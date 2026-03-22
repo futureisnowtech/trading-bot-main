@@ -330,6 +330,18 @@ def get_recent_events(limit=20, level=None) -> list:
     return rows
 
 
+def get_recent_notifications(limit=30) -> list:
+    """Return notifications written by the alert system (source='notify')."""
+    conn = _conn()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT * FROM system_events WHERE source='notify' ORDER BY ts DESC LIMIT ?",
+        (limit,))
+    rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    return rows
+
+
 def _csv_append(ts, strategy, broker, symbol, action, order_type,
                 qty, price, value_usd, fee_usd, pnl_usd, paper, order_id, notes):
     os.makedirs(CSV_LOG_DIR, exist_ok=True)

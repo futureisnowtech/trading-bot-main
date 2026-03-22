@@ -3,6 +3,13 @@ All notable changes to The King's Algo Trading System.
 
 ---
 
+## 2026-03-22 (patch)
+- **Notifications reworked: email removed, dashboard panel added**
+- `alerts/telegram_alert.py` rewritten — all notifications now write to `system_events` table (`source='notify'`) instead of sending email
+- Added `get_recent_notifications()` to `trade_logger.py`
+- Added Notifications panel to THE KING dashboard view (left column, below Today's Trades)
+- Removed email config (`EMAIL_FROM`, `EMAIL_TO`, `EMAIL_APP_PASSWORD`) from `config.py` and `.env.example`
+
 ## 2026-03-22
 - **Resilience & ops infrastructure added (v3.1)**
 - Added git version control with initial commit (`.gitignore` updated)

@@ -11,7 +11,7 @@ A fully autonomous AI-powered trading system that:
 - Uses extended AI reasoning (interleaved thinking) for exit decisions
 - Enforces unbreakable emotional safeguards (the amygdala is removed)
 - Learns from every completed trade via LanceDB vector memory
-- Sends email alerts on every action via Gmail SMTP
+- Writes all notifications to SQLite; dashboard Notifications panel displays them
 - Displays everything on a LeBron James / Dragon Ball Z themed dashboard
 - Trades 100% autonomously — owner is never asked to approve anything
 
@@ -186,6 +186,16 @@ python3 main.py --equity-only      # Skip crypto
 streamlit run dashboard/app.py     # Dashboard on :8501
 ```
 
+## Notifications (v3.1)
+All alerts (trade opened/closed, signals, halts, system events, readiness) are
+written to the `system_events` SQLite table with `source='notify'`. The dashboard
+**Notifications panel** (bottom of the left column in THE KING view) reads and
+displays them in real time. No email. No external service. Works offline.
+
+`alerts/telegram_alert.py` keeps the same public API — nothing else in the
+codebase needed to change. `get_recent_notifications()` in `trade_logger.py`
+queries `system_events WHERE source='notify'`.
+
 ## Auto-Start & Auto-Restart (v3.1)
 Set up once, runs forever:
 ```bash
@@ -296,7 +306,8 @@ Motivation 5: "Nothing is given. Everything is earned."
          position persistence, watchdog, auto cost tuning
 - v3.1 (2026-03-22): Git version control, WAL crash safety, auto-restart via
          launchd, daily DB + credential backups, paper→live readiness tracker,
-         CHANGELOG.md + log_change.sh for self-documenting changes
+         CHANGELOG.md + log_change.sh, notifications written to SQLite +
+         displayed in dashboard Notifications panel (no email)
 
 ## Claude's Standing Instructions
 When making any change to this project:

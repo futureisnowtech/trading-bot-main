@@ -120,11 +120,9 @@ POSITION_MONITOR_INTERVAL_SECONDS: int = 30
 WATCHDOG_INTERVAL_SECONDS: int = 900       # Alert if no scan in 15 min
 
 # ════════════════════════════════════════════════════════════════════
-# ALERTS & TELEGRAM
+# ALERTS — written to SQLite system_events, displayed on dashboard
+# (No email. Notifications panel in the dashboard shows everything.)
 # ════════════════════════════════════════════════════════════════════
-EMAIL_FROM: str = os.getenv('EMAIL_FROM', 'futureisnowtech@gmail.com')
-EMAIL_TO: str = os.getenv('EMAIL_TO', 'futureisnowtech@gmail.com')
-EMAIL_APP_PASSWORD: str = os.getenv('EMAIL_APP_PASSWORD', '')
 
 # ════════════════════════════════════════════════════════════════════
 # DATABASE & LOGGING

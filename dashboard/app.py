@@ -22,7 +22,8 @@ from config import (
 from logging_db.trade_logger import (
     get_todays_trades, get_todays_signals, get_todays_pnl, get_todays_fees,
     get_daily_trade_count, get_all_time_stats, get_recent_debates,
-    get_monthly_api_cost, get_win_rate, get_recent_trades, get_recent_events
+    get_monthly_api_cost, get_win_rate, get_recent_trades, get_recent_events,
+    get_recent_notifications,
 )
 from risk.risk_manager import get_risk_manager
 from data.market_data import is_market_open, is_in_no_trade_window
@@ -731,6 +732,52 @@ def render_king():
             st.dataframe(df_t[cols], use_container_width=True, hide_index=True)
         else:
             st.info("No trades yet today. Waiting for the right setup. 👑")
+
+        st.divider()
+        st.subheader("🔔 Notifications")
+        notifs = get_recent_notifications(limit=25)
+        if notifs:
+            for n in notifs[:20]:
+                level = n.get('level', 'INFO')
+                msg   = n.get('message', '')
+                ts    = n.get('ts', '')
+
+                # Subject is before first " | ", body is everything after
+                parts   = msg.split(' | ', 1)
+                subject = parts[0]
+                body    = parts[1] if len(parts) > 1 else ''
+
+                # Icon + colour by content
+                if 'HALT' in subject or level == 'ERROR':
+                    icon, color = '🚨', '#ff4444'
+                elif 'WIN' in subject:
+                    icon, color = '✅', '#44ff88'
+                elif 'LOSS' in subject or level == 'WARNING':
+                    icon, color = '❌', '#ff8844'
+                elif 'BUY' in subject or 'OPENED' in subject:
+                    icon, color = '💰', '#FDB927'
+                elif 'CLOSED' in subject:
+                    icon, color = '🏁', '#FDB927'
+                elif 'SIGNAL' in subject:
+                    icon, color = '📡', '#aaa'
+                elif 'READY' in subject:
+                    icon, color = '🏆', '#FDB927'
+                else:
+                    icon, color = 'ℹ️', '#666'
+
+                time_str = ts[5:19] if len(ts) >= 19 else ts  # MM-DD HH:MM:SS
+                st.markdown(
+                    f'<div style="background:#111; border-left:3px solid {color}; '
+                    f'padding:8px 12px; margin:3px 0; border-radius:0 6px 6px 0;">'
+                    f'<span style="color:{color}; font-weight:700; font-size:13px;">'
+                    f'{icon} {subject}</span>'
+                    f'<span style="color:#555; font-size:11px; float:right;">{time_str}</span>'
+                    f'<br><span style="color:#888; font-size:11px;">{body[:110]}</span>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+        else:
+            st.info("No notifications yet. System is watching. 👑")
 
     with mid:
         st.subheader("🏀 Live Signals")

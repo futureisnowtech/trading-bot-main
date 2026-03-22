@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.algotrading.king.plist
+  Auto-start & auto-restart the trading bot (paper mode).
+
+  INSTALL:
+    cp scripts/com.algotrading.king.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.algotrading.king.plist
+
+  UNINSTALL:
+    launchctl unload ~/Library/LaunchAgents/com.algotrading.king.plist
+    rm ~/Library/LaunchAgents/com.algotrading.king.plist
+
+  NOTES:
+  - Always starts in PAPER mode (safe for auto-restart).
+  - For live trading, start main.py manually in a terminal.
+  - Logs stdout to logs/service/bot.log, stderr to logs/service/bot_error.log
+  - KeepAlive = true → restarts automatically if the process exits.
+  - RunAtLoad = true → starts when you load the plist (and on reboot).
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.algotrading.king</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/joshmacbookair2020/Desktop/algo_trading_final/scripts/start_bot.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/joshmacbookair2020/Desktop/algo_trading_final</string>
+
+    <!-- Restart if it crashes -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- Start on load (and on reboot via LoginItems) -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Wait 10 seconds before restarting after a crash -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <!-- Capture logs -->
+    <key>StandardOutPath</key>
+    <string>/Users/joshmacbookair2020/Desktop/algo_trading_final/logs/service/bot.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/joshmacbookair2020/Desktop/algo_trading_final/logs/service/bot_error.log</string>
+
+    <!-- Environment variables -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/Library/Frameworks/Python.framework/Versions/3.14/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+</dict>
+</plist>

@@ -1,0 +1,39 @@
+# ── Credentials (NEVER commit) ───────────────────────────────────────────────
+.env
+did.bin
+
+# ── Runtime data (logs, databases, vector store) ─────────────────────────────
+logs/
+*.db
+*.db-shm
+*.db-wal
+
+# ── Backups (stored outside repo in ~/.algo_backup) ──────────────────────────
+.algo_backup/
+
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+.venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# ── macOS ────────────────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# ── Broker session files ──────────────────────────────────────────────────────
+.webull/
+
+# ── Editor ───────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo

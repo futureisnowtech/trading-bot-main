@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.algotrading.readiness.plist
+  Runs check_readiness.py once per day at 7:00 AM ET.
+  Sends an email alert the first time all criteria are met in a day.
+
+  INSTALL:
+    cp scripts/com.algotrading.readiness.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.algotrading.readiness.plist
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.algotrading.readiness</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Library/Frameworks/Python.framework/Versions/3.14/bin/python3</string>
+        <string>/Users/joshmacbookair2020/Desktop/algo_trading_final/scripts/check_readiness.py</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/joshmacbookair2020/Desktop/algo_trading_final</string>
+
+    <!-- Run daily at 7:00 AM -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>7</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/joshmacbookair2020/Desktop/algo_trading_final/logs/service/readiness.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/joshmacbookair2020/Desktop/algo_trading_final/logs/service/readiness_error.log</string>
+</dict>
+</plist>

@@ -1,0 +1,41 @@
+# ─── Core ─────────────────────────────────────────────────────────────────────
+python-dotenv>=1.0.0
+pandas>=2.0.0
+numpy>=1.24.0
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+pytz>=2024.1
+
+# ─── Market Data & Indicators ─────────────────────────────────────────────────
+yfinance>=0.2.36
+# pandas-ta requires Python >=3.12 — install manually after upgrading Python:
+# pip install pandas-ta==0.4.67b0
+# pandas-ta==0.4.67b0
+
+# ─── Broker APIs ──────────────────────────────────────────────────────────────
+webull>=0.3.15
+coinbase-advanced-py>=1.7.0
+
+# ─── Vector Memory (LanceDB — serverless, no config, blazing fast) ────────────
+lancedb>=0.6.0
+sentence-transformers>=2.7.0
+
+# ─── Backtesting ──────────────────────────────────────────────────────────────
+backtesting>=0.3.3
+
+# ─── Dashboard ────────────────────────────────────────────────────────────────
+streamlit>=1.32.0
+plotly>=5.18.0
+
+# ─── Alerts ───────────────────────────────────────────────────────────────────
+python-telegram-bot>=20.7
+
+# ─── Scheduling ───────────────────────────────────────────────────────────────
+schedule>=1.2.1
+APScheduler>=3.10.4
+
+# ─── Utilities ────────────────────────────────────────────────────────────────
+tabulate>=0.9.0
+colorama>=0.4.6
+loguru>=0.7.2

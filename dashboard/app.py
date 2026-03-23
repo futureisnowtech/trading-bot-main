@@ -23,7 +23,7 @@ from logging_db.trade_logger import (
     get_todays_trades, get_todays_signals, get_todays_pnl, get_todays_fees,
     get_daily_trade_count, get_all_time_stats, get_recent_debates,
     get_monthly_api_cost, get_win_rate, get_recent_trades, get_recent_events,
-    get_recent_notifications,
+    get_recent_notifications, get_today_stats,
 )
 from risk.risk_manager import get_risk_manager
 from data.market_data import is_market_open, is_in_no_trade_window
@@ -689,12 +689,18 @@ def render_king():
         </div>""", unsafe_allow_html=True)
 
     # Top metrics
-    c1, c2, c3, c4, c5 = st.columns(5)
     stats = get_all_time_stats(paper=PAPER_TRADING)
-    c1.metric("💰 Account", f"${ACCOUNT_SIZE:,.0f}")
-    c2.metric("📈 All-Time P&L", f"${stats.get('total_pnl',0):+.2f}")
-    c3.metric("🎯 Win Rate", f"{stats.get('win_rate',0):.1%}")
-    c4.metric("🔁 Trades Today", len(trades))
+    today_s = get_today_stats(paper=PAPER_TRADING)
+    real_balance = ACCOUNT_SIZE + stats.get('total_pnl', 0)
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("💰 Account", f"${real_balance:,.2f}",
+              delta=f"{stats.get('total_pnl',0):+.2f} realized")
+    c2.metric("📈 All-Time P&L", f"${stats.get('total_pnl',0):+.2f}",
+              delta=f"{stats.get('win_rate',0):.1%} win rate ({stats.get('total',0)} trades)")
+    c3.metric("🎯 Today Closed", f"{today_s['total']} trades",
+              delta=f"{today_s['wins']}W / {today_s['losses']}L  {today_s['win_rate']:.0%}")
+    c4.metric("📊 Today Net P&L", f"${today_s['net_pnl']:+.2f}",
+              delta=f"gross {today_s['gross_pnl']:+.2f}  fees −${today_s['fees']:.3f}")
     c5.metric("💸 Fees Today", f"${fees:.4f}")
 
     st.divider()

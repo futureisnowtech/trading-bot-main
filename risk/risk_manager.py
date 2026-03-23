@@ -20,7 +20,7 @@ from config import (
 )
 from logging_db.trade_logger import (
     get_todays_pnl, get_todays_fees, get_daily_trade_count, log_event,
-    persist_position, delete_position, load_open_positions
+    persist_position, delete_position, load_open_positions, get_all_time_stats,
 )
 from data.market_data import is_market_open, is_in_no_trade_window
 
@@ -81,7 +81,9 @@ class RiskManager:
             return RiskCheckResult(False, f"Confidence {confidence:.0%} < 40% minimum")
 
         daily_pnl = get_todays_pnl(paper=PAPER_TRADING)
-        max_loss = ACCOUNT_SIZE * MAX_DAILY_LOSS_PCT
+        all_time = get_all_time_stats(paper=PAPER_TRADING)
+        real_balance = ACCOUNT_SIZE + all_time['total_pnl']
+        max_loss = real_balance * MAX_DAILY_LOSS_PCT
         if daily_pnl < -max_loss:
             reason = f"Daily loss limit hit: ${daily_pnl:.2f} (max ${max_loss:.2f})"
             self.halt(reason)

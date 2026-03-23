@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python:*)",
+      "Bash(python3:*)",
+      "Bash(pip3 index:*)",
+      "Read(//usr/local/**)",
+      "Bash(brew list:*)",
+      "Bash(pip3 install:*)",
+      "Bash(echo $PATH)",
+      "Bash(streamlit --version)",
+      "Bash(pip3 list:*)",
+      "Bash(grep -E \"anthropic|pandas.ta|ta$|ta-lib\")",
+      "Bash(pip show:*)",
+      "Bash(pip list:*)",
+      "Bash(kill %2)",
+      "Bash(pip install:*)"
+    ]
+  }
+}

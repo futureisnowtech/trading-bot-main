@@ -254,13 +254,14 @@ def get_daily_trade_count(strategy, paper=True) -> int:
 
 
 def get_win_rate(strategy=None, lookback_days=14, paper=True) -> float:
+    # Use pnl_usd != 0 so SHORT exits (logged as action='BUY') are counted.
     conn = _conn()
     cur = conn.cursor()
     if strategy:
-        cur.execute("SELECT pnl_usd FROM trades WHERE strategy=? AND paper=? AND action='SELL' ORDER BY ts DESC LIMIT ?",
+        cur.execute("SELECT pnl_usd FROM trades WHERE strategy=? AND paper=? AND pnl_usd != 0 ORDER BY ts DESC LIMIT ?",
                     (strategy, int(paper), lookback_days * 5))
     else:
-        cur.execute("SELECT pnl_usd FROM trades WHERE paper=? AND action='SELL' ORDER BY ts DESC LIMIT ?",
+        cur.execute("SELECT pnl_usd FROM trades WHERE paper=? AND pnl_usd != 0 ORDER BY ts DESC LIMIT ?",
                     (int(paper), lookback_days * 5))
     rows = cur.fetchall()
     conn.close()
@@ -283,6 +284,8 @@ def get_monthly_api_cost() -> float:
 
 
 def get_all_time_stats(paper=True) -> dict:
+    # Filter on pnl_usd != 0 (not action='SELL') so SHORT exits logged as
+    # action='BUY' with non-zero pnl are counted correctly.
     conn = _conn()
     cur = conn.cursor()
     cur.execute("""SELECT COUNT(*) as total,
@@ -291,7 +294,7 @@ def get_all_time_stats(paper=True) -> dict:
         SUM(pnl_usd) as total_pnl,
         MAX(pnl_usd) as best_trade,
         MIN(pnl_usd) as worst_trade
-        FROM trades WHERE paper=? AND action='SELL'""", (int(paper),))
+        FROM trades WHERE paper=? AND pnl_usd != 0""", (int(paper),))
     row = cur.fetchone()
     conn.close()
     if not row or not row[0]:
@@ -328,6 +331,32 @@ def get_recent_events(limit=20, level=None) -> list:
     rows = [dict(r) for r in cur.fetchall()]
     conn.close()
     return rows
+
+
+def get_today_stats(paper=True) -> dict:
+    """Today-only stats: closed trades (pnl_usd != 0), wins, losses, fees, net P&L."""
+    today = datetime.now(pytz.timezone(MARKET_TIMEZONE)).strftime('%Y-%m-%d')
+    conn = _conn()
+    cur = conn.cursor()
+    cur.execute("""SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN pnl_usd>0 THEN 1 ELSE 0 END) as wins,
+        SUM(CASE WHEN pnl_usd<0 THEN 1 ELSE 0 END) as losses,
+        COALESCE(SUM(pnl_usd), 0) as gross_pnl,
+        COALESCE(SUM(fee_usd), 0) as total_fees
+        FROM trades WHERE ts LIKE ? AND paper=? AND pnl_usd != 0""",
+        (f'{today}%', int(paper)))
+    row = cur.fetchone()
+    conn.close()
+    total = row[0] or 0
+    wins  = row[1] or 0
+    gross = row[3] or 0.0
+    fees  = row[4] or 0.0
+    return {
+        'total': total, 'wins': wins, 'losses': row[2] or 0,
+        'win_rate': wins / total if total > 0 else 0.0,
+        'gross_pnl': gross, 'fees': fees, 'net_pnl': gross - fees,
+    }
 
 
 def get_recent_notifications(limit=30) -> list:

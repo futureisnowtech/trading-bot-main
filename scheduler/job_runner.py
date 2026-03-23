@@ -37,7 +37,8 @@ from execution.webull_broker import get_webull_broker
 from execution.coinbase_broker import get_coinbase_broker
 from logging_db.trade_logger import (
     get_todays_trades, get_todays_pnl, get_todays_fees,
-    log_event, log_signal, get_win_rate
+    log_event, log_signal, get_win_rate, get_all_time_stats, get_today_stats,
+    get_monthly_api_cost,
 )
 from alerts.telegram_alert import alert_system, alert_daily_summary
 from memory.trade_memory import retrieve_similar_experiences, format_memory_context, store_trade_experience
@@ -204,6 +205,13 @@ def _execute_crypto_exit(cb, rm, pid, pos, price, reason, strategy):
         store_trade_experience(symbol=pid, strategy=strategy,
                                entry_reason=pos.get('entry_reason', ''),
                                exit_reason=reason, pnl_usd=pnl)
+        # Alert was missing for SHORT exits — fixed
+        try:
+            from alerts.telegram_alert import alert_trade_closed
+            alert_trade_closed(strategy, pid, 'SELL', pos['qty'],
+                               pos['entry'], price, pnl, reason)
+        except Exception:
+            pass
         print(f"[crypto] ✅ SHORT CLOSED {pid} | {reason} | P&L: ${pnl:+.2f}")
         return
 
@@ -286,11 +294,13 @@ def run_equity_scan() -> None:
 
                 daily_pnl = get_todays_pnl(paper=PAPER_TRADING)
                 trades_today = len([t for t in get_todays_trades(paper=PAPER_TRADING) if t.get('action') == 'BUY'])
+                _atstats = get_all_time_stats(paper=PAPER_TRADING)
+                real_balance = ACCOUNT_SIZE + _atstats['total_pnl']
                 final = engine['synthesize'](
                     debate=debate_result, current_price=price,
                     asset_class='equity', daily_pnl=daily_pnl,
                     open_positions=len(rm.get_all_positions()['equity']),
-                    trades_today=trades_today, account_balance=ACCOUNT_SIZE,
+                    trades_today=trades_today, account_balance=real_balance,
                 )
                 print(final)
 
@@ -385,12 +395,14 @@ def run_crypto_scan() -> None:
                 debate_result = engine['quick'](symbol=pid, market_data=market_data,
                                                 verbose=False, memory_context=mem_ctx)
                 daily_pnl = get_todays_pnl(paper=PAPER_TRADING)
+                _atstats = get_all_time_stats(paper=PAPER_TRADING)
+                real_balance = ACCOUNT_SIZE + _atstats['total_pnl']
                 final = engine['synthesize'](
                     debate=debate_result, current_price=price, asset_class='crypto',
                     daily_pnl=daily_pnl,
                     open_positions=len(rm.get_all_positions()['crypto']),
                     trades_today=len(get_todays_trades(paper=PAPER_TRADING)),
-                    account_balance=ACCOUNT_SIZE,
+                    account_balance=real_balance,
                     allow_short=PAPER_TRADING,
                 )
                 log_signal('crypto_ai_debate', pid, final.action, final.confidence,
@@ -527,13 +539,14 @@ def run_opening_range() -> None:
 
 
 def run_daily_close() -> None:
-    trades = get_todays_trades(paper=PAPER_TRADING)
-    pnl = get_todays_pnl(paper=PAPER_TRADING)
-    fees = get_todays_fees(paper=PAPER_TRADING)
-    wins = sum(1 for t in trades if t.get('pnl_usd', 0) > 0)
-    losses = sum(1 for t in trades if t.get('pnl_usd', 0) < 0)
-    alert_daily_summary(len(trades), wins, losses, pnl, fees, ACCOUNT_SIZE + pnl)
-    log_event('INFO', 'daily_close', f"P&L=${pnl:+.2f} | {len(trades)} trades")
+    ts = get_today_stats(paper=PAPER_TRADING)
+    pnl = ts['gross_pnl']
+    fees = ts['fees']
+    # Use all-time P&L to compute real running balance
+    all_stats = get_all_time_stats(paper=PAPER_TRADING)
+    real_balance = ACCOUNT_SIZE + all_stats['total_pnl']
+    alert_daily_summary(ts['total'], ts['wins'], ts['losses'], pnl, fees, real_balance)
+    log_event('INFO', 'daily_close', f"P&L=${pnl:+.2f} | {ts['total']} closed trades")
     rm = get_risk_manager()
     if rm.is_halted and 'Daily loss' in rm.halt_reason:
         rm.resume()
@@ -561,10 +574,25 @@ def setup_schedules() -> None:
 
 def run_forever() -> None:
     setup_schedules()
+    try:
+        from dashboard.terminal import render as render_terminal
+        _terminal_ok = True
+    except Exception:
+        _terminal_ok = False
+
+    _last_render = 0.0
+    RENDER_INTERVAL = 5   # seconds between dashboard refreshes
+
     print("\n🚀 System online. Press Ctrl+C to stop.\n")
     while True:
         try:
             schedule.run_pending()
+            if _terminal_ok and time.time() - _last_render >= RENDER_INTERVAL:
+                try:
+                    render_terminal()
+                except Exception:
+                    pass
+                _last_render = time.time()
             time.sleep(1)
         except KeyboardInterrupt:
             print("\n[scheduler] Shutting down.")

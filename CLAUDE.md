@@ -22,7 +22,7 @@ A fully autonomous AI-powered trading system that:
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
 
-## Current Version: v4.0
+## Current Version: v4.2
 - v3.0 baseline: Extended thinking exits, LanceDB memory, regime detection,
   prompt caching, structured outputs, 4-view dashboard, position persistence,
   watchdog, auto cost tuning
@@ -38,6 +38,24 @@ A fully autonomous AI-powered trading system that:
   10 new math signals (AR(1) autocorr, OU half-life, Kyle lambda R² filter,
   Hurst H min_periods 96, RV ratio gap guard, squeeze direction);
   CoinbaseMicrostructureFeed WebSocket; Kelly sizing; 20 crypto pairs (.env)
+- v4.2 (2026-03-24): TradingView Pro webhook integration:
+  • scripts/tradingview_webhook.py: standalone HTTP server (port 8765) receives Pine Script alerts
+    Validates TV_WEBHOOK_SECRET, normalises symbol (BTCUSDC→BTC-USDC), writes to system_events
+    GET /health + POST /webhook — run: python3 scripts/tradingview_webhook.py
+  • scripts/tradingview_pine.pine: copy-paste Pine Script v5 template — mirrors bot's 7-signal gate
+    (MACD 3/15/3 cross, Williams %R ≤ -80, BB-Keltner squeeze fire)
+    alert() sends JSON with symbol/action/price/tf/signal to ngrok → webhook
+  • scheduler/job_runner.py: Tier 3 conviction boost — get_recent_tv_signal() checked per symbol
+    If buy signal arrived within TV_SIGNAL_MAX_AGE_SECONDS (300s): +TV_SIGNAL_BOOST_CONVICTION pts (20)
+    TV signal also tagged in signal_triggers so agents see it during debate
+  • config.py: TV_WEBHOOK_PORT, TV_WEBHOOK_SECRET, TV_SIGNAL_BOOST_CONVICTION, TV_SIGNAL_MAX_AGE_SECONDS
+  • logging_db/trade_logger.py: get_recent_tv_signal(symbol, max_age_seconds) queries system_events
+  • .env: TV_WEBHOOK_PORT=8765, TV_WEBHOOK_SECRET=, TV_SIGNAL_BOOST_CONVICTION=20 placeholders
+  Setup: 1) Set TV_WEBHOOK_SECRET in .env, 2) Start webhook server, 3) Run ngrok http 8765,
+         4) Paste HTTPS URL into TradingView alert → Webhook URL,
+         5) Use tradingview_pine.pine as the indicator
+- v4.1 (2026-03-24): OU z-score + Ask Claude upgrade + CI/CD:
+  (see v4.1 details below)
 - v4.0 (2026-03-24): De-risk overhaul + RSI removal + Hurst removal + min-agreement=2:
   • All risk params cut 50%: MAX_RISK_PER_TRADE 2%→1%, MAX_DAILY_LOSS 8%→4%,
     MAX_POSITIONS_CRYPTO 10→5, stops/targets halved, PERP leverage 20→10,
@@ -154,6 +172,10 @@ algo_trading_final/
 │   ├── backup_db.sh              ← Daily SQLite + CSV backup → ~/.algo_backup/db/
 │   ├── backup_credentials.sh     ← Backs up .env → ~/.algo_backup/credentials/
 │   ├── check_readiness.py        ← Paper→live readiness checker + email alert
+│   ├── validate.py               ← Pre-flight validator (env, config, imports, DB)
+│   ├── install_hooks.sh          ← Install git pre-commit / post-commit hooks (run once)
+│   ├── tradingview_webhook.py    ← HTTP server for TradingView Pine Script alerts
+│   ├── tradingview_pine.pine     ← Pine Script v5 template — mirrors bot signal gates
 │   ├── log_change.sh             ← Prepend entry to CHANGELOG.md
 │   ├── com.algotrading.king.plist      ← launchd: auto-start + crash restart
 │   ├── com.algotrading.backup.plist    ← launchd: daily backup at 2:00 AM
@@ -375,6 +397,36 @@ After any commit that changes behavior, also update CHANGELOG.md:
 bash scripts/log_change.sh "Brief description"
 ```
 
+## TradingView Pro Integration (v4.2)
+
+How it works:
+1. Pine Script on TradingView fires an alert → POSTs JSON to your webhook
+2. Webhook server writes signal to SQLite `system_events` (source='tradingview')
+3. `job_runner.py` checks for fresh TV buy signals per symbol during scan
+4. If a matching signal arrived within 5 min → +20 conviction pts (configurable)
+5. Signal also tagged in `signal_triggers` so AI agents see it during debate
+
+Setup steps:
+```bash
+# 1. Set secret in .env
+TV_WEBHOOK_SECRET=your_random_secret_here
+
+# 2. Start webhook server (separate terminal)
+python3 scripts/tradingview_webhook.py
+
+# 3. Expose to internet via ngrok (free tier works)
+ngrok http 8765
+
+# 4. In TradingView: Alerts → Create → Webhook URL = https://xxxx.ngrok.io/webhook
+#    Add to chart: scripts/tradingview_pine.pine
+#    Set Pine Script "Webhook Secret" input to match TV_WEBHOOK_SECRET
+```
+
+Symbol mapping (TradingView → Coinbase format built in):
+- BTCUSDC / BTCUSD / BTCUSDT → BTC-USDC
+- ETHUSDC / ETHUSD / ETHUSDT → ETH-USDC
+- (all 8 default pairs covered, unknown formats fall back to BASE-USDC)
+
 ## Common Errors and Fixes
 
 **webull login fails** → Check WEBULL_MFA in .env, try re-running setup.py
@@ -385,6 +437,10 @@ bash scripts/log_change.sh "Brief description"
 **Tradovate symbol error** → Update MES_SYMBOL in tradovate_broker.py for current quarter
 **launchd not starting** → `launchctl list | grep algotrading` to check status; check logs/service/bot_error.log
 **DB backup fails** → Ensure sqlite3 CLI is installed: `sqlite3 --version`
+**TV webhook 403** → TV_WEBHOOK_SECRET in .env doesn't match Pine Script "Webhook Secret" input
+**TV webhook not receiving** → ngrok must be running (`ngrok http 8765`); free tier URL changes on restart, update TradingView alert each time
+**TV signal not boosting conviction** → Check TV_SIGNAL_MAX_AGE_SECONDS (default 300s); signal must match symbol exactly; only 'buy' action triggers boost
+**ngrok not installed** → `brew install ngrok` or download from ngrok.com
 
 ## MES Contract Symbols (update quarterly)
 - Q1 (Jan-Mar): MESH6  ← current code uses MESM6

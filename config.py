@@ -177,6 +177,14 @@ POSITION_MONITOR_INTERVAL_SECONDS: int = 30
 WATCHDOG_INTERVAL_SECONDS: int = 900       # Alert if no scan in 15 min
 
 # ════════════════════════════════════════════════════════════════════
+# TRADINGVIEW WEBHOOK INTEGRATION
+# ════════════════════════════════════════════════════════════════════
+TV_WEBHOOK_PORT:            int   = int(os.getenv('TV_WEBHOOK_PORT', '8765'))
+TV_WEBHOOK_SECRET:          str   = os.getenv('TV_WEBHOOK_SECRET', '')
+TV_SIGNAL_BOOST_CONVICTION: int   = int(os.getenv('TV_SIGNAL_BOOST_CONVICTION', '20'))
+TV_SIGNAL_MAX_AGE_SECONDS:  int   = int(os.getenv('TV_SIGNAL_MAX_AGE_SECONDS', '300'))  # ignore TV signals older than 5 min
+
+# ════════════════════════════════════════════════════════════════════
 # ALERTS — written to SQLite system_events, displayed on dashboard
 # (No email. Notifications panel in the dashboard shows everything.)
 # ════════════════════════════════════════════════════════════════════

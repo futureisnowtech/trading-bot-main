@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-03-24
+- v4.2 — TradingView Pro webhook integration
+
+## 2026-03-24
 - v3.9: Advanced math overhaul — 8-signal pre-filter, ATR fee-floor guard, full conviction scoring for Hurst/Kalman/squeeze/RV/AVWAP
 
 

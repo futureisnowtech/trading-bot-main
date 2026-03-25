@@ -504,6 +504,44 @@ def get_tax_summary(paper: bool = False) -> dict:
     }
 
 
+def get_recent_tv_signal(symbol: str, max_age_seconds: int = 300) -> dict | None:
+    """Return the most recent TradingView webhook signal for `symbol` if it arrived
+    within `max_age_seconds`.  Returns None if no fresh signal exists.
+
+    The returned dict has keys: symbol, action, price, tf_min, signal, ts
+    """
+    import json
+    from datetime import timezone
+    try:
+        conn = _conn()
+        cur  = conn.cursor()
+        # Pull last 20 tradingview events and find a match (small result set, avoids LIKE index miss)
+        cur.execute(
+            "SELECT message, ts FROM system_events WHERE source='tradingview' ORDER BY ts DESC LIMIT 20"
+        )
+        rows = cur.fetchall()
+        conn.close()
+        now = datetime.now(timezone.utc)
+        for msg, ts_str in rows:
+            try:
+                data = json.loads(msg)
+            except Exception:
+                continue
+            # Check symbol match
+            if data.get('symbol', '').upper() != symbol.upper():
+                continue
+            # Check age
+            ts_dt = datetime.fromisoformat(data.get('ts', ts_str))
+            if not ts_dt.tzinfo:
+                ts_dt = ts_dt.replace(tzinfo=timezone.utc)
+            age = (now - ts_dt).total_seconds()
+            if age <= max_age_seconds:
+                return data
+        return None
+    except Exception:
+        return None
+
+
 def get_recent_notifications(limit=30) -> list:
     """Return notifications written by the alert system (source='notify')."""
     conn = _conn()

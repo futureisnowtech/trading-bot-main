@@ -1,0 +1,74 @@
+// ═══════════════════════════════════════════════════════════════════════════════
+// TradingView Pine Script v5 — Alert sender for algo_trading_final webhook
+//
+// SETUP INSTRUCTIONS:
+//   1. In TradingView, open Pine Editor (bottom panel)
+//   2. Paste this script and click "Add to chart"
+//   3. Click the ⏰ (alarm clock) icon on the indicator → Create Alert
+//   4. Set "Condition" to your indicator name
+//   5. Set "Webhook URL" to: https://YOUR_NGROK_URL/webhook
+//   6. Set "Message" to: {{strategy.order.comment}}
+//      (Pine Script fills in the JSON alert body automatically)
+//   7. Set TV_WEBHOOK_SECRET in your .env to match the secret below
+//
+// The alerts sent to the webhook will add +20 conviction pts to any matching
+// symbol scan in job_runner.py (TV_SIGNAL_BOOST_CONVICTION in config.py).
+// ═══════════════════════════════════════════════════════════════════════════════
+
+//@version=5
+indicator("AlgoBot Signal Sender", overlay=true)
+
+// ── INPUTS ────────────────────────────────────────────────────────────────────
+secret = input.string("CHANGE_THIS_TO_YOUR_SECRET",   title="Webhook Secret (must match .env TV_WEBHOOK_SECRET)")
+
+// ── INDICATORS ───────────────────────────────────────────────────────────────
+// Fast MACD (3/15/3) — mirrors the crypto_macd.py "workhorse" variant
+[macd_line, signal_line, hist] = ta.macd(close, 3, 15, 3)
+macd_cross_up   = ta.crossover(macd_line, signal_line)
+macd_cross_down = ta.crossunder(macd_line, signal_line)
+
+// Williams %R
+wpr = ta.wpr(14)
+wpr_oversold  = wpr <= -80
+wpr_overbought = wpr >= -20
+
+// RSI (exit signal only — used for exit confirmation, not entry gate)
+rsi = ta.rsi(close, 14)
+
+// Keltner Channel + Bollinger Band squeeze (mirrors indicators.py squeeze logic)
+bb_upper = ta.sma(close, 20) + 2.0 * ta.stdev(close, 20)
+bb_lower = ta.sma(close, 20) - 2.0 * ta.stdev(close, 20)
+kc_atr   = ta.atr(20)
+kc_upper = ta.sma(close, 20) + 1.5 * kc_atr
+kc_lower = ta.sma(close, 20) - 1.5 * kc_atr
+squeeze_on  = bb_upper < kc_upper and bb_lower > kc_lower
+squeeze_fire = not squeeze_on and squeeze_on[1]  // squeeze just released
+
+// ── BUY / SELL CONDITIONS ─────────────────────────────────────────────────────
+// Mirroring the 7-signal gate in job_runner.py:
+//   1. MACD cross
+//   2. Williams %R oversold
+//   3. Squeeze fired (momentum breakout from compression)
+buy_condition  = (macd_cross_up  or wpr_oversold  or squeeze_fire) and hist > 0
+sell_condition = (macd_cross_down or wpr_overbought) and hist < 0
+
+// ── PLOTS ─────────────────────────────────────────────────────────────────────
+plotshape(buy_condition,  title="BUY Signal",  style=shape.triangleup,   location=location.belowbar, color=color.lime,  size=size.small)
+plotshape(sell_condition, title="SELL Signal", style=shape.triangledown, location=location.abovebar, color=color.red,   size=size.small)
+
+// ── ALERT ACTIONS ─────────────────────────────────────────────────────────────
+// The alert payload is the JSON that gets POSTed to your webhook.
+// TradingView fills in {{ticker}}, {{close}}, {{time}} automatically.
+// Your .env TV_WEBHOOK_SECRET must match the "secret" field here.
+
+buy_signal_desc  = "MACD_cross=" + str.tostring(macd_cross_up) + " WPR=" + str.tostring(math.round(wpr, 1)) + " squeeze=" + str.tostring(squeeze_fire)
+sell_signal_desc = "MACD_cross_down=" + str.tostring(macd_cross_down) + " WPR=" + str.tostring(math.round(wpr, 1)) + " RSI=" + str.tostring(math.round(rsi, 1))
+
+buy_json  = '{"secret":"' + secret + '","symbol":"{{ticker}}","action":"buy","price":"{{close}}","tf":"{{interval}}","signal":"' + buy_signal_desc + '"}'
+sell_json = '{"secret":"' + secret + '","symbol":"{{ticker}}","action":"sell","price":"{{close}}","tf":"{{interval}}","signal":"' + sell_signal_desc + '"}'
+
+if buy_condition
+    alert(buy_json, alert.freq_once_per_bar)
+
+if sell_condition
+    alert(sell_json, alert.freq_once_per_bar)

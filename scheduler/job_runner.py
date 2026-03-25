@@ -35,6 +35,7 @@ from config import (
     SQUEEZE_MIN_BARS, RV_EXPANSION_THRESHOLD,
     KALMAN_ENTRY_DEV_PCT, AVWAP_ENTRY_DEV_PCT,
     OU_HALFLIFE_MIN_MINUTES, OU_HALFLIFE_MAX_MINUTES, KYLE_LAMBDA_LOW_PCT,
+    TV_SIGNAL_BOOST_CONVICTION, TV_SIGNAL_MAX_AGE_SECONDS,
 )
 from data.market_data import (
     is_market_open, is_in_no_trade_window, get_bars,
@@ -55,6 +56,7 @@ from logging_db.trade_logger import (
     get_todays_trades, get_todays_pnl, get_todays_fees,
     log_event, log_signal, get_win_rate, get_all_time_stats, get_today_stats,
     get_monthly_api_cost, get_strategy_consecutive_losses,
+    get_recent_tv_signal,
 )
 from alerts.telegram_alert import alert_system, alert_daily_summary
 from memory.trade_memory import retrieve_similar_experiences, format_memory_context, store_trade_experience
@@ -813,6 +815,10 @@ def run_crypto_scan() -> None:
             _kyle = market_data.get('kyle_lambda_pct')
             if _kyle is not None and float(_kyle) <= KYLE_LAMBDA_LOW_PCT:
                                                                conviction +=  5  # Low Kyle lambda = liquid fills
+            # ── Tier 3: TradingView Pro confirmation (external signal boost) ──
+            _tv_sig = get_recent_tv_signal(pid, max_age_seconds=TV_SIGNAL_MAX_AGE_SECONDS)
+            if _tv_sig and _tv_sig.get('action') == 'buy':
+                                                               conviction += TV_SIGNAL_BOOST_CONVICTION
             _min_cv = 70 if _dead_zone else 30
 
             if conviction < _min_cv:
@@ -853,6 +859,8 @@ def run_crypto_scan() -> None:
             if _ou_z <= -1.5:       signal_triggers.append(f'ou_zscore={_ou_z:.2f}')
             if obi is not None:     signal_triggers.append(f'OBI={obi:+.2f}')
             if tfi is not None:     signal_triggers.append(f'TFI={tfi:+.2f}')
+            if _tv_sig and _tv_sig.get('action') == 'buy':
+                signal_triggers.append(f'TV_signal({_tv_sig.get("signal","")[:40]})')
             market_data['signal_triggers'] = ', '.join(signal_triggers)
 
             if engine:

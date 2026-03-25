@@ -33,12 +33,17 @@ from config import (
     CRYPTO_STOP_LOSS_PCT, CRYPTO_TAKE_PROFIT_PCT,
     MAX_POSITIONS_CRYPTO, MAX_POSITIONS_EQUITY,
     CRYPTO_RSI_OVERSOLD, CRYPTO_RSI_OVERBOUGHT,
+    KALMAN_ENTRY_DEV_PCT, AVWAP_ENTRY_DEV_PCT,
+    SQUEEZE_MIN_BARS, RV_EXPANSION_THRESHOLD,
+    OU_HALFLIFE_MIN_MINUTES, OU_HALFLIFE_MAX_MINUTES,
+    KYLE_LAMBDA_LOW_PCT, ATR_FEE_FLOOR_PCT,
+    ATR_STOP_MULTIPLIER, ATR_TARGET_MULTIPLIER,
 )
 from logging_db.trade_logger import (
     get_todays_trades, get_todays_signals, get_todays_pnl, get_todays_fees, get_scan_feed,
     get_daily_trade_count, get_all_time_stats, get_recent_debates,
     get_monthly_api_cost, get_win_rate, get_recent_trades, get_recent_events,
-    get_recent_notifications, get_today_stats, get_tax_summary, get_kelly_stats,
+    get_recent_notifications, get_today_stats, get_kelly_stats,
 )
 from risk.risk_manager import get_risk_manager
 from data.market_data import is_market_open, is_in_no_trade_window
@@ -501,7 +506,7 @@ def render_chat_column(theme: str):
 # ─── Cost lab helpers ─────────────────────────────────────────────────────────
 
 def _write_env_values(updates: dict) -> None:
-    """Write key=value pairs into .env."""
+    """Write key=value pairs into .env (used by cost lab and strategy lab sliders)."""
     env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
     try:
         with open(env_path, 'r') as f:
@@ -1095,13 +1100,12 @@ _PANEL_LABELS = {
     'strategy_lab':  '🔬 Strategy Lab',
     'attribution':   '📊 Performance Attribution',
     'chat':          '🤖 Ask Claude',
-    'cpa_tax':       '🧾 CPA Tax Brief',
 }
 
 _DEFAULT_LAYOUT: dict = {
     'left':  ['scan_feed', 'positions', 'trades'],
     'mid':   ['signals', 'risk', 'notifications'],
-    'right': ['attribution', 'cpa_tax', 'cost_lab', 'chat'],
+    'right': ['attribution', 'cost_lab', 'chat'],
 }
 
 
@@ -1639,206 +1643,6 @@ def _panel_attribution():
         )
 
 
-def _panel_cpa_tax():
-    """
-    CPA Tax Brief — SC + Federal estimates for a 1-member LLC active trader.
-    All trades are short-term (day/swing). Crypto = property per IRS Notice 2014-21.
-    NOT legal/tax advice. Use as a starting point before your actual CPA.
-    """
-    st.subheader("🧾 CPA Tax Brief")
-
-    # ── Pull data ─────────────────────────────────────────────────────────────
-    # Show both paper and live, with a toggle
-    show_paper = st.toggle("Include paper trades", value=False, key='tax_paper_toggle')
-    try:
-        tax = get_tax_summary(paper=show_paper)
-    except Exception as e:
-        st.error(f"Tax data unavailable: {e}")
-        return
-
-    net_pnl      = tax['net_pnl']
-    total_gains  = tax['total_gains']
-    total_losses = tax['total_losses']
-    total_fees   = tax['total_fees']
-    total_trades = tax['total_trades']
-    annual       = tax['annual']
-
-    if total_trades == 0:
-        st.info("No closed trades yet. Tax estimates will appear after your first closed position.")
-        _tax_rules_section()
-        return
-
-    # ── 2025 Tax Rate Constants ───────────────────────────────────────────────
-    # Federal short-term capital gains = ordinary income (same as income tax brackets)
-    # You're in this bracket based on TOTAL income — trading P&L is ADDED to other income.
-    # SC: flat 6.4% (2025). Being reduced from 7% → 6% through 2027.
-    # SE tax: 15.3% applies if IRS classifies you as active "trader" (not investor).
-    # QBI: 20% deduction on qualified business income if active trader on Schedule C.
-    FED_RATE_LOW   = 0.22   # 22% — likely bracket if <$100K total income
-    FED_RATE_MID   = 0.24   # 24% — if $100K–$192K total income
-    SC_RATE        = 0.064  # 6.4% SC flat rate (2025)
-    SE_TAX_RATE    = 0.153  # Self-employment tax (12.4% SS + 2.9% Medicare)
-    SE_HALF_DEDUCT = 0.5    # Deduct half of SE tax from federal taxable income
-    QBI_DEDUCT     = 0.20   # 20% QBI deduction if active trader business
-
-    # ── Estimate scenarios ────────────────────────────────────────────────────
-    # Note: fees are deductible trading expenses if you qualify as active trader
-    taxable_pnl = max(net_pnl - total_fees, 0)  # fees reduce taxable income
-
-    def _estimate(fed_rate, include_se, include_qbi):
-        base = taxable_pnl
-        if include_qbi:
-            base = base * (1 - QBI_DEDUCT)  # 20% QBI deduction first
-        se_tax = base * SE_TAX_RATE if include_se else 0
-        se_deduct = se_tax * SE_HALF_DEDUCT  # deduct half of SE tax
-        fed_tax = (base - se_deduct) * fed_rate
-        sc_tax  = base * SC_RATE
-        total   = fed_tax + sc_tax + se_tax
-        eff_rate = total / taxable_pnl if taxable_pnl > 0 else 0
-        return {'fed': fed_tax, 'sc': sc_tax, 'se': se_tax, 'total': total, 'eff': eff_rate}
-
-    sc1 = _estimate(FED_RATE_LOW,  include_se=False, include_qbi=False)  # Investor, 22% fed
-    sc2 = _estimate(FED_RATE_LOW,  include_se=True,  include_qbi=True)   # Active trader, SE + QBI
-    sc3 = _estimate(FED_RATE_MID,  include_se=True,  include_qbi=True)   # Active trader, 24% fed
-
-    # ── Header numbers ────────────────────────────────────────────────────────
-    gain_color = '#44ff88' if net_pnl >= 0 else '#ff4444'
-    st.markdown(
-        f'<div style="background:#0d1117; border:1px solid #222; border-radius:8px; '
-        f'padding:14px; margin-bottom:8px;">'
-        f'<div style="color:#888; font-size:11px; letter-spacing:2px;">YTD NET REALIZED P&L</div>'
-        f'<div style="color:{gain_color}; font-size:28px; font-weight:900;">${net_pnl:+,.2f}</div>'
-        f'<div style="color:#555; font-size:11px; margin-top:4px;">'
-        f'Gains: <span style="color:#44ff88;">${total_gains:,.2f}</span> &nbsp;|&nbsp; '
-        f'Losses: <span style="color:#ff4444;">${total_losses:,.2f}</span> &nbsp;|&nbsp; '
-        f'Fees paid: <span style="color:#FDB927;">${total_fees:,.2f}</span> &nbsp;|&nbsp; '
-        f'{total_trades} closed trades</div>'
-        f'</div>',
-        unsafe_allow_html=True
-    )
-
-    if net_pnl <= 0:
-        st.markdown(
-            '<div style="background:#1a0f0f; border-left:3px solid #FDB927; padding:10px 14px; '
-            'border-radius:0 6px 6px 0; font-size:12px; color:#ccc; margin-bottom:8px;">'
-            '📉 <b>Net loss YTD.</b> Losses can offset other capital gains or up to <b>$3,000/yr</b> '
-            'of ordinary income (federal). Excess carries forward to future years.'
-            '</div>',
-            unsafe_allow_html=True
-        )
-        _tax_rules_section()
-        return
-
-    # ── Tax estimate table ────────────────────────────────────────────────────
-    st.markdown("**Estimated tax owed on ${:,.2f} net gain (3 scenarios)**".format(taxable_pnl))
-    st.caption(f"Fees (${total_fees:.2f}) already subtracted as deductible expenses.")
-
-    rows_html = ""
-    scenarios = [
-        ("Investor status, 22% fed bracket",   sc1),
-        ("Active trader + SE tax + QBI deduct (22%)", sc2),
-        ("Active trader + SE tax + QBI deduct (24%)", sc3),
-    ]
-    for label, s in scenarios:
-        rows_html += (
-            f'<tr style="border-bottom:1px solid #222;">'
-            f'<td style="color:#ccc; font-size:11px; padding:6px 8px;">{label}</td>'
-            f'<td style="color:#aef; text-align:right; padding:6px 8px; font-family:monospace;">'
-            f'${s["fed"]:,.2f}</td>'
-            f'<td style="color:#FDB927; text-align:right; padding:6px 8px; font-family:monospace;">'
-            f'${s["sc"]:,.2f}</td>'
-            f'<td style="color:#f88; text-align:right; padding:6px 8px; font-family:monospace;">'
-            f'${s["se"]:,.2f}</td>'
-            f'<td style="color:#ff4444; font-weight:700; text-align:right; padding:6px 8px; '
-            f'font-family:monospace;">${s["total"]:,.2f}</td>'
-            f'<td style="color:#888; text-align:right; padding:6px 8px; font-family:monospace;">'
-            f'{s["eff"]:.1%}</td>'
-            f'</tr>'
-        )
-
-    st.markdown(
-        f'<table style="width:100%; border-collapse:collapse; font-size:11px;">'
-        f'<thead><tr style="border-bottom:1px solid #444;">'
-        f'<th style="color:#888; text-align:left; padding:4px 8px;">Scenario</th>'
-        f'<th style="color:#aef; text-align:right; padding:4px 8px;">Federal</th>'
-        f'<th style="color:#FDB927; text-align:right; padding:4px 8px;">SC (6.4%)</th>'
-        f'<th style="color:#f88; text-align:right; padding:4px 8px;">SE Tax</th>'
-        f'<th style="color:#ff4444; text-align:right; padding:4px 8px;">Total</th>'
-        f'<th style="color:#888; text-align:right; padding:4px 8px;">Eff Rate</th>'
-        f'</tr></thead><tbody>{rows_html}</tbody></table>',
-        unsafe_allow_html=True
-    )
-
-    # ── Annual breakdown ──────────────────────────────────────────────────────
-    if len(annual) > 0:
-        st.markdown("&nbsp;")
-        st.markdown("**Breakdown by year**")
-        for yr, d in sorted(annual.items(), reverse=True):
-            yr_net = d['gains'] + d['losses']
-            c = '#44ff88' if yr_net >= 0 else '#ff4444'
-            st.markdown(
-                f'<div style="font-family:monospace; font-size:11px; color:#888; '
-                f'padding:3px 0;">{yr}: '
-                f'<span style="color:{c};">${yr_net:+,.2f} net</span> | '
-                f'{d["trades"]} trades | '
-                f'gains ${d["gains"]:,.2f} losses ${d["losses"]:,.2f} fees ${d["fees"]:,.2f} | '
-                f'crypto ${d["crypto"]:+,.2f} equity ${d["equity"]:+,.2f}'
-                f'</div>',
-                unsafe_allow_html=True
-            )
-
-    _tax_rules_section()
-
-
-def _tax_rules_section():
-    """SC + Federal rules specific to a 1-member LLC active trader."""
-    with st.expander("📖 SC + Federal Rules for Your LLC", expanded=False):
-        st.markdown("""
-**Your structure: 1-member LLC (disregarded entity)**
-All P&L passes through to your personal 1040. The LLC is invisible to the IRS for income tax — you report on *your* return, not a corporate return.
-
----
-**Federal — What applies to you (2025)**
-- **Crypto = property** (IRS Notice 2014-21). Every sale, swap, or conversion is a taxable event.
-- **All your trades are short-term** (held < 1 year) → taxed at ordinary income rates, NOT the lower long-term cap gains rate.
-- **Wash sale rule does NOT apply to crypto** (as of 2025). You can sell BTC at a loss and rebuy immediately — still deductible. Stock wash sale rules DO apply to equity trades.
-- **No like-kind exchange** for crypto (eliminated by Tax Cuts and Jobs Act 2017). You cannot defer crypto gains.
-- **Cost basis method**: IRS default is FIFO. You can elect specific identification (best for tax optimization). Must be elected per-exchange and documented.
-- **LLC trading expenses deductible** if you qualify as an active *trader* (not investor): data feeds, software, home office, internet, hardware. Deducted on Schedule C.
-
-**Trader vs Investor status** — IRS looks at:
-- Volume: typically 720+ trades/year to qualify
-- Frequency: near-daily trading activity
-- Profit motive: trading is your primary intent (not investment)
-- *If trader*: Schedule C, SE tax may apply, can deduct expenses, can elect Sec. 475 mark-to-market
-- *If investor*: Schedule D, no SE tax, limited expense deductions
-
-**SE Tax (15.3%)**: Applies if trading income is classified as self-employment (Schedule C). You deduct *half* of SE tax before calculating income tax. First $168,600 of earnings subject to 12.4% SS portion.
-
-**QBI Deduction (20%)**: If active trader on Schedule C, may qualify for 20% deduction on net business income under IRC Sec. 199A. Reduces taxable income before federal rate applies.
-
----
-**South Carolina — What applies to you (2025)**
-- **Flat rate: 6.4%** on taxable income. SC is reducing this annually → 6.2% in 2026 → 6.0% by 2027.
-- **Short-term gains**: taxed as ordinary income at the 6.4% flat rate. No special short-term rate.
-- **Long-term gains deduction (44%)**: SC allows a 44% deduction on long-term capital gains — but only if held >1 year. Your day trades don't qualify.
-- **SC follows federal crypto treatment**: property, taxable on each sale.
-- **SC has no separate crypto legislation** as of 2025 — federal rules apply.
-- **SC 1-member LLC**: no state-level entity tax. P&L flows to your SC individual return (SC 1040).
-
----
-**Example numbers** (if your net trading P&L = $1,000 for the year, other income = $50K):
-- You land in the ~22% federal bracket
-- Federal tax on $1,000: ~$220
-- SC tax: $64
-- If active trader with SE tax + QBI: ~$280 total
-- Keep records of every entry/exit — Coinbase and Webull export CSV for tax software
-
----
-*⚠️ This is an educational estimate, not tax advice. Consult a licensed CPA or EA in South Carolina before filing. Tax law changes frequently.*
-        """)
-
-
 def _panel_chat():
     render_chat_column('king')
 
@@ -2277,7 +2081,6 @@ def render_king():
         elif pid == 'cost_lab':      _panel_cost_lab()
         elif pid == 'strategy_lab':  _panel_strategy_lab()
         elif pid == 'attribution':   _panel_attribution()
-        elif pid == 'cpa_tax':       _panel_cpa_tax()
         elif pid == 'chat':          _panel_chat()
 
     layout = st.session_state.king_layout

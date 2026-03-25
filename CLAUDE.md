@@ -22,7 +22,7 @@ A fully autonomous AI-powered trading system that:
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
 
-## Current Version: v4.2
+## Current Version: v4.3
 - v3.0 baseline: Extended thinking exits, LanceDB memory, regime detection,
   prompt caching, structured outputs, 4-view dashboard, position persistence,
   watchdog, auto cost tuning
@@ -38,6 +38,22 @@ A fully autonomous AI-powered trading system that:
   10 new math signals (AR(1) autocorr, OU half-life, Kyle lambda R² filter,
   Hurst H min_periods 96, RV ratio gap guard, squeeze direction);
   CoinbaseMicrostructureFeed WebSocket; Kelly sizing; 20 crypto pairs (.env)
+- v4.3 (2026-03-25): 7 new indicators added to indicators.py + conviction scoring:
+  • SuperTrend (ATR 10, mult 3.0): binary trend direction, ATR-adaptive trailing band
+    supertrend_bullish → +12 pts; pandas_ta primary, manual fallback included
+  • Ichimoku Cloud (kumo only): price vs Senkou Span A/B — dynamic S/R
+    cloud_bullish → +8 pts; TK crosses intentionally omitted (too noisy on 1-min)
+  • Waddah Attar Explosion (WAE): MACD(20/40) × BB width — momentum + explosion gate
+    wae_bullish + wae_exploding → +10 pts; wae_bullish only → +5 pts
+  • Ehlers Fisher Transform: Gaussian-normalised turning point detector
+    fisher_cross_up (cross from negative) → +8 pts
+  • Choppiness Index (CHOP): trending < 38.2 / choppy > 61.8
+    chop_trending → +5 pts; agents see chop value for regime context
+  • WaveTrend Oscillator (WT): LazyBear's crypto-popular 2-line momentum oscillator
+    wt_oversold_cross (WT1 > WT2 from below -53) → +12 pts
+  • Laguerre RSI (γ=0.5): Ehlers 4-tap filter, ~5× less lag than RSI-14
+    lrsi < 0.15 → +8 pts; lrsi < 0.25 → +4 pts
+  All 7 tagged in signal_triggers so AI agents see them during debate.
 - v4.2 (2026-03-24): TradingView Pro webhook integration:
   • scripts/tradingview_webhook.py: standalone HTTP server (port 8765) receives Pine Script alerts
     Validates TV_WEBHOOK_SECRET, normalises symbol (BTCUSDC→BTC-USDC), writes to system_events

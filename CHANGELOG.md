@@ -1,5 +1,8 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
+## 2026-03-25
+- v4.3 — 7 new indicators: SuperTrend, Ichimoku cloud, WAE, Fisher Transform, CHOP, WaveTrend, Laguerre RSI
+
 ## 2026-03-24
 - v4.2 — TradingView Pro webhook integration
 

@@ -170,6 +170,21 @@ def _build_market_data(symbol, price, df_ind, change_pct=0, regime='ranging') ->
     kalman_price      = _safe('kalman_price', price)
     kalman_dev        = _safe('kalman_dev', 0.0)
     session_active    = bool(last.get('session_active', True))
+    # ─── v4.3 new indicators ─────────────────────────────────────────────────
+    supertrend_bullish  = bool(last.get('supertrend_bullish', False))
+    cloud_bullish       = bool(last.get('cloud_bullish', False))
+    cloud_bearish       = bool(last.get('cloud_bearish', False))
+    wae_bullish         = bool(last.get('wae_bullish', False))
+    wae_exploding       = bool(last.get('wae_exploding', False))
+    fisher_cross_up     = bool(last.get('fisher_cross_up', False))
+    fisher_val          = _safe('fisher', 0.0)
+    chop_val            = _safe('chop', 50.0)
+    chop_trending       = bool(last.get('chop_trending', False))
+    chop_ranging        = bool(last.get('chop_ranging', False))
+    wt1_val             = _safe('wt1', 0.0)
+    wt_oversold_cross   = bool(last.get('wt_oversold_cross', False))
+    lrsi_val            = _safe('lrsi', 0.5)
+    lrsi_oversold       = lrsi_val is not None and float(lrsi_val) < 0.15
     # ────────────────────────────────────────────────────────────────────────
 
     return {
@@ -209,6 +224,20 @@ def _build_market_data(symbol, price, df_ind, change_pct=0, regime='ranging') ->
         'kalman_price': kalman_price,
         'kalman_dev': kalman_dev,
         'session_active': session_active,
+        # v4.3 new indicators
+        'supertrend_bullish': supertrend_bullish,
+        'cloud_bullish': cloud_bullish,
+        'cloud_bearish': cloud_bearish,
+        'wae_bullish': wae_bullish,
+        'wae_exploding': wae_exploding,
+        'fisher_cross_up': fisher_cross_up,
+        'fisher': fisher_val,
+        'chop': chop_val,
+        'chop_trending': chop_trending,
+        'chop_ranging': chop_ranging,
+        'wt1': wt1_val,
+        'wt_oversold_cross': wt_oversold_cross,
+        'lrsi': lrsi_val,
         # OBI/TFI/microprice/spread from live WebSocket microstructure feed
         **_get_microstructure(symbol),
     }
@@ -815,6 +844,24 @@ def run_crypto_scan() -> None:
             _kyle = market_data.get('kyle_lambda_pct')
             if _kyle is not None and float(_kyle) <= KYLE_LAMBDA_LOW_PCT:
                                                                conviction +=  5  # Low Kyle lambda = liquid fills
+            # ── Tier 2b: New indicators (v4.3) ───────────────────────────────
+            _st_bull  = market_data.get('supertrend_bullish', False)
+            _cloud_b  = market_data.get('cloud_bullish', False)
+            _wae_bull = market_data.get('wae_bullish', False)
+            _wae_exp  = market_data.get('wae_exploding', False)
+            _fish_up  = market_data.get('fisher_cross_up', False)
+            _chop_t   = market_data.get('chop_trending', False)
+            _wt_osc   = market_data.get('wt_oversold_cross', False)
+            _lrsi_v   = float(market_data.get('lrsi') or 0.5)
+            if _st_bull:                                           conviction += 12  # SuperTrend bullish
+            if _cloud_b:                                           conviction +=  8  # Price above Ichimoku cloud
+            if _wae_bull and _wae_exp:                             conviction += 10  # WAE bullish explosion
+            elif _wae_bull:                                        conviction +=  5  # WAE directional (no explosion)
+            if _fish_up:                                           conviction +=  8  # Fisher Transform turning up
+            if _chop_t:                                            conviction +=  5  # CHOP < 38.2 = trending mkt
+            if _wt_osc:                                            conviction += 12  # WaveTrend cross from oversold
+            if _lrsi_v < 0.15:                                     conviction +=  8  # Laguerre RSI deeply oversold
+            elif _lrsi_v < 0.25:                                   conviction +=  4  # Laguerre RSI oversold
             # ── Tier 3: TradingView Pro confirmation (external signal boost) ──
             _tv_sig = get_recent_tv_signal(pid, max_age_seconds=TV_SIGNAL_MAX_AGE_SECONDS)
             if _tv_sig and _tv_sig.get('action') == 'buy':
@@ -859,6 +906,13 @@ def run_crypto_scan() -> None:
             if _ou_z <= -1.5:       signal_triggers.append(f'ou_zscore={_ou_z:.2f}')
             if obi is not None:     signal_triggers.append(f'OBI={obi:+.2f}')
             if tfi is not None:     signal_triggers.append(f'TFI={tfi:+.2f}')
+            if _st_bull:            signal_triggers.append('SuperTrend=bullish')
+            if _cloud_b:            signal_triggers.append('Ichimoku=above_cloud')
+            if _wae_bull and _wae_exp: signal_triggers.append('WAE=bullish_explosion')
+            if _fish_up:            signal_triggers.append(f'Fisher=cross_up({market_data.get("fisher",0):.2f})')
+            if _chop_t:             signal_triggers.append(f'CHOP={market_data.get("chop",50):.1f}(trending)')
+            if _wt_osc:             signal_triggers.append(f'WaveTrend=oversold_cross(wt1={market_data.get("wt1",0):.1f})')
+            if _lrsi_v < 0.25:      signal_triggers.append(f'LaguerreRSI={_lrsi_v:.2f}')
             if _tv_sig and _tv_sig.get('action') == 'buy':
                 signal_triggers.append(f'TV_signal({_tv_sig.get("signal","")[:40]})')
             market_data['signal_triggers'] = ', '.join(signal_triggers)

@@ -296,6 +296,181 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
         print(f"[indicators] session_active failed: {e}")
         df['session_active'] = True
 
+    # ─── 10. SuperTrend (ATR 10, mult 3.0) ───────────────────────────────────
+    # Binary trend filter: 1 = bullish (price above band), -1 = bearish.
+    # ATR-adaptive trailing stop that switches state cleanly — no chop.
+    # Complements MACD direction with a persistent, low-noise trend label.
+    try:
+        _used_pandas_ta_st = False
+        if PANDAS_TA:
+            try:
+                _st = ta.supertrend(df['high'], df['low'], df['close'], length=10, multiplier=3.0)
+                if _st is not None and not _st.empty:
+                    _dir_cols = [c for c in _st.columns if 'SUPERTd' in c]
+                    if _dir_cols:
+                        df['supertrend_dir'] = _st[_dir_cols[0]].fillna(1)
+                        df['supertrend_bullish'] = df['supertrend_dir'] == 1
+                        _used_pandas_ta_st = True
+            except Exception:
+                pass
+        if not _used_pandas_ta_st:
+            _atr_st = df['atr'] if 'atr' in df.columns else _atr_fallback(df, 14)
+            _st_dir = _supertrend_manual(df['high'], df['low'], df['close'],
+                                         _atr_st.fillna(_atr_st.mean()), multiplier=3.0)
+            df['supertrend_dir'] = _st_dir
+            df['supertrend_bullish'] = _st_dir == 1
+    except Exception as e:
+        print(f"[indicators] supertrend failed: {e}")
+        df['supertrend_bullish'] = False
+
+    # ─── 11. Ichimoku Cloud — kumo direction only ─────────────────────────────
+    # price above cloud top (Senkou Span A and B both) = bullish structure.
+    # The cloud is the most reliable Ichimoku component on sub-hourly charts;
+    # TK crosses are too noisy on 1-minute data and are intentionally omitted.
+    try:
+        _tenkan = (df['high'].rolling(9).max() + df['low'].rolling(9).min()) / 2
+        _kijun  = (df['high'].rolling(26).max() + df['low'].rolling(26).min()) / 2
+        _senkou_a = ((_tenkan + _kijun) / 2).shift(26)
+        _senkou_b = ((df['high'].rolling(52).max() + df['low'].rolling(52).min()) / 2).shift(26)
+        df['cloud_top']    = pd.concat([_senkou_a, _senkou_b], axis=1).max(axis=1)
+        df['cloud_bottom'] = pd.concat([_senkou_a, _senkou_b], axis=1).min(axis=1)
+        df['cloud_bullish'] = df['close'] > df['cloud_top']
+        df['cloud_bearish'] = df['close'] < df['cloud_bottom']
+    except Exception as e:
+        print(f"[indicators] ichimoku failed: {e}")
+        df['cloud_bullish'] = False
+        df['cloud_bearish'] = False
+
+    # ─── 12. Waddah Attar Explosion (WAE) ────────────────────────────────────
+    # Momentum × volatility composite. Direction = MACD(20/40) histogram.
+    # Explosion = BB width (upper-lower). Signal fires when trending momentum
+    # exceeds the volatility baseline — confirms breakouts from compression.
+    # Widely used on TradingView; pairs naturally with the BB-Keltner squeeze.
+    try:
+        _sensitivity = 150
+        _e_fast = df['close'].ewm(span=20, adjust=False).mean()
+        _e_slow = df['close'].ewm(span=40, adjust=False).mean()
+        _t1 = (_e_fast - _e_slow) * _sensitivity
+        _t2 = _t1.shift(1).fillna(_t1)
+        _trend_up   = (_t1 - _t2).clip(lower=0).where(_t1 >= 0, 0)
+        _trend_dn   = (_t2 - _t1).clip(lower=0).where(_t1 < 0,  0)
+        _bb_std20   = df['close'].rolling(20).std().fillna(0)
+        _explosion  = 4 * _bb_std20   # BB upper-lower width (2σ each side)
+        df['wae_trend_up']  = _trend_up
+        df['wae_trend_down'] = _trend_dn
+        df['wae_explosion'] = _explosion
+        df['wae_bullish']   = (_trend_up > _trend_dn) & (_trend_up > 0)
+        df['wae_exploding'] = (_trend_up > _explosion) | (_trend_dn > _explosion)
+    except Exception as e:
+        print(f"[indicators] wae failed: {e}")
+        df['wae_bullish']  = False
+        df['wae_exploding'] = False
+
+    # ─── 13. Ehlers Fisher Transform ─────────────────────────────────────────
+    # Converts price range to a Gaussian normal distribution.
+    # Extreme readings (|fisher| > 1.5) identify precise price turning points.
+    # Published by John Ehlers — used by quantitative traders for entry timing.
+    # Fisher cross (fisher > fisher_signal) from negative = bullish flip.
+    try:
+        _flen = 10
+        _hl2  = (df['high'] + df['low']) / 2.0
+        _hh   = _hl2.rolling(_flen, min_periods=_flen).max()
+        _ll   = _hl2.rolling(_flen, min_periods=_flen).min()
+        _rng  = (_hh - _ll).clip(lower=1e-10)
+        _val  = ((2.0 * (_hl2 - _ll) / _rng) - 1.0).clip(-0.999, 0.999).fillna(0.0)
+        _fisher_raw = 0.5 * np.log((1.0 + _val) / (1.0 - _val))
+        df['fisher']        = _fisher_raw.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+        df['fisher_signal'] = df['fisher'].shift(1).fillna(0.0)
+        _cross_up   = (df['fisher'] > df['fisher_signal']) & \
+                      (df['fisher'].shift(1).fillna(0) <= df['fisher_signal'].shift(1).fillna(0))
+        df['fisher_cross_up']   = _cross_up & (df['fisher'] < 0)  # cross from negative = bullish
+        df['fisher_cross_down'] = (df['fisher'] < df['fisher_signal']) & \
+                                  (df['fisher'].shift(1).fillna(0) >= df['fisher_signal'].shift(1).fillna(0)) & \
+                                  (df['fisher'] > 0)
+    except Exception as e:
+        print(f"[indicators] fisher failed: {e}")
+        df['fisher'] = 0.0
+        df['fisher_cross_up'] = False
+
+    # ─── 14. Choppiness Index (CHOP) ─────────────────────────────────────────
+    # Measures whether the market is trending or oscillating.
+    # Formula: 100 × log10(Σ ATR₁ / (HighestHigh − LowestLow)) / log10(n)
+    # < 38.2 = strongly trending (directional — take breakout signals)
+    # > 61.8 = high chop (ranging — favour mean reversion, reduce confidence)
+    # Fills a gap in the regime detector: quantifies "tradeable trend quality".
+    try:
+        _cn   = 14
+        _prev_close = df['close'].shift(1).fillna(df['close'])
+        _tr1  = (df['high'] - df['low']).abs()
+        _tr2  = (df['high'] - _prev_close).abs()
+        _tr3  = (df['low']  - _prev_close).abs()
+        _tr   = pd.concat([_tr1, _tr2, _tr3], axis=1).max(axis=1)
+        _atr_sum = _tr.rolling(_cn, min_periods=_cn).sum()
+        _hh_n    = df['high'].rolling(_cn, min_periods=_cn).max()
+        _ll_n    = df['low'].rolling(_cn, min_periods=_cn).min()
+        _hl_rng  = (_hh_n - _ll_n).clip(lower=1e-10)
+        _ratio   = (_atr_sum / _hl_rng).clip(lower=1e-10, upper=1e10)
+        _chop_raw = (100.0 * np.log10(_ratio) / np.log10(_cn))
+        df['chop']          = _chop_raw.clip(1, 100)
+        df['chop_trending'] = df['chop'] < 38.2  # strongly trending
+        df['chop_ranging']  = df['chop'] > 61.8  # high chop
+    except Exception as e:
+        print(f"[indicators] chop failed: {e}")
+        df['chop'] = 50.0
+        df['chop_trending'] = False
+
+    # ─── 15. WaveTrend Oscillator ────────────────────────────────────────────
+    # LazyBear's adaptation of the WT oscillator — highly popular in crypto.
+    # Two-line momentum oscillator. Cross (WT1 > WT2) from oversold (<−53)
+    # is the highest-confidence buy signal: momentum reversal from extreme.
+    # Unlike RSI, WT has built-in smoothing that filters 1-minute noise well.
+    try:
+        _wn1, _wn2 = 10, 21
+        _ap   = (df['high'] + df['low'] + df['close']) / 3.0
+        _esa  = _ap.ewm(span=_wn1, adjust=False).mean()
+        _d    = (_ap - _esa).abs().ewm(span=_wn1, adjust=False).mean().clip(lower=1e-10)
+        _ci   = (_ap - _esa) / (0.015 * _d)
+        _tci  = _ci.ewm(span=_wn2, adjust=False).mean()
+        df['wt1']               = _tci
+        df['wt2']               = _tci.rolling(4, min_periods=1).mean()
+        _wt_prev1               = df['wt1'].shift(1).fillna(0)
+        _wt_prev2               = df['wt2'].shift(1).fillna(0)
+        _wt_cross_up            = (df['wt1'] > df['wt2']) & (_wt_prev1 <= _wt_prev2)
+        df['wt_cross_up']       = _wt_cross_up
+        df['wt_oversold_cross'] = _wt_cross_up & (_wt_prev1 < -53)
+        df['wt_overbought']     = df['wt1'] > 53
+    except Exception as e:
+        print(f"[indicators] wavetrend failed: {e}")
+        df['wt1'] = 0.0
+        df['wt_oversold_cross'] = False
+
+    # ─── 16. Laguerre RSI (γ = 0.5) ──────────────────────────────────────────
+    # John Ehlers adaptive oscillator using a 4-tap Laguerre filter.
+    # ~5× less lag than standard RSI-14 on the same timeframe.
+    # Range 0–1. < 0.15 = deeply oversold (stronger than RSI < 30).
+    # Better for 1-minute crypto: fewer false signals, faster turning points.
+    try:
+        _gamma = 0.5
+        _c  = df['close'].values.astype(float)
+        _n  = len(_c)
+        _L0 = np.empty(_n); _L0[0] = _c[0]
+        _L1 = np.empty(_n); _L1[0] = _c[0]
+        _L2 = np.empty(_n); _L2[0] = _c[0]
+        _L3 = np.empty(_n); _L3[0] = _c[0]
+        for _i in range(1, _n):
+            _L0[_i] = (1 - _gamma) * _c[_i] + _gamma * _L0[_i - 1]
+            _L1[_i] = -_gamma * _L0[_i] + _L0[_i - 1] + _gamma * _L1[_i - 1]
+            _L2[_i] = -_gamma * _L1[_i] + _L1[_i - 1] + _gamma * _L2[_i - 1]
+            _L3[_i] = -_gamma * _L2[_i] + _L2[_i - 1] + _gamma * _L3[_i - 1]
+        _cu = np.maximum(_L0 - _L1, 0) + np.maximum(_L1 - _L2, 0) + np.maximum(_L2 - _L3, 0)
+        _cd = np.maximum(_L1 - _L0, 0) + np.maximum(_L2 - _L1, 0) + np.maximum(_L3 - _L2, 0)
+        _tot = _cu + _cd
+        _lrsi = np.where(_tot > 1e-10, _cu / _tot, 0.5)
+        df['lrsi'] = pd.Series(_lrsi, index=df.index)
+    except Exception as e:
+        print(f"[indicators] lrsi failed: {e}")
+        df['lrsi'] = 0.5
+
     return df
 
 
@@ -576,6 +751,35 @@ def fib_confluence(price: float, atr: float, fib: dict) -> tuple:
             return signal, name, boost
 
     return None, None, 0.0
+
+
+def _supertrend_manual(high: pd.Series, low: pd.Series, close: pd.Series,
+                        atr: pd.Series, multiplier: float = 3.0) -> pd.Series:
+    """
+    Manual SuperTrend fallback (used when pandas-ta is unavailable or fails).
+    Returns a Series of 1 (bullish) / -1 (bearish) matching the input index.
+    """
+    hl2 = (high + low) / 2
+    basic_upper = hl2 + multiplier * atr
+    basic_lower = hl2 - multiplier * atr
+
+    n = len(close)
+    fu = basic_upper.copy().values.astype(float)
+    fl = basic_lower.copy().values.astype(float)
+    direction = np.ones(n, dtype=int)
+    c = close.values
+
+    for i in range(1, n):
+        fu[i] = basic_upper.iloc[i] if (basic_upper.iloc[i] < fu[i-1] or c[i-1] > fu[i-1]) else fu[i-1]
+        fl[i] = basic_lower.iloc[i] if (basic_lower.iloc[i] > fl[i-1] or c[i-1] < fl[i-1]) else fl[i-1]
+        if c[i] > fu[i-1]:
+            direction[i] = 1
+        elif c[i] < fl[i-1]:
+            direction[i] = -1
+        else:
+            direction[i] = direction[i-1]
+
+    return pd.Series(direction, index=close.index)
 
 
 def _rsi_fallback(series: pd.Series, period: int = 14) -> pd.Series:

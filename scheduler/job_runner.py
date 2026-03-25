@@ -157,7 +157,8 @@ def _build_market_data(symbol, price, df_ind, change_pct=0, regime='ranging') ->
     avwap_utc         = _safe('avwap_utc', price)
     avwap_dev         = _safe('avwap_dev', 0.0)
     autocorr_ret      = _safe('autocorr_ret')          # AR(1) return autocorrelation
-    ou_halflife_minutes = _safe('ou_halflife_minutes')  # OU mean-reversion half-life (only when H<0.40)
+    ou_halflife_minutes = _safe('ou_halflife_minutes')  # OU mean-reversion half-life
+    ou_zscore         = _safe('ou_zscore', 0.0)         # OU z-score: price deviation from 60-bar mean
     amihud_pct        = _safe('amihud_pct')
     kyle_lambda_pct   = _safe('kyle_lambda_pct')
     squeeze_on        = bool(last.get('squeeze_on', False))
@@ -196,6 +197,7 @@ def _build_market_data(symbol, price, df_ind, change_pct=0, regime='ranging') ->
         'avwap_dev': avwap_dev,
         'autocorr_ret': autocorr_ret,
         'ou_halflife_minutes': ou_halflife_minutes,
+        'ou_zscore': ou_zscore,
         'amihud_pct': amihud_pct,
         'kyle_lambda_pct': kyle_lambda_pct,
         'squeeze_on': squeeze_on,
@@ -803,6 +805,8 @@ def run_crypto_scan() -> None:
             if rv_expansion:                                   conviction += 15  # RV ratio ≥ 1.3 expansion
             if kalman_oversold:                                conviction += 10  # Price ≥1% below Kalman estimate
             if avwap_reclaim:                                  conviction += 10  # Price ≥0.5% below AVWAP
+            _ou_z = float(market_data.get('ou_zscore') or 0.0)
+            if _ou_z <= -1.5:                                  conviction += 10  # OU z-score deep oversold
             _ou_hl = market_data.get('ou_halflife_minutes')
             if _ou_hl is not None and OU_HALFLIFE_MIN_MINUTES <= float(_ou_hl) <= OU_HALFLIFE_MAX_MINUTES:
                                                                conviction +=  5  # OU half-life in tradeable range
@@ -846,6 +850,7 @@ def run_crypto_scan() -> None:
             if rv_expansion:        signal_triggers.append(f'RV_expansion({_rv_ratio:.2f}x)')
             if kalman_oversold:     signal_triggers.append(f'kalman_dev={_kalman_dev:.2f}%')
             if avwap_reclaim:       signal_triggers.append(f'avwap_dev={_avwap_dev:.2f}%')
+            if _ou_z <= -1.5:       signal_triggers.append(f'ou_zscore={_ou_z:.2f}')
             if obi is not None:     signal_triggers.append(f'OBI={obi:+.2f}')
             if tfi is not None:     signal_triggers.append(f'TFI={tfi:+.2f}')
             market_data['signal_triggers'] = ', '.join(signal_triggers)

@@ -1,0 +1,27 @@
+<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="kg_red" cx="40%" cy="35%" r="70%">
+      <stop offset="0%" stop-color="#FFAAAA"/>
+      <stop offset="40%" stop-color="#FF3300"/>
+      <stop offset="100%" stop-color="#990000"/>
+    </radialGradient>
+    <radialGradient id="kglow_red" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#FF3300" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#990000" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <!-- Outer glow rings -->
+  <circle cx="100" cy="100" r="140" fill="url(#kglow_red)" opacity="0.5"/>
+  <circle cx="100" cy="100" r="110" fill="none" stroke="#FFD0D0" stroke-width="2" opacity="0.4"/>
+  <circle cx="100" cy="100" r="120" fill="none" stroke="#FFD0D0" stroke-width="1" opacity="0.25"/>
+  <!-- Energy ring sparkles -->
+  <line x1="215" y1="100" x2="240" y2="100" stroke="#FFD0D0" stroke-width="1.5" opacity="0.8"/><line x1="199" y1="157" x2="221" y2="170" stroke="#FFD0D0" stroke-width="1.5" opacity="0.3"/><line x1="157" y1="199" x2="170" y2="221" stroke="#FFD0D0" stroke-width="1.5" opacity="0.3"/><line x1="100" y1="215" x2="100" y2="240" stroke="#FFD0D0" stroke-width="1.5" opacity="0.8"/><line x1="42" y1="199" x2="30" y2="221" stroke="#FFD0D0" stroke-width="1.5" opacity="0.3"/><line x1="0" y1="157" x2="-21" y2="170" stroke="#FFD0D0" stroke-width="1.5" opacity="0.3"/><line x1="-14" y1="100" x2="-40" y2="100" stroke="#FFD0D0" stroke-width="1.5" opacity="0.8"/><line x1="0" y1="42" x2="-21" y2="29" stroke="#FFD0D0" stroke-width="1.5" opacity="0.3"/><line x1="42" y1="0" x2="29" y2="-21" stroke="#FFD0D0" stroke-width="1.5" opacity="0.3"/><line x1="99" y1="-14" x2="99" y2="-40" stroke="#FFD0D0" stroke-width="1.5" opacity="0.8"/><line x1="157" y1="0" x2="170" y2="-21" stroke="#FFD0D0" stroke-width="1.5" opacity="0.3"/><line x1="199" y1="42" x2="221" y2="29" stroke="#FFD0D0" stroke-width="1.5" opacity="0.3"/>
+  <!-- Main ball -->
+  <circle cx="100" cy="100" r="100" fill="url(#kg_red)"/>
+  <!-- Inner core highlight -->
+  <circle cx="75" cy="75" r="35" fill="#FFAAAA" opacity="0.5"/>
+  <circle cx="80" cy="80" r="12" fill="white" opacity="0.8"/>
+  <!-- Energy crackling lines -->
+  <path d="M100,0 L92,60 L110,45 L100,90" fill="none" stroke="#FFD0D0" stroke-width="1.5" opacity="0.6"/>
+  <path d="M170,30 L140,80 L160,100" fill="none" stroke="#FFD0D0" stroke-width="1" opacity="0.5"/>
+</svg>

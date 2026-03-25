@@ -36,7 +36,7 @@ import pytz
 import requests
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import PAPER_TRADING, MARKET_TIMEZONE
+from config import PAPER_TRADING, MARKET_TIMEZONE, FUTURES_NUM_CONTRACTS
 from logging_db.trade_logger import log_trade, log_event
 from alerts.telegram_alert import alert_trade_opened, alert_trade_closed
 
@@ -51,13 +51,13 @@ TRADOVATE_DEMO_URL = 'https://demo.tradovateapi.com/v1'
 TRADOVATE_LIVE_URL = 'https://live.tradovateapi.com/v1'
 
 # MES (Micro E-mini S&P 500)
-MES_SYMBOL = 'MESU4'     # Quarterly expiry — update this each quarter
+MES_SYMBOL = 'MESM6'     # Quarterly expiry — update this each quarter (current: June 2026)
 MES_TICK_SIZE = 0.25     # Minimum price movement
 MES_TICK_VALUE = 1.25    # $ per tick
 MES_POINT_VALUE = 5.00   # $ per full point
 
 # ES (E-mini S&P 500) — DO NOT USE WITH $500 ACCOUNT
-ES_SYMBOL = 'ESU4'
+ES_SYMBOL = 'ESM6'
 ES_TICK_VALUE = 12.50
 ES_POINT_VALUE = 50.00
 
@@ -128,7 +128,7 @@ class TradovateBroker:
 
     def buy_mes(
         self,
-        num_contracts: int = 1,
+        num_contracts: int = FUTURES_NUM_CONTRACTS,
         order_type: str = 'Market',
         limit_price: Optional[float] = None,
         stop_loss_pts: float = 4.0,    # 4 points = $20 risk per contract
@@ -269,18 +269,40 @@ class TradovateBroker:
 
     # ─── Paper trading simulation ─────────────────────────────────────────────
 
+    def _get_real_es_price(self) -> float:
+        """Fetch current ES/MES price from yfinance (free, no API key needed)."""
+        try:
+            import yfinance as yf
+            ticker = yf.Ticker('ES=F')
+            hist = ticker.history(period='1d', interval='1m')
+            if hist is not None and not hist.empty:
+                return float(hist['Close'].iloc[-1])
+        except Exception:
+            pass
+        # Fallback: last known price from a slightly wider window
+        try:
+            import yfinance as yf
+            hist = yf.download('ES=F', period='2d', interval='5m',
+                               auto_adjust=True, progress=False)
+            if hist is not None and not hist.empty:
+                cols = [c[0].lower() if isinstance(c, tuple) else c.lower()
+                        for c in hist.columns]
+                hist.columns = cols
+                return float(hist['close'].iloc[-1])
+        except Exception:
+            pass
+        return 5750.0  # Hard fallback — only used if yfinance is completely down
+
     def _paper_trade(self, symbol, side, qty, stop_pts, target_pts, strategy):
-        """Simulate a futures trade when no API connection."""
-        import random
-        # Simulate a realistic ES price
-        sim_price = 5800.0 + random.uniform(-50, 50)
-        stop = sim_price - stop_pts
-        target = sim_price + target_pts
+        """Simulate a futures trade using real ES market price from yfinance."""
+        sim_price = self._get_real_es_price()
+        stop = sim_price - stop_pts if side == 'BUY' else sim_price + stop_pts
+        target = sim_price + target_pts if side == 'BUY' else sim_price - target_pts
         risk = stop_pts * MES_POINT_VALUE * qty
 
         self._open_positions[symbol] = {
             'qty': qty, 'entry': sim_price,
-            'stop': stop, 'target': target, 'side': 'LONG',
+            'stop': stop, 'target': target, 'side': 'LONG' if side == 'BUY' else 'SHORT',
             'order_id': f'PAPER_{uuid.uuid4().hex[:8]}'
         }
 
@@ -290,18 +312,18 @@ class TradovateBroker:
             symbol=symbol, action=side, order_type='MARKET',
             qty=qty, price=sim_price, paper=True,
             order_id=order_id,
-            notes=f"SL={stop} TP={target} risk=${risk:.2f}"
+            notes=f"SL={stop:.2f} TP={target:.2f} risk=${risk:.2f}"
         )
 
-        print(f"[PAPER FUTURES] 🟢 BUY {qty} MES @ {sim_price:.2f} | SL={stop:.2f} TP={target:.2f}")
+        print(f"[PAPER FUTURES] 🟢 {side} {qty} MES @ {sim_price:.2f} | SL={stop:.2f} TP={target:.2f}")
         alert_trade_opened(strategy, symbol, side, float(qty), sim_price, stop, target)
         return {'paper': True, 'price': sim_price}
 
     def _paper_close(self, symbol, qty, strategy, reason, entry_price):
         pos = self._open_positions.pop(symbol, {})
         entry = pos.get('entry', entry_price)
-        import random
-        exit_price = entry + random.uniform(-3, 5)  # Simulate outcome
+        # Use real current price for exit — same yfinance source
+        exit_price = self._get_real_es_price()
         pnl = (exit_price - entry) * MES_POINT_VALUE * qty
 
         log_trade(

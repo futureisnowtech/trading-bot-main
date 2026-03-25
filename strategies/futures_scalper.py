@@ -15,12 +15,12 @@ Market open strategy:
   - Wait for strong breakout above/below opening range
   - Wait for pullback to VWAP or 50% of candle
   - Enter on 1–2 min chart confirmation
-  - Max 4 trades/day, stop when daily goal hit
+  - Max 10 trades/day, stop when daily goal hit
 
-With $500 account:
-  - Use MES ONLY (1 contract max)
-  - Daily goal: $30 (6 points on MES)
-  - Max daily loss: $25 (5 points on MES)
+With $5000 account:
+  - Use MES, 3 contracts
+  - Daily goal: $180 (12 points × 3 contracts × $5)
+  - Max daily loss: $150 (10 points × 3 contracts × $5)
 """
 import pandas as pd
 import numpy as np
@@ -35,23 +35,28 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from strategies.base_strategy import BaseStrategy, Signal
 from data.indicators import add_all_indicators, get_htf_bias
 from data.market_data import get_bars, is_market_open, is_in_no_trade_window
-from config import MARKET_TIMEZONE
+from config import (
+    MARKET_TIMEZONE, FUTURES_DAILY_GOAL_PTS, FUTURES_DAILY_MAX_LOSS_PTS,
+    FUTURES_MAX_TRADES_DAY, FUTURES_NUM_CONTRACTS,
+)
 
 
 class FuturesScalperStrategy(BaseStrategy):
     """
     Intraday scalper for MES (Micro E-mini S&P 500).
     AI debate engine required for all entries.
+    Contract count and daily limits driven by config (scale with account size).
     """
 
-    # Daily limits
-    DAILY_GOAL_PTS = 6.0    # Stop trading after +6 points profit ($30 on MES)
-    DAILY_MAX_LOSS_PTS = 5.0  # Hard stop after -5 points ($25 on MES)
-    MAX_TRADES_DAY = 4
+    # Daily limits — pulled from config so they scale with account size
+    DAILY_GOAL_PTS = FUTURES_DAILY_GOAL_PTS
+    DAILY_MAX_LOSS_PTS = FUTURES_DAILY_MAX_LOSS_PTS
+    MAX_TRADES_DAY = FUTURES_MAX_TRADES_DAY
+    NUM_CONTRACTS = FUTURES_NUM_CONTRACTS
 
-    # Stop/target in points
-    STOP_LOSS_PTS = 4.0     # $20 risk per trade
-    TAKE_PROFIT_PTS = 8.0   # $40 target (2:1 R:R)
+    # Stop/target in points — strategy-driven, not account-size-driven
+    STOP_LOSS_PTS = 4.0     # $20 risk per contract (×3 contracts = $60 at $5k)
+    TAKE_PROFIT_PTS = 8.0   # 2:1 R:R (always)
 
     # MES proxy ticker for yfinance data (use ES=F as free data source)
     DATA_TICKER = 'ES=F'

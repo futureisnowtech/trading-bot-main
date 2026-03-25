@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<style>
+*{margin:0;padding:0;}
+body{background:#000;display:flex;align-items:center;justify-content:center;height:100vh;}
+@keyframes power-text{
+  0%{transform:scale(0.1);opacity:0;filter:blur(8px);}
+  60%{transform:scale(1.15);opacity:1;filter:blur(0px);}
+  80%{transform:scale(0.95);}
+  100%{transform:scale(1);opacity:1;}
+}
+@keyframes glow-pulse{
+  0%,100%{text-shadow:0 0 20px #44FF88,0 0 40px #44FF88,0 0 80px #44FF88;}
+  50%{text-shadow:0 0 40px #44FF88,0 0 80px #44FF88,0 0 160px #44FF88;}
+}
+.text-wrapper{text-align:center;animation:power-text 0.8s ease-out forwards;}
+.main-text{
+  font-size:72px;font-weight:900;font-family:Arial Black,sans-serif;
+  color:#44FF88;
+  text-shadow:0 0 20px #44FF88,0 0 40px #44FF88;
+  -webkit-text-stroke:2px #fff;
+  animation:glow-pulse 1.5s ease-in-out infinite;
+  letter-spacing:8px;
+}
+.sub-text{
+  font-size:24px;font-weight:700;font-family:Arial,sans-serif;
+  color:white;opacity:0.8;letter-spacing:16px;margin-top:12px;
+}
+</style></head><body>
+<div class="text-wrapper">
+  <div class="main-text">BUY!</div>
+  <div class="sub-text">POWER ACTIVATED</div>
+</div>
+</body></html>

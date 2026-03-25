@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#000; display:flex; align-items:center; justify-content:center; height:100vh; overflow:hidden; }
+.scene { position:relative; width:400px; height:550px; }
+@keyframes aura-pulse {
+  0%,100% { opacity:0.6; transform:scaleX(1) scaleY(1); }
+  50% { opacity:1; transform:scaleX(1.12) scaleY(1.08); }
+}
+@keyframes hair-rise {
+  0%,100% { transform:translateY(0); }
+  50% { transform:translateY(-4px); }
+}
+@keyframes lightning {
+  0% { opacity:0; }
+  10% { opacity:1; }
+  20% { opacity:0; }
+  30% { opacity:0.8; }
+  40% { opacity:0; }
+  100% { opacity:0; }
+}
+@keyframes ground-shake {
+  0%,100% { transform:translateX(0); }
+  25% { transform:translateX(-3px); }
+  75% { transform:translateX(3px); }
+}
+@keyframes particle-float {
+  0% { transform:translateY(0) scale(1); opacity:1; }
+  100% { transform:translateY(-200px) scale(0); opacity:0; }
+}
+@keyframes screaming {
+  0%,100% { transform:scaleY(1); }
+  50% { transform:scaleY(1.08); }
+}
+.aura {
+  position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+  width:320px; height:480px; border-radius:50%;
+  background: radial-gradient(ellipse, #FF4444CC 0%, #FF444466 40%, transparent 70%);
+  animation: aura-pulse 0.8s ease-in-out infinite;
+}
+.warrior { position:absolute; left:50%; bottom:40px; transform:translateX(-50%); animation:screaming 0.8s ease-in-out infinite; }
+.bolt { position:absolute; animation: lightning 1.2s ease-in-out infinite; }
+.particle { position:absolute; width:6px; height:6px; border-radius:50%; background:#FF4444; animation:particle-float 2s ease-out infinite; }
+.ground { position:absolute; bottom:20px; left:50%; transform:translateX(-50%); animation:ground-shake 0.4s ease-in-out infinite; }
+</style>
+</head><body>
+<div class="scene">
+  <div class="aura"></div>
+  <!-- Particles -->
+  <div class="particle" style="left:309px;bottom:183px;animation-delay:0.2s;animation-duration:2.5s;width:3px;height:8px;"></div><div class="particle" style="left:128px;bottom:93px;animation-delay:0.2s;animation-duration:2.8s;width:7px;height:5px;"></div><div class="particle" style="left:67px;bottom:259px;animation-delay:1.5s;animation-duration:2.7s;width:3px;height:3px;"></div><div class="particle" style="left:243px;bottom:248px;animation-delay:1.8s;animation-duration:2.1s;width:7px;height:3px;"></div><div class="particle" style="left:213px;bottom:104px;animation-delay:1.5s;animation-duration:2.0s;width:7px;height:5px;"></div><div class="particle" style="left:103px;bottom:243px;animation-delay:0.1s;animation-duration:2.1s;width:8px;height:6px;"></div><div class="particle" style="left:306px;bottom:109px;animation-delay:0.9s;animation-duration:2.8s;width:4px;height:6px;"></div><div class="particle" style="left:332px;bottom:243px;animation-delay:1.5s;animation-duration:2.6s;width:6px;height:3px;"></div><div class="particle" style="left:325px;bottom:195px;animation-delay:0.3s;animation-duration:2.3s;width:4px;height:5px;"></div><div class="particle" style="left:245px;bottom:134px;animation-delay:1.1s;animation-duration:2.0s;width:8px;height:8px;"></div><div class="particle" style="left:152px;bottom:195px;animation-delay:0.1s;animation-duration:2.0s;width:4px;height:4px;"></div><div class="particle" style="left:252px;bottom:244px;animation-delay:1.5s;animation-duration:2.3s;width:7px;height:3px;"></div><div class="particle" style="left:264px;bottom:168px;animation-delay:0.1s;animation-duration:2.9s;width:3px;height:5px;"></div><div class="particle" style="left:263px;bottom:110px;animation-delay:0.3s;animation-duration:1.8s;width:7px;height:6px;"></div><div class="particle" style="left:309px;bottom:234px;animation-delay:1.5s;animation-duration:3.0s;width:8px;height:8px;"></div><div class="particle" style="left:132px;bottom:202px;animation-delay:0.5s;animation-duration:1.5s;width:5px;height:5px;"></div><div class="particle" style="left:324px;bottom:289px;animation-delay:1.9s;animation-duration:2.0s;width:8px;height:5px;"></div><div class="particle" style="left:263px;bottom:249px;animation-delay:0.9s;animation-duration:2.6s;width:6px;height:3px;"></div><div class="particle" style="left:264px;bottom:105px;animation-delay:0.8s;animation-duration:2.7s;width:5px;height:7px;"></div><div class="particle" style="left:105px;bottom:247px;animation-delay:1.4s;animation-duration:1.6s;width:8px;height:6px;"></div>
+  <!-- SVG warrior -->
+  <svg class="warrior" viewBox="0 0 300 420" width="300">
+    <!-- Ground rings -->
+    <ellipse cx="150" cy="410" rx="130" ry="12" fill="#FF4444" opacity="0.3"/>
+    <ellipse cx="150" cy="410" rx="90" ry="8" fill="#FF4444" opacity="0.5"/>
+    <!-- Legs -->
+    <path d="M130,310 L115,375 L108,408" stroke="#880000" stroke-width="22" stroke-linecap="round" fill="none"/>
+    <path d="M170,310 L185,372 L192,405" stroke="#880000" stroke-width="22" stroke-linecap="round" fill="none"/>
+    <!-- Boots -->
+    <ellipse cx="105" cy="411" rx="20" ry="9" fill="#222"/>
+    <ellipse cx="195" cy="408" rx="20" ry="9" fill="#222"/>
+    <!-- Body -->
+    <rect x="120" y="230" width="60" height="82" rx="13" fill="#880000"/>
+    <!-- Belt -->
+    <rect x="115" y="298" width="70" height="18" rx="6" fill="#333"/>
+    <!-- Arms (fists down) -->
+    <path d="M120,245 L92,285 L76,322" stroke="#C68642" stroke-width="17" stroke-linecap="round" fill="none"/>
+    <path d="M180,245 L208,285 L224,322" stroke="#C68642" stroke-width="17" stroke-linecap="round" fill="none"/>
+    <rect x="64" y="315" width="20" height="18" rx="5" fill="#C68642"/>
+    <rect x="216" y="315" width="20" height="18" rx="5" fill="#C68642"/>
+    <!-- Head -->
+    <circle cx="150" cy="180" r="44" fill="#C68642"/>
+    <!-- Eyes glowing -->
+    <ellipse cx="134" cy="177" rx="8" ry="6" fill="white"/>
+    <circle cx="136" cy="177" r="4" fill="#FF4444"/>
+    <ellipse cx="166" cy="177" rx="8" ry="6" fill="white"/>
+    <circle cx="168" cy="177" r="4" fill="#FF4444"/>
+    <!-- Screaming mouth -->
+    <path d="M134,200 Q150,214 166,200" fill="#333" stroke="#111" stroke-width="1"/>
+    <!-- Spikey hair (animated) -->
+    <g class="hair-rise" style="animation:hair-rise 0.8s ease-in-out infinite;">
+      <path d="M108,175 Q105,145 112,118 L122,148 L118,165Z" fill="#CC0000"/>
+      <path d="M120,168 Q115,132 125,105 L137,138 L130,162Z" fill="#CC0000"/>
+      <path d="M134,164 Q133,122 146,96 L155,130 L148,158Z" fill="#CC0000"/>
+      <path d="M150,162 Q154,118 165,94 L170,128 L162,156Z" fill="#CC0000"/>
+      <path d="M164,166 Q172,130 180,110 L182,140 L174,162Z" fill="#CC0000"/>
+      <path d="M176,172 Q188,140 194,124 L192,152 L184,168Z" fill="#CC0000"/>
+    </g>
+    <!-- Aura flames (static in SVG, animated via CSS on parent) -->
+    <path d="M150,140 Q135,100 132,60 Q145,95 150,118 Q155,95 168,60 Q165,100 150,140Z" fill="#FF4444" opacity="0.7"/>
+    <path d="M120,160 Q100,120 98,75 Q112,110 118,138Z" fill="#FF4444" opacity="0.5"/>
+    <path d="M180,160 Q200,120 202,75 Q188,110 182,138Z" fill="#FF4444" opacity="0.5"/>
+  </svg>
+  <!-- Lightning bolts -->
+  <svg class="bolt" style="top:0;left:0;width:400px;height:550px;animation-delay:0s;">
+    <path d="M80,50 L72,120 L90,108 L78,180" stroke="#FF4444" stroke-width="3" fill="none" stroke-linecap="round"/>
+  </svg>
+  <svg class="bolt" style="top:0;left:0;width:400px;height:550px;animation-delay:0.4s;">
+    <path d="M320,80 L328,148 L312,138 L322,205" stroke="#FF4444" stroke-width="2" fill="none" stroke-linecap="round"/>
+  </svg>
+  <svg class="bolt" style="top:0;left:0;width:400px;height:550px;animation-delay:0.7s;">
+    <path d="M160,20 L153,75 L168,66 L158,120" stroke="white" stroke-width="1.5" fill="none" stroke-linecap="round" opacity="0.6"/>
+  </svg>
+</div>
+</body></html>

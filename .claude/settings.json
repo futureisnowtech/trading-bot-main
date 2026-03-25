@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // .tool_response.filePath // \"\"' | { read -r f; [[ \"$f\" =~ ^/Users/joshmacbookair2020/Desktop/algo_trading_final/.*\\.py$ ]] && /Users/joshmacbookair2020/Desktop/algo_trading_final/scripts/reload_on_change.sh; } 2>/dev/null || true",
+            "timeout": 15,
+            "statusMessage": "Scheduling bot reload..."
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -23,10 +23,15 @@ REGIMES = {
 }
 
 
-def detect_regime(df: Optional[pd.DataFrame] = None, symbol: str = 'SPY') -> dict:
+def detect_regime(df: Optional[pd.DataFrame] = None, symbol: str = 'SPY',
+                  intraday: bool = False) -> dict:
     """
     Classify the current market regime using SPY (market proxy) or provided df.
     Returns: {'regime': str, 'description': str, 'adx': float, 'vix_proxy': float}
+
+    intraday=True: uses tighter BB-width threshold calibrated for crypto 5-min candles.
+      On 5-min crypto: bb_width 0.3–1.5% is normal. >1.2% = volatile, >0.6% = active.
+      On SPY daily:    bb_width 2–8% is normal.  >8%   = volatile.
     """
     try:
         if df is None:
@@ -50,10 +55,16 @@ def detect_regime(df: Optional[pd.DataFrame] = None, symbol: str = 'SPY') -> dic
         # Volatility proxy from BB width (replaces VIX)
         vix_proxy = bb_width * 100
 
+        # Threshold calibration:
+        # Daily SPY: normal bb_width ≈ 2–8%, so >8% = volatile
+        # Crypto 5-min: normal bb_width ≈ 0.3–1.0%, so >1.2% = volatile
+        volatile_bb_threshold  = 0.012 if intraday else 0.08
+        vix_volatile_threshold = 1.2   if intraday else 8.0
+
         # Classification logic
         if volume > 0 and vol_ma > 0 and (volume / vol_ma) < 0.5:
             regime = 'low_liquidity'
-        elif bb_width > 0.08 or vix_proxy > 8:
+        elif bb_width > volatile_bb_threshold or vix_proxy > vix_volatile_threshold:
             regime = 'volatile'
         elif adx > 25 and close > ema20 > ema50:
             regime = 'trending_up'

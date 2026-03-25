@@ -46,12 +46,17 @@ def init_db() -> None:
         stop REAL NOT NULL, target REAL NOT NULL,
         high_since_entry REAL NOT NULL, ts_entry TEXT NOT NULL,
         paper INTEGER NOT NULL, direction TEXT DEFAULT 'LONG',
+        entry_reason TEXT DEFAULT '',
         PRIMARY KEY (symbol, strategy, paper)
     )""")
-    try:
-        cur.execute("ALTER TABLE open_positions ADD COLUMN direction TEXT DEFAULT 'LONG'")
-    except Exception:
-        pass
+    for migration in [
+        "ALTER TABLE open_positions ADD COLUMN direction TEXT DEFAULT 'LONG'",
+        "ALTER TABLE open_positions ADD COLUMN entry_reason TEXT DEFAULT ''",
+    ]:
+        try:
+            cur.execute(migration)
+        except Exception:
+            pass
 
     cur.execute("""CREATE TABLE IF NOT EXISTS signals (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -97,6 +102,22 @@ def log_trade(strategy, broker, symbol, action, order_type,
     value_usd = qty * price
     conn = _conn()
     cur = conn.cursor()
+
+    # Dedup guard: if an identical close (SELL/BUY with P&L) for this symbol+strategy
+    # was already logged within the last 90 seconds, skip. Prevents double-logging
+    # caused by the kill window between log_trade and delete_position on restart.
+    if pnl_usd != 0:
+        cur.execute("""
+            SELECT id FROM trades
+            WHERE symbol=? AND strategy=? AND action=? AND paper=?
+              AND ABS(qty - ?) < 0.000001
+              AND ts >= datetime('now', '-90 seconds')
+            LIMIT 1
+        """, (symbol, strategy, action, int(paper), qty))
+        if cur.fetchone():
+            conn.close()
+            return -1  # silently skip duplicate
+
     cur.execute("""INSERT INTO trades
         (ts,strategy,broker,symbol,action,order_type,qty,price,value_usd,
          fee_usd,pnl_usd,paper,order_id,notes)
@@ -158,13 +179,15 @@ def log_api_cost(call_type, input_tokens, output_tokens, cost_usd, symbol='') ->
 # ─── Position persistence ─────────────────────────────────────────────────────
 
 def persist_position(symbol, strategy, qty, entry, stop, target,
-                     high_since_entry, ts_entry, paper=True, direction='LONG') -> None:
+                     high_since_entry, ts_entry, paper=True,
+                     direction='LONG', entry_reason='') -> None:
     """Write open position to DB so restarts can recover it."""
     conn = _conn()
     conn.cursor().execute("""INSERT OR REPLACE INTO open_positions
-        (symbol,strategy,qty,entry,stop,target,high_since_entry,ts_entry,paper,direction)
-        VALUES (?,?,?,?,?,?,?,?,?,?)""",
-        (symbol, strategy, qty, entry, stop, target, high_since_entry, ts_entry, int(paper), direction))
+        (symbol,strategy,qty,entry,stop,target,high_since_entry,ts_entry,paper,direction,entry_reason)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+        (symbol, strategy, qty, entry, stop, target, high_since_entry, ts_entry,
+         int(paper), direction, entry_reason or ''))
     conn.commit()
     conn.close()
 
@@ -296,17 +319,80 @@ def get_all_time_stats(paper=True) -> dict:
         MIN(pnl_usd) as worst_trade
         FROM trades WHERE paper=? AND pnl_usd != 0""", (int(paper),))
     row = cur.fetchone()
+    # Total fees across ALL trades (BUY + SELL both have fees)
+    cur.execute("SELECT COALESCE(SUM(fee_usd), 0) FROM trades WHERE paper=?", (int(paper),))
+    total_fees = float(cur.fetchone()[0])
     conn.close()
     if not row or not row[0]:
         return {'total': 0, 'wins': 0, 'losses': 0, 'total_pnl': 0,
-                'best_trade': 0, 'worst_trade': 0, 'win_rate': 0}
+                'total_fees': 0, 'best_trade': 0, 'worst_trade': 0, 'win_rate': 0}
     total = row[0] or 0
     wins = row[1] or 0
     return {
         'total': total, 'wins': wins, 'losses': row[2] or 0,
-        'total_pnl': row[3] or 0, 'best_trade': row[4] or 0,
-        'worst_trade': row[5] or 0,
+        'total_pnl': row[3] or 0, 'total_fees': total_fees,
+        'best_trade': row[4] or 0, 'worst_trade': row[5] or 0,
         'win_rate': wins / total if total > 0 else 0,
+    }
+
+
+def get_kelly_stats(strategy: str = None, paper: bool = True, window: int = 50) -> dict:
+    """
+    Compute rolling Kelly fraction from the last `window` closed trades.
+
+    Returns:
+      kelly_full  — f* = p - q/b  (raw Kelly fraction, can be negative)
+      kelly_25pct — 25% fractional Kelly (use this for sizing)
+      win_rate    — win rate in the window
+      avg_win     — avg winning trade $
+      avg_loss    — avg losing trade $ (absolute value)
+      b_ratio     — avg_win / avg_loss (payoff ratio)
+      n_trades    — number of trades in window
+    """
+    conn = _conn()
+    cur = conn.cursor()
+    if strategy:
+        cur.execute(
+            "SELECT pnl_usd FROM trades WHERE paper=? AND strategy=? AND pnl_usd != 0 "
+            "ORDER BY ts DESC LIMIT ?",
+            (int(paper), strategy, window)
+        )
+    else:
+        cur.execute(
+            "SELECT pnl_usd FROM trades WHERE paper=? AND pnl_usd != 0 "
+            "ORDER BY ts DESC LIMIT ?",
+            (int(paper), window)
+        )
+    rows = [r[0] for r in cur.fetchall()]
+    conn.close()
+
+    _default = {'kelly_full': 0.0, 'kelly_25pct': 0.0, 'win_rate': 0.0,
+                'avg_win': 0.0, 'avg_loss': 0.0, 'b_ratio': 1.0, 'n_trades': 0}
+    if len(rows) < 10:   # need at least 10 trades for meaningful Kelly
+        return _default
+
+    wins   = [r for r in rows if r > 0]
+    losses = [r for r in rows if r < 0]
+    if not wins or not losses:
+        return _default
+
+    p = len(wins) / len(rows)
+    q = 1.0 - p
+    avg_win  = sum(wins)  / len(wins)
+    avg_loss = abs(sum(losses) / len(losses))
+    b = avg_win / avg_loss if avg_loss > 0 else 1.0
+
+    kelly_full = p - q / b
+    kelly_25pct = max(0.0, kelly_full * 0.25)  # floor at 0 (never negative size)
+
+    return {
+        'kelly_full':   round(kelly_full, 4),
+        'kelly_25pct':  round(kelly_25pct, 4),
+        'win_rate':     round(p, 4),
+        'avg_win':      round(avg_win, 4),
+        'avg_loss':     round(avg_loss, 4),
+        'b_ratio':      round(b, 4),
+        'n_trades':     len(rows),
     }
 
 
@@ -338,24 +424,83 @@ def get_today_stats(paper=True) -> dict:
     today = datetime.now(pytz.timezone(MARKET_TIMEZONE)).strftime('%Y-%m-%d')
     conn = _conn()
     cur = conn.cursor()
+    # Closed trade counts and gross P&L — only rows with actual P&L
     cur.execute("""SELECT
         COUNT(*) as total,
         SUM(CASE WHEN pnl_usd>0 THEN 1 ELSE 0 END) as wins,
         SUM(CASE WHEN pnl_usd<0 THEN 1 ELSE 0 END) as losses,
-        COALESCE(SUM(pnl_usd), 0) as gross_pnl,
-        COALESCE(SUM(fee_usd), 0) as total_fees
+        COALESCE(SUM(pnl_usd), 0) as gross_pnl
         FROM trades WHERE ts LIKE ? AND paper=? AND pnl_usd != 0""",
         (f'{today}%', int(paper)))
     row = cur.fetchone()
+    # Fees across ALL trades today (BUY + SELL both charged fees)
+    cur.execute(
+        "SELECT COALESCE(SUM(fee_usd), 0) FROM trades WHERE ts LIKE ? AND paper=?",
+        (f'{today}%', int(paper)))
+    fees = float(cur.fetchone()[0])
     conn.close()
     total = row[0] or 0
     wins  = row[1] or 0
-    gross = row[3] or 0.0
-    fees  = row[4] or 0.0
+    gross = float(row[3] or 0.0)
     return {
         'total': total, 'wins': wins, 'losses': row[2] or 0,
         'win_rate': wins / total if total > 0 else 0.0,
         'gross_pnl': gross, 'fees': fees, 'net_pnl': gross - fees,
+    }
+
+
+def get_tax_summary(paper: bool = False) -> dict:
+    """
+    Pull all realized P&L data for tax calculations.
+    Separates gains from losses, groups by asset class and year.
+    Uses paper=False by default — live trades are what matter for taxes.
+    """
+    conn = _conn()
+    cur = conn.cursor()
+
+    # All closed trades with P&L — both gains and losses
+    cur.execute("""
+        SELECT ts, strategy, symbol, pnl_usd, fee_usd, value_usd
+        FROM trades
+        WHERE paper=? AND pnl_usd != 0
+        ORDER BY ts ASC
+    """, (int(paper),))
+    rows = [dict(r) for r in cur.fetchall()]
+
+    # Annual breakdown
+    annual: dict = {}
+    for r in rows:
+        year = r['ts'][:4]
+        if year not in annual:
+            annual[year] = {'gains': 0.0, 'losses': 0.0, 'fees': 0.0,
+                            'trades': 0, 'crypto': 0.0, 'equity': 0.0}
+        pnl = float(r['pnl_usd'] or 0)
+        fee = float(r['fee_usd'] or 0)
+        annual[year]['trades'] += 1
+        annual[year]['fees'] += fee
+        if pnl > 0:
+            annual[year]['gains'] += pnl
+        else:
+            annual[year]['losses'] += pnl
+        if 'crypto' in r.get('strategy', ''):
+            annual[year]['crypto'] += pnl
+        else:
+            annual[year]['equity'] += pnl
+
+    total_gains  = sum(v['gains']  for v in annual.values())
+    total_losses = sum(v['losses'] for v in annual.values())
+    total_fees   = sum(v['fees']   for v in annual.values())
+    net_pnl      = total_gains + total_losses  # losses are negative
+
+    conn.close()
+    return {
+        'rows': rows,
+        'annual': annual,
+        'total_gains': total_gains,
+        'total_losses': total_losses,
+        'total_fees': total_fees,
+        'net_pnl': net_pnl,
+        'total_trades': len(rows),
     }
 
 
@@ -369,6 +514,74 @@ def get_recent_notifications(limit=30) -> list:
     rows = [dict(r) for r in cur.fetchall()]
     conn.close()
     return rows
+
+
+def get_scan_feed(limit=40) -> list:
+    """Return recent scan activity log entries (source='scan_feed'), newest first."""
+    conn = _conn()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT ts, message FROM system_events WHERE source='scan_feed' ORDER BY ts DESC LIMIT ?",
+        (limit,))
+    rows = [{'ts': r[0], 'message': r[1]} for r in cur.fetchall()]
+    conn.close()
+    return rows
+
+
+def get_performance_attribution(paper=True, lookback_days=30) -> dict:
+    """
+    Break down P&L, win rate, and trade count by strategy.
+    Returns: {strategy_name: {total, wins, losses, win_rate, total_pnl, avg_pnl}}
+    """
+    from datetime import timedelta
+    cutoff = (datetime.now(pytz.timezone(MARKET_TIMEZONE)) -
+              timedelta(days=lookback_days)).strftime('%Y-%m-%d')
+    conn = _conn()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT strategy,
+               COUNT(*)                                    AS total,
+               SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END) AS wins,
+               COALESCE(SUM(pnl_usd), 0)                  AS total_pnl,
+               COALESCE(AVG(pnl_usd), 0)                  AS avg_pnl
+        FROM trades
+        WHERE paper=? AND pnl_usd != 0 AND ts >= ?
+        GROUP BY strategy
+        ORDER BY total_pnl DESC
+    """, (int(paper), cutoff))
+    rows = cur.fetchall()
+    conn.close()
+    result = {}
+    for r in rows:
+        total = r[1] or 0
+        wins  = r[2] or 0
+        result[r[0]] = {
+            'total': total,
+            'wins':  wins,
+            'losses': total - wins,
+            'win_rate': wins / total if total > 0 else 0.0,
+            'total_pnl': float(r[3]),
+            'avg_pnl':   float(r[4]),
+        }
+    return result
+
+
+def get_strategy_consecutive_losses(strategy: str, paper=True) -> int:
+    """Return the current consecutive loss streak for a strategy (most recent trades first)."""
+    conn = _conn()
+    cur = conn.cursor()
+    cur.execute("""SELECT pnl_usd FROM trades
+        WHERE strategy=? AND paper=? AND pnl_usd != 0
+        ORDER BY ts DESC LIMIT 20""", (strategy, int(paper)))
+    rows = cur.fetchall()
+    conn.close()
+    streak = 0
+    for r in rows:
+        if r[0] < 0:
+            streak += 1
+        else:
+            break
+    return streak
 
 
 def _csv_append(ts, strategy, broker, symbol, action, order_type,

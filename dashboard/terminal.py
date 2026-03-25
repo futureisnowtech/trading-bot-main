@@ -67,8 +67,9 @@ def _cell(text: str, width: int, align: str = 'left') -> str:
 
 # ── Box-drawing primitives ────────────────────────────────────────────────────
 
-def _top() -> str:
-    return '┌' + '─' * LW + '┬' + '─' * RW + '┐'
+def _split_open() -> str:
+    """Transition from full-width row into two-column section."""
+    return '├' + '─' * LW + '┬' + '─' * RW + '┤'
 
 def _bottom() -> str:
     return '└' + '─' * LW + '┴' + '─' * RW + '┘'
@@ -87,6 +88,14 @@ def _full_mid() -> str:
 
 def _row(left: str, right: str) -> str:
     return '│' + _pad(left, LW) + '│' + _pad(right, RW) + '│'
+
+
+def _ts(raw: str) -> str:
+    """Extract HH:MM:SS from any ISO timestamp."""
+    try:
+        return raw.split('T')[1][:8] if 'T' in raw else raw[-8:]
+    except Exception:
+        return raw[-8:] if len(raw) >= 8 else raw
 
 def _full_row(content: str) -> str:
     return '│' + _pad(content, W - 2) + '│'
@@ -245,7 +254,7 @@ def _trades_panel(d: dict, n_rows: int) -> list:
     for t in d['recent_trades']:
         act    = t.get('action', '')
         pnl    = t.get('pnl_usd', 0)
-        ts     = t.get('ts', '')[-19:-4]
+        ts     = _ts(t.get('ts', ''))
         sym    = t.get('symbol', '')
         strat  = t.get('strategy', '')[:12]
         if act == 'SELL' or (act == 'BUY' and pnl != 0):
@@ -268,7 +277,7 @@ def _signals_panel(d: dict, n_rows: int) -> list:
         sig  = s.get('signal', 'HOLD')
         sym  = s.get('symbol', '')
         conf = s.get('confidence', 0)
-        ts   = s.get('ts', '')[-19:-14]
+        ts   = _ts(s.get('ts', ''))
         rsn  = s.get('reason', '')[:55]
         acted = '✓' if s.get('acted_on') else ' '
         if sig == 'BUY':
@@ -297,7 +306,7 @@ def _debate_panel(d: dict, n_rows: int) -> list:
     if db:
         sig    = db.get('final_signal', '?')
         sym    = db.get('symbol', '?')
-        ts     = db.get('ts', '')[-19:-4]
+        ts     = _ts(db.get('ts', ''))
         bv     = db.get('buy_votes', 0)
         hv     = db.get('hold_votes', 0)
         sv     = db.get('sell_votes', 0)
@@ -329,7 +338,7 @@ def _events_panel(d: dict, n_rows: int) -> list:
         lvl = e.get('level', 'INFO')
         src = e.get('source', '')[:14]
         msg = e.get('message', '')[:72]
-        ts  = e.get('ts', '')[-19:-4]
+        ts  = _ts(e.get('ts', ''))
         if lvl in ('ERROR', 'HALT'):
             icon = f"{RED}❌{RST}"
         elif lvl == 'WARNING':
@@ -378,24 +387,24 @@ def render(data: dict = None) -> None:
 
     # Row 2: Positions (left) | Stats (right) — 6 content rows
     N2 = 6
-    lines.append(_top())
+    lines.append(_split_open())
     for l, r in zip(_positions_panel(data, N2), _stats_panel(data, N2)):
         lines.append(_row(l, r))
 
     # Row 3: Recent trades | Signals — 7 content rows
     N3 = 7
-    lines.append(_mid())
+    lines.append(_mid())   # ├──────────┼──────────┤
     for l, r in zip(_trades_panel(data, N3), _signals_panel(data, N3)):
         lines.append(_row(l, r))
 
     # Row 4: Debate | Events — 6 content rows
     N4 = 6
-    lines.append(_mid())
+    lines.append(_mid())   # ├──────────┼──────────┤
     for l, r in zip(_debate_panel(data, N4), _events_panel(data, N4)):
         lines.append(_row(l, r))
 
-    # Bottom bar
-    lines.append(_full_mid())
+    # Close two-column section, then bottom bar (full-width again)
+    lines.append('├' + '─' * LW + '┴' + '─' * RW + '┤')
     lines += _bottom_bar(data)
 
     sys.stdout.write('\n'.join(lines) + '\n')

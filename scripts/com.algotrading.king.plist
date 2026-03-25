@@ -27,8 +27,10 @@
 
     <key>ProgramArguments</key>
     <array>
-        <string>/bin/bash</string>
-        <string>/Users/joshmacbookair2020/Desktop/algo_trading_final/scripts/start_bot.sh</string>
+        <string>/Library/Frameworks/Python.framework/Versions/3.14/bin/python3</string>
+        <string>/Users/joshmacbookair2020/Desktop/algo_trading_final/main.py</string>
+        <string>--mode</string>
+        <string>paper</string>
     </array>
 
     <key>WorkingDirectory</key>
@@ -42,9 +44,9 @@
     <key>RunAtLoad</key>
     <true/>
 
-    <!-- Wait 10 seconds before restarting after a crash -->
+    <!-- Wait 30 seconds before restarting after a crash (prevents .pyc lock contention) -->
     <key>ThrottleInterval</key>
-    <integer>10</integer>
+    <integer>30</integer>
 
     <!-- Capture logs -->
     <key>StandardOutPath</key>
@@ -57,6 +59,11 @@
     <dict>
         <key>PATH</key>
         <string>/Library/Frameworks/Python.framework/Versions/3.14/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <!-- Disable tqdm progress bars — prevents OSError [Errno 11] deadlock in launchd (no TTY) -->
+        <key>TQDM_DISABLE</key>
+        <string>1</string>
+        <key>TOKENIZERS_PARALLELISM</key>
+        <string>false</string>
     </dict>
 </dict>
 </plist>

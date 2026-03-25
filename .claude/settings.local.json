@@ -14,7 +14,12 @@
       "Bash(pip show:*)",
       "Bash(pip list:*)",
       "Bash(kill %2)",
-      "Bash(pip install:*)"
+      "Bash(pip install:*)",
+      "Bash(sed -i '' 's/^CRYPTO_POSITION_SIZE_USD=500$/CRYPTO_POSITION_SIZE_USD=250/' /Users/joshmacbookair2020/Desktop/algo_trading_final/.env)",
+      "Bash(sed -i '' 's/^EQUITY_POSITION_SIZE_USD=500$/EQUITY_POSITION_SIZE_USD=250/' /Users/joshmacbookair2020/Desktop/algo_trading_final/.env)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(bash /Users/joshmacbookair2020/Desktop/algo_trading_final/scripts/install_hooks.sh)"
     ]
   }
 }

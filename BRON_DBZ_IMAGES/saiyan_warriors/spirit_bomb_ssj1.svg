@@ -1,0 +1,84 @@
+<svg viewBox="0 0 520 600" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="sbglow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="white"/>
+      <stop offset="30%" stop-color="#AADDFF"/>
+      <stop offset="65%" stop-color="#4499FF"/>
+      <stop offset="100%" stop-color="#0044BB" stop-opacity="0.3"/>
+    </radialGradient>
+    <radialGradient id="sbbg" cx="50%" cy="40%" r="70%">
+      <stop offset="0%" stop-color="#001a33"/>
+      <stop offset="100%" stop-color="#000"/>
+    </radialGradient>
+  </defs>
+  <rect width="520" height="600" fill="url(#sbbg)"/>
+
+  <!-- Stars (spirit bomb draws energy from universe) -->
+  <circle cx="150" cy="186" r="2" fill="white" opacity="0.6"/><circle cx="43" cy="300" r="2" fill="white" opacity="0.5"/><circle cx="364" cy="270" r="2" fill="white" opacity="0.2"/><circle cx="497" cy="66" r="1" fill="white" opacity="0.4"/><circle cx="296" cy="216" r="2" fill="white" opacity="0.3"/><circle cx="8" cy="241" r="2" fill="white" opacity="0.5"/><circle cx="199" cy="120" r="1" fill="white" opacity="0.5"/><circle cx="459" cy="175" r="1" fill="white" opacity="0.3"/><circle cx="300" cy="26" r="2" fill="white" opacity="0.4"/><circle cx="63" cy="87" r="1" fill="white" opacity="0.3"/><circle cx="169" cy="206" r="2" fill="white" opacity="0.4"/><circle cx="351" cy="278" r="2" fill="white" opacity="0.5"/><circle cx="386" cy="197" r="1" fill="white" opacity="0.8"/><circle cx="10" cy="200" r="2" fill="white" opacity="0.3"/><circle cx="395" cy="26" r="1" fill="white" opacity="0.2"/><circle cx="176" cy="95" r="1" fill="white" opacity="0.6"/><circle cx="241" cy="203" r="1" fill="white" opacity="0.6"/><circle cx="261" cy="83" r="2" fill="white" opacity="0.4"/><circle cx="334" cy="276" r="1" fill="white" opacity="0.8"/><circle cx="486" cy="219" r="1" fill="white" opacity="0.4"/><circle cx="260" cy="196" r="1" fill="white" opacity="0.8"/><circle cx="404" cy="139" r="2" fill="white" opacity="0.5"/><circle cx="326" cy="121" r="1" fill="white" opacity="0.4"/><circle cx="73" cy="291" r="2" fill="white" opacity="0.3"/><circle cx="229" cy="262" r="2" fill="white" opacity="0.4"/><circle cx="464" cy="279" r="1" fill="white" opacity="0.3"/><circle cx="20" cy="135" r="2" fill="white" opacity="0.3"/><circle cx="173" cy="101" r="1" fill="white" opacity="0.4"/><circle cx="179" cy="222" r="2" fill="white" opacity="0.4"/><circle cx="244" cy="36" r="2" fill="white" opacity="0.7"/><circle cx="382" cy="142" r="2" fill="white" opacity="0.2"/><circle cx="417" cy="166" r="2" fill="white" opacity="0.7"/><circle cx="467" cy="154" r="2" fill="white" opacity="0.7"/><circle cx="496" cy="168" r="1" fill="white" opacity="0.5"/><circle cx="44" cy="47" r="2" fill="white" opacity="0.5"/><circle cx="439" cy="292" r="2" fill="white" opacity="0.5"/><circle cx="480" cy="71" r="2" fill="white" opacity="0.3"/><circle cx="33" cy="97" r="2" fill="white" opacity="0.3"/><circle cx="239" cy="215" r="2" fill="white" opacity="0.8"/><circle cx="242" cy="3" r="2" fill="white" opacity="0.3"/><circle cx="518" cy="34" r="2" fill="white" opacity="0.3"/><circle cx="266" cy="107" r="2" fill="white" opacity="0.4"/><circle cx="174" cy="269" r="2" fill="white" opacity="0.4"/><circle cx="22" cy="11" r="2" fill="white" opacity="0.6"/><circle cx="95" cy="86" r="1" fill="white" opacity="0.3"/><circle cx="292" cy="72" r="1" fill="white" opacity="0.5"/><circle cx="197" cy="9" r="2" fill="white" opacity="0.7"/><circle cx="14" cy="138" r="1" fill="white" opacity="0.5"/><circle cx="304" cy="12" r="1" fill="white" opacity="0.7"/><circle cx="50" cy="223" r="1" fill="white" opacity="0.2"/><circle cx="2" cy="279" r="1" fill="white" opacity="0.4"/><circle cx="229" cy="63" r="1" fill="white" opacity="0.4"/><circle cx="352" cy="234" r="2" fill="white" opacity="0.6"/><circle cx="118" cy="189" r="1" fill="white" opacity="0.7"/><circle cx="418" cy="202" r="2" fill="white" opacity="0.6"/>
+
+  <!-- Energy streams flowing toward bomb from all directions -->
+  <path d="M560,150 Q397,170 260,150" stroke="#88DDFF" stroke-width="1.5" fill="none" opacity="0.2" stroke-dasharray="6,4"/><path d="M538,247 Q378,213 260,150" stroke="#88DDFF" stroke-width="2.0" fill="none" opacity="0.6" stroke-dasharray="6,4"/><path d="M475,330 Q342,247 260,150" stroke="#88DDFF" stroke-width="2.5" fill="none" opacity="0.2" stroke-dasharray="6,4"/><path d="M382,387 Q293,266 260,150" stroke="#88DDFF" stroke-width="1.5" fill="none" opacity="0.6" stroke-dasharray="6,4"/><path d="M270,409 Q240,268 260,150" stroke="#88DDFF" stroke-width="2.0" fill="none" opacity="0.2" stroke-dasharray="6,4"/><path d="M157,394 Q190,253 260,150" stroke="#88DDFF" stroke-width="2.5" fill="none" opacity="0.6" stroke-dasharray="6,4"/><path d="M59,343 Q149,223 260,150" stroke="#88DDFF" stroke-width="1.5" fill="none" opacity="0.2" stroke-dasharray="6,4"/><path d="M-9,263 Q125,183 260,150" stroke="#88DDFF" stroke-width="2.0" fill="none" opacity="0.6" stroke-dasharray="6,4"/><path d="M-39,168 Q120,137 260,150" stroke="#88DDFF" stroke-width="2.5" fill="none" opacity="0.2" stroke-dasharray="6,4"/><path d="M-25,69 Q136,93 260,150" stroke="#88DDFF" stroke-width="1.5" fill="none" opacity="0.6" stroke-dasharray="6,4"/><path d="M30,-17 Q170,58 260,150" stroke="#88DDFF" stroke-width="2.0" fill="none" opacity="0.2" stroke-dasharray="6,4"/><path d="M119,-79 Q216,35 260,150" stroke="#88DDFF" stroke-width="2.5" fill="none" opacity="0.6" stroke-dasharray="6,4"/><path d="M228,-108 Q269,30 260,150" stroke="#88DDFF" stroke-width="1.5" fill="none" opacity="0.2" stroke-dasharray="6,4"/><path d="M342,-99 Q321,42 260,150" stroke="#88DDFF" stroke-width="2.0" fill="none" opacity="0.6" stroke-dasharray="6,4"/><path d="M444,-54 Q364,69 260,150" stroke="#88DDFF" stroke-width="2.5" fill="none" opacity="0.2" stroke-dasharray="6,4"/><path d="M519,19 Q391,108 260,150" stroke="#88DDFF" stroke-width="1.5" fill="none" opacity="0.6" stroke-dasharray="6,4"/><path d="M557,113 Q399,154 260,150" stroke="#88DDFF" stroke-width="2.0" fill="none" opacity="0.2" stroke-dasharray="6,4"/>
+
+  <!-- Outer glow rings -->
+  <circle cx="260" cy="150" r="135" fill="#4499FF" opacity="0.07"/>
+  <circle cx="260" cy="150" r="115" fill="#4499FF" opacity="0.1"/>
+  <circle cx="260" cy="150" r="100" fill="#4499FF" opacity="0.15"/>
+  <!-- Ring lines -->
+  <circle cx="260" cy="150" r="122" fill="none" stroke="#AADDFF" stroke-width="1.5" opacity="0.4"/>
+  <circle cx="260" cy="150" r="108" fill="none" stroke="#AADDFF" stroke-width="1" opacity="0.3"/>
+
+  <!-- Swirl lines on bomb surface -->
+  <path d="M338,150 Q305,195 260,228" stroke="#AADDFF" stroke-width="1.2" fill="none" opacity="0.4"/><path d="M299,217 Q243,212 192,189" stroke="#AADDFF" stroke-width="1.2" fill="none" opacity="0.4"/><path d="M221,217 Q197,166 192,111" stroke="#AADDFF" stroke-width="1.2" fill="none" opacity="0.4"/><path d="M182,150 Q214,104 260,72" stroke="#AADDFF" stroke-width="1.2" fill="none" opacity="0.4"/><path d="M220,82 Q276,87 327,110" stroke="#AADDFF" stroke-width="1.2" fill="none" opacity="0.4"/><path d="M299,82 Q322,133 327,188" stroke="#AADDFF" stroke-width="1.2" fill="none" opacity="0.4"/>
+
+  <!-- Main spirit bomb -->
+  <circle cx="260" cy="150" r="85" fill="url(#sbglow)"/>
+
+  <!-- Inner bright details -->
+  <circle cx="235" cy="125" r="28" fill="white" opacity="0.18"/>
+  <circle cx="230" cy="120" r="14" fill="white" opacity="0.3"/>
+  <circle cx="228" cy="118" r="6" fill="white" opacity="0.7"/>
+
+  <!-- Spark particles on surface -->
+  <circle cx="345" cy="150" r="4" fill="#AADDFF" opacity="1.0"/><circle cx="340" cy="176" r="5" fill="#AADDFF" opacity="0.7"/><circle cx="328" cy="199" r="2" fill="#AADDFF" opacity="0.7"/><circle cx="309" cy="218" r="4" fill="#AADDFF" opacity="0.9"/><circle cx="286" cy="230" r="4" fill="#AADDFF" opacity="0.6"/><circle cx="260" cy="235" r="4" fill="#AADDFF" opacity="1.0"/><circle cx="233" cy="230" r="2" fill="#AADDFF" opacity="0.9"/><circle cx="210" cy="218" r="4" fill="#AADDFF" opacity="0.6"/><circle cx="191" cy="199" r="5" fill="#AADDFF" opacity="0.8"/><circle cx="179" cy="176" r="4" fill="#AADDFF" opacity="0.8"/><circle cx="175" cy="150" r="3" fill="#AADDFF" opacity="0.7"/><circle cx="179" cy="123" r="2" fill="#AADDFF" opacity="1.0"/><circle cx="191" cy="100" r="5" fill="#AADDFF" opacity="0.9"/><circle cx="210" cy="81" r="4" fill="#AADDFF" opacity="0.8"/><circle cx="233" cy="69" r="2" fill="#AADDFF" opacity="0.7"/><circle cx="260" cy="65" r="5" fill="#AADDFF" opacity="0.9"/><circle cx="286" cy="69" r="2" fill="#AADDFF" opacity="0.7"/><circle cx="309" cy="81" r="2" fill="#AADDFF" opacity="0.6"/><circle cx="328" cy="100" r="4" fill="#AADDFF" opacity="0.8"/><circle cx="340" cy="123" r="5" fill="#AADDFF" opacity="0.5"/>
+
+  <!-- Warrior below holding up -->
+  <!-- Arms raised -->
+  <path d="M190,370 L222,330 L248,295" stroke="#FDBCB4" stroke-width="18" stroke-linecap="round" fill="none"/>
+  <path d="M330,370 L298,330 L272,295" stroke="#FDBCB4" stroke-width="18" stroke-linecap="round" fill="none"/>
+  <!-- Hands -->
+  <circle cx="250" cy="290" r="14" fill="#FDBCB4"/>
+  <circle cx="270" cy="290" r="14" fill="#FDBCB4"/>
+
+  <!-- Body -->
+  <rect x="188" y="330" width="64" height="80" rx="14" fill="#FF6600"/>
+  <rect x="182" y="400" width="76" height="48" rx="10" fill="#CC3300"/>
+  <rect x="178" y="415" width="84" height="12" rx="5" fill="#333"/>
+
+  <!-- Legs -->
+  <path d="M196,446 L184,510 L178,555" stroke="#FDBCB4" stroke-width="22" stroke-linecap="round" fill="none"/>
+  <path d="M244,446 L256,510 L262,555" stroke="#FDBCB4" stroke-width="22" stroke-linecap="round" fill="none"/>
+  <ellipse cx="175" cy="558" rx="22" ry="10" fill="#222"/>
+  <ellipse cx="264" cy="557" rx="22" ry="10" fill="#222"/>
+
+  <!-- Head looking up -->
+  <circle cx="220" cy="305" r="38" fill="#FDBCB4" stroke="#1a1a1a" stroke-width="1.5" transform="rotate(-20,220,305)"/>
+  <!-- Eyes looking up -->
+  <ellipse cx="210" cy="297" rx="7" ry="5" fill="white" transform="rotate(-20,220,305)"/>
+  <circle cx="211" cy="296" r="3.5" fill="#22CC22" transform="rotate(-20,220,305)"/>
+  <ellipse cx="230" cy="293" rx="7" ry="5" fill="white" transform="rotate(-20,220,305)"/>
+  <circle cx="231" cy="292" r="3.5" fill="#22CC22" transform="rotate(-20,220,305)"/>
+  <!-- Mouth open (focused) -->
+  <path d="M208,314 Q220,320 232,314" fill="#333" transform="rotate(-20,220,305)"/>
+
+  <!-- Spiky hair -->
+  <path d="M207,280 L211,225 L215,221 L219,225 L219,280Z" fill="#FFD700" stroke="#FFD700" stroke-width="0.5"/><path d="M211,280 L228,219 L232,215 L236,219 L221,280Z" fill="#FFD700" stroke="#FFD700" stroke-width="0.5"/><path d="M215,280 L238,217 L242,213 L246,217 L223,280Z" fill="#FFD700" stroke="#FFD700" stroke-width="0.5"/><path d="M219,280 L257,240 L261,236 L265,240 L225,280Z" fill="#FFD700" stroke="#FFD700" stroke-width="0.5"/><path d="M223,280 L257,247 L261,243 L265,247 L227,280Z" fill="#FFD700" stroke="#FFD700" stroke-width="0.5"/><path d="M227,280 L189,212 L193,208 L197,212 L229,280Z" fill="#FFD700" stroke="#FFD700" stroke-width="0.5"/>
+
+  <!-- Level badge -->
+  <rect x="420" y="14" width="82" height="30" rx="8" fill="#FFD700" opacity="0.9"/>
+  <text x="461" y="34" text-anchor="middle" font-size="13" font-weight="bold" fill="black" font-family="Arial Black,sans-serif">SPIRIT BOMB</text>
+  <rect x="420" y="50" width="82" height="24" rx="6" fill="#FFD700" opacity="0.7"/>
+  <text x="461" y="66" text-anchor="middle" font-size="12" font-weight="bold" fill="black" font-family="Arial Black,sans-serif">SSJ</text>
+
+  <!-- Ground shockwave -->
+  <ellipse cx="220" cy="568" rx="130" ry="14" fill="#4499FF" opacity="0.2"/>
+</svg>

@@ -1,0 +1,16 @@
+<svg viewBox="0 0 600 400" xmlns="http://www.w3.org/2000/svg">
+  <!-- Dashboard frame with lightning -->
+  <rect x="3" y="3" width="594" height="394" rx="12" fill="none" stroke="#FF4444" stroke-width="2.5" opacity="0.8"/>
+  <rect x="8" y="8" width="584" height="384" rx="10" fill="none" stroke="#FF4444" stroke-width="1" opacity="0.3"/>
+  <!-- Corner accents -->
+  <rect x="3" y="3" width="40" height="6" rx="2" fill="#FF4444" opacity="0.9"/>
+  <rect x="3" y="3" width="6" height="40" rx="2" fill="#FF4444" opacity="0.9"/>
+  <rect x="557" y="3" width="40" height="6" rx="2" fill="#FF4444" opacity="0.9"/>
+  <rect x="591" y="3" width="6" height="40" rx="2" fill="#FF4444" opacity="0.9"/>
+  <rect x="3" y="391" width="40" height="6" rx="2" fill="#FF4444" opacity="0.9"/>
+  <rect x="3" y="357" width="6" height="40" rx="2" fill="#FF4444" opacity="0.9"/>
+  <rect x="557" y="391" width="40" height="6" rx="2" fill="#FF4444" opacity="0.9"/>
+  <rect x="591" y="357" width="6" height="40" rx="2" fill="#FF4444" opacity="0.9"/>
+  <!-- Lightning bolts -->
+  <path d="M208,0 L218,15 L229,43" stroke="#FF4444" stroke-width="3" fill="none" opacity="0.6" stroke-linecap="round"/><path d="M600,43 L568,51 L563,33" stroke="#FF4444" stroke-width="3" fill="none" opacity="0.4" stroke-linecap="round"/><path d="M465,400 L464,382 L482,351" stroke="#FF4444" stroke-width="2" fill="none" opacity="0.8" stroke-linecap="round"/><path d="M0,334 L6,345 L35,354" stroke="#FF4444" stroke-width="3" fill="none" opacity="0.6" stroke-linecap="round"/><path d="M489,0 L469,37 L464,46" stroke="#FF4444" stroke-width="3" fill="none" opacity="0.4" stroke-linecap="round"/><path d="M600,289 L591,276 L553,273" stroke="#FF4444" stroke-width="1" fill="none" opacity="0.4" stroke-linecap="round"/><path d="M309,400 L312,385 L317,343" stroke="#FF4444" stroke-width="2" fill="none" opacity="0.8" stroke-linecap="round"/><path d="M0,92 L26,84 L36,100" stroke="#FF4444" stroke-width="1" fill="none" opacity="0.5" stroke-linecap="round"/><path d="M295,0 L315,40 L315,53" stroke="#FF4444" stroke-width="3" fill="none" opacity="0.4" stroke-linecap="round"/><path d="M600,213 L582,221 L544,230" stroke="#FF4444" stroke-width="1" fill="none" opacity="0.5" stroke-linecap="round"/><path d="M246,400 L256,388 L261,365" stroke="#FF4444" stroke-width="2" fill="none" opacity="0.5" stroke-linecap="round"/><path d="M0,159 L19,141 L47,146" stroke="#FF4444" stroke-width="1" fill="none" opacity="0.6" stroke-linecap="round"/><path d="M265,0 L268,13 L278,23" stroke="#FF4444" stroke-width="1" fill="none" opacity="0.7" stroke-linecap="round"/><path d="M600,185 L576,180 L548,182" stroke="#FF4444" stroke-width="2" fill="none" opacity="0.6" stroke-linecap="round"/><path d="M269,400 L270,385 L266,379" stroke="#FF4444" stroke-width="3" fill="none" opacity="0.8" stroke-linecap="round"/><path d="M0,287 L5,278 L20,274" stroke="#FF4444" stroke-width="2" fill="none" opacity="0.9" stroke-linecap="round"/>
+</svg>

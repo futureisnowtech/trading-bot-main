@@ -4,9 +4,10 @@ strategies/ai_agents/exit_review.py
 AI-powered exit review using Claude's extended thinking (interleaved thinking).
 Runs on every candle close for every open position.
 
-Three exit agents — asymmetric by design:
-  ANY ONE saying EXIT → we exit.
-  Entering needs 5/8 to agree. Exiting needs only 1/3 to object.
+Three exit agents — P&L-aware thresholds:
+  Losing position (<+1% P&L): 1/3 agents EXIT → exit fast, don't let losers linger.
+  Winning position (≥+1% P&L): 2/3 agents EXIT → protect winners, don't cut early.
+  Entering needs 5/8 to agree. Exiting is calibrated to protect both capital and profits.
 
 Agents:
   Tudor Jones: "Is the stop still valid? Is momentum intact?"
@@ -75,8 +76,9 @@ def run_exit_review(
     """
     Run 3-agent exit review with extended thinking.
     Returns: {'should_exit': bool, 'reason': str, 'urgency': str, 'agent_reviews': list}
-    
-    ANY agent saying should_exit=True → exit.
+
+    Winners (pnl >= +1%): need 2/3 agents to exit — protect profits.
+    Losers (pnl < +1%): need 1/3 agents to exit — cut fast.
     """
     if not ANTHROPIC_API_KEY:
         return {'should_exit': False, 'reason': 'No API key', 'urgency': 'hold', 'agent_reviews': []}
@@ -113,22 +115,31 @@ def run_exit_review(
             status = '🔴 EXIT' if review.get('should_exit') else '🟢 HOLD'
             print(f"  [exit] {agent['name']:22} → {status} | {review.get('reasoning','')[:60]}")
 
-    # ANY one agent saying exit → exit (asymmetric)
-    if exit_votes:
+    total_agents = len(EXIT_AGENTS)
+    exit_count = len(exit_votes)
+
+    # P&L-aware exit threshold:
+    # Winning position (>+1%): require 2/3 agents to agree — don't cut winners short
+    # Losing position (<+1%): require only 1/3 — cut losers fast
+    is_winner = pnl_pct >= 1.0
+    votes_required = 2 if is_winner else 1
+
+    if exit_count >= votes_required:
         urgencies = [v.get('urgency', 'monitor') for v in exit_votes]
         urgency = 'immediate' if 'immediate' in urgencies else 'next_candle' if 'next_candle' in urgencies else 'monitor'
         reasons = ' | '.join(set(v.get('reasoning', '') for v in exit_votes))
         agents_exiting = [r['agent'] for r in agent_reviews if r.get('should_exit')]
+        threshold_note = f'{exit_count}/{total_agents} agree'
         return {
             'should_exit': True,
-            'reason': f"[{', '.join(agents_exiting)} says EXIT] {reasons}",
+            'reason': f"[{threshold_note}: {', '.join(agents_exiting)} EXIT] {reasons}",
             'urgency': urgency,
             'agent_reviews': agent_reviews,
         }
 
     return {
         'should_exit': False,
-        'reason': 'All 3 exit agents say hold',
+        'reason': f'Exit threshold not met ({exit_count}/{total_agents}, need {votes_required})',
         'urgency': 'hold',
         'agent_reviews': agent_reviews,
     }
@@ -221,7 +232,7 @@ Should we EXIT this position now?"""
         )
 
         thinking_text = ''
-        with urllib.request.urlopen(req, timeout=45) as resp:
+        with urllib.request.urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read().decode('utf-8'))
 
             # Extract thinking blocks

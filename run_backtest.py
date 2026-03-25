@@ -2,12 +2,13 @@
 run_backtest.py — Standalone backtest runner.
 
 Usage:
-  python run_backtest.py                    → BTC crypto, all 3 MACD variants
-  python run_backtest.py --strategy equity  → Equity momentum on SPY
-  python run_backtest.py --symbol AAPL      → Equity on AAPL
-  python run_backtest.py --symbol BTC-USD   → Crypto on BTC
-  python run_backtest.py --period 60d       → 60-day lookback
-  python run_backtest.py --variant sniper   → Only MACD sniper variant
+  python3 run_backtest.py                         → BTC crypto, all 3 MACD variants
+  python3 run_backtest.py --strategy equity       → Equity momentum on SPY
+  python3 run_backtest.py --symbol AAPL           → Equity on AAPL
+  python3 run_backtest.py --symbol BTC-USD        → Crypto on BTC
+  python3 run_backtest.py --period 60d            → 60-day lookback
+  python3 run_backtest.py --variant sniper        → Only MACD sniper variant
+  python3 run_backtest.py --oos                   → Chan out-of-sample 70/30 split
 
 Note on data limits:
   yfinance 5-min bars are only available for ~60 days.
@@ -25,6 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from backtesting.backtest_engine import (
     run_crypto_backtest, run_equity_backtest,
     optimize_crypto, optimize_equity,
+    run_backtest_oos_split,
 )
 
 
@@ -39,6 +41,8 @@ def main():
                         help='Sweep parameter combinations and write best to .env automatically')
     parser.add_argument('--dry-run', action='store_true',
                         help='With --optimize: show best params but do NOT write to .env')
+    parser.add_argument('--oos', action='store_true',
+                        help='Chan out-of-sample validation: 70%% train / 30%% test split')
     args = parser.parse_args()
 
     print(f"\n🧪 {'OPTIMIZER' if args.optimize else 'Backtest'} — strategy={args.strategy} cash=${args.cash:,.2f}\n")
@@ -65,6 +69,18 @@ def main():
             print("✅ Best params written to .env. Restart main.py to apply.\n")
         else:
             print("✅ Dry run complete — nothing written. Remove --dry-run to apply.\n")
+
+    elif args.oos:
+        # ── Chan out-of-sample validation ────────────────────────────────────
+        strat = 'equity' if args.strategy == 'equity' else 'crypto'
+        symbol = args.symbol or ('SPY' if strat == 'equity' else 'BTC-USD')
+        period = args.period or ('1y' if strat == 'equity' else '60d')
+        interval = '30m' if strat == 'equity' else '5m'
+        print(f"\n🔬 OOS VALIDATION: {symbol} | {period} | {interval} | 70/30 split")
+        run_backtest_oos_split(
+            symbol=symbol, strategy=strat, period=period, interval=interval,
+            cash=args.cash, commission=0.006, slippage=0.002,
+        )
 
     else:
         # ── Normal backtest mode ─────────────────────────────────────────────

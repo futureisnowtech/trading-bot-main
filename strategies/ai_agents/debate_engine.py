@@ -17,7 +17,8 @@ from strategies.ai_agents.analyst_agents import (
     run_agent, get_all_agents, call_claude_structured, AGENTS, AGENT_RESPONSE_SCHEMA
 )
 from strategies.ai_agents.regime_detector import detect_regime, get_regime_brief
-from config import MARKET_TIMEZONE, CLAUDE_MODEL, QUICK_DEBATE_AGENTS, FULL_DEBATE_MIN_AGREEMENT
+from config import (MARKET_TIMEZONE, CLAUDE_MODEL, QUICK_DEBATE_AGENTS,
+                    FULL_DEBATE_MIN_AGREEMENT, FULL_DEBATE_AGENTS, MODERATOR_MAX_TOKENS)
 
 MODERATOR_SCHEMA = {
     "type": "object",
@@ -79,7 +80,7 @@ class DebateResult:
 
 def run_debate(symbol: str, market_data: dict, context: str = '',
                agents_to_use: Optional[list] = None, verbose: bool = True,
-               memory_context: str = '') -> DebateResult:
+               memory_context: str = '', asset_class: str = 'equity') -> DebateResult:
     """
     Full debate — all 8 agents (or specified subset).
     Includes regime detection and memory context.
@@ -88,13 +89,20 @@ def run_debate(symbol: str, market_data: dict, context: str = '',
     timestamp = datetime.now(tz).isoformat()
 
     if agents_to_use is None:
-        agents_to_use = get_all_agents()
+        agents_to_use = FULL_DEBATE_AGENTS  # 5 focused agents — deeper reasoning per agent
 
-    # Detect regime and add to market_data
-    regime_data = detect_regime()
-    regime = regime_data.get('regime', 'ranging')
-    regime_brief = get_regime_brief(regime_data)
-    market_data['regime'] = regime
+    # Use pre-computed regime if caller already detected it (e.g. from asset's own candles)
+    # Otherwise fall back to SPY-based market regime
+    if market_data.get('regime') and market_data['regime'] != 'ranging':
+        regime = market_data['regime']
+        regime_data = {'regime': regime, 'description': '', 'adx': market_data.get('adx', 25),
+                       'vix_proxy': 3.0, 'trend_direction': 'neutral', 'vol_spike': 1.0}
+        regime_brief = get_regime_brief(regime_data)
+    else:
+        regime_data = detect_regime()
+        regime = regime_data.get('regime', 'ranging')
+        regime_brief = get_regime_brief(regime_data)
+        market_data['regime'] = regime
     enhanced_context = f"{regime_brief}\n\n{context}" if context else regime_brief
 
     if verbose:
@@ -107,7 +115,8 @@ def run_debate(symbol: str, market_data: dict, context: str = '',
             print(f"  📊 {name}...", end=' ', flush=True)
 
         result = run_agent(agent_key, symbol, market_data,
-                           context=enhanced_context, memory_context=memory_context)
+                           context=enhanced_context, memory_context=memory_context,
+                           asset_class=asset_class)
         individual_signals.append(result)
         time.sleep(0.2)
 
@@ -169,11 +178,13 @@ def run_debate(symbol: str, market_data: dict, context: str = '',
 
 
 def run_quick_debate(symbol: str, market_data: dict, context: str = '',
-                     verbose: bool = False, memory_context: str = '') -> DebateResult:
+                     verbose: bool = False, memory_context: str = '',
+                     asset_class: str = 'crypto') -> DebateResult:
     """3-agent quick debate for crypto and futures (lower cost, faster)."""
     return run_debate(symbol=symbol, market_data=market_data,
                       context=context, agents_to_use=QUICK_DEBATE_AGENTS,
-                      verbose=verbose, memory_context=memory_context)
+                      verbose=verbose, memory_context=memory_context,
+                      asset_class=asset_class)
 
 
 def _run_moderator(symbol, market_data, individual_signals,
@@ -190,15 +201,23 @@ def _run_moderator(symbol, market_data, individual_signals,
             f"| Risk: {s.get('key_concern','')[:35]}"
         )
 
-    system_prompt = """You are the Chief Investment Officer moderating a debate between legendary investors.
-Synthesize their conflicting views into ONE actionable trading decision.
+    system_prompt = """You are the Chief Investment Officer synthesizing 5 specialist analysts into ONE decisive trading call.
+Each analyst is an expert in exactly one dimension. Your job is to weigh their specific expertise and decide.
 
 THE AMYGDALA IS REMOVED — ABSOLUTE RULES:
 - No emotional reasoning. No hope. No fear. No FOMO.
-- Split vote (< 60% agreement) → HOLD is correct.
-- Any analyst flagging catastrophic risk → veto the trade.
-- Protecting a $500 account. Capital preservation is priority one.
-- A skipped trade loses nothing. A bad trade can end the account."""
+- manipulation_risk flagging manipulation/cascade → HARD VETO regardless of other votes.
+- fee_discipline saying fees can't be covered → HARD VETO regardless of other votes.
+- < 60% agreement → HOLD. Split expert panels mean no edge.
+- Capital preservation is priority one on a $500 account.
+- A skipped trade costs $0. A bad trade can permanently impair the account.
+
+ANALYSTS AND THEIR WEIGHT:
+- microstructure: OBI/TFI/microprice — the fastest and most predictive 1-min signal. Weight it heavily.
+- flow_tape: Real tape/Kyle lambda — confirms or denies microstructure. Aligns = strong. Contradicts = pause.
+- fee_discipline: Economics gatekeeper. If fees can't be cleared, there is no trade. Non-negotiable.
+- regime_volatility: BB-KC squeeze + RV ratio. Sets context for whether a breakout or mean-reversion setup is valid.
+- manipulation_risk: Spoofing/adverse selection detector. A YES from this agent is a stop sign."""
 
     user_prompt = f"""Symbol: {symbol}
 Price: ${market_data.get('price', 0):,.4f}
@@ -216,10 +235,31 @@ Synthesize into one final trading decision. Need {FULL_DEBATE_MIN_AGREEMENT:.0%}
     result = call_claude_structured(
         system_prompt=system_prompt,
         user_prompt=user_prompt,
-        max_tokens=400,
+        max_tokens=MODERATOR_MAX_TOKENS,
         call_type='moderator',
         schema=MODERATOR_SCHEMA,
     )
+
+    # ── Hard veto override: checked BEFORE agreement threshold ───────────────
+    # These two agents are non-negotiable gatekeepers. If either says NO,
+    # the trade is killed regardless of what the other 4 agents voted.
+    for s in individual_signals:
+        agent_key = s.get('agent_key', '')
+        sig       = s.get('signal', 'HOLD')
+        if agent_key == 'manipulation_risk' and sig in ('HOLD', 'SELL'):
+            result['signal']    = 'HOLD'
+            result['reasoning'] = (
+                f"HARD VETO — manipulation_risk: {s.get('reasoning', '')[:100]}. "
+                + result.get('reasoning', '')
+            )
+            return result  # early exit — no point checking further
+        if agent_key == 'fee_discipline' and sig == 'HOLD':
+            result['signal']    = 'HOLD'
+            result['reasoning'] = (
+                f"HARD VETO — fee_discipline: {s.get('reasoning', '')[:100]}. "
+                + result.get('reasoning', '')
+            )
+            return result  # early exit
 
     # Override with HOLD if agreement below threshold
     if (result.get('signal') == 'BUY' and

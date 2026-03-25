@@ -92,8 +92,10 @@ class CoinbaseBroker:
         Calculates base_size from price.
         """
         # Always prefer limit orders (lower fees = longer account lifespan)
-        base_size = size_usd / limit_price
-        base_size = round(base_size, 8)
+        base_size = round(size_usd / limit_price, 8)
+        if base_size <= 0:
+            print(f"[CoinbaseBroker] Buy size too small for {product_id}: ${size_usd:.2f} @ ${limit_price}")
+            return None
 
         if PAPER_TRADING or not self.is_connected():
             return self._paper_buy(product_id, base_size, limit_price,
@@ -115,6 +117,26 @@ class CoinbaseBroker:
                 base_size=str(base_size),
                 limit_price=str(round(limit_price, 2))
             )
+
+            # Verify the order was accepted by the exchange before registering position.
+            # Limit orders don't fill instantly — check status after brief wait.
+            time.sleep(1.5)
+            try:
+                order_status = self._client.get_order(order_id=order_id)
+                status = getattr(order_status, 'status', 'UNKNOWN')
+                filled_size = float(getattr(order_status, 'filled_size', 0) or 0)
+                if status in ('CANCELLED', 'FAILED', 'EXPIRED'):
+                    print(f"[CoinbaseBroker] Order {order_id} {status} — not registering position")
+                    log_event('WARNING', 'CoinbaseBroker',
+                              f"Buy order {status} for {product_id}: {order_id}")
+                    return None
+                if filled_size > 0 and filled_size < base_size * 0.9:
+                    print(f"[CoinbaseBroker] Partial fill {product_id}: {filled_size:.6f}/{base_size:.6f}")
+                    log_event('WARNING', 'CoinbaseBroker',
+                              f"Partial fill {product_id}: {filled_size:.6f} of {base_size:.6f}")
+                    base_size = filled_size  # track only what actually filled
+            except Exception as status_err:
+                print(f"[CoinbaseBroker] Order status check failed (proceeding): {status_err}")
 
             fee = size_usd * COINBASE_MAKER_FEE_PCT
             print(f"[CoinbaseBroker] BUY LIMIT {base_size:.6f} {product_id} @ ${limit_price:,.2f} | fee≈${fee:.3f}")
@@ -244,8 +266,8 @@ class CoinbaseBroker:
         if PAPER_TRADING or not self.is_connected():
             from data.coinbase_feed import get_current_price
             price = get_current_price(product_id) or entry_price
-            return self._paper_sell(product_id, base_size, price or entry_price,
-                                    strategy, entry_price, reason)
+            return self._paper_sell_market(product_id, base_size, price or entry_price,
+                                           strategy, entry_price, reason)
 
         try:
             self._cancel_product_orders(product_id)
@@ -257,7 +279,12 @@ class CoinbaseBroker:
                 base_size=str(round(base_size, 8))
             )
 
+            fee = (base_size * (entry_price or 1)) * COINBASE_TAKER_FEE_PCT
             self._open_positions.pop(product_id, None)
+            log_trade(strategy=strategy, broker='coinbase', symbol=product_id,
+                      action='SELL', order_type='MARKET', qty=base_size,
+                      price=entry_price, fee_usd=fee, pnl_usd=pnl, paper=False,
+                      order_id=order_id, notes=f"reason={reason}")
             print(f"[CoinbaseBroker] SELL MARKET (emergency) {base_size:.6f} {product_id} | {reason}")
             log_event('WARNING', 'CoinbaseBroker', f"Market sell {product_id}: {reason}")
 
@@ -334,6 +361,20 @@ class CoinbaseBroker:
 
         print(f"[PAPER] 🟢 BUY {base_size:.6f} {product_id} @ ${price:,.2f} | fee=${fee:.3f}")
         alert_trade_opened(strategy, product_id, 'BUY', base_size, price, stop, target)
+        return {'paper_fill': True, 'qty': base_size, 'price': price}
+
+    def _paper_sell_market(self, product_id, base_size, price, strategy,
+                           entry_price, reason) -> dict:
+        """Paper market sell — uses taker fee (emergency stop path)."""
+        fee = price * base_size * COINBASE_TAKER_FEE_PCT
+        pnl = (price - entry_price) * base_size if entry_price > 0 else 0
+        self._open_positions.pop(product_id, None)
+        log_trade(strategy=strategy, broker='coinbase_paper',
+                  symbol=product_id, action='SELL', order_type='MARKET',
+                  qty=base_size, price=price, fee_usd=fee, pnl_usd=pnl, paper=True,
+                  order_id=f'PAPER_{uuid.uuid4().hex[:8]}', notes=f"reason={reason}")
+        print(f"[PAPER] 🔴 SELL MARKET {base_size:.6f} {product_id} @ ${price:,.2f} | P&L: ${pnl:+.2f}")
+        alert_trade_closed(strategy, product_id, 'SELL', base_size, entry_price, price, pnl, reason)
         return {'paper_fill': True, 'qty': base_size, 'price': price}
 
     def _paper_sell(self, product_id, base_size, price, strategy,

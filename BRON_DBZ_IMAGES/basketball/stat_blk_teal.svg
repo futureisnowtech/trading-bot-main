@@ -1,0 +1,7 @@
+<svg viewBox="0 0 220 120" xmlns="http://www.w3.org/2000/svg">
+  <rect width="220" height="120" rx="12" fill="#008080" stroke="#00CED1" stroke-width="2"/>
+  <rect x="0" y="0" width="220" height="6" rx="3" fill="#00CED1"/>
+  <text x="110" y="35" text-anchor="middle" font-size="13" fill="#00CED1" font-family="Arial,sans-serif" font-weight="bold">BLK</text>
+  <text x="110" y="82" text-anchor="middle" font-size="48" fill="white" font-family="Arial Black,sans-serif" font-weight="900">1.2</text>
+  <text x="110" y="108" text-anchor="middle" font-size="12" fill="#00CED1" font-family="Arial,sans-serif" opacity="0.8">Blocks Per Game</text>
+</svg>

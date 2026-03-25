@@ -181,6 +181,8 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
             hl = np.log(2) / kappa if kappa > 0 else np.nan
             if np.isfinite(hl) and 3.0 <= hl <= 120.0:
                 ou_hl.iloc[i] = hl
+        ou_zscore = (spread - spread.rolling(40, min_periods=10).mean()) / spread.rolling(40, min_periods=10).std().clip(lower=1e-10)
+        df['ou_zscore'] = ou_zscore.clip(-4.0, 4.0)
         df['ou_halflife_minutes'] = ou_hl
     except Exception as e:
         print(f"[indicators] ou_halflife failed: {e}")

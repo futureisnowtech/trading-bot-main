@@ -13,7 +13,7 @@ import pytz
 
 BANNER = """
 ╔══════════════════════════════════════════════════════════════════╗
-║  👑  THE KING'S ALGO TRADING SYSTEM  v3.0  👑                   ║
+║  👑  THE KING'S ALGO TRADING SYSTEM  v3.3  👑                   ║
 ║                                                                  ║
 ║  "Nothing is given. Everything is earned." — LeBron James       ║
 ║                                                                  ║
@@ -40,9 +40,15 @@ def main():
     if args.mode:
         os.environ['PAPER_TRADING'] = 'true' if args.mode == 'paper' else 'false'
 
-    from config import PAPER_TRADING, ACCOUNT_SIZE, MARKET_TIMEZONE, ANTHROPIC_API_KEY
+    from config import (PAPER_TRADING, ACCOUNT_SIZE, MARKET_TIMEZONE, ANTHROPIC_API_KEY,
+                        MAX_RISK_PER_TRADE_PCT, MAX_DAILY_LOSS_PCT, MAX_DEPLOYED_PCT)
     tz = pytz.timezone(MARKET_TIMEZONE)
     mode = '📄 PAPER' if PAPER_TRADING else '💰 LIVE'
+
+    # Sanity-check hardcoded risk values — catch accidental misconfiguration
+    assert 0 < MAX_RISK_PER_TRADE_PCT <= 0.10, f"MAX_RISK_PER_TRADE_PCT={MAX_RISK_PER_TRADE_PCT} out of safe range (0–10%)"
+    assert 0 < MAX_DAILY_LOSS_PCT    <= 0.15, f"MAX_DAILY_LOSS_PCT={MAX_DAILY_LOSS_PCT} out of safe range (0–15%)"
+    assert 0 < MAX_DEPLOYED_PCT      <= 1.00, f"MAX_DEPLOYED_PCT={MAX_DEPLOYED_PCT} out of safe range (0–100%)"
 
     print(f"  Mode:       {mode} TRADING")
     print(f"  Account:    ${ACCOUNT_SIZE}")
@@ -110,7 +116,7 @@ def main():
 
     print("=" * 60)
     print("  🚀 Scheduler starting. System is live.")
-    print("  📊 Dashboard → streamlit run dashboard/app.py → :8501")
+    print("  📊 Dashboard → streamlit run dashboard/app.py --server.runOnSave true → :8501")
     print("  📋 CSV logs  → logs/csv/")
     print("  🗄️  Database  → logs/trades.db")
     print("  ⌨️  Stop      → Ctrl+C")

@@ -35,7 +35,7 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from strategies.base_strategy import BaseStrategy, Signal
-from data.indicators import add_all_indicators
+from data.indicators import add_all_indicators, get_fib_levels, fib_confluence
 from config import (
     CRYPTO_POSITION_SIZE_USD, CRYPTO_STOP_LOSS_PCT, CRYPTO_TAKE_PROFIT_PCT,
     CRYPTO_RSI_OVERBOUGHT, CRYPTO_RSI_OVERSOLD, CRYPTO_MIN_ADX,
@@ -110,6 +110,11 @@ class CryptoMACDStrategy(BaseStrategy):
             return self._hold(symbol, price,
                               f"Market choppy — ADX {adx:.1f} < {CRYPTO_MIN_ADX}")
 
+        # ── Fibonacci levels (auto-detected from swing structure) ──────────────
+        atr = float(last.get('atr', price * 0.005) or price * 0.005)
+        fib = get_fib_levels(df, lookback=100, swing_n=3)
+        fib_signal, fib_level, fib_boost = fib_confluence(price, atr, fib)
+
         # ══════════════════════════════════════════════════════════════════════
         # EVALUATE EACH VARIANT
         # ══════════════════════════════════════════════════════════════════════
@@ -134,6 +139,21 @@ class CryptoMACDStrategy(BaseStrategy):
         if action == 'HOLD':
             return self._hold(symbol, price, reason)
 
+        # ── Fibonacci confluence boost ─────────────────────────────────────────
+        # Fib boosts confidence when MACD direction aligns with the fib signal.
+        # BUY at fib support = high conviction.  SELL at fib resistance = high conviction.
+        # Misaligned (BUY at resistance, SELL at support) → reduce confidence slightly.
+        if fib_signal and fib_level:
+            aligned = (action == 'BUY' and fib_signal == 'support') or \
+                      (action == 'SELL' and fib_signal == 'resistance')
+            if aligned:
+                conf = min(conf + fib_boost, 0.95)
+                reason += f" | 🎯 {fib_level} {fib_signal} confluence (+{fib_boost:.0%})"
+            else:
+                # Fib pushes back — small penalty
+                conf = max(conf - fib_boost * 0.5, 0.40)
+                reason += f" | ⚠️ fib {fib_level} {fib_signal} pushback"
+
         # ── EXIT signals override ENTRY ────────────────────────────────────────
         exit_action, exit_reason = self._check_exits(
             rsi, m1_hist, m2_line, m2_sig, price, vwap
@@ -146,7 +166,6 @@ class CryptoMACDStrategy(BaseStrategy):
         # ── Build final signal ─────────────────────────────────────────────────
         from risk.risk_manager import get_risk_manager
         rm = get_risk_manager()
-        atr = float(last.get('atr', price * 0.005) or price * 0.005)
         stop_loss = rm.calc_stop_loss(price, self.name, atr=atr)
         take_profit = rm.calc_take_profit(price, self.name, atr=atr)
 
@@ -161,14 +180,19 @@ class CryptoMACDStrategy(BaseStrategy):
             stop_loss=stop_loss,
             take_profit=take_profit,
             metadata={
-                'variant': self.variant,
-                'rsi': rsi,
-                'adx': adx,
-                'macd1_hist': m1_hist,
-                'macd2_crossover': m2_line > m2_sig,
-                'macd3_hist': m3_hist,
-                'vwap': vwap,
-                'price_vs_vwap': price / vwap if vwap > 0 else 1.0,
+                'variant':          self.variant,
+                'rsi':              rsi,
+                'adx':              adx,
+                'macd1_hist':       m1_hist,
+                'macd2_crossover':  m2_line > m2_sig,
+                'macd3_hist':       m3_hist,
+                'vwap':             vwap,
+                'price_vs_vwap':    price / vwap if vwap > 0 else 1.0,
+                'fib_level':        fib_level,
+                'fib_signal':       fib_signal,
+                'fib_boost':        fib_boost,
+                'fib_swing_high':   fib.get('swing_high'),
+                'fib_swing_low':    fib.get('swing_low'),
             }
         )
         self._last_signal = signal

@@ -20,7 +20,7 @@ from datetime import datetime
 from typing import Optional
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from data.indicators import add_all_indicators
+from data.indicators import add_all_indicators, get_fib_levels, fib_confluence
 
 BACKTEST_DIR = 'logs/backtest'
 os.makedirs(BACKTEST_DIR, exist_ok=True)
@@ -53,48 +53,169 @@ except Exception as _e:
 
 if BACKTESTING_PY:
 
+    def _calc_fib_confluence(
+        high: pd.Series, low: pd.Series, close: pd.Series,
+        lookback: int = 100, atr_period: int = 14,
+    ) -> np.ndarray:
+        """
+        Vectorized Fibonacci confluence signal, look-ahead free.
+
+        At each bar we treat the rolling max-high and min-low over the last
+        `lookback` bars as the swing high / swing low.  Retracement levels
+        are computed from those.  If the current close is within 0.5×ATR of
+        a key level the function returns:
+            > 0  →  bullish support confluence (multiply by MACD confidence)
+            < 0  →  bearish resistance pushback
+            = 0  →  no fib confluence at this bar
+
+        Values are scaled to match the confidence boosts used in the live
+        strategy (fib_618 = ±0.15, fib_382 = ±0.12, etc.).
+        """
+        sh = high.rolling(lookback).max()          # range high
+        sl = low.rolling(lookback).min()           # range low
+        diff = sh - sl
+
+        # ATR for tolerance band
+        tr_raw = pd.concat([
+            high - low,
+            (high - close.shift(1)).abs(),
+            (low  - close.shift(1)).abs(),
+        ], axis=1).max(axis=1)
+        atr = tr_raw.ewm(span=atr_period, adjust=False).mean()
+        tol = atr * 0.5
+
+        midpoint  = (sh + sl) / 2.0
+        is_support = (close <= midpoint).astype(float)   # 1 = support, 0 = resistance
+        direction  = np.where(is_support == 1, 1.0, -1.0)
+
+        # Fib levels and their boosts (highest to lowest priority)
+        fib_params = [
+            (0.618, 0.15),
+            (0.382, 0.12),
+            (0.500, 0.08),
+            (0.786, 0.08),
+            (0.236, 0.06),
+        ]
+
+        result = pd.Series(0.0, index=close.index)
+        for ratio, boost in fib_params:
+            level   = sh - diff * ratio
+            near    = (close - level).abs() <= tol
+            # Only mark bars not already claimed by a higher-priority level
+            unset   = result == 0.0
+            result  = result.where(~(near & unset), other=pd.Series(direction * boost, index=close.index))
+
+        return result.values
+
+
+    def _calc_adx(high: pd.Series, low: pd.Series, close: pd.Series, n: int = 14) -> np.ndarray:
+        """Lightweight ADX calculation (no external dependency)."""
+        tr = pd.concat([
+            high - low,
+            (high - close.shift(1)).abs(),
+            (low  - close.shift(1)).abs(),
+        ], axis=1).max(axis=1)
+        atr = tr.ewm(span=n, adjust=False).mean()
+        up   = high.diff()
+        down = -low.diff()
+        dm_p = np.where((up > down) & (up > 0), up, 0.0)
+        dm_m = np.where((down > up) & (down > 0), down, 0.0)
+        di_p = pd.Series(dm_p, index=high.index).ewm(span=n, adjust=False).mean() / atr * 100
+        di_m = pd.Series(dm_m, index=high.index).ewm(span=n, adjust=False).mean() / atr * 100
+        dx   = (di_p - di_m).abs() / (di_p + di_m).replace(0, np.nan) * 100
+        return dx.ewm(span=n, adjust=False).mean().values
+
+
     class CryptoMACDWorkhorse(Strategy):
         """
-        MACD(3/15/3) Histogram > 0 strategy.
-        Mirrors Moon Dev's Variant 1 — the workhorse.
-        Trades every signal. Long only.
+        MACD(3/15/3) Histogram strategy — mirrors live crypto_macd variant 1.
+
+        long_short = False → LONG only (default — crypto live bot is long-only)
+        long_short = True  → LONG when hist>0, SHORT when hist<0 (requires margin)
+        adx_min           → skip entry when market is choppy (ADX < threshold)
+        use_fib = True    → fib confluence required to confirm entries
+                            (same logic as live strategy)
         """
-        fast = 3
-        slow = 15
+        fast          = 3
+        slow          = 15
         signal_period = 3
+        adx_min       = 15
+        long_short    = False   # long-only: mirrors live bot (no margin/short)
+        use_fib       = True    # set False to compare without fib
 
         def init(self):
             close = pd.Series(self.data.Close)
+            high  = pd.Series(self.data.High)
+            low   = pd.Series(self.data.Low)
 
             def macd_hist(prices, f, s, sig):
                 ema_f = prices.ewm(span=f, adjust=False).mean()
                 ema_s = prices.ewm(span=s, adjust=False).mean()
-                line = ema_f - ema_s
+                line  = ema_f - ema_s
                 signal = line.ewm(span=sig, adjust=False).mean()
                 return (line - signal).values
 
             self.macd_histogram = self.I(
                 macd_hist, close, self.fast, self.slow, self.signal_period
             )
+            self.adx = self.I(_calc_adx, high, low, close)
+            if self.use_fib:
+                self.fib = self.I(_calc_fib_confluence, high, low, close)
 
         def next(self):
-            if self.macd_histogram[-1] > 0 and not self.position:
-                self.buy()
-            elif self.macd_histogram[-1] < 0 and self.position:
-                self.position.close()
+            hist = self.macd_histogram[-1]
+            adx  = self.adx[-1]
+            if np.isnan(adx) or adx < self.adx_min:
+                return
+
+            # fib_val > 0: price is at fib support (buy-friendly)
+            # fib_val < 0: price is at fib resistance (sell-friendly)
+            # fib_val = 0: no fib confluence
+            fib_val = self.fib[-1] if self.use_fib else 0.0
+
+            want_long  = hist > 0
+            want_short = hist < 0
+
+            # When fib conflicts with direction, skip the trade.
+            # e.g. MACD says BUY but fib says we're at resistance → skip.
+            if self.use_fib:
+                if want_long  and fib_val < -0.05:   # resistance pushback
+                    return
+                if want_short and fib_val > 0.05:    # support pushback
+                    return
+
+            if self.long_short:
+                if want_long and not self.position.is_long:
+                    if self.position.is_short:
+                        self.position.close()
+                    self.buy()
+                elif want_short and not self.position.is_short:
+                    if self.position.is_long:
+                        self.position.close()
+                    self.sell()
+            else:
+                if want_long and not self.position:
+                    self.buy()
+                elif want_short and self.position:
+                    self.position.close()
 
 
     class CryptoMACDClassic(Strategy):
         """
-        MACD(4/16/3) Line vs Signal crossover.
-        Variant 2 — classic crossover.
+        MACD(4/16/3) Line vs Signal crossover — mirrors live variant 2.
+        adx_min / long_short / use_fib params same as Workhorse.
         """
-        fast = 4
-        slow = 16
+        fast          = 4
+        slow          = 16
         signal_period = 3
+        adx_min       = 15
+        long_short    = False   # long-only
+        use_fib       = True
 
         def init(self):
             close = pd.Series(self.data.Close)
+            high  = pd.Series(self.data.High)
+            low   = pd.Series(self.data.Low)
 
             def macd_line(prices, f, s):
                 return (prices.ewm(span=f, adjust=False).mean()
@@ -104,46 +225,107 @@ if BACKTESTING_PY:
                 ml = pd.Series(macd_line(prices, f, s))
                 return ml.ewm(span=sig, adjust=False).mean().values
 
-            self.macd = self.I(macd_line, close, self.fast, self.slow)
+            self.macd   = self.I(macd_line, close, self.fast, self.slow)
             self.signal = self.I(signal_line, close, self.fast, self.slow, self.signal_period)
+            self.adx    = self.I(_calc_adx, high, low, close)
+            if self.use_fib:
+                self.fib = self.I(_calc_fib_confluence, high, low, close)
 
         def next(self):
-            if crossover(self.macd, self.signal) and not self.position:
-                self.buy()
-            elif crossover(self.signal, self.macd) and self.position:
-                self.position.close()
+            adx = self.adx[-1]
+            if np.isnan(adx) or adx < self.adx_min:
+                return
+
+            fib_val     = self.fib[-1] if self.use_fib else 0.0
+            going_long  = crossover(self.macd, self.signal)
+            going_short = crossover(self.signal, self.macd)
+
+            if self.use_fib:
+                if going_long  and fib_val < -0.05:
+                    return
+                if going_short and fib_val > 0.05:
+                    return
+
+            if self.long_short:
+                if going_long:
+                    if self.position.is_short:
+                        self.position.close()
+                    self.buy()
+                elif going_short:
+                    if self.position.is_long:
+                        self.position.close()
+                    self.sell()
+            else:
+                if going_long and not self.position:
+                    self.buy()
+                elif going_short and self.position:
+                    self.position.close()
 
 
     class CryptoMACDSniper(Strategy):
         """
-        MACD(6/20/5) Histogram > threshold.
-        Variant 3 — sniper, high win rate, low frequency.
+        MACD(6/20/5) Histogram > threshold — mirrors live variant 3.
+        adx_min / long_short / use_fib params same as Workhorse.
         """
-        fast = 6
-        slow = 20
+        fast          = 6
+        slow          = 20
         signal_period = 5
-        threshold_pct = 0.0001  # 0.01% of price
+        threshold_pct = 0.0001
+        adx_min       = 15
+        long_short    = False   # long-only
+        use_fib       = True
 
         def init(self):
             close = pd.Series(self.data.Close)
+            high  = pd.Series(self.data.High)
+            low   = pd.Series(self.data.Low)
 
             def macd_hist(prices, f, s, sig):
                 ema_f = prices.ewm(span=f, adjust=False).mean()
                 ema_s = prices.ewm(span=s, adjust=False).mean()
-                line = ema_f - ema_s
-                signal = line.ewm(span=sig, adjust=False).mean()
-                return (line - signal).values
+                line  = ema_f - ema_s
+                sig_l = line.ewm(span=sig, adjust=False).mean()
+                return (line - sig_l).values
 
             self.macd_histogram = self.I(
                 macd_hist, close, self.fast, self.slow, self.signal_period
             )
+            self.adx = self.I(_calc_adx, high, low, close)
+            if self.use_fib:
+                self.fib = self.I(_calc_fib_confluence, high, low, close)
 
         def next(self):
+            adx       = self.adx[-1]
+            hist      = self.macd_histogram[-1]
             threshold = self.data.Close[-1] * self.threshold_pct
-            if self.macd_histogram[-1] > threshold and not self.position:
-                self.buy()
-            elif self.macd_histogram[-1] < -threshold and self.position:
-                self.position.close()
+
+            if np.isnan(adx) or adx < self.adx_min:
+                return
+
+            fib_val     = self.fib[-1] if self.use_fib else 0.0
+            want_long   = hist > threshold
+            want_short  = hist < -threshold
+
+            if self.use_fib:
+                if want_long  and fib_val < -0.05:
+                    return
+                if want_short and fib_val > 0.05:
+                    return
+
+            if self.long_short:
+                if want_long and not self.position.is_long:
+                    if self.position.is_short:
+                        self.position.close()
+                    self.buy()
+                elif want_short and not self.position.is_short:
+                    if self.position.is_long:
+                        self.position.close()
+                    self.sell()
+            else:
+                if want_long and not self.position:
+                    self.buy()
+                elif want_short and self.position:
+                    self.position.close()
 
 
     class EquityMomentum(Strategy):
@@ -203,16 +385,66 @@ if BACKTESTING_PY:
 
 # ─── Backtest runner ─────────────────────────────────────────────────────────
 
+_PERIOD_TO_DAYS = {
+    '1mo': 30, '3mo': 90, '6mo': 180, '1y': 365, '2y': 730,
+}
+
+_INTERVAL_TO_CB_GRANULARITY = {
+    '1m': 'ONE_MINUTE', '5m': 'FIVE_MINUTE', '15m': 'FIFTEEN_MINUTE',
+    '30m': 'THIRTY_MINUTE', '1h': 'ONE_HOUR', '1d': 'ONE_DAY',
+}
+
+
 def fetch_data(symbol: str, period: str = '6mo', interval: str = '5m') -> Optional[pd.DataFrame]:
-    """Fetch OHLCV data for backtesting via yfinance."""
-    print(f"[backtest] Fetching {symbol} {interval} data ({period})...")
+    """
+    Fetch OHLCV data for backtesting.
+
+    For Coinbase-traded pairs (symbol contains '-USDC' or '-USD' matching a CB pair),
+    we prefer the Coinbase Advanced Trade API so backtests use the actual price feed
+    the live bot trades on.  Falls back to yfinance if Coinbase credentials are absent
+    or the fetch fails (e.g. for equity symbols).
+    """
+    days = _PERIOD_TO_DAYS.get(period, 180)
+    cb_granularity = _INTERVAL_TO_CB_GRANULARITY.get(interval, 'FIVE_MINUTE')
+
+    # ── Try Coinbase first for crypto pairs ───────────────────────────────────
+    is_cb_pair = '-USDC' in symbol.upper() or (
+        '-USD' in symbol.upper() and symbol.upper() not in ('BTC-USD', 'ETH-USD')
+    )
+    # Also try for BTC-USD / ETH-USD by converting to the USDC pair
+    yf_to_cb = {'BTC-USD': 'BTC-USDC', 'ETH-USD': 'ETH-USDC'}
+    cb_symbol = yf_to_cb.get(symbol.upper(), symbol.upper())
+    use_coinbase = '-USDC' in cb_symbol or '-USD' in cb_symbol
+
+    if use_coinbase:
+        try:
+            sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            from data.coinbase_feed import get_historical_candles
+            print(f"[backtest] Fetching {cb_symbol} from Coinbase API ({days}d, {cb_granularity})…")
+            df = get_historical_candles(
+                product_id=cb_symbol, granularity=cb_granularity,
+                days=days, use_cache=True,
+            )
+            if df is not None and not df.empty:
+                df = df.rename(columns={
+                    'open': 'Open', 'high': 'High', 'low': 'Low',
+                    'close': 'Close', 'volume': 'Volume',
+                })
+                df = df[['Open', 'High', 'Low', 'Close', 'Volume']].dropna()
+                print(f"[backtest] Coinbase data: {len(df)} candles for {cb_symbol}")
+                return df
+            print(f"[backtest] Coinbase fetch empty — falling back to yfinance")
+        except Exception as e:
+            print(f"[backtest] Coinbase fetch failed ({e}) — falling back to yfinance")
+
+    # ── yfinance fallback (equities + when Coinbase creds absent) ─────────────
+    print(f"[backtest] Fetching {symbol} {interval} data ({period}) via yfinance…")
     try:
         df = yf.download(symbol, period=period, interval=interval, progress=False)
         if df.empty:
             print(f"[backtest] No data returned for {symbol}")
             return None
         df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
-        # backtesting.py needs these exact column names
         df = df.rename(columns={
             'open': 'Open', 'high': 'High', 'low': 'Low',
             'close': 'Close', 'volume': 'Volume'
@@ -232,6 +464,7 @@ def run_crypto_backtest(
     interval: str = '5m',
     cash: float = 500,
     commission: float = 0.006,
+    slippage: float = 0.002,
     variant: str = 'all'
 ) -> dict:
     """
@@ -244,6 +477,22 @@ def run_crypto_backtest(
     df = fetch_data(symbol, period=period, interval=interval)
     if df is None:
         return {'error': f'No data for {symbol}'}
+
+    # backtesting.py 0.6.x converts fractional sizes to int() units via int(cash/price).
+    # For BTC at ~$80k, int(500/80000)=0 → all orders cancelled.
+    # Fix: scale prices DOWN so $500 of virtual cash buys ≥10 units. P&L % is preserved.
+    # Do NOT scale cash — keep it at the original value.
+    avg_price = float(df['Close'].mean())
+    target_units = 10  # want at least 10 units purchasable with `cash`
+    if avg_price > 0 and cash / avg_price < target_units:
+        price_scale = avg_price / (cash / target_units)   # scale price so cash buys ~10 units
+    else:
+        price_scale = 1.0
+    if price_scale > 1.0:
+        df = df.copy()
+        for col in ('Open', 'High', 'Low', 'Close'):
+            df[col] = df[col] / price_scale
+    cash_scaled = cash  # keep cash unchanged — only price is scaled
 
     results = {}
     strategies = {
@@ -260,8 +509,8 @@ def run_crypto_backtest(
         try:
             bt = Backtest(
                 df, StratClass,
-                cash=cash,
-                commission=commission,
+                cash=cash_scaled,
+                commission=commission + slippage,
                 exclusive_orders=True
             )
             stats = bt.run()
@@ -296,6 +545,7 @@ def run_equity_backtest(
     period: str = '1y',
     interval: str = '30m',
     cash: float = 500,
+    slippage: float = 0.002,
 ) -> dict:
     """Run equity momentum strategy backtest."""
     if not BACKTESTING_PY:
@@ -307,7 +557,7 @@ def run_equity_backtest(
 
     print(f"\n[backtest] Running Equity Momentum on {symbol}...")
     try:
-        bt = Backtest(df, EquityMomentum, cash=cash, commission=0.0)
+        bt = Backtest(df, EquityMomentum, cash=cash, commission=slippage)
         stats = bt.run()
         result = _parse_stats(stats, symbol, 'equity_momentum', 'Equity Momentum MACD+RSI+Volume')
         _print_result(result)
@@ -315,6 +565,93 @@ def run_equity_backtest(
     except Exception as e:
         print(f"[backtest] Error: {e}")
         return {'error': str(e)}
+
+
+def run_backtest_oos_split(
+    symbol: str,
+    strategy: str = 'crypto',
+    period: str = '6mo',
+    interval: str = '5m',
+    cash: float = 500,
+    commission: float = 0.006,
+    slippage: float = 0.002,
+    train_pct: float = 0.70,
+) -> dict:
+    """
+    Chan out-of-sample validation: split data 70% train / 30% test.
+    Runs the strategy on both halves and compares.
+    A strategy with good IS stats but poor OOS stats is likely curve-fitted.
+    Returns {'in_sample': dict, 'out_of_sample': dict, 'oos_degradation_pct': float}
+    """
+    if not BACKTESTING_PY:
+        return {'error': 'backtesting.py not installed'}
+
+    df = fetch_data(symbol, period=period, interval=interval)
+    if df is None or len(df) < 100:
+        return {'error': f'Insufficient data for {symbol}'}
+
+    # Apply same price scaling fix as run_crypto_backtest (int truncation fix)
+    avg_price = float(df['Close'].mean())
+    target_units = 10
+    if avg_price > 0 and cash / avg_price < target_units:
+        price_scale = avg_price / (cash / target_units)
+    else:
+        price_scale = 1.0
+    if price_scale > 1.0:
+        df = df.copy()
+        for col in ('Open', 'High', 'Low', 'Close'):
+            df[col] = df[col] / price_scale
+    cash_scaled = cash
+
+    split = int(len(df) * train_pct)
+    df_train = df.iloc[:split].copy()
+    df_test  = df.iloc[split:].copy()
+
+    print(f"\n[backtest:OOS] {symbol} | train={len(df_train)} bars, test={len(df_test)} bars ({train_pct:.0%}/{1-train_pct:.0%})")
+
+    StratClass = CryptoMACDWorkhorse if strategy == 'crypto' else EquityMomentum
+    comm = (commission + slippage) if strategy == 'crypto' else slippage
+    desc = f"{strategy} OOS split"
+
+    def _run_split(df_split, label):
+        try:
+            bt = Backtest(df_split, StratClass, cash=cash_scaled, commission=comm, exclusive_orders=True)
+            stats = bt.run()
+            r = _parse_stats(stats, symbol, f'{strategy}_{label}', f'{desc} [{label}]')
+            _print_result(r)
+            return r
+        except Exception as e:
+            return {'error': str(e)}
+
+    is_result  = _run_split(df_train, 'IN_SAMPLE')
+    oos_result = _run_split(df_test,  'OUT_OF_SAMPLE')
+
+    # Chan degradation check: OOS return should be within 50% of IS return
+    is_ret  = is_result.get('total_return_pct', 0)
+    oos_ret = oos_result.get('total_return_pct', 0)
+    degradation = ((is_ret - oos_ret) / abs(is_ret) * 100) if is_ret != 0 else 0
+
+    verdict = '✅ ROBUST' if degradation < 50 else '⚠️ POSSIBLE OVERFIT'
+    print(f"\n[backtest:OOS] {verdict} | IS return: {is_ret:+.1f}% → OOS return: {oos_ret:+.1f}% | degradation: {degradation:.0f}%")
+
+    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+    results_path = os.path.join(BACKTEST_DIR, f'oos_{symbol}_{ts}.json')
+    with open(results_path, 'w') as f:
+        json.dump({
+            'symbol': symbol, 'verdict': verdict,
+            'is_return_pct': is_ret, 'oos_return_pct': oos_ret,
+            'degradation_pct': degradation,
+            'in_sample': {k: str(v) for k, v in is_result.items()},
+            'out_of_sample': {k: str(v) for k, v in oos_result.items()},
+        }, f, indent=2)
+    print(f"[backtest:OOS] Results saved to {results_path}")
+
+    return {
+        'in_sample': is_result,
+        'out_of_sample': oos_result,
+        'oos_degradation_pct': degradation,
+        'verdict': verdict,
+    }
 
 
 def _parse_stats(stats, symbol, name, description) -> dict:
@@ -408,6 +745,7 @@ def optimize_crypto(
     interval: str = '1h',
     cash: float = 500,
     commission: float = 0.006,
+    slippage: float = 0.002,
     write_to_env: bool = True,
 ) -> dict:
     """
@@ -450,7 +788,7 @@ def optimize_crypto(
                     CryptoMACDWorkhorse.signal_period = sig
 
                     bt = Backtest(df, CryptoMACDWorkhorse, cash=cash,
-                                  commission=commission, exclusive_orders=True)
+                                  commission=commission + slippage, exclusive_orders=True)
                     stats = bt.run()
 
                     wr = float(stats['Win Rate [%]']) if stats['Win Rate [%]'] is not None else 0.0
@@ -537,6 +875,7 @@ def optimize_equity(
     period: str = '1y',
     interval: str = '1h',
     cash: float = 500,
+    slippage: float = 0.002,
     write_to_env: bool = True,
 ) -> dict:
     """
@@ -578,7 +917,7 @@ def optimize_equity(
                         EquityMomentum.rsi_oversold = rsi_os
 
                         bt = Backtest(df, EquityMomentum, cash=cash,
-                                      commission=0.0, exclusive_orders=True)
+                                      commission=slippage, exclusive_orders=True)
                         stats = bt.run()
 
                         wr     = float(stats['Win Rate [%]'])     if stats['Win Rate [%]']     is not None else 0.0

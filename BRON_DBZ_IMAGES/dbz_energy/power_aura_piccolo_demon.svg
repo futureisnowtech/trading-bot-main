@@ -1,0 +1,67 @@
+<svg viewBox="0 0 400 550" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="aura_PICCOLO" cx="50%" cy="70%" r="70%">
+      <stop offset="0%" stop-color="#00FF77" stop-opacity="0.9"/>
+      <stop offset="60%" stop-color="#00FF77" stop-opacity="0.4"/>
+      <stop offset="100%" stop-color="#00FF77" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <!-- Ground shockwave rings -->
+  <ellipse cx="200" cy="520" rx="160" ry="18" fill="#00FF77" opacity="0.12"/>
+  <ellipse cx="200" cy="520" rx="120" ry="13" fill="#00FF77" opacity="0.2"/>
+  <ellipse cx="200" cy="520" rx="70" ry="8" fill="#00FF77" opacity="0.35"/>
+  <!-- Main aura blob -->
+  <ellipse cx="200" cy="280" rx="140" ry="240" fill="url(#aura_PICCOLO)"/>
+  <!-- Aura flame tongues -->
+  <path d="M200,40 Q160,120 155,200 Q185,150 200,190 Q215,150 245,200 Q240,120 200,40Z" fill="#AAFFCC" opacity="0.7"/>
+  <path d="M160,80 Q130,150 128,230 Q155,185 165,220 Q180,165 170,260 Q145,200 130,300 Q120,180 160,80Z" fill="#00FF77" opacity="0.5"/>
+  <path d="M240,80 Q270,150 272,230 Q245,185 235,220 Q220,165 230,260 Q255,200 270,300 Q280,180 240,80Z" fill="#00FF77" opacity="0.5"/>
+  <!-- Energy sparks -->
+  <circle cx="278" cy="346" r="1" fill="#AAFFCC" opacity="0.6"/><circle cx="311" cy="122" r="1" fill="#AAFFCC" opacity="0.3"/><circle cx="300" cy="300" r="4" fill="#AAFFCC" opacity="0.8"/><circle cx="276" cy="420" r="1" fill="#AAFFCC" opacity="0.3"/><circle cx="105" cy="186" r="3" fill="#AAFFCC" opacity="0.6"/><circle cx="113" cy="412" r="2" fill="#AAFFCC" opacity="0.4"/><circle cx="232" cy="447" r="3" fill="#AAFFCC" opacity="0.5"/><circle cx="196" cy="142" r="2" fill="#AAFFCC" opacity="0.5"/><circle cx="264" cy="129" r="1" fill="#AAFFCC" opacity="0.5"/><circle cx="231" cy="205" r="4" fill="#AAFFCC" opacity="0.8"/><circle cx="216" cy="209" r="4" fill="#AAFFCC" opacity="0.4"/><circle cx="246" cy="202" r="4" fill="#AAFFCC" opacity="0.7"/><circle cx="156" cy="303" r="1" fill="#AAFFCC" opacity="0.5"/><circle cx="159" cy="262" r="2" fill="#AAFFCC" opacity="0.8"/><circle cx="239" cy="62" r="4" fill="#AAFFCC" opacity="0.8"/><circle cx="291" cy="173" r="1" fill="#AAFFCC" opacity="0.7"/><circle cx="229" cy="71" r="4" fill="#AAFFCC" opacity="0.7"/><circle cx="150" cy="427" r="4" fill="#AAFFCC" opacity="0.7"/><circle cx="113" cy="367" r="1" fill="#AAFFCC" opacity="0.4"/><circle cx="191" cy="87" r="4" fill="#AAFFCC" opacity="0.6"/>
+  <!-- Lightning bolts in aura -->
+  <path d="M155,200 L145,240 L158,232 L148,275" fill="none" stroke="#AAFFCC" stroke-width="2" opacity="0.8"/>
+  <path d="M245,180 L255,215 L243,210 L252,248" fill="none" stroke="#AAFFCC" stroke-width="1.5" opacity="0.7"/>
+  <!-- Warrior silhouette -->
+  <!-- Legs (power stance) -->
+  <path d="M180,390 L165,460 L158,500" stroke="#004400" stroke-width="24" stroke-linecap="round" fill="none"/>
+  <path d="M220,390 L235,458 L242,498" stroke="#004400" stroke-width="24" stroke-linecap="round" fill="none"/>
+  <!-- Shoes/boots -->
+  <ellipse cx="155" cy="503" rx="22" ry="10" fill="#00AA44" stroke="#111" stroke-width="1"/>
+  <ellipse cx="245" cy="501" rx="22" ry="10" fill="#00AA44" stroke="#111" stroke-width="1"/>
+  <!-- Shorts/belt -->
+  <rect x="162" y="340" width="76" height="56" rx="10" fill="#004400" stroke="#111" stroke-width="1.5"/>
+  <rect x="172" y="355" width="56" height="14" rx="4" fill="#00AA44" opacity="0.7"/>
+  <!-- Torso -->
+  <rect x="168" y="258" width="64" height="86" rx="14" fill="#004400" stroke="#111" stroke-width="1.5"/>
+  <!-- Gi collar/top detail -->
+  <path d="M190,258 L200,285 L210,258" fill="#00AA44" opacity="0.8"/>
+  <!-- Arms (fists down power pose) -->
+  <path d="M168,270 L138,305 L118,342" stroke="#AAFFAA" stroke-width="18" stroke-linecap="round" fill="none"/>
+  <path d="M232,270 L262,305 L282,342" stroke="#AAFFAA" stroke-width="18" stroke-linecap="round" fill="none"/>
+  <!-- Fists -->
+  <rect x="106" y="334" width="22" height="20" rx="6" fill="#AAFFAA" stroke="#111" stroke-width="1"/>
+  <rect x="274" y="334" width="22" height="20" rx="6" fill="#AAFFAA" stroke="#111" stroke-width="1"/>
+  <!-- Head -->
+  <circle cx="200" cy="210" r="46" fill="#AAFFAA" stroke="#111" stroke-width="1.5"/>
+  <!-- Intense eyes -->
+  <ellipse cx="184" cy="207" rx="7" ry="5" fill="white"/><circle cx="186" cy="207" r="4" fill="#111"/>
+  <ellipse cx="216" cy="207" rx="7" ry="5" fill="white"/><circle cx="218" cy="207" r="4" fill="#111"/>
+  <!-- Eye glow for transformed -->
+  <ellipse cx="186" cy="207" rx="3" ry="2.5" fill="#00FF77" opacity="0.8"/>
+  <ellipse cx="218" cy="207" rx="3" ry="2.5" fill="#00FF77" opacity="0.8"/>
+  <!-- Brow furrow -->
+  <path d="M178,198 L196,202" stroke="#444" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M204,202 L222,198" stroke="#444" stroke-width="2.5" stroke-linecap="round"/>
+  <!-- Screaming mouth -->
+  <path d="M186,228 Q200,240 214,228" fill="#444" stroke="#111" stroke-width="1"/>
+  <rect x="188" y="226" width="24" height="10" rx="3" fill="#AA0000" opacity="0.7"/>
+  <!-- Spikey hair -->
+  <path d="M158,200 Q155,170 162,145 Q170,165 168,178Z" fill="#003300"/>
+  <path d="M168,188 Q162,150 172,122 Q182,148 178,165Z" fill="#003300"/>
+  <path d="M180,182 Q178,138 192,110 Q200,140 196,160Z" fill="#003300"/>
+  <path d="M196,180 Q200,132 212,108 Q216,138 210,162Z" fill="#003300"/>
+  <path d="M210,184 Q218,142 228,120 Q232,148 224,168Z" fill="#003300"/>
+  <path d="M222,190 Q238,152 244,134 Q244,164 236,178Z" fill="#003300"/>
+  <!-- Warrior name label -->
+  <text x="200" y="545" text-anchor="middle" font-size="16" font-weight="bold" fill="#00FF77" font-family="Arial Black,sans-serif" opacity="0.9">PICCOLO</text>
+</svg>

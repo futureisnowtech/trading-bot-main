@@ -4,12 +4,13 @@ check_readiness.py — Evaluates whether the system is ready to switch from
 paper trading to live money. Reads directly from logs/trades.db.
 
 Run manually:
-    python3 scripts/check_readiness.py
+    python3 scripts/check_readiness.py               # Standard (14 days / 30 trades)
+    python3 scripts/check_readiness.py --fast-track  # After historical validation (2 days / 10 trades)
 
 Or schedule via launchd (see scripts/com.algotrading.readiness.plist).
-Sends an email alert when ALL criteria are met for the first time in a day.
+Sends an alert when ALL criteria are met for the first time in a day.
 
-Criteria (all must pass):
+Standard criteria (all must pass):
   1. At least 14 calendar days of paper trading activity
   2. At least 30 completed trades (closed positions)
   3. Overall win rate >= 52% across all completed trades
@@ -17,9 +18,20 @@ Criteria (all must pass):
   5. Total paper P&L is positive
   6. No single day had a loss exceeding 4% of starting account
   7. Average P&L per trade >= $0.10 (the system earns something)
+
+Fast-track criteria (--fast-track flag, after historical validation passes):
+  1. At least 2 calendar days of paper trading activity
+  2. At least 10 completed trades
+  3. Win rate >= 45%
+  4. No system halts in last 2 days
+  5. Positive total paper P&L
+  6. No single day worse than 6% of account
+  7. Average P&L per trade >= $0.05
+  8. Historical validation report exists and passed
 """
 import os
 import sys
+import argparse
 import sqlite3
 from datetime import datetime, timedelta
 
@@ -30,7 +42,7 @@ sys.path.insert(0, PROJ_ROOT)
 
 DB_PATH = os.path.join(PROJ_ROOT, 'logs', 'trades.db')
 
-# ── Criteria thresholds ───────────────────────────────────────────────────────
+# ── Criteria thresholds — Standard ───────────────────────────────────────────
 MIN_DAYS            = 14      # calendar days with at least 1 signal
 MIN_TRADES          = 30      # completed (SELL) trades
 MIN_WIN_RATE        = 0.52    # 52% win rate
@@ -38,6 +50,17 @@ MAX_DAILY_LOSS_PCT  = 0.04    # no day worse than -4% of account
 ACCOUNT_SIZE        = 500.0   # from config (fallback if .env not loaded)
 MIN_AVG_PNL         = 0.10    # minimum average P&L per trade ($)
 HALT_LOOKBACK_DAYS  = 7       # check for halts in last N days
+
+# ── Criteria thresholds — Fast-track (after historical validation) ────────────
+FT_MIN_DAYS           = 2
+FT_MIN_TRADES         = 10
+FT_MIN_WIN_RATE       = 0.45
+FT_MAX_DAILY_LOSS_PCT = 0.06
+FT_MIN_AVG_PNL        = 0.05
+FT_HALT_LOOKBACK_DAYS = 2
+
+VALIDATION_REPORT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                  'logs', 'validation_report.txt')
 
 
 def _conn():
@@ -48,13 +71,45 @@ def _conn():
     return c
 
 
-def check_criteria() -> dict:
+def check_historical_validation() -> dict:
+    """Check if logs/validation_report.txt exists and contains a PASS."""
+    if not os.path.exists(VALIDATION_REPORT):
+        return {
+            'value': False,
+            'target': True,
+            'pass': False,
+            'label': 'Historical validation: NOT RUN (run: python3 scripts/rapid_validate.py --no-ai)',
+        }
+    with open(VALIDATION_REPORT) as f:
+        content = f.read()
+    passed = 'OVERALL: ✅ PASS' in content or 'OVERALL: PASS' in content
+    return {
+        'value': passed,
+        'target': True,
+        'pass': passed,
+        'label': f'Historical validation: {"✅ PASSED" if passed else "❌ FAILED — re-run rapid_validate.py"}',
+    }
+
+
+def check_criteria(fast_track: bool = False) -> dict:
+    # Apply thresholds based on mode
+    min_days          = FT_MIN_DAYS           if fast_track else MIN_DAYS
+    min_trades        = FT_MIN_TRADES         if fast_track else MIN_TRADES
+    min_win_rate      = FT_MIN_WIN_RATE       if fast_track else MIN_WIN_RATE
+    max_daily_loss    = FT_MAX_DAILY_LOSS_PCT if fast_track else MAX_DAILY_LOSS_PCT
+    min_avg_pnl       = FT_MIN_AVG_PNL        if fast_track else MIN_AVG_PNL
+    halt_lookback     = FT_HALT_LOOKBACK_DAYS if fast_track else HALT_LOOKBACK_DAYS
+
     conn = _conn()
     if conn is None:
         return {'error': f'Database not found at {DB_PATH}. Run main.py first.'}
 
     results = {}
     now = datetime.now()
+
+    # ── Fast-track only: historical validation ────────────────────────────────
+    if fast_track:
+        results['historical_validation'] = check_historical_validation()
 
     # ── 1. Days of activity ───────────────────────────────────────────────────
     cur = conn.cursor()
@@ -67,23 +122,23 @@ def check_criteria() -> dict:
         days_elapsed = 0
     results['days_trading'] = {
         'value': days_elapsed,
-        'target': MIN_DAYS,
-        'pass': days_elapsed >= MIN_DAYS,
-        'label': f'{days_elapsed} calendar days (need {MIN_DAYS})',
+        'target': min_days,
+        'pass': days_elapsed >= min_days,
+        'label': f'{days_elapsed} calendar days (need {min_days})',
     }
 
     # ── 2. Number of completed trades ─────────────────────────────────────────
-    cur.execute("SELECT COUNT(*) FROM trades WHERE paper=1 AND action='SELL'")
+    cur.execute("SELECT COUNT(*) FROM trades WHERE paper=1 AND pnl_usd != 0")
     trade_count = cur.fetchone()[0] or 0
     results['trade_count'] = {
         'value': trade_count,
-        'target': MIN_TRADES,
-        'pass': trade_count >= MIN_TRADES,
-        'label': f'{trade_count} completed trades (need {MIN_TRADES})',
+        'target': min_trades,
+        'pass': trade_count >= min_trades,
+        'label': f'{trade_count} completed trades (need {min_trades})',
     }
 
     # ── 3. Win rate ───────────────────────────────────────────────────────────
-    cur.execute("SELECT pnl_usd FROM trades WHERE paper=1 AND action='SELL'")
+    cur.execute("SELECT pnl_usd FROM trades WHERE paper=1 AND pnl_usd != 0")
     pnls = [r[0] for r in cur.fetchall()]
     if pnls:
         wins = sum(1 for p in pnls if p > 0)
@@ -92,13 +147,13 @@ def check_criteria() -> dict:
         win_rate = 0.0
     results['win_rate'] = {
         'value': win_rate,
-        'target': MIN_WIN_RATE,
-        'pass': win_rate >= MIN_WIN_RATE,
-        'label': f'{win_rate:.1%} win rate (need {MIN_WIN_RATE:.0%})',
+        'target': min_win_rate,
+        'pass': win_rate >= min_win_rate,
+        'label': f'{win_rate:.1%} win rate (need {min_win_rate:.0%})',
     }
 
-    # ── 4. No system halts in last 7 days ─────────────────────────────────────
-    cutoff = (now - timedelta(days=HALT_LOOKBACK_DAYS)).strftime('%Y-%m-%d')
+    # ── 4. No system halts ────────────────────────────────────────────────────
+    cutoff = (now - timedelta(days=halt_lookback)).strftime('%Y-%m-%d')
     cur.execute(
         "SELECT COUNT(*) FROM system_events WHERE level='ERROR' AND message LIKE '%halt%' AND ts >= ?",
         (cutoff,))
@@ -107,7 +162,7 @@ def check_criteria() -> dict:
         'value': halt_count,
         'target': 0,
         'pass': halt_count == 0,
-        'label': f'{halt_count} halt events in last {HALT_LOOKBACK_DAYS} days (need 0)',
+        'label': f'{halt_count} halt events in last {halt_lookback} days (need 0)',
     }
 
     # ── 5. Positive total P&L ─────────────────────────────────────────────────
@@ -119,9 +174,9 @@ def check_criteria() -> dict:
         'label': f'Total P&L: ${total_pnl:.2f} (must be positive)',
     }
 
-    # ── 6. No single day worse than -4% of account ────────────────────────────
+    # ── 6. No single day worse than max_daily_loss of account ─────────────────
     cur.execute("""SELECT substr(ts,1,10) as day, SUM(pnl_usd) as daily_pnl
-                   FROM trades WHERE paper=1 AND action='SELL'
+                   FROM trades WHERE paper=1 AND pnl_usd != 0
                    GROUP BY day""")
     daily = {r[0]: r[1] for r in cur.fetchall()}
     max_loss_pct = 0.0
@@ -133,12 +188,12 @@ def check_criteria() -> dict:
             worst_day = day
     results['max_daily_loss'] = {
         'value': max_loss_pct,
-        'target': MAX_DAILY_LOSS_PCT,
-        'pass': max_loss_pct < MAX_DAILY_LOSS_PCT,
+        'target': max_daily_loss,
+        'pass': max_loss_pct < max_daily_loss,
         'label': (
             f'Worst day: {max_loss_pct:.1%} loss'
             + (f' on {worst_day}' if worst_day else '')
-            + f' (limit {MAX_DAILY_LOSS_PCT:.0%})'
+            + f' (limit {max_daily_loss:.0%})'
         ),
     }
 
@@ -146,24 +201,27 @@ def check_criteria() -> dict:
     avg_pnl = (sum(pnls) / len(pnls)) if pnls else 0.0
     results['avg_pnl'] = {
         'value': avg_pnl,
-        'target': MIN_AVG_PNL,
-        'pass': avg_pnl >= MIN_AVG_PNL,
-        'label': f'Avg P&L per trade: ${avg_pnl:.2f} (need ${MIN_AVG_PNL:.2f})',
+        'target': min_avg_pnl,
+        'pass': avg_pnl >= min_avg_pnl,
+        'label': f'Avg P&L per trade: ${avg_pnl:.2f} (need ${min_avg_pnl:.2f})',
     }
 
     conn.close()
     return results
 
 
-def print_report(results: dict) -> bool:
+def print_report(results: dict, fast_track: bool = False) -> bool:
     """Print the readiness report. Returns True if ALL criteria pass."""
     if 'error' in results:
         print(f'\n  ERROR: {results["error"]}\n')
         return False
 
+    mode_label = '⚡ FAST-TRACK' if fast_track else 'STANDARD'
     print('\n' + '='*60)
-    print('  PAPER → LIVE READINESS REPORT')
+    print(f'  PAPER → LIVE READINESS REPORT  [{mode_label}]')
     print(f'  Generated: {datetime.now().strftime("%Y-%m-%d %H:%M")}')
+    if fast_track:
+        print('  Mode: Historical validation passed → relaxed thresholds')
     print('='*60)
 
     all_pass = True
@@ -201,8 +259,13 @@ def send_ready_alert():
 
 
 def main():
-    results = check_criteria()
-    ready   = print_report(results)
+    parser = argparse.ArgumentParser(description='Paper → Live readiness check')
+    parser.add_argument('--fast-track', action='store_true',
+                        help='Use relaxed thresholds after historical validation passes')
+    args = parser.parse_args()
+
+    results = check_criteria(fast_track=args.fast_track)
+    ready   = print_report(results, fast_track=args.fast_track)
 
     # Only send alert if we crossed the threshold today
     if ready:

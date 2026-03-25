@@ -1,0 +1,102 @@
+<svg viewBox="0 0 700 480" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="kbg_ssj3" cx="25%" cy="60%" r="80%">
+      <stop offset="0%" stop-color="#111100" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="#000"/>
+    </radialGradient>
+    <linearGradient id="kbeam_ssj3" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#FFD700"/>
+      <stop offset="70%" stop-color="#FFD700" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#FFD700" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="kball_ssj3" cx="35%" cy="40%" r="60%">
+      <stop offset="0%" stop-color="white"/>
+      <stop offset="35%" stop-color="#FFD700"/>
+      <stop offset="100%" stop-color="#FFD700" stop-opacity="0.3"/>
+    </radialGradient>
+  </defs>
+  <rect width="700" height="480" fill="url(#kbg_ssj3)"/>
+
+  <!-- Ground crack effect -->
+  <ellipse cx="170" cy="460" rx="140" ry="14" fill="#FFD700" opacity="0.2"/>
+  <path d="M110,460 L130,440 L90,440 L115,420" stroke="#FFD700" stroke-width="1.5" fill="none" opacity="0.4"/>
+  <path d="M190,460 L210,445 L195,430" stroke="#FFD700" stroke-width="1" fill="none" opacity="0.3"/>
+
+  <!-- Aura around warrior -->
+  <ellipse cx="170" cy="260" rx="140" ry="220" fill="#FFD700" opacity="0.12"/>
+  <path d="M130,180 Q122,150 130,48 Q138,-24 130,-96Z" fill="#FFD700" opacity="0.4"/><path d="M150,180 Q142,150 150,56 Q158,-8 150,-72Z" fill="#FFD700" opacity="0.7"/><path d="M170,180 Q162,150 170,40 Q178,-40 170,-120Z" fill="#FFD700" opacity="0.4"/><path d="M190,180 Q182,150 190,60 Q198,0 190,-60Z" fill="#FFD700" opacity="0.7"/><path d="M210,180 Q202,150 210,44 Q218,-32 210,-108Z" fill="#FFD700" opacity="0.4"/><path d="M110,180 Q102,150 110,52 Q118,-16 110,-84Z" fill="#FFD700" opacity="0.7"/><path d="M230,180 Q222,150 230,36 Q238,-48 230,-132Z" fill="#FFD700" opacity="0.4"/><path d="M155,170 Q150,120 155,-24 Q160,48 155,12Z" fill="#FFFAAA" opacity="0.6"/><path d="M170,170 Q165,120 170,-24 Q175,48 170,12Z" fill="#FFFAAA" opacity="0.6"/><path d="M185,170 Q180,120 185,-24 Q190,48 185,12Z" fill="#FFFAAA" opacity="0.6"/>
+  <path d="M90,70 L105,110 L95,118 L115,155" stroke="#FFFAAA" stroke-width="2.5" fill="none" stroke-linecap="round" opacity="0.8"/><path d="M250,80 L238,115 L248,122 L230,160" stroke="#FFFAAA" stroke-width="2" fill="none" stroke-linecap="round" opacity="0.7"/><path d="M75,160 L92,185 L82,190 L100,215" stroke="#FFFAAA" stroke-width="1.5" fill="none" stroke-linecap="round" opacity="0.6"/><path d="M260,150 L245,180 L255,186 L235,210" stroke="#FFFAAA" stroke-width="1.5" fill="none" stroke-linecap="round" opacity="0.6"/>
+
+  <!-- Energy particles -->
+  <circle cx="125" cy="83" r="1" fill="#FFFAAA" opacity="0.5"/><circle cx="114" cy="98" r="1" fill="#FFFAAA" opacity="0.5"/><circle cx="244" cy="83" r="2" fill="#FFFAAA" opacity="0.2"/><circle cx="201" cy="360" r="4" fill="#FFFAAA" opacity="0.5"/><circle cx="95" cy="122" r="3" fill="#FFFAAA" opacity="0.6"/><circle cx="166" cy="152" r="4" fill="#FFFAAA" opacity="0.7"/><circle cx="221" cy="429" r="3" fill="#FFFAAA" opacity="0.4"/><circle cx="319" cy="279" r="2" fill="#FFFAAA" opacity="0.5"/><circle cx="283" cy="394" r="4" fill="#FFFAAA" opacity="0.2"/><circle cx="71" cy="337" r="4" fill="#FFFAAA" opacity="0.5"/><circle cx="183" cy="114" r="3" fill="#FFFAAA" opacity="0.4"/><circle cx="166" cy="267" r="4" fill="#FFFAAA" opacity="0.3"/><circle cx="273" cy="279" r="3" fill="#FFFAAA" opacity="0.4"/><circle cx="93" cy="214" r="4" fill="#FFFAAA" opacity="0.6"/><circle cx="113" cy="224" r="4" fill="#FFFAAA" opacity="0.6"/><circle cx="161" cy="98" r="4" fill="#FFFAAA" opacity="0.5"/><circle cx="43" cy="241" r="1" fill="#FFFAAA" opacity="0.6"/><circle cx="73" cy="44" r="2" fill="#FFFAAA" opacity="0.4"/><circle cx="304" cy="35" r="4" fill="#FFFAAA" opacity="0.3"/><circle cx="305" cy="140" r="2" fill="#FFFAAA" opacity="0.7"/><circle cx="173" cy="353" r="1" fill="#FFFAAA" opacity="0.4"/><circle cx="149" cy="62" r="5" fill="#FFFAAA" opacity="0.2"/><circle cx="253" cy="104" r="1" fill="#FFFAAA" opacity="0.3"/><circle cx="109" cy="326" r="1" fill="#FFFAAA" opacity="0.5"/><circle cx="107" cy="48" r="5" fill="#FFFAAA" opacity="0.3"/>
+
+  <!-- Warrior (side profile, leaning into beam) -->
+  <!-- Legs (side stance) -->
+  <path d="M148,380 L132,440 L126,468" stroke="#FDBCB4" stroke-width="22" stroke-linecap="round" fill="none"/>
+  <path d="M192,376 L206,435 L214,465" stroke="#FDBCB4" stroke-width="22" stroke-linecap="round" fill="none"/>
+  <ellipse cx="122" cy="470" rx="20" ry="9" fill="#222"/>
+  <ellipse cx="217" cy="468" rx="20" ry="9" fill="#222"/>
+
+  <!-- Shorts -->
+  <rect x="136" y="328" width="68" height="54" rx="10" fill="#CC3300"/>
+  <!-- Belt -->
+  <rect x="130" y="344" width="80" height="12" rx="5" fill="#333"/>
+
+  <!-- Torso leaning forward -->
+  <rect x="138" y="248" width="62" height="84" rx="13" fill="#FF6600" transform="rotate(-12,170,290)"/>
+  <path d="M162,248 L170,272 L178,248" fill="#CC3300" opacity="0.8" transform="rotate(-12,170,290)"/>
+
+  <!-- Left arm (support) -->
+  <path d="M140,262 L108,295 L84,322" stroke="#FDBCB4" stroke-width="17" stroke-linecap="round" fill="none"/>
+  <!-- Right arm (power arm angled forward into beam) -->
+  <path d="M196,260 L235,252 L285,248" stroke="#FDBCB4" stroke-width="17" stroke-linecap="round" fill="none"/>
+
+  <!-- Hands cupped/pushing -->
+  <circle cx="80" cy="325" r="14" fill="#FDBCB4"/>
+  <circle cx="290" cy="248" r="15" fill="#FDBCB4"/>
+  <!-- Cupped hand effect -->
+  <path d="M276,238 Q290,242 295,256 Q285,260 272,256Z" fill="#FDBCB4"/>
+
+  <!-- Head -->
+  <circle cx="168" cy="178" r="44" fill="#FDBCB4" stroke="#1a1a1a" stroke-width="1.5"/>
+  <!-- Eye (single visible profile) -->
+  <ellipse cx="182" cy="174" rx="9" ry="7" fill="white"/>
+  <circle cx="183" cy="173" r="5" fill="#22FF22"/>
+  <circle cx="184" cy="172" r="2.5" fill="#111"/>
+  <ellipse cx="183" cy="173" rx="3.5" ry="2.5" fill="#22FF22" opacity="0.6"/>
+  <!-- Brow -->
+  <path d="M172,164 Q183,158 193,162" stroke="#5a3a1a" stroke-width="3.5" fill="none" stroke-linecap="round" opacity="0.8"/>
+  <!-- Mouth (yelling KAME) -->
+  <path d="M165,196 Q175,205 185,198" fill="#333" stroke="#111" stroke-width="1"/>
+
+  <!-- Spiky hair -->
+  <path d="M160,146 L164,87 L168,83 L172,87 L172,146Z" fill="#FFD700" stroke="#FFD700" stroke-width="0.5"/><path d="M164,146 L182,80 L186,76 L190,80 L174,146Z" fill="#FFD700" stroke="#FFD700" stroke-width="0.5"/><path d="M168,146 L193,78 L197,74 L201,78 L176,146Z" fill="#FFD700" stroke="#FFD700" stroke-width="0.5"/><path d="M172,146 L214,103 L218,99 L222,103 L178,146Z" fill="#FFD700" stroke="#FFD700" stroke-width="0.5"/><path d="M176,146 L214,110 L218,106 L222,110 L180,146Z" fill="#FFD700" stroke="#FFD700" stroke-width="0.5"/><path d="M180,146 L140,72 L144,68 L148,72 L182,146Z" fill="#FFD700" stroke="#FFD700" stroke-width="0.5"/>
+
+  <!-- ═══ BEAM ═══ -->
+  <!-- Charge ball at hands -->
+  <circle cx="310" cy="246" r="52" fill="#FFD700" opacity="0.25"/>
+  <circle cx="310" cy="246" r="38" fill="#FFD700" opacity="0.4"/>
+  <circle cx="310" cy="246" r="26" fill="url(#kball_ssj3)"/>
+  <circle cx="300" cy="238" r="10" fill="white" opacity="0.7"/>
+
+  <!-- Beam body -->
+  <path d="M348,226 L700,200 L700,292 L348,266Z" fill="url(#kbeam_ssj3)" opacity="0.35"/>
+  <path d="M348,232 L700,208 L700,284 L348,260Z" fill="url(#kbeam_ssj3)" opacity="0.55"/>
+  <!-- Core bright beam -->
+  <path d="M348,240 L700,220 L700,272 L348,252Z" fill="#FFD700" opacity="0.7"/>
+  <path d="M348,244 L700,226 L700,266 L348,248Z" fill="white" opacity="0.4"/>
+
+  <!-- Beam edge glow -->
+  <path d="M348,228 L700,205 L700,210 L348,233Z" fill="#FFFAAA" opacity="0.3"/>
+  <path d="M348,262 L700,285 L700,290 L348,267Z" fill="#FFFAAA" opacity="0.3"/>
+
+  <!-- Sparks along beam -->
+  <circle cx="348" cy="242" r="3" fill="#FFFAAA" opacity="0.6"/><circle cx="389" cy="239" r="3" fill="#FFFAAA" opacity="0.4"/><circle cx="437" cy="237" r="2" fill="#FFFAAA" opacity="0.4"/><circle cx="484" cy="255" r="5" fill="#FFFAAA" opacity="0.5"/><circle cx="515" cy="243" r="4" fill="#FFFAAA" opacity="0.6"/><circle cx="553" cy="236" r="2" fill="#FFFAAA" opacity="0.7"/><circle cx="608" cy="256" r="5" fill="#FFFAAA" opacity="0.9"/><circle cx="639" cy="239" r="2" fill="#FFFAAA" opacity="0.5"/><circle cx="694" cy="253" r="2" fill="#FFFAAA" opacity="0.8"/>
+
+  <!-- Level badge -->
+  <rect x="610" y="14" width="76" height="30" rx="8" fill="#FFD700" opacity="0.9"/>
+  <text x="648" y="34" text-anchor="middle" font-size="14" font-weight="bold" fill="black" font-family="Arial Black,sans-serif">SSJ3</text>
+
+  <!-- KAMEHAMEHA label -->
+  <text x="350" y="460" text-anchor="middle" font-size="28" font-weight="bold" fill="#FFD700" font-family="Arial Black,sans-serif" letter-spacing="6" opacity="0.7">KAMEHAMEHA</text>
+</svg>

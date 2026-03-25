@@ -60,6 +60,28 @@ from logging_db.trade_logger import (
 )
 from alerts.telegram_alert import alert_system, alert_daily_summary
 from memory.trade_memory import retrieve_similar_experiences, format_memory_context, store_trade_experience
+# ── Self-improving intelligence layer ────────────────────────────────────────
+try:
+    from learning.post_trade_analyzer import analyze_closed_trade
+    from learning.dynamic_weights import get_conviction_score, invalidate_cache as _invalidate_weights
+    from learning.signal_performance import get_agent_accuracy_context
+    from data.price_archive import upsert_candles as _archive_candles
+    _LEARNING_AVAILABLE = True
+except Exception as _le:
+    print(f"[scheduler] Learning layer unavailable: {_le}")
+    _LEARNING_AVAILABLE = False
+
+# ── Market context + session analyst ─────────────────────────────────────────
+try:
+    from data.market_context import get_context_for_debate, should_block_trade
+    from strategies.ai_agents.session_analyst import (
+        run_session_analysis, get_current_session_context,
+        format_session_context_for_debate,
+    )
+    _CONTEXT_AVAILABLE = True
+except Exception as _cte:
+    print(f"[scheduler] Market context unavailable: {_cte}")
+    _CONTEXT_AVAILABLE = False
 
 _crypto_strategy = CryptoMACDStrategy(variant='consensus')
 _futures_strategy = FuturesScalperStrategy()
@@ -383,6 +405,7 @@ def _execute_equity_exit(wb, rm, symbol, pos, price, reason, strategy, market_da
     if result:
         rm.close_position(strategy, symbol)
         pnl = (price - pos['entry']) * pos['qty']
+        fee  = price * pos['qty'] * 0.001  # equity commission estimate
         md = market_data or {}
         store_trade_experience(
             symbol=symbol, strategy=strategy,
@@ -392,6 +415,24 @@ def _execute_equity_exit(wb, rm, symbol, pos, price, reason, strategy, market_da
             adx=md.get('adx', 25), vol_spike=md.get('vol_spike', 1.0),
             regime=md.get('regime', 'unknown'),
         )
+        # Post-trade attribution + Bayesian weight update
+        if _LEARNING_AVAILABLE:
+            try:
+                analyze_closed_trade(
+                    symbol=symbol, strategy=strategy,
+                    entry_price=pos['entry'], exit_price=price,
+                    qty=pos['qty'], fee_usd=fee,
+                    entry_ts=pos.get('ts_entry', ''),
+                    exit_ts=datetime.now(pytz.timezone(MARKET_TIMEZONE)).isoformat(),
+                    exit_reason=reason,
+                    market_data_at_entry=md,
+                    agent_votes=md.get('agent_votes', {}),
+                    paper=PAPER_TRADING,
+                    trade_ref=f"eq_{symbol}_{pos.get('ts_entry','')}",
+                )
+                _invalidate_weights()
+            except Exception as _ale:
+                print(f"[learning] equity attribution error: {_ale}")
         print(f"[equity] ✅ EXITED {symbol} | {reason} | P&L: ${pnl:+.2f}")
 
 
@@ -420,6 +461,25 @@ def _execute_crypto_exit(cb, rm, pid, pos, price, reason, strategy, market_data=
                                rsi=md.get('rsi', 50), macd_hist=md.get('macd_hist', 0),
                                adx=md.get('adx', 25), vol_spike=md.get('vol_spike', 1.0),
                                regime=md.get('regime', 'unknown'))
+        # Post-trade attribution + Bayesian weight update (SHORT)
+        if _LEARNING_AVAILABLE:
+            try:
+                fee_est_short = price * pos['qty'] * (COINBASE_MAKER_FEE_PCT + 0.006)
+                analyze_closed_trade(
+                    symbol=pid, strategy=strategy,
+                    entry_price=pos['entry'], exit_price=price,
+                    qty=pos['qty'], fee_usd=fee_est_short,
+                    entry_ts=pos.get('ts_entry', ''),
+                    exit_ts=datetime.now(pytz.timezone(MARKET_TIMEZONE)).isoformat(),
+                    exit_reason=reason,
+                    market_data_at_entry=md,
+                    agent_votes=md.get('agent_votes', {}),
+                    paper=PAPER_TRADING,
+                    trade_ref=f"cr_short_{pid}_{pos.get('ts_entry','')}",
+                )
+                _invalidate_weights()
+            except Exception as _ale:
+                print(f"[learning] SHORT attribution error: {_ale}")
         # Alert was missing for SHORT exits — fixed
         try:
             from alerts.telegram_alert import alert_trade_closed
@@ -451,6 +511,24 @@ def _execute_crypto_exit(cb, rm, pid, pos, price, reason, strategy, market_data=
             adx=md.get('adx', 25), vol_spike=md.get('vol_spike', 1.0),
             regime=md.get('regime', 'unknown'),
         )
+        # Post-trade attribution + Bayesian weight update
+        if _LEARNING_AVAILABLE:
+            try:
+                analyze_closed_trade(
+                    symbol=pid, strategy=strategy,
+                    entry_price=pos['entry'], exit_price=price,
+                    qty=pos['qty'], fee_usd=fee_est,
+                    entry_ts=pos.get('ts_entry', ''),
+                    exit_ts=datetime.now(pytz.timezone(MARKET_TIMEZONE)).isoformat(),
+                    exit_reason=reason,
+                    market_data_at_entry=md,
+                    agent_votes=md.get('agent_votes', {}),
+                    paper=PAPER_TRADING,
+                    trade_ref=f"cr_{pid}_{pos.get('ts_entry','')}",
+                )
+                _invalidate_weights()
+            except Exception as _ale:
+                print(f"[learning] crypto attribution error: {_ale}")
         print(f"[crypto] ✅ EXITED {pid} | {reason} | P&L: ${pnl:+.2f}")
 
 
@@ -693,6 +771,13 @@ def run_crypto_scan() -> None:
             if df is None or len(df) < 30:
                 continue
 
+            # Archive candles as they arrive — feeds the backtest data flywheel
+            if _LEARNING_AVAILABLE:
+                try:
+                    _archive_candles(df, pid, CRYPTO_CANDLE_GRANULARITY)
+                except Exception:
+                    pass
+
             df_ind = add_all_indicators(df)
             price = float(df_ind.iloc[-1]['close'])
 
@@ -811,68 +896,159 @@ def run_crypto_scan() -> None:
             _ac_cv    = market_data.get('autocorr_ret') or 0.0
             _tz_cv    = pytz.timezone(MARKET_TIMEZONE)
             _hour_et  = datetime.now(_tz_cv).hour
-            _dead_zone = 2 <= _hour_et < 7
+            _dead_zone = 2 <= _hour_et < 3   # Only the pre-London window is dead zone now
 
-            # Hard block on new entries 2-5 AM ET — lowest liquidity window.
-            # Exits/stops still work; only NEW entries are blocked.
-            if 2 <= _hour_et < 5:
+            # ── Session analyst context ────────────────────────────────────────
+            _session_ctx = {}
+            _session_cv_mult = 1.0
+            _session_debate_notes = ''
+            if _CONTEXT_AVAILABLE:
+                try:
+                    _session_ctx = get_current_session_context()
+                    _session_cv_mult = float(_session_ctx.get('conviction_threshold_multiplier', 1.0))
+                    _session_debate_notes = format_session_context_for_debate(_session_ctx)
+                except Exception:
+                    pass
+
+            # Hard block on new entries 2-3 AM ET only — absolute lowest liquidity.
+            # 3-8 AM ET = London session (HIGH quality window — best breakout time).
+            # Exits/stops still work; only NEW entries are blocked pre-3am.
+            if 2 <= _hour_et < 3:
                 log_event('INFO', 'scan_feed',
-                          f"[crypto] {pid} ⛔ 2-5am hard block — no new entries in lowest-liquidity window")
+                          f"[crypto] {pid} ⛔ 2-3am hard block — pre-London dead zone, no new entries")
                 continue
 
-            conviction = 0
-            # ── Tier 1: Legacy signals (backtested, proven) ───────────────────
-            if macd_entry:                                     conviction += 25
-            if williams_extreme:                               conviction += 20
-            if momentum_breakout:                              conviction += 15
-            if market_data['vol_spike'] >= 1.5:                conviction += 15
-            if _obi_cv > 0.15:                                 conviction += 10
-            if _tfi_cv > 0.10:                                 conviction += 10
-            if _adx_cv > 20:                                   conviction += 10
-            if _ac_cv  > 0.10:                                 conviction +=  5
-            if market_data.get('session_active', False):       conviction +=  5
-            # ── Tier 2: Advanced math signals (deep-research-backed) ──────────
-            if squeeze_breakout:                               conviction += 20  # BB-Keltner squeeze fire ≥20 bars
-            if rv_expansion:                                   conviction += 15  # RV ratio ≥ 1.3 expansion
-            if kalman_oversold:                                conviction += 10  # Price ≥1% below Kalman estimate
-            if avwap_reclaim:                                  conviction += 10  # Price ≥0.5% below AVWAP
-            _ou_z = float(market_data.get('ou_zscore') or 0.0)
-            if _ou_z <= -1.5:                                  conviction += 10  # OU z-score deep oversold
-            _ou_hl = market_data.get('ou_halflife_minutes')
-            if _ou_hl is not None and OU_HALFLIFE_MIN_MINUTES <= float(_ou_hl) <= OU_HALFLIFE_MAX_MINUTES:
-                                                               conviction +=  5  # OU half-life in tradeable range
-            _kyle = market_data.get('kyle_lambda_pct')
-            if _kyle is not None and float(_kyle) <= KYLE_LAMBDA_LOW_PCT:
-                                                               conviction +=  5  # Low Kyle lambda = liquid fills
-            # ── Tier 2b: New indicators (v4.3) ───────────────────────────────
-            _st_bull  = market_data.get('supertrend_bullish', False)
-            _cloud_b  = market_data.get('cloud_bullish', False)
-            _wae_bull = market_data.get('wae_bullish', False)
-            _wae_exp  = market_data.get('wae_exploding', False)
-            _fish_up  = market_data.get('fisher_cross_up', False)
-            _chop_t   = market_data.get('chop_trending', False)
-            _wt_osc   = market_data.get('wt_oversold_cross', False)
-            _lrsi_v   = float(market_data.get('lrsi') or 0.5)
-            if _st_bull:                                           conviction += 12  # SuperTrend bullish
-            if _cloud_b:                                           conviction +=  8  # Price above Ichimoku cloud
-            if _wae_bull and _wae_exp:                             conviction += 10  # WAE bullish explosion
-            elif _wae_bull:                                        conviction +=  5  # WAE directional (no explosion)
-            if _fish_up:                                           conviction +=  8  # Fisher Transform turning up
-            if _chop_t:                                            conviction +=  5  # CHOP < 38.2 = trending mkt
-            if _wt_osc:                                            conviction += 12  # WaveTrend cross from oversold
-            if _lrsi_v < 0.15:                                     conviction +=  8  # Laguerre RSI deeply oversold
-            elif _lrsi_v < 0.25:                                   conviction +=  4  # Laguerre RSI oversold
-            # ── Tier 3: TradingView Pro confirmation (external signal boost) ──
+            # ── Conviction scoring: Bayesian dynamic weights (learning layer) ──
+            # Falls back to hardcoded priors if < MIN_FIRES_TO_LEARN data exists.
+            # Weights shift toward observed win rates as evidence accumulates.
+            market_data['macd_consensus'] = macd_entry
+            market_data['tv_signal_active'] = False
             _tv_sig = get_recent_tv_signal(pid, max_age_seconds=TV_SIGNAL_MAX_AGE_SECONDS)
             if _tv_sig and _tv_sig.get('action') == 'buy':
-                                                               conviction += TV_SIGNAL_BOOST_CONVICTION
-            _min_cv = 70 if _dead_zone else 30
+                market_data['tv_signal_active'] = True
 
-            if conviction < _min_cv:
+            if _LEARNING_AVAILABLE:
+                conviction, _cv_breakdown = get_conviction_score(
+                    market_data, regime=market_data.get('regime', 'any')
+                )
+                # Additional microstructure signals not in canonical signal set
+                if _obi_cv > 0.15:  conviction += 10
+                if _tfi_cv > 0.10:  conviction += 10
+                if _adx_cv > 20:    conviction += 10
+                if _ac_cv  > 0.10:  conviction +=  5
+                if market_data.get('session_active', False): conviction += 5
+                _ou_z = float(market_data.get('ou_zscore') or 0.0)
+                if _ou_z <= -1.5:   conviction += 10
+                if _tv_sig and _tv_sig.get('action') == 'buy':
+                    conviction += TV_SIGNAL_BOOST_CONVICTION
+                market_data['conviction_score'] = conviction
+            else:
+                # Full hardcoded fallback (original v4.3 logic)
+                conviction = 0
+                if macd_entry:                                     conviction += 25
+                if williams_extreme:                               conviction += 20
+                if momentum_breakout:                              conviction += 15
+                if market_data['vol_spike'] >= 1.5:                conviction += 15
+                if _obi_cv > 0.15:                                 conviction += 10
+                if _tfi_cv > 0.10:                                 conviction += 10
+                if _adx_cv > 20:                                   conviction += 10
+                if _ac_cv  > 0.10:                                 conviction +=  5
+                if market_data.get('session_active', False):       conviction +=  5
+                if squeeze_breakout:                               conviction += 20
+                if rv_expansion:                                   conviction += 15
+                if kalman_oversold:                                conviction += 10
+                if avwap_reclaim:                                  conviction += 10
+                _ou_z = float(market_data.get('ou_zscore') or 0.0)
+                if _ou_z <= -1.5:                                  conviction += 10
+                _ou_hl = market_data.get('ou_halflife_minutes')
+                if _ou_hl is not None and OU_HALFLIFE_MIN_MINUTES <= float(_ou_hl) <= OU_HALFLIFE_MAX_MINUTES:
+                                                                   conviction +=  5
+                _kyle = market_data.get('kyle_lambda_pct')
+                if _kyle is not None and float(_kyle) <= KYLE_LAMBDA_LOW_PCT:
+                                                                   conviction +=  5
+                _lrsi_v = float(market_data.get('lrsi') or 0.5)
+                if market_data.get('supertrend_bullish'):          conviction += 12
+                if market_data.get('cloud_bullish'):               conviction +=  8
+                if market_data.get('wae_bullish') and market_data.get('wae_exploding'):
+                                                                   conviction += 10
+                elif market_data.get('wae_bullish'):               conviction +=  5
+                if market_data.get('fisher_cross_up'):             conviction +=  8
+                if market_data.get('chop_trending'):               conviction +=  5
+                if market_data.get('wt_oversold_cross'):           conviction += 12
+                if _lrsi_v < 0.15:                                 conviction +=  8
+                elif _lrsi_v < 0.25:                               conviction +=  4
+                if _tv_sig and _tv_sig.get('action') == 'buy':
+                                                                   conviction += TV_SIGNAL_BOOST_CONVICTION
+
+            # ── AI-first gate: conviction is now CONTEXT, not a blocker ─────────
+            # Old: skip debate if conviction < 30 (math decided for AI)
+            # New: require only ONE signal to fire (conviction > 0), then let AI decide.
+            # Dead zone (2-3am) already hard-blocked above.
+            # The session multiplier and session_bias become context in the debate prompt,
+            # not a numeric floor. AI agents see conviction score + session bias and decide.
+            if conviction == 0:
+                _sess_bias = _session_ctx.get('session_bias', 'NEUTRAL') if _session_ctx else 'N/A'
                 log_event('INFO', 'scan_feed',
-                          f"[crypto] {pid} ⏭ conviction={conviction}/100 < {_min_cv} "
-                          f"({'dead-zone' if _dead_zone else 'normal'})")
+                          f"[crypto] {pid} ⏭ conviction=0 — no signals fired, skip debate")
                 continue
+
+            # ── Macro/news pre-debate gate ─────────────────────────────────────
+            # should_block_trade() checks: RISK_OFF macro, HIGH news risk, VIX fear.
+            # These are hard economic conditions where no signal is worth trading into.
+            # Unlike conviction floor (which was math-gating AI), this is a genuine
+            # macro-environment gate that even a human would respect.
+            if _CONTEXT_AVAILABLE:
+                try:
+                    _macro_block, _macro_reason = should_block_trade(pid)
+                    if _macro_block:
+                        log_event('INFO', 'scan_feed',
+                                  f"[crypto] {pid} ⛔ macro/news block: {_macro_reason}")
+                        continue
+                except Exception:
+                    pass  # fail open — don't block on context errors
+
+            # ── Build active_signals list for Bayesian signal stats in prompts ──
+            # Canonical names that match signal_stats DB keys.
+            _active_signals = []
+            if macd_entry:          _active_signals.append('macd_consensus')
+            if williams_extreme:    _active_signals.append('williams_r')
+            if momentum_breakout:   _active_signals.append('momentum_volume')
+            if squeeze_breakout:    _active_signals.append('squeeze_fired')
+            if rv_expansion:        _active_signals.append('rv_expansion')
+            if kalman_oversold:     _active_signals.append('kalman_deviation')
+            if avwap_reclaim:       _active_signals.append('avwap_deviation')
+            _ou_z_check = float(market_data.get('ou_zscore') or 0.0)
+            if _ou_z_check <= -1.5: _active_signals.append('ou_zscore_entry')
+            if market_data.get('supertrend_bullish'):   _active_signals.append('supertrend_bullish')
+            if market_data.get('wt_oversold_cross'):    _active_signals.append('wavetrend_cross')
+            if market_data.get('cloud_bullish'):        _active_signals.append('ichimoku_bullish')
+            if market_data.get('fisher_cross_up'):      _active_signals.append('fisher_cross_up')
+            _lrsi_check = float(market_data.get('lrsi') or 0.5)
+            if _lrsi_check < 0.15:  _active_signals.append('lrsi_oversold')
+            elif _lrsi_check < 0.25: _active_signals.append('lrsi_mild_oversold')
+            if market_data.get('wae_bullish') and market_data.get('wae_exploding'):
+                _active_signals.append('wae_bullish_exploding')
+            elif market_data.get('wae_bullish'):
+                _active_signals.append('wae_bullish')
+            if market_data.get('chop_trending'):        _active_signals.append('chop_trending')
+            market_data['active_signals'] = _active_signals
+
+            # Pre-populate signal stats brief once (all agents share the same table)
+            if _LEARNING_AVAILABLE and _active_signals:
+                try:
+                    from learning.signal_performance import get_active_signal_stats_brief
+                    market_data['_signal_stats_brief'] = get_active_signal_stats_brief(
+                        _active_signals, regime=regime
+                    )
+                except Exception:
+                    market_data['_signal_stats_brief'] = ''
+
+            # Log conviction with session context (now informational, not a gate)
+            _sess_bias = _session_ctx.get('session_bias', 'NEUTRAL') if _session_ctx else 'N/A'
+            log_event('INFO', 'scan_feed',
+                      f"[crypto] {pid} conviction={conviction}/100 "
+                      f"signals={len(_active_signals)} "
+                      f"session={_sess_bias} mult={_session_cv_mult:.2f} — calling debate")
 
             # ── Symbol cooldown: skip re-entry 20 min after a losing exit ─────
             # DB-based check — survives bot restarts (in-memory dict would reset on reload)
@@ -922,11 +1098,42 @@ def run_crypto_scan() -> None:
                                                         market_data['rsi'], market_data['macd_hist'],
                                                         market_data['adx'], market_data['vol_spike'])
                 mem_ctx = format_memory_context(mem_exps)
+                # Augment with agent accuracy + signal performance intelligence
+                if _LEARNING_AVAILABLE:
+                    try:
+                        _acc_ctx = get_agent_accuracy_context(regime)
+                        if _acc_ctx:
+                            mem_ctx = mem_ctx + '\n\n' + _acc_ctx
+                    except Exception:
+                        pass
+
+                # Assemble full AI context: macro + news + session bias + conviction
+                _debate_context_parts = []
+                if _CONTEXT_AVAILABLE:
+                    try:
+                        _macro_news_ctx = get_context_for_debate(pid, market_data)
+                        if _macro_news_ctx:
+                            _debate_context_parts.append(_macro_news_ctx)
+                    except Exception:
+                        pass
+                if _session_debate_notes:
+                    _debate_context_parts.append(_session_debate_notes)
+                # Inject conviction score + session bias as readable AI context
+                _cv_context = (
+                    f"CONVICTION SCORE: {conviction}/100 | "
+                    f"SESSION BIAS: {_sess_bias} | "
+                    f"SESSION MULTIPLIER: {_session_cv_mult:.2f}x "
+                    f"({'AI bar lowered — strong session' if _session_cv_mult < 1.0 else 'AI bar raised — weak/risky session' if _session_cv_mult > 1.0 else 'neutral session'}). "
+                    f"The conviction score is informational — AI decides whether it's sufficient."
+                )
+                _debate_context_parts.append(_cv_context)
+                _debate_context = '\n\n'.join(_debate_context_parts)
 
                 # Full 5-agent debate for crypto — quick (3-agent) was missing
                 # regime_volatility and manipulation_risk, the exact agents that
                 # block bad regime entries and detect pump/dump/spoofing setups.
                 debate_result = engine['debate'](symbol=pid, market_data=market_data,
+                                                 context=_debate_context,
                                                  verbose=False, memory_context=mem_ctx)
                 daily_pnl = get_todays_pnl(paper=PAPER_TRADING)
                 _atstats = get_all_time_stats(paper=PAPER_TRADING)
@@ -1339,6 +1546,26 @@ def run_daily_close() -> None:
 
 # ─── SCHEDULER SETUP & LOOP ──────────────────────────────────────────────────
 
+def run_session_open_analysis(session_name: str) -> None:
+    """
+    Fire the AI Session Analyst at each session open.
+    Runs async-style — failure is silent to not disrupt trading.
+    """
+    if not _CONTEXT_AVAILABLE:
+        return
+    try:
+        print(f"\n[session_analyst] {session_name} open — running session analysis...")
+        ctx = run_session_analysis(session_name=session_name, force=True)
+        bias = ctx.get('session_bias', 'NEUTRAL')
+        mult = ctx.get('conviction_threshold_multiplier', 1.0)
+        notes = ctx.get('session_notes', '')[:100]
+        msg = f"[{session_name}] bias={bias} | cv_threshold×{mult:.2f} | {notes}"
+        print(f"  {msg}")
+        log_event('INFO', 'session_analyst', msg)
+    except Exception as e:
+        print(f"[session_analyst] {session_name} analysis error: {e}")
+
+
 def setup_schedules() -> None:
     days = [schedule.every().monday, schedule.every().tuesday, schedule.every().wednesday,
             schedule.every().thursday, schedule.every().friday]
@@ -1358,8 +1585,23 @@ def setup_schedules() -> None:
     if PERP_ENABLED:
         schedule.every(CRYPTO_SCAN_INTERVAL_SECONDS).seconds.do(run_perp_scan)
 
+    # ── Session-open analysis triggers (24/7 — crypto never closes) ──────────
+    # Asia open:   8:00 PM ET (20:00) — JPY/KRW flows, BTC/ETH active
+    # London open: 3:00 AM ET (03:00) — Best breakout window for crypto
+    # NY pre-mkt:  8:30 AM ET (08:30) — US session sets the tone
+    schedule.every().day.at('20:00').do(
+        lambda: run_session_open_analysis('ASIA')
+    )
+    schedule.every().day.at('03:00').do(
+        lambda: run_session_open_analysis('LONDON')
+    )
+    schedule.every().day.at('08:30').do(
+        lambda: run_session_open_analysis('NY_OPEN')
+    )
+
     print(f"[scheduler] Equity: {EQUITY_SCAN_INTERVAL_SECONDS}s | Crypto: {CRYPTO_SCAN_INTERVAL_SECONDS}s | "
-          f"Perp: {'ON' if PERP_ENABLED else 'OFF'} | Watchdog: {WATCHDOG_INTERVAL_SECONDS}s")
+          f"Perp: {'ON' if PERP_ENABLED else 'OFF'} | Watchdog: {WATCHDOG_INTERVAL_SECONDS}s | "
+          f"Session Analysis: ASIA 8pm / LONDON 3am / NY 8:30am ET")
 
 
 def run_forever() -> None:

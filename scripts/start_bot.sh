@@ -11,4 +11,7 @@ mkdir -p "$LOG_DIR"
 
 cd "$PROJ" || exit 1
 
-exec "$PYTHON" main.py --mode paper >> "$LOG_DIR/bot.log" 2>> "$LOG_DIR/bot_error.log"
+# Do NOT use exec — keep bash as parent process to break launchd's file lock
+# inheritance (Python 3.14 EDEADLK bug in daemon context on macOS).
+export PYTHONDONTWRITEBYTECODE=1
+"$PYTHON" -B main.py --mode paper

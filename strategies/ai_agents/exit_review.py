@@ -71,7 +71,9 @@ def run_exit_review(
     entry_reason: str,
     time_in_trade_minutes: int,
     market_data: dict,
-    verbose: bool = False
+    verbose: bool = False,
+    entry_ts: str = '',
+    asset_class: str = '',
 ) -> dict:
     """
     Run 3-agent exit review with extended thinking.
@@ -86,6 +88,22 @@ def run_exit_review(
     pnl_pct = (current_price - entry_price) / entry_price * 100
     distance_to_stop_pct = (current_price - stop_loss) / current_price * 100
     distance_to_target_pct = (take_profit - current_price) / current_price * 100
+
+    # ── Tax context injection ─────────────────────────────────────────────────
+    tax_note = ''
+    try:
+        from learning.tax_tracker import get_tax_aware_exit_note
+        # Infer asset_class from strategy if not provided
+        _ac = asset_class or ('futures' if 'futures' in strategy.lower() or 'mes' in strategy.lower()
+                              else 'perp' if 'perp' in strategy.lower()
+                              else 'equity' if 'equity' in strategy.lower()
+                              else 'crypto')
+        _ts = entry_ts or ''
+        unrealized = (current_price - entry_price) * (take_profit - entry_price) / max(
+            take_profit - entry_price, 0.001)  # rough unrealized in direction
+        tax_note = get_tax_aware_exit_note(symbol, strategy, _ac, _ts, pnl_pct * entry_price / 100)
+    except Exception:
+        pass
 
     agent_reviews = []
     exit_votes = []
@@ -105,6 +123,7 @@ def run_exit_review(
             entry_reason=entry_reason,
             time_in_trade_minutes=time_in_trade_minutes,
             market_data=market_data,
+            tax_note=tax_note,
         )
         agent_reviews.append({**review, 'agent': agent['name'], 'agent_key': agent_key})
 
@@ -148,7 +167,7 @@ def run_exit_review(
 def _run_exit_agent(agent_key, agent, symbol, entry_price, current_price,
                     stop_loss, take_profit, pnl_pct, distance_to_stop_pct,
                     distance_to_target_pct, entry_reason, time_in_trade_minutes,
-                    market_data) -> dict:
+                    market_data, tax_note: str = '') -> dict:
     """Run one exit agent with extended thinking."""
     rsi = market_data.get('rsi', 50)
     macd_hist = market_data.get('macd_hist', 0)
@@ -187,6 +206,7 @@ CURRENT MARKET DATA:
 - Price vs VWAP: {'ABOVE' if current_price > vwap else 'BELOW — possible trend break'} (VWAP: ${vwap:.4f})
 - ADX: {adx:.1f}
 - Volume spike: {vol_spike:.1f}x
+{f'{chr(10)}{tax_note}' if tax_note else ''}
 
 Should we EXIT this position now?"""
 

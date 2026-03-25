@@ -17,6 +17,7 @@ PLISTS=(
     "com.algotrading.king"
     "com.algotrading.backup"
     "com.algotrading.readiness"
+    "com.algotrading.brain"
 )
 
 # Make scripts executable
@@ -67,7 +68,8 @@ echo "Services installed. The bot will now:"
 echo "  • Start automatically when you log in"
 echo "  • Restart if it crashes (paper mode only)"
 echo "  • Back up the database and credentials at 2:00 AM daily"
-echo "  • Check readiness for live trading at 7:00 AM daily"
+echo "  • Check readiness for live trading at 7:00 AM daily
+  • Generate daily brain summary at 9:47 PM daily"
 echo ""
 echo "To check service status:"
 echo "  launchctl list | grep algotrading"

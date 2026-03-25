@@ -3,6 +3,13 @@
 # This file IS the system memory. Keep it current.
 # When you make changes: update this file AND append to CHANGELOG.md.
 
+## Strategic Brain
+
+The `/brain/` directory is the living strategic intelligence layer.
+- Hub: `brain/README.md`
+- Governed by: `brain_constitution.md` + `brain_execution_os.md`
+- Key notes: `brain/01_current_system/`, `brain/03_parameter_sets/`, `brain/10_decisions/`
+
 ## What This System Is
 
 A fully autonomous AI-powered trading system that:
@@ -10,7 +17,7 @@ A fully autonomous AI-powered trading system that:
 - Runs every candidate through 8 legendary investor AI agents who debate it
 - Uses extended AI reasoning (interleaved thinking) for exit decisions
 - Enforces unbreakable emotional safeguards (the amygdala is removed)
-- Learns from every completed trade via LanceDB vector memory
+- Learns from every completed trade via Bayesian signal attribution + LanceDB vector memory
 - Writes all notifications to SQLite; dashboard Notifications panel displays them
 - Displays everything on a LeBron James / Dragon Ball Z themed dashboard
 - Trades 100% autonomously — owner is never asked to approve anything
@@ -22,7 +29,20 @@ A fully autonomous AI-powered trading system that:
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
 
-## Current Version: v4.3
+## Current Version: v5.3
+- v5.2 (2026-03-25): Goku agent + Data feed layer + Tax tracking
+  - `data/news_feed.py`: CryptoPanic API + RSS fallback; sentiment -1 to +1; news_risk HIGH/MEDIUM/LOW
+  - `data/macro_feed.py`: DXY/SPY/GLD/VIX/TLT via yfinance + Coinglass funding rates; RISK_ON/NEUTRAL/RISK_OFF; macro_score -5 to +5
+  - `data/market_context.py`: Session detector (ASIA/LONDON/NY_OPEN/etc.); no_trade_flags + conviction_hints; get_context_for_debate() injects into every debate; should_block_trade() pre-debate gate
+  - `learning/tax_tracker.py`: Section 1256 futures 60/40 blended (~17% vs 32% short-term); YTD P&L by treatment; harvesting opportunities; exit_note injection for Tudor Jones/Soros/Simons
+  - `strategies/ai_agents/analyst_agents.py`: Goku (Ultra Instinct) added — 9th agent; Jim Simons/PTJ/Soros; sees all other votes, absolute veto (-100), boost (+25), 1200 tokens, no cache
+  - `strategies/ai_agents/debate_engine.py`: Goku runs after moderator when signal=BUY; VETO flips to HOLD; BOOST raises confidence by +0.15; DebateResult tracks goku_verdict
+  - `learning/post_trade_analyzer.py`: record_tax_lot() wired into every trade close
+  - Tax snapshot added to daily brain summaries
+- v5.3 (2026-03-25): AI Session Analyst + Session-aware routing
+  - `strategies/ai_agents/session_analyst.py`: Fires at Asia/London/NY opens; outputs session_bias + conviction_threshold_multiplier (0.7–1.5×) + signal overrides + avoid_flags; stored to SQLite session_contexts table
+  - `scheduler/job_runner.py`: London window opened (dead zone now 2-3am only); conviction threshold = base × session multiplier; macro+news context injected into every crypto debate; session open triggers at 8pm/3am/8:30am ET
+  - `strategies/ai_agents/exit_review.py`: Tax-aware exit — tax note injected into Tudor Jones/Soros/Simons prompts; new entry_ts + asset_class params
 - v3.0 baseline: Extended thinking exits, LanceDB memory, regime detection,
   prompt caching, structured outputs, 4-view dashboard, position persistence,
   watchdog, auto cost tuning
@@ -195,13 +215,20 @@ algo_trading_final/
 │   ├── log_change.sh             ← Prepend entry to CHANGELOG.md
 │   ├── com.algotrading.king.plist      ← launchd: auto-start + crash restart
 │   ├── com.algotrading.backup.plist    ← launchd: daily backup at 2:00 AM
-│   └── com.algotrading.readiness.plist ← launchd: readiness check at 7:00 AM
+│   ├── com.algotrading.readiness.plist ← launchd: readiness check at 7:00 AM
+│   ├── com.algotrading.brain.plist     ← launchd: daily brain summary at 9:47 PM
+│   ├── generate_daily_summary.py ← Auto-generates brain/06_daily_summaries/YYYY-MM-DD.md from DB
+│   └── seed_intelligence.py      ← One-time Bayesian prior seeding from 90-day backtests
 │
 ├── data/
 │   ├── auto_screener.py          ← Finviz + Yahoo + SEC discovery
 │   ├── market_data.py            ← yfinance, market hours
 │   ├── coinbase_feed.py          ← Coinbase WebSocket + REST
-│   └── indicators.py             ← MACD×4, RSI, VWAP, KST, ATR, ADX, HA
+│   ├── indicators.py             ← MACD×4, RSI, VWAP, KST, ATR, ADX, HA + 7 v4.3 indicators
+│   ├── price_archive.py          ← SQLite candle flywheel (logs/price_archive.db); backtest reads here first
+│   ├── news_feed.py              ← CryptoPanic API + RSS fallback; sentiment scoring; 10-min cache (v5.2)
+│   ├── macro_feed.py             ← Cross-asset: DXY/SPY/GLD/VIX via yfinance; Coinglass funding rates; RISK_ON/OFF (v5.2)
+│   └── market_context.py         ← Unified context: session + news + macro; no_trade_flags; get_context_for_debate() (v5.2)
 │
 ├── strategies/
 │   ├── base_strategy.py          ← Signal dataclass + abstract base
@@ -216,8 +243,16 @@ algo_trading_final/
 │       ├── risk_synthesizer.py   ← Final go/no-go with hard rules
 │       └── regime_detector.py    ← Market regime (trending/ranging/volatile)
 │
+├── learning/                     ← v5.0 Self-improving intelligence layer
+│   ├── __init__.py
+│   ├── signal_performance.py     ← Bayesian signal stats (4 tables: trade_attribution, signal_stats, agent_stats, backtest_results)
+│   ├── post_trade_analyzer.py    ← Why-this-trade-worked/failed engine (called on every close)
+│   ├── dynamic_weights.py        ← Live conviction weights (5-min cache, invalidates on close)
+│   ├── intelligence_bridge.py    ← Backtest → signal_stats pipeline (same table as live)
+│   └── tax_tracker.py            ← Tax lot tracking: Section 1256 futures, short/long-term, YTD liability, harvesting (v5.2)
+│
 ├── memory/
-│   └── trade_memory.py           ← LanceDB vector store (learns from history)
+│   └── trade_memory.py           ← LanceDB vector store (supplemental qualitative context)
 │
 ├── risk/
 │   └── risk_manager.py           ← All hard rules, position tracking, persistence
@@ -228,7 +263,8 @@ algo_trading_final/
 │   └── tradovate_broker.py       ← MES futures
 │
 ├── backtesting/
-│   └── backtest_engine.py
+│   ├── backtest_engine.py        ← run_with_intelligence() — full pipeline: run→validate→archive
+│   └── strategy_validator.py     ← Gate: win_rate≥45%, Sharpe≥0.5, max_dd≤20%, min_trades≥20
 │
 ├── logging_db/
 │   └── trade_logger.py           ← SQLite trades.db (WAL mode) + CSV + positions
@@ -256,6 +292,10 @@ algo_trading_final/
 | flow_tape | Coinbase Tape / Microstructure Flow | Piccolo | TFI 60-sec window; spread_bps tightness; Kyle lambda percentile; trade intensity spikes |
 | manipulation_risk | Kose John / Amin Nejat | Tien | OBI/TFI conflict = spoofing; unconfirmed vol spike = news risk; liquidation cascade detection |
 
+| goku | Jim Simons / Paul Tudor Jones / Soros | Goku (Ultra Instinct) | **RUNS LAST** after all agents. Absolute veto (kills trade if BUY) or boost (+0.15 confidence). Meta-pattern synthesis — evaluates whether the panel's consensus is genuine edge or rationalization. 1200 tokens, no cache. |
+
+**AI Session Analyst** (`strategies/ai_agents/session_analyst.py`): NOT a debate agent — fires ONCE at each session open (Asia 8pm ET, London 3am ET, NY 8:30am ET). Reads macro+news+signal leaderboard. Sets conviction_threshold_multiplier (0.7–1.5×) and session_bias that adjust the conviction floor for all scans that session.
+
 Quick debate agents (crypto/futures): microstructure, fee_discipline, flow_tape
 
 ## Exit Review Agents (Extended Thinking)
@@ -263,6 +303,50 @@ Quick debate agents (crypto/futures): microstructure, fee_discipline, flow_tape
 - Soros: "Is the thesis still intact?"
 - Simons: "Is the statistical pattern still holding?"
 Any ONE saying EXIT → we exit. Asymmetric on purpose.
+
+## v5.0 Learning Layer Architecture
+
+### How the System Learns
+
+Every closed trade triggers `analyze_closed_trade()` in `learning/post_trade_analyzer.py`, which:
+1. Extracts which signals were active at entry
+2. Computes net P&L (gross - fees)
+3. Generates a structured lesson ("why this worked/failed")
+4. Calls `record_trade_attribution()` → updates `signal_stats` table
+5. Calls `record_agent_votes()` → updates `agent_stats` table
+6. Calls `invalidate_cache()` → forces fresh weight load next conviction score
+
+### Bayesian Weight Formula
+```
+posterior_wr = (PRIOR_N * prior_p + N * obs_win_rate) / (PRIOR_N + N)
+bayesian_pts = prior_pts * (posterior_wr / prior_p)
+```
+- `PRIOR_N = 20` phantom trades (confidence in prior)
+- `MIN_FIRES_TO_LEARN = 10` (below this, use hardcoded prior)
+- Cap: 2.5× the original prior points
+- Per signal × regime (trending/ranging/volatile)
+
+### Price Archive Flywheel
+Every live candle fetch writes to `logs/price_archive.db` (WAL mode, separate from trades.db).
+Backtests check archive first (70% coverage threshold). If coverage OK, zero API calls.
+If not, fetches from Coinbase API → yfinance fallback → archives result immediately.
+
+### Seeding Intelligence (run once before live trading)
+```bash
+python3 scripts/seed_intelligence.py --days 90 --validate
+```
+Fetches 90 days of BTC/ETH/SOL/etc., runs full backtests, attributes 1000s of simulated trades
+into `signal_stats`, pre-populates Bayesian priors so Day 1 is evidence-backed, not guesswork.
+
+### SQLite Tables Added in v5.0
+| Table | Purpose |
+|-------|---------|
+| `trade_attribution` | One row per signal per closed trade; links signal→regime→won→pnl |
+| `signal_stats` | Running Bayesian stats per signal/regime; source=live or backtest |
+| `agent_stats` | Per-agent vote accuracy; injected into debate prompts |
+| `backtest_results` | Archived strategy validation runs with param hash |
+
+(All in `logs/trades.db`)
 
 ## The Amygdala Removal Rules (HARDCODED — NO OVERRIDE)
 1. Never chase — skip if price moved >3% since signal
@@ -496,6 +580,17 @@ Motivation 5: "Nothing is given. Everything is earned."
          launchd, daily DB + credential backups, paper→live readiness tracker,
          CHANGELOG.md + log_change.sh, notifications written to SQLite +
          displayed in dashboard Notifications panel (no email)
+- v5.0 (2026-03-25): True Brain — self-improving intelligence layer:
+         Bayesian conviction weights (prior → posterior per signal/regime);
+         trade attribution engine (learning/signal_performance.py + post_trade_analyzer.py);
+         dynamic weights (learning/dynamic_weights.py, 5-min cache, invalidate on close);
+         intelligence bridge (backtest trades feed same signal_stats as live trades);
+         price archive (data/price_archive.db — candle flywheel, zero re-fetch);
+         strategy validator gate (win_rate≥45%, Sharpe≥0.5, max_dd≤20%, trades≥20);
+         seed_intelligence.py (pre-populate Bayesian priors from 90-day backtest data);
+         agent accuracy tracking (agent_stats table, accuracy injected into debate context);
+         daily brain summaries (generate_daily_summary.py + launchd 9:47 PM, signal leaderboard auto-populated);
+         SHORT branch attribution fixed; LanceDB demoted to supplemental context
 
 ## Claude's Standing Instructions
 When making any change to this project:

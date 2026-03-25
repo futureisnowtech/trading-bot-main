@@ -86,6 +86,7 @@ KYLE_LAMBDA_LOW_PCT: float = 30.0          # Kyle lambda ≤ 30th pct = liquid m
 # AI — ANTHROPIC
 # ════════════════════════════════════════════════════════════════════
 ANTHROPIC_API_KEY: str = os.getenv('ANTHROPIC_API_KEY', '')
+CRYPTOPANIC_API_KEY: str = os.getenv('CRYPTOPANIC_API_KEY', '')    # Free tier at cryptopanic.com/developers/api/
 CLAUDE_MODEL: str = 'claude-sonnet-4-6'                      # Always latest
 CLAUDE_MODEL_EXTENDED: str = 'claude-sonnet-4-6'             # For exit extended thinking
 DEBATE_MAX_TOKENS: int = 700                                  # Raised from 300 — agents need room to reason deeply
@@ -98,6 +99,9 @@ QUICK_DEBATE_AGENTS: list = ['microstructure', 'fee_discipline', 'flow_tape']
 FULL_DEBATE_AGENTS: list = ['microstructure', 'fee_discipline', 'flow_tape',
                              'regime_volatility', 'manipulation_risk']
 FULL_DEBATE_MIN_AGREEMENT: float = 0.40                      # 2 of 5 agents — explicit count enforced in risk_synthesizer
+
+# Goku — Ultra Instinct final synthesizer (runs after all agents, absolute veto + boost)
+GOKU_ENABLED: bool = os.getenv('GOKU_ENABLED', 'true').lower() == 'true'
 
 # Auto-tuning thresholds (AI switches debate depth based on account + win rate)
 AUTO_TUNE_FULL_DEBATE_THRESHOLD: float = float(os.getenv('AUTO_TUNE_FULL_DEBATE_THRESHOLD', '1000.0'))  # Account > $1000 → always full debate

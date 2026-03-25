@@ -1,5 +1,46 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
+## 2026-03-25 — v5.3: AI Session Analyst + Session-aware Routing + Full Wiring
+- **strategies/ai_agents/session_analyst.py** (NEW): AI Session Analyst — fires at Asia (8pm ET), London (3am ET), NY (8:30am ET) opens. Reads news+macro+signal leaderboard. Outputs: session_bias (STRONGLY_BULLISH→STRONGLY_BEARISH), conviction_threshold_multiplier (0.7–1.5×), signal_weight_overrides, strategies_to_favor, avoid_flags, session_notes. Stores to SQLite session_contexts table + 4h memory cache. Bounded multipliers prevent AI from silencing all signals or going wild.
+- **scheduler/job_runner.py** (MODIFIED):
+  - London window OPENED: dead zone reduced from 2-5am → 2-3am ET. London session (3am-8am ET) now fully active as HIGH quality breakout window.
+  - Session analyst integration: conviction threshold = base × session_cv_multiplier. BULLISH session lowers bar, RISK_OFF raises it. Session bias logged on every skip.
+  - Macro+news context wired into every crypto debate: `get_context_for_debate()` + `format_session_context_for_debate()` injected as `context` arg to `run_debate()`. Every agent now sees macro regime, VIX, news sentiment, funding rates before deciding.
+  - Session open triggers added to setup_schedules(): ASIA 8pm ET, LONDON 3am ET, NY 8:30am ET
+  - `run_session_open_analysis()` function added
+- **strategies/ai_agents/exit_review.py** (MODIFIED): Tax-aware exit review — `get_tax_aware_exit_note()` injected into every exit agent prompt. Tudor Jones, Soros, and Simons now explicitly see whether gains are short-term, long-term, or Section 1256 before recommending hold/exit. Added `entry_ts` and `asset_class` parameters.
+
+## 2026-03-25 — v5.2: Goku + Data Feed Layer + Tax Tracking
+- **data/news_feed.py** (NEW): Crypto news sentiment — CryptoPanic API primary, CoinDesk RSS fallback; bearish/bullish/risk keyword scoring; sentiment_score -1.0 to +1.0; 10-min cache; format_news_for_debate() injects into agent prompts
+- **data/macro_feed.py** (NEW): Cross-asset macro context — yfinance (DXY, SPY, GLD, VIX, TLT, BTC), Coinglass public funding rates; macro_score -5 to +5; RISK_ON/NEUTRAL/RISK_OFF regime; 15-min cache; format_macro_for_debate() injects into agent prompts
+- **data/market_context.py** (NEW): Unified context assembler — session detection (ASIA/LONDON/NY_OPEN/PREMARKET/etc.); no_trade_flags (dead zone, HIGH news risk, RISK_OFF, VIX fear, overheated longs); conviction_hints (tailwinds); get_context_for_debate() for debate enrichment; should_block_trade() for pre-debate gate
+- **learning/tax_tracker.py** (NEW): Tax lot tracking — SQLite tax_lots table; Section 1256 detection (MES/futures: 60% LTCG + 40% ST = ~17% blended); short/long-term classification; YTD summary by treatment; estimated liability; harvesting opportunity detection; get_tax_aware_exit_note() injected into exit review; format_tax_summary_for_brain() for daily notes
+- **strategies/ai_agents/analyst_agents.py** (MODIFIED): Added 'goku' to AGENTS dict — Jim Simons / Paul Tudor Jones / Soros, DBZ: Goku (Ultra Instinct); added run_goku() function — 9th agent, runs LAST, sees all other votes + moderator synthesis, absolute veto (-100) and boost (+25) capability, 1200 token limit, no cache (unique context every call)
+- **strategies/ai_agents/debate_engine.py** (MODIFIED): Goku integration — imports GOKU_ENABLED; DebateResult gains goku_verdict/goku_conviction_adjustment/goku_reasoning/goku_insight fields; run_debate() calls run_goku() after moderator when signal=BUY; VETO kills trade + updates reasoning; BOOST raises confidence by +0.15 capped at 0.95; goku verdict shown in __repr__
+- **learning/post_trade_analyzer.py** (MODIFIED): Tax lot recording wired into analyze_closed_trade() — calls record_tax_lot() after every close with asset_class mapped from strategy name
+- **scripts/generate_daily_summary.py** (MODIFIED): Added TAX SNAPSHOT section — calls format_tax_summary_for_brain() for YTD tax breakdown in every daily brain note; added _get_tax_snapshot() helper
+- **config.py** (MODIFIED): Added CRYPTOPANIC_API_KEY, GOKU_ENABLED
+- **.env.example** (MODIFIED): Added CRYPTOPANIC_API_KEY and GOKU_ENABLED placeholders
+
+## 2026-03-25 — v5.0 True Brain: Self-Improving Intelligence Layer
+- **learning/signal_performance.py** (NEW): Bayesian attribution engine — 4 new SQLite tables (trade_attribution, signal_stats, agent_stats, backtest_results); PRIOR_N=20 phantom trades; 19 signal priors; posterior_wr blend; bayesian_pts = prior_pts × (posterior_wr / prior_p) capped 2.5×; MIN_FIRES_TO_LEARN=10
+- **learning/post_trade_analyzer.py** (NEW): Why-this-trade-worked/failed engine; extracts canonical signal names from market_data; generates structured lessons (confluence patterns, fee cannibalization, regime mismatch); called on every trade close
+- **learning/dynamic_weights.py** (NEW): Live conviction weights; 5-min TTL cache; invalidate_cache() after every close; get_conviction_score() replaces hardcoded tier blocks; get_weights_snapshot() for dashboard
+- **learning/intelligence_bridge.py** (NEW): Backtest trade attribution → same signal_stats table as live (source='backtest'); archive_backtest_result() with MD5 param hash; get_best_backtest() for drift detection
+- **data/price_archive.py** (NEW): SQLite candle flywheel at logs/price_archive.db; upsert_candles() + get_candles() + has_data() with 70% coverage threshold; every live fetch auto-archives; backtests read here first (zero re-fetch)
+- **backtesting/strategy_validator.py** (NEW): ValidationResult dataclass; gate checks: win_rate≥45%, Sharpe≥0.5, max_dd≤20%, min_trades≥20, avg_pnl>0; archives to backtest_results; check_live_vs_backtest_drift() for divergence detection
+- **backtesting/backtest_engine.py** (MODIFIED): fetch_data() checks price_archive first; run_with_intelligence() full pipeline: run→extract_trades→validate→archive→return; _extract_trades_from_stats() helper
+- **scheduler/job_runner.py** (MODIFIED): Dynamic conviction weights replace all hardcoded tier blocks; analyze_closed_trade() + invalidate_cache() wired into LONG and SHORT crypto exits, equity exits; candle archiving after every fetch; agent accuracy context injected into debate prompts
+- **scripts/seed_intelligence.py** (NEW): One-time Bayesian prior seeding from 90-day backtest data; loops top 8 pairs; runs run_with_intelligence() + upsert_candles(); prints signal leaderboard with Bayesian vs prior pts
+- **scripts/generate_daily_summary.py** (UPDATED): Signal attribution auto-populates "What to Keep/Change/Test/Stop" section; queries trade_attribution, signal_stats, agent_stats; real signal leaderboard table in every daily note
+- **Bug fix**: SHORT branch of _execute_crypto_exit was missing analyze_closed_trade() call — fixed
+
+## 2026-03-25
+- Add generate_daily_summary.py + launchd brain service — auto-writes brain/06_daily_summaries/ at 9:47pm nightly
+
+## 2026-03-25
+- Brain architecture — /brain/ directory + 9 intelligence layer notes (constitution-governed)
+
 ## 2026-03-25
 - v4.3 — 7 new indicators: SuperTrend, Ichimoku cloud, WAE, Fisher Transform, CHOP, WaveTrend, Laguerre RSI
 

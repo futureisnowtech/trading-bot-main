@@ -104,6 +104,30 @@ AGENTS = {
             'Is the current spread significantly wider than the pair baseline? Wide spreads during volatile periods = adverse selection environment = our effective cost is much higher than 1.2%.',
         ]
     },
+    'goku': {
+        'name': 'Jim Simons / Paul Tudor Jones / George Soros',
+        'dbz_name': 'Goku (Ultra Instinct)',
+        'style': (
+            'Ultra Instinct synthesizer. You have already heard ALL other analysts. '
+            'You do NOT re-analyze individual signals — you evaluate whether the PANEL\'s '
+            'collective judgment forms a coherent, high-confidence trade thesis or whether '
+            'the consensus is fragile rationalization. '
+            'Simons lens: are the signals forming a meta-pattern — a specific combination '
+            'whose joint probability of success is meaningfully above each signal alone? '
+            'PTJ lens: is there a clean, defined entry with a capital-light stop? '
+            'If the trade requires hope or faith, it fails here. '
+            'Soros reflexivity lens: if many participants are seeing this same setup '
+            'simultaneously, has the edge already been priced in? '
+            'Ultra Instinct = no deliberation. One clean read. You either see it or you don\'t. '
+            'If you\'re unsure, VETO — protecting $500 capital is more important than any single trade.'
+        ),
+        'key_questions': [
+            'Looking at all analyst votes as a unified picture — is there a COHERENT narrative where microstructure, flow, fee math, and regime all point the same direction? Or are the BUY votes coming from weak, isolated signals that happen to agree by coincidence?',
+            'PTJ capital preservation test: if this trade stopped out, would the loss feel clean and acceptable? Or does this feel like a reach — entering a suboptimal setup because we\'ve been waiting too long?',
+            'Soros reflexivity: is this a genuinely unrecognized opportunity, or is it the obvious trade everyone is seeing right now? Obvious trades in liquid crypto markets get front-run and then reversed against latecomers.',
+            'Simons meta-pattern: does the specific COMBINATION of active signals (not each individually) match a historically reliable pattern — all 5 agents aligned with high confidence? Or is the consensus driven by 2 strong votes and 3 lukewarm follows?',
+        ],
+    },
 }
 
 # JSON schema for structured outputs — guaranteed valid response
@@ -327,6 +351,38 @@ def run_agent(agent_key: str, symbol: str, market_data: dict,
     kalman_line = f"- Kalman filter deviation: {kalman_dev:+.2%} ({'extended above fair price — fade risk' if kalman_dev > 0.01 else 'depressed below fair price — mean-reversion support' if kalman_dev < -0.01 else 'near fair price'})" if kalman_dev is not None else ''
     session_line = f"- Session window (08:00-11:00 ET): {'ACTIVE — intraday predictability elevated, volume-backed moves more reliable' if session_active else 'INACTIVE — outside high-volume hours, momentum signals weaker, require OBI/TFI confirmation'}"
 
+    # ── Inject Bayesian signal stats + per-agent accuracy ─────────────────────
+    # These fields are pre-populated in job_runner.py and stored on market_data.
+    # If not present (equity path, tests), we compute them here as best-effort.
+    if '_signal_stats_brief' not in market_data:
+        try:
+            from learning.signal_performance import get_active_signal_stats_brief
+            _active = market_data.get('active_signals', [])
+            market_data['_signal_stats_brief'] = get_active_signal_stats_brief(
+                _active, regime=market_data.get('regime', 'any')
+            ) if _active else ''
+        except Exception:
+            market_data['_signal_stats_brief'] = ''
+
+    if '_agent_self_accuracy' not in market_data:
+        try:
+            from learning.signal_performance import get_agent_self_accuracy
+            market_data['_agent_self_accuracy'] = get_agent_self_accuracy(
+                agent['name'], regime=market_data.get('regime', 'any')
+            )
+        except Exception:
+            market_data['_agent_self_accuracy'] = ''
+    else:
+        # Recompute per-agent (each agent gets their own accuracy line)
+        try:
+            from learning.signal_performance import get_agent_self_accuracy
+            market_data['_agent_self_accuracy'] = get_agent_self_accuracy(
+                agent['name'], regime=market_data.get('regime', 'any')
+            )
+        except Exception:
+            market_data['_agent_self_accuracy'] = ''
+    # ─────────────────────────────────────────────────────────────────────────
+
     user_prompt = f"""Analyze {symbol} for a potential trade right now. Apply ONLY your specific methodology — do not generalize.
 
 PRICE & MOMENTUM:
@@ -376,6 +432,11 @@ EXECUTION ECONOMICS:
 
 {memory_context if memory_context else ''}
 
+CONVICTION SCORE (math pre-filter): {market_data.get('conviction_score', 'N/A')}/100
+Active signals that triggered this debate: {market_data.get('signal_triggers', 'see above')}
+{market_data.get('_signal_stats_brief', '')}
+{market_data.get('_agent_self_accuracy', '')}
+
 You are {agent['name']}. Answer these specific questions then give your signal:
 {chr(10).join(f'{i+1}. {q}' for i, q in enumerate(agent.get('key_questions', [])))}
 
@@ -387,6 +448,137 @@ Signal + confidence + reasoning + key_concern:"""
     result['agent'] = agent['name']
     result['agent_key'] = agent_key
     result['dbz_name'] = agent.get('dbz_name', agent['name'])
+    return result
+
+
+def run_goku(
+    symbol: str,
+    market_data: dict,
+    individual_signals: list,
+    moderator_synthesis: dict,
+    vote_breakdown: dict,
+    context: str = '',
+) -> dict:
+    """
+    Goku (Ultra Instinct) — the final synthesizer. Runs AFTER all other agents
+    and the moderator. Sees the full picture and makes the definitive call.
+
+    Returns:
+        {
+            'verdict':               'PROCEED' | 'VETO' | 'BOOST',
+            'conviction_adjustment': int,   # 0 = PROCEED, -100 = VETO, +25 = BOOST
+            'reasoning':             str,
+            'key_insight':           str,   # the one thing other agents missed
+            'confidence':            float,
+        }
+    """
+    goku = AGENTS['goku']
+
+    system_prompt = f"""You are {goku['name']} — {goku['dbz_name']}.
+
+You are the FINAL AUTHORITY. All 5 specialist analysts and the moderator have already spoken.
+Your role is NOT to re-analyze the chart. Your role is to evaluate whether the panel's
+consensus constitutes GENUINE EDGE or self-serving rationalization.
+
+{goku['style']}
+
+YOUR THREE POWERS:
+1. PROCEED — the consensus holds. Let the moderator's decision stand unchanged.
+2. VETO — you see something others missed. Kill the trade. Signal becomes HOLD.
+   Use VETO when: manipulation signals ignored, news/macro blocks present,
+   agent reasoning sounds like hope, split panel with weak average confidence,
+   or the setup is the "obvious trade" that will get front-run.
+3. BOOST — all dimensions align perfectly. Add +25 conviction points.
+   Use BOOST sparingly — only when you see the rare setup where microstructure,
+   flow, fee math, regime, and macro all point the same direction with high conviction.
+
+THE AMYGDALA IS REMOVED:
+- No FOMO. A skipped trade costs $0. A bad trade on $500 can permanently impair the account.
+- "It looks good enough" is NOT a PROCEED. You need to see it.
+- If you're uncertain: VETO. Always.
+
+Respond ONLY with valid JSON matching this exact schema:
+{{"verdict": "PROCEED" or "VETO" or "BOOST", "conviction_adjustment": integer (-100 or 0 or 25), "reasoning": "1-2 sentences in your voice", "key_insight": "the one thing other agents missed or confirmed in 10 words max", "confidence": 0.0-1.0}}"""
+
+    # Build a rich summary of what the other agents said
+    agent_lines = []
+    for s in individual_signals:
+        agent_lines.append(
+            f"  {s.get('agent_key','?'):20} ({s.get('dbz_name','?'):15}) "
+            f"→ {s.get('signal','?'):4} {s.get('confidence',0):.0%} | "
+            f"{s.get('reasoning','')[:70]} | Risk: {s.get('key_concern','')[:35]}"
+        )
+
+    total = sum(vote_breakdown.values())
+    buy_pct = vote_breakdown.get('BUY', 0) / total if total else 0
+    moderator_signal = moderator_synthesis.get('signal', 'HOLD')
+    moderator_conf   = moderator_synthesis.get('confidence', 0)
+    moderator_reason = moderator_synthesis.get('reasoning', '')
+
+    # Check for existing hard vetoes from the moderator
+    hard_vetoed = 'HARD VETO' in moderator_reason
+
+    questions = '\n'.join(f'{i+1}. {q}' for i, q in enumerate(goku['key_questions']))
+
+    user_prompt = f"""Symbol: {symbol} | Price: ${market_data.get('price', 0):,.4f}
+
+ANALYST PANEL RESULTS:
+{chr(10).join(agent_lines)}
+
+VOTE TALLY: {vote_breakdown.get('BUY',0)} BUY | {vote_breakdown.get('HOLD',0)} HOLD | {vote_breakdown.get('SELL',0)} SELL
+Agreement: {buy_pct:.0%}
+
+MODERATOR SYNTHESIS: {moderator_signal} ({moderator_conf:.0%})
+Moderator reasoning: {moderator_reason[:150]}
+{'⚠️ Note: A hard veto was already triggered by the moderator.' if hard_vetoed else ''}
+
+MARKET CONTEXT:
+- Regime: {market_data.get('regime', 'unknown')}
+- OBI: {market_data.get('obi', 'N/A')} | TFI: {market_data.get('tfi', 'N/A')}
+- OU z-score: {market_data.get('ou_zscore', 'N/A')} | Squeeze fired: {market_data.get('squeeze_fired', False)}
+- Fear & Greed: {market_data.get('fear_greed_score', 50):.0f}/100
+{f'- External context: {context[:200]}' if context else ''}
+
+Your four questions:
+{questions}
+
+Now give your Ultra Instinct verdict. Remember: if uncertain, VETO."""
+
+    goku_schema = {
+        "type": "object",
+        "properties": {
+            "verdict":               {"type": "string", "enum": ["PROCEED", "VETO", "BOOST"]},
+            "conviction_adjustment": {"type": "integer"},
+            "reasoning":             {"type": "string"},
+            "key_insight":           {"type": "string"},
+            "confidence":            {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        },
+        "required": ["verdict", "conviction_adjustment", "reasoning", "key_insight", "confidence"]
+    }
+
+    # Goku gets more tokens and uses cache=False (his context is always unique)
+    result = call_claude_structured(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        max_tokens=1200,
+        use_cache=False,
+        call_type='goku',
+        schema=goku_schema,
+    )
+
+    # Enforce the adjustment values for each verdict type
+    verdict = result.get('verdict', 'PROCEED')
+    if verdict == 'VETO':
+        result['conviction_adjustment'] = -100
+    elif verdict == 'BOOST':
+        result['conviction_adjustment'] = 25
+    else:
+        result['verdict'] = 'PROCEED'
+        result['conviction_adjustment'] = 0
+
+    result['agent']     = goku['name']
+    result['agent_key'] = 'goku'
+    result['dbz_name']  = goku['dbz_name']
     return result
 
 

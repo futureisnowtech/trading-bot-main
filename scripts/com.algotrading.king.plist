@@ -28,9 +28,8 @@
     <key>ProgramArguments</key>
     <array>
         <string>/Library/Frameworks/Python.framework/Versions/3.14/bin/python3</string>
-        <string>/Users/joshmacbookair2020/Desktop/algo_trading_final/main.py</string>
-        <string>--mode</string>
-        <string>paper</string>
+        <string>-B</string>
+        <string>/Users/joshmacbookair2020/Desktop/algo_trading_final/scripts/boot.py</string>
     </array>
 
     <key>WorkingDirectory</key>
@@ -59,6 +58,11 @@
     <dict>
         <key>PATH</key>
         <string>/Library/Frameworks/Python.framework/Versions/3.14/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>/Users/joshmacbookair2020</string>
+        <!-- Prevent Python 3.14 .pyc file lock deadlock on fast restarts -->
+        <key>PYTHONDONTWRITEBYTECODE</key>
+        <string>1</string>
         <!-- Disable tqdm progress bars — prevents OSError [Errno 11] deadlock in launchd (no TTY) -->
         <key>TQDM_DISABLE</key>
         <string>1</string>

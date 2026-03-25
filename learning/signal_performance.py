@@ -399,6 +399,95 @@ def get_all_weights(regime: str = 'any') -> dict[str, float]:
     return {sig: get_signal_bayesian_pts(sig, regime) for sig in SIGNAL_PRIOR_PTS}
 
 
+def get_active_signal_stats_brief(active_signals: list, regime: str = 'any') -> str:
+    """
+    Returns a compact table of Bayesian win rates for the signals that fired.
+    Injected into every agent's user prompt so AI can calibrate per-signal confidence.
+    Falls back to prior pts when live data is insufficient (< MIN_FIRES_TO_LEARN).
+    """
+    if not active_signals:
+        return ""
+    try:
+        with _conn() as c:
+            lines = [
+                f"SIGNAL QUALITY (Bayesian evidence — {regime} regime):",
+                f"  {'Signal':<26} {'Fires':>5} {'Win%':>6} {'AvgP&L':>8} {'BayesPts':>9} {'PriorPts':>9}",
+                f"  {'-'*26} {'-'*5} {'-'*6} {'-'*8} {'-'*9} {'-'*9}",
+            ]
+            any_live_data = False
+            for sig_name in active_signals:
+                prior = SIGNAL_PRIOR_PTS.get(sig_name, 0)
+                # Prefer regime-specific row, fall back to 'any'
+                row = c.execute("""
+                    SELECT fires, win_rate, avg_pnl, bayesian_pts, prior_pts
+                    FROM signal_stats
+                    WHERE signal_name=? AND regime=? AND source='combined'
+                    LIMIT 1
+                """, (sig_name, regime)).fetchone()
+                if not row and regime != 'any':
+                    row = c.execute("""
+                        SELECT fires, win_rate, avg_pnl, bayesian_pts, prior_pts
+                        FROM signal_stats
+                        WHERE signal_name=? AND regime='any' AND source='combined'
+                        LIMIT 1
+                    """, (sig_name,)).fetchone()
+
+                if row and (row['fires'] or 0) >= MIN_FIRES_TO_LEARN:
+                    any_live_data = True
+                    wr = f"{row['win_rate']*100:.0f}%" if row['win_rate'] is not None else "  ?"
+                    ap = f"${row['avg_pnl']:+.3f}" if row['avg_pnl'] is not None else "     ?"
+                    bp = f"{row['bayesian_pts']:.1f}" if row['bayesian_pts'] is not None else "  ?"
+                    pp = f"{row['prior_pts'] or prior:.1f}"
+                    fires = row['fires'] or 0
+                    lines.append(f"  {sig_name:<26} {fires:>5} {wr:>6} {ap:>8} {bp:>9} {pp:>9}")
+                else:
+                    fires = (row['fires'] or 0) if row else 0
+                    lines.append(
+                        f"  {sig_name:<26} {fires:>5} {'prior':>6} {'N/A':>8} "
+                        f"{'N/A':>9} {prior:>9.0f}"
+                    )
+
+            if not any_live_data:
+                return (f"Active signals: {', '.join(active_signals)} "
+                        f"— no live win-rate data yet, using priors only.")
+            return '\n'.join(lines)
+    except Exception:
+        return f"Active signals fired: {', '.join(active_signals)} (win-rate DB unavailable)"
+
+
+def get_agent_self_accuracy(agent_name: str, regime: str = 'any') -> str:
+    """
+    Returns a one-liner for an agent's own historical accuracy.
+    Injected into the USER prompt (not system — keeps caching intact).
+    """
+    try:
+        with _conn() as c:
+            # Prefer regime-specific, fall back to 'any'
+            row = c.execute("""
+                SELECT votes_buy, correct_buy, accuracy
+                FROM agent_stats
+                WHERE agent_name=? AND regime=?
+                LIMIT 1
+            """, (agent_name, regime)).fetchone()
+            if not row or not row['votes_buy'] or row['votes_buy'] < 5:
+                row = c.execute("""
+                    SELECT votes_buy, correct_buy, accuracy
+                    FROM agent_stats
+                    WHERE agent_name=? AND regime='any'
+                    LIMIT 1
+                """, (agent_name,)).fetchone()
+            if row and row['votes_buy'] and row['votes_buy'] >= 5:
+                acc = row['accuracy'] or (row['correct_buy'] / max(row['votes_buy'], 1))
+                return (
+                    f"YOUR PAST ACCURACY ({regime} regime): "
+                    f"{row['correct_buy']}/{row['votes_buy']} BUY calls correct ({acc:.0%}). "
+                    f"Use this to calibrate how confident you need to be before saying BUY."
+                )
+        return ""
+    except Exception:
+        return ""
+
+
 def get_agent_accuracy_context(regime: str = 'any') -> str:
     """Return a formatted string injected into agent debate prompts."""
     try:

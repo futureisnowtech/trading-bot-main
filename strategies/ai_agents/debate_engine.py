@@ -14,11 +14,12 @@ import pytz
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from strategies.ai_agents.analyst_agents import (
-    run_agent, get_all_agents, call_claude_structured, AGENTS, AGENT_RESPONSE_SCHEMA
+    run_agent, run_goku, get_all_agents, call_claude_structured, AGENTS, AGENT_RESPONSE_SCHEMA
 )
 from strategies.ai_agents.regime_detector import detect_regime, get_regime_brief
 from config import (MARKET_TIMEZONE, CLAUDE_MODEL, QUICK_DEBATE_AGENTS,
-                    FULL_DEBATE_MIN_AGREEMENT, FULL_DEBATE_AGENTS, MODERATOR_MAX_TOKENS)
+                    FULL_DEBATE_MIN_AGREEMENT, FULL_DEBATE_AGENTS, MODERATOR_MAX_TOKENS,
+                    GOKU_ENABLED)
 
 MODERATOR_SCHEMA = {
     "type": "object",
@@ -37,7 +38,9 @@ MODERATOR_SCHEMA = {
 class DebateResult:
     def __init__(self, symbol, individual_signals, synthesized_signal,
                  synthesized_confidence, unified_reasoning, bull_case,
-                 bear_case, key_risk, vote_breakdown, timestamp, regime=''):
+                 bear_case, key_risk, vote_breakdown, timestamp, regime='',
+                 goku_verdict='SKIPPED', goku_conviction_adjustment=0,
+                 goku_reasoning='', goku_insight=''):
         self.symbol = symbol
         self.individual_signals = individual_signals
         self.synthesized_signal = synthesized_signal
@@ -49,6 +52,11 @@ class DebateResult:
         self.vote_breakdown = vote_breakdown
         self.timestamp = timestamp
         self.regime = regime
+        # Goku fields
+        self.goku_verdict = goku_verdict
+        self.goku_conviction_adjustment = goku_conviction_adjustment
+        self.goku_reasoning = goku_reasoning
+        self.goku_insight = goku_insight
 
     def to_dict(self) -> dict:
         return {
@@ -63,18 +71,29 @@ class DebateResult:
             'individual_signals': self.individual_signals,
             'timestamp': self.timestamp,
             'regime': self.regime,
+            'goku_verdict': self.goku_verdict,
+            'goku_conviction_adjustment': self.goku_conviction_adjustment,
+            'goku_reasoning': self.goku_reasoning,
+            'goku_insight': self.goku_insight,
         }
 
     def __repr__(self):
         b = self.vote_breakdown
         e = {'BUY': '🟢', 'SELL': '🔴', 'HOLD': '⚪'}.get(self.synthesized_signal, '⚪')
+        goku_line = ''
+        if self.goku_verdict != 'SKIPPED':
+            goku_emoji = {'VETO': '🚫', 'BOOST': '⚡', 'PROCEED': '✅'}.get(self.goku_verdict, '')
+            goku_line = (f"  Goku: {goku_emoji} {self.goku_verdict} "
+                         f"(adj={self.goku_conviction_adjustment:+d}) | {self.goku_reasoning[:55]}\n")
         return (
             f"\n{'═'*60}\n  DEBATE: {self.symbol} | Regime: {self.regime}\n{'═'*60}\n"
             f"  Votes: {b.get('BUY',0)} BUY | {b.get('HOLD',0)} HOLD | {b.get('SELL',0)} SELL\n"
             f"  Decision: {e} {self.synthesized_signal} ({self.synthesized_confidence:.0%})\n"
             f"  Reason: {self.unified_reasoning}\n"
             f"  Bull: {self.bull_case}\n  Bear: {self.bear_case}\n"
-            f"  Risk: {self.key_risk}\n{'═'*60}"
+            f"  Risk: {self.key_risk}\n"
+            f"{goku_line}"
+            f"{'═'*60}"
         )
 
 
@@ -137,6 +156,53 @@ def run_debate(symbol: str, market_data: dict, context: str = '',
     synthesis = _run_moderator(symbol, market_data, individual_signals,
                                 vote_breakdown, regime_brief)
 
+    # ── Goku: Ultra Instinct final review ────────────────────────────────────
+    goku_verdict = 'SKIPPED'
+    goku_adj = 0
+    goku_reasoning = ''
+    goku_insight = ''
+
+    if GOKU_ENABLED and synthesis.get('signal') == 'BUY':
+        # Goku only activates when the panel is recommending a BUY —
+        # no point running him on a HOLD decision.
+        if verbose:
+            print(f"  ⚡ Goku (Ultra Instinct)...", end=' ', flush=True)
+        try:
+            goku_result = run_goku(
+                symbol=symbol,
+                market_data=market_data,
+                individual_signals=individual_signals,
+                moderator_synthesis=synthesis,
+                vote_breakdown=vote_breakdown,
+                context=enhanced_context,
+            )
+            goku_verdict    = goku_result.get('verdict', 'PROCEED')
+            goku_adj        = goku_result.get('conviction_adjustment', 0)
+            goku_reasoning  = goku_result.get('reasoning', '')
+            goku_insight    = goku_result.get('key_insight', '')
+
+            if verbose:
+                g_emoji = {'VETO': '🚫', 'BOOST': '⚡', 'PROCEED': '✅'}.get(goku_verdict, '❓')
+                print(f"{g_emoji} {goku_verdict} | {goku_reasoning[:60]}")
+
+            # Apply Goku's verdict
+            if goku_verdict == 'VETO':
+                synthesis['signal'] = 'HOLD'
+                synthesis['reasoning'] = (
+                    f"GOKU VETO — {goku_reasoning[:120]}. "
+                    + synthesis.get('reasoning', '')
+                )
+            elif goku_verdict == 'BOOST':
+                # Clamp boosted confidence at 0.95
+                orig_conf = synthesis.get('confidence', 0.0)
+                synthesis['confidence'] = min(0.95, orig_conf + 0.15)
+                synthesis['reasoning'] = (
+                    f"GOKU BOOST — {goku_reasoning[:80]}. "
+                    + synthesis.get('reasoning', '')
+                )
+        except Exception as _ge:
+            print(f"  [goku error: {_ge}]")
+
     result = DebateResult(
         symbol=symbol,
         individual_signals=individual_signals,
@@ -149,6 +215,10 @@ def run_debate(symbol: str, market_data: dict, context: str = '',
         vote_breakdown=vote_breakdown,
         timestamp=timestamp,
         regime=regime,
+        goku_verdict=goku_verdict,
+        goku_conviction_adjustment=goku_adj,
+        goku_reasoning=goku_reasoning,
+        goku_insight=goku_insight,
     )
 
     if verbose:
@@ -219,11 +289,17 @@ ANALYSTS AND THEIR WEIGHT:
 - regime_volatility: BB-KC squeeze + RV ratio. Sets context for whether a breakout or mean-reversion setup is valid.
 - manipulation_risk: Spoofing/adverse selection detector. A YES from this agent is a stop sign."""
 
+    conviction_score = market_data.get('conviction_score', None)
+    conviction_line = (f"Math pre-filter conviction: {conviction_score}/100 "
+                       f"(signals: {market_data.get('signal_triggers', 'N/A')})"
+                       if conviction_score is not None else '')
+
     user_prompt = f"""Symbol: {symbol}
 Price: ${market_data.get('price', 0):,.4f}
 Volume spike: {market_data.get('vol_spike', 1):.1f}x
 Votes: {vote_breakdown.get('BUY',0)} BUY | {vote_breakdown.get('HOLD',0)} HOLD | {vote_breakdown.get('SELL',0)} SELL
 Agreement: {buy_pct:.0%}
+{conviction_line}
 
 {regime_brief}
 

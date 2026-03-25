@@ -11,6 +11,15 @@ import sys, os, argparse, time, traceback
 from datetime import datetime
 import pytz
 
+# Pre-import stdlib modules and the core DB module at module level.
+# Python 3.14 on macOS deadlocks (EDEADLK) when importing these lazily
+# inside a function in a launchd daemon context. Pre-loading them here
+# (in the "safe" startup context) puts them in sys.modules so the lazy
+# imports inside main() become zero-cost cache hits.
+import csv, uuid, sqlite3
+from typing import Optional
+import logging_db.trade_logger  # noqa: F401 — pre-warm, prevents EDEADLK
+
 BANNER = """
 ╔══════════════════════════════════════════════════════════════════╗
 ║  👑  THE KING'S ALGO TRADING SYSTEM  v3.3  👑                   ║

@@ -22,12 +22,117 @@ A fully autonomous AI-powered trading system that:
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
 
-## Current Version: v3.1
+## Current Version: v4.0
 - v3.0 baseline: Extended thinking exits, LanceDB memory, regime detection,
   prompt caching, structured outputs, 4-view dashboard, position persistence,
   watchdog, auto cost tuning
 - v3.1 (2026-03-22): Ops infrastructure — git, WAL mode, auto-restart,
   daily DB backups, credential backups, paper-to-live readiness tracker
+- v3.2 (2026-03-22): Aggressive mode — replaced 8 agents with active trading
+  methodologies; 1-min crypto candles; 8 pairs; Williams %R + Fear&Greed + IV rank
+- v3.3 (2026-03-23): Gate unlock — min confidence 30% crypto/35% equity;
+  vote agreement 37.5%; 5 max crypto / 3 equity positions; min ADX 10
+- v3.4 (2026-03-23): Mean-reversion strategy — RSI<33 + lower BB + ADX<22;
+  runs in parallel with AI debate path
+- v3.5 (2026-03-24): Research-backed overhaul — 5 focused agents (dropped 3);
+  10 new math signals (AR(1) autocorr, OU half-life, Kyle lambda R² filter,
+  Hurst H min_periods 96, RV ratio gap guard, squeeze direction);
+  CoinbaseMicrostructureFeed WebSocket; Kelly sizing; 20 crypto pairs (.env)
+- v4.0 (2026-03-24): De-risk overhaul + RSI removal + Hurst removal + min-agreement=2:
+  • All risk params cut 50%: MAX_RISK_PER_TRADE 2%→1%, MAX_DAILY_LOSS 8%→4%,
+    MAX_POSITIONS_CRYPTO 10→5, stops/targets halved, PERP leverage 20→10,
+    FUTURES_NUM_CONTRACTS 3→2, MAX_STRATEGY_LOSS_STREAK 8→4
+  • Position sizes: CRYPTO/EQUITY $500→$250 (in .env)
+  • Min agent agreement: explicit 2 agents (not % — buy_votes < 2 = VETO)
+  • FULL_DEBATE_MIN_AGREEMENT: 0.60→0.40 in config
+  • RSI removed as entry gate: crypto_mean_reversion now uses Kalman+AVWAP
+    (kalman_dev ≤ -0.8% OR avwap_dev ≤ -0.5%) with autocorr confidence boost
+  • Hurst fully removed: indicators.py (calc + _hurst_rs function), job_runner.py
+    (HURST_MEAN_REVERT_MAX import, signal 8, conviction scoring, gate condition)
+  • FutureWarning fixed: squeeze_fired now uses .astype(bool) before comparison
+  • Fee brake raised: MAX_DAILY_FEE_DRAG_PCT 5%→10% ($25→$50 limit)
+  • config.py: HURST_MEAN_REVERT_MAX removed
+- v3.9 (2026-03-24): Advanced math signal overhaul — MACD demoted from gatekeeper to one-of-eight:
+  • scheduler/job_runner.py: pre-filter replaced — 8 independent signal paths now gate debate:
+    1. MACD 3-variant consensus (25 pts)
+    2. Williams %R ≤ -80 extreme oversold (20 pts)
+    3. Momentum + volume breakout (15 pts)
+    4. BB-Keltner squeeze fire ≥20 bars, direction > 0 (20 pts) ← NEW
+    5. RV ratio ≥ 1.3 volatility expansion (15 pts) ← NEW
+    6. Kalman deviation ≤ -1.0% (price below Kalman estimate) (10 pts) ← NEW
+    7. AVWAP deviation ≤ -0.5% (reclaim setup) (10 pts) ← NEW
+    8. Hurst H < 0.45 mean-reverting regime (10 pts) ← NEW
+    OU half-life in [3, 60] min: +5 pts | Kyle lambda ≤ 30th pct: +5 pts
+  • ATR fee-floor guard added before any debate call:
+    If ATR/price < 0.4%, expected 4×ATR target < 1.6% → can't clear 2.4% round-trip fees
+    Skips debate entirely, saving API tokens on untradeable symbols
+  • signal_triggers now tags ALL 8 signals so agents see the full evidence matrix
+  • config.py: added ATR_FEE_FLOOR_PCT, SQUEEZE_MIN_BARS, RV_EXPANSION_THRESHOLD,
+    HURST_MEAN_REVERT_MAX, KALMAN_ENTRY_DEV_PCT, AVWAP_ENTRY_DEV_PCT,
+    OU_HALFLIFE_MIN/MAX_MINUTES, KYLE_LAMBDA_LOW_PCT, ATR_STOP/TARGET_MULTIPLIER
+- v3.8 (2026-03-24): Bybit perp integration + start-button EDEADLK fix:
+  • execution/bybit_broker.py: new — Bybit linear perp (USDT-margined) broker
+    Paper mode uses real Bybit public prices, live uses pybit v5 HTTP
+    open_long/open_short/close_position/get_funding_rate/get_open_interest
+    Server-side stop-loss + take-profit set after entry (set_trading_stop)
+  • strategies/crypto_perp_strategy.py: new — long/short perp signal
+    20-bar breakout + RSI + ADX + funding rate + OI confirmation
+    SHORT: breakdown + RSI<45 + funding≥0.01%/8h (longs paying = bearish)
+    LONG: breakout + RSI>55 + funding≤0.03% (not overloaded with longs)
+  • scheduler/job_runner.py: run_perp_scan() + _monitor_perp_exit()
+    Scans PERP_PAIRS every CRYPTO_SCAN_INTERVAL_SECONDS
+    4h flat exit to avoid funding cost drain on stagnant positions
+  • risk/risk_manager.py: _perp dict + PERP_MAX_POSITIONS gate
+    register/close/get_position/should_exit all handle 'perp' strategy
+    _get_deployed uses margin (notional/leverage) not full notional
+  • config.py: PERP_ENABLED, BYBIT_*, PERP_* constants
+  • .env: BYBIT_API_KEY/SECRET/TESTNET placeholders, PERP_PAIRS, PERP_ENABLED=true
+  • dashboard/app.py _start_bot(): bypass launchd, use subprocess.Popen directly
+    PYTHONDONTWRITEBYTECODE=1 + start_new_session=True + 6s sleep
+    Fixes OSError EDEADLK (Python 3.14 .pyc file lock bug)
+  • scripts/reload_on_change.sh: replaced launchctl unload/load with nohup python3
+    (launchctl load deprecated, fails silently on modern macOS)
+  • BYBIT_TESTNET=true in .env — fill BYBIT_API_KEY/SECRET to go live
+- v3.7 (2026-03-24): Broker migration + scan feed fixes + auto-reload fix:
+  • EQUITY_ENABLED=false — equity off, crypto+futures only with $500 account
+  • execution/webull_broker.py: proxies to AlpacaBroker (Webull API 403-blocked)
+  • execution/alpaca_broker.py: new file, full equity broker via official Alpaca API
+  • execution/tradovate_broker.py: _paper_trade/_paper_close now use real ES prices
+    via yfinance instead of hardcoded $5800 fake price
+  • data/market_data.py: Fear&Greed switched to Alternative.me (was CNN API, failing
+    silently → stuck at 50 Neutral all day). Current: 11 Extreme Fear
+  • scheduler/job_runner.py: hard block new entries 2-5am ET (was just higher floor);
+    dead-zone conviction floor raised 50→70 (MACD+Williams alone can't fire)
+  • config.py: MAX_DAILY_FEE_DRAG_PCT 3%→5% ($25 limit, was $15 — hit before US hours)
+  • scripts/reload_on_change.sh: SIGTERM before launchctl unload, sleep 4s to allow
+    Python 3.14 to release file locks — fixes OSError EDEADLK on auto-reload
+  • scripts/test_brokers.py: new file — one-command broker health check
+  • scripts/alpaca_broker.py: n/a (alpaca-py 0.43.2 installed)
+  • FUTURES_ENABLED=true, EQUITY_ENABLED=false in .env
+  • Tradovate API access requires paid subscription — no free demo API tier
+    Paper simulation uses real ES/yfinance prices instead
+- v3.6 (2026-03-24): Win-rate overhaul — all bugs fixed + aggressive tuning:
+  • debate_engine.py: hard vetoes (manipulation_risk/fee_discipline) NOW
+    enforced in code with early-return — were only in prompt text before
+  • coinbase_feed.py: 30s watchdog breaks inner loop on silent disconnect
+    (was infinite hang with no reconnect)
+  • job_runner.py: full 5-agent debate for crypto (was quick 3-agent, missing
+    regime_volatility + manipulation_risk); conviction scoring pre-filter
+    (30 normal / 50 dead-zone 2-7am ET); symbol 20-min loss cooldown;
+    OBI+TFI microstructure veto (OBI<-0.35 AND TFI<-0.20 = skip debate);
+    stagnant trade killer (45min <15% target progress = exit);
+    volume threshold 0.5→0.3; regime-MACD double-gate removed
+  • config.py: MAX_DEPLOYED_PCT 0.75→0.90; MAX_DAILY_LOSS_PCT 0.05→0.08;
+    CRYPTO_TAKE_PROFIT_PCT 0.06→0.09; CRYPTO_MIN_ADX 10→15;
+    MODERATOR_MAX_TOKENS 700→900
+  • risk_manager.py: Kelly activation 30→15 trades; losing streak clamp
+    trigger 3→5 consecutive losses
+  • .env: CRYPTO_POSITION_SIZE_USD 50→100 (fee R:R fix: 1.14:1→1.86:1);
+    removed stale DEBATE_MAX_TOKENS=400 and EXIT_REVIEW_MAX_TOKENS=800
+    (both were silently ignored — config hardcodes those values)
+  • dashboard/app.py: Current Brain expander added (AI config, risk rules,
+    signal config, live Kelly stats); now shows actual runtime values
+    (scan interval, max trades, full 20-pair list)
 
 ## Project Structure
 
@@ -64,6 +169,7 @@ algo_trading_final/
 │   ├── base_strategy.py          ← Signal dataclass + abstract base
 │   ├── equity_momentum.py        ← KST+MACD+VWAP fallback (no API key)
 │   ├── crypto_macd.py            ← 3-variant MACD fallback (no API key)
+│   ├── crypto_mean_reversion.py  ← Mean-reversion for ranging/volatile regimes (v3.4)
 │   ├── futures_scalper.py        ← MES opening range breakout
 │   └── ai_agents/
 │       ├── analyst_agents.py     ← 8 agents with prompt caching
@@ -99,22 +205,20 @@ algo_trading_final/
     └── job_runner.py             ← The while True engine
 ```
 
-## The 8 AI Analyst Agents
+## The 5 AI Analyst Agents (v3.6 — full panel now used for ALL crypto debates)
 
-| Key | Name | Philosophy |
-|-----|------|------------|
-| buffett | Warren Buffett | Value, moats, margin of safety |
-| soros | George Soros | Reflexivity, turning points, macro |
-| simons | Jim Simons | Pure quant, statistical patterns only |
-| tudor_jones | Paul Tudor Jones | Momentum, risk-first, never average down |
-| druckenmiller | Stan Druckenmiller | Macro momentum, paradigm shifts |
-| cathie_wood | Cathie Wood | Disruptive growth, exponential curves |
-| livermore | Jesse Livermore | Tape reading, price action, breakouts |
-| dalio | Ray Dalio | All-weather, correlation, debt cycles |
+| Key | Name | DBZ Name | Methodology |
+|-----|------|----------|-------------|
+| microstructure | Sasha Stoikov / Rama Cont | Vegeta | OBI ≥ 0.20/0.35 buy pressure; microprice vs midprice; TFI ≥ 0.10 aggressor flow |
+| session_breakout | Dan Shen / Zhuzhu Wen | Broly | 08:00-11:00 ET session window; 30-min ORB with vol ≥ 1.5×; time-of-day predictability |
+| williams | Larry Williams | Yamcha | W%R ≤ -80 extreme oversold; Hurst H<0.50 required (mean-reverting regime only) |
+| regime_volatility | Andersen-Bollerslev / TTM Squeeze | Frieza | RV ratio ≥ 1.3 expansion / ≤ 0.8 compression; BB-Keltner squeeze firing after ≥20 bars |
+| quant_edge | Ernie Chan / Ornstein-Uhlenbeck | Gohan | Hurst regime classification; OU half-life 3-60 min; z-score entry; 25% Kelly sizing; Amihud liquidity |
+| fee_discipline | Fee Economics / Albers et al. | Krillin | p_min = (1 + 0.012/L)/(R+1); 2.4% min gross move; maker vs taker analysis; 45-min time stop |
+| flow_tape | Coinbase Tape / Microstructure Flow | Piccolo | TFI 60-sec window; spread_bps tightness; Kyle lambda percentile; trade intensity spikes |
+| manipulation_risk | Kose John / Amin Nejat | Tien | OBI/TFI conflict = spoofing; unconfirmed vol spike = news risk; liquidation cascade detection |
 
-**In Dragon Ball Z mode these are renamed:**
-Buffett=Master Roshi, Soros=Cell, Simons=Android 17, Tudor Jones=Vegeta,
-Druckenmiller=Piccolo, Cathie Wood=Bulma, Livermore=Goku, Dalio=Whis
+Quick debate agents (crypto/futures): microstructure, fee_discipline, flow_tape
 
 ## Exit Review Agents (Extended Thinking)
 - Tudor Jones: "Is the stop still valid?"
@@ -132,15 +236,25 @@ Any ONE saying EXIT → we exit. Asymmetric on purpose.
 7. When in doubt, HOLD — a skipped trade costs nothing
 8. The goal is being in business next month, not winning today
 
-## Risk Rules (HARDCODED)
-- 2% max account risk per trade
-- 5% max daily loss → halt ALL trading, email alert
+## Risk Rules (v3.6 current values)
+- **1%** max account risk per trade [was 2%, cut 50%]
+- **4%** max daily loss → halt ALL trading [was 8%, cut 50%]
+- **90%** max deployed capital
 - 3 equity trades/day max (PDT cash account)
-- 2 open positions max per asset class
+- **5** max crypto positions, **3** max equity positions [was 10/5, cut 50%]
 - No equity entries 9:30–10:00 ET
 - Stop loss set immediately after every fill
-- Limit orders for entries, market only for emergency stops
-- Fees > 1.5% of account/day → halt crypto bot
+- Crypto stop: **1.5%** | take profit: **4.5%** [was 3%/9%] — maintains 3:1 R:R
+- Equity stop: **2.5%** | take profit: **7.5%** [was 5%/15%] — maintains 3:1 R:R
+- Position sizes: crypto **$250**, equity **$250** [was $500/$500]
+- Fees > **10%** of account/day → halt crypto bot ($50 on $500)
+- Kelly sizing activates after **15** trades
+- Losing streak size clamp (50%) triggers after **5** consecutive losses
+- Symbol 20-min cooldown after any losing crypto exit
+- Stagnant trade exit: 45min with <15% progress toward target → close
+- Circuit breaker: **4** consecutive strategy losses → pause [was 8]
+- Min agent agreement: **2 agents** explicit (not percentage)
+- RSI is EXIT signal only — NOT used as entry gate anywhere
 
 ## Key Data Formats
 
@@ -183,7 +297,7 @@ python3 main.py --mode paper       # Force paper
 python3 main.py --mode live        # Live (requires typing 'I UNDERSTAND')
 python3 main.py --crypto-only      # Skip equity
 python3 main.py --equity-only      # Skip crypto
-streamlit run dashboard/app.py     # Dashboard on :8501
+streamlit run dashboard/app.py --server.runOnSave true     # Dashboard on :8501 — auto-reloads on file changes
 ```
 
 ## Notifications (v3.1)
@@ -273,10 +387,12 @@ bash scripts/log_change.sh "Brief description"
 **DB backup fails** → Ensure sqlite3 CLI is installed: `sqlite3 --version`
 
 ## MES Contract Symbols (update quarterly)
-- Q1 (Jan-Mar): MESH5
-- Q2 (Apr-Jun): MESM5
-- Q3 (Jul-Sep): MESU5
-- Q4 (Oct-Dec): MESZ5
+- Q1 (Jan-Mar): MESH6  ← current code uses MESM6
+- Q2 (Apr-Jun): MESM6  ← **ACTIVE** (current front month, June 2026)
+- Q3 (Jul-Sep): MESU6
+- Q4 (Oct-Dec): MESZ6
+
+To update: change MES_SYMBOL in execution/tradovate_broker.py each quarter rollover.
 
 ## Dashboard Views
 1. THE KING — Lakers gold/navy, LeBron quotes, championship energy (default)

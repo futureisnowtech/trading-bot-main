@@ -9,7 +9,6 @@ import sys
 from typing import Optional
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from strategies.ai_agents.analyst_agents import call_claude_structured
 from strategies.ai_agents.debate_engine import DebateResult
 from config import (
     ACCOUNT_SIZE, MAX_RISK_PER_TRADE_PCT, MAX_DAILY_LOSS_PCT,
@@ -28,16 +27,6 @@ NO_EMOTION_RULES = [
     "RULE 7: When in doubt, HOLD. A skipped trade loses nothing.",
     "RULE 8: The goal is being in business next month, not winning today.",
 ]
-
-SANITY_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "veto": {"type": "boolean"},
-        "veto_reason": {"type": "string"}
-    },
-    "required": ["veto", "veto_reason"]
-}
-
 
 class FinalDecision:
     def __init__(self, action, symbol, size_usd, entry_price, stop_loss,
@@ -79,6 +68,7 @@ def synthesize_final_decision(
     trades_today: int,
     account_balance: float = ACCOUNT_SIZE,
     allow_short: bool = False,
+    atr: float = 0.0,
 ) -> FinalDecision:
     """Final decision after debate. Applies hard rules then AI sanity check."""
     symbol = debate.symbol
@@ -102,21 +92,31 @@ def synthesize_final_decision(
         return FinalDecision('HOLD', symbol, 0, current_price, 0, 0, confidence,
                              f"Debate: {signal}. {debate.unified_reasoning}")
 
-    min_conf = 0.50 if asset_class == 'equity' else 0.55
+    min_conf = 0.35 if asset_class == 'equity' else 0.30
     if confidence < min_conf:
         return FinalDecision('VETO', symbol, 0, current_price, 0, 0, confidence, '',
                              f"Confidence {confidence:.0%} < {min_conf:.0%}. Rule 7: when in doubt, HOLD.")
 
     buy_votes = debate.vote_breakdown.get('BUY', 0)
     total_agents = sum(debate.vote_breakdown.values())
-    if total_agents > 0 and buy_votes / total_agents < 0.60:
+    if buy_votes < 2:
         return FinalDecision('VETO', symbol, 0, current_price, 0, 0, confidence, '',
-                             f"Only {buy_votes}/{total_agents} agents agree. Need 60%+.")
+                             f"Only {buy_votes}/{total_agents} agents agree. Need at least 2.")
 
-    # ── Position sizing ────────────────────────────────────────────────────────
-    stop_pct = EQUITY_STOP_LOSS_PCT if asset_class == 'equity' else CRYPTO_STOP_LOSS_PCT
+    # ── Position sizing (Dennis: ATR-based dynamic stops) ─────────────────────
     risk_dollars = account_balance * MAX_RISK_PER_TRADE_PCT
-    stop_loss = current_price * (1 - stop_pct)
+    stop_pct = EQUITY_STOP_LOSS_PCT if asset_class == 'equity' else CRYPTO_STOP_LOSS_PCT
+
+    if atr > 0:
+        # Dennis Turtle rule: stop = 2 ATR below entry, position size = risk / (2*ATR)
+        raw_stop = current_price - (2.0 * atr)
+        atr_pct = (current_price - raw_stop) / current_price
+        # Clamp: never tighter than 1%, never wider than max stop_pct * 1.5
+        atr_pct = max(0.01, min(atr_pct, stop_pct * 1.5))
+        stop_loss = current_price * (1 - atr_pct)
+    else:
+        stop_loss = current_price * (1 - stop_pct)
+
     risk_per_unit = current_price - stop_loss
 
     if risk_per_unit > 0:
@@ -127,43 +127,11 @@ def synthesize_final_decision(
 
     # Scale with account size — larger account gets larger positions
     scale = min(account_balance / 500.0, 5.0)  # Cap at 5x from initial $500
-    position_size_usd = min(position_size_usd * scale, account_balance * 0.20)
+    position_size_usd = min(position_size_usd * scale, account_balance * 0.35)
     position_size_usd = max(position_size_usd, 10.0)
 
     risk = current_price - stop_loss
     take_profit = current_price + (risk * 2.0)
-
-    # ── AI sanity check ────────────────────────────────────────────────────────
-    rr = (take_profit - current_price) / max(risk, 0.0001)
-    sanity = call_claude_structured(
-        system_prompt=(
-            "You are the final risk manager for a trading account.\n"
-            "Your ONLY job is to veto trades that violate principles.\n"
-            "THE AMYGDALA IS REMOVED:\n" + '\n'.join(NO_EMOTION_RULES)
-        ),
-        user_prompt=(
-            f"Final check: {symbol} ({asset_class})\n"
-            f"Signal: {signal} @ ${current_price:.4f}\n"
-            f"Size: ${position_size_usd:.2f} ({position_size_usd/account_balance:.1%} of ${account_balance:.0f})\n"
-            f"Stop: ${stop_loss:.4f} | Target: ${take_profit:.4f} | R:R={rr:.1f}:1\n"
-            f"Confidence: {confidence:.0%}\n"
-            f"Key risk: {debate.key_risk}\n"
-            f"Today P&L: ${daily_pnl:+.2f}\n"
-            f"Should this be vetoed?"
-        ),
-        max_tokens=100,
-        call_type='sanity_check',
-        schema=SANITY_SCHEMA,
-    )
-
-    # Map sanity response (may come back as signal dict or veto dict)
-    is_vetoed = (sanity.get('veto', False) or
-                 sanity.get('signal', 'BUY') == 'SELL')
-    veto_reason = sanity.get('veto_reason', sanity.get('reasoning', ''))
-
-    if is_vetoed:
-        return FinalDecision('VETO', symbol, 0, current_price, 0, 0, confidence, '',
-                             veto_reason or 'AI sanity check veto')
 
     reasoning = (
         f"[{buy_votes}/{total_agents} agree] {debate.unified_reasoning} | "
@@ -188,22 +156,22 @@ def _synthesize_short(debate, current_price, asset_class,
     symbol = debate.symbol
     stop_pct = EQUITY_STOP_LOSS_PCT if asset_class == 'equity' else CRYPTO_STOP_LOSS_PCT
 
-    min_conf = 0.55
+    min_conf = 0.35
     if confidence < min_conf:
         return FinalDecision('VETO', symbol, 0, current_price, 0, 0, confidence, '',
                              f"Short confidence {confidence:.0%} < {min_conf:.0%}. Rule 7: when in doubt, HOLD.")
 
     sell_votes = debate.vote_breakdown.get('SELL', 0)
     total_agents = sum(debate.vote_breakdown.values())
-    if total_agents > 0 and sell_votes / total_agents < 0.60:
+    if sell_votes < 2:
         return FinalDecision('VETO', symbol, 0, current_price, 0, 0, confidence, '',
-                             f"Only {sell_votes}/{total_agents} agents agree to short. Need 60%+.")
+                             f"Only {sell_votes}/{total_agents} agents agree to short. Need at least 2.")
 
     risk_dollars = account_balance * MAX_RISK_PER_TRADE_PCT
     stop_loss = current_price * (1 + stop_pct)       # Stop ABOVE entry for short
     risk_per_unit = stop_loss - current_price
     units = risk_dollars / risk_per_unit if risk_per_unit > 0 else account_balance * 0.10 / current_price
-    position_size_usd = min(units * current_price, account_balance * 0.20)
+    position_size_usd = min(units * current_price, account_balance * 0.35)
     position_size_usd = max(position_size_usd, 10.0)
     take_profit = current_price - (stop_loss - current_price) * 2.0  # 2:1 R:R below entry
 

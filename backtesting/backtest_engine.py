@@ -16,7 +16,7 @@ import json
 import pandas as pd
 import numpy as np
 import yfinance as yf
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -383,6 +383,295 @@ if BACKTESTING_PY:
                 self.position.close()
 
 
+    class CryptoMeanReversionBT(Strategy):
+        """
+        Mean-reversion strategy — mirrors crypto_mean_reversion.py.
+
+        Entry (LONG only):
+          - Kalman proxy: (close - EMA50) / EMA50 <= -0.8% (price stretched below trend)
+          - OR: (close - rolling_vwap_30) / rolling_vwap_30 <= -0.5% (AVWAP deviation)
+          - Price within 1.2% of lower Bollinger Band (structural support zone)
+          - ADX < adx_max (ranging, not trending)
+          - MACD(3/15/3) hist > -0.3% of price (not in freefall)
+        Exit: BB mid target OR 2% stop (whichever hit first)
+        """
+        adx_max    = 22
+        bb_period  = 20
+        bb_std     = 2.0
+        ema_period = 50
+
+        def init(self):
+            close  = pd.Series(self.data.Close)
+            high   = pd.Series(self.data.High)
+            low    = pd.Series(self.data.Low)
+            volume = pd.Series(self.data.Volume)
+
+            # EMA50 as Kalman proxy
+            def ema(prices, n):
+                return prices.ewm(span=n, adjust=False).mean().values
+
+            # Rolling VWAP (30-bar) as AVWAP proxy
+            def rolling_vwap(high, low, close, vol, n=30):
+                typical = (high + low + close) / 3.0
+                tpv = typical * vol
+                cum_tpv = tpv.rolling(n).sum()
+                cum_vol = vol.rolling(n).sum()
+                return (cum_tpv / cum_vol.replace(0, np.nan)).values
+
+            # Bollinger Bands
+            def bb_lower(prices, n, k):
+                mid = prices.rolling(n).mean()
+                std = prices.rolling(n).std()
+                return (mid - k * std).values
+
+            def bb_mid(prices, n):
+                return prices.rolling(n).mean().values
+
+            # MACD(3/15/3) histogram
+            def macd_hist(prices, f=3, s=15, sig=3):
+                ema_f = prices.ewm(span=f, adjust=False).mean()
+                ema_s = prices.ewm(span=s, adjust=False).mean()
+                line  = ema_f - ema_s
+                signal_l = line.ewm(span=sig, adjust=False).mean()
+                return (line - signal_l).values
+
+            self.ema50    = self.I(ema, close, self.ema_period)
+            self.vwap30   = self.I(rolling_vwap, high, low, close, volume)
+            self.bb_lower = self.I(bb_lower, close, self.bb_period, self.bb_std)
+            self.bb_mid   = self.I(bb_mid,   close, self.bb_period)
+            self.macd_h   = self.I(macd_hist, close)
+            self.adx      = self.I(_calc_adx, high, low, close)
+
+        def next(self):
+            price  = self.data.Close[-1]
+            adx    = self.adx[-1]
+            ema50  = self.ema50[-1]
+            vwap30 = self.vwap30[-1]
+            bbl    = self.bb_lower[-1]
+            bbm    = self.bb_mid[-1]
+            hist   = self.macd_h[-1]
+
+            # Guard against NaN
+            if any(np.isnan(x) for x in [adx, ema50, vwap30, bbl, bbm, hist]):
+                return
+
+            # Already in a position — check if target hit (managed via sl/tp on entry)
+            if self.position:
+                return
+
+            # Kalman proxy: price at least 0.8% below EMA50
+            kalman_ok = (price - ema50) / ema50 <= -0.008
+            # AVWAP proxy: price at least 0.5% below rolling VWAP
+            avwap_ok  = (price - vwap30) / vwap30 <= -0.005 if vwap30 > 0 else False
+            if not (kalman_ok or avwap_ok):
+                return
+
+            # Price within 1.2% of lower BB
+            if price <= 0:
+                return
+            bb_prox = (price - bbl) / price
+            if bb_prox > 0.012:
+                return
+
+            # ADX < adx_max (ranging regime)
+            if adx >= self.adx_max:
+                return
+
+            # MACD not in freefall: hist > -0.003 * price
+            if hist <= -0.003 * price:
+                return
+
+            # Compute target (BB mid) and stop (2% below entry)
+            target = bbm if bbm > price else price * 1.055  # fallback: 5.5% above
+            stop   = price * 0.98
+
+            reward = (target - price) / price
+            risk   = (price - stop)   / price
+
+            # Min R:R = 2.5 and min reward = 4%
+            if reward < 0.04 or (risk <= 0 or reward / risk < 2.5):
+                return
+
+            self.buy(sl=stop, tp=target)
+
+
+    class FuturesMESScalperBT(Strategy):
+        """
+        MES Opening Range Breakout — mirrors futures_scalper.py.
+
+        Entry:
+          - Track first bar of each day as the Opening Range (OR)
+          - LONG: close > OR high × 1.001 AND price > EMA20 AND ADX > adx_min
+          - SHORT: close < OR low × 0.999 AND price < EMA20 AND ADX > adx_min
+        Stop: stop_pts_pct below/above entry. Target: target_pts_pct above/below.
+        """
+        adx_min       = 18
+        stop_pts_pct  = 0.00073   # ~4 ES points / 5500
+        target_pts_pct = 0.00145  # ~8 ES points / 5500
+        long_short    = True
+
+        def init(self):
+            close = pd.Series(self.data.Close)
+            high  = pd.Series(self.data.High)
+            low   = pd.Series(self.data.Low)
+
+            def ema(prices, n=20):
+                return prices.ewm(span=n, adjust=False).mean().values
+
+            self.ema20 = self.I(ema, close)
+            self.adx   = self.I(_calc_adx, high, low, close)
+
+            # OR tracking state
+            self._or_high = None
+            self._or_low  = None
+            self._or_date = None
+
+        def next(self):
+            price    = self.data.Close[-1]
+            high_bar = self.data.High[-1]
+            low_bar  = self.data.Low[-1]
+            adx      = self.adx[-1]
+            ema20    = self.ema20[-1]
+
+            if np.isnan(adx) or np.isnan(ema20):
+                return
+
+            # Detect new trading day
+            try:
+                current_date = self.data.index[-1].date()
+            except Exception:
+                return
+
+            if current_date != self._or_date:
+                # First bar of new day — set Opening Range and do not trade
+                self._or_high = high_bar
+                self._or_low  = low_bar
+                self._or_date = current_date
+                return
+
+            if self._or_high is None or self._or_low is None:
+                return
+
+            # HTF bias proxy: EMA20
+            htf_bullish = price > ema20
+            htf_bearish = price < ema20
+
+            # ADX filter
+            if adx < self.adx_min:
+                return
+
+            # LONG entry
+            if (self.long_short and
+                    price > self._or_high * 1.001 and
+                    htf_bullish and
+                    not self.position.is_long):
+                if self.position.is_short:
+                    self.position.close()
+                stop   = price * (1 - self.stop_pts_pct)
+                target = price * (1 + self.target_pts_pct)
+                self.buy(sl=stop, tp=target)
+
+            # SHORT entry
+            elif (self.long_short and
+                    price < self._or_low * 0.999 and
+                    htf_bearish and
+                    not self.position.is_short):
+                if self.position.is_long:
+                    self.position.close()
+                stop   = price * (1 + self.stop_pts_pct)
+                target = price * (1 - self.target_pts_pct)
+                self.sell(sl=stop, tp=target)
+
+
+    class CryptoPerpBT(Strategy):
+        """
+        Perpetual futures breakout strategy — mirrors crypto_perp_strategy.py.
+
+        Entry:
+          - LONG:  close > 20-bar rolling high × 1.001 AND RSI > 55 AND ADX > 20
+                   AND vol_spike > 1.2
+          - SHORT: close < 20-bar rolling low × 0.999 AND RSI < 45 AND ADX > 20
+                   AND vol_spike > 1.2
+        Stop: stop_pct. Target: tp_pct (2:1 R:R).
+        """
+        breakout_bars   = 20
+        adx_min         = 20
+        rsi_period      = 14
+        vol_spike_min   = 1.2
+        rsi_long_min    = 55
+        rsi_short_max   = 45
+        stop_pct        = 0.015
+        tp_pct          = 0.030
+
+        def init(self):
+            close  = pd.Series(self.data.Close)
+            high   = pd.Series(self.data.High)
+            low    = pd.Series(self.data.Low)
+            volume = pd.Series(self.data.Volume)
+
+            def rolling_max(prices, n):
+                return prices.rolling(n).max().values
+
+            def rolling_min(prices, n):
+                return prices.rolling(n).min().values
+
+            def rsi(prices, n):
+                delta = prices.diff()
+                gain  = delta.clip(lower=0).rolling(n).mean()
+                loss  = (-delta.clip(upper=0)).rolling(n).mean()
+                rs    = gain / loss.replace(0, np.nan)
+                return (100 - 100 / (1 + rs)).values
+
+            def vol_spike(vol, n=20):
+                ma = vol.rolling(n).mean()
+                return (vol / ma.replace(0, np.nan)).values
+
+            self.roll_high = self.I(rolling_max, close, self.breakout_bars)
+            self.roll_low  = self.I(rolling_min, close, self.breakout_bars)
+            self.rsi_vals  = self.I(rsi, close, self.rsi_period)
+            self.vol_spk   = self.I(vol_spike, volume)
+            self.adx       = self.I(_calc_adx, high, low, close)
+
+        def next(self):
+            price     = self.data.Close[-1]
+            rsi_val   = self.rsi_vals[-1]
+            adx       = self.adx[-1]
+            spike     = self.vol_spk[-1]
+            r_high    = self.roll_high[-1]
+            r_low     = self.roll_low[-1]
+
+            if any(np.isnan(x) for x in [rsi_val, adx, spike, r_high, r_low]):
+                return
+
+            # LONG: breakout above 20-bar high
+            want_long = (
+                price > r_high * 1.001 and
+                rsi_val > self.rsi_long_min and
+                adx > self.adx_min and
+                spike > self.vol_spike_min
+            )
+            # SHORT: breakdown below 20-bar low
+            want_short = (
+                price < r_low * 0.999 and
+                rsi_val < self.rsi_short_max and
+                adx > self.adx_min and
+                spike > self.vol_spike_min
+            )
+
+            if want_long and not self.position.is_long:
+                if self.position.is_short:
+                    self.position.close()
+                stop   = price * (1 - self.stop_pct)
+                target = price * (1 + self.tp_pct)
+                self.buy(sl=stop, tp=target)
+            elif want_short and not self.position.is_short:
+                if self.position.is_long:
+                    self.position.close()
+                stop   = price * (1 + self.stop_pct)
+                target = price * (1 - self.tp_pct)
+                self.sell(sl=stop, tp=target)
+
+
 # ─── Backtest runner ─────────────────────────────────────────────────────────
 
 _PERIOD_TO_DAYS = {
@@ -399,11 +688,34 @@ def fetch_data(symbol: str, period: str = '6mo', interval: str = '5m') -> Option
     """
     Fetch OHLCV data for backtesting.
 
-    For Coinbase-traded pairs (symbol contains '-USDC' or '-USD' matching a CB pair),
-    we prefer the Coinbase Advanced Trade API so backtests use the actual price feed
-    the live bot trades on.  Falls back to yfinance if Coinbase credentials are absent
-    or the fetch fails (e.g. for equity symbols).
+    Priority:
+      1. Local price archive (logs/price_archive.db) — zero API cost
+      2. Coinbase REST API — for crypto pairs, best data quality
+      3. yfinance — fallback for equities or when Coinbase creds absent
     """
+    # ── 1. Check local price archive first ────────────────────────────────────
+    days = _PERIOD_TO_DAYS.get(period, 180)
+    cb_granularity = _INTERVAL_TO_CB_GRANULARITY.get(interval, 'FIVE_MINUTE')
+    try:
+        from data.price_archive import get_candles as archive_get, has_data, upsert_candles
+        from datetime import timezone
+        end_dt   = datetime.now(timezone.utc)
+        start_dt = end_dt - timedelta(days=days)
+        # Normalise symbol for archive lookup
+        _arch_sym = symbol.upper().replace('BTC-USD', 'BTC-USDC').replace('ETH-USD', 'ETH-USDC')
+        if has_data(_arch_sym, cb_granularity, start_dt, end_dt, min_coverage=0.70):
+            df_arch = archive_get(_arch_sym, cb_granularity, start=start_dt, end=end_dt)
+            if df_arch is not None and len(df_arch) > 100:
+                df_arch = df_arch.rename(columns={
+                    'open': 'Open', 'high': 'High', 'low': 'Low',
+                    'close': 'Close', 'volume': 'Volume',
+                })
+                df_arch = df_arch[['Open', 'High', 'Low', 'Close', 'Volume']].dropna()
+                print(f"[backtest] ✅ Loaded {len(df_arch)} candles from local archive for {_arch_sym}")
+                return df_arch
+        print(f"[backtest] Archive miss for {_arch_sym} — fetching from API")
+    except Exception as _ae:
+        print(f"[backtest] Archive check failed: {_ae} — falling back to API")
     days = _PERIOD_TO_DAYS.get(period, 180)
     cb_granularity = _INTERVAL_TO_CB_GRANULARITY.get(interval, 'FIVE_MINUTE')
 
@@ -567,6 +879,164 @@ def run_equity_backtest(
         return {'error': str(e)}
 
 
+def run_mean_reversion_backtest(
+    symbol: str,
+    period: str = '6mo',
+    interval: str = '5m',
+    cash: float = 500,
+    commission: float = 0.006,
+    slippage: float = 0.002,
+) -> dict:
+    """Run crypto mean-reversion strategy backtest (Kalman+AVWAP+BB entry)."""
+    if not BACKTESTING_PY:
+        return {'error': 'backtesting.py not installed'}
+
+    df = fetch_data(symbol, period=period, interval=interval)
+    if df is None:
+        return {'error': f'No data for {symbol}'}
+
+    # Price scaling fix for high-price assets (same as run_crypto_backtest)
+    avg_price = float(df['Close'].mean())
+    target_units = 10
+    if avg_price > 0 and cash / avg_price < target_units:
+        price_scale = avg_price / (cash / target_units)
+    else:
+        price_scale = 1.0
+    if price_scale > 1.0:
+        df = df.copy()
+        for col in ('Open', 'High', 'Low', 'Close'):
+            df[col] = df[col] / price_scale
+    cash_scaled = cash
+
+    print(f"\n[backtest] Running CryptoMeanReversionBT on {symbol}...")
+    try:
+        bt = Backtest(
+            df, CryptoMeanReversionBT,
+            cash=cash_scaled,
+            commission=commission + slippage,
+            exclusive_orders=True,
+        )
+        stats = bt.run()
+        result = _parse_stats(stats, symbol, 'crypto_mean_reversion', 'Mean Reversion BB+Kalman+AVWAP')
+        _print_result(result)
+
+        # Save JSON
+        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+        results_path = os.path.join(BACKTEST_DIR, f'results_{symbol}_mean_reversion_{ts}.json')
+        with open(results_path, 'w') as f:
+            json.dump({k: str(v) for k, v in result.items()}, f, indent=2)
+        print(f"[backtest] Results saved to {results_path}")
+
+        result['_raw_stats'] = stats
+        return result
+    except Exception as e:
+        print(f"[backtest] Error: {e}")
+        return {'error': str(e)}
+
+
+def run_futures_backtest(
+    symbol: str = 'ES=F',
+    period: str = '6mo',
+    interval: str = '5m',
+    cash: float = 50000,
+    commission: float = 0.0002,
+    slippage: float = 0.0001,
+) -> dict:
+    """
+    Run MES Opening Range Breakout backtest.
+    cash=50000 simulates a properly-funded futures account — win% is what matters for attribution.
+    """
+    if not BACKTESTING_PY:
+        return {'error': 'backtesting.py not installed'}
+
+    df = fetch_data(symbol, period=period, interval=interval)
+    if df is None:
+        return {'error': f'No data for {symbol}'}
+
+    print(f"\n[backtest] Running FuturesMESScalperBT on {symbol}...")
+    try:
+        bt = Backtest(
+            df, FuturesMESScalperBT,
+            cash=cash,
+            commission=commission + slippage,
+            exclusive_orders=True,
+        )
+        stats = bt.run()
+        result = _parse_stats(stats, symbol, 'futures_scalper', 'MES ORB Scalper')
+        _print_result(result)
+
+        # Save JSON
+        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+        results_path = os.path.join(BACKTEST_DIR, f'results_{symbol}_futures_{ts}.json')
+        with open(results_path, 'w') as f:
+            json.dump({k: str(v) for k, v in result.items()}, f, indent=2)
+        print(f"[backtest] Results saved to {results_path}")
+
+        result['_raw_stats'] = stats
+        return result
+    except Exception as e:
+        print(f"[backtest] Error: {e}")
+        return {'error': str(e)}
+
+
+def run_perp_backtest(
+    symbol: str,
+    period: str = '6mo',
+    interval: str = '5m',
+    cash: float = 500,
+    commission: float = 0.0011,
+    slippage: float = 0.0005,
+) -> dict:
+    """
+    Run Bybit perpetual futures breakout backtest.
+    commission=0.0011 (Bybit taker 0.055% × 2 round-trip ≈ 0.11%).
+    """
+    if not BACKTESTING_PY:
+        return {'error': 'backtesting.py not installed'}
+
+    df = fetch_data(symbol, period=period, interval=interval)
+    if df is None:
+        return {'error': f'No data for {symbol}'}
+
+    # Price scaling fix for high-price assets
+    avg_price = float(df['Close'].mean())
+    target_units = 10
+    if avg_price > 0 and cash / avg_price < target_units:
+        price_scale = avg_price / (cash / target_units)
+    else:
+        price_scale = 1.0
+    if price_scale > 1.0:
+        df = df.copy()
+        for col in ('Open', 'High', 'Low', 'Close'):
+            df[col] = df[col] / price_scale
+    cash_scaled = cash
+
+    print(f"\n[backtest] Running CryptoPerpBT on {symbol}...")
+    try:
+        bt = Backtest(
+            df, CryptoPerpBT,
+            cash=cash_scaled,
+            commission=commission + slippage,
+            exclusive_orders=True,
+        )
+        stats = bt.run()
+        result = _parse_stats(stats, symbol, 'crypto_perp', 'Crypto Perp Breakout Long/Short')
+        _print_result(result)
+
+        # Save JSON
+        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+        results_path = os.path.join(BACKTEST_DIR, f'results_{symbol}_perp_{ts}.json')
+        with open(results_path, 'w') as f:
+            json.dump({k: str(v) for k, v in result.items()}, f, indent=2)
+        print(f"[backtest] Results saved to {results_path}")
+
+        result['_raw_stats'] = stats
+        return result
+    except Exception as e:
+        print(f"[backtest] Error: {e}")
+        return {'error': str(e)}
+
+
 def run_backtest_oos_split(
     symbol: str,
     strategy: str = 'crypto',
@@ -707,6 +1177,297 @@ def _print_result(result: dict) -> None:
 ║  Avg Trade:     {result['avg_trade_return_pct']:+.2f}%
 ║  Final Equity:  ${result['final_equity']:,.2f}
 ╚══════════════════════════════════════════════════════════""")
+
+
+# ─── Intelligence pipeline ───────────────────────────────────────────────────
+
+def _extract_trades_from_stats(stats, symbol: str, strategy_name: str,
+                                commission: float = 0.012,
+                                price_scale: float = 1.0) -> list[dict]:
+    """
+    Extract individual trade records from backtesting.py stats object.
+    Returns list of dicts suitable for intelligence_bridge.ingest_backtest_trades.
+
+    price_scale: de-scale factor when prices were scaled down for int-truncation fix.
+                 P&L and prices are multiplied back by price_scale.
+    """
+    trades = []
+    try:
+        raw = stats._trades  # backtesting.py internal trade DataFrame
+        if raw is None or len(raw) == 0:
+            return trades
+        for _, row in raw.iterrows():
+            entry_p_scaled = float(row.get('EntryPrice', 0))
+            exit_p_scaled  = float(row.get('ExitPrice', 0))
+            size    = abs(float(row.get('Size', 1)))
+            pnl_raw = float(row.get('PnL', (exit_p_scaled - entry_p_scaled) * size))
+            # De-scale prices and P&L back to real-world values
+            entry_p = entry_p_scaled * price_scale
+            exit_p  = exit_p_scaled  * price_scale
+            pnl     = pnl_raw * price_scale
+            fee     = abs(pnl) * commission if commission > 0 else 0
+            net     = pnl - fee
+            entry_ts = str(row.get('EntryTime', ''))
+            exit_ts  = str(row.get('ExitTime', ''))
+            hold_m = 0.0
+            try:
+                et = pd.to_datetime(entry_ts)
+                xt = pd.to_datetime(exit_ts)
+                hold_m = (xt - et).total_seconds() / 60
+            except Exception:
+                pass
+            trades.append({
+                'symbol': symbol,
+                'strategy': strategy_name,
+                'entry_ts': entry_ts,
+                'exit_ts': exit_ts,
+                'entry_price': entry_p,
+                'exit_price': exit_p,
+                'pnl_usd': pnl,
+                'fee_usd': fee,
+                'pnl_pct': (exit_p - entry_p) / entry_p if entry_p > 0 else 0,
+                'won': net > 0,
+                'hold_minutes': hold_m,
+                'exit_reason': 'backtest_close',
+                'regime': 'unknown',  # enriched later by intelligence_bridge
+            })
+    except Exception as e:
+        print(f"[backtest] Trade extraction error: {e}")
+    return trades
+
+
+def run_with_intelligence(
+    symbol: str,
+    strategy: str = 'crypto',
+    period: str = '6mo',
+    interval: str = '5m',
+    variant: str = 'workhorse',
+    cash: float = 500,
+    commission: float = 0.006,
+    slippage: float = 0.002,
+    archive_to_db: bool = True,
+    validate: bool = True,
+) -> dict:
+    """
+    Full intelligence-aware backtest run:
+      1. Fetch data (archive → Coinbase → yfinance)
+      2. Run backtest (strategy: 'crypto', 'equity', 'mean_reversion', 'futures', 'perp')
+      3. Extract trade-level attribution → signal_stats (Bayesian priors updated)
+      4. Archive result to backtest_results table
+      5. Run strategy validation gate
+      6. Return full result dict with validation verdict + trades_attributed count
+
+    Strategy name mapping:
+      'crypto'          → crypto_macd_{variant}  (variant: workhorse/classic/sniper/all)
+      'equity'          → equity_momentum
+      'mean_reversion'  → crypto_mean_reversion
+      'futures'         → futures_scalper
+      'perp'            → crypto_perp
+    """
+    # ── Strategy name mapping ─────────────────────────────────────────────────
+    if strategy == 'crypto':
+        strategy_name = f"crypto_macd_{variant}" if variant != 'all' else 'crypto_macd_workhorse'
+    elif strategy == 'equity':
+        strategy_name = 'equity_momentum'
+    elif strategy == 'mean_reversion':
+        strategy_name = 'crypto_mean_reversion'
+    elif strategy == 'futures':
+        strategy_name = 'futures_scalper'
+    elif strategy == 'perp':
+        strategy_name = 'crypto_perp'
+    else:
+        strategy_name = strategy
+
+    # ── Run the backtest ──────────────────────────────────────────────────────
+    # Compute price_scale so we can de-scale P&L during attribution
+    price_scale = 1.0
+    raw_stats_obj = None
+    trades_attributed = 0
+
+    if strategy == 'crypto':
+        if variant == 'all':
+            # Run all 3 variants and aggregate attribution; return workhorse stats for gate
+            variants_to_run = ['workhorse', 'classic', 'sniper']
+            all_bt_stats = {}
+            for v in variants_to_run:
+                _r = run_with_intelligence(
+                    symbol=symbol, strategy='crypto', period=period,
+                    interval=interval, variant=v, cash=cash,
+                    commission=commission, slippage=slippage,
+                    archive_to_db=archive_to_db, validate=validate,
+                )
+                all_bt_stats[v] = _r
+            # Return the workhorse result as representative
+            main_r = all_bt_stats.get('workhorse', {})
+            # Sum up attributed trades
+            total_attr = sum(r.get('trades_attributed', 0) for r in all_bt_stats.values())
+            main_r['trades_attributed'] = total_attr
+            return main_r
+
+        result = run_crypto_backtest(symbol=symbol, period=period, interval=interval,
+                                     cash=cash, commission=commission,
+                                     slippage=slippage, variant=variant)
+        stats_key = variant
+        bt_stats = result.get(stats_key, result.get(list(result.keys())[0], {}))
+        if 'error' in bt_stats:
+            return {'error': bt_stats['error']}
+        # For attribution we need the raw backtesting.py stats object
+        # Re-run to capture raw stats (run_crypto_backtest discards it)
+        try:
+            df_for_attr = fetch_data(symbol, period=period, interval=interval)
+            if df_for_attr is not None:
+                avg_p = float(df_for_attr['Close'].mean())
+                if avg_p > 0 and cash / avg_p < 10:
+                    price_scale = avg_p / (cash / 10)
+                    df_for_attr = df_for_attr.copy()
+                    for col in ('Open', 'High', 'Low', 'Close'):
+                        df_for_attr[col] = df_for_attr[col] / price_scale
+                _strat_map = {
+                    'workhorse': CryptoMACDWorkhorse,
+                    'classic':   CryptoMACDClassic,
+                    'sniper':    CryptoMACDSniper,
+                }
+                _StratClass = _strat_map.get(variant, CryptoMACDWorkhorse)
+                _bt = Backtest(df_for_attr, _StratClass, cash=cash,
+                               commission=commission + slippage, exclusive_orders=True)
+                raw_stats_obj = _bt.run()
+        except Exception as _re:
+            print(f"[backtest] Raw stats re-run for attribution failed: {_re}")
+
+    elif strategy == 'equity':
+        bt_stats = run_equity_backtest(symbol=symbol, period=period, interval=interval,
+                                       cash=cash, slippage=slippage)
+        if 'error' in bt_stats:
+            return {'error': bt_stats['error']}
+        try:
+            df_for_attr = fetch_data(symbol, period=period, interval=interval)
+            if df_for_attr is not None:
+                _bt = Backtest(df_for_attr, EquityMomentum, cash=cash,
+                               commission=slippage, exclusive_orders=True)
+                raw_stats_obj = _bt.run()
+        except Exception as _re:
+            print(f"[backtest] Raw stats re-run for attribution failed: {_re}")
+
+    elif strategy == 'mean_reversion':
+        bt_stats = run_mean_reversion_backtest(symbol=symbol, period=period, interval=interval,
+                                               cash=cash, commission=commission, slippage=slippage)
+        raw_stats_obj = bt_stats.pop('_raw_stats', None)
+        if 'error' in bt_stats:
+            return {'error': bt_stats['error']}
+        # Recompute price_scale
+        try:
+            df_ps = fetch_data(symbol, period=period, interval=interval)
+            if df_ps is not None:
+                avg_p = float(df_ps['Close'].mean())
+                if avg_p > 0 and cash / avg_p < 10:
+                    price_scale = avg_p / (cash / 10)
+        except Exception:
+            pass
+
+    elif strategy == 'futures':
+        _fut_cash = 50000
+        _fut_comm = commission if commission != 0.006 else 0.0002
+        _fut_slip = slippage  if slippage  != 0.002  else 0.0001
+        bt_stats = run_futures_backtest(symbol=symbol, period=period, interval=interval,
+                                        cash=_fut_cash, commission=_fut_comm, slippage=_fut_slip)
+        raw_stats_obj = bt_stats.pop('_raw_stats', None)
+        if 'error' in bt_stats:
+            return {'error': bt_stats['error']}
+
+    elif strategy == 'perp':
+        _perp_comm = commission if commission != 0.006 else 0.0011
+        _perp_slip = slippage  if slippage  != 0.002  else 0.0005
+        bt_stats = run_perp_backtest(symbol=symbol, period=period, interval=interval,
+                                     cash=cash, commission=_perp_comm, slippage=_perp_slip)
+        raw_stats_obj = bt_stats.pop('_raw_stats', None)
+        if 'error' in bt_stats:
+            return {'error': bt_stats['error']}
+        try:
+            df_ps = fetch_data(symbol, period=period, interval=interval)
+            if df_ps is not None:
+                avg_p = float(df_ps['Close'].mean())
+                if avg_p > 0 and cash / avg_p < 10:
+                    price_scale = avg_p / (cash / 10)
+        except Exception:
+            pass
+
+    else:
+        return {'error': f'Unknown strategy: {strategy}'}
+
+    # ── Extract trades and feed into attribution ───────────────────────────────
+    if raw_stats_obj is not None:
+        try:
+            from learning.intelligence_bridge import ingest_backtest_trades
+            trades_list = _extract_trades_from_stats(
+                raw_stats_obj, symbol, strategy_name, commission, price_scale=price_scale
+            )
+            if trades_list:
+                trades_df = pd.DataFrame(trades_list)
+                trades_attributed = ingest_backtest_trades(
+                    trades_df=trades_df,
+                    symbol=symbol,
+                    strategy_name=strategy_name,
+                    strategy_variant=variant,
+                    params={'variant': variant, 'interval': interval, 'period': period,
+                            'commission': commission},
+                    timeframe=_INTERVAL_TO_CB_GRANULARITY.get(interval, 'FIVE_MINUTE'),
+                )
+                print(f"[backtest] Attributed {trades_attributed} trades to signal_stats "
+                      f"for {strategy_name}/{symbol}")
+        except Exception as e:
+            print(f"[backtest] Attribution error: {e}")
+
+    # ── Convert to validation-format stats ────────────────────────────────────
+    val_stats = {
+        'total_trades': bt_stats.get('total_trades', 0),
+        'win_rate': bt_stats.get('win_rate_pct', 0) / 100,
+        'total_pnl': bt_stats.get('total_return_pct', 0) / 100 * cash,
+        'sharpe': bt_stats.get('sharpe_ratio', 0),
+        'max_drawdown': abs(bt_stats.get('max_drawdown_pct', 0)) / 100,
+        'avg_pnl': bt_stats.get('avg_trade_return_pct', 0) / 100 * (cash / max(bt_stats.get('total_trades', 1), 1)),
+        'profit_factor': bt_stats.get('profit_factor', 0),
+    }
+
+    # ── Archive + validate ────────────────────────────────────────────────────
+    validation = None
+    if validate:
+        try:
+            from backtesting.strategy_validator import validate_strategy
+            params = {'variant': variant, 'interval': interval, 'period': period, 'commission': commission}
+            validation = validate_strategy(
+                strategy_name=strategy_name,
+                symbol=symbol, params=params, stats=val_stats,
+                period_start=bt_stats.get('start', ''),
+                period_end=bt_stats.get('end', ''),
+            )
+            print(f"\n{validation.summary()}")
+        except Exception as e:
+            print(f"[backtest] Validation error: {e}")
+
+    # ── Archive price data ────────────────────────────────────────────────────
+    try:
+        from data.price_archive import upsert_candles
+        _arch_sym = symbol.upper().replace('BTC-USD', 'BTC-USDC').replace('ETH-USD', 'ETH-USDC')
+        cb_gran = _INTERVAL_TO_CB_GRANULARITY.get(interval, 'FIVE_MINUTE')
+        df_fetched = fetch_data(symbol, period=period, interval=interval)
+        if df_fetched is not None:
+            df_low = df_fetched.rename(columns={
+                'Open': 'open', 'High': 'high', 'Low': 'low',
+                'Close': 'close', 'Volume': 'volume',
+            })
+            n = upsert_candles(df_low, _arch_sym, cb_gran)
+            if n > 0:
+                print(f"[backtest] Archived {n} candles to price archive for {_arch_sym}")
+    except Exception as e:
+        print(f"[backtest] Archive write error: {e}")
+
+    return {
+        'backtest': bt_stats,
+        'validation': validation,
+        'stats': val_stats,
+        'passed': validation.passed if validation else None,
+        'trades_attributed': trades_attributed,
+    }
 
 
 # ─── Auto-optimizer ───────────────────────────────────────────────────────────

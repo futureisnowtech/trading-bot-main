@@ -29,7 +29,13 @@ A fully autonomous AI-powered trading system that:
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
 
-## Current Version: v5.3
+## Current Version: v6.0
+- v6.0 (2026-03-25): AI-first rework — conviction floor removed, AI sees everything
+  - Hard conviction gate (30pts) replaced by: any signal fires + `should_block_trade()` macro gate
+  - `get_active_signal_stats_brief()`: Bayesian win rates for fired signals injected into every agent
+  - `get_agent_self_accuracy()`: each agent sees their own historical accuracy in their prompt
+  - Session bias + multiplier injected as readable text (not numeric floor gate)
+  - Conviction score + signal list visible to all agents + moderator
 - v5.2 (2026-03-25): Goku agent + Data feed layer + Tax tracking
   - `data/news_feed.py`: CryptoPanic API + RSS fallback; sentiment -1 to +1; news_risk HIGH/MEDIUM/LOW
   - `data/macro_feed.py`: DXY/SPY/GLD/VIX/TLT via yfinance + Coinglass funding rates; RISK_ON/NEUTRAL/RISK_OFF; macro_score -5 to +5

@@ -1,5 +1,17 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
+## 2026-03-25 — v6.0: AI-First Rework — Conviction Score Becomes Context, Not Gate
+
+**Core architectural change:**
+The hard conviction floor (30pts) that blocked the AI debate has been removed.
+The math signal scoring now feeds the AI as rich context rather than deciding for it.
+
+- **scheduler/job_runner.py**: Conviction gate removed. New gate: any signal fires + macro not blocked + ATR fee floor passes. `should_block_trade()` now called pre-debate as the real macro/news gate (RISK_OFF, HIGH news risk, VIX extreme fear). `active_signals` list built per symbol (canonical DB names) and added to `market_data`. Session bias + multiplier injected as readable text into debate context (not a numeric floor).
+- **learning/signal_performance.py**: Added `get_active_signal_stats_brief(active_signals, regime)` — returns compact Bayesian win-rate table for fired signals, injected into every agent prompt. Added `get_agent_self_accuracy(agent_name, regime)` — returns per-agent historical accuracy one-liner for their own prompt.
+- **strategies/ai_agents/analyst_agents.py**: Conviction score, active signal list, Bayesian signal win-rate table, and per-agent historical accuracy now injected into every agent user prompt. Each agent sees: "CONVICTION SCORE: X/100", which signals fired, how those signals have historically performed, and their own past accuracy.
+- **strategies/ai_agents/debate_engine.py**: Conviction score + active signals summary added to moderator synthesis prompt.
+- **TODO.md**: Created — tracks manual tasks, in-progress AI-first work, and future improvement ideas.
+
 ## 2026-03-25 — v5.3: AI Session Analyst + Session-aware Routing + Full Wiring
 - **strategies/ai_agents/session_analyst.py** (NEW): AI Session Analyst — fires at Asia (8pm ET), London (3am ET), NY (8:30am ET) opens. Reads news+macro+signal leaderboard. Outputs: session_bias (STRONGLY_BULLISH→STRONGLY_BEARISH), conviction_threshold_multiplier (0.7–1.5×), signal_weight_overrides, strategies_to_favor, avoid_flags, session_notes. Stores to SQLite session_contexts table + 4h memory cache. Bounded multipliers prevent AI from silencing all signals or going wild.
 - **scheduler/job_runner.py** (MODIFIED):

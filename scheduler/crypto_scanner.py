@@ -17,7 +17,7 @@ from config import (
     CRYPTO_PAIRS, PAPER_TRADING, ACCOUNT_SIZE, MARKET_TIMEZONE,
     CRYPTO_CANDLE_GRANULARITY, CRYPTO_ENABLED,
     COINBASE_MAKER_FEE_PCT, CRYPTO_POSITION_SIZE_USD,
-    MAX_STRATEGY_LOSS_STREAK, CRYPTO_MIN_HOLD_MINUTES,
+    MAX_STRATEGY_LOSS_STREAK,
     MEAN_REVERSION_ENABLED, MEAN_REVERSION_RSI_ENTRY, MEAN_REVERSION_ADX_MAX,
     ATR_FEE_FLOOR_PCT, SQUEEZE_MIN_BARS, RV_EXPANSION_THRESHOLD,
     KALMAN_ENTRY_DEV_PCT, AVWAP_ENTRY_DEV_PCT,
@@ -125,21 +125,8 @@ def run_crypto_scan() -> None:
 
             pos = rm.get_position('crypto_macd_consensus', pid)
             if pos:
-                # Strategy exit check as backup — gate with min hold to prevent churn
-                ts_entry = pos.get('ts_entry', '')
-                try:
-                    entry_dt = datetime.fromisoformat(ts_entry)
-                    tz = pytz.timezone(MARKET_TIMEZONE)
-                    _mins_held = int((datetime.now(tz) - (entry_dt if entry_dt.tzinfo else entry_dt.replace(tzinfo=tz))).total_seconds() / 60)
-                except Exception:
-                    _mins_held = CRYPTO_MIN_HOLD_MINUTES
-                sig = _crypto_strategy.generate_signal(pid, df)
-                if sig.action == 'SELL':
-                    if _mins_held >= CRYPTO_MIN_HOLD_MINUTES:
-                        _execute_crypto_exit(cb, rm, pid, pos, price, sig.reason, 'crypto_macd_consensus')
-                    else:
-                        log_event('INFO', 'exit_monitor',
-                                  f"[crypto] {pid} SELL signal but only {_mins_held}m in — waiting min hold ({CRYPTO_MIN_HOLD_MINUTES}m)")
+                # Position already open — monitor_exits_with_ai (called above) handles all exits.
+                # MACD SELL is an entry signal, not an exit trigger. Skip entry logic.
                 continue
 
             # ── Regime detection ──────────────────────────────────────────────

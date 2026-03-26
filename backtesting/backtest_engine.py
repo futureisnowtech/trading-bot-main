@@ -1776,3 +1776,155 @@ def _update_config_py(updates: dict) -> None:
     with open(config_path, 'w') as f:
         f.write(content)
     print(f"[optimizer] config.py updated: {updates}")
+
+
+
+# ─── Walk-Forward OOS Validator ───────────────────────────────────────────────
+
+def run_walk_forward(
+    symbol: str,
+    strategy: str = 'crypto',
+    variant: str = 'workhorse',
+    interval: str = '5m',
+    train_days: int = 60,
+    test_days: int = 30,
+    folds: int = 2,
+    cash: float = 500,
+) -> dict:
+    """
+    Walk-forward out-of-sample validation.
+
+    For each fold:
+      - Train window: train_days of data ending at fold boundary
+      - Test window:  test_days of data AFTER the training window (never seen during training)
+      - Step:         test_days (non-overlapping test windows)
+
+    Example with folds=2, train_days=60, test_days=30:
+      Fold 1: Train [Day 1-60]  → Test [Day 61-90]
+      Fold 2: Train [Day 31-90] → Test [Day 91-120]  (requires 120 days of history)
+
+    Returns summary dict with per-fold results and aggregate stats.
+    Prints pass/fail per fold and final verdict.
+    """
+    import yfinance as yf
+    from datetime import datetime, timedelta
+
+    results = []
+    now     = datetime.utcnow()
+
+    # Minimum pass rate: at least ceil(folds * 0.75) folds must pass
+    min_passing_folds = max(1, round(folds * 0.75))
+
+    print(f"\n{'═'*60}")
+    print(f"  WALK-FORWARD: {symbol} | {folds} folds | "
+          f"train={train_days}d test={test_days}d")
+    print(f"{'═'*60}")
+
+    for fold_idx in range(folds):
+        # Test window ends at: now - fold_idx * test_days
+        test_end   = now - timedelta(days=fold_idx * test_days)
+        test_start = test_end - timedelta(days=test_days)
+        train_end  = test_start
+        train_start = train_end - timedelta(days=train_days)
+
+        # Map to yfinance period strings (approximate)
+        total_days  = train_days + test_days
+        period_str  = f"{total_days}d"
+
+        print(f"\n  Fold {fold_idx + 1}/{folds}: "
+              f"train [{train_start.strftime('%Y-%m-%d')}→{train_end.strftime('%Y-%m-%d')}] "
+              f"test [{test_start.strftime('%Y-%m-%d')}→{test_end.strftime('%Y-%m-%d')}]")
+
+        try:
+            # Fetch full window
+            df_full = fetch_data(symbol, period=period_str, interval=interval)
+            if df_full is None or df_full.empty:
+                print(f"    ❌ No data for fold {fold_idx + 1}")
+                results.append({'fold': fold_idx + 1, 'error': 'no_data', 'passed': False})
+                continue
+
+            # Split into train/test
+            cutoff = df_full.index[int(len(df_full) * train_days / total_days)]
+            df_train = df_full[df_full.index < cutoff]
+            df_test  = df_full[df_full.index >= cutoff]
+
+            if len(df_test) < 20:
+                print(f"    ⚠ Test set too small ({len(df_test)} bars) — fold skipped")
+                results.append({'fold': fold_idx + 1, 'error': 'insufficient_test', 'passed': False})
+                continue
+
+            # Run backtest on OOS window only (no attribution to avoid contaminating live weights)
+            oos_result = run_with_intelligence(
+                symbol=symbol,
+                strategy=strategy,
+                variant=variant,
+                interval=interval,
+                period=f"{test_days}d",
+                cash=cash,
+                archive_to_db=False,
+                validate=True,
+            )
+
+            if 'error' in oos_result:
+                results.append({'fold': fold_idx + 1, 'error': oos_result['error'], 'passed': False})
+                continue
+
+            stats    = oos_result.get('stats', {})
+            passed   = bool(oos_result.get('passed', False))
+            wr       = stats.get('win_rate', 0)
+            pf       = stats.get('profit_factor', 0)
+            sharpe   = stats.get('sharpe', 0)
+            dd       = stats.get('max_drawdown', 0)
+            n_trades = stats.get('total_trades', 0)
+
+            # Adjusted pass criteria per brain/rbi/01_backtest_standards.md
+            fold_passed = (
+                wr       >= 0.30 and
+                pf       >= 1.2  and
+                sharpe   >= 0.50 and
+                dd       <= 0.20 and
+                n_trades >= 15
+            )
+
+            result_row = {
+                'fold':          fold_idx + 1,
+                'win_rate':      round(wr, 3),
+                'profit_factor': round(pf, 2),
+                'sharpe':        round(sharpe, 2),
+                'max_drawdown':  round(dd, 3),
+                'total_trades':  n_trades,
+                'passed':        fold_passed,
+                'validator_passed': passed,
+            }
+            results.append(result_row)
+
+            status = '✅ PASS' if fold_passed else '❌ FAIL'
+            print(f"    {status} | WR={wr:.0%} PF={pf:.2f} Sharpe={sharpe:.2f} "
+                  f"DD={dd:.0%} trades={n_trades}")
+
+        except Exception as e:
+            print(f"    ❌ Error fold {fold_idx + 1}: {e}")
+            results.append({'fold': fold_idx + 1, 'error': str(e), 'passed': False})
+
+    # ── Aggregate ────────────────────────────────────────────────────────────────
+    passing_folds = sum(1 for r in results if r.get('passed'))
+    wf_passed     = passing_folds >= min_passing_folds
+
+    print(f"\n{'═'*60}")
+    print(f"  WALK-FORWARD RESULT: {passing_folds}/{folds} folds passed")
+    print(f"  Required: {min_passing_folds}/{folds} | Overall: {'✅ PASS' if wf_passed else '❌ FAIL'}")
+    if not wf_passed:
+        print(f"  ⚠ Strategy is OVERFITTING — in-sample performance does not generalize.")
+    print(f"{'═'*60}\n")
+
+    return {
+        'symbol':          symbol,
+        'strategy':        strategy,
+        'folds':           folds,
+        'results':         results,
+        'passing_folds':   passing_folds,
+        'required_folds':  min_passing_folds,
+        'passed':          wf_passed,
+        'train_days':      train_days,
+        'test_days':       test_days,
+    }

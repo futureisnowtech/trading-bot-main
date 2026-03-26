@@ -1,5 +1,20 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
+## 2026-03-26
+- v8.1: auto_env_updater.py — automatic ML threshold + position size progression via launchd every 6h
+
+## 2026-03-26
+- v8.0 fixes: walk-forward wired into run_backtest.py, ML schema fixed for trade_attribution, ML threshold calibrated to 0.08 for seeded data
+
+## 2026-03-26
+- v8.0: 3-agent debate (11→3 API calls), ML signal layer (LightGBM), walk-forward OOS, funding rate wired, cooldown removed
+
+## 2026-03-26
+- v7.1: RBIPMS framework — RBI audit + walk-forward standards + incubation playbook + strategy lifecycle docs
+
+## 2026-03-25
+- v7.0: AI-first pipeline — prescreener + meta-learner + live backtest validator
+
 ## 2026-03-25 — v6.0: AI-First Rework — Conviction Score Becomes Context, Not Gate
 
 **Core architectural change:**

@@ -1,12 +1,21 @@
 """
 strategies/ai_agents/analyst_agents.py
-8 elite trading methodology AI agents with prompt caching + guaranteed JSON outputs.
-Prompt caching cuts cost ~80% — system prompts cached for 1 hour.
-Structured outputs guarantee valid JSON — no regex fallback needed.
+
+3 focused agents replace the old 9. Each owns exactly one non-overlapping domain.
+Same external API — run_agent(), call_claude_structured(), AGENTS, AGENT_RESPONSE_SCHEMA.
+
+Old system: 9 agents + moderator + Goku = up to 11 API calls per decision.
+New system: 3 agents, majority vote, done = 3 API calls. 3.5× cheaper and faster.
+
+Agents:
+  funding_regime   — Crypto-native macro: funding rate, OI trend, cross-asset regime
+  momentum_structure — Technical setup quality: ADX, squeeze, WAE, WaveTrend, MACD
+  risk_economics   — Trade economics: ATR vs fees, volume, stop placement
 """
 import json
 import os
 import sys
+import time
 import urllib.request
 import urllib.error
 from typing import Optional
@@ -14,581 +23,247 @@ from typing import Optional
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from config import ANTHROPIC_API_KEY, CLAUDE_MODEL, DEBATE_MAX_TOKENS
 
-# ─── Agent definitions ────────────────────────────────────────────────────────
+# ── Agent definitions ──────────────────────────────────────────────────────────
 AGENTS = {
-    'microstructure': {
-        'name': 'Sasha Stoikov / Rama Cont',
-        'dbz_name': 'Vegeta',
-        'style': 'Market microstructure direction analysis. Evaluates Order Book Imbalance (OBI = (bid_qty - ask_qty)/(bid_qty + ask_qty)), microprice (quantity-weighted fair value = (ask_price×bid_qty + bid_price×ask_qty)/(bid_qty+ask_qty)), and Trade Flow Imbalance (TFI = (buy_vol - sell_vol)/(buy_vol + sell_vol)). OBI ≥ 0.20 = mild buy pressure, ≥ 0.35 = strong. TFI ≥ 0.10 = buy-initiated flow. Microprice above midprice = fair value bid. These are the most predictive short-interval signals for 1-minute crypto.',
-        'key_questions': [
-            'Is OBI ≥ 0.20 confirming buy pressure, or is the book weighted to the ask side?',
-            'Does the microprice sit above the midprice, suggesting fair value is bid?',
-            'Is TFI ≥ 0.10 showing buy-initiated aggressor flow dominates sell flow?',
-            'Are OBI and TFI aligned (both bullish), or do they contradict each other suggesting noise?',
-        ]
-    },
-    'session_breakout': {
-        'name': 'Dan Shen / Zhuzhu Wen',
-        'dbz_name': 'Broly',
-        'style': 'Intraday session breakout and time-of-day momentum. Crypto has documented intraday predictability aligned with US market hours (08:00-11:00 ET) and Asian sessions. Session opening range breakout: first 30-minute high/low defines the range; long entry when close ≥ range_high + 0.1×ATR with volume ≥ 1.5× average. Outside active sessions, momentum signals are weaker and require stronger confirmation. Fee-aware: only trades where expected move is a multi-ATR continuation, not a 1-minute scalp.',
-        'key_questions': [
-            'Are we inside a high-volume session window (08:00-11:00 ET or documented Asia spike)? Entries during active windows have stronger intraday predictability.',
-            'Has price broken the 30-minute opening range high with volume confirmation (≥1.5× avg)?',
-            'Is this a genuine session momentum breakout or a random noise spike outside active hours?',
-            'Given time of day, does the intraday predictability literature support a directional bias?',
-        ]
-    },
-    'williams': {
-        'name': 'Larry Williams',
-        'dbz_name': 'Yamcha',
-        'style': 'Williams %R extreme oscillator for mean-reversion timing, regime-gated. Williams %R = (highest_high - close)/(highest_high - lowest_low) × -100. Extreme oversold: W%R ≤ -80. Only valid when Hurst exponent H < 0.50 (mean-reverting regime) — in trending regimes (H > 0.55), W%R extremes continue rather than revert. Fee-aware: the reversion must target at least 2× round-trip fees (2.4% gross move minimum at 1.2% RT fees). Confirmed with volume dry-up during the oversold extreme and a momentum burst on reversal.',
-        'key_questions': [
-            'Is Williams %R ≤ -80 (extreme oversold) AND does the OU z-score or negative autocorr (< -0.10) confirm mean-reverting regime? (In trending regimes with positive autocorr, W%R extremes are continuation signals, not reversals.)',
-            'Has volume dried up during the oversold extreme (exhaustion of sellers), followed by a momentum burst?',
-            'Is the expected reversion distance at least 2.4% (covering 1.2% RT fees with 2:1 R:R minimum)?',
-            'Does the realized volatility ratio (RVol_15/RVol_240) show compression (≤0.8), consistent with a coiled mean-reversion setup?',
-        ]
-    },
-    'regime_volatility': {
-        'name': 'Andersen-Bollerslev / TTM Squeeze',
-        'dbz_name': 'Frieza',
-        'style': 'Volatility regime detection and breakout timing. Realized volatility ratio: RVol_ratio = sqrt(sum(r²,15min)) / sqrt(sum(r²,240min)). RVol_ratio ≥ 1.3 = volatility expansion → breakout mode. RVol_ratio ≤ 0.8 = compression → mean-reversion or squeeze setup. Bollinger-Keltner Squeeze: BB inside KC (BB± = SMA20 ± 2σ, KC± = EMA20 ± 1.5×ATR) = energy coiling. Squeeze firing (BB expanding outside KC) after ≥20 bars compressed = high-probability expansion entry. Target: 4× ATR (must clear 1.2% fees with margin).',
-        'key_questions': [
-            'What is the realized volatility ratio (RVol_15/RVol_240)? ≥1.3 confirms expansion mode for breakout entries; ≤0.8 favors compression/mean-reversion setups.',
-            'Is the Bollinger-Keltner squeeze firing (BB just expanded outside KC after ≥20 bars of compression)? This is the highest-probability breakout timing signal.',
-            'Is the ATR large enough that a 4× ATR target exceeds 1.2% round-trip fees? If ATR/price < 0.003 (0.3%), even a 4-ATR target won\'t clear fees.',
-            'Is volatility expanding (breakout mode) or compressing (mean-reversion mode), and does our strategy type match the current regime?',
-        ]
-    },
-    'quant_edge': {
-        'name': 'Ernie Chan / Ornstein-Uhlenbeck',
-        'dbz_name': 'Gohan',
-        'style': 'Quantitative edge validation with OU mean-reversion and Kelly sizing. OU z-score: z = (log_price - rolling_mean(60)) / rolling_std(40). Long entry when z ≤ -1.5 (oversold vs 60-bar mean). Exit when z ≥ -0.5 (partial reversion). OU half-life: t½ = ln(2)/κ from AR(1); actionable when t½ in [3, 60] min. Return autocorrelation < 0 confirms mean-reverting microstructure. Kelly fraction: f* = p - q/b where p=win_rate, b=avg_win/avg_loss (net of fees). Use 25% of f*. Amihud illiquidity: ILLIQ = |r_t|/(price×volume). Avoid top-20th-percentile ILLIQ. Kelly says: size up when edge is real and measured, size down when uncertain.',
-        'key_questions': [
-            'What is the OU z-score? z ≤ -1.5 = entry zone (price depressed relative to 60-bar mean). z ≥ -0.5 = exit zone (mean reversion mostly complete). z ≤ -2.0 = deep oversold, highest conviction.',
-            'What is the OU half-life? t½ in [3, 20] min = fast actionable reversion for 1-min execution. t½ in [20, 60] min = moderate, works with 45-min time stop. t½ > 60 min = too slow.',
-            'Does return autocorrelation (AR1) confirm mean-reverting microstructure (autocorr < -0.10)? Or does positive autocorr suggest momentum is persisting?',
-            'What does the Kelly fraction say given current rolling win rate and R:R? f* = p - (1-p)/b. At 25% Kelly, is the implied position size consistent with our risk budget?',
-        ]
-    },
-    'fee_discipline': {
-        'name': 'Fee Economics / Albers et al.',
-        'dbz_name': 'Krillin',
-        'style': 'Execution economics and fee discipline. The single hardest constraint: 1.2% round-trip taker fee. Breakeven equation: p×G - (1-p)×L ≥ 0.012. With stop L=1% and target G=2% (R:R=2): p_min = (1 + 0.012/0.01)/(2+1) = 0.67 (67% win rate needed). With L=3% and G=6%: p_min = (1+0.004)/3 = 0.35 (35%). Every trade must be evaluated: does expected move × win probability actually clear the fee floor? Maker-vs-taker: limit orders cut fee ~33%. Time stop: if flat after 45 min, fee drag has already been paid — waiting longer compounds the loss.',
-        'key_questions': [
-            'Given the planned stop (L%) and target (G%), what is the minimum win rate needed to break even after 1.2% round-trip fees? p_min = (1 + 0.012/L)/(R+1). Is our historical win rate on similar setups above p_min?',
-            'Is the expected gross move (ATR × target_multiplier) at least 2.4% (2× the round-trip fee)? Below this, no R:R ratio saves us.',
-            'Can we use a limit order (maker) instead of market (taker) on entry? Maker fee is ~0.4% vs 0.6% taker — saves 0.2% per side and improves the fee math meaningfully.',
-            'How long has this potential trade been setting up? If we are entering late in the move after fees were already implied, is there enough remaining move to justify the cost?',
-        ]
-    },
-    'flow_tape': {
-        'name': 'Coinbase Tape / Microstructure Flow',
-        'dbz_name': 'Piccolo',
-        'style': 'Trade flow and tape reading from Coinbase market_trades. Trade Flow Imbalance: TFI = (buy_vol - sell_vol)/(buy_vol + sell_vol). IMPORTANT: Coinbase side field = MAKER side, so side=SELL means taker BUY (buy-initiated). Kyle lambda: Δprice = λ × signed_flow; high λ = high price impact per unit flow. Spread dynamics: wide spread = avoid taker entries. Aggressor dominance: if buy-initiated volume > 60% of last-60s flow, strong demand signal. Volume intensity: trades-per-minute spike vs baseline. These raw tape signals bypass indicator lag entirely.',
-        'key_questions': [
-            'What is the TFI (trade flow imbalance) over the last 60 seconds? TFI ≥ 0.25 = strong buy-initiated aggressor dominance. Remember: Coinbase side=SELL means the taker was a buyer.',
-            'Is the bid-ask spread in basis points below the pair-specific threshold (e.g., ≤12 bps for majors)? Wide spreads increase effective round-trip cost beyond the stated 1.2%.',
-            'Is Kyle lambda (price impact per unit signed flow) in a favorable percentile? Low lambda = your order moves price less = better fills = fees are your stated cost, not more.',
-            'Is there a trade intensity spike (trades-per-minute significantly above baseline) confirming genuine participation, not thin-book noise?',
-        ]
-    },
-    'manipulation_risk': {
-        'name': 'Kose John / Amin Nejat (Spoofing Detection)',
-        'dbz_name': 'Tien',
-        'style': 'Market manipulation and adverse selection risk. Spoofing signature: OBI extreme (|OBI| ≥ 0.35) but TFI contradicts it (TFI sign opposite OBI) — book is likely manipulated. Adverse selection: entering when informed traders are active means your fill is against smart money. VPIN (Volume-Synchronized Probability of Informed Trading): high VPIN = toxic flow environment. Jump risk: if realized vol spikes suddenly with no corresponding TFI, it may be a news-driven gap where your stop gets skipped. During liquidation cascades, mean-reversion entries are suicidal — OI dropping fast with price dropping = forced selling, not a reversion opportunity.',
-        'key_questions': [
-            'Is there a conflict between OBI and TFI? (OBI showing strong bids but TFI showing sell-initiated flow = probable spoofing/layering on the bid side.) If yes, distrust the OBI signal.',
-            'Is the realized volatility spike coming with corresponding signed flow (TFI aligned), or is it a jump with no aggressor confirmation? Unconfirmed vol spikes = news risk or book manipulation.',
-            'Are we in a liquidation cascade regime? (Price falling rapidly, OI declining, TFI sell-dominated.) Mean-reversion entries here are traps. Breakout shorts not available. Best action: stand down.',
-            'Is the current spread significantly wider than the pair baseline? Wide spreads during volatile periods = adverse selection environment = our effective cost is much higher than 1.2%.',
-        ]
-    },
-    'goku': {
-        'name': 'Jim Simons / Paul Tudor Jones / George Soros',
-        'dbz_name': 'Goku (Ultra Instinct)',
+    'funding_regime': {
+        'name': 'Macro & Funding Intelligence',
+        'dbz_name': 'Bardock',
         'style': (
-            'Ultra Instinct synthesizer. You have already heard ALL other analysts. '
-            'You do NOT re-analyze individual signals — you evaluate whether the PANEL\'s '
-            'collective judgment forms a coherent, high-confidence trade thesis or whether '
-            'the consensus is fragile rationalization. '
-            'Simons lens: are the signals forming a meta-pattern — a specific combination '
-            'whose joint probability of success is meaningfully above each signal alone? '
-            'PTJ lens: is there a clean, defined entry with a capital-light stop? '
-            'If the trade requires hope or faith, it fails here. '
-            'Soros reflexivity lens: if many participants are seeing this same setup '
-            'simultaneously, has the edge already been priced in? '
-            'Ultra Instinct = no deliberation. One clean read. You either see it or you don\'t. '
-            'If you\'re unsure, VETO — protecting $500 capital is more important than any single trade.'
+            'Crypto-native macro analyst. Primary signal: perpetual funding rates. '
+            'Funding > 0.05%/8h = longs are overloaded, squeeze risk is HIGH → lean HOLD or SELL. '
+            'Funding 0.01-0.05%/8h = mild bullish bias, acceptable for longs. '
+            'Funding near zero or slightly negative = market not crowded → best entry window for longs. '
+            'Also reads: macro_score (-5 to +5), VIX regime (fear/neutral/complacent), '
+            'DXY direction (rising DXY = crypto headwind), SPY trend (risk-on/off), '
+            'and BTC 24h change as the crypto market pulse. '
+            'RULE: If funding is overheated AND macro is risk-off, HOLD regardless of chart. '
+            'If funding is neutral AND macro is risk-on, BUY bias. '
+            'Give a clean directional read on whether the MACRO + FUNDING environment supports a long entry.'
         ),
         'key_questions': [
-            'Looking at all analyst votes as a unified picture — is there a COHERENT narrative where microstructure, flow, fee math, and regime all point the same direction? Or are the BUY votes coming from weak, isolated signals that happen to agree by coincidence?',
-            'PTJ capital preservation test: if this trade stopped out, would the loss feel clean and acceptable? Or does this feel like a reach — entering a suboptimal setup because we\'ve been waiting too long?',
-            'Soros reflexivity: is this a genuinely unrecognized opportunity, or is it the obvious trade everyone is seeing right now? Obvious trades in liquid crypto markets get front-run and then reversed against latecomers.',
-            'Simons meta-pattern: does the specific COMBINATION of active signals (not each individually) match a historically reliable pattern — all 5 agents aligned with high confidence? Or is the consensus driven by 2 strong votes and 3 lukewarm follows?',
-        ],
+            'What is the current funding rate? Overheated (>0.05%/8h), normal (0.01-0.05%), or favorable (≤0.01%)?',
+            'Is the macro environment risk-on or risk-off? (macro_score, VIX, DXY, SPY)',
+            'Does OI trend confirm or contradict the price move?',
+            'Would you be comfortable holding a long position right now given these macro + funding conditions?',
+        ]
+    },
+    'momentum_structure': {
+        'name': 'Technical Momentum & Structure',
+        'dbz_name': 'Vegeta',
+        'style': (
+            'Technical setup specialist. Focus: is this chart a CLEAN setup or noise? '
+            'ADX > 25 = real trend exists (momentum trades valid). ADX < 20 = ranging (mean-reversion only). '
+            'BB-Keltner squeeze after ≥20 bars compression then firing = highest conviction breakout signal. '
+            'WAE bullish + exploding = momentum is genuinely erupting (not faking). '
+            'WaveTrend oversold cross from below -53 = oversold bounce setup. '
+            'SuperTrend bullish = trend direction confirmed. '
+            'MACD consensus (3 variants aligned) = momentum confirmation, not primary signal. '
+            'RULE: require at least 2 of these to be green. One signal alone = HOLD. '
+            'Two aligned signals = cautious BUY. Three+ = strong BUY. '
+            'Be HARSH — marginal setups are not worth the fees. Only recommend BUY when the setup is genuinely clean.'
+        ),
+        'key_questions': [
+            'What is ADX? Is there a real trend (>25) or is this choppy (<20)?',
+            'Did the squeeze fire with direction? After how many compressed bars?',
+            'Is WAE bullish AND exploding (full momentum), or just bullish (partial)?',
+            'How many of these are green: WAE, squeeze, WaveTrend, SuperTrend, MACD consensus?',
+        ]
+    },
+    'risk_economics': {
+        'name': 'Trade Economics & Risk',
+        'dbz_name': 'Krillin',
+        'style': (
+            'Trade economics specialist and kill switch. NO trade passes without clearing the fee math. '
+            'Coinbase round-trip cost: ~1.2% (0.6% × 2 sides). '
+            'Minimum gross move needed: 2.4% (2× round-trip, R:R ≥ 1:1). '
+            'ATR-based check: if ATR/price < 0.004 (0.4%), a 4×ATR target cannot clear fees — HARD HOLD. '
+            'Volume: vol_spike < 0.3 = thin book, fills will be bad — HOLD. '
+            'Time of day: 2am-5am ET = dead zone, spread is wide, HOLD unless very strong setup. '
+            'Position size check: with ATR-based stop at 2×ATR, is the max loss on this trade ≤ 1% of account? '
+            'RULE: If fee math fails OR volume is too thin OR time is dead zone → HOLD regardless of chart. '
+            'If economics are clean, BUY (defer to other agents for direction). '
+            'You are not a direction predictor — you are the gate that ensures every trade is economically viable.'
+        ),
+        'key_questions': [
+            'Is ATR/price ≥ 0.4%? If not, fees cannot be cleared — HOLD.',
+            'Is volume spike ≥ 0.3× baseline? If not, the book is too thin.',
+            'Is the current time a favorable trading window? (Avoid 2am-5am ET)',
+            'Does the ATR-based stop (2×ATR below entry) keep max loss ≤ 1% of $500?',
+        ]
     },
 }
 
-# JSON schema for structured outputs — guaranteed valid response
 AGENT_RESPONSE_SCHEMA = {
     "type": "object",
     "properties": {
-        "signal": {"type": "string", "enum": ["BUY", "SELL", "HOLD"]},
+        "signal":     {"type": "string", "enum": ["BUY", "SELL", "HOLD"]},
         "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
-        "reasoning": {"type": "string"},
-        "key_concern": {"type": "string"}
+        "reasoning":  {"type": "string"},
+        "key_concern": {"type": "string"},
     },
-    "required": ["signal", "confidence", "reasoning", "key_concern"]
+    "required": ["signal", "confidence", "reasoning", "key_concern"],
 }
-
-
-_CRYPTO_CONTEXT = """TRADING CONTEXT — READ THIS FIRST:
-You are evaluating a SHORT-TERM CRYPTO MOMENTUM TRADE on 1-MINUTE candles.
-This is NOT a long-term investment. Do NOT apply long-term frameworks here.
-- Round-trip fees: ~1.2% of position. The move MUST clear this to be worth it.
-- Stop loss: ~1.5% below entry. Take profit: ~4.5% above entry (3:1 R/R).
-- Market is 24/7. Only momentum, price action, volume, and regime matter right now.
-- A 1-min MACD cross with volume confirmation = valid signal. Evaluate it as such.
-- "Would I hold for 10 years?" → IRRELEVANT. Ignore it entirely.
-- "Economic moat?" → IRRELEVANT. "Debt cycle?" → IRRELEVANT.
-- Apply YOUR specific methodology to short-term price action and momentum signals.
-- Ask: does the data support a clean entry RIGHT NOW using your documented strategy?"""
-
-_EQUITY_CONTEXT = """TRADING CONTEXT — READ THIS FIRST:
-You are evaluating an EQUITY SWING TRADE on 15-minute to daily candles.
-- Hold period: hours to a few days (not months, not years).
-- Round-trip fees: ~0.1% (much cheaper than crypto).
-- Market hours: 9:30 AM – 4:00 PM ET. PDT rules: max 3 day trades for cash accounts.
-- Stop: 5% below entry. Target: 15% above entry (1:3 R/R minimum).
-- Price action, volume, and short-term momentum are primary signals.
-- Fundamentals can add conviction but are secondary — we're not buying to hold forever."""
-
-
-def _build_agent_system_prompt(agent_key: str, asset_class: str = 'equity') -> str:
-    """Build the cached system prompt for an agent."""
-    agent = AGENTS[agent_key]
-    questions = '\n'.join(f'- {q}' for q in agent['key_questions'])
-    ctx = _CRYPTO_CONTEXT if asset_class == 'crypto' else _EQUITY_CONTEXT
-    return f"""You are {agent['name']}, the legendary investor/trader.
-You analyze potential trades EXACTLY as {agent['name']} would — through their documented philosophy.
-
-{ctx}
-
-Your investment philosophy: {agent['style']}
-
-Your analytical framework (apply only what is relevant to the trading context above):
-{questions}
-
-THE AMYGDALA IS REMOVED — these rules are absolute and non-negotiable:
-- No panic, no FOMO, no revenge trading, no hope trading
-- Every decision is pre-defined rules only
-- You either see a clear setup or you don't. If unclear: HOLD
-- Your job is to be RIGHT, not to trade often
-- Protecting a $500 account. Capital preservation is priority one.
-
-Respond ONLY with valid JSON matching this exact schema:
-{{"signal": "BUY" or "SELL" or "HOLD", "confidence": 0.0-1.0, "reasoning": "1-2 sentences max in {agent['name']}'s voice", "key_concern": "biggest risk in 10 words max"}}"""
-
-
-def call_claude_structured(
-    system_prompt: str,
-    user_prompt: str,
-    max_tokens: int = 300,
-    use_cache: bool = True,
-    call_type: str = 'agent',
-    schema: dict = None,
-) -> dict:
-    """
-    Call Claude API with structured outputs and prompt caching.
-    Returns parsed dict. Never raises — returns error dict on failure.
-    """
-    if not ANTHROPIC_API_KEY:
-        return {'signal': 'HOLD', 'confidence': 0.0,
-                'reasoning': 'No API key configured', 'key_concern': 'Missing ANTHROPIC_API_KEY'}
-
-    # Build messages with prompt caching on system prompt
-    system_content = system_prompt
-    if use_cache:
-        # Use cache_control to cache the system prompt for 1 hour
-        system_payload = [
-            {
-                "type": "text",
-                "text": system_prompt,
-                "cache_control": {"type": "ephemeral"}
-            }
-        ]
-    else:
-        system_payload = system_prompt
-
-    active_schema = schema if schema is not None else AGENT_RESPONSE_SCHEMA
-    payload = json.dumps({
-        "model": CLAUDE_MODEL,
-        "max_tokens": max_tokens,
-        "system": system_payload if use_cache else system_prompt,
-        "messages": [{"role": "user", "content": user_prompt}],
-        "tools": [{
-            "name": "structured_response",
-            "description": "Return the structured analysis",
-            "input_schema": active_schema
-        }],
-        "tool_choice": {"type": "any"}
-    }).encode('utf-8')
-
-    try:
-        req = urllib.request.Request(
-            'https://api.anthropic.com/v1/messages',
-            data=payload,
-            headers={
-                'Content-Type': 'application/json',
-                'x-api-key': ANTHROPIC_API_KEY,
-                'anthropic-version': '2023-06-01',
-                'anthropic-beta': 'prompt-caching-2024-07-31',
-            },
-            method='POST'
-        )
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = json.loads(resp.read().decode('utf-8'))
-
-            # Log API cost
-            usage = data.get('usage', {})
-            input_tokens = usage.get('input_tokens', 0)
-            output_tokens = usage.get('output_tokens', 0)
-            # Claude Sonnet pricing approx: $3/M input, $15/M output
-            cost = (input_tokens * 3 + output_tokens * 15) / 1_000_000
-            try:
-                from logging_db.trade_logger import log_api_cost
-                log_api_cost(call_type, input_tokens, output_tokens, cost)
-            except Exception:
-                pass
-
-            # Extract structured response from tool use
-            for block in data.get('content', []):
-                if block.get('type') == 'tool_use':
-                    return block.get('input', {})
-
-            # Fallback: try text content
-            for block in data.get('content', []):
-                if block.get('type') == 'text':
-                    text = block.get('text', '')
-                    # Try JSON parse
-                    import re
-                    match = re.search(r'\{.*\}', text, re.DOTALL)
-                    if match:
-                        return json.loads(match.group())
-
-    except urllib.error.HTTPError as e:
-        print(f"[agents] HTTP {e.code}: {e.read().decode()[:200]}")
-    except Exception as e:
-        print(f"[agents] API error: {e}")
-
-    return {'signal': 'HOLD', 'confidence': 0.0,
-            'reasoning': 'API call failed', 'key_concern': 'Connection error'}
-
-
-def run_agent(agent_key: str, symbol: str, market_data: dict,
-              context: str = '', memory_context: str = '',
-              asset_class: str = 'equity') -> dict:
-    """Run one analyst agent. Returns signal dict."""
-    agent = AGENTS[agent_key]
-    system_prompt = _build_agent_system_prompt(agent_key, asset_class=asset_class)
-
-    williams_r = market_data.get('williams_r', -50)
-    fear_greed = market_data.get('fear_greed_score', 50)
-    fear_greed_label = market_data.get('fear_greed_label', 'Neutral')
-    iv_rank = market_data.get('iv_rank', None)
-    momentum_rank = market_data.get('momentum_rank', None)
-    above_200d = market_data.get('above_200d_ma', None)
-    vol_20d_pct = market_data.get('vol_20d_pct_above_avg', None)
-    pullback_bars = market_data.get('pullback_bars', None)
-
-    iv_line = f"- IV Rank: {iv_rank:.0f}/100 ({'elevated — options pricing high risk' if iv_rank > 60 else 'normal'})" if iv_rank is not None else ''
-    momentum_line = f"- Momentum rank vs universe: #{momentum_rank}" if momentum_rank is not None else ''
-    ma200_line = f"- Price vs 200-day MA: {'ABOVE ✅' if above_200d else 'BELOW ❌'}" if above_200d is not None else ''
-    vol_breakout_line = f"- Volume vs avg on breakout: +{vol_20d_pct:.0f}% ({'✅ 40%+ confirms breakout' if vol_20d_pct >= 40 else '⚠️ below 40% threshold'})" if vol_20d_pct is not None else ''
-    pullback_line = f"- Pullback bars against trend: {pullback_bars} bars" if pullback_bars is not None else ''
-
-    signal_triggers = market_data.get('signal_triggers', '')
-    triggers_line = f"- Signal triggers (what fired this debate): {signal_triggers}" if signal_triggers else ''
-    momentum_score_line = f"- Momentum score (exp regression slope × R²): {market_data.get('momentum_score', 0):.3f}"
-
-    # Microstructure / flow / advanced math fields (v3.5)
-    obi = market_data.get('obi', None)
-    tfi = market_data.get('tfi', None)
-    microprice_premium_bps = market_data.get('microprice_premium_bps', None)
-    rv_ratio = market_data.get('rv_ratio', None)
-    hurst = market_data.get('hurst', None)
-    kyle_lambda_pct = market_data.get('kyle_lambda_pct', None)
-    amihud_pct = market_data.get('amihud_pct', None)
-    spread_bps = market_data.get('spread_bps', None)
-    session_active = market_data.get('session_active', False)
-    autocorr_ret = market_data.get('autocorr_ret', None)
-    ou_halflife = market_data.get('ou_halflife_minutes', None)
-    ou_zscore = market_data.get('ou_zscore', None)
-    squeeze_direction = market_data.get('squeeze_direction', 0)
-    squeeze_fired = market_data.get('squeeze_fired', False)
-    squeeze_bars = market_data.get('squeeze_bars', 0)
-    avwap_dev = market_data.get('avwap_dev', None)
-    kalman_dev = market_data.get('kalman_dev', None)
-
-    obi_line = f"- Order Book Imbalance (OBI): {obi:.3f} ({'STRONG buy pressure ≥0.35' if obi >= 0.35 else 'mild buy pressure ≥0.20' if obi >= 0.20 else 'neutral/ask-heavy' if obi < 0 else 'slight buy lean'})" if obi is not None else ''
-    tfi_line = f"- Trade Flow Imbalance (TFI, 60s): {tfi:.3f} ({'STRONG buy-initiated ≥0.25' if tfi >= 0.25 else 'buy-initiated ≥0.10' if tfi >= 0.10 else 'sell-dominated' if tfi < -0.10 else 'neutral — no clear aggressor'})" if tfi is not None else ''
-    microprice_line = f"- Microprice vs midprice: {microprice_premium_bps:+.1f} bps ({'fair value BID — buyers paying up' if microprice_premium_bps > 2 else 'fair value OFFERED — sellers aggressive' if microprice_premium_bps < -2 else 'neutral'})" if microprice_premium_bps is not None else ''
-    rv_ratio_line = f"- Realized vol ratio (15min/240min): {rv_ratio:.3f} ({'EXPANSION — breakout mode, momentum strategies favored' if rv_ratio >= 1.3 else 'COMPRESSION — coiling, squeeze/mean-reversion setups favored' if rv_ratio <= 0.8 else 'neutral vol regime'})" if rv_ratio is not None else ''
-    hurst_line = f"- Hurst exponent: {hurst:.3f} ({'TRENDING H>0.60 — momentum persists' if hurst > 0.60 else 'mean-reverting H<0.40 — reversions complete' if hurst < 0.40 else 'noisy H=0.40-0.60 — no persistent regime, require stronger signal'})" if hurst is not None else ''
-    autocorr_line = f"- Return autocorrelation (AR1, 40-bar): {autocorr_ret:+.3f} ({'momentum persistence — up bars follow up bars' if autocorr_ret > 0.15 else 'mean-reverting microstructure — bid-ask bounce dominant' if autocorr_ret < -0.15 else 'no persistence — random/noise regime'})" if autocorr_ret is not None else ''
-    ou_line = f"- OU mean-reversion half-life: {ou_halflife:.0f} min ({'fast reversion — actionable for 1-min execution' if ou_halflife <= 20 else 'moderate speed — consider 45-min time stop' if ou_halflife <= 45 else 'slow reversion — too slow for 1-min trading'})" if ou_halflife is not None else ''
-    ou_zscore_line = (f"- OU z-score (price deviation from 60-bar mean): {ou_zscore:.2f} "
-                     f"({'DEEP OVERSOLD — strong mean-reversion entry (z≤-2)' if ou_zscore <= -2.0 else 'OVERSOLD — entry zone (z≤-1.5)' if ou_zscore <= -1.5 else 'near mean — partial reversion done (exit zone)' if ou_zscore >= -0.5 else 'extended — fade risk' if ou_zscore >= 1.5 else 'neutral'})") if ou_zscore is not None else ''
-    kyle_lambda_line = f"- Kyle lambda (price impact) percentile: {kyle_lambda_pct:.0f}th ({'low impact — fills close to stated price' if kyle_lambda_pct < 40 else 'HIGH impact — your order moves the book, effective cost > 1.2%' if kyle_lambda_pct > 70 else 'moderate impact'})" if kyle_lambda_pct is not None else ''
-    amihud_line = f"- Amihud illiquidity: {amihud_pct:.0f}th percentile ({'liquid — ok to trade' if amihud_pct < 80 else 'ILLIQUID top-20% — wider effective spread, avoid'})" if amihud_pct is not None else ''
-    spread_line = f"- Bid-ask spread: {spread_bps:.1f} bps ({'tight ≤12bps — stated fees apply' if spread_bps <= 12 else 'WIDE >12bps — effective round-trip cost exceeds stated 1.2%'})" if spread_bps is not None else ''
-    squeeze_line = (f"- BB-Keltner squeeze: FIRED after {squeeze_bars} compressed bars — "
-                    f"{'breakout UP (EMA trending up)' if squeeze_direction > 0 else 'breakout DOWN (EMA trending down)' if squeeze_direction < 0 else 'direction unclear'}"
-                    if squeeze_fired else
-                    f"- BB-Keltner squeeze: {'ON — {squeeze_bars} bars coiled, energy building' if squeeze_bars > 5 else 'off'}") if squeeze_bars >= 0 else ''
-    avwap_line = f"- Price vs daily AVWAP: {avwap_dev:+.2%} ({'above fair value — momentum intact' if avwap_dev > 0.005 else 'below fair value — mean-reversion candidate' if avwap_dev < -0.005 else 'at fair value'})" if avwap_dev is not None else ''
-    kalman_line = f"- Kalman filter deviation: {kalman_dev:+.2%} ({'extended above fair price — fade risk' if kalman_dev > 0.01 else 'depressed below fair price — mean-reversion support' if kalman_dev < -0.01 else 'near fair price'})" if kalman_dev is not None else ''
-    session_line = f"- Session window (08:00-11:00 ET): {'ACTIVE — intraday predictability elevated, volume-backed moves more reliable' if session_active else 'INACTIVE — outside high-volume hours, momentum signals weaker, require OBI/TFI confirmation'}"
-
-    # ── Inject Bayesian signal stats + per-agent accuracy ─────────────────────
-    # These fields are pre-populated in job_runner.py and stored on market_data.
-    # If not present (equity path, tests), we compute them here as best-effort.
-    if '_signal_stats_brief' not in market_data:
-        try:
-            from learning.signal_performance import get_active_signal_stats_brief
-            _active = market_data.get('active_signals', [])
-            market_data['_signal_stats_brief'] = get_active_signal_stats_brief(
-                _active, regime=market_data.get('regime', 'any')
-            ) if _active else ''
-        except Exception:
-            market_data['_signal_stats_brief'] = ''
-
-    if '_agent_self_accuracy' not in market_data:
-        try:
-            from learning.signal_performance import get_agent_self_accuracy
-            market_data['_agent_self_accuracy'] = get_agent_self_accuracy(
-                agent['name'], regime=market_data.get('regime', 'any')
-            )
-        except Exception:
-            market_data['_agent_self_accuracy'] = ''
-    else:
-        # Recompute per-agent (each agent gets their own accuracy line)
-        try:
-            from learning.signal_performance import get_agent_self_accuracy
-            market_data['_agent_self_accuracy'] = get_agent_self_accuracy(
-                agent['name'], regime=market_data.get('regime', 'any')
-            )
-        except Exception:
-            market_data['_agent_self_accuracy'] = ''
-    # ─────────────────────────────────────────────────────────────────────────
-
-    user_prompt = f"""Analyze {symbol} for a potential trade right now. Apply ONLY your specific methodology — do not generalize.
-
-PRICE & MOMENTUM:
-- Current price: ${market_data.get('price', 0):,.4f}
-- Change today: {market_data.get('change_pct', 0):+.2f}%
-- Volume vs avg: {market_data.get('vol_spike', 1):.1f}x
-- RSI (14): {market_data.get('rsi', 50):.1f}
-- Williams %R: {williams_r:.1f} ({'oversold extreme ≤-80' if williams_r <= -80 else 'overbought extreme ≥-20' if williams_r >= -20 else 'mid-range'})
-- MACD histogram: {market_data.get('macd_hist', 0):.6f} ({'positive momentum' if market_data.get('macd_hist', 0) > 0 else 'negative momentum'})
-- Price vs VWAP: {'ABOVE' if market_data.get('price', 0) > market_data.get('vwap', 1) else 'BELOW'} (VWAP: ${market_data.get('vwap', 0):,.4f})
-- ATR (14): ${market_data.get('atr', 0):.4f} ({market_data.get('atr', 0)/max(market_data.get('price',1),0.0001)*100:.2f}% of price)
-- ADX: {market_data.get('adx', 0):.1f} ({'strong trend >25' if market_data.get('adx',0)>25 else 'weak/no trend ≤25'})
-- 20-day trend: {market_data.get('trend_20d', 'neutral')}
-{momentum_score_line}
-{triggers_line}
-
-REGIME & VOLATILITY:
-{rv_ratio_line}
-{hurst_line}
-{ou_zscore_line}
-{autocorr_line}
-{squeeze_line}
-{avwap_line}
-{kalman_line}
-{session_line}
-- Market regime: {market_data.get('regime', 'unknown')}
-- Fear & Greed: {fear_greed:.0f}/100 — {fear_greed_label}
-
-MICROSTRUCTURE (real-time):
-{obi_line}
-{tfi_line}
-{microprice_line}
-{spread_line}
-{kyle_lambda_line}
-{amihud_line}
-
-MEAN-REVERSION CONTEXT:
-{ou_line}
-
-EXECUTION ECONOMICS:
-- Planned stop: {market_data.get('atr', 0)*3:.4f} ({market_data.get('atr', 0)*3/max(market_data.get('price',1),0.0001)*100:.1f}% of price)
-- 1.2% round-trip fee floor on ${market_data.get('price', 0)*100:.0f} position = ${market_data.get('price', 0)*100*0.012:.2f} minimum profit needed
-- Dollar volume: ${market_data.get('dollar_volume', 0):,.0f}
-{iv_line}
-{ma200_line}
-{f'- Additional context: {context}' if context else ''}
-
-{memory_context if memory_context else ''}
-
-CONVICTION SCORE (math pre-filter): {market_data.get('conviction_score', 'N/A')}/100
-Active signals that triggered this debate: {market_data.get('signal_triggers', 'see above')}
-{market_data.get('_signal_stats_brief', '')}
-{market_data.get('_agent_self_accuracy', '')}
-
-You are {agent['name']}. Answer these specific questions then give your signal:
-{chr(10).join(f'{i+1}. {q}' for i, q in enumerate(agent.get('key_questions', [])))}
-
-Signal + confidence + reasoning + key_concern:"""
-
-    result = call_claude_structured(system_prompt, user_prompt,
-                                    max_tokens=DEBATE_MAX_TOKENS,
-                                    call_type=f'agent_{agent_key}')
-    result['agent'] = agent['name']
-    result['agent_key'] = agent_key
-    result['dbz_name'] = agent.get('dbz_name', agent['name'])
-    return result
-
-
-def run_goku(
-    symbol: str,
-    market_data: dict,
-    individual_signals: list,
-    moderator_synthesis: dict,
-    vote_breakdown: dict,
-    context: str = '',
-) -> dict:
-    """
-    Goku (Ultra Instinct) — the final synthesizer. Runs AFTER all other agents
-    and the moderator. Sees the full picture and makes the definitive call.
-
-    Returns:
-        {
-            'verdict':               'PROCEED' | 'VETO' | 'BOOST',
-            'conviction_adjustment': int,   # 0 = PROCEED, -100 = VETO, +25 = BOOST
-            'reasoning':             str,
-            'key_insight':           str,   # the one thing other agents missed
-            'confidence':            float,
-        }
-    """
-    goku = AGENTS['goku']
-
-    system_prompt = f"""You are {goku['name']} — {goku['dbz_name']}.
-
-You are the FINAL AUTHORITY. All 5 specialist analysts and the moderator have already spoken.
-Your role is NOT to re-analyze the chart. Your role is to evaluate whether the panel's
-consensus constitutes GENUINE EDGE or self-serving rationalization.
-
-{goku['style']}
-
-YOUR THREE POWERS:
-1. PROCEED — the consensus holds. Let the moderator's decision stand unchanged.
-2. VETO — you see something others missed. Kill the trade. Signal becomes HOLD.
-   Use VETO when: manipulation signals ignored, news/macro blocks present,
-   agent reasoning sounds like hope, split panel with weak average confidence,
-   or the setup is the "obvious trade" that will get front-run.
-3. BOOST — all dimensions align perfectly. Add +25 conviction points.
-   Use BOOST sparingly — only when you see the rare setup where microstructure,
-   flow, fee math, regime, and macro all point the same direction with high conviction.
-
-THE AMYGDALA IS REMOVED:
-- No FOMO. A skipped trade costs $0. A bad trade on $500 can permanently impair the account.
-- "It looks good enough" is NOT a PROCEED. You need to see it.
-- If you're uncertain: VETO. Always.
-
-Respond ONLY with valid JSON matching this exact schema:
-{{"verdict": "PROCEED" or "VETO" or "BOOST", "conviction_adjustment": integer (-100 or 0 or 25), "reasoning": "1-2 sentences in your voice", "key_insight": "the one thing other agents missed or confirmed in 10 words max", "confidence": 0.0-1.0}}"""
-
-    # Build a rich summary of what the other agents said
-    agent_lines = []
-    for s in individual_signals:
-        agent_lines.append(
-            f"  {s.get('agent_key','?'):20} ({s.get('dbz_name','?'):15}) "
-            f"→ {s.get('signal','?'):4} {s.get('confidence',0):.0%} | "
-            f"{s.get('reasoning','')[:70]} | Risk: {s.get('key_concern','')[:35]}"
-        )
-
-    total = sum(vote_breakdown.values())
-    buy_pct = vote_breakdown.get('BUY', 0) / total if total else 0
-    moderator_signal = moderator_synthesis.get('signal', 'HOLD')
-    moderator_conf   = moderator_synthesis.get('confidence', 0)
-    moderator_reason = moderator_synthesis.get('reasoning', '')
-
-    # Check for existing hard vetoes from the moderator
-    hard_vetoed = 'HARD VETO' in moderator_reason
-
-    questions = '\n'.join(f'{i+1}. {q}' for i, q in enumerate(goku['key_questions']))
-
-    user_prompt = f"""Symbol: {symbol} | Price: ${market_data.get('price', 0):,.4f}
-
-ANALYST PANEL RESULTS:
-{chr(10).join(agent_lines)}
-
-VOTE TALLY: {vote_breakdown.get('BUY',0)} BUY | {vote_breakdown.get('HOLD',0)} HOLD | {vote_breakdown.get('SELL',0)} SELL
-Agreement: {buy_pct:.0%}
-
-MODERATOR SYNTHESIS: {moderator_signal} ({moderator_conf:.0%})
-Moderator reasoning: {moderator_reason[:150]}
-{'⚠️ Note: A hard veto was already triggered by the moderator.' if hard_vetoed else ''}
-
-MARKET CONTEXT:
-- Regime: {market_data.get('regime', 'unknown')}
-- OBI: {market_data.get('obi', 'N/A')} | TFI: {market_data.get('tfi', 'N/A')}
-- OU z-score: {market_data.get('ou_zscore', 'N/A')} | Squeeze fired: {market_data.get('squeeze_fired', False)}
-- Fear & Greed: {market_data.get('fear_greed_score', 50):.0f}/100
-{f'- External context: {context[:200]}' if context else ''}
-
-Your four questions:
-{questions}
-
-Now give your Ultra Instinct verdict. Remember: if uncertain, VETO."""
-
-    goku_schema = {
-        "type": "object",
-        "properties": {
-            "verdict":               {"type": "string", "enum": ["PROCEED", "VETO", "BOOST"]},
-            "conviction_adjustment": {"type": "integer"},
-            "reasoning":             {"type": "string"},
-            "key_insight":           {"type": "string"},
-            "confidence":            {"type": "number", "minimum": 0.0, "maximum": 1.0},
-        },
-        "required": ["verdict", "conviction_adjustment", "reasoning", "key_insight", "confidence"]
-    }
-
-    # Goku gets more tokens and uses cache=False (his context is always unique)
-    result = call_claude_structured(
-        system_prompt=system_prompt,
-        user_prompt=user_prompt,
-        max_tokens=1200,
-        use_cache=False,
-        call_type='goku',
-        schema=goku_schema,
-    )
-
-    # Enforce the adjustment values for each verdict type
-    verdict = result.get('verdict', 'PROCEED')
-    if verdict == 'VETO':
-        result['conviction_adjustment'] = -100
-    elif verdict == 'BOOST':
-        result['conviction_adjustment'] = 25
-    else:
-        result['verdict'] = 'PROCEED'
-        result['conviction_adjustment'] = 0
-
-    result['agent']     = goku['name']
-    result['agent_key'] = 'goku'
-    result['dbz_name']  = goku['dbz_name']
-    return result
 
 
 def get_all_agents() -> list:
     return list(AGENTS.keys())
 
 
-def get_agent_name(key: str) -> str:
-    return AGENTS.get(key, {}).get('name', key)
+# ── Core API caller ────────────────────────────────────────────────────────────
+
+def call_claude_structured(
+    system_prompt: str,
+    user_prompt: str,
+    max_tokens: int = 700,
+    call_type: str = 'agent',
+    schema: Optional[dict] = None,
+    cache_system: bool = True,
+) -> dict:
+    """
+    Single API call to Claude with structured JSON output.
+    Returns parsed dict. Never raises — returns safe HOLD default on any error.
+    """
+    if not ANTHROPIC_API_KEY:
+        return {'signal': 'HOLD', 'confidence': 0.0, 'reasoning': 'No API key.', 'key_concern': 'No API key.'}
+
+    resp_schema = schema or AGENT_RESPONSE_SCHEMA
+
+    system_content = (
+        [{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}]
+        if cache_system else system_prompt
+    )
+
+    payload = {
+        "model":      CLAUDE_MODEL,
+        "max_tokens": max_tokens,
+        "system":     system_content,
+        "messages":   [{"role": "user", "content": user_prompt}],
+        "tools": [{
+            "name":        "trade_decision",
+            "description": "Return the trading decision",
+            "input_schema": resp_schema,
+        }],
+        "tool_choice": {"type": "tool", "name": "trade_decision"},
+    }
+
+    try:
+        data = json.dumps(payload).encode()
+        req  = urllib.request.Request(
+            "https://api.anthropic.com/v1/messages",
+            data=data,
+            headers={
+                "x-api-key":         ANTHROPIC_API_KEY,
+                "anthropic-version": "2023-06-01",
+                "content-type":      "application/json",
+                "anthropic-beta":    "prompt-caching-2024-07-31",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            body = json.loads(resp.read().decode())
+
+        for block in body.get("content", []):
+            if block.get("type") == "tool_use":
+                return block.get("input", {})
+
+        return {'signal': 'HOLD', 'confidence': 0.0,
+                'reasoning': 'No tool_use block in response.', 'key_concern': 'parse_error'}
+
+    except urllib.error.HTTPError as e:
+        err = e.read().decode()[:200]
+        print(f"[analyst_agents] HTTP {e.code} ({call_type}): {err}")
+        return {'signal': 'HOLD', 'confidence': 0.0, 'reasoning': f'HTTP {e.code}', 'key_concern': err}
+    except Exception as e:
+        print(f"[analyst_agents] error ({call_type}): {e}")
+        return {'signal': 'HOLD', 'confidence': 0.0, 'reasoning': str(e), 'key_concern': str(e)}
 
 
-def get_agent_dbz_name(key: str) -> str:
-    return AGENTS.get(key, {}).get('dbz_name', key)
+# ── Market data formatter ──────────────────────────────────────────────────────
+
+def _format_market_data(symbol: str, md: dict) -> str:
+    """Compact market data block for agent prompts. Tuned per agent type."""
+    def _f(k, default='?', fmt='.4f'):
+        v = md.get(k)
+        return format(float(v), fmt) if v is not None else str(default)
+
+    lines = [
+        f"Symbol: {symbol} | Price: ${_f('price', fmt=',.4f')} | Regime: {md.get('regime', '?')}",
+        f"Funding: {_f('funding_rate_pct', '?', '.5f')}%/8h ({md.get('funding_signal', '?')}) | "
+        f"OI change: {_f('oi_change_pct', '?', '.2f')}%",
+        f"Macro score: {md.get('macro_score', '?')} | VIX regime: {md.get('vix_regime', '?')} | "
+        f"DXY chg: {_f('dxy_change', '?', '.2f')}% | SPY chg: {_f('spy_change', '?', '.2f')}%",
+        f"ADX: {_f('adx', fmt='.1f')} | ATR: {_f('atr', fmt='.6f')} | "
+        f"ATR/price: {_f('atr_pct', '?', '.3f')}% | Vol spike: {_f('vol_spike', fmt='.2f')}x",
+        f"Squeeze fired: {md.get('squeeze_fired', False)} ({_f('squeeze_bars', '0', '.0f')} bars) | "
+        f"RV ratio: {_f('rv_ratio', '?', '.2f')}",
+        f"WAE bullish: {md.get('wae_bullish', False)} | WAE exploding: {md.get('wae_exploding', False)} | "
+        f"WaveTrend cross: {md.get('wt_oversold_cross', False)}",
+        f"SuperTrend bullish: {md.get('supertrend_bullish', False)} | "
+        f"MACD consensus: {md.get('macd_consensus', False)} | "
+        f"Ichimoku bullish: {md.get('cloud_bullish', False)}",
+        f"Conviction score: {md.get('conviction_score', '?')} | "
+        f"Active signals: {md.get('signal_triggers', 'none')}",
+    ]
+
+    # ML signal if available
+    if md.get('ml_p_win') is not None:
+        lines.append(f"ML P(win): {float(md['ml_p_win']):.1%} | ML confidence: {md.get('ml_confidence', '?')}")
+
+    # Rolling backtest context if available
+    if md.get('backtest_context'):
+        lines.append(f"Backtest: {md['backtest_context']}")
+
+    # Bayesian signal stats if available
+    if md.get('signal_stats_brief'):
+        lines.append(f"Signal stats: {md['signal_stats_brief']}")
+
+    return '\n'.join(lines)
+
+
+# ── Agent runner ───────────────────────────────────────────────────────────────
+
+def run_agent(
+    agent_key: str,
+    symbol: str,
+    market_data: dict,
+    context: str = '',
+    memory_context: str = '',
+    asset_class: str = 'crypto',
+) -> dict:
+    """Run one analyst agent. Returns signal dict with agent_key added."""
+    agent = AGENTS.get(agent_key)
+    if not agent:
+        return {'signal': 'HOLD', 'confidence': 0.0, 'reasoning': f'Unknown agent: {agent_key}',
+                'key_concern': '', 'agent': agent.get('name', agent_key), 'agent_key': agent_key}
+
+    system_prompt = f"""You are {agent['name']} ({agent['dbz_name']}), an elite trading analyst.
+
+Your specialty: {agent['style']}
+
+Your key questions to answer:
+{chr(10).join(f'- {q}' for q in agent['key_questions'])}
+
+ABSOLUTE RULES:
+- Be direct and decisive. No hedging.
+- Give a clear BUY, SELL, or HOLD with a confidence score (0.0–1.0).
+- One sentence reasoning max. One sentence key concern max.
+- This is a $500 crypto account. Capital preservation matters — when in doubt, HOLD.
+- You are NOT asked to consider the other analysts' views. Focus only on your domain."""
+
+    market_brief = _format_market_data(symbol, market_data)
+    ctx_block = f"\nCONTEXT:\n{context}" if context else ''
+    mem_block  = f"\nMEMORY:\n{memory_context[:400]}" if memory_context else ''
+
+    user_prompt = f"""{market_brief}{ctx_block}{mem_block}
+
+Based on your specialty ({agent['name']}), what is your trading decision for {symbol}?"""
+
+    result = call_claude_structured(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        max_tokens=DEBATE_MAX_TOKENS,
+        call_type=f'agent_{agent_key}',
+    )
+    result['agent'] = agent['name']
+    result['agent_key'] = agent_key
+    return result

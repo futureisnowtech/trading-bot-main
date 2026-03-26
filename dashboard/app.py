@@ -1,6 +1,6 @@
 """
 dashboard/app.py — The King's War Room
-4 views: THE KING | SAIYAN MODE | FILM ROOM | RING CEREMONY
+Single unified view: THE KING (with Capacity, Debates, Stats, Milestones below)
 Run: streamlit run dashboard/app.py → http://localhost:8501
 """
 import sys, os
@@ -15,7 +15,6 @@ import pytz
 import random
 import base64
 import streamlit.components.v1 as components
-from streamlit_autorefresh import st_autorefresh
 import plotly.graph_objects as go
 
 from config import (
@@ -75,16 +74,6 @@ LEBRON_MESSAGES = {
     'patience': "Sometimes the best move is no move. Stay patient. 🧘",
     'new_high': "THIS IS WHAT THE WORK LOOKS LIKE. NEW HIGH WATERMARK. 👑🔥",
     'paper': "Paper training. Every rep counts. The real game is coming. 📄",
-}
-
-DBZ_AGENTS = {
-    'minervini': 'Trunks', 'dennis': 'Broly', 'williams': 'Yamcha',
-    'clenow': 'Frieza', 'chan': 'Gohan', 'hougaard': 'Krillin',
-    'abdelmessih': 'Piccolo', 'landry': 'Tien',
-    # Legacy keys — kept for Film Room display of older debate logs
-    'buffett': 'Master Roshi', 'soros': 'Cell', 'simons': 'Android 17',
-    'tudor_jones': 'Vegeta', 'druckenmiller': 'Piccolo',
-    'cathie_wood': 'Bulma', 'livermore': 'Goku', 'dalio': 'Whis',
 }
 
 # ─── Page config ─────────────────────────────────────────────────────────────
@@ -439,23 +428,9 @@ Futures (MES): {'enabled' if FUTURES_ENABLED else 'DISABLED'}
 Perp (Bybit): {'enabled' if PERP_ENABLED else 'DISABLED'}"""
 
 
-def render_chat_column(theme: str):
-    # Theme-specific icons — LeBron (👑) only in THE KING view
-    _THEME_ICONS = {
-        'king':     ('👤', '👑'),
-        'saiyan':   ('⚡', '🐉'),
-        'filmroom': ('📝', '📊'),
-        'ring':     ('👤', '🏆'),
-    }
-    user_icon, bot_icon = _THEME_ICONS.get(theme, ('👤', '🤖'))
-
-    _THEME_TITLES = {
-        'king':     "👑 Ask The King",
-        'saiyan':   "🐉 Ask the Scouter",
-        'filmroom': "📊 Ask the Analyst",
-        'ring':     "🏆 Ask Claude",
-    }
-    st.subheader(_THEME_TITLES.get(theme, "🤖 Ask Claude"))
+def render_chat_column(theme: str = 'king'):
+    user_icon, bot_icon = '👤', '👑'
+    st.subheader("👑 Ask The King")
     st.caption("Ask anything about your trades, positions, strategy, costs, or market conditions.")
 
     if 'chat' not in st.session_state:
@@ -566,7 +541,7 @@ def _cost_lab_ai_advice(goal: str, sliders: dict, current_monthly: float) -> str
 The bot uses Claude API for trade debates and exit reviews. You have full knowledge of its architecture.
 
 Cost drivers:
-- Debate depth: quick (3 agents, ~$0.04/debate) vs full (8 agents, ~$0.12/debate)
+- Debate depth: 3-agent majority vote (~$0.02/debate — all debates use same 3 agents)
 - Debate max tokens: more tokens = better reasoning but higher cost
 - Exit review tokens: extended thinking on every open position on every candle
 - Crypto scan interval: how often crypto is checked (more frequent = more potential debates)
@@ -609,12 +584,8 @@ Be concise. No fluff. Protect the account first, save money second."""
 
 
 def render_cost_lab(theme: str = 'king'):
-    """
-    Interactive cost lab: sliders → live estimate → apply button + AI advisor.
-    theme: 'king' | 'saiyan' | 'filmroom' | 'ring'
-    """
-    accent = {'king': '#FDB927', 'saiyan': '#00ffff',
-              'filmroom': '#ff8c00', 'ring': '#FFD700'}.get(theme, '#FDB927')
+    """Interactive cost lab: sliders → live estimate → apply button + AI advisor."""
+    accent = '#FDB927'
 
     st.subheader("💰 Cost Lab")
     st.caption("Tune your AI spend. Changes write to .env and take effect on next bot restart.")
@@ -648,7 +619,7 @@ def render_cost_lab(theme: str = 'king'):
     _live_depth_idx = 1 if live_depth == 'full' else 0
     debate_depth = st.radio(
         "Debate depth",
-        ["quick (3 agents — saves cost)", "full (8 agents — best signals)"],
+        ["quick (3 agents)", "full (3 agents)"],
         index=_live_depth_idx,
         key=f"cl_depth_{theme}",
         horizontal=True,
@@ -774,7 +745,7 @@ _SIG_STYLE = {
 
 _STRAT_LABELS = {
     'crypto_macd_consensus': 'MACD 3-variant',
-    'crypto_ai_debate':      'AI Debate (8 agents)',
+    'crypto_ai_debate':      'AI Debate (3 agents)',
     'equity_momentum':       'Equity Momentum',
     'equity_ai_debate':      'AI Debate (equity)',
     'futures_scalper':       'MES Futures Scalper',
@@ -1187,6 +1158,7 @@ def _layout_editor():
             st.rerun()
 
 
+@st.fragment(run_every=5)
 def _panel_scan_feed():
     entries = get_scan_feed(limit=40)
     last_ts = fmt_ts(entries[0].get('ts', ''), show_date=False, show_seconds=True) if entries else '—'
@@ -1234,6 +1206,7 @@ def _panel_scan_feed():
     )
 
 
+@st.fragment(run_every=5)
 def _panel_positions(rm):
     st.subheader("⚡ Positions")
     pos      = rm.get_all_positions()
@@ -1283,7 +1256,9 @@ def _panel_positions(rm):
             st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 
-def _panel_trades(trades):
+@st.fragment(run_every=10)
+def _panel_trades():
+    trades = get_todays_trades(paper=PAPER_TRADING)
     st.subheader("📋 Today's Trades")
     if trades:
         st.caption(f"{len(trades)} trade events today")
@@ -1306,6 +1281,7 @@ def _panel_trades(trades):
         st.info("No trades yet today. Waiting for the right setup. 👑")
 
 
+@st.fragment(run_every=5)
 def _panel_notifications():
     """Compact, plain-English activity feed — trades, halts, summaries only."""
     from datetime import timezone as _utc
@@ -1416,6 +1392,7 @@ def _panel_notifications():
             unsafe_allow_html=True)
 
 
+@st.fragment(run_every=5)
 def _panel_signals():
     sigs = get_todays_signals()
     buys  = [s for s in sigs if s.get('signal') == 'BUY']
@@ -1700,54 +1677,62 @@ def _local_anim(html_path: str, height: int = 200) -> None:
             pass
 
 
-def _saiyan_form(pnl: float, win_rate: float, all_time_pnl: float) -> tuple:
-    """Return (kakarot_path, prince_path, form_label, transform_gif_path) based on performance."""
-    # Tiers ordered from highest to lowest
-    if all_time_pnl >= ACCOUNT_SIZE:
-        form = 'ultra_mastered'
-        label = '⚡ ULTRA INSTINCT MASTERED'
-        tgif = os.path.join(_GIF, 'transform_ultra_instinct.gif')
-    elif pnl >= 60 or win_rate >= 0.80:
-        form = 'ultra'
-        label = '🌌 ULTRA INSTINCT'
-        tgif = os.path.join(_GIF, 'transform_ultra_instinct.gif')
-    elif pnl >= 35 or win_rate >= 0.72:
-        form = 'ssj_god'
-        label = '🔴 SUPER SAIYAN GOD'
-        tgif = os.path.join(_GIF, 'transform_ssj_god.gif')
-    elif pnl >= 20 or win_rate >= 0.65:
-        form = 'ssj_blue'
-        label = '💙 SUPER SAIYAN BLUE'
-        tgif = os.path.join(_GIF, 'transform_ssj_blue.gif')
-    elif pnl >= 10 or win_rate >= 0.58:
-        form = 'ssj2'
-        label = '⚡ SUPER SAIYAN 2'
-        tgif = os.path.join(_GIF, 'transform_ssj2.gif')
-    elif pnl >= 2 or win_rate >= 0.50:
-        form = 'ssj1'
-        label = '✨ SUPER SAIYAN'
-        tgif = os.path.join(_GIF, 'transform_ssj1.gif')
-    else:
-        form = 'base'
-        label = '⚪ BASE FORM'
-        tgif = None
-    kakarot = os.path.join(_SW, f'saiyan_kakarot_{form}.svg')
-    prince  = os.path.join(_SW, f'saiyan_prince_{form}.svg')
-    return kakarot, prince, label, tgif
-
-
-def _aura_gif(pnl: float) -> str:
-    """Return aura loop gif path based on P&L state."""
-    if pnl >= 20:   return os.path.join(_GIF, 'aura_loop_gold.gif')
-    elif pnl >= 5:  return os.path.join(_GIF, 'aura_loop_blue.gif')
-    elif pnl >= 0:  return os.path.join(_GIF, 'aura_loop_purple.gif')
-    else:           return os.path.join(_GIF, 'aura_loop_red.gif')
-
 
 _LEBRON_URLS = [
     "https://cdn.nba.com/headshots/nba/latest/1040x760/2544.png",
     "https://ak-static.cms.nba.com/wp-content/uploads/headshots/nba/latest/260x190/2544.png",
+    "https://upload.wikimedia.org/wikipedia/commons/thumb/c/cf/LeBron_James_crop1.jpg/330px-LeBron_James_crop1.jpg",
+    "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1d/LeBron_James_-_51959723161.jpg/440px-LeBron_James_-_51959723161.jpg",
 ]
+
+# 20-slot gallery — (url, caption). onerror hides broken images in browser.
+_LEBRON_GALLERY = [
+    ("https://cdn.nba.com/headshots/nba/latest/1040x760/2544.png",                                                                                              "THE KING"),
+    ("https://upload.wikimedia.org/wikipedia/commons/thumb/c/cf/LeBron_James_crop1.jpg/330px-LeBron_James_crop1.jpg",                                          "BRON"),
+    ("https://upload.wikimedia.org/wikipedia/commons/thumb/1/1d/LeBron_James_-_51959723161.jpg/440px-LeBron_James_-_51959723161.jpg",                          "LAKERS"),
+    ("https://upload.wikimedia.org/wikipedia/commons/thumb/a/a5/LeBron_James_%2815662939969%29_%28cropped%29.jpg/440px-LeBron_James_%2815662939969%29_%28cropped%29.jpg", "MVP"),
+    ("https://upload.wikimedia.org/wikipedia/commons/thumb/7/7a/LeBron_James_%2820-11%29.jpg/440px-LeBron_James_%2820-11%29.jpg",                             "CHAMP"),
+    ("https://upload.wikimedia.org/wikipedia/commons/thumb/d/de/LeBron_James_-_Cleveland_Cavaliers.jpg/330px-LeBron_James_-_Cleveland_Cavaliers.jpg",         "CAVS"),
+    ("https://upload.wikimedia.org/wikipedia/commons/thumb/4/47/LeBron_James_-_2014_%28cropped%29.jpg/330px-LeBron_James_-_2014_%28cropped%29.jpg",           "2014"),
+    ("https://upload.wikimedia.org/wikipedia/commons/thumb/3/31/LeBron_James_-_2019_%2848074836221%29_%28cropped%29.jpg/330px-LeBron_James_-_2019_%2848074836221%29_%28cropped%29.jpg", "2019"),
+    ("https://media.tenor.com/g9sXlTNE9v0AAAAC/lebron-james.gif",                                                                                              "KING GIF"),
+    ("https://media.tenor.com/JVGF4GCOhisAAAAC/lebron-james-dunk.gif",                                                                                        "DUNK"),
+    ("https://media.tenor.com/WFr39s9MFMYAAAAC/lebron.gif",                                                                                                    "BRON GIF"),
+    ("https://media.tenor.com/6MqDpJ3mEqwAAAAC/lebron-james-celebration.gif",                                                                                  "W"),
+    ("https://media.tenor.com/q_k1Sd4i89EAAAAC/lebron-james.gif",                                                                                              "LEBRON"),
+    ("https://media.tenor.com/sBJXhLFc0X0AAAAC/lebron.gif",                                                                                                    "KING 2"),
+    ("https://media.tenor.com/7KlvM3nV_fUAAAAC/lebron-james-basketball.gif",                                                                                   "HOOPS"),
+    ("https://media.tenor.com/8RqBd2ZbYHsAAAAC/lebron-james.gif",                                                                                              "FINALS"),
+    ("https://ak-static.cms.nba.com/wp-content/uploads/headshots/nba/latest/260x190/2544.png",                                                                 "#23"),
+    ("https://media.tenor.com/5FKuFVJlAhIAAAAC/lebron-james-lebron.gif",                                                                                       "CLUTCH"),
+    ("https://media.tenor.com/Gq4p9FwKl0UAAAAC/lebron-james.gif",                                                                                              "LEGEND"),
+    ("https://media.tenor.com/YsXTNqRdBfQAAAAC/lebron-james.gif",                                                                                              "GOAT"),
+]
+
+
+def _king_lebron_gallery() -> None:
+    """Render 20-image LeBron gallery as a CSS grid. Broken images auto-hide via onerror."""
+    st.markdown(
+        '<div style="color:#FDB927; font-family:\'Impact\',sans-serif; font-size:16px; '
+        'letter-spacing:4px; text-align:center; margin:18px 0 10px 0;">👑 THE KING\'S GALLERY 👑</div>',
+        unsafe_allow_html=True,
+    )
+    img_tags = ''
+    for url, cap in _LEBRON_GALLERY:
+        img_tags += (
+            f'<div style="text-align:center; background:#0a0a14; border:1px solid #FDB92755; '
+            f'border-radius:6px; overflow:hidden; padding:4px;">'
+            f'<img src="{url}" onerror="this.parentElement.style.display=\'none\'" '
+            f'style="width:100%; height:90px; object-fit:cover; border-radius:4px;" />'
+            f'<div style="color:#FDB927; font-size:8px; font-family:monospace; '
+            f'letter-spacing:2px; margin-top:3px;">{cap}</div>'
+            f'</div>'
+        )
+    st.markdown(
+        f'<div style="display:grid; grid-template-columns:repeat(5,1fr); gap:6px; '
+        f'margin:6px 0 20px 0;">{img_tags}</div>',
+        unsafe_allow_html=True,
+    )
 
 
 def _lebron_img(width: int = 120, caption: str = '') -> None:
@@ -1833,35 +1818,44 @@ def _live_stat_hub(rm):
     # ── 4 metric cards + live trade ticker ───────────────────────────────────
     m1, m2, m3, m4, ticker_col = st.columns([1, 1, 1, 1, 1.8])
 
-    def _card(col, label, value, sub, color='#FDB927'):
+    def _card(col, label, value, sub, color='#FDB927', icon='📊'):
+        border_glow = f'box-shadow: 0 0 14px {color}55; border: 2px solid {color};'
         col.markdown(f"""
-        <div class="metric-card">
-            <div class="metric-val" style="color:{color};">{value}</div>
-            <div class="metric-lbl">{label}</div>
-            <div style="font-size:10px; color:#666; margin-top:3px;">{sub}</div>
+        <div style="background:linear-gradient(135deg,#0d1b38 0%,#1D428A 100%);
+             {border_glow} border-radius:10px; padding:14px 10px; text-align:center;
+             margin:4px 0; min-height:90px;">
+            <div style="font-size:10px; color:#888; text-transform:uppercase;
+                 letter-spacing:2px; margin-bottom:4px;">{icon} {label}</div>
+            <div style="font-size:26px; font-weight:900; color:{color};
+                 font-family:'Impact',sans-serif; line-height:1.1;">{value}</div>
+            <div style="font-size:10px; color:#666; margin-top:5px;">{sub}</div>
         </div>""", unsafe_allow_html=True)
 
     _bal_color = '#44ff88' if real_balance >= ACCOUNT_SIZE else '#ff4444'
-    _card(m1, 'ACCOUNT BALANCE', f'${real_balance:,.2f}',
-          f'{_net_pnl_all:+.2f} net all-time', _bal_color)
+    _bal_icon  = '💰' if real_balance >= ACCOUNT_SIZE else '📉'
+    _card(m1, 'BALANCE', f'${real_balance:,.2f}',
+          f'{_net_pnl_all:+.2f} net all-time', _bal_color, _bal_icon)
 
     _pnl_color = '#44ff88' if today_s['net_pnl'] >= 0 else '#ff4444'
+    _pnl_icon  = '🔥' if today_s['net_pnl'] > 5 else '📈' if today_s['net_pnl'] >= 0 else '📉'
     _card(m2, 'TODAY P&L',
           f"{'+' if today_s['net_pnl']>=0 else ''}${today_s['net_pnl']:.2f}",
-          f"gross {today_s['gross_pnl']:+.2f}  fees −${fees_today:.3f}",
-          _pnl_color)
+          f"gross {today_s['gross_pnl']:+.2f} · fees −${fees_today:.3f}",
+          _pnl_color, _pnl_icon)
 
     _wr_color = '#44ff88' if wr_all >= 0.52 else '#FDB927' if wr_all >= 0.45 else '#ff4444'
+    _wr_icon  = '👑' if wr_all >= 0.52 else '⚡' if wr_all >= 0.45 else '⚠️'
     _card(m3, 'WIN RATE', f'{wr_all:.1%}',
-          f"{stats.get('wins',0)}W / {stats.get('losses',0)}L  ({wr_today:.0%} today)",
-          _wr_color)
+          f"{stats.get('wins',0)}W / {stats.get('losses',0)}L · {wr_today:.0%} today",
+          _wr_color, _wr_icon)
 
-    _dep_pct = _deployed / ACCOUNT_SIZE if ACCOUNT_SIZE else 0
-    _dep_color = '#ff4444' if _dep_pct > 0.8 else '#FDB927'
+    _dep_pct   = _deployed / ACCOUNT_SIZE if ACCOUNT_SIZE else 0
+    _dep_color = '#ff4444' if _dep_pct > 0.8 else '#FDB927' if _dep_pct > 0.3 else '#44ff88'
+    _dep_icon  = '⚡' if _dep_pct > 0.5 else '🏦'
     _card(m4, 'DEPLOYED',
           f'${_deployed:.0f}',
-          f'{_dep_pct:.0%} of ${ACCOUNT_SIZE:,.0f}  ({today_s["total"]} trades today)',
-          _dep_color)
+          f'{_dep_pct:.0%} of ${ACCOUNT_SIZE:,.0f} · {today_s["total"]} trades',
+          _dep_color, _dep_icon)
 
     # Live trade ticker — last 8 closed trades
     with ticker_col:
@@ -1892,7 +1886,8 @@ def _live_stat_hub(rm):
                         unsafe_allow_html=True)
         # Last updated timestamp
         st.markdown(
-            f'<div style="font-size:9px; color:#444; margin-top:4px;">updated {et_now()}</div>',
+            f'<div style="font-size:9px; color:#444; margin-top:4px;">'
+            f'<span style="color:#44ff88; font-size:8px;">●</span> LIVE · updated {et_now()}</div>',
             unsafe_allow_html=True)
 
 
@@ -2016,56 +2011,116 @@ def render_king():
 
     # ── Current Brain ─────────────────────────────────────────────────────────
     with st.expander("🧠 Current Brain — System Parameters", expanded=False):
+
+        def _brain_row(label, value, highlight=False):
+            color = '#FDB927' if highlight else '#cccccc'
+            return (
+                f'<div style="display:flex; justify-content:space-between; '
+                f'padding:5px 10px; border-bottom:1px solid #1a1a2a; font-size:12px;">'
+                f'<span style="color:#888;">{label}</span>'
+                f'<span style="color:{color}; font-weight:{"700" if highlight else "400"};">{value}</span>'
+                f'</div>'
+            )
+
+        def _brain_section(title, rows_html):
+            return (
+                f'<div style="background:#0a0a18; border:1px solid #1D428A55; border-radius:8px; '
+                f'overflow:hidden; margin-bottom:10px;">'
+                f'<div style="background:#1D428A; padding:6px 10px; font-size:11px; '
+                f'font-weight:900; color:#FDB927; letter-spacing:2px;">{title}</div>'
+                f'{rows_html}'
+                f'</div>'
+            )
+
         _bc1, _bc2, _bc3 = st.columns(3)
 
         with _bc1:
-            st.markdown("**🤖 AI Config**")
             model_short = CLAUDE_MODEL.replace('claude-', '').replace('-20', ' (') + ')' if '-20' in CLAUDE_MODEL else CLAUDE_MODEL.replace('claude-', '')
-            st.markdown(f"- **Model:** `{model_short}`")
-            st.markdown(f"- **Debate tokens:** {DEBATE_MAX_TOKENS}")
-            st.markdown(f"- **Exit review tokens:** {EXIT_REVIEW_MAX_TOKENS}")
-            st.markdown(f"- **Moderator tokens:** {MODERATOR_MAX_TOKENS}")
-            st.markdown(f"- **Min agreement:** 2/{len(FULL_DEBATE_AGENTS)} agents (explicit count — buy_votes < 2 = VETO)")
-            st.markdown("**Full debate panel:**")
-            for _ag in FULL_DEBATE_AGENTS:
-                st.markdown(f"  - {_ag}")
-            st.markdown("**Quick debate panel:**")
-            for _ag in QUICK_DEBATE_AGENTS:
-                st.markdown(f"  - {_ag}")
+            _agent_labels = {
+                'funding_regime':     'Macro & Funding Agent',
+                'momentum_structure': 'Technical Momentum Agent',
+                'risk_economics':     'Risk & Economics Agent',
+            }
+            try:
+                from config import ML_SIGNAL_MIN_PROB as _mlp
+                _ml_str = f'{_mlp:.0%} (auto-raised)'
+            except Exception:
+                _ml_str = 'N/A'
+
+            _ai_rows = (
+                _brain_row('Model', model_short)
+                + _brain_row('Debate tokens', str(DEBATE_MAX_TOKENS))
+                + _brain_row('Exit review tokens', str(EXIT_REVIEW_MAX_TOKENS))
+                + _brain_row('Decision rule', f'2/{len(FULL_DEBATE_AGENTS)} BUY = BUY', highlight=True)
+                + _brain_row('Moderator', 'NONE (removed v8.0)', highlight=True)
+                + _brain_row('Cost per debate', '~0.02 USD (was 0.08)', highlight=True)
+                + _brain_row('ML gate P(win)', _ml_str, highlight=True)
+            )
+            _agent_rows = ''.join(
+                _brain_row(f'Agent {i+1}', _agent_labels.get(ag, ag), highlight=True)
+                for i, ag in enumerate(FULL_DEBATE_AGENTS)
+            )
+            st.markdown(
+                _brain_section('🤖 AI CONFIG — v8.0', _ai_rows)
+                + _brain_section('👥 3-AGENT DEBATE PANEL', _agent_rows),
+                unsafe_allow_html=True,
+            )
 
         with _bc2:
-            st.markdown("**🛡️ Risk Rules**")
-            st.markdown(f"- **Max risk/trade:** {MAX_RISK_PER_TRADE_PCT:.0%}")
-            st.markdown(f"- **Max daily loss:** {MAX_DAILY_LOSS_PCT:.0%}")
-            st.markdown(f"- **Max deployed:** {MAX_DEPLOYED_PCT:.0%}")
-            st.markdown(f"- **Max fee drag/day:** {MAX_DAILY_FEE_DRAG_PCT:.0%}")
-            st.markdown(f"- **Max positions — crypto:** {MAX_POSITIONS_CRYPTO} | equity: {MAX_POSITIONS_EQUITY}")
-            st.markdown(f"- **Crypto stop:** {CRYPTO_STOP_LOSS_PCT:.1%} | target: {CRYPTO_TAKE_PROFIT_PCT:.1%}")
-            st.markdown(f"- **Taker fee:** {COINBASE_TAKER_FEE_PCT:.2%}")
-            st.markdown(f"- **Loss streak halt:** {MAX_STRATEGY_LOSS_STREAK} consecutive")
-            st.markdown(f"- **Max equity trades/day:** {MAX_TRADES_PER_DAY_EQUITY}")
-            st.markdown(f"- **Max crypto trades/day:** {MAX_TRADES_PER_DAY_CRYPTO}")
+            _risk_rows = (
+                _brain_row('Max risk/trade', f'{MAX_RISK_PER_TRADE_PCT:.0%}')
+                + _brain_row('Max daily loss', f'{MAX_DAILY_LOSS_PCT:.0%}')
+                + _brain_row('Max deployed', f'{MAX_DEPLOYED_PCT:.0%}')
+                + _brain_row('Max fee drag/day', f'{MAX_DAILY_FEE_DRAG_PCT:.0%}')
+                + _brain_row('Max crypto positions', str(MAX_POSITIONS_CRYPTO))
+                + _brain_row('Max equity positions', str(MAX_POSITIONS_EQUITY))
+                + _brain_row('Crypto stop / target', f'{CRYPTO_STOP_LOSS_PCT:.1%} / {CRYPTO_TAKE_PROFIT_PCT:.1%}')
+                + _brain_row('Taker fee', f'{COINBASE_TAKER_FEE_PCT:.2%}')
+                + _brain_row('Loss streak halt', f'{MAX_STRATEGY_LOSS_STREAK} consecutive')
+                + _brain_row('Max crypto trades/day', str(MAX_TRADES_PER_DAY_CRYPTO))
+                + _brain_row('Max equity trades/day', str(MAX_TRADES_PER_DAY_EQUITY))
+            )
+            st.markdown(_brain_section('🛡️ RISK RULES', _risk_rows), unsafe_allow_html=True)
 
-        with _bc3:
-            st.markdown("**📡 Signal Config**")
-            st.markdown(f"- **Min ADX (crypto):** {CRYPTO_MIN_ADX}")
-            st.markdown(f"- **RSI:** exit signals only (not an entry gate)")
-            st.markdown(f"- **OU z-score entry:** ≤ -1.5 | exit: ≥ -0.5")
-            st.markdown(f"- **Kalman entry dev:** {KALMAN_ENTRY_DEV_PCT:.1%} | AVWAP: {AVWAP_ENTRY_DEV_PCT:.1%}")
-            st.markdown(f"- **Crypto size:** ${CRYPTO_POSITION_SIZE_USD:.0f} | equity: ${EQUITY_POSITION_SIZE_USD:.0f}")
-            st.markdown(f"- **Crypto scan every:** {CRYPTO_SCAN_INTERVAL_SECONDS}s | equity: {EQUITY_SCAN_INTERVAL_SECONDS}s")
-            st.markdown(f"- **Max crypto trades/day:** {MAX_TRADES_PER_DAY_CRYPTO} | equity: {MAX_TRADES_PER_DAY_EQUITY}")
-            _pairs_list = CRYPTO_PAIRS if isinstance(CRYPTO_PAIRS, list) else str(CRYPTO_PAIRS).split(',')
-            st.markdown(f"- **Pairs ({len(_pairs_list)}):** {', '.join(p.replace('-USDC','').replace('-USD','') for p in _pairs_list)}")
-            st.markdown("**📈 Live Kelly (crypto, last 50)**")
             try:
                 _ks = get_kelly_stats(strategy='crypto_ai_debate', paper=PAPER_TRADING, window=50)
-                st.markdown(f"- **Trades:** {_ks.get('n_trades', 0)}")
-                st.markdown(f"- **Win rate:** {_ks.get('win_rate', 0):.1%}")
-                st.markdown(f"- **Kelly 25%:** {_ks.get('kelly_25pct', 0):.1%}")
-                st.markdown(f"- **Avg W/L ratio:** {_ks.get('avg_win', 0):.2f} / {abs(_ks.get('avg_loss', 0)):.2f}")
+                _kelly_rows = (
+                    _brain_row('Trades (last 50)', str(_ks.get('n_trades', 0)))
+                    + _brain_row('Win rate', f"{_ks.get('win_rate', 0):.1%}", highlight=_ks.get('win_rate', 0) >= 0.45)
+                    + _brain_row('Kelly 25%', f"{_ks.get('kelly_25pct', 0):.1%}")
+                    + _brain_row('Avg W / L', f"{_ks.get('avg_win', 0):.2f} / {abs(_ks.get('avg_loss', 0)):.2f}")
+                )
             except Exception:
-                st.markdown("- *(no trades yet)*")
+                _kelly_rows = _brain_row('Status', 'No trades yet')
+            st.markdown(_brain_section('📈 LIVE KELLY', _kelly_rows), unsafe_allow_html=True)
+
+        with _bc3:
+            _pairs_list = CRYPTO_PAIRS if isinstance(CRYPTO_PAIRS, list) else str(CRYPTO_PAIRS).split(',')
+            _pairs_str = ', '.join(p.replace('-USDC','').replace('-USD','') for p in _pairs_list)
+            _kal_pct = KALMAN_ENTRY_DEV_PCT * 100 if abs(KALMAN_ENTRY_DEV_PCT) < 1 else KALMAN_ENTRY_DEV_PCT
+            _avw_pct = AVWAP_ENTRY_DEV_PCT * 100 if abs(AVWAP_ENTRY_DEV_PCT) < 1 else AVWAP_ENTRY_DEV_PCT
+            _sig_rows = (
+                _brain_row('Min ADX (crypto)', str(CRYPTO_MIN_ADX))
+                + _brain_row('RSI role', 'Exit only — NOT entry gate')
+                + _brain_row('OU z-score entry', '<= -1.5  |  exit >= -0.5')
+                + _brain_row('Kalman entry dev', f'{_kal_pct:.1f}%')
+                + _brain_row('AVWAP entry dev', f'{_avw_pct:.1f}%')
+                + _brain_row('Crypto position size', f'USD {CRYPTO_POSITION_SIZE_USD:.0f}')
+                + _brain_row('Equity position size', f'USD {EQUITY_POSITION_SIZE_USD:.0f}')
+                + _brain_row('Crypto scan interval', f'{CRYPTO_SCAN_INTERVAL_SECONDS}s')
+                + _brain_row(f'Pairs ({len(_pairs_list)})', _pairs_str)
+            )
+            _new_sig_rows = (
+                _brain_row('StochRSI cross up', '+10 pts  (40-45% WR)', highlight=True)
+                + _brain_row('CVD bull divergence', '+8 pts  (40-50% WR)', highlight=True)
+                + _brain_row('VWAP -2σ touch', '+8 pts  (45-55% WR)', highlight=True)
+                + _brain_row('EMA 9/21 golden cross', '+10 pts  (40-45% WR)', highlight=True)
+            )
+            st.markdown(
+                _brain_section('📡 SIGNAL CONFIG', _sig_rows)
+                + _brain_section('⚡ HIGH-WR SIGNALS (v8.1)', _new_sig_rows),
+                unsafe_allow_html=True,
+            )
 
     # ── Modular panel layout ──────────────────────────────────────────────────
     _init_king_layout()
@@ -2074,7 +2129,7 @@ def render_king():
     def _dispatch(pid):
         if   pid == 'scan_feed':     _panel_scan_feed()
         elif pid == 'positions':     _panel_positions(rm)
-        elif pid == 'trades':        _panel_trades(trades)
+        elif pid == 'trades':        _panel_trades()
         elif pid == 'notifications': _panel_notifications()
         elif pid == 'signals':       _panel_signals()
         elif pid == 'risk':          _panel_risk(pnl, rm)
@@ -2107,1106 +2162,391 @@ def render_king():
             if j < len(panels_r) - 1:
                 st.divider()
 
+    # ── LeBron Gallery ────────────────────────────────────────────────────────
+    st.divider()
+    _king_lebron_gallery()
 
-# ─── DBZ character image helper ───────────────────────────────────────────────
-# Multiple URL candidates per character — tries each, silently skips on failure.
-# GIF URLs are tried first where available for extra DBZ energy.
-_DBZ_CHAR_URLS: dict = {
-    'goku': [
-        "https://media.tenor.com/fGXFdaY9Q3AAAAC/dragon-ball-z-goku.gif",
-        "https://media.tenor.com/zFoF5R8w1AYAAAAC/goku-super-saiyan.gif",
-        "https://static.wikia.nocookie.net/dragonball/images/5/5b/Goku_DBS_Manga_003.png",
-        "https://upload.wikimedia.org/wikipedia/en/a/a7/Kamehameha.jpg",
-    ],
-    'vegeta': [
-        "https://media.tenor.com/hXjqCCNtHesAAAAC/vegeta-dbz.gif",
-        "https://media.tenor.com/3iCp3gQMo7sAAAAC/vegeta-dragon-ball-z.gif",
-        "https://static.wikia.nocookie.net/dragonball/images/e/ea/Vegeta_DBS_Manga_003.png",
-        "https://upload.wikimedia.org/wikipedia/en/d/d2/VegetaDB.jpg",
-    ],
-    'piccolo': [
-        "https://media.tenor.com/GCe1EKiCsIEAAAAC/piccolo-dbz.gif",
-        "https://static.wikia.nocookie.net/dragonball/images/a/a4/Piccolo_DBS_Manga_003.png",
-    ],
-    'trunks': [
-        "https://media.tenor.com/s7R5kNi6uqEAAAAC/future-trunks-dragon-ball-z.gif",
-        "https://static.wikia.nocookie.net/dragonball/images/4/41/Future_Trunks_DBS_Manga_003.png",
-    ],
-    'broly': [
-        "https://media.tenor.com/x0ybhpSK4DYAAAAC/broly-dragon-ball-super.gif",
-        "https://static.wikia.nocookie.net/dragonball/images/b/bb/Broly_DBS_Manga_003.png",
-    ],
-    'gohan': [
-        "https://media.tenor.com/5MBaxV3l1q4AAAAC/gohan-dbz.gif",
-        "https://static.wikia.nocookie.net/dragonball/images/2/2b/Gohan_DBS_Manga_003.png",
-    ],
-    'krillin': [
-        "https://media.tenor.com/ZwYq6mj3oLcAAAAC/krillin-dbz.gif",
-        "https://static.wikia.nocookie.net/dragonball/images/0/02/Krillin_DBS_Manga_003.png",
-    ],
-    'frieza': [
-        "https://media.tenor.com/OoaJJGr78CsAAAAC/frieza-dragon-ball.gif",
-        "https://static.wikia.nocookie.net/dragonball/images/b/b7/Frieza_DBS_Manga_003.png",
-    ],
-    'cell': [
-        "https://media.tenor.com/ZIm8TQHB8KQAAAAC/cell-dbz.gif",
-        "https://static.wikia.nocookie.net/dragonball/images/1/17/Cell_DBS_Manga_003.png",
-    ],
-    'beerus': [
-        "https://media.tenor.com/cGpMRRlhAnAAAAAC/beerus-dragon-ball.gif",
-        "https://static.wikia.nocookie.net/dragonball/images/4/44/Beerus_DBS_Manga.png",
-    ],
-    'goku_ssj': [
-        "https://media.tenor.com/zFoF5R8w1AYAAAAC/goku-super-saiyan.gif",
-        "https://media.tenor.com/fGXFdaY9Q3AAAAC/dragon-ball-z-goku.gif",
-    ],
-    'vegeta_ssj': [
-        "https://media.tenor.com/hXjqCCNtHesAAAAC/vegeta-dbz.gif",
-        "https://media.tenor.com/3iCp3gQMo7sAAAAC/vegeta-dragon-ball-z.gif",
-    ],
-    'kamehameha': [
-        "https://media.tenor.com/fGXFdaY9Q3AAAAC/dragon-ball-z-goku.gif",
-    ],
-}
+    # ═══════════════════════════════════════════════════════════════════════════
+    # SECTION A — CAPACITY GAUGES
+    # ═══════════════════════════════════════════════════════════════════════════
+    st.divider()
+    st.subheader("📊 Capacity Gauges")
+    _king_capacity_gauges()
 
-_DBZ_CHAR_EMOJI: dict = {
-    'goku': '🌟', 'vegeta': '🔥', 'piccolo': '💚', 'trunks': '⚔️',
-    'broly': '💥', 'gohan': '✨', 'krillin': '⭕', 'frieza': '❄️',
-    'cell': '🟢', 'beerus': '🐱', 'goku_ssj': '⚡', 'vegeta_ssj': '⚡',
-    'kamehameha': '💫',
-}
+    # ═══════════════════════════════════════════════════════════════════════════
+    # SECTION B — PERP FUNDING RATES
+    # ═══════════════════════════════════════════════════════════════════════════
+    st.divider()
+    st.subheader("⚡ Perp Funding Rates")
+    _king_perp_funding(rm)
 
-# DBZ power quotes for Saiyan mode flavor
-_DBZ_QUOTES = [
-    ("It's over 9,000!!", "Vegeta"),
-    ("I am the hope of the universe.", "Goku"),
-    ("I am the prince of all Saiyans!", "Vegeta"),
-    ("There's no such thing as fair or unfair in battle.", "Vegeta"),
-    ("Power comes in response to a need, not a desire.", "Goku"),
-    ("Every time I reach a new level of strength, a greater power appears to challenge it.", "Goku"),
-    ("I do not fear this new challenge. Rather like a true warrior I will rise to meet it.", "Vegeta"),
-    ("My name is Vegeta and I will not be defeated by someone with a power level lower than mine.", "Vegeta"),
-    ("The only thing that makes life worth living is the thrill of the fight!", "Vegeta"),
-    ("Push through the pain. Giving up hurts more.", "Vegeta"),
-]
+    # ═══════════════════════════════════════════════════════════════════════════
+    # SECTION C — ROLLING WIN RATE (10-TRADE WINDOW)
+    # ═══════════════════════════════════════════════════════════════════════════
+    st.divider()
+    st.subheader("📈 Rolling Win Rate (10-Trade Window)")
+    _king_rolling_win_rate()
 
-def get_dbz_quote_for_hour() -> tuple:
-    hour = datetime.now(pytz.timezone(MARKET_TIMEZONE)).hour
-    return _DBZ_QUOTES[hour % len(_DBZ_QUOTES)]
+    # ═══════════════════════════════════════════════════════════════════════════
+    # SECTION D — AGENT PERFORMANCE SCORECARD
+    # ═══════════════════════════════════════════════════════════════════════════
+    st.divider()
+    st.subheader("🤖 Agent Performance Scorecard")
+    _king_agent_scorecard()
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # SECTION E — RECENT DEBATE TRANSCRIPTS (LAST 6)
+    # ═══════════════════════════════════════════════════════════════════════════
+    st.divider()
+    st.subheader("🎬 Recent Debate Transcripts (Last 6)")
+    _king_debate_transcripts()
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # SECTION F — ALL-TIME PERFORMANCE STATS
+    # ═══════════════════════════════════════════════════════════════════════════
+    st.divider()
+    st.subheader("📊 All-Time Performance Stats")
+    _king_alltime_stats()
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # SECTION G — MILESTONE TRACKER
+    # ═══════════════════════════════════════════════════════════════════════════
+    st.divider()
+    st.subheader("🏅 Milestone Tracker")
+    _king_milestones()
 
 
-def _dbz_char_img(char: str, width: int = 120, label: str = '') -> None:
-    """Try each URL for a DBZ character (GIFs preferred); fall back to animated emoji card."""
-    urls = _DBZ_CHAR_URLS.get(char.lower(), [])
-    for url in urls:
-        try:
-            st.image(url, width=width, caption=label or char.upper())
-            return
-        except Exception:
-            continue
-    # Animated emoji fallback card with ki-glow effect
-    emoji = _DBZ_CHAR_EMOJI.get(char.lower(), '⚡')
-    st.markdown(
-        f'<div style="text-align:center; padding:12px 8px; background:#050520; '
-        f'border:2px solid #00ffff; border-radius:8px; min-width:{width}px; '
-        f'box-shadow: 0 0 12px #00ffff44; animation: pulse9k 2s infinite;">'
-        f'<div style="font-size:{max(width//3, 24)}px;">{emoji}</div>'
-        f'<div style="color:#00ffff; font-family:monospace; font-size:9px; '
-        f'letter-spacing:2px; margin-top:4px;">{(label or char).upper()}</div>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
+# ─── Section helpers added below render_king ──────────────────────────────────
 
-
-def render_saiyan():
-    st.markdown(f"<style>{THEME_CSS['saiyan']}</style>", unsafe_allow_html=True)
-
+def _king_capacity_gauges():
+    """Section A: 4 capacity/limit progress bars."""
+    pnl = get_todays_pnl(paper=PAPER_TRADING) - get_todays_fees(paper=PAPER_TRADING)
+    fees_today = get_todays_fees(paper=PAPER_TRADING)
     rm = get_risk_manager()
-    pnl = get_todays_pnl(paper=PAPER_TRADING)
-    trades = get_todays_trades(paper=PAPER_TRADING)
-    stats = get_all_time_stats(paper=PAPER_TRADING)
-    win_rate = stats.get('win_rate', 0)
-    all_time_pnl = stats.get('total_pnl', 0)
-    total_trades = stats.get('total', 0)
-    power_level = int(
-        abs(pnl) * 200
-        + len(trades) * 300
-        + win_rate * 8000
-        + total_trades * 50
-        + 1337
+    pos = rm.get_all_positions()
+    cr_pos = pos.get('crypto', {})
+    perp_pos = pos.get('perp', {})
+
+    all_time = get_all_time_stats(paper=PAPER_TRADING)
+    real_balance = ACCOUNT_SIZE + all_time.get('total_pnl', 0)
+    max_loss_usd = real_balance * MAX_DAILY_LOSS_PCT
+    daily_loss_pct = abs(pnl) / real_balance * 100 if pnl < 0 else 0
+    halt_pct = MAX_DAILY_LOSS_PCT * 100
+
+    st.progress(
+        min(daily_loss_pct / halt_pct, 1.0),
+        text=f"Daily Loss Used — {daily_loss_pct:.2f}% / {halt_pct:.0f}% halt  (${abs(pnl):.2f} of ${max_loss_usd:.2f} limit)"
     )
 
-    # ── Determine saiyan form + detect form transitions ───────────────────────
-    kakarot_svg, prince_svg, form_label, transform_gif = _saiyan_form(pnl, win_rate, all_time_pnl)
-    if 'saiyan_prev_form' not in st.session_state:
-        st.session_state.saiyan_prev_form = form_label
-        st.session_state.saiyan_show_transform = False
-    if st.session_state.saiyan_prev_form != form_label:
-        st.session_state.saiyan_prev_form = form_label
-        st.session_state.saiyan_show_transform = True
-    else:
-        st.session_state.saiyan_show_transform = False
+    spot_count = len(cr_pos)
+    st.progress(
+        min(spot_count / max(MAX_POSITIONS_CRYPTO, 1), 1.0),
+        text=f"Crypto Positions — {spot_count} / {MAX_POSITIONS_CRYPTO}"
+    )
 
-    # ── Full-width DBZ header with quote ──────────────────────────────────────
-    dbz_quote, dbz_speaker = get_dbz_quote_for_hour()
-    st.markdown(f"""
-    <div class="saiyan-header">
-        <div style="text-align:center; color:#00ffff; font-size:28px; font-weight:900;
-             letter-spacing:6px; font-family:monospace; text-shadow: 0 0 20px #00ffff,
-             0 0 40px #00ffff55;">
-            ⚡ SAIYAN TRADING SYSTEM ⚡
-        </div>
-        <div style="text-align:center; color:#888; font-size:11px; font-family:monospace;
-             letter-spacing:4px; margin-top:4px;">DRAGON BALL Z × ALGO TRADING</div>
-        <div style="text-align:center; margin-top:10px; background:#0a0a1e;
-             border:1px solid #00ffff44; border-radius:4px; padding:8px 16px;">
-            <span style="color:#FFD700; font-family:monospace; font-style:italic;
-                  font-size:14px;">"{dbz_quote}"</span>
-            <span style="color:#555; font-size:11px; font-family:monospace;">
-                — {dbz_speaker}</span>
-        </div>
-    </div>""", unsafe_allow_html=True)
+    perp_count = len(perp_pos)
+    _MAX_PERP = 3
+    st.progress(
+        min(perp_count / _MAX_PERP, 1.0),
+        text=f"Perp Positions — {perp_count} / {_MAX_PERP}"
+    )
 
-    # ── Situation-based HTML animation banners ────────────────────────────────
-    recent_trades_today = [t for t in trades if t.get('pnl_usd', 0) > 0]
-    # Try to get today's signals safely
-    try:
-        _today_sigs = get_todays_signals()
-        recent_buy_signals = [t for t in _today_sigs if t.get('action') == 'BUY']
-    except Exception:
-        recent_buy_signals = []
+    fee_drag_pct = fees_today / real_balance * 100
+    fee_limit_pct = MAX_DAILY_FEE_DRAG_PCT * 100
+    st.progress(
+        min(fee_drag_pct / fee_limit_pct, 1.0),
+        text=f"Fee Drag Today — {fee_drag_pct:.2f}% / {fee_limit_pct:.1f}% limit  (${fees_today:.2f} paid)"
+    )
 
-    if pnl > 0 and recent_trades_today:
-        _local_anim(os.path.join(_AN, 'powerup_gold_ss.html'), height=150)
-    if win_rate > 0.70:
-        _local_anim(os.path.join(_AN, 'powerup_purple_ultra.html'), height=150)
-    if recent_buy_signals:
-        _local_anim(os.path.join(_AN, 'energy_charge_blue_kamehameha.html'), height=150)
 
-    # ── Dragon Ball orb row — earned by total trades milestone ────────────────
-    _orb_thresholds = [1, 5, 10, 25, 50, 100, 200]
-    _orb_earned = [i+1 for i, thresh in enumerate(_orb_thresholds) if total_trades >= thresh]
-    if _orb_earned:
-        _orb_html = '<div style="display:flex; gap:6px; justify-content:center; margin:8px 0; align-items:center;">'
-        _orb_html += '<span style="color:#555; font-family:monospace; font-size:9px; letter-spacing:2px;">DRAGON BALLS:</span>'
-        for star_n in range(1, 8):
-            _orb_path = os.path.join(_DE, f'orb_{star_n}star.svg')
-            _orb_b64 = _b64img(_orb_path)
-            if _orb_b64:
-                if star_n in _orb_earned:
-                    _orb_html += (f'<img src="{_orb_b64}" style="width:30px; '
-                                  f'filter: drop-shadow(0 0 6px #FFD700) drop-shadow(0 0 12px #FDB927); '
-                                  f'animation: pulse9k 2s infinite;">')
-                else:
-                    _orb_html += (f'<img src="{_orb_b64}" style="width:30px; opacity:0.18; '
-                                  f'filter: grayscale(1);">')
-        _orb_html += '</div>'
-        st.markdown(_orb_html, unsafe_allow_html=True)
-
-    # ── Main character row: Kakarot | power center | Prince ─────────────────
-    # (aura GIFs embedded in character columns to prevent overflow)
-    char_l, power_col, char_r = st.columns([1, 2.8, 1])
-    with char_l:
-        if os.path.exists(kakarot_svg):
-            st.image(kakarot_svg, width=130)
-        else:
-            _dbz_char_img('goku', width=110, label='Kakarot')
-        st.markdown('<div style="text-align:center; color:#FFD700; font-family:monospace; '
-                    'font-size:9px; letter-spacing:1px; margin-top:2px;">KAKAROT</div>',
-                    unsafe_allow_html=True)
-        # Aura gif sits below the character, constrained to column width
-        _local_img(_aura_gif(pnl), width=60)
-
-    with power_col:
-        # ── Lightning frame + power level display ─────────────────────────────
-        _lf_b64 = _b64img(os.path.join(_DE, 'lightning_frame_gold.svg'))
-        _pl_color = '#FFD700' if power_level > 9000 else '#00ffff'
-        if _lf_b64:
+def _king_perp_funding(rm):
+    """Section B: Perp funding rates — only if open perp positions exist."""
+    pos = rm.get_all_positions()
+    perp_pos = pos.get('perp', {})
+    if not perp_pos:
+        st.caption("No open perp positions — funding rates will appear here when positions are open.")
+        return
+    for sym, p in perp_pos.items():
+        funding = p.get('funding_rate', None)
+        side = p.get('side', 'long')
+        lev = p.get('leverage', 1)
+        if funding is not None:
+            f_pct = funding * 100
+            paying = (side == 'long' and f_pct > 0) or (side == 'short' and f_pct < 0)
+            f_color = '#ff4444' if paying else '#44ff88'
+            label = "paying" if paying else "receiving"
             st.markdown(
-                f'<div style="position:relative; text-align:center; margin:4px 0;">'
-                f'<img src="{_lf_b64}" style="width:100%; max-width:320px; opacity:0.55; '
-                f'filter: drop-shadow(0 0 10px {_pl_color});">'
-                f'<div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); '
-                f'color:{_pl_color}; font-family:monospace; font-weight:900; font-size:18px; '
-                f'text-shadow: 0 0 15px {_pl_color}; white-space:nowrap;">'
-                f'POWER LEVEL: {power_level:,}</div>'
+                f'<div style="background:#0a0a0a; border-left:3px solid {f_color}; '
+                f'padding:6px 12px; margin:3px 0; border-radius:0 4px 4px 0; font-family:monospace; font-size:12px;">'
+                f'<span style="color:#ddd; font-weight:700;">{sym}</span>'
+                f'&nbsp;&nbsp;<span style="color:#888;">{side.upper()} ×{lev}</span>'
+                f'&nbsp;&nbsp;<span style="color:{f_color}; font-weight:700; float:right;">'
+                f'{f_pct:+.4f}%/8h ({label})</span>'
                 f'</div>',
                 unsafe_allow_html=True)
         else:
-            st.markdown(f'<div class="power-level">POWER LEVEL: {power_level:,}</div>', unsafe_allow_html=True)
+            st.markdown(
+                f'<div style="background:#0a0a0a; border-left:3px solid #444; '
+                f'padding:6px 12px; margin:3px 0; border-radius:0 4px 4px 0; font-family:monospace; font-size:12px;">'
+                f'<span style="color:#ddd; font-weight:700;">{sym}</span>'
+                f'&nbsp;&nbsp;<span style="color:#888;">{side.upper()} ×{lev}</span>'
+                f'&nbsp;&nbsp;<span style="color:#444; float:right;">no funding rate data</span>'
+                f'</div>',
+                unsafe_allow_html=True)
 
-        # Power level GIF
-        if power_level > 50000:
-            _local_img(os.path.join(_GIF, 'power_level_max.gif'), width=160)
-        elif power_level > 9000:
-            st.markdown('<div class="over9k" style="text-align:center; margin:4px 0;">⚡ IT\'S OVER 9,000!!! ⚡</div>',
-                        unsafe_allow_html=True)
-            _local_img(os.path.join(_GIF, 'power_level_9001.gif'), width=160)
 
-        sign = "+" if pnl >= 0 else ""
-        pnl_col = '#44ff88' if pnl >= 0 else '#ff4444'
-        if pnl > 10:
-            st.markdown('<div style="text-align:center; color:#FFD700; font-family:monospace; '
-                        'font-size:11px; animation: pulse9k 1s infinite;">🔥 SUPER SAIYAN ACTIVATED 🔥</div>',
-                        unsafe_allow_html=True)
-        elif pnl < -5:
-            st.markdown('<div style="text-align:center; color:#ff4444; font-family:monospace; '
-                        'font-size:11px;">💔 KI DEPLETED — REGENERATING...</div>',
-                        unsafe_allow_html=True)
-        st.markdown(
-            f'<div style="text-align:center; color:{pnl_col}; font-size:20px; font-family:monospace; '
-            f'font-weight:900; margin-bottom:4px;">KI BALANCE: {sign}${pnl:.2f} TODAY</div>',
-            unsafe_allow_html=True)
-        real_balance = ACCOUNT_SIZE + all_time_pnl
-        c1, c2, c3, c4 = st.columns(4)
-        # Ki blast icons next to key metrics
-        _kb_g = _b64img(os.path.join(_DE, 'ki_blast_gold_100.svg'))
-        _kb_b = _b64img(os.path.join(_DE, 'ki_blast_blue_200.svg'))
-        with c1:
-            if _kb_g:
-                st.markdown(f'<img src="{_kb_g}" style="width:18px; vertical-align:middle;">',
-                            unsafe_allow_html=True)
-            st.metric("Ki Reserve", f"${real_balance:,.0f}")
-        with c2:
-            if _kb_b:
-                st.markdown(f'<img src="{_kb_b}" style="width:18px; vertical-align:middle;">',
-                            unsafe_allow_html=True)
-            st.metric("Win Rate", f"{win_rate:.1%}")
-        c3.metric("🐉 Trades", total_trades)
-        c4.metric("💥 Best", f"${stats.get('best_trade',0):+.2f}")
+def _king_rolling_win_rate():
+    """Section C: Rolling 10-trade win rate chart."""
+    all_trades = get_recent_trades(limit=200, paper=PAPER_TRADING)
+    closed = [t for t in all_trades if t.get('pnl_usd', 0) != 0 and t.get('ts')]
+    closed_sorted = sorted(closed, key=lambda x: x.get('ts', ''))
 
-        # Transformation GIF — only show on first render of new form
-        if st.session_state.saiyan_show_transform and transform_gif and os.path.exists(transform_gif):
-            st.markdown(f'<div style="text-align:center; color:#FFD700; font-family:monospace; '
-                        f'font-size:10px; letter-spacing:2px; margin-top:6px;">▶ TRANSFORMATION ▶</div>',
-                        unsafe_allow_html=True)
-            st.image(transform_gif, width=200)
+    if len(closed_sorted) < 10:
+        st.caption(f"Need 10+ closed trades for win rate trend (have {len(closed_sorted)}).")
+        return
 
-        st.markdown(
-            f'<div style="text-align:center; color:#00ffff44; font-family:monospace; font-size:10px; '
-            f'letter-spacing:3px; margin-top:4px;">{form_label}</div>',
-            unsafe_allow_html=True)
+    wr_x, wr_y = [], []
+    for i in range(9, len(closed_sorted)):
+        window = closed_sorted[i-9:i+1]
+        wins_w = sum(1 for t in window if t.get('pnl_usd', 0) > 0)
+        wr_x.append(closed_sorted[i]['ts'])
+        wr_y.append(wins_w / 10.0)
 
-    with char_r:
-        if os.path.exists(prince_svg):
-            st.image(prince_svg, width=130)
-        else:
-            _dbz_char_img('vegeta', width=110, label='The Prince')
-        st.markdown('<div style="text-align:center; color:#4488ff; font-family:monospace; '
-                    'font-size:9px; letter-spacing:1px; margin-top:2px;">THE PRINCE</div>',
-                    unsafe_allow_html=True)
-        _local_img(_aura_gif(pnl), width=60)
+    wr_color = '#44ff88' if (wr_y[-1] >= 0.5 if wr_y else False) else '#ff4444'
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=wr_x, y=wr_y,
+        mode='lines',
+        line=dict(color=wr_color, width=2),
+        fill='tozeroy',
+        fillcolor='rgba(68,255,136,0.06)' if wr_color == '#44ff88' else 'rgba(255,68,68,0.06)',
+        name='Win Rate'
+    ))
+    fig.add_hline(y=0.5, line_dash='dash', line_color='#FDB927',
+                  line_width=1, annotation_text='50%',
+                  annotation_font_color='#FDB927', annotation_font_size=9)
+    fig.update_layout(
+        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+        height=180, margin=dict(l=40, r=10, t=10, b=30),
+        xaxis=dict(showgrid=False, color='#555', tickfont=dict(size=9)),
+        yaxis=dict(showgrid=True, gridcolor='#222', color='#555',
+                   tickformat='.0%', tickfont=dict(size=9), range=[0, 1]),
+        showlegend=False,
+        font=dict(color='#aaa'),
+    )
+    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+    if wr_y:
+        st.caption(f"Latest 10-trade window: {wr_y[-1]:.0%} win rate")
 
-    # ── Win / Buy text animations — at most one, only on fresh events ─────────
-    # Check freshness of most recent win trade
-    _win_trades = sorted([t for t in trades if t.get('pnl_usd', 0) > 0],
-                         key=lambda x: x.get('ts', ''), reverse=True)
-    _fresh_win = False
-    if _win_trades:
+
+def _king_agent_scorecard():
+    """Section D: Per-agent vote stats pulled from recent debate logs."""
+    _AGENT_DISPLAY = {
+        'funding_regime':     'Macro & Funding Agent',
+        'momentum_structure': 'Technical Momentum Agent',
+        'risk_economics':     'Risk & Economics Agent',
+    }
+    debates = get_recent_debates(limit=50)
+    if not debates:
+        st.info("No debates recorded yet.")
+        return
+
+    agent_stats: dict = {}
+    for d in debates:
         try:
-            from datetime import timezone as _utc3
-            _wdt = datetime.fromisoformat(_win_trades[0].get('ts', ''))
-            if not _wdt.tzinfo: _wdt = _wdt.replace(tzinfo=_utc3.utc)
-            _fresh_win = (datetime.now(_utc3.utc) - _wdt).total_seconds() < 600
+            agents = json.loads(d.get('agent_details', '[]'))
+            for ag in agents:
+                key  = ag.get('agent', '?')
+                vote = ag.get('signal', 'HOLD')
+                conf = ag.get('confidence', 0)
+                if key not in agent_stats:
+                    agent_stats[key] = {'votes': 0, 'conf_sum': 0.0,
+                                        'buy': 0, 'hold': 0, 'sell': 0}
+                agent_stats[key]['votes'] += 1
+                agent_stats[key]['conf_sum'] += conf
+                agent_stats[key][vote.lower() if vote.lower() in ('buy','hold','sell') else 'hold'] += 1
         except Exception:
             pass
-    if _fresh_win:
-        _local_anim(os.path.join(_AN, 'power_text_win.html'), height=80)
-    elif recent_buy_signals:
-        _local_anim(os.path.join(_AN, 'power_text_buy.html'), height=80)
 
-    # ── Second character row: Broly | Trunks | Krillin | Frieza | Cell ────────
-    st.markdown('<div style="margin: 4px 0 8px 0; color:#00ffff44; font-family:monospace; '
-                'font-size:9px; text-align:center; letter-spacing:3px;">── THE Z FIGHTERS ──</div>',
-                unsafe_allow_html=True)
-    r2c1, r2c2, r2c3, r2c4, r2c5 = st.columns(5)
-    with r2c1:
-        _dbz_char_img('broly',  width=90, label='Broly')
-    with r2c2:
-        _dbz_char_img('trunks', width=90, label='Trunks')
-    with r2c3:
-        _dbz_char_img('krillin', width=90, label='Krillin')
-    with r2c4:
-        _dbz_char_img('frieza', width=90, label='Frieza')
-    with r2c5:
-        _dbz_char_img('cell', width=90, label='Cell')
+    if not agent_stats:
+        st.info("No agent vote data found in debates.")
+        return
 
-    st.divider()
-
-    left, mid, right = st.columns([1.4, 1, 0.9])
-
-    with left:
-        # ── Live Crypto Positions ─────────────────────────────────────────────
-        pos = rm.get_all_positions()
-        cr_pos  = pos.get('crypto', {})
-        perp_pos = pos.get('perp', {})
-        all_cr = {**{f'SPOT:{s}': p for s, p in cr_pos.items()},
-                  **{f'PERP:{s}': p for s, p in perp_pos.items()}}
-
-        _ew_y_b64 = _b64img(os.path.join(_DE, 'energy_wave_yellow.svg'))
-        _ew_b_b64 = _b64img(os.path.join(_DE, 'energy_wave_blue.svg'))
-        _ew_row = ''
-        if _ew_y_b64:
-            _ew_row += f'<img src="{_ew_y_b64}" style="width:60px; opacity:0.7;">'
-        _ew_row += ('<span style="color:#00ffff; font-family:monospace; font-size:14px; '
-                    'font-weight:900; letter-spacing:2px; margin:0 8px;">⚡ LIVE CRYPTO POSITIONS</span>')
-        if _ew_b_b64:
-            _ew_row += f'<img src="{_ew_b_b64}" style="width:60px; opacity:0.7; transform:scaleX(-1);">'
-        st.markdown(
-            f'<div style="display:flex; align-items:center; justify-content:center; '
-            f'margin-bottom:8px;">{_ew_row}</div>',
-            unsafe_allow_html=True)
-
-        if all_cr:
-            for key, p in all_cr.items():
-                kind, sym = key.split(':', 1)
-                entry    = p.get('entry', 0)
-                stop     = p.get('stop', 0)
-                tgt      = p.get('target', entry)
-                side     = p.get('side', 'long')
-                lev      = p.get('leverage', 1)
-                ts_entry = p.get('ts_entry', '')
-                if kind == 'PERP' and side == 'short':
-                    rr_pct   = ((entry - tgt) / entry * 100) if entry > 0 else 0
-                    stop_pct = ((stop  - entry) / entry * 100) if entry > 0 else 0
-                else:
-                    rr_pct   = ((tgt - entry) / entry * 100) if entry > 0 else 0
-                    stop_pct = ((entry - stop) / entry * 100) if entry > 0 else 0
-                node_color = '#44ff88' if side != 'short' else '#ff8844'
-                perp_tag = (f' <span style="color:#FDB927; font-size:9px;">×{lev} LEV</span>'
-                            if kind == 'PERP' and lev > 1 else '')
-                side_badge = ('▲ LONG' if side != 'short' else '▼ SHORT')
-                badge_c = '#44ff88' if side != 'short' else '#ff4444'
-                st.markdown(
-                    f'<div class="saiyan-border" style="border-color:{node_color}; padding:7px 10px; margin:4px 0;">'
-                    f'<div style="display:flex; justify-content:space-between; align-items:center;">'
-                    f'<span style="color:{node_color}; font-family:monospace; font-weight:900; font-size:13px;">'
-                    f'{sym}</span>'
-                    f'<span style="font-family:monospace; font-size:10px; color:#555;">{kind}{perp_tag}</span>'
-                    f'<span style="color:{badge_c}; font-family:monospace; font-size:10px; font-weight:700;">'
-                    f'{side_badge}</span>'
-                    f'</div>'
-                    f'<div style="color:#888; font-size:10px; font-family:monospace; margin-top:3px;">'
-                    f'Entry <span style="color:#ddd;">${entry:,.4f}</span> &nbsp;·&nbsp; '
-                    f'Stop <span style="color:#ff6666;">−{stop_pct:.1f}%</span> &nbsp;·&nbsp; '
-                    f'Target <span style="color:#44ff88;">+{rr_pct:.1f}%</span>'
-                    f'</div>'
-                    f'<div style="color:#444; font-size:9px; font-family:monospace; margin-top:1px;">'
-                    f'Entered: {fmt_ts(ts_entry, show_date=False)}</div>'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-        else:
+    cols = st.columns(len(agent_stats))
+    for i, (agent_key, s) in enumerate(sorted(agent_stats.items())):
+        display = _AGENT_DISPLAY.get(agent_key, agent_key)
+        total = s['votes']
+        avg_conf = s['conf_sum'] / total if total else 0
+        buy_pct  = s['buy']  / total if total else 0
+        hold_pct = s['hold'] / total if total else 0
+        sell_pct = s['sell'] / total if total else 0
+        with cols[i]:
             st.markdown(
-                '<div style="color:#333; font-family:monospace; text-align:center; '
-                'padding:20px; font-size:12px; border:1px solid #0a0a1e; border-radius:4px;">'
-                '⚡ No open crypto positions.<br>'
-                '<span style="color:#222; font-size:10px;">Conserving ki — scanning for entry...</span>'
-                '</div>',
-                unsafe_allow_html=True)
-
-        st.divider()
-
-        # ── Crypto Scan Feed ──────────────────────────────────────────────────
-        _kame_b64 = _b64img(os.path.join(_GIF, 'kamehameha_gold_ssj.gif'))
-        _kame_tag = (f'<img src="{_kame_b64}" style="width:100px; vertical-align:middle; margin-left:8px;">'
-                     if _kame_b64 else '')
-        _ff_b64 = _b64img(os.path.join(_GIF, 'final_flash_blue.gif'))
-        st.markdown(
-            f'<div style="color:#00ffff; font-family:monospace; font-size:14px; '
-            f'font-weight:900; letter-spacing:2px; margin-bottom:6px; display:flex; align-items:center;">'
-            f'🔍 CRYPTO SCAN FEED{_kame_tag}</div>',
-            unsafe_allow_html=True)
-
-        # Combine scan feed + recent crypto debates
-        scan_items = get_scan_feed(limit=20)
-        crypto_debates = [d for d in get_recent_debates(limit=12)
-                         if any(p in d.get('symbol', '') for p in
-                                ['-USD', 'BTC', 'ETH', 'SOL', 'DOGE', 'ADA', 'AVAX', 'MATIC'])]
-
-        if scan_items:
-            for item in scan_items[:8]:
-                act     = item.get('action', 'SCAN')
-                sym     = item.get('symbol', '?')
-                conf    = item.get('confidence', 0)
-                reason  = item.get('reason', '')[:60]
-                ts      = item.get('ts', '')
-                act_c   = '#44ff88' if act == 'BUY' else '#ff4444' if act == 'SELL' else '#888'
-                conf_bar = int(conf * 100)
-                st.markdown(
-                    f'<div style="background:#050510; border-left:3px solid {act_c}; '
-                    f'padding:5px 10px; margin:3px 0; border-radius:0 4px 4px 0;">'
-                    f'<div style="display:flex; justify-content:space-between; align-items:center;">'
-                    f'<span style="color:#00ffff; font-family:monospace; font-size:11px; font-weight:700;">'
-                    f'{sym}</span>'
-                    f'<span style="color:{act_c}; font-family:monospace; font-size:11px; font-weight:900;">'
-                    f'{act}</span>'
-                    f'<span style="color:#555; font-size:9px; font-family:monospace;">'
-                    f'{fmt_ts(ts, show_date=False)}</span>'
-                    f'</div>'
-                    f'<div style="background:#0a0a1e; border-radius:2px; height:3px; margin:3px 0;">'
-                    f'<div style="background:{act_c}; width:{conf_bar}%; height:3px; border-radius:2px;"></div>'
-                    f'</div>'
-                    f'<div style="color:#555; font-size:9px; font-family:monospace;">{reason}</div>'
-                    f'</div>',
-                    unsafe_allow_html=True)
-        elif crypto_debates:
-            for d in crypto_debates[:6]:
-                signal   = d.get('final_signal', 'HOLD')
-                color    = '#44ff88' if signal == 'BUY' else '#ff4444' if signal == 'SELL' else '#555'
-                conf     = d.get('confidence', 0)
-                conf_lvl = int(conf * 10000) + random.randint(100, 500)
-                bar_w    = int(conf * 100)
-                _sell_tag = ''
-                if signal == 'SELL' and conf >= 0.6 and _ff_b64:
-                    _sell_tag = (f'<img src="{_ff_b64}" style="width:60px; vertical-align:middle; '
-                                 f'float:right; margin-left:4px;">')
-                st.markdown(f"""
-                <div class="saiyan-border" style="border-color:{color}; margin-bottom:4px;">
-                    <div style="display:flex; justify-content:space-between; align-items:center;">
-                        <span style="color:#00ffff; font-family:monospace; font-size:10px;">
-                            {fmt_ts(d.get('ts',''), show_date=False)} · {d.get('symbol','?')}
-                        </span>
-                        <span style="color:{color}; font-weight:900; font-size:13px;">{signal}{_sell_tag}</span>
-                    </div>
-                    <div style="color:{color}; font-family:monospace; font-size:11px; margin:2px 0;">
-                        POWER: {conf_lvl:,} &nbsp;|&nbsp;
-                        <span style="color:#555">{d.get('regime','?')}</span>
-                    </div>
-                    <div style="background:#111; border-radius:2px; height:3px; margin:3px 0;">
-                        <div style="background:{color}; width:{bar_w}%; height:3px; border-radius:2px;"></div>
-                    </div>
-                </div>""", unsafe_allow_html=True)
-        else:
-            st.markdown('<div style="color:#333; font-family:monospace; text-align:center; '
-                        'padding:20px;">Scanning the battlefield...</div>',
-                        unsafe_allow_html=True)
-
-        # Spirit bomb if halted
-        if rm.is_halted:
-            st.markdown('<div style="text-align:center; color:#ff4444; font-family:monospace; '
-                        'font-size:11px; margin:6px 0;">🛑 SYSTEM HALTED — GATHERING ENERGY...</div>',
-                        unsafe_allow_html=True)
-            _local_img(os.path.join(_GIF, 'spirit_bomb_charge.gif'), width=100)
-
-    with mid:
-        # ── Ki Energy Gauges ──────────────────────────────────────────────────
-        st.markdown('<div style="color:#00ffff; font-family:monospace; font-size:14px; '
-                    'font-weight:900; letter-spacing:2px; margin-bottom:8px;">💥 KI ENERGY GAUGES</div>',
-                    unsafe_allow_html=True)
-
-        daily_loss_pct = abs(pnl) / ACCOUNT_SIZE * 100 if pnl < 0 else 0
-        ki_drain = min(daily_loss_pct / 8.0, 1.0)   # 8% halt threshold
-        st.markdown(
-            f'<div style="font-family:monospace; font-size:10px; color:#888; margin-bottom:2px;">'
-            f'⚡ KI DRAIN — {daily_loss_pct:.2f}% / 8.0% HALT</div>',
-            unsafe_allow_html=True)
-        st.progress(ki_drain, text='')
-
-        _spot_count = len(cr_pos)
-        _perp_count = len(perp_pos)
-        _MAX_SPOT  = 5
-        _MAX_PERP  = 3
-
-        st.markdown(
-            f'<div style="font-family:monospace; font-size:10px; color:#888; margin-top:8px; margin-bottom:2px;">'
-            f'🌐 SPOT SLOTS — {_spot_count}/{_MAX_SPOT}</div>',
-            unsafe_allow_html=True)
-        st.progress(min(_spot_count / _MAX_SPOT, 1.0), text='')
-
-        st.markdown(
-            f'<div style="font-family:monospace; font-size:10px; color:#888; margin-top:8px; margin-bottom:2px;">'
-            f'⚡ PERP SLOTS — {_perp_count}/{_MAX_PERP}</div>',
-            unsafe_allow_html=True)
-        st.progress(min(_perp_count / _MAX_PERP, 1.0), text='')
-
-        # Fees today gauge
-        _fees_today = get_todays_fees(paper=PAPER_TRADING)
-        _fee_pct = _fees_today / ACCOUNT_SIZE * 100
-        _fee_drain = min(_fee_pct / 5.0, 1.0)   # 5% fee halt
-        fee_color = '#ff4444' if _fee_drain > 0.7 else '#FDB927' if _fee_drain > 0.4 else '#44ff88'
-        st.markdown(
-            f'<div style="font-family:monospace; font-size:10px; color:#888; margin-top:8px; margin-bottom:2px;">'
-            f'💸 FEE DRAIN — ${_fees_today:.2f} ({_fee_pct:.1f}% / 5.0% limit)</div>',
-            unsafe_allow_html=True)
-        st.progress(_fee_drain, text='')
-
-        st.divider()
-
-        # ── Crypto Today Stats ────────────────────────────────────────────────
-        today_s = get_today_stats(paper=PAPER_TRADING)
-        _cr_pnl_today = today_s.get('net_pnl', 0)
-        _cr_trades_today = today_s.get('closed_trades', 0)
-        _cr_wr_today = today_s.get('win_rate', 0)
-
-        st.markdown('<div style="color:#00ffff; font-family:monospace; font-size:12px; '
-                    'font-weight:900; letter-spacing:2px; margin-bottom:6px;">📊 TODAY</div>',
-                    unsafe_allow_html=True)
-        _pnl_c = '#44ff88' if _cr_pnl_today >= 0 else '#ff4444'
-        _pnl_sign = '+' if _cr_pnl_today >= 0 else ''
-        st.markdown(
-            f'<div style="font-family:monospace; font-size:20px; font-weight:900; '
-            f'color:{_pnl_c}; text-align:center; margin:4px 0;">'
-            f'{_pnl_sign}${_cr_pnl_today:.2f} NET</div>',
-            unsafe_allow_html=True)
-        _m1, _m2 = st.columns(2)
-        _m1.metric("Closed", _cr_trades_today)
-        _m2.metric("Win Rate", f"{_cr_wr_today:.0%}")
-
-        st.divider()
-
-        # ── Perp funding rate display ─────────────────────────────────────────
-        if perp_pos:
-            st.markdown('<div style="color:#FDB927; font-family:monospace; font-size:12px; '
-                        'font-weight:900; letter-spacing:2px; margin-bottom:6px;">⚡ PERP FUNDING</div>',
-                        unsafe_allow_html=True)
-            for sym, p in perp_pos.items():
-                funding = p.get('funding_rate', None)
-                side    = p.get('side', 'long')
-                lev     = p.get('leverage', 1)
-                if funding is not None:
-                    f_pct = funding * 100
-                    f_c = '#ff4444' if (side == 'long' and f_pct > 0) else '#44ff88'
-                    st.markdown(
-                        f'<div style="font-family:monospace; font-size:11px; padding:4px 8px; '
-                        f'background:#050510; border-radius:4px; margin:2px 0;">'
-                        f'<span style="color:#00ffff;">{sym}</span> '
-                        f'<span style="color:#888;">×{lev}</span> '
-                        f'<span style="color:{f_c}; float:right;">{f_pct:+.4f}%/8h</span>'
-                        f'</div>',
-                        unsafe_allow_html=True)
-
-        st.divider()
-        monthly_cost = get_monthly_api_cost()
-        st.markdown(
-            f'<div style="font-family:monospace; font-size:10px; color:#555; text-align:center;">'
-            f'Senzu bean cost this month: ${monthly_cost:.4f}</div>',
-            unsafe_allow_html=True)
-
-    with right:
-        render_chat_column('saiyan')
-
-
-def render_filmroom():
-    st.markdown(f"<style>{THEME_CSS['filmroom']}</style>", unsafe_allow_html=True)
-
-    # ── Header ────────────────────────────────────────────────────────────────
-    _court_b64_fr = _b64img(os.path.join(_BB, 'bball_court_gold.svg'))
-    _court_tag_fr = (f'<img src="{_court_b64_fr}" style="width:40px; opacity:0.4; '
-                     f'float:right; margin-left:8px; filter: drop-shadow(0 0 3px #FDB92744);">'
-                     if _court_b64_fr else '')
-    st.markdown(f"""
-    <div class="chalk-header">
-        <div style="color:#ff8c00; font-family:'Courier New'; font-size:20px; font-weight:bold;">
-            🎬 FILM ROOM — Advanced Stats & Insights {_court_tag_fr}
-        </div>
-        <div style="color:#888; font-size:12px; font-family:monospace;">
-            Historical · Recent · Live — All-time equity curve, win rate trends, strategy analytics
-        </div>
-    </div>""", unsafe_allow_html=True)
-
-    rm = get_risk_manager()
-    pnl = get_todays_pnl(paper=PAPER_TRADING)
-    fees_today = get_todays_fees(paper=PAPER_TRADING)
-    trades = get_todays_trades(paper=PAPER_TRADING)
-    stats = get_all_time_stats(paper=PAPER_TRADING)
-    all_trades = get_recent_trades(limit=200, paper=PAPER_TRADING)
-    debates = get_recent_debates(limit=20)
-
-    # ── Top metric bar ────────────────────────────────────────────────────────
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
-    net_today = pnl - fees_today
-    c1.metric("Net P&L Today", f"${net_today:+.2f}")
-    c2.metric("Win Rate (all)", f"{stats.get('win_rate',0):.1%}")
-    c3.metric("Total Closed", stats.get('total', 0))
-    c4.metric("All-Time P&L", f"${stats.get('total_pnl',0):+.2f}")
-    c5.metric("Deployed", f"${rm._get_deployed():.2f}")
-    c6.metric("Fees Today", f"${fees_today:.2f}")
-
-    st.divider()
-
-    # ── Full-width equity curve ───────────────────────────────────────────────
-    st.markdown('<div class="chalk-highlight" style="font-size:14px; font-weight:bold; '
-                'margin-bottom:6px;">📈 ALL-TIME EQUITY CURVE</div>', unsafe_allow_html=True)
-
-    closed_trades = [t for t in all_trades
-                     if t.get('pnl_usd', 0) != 0 and t.get('ts')]
-    closed_trades_sorted = sorted(closed_trades, key=lambda x: x.get('ts', ''))
-
-    if len(closed_trades_sorted) >= 2:
-        cumulative = 0.0
-        eq_x, eq_y, eq_colors, eq_hover = [], [], [], []
-        for t in closed_trades_sorted:
-            cumulative += t.get('pnl_usd', 0)
-            eq_x.append(t['ts'])
-            eq_y.append(round(cumulative, 4))
-            eq_colors.append('#44ff88' if cumulative >= 0 else '#ff4444')
-            eq_hover.append(
-                f"{t.get('symbol','?')} | {t.get('strategy','?')[:20]}<br>"
-                f"P&L: ${t.get('pnl_usd',0):+.4f} | Running: ${cumulative:+.4f}"
+                f'<div style="background:#0a0a18; border:1px solid #1D428A; border-radius:8px; '
+                f'padding:12px; text-align:center;">'
+                f'<div style="color:#FDB927; font-weight:900; font-size:12px; margin-bottom:6px;">{display}</div>'
+                f'<div style="color:#aaa; font-size:11px;">{total} total votes</div>'
+                f'<div style="margin:8px 0;">'
+                f'<span style="color:#44ff88; font-weight:700;">BUY {buy_pct:.0%}</span>'
+                f'&nbsp;&nbsp;'
+                f'<span style="color:#888;">HOLD {hold_pct:.0%}</span>'
+                f'&nbsp;&nbsp;'
+                f'<span style="color:#ff4444;">SELL {sell_pct:.0%}</span>'
+                f'</div>'
+                f'<div style="color:#aaa; font-size:11px;">avg conf {avg_conf:.0%}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
             )
-        line_color = '#44ff88' if eq_y[-1] >= 0 else '#ff4444'
-        fig_eq = go.Figure()
-        fig_eq.add_trace(go.Scatter(
-            x=eq_x, y=eq_y,
-            mode='lines+markers',
-            line=dict(color=line_color, width=2),
-            marker=dict(color=eq_colors, size=5),
-            fill='tozeroy',
-            fillcolor='rgba(68,255,136,0.08)' if eq_y[-1] >= 0 else 'rgba(255,68,68,0.08)',
-            hovertext=eq_hover,
-            hoverinfo='text',
-            name='Cumulative P&L'
-        ))
-        fig_eq.add_hline(y=0, line_dash='dash', line_color='#333', line_width=1)
-        fig_eq.update_layout(
-            paper_bgcolor='#0a0a0a', plot_bgcolor='#0a0a0a',
-            height=220, margin=dict(l=40, r=10, t=10, b=30),
-            xaxis=dict(showgrid=False, color='#555', tickfont=dict(size=9)),
-            yaxis=dict(showgrid=True, gridcolor='#1a1a1a', color='#555',
-                       tickprefix='$', tickfont=dict(size=9)),
-            showlegend=False,
-        )
-        st.plotly_chart(fig_eq, use_container_width=True)
-    else:
-        st.markdown('<div class="chalk-text" style="color:#555; padding:20px; text-align:center;">'
-                    'Equity curve populates after 2+ closed trades.</div>', unsafe_allow_html=True)
 
-    st.divider()
-    left, right = st.columns([1.5, 1])
 
-    with left:
-        # ── Rolling win rate trend ────────────────────────────────────────────
-        st.markdown('<div class="chalk-highlight" style="font-size:13px; font-weight:bold; '
-                    'margin-bottom:6px;">📊 ROLLING WIN RATE (10-trade window)</div>',
-                    unsafe_allow_html=True)
-
-        if len(closed_trades_sorted) >= 10:
-            wr_x, wr_y = [], []
-            for i in range(9, len(closed_trades_sorted)):
-                window = closed_trades_sorted[i-9:i+1]
-                wins_w = sum(1 for t in window if t.get('pnl_usd', 0) > 0)
-                wr_x.append(closed_trades_sorted[i]['ts'])
-                wr_y.append(wins_w / 10.0)
-            wr_color = '#44ff88' if (wr_y[-1] >= 0.5 if wr_y else False) else '#ff4444'
-            fig_wr = go.Figure()
-            fig_wr.add_trace(go.Scatter(
-                x=wr_x, y=wr_y,
-                mode='lines',
-                line=dict(color=wr_color, width=2),
-                fill='tozeroy',
-                fillcolor='rgba(68,255,136,0.06)' if wr_color == '#44ff88' else 'rgba(255,68,68,0.06)',
-                name='Win Rate'
-            ))
-            fig_wr.add_hline(y=0.5, line_dash='dash', line_color='#FDB927',
-                             line_width=1, annotation_text='50%',
-                             annotation_font_color='#FDB927', annotation_font_size=9)
-            fig_wr.update_layout(
-                paper_bgcolor='#0a0a0a', plot_bgcolor='#0a0a0a',
-                height=160, margin=dict(l=40, r=10, t=5, b=30),
-                xaxis=dict(showgrid=False, color='#555', tickfont=dict(size=9)),
-                yaxis=dict(showgrid=True, gridcolor='#1a1a1a', color='#555',
-                           tickformat='.0%', tickfont=dict(size=9), range=[0, 1]),
-                showlegend=False,
+def _king_debate_transcripts():
+    """Section E: Expandable debate transcripts (last 6)."""
+    _AGENT_DISPLAY = {
+        'funding_regime':     'Macro & Funding Agent',
+        'momentum_structure': 'Technical Momentum Agent',
+        'risk_economics':     'Risk & Economics Agent',
+    }
+    debates = get_recent_debates(limit=6)
+    if not debates:
+        st.info("No debates recorded yet.")
+        return
+    for d in debates:
+        signal = d.get('final_signal', 'HOLD')
+        buy_v  = d.get('buy_votes', 0)
+        hold_v = d.get('hold_votes', 0)
+        sell_v = d.get('sell_votes', 0)
+        conf   = d.get('confidence', 0)
+        ts_str = fmt_ts(d.get('ts', ''), show_date=True)
+        label  = (f"{ts_str} | {d.get('symbol','?')} → {signal} "
+                  f"({buy_v}B/{hold_v}H/{sell_v}S | {conf:.0%} conf) | {d.get('regime','?')}")
+        with st.expander(label):
+            sig_color = '#44ff88' if signal == 'BUY' else '#ff4444' if signal == 'SELL' else '#888'
+            st.markdown(
+                f'<div style="background:#0a0a18; border-left:3px solid {sig_color}; '
+                f'padding:10px 14px; border-radius:0 6px 6px 0; font-size:12px; margin-bottom:8px;">'
+                f'<b style="color:#FDB927;">Synthesis:</b> {d.get("reasoning","")}<br>'
+                f'<b style="color:#44ff88;">Bull case:</b> {d.get("bull_case","")}<br>'
+                f'<b style="color:#ff4444;">Bear case:</b> {d.get("bear_case","")}<br>'
+                f'<b style="color:#ff8888;">Key risk:</b> {d.get("key_risk","")}'
+                f'</div>',
+                unsafe_allow_html=True,
             )
-            st.plotly_chart(fig_wr, use_container_width=True)
-        else:
-            st.caption("Need 10+ closed trades for win rate trend.")
-
-        st.divider()
-
-        # ── Agent scorecard ───────────────────────────────────────────────────
-        st.markdown('<div class="chalk-highlight" style="font-size:13px; font-weight:bold; '
-                    'margin-bottom:6px;">📋 AGENT SCORECARD (Recent Debates)</div>',
-                    unsafe_allow_html=True)
-
-        agent_stats: dict = {}
-        for d in debates:
             try:
-                agents = json.loads(d.get('agent_details', '[]'))
-                final  = d.get('final_signal', 'HOLD')
-                for ag in agents:
-                    key  = ag.get('agent', '?')
-                    vote = ag.get('signal', 'HOLD')
-                    conf = ag.get('confidence', 0)
-                    correct = (vote == final)
-                    if key not in agent_stats:
-                        agent_stats[key] = {'votes': 0, 'correct': 0, 'conf_sum': 0.0,
-                                            'buy': 0, 'hold': 0, 'sell': 0}
-                    agent_stats[key]['votes'] += 1
-                    agent_stats[key]['correct'] += int(correct)
-                    agent_stats[key]['conf_sum'] += conf
-                    agent_stats[key][vote.lower() if vote.lower() in ('buy','hold','sell') else 'hold'] += 1
+                agents_list = json.loads(d.get('agent_details', '[]'))
+                for ag in agents_list:
+                    ag_sig = ag.get('signal', 'HOLD')
+                    ag_color = '#44ff88' if ag_sig == 'BUY' else '#ff4444' if ag_sig == 'SELL' else '#888'
+                    name = _AGENT_DISPLAY.get(ag.get('agent', ''), ag.get('agent', '?'))
+                    st.markdown(
+                        f'<div style="background:#111; border-left:2px solid {ag_color}; '
+                        f'padding:6px 10px; margin:3px 0; border-radius:0 4px 4px 0; font-size:11px;">'
+                        f'<span style="color:#ddd; font-weight:700;">{name}</span>: '
+                        f'<span style="color:{ag_color}; font-weight:700;">{ag_sig}</span> '
+                        f'({ag.get("confidence",0):.0%}) — {ag.get("reasoning","")[:150]}'
+                        f'<br><span style="color:#555;">⚠ {ag.get("key_concern","")[:100]}</span>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
             except Exception:
                 pass
 
-        _AGENT_DISPLAY = {
-            'microstructure': 'Stoikov/Cont', 'session_breakout': 'Shen/Wen',
-            'williams': 'Williams', 'regime_volatility': 'Andersen-BB/KC',
-            'quant_edge': 'Chan/OU', 'fee_discipline': 'Fee Economics',
-            'flow_tape': 'Tape/Flow', 'manipulation_risk': 'John/Nejat',
-        }
-        if agent_stats:
-            score_html = ''
-            for agent_key, s in sorted(agent_stats.items(), key=lambda x: -x[1]['correct']):
-                display = _AGENT_DISPLAY.get(agent_key, agent_key)
-                agreement = s['correct'] / s['votes'] if s['votes'] else 0
-                avg_conf = s['conf_sum'] / s['votes'] if s['votes'] else 0
-                agree_color = '#44ff88' if agreement >= 0.6 else '#FDB927' if agreement >= 0.4 else '#ff4444'
-                score_html += (
-                    f'<div class="agent-card" style="font-size:11px; display:flex; '
-                    f'gap:6px; align-items:center; flex-wrap:wrap;">'
-                    f'<span style="color:#ff8c00; font-weight:bold; min-width:90px;">{display}</span>'
-                    f'<span style="color:{agree_color}; font-weight:700;">{agreement:.0%} agree</span>'
-                    f'<span style="color:#555; font-size:10px;">{s["votes"]} votes</span>'
-                    f'<span style="color:#888; font-size:10px;">avg {avg_conf:.0%} conf</span>'
-                    f'<span style="color:#44ff88; font-size:10px;">▲{s["buy"]}</span>'
-                    f'<span style="color:#666; font-size:10px;">–{s["hold"]}</span>'
-                    f'<span style="color:#ff4444; font-size:10px;">▼{s["sell"]}</span>'
-                    f'</div>'
-                )
-            st.markdown(score_html, unsafe_allow_html=True)
-        else:
-            st.markdown('<div class="chalk-text" style="color:#555; padding:12px;">'
-                        'No debate data yet.</div>', unsafe_allow_html=True)
 
-        st.divider()
-
-        # ── Debate transcripts ────────────────────────────────────────────────
-        st.markdown('<div class="chalk-highlight" style="font-size:13px; font-weight:bold; '
-                    'margin-bottom:6px;">🎬 DEBATE TRANSCRIPTS (most recent)</div>',
-                    unsafe_allow_html=True)
-        for d in debates[:6]:
-            signal = d.get('final_signal', 'HOLD')
-            border = 'buy' if signal == 'BUY' else 'sell' if signal == 'SELL' else ''
-            buy_v  = d.get('buy_votes', 0)
-            hold_v = d.get('hold_votes', 0)
-            sell_v = d.get('sell_votes', 0)
-            with st.expander(
-                f"[{fmt_ts(d.get('ts',''), show_date=False)}] {d.get('symbol','?')} → {signal} "
-                f"({buy_v}B/{hold_v}H/{sell_v}S | {d.get('confidence',0):.0%}) | {d.get('regime','?')}"
-            ):
-                st.markdown(f"""
-                <div class="agent-card {border}-card">
-                    <b>SYNTHESIS:</b> {d.get('reasoning','')}<br>
-                    <b>BULL CASE:</b> {d.get('bull_case','')}<br>
-                    <b>BEAR CASE:</b> {d.get('bear_case','')}<br>
-                    <b>KEY RISK:</b> {d.get('key_risk','')}
-                </div>""", unsafe_allow_html=True)
-                try:
-                    agents_list = json.loads(d.get('agent_details', '[]'))
-                    if agents_list:
-                        st.caption("Agent breakdown:")
-                        for ag in agents_list:
-                            ag_sig = ag.get('signal', 'HOLD')
-                            ac = 'buy' if ag_sig == 'BUY' else 'sell' if ag_sig == 'SELL' else 'hold'
-                            name = _AGENT_DISPLAY.get(ag.get('agent', ''), ag.get('agent', '?'))
-                            st.markdown(
-                                f'<div class="agent-card {ac}-card" style="font-size:11px;">'
-                                f'<b>{name}</b>: {ag_sig} ({ag.get("confidence",0):.0%}) '
-                                f'— {ag.get("reasoning","")[:120]}<br>'
-                                f'<span style="color:#666">⚠ {ag.get("key_concern","")[:80]}</span></div>',
-                                unsafe_allow_html=True)
-                except Exception:
-                    pass
-        if not debates:
-            st.info("No debates recorded yet. System is warming up.")
-
-    with right:
-        # ── Strategy P&L Breakdown ────────────────────────────────────────────
-        st.markdown('<div class="chalk-highlight" style="font-size:13px; font-weight:bold; '
-                    'margin-bottom:6px;">📊 STRATEGY BREAKDOWN (30d)</div>',
-                    unsafe_allow_html=True)
-        try:
-            from logging_db.trade_logger import get_performance_attribution
-            attr = get_performance_attribution(paper=PAPER_TRADING, lookback_days=30)
-        except Exception:
-            attr = {}
-        if attr:
-            for strat, s in attr.items():
-                wr   = s['win_rate']
-                spnl = s['total_pnl']
-                label = {'equity_ai_debate': 'Equity AI', 'equity_momentum': 'Equity MACD',
-                         'crypto_ai_debate': 'Crypto AI', 'crypto_macd_consensus': 'Crypto MACD',
-                         'crypto_mean_reversion': 'Mean Rev', 'crypto_perp_strategy': 'Perp',
-                         'futures_scalper': 'Futures'}.get(strat, strat[:18])
-                wr_c  = '#44ff88' if wr >= 0.55 else '#FDB927' if wr >= 0.45 else '#ff4444'
-                pnl_c = '#44ff88' if spnl >= 0 else '#ff4444'
-                bar_w = min(int(abs(spnl) / max(abs(s2['total_pnl']) for s2 in attr.values() if s2['total_pnl']) * 100), 100) if any(s2['total_pnl'] for s2 in attr.values()) else 0
-                bar_c = pnl_c
-                st.markdown(
-                    f'<div class="agent-card" style="font-size:11px; margin-bottom:4px;">'
-                    f'<div style="display:flex; justify-content:space-between;">'
-                    f'<b style="color:#f5f5dc;">{label}</b>'
-                    f'<span style="color:{wr_c}; font-weight:700;">{wr:.0%} WR</span>'
-                    f'</div>'
-                    f'<div style="display:flex; justify-content:space-between; margin-top:2px;">'
-                    f'<span style="color:{pnl_c};">${spnl:+.2f}</span>'
-                    f'<span style="color:#555; font-size:10px;">{s["total"]}T · avg ${s["avg_pnl"]:+.2f}</span>'
-                    f'</div>'
-                    f'<div style="background:#1a1a1a; border-radius:2px; height:3px; margin-top:3px;">'
-                    f'<div style="background:{bar_c}; width:{bar_w}%; height:3px; border-radius:2px;"></div>'
-                    f'</div>'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-        else:
-            st.info("No closed trades yet.")
-
-        st.divider()
-
-        # ── Win/Loss deep stats ───────────────────────────────────────────────
-        st.markdown('<div class="chalk-highlight" style="font-size:13px; font-weight:bold; '
-                    'margin-bottom:6px;">🔍 LAST 200 TRADES</div>',
-                    unsafe_allow_html=True)
-        closed = [t for t in all_trades if t.get('pnl_usd', 0) != 0]
-        wins_   = [t for t in closed if t.get('pnl_usd', 0) > 0]
-        losses_ = [t for t in closed if t.get('pnl_usd', 0) < 0]
-        gross_profit = sum(t.get('pnl_usd', 0) for t in wins_)
-        gross_loss   = abs(sum(t.get('pnl_usd', 0) for t in losses_))
-        profit_factor = gross_profit / gross_loss if gross_loss > 0 else float('inf')
-        total_fees_all = sum(t.get('fee_usd', 0) for t in all_trades)
-        net_pnl_all = sum(t.get('pnl_usd', 0) for t in closed) - total_fees_all
-
-        _s1, _s2 = st.columns(2)
-        _s1.metric("Wins", len(wins_), delta=f"+${gross_profit:.2f}")
-        _s2.metric("Losses", len(losses_), delta=f"-${gross_loss:.2f}")
-        if wins_:
-            _s1.metric("Avg Win", f"${gross_profit/len(wins_):+.3f}")
-        if losses_:
-            _s2.metric("Avg Loss", f"${-gross_loss/len(losses_):+.3f}")
-        if gross_loss > 0:
-            pf_label = f"{profit_factor:.2f}×" if profit_factor < 999 else "∞"
-            st.metric("Profit Factor", pf_label,
-                      delta="above 1.5 is edge" if profit_factor >= 1.5 else "below 1.5")
-
-        st.divider()
-
-        # ── Fee analysis ──────────────────────────────────────────────────────
-        st.markdown('<div class="chalk-highlight" style="font-size:13px; font-weight:bold; '
-                    'margin-bottom:6px;">💸 FEE ANALYSIS</div>',
-                    unsafe_allow_html=True)
-        total_gross = gross_profit - gross_loss
-        fee_drag_pct = (total_fees_all / abs(total_gross) * 100) if total_gross != 0 else 0
-        kelly_s = get_kelly_stats(paper=PAPER_TRADING)
-        st.markdown(
-            f'<div class="agent-card" style="font-size:11px;">'
-            f'Total fees paid: <span style="color:#ff8c00;">${total_fees_all:.4f}</span><br>'
-            f'Fee drag on gross: <span style="color:#ff8c00;">{abs(fee_drag_pct):.1f}%</span><br>'
-            f'Net P&L (after fees): <span style="color:{"#44ff88" if net_pnl_all >= 0 else "#ff4444"};">'
-            f'${net_pnl_all:+.4f}</span><br>'
-            f'Kelly fraction: <span style="color:#FDB927;">{kelly_s.get("kelly_25pct", 0):.1%} (25% Kelly)</span><br>'
-            f'Win/Loss ratio: <span style="color:#ddd;">'
-            f'{kelly_s.get("avg_win",0):.4f} / {kelly_s.get("avg_loss",0):.4f}</span>'
-            f'</div>',
-            unsafe_allow_html=True)
-
-        st.divider()
-
-        # ── Today's trade log ─────────────────────────────────────────────────
-        st.markdown('<div class="chalk-highlight" style="font-size:12px; font-weight:bold; '
-                    'margin-bottom:4px;">📋 TODAY\'S TRADE LOG</div>',
-                    unsafe_allow_html=True)
-        if trades:
-            rows = [{'Time': fmt_ts(t.get('ts',''), show_date=False),
-                     'Sym': t.get('symbol',''), 'Act': t.get('action',''),
-                     'P&L': f"${t.get('pnl_usd',0):+.4f}",
-                     'Fee': f"${t.get('fee_usd',0):.4f}"}
-                    for t in trades[:20]]
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-        else:
-            st.caption("No trades today.")
-
-        render_chat_column('filmroom')
-
-
-def render_ring():
-    st.markdown(f"<style>{THEME_CSS['ring']}</style>", unsafe_allow_html=True)
-
+def _king_alltime_stats():
+    """Section F: All-time performance stats in a single metric row."""
     stats = get_all_time_stats(paper=PAPER_TRADING)
-    pnl_all = stats.get('total_pnl', 0)
-    win_rate = stats.get('win_rate', 0)
-    total_trades = stats.get('total', 0)
-    wins = stats.get('wins', 0)
-    losses_count = stats.get('losses', 0)
-    real_balance = ACCOUNT_SIZE + pnl_all
+    all_trades = get_recent_trades(limit=500, paper=PAPER_TRADING)
     monthly_cost = get_monthly_api_cost()
 
-    # All milestones — (trophy, title, desc, condition, progress_fn)
+    closed = [t for t in all_trades if t.get('pnl_usd', 0) != 0]
+    wins_   = [t for t in closed if t.get('pnl_usd', 0) > 0]
+    losses_ = [t for t in closed if t.get('pnl_usd', 0) < 0]
+    gross_profit = sum(t.get('pnl_usd', 0) for t in wins_)
+    gross_loss   = abs(sum(t.get('pnl_usd', 0) for t in losses_))
+    profit_factor = gross_profit / gross_loss if gross_loss > 0 else float('inf')
+    total_fees_all = sum(t.get('fee_usd', 0) for t in all_trades)
+    pnl_all = stats.get('total_pnl', 0)
+    return_pct = pnl_all / ACCOUNT_SIZE * 100
+
+    pf_label = f"{profit_factor:.2f}×" if profit_factor < 999 else "∞"
+
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1.metric("Best Trade",        f"${stats.get('best_trade', 0):+.2f}")
+    c2.metric("Worst Trade",       f"${stats.get('worst_trade', 0):+.2f}")
+    c3.metric("Total Fees Paid",   f"${total_fees_all:.2f}")
+    c4.metric("Profit Factor",     pf_label)
+    c5.metric("Return on Account", f"{return_pct:+.1f}%")
+    c6.metric("Monthly AI Cost",   f"${monthly_cost:.4f}")
+
+
+def _king_milestones():
+    """Section G: 10-milestone tracker. Green check = earned, progress bar = in progress, lock = not started."""
+    stats = get_all_time_stats(paper=PAPER_TRADING)
+    pnl_all      = stats.get('total_pnl', 0)
+    win_rate     = stats.get('win_rate', 0)
+    total_trades = stats.get('total', 0)
+
     ALL_MILESTONES = [
-        ("🥇", "FIRST TRADE",      "The journey begins.",              total_trades >= 1,    None),
-        ("💰", "IN THE BLACK",     "System generating real edge.",     pnl_all > 0,          None),
-        ("🎯", "55% WIN RATE",     "Statistically significant edge.",  win_rate >= 0.55,     None),
-        ("📊", "10 TRADES",        "Pattern recognition emerging.",    total_trades >= 10,   total_trades / 10),
-        ("🔥", "50 TRADES",        "Data flywheel spinning.",          total_trades >= 50,   total_trades / 50),
-        ("🏅", "10% GAIN",         "First ring. Championship energy.", pnl_all >= ACCOUNT_SIZE * 0.10, pnl_all / (ACCOUNT_SIZE * 0.10)),
-        ("🏆", "25% GAIN",         "Compounding is working.",          pnl_all >= ACCOUNT_SIZE * 0.25, pnl_all / (ACCOUNT_SIZE * 0.25)),
-        ("👑", "50% GAIN",         "The King.",                        pnl_all >= ACCOUNT_SIZE * 0.50, pnl_all / (ACCOUNT_SIZE * 0.50)),
-        ("🌟", "100 TRADES",       "Volume = conviction.",             total_trades >= 100,  total_trades / 100),
-        ("💎", "DOUBLE ACCOUNT",   "100% return. LeBron status.",      pnl_all >= ACCOUNT_SIZE,       pnl_all / ACCOUNT_SIZE),
+        ("🥇", "First Trade",        "Complete 1 trade",                     total_trades >= 1,    None),
+        ("💰", "In the Black",       "Positive total P&L",                   pnl_all > 0,          None),
+        ("🎯", "55% Win Rate",       "Win rate at or above 55%",             win_rate >= 0.55,     None),
+        ("📊", "10 Trades",          "Complete 10 or more trades",           total_trades >= 10,   total_trades / 10),
+        ("🔥", "50 Trades",          "Complete 50 or more trades",           total_trades >= 50,   total_trades / 50),
+        ("🏅", "First 10% Gain",     "Account up 10% from start",           pnl_all >= ACCOUNT_SIZE * 0.10, pnl_all / (ACCOUNT_SIZE * 0.10)),
+        ("🏆", "First 25% Gain",     "Account up 25% from start",           pnl_all >= ACCOUNT_SIZE * 0.25, pnl_all / (ACCOUNT_SIZE * 0.25)),
+        ("👑", "First 50% Gain",     "Account up 50% from start",           pnl_all >= ACCOUNT_SIZE * 0.50, pnl_all / (ACCOUNT_SIZE * 0.50)),
+        ("🌟", "100 Trades",         "Complete 100 or more trades",          total_trades >= 100,  total_trades / 100),
+        ("💎", "Double the Account", "100%+ return — account fully doubled", pnl_all >= ACCOUNT_SIZE, pnl_all / ACCOUNT_SIZE),
     ]
 
-    earned     = [(t, ti, d) for t, ti, d, cond, _ in ALL_MILESTONES if cond]
-    next_lock  = next(((t, ti, d, prog) for t, ti, d, cond, prog in ALL_MILESTONES if not cond and prog is not None), None)
+    earned_count = sum(1 for _, _, _, cond, _ in ALL_MILESTONES if cond)
+    st.caption(f"{earned_count} of {len(ALL_MILESTONES)} milestones earned")
 
-    # ── Power text dunk animation at top if at least one ring earned ──────────
-    if earned:
-        _local_anim(os.path.join(_AN, 'power_text_dunk.html'), height=80)
-
-    # ── Header with dunk GIFs flanking and court background ──────────────────
-    _rh_court_b64 = _b64img(os.path.join(_BB, 'bball_court_gold.svg'))
-    _rh_court_tag = (f'<img src="{_rh_court_b64}" style="position:absolute; top:50%; left:50%; '
-                     f'transform:translate(-50%,-50%); width:500px; opacity:0.10; pointer-events:none; z-index:0;">'
-                     if _rh_court_b64 else '')
-    _rh_dunk23_b64 = _b64img(os.path.join(_GIF, 'dunk_gold_23.gif'))
-    _rh_dunkcel_b64 = _b64img(os.path.join(_GIF, 'dunk_celebrate_gold.gif'))
-    _rh_left_img = (f'<img src="{_rh_dunk23_b64}" style="width:80px; vertical-align:middle; margin-right:16px;">'
-                    if _rh_dunk23_b64 else '')
-    _rh_right_img = (f'<img src="{_rh_dunkcel_b64}" style="width:80px; vertical-align:middle; margin-left:16px;">'
-                     if _rh_dunkcel_b64 else '')
-    st.markdown(f"""
-    <div class="trophy-header" style="position:relative; overflow:hidden;">
-        {_rh_court_tag}
-        <div style="position:relative; z-index:1; display:flex; align-items:center; justify-content:center;">
-            {_rh_left_img}
-            <div style="text-align:center;">
-                <div style="color:#FFD700; font-size:30px; font-weight:900; letter-spacing:4px;">
-                    🏆 THE RING CEREMONY 🏆
-                </div>
-                <div style="color:#888; font-size:13px; margin-top:6px;">
-                    "Nothing is given. Everything is earned." — LeBron James
-                </div>
-                <div style="color:#FFD700; font-size:22px; font-weight:900; margin-top:8px;">
-                    {len(earned)} RINGS EARNED
-                </div>
-            </div>
-            {_rh_right_img}
-        </div>
-    </div>""", unsafe_allow_html=True)
-
-    # Key metrics
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("👑 Total P&L",     f"${pnl_all:+.2f}")
-    c2.metric("🎯 Win Rate",      f"{win_rate:.1%}")
-    c3.metric("🏀 Closed Trades", total_trades)
-    c4.metric("💰 Account Value", f"${real_balance:,.2f}")
-    c5.metric("🔥 Gain vs Start", f"{pnl_all/ACCOUNT_SIZE*100:+.1f}%")
-
-    st.divider()
-
-    left, right = st.columns([1.6, 1])
-
-    with left:
-        # ── Earned rings with dunk celebrate GIF ─────────────────────────────
-        st.markdown('<div style="color:#FFD700; font-size:16px; font-weight:900; '
-                    'letter-spacing:3px; margin-bottom:10px;">🏅 RINGS EARNED</div>',
-                    unsafe_allow_html=True)
-        if not earned:
+    for trophy, title, desc, cond, prog in ALL_MILESTONES:
+        if cond:
+            # Earned
             st.markdown(
-                '<div class="milestone-banner">NO RINGS YET — THE GRIND IS JUST BEGINNING</div>'
-                '<div style="text-align:center; color:#444; padding:30px; font-size:14px;">'
-                'Complete your first trade to earn your first ring.<br>'
-                '"Not 0 not 2 not 3 not 4... I came back to win." — LeBron James</div>',
-                unsafe_allow_html=True)
-            # Bouncing basketball in empty state
-            _local_anim(os.path.join(_AN, 'bouncing_basketball.html'), height=150)
-        else:
-            _dunk_cel_b64 = _b64img(os.path.join(_GIF, 'dunk_celebrate_gold.gif'))
-            _dunk_cel_tag = (f'<img src="{_dunk_cel_b64}" style="width:80px; vertical-align:middle;">'
-                             if _dunk_cel_b64 else '🏀')
-            cols = st.columns(min(len(earned), 4))
-            for i, (trophy, title, desc) in enumerate(earned):
-                with cols[i % min(len(earned), 4)]:
-                    st.markdown(f"""
-                    <div style="text-align:center; padding:18px 10px; background:#1a1200;
-                         border:2px solid #FFD700; border-radius:12px; margin:4px 0;
-                         box-shadow: 0 0 12px #FFD70044;">
-                        <div style="font-size:36px;">{trophy}</div>
-                        <div style="color:#FFD700; font-weight:900; font-size:12px;
-                             letter-spacing:2px; margin-top:4px;">{title}</div>
-                        <div style="color:#666; font-size:10px; margin-top:4px;">{desc}</div>
-                        {_dunk_cel_tag}
-                    </div>""", unsafe_allow_html=True)
-
-        st.divider()
-
-        # ── Next milestone progress ───────────────────────────────────────────
-        st.markdown('<div style="color:#FFD700; font-size:15px; font-weight:900; '
-                    'letter-spacing:2px; margin-bottom:8px;">⏳ NEXT RING</div>',
-                    unsafe_allow_html=True)
-        if next_lock:
-            n_trophy, n_title, n_desc, n_prog = next_lock
-            pct = min(max(n_prog or 0, 0), 1.0)
+                f'<div style="display:flex; align-items:center; gap:10px; padding:8px 12px; '
+                f'background:#0a1a0a; border:1px solid #44ff88; border-radius:6px; margin:3px 0;">'
+                f'<span style="font-size:22px;">{trophy}</span>'
+                f'<span style="color:#44ff88; font-size:13px; font-weight:900; '
+                f'letter-spacing:1px;">✓ {title}</span>'
+                f'<span style="color:#666; font-size:11px; margin-left:4px;">{desc}</span>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+        elif prog is not None and prog > 0:
+            # In progress
+            pct = min(max(prog, 0), 1.0)
             bar_w = int(pct * 100)
             st.markdown(
-                f'<div style="background:#1a1200; border:2px solid #555; border-radius:10px; '
-                f'padding:16px; margin-bottom:8px;">'
-                f'<div style="display:flex; align-items:center; gap:10px;">'
-                f'<div style="font-size:32px;">{n_trophy}</div>'
-                f'<div>'
-                f'<div style="color:#FFD700; font-weight:900; font-size:14px; letter-spacing:2px;">{n_title}</div>'
-                f'<div style="color:#666; font-size:11px;">{n_desc}</div>'
-                f'</div></div>'
-                f'<div style="background:#111; border-radius:4px; height:8px; margin-top:10px;">'
-                f'<div style="background:linear-gradient(90deg,#FFD700,#FDB927); '
-                f'width:{bar_w}%; height:8px; border-radius:4px;"></div></div>'
-                f'<div style="color:#888; font-size:10px; margin-top:4px; text-align:right;">'
+                f'<div style="padding:8px 12px; background:#0a0a18; border:1px solid #1D428A; '
+                f'border-radius:6px; margin:3px 0;">'
+                f'<div style="display:flex; align-items:center; gap:10px; margin-bottom:5px;">'
+                f'<span style="font-size:22px; opacity:0.7;">{trophy}</span>'
+                f'<span style="color:#FDB927; font-size:13px; font-weight:700;">{title}</span>'
+                f'<span style="color:#555; font-size:11px;">{desc}</span>'
+                f'</div>'
+                f'<div style="background:#111; border-radius:4px; height:6px;">'
+                f'<div style="background:linear-gradient(90deg,#1D428A,#FDB927); '
+                f'width:{bar_w}%; height:6px; border-radius:4px;"></div></div>'
+                f'<div style="color:#555; font-size:10px; margin-top:3px; text-align:right;">'
                 f'{pct:.1%} complete</div>'
                 f'</div>',
                 unsafe_allow_html=True,
             )
-
-        # Locked milestones list
-        locked = [(t, ti, d) for t, ti, d, cond, _ in ALL_MILESTONES if not cond]
-        if locked:
-            st.markdown('<div style="color:#444; font-size:12px; font-weight:700; '
-                        'letter-spacing:1px; margin-top:4px; margin-bottom:4px;">🔒 LOCKED</div>',
-                        unsafe_allow_html=True)
-            for t, ti, d in locked:
-                st.markdown(
-                    f'<div style="background:#0a0800; border:1px solid #222; border-radius:6px; '
-                    f'padding:6px 12px; margin:2px 0; display:flex; gap:10px; align-items:center;">'
-                    f'<span style="font-size:18px; opacity:0.3;">{t}</span>'
-                    f'<span style="color:#333; font-size:11px; font-weight:700; letter-spacing:1px;">{ti}</span>'
-                    f'<span style="color:#2a2a1a; font-size:10px;">{d}</span>'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-
-    with right:
-        # ── Championship stats ────────────────────────────────────────────────
-        st.markdown('<div style="color:#FFD700; font-size:15px; font-weight:900; '
-                    'letter-spacing:2px; margin-bottom:10px;">📊 CHAMPIONSHIP STATS</div>',
-                    unsafe_allow_html=True)
-
-        stat_rows = [
-            ("👑 Rings Earned",        f"{len(earned)} / {len(ALL_MILESTONES)}"),
-            ("💥 Best Trade",          f"${stats.get('best_trade',0):+.2f}"),
-            ("💀 Worst Trade",         f"${stats.get('worst_trade',0):+.2f}"),
-            ("🏆 Wins",                str(wins)),
-            ("💔 Losses",              str(losses_count)),
-            ("📈 Return on Account",   f"{pnl_all/ACCOUNT_SIZE*100:+.1f}%"),
-            ("🤖 AI Cost (month)",     f"${monthly_cost:.4f}"),
-        ]
-        for label, val in stat_rows:
+        else:
+            # Not started / locked
             st.markdown(
-                f'<div style="display:flex; justify-content:space-between; '
-                f'padding:6px 0; border-bottom:1px solid #1a1200; font-size:12px;">'
-                f'<span style="color:#888;">{label}</span>'
-                f'<span style="color:#FFD700; font-weight:700; font-family:monospace;">{val}</span>'
+                f'<div style="display:flex; align-items:center; gap:10px; padding:6px 12px; '
+                f'background:#070707; border:1px solid #1a1a1a; border-radius:6px; margin:3px 0; opacity:0.5;">'
+                f'<span style="font-size:22px; filter:grayscale(1);">{trophy}</span>'
+                f'<span style="color:#333; font-size:12px; font-weight:700;">🔒 {title}</span>'
+                f'<span style="color:#222; font-size:11px;">{desc}</span>'
                 f'</div>',
                 unsafe_allow_html=True,
             )
 
-        st.divider()
-        st.markdown(
-            '<div style="color:#444; font-size:11px; text-align:center; font-style:italic; padding:8px;">'
-            '"Every champion was once a contender that refused to give up."'
-            '</div>',
-            unsafe_allow_html=True,
-        )
 
-        render_chat_column('ring')
 
 
 # ─── Bot status helpers ───────────────────────────────────────────────────────
@@ -3284,38 +2624,17 @@ def _stop_bot() -> None:
 # ─── MAIN ─────────────────────────────────────────────────────────────────────
 
 def main():
-    if 'view' not in st.session_state:
-        st.session_state.view = 'king'
+    # Single unified view — no tab switcher.
+    # THE KING view uses @st.fragment(run_every=3) for live stat hub.
 
-    # THE KING uses @st.fragment(run_every=3) for the stat hub — no page-level refresh needed.
-    # Other views (saiyan/filmroom/ring) still need the 30s refresh for their panels.
-    if st.session_state.view != 'king':
-        st_autorefresh(interval=30_000, key="dashboard_refresh")
-
-    # View switcher + bot status button (top right)
-    c1, c2, c3, c4, c5, c6 = st.columns([2, 1, 1, 1, 1, 1.4])
+    # Status bar + bot control (top)
+    c1, c2 = st.columns([3, 1.4])
     with c1:
         mkt = "🟢 MARKET OPEN" if is_market_open() else "🔴 CLOSED"
         if is_in_no_trade_window():
             mkt = "🟡 NO-TRADE WINDOW"
         st.caption(f"{mkt} | {et_now()}")
     with c2:
-        if st.button("👑 THE KING", use_container_width=True,
-                     type='primary' if st.session_state.view == 'king' else 'secondary'):
-            st.session_state.view = 'king'; st.rerun()
-    with c3:
-        if st.button("⚡ SAIYAN", use_container_width=True,
-                     type='primary' if st.session_state.view == 'saiyan' else 'secondary'):
-            st.session_state.view = 'saiyan'; st.rerun()
-    with c4:
-        if st.button("🎬 FILM ROOM", use_container_width=True,
-                     type='primary' if st.session_state.view == 'filmroom' else 'secondary'):
-            st.session_state.view = 'filmroom'; st.rerun()
-    with c5:
-        if st.button("🏆 RING", use_container_width=True,
-                     type='primary' if st.session_state.view == 'ring' else 'secondary'):
-            st.session_state.view = 'ring'; st.rerun()
-    with c6:
         _running = _bot_is_running()
         if _running:
             st.markdown(
@@ -3340,15 +2659,7 @@ def main():
                 _start_bot()
                 st.rerun()
 
-    view = st.session_state.view
-    if view == 'king':
-        render_king()
-    elif view == 'saiyan':
-        render_saiyan()
-    elif view == 'filmroom':
-        render_filmroom()
-    elif view == 'ring':
-        render_ring()
+    render_king()
 
 
 if __name__ == '__main__':

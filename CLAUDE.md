@@ -29,7 +29,54 @@ A fully autonomous AI-powered trading system that:
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
 
-## Current Version: v6.0
+## Current Version: v8.0
+- v8.0 (2026-03-26): Architecture overhaul — 3-agent debate, ML signal layer, walk-forward, funding rate wiring
+  - **3-agent debate** (`strategies/ai_agents/analyst_agents.py`): Replaced 9 agents + moderator + Goku (up to 11
+    API calls) with 3 focused non-overlapping agents (3 calls, 3.5× cheaper, ~4× faster):
+    • `funding_regime` (Bardock): crypto-native macro — funding rate, OI, VIX, DXY, macro score.
+      Funding > 0.05%/8h = market overheated → HOLD. Neutral/negative funding = best entry window.
+    • `momentum_structure` (Vegeta): technical setup quality — ADX, squeeze, WAE, WaveTrend, MACD.
+      Requires ≥2 aligned signals for BUY. One signal alone = HOLD.
+    • `risk_economics` (Krillin): fee math, ATR vs fees, volume, time-of-day gate. Hard kill switch.
+    Decision rule: 2/3 agents BUY = BUY. No moderator. No Goku veto.
+  - **ML signal layer** (`learning/ml_signal.py`): LightGBM (sklearn GradientBoosting fallback) trained
+    on rolling 90-day trade_attribution data. Features = 19 signal flags + regime encoding. Target = won.
+    Retrains every 50 new trade closes. Exposes `get_ml_signal(market_data) -> (p_win, label)`.
+    Gate in job_runner: if p_win < ML_SIGNAL_MIN_PROB (0.52) → skip debate (fail-open if no model yet).
+    Closes backtest-to-live gap: model trained on LIVE outcomes, not math-only backtests.
+  - **Walk-forward OOS validation** (`backtesting/backtest_engine.run_walk_forward()`): 2-fold default
+    (train 60d → test 30d per fold). Pass criteria per `brain/rbi/01_backtest_standards.md`:
+    WR ≥ 30%, PF ≥ 1.2, Sharpe ≥ 0.5, DD ≤ 20%, ≥15 OOS trades. 75% of folds must pass.
+  - **Funding rate wired into market_data**: `_build_market_data` now enriches market_data with
+    `funding_rate_pct`, `funding_signal`, `macro_score`, `vix_regime`, `dxy_change`, `spy_change`.
+    Agents receive these as structured fields, not just as string context.
+  - **Symbol cooldown removed**: 20-min post-loss cooldown eliminated. ML gate and 3 focused agents
+    are the quality filter now. A good setup 5 min after a loss is not worse than the same setup 21 min later.
+  - **RBIPMS framework** (`brain/rbi/`): 5 research/operational docs created — full lifecycle framework,
+    backtest standards (OOS spec, look-ahead checklist), incubation playbook, strategy lifecycle
+    (promotion/monitoring/retirement criteria), and full RBI audit 2026-03-26.
+  - `config.py`: QUICK/FULL_DEBATE_AGENTS = 3 new agent keys, ML_SIGNAL_MIN_PROB default=0.08
+    (auto-raised by auto_env_updater: 50 trades→0.35, 100→0.45, 200→0.52),
+    FUNDING_OVERHEATED_PCT=0.05, FUNDING_FAVORABLE_PCT=0.01, GOKU_ENABLED=False
+- v7.0 (2026-03-25): AI-first pipeline + backtesting + self-taught learning
+  - **AI pre-screener** (`learning/ai_prescreener.py`): batch-scores ALL crypto pairs in ONE
+    Claude Haiku call BEFORE any full debate. Catches market-wide noise (all symbols hitting
+    same signal = skip all). Symbols scoring < 4/10 skip the expensive debate entirely.
+    `PRESCORE_THRESHOLD = 4`. Fail-open on API errors (all pass). Saves debate API cost.
+  - **Meta-learner** (`learning/meta_learner.py`): fires after every 10 trade closes.
+    Claude analyzes last 100 trade attributions, identifies over/under-weighted signals,
+    stores weight-delta recommendations to `meta_recommendations` table.
+    `dynamic_weights.get_conviction_score()` now applies meta-deltas on top of Bayesian weights.
+    New tables: `meta_recommendations`, `meta_analysis_log`.
+  - **Live backtest validator** (`learning/live_backtest_validator.py`): background thread
+    runs 30-day rolling backtest every 4 hours on top 3 crypto pairs using price archive
+    (zero extra API calls). Results injected into every debate as "ROLLING BACKTEST" context.
+    Agents can see "strategy ✅ PASS 58% WR" vs "❌ FAIL 38% WR" and calibrate.
+  - **`scheduler/job_runner.py`**: two-phase crypto scan:
+    1. Pre-phase: fetch 30 candles + indicators for all pairs → batch prescreener
+    2. Main loop: prescreener gate before each debate, + backtest + meta insight injected
+  - **`learning/dynamic_weights.py`**: Layer 2 added — meta-learner deltas applied on top
+    of Bayesian weights. `meta_adj = get_meta_weight_adjustments(regime)` + `pts = base + delta`
 - v6.0 (2026-03-25): AI-first rework — conviction floor removed, AI sees everything
   - Hard conviction gate (30pts) replaced by: any signal fires + `should_block_trade()` macro gate
   - `get_active_signal_stats_brief()`: Bayesian win rates for fired signals injected into every agent
@@ -224,7 +271,9 @@ algo_trading_final/
 │   ├── com.algotrading.readiness.plist ← launchd: readiness check at 7:00 AM
 │   ├── com.algotrading.brain.plist     ← launchd: daily brain summary at 9:47 PM
 │   ├── generate_daily_summary.py ← Auto-generates brain/06_daily_summaries/YYYY-MM-DD.md from DB
-│   └── seed_intelligence.py      ← One-time Bayesian prior seeding from 90-day backtests
+│   ├── seed_intelligence.py      ← One-time Bayesian prior seeding from 90-day backtests
+│   ├── auto_env_updater.py       ← Runs every 6h via launchd; auto-raises ML gate + position size on milestones
+│   └── com.algotrading.autoenv.plist ← launchd: auto_env_updater at 0/6/12/18h
 │
 ├── data/
 │   ├── auto_screener.py          ← Finviz + Yahoo + SEC discovery
@@ -243,7 +292,7 @@ algo_trading_final/
 │   ├── crypto_mean_reversion.py  ← Mean-reversion for ranging/volatile regimes (v3.4)
 │   ├── futures_scalper.py        ← MES opening range breakout
 │   └── ai_agents/
-│       ├── analyst_agents.py     ← 8 agents with prompt caching
+│       ├── analyst_agents.py     ← 3 agents (v8.0): funding_regime, momentum_structure, risk_economics
 │       ├── debate_engine.py      ← Full (8-agent) + quick (3-agent) debate
 │       ├── exit_review.py        ← Extended thinking exit decisions
 │       ├── risk_synthesizer.py   ← Final go/no-go with hard rules
@@ -255,6 +304,7 @@ algo_trading_final/
 │   ├── post_trade_analyzer.py    ← Why-this-trade-worked/failed engine (called on every close)
 │   ├── dynamic_weights.py        ← Live conviction weights (5-min cache, invalidates on close)
 │   ├── intelligence_bridge.py    ← Backtest → signal_stats pipeline (same table as live)
+│   ├── ml_signal.py              ← LightGBM gate: P(win) from 90d rolling trade_attribution; retrains every 50 closes
 │   └── tax_tracker.py            ← Tax lot tracking: Section 1256 futures, short/long-term, YTD liability, harvesting (v5.2)
 │
 ├── memory/
@@ -285,24 +335,20 @@ algo_trading_final/
     └── job_runner.py             ← The while True engine
 ```
 
-## The 5 AI Analyst Agents (v3.6 — full panel now used for ALL crypto debates)
+## The 3 AI Analyst Agents (v8.0 — replaced 9-agent panel)
 
-| Key | Name | DBZ Name | Methodology |
-|-----|------|----------|-------------|
-| microstructure | Sasha Stoikov / Rama Cont | Vegeta | OBI ≥ 0.20/0.35 buy pressure; microprice vs midprice; TFI ≥ 0.10 aggressor flow |
-| session_breakout | Dan Shen / Zhuzhu Wen | Broly | 08:00-11:00 ET session window; 30-min ORB with vol ≥ 1.5×; time-of-day predictability |
-| williams | Larry Williams | Yamcha | W%R ≤ -80 extreme oversold; Hurst H<0.50 required (mean-reverting regime only) |
-| regime_volatility | Andersen-Bollerslev / TTM Squeeze | Frieza | RV ratio ≥ 1.3 expansion / ≤ 0.8 compression; BB-Keltner squeeze firing after ≥20 bars |
-| quant_edge | Ernie Chan / Ornstein-Uhlenbeck | Gohan | Hurst regime classification; OU half-life 3-60 min; z-score entry; 25% Kelly sizing; Amihud liquidity |
-| fee_discipline | Fee Economics / Albers et al. | Krillin | p_min = (1 + 0.012/L)/(R+1); 2.4% min gross move; maker vs taker analysis; 45-min time stop |
-| flow_tape | Coinbase Tape / Microstructure Flow | Piccolo | TFI 60-sec window; spread_bps tightness; Kyle lambda percentile; trade intensity spikes |
-| manipulation_risk | Kose John / Amin Nejat | Tien | OBI/TFI conflict = spoofing; unconfirmed vol spike = news risk; liquidation cascade detection |
+3 calls per decision (was up to 11). 2/3 BUY = BUY. No moderator. No Goku.
 
-| goku | Jim Simons / Paul Tudor Jones / Soros | Goku (Ultra Instinct) | **RUNS LAST** after all agents. Absolute veto (kills trade if BUY) or boost (+0.15 confidence). Meta-pattern synthesis — evaluates whether the panel's consensus is genuine edge or rationalization. 1200 tokens, no cache. |
+| Key | Name | DBZ Name | Domain |
+|-----|------|----------|--------|
+| `funding_regime` | Macro & Funding Intelligence | Bardock | Funding rate (>0.05%/8h = overheated → HOLD), OI trend, macro score, VIX, DXY, SPY |
+| `momentum_structure` | Technical Momentum & Structure | Vegeta | ADX, BB-Keltner squeeze, WAE explosion, WaveTrend cross, SuperTrend, MACD consensus. Requires ≥2 aligned signals |
+| `risk_economics` | Trade Economics & Risk | Krillin | Fee math (ATR/price ≥ 0.4%), volume gate, time-of-day, ATR-based stop sizing. Hard kill switch |
 
-**AI Session Analyst** (`strategies/ai_agents/session_analyst.py`): NOT a debate agent — fires ONCE at each session open (Asia 8pm ET, London 3am ET, NY 8:30am ET). Reads macro+news+signal leaderboard. Sets conviction_threshold_multiplier (0.7–1.5×) and session_bias that adjust the conviction floor for all scans that session.
+Decision: **2/3 agents vote BUY = BUY** at average confidence. Otherwise HOLD.
+Cost: ~$0.02/debate (was ~$0.08). Latency: ~15s (was ~60s).
 
-Quick debate agents (crypto/futures): microstructure, fee_discipline, flow_tape
+**AI Session Analyst** (`strategies/ai_agents/session_analyst.py`): fires ONCE at each session open. Sets conviction_threshold_multiplier (0.7–1.5×) and session_bias.
 
 ## Exit Review Agents (Extended Thinking)
 - Tudor Jones: "Is the stop still valid?"
@@ -378,8 +424,6 @@ into `signal_stats`, pre-populates Bayesian priors so Day 1 is evidence-backed, 
 - Fees > **10%** of account/day → halt crypto bot ($50 on $500)
 - Kelly sizing activates after **15** trades
 - Losing streak size clamp (50%) triggers after **5** consecutive losses
-- Symbol 20-min cooldown after any losing crypto exit
-- Stagnant trade exit: 45min with <15% progress toward target → close
 - Circuit breaker: **4** consecutive strategy losses → pause [was 8]
 - Min agent agreement: **2 agents** explicit (not percentage)
 - RSI is EXIT signal only — NOT used as entry gate anywhere

@@ -460,7 +460,7 @@ def _demo_data() -> dict:
         ],
         'signals': [
             {'ts': '2026-03-22T10:14:52', 'signal': 'BUY',  'symbol': 'AAPL',
-             'confidence': 0.82, 'reason': '8/8 agents agree: KST+MACD+VWAP all bullish', 'acted_on': 1},
+             'confidence': 0.82, 'reason': '3/3 agents BUY: funding neutral + squeeze fired + fee math clear', 'acted_on': 1},
             {'ts': '2026-03-22T10:13:11', 'signal': 'HOLD', 'symbol': 'ETH-USDC',
              'confidence': 0.45, 'reason': 'ADX < 20, choppy market — skipping', 'acted_on': 0},
             {'ts': '2026-03-22T10:10:03', 'signal': 'SELL', 'symbol': 'BTC-USDC',

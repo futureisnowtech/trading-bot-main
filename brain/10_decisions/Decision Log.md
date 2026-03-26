@@ -122,3 +122,6 @@ These questions were debated and settled:
 | Email alerts or dashboard? | Dashboard (SQLite) | v3.1 |
 | CNN or Alternative.me? | Alternative.me | v3.7 |
 | $500 or $250 position sizes? | $250 (de-risk) | v4.0 |
+
+### 2026-03-26 02:02 — auto_env_updater
+🧠 ML gate auto-updated: ML_SIGNAL_MIN_PROB 0.08 → 0.45 (101 live trades). ML gate tightened — model has 100+ real AI-debated trades

@@ -90,21 +90,34 @@ def market_data_to_signals(md: dict) -> dict[str, bool]:
     }
 
 
+def _load_meta_adjustments(regime: str) -> dict[str, float]:
+    """Load meta-learner weight adjustments (delta pts per signal)."""
+    try:
+        from learning.meta_learner import get_meta_weight_adjustments
+        return get_meta_weight_adjustments(regime)
+    except Exception:
+        return {}
+
+
 def get_conviction_score(
     market_data: dict,
     regime: Optional[str] = None,
 ) -> tuple[float, dict]:
     """
-    Compute total conviction score using Bayesian weights.
+    Compute total conviction score using Bayesian weights + meta adjustments.
 
     Returns:
         (total_score, breakdown_dict)
         breakdown_dict: {signal_name: pts_contributed}
 
-    This replaces the multi-tier hardcoded conviction block in job_runner.
+    Layer 1: Bayesian weights (shift from priors based on live win rates)
+    Layer 2: Meta-learner adjustments (AI-identified pattern corrections)
     """
     regime = regime or str(market_data.get('regime', 'any') or 'any').lower()
     weights = _load_weights(regime)
+
+    # Meta-learner delta adjustments on top of Bayesian weights
+    meta_adj = _load_meta_adjustments(regime)
 
     signals = market_data_to_signals(market_data)
     breakdown = {}
@@ -113,7 +126,9 @@ def get_conviction_score(
     for sig_name, active in signals.items():
         if not active:
             continue
-        pts = weights.get(sig_name, float(SIGNAL_PRIOR_PTS.get(sig_name, 0)))
+        base_pts = weights.get(sig_name, float(SIGNAL_PRIOR_PTS.get(sig_name, 0)))
+        delta    = meta_adj.get(sig_name, 0.0)
+        pts      = max(0.0, base_pts + delta)   # never go negative
         if pts > 0:
             breakdown[sig_name] = round(pts, 1)
             total += pts

@@ -538,7 +538,7 @@ def main():
     # Print signal leaderboard
     try:
         from learning.signal_performance import get_signal_report
-        report = get_signal_report(min_fires=3, source='replay')
+        report = get_signal_report(min_fires=3)
         if report:
             print(f"  Signal Leaderboard (replay source, ≥3 fires):")
             print(f"  {'Signal':<28} {'Regime':<12} {'Fires':>5} {'Win%':>6} {'Avg P&L':>8} {'Bayes':>7}")

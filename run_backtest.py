@@ -26,7 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from backtesting.backtest_engine import (
     run_crypto_backtest, run_equity_backtest,
     optimize_crypto, optimize_equity,
-    run_backtest_oos_split,
+    run_backtest_oos_split, run_walk_forward,
 )
 
 
@@ -43,6 +43,14 @@ def main():
                         help='With --optimize: show best params but do NOT write to .env')
     parser.add_argument('--oos', action='store_true',
                         help='Chan out-of-sample validation: 70%% train / 30%% test split')
+    parser.add_argument('--walk-forward', action='store_true',
+                        help='Walk-forward OOS validation: rolling train/test folds')
+    parser.add_argument('--folds', type=int, default=2,
+                        help='Number of walk-forward folds (default: 2)')
+    parser.add_argument('--train-days', type=int, default=60,
+                        help='Training window per fold in days (default: 60)')
+    parser.add_argument('--test-days', type=int, default=30,
+                        help='OOS test window per fold in days (default: 30)')
     args = parser.parse_args()
 
     print(f"\n🧪 {'OPTIMIZER' if args.optimize else 'Backtest'} — strategy={args.strategy} cash=${args.cash:,.2f}\n")
@@ -69,6 +77,19 @@ def main():
             print("✅ Best params written to .env. Restart main.py to apply.\n")
         else:
             print("✅ Dry run complete — nothing written. Remove --dry-run to apply.\n")
+
+    elif getattr(args, 'walk_forward', False):
+        # ── Walk-forward OOS validation ──────────────────────────────────────
+        strat  = 'equity' if args.strategy == 'equity' else 'crypto'
+        symbol = args.symbol or ('SPY' if strat == 'equity' else 'BTC-USD')
+        print(f"\n🔬 WALK-FORWARD OOS: {symbol} | {args.folds} folds | "
+              f"train={args.train_days}d test={args.test_days}d")
+        run_walk_forward(
+            symbol=symbol, strategy=strat,
+            variant=args.variant if args.variant != 'all' else 'workhorse',
+            folds=args.folds, train_days=args.train_days, test_days=args.test_days,
+            cash=args.cash,
+        )
 
     elif args.oos:
         # ── Chan out-of-sample validation ────────────────────────────────────

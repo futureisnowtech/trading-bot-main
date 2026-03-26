@@ -50,7 +50,7 @@ from data.indicators import add_all_indicators
 from strategies.crypto_macd import CryptoMACDStrategy
 from strategies.futures_scalper import FuturesScalperStrategy
 from risk.risk_manager import get_risk_manager
-from execution.webull_broker import get_webull_broker
+from execution.alpaca_broker import get_alpaca_broker as get_webull_broker
 from execution.coinbase_broker import get_coinbase_broker
 from logging_db.trade_logger import (
     get_todays_trades, get_todays_pnl, get_todays_fees,
@@ -71,6 +71,49 @@ except Exception as _le:
     print(f"[scheduler] Learning layer unavailable: {_le}")
     _LEARNING_AVAILABLE = False
 
+# ── AI pre-screener (AI-first gate before full debate) ────────────────────
+try:
+    from learning.ai_prescreener import prescreener_batch, get_prescreener_context, PRESCORE_THRESHOLD
+    _PRESCREENER_AVAILABLE = True
+except Exception as _pse:
+    print(f"[scheduler] AI pre-screener unavailable: {_pse}")
+    _PRESCREENER_AVAILABLE = False
+
+# ── Meta-learner (self-taught weight adjustments) ─────────────────────────
+try:
+    from learning.meta_learner import maybe_run_meta_analysis, get_latest_insight
+    _META_LEARNER_AVAILABLE = True
+except Exception as _mle:
+    print(f"[scheduler] Meta-learner unavailable: {_mle}")
+    _META_LEARNER_AVAILABLE = False
+
+# ── Live backtest validator (rolling 30d validation in background) ─────────
+try:
+    from learning.live_backtest_validator import (
+        trigger_background_backtest, get_recent_backtest_context,
+    )
+    _BACKTEST_VALIDATOR_AVAILABLE = True
+except Exception as _bve:
+    print(f"[scheduler] Live backtest validator unavailable: {_bve}")
+    _BACKTEST_VALIDATOR_AVAILABLE = False
+
+# ── ML signal layer (rolling LightGBM on trade attribution data) ─────────────
+try:
+    from learning.ml_signal import get_ml_signal, maybe_retrain as _ml_maybe_retrain
+    from config import ML_SIGNAL_MIN_PROB
+    _ML_AVAILABLE = True
+except Exception as _mls:
+    print(f"[scheduler] ML signal layer unavailable: {_mls}")
+    _ML_AVAILABLE = False
+    ML_SIGNAL_MIN_PROB = 0.0  # disabled
+
+# ── Macro feed (for funding rate enrichment in market_data) ──────────────────
+try:
+    from data.macro_feed import get_macro_snapshot as _get_macro_snapshot
+    _MACRO_FEED_AVAILABLE = True
+except Exception:
+    _MACRO_FEED_AVAILABLE = False
+
 # ── Market context + session analyst ─────────────────────────────────────────
 try:
     from data.market_context import get_context_for_debate, should_block_trade
@@ -86,39 +129,9 @@ except Exception as _cte:
 _crypto_strategy = CryptoMACDStrategy(variant='consensus')
 _futures_strategy = FuturesScalperStrategy()
 
-# Symbol-level cooldown: after a losing crypto exit, block re-entry for 20 minutes.
-# DB-based (not in-memory) so bot restarts don't reset the cooldown.
-_SYMBOL_COOLDOWN_SEC = 20 * 60  # 20 minutes
-
-
-def _is_in_cooldown(pid: str) -> bool:
-    """True if the last closed trade for this symbol was a loss within _SYMBOL_COOLDOWN_SEC.
-    Queries the trades DB directly — survives bot restarts, no in-memory state needed."""
-    try:
-        import sqlite3
-        from config import DB_PATH, PAPER_TRADING as _PT
-        conn = sqlite3.connect(DB_PATH)
-        cur  = conn.cursor()
-        cur.execute(
-            "SELECT pnl_usd, ts FROM trades WHERE symbol=? AND paper=? AND pnl_usd != 0 "
-            "ORDER BY ts DESC LIMIT 1",
-            (pid, int(_PT))
-        )
-        row = conn.fetchone() if False else cur.fetchone()
-        conn.close()
-        if not row:
-            return False
-        pnl, ts = row[0], row[1]
-        if pnl >= 0:
-            return False  # last trade was a win — no cooldown
-        from datetime import datetime, timezone
-        trade_dt = datetime.fromisoformat(ts)
-        if not trade_dt.tzinfo:
-            trade_dt = trade_dt.replace(tzinfo=timezone.utc)
-        elapsed = (datetime.now(timezone.utc) - trade_dt).total_seconds()
-        return elapsed < _SYMBOL_COOLDOWN_SEC
-    except Exception:
-        return False
+# Cooldown removed (v8.0) — the ML signal gate and 3-agent debate are the filter now.
+# Re-entry after a loss is allowed immediately if the setup quality is there.
+# Evidence: a good setup 5 minutes after a loss is not worse than the same setup 21 minutes later.
 
 
 def _debate_available():
@@ -207,6 +220,16 @@ def _build_market_data(symbol, price, df_ind, change_pct=0, regime='ranging') ->
     wt_oversold_cross   = bool(last.get('wt_oversold_cross', False))
     lrsi_val            = _safe('lrsi', 0.5)
     lrsi_oversold       = lrsi_val is not None and float(lrsi_val) < 0.15
+    # ─── high-WR signals (v8.1) ──────────────────────────────────────────────
+    stochrsi_k          = _safe('stochrsi_k', 50.0)
+    stochrsi_d          = _safe('stochrsi_d', 50.0)
+    stochrsi_cross_up   = bool(last.get('stochrsi_cross_up', False))
+    cvd_bull_div        = bool(last.get('cvd_bull_div', False))
+    cvd_bear_div        = bool(last.get('cvd_bear_div', False))
+    vwap_lower_touch    = bool(last.get('vwap_lower_touch', False))
+    vwap_upper_touch    = bool(last.get('vwap_upper_touch', False))
+    ema_golden_cross    = bool(last.get('ema_golden_cross', False))
+    ema9_above_21       = bool(last.get('ema9_above_21', False))
     # ────────────────────────────────────────────────────────────────────────
 
     return {
@@ -260,6 +283,18 @@ def _build_market_data(symbol, price, df_ind, change_pct=0, regime='ranging') ->
         'wt1': wt1_val,
         'wt_oversold_cross': wt_oversold_cross,
         'lrsi': lrsi_val,
+        # high-WR signals (v8.1)
+        'stochrsi_k': stochrsi_k,
+        'stochrsi_d': stochrsi_d,
+        'stochrsi_cross_up': stochrsi_cross_up,
+        'cvd_bull_div': cvd_bull_div,
+        'cvd_bear_div': cvd_bear_div,
+        'vwap_lower_touch': vwap_lower_touch,
+        'vwap_upper_touch': vwap_upper_touch,
+        'ema_golden_cross': ema_golden_cross,
+        'ema9_above_21': ema9_above_21,
+        # ATR as % of price (for fee math in agents)
+        'atr_pct': float(last.get('atr', price * 0.01) or price * 0.01) / price * 100,
         # OBI/TFI/microprice/spread from live WebSocket microstructure feed
         **_get_microstructure(symbol),
     }
@@ -433,6 +468,17 @@ def _execute_equity_exit(wb, rm, symbol, pos, price, reason, strategy, market_da
                 _invalidate_weights()
             except Exception as _ale:
                 print(f"[learning] equity attribution error: {_ale}")
+        # Self-taught meta-learning + ML retrain after each trade close
+        if _META_LEARNER_AVAILABLE:
+            try:
+                maybe_run_meta_analysis()
+            except Exception as _mle:
+                pass
+        if _ML_AVAILABLE:
+            try:
+                _ml_maybe_retrain()
+            except Exception:
+                pass
         print(f"[equity] ✅ EXITED {symbol} | {reason} | P&L: ${pnl:+.2f}")
 
 
@@ -529,6 +575,17 @@ def _execute_crypto_exit(cb, rm, pid, pos, price, reason, strategy, market_data=
                 _invalidate_weights()
             except Exception as _ale:
                 print(f"[learning] crypto attribution error: {_ale}")
+        # Self-taught meta-learning + ML retrain after each trade close
+        if _META_LEARNER_AVAILABLE:
+            try:
+                maybe_run_meta_analysis()
+            except Exception as _mle:
+                pass
+        if _ML_AVAILABLE:
+            try:
+                _ml_maybe_retrain()
+            except Exception:
+                pass
         print(f"[crypto] ✅ EXITED {pid} | {reason} | P&L: ${pnl:+.2f}")
 
 
@@ -765,6 +822,44 @@ def run_crypto_scan() -> None:
 
     from strategies.ai_agents.regime_detector import detect_regime
 
+    # ── Kick off 30-day rolling backtest in background (every 4h) ────────────
+    if _BACKTEST_VALIDATOR_AVAILABLE:
+        try:
+            trigger_background_backtest()
+        except Exception:
+            pass
+
+    # ── AI BATCH PRE-SCREENER — "AI as early as possible" ────────────────────
+    # Before spending budget on full 5-agent debates, batch-score ALL pairs
+    # in ONE cheap Claude Haiku call. Symbols scoring below PRESCORE_THRESHOLD
+    # are skipped. This also catches market-wide noise (when BTC/ETH/SOL all
+    # hit W%R=-80 simultaneously — AI can see it's noise, math gates can't).
+    _prescores: dict = {}
+    if _PRESCREENER_AVAILABLE and engine:
+        _pre_candidates = []
+        for _pid in CRYPTO_PAIRS:
+            try:
+                _qdf = get_candles(_pid, CRYPTO_CANDLE_GRANULARITY, 30)
+                if _qdf is None or len(_qdf) < 15:
+                    continue
+                _qdf_ind = add_all_indicators(_qdf)
+                _qprice  = float(_qdf_ind.iloc[-1]['close'])
+                _qmd     = _build_market_data(_pid, _qprice, _qdf_ind)
+                _pre_candidates.append((_pid, _qmd))
+            except Exception:
+                pass
+        if _pre_candidates:
+            try:
+                _prescores = prescreener_batch(_pre_candidates)
+                # Log the result
+                _pre_summary = ', '.join(
+                    f"{s}={r['score']}" for s, r in _prescores.items()
+                )
+                log_event('INFO', 'scan_feed',
+                          f"[prescreener] scores: {_pre_summary} (threshold≥{PRESCORE_THRESHOLD})")
+            except Exception as _pse:
+                log_event('WARNING', 'scan_feed', f"[prescreener] batch failed: {_pse}")
+
     for pid in CRYPTO_PAIRS:
         try:
             df = get_candles(pid, CRYPTO_CANDLE_GRANULARITY, 100)
@@ -809,6 +904,20 @@ def run_crypto_scan() -> None:
 
             market_data = _build_market_data(pid, price, df_ind)
             market_data['regime'] = regime  # make sure debate sees it
+
+            # ── Enrich market_data with funding rate + macro (agents need it) ──
+            if _MACRO_FEED_AVAILABLE:
+                try:
+                    _macro = _get_macro_snapshot(symbols_of_interest=[pid])
+                    _fr = _macro.get('funding_rates', {}).get(pid, {})
+                    market_data['funding_rate_pct'] = _fr.get('rate_pct')
+                    market_data['funding_signal']   = _fr.get('signal', 'unknown')
+                    market_data['macro_score']      = _macro.get('macro_score', 0)
+                    market_data['vix_regime']       = _macro.get('vix_regime', 'unknown')
+                    market_data['dxy_change']       = _macro.get('dxy_change')
+                    market_data['spy_change']       = _macro.get('spy_change')
+                except Exception:
+                    pass
 
             fg_score = market_data.get('fear_greed_score', 50)
             fg_label = market_data.get('fear_greed_label', 'Neutral')
@@ -977,6 +1086,14 @@ def run_crypto_scan() -> None:
                 if market_data.get('wt_oversold_cross'):           conviction += 12
                 if _lrsi_v < 0.15:                                 conviction +=  8
                 elif _lrsi_v < 0.25:                               conviction +=  4
+                # high-WR signals (v8.1)
+                if market_data.get('stochrsi_cross_up'):           conviction += 10  # StochRSI oversold cross (40-45% WR)
+                if market_data.get('cvd_bull_div'):                conviction +=  8  # CVD bullish divergence (40-50% WR)
+                if market_data.get('vwap_lower_touch'):            conviction +=  8  # VWAP -2σ touch (45-55% WR)
+                if market_data.get('ema_golden_cross'):            conviction += 10  # EMA 9/21 golden cross (40-45% WR)
+                # EMA alignment boost (persistent state — weaker than a fresh cross)
+                if market_data.get('ema9_above_21') and not market_data.get('ema_golden_cross'):
+                                                                   conviction +=  3
                 if _tv_sig and _tv_sig.get('action') == 'buy':
                                                                    conviction += TV_SIGNAL_BOOST_CONVICTION
 
@@ -1031,6 +1148,11 @@ def run_crypto_scan() -> None:
             elif market_data.get('wae_bullish'):
                 _active_signals.append('wae_bullish')
             if market_data.get('chop_trending'):        _active_signals.append('chop_trending')
+            # high-WR signals (v8.1)
+            if market_data.get('stochrsi_cross_up'):    _active_signals.append('stochrsi_cross_up')
+            if market_data.get('cvd_bull_div'):         _active_signals.append('cvd_bull_divergence')
+            if market_data.get('vwap_lower_touch'):     _active_signals.append('vwap_lower_band')
+            if market_data.get('ema_golden_cross'):     _active_signals.append('ema_golden_cross')
             market_data['active_signals'] = _active_signals
 
             # Pre-populate signal stats brief once (all agents share the same table)
@@ -1050,12 +1172,18 @@ def run_crypto_scan() -> None:
                       f"signals={len(_active_signals)} "
                       f"session={_sess_bias} mult={_session_cv_mult:.2f} — calling debate")
 
-            # ── Symbol cooldown: skip re-entry 20 min after a losing exit ─────
-            # DB-based check — survives bot restarts (in-memory dict would reset on reload)
-            if _is_in_cooldown(pid):
-                log_event('INFO', 'scan_feed',
-                          f"[crypto] {pid} ⏳ loss cooldown (<{_SYMBOL_COOLDOWN_SEC//60}m since last loss) — skip")
-                continue
+            # ── ML signal gate: skip debate if model predicts low P(win) ──────
+            if _ML_AVAILABLE:
+                try:
+                    _p_win, _ml_conf = get_ml_signal(market_data)
+                    market_data['ml_p_win']      = _p_win
+                    market_data['ml_confidence'] = _ml_conf
+                    if _ml_conf != 'no_model' and _p_win < ML_SIGNAL_MIN_PROB:
+                        log_event('INFO', 'scan_feed',
+                                  f"[crypto] {pid} 🧠 ML P(win)={_p_win:.1%} < {ML_SIGNAL_MIN_PROB:.0%} — skip debate")
+                        continue
+                except Exception as _mle2:
+                    pass  # fail-open: ML errors don't block trading
 
             # ── Microstructure veto: if live order flow is strongly bearish, skip ──
             # OBI < -0.35 = 35%+ more sell-side book pressure.
@@ -1069,6 +1197,16 @@ def run_crypto_scan() -> None:
                               f"[crypto] {pid} ⛔ microstructure VETO: OBI={obi:+.2f} TFI={tfi:+.2f} "
                               f"— sell-side dominates, skip debate")
                     continue
+
+            # ── AI pre-screener gate ──────────────────────────────────────
+            # AI rated this symbol in the pre-phase. If below threshold, skip.
+            # Fail-open: if no prescore available (API error), proceed to debate.
+            _prescore = _prescores.get(pid, {})
+            if _prescore and not _prescore.get('should_analyze', True):
+                log_event('INFO', 'scan_feed',
+                          f"[crypto] {pid} 🤖 AI pre-screen {_prescore['score']}/10 "
+                          f"(need {PRESCORE_THRESHOLD}+) — {_prescore['reason']} — skip debate")
+                continue
 
             # Tag all fired signals so agents have full context during debate
             signal_triggers = []
@@ -1089,6 +1227,10 @@ def run_crypto_scan() -> None:
             if _chop_t:             signal_triggers.append(f'CHOP={market_data.get("chop",50):.1f}(trending)')
             if _wt_osc:             signal_triggers.append(f'WaveTrend=oversold_cross(wt1={market_data.get("wt1",0):.1f})')
             if _lrsi_v < 0.25:      signal_triggers.append(f'LaguerreRSI={_lrsi_v:.2f}')
+            if market_data.get('stochrsi_cross_up'):  signal_triggers.append(f'StochRSI_cross(k={market_data.get("stochrsi_k",50):.0f})')
+            if market_data.get('cvd_bull_div'):        signal_triggers.append('CVD_bull_divergence')
+            if market_data.get('vwap_lower_touch'):    signal_triggers.append('VWAP_lower2σ_touch')
+            if market_data.get('ema_golden_cross'):    signal_triggers.append('EMA9/21_golden_cross')
             if _tv_sig and _tv_sig.get('action') == 'buy':
                 signal_triggers.append(f'TV_signal({_tv_sig.get("signal","")[:40]})')
             market_data['signal_triggers'] = ', '.join(signal_triggers)
@@ -1127,6 +1269,31 @@ def run_crypto_scan() -> None:
                     f"The conviction score is informational — AI decides whether it's sufficient."
                 )
                 _debate_context_parts.append(_cv_context)
+
+                # Inject AI pre-screener score (the pre-debate AI rating)
+                if _prescore:
+                    _ps_ctx = get_prescreener_context(pid, _prescore)
+                    if _ps_ctx:
+                        _debate_context_parts.append(_ps_ctx)
+
+                # Inject rolling 30-day backtest result (strategy validation)
+                if _BACKTEST_VALIDATOR_AVAILABLE:
+                    try:
+                        _bt_ctx = get_recent_backtest_context(pid)
+                        if _bt_ctx:
+                            _debate_context_parts.append(_bt_ctx)
+                    except Exception:
+                        pass
+
+                # Inject meta-learner insight (self-taught pattern summary)
+                if _META_LEARNER_AVAILABLE:
+                    try:
+                        _ml_insight = get_latest_insight()
+                        if _ml_insight:
+                            _debate_context_parts.append(_ml_insight)
+                    except Exception:
+                        pass
+
                 _debate_context = '\n\n'.join(_debate_context_parts)
 
                 # Full 5-agent debate for crypto — quick (3-agent) was missing

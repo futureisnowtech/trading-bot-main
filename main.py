@@ -85,7 +85,7 @@ def main():
 
     if not args.crypto_only:
         print("🔌 Connecting Webull...")
-        from execution.webull_broker import get_webull_broker
+        from execution.alpaca_broker import get_alpaca_broker as get_webull_broker
         wb = get_webull_broker()
         ok = wb.connect()
         print(f"   {'✅ Connected' if ok else '⚠️ Offline — signals log-only'}\n")

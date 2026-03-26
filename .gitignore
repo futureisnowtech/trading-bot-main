@@ -32,6 +32,9 @@ build/
 # ── Broker session files ──────────────────────────────────────────────────────
 .webull/
 
+# ── Reference repos (cloned for analysis, never committed) ───────────────────
+reference_repos/
+
 # ── Editor ───────────────────────────────────────────────────────────────────
 .vscode/
 .idea/

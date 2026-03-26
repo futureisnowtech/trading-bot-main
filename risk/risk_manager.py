@@ -25,7 +25,7 @@ from logging_db.trade_logger import (
 )
 from risk.position_sizer import size_from_kelly
 from risk.stop_loss_manager import calc_stop_loss, calc_take_profit, should_exit
-from risk.drawdown_controller import check_daily_loss, check_fee_drag
+from risk.drawdown_controller import check_daily_loss, check_fee_drag, get_heat_level
 from risk.risk_limits import (
     RiskCheckResult, check_market_hours, check_position_limits,
     check_deployment_cap, check_crypto_fee_gate,
@@ -206,6 +206,13 @@ class RiskManager:
         if not ok:
             self.halt(reason)
             return RiskCheckResult(False, reason)
+
+        # Log heat level on every entry attempt (visible in scan feed)
+        heat = get_heat_level(paper=PAPER_TRADING)
+        if heat['level'] > 0:
+            log_event('INFO', 'risk',
+                      f"[Heat:{heat['label']}] day={heat['daily_pnl']:+.2f} "
+                      f"({heat['pct_drawn']:.1%} drawn) → size×{heat['size_factor']:.2f}")
 
         result = check_market_hours(strategy, side)
         if not result:

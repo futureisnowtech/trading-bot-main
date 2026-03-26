@@ -157,3 +157,62 @@ class TestStopLossManager:
         exit_, reason = should_exit(pos, 'crypto_macd', current_price=51001)
         assert exit_
         assert "stop" in reason.lower()
+
+
+class TestDrawdownHeat:
+    """Verify the 5-level heat system returns correct levels and size factors."""
+
+    def _heat(self, daily_pnl: float, all_time_pnl: float = 0.0):
+        from risk.drawdown_controller import get_heat_level
+        with patch('risk.drawdown_controller.get_todays_pnl', return_value=daily_pnl), \
+             patch('risk.drawdown_controller.get_todays_fees', return_value=0.0), \
+             patch('risk.drawdown_controller.get_all_time_stats',
+                   return_value={'total_pnl': all_time_pnl}):
+            return get_heat_level(paper=True)
+
+    def test_normal_no_loss(self):
+        heat = self._heat(0.0)
+        assert heat['level'] == 0
+        assert heat['label'] == 'NORMAL'
+        assert heat['size_factor'] == 1.0
+
+    def test_caution_at_1pt5_pct(self):
+        # -1.5% of $5000 = -$75
+        heat = self._heat(-75.0)
+        assert heat['level'] == 1
+        assert heat['label'] == 'CAUTION'
+        assert heat['size_factor'] == 0.75
+
+    def test_warning_at_2pt5_pct(self):
+        # -2.5% of $5000 = -$125
+        heat = self._heat(-125.0)
+        assert heat['level'] == 2
+        assert heat['label'] == 'WARNING'
+        assert heat['size_factor'] == 0.50
+
+    def test_danger_at_3pt5_pct(self):
+        # -3.5% of $5000 = -$175
+        heat = self._heat(-175.0)
+        assert heat['level'] == 3
+        assert heat['label'] == 'DANGER'
+        assert heat['size_factor'] == 0.25
+
+    def test_halt_at_4_pct(self):
+        # -4.0% of $5000 = -$200
+        heat = self._heat(-200.0)
+        assert heat['level'] == 4
+        assert heat['label'] == 'HALT'
+        assert heat['size_factor'] == 0.0
+
+    def test_heat_size_factors_are_monotone_decreasing(self):
+        """Each level should have a strictly lower size_factor than the previous."""
+        losses = [0.0, -75.0, -125.0, -175.0, -200.0]
+        factors = [self._heat(loss)['size_factor'] for loss in losses]
+        for i in range(1, len(factors)):
+            assert factors[i] <= factors[i - 1], \
+                f"Heat size factor not decreasing: {factors}"
+
+    def test_small_win_stays_normal(self):
+        heat = self._heat(+10.0)
+        assert heat['level'] == 0
+        assert heat['size_factor'] == 1.0

@@ -94,6 +94,14 @@ except Exception:
     _get_macro_snapshot = None
     _MACRO_FEED_AVAILABLE = False
 
+# ── Forecast calibrator ────────────────────────────────────────────────────────
+try:
+    from learning.forecast_calibrator import get_full_calibration_context as _get_calibration_ctx
+    _CALIBRATION_AVAILABLE = True
+except Exception:
+    _get_calibration_ctx = None
+    _CALIBRATION_AVAILABLE = False
+
 # ── Market context + session analyst ─────────────────────────────────────────
 try:
     from data.market_context import get_context_for_debate, should_block_trade
@@ -210,7 +218,7 @@ def _build_market_data(symbol, price, df_ind, change_pct=0, regime='ranging') ->
     ema_golden_cross    = bool(last.get('ema_golden_cross', False))
     ema9_above_21       = bool(last.get('ema9_above_21', False))
 
-    return {
+    md = {
         'price': price,
         'change_pct': change_pct,
         'vol_spike': vol_spike,
@@ -271,3 +279,15 @@ def _build_market_data(symbol, price, df_ind, change_pct=0, regime='ranging') ->
         'atr_pct': float(last.get('atr', price * 0.01) or price * 0.01) / price * 100,
         **_get_microstructure(symbol),
     }
+
+    # ── Inject calibration context (how well conviction scores predict wins) ──
+    if _CALIBRATION_AVAILABLE and _get_calibration_ctx:
+        try:
+            from config import PAPER_TRADING
+            cal_ctx = _get_calibration_ctx(paper=PAPER_TRADING)
+            if cal_ctx:
+                md['calibration_context'] = cal_ctx
+        except Exception:
+            pass
+
+    return md

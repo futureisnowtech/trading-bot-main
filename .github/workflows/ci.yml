@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main, feature/agent-overhaul]
+
+jobs:
+  test:
+    name: Lint + Test (Python 3.12)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install test dependencies
+        run: |
+          pip install --upgrade pip
+          # Core deps needed by tests
+          pip install \
+            pytest pytest-cov ruff \
+            python-dotenv pandas numpy pytz requests \
+            yfinance schedule \
+            "pandas-ta==0.3.14b0"
+          # Broker SDKs (paper mode only — no real API calls in tests)
+          pip install \
+            "alpaca-py>=0.43.0" \
+            "coinbase-advanced-py>=1.7.0" \
+            "python-binance>=1.0.19"
+          # Learning / ML
+          pip install scikit-learn lightgbm
+
+      - name: Create test .env
+        run: |
+          cat > .env << 'EOF'
+          PAPER_TRADING=true
+          ANTHROPIC_API_KEY=test_key_ci
+          ACCOUNT_SIZE=5000
+          COINBASE_API_KEY=test_key_ci
+          COINBASE_API_SECRET=test_secret_ci
+          ALPACA_API_KEY=test_key_ci
+          ALPACA_API_SECRET=test_secret_ci
+          ALPACA_BASE_URL=https://paper-api.alpaca.markets
+          BINANCE_API_KEY=test_key_ci
+          BINANCE_API_SECRET=test_secret_ci
+          BINANCE_TESTNET=true
+          TRADOVATE_USERNAME=test_ci
+          TRADOVATE_PASSWORD=test_ci
+          CRYPTO_PAIRS=BTC-USDC,ETH-USDC
+          PERP_PAIRS=BTCUSDT,ETHUSDT
+          CRYPTO_POSITION_SIZE_USD=250
+          EQUITY_POSITION_SIZE_USD=250
+          FUTURES_ENABLED=false
+          EQUITY_ENABLED=false
+          CRYPTO_ENABLED=true
+          PERP_ENABLED=false
+          EOF
+
+      - name: Lint with ruff
+        run: |
+          ruff check . \
+            --exclude=".git,__pycache__,logs,reference_repos,brain,docs" \
+            --ignore=E501,E402,F401,F811,W503 \
+            --select=E,F,W \
+            || true
+          # Non-blocking for now — report issues but don't fail build.
+          # Remove `|| true` once codebase is clean.
+
+      - name: Run pytest
+        run: |
+          python -m pytest tests/ -v \
+            --tb=short \
+            --cov=. \
+            --cov-report=term-missing \
+            --cov-omit="tests/*,scripts/*,brain/*,docs/*,logs/*" \
+            -q
+
+      - name: Validate config (pre-flight check)
+        run: |
+          python scripts/validate.py || true
+          # Non-blocking — some warnings expected with test API keys

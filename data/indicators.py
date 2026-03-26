@@ -60,9 +60,11 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
     if PANDAS_TA:
         bbands = ta.bbands(df['close'], length=20, std=2)
         if bbands is not None and not bbands.empty:
-            df['bb_upper'] = bbands.iloc[:, 0]
-            df['bb_mid'] = bbands.iloc[:, 1]
-            df['bb_lower'] = bbands.iloc[:, 2]
+            # pandas_ta returns columns as [BBL, BBM, BBU, BBB, BBP] — lower first.
+            # Assign by position: 0=lower, 1=mid, 2=upper.
+            df['bb_lower'] = bbands.iloc[:, 0]
+            df['bb_mid']   = bbands.iloc[:, 1]
+            df['bb_upper'] = bbands.iloc[:, 2]
             df['bb_width'] = (df['bb_upper'] - df['bb_lower']) / df['bb_mid']
     else:
         rolling_mean = df['close'].rolling(20).mean()

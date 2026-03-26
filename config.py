@@ -92,16 +92,26 @@ CLAUDE_MODEL_EXTENDED: str = 'claude-sonnet-4-6'             # For exit extended
 DEBATE_MAX_TOKENS: int = 700                                  # Raised from 300 — agents need room to reason deeply
 EXIT_REVIEW_MAX_TOKENS: int = 1500                            # Raised from 800 — exit reasoning is the most critical decision
 MODERATOR_MAX_TOKENS: int = 900                               # CIO synthesis
-QUICK_DEBATE_AGENTS: list = ['microstructure', 'fee_discipline', 'flow_tape']
-# Full debate: 5 focused agents covering the 5 critical dimensions for 1-min crypto
-# Dropped: session_breakout (session_active flag handles it), williams (pre-filter handles it),
-#          quant_edge (Kelly/OU now in risk_manager + indicators)
-FULL_DEBATE_AGENTS: list = ['microstructure', 'fee_discipline', 'flow_tape',
-                             'regime_volatility', 'manipulation_risk']
-FULL_DEBATE_MIN_AGREEMENT: float = 0.40                      # 2 of 5 agents — explicit count enforced in risk_synthesizer
+# 3-agent debate — same agents for quick and full (no distinction needed)
+# funding_regime: macro + funding rate (crypto-native edge)
+# momentum_structure: ADX + squeeze + WAE + WaveTrend + MACD
+# risk_economics: fee math + ATR + volume + time-of-day gate
+QUICK_DEBATE_AGENTS: list = ['funding_regime', 'momentum_structure', 'risk_economics']
+FULL_DEBATE_AGENTS:  list = ['funding_regime', 'momentum_structure', 'risk_economics']
+FULL_DEBATE_MIN_AGREEMENT: float = 0.67   # 2 of 3 agents must agree for BUY
 
-# Goku — Ultra Instinct final synthesizer (runs after all agents, absolute veto + boost)
-GOKU_ENABLED: bool = os.getenv('GOKU_ENABLED', 'true').lower() == 'true'
+# ML signal gate — skip debate if P(win) below threshold
+# Calibrated to seeded data baseline (~9% WR from math-only backtest).
+# Once live trades accumulate (AI-filtered ~30-50% WR), raise this to 0.35+
+# In .env: set ML_SIGNAL_MIN_PROB=0.35 after 50+ real trades
+ML_SIGNAL_MIN_PROB: float = float(os.getenv('ML_SIGNAL_MIN_PROB', '0.08'))
+
+# Funding rate signal thresholds (Coinglass per-8h %)
+FUNDING_OVERHEATED_PCT:  float = 0.05   # > this = longs overloaded, lean hold
+FUNDING_FAVORABLE_PCT:   float = 0.01   # < this = low crowding, good long entry window
+
+# Goku removed — was too expensive, now just a compat constant
+GOKU_ENABLED: bool = False
 
 # Auto-tuning thresholds (AI switches debate depth based on account + win rate)
 AUTO_TUNE_FULL_DEBATE_THRESHOLD: float = float(os.getenv('AUTO_TUNE_FULL_DEBATE_THRESHOLD', '1000.0'))  # Account > $1000 → always full debate
@@ -125,18 +135,18 @@ CRYPTO_ENABLED:  bool = os.getenv('CRYPTO_ENABLED',  'true').lower()  == 'true'
 FUTURES_ENABLED: bool = os.getenv('FUTURES_ENABLED', 'false').lower() == 'true'
 PERP_ENABLED:    bool = os.getenv('PERP_ENABLED',    'false').lower() == 'true'
 
-# ── Bybit perpetual futures ──────────────────────────────────────────────────
-BYBIT_API_KEY:    str   = os.getenv('BYBIT_API_KEY', '')
-BYBIT_API_SECRET: str   = os.getenv('BYBIT_API_SECRET', '')
-BYBIT_TESTNET:    bool  = os.getenv('BYBIT_TESTNET', 'true').lower() == 'true'
+# ── Binance USD-M perpetual futures (replaced Bybit, Sprint 1 overhaul) ──────
+BINANCE_API_KEY:    str   = os.getenv('BINANCE_API_KEY', '')
+BINANCE_API_SECRET: str   = os.getenv('BINANCE_API_SECRET', '')
+BINANCE_TESTNET:    bool  = os.getenv('BINANCE_TESTNET', 'true').lower() == 'true'
 PERP_PAIRS:       list  = os.getenv('PERP_PAIRS', 'AVAXUSDT,SOLUSDT,ETHUSDT,BTCUSDT').split(',')
 PERP_POSITION_SIZE_USD:  float = float(os.getenv('PERP_POSITION_SIZE_USD', '50'))   # was 100, cut 50%
 PERP_MAX_LEVERAGE:       int   = int(os.getenv('PERP_MAX_LEVERAGE', '10'))            # was 20, cut 50%
 PERP_MAX_POSITIONS:      int   = int(os.getenv('PERP_MAX_POSITIONS', '2'))            # was 3, cut 50%
 PERP_STOP_PCT:           float = float(os.getenv('PERP_STOP_PCT', '0.008'))           # was 0.015, cut 50%
 PERP_TAKE_PROFIT_PCT:    float = float(os.getenv('PERP_TAKE_PROFIT_PCT', '0.016'))   # was 0.03, cut 50%, maintains 2:1
-BYBIT_TAKER_FEE_PCT:     float = 0.00055   # 0.055% taker (linear perp default)
-BYBIT_MAKER_FEE_PCT:     float = 0.00020   # 0.020% maker
+BINANCE_TAKER_FEE_PCT:   float = 0.00040   # 0.040% taker (USD-M futures standard tier)
+BINANCE_MAKER_FEE_PCT:   float = 0.00020   # 0.020% maker
 
 # ── Mean-reversion strategy (ranging / volatile regimes) ─────────────────────
 MEAN_REVERSION_ENABLED:   bool  = os.getenv('MEAN_REVERSION_ENABLED', 'true').lower() == 'true'

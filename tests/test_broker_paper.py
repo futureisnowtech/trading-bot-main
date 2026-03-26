@@ -74,26 +74,32 @@ class TestAlpacaBrokerPaper:
         assert order is None or isinstance(order, dict)
 
 
-class TestBybitBrokerPaper:
+class TestBinanceBrokerPaper:
     def setup_method(self):
-        with patch.dict(os.environ, {'BYBIT_TESTNET': 'true',
-                                      'BYBIT_API_KEY': 'test', 'BYBIT_API_SECRET': 'test'}):
+        with patch.dict(os.environ, {'BINANCE_TESTNET': 'true',
+                                      'BINANCE_API_KEY': 'test', 'BINANCE_API_SECRET': 'test',
+                                      'PAPER_TRADING': 'true'}):
             try:
-                from execution.bybit_broker import BybitBroker
-                self.broker = BybitBroker(paper=True)
+                with patch('execution.binance_broker.BinanceClient', MagicMock()):
+                    from execution.binance_broker import BinanceBroker
+                    self.broker = BinanceBroker()
                 self.available = True
             except (ImportError, Exception):
                 self.available = False
 
-    def test_bybit_paper_connect(self):
+    def test_binance_paper_connect(self):
         if not self.available:
-            pytest.skip("Bybit broker not available (pybit not installed or import error)")
+            pytest.skip("Binance broker not available (python-binance not installed)")
         result = self.broker.connect()
         assert isinstance(result, bool)
 
-    def test_bybit_get_funding_rate_returns_float_or_none(self):
+    def test_binance_get_funding_rate_returns_float(self):
         if not self.available:
-            pytest.skip("Bybit broker not available")
-        with patch.object(self.broker, '_get_funding_rate_live', return_value=0.0001):
+            pytest.skip("Binance broker not available")
+        with patch.object(self.broker, '_client', None), \
+             patch('execution.binance_broker.BinanceClient') as mock_cls:
+            mock_client = MagicMock()
+            mock_cls.return_value = mock_client
+            mock_client.futures_funding_rate.return_value = [{'fundingRate': '0.0001'}]
             rate = self.broker.get_funding_rate('BTCUSDT')
         assert isinstance(rate, (float, int, type(None)))

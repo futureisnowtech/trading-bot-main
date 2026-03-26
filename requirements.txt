@@ -16,6 +16,7 @@ yfinance>=0.2.36
 # ─── Broker APIs ──────────────────────────────────────────────────────────────
 alpaca-py>=0.43.0
 coinbase-advanced-py>=1.7.0
+python-binance>=1.0.19
 mcp>=1.0.0
 fastmcp>=0.1.0
 

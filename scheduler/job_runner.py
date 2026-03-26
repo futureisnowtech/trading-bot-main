@@ -1525,7 +1525,7 @@ def run_perp_scan() -> None:
     if rm.is_halted:
         return
 
-    from execution.bybit_broker import get_bybit_broker
+    from execution.binance_broker import get_binance_broker as get_bybit_broker
     from strategies.crypto_perp_strategy import get_perp_signal
     from data.coinbase_feed import get_candles  # reuse candle fetcher for price data
 

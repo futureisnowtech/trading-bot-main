@@ -1,5 +1,35 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
+
+## 2026-03-26 (v9.0 — Sprint 1 Foundation)
+- **job_runner.py decomposed**: 1,812-line god object → 6 focused modules (86% reduction)
+  - `scheduler/_helpers.py` (273L): shared state, optional-import flags, 3 helper fns, strategy singletons
+  - `scheduler/exit_monitor.py` (329L): AI exits, hard-stop/time/stagnant exits, post-trade attribution, EOD close
+  - `scheduler/equity_scanner.py` (227L): Clenow ranking, Minervini, AI debate, F&G/IV sizing
+  - `scheduler/crypto_scanner.py` (641L): 8-signal gate, ML gate, microstructure veto, 3-agent debate, MR path
+  - `scheduler/perp_scanner.py` (153L): Binance perp entry/exit, 4h flat exit
+  - `scheduler/job_runner.py` (258L): thin orchestrator — re-exports sub-modules, futures/watchdog/premarket/schedules
+- **Bybit → Binance migration**: `execution/binance_broker.py` (NEW, 320L) replaces deleted bybit_broker.py
+  - `python-binance` library, STOP_MARKET/TAKE_PROFIT_MARKET server-side SL/TP, ISOLATED margin
+  - `BINANCE_TESTNET=true` in .env — fill keys at testnet.binancefuture.com to activate
+  - Fees: 0.040% taker (cheaper than Bybit's 0.055%)
+  - `get_bybit_broker` alias preserved; config.py/validate.py/.env all updated
+- **Risk decomposition**: 527-line risk_manager.py → thin orchestrator + 5 modules
+  - `risk/position_sizer.py`: 25%-fractional Kelly, 5-loss clamp, floor/cap
+  - `risk/stop_loss_manager.py`: calc_stop_loss, calc_take_profit, should_exit (hard/trailing/TP)
+  - `risk/drawdown_controller.py`: daily loss gate + fee drag gate
+  - `risk/risk_limits.py`: market hours, position limits, deployment cap, crypto fee gate; RiskCheckResult moved here
+  - `risk/var_calculator.py`: historical simulation VaR (95/99% confidence) — new capability
+- **MCP server** (`mcp_server/server.py`): 15 FastMCP tools expose full bot state to Claude Code
+  - Tools: positions, trades, signals, agent accuracy, ML signal, price history, macro, scan, debate, backtest, readiness, notifications
+  - Start: `python3 mcp_server/server.py`
+- **Claude Code agents** (`.claude/agents/`): portfolio_manager, trade_strategist, devil_advocate, system_engineer
+- **Claude Code commands** (`.claude/commands/`): /health, /audit, /deploy, /optimize, /build-strategy
+- **Test suite** (`tests/`): test_indicators.py, test_risk_manager.py, test_broker_paper.py (~25 tests total)
+- **GitHub**: Repository futureisnowtech/trading-bot-main live; SSH push configured; pre-commit validation hook active
+- **Dead code removed**: webull_broker.py deleted; bybit_broker.py deleted; scripts/generate_system_html.py removed
+- **CLAUDE.md**: Updated to v9.0 with project structure, GitHub section, Sprint 1 changes
+
 ## 2026-03-26
 - v8.1: auto_env_updater.py — automatic ML threshold + position size progression via launchd every 6h
 

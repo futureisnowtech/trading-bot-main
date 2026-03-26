@@ -29,7 +29,47 @@ A fully autonomous AI-powered trading system that:
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
 
-## Current Version: v8.0
+## Current Version: v9.0
+- v9.0 (2026-03-26): Sprint 1 — Foundation overhaul: MCP server, risk decomposition, Binance migration, job_runner split
+  - **MCP server** (`mcp_server/server.py`): 15 FastMCP tools expose full bot state over MCP protocol.
+    Tools: get_positions, get_open_trades, get_recent_trades, close_position, get_signal_stats,
+    get_agent_accuracy, get_ml_signal, get_price_history, get_macro_context, scan_crypto_pairs,
+    get_debate_result, run_backtest, get_daily_summary, get_readiness_score, get_notifications.
+    Start: `python3 mcp_server/server.py`
+  - **Risk decomposition** (`risk/`): Rewrote 527-line god-class into 5 single-responsibility modules.
+    `risk_manager.py` → thin orchestrator. New modules:
+    `position_sizer.py` (25%-fractional Kelly, 5-trade clamp),
+    `stop_loss_manager.py` (calc_stop_loss, calc_take_profit, should_exit),
+    `drawdown_controller.py` (daily loss + fee drag gates),
+    `risk_limits.py` (market hours, position limits, deployment cap, fee gate),
+    `var_calculator.py` (historical VaR at 95/99%, new capability).
+    Public API 100% unchanged — nothing else in the codebase needed to change.
+  - **Bybit → Binance migration**: Replaced bybit_broker.py (deleted) with `execution/binance_broker.py`.
+    Drop-in replacement using `python-binance`. Server-side SL/TP via STOP_MARKET/TAKE_PROFIT_MARKET.
+    Testnet support: `BINANCE_TESTNET=true`. Fees 0.040% (cheaper than Bybit 0.055%).
+    `get_bybit_broker` alias preserved. Updated: config.py, requirements.txt, validate.py, .env.
+  - **job_runner.py decomposition**: 1,812-line god object → 6 focused modules (86% reduction).
+    `scheduler/_helpers.py` (273L): shared state, optional-import flags, 3 helper functions, strategy singletons.
+    `scheduler/exit_monitor.py` (329L): AI exits, hard-stop/time/stagnant exits, attribution, EOD close.
+    `scheduler/equity_scanner.py` (227L): Clenow ranking, Minervini, AI debate, F&G/IV sizing.
+    `scheduler/crypto_scanner.py` (641L): 8-signal gate, ML gate, microstructure veto, 3-agent debate, MR path.
+    `scheduler/perp_scanner.py` (153L): Binance perp entry/exit, 4h flat exit.
+    `scheduler/job_runner.py` (258L): thin orchestrator — re-exports sub-modules, futures/watchdog/premarket/schedules.
+  - **Claude Code agents** (`.claude/agents/`): 4 specialized sub-agents:
+    `portfolio_manager.md` (risk, halt/resume, readiness),
+    `trade_strategist.md` (signal quality, debate analysis),
+    `devil_advocate.md` (overfitting/fee-blindness stress-tester),
+    `system_engineer.md` (code changes, debugging).
+  - **Claude Code commands** (`.claude/commands/`): 5 slash commands:
+    `/health` (30-second check), `/audit` (full 6-dimension audit),
+    `/deploy` (pre-flight + DB backup), `/optimize` (walk-forward params),
+    `/build-strategy` (scaffold + backtest validation).
+  - **Tests** (`tests/`): 3 test files, ~25 tests total.
+    `test_indicators.py`: required fields, look-ahead bias, edge cases.
+    `test_risk_manager.py`: halt rules, daily loss limit, position limits, stop math, R/R.
+    `test_broker_paper.py`: Coinbase, Alpaca, Binance paper-mode smoke tests.
+  - **GitHub**: Repository live at `futureisnowtech/trading-bot-main`, branch `feature/agent-overhaul`.
+    SSH push configured. Pre-commit validation hook active.
 - v8.0 (2026-03-26): Architecture overhaul — 3-agent debate, ML signal layer, walk-forward, funding rate wiring
   - **3-agent debate** (`strategies/ai_agents/analyst_agents.py`): Replaced 9 agents + moderator + Goku (up to 11
     API calls) with 3 focused non-overlapping agents (3 calls, 3.5× cheaper, ~4× faster):
@@ -310,12 +350,18 @@ algo_trading_final/
 ├── memory/
 │   └── trade_memory.py           ← LanceDB vector store (supplemental qualitative context)
 │
-├── risk/
-│   └── risk_manager.py           ← All hard rules, position tracking, persistence
+├── risk/                         ← v9.0: decomposed from 1 file to 6
+│   ├── risk_manager.py           ← Thin orchestrator; public API unchanged
+│   ├── position_sizer.py         ← 25%-Kelly, losing-streak clamp
+│   ├── stop_loss_manager.py      ← calc_stop_loss/take_profit/should_exit
+│   ├── drawdown_controller.py    ← Daily loss + fee drag gates
+│   ├── risk_limits.py            ← Market hours, position limits, deployment cap
+│   └── var_calculator.py         ← Historical VaR 95/99% (new capability)
 │
 ├── execution/
-│   ├── webull_broker.py          ← Stocks
-│   ├── coinbase_broker.py        ← Crypto
+│   ├── alpaca_broker.py          ← Stocks (Alpaca paper API)
+│   ├── coinbase_broker.py        ← Crypto (Coinbase Advanced Trade)
+│   ├── binance_broker.py         ← Perp futures (Binance USD-M; replaced Bybit v9.0)
 │   └── tradovate_broker.py       ← MES futures
 │
 ├── backtesting/
@@ -331,8 +377,21 @@ algo_trading_final/
 ├── dashboard/
 │   └── app.py                    ← 4-view dashboard: TheKing/Saiyan/FilmRoom/Ring
 │
+├── mcp_server/                   ← MCP server (v9.0 Sprint 1)
+│   └── server.py                 ← 15 FastMCP tools; start: python3 mcp_server/server.py
+│
+├── tests/                        ← pytest test suite (v9.0 Sprint 1)
+│   ├── test_indicators.py        ← look-ahead bias + edge cases
+│   ├── test_risk_manager.py      ← halt rules, position limits, stop math
+│   └── test_broker_paper.py      ← Coinbase/Alpaca/Binance paper smoke tests
+│
 └── scheduler/
-    └── job_runner.py             ← The while True engine
+    ├── job_runner.py             ← Thin orchestrator (v9.0: 258L, was 1812L)
+    ├── _helpers.py               ← Shared state: flags, helper fns, strategy singletons
+    ├── exit_monitor.py           ← AI exit management + attribution
+    ├── equity_scanner.py         ← Equity discovery → debate → execute
+    ├── crypto_scanner.py         ← 8-signal gate → ML → debate → execute
+    └── perp_scanner.py           ← Binance perp entry/exit
 ```
 
 ## The 3 AI Analyst Agents (v8.0 — replaced 9-agent panel)
@@ -641,6 +700,17 @@ Motivation 5: "Nothing is given. Everything is earned."
          agent accuracy tracking (agent_stats table, accuracy injected into debate context);
          daily brain summaries (generate_daily_summary.py + launchd 9:47 PM, signal leaderboard auto-populated);
          SHORT branch attribution fixed; LanceDB demoted to supplemental context
+- v8.0 (2026-03-26): 3-agent debate (Bardock/Vegeta/Krillin), ML signal gate (LightGBM),
+         walk-forward OOS validation, funding rate wired into market_data, RBIPMS framework
+- v9.0 (2026-03-26): Sprint 1 Foundation — MCP server (15 tools), risk decomposition (5 modules),
+         Bybit→Binance migration, job_runner → 6-file decomposition (258L orchestrator),
+         4 Claude agents, 5 slash commands, 3 test files, GitHub live
+
+## GitHub
+- Repository: `futureisnowtech/trading-bot-main` (private)
+- Active branch: `feature/agent-overhaul`
+- Push: `git push origin feature/agent-overhaul` (SSH configured, no GitHub Desktop needed)
+- Sprint plan: `docs/INTEGRATION_PLAN.md` (Sprint 1 done, Sprint 2 = prediction markets)
 
 ## Claude's Standing Instructions
 When making any change to this project:

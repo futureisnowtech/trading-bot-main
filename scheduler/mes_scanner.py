@@ -91,10 +91,18 @@ def run_mes_scan() -> None:
             log_event('INFO', 'scan_feed', f"[mes] MES ⛔ risk gate: {pre.reason}")
             return
 
-        # ── AI debate (when confidence < 0.80) ────────────────────────────────
+        # ── AI debate with high-conviction gate (Sprint 5) ────────────────────
+        # conf < 0.55: rule-based only — engine not confident enough to waste API tokens
+        # conf >= 0.55: run MES-specific 3-agent debate with state chaining
         from scheduler._helpers import _debate_available, _build_market_data
         ai = _debate_available()
-        if ai and signal.confidence < 0.80:
+        debate_type = 'rule_based'
+
+        if signal.confidence < 0.55:
+            log_event('INFO', 'scan_feed',
+                      f"[mes] Rule-based path: conf={signal.confidence:.0%} < 0.55")
+        elif ai:
+            debate_type = 'agents'
             md = _build_market_data('MES', price, df)
             md['dollar_volume'] = 1_000_000_000  # futures always liquid
             md['signal_type'] = signal.signal_type
@@ -105,16 +113,22 @@ def run_mes_scan() -> None:
             md['trades_today'] = engine.trades_today
 
             try:
-                debate = ai['quick']('MES', md, verbose=False)
+                # MES-specific agents auto-selected via asset_class='mes'
+                debate = ai['quick']('MES', md, verbose=False, asset_class='mes')
+                log_event('INFO', 'scan_feed',
+                          f"[mes] Debate {debate.vote_breakdown} → {debate.synthesized_signal} "
+                          f"(chained state, {len(debate.individual_signals)} agents)")
                 if debate.synthesized_signal != 'BUY':
                     log_event('INFO', 'scan_feed',
-                              f"[mes] Debate override → HOLD (conf={debate.confidence:.0%})")
+                              f"[mes] Debate override → HOLD ({debate.synthesized_confidence:.0%})")
                     return
-                # Use debate confidence if higher
-                if debate.confidence > signal.confidence:
-                    signal.confidence = debate.confidence
+                if debate.synthesized_confidence > signal.confidence:
+                    signal.confidence = debate.synthesized_confidence
             except Exception as e:
-                log_event('WARNING', 'mes_scan', f"Debate failed, proceeding on engine signal: {e}")
+                log_event('WARNING', 'mes_scan', f"Debate failed, proceeding on engine: {e}")
+
+        log_event('INFO', 'mes_debate_type',
+                  f"[mes] debate_type={debate_type} conf={signal.confidence:.0%}")
 
         # ── Execute ───────────────────────────────────────────────────────────
         direction = signal.action  # 'LONG' or 'SHORT'

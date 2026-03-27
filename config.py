@@ -98,6 +98,7 @@ MODERATOR_MAX_TOKENS: int = 900                               # CIO synthesis
 # risk_economics: fee math + ATR + volume + time-of-day gate
 QUICK_DEBATE_AGENTS: list = ['funding_regime', 'momentum_structure', 'risk_economics']
 FULL_DEBATE_AGENTS:  list = ['funding_regime', 'momentum_structure', 'risk_economics']
+MES_DEBATE_AGENTS:   list = ['mes_momentum_risk', 'mes_quant', 'mes_market_structure']
 FULL_DEBATE_MIN_AGREEMENT: float = 0.67   # 2 of 3 agents must agree for BUY
 
 # ML signal gate — skip debate if P(win) below threshold

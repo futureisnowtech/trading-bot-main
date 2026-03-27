@@ -22,7 +22,8 @@ from strategies.ai_agents.analyst_agents import (
 )
 from strategies.ai_agents.regime_detector import detect_regime, get_regime_brief
 from config import (MARKET_TIMEZONE, CLAUDE_MODEL,
-                    QUICK_DEBATE_AGENTS, FULL_DEBATE_AGENTS, FULL_DEBATE_MIN_AGREEMENT)
+                    QUICK_DEBATE_AGENTS, FULL_DEBATE_AGENTS, FULL_DEBATE_MIN_AGREEMENT,
+                    MES_DEBATE_AGENTS)
 
 
 class DebateResult:
@@ -30,7 +31,7 @@ class DebateResult:
                  synthesized_confidence, unified_reasoning, bull_case,
                  bear_case, key_risk, vote_breakdown, timestamp, regime='',
                  goku_verdict='SKIPPED', goku_conviction_adjustment=0,
-                 goku_reasoning='', goku_insight=''):
+                 goku_reasoning='', goku_insight='', debate_type='agents'):
         self.symbol = symbol
         self.individual_signals = individual_signals
         self.synthesized_signal = synthesized_signal
@@ -42,6 +43,7 @@ class DebateResult:
         self.vote_breakdown = vote_breakdown
         self.timestamp = timestamp
         self.regime = regime
+        self.debate_type = debate_type   # 'agents' | 'rule_based'
         # Kept for backward compatibility — always SKIPPED now
         self.goku_verdict = goku_verdict
         self.goku_conviction_adjustment = goku_conviction_adjustment
@@ -61,6 +63,7 @@ class DebateResult:
             'individual_signals':      self.individual_signals,
             'timestamp':               self.timestamp,
             'regime':                  self.regime,
+            'debate_type':             self.debate_type,
             'goku_verdict':            self.goku_verdict,
             'goku_conviction_adjustment': self.goku_conviction_adjustment,
             'goku_reasoning':          self.goku_reasoning,
@@ -97,7 +100,11 @@ def run_debate(symbol: str, market_data: dict, context: str = '',
     timestamp = datetime.now(tz).isoformat()
 
     if agents_to_use is None:
-        agents_to_use = FULL_DEBATE_AGENTS  # defaults to 3-agent set
+        # Sprint 5: auto-select agent set based on asset class
+        if asset_class == 'mes':
+            agents_to_use = MES_DEBATE_AGENTS
+        else:
+            agents_to_use = FULL_DEBATE_AGENTS  # crypto default (3-agent set)
 
     # Regime detection (keep same logic — used as context)
     if market_data.get('regime') and market_data['regime'] != 'ranging':
@@ -116,17 +123,32 @@ def run_debate(symbol: str, market_data: dict, context: str = '',
     if verbose:
         print(f"\n🏛️  DEBATE: {symbol} | {regime.upper()} | {len(agents_to_use)} analysts")
 
-    # ── Run each agent ──────────────────────────────────────────────────────────
+    # ── Run each agent with state chaining (Sprint 5 — TauricResearch pattern) ─
+    # Each agent sees prior agents' conclusions in their user prompt.
+    # System prompt (persona) is unchanged → stays cached (no extra cost).
     individual_signals = []
+    accumulated_state = ''   # grows as each agent adds their verdict
+
     for agent_key in agents_to_use:
         if verbose:
             name = AGENTS[agent_key]['name']
             print(f"  📊 {name}...", end=' ', flush=True)
 
-        result = run_agent(agent_key, symbol, market_data,
-                           context=enhanced_context, memory_context=memory_context,
-                           asset_class=asset_class)
+        result = run_agent(
+            agent_key, symbol, market_data,
+            context=enhanced_context, memory_context=memory_context,
+            asset_class=asset_class,
+            prior_reasoning=accumulated_state,   # chain state forward
+        )
         individual_signals.append(result)
+
+        # Accumulate for next agent: brief verdict (no padding — keep user prompt tight)
+        agent_name = result.get('agent', agent_key)
+        accumulated_state += (
+            f"\n{agent_name}: {result.get('signal','HOLD')} "
+            f"({result.get('confidence',0):.0%}) — {result.get('reasoning','')[:80]}"
+        )
+
         time.sleep(0.1)
 
         if verbose:
@@ -191,6 +213,7 @@ def run_debate(symbol: str, market_data: dict, context: str = '',
         vote_breakdown=vote_breakdown,
         timestamp=timestamp,
         regime=regime,
+        debate_type='agents',   # ran actual AI agents
         # Goku fields — always SKIPPED (removed from system)
         goku_verdict='SKIPPED',
         goku_conviction_adjustment=0,

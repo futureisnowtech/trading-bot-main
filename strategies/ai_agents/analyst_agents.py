@@ -91,6 +91,80 @@ AGENTS = {
             'Does the ATR-based stop (2×ATR below entry) keep max loss ≤ 1% of $500?',
         ]
     },
+
+    # ── MES Futures Agents (Sprint 5) ─────────────────────────────────────────
+    # Different market, different domains. Same debate mechanics (2/3 BUY = BUY).
+    'mes_momentum_risk': {
+        'name': 'Momentum & Risk Manager',
+        'dbz_name': 'Tudor Jones',
+        'style': (
+            'MES futures momentum and risk specialist. Read the tape: is momentum real or fading? '
+            'Opening Range Breakout context: price broke the first 5-min high/low, then pulled back. '
+            'The pullback must respect the breakout level — if it breaks back through, this setup is invalid. '
+            'ADX > 20 = real momentum. ADX < 18 = chop, HOLD. '
+            'HTF (30-min) bias must align: LONG setup needs BULLISH or NEUTRAL HTF, not BEARISH. '
+            'Risk rules for $500 futures account: 1 MES contract max. Daily stop = -5 pts (-$25). '
+            'Commission: $0.59/side × 2 = $1.18 round-trip. Trade must be worth the commission. '
+            'Target minimum: 1.5× stop (e.g. stop 3 pts → target ≥ 4.5 pts). '
+            'RULE: If HTF misaligns, or ADX < 18, or the setup looks like a failed breakout → HOLD.'
+        ),
+        'key_questions': [
+            'Is the ORB pullback respecting the breakout level (price bounced, not broke through)?',
+            'Is ADX > 20 confirming real momentum?',
+            'Does 30-min HTF bias align with the trade direction?',
+            'Is the R:R at least 1.5:1 after Tradovate commission ($1.18 round-trip)?',
+        ]
+    },
+    'mes_quant': {
+        'name': 'Quantitative Pattern Analyst',
+        'dbz_name': 'Jim Simons',
+        'style': (
+            'Quantitative edge and pattern quality analyst for MES futures. '
+            'Opening Range Breakout pullback patterns work best when: '
+            '(1) Volume on breakout bar was above average, '
+            '(2) Pullback volume is LOWER than breakout volume (conviction stays with breakout), '
+            '(3) VIX < 20 (calm markets = predictable ORB patterns), '
+            '(4) ES has a clear trend intraday, not a range day. '
+            'Pattern degraders: VIX > 20 (adds noise), gap-open days (skip — opening range unreliable), '
+            'tight pre-market range < 5 pts (ORB pattern fails on low-energy days). '
+            'Statistics: ORB pullback patterns historically win ~58-62% when volume confirms. '
+            'Without volume confirmation they win ~42%. '
+            'RULE: If volume pattern is wrong (pullback higher volume than breakout) → HOLD. '
+            'If VIX > 25 → HOLD (engine already blocks this, but confirm). '
+            'If conditions confirm the pattern, BUY.'
+        ),
+        'key_questions': [
+            'Was breakout bar volume above the 10-bar average? (confirmation of genuine breakout)',
+            'Is pullback volume LOWER than breakout bar volume? (key ORB confirmation signal)',
+            'Is VIX < 20? If elevated (20-25), discount confidence. If > 25, HOLD.',
+            'Is today a trend day (directional) or range day (skip ORB)? What does the pre-market range suggest?',
+        ]
+    },
+    'mes_market_structure': {
+        'name': 'Market Structure & Tape Reader',
+        'dbz_name': 'Jesse Livermore',
+        'style': (
+            'Market structure and entry timing specialist for MES futures. '
+            'Read the structure: where are the key levels? Is the pullback touching a significant level? '
+            'ORB pullback entries are strongest when the breakout level also coincides with: VWAP, '
+            'a prior swing high/low, or a round number (e.g., 5800, 5825). '
+            'Check if price is above or below VWAP after the pullback: '
+            'LONG setup should have price above VWAP after pulling back to breakout level. '
+            'Pre-market accumulation signal: if lower wicks > upper wicks in pre-market candles → '
+            'institutional buying bias — supports LONG. '
+            'Timing: 9:35-10:30am ET is the ORB window. '
+            'After 10:30am, skip new ORB entries (breakout energy dissipates). '
+            'Close Auction (3:00-3:30pm): trade with last-hour trend. '
+            'RULE: If price is below VWAP on a long entry → HOLD (wrong side of structure). '
+            'If the pullback overshoots the level significantly → HOLD (failed breakout pattern).'
+        ),
+        'key_questions': [
+            'Does the breakout level coincide with VWAP, a swing level, or a round number?',
+            'Is price above VWAP (for LONG) or below VWAP (for SHORT) after the pullback?',
+            'Did the pre-market show accumulation (lower wick dominance)?',
+            'Is the pullback touching the level cleanly, or has it overshot (potential failed breakout)?',
+        ]
+    },
 }
 
 AGENT_RESPONSE_SCHEMA = {
@@ -229,12 +303,20 @@ def run_agent(
     context: str = '',
     memory_context: str = '',
     asset_class: str = 'crypto',
+    prior_reasoning: str = '',   # Sprint 5: state chaining — prior agents' conclusions
 ) -> dict:
-    """Run one analyst agent. Returns signal dict with agent_key added."""
+    """Run one analyst agent. Returns signal dict with agent_key added.
+
+    prior_reasoning: accumulated output from agents that ran before this one.
+    Passed in the user prompt so the system prompt (persona) stays cached.
+    """
     agent = AGENTS.get(agent_key)
     if not agent:
         return {'signal': 'HOLD', 'confidence': 0.0, 'reasoning': f'Unknown agent: {agent_key}',
-                'key_concern': '', 'agent': agent.get('name', agent_key), 'agent_key': agent_key}
+                'key_concern': '', 'agent': agent_key, 'agent_key': agent_key}
+
+    account_note = 'This is a $500 futures account (1 MES contract max).' if asset_class == 'mes' \
+                   else 'This is a $500 crypto account. Capital preservation matters.'
 
     system_prompt = f"""You are {agent['name']} ({agent['dbz_name']}), an elite trading analyst.
 
@@ -247,14 +329,15 @@ ABSOLUTE RULES:
 - Be direct and decisive. No hedging.
 - Give a clear BUY, SELL, or HOLD with a confidence score (0.0–1.0).
 - One sentence reasoning max. One sentence key concern max.
-- This is a $500 crypto account. Capital preservation matters — when in doubt, HOLD.
-- You are NOT asked to consider the other analysts' views. Focus only on your domain."""
+- {account_note}
+- Focus on your domain. You MAY consider prior analysts' views, but your primary lens is your specialty."""
 
     market_brief = _format_market_data(symbol, market_data)
     ctx_block = f"\nCONTEXT:\n{context}" if context else ''
     mem_block  = f"\nMEMORY:\n{memory_context[:400]}" if memory_context else ''
+    prior_block = f"\nPRIOR ANALYST VIEWS (for awareness only):\n{prior_reasoning}" if prior_reasoning else ''
 
-    user_prompt = f"""{market_brief}{ctx_block}{mem_block}
+    user_prompt = f"""{market_brief}{ctx_block}{mem_block}{prior_block}
 
 Based on your specialty ({agent['name']}), what is your trading decision for {symbol}?"""
 

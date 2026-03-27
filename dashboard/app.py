@@ -1,23 +1,20 @@
 """
-dashboard/app.py — The King's War Room v9.0
+dashboard/app.py — Trading War Room v10.0
 
-ONE VIEW. One toggle. That is all.
+Single view. Data-first. No themes. No fluff.
+Every section has an ℹ️ info button explaining what you're looking at.
 
-THE KING (standard): Lakers gold on navy on black.
-  Row 1 — Giant P&L scoreboard. Gold positive. Red negative.
-  Row 2 — LeBron quote rotating through the day.
-  Row 3 — Six metrics: balance, today P&L, all-time P&L, 20-trade WR, edge score, API cost.
-  Row 4 — Three market panels: crypto / MES futures / perp. Position + last signal + last trade.
-  Row 5 — Recent trades table | Recent signals feed.
-  Row 6 — Claude AI chat (full context injected).
-  Row 7 — Risk gauges: daily loss bar, position counts, watchdog.
-
-SAIYAN MODE: Same data. DBZ skin. Power levels. Ki bars. Z-Fighter agent names.
-
-One button top-right toggles the entire UI.
-Two modes total. Nothing else.
-
-Run: streamlit run dashboard/app.py
+Layout:
+  Header     — status bar: mode · bot health · last scan · ET clock
+  Row 1      — Giant P&L scoreboard
+  Row 2      — Six key metrics
+  Row 3      — Edge monitor (most important component)
+  Row 4      — Open positions with stop/target distances
+  Row 5      — Three market panels (crypto / MES / perp)
+  Row 6      — Risk gauges (daily loss · heat level · watchdog)
+  Row 7      — Recent trades | Recent signals
+  Row 8      — Claude AI chat
+  Expanders  — Debate history · Notifications · Controls
 """
 import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -33,13 +30,13 @@ import streamlit as st
 from config import (
     PAPER_TRADING, ACCOUNT_SIZE, MARKET_TIMEZONE,
     CRYPTO_PAIRS, ANTHROPIC_API_KEY, CLAUDE_MODEL,
-    EQUITY_ENABLED, CRYPTO_ENABLED, FUTURES_ENABLED,
-    MAX_DAILY_LOSS_PCT, MAX_DAILY_FEE_DRAG_PCT, MAX_STRATEGY_LOSS_STREAK,
+    CRYPTO_ENABLED, FUTURES_ENABLED,
+    MAX_DAILY_LOSS_PCT, MAX_DAILY_FEE_DRAG_PCT,
     CRYPTO_SCAN_INTERVAL_SECONDS,
     MAX_RISK_PER_TRADE_PCT, MAX_POSITIONS_CRYPTO,
     CRYPTO_STOP_LOSS_PCT, CRYPTO_TAKE_PROFIT_PCT,
     FULL_DEBATE_AGENTS,
-    CRYPTO_POSITION_SIZE_USD, EQUITY_POSITION_SIZE_USD,
+    CRYPTO_POSITION_SIZE_USD,
     COINBASE_TAKER_FEE_PCT,
 )
 from logging_db.trade_logger import (
@@ -57,266 +54,221 @@ try:
 except Exception:
     _EDGE_MONITOR = False
     def get_edge_state(s, paper=True):
-        return {'status': 'UNCERTAIN', 'edge_score': 0.5, 'profit_factor': 1.5,
-                'consecutive_bad': 0, 'sizing_multiplier': 1.0, 'should_block': False,
-                'window_trades': 0}
+        return {
+            'status': 'UNCERTAIN', 'edge_score': 0.5, 'profit_factor': 1.5,
+            'win_rate_20': 0.5, 'consecutive_bad': 0,
+            'sizing_multiplier': 1.0, 'should_block': False, 'window_trades': 0,
+        }
 
 try:
     from risk.drawdown_controller import get_heat_level
 except Exception:
     def get_heat_level(paper=True):
-        return {'level': 0, 'label': 'NORMAL', 'size_factor': 1.0, 'daily_pnl': 0.0, 'pct_drawn': 0.0}
-
-# ── LeBron quotes — REAL documented quotes only ───────────────────────────────
-# Keyed by context so the right quote fires at the right moment.
-LEBRON = {
-    'startup':   "We're in the lab. Let's get to work.",
-    'win':       "That's preparation meeting opportunity.",
-    'loss':      "Losses are tuition. On to the next.",
-    'halt':      "Not today. Live to play tomorrow.",
-    'goal':      "We came, we worked, we're done.",
-    'high':      "This is what the work looks like.",
-    'edge_on':   "Nothing is given. Everything is earned.",
-    'edge_off':  "I like criticism. It makes you strong.",
-    'overnight': "I treated every day like my last.",
-    'patience':  "Sometimes the best move is no move.",
-}
+        return {'level': 0, 'label': 'NORMAL', 'size_factor': 1.0,
+                'daily_pnl': 0.0, 'pct_drawn': 0.0}
 
 # ─── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="👑 The King's War Room",
-    page_icon='👑',
-    layout='wide',
-    initial_sidebar_state='collapsed',
+    page_title="Trading War Room",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="collapsed",
 )
 
-# ─── CSS ────────────────────────────────────────────────────────────────────────
+# ─── CSS — clean dark terminal ─────────────────────────────────────────────────
 st.markdown("""
 <style>
 /* ── Base ── */
-.main, .stApp { background: #000 !important; }
+.main, .stApp { background: #050505 !important; }
 * { box-sizing: border-box; }
-.stButton > button {
-    background: #0d1e3a; color: #FDB927; border: 1px solid #FDB927;
-    font-weight: 700; border-radius: 4px; font-size: 12px;
-    padding: 4px 12px;
-}
-.stButton > button:hover { background: #FDB927; color: #000; }
-.stExpander { border: 1px solid #111 !important; }
-div[data-testid="stChatInput"] { border-color: #1D428A !important; }
 
-/* ── GIANT P&L SCOREBOARD ── */
+/* ── Buttons ── */
+.stButton > button {
+    background: #111; color: #aaa; border: 1px solid #222;
+    font-weight: 600; border-radius: 4px; font-size: 12px;
+    padding: 4px 14px; transition: all 0.15s;
+}
+.stButton > button:hover { background: #1e1e1e; color: #fff; border-color: #444; }
+
+/* ── Section header ── */
+.sec-hdr {
+    display: flex; align-items: center; gap: 8px;
+    color: #888; font-size: 10px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 3px;
+    padding: 6px 0 4px 0;
+    border-bottom: 1px solid #111;
+    margin-bottom: 10px;
+}
+.sec-hdr-accent { color: #FDB927; }
+
+/* ── Scoreboard ── */
 .scoreboard {
-    text-align: center;
-    padding: 24px 0 10px 0;
-    font-family: 'Impact', 'Arial Black', sans-serif;
-    letter-spacing: 2px;
+    text-align: center; padding: 18px 0 8px 0;
+    font-family: 'SF Mono', 'Consolas', monospace;
     line-height: 1;
 }
-.scoreboard-pnl {
-    font-size: 72px;
-    font-weight: 900;
-    display: block;
+.score-pnl {
+    font-size: 68px; font-weight: 900;
+    display: block; letter-spacing: -1px;
 }
-.scoreboard-sub {
-    font-size: 14px;
-    color: #555;
-    text-transform: uppercase;
-    letter-spacing: 3px;
-    margin-top: 4px;
+.score-label {
+    font-size: 10px; color: #333;
+    text-transform: uppercase; letter-spacing: 4px;
+    margin-top: 6px;
 }
 
-/* ── LeBron quote banner ── */
-.quote-bar {
-    border-left: 3px solid #FDB927;
-    padding: 8px 16px;
-    margin: 8px 0 14px 0;
-    background: #0a0f1a;
-    border-radius: 0 4px 4px 0;
-}
-.quote-text {
-    color: #FDB927;
-    font-size: 16px;
-    font-style: italic;
-    font-weight: 700;
-}
-.quote-attr {
-    color: #444;
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 3px;
-    margin-top: 3px;
-}
-
-/* ── Metric pill ── */
-.metric-pill {
-    background: #050a14;
-    border: 1px solid #1a2a3a;
+/* ── Metric card ── */
+.m-card {
+    background: #0d0d0d;
+    border: 1px solid #1a1a1a;
     border-radius: 6px;
-    padding: 10px 12px;
+    padding: 10px 12px 8px 12px;
     text-align: center;
 }
-.metric-pill-lbl {
-    color: #444;
-    font-size: 9px;
-    text-transform: uppercase;
-    letter-spacing: 2px;
+.m-lbl {
+    color: #444; font-size: 9px;
+    text-transform: uppercase; letter-spacing: 2px;
     margin-bottom: 4px;
 }
-.metric-pill-val {
-    font-size: 20px;
-    font-weight: 900;
-    font-family: 'Impact', sans-serif;
+.m-val {
+    font-size: 19px; font-weight: 900;
+    font-family: 'SF Mono', 'Consolas', monospace;
 }
-.metric-pill-sub {
-    color: #333;
-    font-size: 10px;
-    margin-top: 3px;
+.m-sub { color: #333; font-size: 10px; margin-top: 3px; }
+
+/* ── Edge panel ── */
+.edge-panel {
+    background: #0a0a0a;
+    border: 1px solid #1a1a1a;
+    border-radius: 6px;
+    padding: 12px 14px;
+}
+.edge-market {
+    color: #555; font-size: 9px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 3px;
+    margin-bottom: 8px;
+}
+.edge-status {
+    font-size: 11px; font-weight: 900;
+    text-transform: uppercase; letter-spacing: 2px;
+    margin-bottom: 6px;
+}
+.edge-bar-bg {
+    background: #111; border-radius: 3px; height: 6px;
+    overflow: hidden; margin: 6px 0 8px 0;
+}
+.edge-bar-fill { height: 100%; border-radius: 3px; }
+.edge-stat { color: #555; font-size: 10px; font-family: monospace; }
+
+/* ── Position table ── */
+.pos-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 6px 8px; border-radius: 4px;
+    border-left: 2px solid #FDB927;
+    background: #0d0d0d; margin-bottom: 4px;
+    font-family: 'SF Mono', 'Consolas', monospace;
+    font-size: 11px; color: #ccc;
+}
+.pos-symbol { color: #fff; font-weight: 700; min-width: 90px; }
+.pos-detail { color: #555; font-size: 10px; }
+.pos-pnl { font-weight: 700; margin-left: auto; font-size: 13px; }
+.pos-empty {
+    color: #222; font-size: 11px; font-style: italic;
+    padding: 12px 0; text-align: center;
 }
 
 /* ── Market panel ── */
-.market-panel {
-    background: #030912;
-    border: 1px solid #0d1e3a;
+.mkt-panel {
+    background: #0a0a0a;
+    border: 1px solid #1a1a1a;
     border-radius: 6px;
     padding: 12px 14px;
-    min-height: 130px;
 }
-.mp-header {
-    color: #FDB927;
-    font-size: 10px;
-    font-weight: 900;
-    text-transform: uppercase;
-    letter-spacing: 3px;
-    border-bottom: 1px solid #0d1e3a;
-    padding-bottom: 6px;
-    margin-bottom: 8px;
+.mkt-hdr {
+    color: #555; font-size: 9px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 3px;
+    border-bottom: 1px solid #0f0f0f;
+    padding-bottom: 6px; margin-bottom: 8px;
 }
-.mp-position {
-    background: #0d1e3a22;
-    border-left: 2px solid #FDB927;
-    padding: 5px 8px;
-    border-radius: 0 3px 3px 0;
-    font-size: 11px;
-    margin-bottom: 5px;
-}
-.mp-empty {
-    color: #222;
-    font-size: 11px;
-    font-style: italic;
-    padding: 8px 0;
-}
-
-/* ── Trade table ── */
-.trade-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 4px 0;
-    border-bottom: 1px solid #080808;
-    font-family: monospace;
-    font-size: 11px;
-}
-
-/* ── Signal feed ── */
-.sig-row {
-    padding: 3px 0;
-    border-bottom: 1px solid #080808;
-    font-family: monospace;
-    font-size: 11px;
-    display: flex;
-    gap: 6px;
-}
+.mkt-row { font-family: monospace; font-size: 10px; color: #444; padding: 2px 0; }
+.mkt-val { color: #aaa; }
 
 /* ── Risk gauge ── */
-.gauge-bar-bg {
-    background: #0a0a0a;
-    border-radius: 3px;
-    height: 8px;
-    overflow: hidden;
-    margin: 4px 0;
+.gauge-wrap { margin-bottom: 10px; }
+.gauge-lbl {
+    display: flex; justify-content: space-between;
+    color: #555; font-size: 10px; font-family: monospace;
+    margin-bottom: 3px;
 }
-.gauge-bar-fill {
-    height: 100%;
-    border-radius: 3px;
-    transition: width 0.3s;
+.gauge-bg {
+    background: #111; border-radius: 3px;
+    height: 8px; overflow: hidden;
+}
+.gauge-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
+
+/* ── Trade/signal rows ── */
+.t-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 4px 0; border-bottom: 1px solid #0d0d0d;
+    font-family: monospace; font-size: 11px;
+}
+.s-row {
+    padding: 4px 0; border-bottom: 1px solid #0d0d0d;
+    font-family: monospace; font-size: 10px; color: #555;
 }
 
-/* ── Halt banner ── */
-.halt-banner {
-    background: #FF1744;
-    color: #fff;
-    padding: 10px 16px;
-    border-radius: 4px;
-    text-align: center;
-    font-weight: 900;
-    font-size: 15px;
-    letter-spacing: 2px;
-    margin: 6px 0;
+/* ── Status badges ── */
+.badge {
+    display: inline-block; padding: 1px 6px;
+    border-radius: 3px; font-size: 9px;
+    font-weight: 700; text-transform: uppercase; letter-spacing: 1px;
 }
-.paper-banner {
-    background: #0d1e3a;
-    color: #FDB927;
-    padding: 5px 16px;
-    border-radius: 4px;
-    text-align: center;
-    font-weight: 700;
-    font-size: 11px;
-    letter-spacing: 2px;
-    margin-bottom: 6px;
+.badge-paper { background: #1a120a; color: #FDB927; border: 1px solid #3a2a0a; }
+.badge-live  { background: #1a0505; color: #FF4444; border: 1px solid #3a0a0a; }
+.badge-halted { background: #FF1744; color: #fff; }
+.badge-ok { background: #0a1a0a; color: #00C896; border: 1px solid #0a3a1a; }
+
+/* ── Banners ── */
+.halt-banner {
+    background: #FF1744; color: #fff;
+    padding: 8px 16px; border-radius: 4px;
+    text-align: center; font-weight: 900;
+    font-size: 14px; letter-spacing: 2px; margin: 6px 0;
 }
 
 /* ── Chat ── */
 .chat-user {
-    background: #0d1e3a;
-    color: #ddd;
-    padding: 8px 12px;
-    border-radius: 12px 12px 4px 12px;
-    margin: 4px 0;
-    font-size: 13px;
+    background: #0f1525; color: #ddd;
+    padding: 8px 12px; border-radius: 12px 12px 4px 12px;
+    margin: 4px 0; font-size: 13px;
 }
 .chat-bot {
-    background: #0a0a0a;
-    color: #ccc;
-    padding: 8px 12px;
-    border-radius: 12px 12px 12px 4px;
-    margin: 4px 0;
-    font-size: 13px;
+    background: #0a0a0a; color: #ccc;
+    padding: 8px 12px; border-radius: 12px 12px 12px 4px;
+    margin: 4px 0; font-size: 13px;
     border-left: 3px solid #FDB927;
 }
 
-/* ── SAIYAN overrides ── */
-.saiyan .main, .saiyan .stApp { background: #050005 !important; }
-.saiyan-score { font-family: 'Impact', sans-serif; font-size: 72px; font-weight: 900;
-    text-align: center; text-shadow: 0 0 30px currentColor; }
-.ki-track { background: #0a0005; border-radius: 20px; height: 10px;
-    overflow: hidden; margin: 3px 0; }
-.ki-fill { height: 100%; border-radius: 20px; }
-.warrior-card {
-    border-radius: 8px;
-    padding: 12px;
-    font-size: 11px;
-}
-.w-bardock { background: #1a0005; border: 1px solid #8B0000; }
-.w-vegeta  { background: #00001a; border: 1px solid #1D428A; }
-.w-krillin { background: #1a0d00; border: 1px solid #FF8C00; }
-
-/* ── Animations ── */
-@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
-@keyframes gold-glow { 0%,100%{text-shadow:0 0 10px #FDB92755} 50%{text-shadow:0 0 25px #FDB927cc} }
-.live-dot { animation: pulse 2s infinite; }
-.gold-glow { animation: gold-glow 3s ease-in-out infinite; }
-
-/* ── Divider ── */
-.divider { border-top: 1px solid #0d0d0d; margin: 12px 0; }
-
-/* ── Popover ── */
+/* ── Popover info button ── */
 div[data-testid="stPopover"] > button {
-    background: transparent !important; border: 1px solid #1a1a1a !important;
+    background: transparent !important;
+    border: 1px solid #1e1e1e !important;
     color: #333 !important; padding: 0 !important;
-    min-height: 18px !important; height: 18px !important; width: 18px !important;
-    border-radius: 50% !important; font-size: 10px !important;
+    min-height: 16px !important; height: 16px !important;
+    width: 16px !important; border-radius: 50% !important;
+    font-size: 9px !important; line-height: 1 !important;
 }
+div[data-testid="stPopover"] > button:hover {
+    color: #888 !important; border-color: #444 !important;
+}
+
+/* ── Misc ── */
+.stExpander { border: 1px solid #111 !important; }
+div[data-testid="stChatInput"] textarea {
+    background: #0d0d0d !important; border-color: #222 !important;
+    color: #ccc !important;
+}
+.divider { border-top: 1px solid #0d0d0d; margin: 14px 0; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -328,7 +280,7 @@ def et_now() -> str:
 
 def fmt_ts(ts: str, short: bool = False) -> str:
     if not ts:
-        return ''
+        return '—'
     try:
         dt = datetime.fromisoformat(ts)
         tz = pytz.timezone(MARKET_TIMEZONE)
@@ -424,20 +376,23 @@ def _write_env(updates: dict) -> None:
     except Exception as e:
         st.error(f"Failed to write .env: {e}")
 
-def _quote(pnl: float, is_halted: bool, edge_status: str, hour: int) -> str:
-    if is_halted:
-        return LEBRON['halt']
-    if pnl > 10:
-        return LEBRON['win']
-    if pnl < -5:
-        return LEBRON['loss']
-    if edge_status == 'STRONG':
-        return LEBRON['edge_on']
-    if edge_status in ('DEGRADED', 'BLOCKED'):
-        return LEBRON['edge_off']
-    if hour < 6:
-        return LEBRON['overnight']
-    return [LEBRON['startup'], LEBRON['patience'], LEBRON['goal']][hour % 3]
+def _info(text: str):
+    """Inline info popover button."""
+    with st.popover("ℹ️"):
+        st.markdown(f'<div style="font-size:12px;color:#aaa;">{text}</div>',
+                    unsafe_allow_html=True)
+
+def _section(title: str, info_text: str, accent: bool = False):
+    """Section header with info button."""
+    c1, c2 = st.columns([20, 1])
+    with c1:
+        color = '#FDB927' if accent else '#555'
+        st.markdown(
+            f'<div class="sec-hdr"><span style="color:{color};">{title}</span></div>',
+            unsafe_allow_html=True,
+        )
+    with c2:
+        _info(info_text)
 
 def call_claude(messages: list, ctx: str) -> str:
     if not ANTHROPIC_API_KEY:
@@ -460,26 +415,24 @@ def call_claude(messages: list, ctx: str) -> str:
         return f"Error: {e}"
 
 def build_context() -> str:
-    pos   = _live_positions()
-    pnl   = get_todays_pnl(paper=PAPER_TRADING)
-    fees  = get_todays_fees(paper=PAPER_TRADING)
-    stats = get_all_time_stats(paper=PAPER_TRADING)
-    rm    = get_risk_manager()
-    risk  = rm.status_report()
-    wr14  = get_win_rate(lookback_days=14, paper=PAPER_TRADING)
-    mo    = get_monthly_api_cost()
+    pos    = _live_positions()
+    pnl    = get_todays_pnl(paper=PAPER_TRADING)
+    fees   = get_todays_fees(paper=PAPER_TRADING)
+    stats  = get_all_time_stats(paper=PAPER_TRADING)
+    rm     = get_risk_manager()
+    risk   = rm.status_report()
+    wr14   = get_win_rate(lookback_days=14, paper=PAPER_TRADING)
+    mo     = get_monthly_api_cost()
     recent = get_recent_trades(limit=10, paper=PAPER_TRADING)
-
     pos_lines = ''
     for strat, syms in pos.items():
         for sym, p in syms.items():
             pos_lines += f"  {strat} {sym} entry=${p['entry']:.4f} stop=${p['stop']:.4f}\n"
-
     trade_lines = '\n'.join(
-        f"  {fmt_ts(t.get('ts',''))} {t.get('action','')} {t.get('symbol','')} P&L=${t.get('pnl_usd',0):+.4f}"
+        f"  {fmt_ts(t.get('ts',''))} {t.get('action','')} {t.get('symbol','')} "
+        f"P&L=${t.get('pnl_usd',0):+.4f}"
         for t in recent
     ) or '  None'
-
     _n = len(FULL_DEBATE_AGENTS)
     return f"""You are the AI brain of this autonomous trading system. Be direct. Protect capital first.
 Philosophy: edge preservation over time. The rolling edge monitor is the most important component.
@@ -500,730 +453,697 @@ RULES: {_n} agents, 2/3 BUY = BUY | no entries 2-3am ET | daily loss limit {MAX_
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# ROW 0 — STATUS BAR
+# ══════════════════════════════════════════════════════════════════════════════
+
+@st.fragment(run_every=5)
+def row_status_bar():
+    is_halted, halt_reason = _live_halt()
+    secs = _bot_last_seen()
+
+    if PAPER_TRADING:
+        mode_html = '<span class="badge badge-paper">PAPER</span>'
+    else:
+        mode_html = '<span class="badge badge-live">LIVE — REAL MONEY</span>'
+
+    if secs is None:
+        bot_html = '<span style="color:#888;font-size:10px;">⚪ BOT NOT STARTED</span>'
+    elif secs > 180:
+        bot_html = f'<span style="color:#FF4444;font-size:10px;">🔴 STALE ({int(secs)}s)</span>'
+    else:
+        bot_html = f'<span style="color:#00C896;font-size:10px;">🟢 RUNNING ({int(secs)}s ago)</span>'
+
+    c1, c2, c3 = st.columns([3, 5, 3])
+    with c1:
+        st.markdown(
+            f'<div style="padding:6px 0;">{mode_html}</div>',
+            unsafe_allow_html=True,
+        )
+    with c2:
+        if is_halted:
+            st.markdown(
+                f'<div class="halt-banner">⛔ HALTED — {halt_reason or "Limit reached"}</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                f'<div style="padding:6px 0;text-align:center;">{bot_html}</div>',
+                unsafe_allow_html=True,
+            )
+    with c3:
+        st.markdown(
+            f'<div style="text-align:right;color:#333;font-size:10px;'
+            f'font-family:monospace;padding:8px 0;">{et_now()}</div>',
+            unsafe_allow_html=True,
+        )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # ROW 1 — GIANT P&L SCOREBOARD
 # ══════════════════════════════════════════════════════════════════════════════
 
 @st.fragment(run_every=5)
-def row_scoreboard(saiyan: bool):
-    pnl      = get_todays_pnl(paper=PAPER_TRADING)
-    fees     = get_todays_fees(paper=PAPER_TRADING)
-    net      = pnl - fees
-    stats    = get_all_time_stats(paper=PAPER_TRADING)
+def row_scoreboard():
+    c_hdr, c_info = st.columns([20, 1])
+    with c_hdr:
+        st.markdown('<div class="sec-hdr">P&L SCOREBOARD</div>', unsafe_allow_html=True)
+    with c_info:
+        _info("Today's net P&L = realized gross profits minus all fees paid today. "
+              "Resets to $0 at midnight ET. Gold = above breakeven. Red = in the hole.")
+
+    pnl   = get_todays_pnl(paper=PAPER_TRADING)
+    fees  = get_todays_fees(paper=PAPER_TRADING)
+    net   = pnl - fees
+    stats = get_all_time_stats(paper=PAPER_TRADING)
     real_bal = ACCOUNT_SIZE + stats.get('total_pnl', 0)
-    secs     = _bot_last_seen()
-    is_halted, halt_reason = _live_halt()
 
-    color = '#00C853' if net >= 0 else '#FF1744'
+    color = '#00C896' if net >= 0 else '#FF4444'
+    prefix = '+' if net >= 0 else ''
+    bal_color = '#00C896' if real_bal >= ACCOUNT_SIZE else '#FF4444'
+    at_color = '#00C896' if stats.get('total_pnl', 0) >= 0 else '#FF4444'
 
-    # Mode banner
-    if PAPER_TRADING:
+    l, m, r = st.columns([2, 4, 2])
+    with m:
         st.markdown(
-            '<div class="paper-banner">📄 PAPER TRADING — Simulated capital</div>',
+            f'<div class="scoreboard">'
+            f'<span class="score-pnl" style="color:{color};">{prefix}${net:.2f}</span>'
+            f'<div class="score-label">TODAY NET P&L</div>'
+            f'</div>',
             unsafe_allow_html=True,
         )
-    else:
+    with l:
         st.markdown(
-            '<div class="halt-banner" style="background:#c60020;">💰 LIVE — REAL MONEY</div>',
+            f'<div style="padding-top:24px;">'
+            f'<div style="color:#333;font-size:9px;text-transform:uppercase;letter-spacing:2px;">Gross</div>'
+            f'<div style="color:#888;font-size:16px;font-weight:700;font-family:monospace;">'
+            f'{prefix}${pnl:.2f}</div>'
+            f'<div style="color:#333;font-size:9px;margin-top:4px;">Fees: −${fees:.2f}</div>'
+            f'</div>',
             unsafe_allow_html=True,
         )
-
-    if is_halted:
+    with r:
         st.markdown(
-            f'<div class="halt-banner">⛔ HALTED — {halt_reason or "Limit reached"}</div>',
-            unsafe_allow_html=True,
-        )
-
-    # Bot alive indicator
-    if secs is None:
-        bot_html = '<span style="color:#FF8F00;">🟡 STARTING</span>'
-    elif secs > 180:
-        bot_html = f'<span style="color:#FF1744;" class="live-dot">🔴 STALE {int(secs)}s ago</span>'
-    else:
-        bot_html = (f'<span style="color:#00C853;font-weight:900;">🟢</span>'
-                    f'<span style="color:#333;font-size:10px;margin-left:4px;">{int(secs)}s ago</span>')
-
-    left_col, mid_col, right_col = st.columns([2, 4, 2])
-
-    with left_col:
-        st.markdown(
-            f'<div style="padding-top:20px;">'
-            f'{bot_html}'
-            f'<div style="color:#222;font-size:9px;font-family:monospace;margin-top:4px;">{et_now()}</div>'
-            f'</div>', unsafe_allow_html=True,
-        )
-
-    with mid_col:
-        if saiyan:
-            # DBZ power level display
-            power = max(1, int(abs(net) * 1000 + 9001))
-            label = "POWER LEVEL"
-            glow = 'gold-glow' if net >= 0 else ''
-            st.markdown(
-                f'<div class="scoreboard {glow}">'
-                f'<span class="scoreboard-pnl" style="color:{color};">{power:,}</span>'
-                f'<div class="scoreboard-sub" style="color:{color}88;">{label}</div>'
-                f'</div>', unsafe_allow_html=True,
-            )
-        else:
-            prefix = '+' if net >= 0 else ''
-            glow = 'gold-glow' if net > 5 else ''
-            st.markdown(
-                f'<div class="scoreboard {glow}">'
-                f'<span class="scoreboard-pnl" style="color:{color};">{prefix}${net:.2f}</span>'
-                f'<div class="scoreboard-sub">TODAY NET P&L</div>'
-                f'</div>', unsafe_allow_html=True,
-            )
-
-    with right_col:
-        bal_color = '#00C853' if real_bal >= ACCOUNT_SIZE else '#FF1744'
-        st.markdown(
-            f'<div style="padding-top:20px;text-align:right;">'
+            f'<div style="padding-top:24px;text-align:right;">'
             f'<div style="color:#333;font-size:9px;text-transform:uppercase;letter-spacing:2px;">Balance</div>'
-            f'<div style="color:{bal_color};font-size:22px;font-weight:900;">${real_bal:,.2f}</div>'
-            f'<div style="color:#222;font-size:10px;">gross ${pnl:+.2f} · fees −${fees:.2f}</div>'
-            f'</div>', unsafe_allow_html=True,
+            f'<div style="color:{bal_color};font-size:16px;font-weight:700;font-family:monospace;">'
+            f'${real_bal:,.2f}</div>'
+            f'<div style="color:{at_color};font-size:9px;margin-top:4px;">'
+            f'All-time: {("+" if stats.get("total_pnl",0)>=0 else "")}${stats.get("total_pnl",0):.2f}</div>'
+            f'</div>',
+            unsafe_allow_html=True,
         )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# ROW 2 — LEBRON QUOTE
+# ROW 2 — SIX KEY METRICS
 # ══════════════════════════════════════════════════════════════════════════════
 
-@st.fragment(run_every=60)
-def row_quote(saiyan: bool):
-    pnl      = get_todays_pnl(paper=PAPER_TRADING)
-    is_halted, _ = _live_halt()
-    hour     = datetime.now(pytz.timezone(MARKET_TIMEZONE)).hour
-    es       = get_edge_state('crypto_macd_consensus', paper=PAPER_TRADING)
-    quote    = _quote(pnl, is_halted, es['status'], hour)
+@st.fragment(run_every=10)
+def row_metrics():
+    _section(
+        "KEY METRICS",
+        "Six numbers that matter most. "
+        "Win Rate = last 20 trades (rolling). "
+        "Edge Score = composite of win rate × profit factor × consistency (0–1 scale; above 0.7 = size up, below 0.3 = size down). "
+        "Daily Loss % = how much of today's 4% hard limit you've used. "
+        "API Cost = Claude AI spend this month."
+    )
 
-    if saiyan:
-        st.markdown(
-            f'<div style="border-left:3px solid #FDB927;padding:6px 14px;margin:6px 0 12px 0;'
-            f'background:#0a0005;">'
-            f'<div style="color:#FDB927;font-size:14px;font-style:italic;font-weight:700;">'
-            f'⚡ "{quote}"</div>'
-            f'<div style="color:#333;font-size:9px;letter-spacing:3px;margin-top:2px;">'
-            f'— THE KING · SAIYAN TRANSMISSION</div>'
-            f'</div>', unsafe_allow_html=True,
+    pnl    = get_todays_pnl(paper=PAPER_TRADING)
+    fees   = get_todays_fees(paper=PAPER_TRADING)
+    stats  = get_all_time_stats(paper=PAPER_TRADING)
+    real_bal = ACCOUNT_SIZE + stats.get('total_pnl', 0)
+    wr20   = get_win_rate(lookback_days=7, paper=PAPER_TRADING)
+    mo     = get_monthly_api_cost()
+    heat   = get_heat_level(paper=PAPER_TRADING)
+    es     = get_edge_state('crypto_macd_consensus', paper=PAPER_TRADING)
+
+    net        = pnl - fees
+    daily_pct  = heat.get('pct_drawn', 0.0)
+    edge_score = es.get('edge_score', 0.5)
+
+    def _color(v, lo, hi):
+        if v >= hi:
+            return '#00C896'
+        if v <= lo:
+            return '#FF4444'
+        return '#FDB927'
+
+    def _card(label, value, sub, color='#aaa'):
+        return (
+            f'<div class="m-card">'
+            f'<div class="m-lbl">{label}</div>'
+            f'<div class="m-val" style="color:{color};">{value}</div>'
+            f'<div class="m-sub">{sub}</div>'
+            f'</div>'
         )
-    else:
-        st.markdown(
-            f'<div class="quote-bar">'
-            f'<div class="quote-text">"{quote}"</div>'
-            f'<div class="quote-attr">— LeBron James</div>'
-            f'</div>', unsafe_allow_html=True,
-        )
+
+    cols = st.columns(6)
+    cards = [
+        ("BALANCE",       f'${real_bal:,.2f}',
+         f'start ${ACCOUNT_SIZE:,.0f}',
+         _color(real_bal, ACCOUNT_SIZE * 0.95, ACCOUNT_SIZE * 1.05)),
+        ("TODAY NET",     f'{"+" if net>=0 else ""}{net:.2f}',
+         f'gross {("+" if pnl>=0 else "")}{pnl:.2f}',
+         '#00C896' if net >= 0 else '#FF4444'),
+        ("ALL-TIME P&L",  f'{"+" if stats.get("total_pnl",0)>=0 else ""}'
+                          f'${stats.get("total_pnl",0):.2f}',
+         f'{stats.get("total",0)} trades',
+         '#00C896' if stats.get('total_pnl', 0) >= 0 else '#FF4444'),
+        ("20-TRADE WR",   f'{wr20:.1%}',
+         'need ≥52% for live',
+         _color(wr20, 0.45, 0.55)),
+        ("EDGE SCORE",    f'{edge_score:.2f}',
+         es.get('status', 'UNCERTAIN'),
+         _color(edge_score, 0.3, 0.7)),
+        ("DAILY LOSS",    f'{daily_pct:.1%}',
+         f'limit {MAX_DAILY_LOSS_PCT:.0%}',
+         _color(MAX_DAILY_LOSS_PCT - daily_pct, 0.005, 0.02)),
+    ]
+    for col, (lbl, val, sub, clr) in zip(cols, cards):
+        with col:
+            st.markdown(_card(lbl, val, sub, clr), unsafe_allow_html=True)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# ROW 3 — SIX METRICS
+# ROW 3 — EDGE MONITOR (most important component)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@st.fragment(run_every=30)
+def row_edge_monitor():
+    _section(
+        "EDGE MONITOR",
+        "⚠️ Most important component in the system. "
+        "Tracks rolling 20-trade performance per market. "
+        "When edge_score < 0.30 for 2 consecutive windows: position sizing automatically cut 50%. "
+        "When edge_score > 0.70 for 2 consecutive windows: sizing scales toward Kelly max. "
+        "STRONG (≥0.70) · NORMAL (0.40–0.70) · FADING (0.30–0.40) · DEGRADED (<0.30). "
+        "Sizing multiplier shows what fraction of normal size the system is currently using.",
+        accent=True,
+    )
+
+    MARKETS = [
+        ('CRYPTO',       'crypto_macd_consensus'),
+        ('MES FUTURES',  'futures_scalper'),
+        ('PERP',         'crypto_perp'),
+    ]
+
+    STATUS_COLORS = {
+        'STRONG':    '#00C896',
+        'NORMAL':    '#FDB927',
+        'FADING':    '#FF8C00',
+        'DEGRADED':  '#FF4444',
+        'UNCERTAIN': '#555',
+    }
+
+    cols = st.columns(3)
+    for col, (mkt_name, strat_key) in zip(cols, MARKETS):
+        es = get_edge_state(strat_key, paper=PAPER_TRADING)
+        status    = es.get('status', 'UNCERTAIN')
+        score     = es.get('edge_score', 0.5)
+        wr20      = es.get('win_rate_20', 0.5)
+        pf        = es.get('profit_factor', 1.0)
+        mult      = es.get('sizing_multiplier', 1.0)
+        n_trades  = es.get('window_trades', 0)
+        consec    = es.get('consecutive_bad', 0)
+        clr       = STATUS_COLORS.get(status, '#555')
+        bar_pct   = min(100, int(score * 100))
+
+        with col:
+            st.markdown(
+                f'<div class="edge-panel">'
+                f'<div class="edge-market">{mkt_name}</div>'
+                f'<div class="edge-status" style="color:{clr};">{status}</div>'
+                f'<div class="edge-bar-bg">'
+                f'<div class="edge-bar-fill" style="width:{bar_pct}%;background:{clr};"></div>'
+                f'</div>'
+                f'<div class="edge-stat">Score: <span style="color:#aaa;">{score:.2f}</span>'
+                f' &nbsp; WR-20: <span style="color:#aaa;">{wr20:.1%}</span></div>'
+                f'<div class="edge-stat">PF: <span style="color:#aaa;">{pf:.2f}</span>'
+                f' &nbsp; Size: <span style="color:#aaa;">{mult:.0%}</span>'
+                f' &nbsp; Trades: <span style="color:#aaa;">{n_trades}</span></div>'
+                + (f'<div class="edge-stat" style="color:#FF4444;margin-top:4px;">'
+                   f'⚠ {consec} consecutive bad windows</div>' if consec >= 2 else '')
+                + '</div>',
+                unsafe_allow_html=True,
+            )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ROW 4 — OPEN POSITIONS
+# ══════════════════════════════════════════════════════════════════════════════
+
+@st.fragment(run_every=5)
+def row_positions():
+    _section(
+        "OPEN POSITIONS",
+        "All active positions with real-time stop and target distances. "
+        "% to Stop = how far price must move against you before the stop triggers. "
+        "% to Target = how far to take-profit. "
+        "Age = how long the position has been open. "
+        "Stops are never moved wider after entry (hard rule)."
+    )
+
+    positions = _live_positions()
+
+    if not positions:
+        st.markdown('<div class="pos-empty">No open positions</div>', unsafe_allow_html=True)
+        return
+
+    for strat, syms in positions.items():
+        for sym, p in syms.items():
+            entry   = float(p.get('entry', 0))
+            stop    = float(p.get('stop', 0))
+            target  = float(p.get('target', 0))
+            ts      = p.get('ts_entry', '')
+            direc   = p.get('direction', 'LONG')
+
+            # Age
+            age_str = '—'
+            try:
+                from datetime import timezone as _tz
+                dt = datetime.fromisoformat(ts)
+                if not dt.tzinfo:
+                    dt = dt.replace(tzinfo=_tz.utc)
+                mins = int((datetime.now(_tz.utc) - dt).total_seconds() / 60)
+                age_str = f'{mins}m' if mins < 60 else f'{mins//60}h {mins%60}m'
+            except Exception:
+                pass
+
+            # Distances
+            if entry > 0 and stop > 0:
+                to_stop   = abs(entry - stop) / entry * 100
+                to_target = abs(target - entry) / entry * 100 if target else 0
+            else:
+                to_stop = to_target = 0
+
+            stop_clr   = '#FF4444' if to_stop < 0.5 else '#888'
+            target_clr = '#00C896'
+
+            st.markdown(
+                f'<div class="pos-row">'
+                f'<span class="pos-symbol">{sym}</span>'
+                f'<span class="pos-detail">{strat} · {direc}</span>'
+                f'<span class="pos-detail">Entry: {entry:.5g}</span>'
+                f'<span style="color:{stop_clr};font-size:10px;font-family:monospace;">'
+                f'Stop: {to_stop:.2f}% away</span>'
+                f'<span style="color:{target_clr};font-size:10px;font-family:monospace;">'
+                f'Target: {to_target:.2f}% away</span>'
+                f'<span class="pos-detail">{age_str}</span>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ROW 5 — THREE MARKET PANELS
 # ══════════════════════════════════════════════════════════════════════════════
 
 @st.fragment(run_every=15)
-def row_six_metrics(saiyan: bool):
-    stats  = get_all_time_stats(paper=PAPER_TRADING)
-    wr14   = get_win_rate(lookback_days=14, paper=PAPER_TRADING)
-    monthly = get_monthly_api_cost()
-    es     = get_edge_state('crypto_macd_consensus', paper=PAPER_TRADING)
+def row_market_panels():
+    _section(
+        "MARKETS",
+        "Per-market status panel. Shows current position count, the most recent AI debate signal, "
+        "and the most recent completed trade. Each market runs its own strategy and edge monitor independently."
+    )
 
-    balance  = ACCOUNT_SIZE + stats.get('total_pnl', 0)
-    pnl_today = get_todays_pnl(paper=PAPER_TRADING)
-    fees_today = get_todays_fees(paper=PAPER_TRADING)
-    total_pnl = stats.get('total_pnl', 0)
-    edge_score = es.get('edge_score', 0.5)
-    edge_status = es.get('status', 'UNCERTAIN')
+    positions = _live_positions()
+    recent    = get_recent_trades(limit=3, paper=PAPER_TRADING)
+    signals   = get_todays_signals(paper=PAPER_TRADING) or []
 
-    def _col(color): return color
-    bal_c    = '#00C853' if balance >= ACCOUNT_SIZE else '#FF1744'
-    pnl_c    = '#00C853' if pnl_today >= 0 else '#FF1744'
-    all_c    = '#00C853' if total_pnl >= 0 else '#FF1744'
-    wr_c     = '#00C853' if wr14 >= 0.52 else '#FDB927' if wr14 >= 0.45 else '#FF1744'
-    edge_c   = {'STRONG':'#00C853','OK':'#FDB927','DEGRADED':'#FF8F00',
-                'BLOCKED':'#FF1744','UNCERTAIN':'#555'}.get(edge_status,'#555')
-    api_c    = '#00C853' if monthly < 5 else '#FF8F00'
+    def _last_signal(strategy_key: str) -> str:
+        for s in signals:
+            if strategy_key.lower() in str(s.get('strategy', '')).lower():
+                action = s.get('action', '')
+                sym    = s.get('symbol', '')
+                ts     = fmt_ts(s.get('ts', ''), short=True)
+                return f'{action} {sym} @ {ts}'
+        return '—'
 
-    METRICS = [
-        ('ACCOUNT BALANCE', f'${balance:,.2f}', f'+${ACCOUNT_SIZE:,.0f} base', bal_c),
-        ('TODAY P&L',       f'${pnl_today:+.2f}', f'net after ${fees_today:.2f} fees', pnl_c),
-        ('ALL-TIME P&L',    f'${total_pnl:+.2f}', f'{stats.get("total",0)} trades', all_c),
-        ('20-TRADE WIN RATE', f'{wr14:.1%}',        f'{stats.get("wins",0)}W/{stats.get("losses",0)}L', wr_c),
-        ('EDGE SCORE',      f'{edge_score:.2f}',    edge_status, edge_c),
-        ('API COST / MO',   f'${monthly:.2f}',      '← keep this low', api_c),
-    ]
-
-    if saiyan:
-        DBZ_NAMES = ['POWER LEVEL', 'KI GAINED', 'BATTLE RECORD', 'WIN RATIO', 'EDGE POWER', 'SPIRIT COST']
-        METRICS = [(DBZ_NAMES[i], v, s, c) for i, (_, v, s, c) in enumerate(METRICS)]
-
-    cols = st.columns(6)
-    for i, (lbl, val, sub, color) in enumerate(METRICS):
-        with cols[i]:
-            st.markdown(
-                f'<div class="metric-pill">'
-                f'<div class="metric-pill-lbl">{lbl}</div>'
-                f'<div class="metric-pill-val" style="color:{color};">{val}</div>'
-                f'<div class="metric-pill-sub">{sub}</div>'
-                f'</div>', unsafe_allow_html=True,
-            )
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# ROW 4 — THREE MARKET PANELS
-# ══════════════════════════════════════════════════════════════════════════════
-
-@st.fragment(run_every=10)
-def row_markets(saiyan: bool):
-    pos      = _live_positions()
-    debates  = get_recent_debates(limit=3)
-    recent   = get_recent_trades(limit=20, paper=PAPER_TRADING)
-    is_halted, _ = _live_halt()
-
-    # Get last debate / last trade per market
-    def _last_debate(market_keys):
-        for d in debates:
-            strat = d.get('strategy', '') or ''
-            sym   = d.get('symbol', '') or ''
-            if any(k in strat or k in sym.lower() for k in market_keys):
-                return d
-        return debates[0] if debates else {}
-
-    def _last_trade(market_keys):
+    def _last_trade(strategy_key: str) -> str:
         for t in recent:
-            s = (t.get('strategy') or '').lower()
-            if any(k in s for k in market_keys):
-                return t
-        return {}
+            if strategy_key.lower() in str(t.get('strategy', '')).lower():
+                sym  = t.get('symbol', '')
+                pnl  = t.get('pnl_usd', 0)
+                ts   = fmt_ts(t.get('ts', ''), short=True)
+                sign = '+' if pnl >= 0 else ''
+                clr  = '#00C896' if pnl >= 0 else '#FF4444'
+                return f'{sym} <span style="color:{clr};">{sign}${pnl:.2f}</span> @ {ts}'
+        return '—'
 
-    MARKETS = [
-        {
-            'name':   '₿ CRYPTO',
-            'saiyan': '⚡ BARDOCK SECTOR',
-            'keys':   ['crypto', 'btc', 'eth', 'sol', 'usdc'],
-            'strats': ['crypto', 'perp'],
-            'color':  '#FDB927',
-            'border': '#1D428A',
-        },
-        {
-            'name':   '📈 MES FUTURES',
-            'saiyan': '🔵 VEGETA SECTOR',
-            'keys':   ['futures', 'mes', 'scalper'],
-            'strats': ['futures_scalper'],
-            'color':  '#4488FF',
-            'border': '#1D428A',
-        },
-        {
-            'name':   '⚡ PERP / OTHER',
-            'saiyan': '🟠 KRILLIN SECTOR',
-            'keys':   ['perp', 'mean', 'reversion'],
-            'strats': ['perp', 'crypto_mean_reversion'],
-            'color':  '#FF8C00',
-            'border': '#1D428A',
-        },
+    PANELS = [
+        ('CRYPTO',      'crypto',   'Coinbase · 1-min candles · up to 5 positions'),
+        ('MES FUTURES', 'futures',  'Tradovate · MES opening range breakout · yfinance prices in paper'),
+        ('PERP',        'perp',     'Binance USD-M perp · funding rate aware · 4h flat exit'),
     ]
 
     cols = st.columns(3)
-    for i, m in enumerate(MARKETS):
-        title = m['saiyan'] if saiyan else m['name']
-        color = m['color']
-        border = '#5a0000' if saiyan and i == 0 else ('#00001a' if saiyan and i == 1 else ('#1a0d00' if saiyan else '#0d1e3a'))
-
-        # Collect open positions for this market
-        open_pos = []
-        for strat, syms in pos.items():
-            if any(k in strat.lower() for k in m['keys'] + m['strats']):
-                for sym, p in syms.items():
-                    open_pos.append((sym, p))
-
-        last_d = _last_debate(m['keys'] + m['strats'])
-        last_t = _last_trade(m['keys'] + m['strats'])
-
-        # Edge state
-        es_key = {'₿ CRYPTO': 'crypto_macd_consensus',
-                  '📈 MES FUTURES': 'futures_scalper',
-                  '⚡ PERP / OTHER': 'crypto_mean_reversion'}.get(m['name'], 'crypto_macd_consensus')
-        es = get_edge_state(es_key, paper=PAPER_TRADING)
-        es_color = {'STRONG':'#00C853','OK':'#FDB927','DEGRADED':'#FF8F00',
-                    'BLOCKED':'#FF1744','UNCERTAIN':'#333'}.get(es['status'],'#333')
-
-        pos_html = ''
-        if open_pos:
-            for sym, p in open_pos[:2]:
-                entry = float(p.get('entry', 0))
-                stop  = float(p.get('stop', 0))
-                tgt   = float(p.get('target', 0))
-                stop_pct = abs(entry - stop) / entry * 100 if entry > 0 else 0
-                dir_c = '#00C853' if p.get('direction','LONG') == 'LONG' else '#FF1744'
-                pos_html += (
-                    f'<div class="mp-position">'
-                    f'<span style="color:{color};font-weight:900;">{sym}</span>'
-                    f'<span style="color:{dir_c};margin-left:6px;font-size:10px;">{p.get("direction","LONG")}</span>'
-                    f'<div style="color:#444;margin-top:2px;">'
-                    f'in ${entry:.4f} · stop ${stop:.4f} ({stop_pct:.1f}%) · tgt ${tgt:.4f}'
-                    f'</div>'
-                    f'</div>'
-                )
-        else:
-            pos_html = '<div class="mp-empty">No open position</div>'
-
-        debate_html = ''
-        if last_d:
-            sig    = (last_d.get('final_signal') or '').upper()
-            sym_d  = last_d.get('symbol', '')
-            conf   = last_d.get('confidence', 0)
-            bv     = last_d.get('buy_votes', 0)
-            hv     = last_d.get('hold_votes', 0)
-            sc     = '#00C853' if sig == 'BUY' else '#FF1744' if sig in ('SELL','SHORT') else '#555'
-            debate_html = (
-                f'<div style="font-size:10px;color:#333;margin-top:6px;">'
-                f'<span style="color:#222;text-transform:uppercase;letter-spacing:1px;">Last signal</span>'
-                f'<span style="color:{color};margin-left:6px;">{sym_d}</span>'
-                f'<span style="color:{sc};font-weight:900;margin-left:6px;">{sig}</span>'
-                f'<span style="color:#222;margin-left:4px;">{bv}B/{hv}H {conf:.0%}</span>'
-                f'</div>'
-            )
-
-        trade_html = ''
-        if last_t:
-            tpnl   = float(last_t.get('pnl_usd') or 0)
-            tsym   = last_t.get('symbol', '')
-            tts    = fmt_ts(last_t.get('ts', ''), short=True)
-            tc     = '#00C853' if tpnl > 0 else '#FF1744' if tpnl < 0 else '#444'
-            trade_html = (
-                f'<div style="font-size:10px;color:#333;margin-top:4px;">'
-                f'<span style="color:#222;text-transform:uppercase;letter-spacing:1px;">Last trade</span>'
-                f'<span style="color:{color};margin-left:6px;">{tsym}</span>'
-                f'<span style="color:{tc};font-weight:900;margin-left:6px;">${tpnl:+.2f}</span>'
-                f'<span style="color:#222;margin-left:4px;">{tts}</span>'
-                f'</div>'
-            )
-
-        edge_bar_pct = int(es['sizing_multiplier'] * 100)
-        edge_bar_html = (
-            f'<div style="margin-top:6px;">'
-            f'<div style="font-size:9px;color:#222;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px;">'
-            f'Edge: <span style="color:{es_color};">{es["status"]}</span>'
-            f'<span style="color:#1a1a1a;margin-left:6px;">PF {es["profit_factor"]:.2f}</span>'
-            f'</div>'
-            f'<div class="gauge-bar-bg"><div class="gauge-bar-fill" '
-            f'style="width:{edge_bar_pct}%;background:{es_color};"></div></div>'
-            f'</div>'
+    for col, (title, key, note) in zip(cols, PANELS):
+        pos_count = sum(
+            1 for strat, syms in positions.items()
+            if key in strat.lower()
+            for _ in syms
         )
+        sig_html   = _last_signal(key)
+        trade_html = _last_trade(key)
+        es         = get_edge_state(
+            'crypto_macd_consensus' if key == 'crypto' else
+            'futures_scalper'       if key == 'futures' else
+            'crypto_perp',
+            paper=PAPER_TRADING,
+        )
+        edge_score = es.get('edge_score', 0.5)
+        bar_pct    = min(100, int(edge_score * 100))
+        bar_clr    = ('#00C896' if edge_score >= 0.7 else
+                      '#FDB927' if edge_score >= 0.4 else '#FF4444')
 
-        with cols[i]:
+        with col:
             st.markdown(
-                f'<div class="market-panel" style="background:{border}18;border-color:{color}33;">'
-                f'<div class="mp-header" style="color:{color};">{title}</div>'
-                f'{pos_html}'
-                f'{debate_html}'
-                f'{trade_html}'
-                f'{edge_bar_html}'
-                f'</div>', unsafe_allow_html=True,
+                f'<div class="mkt-panel">'
+                f'<div class="mkt-hdr">{title}</div>'
+                f'<div class="mkt-row">Positions: <span class="mkt-val">{pos_count}</span></div>'
+                f'<div class="mkt-row">Last signal: <span class="mkt-val">{sig_html}</span></div>'
+                f'<div class="mkt-row">Last trade: <span class="mkt-val">{trade_html}</span></div>'
+                f'<div style="margin-top:8px;">'
+                f'<div style="color:#333;font-size:9px;margin-bottom:3px;">EDGE</div>'
+                f'<div class="edge-bar-bg">'
+                f'<div class="edge-bar-fill" style="width:{bar_pct}%;background:{bar_clr};"></div>'
+                f'</div>'
+                f'</div>'
+                f'<div style="color:#222;font-size:9px;margin-top:6px;">{note}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
             )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# ROW 5 — RECENT TRADES | RECENT SIGNALS
-# ══════════════════════════════════════════════════════════════════════════════
-
-@st.fragment(run_every=8)
-def row_trades_signals(saiyan: bool):
-    col_l, col_r = st.columns(2)
-
-    with col_l:
-        trades = get_recent_trades(limit=15, paper=PAPER_TRADING)
-        label = '⚡ BATTLE LOG' if saiyan else '📋 RECENT TRADES'
-        st.markdown(
-            f'<div style="color:#FDB927;font-size:10px;font-weight:900;'
-            f'letter-spacing:2px;text-transform:uppercase;margin-bottom:6px;">'
-            f'{label}</div>', unsafe_allow_html=True,
-        )
-        if not trades:
-            st.markdown('<div style="color:#222;font-size:11px;font-style:italic;">'
-                        'No trades yet.</div>', unsafe_allow_html=True)
-        else:
-            html = ''
-            for t in trades:
-                pnl    = float(t.get('pnl_usd') or 0)
-                sym    = t.get('symbol', '')
-                action = t.get('action', '')
-                ts     = fmt_ts(t.get('ts', ''), short=True)
-                if pnl > 0:
-                    icon, color = ('✓', '#00C853')
-                elif pnl < 0:
-                    icon, color = ('✗', '#FF1744')
-                else:
-                    icon, color = ('→', '#444')
-                pnl_str = f'${pnl:+.3f}' if pnl != 0 else '(open)'
-                html += (
-                    f'<div class="trade-row">'
-                    f'<span style="color:{color};min-width:12px;">{icon}</span>'
-                    f'<span style="color:#ccc;min-width:100px;">{sym[:12]}</span>'
-                    f'<span style="color:#333;min-width:52px;">{ts}</span>'
-                    f'<span style="color:{color};margin-left:auto;font-weight:700;">{pnl_str}</span>'
-                    f'</div>'
-                )
-            st.markdown(f'<div style="max-height:240px;overflow-y:auto;">{html}</div>',
-                        unsafe_allow_html=True)
-
-    with col_r:
-        signals = get_todays_signals()
-        label = '🔭 SCOUTER FEED' if saiyan else '📡 SIGNAL FEED'
-        recent_sigs = sorted(signals, key=lambda x: x.get('ts', ''), reverse=True)[:15]
-        st.markdown(
-            f'<div style="color:#FDB927;font-size:10px;font-weight:900;'
-            f'letter-spacing:2px;text-transform:uppercase;margin-bottom:6px;">'
-            f'{label} '
-            f'<span style="background:#FF1744;color:#fff;font-size:8px;font-weight:900;'
-            f'padding:1px 5px;border-radius:2px;" class="live-dot">● LIVE</span>'
-            f'</div>', unsafe_allow_html=True,
-        )
-        if not recent_sigs:
-            st.markdown('<div style="color:#222;font-size:11px;font-style:italic;">'
-                        'Watching...</div>', unsafe_allow_html=True)
-        else:
-            html = ''
-            for s in recent_sigs:
-                sym    = s.get('symbol', '?')
-                conf   = float(s.get('confidence', 0))
-                acted  = bool(s.get('acted_on', False))
-                ts     = fmt_ts(s.get('ts', ''), short=True)
-                color  = '#FDB927' if acted else '#222'
-                prefix = '⚡' if acted else '·'
-                bar_n  = int(conf * 10)
-                bar = ''.join(
-                    f'<span style="color:{color};font-size:9px;">█</span>' if j < bar_n
-                    else '<span style="color:#0d0d0d;font-size:9px;">█</span>'
-                    for j in range(10)
-                )
-                html += (
-                    f'<div class="sig-row">'
-                    f'<span style="color:{color};min-width:12px;">{prefix}</span>'
-                    f'<span style="color:#aaa;min-width:90px;">{sym[:12]}</span>'
-                    f'<span style="font-family:monospace;">{bar}</span>'
-                    f'<span style="color:{color};min-width:30px;text-align:right;">{conf:.0%}</span>'
-                    f'<span style="color:#222;min-width:48px;text-align:right;">{ts}</span>'
-                    f'</div>'
-                )
-            st.markdown(f'<div style="max-height:240px;overflow-y:auto;">{html}</div>',
-                        unsafe_allow_html=True)
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# ROW 6 — CLAUDE AI CHAT
-# ══════════════════════════════════════════════════════════════════════════════
-
-def row_chat(saiyan: bool):
-    label = '🤖 ASK THE SAIYAN AI BRAIN' if saiyan else '🤖 ASK THE KING\'S AI BRAIN'
-    with st.expander(label, expanded=False):
-        if 'chat' not in st.session_state:
-            st.session_state['chat'] = []
-        for msg in st.session_state['chat']:
-            css = 'chat-user' if msg['role'] == 'user' else 'chat-bot'
-            st.markdown(f'<div class="{css}">{msg["content"]}</div>', unsafe_allow_html=True)
-        user_input = st.chat_input("Ask about trades, signals, edge, or risk...")
-        if user_input:
-            st.session_state['chat'].append({'role': 'user', 'content': user_input})
-            ctx  = build_context()
-            resp = call_claude(st.session_state['chat'], ctx)
-            st.session_state['chat'].append({'role': 'assistant', 'content': resp})
-            st.rerun()
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# ROW 7 — RISK GAUGES
+# ROW 6 — RISK GAUGES
 # ══════════════════════════════════════════════════════════════════════════════
 
 @st.fragment(run_every=10)
-def row_risk_gauges(saiyan: bool):
+def row_risk_gauges():
+    _section(
+        "RISK STATUS",
+        "Daily loss gauge: fills as you approach the 4% hard limit. At 100%, all trading halts automatically. "
+        "Heat levels: NORMAL → CAUTION (75% size) → WARNING (50%) → DANGER (25%) → HALT (0%). "
+        "Fee drag: daily fees as % of account — limit is 10% ($50 on $500). "
+        "Watchdog: time since last bot activity."
+    )
+
     heat     = get_heat_level(paper=PAPER_TRADING)
+    fees     = get_todays_fees(paper=PAPER_TRADING)
     secs     = _bot_last_seen()
-    is_halted, _ = _live_halt()
-    pos      = _live_positions()
+    rm       = get_risk_manager()
+    risk     = rm.status_report()
     stats    = get_all_time_stats(paper=PAPER_TRADING)
-    monthly  = get_monthly_api_cost()
+    real_bal = max(ACCOUNT_SIZE + stats.get('total_pnl', 0), 1.0)
 
-    total_pos = sum(len(syms) for syms in pos.values())
-    pct_drawn = max(heat.get('pct_drawn', 0), 0)
-    heat_lvl  = heat.get('level', 0)
+    daily_loss_pct = heat.get('pct_drawn', 0.0)
+    daily_limit    = MAX_DAILY_LOSS_PCT
+    daily_fill     = min(100, int(daily_loss_pct / daily_limit * 100)) if daily_limit > 0 else 0
+    daily_clr      = ('#00C896' if daily_fill < 50 else
+                      '#FDB927' if daily_fill < 75 else
+                      '#FF8C00' if daily_fill < 90 else '#FF4444')
+
+    fee_pct  = fees / real_bal
+    fee_fill = min(100, int(fee_pct / MAX_DAILY_FEE_DRAG_PCT * 100)) if MAX_DAILY_FEE_DRAG_PCT > 0 else 0
+    fee_clr  = ('#00C896' if fee_fill < 50 else
+                '#FDB927' if fee_fill < 75 else '#FF4444')
+
+    wdog_fill = 0
+    wdog_clr  = '#00C896'
+    wdog_lbl  = 'OK'
+    if secs is None:
+        wdog_fill, wdog_clr, wdog_lbl = 100, '#888', 'NOT STARTED'
+    elif secs > 900:
+        wdog_fill, wdog_clr, wdog_lbl = 100, '#FF4444', f'STALE {int(secs)}s'
+    elif secs > 300:
+        wdog_fill, wdog_clr, wdog_lbl = int(secs / 9), '#FF8C00', f'{int(secs)}s'
+    else:
+        wdog_fill, wdog_lbl = int(secs / 9), f'{int(secs)}s ago'
+
+    HEAT_COLORS = {
+        'NORMAL': '#00C896', 'CAUTION': '#FDB927',
+        'WARNING': '#FF8C00', 'DANGER': '#FF4444', 'HALT': '#FF1744',
+    }
     heat_label = heat.get('label', 'NORMAL')
-    heat_colors = {0: '#00C853', 1: '#FDB927', 2: '#FF8F00', 3: '#FF4444', 4: '#FF0000'}
-    heat_color = heat_colors.get(heat_lvl, '#333')
+    heat_clr   = HEAT_COLORS.get(heat_label, '#555')
 
-    watchdog_ok   = secs is not None and secs < 180
-    watchdog_color = '#00C853' if watchdog_ok else '#FF1744'
+    def _gauge(label, fill_pct, color, right_label):
+        return (
+            f'<div class="gauge-wrap">'
+            f'<div class="gauge-lbl"><span>{label}</span><span style="color:{color};">{right_label}</span></div>'
+            f'<div class="gauge-bg">'
+            f'<div class="gauge-fill" style="width:{fill_pct}%;background:{color};"></div>'
+            f'</div>'
+            f'</div>'
+        )
 
-    if saiyan:
-        HEAT_NAMES = {0:'BASE FORM', 1:'KAIOKEN x2', 2:'SUPER SAIYAN', 3:'SSJ2', 4:'POWER LIMIT'}
-        heat_label = HEAT_NAMES.get(heat_lvl, heat_label)
-
-    g1, g2, g3, g4, g5 = st.columns(5)
-
-    # Daily loss gauge
-    with g1:
-        bar_pct = min(pct_drawn / MAX_DAILY_LOSS_PCT, 1.0) * 100 if MAX_DAILY_LOSS_PCT > 0 else 0
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
         st.markdown(
-            f'<div style="font-size:9px;color:#333;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px;">'
-            f'{"⚡ Ki Drain" if saiyan else "Daily Loss"}</div>'
-            f'<div class="gauge-bar-bg"><div class="gauge-bar-fill" '
-            f'style="width:{bar_pct:.0f}%;background:{heat_color};"></div></div>'
-            f'<div style="font-size:10px;color:{heat_color};margin-top:2px;">'
-            f'{heat_label} ({pct_drawn*100:.1f}%/{MAX_DAILY_LOSS_PCT*100:.0f}%)</div>',
+            _gauge(f'Daily Loss', daily_fill,
+                   daily_clr, f'{daily_loss_pct:.1%} / {daily_limit:.0%}'),
+            unsafe_allow_html=True,
+        )
+    with c2:
+        st.markdown(
+            f'<div class="gauge-wrap">'
+            f'<div class="gauge-lbl"><span>Heat Level</span>'
+            f'<span style="color:{heat_clr};">{heat_label}</span></div>'
+            f'<div class="gauge-bg"><div class="gauge-fill" style="'
+            f'width:{int((heat.get("level",0)/4)*100)}%;background:{heat_clr};"></div></div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+    with c3:
+        st.markdown(
+            _gauge('Fee Drag', fee_fill, fee_clr,
+                   f'${fees:.2f} ({fee_pct:.1%})'),
+            unsafe_allow_html=True,
+        )
+    with c4:
+        st.markdown(
+            _gauge('Watchdog', wdog_fill, wdog_clr, wdog_lbl),
             unsafe_allow_html=True,
         )
 
-    # Position count
-    with g2:
-        pos_pct = min(total_pos / max(MAX_POSITIONS_CRYPTO, 1), 1.0) * 100
-        pos_color = '#FF8F00' if total_pos >= MAX_POSITIONS_CRYPTO else '#FDB927'
-        st.markdown(
-            f'<div style="font-size:9px;color:#333;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px;">'
-            f'{"Active Battles" if saiyan else "Open Positions"}</div>'
-            f'<div class="gauge-bar-bg"><div class="gauge-bar-fill" '
-            f'style="width:{pos_pct:.0f}%;background:{pos_color};"></div></div>'
-            f'<div style="font-size:10px;color:{pos_color};margin-top:2px;">'
-            f'{total_pos} / {MAX_POSITIONS_CRYPTO} max</div>',
-            unsafe_allow_html=True,
-        )
-
-    # Watchdog
-    with g3:
-        wd_pct = 100 if watchdog_ok else 0
-        wd_txt = f'{int(secs)}s ago' if secs else 'no data'
-        st.markdown(
-            f'<div style="font-size:9px;color:#333;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px;">'
-            f'{"Scouter Link" if saiyan else "Watchdog"}</div>'
-            f'<div class="gauge-bar-bg"><div class="gauge-bar-fill" '
-            f'style="width:{wd_pct}%;background:{watchdog_color};"></div></div>'
-            f'<div style="font-size:10px;color:{watchdog_color};margin-top:2px;">'
-            f'{"🟢 " if watchdog_ok else "🔴 "}{wd_txt}</div>',
-            unsafe_allow_html=True,
-        )
-
-    # API cost gauge
-    with g4:
-        # Flag if > $10/month
-        api_pct = min(monthly / 10.0, 1.0) * 100
-        api_c   = '#00C853' if monthly < 3 else '#FF8F00' if monthly < 8 else '#FF1744'
-        st.markdown(
-            f'<div style="font-size:9px;color:#333;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px;">'
-            f'{"Spirit Cost" if saiyan else "API Cost/Mo"}</div>'
-            f'<div class="gauge-bar-bg"><div class="gauge-bar-fill" '
-            f'style="width:{api_pct:.0f}%;background:{api_c};"></div></div>'
-            f'<div style="font-size:10px;color:{api_c};margin-top:2px;">${monthly:.2f} / $10 cap</div>',
-            unsafe_allow_html=True,
-        )
-
-    # Halt status
-    with g5:
-        halt_c = '#FF1744' if is_halted else '#00C853'
-        halt_t = ('⛔ HALTED' if is_halted else '🟢 TRADING') if not saiyan else ('⛔ POWER OFF' if is_halted else '⚡ POWER ON')
-        st.markdown(
-            f'<div style="font-size:9px;color:#333;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px;">'
-            f'{"System Power" if saiyan else "System Status"}</div>'
-            f'<div class="gauge-bar-bg"><div class="gauge-bar-fill" '
-            f'style="width:100%;background:{halt_c};"></div></div>'
-            f'<div style="font-size:10px;color:{halt_c};font-weight:900;margin-top:2px;">{halt_t}</div>',
-            unsafe_allow_html=True,
-        )
+    # Position counts
+    open_pos = risk.get('open_positions', 0)
+    max_pos  = MAX_POSITIONS_CRYPTO
+    st.markdown(
+        f'<div style="color:#333;font-size:10px;font-family:monospace;margin-top:4px;">'
+        f'Positions: {open_pos}/{max_pos} crypto · '
+        f'Deployed: {risk.get("deployed_pct", 0):.1%} · '
+        f'Size factor: {heat.get("size_factor",1.0):.0%}'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# DETAIL EXPANDERS (on-demand — below the fold)
+# ROW 7 — RECENT TRADES + SIGNALS
 # ══════════════════════════════════════════════════════════════════════════════
 
-@st.fragment(run_every=30)
-def expander_edge(saiyan: bool):
-    title = '⬡ EDGE MONITOR' if not saiyan else '⚡ SCOUTER — STRATEGY POWER LEVELS'
-    with st.expander(title, expanded=False):
-        strategies = [
-            ('crypto_macd_consensus', '₿ Crypto MACD',     'BARDOCK' if saiyan else None),
-            ('futures_scalper',       '📈 MES Futures',     'VEGETA'  if saiyan else None),
-            ('crypto_mean_reversion', '↔ Mean Reversion',  'KRILLIN' if saiyan else None),
-        ]
-        for strat, label, z_name in strategies:
-            es     = get_edge_state(strat, paper=PAPER_TRADING)
-            status = es['status']
-            color  = {'STRONG':'#00C853','OK':'#FDB927','DEGRADED':'#FF8F00',
-                      'BLOCKED':'#FF1744','UNCERTAIN':'#555'}.get(status,'#555')
-            mult   = es['sizing_multiplier']
-            pf     = es['profit_factor']
-            trades = es['window_trades']
-            bar_n  = int(mult * 10)
-            bar = ''.join(
-                f'<span style="color:{color};">█</span>' if j < bar_n
-                else '<span style="color:#111;">█</span>'
-                for j in range(10)
-            )
-            display = f'{z_name} — {label}' if z_name else label
-            st.markdown(
-                f'<div style="background:#050a14;border:1px solid {color}33;border-radius:4px;'
-                f'padding:8px 12px;margin:4px 0;font-size:11px;">'
-                f'<div style="display:flex;justify-content:space-between;">'
-                f'<span style="color:#aaa;">{display}</span>'
-                f'<span style="color:{color};font-weight:900;">{status}</span>'
-                f'</div>'
-                f'<div style="font-family:monospace;margin:4px 0;">{bar}</div>'
-                f'<div style="display:flex;gap:16px;color:#444;">'
-                f'<span>PF <span style="color:{color};">{pf:.2f}</span></span>'
-                f'<span>size <span style="color:#aaa;">{mult:.0%}</span></span>'
-                f'<span>{trades} trades</span>'
-                f'</div>'
-                f'</div>', unsafe_allow_html=True,
-            )
+@st.fragment(run_every=15)
+def row_trades_signals():
+    left, right = st.columns(2)
 
-
-@st.fragment(run_every=30)
-def expander_debates(saiyan: bool):
-    title = '🤖 AI DEBATES' if not saiyan else '⚔ WARRIOR DEBATE LOGS'
-    with st.expander(title, expanded=False):
-        debates = get_recent_debates(limit=8)
-        if not debates:
-            st.markdown('<div style="color:#333;font-size:11px;">No debates yet.</div>',
+    with left:
+        _section(
+            "RECENT TRADES",
+            "Last 20 closed trades. P&L is net after fees. "
+            "Green = winner, Red = loser. "
+            "Win rate and profit factor feed directly into the edge monitor.",
+        )
+        trades = get_recent_trades(limit=20, paper=PAPER_TRADING) or []
+        if not trades:
+            st.markdown('<div style="color:#222;font-size:11px;">No trades yet</div>',
                         unsafe_allow_html=True)
-            return
-        AGENT_LABELS = {
-            'funding_regime':     ('BARDOCK' if saiyan else 'Funding/Macro', '#FF4444'),
-            'momentum_structure': ('VEGETA'  if saiyan else 'Momentum',      '#4488FF'),
-            'risk_economics':     ('KRILLIN' if saiyan else 'Risk/Econ',     '#FFB347'),
-        }
-        for d in debates:
-            sym  = d.get('symbol', '?')
-            sig  = (d.get('final_signal') or '').upper()
-            conf = float(d.get('confidence', 0))
-            bv   = d.get('buy_votes', 0)
-            hv   = d.get('hold_votes', 0)
-            reas = str(d.get('reasoning', ''))[:300]
-            ts   = fmt_ts(d.get('ts', ''), short=True)
-            sc   = '#00C853' if sig == 'BUY' else '#FF1744' if sig in ('SELL','SHORT') else '#555'
-
-            agents_raw = d.get('agent_votes') or d.get('agents') or ''
-            agent_data = {}
-            if isinstance(agents_raw, str):
-                try:
-                    agent_data = json.loads(agents_raw)
-                except Exception:
-                    pass
-            elif isinstance(agents_raw, dict):
-                agent_data = agents_raw
-
-            agent_html = ''
-            for key, vote_data in agent_data.items():
-                if not isinstance(vote_data, dict):
-                    continue
-                v_sig  = (vote_data.get('signal', vote_data.get('verdict', '?'))).upper()
-                v_conf = float(vote_data.get('confidence', 0))
-                v_reas = str(vote_data.get('reason', ''))[:60]
-                name, clr = AGENT_LABELS.get(key, (key.upper(), '#888'))
-                vc = '#00C853' if v_sig == 'BUY' else '#FF1744' if v_sig in ('SELL','SHORT') else '#555'
-                agent_html += (
-                    f'<span style="color:{clr};font-weight:700;min-width:60px;display:inline-block;">{name}</span>'
-                    f'<span style="color:{vc};font-weight:900;min-width:40px;display:inline-block;">{v_sig}</span>'
-                    f'<span style="color:#444;">{v_conf:.0%} — {v_reas}</span><br>'
+        else:
+            rows_html = ''
+            for t in trades:
+                pnl   = t.get('pnl_usd', 0)
+                clr   = '#00C896' if pnl > 0 else '#FF4444' if pnl < 0 else '#555'
+                sign  = '+' if pnl > 0 else ''
+                sym   = t.get('symbol', '—')
+                act   = t.get('action', '')
+                ts    = fmt_ts(t.get('ts', ''), short=True)
+                rows_html += (
+                    f'<div class="t-row">'
+                    f'<span style="color:#555;min-width:60px;">{ts}</span>'
+                    f'<span style="color:#888;min-width:100px;">{sym}</span>'
+                    f'<span style="color:#555;min-width:40px;font-size:9px;">{act}</span>'
+                    f'<span style="color:{clr};margin-left:auto;">{sign}${pnl:.2f}</span>'
+                    f'</div>'
                 )
+            st.markdown(rows_html, unsafe_allow_html=True)
 
-            with st.expander(f"{sym} → {sig}  {bv}B/{hv}H  {conf:.0%}  {ts}", expanded=False):
-                if agent_html:
-                    st.markdown(
-                        f'<div style="background:#030303;border-radius:4px;padding:8px;'
-                        f'font-size:11px;font-family:monospace;line-height:1.8;">'
-                        f'{agent_html}</div>', unsafe_allow_html=True,
-                    )
-                if reas:
-                    st.markdown(
-                        f'<div style="color:#666;font-size:11px;margin-top:6px;">{reas}</div>',
-                        unsafe_allow_html=True,
-                    )
+    with right:
+        _section(
+            "RECENT SIGNALS",
+            "All signals generated today (acted on and filtered out). "
+            "BUY = debate voted 2/3 BUY. HOLD = debate blocked it. "
+            "Watching HOLD signals helps you understand what the system is rejecting and why.",
+        )
+        signals = get_scan_feed(limit=30) or []
+        if not signals:
+            st.markdown('<div style="color:#222;font-size:11px;">No signals yet</div>',
+                        unsafe_allow_html=True)
+        else:
+            rows_html = ''
+            for s in signals:
+                action = str(s.get('action', s.get('signal', ''))).upper()
+                sym    = s.get('symbol', '—')
+                ts     = fmt_ts(s.get('ts', ''), short=True)
+                conf   = s.get('confidence', '')
+                clr    = ('#00C896' if action == 'BUY' else
+                          '#FF4444' if action == 'SELL' else '#555')
+                conf_str = f' · {float(conf):.0%}' if conf else ''
+                rows_html += (
+                    f'<div class="s-row">'
+                    f'<span style="color:#444;min-width:60px;">{ts}</span>'
+                    f'<span style="color:{clr};min-width:40px;font-weight:700;">{action}</span>'
+                    f'<span style="color:#888;">{sym}{conf_str}</span>'
+                    f'</div>'
+                )
+            st.markdown(rows_html, unsafe_allow_html=True)
 
 
-@st.fragment(run_every=5)
-def expander_scanfeed(saiyan: bool):
-    title = '📡 SCAN FEED' if not saiyan else '🔭 SCOUTER TRANSMISSION'
-    with st.expander(title, expanded=False):
-        entries = get_scan_feed(limit=60)
-        if not entries:
-            st.markdown('<div style="color:#333;padding:8px;">Waiting...</div>', unsafe_allow_html=True)
-            return
-        html = ''
-        for e in entries[:50]:
-            msg = e.get('message', '')
-            ts  = fmt_ts(e.get('ts', ''), short=True)
-            if any(k in msg for k in ('BUY', 'LONG', 'SHORT', '🟢')):
-                c, dot = '#FDB927', '●'
-            elif any(k in msg for k in ('CLOSED', 'EXITED', 'P&L')):
-                c, dot = '#00C853', '✓'
-            elif any(k in msg for k in ('HALT', 'ERROR', 'block', 'VETO')):
-                c, dot = '#FF1744', '⊘'
-            elif any(k in msg for k in ('Debate', 'agent')):
-                c, dot = '#9966ff', '🤖'
-            else:
-                c, dot = '#1a1a1a', '·'
-            html += (
-                f'<div class="sig-row">'
-                f'<span style="color:#1a1a1a;min-width:48px;flex-shrink:0;">{ts}</span>'
-                f'<span style="color:{c};">{dot} {msg[:100]}</span>'
-                f'</div>'
-            )
+# ══════════════════════════════════════════════════════════════════════════════
+# ROW 8 — CLAUDE AI CHAT
+# ══════════════════════════════════════════════════════════════════════════════
+
+def row_chat():
+    c_hdr, c_info = st.columns([20, 1])
+    with c_hdr:
+        st.markdown('<div class="sec-hdr">CLAUDE AI CHAT</div>', unsafe_allow_html=True)
+    with c_info:
+        _info("Ask Claude anything about the portfolio, signals, or strategy. "
+              "Full system state is injected automatically: positions, P&L, recent trades, "
+              "risk rules, win rate, edge scores. Claude has the same data you see on this dashboard.")
+
+    if 'chat_msgs' not in st.session_state:
+        st.session_state['chat_msgs'] = []
+
+    for msg in st.session_state['chat_msgs'][-10:]:
+        css = 'chat-user' if msg['role'] == 'user' else 'chat-bot'
         st.markdown(
-            f'<div style="max-height:300px;overflow-y:auto;background:#030303;'
-            f'border:1px solid #0a0a0a;border-radius:4px;padding:8px;">{html}</div>',
+            f'<div class="{css}">{msg["content"]}</div>',
             unsafe_allow_html=True,
         )
 
+    prompt = st.chat_input("Ask about your portfolio…")
+    if prompt:
+        st.session_state['chat_msgs'].append({'role': 'user', 'content': prompt})
+        ctx  = build_context()
+        hist = [{'role': m['role'], 'content': m['content']}
+                for m in st.session_state['chat_msgs']]
+        with st.spinner(''):
+            reply = call_claude(hist, ctx)
+        st.session_state['chat_msgs'].append({'role': 'assistant', 'content': reply})
+        st.rerun()
 
-def expander_controls(saiyan: bool):
-    title = '⚙️ CONTROLS' if not saiyan else '⚙️ POWER CONTROLS'
-    with st.expander(title, expanded=False):
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.markdown('<div style="color:#555;font-size:10px;text-transform:uppercase;'
-                        'letter-spacing:1px;margin-bottom:6px;">Position Sizes</div>',
-                        unsafe_allow_html=True)
-            nc = st.number_input('Crypto ($)', 10.0, 2000.0, float(CRYPTO_POSITION_SIZE_USD), 10.0, key='cs')
-            ne = st.number_input('Equity ($)', 10.0, 2000.0, float(EQUITY_POSITION_SIZE_USD), 10.0, key='es')
-            if st.button('Save Sizes', key='save_sz'):
-                _write_env({'CRYPTO_POSITION_SIZE_USD': str(nc), 'EQUITY_POSITION_SIZE_USD': str(ne)})
-                st.success('Saved — restart main.py.')
 
-        with col2:
-            st.markdown('<div style="color:#555;font-size:10px;text-transform:uppercase;'
-                        'letter-spacing:1px;margin-bottom:6px;">Halt Control</div>',
-                        unsafe_allow_html=True)
-            rm = get_risk_manager()
-            is_halted, reason = _live_halt()
-            if is_halted:
-                st.error(f'HALTED: {reason}')
-                if st.button('▶ Resume', key='resume', type='primary'):
-                    try:
-                        rm.resume_trading()
-                        st.success('Resumed.')
-                    except Exception as ex:
-                        st.error(str(ex))
-            else:
-                st.success('Active')
-                if st.button('⏸ Emergency Halt', key='ehalt'):
-                    try:
-                        rm.halt_trading('Manual dashboard halt')
-                        st.warning('Halted.')
-                    except Exception as ex:
-                        st.error(str(ex))
+# ══════════════════════════════════════════════════════════════════════════════
+# EXPANDERS — below the fold
+# ══════════════════════════════════════════════════════════════════════════════
 
-        with col3:
-            try:
-                from config import DEBATE_MAX_TOKENS, EXIT_REVIEW_MAX_TOKENS
-            except Exception:
-                DEBATE_MAX_TOKENS, EXIT_REVIEW_MAX_TOKENS = 400, 800
-            st.markdown('<div style="color:#555;font-size:10px;text-transform:uppercase;'
-                        'letter-spacing:1px;margin-bottom:6px;">Cost Lab</div>',
-                        unsafe_allow_html=True)
-            mo = get_monthly_api_cost()
-            st.metric('This month', f'${mo:.4f}')
-            nd = st.slider('Debate tokens', 100, 600, DEBATE_MAX_TOKENS, 50, key='dbt')
-            ni = st.slider('Scan interval (min)', 1, 15, max(1, CRYPTO_SCAN_INTERVAL_SECONDS//60), 1, key='sci')
-            if st.button('Apply', key='apply_cost', type='primary'):
-                _write_env({'DEBATE_MAX_TOKENS': str(nd),
-                            'CRYPTO_SCAN_INTERVAL_SECONDS': str(ni * 60)})
-                st.success('Written — restart main.py.')
+def expander_debates():
+    with st.expander("AI DEBATE HISTORY"):
+        _info("Full reasoning from each 3-agent debate. Bardock = macro/funding. "
+              "Vegeta = technical momentum. Krillin = trade economics/fee math. "
+              "2/3 BUY = trade taken. Any HOLD = skipped.")
+        debates = get_recent_debates(limit=10) or []
+        if not debates:
+            st.write("No debates yet.")
+            return
+        for d in debates:
+            sym   = d.get('symbol', '?')
+            ts    = fmt_ts(d.get('ts', ''))
+            res   = d.get('result', '?').upper()
+            conf  = d.get('confidence', 0)
+            rsn   = d.get('reason', '')
+            clr   = '#00C896' if res == 'BUY' else '#FF4444' if res == 'SELL' else '#888'
+            st.markdown(
+                f'**{ts}** · `{sym}` · '
+                f'<span style="color:{clr};font-weight:700;">{res}</span> '
+                f'({conf:.0%}) — {rsn[:120]}',
+                unsafe_allow_html=True,
+            )
+
+def expander_notifications():
+    with st.expander("SYSTEM NOTIFICATIONS"):
+        _info("All system events: trade opens/closes, halts, errors, watchdog alerts. "
+              "ERROR and HALT level events are critical — investigate immediately.")
+        notifs = get_recent_notifications(limit=40) or []
+        if not notifs:
+            st.write("No notifications.")
+            return
+        for n in notifs:
+            level = n.get('level', 'INFO')
+            msg   = n.get('message', '')
+            ts    = fmt_ts(n.get('ts', ''))
+            clr   = ('#FF4444' if level in ('ERROR', 'HALT') else
+                     '#FF8C00' if level == 'WARNING' else '#555')
+            st.markdown(
+                f'<div style="font-family:monospace;font-size:10px;color:{clr};padding:2px 0;">'
+                f'[{ts}] [{level}] {msg}</div>',
+                unsafe_allow_html=True,
+            )
+
+def expander_controls():
+    with st.expander("CONTROLS"):
+        _info("Bot management and config overrides. Changes to .env take effect on the next scan cycle. "
+              "Starting/stopping the bot from here uses subprocess — check the Watchdog gauge to confirm.")
+        st.markdown('<div style="color:#555;font-size:10px;">Bot management</div>',
+                    unsafe_allow_html=True)
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            if st.button("Start Bot (paper)"):
+                import subprocess
+                subprocess.Popen(
+                    ['python3', 'main.py', '--mode', 'paper'],
+                    cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                    start_new_session=True,
+                )
+                st.success("Bot started.")
+        with c2:
+            if st.button("Kill Bot"):
+                import subprocess
+                subprocess.run(['pkill', '-f', 'main.py'])
+                st.warning("Kill signal sent.")
+        with c3:
+            if st.button("Backup DB"):
+                import subprocess
+                result = subprocess.run(
+                    ['bash', 'scripts/backup_db.sh'],
+                    cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                    capture_output=True, text=True,
+                )
+                if result.returncode == 0:
+                    st.success("Backup complete.")
+                else:
+                    st.error(result.stderr[:200])
+
+        st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
+        st.markdown('<div style="color:#555;font-size:10px;margin-bottom:8px;">Config overrides (writes .env)</div>',
+                    unsafe_allow_html=True)
+        c4, c5 = st.columns(2)
+        with c4:
+            new_size = st.number_input(
+                'Crypto position size ($)',
+                min_value=10.0, max_value=5000.0,
+                value=float(CRYPTO_POSITION_SIZE_USD), step=10.0,
+            )
+            if st.button("Update position size"):
+                _write_env({'CRYPTO_POSITION_SIZE_USD': str(new_size)})
+                st.success(f"Set to ${new_size:.0f}. Restart bot to apply.")
+        with c5:
+            st.metric("Max risk/trade",    f"{MAX_RISK_PER_TRADE_PCT:.1%}",
+                      help="Fraction of account risked per trade")
+            st.metric("Taker fee",         f"{COINBASE_TAKER_FEE_PCT:.3%}",
+                      help="Coinbase taker fee used in P&L math")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1231,68 +1151,27 @@ def expander_controls(saiyan: bool):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def main():
-    # ── Saiyan mode toggle (top-right) ────────────────────────────────────────
-    if 'saiyan' not in st.session_state:
-        st.session_state['saiyan'] = False
-
-    header_l, header_r = st.columns([8, 1])
-    with header_r:
-        if st.session_state['saiyan']:
-            if st.button('👑 THE KING', key='toggle_king'):
-                st.session_state['saiyan'] = False
-                st.rerun()
-        else:
-            if st.button('⚡ SAIYAN', key='toggle_saiyan'):
-                st.session_state['saiyan'] = True
-                st.rerun()
-
-    saiyan = st.session_state['saiyan']
-
-    # ── Row 1: Scoreboard ─────────────────────────────────────────────────────
-    row_scoreboard(saiyan)
-
-    # ── Row 2: LeBron quote ───────────────────────────────────────────────────
-    row_quote(saiyan)
-
-    # ── Row 3: Six metrics ────────────────────────────────────────────────────
-    row_six_metrics(saiyan)
-
+    row_status_bar()
     st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
-
-    # ── Row 4: Three market panels ────────────────────────────────────────────
-    row_markets(saiyan)
-
+    row_scoreboard()
     st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
-
-    # ── Row 5: Trades + signals ───────────────────────────────────────────────
-    row_trades_signals(saiyan)
-
+    row_metrics()
     st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
-
-    # ── Row 6: Chat ───────────────────────────────────────────────────────────
-    row_chat(saiyan)
-
-    # ── Row 7: Risk gauges ────────────────────────────────────────────────────
+    row_edge_monitor()
     st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
-    row_risk_gauges(saiyan)
-
-    # ── Detail expanders (below the fold) ─────────────────────────────────────
+    row_positions()
     st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
-    expander_edge(saiyan)
-    expander_debates(saiyan)
-    expander_scanfeed(saiyan)
-    expander_controls(saiyan)
-
-    # Footer
-    mode_str = '⚡ SAIYAN MODE' if saiyan else '👑 THE KING'
-    st.markdown(
-        f'<div style="text-align:center;color:#111;font-size:9px;font-family:monospace;'
-        f'padding:12px 0;letter-spacing:3px;">'
-        f'THE KING\'S WAR ROOM v9.0 · {mode_str} · {et_now()} · '
-        f'{"PAPER" if PAPER_TRADING else "LIVE"}</div>',
-        unsafe_allow_html=True,
-    )
+    row_market_panels()
+    st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
+    row_risk_gauges()
+    st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
+    row_trades_signals()
+    st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
+    row_chat()
+    st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
+    expander_debates()
+    expander_notifications()
+    expander_controls()
 
 
-if __name__ == '__main__':
-    main()
+main()

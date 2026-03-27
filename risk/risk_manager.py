@@ -255,6 +255,7 @@ class RiskManager:
             'qty': qty, 'entry': entry, 'stop': stop, 'target': target,
             'high_since_entry': entry, 'ts_entry': ts, 'direction': direction,
             'entry_reason': entry_reason[:200] if entry_reason else '',
+            'strategy': strategy,
         }
         if 'equity' in strategy.lower() or 'futures' in strategy.lower():
             self._equity[symbol] = pos

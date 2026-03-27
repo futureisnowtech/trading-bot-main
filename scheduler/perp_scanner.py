@@ -16,7 +16,7 @@ from config import (
     PERP_ENABLED, PERP_PAIRS, PAPER_TRADING,
     PERP_POSITION_SIZE_USD, PERP_MAX_LEVERAGE,
     PERP_STOP_PCT, PERP_TAKE_PROFIT_PCT,
-    MARKET_TIMEZONE,
+    MARKET_TIMEZONE, FUNDING_OVERHEATED_PCT,
 )
 from risk.risk_manager import get_risk_manager
 from logging_db.trade_logger import log_event, log_signal
@@ -32,7 +32,6 @@ def run_perp_scan() -> None:
 
     from execution.binance_broker import get_binance_broker
     from strategies.crypto_perp_strategy import get_perp_signal
-    from data.coinbase_feed import get_candles
 
     bb = get_binance_broker()
     if not bb.is_connected():
@@ -48,26 +47,21 @@ def run_perp_scan() -> None:
                 _monitor_perp_exit(bb, rm, symbol, pos)
                 continue
 
-            base = symbol.replace('USDT', '').replace('USDC', '')
-            cb_symbol = f"{base}-USDC"
-            df = None
-            try:
-                df = get_candles(cb_symbol, 'ONE_MINUTE', 60)
-            except Exception:
-                pass
+            # Fetch candles from Binance (correct exchange for perp symbols like AVAXUSDT)
+            df = bb.get_klines(symbol, interval='1m', limit=100)
             if df is None or len(df) < 25:
-                try:
-                    import yfinance as yf
-                    hist = yf.Ticker(f'{base}-USD').history(period='2d', interval='1m')
-                    if hist is not None and not hist.empty:
-                        hist.columns = [c.lower() for c in hist.columns]
-                        df = hist.reset_index(drop=True)
-                except Exception:
-                    pass
-            if df is None or len(df) < 25:
+                log_event('INFO', 'scan_feed',
+                          f"[perp] {symbol} skip — insufficient candle data from Binance")
                 continue
 
             funding = bb.get_funding_rate(symbol)
+            # Gate: skip if funding is overheated (too many longs paying — crowded entry)
+            if funding > FUNDING_OVERHEATED_PCT:
+                log_event('INFO', 'scan_feed',
+                          f"[perp] {symbol} skip — funding overheated "
+                          f"({funding*100:.4f}%/8h > {FUNDING_OVERHEATED_PCT*100:.4f}%)")
+                continue
+
             oi = bb.get_open_interest(symbol)
             prev_oi = run_perp_scan._prev_oi.get(symbol, oi)
             run_perp_scan._prev_oi[symbol] = oi
@@ -104,10 +98,12 @@ def run_perp_scan() -> None:
                                        PERP_TAKE_PROFIT_PCT, 'crypto_perp')
 
             if result:
+                # Use live mark price for accurate position accounting
+                mark_price = bb.get_mark_price(symbol) or sig.price
                 rm.register_position(
                     'crypto_perp', symbol,
-                    PERP_POSITION_SIZE_USD / sig.price,
-                    sig.price, sig.stop_loss, sig.take_profit,
+                    PERP_POSITION_SIZE_USD / mark_price,
+                    mark_price, sig.stop_loss, sig.take_profit,
                     direction=direction, entry_reason=sig.reason
                 )
 

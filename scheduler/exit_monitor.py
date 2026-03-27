@@ -242,10 +242,12 @@ def monitor_exits_with_ai(engine) -> None:
 
     for pid, pos in list(all_pos.get('crypto', {}).items()):
         try:
+            # Use the strategy that opened this position — prevents DB key mismatch on close
+            strategy = pos.get('strategy', 'crypto_macd_consensus')
             price = cb_price(pid) or 0
             if not price:
                 continue
-            rm.update_high('crypto_macd_consensus', pid, price)
+            rm.update_high(strategy, pid, price)
 
             cr_md = {}
             df_cr = get_candles(pid, CRYPTO_CANDLE_GRANULARITY, 50)
@@ -253,9 +255,9 @@ def monitor_exits_with_ai(engine) -> None:
                 df_cr_ind = add_all_indicators(df_cr)
                 cr_md = _build_market_data(pid, price, df_cr_ind)
 
-            should_exit, exit_reason = rm.should_exit('crypto_macd_consensus', pid, price)
+            should_exit, exit_reason = rm.should_exit(strategy, pid, price)
             if should_exit:
-                _execute_crypto_exit(cb, rm, pid, pos, price, exit_reason, 'crypto_macd_consensus', cr_md)
+                _execute_crypto_exit(cb, rm, pid, pos, price, exit_reason, strategy, cr_md)
                 continue
 
             if engine and cr_md:
@@ -279,20 +281,20 @@ def monitor_exits_with_ai(engine) -> None:
                         and pnl_pct < 0.005):
                     reason = (f"Stagnant exit: {mins_in}m in, {pnl_pct:+.2%} move, "
                               f"{_target_progress:.0%} of target — thesis not playing out")
-                    _execute_crypto_exit(cb, rm, pid, pos, price, reason, 'crypto_macd_consensus', cr_md)
+                    _execute_crypto_exit(cb, rm, pid, pos, price, reason, strategy, cr_md)
                     log_event('INFO', 'exit_monitor', reason)
                     continue
 
                 if abs(pnl_pct) <= FLAT_POSITION_THRESHOLD_PCT and mins_in >= CRYPTO_MAX_HOLD_HOURS * 60:
                     reason = (f"Time exit: {mins_in//60}h {mins_in%60}m in trade, "
                               f"only {pnl_pct:+.1%} — releasing dead capital")
-                    _execute_crypto_exit(cb, rm, pid, pos, price, reason, 'crypto_macd_consensus', cr_md)
+                    _execute_crypto_exit(cb, rm, pid, pos, price, reason, strategy, cr_md)
                     log_event('INFO', 'exit_monitor', reason)
                     continue
 
                 if mins_in >= 5:
                     review = engine['exit'](
-                        symbol=pid, strategy='crypto_macd_consensus',
+                        symbol=pid, strategy=strategy,
                         entry_price=pos['entry'], current_price=price,
                         stop_loss=pos['stop'], take_profit=pos['target'],
                         entry_reason=pos.get('entry_reason', ''),
@@ -300,7 +302,7 @@ def monitor_exits_with_ai(engine) -> None:
                         market_data=cr_md, verbose=False
                     )
                     if review.get('should_exit'):
-                        _execute_crypto_exit(cb, rm, pid, pos, price, review['reason'], 'crypto_macd_consensus', cr_md)
+                        _execute_crypto_exit(cb, rm, pid, pos, price, review['reason'], strategy, cr_md)
 
         except Exception as e:
             print(f"[exit_monitor] crypto error {pid}: {e}")

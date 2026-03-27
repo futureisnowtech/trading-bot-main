@@ -18,13 +18,20 @@ from data.market_data import is_market_open, is_in_no_trade_window
 from logging_db.trade_logger import get_daily_trade_count
 
 # Crypto correlation clusters — never hold two symbols from the same cluster.
-_CORR_GROUPS = [
-    {'BTC-USDC', 'BTC-USD', 'LTC-USDC', 'BCH-USDC'},
-    {'ETH-USDC', 'ETH-USD', 'LINK-USDC', 'UNI-USDC', 'ARB-USDC', 'OP-USDC', 'INJ-USDC'},
-    {'SOL-USDC', 'AVAX-USDC', 'ADA-USDC', 'NEAR-USDC', 'APT-USDC', 'SUI-USDC', 'DOT-USDC'},
-    {'PEPE-USDC', 'WIF-USDC', 'DOGE-USDC'},
-    {'XRP-USDC'},
+# Stored as base-asset sets so Coinbase (BTC-USDC) and Binance (BTCUSDT) both match.
+_CORR_GROUPS_BASE = [
+    {'BTC', 'LTC', 'BCH'},
+    {'ETH', 'LINK', 'UNI', 'ARB', 'OP', 'INJ'},
+    {'SOL', 'AVAX', 'ADA', 'NEAR', 'APT', 'SUI', 'DOT'},
+    {'PEPE', 'WIF', 'DOGE'},
+    {'XRP'},
 ]
+
+
+def _normalize_to_base(symbol: str) -> str:
+    """Strip quote suffix: BTC-USDC, BTCUSDT, BTC-USD → BTC."""
+    return (symbol.replace('-USDC', '').replace('-USDT', '')
+                  .replace('-USD', '').replace('USDT', '').replace('USDC', '').upper())
 
 
 class RiskCheckResult:
@@ -74,17 +81,20 @@ def check_position_limits(strategy: str, symbol: str, side: str,
     if is_perp and len(perp_positions) >= PERP_MAX_POSITIONS:
         return RiskCheckResult(False, f"Max perp positions ({PERP_MAX_POSITIONS}) reached")
 
-    # Duplicate-entry guard
-    if (equity_positions.get(symbol) or crypto_positions.get(symbol)
-            or perp_positions.get(symbol)):
+    # Duplicate-entry guard — normalized so BTC-USDC and BTCUSDT both match
+    sym_base = _normalize_to_base(symbol)
+    all_held_bases = {_normalize_to_base(h) for h in
+                      list(equity_positions) + list(crypto_positions) + list(perp_positions)}
+    if equity_positions.get(symbol) or crypto_positions.get(symbol) or perp_positions.get(symbol) \
+            or sym_base in all_held_bases:
         return RiskCheckResult(False, f"Already holding {symbol} — no double-entry")
 
-    # Crypto correlation block
-    if is_cr:
-        for group in _CORR_GROUPS:
-            if symbol in group:
-                for held in crypto_positions:
-                    if held in group and held != symbol:
+    # Crypto correlation block — normalized to base asset (catches cross-broker pairs)
+    if is_cr or is_perp:
+        for group in _CORR_GROUPS_BASE:
+            if sym_base in group:
+                for held in list(crypto_positions) + list(perp_positions):
+                    if _normalize_to_base(held) in group and held != symbol:
                         return RiskCheckResult(
                             False,
                             f"Correlation block: already holding {held} "

@@ -143,15 +143,17 @@ class BinanceBroker:
             resp = self._client.futures_create_order(
                 symbol=symbol,
                 side='BUY',
-                type='MARKET',
+                type='LIMIT',
                 quantity=qty,
+                price=round(price, 4),
+                timeInForce='GTC',
                 positionSide='BOTH',
             )
             order_id = resp.get('orderId', f'BN_{uuid.uuid4().hex[:8]}')
-            fill_price = float(resp.get('avgPrice', price) or price)
+            fill_price = float(resp.get('avgPrice', 0) or 0) or price
             stop = fill_price * (1 - stop_pct)
             target = fill_price * (1 + take_profit_pct)
-            fee = size_usd * BINANCE_TAKER_FEE_PCT
+            fee = size_usd * BINANCE_MAKER_FEE_PCT
 
             # Server-side stop-loss
             self._set_stop_loss(symbol, 'SELL', stop)
@@ -166,7 +168,7 @@ class BinanceBroker:
             }
             log_trade(
                 strategy=strategy, broker='binance',
-                symbol=symbol, action='BUY', order_type='MARKET',
+                symbol=symbol, action='BUY', order_type='LIMIT',
                 qty=qty, price=fill_price, fee_usd=fee, paper=False,
                 order_id=str(order_id),
                 notes=f"LONG lev={leverage}x SL={stop:.4f} TP={target:.4f}"
@@ -206,15 +208,17 @@ class BinanceBroker:
             resp = self._client.futures_create_order(
                 symbol=symbol,
                 side='SELL',
-                type='MARKET',
+                type='LIMIT',
                 quantity=qty,
+                price=round(price, 4),
+                timeInForce='GTC',
                 positionSide='BOTH',
             )
             order_id = resp.get('orderId', f'BN_{uuid.uuid4().hex[:8]}')
-            fill_price = float(resp.get('avgPrice', price) or price)
+            fill_price = float(resp.get('avgPrice', 0) or 0) or price
             stop = fill_price * (1 + stop_pct)     # stop above entry for short
             target = fill_price * (1 - take_profit_pct)  # target below entry
-            fee = size_usd * BINANCE_TAKER_FEE_PCT
+            fee = size_usd * BINANCE_MAKER_FEE_PCT
 
             self._set_stop_loss(symbol, 'BUY', stop)
             self._set_take_profit(symbol, 'BUY', target)
@@ -227,7 +231,7 @@ class BinanceBroker:
             }
             log_trade(
                 strategy=strategy, broker='binance',
-                symbol=symbol, action='SELL', order_type='MARKET',
+                symbol=symbol, action='SELL', order_type='LIMIT',
                 qty=qty, price=fill_price, fee_usd=fee, paper=False,
                 order_id=str(order_id),
                 notes=f"SHORT lev={leverage}x SL={stop:.4f} TP={target:.4f}"
@@ -345,6 +349,44 @@ class BinanceBroker:
         except Exception:
             pass
         return 0.0
+
+    def get_klines(self, symbol: str, interval: str = '1m', limit: int = 100):
+        """
+        Fetch OHLCV klines from Binance Futures (public endpoint — no auth needed).
+        Returns a DataFrame with columns: open, high, low, close, volume.
+        Falls back to yfinance if Binance unavailable.
+        """
+        import pandas as pd
+        try:
+            if BINANCE_AVAILABLE:
+                client = self._client
+                if not client:
+                    client = BinanceClient('', '')  # public endpoint
+                klines = client.futures_klines(symbol=symbol, interval=interval, limit=limit)
+                if klines:
+                    df = pd.DataFrame(klines, columns=[
+                        'open_time', 'open', 'high', 'low', 'close', 'volume',
+                        'close_time', 'quote_vol', 'trades', 'taker_buy_base',
+                        'taker_buy_quote', 'ignore',
+                    ])
+                    for col in ['open', 'high', 'low', 'close', 'volume']:
+                        df[col] = pd.to_numeric(df[col], errors='coerce')
+                    return df[['open', 'high', 'low', 'close', 'volume']].reset_index(drop=True)
+        except Exception as e:
+            print(f"[BinanceBroker] get_klines {symbol}: {e}")
+
+        # yfinance fallback
+        try:
+            import yfinance as yf
+            base = _binance_symbol_to_base(symbol)
+            period = '5d' if limit > 100 else '2d'
+            hist = yf.Ticker(f'{base}-USD').history(period=period, interval='1m')
+            if hist is not None and not hist.empty:
+                hist.columns = [c.lower() for c in hist.columns]
+                return hist[['open', 'high', 'low', 'close', 'volume']].tail(limit).reset_index(drop=True)
+        except Exception:
+            pass
+        return None
 
     # ─── Internal helpers ─────────────────────────────────────────────────────
 

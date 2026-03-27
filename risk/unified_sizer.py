@@ -39,7 +39,7 @@ USE_ADAPTIVE_SIZING_MIN_TRADES: int = 20   # V and E stay at 1.0 below this
 MIN_POSITION_USD: float = 5.0              # absolute floor (below this = skip trade)
 MAX_POSITION_SCALE: float = 1.5            # multipliers cannot push size above 150% of base
 
-# Time-of-day multipliers (ET timezone)
+# Time-of-day multipliers for equity/MES (ET timezone)
 _TOD_SCHEDULE = [
     # (start_hour, end_hour, multiplier)
     (2,   5,   0.50),   # dead zone — worst fills, thin books
@@ -53,14 +53,29 @@ _TOD_SCHEDULE = [
 ]
 _TOD_DEFAULT: float = 0.90   # Asia session / overnight
 
+# Perp-specific schedule: Binance USD-M futures trade 24/7 — Asia & London matter
+_TOD_SCHEDULE_PERP = [
+    # (start_hour, end_hour, multiplier)
+    (0,   2,   1.10),   # Asia peak — BTC/ETH volume on Binance is high
+    (2,   8,   1.20),   # London session — overlaps Asia close, highest global perp volume
+    (8,   9.5, 0.90),   # Pre-NY quiet
+    (9.5, 11.5, 1.50),  # NY open — overlaps London close, maximum global volume
+    (11.5, 14.5, 0.60), # lunch dead zone — thin across all regions
+    (14.5, 16.0, 1.10), # NY close run-up
+    (16.0, 20.0, 0.80), # post-NY quiet
+    (20,  24,   1.10),  # Asia build-up / late US
+]
+_TOD_DEFAULT_PERP: float = 0.90
+
 
 def _get_time_of_day_multiplier(strategy: str) -> float:
     """
     Return the time-of-day size multiplier for the current ET time.
 
     Prediction markets (24/7 with uniform liquidity) always return 1.0.
-    MES futures: follows ET session schedule strictly.
-    Crypto: follows ET schedule (Coinbase/Binance liquidity mirrors US hours).
+    Perp (Binance 24/7): rewards Asia (0-2h) and London (2-8h) — not just US hours.
+    MES/equity: follows strict ET session schedule.
+    Coinbase spot crypto: follows ET schedule (Coinbase liquidity mirrors US hours).
     """
     strat_lower = strategy.lower()
     if 'poly' in strat_lower:
@@ -70,10 +85,12 @@ def _get_time_of_day_multiplier(strategy: str) -> float:
         tz = pytz.timezone(MARKET_TIMEZONE)
         now = datetime.now(tz)
         hour_float = now.hour + now.minute / 60.0
-        for start, end, multiplier in _TOD_SCHEDULE:
+        schedule = _TOD_SCHEDULE_PERP if 'perp' in strat_lower else _TOD_SCHEDULE
+        default  = _TOD_DEFAULT_PERP  if 'perp' in strat_lower else _TOD_DEFAULT
+        for start, end, multiplier in schedule:
             if start <= hour_float < end:
                 return multiplier
-        return _TOD_DEFAULT
+        return default
     except Exception:
         return 1.0   # safe default on error
 
@@ -165,18 +182,19 @@ def get_position_size(
         except Exception:
             v_score = 0.75   # NORMAL fallback
 
+    # V_score < 0.15 = extreme volatility crush — halt entries entirely
+    if v_score < 0.15:
+        return 0.0
+
     # ── E: Edge quality ───────────────────────────────────────────────────────
     e_score = 1.0
     if adaptive:
         try:
-            from risk.edge_monitor import get_edge_score, get_edge_size_factor
-            edge_data = get_edge_score(market=market, paper=paper)
-            # Use normalised edge score centred at 0.5 → multiplier 0.5–1.5
-            # edge_score 0.0 → E=0.50, 0.5 → E=1.00, 1.0 → E=1.50
-            raw_edge = edge_data['edge_score']
-            e_score = 0.50 + raw_edge  # [0.50, 1.50]
-            # Also apply binary size_down factor from consecutive low windows
-            e_score *= get_edge_size_factor(market=market, paper=paper)
+            from data.edge_monitor import get_edge_state
+            edge_data = get_edge_state(strategy=strategy, paper=paper)
+            e_score = edge_data['sizing_multiplier']  # 1.0/0.75/0.50/0.0
+            if e_score == 0.0:
+                return 0.0  # edge blocked — strategy is in losing streak
         except Exception:
             e_score = 1.0
 
@@ -264,9 +282,9 @@ def get_sizing_breakdown(
 
     if adaptive:
         try:
-            from risk.edge_monitor import get_edge_score, get_edge_size_factor
-            edge_data = get_edge_score(market=market, paper=paper)
-            e_score = (0.50 + edge_data['edge_score']) * get_edge_size_factor(market=market, paper=paper)
+            from data.edge_monitor import get_edge_state
+            edge_data = get_edge_state(strategy=strategy, paper=paper)
+            e_score = edge_data['sizing_multiplier']
         except Exception:
             e_score = 1.0
 

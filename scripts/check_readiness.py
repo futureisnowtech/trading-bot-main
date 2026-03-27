@@ -4,29 +4,30 @@ check_readiness.py — Evaluates whether the system is ready to switch from
 paper trading to live money. Reads directly from logs/trades.db.
 
 Run manually:
-    python3 scripts/check_readiness.py               # Standard (14 days / 30 trades)
-    python3 scripts/check_readiness.py --fast-track  # After historical validation (2 days / 10 trades)
+    python3 scripts/check_readiness.py               # Standard (21 days / 50 trades)
+    python3 scripts/check_readiness.py --fast-track  # After historical validation (3 days / 20 trades)
 
 Or schedule via launchd (see scripts/com.algotrading.readiness.plist).
 Sends an alert when ALL criteria are met for the first time in a day.
 
-Standard criteria (all must pass):
-  1. At least 14 calendar days of paper trading activity
-  2. At least 30 completed trades (closed positions)
+Standard criteria (all 8 must pass):
+  1. At least 21 calendar days of paper trading activity
+  2. At least 50 completed trades (closed positions per active market)
   3. Overall win rate >= 52% across all completed trades
-  4. No system halts (5% daily loss triggers) in the last 7 days
-  5. Total paper P&L is positive
-  6. No single day had a loss exceeding 4% of starting account
-  7. Average P&L per trade >= $0.10 (the system earns something)
+  4. Profit factor >= 1.4 (gross wins / gross losses)
+  5. No single day had a loss exceeding 3.5% of starting account
+  6. No system crashes in the last 7 days
+  7. Total paper P&L is positive
+  8. Average P&L per trade >= $0.10 (the system earns something)
 
 Fast-track criteria (--fast-track flag, after historical validation passes):
-  1. At least 2 calendar days of paper trading activity
-  2. At least 10 completed trades
-  3. Win rate >= 45%
-  4. No system halts in last 2 days
-  5. Positive total paper P&L
-  6. No single day worse than 6% of account
-  7. Average P&L per trade >= $0.05
+  1. At least 3 calendar days of paper trading activity
+  2. At least 20 completed trades
+  3. Win rate >= 48%
+  4. Profit factor >= 1.2
+  5. No single day worse than 5% of account
+  6. No system crashes in last 2 days
+  7. Positive total paper P&L
   8. Historical validation report exists and passed
 """
 import os
@@ -43,24 +44,25 @@ sys.path.insert(0, PROJ_ROOT)
 DB_PATH = os.path.join(PROJ_ROOT, 'logs', 'trades.db')
 
 # ── Criteria thresholds — Standard ───────────────────────────────────────────
-MIN_DAYS            = 14      # calendar days with at least 1 signal
-MIN_TRADES          = 30      # completed (SELL) trades
+MIN_DAYS            = 21      # calendar days with at least 1 signal
+MIN_TRADES          = 50      # completed (SELL) trades
 MIN_WIN_RATE        = 0.52    # 52% win rate
-MAX_DAILY_LOSS_PCT  = 0.04    # no day worse than -4% of account
+MIN_PROFIT_FACTOR   = 1.4     # gross wins / gross losses
+MAX_DAILY_LOSS_PCT  = 0.035   # no day worse than -3.5% of account
 ACCOUNT_SIZE        = 500.0   # from config (fallback if .env not loaded)
 MIN_AVG_PNL         = 0.10    # minimum average P&L per trade ($)
-HALT_LOOKBACK_DAYS  = 7       # check for halts in last N days
+CRASH_LOOKBACK_DAYS = 7       # check for crashes/halts in last N days
 
 # ── Criteria thresholds — Fast-track (after historical validation) ────────────
-FT_MIN_DAYS           = 2
-FT_MIN_TRADES         = 10
-FT_MIN_WIN_RATE       = 0.45
-FT_MAX_DAILY_LOSS_PCT = 0.06
+FT_MIN_DAYS           = 3
+FT_MIN_TRADES         = 20
+FT_MIN_WIN_RATE       = 0.48
+FT_MIN_PROFIT_FACTOR  = 1.2
+FT_MAX_DAILY_LOSS_PCT = 0.05
 FT_MIN_AVG_PNL        = 0.05
-FT_HALT_LOOKBACK_DAYS = 2
+FT_CRASH_LOOKBACK     = 2
 
-VALIDATION_REPORT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                  'logs', 'validation_report.txt')
+VALIDATION_REPORT = os.path.join(PROJ_ROOT, 'logs', 'validation_report.txt')
 
 
 def _conn():
@@ -92,13 +94,13 @@ def check_historical_validation() -> dict:
 
 
 def check_criteria(fast_track: bool = False) -> dict:
-    # Apply thresholds based on mode
-    min_days          = FT_MIN_DAYS           if fast_track else MIN_DAYS
-    min_trades        = FT_MIN_TRADES         if fast_track else MIN_TRADES
-    min_win_rate      = FT_MIN_WIN_RATE       if fast_track else MIN_WIN_RATE
-    max_daily_loss    = FT_MAX_DAILY_LOSS_PCT if fast_track else MAX_DAILY_LOSS_PCT
-    min_avg_pnl       = FT_MIN_AVG_PNL        if fast_track else MIN_AVG_PNL
-    halt_lookback     = FT_HALT_LOOKBACK_DAYS if fast_track else HALT_LOOKBACK_DAYS
+    min_days         = FT_MIN_DAYS           if fast_track else MIN_DAYS
+    min_trades       = FT_MIN_TRADES         if fast_track else MIN_TRADES
+    min_win_rate     = FT_MIN_WIN_RATE       if fast_track else MIN_WIN_RATE
+    min_pf           = FT_MIN_PROFIT_FACTOR  if fast_track else MIN_PROFIT_FACTOR
+    max_daily_loss   = FT_MAX_DAILY_LOSS_PCT if fast_track else MAX_DAILY_LOSS_PCT
+    min_avg_pnl      = FT_MIN_AVG_PNL        if fast_track else MIN_AVG_PNL
+    crash_lookback   = FT_CRASH_LOOKBACK     if fast_track else CRASH_LOOKBACK_DAYS
 
     conn = _conn()
     if conn is None:
@@ -106,104 +108,118 @@ def check_criteria(fast_track: bool = False) -> dict:
 
     results = {}
     now = datetime.now()
+    cur = conn.cursor()
 
     # ── Fast-track only: historical validation ────────────────────────────────
     if fast_track:
         results['historical_validation'] = check_historical_validation()
 
     # ── 1. Days of activity ───────────────────────────────────────────────────
-    cur = conn.cursor()
     cur.execute("SELECT DISTINCT substr(ts,1,10) FROM signals WHERE acted_on=1 ORDER BY ts")
     active_days = [r[0] for r in cur.fetchall()]
     if active_days:
-        first_day = datetime.strptime(active_days[0], '%Y-%m-%d')
+        first_day    = datetime.strptime(active_days[0], '%Y-%m-%d')
         days_elapsed = (now - first_day).days
     else:
         days_elapsed = 0
     results['days_trading'] = {
-        'value': days_elapsed,
+        'value':  days_elapsed,
         'target': min_days,
-        'pass': days_elapsed >= min_days,
-        'label': f'{days_elapsed} calendar days (need {min_days})',
+        'pass':   days_elapsed >= min_days,
+        'label':  f'{days_elapsed} calendar days (need {min_days})',
     }
 
     # ── 2. Number of completed trades ─────────────────────────────────────────
     cur.execute("SELECT COUNT(*) FROM trades WHERE paper=1 AND pnl_usd != 0")
     trade_count = cur.fetchone()[0] or 0
     results['trade_count'] = {
-        'value': trade_count,
+        'value':  trade_count,
         'target': min_trades,
-        'pass': trade_count >= min_trades,
-        'label': f'{trade_count} completed trades (need {min_trades})',
+        'pass':   trade_count >= min_trades,
+        'label':  f'{trade_count} completed trades (need {min_trades})',
     }
 
     # ── 3. Win rate ───────────────────────────────────────────────────────────
     cur.execute("SELECT pnl_usd FROM trades WHERE paper=1 AND pnl_usd != 0")
     pnls = [r[0] for r in cur.fetchall()]
     if pnls:
-        wins = sum(1 for p in pnls if p > 0)
+        wins     = sum(1 for p in pnls if p > 0)
         win_rate = wins / len(pnls)
     else:
         win_rate = 0.0
     results['win_rate'] = {
-        'value': win_rate,
+        'value':  win_rate,
         'target': min_win_rate,
-        'pass': win_rate >= min_win_rate,
-        'label': f'{win_rate:.1%} win rate (need {min_win_rate:.0%})',
+        'pass':   win_rate >= min_win_rate,
+        'label':  f'{win_rate:.1%} win rate (need {min_win_rate:.0%})',
     }
 
-    # ── 4. No system halts ────────────────────────────────────────────────────
-    cutoff = (now - timedelta(days=halt_lookback)).strftime('%Y-%m-%d')
-    cur.execute(
-        "SELECT COUNT(*) FROM system_events WHERE level='ERROR' AND message LIKE '%halt%' AND ts >= ?",
-        (cutoff,))
-    halt_count = cur.fetchone()[0] or 0
-    results['no_recent_halts'] = {
-        'value': halt_count,
-        'target': 0,
-        'pass': halt_count == 0,
-        'label': f'{halt_count} halt events in last {halt_lookback} days (need 0)',
+    # ── 4. Profit factor ──────────────────────────────────────────────────────
+    gross_wins   = sum(p for p in pnls if p > 0)
+    gross_losses = abs(sum(p for p in pnls if p < 0))
+    pf = (gross_wins / gross_losses) if gross_losses > 0 else (1.0 if not pnls else 99.0)
+    results['profit_factor'] = {
+        'value':  round(pf, 2),
+        'target': min_pf,
+        'pass':   pf >= min_pf,
+        'label':  f'Profit factor: {pf:.2f} (need {min_pf:.1f})',
     }
 
-    # ── 5. Positive total P&L ─────────────────────────────────────────────────
-    total_pnl = sum(pnls) if pnls else 0.0
-    results['positive_pnl'] = {
-        'value': total_pnl,
-        'target': 0,
-        'pass': total_pnl > 0,
-        'label': f'Total P&L: ${total_pnl:.2f} (must be positive)',
-    }
-
-    # ── 6. No single day worse than max_daily_loss of account ─────────────────
+    # ── 5. No single day worse than max_daily_loss of account ─────────────────
     cur.execute("""SELECT substr(ts,1,10) as day, SUM(pnl_usd) as daily_pnl
                    FROM trades WHERE paper=1 AND pnl_usd != 0
                    GROUP BY day""")
     daily = {r[0]: r[1] for r in cur.fetchall()}
     max_loss_pct = 0.0
-    worst_day = None
+    worst_day    = None
     for day, dpnl in daily.items():
         pct = abs(dpnl) / ACCOUNT_SIZE if dpnl < 0 else 0
         if pct > max_loss_pct:
             max_loss_pct = pct
-            worst_day = day
+            worst_day    = day
     results['max_daily_loss'] = {
-        'value': max_loss_pct,
+        'value':  max_loss_pct,
         'target': max_daily_loss,
-        'pass': max_loss_pct < max_daily_loss,
-        'label': (
+        'pass':   max_loss_pct < max_daily_loss,
+        'label':  (
             f'Worst day: {max_loss_pct:.1%} loss'
             + (f' on {worst_day}' if worst_day else '')
-            + f' (limit {max_daily_loss:.0%})'
+            + f' (limit {max_daily_loss:.1%})'
         ),
     }
 
-    # ── 7. Average P&L per trade ──────────────────────────────────────────────
+    # ── 6. No crashes or halts in last N days ─────────────────────────────────
+    cutoff = (now - timedelta(days=crash_lookback)).strftime('%Y-%m-%d')
+    cur.execute(
+        "SELECT COUNT(*) FROM system_events "
+        "WHERE level='ERROR' AND (message LIKE '%halt%' OR message LIKE '%crash%' OR message LIKE '%HALT%') "
+        "AND ts >= ?",
+        (cutoff,),
+    )
+    crash_count = cur.fetchone()[0] or 0
+    results['no_crashes'] = {
+        'value':  crash_count,
+        'target': 0,
+        'pass':   crash_count == 0,
+        'label':  f'{crash_count} halt/crash events in last {crash_lookback} days (need 0)',
+    }
+
+    # ── 7. Positive total P&L ─────────────────────────────────────────────────
+    total_pnl = sum(pnls) if pnls else 0.0
+    results['positive_pnl'] = {
+        'value':  total_pnl,
+        'target': 0,
+        'pass':   total_pnl > 0,
+        'label':  f'Total P&L: ${total_pnl:.2f} (must be positive)',
+    }
+
+    # ── 8. Average P&L per trade ──────────────────────────────────────────────
     avg_pnl = (sum(pnls) / len(pnls)) if pnls else 0.0
     results['avg_pnl'] = {
-        'value': avg_pnl,
+        'value':  avg_pnl,
         'target': min_avg_pnl,
-        'pass': avg_pnl >= min_avg_pnl,
-        'label': f'Avg P&L per trade: ${avg_pnl:.2f} (need ${min_avg_pnl:.2f})',
+        'pass':   avg_pnl >= min_avg_pnl,
+        'label':  f'Avg P&L per trade: ${avg_pnl:.2f} (need ${min_avg_pnl:.2f})',
     }
 
     conn.close()
@@ -243,9 +259,8 @@ def print_report(results: dict, fast_track: bool = False) -> bool:
 
 
 def send_ready_alert():
-    """Fire an email alert when all criteria are met."""
+    """Fire an alert when all criteria are met."""
     try:
-        sys.path.insert(0, PROJ_ROOT)
         from alerts.telegram_alert import alert_system
         alert_system('READY',
             '🏆 PAPER TRADING CRITERIA MET!\n\n'

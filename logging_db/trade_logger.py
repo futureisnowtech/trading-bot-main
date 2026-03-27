@@ -87,6 +87,22 @@ def init_db() -> None:
         cost_usd REAL DEFAULT 0, symbol TEXT
     )""")
 
+    cur.execute("""CREATE TABLE IF NOT EXISTS edge_snapshots (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts TEXT NOT NULL,
+        market TEXT NOT NULL,
+        symbol TEXT NOT NULL,
+        v_score REAL,
+        e_score REAL,
+        d_factor REAL,
+        t_multiplier REAL,
+        k_factor REAL,
+        m_score REAL,
+        final_size_usd REAL,
+        debate_type TEXT,
+        notes TEXT
+    )""")
+
     conn.commit()
     conn.close()
 
@@ -172,6 +188,32 @@ def log_api_cost(call_type, input_tokens, output_tokens, cost_usd, symbol='') ->
     conn.cursor().execute(
         "INSERT INTO api_costs (ts,call_type,input_tokens,output_tokens,cost_usd,symbol) VALUES (?,?,?,?,?,?)",
         (_ts(), call_type, input_tokens, output_tokens, cost_usd, symbol))
+    conn.commit()
+    conn.close()
+
+
+def log_edge_snapshot(
+    market: str,
+    symbol: str,
+    v_score: float = 0.0,
+    e_score: float = 0.0,
+    d_factor: float = 1.0,
+    t_multiplier: float = 1.0,
+    k_factor: float = 1.0,
+    m_score: float = 0.0,
+    final_size_usd: float = 0.0,
+    debate_type: str = 'agents',
+    notes: str = '',
+) -> None:
+    """Log a sizing edge snapshot for post-trade attribution and reporting."""
+    conn = _conn()
+    conn.cursor().execute(
+        "INSERT INTO edge_snapshots "
+        "(ts,market,symbol,v_score,e_score,d_factor,t_multiplier,k_factor,m_score,final_size_usd,debate_type,notes) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        (_ts(), market, symbol, v_score, e_score, d_factor, t_multiplier,
+         k_factor, m_score, final_size_usd, debate_type, notes),
+    )
     conn.commit()
     conn.close()
 

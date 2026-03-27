@@ -17,7 +17,7 @@ A fully autonomous AI-powered trading system that:
 - Runs every candidate through 8 legendary investor AI agents who debate it
 - Uses extended AI reasoning (interleaved thinking) for exit decisions
 - Enforces unbreakable emotional safeguards (the amygdala is removed)
-- Learns from every completed trade via Bayesian signal attribution + LanceDB vector memory
+- Learns from every completed trade via Bayesian signal attribution + NumPy vector memory (SQLite-backed)
 - Writes all notifications to SQLite; dashboard Notifications panel displays them
 - Displays everything on a LeBron James / Dragon Ball Z themed dashboard
 - Trades 100% autonomously — owner is never asked to approve anything
@@ -503,22 +503,34 @@ value_usd, fee_usd, pnl_usd, paper, order_id, notes
 ### Position (risk_manager in-memory + SQLite open_positions table)
 symbol, strategy, qty, entry, stop, target, high_since_entry, ts_entry
 
-## LanceDB Schema
-Table: trade_experiences
-- id: str (uuid)
-- ts: str
-- symbol: str
-- strategy: str
-- entry_reason: str
-- exit_reason: str
-- outcome: float (pnl_usd)
-- won: bool
-- rsi_at_entry: float
-- macd_hist_at_entry: float
-- adx_at_entry: float
-- vol_spike_at_entry: float
-- regime: str
-- embedding: vector[384]
+## Vector Memory Schema (logs/memory/trade_memory.db)
+Table: trade_experiences — NumPy cosine similarity, SQLite storage (no LanceDB)
+- id: TEXT (uuid)
+- ts: TEXT
+- symbol: TEXT
+- strategy: TEXT
+- entry_reason: TEXT
+- exit_reason: TEXT
+- outcome: REAL (pnl_usd)
+- won: INTEGER (0/1)
+- rsi_at_entry: REAL
+- macd_hist_at_entry: REAL
+- adx_at_entry: REAL
+- vol_spike_at_entry: REAL
+- regime: TEXT
+- vector: TEXT (JSON 8-dim feature vector)
+
+Vector layout: [rsi/100, tanh(macd*10), adx/100, min(vol/5,1),
+                regime_trending, regime_ranging, regime_volatile, regime_unknown]
+
+## edge_snapshots Table (logs/trades.db)
+Tracks sizing inputs per trade for attribution and reporting.
+- market: TEXT (crypto|futures|perp)
+- symbol: TEXT
+- v_score, e_score, d_factor, t_multiplier, k_factor, m_score: REAL (edge factors)
+- final_size_usd: REAL
+- debate_type: TEXT (agents|rule_based)
+- notes: TEXT
 
 ## How to Start the System
 ```bash
@@ -570,21 +582,25 @@ WAL (Write-Ahead Logging) mode is now enabled on every connection in `trade_logg
 WAL means the database file is never left in a corrupt state even if Python crashes
 mid-write. The trade history is safe.
 
-## Paper → Live Readiness Checker (v3.1)
-Evaluates 7 criteria before flagging the system as ready for live money:
-1. ≥ 14 calendar days of paper trading
-2. ≥ 30 completed trades
+## Paper → Live Readiness Checker (v5.0)
+Evaluates 8 criteria before flagging the system as ready for live money:
+1. ≥ 21 calendar days of paper trading
+2. ≥ 50 completed trades
 3. Win rate ≥ 52%
-4. Zero system halts in the last 7 days
-5. Positive total paper P&L
-6. No single day worse than -4% of account
-7. Average P&L per trade ≥ $0.10
+4. Profit factor ≥ 1.4 (gross wins / gross losses)
+5. No single day worse than -3.5% of account
+6. Zero crashes or halts in the last 7 days
+7. Positive total paper P&L
+8. Average P&L per trade ≥ $0.10
+
+Fast-track mode (--fast-track, after historical validation): 3 days / 20 trades / WR ≥ 48% / PF ≥ 1.2
 
 Run anytime:
 ```bash
 python3 scripts/check_readiness.py
+python3 scripts/check_readiness.py --fast-track
 ```
-Sends an email alert automatically the first time all criteria pass in a day.
+Fires an alert automatically the first time all criteria pass in a day.
 The daily launchd job runs this at 7:00 AM.
 
 ## How to Run Backtests

@@ -1891,6 +1891,101 @@ def _live_stat_hub(rm):
             unsafe_allow_html=True)
 
 
+def _render_readiness_banner() -> None:
+    """Go-live readiness banner — shown only when all criteria pass."""
+    try:
+        import sys, os as _os
+        sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+        sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), 'scripts'))
+        from check_readiness import check_criteria
+        results = check_criteria()
+        all_pass = all(r.get('pass', False) for r in results.values())
+        n_pass = sum(1 for r in results.values() if r.get('pass', False))
+        n_total = len(results)
+        if all_pass:
+            st.markdown(
+                '<div style="background:#0d4a0d; color:#44ff88; border:2px solid #44ff88; '
+                'border-radius:8px; padding:12px 20px; text-align:center; font-weight:900; font-size:16px; margin:8px 0;">'
+                '🏆 READY FOR LIVE TRADING — All criteria met. Switch PAPER_TRADING=false to go live.</div>',
+                unsafe_allow_html=True,
+            )
+        elif n_pass >= n_total - 2:
+            st.markdown(
+                f'<div style="background:#1a1a00; color:#FFD700; border:1px solid #FFD700; '
+                f'border-radius:6px; padding:8px 16px; text-align:center; font-size:12px; margin:4px 0;">'
+                f'📊 Go-Live Progress: {n_pass}/{n_total} criteria met — almost there</div>',
+                unsafe_allow_html=True,
+            )
+    except Exception:
+        pass  # readiness check failures are non-fatal
+
+
+def render_saiyan_overlay() -> None:
+    """SAIYAN MODE — Dragon Ball Z aesthetic overlay over the same data."""
+    st.markdown(f"<style>{THEME_CSS['saiyan']}</style>", unsafe_allow_html=True)
+
+    rm = get_risk_manager()
+    all_stats = get_all_time_stats(paper=PAPER_TRADING)
+    pnl_today = get_todays_pnl(paper=PAPER_TRADING) - get_todays_fees(paper=PAPER_TRADING)
+    total_pnl = all_stats.get('total_pnl', 0.0)
+    wr = get_win_rate(paper=PAPER_TRADING, lookback_days=20)
+
+    # Power level = base 9000 + every $1 gained = +100 power
+    power_level = max(9001, int(9001 + max(0, total_pnl) * 100))
+
+    st.markdown(f"""
+    <div class="saiyan-header">
+        <div style="text-align:center; color:#FFD700; font-size:26px; font-weight:900; letter-spacing:4px;">
+            ⚡ SAIYAN MODE — THE KING'S WAR ROOM ⚡
+        </div>
+        <div style="text-align:center; color:#00ffff; font-size:11px; letter-spacing:6px; margin-top:4px;">
+            POWER LEVEL {'OVER 9000' if power_level > 9001 else '9001'}
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown(f'<div class="power-level">⚡ {power_level:,} ⚡</div>', unsafe_allow_html=True)
+    st.markdown('<div style="text-align:center; color:#00ffff; font-size:10px; letter-spacing:4px; margin-bottom:16px;">TRADING POWER LEVEL</div>',
+                unsafe_allow_html=True)
+
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        sign = '+' if pnl_today >= 0 else ''
+        color = '#FFD700' if pnl_today >= 0 else '#ff4444'
+        st.markdown(f'<div class="ki-label">TODAY\'S KI</div>'
+                    f'<div class="ki-val" style="color:{color}">{sign}${pnl_today:.2f}</div>',
+                    unsafe_allow_html=True)
+    with col2:
+        sign = '+' if total_pnl >= 0 else ''
+        color = '#FFD700' if total_pnl >= 0 else '#ff4444'
+        st.markdown(f'<div class="ki-label">ALL-TIME KI</div>'
+                    f'<div class="ki-val" style="color:{color}">{sign}${total_pnl:.2f}</div>',
+                    unsafe_allow_html=True)
+    with col3:
+        wr_pct = f"{wr*100:.0f}%" if wr else "—"
+        wr_color = '#FFD700' if (wr or 0) >= 0.52 else '#ff8c00' if (wr or 0) >= 0.40 else '#ff4444'
+        st.markdown(f'<div class="ki-label">20-TRADE WR</div>'
+                    f'<div class="ki-val" style="color:{wr_color}">{wr_pct}</div>',
+                    unsafe_allow_html=True)
+    with col4:
+        mode = "📄 PAPER" if PAPER_TRADING else "🔴 LIVE"
+        halt = "🛑 HALTED" if rm.is_halted else "✅ ACTIVE"
+        st.markdown(f'<div class="ki-label">STATUS</div>'
+                    f'<div class="ki-val" style="font-size:14px;">{mode}<br>{halt}</div>',
+                    unsafe_allow_html=True)
+
+    st.divider()
+    # Show full king content in saiyan style
+    _render_readiness_banner()
+    st.subheader("⚡ Combat Log — Recent Trades")
+    trades = get_recent_trades(limit=10, paper=PAPER_TRADING)
+    if trades:
+        df_t = pd.DataFrame(trades)
+        st.dataframe(df_t[['ts','symbol','action','price','pnl_usd']].head(10), use_container_width=True)
+    else:
+        st.info("No trades yet. The Saiyan is training.")
+
+
 def render_king():
     st.markdown(f"<style>{THEME_CSS['king']}</style>", unsafe_allow_html=True)
 
@@ -1915,7 +2010,7 @@ def render_king():
                 👑 THE KING'S WAR ROOM 👑
             </div>
             <div style="text-align:center; color:#888; font-size:11px; letter-spacing:6px;
-                 font-family:monospace; margin-top:2px;">EQUITIES · FUTURES · COMMAND CENTER</div>
+                 font-family:monospace; margin-top:2px;">CRYPTO · FUTURES · COMMAND CENTER</div>
             <div class="quote-box" style="margin-top:10px;">"{quote}" — LeBron James</div>
         </div>
         """, unsafe_allow_html=True)
@@ -1948,6 +2043,9 @@ def render_king():
         st.markdown(
             f'<div class="halt-banner">{_def_tag}🚨 {LEBRON_MESSAGES["halt"]}<br>{rm.halt_reason}</div>',
             unsafe_allow_html=True)
+
+    # ── Go-live readiness banner ──────────────────────────────────────────────
+    _render_readiness_banner()
 
     # ── Scoreboard P&L with decorative court ─────────────────────────────────
     pnl_class = "scoreboard" if pnl >= 0 else "scoreboard scoreboard-neg"
@@ -2624,11 +2722,14 @@ def _stop_bot() -> None:
 # ─── MAIN ─────────────────────────────────────────────────────────────────────
 
 def main():
-    # Single unified view — no tab switcher.
-    # THE KING view uses @st.fragment(run_every=3) for live stat hub.
+    # Two modes: THE KING (default) and SAIYAN MODE (toggle top-right).
+    # Mode state persists in st.session_state['saiyan_mode'].
 
-    # Status bar + bot control (top)
-    c1, c2 = st.columns([3, 1.4])
+    if 'saiyan_mode' not in st.session_state:
+        st.session_state.saiyan_mode = False
+
+    # Status bar + bot control + SAIYAN toggle (top row)
+    c1, c2, c3 = st.columns([2.5, 1.4, 1])
     with c1:
         mkt = "🟢 MARKET OPEN" if is_market_open() else "🔴 CLOSED"
         if is_in_no_trade_window():
@@ -2658,8 +2759,16 @@ def main():
             if st.button("▶ Start Bot", key="_bot_start", use_container_width=True):
                 _start_bot()
                 st.rerun()
+    with c3:
+        toggle_label = "👑 KING" if st.session_state.saiyan_mode else "⚡ SAIYAN"
+        if st.button(toggle_label, key="_mode_toggle", use_container_width=True):
+            st.session_state.saiyan_mode = not st.session_state.saiyan_mode
+            st.rerun()
 
-    render_king()
+    if st.session_state.saiyan_mode:
+        render_saiyan_overlay()
+    else:
+        render_king()
 
 
 if __name__ == '__main__':

@@ -35,11 +35,10 @@ from config import (
     MAX_STRATEGY_LOSS_STREAK,
 )
 from data.market_data import (
-    is_market_open, is_in_no_trade_window, get_bars,
+    is_market_open, is_in_no_trade_window,
     get_daily_bars,
 )
 from data.coinbase_feed import get_microstructure_feed
-from data.indicators import add_all_indicators
 from risk.risk_manager import get_risk_manager
 from logging_db.trade_logger import (
     log_event, get_today_stats, get_all_time_stats, get_todays_pnl,
@@ -49,7 +48,7 @@ from alerts.telegram_alert import alert_system, alert_daily_summary
 # ── Import shared state from helpers ──────────────────────────────────────────
 from scheduler._helpers import (
     _debate_available, _build_market_data, _get_microstructure,
-    _futures_strategy, _crypto_strategy,
+    _crypto_strategy,
     _CONTEXT_AVAILABLE, run_session_analysis,
 )
 
@@ -59,51 +58,9 @@ from scheduler.exit_monitor import (
 )
 from scheduler.crypto_scanner import run_crypto_scan
 from scheduler.perp_scanner import run_perp_scan, _monitor_perp_exit
-
-
-# ─── FUTURES SCAN ────────────────────────────────────────────────────────────
-
-def run_futures_scan() -> None:
-    if not FUTURES_ENABLED or not is_market_open() or is_in_no_trade_window():
-        return
-    rm = get_risk_manager()
-    if rm.is_halted:
-        return
-    try:
-        from data.market_data import get_cot_sentiment
-        cot = get_cot_sentiment()
-        if not cot['is_bullish']:
-            log_event('INFO', 'scan_feed',
-                      f"[futures] COT: commercials net {cot['commercial_net']:+,} — bearish bias, skipping longs")
-
-        from execution.tradovate_broker import get_tradovate_broker
-        tb = get_tradovate_broker()
-        sig = _futures_strategy.generate_signal('MES')
-        if sig.action == 'BUY' and not cot['is_bullish']:
-            log_event('INFO', 'scan_feed', f"[futures] COT bearish advisory — proceeding with BUY (signal confidence required)")
-        if sig.action == 'BUY':
-            log_event('INFO', 'scan_feed',
-                      f"[futures] MES → BUY {sig.confidence:.0%} | {sig.reason[:80]}")
-            engine = _debate_available()
-            if engine and sig.confidence < 0.75:
-                df = get_bars('ES=F', '5m', '2d')
-                if df is not None:
-                    df_ind = add_all_indicators(df)
-                    md = _build_market_data('MES', sig.price, df_ind)
-                    md['dollar_volume'] = 1_000_000_000
-                    debate = engine['quick']('MES', md, verbose=False)
-                    if debate.synthesized_signal != 'BUY':
-                        print(f"[futures] Debate override → HOLD")
-                        return
-            tb.buy_mes(
-                num_contracts=_futures_strategy.NUM_CONTRACTS,
-                stop_loss_pts=_futures_strategy.STOP_LOSS_PTS,
-                take_profit_pts=_futures_strategy.TAKE_PROFIT_PTS,
-                strategy='futures_scalper',
-            )
-    except Exception as e:
-        print(f"[futures_scan] {e}")
-        log_event('ERROR', 'futures_scan', str(e))
+from scheduler.mes_scanner import (
+    run_mes_scan, run_mes_premarket, run_mes_opening_range,
+)
 
 
 # ─── WATCHDOG ────────────────────────────────────────────────────────────────
@@ -124,13 +81,13 @@ def run_watchdog() -> None:
 
 def run_premarket() -> None:
     print("\n📊 Pre-market analysis...")
-    _futures_strategy.update_htf_bias()
-    _futures_strategy.reset_daily()
+    run_mes_premarket()
     try:
-        from data.indicators import get_htf_bias
         df_spy = get_daily_bars('SPY', '3mo')
         if df_spy is not None:
-            bias = get_htf_bias(df_spy)
+            from data.indicators import get_htf_bias, add_all_indicators
+            df_ind = add_all_indicators(df_spy.copy())
+            bias = get_htf_bias(df_ind)
             msg = f"Pre-market: SPY HTF={bias['bias']} ADX={bias['strength']:.2f}"
             print(f"  {msg}")
             alert_system('INFO', msg)
@@ -139,13 +96,7 @@ def run_premarket() -> None:
 
 
 def run_opening_range() -> None:
-    try:
-        df = get_bars('ES=F', '5m', '1d')
-        if df is not None and len(df) >= 1:
-            last = df.iloc[-1]
-            _futures_strategy.set_opening_range(float(last['high']), float(last['low']))
-    except Exception as e:
-        print(f"[opening_range] {e}")
+    run_mes_opening_range()
 
 
 def run_daily_close() -> None:
@@ -194,7 +145,7 @@ def setup_schedules() -> None:
     schedule.every(WATCHDOG_INTERVAL_SECONDS).seconds.do(run_watchdog)
 
     if FUTURES_ENABLED:
-        schedule.every(FUTURES_SCAN_INTERVAL_SECONDS).seconds.do(run_futures_scan)
+        schedule.every(FUTURES_SCAN_INTERVAL_SECONDS).seconds.do(run_mes_scan)
 
     if PERP_ENABLED:
         schedule.every(CRYPTO_SCAN_INTERVAL_SECONDS).seconds.do(run_perp_scan)

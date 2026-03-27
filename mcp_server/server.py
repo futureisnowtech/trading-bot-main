@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 mcp_server/server.py — The King's MCP Server
-Exposes the trading system as 15 callable tools for Claude Code.
+Exposes the trading system as 21 callable tools for Claude Code.
 
 Run: python3 mcp_server/server.py
 Add to Claude Code settings: { "mcpServers": { "trading-bot": { "command": "python3", "args": ["/Users/joshmacbookair2020/Desktop/algo_trading_final/mcp_server/server.py"] } } }
@@ -494,6 +494,147 @@ def get_edge_status(market: str = 'crypto') -> dict:
             'sizing_reduced': size_factor < 1.0,
             'label': label,
             'actions': actions,
+        }
+    except Exception as e:
+        return {'error': str(e)}
+
+
+# ============================================================================
+# MES FUTURES TOOLS (Sprint 4)
+# ============================================================================
+
+@mcp.tool()
+def get_mes_signal() -> dict:
+    """Run the MES engine evaluation and return the current signal.
+
+    Fetches live ES=F 5-min bars, runs mes_engine.evaluate(), and returns
+    the signal with all state: action, signal_type, confidence, hard rule status,
+    daily P&L progress, VIX regime, HTF bias.
+    """
+    try:
+        import sys, os
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from data.market_data import get_bars
+        from data.indicators import add_all_indicators
+        from strategies.futures.mes_engine import get_engine
+
+        df_raw = get_bars('ES=F', interval='5m', period='2d')
+        if df_raw is None or len(df_raw) < 5:
+            return {'error': 'Insufficient ES data'}
+
+        df = add_all_indicators(df_raw.copy())
+        price = float(df.iloc[-1]['close'])
+        engine = get_engine()
+        sig = engine.evaluate(price, df)
+
+        return {
+            'action': sig.action,
+            'signal_type': sig.signal_type,
+            'confidence': round(sig.confidence, 3),
+            'reason': sig.reason,
+            'entry_price': price,
+            'stop_pts': sig.stop_pts,
+            'target_pts': sig.target_pts,
+            'contracts': sig.contracts,
+            'htf_bias': sig.htf_bias,
+            'vix_regime': sig.vix_regime,
+            'fired_signals': sig.fired_signals,
+            'daily_pnl_pts': engine.daily_pnl_pts,
+            'trades_today': engine.trades_today,
+            'trades_remaining': engine.trades_remaining,
+            'goal_pts': engine.goal_pts,
+            'stop_limit_pts': engine.stop_pts,
+        }
+    except Exception as e:
+        return {'error': str(e)}
+
+
+@mcp.tool()
+def get_mes_position() -> dict:
+    """Get current open MES position (if any) with unrealized P&L.
+
+    Returns position details from risk_manager plus estimated unrealized P&L
+    from current ES=F price vs entry price.
+    """
+    try:
+        import sys, os
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from risk.risk_manager import get_risk_manager
+        from execution.tradovate_broker import get_tradovate_broker, MES_POINT_VALUE
+
+        rm = get_risk_manager()
+        pos = rm.get_position('futures_scalper', 'MES')
+        if not pos:
+            return {'open_position': False}
+
+        tb = get_tradovate_broker()
+        current_price = tb._get_real_es_price()
+
+        entry = pos.get('entry', current_price)
+        direction = pos.get('direction', 'LONG')
+        contracts = pos.get('qty', 1)
+
+        if direction == 'LONG':
+            unrealized_pts = current_price - entry
+        else:
+            unrealized_pts = entry - current_price
+        unrealized_usd = unrealized_pts * MES_POINT_VALUE * contracts
+
+        return {
+            'open_position': True,
+            'direction': direction,
+            'entry_price': entry,
+            'current_price': current_price,
+            'contracts': contracts,
+            'stop': pos.get('stop', 0),
+            'target': pos.get('target', 0),
+            'unrealized_pts': round(unrealized_pts, 2),
+            'unrealized_usd': round(unrealized_usd, 2),
+            'ts_entry': pos.get('ts_entry', ''),
+        }
+    except Exception as e:
+        return {'error': str(e)}
+
+
+@mcp.tool()
+def get_mes_daily_stats() -> dict:
+    """Get MES daily session stats: P&L progress, trades remaining, hard rule status.
+
+    Shows progress toward daily goal (+6 pts) and daily stop (-5 pts),
+    how many of the 2 allowed trades have been used, and whether the
+    engine is standing down for any reason.
+    """
+    try:
+        import sys, os
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from strategies.futures.mes_engine import get_engine
+        from execution.tradovate_broker import MES_POINT_VALUE
+
+        engine = get_engine()
+        pnl_pts = engine.daily_pnl_pts
+        pnl_usd = pnl_pts * MES_POINT_VALUE
+
+        if engine._goal_hit:
+            status = 'STANDING_DOWN_GOAL_HIT'
+        elif pnl_pts <= -engine.stop_pts:
+            status = 'STANDING_DOWN_STOP_HIT'
+        elif engine.trades_today >= 2:
+            status = 'STANDING_DOWN_MAX_TRADES'
+        else:
+            status = 'ACTIVE'
+
+        return {
+            'status': status,
+            'daily_pnl_pts': round(pnl_pts, 2),
+            'daily_pnl_usd': round(pnl_usd, 2),
+            'daily_goal_pts': engine.goal_pts,
+            'daily_stop_pts': -engine.stop_pts,
+            'goal_progress_pct': round(pnl_pts / engine.goal_pts * 100, 1) if engine.goal_pts else 0,
+            'trades_today': engine.trades_today,
+            'trades_remaining': engine.trades_remaining,
+            'htf_bias': engine._htf_bias.get('bias', 'NEUTRAL'),
+            'premarket_bias': engine._premarket_bias,
+            'vix': engine._vix,
         }
     except Exception as e:
         return {'error': str(e)}

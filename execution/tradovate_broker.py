@@ -255,6 +255,79 @@ class TradovateBroker:
             print(f"[TradovateBroker] Sell MES failed: {e}")
             return None
 
+    def short_mes(
+        self,
+        num_contracts: int = 1,
+        order_type: str = 'Limit',
+        limit_price: Optional[float] = None,
+        stop_loss_pts: float = 4.0,
+        take_profit_pts: float = 8.0,
+        strategy: str = 'futures_scalper'
+    ) -> Optional[dict]:
+        """
+        Short MES (Micro E-mini S&P 500) contracts.
+        In paper mode, simulates as a synthetic short using real price.
+        In live mode, places a Sell order (short sell on futures account).
+        """
+        if PAPER_TRADING or not self._access_token:
+            return self._paper_trade(
+                'MES', 'SHORT', num_contracts,
+                stop_loss_pts, take_profit_pts, strategy
+            )
+
+        try:
+            quote = self._get_quote(MES_SYMBOL)
+            current_price = quote.get('bid', 0) if quote else 0
+            if not current_price:
+                current_price = limit_price or self._get_real_es_price()
+
+            payload = {
+                'accountSpec': TRADOVATE_USERNAME,
+                'accountId': self._account_id,
+                'action': 'Sell',
+                'symbol': MES_SYMBOL,
+                'orderQty': num_contracts,
+                'orderType': order_type,
+                'timeInForce': 'Day',
+                'isAutomated': True,
+            }
+            if order_type == 'Limit' and limit_price:
+                payload['price'] = limit_price
+
+            resp = self._post('/order/placeorder', payload)
+            order_id = str(resp.get('orderId', ''))
+
+            stop_price = current_price + stop_loss_pts
+            target_price = current_price - take_profit_pts
+
+            self._open_positions['MES'] = {
+                'qty': num_contracts,
+                'entry': current_price,
+                'stop': stop_price,
+                'target': target_price,
+                'side': 'SHORT',
+                'order_id': order_id,
+            }
+
+            commission = 0.59 * num_contracts * 2
+            log_trade(
+                strategy=strategy, broker='tradovate',
+                symbol='MES', action='SHORT', order_type=order_type,
+                qty=num_contracts, price=current_price,
+                fee_usd=commission,
+                paper=False, order_id=order_id,
+                notes=f"SL={stop_price} TP={target_price}"
+            )
+            alert_trade_opened(strategy, 'MES', 'SHORT', float(num_contracts),
+                               current_price, stop_price, target_price)
+            print(f"[TradovateBroker] SHORT {num_contracts} MES @ {current_price} | SL={stop_price} TP={target_price}")
+            return resp
+
+        except Exception as e:
+            print(f"[TradovateBroker] Short MES failed: {e}")
+            log_event('ERROR', 'TradovateBroker', str(e))
+            return None
+
     def get_position(self, symbol: str = 'MES') -> Optional[dict]:
         return self._open_positions.get(symbol)
 

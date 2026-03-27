@@ -20,7 +20,9 @@ from data.market_data import get_bars, is_near_market_close
 from data.coinbase_feed import get_candles, get_current_price as cb_price
 from data.indicators import add_all_indicators
 from risk.risk_manager import get_risk_manager
-from execution.alpaca_broker import get_alpaca_broker as get_webull_broker
+# Equity removed in v5.0 — stub to prevent NameError in legacy equity exit paths
+def get_webull_broker():
+    return None
 from execution.coinbase_broker import get_coinbase_broker
 from logging_db.trade_logger import log_event
 from memory.trade_memory import store_trade_experience

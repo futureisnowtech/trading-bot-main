@@ -89,6 +89,39 @@ The AI learns what score levels correspond to good vs bad outcomes via Bayesian 
 
 ---
 
+## 🔮 DEFERRED SPRINTS (Build When Ready)
+
+### Sprint: Polymarket Integration (was Sprint 4 in V5_REBUILD_PLAN.md)
+
+Full prediction market lane — deferred until Crypto + MES are profitable in paper trading.
+
+**Files to build:**
+- `execution/polymarket_broker.py` — CLOB client (adapt moondevonyt `nice_funcs.py`)
+  - LIMIT ORDERS ONLY hardcoded — maker fee 0%, taker fee 2%
+  - Paper/live toggle matching existing broker pattern
+- `data/polymarket_feed.py` — market scanner via Gamma API + CLOB orderbook
+- `strategies/polymarket/polymarket_engine.py` — 5-signal hierarchy:
+  1. Cross-platform arbitrage (Polymarket vs Kalshi same event)
+  2. Late-stage binary collapse (48h before resolution, price >85 or <15)
+  3. Favorite-longshot bias (buy when market price < base rate by >5%)
+  4. Correlated contract inconsistency (logical dependency graph)
+  5. Volume spike follow (5x+ sudden volume → smallest size, widest stop)
+- `strategies/ai_agents/` — 3 Polymarket-specific agents:
+  - Superforecaster (Tetlock methodology): base rates, reference class, confidence interval
+  - Information Asymmetry: who has edge, what category gets wrong, recent unpriced news
+  - Execution: bid/ask spread, liquidity, maker fee math, max size before impact
+- `scheduler/poly_scanner.py` — 15-min cycle, 24/7, binary Kelly: `f = (b*p - q) / b`
+- Add Polymarket tools to `mcp_server/server.py`
+
+**Prerequisites before starting:**
+- Verify Polymarket operational status + US access (faced regulatory scrutiny 2024)
+- If inaccessible, substitute Kalshi (fully US-regulated) as Market 2
+- Set up Polymarket API credentials
+
+**Reference:** moondevonyt `nice_funcs.py` for CLOB client (saves 3-5 days)
+
+---
+
 ## 💡 FUTURE IDEAS (Build When Ready)
 
 ### Strategy

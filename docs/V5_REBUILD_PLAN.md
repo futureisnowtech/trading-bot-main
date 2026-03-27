@@ -230,7 +230,7 @@ Execution rules (hardcoded, non-negotiable):
 - Check funding rate before every entry
 - **Scan on 5-minute bar closes** (not 1-minute — latency makes 1-min unreliable)
 
-### Phase 6: Market 2 — Polymarket Strategy
+### Phase 6: Market 2 — Polymarket Strategy (DEFERRED — see TODO.md)
 
 **`execution/polymarket_broker.py`** — CLOB client
 - Source: adapt `moondevonyt/moon-dev-ai-agents/nice_funcs.py` (fastest path)
@@ -420,16 +420,7 @@ Readiness check runs daily at 4:15pm ET. Report goes to dashboard Notifications 
 - Update `mcp_server/server.py` with 3 new Market 1 tools
 - Backtest crypto engine against 90-day price archive
 
-### Sprint 4 — Polymarket Integration (Phase 6) — ~5 days
-- `execution/polymarket_broker.py` (from moondevonyt nice_funcs.py — saves 3-5 days)
-- `data/polymarket_feed.py` (market discovery + orderbook)
-- `strategies/polymarket/polymarket_engine.py` (5-signal hierarchy)
-- `strategies/ai_agents/` — add 3 Polymarket-specific agents (Superforecaster, Info Asymmetry, Execution)
-- `scheduler/poly_scanner.py` (15-min cycle, 24/7, binary Kelly formula)
-- Add Polymarket tools to `mcp_server/server.py`
-- Paper mode only until go-live criteria met
-
-### Sprint 5 — MES Futures Engine (Phase 7) — ~4 days
+### Sprint 4 — MES Futures Engine (Phase 7) — ~4 days
 - `strategies/futures/mes_engine.py` (pullback entry, NOT initial breakout)
 - Wire Tradovate demo REST API in `tradovate_broker.py`
 - Pre-market order flow detection (ghost orders + accumulation)
@@ -437,21 +428,21 @@ Readiness check runs daily at 4:15pm ET. Report goes to dashboard Notifications 
 - Add MES hard rules as code-enforced checks (no debate can override them)
 - Add MES tools to `mcp_server/server.py`
 
-### Sprint 6 — Agent System Extension (Phase 8) — ~2 days
+### Sprint 5 — Agent System Extension (Phase 8) — ~2 days
 - Agent state chaining (TauricResearch pattern): agents see prior agents' reasoning
 - Parameterize agent list in `debate_engine.py` for per-market agent sets
 - High-conviction threshold gate (full debate only when signal > 0.8 AND edge > 0.6)
 - Add `debate_type` tracking to validate cost vs. outcome
 
-### Sprint 7 — Dashboard Rebuild (Phase 9) — ~3 days
+### Sprint 6 — Dashboard Rebuild (Phase 9) — ~3 days
 - Rewrite `dashboard/app.py`: 2 modes only (THE KING + SAIYAN toggle)
-- Three-panel market view (Crypto / Polymarket / MES)
+- Two-panel market view (Crypto / MES)
 - Claude AI chat widget wired to MCP server
 - Go-live readiness banner
 - Replace `dashboard/terminal.py` with `--no-dashboard` stdout flag in `main.py`
 - Delete `scripts/generate_system_html.py`
 
-### Sprint 8 — Infrastructure & Cleanup (Phase 8) — ~2 days
+### Sprint 7 — Infrastructure & Cleanup (Phase 8) — ~2 days
 - Replace `memory/trade_memory.py` with NumPy cosine similarity (remove LanceDB/sentence-transformers)
 - Add `edge_snapshots` table to `logging_db/trade_logger.py`
 - Update go-live criteria in `scripts/check_readiness.py` (all 8 Phase 9 criteria)
@@ -460,10 +451,14 @@ Readiness check runs daily at 4:15pm ET. Report goes to dashboard Notifications 
 - Git commit: "v5.0 three-market autonomous rebuild"
 - Run `setup.py`, verify clean start
 
-### Sprint 9 — Validation (Phases 14-17)
-- Run backtests on all 3 markets
-- Start paper trading all 3 markets simultaneously
+### Sprint 8 — Validation (Phases 14-17)
+- Run backtests on Crypto + MES
+- Start paper trading both markets simultaneously
 - Monitor go-live criteria daily (4:15pm ET dashboard report)
+
+### Sprint 9 (DEFERRED) — Polymarket Integration
+- See TODO.md "Deferred Sprints" section for full spec
+- Prerequisite: Crypto + MES profitable in paper for 14+ days
 
 ---
 
@@ -473,9 +468,9 @@ Full detail in `docs/REFERENCE_ANALYSIS.md`. Action items:
 
 | Source | What to steal | Sprint |
 |--------|--------------|--------|
-| moondevonyt `nice_funcs.py` | Polymarket CLOB API client — saves 3-5 days | 4 |
-| dylanpersonguy Polymarket | Binary Kelly formula: `f = (b*p - q) / b` | 4 |
-| TauricResearch TradingAgents | Agent state chaining pattern | 6 |
+| moondevonyt `nice_funcs.py` | Polymarket CLOB API client — saves 3-5 days | deferred |
+| dylanpersonguy Polymarket | Binary Kelly formula: `f = (b*p - q) / b` | deferred |
+| TauricResearch TradingAgents | Agent state chaining pattern | 5 |
 | freqtrade FreqAI | IsolationForest outlier detection before ML training | ongoing |
 | asavinov ensemble | Add logistic regression alongside LightGBM in ml_signal.py | ongoing |
 | hummingbot OrderTracker | Order lifecycle state machine for broker reliability | ongoing |

@@ -1,5 +1,17 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
+## 2026-03-27
+- Sprint 8: Validation — all 3 markets import clean, 66 tests passing, go-live criteria updated to 8-criterion Phase-9 spec
+
+## 2026-03-27
+- Sprint 2: unified math framework — volatility_regime.py, edge_monitor.py, unified_sizer.py (V×E×D×T×K×M formula), 5-min candles, 29 tests
+
+## 2026-03-26
+- v9.1 — CI/CD + heat system + calibrator + BB bug fix + MACD exit removal
+
+## 2026-03-26
+- Remove MACD SELL as exit trigger — was cutting winners at avg $0.27 (57 orphan exits identified via SQL audit). All exits now owned by monitor_exits_with_ai.
+
 
 ## 2026-03-26 (v9.0 — Sprint 1 Foundation)
 - **job_runner.py decomposed**: 1,812-line god object → 6 focused modules (86% reduction)

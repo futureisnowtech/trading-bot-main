@@ -153,6 +153,12 @@ BINANCE_MAKER_FEE_PCT:   float = 0.00020   # 0.020% maker
 MEAN_REVERSION_ENABLED:   bool  = os.getenv('MEAN_REVERSION_ENABLED', 'true').lower() == 'true'
 MEAN_REVERSION_RSI_ENTRY: float = float(os.getenv('MEAN_REVERSION_RSI_ENTRY', '33'))
 MEAN_REVERSION_ADX_MAX:   float = float(os.getenv('MEAN_REVERSION_ADX_MAX', '22'))
+
+# ── Fade-the-rally (SHORT overbought in ranging/volatile regimes) ─────────────
+FADE_ENABLED: bool = os.getenv('FADE_ENABLED', 'true').lower() == 'true'
+
+# ── Range scalper (ultra-flat ADX < 15 + tight BBs — buy range support) ──────
+RANGE_SCALPER_ENABLED: bool = os.getenv('RANGE_SCALPER_ENABLED', 'true').lower() == 'true'
 TRADOVATE_USERNAME: str = os.getenv('TRADOVATE_USERNAME', '')
 TRADOVATE_PASSWORD: str = os.getenv('TRADOVATE_PASSWORD', '')
 TRADOVATE_APP_ID: str = os.getenv('TRADOVATE_APP_ID', '')

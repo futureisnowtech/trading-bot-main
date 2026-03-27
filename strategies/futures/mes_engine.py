@@ -22,8 +22,8 @@ Hard rules — code-enforced, no debate or config can override:
   - 30-min HTF bias must align with trade direction
 
 VIX regime:
-  - VIX > 25 (HIGH): skip all new entries — too noisy for ORB patterns
-  - VIX 20–25 (ELEVATED): 0.8× confidence discount
+  - VIX > 35 (HIGH): skip all new entries — too noisy for ORB patterns
+  - VIX 25–35 (ELEVATED): 0.8× confidence discount
   - VIX < 20 (NORMAL/LOW): standard
 
 Pre-market accumulation signal (proxy — no L2 data):
@@ -57,8 +57,8 @@ _CLOSE_AUCTION_END: dtime = dtime(15, 30)
 _BREAKOUT_THRESHOLD: float = 0.001  # 0.1% above/below OR = confirmed breakout
 _PULLBACK_ZONE: float = 0.002       # within 0.2% of breakout level = in pullback zone
 _MIN_ADX: float = 18.0
-_HIGH_VIX: float = 25.0
-_ELEVATED_VIX: float = 20.0
+_HIGH_VIX: float = 35.0     # was 25 — elevated market VIX; ORB still works up to ~35
+_ELEVATED_VIX: float = 25.0  # was 20
 
 
 # ─── Signal dataclass ─────────────────────────────────────────────────────────

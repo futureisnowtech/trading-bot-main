@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-03-27
+- Strategy expansion: VWAP reclaim (signal 5), fade-the-rally SHORT, range scalper, wire Kyle Lambda + Amihud — from 4 strategies to 7, fix MR independence bug
+
+## 2026-03-27
 - Philosophical reoptimizations: edge monitor, options flow, Landry bar count, stop cooldown
 
 ## 2026-03-27

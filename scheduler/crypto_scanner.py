@@ -19,6 +19,7 @@ from config import (
     COINBASE_MAKER_FEE_PCT, CRYPTO_POSITION_SIZE_USD,
     MAX_STRATEGY_LOSS_STREAK,
     MEAN_REVERSION_ENABLED, MEAN_REVERSION_RSI_ENTRY, MEAN_REVERSION_ADX_MAX,
+    FADE_ENABLED, RANGE_SCALPER_ENABLED,
     TV_SIGNAL_MAX_AGE_SECONDS,
 )
 from data.coinbase_feed import get_candles
@@ -147,6 +148,20 @@ def run_crypto_scan() -> None:
 
             market_data = _build_market_data(pid, price, df_ind)
             market_data['regime'] = regime
+
+            # ── VWAP reclaim flag (engine signal 5) ───────────────────────────
+            # True when price crossed back above AVWAP after being below in last 3 bars.
+            # Pre-computed here because engine.evaluate() only sees market_data (not df).
+            if 'avwap_dev' in df_ind.columns and len(df_ind) >= 4:
+                try:
+                    _avd_prior = df_ind['avwap_dev'].iloc[-4:-1].fillna(0).tolist()
+                    _avd_curr  = float(market_data.get('avwap_dev') or 0)
+                    market_data['vwap_reclaim'] = (
+                        _avd_curr > 0.001 and                     # currently above AVWAP
+                        any(d < -0.001 for d in _avd_prior)       # was below in prior bars
+                    )
+                except Exception:
+                    market_data['vwap_reclaim'] = False
 
             # ── Enrich with funding rate + macro ─────────────────────────────
             if _MACRO_FEED_AVAILABLE:
@@ -417,46 +432,154 @@ def run_crypto_scan() -> None:
                     print(f"[crypto] 🔻 SHORT {pid} | qty={qty:.6f} @ ${price:,.4f} | "
                           f"stop=${final.stop_loss:,.4f} target=${final.take_profit:,.4f}")
 
-            # ── Mean-reversion path (ranging/volatile regimes only) ────────────
-            if MEAN_REVERSION_ENABLED and regime in ('ranging', 'volatile'):
-                try:
-                    from strategies.crypto_mean_reversion import get_mean_reversion_signal
-                    mr_market_data = dict(market_data)
-                    mr_market_data['mr_rsi_entry'] = MEAN_REVERSION_RSI_ENTRY
-                    mr_market_data['mr_adx_max']   = MEAN_REVERSION_ADX_MAX
-                    mr_sig = get_mean_reversion_signal(pid, mr_market_data, df)
-                    log_signal('crypto_mean_reversion', pid, mr_sig.action, mr_sig.confidence,
-                               mr_sig.reason, price=price)
-                    if mr_sig.action == 'BUY':
-                        risk_check = rm.check_entry('crypto_mean_reversion', pid, 'BUY',
-                                                    mr_sig.suggested_size_usd, price,
-                                                    mr_sig.confidence)
-                        if not risk_check:
-                            log_event('INFO', 'scan_feed',
-                                      f"[crypto] {pid} ⛔ MR blocked: {risk_check.reason}")
-                        else:
-                            result = cb.buy_limit(pid, risk_check.adjusted_size,
-                                                  price * 1.001,
-                                                  'crypto_mean_reversion',
-                                                  mr_sig.stop_loss, mr_sig.take_profit)
-                            if result:
-                                rm.register_position('crypto_mean_reversion', pid,
-                                                     risk_check.adjusted_size / price,
-                                                     price, mr_sig.stop_loss,
-                                                     mr_sig.take_profit,
-                                                     direction='LONG',
-                                                     entry_reason=mr_sig.reason)
-                                log_event('INFO', 'scan_feed',
-                                          f"[crypto] MR ENTRY {pid} @ ${price:,.4f} | "
-                                          f"conf={mr_sig.confidence:.0%} "
-                                          f"stop=${mr_sig.stop_loss:,.4f} "
-                                          f"target=${mr_sig.take_profit:,.4f} | "
-                                          f"{mr_sig.reason[:80]}")
-                except Exception as mr_err:
-                    log_event('ERROR', 'crypto_scan', f"[MR] {pid}: {mr_err}")
+            # NOTE: Independent strategies (MR, Fade, Range Scalper) are handled
+            # in the second pass loop below — they run regardless of engine signal.
 
         except Exception as e:
             print(f"[crypto_scan] {pid}: {e}")
             log_event('ERROR', 'crypto_scan', f"{pid}: {e}")
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # INDEPENDENT STRATEGY PASS
+    # Mean reversion, Fade, and Range Scalper run on a second pass — independent
+    # of the engine signal. This fixes the bug where MR only ran when the engine
+    # also signaled BUY. These strategies have different entry conditions and
+    # should fire even when cascade/divergence/obi/macd are all HOLD.
+    # ══════════════════════════════════════════════════════════════════════════
+    _indep_strategy_names = ['crypto_mean_reversion', 'crypto_fade', 'crypto_range_scalper']
+
+    for pid in CRYPTO_PAIRS:
+        try:
+            # Skip if ANY strategy already has a position in this symbol
+            if any(rm.get_position(s, pid) for s in _indep_strategy_names + ['crypto_macd_consensus']):
+                continue
+
+            df2 = get_candles(pid, CRYPTO_CANDLE_GRANULARITY, 100)
+            if df2 is None or len(df2) < 30:
+                continue
+
+            df2_ind = add_all_indicators(df2)
+            price2  = float(df2_ind.iloc[-1]['close'])
+
+            from strategies.ai_agents.regime_detector import detect_regime
+            regime2_data = detect_regime(df=df2_ind, intraday=True)
+            regime2 = regime2_data.get('regime', 'ranging')
+
+            md2 = _build_market_data(pid, price2, df2_ind)
+            md2['regime'] = regime2
+
+            # ── Mean-reversion LONG (oversold near lower BB) ──────────────────
+            if MEAN_REVERSION_ENABLED and regime2 in ('ranging', 'volatile'):
+                try:
+                    _cd_mr, _ = is_in_stop_cooldown('crypto_mean_reversion', pid, paper=PAPER_TRADING)
+                    if not _cd_mr:
+                        from strategies.crypto_mean_reversion import get_mean_reversion_signal
+                        mr_md = dict(md2)
+                        mr_md['mr_rsi_entry'] = MEAN_REVERSION_RSI_ENTRY
+                        mr_md['mr_adx_max']   = MEAN_REVERSION_ADX_MAX
+                        mr_sig = get_mean_reversion_signal(pid, mr_md, df2)
+                        log_signal('crypto_mean_reversion', pid, mr_sig.action,
+                                   mr_sig.confidence, mr_sig.reason, price=price2)
+                        if mr_sig.action == 'BUY':
+                            _rc = rm.check_entry('crypto_mean_reversion', pid, 'BUY',
+                                                 mr_sig.suggested_size_usd, price2,
+                                                 mr_sig.confidence)
+                            if not _rc:
+                                log_event('INFO', 'scan_feed',
+                                          f"[crypto] {pid} ⛔ MR blocked: {_rc.reason}")
+                            else:
+                                _res = cb.buy_limit(pid, _rc.adjusted_size, price2 * 1.001,
+                                                    'crypto_mean_reversion',
+                                                    mr_sig.stop_loss, mr_sig.take_profit)
+                                if _res:
+                                    rm.register_position(
+                                        'crypto_mean_reversion', pid,
+                                        _rc.adjusted_size / price2, price2,
+                                        mr_sig.stop_loss, mr_sig.take_profit,
+                                        direction='LONG', entry_reason=mr_sig.reason)
+                                    log_event('INFO', 'scan_feed',
+                                              f"[crypto] MR LONG {pid} @ ${price2:,.4f} | "
+                                              f"conf={mr_sig.confidence:.0%} "
+                                              f"stop=${mr_sig.stop_loss:,.4f} "
+                                              f"target=${mr_sig.take_profit:,.4f} | "
+                                              f"{mr_sig.reason[:80]}")
+                except Exception as _err:
+                    log_event('ERROR', 'crypto_scan', f"[MR] {pid}: {_err}")
+
+            # ── Fade SHORT (overbought near upper BB) ─────────────────────────
+            if FADE_ENABLED and regime2 in ('ranging', 'volatile'):
+                try:
+                    _cd_fade, _ = is_in_stop_cooldown('crypto_fade', pid, paper=PAPER_TRADING)
+                    if not _cd_fade:
+                        from strategies.crypto_fade_strategy import get_fade_signal
+                        fade_sig = get_fade_signal(pid, md2, df2)
+                        log_signal('crypto_fade', pid, fade_sig.action,
+                                   fade_sig.confidence, fade_sig.reason, price=price2)
+                        if fade_sig.action == 'SELL':
+                            _rc = rm.check_entry('crypto_fade', pid, 'SELL',
+                                                 fade_sig.suggested_size_usd, price2,
+                                                 fade_sig.confidence)
+                            if not _rc:
+                                log_event('INFO', 'scan_feed',
+                                          f"[crypto] {pid} ⛔ Fade blocked: {_rc.reason}")
+                            else:
+                                qty = _rc.adjusted_size / price2
+                                from logging_db.trade_logger import log_trade
+                                log_trade('crypto_fade', 'coinbase', pid, 'SELL', 'LIMIT',
+                                          qty, price2,
+                                          fee_usd=price2 * qty * COINBASE_MAKER_FEE_PCT,
+                                          paper=PAPER_TRADING,
+                                          notes=(f'SHORT fade | stop=${fade_sig.stop_loss:.4f} | '
+                                                 f'{fade_sig.reason[:100]}'))
+                                rm.register_position(
+                                    'crypto_fade', pid, qty, price2,
+                                    fade_sig.stop_loss, fade_sig.take_profit,
+                                    direction='SHORT', entry_reason=fade_sig.reason)
+                                log_event('INFO', 'scan_feed',
+                                          f"[crypto] FADE SHORT {pid} @ ${price2:,.4f} | "
+                                          f"conf={fade_sig.confidence:.0%} "
+                                          f"stop=${fade_sig.stop_loss:,.4f} "
+                                          f"target=${fade_sig.take_profit:,.4f} | "
+                                          f"{fade_sig.reason[:80]}")
+                except Exception as _err:
+                    log_event('ERROR', 'crypto_scan', f"[Fade] {pid}: {_err}")
+
+            # ── Range Scalper LONG (ultra-flat ADX < 15, buy range support) ───
+            if RANGE_SCALPER_ENABLED:
+                try:
+                    _cd_rs, _ = is_in_stop_cooldown('crypto_range_scalper', pid, paper=PAPER_TRADING)
+                    if not _cd_rs:
+                        from strategies.crypto_range_scalper import get_range_scalper_signal
+                        rs_sig = get_range_scalper_signal(pid, md2, df2)
+                        log_signal('crypto_range_scalper', pid, rs_sig.action,
+                                   rs_sig.confidence, rs_sig.reason, price=price2)
+                        if rs_sig.action == 'BUY':
+                            _rc = rm.check_entry('crypto_range_scalper', pid, 'BUY',
+                                                 rs_sig.suggested_size_usd, price2,
+                                                 rs_sig.confidence)
+                            if not _rc:
+                                log_event('INFO', 'scan_feed',
+                                          f"[crypto] {pid} ⛔ Range scalp blocked: {_rc.reason}")
+                            else:
+                                _res = cb.buy_limit(pid, _rc.adjusted_size, price2 * 1.001,
+                                                    'crypto_range_scalper',
+                                                    rs_sig.stop_loss, rs_sig.take_profit)
+                                if _res:
+                                    rm.register_position(
+                                        'crypto_range_scalper', pid,
+                                        _rc.adjusted_size / price2, price2,
+                                        rs_sig.stop_loss, rs_sig.take_profit,
+                                        direction='LONG', entry_reason=rs_sig.reason)
+                                    _rs_bb_w = rs_sig.metadata.get('bb_width', 0)
+                                    log_event('INFO', 'scan_feed',
+                                              f"[crypto] RANGE SCALP {pid} @ ${price2:,.4f} | "
+                                              f"conf={rs_sig.confidence:.0%} BB_width={_rs_bb_w:.2%} "
+                                              f"target=${rs_sig.take_profit:,.4f} | "
+                                              f"{rs_sig.reason[:80]}")
+                except Exception as _err:
+                    log_event('ERROR', 'crypto_scan', f"[RangeScalp] {pid}: {_err}")
+
+        except Exception as e:
+            log_event('ERROR', 'crypto_scan', f"[indep] {pid}: {e}")
 
     rm.ping()

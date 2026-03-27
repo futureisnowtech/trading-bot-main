@@ -25,10 +25,10 @@ import sqlite3
 from datetime import datetime
 from typing import Dict, Tuple
 
-_WINDOW_SIZE = 20           # trades per evaluation window
+_WINDOW_SIZE = 30           # trades per evaluation window (was 20 — too small, one bad run distorted PF)
 _BAD_THRESHOLD = 0.45       # PF < 1.45 = degraded window
-_BLOCK_THRESHOLD = 0.30     # PF < 1.30 = block entries (negative expected value)
-_MIN_TRADES_TO_GATE = 10    # require at least this many trades before gating
+_BLOCK_THRESHOLD = 0.10     # PF < 1.10 = block entries (was 0.30/PF1.30 — too strict at small sample sizes)
+_MIN_TRADES_TO_GATE = 20    # require at least this many trades before gating (was 10)
 _CACHE_MINUTES = 5
 
 _cache: Dict[str, dict] = {}

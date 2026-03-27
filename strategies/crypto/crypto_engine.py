@@ -148,6 +148,30 @@ def _detect_macd_consensus(market_data: dict) -> bool:
     return bool(market_data.get('macd_consensus', False))
 
 
+def _detect_vwap_reclaim(market_data: dict) -> bool:
+    """
+    VWAP reclaim: price crossed back above the daily anchored VWAP after being below.
+
+    Logic:
+      - The anchored VWAP (avwap_utc) is the volume-weighted average price since
+        the UTC midnight anchor. It's the fair-value reference every smart participant
+        tracks.
+      - When price dips below AVWAP and then reclaims it (closes back above),
+        sellers failed to hold the market down — buyers took control at a key level.
+      - This is a momentum entry ON the reclaim, not after — captures the structural shift.
+
+    Pre-computed by the scanner:
+      `market_data['vwap_reclaim'] = True` when current bar is above AVWAP AND
+      at least one of the prior 3 bars was below AVWAP (+0.1% threshold to avoid noise).
+      Volume spike >= 1.0x confirms genuine buying, not random noise.
+    """
+    if not market_data.get('vwap_reclaim', False):
+        return False
+    # Require at least average volume on the reclaim — a fake breakout has thin volume
+    vol_spike = float(market_data.get('vol_spike', 0.0) or 0.0)
+    return vol_spike >= 1.0
+
+
 # ── Pre-entry hard checks ─────────────────────────────────────────────────────
 
 def _pre_entry_ok(symbol: str, market_data: dict) -> tuple:
@@ -173,6 +197,27 @@ def _pre_entry_ok(symbol: str, market_data: dict) -> tuple:
                 return False, f"funding overheated ({float(funding_pct):.4f}%/8h > {FUNDING_OVERHEATED_PCT}%)"
         except (TypeError, ValueError):
             pass
+
+    # Kyle's Lambda illiquidity gate — top 20% most illiquid = expect significant slippage
+    # kyle_lambda_pct is the rolling percentile rank: 80+ = top 20% illiquid conditions
+    try:
+        _kl = market_data.get('kyle_lambda_pct')
+        if _kl is not None:
+            kl_val = float(_kl)
+            if kl_val == kl_val and kl_val > 80:   # nan != nan, so this skips NaN
+                return False, f"kyle_lambda_pct={kl_val:.0f} — top-20% illiquid, expect slippage on entry"
+    except (TypeError, ValueError):
+        pass
+
+    # Amihud illiquidity gate — top 15% most illiquid = extreme market impact cost
+    try:
+        _am = market_data.get('amihud_pct')
+        if _am is not None:
+            am_val = float(_am)
+            if am_val == am_val and am_val > 85:   # nan check
+                return False, f"amihud_pct={am_val:.0f} — extreme illiquidity, market impact too high"
+    except (TypeError, ValueError):
+        pass
 
     return True, ''
 
@@ -205,22 +250,24 @@ def evaluate(
     fired = []
 
     # Detect each signal
-    cascade   = _detect_cascade(market_data)
-    divergence = _detect_divergence(symbol, market_data, btc_change_pct)
-    obi_hit   = _detect_obi(market_data)
-    macd_hit  = _detect_macd_consensus(market_data)
+    cascade       = _detect_cascade(market_data)
+    vwap_reclaim  = _detect_vwap_reclaim(market_data)
+    divergence    = _detect_divergence(symbol, market_data, btc_change_pct)
+    obi_hit       = _detect_obi(market_data)
+    macd_hit      = _detect_macd_consensus(market_data)
 
-    if cascade:    fired.append('cascade')
-    if divergence: fired.append('divergence')
-    if obi_hit:    fired.append('obi')
-    if macd_hit:   fired.append('macd_fallback')
+    if cascade:       fired.append('cascade')
+    if vwap_reclaim:  fired.append('vwap_reclaim')
+    if divergence:    fired.append('divergence')
+    if obi_hit:       fired.append('obi')
+    if macd_hit:      fired.append('macd_fallback')
 
     if not fired:
         return EngineSignal(action='HOLD', signal_type='none',
                             size_multiplier=0.0, reason='no signals fired',
                             fired_signals=[])
 
-    # Priority: cascade > divergence > obi > macd_fallback
+    # Priority: cascade > vwap_reclaim > divergence > obi > macd_fallback
     if cascade:
         return EngineSignal(
             action='BUY',
@@ -231,6 +278,21 @@ def evaluate(
             reason=(f"Liquidation cascade: funding={market_data.get('funding_rate_pct', '?'):.4f}%/8h "
                     f"OI_chg={market_data.get('oi_change_pct', '?'):.2f}% — "
                     f"forced long liquidation, ride the forced unwind"),
+            fired_signals=fired,
+        )
+
+    if vwap_reclaim:
+        avwap_dev = float(market_data.get('avwap_dev', 0.0) or 0.0)
+        vol_spike = float(market_data.get('vol_spike', 0.0) or 0.0)
+        return EngineSignal(
+            action='BUY',
+            signal_type='vwap_reclaim',
+            size_multiplier=1.0,
+            order_type='limit',
+            confidence=0.68,
+            reason=(f"VWAP reclaim: price crossed back above daily AVWAP "
+                    f"(avwap_dev={avwap_dev:+.2f}%, vol={vol_spike:.1f}x) — "
+                    f"sellers failed to hold, buyers reclaimed volume-weighted fair value"),
             fired_signals=fired,
         )
 
@@ -278,9 +340,10 @@ def get_signal_tags(signal: EngineSignal) -> list:
     Matches the format used by the existing signal_triggers field.
     """
     tag_map = {
-        'cascade':      'liq_cascade',
-        'divergence':   'cross_pair_divergence',
-        'obi':          f'OBI_strong(>{OBI_STRONG_THRESHOLD})',
+        'cascade':       'liq_cascade',
+        'vwap_reclaim':  'VWAP_reclaim(crossed_above_daily_avwap)',
+        'divergence':    'cross_pair_divergence',
+        'obi':           f'OBI_strong(>{OBI_STRONG_THRESHOLD})',
         'macd_fallback': 'MACD_consensus_fallback',
     }
     return [tag_map.get(s, s) for s in signal.fired_signals]

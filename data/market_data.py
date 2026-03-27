@@ -300,9 +300,8 @@ def is_near_market_close(minutes_before: int = 15) -> bool:
     if now.weekday() >= 5:
         return False
     close = now.replace(hour=16, minute=0, second=0, microsecond=0)
-    gate  = now.replace(hour=16 - (minutes_before // 60),
-                        minute=(60 - minutes_before % 60) % 60,
-                        second=0, microsecond=0)
+    from datetime import timedelta
+    gate  = close - timedelta(minutes=minutes_before)
     return gate <= now <= close
 
 

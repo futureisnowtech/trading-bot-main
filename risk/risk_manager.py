@@ -17,7 +17,7 @@ from typing import Optional
 import pytz
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import ACCOUNT_SIZE, MARKET_TIMEZONE, PAPER_TRADING
+from config import ACCOUNT_SIZE, MARKET_TIMEZONE, PAPER_TRADING, MAX_DEPLOYED_PCT
 
 from logging_db.trade_logger import (
     log_event, persist_position, delete_position, load_open_positions,
@@ -231,7 +231,7 @@ class RiskManager:
             return result
 
         deployed = self._get_deployed()
-        max_deploy = ACCOUNT_SIZE * 0.90
+        max_deploy = ACCOUNT_SIZE * MAX_DEPLOYED_PCT
         if deployed >= max_deploy:
             return RiskCheckResult(False, f"Max capital deployed (${deployed:.0f}/${max_deploy:.0f})")
 

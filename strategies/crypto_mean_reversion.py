@@ -106,12 +106,12 @@ def get_mean_reversion_signal(
     # Price must be below Kalman estimate OR below AVWAP, with negative autocorr
     # confirming mean-reverting microstructure. Deep research: these are more
     # reliable than RSI for detecting true oversold on 1-min crypto.
-    kalman_oversold = kalman_dev <= -0.8   # price ≥0.8% below Kalman estimate
-    avwap_oversold  = avwap_dev  <= -0.5   # price ≥0.5% below AVWAP
+    kalman_oversold = kalman_dev <= -0.008  # price ≥0.8% below Kalman estimate (fraction, not pct)
+    avwap_oversold  = avwap_dev  <= -0.005  # price ≥0.5% below AVWAP (fraction, not pct)
     mr_microstructure = autocorr < 0.0    # negative autocorr = mean-reverting
     if not (kalman_oversold or avwap_oversold):
         return _hold(symbol, price,
-                     f"Not oversold: Kalman={kalman_dev:.2f}% AVWAP={avwap_dev:.2f}% — need <-0.8% or <-0.5%")
+                     f"Not oversold: Kalman={kalman_dev:.4f} AVWAP={avwap_dev:.4f} — need <-0.008 or <-0.005")
 
     # ── Condition 3: Near lower Bollinger Band ────────────────────────────────
     if bb_lower <= 0:

@@ -38,19 +38,19 @@ def get_current_session() -> dict:
       HIGH     → elevated volume, documented intraday predictability
       MEDIUM   → moderate activity, signals still valid
       LOW      → thin book, momentum signals weaker
-      BLOCKED  → system hard-blocks new entries (dead zone 2am–5am ET)
+      BLOCKED  → system hard-blocks new entries (dead zone 2am–3am ET)
     """
     tz = pytz.timezone(MARKET_TIMEZONE)
     now = datetime.now(tz)
     h = now.hour + now.minute / 60.0
 
-    # Dead zone first (hard override)
-    if 2.0 <= h < 5.0:
+    # Dead zone first (hard override) — 2am-3am ET only; London opens at 3am
+    if 2.0 <= h < 3.0:
         return {
             'session': 'DEAD_ZONE',
             'session_quality': 'BLOCKED',
             'hour_et': round(h, 2),
-            'notes': 'Dead zone 2am–5am ET: system blocks new entries. No edge, thin book.',
+            'notes': 'Dead zone 2am–3am ET: system blocks new entries. Pre-London gap, no edge.',
             'timestamp': now.isoformat(),
         }
 

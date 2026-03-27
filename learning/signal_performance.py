@@ -302,10 +302,13 @@ def _update_signal_stat(
             n = row['fires']
 
             if n >= MIN_FIRES_TO_LEARN:
+                # Clamp prior_p to [0, 1] — SIGNAL_PRIORS stores pts/12, not win rates,
+                # so values > 1.0 are possible and would break the Bayesian formula
+                prior_p_wr = min(max(prior_p, 0.01), 1.0)
                 # posterior win rate = weighted average of prior and observed
-                posterior_wr = (prior_p * PRIOR_N + obs_win_rate * n) / (PRIOR_N + n)
+                posterior_wr = (prior_p_wr * PRIOR_N + obs_win_rate * n) / (PRIOR_N + n)
                 # Scale to conviction points: 0.5 wr → prior_pts, 1.0 wr → 2×prior_pts, 0.0 → 0
-                bayesian_pts = prior_pts * (posterior_wr / max(prior_p, 0.01))
+                bayesian_pts = prior_pts * (posterior_wr / prior_p_wr)
                 bayesian_pts = max(0, min(bayesian_pts, prior_pts * 2.5))  # cap at 2.5×
             else:
                 bayesian_pts = float(prior_pts)  # not enough data — use prior

@@ -170,11 +170,12 @@ def _build_market_data(symbol, price, df_ind, change_pct=0, regime='ranging') ->
         if v is None:
             return default
         try:
-            if math.isnan(float(v)):
+            fv = float(v)
+            if math.isnan(fv):
                 return default
+            return fv
         except Exception:
-            pass
-        return float(v) if default is not None or v is not None else v
+            return default
 
     rv_ratio          = _safe('rv_ratio')
     avwap_utc         = _safe('avwap_utc', price)

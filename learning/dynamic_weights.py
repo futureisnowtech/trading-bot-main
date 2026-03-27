@@ -25,19 +25,18 @@ from learning.signal_performance import (
 # Cache weights for 5 minutes to avoid repeated DB reads during hot scan loops
 import time
 _weight_cache: dict = {}
-_cache_ts: float = 0
+_cache_ts: dict = {}   # per-regime timestamps (single float caused stale cross-regime cache hits)
 _CACHE_TTL = 300  # 5 minutes
 
 
 def _load_weights(regime: str) -> dict[str, float]:
     global _weight_cache, _cache_ts
     now = time.time()
-    cache_key = regime
-    if cache_key in _weight_cache and (now - _cache_ts) < _CACHE_TTL:
-        return _weight_cache[cache_key]
+    if regime in _weight_cache and (now - _cache_ts.get(regime, 0)) < _CACHE_TTL:
+        return _weight_cache[regime]
     weights = get_all_weights(regime)
-    _weight_cache[cache_key] = weights
-    _cache_ts = now
+    _weight_cache[regime] = weights
+    _cache_ts[regime] = now
     return weights
 
 
@@ -45,7 +44,7 @@ def invalidate_cache():
     """Call after a trade closes to force weight reload on next scan."""
     global _weight_cache, _cache_ts
     _weight_cache = {}
-    _cache_ts = 0
+    _cache_ts = {}
 
 
 # ── Map raw market_data signals to canonical signal names ─────────────────────

@@ -49,7 +49,10 @@ MIN_TRADES          = 50      # completed (SELL) trades
 MIN_WIN_RATE        = 0.52    # 52% win rate
 MIN_PROFIT_FACTOR   = 1.4     # gross wins / gross losses
 MAX_DAILY_LOSS_PCT  = 0.035   # no day worse than -3.5% of account
-ACCOUNT_SIZE        = 500.0   # from config (fallback if .env not loaded)
+try:
+    from config import ACCOUNT_SIZE
+except Exception:
+    ACCOUNT_SIZE = 500.0   # fallback if config not loadable
 MIN_AVG_PNL         = 0.10    # minimum average P&L per trade ($)
 CRASH_LOOKBACK_DAYS = 7       # check for crashes/halts in last N days
 

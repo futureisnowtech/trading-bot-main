@@ -30,6 +30,11 @@ from collections import defaultdict
 # ── Paths ─────────────────────────────────────────────────────────────────────
 SCRIPT_DIR  = Path(__file__).resolve().parent
 PROJECT_DIR = SCRIPT_DIR.parent
+sys.path.insert(0, str(PROJECT_DIR))
+try:
+    from config import ACCOUNT_SIZE
+except Exception:
+    ACCOUNT_SIZE = 500.0
 DB_PATH     = PROJECT_DIR / 'logs' / 'trades.db'
 BRAIN_DIR   = PROJECT_DIR / 'brain'
 SUMMARIES   = BRAIN_DIR / '06_daily_summaries'
@@ -150,7 +155,9 @@ def analyze_trades(trades):
             'paper_count': 0, 'live_count': 0,
         }
 
-    closes = [t for t in trades if t['action'] in ('SELL', 'CLOSE', 'SELL_SHORT')]
+    # Include BUY with pnl_usd to catch short exits (buying to cover logs as 'BUY')
+    closes = [t for t in trades if t['action'] in ('SELL', 'CLOSE', 'SELL_SHORT')
+              or (t['action'] == 'BUY' and (t['pnl_usd'] or 0) != 0)]
     wins   = [t for t in closes if (t['pnl_usd'] or 0) > 0]
     losses = [t for t in closes if (t['pnl_usd'] or 0) < 0]
 
@@ -422,7 +429,7 @@ def write_daily_summary(day: date, ta, sa, da, events, open_positions,
     pos_section = "\n".join(pos_lines) if pos_lines else "  - No open positions"
 
     # Fee analysis
-    fee_pct_of_account = ta['total_fees'] / 500.0 * 100  # $500 account
+    fee_pct_of_account = ta['total_fees'] / max(ACCOUNT_SIZE, 1.0) * 100
     fee_ok = "YES" if ta['total_fees'] < 40 else ("WARN > $40" if ta['total_fees'] < 50 else "BREACHED $50 LIMIT")
 
     db_note = "\n> **WARNING**: Database not found — this is a template with no real data.\n" if no_db else ""
@@ -435,7 +442,7 @@ def write_daily_summary(day: date, ta, sa, da, events, open_positions,
 
 #daily-summary
 {db_note}
-**System version**: BELIEVED v4.3
+**System version**: v9.0
 **Mode**: {mode_label}
 **Generated**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} (auto)
 

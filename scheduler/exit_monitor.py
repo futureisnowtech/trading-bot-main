@@ -15,6 +15,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import (
     PAPER_TRADING, MARKET_TIMEZONE, COINBASE_MAKER_FEE_PCT,
     FLAT_POSITION_THRESHOLD_PCT, EQUITY_MAX_HOLD_HOURS, CRYPTO_MAX_HOLD_HOURS,
+    BINANCE_TAKER_FEE_PCT,
 )
 from data.market_data import get_bars, is_near_market_close
 from data.coinbase_feed import get_candles, get_current_price as cb_price
@@ -195,7 +196,8 @@ def monitor_exits_with_ai(engine) -> None:
         try:
             if wb is None:
                 # Equity broker not configured — close orphaned positions to prevent monitor crash
-                rm.close_position('equity_momentum', symbol)
+                strat = pos.get('strategy', 'equity_momentum')
+                rm.close_position(strat, symbol)
                 log_event('WARNING', 'exit_monitor',
                           f"[equity] {symbol} — equity broker unavailable, removed orphaned position")
                 continue
@@ -391,10 +393,11 @@ def _execute_perp_exit(bb, rm, symbol: str, pos: dict, reason: str) -> None:
         if _LEARNING_AVAILABLE:
             try:
                 from datetime import datetime as _dt
+                _perp_fee = pos.get('qty', 0) * pos.get('entry', 0) * BINANCE_TAKER_FEE_PCT
                 analyze_closed_trade(
                     symbol=symbol, strategy='crypto_perp',
                     entry_price=pos['entry'], exit_price=exit_price,
-                    qty=pos.get('qty', 0), fee_usd=0.0,
+                    qty=pos.get('qty', 0), fee_usd=_perp_fee,
                     entry_ts=pos.get('ts_entry', ''),
                     exit_ts=_dt.now(pytz.timezone(MARKET_TIMEZONE)).isoformat(),
                     exit_reason=reason,

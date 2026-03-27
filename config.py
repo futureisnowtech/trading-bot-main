@@ -108,8 +108,8 @@ FULL_DEBATE_MIN_AGREEMENT: float = 0.60   # 2 of 3 agents must agree for BUY (2/
 ML_SIGNAL_MIN_PROB: float = float(os.getenv('ML_SIGNAL_MIN_PROB', '0.08'))
 
 # Funding rate signal thresholds (Coinglass per-8h %)
-FUNDING_OVERHEATED_PCT:  float = 0.05   # > this = longs overloaded, lean hold
-FUNDING_FAVORABLE_PCT:   float = 0.01   # < this = low crowding, good long entry window
+FUNDING_OVERHEATED_PCT:  float = 0.0005  # > this = longs overloaded (Binance decimal: 0.0001 = 0.01%/8h; 0.05% = overheated)
+FUNDING_FAVORABLE_PCT:   float = 0.0001  # < this = low crowding, good long entry window
 
 # Goku removed — was too expensive, now just a compat constant
 GOKU_ENABLED: bool = False

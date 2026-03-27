@@ -250,18 +250,20 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
         kc_lower = ema20_kc - 1.5 * atr
 
         df['squeeze_on'] = (bb_upper <= kc_upper) & (bb_lower >= kc_lower)
-        _prev_squeeze = df['squeeze_on'].shift(1).fillna(False).astype(bool)
+        _prev_squeeze = df['squeeze_on'].shift(1).infer_objects(copy=False).fillna(False).astype(bool)
         df['squeeze_fired'] = (~df['squeeze_on']) & _prev_squeeze
 
-        squeeze_count = pd.Series(0, index=df.index)
+        # Use numpy array to avoid pandas 2.0 CoW SettingWithCopyWarning on iloc setter
+        squeeze_arr = np.zeros(len(df), dtype=int)
+        squeeze_on_arr = df['squeeze_on'].values
         count = 0
         for i in range(len(df)):
-            if df['squeeze_on'].iloc[i]:
+            if squeeze_on_arr[i]:
                 count += 1
             else:
                 count = 0
-            squeeze_count.iloc[i] = count
-        df['squeeze_bars'] = squeeze_count
+            squeeze_arr[i] = count
+        df['squeeze_bars'] = squeeze_arr
         # squeeze_direction: +1 if trend up at fire, -1 if down, 0 if no fire
         # Tells agents WHICH direction the coiled energy is releasing
         ema_slope = ema20_kc.diff(3)

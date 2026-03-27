@@ -82,8 +82,11 @@ def _write_env_key(key: str, value: str) -> bool:
     else:
         content += f'\n{new_line}\n'
 
-    with open(ENV_PATH, 'w') as f:
+    # Atomic write: write to temp file then rename to prevent .env corruption on crash
+    tmp_path = ENV_PATH + '.tmp'
+    with open(tmp_path, 'w') as f:
         f.write(content)
+    os.replace(tmp_path, ENV_PATH)
     return True
 
 
@@ -155,8 +158,8 @@ def check_all_readiness() -> tuple[bool, list]:
     try:
         sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         # Import the check functions directly
-        from scripts.check_readiness import _check_criteria
-        results = _check_criteria()
+        from scripts.check_readiness import check_criteria
+        results = check_criteria()
         all_pass = all(r['pass'] for r in results)
         return all_pass, results
     except Exception:

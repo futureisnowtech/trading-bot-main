@@ -236,7 +236,7 @@ Should we EXIT this position now?"""
                 "description": "Submit exit analysis",
                 "input_schema": EXIT_SCHEMA
             }],
-            "tool_choice": {"type": "any"}
+            "tool_choice": {"type": "tool", "name": "exit_decision"}
         }).encode('utf-8')
 
         req = urllib.request.Request(
@@ -252,7 +252,7 @@ Should we EXIT this position now?"""
         )
 
         thinking_text = ''
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=45) as resp:
             data = json.loads(resp.read().decode('utf-8'))
 
             # Extract thinking blocks

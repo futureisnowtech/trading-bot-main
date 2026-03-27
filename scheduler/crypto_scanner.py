@@ -46,6 +46,7 @@ from scheduler._helpers import (
 from strategies.crypto.crypto_engine import evaluate as engine_evaluate, get_signal_tags
 from risk.unified_sizer import get_position_size as unified_get_size
 from scheduler.exit_monitor import monitor_exits_with_ai, _execute_crypto_exit
+from data.edge_monitor import get_edge_state, is_in_stop_cooldown, format_edge_context
 
 
 def run_crypto_scan() -> None:
@@ -69,6 +70,24 @@ def run_crypto_scan() -> None:
         log_event('WARNING', 'crypto_scan', msg)
         rm.ping()
         return
+
+    # ── Edge gate (strategy-level) ────────────────────────────────────────────
+    # Block new entries when the strategy's edge has degraded to negative EV.
+    # Requires 2 consecutive 20-trade windows below PF 1.45 before sizing down,
+    # and hard blocks at PF < 1.30 (negative expected value after fees).
+    edge_state = get_edge_state('crypto_macd_consensus', paper=PAPER_TRADING)
+    if edge_state.get('should_block'):
+        msg = (f"Edge gate BLOCK: crypto edge={format_edge_context(edge_state)} "
+               f"— PF below 1.30, negative EV, no new entries")
+        print(f"[crypto] {msg}")
+        log_event('WARNING', 'crypto_scan', msg)
+        rm.ping()
+        return
+    # Log edge status at reduced sizing for transparency
+    if edge_state.get('sizing_multiplier', 1.0) < 1.0:
+        log_event('INFO', 'crypto_scan',
+                  f"[crypto] Edge degraded: {format_edge_context(edge_state)} "
+                  f"— sizing reduced to {edge_state['sizing_multiplier']:.0%}")
 
     from strategies.ai_agents.regime_detector import detect_regime
 
@@ -111,6 +130,15 @@ def run_crypto_scan() -> None:
             if pos:
                 # Position already open — monitor_exits_with_ai (called above) handles all exits.
                 # MACD SELL is an entry signal, not an exit trigger. Skip entry logic.
+                continue
+
+            # ── Stop cooldown: no re-entry for 30 min after a full stop hit ──
+            in_cooldown, cooldown_reason = is_in_stop_cooldown(
+                'crypto_macd_consensus', pid, paper=PAPER_TRADING
+            )
+            if in_cooldown:
+                log_event('INFO', 'scan_feed',
+                          f"[crypto] {pid} ⛔ {cooldown_reason} — skipping entry")
                 continue
 
             # ── Regime detection ──────────────────────────────────────────────

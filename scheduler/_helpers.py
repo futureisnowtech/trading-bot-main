@@ -91,6 +91,16 @@ except Exception:
     _get_calibration_ctx = None
     _CALIBRATION_AVAILABLE = False
 
+# ── Options flow signals ──────────────────────────────────────────────────────
+try:
+    from data.options_flow import get_options_signals as _get_options_signals
+    from data.options_flow import format_options_context as _format_options_context
+    _OPTIONS_FLOW_AVAILABLE = True
+except Exception:
+    _get_options_signals = None
+    _format_options_context = None
+    _OPTIONS_FLOW_AVAILABLE = False
+
 # ── Market context + session analyst ─────────────────────────────────────────
 try:
     from data.market_context import get_context_for_debate, should_block_trade
@@ -268,6 +278,39 @@ def _build_market_data(symbol, price, df_ind, change_pct=0, regime='ranging') ->
         'atr_pct': float(last.get('atr', price * 0.01) or price * 0.01) / price * 100,
         **_get_microstructure(symbol),
     }
+
+    # ── Momentum acceleration (d²price/dt² proxy via MACD histogram delta) ────
+    # Positive = momentum building (buy-side accelerating)
+    # Negative = momentum decelerating or reversing
+    try:
+        macd_col = 'macd_std_hist' if 'macd_std_hist' in df_ind.columns else 'macd1_hist'
+        if macd_col in df_ind.columns and len(df_ind) >= 5:
+            hist_series = df_ind[macd_col].dropna()
+            if len(hist_series) >= 5:
+                # 3-bar EMA of the delta to smooth noise
+                delta = hist_series.diff()
+                smoothed = delta.ewm(span=3, adjust=False).mean()
+                accel = float(smoothed.iloc[-1])
+                md['macd_acceleration'] = round(accel, 6)
+                md['macd_accel_direction'] = 'ACCELERATING' if accel > 0 else 'DECELERATING'
+    except Exception:
+        md['macd_acceleration'] = 0.0
+        md['macd_accel_direction'] = 'UNKNOWN'
+
+    # ── Options flow signals (30-min cache, fail-silent) ─────────────────────
+    if _OPTIONS_FLOW_AVAILABLE and _get_options_signals:
+        try:
+            opt = _get_options_signals()
+            md['iv_rank']            = opt.get('iv_rank', 0.50)
+            md['iv_regime']          = opt.get('iv_regime', 'NORMAL_IV')
+            md['vix_level']          = opt.get('vix_level')
+            md['term_structure']     = opt.get('term_structure', 'FLAT')
+            md['contango_ratio']     = opt.get('contango_ratio', 1.0)
+            md['panic_signal']       = opt.get('panic_signal', False)
+            md['tail_risk_elevated'] = opt.get('tail_risk_elevated', False)
+            md['options_regime']     = opt.get('options_regime', '')
+        except Exception:
+            pass
 
     # ── Inject calibration context (how well conviction scores predict wins) ──
     if _CALIBRATION_AVAILABLE and _get_calibration_ctx:

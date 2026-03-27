@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-03-27
+- Philosophical reoptimizations: edge monitor, options flow, Landry bar count, stop cooldown
+
+## 2026-03-27
 - Sprint 8: Validation — all 3 markets import clean, 66 tests passing, go-live criteria updated to 8-criterion Phase-9 spec
 
 ## 2026-03-27

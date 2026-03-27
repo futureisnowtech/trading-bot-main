@@ -93,7 +93,10 @@ class MESEngine:
         self._opening_range: dict = {}          # {'high': float, 'low': float, 'set': bool}
         self._breakout_state: dict = {}         # {'direction': str, 'level': float,
         #                                           'breakout_bar_volume': float,
-        #                                           'pullback_in_progress': bool}
+        #                                           'pullback_in_progress': bool,
+        #                                           'pullback_bar_count': int,
+        #                                           'pullback_volumes': list[float],
+        #                                           'last_bar_ts': Any}
         self._daily_pnl_pts: float = 0.0
         self._trades_today: int = 0
         self._goal_hit: bool = False
@@ -266,6 +269,9 @@ class MESEngine:
                     'level': or_high,
                     'breakout_bar_volume': volume,
                     'pullback_in_progress': False,
+                    'pullback_bar_count': 0,
+                    'pullback_volumes': [],
+                    'last_bar_ts': df.index[-1],
                 }
                 return hold(f"LONG breakout detected at {or_high:.2f} — waiting for pullback")
 
@@ -277,6 +283,9 @@ class MESEngine:
                     'level': or_low,
                     'breakout_bar_volume': volume,
                     'pullback_in_progress': False,
+                    'pullback_bar_count': 0,
+                    'pullback_volumes': [],
+                    'last_bar_ts': df.index[-1],
                 }
                 return hold(f"SHORT breakout detected at {or_low:.2f} — waiting for pullback")
 
@@ -288,36 +297,79 @@ class MESEngine:
         level = bs['level']
         breakout_vol = bs.get('breakout_bar_volume', volume)
 
+        # ── Landry pullback bar count: only increment on a NEW 5-min bar ────────
+        current_bar_ts = df.index[-1]
+        last_bar_ts = bs.get('last_bar_ts')
+        is_new_bar = (last_bar_ts is None or current_bar_ts != last_bar_ts)
+
         # If price has run far away and then pulled back, track pullback
         if direction == 'LONG':
-            if price <= level * (1 + _PULLBACK_ZONE):
+            in_pullback_zone = price <= level * (1 + _PULLBACK_ZONE)
+            if in_pullback_zone:
                 bs['pullback_in_progress'] = True
-            # Entry: pullback happened AND price now bouncing (above level) on reduced volume
+                if is_new_bar:
+                    bs['pullback_bar_count'] = bs.get('pullback_bar_count', 0) + 1
+                    bs['pullback_volumes'] = bs.get('pullback_volumes', []) + [volume]
+                    bs['last_bar_ts'] = current_bar_ts
+
+            bar_count = bs.get('pullback_bar_count', 0)
+            pullback_vols = bs.get('pullback_volumes', [])
+            avg_pullback_vol = (sum(pullback_vols) / len(pullback_vols)) if pullback_vols else volume
+
+            # Entry: pullback happened, bar count 3–7, bouncing on expansion vs pullback avg
+            # but still reduced vs breakout (Landry: demand re-entering, not panic)
             if (bs['pullback_in_progress']
                     and price > level
                     and price <= level * (1 + _PULLBACK_ZONE * 2)
-                    and volume < breakout_vol * 0.7):
+                    and 3 <= bar_count <= 7
+                    and volume > avg_pullback_vol * 1.2   # volume expanding vs pullback
+                    and volume < breakout_vol * 0.7):      # still subdued vs breakout
                 return self._build_long_signal(
                     price, or_range, adx, vix, level,
                     f"ORB pullback long at {price:.2f} | level={level:.2f} | "
-                    f"OR_range={or_range:.1f} | ADX={adx:.1f} | HTF={htf_bias}",
+                    f"OR_range={or_range:.1f} | ADX={adx:.1f} | HTF={htf_bias} | "
+                    f"pullback_bars={bar_count}",
                 )
+            if bar_count > 7:
+                self._breakout_state = {}
+                return hold(f"Pullback exceeded 7 bars ({bar_count}) — setup invalidated (Landry rule)")
+
         else:  # SHORT
-            if price >= level * (1 - _PULLBACK_ZONE):
+            in_pullback_zone = price >= level * (1 - _PULLBACK_ZONE)
+            if in_pullback_zone:
                 bs['pullback_in_progress'] = True
+                if is_new_bar:
+                    bs['pullback_bar_count'] = bs.get('pullback_bar_count', 0) + 1
+                    bs['pullback_volumes'] = bs.get('pullback_volumes', []) + [volume]
+                    bs['last_bar_ts'] = current_bar_ts
+
+            bar_count = bs.get('pullback_bar_count', 0)
+            pullback_vols = bs.get('pullback_volumes', [])
+            avg_pullback_vol = (sum(pullback_vols) / len(pullback_vols)) if pullback_vols else volume
+
             if (bs['pullback_in_progress']
                     and price < level
                     and price >= level * (1 - _PULLBACK_ZONE * 2)
+                    and 3 <= bar_count <= 7
+                    and volume > avg_pullback_vol * 1.2
                     and volume < breakout_vol * 0.7):
                 return self._build_short_signal(
                     price, or_range, adx, vix, level,
                     f"ORB pullback short at {price:.2f} | level={level:.2f} | "
-                    f"OR_range={or_range:.1f} | ADX={adx:.1f} | HTF={htf_bias}",
+                    f"OR_range={or_range:.1f} | ADX={adx:.1f} | HTF={htf_bias} | "
+                    f"pullback_bars={bar_count}",
                 )
+            if bar_count > 7:
+                self._breakout_state = {}
+                return hold(f"Pullback exceeded 7 bars ({bar_count}) — setup invalidated (Landry rule)")
 
+        if is_new_bar:
+            bs['last_bar_ts'] = current_bar_ts
+
+        bar_count = bs.get('pullback_bar_count', 0)
         return hold(
             f"Breakout {direction} confirmed — waiting for pullback to {level:.2f} "
-            f"(pullback_in_progress={bs.get('pullback_in_progress', False)})"
+            f"(pullback_in_progress={bs.get('pullback_in_progress', False)}, bars={bar_count}/7)"
         )
 
     def _close_auction_signal(self, price: float, df: pd.DataFrame, vix: Optional[float]) -> MESSignal:

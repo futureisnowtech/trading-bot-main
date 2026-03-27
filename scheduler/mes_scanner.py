@@ -32,6 +32,7 @@ from risk.risk_manager import get_risk_manager
 from execution.tradovate_broker import get_tradovate_broker, MES_POINT_VALUE
 from logging_db.trade_logger import log_event, log_signal
 from strategies.futures.mes_engine import get_engine as get_mes_engine
+from data.edge_monitor import get_edge_state, is_in_stop_cooldown, format_edge_context
 
 
 def run_mes_scan() -> None:
@@ -57,6 +58,25 @@ def run_mes_scan() -> None:
 
         # ── Early exit if daily limits hit ────────────────────────────────────
         if engine.trades_today >= 2 or engine.daily_pnl_pts >= engine.goal_pts:
+            return
+
+        # ── Edge gate (strategy-level) ────────────────────────────────────────
+        edge_state = get_edge_state('futures_scalper', paper=PAPER_TRADING)
+        if edge_state.get('should_block'):
+            log_event('WARNING', 'mes_scan',
+                      f"[mes] Edge gate BLOCK: {format_edge_context(edge_state)} "
+                      f"— PF below 1.30, no new entries")
+            rm.ping()
+            return
+
+        # ── Stop cooldown: no re-entry for 30 min after a full stop hit ──────
+        in_cooldown, cooldown_reason = is_in_stop_cooldown(
+            'futures_scalper', 'MES', paper=PAPER_TRADING
+        )
+        if in_cooldown:
+            log_event('INFO', 'mes_scan',
+                      f"[mes] MES ⛔ {cooldown_reason} — skipping entry")
+            rm.ping()
             return
 
         # ── Fetch data ─────────────────────────────────────────────────────────

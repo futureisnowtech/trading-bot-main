@@ -85,7 +85,7 @@ html, body, .stApp, .main {{
 
 /* Hide Streamlit chrome */
 #MainMenu, footer, header {{ visibility: hidden; }}
-.block-container {{ padding: 20px 32px 40px 32px !important; max-width: 1600px !important; }}
+.block-container {{ padding: 20px 24px 40px 24px !important; max-width: 100% !important; }}
 .stExpander {{ border: 1px solid {BORDER} !important; border-radius: 12px !important; }}
 .stExpander summary {{ padding: 12px 16px !important; }}
 
@@ -118,7 +118,7 @@ div[data-testid="column"] {{ padding: 0 6px !important; }}
     background: linear-gradient(135deg, #0f1120 0%, #13141f 60%, #0f1018 100%);
     border: 1px solid {BORDER};
     border-radius: 20px;
-    padding: 36px 40px;
+    padding: 40px 40px;
     text-align: center;
     position: relative;
     overflow: hidden;
@@ -127,21 +127,21 @@ div[data-testid="column"] {{ padding: 0 6px !important; }}
     content: '';
     position: absolute; top: 0; left: 0; right: 0;
     height: 1px;
-    background: linear-gradient(90deg, transparent, {GOLD}33, transparent);
+    background: linear-gradient(90deg, transparent, {GOLD}55, transparent);
 }}
 .hero-label {{
-    font-size: 11px; font-weight: 700;
-    letter-spacing: 4px; text-transform: uppercase;
-    color: {TEXT3}; margin-bottom: 12px;
+    font-size: 12px; font-weight: 700;
+    letter-spacing: 5px; text-transform: uppercase;
+    color: {TEXT3}; margin-bottom: 14px;
 }}
 .hero-pnl {{
-    font-size: 80px; font-weight: 900; line-height: 1;
-    letter-spacing: -2px;
+    font-size: 96px; font-weight: 900; line-height: 1;
+    letter-spacing: -3px;
     font-family: 'Inter', sans-serif;
 }}
 .hero-sub {{
-    font-size: 14px; color: {TEXT2};
-    margin-top: 14px; font-weight: 500;
+    font-size: 16px; color: {TEXT2};
+    margin-top: 18px; font-weight: 500;
 }}
 
 /* ── METRIC CARD ── */
@@ -149,30 +149,30 @@ div[data-testid="column"] {{ padding: 0 6px !important; }}
     background: {CARD};
     border: 1px solid {BORDER};
     border-radius: 16px;
-    padding: 20px 22px 18px 22px;
+    padding: 22px 24px 20px 24px;
     height: 100%;
 }}
 .met-label {{
     font-size: 11px; font-weight: 700;
     letter-spacing: 3px; text-transform: uppercase;
-    color: {TEXT3}; margin-bottom: 10px;
+    color: {TEXT3}; margin-bottom: 12px;
 }}
 .met-value {{
-    font-size: 30px; font-weight: 800;
+    font-size: 34px; font-weight: 800;
     line-height: 1; letter-spacing: -0.5px;
     font-family: 'Inter', sans-serif;
 }}
 .met-sub {{
-    font-size: 12px; color: {TEXT2};
-    margin-top: 8px; font-weight: 500;
+    font-size: 13px; color: {TEXT2};
+    margin-top: 10px; font-weight: 500;
 }}
 
 /* ── SECTION HEADER ── */
 .sec {{
-    font-size: 11px; font-weight: 700;
+    font-size: 12px; font-weight: 700;
     letter-spacing: 3px; text-transform: uppercase;
-    color: {TEXT3}; padding: 24px 0 10px 0;
-    display: flex; align-items: center; gap: 8px;
+    color: {TEXT3}; padding: 28px 0 12px 0;
+    display: flex; align-items: center; gap: 10px;
 }}
 .sec-line {{
     flex: 1; height: 1px; background: {BORDER};
@@ -183,20 +183,20 @@ div[data-testid="column"] {{ padding: 0 6px !important; }}
     background: {CARD};
     border: 1px solid {BORDER};
     border-radius: 16px;
-    padding: 22px 22px 20px 22px;
+    padding: 24px 24px 22px 24px;
 }}
 .edge-market {{
-    font-size: 10px; font-weight: 700;
+    font-size: 11px; font-weight: 700;
     letter-spacing: 4px; text-transform: uppercase;
-    color: {TEXT3}; margin-bottom: 12px;
+    color: {TEXT3}; margin-bottom: 14px;
 }}
 .edge-status {{
-    font-size: 18px; font-weight: 800;
-    letter-spacing: 1px; margin-bottom: 14px;
+    font-size: 22px; font-weight: 800;
+    letter-spacing: 1px; margin-bottom: 16px;
 }}
 .edge-track {{
     background: {SURFACE}; border-radius: 100px;
-    height: 10px; overflow: hidden; margin-bottom: 14px;
+    height: 12px; overflow: hidden; margin-bottom: 16px;
 }}
 .edge-fill {{
     height: 100%; border-radius: 100px;
@@ -204,7 +204,7 @@ div[data-testid="column"] {{ padding: 0 6px !important; }}
 }}
 .edge-row {{
     display: flex; justify-content: space-between;
-    font-size: 13px; color: {TEXT2}; margin-bottom: 6px;
+    font-size: 14px; color: {TEXT2}; margin-bottom: 8px;
 }}
 .edge-val {{ color: {TEXT}; font-weight: 600;
     font-family: 'JetBrains Mono', monospace; }}
@@ -223,29 +223,29 @@ div[data-testid="column"] {{ padding: 0 6px !important; }}
     align-items: flex-start; margin-bottom: 10px;
 }}
 .pos-symbol {{
-    font-size: 18px; font-weight: 800; color: {TEXT};
+    font-size: 22px; font-weight: 800; color: {TEXT};
     font-family: 'JetBrains Mono', monospace;
 }}
 .pos-strategy {{
-    font-size: 11px; color: {TEXT3};
+    font-size: 12px; color: {TEXT3};
     font-weight: 600; letter-spacing: 1px;
-    text-transform: uppercase; margin-top: 2px;
+    text-transform: uppercase; margin-top: 3px;
 }}
 .pos-age {{
-    font-size: 12px; color: {TEXT2}; font-weight: 500;
+    font-size: 13px; color: {TEXT2}; font-weight: 500;
     background: {CARD}; border-radius: 20px;
-    padding: 3px 10px; border: 1px solid {BORDER};
+    padding: 4px 12px; border: 1px solid {BORDER};
 }}
 .pos-bars {{
     display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
 }}
 .pos-dist-label {{
-    font-size: 11px; color: {TEXT3};
+    font-size: 12px; color: {TEXT3};
     text-transform: uppercase; letter-spacing: 2px;
-    margin-bottom: 4px;
+    margin-bottom: 5px;
 }}
 .pos-dist-val {{
-    font-size: 15px; font-weight: 700;
+    font-size: 20px; font-weight: 700;
     font-family: 'JetBrains Mono', monospace;
 }}
 .pos-track {{
@@ -270,15 +270,16 @@ div[data-testid="column"] {{ padding: 0 6px !important; }}
 }}
 .mkt-row {{
     display: flex; justify-content: space-between;
-    align-items: center; margin-bottom: 10px;
+    align-items: flex-start; margin-bottom: 12px;
 }}
 .mkt-key {{
-    font-size: 12px; color: {TEXT2}; font-weight: 500;
+    font-size: 13px; color: {TEXT2}; font-weight: 500;
+    flex-shrink: 0; margin-right: 10px;
 }}
 .mkt-val {{
-    font-size: 13px; color: {TEXT};
+    font-size: 14px; color: {TEXT};
     font-weight: 600; font-family: 'JetBrains Mono', monospace;
-    text-align: right; max-width: 60%;
+    text-align: right;
 }}
 .mkt-bar-bg {{
     background: {SURFACE}; border-radius: 100px;
@@ -300,77 +301,77 @@ div[data-testid="column"] {{ padding: 0 6px !important; }}
     align-items: center; margin-bottom: 10px;
 }}
 .gauge-name {{
-    font-size: 11px; font-weight: 700;
+    font-size: 12px; font-weight: 700;
     text-transform: uppercase; letter-spacing: 2px;
     color: {TEXT2};
 }}
 .gauge-val {{
-    font-size: 14px; font-weight: 800;
+    font-size: 16px; font-weight: 800;
     font-family: 'JetBrains Mono', monospace;
 }}
 .gauge-track {{
     background: {SURFACE}; border-radius: 100px;
-    height: 8px; overflow: hidden;
+    height: 10px; overflow: hidden;
 }}
 .gauge-fill {{
     height: 100%; border-radius: 100px;
     transition: width 0.3s;
 }}
 .gauge-sub {{
-    font-size: 11px; color: {TEXT3};
-    margin-top: 6px;
+    font-size: 12px; color: {TEXT3};
+    margin-top: 8px;
 }}
 
 /* ── TRADE ROW ── */
 .tr {{
     display: flex; align-items: center;
-    padding: 12px 0; border-bottom: 1px solid {BORDER};
+    padding: 14px 0; border-bottom: 1px solid {BORDER};
     gap: 0;
 }}
 .tr:last-child {{ border-bottom: none; }}
 .tr-time {{
-    font-size: 12px; color: {TEXT2};
+    font-size: 13px; color: {TEXT2};
     font-family: 'JetBrains Mono', monospace;
     min-width: 90px;
 }}
 .tr-sym {{
-    font-size: 14px; font-weight: 700; color: {TEXT};
-    min-width: 110px; font-family: 'JetBrains Mono', monospace;
+    font-size: 15px; font-weight: 700; color: {TEXT};
+    min-width: 120px; font-family: 'JetBrains Mono', monospace;
 }}
 .tr-act {{
-    font-size: 10px; font-weight: 700;
+    font-size: 11px; font-weight: 700;
     text-transform: uppercase; letter-spacing: 1px;
     min-width: 50px; color: {TEXT2};
 }}
 .tr-pnl {{
-    margin-left: auto; font-size: 15px; font-weight: 800;
+    margin-left: auto; font-size: 17px; font-weight: 800;
     font-family: 'JetBrains Mono', monospace;
 }}
 
 /* ── SIGNAL ROW ── */
 .sr {{
     display: flex; align-items: center;
-    padding: 10px 0; border-bottom: 1px solid {BORDER};
-    gap: 10px;
+    padding: 12px 0; border-bottom: 1px solid {BORDER};
+    gap: 12px;
 }}
 .sr:last-child {{ border-bottom: none; }}
 .sr-time {{
-    font-size: 11px; color: {TEXT2};
+    font-size: 12px; color: {TEXT2};
     font-family: 'JetBrains Mono', monospace;
-    min-width: 70px;
+    min-width: 72px;
 }}
 .sr-badge {{
-    font-size: 10px; font-weight: 800;
+    font-size: 11px; font-weight: 800;
     text-transform: uppercase; letter-spacing: 1px;
-    padding: 2px 8px; border-radius: 20px;
-    min-width: 46px; text-align: center;
+    padding: 3px 10px; border-radius: 20px;
+    min-width: 50px; text-align: center;
 }}
 .sr-sym {{
-    font-size: 13px; font-weight: 600;
+    font-size: 14px; font-weight: 600;
     color: {TEXT}; font-family: 'JetBrains Mono', monospace;
 }}
 .sr-conf {{
-    margin-left: auto; font-size: 12px;
+    margin-left: auto; font-size: 13px;
     color: {TEXT2}; font-family: monospace;
 }}
 
@@ -981,7 +982,7 @@ def comp_markets():
 
     positions = _positions()
     recent    = get_recent_trades(limit=5, paper=PAPER_TRADING) or []
-    signals   = get_todays_signals(paper=PAPER_TRADING) or []
+    signals   = get_todays_signals() or []
 
     def _last_sig(key):
         for s in signals:

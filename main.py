@@ -22,13 +22,13 @@ import logging_db.trade_logger  # noqa: F401 — pre-warm, prevents EDEADLK
 
 BANNER = """
 ╔══════════════════════════════════════════════════════════════════╗
-║  👑  THE KING'S ALGO TRADING SYSTEM  v3.3  👑                   ║
+║  👑  THE KING'S ALGO TRADING SYSTEM  v5.0  👑                   ║
 ║                                                                  ║
 ║  "Nothing is given. Everything is earned." — LeBron James       ║
 ║                                                                  ║
-║  Equity:  Webull | Auto-discovered | 8-agent AI debate          ║
-║  Crypto:  Coinbase | 3-agent quick debate | 24/7                ║
-║  Futures: Tradovate MES | Opening range breakout                ║
+║  Crypto:  Coinbase/Binance | 4-signal engine | 3-agent debate   ║
+║  Futures: Tradovate MES | Opening range pullback                ║
+║  Perp:    Binance USD-M | Funding-aware entries                 ║
 ║  Exits:   Extended thinking AI review on every candle           ║
 ╚══════════════════════════════════════════════════════════════════╝
 """
@@ -82,13 +82,6 @@ def main():
     from memory.trade_memory import get_memory_stats
     mem = get_memory_stats()
     print(f"🧠 Trade memory: {mem.get('total', 0)} experiences | Win rate: {mem.get('win_rate', 0):.1%}\n")
-
-    if not args.crypto_only:
-        print("🔌 Connecting Webull...")
-        from execution.alpaca_broker import get_alpaca_broker as get_webull_broker
-        wb = get_webull_broker()
-        ok = wb.connect()
-        print(f"   {'✅ Connected' if ok else '⚠️ Offline — signals log-only'}\n")
 
     if not args.equity_only:
         print("🔌 Connecting Coinbase...")

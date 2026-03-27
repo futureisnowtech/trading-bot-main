@@ -41,17 +41,6 @@ except Exception as _le:
     _archive_candles = None
     _LEARNING_AVAILABLE = False
 
-# ── AI pre-screener ───────────────────────────────────────────────────────────
-try:
-    from learning.ai_prescreener import prescreener_batch, get_prescreener_context, PRESCORE_THRESHOLD
-    _PRESCREENER_AVAILABLE = True
-except Exception as _pse:
-    print(f"[scheduler] AI pre-screener unavailable: {_pse}")
-    prescreener_batch = None
-    get_prescreener_context = None
-    PRESCORE_THRESHOLD = 4
-    _PRESCREENER_AVAILABLE = False
-
 # ── Meta-learner ──────────────────────────────────────────────────────────────
 try:
     from learning.meta_learner import maybe_run_meta_analysis, get_latest_insight

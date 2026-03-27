@@ -1,18 +1,17 @@
 """
 scheduler/job_runner.py — The engine. Runs forever.
 
-Full pipeline:
-  Equity (60s, market hours): auto_screener → debate → synthesize → execute
-  Crypto (5min, 24/7):        candles → quick_debate → synthesize → execute
+Full pipeline (v5.0 — equity removed):
+  Crypto (5min, 24/7):         4-signal engine → ML gate → debate → execute
   Exits (every candle close):  extended_thinking exit review on ALL open positions
   Futures (60s, market hours): opening range breakout → debate confirmation → execute
-  Watchdog (15min):           alert if no scan completed
+  Perp (5min, 24/7):           Binance perp entry/exit
+  Watchdog (15min):            alert if no scan completed
 
-Sub-modules (decomposed Sprint 1):
+Sub-modules:
   scheduler/_helpers.py        — shared state, helper functions, strategy instances
   scheduler/exit_monitor.py    — AI-driven exit management
-  scheduler/equity_scanner.py  — equity discovery → debate → execute
-  scheduler/crypto_scanner.py  — crypto signal → ML gate → debate → execute
+  scheduler/crypto_scanner.py  — crypto 4-signal engine → ML gate → debate → execute
   scheduler/perp_scanner.py    — perp entry/exit via Binance
 """
 import time
@@ -27,9 +26,9 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import (
     CRYPTO_PAIRS, PAPER_TRADING, ACCOUNT_SIZE,
-    EQUITY_SCAN_INTERVAL_SECONDS, CRYPTO_SCAN_INTERVAL_SECONDS,
+    CRYPTO_SCAN_INTERVAL_SECONDS,
     FUTURES_SCAN_INTERVAL_SECONDS, MARKET_TIMEZONE,
-    EQUITY_ENABLED, CRYPTO_ENABLED, FUTURES_ENABLED,
+    CRYPTO_ENABLED, FUTURES_ENABLED,
     PERP_ENABLED,
     ANTHROPIC_API_KEY,
     WATCHDOG_INTERVAL_SECONDS,
@@ -54,12 +53,10 @@ from scheduler._helpers import (
     _CONTEXT_AVAILABLE, run_session_analysis,
 )
 
-# ── Import sub-module scan functions (re-exported for backwards compat) ────────
+# ── Import sub-module scan functions ─────────────────────────────────────────
 from scheduler.exit_monitor import (
-    monitor_exits_with_ai, _execute_equity_exit, _execute_crypto_exit,
-    close_equity_before_market_close,
+    monitor_exits_with_ai, _execute_crypto_exit,
 )
-from scheduler.equity_scanner import run_equity_scan
 from scheduler.crypto_scanner import run_crypto_scan
 from scheduler.perp_scanner import run_perp_scan, _monitor_perp_exit
 
@@ -193,8 +190,6 @@ def setup_schedules() -> None:
         d.at('09:35').do(run_opening_range)
         d.at('16:15').do(run_daily_close)
 
-    schedule.every(EQUITY_SCAN_INTERVAL_SECONDS).seconds.do(run_equity_scan)
-    schedule.every(EQUITY_SCAN_INTERVAL_SECONDS).seconds.do(close_equity_before_market_close)
     schedule.every(CRYPTO_SCAN_INTERVAL_SECONDS).seconds.do(run_crypto_scan)
     schedule.every(WATCHDOG_INTERVAL_SECONDS).seconds.do(run_watchdog)
 
@@ -209,7 +204,7 @@ def setup_schedules() -> None:
     schedule.every().day.at('03:00').do(lambda: run_session_open_analysis('LONDON'))
     schedule.every().day.at('08:30').do(lambda: run_session_open_analysis('NY_OPEN'))
 
-    print(f"[scheduler] Equity: {EQUITY_SCAN_INTERVAL_SECONDS}s | Crypto: {CRYPTO_SCAN_INTERVAL_SECONDS}s | "
+    print(f"[scheduler] Crypto: {CRYPTO_SCAN_INTERVAL_SECONDS}s | "
           f"Perp: {'ON' if PERP_ENABLED else 'OFF'} | Watchdog: {WATCHDOG_INTERVAL_SECONDS}s | "
           f"Session Analysis: ASIA 8pm / LONDON 3am / NY 8:30am ET")
 

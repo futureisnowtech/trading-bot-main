@@ -1,6 +1,9 @@
 """
 tests/test_broker_paper.py — Smoke tests for each broker's paper mode.
 
+Brokers tested: Coinbase (crypto), Binance (perp).
+Alpaca (equity) removed in v5.0 — equity lane dropped.
+
 Verifies that paper-mode brokers:
 1. Import and instantiate without crashing
 2. Expose the expected public API surface
@@ -69,49 +72,6 @@ class TestCoinbaseBrokerPaper:
             qty = pos.get('qty', 0.01)
             result = self.broker.sell_market('ETH-USDC', base_size=qty,
                                               strategy='test', entry_price=3000.0)
-        assert result is None or isinstance(result, dict)
-
-
-class TestAlpacaBrokerPaper:
-    """AlpacaBroker reads PAPER_TRADING from config — no constructor arg needed."""
-
-    def setup_method(self):
-        with patch.dict(os.environ, {
-            'PAPER_TRADING': 'true',
-            'ALPACA_API_KEY': 'test_key',
-            'ALPACA_API_SECRET': 'test_secret',
-            'ALPACA_BASE_URL': 'https://paper-api.alpaca.markets',
-        }):
-            import importlib
-            import execution.alpaca_broker as mod
-            importlib.reload(mod)
-            self.broker = mod.AlpacaBroker()
-
-    def test_api_surface(self):
-        for method in ('connect', 'is_connected', 'buy_limit', 'sell_limit', 'sell_market'):
-            assert hasattr(self.broker, method), f"AlpacaBroker missing method: {method}"
-
-    def test_connect_returns_bool(self):
-        # Dummy creds will fail auth — just must not crash and return bool
-        try:
-            result = self.broker.connect()
-            assert isinstance(result, bool)
-        except Exception as e:
-            pytest.fail(f"connect() raised unexpectedly: {e}")
-
-    def test_paper_buy_returns_dict_or_none(self):
-        """With PAPER_TRADING=true and no real connection, buy_limit uses paper path.
-        AlpacaBroker.buy_limit takes qty (shares), not size_usd.
-        """
-        with patch('execution.alpaca_broker.log_trade', return_value=None), \
-             patch('execution.alpaca_broker.log_event', return_value=None):
-            result = self.broker.buy_limit(
-                symbol='AAPL',
-                qty=1,
-                limit_price=175.0,
-                strategy='equity_momentum',
-            )
-        # Paper mode without valid creds may return None — that's acceptable
         assert result is None or isinstance(result, dict)
 
 

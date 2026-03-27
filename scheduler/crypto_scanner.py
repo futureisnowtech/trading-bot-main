@@ -19,7 +19,7 @@ from config import (
     COINBASE_MAKER_FEE_PCT, CRYPTO_POSITION_SIZE_USD,
     MAX_STRATEGY_LOSS_STREAK,
     MEAN_REVERSION_ENABLED, MEAN_REVERSION_RSI_ENTRY, MEAN_REVERSION_ADX_MAX,
-    TV_SIGNAL_BOOST_CONVICTION, TV_SIGNAL_MAX_AGE_SECONDS,
+    TV_SIGNAL_MAX_AGE_SECONDS,
 )
 from data.coinbase_feed import get_candles
 from data.indicators import add_all_indicators

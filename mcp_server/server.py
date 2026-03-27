@@ -342,6 +342,164 @@ def get_notifications(limit: int = 20) -> list:
 
 
 # ============================================================================
+# SPRINT 3 TOOLS — Crypto engine + unified sizing introspection
+# ============================================================================
+
+@mcp.tool()
+def get_engine_signal(symbol: str, btc_change_pct: float = None) -> dict:
+    """Evaluate the 4-signal crypto engine for a symbol right now.
+
+    Runs cascade → divergence → OBI → MACD hierarchy and returns
+    the highest-priority signal that fired (or HOLD if none).
+
+    Args:
+        symbol:        Coinbase product ID (e.g. 'BTC-USDC', 'ETH-USDC').
+        btc_change_pct: BTC's 5-min % change for divergence signal. If omitted,
+                        divergence signal will be skipped.
+
+    Returns dict with: action, signal_type, size_multiplier, confidence, reason,
+                       fired_signals, blocked_reason (if HOLD/blocked).
+    """
+    try:
+        import sys, os
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from data.coinbase_feed import get_candles
+        from data.indicators import add_all_indicators
+        from strategies.crypto.crypto_engine import evaluate as engine_evaluate, get_signal_tags
+        from scheduler._helpers import _build_market_data, _crypto_strategy
+        from data.macro_feed import get_macro_snapshot
+        from config import CRYPTO_CANDLE_GRANULARITY
+
+        df = get_candles(symbol, CRYPTO_CANDLE_GRANULARITY, 100)
+        if df is None or len(df) < 30:
+            return {'error': f'Insufficient candle data for {symbol}'}
+
+        df_ind = add_all_indicators(df)
+        price = float(df_ind.iloc[-1]['close'])
+        market_data = _build_market_data(symbol, price, df_ind)
+
+        # Enrich funding rate
+        try:
+            macro = get_macro_snapshot(symbols_of_interest=[symbol])
+            fr = macro.get('funding_rates', {}).get(symbol, {})
+            market_data['funding_rate_pct'] = fr.get('rate_pct')
+        except Exception:
+            pass
+
+        # Inject MACD consensus flag
+        macd_sig = _crypto_strategy.generate_signal(symbol, df_ind)
+        market_data['macd_consensus'] = macd_sig.action == 'BUY'
+
+        btc_pct = float(btc_change_pct) if btc_change_pct is not None else None
+        signal = engine_evaluate(symbol, market_data, btc_change_pct=btc_pct)
+        tags = get_signal_tags(signal)
+
+        return {
+            'symbol': symbol,
+            'price': price,
+            'action': signal.action,
+            'signal_type': signal.signal_type,
+            'size_multiplier': signal.size_multiplier,
+            'confidence': round(signal.confidence, 3),
+            'reason': signal.reason,
+            'fired_signals': signal.fired_signals,
+            'signal_tags': tags,
+            'funding_rate_pct': market_data.get('funding_rate_pct'),
+            'obi': market_data.get('obi'),
+            'macd_consensus': market_data['macd_consensus'],
+        }
+    except Exception as e:
+        return {'error': str(e)}
+
+
+@mcp.tool()
+def get_sizing_breakdown(symbol: str, strategy: str = 'crypto_ai',
+                         base_size: float = None, confidence: float = 0.65) -> dict:
+    """Show the full V×E×D×T×K×M sizing breakdown for a symbol.
+
+    Useful for understanding why the bot sized a position the way it did,
+    or what size it would use right now.
+
+    Args:
+        symbol:     Instrument symbol (e.g. 'BTC-USDC').
+        strategy:   Strategy name (default 'crypto_ai'; use 'mes_pullback' for futures).
+        base_size:  Base USD size (defaults to CRYPTO_POSITION_SIZE_USD from config).
+        confidence: Debate confidence to use for Kelly calc [0,1] (default 0.65).
+
+    Returns dict with: base_size, v, e, d, t, k, m, final_size, adaptive, trade_count,
+                       and human-readable label for each factor.
+    """
+    try:
+        import sys, os
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from risk.unified_sizer import get_sizing_breakdown as _breakdown
+        from config import CRYPTO_POSITION_SIZE_USD, PAPER_TRADING
+
+        size = float(base_size) if base_size is not None else CRYPTO_POSITION_SIZE_USD
+        result = _breakdown(
+            strategy=strategy,
+            symbol=symbol,
+            base_size=size,
+            confidence=float(confidence),
+            paper=PAPER_TRADING,
+        )
+        return result
+    except Exception as e:
+        return {'error': str(e)}
+
+
+@mcp.tool()
+def get_edge_status(market: str = 'crypto') -> dict:
+    """Get the current rolling edge score and auto-action status for a market lane.
+
+    Shows the 20-trade composite score (WR 40% + PF 35% + Sharpe 25%),
+    whether sizing is currently reduced due to consecutive low-edge windows,
+    and the underlying win rate / profit factor / Sharpe components.
+
+    Args:
+        market: 'crypto' | 'mes' | 'polymarket' (default 'crypto')
+
+    Returns dict with: edge_score, wr, pf, sharpe, size_factor, window_trades,
+                       consecutive_low_windows, consecutive_high_windows, label.
+    """
+    try:
+        import sys, os
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from risk.edge_monitor import get_edge_score, get_edge_size_factor, check_edge_actions
+        from config import PAPER_TRADING
+
+        market = market.lower()
+        edge_data = get_edge_score(market=market, paper=PAPER_TRADING)
+        size_factor = get_edge_size_factor(market=market, paper=PAPER_TRADING)
+        actions = check_edge_actions(market=market, paper=PAPER_TRADING)
+
+        score = edge_data.get('edge_score', 0.0)
+        if score >= 0.70:
+            label = 'STRONG — Kelly max active'
+        elif score >= 0.50:
+            label = 'GOOD — normal sizing'
+        elif score >= 0.30:
+            label = 'WEAK — approaching auto-reduce'
+        else:
+            label = 'POOR — size may be reduced'
+
+        return {
+            'market': market,
+            'edge_score': round(score, 3),
+            'win_rate': round(edge_data.get('win_rate', 0.0), 3),
+            'profit_factor': round(edge_data.get('profit_factor', 0.0), 3),
+            'sharpe': round(edge_data.get('sharpe', 0.0), 3),
+            'window_trades': edge_data.get('n_trades', 0),
+            'size_factor': size_factor,
+            'sizing_reduced': size_factor < 1.0,
+            'label': label,
+            'actions': actions,
+        }
+    except Exception as e:
+        return {'error': str(e)}
+
+
+# ============================================================================
 # ENTRY POINT
 # ============================================================================
 

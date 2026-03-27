@@ -49,6 +49,9 @@ from risk.unified_sizer import get_position_size as unified_get_size
 from scheduler.exit_monitor import monitor_exits_with_ai, _execute_crypto_exit
 from data.edge_monitor import get_edge_state, is_in_stop_cooldown, format_edge_context
 
+# Per-symbol OI state for cascade signal (needs delta between scans)
+_prev_oi_state: dict = {}   # symbol → previous open interest value
+
 
 def run_crypto_scan() -> None:
     if not CRYPTO_ENABLED:
@@ -163,6 +166,21 @@ def run_crypto_scan() -> None:
                 except Exception:
                     market_data['vwap_reclaim'] = False
 
+            # ── Open Interest delta (for cascade signal) ──────────────────────
+            # Cascade requires oi_change_pct — fetch from Binance perp equivalent.
+            # Spot Coinbase doesn't have OI; Binance perp OI is the correct proxy.
+            try:
+                from execution.binance_broker import get_binance_broker as _get_bb
+                _bb = _get_bb()
+                _perp_sym = pid.replace('-USDC', 'USDT').replace('-USD', 'USDT')
+                _curr_oi = _bb.get_open_interest(_perp_sym)
+                if _curr_oi and _curr_oi > 0:
+                    _prev_oi = _prev_oi_state.get(pid, _curr_oi)
+                    market_data['oi_change_pct'] = (_curr_oi - _prev_oi) / _prev_oi * 100 if _prev_oi > 0 else 0.0
+                    _prev_oi_state[pid] = _curr_oi
+            except Exception:
+                pass
+
             # ── Enrich with funding rate + macro ─────────────────────────────
             if _MACRO_FEED_AVAILABLE:
                 try:
@@ -256,11 +274,11 @@ def run_crypto_scan() -> None:
             if _LEARNING_AVAILABLE and _active_signals:
                 try:
                     from learning.signal_performance import get_active_signal_stats_brief
-                    market_data['_signal_stats_brief'] = get_active_signal_stats_brief(
+                    market_data['signal_stats_brief'] = get_active_signal_stats_brief(
                         _active_signals, regime=regime
                     )
                 except Exception:
-                    market_data['_signal_stats_brief'] = ''
+                    market_data['signal_stats_brief'] = ''
 
             _sess_bias = _session_ctx.get('session_bias', 'NEUTRAL') if _session_ctx else 'N/A'
             log_event('INFO', 'scan_feed',
@@ -408,6 +426,13 @@ def run_crypto_scan() -> None:
                                              direction='LONG', entry_reason=final.reasoning)
 
                 elif final.action == 'SHORT':
+                    # Coinbase spot doesn't support shorting — paper-log only.
+                    # In live mode, shorts must route to Binance perp (perp_scanner).
+                    # Block live SHORT here to prevent phantom position registration.
+                    if not PAPER_TRADING:
+                        log_event('INFO', 'scan_feed',
+                                  f"[crypto] {pid} SHORT signal — live mode routes to perp_scanner, skip spot SHORT")
+                        continue
                     _short_usd = unified_get_size(
                         strategy='crypto_ai',
                         symbol=pid,
@@ -416,16 +441,16 @@ def run_crypto_scan() -> None:
                         current_price=price,
                         funding_rate=float(market_data.get('funding_rate_pct') or 0.0) / 100,
                     )
-                    risk_check = rm.check_entry('crypto_macd_consensus', pid, 'BUY',
+                    risk_check = rm.check_entry('crypto_macd_consensus', pid, 'SELL',
                                                 _short_usd, price, final.confidence)
                     if not risk_check:
                         print(f"[crypto] ❌ {pid} blocked: {risk_check.reason}")
                         continue
                     qty = risk_check.adjusted_size / price
                     from logging_db.trade_logger import log_trade
-                    log_trade('crypto_macd_consensus', 'coinbase', pid, 'SELL', 'LIMIT',
+                    log_trade('crypto_macd_consensus', 'coinbase_paper_short', pid, 'SELL', 'LIMIT',
                               qty, price, fee_usd=price * qty * COINBASE_MAKER_FEE_PCT,
-                              paper=PAPER_TRADING, notes=f'SHORT entry | {final.reasoning[:100]}')
+                              paper=PAPER_TRADING, notes=f'SHORT entry (paper only) | {final.reasoning[:100]}')
                     rm.register_position('crypto_macd_consensus', pid, qty, price,
                                          final.stop_loss, final.take_profit,
                                          direction='SHORT', entry_reason=final.reasoning)
@@ -516,6 +541,10 @@ def run_crypto_scan() -> None:
                         log_signal('crypto_fade', pid, fade_sig.action,
                                    fade_sig.confidence, fade_sig.reason, price=price2)
                         if fade_sig.action == 'SELL':
+                            if not PAPER_TRADING:
+                                log_event('INFO', 'scan_feed',
+                                          f"[crypto] {pid} Fade SHORT — live mode routes to perp, skip spot")
+                                continue
                             _rc = rm.check_entry('crypto_fade', pid, 'SELL',
                                                  fade_sig.suggested_size_usd, price2,
                                                  fade_sig.confidence)
@@ -525,7 +554,7 @@ def run_crypto_scan() -> None:
                             else:
                                 qty = _rc.adjusted_size / price2
                                 from logging_db.trade_logger import log_trade
-                                log_trade('crypto_fade', 'coinbase', pid, 'SELL', 'LIMIT',
+                                log_trade('crypto_fade', 'coinbase_paper_short', pid, 'SELL', 'LIMIT',
                                           qty, price2,
                                           fee_usd=price2 * qty * COINBASE_MAKER_FEE_PCT,
                                           paper=PAPER_TRADING,

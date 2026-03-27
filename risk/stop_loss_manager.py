@@ -27,7 +27,7 @@ def calc_take_profit(entry: float, strategy: str, atr: float = 0.0) -> float:
     Stop is calculated first, then target = entry + (entry - stop) * rr.
     """
     stop = calc_stop_loss(entry, strategy, atr)
-    rr = 3.0 if ('equity' in strategy and 'crypto' not in strategy) else 2.0
+    rr = 3.0  # 3:1 R:R for all strategies — matches config (CRYPTO/EQUITY_TAKE_PROFIT_PCT)
     return entry + (entry - stop) * rr
 
 

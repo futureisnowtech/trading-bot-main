@@ -193,6 +193,12 @@ def monitor_exits_with_ai(engine) -> None:
 
     for symbol, pos in list(all_pos.get('equity', {}).items()):
         try:
+            if wb is None:
+                # Equity broker not configured — close orphaned positions to prevent monitor crash
+                rm.close_position('equity_momentum', symbol)
+                log_event('WARNING', 'exit_monitor',
+                          f"[equity] {symbol} — equity broker unavailable, removed orphaned position")
+                continue
             df = get_bars(symbol, interval='5m', period='1d')
             if df is None or df.empty:
                 continue
@@ -306,6 +312,102 @@ def monitor_exits_with_ai(engine) -> None:
 
         except Exception as e:
             print(f"[exit_monitor] crypto error {pid}: {e}")
+
+    # ── Perp positions: AI exit review + stagnant exit ────────────────────────
+    for symbol, pos in list(all_pos.get('perp', {}).items()):
+        try:
+            from execution.binance_broker import get_binance_broker as _get_bb_exit
+            bb_exit = _get_bb_exit()
+            current_price = bb_exit.get_mark_price(symbol)
+            if not current_price:
+                continue
+
+            rm.update_high('crypto_perp', symbol, current_price)
+            should_exit_perp, exit_reason_perp = rm.should_exit('crypto_perp', symbol, current_price)
+            if should_exit_perp:
+                _execute_perp_exit(bb_exit, rm, symbol, pos, exit_reason_perp)
+                continue
+
+            if engine:
+                ts_entry = pos.get('ts_entry', '')
+                try:
+                    from datetime import datetime as _dt2
+                    entry_dt = _dt2.fromisoformat(ts_entry)
+                    tz = pytz.timezone(MARKET_TIMEZONE)
+                    mins_in = int((datetime.now(tz) - entry_dt if entry_dt.tzinfo
+                                   else entry_dt.replace(tzinfo=tz)).total_seconds() / 60)
+                except Exception:
+                    mins_in = 0
+
+                pnl_pct = ((current_price - pos['entry']) / pos['entry']
+                           if pos.get('direction', 'LONG') == 'LONG'
+                           else (pos['entry'] - current_price) / pos['entry'])
+
+                # 4h flat exit (also in perp_scanner — belt and suspenders)
+                if mins_in >= 240 and abs(pnl_pct) < 0.005:
+                    reason = f"Perp stagnant exit: {mins_in}m, flat ({pnl_pct:+.2%})"
+                    _execute_perp_exit(bb_exit, rm, symbol, pos, reason)
+                    continue
+
+                if mins_in >= 5:
+                    perp_md = {'direction': pos.get('direction', 'LONG'),
+                               'regime': 'unknown', 'rsi': 50, 'adx': 25}
+                    review = engine['exit'](
+                        symbol=symbol, strategy='crypto_perp',
+                        entry_price=pos['entry'], current_price=current_price,
+                        stop_loss=pos['stop'], take_profit=pos['target'],
+                        entry_reason=pos.get('entry_reason', ''),
+                        time_in_trade_minutes=mins_in,
+                        market_data=perp_md, verbose=False,
+                    )
+                    if review.get('should_exit'):
+                        _execute_perp_exit(bb_exit, rm, symbol, pos, review['reason'])
+
+        except Exception as e:
+            print(f"[exit_monitor] perp error {symbol}: {e}")
+
+
+def _execute_perp_exit(bb, rm, symbol: str, pos: dict, reason: str) -> None:
+    """Close a perp position and fire attribution pipeline."""
+    try:
+        result = bb.close_position(symbol, strategy='crypto_perp', reason=reason)
+        if result is None:
+            return
+        rm.close_position('crypto_perp', symbol)
+        log_event('INFO', 'perp_exit', f"[perp] CLOSED {symbol} | {reason}")
+
+        # Post-trade attribution — feed learning layer
+        exit_price = bb.get_mark_price(symbol) or pos['entry']
+        side = pos.get('direction', 'LONG')
+        pnl = ((exit_price - pos['entry']) if side == 'LONG'
+               else (pos['entry'] - exit_price)) * pos.get('qty', 0)
+
+        store_trade_experience(
+            symbol=symbol, strategy='crypto_perp',
+            entry_reason=pos.get('entry_reason', ''),
+            exit_reason=reason, pnl_usd=pnl,
+            rsi=50, macd_hist=0, adx=25, vol_spike=1.0, regime='unknown',
+        )
+        if _LEARNING_AVAILABLE:
+            try:
+                from datetime import datetime as _dt
+                analyze_closed_trade(
+                    symbol=symbol, strategy='crypto_perp',
+                    entry_price=pos['entry'], exit_price=exit_price,
+                    qty=pos.get('qty', 0), fee_usd=0.0,
+                    entry_ts=pos.get('ts_entry', ''),
+                    exit_ts=_dt.now(pytz.timezone(MARKET_TIMEZONE)).isoformat(),
+                    exit_reason=reason,
+                    market_data_at_entry={},
+                    agent_votes={},
+                    paper=PAPER_TRADING,
+                    trade_ref=f"perp_{symbol}_{pos.get('ts_entry','')}",
+                )
+                _invalidate_weights()
+            except Exception as _ale:
+                print(f"[learning] perp attribution error: {_ale}")
+    except Exception as e:
+        log_event('ERROR', 'perp_exit', f"{symbol} execute_perp_exit: {e}")
 
 
 def close_equity_before_market_close() -> None:

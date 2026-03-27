@@ -99,7 +99,7 @@ MODERATOR_MAX_TOKENS: int = 900                               # CIO synthesis
 QUICK_DEBATE_AGENTS: list = ['funding_regime', 'momentum_structure', 'risk_economics']
 FULL_DEBATE_AGENTS:  list = ['funding_regime', 'momentum_structure', 'risk_economics']
 MES_DEBATE_AGENTS:   list = ['mes_momentum_risk', 'mes_quant', 'mes_market_structure']
-FULL_DEBATE_MIN_AGREEMENT: float = 0.67   # 2 of 3 agents must agree for BUY
+FULL_DEBATE_MIN_AGREEMENT: float = 0.60   # 2 of 3 agents must agree for BUY (2/3 = 0.666; 0.67 was unreachable)
 
 # ML signal gate — skip debate if P(win) below threshold
 # Calibrated to seeded data baseline (~9% WR from math-only backtest).

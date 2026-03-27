@@ -140,10 +140,8 @@ def _monitor_perp_exit(bb, rm, symbol: str, pos: dict) -> None:
                 reason = f"Perp time exit: {mins_in}m, flat ({pnl_pct:.2%}) — funding cost drain"
 
         if should_exit:
-            result = bb.close_position(symbol, strategy='crypto_perp', reason=reason)
-            if result is not None:
-                rm.close_position('crypto_perp', symbol)
-                log_event('INFO', 'perp_exit', f"[perp] CLOSED {symbol} | {reason}")
+            from scheduler.exit_monitor import _execute_perp_exit
+            _execute_perp_exit(bb, rm, symbol, pos, reason)
 
     except Exception as e:
         log_event('ERROR', 'perp_exit', f"{symbol}: {e}")

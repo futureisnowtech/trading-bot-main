@@ -167,7 +167,7 @@ FUTURES_MAX_TRADES_DAY: int = 10
 # MARKET & INSTRUMENTS
 # ════════════════════════════════════════════════════════════════════
 CRYPTO_PAIRS: list = os.getenv('CRYPTO_PAIRS', 'BTC-USDC,ETH-USDC,SOL-USDC,AVAX-USDC,XRP-USDC,DOGE-USDC,LINK-USDC,ADA-USDC').split(',')
-CRYPTO_CANDLE_GRANULARITY: str = 'ONE_MINUTE'
+CRYPTO_CANDLE_GRANULARITY: str = 'FIVE_MINUTE'   # v5.0 Sprint 2: 5-min bars (was ONE_MINUTE)
 EQUITY_MIN_PRICE: float = 1.00
 EQUITY_MAX_PRICE: float = 200.00
 EQUITY_MIN_VOLUME: int = 500_000

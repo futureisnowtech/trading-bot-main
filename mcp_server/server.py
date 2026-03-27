@@ -60,8 +60,9 @@ def get_open_trades(lane: str = "all") -> list:
     Args:
         lane: Filter by lane — 'crypto', 'equity', 'futures', 'perp', or 'all'
     """
+    from config import PAPER_TRADING
     logger = _get_logger()
-    positions = logger.get_open_positions()
+    positions = logger.load_open_positions(paper=PAPER_TRADING)
     if lane == "all":
         return positions
     return [p for p in positions if p.get("strategy", "").startswith(lane.rstrip("s"))]
@@ -94,10 +95,10 @@ def close_position(symbol: str, strategy: str, reason: str = "manual_close") -> 
     if not PAPER_TRADING:
         return {"success": False, "message": "Live mode: use the dashboard or confirm manually."}
     rm = _get_risk_manager()
-    pos = rm.get_position(symbol, strategy)
+    pos = rm.get_position(strategy, symbol)
     if not pos:
         return {"success": False, "message": f"No open position for {symbol} / {strategy}"}
-    rm.close_position(symbol, strategy, exit_reason=reason)
+    rm.close_position(strategy, symbol, exit_reason=reason)
     return {"success": True, "message": f"Closed {symbol} ({strategy}): {reason}"}
 
 
@@ -116,11 +117,11 @@ def get_signal_stats(regime: str = "all", min_fires: int = 5) -> list:
     Returns: List of {signal, regime, fires, win_rate, bayesian_pts, source}
     """
     try:
-        from learning.signal_performance import get_signal_leaderboard
-        rows = get_signal_leaderboard()
+        from learning.signal_performance import get_signal_report
+        rows = get_signal_report(min_fires=min_fires)
         if regime != "all":
             rows = [r for r in rows if r.get("regime") == regime]
-        return [r for r in rows if r.get("fires", 0) >= min_fires]
+        return rows
     except Exception as e:
         return [{"error": str(e)}]
 
@@ -133,8 +134,9 @@ def get_agent_accuracy() -> list:
     Accuracy = % of times agent voted BUY and trade was profitable.
     """
     try:
-        from learning.signal_performance import get_agent_accuracy_stats
-        return get_agent_accuracy_stats()
+        from learning.signal_performance import get_agent_accuracy_context
+        context = get_agent_accuracy_context(regime="any")
+        return [{"accuracy_context": context}]
     except Exception as e:
         return [{"error": str(e)}]
 
@@ -150,13 +152,16 @@ def get_ml_signal(symbol: str) -> dict:
     """
     try:
         from learning.ml_signal import get_ml_signal as _get_ml_signal
-        from data.coinbase_feed import CoinbaseFeed
-        feed = CoinbaseFeed()
-        candles = feed.get_candles(symbol, limit=100)
-        if candles is None or len(candles) < 50:
+        from data.coinbase_feed import get_candles
+        from data.indicators import add_all_indicators
+        from scheduler._helpers import _build_market_data
+        from config import CRYPTO_CANDLE_GRANULARITY
+        df = get_candles(symbol, CRYPTO_CANDLE_GRANULARITY, 100)
+        if df is None or len(df) < 50:
             return {"p_win": None, "label": "INSUFFICIENT_DATA", "model_trained": False}
-        from data.indicators import calculate_indicators
-        market_data = calculate_indicators(candles)
+        df_ind = add_all_indicators(df)
+        price = float(df_ind.iloc[-1]['close'])
+        market_data = _build_market_data(symbol, price, df_ind)
         p_win, label = _get_ml_signal(market_data)
         return {"p_win": round(p_win, 4), "label": label, "model_trained": True}
     except Exception as e:
@@ -179,17 +184,26 @@ def get_price_history(symbol: str, limit: int = 100, interval: str = "1m") -> li
     Returns: List of {ts, open, high, low, close, volume}
     """
     try:
-        from data.price_archive import PriceArchive
-        archive = PriceArchive()
-        candles = archive.get_candles(symbol, limit=min(limit, 500))
-        if candles and len(candles) >= limit // 2:
-            return [{"ts": c[0], "open": c[1], "high": c[2], "low": c[3], "close": c[4], "volume": c[5]} for c in candles]
-        from data.coinbase_feed import CoinbaseFeed
-        feed = CoinbaseFeed()
-        raw = feed.get_candles(symbol, limit=min(limit, 500))
-        if raw is None:
+        from data.price_archive import get_candles_tail
+        from data.coinbase_feed import get_candles
+        from config import CRYPTO_CANDLE_GRANULARITY
+
+        def _df_to_rows(df):
+            df = df.reset_index()
+            ts_col = 'timestamp' if 'timestamp' in df.columns else df.columns[0]
+            return [{"ts": str(row[ts_col]), "open": float(row['open']),
+                     "high": float(row['high']), "low": float(row['low']),
+                     "close": float(row['close']), "volume": float(row['volume'])}
+                    for _, row in df.iterrows()]
+
+        cap = min(limit, 500)
+        df_archive = get_candles_tail(symbol, CRYPTO_CANDLE_GRANULARITY, cap)
+        if df_archive is not None and len(df_archive) >= cap // 2:
+            return _df_to_rows(df_archive)
+        df_live = get_candles(symbol, CRYPTO_CANDLE_GRANULARITY, cap)
+        if df_live is None:
             return []
-        return [{"ts": c[0], "open": c[1], "high": c[2], "low": c[3], "close": c[4], "volume": c[5]} for c in raw]
+        return _df_to_rows(df_live)
     except Exception as e:
         return [{"error": str(e)}]
 

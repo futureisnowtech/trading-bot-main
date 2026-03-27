@@ -125,7 +125,7 @@ class TestStopLossManager:
         risk   = entry - stop
         reward = tp - entry
         rr = reward / risk if risk > 0 else 0
-        assert abs(rr - 2.0) < 0.5, f"Crypto R/R should be ~2:1, got {rr:.2f}"
+        assert abs(rr - 3.0) < 0.5, f"Crypto R/R should be ~3:1, got {rr:.2f}"
 
     def test_long_hard_stop_triggers(self):
         from risk.stop_loss_manager import should_exit
@@ -177,36 +177,45 @@ class TestDrawdownHeat:
         assert heat['size_factor'] == 1.0
 
     def test_caution_at_1pt5_pct(self):
-        # -1.5% of $5000 = -$75
-        heat = self._heat(-75.0)
+        from config import ACCOUNT_SIZE
+        loss = -(ACCOUNT_SIZE * 0.015 + 1.0)  # just past -1.5% of real balance
+        heat = self._heat(loss)
         assert heat['level'] == 1
         assert heat['label'] == 'CAUTION'
         assert heat['size_factor'] == 0.75
 
     def test_warning_at_2pt5_pct(self):
-        # -2.5% of $5000 = -$125
-        heat = self._heat(-125.0)
+        from config import ACCOUNT_SIZE
+        loss = -(ACCOUNT_SIZE * 0.025 + 1.0)  # just past -2.5%
+        heat = self._heat(loss)
         assert heat['level'] == 2
         assert heat['label'] == 'WARNING'
         assert heat['size_factor'] == 0.50
 
     def test_danger_at_3pt5_pct(self):
-        # -3.5% of $5000 = -$175
-        heat = self._heat(-175.0)
+        from config import ACCOUNT_SIZE
+        loss = -(ACCOUNT_SIZE * 0.035 + 1.0)  # just past -3.5%
+        heat = self._heat(loss)
         assert heat['level'] == 3
         assert heat['label'] == 'DANGER'
         assert heat['size_factor'] == 0.25
 
     def test_halt_at_4_pct(self):
-        # -4.0% of $5000 = -$200
-        heat = self._heat(-200.0)
+        from config import ACCOUNT_SIZE
+        loss = -(ACCOUNT_SIZE * 0.040 + 1.0)  # just past -4.0%
+        heat = self._heat(loss)
         assert heat['level'] == 4
         assert heat['label'] == 'HALT'
         assert heat['size_factor'] == 0.0
 
     def test_heat_size_factors_are_monotone_decreasing(self):
         """Each level should have a strictly lower size_factor than the previous."""
-        losses = [0.0, -75.0, -125.0, -175.0, -200.0]
+        from config import ACCOUNT_SIZE
+        losses = [0.0,
+                  -(ACCOUNT_SIZE * 0.015 + 1.0),
+                  -(ACCOUNT_SIZE * 0.025 + 1.0),
+                  -(ACCOUNT_SIZE * 0.035 + 1.0),
+                  -(ACCOUNT_SIZE * 0.040 + 1.0)]
         factors = [self._heat(loss)['size_factor'] for loss in losses]
         for i in range(1, len(factors)):
             assert factors[i] <= factors[i - 1], \

@@ -85,7 +85,8 @@ def check_fee_drag(paper: bool) -> tuple:
     Returns: (ok: bool, reason: str)
     """
     fees = get_todays_fees(paper=paper)
-    limit = ACCOUNT_SIZE * MAX_DAILY_FEE_DRAG_PCT
+    real_balance = max(ACCOUNT_SIZE + get_all_time_stats(paper=paper)['total_pnl'], 1.0)
+    limit = real_balance * MAX_DAILY_FEE_DRAG_PCT
     if fees > limit:
         return False, f"Daily fee limit: ${fees:.2f} (max ${limit:.2f})"
     return True, ''

@@ -119,7 +119,7 @@ def _generate_lesson(
     # Add interpretation
     if won:
         if len(active) >= 4:
-            lines.append("PATTERN: Multi-signal confluence in {regime} regime → confirmed edge")
+            lines.append(f"PATTERN: Multi-signal confluence in {regime} regime → confirmed edge")
         if 'supertrend_bullish' in active and 'wavetrend_cross' in active:
             lines.append("PATTERN: SuperTrend + WaveTrend combo → strong trend-momentum confluence")
         if 'squeeze_fired' in active and 'rv_expansion' in active:
@@ -251,7 +251,15 @@ def analyze_closed_trade(
             'futures': 'futures', 'futures_scalper': 'futures',
             'perp': 'perp',
         }
-        asset_class = asset_class_map.get(strategy.lower().split('_')[0], 'crypto')
+        strat_lower = strategy.lower()
+        if 'perp' in strat_lower:
+            asset_class = 'perp'
+        elif 'futures' in strat_lower:
+            asset_class = 'futures'
+        elif 'equity' in strat_lower:
+            asset_class = 'equity'
+        else:
+            asset_class = asset_class_map.get(strat_lower.split('_')[0], 'crypto')
         record_tax_lot(
             symbol=symbol, strategy=strategy, asset_class=asset_class,
             entry_ts=entry_ts,

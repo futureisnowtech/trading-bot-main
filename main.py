@@ -22,7 +22,7 @@ import logging_db.trade_logger  # noqa: F401 — pre-warm, prevents EDEADLK
 
 BANNER = """
 ╔══════════════════════════════════════════════════════════════════╗
-║  👑  THE KING'S ALGO TRADING SYSTEM  v5.0  👑                   ║
+║  👑  THE KING'S ALGO TRADING SYSTEM  v9.0  👑                   ║
 ║                                                                  ║
 ║  "Nothing is given. Everything is earned." — LeBron James       ║
 ║                                                                  ║

@@ -45,6 +45,15 @@ except Exception:
                 'sizing_multiplier': 1.0, 'should_block': False, 'window_trades': 0}
 
 try:
+    from logging_db.trade_logger import get_trade_quality_stats, get_open_position_health
+except (ImportError, Exception):
+    def get_trade_quality_stats(**kwargs):
+        return {'entry_timing': 5.0, 'exit_efficiency': 5.0, 'thesis_hit_rate': 0.5,
+                'agent_edge_pct': 0.0, 'exit_type_dist': {}, 'avg_super_score': 0.0, 'n': 0}
+    def get_open_position_health(**kwargs):
+        return []
+
+try:
     from risk.drawdown_controller import get_heat_level
 except Exception:
     def get_heat_level(paper=True):
@@ -892,6 +901,274 @@ def comp_edge():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# TRADE QUALITY
+# ══════════════════════════════════════════════════════════════════════════════
+
+@st.fragment(run_every=30)
+def comp_trade_quality():
+    _sec(
+        "TRADE QUALITY",
+        "How well is the system executing? Entry Timing and Exit Efficiency measure "
+        "the quality of our fills relative to the trade's range. Thesis Hit Rate measures "
+        "how often setups actually play out in our direction. Super Score is the rolling "
+        "entry conviction composite. All metrics computed over the last 20 closed trades.",
+    )
+
+    qs = get_trade_quality_stats(lookback=20, paper=PAPER_TRADING)
+    entry_timing   = float(qs.get('entry_timing', 5.0))
+    exit_eff       = float(qs.get('exit_efficiency', 5.0))
+    thesis_hit     = float(qs.get('thesis_hit_rate', 0.5))
+    avg_super      = float(qs.get('avg_super_score', 0.0))
+    exit_dist      = qs.get('exit_type_dist', {}) or {}
+    n              = int(qs.get('n', 0))
+
+    # ── Scorecard colors ───────────────────────────────────────────────────────
+    def _timing_clr(v):
+        return GREEN if v >= 7 else (RED if v < 4 else AMBER)
+
+    def _exit_clr(v):
+        return GREEN if v >= 6 else (RED if v < 3 else AMBER)
+
+    def _thesis_clr(v):
+        return GREEN if v >= 0.60 else (RED if v < 0.35 else AMBER)
+
+    def _super_clr(v):
+        return GREEN if v >= 65 else (RED if v < 45 else AMBER)
+
+    def _met(label, value, sub, color, tooltip):
+        return (
+            f'<div class="met" title="{tooltip}">'
+            f'<div class="met-label">{label}</div>'
+            f'<div class="met-value" style="color:{color};">{value}</div>'
+            f'<div class="met-sub">{sub}</div>'
+            f'</div>'
+        )
+
+    c1, c2, c3, c4 = st.columns(4)
+
+    with c1:
+        st.markdown(
+            _met(
+                "ENTRY TIMING",
+                f"{entry_timing:.1f} / 10",
+                "avg adverse excursion vs stop",
+                _timing_clr(entry_timing),
+                "How well-timed are entries? 10 = price never went against us. "
+                "Below 4 = entering too early or chasing. "
+                "Measures avg MAE as fraction of stop distance.",
+            ),
+            unsafe_allow_html=True,
+        )
+
+    with c2:
+        st.markdown(
+            _met(
+                "EXIT EFFICIENCY",
+                f"{exit_eff:.1f} / 10",
+                "% of MFE captured",
+                _exit_clr(exit_eff),
+                "Did we capture the move? exit_pnl / max_favorable_excursion. "
+                "10 = exited at the peak. "
+                "Below 4 = bailing before the move plays out.",
+            ),
+            unsafe_allow_html=True,
+        )
+
+    with c3:
+        st.markdown(
+            _met(
+                "THESIS HIT RATE",
+                f"{thesis_hit:.0%}",
+                "trades where price cleared stop distance",
+                _thesis_clr(thesis_hit),
+                "What % of trades did price move in our favor by at least the stop distance? "
+                "Below 35% means setups aren't playing out — "
+                "wrong market conditions or signal timing.",
+            ),
+            unsafe_allow_html=True,
+        )
+
+    with c4:
+        super_val = f"{avg_super:.0f}" if avg_super > 0 else "—"
+        st.markdown(
+            _met(
+                "SUPER SCORE AVG",
+                super_val,
+                "rolling entry conviction",
+                _super_clr(avg_super) if avg_super > 0 else TEXT3,
+                "Average SUPER SCORE across last 20 entries. "
+                "Composite of ML model, signal confluence, agent consensus, "
+                "market context, and microstructure.",
+            ),
+            unsafe_allow_html=True,
+        )
+
+    # ── Exit type distribution ─────────────────────────────────────────────────
+    if exit_dist:
+        total_exits = sum(exit_dist.values()) or 1
+        parts = []
+        for etype, count in exit_dist.items():
+            pct = count / total_exits
+            if etype in ('stop_hit', 'stagnant') and pct > 0.40:
+                clr = RED
+            elif etype == 'target_hit':
+                clr = GREEN
+            else:
+                clr = TEXT2
+            parts.append(
+                f'<span style="color:{TEXT3};font-weight:600;">{etype}:</span>'
+                f'&nbsp;<span style="color:{clr};font-weight:700;">{count}</span>'
+            )
+        mix_html = (
+            f'<div style="font-size:12px;padding:10px 14px;background:{SURFACE};'
+            f'border:1px solid {BORDER};border-radius:10px;margin-top:10px;'
+            f'display:flex;align-items:center;gap:16px;flex-wrap:wrap;">'
+            f'<span style="font-size:11px;font-weight:700;letter-spacing:2px;'
+            f'text-transform:uppercase;color:{TEXT3};margin-right:4px;">EXIT MIX (last {n}):</span>'
+            + '&ensp;'.join(parts)
+            + f'</div>'
+        )
+        st.markdown(mix_html, unsafe_allow_html=True)
+
+    # ── Open position health cards ─────────────────────────────────────────────
+    health_cards = get_open_position_health(paper=PAPER_TRADING)
+
+    if not health_cards:
+        st.markdown(
+            f'<div style="color:{TEXT3};font-size:14px;padding:16px 0 4px 0;'
+            f'text-align:center;font-style:italic;">No open positions</div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    st.markdown(
+        f'<div style="font-size:11px;font-weight:700;letter-spacing:3px;'
+        f'text-transform:uppercase;color:{TEXT3};padding:18px 0 8px 0;">OPEN POSITION HEALTH</div>',
+        unsafe_allow_html=True,
+    )
+
+    now = datetime.now(_tz.utc)
+
+    for pos in health_cards:
+        symbol  = pos.get('symbol', '—')
+        strat   = pos.get('strategy', '—')
+        direc   = pos.get('direction', 'LONG')
+        entry   = float(pos.get('entry', 0))
+        stop    = float(pos.get('stop', 0))
+        target  = float(pos.get('target', 0))
+        qty     = float(pos.get('qty', 0))
+        high_se = float(pos.get('high_since_entry', entry))
+        low_se  = float(pos.get('low_since_entry', entry))
+        ts_raw  = pos.get('ts_entry', '')
+
+        # Time in trade
+        mins_in = 0
+        age_str = '—'
+        try:
+            dt = datetime.fromisoformat(ts_raw)
+            if not dt.tzinfo:
+                dt = dt.replace(tzinfo=_tz.utc)
+            mins_in = int((now - dt).total_seconds() / 60)
+            age_str = f'{mins_in}m' if mins_in < 60 else f'{mins_in // 60}h {mins_in % 60}m'
+        except Exception:
+            pass
+
+        target_range = (target - entry) if target > entry else 0
+        stop_range   = (entry - stop)   if entry > stop   else 0
+
+        mfe_pct = 0.0
+        if target_range > 0:
+            mfe_pct = (high_se - entry) / target_range * 100
+            mfe_pct = max(0.0, min(100.0, mfe_pct))
+
+        mae_pct = 0.0
+        if stop_range > 0:
+            mae_pct = (entry - low_se) / stop_range * 100
+            mae_pct = max(0.0, min(100.0, mae_pct))
+
+        pnl_est = (high_se - entry) * qty
+
+        # Status badge
+        if mfe_pct >= 30:
+            badge = f'<span style="color:{GREEN};font-weight:700;">✅ thesis working</span>'
+        elif mae_pct >= 70:
+            badge = f'<span style="color:{RED};font-weight:700;">⚠️ near stop</span>'
+        else:
+            badge = f'<span style="color:{AMBER};font-weight:700;">⏳ developing</span>'
+
+        mfe_bar  = int(mfe_pct)
+        mae_bar  = int(mae_pct)
+        pnl_sign = '+' if pnl_est >= 0 else ''
+        pnl_clr  = GREEN if pnl_est >= 0 else RED
+
+        card_html = (
+            f'<div style="background:{SURFACE};border:1px solid {BORDER};'
+            f'border-radius:12px;padding:16px 18px;margin-bottom:8px;'
+            f'border-left:3px solid {GOLD};">'
+
+            # Header row
+            f'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;">'
+            f'  <div>'
+            f'    <span style="font-size:20px;font-weight:800;color:{TEXT};'
+            f'    font-family:\'JetBrains Mono\',monospace;">{symbol}</span>'
+            f'    &nbsp;&nbsp;'
+            f'    <span style="font-size:12px;color:{TEXT3};font-weight:600;'
+            f'    text-transform:uppercase;letter-spacing:1px;">{strat} · {direc}</span>'
+            f'  </div>'
+            f'  <span style="font-size:13px;color:{TEXT2};font-weight:500;'
+            f'  background:{CARD};border-radius:20px;padding:4px 12px;'
+            f'  border:1px solid {BORDER};">{age_str} in</span>'
+            f'</div>'
+
+            # Price levels
+            f'<div style="font-size:12px;color:{TEXT3};font-family:\'JetBrains Mono\',monospace;'
+            f'margin-bottom:12px;">'
+            f'Entry:&nbsp;<span style="color:{TEXT};">{entry:.5g}</span>'
+            f'&ensp;·&ensp;Stop:&nbsp;<span style="color:{RED};">{stop:.5g}</span>'
+            f'&ensp;·&ensp;Target:&nbsp;<span style="color:{GREEN};">{target:.5g}</span>'
+            f'</div>'
+
+            # MFE progress bar
+            f'<div style="margin-bottom:10px;">'
+            f'  <div style="display:flex;justify-content:space-between;'
+            f'  font-size:11px;color:{TEXT3};margin-bottom:4px;">'
+            f'    <span style="font-weight:700;letter-spacing:1px;text-transform:uppercase;">MFE Progress</span>'
+            f'    <span style="color:{GREEN};font-weight:700;">{mfe_pct:.0f}%</span>'
+            f'  </div>'
+            f'  <div style="background:{BORDER};border-radius:100px;height:6px;overflow:hidden;">'
+            f'    <div style="width:{mfe_bar}%;height:100%;background:{GREEN};border-radius:100px;"></div>'
+            f'  </div>'
+            f'</div>'
+
+            # MAE exposure bar
+            f'<div style="margin-bottom:10px;">'
+            f'  <div style="display:flex;justify-content:space-between;'
+            f'  font-size:11px;color:{TEXT3};margin-bottom:4px;">'
+            f'    <span style="font-weight:700;letter-spacing:1px;text-transform:uppercase;">MAE Exposure</span>'
+            f'    <span style="color:{RED};font-weight:700;">{mae_pct:.0f}% of stop distance</span>'
+            f'  </div>'
+            f'  <div style="background:{BORDER};border-radius:100px;height:6px;overflow:hidden;">'
+            f'    <div style="width:{mae_bar}%;height:100%;background:{RED};border-radius:100px;"></div>'
+            f'  </div>'
+            f'</div>'
+
+            # P&L estimate + status badge
+            f'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;">'
+            f'  <span style="font-size:13px;color:{TEXT2};">'
+            f'    P&amp;L est:&nbsp;'
+            f'    <span style="color:{pnl_clr};font-weight:700;font-family:\'JetBrains Mono\',monospace;">'
+            f'    {pnl_sign}${pnl_est:.2f}</span>'
+            f'    <span style="font-size:11px;color:{TEXT3};">&nbsp;(high since entry)</span>'
+            f'  </span>'
+            f'  {badge}'
+            f'</div>'
+
+            f'</div>'
+        )
+        st.markdown(card_html, unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # OPEN POSITIONS
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -1436,6 +1713,7 @@ def main():
     comp_hero()
     comp_metrics()
     comp_edge()
+    comp_trade_quality()
     comp_positions()
     comp_markets()
     comp_risk()

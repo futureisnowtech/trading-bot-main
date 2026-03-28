@@ -302,6 +302,28 @@ def run_crypto_scan() -> None:
                 except Exception:
                     pass
 
+            # ── SUPER SCORE ────────────────────────────────────────────────────
+            _super = {'score': 50, 'label': 'NORMAL', 'size_multiplier': 1.0, 'components': {}}
+            try:
+                from learning.super_score import compute_super_score
+                _super = compute_super_score(market_data, debate_result=None,
+                                             ml_p_win=_p_win if _ML_AVAILABLE else 0.0,
+                                             symbol=pid)
+                market_data['super_score'] = _super['score']
+                market_data['super_label'] = _super['label']
+                if _super['score'] < 40:
+                    log_event('INFO', 'scan_feed',
+                              f"[crypto] {pid} SUPER SCORE {_super['score']:.0f} ({_super['label']}) -- abort")
+                    continue
+                log_event('INFO', 'scan_feed',
+                          f"[crypto] {pid} SUPER SCORE {_super['score']:.0f} ({_super['label']}) "
+                          f"ML={_super['components'].get('ml', 0):.0f} "
+                          f"Sig={_super['components'].get('signals', 0):.0f} "
+                          f"Ctx={_super['components'].get('context', 0):.0f} "
+                          f"Mic={_super['components'].get('micro', 0):.0f}")
+            except Exception as _se:
+                log_event('INFO', 'scan_feed', f"[crypto] {pid} super_score error: {_se}")
+
             # ── Microstructure veto ────────────────────────────────────────────
             obi = market_data.get('obi')
             tfi = market_data.get('tfi')
@@ -393,6 +415,21 @@ def run_crypto_scan() -> None:
                           f"{vb.get('BUY',0)}B/{vb.get('HOLD',0)}H/{vb.get('SELL',0)}S | "
                           f"regime={regime} | {final.reasoning[:70]}")
 
+                # Recompute SUPER SCORE with agent votes now available
+                try:
+                    from learning.super_score import compute_super_score
+                    _super = compute_super_score(market_data, debate_result=debate_result,
+                                                 ml_p_win=_p_win if _ML_AVAILABLE else 0.0,
+                                                 symbol=pid)
+                    market_data['super_score'] = _super['score']
+                    market_data['super_label'] = _super['label']
+                    log_event('INFO', 'scan_feed',
+                              f"[crypto] {pid} SUPER (w/agents) {_super['score']:.0f} ({_super['label']}) "
+                              f"Agt={_super['components'].get('agents', 0):.0f} "
+                              f"-> size x{_super['size_multiplier']:.2f}")
+                except Exception:
+                    pass
+
                 # ── Regime gates ───────────────────────────────────────────────
                 if final.action == 'BUY' and regime == 'trending_down':
                     log_event('INFO', 'scan_feed', f"[crypto] {pid} 🚫 regime block: trending_down, no longs")
@@ -406,7 +443,7 @@ def run_crypto_scan() -> None:
                     continue
 
                 if final.action == 'BUY':
-                    # Unified sizer: base × engine.size_multiplier × vol/edge/time/Kelly
+                    # Unified sizer: base × engine.size_multiplier × vol/edge/time/Kelly × super_score_multiplier
                     _base_usd = unified_get_size(
                         strategy='crypto_ai',
                         symbol=pid,
@@ -414,7 +451,7 @@ def run_crypto_scan() -> None:
                         confidence=final.confidence,
                         current_price=price,
                         funding_rate=float(market_data.get('funding_rate_pct') or 0.0) / 100,
-                    )
+                    ) * _super.get('size_multiplier', 1.0)
                     risk_check = rm.check_entry('crypto_macd_consensus', pid, 'BUY',
                                                 _base_usd, price, final.confidence)
                     if not risk_check:
@@ -428,7 +465,8 @@ def run_crypto_scan() -> None:
                                              final.stop_loss, final.take_profit,
                                              direction='LONG', entry_reason=final.reasoning,
                                              agent_votes=debate_result.vote_breakdown,
-                                             ml_p_win=market_data.get('ml_p_win', 0))
+                                             ml_p_win=market_data.get('ml_p_win', 0),
+                                             super_score=market_data.get('super_score', 0))
 
                 elif final.action == 'SHORT':
                     # Coinbase spot doesn't support shorting — paper-log only.

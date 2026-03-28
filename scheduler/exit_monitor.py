@@ -90,6 +90,7 @@ def _execute_equity_exit(wb, rm, symbol, pos, price, reason, strategy, market_da
                     mae_pct=_eq_mae, mfe_pct=_eq_mfe,
                     exit_type=_classify_exit_type(reason),
                     ml_p_win=pos.get('ml_p_win', 0),
+                    super_score=pos.get('super_score', 0),
                 )
                 _invalidate_weights()
             except Exception as _ale:
@@ -154,6 +155,7 @@ def _execute_crypto_exit(cb, rm, pid, pos, price, reason, strategy, market_data=
                     mae_pct=_s_mae, mfe_pct=_s_mfe,
                     exit_type=_classify_exit_type(reason),
                     ml_p_win=pos.get('ml_p_win', 0),
+                    super_score=pos.get('super_score', 0),
                 )
                 _invalidate_weights()
             except Exception as _ale:
@@ -209,6 +211,7 @@ def _execute_crypto_exit(cb, rm, pid, pos, price, reason, strategy, market_data=
                     mae_pct=_c_mae, mfe_pct=_c_mfe,
                     exit_type=_classify_exit_type(reason),
                     ml_p_win=pos.get('ml_p_win', 0),
+                    super_score=pos.get('super_score', 0),
                 )
                 _invalidate_weights()
             except Exception as _ale:
@@ -305,6 +308,29 @@ def monitor_exits_with_ai(engine) -> None:
             if df_cr is not None and len(df_cr) >= 20:
                 df_cr_ind = add_all_indicators(df_cr)
                 cr_md = _build_market_data(pid, price, df_cr_ind)
+
+            # ── Super score decay exit ─────────────────────────────────────────
+            try:
+                from learning.super_score import compute_super_score
+                ts_entry_ss = pos.get('ts_entry', '')
+                try:
+                    from datetime import datetime as _dt_ss
+                    _e_ss = _dt_ss.fromisoformat(ts_entry_ss)
+                    _tz_ss = pytz.timezone(MARKET_TIMEZONE)
+                    mins_in_ss = int((datetime.now(_tz_ss) - _e_ss if _e_ss.tzinfo
+                                      else _e_ss.replace(tzinfo=_tz_ss)).total_seconds() / 60)
+                except Exception:
+                    mins_in_ss = 0
+                _cur_super = compute_super_score(cr_md, debate_result=None, ml_p_win=0, symbol=pid)
+                _entry_super = pos.get('super_score', 0)
+                if _entry_super >= 65 and _cur_super['score'] <= 35 and mins_in_ss >= 10:
+                    reason = (f"SUPER SCORE decay exit: entry={_entry_super:.0f} -> "
+                              f"current={_cur_super['score']:.0f} ({_cur_super['label']}) after {mins_in_ss}m")
+                    _execute_crypto_exit(cb, rm, pid, pos, price, reason, strategy, cr_md)
+                    log_event('INFO', 'exit_monitor', reason)
+                    continue
+            except Exception:
+                pass
 
             should_exit, exit_reason = rm.should_exit(strategy, pid, price)
             if should_exit:

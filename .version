@@ -1,1 +1,1 @@
-2026-03-28 14:15 | 5eacf0f | Fix 4 audit bugs: LightGBM, agent_votes, perp stagnant exit, 3 stuck positions
+2026-03-28 15:43 | 8c837dc | True cost accounting: API costs tracked + included in all P&L/fee displays

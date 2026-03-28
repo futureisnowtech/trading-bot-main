@@ -1,6 +1,21 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-03-28
+- Wire super_score through full trading pipeline: signal_performance, post_trade_analyzer, risk_manager, crypto_scanner (pre+post-debate compute, abort<40, size multiplier), exit_monitor (decay exit + attribution)
+
+## 2026-03-28
+- Dashboard: add TRADE QUALITY section — entry timing, exit efficiency, thesis hit rate, super score avg, exit mix, open position health cards
+
+## 2026-03-28
+- Add learning/super_score.py (0-100 unified composite) + trade_logger get_trade_quality_stats / get_open_position_health + super_score DB migration
+
+## 2026-03-28
+- Binance spot broker: replace Coinbase execution with Binance spot (4x cheaper fees: 0.10% vs 0.40%)
+
+## 2026-03-28
+- Switch debate agents (Bardock/Vegeta/Krillin) from Sonnet to Haiku via CLAUDE_DEBATE_MODEL; exit review (Tudor Jones/Soros/Simons) stays on Sonnet
+
+## 2026-03-28
 - generate_daily_summary: add fee-ratio alert (>2x) and backtest-vs-live WR divergence alert (>10pp) to daily markdown summaries
 
 ## 2026-03-28

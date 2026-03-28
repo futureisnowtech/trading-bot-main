@@ -62,6 +62,8 @@ def init_db() -> None:
         "ALTER TABLE trade_attribution ADD COLUMN exit_type TEXT DEFAULT 'unknown'",
         "ALTER TABLE trade_attribution ADD COLUMN is_fee_trap INTEGER DEFAULT 0",
         "ALTER TABLE trade_attribution ADD COLUMN ml_p_win REAL DEFAULT 0",
+        # v9.1 super score: unified 0-100 composite intelligence per trade
+        "ALTER TABLE trade_attribution ADD COLUMN super_score REAL DEFAULT 0",
     ]:
         try:
             cur.execute(migration)
@@ -700,6 +702,127 @@ def get_strategy_consecutive_losses(strategy: str, paper=True) -> int:
         else:
             break
     return streak
+
+
+def get_trade_quality_stats(lookback: int = 20, paper: bool = True) -> dict:
+    """
+    Compute Trade Quality scorecard from the last N closed trades in trade_attribution.
+
+    Returns
+    -------
+    dict with keys:
+      entry_timing    : 0-10  (10 = zero adverse excursion before price moved in our favour)
+      exit_efficiency : 0-10  (10 = exited at peak MFE)
+      thesis_hit_rate : 0-1   (fraction where MFE >= 1.5%, i.e. cleared the crypto stop)
+      exit_type_dist  : dict  {exit_type: count}
+      avg_super_score : float (avg of non-zero super_score values)
+      n               : int   (actual row count used)
+    """
+    _defaults = {
+        'entry_timing':    5.0,
+        'exit_efficiency': 5.0,
+        'thesis_hit_rate': 0.0,
+        'exit_type_dist':  {},
+        'avg_super_score': 0.0,
+        'n':               0,
+    }
+    try:
+        conn = _conn()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT mae_pct, mfe_pct, pnl_pct, exit_type, won, super_score, ml_p_win
+            FROM trade_attribution
+            ORDER BY entry_ts DESC
+            LIMIT ?
+        """, (lookback,))
+        rows = [dict(r) for r in cur.fetchall()]
+        conn.close()
+    except Exception:
+        return _defaults
+
+    if not rows:
+        return _defaults
+
+    n = len(rows)
+
+    # entry_timing: 10 * (1 - avg(min(|mae_pct| / 0.015, 1.0)))
+    mae_vals = [abs(float(r.get('mae_pct') or 0)) for r in rows]
+    avg_mae_ratio = sum(min(v / 0.015, 1.0) for v in mae_vals) / n
+    entry_timing = round(10.0 * (1.0 - avg_mae_ratio), 2)
+
+    # exit_efficiency: 10 * avg(pnl_pct / mfe_pct) where mfe_pct > 0.001
+    eff_pairs = [
+        (float(r.get('pnl_pct') or 0), float(r.get('mfe_pct') or 0))
+        for r in rows
+        if float(r.get('mfe_pct') or 0) > 0.001
+    ]
+    if eff_pairs:
+        ratios = [min(pnl / mfe, 1.0) for pnl, mfe in eff_pairs]  # cap at 1
+        exit_efficiency = round(10.0 * (sum(ratios) / len(ratios)), 2)
+    else:
+        exit_efficiency = 5.0
+
+    # thesis_hit_rate: fraction where mfe_pct >= 0.015
+    thesis_hits = sum(1 for r in rows if float(r.get('mfe_pct') or 0) >= 0.015)
+    thesis_hit_rate = round(thesis_hits / n, 4)
+
+    # exit_type_dist
+    from collections import Counter
+    exit_type_dist = dict(Counter(
+        r.get('exit_type') or 'unknown' for r in rows
+    ))
+
+    # avg_super_score — exclude rows where super_score == 0 (old rows before this column existed)
+    scored_rows = [float(r.get('super_score') or 0) for r in rows if float(r.get('super_score') or 0) > 0]
+    avg_super_score = round(sum(scored_rows) / len(scored_rows), 2) if scored_rows else 0.0
+
+    return {
+        'entry_timing':    max(0.0, min(10.0, entry_timing)),
+        'exit_efficiency': max(0.0, min(10.0, exit_efficiency)),
+        'thesis_hit_rate': thesis_hit_rate,
+        'exit_type_dist':  exit_type_dist,
+        'avg_super_score': avg_super_score,
+        'n':               n,
+    }
+
+
+def get_open_position_health(paper: bool = True) -> list:
+    """
+    Return current open positions with full health metadata.
+
+    Returns
+    -------
+    list of dicts: symbol, strategy, entry, stop, target,
+                   high_since_entry, low_since_entry, ts_entry, qty, direction
+    """
+    try:
+        conn = _conn()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT symbol, strategy, qty, entry, stop, target, "
+            "high_since_entry, low_since_entry, ts_entry, direction "
+            "FROM open_positions WHERE paper=?",
+            (int(paper),)
+        )
+        rows = cur.fetchall()
+        conn.close()
+        result = []
+        for r in rows:
+            result.append({
+                'symbol':           r[0],
+                'strategy':         r[1],
+                'qty':              r[2],
+                'entry':            r[3],
+                'stop':             r[4],
+                'target':           r[5],
+                'high_since_entry': r[6],
+                'low_since_entry':  r[7],
+                'ts_entry':         r[8],
+                'direction':        r[9] or 'LONG',
+            })
+        return result
+    except Exception:
+        return []
 
 
 def _csv_append(ts, strategy, broker, symbol, action, order_type,

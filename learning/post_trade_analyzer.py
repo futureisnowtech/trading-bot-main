@@ -158,6 +158,7 @@ def analyze_closed_trade(
     mfe_pct: float = 0,
     exit_type: str = 'unknown',
     ml_p_win: float = 0,
+    super_score: float = 0,
 ) -> dict:
     """
     Full post-trade attribution analysis. Call this immediately after every trade close.
@@ -221,6 +222,7 @@ def analyze_closed_trade(
         lesson=lesson,
         mae_pct=mae_pct, mfe_pct=mfe_pct,
         exit_type=exit_type, ml_p_win=ml_p_win,
+        super_score=super_score,
     )
 
     # Update agent accuracy

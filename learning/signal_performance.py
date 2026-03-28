@@ -231,6 +231,7 @@ def record_trade_attribution(
     mfe_pct: float = 0,
     exit_type: str = 'unknown',
     ml_p_win: float = 0,
+    super_score: float = 0,
 ) -> int:
     """
     Record the full attribution for one closed trade.
@@ -249,15 +250,15 @@ def record_trade_attribution(
                  pnl_usd, pnl_pct, fee_usd, won,
                  signals_json, conviction, exit_reason,
                  hold_minutes, paper, lesson, created_at,
-                 mae_pct, mfe_pct, exit_type, is_fee_trap, ml_p_win)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 mae_pct, mfe_pct, exit_type, is_fee_trap, ml_p_win, super_score)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             trade_ref, symbol, strategy, regime, source,
             entry_ts, exit_ts, entry_price, exit_price,
             pnl_usd, pnl_pct, fee_usd, int(won),
             signals_json, conviction, exit_reason,
             hold_minutes, int(paper), lesson, now,
-            mae_pct, mfe_pct, exit_type, is_fee_trap, ml_p_win,
+            mae_pct, mfe_pct, exit_type, is_fee_trap, ml_p_win, float(super_score or 0),
         ))
         attr_id = cur.lastrowid
 

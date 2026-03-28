@@ -14,12 +14,13 @@ The `/brain/` directory is the living strategic intelligence layer.
 
 A fully autonomous AI-powered trading system that:
 - Discovers stocks/crypto/futures opportunities automatically (no watchlist)
-- Runs every candidate through 8 legendary investor AI agents who debate it
+- Runs every candidate through 3 legendary investor AI agents who debate it (Bardock/Vegeta/Krillin)
+- Scores every trade with a **SUPER SCORE** (0-100 unified composite: ML + signals + agents + macro + micro)
 - Uses extended AI reasoning (interleaved thinking) for exit decisions
 - Enforces unbreakable emotional safeguards (the amygdala is removed)
 - Learns from every completed trade via Bayesian signal attribution + NumPy vector memory (SQLite-backed)
 - Writes all notifications to SQLite; dashboard Notifications panel displays them
-- Displays everything on a LeBron James / Dragon Ball Z themed dashboard
+- Displays everything on a LeBron James / Dragon Ball Z themed dashboard with Trade Quality scorecard
 - Trades 100% autonomously — owner is never asked to approve anything
 
 ## Owner Profile
@@ -29,7 +30,38 @@ A fully autonomous AI-powered trading system that:
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
 
-## Current Version: v9.0 (Sprint 2 complete)
+## Current Version: v9.0 (Sprint 3 complete)
+- v9.0 Sprint 3 (2026-03-28): Cost optimization + SUPER SCORE + Trade Quality panel
+  - **Binance Spot broker** (`execution/binance_spot_broker.py`): replaced Coinbase for crypto execution.
+    Fee: 0.10% vs Coinbase 0.40% — **4× cheaper per trade**. US geo-block handled via yfinance fallback.
+    Symbol normalization: `BTC-USDC` → `BTCUSDC`. Paper mode logs to SQLite (broker=`binance_spot_paper`).
+    Singleton: `get_binance_spot_broker()`. `BINANCE_SPOT_MAKER_FEE_PCT=0.001` in config.
+    `crypto_scanner.py` + `exit_monitor.py` both use Binance Spot for execution and fee math.
+  - **Haiku debate agents**: `CLAUDE_DEBATE_MODEL = claude-haiku-4-5-20251001` (15× cheaper than Sonnet).
+    Exit review (Tudor Jones / Soros / Simons) stays on Sonnet — only fast, cheap, high-volume debate calls downgraded.
+    Cost per debate: ~$0.001 (was ~$0.02). After-token cost logged via `log_api_cost()`.
+  - **True cost accounting**: `get_todays_fees()` now = exchange trade fees + Claude API costs combined.
+    `get_todays_trade_fees()` → exchange only. `get_todays_api_cost()` → Claude API only.
+    Dashboard hero, TODAY NET metric, and Fee Drag gauge all show exchange + API breakdown.
+  - **SUPER SCORE** (`learning/super_score.py`): unified 0-100 composite decision number.
+    Components: ML P(win) 25% · Bayesian signals 20% · Agent consensus 20% · Market context 20% · Microstructure 15%.
+    Labels: ABORT(<40) / WEAK(40-54) / MODEST(55-64) / NORMAL(65-74) / STRONG(75-84) / EXCEPTIONAL(85+).
+    Size multiplier: <40→0 (no trade) · 40-54→0.5× · 55-64→0.75× · 65-74→1.0× · 75-84→1.25× · 85+→1.5×.
+    Pre-debate gate in `crypto_scanner.py`: score < 40 = abort. Post-debate recompute with agent votes.
+    Decay exit in `exit_monitor.py`: entry_score ≥ 65 drops to ≤ 35 after 10+ min → auto-exit.
+    Stored per-trade in `trade_attribution.super_score`. Available at exit via `pos['super_score']`.
+  - **MAE/MFE tracking**: `update_low()` on every price update. `mae_pct`/`mfe_pct` computed at close
+    and stored in `trade_attribution`. Exit efficiency = realized_pnl / mfe_pct.
+  - **Exit type classification**: `_classify_exit_type(reason)` → stop_hit/target_hit/stagnant/time_exit/ai_exit/unknown.
+    Stored in `trade_attribution.exit_type`. Visible in Trade Quality panel distribution chart.
+  - **Trade Quality panel** (`dashboard/app.py` → `comp_trade_quality()`): 4-metric scorecard:
+    ENTRY TIMING (% trades where entry to first-move was positive), EXIT EFFICIENCY (realized/MFE),
+    THESIS HIT RATE (% exited at target or AI exit), SUPER SCORE AVG.
+    Exit type distribution line + open position health cards with MFE/MAE progress bars and status badges.
+  - **Liquidation feed** (`data/liquidation_feed.py`): Binance taker long/short ratio as liq_signal proxy.
+    US geo-restricted → neutral fallback. 10-min cache. Wired into `_helpers.py` market context.
+  - **Full pipeline backtest** (`backtesting/full_pipeline_backtest.py`): mirrors live 4-signal gate + ML model + fees + slippage.
+  - config.py: `BINANCE_SPOT_MAKER_FEE_PCT`, `CLAUDE_DEBATE_MODEL`, `BACKTEST_SLIPPAGE_PCT=0.001`.
 - v9.0 Sprint 2 (2026-03-28): Lane 3 — Prediction Markets built. All off by default (LANE3_ENABLED=false).
   - `data/polymarket_feed.py`: Gamma REST scanner — market discovery, classification, tradeability filter
   - `data/kalshi_feed.py`: Kalshi REST feed — CFTC-regulated, demo + live environments
@@ -360,6 +392,7 @@ algo_trading_final/
 │   ├── dynamic_weights.py        ← Live conviction weights (5-min cache, invalidates on close)
 │   ├── intelligence_bridge.py    ← Backtest → signal_stats pipeline (same table as live)
 │   ├── ml_signal.py              ← LightGBM gate: P(win) from 90d rolling trade_attribution; retrains every 50 closes
+│   ├── super_score.py            ← SUPER SCORE 0-100 composite (ML+signals+agents+context+micro); size multiplier bands
 │   ├── pm_calibrator.py          ← Lane 3: Platt scaling for LLM probability estimates (v9.0 Sprint 2)
 │   └── tax_tracker.py            ← Tax lot tracking: Section 1256 futures, short/long-term, YTD liability, harvesting (v5.2)
 │
@@ -376,7 +409,8 @@ algo_trading_final/
 │
 ├── execution/
 │   ├── alpaca_broker.py          ← Stocks (Alpaca paper API)
-│   ├── coinbase_broker.py        ← Crypto (Coinbase Advanced Trade)
+│   ├── coinbase_broker.py        ← Crypto price feed (Coinbase WebSocket; execution now Binance Spot)
+│   ├── binance_spot_broker.py    ← Crypto SPOT execution (0.10% fee; replaced Coinbase v9.0 Sprint 3)
 │   ├── binance_broker.py         ← Perp futures (Binance USD-M; replaced Bybit v9.0)
 │   ├── tradovate_broker.py       ← MES futures
 │   ├── prediction_market_base.py ← Abstract interface for prediction market brokers (v9.0 Sprint 2)
@@ -405,10 +439,11 @@ algo_trading_final/
 │   ├── test_risk_manager.py      ← halt rules, position limits, stop math
 │   └── test_broker_paper.py      ← Coinbase/Alpaca/Binance paper smoke tests
 │
-├── data/                         ← (new Sprint 2 additions)
+├── data/                         ← (new Sprint 2+3 additions)
 │   ├── polymarket_feed.py        ← Lane 3: Gamma REST scanner, market classification
 │   ├── kalshi_feed.py            ← Lane 3: Kalshi REST feed
-│   └── whale_tracker.py          ← Lane 3: smart money signal via CLOB trade history
+│   ├── whale_tracker.py          ← Lane 3: smart money signal via CLOB trade history
+│   └── liquidation_feed.py       ← Binance taker long/short ratio as liq_signal (geo-fallback neutral)
 │
 └── scheduler/
     ├── job_runner.py             ← Thin orchestrator (v9.0: 258L, was 1812L)
@@ -744,6 +779,10 @@ Motivation 5: "Nothing is given. Everything is earned."
          SHORT branch attribution fixed; LanceDB demoted to supplemental context
 - v8.0 (2026-03-26): 3-agent debate (Bardock/Vegeta/Krillin), ML signal gate (LightGBM),
          walk-forward OOS validation, funding rate wired into market_data, RBIPMS framework
+- v9.0 Sprint 3 (2026-03-28): Cost optimization + SUPER SCORE + Trade Quality panel —
+         Binance Spot execution (4× cheaper), Haiku debate agents (15× cheaper), true cost accounting,
+         SUPER SCORE composite (0-100), MAE/MFE tracking, exit type classification,
+         Trade Quality dashboard panel, liquidation feed, full-pipeline backtest
 - v9.0 (2026-03-26): Sprint 1 Foundation — MCP server (15 tools), risk decomposition (5 modules),
          Bybit→Binance migration, job_runner → 6-file decomposition (258L orchestrator),
          4 Claude agents, 5 slash commands, 3 test files, GitHub live

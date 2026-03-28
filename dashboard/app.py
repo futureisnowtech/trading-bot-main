@@ -1281,6 +1281,98 @@ def expander_notifications():
                 unsafe_allow_html=True,
             )
 
+def expander_lane3():
+    """Lane 3 — Prediction Markets panel (only shown when LANE3_ENABLED=true)."""
+    try:
+        from config import LANE3_ENABLED, POLYMARKET_ENABLED, KALSHI_ENABLED, POLYMARKET_PAPER, KALSHI_PAPER
+        if not LANE3_ENABLED:
+            return
+    except Exception:
+        return
+
+    with st.expander("LANE 3 — PREDICTION MARKETS"):
+        pm_tag = "PAPER" if POLYMARKET_PAPER else "LIVE"
+        kx_tag = "PAPER" if KALSHI_PAPER else "LIVE"
+        enabled = []
+        if POLYMARKET_ENABLED:
+            enabled.append(f"Polymarket ({pm_tag})")
+        if KALSHI_ENABLED:
+            enabled.append(f"Kalshi ({kx_tag})")
+        st.markdown(
+            f'<div style="font-size:13px;color:{TEXT2};margin-bottom:8px;">'
+            f'Active platforms: {", ".join(enabled) if enabled else "None configured"}</div>',
+            unsafe_allow_html=True,
+        )
+
+        # Open prediction market positions (from lane3 trades)
+        try:
+            import sqlite3
+            from config import DB_PATH, PAPER_TRADING
+            conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """SELECT ts, strategy, symbol, action, qty, price, notes
+                   FROM trades
+                   WHERE notes LIKE '%lane=lane3%' AND pnl_usd=0
+                   ORDER BY ts DESC LIMIT 20"""
+            ).fetchall()
+            conn.close()
+
+            if rows:
+                st.markdown(f'<div style="font-size:12px;color:{TEXT3};font-weight:600;margin-bottom:4px;">OPEN PREDICTIONS</div>', unsafe_allow_html=True)
+                for r in rows:
+                    notes = r["notes"] or ""
+                    side = "YES" if "pm_side=YES" in notes or "kx_side=YES" in notes else "NO"
+                    platform = "PM" if "polymarket" in r["strategy"] else "KX"
+                    st.markdown(
+                        f'<div style="font-family:monospace;font-size:11px;color:{TEXT2};'
+                        f'padding:2px 0;border-bottom:1px solid {BORDER};">'
+                        f'[{_fmt_ts(r["ts"])}] {platform} {side} {r["symbol"]} '
+                        f'${r["qty"]*r["price"]:.2f} @ {r["price"]:.3f}</div>',
+                        unsafe_allow_html=True,
+                    )
+            else:
+                st.markdown(f'<div style="font-size:12px;color:{TEXT3};">No open prediction market positions.</div>', unsafe_allow_html=True)
+
+            # Recent resolutions
+            resolved = conn.execute(
+                """SELECT ts, strategy, symbol, action, pnl_usd, notes
+                   FROM trades
+                   WHERE notes LIKE '%lane=lane3%' AND pnl_usd != 0
+                   ORDER BY ts DESC LIMIT 10"""
+            ).fetchall()
+            conn.close()
+            if resolved:
+                st.markdown(f'<div style="font-size:12px;color:{TEXT3};font-weight:600;margin-top:8px;margin-bottom:4px;">RECENT RESOLUTIONS</div>', unsafe_allow_html=True)
+                for r in resolved:
+                    pnl = r["pnl_usd"]
+                    clr = GREEN if pnl >= 0 else RED
+                    result = "WON" if pnl >= 0 else "LOST"
+                    st.markdown(
+                        f'<div style="font-family:monospace;font-size:11px;color:{clr};'
+                        f'padding:2px 0;border-bottom:1px solid {BORDER};">'
+                        f'[{_fmt_ts(r["ts"])}] {result} {r["symbol"]} P&L=${pnl:+.2f}</div>',
+                        unsafe_allow_html=True,
+                    )
+
+            # Calibration stats
+            try:
+                from learning.pm_calibrator import get_pm_calibration_stats
+                stats = get_pm_calibration_stats()
+                total = stats.get("total_records", 0)
+                st.markdown(
+                    f'<div style="font-size:11px;color:{TEXT3};margin-top:8px;">'
+                    f'Calibration: {total} resolved outcomes tracked '
+                    f'(Platt scaling activates after 30)</div>',
+                    unsafe_allow_html=True,
+                )
+            except Exception:
+                pass
+
+        except Exception as e:
+            st.markdown(f'<div style="color:{RED};font-size:12px;">Lane 3 data error: {e}</div>', unsafe_allow_html=True)
+
+
 def expander_controls():
     with st.expander("CONTROLS"):
         _info("Bot management. .env changes take effect on the next scan cycle.")
@@ -1343,6 +1435,7 @@ def main():
     comp_chat()
     st.markdown(f'<div style="height:24px;"></div>', unsafe_allow_html=True)
     expander_debates()
+    expander_lane3()
     expander_notifications()
     expander_controls()
 

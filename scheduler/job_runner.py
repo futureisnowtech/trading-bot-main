@@ -29,7 +29,8 @@ from config import (
     CRYPTO_SCAN_INTERVAL_SECONDS,
     FUTURES_SCAN_INTERVAL_SECONDS, MARKET_TIMEZONE,
     CRYPTO_ENABLED, FUTURES_ENABLED,
-    PERP_ENABLED,
+    PERP_ENABLED, LANE3_ENABLED,
+    LANE3_SCAN_INTERVAL_SECONDS,
     ANTHROPIC_API_KEY,
     WATCHDOG_INTERVAL_SECONDS,
     MAX_STRATEGY_LOSS_STREAK,
@@ -61,6 +62,15 @@ from scheduler.perp_scanner import run_perp_scan, _monitor_perp_exit
 from scheduler.mes_scanner import (
     run_mes_scan, run_mes_premarket, run_mes_opening_range,
 )
+if LANE3_ENABLED:
+    try:
+        from scheduler.lane3_scanner import run_prediction_market_scan
+    except Exception as _e:
+        import logging as _logging
+        _logging.getLogger(__name__).warning(f"[lane3] Import failed: {_e}")
+        run_prediction_market_scan = None
+else:
+    run_prediction_market_scan = None
 
 
 # ─── WATCHDOG ────────────────────────────────────────────────────────────────
@@ -149,6 +159,10 @@ def setup_schedules() -> None:
 
     if PERP_ENABLED:
         schedule.every(CRYPTO_SCAN_INTERVAL_SECONDS).seconds.do(run_perp_scan)
+
+    if LANE3_ENABLED and run_prediction_market_scan is not None:
+        schedule.every(LANE3_SCAN_INTERVAL_SECONDS).seconds.do(run_prediction_market_scan)
+        print(f"[scheduler] Lane 3 (Prediction Markets): {LANE3_SCAN_INTERVAL_SECONDS}s")
 
     # Session-open analysis triggers (24/7 — crypto never closes)
     schedule.every().day.at('20:00').do(lambda: run_session_open_analysis('ASIA'))

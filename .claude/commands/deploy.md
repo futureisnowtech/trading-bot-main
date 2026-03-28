@@ -81,9 +81,23 @@ Deployment summary:
 - First 5 system events from the new session
 - Dashboard URL: http://localhost:8501
 
+### 9. Lane 3 Status (if LANE3_ENABLED=true)
+
+If Lane 3 is configured, show prediction market status:
+```bash
+python3 -c "
+from config import LANE3_ENABLED, POLYMARKET_ENABLED, KALSHI_ENABLED, POLYMARKET_PAPER, KALSHI_PAPER
+print(f'Lane 3: {LANE3_ENABLED} | Polymarket: {POLYMARKET_ENABLED} (paper={POLYMARKET_PAPER}) | Kalshi: {KALSHI_ENABLED} (paper={KALSHI_PAPER})')
+"
+```
+
+Note: Lane 3 starts in paper mode by default (POLYMARKET_PAPER=true, KALSHI_PAPER=true).
+Polymarket live requires a Polygon crypto wallet. Kalshi live requires a verified Kalshi account.
+
 ## Safety Rules
 
 - NEVER deploy live without 7/7 readiness score
 - ALWAYS backup DB before starting
 - NEVER kill a running live-mode process without user confirmation
 - If deployment fails (process not found after 30s): show the last 20 lines of logs/bot.log
+- NEVER enable LANE3 live trading without separate confirmation from user (prediction markets are real money)

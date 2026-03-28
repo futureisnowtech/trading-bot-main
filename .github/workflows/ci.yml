@@ -61,6 +61,11 @@ jobs:
           EQUITY_ENABLED=false
           CRYPTO_ENABLED=true
           PERP_ENABLED=false
+          LANE3_ENABLED=false
+          POLYMARKET_ENABLED=false
+          KALSHI_ENABLED=false
+          POLYMARKET_PAPER=true
+          KALSHI_PAPER=true
           EOF
 
       - name: Lint with ruff

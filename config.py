@@ -206,9 +206,56 @@ TV_SIGNAL_BOOST_CONVICTION: int   = int(os.getenv('TV_SIGNAL_BOOST_CONVICTION', 
 TV_SIGNAL_MAX_AGE_SECONDS:  int   = int(os.getenv('TV_SIGNAL_MAX_AGE_SECONDS', '300'))  # ignore TV signals older than 5 min
 
 # ════════════════════════════════════════════════════════════════════
-# ALERTS — written to SQLite system_events, displayed on dashboard
-# (No email. Notifications panel in the dashboard shows everything.)
+# ALERTS
+# SQLite system_events: always active, displayed on dashboard.
+# Telegram: optional — fill TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID for phone alerts.
 # ════════════════════════════════════════════════════════════════════
+TELEGRAM_BOT_TOKEN: str = os.getenv('TELEGRAM_BOT_TOKEN', '')
+TELEGRAM_CHAT_ID:   str = os.getenv('TELEGRAM_CHAT_ID',   '')
+
+# ════════════════════════════════════════════════════════════════════
+# LANE 3 — PREDICTION MARKETS (Polymarket + Kalshi)
+# ════════════════════════════════════════════════════════════════════
+LANE3_ENABLED:      bool  = os.getenv('LANE3_ENABLED',      'false').lower() == 'true'
+POLYMARKET_ENABLED: bool  = os.getenv('POLYMARKET_ENABLED', 'false').lower() == 'true'
+KALSHI_ENABLED:     bool  = os.getenv('KALSHI_ENABLED',     'false').lower() == 'true'
+POLYMARKET_PAPER:   bool  = os.getenv('POLYMARKET_PAPER',   'true').lower()  == 'true'
+KALSHI_PAPER:       bool  = os.getenv('KALSHI_PAPER',        'true').lower()  == 'true'
+
+# Polymarket (Polygon CLOB — requires crypto wallet for live trading)
+POLYMARKET_PRIVATE_KEY:    str = os.getenv('POLYMARKET_PRIVATE_KEY',    '')
+POLYMARKET_API_KEY:        str = os.getenv('POLYMARKET_API_KEY',        '')
+POLYMARKET_API_SECRET:     str = os.getenv('POLYMARKET_API_SECRET',     '')
+POLYMARKET_API_PASSPHRASE: str = os.getenv('POLYMARKET_API_PASSPHRASE', '')
+POLYMARKET_CHAIN_ID:       int = int(os.getenv('POLYMARKET_CHAIN_ID',   '137'))  # Polygon mainnet
+
+# Kalshi (CFTC-regulated, USD-direct — demo.kalshi.co for paper)
+KALSHI_API_KEY:    str = os.getenv('KALSHI_API_KEY',    '')
+KALSHI_API_SECRET: str = os.getenv('KALSHI_API_SECRET', '')
+
+# Market selection filters
+PM_MIN_VOLUME_USD:  float = float(os.getenv('PM_MIN_VOLUME_USD',  '10000'))  # min $10k/day volume
+PM_MAX_POSITION_USD: float = float(os.getenv('PM_MAX_POSITION_USD', '25'))   # max $25 per trade
+PM_MIN_EDGE_PCT:     float = float(os.getenv('PM_MIN_EDGE_PCT',    '0.03'))  # need ≥3% edge vs market
+PM_MAX_POSITIONS:    int   = int(os.getenv('PM_MAX_POSITIONS',     '5'))     # max 5 open pred. market positions
+PM_MIN_DAYS:         float = float(os.getenv('PM_MIN_DAYS',        '1.0'))   # min days to expiry
+PM_MAX_DAYS:         float = float(os.getenv('PM_MAX_DAYS',        '90.0'))  # max days to expiry (avoid illiquid far-dated)
+PM_STOP_LOSS_FRACTION:   float = 0.50   # exit if price drops to 50% of entry (e.g. $0.60 → exit at $0.30)
+PM_TAKE_PROFIT_FRACTION: float = 0.60   # exit when 60% of potential gain captured
+LANE3_SCAN_INTERVAL_SECONDS: int = int(os.getenv('LANE3_SCAN_INTERVAL_SECONDS', '900'))  # 15 min
+
+# Multi-LLM ensemble weights (must sum to 1.0)
+# Weights are adapted by pm_calibrator.py based on per-model Brier scores
+ENSEMBLE_CLAUDE_WEIGHT: float = float(os.getenv('ENSEMBLE_CLAUDE_WEIGHT', '1.0'))   # start Claude-only
+ENSEMBLE_GPT_WEIGHT:    float = float(os.getenv('ENSEMBLE_GPT_WEIGHT',    '0.0'))   # add when OPENAI_API_KEY set
+ENSEMBLE_GEMINI_WEIGHT: float = float(os.getenv('ENSEMBLE_GEMINI_WEIGHT', '0.0'))   # add when GOOGLE_API_KEY set
+PM_ENSEMBLE_MIN_MODELS: int   = int(os.getenv('PM_ENSEMBLE_MIN_MODELS',   '1'))     # min models needed for forecast
+PM_LLM_TEMPERATURE:     float = float(os.getenv('PM_LLM_TEMPERATURE',     '0.3'))   # lower = more deterministic
+PM_LLM_MAX_TOKENS:      int   = int(os.getenv('PM_LLM_MAX_TOKENS',        '600'))
+
+# Optional additional LLM providers (add keys to enable)
+OPENAI_API_KEY: str = os.getenv('OPENAI_API_KEY', '')
+GOOGLE_API_KEY: str = os.getenv('GOOGLE_API_KEY', '')
 
 # ════════════════════════════════════════════════════════════════════
 # DATABASE & LOGGING

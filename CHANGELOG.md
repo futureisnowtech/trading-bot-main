@@ -1,5 +1,8 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
+## 2026-03-28
+- Sprint 2: Lane 3 Prediction Markets — Polymarket + Kalshi + ensemble forecaster + calibrator + whale tracker + Telegram alerts + dashboard panel
+
 ## 2026-03-27
 - Strategy expansion: VWAP reclaim (signal 5), fade-the-rally SHORT, range scalper, wire Kyle Lambda + Amihud — from 4 strategies to 7, fix MR independence bug
 

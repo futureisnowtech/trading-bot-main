@@ -52,6 +52,9 @@ def init_db() -> None:
     for migration in [
         "ALTER TABLE open_positions ADD COLUMN direction TEXT DEFAULT 'LONG'",
         "ALTER TABLE open_positions ADD COLUMN entry_reason TEXT DEFAULT ''",
+        # v9.0 Sprint 2: lane tag for 3-lane architecture (lane1=stocks, lane2=crypto, lane3=prediction)
+        "ALTER TABLE trades ADD COLUMN lane TEXT DEFAULT 'lane2'",
+        "ALTER TABLE open_positions ADD COLUMN lane TEXT DEFAULT 'lane2'",
     ]:
         try:
             cur.execute(migration)

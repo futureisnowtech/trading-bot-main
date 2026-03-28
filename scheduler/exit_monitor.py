@@ -63,7 +63,7 @@ def _execute_equity_exit(wb, rm, symbol, pos, price, reason, strategy, market_da
                     exit_ts=datetime.now(pytz.timezone(MARKET_TIMEZONE)).isoformat(),
                     exit_reason=reason,
                     market_data_at_entry=md,
-                    agent_votes=md.get('agent_votes', {}),
+                    agent_votes=pos.get('agent_votes', md.get('agent_votes', {})),
                     paper=PAPER_TRADING,
                     trade_ref=f"eq_{symbol}_{pos.get('ts_entry','')}",
                 )
@@ -118,7 +118,7 @@ def _execute_crypto_exit(cb, rm, pid, pos, price, reason, strategy, market_data=
                     exit_ts=datetime.now(pytz.timezone(MARKET_TIMEZONE)).isoformat(),
                     exit_reason=reason,
                     market_data_at_entry=md,
-                    agent_votes=md.get('agent_votes', {}),
+                    agent_votes=pos.get('agent_votes', md.get('agent_votes', {})),
                     paper=PAPER_TRADING,
                     trade_ref=f"cr_short_{pid}_{pos.get('ts_entry','')}",
                 )
@@ -165,7 +165,7 @@ def _execute_crypto_exit(cb, rm, pid, pos, price, reason, strategy, market_data=
                     exit_ts=datetime.now(pytz.timezone(MARKET_TIMEZONE)).isoformat(),
                     exit_reason=reason,
                     market_data_at_entry=md,
-                    agent_votes=md.get('agent_votes', {}),
+                    agent_votes=pos.get('agent_votes', md.get('agent_votes', {})),
                     paper=PAPER_TRADING,
                     trade_ref=f"cr_{pid}_{pos.get('ts_entry','')}",
                 )

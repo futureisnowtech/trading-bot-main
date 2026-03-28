@@ -134,10 +134,10 @@ def _monitor_perp_exit(bb, rm, symbol: str, pos: dict) -> None:
                                else entry_dt.replace(tzinfo=tz))).total_seconds() / 60)
             except Exception:
                 mins_in = 0
-            pnl_pct = abs(current_price - pos['entry']) / pos['entry']
-            if mins_in >= 240 and pnl_pct < 0.005:
+            pnl_pct = (current_price - pos['entry']) / pos['entry']
+            if mins_in >= 240 and (abs(pnl_pct) < 0.005 or pnl_pct < 0):
                 should_exit = True
-                reason = f"Perp time exit: {mins_in}m, flat ({pnl_pct:.2%}) — funding cost drain"
+                reason = f"Perp time exit: {mins_in}m, pnl={pnl_pct:.2%} — funding cost drain"
 
         if should_exit:
             from scheduler.exit_monitor import _execute_perp_exit

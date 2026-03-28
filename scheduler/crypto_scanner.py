@@ -423,7 +423,8 @@ def run_crypto_scan() -> None:
                         rm.register_position('crypto_macd_consensus', pid,
                                              risk_check.adjusted_size / price, price,
                                              final.stop_loss, final.take_profit,
-                                             direction='LONG', entry_reason=final.reasoning)
+                                             direction='LONG', entry_reason=final.reasoning,
+                                             agent_votes=debate_result.vote_breakdown)
 
                 elif final.action == 'SHORT':
                     # Coinbase spot doesn't support shorting — paper-log only.

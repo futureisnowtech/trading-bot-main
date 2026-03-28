@@ -248,7 +248,7 @@ class RiskManager:
     # ── Position management ───────────────────────────────────────────────────
 
     def register_position(self, strategy, symbol, qty, entry, stop, target,
-                          direction='LONG', entry_reason='') -> None:
+                          direction='LONG', entry_reason='', agent_votes=None) -> None:
         tz = pytz.timezone(MARKET_TIMEZONE)
         ts = datetime.now(tz).isoformat()
         pos = {
@@ -256,6 +256,7 @@ class RiskManager:
             'high_since_entry': entry, 'ts_entry': ts, 'direction': direction,
             'entry_reason': entry_reason[:200] if entry_reason else '',
             'strategy': strategy,
+            'agent_votes': agent_votes or {},
         }
         if 'equity' in strategy.lower() or 'futures' in strategy.lower():
             self._equity[symbol] = pos

@@ -236,6 +236,16 @@ def call_claude_structured(
         with urllib.request.urlopen(req, timeout=30) as resp:
             body = json.loads(resp.read().decode())
 
+        # Log API cost (Haiku pricing: $0.80/MTok in, $4.00/MTok out)
+        try:
+            _u = body.get('usage', {})
+            _in, _out = _u.get('input_tokens', 0), _u.get('output_tokens', 0)
+            _cost = (_in * 0.80 + _out * 4.00) / 1_000_000
+            from logging_db.trade_logger import log_api_cost
+            log_api_cost(f'debate_{call_type}', _in, _out, _cost)
+        except Exception:
+            pass
+
         for block in body.get("content", []):
             if block.get("type") == "tool_use":
                 return block.get("input", {})

@@ -25,10 +25,11 @@ from config import (
     CRYPTO_STOP_LOSS_PCT, CRYPTO_TAKE_PROFIT_PCT,
     FULL_DEBATE_AGENTS,
     CRYPTO_POSITION_SIZE_USD,
-    COINBASE_TAKER_FEE_PCT,
+    BINANCE_SPOT_MAKER_FEE_PCT,
 )
 from logging_db.trade_logger import (
-    get_todays_pnl, get_todays_fees, get_todays_signals,
+    get_todays_pnl, get_todays_fees, get_todays_trade_fees, get_todays_api_cost,
+    get_todays_signals,
     get_scan_feed, get_all_time_stats, get_recent_debates,
     get_monthly_api_cost, get_win_rate, get_recent_trades,
     get_recent_notifications,
@@ -640,7 +641,7 @@ def _build_ctx() -> str:
         f"Rules: never chase, never average down, stops sacred, FOMO is not a signal.\n\n"
         f"LIVE STATE ({_et()})\n"
         f"Mode: {'PAPER' if PAPER_TRADING else 'LIVE'} | Account: ${ACCOUNT_SIZE:,.0f}\n"
-        f"Today P&L: ${pnl:+.2f} | Fees: ${fees:.2f} | 14d WR: {wr14:.1%} | API/month: ${mo:.2f}\n"
+        f"Today P&L: ${pnl:+.2f} | Total cost: ${fees:.2f} (trade fees + API) | 14d WR: {wr14:.1%} | API/month: ${mo:.2f}\n"
         f"All-time: {stats.get('total',0)} trades | WR {stats.get('win_rate',0):.1%} | P&L ${stats.get('total_pnl',0):+.2f}\n"
         f"Halted: {risk.get('halted', False)}\n\n"
         f"POSITIONS:\n{pos_lines}\n\nRECENT TRADES:\n{trade_lines}\n\n"
@@ -700,16 +701,19 @@ def comp_hero():
     c1, c2 = st.columns([20, 1])
     with c2:
         _info(
-            "Today's net P&L = realized gross P&L minus all fees paid since midnight ET. "
-            "This is the scoreboard. Gold/green = profitable today. Red = in the hole. "
+            "Today's net P&L = realized gross P&L minus ALL costs since midnight ET: "
+            "exchange commissions (Binance spot 0.1%) AND Claude API costs. "
+            "This is the true scoreboard — every dollar this system costs is accounted for. "
             "Balance reflects your starting account plus all-time cumulative P&L."
         )
 
-    pnl   = get_todays_pnl(paper=PAPER_TRADING)
-    fees  = get_todays_fees(paper=PAPER_TRADING)
-    net   = pnl - fees
-    stats = get_all_time_stats(paper=PAPER_TRADING)
-    real_bal = ACCOUNT_SIZE + stats.get('total_pnl', 0)
+    pnl        = get_todays_pnl(paper=PAPER_TRADING)
+    trade_fees = get_todays_trade_fees(paper=PAPER_TRADING)
+    api_cost   = get_todays_api_cost()
+    fees       = trade_fees + api_cost
+    net        = pnl - fees
+    stats      = get_all_time_stats(paper=PAPER_TRADING)
+    real_bal   = ACCOUNT_SIZE + stats.get('total_pnl', 0)
 
     clr    = GREEN if net >= 0 else RED
     prefix = '+' if net >= 0 else ''
@@ -726,7 +730,9 @@ def comp_hero():
         f'&emsp;·&emsp;'
         f'Gross&nbsp;<strong style="color:{TEXT};">{prefix}${pnl:.2f}</strong>'
         f'&emsp;·&emsp;'
-        f'Fees&nbsp;<strong style="color:{TEXT2};">−${fees:.2f}</strong>'
+        f'Exchange&nbsp;fees&nbsp;<strong style="color:{TEXT2};">−${trade_fees:.2f}</strong>'
+        f'&emsp;·&emsp;'
+        f'API&nbsp;<strong style="color:{TEXT2};">−${api_cost:.3f}</strong>'
         f'&emsp;·&emsp;'
         f'All&#8209;time&nbsp;<strong style="color:{at_clr};">{at_sign}${stats.get("total_pnl",0):.2f}</strong>'
         f'</div>'
@@ -748,18 +754,20 @@ def comp_metrics():
         "<b>Edge Score</b>: composite of WR × profit factor × consistency (0–1). "
         "Above 0.70 = strong edge, size up. Below 0.30 = fading, size down automatically. "
         "<b>Daily Loss</b>: how much of the 4% hard limit you've burned today. "
-        "<b>API Cost</b>: Claude AI spend this calendar month."
+        "<b>API Cost</b>: Claude AI spend today (debate agents + exit reviews). Monthly total in sub-label."
     )
 
-    pnl   = get_todays_pnl(paper=PAPER_TRADING)
-    fees  = get_todays_fees(paper=PAPER_TRADING)
-    stats = get_all_time_stats(paper=PAPER_TRADING)
-    real_bal = ACCOUNT_SIZE + stats.get('total_pnl', 0)
-    wr20  = get_win_rate(lookback_days=7, paper=PAPER_TRADING)
-    mo    = get_monthly_api_cost()
-    heat  = get_heat_level(paper=PAPER_TRADING)
-    es    = get_edge_state('crypto_macd_consensus', paper=PAPER_TRADING)
-    net   = pnl - fees
+    pnl        = get_todays_pnl(paper=PAPER_TRADING)
+    trade_fees = get_todays_trade_fees(paper=PAPER_TRADING)
+    api_today  = get_todays_api_cost()
+    fees       = trade_fees + api_today
+    stats      = get_all_time_stats(paper=PAPER_TRADING)
+    real_bal   = ACCOUNT_SIZE + stats.get('total_pnl', 0)
+    wr20       = get_win_rate(lookback_days=7, paper=PAPER_TRADING)
+    mo         = get_monthly_api_cost()
+    heat       = get_heat_level(paper=PAPER_TRADING)
+    es         = get_edge_state('crypto_macd_consensus', paper=PAPER_TRADING)
+    net        = pnl - fees
     dp    = heat.get('pct_drawn', 0.0)
     edge  = es.get('edge_score', 0.5)
 
@@ -791,7 +799,7 @@ def comp_metrics():
                          f"start ${ACCOUNT_SIZE:,.0f}", bal_clr), unsafe_allow_html=True)
     with row1[1]:
         st.markdown(_met("TODAY NET", f"{net_sign}${net:.2f}",
-                         f"gross {net_sign}${pnl:.2f}", net_clr), unsafe_allow_html=True)
+                         f"gross {net_sign}${pnl:.2f} · exch −${trade_fees:.2f} · api −${api_today:.3f}", net_clr), unsafe_allow_html=True)
     with row1[2]:
         st.markdown(_met("ALL-TIME P&L", f"{at_sign}${stats.get('total_pnl',0):.2f}",
                          f"{stats.get('total',0)} trades", at_clr), unsafe_allow_html=True)
@@ -1012,7 +1020,7 @@ def comp_markets():
         return f'<span style="color:{TEXT3};">—</span>'
 
     PANELS = [
-        ('CRYPTO',      'crypto',   'Coinbase · 1-min · up to 5 positions', 'crypto_macd_consensus'),
+        ('CRYPTO',      'crypto',   'Binance · 1-min · up to 5 positions', 'crypto_macd_consensus'),
         ('MES FUTURES', 'futures',  'Tradovate · opening range breakout',   'futures_scalper'),
         ('PERP',        'perp',     'Binance USD-M · funding rate aware',   'crypto_perp'),
     ]
@@ -1065,7 +1073,7 @@ def comp_risk():
         "Daily loss bar: fills toward the 4% hard limit. At 100% all trading halts. "
         "Heat levels reduce position size before the hard halt: "
         "CAUTION = 75% size, WARNING = 50%, DANGER = 25%, HALT = 0%. "
-        "Fee drag: total fees today as % of account (limit 10%). "
+        "Fee drag: exchange commissions + Claude API costs today as % of account (limit 10%). "
         "Watchdog: time since last bot scan cycle (stale > 3 min = problem)."
     )
 
@@ -1415,8 +1423,8 @@ def expander_controls():
         with c5:
             st.metric("Max risk/trade", f"{MAX_RISK_PER_TRADE_PCT:.1%}",
                       help="Fraction of account risked per trade")
-            st.metric("Taker fee", f"{COINBASE_TAKER_FEE_PCT:.3%}",
-                      help="Coinbase taker fee used in P&L math")
+            st.metric("Exchange fee", f"{BINANCE_SPOT_MAKER_FEE_PCT:.3%}",
+                      help="Binance spot maker fee (0.10%) — applied on both entry and exit")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

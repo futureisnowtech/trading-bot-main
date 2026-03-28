@@ -307,11 +307,39 @@ def get_todays_pnl(paper=True) -> float:
 
 
 def get_todays_fees(paper=True) -> float:
+    """Returns total cost today: trading fees + Claude API costs."""
     today = datetime.now(pytz.timezone(MARKET_TIMEZONE)).strftime('%Y-%m-%d')
     conn = _conn()
     cur = conn.cursor()
     cur.execute("SELECT COALESCE(SUM(fee_usd),0) FROM trades WHERE ts LIKE ? AND paper=?",
                 (f'{today}%', int(paper)))
+    trade_fees = float(cur.fetchone()[0])
+    cur.execute("SELECT COALESCE(SUM(cost_usd),0) FROM api_costs WHERE ts LIKE ?",
+                (f'{today}%',))
+    api_fees = float(cur.fetchone()[0])
+    conn.close()
+    return trade_fees + api_fees
+
+
+def get_todays_trade_fees(paper=True) -> float:
+    """Trading exchange fees only (excludes API costs)."""
+    today = datetime.now(pytz.timezone(MARKET_TIMEZONE)).strftime('%Y-%m-%d')
+    conn = _conn()
+    cur = conn.cursor()
+    cur.execute("SELECT COALESCE(SUM(fee_usd),0) FROM trades WHERE ts LIKE ? AND paper=?",
+                (f'{today}%', int(paper)))
+    val = cur.fetchone()[0]
+    conn.close()
+    return float(val)
+
+
+def get_todays_api_cost() -> float:
+    """Claude API cost today only."""
+    today = datetime.now(pytz.timezone(MARKET_TIMEZONE)).strftime('%Y-%m-%d')
+    conn = _conn()
+    cur = conn.cursor()
+    cur.execute("SELECT COALESCE(SUM(cost_usd),0) FROM api_costs WHERE ts LIKE ?",
+                (f'{today}%',))
     val = cur.fetchone()[0]
     conn.close()
     return float(val)

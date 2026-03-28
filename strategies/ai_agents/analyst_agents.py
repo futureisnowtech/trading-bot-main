@@ -21,7 +21,7 @@ import urllib.error
 from typing import Optional
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from config import ANTHROPIC_API_KEY, CLAUDE_MODEL, DEBATE_MAX_TOKENS
+from config import ANTHROPIC_API_KEY, CLAUDE_MODEL, CLAUDE_DEBATE_MODEL, DEBATE_MAX_TOKENS
 
 # ── Agent definitions ──────────────────────────────────────────────────────────
 AGENTS = {
@@ -208,7 +208,7 @@ def call_claude_structured(
     )
 
     payload = {
-        "model":      CLAUDE_MODEL,
+        "model":      CLAUDE_DEBATE_MODEL,
         "max_tokens": max_tokens,
         "system":     system_content,
         "messages":   [{"role": "user", "content": user_prompt}],

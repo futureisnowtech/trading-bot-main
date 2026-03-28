@@ -89,6 +89,7 @@ ANTHROPIC_API_KEY: str = os.getenv('ANTHROPIC_API_KEY', '')
 CRYPTOPANIC_API_KEY: str = os.getenv('CRYPTOPANIC_API_KEY', '')    # Free tier at cryptopanic.com/developers/api/
 CLAUDE_MODEL: str = 'claude-sonnet-4-6'                      # Always latest
 CLAUDE_MODEL_EXTENDED: str = 'claude-sonnet-4-6'             # For exit extended thinking
+CLAUDE_DEBATE_MODEL: str = os.getenv('CLAUDE_DEBATE_MODEL', 'claude-haiku-4-5-20251001')  # Debate agents (cheap)
 DEBATE_MAX_TOKENS: int = 700                                  # Raised from 300 — agents need room to reason deeply
 EXIT_REVIEW_MAX_TOKENS: int = 1500                            # Raised from 800 — exit reasoning is the most critical decision
 MODERATOR_MAX_TOKENS: int = 900                               # CIO synthesis
@@ -148,6 +149,7 @@ PERP_STOP_PCT:           float = float(os.getenv('PERP_STOP_PCT', '0.008'))     
 PERP_TAKE_PROFIT_PCT:    float = float(os.getenv('PERP_TAKE_PROFIT_PCT', '0.016'))   # was 0.03, cut 50%, maintains 2:1
 BINANCE_TAKER_FEE_PCT:   float = 0.00040   # 0.040% taker (USD-M futures standard tier)
 BINANCE_MAKER_FEE_PCT:   float = 0.00020   # 0.020% maker
+BINANCE_SPOT_MAKER_FEE_PCT: float = float(os.getenv('BINANCE_SPOT_MAKER_FEE_PCT', '0.001'))  # 0.10% spot maker (4x cheaper than Coinbase 0.40%)
 
 # ── Mean-reversion strategy (ranging / volatile regimes) ─────────────────────
 MEAN_REVERSION_ENABLED:   bool  = os.getenv('MEAN_REVERSION_ENABLED', 'true').lower() == 'true'

@@ -13,7 +13,7 @@ import pytz
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import (
-    PAPER_TRADING, MARKET_TIMEZONE, COINBASE_MAKER_FEE_PCT,
+    PAPER_TRADING, MARKET_TIMEZONE, BINANCE_SPOT_MAKER_FEE_PCT,
     FLAT_POSITION_THRESHOLD_PCT, EQUITY_MAX_HOLD_HOURS, CRYPTO_MAX_HOLD_HOURS,
     BINANCE_TAKER_FEE_PCT,
 )
@@ -24,7 +24,7 @@ from risk.risk_manager import get_risk_manager
 # Equity removed in v5.0 — stub to prevent NameError in legacy equity exit paths
 def get_webull_broker():
     return None
-from execution.coinbase_broker import get_coinbase_broker
+from execution.binance_spot_broker import get_binance_spot_broker
 from logging_db.trade_logger import log_event
 from memory.trade_memory import store_trade_experience
 from scheduler._helpers import (
@@ -119,9 +119,9 @@ def _execute_crypto_exit(cb, rm, pid, pos, price, reason, strategy, market_data=
             log_event('INFO', 'exit_monitor',
                       f"[crypto] {pid} SHORT loss exit P&L=${pnl:+.2f}")
         from logging_db.trade_logger import log_trade
-        log_trade(strategy, 'coinbase', pid, 'BUY', 'LIMIT',
+        log_trade(strategy, 'binance_spot', pid, 'BUY', 'LIMIT',
                   pos['qty'], price,
-                  fee_usd=price * pos['qty'] * COINBASE_MAKER_FEE_PCT,
+                  fee_usd=price * pos['qty'] * BINANCE_SPOT_MAKER_FEE_PCT,
                   pnl_usd=pnl, paper=PAPER_TRADING,
                   notes=f'SHORT exit | {reason[:100]}')
         rm.close_position(strategy, pid)
@@ -133,7 +133,7 @@ def _execute_crypto_exit(cb, rm, pid, pos, price, reason, strategy, market_data=
                                regime=md.get('regime', 'unknown'))
         if _LEARNING_AVAILABLE:
             try:
-                fee_est_short = price * pos['qty'] * (COINBASE_MAKER_FEE_PCT + 0.006)
+                fee_est_short = price * pos['qty'] * BINANCE_SPOT_MAKER_FEE_PCT
                 _s_entry = pos['entry']
                 _s_high  = pos.get('high_since_entry', _s_entry)
                 _s_low   = pos.get('low_since_entry',  _s_entry)
@@ -176,7 +176,7 @@ def _execute_crypto_exit(cb, rm, pid, pos, price, reason, strategy, market_data=
         if pnl < 0:
             log_event('INFO', 'exit_monitor',
                       f"[crypto] {pid} loss exit P&L=${pnl:+.2f}")
-        fee_est = price * pos['qty'] * (COINBASE_MAKER_FEE_PCT + 0.006)
+        fee_est = price * pos['qty'] * BINANCE_SPOT_MAKER_FEE_PCT
         if abs(pnl) < fee_est * 0.5:
             log_event('WARNING', 'exit_monitor',
                       f"[crypto] {pid} near-zero exit: P&L=${pnl:+.4f} vs fee~${fee_est:.4f} — churn trade")
@@ -231,7 +231,7 @@ def monitor_exits_with_ai(engine) -> None:
     rm = get_risk_manager()
     all_pos = rm.get_all_positions()
     wb = get_webull_broker()
-    cb = get_coinbase_broker()
+    cb = get_binance_spot_broker()
 
     for symbol, pos in list(all_pos.get('equity', {}).items()):
         try:

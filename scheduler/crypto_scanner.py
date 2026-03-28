@@ -16,7 +16,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import (
     CRYPTO_PAIRS, PAPER_TRADING, ACCOUNT_SIZE, MARKET_TIMEZONE,
     CRYPTO_CANDLE_GRANULARITY, CRYPTO_ENABLED,
-    COINBASE_MAKER_FEE_PCT, CRYPTO_POSITION_SIZE_USD,
+    BINANCE_SPOT_MAKER_FEE_PCT, CRYPTO_POSITION_SIZE_USD,
     MAX_STRATEGY_LOSS_STREAK,
     MEAN_REVERSION_ENABLED, MEAN_REVERSION_RSI_ENTRY, MEAN_REVERSION_ADX_MAX,
     FADE_ENABLED, RANGE_SCALPER_ENABLED,
@@ -25,7 +25,7 @@ from config import (
 from data.coinbase_feed import get_candles
 from data.indicators import add_all_indicators
 from risk.risk_manager import get_risk_manager
-from execution.coinbase_broker import get_coinbase_broker
+from execution.binance_spot_broker import get_binance_spot_broker
 from logging_db.trade_logger import (
     log_event, log_signal,
     get_todays_pnl, get_todays_trades, get_all_time_stats,
@@ -61,7 +61,7 @@ def run_crypto_scan() -> None:
         return
 
     engine = _debate_available()
-    cb = get_coinbase_broker()
+    cb = get_binance_spot_broker()
 
     # Exit monitor: runs here when EQUITY_ENABLED=false (otherwise equity_scanner calls it)
     monitor_exits_with_ai(engine)
@@ -453,8 +453,8 @@ def run_crypto_scan() -> None:
                         continue
                     qty = risk_check.adjusted_size / price
                     from logging_db.trade_logger import log_trade
-                    log_trade('crypto_macd_consensus', 'coinbase_paper_short', pid, 'SELL', 'LIMIT',
-                              qty, price, fee_usd=price * qty * COINBASE_MAKER_FEE_PCT,
+                    log_trade('crypto_macd_consensus', 'binance_spot_paper_short', pid, 'SELL', 'LIMIT',
+                              qty, price, fee_usd=price * qty * BINANCE_SPOT_MAKER_FEE_PCT,
                               paper=PAPER_TRADING, notes=f'SHORT entry (paper only) | {final.reasoning[:100]}')
                     rm.register_position('crypto_macd_consensus', pid, qty, price,
                                          final.stop_loss, final.take_profit,
@@ -559,9 +559,9 @@ def run_crypto_scan() -> None:
                             else:
                                 qty = _rc.adjusted_size / price2
                                 from logging_db.trade_logger import log_trade
-                                log_trade('crypto_fade', 'coinbase_paper_short', pid, 'SELL', 'LIMIT',
+                                log_trade('crypto_fade', 'binance_spot_paper_short', pid, 'SELL', 'LIMIT',
                                           qty, price2,
-                                          fee_usd=price2 * qty * COINBASE_MAKER_FEE_PCT,
+                                          fee_usd=price2 * qty * BINANCE_SPOT_MAKER_FEE_PCT,
                                           paper=PAPER_TRADING,
                                           notes=(f'SHORT fade | stop=${fade_sig.stop_loss:.4f} | '
                                                  f'{fade_sig.reason[:100]}'))

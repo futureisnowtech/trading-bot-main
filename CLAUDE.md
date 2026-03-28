@@ -24,12 +24,27 @@ A fully autonomous AI-powered trading system that:
 
 ## Owner Profile
 - Mac user (MacBook Air 2020, Python 3.14 at /Library/Frameworks/Python.framework/Versions/3.14/bin/python3)
-- Starting account: $500 (equity Webull, crypto Coinbase, futures Tradovate)
+- Paper account: $5,000 (ACCOUNT_SIZE=5000 in .env — sized to avoid position-size constraints during paper phase)
 - Relatively technical but wants zero day-to-day intervention
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
 
-## Current Version: v9.0
+## Current Version: v9.0 (Sprint 2 complete)
+- v9.0 Sprint 2 (2026-03-28): Lane 3 — Prediction Markets built. All off by default (LANE3_ENABLED=false).
+  - `data/polymarket_feed.py`: Gamma REST scanner — market discovery, classification, tradeability filter
+  - `data/kalshi_feed.py`: Kalshi REST feed — CFTC-regulated, demo + live environments
+  - `data/whale_tracker.py`: smart money signal via CLOB trade history (±8% prob boost)
+  - `execution/prediction_market_base.py`: abstract broker interface (Polymarket + Kalshi interchangeable)
+  - `execution/polymarket_broker.py`: CLOB broker — paper logs to SQLite, live uses py-clob-client
+  - `execution/kalshi_broker.py`: REST broker — handles settlement resolution + P&L
+  - `strategies/ai_agents/ensemble_forecaster.py`: multi-LLM forecaster — Claude-first, +GPT-4o/Gemini optional
+  - `learning/pm_calibrator.py`: Platt scaling calibrator (SQLite-backed, activates after 30 resolved markets)
+  - `alerts/alert_dispatcher.py`: Telegram + SQLite dual-channel alerts (same public API as telegram_alert.py)
+  - `scheduler/lane3_scanner.py`: 15-min scan loop — discover → forecast → calibrate → whale → edge → trade
+  - config.py: LANE3_*, PM_*, ENSEMBLE_*, TELEGRAM_*, OPENAI_API_KEY, GOOGLE_API_KEY
+  - trade_logger.py: lane column migration (lane1=stocks, lane2=crypto, lane3=prediction)
+  - dashboard/app.py: expander_lane3() panel — open predictions, resolutions, calibration stats
+  - To activate: set LANE3_ENABLED=true, POLYMARKET_ENABLED=true in .env (paper, no wallet needed)
 - v9.0 (2026-03-26): Sprint 1 — Foundation overhaul: MCP server, risk decomposition, Binance migration, job_runner split
   - **MCP server** (`mcp_server/server.py`): 15 FastMCP tools expose full bot state over MCP protocol.
     Tools: get_positions, get_open_trades, get_recent_trades, close_position, get_signal_stats,
@@ -345,6 +360,7 @@ algo_trading_final/
 │   ├── dynamic_weights.py        ← Live conviction weights (5-min cache, invalidates on close)
 │   ├── intelligence_bridge.py    ← Backtest → signal_stats pipeline (same table as live)
 │   ├── ml_signal.py              ← LightGBM gate: P(win) from 90d rolling trade_attribution; retrains every 50 closes
+│   ├── pm_calibrator.py          ← Lane 3: Platt scaling for LLM probability estimates (v9.0 Sprint 2)
 │   └── tax_tracker.py            ← Tax lot tracking: Section 1256 futures, short/long-term, YTD liability, harvesting (v5.2)
 │
 ├── memory/
@@ -362,7 +378,10 @@ algo_trading_final/
 │   ├── alpaca_broker.py          ← Stocks (Alpaca paper API)
 │   ├── coinbase_broker.py        ← Crypto (Coinbase Advanced Trade)
 │   ├── binance_broker.py         ← Perp futures (Binance USD-M; replaced Bybit v9.0)
-│   └── tradovate_broker.py       ← MES futures
+│   ├── tradovate_broker.py       ← MES futures
+│   ├── prediction_market_base.py ← Abstract interface for prediction market brokers (v9.0 Sprint 2)
+│   ├── polymarket_broker.py      ← Lane 3: Polymarket CLOB paper/live (v9.0 Sprint 2)
+│   └── kalshi_broker.py          ← Lane 3: Kalshi REST paper/live (v9.0 Sprint 2)
 │
 ├── backtesting/
 │   ├── backtest_engine.py        ← run_with_intelligence() — full pipeline: run→validate→archive
@@ -372,7 +391,8 @@ algo_trading_final/
 │   └── trade_logger.py           ← SQLite trades.db (WAL mode) + CSV + positions
 │
 ├── alerts/
-│   └── telegram_alert.py         ← Gmail SMTP alerts (named telegram but uses email)
+│   ├── telegram_alert.py         ← SQLite-only notifier (original, still used by job_runner)
+│   └── alert_dispatcher.py       ← Telegram Bot API + SQLite dual-channel (v9.0 Sprint 2)
 │
 ├── dashboard/
 │   └── app.py                    ← 4-view dashboard: TheKing/Saiyan/FilmRoom/Ring
@@ -385,8 +405,14 @@ algo_trading_final/
 │   ├── test_risk_manager.py      ← halt rules, position limits, stop math
 │   └── test_broker_paper.py      ← Coinbase/Alpaca/Binance paper smoke tests
 │
+├── data/                         ← (new Sprint 2 additions)
+│   ├── polymarket_feed.py        ← Lane 3: Gamma REST scanner, market classification
+│   ├── kalshi_feed.py            ← Lane 3: Kalshi REST feed
+│   └── whale_tracker.py          ← Lane 3: smart money signal via CLOB trade history
+│
 └── scheduler/
     ├── job_runner.py             ← Thin orchestrator (v9.0: 258L, was 1812L)
+    ├── lane3_scanner.py          ← Lane 3: 15-min predict market scan (v9.0 Sprint 2)
     ├── _helpers.py               ← Shared state: flags, helper fns, strategy singletons
     ├── exit_monitor.py           ← AI exit management + attribution
     ├── equity_scanner.py         ← Equity discovery → debate → execute
@@ -480,7 +506,7 @@ into `signal_stats`, pre-populates Bayesian priors so Day 1 is evidence-backed, 
 - Crypto stop: **1.5%** | take profit: **4.5%** [was 3%/9%] — maintains 3:1 R:R
 - Equity stop: **2.5%** | take profit: **7.5%** [was 5%/15%] — maintains 3:1 R:R
 - Position sizes: crypto **$250**, equity **$250** [was $500/$500]
-- Fees > **10%** of account/day → halt crypto bot ($50 on $500)
+- Fees > **10%** of account/day → halt crypto bot ($500 on $5,000)
 - Kelly sizing activates after **15** trades
 - Losing streak size clamp (50%) triggers after **5** consecutive losses
 - Circuit breaker: **4** consecutive strategy losses → pause [was 8]
@@ -726,7 +752,7 @@ Motivation 5: "Nothing is given. Everything is earned."
 - Repository: `futureisnowtech/trading-bot-main` (private)
 - Active branch: `feature/agent-overhaul`
 - Push: `git push origin feature/agent-overhaul` (SSH configured, no GitHub Desktop needed)
-- Sprint plan: `docs/INTEGRATION_PLAN.md` (Sprint 1 done, Sprint 2 = prediction markets)
+- Sprint plan: `docs/INTEGRATION_PLAN.md` (Sprints 1+2 done, Sprint 3 = Lane 1 Options)
 
 ## Claude's Standing Instructions
 When making any change to this project:

@@ -296,6 +296,9 @@ def run_crypto_scan() -> None:
                         log_event('INFO', 'scan_feed',
                                   f"[crypto] {pid} 🧠 ML P(win)={_p_win:.1%} < {ML_SIGNAL_MIN_PROB:.0%} — skip debate")
                         continue
+                    elif _ml_conf != 'no_model':
+                        log_event('INFO', 'scan_feed',
+                                  f"[crypto] {pid} 🧠 ML P(win)={_p_win:.1%} ≥ {ML_SIGNAL_MIN_PROB:.0%} — gate passed")
                 except Exception:
                     pass
 
@@ -424,7 +427,8 @@ def run_crypto_scan() -> None:
                                              risk_check.adjusted_size / price, price,
                                              final.stop_loss, final.take_profit,
                                              direction='LONG', entry_reason=final.reasoning,
-                                             agent_votes=debate_result.vote_breakdown)
+                                             agent_votes=debate_result.vote_breakdown,
+                                             ml_p_win=market_data.get('ml_p_win', 0))
 
                 elif final.action == 'SHORT':
                     # Coinbase spot doesn't support shorting — paper-log only.

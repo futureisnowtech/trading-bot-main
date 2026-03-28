@@ -30,6 +30,7 @@ from typing import Optional, Tuple
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import DB_PATH
+from logging_db.trade_logger import log_event
 
 RETRAIN_INTERVAL = 50      # retrain after every N new trade closes
 ML_MIN_TRAIN_SAMPLES = 30  # don't train if fewer than this many labeled trades
@@ -175,8 +176,21 @@ def train() -> bool:
         _last_trade_count = _get_trade_count()
         _last_retrain_ts = time.time()
         win_rate = y.mean()
-        print(f"[ml_signal] ✅ trained on {len(X)} trades | WR={win_rate:.1%} | "
+        print(f"[ml_signal] trained on {len(X)} trades | WR={win_rate:.1%} | "
               f"model={type(clf).__name__}")
+
+        # Log feature importances after fit
+        importances = getattr(clf, 'feature_importances_', None)
+        if importances is not None:
+            all_cols = SIGNAL_FEATURES + ['regime_encoded']
+            ranked = sorted(zip(all_cols, importances), key=lambda x: x[1], reverse=True)
+            top5 = [(name, round(score, 4)) for name, score in ranked[:5]]
+            print(f"[ml_signal] Top features: {top5}")
+            try:
+                log_event('INFO', 'ml_signal', f"Top features: {top5}")
+            except Exception:
+                pass  # non-fatal — DB may not be initialised yet
+
         return True
     except Exception as e:
         print(f"[ml_signal] train error: {e}")

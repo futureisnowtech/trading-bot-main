@@ -86,6 +86,7 @@ class RiskManager:
                     'qty': pos['qty'], 'entry': pos['entry'],
                     'stop': pos['stop'], 'target': pos['target'],
                     'high_since_entry': pos['high_since_entry'],
+                    'low_since_entry': pos.get('low_since_entry', pos['entry']),
                     'ts_entry': ts_e,
                     'direction': pos.get('direction', 'LONG'),
                     'entry_reason': pos.get('entry_reason', ''),
@@ -248,15 +249,18 @@ class RiskManager:
     # ── Position management ───────────────────────────────────────────────────
 
     def register_position(self, strategy, symbol, qty, entry, stop, target,
-                          direction='LONG', entry_reason='', agent_votes=None) -> None:
+                          direction='LONG', entry_reason='', agent_votes=None,
+                          ml_p_win: float = 0.0) -> None:
         tz = pytz.timezone(MARKET_TIMEZONE)
         ts = datetime.now(tz).isoformat()
         pos = {
             'qty': qty, 'entry': entry, 'stop': stop, 'target': target,
-            'high_since_entry': entry, 'ts_entry': ts, 'direction': direction,
+            'high_since_entry': entry, 'low_since_entry': entry,
+            'ts_entry': ts, 'direction': direction,
             'entry_reason': entry_reason[:200] if entry_reason else '',
             'strategy': strategy,
             'agent_votes': agent_votes or {},
+            'ml_p_win': float(ml_p_win or 0),
         }
         if 'equity' in strategy.lower() or 'futures' in strategy.lower():
             self._equity[symbol] = pos
@@ -296,6 +300,20 @@ class RiskManager:
                                  new_extreme, d[symbol]['ts_entry'], PAPER_TRADING,
                                  direction=direction,
                                  entry_reason=d[symbol].get('entry_reason', ''))
+
+    def update_low(self, strategy, symbol, price) -> None:
+        """Track max adverse excursion (lowest price seen for LONG, highest for SHORT)."""
+        if 'equity' in strategy.lower() or 'futures' in strategy.lower():
+            d = self._equity
+        elif 'perp' in strategy.lower():
+            d = self._perp
+        else:
+            d = self._crypto
+        if symbol in d:
+            direction = d[symbol].get('direction', 'LONG')
+            old_low = d[symbol].get('low_since_entry', price)
+            new_low = min(old_low, price) if direction == 'LONG' else max(old_low, price)
+            d[symbol]['low_since_entry'] = new_low
 
     def get_position(self, strategy, symbol) -> Optional[dict]:
         if 'equity' in strategy.lower() or 'futures' in strategy.lower():

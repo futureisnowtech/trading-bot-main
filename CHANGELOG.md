@@ -1,6 +1,24 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-03-28
+- generate_daily_summary: add fee-ratio alert (>2x) and backtest-vs-live WR divergence alert (>10pp) to daily markdown summaries
+
+## 2026-03-28
+- Add backtesting/full_pipeline_backtest.py: full-pipeline backtest mirroring production 4-signal gate + ML gate with real fees and slippage
+
+## 2026-03-28
+- Add data/liquidation_feed.py (Binance L/S ratio, 10-min cache, fail-open) + inject liq_signal/liq_avoid_long/liq_long_ratio into _build_market_data() in scheduler/_helpers.py
+
+## 2026-03-28
+- Add scripts/inspect_ml_model.py + wire feature importances into learning/ml_signal.py
+
+## 2026-03-28
+- Slippage: wire BACKTEST_SLIPPAGE_PCT from .env into config.py (0.001 default) and as default for all 7 public slippage= params in backtest_engine.py
+
+## 2026-03-28
+- Add scripts/backfill_agent_stats.py: reconstructs agent_stats from debate_results x trades join
+
+## 2026-03-28
 - Sprint 2: Lane 3 Prediction Markets — Polymarket + Kalshi + ensemble forecaster + calibrator + whale tracker + Telegram alerts + dashboard panel
 
 ## 2026-03-27

@@ -142,6 +142,79 @@ def query_agent_stats(conn):
         return []
 
 
+def compute_fee_ratio_alert(ta, conn):
+    """
+    Return an alert string if daily fees exceed 2x gross P&L, else None.
+    Also logs a WARNING to system_events. Defensive — never raises.
+    """
+    try:
+        daily_fees = ta.get('total_fees', 0.0) or 0.0
+        daily_gross_pnl = ta.get('total_pnl', 0.0) or 0.0
+        ratio = daily_fees / max(abs(daily_gross_pnl), 0.01)
+        if ratio > 2.0:
+            msg = (
+                f"Fee ratio {ratio:.1f}x — fees ${daily_fees:.2f} vs "
+                f"gross P&L ${daily_gross_pnl:.2f}"
+            )
+            try:
+                from logging_db.trade_logger import log_event
+                log_event('WARNING', 'daily_summary', msg)
+            except Exception:
+                pass
+            return (
+                f"⚠️ FEE ALERT: Fees (${daily_fees:.2f}) are {ratio:.1f}× gross P&L "
+                f"— review position sizing or reduce trade frequency"
+            )
+    except Exception:
+        pass
+    return None
+
+
+def compute_divergence_alert(conn):
+    """
+    Return an alert string if live win rate diverges from backtest win rate by >10pp, else None.
+    Also logs a WARNING to system_events. Defensive — never raises.
+    """
+    try:
+        if conn is None:
+            return None
+
+        # Live win rate: average bayesian_wr from signal_stats where source='live'
+        live_row = conn.execute(
+            "SELECT AVG(win_rate) as avg_wr FROM signal_stats WHERE source='live'"
+        ).fetchone()
+        if live_row is None or live_row[0] is None:
+            return None
+        live_wr = float(live_row[0])
+
+        # Most recent backtest win rate from backtest_results
+        bt_row = conn.execute(
+            "SELECT win_rate FROM backtest_results ORDER BY ts DESC LIMIT 1"
+        ).fetchone()
+        if bt_row is None or bt_row[0] is None:
+            return None
+        backtest_wr = float(bt_row[0])
+
+        gap = abs(live_wr - backtest_wr)
+        if gap > 0.10:
+            msg = (
+                f"Live WR {live_wr:.0%} vs backtest WR {backtest_wr:.0%} — "
+                f"{gap:.0%} gap exceeds 10pp threshold"
+            )
+            try:
+                from logging_db.trade_logger import log_event
+                log_event('WARNING', 'daily_summary', msg)
+            except Exception:
+                pass
+            return (
+                f"⚠️ DIVERGENCE ALERT: Live WR {live_wr:.0%} vs backtest WR "
+                f"{backtest_wr:.0%} — {gap:.0%} gap exceeds threshold"
+            )
+    except Exception:
+        pass
+    return None
+
+
 # ── Analysis ──────────────────────────────────────────────────────────────────
 
 def analyze_trades(trades):
@@ -358,7 +431,7 @@ def _get_tax_snapshot() -> str:
 
 def write_daily_summary(day: date, ta, sa, da, events, open_positions,
                         attribution_rows=None, signal_leaderboard=None,
-                        agent_stats=None, no_db=False):
+                        agent_stats=None, no_db=False, system_alerts=None):
     SUMMARIES.mkdir(parents=True, exist_ok=True)
     out_path = SUMMARIES / f"{day}.md"
 
@@ -433,6 +506,13 @@ def write_daily_summary(day: date, ta, sa, da, events, open_positions,
     fee_ok = "YES" if ta['total_fees'] < 40 else ("WARN > $40" if ta['total_fees'] < 50 else "BREACHED $50 LIMIT")
 
     db_note = "\n> **WARNING**: Database not found — this is a template with no real data.\n" if no_db else ""
+
+    # Build system alerts block (fee ratio + divergence)
+    active_alerts = [a for a in (system_alerts or []) if a]
+    if active_alerts:
+        alerts_section = "\n".join(f"- {a}" for a in active_alerts)
+    else:
+        alerts_section = "- No alerts triggered today"
 
     signal_intel_section = build_signal_intelligence_section(
         attribution_rows or [], signal_leaderboard or [], agent_stats or []
@@ -524,6 +604,12 @@ What was directly confirmed (trades executed, DB rows present):
 
 ---
 
+## SYSTEM ALERTS
+
+{alerts_section}
+
+---
+
 ## SETUPS THAT MADE MONEY AFTER FEES
 
 {chr(10).join(f"- {t['symbol']}: {_usd(t['pnl_usd'])} ({t['strategy']}) @ {t['ts'][:16]}" for t in ([ta['best_trade']] if ta['best_trade'] and (ta['best_trade']['pnl_usd'] or 0) > 0 else [])) or '- None confirmed today'}
@@ -601,6 +687,8 @@ def main():
         print("  WARNING: Database not found at", DB_PATH)
         trades, signals, debates, events, positions = [], [], [], [], []
         attribution_rows, signal_leaderboard, agent_stats_rows = [], [], []
+        fee_alert        = None
+        divergence_alert = None
     else:
         print("  Querying database...")
         trades    = query_trades(conn, target_day)
@@ -611,6 +699,11 @@ def main():
         attribution_rows   = query_todays_attribution(conn, target_day)
         signal_leaderboard = query_signal_leaderboard(conn)
         agent_stats_rows   = query_agent_stats(conn)
+
+        # Compute alert strings before closing conn (queries need open connection)
+        ta_preview       = analyze_trades(trades)
+        fee_alert        = compute_fee_ratio_alert(ta_preview, conn)
+        divergence_alert = compute_divergence_alert(conn)
         conn.close()
 
     ta = analyze_trades(trades)
@@ -630,6 +723,7 @@ def main():
         signal_leaderboard=signal_leaderboard,
         agent_stats=agent_stats_rows,
         no_db=no_db,
+        system_alerts=[fee_alert, divergence_alert],
     )
     print(f"  Written → {out_path.relative_to(PROJECT_DIR)}")
 

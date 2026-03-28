@@ -58,7 +58,7 @@ COINBASE_TAKER_FEE_PCT: float = 0.006
 COINBASE_MAKER_FEE_PCT: float = 0.004
 MAX_DAILY_FEE_DRAG_PCT: float = 0.100  # 10% = $50 on $500 / $500 on $5000 — raised from 5%
 MARKET_BREADTH_MIN_SPY_PCT: float = -2.0      # Block equity longs if SPY down more than this
-BACKTEST_SLIPPAGE_PCT: float = 0.002           # 0.2% per side slippage added to commission
+BACKTEST_SLIPPAGE_PCT: float = float(os.getenv('BACKTEST_SLIPPAGE_PCT', '0.001'))  # 0.1% per leg slippage added to commission
 MAX_STRATEGY_LOSS_STREAK: int = 4             # Circuit breaker: pause strategy after N consecutive losses (was 8, cut 50%)
 EQUITY_MAX_HOLD_HOURS: float = 6.0            # Close equity position if flat after this many hours
 CRYPTO_MAX_HOLD_HOURS: float = 12.0           # Close crypto position if flat after this many hours

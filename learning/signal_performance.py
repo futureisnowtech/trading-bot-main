@@ -227,6 +227,10 @@ def record_trade_attribution(
     paper: bool = True,
     trade_ref: str = '',
     lesson: str = '',
+    mae_pct: float = 0,
+    mfe_pct: float = 0,
+    exit_type: str = 'unknown',
+    ml_p_win: float = 0,
 ) -> int:
     """
     Record the full attribution for one closed trade.
@@ -235,6 +239,7 @@ def record_trade_attribution(
     """
     now = datetime.now(timezone.utc).isoformat()
     signals_json = json.dumps({k: bool(v) for k, v in signals.items()})
+    is_fee_trap = int(fee_usd > 0 and abs(pnl_usd) > 0 and fee_usd > abs(pnl_usd) * 0.5)
 
     with _conn() as c:
         cur = c.execute("""
@@ -243,14 +248,16 @@ def record_trade_attribution(
                  entry_ts, exit_ts, entry_price, exit_price,
                  pnl_usd, pnl_pct, fee_usd, won,
                  signals_json, conviction, exit_reason,
-                 hold_minutes, paper, lesson, created_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 hold_minutes, paper, lesson, created_at,
+                 mae_pct, mfe_pct, exit_type, is_fee_trap, ml_p_win)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             trade_ref, symbol, strategy, regime, source,
             entry_ts, exit_ts, entry_price, exit_price,
             pnl_usd, pnl_pct, fee_usd, int(won),
             signals_json, conviction, exit_reason,
             hold_minutes, int(paper), lesson, now,
+            mae_pct, mfe_pct, exit_type, is_fee_trap, ml_p_win,
         ))
         attr_id = cur.lastrowid
 

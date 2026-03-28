@@ -21,6 +21,7 @@ from typing import Optional
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from data.indicators import add_all_indicators, get_fib_levels, fib_confluence
+from config import BACKTEST_SLIPPAGE_PCT
 
 BACKTEST_DIR = 'logs/backtest'
 os.makedirs(BACKTEST_DIR, exist_ok=True)
@@ -776,7 +777,7 @@ def run_crypto_backtest(
     interval: str = '5m',
     cash: float = 500,
     commission: float = 0.006,
-    slippage: float = 0.002,
+    slippage: float = BACKTEST_SLIPPAGE_PCT,
     variant: str = 'all'
 ) -> dict:
     """
@@ -857,7 +858,7 @@ def run_equity_backtest(
     period: str = '1y',
     interval: str = '30m',
     cash: float = 500,
-    slippage: float = 0.002,
+    slippage: float = BACKTEST_SLIPPAGE_PCT,
 ) -> dict:
     """Run equity momentum strategy backtest."""
     if not BACKTESTING_PY:
@@ -885,7 +886,7 @@ def run_mean_reversion_backtest(
     interval: str = '5m',
     cash: float = 500,
     commission: float = 0.006,
-    slippage: float = 0.002,
+    slippage: float = BACKTEST_SLIPPAGE_PCT,
 ) -> dict:
     """Run crypto mean-reversion strategy backtest (Kalman+AVWAP+BB entry)."""
     if not BACKTESTING_PY:
@@ -1044,7 +1045,7 @@ def run_backtest_oos_split(
     interval: str = '5m',
     cash: float = 500,
     commission: float = 0.006,
-    slippage: float = 0.002,
+    slippage: float = BACKTEST_SLIPPAGE_PCT,
     train_pct: float = 0.70,
 ) -> dict:
     """
@@ -1244,7 +1245,7 @@ def run_with_intelligence(
     variant: str = 'workhorse',
     cash: float = 500,
     commission: float = 0.006,
-    slippage: float = 0.002,
+    slippage: float = BACKTEST_SLIPPAGE_PCT,
     archive_to_db: bool = True,
     validate: bool = True,
 ) -> dict:
@@ -1506,7 +1507,7 @@ def optimize_crypto(
     interval: str = '1h',
     cash: float = 500,
     commission: float = 0.006,
-    slippage: float = 0.002,
+    slippage: float = BACKTEST_SLIPPAGE_PCT,
     write_to_env: bool = True,
 ) -> dict:
     """
@@ -1636,7 +1637,7 @@ def optimize_equity(
     period: str = '1y',
     interval: str = '1h',
     cash: float = 500,
-    slippage: float = 0.002,
+    slippage: float = BACKTEST_SLIPPAGE_PCT,
     write_to_env: bool = True,
 ) -> dict:
     """

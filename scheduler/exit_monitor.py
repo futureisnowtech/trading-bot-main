@@ -36,6 +36,22 @@ from scheduler._helpers import (
 )
 
 
+def _classify_exit_type(reason: str) -> str:
+    """Map free-form exit reason string to canonical exit_type enum."""
+    r = reason.lower()
+    if 'stop' in r:
+        return 'stop_hit'
+    if 'target' in r or 'take profit' in r:
+        return 'target_hit'
+    if 'stagnant' in r:
+        return 'stagnant'
+    if 'time exit' in r or 'eod' in r or 'overnight' in r:
+        return 'time_exit'
+    if any(k in r for k in ('tudor', 'soros', 'simons', 'ai exit', 'review')):
+        return 'ai_exit'
+    return 'unknown'
+
+
 def _execute_equity_exit(wb, rm, symbol, pos, price, reason, strategy, market_data=None):
     result = wb.sell_limit(symbol=symbol, qty=pos['qty'],
                            limit_price=price * 0.999, strategy=strategy,
@@ -55,9 +71,14 @@ def _execute_equity_exit(wb, rm, symbol, pos, price, reason, strategy, market_da
         )
         if _LEARNING_AVAILABLE:
             try:
+                _entry = pos['entry']
+                _high = pos.get('high_since_entry', _entry)
+                _low  = pos.get('low_since_entry',  _entry)
+                _eq_mfe = abs(_high - _entry) / _entry if _entry > 0 else 0
+                _eq_mae = abs(_entry - _low) / _entry if _entry > 0 else 0
                 analyze_closed_trade(
                     symbol=symbol, strategy=strategy,
-                    entry_price=pos['entry'], exit_price=price,
+                    entry_price=_entry, exit_price=price,
                     qty=pos['qty'], fee_usd=fee,
                     entry_ts=pos.get('ts_entry', ''),
                     exit_ts=datetime.now(pytz.timezone(MARKET_TIMEZONE)).isoformat(),
@@ -66,6 +87,9 @@ def _execute_equity_exit(wb, rm, symbol, pos, price, reason, strategy, market_da
                     agent_votes=pos.get('agent_votes', md.get('agent_votes', {})),
                     paper=PAPER_TRADING,
                     trade_ref=f"eq_{symbol}_{pos.get('ts_entry','')}",
+                    mae_pct=_eq_mae, mfe_pct=_eq_mfe,
+                    exit_type=_classify_exit_type(reason),
+                    ml_p_win=pos.get('ml_p_win', 0),
                 )
                 _invalidate_weights()
             except Exception as _ale:
@@ -110,9 +134,15 @@ def _execute_crypto_exit(cb, rm, pid, pos, price, reason, strategy, market_data=
         if _LEARNING_AVAILABLE:
             try:
                 fee_est_short = price * pos['qty'] * (COINBASE_MAKER_FEE_PCT + 0.006)
+                _s_entry = pos['entry']
+                _s_high  = pos.get('high_since_entry', _s_entry)
+                _s_low   = pos.get('low_since_entry',  _s_entry)
+                # SHORT: favorable = price going down → low_since_entry is MFE
+                _s_mfe = abs(_s_entry - _s_low) / _s_entry if _s_entry > 0 else 0
+                _s_mae = abs(_s_high - _s_entry) / _s_entry if _s_entry > 0 else 0
                 analyze_closed_trade(
                     symbol=pid, strategy=strategy,
-                    entry_price=pos['entry'], exit_price=price,
+                    entry_price=_s_entry, exit_price=price,
                     qty=pos['qty'], fee_usd=fee_est_short,
                     entry_ts=pos.get('ts_entry', ''),
                     exit_ts=datetime.now(pytz.timezone(MARKET_TIMEZONE)).isoformat(),
@@ -121,6 +151,9 @@ def _execute_crypto_exit(cb, rm, pid, pos, price, reason, strategy, market_data=
                     agent_votes=pos.get('agent_votes', md.get('agent_votes', {})),
                     paper=PAPER_TRADING,
                     trade_ref=f"cr_short_{pid}_{pos.get('ts_entry','')}",
+                    mae_pct=_s_mae, mfe_pct=_s_mfe,
+                    exit_type=_classify_exit_type(reason),
+                    ml_p_win=pos.get('ml_p_win', 0),
                 )
                 _invalidate_weights()
             except Exception as _ale:
@@ -157,9 +190,14 @@ def _execute_crypto_exit(cb, rm, pid, pos, price, reason, strategy, market_data=
         )
         if _LEARNING_AVAILABLE:
             try:
+                _c_entry = pos['entry']
+                _c_high  = pos.get('high_since_entry', _c_entry)
+                _c_low   = pos.get('low_since_entry',  _c_entry)
+                _c_mfe = abs(_c_high - _c_entry) / _c_entry if _c_entry > 0 else 0
+                _c_mae = abs(_c_entry - _c_low) / _c_entry if _c_entry > 0 else 0
                 analyze_closed_trade(
                     symbol=pid, strategy=strategy,
-                    entry_price=pos['entry'], exit_price=price,
+                    entry_price=_c_entry, exit_price=price,
                     qty=pos['qty'], fee_usd=fee_est,
                     entry_ts=pos.get('ts_entry', ''),
                     exit_ts=datetime.now(pytz.timezone(MARKET_TIMEZONE)).isoformat(),
@@ -168,6 +206,9 @@ def _execute_crypto_exit(cb, rm, pid, pos, price, reason, strategy, market_data=
                     agent_votes=pos.get('agent_votes', md.get('agent_votes', {})),
                     paper=PAPER_TRADING,
                     trade_ref=f"cr_{pid}_{pos.get('ts_entry','')}",
+                    mae_pct=_c_mae, mfe_pct=_c_mfe,
+                    exit_type=_classify_exit_type(reason),
+                    ml_p_win=pos.get('ml_p_win', 0),
                 )
                 _invalidate_weights()
             except Exception as _ale:
@@ -208,6 +249,7 @@ def monitor_exits_with_ai(engine) -> None:
             last = df_ind.iloc[-1]
             price = float(last['close'])
             rm.update_high('equity_momentum', symbol, price)
+            rm.update_low('equity_momentum', symbol, price)
 
             market_data_eq = _build_market_data(symbol, price, df_ind)
 
@@ -256,6 +298,7 @@ def monitor_exits_with_ai(engine) -> None:
             if not price:
                 continue
             rm.update_high(strategy, pid, price)
+            rm.update_low(strategy, pid, price)
 
             cr_md = {}
             df_cr = get_candles(pid, CRYPTO_CANDLE_GRANULARITY, 50)
@@ -325,6 +368,7 @@ def monitor_exits_with_ai(engine) -> None:
                 continue
 
             rm.update_high('crypto_perp', symbol, current_price)
+            rm.update_low('crypto_perp', symbol, current_price)
             should_exit_perp, exit_reason_perp = rm.should_exit('crypto_perp', symbol, current_price)
             if should_exit_perp:
                 _execute_perp_exit(bb_exit, rm, symbol, pos, exit_reason_perp)
@@ -394,9 +438,19 @@ def _execute_perp_exit(bb, rm, symbol: str, pos: dict, reason: str) -> None:
             try:
                 from datetime import datetime as _dt
                 _perp_fee = pos.get('qty', 0) * pos.get('entry', 0) * BINANCE_TAKER_FEE_PCT
+                _p_entry = pos.get('entry', exit_price)
+                _p_high  = pos.get('high_since_entry', _p_entry)
+                _p_low   = pos.get('low_since_entry',  _p_entry)
+                _p_side  = pos.get('direction', 'LONG')
+                if _p_side == 'LONG':
+                    _p_mfe = abs(_p_high - _p_entry) / _p_entry if _p_entry > 0 else 0
+                    _p_mae = abs(_p_entry - _p_low) / _p_entry if _p_entry > 0 else 0
+                else:
+                    _p_mfe = abs(_p_entry - _p_low) / _p_entry if _p_entry > 0 else 0
+                    _p_mae = abs(_p_high - _p_entry) / _p_entry if _p_entry > 0 else 0
                 analyze_closed_trade(
                     symbol=symbol, strategy='crypto_perp',
-                    entry_price=pos['entry'], exit_price=exit_price,
+                    entry_price=_p_entry, exit_price=exit_price,
                     qty=pos.get('qty', 0), fee_usd=_perp_fee,
                     entry_ts=pos.get('ts_entry', ''),
                     exit_ts=_dt.now(pytz.timezone(MARKET_TIMEZONE)).isoformat(),
@@ -405,6 +459,9 @@ def _execute_perp_exit(bb, rm, symbol: str, pos: dict, reason: str) -> None:
                     agent_votes={},
                     paper=PAPER_TRADING,
                     trade_ref=f"perp_{symbol}_{pos.get('ts_entry','')}",
+                    mae_pct=_p_mae, mfe_pct=_p_mfe,
+                    exit_type=_classify_exit_type(reason),
+                    ml_p_win=pos.get('ml_p_win', 0),
                 )
                 _invalidate_weights()
             except Exception as _ale:

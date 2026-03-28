@@ -154,6 +154,10 @@ def analyze_closed_trade(
     source: str = 'live',
     paper: bool = True,
     trade_ref: str = '',
+    mae_pct: float = 0,
+    mfe_pct: float = 0,
+    exit_type: str = 'unknown',
+    ml_p_win: float = 0,
 ) -> dict:
     """
     Full post-trade attribution analysis. Call this immediately after every trade close.
@@ -215,6 +219,8 @@ def analyze_closed_trade(
         exit_reason=exit_reason, hold_minutes=hold_minutes,
         source=source, paper=paper, trade_ref=trade_ref,
         lesson=lesson,
+        mae_pct=mae_pct, mfe_pct=mfe_pct,
+        exit_type=exit_type, ml_p_win=ml_p_win,
     )
 
     # Update agent accuracy

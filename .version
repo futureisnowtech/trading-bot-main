@@ -1,1 +1,1 @@
-2026-03-26 16:41 | 6121e93 | Commit untracked v7.0/v8.0 learning modules + ops scripts
+2026-03-28 14:15 | 5eacf0f | Fix 4 audit bugs: LightGBM, agent_votes, perp stagnant exit, 3 stuck positions

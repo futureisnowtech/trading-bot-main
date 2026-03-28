@@ -101,6 +101,14 @@ except Exception:
     _format_options_context = None
     _OPTIONS_FLOW_AVAILABLE = False
 
+# ── Liquidation feed ──────────────────────────────────────────────────────────
+try:
+    from data.liquidation_feed import get_liquidation_signal as _get_liquidation_signal
+    _LIQUIDATION_FEED_AVAILABLE = True
+except Exception:
+    _get_liquidation_signal = None
+    _LIQUIDATION_FEED_AVAILABLE = False
+
 # ── Market context + session analyst ─────────────────────────────────────────
 try:
     from data.market_context import get_context_for_debate, should_block_trade
@@ -322,5 +330,21 @@ def _build_market_data(symbol, price, df_ind, change_pct=0, regime='ranging') ->
                 md['calibration_context'] = cal_ctx
         except Exception:
             pass
+
+    # ── Liquidation signal ────────────────────────────────────────────────────
+    try:
+        liq = _get_liquidation_signal(symbol) if _LIQUIDATION_FEED_AVAILABLE and _get_liquidation_signal else None
+        if liq:
+            md['liq_signal'] = liq.get('liq_signal', 'neutral')
+            md['liq_avoid_long'] = liq.get('liq_avoid_long', False)
+            md['liq_long_ratio'] = liq.get('liq_long_ratio', 0.5)
+        else:
+            md['liq_signal'] = 'neutral'
+            md['liq_avoid_long'] = False
+            md['liq_long_ratio'] = 0.5
+    except Exception:
+        md['liq_signal'] = 'neutral'
+        md['liq_avoid_long'] = False
+        md['liq_long_ratio'] = 0.5
 
     return md

@@ -55,6 +55,13 @@ def init_db() -> None:
         # v9.0 Sprint 2: lane tag for 3-lane architecture (lane1=stocks, lane2=crypto, lane3=prediction)
         "ALTER TABLE trades ADD COLUMN lane TEXT DEFAULT 'lane2'",
         "ALTER TABLE open_positions ADD COLUMN lane TEXT DEFAULT 'lane2'",
+        # v9.1 audit builds: MAE/MFE tracking, exit classification, ML gate visibility
+        "ALTER TABLE open_positions ADD COLUMN low_since_entry REAL",
+        "ALTER TABLE trade_attribution ADD COLUMN mae_pct REAL DEFAULT 0",
+        "ALTER TABLE trade_attribution ADD COLUMN mfe_pct REAL DEFAULT 0",
+        "ALTER TABLE trade_attribution ADD COLUMN exit_type TEXT DEFAULT 'unknown'",
+        "ALTER TABLE trade_attribution ADD COLUMN is_fee_trap INTEGER DEFAULT 0",
+        "ALTER TABLE trade_attribution ADD COLUMN ml_p_win REAL DEFAULT 0",
     ]:
         try:
             cur.execute(migration)

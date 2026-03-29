@@ -26,13 +26,14 @@ from config import (
     FULL_DEBATE_AGENTS,
     CRYPTO_POSITION_SIZE_USD,
     BINANCE_SPOT_MAKER_FEE_PCT,
+    LANE3_ENABLED,
 )
 from logging_db.trade_logger import (
     get_todays_pnl, get_todays_fees, get_todays_trade_fees, get_todays_api_cost,
     get_todays_signals,
     get_scan_feed, get_all_time_stats, get_recent_debates,
     get_monthly_api_cost, get_win_rate, get_recent_trades,
-    get_recent_notifications,
+    get_recent_notifications, get_performance_attribution,
 )
 from risk.risk_manager import get_risk_manager
 
@@ -1705,25 +1706,508 @@ def expander_controls():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# CRYPTO SPOT TAB
+# ══════════════════════════════════════════════════════════════════════════════
+
+@st.fragment(run_every=15)
+def comp_crypto_tab():
+    positions = _positions()
+    crypto_pos = positions.get('crypto_macd_consensus', {})
+    # Also catch any strategy key with 'crypto' that isn't 'perp'
+    all_crypto_pos: dict = {}
+    for strat_key, syms in positions.items():
+        if 'crypto' in strat_key.lower() and 'perp' not in strat_key.lower():
+            all_crypto_pos.update(syms)
+
+    # ── Open positions (crypto spot only) ──────────────────────────────────────
+    _sec("CRYPTO SPOT POSITIONS",
+         "Open positions from crypto_macd and mean_reversion strategies. "
+         "Perp positions are in the PERP tab.")
+
+    if not all_crypto_pos:
+        st.markdown(
+            f'<div style="color:{TEXT3};font-size:14px;padding:16px 0;'
+            f'text-align:center;font-style:italic;">No open crypto spot positions</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        for sym, p in all_crypto_pos.items():
+            entry  = float(p.get('entry', 0))
+            stop   = float(p.get('stop', 0))
+            target = float(p.get('target', 0))
+            direc  = p.get('direction', 'LONG')
+            ts     = p.get('ts_entry', '')
+            age_str = '—'
+            try:
+                from datetime import timezone as _tz2
+                dt = datetime.fromisoformat(ts)
+                if not dt.tzinfo:
+                    dt = dt.replace(tzinfo=_tz.utc)
+                mins = int((datetime.now(_tz.utc) - dt).total_seconds() / 60)
+                age_str = f'{mins}m' if mins < 60 else f'{mins//60}h {mins%60}m'
+            except Exception:
+                pass
+            to_stop   = abs(entry - stop)   / entry * 100 if entry > 0 and stop > 0   else 0
+            to_target = abs(target - entry) / entry * 100 if entry > 0 and target > 0 else 0
+            stop_pct  = min(100, int((to_stop / CRYPTO_STOP_LOSS_PCT / 100) * 100))
+            tgt_pct   = min(100, int((to_target / CRYPTO_TAKE_PROFIT_PCT / 100) * 100))
+            stop_clr  = RED if to_stop < 0.3 else (AMBER if to_stop < 0.8 else TEXT2)
+            st.markdown(
+                f'<div class="pos-card">'
+                f'<div class="pos-top">'
+                f'  <div>'
+                f'    <div class="pos-symbol">{sym}</div>'
+                f'    <div class="pos-strategy">crypto spot · {direc}</div>'
+                f'  </div>'
+                f'  <div class="pos-age">{age_str}</div>'
+                f'</div>'
+                f'<div class="pos-bars">'
+                f'  <div>'
+                f'    <div class="pos-dist-label">To Stop</div>'
+                f'    <div class="pos-dist-val" style="color:{stop_clr};">{to_stop:.2f}%</div>'
+                f'    <div class="pos-track">'
+                f'      <div class="pos-fill" style="width:{stop_pct}%;background:{stop_clr};"></div>'
+                f'    </div>'
+                f'  </div>'
+                f'  <div>'
+                f'    <div class="pos-dist-label">To Target</div>'
+                f'    <div class="pos-dist-val" style="color:{GREEN};">{to_target:.2f}%</div>'
+                f'    <div class="pos-track">'
+                f'      <div class="pos-fill" style="width:{tgt_pct}%;background:{GREEN};"></div>'
+                f'    </div>'
+                f'  </div>'
+                f'</div>'
+                f'<div style="margin-top:12px;font-size:12px;color:{TEXT3};'
+                f'font-family:\'JetBrains Mono\',monospace;">'
+                f'Entry {entry:.5g}  ·  Stop {stop:.5g}  ·  Target {target:.5g}'
+                f'</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+    # ── Per-strategy breakdown ─────────────────────────────────────────────────
+    _sec("STRATEGY BREAKDOWN",
+         "Performance split by strategy: crypto_macd vs mean_reversion. "
+         "Based on last 30 days of closed trades.")
+    try:
+        perf = get_performance_attribution(paper=PAPER_TRADING, lookback_days=30)
+        crypto_strats = {k: v for k, v in perf.items()
+                         if 'crypto' in k.lower() and 'perp' not in k.lower()}
+        if crypto_strats:
+            parts = []
+            for sname, sv in crypto_strats.items():
+                n   = sv.get('total', 0)
+                wr  = sv.get('win_rate', 0)
+                pnl = sv.get('total_pnl', 0)
+                wr_clr  = GREEN if wr >= 0.52 else (RED if wr < 0.40 else GOLD)
+                pnl_clr = GREEN if pnl >= 0 else RED
+                pnl_sgn = '+' if pnl >= 0 else ''
+                parts.append(
+                    f'<div class="card-sm" style="flex:1;">'
+                    f'<div style="font-size:11px;font-weight:700;letter-spacing:2px;'
+                    f'text-transform:uppercase;color:{TEXT3};margin-bottom:8px;">{sname}</div>'
+                    f'<div style="font-size:22px;font-weight:800;color:{wr_clr};">{wr:.0%}</div>'
+                    f'<div style="font-size:12px;color:{TEXT2};margin-top:4px;">{n} trades</div>'
+                    f'<div style="font-size:14px;font-weight:700;color:{pnl_clr};'
+                    f'font-family:\'JetBrains Mono\',monospace;margin-top:6px;">{pnl_sgn}${pnl:.2f}</div>'
+                    f'</div>'
+                )
+            st.markdown(
+                f'<div style="display:flex;gap:12px;">{"".join(parts)}</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                f'<div style="color:{TEXT3};font-size:14px;">No crypto spot attribution data yet.</div>',
+                unsafe_allow_html=True,
+            )
+    except Exception as e:
+        st.markdown(
+            f'<div style="color:{TEXT3};font-size:13px;">Attribution unavailable: {e}</div>',
+            unsafe_allow_html=True,
+        )
+
+    # ── Recent trades + scan feed ──────────────────────────────────────────────
+    _sec("RECENT TRADES & SCAN FEED")
+    left, right = st.columns(2)
+
+    with left:
+        st.markdown(
+            f'<div style="font-size:11px;font-weight:700;letter-spacing:3px;'
+            f'text-transform:uppercase;color:{TEXT3};padding-bottom:8px;">CRYPTO SPOT TRADES</div>',
+            unsafe_allow_html=True,
+        )
+        all_trades = get_recent_trades(limit=100, paper=PAPER_TRADING) or []
+        spot_trades = [
+            t for t in all_trades
+            if 'perp' not in t.get('strategy', '').lower()
+            and 'equity' not in t.get('strategy', '').lower()
+            and t.get('strategy', '') != ''
+            and ('crypto' in t.get('strategy', '').lower()
+                 or 'mean_reversion' in t.get('strategy', '').lower())
+        ]
+        if not spot_trades:
+            st.markdown(
+                f'<div style="color:{TEXT3};font-size:14px;padding:12px 0;">No crypto spot trades yet.</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            html = ''
+            for t in spot_trades[:20]:
+                pnl  = t.get('pnl_usd', 0)
+                clr  = GREEN if pnl > 0 else (RED if pnl < 0 else TEXT2)
+                sign = '+' if pnl > 0 else ''
+                html += (
+                    f'<div class="tr">'
+                    f'<span class="tr-time">{_fmt_ts(t.get("ts",""), short=True)}</span>'
+                    f'<span class="tr-sym">{t.get("symbol","—")}</span>'
+                    f'<span class="tr-act">{t.get("action","")}</span>'
+                    f'<span class="tr-pnl" style="color:{clr};">{sign}${pnl:.2f}</span>'
+                    f'</div>'
+                )
+            st.markdown(f'<div class="card-flush">{html}</div>', unsafe_allow_html=True)
+
+    with right:
+        st.markdown(
+            f'<div style="font-size:11px;font-weight:700;letter-spacing:3px;'
+            f'text-transform:uppercase;color:{TEXT3};padding-bottom:8px;">SCAN FEED</div>',
+            unsafe_allow_html=True,
+        )
+        feed = get_scan_feed(limit=50) or []
+        if not feed:
+            st.markdown(
+                f'<div style="color:{TEXT3};font-size:14px;padding:12px 0;">No scan feed yet.</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            html = ''
+            for s in feed:
+                act  = str(s.get('action', s.get('signal', ''))).upper()
+                sym  = s.get('symbol', '—')
+                conf = s.get('confidence', '')
+                ts   = _fmt_ts(s.get('ts', ''), short=True)
+                if act == 'BUY':
+                    badge_bg, badge_clr = '#0d2218', GREEN
+                elif act == 'SELL':
+                    badge_bg, badge_clr = '#220d10', RED
+                else:
+                    badge_bg, badge_clr = SURFACE, TEXT2
+                conf_str = f'<span class="sr-conf">{float(conf):.0%}</span>' if conf else ''
+                html += (
+                    f'<div class="sr">'
+                    f'<span class="sr-time">{ts}</span>'
+                    f'<span class="sr-badge" style="background:{badge_bg};color:{badge_clr};'
+                    f'border:1px solid {badge_clr}33;">{act}</span>'
+                    f'<span class="sr-sym">{sym}</span>'
+                    f'{conf_str}'
+                    f'</div>'
+                )
+            st.markdown(f'<div class="card-flush">{html}</div>', unsafe_allow_html=True)
+
+    # ── Last crypto AI debate ──────────────────────────────────────────────────
+    _sec("LAST AI DEBATE",
+         "Most recent 3-agent debate for a crypto spot pair. "
+         "Bardock = macro/funding. Vegeta = momentum. Krillin = fee math.")
+    try:
+        debates = get_recent_debates(limit=10) or []
+        crypto_debate = None
+        for d in debates:
+            sym = str(d.get('symbol', ''))
+            strat = str(d.get('strategy', ''))
+            if ('-USDC' in sym or '-USD' in sym or 'crypto' in strat.lower()):
+                if 'perp' not in strat.lower():
+                    crypto_debate = d
+                    break
+        if crypto_debate:
+            res  = str(crypto_debate.get('result', '?')).upper()
+            clr  = GREEN if res == 'BUY' else (RED if res == 'SELL' else TEXT2)
+            conf = crypto_debate.get('confidence', 0)
+            reason = str(crypto_debate.get('reason', ''))[:300]
+            st.markdown(
+                f'<div class="card-sm">'
+                f'<div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">'
+                f'  <span style="font-size:18px;font-weight:800;color:{TEXT};'
+                f'  font-family:\'JetBrains Mono\',monospace;">'
+                f'  {crypto_debate.get("symbol","?")}</span>'
+                f'  <span style="font-size:16px;font-weight:800;color:{clr};">{res}</span>'
+                f'  <span style="font-size:13px;color:{TEXT2};">{conf:.0%} confidence</span>'
+                f'  <span style="margin-left:auto;font-size:12px;color:{TEXT3};">'
+                f'  {_fmt_ts(crypto_debate.get("ts",""))}</span>'
+                f'</div>'
+                f'<div style="font-size:13px;color:{TEXT2};line-height:1.5;">{reason}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                f'<div style="color:{TEXT3};font-size:14px;padding:12px 0;">No crypto debates yet.</div>',
+                unsafe_allow_html=True,
+            )
+    except Exception as e:
+        st.markdown(
+            f'<div style="color:{TEXT3};font-size:13px;">Debate unavailable: {e}</div>',
+            unsafe_allow_html=True,
+        )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PERP TAB
+# ══════════════════════════════════════════════════════════════════════════════
+
+@st.fragment(run_every=15)
+def comp_perp_tab():
+    positions = _positions()
+    # Collect all perp positions across any strategy key containing 'perp'
+    perp_pos: dict = {}
+    for strat_key, syms in positions.items():
+        if 'perp' in strat_key.lower():
+            perp_pos.update({sym: (strat_key, p) for sym, p in syms.items()})
+
+    # ── Open perp positions ────────────────────────────────────────────────────
+    _sec("OPEN PERP POSITIONS",
+         "Binance USD-M perpetual futures positions. "
+         "Funding-rate aware strategy. Positions auto-close after 4h if flat.")
+
+    if not perp_pos:
+        st.markdown(
+            f'<div style="color:{TEXT3};font-size:14px;padding:16px 0;'
+            f'text-align:center;font-style:italic;">No open perp positions</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        for sym, (strat_key, p) in perp_pos.items():
+            entry  = float(p.get('entry', 0))
+            stop   = float(p.get('stop', 0))
+            target = float(p.get('target', 0))
+            direc  = p.get('direction', 'LONG')
+            ts     = p.get('ts_entry', '')
+            age_str = '—'
+            try:
+                dt = datetime.fromisoformat(ts)
+                if not dt.tzinfo:
+                    dt = dt.replace(tzinfo=_tz.utc)
+                mins = int((datetime.now(_tz.utc) - dt).total_seconds() / 60)
+                age_str = f'{mins}m' if mins < 60 else f'{mins//60}h {mins%60}m'
+            except Exception:
+                pass
+            to_stop   = abs(entry - stop)   / entry * 100 if entry > 0 and stop > 0   else 0
+            to_target = abs(target - entry) / entry * 100 if entry > 0 and target > 0 else 0
+            stop_pct  = min(100, int(to_stop * 20))
+            tgt_pct   = min(100, int(to_target * 10))
+            stop_clr  = RED if to_stop < 0.3 else (AMBER if to_stop < 0.8 else TEXT2)
+            dir_clr   = GREEN if direc == 'LONG' else RED
+            st.markdown(
+                f'<div class="pos-card" style="border-left-color:{dir_clr};">'
+                f'<div class="pos-top">'
+                f'  <div>'
+                f'    <div class="pos-symbol">{sym}</div>'
+                f'    <div class="pos-strategy">perp · '
+                f'    <span style="color:{dir_clr};">{direc}</span></div>'
+                f'  </div>'
+                f'  <div class="pos-age">{age_str}</div>'
+                f'</div>'
+                f'<div class="pos-bars">'
+                f'  <div>'
+                f'    <div class="pos-dist-label">To Stop</div>'
+                f'    <div class="pos-dist-val" style="color:{stop_clr};">{to_stop:.2f}%</div>'
+                f'    <div class="pos-track">'
+                f'      <div class="pos-fill" style="width:{stop_pct}%;background:{stop_clr};"></div>'
+                f'    </div>'
+                f'  </div>'
+                f'  <div>'
+                f'    <div class="pos-dist-label">To Target</div>'
+                f'    <div class="pos-dist-val" style="color:{GREEN};">{to_target:.2f}%</div>'
+                f'    <div class="pos-track">'
+                f'      <div class="pos-fill" style="width:{tgt_pct}%;background:{GREEN};"></div>'
+                f'    </div>'
+                f'  </div>'
+                f'</div>'
+                f'<div style="margin-top:12px;font-size:12px;color:{TEXT3};'
+                f'font-family:\'JetBrains Mono\',monospace;">'
+                f'Entry {entry:.5g}  ·  Stop {stop:.5g}  ·  Target {target:.5g}'
+                f'</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+    # ── Perp stats ─────────────────────────────────────────────────────────────
+    _sec("PERP PERFORMANCE",
+         "All-time perp strategy performance. "
+         "4h flat exit prevents funding cost drag on stagnant positions.")
+    try:
+        perf = get_performance_attribution(paper=PAPER_TRADING, lookback_days=90)
+        perp_strats = {k: v for k, v in perf.items() if 'perp' in k.lower()}
+        if perp_strats:
+            for sname, sv in perp_strats.items():
+                n    = sv.get('total', 0)
+                wins = sv.get('wins', 0)
+                losses = sv.get('losses', 0)
+                wr   = sv.get('win_rate', 0)
+                pnl  = sv.get('total_pnl', 0)
+                wr_clr  = GREEN if wr >= 0.52 else (RED if wr < 0.40 else GOLD)
+                pnl_clr = GREEN if pnl >= 0 else RED
+                pnl_sgn = '+' if pnl >= 0 else ''
+                st.markdown(
+                    f'<div class="card-sm">'
+                    f'<div style="display:flex;gap:24px;flex-wrap:wrap;">'
+                    f'  <div>'
+                    f'    <div style="font-size:11px;color:{TEXT3};font-weight:700;'
+                    f'    letter-spacing:2px;text-transform:uppercase;margin-bottom:4px;">Win Rate</div>'
+                    f'    <div style="font-size:28px;font-weight:800;color:{wr_clr};">{wr:.0%}</div>'
+                    f'  </div>'
+                    f'  <div>'
+                    f'    <div style="font-size:11px;color:{TEXT3};font-weight:700;'
+                    f'    letter-spacing:2px;text-transform:uppercase;margin-bottom:4px;">Total P&L</div>'
+                    f'    <div style="font-size:28px;font-weight:800;color:{pnl_clr};'
+                    f'    font-family:\'JetBrains Mono\',monospace;">{pnl_sgn}${pnl:.2f}</div>'
+                    f'  </div>'
+                    f'  <div>'
+                    f'    <div style="font-size:11px;color:{TEXT3};font-weight:700;'
+                    f'    letter-spacing:2px;text-transform:uppercase;margin-bottom:4px;">Trades</div>'
+                    f'    <div style="font-size:28px;font-weight:800;color:{TEXT};">{n}</div>'
+                    f'  </div>'
+                    f'  <div>'
+                    f'    <div style="font-size:11px;color:{TEXT3};font-weight:700;'
+                    f'    letter-spacing:2px;text-transform:uppercase;margin-bottom:4px;">W / L</div>'
+                    f'    <div style="font-size:18px;font-weight:700;">'
+                    f'    <span style="color:{GREEN};">{wins}W</span>'
+                    f'    &nbsp;/&nbsp;'
+                    f'    <span style="color:{RED};">{losses}L</span>'
+                    f'    </div>'
+                    f'  </div>'
+                    f'</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+        else:
+            st.markdown(
+                f'<div class="card-sm">'
+                f'<div style="color:{TEXT2};font-size:14px;line-height:1.7;">'
+                f'Perp is running on testnet — paper trading accumulating track record.<br>'
+                f'<span style="color:{TEXT3};font-size:12px;font-family:\'JetBrains Mono\',monospace;">'
+                f'Run <code>python3 scripts/promote_perp_live.py</code> to check readiness for live.</span>'
+                f'</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+    except Exception as e:
+        st.markdown(
+            f'<div style="color:{TEXT3};font-size:13px;">Perp stats unavailable: {e}</div>',
+            unsafe_allow_html=True,
+        )
+
+    # ── Recent perp trades ─────────────────────────────────────────────────────
+    _sec("RECENT PERP TRADES")
+    all_trades = get_recent_trades(limit=100, paper=PAPER_TRADING) or []
+    perp_trades = [t for t in all_trades if 'perp' in t.get('strategy', '').lower()]
+    if not perp_trades:
+        st.markdown(
+            f'<div style="color:{TEXT3};font-size:14px;padding:12px 0;">No perp trades yet.</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        html = ''
+        for t in perp_trades[:20]:
+            pnl  = t.get('pnl_usd', 0)
+            clr  = GREEN if pnl > 0 else (RED if pnl < 0 else TEXT2)
+            sign = '+' if pnl > 0 else ''
+            html += (
+                f'<div class="tr">'
+                f'<span class="tr-time">{_fmt_ts(t.get("ts",""), short=True)}</span>'
+                f'<span class="tr-sym">{t.get("symbol","—")}</span>'
+                f'<span class="tr-act">{t.get("action","")}</span>'
+                f'<span class="tr-pnl" style="color:{clr};">{sign}${pnl:.2f}</span>'
+                f'</div>'
+            )
+        st.markdown(f'<div class="card-flush">{html}</div>', unsafe_allow_html=True)
+
+    # ── Funding rate context ───────────────────────────────────────────────────
+    _sec("FUNDING CONTEXT",
+         "Most recent funding rate data from the scan feed. "
+         "Funding > 0.05%/8h = market overheated (Bardock blocks entry).")
+    try:
+        feed = get_scan_feed(limit=100) or []
+        funding_msg = None
+        for s in feed:
+            msg = str(s.get('message', '') or s.get('notes', '') or '')
+            if 'funding' in msg.lower():
+                funding_msg = msg
+                break
+        if funding_msg:
+            st.markdown(
+                f'<div class="card-sm" style="font-family:\'JetBrains Mono\',monospace;'
+                f'font-size:12px;color:{TEXT2};">{funding_msg[:300]}</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                f'<div style="color:{TEXT3};font-size:14px;padding:8px 0;">'
+                f'No funding data in recent scan feed.</div>',
+                unsafe_allow_html=True,
+            )
+    except Exception:
+        st.markdown(
+            f'<div style="color:{TEXT3};font-size:14px;padding:8px 0;">—</div>',
+            unsafe_allow_html=True,
+        )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # MAIN
 # ══════════════════════════════════════════════════════════════════════════════
 
 def main():
     comp_status_bar()
-    comp_hero()
-    comp_metrics()
-    comp_edge()
-    comp_trade_quality()
-    comp_positions()
-    comp_markets()
-    comp_risk()
-    comp_trades_signals()
-    comp_chat()
-    st.markdown(f'<div style="height:24px;"></div>', unsafe_allow_html=True)
-    expander_debates()
-    expander_lane3()
-    expander_notifications()
-    expander_controls()
+
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "📊  OVERVIEW", "₿  CRYPTO SPOT", "⚡  PERP", "🎯  PREDICTIONS", "🧠  INTELLIGENCE", "⚙️  SYSTEM"
+    ])
+
+    with tab1:
+        comp_hero()
+        comp_metrics()
+        col_l, col_r = st.columns(2)
+        with col_l:
+            comp_positions()
+        with col_r:
+            comp_markets()
+
+    with tab2:
+        comp_crypto_tab()
+
+    with tab3:
+        comp_perp_tab()
+
+    with tab4:
+        if LANE3_ENABLED:
+            expander_lane3()
+        else:
+            st.markdown(
+                f'<div class="card" style="text-align:center;padding:40px;">'
+                f'<div style="font-size:32px;margin-bottom:16px;">🎯</div>'
+                f'<div style="font-size:20px;font-weight:800;color:{TEXT};margin-bottom:12px;">'
+                f'Prediction Markets — Lane 3</div>'
+                f'<div style="font-size:14px;color:{TEXT2};margin-bottom:20px;">'
+                f'Status: <span style="color:{RED};font-weight:700;">DISABLED</span>'
+                f' (LANE3_ENABLED=false in .env)</div>'
+                f'<div style="font-size:13px;color:{TEXT3};font-family:\'JetBrains Mono\',monospace;">'
+                f'To activate: set LANE3_ENABLED=true, POLYMARKET_ENABLED=true</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+    with tab5:
+        comp_edge()
+        comp_trade_quality()
+        comp_risk()
+
+    with tab6:
+        comp_trades_signals()
+        comp_chat()
+        st.markdown('<div style="height:24px;"></div>', unsafe_allow_html=True)
+        expander_debates()
+        expander_notifications()
+        expander_controls()
 
 
 main()

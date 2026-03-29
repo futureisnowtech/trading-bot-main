@@ -29,7 +29,8 @@ from config import (
 from data.market_data import is_market_open, is_in_no_trade_window, get_bars
 from data.indicators import add_all_indicators, get_htf_bias
 from risk.risk_manager import get_risk_manager
-from execution.tradovate_broker import get_tradovate_broker, MES_POINT_VALUE
+from execution.ibkr_broker import get_ibkr_broker as get_tradovate_broker
+from execution.ibkr_broker import MES_POINT_VALUE
 from logging_db.trade_logger import log_event, log_signal
 from strategies.futures.mes_engine import get_engine as get_mes_engine
 from data.edge_monitor import get_edge_state, is_in_stop_cooldown, format_edge_context

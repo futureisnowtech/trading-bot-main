@@ -353,15 +353,6 @@ def monitor_exits_with_ai(engine) -> None:
                 _target_range = _target - pos['entry']
                 _target_progress = ((price - pos['entry']) / _target_range
                                     if _target_range > 0 else 0)
-                if (mins_in >= 45
-                        and _target_progress < 0.15
-                        and pnl_pct < 0.005):
-                    reason = (f"Stagnant exit: {mins_in}m in, {pnl_pct:+.2%} move, "
-                              f"{_target_progress:.0%} of target — thesis not playing out")
-                    _execute_crypto_exit(cb, rm, pid, pos, price, reason, strategy, cr_md)
-                    log_event('INFO', 'exit_monitor', reason)
-                    continue
-
                 if abs(pnl_pct) <= FLAT_POSITION_THRESHOLD_PCT and mins_in >= CRYPTO_MAX_HOLD_HOURS * 60:
                     reason = (f"Time exit: {mins_in//60}h {mins_in%60}m in trade, "
                               f"only {pnl_pct:+.1%} — releasing dead capital")

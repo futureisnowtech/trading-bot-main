@@ -311,7 +311,7 @@ def run_crypto_scan() -> None:
                                              symbol=pid)
                 market_data['super_score'] = _super['score']
                 market_data['super_label'] = _super['label']
-                if _super['score'] < 40:
+                if _super['score'] < 40 and not PAPER_TRADING:
                     log_event('INFO', 'scan_feed',
                               f"[crypto] {pid} SUPER SCORE {_super['score']:.0f} ({_super['label']}) -- abort")
                     continue
@@ -327,7 +327,7 @@ def run_crypto_scan() -> None:
             # ── Microstructure veto ────────────────────────────────────────────
             obi = market_data.get('obi')
             tfi = market_data.get('tfi')
-            if obi is not None and tfi is not None:
+            if obi is not None and tfi is not None and not PAPER_TRADING:
                 if obi < -0.35 and tfi < -0.20:
                     log_event('INFO', 'scan_feed',
                               f"[crypto] {pid} ⛔ microstructure VETO: OBI={obi:+.2f} TFI={tfi:+.2f} "
@@ -437,7 +437,7 @@ def run_crypto_scan() -> None:
                 if final.action == 'SHORT' and regime == 'trending_up':
                     log_event('INFO', 'scan_feed', f"[crypto] {pid} 🚫 regime block: trending_up, no shorts")
                     continue
-                if regime == 'ranging' and final.confidence < 0.40:
+                if regime == 'ranging' and final.confidence < 0.40 and not PAPER_TRADING:
                     log_event('INFO', 'scan_feed',
                               f"[crypto] {pid} 🚫 regime block: ranging needs 40%+ conf (got {final.confidence:.0%})")
                     continue

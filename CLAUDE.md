@@ -30,7 +30,25 @@ A fully autonomous AI-powered trading system that:
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
 
-## Current Version: v9.0 (Sprint 3 complete)
+## Current Version: v9.0 (Sprints 4+5 complete)
+- v9.0 Sprints 4+5 (2026-03-28): Parallel lanes, market sentiment signals, offline ML, multi-LLM, CI
+  - **Parallel lane scanning** (`scheduler/job_runner.py`): crypto + perp + Lane 3 now run simultaneously
+    via `ThreadPoolExecutor(max_workers=3)`. A slow BTC debate no longer delays ETH or perp scans.
+    `run_parallel_scan()` replaces 3 separate schedule entries. 5-min timeout per lane.
+  - **Perp live promotion** (`scripts/promote_perp_live.py`): 8-step checklist before flipping
+    Binance perp from testnet → mainnet. Checks API keys, testnet conn, ≥10 paper trades,
+    ≥45% WR, risk limits, halt status, fee viability, manual CONFIRM typed at terminal.
+  - **Market sentiment intelligence** (`data/market_sentiment.py`): two new signal sources:
+    • Options market signals (yfinance, no key needed): put/call ratio (>1.2=bearish, <0.7=bullish),
+      IV rank (0-100 vs 52-week range), VIX term structure (contango=normal, backwardation=stressed).
+    • Reddit sentiment (PRAW, graceful fallback): r/wallstreetbets, r/investing, r/stocks, r/CryptoCurrency.
+    Combined score → `avoid_long` flag + `debate_context` injected into every debate.
+    Add REDDIT_CLIENT_ID + REDDIT_CLIENT_SECRET to .env to activate Reddit signal.
+  - **Offline ML trainer** (`learning/ml_trainer.py`): saves `logs/ml_model.pkl` as background subprocess.
+    `ml_signal.py` loads pkl (< 6h) instead of retraining inline. Hot-reload between scans.
+  - **Multi-LLM ensemble**: Claude 40% / GPT-4o 35% / Gemini 25% — add API keys to activate.
+  - **Prediction market arbitrage** (`strategies/prediction_arb.py`): Polymarket vs Kalshi price divergence.
+  - **GitHub Actions CI** (`.github/workflows/ci.yml`): pytest + validate on every push.
 - v9.0 Sprint 3 (2026-03-28): Cost optimization + SUPER SCORE + Trade Quality panel
   - **Binance Spot broker** (`execution/binance_spot_broker.py`): replaced Coinbase for crypto execution.
     Fee: 0.10% vs Coinbase 0.40% — **4× cheaper per trade**. US geo-block handled via yfinance fallback.
@@ -393,6 +411,7 @@ algo_trading_final/
 │   ├── intelligence_bridge.py    ← Backtest → signal_stats pipeline (same table as live)
 │   ├── ml_signal.py              ← LightGBM gate: P(win) from 90d rolling trade_attribution; retrains every 50 closes
 │   ├── super_score.py            ← SUPER SCORE 0-100 composite (ML+signals+agents+context+micro); size multiplier bands
+│   ├── ml_trainer.py             ← Offline trainer: saves logs/ml_model.pkl as background subprocess (never blocks scan)
 │   ├── pm_calibrator.py          ← Lane 3: Platt scaling for LLM probability estimates (v9.0 Sprint 2)
 │   └── tax_tracker.py            ← Tax lot tracking: Section 1256 futures, short/long-term, YTD liability, harvesting (v5.2)
 │
@@ -443,7 +462,8 @@ algo_trading_final/
 │   ├── polymarket_feed.py        ← Lane 3: Gamma REST scanner, market classification
 │   ├── kalshi_feed.py            ← Lane 3: Kalshi REST feed
 │   ├── whale_tracker.py          ← Lane 3: smart money signal via CLOB trade history
-│   └── liquidation_feed.py       ← Binance taker long/short ratio as liq_signal (geo-fallback neutral)
+│   ├── liquidation_feed.py       ← Binance taker long/short ratio as liq_signal (geo-fallback neutral)
+│   └── market_sentiment.py       ← Options P/C ratio + IV rank + Reddit sentiment → avoid_long + debate_context
 │
 └── scheduler/
     ├── job_runner.py             ← Thin orchestrator (v9.0: 258L, was 1812L)
@@ -779,6 +799,9 @@ Motivation 5: "Nothing is given. Everything is earned."
          SHORT branch attribution fixed; LanceDB demoted to supplemental context
 - v8.0 (2026-03-26): 3-agent debate (Bardock/Vegeta/Krillin), ML signal gate (LightGBM),
          walk-forward OOS validation, funding rate wired into market_data, RBIPMS framework
+- v9.0 Sprints 4+5 (2026-03-28): Parallel lane scanning (ThreadPoolExecutor), market sentiment
+         (put/call ratio + IV rank + Reddit), offline ML trainer (no more blocking retrains),
+         multi-LLM ensemble (GPT-4o + Gemini optional), prediction market arb detector, GitHub CI
 - v9.0 Sprint 3 (2026-03-28): Cost optimization + SUPER SCORE + Trade Quality panel —
          Binance Spot execution (4× cheaper), Haiku debate agents (15× cheaper), true cost accounting,
          SUPER SCORE composite (0-100), MAE/MFE tracking, exit type classification,

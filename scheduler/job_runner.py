@@ -16,6 +16,7 @@ Sub-modules:
 """
 import time
 import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 import pytz
 import schedule
@@ -141,6 +142,35 @@ def run_session_open_analysis(session_name: str) -> None:
         print(f"[session_analyst] {session_name} analysis error: {e}")
 
 
+# ─── PARALLEL LANE SCAN ──────────────────────────────────────────────────────
+
+def run_parallel_scan() -> None:
+    """Run crypto, perp, and Lane 3 scans in parallel threads.
+
+    Each lane is fully independent: they share no write state except via
+    risk_manager (SQLite WAL — safe for concurrent reads and serialised writes).
+    A 60-second Claude API call for BTC no longer blocks perp or Lane 3.
+    """
+    tz = pytz.timezone(MARKET_TIMEZONE)
+    print(f"[parallel] Starting lane scan at {datetime.now(tz).strftime('%H:%M:%S')} ET")
+
+    lane_tasks: dict = {}
+    with ThreadPoolExecutor(max_workers=3, thread_name_prefix='lane') as executor:
+        lane_tasks['crypto'] = executor.submit(run_crypto_scan)
+        if PERP_ENABLED:
+            lane_tasks['perp'] = executor.submit(run_perp_scan)
+        if LANE3_ENABLED and run_prediction_market_scan is not None:
+            lane_tasks['lane3'] = executor.submit(run_prediction_market_scan)
+
+        for name, future in lane_tasks.items():
+            try:
+                future.result(timeout=300)  # 5-min hard cap per lane
+            except Exception as e:
+                log_event('ERROR', 'scheduler',
+                          f"[parallel] Lane '{name}' raised unhandled error: {e}")
+                traceback.print_exc()
+
+
 # ─── SCHEDULER SETUP & LOOP ──────────────────────────────────────────────────
 
 def setup_schedules() -> None:
@@ -151,26 +181,23 @@ def setup_schedules() -> None:
         d.at('09:35').do(run_opening_range)
         d.at('16:15').do(run_daily_close)
 
-    schedule.every(CRYPTO_SCAN_INTERVAL_SECONDS).seconds.do(run_crypto_scan)
+    # Crypto + Perp + Lane 3 all run together in parallel threads.
+    # A slow Claude call for one symbol can no longer block the other lanes.
+    schedule.every(CRYPTO_SCAN_INTERVAL_SECONDS).seconds.do(run_parallel_scan)
     schedule.every(WATCHDOG_INTERVAL_SECONDS).seconds.do(run_watchdog)
 
     if FUTURES_ENABLED:
         schedule.every(FUTURES_SCAN_INTERVAL_SECONDS).seconds.do(run_mes_scan)
-
-    if PERP_ENABLED:
-        schedule.every(CRYPTO_SCAN_INTERVAL_SECONDS).seconds.do(run_perp_scan)
-
-    if LANE3_ENABLED and run_prediction_market_scan is not None:
-        schedule.every(LANE3_SCAN_INTERVAL_SECONDS).seconds.do(run_prediction_market_scan)
-        print(f"[scheduler] Lane 3 (Prediction Markets): {LANE3_SCAN_INTERVAL_SECONDS}s")
 
     # Session-open analysis triggers (24/7 — crypto never closes)
     schedule.every().day.at('20:00').do(lambda: run_session_open_analysis('ASIA'))
     schedule.every().day.at('03:00').do(lambda: run_session_open_analysis('LONDON'))
     schedule.every().day.at('08:30').do(lambda: run_session_open_analysis('NY_OPEN'))
 
-    print(f"[scheduler] Crypto: {CRYPTO_SCAN_INTERVAL_SECONDS}s | "
-          f"Perp: {'ON' if PERP_ENABLED else 'OFF'} | Watchdog: {WATCHDOG_INTERVAL_SECONDS}s | "
+    lane3_status = f"Lane3: {LANE3_SCAN_INTERVAL_SECONDS}s" if LANE3_ENABLED else "Lane3: OFF"
+    print(f"[scheduler] Parallel scan: {CRYPTO_SCAN_INTERVAL_SECONDS}s "
+          f"(Crypto + {'Perp' if PERP_ENABLED else 'no-Perp'} + {lane3_status}) | "
+          f"Watchdog: {WATCHDOG_INTERVAL_SECONDS}s | "
           f"Session Analysis: ASIA 8pm / LONDON 3am / NY 8:30am ET")
 
 

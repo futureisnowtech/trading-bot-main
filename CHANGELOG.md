@@ -1,6 +1,15 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-03-28
+- Sprint 5: ml_trainer.py offline trainer, ml_signal.py background retrain, prediction_arb.py, CI branch fix
+
+## 2026-03-28
+- Task 1: run_parallel_scan() in job_runner.py — crypto/perp/lane3 now run in parallel ThreadPoolExecutor (3 workers, 5-min timeout each); separate schedule lines for perp/lane3 removed. Task 2: scripts/promote_perp_live.py — 8-check paper-to-live checklist for Binance perp (API keys, testnet conn, trade count, win rate, risk limits, halt state, fee viability, manual confirm)
+
+## 2026-03-28
+- Add market_sentiment.py: Reddit + options market signals (P/C ratio, IV rank, term structure) as sentiment layer; wired into market_context.get_context_for_debate() and _helpers._build_market_data()
+
+## 2026-03-28
 - Wire super_score through full trading pipeline: signal_performance, post_trade_analyzer, risk_manager, crypto_scanner (pre+post-debate compute, abort<40, size multiplier), exit_monitor (decay exit + attribution)
 
 ## 2026-03-28

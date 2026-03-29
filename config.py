@@ -87,6 +87,12 @@ KYLE_LAMBDA_LOW_PCT: float = 30.0          # Kyle lambda ≤ 30th pct = liquid m
 # ════════════════════════════════════════════════════════════════════
 ANTHROPIC_API_KEY: str = os.getenv('ANTHROPIC_API_KEY', '')
 CRYPTOPANIC_API_KEY: str = os.getenv('CRYPTOPANIC_API_KEY', '')    # Free tier at cryptopanic.com/developers/api/
+
+# Reddit sentiment (PRAW — optional; graceful fallback if missing)
+# Get free credentials: reddit.com/prefs/apps → create app (script type)
+REDDIT_CLIENT_ID:     str = os.getenv('REDDIT_CLIENT_ID',     '')
+REDDIT_CLIENT_SECRET: str = os.getenv('REDDIT_CLIENT_SECRET', '')
+REDDIT_USER_AGENT:    str = os.getenv('REDDIT_USER_AGENT',    'AlgoTradingBot/1.0')
 CLAUDE_MODEL: str = 'claude-sonnet-4-6'                      # Always latest
 CLAUDE_MODEL_EXTENDED: str = 'claude-sonnet-4-6'             # For exit extended thinking
 CLAUDE_DEBATE_MODEL: str = os.getenv('CLAUDE_DEBATE_MODEL', 'claude-haiku-4-5-20251001')  # Debate agents (cheap)

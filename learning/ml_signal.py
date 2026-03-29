@@ -22,6 +22,8 @@ Usage:
     maybe_retrain()   # call after every trade close
 """
 import os
+import pickle
+import subprocess
 import sys
 import time
 import sqlite3
@@ -31,6 +33,11 @@ from typing import Optional, Tuple
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import DB_PATH
 from logging_db.trade_logger import log_event
+
+# Path to offline-trained model artifact (written by ml_trainer.py)
+_MODEL_PKL_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                               'logs', 'ml_model.pkl')
+_MODEL_PKL_MAX_AGE_SECONDS = 6 * 3600  # treat pkl as stale after 6h
 
 RETRAIN_INTERVAL = 50      # retrain after every N new trade closes
 ML_MIN_TRAIN_SAMPLES = 30  # don't train if fewer than this many labeled trades
@@ -154,10 +161,56 @@ def _build_model():
     return LogisticRegression(class_weight='balanced', max_iter=500, random_state=42)
 
 
+def _load_from_pkl() -> bool:
+    """
+    Try to load a pre-trained model from logs/ml_model.pkl (written by ml_trainer.py).
+    Returns True if a fresh-enough model was loaded successfully.
+    """
+    global _model, _feature_cols, _last_retrain_ts
+
+    if not os.path.exists(_MODEL_PKL_PATH):
+        return False
+
+    try:
+        age = time.time() - os.path.getmtime(_MODEL_PKL_PATH)
+        if age > _MODEL_PKL_MAX_AGE_SECONDS:
+            print(f"[ml_signal] pkl exists but is {age/3600:.1f}h old (max {_MODEL_PKL_MAX_AGE_SECONDS/3600:.0f}h) — will retrain")
+            return False
+
+        with open(_MODEL_PKL_PATH, 'rb') as f:
+            payload = pickle.load(f)
+
+        _model = payload['model']
+        _feature_cols = payload.get('feature_cols', SIGNAL_FEATURES + ['regime_encoded'])
+        _last_retrain_ts = payload.get('trained_at', time.time())
+
+        n = payload.get('n_trades', '?')
+        wr = payload.get('win_rate', 0.0)
+        mtype = payload.get('model_type', type(_model).__name__)
+        print(f"[ml_signal] Loaded pkl model — {n} trades | WR={wr:.1%} | model={mtype} | age={age/60:.0f}min")
+        return True
+
+    except Exception as e:
+        print(f"[ml_signal] pkl load error: {e}")
+        return False
+
+
 def train() -> bool:
-    """Train the ML model on current attribution data. Returns True on success."""
+    """
+    Train the ML model on current attribution data. Returns True on success.
+
+    Execution order:
+    1. Try loading from logs/ml_model.pkl (fast, non-blocking)
+    2. If pkl missing or stale: fall back to inline training (existing behaviour)
+    """
     global _model, _feature_cols, _last_trade_count, _last_retrain_ts
 
+    # Fast path: use pre-trained pkl from background trainer
+    if _load_from_pkl():
+        _last_trade_count = _get_trade_count()
+        return True
+
+    # Slow path: inline train (blocks for 3-10s — acceptable at startup only)
     X, y = _load_training_data()
     if X is None or len(X) < ML_MIN_TRAIN_SAMPLES:
         print(f"[ml_signal] insufficient data ({0 if X is None else len(X)} trades) — using priors")
@@ -199,9 +252,9 @@ def train() -> bool:
 
 def maybe_retrain() -> None:
     """
-    Call after every trade close. Retrains if RETRAIN_INTERVAL new trades
-    have accumulated since last training. Rate-limited to RETRAIN_COOLDOWN.
-    Non-blocking (returns immediately if not needed).
+    Call after every trade close. When RETRAIN_INTERVAL new trades have accumulated,
+    launches ml_trainer.py as a background subprocess — scan cycle is never blocked.
+    Rate-limited to RETRAIN_COOLDOWN to prevent duplicate spawns on rapid closes.
     """
     global _last_trade_count
 
@@ -210,7 +263,25 @@ def maybe_retrain() -> None:
 
     current_count = _get_trade_count()
     if current_count - _last_trade_count >= RETRAIN_INTERVAL:
-        train()
+        _trigger_background_retrain()
+        # Optimistically advance the counter so we don't re-trigger immediately.
+        # The pkl reload in the next get_ml_signal() call will pick up the fresh model.
+        _last_trade_count = current_count
+
+
+def _trigger_background_retrain() -> None:
+    """Spawn ml_trainer.py as a detached background process (fire-and-forget)."""
+    trainer_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ml_trainer.py')
+    try:
+        subprocess.Popen(
+            [sys.executable, trainer_path],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,   # detach from parent process group
+        )
+        print("[ml_signal] Background retrain triggered")
+    except Exception as e:
+        print(f"[ml_signal] Failed to spawn background trainer: {e}")
 
 
 def get_ml_signal(market_data: dict) -> Tuple[float, str]:
@@ -225,9 +296,16 @@ def get_ml_signal(market_data: dict) -> Tuple[float, str]:
     """
     global _model
 
-    # Lazy train on first call if model not loaded
+    # Lazy load on first call. If pkl exists and is fresh, use it.
+    # Otherwise fall back to inline training.
     if _model is None:
         train()
+
+    # Hot-reload: if a fresh pkl appeared (background trainer finished), pick it up
+    if _model is not None and os.path.exists(_MODEL_PKL_PATH):
+        pkl_mtime = os.path.getmtime(_MODEL_PKL_PATH)
+        if pkl_mtime > _last_retrain_ts:
+            _load_from_pkl()
 
     if _model is None:
         return 0.5, 'no_model'

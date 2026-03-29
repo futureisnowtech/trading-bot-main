@@ -215,7 +215,7 @@ def get_full_market_context(
 def get_context_for_debate(symbol: str, market_data: dict) -> str:
     """
     Return a concise multi-line context string for injection into debate agent prompts.
-    Includes session, macro regime, news risk, and any no-trade flags.
+    Includes session, macro regime, news risk, any no-trade flags, and market sentiment.
     Called by debate_engine.run_debate() to enrich every agent's user prompt.
     """
     try:
@@ -247,6 +247,17 @@ def get_context_for_debate(symbol: str, market_data: dict) -> str:
         conviction_hints = ctx.get('conviction_hints', [])
         if conviction_hints:
             lines.append('✅ Tailwinds: ' + ' | '.join(conviction_hints))
+
+        # ── Market sentiment (Reddit + options market signals) ────────────────
+        try:
+            from data.market_sentiment import get_market_sentiment_snapshot
+            sentiment = get_market_sentiment_snapshot()
+            if sentiment.get('debate_context'):
+                lines.append(sentiment['debate_context'])
+            # Expose avoid_long flag so callers can check it
+            ctx['avoid_long'] = sentiment.get('avoid_long', False)
+        except Exception:
+            pass  # Fail-open: sentiment is enrichment, not a gate
 
         return '\n'.join(filter(None, lines))
 

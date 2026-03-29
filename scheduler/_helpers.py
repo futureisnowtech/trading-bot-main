@@ -347,4 +347,16 @@ def _build_market_data(symbol, price, df_ind, change_pct=0, regime='ranging') ->
         md['liq_avoid_long'] = False
         md['liq_long_ratio'] = 0.5
 
+    # ── Market sentiment (Reddit crowd + options market signals) ──────────────
+    try:
+        from data.market_sentiment import get_market_sentiment_snapshot
+        _sent = get_market_sentiment_snapshot()
+        md['reddit_sentiment']        = _sent['reddit'].get('score', 0)
+        md['put_call_ratio']          = _sent['options'].get('put_call_ratio', 1.0)
+        md['iv_rank']                 = _sent['options'].get('iv_rank', 50)
+        md['options_avoid_long']      = _sent.get('avoid_long', False)
+        md['market_sentiment_label']  = _sent.get('label', 'NEUTRAL')
+    except Exception:
+        pass
+
     return md

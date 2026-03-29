@@ -56,7 +56,8 @@ def main():
 
     # Sanity-check hardcoded risk values — catch accidental misconfiguration
     assert 0 < MAX_RISK_PER_TRADE_PCT <= 0.10, f"MAX_RISK_PER_TRADE_PCT={MAX_RISK_PER_TRADE_PCT} out of safe range (0–10%)"
-    assert 0 < MAX_DAILY_LOSS_PCT    <= 0.15, f"MAX_DAILY_LOSS_PCT={MAX_DAILY_LOSS_PCT} out of safe range (0–15%)"
+    _daily_loss_cap = 1.00 if PAPER_TRADING else 0.15  # paper: no learning-halt cap
+    assert 0 < MAX_DAILY_LOSS_PCT <= _daily_loss_cap, f"MAX_DAILY_LOSS_PCT={MAX_DAILY_LOSS_PCT} out of safe range"
     assert 0 < MAX_DEPLOYED_PCT      <= 1.00, f"MAX_DEPLOYED_PCT={MAX_DEPLOYED_PCT} out of safe range (0–100%)"
 
     print(f"  Mode:       {mode} TRADING")

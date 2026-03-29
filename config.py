@@ -23,13 +23,22 @@ CASH_RESERVE_PCT: float = 0.10
 
 # ════════════════════════════════════════════════════════════════════
 # RISK — HARDCODED. NO AI CAN OVERRIDE THESE.
+# Paper mode uses looser limits to maximise learning velocity.
+# Live mode uses tight limits to protect real capital.
 # ════════════════════════════════════════════════════════════════════
-MAX_RISK_PER_TRADE_PCT: float = 0.01        # 1% of account per trade (was 2%, cut 50%)
-MAX_DAILY_LOSS_PCT: float = 0.04            # 4% daily loss → halt all trading (was 8%, cut 50%)
-MAX_POSITIONS_EQUITY: int = 3               # was 5, cut 50% → 3 (PDT min)
-MAX_POSITIONS_CRYPTO: int = 5               # was 10, cut 50%
-MAX_TRADES_PER_DAY_EQUITY: int = 3          # PDT cash account compliance (regulatory, not account-size)
-MAX_TRADES_PER_DAY_CRYPTO: int = 100       # Effectively unlimited — regime gate controls quality
+MAX_RISK_PER_TRADE_PCT: float = 0.01        # 1% of account per trade
+
+# Daily loss halt: paper = 20% (don't halt learning), live = 4%
+MAX_DAILY_LOSS_PCT: float = 0.20 if PAPER_TRADING else 0.04
+
+# Max open positions: paper = wide open for learning, live = conservative
+MAX_POSITIONS_EQUITY: int = 10 if PAPER_TRADING else 3
+MAX_POSITIONS_CRYPTO: int = 20 if PAPER_TRADING else 5  # all 20 pairs can run simultaneously
+
+# Daily trade caps: paper = uncapped, live = PDT compliance
+MAX_TRADES_PER_DAY_EQUITY: int = 999 if PAPER_TRADING else 3
+MAX_TRADES_PER_DAY_CRYPTO: int = 999       # Effectively unlimited in both modes
+
 CRYPTO_MIN_PROFIT_FEE_MULTIPLE: float = 1.0     # Take-profit must clear 1.0x round-trip fees
 EQUITY_STOP_LOSS_PCT: float = 0.025        # was 0.05, cut 50%
 EQUITY_TAKE_PROFIT_PCT: float = 0.075      # was 0.15, cut 50% — maintains 3:1 R:R
@@ -56,10 +65,10 @@ CRYPTO_MACD3_SIGNAL: int = 5
 CRYPTO_MACD3_HISTOGRAM_THRESHOLD: float = 0.0
 COINBASE_TAKER_FEE_PCT: float = 0.006
 COINBASE_MAKER_FEE_PCT: float = 0.004
-MAX_DAILY_FEE_DRAG_PCT: float = 0.100  # 10% = $50 on $500 / $500 on $5000 — raised from 5%
+MAX_DAILY_FEE_DRAG_PCT: float = 0.50 if PAPER_TRADING else 0.10  # paper: fees never halt learning; live: 10% cap
 MARKET_BREADTH_MIN_SPY_PCT: float = -2.0      # Block equity longs if SPY down more than this
 BACKTEST_SLIPPAGE_PCT: float = float(os.getenv('BACKTEST_SLIPPAGE_PCT', '0.001'))  # 0.1% per leg slippage added to commission
-MAX_STRATEGY_LOSS_STREAK: int = 4             # Circuit breaker: pause strategy after N consecutive losses (was 8, cut 50%)
+MAX_STRATEGY_LOSS_STREAK: int = 99 if PAPER_TRADING else 4  # paper: never pause on streak; live: 4-loss circuit breaker
 EQUITY_MAX_HOLD_HOURS: float = 6.0            # Close equity position if flat after this many hours
 CRYPTO_MAX_HOLD_HOURS: float = 12.0           # Close crypto position if flat after this many hours
 FLAT_POSITION_THRESHOLD_PCT: float = 0.015    # Position is "flat" if P&L within ±1.5%

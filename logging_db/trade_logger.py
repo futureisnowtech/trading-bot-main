@@ -825,6 +825,94 @@ def get_open_position_health(paper: bool = True) -> list:
         return []
 
 
+def get_intelligence_log(limit: int = 30) -> dict:
+    """
+    Pull together all self-improvement events for the SELF-LEARNING LOG panel.
+
+    Returns:
+        meta_analyses:   list of meta-analysis runs (insight, WR, trades, timestamp)
+        recommendations: list of active/recent signal weight recommendations
+        agent_accuracy:  list of per-agent accuracy stats
+        ml_events:       list of ML retrain events from system_events
+        signal_shifts:   top signals ranked by Bayesian pts (current state)
+    """
+    try:
+        conn = _conn()
+        cur  = conn.cursor()
+
+        # Meta-analysis runs (what Claude learned from recent trades)
+        try:
+            cur.execute("""
+                SELECT created_at, trades_analyzed, win_rate, key_insight, patterns_found, recs_count
+                FROM meta_analysis_log
+                ORDER BY created_at DESC LIMIT ?
+            """, (limit,))
+            meta_analyses = [dict(zip([c[0] for c in cur.description], r)) for r in cur.fetchall()]
+        except Exception:
+            meta_analyses = []
+
+        # Active + recent signal weight recommendations
+        try:
+            cur.execute("""
+                SELECT signal_name, regime, weight_delta, reasoning, pattern, confidence, created_at, applied
+                FROM meta_recommendations
+                ORDER BY created_at DESC LIMIT ?
+            """, (limit,))
+            recommendations = [dict(zip([c[0] for c in cur.description], r)) for r in cur.fetchall()]
+        except Exception:
+            recommendations = []
+
+        # Agent accuracy
+        try:
+            cur.execute("""
+                SELECT agent_name, regime, accuracy, total_assessed, votes_buy, votes_hold, last_updated
+                FROM agent_stats
+                WHERE regime = 'any'
+                ORDER BY total_assessed DESC
+            """)
+            agent_accuracy = [dict(zip([c[0] for c in cur.description], r)) for r in cur.fetchall()]
+        except Exception:
+            agent_accuracy = []
+
+        # ML retrain events
+        try:
+            cur.execute("""
+                SELECT ts, message FROM system_events
+                WHERE (source='ml_trainer' OR message LIKE '%retrain%' OR message LIKE '%ml_model%'
+                       OR message LIKE '%ML model%' OR message LIKE '%Background retrain%')
+                ORDER BY ts DESC LIMIT ?
+            """, (limit,))
+            ml_events = [{'ts': r[0], 'message': r[1]} for r in cur.fetchall()]
+        except Exception:
+            ml_events = []
+
+        # Top signals by current Bayesian pts
+        try:
+            cur.execute("""
+                SELECT signal_name, regime, fires, wins, losses, win_rate, bayesian_pts, last_updated
+                FROM signal_stats
+                WHERE fires >= 5
+                ORDER BY bayesian_pts DESC LIMIT 15
+            """)
+            signal_shifts = [dict(zip([c[0] for c in cur.description], r)) for r in cur.fetchall()]
+        except Exception:
+            signal_shifts = []
+
+        conn.close()
+        return {
+            'meta_analyses':   meta_analyses,
+            'recommendations': recommendations,
+            'agent_accuracy':  agent_accuracy,
+            'ml_events':       ml_events,
+            'signal_shifts':   signal_shifts,
+        }
+    except Exception:
+        return {
+            'meta_analyses': [], 'recommendations': [], 'agent_accuracy': [],
+            'ml_events': [], 'signal_shifts': [],
+        }
+
+
 def _csv_append(ts, strategy, broker, symbol, action, order_type,
                 qty, price, value_usd, fee_usd, pnl_usd, paper, order_id, notes):
     os.makedirs(CSV_LOG_DIR, exist_ok=True)

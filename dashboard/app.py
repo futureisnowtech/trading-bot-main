@@ -34,6 +34,7 @@ from logging_db.trade_logger import (
     get_scan_feed, get_all_time_stats, get_recent_debates,
     get_monthly_api_cost, get_win_rate, get_recent_trades,
     get_recent_notifications, get_performance_attribution,
+    get_intelligence_log,
 )
 from risk.risk_manager import get_risk_manager
 
@@ -1659,6 +1660,213 @@ def expander_lane3():
             st.markdown(f'<div style="color:{RED};font-size:12px;">Lane 3 data error: {e}</div>', unsafe_allow_html=True)
 
 
+def expander_intelligence():
+    with st.expander("🧠 SELF-LEARNING LOG"):
+        _info(
+            "Everything the bot has taught itself. "
+            "<b>Meta-Analysis</b>: Claude reviews the last 100 trades and identifies patterns the math can't see — "
+            "runs after every 10 trade closes. "
+            "<b>Signal Recommendations</b>: specific weight adjustments Claude recommended and why. "
+            "<b>Agent Accuracy</b>: how often each debate agent's BUY vote led to a winning trade. "
+            "<b>ML Retrains</b>: when the prediction model was updated and on how many trades. "
+            "<b>Signal Leaderboard</b>: current Bayesian win-rate ranking (updates after every close)."
+        )
+
+        log = get_intelligence_log(limit=20)
+
+        # ── Meta-analysis runs ───────────────────────────────────────────────
+        st.markdown(f'<div style="font-size:13px;font-weight:700;color:{GOLD};'
+                    f'letter-spacing:0.08em;margin:8px 0 10px;">WHAT CLAUDE LEARNED</div>',
+                    unsafe_allow_html=True)
+
+        meta = log.get('meta_analyses', [])
+        if not meta:
+            st.markdown(f'<div style="color:{TEXT3};font-size:13px;padding:8px 0;">'
+                        f'No meta-analyses yet — fires after every 10 trade closes.</div>',
+                        unsafe_allow_html=True)
+        else:
+            for m in meta:
+                wr     = m.get('win_rate')
+                wr_str = f"{wr*100:.0f}%" if wr is not None else "?"
+                wr_clr = GREEN if wr and wr >= 0.52 else (AMBER if wr and wr >= 0.45 else RED)
+                ts_str = _fmt_ts(m.get('created_at', ''))
+                n      = m.get('trades_analyzed', 0)
+                recs   = m.get('recs_count', 0)
+                insight = m.get('key_insight') or '—'
+                patterns = m.get('patterns_found') or ''
+
+                st.markdown(
+                    f'<div style="border:1px solid {BORDER};border-radius:10px;'
+                    f'padding:14px 16px;margin-bottom:10px;background:{SURFACE};">'
+                    f'<div style="display:flex;justify-content:space-between;margin-bottom:8px;">'
+                    f'  <span style="font-size:12px;color:{TEXT3};">{ts_str}</span>'
+                    f'  <span style="font-size:12px;color:{TEXT2};">{n} trades · '
+                    f'WR <span style="color:{wr_clr};font-weight:700;">{wr_str}</span> · '
+                    f'{recs} recs made</span>'
+                    f'</div>'
+                    f'<div style="font-size:13px;color:{TEXT};font-weight:600;margin-bottom:6px;">'
+                    f'💡 {insight}</div>'
+                    + (f'<div style="font-size:12px;color:{TEXT2};font-style:italic;">{patterns[:300]}</div>'
+                       if patterns else '')
+                    + f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+        st.markdown('<div style="height:8px;"></div>', unsafe_allow_html=True)
+
+        # ── Active signal recommendations ────────────────────────────────────
+        st.markdown(f'<div style="font-size:13px;font-weight:700;color:{GOLD};'
+                    f'letter-spacing:0.08em;margin:8px 0 10px;">SIGNAL WEIGHT CHANGES</div>',
+                    unsafe_allow_html=True)
+
+        recs = log.get('recommendations', [])
+        if not recs:
+            st.markdown(f'<div style="color:{TEXT3};font-size:13px;padding:8px 0;">'
+                        f'No recommendations yet.</div>', unsafe_allow_html=True)
+        else:
+            html = ''
+            for r in recs:
+                delta   = float(r.get('weight_delta') or 0)
+                applied = bool(r.get('applied'))
+                delta_clr = GREEN if delta > 0 else RED
+                sign      = '+' if delta > 0 else ''
+                arrow     = '▲' if delta > 0 else '▼'
+                conf      = float(r.get('confidence') or 0)
+                status    = f'<span style="color:{TEXT3};font-size:11px;">applied</span>' \
+                            if applied else f'<span style="color:{AMBER};font-size:11px;">active</span>'
+                regime_str = r.get('regime') or 'any'
+                reasoning  = (r.get('reasoning') or '')[:120]
+                html += (
+                    f'<div style="padding:10px 0;border-bottom:1px solid {BORDER};">'
+                    f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;">'
+                    f'  <span style="font-weight:700;color:{TEXT};font-size:13px;">'
+                    f'    {r.get("signal_name","?")}</span>'
+                    f'  <span style="color:{TEXT3};font-size:12px;">[{regime_str}]</span>'
+                    f'  <span style="color:{delta_clr};font-weight:700;font-size:13px;">'
+                    f'    {arrow} {sign}{delta:+.1f} pts</span>'
+                    f'  <span style="color:{TEXT3};font-size:11px;">conf {conf:.0%}</span>'
+                    f'  {status}'
+                    f'</div>'
+                    f'<div style="font-size:12px;color:{TEXT2};font-style:italic;">{reasoning}</div>'
+                    f'</div>'
+                )
+            st.markdown(f'<div class="card-flush">{html}</div>', unsafe_allow_html=True)
+
+        st.markdown('<div style="height:8px;"></div>', unsafe_allow_html=True)
+
+        # ── Two-column: Agent accuracy + ML events ───────────────────────────
+        col_a, col_b = st.columns(2)
+
+        with col_a:
+            st.markdown(f'<div style="font-size:13px;font-weight:700;color:{GOLD};'
+                        f'letter-spacing:0.08em;margin:8px 0 10px;">AGENT ACCURACY</div>',
+                        unsafe_allow_html=True)
+            agents = log.get('agent_accuracy', [])
+            if not agents:
+                st.markdown(f'<div style="color:{TEXT3};font-size:13px;">No agent data yet.</div>',
+                            unsafe_allow_html=True)
+            else:
+                agent_labels = {
+                    'funding_regime':    'Bardock (Macro)',
+                    'momentum_structure':'Vegeta (Momentum)',
+                    'risk_economics':    'Krillin (Risk)',
+                }
+                for a in agents:
+                    name  = a.get('agent_name', '?')
+                    label = agent_labels.get(name, name)
+                    acc   = a.get('accuracy')
+                    total = a.get('total_assessed', 0)
+                    acc_str = f"{acc*100:.0f}%" if acc is not None else "—"
+                    acc_clr = GREEN if acc and acc >= 0.55 else (AMBER if acc and acc >= 0.45 else RED)
+                    bar_w   = int((acc or 0) * 100)
+                    st.markdown(
+                        f'<div style="padding:8px 0;border-bottom:1px solid {BORDER};">'
+                        f'<div style="display:flex;justify-content:space-between;margin-bottom:4px;">'
+                        f'  <span style="font-size:13px;color:{TEXT};">{label}</span>'
+                        f'  <span style="font-size:13px;font-weight:700;color:{acc_clr};">'
+                        f'    {acc_str}</span>'
+                        f'</div>'
+                        f'<div style="font-size:11px;color:{TEXT3};margin-bottom:4px;">'
+                        f'  {total} assessed</div>'
+                        f'<div style="height:4px;background:{BORDER};border-radius:2px;">'
+                        f'  <div style="height:4px;width:{bar_w}%;background:{acc_clr};'
+                        f'    border-radius:2px;transition:width 0.3s;"></div>'
+                        f'</div>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+
+        with col_b:
+            st.markdown(f'<div style="font-size:13px;font-weight:700;color:{GOLD};'
+                        f'letter-spacing:0.08em;margin:8px 0 10px;">ML MODEL RETRAINS</div>',
+                        unsafe_allow_html=True)
+            ml = log.get('ml_events', [])
+            if not ml:
+                st.markdown(f'<div style="color:{TEXT3};font-size:13px;">'
+                            f'No retrains yet — triggers after 50 trade closes '
+                            f'(currently runs as background subprocess).</div>',
+                            unsafe_allow_html=True)
+            else:
+                html = ''
+                for e in ml:
+                    html += (
+                        f'<div style="font-family:monospace;font-size:12px;color:{TEXT2};'
+                        f'padding:5px 0;border-bottom:1px solid {BORDER};">'
+                        f'<span style="color:{TEXT3};">{_fmt_ts(e.get("ts",""), short=True)}</span>'
+                        f'&nbsp; {e.get("message","")[:120]}'
+                        f'</div>'
+                    )
+                st.markdown(f'<div class="card-flush">{html}</div>', unsafe_allow_html=True)
+
+        st.markdown('<div style="height:8px;"></div>', unsafe_allow_html=True)
+
+        # ── Signal leaderboard ───────────────────────────────────────────────
+        st.markdown(f'<div style="font-size:13px;font-weight:700;color:{GOLD};'
+                    f'letter-spacing:0.08em;margin:8px 0 10px;">SIGNAL LEADERBOARD '
+                    f'<span style="font-weight:400;color:{TEXT3};font-size:11px;">'
+                    f'(Bayesian pts, ≥5 fires)</span></div>',
+                    unsafe_allow_html=True)
+
+        signals = log.get('signal_shifts', [])
+        if not signals:
+            st.markdown(f'<div style="color:{TEXT3};font-size:13px;">No signal data yet.</div>',
+                        unsafe_allow_html=True)
+        else:
+            max_pts = max((float(s.get('bayesian_pts') or 1) for s in signals), default=1)
+            html = ''
+            for i, s in enumerate(signals):
+                pts    = float(s.get('bayesian_pts') or 0)
+                wr     = float(s.get('win_rate') or 0)
+                fires  = int(s.get('fires') or 0)
+                wins   = int(s.get('wins') or 0)
+                regime = s.get('regime', 'any')
+                wr_clr = GREEN if wr >= 0.55 else (AMBER if wr >= 0.45 else RED)
+                bar_w  = int(pts / max_pts * 100) if max_pts > 0 else 0
+                rank_clr = GOLD if i == 0 else (TEXT2 if i < 3 else TEXT3)
+                html += (
+                    f'<div style="padding:8px 0;border-bottom:1px solid {BORDER};">'
+                    f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">'
+                    f'  <div>'
+                    f'    <span style="color:{rank_clr};font-weight:700;font-size:12px;">#{i+1}</span>'
+                    f'    &nbsp;<span style="font-size:13px;color:{TEXT};">'
+                    f'      {s.get("signal_name","?")}</span>'
+                    f'    &nbsp;<span style="font-size:11px;color:{TEXT3};">[{regime}]</span>'
+                    f'  </div>'
+                    f'  <div style="text-align:right;">'
+                    f'    <span style="font-size:13px;font-weight:700;color:{wr_clr};">'
+                    f'      {wr*100:.0f}% WR</span>'
+                    f'    &nbsp;<span style="font-size:11px;color:{TEXT3};">'
+                    f'      {wins}/{fires} · {pts:.1f}pts</span>'
+                    f'  </div>'
+                    f'</div>'
+                    f'<div style="height:3px;background:{BORDER};border-radius:2px;">'
+                    f'  <div style="height:3px;width:{bar_w}%;background:{wr_clr};border-radius:2px;"></div>'
+                    f'</div>'
+                    f'</div>'
+                )
+            st.markdown(f'<div class="card-flush">{html}</div>', unsafe_allow_html=True)
+
+
 def expander_controls():
     with st.expander("CONTROLS"):
         _info("Bot management. .env changes take effect on the next scan cycle.")
@@ -2207,6 +2415,7 @@ def main():
         st.markdown('<div style="height:24px;"></div>', unsafe_allow_html=True)
         expander_debates()
         expander_notifications()
+        expander_intelligence()
         expander_controls()
 
 

@@ -521,11 +521,13 @@ def run_crypto_scan() -> None:
                 if not risk_check:
                     log_event('INFO', 'scan_feed', f"[crypto] {pid} ⛔ {risk_check.reason}")
                     continue
-                exec_result = cb.buy_limit(pid, risk_check.adjusted_size, price * 1.001,
+                _entry_price = price * 1.001
+                _qty = risk_check.adjusted_size / _entry_price
+                exec_result = cb.buy_limit(pid, _qty, _entry_price,
                                            'crypto_macd_consensus', final.stop_loss, final.take_profit)
                 if exec_result:
                     rm.register_position('crypto_macd_consensus', pid,
-                                         risk_check.adjusted_size / price, price,
+                                         _qty, price,
                                          final.stop_loss, final.take_profit,
                                          direction='LONG', entry_reason=final.reasoning,
                                          agent_votes=debate_result.vote_breakdown,
@@ -614,13 +616,15 @@ def run_crypto_scan() -> None:
                                 log_event('INFO', 'scan_feed',
                                           f"[crypto] {pid} ⛔ MR blocked: {_rc.reason}")
                             else:
-                                _res = cb.buy_limit(pid, _rc.adjusted_size, price2 * 1.001,
+                                _mr_entry = price2 * 1.001
+                                _mr_qty = _rc.adjusted_size / _mr_entry
+                                _res = cb.buy_limit(pid, _mr_qty, _mr_entry,
                                                     'crypto_mean_reversion',
                                                     mr_sig.stop_loss, mr_sig.take_profit)
                                 if _res:
                                     rm.register_position(
                                         'crypto_mean_reversion', pid,
-                                        _rc.adjusted_size / price2, price2,
+                                        _mr_qty, price2,
                                         mr_sig.stop_loss, mr_sig.take_profit,
                                         direction='LONG', entry_reason=mr_sig.reason)
                                     log_event('INFO', 'scan_feed',
@@ -691,13 +695,15 @@ def run_crypto_scan() -> None:
                                 log_event('INFO', 'scan_feed',
                                           f"[crypto] {pid} ⛔ Range scalp blocked: {_rc.reason}")
                             else:
-                                _res = cb.buy_limit(pid, _rc.adjusted_size, price2 * 1.001,
+                                _rs_entry = price2 * 1.001
+                                _rs_qty = _rc.adjusted_size / _rs_entry
+                                _res = cb.buy_limit(pid, _rs_qty, _rs_entry,
                                                     'crypto_range_scalper',
                                                     rs_sig.stop_loss, rs_sig.take_profit)
                                 if _res:
                                     rm.register_position(
                                         'crypto_range_scalper', pid,
-                                        _rc.adjusted_size / price2, price2,
+                                        _rs_qty, price2,
                                         rs_sig.stop_loss, rs_sig.take_profit,
                                         direction='LONG', entry_reason=rs_sig.reason)
                                     _rs_bb_w = rs_sig.metadata.get('bb_width', 0)

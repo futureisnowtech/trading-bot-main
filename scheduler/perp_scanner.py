@@ -129,6 +129,65 @@ def run_perp_scan() -> None:
     rm.ping()
 
 
+def run_perp_time_watchdog() -> None:
+    """Independent 4h time-exit watchdog — runs on its own schedule, never
+    blocked by scanner loop failures.
+
+    This is a safety net separate from _monitor_perp_exit inside run_perp_scan.
+    If the main perp scanner crashes or stalls, this still closes stale positions
+    on a 5-minute heartbeat.
+    """
+    if not PERP_ENABLED:
+        return
+    rm = get_risk_manager()
+    if rm.is_halted:
+        return
+
+    from execution.binance_broker import get_binance_broker
+    bb = get_binance_broker()
+    if not bb.is_connected():
+        bb.connect()
+
+    all_pos = rm.get_all_positions()
+    perp_positions = all_pos.get('perp', {})
+    if not perp_positions:
+        return
+
+    from datetime import datetime as _dt
+    tz = pytz.timezone(MARKET_TIMEZONE)
+    now = _dt.now(tz)
+
+    for symbol, pos in list(perp_positions.items()):
+        try:
+            ts_entry = pos.get('ts_entry', '')
+            try:
+                entry_dt = _dt.fromisoformat(ts_entry)
+                mins_in = int((now - (entry_dt if entry_dt.tzinfo
+                               else entry_dt.replace(tzinfo=tz))).total_seconds() / 60)
+            except Exception:
+                mins_in = 0
+
+            if mins_in >= 240:
+                current_price = bb.get_mark_price(symbol)
+                if not current_price:
+                    log_event('WARNING', 'perp_watchdog',
+                              f"[watchdog] {symbol}: {mins_in}m old — can't get price, skipping")
+                    continue
+                direction = pos.get('direction', 'LONG')
+                pnl_pct = ((current_price - pos['entry']) / pos['entry']
+                           if direction == 'LONG'
+                           else (pos['entry'] - current_price) / pos['entry'])
+                reason = (f"Perp watchdog 4h exit: {mins_in}m, pnl={pnl_pct:+.2%} "
+                          f"(independent watchdog — not via scanner loop)")
+                log_event('WARNING', 'perp_watchdog',
+                          f"[watchdog] STALE {symbol} {mins_in}m — force-closing | {reason}")
+                from scheduler.exit_monitor import _execute_perp_exit
+                _execute_perp_exit(bb, rm, symbol, pos, reason, pos_fallback=pos)
+
+        except Exception as e:
+            log_event('ERROR', 'perp_watchdog', f"{symbol}: {e}")
+
+
 def _monitor_perp_exit(bb, rm, symbol: str, pos: dict) -> None:
     """Check if an open perp position should be closed."""
     try:

@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-03-30
+- v9.3: perp watchdog + traceback logging + risk reduction (post 2026-03-30 audit)
+
+## 2026-03-30
 - v9.2: perp exit restart fix + ML data fix + agent_votes format + dashboard overhaul + buy_limit qty fix
 
 ## 2026-03-30

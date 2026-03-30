@@ -30,6 +30,24 @@ A fully autonomous AI-powered trading system that:
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
 
+## Current Version: v9.3 (2026-03-30: perp watchdog + traceback logging + risk reduction)
+- v9.3 (2026-03-30): Post-audit emergency fixes — root cause: +$288→-$285 P&L swing from 8 stale perp positions force-closed after 4–17h due to 3-hour scanner outage with empty exception messages
+  - **Independent perp time-exit watchdog** (`scheduler/perp_scanner.py`): `run_perp_time_watchdog()`
+    runs every 5 minutes on its OWN schedule (wired into `setup_schedules()` in job_runner.py).
+    Iterates ALL perp positions from `rm.get_all_positions()['perp']` directly — does NOT depend on
+    the scanner loop successfully iterating. If the scanner crashes/hangs, this still force-closes
+    any position >= 240 minutes old. Calls `_execute_perp_exit` with `pos_fallback=pos` so broker
+    reconstruction works after restarts. This is the direct fix for the $545 loss on 2026-03-30.
+  - **Full traceback in DB** (`scheduler/job_runner.py`): Parallel lane exception handler now logs
+    `traceback.format_exc()[:1000]` to the `system_events` table via `log_event`. Previously only
+    `str(e)` was logged — which was empty for exceptions with no message, making the root cause
+    of the 07:00-10:00 ET scanner outage completely undiagnosable. Next identical failure will show
+    the full stack trace in the DB.
+  - **Perp risk reduction** (`.env`): PERP_MAX_POSITIONS 8→3, PERP_MAX_LEVERAGE 20→10,
+    PERP_POSITION_SIZE_USD 250→100. Previous settings = $40,000 notional on a $5,000 account (800%).
+    New settings = max $3,000 notional (60%). Will restore after 5+ consecutive days of confirmed
+    4h exit reliability via the new watchdog.
+
 ## Current Version: v9.2 (2026-03-30: audit fixes — perp exit, ML data, agent votes, dashboard)
 - v9.2 (2026-03-30): Post-audit critical fixes
   - **Perp exit after restart fixed** (`execution/binance_broker.py`): `close_position` now accepts

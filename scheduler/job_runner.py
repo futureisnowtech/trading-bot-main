@@ -59,10 +59,18 @@ from scheduler.exit_monitor import (
     monitor_exits_with_ai, _execute_crypto_exit,
 )
 from scheduler.crypto_scanner import run_crypto_scan
-from scheduler.perp_scanner import run_perp_scan, _monitor_perp_exit
+from scheduler.perp_scanner import run_perp_scan, _monitor_perp_exit, run_perp_time_watchdog
 from scheduler.mes_scanner import (
     run_mes_scan, run_mes_premarket, run_mes_opening_range,
 )
+try:
+    from scheduler.derivatives_momentum_scanner import run_derivatives_momentum_scan
+    _DERIV_SCANNER_AVAILABLE = True
+except Exception as _dse:
+    run_derivatives_momentum_scan = None
+    _DERIV_SCANNER_AVAILABLE = False
+    print(f"[scheduler] Derivatives momentum scanner unavailable: {_dse}")
+
 if LANE3_ENABLED:
     try:
         from scheduler.lane3_scanner import run_prediction_market_scan
@@ -153,12 +161,18 @@ def run_parallel_scan() -> None:
     """
     tz = pytz.timezone(MARKET_TIMEZONE)
     print(f"[parallel] Starting lane scan at {datetime.now(tz).strftime('%H:%M:%S')} ET")
+    log_event('INFO', 'heartbeat', f"scan cycle {datetime.now(tz).strftime('%H:%M:%S')}")
 
     lane_tasks: dict = {}
-    with ThreadPoolExecutor(max_workers=3, thread_name_prefix='lane') as executor:
+    # Lane 4 (derivatives momentum) runs on every cycle when perp is enabled
+    _run_deriv = _DERIV_SCANNER_AVAILABLE and PERP_ENABLED and run_derivatives_momentum_scan is not None
+    _max_workers = 3 + (1 if _run_deriv else 0) + (1 if LANE3_ENABLED and run_prediction_market_scan else 0)
+    with ThreadPoolExecutor(max_workers=max(4, _max_workers), thread_name_prefix='lane') as executor:
         lane_tasks['crypto'] = executor.submit(run_crypto_scan)
         if PERP_ENABLED:
             lane_tasks['perp'] = executor.submit(run_perp_scan)
+        if _run_deriv:
+            lane_tasks['deriv'] = executor.submit(run_derivatives_momentum_scan)
         if LANE3_ENABLED and run_prediction_market_scan is not None:
             lane_tasks['lane3'] = executor.submit(run_prediction_market_scan)
 
@@ -166,9 +180,17 @@ def run_parallel_scan() -> None:
             try:
                 future.result(timeout=300)  # 5-min hard cap per lane
             except Exception as e:
+                _tb_str = traceback.format_exc()
                 log_event('ERROR', 'scheduler',
-                          f"[parallel] Lane '{name}' raised unhandled error: {e}")
+                          f"[parallel] Lane '{name}' raised unhandled error: {e}\n{_tb_str[:1000]}")
                 traceback.print_exc()
+
+    # Run health check after every scan cycle (rate-limited internally to 1/min)
+    try:
+        from monitoring.health_check import run_health_check
+        run_health_check()
+    except Exception as _hce:
+        pass  # health check must never crash the scan loop
 
 
 # ─── SCHEDULER SETUP & LOOP ──────────────────────────────────────────────────
@@ -186,6 +208,12 @@ def setup_schedules() -> None:
     schedule.every(CRYPTO_SCAN_INTERVAL_SECONDS).seconds.do(run_parallel_scan)
     schedule.every(WATCHDOG_INTERVAL_SECONDS).seconds.do(run_watchdog)
 
+    # Independent perp time-exit watchdog — runs every 5 min on its own schedule.
+    # Closes any perp position that has been open >= 4h even if the scanner loop
+    # crashes, hangs, or throws an unhandled exception.
+    if PERP_ENABLED:
+        schedule.every(300).seconds.do(run_perp_time_watchdog)
+
     if FUTURES_ENABLED:
         schedule.every(FUTURES_SCAN_INTERVAL_SECONDS).seconds.do(run_mes_scan)
 
@@ -195,8 +223,9 @@ def setup_schedules() -> None:
     schedule.every().day.at('08:30').do(lambda: run_session_open_analysis('NY_OPEN'))
 
     lane3_status = f"Lane3: {LANE3_SCAN_INTERVAL_SECONDS}s" if LANE3_ENABLED else "Lane3: OFF"
+    deriv_status = "DerivMomentum: ON" if _DERIV_SCANNER_AVAILABLE and PERP_ENABLED else "DerivMomentum: OFF"
     print(f"[scheduler] Parallel scan: {CRYPTO_SCAN_INTERVAL_SECONDS}s "
-          f"(Crypto + {'Perp' if PERP_ENABLED else 'no-Perp'} + {lane3_status}) | "
+          f"(Crypto + {'Perp' if PERP_ENABLED else 'no-Perp'} + {deriv_status} + {lane3_status}) | "
           f"Watchdog: {WATCHDOG_INTERVAL_SECONDS}s | "
           f"Session Analysis: ASIA 8pm / LONDON 3am / NY 8:30am ET")
 

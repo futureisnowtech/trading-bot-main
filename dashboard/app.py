@@ -74,16 +74,16 @@ st.set_page_config(
 BG       = "#08090e"
 SURFACE  = "#0f1018"
 CARD     = "#13141f"
-BORDER   = "#1e2038"
-BORDER2  = "#272945"
+BORDER   = "#252843"
+BORDER2  = "#2f3456"
 GOLD     = "#f5a623"
 GREEN    = "#10c98f"
 RED      = "#f03e5e"
 AMBER    = "#f59e0b"
 BLUE     = "#4f8ef7"
 TEXT     = "#eef0f6"
-TEXT2    = "#7c849e"
-TEXT3    = "#3a3f58"
+TEXT2    = "#a8b0cc"
+TEXT3    = "#6b7494"
 
 st.markdown(f"""
 <style>
@@ -142,9 +142,9 @@ div[data-testid="column"] {{ padding: 0 6px !important; }}
     background: linear-gradient(90deg, transparent, {GOLD}55, transparent);
 }}
 .hero-label {{
-    font-size: 12px; font-weight: 700;
-    letter-spacing: 5px; text-transform: uppercase;
-    color: {TEXT3}; margin-bottom: 14px;
+    font-size: 13px; font-weight: 800;
+    letter-spacing: 4px; text-transform: uppercase;
+    color: {TEXT2}; margin-bottom: 14px;
 }}
 .hero-pnl {{
     font-size: 96px; font-weight: 900; line-height: 1;
@@ -165,9 +165,9 @@ div[data-testid="column"] {{ padding: 0 6px !important; }}
     height: 100%;
 }}
 .met-label {{
-    font-size: 11px; font-weight: 700;
-    letter-spacing: 3px; text-transform: uppercase;
-    color: {TEXT3}; margin-bottom: 12px;
+    font-size: 12px; font-weight: 800;
+    letter-spacing: 2.5px; text-transform: uppercase;
+    color: {TEXT2}; margin-bottom: 12px;
 }}
 .met-value {{
     font-size: 34px; font-weight: 800;
@@ -181,9 +181,9 @@ div[data-testid="column"] {{ padding: 0 6px !important; }}
 
 /* ── SECTION HEADER ── */
 .sec {{
-    font-size: 12px; font-weight: 700;
-    letter-spacing: 3px; text-transform: uppercase;
-    color: {TEXT3}; padding: 28px 0 12px 0;
+    font-size: 13px; font-weight: 800;
+    letter-spacing: 2.5px; text-transform: uppercase;
+    color: {TEXT2}; padding: 28px 0 12px 0;
     display: flex; align-items: center; gap: 10px;
 }}
 .sec-line {{
@@ -198,9 +198,9 @@ div[data-testid="column"] {{ padding: 0 6px !important; }}
     padding: 24px 24px 22px 24px;
 }}
 .edge-market {{
-    font-size: 11px; font-weight: 700;
-    letter-spacing: 4px; text-transform: uppercase;
-    color: {TEXT3}; margin-bottom: 14px;
+    font-size: 12px; font-weight: 800;
+    letter-spacing: 3px; text-transform: uppercase;
+    color: {TEXT2}; margin-bottom: 14px;
 }}
 .edge-status {{
     font-size: 22px; font-weight: 800;
@@ -239,7 +239,7 @@ div[data-testid="column"] {{ padding: 0 6px !important; }}
     font-family: 'JetBrains Mono', monospace;
 }}
 .pos-strategy {{
-    font-size: 12px; color: {TEXT3};
+    font-size: 12px; color: {TEXT2};
     font-weight: 600; letter-spacing: 1px;
     text-transform: uppercase; margin-top: 3px;
 }}
@@ -252,9 +252,9 @@ div[data-testid="column"] {{ padding: 0 6px !important; }}
     display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
 }}
 .pos-dist-label {{
-    font-size: 12px; color: {TEXT3};
+    font-size: 12px; color: {TEXT2};
     text-transform: uppercase; letter-spacing: 2px;
-    margin-bottom: 5px;
+    font-weight: 700; margin-bottom: 5px;
 }}
 .pos-dist-val {{
     font-size: 20px; font-weight: 700;
@@ -274,9 +274,9 @@ div[data-testid="column"] {{ padding: 0 6px !important; }}
     padding: 20px 22px;
 }}
 .mkt-title {{
-    font-size: 11px; font-weight: 700;
-    letter-spacing: 4px; text-transform: uppercase;
-    color: {TEXT3}; margin-bottom: 16px;
+    font-size: 13px; font-weight: 800;
+    letter-spacing: 3px; text-transform: uppercase;
+    color: {TEXT}; margin-bottom: 16px;
     padding-bottom: 12px;
     border-bottom: 1px solid {BORDER};
 }}
@@ -313,9 +313,9 @@ div[data-testid="column"] {{ padding: 0 6px !important; }}
     align-items: center; margin-bottom: 10px;
 }}
 .gauge-name {{
-    font-size: 12px; font-weight: 700;
+    font-size: 13px; font-weight: 800;
     text-transform: uppercase; letter-spacing: 2px;
-    color: {TEXT2};
+    color: {TEXT};
 }}
 .gauge-val {{
     font-size: 16px; font-weight: 800;
@@ -389,18 +389,24 @@ div[data-testid="column"] {{ padding: 0 6px !important; }}
 
 /* ── STATUS BAR ── */
 .statusbar {{
-    display: flex; align-items: center; gap: 12px;
-    padding: 10px 18px;
+    display: flex; align-items: center; gap: 14px;
+    padding: 12px 20px;
     background: {SURFACE};
     border: 1px solid {BORDER};
     border-radius: 12px;
     margin-bottom: 20px;
 }}
-.sb-dot {{ width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }}
-.sb-text {{ font-size: 13px; font-weight: 600; color: {TEXT}; }}
-.sb-muted {{ font-size: 12px; color: {TEXT2}; }}
-.sb-sep {{ color: {BORDER2}; }}
-.sb-right {{ margin-left: auto; font-size: 12px; color: {TEXT3};
+.sb-dot {{ width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }}
+.sb-text {{ font-size: 14px; font-weight: 700; color: {TEXT}; }}
+.sb-muted {{ font-size: 13px; color: {TEXT2}; }}
+.sb-activity {{ font-size: 12px; color: {TEXT2};
+    font-family: 'JetBrains Mono', monospace;
+    background: {CARD}; border-radius: 6px;
+    padding: 3px 10px; border: 1px solid {BORDER};
+    max-width: 380px; overflow: hidden;
+    white-space: nowrap; text-overflow: ellipsis; }}
+.sb-sep {{ color: {BORDER2}; font-size: 16px; }}
+.sb-right {{ margin-left: auto; font-size: 13px; font-weight: 600; color: {TEXT2};
     font-family: 'JetBrains Mono', monospace; }}
 
 /* ── HALT BANNER ── */
@@ -540,11 +546,11 @@ st.markdown("""
     margin-right:10px;
 }
 .scan-reason {
-    font-size:11px; color:#7c849e; flex:1;
+    font-size:12px; color:#a8b0cc; flex:1;
     overflow:hidden; white-space:nowrap; text-overflow:ellipsis;
 }
 .scan-time {
-    font-size:11px; color:#3a3f58;
+    font-size:11px; color:#6b7494;
     font-family:'JetBrains Mono',monospace;
     margin-left:10px; min-width:55px; text-align:right;
 }
@@ -595,11 +601,11 @@ st.markdown("""
     flex-shrink:0;
 }
 .scanner-label {
-    font-size:11px; font-weight:700; letter-spacing:3px;
-    text-transform:uppercase; color:#3a3f58;
+    font-size:12px; font-weight:800; letter-spacing:2.5px;
+    text-transform:uppercase; color:#a8b0cc;
 }
 .scanner-count {
-    font-size:12px; color:#7c849e; margin-left:auto;
+    font-size:12px; color:#a8b0cc; margin-left:auto;
     font-family:'JetBrains Mono',monospace;
 }
 
@@ -900,26 +906,84 @@ def comp_status_bar():
     is_halted, halt_reason = _halt_state()
     secs = _bot_age()
 
+    # Pull last scan event for activity detail
+    last_msg = ''
+    last_secs = None
+    open_count = 0
+    try:
+        conn = _db()
+        row = conn.execute(
+            "SELECT source, message, ts FROM system_events ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        if row:
+            raw = str(row['message'] or '')
+            # Parse "[lane] SYMBOL verdict | detail" → show "lane · SYMBOL verdict"
+            if raw.startswith('['):
+                end = raw.find(']')
+                if end > 0:
+                    lane = raw[1:end]
+                    rest = raw[end+2:].split('|')[0].strip()
+                    last_msg = f'{lane.upper()} · {rest}'
+                else:
+                    last_msg = raw[:55]
+            else:
+                last_msg = raw[:55]
+            try:
+                dt = datetime.fromisoformat(row['ts'])
+                if not dt.tzinfo:
+                    dt = dt.replace(tzinfo=_tz.utc)
+                last_secs = int((datetime.now(_tz.utc) - dt).total_seconds())
+            except Exception:
+                pass
+        open_count = conn.execute(
+            "SELECT COUNT(*) FROM open_positions WHERE paper=?", (int(PAPER_TRADING),)
+        ).fetchone()[0]
+        conn.close()
+    except Exception:
+        pass
+
     if PAPER_TRADING:
         mode_chip = f'<span class="chip chip-paper">PAPER TRADING</span>'
     else:
         mode_chip = f'<span class="chip chip-live">⚡ LIVE — REAL MONEY</span>'
 
     if secs is None:
-        dot_clr, bot_txt, bot_age = '#555', 'Not started', ''
+        dot_clr, bot_txt = '#555', 'NOT STARTED'
+        age_html = ''
     elif secs > 180:
-        dot_clr, bot_txt, bot_age = RED, 'Stale', f'{int(secs)}s ago'
+        dot_clr, bot_txt = RED, 'STALE'
+        age_html = f'<span class="sb-muted">{int(secs)}s since last event</span>'
     else:
-        dot_clr, bot_txt, bot_age = GREEN, 'Running', f'{int(secs)}s ago'
+        dot_clr, bot_txt = GREEN, 'RUNNING'
+        if last_secs is not None and last_secs < 5:
+            age_html = f'<span class="sb-muted">active now</span>'
+        elif last_secs is not None:
+            age_html = f'<span class="sb-muted">{last_secs}s ago</span>'
+        else:
+            age_html = ''
+
+    activity_html = (
+        f'<span class="sb-sep">·</span>'
+        f'<span class="sb-activity">{last_msg}</span>'
+    ) if last_msg else ''
+
+    pos_html = (
+        f'<span class="sb-sep">·</span>'
+        f'<span class="sb-muted">'
+        f'<span style="color:{GREEN if open_count else TEXT3};font-weight:700;">{open_count}</span>'
+        f' open</span>'
+    )
 
     st.markdown(
         f'<div class="statusbar">'
         f'{mode_chip}'
         f'<span class="sb-sep">·</span>'
         f'<span class="sb-dot" style="background:{dot_clr};'
-        f'{"box-shadow:0 0 6px " + dot_clr + ";" if dot_clr == GREEN else ""}"></span>'
+        f'{"box-shadow:0 0 8px " + dot_clr + "99;" if dot_clr == GREEN else ""}"></span>'
         f'<span class="sb-text">{bot_txt}</span>'
-        f'{"<span class=sb-muted>" + bot_age + "</span>" if bot_age else ""}'
+        f'{age_html}'
+        f'{activity_html}'
+        f'{pos_html}'
         f'<span class="sb-right">{_et()}</span>'
         f'</div>',
         unsafe_allow_html=True,

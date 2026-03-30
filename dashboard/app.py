@@ -1490,10 +1490,21 @@ def comp_positions():
             else:
                 price_line = ''
 
-            to_stop   = abs(entry - stop)   / entry * 100 if entry > 0 and stop > 0   else 0
-            to_target = abs(target - entry) / entry * 100 if entry > 0 and target > 0 else 0
-            stop_pct  = min(100, int((to_stop / CRYPTO_STOP_LOSS_PCT / 100) * 100))
-            tgt_pct   = min(100, int((to_target / CRYPTO_TAKE_PROFIT_PCT / 100) * 100))
+            # Use current price for live distance; fall back to entry if no price feed
+            ref_price = current if (current and current > 0) else entry
+            if direc == 'SHORT':
+                to_stop   = (stop - ref_price)   / ref_price * 100 if ref_price > 0 and stop > 0   else 0
+                to_target = (ref_price - target)  / ref_price * 100 if ref_price > 0 and target > 0 else 0
+            else:
+                to_stop   = (ref_price - stop)    / ref_price * 100 if ref_price > 0 and stop > 0   else 0
+                to_target = (target - ref_price)  / ref_price * 100 if ref_price > 0 and target > 0 else 0
+            to_stop   = max(0.0, to_stop)
+            to_target = max(0.0, to_target)
+            # Progress bars: fill relative to original stop/target distances from entry
+            orig_stop_dist   = abs(entry - stop)   / entry * 100 if entry > 0 and stop > 0   else 1
+            orig_target_dist = abs(target - entry) / entry * 100 if entry > 0 and target > 0 else 1
+            stop_pct  = min(100, int(to_stop   / orig_stop_dist   * 100)) if orig_stop_dist   > 0 else 0
+            tgt_pct   = min(100, int(to_target / orig_target_dist * 100)) if orig_target_dist > 0 else 0
 
             stop_clr = RED if to_stop < 0.3 else (AMBER if to_stop < 0.8 else TEXT2)
 

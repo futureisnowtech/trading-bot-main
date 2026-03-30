@@ -30,6 +30,36 @@ A fully autonomous AI-powered trading system that:
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
 
+## Current Version: v9.2 (2026-03-30: audit fixes — perp exit, ML data, agent votes, dashboard)
+- v9.2 (2026-03-30): Post-audit critical fixes
+  - **Perp exit after restart fixed** (`execution/binance_broker.py`): `close_position` now accepts
+    `pos_fallback` param. After any bot restart, broker's `_open_positions` is empty; all exit calls
+    were silently returning `None`. Now reconstructs broker position from risk manager data and proceeds.
+    Root cause: broker and risk manager have separate in-memory position stores; only risk manager
+    restores from SQLite on startup. All 8 stale perp positions (4–17h old) force-closed.
+  - **4h perp rule fixed** (`scheduler/perp_scanner.py`, `scheduler/exit_monitor.py`): Old condition
+    `abs(pnl_pct) < 0.005 or pnl_pct < 0` meant profitable positions never exited on the 4h rule.
+    Changed to `if mins_in >= 240:` — exits ALL perp positions after 4h regardless of P&L direction.
+    Also moved 4h check OUTSIDE the `if engine:` gate in exit_monitor (was unreachable without AI engine).
+  - **ML training data poison fixed** (`learning/ml_trainer.py`, `learning/ml_signal.py`): Both inline
+    trainer and background pkl trainer were training on ALL trade_attribution rows including 8,876 seeded
+    backtest trades (source='backtest', 3.5% WR), crushing model to 4% WR. Fixed: added
+    `AND source = 'live'` filter. Retrained on 108 live trades → 46.3% WR, p_win now ~0.71 vs old 0.051.
+  - **agent_votes format fixed** (`scheduler/crypto_scanner.py`): Was passing `debate_result.vote_breakdown`
+    = `{'BUY': 2, 'HOLD': 1, 'SELL': 0}` (counts) to `record_agent_votes()` which expects
+    `{agent_key: vote}` format. Fixed to build per-agent dict from `individual_signals`:
+    `{s.get('agent_key'): s.get('signal') for s in debate_result.individual_signals}`.
+    This unblocks agent accuracy tracking in `agent_stats` table.
+  - **Dashboard overhaul** (`dashboard/app.py`): Labels/titles brightened (was gray-on-black invisible).
+    Status bar now shows actual scan activity (`[perp] BTCUSDT HOLD` etc.) not just "Xs ago".
+    "To Stop/To Target" on Crypto and Perp tabs now uses live price (not static entry-based distance).
+    New INTELLIGENCE tab with `comp_lane_intelligence()` showing last debate result + funding context.
+    OVERVIEW no longer duplicates position data (removed redundant `comp_positions()` call).
+  - **buy_limit qty bug fixed** (`scheduler/crypto_scanner.py`): All 3 buy paths were passing
+    `risk_check.adjusted_size` (USD amount) as `base_size` to `buy_limit()`, which treats it as base
+    currency quantity. Fixed: `_qty = adjusted_size / limit_price` before calling broker.
+    3 corrupted DB entries manually corrected (AAVE-USDC, BTC-USDC with 350-coin phantom quantities).
+
 ## Current Version: v9.1 (2026-03-30: speed overhaul + perp stability fixes)
 - v9.1 (2026-03-30): Scan speed overhaul + perp None-comparison bug fix + dead pair cleanup
   - **Parallel inter-symbol debates** (`scheduler/crypto_scanner.py`): Phase 1 accumulates all

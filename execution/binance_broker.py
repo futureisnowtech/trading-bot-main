@@ -251,11 +251,27 @@ class BinanceBroker:
         symbol: str,
         strategy: str = 'crypto_perp',
         reason: str = 'Signal',
+        pos_fallback: Optional[dict] = None,
     ) -> Optional[dict]:
-        """Close an open position (long or short) at market. Cancels server-side SL/TP first."""
+        """Close an open position (long or short) at market. Cancels server-side SL/TP first.
+
+        pos_fallback: risk manager position dict — used to recover broker in-memory state after
+        a restart. Without it, _open_positions is empty and close_position would silently abort.
+        """
         pos = self._open_positions.get(symbol)
         if not pos:
-            return None
+            if PAPER_TRADING and pos_fallback:
+                # Bot restarted: broker lost in-memory state. Reconstruct from risk manager pos.
+                from config import PERP_MAX_LEVERAGE as _LEV
+                self._open_positions[symbol] = {
+                    'entry':    pos_fallback['entry'],
+                    'side':     pos_fallback.get('direction', 'LONG'),
+                    'qty':      pos_fallback.get('qty', 0),
+                    'leverage': _LEV,
+                    'size_usd': pos_fallback.get('qty', 0) * pos_fallback['entry'],
+                }
+            else:
+                return None
 
         if PAPER_TRADING or not self._client:
             return self._paper_close(symbol, strategy, reason)

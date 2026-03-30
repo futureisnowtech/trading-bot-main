@@ -52,7 +52,40 @@ SIGNAL_FEATURES = [
     'tradingview_signal',
 ]
 
+# Time-of-day features (numeric, appended after boolean signals + regime)
+TIME_FEATURES = ['hour_et_norm', 'session_norm']
+# Full feature list used by the model (for feature_cols in pkl payload)
+ALL_FEATURES = SIGNAL_FEATURES + ['regime_encoded'] + TIME_FEATURES
+
 REGIME_MAP = {'trending': 0, 'ranging': 1, 'volatile': 2, 'any': 1}
+
+
+def _ts_to_time_features(ts_str: str) -> tuple:
+    """
+    Parse an ISO timestamp string and return (hour_et_norm, session_norm).
+    hour_et_norm: ET hour / 23.0 (0.0–1.0)
+    session_norm: 0=Asia(0-8h)/1=London(8-13h)/2=NY_open(13-18h)/3=NY_pm(18-24h) / 3.0
+    Returns (0.5, 0.5) on parse error (neutral defaults).
+    """
+    try:
+        import datetime
+        import pytz
+        dt = datetime.datetime.fromisoformat(ts_str)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=pytz.UTC)
+        et = dt.astimezone(pytz.timezone('US/Eastern'))
+        hour = et.hour
+        if hour < 8:
+            session = 0    # Asia
+        elif hour < 13:
+            session = 1    # London
+        elif hour < 18:
+            session = 2    # NY open
+        else:
+            session = 3    # NY afternoon / evening
+        return hour / 23.0, session / 3.0
+    except Exception:
+        return 0.5, 0.5
 
 
 # ── DB helpers ─────────────────────────────────────────────────────────────────
@@ -76,11 +109,12 @@ def _load_training_data(min_trades: int):
                                time.gmtime(time.time() - LOOKBACK_DAYS * 86400))
         with _conn() as c:
             rows = c.execute("""
-                SELECT signals_json, regime, won
+                SELECT signals_json, regime, won, entry_ts
                 FROM trade_attribution
                 WHERE won IS NOT NULL
                   AND signals_json IS NOT NULL
                   AND created_at > ?
+                  AND source = 'live'
             """, (cutoff,)).fetchall()
 
         if not rows:
@@ -97,6 +131,11 @@ def _load_training_data(min_trades: int):
             row = [1.0 if sigs.get(s, False) else 0.0 for s in SIGNAL_FEATURES]
             regime_str = str(r['regime'] or 'any').lower()
             row.append(float(REGIME_MAP.get(regime_str, 1)))
+            # Time-of-day features from trade entry timestamp
+            entry_ts = str(r['entry_ts'] if 'entry_ts' in r.keys() else '') if hasattr(r, 'keys') else ''
+            hour_norm, session_norm = _ts_to_time_features(entry_ts)
+            row.append(hour_norm)
+            row.append(session_norm)
             X_rows.append(row)
             y_rows.append(int(bool(r['won'])))
 
@@ -171,7 +210,7 @@ def run_training(min_trades: int = 30) -> bool:
         importances = getattr(clf, 'feature_importances_', None)
         top_features = []
         if importances is not None:
-            all_cols = SIGNAL_FEATURES + ['regime_encoded']
+            all_cols = ALL_FEATURES
             ranked = sorted(zip(all_cols, importances), key=lambda x: x[1], reverse=True)
             top_features = [(name, round(score, 4)) for name, score in ranked[:5]]
 
@@ -179,7 +218,7 @@ def run_training(min_trades: int = 30) -> bool:
         os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
         payload = {
             'model': clf,
-            'feature_cols': SIGNAL_FEATURES + ['regime_encoded'],
+            'feature_cols': ALL_FEATURES,
             'trained_at': time.time(),
             'n_trades': n_rows,
             'win_rate': win_rate,
@@ -211,6 +250,17 @@ if __name__ == '__main__':
         help='Minimum number of labeled trades required to train (default: 30)'
     )
     args = parser.parse_args()
+
+    # Remove lock file on exit (success, failure, or crash via atexit)
+    import atexit
+    _lock_path = os.path.join(os.path.dirname(MODEL_PATH), 'ml_trainer.lock')
+    def _remove_lock():
+        try:
+            if os.path.exists(_lock_path):
+                os.remove(_lock_path)
+        except Exception:
+            pass
+    atexit.register(_remove_lock)
 
     success = run_training(min_trades=args.min_trades)
     sys.exit(0 if success else 1)

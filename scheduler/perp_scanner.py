@@ -49,9 +49,12 @@ def run_perp_scan() -> None:
 
             # Fetch candles from Binance (correct exchange for perp symbols like AVAXUSDT)
             df = bb.get_klines(symbol, interval='1m', limit=100)
-            if df is None or len(df) < 25:
+            if df is None:
+                # Binance futures geo-blocked in US — silently skip, no log spam
+                continue
+            if len(df) < 25:
                 log_event('INFO', 'scan_feed',
-                          f"[perp] {symbol} skip — insufficient candle data from Binance")
+                          f"[perp] {symbol} skip — only {len(df)} candles returned")
                 continue
 
             funding = bb.get_funding_rate(symbol)
@@ -61,6 +64,18 @@ def run_perp_scan() -> None:
                           f"[perp] {symbol} skip — funding overheated "
                           f"({funding*100:.4f}%/8h > {FUNDING_OVERHEATED_PCT*100:.4f}%)")
                 continue
+
+            # Gate: skip long entries during liquidation cascade (longs being washed out)
+            try:
+                from data.liquidation_feed import get_liquidation_signal
+                liq = get_liquidation_signal(symbol)
+                if liq.get('liq_avoid_long') and liq.get('liq_signal') == 'cascade':
+                    log_event('INFO', 'scan_feed',
+                              f"[perp] {symbol} skip — liquidation cascade detected "
+                              f"(long ratio={liq.get('liq_long_ratio', 0):.2f})")
+                    continue
+            except Exception:
+                pass  # fail-open: liquidation data unavailable, proceed normally
 
             oi = bb.get_open_interest(symbol)
             prev_oi = run_perp_scan._prev_oi.get(symbol, oi)
@@ -135,13 +150,13 @@ def _monitor_perp_exit(bb, rm, symbol: str, pos: dict) -> None:
             except Exception:
                 mins_in = 0
             pnl_pct = (current_price - pos['entry']) / pos['entry']
-            if mins_in >= 240 and (abs(pnl_pct) < 0.005 or pnl_pct < 0):
+            if mins_in >= 240:
                 should_exit = True
-                reason = f"Perp time exit: {mins_in}m, pnl={pnl_pct:.2%} — funding cost drain"
+                reason = f"Perp time exit: {mins_in}m, pnl={pnl_pct:.2%} — 4h rule"
 
         if should_exit:
             from scheduler.exit_monitor import _execute_perp_exit
-            _execute_perp_exit(bb, rm, symbol, pos, reason)
+            _execute_perp_exit(bb, rm, symbol, pos, reason, pos_fallback=pos)
 
     except Exception as e:
         log_event('ERROR', 'perp_exit', f"{symbol}: {e}")

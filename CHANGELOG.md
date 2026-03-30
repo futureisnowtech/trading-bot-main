@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-03-30
+- v9.2: perp exit restart fix + ML data fix + agent_votes format + dashboard overhaul + buy_limit qty fix
+
+## 2026-03-30
 - Dashboard: fix comp_positions To Stop / To Target showing entry-based distances instead of live current-price distances; now correctly shows how far current price is from stop and target
 ## 2026-03-30
 - Dashboard: fix NameError TEXT1 (undefined color constant in comp_positions); fix float(None) on low_since_entry in comp_trade_quality; both caused all non-overview tabs to render blank

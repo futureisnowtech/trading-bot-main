@@ -75,6 +75,29 @@ SIGNAL_FEATURES = [
 
 REGIME_MAP = {'trending': 0, 'ranging': 1, 'volatile': 2, 'any': 1}
 
+# Same extended feature list as ml_trainer.py
+ALL_FEATURES = SIGNAL_FEATURES + ['regime_encoded', 'hour_et_norm', 'session_norm']
+
+
+def _get_current_time_features() -> tuple:
+    """Return (hour_et_norm, session_norm) for current Eastern Time."""
+    try:
+        import datetime
+        import pytz
+        now = datetime.datetime.now(pytz.timezone('US/Eastern'))
+        hour = now.hour
+        if hour < 8:
+            session = 0
+        elif hour < 13:
+            session = 1
+        elif hour < 18:
+            session = 2
+        else:
+            session = 3
+        return hour / 23.0, session / 3.0
+    except Exception:
+        return 0.5, 0.5
+
 
 def _conn() -> sqlite3.Connection:
     os.makedirs(os.path.dirname(os.path.abspath(DB_PATH)), exist_ok=True)
@@ -96,11 +119,12 @@ def _load_training_data() -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
                                time.gmtime(time.time() - LOOKBACK_DAYS * 86400))
         with _conn() as c:
             rows = c.execute("""
-                SELECT signals_json, regime, won
+                SELECT signals_json, regime, won, entry_ts
                 FROM trade_attribution
                 WHERE won IS NOT NULL
                   AND signals_json IS NOT NULL
                   AND created_at > ?
+                  AND source = 'live'
             """, (cutoff,)).fetchall()
 
         if not rows:
@@ -115,6 +139,21 @@ def _load_training_data() -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
             row = [1.0 if sigs.get(s, False) else 0.0 for s in SIGNAL_FEATURES]
             regime_str = str(r['regime'] or 'any').lower()
             row.append(float(REGIME_MAP.get(regime_str, 1)))
+            # Time features
+            try:
+                import datetime, pytz as _pytz
+                _ts = str(r['entry_ts'] or '')
+                _dt = datetime.datetime.fromisoformat(_ts)
+                if _dt.tzinfo is None:
+                    _dt = _dt.replace(tzinfo=_pytz.UTC)
+                _et = _dt.astimezone(_pytz.timezone('US/Eastern'))
+                _h = _et.hour
+                _s = 0 if _h < 8 else (1 if _h < 13 else (2 if _h < 18 else 3))
+                row.append(_h / 23.0)
+                row.append(_s / 3.0)
+            except Exception:
+                row.append(0.5)
+                row.append(0.5)
             X_rows.append(row)
             y_rows.append(int(bool(r['won'])))
 
@@ -132,7 +171,7 @@ def _get_trade_count() -> int:
     """Fast row count for trade_attribution."""
     try:
         with _conn() as c:
-            return c.execute("SELECT COUNT(*) FROM trade_attribution WHERE won IS NOT NULL").fetchone()[0]
+            return c.execute("SELECT COUNT(*) FROM trade_attribution WHERE won IS NOT NULL AND source = 'live'").fetchone()[0]
     except Exception:
         return 0
 
@@ -225,7 +264,7 @@ def train() -> bool:
         clf = _build_model()
         clf.fit(X, y)
         _model = clf
-        _feature_cols = SIGNAL_FEATURES + ['regime_encoded']
+        _feature_cols = ALL_FEATURES
         _last_trade_count = _get_trade_count()
         _last_retrain_ts = time.time()
         win_rate = y.mean()
@@ -235,7 +274,7 @@ def train() -> bool:
         # Log feature importances after fit
         importances = getattr(clf, 'feature_importances_', None)
         if importances is not None:
-            all_cols = SIGNAL_FEATURES + ['regime_encoded']
+            all_cols = ALL_FEATURES
             ranked = sorted(zip(all_cols, importances), key=lambda x: x[1], reverse=True)
             top5 = [(name, round(score, 4)) for name, score in ranked[:5]]
             print(f"[ml_signal] Top features: {top5}")
@@ -270,9 +309,27 @@ def maybe_retrain() -> None:
 
 
 def _trigger_background_retrain() -> None:
-    """Spawn ml_trainer.py as a detached background process (fire-and-forget)."""
+    """
+    Spawn ml_trainer.py as a detached background process (fire-and-forget).
+    Uses a lock file to prevent multiple concurrent trainers from racing on the pkl file.
+    """
     trainer_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ml_trainer.py')
+    lock_path = os.path.join(os.path.dirname(_MODEL_PKL_PATH), 'ml_trainer.lock')
     try:
+        # Check if a trainer is already running via lock file
+        if os.path.exists(lock_path):
+            lock_age = time.time() - os.path.getmtime(lock_path)
+            if lock_age < 300:   # lock file < 5 min old = trainer likely still running
+                print(f"[ml_signal] Background retrain skipped — trainer already running "
+                      f"(lock age {lock_age:.0f}s)")
+                return
+            # Lock file is stale (>5 min) — previous trainer died, safe to remove
+            os.remove(lock_path)
+
+        # Write lock file before spawning so next call sees it immediately
+        with open(lock_path, 'w') as f:
+            f.write(str(os.getpid()))
+
         subprocess.Popen(
             [sys.executable, trainer_path],
             stdout=subprocess.DEVNULL,
@@ -320,6 +377,17 @@ def get_ml_signal(market_data: dict) -> Tuple[float, str]:
     row = [1.0 if signals.get(s, False) else 0.0 for s in SIGNAL_FEATURES]
     regime_str = str(market_data.get('regime', 'any') or 'any').lower()
     row.append(float(REGIME_MAP.get(regime_str, 1)))
+    # Time-of-day features (matches ml_trainer.py)
+    hour_norm, session_norm = _get_current_time_features()
+    row.append(hour_norm)
+    row.append(session_norm)
+
+    # Feature count guard: if pkl was trained without time features, truncate
+    expected_len = len(_feature_cols) if _feature_cols else len(ALL_FEATURES)
+    if len(row) > expected_len:
+        row = row[:expected_len]
+    elif len(row) < expected_len:
+        row.extend([0.5] * (expected_len - len(row)))
 
     try:
         X = np.array([row], dtype=float)
@@ -350,7 +418,7 @@ def get_feature_importance() -> dict:
         importances = getattr(_model, 'feature_importances_', None)
         if importances is None:
             return {}
-        cols = SIGNAL_FEATURES + ['regime_encoded']
+        cols = ALL_FEATURES
         return dict(sorted(
             zip(cols, importances.tolist()),
             key=lambda x: x[1], reverse=True

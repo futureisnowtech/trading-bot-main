@@ -337,28 +337,58 @@ def monitor_exits_with_ai(engine) -> None:
                 _execute_crypto_exit(cb, rm, pid, pos, price, exit_reason, strategy, cr_md)
                 continue
 
+            # ── Time/stagnant exit — always runs regardless of AI engine ─────
+            _ts_entry = pos.get('ts_entry', '')
+            try:
+                from datetime import datetime as _dt_cx
+                _entry_dt_cx = _dt_cx.fromisoformat(_ts_entry)
+                _tz_cx = pytz.timezone(MARKET_TIMEZONE)
+                mins_in = int((datetime.now(_tz_cx) - (_entry_dt_cx if _entry_dt_cx.tzinfo
+                               else _entry_dt_cx.replace(tzinfo=_tz_cx))).total_seconds() / 60)
+            except Exception:
+                mins_in = 0
+
+            pnl_pct = (price - pos['entry']) / pos['entry'] if pos['entry'] > 0 else 0
+
+            if abs(pnl_pct) <= FLAT_POSITION_THRESHOLD_PCT and mins_in >= CRYPTO_MAX_HOLD_HOURS * 60:
+                reason = (f"Time exit: {mins_in//60}h {mins_in%60}m in trade, "
+                          f"only {pnl_pct:+.1%} — releasing dead capital")
+                _execute_crypto_exit(cb, rm, pid, pos, price, reason, strategy, cr_md)
+                log_event('INFO', 'exit_monitor', reason)
+                continue
+
             if engine and cr_md:
-                ts_entry = pos.get('ts_entry', '')
-                try:
-                    from datetime import datetime as dt
-                    entry_dt = dt.fromisoformat(ts_entry)
-                    tz = pytz.timezone(MARKET_TIMEZONE)
-                    mins_in = int((datetime.now(tz) - entry_dt if entry_dt.tzinfo else entry_dt.replace(tzinfo=tz)).total_seconds() / 60)
-                except Exception:
-                    mins_in = 0
-
-                pnl_pct = (price - pos['entry']) / pos['entry'] if pos['entry'] > 0 else 0
-
                 _target = pos.get('target', pos['entry'] * 1.06)
                 _target_range = _target - pos['entry']
                 _target_progress = ((price - pos['entry']) / _target_range
                                     if _target_range > 0 else 0)
-                if abs(pnl_pct) <= FLAT_POSITION_THRESHOLD_PCT and mins_in >= CRYPTO_MAX_HOLD_HOURS * 60:
-                    reason = (f"Time exit: {mins_in//60}h {mins_in%60}m in trade, "
-                              f"only {pnl_pct:+.1%} — releasing dead capital")
-                    _execute_crypto_exit(cb, rm, pid, pos, price, reason, strategy, cr_md)
-                    log_event('INFO', 'exit_monitor', reason)
-                    continue
+
+                # ── Partial profit taking (50% close at 50% of target) ────────
+                if (_target_progress >= 0.50
+                        and not pos.get('partial_closed')
+                        and pos.get('qty', 0) > 0):
+                    try:
+                        half_qty = pos['qty'] * 0.50
+                        if half_qty > 0:
+                            _partial_result = cb.sell_limit(
+                                product_id=pid,
+                                base_size=half_qty,
+                                limit_price=price * 0.999,
+                                strategy=strategy,
+                                entry_price=pos['entry'],
+                                reason=f"Partial profit: {_target_progress:.0%} of target reached",
+                            )
+                            if _partial_result:
+                                _half_pnl = (price - pos['entry']) * half_qty
+                                log_event('INFO', 'exit_monitor',
+                                          f"[partial] {pid} — closed 50% @ {price:.4f} "
+                                          f"({_target_progress:.0%} of target) | partial P&L: ${_half_pnl:+.2f}")
+                                print(f"[exit_monitor] PARTIAL CLOSE {pid} — "
+                                      f"50% at {_target_progress:.0%} target | ${_half_pnl:+.2f}")
+                                pos['partial_closed'] = True
+                                pos['qty'] = pos['qty'] - half_qty
+                    except Exception as _pe:
+                        print(f"[exit_monitor] partial close error {pid}: {_pe}")
 
                 if mins_in >= 5:
                     review = engine['exit'](
@@ -391,26 +421,27 @@ def monitor_exits_with_ai(engine) -> None:
                 _execute_perp_exit(bb_exit, rm, symbol, pos, exit_reason_perp)
                 continue
 
+            ts_entry = pos.get('ts_entry', '')
+            try:
+                from datetime import datetime as _dt2
+                entry_dt = _dt2.fromisoformat(ts_entry)
+                tz = pytz.timezone(MARKET_TIMEZONE)
+                mins_in = int((datetime.now(tz) - entry_dt if entry_dt.tzinfo
+                               else entry_dt.replace(tzinfo=tz)).total_seconds() / 60)
+            except Exception:
+                mins_in = 0
+
+            pnl_pct = ((current_price - pos['entry']) / pos['entry']
+                       if pos.get('direction', 'LONG') == 'LONG'
+                       else (pos['entry'] - current_price) / pos['entry'])
+
+            # 4h exit — all perp positions close after 4h regardless of PnL (funding cost rule)
+            if mins_in >= 240:
+                reason = f"Perp 4h exit: {mins_in}m, pnl={pnl_pct:+.2%}"
+                _execute_perp_exit(bb_exit, rm, symbol, pos, reason)
+                continue
+
             if engine:
-                ts_entry = pos.get('ts_entry', '')
-                try:
-                    from datetime import datetime as _dt2
-                    entry_dt = _dt2.fromisoformat(ts_entry)
-                    tz = pytz.timezone(MARKET_TIMEZONE)
-                    mins_in = int((datetime.now(tz) - entry_dt if entry_dt.tzinfo
-                                   else entry_dt.replace(tzinfo=tz)).total_seconds() / 60)
-                except Exception:
-                    mins_in = 0
-
-                pnl_pct = ((current_price - pos['entry']) / pos['entry']
-                           if pos.get('direction', 'LONG') == 'LONG'
-                           else (pos['entry'] - current_price) / pos['entry'])
-
-                # 4h flat exit (also in perp_scanner — belt and suspenders)
-                if mins_in >= 240 and abs(pnl_pct) < 0.005:
-                    reason = f"Perp stagnant exit: {mins_in}m, flat ({pnl_pct:+.2%})"
-                    _execute_perp_exit(bb_exit, rm, symbol, pos, reason)
-                    continue
 
                 if mins_in >= 5:
                     perp_md = {'direction': pos.get('direction', 'LONG'),
@@ -430,10 +461,12 @@ def monitor_exits_with_ai(engine) -> None:
             print(f"[exit_monitor] perp error {symbol}: {e}")
 
 
-def _execute_perp_exit(bb, rm, symbol: str, pos: dict, reason: str) -> None:
+def _execute_perp_exit(bb, rm, symbol: str, pos: dict, reason: str,
+                       pos_fallback: dict = None) -> None:
     """Close a perp position and fire attribution pipeline."""
     try:
-        result = bb.close_position(symbol, strategy='crypto_perp', reason=reason)
+        result = bb.close_position(symbol, strategy='crypto_perp', reason=reason,
+                                   pos_fallback=pos_fallback or pos)
         if result is None:
             return
         rm.close_position('crypto_perp', symbol)

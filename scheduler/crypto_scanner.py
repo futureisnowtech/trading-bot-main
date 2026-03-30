@@ -530,7 +530,8 @@ def run_crypto_scan() -> None:
                                          _qty, price,
                                          final.stop_loss, final.take_profit,
                                          direction='LONG', entry_reason=final.reasoning,
-                                         agent_votes=debate_result.vote_breakdown,
+                                         agent_votes={s.get('agent_key', s.get('agent', f'agent_{i}')): s.get('signal', 'HOLD')
+                                                      for i, s in enumerate(debate_result.individual_signals)},
                                          ml_p_win=market_data.get('ml_p_win', 0),
                                          super_score=market_data.get('super_score', 0))
 

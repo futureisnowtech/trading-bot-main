@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-03-30
+- Dashboard: fix NameError TEXT1 (undefined color constant in comp_positions); fix float(None) on low_since_entry in comp_trade_quality; both caused all non-overview tabs to render blank
+- Dashboard: Edge Monitor clarity — fix STATUS_CLR mismatch (OK/BLOCKED now colored correctly vs gray); remove fake win_rate_20 row; NO DATA label when window=0; bar normalized to STRONG threshold; PF shown prominently; "X/30 (building)" trades counter; LIVE READY badge on STRONG
+## 2026-03-30
 - v9.1: scan speed overhaul — parallel inter-symbol debates (ThreadPoolExecutor fan-out in crypto_scanner.py Phase 2), MTF candle cache (240s TTL, eliminates redundant Coinbase REST calls), scan interval halved 30s→15s in config.py
 - v9.1: MTF granularity bug fix — _get_5m_candles was passing integer 300 instead of 'FIVE_MINUTE' string; Coinbase silently rejected all 5-min bar requests; all MTF confluence was always absent
 - v9.1: low_since_entry persistence fix — persist_position() now saves low_since_entry to DB; load path uses explicit None check; register_position + update_high pass low_since_entry through; fixes perp TypeError '<' not supported between float and NoneType permanently

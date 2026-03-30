@@ -485,6 +485,165 @@ div[data-testid="stPopover"] > button:hover {{
 </style>
 """, unsafe_allow_html=True)
 
+st.markdown("""
+<style>
+@keyframes pulse-green {
+    0%   { box-shadow: 0 0 0 0 rgba(16,201,143,0.5); }
+    60%  { box-shadow: 0 0 0 10px rgba(16,201,143,0); }
+    100% { box-shadow: 0 0 0 0 rgba(16,201,143,0); }
+}
+@keyframes pulse-gold {
+    0%   { box-shadow: 0 0 0 0 rgba(245,166,35,0.4); }
+    60%  { box-shadow: 0 0 0 8px rgba(245,166,35,0); }
+    100% { box-shadow: 0 0 0 0 rgba(245,166,35,0); }
+}
+@keyframes slide-in-right {
+    from { opacity:0; transform:translateX(16px); }
+    to   { opacity:1; transform:translateX(0); }
+}
+@keyframes fade-in {
+    from { opacity:0; }
+    to   { opacity:1; }
+}
+@keyframes sweep {
+    0%   { left:-8%; opacity:0.8; }
+    100% { left:108%; opacity:0; }
+}
+@keyframes blink-dot {
+    0%,100% { opacity:1; }
+    50%      { opacity:0.15; }
+}
+@keyframes counter-up {
+    from { transform:translateY(6px); opacity:0; }
+    to   { transform:translateY(0);   opacity:1; }
+}
+
+/* Scanner cards */
+.scan-row {
+    display:flex; align-items:center; gap:0;
+    padding:10px 0; border-bottom:1px solid #1e2038;
+    animation: slide-in-right 0.3s ease;
+}
+.scan-row:last-child { border-bottom:none; }
+.scan-lane {
+    font-size:9px; font-weight:800; letter-spacing:2px;
+    text-transform:uppercase; padding:2px 7px; border-radius:4px;
+    margin-right:10px; min-width:52px; text-align:center;
+}
+.scan-sym {
+    font-size:15px; font-weight:700; color:#eef0f6;
+    font-family:'JetBrains Mono',monospace; min-width:115px;
+}
+.scan-badge {
+    font-size:11px; font-weight:800; padding:3px 10px;
+    border-radius:20px; min-width:50px; text-align:center;
+    margin-right:10px;
+}
+.scan-reason {
+    font-size:11px; color:#7c849e; flex:1;
+    overflow:hidden; white-space:nowrap; text-overflow:ellipsis;
+}
+.scan-time {
+    font-size:11px; color:#3a3f58;
+    font-family:'JetBrains Mono',monospace;
+    margin-left:10px; min-width:55px; text-align:right;
+}
+
+/* Heat tiles */
+.heat-grid {
+    display:grid; gap:6px;
+    grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
+}
+.heat-tile {
+    border-radius:10px; padding:10px 8px;
+    text-align:center; cursor:default;
+    transition:transform 0.15s, box-shadow 0.15s;
+    border:1px solid transparent;
+    position:relative; overflow:hidden;
+}
+.heat-tile:hover {
+    transform:translateY(-2px);
+    box-shadow:0 6px 20px rgba(0,0,0,0.4);
+}
+.heat-sym {
+    font-size:11px; font-weight:800; letter-spacing:0.5px;
+    font-family:'JetBrains Mono',monospace; display:block;
+    margin-bottom:4px;
+}
+.heat-act {
+    font-size:9px; font-weight:800; letter-spacing:1.5px;
+    text-transform:uppercase;
+}
+.heat-age {
+    font-size:9px; margin-top:3px; opacity:0.6; display:block;
+}
+.heat-conf {
+    position:absolute; bottom:0; left:0; right:0;
+    height:2px; border-radius:0 0 10px 10px;
+}
+
+/* Active scanner indicator */
+.scanner-header {
+    display:flex; align-items:center; gap:10px;
+    padding-bottom:12px; border-bottom:1px solid #1e2038;
+    margin-bottom:4px;
+}
+.scanner-live-dot {
+    width:7px; height:7px; border-radius:50%;
+    background:#10c98f;
+    animation: blink-dot 1.4s ease-in-out infinite;
+    flex-shrink:0;
+}
+.scanner-label {
+    font-size:11px; font-weight:700; letter-spacing:3px;
+    text-transform:uppercase; color:#3a3f58;
+}
+.scanner-count {
+    font-size:12px; color:#7c849e; margin-left:auto;
+    font-family:'JetBrains Mono',monospace;
+}
+
+/* Ticker strip */
+.ticker-wrap {
+    overflow:hidden; white-space:nowrap;
+    background:#0f1018; border:1px solid #1e2038;
+    border-radius:10px; padding:8px 0;
+    margin-bottom:16px; position:relative;
+}
+.ticker-inner {
+    display:inline-block;
+    animation: ticker-scroll 40s linear infinite;
+}
+@keyframes ticker-scroll {
+    0%   { transform:translateX(0); }
+    100% { transform:translateX(-50%); }
+}
+.ticker-item {
+    display:inline-block; padding:0 20px;
+    font-size:12px; font-family:'JetBrains Mono',monospace;
+}
+
+/* Stat flash cards (mini scoreboard) */
+.flash-card {
+    background:#13141f; border:1px solid #1e2038;
+    border-radius:12px; padding:14px 16px;
+    display:flex; flex-direction:column; gap:4px;
+    position:relative; overflow:hidden;
+}
+.flash-card::after {
+    content:''; position:absolute;
+    top:0; left:-100%; width:60%; height:100%;
+    background:linear-gradient(90deg,transparent,rgba(255,255,255,0.03),transparent);
+    animation:shimmer 3s ease-in-out infinite;
+}
+@keyframes shimmer {
+    0%   { left:-100%; }
+    60%  { left:150%; }
+    100% { left:150%; }
+}
+</style>
+""", unsafe_allow_html=True)
+
 
 # ─── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -512,16 +671,32 @@ def _db():
     return c
 
 def _bot_age() -> float | None:
+    """Return seconds since last bot activity — checks system_events AND trades table."""
     try:
         conn = _db()
+        candidates = []
         row = conn.execute("SELECT ts FROM system_events ORDER BY id DESC LIMIT 1").fetchone()
+        if row:
+            candidates.append(row[0])
+        row2 = conn.execute("SELECT ts FROM trades ORDER BY id DESC LIMIT 1").fetchone()
+        if row2:
+            candidates.append(row2[0])
         conn.close()
-        if not row:
+        if not candidates:
             return None
-        dt = datetime.fromisoformat(row[0])
-        if not dt.tzinfo:
-            dt = dt.replace(tzinfo=_tz.utc)
-        return (datetime.now(_tz.utc) - dt).total_seconds()
+        most_recent = None
+        for ts_str in candidates:
+            try:
+                dt = datetime.fromisoformat(ts_str)
+                if not dt.tzinfo:
+                    dt = dt.replace(tzinfo=_tz.utc)
+                if most_recent is None or dt > most_recent:
+                    most_recent = dt
+            except Exception:
+                continue
+        if most_recent is None:
+            return None
+        return (datetime.now(_tz.utc) - most_recent).total_seconds()
     except Exception:
         return None
 
@@ -561,6 +736,44 @@ def _positions() -> dict:
     except Exception:
         return {}
 
+
+# ── Live price lookup (30-second cache so dashboard refresh doesn't hammer APIs) ──
+_price_cache: dict = {}   # symbol → (price, fetched_at_epoch)
+_PRICE_CACHE_TTL = 30     # seconds
+
+def _live_price(symbol: str) -> float | None:
+    """
+    Return current price for a position symbol.
+    Handles both Coinbase format (BTC-USDC) and Binance format (BTCUSDT).
+    Uses yfinance with a 30s cache. Returns None on failure (never raises).
+    """
+    import time
+    now = time.time()
+    cached = _price_cache.get(symbol)
+    if cached and now - cached[1] < _PRICE_CACHE_TTL:
+        return cached[0]
+    try:
+        import yfinance as yf
+        # Normalise to yfinance ticker
+        if '-' in symbol:
+            # Coinbase format: BTC-USDC → BTC-USD (yfinance uses USD)
+            base = symbol.split('-')[0]
+            ticker = f"{base}-USD"
+        elif symbol.endswith('USDT') or symbol.endswith('USDC'):
+            base = symbol[:-4]
+            ticker = f"{base}-USD"
+        else:
+            ticker = symbol
+        data = yf.Ticker(ticker).fast_info
+        price = float(data.get('lastPrice') or data.get('last_price') or data.get('regularMarketPrice') or 0)
+        if price > 0:
+            _price_cache[symbol] = (price, now)
+            return price
+    except Exception:
+        pass
+    return None
+
+
 def _write_env(updates: dict):
     env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
     try:
@@ -588,6 +801,24 @@ def _info(text: str, label: str = "ℹ"):
     with st.popover(label):
         st.markdown(f'<p style="font-size:13px;color:{TEXT2};line-height:1.6;">{text}</p>',
                     unsafe_allow_html=True)
+
+def _minutes_ago(ts_str: str) -> str:
+    """Return human-readable time since ts_str."""
+    if not ts_str:
+        return '—'
+    try:
+        dt = datetime.fromisoformat(ts_str)
+        if not dt.tzinfo:
+            dt = dt.replace(tzinfo=_tz.utc)
+        secs = int((datetime.now(_tz.utc) - dt).total_seconds())
+        if secs < 60:
+            return f'{secs}s'
+        elif secs < 3600:
+            return f'{secs//60}m'
+        else:
+            return f'{secs//3600}h'
+    except Exception:
+        return '—'
 
 def _sec(title: str, info: str = ''):
     c1, c2 = st.columns([30, 1]) if info else (st.columns([1])[0], None)
@@ -841,9 +1072,10 @@ def comp_edge():
         "The Sizing column shows what fraction of normal position size is currently in use."
     )
 
+    # Match edge_monitor's actual status strings: STRONG/OK/DEGRADED/BLOCKED/UNCERTAIN
     STATUS_CLR = {
-        'STRONG': GREEN, 'NORMAL': GOLD,
-        'FADING': AMBER, 'DEGRADED': RED, 'UNCERTAIN': TEXT2,
+        'STRONG': GREEN, 'OK': GOLD,
+        'DEGRADED': AMBER, 'BLOCKED': RED, 'UNCERTAIN': TEXT2,
     }
 
     MARKETS = [
@@ -857,16 +1089,29 @@ def comp_edge():
         es   = get_edge_state(skey, paper=PAPER_TRADING)
         stat = es.get('status', 'UNCERTAIN')
         scr  = es.get('edge_score', 0.5)
-        wr20 = es.get('win_rate_20', 0.5)
         pf   = es.get('profit_factor', 1.0)
         mult = es.get('sizing_multiplier', 1.0)
         n    = es.get('window_trades', 0)
         bad  = es.get('consecutive_bad', 0)
         clr  = STATUS_CLR.get(stat, TEXT2)
-        bar  = min(100, int(scr * 100))
+
+        # edge_score = PF - 1; normalize to 0-100 bar capped at STRONG threshold (0.60)
+        bar = min(100, int(scr / 0.60 * 100)) if scr >= 0 else 0
+
+        # Friendly display when no data yet
+        display_stat = 'NO DATA' if n == 0 else stat
+        display_clr  = TEXT3 if n == 0 else clr
+
+        live_badge = (
+            f'<div style="margin-top:10px;padding:6px 10px;background:#0a1f14;'
+            f'border:1px solid {GREEN}55;border-radius:8px;'
+            f'font-size:11px;color:{GREEN};font-weight:700;text-align:center;">'
+            f'✓ EDGE CONFIRMED — LIVE READY'
+            f'</div>'
+        ) if stat == 'STRONG' else ''
 
         warn_html = (
-            f'<div style="margin-top:12px;padding:8px 10px;background:#1a0808;'
+            f'<div style="margin-top:10px;padding:6px 10px;background:#1a0808;'
             f'border:1px solid {RED}33;border-radius:8px;'
             f'font-size:11px;color:{RED};font-weight:600;">'
             f'⚠ {bad} consecutive bad windows — sizing reducing'
@@ -877,25 +1122,32 @@ def comp_edge():
             st.markdown(
                 f'<div class="edge-card">'
                 f'<div class="edge-market">{mname}</div>'
-                f'<div class="edge-status" style="color:{clr};">{stat}</div>'
-                f'<div class="edge-track">'
-                f'<div class="edge-fill" style="width:{bar}%;background:{clr};"></div>'
+                f'<div class="edge-status" style="color:{display_clr};">{display_stat}</div>'
+                f'<div style="position:relative;margin-bottom:16px;">'
+                f'  <div class="edge-track">'
+                f'    <div class="edge-fill" style="width:{bar}%;background:{display_clr};"></div>'
+                f'  </div>'
+                f'  <div style="font-size:9px;color:{TEXT3};text-align:right;margin-top:3px;">'
+                f'    target ≥ 0.60 for STRONG'
+                f'  </div>'
                 f'</div>'
                 f'<div class="edge-row">'
-                f'<span>Score</span><span class="edge-val">{scr:.2f}</span>'
+                f'<span>Profit Factor</span>'
+                f'<span class="edge-val" style="color:{display_clr};">{pf:.2f}×</span>'
                 f'</div>'
                 f'<div class="edge-row">'
-                f'<span>Win Rate (20)</span><span class="edge-val">{wr20:.1%}</span>'
+                f'<span>Edge Score (PF−1)</span><span class="edge-val">{scr:.2f}</span>'
                 f'</div>'
                 f'<div class="edge-row">'
-                f'<span>Profit Factor</span><span class="edge-val">{pf:.2f}</span>'
+                f'<span>Position Sizing</span><span class="edge-val">{mult:.0%}</span>'
                 f'</div>'
-                f'<div class="edge-row">'
-                f'<span>Sizing</span><span class="edge-val">{mult:.0%}</span>'
+                f'<div class="edge-row" style="color:{TEXT3 if n < 30 else TEXT2};">'
+                f'<span>Trades in window</span>'
+                f'<span class="edge-val">{n}/30'
+                f'{"" if n >= 30 else " (building)"}'
+                f'</span>'
                 f'</div>'
-                f'<div class="edge-row">'
-                f'<span>Trades in window</span><span class="edge-val">{n}</span>'
-                f'</div>'
+                f'{live_badge}'
                 f'{warn_html}'
                 f'</div>',
                 unsafe_allow_html=True,
@@ -1059,8 +1311,8 @@ def comp_trade_quality():
         stop    = float(pos.get('stop', 0))
         target  = float(pos.get('target', 0))
         qty     = float(pos.get('qty', 0))
-        high_se = float(pos.get('high_since_entry', entry))
-        low_se  = float(pos.get('low_since_entry', entry))
+        high_se = float(pos.get('high_since_entry') or entry)
+        low_se  = float(pos.get('low_since_entry')  or entry)
         ts_raw  = pos.get('ts_entry', '')
 
         # Time in trade
@@ -1201,6 +1453,7 @@ def comp_positions():
             stop   = float(p.get('stop', 0))
             target = float(p.get('target', 0))
             direc  = p.get('direction', 'LONG')
+            qty    = float(p.get('qty', 0))
             ts     = p.get('ts_entry', '')
 
             age_str = '—'
@@ -1212,6 +1465,30 @@ def comp_positions():
                 age_str = f'{mins}m' if mins < 60 else f'{mins//60}h {mins%60}m'
             except Exception:
                 pass
+
+            # Live price + unrealized P&L
+            current = _live_price(sym)
+            if current and current > 0 and entry > 0:
+                if direc == 'SHORT':
+                    unreal_pct = (entry - current) / entry * 100
+                else:
+                    unreal_pct = (current - entry) / entry * 100
+                unreal_usd = unreal_pct / 100 * entry * qty
+                pnl_clr    = GREEN if unreal_pct >= 0 else RED
+                pnl_sign   = '+' if unreal_pct >= 0 else ''
+                price_line = (
+                    f'<div style="display:flex;justify-content:space-between;'
+                    f'align-items:center;margin-bottom:8px;">'
+                    f'  <span style="font-size:13px;color:{TEXT2};">Now: '
+                    f'    <b style="color:{TEXT};">{current:.5g}</b>'
+                    f'  </span>'
+                    f'  <span style="font-size:13px;font-weight:700;color:{pnl_clr};">'
+                    f'    {pnl_sign}{unreal_pct:.2f}% &nbsp; ({pnl_sign}${unreal_usd:.2f})'
+                    f'  </span>'
+                    f'</div>'
+                )
+            else:
+                price_line = ''
 
             to_stop   = abs(entry - stop)   / entry * 100 if entry > 0 and stop > 0   else 0
             to_target = abs(target - entry) / entry * 100 if entry > 0 and target > 0 else 0
@@ -1229,6 +1506,7 @@ def comp_positions():
                 f'  </div>'
                 f'  <div class="pos-age">{age_str}</div>'
                 f'</div>'
+                f'{price_line}'
                 f'<div class="pos-bars">'
                 f'  <div>'
                 f'    <div class="pos-dist-label">To Stop</div>'
@@ -1533,8 +1811,9 @@ def comp_chat():
 def expander_debates():
     with st.expander("AI DEBATE HISTORY"):
         _info("Full reasoning from each 3-agent debate. "
-              "Bardock = macro/funding/OI. Vegeta = technical momentum. "
-              "Krillin = trade economics and fee math. 2/3 BUY = trade taken.")
+              "Macro & Funding Analyst = funding rate/OI/macro. "
+              "Technical Momentum Analyst = chart setup quality. "
+              "Trade Economics & Risk Analyst = fee math and viability. 2/3 BUY = trade taken.")
         debates = get_recent_debates(limit=10) or []
         if not debates:
             st.write("No debates yet.")
@@ -1767,9 +2046,9 @@ def expander_intelligence():
                             unsafe_allow_html=True)
             else:
                 agent_labels = {
-                    'funding_regime':    'Bardock (Macro)',
-                    'momentum_structure':'Vegeta (Momentum)',
-                    'risk_economics':    'Krillin (Risk)',
+                    'funding_regime':    'Macro & Funding Analyst',
+                    'momentum_structure':'Technical Momentum Analyst',
+                    'risk_economics':    'Trade Economics & Risk Analyst',
                 }
                 for a in agents:
                     name  = a.get('agent_name', '?')
@@ -2115,7 +2394,7 @@ def comp_crypto_tab():
     # ── Last crypto AI debate ──────────────────────────────────────────────────
     _sec("LAST AI DEBATE",
          "Most recent 3-agent debate for a crypto spot pair. "
-         "Bardock = macro/funding. Vegeta = momentum. Krillin = fee math.")
+         "Agent 1 = Macro & Funding. Agent 2 = Technical Momentum. Agent 3 = Trade Economics. 2/3 BUY = trade taken.")
     try:
         debates = get_recent_debates(limit=10) or []
         crypto_debate = None
@@ -2332,7 +2611,7 @@ def comp_perp_tab():
     # ── Funding rate context ───────────────────────────────────────────────────
     _sec("FUNDING CONTEXT",
          "Most recent funding rate data from the scan feed. "
-         "Funding > 0.05%/8h = market overheated (Bardock blocks entry).")
+         "Funding > 0.05%/8h = market overheated (Macro & Funding Analyst blocks entry).")
     try:
         feed = get_scan_feed(limit=100) or []
         funding_msg = None
@@ -2360,6 +2639,201 @@ def comp_perp_tab():
         )
 
 
+@st.fragment(run_every=5)
+def comp_live_scanner():
+    """Rolling live preview of what the scanner is evaluating — the war room radar."""
+    feed = get_scan_feed(limit=60) or []
+    secs = _bot_age()
+    is_alive = secs is not None and secs < 180
+
+    # ── Scanner header ─────────────────────────────────────────────────────────
+    dot_html = (
+        '<span class="scanner-live-dot"></span>'
+        if is_alive else
+        '<span style="width:7px;height:7px;border-radius:50%;'
+        'background:#3a3f58;display:inline-block;flex-shrink:0;"></span>'
+    )
+    scan_status = 'LIVE' if is_alive else 'IDLE'
+    st.markdown(
+        f'<div class="scanner-header">'
+        f'{dot_html}'
+        f'<span class="scanner-label">Scanner Radar</span>'
+        f'<span style="font-size:10px;font-weight:700;letter-spacing:2px;'
+        f'color:{"#10c98f" if is_alive else "#3a3f58"};text-transform:uppercase;">'
+        f'{scan_status}</span>'
+        f'<span class="scanner-count">'
+        f'{len(feed)} events · last {_minutes_ago(feed[0].get("ts","")) if feed else "—"} ago'
+        f'</span>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    if not feed:
+        st.markdown(
+            f'<div style="color:#3a3f58;font-size:13px;padding:20px;text-align:center;'
+            f'font-style:italic;">Bot not scanning yet — start bot to see live feed</div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    # Lane color map
+    LANE_STYLES = {
+        'crypto':  ('background:#0d1a14;color:#10c98f;border:1px solid #10c98f33;', 'CRYPTO'),
+        'perp':    ('background:#0d1020;color:#4f8ef7;border:1px solid #4f8ef733;', 'PERP'),
+        'deriv':   ('background:#1a0d20;color:#b06ef7;border:1px solid #b06ef733;', 'DERIV'),
+        'futures': ('background:#1a1408;color:#f5a623;border:1px solid #f5a62333;', 'MES'),
+        'equity':  ('background:#151520;color:#7c849e;border:1px solid #1e2038;',   'EQ'),
+    }
+
+    html = ''
+    shown = 0
+    for item in feed:
+        if shown >= 25:
+            break
+        act  = str(item.get('action', item.get('signal', 'HOLD'))).upper()
+        sym  = item.get('symbol', '—')
+        conf = item.get('confidence', 0) or 0
+        ts   = item.get('ts', '')
+        strat = str(item.get('strategy', '') or '').lower()
+        notes = str(item.get('message', item.get('notes', '')) or '')[:80]
+
+        # Determine lane
+        lane_key = 'crypto'
+        for k in ('perp', 'deriv', 'futures', 'equity'):
+            if k in strat:
+                lane_key = k
+                break
+        lane_style, lane_label = LANE_STYLES.get(lane_key, LANE_STYLES['crypto'])
+
+        # Action badge
+        if act == 'BUY':
+            badge_style = 'background:#0d2218;color:#10c98f;border:1px solid #10c98f44;'
+            act_icon = '▲ BUY'
+        elif act in ('SELL', 'SHORT'):
+            badge_style = 'background:#220d10;color:#f03e5e;border:1px solid #f03e5e44;'
+            act_icon = '▼ SELL'
+        else:
+            badge_style = f'background:#0f1018;color:#3a3f58;border:1px solid #1e2038;'
+            act_icon = '— HOLD'
+
+        conf_str = f' · {float(conf):.0%}' if conf and float(conf) > 0 else ''
+        age_str  = _minutes_ago(ts)
+
+        html += (
+            f'<div class="scan-row">'
+            f'<span class="scan-lane" style="{lane_style}">{lane_label}</span>'
+            f'<span class="scan-sym">{sym}</span>'
+            f'<span class="scan-badge" style="{badge_style}">{act_icon}</span>'
+            f'<span class="scan-reason">{notes or "—"}{conf_str}</span>'
+            f'<span class="scan-time">{age_str}</span>'
+            f'</div>'
+        )
+        shown += 1
+
+    st.markdown(
+        f'<div style="background:#13141f;border:1px solid #1e2038;border-radius:14px;'
+        f'padding:12px 16px;max-height:400px;overflow-y:auto;">{html}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+@st.fragment(run_every=10)
+def comp_pair_heatmap():
+    """Signal heatmap — all pairs color-coded by last scanner verdict."""
+    from config import CRYPTO_PAIRS, PERP_PAIRS
+
+    feed = get_scan_feed(limit=300) or []
+
+    # Build last-signal lookup per symbol
+    last_sig: dict = {}
+    for item in feed:
+        sym = str(item.get('symbol', '') or '').upper()
+        if sym and sym not in last_sig:
+            last_sig[sym] = {
+                'action': str(item.get('action', item.get('signal', 'HOLD')) or 'HOLD').upper(),
+                'conf':   float(item.get('confidence', 0) or 0),
+                'ts':     item.get('ts', ''),
+            }
+
+    # Gather all pairs to display
+    all_pairs = []
+    seen = set()
+    for p in (CRYPTO_PAIRS or []):
+        sym = p.strip().upper()
+        if sym and sym not in seen:
+            all_pairs.append(('spot', sym))
+            seen.add(sym)
+    for p in (PERP_PAIRS or []):
+        sym = p.strip().upper()
+        if sym and sym not in seen:
+            all_pairs.append(('perp', sym))
+            seen.add(sym)
+
+    if not all_pairs:
+        return
+
+    tiles_html = ''
+    for (market, sym) in all_pairs:
+        sig  = last_sig.get(sym) or last_sig.get(sym.replace('USDT','USDC')) or {}
+        act  = sig.get('action', 'HOLD')
+        conf = sig.get('conf', 0.0)
+        ts   = sig.get('ts', '')
+        age  = _minutes_ago(ts) if ts else '—'
+
+        # Short display name
+        short = sym.replace('-USDC', '').replace('-USDT', '').replace('-USD', '').replace('USDT','').replace('USDC','')
+
+        if act == 'BUY':
+            intensity = int(30 + conf * 40)
+            tile_bg   = f'background:rgba(16,201,143,0.{intensity:02d});'
+            border    = 'border-color:rgba(16,201,143,0.35);'
+            sym_clr   = '#10c98f'
+            act_clr   = '#10c98f'
+            bar_bg    = f'background:rgba(16,201,143,{conf:.2f});'
+        elif act in ('SELL', 'SHORT'):
+            intensity = int(30 + conf * 40)
+            tile_bg   = f'background:rgba(240,62,94,0.{intensity:02d});'
+            border    = 'border-color:rgba(240,62,94,0.35);'
+            sym_clr   = '#f03e5e'
+            act_clr   = '#f03e5e'
+            bar_bg    = f'background:rgba(240,62,94,{conf:.2f});'
+        else:
+            tile_bg   = 'background:#0f1018;'
+            border    = 'border-color:#1e2038;'
+            sym_clr   = '#3a3f58'
+            act_clr   = '#3a3f58'
+            bar_bg    = 'background:#1e2038;'
+
+        perp_dot = (
+            '<span style="position:absolute;top:5px;right:5px;width:4px;height:4px;'
+            'border-radius:50%;background:#4f8ef7;opacity:0.7;"></span>'
+        ) if market == 'perp' else ''
+
+        tiles_html += (
+            f'<div class="heat-tile" style="{tile_bg}{border}" '
+            f'title="{sym} — {act} {conf:.0%} — {age} ago">'
+            f'{perp_dot}'
+            f'<span class="heat-sym" style="color:{sym_clr};">{short}</span>'
+            f'<span class="heat-act" style="color:{act_clr};">{act}</span>'
+            f'<span class="heat-age" style="color:#3a3f58;">{age}</span>'
+            f'<div class="heat-conf" style="{bar_bg}"></div>'
+            f'</div>'
+        )
+
+    st.markdown(
+        f'<div style="background:#0f1018;border:1px solid #1e2038;border-radius:14px;'
+        f'padding:14px 16px;">'
+        f'<div style="font-size:10px;font-weight:700;letter-spacing:3px;'
+        f'text-transform:uppercase;color:#3a3f58;margin-bottom:12px;">'
+        f'Signal Heatmap — all pairs '
+        f'<span style="color:#1e2038;font-weight:400;">'
+        f'(green=BUY · red=SELL · dark=HOLD · blue dot=perp)</span></div>'
+        f'<div class="heat-grid">{tiles_html}</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # MAIN
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2374,6 +2848,22 @@ def main():
     with tab1:
         comp_hero()
         comp_metrics()
+
+        # Live scanner radar + pair heatmap
+        scan_col, heat_col = st.columns([3, 4])
+        with scan_col:
+            _sec("SCANNER RADAR", "Rolling preview of every pair the bot evaluates each scan cycle. "
+                 "Each row = one symbol evaluated. Lane tag shows which strategy engine scanned it. "
+                 "BUY = debate was triggered and voted to enter. HOLD = filtered out. "
+                 "Color intensity = conviction level. Auto-refreshes every 5 seconds.")
+            comp_live_scanner()
+        with heat_col:
+            _sec("SIGNAL HEATMAP", "Every pair in the universe color-coded by its last scan verdict. "
+                 "Green = most recent scan returned BUY signal. Red = SELL/SHORT. Dark = no signal (HOLD). "
+                 "Color intensity scales with confidence. Blue dot = perp pair. Hover for details. "
+                 "Updates every 10 seconds.")
+            comp_pair_heatmap()
+
         col_l, col_r = st.columns(2)
         with col_l:
             comp_positions()

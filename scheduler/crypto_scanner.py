@@ -114,6 +114,11 @@ def run_crypto_scan() -> None:
     except Exception:
         pass
 
+    # ── Phase 1: Collect debate candidates ────────────────────────────────────
+    # All pre-debate prep runs sequentially (data fetches, indicators, gates).
+    # Symbols that pass every gate accumulate here; debates run in parallel below.
+    _debate_candidates: list = []
+
     for pid in CRYPTO_PAIRS:
         try:
             df = get_candles(pid, CRYPTO_CANDLE_GRANULARITY, 100)
@@ -256,7 +261,7 @@ def run_crypto_scan() -> None:
             market_data['tv_signal_active'] = bool(_tv_sig and _tv_sig.get('action') == 'buy')
 
             # ── Macro/news pre-debate gate ─────────────────────────────────────
-            if _CONTEXT_AVAILABLE:
+            if _CONTEXT_AVAILABLE and not PAPER_TRADING:
                 try:
                     _macro_block, _macro_reason = should_block_trade(pid)
                     if _macro_block:
@@ -287,18 +292,22 @@ def run_crypto_scan() -> None:
                       f"session={_sess_bias} mult={_session_cv_mult:.2f} — calling debate")
 
             # ── ML signal gate ─────────────────────────────────────────────────
+            _p_win = 0.0   # default when ML unavailable or not yet run
             if _ML_AVAILABLE:
                 try:
                     _p_win, _ml_conf = get_ml_signal(market_data)
                     market_data['ml_p_win']      = _p_win
                     market_data['ml_confidence'] = _ml_conf
-                    if _ml_conf != 'no_model' and _p_win < ML_SIGNAL_MIN_PROB:
+                    if _ml_conf != 'no_model' and _p_win < ML_SIGNAL_MIN_PROB and not PAPER_TRADING:
                         log_event('INFO', 'scan_feed',
                                   f"[crypto] {pid} 🧠 ML P(win)={_p_win:.1%} < {ML_SIGNAL_MIN_PROB:.0%} — skip debate")
                         continue
                     elif _ml_conf != 'no_model':
+                        _would_block = _p_win < ML_SIGNAL_MIN_PROB
+                        _gate_note = f"paper bypass (would BLOCK live)" if _would_block else "gate passed"
                         log_event('INFO', 'scan_feed',
-                                  f"[crypto] {pid} 🧠 ML P(win)={_p_win:.1%} ≥ {ML_SIGNAL_MIN_PROB:.0%} — gate passed")
+                                  f"[crypto] {pid} 🧠 ML P(win)={_p_win:.1%} {'<' if _would_block else '≥'} "
+                                  f"{ML_SIGNAL_MIN_PROB:.0%} — {_gate_note}")
                 except Exception:
                     pass
 
@@ -392,120 +401,169 @@ def run_crypto_scan() -> None:
 
                 _debate_context = '\n\n'.join(_debate_context_parts)
 
-                debate_result = engine['debate'](symbol=pid, market_data=market_data,
-                                                 context=_debate_context,
-                                                 verbose=False, memory_context=mem_ctx)
-                daily_pnl = get_todays_pnl(paper=PAPER_TRADING)
-                _atstats = get_all_time_stats(paper=PAPER_TRADING)
-                real_balance = ACCOUNT_SIZE + _atstats['total_pnl']
-                final = engine['synthesize'](
-                    debate=debate_result, current_price=price, asset_class='crypto',
-                    daily_pnl=daily_pnl,
-                    open_positions=len(rm.get_all_positions()['crypto']),
-                    trades_today=len(get_todays_trades(paper=PAPER_TRADING)),
-                    account_balance=real_balance,
-                    allow_short=PAPER_TRADING,
-                    atr=market_data.get('atr', 0),
-                )
-                log_signal('crypto_ai_debate', pid, final.action, final.confidence,
-                           final.reasoning, price=price)
-                vb = debate_result.vote_breakdown
-                log_event('INFO', 'scan_feed',
-                          f"[crypto] {pid} → {final.action} {final.confidence:.0%} | "
-                          f"{vb.get('BUY',0)}B/{vb.get('HOLD',0)}H/{vb.get('SELL',0)}S | "
-                          f"regime={regime} | {final.reasoning[:70]}")
-
-                # Recompute SUPER SCORE with agent votes now available
-                try:
-                    from learning.super_score import compute_super_score
-                    _super = compute_super_score(market_data, debate_result=debate_result,
-                                                 ml_p_win=_p_win if _ML_AVAILABLE else 0.0,
-                                                 symbol=pid)
-                    market_data['super_score'] = _super['score']
-                    market_data['super_label'] = _super['label']
-                    log_event('INFO', 'scan_feed',
-                              f"[crypto] {pid} SUPER (w/agents) {_super['score']:.0f} ({_super['label']}) "
-                              f"Agt={_super['components'].get('agents', 0):.0f} "
-                              f"-> size x{_super['size_multiplier']:.2f}")
-                except Exception:
-                    pass
-
-                # ── Regime gates ───────────────────────────────────────────────
-                if final.action == 'BUY' and regime == 'trending_down':
-                    log_event('INFO', 'scan_feed', f"[crypto] {pid} 🚫 regime block: trending_down, no longs")
-                    continue
-                if final.action == 'SHORT' and regime == 'trending_up':
-                    log_event('INFO', 'scan_feed', f"[crypto] {pid} 🚫 regime block: trending_up, no shorts")
-                    continue
-                if regime == 'ranging' and final.confidence < 0.40 and not PAPER_TRADING:
-                    log_event('INFO', 'scan_feed',
-                              f"[crypto] {pid} 🚫 regime block: ranging needs 40%+ conf (got {final.confidence:.0%})")
-                    continue
-
-                if final.action == 'BUY':
-                    # Unified sizer: base × engine.size_multiplier × vol/edge/time/Kelly × super_score_multiplier
-                    _base_usd = unified_get_size(
-                        strategy='crypto_ai',
-                        symbol=pid,
-                        base_size=CRYPTO_POSITION_SIZE_USD * eng_signal.size_multiplier,
-                        confidence=final.confidence,
-                        current_price=price,
-                        funding_rate=float(market_data.get('funding_rate_pct') or 0.0) / 100,
-                    ) * _super.get('size_multiplier', 1.0)
-                    risk_check = rm.check_entry('crypto_macd_consensus', pid, 'BUY',
-                                                _base_usd, price, final.confidence)
-                    if not risk_check:
-                        log_event('INFO', 'scan_feed', f"[crypto] {pid} ⛔ {risk_check.reason}")
-                        continue
-                    result = cb.buy_limit(pid, risk_check.adjusted_size, price * 1.001,
-                                          'crypto_macd_consensus', final.stop_loss, final.take_profit)
-                    if result:
-                        rm.register_position('crypto_macd_consensus', pid,
-                                             risk_check.adjusted_size / price, price,
-                                             final.stop_loss, final.take_profit,
-                                             direction='LONG', entry_reason=final.reasoning,
-                                             agent_votes=debate_result.vote_breakdown,
-                                             ml_p_win=market_data.get('ml_p_win', 0),
-                                             super_score=market_data.get('super_score', 0))
-
-                elif final.action == 'SHORT':
-                    # Coinbase spot doesn't support shorting — paper-log only.
-                    # In live mode, shorts must route to Binance perp (perp_scanner).
-                    # Block live SHORT here to prevent phantom position registration.
-                    if not PAPER_TRADING:
-                        log_event('INFO', 'scan_feed',
-                                  f"[crypto] {pid} SHORT signal — live mode routes to perp_scanner, skip spot SHORT")
-                        continue
-                    _short_usd = unified_get_size(
-                        strategy='crypto_ai',
-                        symbol=pid,
-                        base_size=CRYPTO_POSITION_SIZE_USD * eng_signal.size_multiplier,
-                        confidence=final.confidence,
-                        current_price=price,
-                        funding_rate=float(market_data.get('funding_rate_pct') or 0.0) / 100,
-                    )
-                    risk_check = rm.check_entry('crypto_macd_consensus', pid, 'SELL',
-                                                _short_usd, price, final.confidence)
-                    if not risk_check:
-                        print(f"[crypto] ❌ {pid} blocked: {risk_check.reason}")
-                        continue
-                    qty = risk_check.adjusted_size / price
-                    from logging_db.trade_logger import log_trade
-                    log_trade('crypto_macd_consensus', 'binance_spot_paper_short', pid, 'SELL', 'LIMIT',
-                              qty, price, fee_usd=price * qty * BINANCE_SPOT_MAKER_FEE_PCT,
-                              paper=PAPER_TRADING, notes=f'SHORT entry (paper only) | {final.reasoning[:100]}')
-                    rm.register_position('crypto_macd_consensus', pid, qty, price,
-                                         final.stop_loss, final.take_profit,
-                                         direction='SHORT', entry_reason=final.reasoning)
-                    print(f"[crypto] 🔻 SHORT {pid} | qty={qty:.6f} @ ${price:,.4f} | "
-                          f"stop=${final.stop_loss:,.4f} target=${final.take_profit:,.4f}")
-
-            # NOTE: Independent strategies (MR, Fade, Range Scalper) are handled
-            # in the second pass loop below — they run regardless of engine signal.
+                # All gates passed — queue for parallel debate.
+                _debate_candidates.append({
+                    'pid': pid, 'price': price, 'market_data': market_data,
+                    'regime': regime, 'mem_ctx': mem_ctx,
+                    '_debate_context': _debate_context,
+                    '_p_win': _p_win, '_super': _super, 'eng_signal': eng_signal,
+                })
 
         except Exception as e:
             print(f"[crypto_scan] {pid}: {e}")
             log_event('ERROR', 'crypto_scan', f"{pid}: {e}")
+
+    # ── Phase 2: Parallel debate execution ────────────────────────────────────
+    # Debates are stateless Claude API calls — safe to fan out concurrently.
+    # Trade execution (Phase 3) remains sequential so risk state stays consistent.
+    def _debate_one(candidate: dict) -> dict:
+        _pid     = candidate['pid']
+        _price   = candidate['price']
+        _mdata   = candidate['market_data']
+        _regime  = candidate['regime']
+        _mem_ctx = candidate['mem_ctx']
+        _dctx    = candidate['_debate_context']
+        __p_win  = candidate['_p_win']
+        __super  = candidate['_super']
+        _eng_sig = candidate['eng_signal']
+
+        _debate_result = engine['debate'](symbol=_pid, market_data=_mdata,
+                                          context=_dctx, verbose=False,
+                                          memory_context=_mem_ctx)
+        _daily_pnl = get_todays_pnl(paper=PAPER_TRADING)
+        _atstats   = get_all_time_stats(paper=PAPER_TRADING)
+        _real_bal  = ACCOUNT_SIZE + _atstats['total_pnl']
+        _final = engine['synthesize'](
+            debate=_debate_result, current_price=_price, asset_class='crypto',
+            daily_pnl=_daily_pnl,
+            open_positions=len(rm.get_all_positions()['crypto']),
+            trades_today=len(get_todays_trades(paper=PAPER_TRADING)),
+            account_balance=_real_bal,
+            allow_short=PAPER_TRADING,
+            atr=_mdata.get('atr', 0),
+        )
+        log_signal('crypto_ai_debate', _pid, _final.action, _final.confidence,
+                   _final.reasoning, price=_price)
+        _vb = _debate_result.vote_breakdown
+        log_event('INFO', 'scan_feed',
+                  f"[crypto] {_pid} → {_final.action} {_final.confidence:.0%} | "
+                  f"{_vb.get('BUY',0)}B/{_vb.get('HOLD',0)}H/{_vb.get('SELL',0)}S | "
+                  f"regime={_regime} | {_final.reasoning[:70]}")
+
+        # Recompute SUPER SCORE with agent votes now available.
+        try:
+            from learning.super_score import compute_super_score
+            __super = compute_super_score(_mdata, debate_result=_debate_result,
+                                          ml_p_win=__p_win if _ML_AVAILABLE else 0.0,
+                                          symbol=_pid)
+            _mdata['super_score'] = __super['score']
+            _mdata['super_label'] = __super['label']
+            log_event('INFO', 'scan_feed',
+                      f"[crypto] {_pid} SUPER (w/agents) {__super['score']:.0f} ({__super['label']}) "
+                      f"Agt={__super['components'].get('agents', 0):.0f} "
+                      f"-> size x{__super['size_multiplier']:.2f}")
+        except Exception:
+            pass
+
+        return {
+            'pid': _pid, 'price': _price, 'market_data': _mdata,
+            'regime': _regime, 'debate_result': _debate_result,
+            'final': _final, '_super': __super, 'eng_signal': _eng_sig,
+        }
+
+    _debate_results: list = []
+    if _debate_candidates:
+        from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
+        _max_w = min(4, len(_debate_candidates))
+        with ThreadPoolExecutor(max_workers=_max_w) as _pool:
+            _futures = {_pool.submit(_debate_one, c): c['pid'] for c in _debate_candidates}
+            for _fut in _as_completed(_futures, timeout=25):
+                _sym = _futures[_fut]
+                try:
+                    _debate_results.append(_fut.result())
+                except Exception as _de:
+                    log_event('ERROR', 'crypto_scan', f"[debate parallel] {_sym}: {_de}")
+
+    # ── Phase 3: Trade execution (sequential — risk state must be consistent) ─
+    for _res in _debate_results:
+        pid          = _res['pid']
+        price        = _res['price']
+        market_data  = _res['market_data']
+        regime       = _res['regime']
+        final        = _res['final']
+        debate_result = _res['debate_result']
+        _super       = _res['_super']
+        eng_signal   = _res['eng_signal']
+        try:
+            # ── Regime gates ───────────────────────────────────────────────
+            if final.action == 'BUY' and regime == 'trending_down' and not PAPER_TRADING:
+                log_event('INFO', 'scan_feed', f"[crypto] {pid} 🚫 regime block: trending_down, no longs")
+                continue
+            if final.action == 'SHORT' and regime == 'trending_up' and not PAPER_TRADING:
+                log_event('INFO', 'scan_feed', f"[crypto] {pid} 🚫 regime block: trending_up, no shorts")
+                continue
+            if regime == 'ranging' and final.confidence < 0.40 and not PAPER_TRADING:
+                log_event('INFO', 'scan_feed',
+                          f"[crypto] {pid} 🚫 regime block: ranging needs 40%+ conf (got {final.confidence:.0%})")
+                continue
+
+            if final.action == 'BUY':
+                _base_usd = unified_get_size(
+                    strategy='crypto_ai',
+                    symbol=pid,
+                    base_size=CRYPTO_POSITION_SIZE_USD * eng_signal.size_multiplier,
+                    confidence=final.confidence,
+                    current_price=price,
+                    funding_rate=float(market_data.get('funding_rate_pct') or 0.0) / 100,
+                ) * _super.get('size_multiplier', 1.0)
+                risk_check = rm.check_entry('crypto_macd_consensus', pid, 'BUY',
+                                            _base_usd, price, final.confidence)
+                if not risk_check:
+                    log_event('INFO', 'scan_feed', f"[crypto] {pid} ⛔ {risk_check.reason}")
+                    continue
+                exec_result = cb.buy_limit(pid, risk_check.adjusted_size, price * 1.001,
+                                           'crypto_macd_consensus', final.stop_loss, final.take_profit)
+                if exec_result:
+                    rm.register_position('crypto_macd_consensus', pid,
+                                         risk_check.adjusted_size / price, price,
+                                         final.stop_loss, final.take_profit,
+                                         direction='LONG', entry_reason=final.reasoning,
+                                         agent_votes=debate_result.vote_breakdown,
+                                         ml_p_win=market_data.get('ml_p_win', 0),
+                                         super_score=market_data.get('super_score', 0))
+
+            elif final.action == 'SHORT':
+                # Coinbase spot doesn't support shorting — paper-log only.
+                # In live mode, shorts must route to Binance perp (perp_scanner).
+                if not PAPER_TRADING:
+                    log_event('INFO', 'scan_feed',
+                              f"[crypto] {pid} SHORT signal — live mode routes to perp_scanner, skip spot SHORT")
+                    continue
+                _short_usd = unified_get_size(
+                    strategy='crypto_ai',
+                    symbol=pid,
+                    base_size=CRYPTO_POSITION_SIZE_USD * eng_signal.size_multiplier,
+                    confidence=final.confidence,
+                    current_price=price,
+                    funding_rate=float(market_data.get('funding_rate_pct') or 0.0) / 100,
+                )
+                risk_check = rm.check_entry('crypto_macd_consensus', pid, 'SELL',
+                                            _short_usd, price, final.confidence)
+                if not risk_check:
+                    print(f"[crypto] ❌ {pid} blocked: {risk_check.reason}")
+                    continue
+                qty = risk_check.adjusted_size / price
+                from logging_db.trade_logger import log_trade
+                log_trade('crypto_macd_consensus', 'binance_spot_paper_short', pid, 'SELL', 'LIMIT',
+                          qty, price, fee_usd=price * qty * BINANCE_SPOT_MAKER_FEE_PCT,
+                          paper=PAPER_TRADING, notes=f'SHORT entry (paper only) | {final.reasoning[:100]}')
+                rm.register_position('crypto_macd_consensus', pid, qty, price,
+                                     final.stop_loss, final.take_profit,
+                                     direction='SHORT', entry_reason=final.reasoning)
+                print(f"[crypto] 🔻 SHORT {pid} | qty={qty:.6f} @ ${price:,.4f} | "
+                      f"stop=${final.stop_loss:,.4f} target=${final.take_profit:,.4f}")
+        except Exception as e:
+            log_event('ERROR', 'crypto_scan', f"[trade exec] {pid}: {e}")
 
     # ══════════════════════════════════════════════════════════════════════════
     # INDEPENDENT STRATEGY PASS

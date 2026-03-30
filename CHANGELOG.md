@@ -1,5 +1,19 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
+## 2026-03-30
+- v9.1: scan speed overhaul — parallel inter-symbol debates (ThreadPoolExecutor fan-out in crypto_scanner.py Phase 2), MTF candle cache (240s TTL, eliminates redundant Coinbase REST calls), scan interval halved 30s→15s in config.py
+- v9.1: MTF granularity bug fix — _get_5m_candles was passing integer 300 instead of 'FIVE_MINUTE' string; Coinbase silently rejected all 5-min bar requests; all MTF confluence was always absent
+- v9.1: low_since_entry persistence fix — persist_position() now saves low_since_entry to DB; load path uses explicit None check; register_position + update_high pass low_since_entry through; fixes perp TypeError '<' not supported between float and NoneType permanently
+- v9.1: should_exit None guards — stop_price/target_price/high_since_entry all guarded against None before comparison in stop_loss_manager.py
+- v9.1: dead pair cleanup — removed 7 zero-volume/delisted pairs (LTC, NEAR, APT, OP, ARB, SUI, PEPE, MATIC) from CRYPTO_PAIRS; replaced with ATOM, LDO, FIL, AAVE, ICP, SNX, COMP (all liquid on Coinbase USDC)
+- v9.1: ML gate log fix — crypto_scanner now shows correct < vs >= and "paper bypass (would BLOCK live)" vs "gate passed"
+
+## 2026-03-29
+- 9-feature build: cumulative delta, Deribit IV skew, on-chain whale, derivatives momentum scanner (Lane 4), MTF alignment, partial profit taking (50% at 50% target), tighter trailing stop (2%, activates at 40% target), time-of-day ML features, regime-aware position sizing (R factor)
+
+## 2026-03-28
+- Dashboard v12.0: tabbed layout — 6 tabs (Overview/Crypto Spot/Perp/Predictions/Intelligence/System), new comp_crypto_tab and comp_perp_tab functions
+
 ## 2026-03-28
 - Sprint 5: ml_trainer.py offline trainer, ml_signal.py background retrain, prediction_arb.py, CI branch fix
 

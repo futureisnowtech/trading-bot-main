@@ -234,13 +234,14 @@ def log_edge_snapshot(
 
 def persist_position(symbol, strategy, qty, entry, stop, target,
                      high_since_entry, ts_entry, paper=True,
-                     direction='LONG', entry_reason='') -> None:
+                     direction='LONG', entry_reason='', low_since_entry=None) -> None:
     """Write open position to DB so restarts can recover it."""
+    _low = low_since_entry if low_since_entry is not None else entry
     conn = _conn()
     conn.cursor().execute("""INSERT OR REPLACE INTO open_positions
-        (symbol,strategy,qty,entry,stop,target,high_since_entry,ts_entry,paper,direction,entry_reason)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-        (symbol, strategy, qty, entry, stop, target, high_since_entry, ts_entry,
+        (symbol,strategy,qty,entry,stop,target,high_since_entry,low_since_entry,ts_entry,paper,direction,entry_reason)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (symbol, strategy, qty, entry, stop, target, high_since_entry, _low, ts_entry,
          int(paper), direction, entry_reason or ''))
     conn.commit()
     conn.close()
@@ -391,6 +392,8 @@ def get_monthly_api_cost() -> float:
 def get_all_time_stats(paper=True) -> dict:
     # Filter on pnl_usd != 0 (not action='SELL') so SHORT exits logged as
     # action='BUY' with non-zero pnl are counted correctly.
+    # Respects TRADE_SESSION_START so pre-overhaul trades don't skew metrics.
+    from config import TRADE_SESSION_START
     conn = _conn()
     cur = conn.cursor()
     cur.execute("""SELECT COUNT(*) as total,
@@ -399,10 +402,11 @@ def get_all_time_stats(paper=True) -> dict:
         SUM(pnl_usd) as total_pnl,
         MAX(pnl_usd) as best_trade,
         MIN(pnl_usd) as worst_trade
-        FROM trades WHERE paper=? AND pnl_usd != 0""", (int(paper),))
+        FROM trades WHERE paper=? AND pnl_usd != 0
+        AND ts >= ?""", (int(paper), TRADE_SESSION_START))
     row = cur.fetchone()
-    # Total fees across ALL trades (BUY + SELL both have fees)
-    cur.execute("SELECT COALESCE(SUM(fee_usd), 0) FROM trades WHERE paper=?", (int(paper),))
+    cur.execute("SELECT COALESCE(SUM(fee_usd), 0) FROM trades WHERE paper=? AND ts >= ?",
+                (int(paper), TRADE_SESSION_START))
     total_fees = float(cur.fetchone()[0])
     conn.close()
     if not row or not row[0]:

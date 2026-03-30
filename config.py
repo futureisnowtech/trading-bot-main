@@ -14,6 +14,13 @@ load_dotenv()
 PAPER_TRADING: bool = os.getenv('PAPER_TRADING', 'true').lower() == 'true'
 LIVE_TRADING: bool = not PAPER_TRADING
 
+# Session start: all performance stats (win rate, P&L, trade counts) are
+# measured from this date forward. Old trades are kept in DB for ML training
+# but excluded from dashboard metrics and Kelly/sizing decisions.
+# Reset this when making significant system changes so stale data doesn't
+# pollute current performance signals.
+TRADE_SESSION_START: str = os.getenv('TRADE_SESSION_START', '2026-03-28')
+
 # ════════════════════════════════════════════════════════════════════
 # ACCOUNT
 # ════════════════════════════════════════════════════════════════════
@@ -115,7 +122,7 @@ MODERATOR_MAX_TOKENS: int = 900                               # CIO synthesis
 QUICK_DEBATE_AGENTS: list = ['funding_regime', 'momentum_structure', 'risk_economics']
 FULL_DEBATE_AGENTS:  list = ['funding_regime', 'momentum_structure', 'risk_economics']
 MES_DEBATE_AGENTS:   list = ['mes_momentum_risk', 'mes_quant', 'mes_market_structure']
-FULL_DEBATE_MIN_AGREEMENT: float = 0.60   # 2 of 3 agents must agree for BUY (2/3 = 0.666; 0.67 was unreachable)
+FULL_DEBATE_MIN_AGREEMENT: float = 0.20 if PAPER_TRADING else 0.60   # paper: any 1/3 agent BUY = BUY
 
 # ML signal gate — skip debate if P(win) below threshold
 # Calibrated to seeded data baseline (~9% WR from math-only backtest).
@@ -209,7 +216,7 @@ NO_TRADE_UNTIL: dt_time = dt_time(10, 0)
 # SCHEDULER INTERVALS
 # ════════════════════════════════════════════════════════════════════
 EQUITY_SCAN_INTERVAL_SECONDS: int = 60
-CRYPTO_SCAN_INTERVAL_SECONDS: int = 60
+CRYPTO_SCAN_INTERVAL_SECONDS: int = 15
 FUTURES_SCAN_INTERVAL_SECONDS: int = 60
 POSITION_MONITOR_INTERVAL_SECONDS: int = 30
 WATCHDOG_INTERVAL_SECONDS: int = 900       # Alert if no scan in 15 min

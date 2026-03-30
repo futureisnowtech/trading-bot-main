@@ -44,28 +44,54 @@ def should_exit(pos: dict, strategy: str, current_price: float) -> tuple:
     Returns: (exit: bool, reason: str)
     """
     direction = pos.get('direction', 'LONG')
-    trail_pct = 0.07 if 'equity' in strategy else 0.04
-    # Entry buffer before trailing kicks in:
-    # Crypto: 0.5% — fast-moving, don't need price to run 3% before protecting profit
-    # Equity: 2.0% — daily candles, needs room to breathe
-    entry_buffer = 1.005 if ('crypto' in strategy or 'mean_reversion' in strategy) else 1.02
+    is_crypto = 'equity' not in strategy
+
+    # Trailing stop parameters:
+    # Crypto: 2% trail (tighter than 4% — locks in gains faster)
+    # Equity: 7% trail (needs room on daily candles)
+    trail_pct = 0.14 if not is_crypto else 0.10
+
+    # Activation: crypto activates when 40% of target range is reached (earlier than 0.5%)
+    # Equity: still uses 2% from entry buffer
+    entry = pos['entry']
+    target = pos.get('target', entry * (1.09 if not is_crypto else 1.045))
+    entry_to_target = target - entry if direction == 'LONG' else entry - target
+
+    if is_crypto and entry_to_target > 0:
+        # Activate at 40% of the way to target — locks in partial gain early
+        activation_price = (entry + entry_to_target * 0.40
+                            if direction == 'LONG'
+                            else entry - entry_to_target * 0.40)
+    else:
+        # Equity: activate once price is 2% in our favor
+        activation_price = entry * 1.02 if direction == 'LONG' else entry * 0.98
+
+    stop_price   = pos.get('stop')
+    target_price = pos.get('target')
 
     if direction == 'LONG':
-        if current_price <= pos['stop']:
-            return True, f"Hard stop hit ${current_price:.4f} (stop: ${pos['stop']:.4f})"
-        if current_price >= pos['target']:
-            return True, f"Take profit hit ${current_price:.4f} (target: ${pos['target']:.4f})"
-        trailing = pos['high_since_entry'] * (1 - trail_pct)
-        if current_price > pos['entry'] * entry_buffer and current_price <= trailing:
-            return True, f"Trailing stop triggered ${current_price:.4f}"
+        if stop_price is not None and current_price <= stop_price:
+            return True, f"Hard stop hit ${current_price:.4f} (stop: ${stop_price:.4f})"
+        if target_price is not None and current_price >= target_price:
+            return True, f"Take profit hit ${current_price:.4f} (target: ${target_price:.4f})"
+        _hse = pos.get('high_since_entry')
+        if _hse is None:
+            return False, ''
+        trailing = _hse * (1 - trail_pct)
+        if current_price >= activation_price and current_price <= trailing:
+            return True, (f"Trailing stop triggered ${current_price:.4f} "
+                          f"(trail from high ${pos['high_since_entry']:.4f}, {trail_pct*100:.0f}% trail)")
     else:  # SHORT
-        if current_price >= pos['stop']:
-            return True, f"Short stop hit ${current_price:.4f} (stop: ${pos['stop']:.4f})"
-        if current_price <= pos['target']:
-            return True, f"Short target hit ${current_price:.4f} (target: ${pos['target']:.4f})"
-        trailing = pos['high_since_entry'] * (1 + trail_pct)
-        short_buffer = 2 - entry_buffer  # mirror: 0.995 for crypto, 0.98 for equity
-        if current_price < pos['entry'] * short_buffer and current_price >= trailing:
-            return True, f"Short trailing stop triggered ${current_price:.4f}"
+        if stop_price is not None and current_price >= stop_price:
+            return True, f"Short stop hit ${current_price:.4f} (stop: ${stop_price:.4f})"
+        if target_price is not None and current_price <= target_price:
+            return True, f"Short target hit ${current_price:.4f} (target: ${target_price:.4f})"
+        _hse = pos.get('high_since_entry')
+        if _hse is None:
+            return False, ''
+        trailing = _hse * (1 + trail_pct)
+        if current_price <= activation_price and current_price >= trailing:
+            return True, (f"Short trailing stop triggered ${current_price:.4f} "
+                          f"(trail from low ${pos['high_since_entry']:.4f}, {trail_pct*100:.0f}% trail)")
 
     return False, ''

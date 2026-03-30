@@ -7,6 +7,7 @@ Not imported by any file that any of the above import (no circular deps).
 import math
 import os
 import sys
+import time
 from datetime import datetime
 
 import pytz
@@ -129,6 +130,14 @@ except Exception as _cte:
 # ── Strategy singletons ───────────────────────────────────────────────────────
 _crypto_strategy = CryptoMACDStrategy(variant='consensus')
 _futures_strategy = FuturesScalperStrategy()
+
+# ── MTF 5-min candle cache ────────────────────────────────────────────────────
+# 5-min bars change every 300s. We refresh slightly before a new bar closes (240s TTL).
+# Without this, every _build_market_data call fetches 40 bars × 8 symbols = 16 API
+# calls per 15s cycle. With caching, only 1 fetch per symbol per 4 minutes.
+_mtf_candle_cache: dict = {}  # {symbol: DataFrame with indicators}
+_mtf_candle_ts: dict = {}     # {symbol: float (unix timestamp of last fetch)}
+_MTF_CACHE_TTL: float = 240.0  # 4 minutes
 
 
 # ── Shared helper functions ───────────────────────────────────────────────────
@@ -358,5 +367,80 @@ def _build_market_data(symbol, price, df_ind, change_pct=0, regime='ranging') ->
         md['market_sentiment_label']  = _sent.get('label', 'NEUTRAL')
     except Exception:
         pass
+
+    # ── Cumulative delta (net buy/sell volume pressure) ────────────────────
+    try:
+        from data.cumulative_delta import get_cumulative_delta
+        _cd = get_cumulative_delta(symbol)
+        md['delta_value']  = _cd.get('delta_value', 0.0)
+        md['delta_pct']    = _cd.get('delta_pct', 0.0)
+        md['delta_trend']  = _cd.get('delta_trend', 'neutral')
+        md['delta_accel']  = _cd.get('delta_accel', False)
+    except Exception:
+        md['delta_value'] = 0.0
+        md['delta_pct']   = 0.0
+        md['delta_trend'] = 'neutral'
+        md['delta_accel'] = False
+
+    # ── Deribit IV skew (BTC/ETH options market directional bias) ──────────
+    try:
+        from data.deribit_feed import get_iv_skew
+        _iv = get_iv_skew(symbol)
+        md['iv_skew']           = _iv.get('skew', 0.0)
+        md['iv_skew_pct']       = _iv.get('skew_pct', 0.0)
+        md['iv_skew_direction'] = _iv.get('skew_direction', 'neutral')
+        md['iv_pct_rank']       = _iv.get('iv_pct_rank', 50.0)
+    except Exception:
+        md['iv_skew']           = 0.0
+        md['iv_skew_pct']       = 0.0
+        md['iv_skew_direction'] = 'neutral'
+        md['iv_pct_rank']       = 50.0
+
+    # ── On-chain whale flow (BTC/ETH only, neutral fallback) ──────────────
+    try:
+        from data.onchain_feed import get_whale_flow
+        _wf = get_whale_flow(symbol)
+        md['whale_signal']   = _wf.get('whale_signal', 'neutral')
+        md['whale_strength'] = _wf.get('whale_strength', 0.0)
+    except Exception:
+        md['whale_signal']   = 'neutral'
+        md['whale_strength'] = 0.0
+
+    # ── Multi-timeframe MACD alignment (5m candles via Coinbase, cached 4 min) ──
+    try:
+        from data.coinbase_feed import get_candles as _get_5m_candles
+        from data.indicators import add_all_indicators as _add_ind
+        _now = time.time()
+        if symbol not in _mtf_candle_cache or (_now - _mtf_candle_ts.get(symbol, 0)) > _MTF_CACHE_TTL:
+            _df5_raw = _get_5m_candles(symbol, 'FIVE_MINUTE', 40)   # 5-min candles, 40 bars
+            if _df5_raw is not None and len(_df5_raw) >= 20:
+                _mtf_candle_cache[symbol] = _add_ind(_df5_raw)
+            else:
+                _mtf_candle_cache[symbol] = None
+            _mtf_candle_ts[symbol] = _now
+        _df5_ind = _mtf_candle_cache.get(symbol)
+        if _df5_ind is not None and len(_df5_ind) >= 20:
+            _last5   = _df5_ind.iloc[-1]
+            _macd5   = float(_last5.get('macd_std_hist', 0) or _last5.get('macd1_hist', 0) or 0)
+            _mtf_5m_bullish = _macd5 > 0
+        else:
+            _mtf_5m_bullish = None
+
+        # MTF alignment score: 1m + 5m
+        # current 1m MACD
+        _macd1 = md.get('macd_hist', 0)
+        _score = 0
+        if _macd1 > 0:
+            _score += 1
+        if _mtf_5m_bullish is True:
+            _score += 1
+        # Both agree = score 2 (strong), one each = 1 (weak/mixed), both bearish = 0
+        md['mtf_alignment']    = _score
+        md['mtf_5m_bullish']   = _mtf_5m_bullish
+        md['mtf_both_bullish'] = (_score == 2)
+    except Exception:
+        md['mtf_alignment']    = 1      # neutral (middle of 0-2 range)
+        md['mtf_5m_bullish']   = None
+        md['mtf_both_bullish'] = False
 
     return md

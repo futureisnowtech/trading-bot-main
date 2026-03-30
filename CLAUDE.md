@@ -30,6 +30,34 @@ A fully autonomous AI-powered trading system that:
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
 
+## Current Version: v9.1 (2026-03-30: speed overhaul + perp stability fixes)
+- v9.1 (2026-03-30): Scan speed overhaul + perp None-comparison bug fix + dead pair cleanup
+  - **Parallel inter-symbol debates** (`scheduler/crypto_scanner.py`): Phase 1 accumulates all
+    signal-passing symbols into `_debate_candidates`; Phase 2 fans out 3-agent Claude calls
+    across all candidates simultaneously via `ThreadPoolExecutor(max_workers=4, timeout=25s)`.
+    A slow BTC debate no longer serializes ETH/SOL/etc. debates.
+  - **MTF candle cache** (`scheduler/_helpers.py`): 240s TTL cache for 5-min bar DataFrames.
+    `_mtf_candle_cache` + `_mtf_candle_ts` dicts keyed by symbol. Eliminates redundant Coinbase
+    REST fetches on every 15s scan cycle. Cache auto-invalidates after 4 minutes.
+  - **Scan interval halved**: `CRYPTO_SCAN_INTERVAL_SECONDS` 30s → 15s in `config.py`.
+    Doubles decision frequency with no additional API cost (candle cache absorbs REST load).
+  - **MTF granularity bug fixed** (`scheduler/_helpers.py`): `_get_5m_candles(symbol, 300, 40)` was
+    passing integer `300` — Coinbase API rejected it. Fixed to `'FIVE_MINUTE'` string. Was silently
+    returning `None` for all 5-min candle calls, meaning MTF confluence signals were always absent.
+  - **`low_since_entry` persistence fix** (`logging_db/trade_logger.py`, `risk/risk_manager.py`):
+    `persist_position()` now accepts `low_since_entry` param and writes it to DB.
+    Load path uses explicit None check: `pos['low_since_entry'] if ... is not None else pos['entry']`.
+    `register_position` + `update_high` both pass `low_since_entry` to `persist_position`.
+    Root cause of perp `TypeError: '<' not supported between float and NoneType` — fixed permanently.
+  - **`should_exit` None guards** (`risk/stop_loss_manager.py`): `stop_price`, `target_price`,
+    `high_since_entry` all guarded against None before comparison — safe even if DB has NULLs.
+  - **Dead pair cleanup** (`.env` `CRYPTO_PAIRS`): Removed 7 zero-volume/delisted Coinbase USDC
+    pairs (LTC, NEAR, APT, OP, ARB, SUI, PEPE, MATIC). Replaced with liquid alternatives:
+    ATOM-USDC, LDO-USDC, FIL-USDC, AAVE-USDC, ICP-USDC, SNX-USDC, COMP-USDC.
+    Dead pairs were wasting scan cycles and blocking on Kyle Lambda / ATR fee-floor checks.
+  - **ML gate log fix** (`scheduler/crypto_scanner.py`): Log now correctly shows `<` vs `≥` and
+    `"paper bypass (would BLOCK live)"` vs `"gate passed"` — was always showing `≥ gate passed`.
+
 ## Current Version: v9.0 (Sprints 4+5 complete)
 - v9.0 Sprints 4+5 (2026-03-28): Parallel lanes, market sentiment signals, offline ML, multi-LLM, CI
   - **Parallel lane scanning** (`scheduler/job_runner.py`): crypto + perp + Lane 3 now run simultaneously

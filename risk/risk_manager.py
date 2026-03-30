@@ -86,7 +86,7 @@ class RiskManager:
                     'qty': pos['qty'], 'entry': pos['entry'],
                     'stop': pos['stop'], 'target': pos['target'],
                     'high_since_entry': pos['high_since_entry'],
-                    'low_since_entry': pos.get('low_since_entry', pos['entry']),
+                    'low_since_entry': pos['low_since_entry'] if pos.get('low_since_entry') is not None else pos['entry'],
                     'ts_entry': ts_e,
                     'direction': pos.get('direction', 'LONG'),
                     'entry_reason': pos.get('entry_reason', ''),
@@ -270,7 +270,8 @@ class RiskManager:
         else:
             self._crypto[symbol] = pos
         persist_position(symbol, strategy, qty, entry, stop, target, entry, ts,
-                         PAPER_TRADING, direction=direction, entry_reason=entry_reason)
+                         PAPER_TRADING, direction=direction, entry_reason=entry_reason,
+                         low_since_entry=entry)
 
     def close_position(self, strategy, symbol, exit_reason: str = '') -> Optional[dict]:
         if 'equity' in strategy.lower() or 'futures' in strategy.lower():
@@ -291,7 +292,8 @@ class RiskManager:
             d = self._crypto
         if symbol in d:
             direction = d[symbol].get('direction', 'LONG')
-            old_extreme = d[symbol].get('high_since_entry', price)
+            _he = d[symbol].get('high_since_entry')
+            old_extreme = _he if _he is not None else price  # explicit None-guard (.get default ignored for NULL SQLite values)
             new_extreme = max(old_extreme, price) if direction == 'LONG' else min(old_extreme, price)
             d[symbol]['high_since_entry'] = new_extreme
             if new_extreme != old_extreme:
@@ -300,7 +302,8 @@ class RiskManager:
                                  d[symbol]['stop'], d[symbol]['target'],
                                  new_extreme, d[symbol]['ts_entry'], PAPER_TRADING,
                                  direction=direction,
-                                 entry_reason=d[symbol].get('entry_reason', ''))
+                                 entry_reason=d[symbol].get('entry_reason', ''),
+                                 low_since_entry=d[symbol].get('low_since_entry'))
 
     def update_low(self, strategy, symbol, price) -> None:
         """Track max adverse excursion (lowest price seen for LONG, highest for SHORT)."""
@@ -312,7 +315,8 @@ class RiskManager:
             d = self._crypto
         if symbol in d:
             direction = d[symbol].get('direction', 'LONG')
-            old_low = d[symbol].get('low_since_entry', price)
+            _ll = d[symbol].get('low_since_entry')
+            old_low = _ll if _ll is not None else price  # explicit None-guard
             new_low = min(old_low, price) if direction == 'LONG' else max(old_low, price)
             d[symbol]['low_since_entry'] = new_low
 

@@ -2245,10 +2245,42 @@ def comp_crypto_tab():
                 age_str = f'{mins}m' if mins < 60 else f'{mins//60}h {mins%60}m'
             except Exception:
                 pass
-            to_stop   = abs(entry - stop)   / entry * 100 if entry > 0 and stop > 0   else 0
-            to_target = abs(target - entry) / entry * 100 if entry > 0 and target > 0 else 0
-            stop_pct  = min(100, int((to_stop / CRYPTO_STOP_LOSS_PCT / 100) * 100))
-            tgt_pct   = min(100, int((to_target / CRYPTO_TAKE_PROFIT_PCT / 100) * 100))
+            current = _live_price(sym)
+            qty = float(p.get('qty', 0))
+            if current and current > 0 and entry > 0:
+                if direc == 'SHORT':
+                    unreal_pct = (entry - current) / entry * 100
+                else:
+                    unreal_pct = (current - entry) / entry * 100
+                unreal_usd = unreal_pct / 100 * entry * qty
+                pnl_clr   = GREEN if unreal_pct >= 0 else RED
+                pnl_sign  = '+' if unreal_pct >= 0 else ''
+                price_line = (
+                    f'<div style="display:flex;justify-content:space-between;'
+                    f'align-items:center;margin-bottom:8px;">'
+                    f'  <span style="font-size:13px;color:{TEXT2};">Now: '
+                    f'    <b style="color:{TEXT};">{current:.5g}</b>'
+                    f'  </span>'
+                    f'  <span style="font-size:13px;font-weight:700;color:{pnl_clr};">'
+                    f'    {pnl_sign}{unreal_pct:.2f}% &nbsp; ({pnl_sign}${unreal_usd:.2f})'
+                    f'  </span>'
+                    f'</div>'
+                )
+            else:
+                price_line = ''
+            ref_price = current if (current and current > 0) else entry
+            if direc == 'SHORT':
+                to_stop   = (stop - ref_price)   / ref_price * 100 if ref_price > 0 and stop > 0   else 0
+                to_target = (ref_price - target)  / ref_price * 100 if ref_price > 0 and target > 0 else 0
+            else:
+                to_stop   = (ref_price - stop)    / ref_price * 100 if ref_price > 0 and stop > 0   else 0
+                to_target = (target - ref_price)  / ref_price * 100 if ref_price > 0 and target > 0 else 0
+            to_stop   = max(0.0, to_stop)
+            to_target = max(0.0, to_target)
+            orig_stop_dist   = abs(entry - stop)   / entry * 100 if entry > 0 and stop > 0   else 1
+            orig_target_dist = abs(target - entry) / entry * 100 if entry > 0 and target > 0 else 1
+            stop_pct  = min(100, int(to_stop   / orig_stop_dist   * 100)) if orig_stop_dist   > 0 else 0
+            tgt_pct   = min(100, int(to_target / orig_target_dist * 100)) if orig_target_dist > 0 else 0
             stop_clr  = RED if to_stop < 0.3 else (AMBER if to_stop < 0.8 else TEXT2)
             st.markdown(
                 f'<div class="pos-card">'
@@ -2259,6 +2291,7 @@ def comp_crypto_tab():
                 f'  </div>'
                 f'  <div class="pos-age">{age_str}</div>'
                 f'</div>'
+                f'{price_line}'
                 f'<div class="pos-bars">'
                 f'  <div>'
                 f'    <div class="pos-dist-label">To Stop</div>'
@@ -2402,50 +2435,6 @@ def comp_crypto_tab():
                 )
             st.markdown(f'<div class="card-flush">{html}</div>', unsafe_allow_html=True)
 
-    # ── Last crypto AI debate ──────────────────────────────────────────────────
-    _sec("LAST AI DEBATE",
-         "Most recent 3-agent debate for a crypto spot pair. "
-         "Agent 1 = Macro & Funding. Agent 2 = Technical Momentum. Agent 3 = Trade Economics. 2/3 BUY = trade taken.")
-    try:
-        debates = get_recent_debates(limit=10) or []
-        crypto_debate = None
-        for d in debates:
-            sym = str(d.get('symbol', ''))
-            strat = str(d.get('strategy', ''))
-            if ('-USDC' in sym or '-USD' in sym or 'crypto' in strat.lower()):
-                if 'perp' not in strat.lower():
-                    crypto_debate = d
-                    break
-        if crypto_debate:
-            res  = str(crypto_debate.get('result', '?')).upper()
-            clr  = GREEN if res == 'BUY' else (RED if res == 'SELL' else TEXT2)
-            conf = crypto_debate.get('confidence', 0)
-            reason = str(crypto_debate.get('reason', ''))[:300]
-            st.markdown(
-                f'<div class="card-sm">'
-                f'<div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">'
-                f'  <span style="font-size:18px;font-weight:800;color:{TEXT};'
-                f'  font-family:\'JetBrains Mono\',monospace;">'
-                f'  {crypto_debate.get("symbol","?")}</span>'
-                f'  <span style="font-size:16px;font-weight:800;color:{clr};">{res}</span>'
-                f'  <span style="font-size:13px;color:{TEXT2};">{conf:.0%} confidence</span>'
-                f'  <span style="margin-left:auto;font-size:12px;color:{TEXT3};">'
-                f'  {_fmt_ts(crypto_debate.get("ts",""))}</span>'
-                f'</div>'
-                f'<div style="font-size:13px;color:{TEXT2};line-height:1.5;">{reason}</div>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-        else:
-            st.markdown(
-                f'<div style="color:{TEXT3};font-size:14px;padding:12px 0;">No crypto debates yet.</div>',
-                unsafe_allow_html=True,
-            )
-    except Exception as e:
-        st.markdown(
-            f'<div style="color:{TEXT3};font-size:13px;">Debate unavailable: {e}</div>',
-            unsafe_allow_html=True,
-        )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2488,10 +2477,42 @@ def comp_perp_tab():
                 age_str = f'{mins}m' if mins < 60 else f'{mins//60}h {mins%60}m'
             except Exception:
                 pass
-            to_stop   = abs(entry - stop)   / entry * 100 if entry > 0 and stop > 0   else 0
-            to_target = abs(target - entry) / entry * 100 if entry > 0 and target > 0 else 0
-            stop_pct  = min(100, int(to_stop * 20))
-            tgt_pct   = min(100, int(to_target * 10))
+            current = _live_price(sym)
+            qty = float(p.get('qty', 0))
+            if current and current > 0 and entry > 0:
+                if direc == 'SHORT':
+                    unreal_pct = (entry - current) / entry * 100
+                else:
+                    unreal_pct = (current - entry) / entry * 100
+                unreal_usd = unreal_pct / 100 * entry * qty
+                pnl_clr   = GREEN if unreal_pct >= 0 else RED
+                pnl_sign  = '+' if unreal_pct >= 0 else ''
+                price_line = (
+                    f'<div style="display:flex;justify-content:space-between;'
+                    f'align-items:center;margin-bottom:8px;">'
+                    f'  <span style="font-size:13px;color:{TEXT2};">Now: '
+                    f'    <b style="color:{TEXT};">{current:.5g}</b>'
+                    f'  </span>'
+                    f'  <span style="font-size:13px;font-weight:700;color:{pnl_clr};">'
+                    f'    {pnl_sign}{unreal_pct:.2f}% &nbsp; ({pnl_sign}${unreal_usd:.2f})'
+                    f'  </span>'
+                    f'</div>'
+                )
+            else:
+                price_line = ''
+            ref_price = current if (current and current > 0) else entry
+            if direc == 'SHORT':
+                to_stop   = (stop - ref_price)   / ref_price * 100 if ref_price > 0 and stop > 0   else 0
+                to_target = (ref_price - target)  / ref_price * 100 if ref_price > 0 and target > 0 else 0
+            else:
+                to_stop   = (ref_price - stop)    / ref_price * 100 if ref_price > 0 and stop > 0   else 0
+                to_target = (target - ref_price)  / ref_price * 100 if ref_price > 0 and target > 0 else 0
+            to_stop   = max(0.0, to_stop)
+            to_target = max(0.0, to_target)
+            orig_stop_dist   = abs(entry - stop)   / entry * 100 if entry > 0 and stop > 0   else 1
+            orig_target_dist = abs(target - entry) / entry * 100 if entry > 0 and target > 0 else 1
+            stop_pct  = min(100, int(to_stop   / orig_stop_dist   * 100)) if orig_stop_dist   > 0 else 0
+            tgt_pct   = min(100, int(to_target / orig_target_dist * 100)) if orig_target_dist > 0 else 0
             stop_clr  = RED if to_stop < 0.3 else (AMBER if to_stop < 0.8 else TEXT2)
             dir_clr   = GREEN if direc == 'LONG' else RED
             st.markdown(
@@ -2504,6 +2525,7 @@ def comp_perp_tab():
                 f'  </div>'
                 f'  <div class="pos-age">{age_str}</div>'
                 f'</div>'
+                f'{price_line}'
                 f'<div class="pos-bars">'
                 f'  <div>'
                 f'    <div class="pos-dist-label">To Stop</div>'
@@ -2619,10 +2641,64 @@ def comp_perp_tab():
             )
         st.markdown(f'<div class="card-flush">{html}</div>', unsafe_allow_html=True)
 
-    # ── Funding rate context ───────────────────────────────────────────────────
-    _sec("FUNDING CONTEXT",
-         "Most recent funding rate data from the scan feed. "
-         "Funding > 0.05%/8h = market overheated (Macro & Funding Analyst blocks entry).")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# INTELLIGENCE TAB — AI debates + funding signals for both lanes
+# ══════════════════════════════════════════════════════════════════════════════
+
+@st.fragment(run_every=15)
+def comp_lane_intelligence():
+    """Crypto spot AI debates + perp funding context — the 'why' behind every decision."""
+    # ── Last crypto spot AI debate ─────────────────────────────────────────────
+    _sec("CRYPTO SPOT — LAST AI DEBATE",
+         "Most recent 3-agent debate (Bardock / Vegeta / Krillin). "
+         "2/3 BUY = trade taken. Agent 1 = Macro & Funding (funding rate, OI, VIX, DXY). "
+         "Agent 2 = Technical Momentum (ADX, squeeze, WAE, WaveTrend). "
+         "Agent 3 = Trade Economics (fee math, ATR, volume, time-of-day).")
+    try:
+        debates = get_recent_debates(limit=20) or []
+        crypto_debate = None
+        for d in debates:
+            sym   = str(d.get('symbol', ''))
+            strat = str(d.get('strategy', ''))
+            if ('-USDC' in sym or '-USD' in sym or 'crypto' in strat.lower()):
+                if 'perp' not in strat.lower():
+                    crypto_debate = d
+                    break
+        if crypto_debate:
+            res    = str(crypto_debate.get('result', '?')).upper()
+            clr    = GREEN if res == 'BUY' else (RED if res == 'SELL' else TEXT2)
+            conf   = crypto_debate.get('confidence', 0)
+            reason = str(crypto_debate.get('reason', ''))[:400]
+            st.markdown(
+                f'<div class="card-sm">'
+                f'<div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">'
+                f'  <span style="font-size:18px;font-weight:800;color:{TEXT};'
+                f'  font-family:\'JetBrains Mono\',monospace;">'
+                f'  {crypto_debate.get("symbol","?")}</span>'
+                f'  <span style="font-size:16px;font-weight:800;color:{clr};">{res}</span>'
+                f'  <span style="font-size:13px;color:{TEXT2};">{conf:.0%} confidence</span>'
+                f'  <span style="margin-left:auto;font-size:12px;color:{TEXT3};">'
+                f'  {_fmt_ts(crypto_debate.get("ts",""))}</span>'
+                f'</div>'
+                f'<div style="font-size:13px;color:{TEXT2};line-height:1.5;">{reason}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                f'<div style="color:{TEXT3};font-size:14px;padding:12px 0;">No crypto debates yet.</div>',
+                unsafe_allow_html=True,
+            )
+    except Exception as e:
+        st.markdown(f'<div style="color:{TEXT3};font-size:13px;">Debate unavailable: {e}</div>',
+                    unsafe_allow_html=True)
+
+    # ── Perp funding context ───────────────────────────────────────────────────
+    _sec("PERP — FUNDING RATE CONTEXT",
+         "Most recent funding rate data from the perp scan feed. "
+         "Funding > 0.05%/8h = market overheated → Bardock blocks entry. "
+         "Neutral/negative funding = best entry window for perp longs.")
     try:
         feed = get_scan_feed(limit=100) or []
         funding_msg = None
@@ -2634,7 +2710,7 @@ def comp_perp_tab():
         if funding_msg:
             st.markdown(
                 f'<div class="card-sm" style="font-family:\'JetBrains Mono\',monospace;'
-                f'font-size:12px;color:{TEXT2};">{funding_msg[:300]}</div>',
+                f'font-size:12px;color:{TEXT2};">{funding_msg[:400]}</div>',
                 unsafe_allow_html=True,
             )
         else:
@@ -2644,10 +2720,8 @@ def comp_perp_tab():
                 unsafe_allow_html=True,
             )
     except Exception:
-        st.markdown(
-            f'<div style="color:{TEXT3};font-size:14px;padding:8px 0;">—</div>',
-            unsafe_allow_html=True,
-        )
+        st.markdown(f'<div style="color:{TEXT3};font-size:14px;padding:8px 0;">—</div>',
+                    unsafe_allow_html=True)
 
 
 @st.fragment(run_every=5)
@@ -2875,16 +2949,28 @@ def main():
                  "Updates every 10 seconds.")
             comp_pair_heatmap()
 
-        col_l, col_r = st.columns(2)
-        with col_l:
-            comp_positions()
-        with col_r:
-            comp_markets()
+        comp_markets()
 
     with tab2:
+        st.markdown(
+            f'<div style="font-size:12px;color:{TEXT3};padding:4px 0 12px 0;">'
+            f'Binance Spot · 1-min candles · up to 5 positions · 3-agent AI debate gate · '
+            f'0.10% fee · Stop 1.5% / Target 4.5% (3:1 R:R) — '
+            f'<b style="color:{TEXT2};">AI debates & edge analysis → Intelligence tab</b>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
         comp_crypto_tab()
 
     with tab3:
+        st.markdown(
+            f'<div style="font-size:12px;color:{TEXT3};padding:4px 0 12px 0;">'
+            f'Binance USD-M Perp · funding-rate-aware · long + short · 4h flat exit to avoid funding drag · '
+            f'Testnet paper mode — '
+            f'<b style="color:{TEXT2};">Funding context & debate analysis → Intelligence tab</b>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
         comp_perp_tab()
 
     with tab4:
@@ -2906,6 +2992,7 @@ def main():
             )
 
     with tab5:
+        comp_lane_intelligence()
         comp_edge()
         comp_trade_quality()
         comp_risk()

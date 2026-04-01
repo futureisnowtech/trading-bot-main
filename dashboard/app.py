@@ -2886,98 +2886,152 @@ def comp_live_scanner():
     )
 
 
-@st.fragment(run_every=10)
-def comp_pair_heatmap():
-    """Signal heatmap — all pairs color-coded by last scanner verdict."""
-    from config import CRYPTO_PAIRS, PERP_PAIRS
+@st.fragment(run_every=30)
+def comp_signal_intelligence():
+    """Signal leaderboard + ML model status — replaces heatmap."""
+    # ── 1. Signal leaderboard ─────────────────────────────────────────────────
+    try:
+        from learning.signal_performance import get_signal_report
+        from learning.meta_learner import get_meta_weight_adjustments, get_latest_insight
+        sig_rows = get_signal_report(min_fires=1) or []
+        meta_adj = get_meta_weight_adjustments('any') or {}
+        meta_insight = get_latest_insight() or ''
+    except Exception:
+        sig_rows, meta_adj, meta_insight = [], {}, ''
 
-    feed = get_scan_feed(limit=300) or []
+    # Sort by bayesian_pts desc, only show signals with at least 1 fire
+    sig_rows = sorted([r for r in sig_rows if (r.get('fires') or 0) >= 1],
+                      key=lambda r: -(r.get('bayesian_pts') or 0))[:12]
 
-    # Build last-signal lookup per symbol
-    last_sig: dict = {}
-    for item in feed:
-        sym = str(item.get('symbol', '') or '').upper()
-        if sym and sym not in last_sig:
-            last_sig[sym] = {
-                'action': str(item.get('action', item.get('signal', 'HOLD')) or 'HOLD').upper(),
-                'conf':   float(item.get('confidence', 0) or 0),
-                'ts':     item.get('ts', ''),
-            }
+    leaderboard_html = ''
+    for r in sig_rows:
+        name   = r.get('signal_name', '')
+        fires  = int(r.get('fires') or 0)
+        wr     = r.get('win_rate')
+        bpts   = float(r.get('bayesian_pts') or 0)
+        adj    = meta_adj.get(name, 0.0)
+        wr_str = f"{wr*100:.0f}%" if wr is not None else '—'
+        wr_clr = GREEN if (wr or 0) >= 0.55 else (RED if (wr or 0) < 0.40 else TEXT2)
+        adj_str = (f'<span style="color:{GREEN};font-size:10px;margin-left:4px;">▲{adj:+.1f}</span>'
+                   if adj > 0 else
+                   f'<span style="color:{RED};font-size:10px;margin-left:4px;">▼{adj:.1f}</span>'
+                   if adj < 0 else '')
+        bar_w  = min(100, int(bpts * 4))
+        bar_clr = GREEN if bpts >= 12 else (GOLD if bpts >= 6 else '#3a3f58')
+        leaderboard_html += (
+            f'<div style="display:flex;align-items:center;gap:8px;padding:4px 0;'
+            f'border-bottom:1px solid #1e2038;">'
+            f'<div style="width:140px;font-size:11px;color:{TEXT2};white-space:nowrap;'
+            f'overflow:hidden;text-overflow:ellipsis;">{name}{adj_str}</div>'
+            f'<div style="width:32px;font-size:11px;color:{TEXT3};text-align:right;">{fires}</div>'
+            f'<div style="width:38px;font-size:11px;color:{wr_clr};text-align:right;">{wr_str}</div>'
+            f'<div style="flex:1;background:#1e2038;border-radius:3px;height:6px;overflow:hidden;">'
+            f'<div style="width:{bar_w}%;height:6px;background:{bar_clr};border-radius:3px;"></div></div>'
+            f'<div style="width:32px;font-size:11px;color:{bar_clr};text-align:right;">{bpts:.1f}</div>'
+            f'</div>'
+        )
 
-    # Gather all pairs to display
-    all_pairs = []
-    seen = set()
-    for p in (CRYPTO_PAIRS or []):
-        sym = p.strip().upper()
-        if sym and sym not in seen:
-            all_pairs.append(('spot', sym))
-            seen.add(sym)
-    for p in (PERP_PAIRS or []):
-        sym = p.strip().upper()
-        if sym and sym not in seen:
-            all_pairs.append(('perp', sym))
-            seen.add(sym)
+    if not leaderboard_html:
+        leaderboard_html = f'<div style="color:{TEXT3};font-size:13px;padding:12px 0;">No signal data yet — runs after first trade closes.</div>'
 
-    if not all_pairs:
-        return
+    # ── 2. ML model status ────────────────────────────────────────────────────
+    ml_status_html = ''
+    try:
+        import os, pickle, time as _time
+        pkl_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                'logs', 'ml_model.pkl')
+        if os.path.exists(pkl_path):
+            age_sec  = _time.time() - os.path.getmtime(pkl_path)
+            age_str  = (f"{int(age_sec/3600)}h {int((age_sec%3600)/60)}m ago"
+                        if age_sec >= 3600 else f"{int(age_sec/60)}m ago")
+            stale    = age_sec > 6 * 3600
+            age_clr  = RED if stale else GREEN
+            with open(pkl_path, 'rb') as f:
+                payload = pickle.load(f)
+            n_trades   = int(payload.get('n_trades', 0))
+            model_wr   = payload.get('win_rate', None)
+            model_type = str(payload.get('model_type', 'unknown'))
+            wr_str     = f"{model_wr*100:.1f}%" if model_wr is not None else '—'
+            wr_clr     = GREEN if (model_wr or 0) >= 0.50 else RED
 
-    tiles_html = ''
-    for (market, sym) in all_pairs:
-        sig  = last_sig.get(sym) or last_sig.get(sym.replace('USDT','USDC')) or {}
-        act  = sig.get('action', 'HOLD')
-        conf = sig.get('conf', 0.0)
-        ts   = sig.get('ts', '')
-        age  = _minutes_ago(ts) if ts else '—'
+            # Feature importances (top 5)
+            try:
+                from learning.ml_signal import get_feature_importance
+                imps = get_feature_importance()
+                top5 = list(imps.items())[:5]
+            except Exception:
+                top5 = []
 
-        # Short display name
-        short = sym.replace('-USDC', '').replace('-USDT', '').replace('-USD', '').replace('USDT','').replace('USDC','')
+            imp_html = ''
+            for fname, fval in top5:
+                bar_w = min(100, int(fval * 600))
+                short_name = fname.replace('engine_', '').replace('_', ' ')
+                imp_html += (
+                    f'<div style="display:flex;align-items:center;gap:6px;padding:2px 0;">'
+                    f'<div style="width:120px;font-size:10px;color:{TEXT3};white-space:nowrap;'
+                    f'overflow:hidden;text-overflow:ellipsis;">{short_name}</div>'
+                    f'<div style="flex:1;background:#1e2038;border-radius:2px;height:4px;">'
+                    f'<div style="width:{bar_w}%;height:4px;background:{GOLD};border-radius:2px;"></div></div>'
+                    f'<div style="width:34px;font-size:10px;color:{TEXT3};text-align:right;">{fval:.3f}</div>'
+                    f'</div>'
+                )
 
-        if act == 'BUY':
-            intensity = int(30 + conf * 40)
-            tile_bg   = f'background:rgba(16,201,143,0.{intensity:02d});'
-            border    = 'border-color:rgba(16,201,143,0.35);'
-            sym_clr   = '#10c98f'
-            act_clr   = '#10c98f'
-            bar_bg    = f'background:rgba(16,201,143,{conf:.2f});'
-        elif act in ('SELL', 'SHORT'):
-            intensity = int(30 + conf * 40)
-            tile_bg   = f'background:rgba(240,62,94,0.{intensity:02d});'
-            border    = 'border-color:rgba(240,62,94,0.35);'
-            sym_clr   = '#f03e5e'
-            act_clr   = '#f03e5e'
-            bar_bg    = f'background:rgba(240,62,94,{conf:.2f});'
+            ml_status_html = (
+                f'<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:10px;">'
+                f'<div style="font-size:11px;color:{TEXT3};">Model: <span style="color:{TEXT2};font-weight:700;">{model_type}</span></div>'
+                f'<div style="font-size:11px;color:{TEXT3};">Trained on: <span style="color:{TEXT2};font-weight:700;">{n_trades} trades</span></div>'
+                f'<div style="font-size:11px;color:{TEXT3};">WR: <span style="color:{wr_clr};font-weight:700;">{wr_str}</span></div>'
+                f'<div style="font-size:11px;color:{TEXT3};">Age: <span style="color:{age_clr};font-weight:700;">{age_str}</span>'
+                f'{"&nbsp;<span style=\"font-size:10px;color:{RED};\">STALE — retrains at 50 new closes</span>".format(RED=RED) if stale else ""}</span></div>'
+                f'</div>'
+                f'{"<div style=\"font-size:10px;color:{TEXT3};margin-bottom:4px;font-weight:700;letter-spacing:1px;\">TOP FEATURES</div>" + imp_html if imp_html else ""}'.format(TEXT3=TEXT3)
+            )
         else:
-            tile_bg   = 'background:#0f1018;'
-            border    = 'border-color:#1e2038;'
-            sym_clr   = '#3a3f58'
-            act_clr   = '#3a3f58'
-            bar_bg    = 'background:#1e2038;'
+            ml_status_html = (
+                f'<div style="color:{TEXT3};font-size:13px;padding:4px 0;">'
+                f'No pkl yet — will train after {50} trade closes.</div>'
+            )
+    except Exception as _me:
+        ml_status_html = f'<div style="color:{TEXT3};font-size:12px;">ML status unavailable: {_me}</div>'
 
-        perp_dot = (
-            '<span style="position:absolute;top:5px;right:5px;width:4px;height:4px;'
-            'border-radius:50%;background:#4f8ef7;opacity:0.7;"></span>'
-        ) if market == 'perp' else ''
-
-        tiles_html += (
-            f'<div class="heat-tile" style="{tile_bg}{border}" '
-            f'title="{sym} — {act} {conf:.0%} — {age} ago">'
-            f'{perp_dot}'
-            f'<span class="heat-sym" style="color:{sym_clr};">{short}</span>'
-            f'<span class="heat-act" style="color:{act_clr};">{act}</span>'
-            f'<span class="heat-age" style="color:#3a3f58;">{age}</span>'
-            f'<div class="heat-conf" style="{bar_bg}"></div>'
+    # ── 3. Meta-learner insight ───────────────────────────────────────────────
+    insight_html = ''
+    if meta_insight:
+        insight_html = (
+            f'<div style="margin-top:10px;padding:8px 10px;background:#12141f;'
+            f'border-left:3px solid {GOLD};border-radius:0 6px 6px 0;">'
+            f'<div style="font-size:10px;font-weight:700;letter-spacing:2px;color:{GOLD};'
+            f'text-transform:uppercase;margin-bottom:4px;">Meta-Learner Insight</div>'
+            f'<div style="font-size:12px;color:{TEXT2};">{meta_insight}</div>'
             f'</div>'
         )
 
     st.markdown(
         f'<div style="background:#0f1018;border:1px solid #1e2038;border-radius:14px;'
         f'padding:14px 16px;">'
+        # Signal leaderboard header
+        f'<div style="display:flex;gap:8px;align-items:baseline;margin-bottom:8px;">'
         f'<div style="font-size:10px;font-weight:700;letter-spacing:3px;'
-        f'text-transform:uppercase;color:#3a3f58;margin-bottom:12px;">'
-        f'Signal Heatmap — all pairs '
-        f'<span style="color:#1e2038;font-weight:400;">'
-        f'(green=BUY · red=SELL · dark=HOLD · blue dot=perp)</span></div>'
-        f'<div class="heat-grid">{tiles_html}</div>'
+        f'text-transform:uppercase;color:{TEXT3};">Signal Leaderboard</div>'
+        f'<div style="font-size:10px;color:{TEXT3};">fires · WR · Bayesian pts</div>'
+        f'</div>'
+        # Column headers
+        f'<div style="display:flex;gap:8px;padding:2px 0 6px 0;'
+        f'border-bottom:1px solid #1e2038;margin-bottom:4px;">'
+        f'<div style="width:140px;font-size:9px;color:{TEXT3};text-transform:uppercase;">Signal</div>'
+        f'<div style="width:32px;font-size:9px;color:{TEXT3};text-align:right;">Fires</div>'
+        f'<div style="width:38px;font-size:9px;color:{TEXT3};text-align:right;">WR</div>'
+        f'<div style="flex:1;font-size:9px;color:{TEXT3};">Weight</div>'
+        f'<div style="width:32px;font-size:9px;color:{TEXT3};text-align:right;">Pts</div>'
+        f'</div>'
+        f'{leaderboard_html}'
+        # ML status section
+        f'<div style="margin-top:14px;padding-top:12px;border-top:1px solid #1e2038;">'
+        f'<div style="font-size:10px;font-weight:700;letter-spacing:3px;'
+        f'text-transform:uppercase;color:{TEXT3};margin-bottom:8px;">ML Model</div>'
+        f'{ml_status_html}'
+        f'</div>'
+        f'{insight_html}'
         f'</div>',
         unsafe_allow_html=True,
     )
@@ -3007,11 +3061,12 @@ def main():
                  "Color intensity = conviction level. Auto-refreshes every 5 seconds.")
             comp_live_scanner()
         with heat_col:
-            _sec("SIGNAL HEATMAP", "Every pair in the universe color-coded by its last scan verdict. "
-                 "Green = most recent scan returned BUY signal. Red = SELL/SHORT. Dark = no signal (HOLD). "
-                 "Color intensity scales with confidence. Blue dot = perp pair. Hover for details. "
-                 "Updates every 10 seconds.")
-            comp_pair_heatmap()
+            _sec("SIGNAL INTELLIGENCE", "Live signal leaderboard: which signals are actually winning, "
+                 "ranked by Bayesian conviction points. WR = win rate from closed trades. "
+                 "▲/▼ = meta-learner weight adjustment applied on top of Bayesian pts. "
+                 "ML model status shows model age, training set size, and top features by importance. "
+                 "Updates every 30 seconds.")
+            comp_signal_intelligence()
 
         comp_markets()
 

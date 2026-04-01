@@ -30,6 +30,7 @@ from config import (
     MARKET_TIMEZONE,
     FUNDING_OVERHEATED_PCT,
     ATR_FEE_FLOOR_PCT,
+    PAPER_TRADING,
 )
 
 # ── Thresholds ────────────────────────────────────────────────────────────────
@@ -47,6 +48,14 @@ OBI_STRONG_THRESHOLD = 0.40     # OBI ≥ 0.40 = 3:1+ bid/ask pressure
 # Lunch dead zone
 LUNCH_DEAD_ZONE_START = 11      # 11:00am ET
 LUNCH_DEAD_ZONE_END   = 14      # 2:00pm ET
+
+# ── Paper-mode near-miss thresholds (30% of live values) ─────────────────────
+# These are ONLY used in paper mode to force enough trades for pipeline validation.
+# Live mode never uses these — live thresholds above remain unchanged.
+_PAPER_DIVERGENCE_PCT = 0.45    # live: 1.5% → 30% threshold
+_PAPER_OBI_THRESHOLD  = 0.12    # live: 0.40 → 30% threshold
+_PAPER_VOL_SPIKE_MIN  = 0.3     # live: 1.0x vol for VWAP reclaim → 30%
+_PAPER_FUNDING_MAX    = 0.0015  # live: 0.0005 (0.05%/8h) → 3× looser for paper
 
 
 @dataclass
@@ -179,22 +188,25 @@ def _pre_entry_ok(symbol: str, market_data: dict) -> tuple:
     Hard checks that apply regardless of signal type.
     Returns (ok: bool, reason: str).
     """
-    # ATR fee floor — can't clear fees, don't even try
+    # ATR fee floor — in paper use a minimal floor (0.05%) just to block zero-vol assets;
+    # in live the full 0.4% floor applies to protect against fee-unviable trades.
     atr   = float(market_data.get('atr', 0.0))
     price = float(market_data.get('price', 1.0))
-    if price > 0 and (atr / price) < ATR_FEE_FLOOR_PCT:
-        return False, f"ATR/price={atr/price:.3%} < {ATR_FEE_FLOOR_PCT:.3%} fee floor"
+    _floor = ATR_FEE_FLOOR_PCT * 0.125 if PAPER_TRADING else ATR_FEE_FLOOR_PCT  # 0.05% paper, 0.4% live
+    if price > 0 and (atr / price) < _floor:
+        return False, f"ATR/price={atr/price:.3%} < {_floor:.3%} fee floor"
 
-    # Lunch dead zone
-    if _is_lunch_dead_zone():
+    # Lunch dead zone — skip in paper to maximise learning exposure
+    if _is_lunch_dead_zone() and not PAPER_TRADING:
         return False, f"lunch dead zone ({LUNCH_DEAD_ZONE_START}am–{LUNCH_DEAD_ZONE_END}pm ET)"
 
-    # Overheated funding (for ALL signals, not just cascade)
+    # Overheated funding — paper uses a 3× looser threshold to allow more trades
     funding_pct = market_data.get('funding_rate_pct')
     if funding_pct is not None:
         try:
-            if float(funding_pct) > FUNDING_OVERHEATED_PCT:
-                return False, f"funding overheated ({float(funding_pct):.4f}%/8h > {FUNDING_OVERHEATED_PCT}%)"
+            _fund_cap = _PAPER_FUNDING_MAX if PAPER_TRADING else FUNDING_OVERHEATED_PCT
+            if float(funding_pct) > _fund_cap:
+                return False, f"funding overheated ({float(funding_pct):.4f}%/8h > {_fund_cap:.4f}%)"
         except (TypeError, ValueError):
             pass
 
@@ -263,6 +275,44 @@ def evaluate(
     if macd_hit:      fired.append('macd_fallback')
 
     if not fired:
+        # ── Paper near-miss: fire on softer conditions for pipeline validation ──
+        # Live mode never reaches this block. Paper mode forces trades on symbols
+        # that "almost" met a real signal so the full system gets exercised.
+        if PAPER_TRADING:
+            paper_fired = []
+
+            # Soft divergence: symbol lagging BTC by ≥ 0.45% (live: 1.5%)
+            if btc_change_pct is not None:
+                _div = float(btc_change_pct) - float(market_data.get('change_pct', 0.0))
+                if _div >= _PAPER_DIVERGENCE_PCT:
+                    paper_fired.append(f'near_divergence({_div:.2f}%)')
+
+            # Soft OBI: bid pressure ≥ 0.12 (live: 0.40)
+            _obi = market_data.get('obi')
+            if _obi is not None:
+                try:
+                    if float(_obi) >= _PAPER_OBI_THRESHOLD:
+                        paper_fired.append(f'near_obi({float(_obi):.2f})')
+                except (TypeError, ValueError):
+                    pass
+
+            # Soft VWAP reclaim: reclaim flag set with any volume (live: 1.0× spike)
+            if market_data.get('vwap_reclaim', False):
+                _vs = float(market_data.get('vol_spike', 0.0) or 0.0)
+                if _vs >= _PAPER_VOL_SPIKE_MIN:
+                    paper_fired.append(f'near_vwap_reclaim(vol={_vs:.1f}x)')
+
+            if paper_fired:
+                return EngineSignal(
+                    action='BUY',
+                    signal_type='near_miss',
+                    size_multiplier=0.5,
+                    order_type='limit',
+                    confidence=0.38,
+                    reason=f"Paper near-miss: {', '.join(paper_fired)} (relaxed thresholds for validation)",
+                    fired_signals=paper_fired,
+                )
+
         return EngineSignal(action='HOLD', signal_type='none',
                             size_multiplier=0.0, reason='no signals fired',
                             fired_signals=[])

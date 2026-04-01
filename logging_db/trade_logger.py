@@ -640,14 +640,43 @@ def get_recent_notifications(limit=30) -> list:
     return rows
 
 
+def _parse_scan_msg(msg: str, ts: str) -> dict:
+    """Parse a scan_feed log message into structured fields for dashboard display."""
+    import re
+    out = {'ts': ts, 'symbol': None, 'action': 'HOLD', 'confidence': 0.0,
+           'strategy': 'crypto', 'message': (msg or '')[:120]}
+    if not msg:
+        return out
+    # Extract lane and symbol: "[crypto] BTC-USDC ..." or "[perp] BTCUSDT ..."
+    m = re.match(r'\[(crypto|perp|equity|futures|deriv)\]\s+(\S+)', msg)
+    if m:
+        out['strategy'] = m.group(1)
+        out['symbol'] = m.group(2).upper()
+    # Extract confidence: "conf=75%" pattern
+    c = re.search(r'conf=(\d+)%', msg)
+    if c:
+        out['confidence'] = float(c.group(1)) / 100
+    # Determine action from message content
+    msg_l = msg.lower()
+    if 'calling debate' in msg_l or '✅ buy' in msg or 'near_miss' in msg_l:
+        out['action'] = 'BUY'
+    # HOLD is the default — skip debate / abort / veto / block all stay HOLD
+    return out
+
+
 def get_scan_feed(limit=40) -> list:
-    """Return recent scan activity log entries (source='scan_feed'), newest first."""
+    """Return recent scan activity log entries (source='scan_feed'), newest first.
+
+    Returns structured dicts with symbol/action/confidence/strategy fields
+    (parsed from the human-readable log message) so dashboard components can
+    use them directly without regex parsing on the caller side.
+    """
     conn = _conn()
     cur = conn.cursor()
     cur.execute(
         "SELECT ts, message FROM system_events WHERE source='scan_feed' ORDER BY ts DESC LIMIT ?",
         (limit,))
-    rows = [{'ts': r[0], 'message': r[1]} for r in cur.fetchall()]
+    rows = [_parse_scan_msg(r[1], r[0]) for r in cur.fetchall()]
     conn.close()
     return rows
 

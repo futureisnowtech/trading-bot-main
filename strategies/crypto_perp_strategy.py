@@ -38,18 +38,25 @@ from strategies.base_strategy import Signal
 from data.indicators import add_all_indicators
 from config import (
     PERP_POSITION_SIZE_USD, PERP_STOP_PCT, PERP_TAKE_PROFIT_PCT,
-    PERP_MAX_LEVERAGE,
+    PERP_MAX_LEVERAGE, PAPER_TRADING,
 )
 
 # ── Tuneable constants ─────────────────────────────────────────────────────────
-_BREAKOUT_BARS    = 20        # Look-back bars for high/low breakout detection
-_ADX_MIN          = 20.0      # Minimum trend strength required
-_RSI_LONG_MIN     = 55.0      # RSI must confirm bullish momentum for longs
-_RSI_SHORT_MAX    = 45.0      # RSI must confirm bearish momentum for shorts
-_VOL_SPIKE_MIN    = 1.2       # Volume confirmation (1.2× 20-bar avg)
+_BREAKOUT_BARS    = 10 if PAPER_TRADING else 20   # paper: 10-bar high/low fires more often
+# Paper mode: loosen thresholds to maximise learning trades
+_ADX_MIN          = 12.0 if PAPER_TRADING else 20.0   # paper: catch weaker trends
+_RSI_LONG_MIN     = 48.0 if PAPER_TRADING else 55.0   # paper: near-neutral RSI ok
+_RSI_SHORT_MAX    = 52.0 if PAPER_TRADING else 45.0   # paper: near-neutral RSI ok
+_VOL_SPIKE_MIN    = 0.8  if PAPER_TRADING else 1.2    # paper: no vol confirmation needed
+_BREAKOUT_BUFFER  = 0.0005 if PAPER_TRADING else 0.001  # paper: 0.05% buffer (was 0.1%)
 _FUNDING_SHORT_MIN= 0.0001    # 0.01% per 8h → longs paying → bearish bias
 _FUNDING_LONG_MAX = 0.0003    # Above 0.03% → too expensive to go long (cost paid 3×/day)
 _FUNDING_EXTREME  = 0.0005    # 0.05% → extreme, strong short confirmation
+
+# Momentum path thresholds (paper only — second entry mode alongside breakout)
+_MACD_MOMENTUM_ADX_MIN  = 12.0   # ADX floor for momentum entries
+_MACD_MOMENTUM_RSI_LONG = (50, 72)   # RSI band for momentum longs
+_MACD_MOMENTUM_RSI_SHORT= (28, 50)   # RSI band for momentum shorts
 
 
 def get_perp_signal(
@@ -109,7 +116,7 @@ def get_perp_signal(
                      f"Vol {vol_spike:.2f}x < {_VOL_SPIKE_MIN}x — weak breakout, skip")
 
     # ── LONG signal ───────────────────────────────────────────────────────────
-    long_breakout = price > bar_high * 1.001   # 0.1% buffer above 20-bar high
+    long_breakout = price > bar_high * (1 + _BREAKOUT_BUFFER)
     if long_breakout and rsi >= _RSI_LONG_MIN and funding_rate <= _FUNDING_LONG_MAX:
         # Funding gate: if rate is too high, longs are too crowded — skip
         stop   = price * (1 - PERP_STOP_PCT)
@@ -149,7 +156,7 @@ def get_perp_signal(
         )
 
     # ── SHORT signal ──────────────────────────────────────────────────────────
-    short_breakout = price < bar_low * 0.999   # 0.1% buffer below 20-bar low
+    short_breakout = price < bar_low * (1 - _BREAKOUT_BUFFER)
     if short_breakout and rsi <= _RSI_SHORT_MAX and funding_rate >= _FUNDING_SHORT_MIN:
         stop   = price * (1 + PERP_STOP_PCT)
         target = price * (1 - PERP_TAKE_PROFIT_PCT)
@@ -186,18 +193,78 @@ def get_perp_signal(
             },
         )
 
+    # ── Momentum continuation path (paper mode — feeds learning system) ──────
+    # Fires when MACD histogram is turning in our favor + RSI in trend band + ADX shows trend.
+    # Does NOT require a strict price breakout — catches mid-trend momentum entries.
+    if PAPER_TRADING and adx >= _MACD_MOMENTUM_ADX_MIN:
+        macd_hist = float(last.get('macd_hist', 0) or 0)
+        prev_hist = float(df.iloc[-2].get('macd_hist', 0) or 0) if len(df) >= 2 else 0.0
+
+        # LONG momentum: MACD hist positive and accelerating, RSI in bullish band
+        if (macd_hist > 0 and macd_hist > prev_hist
+                and _MACD_MOMENTUM_RSI_LONG[0] <= rsi <= _MACD_MOMENTUM_RSI_LONG[1]
+                and funding_rate <= _FUNDING_LONG_MAX):
+            stop   = price * (1 - PERP_STOP_PCT)
+            target = price * (1 + PERP_TAKE_PROFIT_PCT)
+            rr = (target - price) / (price - stop)
+            confidence = 0.52
+            if oi_rising:              confidence += 0.04
+            if rsi > 60:               confidence += 0.03
+            if funding_rate < 0:       confidence += 0.04
+            confidence = round(min(confidence, 0.75), 3)
+            reason = (
+                f"LONG momentum | MACD hist {macd_hist:.6f}↑ RSI={rsi:.1f} "
+                f"ADX={adx:.1f} funding={funding_rate*100:.4f}%/8h R:R={rr:.2f}x"
+            )
+            return Signal(
+                action='BUY', symbol=symbol, strategy='crypto_perp',
+                confidence=confidence, reason=reason, price=price,
+                suggested_size_usd=PERP_POSITION_SIZE_USD,
+                stop_loss=stop, take_profit=target,
+                metadata={'direction': 'LONG', 'leverage': PERP_MAX_LEVERAGE,
+                          'funding_rate': funding_rate, 'oi_rising': oi_rising,
+                          'adx': adx, 'rsi': rsi, 'entry_type': 'momentum'},
+            )
+
+        # SHORT momentum: MACD hist negative and accelerating down, RSI in bearish band
+        if (macd_hist < 0 and macd_hist < prev_hist
+                and _MACD_MOMENTUM_RSI_SHORT[0] <= rsi <= _MACD_MOMENTUM_RSI_SHORT[1]
+                and funding_rate >= _FUNDING_SHORT_MIN):
+            stop   = price * (1 + PERP_STOP_PCT)
+            target = price * (1 - PERP_TAKE_PROFIT_PCT)
+            rr = (price - target) / (stop - price)
+            confidence = 0.52
+            if funding_rate >= _FUNDING_EXTREME:  confidence += 0.07
+            elif funding_rate >= 0.0003:          confidence += 0.04
+            if oi_rising:                          confidence += 0.04
+            if rsi < 38:                           confidence += 0.03
+            confidence = round(min(confidence, 0.75), 3)
+            reason = (
+                f"SHORT momentum | MACD hist {macd_hist:.6f}↓ RSI={rsi:.1f} "
+                f"ADX={adx:.1f} funding={funding_rate*100:.4f}%/8h longs paying={funding_rate>0} R:R={rr:.2f}x"
+            )
+            return Signal(
+                action='SELL', symbol=symbol, strategy='crypto_perp',
+                confidence=confidence, reason=reason, price=price,
+                suggested_size_usd=PERP_POSITION_SIZE_USD,
+                stop_loss=stop, take_profit=target,
+                metadata={'direction': 'SHORT', 'leverage': PERP_MAX_LEVERAGE,
+                          'funding_rate': funding_rate, 'oi_rising': oi_rising,
+                          'adx': adx, 'rsi': rsi, 'entry_type': 'momentum'},
+            )
+
     # ── No signal ─────────────────────────────────────────────────────────────
     long_why = (
-        f"price {price:.4f} vs 20-bar high {bar_high:.4f} "
+        f"price {price:.4f} vs {_BREAKOUT_BARS}-bar high {bar_high:.4f} "
         f"RSI={rsi:.1f}(need≥{_RSI_LONG_MIN}) "
         f"funding={funding_rate*100:.4f}%/8h"
     )
     short_why = (
-        f"price {price:.4f} vs 20-bar low {bar_low:.4f} "
+        f"price {price:.4f} vs {_BREAKOUT_BARS}-bar low {bar_low:.4f} "
         f"RSI={rsi:.1f}(need≤{_RSI_SHORT_MAX})"
     )
     return _hold(symbol, price,
-                 f"No breakout | LONG: {long_why} | SHORT: {short_why}")
+                 f"No signal | LONG: {long_why} | SHORT: {short_why}")
 
 
 def _hold(symbol: str, price: float, reason: str) -> Signal:

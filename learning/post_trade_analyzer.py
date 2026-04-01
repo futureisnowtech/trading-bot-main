@@ -49,20 +49,31 @@ def extract_signals_from_market_data(market_data: dict) -> dict[str, bool]:
         except Exception:
             return default
 
-    # Infer individual signal states from market data values
+    # ── Engine signals (v9 crypto_engine.py — primary trade triggers) ──────────
+    # These are the signals that actually caused the trade to be entered.
+    # Stored in market_data['active_signals'] (list) and market_data['signal_type'].
+    _active = set(md.get('active_signals') or [])
+    _sig_type = str(md.get('signal_type') or '')
+
     signals = {
-        # Tier 1
-        'macd_consensus':       _b('macd_consensus'),   # set by job_runner conviction logic
+        # Engine signals — what actually fired
+        'engine_cascade':       'cascade'      in _active or _sig_type == 'cascade',
+        'engine_divergence':    'divergence'   in _active or _sig_type == 'divergence',
+        'engine_obi':           'obi'          in _active or _sig_type == 'obi',
+        'engine_vwap_reclaim':  'vwap_reclaim' in _active or _sig_type == 'vwap_reclaim',
+        'engine_macd_fallback': 'macd_fallback' in _active or _sig_type == 'macd_fallback',
+        'engine_near_miss':     'near_miss'    in _active or _sig_type == 'near_miss'
+                                or any('near_' in s for s in _active),
+        # Indicator flags (v3-v8 legacy signals — still populated by add_all_indicators)
+        'macd_consensus':       _b('macd_consensus'),
         'williams_r':           _f('williams_r', 0) <= -80,
         'momentum_volume':      _f('momentum_score', 0) > 0.6 and _f('vol_spike', 1) > 1.3,
-        # Tier 2a
         'squeeze_fired':        _b('squeeze_fired') and _f('squeeze_bars', 0) >= 20,
         'rv_expansion':         (_f('rv_ratio') or 0) >= 1.3,
         'kalman_deviation':     (_f('kalman_dev', 0) or 0) <= -0.01,
         'avwap_deviation':      (_f('avwap_dev', 0) or 0) <= -0.005,
         'ou_halflife':          3 <= (_f('ou_halflife_minutes', 0) or 0) <= 60,
         'kyle_lambda':          0 < (_f('kyle_lambda_pct', 100) or 100) <= 30,
-        # Tier 2b
         'supertrend_bullish':   _b('supertrend_bullish'),
         'wavetrend_cross':      _b('wt_oversold_cross'),
         'ichimoku_bullish':     _b('cloud_bullish'),
@@ -72,7 +83,6 @@ def extract_signals_from_market_data(market_data: dict) -> dict[str, bool]:
         'wae_bullish':          _b('wae_bullish') and not _b('wae_exploding'),
         'chop_trending':        _b('chop_trending'),
         'lrsi_mild_oversold':   0.15 <= (_f('lrsi', 0.5) or 0.5) < 0.25,
-        # Tier 3
         'tradingview_signal':   _b('tv_signal_active'),
     }
     return signals

@@ -312,6 +312,11 @@ def monitor_exits_with_ai(engine) -> None:
                 log_event('WARNING', 'exit_monitor',
                           f"[learning] {pid}: candles={len(df_cr) if df_cr is not None else 0} "
                           f"< 5 — signal attribution will be empty for this trade")
+            # Inject entry-time engine signals from position (set at entry, lost if rebuilt from candles)
+            if pos.get('signal_type'):
+                cr_md['signal_type'] = pos['signal_type']
+            if pos.get('active_signals'):
+                cr_md['active_signals'] = pos['active_signals']
 
             # ── Super score decay exit ─────────────────────────────────────────
             try:

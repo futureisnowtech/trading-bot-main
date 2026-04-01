@@ -96,30 +96,31 @@ def _get_time_of_day_multiplier(strategy: str) -> float:
 
 
 def _get_trade_count(market: str, paper: bool) -> int:
-    """Return total completed trades for this market from SQLite."""
+    """Return completed trades for this market since TRADE_SESSION_START."""
     try:
         import sqlite3
-        from config import DB_PATH
+        from config import DB_PATH, TRADE_SESSION_START
 
         conn = sqlite3.connect(DB_PATH)
+        p = (1 if paper else 0,)
+        s = TRADE_SESSION_START
         if market == 'polymarket':
             row = conn.execute(
-                "SELECT COUNT(*) FROM trades WHERE paper=? AND strategy LIKE '%poly%' AND pnl_usd != 0",
-                (1 if paper else 0,)
+                "SELECT COUNT(*) FROM trades WHERE paper=? AND strategy LIKE '%poly%' "
+                "AND pnl_usd != 0 AND ts >= ?", (*p, s)
             ).fetchone()
         elif market == 'mes':
             row = conn.execute(
                 "SELECT COUNT(*) FROM trades WHERE paper=? "
-                "AND (strategy LIKE '%futures%' OR strategy LIKE '%mes%') AND pnl_usd != 0",
-                (1 if paper else 0,)
+                "AND (strategy LIKE '%futures%' OR strategy LIKE '%mes%') "
+                "AND pnl_usd != 0 AND ts >= ?", (*p, s)
             ).fetchone()
         else:
             row = conn.execute(
                 "SELECT COUNT(*) FROM trades WHERE paper=? "
                 "AND strategy NOT LIKE '%poly%' "
                 "AND strategy NOT LIKE '%futures%' AND strategy NOT LIKE '%mes%' "
-                "AND pnl_usd != 0",
-                (1 if paper else 0,)
+                "AND pnl_usd != 0 AND ts >= ?", (*p, s)
             ).fetchone()
         conn.close()
         return int(row[0]) if row else 0
@@ -137,6 +138,24 @@ def _strategy_to_market(strategy: str) -> str:
     return 'crypto'
 
 
+def _get_regime_multiplier(regime: str) -> float:
+    """
+    Regime-aware R factor: scale position size by market regime.
+    trending  = 1.15x (momentum works best in trends — add size)
+    ranging   = 0.85x (mean-reversion is shakier — reduce size)
+    volatile  = 0.70x (high volatility = unpredictable → protect capital)
+    unknown   = 1.00x (neutral — no adjustment)
+    """
+    r = str(regime or '').lower()
+    if 'trend' in r:
+        return 1.15
+    elif 'rang' in r:
+        return 0.85
+    elif 'volat' in r:
+        return 0.70
+    return 1.00
+
+
 def get_position_size(
     strategy: str,
     symbol: str,
@@ -145,6 +164,7 @@ def get_position_size(
     paper: Optional[bool] = None,
     current_price: float = 0.0,
     funding_rate: float = 0.0,
+    regime: str = '',
 ) -> float:
     """
     Compute the final position size for a trade entry.
@@ -234,14 +254,17 @@ def get_position_size(
     # Until then, M = 1.0 (neutral, no adjustment).
     m_score = 1.0
 
+    # ── R: Regime-aware sizing ────────────────────────────────────────────────
+    # Scale size up in trends (momentum edge is real), down in ranging/volatile
+    r_factor = _get_regime_multiplier(regime)
+
     # ── Final formula ─────────────────────────────────────────────────────────
     if adaptive:
-        final = base_size * v_score * e_score * d_factor * t_mult * k_factor * m_score
+        final = base_size * v_score * e_score * d_factor * t_mult * k_factor * m_score * r_factor
     else:
-        # Pre-20-trade: apply only D (drawdown) and T (time-of-day).
-        # V and E are noise before sufficient trade history.
+        # Pre-20-trade: apply only D, T, R (regime). No V/E noise.
         # K still applies via position_sizer (it has its own 15-trade gate).
-        final = base_size * d_factor * t_mult * k_factor * m_score
+        final = base_size * d_factor * t_mult * k_factor * m_score * r_factor
 
     # ── Guardrails ────────────────────────────────────────────────────────────
     max_size = base_size * MAX_POSITION_SCALE

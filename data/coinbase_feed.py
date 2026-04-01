@@ -542,8 +542,19 @@ class CoinbaseMicrostructureFeed:
             print(f"[MicrostructureFeed] Message parse error: {e}")
 
     def _run(self) -> None:
+        _consecutive_failures = 0
+        _MAX_CONSECUTIVE_FAILURES = 5   # give up after 5 straight thread errors
         while self._running:
             try:
+                # Explicitly close previous handle before creating a new one
+                # to prevent leaked file descriptors and threads on reconnect
+                if self._ws is not None:
+                    try:
+                        self._ws.close()
+                    except Exception:
+                        pass
+                    self._ws = None
+
                 self._ws = WSClient(
                     api_key=COINBASE_API_KEY,
                     api_secret=COINBASE_API_SECRET,
@@ -554,6 +565,7 @@ class CoinbaseMicrostructureFeed:
                     product_ids=self._product_ids,
                     channels=['level2', 'market_trades']
                 )
+                _consecutive_failures = 0   # connected — reset failure counter
                 _watchdog_ticks = 0
                 while self._running:
                     time.sleep(1)
@@ -572,8 +584,20 @@ class CoinbaseMicrostructureFeed:
                             print("[MicrostructureFeed] Watchdog: all products stale — silent disconnect, reconnecting")
                             break  # break inner loop → outer loop reconnects
             except Exception as e:
-                print(f"[MicrostructureFeed] WebSocket error: {e} — reconnecting in 10s")
-                time.sleep(10)
+                _consecutive_failures += 1
+                err_str = str(e)
+                # Thread exhaustion: stop retrying — we're leaking OS threads and
+                # blocking the scan ThreadPoolExecutor. Degrade gracefully.
+                if 'start new thread' in err_str or _consecutive_failures >= _MAX_CONSECUTIVE_FAILURES:
+                    print(f"[MicrostructureFeed] Giving up after {_consecutive_failures} "
+                          f"consecutive failures ({err_str}) — microstructure data disabled, "
+                          f"scans unaffected (returns None)")
+                    self._running = False
+                    return
+                backoff = min(10 * _consecutive_failures, 60)
+                print(f"[MicrostructureFeed] WebSocket error: {e} — reconnecting in {backoff}s "
+                      f"(attempt {_consecutive_failures}/{_MAX_CONSECUTIVE_FAILURES})")
+                time.sleep(backoff)
 
 
 # ─── Module-level microstructure feed singleton ───────────────────────────────

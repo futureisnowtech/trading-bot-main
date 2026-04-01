@@ -125,6 +125,27 @@ def _context_component(market_data: dict) -> float:
     if market_data.get('liq_avoid_long'):
         score -= 25.0
 
+    # Deribit IV skew (options market directional bias)
+    iv_skew_dir = str(market_data.get('iv_skew_direction', '') or '').lower()
+    if iv_skew_dir == 'bullish':
+        score += 8.0    # calls bid up = options players expect upside
+    elif iv_skew_dir == 'bearish':
+        score -= 8.0    # puts bid up = hedging = bearish lean
+
+    # Multi-timeframe alignment boost
+    mtf = int(market_data.get('mtf_alignment', 1) or 1)
+    if mtf == 2:
+        score += 10.0   # both 1m + 5m MACD bullish = strong directional agreement
+    elif mtf == 0:
+        score -= 8.0    # both bearish = avoid long
+
+    # On-chain whale signal
+    whale = str(market_data.get('whale_signal', 'neutral') or 'neutral').lower()
+    if whale == 'accumulating':
+        score += 6.0
+    elif whale == 'distributing':
+        score -= 6.0
+
     return score
 
 
@@ -183,6 +204,24 @@ def _micro_component(market_data: dict) -> float:
         score += 5.0
     elif kyle >= 70:
         score -= 5.0
+
+    # Cumulative delta (net buy/sell volume pressure over 30-min window)
+    delta_pct = float(market_data.get('delta_pct', 0.0) or 0.0)
+    if delta_pct > 0.12:
+        score += 12.0   # strong buyer dominance
+    elif delta_pct > 0.06:
+        score += 6.0
+    elif delta_pct < -0.12:
+        score -= 12.0   # strong seller dominance
+    elif delta_pct < -0.06:
+        score -= 6.0
+    # Accelerating delta = momentum building, extra boost
+    if market_data.get('delta_accel') and delta_pct > 0:
+        score += 5.0
+
+    # VWAP reclaim (price crossed back above daily AVWAP)
+    if market_data.get('vwap_reclaim'):
+        score += 8.0
 
     return score
 

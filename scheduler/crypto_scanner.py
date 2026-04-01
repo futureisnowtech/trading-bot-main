@@ -549,7 +549,9 @@ def run_crypto_scan() -> None:
                                          agent_votes={s.get('agent_key', s.get('agent', f'agent_{i}')): s.get('signal', 'HOLD')
                                                       for i, s in enumerate(debate_result.individual_signals)},
                                          ml_p_win=market_data.get('ml_p_win', 0),
-                                         super_score=market_data.get('super_score', 0))
+                                         super_score=market_data.get('super_score', 0),
+                                         signal_type=eng_signal.signal_type,
+                                         active_signals=list(eng_signal.fired_signals))
 
             elif final.action == 'SHORT':
                 # Coinbase spot doesn't support shorting — paper-log only.

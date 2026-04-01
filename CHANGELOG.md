@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-01
+- Perp exits: let winners run past 4h (>0.5% PnL = skip close, 8h hard max); fixes avg win  vs avg loss  imbalance causing PF 0.66
+
+## 2026-04-01
 - Fix learning loop holes: perp exits now build real market_data; crypto exit candle threshold 20→5; meta-learner counter DB-backed (survives restarts); ML pkl force-retrained (was 40h stale)
 
 ## 2026-04-01

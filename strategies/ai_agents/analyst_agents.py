@@ -26,8 +26,7 @@ from config import ANTHROPIC_API_KEY, CLAUDE_MODEL, CLAUDE_DEBATE_MODEL, DEBATE_
 # ── Agent definitions ──────────────────────────────────────────────────────────
 AGENTS = {
     'funding_regime': {
-        'name': 'Macro & Funding Intelligence',
-        'dbz_name': 'Bardock',
+        'name': 'Macro & Funding Analyst',
         'style': (
             'Crypto-native macro analyst. Primary signal: perpetual funding rates. '
             'Funding > 0.05%/8h = longs are overloaded, squeeze risk is HIGH → lean HOLD or SELL. '
@@ -48,8 +47,7 @@ AGENTS = {
         ]
     },
     'momentum_structure': {
-        'name': 'Technical Momentum & Structure',
-        'dbz_name': 'Vegeta',
+        'name': 'Technical Momentum Analyst',
         'style': (
             'Technical setup specialist. Focus: is this chart a CLEAN setup or noise? '
             'ADX > 25 = real trend exists (momentum trades valid). ADX < 20 = ranging (mean-reversion only). '
@@ -70,8 +68,7 @@ AGENTS = {
         ]
     },
     'risk_economics': {
-        'name': 'Trade Economics & Risk',
-        'dbz_name': 'Krillin',
+        'name': 'Trade Economics & Risk Analyst',
         'style': (
             'Trade economics specialist and kill switch. NO trade passes without clearing the fee math. '
             'Coinbase round-trip cost: ~1.2% (0.6% × 2 sides). '
@@ -95,8 +92,7 @@ AGENTS = {
     # ── MES Futures Agents (Sprint 5) ─────────────────────────────────────────
     # Different market, different domains. Same debate mechanics (2/3 BUY = BUY).
     'mes_momentum_risk': {
-        'name': 'Momentum & Risk Manager',
-        'dbz_name': 'Tudor Jones',
+        'name': 'Futures Momentum & Risk Analyst',
         'style': (
             'MES futures momentum and risk specialist. Read the tape: is momentum real or fading? '
             'Opening Range Breakout context: price broke the first 5-min high/low, then pulled back. '
@@ -117,7 +113,6 @@ AGENTS = {
     },
     'mes_quant': {
         'name': 'Quantitative Pattern Analyst',
-        'dbz_name': 'Jim Simons',
         'style': (
             'Quantitative edge and pattern quality analyst for MES futures. '
             'Opening Range Breakout pullback patterns work best when: '
@@ -142,7 +137,6 @@ AGENTS = {
     },
     'mes_market_structure': {
         'name': 'Market Structure & Tape Reader',
-        'dbz_name': 'Jesse Livermore',
         'style': (
             'Market structure and entry timing specialist for MES futures. '
             'Read the structure: where are the key levels? Is the pullback touching a significant level? '
@@ -328,7 +322,7 @@ def run_agent(
     account_note = 'This is a $500 futures account (1 MES contract max).' if asset_class == 'mes' \
                    else 'This is a $500 crypto account. Capital preservation matters.'
 
-    system_prompt = f"""You are {agent['name']} ({agent['dbz_name']}), an elite trading analyst.
+    system_prompt = f"""You are {agent['name']}, an elite trading analyst.
 
 Your specialty: {agent['style']}
 

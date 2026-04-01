@@ -6,8 +6,10 @@ Every scan cycle:
   2. Filters by liquidity ($5M+ 24h volume) and ranks by momentum × volume.
   3. Fetches 5-min klines for top 25 movers to confirm momentum not exhausted.
   4. Enters LONG or SHORT based on recent directional momentum + volume spike.
-  5. Server-side SL/TP set on Binance — no AI exit review (that was running on
-     fake data and killing every trade after 5 minutes before it reached target).
+  5. If momentum scan makes 0 entries AND slots are available → funding harvest mode:
+     scan top liquid pairs for highest positive funding rates, go SHORT to collect.
+     Flat market = free money from longs paying shorts every 8h.
+  6. Server-side SL/TP set on Binance — no AI exit review.
 
 Exit logic: mechanical only.
   - Hard stop/target: checked every scan cycle via rm.should_exit()
@@ -37,6 +39,13 @@ _MIN_QUOTE_VOLUME = 5_000_000
 _MIN_VOL_RATIO = 1.3
 # Minimum recent price move (last 3 × 5-min bars) to confirm still in motion
 _MIN_RECENT_MOVE_PCT = 0.15
+
+# Funding harvest mode — activates when momentum scan finds nothing
+# Go SHORT on highest positive-funding pairs to collect 8h payments from longs
+_FUNDING_HARVEST_MIN_RATE = 0.0001   # ≥ 0.01%/8h to be worth entering (covers fees in 1-2 periods)
+_FUNDING_HARVEST_STOP_PCT = 0.015    # 1.5% stop — same as momentum (tight: market is flat)
+_FUNDING_HARVEST_TP_PCT   = 0.025    # 2.5% target — conservative, profit from funding not price
+_FUNDING_HARVEST_MAX_SLOTS = 3       # max 3 funding positions at once (diversify funding sources)
 
 
 def run_perp_scan() -> None:
@@ -210,7 +219,108 @@ def run_perp_scan() -> None:
         except Exception as e:
             log_event('ERROR', 'perp_scan', f"[perp] {symbol}: {e}")
 
+    # ── Funding harvest mode — fires when momentum scan found nothing ────────────
+    if entries_made == 0 and slots_open > 0:
+        _run_funding_harvest(bb, rm, candidates, slots_open)
+
     rm.ping()
+
+
+def _run_funding_harvest(bb, rm, liquid_tickers: list, slots_open: int) -> None:
+    """
+    Flat market carry trade: go SHORT on pairs with the highest positive funding rates.
+
+    When funding rate is positive, longs pay shorts every 8 hours.
+    At 0.01%/8h on $100 notional = ~$0.01/8h = ~$0.03/day per position.
+    At 0.05%/8h = ~$0.05/8h = ~$0.15/day per position.
+    Stack 3 positions in a flat market and earn passive carry while waiting for momentum.
+
+    Entry: positive funding ≥ 0.01%/8h + price not in a strong uptrend (24h change < +3%)
+    Direction: SHORT (collect from longs paying us)
+    Stop: 1.5% (same as momentum — market is flat so shouldn't hit)
+    """
+    try:
+        perp_pos = rm.get_all_positions().get('perp', {})
+        harvest_slots = min(slots_open, _FUNDING_HARVEST_MAX_SLOTS - sum(
+            1 for sym in perp_pos if perp_pos[sym].get('signal_type') == 'funding_harvest'
+        ))
+        if harvest_slots <= 0:
+            return
+
+        # Only scan top liquid tickers (already filtered to $5M+ volume)
+        # Sort by abs(24h change) ascending — flattest pairs = best carry candidates
+        flat_candidates = sorted(
+            [t for t in liquid_tickers if t['symbol'] not in perp_pos],
+            key=lambda x: abs(float(x.get('price_change_pct', 0) or 0))
+        )[:50]
+
+        if not flat_candidates:
+            return
+
+        # Fetch funding rates for all flat candidates in parallel
+        funding_candidates = []
+        for ticker in flat_candidates:
+            symbol = ticker['symbol']
+            try:
+                funding = bb.get_funding_rate(symbol)
+                price   = float(ticker.get('last_price', 0) or 0)
+                if price > 0 and funding >= _FUNDING_HARVEST_MIN_RATE:
+                    change_24h = float(ticker.get('price_change_pct', 0) or 0)
+                    # Skip strong uptrends — longs winning = likely more longs piling in
+                    if change_24h > 3.0:
+                        continue
+                    funding_candidates.append((symbol, price, funding, change_24h))
+            except Exception:
+                continue
+
+        if not funding_candidates:
+            log_event('INFO', 'perp_scan',
+                      f"[perp] Funding harvest: no pairs above {_FUNDING_HARVEST_MIN_RATE*100:.3f}%/8h threshold")
+            return
+
+        # Sort by funding rate descending — highest carry first
+        funding_candidates.sort(key=lambda x: x[2], reverse=True)
+        log_event('INFO', 'perp_scan',
+                  f"[perp] Funding harvest: {len(funding_candidates)} candidates | "
+                  f"top={funding_candidates[0][0]} {funding_candidates[0][2]*100:.4f}%/8h")
+
+        entered = 0
+        for symbol, price, funding, change_24h in funding_candidates[:harvest_slots * 2]:
+            if entered >= harvest_slots:
+                break
+            if symbol in rm.get_all_positions().get('perp', {}):
+                continue
+
+            risk_check = rm.pre_check_entry('crypto_perp', symbol, 'SELL', price, 0.55)
+            if not risk_check:
+                continue
+
+            result = bb.open_short(symbol, PERP_POSITION_SIZE_USD, PERP_MAX_LEVERAGE,
+                                   _FUNDING_HARVEST_STOP_PCT, _FUNDING_HARVEST_TP_PCT,
+                                   'crypto_perp')
+            if result:
+                mark_price = bb.get_mark_price(symbol) or price
+                sl = mark_price * (1 + _FUNDING_HARVEST_STOP_PCT)
+                tp = mark_price * (1 - _FUNDING_HARVEST_TP_PCT)
+                reason = (f"Funding harvest SHORT: rate={funding*100:.4f}%/8h | "
+                          f"24h={change_24h:+.2f}% (flat) | collecting carry from longs")
+                registered = rm.register_position(
+                    'crypto_perp', symbol,
+                    PERP_POSITION_SIZE_USD / mark_price,
+                    mark_price, sl, tp,
+                    direction='SHORT',
+                    entry_reason=reason,
+                    signal_type='funding_harvest',
+                    active_signals=['funding_harvest', f'rate_{funding*100:.4f}pct_8h'],
+                )
+                if registered:
+                    entered += 1
+                    print(f"[perp_scan] 💰 FUNDING HARVEST SHORT {symbol} @ ${mark_price:.4f} | "
+                          f"rate={funding*100:.4f}%/8h | 24h={change_24h:+.2f}%")
+                    log_signal('crypto_perp', symbol, 'SELL', 0.55, reason, price=mark_price)
+
+    except Exception as e:
+        log_event('ERROR', 'perp_scan', f"[perp] funding harvest error: {e}")
 
 
 def run_perp_time_watchdog() -> None:

@@ -1,5 +1,17 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
+## 2026-04-01
+- Fix learning loop holes: perp exits now build real market_data; crypto exit candle threshold 20→5; meta-learner counter DB-backed (survives restarts); ML pkl force-retrained (was 40h stale)
+
+## 2026-04-01
+- Paper forced-trade timer: one entry every 6 min if no organic trade and slots open
+
+## 2026-04-01
+- Fix divergence: compute per-symbol change_pct (was always 0, breaking all divergence signals)
+
+## 2026-04-01
+- Paper near-miss signals: relaxed thresholds in paper mode to force pipeline trades; heatmap fix: get_scan_feed now returns structured fields
+
 ## 2026-03-30
 - v9.3: perp watchdog + traceback logging + risk reduction (post 2026-03-30 audit)
 

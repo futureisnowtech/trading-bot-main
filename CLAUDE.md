@@ -30,6 +30,34 @@ A fully autonomous AI-powered trading system that:
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
 
+## Current Version: v9.4 (2026-04-01: paper trade forcing + learning loop fixes)
+- v9.4 (2026-04-01): Paper validation overhaul + learning loop bug fixes
+  - **Paper near-miss engine signals** (`strategies/crypto/crypto_engine.py`): When no live signal
+    fires, paper mode tries relaxed thresholds (divergence 0.45%, OBI 0.12, VWAP reclaim 0.3× vol).
+    Fires `near_miss` BUY at 0.5× size / 38% confidence — still routes through full 3-agent debate.
+    ATR floor lowered 0.15%→0.05% and funding cap raised to 0.15%/8h in paper mode. Live unchanged.
+  - **Per-symbol change_pct fix** (`scheduler/crypto_scanner.py`): Was always 0 — divergence signal
+    compared BTC vs literal zero for every pair. Now computes real 5-min close-to-close % so
+    divergence only fires when a specific symbol genuinely lags BTC. Fixes live signal quality too.
+  - **Paper forced-trade timer** (`scheduler/crypto_scanner.py`): If no trade in last 6 minutes and
+    position slots are open, picks highest-vol pair (RSI < 72, no existing position) and enters at
+    half size with normal stop/target. Entry reason tagged `paper_timer_forced` for WR exclusion.
+    Guarantees minimum pipeline exercise even in dead markets.
+  - **Heatmap fix** (`logging_db/trade_logger.py`): `get_scan_feed()` now parses log messages into
+    structured `{symbol, action, confidence, strategy}` fields. Was returning raw text strings so
+    dashboard heatmap showed all-dark tiles regardless of scan activity.
+  - **Perp exit attribution fix** (`scheduler/exit_monitor.py`): Was hardcoding `market_data_at_entry={}`
+    for all perp exits — zero signal data ever recorded for ~25% of trade closes. Now fetches spot
+    candles for the equivalent pair and builds real market_data at exit time.
+  - **Crypto exit candle threshold** (`scheduler/exit_monitor.py`): `len(df_cr) >= 20` was silently
+    dropping attribution when API returned < 20 bars. Lowered to >= 5 with WARNING log on failure.
+  - **Meta-learner DB-backed counter** (`learning/meta_learner.py`): `_trade_counter` global reset to
+    0 on every restart so meta-analysis never accumulated to 10 trades. Replaced with
+    `_trades_since_last_meta_run()` querying `trade_attribution WHERE ts > last meta_analysis_log.ts`.
+    Survives restarts, always reflects true gap since last analysis.
+  - **ML pkl force-retrained**: pkl was 40+ hours stale (7× the 6h max-age). Retrained on 120 live
+    trades → 45.0% WR. `maybe_retrain()` will auto-retrain every 50 new trade closes going forward.
+
 ## Current Version: v9.3 (2026-03-30: perp watchdog + traceback logging + risk reduction)
 - v9.3 (2026-03-30): Post-audit emergency fixes — root cause: +$288→-$285 P&L swing from 8 stale perp positions force-closed after 4–17h due to 3-hour scanner outage with empty exception messages
   - **Independent perp time-exit watchdog** (`scheduler/perp_scanner.py`): `run_perp_time_watchdog()`

@@ -13,11 +13,14 @@ import pytz
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import time as _time
+
 from config import (
     CRYPTO_PAIRS, PAPER_TRADING, ACCOUNT_SIZE, MARKET_TIMEZONE,
     CRYPTO_CANDLE_GRANULARITY, CRYPTO_ENABLED,
     BINANCE_SPOT_MAKER_FEE_PCT, CRYPTO_POSITION_SIZE_USD,
-    MAX_STRATEGY_LOSS_STREAK,
+    MAX_STRATEGY_LOSS_STREAK, MAX_POSITIONS_CRYPTO,
+    CRYPTO_STOP_LOSS_PCT, CRYPTO_TAKE_PROFIT_PCT,
     MEAN_REVERSION_ENABLED, MEAN_REVERSION_RSI_ENTRY, MEAN_REVERSION_ADX_MAX,
     FADE_ENABLED, RANGE_SCALPER_ENABLED,
     TV_SIGNAL_MAX_AGE_SECONDS,
@@ -51,6 +54,10 @@ from data.edge_monitor import get_edge_state, is_in_stop_cooldown, format_edge_c
 
 # Per-symbol OI state for cascade signal (needs delta between scans)
 _prev_oi_state: dict = {}   # symbol → previous open interest value
+
+# Paper forced-trade timer: fire if no trade in this many seconds and slots open
+_PAPER_FORCE_INTERVAL_SEC = 360   # 6 minutes
+_paper_last_forced_ts: float = 0.0  # epoch seconds of last timer-forced entry
 
 
 def run_crypto_scan() -> None:
@@ -727,5 +734,93 @@ def run_crypto_scan() -> None:
 
         except Exception as e:
             log_event('ERROR', 'crypto_scan', f"[indep] {pid}: {e}")
+
+    # ── Paper forced-trade timer ──────────────────────────────────────────────
+    # If no trade in the last 6 minutes and open position slots exist, pick the
+    # best available pair by vol_spike and enter directly. Bypasses debate
+    # intentionally — this path exists solely to keep the pipeline exercised
+    # during quiet stretches. Notes field marks these as timer_forced so they
+    # can be excluded from win-rate analysis if desired.
+    global _paper_last_forced_ts
+    if PAPER_TRADING:
+        _now = _time.time()
+        _all_pos = rm.get_all_positions()
+        _crypto_pos = _all_pos.get('crypto', {})
+        _slots_open = len(_crypto_pos) < MAX_POSITIONS_CRYPTO
+
+        # Check last real trade time from DB
+        _last_trade_ts = 0.0
+        try:
+            _recent = get_todays_trades(paper=True)
+            if _recent:
+                _last_str = _recent[0].get('ts', '')
+                if _last_str:
+                    from datetime import datetime as _dt
+                    _last_dt = _dt.fromisoformat(_last_str.replace('Z', ''))
+                    _last_trade_ts = _last_dt.timestamp()
+        except Exception:
+            pass
+
+        # Use the more recent of: last real trade OR last timer-forced entry
+        _elapsed = _now - max(_last_trade_ts, _paper_last_forced_ts)
+
+        if _slots_open and _elapsed > _PAPER_FORCE_INTERVAL_SEC:
+            _all_strats = ['crypto_macd_consensus', 'crypto_mean_reversion',
+                           'crypto_fade', 'crypto_range_scalper']
+            _best_pair = None
+            _best_vol  = -1.0
+            _best_data: tuple = ()
+
+            for _fp in CRYPTO_PAIRS:
+                try:
+                    if any(rm.get_position(s, _fp) for s in _all_strats):
+                        continue
+                    _in_cd, _ = is_in_stop_cooldown('crypto_macd_consensus', _fp, paper=True)
+                    if _in_cd:
+                        continue
+                    _fdf = get_candles(_fp, CRYPTO_CANDLE_GRANULARITY, 10)
+                    if _fdf is None or len(_fdf) < 3:
+                        continue
+                    _fdf_ind  = add_all_indicators(_fdf)
+                    _flast    = _fdf_ind.iloc[-1]
+                    _fprice   = float(_flast['close'])
+                    _fvol     = float(_flast.get('vol_spike', 0) or 0)
+                    _frsi     = float(_flast.get('rsi', 50) or 50)
+                    # Prefer pairs with volume and not overbought
+                    if _fvol > _best_vol and _frsi < 72:
+                        _best_vol  = _fvol
+                        _best_pair = _fp
+                        _best_data = (_fprice, _fdf_ind)
+                except Exception:
+                    continue
+
+            if _best_pair and _best_data:
+                _fprice, _ = _best_data
+                _fstop   = _fprice * (1 - CRYPTO_STOP_LOSS_PCT)
+                _ftarget = _fprice * (1 + CRYPTO_TAKE_PROFIT_PCT)
+                _fsize   = CRYPTO_POSITION_SIZE_USD * 0.5   # half size for timer-forced
+                _frc = rm.check_entry('crypto_macd_consensus', _best_pair, 'BUY',
+                                      _fsize, _fprice, 0.35)
+                if _frc:
+                    _fentry = _fprice * 1.001
+                    _fqty   = _frc.adjusted_size / _fentry
+                    _fres   = cb.buy_limit(_best_pair, _fqty, _fentry,
+                                           'crypto_macd_consensus', _fstop, _ftarget)
+                    if _fres:
+                        rm.register_position(
+                            'crypto_macd_consensus', _best_pair,
+                            _fqty, _fprice, _fstop, _ftarget,
+                            direction='LONG',
+                            entry_reason=f'paper_timer_forced | vol={_best_vol:.1f}x | '
+                                         f'no trade in {_elapsed/60:.1f} min')
+                        _paper_last_forced_ts = _now
+                        log_event('INFO', 'scan_feed',
+                                  f"[crypto] ⏰ TIMER FORCED {_best_pair} @ ${_fprice:,.4f} | "
+                                  f"vol={_best_vol:.1f}x size=${_frc.adjusted_size:.0f} | "
+                                  f"idle={_elapsed/60:.1f}min "
+                                  f"stop=${_fstop:,.4f} target=${_ftarget:,.4f}")
+                else:
+                    log_event('INFO', 'scan_feed',
+                              f"[crypto] ⏰ timer fired but {_best_pair} blocked: {_frc.reason}")
 
     rm.ping()

@@ -12,6 +12,7 @@ Positions persisted to SQLite on every write. System restart never loses positio
 """
 import os
 import sys
+import threading
 from datetime import datetime
 from typing import Optional
 import pytz
@@ -40,6 +41,7 @@ class RiskManager:
         self._crypto: dict = {}
         self._perp:   dict = {}
         self._last_scan_ts: float = 0.0
+        self._position_lock = threading.RLock()  # prevents duplicate entries from parallel scanners
         self._restore_positions()
         self._restore_halt_state()
 
@@ -251,30 +253,45 @@ class RiskManager:
     def register_position(self, strategy, symbol, qty, entry, stop, target,
                           direction='LONG', entry_reason='', agent_votes=None,
                           ml_p_win: float = 0.0, super_score: float = 0.0,
-                          signal_type: str = '', active_signals=None) -> None:
-        tz = pytz.timezone(MARKET_TIMEZONE)
-        ts = datetime.now(tz).isoformat()
-        pos = {
-            'qty': qty, 'entry': entry, 'stop': stop, 'target': target,
-            'high_since_entry': entry, 'low_since_entry': entry,
-            'ts_entry': ts, 'direction': direction,
-            'entry_reason': entry_reason[:200] if entry_reason else '',
-            'strategy': strategy,
-            'agent_votes': agent_votes or {},
-            'ml_p_win': float(ml_p_win or 0),
-            'super_score': float(super_score or 0),
-            'signal_type': signal_type or '',
-            'active_signals': list(active_signals) if active_signals else [],
-        }
-        if 'equity' in strategy.lower() or 'futures' in strategy.lower():
-            self._equity[symbol] = pos
-        elif 'perp' in strategy.lower():
-            self._perp[symbol] = pos
-        else:
-            self._crypto[symbol] = pos
-        persist_position(symbol, strategy, qty, entry, stop, target, entry, ts,
-                         PAPER_TRADING, direction=direction, entry_reason=entry_reason,
-                         low_since_entry=entry)
+                          signal_type: str = '', active_signals=None) -> bool:
+        """Register a new position. Returns False (no-op) if already in this symbol."""
+        with self._position_lock:
+            # Duplicate guard — parallel scanners can both pass the pre-check before
+            # either has registered; the lock makes the check-then-write atomic.
+            if 'equity' in strategy.lower() or 'futures' in strategy.lower():
+                if symbol in self._equity:
+                    return False
+            elif 'perp' in strategy.lower():
+                if symbol in self._perp:
+                    return False
+            else:
+                if symbol in self._crypto:
+                    return False
+
+            tz = pytz.timezone(MARKET_TIMEZONE)
+            ts = datetime.now(tz).isoformat()
+            pos = {
+                'qty': qty, 'entry': entry, 'stop': stop, 'target': target,
+                'high_since_entry': entry, 'low_since_entry': entry,
+                'ts_entry': ts, 'direction': direction,
+                'entry_reason': entry_reason[:200] if entry_reason else '',
+                'strategy': strategy,
+                'agent_votes': agent_votes or {},
+                'ml_p_win': float(ml_p_win or 0),
+                'super_score': float(super_score or 0),
+                'signal_type': signal_type or '',
+                'active_signals': list(active_signals) if active_signals else [],
+            }
+            if 'equity' in strategy.lower() or 'futures' in strategy.lower():
+                self._equity[symbol] = pos
+            elif 'perp' in strategy.lower():
+                self._perp[symbol] = pos
+            else:
+                self._crypto[symbol] = pos
+            persist_position(symbol, strategy, qty, entry, stop, target, entry, ts,
+                             PAPER_TRADING, direction=direction, entry_reason=entry_reason,
+                             low_since_entry=entry)
+            return True
 
     def close_position(self, strategy, symbol, exit_reason: str = '') -> Optional[dict]:
         if 'equity' in strategy.lower() or 'futures' in strategy.lower():

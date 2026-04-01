@@ -444,27 +444,19 @@ def monitor_exits_with_ai(engine) -> None:
                        if pos.get('direction', 'LONG') == 'LONG'
                        else (pos['entry'] - current_price) / pos['entry'])
 
-            # 4h exit — all perp positions close after 4h regardless of PnL (funding cost rule)
+            # Perp exits are mechanical only — server-side SL/TP on Binance handles
+            # stop and target hits. AI exit review removed: it was running on
+            # hardcoded dummy data (rsi=50, adx=25, regime=unknown) and unanimously
+            # exiting every trade after 5 minutes before it could reach its target.
+            # Time rule: let winners run to 8h max, close flat/losing at 4h.
             if mins_in >= 240:
-                reason = f"Perp 4h exit: {mins_in}m, pnl={pnl_pct:+.2%}"
-                _execute_perp_exit(bb_exit, rm, symbol, pos, reason)
-                continue
-
-            if engine:
-
-                if mins_in >= 5:
-                    perp_md = {'direction': pos.get('direction', 'LONG'),
-                               'regime': 'unknown', 'rsi': 50, 'adx': 25}
-                    review = engine['exit'](
-                        symbol=symbol, strategy='crypto_perp',
-                        entry_price=pos['entry'], current_price=current_price,
-                        stop_loss=pos['stop'], take_profit=pos['target'],
-                        entry_reason=pos.get('entry_reason', ''),
-                        time_in_trade_minutes=mins_in,
-                        market_data=perp_md, verbose=False,
-                    )
-                    if review.get('should_exit'):
-                        _execute_perp_exit(bb_exit, rm, symbol, pos, review['reason'])
+                if pnl_pct > 0.005 and mins_in < 480:
+                    pass  # up >0.5% — let it run to 8h max
+                else:
+                    reason = (f"Perp time exit: {mins_in}m, pnl={pnl_pct:+.2%} — "
+                              f"{'8h max' if mins_in >= 480 else '4h flat/loss rule'}")
+                    _execute_perp_exit(bb_exit, rm, symbol, pos, reason)
+                    continue
 
         except Exception as e:
             print(f"[exit_monitor] perp error {symbol}: {e}")

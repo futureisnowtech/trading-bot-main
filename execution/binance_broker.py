@@ -366,6 +366,76 @@ class BinanceBroker:
             pass
         return 0.0
 
+    def get_all_tickers(self) -> list:
+        """
+        Fetch market-wide momentum data for ranking perp candidates.
+
+        Tries Binance mainnet first (geo-blocked in US → falls through).
+        Falls back to CoinGecko public API — no auth, no geo-block, returns
+        top 250 coins by market cap with 24h price change and volume.
+        Maps to Binance USDT futures symbol format (BTC → BTCUSDT).
+        """
+        # 1. Try Binance mainnet (works outside US, geo-blocked inside)
+        try:
+            if BINANCE_AVAILABLE:
+                client = BinanceClient('', '')
+                tickers = client.futures_ticker()
+                result = [
+                    {
+                        'symbol':           t['symbol'],
+                        'price_change_pct': float(t.get('priceChangePercent', 0) or 0),
+                        'last_price':       float(t.get('lastPrice', 0) or 0),
+                        'volume':           float(t.get('volume', 0) or 0),
+                        'quote_volume':     float(t.get('quoteVolume', 0) or 0),
+                        'count':            int(t.get('count', 0) or 0),
+                        'high':             float(t.get('highPrice', 0) or 0),
+                        'low':              float(t.get('lowPrice', 0) or 0),
+                    }
+                    for t in tickers
+                    if str(t.get('symbol', '')).endswith('USDT')
+                ]
+                if result:
+                    return result
+        except Exception:
+            pass
+
+        # 2. CoinGecko fallback — public API, no geo-block
+        try:
+            import urllib.request, json as _json
+            url = (
+                'https://api.coingecko.com/api/v3/coins/markets'
+                '?vs_currency=usd&order=volume_desc&per_page=250&page=1'
+                '&price_change_percentage=24h'
+            )
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                coins = _json.loads(resp.read())
+
+            result = []
+            for c in coins:
+                sym = str(c.get('symbol', '')).upper() + 'USDT'
+                pct = float(c.get('price_change_percentage_24h') or 0)
+                vol = float(c.get('total_volume') or 0)
+                price = float(c.get('current_price') or 0)
+                if price > 0 and vol > 0:
+                    result.append({
+                        'symbol':           sym,
+                        'price_change_pct': pct,
+                        'last_price':       price,
+                        'volume':           vol / price if price > 0 else 0,
+                        'quote_volume':     vol,
+                        'count':            int(vol / max(price, 0.0001) / 100),
+                        'high':             price * (1 + abs(pct) / 100),
+                        'low':              price * (1 - abs(pct) / 100),
+                    })
+            if result:
+                log_event('INFO', 'BinanceBroker', f'get_all_tickers: CoinGecko fallback OK ({len(result)} coins)')
+                return result
+        except Exception as e:
+            log_event('WARNING', 'BinanceBroker', f'get_all_tickers CoinGecko fallback failed: {e}')
+
+        return []
+
     def get_klines(self, symbol: str, interval: str = '1m', limit: int = 100):
         """
         Fetch OHLCV klines from Binance Futures (public endpoint — no auth needed).
@@ -391,12 +461,17 @@ class BinanceBroker:
         except Exception as e:
             print(f"[BinanceBroker] get_klines {symbol}: {e}")
 
-        # yfinance fallback
+        # yfinance fallback — map Binance interval strings to yfinance format
         try:
             import yfinance as yf
+            _interval_map = {
+                '1m': '1m', '3m': '2m', '5m': '5m', '15m': '15m',
+                '30m': '30m', '1h': '1h', '4h': '1h', '1d': '1d',
+            }
+            yf_interval = _interval_map.get(interval, '5m')
+            period = '5d' if limit > 200 else ('2d' if limit > 50 else '1d')
             base = _binance_symbol_to_base(symbol)
-            period = '5d' if limit > 100 else '2d'
-            hist = yf.Ticker(f'{base}-USD').history(period=period, interval='1m')
+            hist = yf.Ticker(f'{base}-USD').history(period=period, interval=yf_interval)
             if hist is not None and not hist.empty:
                 hist.columns = [c.lower() for c in hist.columns]
                 return hist[['open', 'high', 'low', 'close', 'volume']].tail(limit).reset_index(drop=True)

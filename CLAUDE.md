@@ -30,6 +30,34 @@ A fully autonomous AI-powered trading system that:
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
 
+## Current Version: v9.5 (2026-04-01: full-market perp scanner + race condition fix)
+- v9.5 (2026-04-01): Perp system overhaul — actual dynamic market scanning + critical bug fixes
+  - **Perp AI exit removed** (`scheduler/exit_monitor.py`): Replaced entire `if engine:` block for perp
+    positions (Tudor Jones/Soros/Simons running on hardcoded `rsi=50, adx=25, regime=unknown`) with
+    mechanical-only time rule: close flat/losing at 4h, let winners run to 8h. Was the root cause of
+    all perp positions exiting within 5 minutes before reaching 3% target — killing every trade.
+  - **Full-market perp scanner** (`scheduler/perp_scanner.py`): Replaced fixed 38-pair list iteration
+    with full-market scan. Single `get_all_tickers()` call → all USDT perp pairs → filter $5M+ volume
+    → score by `abs(24h_change) × vol_weight` → top 25 → 5-min kline confirmation (vol_ratio ≥ 1.3×,
+    recent_change ≥ 0.15% over 15min) → enter LONG or SHORT. Direction from recent 15-min momentum,
+    not 24h change. Covers all 300+ Binance futures pairs dynamically per scan cycle.
+  - **CoinGecko fallback** (`execution/binance_broker.py`): Binance mainnet geo-blocked in US.
+    `get_all_tickers()` tries Binance first, falls back to CoinGecko public API (250 coins, no auth).
+    Maps coin data to USDT futures symbols. Confirmed: `[perp] Full-market scan: 250 pairs → 25 candidates`.
+  - **`get_klines()` interval fix** (`execution/binance_broker.py`): yfinance fallback was always
+    using `interval='1m'` regardless of what was requested. Added `_interval_map` dict: '5m'→'5m',
+    '15m'→'15m', '1h'→'1h'. '5m' momentum confirmation now uses correct 5-min bars.
+  - **Threading lock — duplicate entry guard** (`risk/risk_manager.py`): Added `threading.RLock` to
+    `register_position()`. Parallel scanners (perp + deriv_momentum) running simultaneously both saw
+    empty position dict and both entered the same symbol. Lock makes check-then-write atomic. Returns
+    `bool` — callers check False = position already taken by other scanner.
+  - **Derivatives momentum scanner fixed** (`scheduler/derivatives_momentum_scanner.py`): Fixed
+    `usdt_size=` → `size_usd=` parameter bug and wrong `register_position()` call format. Scanner
+    was crashing on every attempted entry, never traded. Now correctly enters as Lane 4.
+  - **Signal Intelligence panel** (`dashboard/app.py`): Replaced broken heatmap with signal leaderboard
+    (top 12 signals by bayesian_pts with WR color coding), ML model status (type/age/WR/feature
+    importances), and meta-learner insight callout.
+
 ## Current Version: v9.4 (2026-04-01: paper trade forcing + learning loop fixes)
 - v9.4 (2026-04-01): Paper validation overhaul + learning loop bug fixes
   - **Paper near-miss engine signals** (`strategies/crypto/crypto_engine.py`): When no live signal

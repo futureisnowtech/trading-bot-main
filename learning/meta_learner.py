@@ -74,24 +74,44 @@ def _init_tables():
 
 _init_tables()
 
-# ── In-process trigger counter ─────────────────────────────────────────────
+# ── DB-backed trigger counter (survives restarts) ──────────────────────────
 
 _TRADES_PER_RUN = 10    # run meta-analysis after every N trade closes
-_trade_counter  = 0
+
+
+def _trades_since_last_meta_run() -> int:
+    """Count live trades closed since the last recorded meta-analysis run."""
+    try:
+        import sqlite3 as _sq
+        from config import MARKET_TIMEZONE as _TZ
+        _db = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                           'logs', 'trades.db')
+        conn = _sq.connect(_db)
+        cur = conn.cursor()
+        # Get timestamp of last meta run
+        cur.execute("SELECT MAX(ts) FROM meta_analysis_log")
+        row = cur.fetchone()
+        last_run_ts = row[0] if row and row[0] else '2000-01-01'
+        # Count trades since then
+        cur.execute(
+            "SELECT COUNT(*) FROM trade_attribution WHERE source='live' AND ts > ?",
+            (last_run_ts,))
+        count = (cur.fetchone() or [0])[0]
+        conn.close()
+        return int(count)
+    except Exception:
+        return 0
 
 
 def maybe_run_meta_analysis(force: bool = False) -> Optional[dict]:
     """
-    Call after every trade close. Triggers analysis when N trades have
-    accumulated since the last run. Safe to call from multiple paths.
+    Call after every trade close. Triggers analysis when N new trades have
+    closed since the last run. DB-backed — survives process restarts.
 
     Returns analysis result dict if it ran, None if skipped.
     """
-    global _trade_counter
-    _trade_counter += 1
-    if not force and _trade_counter < _TRADES_PER_RUN:
+    if not force and _trades_since_last_meta_run() < _TRADES_PER_RUN:
         return None
-    _trade_counter = 0
     return run_meta_analysis()
 
 

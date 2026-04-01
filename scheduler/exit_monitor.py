@@ -305,9 +305,13 @@ def monitor_exits_with_ai(engine) -> None:
 
             cr_md = {}
             df_cr = get_candles(pid, CRYPTO_CANDLE_GRANULARITY, 50)
-            if df_cr is not None and len(df_cr) >= 20:
+            if df_cr is not None and len(df_cr) >= 5:   # was 20 — was silently dropping attribution
                 df_cr_ind = add_all_indicators(df_cr)
                 cr_md = _build_market_data(pid, price, df_cr_ind)
+            else:
+                log_event('WARNING', 'exit_monitor',
+                          f"[learning] {pid}: candles={len(df_cr) if df_cr is not None else 0} "
+                          f"< 5 — signal attribution will be empty for this trade")
 
             # ── Super score decay exit ─────────────────────────────────────────
             try:
@@ -498,6 +502,22 @@ def _execute_perp_exit(bb, rm, symbol: str, pos: dict, reason: str,
                 else:
                     _p_mfe = abs(_p_entry - _p_low) / _p_entry if _p_entry > 0 else 0
                     _p_mae = abs(_p_high - _p_entry) / _p_entry if _p_entry > 0 else 0
+                # Build market data at exit time for signal attribution
+                _perp_md_exit = {}
+                try:
+                    from data.coinbase_feed import get_candles
+                    from data.indicators import add_all_indicators
+                    from scheduler._helpers import _build_market_data
+                    _perp_sym_spot = symbol.replace('USDT', '-USDC').replace('USDC', '-USDC')
+                    if '--' in _perp_sym_spot:
+                        _perp_sym_spot = _perp_sym_spot.replace('--', '-')
+                    _perp_df = get_candles(_perp_sym_spot, 'FIVE_MINUTE', 30)
+                    if _perp_df is not None and len(_perp_df) >= 10:
+                        _perp_df_ind = add_all_indicators(_perp_df)
+                        _perp_md_exit = _build_market_data(
+                            _perp_sym_spot, exit_price, _perp_df_ind)
+                except Exception:
+                    pass  # fall back to empty dict — better than always empty
                 analyze_closed_trade(
                     symbol=symbol, strategy='crypto_perp',
                     entry_price=_p_entry, exit_price=exit_price,
@@ -505,7 +525,7 @@ def _execute_perp_exit(bb, rm, symbol: str, pos: dict, reason: str,
                     entry_ts=pos.get('ts_entry', ''),
                     exit_ts=_dt.now(pytz.timezone(MARKET_TIMEZONE)).isoformat(),
                     exit_reason=reason,
-                    market_data_at_entry={},
+                    market_data_at_entry=_perp_md_exit,
                     agent_votes={},
                     paper=PAPER_TRADING,
                     trade_ref=f"perp_{symbol}_{pos.get('ts_entry','')}",

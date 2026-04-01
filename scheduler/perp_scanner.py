@@ -220,8 +220,14 @@ def run_perp_scan() -> None:
             log_event('ERROR', 'perp_scan', f"[perp] {symbol}: {e}")
 
     # ── Funding harvest mode — fires when momentum scan found nothing ────────────
+    # Pass full liquid ticker universe (not just top 25 movers — harvest wants the flattest pairs)
     if entries_made == 0 and slots_open > 0:
-        _run_funding_harvest(bb, rm, candidates, slots_open)
+        _run_funding_harvest(bb, rm,
+                             [t for t in all_tickers
+                              if t['symbol'].endswith('USDT')
+                              and float(t.get('quote_volume', 0) or 0) >= _MIN_QUOTE_VOLUME
+                              and t['symbol'] not in rm.get_all_positions().get('perp', {})],
+                             slots_open)
 
     rm.ping()
 

@@ -177,10 +177,16 @@ def run_perp_time_watchdog() -> None:
                 pnl_pct = ((current_price - pos['entry']) / pos['entry']
                            if direction == 'LONG'
                            else (pos['entry'] - current_price) / pos['entry'])
-                reason = (f"Perp watchdog 4h exit: {mins_in}m, pnl={pnl_pct:+.2%} "
-                          f"(independent watchdog — not via scanner loop)")
+                # Let winners run — skip 4h close if up > 0.5% and under 8h
+                if pnl_pct > 0.005 and mins_in < 480:
+                    log_event('INFO', 'perp_watchdog',
+                              f"[watchdog] {symbol} {mins_in}m up {pnl_pct:+.2%} — "
+                              f"skipping 4h rule, letting winner run (8h max)")
+                    continue
+                reason = (f"Perp watchdog exit: {mins_in}m, pnl={pnl_pct:+.2%} — "
+                          f"{'8h max' if mins_in >= 480 else '4h flat/loss rule'}")
                 log_event('WARNING', 'perp_watchdog',
-                          f"[watchdog] STALE {symbol} {mins_in}m — force-closing | {reason}")
+                          f"[watchdog] {symbol} {mins_in}m — force-closing | {reason}")
                 from scheduler.exit_monitor import _execute_perp_exit
                 _execute_perp_exit(bb, rm, symbol, pos, reason, pos_fallback=pos)
 
@@ -210,8 +216,16 @@ def _monitor_perp_exit(bb, rm, symbol: str, pos: dict) -> None:
                 mins_in = 0
             pnl_pct = (current_price - pos['entry']) / pos['entry']
             if mins_in >= 240:
-                should_exit = True
-                reason = f"Perp time exit: {mins_in}m, pnl={pnl_pct:.2%} — 4h rule"
+                # Let winners run — only force-close flat or losing positions at 4h.
+                # If up > 0.5%, extend to 8h max so the position can reach its target.
+                if pnl_pct > 0.005 and mins_in < 480:
+                    log_event('INFO', 'scan_feed',
+                              f"[perp] {symbol} 4h rule skipped — up {pnl_pct:+.2%}, "
+                              f"letting winner run (8h max)")
+                else:
+                    should_exit = True
+                    reason = (f"Perp time exit: {mins_in}m, pnl={pnl_pct:+.2%} — "
+                              f"{'8h max' if mins_in >= 480 else '4h flat/loss rule'}")
 
         if should_exit:
             from scheduler.exit_monitor import _execute_perp_exit

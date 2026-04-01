@@ -154,7 +154,16 @@ def run_crypto_scan() -> None:
             regime_data = detect_regime(df=df_ind, intraday=True)
             regime = regime_data.get('regime', 'ranging')
 
-            market_data = _build_market_data(pid, price, df_ind)
+            # ── Per-symbol 5-min change_pct (for divergence signal) ──────────
+            # Was always 0 before — meaning divergence fired for ALL symbols whenever
+            # BTC moved, not just symbols that actually lagged. Fixed here.
+            _sym_change_pct = 0.0
+            if len(df_ind) >= 2:
+                _prev_close = float(df_ind.iloc[-2]['close'])
+                if _prev_close > 0:
+                    _sym_change_pct = (price / _prev_close - 1) * 100
+
+            market_data = _build_market_data(pid, price, df_ind, change_pct=_sym_change_pct)
             market_data['regime'] = regime
 
             # ── VWAP reclaim flag (engine signal 5) ───────────────────────────

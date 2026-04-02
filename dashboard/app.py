@@ -73,6 +73,41 @@ div[data-testid="column"] {{ padding: 0 5px !important; }}
 .stTabs [data-baseweb="tab-panel"] {{ background: transparent !important; padding-top: 20px !important; }}
 .stExpander {{ border: 1px solid {BORDER} !important; border-radius: 10px !important; background: {CARD} !important; }}
 div[data-testid="stExpander"] summary {{ color: {TEXT2} !important; font-size: 13px !important; }}
+@keyframes pulse {{
+    0%,100% {{ opacity:1; transform:scale(1); box-shadow:0 0 0 0 {GREEN}66; }}
+    50%      {{ opacity:.7; transform:scale(1.25); box-shadow:0 0 0 6px {GREEN}00; }}
+}}
+@keyframes scanline {{
+    0%   {{ transform:translateX(-100%); opacity:0; }}
+    10%  {{ opacity:1; }}
+    90%  {{ opacity:1; }}
+    100% {{ transform:translateX(100%); opacity:0; }}
+}}
+@keyframes fadein {{
+    from {{ opacity:0; transform:translateY(-6px); }}
+    to   {{ opacity:1; transform:translateY(0); }}
+}}
+@keyframes ticker {{
+    0%   {{ transform:translateX(0); }}
+    100% {{ transform:translateX(-50%); }}
+}}
+.pulse-dot {{
+    width:10px; height:10px; border-radius:50%;
+    background:{GREEN};
+    animation: pulse 1.6s ease-in-out infinite;
+    display:inline-block;
+}}
+.scanline-bar {{
+    height:2px; border-radius:2px; overflow:hidden;
+    background:{BORDER}; position:relative; margin-top:6px;
+}}
+.scanline-bar::after {{
+    content:''; position:absolute; top:0; left:0;
+    height:100%; width:40%;
+    background:linear-gradient(90deg,transparent,{BLUE},{GREEN},transparent);
+    animation: scanline 2.4s ease-in-out infinite;
+}}
+.activity-row {{ animation: fadein .3s ease; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -165,6 +200,59 @@ def get_recent_events(limit: int = 8) -> list:
         FROM system_events
         ORDER BY ts DESC LIMIT ?
     """, (limit,))
+
+
+LOG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs", "bot.log")
+
+def get_bot_activity(n: int = 30) -> list:
+    """
+    Tail bot.log and parse [v10] lines into structured activity events.
+    Returns list of dicts: {ts, kind, symbol, msg, raw}
+      kind: ENTERED | VETO | SCAN | SCORE | SIGNAL | ERROR | OTHER
+    """
+    events = []
+    try:
+        with open(LOG_PATH, "r") as f:
+            lines = f.readlines()[-300:]
+    except Exception:
+        return []
+
+    import re
+    for line in reversed(lines):
+        line = line.strip()
+        if "[v10]" not in line:
+            continue
+        # Parse timestamp
+        ts_m = re.match(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", line)
+        ts   = ts_m.group(1) if ts_m else ""
+        msg  = line.split("[v10]", 1)[-1].strip()
+
+        if "ENTERED" in msg:
+            kind = "ENTERED"
+        elif "ENTRY SIGNAL" in msg:
+            kind = "SIGNAL"
+        elif "ECONOMICS VETO" in msg or "VETO" in msg.upper():
+            kind = "VETO"
+        elif "score=" in msg and "< threshold" in msg:
+            kind = "SCORE"
+        elif "scan:" in msg and "candidates" in msg:
+            kind = "SCAN"
+        elif "ERROR" in line or "fatal" in line.lower():
+            kind = "ERROR"
+        elif "exit_monitor" in line.lower() or "EXIT" in msg:
+            kind = "EXIT"
+        else:
+            kind = "OTHER"
+
+        # Extract symbol if present
+        sym_m = re.search(r"\bPF_\w+", msg)
+        symbol = sym_m.group(0) if sym_m else ""
+
+        events.append({"ts": ts, "kind": kind, "symbol": symbol, "msg": msg})
+        if len(events) >= n:
+            break
+
+    return events
 
 
 def get_account_balance() -> float:
@@ -270,6 +358,150 @@ def render_status_bar():
         f'{datetime.now().strftime("%H:%M:%S")}</div>'
 
         f'</div>',
+        unsafe_allow_html=True,
+    )
+
+
+# ── live activity feed ────────────────────────────────────────────────────────
+
+KIND_STYLE = {
+    "ENTERED": ("#10c98f", "⬆ ENTERED",   "#10c98f22"),
+    "SIGNAL":  ("#4f8ef7", "◆ SIGNAL",    "#4f8ef722"),
+    "VETO":    ("#f59e0b", "✕ VETO",      "#f59e0b22"),
+    "SCORE":   ("#4a5175", "· SCORE",     "transparent"),
+    "SCAN":    ("#8892b0", "⟳ SCAN",      "transparent"),
+    "EXIT":    ("#a78bfa", "⬇ EXIT",      "#a78bfa22"),
+    "ERROR":   ("#f03e5e", "! ERROR",     "#f03e5e22"),
+    "OTHER":   ("#4a5175", "  ...",       "transparent"),
+}
+
+
+@st.fragment(run_every=5)
+def render_live_feed():
+    scan  = get_scanner_status()
+    age   = int(scan.get("last_scan_age_s", 0))
+    activity = get_bot_activity(20)
+
+    # ── pulse header ──────────────────────────────────────────────────────────
+    scan_interval = 300   # 5 min
+    next_scan_in  = max(0, scan_interval - age)
+    bar_pct       = min(100, int(age / scan_interval * 100))
+
+    if age < 30:
+        status_text  = "SCANNING NOW"
+        status_color = GREEN
+    elif age < scan_interval + 60:
+        status_text  = f"NEXT SCAN IN {next_scan_in}s"
+        status_color = GREEN
+    else:
+        status_text  = f"STALE — {age}s since last scan"
+        status_color = RED
+
+    # Count significant events
+    n_entries = sum(1 for e in activity if e["kind"] == "ENTERED")
+    n_vetoes  = sum(1 for e in activity if e["kind"] == "VETO")
+
+    st.markdown(
+        f'<div style="background:{CARD};border:1px solid {BORDER};border-radius:14px;'
+        f'padding:18px 22px;margin-bottom:14px;">'
+
+        # top row: pulse + status + stats
+        f'<div style="display:flex;align-items:center;justify-content:space-between;">'
+
+        f'<div style="display:flex;align-items:center;gap:14px;">'
+        f'<div class="pulse-dot" style="background:{status_color};'
+        f'box-shadow:0 0 8px {status_color}88;"></div>'
+        f'<div>'
+        f'<div style="font-size:13px;font-weight:800;letter-spacing:2px;'
+        f'text-transform:uppercase;color:{status_color};">{status_text}</div>'
+        f'<div style="font-size:11px;color:{TEXT3};margin-top:2px;">'
+        f'Kraken Futures · scan every 5 min · 7-filter pipeline</div>'
+        f'</div>'
+        f'</div>'
+
+        f'<div style="display:flex;gap:28px;text-align:right;">'
+        f'<div>'
+        f'<div style="font-size:10px;color:{TEXT3};text-transform:uppercase;letter-spacing:1.5px;">Entries (recent)</div>'
+        f'<div style="font-size:22px;font-weight:900;color:{GREEN};font-family:{MONO};">{n_entries}</div>'
+        f'</div>'
+        f'<div>'
+        f'<div style="font-size:10px;color:{TEXT3};text-transform:uppercase;letter-spacing:1.5px;">Vetoes (recent)</div>'
+        f'<div style="font-size:22px;font-weight:900;color:{AMBER};font-family:{MONO};">{n_vetoes}</div>'
+        f'</div>'
+        f'<div>'
+        f'<div style="font-size:10px;color:{TEXT3};text-transform:uppercase;letter-spacing:1.5px;">Last scan</div>'
+        f'<div style="font-size:22px;font-weight:900;color:{TEXT2};font-family:{MONO};">{age}s</div>'
+        f'</div>'
+        f'</div>'
+
+        f'</div>'   # end top row
+
+        # progress bar toward next scan
+        f'<div class="scanline-bar" style="margin-top:14px;">'
+        f'<div style="height:100%;width:{bar_pct}%;background:linear-gradient(90deg,{BLUE},{GREEN});'
+        f'border-radius:2px;transition:width .5s;"></div>'
+        f'</div>'
+        f'<div style="display:flex;justify-content:space-between;font-size:10px;'
+        f'color:{TEXT3};margin-top:4px;">'
+        f'<span>last scan</span><span>{next_scan_in}s to next scan</span>'
+        f'</div>'
+
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    # ── activity log ─────────────────────────────────────────────────────────
+    st.markdown(
+        f'<div style="font-size:11px;font-weight:700;letter-spacing:2.5px;'
+        f'text-transform:uppercase;color:{TEXT3};padding:6px 0 10px 0;">'
+        f'BRAIN ACTIVITY — LIVE LOG</div>',
+        unsafe_allow_html=True,
+    )
+
+    if not activity:
+        st.markdown(
+            _card(f'<div style="text-align:center;padding:20px;color:{TEXT3};">Waiting for bot.log…</div>'),
+            unsafe_allow_html=True,
+        )
+        return
+
+    rows_html = ""
+    for ev in activity:
+        kind  = ev["kind"]
+        color, label, bg = KIND_STYLE.get(kind, KIND_STYLE["OTHER"])
+        ts    = ev["ts"][11:19] if len(ev["ts"]) >= 19 else ev["ts"]   # HH:MM:SS
+        msg   = ev["msg"][:120]
+        sym   = ev["symbol"]
+
+        # Skip pure "OTHER" noise unless it's the most recent
+        if kind == "OTHER" and rows_html:
+            continue
+
+        # Highlight entry rows with a left accent
+        border_left = f"border-left:3px solid {color};" if kind in ("ENTERED","EXIT","ERROR","SIGNAL") else ""
+
+        rows_html += (
+            f'<div class="activity-row" style="display:grid;grid-template-columns:70px 90px 1fr;'
+            f'gap:8px;padding:9px 14px;border-bottom:1px solid {BORDER}22;'
+            f'background:{bg};{border_left}align-items:center;">'
+
+            f'<div style="font-size:11px;color:{TEXT3};font-family:{MONO};">{ts}</div>'
+
+            f'<div><span style="background:{color}22;color:{color};border-radius:4px;'
+            f'padding:2px 7px;font-size:10px;font-weight:800;letter-spacing:.5px;">'
+            f'{label}</span></div>'
+
+            f'<div style="font-size:12px;color:{"" + TEXT if kind in ("ENTERED","SIGNAL","EXIT") else TEXT2};'
+            f'font-family:{MONO if kind in ("ENTERED","SIGNAL","SCORE","VETO") else "inherit"};">'
+            f'{msg}</div>'
+
+            f'</div>'
+        )
+
+    st.markdown(
+        f'<div style="background:{CARD};border:1px solid {BORDER};'
+        f'border-radius:12px;overflow:hidden;max-height:380px;overflow-y:auto;">'
+        f'{rows_html}</div>',
         unsafe_allow_html=True,
     )
 
@@ -836,6 +1068,7 @@ def main():
     ])
 
     with tab1:
+        render_live_feed()
         render_overview()
 
     with tab2:

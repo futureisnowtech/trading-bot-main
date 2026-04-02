@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-01
+- v10 Phase 2: data pipeline — realtime_feeds.py (WebSocket), historical_data.py (OHLCV cache), sentiment_data.py (F&G + Deribit + onchain)
+
+## 2026-04-01
 - v10 Phase 1: architecture doc, DB migration (9 new tables), removed 10 deprecated files (agents, telegram, super_score, meta_learner)
 
 ## 2026-04-01

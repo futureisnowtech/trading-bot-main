@@ -1,0 +1,285 @@
+"""
+data/historical_data.py — v10 Historical OHLCV data layer.
+
+Fetches and caches OHLCV candles for all timeframes needed by the indicator engine.
+Stores in SQLite (price_archive.db) with incremental updates — only fetches missing bars.
+
+Supported timeframes: 1m, 5m, 15m, 1h, 4h, 1d
+Source: Binance Futures REST API (fapi/v1/klines), fallback to yfinance
+
+Coverage tracking:
+  - Before returning data, checks if SQLite has >= 80% coverage for requested window
+  - If yes: zero API calls, serve from cache
+  - If no: fetch missing bars from API → store → return merged dataset
+
+Usage:
+    from data.historical_data import get_candles
+    df = get_candles('BTCUSDT', '5m', limit=200)
+    # Returns DataFrame: open, high, low, close, volume, open_time (datetime index)
+"""
+
+import logging
+import os
+import sqlite3
+import threading
+import time
+from datetime import datetime, timezone
+from typing import Optional
+
+import pandas as pd
+
+logger = logging.getLogger(__name__)
+
+try:
+    import requests
+    _REQUESTS_OK = True
+except ImportError:
+    _REQUESTS_OK = False
+
+try:
+    import yfinance as yf
+    _YF_OK = True
+except ImportError:
+    _YF_OK = False
+
+# ── Config ────────────────────────────────────────────────────────────────────
+_DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'logs', 'price_archive.db')
+_BINANCE_FUTURES_BASE = 'https://fapi.binance.com'
+_BINANCE_SPOT_BASE = 'https://api.binance.com'
+_COVERAGE_THRESHOLD = 0.80
+_MAX_CANDLES_PER_REQUEST = 1500
+
+# Timeframe → milliseconds per bar
+_TF_MS = {
+    '1m':  60_000,
+    '5m':  300_000,
+    '15m': 900_000,
+    '1h':  3_600_000,
+    '4h':  14_400_000,
+    '1d':  86_400_000,
+}
+
+# yfinance interval mapping
+_YF_INTERVAL = {
+    '1m': '1m', '5m': '5m', '15m': '15m',
+    '1h': '1h', '4h': '1h', '1d': '1d',
+}
+
+_lock = threading.RLock()
+
+
+# ── Database setup ─────────────────────────────────────────────────────────────
+
+def _get_db() -> sqlite3.Connection:
+    db_path = os.path.abspath(_DB_PATH)
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    conn = sqlite3.connect(db_path, check_same_thread=False)
+    conn.execute('PRAGMA journal_mode=WAL')
+    conn.execute('PRAGMA synchronous=NORMAL')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS ohlcv (
+            symbol      TEXT NOT NULL,
+            timeframe   TEXT NOT NULL,
+            open_time   INTEGER NOT NULL,
+            open        REAL,
+            high        REAL,
+            low         REAL,
+            close       REAL,
+            volume      REAL,
+            PRIMARY KEY (symbol, timeframe, open_time)
+        )
+    ''')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_ohlcv_lookup ON ohlcv(symbol, timeframe, open_time)')
+    conn.commit()
+    return conn
+
+
+# ── API fetching ──────────────────────────────────────────────────────────────
+
+def _fetch_binance(symbol: str, interval: str, start_ms: int, limit: int) -> Optional[list]:
+    """Fetch klines from Binance futures, fallback to spot."""
+    if not _REQUESTS_OK:
+        return None
+
+    for base, endpoint in [
+        (_BINANCE_FUTURES_BASE, '/fapi/v1/klines'),
+        (_BINANCE_SPOT_BASE, '/api/v3/klines'),
+    ]:
+        try:
+            params = {
+                'symbol': symbol,
+                'interval': interval,
+                'startTime': start_ms,
+                'limit': min(limit, _MAX_CANDLES_PER_REQUEST),
+            }
+            r = requests.get(base + endpoint, params=params, timeout=10)
+            if r.status_code == 200:
+                return r.json()
+        except Exception:
+            continue
+    return None
+
+
+def _fetch_yfinance(symbol: str, interval: str, limit: int) -> Optional[pd.DataFrame]:
+    """yfinance fallback for symbols not on Binance futures."""
+    if not _YF_OK:
+        return None
+    try:
+        yf_interval = _YF_INTERVAL.get(interval, '5m')
+        # Map BTCUSDT → BTC-USD for yfinance
+        yf_sym = symbol.replace('USDT', '-USD').replace('USDC', '-USD')
+        period_map = {'1m': '7d', '5m': '60d', '15m': '60d', '1h': '730d', '4h': '730d', '1d': 'max'}
+        period = period_map.get(interval, '60d')
+        ticker = yf.Ticker(yf_sym)
+        df = ticker.history(period=period, interval=yf_interval, auto_adjust=True)
+        if df.empty:
+            return None
+        df = df.rename(columns={'Open': 'open', 'High': 'high', 'Low': 'low',
+                                 'Close': 'close', 'Volume': 'volume'})
+        return df[['open', 'high', 'low', 'close', 'volume']].tail(limit)
+    except Exception as e:
+        logger.debug(f'[historical_data] yfinance fallback failed for {symbol}: {e}')
+        return None
+
+
+# ── Cache read/write ──────────────────────────────────────────────────────────
+
+def _load_from_db(symbol: str, timeframe: str, start_ms: int, end_ms: int) -> pd.DataFrame:
+    """Load cached OHLCV rows from SQLite for the given time range."""
+    with _lock:
+        conn = _get_db()
+        try:
+            df = pd.read_sql_query(
+                '''SELECT open_time, open, high, low, close, volume
+                   FROM ohlcv
+                   WHERE symbol=? AND timeframe=? AND open_time>=? AND open_time<?
+                   ORDER BY open_time''',
+                conn,
+                params=(symbol, timeframe, start_ms, end_ms),
+            )
+        finally:
+            conn.close()
+
+    if df.empty:
+        return df
+    df['open_time'] = pd.to_datetime(df['open_time'], unit='ms', utc=True)
+    df = df.set_index('open_time')
+    return df
+
+
+def _save_to_db(symbol: str, timeframe: str, rows: list):
+    """
+    Upsert OHLCV rows to SQLite.
+    rows: list of [open_time_ms, open, high, low, close, volume]
+    """
+    if not rows:
+        return
+    with _lock:
+        conn = _get_db()
+        try:
+            conn.executemany(
+                '''INSERT OR REPLACE INTO ohlcv
+                   (symbol, timeframe, open_time, open, high, low, close, volume)
+                   VALUES (?,?,?,?,?,?,?,?)''',
+                [(symbol, timeframe, int(r[0]), float(r[1]), float(r[2]),
+                  float(r[3]), float(r[4]), float(r[5])) for r in rows]
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+# ── Main public API ──────────────────────────────────────────────────────────
+
+def get_candles(symbol: str, timeframe: str = '5m', limit: int = 200) -> pd.DataFrame:
+    """
+    Return a DataFrame of OHLCV candles for symbol/timeframe.
+
+    Checks SQLite cache first. If coverage < 80%: fetches from Binance REST.
+    Falls back to yfinance if Binance fails.
+
+    Returns DataFrame with DatetimeIndex (UTC) and columns: open, high, low, close, volume
+    Returns empty DataFrame on failure (never raises).
+
+    Args:
+        symbol:    Binance futures symbol e.g. 'BTCUSDT'
+        timeframe: '1m' | '5m' | '15m' | '1h' | '4h' | '1d'
+        limit:     Number of bars to return
+    """
+    if timeframe not in _TF_MS:
+        logger.error(f'[historical_data] Unknown timeframe: {timeframe}')
+        return pd.DataFrame()
+
+    bar_ms = _TF_MS[timeframe]
+    now_ms = int(time.time() * 1000)
+    start_ms = now_ms - (limit * bar_ms)
+
+    # Try cache first
+    cached = _load_from_db(symbol, timeframe, start_ms, now_ms)
+    coverage = len(cached) / limit if limit > 0 else 0
+
+    if coverage >= _COVERAGE_THRESHOLD:
+        return cached.tail(limit)
+
+    # Fetch missing bars from API
+    df = _fetch_and_store(symbol, timeframe, start_ms, limit, bar_ms, now_ms)
+    if df is not None and not df.empty:
+        return df.tail(limit)
+
+    # Return whatever we have from cache even if partial
+    if not cached.empty:
+        logger.debug(f'[historical_data] Returning partial cache ({len(cached)}/{limit}) for {symbol} {timeframe}')
+        return cached.tail(limit)
+
+    return pd.DataFrame()
+
+
+def _fetch_and_store(symbol: str, timeframe: str, start_ms: int,
+                     limit: int, bar_ms: int, now_ms: int) -> Optional[pd.DataFrame]:
+    """Fetch from Binance (or yfinance), store to DB, return DataFrame."""
+    raw = _fetch_binance(symbol, timeframe, start_ms, limit)
+
+    if raw:
+        # Binance kline format: [open_time, open, high, low, close, volume, ...]
+        rows = [[r[0], r[1], r[2], r[3], r[4], r[5]] for r in raw]
+        _save_to_db(symbol, timeframe, rows)
+
+        df = pd.DataFrame(rows, columns=['open_time', 'open', 'high', 'low', 'close', 'volume'])
+        df['open_time'] = pd.to_datetime(df['open_time'].astype(int), unit='ms', utc=True)
+        df = df.set_index('open_time')
+        for col in ['open', 'high', 'low', 'close', 'volume']:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+        return df
+
+    # yfinance fallback
+    df = _fetch_yfinance(symbol, timeframe, limit)
+    if df is not None and not df.empty:
+        # Store yfinance data to DB too
+        rows_yf = []
+        for ts, row in df.iterrows():
+            ts_ms = int(ts.timestamp() * 1000) if hasattr(ts, 'timestamp') else int(ts) * 1000
+            rows_yf.append([ts_ms, row['open'], row['high'], row['low'], row['close'], row['volume']])
+        _save_to_db(symbol, timeframe, rows_yf)
+        return df
+
+    logger.warning(f'[historical_data] Failed to fetch {symbol} {timeframe}')
+    return None
+
+
+def prefetch_symbols(symbols: list, timeframes: list = None):
+    """
+    Pre-warm the cache for a list of symbols and timeframes.
+    Call at startup to avoid cold-cache latency on first scan.
+    """
+    if timeframes is None:
+        timeframes = ['5m', '15m', '1h']
+
+    logger.info(f'[historical_data] Prefetching {len(symbols)} symbols × {len(timeframes)} timeframes')
+    for sym in symbols:
+        for tf in timeframes:
+            try:
+                get_candles(sym, tf, limit=200)
+            except Exception as e:
+                logger.debug(f'[historical_data] Prefetch failed {sym} {tf}: {e}')
+            time.sleep(0.05)  # avoid rate limit
+    logger.info('[historical_data] Prefetch complete')

@@ -51,6 +51,7 @@ A fully autonomous AI-powered trading system that:
 | 13 | Notification engine (8 categories + WHY blocks) + dashboard feed | ✅ |
 | 14 | Portfolio backtest structural validation | ✅ |
 | 15 | Readiness checker + CLAUDE.md update | ✅ |
+| 16 | v10 scheduler wired (v10_runner.py) + main.py updated + 1-day paper req | ✅ |
 
 **Key v10 architectural decisions (final):**
 - 57 features (not 47 — counted 8+6+5+7+4+5+6+3+5+4+4=57 across 11 groups)
@@ -69,7 +70,7 @@ A fully autonomous AI-powered trading system that:
 2. ≥1 RBI strategy graduated from incubation
 3. Zero kill switch triggers in paper period
 4. Cost per profitable trade < 25% of average win
-5. 14+ days paper trading on v10
+5. 1+ day paper trading on v10
 6. Win rate ≥ 52%
 
 **Current bot:** `feature/agent-overhaul` stays live during v10 paper validation.

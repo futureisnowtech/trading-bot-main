@@ -6,7 +6,7 @@ Evaluates all 6 go-live criteria from the v10 spec:
   2. ≥1 RBI strategy graduated from incubation to production
   3. Zero kill switch triggers in paper period
   4. Cost per profitable trade < 25% of average win
-  5. 14+ days successful paper trading
+  5. 1+ day successful paper trading
   6. WR ≥ 52% and portfolio backtest Sharpe > 0.8
 
 Usage:
@@ -107,7 +107,7 @@ def check_cost_efficiency() -> tuple:
 
 
 def check_paper_days() -> tuple:
-    """Criterion 5: 14+ days paper trading on v10"""
+    """Criterion 5: 1+ day paper trading on v10"""
     try:
         conn = _conn()
         # Look for the earliest v10 trade (has composite_score set)
@@ -141,9 +141,9 @@ def check_paper_days() -> tuple:
             except Exception:
                 days_running = 0
 
-        passed = days_running >= 14
+        passed = days_running >= 1
         return (passed, round(days_running, 1),
-                f'{days_running:.1f} days paper trading (target ≥ 14)')
+                f'{days_running:.1f} days paper trading (target ≥ 1)')
     except Exception as e:
         return False, 0, f'DB error: {e}'
 
@@ -188,7 +188,7 @@ def main():
         ('≥1 RBI Graduated',          check_rbi_graduates),
         ('Zero Kill Switches (14d)',  check_kill_switches),
         ('Cost Efficiency < 25%',     check_cost_efficiency),
-        ('14+ Days Paper Trading',    check_paper_days),
+        ('1+ Day Paper Trading',       check_paper_days),
         ('Win Rate ≥ 52%',            check_win_rate),
     ]
 

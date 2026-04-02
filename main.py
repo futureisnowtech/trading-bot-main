@@ -22,14 +22,14 @@ import logging_db.trade_logger  # noqa: F401 — pre-warm, prevents EDEADLK
 
 BANNER = """
 ╔══════════════════════════════════════════════════════════════════╗
-║  👑  THE KING'S ALGO TRADING SYSTEM  v9.0  👑                   ║
+║  THE KING'S ALGO TRADING SYSTEM  v10.0                          ║
 ║                                                                  ║
 ║  "Nothing is given. Everything is earned." — LeBron James       ║
 ║                                                                  ║
-║  Crypto:  Coinbase/Binance | 4-signal engine | 3-agent debate   ║
-║  Futures: Tradovate MES | Opening range pullback                ║
-║  Perp:    Binance USD-M | Funding-aware entries                 ║
-║  Exits:   Extended thinking AI review on every candle           ║
+║  Scanner:    Binance USDT perps | 7-filter | top 15             ║
+║  Signals:    Two-tower (technical 0-100 + ML 0-100)             ║
+║  Exits:      6-priority stack (trailing / scale / thesis)       ║
+║  Learning:   57-feature snapshots | walk-forward retrain        ║
 ╚══════════════════════════════════════════════════════════════════╝
 """
 
@@ -84,48 +84,16 @@ def main():
     mem = get_memory_stats()
     print(f"🧠 Trade memory: {mem.get('total', 0)} experiences | Win rate: {mem.get('win_rate', 0):.1%}\n")
 
-    if not args.equity_only:
-        print("🔌 Connecting Coinbase...")
-        from execution.coinbase_broker import get_coinbase_broker
-        cb = get_coinbase_broker()
-        ok = cb.connect()
-        print(f"   {'✅ Connected' if ok else '⚠️ Offline — signals log-only'}")
-        if ok:
-            print("📡 Starting Coinbase WebSocket...")
-            from data.coinbase_feed import get_global_feed
-            get_global_feed().start()
-            time.sleep(2)
-            print("   ✅ Real-time feed running\n")
-
-    if not args.no_alerts:
-        try:
-            from alerts.telegram_alert import alert_system
-            from config import FUTURES_ENABLED
-            alert_system('STARTUP',
-                f"👑 System online\nMode: {mode}\nAccount: ${ACCOUNT_SIZE}\n"
-                f"AI: {'On' if ANTHROPIC_API_KEY else 'Fallback'} | "
-                f"Futures: {'On' if FUTURES_ENABLED else 'Off'}")
-        except Exception:
-            pass
-
-    if args.equity_only or args.crypto_only:
-        import scheduler.job_runner as jr
-        if args.equity_only:
-            jr.run_crypto_scan = lambda: None
-        if args.crypto_only:
-            jr.run_equity_scan = lambda: None
-
-    log_event('INFO', 'main', f"System started — {'paper' if PAPER_TRADING else 'live'}")
+    log_event('INFO', 'main', f"System started — {'paper' if PAPER_TRADING else 'live'} v10")
 
     print("=" * 60)
-    print("  🚀 Scheduler starting. System is live.")
-    print("  📊 Dashboard → streamlit run dashboard/app.py --server.runOnSave true → :8501")
-    print("  📋 CSV logs  → logs/csv/")
-    print("  🗄️  Database  → logs/trades.db")
-    print("  ⌨️  Stop      → Ctrl+C")
+    print("  Scheduler starting. System is live.")
+    print("  Dashboard: streamlit run dashboard/app.py --server.runOnSave true")
+    print("  Database:  logs/trades.db")
+    print("  Stop:      Ctrl+C")
     print("=" * 60 + "\n")
 
-    from scheduler.job_runner import run_forever
+    from scheduler.v10_runner import run_forever
     run_forever()
 
 

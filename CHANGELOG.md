@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-01
+- v10 live: scheduler wired, 1-day paper requirement, system ready to run
+
+## 2026-04-01
 - v10 Phases 12-15: learning loop, notification engine, backtest validation, readiness checker — build complete on feature/v10-rebuild
 
 ## 2026-04-01

@@ -1,0 +1,824 @@
+"""
+scheduler/v10_runner.py — v10 unified scanner + trade loop.
+
+Runs 24/7 paper trading on Binance USDT perp universe.
+Replaces v9 job_runner for v10 architecture.
+
+Loop intervals:
+  scan_and_trade:     every 5 minutes
+  exit_monitor:       every 30 seconds
+  hedge_rebalance:    every 5 minutes
+  kill_switch_check:  every 60 seconds
+  rbi_nightly:        once at 02:00 ET
+  ml_retrain_check:   every 6 hours
+"""
+
+import logging
+import threading
+import time
+import traceback
+from typing import Dict, List, Optional
+
+import schedule
+
+logger = logging.getLogger(__name__)
+
+# ── Module-level state ────────────────────────────────────────────────────────
+
+_scan_lock = threading.RLock()   # prevent parallel scan_and_trade runs
+_initial_balance: float = 0.0   # set at startup from config
+_paper: bool = True              # set at startup from config
+
+# Regime multipliers for position sizing (applied on top of compute_position_size)
+_REGIME_SIZE_MULT = {
+    'TRENDING_UP':   1.00,
+    'TRENDING_DOWN': 1.00,
+    'RANGING':       0.85,
+    'HIGH_VOL':      0.70,
+    'ACCUMULATION':  0.90,
+    'DISTRIBUTION':  0.90,
+    'UNKNOWN':       0.90,
+}
+
+
+# ── Lazy imports (all wrapped so import errors never crash the loop) ──────────
+
+def _import_scanner():
+    try:
+        import scanner
+        return scanner
+    except Exception as e:
+        logger.debug(f'[v10] scanner import error: {e}')
+        return None
+
+
+def _import_signal_engine():
+    try:
+        import signal_engine
+        return signal_engine
+    except Exception as e:
+        logger.debug(f'[v10] signal_engine import error: {e}')
+        return None
+
+
+def _import_position_manager():
+    try:
+        import position_manager
+        return position_manager
+    except Exception as e:
+        logger.debug(f'[v10] position_manager import error: {e}')
+        return None
+
+
+def _import_perps_engine():
+    try:
+        import perps_engine
+        return perps_engine
+    except Exception as e:
+        logger.debug(f'[v10] perps_engine import error: {e}')
+        return None
+
+
+def _import_hedge_engine():
+    try:
+        import hedge_engine
+        return hedge_engine
+    except Exception as e:
+        logger.debug(f'[v10] hedge_engine import error: {e}')
+        return None
+
+
+def _import_kill_switch():
+    try:
+        import kill_switch
+        return kill_switch
+    except Exception as e:
+        logger.debug(f'[v10] kill_switch import error: {e}')
+        return None
+
+
+def _import_risk_engine():
+    try:
+        import risk_engine
+        return risk_engine
+    except Exception as e:
+        logger.debug(f'[v10] risk_engine import error: {e}')
+        return None
+
+
+def _import_learning_loop():
+    try:
+        import learning_loop
+        return learning_loop
+    except Exception as e:
+        logger.debug(f'[v10] learning_loop import error: {e}')
+        return None
+
+
+def _import_feature_builder():
+    try:
+        from ml.feature_builder import build_features, to_array
+        return build_features, to_array
+    except Exception as e:
+        logger.debug(f'[v10] feature_builder import error: {e}')
+        return None, None
+
+
+def _import_regime_classifier():
+    try:
+        from ml.regime_classifier import classify_from_features
+        return classify_from_features
+    except Exception as e:
+        logger.debug(f'[v10] regime_classifier import error: {e}')
+        return None
+
+
+def _import_get_candles():
+    try:
+        from data.historical_data import get_candles
+        return get_candles
+    except Exception as e:
+        logger.debug(f'[v10] historical_data import error: {e}')
+        return None
+
+
+def _import_notification_engine():
+    try:
+        import notifications.notification_engine as ne
+        return ne
+    except Exception as e:
+        logger.debug(f'[v10] notification_engine import error: {e}')
+        return None
+
+
+def _import_incubation_manager():
+    try:
+        from rbi.incubation_manager import get_size_multiplier
+        return get_size_multiplier
+    except Exception as e:
+        logger.debug(f'[v10] incubation_manager import error: {e}')
+        return None
+
+
+# ── Balance helpers ───────────────────────────────────────────────────────────
+
+def _get_account_balance() -> float:
+    """Try broker; fall back to config ACCOUNT_SIZE."""
+    perps = _import_perps_engine()
+    if perps is not None:
+        try:
+            broker = perps._get_broker(testnet=True)
+            if broker is not None:
+                bal = broker.get_account_balance()
+                if bal and bal > 0:
+                    return float(bal)
+        except Exception as e:
+            logger.debug(f'[v10] broker balance error: {e}')
+
+    try:
+        from config import ACCOUNT_SIZE
+        return float(ACCOUNT_SIZE)
+    except Exception:
+        return 5000.0
+
+
+def _get_deployed_usd(open_positions: Dict) -> float:
+    """Sum notional of all open positions."""
+    return sum(float(p.get('position_usd', 0)) for p in open_positions.values())
+
+
+# ── scan_and_trade ────────────────────────────────────────────────────────────
+
+def scan_and_trade():
+    """
+    Main 5-minute loop: run scanner, score candidates, open new positions.
+    Protected by _scan_lock to prevent parallel runs.
+    """
+    if not _scan_lock.acquire(blocking=False):
+        logger.debug('[v10] scan_and_trade skipped — previous run still active')
+        return
+
+    try:
+        _scan_and_trade_inner()
+    except Exception as e:
+        logger.error(f'[v10] scan_and_trade fatal: {e}\n{traceback.format_exc()[:1000]}')
+    finally:
+        _scan_lock.release()
+
+
+def _scan_and_trade_inner():
+    """Inner body of scan_and_trade — separated so the lock release is guaranteed."""
+    ks = _import_kill_switch()
+    re = _import_risk_engine()
+    scanner = _import_scanner()
+    se = _import_signal_engine()
+    pm = _import_position_manager()
+    perps = _import_perps_engine()
+    get_candles = _import_get_candles()
+    build_features, _ = _import_feature_builder()
+    classify_from_features = _import_regime_classifier()
+    ne = _import_notification_engine()
+    get_size_multiplier = _import_incubation_manager()
+
+    # Kill switch check
+    if ks is not None and ks.is_halted():
+        logger.info(f'[v10] scan skipped — kill switch: {ks.get_halt_reason()}')
+        return
+
+    # Risk gate
+    if re is not None:
+        can_trade, reason = re.can_open_new_position()
+        if not can_trade:
+            logger.info(f'[v10] scan skipped — risk gate: {reason}')
+            return
+
+    # Account balance for scanner and sizing
+    balance = _get_account_balance()
+
+    # Get current open positions
+    open_pos: Dict = {}
+    if perps is not None:
+        open_pos = perps.get_open_positions()
+
+    open_symbols = list(open_pos.keys())
+    deployed_usd = _get_deployed_usd(open_pos)
+
+    # Run scanner
+    if scanner is None:
+        logger.debug('[v10] scanner unavailable — skipping')
+        return
+
+    candidates = scanner.scan(
+        open_positions=open_symbols,
+        account_balance=balance,
+    )
+
+    if not candidates:
+        logger.debug('[v10] scan returned 0 candidates')
+        return
+
+    logger.info(f'[v10] scan: {len(candidates)} candidates, '
+                f'balance=${balance:.0f} deployed=${deployed_usd:.0f}')
+
+    for candidate in candidates:
+        symbol = candidate.get('symbol', '')
+        direction = candidate.get('direction', 'LONG')
+
+        # Skip if already in this position
+        if perps is not None and perps.get_open_positions().get(symbol):
+            logger.debug(f'[v10] {symbol} — already have position, skip')
+            continue
+
+        # Re-check risk gate before each entry attempt
+        if re is not None:
+            can_trade, reason = re.can_open_new_position()
+            if not can_trade:
+                logger.info(f'[v10] entry blocked by risk: {reason}')
+                break   # stop trying more candidates
+
+        try:
+            _attempt_entry(
+                candidate=candidate,
+                symbol=symbol,
+                direction=direction,
+                balance=balance,
+                deployed_usd=deployed_usd,
+                perps=perps,
+                se=se,
+                pm=pm,
+                get_candles=get_candles,
+                build_features=build_features,
+                classify_from_features=classify_from_features,
+                ne=ne,
+                get_size_multiplier=get_size_multiplier,
+            )
+        except Exception as e:
+            logger.error(f'[v10] entry attempt error {symbol}: {e}\n'
+                         f'{traceback.format_exc()[:800]}')
+            continue
+
+        # Update deployed after each successful entry
+        if perps is not None:
+            deployed_usd = _get_deployed_usd(perps.get_open_positions())
+
+
+def _attempt_entry(candidate, symbol, direction, balance, deployed_usd,
+                   perps, se, pm, get_candles, build_features,
+                   classify_from_features, ne, get_size_multiplier):
+    """Try to enter a position for one candidate. All exceptions propagate to caller."""
+    if get_candles is None or build_features is None:
+        return
+
+    # Fetch 1h candles for feature building
+    df = get_candles(symbol, '1h', 200)
+    if df is None or len(df) < 20:
+        logger.debug(f'[v10] {symbol} — insufficient candle data, skip')
+        return
+
+    current_price = float(df['close'].iloc[-1])
+    if current_price <= 0:
+        return
+
+    # ATR from last 7 candles (high-low range proxy)
+    atr_7 = float(df['high'].sub(df['low']).tail(7).mean())
+    if atr_7 <= 0:
+        atr_7 = current_price * 0.015   # 1.5% floor
+
+    # Build 57-feature vector
+    features = build_features(df, symbol)
+
+    # Classify regime
+    regime = 'UNKNOWN'
+    if classify_from_features is not None:
+        try:
+            regime = classify_from_features(features)
+        except Exception as e:
+            logger.debug(f'[v10] regime classify error {symbol}: {e}')
+
+    # Score the candidate
+    if se is None:
+        return
+
+    result = se.score(features, direction, regime, model_store=None)
+    composite = result['composite_score']
+    threshold = result['entry_threshold']
+
+    if composite < threshold:
+        # Notify informational signals above 55
+        if composite > 55 and ne is not None:
+            try:
+                ne.notify_signal(
+                    symbol=symbol,
+                    direction=direction,
+                    score=composite,
+                    threshold=threshold,
+                    reason=result.get('signal_description', ''),
+                    regime=regime,
+                )
+            except Exception:
+                pass
+        logger.debug(f'[v10] {symbol} {direction} score={composite:.1f} < '
+                     f'threshold={threshold:.1f}, skip')
+        return
+
+    logger.info(f'[v10] {symbol} {direction} ENTRY SIGNAL: '
+                f'composite={composite:.1f} threshold={threshold:.1f} '
+                f'regime={regime}')
+
+    # Compute position size
+    if pm is None:
+        return
+
+    regime_mult = _REGIME_SIZE_MULT.get(regime, 0.90)
+    ml_score = result.get('ml_score', 50.0)
+
+    sizing = pm.compute_position_size(
+        account_balance=balance,
+        current_price=current_price,
+        atr_7=atr_7,
+        stop_multiplier=1.5,
+        vol_regime=2,           # neutral default; scanner doesn't expose vol_regime int
+        ml_score=ml_score,
+        fg_current=50.0,        # neutral F&G; feature available in features dict
+        composite_score=composite,
+        correlation_penalty=float(candidate.get('correlation_penalty', 1.0)),
+        edge_score=0.5,
+        cascade_risk_score=0,
+        deployed_usd=deployed_usd,
+        paper=_paper,
+    )
+
+    size_usd = sizing['position_usd'] * regime_mult
+
+    # Apply RBI incubation multiplier
+    rbi_mult = 1.0
+    if get_size_multiplier is not None:
+        try:
+            rbi_mult = get_size_multiplier(symbol, [])
+        except Exception as e:
+            logger.debug(f'[v10] RBI multiplier error: {e}')
+    size_usd *= rbi_mult
+
+    if size_usd < 10.0:
+        logger.debug(f'[v10] {symbol} size ${size_usd:.2f} too small, skip')
+        return
+
+    leverage = sizing.get('leverage', 3)
+    stop_distance = sizing.get('stop_distance', atr_7 * 1.5)
+
+    if direction == 'LONG':
+        stop_price = current_price - stop_distance
+        take_profit_price = current_price + stop_distance * 2.0
+    else:
+        stop_price = current_price + stop_distance
+        take_profit_price = current_price - stop_distance * 2.0
+
+    # Execute entry
+    if perps is None:
+        return
+
+    if direction == 'LONG':
+        pos = perps.open_long(
+            symbol=symbol,
+            position_usd=size_usd,
+            entry_price=current_price,
+            stop_price=stop_price,
+            take_profit_price=take_profit_price,
+            leverage=leverage,
+            composite_score=composite,
+            atr_at_entry=atr_7,
+            regime=regime,
+            paper=_paper,
+        )
+    else:
+        pos = perps.open_short(
+            symbol=symbol,
+            position_usd=size_usd,
+            entry_price=current_price,
+            stop_price=stop_price,
+            take_profit_price=take_profit_price,
+            leverage=leverage,
+            composite_score=composite,
+            atr_at_entry=atr_7,
+            regime=regime,
+            paper=_paper,
+        )
+
+    if pos is None:
+        logger.warning(f'[v10] {symbol} entry returned None — execution failed')
+        return
+
+    logger.info(f'[v10] ENTERED {direction} {symbol}: '
+                f'${size_usd:.0f} @ ${current_price:.4f} '
+                f'stop=${stop_price:.4f} tp=${take_profit_price:.4f} '
+                f'lev={leverage}x composite={composite:.1f}')
+
+    # Post-entry notification
+    if ne is not None:
+        try:
+            top_3 = [k for k, v in sorted(result.get('components', {}).items(),
+                                           key=lambda x: abs(x[1]), reverse=True)[:3]]
+            ne.notify_trade_open(
+                symbol=symbol,
+                direction=direction,
+                size_usd=size_usd,
+                entry_price=current_price,
+                score=composite,
+                top_3=top_3,
+                features=features,
+                regime=regime,
+            )
+        except Exception as e:
+            logger.debug(f'[v10] trade_open notify error: {e}')
+
+
+# ── exit_monitor ──────────────────────────────────────────────────────────────
+
+def exit_monitor():
+    """
+    30-second loop: evaluate 6-priority exit stack for all open positions.
+    """
+    try:
+        _exit_monitor_inner()
+    except Exception as e:
+        logger.error(f'[v10] exit_monitor fatal: {e}\n{traceback.format_exc()[:1000]}')
+
+
+def _exit_monitor_inner():
+    perps = _import_perps_engine()
+    pm = _import_position_manager()
+    get_candles = _import_get_candles()
+    build_features, _ = _import_feature_builder()
+    classify_from_features = _import_regime_classifier()
+    ll = _import_learning_loop()
+    ne = _import_notification_engine()
+    ks = _import_kill_switch()
+
+    if perps is None or pm is None:
+        return
+
+    open_positions = perps.get_open_positions()
+    if not open_positions:
+        return
+
+    kill_triggered = False
+    if ks is not None:
+        kill_triggered = ks.is_halted()
+
+    balance = _get_account_balance()
+    deployed_usd = _get_deployed_usd(open_positions)
+
+    for symbol, pos in list(open_positions.items()):
+        try:
+            _evaluate_position_exit(
+                symbol=symbol,
+                pos=pos,
+                perps=perps,
+                pm=pm,
+                get_candles=get_candles,
+                build_features=build_features,
+                classify_from_features=classify_from_features,
+                ll=ll,
+                ne=ne,
+                balance=balance,
+                deployed_usd=deployed_usd,
+                kill_triggered=kill_triggered,
+            )
+        except Exception as e:
+            logger.error(f'[v10] exit eval error {symbol}: {e}\n'
+                         f'{traceback.format_exc()[:800]}')
+
+
+def _evaluate_position_exit(symbol, pos, perps, pm, get_candles,
+                             build_features, classify_from_features,
+                             ll, ne, balance, deployed_usd, kill_triggered):
+    """Evaluate and act on exit signals for one position."""
+    # Get current price from recent 1m candles
+    current_price: Optional[float] = None
+    current_features: Optional[Dict] = None
+    current_df = None
+
+    if get_candles is not None:
+        current_df = get_candles(symbol, '1m', 5)
+        if current_df is not None and len(current_df) > 0:
+            current_price = float(current_df['close'].iloc[-1])
+
+    if current_price is None or current_price <= 0:
+        # Fall back to last known price in position dict
+        current_price = float(pos.get('last_price', pos.get('entry_price', 0)))
+
+    if current_price <= 0:
+        return
+
+    # Update last_price in position
+    perps.update_position_price(symbol, current_price)
+
+    # Build current features for thesis check (use 1h data for richer features)
+    if get_candles is not None and build_features is not None:
+        try:
+            df_1h = get_candles(symbol, '1h', 60)
+            if df_1h is not None and len(df_1h) >= 20:
+                current_features = build_features(df_1h, symbol)
+        except Exception as e:
+            logger.debug(f'[v10] feature build for exit {symbol}: {e}')
+
+    # Evaluate exit stack
+    exit_decision = pm.check_exits(
+        position=pos,
+        current_price=current_price,
+        current_features=current_features,
+        model_store=None,
+        account_balance=balance,
+        total_deployed_usd=deployed_usd,
+        margin_utilization_pct=0.0,
+        drawdown_pct=0.0,
+        kill_switch_triggered=kill_triggered,
+    )
+
+    # Handle trailing stop activation (non-exit signal from check_exits priority 1)
+    if not exit_decision.should_exit and exit_decision.exit_type == 'trailing_activated':
+        try:
+            pm.activate_trailing(pos, current_price)
+            logger.debug(f'[v10] {symbol} trailing stop activated @ {current_price:.4f}')
+        except Exception as e:
+            logger.debug(f'[v10] trailing activate error {symbol}: {e}')
+        return
+
+    # Update trailing stop if active
+    if pos.get('trailing_active', False):
+        try:
+            pm.update_trailing_stop(pos, current_price)
+        except Exception as e:
+            logger.debug(f'[v10] trailing update error {symbol}: {e}')
+
+    if not exit_decision.should_exit:
+        return
+
+    # Execute close
+    direction = pos.get('direction', 'LONG')
+    exit_reason = exit_decision.reason
+    partial_pct = exit_decision.partial_pct
+
+    logger.info(f'[v10] EXIT {symbol} {direction}: '
+                f'priority={exit_decision.priority} type={exit_decision.exit_type} '
+                f'partial={partial_pct:.0%} reason={exit_reason[:80]}')
+
+    close_result = perps.close_position(
+        symbol=symbol,
+        reason=exit_decision.exit_type,
+        partial_pct=partial_pct,
+        paper=_paper,
+    )
+
+    if close_result is None:
+        logger.warning(f'[v10] close_position returned None for {symbol}')
+        return
+
+    pnl_usd = float(close_result.get('pnl_usd', 0))
+    exit_price = float(close_result.get('exit_price', current_price))
+    entry_price = float(pos.get('entry_price', exit_price))
+    pnl_pct = (pnl_usd / (pos.get('position_usd', 1) + 1e-9))
+
+    logger.info(f'[v10] CLOSED {direction} {symbol}: '
+                f'pnl=${pnl_usd:+.2f} ({pnl_pct:+.1%}) @ {exit_price:.4f}')
+
+    # Learning loop record
+    if ll is not None and partial_pct >= 1.0:
+        try:
+            trade_id = int(time.time())   # approximate; real DB inserts use auto-increment
+            features_snap = current_features or {}
+            regime = pos.get('regime', 'UNKNOWN')
+            entry_score = float(pos.get('entry_composite_score', 0.0))
+            ll.record_closed_trade(
+                trade_id=trade_id,
+                symbol=symbol,
+                direction=direction,
+                won=pnl_usd > 0,
+                pnl_usd=pnl_usd,
+                entry_price=entry_price,
+                exit_price=exit_price,
+                entry_score=entry_score,
+                exit_score=0.0,
+                regime=regime,
+                features=features_snap,
+            )
+        except Exception as e:
+            logger.debug(f'[v10] learning record error {symbol}: {e}')
+
+    # Notification
+    if ne is not None:
+        try:
+            top_3 = [exit_decision.exit_type, exit_reason[:50]]
+            ne.notify_trade_close(
+                symbol=symbol,
+                direction=direction,
+                pnl_usd=pnl_usd,
+                pnl_pct=pnl_pct,
+                exit_type=exit_decision.exit_type,
+                top_3=top_3,
+                features=current_features or {},
+                regime=pos.get('regime', 'UNKNOWN'),
+                score=float(pos.get('entry_composite_score', 0.0)),
+            )
+        except Exception as e:
+            logger.debug(f'[v10] trade_close notify error: {e}')
+
+    # Handle scale-out partial flags
+    if partial_pct < 1.0:
+        if exit_decision.exit_type == 'scale_out_33':
+            pos['scale_33_done'] = True
+        elif exit_decision.exit_type == 'scale_out_66':
+            pos['scale_66_done'] = True
+
+
+# ── kill_switch_monitor ───────────────────────────────────────────────────────
+
+def kill_switch_monitor():
+    """60-second loop: check account balance against kill threshold."""
+    try:
+        ks = _import_kill_switch()
+        if ks is None:
+            return
+        current = _get_account_balance()
+        ks.check_balance(current, _initial_balance, paper=_paper)
+    except Exception as e:
+        logger.debug(f'[v10] kill_switch_monitor error: {e}')
+
+
+# ── hedge_rebalance ───────────────────────────────────────────────────────────
+
+def hedge_rebalance():
+    """5-minute loop: rebalance delta-neutral hedge position."""
+    try:
+        he = _import_hedge_engine()
+        perps = _import_perps_engine()
+        if he is None or perps is None:
+            return
+        open_positions = perps.get_open_positions()
+        balance = _get_account_balance()
+        he.rebalance(open_positions, balance, paper=_paper)
+    except Exception as e:
+        logger.debug(f'[v10] hedge_rebalance error: {e}')
+
+
+# ── ml_retrain_check ──────────────────────────────────────────────────────────
+
+def ml_retrain_check():
+    """6-hour loop: trigger walk-forward retrains for slots with enough new data."""
+    try:
+        ll = _import_learning_loop()
+        if ll is None:
+            return
+        triggered = ll.maybe_trigger_retrains(paper=_paper)
+        if triggered:
+            logger.info(f'[v10] ml_retrain_check: triggered {len(triggered)} retrains: '
+                        f'{triggered}')
+    except Exception as e:
+        logger.debug(f'[v10] ml_retrain_check error: {e}')
+
+
+# ── rbi_nightly ───────────────────────────────────────────────────────────────
+
+def rbi_nightly():
+    """2:00 AM ET nightly: run RBI research + backtest pipeline on BTCUSDT."""
+    logger.info('[v10] rbi_nightly: starting BTCUSDT RBI pipeline')
+    try:
+        ll = _import_learning_loop()
+        if ll is None:
+            return
+        results = ll.run_nightly_rbi(symbol='BTCUSDT', paper=_paper)
+        logger.info(f'[v10] rbi_nightly done: {results}')
+        ne = _import_notification_engine()
+        if ne is not None:
+            ne.notify_system(
+                title='RBI Nightly Complete',
+                detail=(f"promoted={results.get('promoted', 0)} "
+                        f"passed={results.get('passed', 0)} "
+                        f"error={results.get('error', 'none')}"),
+            )
+    except Exception as e:
+        logger.error(f'[v10] rbi_nightly error: {e}\n{traceback.format_exc()[:800]}')
+
+
+# ── Startup ───────────────────────────────────────────────────────────────────
+
+def _init_globals():
+    """Set module-level globals from config at startup."""
+    global _initial_balance, _paper
+    try:
+        from config import PAPER_TRADING, ACCOUNT_SIZE
+        _paper = bool(PAPER_TRADING)
+        _initial_balance = float(ACCOUNT_SIZE)
+    except Exception as e:
+        logger.warning(f'[v10] config read error: {e} — using defaults')
+        _paper = True
+        _initial_balance = 5000.0
+
+    logger.info(f'[v10] mode={"PAPER" if _paper else "LIVE"} '
+                f'initial_balance=${_initial_balance:.0f}')
+
+
+def _startup_notification():
+    """Send system-start notification."""
+    try:
+        ne = _import_notification_engine()
+        if ne is not None:
+            ne.notify_system(
+                title='v10 System Started',
+                detail=(f'mode={"PAPER" if _paper else "LIVE"} '
+                        f'balance=${_initial_balance:.0f}'),
+            )
+    except Exception:
+        pass
+
+
+def run_forever():
+    """
+    Set up all schedules and run the v10 loop forever.
+
+    Schedule:
+      - scan_and_trade:    every 5 minutes
+      - exit_monitor:      every 30 seconds
+      - hedge_rebalance:   every 5 minutes (offset by 2.5 min to avoid collision with scan)
+      - kill_switch_check: every 60 seconds
+      - ml_retrain_check:  every 6 hours
+      - rbi_nightly:       daily at 02:00 ET (scheduled as UTC 07:00 which covers ET 02:00)
+    """
+    _init_globals()
+
+    # Initialise DB tables for learning loop
+    ll = _import_learning_loop()
+    if ll is not None:
+        try:
+            ll._ensure_tables()
+        except Exception:
+            pass
+
+    # Log startup
+    _startup_notification()
+    logger.info('[v10] Scheduler starting — wiring schedules...')
+
+    # Wire schedules
+    schedule.every(5).minutes.do(scan_and_trade)
+    schedule.every(30).seconds.do(exit_monitor)
+    schedule.every(5).minutes.do(hedge_rebalance)
+    schedule.every(60).seconds.do(kill_switch_monitor)
+    schedule.every(6).hours.do(ml_retrain_check)
+    schedule.every().day.at('07:00').do(rbi_nightly)   # 07:00 UTC ≈ 02:00 ET
+
+    logger.info('[v10] All schedules wired. Running scan immediately...')
+
+    # Run immediately on startup (don't wait 5 minutes for first scan)
+    scan_and_trade()
+
+    logger.info('[v10] Main loop running. Press Ctrl+C to stop.')
+    while True:
+        try:
+            schedule.run_pending()
+            time.sleep(1)
+        except KeyboardInterrupt:
+            logger.info('[v10] Shutdown requested via KeyboardInterrupt')
+            raise
+        except Exception as e:
+            logger.error(f'[v10] Scheduler loop error: {e}\n{traceback.format_exc()[:800]}')
+            time.sleep(5)   # brief back-off before resuming

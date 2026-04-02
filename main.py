@@ -7,9 +7,28 @@ Usage:
   python main.py --crypto-only
   python main.py --equity-only
 """
-import sys, os, argparse, time, traceback
+import sys, os, argparse, time, traceback, logging
 from datetime import datetime
 import pytz
+
+# Configure root logger to bot.log + console before anything imports
+def _setup_logging():
+    _log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs', 'bot.log')
+    fmt = '%(asctime)s %(name)s %(levelname)s %(message)s'
+    logging.basicConfig(
+        level=logging.INFO,
+        format=fmt,
+        handlers=[
+            logging.FileHandler(_log_path, encoding='utf-8'),
+            logging.StreamHandler(sys.stdout),
+        ],
+    )
+    # Silence noisy third-party loggers
+    for noisy in ('urllib3', 'requests', 'peewee', 'schedule'):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+    logging.getLogger('yfinance').setLevel(logging.CRITICAL)
+
+_setup_logging()
 
 # Pre-import stdlib modules and the core DB module at module level.
 # Python 3.14 on macOS deadlocks (EDEADLK) when importing these lazily

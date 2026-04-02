@@ -287,9 +287,15 @@ def check_exits(
                             'Kill switch triggered — close all', 1.0)
 
     # ── Priority 5: Risk forced exit ──────────────────────────────────────
-    if account_balance < 7500:
+    # Kill threshold = 75% of configured account size (not hardcoded $10K architecture)
+    try:
+        from config import ACCOUNT_SIZE as _ACCT
+        _kill_floor = float(_ACCT) * 0.75
+    except Exception:
+        _kill_floor = 7500.0
+    if account_balance < _kill_floor:
         return ExitDecision(True, 5, 'risk_forced',
-                            f'Balance ${account_balance:.0f} below kill threshold $7,500', 1.0)
+                            f'Balance ${account_balance:.0f} below kill threshold ${_kill_floor:.0f}', 1.0)
 
     if margin_utilization_pct > 85:
         return ExitDecision(True, 5, 'risk_forced',

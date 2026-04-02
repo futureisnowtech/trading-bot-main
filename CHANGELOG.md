@@ -1,5 +1,8 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
+## 2026-04-02
+- v10: scanner yfinance fallback + paper trading fixes (US geo-block workaround)
+
 ## 2026-04-01
 - v10 live: scheduler wired, 1-day paper requirement, system ready to run
 

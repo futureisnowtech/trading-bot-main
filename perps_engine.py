@@ -55,23 +55,20 @@ def open_long(
     Returns position dict on success, None on failure.
     """
     broker = _get_broker(testnet)
-    if broker is None:
-        logger.warning(f'[perps] no broker for {symbol} long')
+    if broker is None and not paper:
+        logger.warning(f'[perps] no broker for {symbol} long (live mode)')
         return None
 
     try:
-        # Set leverage
-        broker.set_leverage(symbol, leverage)
-
-        # Set ISOLATED margin mode
-        try:
-            broker.set_margin_type(symbol, 'ISOLATED')
-        except Exception:
-            pass   # already set
-
         qty = position_usd / entry_price
 
         if paper:
+            if broker is not None:
+                try:
+                    broker.set_leverage(symbol, leverage)
+                    broker.set_margin_type(symbol, 'ISOLATED')
+                except Exception:
+                    pass
             order = {
                 'orderId': f'paper_{symbol}_{int(time.time())}',
                 'symbol': symbol,
@@ -84,6 +81,11 @@ def open_long(
             }
             logger.info(f'[perps] PAPER LONG {symbol}: {qty:.4f} @ {entry_price:.4f} lev={leverage}x')
         else:
+            broker.set_leverage(symbol, leverage)
+            try:
+                broker.set_margin_type(symbol, 'ISOLATED')
+            except Exception:
+                pass
             order = broker.open_long(symbol=symbol, size_usd=position_usd,
                                       leverage=leverage)
             if not order:
@@ -138,19 +140,20 @@ def open_short(
 ) -> Optional[Dict]:
     """Open an ISOLATED short position."""
     broker = _get_broker(testnet)
-    if broker is None:
+    if broker is None and not paper:
+        logger.warning(f'[perps] no broker for {symbol} short (live mode)')
         return None
 
     try:
-        broker.set_leverage(symbol, leverage)
-        try:
-            broker.set_margin_type(symbol, 'ISOLATED')
-        except Exception:
-            pass
-
         qty = position_usd / entry_price
 
         if paper:
+            if broker is not None:
+                try:
+                    broker.set_leverage(symbol, leverage)
+                    broker.set_margin_type(symbol, 'ISOLATED')
+                except Exception:
+                    pass
             order = {
                 'orderId': f'paper_{symbol}_{int(time.time())}',
                 'symbol': symbol,
@@ -163,6 +166,11 @@ def open_short(
             }
             logger.info(f'[perps] PAPER SHORT {symbol}: {qty:.4f} @ {entry_price:.4f} lev={leverage}x')
         else:
+            broker.set_leverage(symbol, leverage)
+            try:
+                broker.set_margin_type(symbol, 'ISOLATED')
+            except Exception:
+                pass
             order = broker.open_short(symbol=symbol, size_usd=position_usd,
                                        leverage=leverage)
             if not order:

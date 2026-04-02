@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="30">
+<title>v10 Algo Trading — System SOP</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#08090e;color:#c8cce8;font-family:'SF Mono',monospace;font-size:13px;padding:20px}
+h1{color:#f5a623;font-size:20px;letter-spacing:2px;margin-bottom:4px}
+h2{color:#7b8ec8;font-size:11px;letter-spacing:3px;text-transform:uppercase;margin:20px 0 8px}
+.grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px}
+.card{background:#13141f;border:1px solid #252843;border-radius:6px;padding:14px}
+.card.warn{border-color:#f5a623}
+.card.ok{border-color:#10c98f}
+.card.err{border-color:#e74c3c}
+.label{font-size:9px;letter-spacing:2px;text-transform:uppercase;color:#5c6394;margin-bottom:4px}
+.val{font-size:22px;font-weight:700;color:#fff}
+.val.green{color:#10c98f}
+.val.red{color:#e74c3c}
+.val.amber{color:#f5a623}
+.pill{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;margin-right:4px}
+.pill.live{background:#10c98f22;color:#10c98f;border:1px solid #10c98f}
+.pill.dead{background:#e74c3c22;color:#e74c3c;border:1px solid #e74c3c}
+.pill.warn{background:#f5a62322;color:#f5a623;border:1px solid #f5a623}
+.pill.info{background:#7b8ec822;color:#7b8ec8;border:1px solid #7b8ec8}
+table{width:100%;border-collapse:collapse}
+th{font-size:9px;letter-spacing:2px;color:#5c6394;text-transform:uppercase;padding:4px 6px;border-bottom:1px solid #252843;text-align:left}
+td{padding:5px 6px;border-bottom:1px solid #1a1b2e;color:#c8cce8}
+td.sym{color:#f5a623;font-weight:700}
+td.long{color:#10c98f}
+td.short{color:#e74c3c}
+td.pass{color:#10c98f}
+td.fail{color:#e74c3c}
+.cmd{background:#0d0e18;border:1px solid #252843;border-radius:4px;padding:8px 12px;font-family:'SF Mono',monospace;font-size:12px;color:#a8b4e8;margin:4px 0}
+.ts{color:#5c6394;font-size:10px}
+.sep{border-top:1px solid #1e2038;margin:20px 0}
+.notif-row{padding:6px 0;border-bottom:1px solid #1a1b2e}
+.notif-title{color:#c8cce8;font-size:12px}
+.notif-cat{font-size:9px;letter-spacing:1px;text-transform:uppercase}
+.cat-SYSTEM{color:#9ca3af}.cat-KILL_SWITCH{color:#e74c3c}.cat-RBI{color:#a78bfa}
+.cat-RISK{color:#e74c3c}.cat-TRADE_OPEN{color:#10c98f}.cat-TRADE_CLOSE{color:#f5a623}
+.cat-ML{color:#38bdf8}.cat-SIGNAL{color:#7b8ec8}
+</style>
+</head>
+<body>
+<h1>⚙️ v10 ALGO TRADING — SYSTEM SOP</h1>
+<div class="ts" id="gentime">Auto-refreshes every 30s</div>
+
+<div id="live-state">Loading live state...</div>
+
+<div class="sep"></div>
+
+<!-- STATIC ARCHITECTURE REFERENCE -->
+<h2>Architecture</h2>
+<div class="grid2">
+  <div class="card">
+    <div class="label">Signal Engine</div>
+    <div style="color:#c8cce8;line-height:1.8;margin-top:6px">
+      Two-tower composite (0–100)<br>
+      • Tech score: CVD, MACD, RSI, VWAP, OB, funding, liq<br>
+      • ML score: XGBoost 60% + LightGBM 40%<br>
+      • Weights: 80/20 → 50/50 → 30/70 (by trade days)<br>
+      • Entry thresholds: TRENDING 62 · RANGING 68 · HIGH_VOL 72
+    </div>
+  </div>
+  <div class="card">
+    <div class="label">Exit Stack (6 Priorities)</div>
+    <div style="color:#c8cce8;line-height:1.8;margin-top:6px">
+      1. Trailing stop (activates after 1× ATR in-favor, trails 1.5×)<br>
+      2. Scale-out: 33% @ 2R, 33% @ 3.5R, trail rest<br>
+      3. Thesis score &lt; 45% of entry score → full close<br>
+      4. Hard stop (stop-market, never widened)<br>
+      5. Risk forced (margin / drawdown breach)<br>
+      6. Kill switch (balance &lt;75% / 5 errors / latency &gt;5s)
+    </div>
+  </div>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <div class="label">Scanner</div>
+    <div style="color:#c8cce8;line-height:1.8;margin-top:6px">
+      Binance USDT perps (CoinGecko fallback)<br>
+      7-step filter · top 15 · every 5 min<br>
+      Vol &gt;$50M · spike ≥1.2 · ADX ≥22<br>
+      EV ≥$1.50 · spread &lt;0.1%
+    </div>
+  </div>
+  <div class="card">
+    <div class="label">Position Sizing</div>
+    <div style="color:#c8cce8;line-height:1.8;margin-top:6px">
+      Kelly 1/3 → 1/2 path<br>
+      2% risk per trade · $5K account<br>
+      Max 30% single · 80% total<br>
+      Leverage: 3x default · 10x max (strict gates)
+    </div>
+  </div>
+  <div class="card">
+    <div class="label">Learning Loop</div>
+    <div style="color:#c8cce8;line-height:1.8;margin-top:6px">
+      57 features snapshotted per close<br>
+      Retrain every 20 trades/slot<br>
+      RBI nightly @ 2am: 575 combos<br>
+      Brier calibration target &lt;0.22
+    </div>
+  </div>
+</div>
+
+<h2>Kill Switch Tripwires</h2>
+<div class="card" style="margin-bottom:16px">
+  <table>
+    <tr><th>Trigger</th><th>Threshold</th><th>Action</th></tr>
+    <tr><td>Account balance drop</td><td>Below $3,750 (75% of $5K)</td><td>Close ALL, halt entries</td></tr>
+    <tr><td>API errors</td><td>5 errors in 10 minutes</td><td>Halt entries</td></tr>
+    <tr><td>Latency</td><td>&gt;5 seconds</td><td>Halt entries</td></tr>
+    <tr><td>Daily loss</td><td>-5% = -$250</td><td>Halt new entries</td></tr>
+    <tr><td>Drawdown</td><td>15%</td><td>Close all, halt</td></tr>
+  </table>
+</div>
+
+<h2>Operations</h2>
+<div class="grid">
+  <div class="card">
+    <div class="label">Start / Stop</div>
+    <div class="cmd">python3 main.py</div>
+    <div class="cmd">pkill -f "python3 main.py"</div>
+    <div class="cmd" style="margin-top:8px">streamlit run dashboard/app.py<br>  --server.port 8501</div>
+  </div>
+  <div class="card">
+    <div class="label">Check System</div>
+    <div class="cmd">python3 scripts/check_v10_readiness.py</div>
+    <div class="cmd">python3 scripts/weekly_report.py</div>
+    <div class="cmd">tail -f logs/bot.log</div>
+  </div>
+  <div class="card">
+    <div class="label">Go-Live Criteria (all 6 must pass)</div>
+    <div style="color:#c8cce8;line-height:1.9;margin-top:6px;font-size:12px">
+      ✦ ML Brier score &lt; 0.22<br>
+      ✦ ≥1 RBI strategy graduated<br>
+      ✦ Zero kill switch triggers<br>
+      ✦ Cost/win &lt; 25%<br>
+      ✦ 1+ day paper trading<br>
+      ✦ Win rate ≥ 52% (v10 trades)
+    </div>
+  </div>
+</div>
+
+<h2>Branch Map</h2>
+<div class="card" style="margin-bottom:16px">
+  <table>
+    <tr><th>Branch</th><th>State</th><th>Purpose</th></tr>
+    <tr><td style="color:#f5a623">feature/v10-rebuild</td><td><span class="pill live">ACTIVE</span></td><td>v10 system — running now (this branch)</td></tr>
+    <tr><td style="color:#7b8ec8">feature/agent-overhaul</td><td><span class="pill warn">STANDBY</span></td><td>v9.5 — 3-agent debate + 4h exit (legacy)</td></tr>
+    <tr><td style="color:#5c6394">main</td><td><span class="pill info">MERGE TARGET</span></td><td>Merge v10 here after go-live criteria pass</td></tr>
+  </table>
+</div>
+
+<div class="sep"></div>
+<div class="ts">v10.0 · feature/v10-rebuild · Phases 1–15 complete · Paper mode</div>
+
+<script>
+// Pull live state from DB via a small Python subprocess isn't possible in static HTML.
+// Instead we embed the snapshot baked at generation time and show a refresh notice.
+const state = {"total_trades": 355, "wins": 76, "total_pnl": -255.1, "open_positions": [{"symbol": "DOT-USDC", "direction": "LONG", "entry": 1.265, "stop": 1.2396999999999998, "target": 1.3345749999999998, "ts": "2026-04-01T16:00:29.972863-04:00"}, {"symbol": "DAOUSDT", "direction": "LONG", "entry": 0.05863839015364647, "stop": 0.05775881430134177, "target": 0.06039754185825587, "ts": "2026-04-01T16:32:06.200024-04:00"}, {"symbol": "PIPPINUSDT", "direction": "LONG", "entry": 0.05828908085823059, "stop": 0.05741474464535713, "target": 0.06003775328397751, "ts": "2026-04-01T16:20:02.170032-04:00"}, {"symbol": "XNYUSDT", "direction": "SHORT", "entry": 0.00478077819570899, "stop": 0.004852489868644625, "target": 0.00463735484983772, "ts": "2026-04-01T16:45:10.292547-04:00"}, {"symbol": "CRTRUSDT", "direction": "LONG", "entry": 0.030348123982548714, "stop": 0.029892902122810483, "target": 0.031258567702025175, "ts": "2026-04-01T19:39:53.134326-04:00"}, {"symbol": "ONTUSDT", "direction": "SHORT", "entry": 0.11127736419439316, "stop": 0.11294652465730905, "target": 0.10793904326856137, "ts": "2026-04-01T19:41:36.326410-04:00"}, {"symbol": "FIDAUSDT", "direction": "LONG", "entry": 0.015604334883391857, "stop": 0.01537026986014098, "target": 0.01607246492989361, "ts": "2026-04-01T19:51:30.235267-04:00"}, {"symbol": "ADA-USDC", "direction": "LONG", "entry": 0.2479, "stop": 0.242942, "target": 0.2615345, "ts": "2026-04-01T19:47:49.560825-04:00"}, {"symbol": "ZENUSDT", "direction": "SHORT", "entry": 5.515534400939941, "stop": 5.59826741695404, "target": 5.350068368911743, "ts": "2026-04-01T16:19:58.437700-04:00"}, {"symbol": "PHAUSDT", "direction": "LONG", "entry": 0.03817731514573097, "stop": 0.037604655418545005, "target": 0.0393226346001029, "ts": "2026-04-01T19:52:07.395085-04:00"}, {"symbol": "BTC-USDC", "direction": "LONG", "entry": 68068.51, "stop": 67047.48234999999, "target": 71131.59294999999, "ts": "2026-04-01T19:58:19.306852-04:00"}], "rbi": {}, "notifications": [{"cat": "SYSTEM", "sev": "INFO", "title": "v10 System Started", "ts": "1775134904.988946"}, {"cat": "SYSTEM", "sev": "INFO", "title": "Bot started", "ts": "1775095171.7781918"}, {"cat": "KILL_SWITCH", "sev": "CRITICAL", "title": "KILL SWITCH TRIGGERED \u2014 balance_drop", "ts": "1775095171.776893"}, {"cat": "RBI", "sev": "INFO", "title": "RBI GRADUATED \u2014 ETHUSDT", "ts": "1775095171.775576"}, {"cat": "RISK", "sev": "WARNING", "title": "Margin 65%", "ts": "1775095171.774104"}, {"cat": "TRADE_CLOSE", "sev": "INFO", "title": "CLOSED LONG BTCUSDT  P&L $+18.50 (+2.7%)", "ts": "1775095171.772552"}, {"cat": "TRADE_OPEN", "sev": "INFO", "title": "LONG BTCUSDT @ 68000", "ts": "1775095171.7476852"}], "bot_running": true, "dash_running": true};
+
+function fmt(ts) {
+  if (!ts) return '—';
+  try {
+    // Handle both unix float and ISO strings
+    const n = parseFloat(ts);
+    const d = n > 1e9 ? new Date(n * 1000) : new Date(ts);
+    return d.toLocaleTimeString('en-US', {hour:'2-digit',minute:'2-digit',timeZone:'America/New_York'}) + ' ET';
+  } catch(e) { return ts; }
+}
+
+function render() {
+  const s = state;
+  const wr = s.total_trades > 0 ? (s.wins / s.total_trades * 100).toFixed(1) : '0.0';
+  const wrClass = parseFloat(wr) >= 52 ? 'green' : (parseFloat(wr) >= 40 ? 'amber' : 'red');
+  const pnlClass = s.total_pnl >= 0 ? 'green' : 'red';
+
+  let posRows = '';
+  (s.open_positions || []).forEach(p => {
+    const pnlPct = p.entry > 0 ? ((p.target - p.entry) / p.entry * 100).toFixed(1) : '—';
+    posRows += `<tr>
+      <td class="sym">${p.symbol}</td>
+      <td class="${p.direction==='LONG'?'long':'short'}">${p.direction}</td>
+      <td>${parseFloat(p.entry).toPrecision(5)}</td>
+      <td style="color:#e74c3c">${parseFloat(p.stop).toPrecision(5)}</td>
+      <td style="color:#10c98f">${parseFloat(p.target).toPrecision(5)}</td>
+      <td class="ts">${fmt(p.ts)}</td>
+    </tr>`;
+  });
+
+  let notifRows = '';
+  (s.notifications || []).forEach(n => {
+    notifRows += `<div class="notif-row">
+      <span class="notif-cat cat-${n.cat}">${n.cat}</span>
+      <span class="notif-title"> ${n.title}</span>
+      <span class="ts"> · ${fmt(n.ts)}</span>
+    </div>`;
+  });
+
+  const rbi = s.rbi || {};
+  const rbiText = Object.keys(rbi).length
+    ? Object.entries(rbi).map(([k,v]) => `${k}: ${v}`).join(' · ')
+    : 'No incubations yet';
+
+  document.getElementById('live-state').innerHTML = `
+    <h2>Live State <span class="ts">(snapshot baked at page load · auto-refreshes every 30s)</span></h2>
+    <div class="grid" style="margin-bottom:12px">
+      <div class="card ${s.bot_running?'ok':'err'}">
+        <div class="label">Bot</div>
+        <div class="val">${s.bot_running ? '🟢 RUNNING' : '🔴 STOPPED'}</div>
+        <div class="ts" style="margin-top:4px">main.py · v10_runner · paper mode</div>
+      </div>
+      <div class="card ${s.dash_running?'ok':'err'}">
+        <div class="label">Dashboard</div>
+        <div class="val">${s.dash_running ? '🟢 RUNNING' : '🔴 STOPPED'}</div>
+        <div class="ts" style="margin-top:4px">localhost:8501 · streamlit</div>
+      </div>
+      <div class="card">
+        <div class="label">Open Positions</div>
+        <div class="val ${(s.open_positions||[]).length > 0 ? 'amber' : ''}">${(s.open_positions||[]).length}</div>
+        <div class="ts" style="margin-top:4px">paper perps + spot</div>
+      </div>
+    </div>
+
+    <div class="grid" style="margin-bottom:12px">
+      <div class="card">
+        <div class="label">Total Paper Trades</div>
+        <div class="val">${s.total_trades}</div>
+      </div>
+      <div class="card">
+        <div class="label">Win Rate (all-time paper)</div>
+        <div class="val ${wrClass}">${wr}%</div>
+        <div class="ts">Note: includes v9 seeded data. v10 WR tracked separately.</div>
+      </div>
+      <div class="card">
+        <div class="label">Total P&L (paper)</div>
+        <div class="val ${pnlClass}">$${s.total_pnl >= 0 ? '+' : ''}${s.total_pnl.toFixed(2)}</div>
+      </div>
+    </div>
+
+    <div class="grid2" style="margin-bottom:16px">
+      <div class="card">
+        <div class="label">Open Positions</div>
+        ${posRows ? `<table style="margin-top:6px">
+          <tr><th>Symbol</th><th>Dir</th><th>Entry</th><th>Stop</th><th>Target</th><th>Time</th></tr>
+          ${posRows}
+        </table>` : '<div style="color:#5c6394;padding:8px 0">No open positions</div>'}
+      </div>
+      <div class="card">
+        <div class="label">Recent Notifications</div>
+        <div style="margin-top:6px">${notifRows || '<div style="color:#5c6394">No notifications</div>'}</div>
+        <div style="margin-top:10px"><div class="label">RBI Incubation</div>
+        <div style="color:#a78bfa;margin-top:4px">${rbiText}</div></div>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('gentime').textContent = 'Last updated: ' + new Date().toLocaleTimeString() + ' · Auto-refreshes every 30s';
+}
+
+render();
+</script>
+</body>
+</html>

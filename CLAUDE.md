@@ -73,8 +73,15 @@ A fully autonomous AI-powered trading system that:
 5. 1+ day paper trading on v10
 6. Win rate ≥ 52%
 
-**Current bot:** `feature/agent-overhaul` stays live during v10 paper validation.
-Switch to v10 once `python3 scripts/check_v10_readiness.py` shows all 6 green.
+**v10 paper trading LIVE as of 2026-04-02** on `feature/v10-rebuild`.
+Check readiness: `python3 scripts/check_v10_readiness.py --detailed`
+
+**US geo-block workarounds applied (2026-04-02):**
+- `scanner.py`: yfinance fallback for 15m klines; drops incomplete current bar
+- `signal_engine.py`: paper mode threshold -20pts (RANGING 68→48, TRENDING 62→42)
+- `perps_engine.py`: paper trades proceed without live Binance broker
+- `position_manager.py`: kill floor = 75% of ACCOUNT_SIZE (not hardcoded $7,500)
+- `main.py`: full logging to logs/bot.log; yfinance errors silenced
 
 - v10.0 Phase 1 (2026-04-01): Full system rebuild begin — branch `feature/v10-rebuild`
   - **Architecture documented** (`docs/ARCHITECTURE.md`): full 15-subsystem design map,

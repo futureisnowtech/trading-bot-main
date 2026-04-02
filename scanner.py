@@ -33,6 +33,12 @@ try:
 except ImportError:
     _NUMPY_OK = False
 
+try:
+    import yfinance as yf
+    _YF_OK = True
+except ImportError:
+    _YF_OK = False
+
 _BINANCE_BASE = 'https://fapi.binance.com'
 _MIN_VOLUME_24H_USD = 50_000_000   # Correction 6: raised from $2M
 _MIN_VOL_SPIKE = 1.2
@@ -126,19 +132,57 @@ def _fetch_tickers_coingecko() -> List[Dict]:
 
 
 def _fetch_klines(symbol: str, interval: str, limit: int = 50) -> List:
-    """Fetch klines (OHLCV) from Binance futures."""
-    if not _REQUESTS_OK:
+    """Fetch klines (OHLCV) from Binance futures; yfinance fallback for US geo-blocks."""
+    if _REQUESTS_OK:
+        try:
+            r = requests.get(
+                f'{_BINANCE_BASE}/fapi/v1/klines',
+                params={'symbol': symbol, 'interval': interval, 'limit': limit},
+                timeout=8
+            )
+            if r.status_code == 200:
+                return r.json()
+        except Exception as e:
+            logger.debug(f'[scanner] klines binance error {symbol}: {e}')
+
+    # yfinance fallback — map BTCUSDT → BTC-USD, 15m → 15m
+    if not _YF_OK:
         return []
     try:
-        r = requests.get(
-            f'{_BINANCE_BASE}/fapi/v1/klines',
-            params={'symbol': symbol, 'interval': interval, 'limit': limit},
-            timeout=8
-        )
-        if r.status_code == 200:
-            return r.json()
+        _interval_map = {'1m': '1m', '3m': '5m', '5m': '5m', '15m': '15m',
+                         '30m': '30m', '1h': '1h', '4h': '1h', '1d': '1d'}
+        yf_interval = _interval_map.get(interval, '15m')
+        _period_map = {'1m': '1d', '5m': '5d', '15m': '5d',
+                       '30m': '5d', '1h': '30d', '1d': '60d'}
+        yf_period = _period_map.get(yf_interval, '5d')
+
+        # Convert BTCUSDT → BTC-USD for yfinance
+        base = symbol.replace('USDT', '').replace('BUSD', '').replace('USDC', '')
+        yf_sym = f'{base}-USD'
+
+        df = yf.download(yf_sym, period=yf_period, interval=yf_interval,
+                         auto_adjust=True, progress=False)
+        if df is None or df.empty or len(df) < 5:
+            return []
+
+        df = df.tail(limit).reset_index()
+        # Flatten MultiIndex columns if present
+        if hasattr(df.columns, 'levels'):
+            df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
+        klines = []
+        for _, row in df.iterrows():
+            ts = row.get('Datetime', row.get('Date', None))
+            t = int(ts.timestamp() * 1000) if ts is not None else 0
+            o = float(row.get('Open', 0))
+            h = float(row.get('High', 0))
+            lo = float(row.get('Low', 0))
+            c = float(row.get('Close', 0))
+            v = float(row.get('Volume', 0))
+            klines.append([t, o, h, lo, c, v, t, 0, 0, 0, 0, 0])
+        logger.debug(f'[scanner] yfinance klines {symbol}: {len(klines)} bars')
+        return klines
     except Exception as e:
-        logger.debug(f'[scanner] klines error {symbol}: {e}')
+        logger.debug(f'[scanner] klines yfinance error {symbol}: {e}')
     return []
 
 
@@ -255,6 +299,13 @@ def _step2_momentum(candidates: List[Dict]) -> List[Dict]:
             lows   = [float(k[3]) for k in klines]
             closes = [float(k[4]) for k in klines]
             vols   = [float(k[5]) for k in klines]
+
+            # Drop last bar if it looks like an incomplete yfinance bar
+            # (current bar volume < 10% of the bar before it)
+            if len(vols) >= 2 and vols[-2] > 0 and vols[-1] / vols[-2] < 0.10:
+                opens = opens[:-1]; highs = highs[:-1]
+                lows  = lows[:-1];  closes = closes[:-1]
+                vols  = vols[:-1]
 
             # Vol spike (current bar vs 20-bar avg)
             vs = _vol_spike(vols, 20)

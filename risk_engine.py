@@ -267,9 +267,9 @@ def can_open_new_position() -> Tuple[bool, str]:
     if margin >= _MARGIN_NO_NEW:
         return False, f'Margin utilization {margin:.0%} >= {_MARGIN_NO_NEW:.0%}'
 
-    # Max deployed
-    if deployed >= balance * 0.80:
-        return False, f'Deployed ${deployed:.0f} >= 80% of balance ${balance:.0f}'
+    # Max deployed — 95% in paper/perps-focused mode
+    if deployed >= balance * 0.95:
+        return False, f'Deployed ${deployed:.0f} >= 95% of balance ${balance:.0f}'
 
     return True, 'OK'
 

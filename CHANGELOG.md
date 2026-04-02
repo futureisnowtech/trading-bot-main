@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-02
+- v10: perp-first tuning — 15 max positions, 95% deployed, no correlation penalty, top-20 scanner
+
+## 2026-04-02
 - v10: scanner yfinance fallback + paper trading fixes (US geo-block workaround)
 
 ## 2026-04-01

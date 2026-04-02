@@ -47,7 +47,7 @@ _MIN_ADX_15M = 22                  # Correction 3: loosened from 25
 _MIN_OB_DEPTH_USD = 50_000
 _MAX_SPREAD_PCT = 0.1
 _MIN_EXPECTED_PROFIT = 1.50        # $ — Correction 3: lowered from $3.00
-_TOP_N = 15                        # Correction 3: raised from 8
+_TOP_N = 20                        # raised to 20 — more perp candidates per scan
 
 _CACHE_TTL = 300   # 5 minutes
 _lock = threading.RLock()
@@ -442,10 +442,8 @@ def _step5_correlation(candidates: List[Dict],
         return candidates
 
     for c in candidates:
-        sym = c['symbol'].replace('USDT', '')
-        # Mark as correlated if we have an open position in same asset
-        correlated = any(sym in pos or pos in sym for pos in open_positions)
-        c['correlation_penalty'] = 0.5 if correlated else 1.0
+        # No penalty — let all candidates trade at full size regardless of existing positions
+        c['correlation_penalty'] = 1.0
 
     return candidates
 

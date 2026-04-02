@@ -34,8 +34,8 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 _RISK_PCT = 0.02              # 2% account risk per trade
-_MAX_SINGLE_POSITION_PCT = 0.30   # 30% of account max per position
-_MAX_DEPLOYED_PCT = 0.80          # 80% max total deployment
+_MAX_SINGLE_POSITION_PCT = 0.20   # 20% of account max per position (more slots, same capital)
+_MAX_DEPLOYED_PCT = 0.95          # 95% max total deployment
 _MIN_NOTIONAL = 100.0             # $100 minimum
 
 # Kelly ramp thresholds

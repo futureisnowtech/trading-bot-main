@@ -145,8 +145,6 @@ critical_imports = [
     ('dotenv', 'dotenv', None),
     ('pytz', 'pytz', None),
     ('sqlite3', 'sqlite3', None),
-    ('strategies.ai_agents.debate_engine', 'strategies.ai_agents.debate_engine', None),
-    ('strategies.ai_agents.risk_synthesizer', 'strategies.ai_agents.risk_synthesizer', None),
     ('data.indicators', 'data.indicators', None),
     ('risk.risk_manager', 'risk.risk_manager', None),
     ('logging_db.trade_logger', 'logging_db.trade_logger', None),

@@ -30,6 +30,28 @@ A fully autonomous AI-powered trading system that:
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
 
+## Current Version: v10.0 (2026-04-01: Phase 1 — Architecture + DB migration + cleanup)
+- v10.0 Phase 1 (2026-04-01): Full system rebuild begin — branch `feature/v10-rebuild`
+  - **Architecture documented** (`docs/ARCHITECTURE.md`): full 15-subsystem design map,
+    exchange decision (Binance USDM + python-binance), two-tower signal engine spec,
+    47-feature ML pipeline, 6-priority exit stack, RBI loop, $10K risk limits.
+  - **DB migration** (`scripts/migrate_v10.py`): added tables: notifications, pair_intelligence,
+    pair_volatility, rbi_research, rbi_backtest, rbi_incubation, ml_calibration,
+    ml_feature_importance, kill_switch_log. Added columns to trade_attribution for
+    technical_score, ml_score, composite_score, regime, thesis scores, funding/rebate tracking.
+  - **Removed deprecated files:** 3-agent debate (analyst_agents, debate_engine),
+    exit_review (Tudor Jones/Soros/Simons), session_analyst, risk_synthesizer,
+    ensemble_forecaster, telegram_alert, alert_dispatcher, super_score, meta_learner.
+  - **Key architectural decisions:**
+    - 3-agent debate replaced by two-tower ML + technical signal engine
+    - 4h perp time exit replaced by thesis score exit (Priority 3)
+    - Telegram removed entirely → dashboard-only notifications
+    - $10,000 account architecture
+    - XGBoost (60%) + LightGBM (40%) ensemble, 47 features, walk-forward training
+    - Default 3x leverage, max 10x (strict thresholds), Kelly 1/3 → 1/2 path
+  - **Current bot:** `feature/agent-overhaul` stays live during v10 build.
+    v10 branch (`feature/v10-rebuild`) is the build target.
+
 ## Current Version: v9.5 (2026-04-01: full-market perp scanner + race condition fix)
 - v9.5 (2026-04-01): Perp system overhaul — actual dynamic market scanning + critical bug fixes
   - **Perp AI exit removed** (`scheduler/exit_monitor.py`): Replaced entire `if engine:` block for perp

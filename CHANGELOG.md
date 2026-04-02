@@ -1,6 +1,12 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-01
+- v10 Phase 1: architecture doc, DB migration (9 new tables), removed 10 deprecated files (agents, telegram, super_score, meta_learner)
+
+## 2026-04-01
+- v9.4: learning loop end-to-end fix — engine signals (cascade/divergence/obi/vwap_reclaim/near_miss) now stored on position at entry and injected into attribution at exit; meta-learner DB-backed counter; perp 4h winner rule; near-miss paper signals; 6-min forced-trade timer; FUTURES_ENABLED=false
+
+## 2026-04-01
 - Perp exits: let winners run past 4h (>0.5% PnL = skip close, 8h hard max); fixes avg win  vs avg loss  imbalance causing PF 0.66
 
 ## 2026-04-01

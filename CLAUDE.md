@@ -63,9 +63,9 @@ A fully autonomous AI-powered trading system that:
 - Sizing: 3-factor formula (base_risk × quality_mult × heat_factor), not 6-factor chain
 - Default 3x leverage, max 10x (strict gates)
 - ISOLATED margin on all perp positions (never CROSS)
-- **Execution venue: Bybit USDT perps** (via `execution/bybit_broker.py`, pybit v5)
+- **Data/scan source: Kraken Futures public REST API** — US-accessible, no auth needed, no geo-block
 - **MES venue: IBKR** (via `execution/ibkr_broker.py`, ib_insync) — paper port 7497
-- **Data source: Bybit V5 REST API** — no Binance, no CoinGecko, no yfinance for execution paths
+- **Execution: paper mode** — trades logged to SQLite; `execution/binance_broker.py` used for paper order tracking
 - **Pre-trade gate: economics_gate.py** — models fees, funding, spread before every entry
 - **Paper = live thresholds** — identical signal thresholds in both modes
 - **ML training data**: clean from 2026-04-02; all prior data tagged `pre_v10_contaminated`
@@ -85,9 +85,9 @@ Owner decides when to go live. These are informational readings, not system gate
 **v10.1 clean paper trading started 2026-04-02** on `feature/v10-rebuild`.
 
 **v10.1 changes vs v10.0:**
-- `scanner.py`: Bybit V5 native (no Binance/CoinGecko/yfinance)
+- `scanner.py`: Kraken Futures public REST (no Binance geo-block, no auth required)
 - `signal_engine.py`: paper threshold reduction REMOVED
-- `execution/bybit_broker.py`: NEW — pybit v5 perp execution
+- `execution/bybit_broker.py`: DELETED — Bybit geo-blocked for US residents; not needed
 - `execution/ibkr_broker.py`: fixed telegram import → notification_engine
 - `risk/economics_gate.py`: NEW — pre-trade fee/funding EV veto
 - `risk/unified_sizer.py`: replaced 6-factor chain with 3-factor formula

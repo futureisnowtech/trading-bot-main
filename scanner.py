@@ -1,20 +1,32 @@
 """
-scanner.py — Unified Bybit linear perp scanner.
+scanner.py — Unified Kraken Futures linear perp scanner.
 
-7-step filter on ALL Bybit USDT linear perps, runs every 5 minutes, 24/7.
-Returns top 15 candidates with direction and signal scores.
+7-step filter on all Kraken PF_ (USD-settled linear) perpetuals, runs every
+5 minutes, 24/7. Returns top 15 candidates with direction and signal scores.
 
 Data sources:
-  ALL market data comes from Bybit V5 REST API — NOT Binance fapi (geo-blocked in US),
-  NOT CoinGecko (creates fake synthetic tickers that don't exist as liquid perps).
+  ALL market data from Kraken Futures public REST API — US-accessible, no auth
+  required for any endpoint used here. Replaces Bybit V5 (geo-blocked after
+  pybit removal) and Binance fapi (HTTP 451 hard geo-block from US).
+
+Why Kraken:
+  - No US geo-block on public endpoints
+  - No API key required for tickers / klines / order book
+  - pip install NOT required (uses stdlib urllib only)
+  - 21 liquid PF_ perps (BTC, ETH, SOL, XRP, DOGE, ADA, BNB, SUI, AVAX, …)
+
+Kraken Futures symbol convention:
+  PF_ prefix = USD-settled (cash-settled) linear perpetual
+  PF_XBTUSD  = Bitcoin (Kraken uses XBT, not BTC)
+  PF_ETHUSD  = Ethereum
+  All others: PF_{TICKER}USD
 
 Filter pipeline:
-  1. Universe pull: all USDT linear tickers from Bybit, filter 24h turnover > $50M
-     Validated against instruments-info (Trading status only, cached 24h)
-  2. Momentum: vol_spike >= 1.2 AND price_move_4h >= 0.8% AND adx_15m >= 22
-  3. Liquidity: ob depth > $50K each side, spread < 0.1%
+  1. Universe: all PF_ perps from /tickers, filter volumeQuote > $5M, not suspended
+  2. Momentum: vol_spike >= 1.2 AND abs(price_move_1h) >= 0.5% AND adx_15m >= 20
+  3. Liquidity: OB depth > $30K each side, spread < 0.15%
      REJECT on missing or empty OB data — no fail-open
-  4. Expected value: expected_profit >= $3.00 (after fees + funding cost)
+  4. Expected value: expected_profit >= $2.00 after fees + funding cost
   5. Correlation: reduce size flag if open position corr > 0.85
   6. Regime: match signal type to current regime
   7. Sort by vol_spike, take top 15
@@ -28,10 +40,11 @@ from typing import List, Dict, Optional
 logger = logging.getLogger(__name__)
 
 try:
-    import requests
-    _REQUESTS_OK = True
+    import urllib.request as _urllib
+    import json as _json
+    _HTTP_OK = True
 except ImportError:
-    _REQUESTS_OK = False
+    _HTTP_OK = False
 
 try:
     import numpy as np
@@ -40,222 +53,151 @@ except ImportError:
     _NUMPY_OK = False
 
 # ---------------------------------------------------------------------------
-# Bybit V5 base URL — not geo-blocked in the US
+# Kraken Futures REST base URLs — both are US-accessible with no API key
 # ---------------------------------------------------------------------------
-_BYBIT_BASE = 'https://api.bybit.com'
+_KRAKEN_BASE   = 'https://futures.kraken.com/derivatives/api/v3'
+_KRAKEN_CHARTS = 'https://futures.kraken.com/api/charts/v1'
 
 # ---------------------------------------------------------------------------
-# Bybit interval mapping: standard label -> Bybit API string
+# Kraken Futures interval labels (used directly in the URL path)
 # ---------------------------------------------------------------------------
-_BYBIT_INTERVAL_MAP = {
-    '1m':  '1',
-    '3m':  '3',
-    '5m':  '5',
-    '15m': '15',
-    '30m': '30',
-    '1h':  '60',
-    '4h':  '240',
-    '1d':  'D',
-}
+_KRAKEN_INTERVALS = {'1m', '5m', '15m', '30m', '1h', '4h', '1d', '1w'}
 
 # ---------------------------------------------------------------------------
 # Filter thresholds
 # ---------------------------------------------------------------------------
-_MIN_VOLUME_24H_USD  = 50_000_000   # Bybit turnover24h (USD denominated)
+_MIN_VOLUME_24H_USD  = 5_000_000    # volumeQuote (USD) — Kraken is smaller than Bybit
 _MIN_VOL_SPIKE       = 1.2
-_MIN_PRICE_MOVE_4H   = 0.8          # %
-_MIN_ADX_15M         = 22
-_MIN_OB_DEPTH_USD    = 50_000
-_MAX_SPREAD_PCT      = 0.1
-_MIN_EXPECTED_PROFIT = 3.00         # $ — restored from lowered $1.50
-_TOP_N               = 15           # restored from inflated 20
+_MIN_PRICE_MOVE_1H   = 0.5          # % — 4 bars of 15m
+_MIN_ADX_15M         = 20
+_MIN_OB_DEPTH_USD    = 30_000
+_MAX_SPREAD_PCT      = 0.15
+_MIN_EXPECTED_PROFIT = 2.00         # $
+_TOP_N               = 15
 
-# EV fee model
-_ROUND_TRIP_FEE_PCT  = 0.0011       # 0.055% taker × 2 sides (Bybit linear)
-_FUNDING_HOLD_PERIODS = 1.5         # expected 8h funding periods held
+# EV fee model — Kraken taker 0.065% × 2 sides = 0.13%
+_ROUND_TRIP_FEE_PCT   = 0.00130
+_FUNDING_HOLD_PERIODS = 1.5         # expected 8h-equivalent funding periods held
 
 # ---------------------------------------------------------------------------
 # Module-level state
 # ---------------------------------------------------------------------------
-_CACHE_TTL    = 300    # 5 minutes
-_lock         = threading.RLock()
-_last_scan_ts: float    = 0.0
+_CACHE_TTL            = 300    # 5 minutes
+_lock                 = threading.RLock()
+_last_scan_ts: float  = 0.0
 _last_candidates: List[Dict] = []
 
-# Instruments-info cache (valid symbols, refreshed every 24h)
-_valid_bybit_symbols: set          = set()
-_instruments_cache_ts: float       = 0.0
-_INSTRUMENTS_CACHE_TTL: float      = 86_400.0   # 24 hours
-
 
 # ===========================================================================
-# Instruments-info: valid symbol validation
+# HTTP helper
 # ===========================================================================
 
-def _refresh_instruments_if_needed() -> None:
+def _get(url: str, timeout: int = 10) -> Optional[Dict]:
     """
-    Fetch Bybit linear instruments-info and populate _valid_bybit_symbols.
-    Only called if cache is older than 24h or empty.
-    Runs inline (called from scan()) — fast enough at 24h TTL.
+    Minimal HTTP GET returning a parsed JSON dict, or None on failure.
+    Uses stdlib urllib — no requests dependency.
     """
-    global _valid_bybit_symbols, _instruments_cache_ts
-
-    now = time.time()
-    if _valid_bybit_symbols and (now - _instruments_cache_ts) < _INSTRUMENTS_CACHE_TTL:
-        return
-
-    if not _REQUESTS_OK:
-        logger.warning('[scanner] requests not available — cannot fetch instruments-info')
-        return
-
+    if not _HTTP_OK:
+        return None
     try:
-        r = requests.get(
-            f'{_BYBIT_BASE}/v5/market/instruments-info',
-            params={'category': 'linear', 'status': 'Trading'},
-            timeout=15,
-        )
-        if r.status_code != 200:
-            logger.warning(f'[scanner] instruments-info returned HTTP {r.status_code}')
-            return
-
-        body = r.json()
-        if body.get('retCode', -1) != 0:
-            logger.warning(f'[scanner] instruments-info retCode={body.get("retCode")} '
-                           f'msg={body.get("retMsg")}')
-            return
-
-        items = body.get('result', {}).get('list', [])
-        symbols = {item['symbol'] for item in items if item.get('symbol', '').endswith('USDT')}
-        _valid_bybit_symbols = symbols
-        _instruments_cache_ts = now
-        logger.info(f'[scanner] instruments-info cached: {len(symbols)} active USDT linear symbols')
-
+        req = _urllib.Request(url, headers={'User-Agent': 'AlgoBot/1.0'})
+        with _urllib.urlopen(req, timeout=timeout) as resp:
+            return _json.loads(resp.read().decode('utf-8'))
     except Exception as e:
-        logger.warning(f'[scanner] instruments-info fetch error: {e}')
-        # Leave existing cache in place rather than clearing it
+        logger.debug(f'[scanner] GET {url!r} failed: {e}')
+        return None
 
 
 # ===========================================================================
-# Bybit V5 data fetchers
+# Kraken Futures data fetchers
 # ===========================================================================
 
 def _fetch_tickers() -> List[Dict]:
     """
-    Fetch all linear (USDT perp) 24h tickers from Bybit V5.
+    Fetch all Kraken Futures tickers.
 
-    Returns raw Bybit ticker dicts from result.list[].
-    Returns empty list on any failure — NO fallback, NO fake data.
-    The caller (scan()) will log a warning and sit idle.
+    Returns raw ticker dicts from result.tickers[].
+    Returns empty list on any failure — no fallback, no fake data.
+
+    Key fields used downstream:
+      symbol         — e.g. 'PF_XBTUSD'
+      tag            — 'perpetual' for perps
+      suspended      — bool, skip if True
+      last           — last traded price
+      volumeQuote    — 24h USD volume (base * price)
+      fundingRate    — per-period funding rate (decimal)
+      change24h      — 24h price change as a percentage (e.g. -1.59 means -1.59%)
+      bid / ask      — best bid/ask price (for spread check from ticker)
+      openInterest   — OI in base currency
     """
-    if not _REQUESTS_OK:
+    data = _get(f'{_KRAKEN_BASE}/tickers', timeout=10)
+    if data is None:
+        logger.warning('[scanner] Kraken tickers fetch failed — scan skipped')
         return []
 
-    try:
-        r = requests.get(
-            f'{_BYBIT_BASE}/v5/market/tickers',
-            params={'category': 'linear'},
-            timeout=10,
-        )
-        if r.status_code != 200:
-            logger.warning(f'[scanner] Bybit tickers HTTP {r.status_code} — scan skipped')
-            return []
-
-        body = r.json()
-        if body.get('retCode', -1) != 0:
-            logger.warning(f'[scanner] Bybit tickers retCode={body.get("retCode")} '
-                           f'msg={body.get("retMsg")} — scan skipped')
-            return []
-
-        items = body.get('result', {}).get('list', [])
-        logger.debug(f'[scanner] Bybit tickers: {len(items)} total')
-        return items
-
-    except Exception as e:
-        logger.warning(f'[scanner] Bybit ticker fetch failed: {e} — scan skipped')
-        return []
+    tickers = data.get('tickers', [])
+    logger.debug(f'[scanner] Kraken raw tickers: {len(tickers)}')
+    return tickers
 
 
-def _fetch_klines(symbol: str, interval: str, limit: int = 50) -> List[List]:
+def _fetch_klines(symbol: str, interval: str, n_bars: int = 50) -> List[Dict]:
     """
-    Fetch OHLCV klines from Bybit V5 linear market.
+    Fetch OHLCV klines from Kraken Futures charts API.
 
-    Bybit returns rows in DESCENDING order (newest first).
-    This function reverses them to ASCENDING before returning.
+    URL: GET /api/charts/v1/trade/{symbol}/{interval}?from={unix_ts}
+    Returns candles in ASCENDING order (oldest first) — no reversal needed.
 
-    Each returned row: [startTime, open, high, low, close, volume, turnover]
-    All values are strings from the API — convert to float in the caller.
+    Each candle dict: {time (ms), open, high, low, close, volume} — strings.
+    Convert to float in the caller.
 
-    Returns empty list on any failure. NO yfinance fallback.
+    Args:
+        symbol:   Kraken PF_ symbol, e.g. 'PF_XBTUSD'
+        interval: '1m', '5m', '15m', '30m', '1h', '4h', '1d', '1w'
+        n_bars:   how many bars of history to request (determines 'from' timestamp)
+
+    Returns empty list on failure. No fallback.
     """
-    if not _REQUESTS_OK:
+    if interval not in _KRAKEN_INTERVALS:
+        logger.warning(f'[scanner] Unknown interval {interval!r}')
         return []
 
-    bybit_interval = _BYBIT_INTERVAL_MAP.get(interval)
-    if bybit_interval is None:
-        logger.warning(f'[scanner] Unknown interval {interval!r} — no Bybit mapping')
+    # Compute seconds per bar to determine 'from' timestamp
+    _bar_seconds = {
+        '1m': 60, '5m': 300, '15m': 900, '30m': 1800,
+        '1h': 3600, '4h': 14400, '1d': 86400, '1w': 604800,
+    }
+    bar_secs = _bar_seconds.get(interval, 900)
+    from_ts  = int(time.time()) - (n_bars + 5) * bar_secs  # +5 buffer for partial bar
+
+    url  = f'{_KRAKEN_CHARTS}/trade/{symbol}/{interval}?from={from_ts}'
+    data = _get(url, timeout=8)
+    if data is None:
         return []
 
-    try:
-        r = requests.get(
-            f'{_BYBIT_BASE}/v5/market/kline',
-            params={
-                'category': 'linear',
-                'symbol':   symbol,
-                'interval': bybit_interval,
-                'limit':    limit,
-            },
-            timeout=8,
-        )
-        if r.status_code != 200:
-            logger.debug(f'[scanner] klines HTTP {r.status_code} for {symbol}')
-            return []
-
-        body = r.json()
-        if body.get('retCode', -1) != 0:
-            logger.debug(f'[scanner] klines retCode={body.get("retCode")} for {symbol}')
-            return []
-
-        rows = body.get('result', {}).get('list', [])
-        if not rows:
-            return []
-
-        # Bybit gives newest first — reverse to oldest-first (ascending)
-        rows.reverse()
-        return rows
-
-    except Exception as e:
-        logger.debug(f'[scanner] klines error {symbol}: {e}')
-        return []
+    candles = data.get('candles', [])
+    return candles   # already ascending (oldest first)
 
 
 def _fetch_ob_depth(symbol: str) -> Dict:
     """
-    Fetch order book depth from Bybit V5 (top 5 levels each side).
+    Fetch order book from Kraken Futures.
 
-    Returns dict with keys 'b' (bids) and 'a' (asks), each a list of [price, size] strings.
-    Returns empty dict on any failure.
+    URL: GET /derivatives/api/v3/orderbook?symbol={symbol}
+    Response: {orderBook: {bids: [[price, qty], ...], asks: [[price, qty], ...]}}
+
+    IMPORTANT — Kraken OB sort order:
+      bids: ASCENDING by price → best bid  = bids[-1]
+      asks: ASCENDING by price → best ask  = asks[0]
+
+    Returns dict with 'bids' and 'asks' lists, or empty dict on failure.
     """
-    if not _REQUESTS_OK:
+    url  = f'{_KRAKEN_BASE}/orderbook?symbol={symbol}'
+    data = _get(url, timeout=5)
+    if data is None:
         return {}
 
-    try:
-        r = requests.get(
-            f'{_BYBIT_BASE}/v5/market/orderbook',
-            params={'category': 'linear', 'symbol': symbol, 'limit': 5},
-            timeout=5,
-        )
-        if r.status_code != 200:
-            return {}
-
-        body = r.json()
-        if body.get('retCode', -1) != 0:
-            return {}
-
-        result = body.get('result', {})
-        return result   # contains 'b', 'a', 'ts', 'u', 's'
-
-    except Exception:
-        return {}
+    ob = data.get('orderBook', {})
+    return ob   # keys: 'bids', 'asks'
 
 
 # ===========================================================================
@@ -264,12 +206,12 @@ def _fetch_ob_depth(symbol: str) -> Dict:
 
 def _calc_adx(highs: List[float], lows: List[float], closes: List[float],
               period: int = 14) -> float:
-    """Compute ADX from price series."""
+    """Compute ADX from price series. Returns 20.0 (neutral) on insufficient data."""
     if not _NUMPY_OK or len(highs) < period + 2:
-        return 20.0   # neutral fallback
+        return 20.0
 
-    h  = np.array(highs, dtype=float)
-    lo = np.array(lows,  dtype=float)
+    h  = np.array(highs,  dtype=float)
+    lo = np.array(lows,   dtype=float)
     c  = np.array(closes, dtype=float)
 
     # True Range
@@ -292,7 +234,7 @@ def _calc_adx(highs: List[float], lows: List[float], closes: List[float],
             s[i] = s[i - 1] - s[i - 1] / p + arr[i]
         return s
 
-    atr_s = _smooth(tr, period)
+    atr_s = _smooth(tr,       period)
     dmp_s = _smooth(dm_plus,  period)
     dmm_s = _smooth(dm_minus, period)
 
@@ -324,45 +266,45 @@ def _vol_spike(volumes: List[float], window: int = 20) -> float:
 
 def _step1_universe(tickers: List[Dict]) -> List[Dict]:
     """
-    Filter to USDT linear perp pairs with:
-      - Symbol ending in USDT
-      - Symbol present in _valid_bybit_symbols (Trading status only)
-      - turnover24h (USD volume) >= $50M
+    Filter to active PF_ (linear USD-settled) perpetuals with volumeQuote >= $5M.
 
-    Bybit field mapping:
-      turnover24h   — 24h notional volume in USD (equivalent to Binance quoteVolume)
-      volume24h     — 24h volume in base currency
-      price24hPcnt  — e.g. "0.0342" means +3.42% (already a decimal, multiply by 100 for %)
-      fundingRate   — per-8h rate, e.g. "0.0001" = 0.01%
+    Kraken field mapping:
+      tag           — 'perpetual' for perps (also 'inverse_perpetual' for PI_ series)
+      suspended     — skip if True
+      last          — last traded price (float or int)
+      volumeQuote   — 24h USD volume (base_vol * price) — this is what we want
+      change24h     — 24h price change in PERCENT (e.g. -1.59 means -1.59%)
+      fundingRate   — current per-period funding rate as a decimal
+                      (treat as fractional, not percentage, for EV math)
       openInterest  — OI in base currency
+      bid / ask     — best bid/ask from ticker snapshot
     """
     result = []
     for t in tickers:
         sym = t.get('symbol', '')
-        if not sym.endswith('USDT'):
+        # Only PF_ (USD-settled linear perpetuals)
+        if not sym.startswith('PF_'):
             continue
-
-        # Skip symbols not confirmed as actively Trading by instruments-info
-        # (If the set is empty because the cache hasn't loaded yet, allow all —
-        #  the cache will be populated on the next scan.)
-        if _valid_bybit_symbols and sym not in _valid_bybit_symbols:
+        # Skip inverse perpetuals (PI_) and futures (FI_, FF_)
+        if t.get('tag') != 'perpetual':
+            continue
+        # Skip suspended
+        if t.get('suspended', False):
             continue
 
         try:
-            # turnover24h is USD-denominated (the "quote volume" equivalent)
-            vol_usd = float(t.get('turnover24h', 0) or 0)
+            vol_usd = float(t.get('volumeQuote', 0) or 0)
             if vol_usd < _MIN_VOLUME_24H_USD:
                 continue
 
-            price = float(t.get('lastPrice', 0) or 0)
+            price = float(t.get('last', 0) or 0)
             if price <= 0:
                 continue
 
-            # price24hPcnt: Bybit returns e.g. "0.0342" meaning 3.42%
-            raw_pct = float(t.get('price24hPcnt', 0) or 0)
-            price_change_pct = raw_pct * 100.0   # convert to human % (3.42)
+            # change24h is already in percent (e.g. -1.59 means -1.59%)
+            price_change_pct = float(t.get('change24h', 0) or 0)
 
-            # Funding rate: e.g. "0.0001" = 0.01% per 8h
+            # fundingRate is a decimal fraction (not percent) — treat accordingly
             funding_rate = float(t.get('fundingRate', 0) or 0)
 
             result.append({
@@ -370,11 +312,12 @@ def _step1_universe(tickers: List[Dict]) -> List[Dict]:
                 'price':            price,
                 'price_change_pct': price_change_pct,
                 'volume_24h_usd':   vol_usd,
-                'volume_24h_base':  float(t.get('volume24h', 0) or 0),
-                'high_24h':         float(t.get('highPrice24h', 0) or 0),
-                'low_24h':          float(t.get('lowPrice24h',  0) or 0),
+                'high_24h':         float(t.get('high24h', 0) or 0),
+                'low_24h':          float(t.get('low24h',  0) or 0),
                 'funding_rate':     funding_rate,
                 'open_interest':    float(t.get('openInterest', 0) or 0),
+                'bid':              float(t.get('bid', price) or price),
+                'ask':              float(t.get('ask', price) or price),
             })
 
         except (ValueError, TypeError):
@@ -385,62 +328,66 @@ def _step1_universe(tickers: List[Dict]) -> List[Dict]:
 
 def _step2_momentum(candidates: List[Dict]) -> List[Dict]:
     """
-    Momentum filter: vol_spike >= 1.2, price_move_4h >= 0.8%, adx_15m >= 22.
-    Fetches 15m Bybit klines for each candidate.
+    Momentum filter: vol_spike >= 1.2, abs(price_move_1h) >= 0.5%, adx_15m >= 20.
+    Fetches 15m Kraken klines for each candidate.
 
-    Bybit kline row (after reversal to ascending):
-      [startTime, openPrice, highPrice, lowPrice, closePrice, volume, turnover]
-      All values are strings — cast to float here.
+    Kraken kline dict (ascending, oldest first):
+      {time (ms), open, high, low, close, volume} — all strings, cast to float here.
     """
     passed = []
     for c in candidates:
         sym = c['symbol']
         try:
-            # 50 bars of 15m = ~12.5h of history
-            klines = _fetch_klines(sym, '15m', 50)
+            # 55 bars of 15m ≈ 13.75h of history (gives enough for ADX(14))
+            klines = _fetch_klines(sym, '15m', 55)
             if len(klines) < 20:
                 logger.debug(f'[scanner] step2 {sym}: only {len(klines)} klines — skip')
                 continue
 
-            opens  = [float(k[1]) for k in klines]
-            highs  = [float(k[2]) for k in klines]
-            lows   = [float(k[3]) for k in klines]
-            closes = [float(k[4]) for k in klines]
-            vols   = [float(k[5]) for k in klines]
+            opens  = [float(k['open'])   for k in klines]
+            highs  = [float(k['high'])   for k in klines]
+            lows   = [float(k['low'])    for k in klines]
+            closes = [float(k['close'])  for k in klines]
+            vols   = [float(k['volume']) for k in klines]
 
-            # Drop last bar if it appears to be an incomplete current bar
+            # Drop last bar if it's an incomplete current bar
             # (current bar volume < 10% of the prior bar)
             if len(vols) >= 2 and vols[-2] > 0 and vols[-1] / vols[-2] < 0.10:
                 opens  = opens[:-1];  highs  = highs[:-1]
                 lows   = lows[:-1];   closes = closes[:-1]
                 vols   = vols[:-1]
 
+            if len(closes) < 10:
+                continue
+
             # Volume spike: current bar vs 20-bar average
             vs = _vol_spike(vols, 20)
 
-            # Price move over last 4h = ~16 bars of 15m
-            bars_4h = min(16, len(closes) - 1)
-            price_move_4h = (abs(closes[-1] - closes[-bars_4h])
-                             / (closes[-bars_4h] + 1e-9) * 100)
+            # Price move over last 1h = 4 bars of 15m
+            bars_1h       = min(4, len(closes) - 1)
+            price_move_1h = (abs(closes[-1] - closes[-bars_1h])
+                             / (closes[-bars_1h] + 1e-9) * 100)
 
             # ADX(14) on 15m
             adx = _calc_adx(highs, lows, closes, 14)
 
-            if vs >= _MIN_VOL_SPIKE and price_move_4h >= _MIN_PRICE_MOVE_4H and adx >= _MIN_ADX_15M:
+            if (vs >= _MIN_VOL_SPIKE
+                    and price_move_1h >= _MIN_PRICE_MOVE_1H
+                    and adx >= _MIN_ADX_15M):
                 # Direction from momentum of last 3 closed bars
                 recent_move = (closes[-1] - closes[-4]
                                if len(closes) >= 4 else closes[-1] - closes[0])
                 direction = 'LONG' if recent_move > 0 else 'SHORT'
 
                 c.update({
-                    'vol_spike':         round(vs, 3),
-                    'price_move_4h_pct': round(price_move_4h, 3),
-                    'adx_15m':           round(adx, 1),
-                    'direction':         direction,
-                    'closes_15m':        closes,
-                    'highs_15m':         highs,
-                    'lows_15m':          lows,
-                    'vols_15m':          vols,
+                    'vol_spike':          round(vs, 3),
+                    'price_move_1h_pct':  round(price_move_1h, 3),
+                    'adx_15m':            round(adx, 1),
+                    'direction':          direction,
+                    'closes_15m':         closes,
+                    'highs_15m':          highs,
+                    'lows_15m':           lows,
+                    'vols_15m':           vols,
                 })
                 passed.append(c)
 
@@ -453,42 +400,45 @@ def _step2_momentum(candidates: List[Dict]) -> List[Dict]:
 
 def _step3_liquidity(candidates: List[Dict]) -> List[Dict]:
     """
-    Orderbook depth > $50K each side, spread < 0.1%.
+    Orderbook depth > $30K each side, spread < 0.15%.
 
     IMPORTANT: If the order book fetch fails or returns empty bids/asks,
     the candidate is REJECTED. We do not trade what we cannot validate.
-    The old fail-open behaviour (passed.append(c) on empty OB) is removed.
 
-    Bybit OB response keys:
-      result.b — bids, list of [price_str, size_str], best bid first
-      result.a — asks, list of [price_str, size_str], best ask first
+    Kraken OB format: bids/asks are [[price, qty], ...] sorted ASCENDING.
+      Best bid = bids[-1]  (highest bid price)
+      Best ask = asks[0]   (lowest ask price)
     """
     passed = []
     for c in candidates:
         sym = c['symbol']
         try:
-            ob = _fetch_ob_depth(sym)
-            bids = ob.get('b', [])
-            asks = ob.get('a', [])
+            ob   = _fetch_ob_depth(sym)
+            bids = ob.get('bids', [])
+            asks = ob.get('asks', [])
 
             if not bids or not asks:
-                # No OB data → reject
+                # No OB data → reject (fail-closed)
                 logger.debug(f'[scanner] step3 {sym}: empty OB — rejected')
                 continue
 
-            bid_depth  = sum(float(b[0]) * float(b[1]) for b in bids[:5])
-            ask_depth  = sum(float(a[0]) * float(a[1]) for a in asks[:5])
-            best_bid   = float(bids[0][0])
-            best_ask   = float(asks[0][0])
-            mid        = (best_bid + best_ask) / 2.0
-            spread_pct = (best_ask - best_bid) / (mid + 1e-9) * 100
+            # Depth: sum price * qty across top 10 levels each side
+            # Bids ascending → last entries are near-market depth
+            near_bids   = bids[-10:]  # closest 10 bid levels
+            bid_depth   = sum(float(b[0]) * float(b[1]) for b in near_bids)
+            ask_depth   = sum(float(a[0]) * float(a[1]) for a in asks[:10])
 
-            if (bid_depth >= _MIN_OB_DEPTH_USD
-                    and ask_depth >= _MIN_OB_DEPTH_USD
+            best_bid    = float(bids[-1][0])
+            best_ask    = float(asks[0][0])
+            mid         = (best_bid + best_ask) / 2.0
+            spread_pct  = (best_ask - best_bid) / (mid + 1e-9) * 100
+
+            if (bid_depth  >= _MIN_OB_DEPTH_USD
+                    and ask_depth  >= _MIN_OB_DEPTH_USD
                     and spread_pct <= _MAX_SPREAD_PCT):
                 c.update({
-                    'bid_depth_usd': round(bid_depth, 0),
-                    'ask_depth_usd': round(ask_depth, 0),
+                    'bid_depth_usd': round(bid_depth,  0),
+                    'ask_depth_usd': round(ask_depth,  0),
                     'spread_pct':    round(spread_pct, 4),
                 })
                 passed.append(c)
@@ -504,39 +454,38 @@ def _step3_liquidity(candidates: List[Dict]) -> List[Dict]:
 
 
 def _step4_expected_value(candidates: List[Dict],
-                           account_balance: float = 10_000.0,
-                           risk_pct: float = 0.02) -> List[Dict]:
+                           account_balance: float = 5_000.0,
+                           risk_pct: float = 0.015) -> List[Dict]:
     """
     Expected value filter including fee modeling and funding cost.
 
     EV formula:
-      round_trip_fee_pct  = 0.0011  (0.055% taker × 2 sides)
-      funding_cost_pct    = abs(funding_rate) * _FUNDING_HOLD_PERIODS
-                            (per 8h rate × expected periods held)
+      round_trip_fee_pct  = 0.00130  (0.065% Kraken taker × 2 sides)
+      funding_cost        = abs(funding_rate) * _FUNDING_HOLD_PERIODS
+                            (funding_rate is a decimal fraction)
 
-      net_win  = target_dist_pct - round_trip_fee_pct - max(0, funding_cost_pct)
+      net_win  = target_dist_pct - round_trip_fee_pct - max(0, funding_cost)
       net_loss = stop_dist_pct   + round_trip_fee_pct
 
       ev = (0.52 * net_win * position_usd) - (0.48 * net_loss * position_usd)
 
-    Minimum ev >= _MIN_EXPECTED_PROFIT ($3.00).
-
-    Fail-open if no closes data (assume passes — it won't have clean ATR anyway).
+    Minimum ev >= _MIN_EXPECTED_PROFIT ($2.00).
+    Fail-open on ATR calculation error (the OB liquidity gate already validated).
     """
     passed = []
     for c in candidates:
         try:
             closes = c.get('closes_15m', [])
             if len(closes) < 15:
-                # Not enough data to compute ATR — pass with neutral placeholder
+                # Not enough history — pass with minimum placeholder
                 c['expected_profit'] = _MIN_EXPECTED_PROFIT + 0.01
                 passed.append(c)
                 continue
 
-            # ATR proxy: mean of abs(close[i] - close[i-1]) over last 14 bars
-            diffs = [abs(closes[i] - closes[i - 1]) for i in range(-14, 0)]
-            atr   = sum(diffs) / len(diffs)
-            price = c['price']
+            # ATR proxy: mean |close[i] - close[i-1]| over last 14 bars
+            diffs   = [abs(closes[i] - closes[i - 1]) for i in range(-14, 0)]
+            atr     = sum(diffs) / len(diffs)
+            price   = c['price']
 
             stop_dist   = atr * 1.5
             target_dist = atr * 3.0
@@ -547,38 +496,37 @@ def _step4_expected_value(candidates: List[Dict],
             dollar_risk  = account_balance * risk_pct
             position_usd = dollar_risk / (stop_pct + 1e-9)
 
-            # Fee model: Bybit linear taker 0.055% × 2 sides = 0.11%
-            fee_pct = _ROUND_TRIP_FEE_PCT   # 0.0011 as a fraction
+            # Fee model: Kraken taker 0.065% × 2 sides = 0.13%
+            fee_pct = _ROUND_TRIP_FEE_PCT
 
-            # Funding cost: use ticker's funding_rate, assume _FUNDING_HOLD_PERIODS settlements
-            funding_rate_per_8h = abs(c.get('funding_rate', 0.0001))
-            funding_cost_pct    = funding_rate_per_8h * _FUNDING_HOLD_PERIODS   # fraction
+            # Funding cost: funding_rate is a decimal fraction per ~8h period
+            # abs() because cost applies regardless of direction vs rate sign
+            funding_cost = abs(c.get('funding_rate', 0.0)) * _FUNDING_HOLD_PERIODS
 
-            # Net distances after costs (all as fractions of price)
-            net_win  = target_pct - fee_pct - max(0.0, funding_cost_pct)
+            # Net distances after costs (fractions of price)
+            net_win  = target_pct - fee_pct - max(0.0, funding_cost)
             net_loss = stop_pct   + fee_pct
 
-            # 52% win-rate baseline (slightly above break-even assumption)
+            # 52% win-rate baseline (conservative assumption)
             ev = (0.52 * net_win * position_usd) - (0.48 * net_loss * position_usd)
 
             if ev >= _MIN_EXPECTED_PROFIT:
                 c.update({
-                    'atr_15m':         round(atr, 6),
-                    'stop_pct':        round(stop_pct  * 100, 3),
-                    'target_pct':      round(target_pct * 100, 3),
-                    'funding_cost_pct': round(funding_cost_pct * 100, 4),
-                    'expected_profit': round(ev, 2),
+                    'atr_15m':          round(atr, 6),
+                    'stop_pct':         round(stop_pct   * 100, 3),
+                    'target_pct':       round(target_pct * 100, 3),
+                    'funding_cost_pct': round(funding_cost * 100, 4),
+                    'expected_profit':  round(ev, 2),
                 })
                 passed.append(c)
             else:
                 logger.debug(f'[scanner] step4 {c.get("symbol")}: '
                              f'ev=${ev:.2f} < ${_MIN_EXPECTED_PROFIT} — rejected '
                              f'(net_win={net_win*100:.3f}% net_loss={net_loss*100:.3f}% '
-                             f'fee={fee_pct*100:.3f}% funding={funding_cost_pct*100:.4f}%)')
+                             f'fee={fee_pct*100:.3f}% funding={funding_cost*100:.4f}%)')
 
         except Exception as e:
             logger.debug(f'[scanner] step4 error {c.get("symbol")}: {e}')
-            # Fail-open on calculation errors only (not on OB errors — that's step3)
             c['expected_profit'] = _MIN_EXPECTED_PROFIT + 0.01
             passed.append(c)
 
@@ -588,29 +536,20 @@ def _step4_expected_value(candidates: List[Dict],
 def _step5_correlation(candidates: List[Dict],
                         open_positions: Optional[List[str]] = None) -> List[Dict]:
     """
-    Reduce size flag if candidate is highly correlated with an open position.
-    Simple proxy: same base asset family = correlated.
-    Full matrix correlation is implemented in risk_engine.py.
+    Flag candidates correlated with open positions.
+    Full matrix correlation is handled by risk_engine.py before order placement.
     """
-    if not open_positions:
-        for c in candidates:
-            c['correlation_penalty'] = 1.0
-        return candidates
-
     for c in candidates:
-        # No penalty — let all candidates trade at full size regardless of existing positions.
-        # risk_engine.py handles the real correlation matrix check before order placement.
         c['correlation_penalty'] = 1.0
-
     return candidates
 
 
 def _step6_regime_filter(candidates: List[Dict], regime: str = 'UNKNOWN') -> List[Dict]:
     """
     Match signal type to regime.
-    - HIGH_VOL: require vol_spike >= 1.5 (stronger confirmation)
+    - HIGH_VOL: require vol_spike >= 1.5
     - RANGING: skip strong trend trades (ADX > 30)
-    - TRENDING_UP/DOWN: counter-trend trades allowed but marked with 0.80 penalty
+    - TRENDING_UP/DOWN: counter-trend marked with 0.80 penalty
     """
     if regime == 'UNKNOWN':
         return candidates
@@ -664,9 +603,9 @@ def _step7_rank_and_top(candidates: List[Dict], n: int = _TOP_N) -> List[Dict]:
 
 def scan(open_positions: Optional[List[str]] = None,
          regime: str = 'UNKNOWN',
-         account_balance: float = 10_000.0) -> List[Dict]:
+         account_balance: float = 5_000.0) -> List[Dict]:
     """
-    Run the full 7-step Bybit perp scanner pipeline.
+    Run the full 7-step Kraken Futures perp scanner pipeline.
 
     Args:
         open_positions: list of currently held symbols (for correlation filter)
@@ -676,12 +615,12 @@ def scan(open_positions: Optional[List[str]] = None,
     Returns:
         List of up to 15 candidate dicts, sorted by vol_spike descending.
         Each dict contains: symbol, price, direction, vol_spike, adx_15m,
-        price_move_4h_pct, atr_15m, stop_pct, target_pct, expected_profit,
+        price_move_1h_pct, atr_15m, stop_pct, target_pct, expected_profit,
         funding_rate, funding_cost_pct, correlation_penalty, regime_penalty,
         spread_pct, bid_depth_usd, ask_depth_usd.
 
-        Returns empty list (not an exception) if Bybit is unavailable.
-        The scheduler should interpret an empty list as "sit idle".
+        Returns empty list (not an exception) if Kraken is unavailable.
+        The scheduler will interpret an empty list as "sit idle this cycle".
     """
     global _last_scan_ts, _last_candidates
 
@@ -690,43 +629,40 @@ def scan(open_positions: Optional[List[str]] = None,
             return _last_candidates
 
     t_start = time.time()
-    logger.info('[scanner] Starting Bybit full-market scan...')
+    logger.info('[scanner] Starting Kraken Futures full-market scan...')
 
     try:
-        # Refresh instruments-info cache if stale (24h TTL, fast on cache hit)
-        _refresh_instruments_if_needed()
-
-        # Step 1: Universe
+        # Step 1: Universe — PF_ perps with volumeQuote > $5M
         tickers  = _fetch_tickers()
         universe = _step1_universe(tickers)
         logger.info(
-            f'[scanner] Step 1 (turnover>${_MIN_VOLUME_24H_USD/1e6:.0f}M): '
-            f'{len(tickers)} pairs → {len(universe)} candidates'
+            f'[scanner] Step 1 (volumeQuote>${_MIN_VOLUME_24H_USD/1e6:.0f}M): '
+            f'{len(tickers)} tickers → {len(universe)} candidates'
         )
 
         if not universe:
-            logger.warning('[scanner] Bybit returned no usable tickers — scan idle')
+            logger.warning('[scanner] Kraken returned no usable tickers — scan idle')
             return []
 
-        # Step 2: Momentum (Bybit kline calls per symbol — most expensive step)
+        # Step 2: Momentum (kline calls per symbol — most expensive step)
         momentum_pass = _step2_momentum(universe)
         logger.info(f'[scanner] Step 2 (momentum): {len(universe)} → {len(momentum_pass)}')
 
         if not momentum_pass:
             return []
 
-        # Step 3: Liquidity (Bybit OB — REJECT on missing data)
+        # Step 3: Liquidity (OB — REJECT on missing data)
         liquidity_pass = _step3_liquidity(momentum_pass)
         logger.info(f'[scanner] Step 3 (liquidity): {len(momentum_pass)} → {len(liquidity_pass)}')
 
-        # Step 4: Expected value (with fee + funding cost model)
+        # Step 4: Expected value (fee + funding cost model)
         ev_pass = _step4_expected_value(liquidity_pass, account_balance)
         logger.info(
             f'[scanner] Step 4 (EV>=${_MIN_EXPECTED_PROFIT}): '
             f'{len(liquidity_pass)} → {len(ev_pass)}'
         )
 
-        # Step 5: Correlation
+        # Step 5: Correlation (always passes; real check in risk_engine)
         corr_pass = _step5_correlation(ev_pass, open_positions)
 
         # Step 6: Regime filter
@@ -744,12 +680,12 @@ def scan(open_positions: Optional[List[str]] = None,
                 f'spike={c.get("vol_spike", 0):.2f} '
                 f'adx={c.get("adx_15m", 0):.0f} '
                 f'ev=${c.get("expected_profit", 0):.2f} '
-                f'funding={c.get("funding_rate", 0)*100:.4f}%/8h'
+                f'funding={c.get("funding_rate", 0)*100:.4f}%'
             )
 
         with _lock:
-            _last_scan_ts     = time.time()
-            _last_candidates  = final
+            _last_scan_ts    = time.time()
+            _last_candidates = final
 
         return final
 
@@ -769,7 +705,7 @@ def get_scan_stats() -> Dict:
         'last_scan_ts':    _last_scan_ts,
         'last_scan_age_s': round(time.time() - _last_scan_ts, 0),
         'candidate_count': len(_last_candidates),
-        'data_source':     'bybit_v5',
+        'data_source':     'kraken_futures',
         'candidates': [
             {
                 'symbol':    c['symbol'],

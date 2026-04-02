@@ -1,6 +1,13 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 
+## 2026-04-02 — BYBIT REMOVAL / KRAKEN FUTURES MIGRATION
+
+- **fix(scanner)**: complete rewrite to Kraken Futures public REST API — removes Bybit V5 (geo-blocked for US residents). Replaces with `futures.kraken.com` public endpoints: `/derivatives/api/v3/tickers` for universe (21 liquid PF_ perps), `/api/charts/v1/trade/{symbol}/{interval}` for OHLCV, `/derivatives/api/v3/orderbook` for depth. No API key required. All endpoints verified working from US IP. BTC symbol is `PF_XBTUSD`. Round-trip fee updated to 0.13% (Kraken taker). Uses stdlib `urllib` only.
+- **delete(bybit_broker)**: `execution/bybit_broker.py` removed — Bybit not viable for US users.
+- **fix(main.py)**: banner updated — "Bybit USDT perps" → "Kraken Futures perps".
+- **fix(CLAUDE.md)**: data source updated — Bybit V5 REST → Kraken Futures public REST.
+
 ## 2026-04-02 — LIVE-READINESS OVERHAUL (full audit + implementation)
 
 ### P0 — Live-blocking fixes

@@ -45,7 +45,7 @@ BANNER = """
 ║                                                                  ║
 ║  "Nothing is given. Everything is earned." — LeBron James       ║
 ║                                                                  ║
-║  Scanner:    Bybit USDT perps | 7-filter | top 15             ║
+║  Scanner:    Kraken Futures perps | 7-filter | top 15          ║
 ║  Signals:    Two-tower (technical 0-100 + ML 0-100)             ║
 ║  Exits:      6-priority stack (trailing / scale / thesis)       ║
 ║  Learning:   57-feature snapshots | walk-forward retrain        ║

@@ -1,6 +1,12 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-02
+- fix(scanner): replace Binance fapi + CoinGecko with Bybit V5 REST — no geo-block, no fake tickers; instruments-info validation set (24h cache); OB fail-closed (reject on missing data); fee+funding EV model; _MIN_EXPECTED_PROFIT restored to $3.00; _TOP_N restored to 15; no yfinance fallback
+
+## 2026-04-02
+- fix(ibkr_broker): replace dead telegram_alert import with notification_engine; wire TradingView signals into v10_runner scan_and_trade as priority candidates
+
+## 2026-04-02
 - v10: perp-first tuning — 15 max positions, 95% deployed, no correlation penalty, top-20 scanner
 
 ## 2026-04-02

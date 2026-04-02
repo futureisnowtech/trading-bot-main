@@ -31,7 +31,10 @@ import pytz
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import PAPER_TRADING, MARKET_TIMEZONE, FUTURES_NUM_CONTRACTS
 from logging_db.trade_logger import log_trade, log_event
-from alerts.telegram_alert import alert_trade_opened, alert_trade_closed
+try:
+    from notifications.notification_engine import get_notification_engine as _get_ne
+except Exception:
+    _get_ne = None
 
 # TWS connection settings
 IBKR_HOST = os.getenv('IBKR_HOST', '127.0.0.1')
@@ -249,8 +252,17 @@ class IBKRBroker:
             paper=PAPER_TRADING, order_id=order_id,
             notes=f"SL={stop_price} TP={target_price} risk=${stop_loss_pts*MES_POINT_VALUE*num_contracts:.2f}",
         )
-        alert_trade_opened(strategy, 'MES', 'BUY', float(num_contracts),
-                           current_price, stop_price, target_price)
+        try:
+            if _get_ne:
+                _ne = _get_ne()
+                _ne.notify_trade_open(
+                    symbol='MES', direction='LONG',
+                    size_usd=float(num_contracts) * current_price * MES_POINT_VALUE,
+                    entry_price=current_price, score=0.0, top_3=[],
+                    features={}, regime='UNKNOWN',
+                )
+        except Exception:
+            pass
         return {'order_id': order_id, 'price': current_price}
 
     def sell_mes(
@@ -290,8 +302,16 @@ class IBKRBroker:
             order_id=f'IBKR_{uuid.uuid4().hex[:8]}',
             notes=f"reason={reason}",
         )
-        alert_trade_closed(strategy, 'MES', 'SELL', float(num_contracts),
-                           entry, exit_price, pnl, reason)
+        try:
+            if _get_ne:
+                _ne = _get_ne()
+                _ne.notify_trade_close(
+                    symbol='MES', direction='LONG',
+                    pnl_usd=pnl, pnl_pct=pnl / max(abs(entry * num_contracts * MES_POINT_VALUE), 1),
+                    exit_type=reason, top_3=[], features={}, regime='UNKNOWN', score=0.0,
+                )
+        except Exception:
+            pass
         return {'exit_price': exit_price, 'pnl': pnl}
 
     def short_mes(
@@ -349,8 +369,17 @@ class IBKRBroker:
             paper=PAPER_TRADING, order_id=order_id,
             notes=f"SL={stop_price} TP={target_price}",
         )
-        alert_trade_opened(strategy, 'MES', 'SHORT', float(num_contracts),
-                           current_price, stop_price, target_price)
+        try:
+            if _get_ne:
+                _ne = _get_ne()
+                _ne.notify_trade_open(
+                    symbol='MES', direction='SHORT',
+                    size_usd=float(num_contracts) * current_price * MES_POINT_VALUE,
+                    entry_price=current_price, score=0.0, top_3=[],
+                    features={}, regime='UNKNOWN',
+                )
+        except Exception:
+            pass
         return {'order_id': order_id, 'price': current_price}
 
     def cover_mes(
@@ -387,8 +416,16 @@ class IBKRBroker:
             order_id=f'IBKR_{uuid.uuid4().hex[:8]}',
             notes=f"reason={reason}",
         )
-        alert_trade_closed(strategy, 'MES', 'COVER', float(num_contracts),
-                           entry, exit_price, pnl, reason)
+        try:
+            if _get_ne:
+                _ne = _get_ne()
+                _ne.notify_trade_close(
+                    symbol='MES', direction='SHORT',
+                    pnl_usd=pnl, pnl_pct=pnl / max(abs(entry * num_contracts * MES_POINT_VALUE), 1),
+                    exit_type=reason, top_3=[], features={}, regime='UNKNOWN', score=0.0,
+                )
+        except Exception:
+            pass
         return {'exit_price': exit_price, 'pnl': pnl}
 
     # ── Account info ──────────────────────────────────────────────────────────

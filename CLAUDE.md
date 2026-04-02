@@ -83,6 +83,20 @@ Check readiness: `python3 scripts/check_v10_readiness.py --detailed`
 - `position_manager.py`: kill floor = 75% of ACCOUNT_SIZE (not hardcoded $7,500)
 - `main.py`: full logging to logs/bot.log; yfinance errors silenced
 
+**Bug fixes + features applied (2026-04-02):**
+- `execution/ibkr_broker.py`: removed dead `from alerts.telegram_alert import ...` import
+  (telegram_alert.py no longer exists in v10). Replaced with try-import of
+  `notifications.notification_engine.get_notification_engine`. All four alert call sites
+  (buy_mes open, sell_mes close, short_mes open, cover_mes close) now call
+  `_ne.notify_trade_open/notify_trade_close` inside try/except — broker never crashes on import.
+- `scheduler/v10_runner.py`: TradingView signal injection wired into `_scan_and_trade_inner()`.
+  `_get_fresh_tv_signals()` queries `system_events WHERE source='tradingview'` for signals
+  in the last 300 seconds. Converts symbol format (BTCUSD→BTCUSDT). Deduplicates across cycles
+  via `_seen_tv_signal_keys` set (bounded at 500). TV candidates are built in scanner output
+  format (edge_score=0.6, vol_spike=1.5, adx_15m=25) and prepended to scanner results so they
+  are processed first. Scanner duplicate symbols are deduplicated. If scanner is unavailable but
+  TV signals exist, TV signals alone proceed through `_attempt_entry`.
+
 - v10.0 Phase 1 (2026-04-01): Full system rebuild begin — branch `feature/v10-rebuild`
   - **Architecture documented** (`docs/ARCHITECTURE.md`): full 15-subsystem design map,
     exchange decision (Binance USDM + python-binance), two-tower signal engine spec,

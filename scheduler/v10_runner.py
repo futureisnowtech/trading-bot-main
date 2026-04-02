@@ -40,6 +40,54 @@ _REGIME_SIZE_MULT = {
     'UNKNOWN':       0.90,
 }
 
+# Deduplicate TradingView signals across scan cycles (symbol_direction_ts key)
+_seen_tv_signal_keys: set = set()
+
+
+# ── TradingView signal helpers ────────────────────────────────────────────────
+
+def _get_fresh_tv_signals(max_age_seconds: int = 300) -> list:
+    """
+    Query system_events for TradingView signals received in the last max_age_seconds.
+    Returns list of dicts with: symbol, direction, indicator, strength, price, ts
+    """
+    try:
+        from logging_db.trade_logger import get_logger
+        db = get_logger()
+        cutoff = time.time() - max_age_seconds
+        rows = db.conn.execute("""
+            SELECT message, ts FROM system_events
+            WHERE source = 'tradingview'
+              AND ts > datetime(?, 'unixepoch')
+            ORDER BY ts DESC LIMIT 20
+        """, (cutoff,)).fetchall()
+
+        signals = []
+        for msg, ts in rows:
+            try:
+                import json
+                data = json.loads(msg) if isinstance(msg, str) else msg
+                symbol = data.get('symbol', '').upper()
+                direction = data.get('direction', 'LONG').upper()
+                if not symbol or direction not in ('LONG', 'SHORT'):
+                    continue
+                # Normalize symbol: BTCUSD → BTCUSDT, BTC-USDT → BTCUSDT etc.
+                if not symbol.endswith('USDT'):
+                    symbol = symbol.replace('-', '').replace('USD', '') + 'USDT'
+                signals.append({
+                    'symbol': symbol,
+                    'direction': direction,
+                    'indicator': data.get('indicator', 'tv_alert'),
+                    'strength': data.get('strength', 'moderate'),
+                    'price': float(data.get('price', 0)),
+                    'ts': ts,
+                })
+            except Exception:
+                continue
+        return signals
+    except Exception:
+        return []
+
 
 # ── Lazy imports (all wrapped so import errors never crash the loop) ──────────
 
@@ -243,21 +291,62 @@ def _scan_and_trade_inner():
     open_symbols = list(open_pos.keys())
     deployed_usd = _get_deployed_usd(open_pos)
 
+    # Check for fresh TradingView signals — promote them to priority candidates
+    global _seen_tv_signal_keys
+    tv_signals = _get_fresh_tv_signals(max_age_seconds=300)
+    tv_candidates = []
+    for tv in tv_signals:
+        key = f"{tv['symbol']}_{tv['direction']}_{tv.get('ts', '')}"
+        if key in _seen_tv_signal_keys:
+            continue
+        _seen_tv_signal_keys.add(key)
+        # Keep set bounded
+        if len(_seen_tv_signal_keys) > 500:
+            _seen_tv_signal_keys.clear()
+        # Build candidate dict matching scanner output format
+        tv_candidates.append({
+            'symbol': tv['symbol'],
+            'direction': tv['direction'],
+            'vol_spike': 1.5,           # TV signal = elevated priority
+            'adx_15m': 25.0,            # assume trending (TV only fires on structured setups)
+            'price_move_4h_pct': 1.0,
+            'atr_15m': 0.0,             # will be computed from candles in _attempt_entry
+            'stop_pct': 1.5,
+            'target_pct': 4.5,
+            'expected_profit': 5.0,
+            'correlation_penalty': 1.0,
+            'regime_penalty': 1.0,
+            'spread_pct': 0.05,
+            'tv_signal': True,
+            'tv_strength': tv.get('strength', 'moderate'),
+            'tv_indicator': tv.get('indicator', 'tv_alert'),
+            'edge_score': 0.6,          # TV signal gets moderate edge score until validated
+        })
+        logger.info(f'[v10] TV signal: {tv["symbol"]} {tv["direction"]} '
+                    f'indicator={tv.get("indicator")} strength={tv.get("strength")}')
+
     # Run scanner
     if scanner is None:
         logger.debug('[v10] scanner unavailable — skipping')
-        return
-
-    candidates = scanner.scan(
-        open_positions=open_symbols,
-        account_balance=balance,
-    )
+        if not tv_candidates:
+            return
+        candidates = tv_candidates
+    else:
+        scanner_candidates = scanner.scan(
+            open_positions=open_symbols,
+            account_balance=balance,
+        )
+        # TV candidates take priority; skip scanner duplicate symbols
+        tv_symbols = {c['symbol'] for c in tv_candidates}
+        candidates = tv_candidates + [c for c in scanner_candidates
+                                      if c['symbol'] not in tv_symbols]
 
     if not candidates:
         logger.debug('[v10] scan returned 0 candidates')
         return
 
-    logger.info(f'[v10] scan: {len(candidates)} candidates, '
+    logger.info(f'[v10] scan: {len(candidates)} candidates '
+                f'(tv={len(tv_candidates)} scanner={len(candidates) - len(tv_candidates)}), '
                 f'balance=${balance:.0f} deployed=${deployed_usd:.0f}')
 
     for candidate in candidates:
@@ -372,17 +461,30 @@ def _attempt_entry(candidate, symbol, direction, balance, deployed_usd,
     regime_mult = _REGIME_SIZE_MULT.get(regime, 0.90)
     ml_score = result.get('ml_score', 50.0)
 
+    # Pull live values from feature vector rather than hardcoding neutral defaults
+    vol_regime_raw = features.get('regime_vol_mult', 1.0)
+    # Map to int tier: <0.8→expanding(3), 0.8-1.1→normal(2), >1.1→compressing(1)
+    if vol_regime_raw < 0.85:
+        vol_regime_int = 3
+    elif vol_regime_raw > 1.10:
+        vol_regime_int = 1
+    else:
+        vol_regime_int = 2
+    fg_current = float(features.get('regime_fg_current', 50.0))
+    # edge_score sourced from economics gate result (passed via candidate dict)
+    edge_score = float(candidate.get('edge_score', 0.5))
+
     sizing = pm.compute_position_size(
         account_balance=balance,
         current_price=current_price,
         atr_7=atr_7,
         stop_multiplier=1.5,
-        vol_regime=2,           # neutral default; scanner doesn't expose vol_regime int
+        vol_regime=vol_regime_int,
         ml_score=ml_score,
-        fg_current=50.0,        # neutral F&G; feature available in features dict
+        fg_current=fg_current,
         composite_score=composite,
         correlation_penalty=float(candidate.get('correlation_penalty', 1.0)),
-        edge_score=0.5,
+        edge_score=edge_score,
         cascade_risk_score=0,
         deployed_usd=deployed_usd,
         paper=_paper,

@@ -17,7 +17,8 @@ import logging
 import threading
 import time
 import traceback
-from typing import Dict, List, Optional
+from datetime import datetime
+from typing import Dict, Optional
 
 import schedule
 
@@ -941,7 +942,6 @@ def _mes_scan_inner():
             return
 
         # Build / extend opening range (9:30–10:00 ET)
-        in_or_window = (h == 9 and m >= 30) or (h == 9 and m == 59)
         if h == 9 and m < 60:  # still 9:xx
             if not _mes_or_locked:
                 _mes_or_high = max(_mes_or_high, price)

@@ -30,7 +30,51 @@ A fully autonomous AI-powered trading system that:
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
 
-## Current Version: v10.0 (2026-04-01: Phase 1 — Architecture + DB migration + cleanup)
+## Current Version: v10.0 (2026-04-01: Phases 1–15 complete — ready for paper validation)
+
+**v10 Build Summary (feature/v10-rebuild branch):**
+
+| Phase | Component | Status |
+|---|---|---|
+| 1 | Architecture doc + DB migration + remove deprecated files | ✅ |
+| 2 | Data pipeline (WebSocket, OHLCV cache, sentiment) | ✅ |
+| 3 | 12 indicator files (CVD, VWAP, MACD, RSI, OB, etc.) | ✅ |
+| 4 | Dynamic scanner (7-filter, top 15) + pair intelligence | ✅ |
+| 5 | Feature builder (57 features, 11 groups) | ✅ |
+| 6 | Two-tower signal engine (tech 0-100 + ML 0-100 → composite) | ✅ |
+| 7 | Position manager + 6-priority exit stack (no time exits) | ✅ |
+| 8 | Perps engine + delta-neutral hedge + kill switch | ✅ |
+| 9 | Risk engine (VaR/CVaR, correlation, margin gates) | ✅ |
+| 10 | ML infrastructure (XGBoost+LGB walk-forward, calibration, online learner) | ✅ |
+| 11 | RBI loop (research 575 combos + backtest + incubation) | ✅ |
+| 12 | Learning loop (57-feature snapshots, retrain queue, weekly report) | ✅ |
+| 13 | Notification engine (8 categories + WHY blocks) + dashboard feed | ✅ |
+| 14 | Portfolio backtest structural validation | ✅ |
+| 15 | Readiness checker + CLAUDE.md update | ✅ |
+
+**Key v10 architectural decisions (final):**
+- 57 features (not 47 — counted 8+6+5+7+4+5+6+3+5+4+4=57 across 11 groups)
+- 3-agent debate → two-tower signal engine (no agent overhead)
+- 4h time exit → thesis score exit (Priority 3 in 6-priority stack)
+- Telegram → notifications/notification_engine.py (SQLite, dashboard panel)
+- XGBoost 60% + LightGBM 40% ensemble (XGBoost needs `brew install libomp`)
+- Kelly 1/3 → 1/2 path based on trade count and Sharpe
+- Default 3x leverage, max 10x (strict gates)
+- ISOLATED margin on all perp positions (never CROSS)
+- Go-live: `python3 scripts/check_v10_readiness.py`
+- Weekly report: `python3 scripts/weekly_report.py`
+
+**Go-live criteria (all must pass):**
+1. ML Brier score < 0.22
+2. ≥1 RBI strategy graduated from incubation
+3. Zero kill switch triggers in paper period
+4. Cost per profitable trade < 25% of average win
+5. 14+ days paper trading on v10
+6. Win rate ≥ 52%
+
+**Current bot:** `feature/agent-overhaul` stays live during v10 paper validation.
+Switch to v10 once `python3 scripts/check_v10_readiness.py` shows all 6 green.
+
 - v10.0 Phase 1 (2026-04-01): Full system rebuild begin — branch `feature/v10-rebuild`
   - **Architecture documented** (`docs/ARCHITECTURE.md`): full 15-subsystem design map,
     exchange decision (Binance USDM + python-binance), two-tower signal engine spec,

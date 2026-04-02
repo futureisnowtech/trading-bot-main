@@ -855,6 +855,211 @@ def ml_retrain_check():
         logger.debug(f'[v10] ml_retrain_check error: {e}')
 
 
+# ── mes_futures_scan ─────────────────────────────────────────────────────────
+
+def mes_futures_scan():
+    """
+    2-minute loop (US market hours only): MES opening-range breakout scanner.
+
+    Strategy:
+      - Hard block 9:30–10:00 ET (opening chaos)
+      - Track the 9:30–10:00 opening range (high/low of first 30 min)
+      - Enter LONG on breakout above OR1 high with volume confirmation
+      - Enter SHORT on breakdown below OR1 low with volume confirmation
+      - Stop: other side of opening range + 1 point buffer
+      - Target: 2× stop distance (min 4 points, ≈ $20/contract)
+      - Max 1 position at a time, max 2 contracts
+      - Daily loss limit: $150 (10 pts × $5 × 3 contracts)
+      - Hard stop at 3:45 PM ET — close any open MES position
+    """
+    try:
+        _mes_scan_inner()
+    except Exception as e:
+        logger.error(f'[mes] scan fatal: {e}\n{traceback.format_exc()[:800]}')
+
+
+# Opening range state (resets each trading day)
+_mes_or_high: float    = 0.0
+_mes_or_low: float     = float('inf')
+_mes_or_locked: bool   = False   # True once 10:00 ET passes
+_mes_or_date: str      = ''
+_mes_daily_pnl: float  = 0.0
+_mes_daily_date: str   = ''
+
+
+def _mes_scan_inner():
+    global _mes_or_high, _mes_or_low, _mes_or_locked, _mes_or_date
+    global _mes_daily_pnl, _mes_daily_date
+
+    from config import FUTURES_ENABLED, FUTURES_NUM_CONTRACTS
+    if not FUTURES_ENABLED:
+        return
+
+    try:
+        import pytz
+        et = pytz.timezone('America/New_York')
+        now_et = datetime.now(et)
+    except Exception:
+        return
+
+    # Only run during US regular session 9:30–15:45 ET on weekdays
+    if now_et.weekday() >= 5:
+        return
+    h, m = now_et.hour, now_et.minute
+    if not ((h == 9 and m >= 30) or (10 <= h <= 15) or (h == 15 and m <= 45)):
+        return
+
+    today_str = now_et.strftime('%Y-%m-%d')
+
+    # Reset opening range and daily P&L each new day
+    if _mes_or_date != today_str:
+        _mes_or_high   = 0.0
+        _mes_or_low    = float('inf')
+        _mes_or_locked = False
+        _mes_or_date   = today_str
+
+    if _mes_daily_date != today_str:
+        _mes_daily_pnl  = 0.0
+        _mes_daily_date = today_str
+
+    # Import broker
+    try:
+        from execution.ibkr_broker import IBKRBroker
+    except Exception as e:
+        logger.debug(f'[mes] ibkr_broker import error: {e}')
+        return
+
+    broker = IBKRBroker()
+    if not broker.connect():
+        logger.warning('[mes] IBKR connection failed — skipping cycle')
+        return
+
+    try:
+        # Get current MES price
+        price = broker.get_price('MES')
+        if not price or price <= 0:
+            return
+
+        # Build / extend opening range (9:30–10:00 ET)
+        in_or_window = (h == 9 and m >= 30) or (h == 9 and m == 59)
+        if h == 9 and m < 60:  # still 9:xx
+            if not _mes_or_locked:
+                _mes_or_high = max(_mes_or_high, price)
+                _mes_or_low  = min(_mes_or_low,  price)
+                logger.debug(f'[mes] OR building: {_mes_or_low:.2f}–{_mes_or_high:.2f}')
+
+        # Lock OR at 10:00 ET
+        if h >= 10 and not _mes_or_locked and _mes_or_high > 0 and _mes_or_low < float('inf'):
+            _mes_or_locked = True
+            or_range = _mes_or_high - _mes_or_low
+            logger.info(f'[mes] Opening range locked: {_mes_or_low:.2f}–{_mes_or_high:.2f} '
+                        f'({or_range:.2f} pts)')
+
+        # Don't trade before OR is locked
+        if not _mes_or_locked:
+            return
+
+        # Hard stop at 15:45 — close any position
+        if h == 15 and m >= 45:
+            pos = broker.get_position('MES')
+            if pos and pos.get('qty', 0) != 0:
+                logger.info('[mes] EOD close — 15:45 ET hard stop')
+                qty = abs(int(pos['qty']))
+                if pos['qty'] > 0:
+                    broker.sell_mes(qty=qty, reason='eod_close')
+                else:
+                    broker.cover_mes(qty=qty, reason='eod_close')
+            return
+
+        # Daily loss limit: $150
+        if _mes_daily_pnl < -150:
+            logger.info(f'[mes] Daily loss limit hit: ${_mes_daily_pnl:.2f} — no new trades')
+            return
+
+        or_range   = _mes_or_high - _mes_or_low
+        or_mid     = (_mes_or_high + _mes_or_low) / 2
+        min_range  = 2.0   # opening range must be at least 2 points to be meaningful
+        if or_range < min_range:
+            logger.debug(f'[mes] OR too tight ({or_range:.2f} pts) — skip')
+            return
+
+        n_contracts = min(int(FUTURES_NUM_CONTRACTS), 2)
+        pos         = broker.get_position('MES')
+        has_pos     = pos is not None and pos.get('qty', 0) != 0
+
+        if has_pos:
+            # Monitor existing position for stop/target
+            entry    = float(pos.get('entry_price', or_mid))
+            qty      = int(pos.get('qty', 0))
+            stop     = float(pos.get('stop', 0))
+            target   = float(pos.get('target', 0))
+            is_long  = qty > 0
+
+            if is_long:
+                if price <= stop:
+                    pnl = (price - entry) * abs(qty) * 5 - IBKR_COMMISSION_RT * abs(qty)
+                    _mes_daily_pnl += pnl
+                    broker.sell_mes(qty=abs(qty), reason='stop_hit')
+                    logger.info(f'[mes] STOP HIT LONG @ {price:.2f} pnl=${pnl:.2f}')
+                elif price >= target:
+                    pnl = (price - entry) * abs(qty) * 5 - IBKR_COMMISSION_RT * abs(qty)
+                    _mes_daily_pnl += pnl
+                    broker.sell_mes(qty=abs(qty), reason='target_hit')
+                    logger.info(f'[mes] TARGET HIT LONG @ {price:.2f} pnl=${pnl:.2f}')
+            else:
+                if price >= stop:
+                    pnl = (entry - price) * abs(qty) * 5 - IBKR_COMMISSION_RT * abs(qty)
+                    _mes_daily_pnl += pnl
+                    broker.cover_mes(qty=abs(qty), reason='stop_hit')
+                    logger.info(f'[mes] STOP HIT SHORT @ {price:.2f} pnl=${pnl:.2f}')
+                elif price <= target:
+                    pnl = (entry - price) * abs(qty) * 5 - IBKR_COMMISSION_RT * abs(qty)
+                    _mes_daily_pnl += pnl
+                    broker.cover_mes(qty=abs(qty), reason='target_hit')
+                    logger.info(f'[mes] TARGET HIT SHORT @ {price:.2f} pnl=${pnl:.2f}')
+            return
+
+        # Look for breakout entry
+        buffer     = 0.25   # 1 tick above/below OR
+        long_entry = _mes_or_high + buffer
+        short_entry = _mes_or_low  - buffer
+
+        if price >= long_entry:
+            stop_price   = _mes_or_low - buffer        # below OR low
+            stop_dist    = price - stop_price
+            target_price = price + max(stop_dist * 2, 4.0)  # 2R or 4 pts min
+            logger.info(f'[mes] LONG BREAKOUT @ {price:.2f} stop={stop_price:.2f} '
+                        f'target={target_price:.2f} contracts={n_contracts}')
+            broker.buy_mes(
+                qty=n_contracts,
+                stop_price=stop_price,
+                target_price=target_price,
+                reason=f'or_breakout_long OR={_mes_or_low:.2f}-{_mes_or_high:.2f}',
+            )
+
+        elif price <= short_entry:
+            stop_price   = _mes_or_high + buffer
+            stop_dist    = stop_price - price
+            target_price = price - max(stop_dist * 2, 4.0)
+            logger.info(f'[mes] SHORT BREAKDOWN @ {price:.2f} stop={stop_price:.2f} '
+                        f'target={target_price:.2f} contracts={n_contracts}')
+            broker.short_mes(
+                qty=n_contracts,
+                stop_price=stop_price,
+                target_price=target_price,
+                reason=f'or_breakdown_short OR={_mes_or_low:.2f}-{_mes_or_high:.2f}',
+            )
+
+    finally:
+        try:
+            broker.disconnect()
+        except Exception:
+            pass
+
+
+IBKR_COMMISSION_RT = 0.47 * 2   # round-trip commission per contract
+
+
 # ── rbi_nightly ───────────────────────────────────────────────────────────────
 
 def rbi_nightly():
@@ -943,6 +1148,11 @@ def run_forever():
     schedule.every(60).seconds.do(kill_switch_monitor)
     schedule.every(6).hours.do(ml_retrain_check)
     schedule.every().day.at('07:00').do(rbi_nightly)   # 07:00 UTC ≈ 02:00 ET
+
+    from config import FUTURES_ENABLED
+    if FUTURES_ENABLED:
+        schedule.every(2).minutes.do(mes_futures_scan)
+        logger.info('[v10] MES futures scanner wired (every 2 min)')
 
     logger.info('[v10] All schedules wired. Running scan immediately...')
 

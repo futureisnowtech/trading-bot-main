@@ -51,16 +51,78 @@ _last_candidates: List[Dict] = []
 
 
 def _fetch_tickers() -> List[Dict]:
-    """Fetch all USDT perp 24h tickers from Binance futures."""
+    """
+    Fetch all USDT perp 24h tickers from Binance futures.
+    Falls back to CoinGecko public API (US-accessible) when Binance is geo-blocked.
+    """
     if not _REQUESTS_OK:
         return []
+
+    # Try Binance futures first
     try:
         r = requests.get(f'{_BINANCE_BASE}/fapi/v1/ticker/24hr', timeout=10)
         if r.status_code == 200:
-            return r.json()
+            data = r.json()
+            if data:
+                logger.debug(f'[scanner] Binance: {len(data)} tickers')
+                return data
     except Exception as e:
-        logger.debug(f'[scanner] ticker fetch error: {e}')
-    return []
+        logger.debug(f'[scanner] Binance ticker fetch error (likely geo-blocked): {e}')
+
+    # CoinGecko fallback — maps top coins to USDT perp symbols
+    return _fetch_tickers_coingecko()
+
+
+def _fetch_tickers_coingecko() -> List[Dict]:
+    """
+    CoinGecko public API fallback — no auth needed, US-accessible.
+    Maps coins to synthetic ticker dicts matching Binance futures format.
+    Returns up to 250 coins as synthetic perp tickers.
+    """
+    try:
+        url = ('https://api.coingecko.com/api/v3/coins/markets'
+               '?vs_currency=usd&order=volume_desc&per_page=250&page=1'
+               '&sparkline=false&price_change_percentage=24h')
+        r = requests.get(url, timeout=15, headers={'Accept': 'application/json'})
+        if r.status_code != 200:
+            logger.debug(f'[scanner] CoinGecko returned {r.status_code}')
+            return []
+
+        coins = r.json()
+        tickers = []
+        for coin in coins:
+            symbol_raw = (coin.get('symbol') or '').upper()
+            # Skip stablecoins
+            if symbol_raw in ('USDT', 'USDC', 'BUSD', 'DAI', 'TUSD', 'FDUSD', 'USDP'):
+                continue
+
+            perp_symbol = f'{symbol_raw}USDT'
+            vol_24h = float(coin.get('total_volume') or 0)
+            price = float(coin.get('current_price') or 0)
+            change_pct = float(coin.get('price_change_percentage_24h') or 0)
+            market_cap = float(coin.get('market_cap') or 0)
+            if price <= 0:
+                continue
+
+            # Synthesise ticker dict matching Binance fapi format
+            tickers.append({
+                'symbol':             perp_symbol,
+                'lastPrice':          str(price),
+                'quoteVolume':        str(vol_24h),
+                'priceChangePercent': str(change_pct),
+                'volume':             str(vol_24h / (price + 1e-9)),
+                'highPrice':          str(price * 1.02),
+                'lowPrice':           str(price * 0.98),
+                '_source':            'coingecko',
+                '_market_cap':        market_cap,
+            })
+
+        logger.info(f'[scanner] CoinGecko fallback: {len(tickers)} synthetic perp tickers')
+        return tickers
+
+    except Exception as e:
+        logger.warning(f'[scanner] CoinGecko fallback failed: {e}')
+        return []
 
 
 def _fetch_klines(symbol: str, interval: str, limit: int = 50) -> List:

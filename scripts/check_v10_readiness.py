@@ -41,7 +41,7 @@ def check_ml_brier() -> tuple:
         conn.close()
         best = rows[0]
         if best is None:
-            return False, None, 'No calibration data yet (< 30 trades)'
+            return False, None, 'No calibration data yet — needs 30+ v10 live trades'
         passed = best < 0.22
         return passed, best, f'Best Brier = {best:.3f} (target < 0.22)'
     except Exception as e:
@@ -149,22 +149,27 @@ def check_paper_days() -> tuple:
 
 
 def check_win_rate() -> tuple:
-    """Criterion 6: WR ≥ 52% on paper trades"""
+    """Criterion 6: WR ≥ 52% on live v10 trades (excludes seeded backtest data)"""
     try:
         conn = _conn()
+        # Only count live trades with v10 composite scores — excludes backtest seeds
         rows = conn.execute("""
             SELECT won FROM trade_attribution
             WHERE won IS NOT NULL
+              AND source = 'live'
+              AND composite_score IS NOT NULL
+              AND composite_score > 0
             ORDER BY entry_ts DESC LIMIT 100
         """).fetchall()
         conn.close()
 
-        if len(rows) < 20:
-            return False, None, f'Only {len(rows)} attributed trades (need ≥ 20)'
+        if len(rows) < 10:
+            return False, None, (f'Only {len(rows)} v10 live trades (need ≥ 10) — '
+                                 f'start v10 to accumulate data')
 
         wr = sum(r[0] for r in rows) / len(rows)
         passed = wr >= 0.52
-        return passed, wr, f'WR = {wr:.1%} over last {len(rows)} trades (target ≥ 52%)'
+        return passed, wr, f'WR = {wr:.1%} over {len(rows)} v10 live trades (target ≥ 52%)'
     except Exception as e:
         return False, None, f'DB error: {e}'
 

@@ -98,10 +98,11 @@ def _load_training_data(pair_key: str, direction: str,
                    ta.technical_score, ta.ml_score, ta.composite_score, ta.regime
             FROM trades t
             LEFT JOIN trade_attribution ta ON t.id = ta.trade_id
-            WHERE t.paper=? AND t.action='SELL' AND t.source != 'backtest'
+            WHERE t.action='SELL'
+              AND t.source NOT IN ('backtest', 'pre_v10_contaminated')
               AND t.won IS NOT NULL
             ORDER BY t.ts ASC
-        """, (1 if paper else 0,)).fetchall()
+        """).fetchall()
 
         if not rows:
             return None

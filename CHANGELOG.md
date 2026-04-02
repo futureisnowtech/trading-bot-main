@@ -1,5 +1,50 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
+
+## 2026-04-02 — LIVE-READINESS OVERHAUL (full audit + implementation)
+
+### P0 — Live-blocking fixes
+
+- **fix(signal_engine)**: remove paper mode -20pt threshold reduction — `signal_engine.py` now uses identical thresholds in paper and live (TRENDING=62, RANGING=68, HIGH_VOL=72). Prior paper trades at threshold 42-52 were invalid; all such data tagged contaminated in DB.
+- **fix(scanner)**: complete rewrite to Bybit V5 REST API — removes Binance fapi (geo-blocked US) and CoinGecko fallback (synthetic fake perp tickers with fabricated OHLCV). `_fetch_tickers()` and `_fetch_klines()` now use `api.bybit.com/v5/market/`; no yfinance fallback; instruments-info validation set (24h cache) rejects non-existent symbols; OB depth check changed fail-closed (candidate rejected if OB unavailable, not silently passed); fee+funding modeled in EV; `_MIN_EXPECTED_PROFIT` restored to $3.00; `_TOP_N` restored to 15.
+- **feat(bybit_broker)**: new `execution/bybit_broker.py` — pybit v5 unified account, USDT perpetual, isolated margin, server-side SL/TP, paper mode via SQLite, `get_bybit_broker()` singleton. No Telegram imports.
+- **feat(economics_gate)**: new `risk/economics_gate.py` — pre-trade EV veto gate. Models Bybit taker fees (0.055%×2), spread, funding carry (1.5 settlement periods). Outputs quality tier (A+/A/B/VETO), ev_pct, roi_on_margin, edge_score. Wired into `_attempt_entry()` in v10_runner before feature building. Rejection logged to dashboard with reason.
+- **fix(ml_training)**: `ml/walk_forward_trainer.py` — removed `paper=?` filter; replaced with `source NOT IN ('backtest', 'pre_v10_contaminated')` — model now trains on clean architecture-consistent data regardless of paper/live mode.
+- **fix(ml_tagging)**: `learning/post_trade_analyzer.py` — default `source` changed from `'live'` to `'paper'`; live trades must explicitly pass `source='live_v10'`. Prevents paper trades under relaxed thresholds contaminating future ML training.
+- **fix(v10_runner hardcodes)**: `scheduler/v10_runner.py` — replaced `vol_regime=2`, `fg_current=50.0`, `edge_score=0.5` hardcodes with values extracted from feature vector (`regime_vol_mult`, `regime_fg_current`) and economics gate result.
+
+### P1 — Data pipeline and architecture
+
+- **feat(tv_ingestion)**: `scheduler/v10_runner.py` — TradingView signals now read from `system_events WHERE source='tradingview'` (max 5 min old) at the top of every scan cycle. TV candidates prepend scanner candidates with priority. Deduplication via bounded key set.
+- **fix(ibkr_broker)**: `execution/ibkr_broker.py` — removed dead `from alerts.telegram_alert import ...`; replaced with `notifications.notification_engine` wrapped in try/except.
+- **refactor(unified_sizer)**: replaced 6-factor chain (V×E×D×T×K×M) with clean 3-factor formula: `notional = (account × 1.5% × quality_mult) / stop_dist_pct`, capped by portfolio heat and 25% single-position hard cap. Legacy `get_position_size()` shim preserved.
+- **feat(readiness_panel)**: `dashboard/app.py` — added READINESS TRACKER expander in SYSTEM tab. Shows 7 clean-trade metrics (WR, PF, worst day, days running, veto rate, kill triggers). Informational only — no gating logic.
+- **fix(main_banner)**: updated banner to show "Bybit USDT perps" instead of "Binance USDT perps".
+
+### Repo cleanup
+
+- Deleted dead execution files: `tradovate_broker.py`, `coinbase_broker.py`, `binance_spot_broker.py`
+- Deleted removed ai_agents remnants: `analyst_agents.py`, `debate_engine.py`, `exit_review.py`, `risk_synthesizer.py`
+- Deleted Lane 3 prediction market files: `polymarket_broker.py`, `kalshi_broker.py`, `polymarket_feed.py`, `kalshi_feed.py`, `lane3_scanner.py`, `prediction_arb.py`, `pm_calibrator.py`, `tax_tracker.py`
+- Archived v9 schedulers (not deleted — audit trail preserved): `v9_crypto_scanner.py.archived`, `v9_perp_scanner.py.archived`, `v9_exit_monitor.py.archived`
+
+### DB migration
+
+- `scripts/migrate_clean_start.py` — run once to tag all existing trade_attribution rows as `pre_v10_contaminated`. Executed: 18,403 rows tagged (18,172 backtest + 231 paper). ML training now starts from zero clean trades; model falls back to 100% technical weighting until clean data accumulates.
+
+### Go-live readiness (per owner preference — tracking only, not gates)
+
+- Paper and live now use identical signal thresholds — paper data is valid for assessing live performance
+- ML training data is clean from this point forward
+- Universe is validated against Bybit instruments (no synthetic tickers)
+- Pre-trade economics gate enforces fee/funding viability before any execution
+- Owner retains full go-live authority — readiness metrics are displayed in dashboard, never enforced by code
+
+## 2026-04-02
+
+## 2026-04-02
+- feat: add risk/economics_gate.py (pre-trade EV veto) + execution/bybit_broker.py (pybit v5 perp broker)
+
 ## 2026-04-02
 - fix(scanner): replace Binance fapi + CoinGecko with Bybit V5 REST — no geo-block, no fake tickers; instruments-info validation set (24h cache); OB fail-closed (reject on missing data); fee+funding EV model; _MIN_EXPECTED_PROFIT restored to $3.00; _TOP_N restored to 15; no yfinance fallback
 

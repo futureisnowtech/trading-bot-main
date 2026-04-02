@@ -1,161 +1,120 @@
 """
-risk/unified_sizer.py — Unified position sizing for all three markets.
+risk/unified_sizer.py — Position sizing for v10.
 
-Formula:  position_size_usd = base_size × V × E × D × T × K × M
+Formula: notional_usd = (account × BASE_RISK_PCT × quality_mult) / stop_dist_pct
+         Capped by portfolio heat and single-position max.
 
-  base_size  — from config (CRYPTO_POSITION_SIZE_USD, etc.)
-  V          — volatility regime score [0.20, 1.00] (risk/volatility_regime.py)
-  E          — edge quality score [0.00, 1.00] (risk/edge_monitor.py)
-  D          — drawdown heat factor [0.00, 1.00] (risk/drawdown_controller.py)
-  T          — time-of-day multiplier [0.50, 1.50] (inline, session-aware)
-  K          — Kelly fraction [0.50, 1.00] (risk/position_sizer.py)
-  M          — memory similarity [0.80, 1.20] (placeholder 1.0 until Sprint 8)
+Three factors only:
+  quality_mult   — from economics gate quality tier (A+/A/B)
+  heat_factor    — reduces size when portfolio risk budget is filling up
+  hard_cap       — single position never exceeds 25% of account notional
 
-Devil's advocate gate:
-  If completed trade count for this market < USE_ADAPTIVE_SIZING_MIN_TRADES (20),
-  V and E multipliers are noisy and should not be applied.
-  Gate: skip V and E when insufficient data. D and T always apply (they don't
-  need trade history). K has its own built-in gate (activates after 15 trades).
+Drawdown halt (D factor from v9) is preserved: if drawdown_controller says halt,
+return 0. That safety gate belongs here.
 
-Min / max guardrails:
-  Result is clamped between MIN_POSITION_USD (5.0) and max from config.
-  This prevents rounding or multiplier chains from producing unexecutable sizes.
+Everything else (time-of-day, Kelly, memory similarity, volatility regime,
+edge monitor) has been removed. These added fragility without measurable edge
+on a 24/7 perp system with insufficient trade history to calibrate them.
 """
 import os
 import sys
-from datetime import datetime
 from typing import Optional
-import pytz
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config import (
-    ACCOUNT_SIZE, PAPER_TRADING, MARKET_TIMEZONE,
-    CRYPTO_POSITION_SIZE_USD, PERP_POSITION_SIZE_USD,
-)
+from config import ACCOUNT_SIZE, PAPER_TRADING
 
-# ─── Constants ────────────────────────────────────────────────────────────────
-USE_ADAPTIVE_SIZING_MIN_TRADES: int = 20   # V and E stay at 1.0 below this
-MIN_POSITION_USD: float = 5.0              # absolute floor (below this = skip trade)
-MAX_POSITION_SCALE: float = 1.5            # multipliers cannot push size above 150% of base
+# ── Constants ─────────────────────────────────────────────────────────────────
+BASE_RISK_PCT: float = 0.015        # risk 1.5% of account per trade
+MAX_HEAT_PCT: float = 0.06          # max 6% of account in total stop-distance risk
+MAX_SINGLE_NOTIONAL_PCT: float = 0.25  # single position <= 25% of account (pre-leverage)
+MIN_NOTIONAL_USD: float = 20.0      # below this skip — fees eat the edge
 
-# Time-of-day multipliers for equity/MES (ET timezone)
-_TOD_SCHEDULE = [
-    # (start_hour, end_hour, multiplier)
-    (2,   5,   0.50),   # dead zone — worst fills, thin books
-    (5,   8,   0.70),   # pre-market — limited participation
-    (9.5, 10.5, 1.50),  # NY open — highest-conviction window
-    (10.5, 11.5, 1.20), # prime morning
-    (11.5, 14.5, 0.60), # lunch dead zone — keep minimum exposure
-    (14.5, 16.0, 1.10), # close run-up
-    (16.0, 21.0, 0.80), # after hours / early evening
-    # 21.0–2.0 covers late evening → Asia open at 0.9x (default below)
-]
-_TOD_DEFAULT: float = 0.90   # Asia session / overnight
-
-# Perp-specific schedule: Binance USD-M futures trade 24/7 — Asia & London matter
-_TOD_SCHEDULE_PERP = [
-    # (start_hour, end_hour, multiplier)
-    (0,   2,   1.10),   # Asia peak — BTC/ETH volume on Binance is high
-    (2,   8,   1.20),   # London session — overlaps Asia close, highest global perp volume
-    (8,   9.5, 0.90),   # Pre-NY quiet
-    (9.5, 11.5, 1.50),  # NY open — overlaps London close, maximum global volume
-    (11.5, 14.5, 0.60), # lunch dead zone — thin across all regions
-    (14.5, 16.0, 1.10), # NY close run-up
-    (16.0, 20.0, 0.80), # post-NY quiet
-    (20,  24,   1.10),  # Asia build-up / late US
-]
-_TOD_DEFAULT_PERP: float = 0.90
+_QUALITY_MULT = {
+    'A+': 1.35,
+    'A':  1.00,
+    'B':  0.75,
+}
 
 
-def _get_time_of_day_multiplier(strategy: str) -> float:
+def compute_size(
+    account_balance: float,
+    stop_dist_pct: float,       # stop distance as fraction (e.g. 0.015 = 1.5%)
+    quality_tier: str = 'A',    # 'A+' | 'A' | 'B' — from economics_gate
+    portfolio_heat: float = 0.0, # current total risk deployed (USD)
+    leverage: int = 3,
+    paper: bool = True,
+) -> dict:
     """
-    Return the time-of-day size multiplier for the current ET time.
+    Returns notional position size in USD.
 
-    Prediction markets (24/7 with uniform liquidity) always return 1.0.
-    Perp (Binance 24/7): rewards Asia (0-2h) and London (2-8h) — not just US hours.
-    MES/equity: follows strict ET session schedule.
-    Coinbase spot crypto: follows ET schedule (Coinbase liquidity mirrors US hours).
+    Args:
+        account_balance:  Current account equity in USD.
+        stop_dist_pct:    ATR × 1.5 / price (e.g. 0.015).
+        quality_tier:     From economics_gate.check() — drives size multiplier.
+        portfolio_heat:   Sum of (notional × stop_pct) across all open positions.
+        leverage:         Intended leverage (affects margin, not notional directly).
+        paper:            Paper mode flag (no behaviour change currently).
+
+    Returns dict with:
+        notional_usd, dollar_risk, stop_dist_pct, quality_mult, heat_factor, leverage
     """
-    strat_lower = strategy.lower()
-    if 'poly' in strat_lower:
-        return 1.0   # prediction markets: 24/7, no session effect
+    if stop_dist_pct <= 0:
+        stop_dist_pct = 0.015
 
+    quality_mult = _QUALITY_MULT.get(quality_tier, 0.75)
+
+    # Drawdown halt check — if heat controller says stop, return 0
     try:
-        tz = pytz.timezone(MARKET_TIMEZONE)
-        now = datetime.now(tz)
-        hour_float = now.hour + now.minute / 60.0
-        schedule = _TOD_SCHEDULE_PERP if 'perp' in strat_lower else _TOD_SCHEDULE
-        default  = _TOD_DEFAULT_PERP  if 'perp' in strat_lower else _TOD_DEFAULT
-        for start, end, multiplier in schedule:
-            if start <= hour_float < end:
-                return multiplier
-        return default
+        from risk.drawdown_controller import get_heat_level
+        heat_data = get_heat_level(paper=paper)
+        if heat_data.get('size_factor', 1.0) == 0.0:
+            return _zero_result(stop_dist_pct, quality_mult)
     except Exception:
-        return 1.0   # safe default on error
+        pass
+
+    # Base: dollar risk → notional
+    dollar_risk = account_balance * BASE_RISK_PCT * quality_mult
+    notional_raw = dollar_risk / stop_dist_pct
+
+    # Portfolio heat cap
+    remaining_budget = max(0.0, MAX_HEAT_PCT * account_balance - portfolio_heat)
+    max_from_heat = remaining_budget / stop_dist_pct if stop_dist_pct > 0 else 0.0
+    heat_factor = min(1.0, max_from_heat / notional_raw) if notional_raw > 0 else 0.0
+
+    notional = notional_raw * heat_factor
+
+    # Hard cap: single position notional
+    hard_cap = account_balance * MAX_SINGLE_NOTIONAL_PCT
+    notional = min(notional, hard_cap)
+
+    if notional < MIN_NOTIONAL_USD:
+        notional = 0.0
+
+    return {
+        'notional_usd':  round(notional, 2),
+        'dollar_risk':   round(dollar_risk * heat_factor, 2),
+        'stop_dist_pct': round(stop_dist_pct * 100, 3),
+        'quality_mult':  quality_mult,
+        'heat_factor':   round(heat_factor, 3),
+        'leverage':      leverage,
+    }
 
 
-def _get_trade_count(market: str, paper: bool) -> int:
-    """Return completed trades for this market since TRADE_SESSION_START."""
-    try:
-        import sqlite3
-        from config import DB_PATH, TRADE_SESSION_START
-
-        conn = sqlite3.connect(DB_PATH)
-        p = (1 if paper else 0,)
-        s = TRADE_SESSION_START
-        if market == 'polymarket':
-            row = conn.execute(
-                "SELECT COUNT(*) FROM trades WHERE paper=? AND strategy LIKE '%poly%' "
-                "AND pnl_usd != 0 AND ts >= ?", (*p, s)
-            ).fetchone()
-        elif market == 'mes':
-            row = conn.execute(
-                "SELECT COUNT(*) FROM trades WHERE paper=? "
-                "AND (strategy LIKE '%futures%' OR strategy LIKE '%mes%') "
-                "AND pnl_usd != 0 AND ts >= ?", (*p, s)
-            ).fetchone()
-        else:
-            row = conn.execute(
-                "SELECT COUNT(*) FROM trades WHERE paper=? "
-                "AND strategy NOT LIKE '%poly%' "
-                "AND strategy NOT LIKE '%futures%' AND strategy NOT LIKE '%mes%' "
-                "AND pnl_usd != 0 AND ts >= ?", (*p, s)
-            ).fetchone()
-        conn.close()
-        return int(row[0]) if row else 0
-    except Exception:
-        return 0
+def _zero_result(stop_dist_pct: float, quality_mult: float) -> dict:
+    return {
+        'notional_usd': 0.0,
+        'dollar_risk': 0.0,
+        'stop_dist_pct': round(stop_dist_pct * 100, 3),
+        'quality_mult': quality_mult,
+        'heat_factor': 0.0,
+        'leverage': 3,
+    }
 
 
-def _strategy_to_market(strategy: str) -> str:
-    """Map strategy name to market label."""
-    s = strategy.lower()
-    if 'poly' in s:
-        return 'polymarket'
-    if 'futures' in s or 'mes' in s or 'scalp' in s:
-        return 'mes'
-    return 'crypto'
-
-
-def _get_regime_multiplier(regime: str) -> float:
-    """
-    Regime-aware R factor: scale position size by market regime.
-    trending  = 1.15x (momentum works best in trends — add size)
-    ranging   = 0.85x (mean-reversion is shakier — reduce size)
-    volatile  = 0.70x (high volatility = unpredictable → protect capital)
-    unknown   = 1.00x (neutral — no adjustment)
-    """
-    r = str(regime or '').lower()
-    if 'trend' in r:
-        return 1.15
-    elif 'rang' in r:
-        return 0.85
-    elif 'volat' in r:
-        return 0.70
-    return 1.00
-
-
+# ── Legacy shim — keeps v9 callers from breaking ───────────────────────────────
+# get_position_size() is called by v9 scanner paths that may still be loaded.
+# Delegates to the new compute_size() with sensible defaults.
 def get_position_size(
     strategy: str,
     symbol: str,
@@ -166,183 +125,23 @@ def get_position_size(
     funding_rate: float = 0.0,
     regime: str = '',
 ) -> float:
-    """
-    Compute the final position size for a trade entry.
-
-    Args:
-        strategy:      Strategy name string (used to derive market + Kelly stats).
-        symbol:        Instrument symbol (used for vol regime lookup).
-        base_size:     Requested position size in USD (from config or caller).
-        confidence:    Agent debate confidence [0, 1] (used by Kelly component).
-        paper:         Override paper/live mode. Defaults to config.PAPER_TRADING.
-        current_price: Current price (optional — used for stop math if needed).
-        funding_rate:  Current 8h funding rate (crypto, fraction). Passed to vol regime.
-
-    Returns:
-        Final position size in USD, always ≥ MIN_POSITION_USD and ≤ base_size × MAX_POSITION_SCALE.
-        Returns 0.0 if base_size is zero or any hard block is hit.
-    """
     if paper is None:
         paper = PAPER_TRADING
-
     if base_size <= 0:
         return 0.0
-
-    market = _strategy_to_market(strategy)
-    trade_count = _get_trade_count(market, paper)
-    adaptive = trade_count >= USE_ADAPTIVE_SIZING_MIN_TRADES
-
-    # ── V: Volatility regime ──────────────────────────────────────────────────
-    v_score = 1.0
-    if adaptive:
-        try:
-            from risk.volatility_regime import get_volatility_regime
-            regime = get_volatility_regime(symbol, market=market, funding_rate=funding_rate)
-            v_score = regime['v_score']
-        except Exception:
-            v_score = 0.75   # NORMAL fallback
-
-    # V_score < 0.15 = extreme volatility crush — halt entries entirely
-    if v_score < 0.15:
-        return 0.0
-
-    # ── E: Edge quality ───────────────────────────────────────────────────────
-    e_score = 1.0
-    if adaptive:
-        try:
-            from data.edge_monitor import get_edge_state
-            edge_data = get_edge_state(strategy=strategy, paper=paper)
-            e_score = edge_data['sizing_multiplier']  # 1.0/0.75/0.50/0.0
-            if e_score == 0.0:
-                return 0.0  # edge blocked — strategy is in losing streak
-        except Exception:
-            e_score = 1.0
-
-    # ── D: Drawdown heat factor ───────────────────────────────────────────────
-    d_factor = 1.0
-    try:
-        from risk.drawdown_controller import get_heat_level
-        heat = get_heat_level(paper=paper)
-        d_factor = heat['size_factor']
-        if d_factor == 0.0:
-            return 0.0   # HALT level — no entries
-    except Exception:
-        d_factor = 1.0
-
-    # ── T: Time-of-day multiplier ─────────────────────────────────────────────
-    t_mult = _get_time_of_day_multiplier(strategy)
-
-    # ── K: Kelly fraction ─────────────────────────────────────────────────────
-    # Delegate to existing position_sizer which already has its own activation gate
-    # (activates at 15 trades) and losing-streak clamp logic.
-    # We pass base_size=1.0 and capture the fractional output.
-    k_factor = 1.0
-    try:
-        from risk.position_sizer import size_from_kelly
-        # size_from_kelly applies heat + Kelly to a base size; we want pure K fraction.
-        # To extract K only: call with base_size=1.0, confidence, then divide out D
-        k_raw = size_from_kelly(strategy, symbol, 1.0, confidence, paper)
-        # k_raw already has heat baked in; we want pure Kelly fraction
-        # Reverse out D: k_factor = k_raw / max(d_factor, 1e-10)
-        k_factor = k_raw / max(d_factor, 1e-10)
-        k_factor = max(0.25, min(k_factor, 1.50))  # safety clamp
-    except Exception:
-        k_factor = max(0.60, min(float(confidence), 1.0))
-
-    # ── M: Memory similarity (placeholder) ───────────────────────────────────
-    # Sprint 8: replace LanceDB with NumPy cosine similarity.
-    # Until then, M = 1.0 (neutral, no adjustment).
-    m_score = 1.0
-
-    # ── R: Regime-aware sizing ────────────────────────────────────────────────
-    # Scale size up in trends (momentum edge is real), down in ranging/volatile
-    r_factor = _get_regime_multiplier(regime)
-
-    # ── Final formula ─────────────────────────────────────────────────────────
-    if adaptive:
-        final = base_size * v_score * e_score * d_factor * t_mult * k_factor * m_score * r_factor
+    # Map confidence → quality tier
+    if confidence >= 0.75:
+        tier = 'A+'
+    elif confidence >= 0.55:
+        tier = 'A'
     else:
-        # Pre-20-trade: apply only D, T, R (regime). No V/E noise.
-        # K still applies via position_sizer (it has its own 15-trade gate).
-        final = base_size * d_factor * t_mult * k_factor * m_score * r_factor
-
-    # ── Guardrails ────────────────────────────────────────────────────────────
-    max_size = base_size * MAX_POSITION_SCALE
-    final = max(MIN_POSITION_USD, min(final, max_size))
-
-    return round(final, 2)
-
-
-def get_sizing_breakdown(
-    strategy: str,
-    symbol: str,
-    base_size: float,
-    confidence: float,
-    paper: Optional[bool] = None,
-    funding_rate: float = 0.0,
-) -> dict:
-    """
-    Return a full breakdown of all multipliers for diagnostics / MCP server.
-
-    Returns dict with: base_size, v, e, d, t, k, m, final_size, adaptive, trade_count.
-    """
-    if paper is None:
-        paper = PAPER_TRADING
-
-    market = _strategy_to_market(strategy)
-    trade_count = _get_trade_count(market, paper)
-    adaptive = trade_count >= USE_ADAPTIVE_SIZING_MIN_TRADES
-
-    v_score = e_score = d_factor = t_mult = k_factor = m_score = 1.0
-
-    if adaptive:
-        try:
-            from risk.volatility_regime import get_volatility_regime
-            regime = get_volatility_regime(symbol, market=market, funding_rate=funding_rate)
-            v_score = regime['v_score']
-        except Exception:
-            v_score = 0.75
-
-    if adaptive:
-        try:
-            from data.edge_monitor import get_edge_state
-            edge_data = get_edge_state(strategy=strategy, paper=paper)
-            e_score = edge_data['sizing_multiplier']
-        except Exception:
-            e_score = 1.0
-
-    try:
-        from risk.drawdown_controller import get_heat_level
-        d_factor = get_heat_level(paper=paper)['size_factor']
-    except Exception:
-        d_factor = 1.0
-
-    t_mult = _get_time_of_day_multiplier(strategy)
-
-    try:
-        from risk.position_sizer import size_from_kelly
-        k_raw = size_from_kelly(strategy, symbol, 1.0, confidence, paper)
-        k_factor = max(0.25, min(k_raw / max(d_factor, 1e-10), 1.50))
-    except Exception:
-        k_factor = max(0.60, min(float(confidence), 1.0))
-
-    if adaptive:
-        final = base_size * v_score * e_score * d_factor * t_mult * k_factor * m_score
-    else:
-        final = base_size * d_factor * t_mult * k_factor * m_score
-
-    final = max(MIN_POSITION_USD, min(final, base_size * MAX_POSITION_SCALE))
-
-    return {
-        'base_size':   round(base_size, 2),
-        'v':           round(v_score, 4),
-        'e':           round(e_score, 4),
-        'd':           round(d_factor, 4),
-        't':           round(t_mult, 4),
-        'k':           round(k_factor, 4),
-        'm':           round(m_score, 4),
-        'final_size':  round(final, 2),
-        'adaptive':    adaptive,
-        'trade_count': trade_count,
-        'market':      market,
-    }
+        tier = 'B'
+    result = compute_size(
+        account_balance=ACCOUNT_SIZE,
+        stop_dist_pct=0.015,   # default 1.5% stop
+        quality_tier=tier,
+        paper=paper if paper is not None else PAPER_TRADING,
+    )
+    # Scale result to caller's requested base_size
+    scale = base_size / ACCOUNT_SIZE if ACCOUNT_SIZE > 0 else 1.0
+    return round(result['notional_usd'] * scale, 2)

@@ -1,1 +1,1 @@
-2026-04-01 12:01 | 66e78e0 | Let perp winners run: 4h rule only closes flat/losing positions
+2026-04-02 14:33 | 064e819 | fix(ibkr_broker): remove telegram_alert import; wire TV signals into v10_runner

@@ -3190,6 +3190,153 @@ def comp_notifications_panel():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# READINESS TRACKER
+# ══════════════════════════════════════════════════════════════════════════════
+
+def comp_readiness_panel() -> None:
+    """Readiness tracking metrics — informational only, not a gate."""
+
+    # ── Single DB query pulls everything needed ────────────────────────────────
+    clean_count      = "—"
+    clean_wr         = "—"
+    clean_pf         = "—"
+    worst_day        = "—"
+    days_running     = "—"
+    econ_veto_rate   = "—"
+    kill_switch_14d  = "—"
+
+    try:
+        import sqlite3 as _sq
+        conn = _sq.connect(_DB, timeout=3)
+        conn.row_factory = _sq.Row
+
+        # ── Clean trade stats ──────────────────────────────────────────────────
+        row = conn.execute("""
+            SELECT
+                COUNT(*)                                        AS total,
+                SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END)  AS wins,
+                SUM(CASE WHEN pnl_usd > 0 THEN pnl_usd ELSE 0 END) AS gross_win,
+                SUM(CASE WHEN pnl_usd < 0 THEN ABS(pnl_usd) ELSE 0 END) AS gross_loss,
+                MIN(ts)                                         AS first_ts
+            FROM trades
+            WHERE source IN ('clean_paper_v10', 'live_v10')
+              AND action = 'SELL'
+        """).fetchone()
+
+        if row and row["total"] and row["total"] > 0:
+            n      = int(row["total"])
+            wins   = int(row["wins"] or 0)
+            gw     = float(row["gross_win"] or 0)
+            gl     = float(row["gross_loss"] or 0)
+            first  = row["first_ts"]
+
+            clean_count = str(n)
+            clean_wr    = f"{wins / n:.1%}" if n > 0 else "—"
+            clean_pf    = f"{gw / gl:.2f}x" if gl > 0 else ("∞" if gw > 0 else "—")
+
+            # Days since first clean trade
+            if first:
+                try:
+                    dt_first = datetime.fromisoformat(first)
+                    if not dt_first.tzinfo:
+                        dt_first = dt_first.replace(tzinfo=_tz.utc)
+                    days_running = str(int((datetime.now(_tz.utc) - dt_first).total_seconds() / 86400))
+                except Exception:
+                    pass
+
+        # ── Worst single day (clean trades) ───────────────────────────────────
+        day_row = conn.execute("""
+            SELECT MIN(day_pnl) AS worst
+            FROM (
+                SELECT DATE(ts) AS d, SUM(pnl_usd) AS day_pnl
+                FROM trades
+                WHERE source IN ('clean_paper_v10', 'live_v10')
+                  AND action = 'SELL'
+                GROUP BY DATE(ts)
+            )
+        """).fetchone()
+
+        if day_row and day_row["worst"] is not None:
+            pct = float(day_row["worst"]) / ACCOUNT_SIZE * 100
+            worst_day = f"{pct:.2f}%"
+
+        # ── Economics gate veto rate (last 7 days) ────────────────────────────
+        veto_row = conn.execute("""
+            SELECT
+                SUM(CASE WHEN source = 'v10_econ_veto' THEN 1 ELSE 0 END) AS vetos,
+                COUNT(*) AS attempts
+            FROM system_events
+            WHERE source IN ('v10_econ_veto', 'v10_entry_attempt')
+              AND ts >= DATETIME('now', '-7 days')
+        """).fetchone()
+
+        if veto_row and veto_row["attempts"] and veto_row["attempts"] > 0:
+            vetos    = int(veto_row["vetos"] or 0)
+            attempts = int(veto_row["attempts"])
+            econ_veto_rate = f"{vetos / attempts:.1%}"
+        else:
+            econ_veto_rate = "no data"
+
+        # ── Kill switch triggers (14d) ─────────────────────────────────────────
+        ks_row = conn.execute("""
+            SELECT COUNT(*) AS cnt
+            FROM kill_switch_log
+            WHERE ts >= DATETIME('now', '-14 days')
+        """).fetchone()
+
+        if ks_row is not None:
+            kill_switch_14d = str(int(ks_row["cnt"] or 0))
+
+        conn.close()
+
+    except Exception:
+        pass  # Leave all values as "—" on any DB error
+
+    # ── Render ─────────────────────────────────────────────────────────────────
+    st.markdown(
+        f'<div style="font-size:11px;color:{TEXT3};margin-bottom:6px;'
+        f'font-style:italic;line-height:1.5;">'
+        f'Owner decides go-live timing. These are informational readings only.</div>',
+        unsafe_allow_html=True,
+    )
+
+    # 2-column grid of metric cards
+    col_a, col_b = st.columns(2)
+
+    def _rmet(col, label, value, note=""):
+        with col:
+            st.metric(label=label, value=value, help=note if note else None)
+
+    _rmet(col_a, "Clean Trades",
+          clean_count,
+          "COUNT of SELL-side trades with source = clean_paper_v10 or live_v10")
+    _rmet(col_b, "Clean Win Rate",
+          clean_wr,
+          "Wins / total from clean trades only")
+    _rmet(col_a, "Clean Profit Factor",
+          clean_pf,
+          "Gross wins / gross losses from clean trades. >1.0 = profitable on average")
+    _rmet(col_b, "Worst Single Day",
+          worst_day,
+          "Min daily P&L from clean trades as % of account size")
+    _rmet(col_a, "Days Running (clean)",
+          days_running,
+          "Calendar days since first clean_paper_v10 / live_v10 trade")
+    _rmet(col_b, "Econ Gate Veto Rate (7d)",
+          econ_veto_rate,
+          "v10_econ_veto events / total entry attempts in last 7 days")
+    _rmet(col_a, "Kill Switch Triggers (14d)",
+          kill_switch_14d,
+          "Rows in kill_switch_log with ts > now - 14 days")
+
+    # Gold separator line
+    st.markdown(
+        f'<div style="height:1px;background:{BORDER};margin-top:10px;"></div>',
+        unsafe_allow_html=True,
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # MAIN
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -3283,6 +3430,8 @@ def main():
         comp_chat()
         st.markdown('<div style="height:24px;"></div>', unsafe_allow_html=True)
         expander_debates()
+        with st.expander("READINESS TRACKER"):
+            comp_readiness_panel()
         expander_notifications()
         expander_intelligence()
         expander_controls()

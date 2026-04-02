@@ -424,14 +424,8 @@ def score(
     tech_w, ml_w = _composite_weights(live_trade_days)
     composite = round(tech_w * tech_score + ml_w * ml_score, 2)
 
-    # Entry threshold — lower by 15 pts in paper mode (fewer data feeds available)
+    # Same threshold in paper and live — paper must meet live standards
     threshold = _ENTRY_THRESHOLDS.get(regime, 65)
-    try:
-        from config import PAPER_TRADING
-        if PAPER_TRADING:
-            threshold = max(40, threshold - 20)
-    except Exception:
-        pass
     should_enter = composite >= threshold
 
     # Human-readable summary

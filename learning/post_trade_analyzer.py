@@ -161,7 +161,7 @@ def analyze_closed_trade(
     exit_reason: str,
     market_data_at_entry: dict,
     agent_votes: Optional[dict] = None,
-    source: str = 'live',
+    source: str = 'paper',
     paper: bool = True,
     trade_ref: str = '',
     mae_pct: float = 0,

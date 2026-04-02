@@ -413,6 +413,42 @@ def _attempt_entry(candidate, symbol, direction, balance, deployed_usd,
     if atr_7 <= 0:
         atr_7 = current_price * 0.015   # 1.5% floor
 
+    # ── Economics gate — run before expensive feature building ──────────────
+    try:
+        from risk.economics_gate import check as economics_check
+        atr_pct = atr_7 / current_price if current_price > 0 else 0.015
+        econ = economics_check(
+            symbol=symbol,
+            direction=direction,
+            current_price=current_price,
+            atr_pct=atr_pct,
+            funding_rate=float(candidate.get('funding_rate', 0.0)),
+            spread_pct=float(candidate.get('spread_pct', 0.001)),
+            volume_24h_usd=float(candidate.get('volume_24h_usd', 50_000_000)),
+            leverage=3,
+            account_balance=balance,
+        )
+        # Inject gate outputs back into candidate for downstream sizing
+        candidate['edge_score'] = econ.get('edge_score', 0.5)
+        candidate['quality_tier'] = econ.get('quality_tier', 'B')
+
+        if not econ.get('approved', True):
+            reason = econ.get('reject_reason', 'economics veto')
+            logger.info(f'[v10] {symbol} {direction} ECONOMICS VETO: {reason} '
+                        f'(ev={econ.get("ev_pct", 0)*100:.3f}% '
+                        f'fees={econ.get("fee_drag_pct", 0)*100:.3f}%)')
+            if ne is not None:
+                try:
+                    ne.notify_rejection(symbol=symbol, direction=direction,
+                                        reason=f'economics: {reason}')
+                except Exception:
+                    pass
+            return
+    except ImportError:
+        pass   # gate not yet available — allow through, log once
+    except Exception as e:
+        logger.debug(f'[v10] economics gate error {symbol}: {e}')
+
     # Build 57-feature vector
     features = build_features(df, symbol)
 

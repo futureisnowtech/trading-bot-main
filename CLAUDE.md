@@ -30,7 +30,7 @@ A fully autonomous AI-powered trading system that:
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
 
-## Current Version: v10.0 (2026-04-01: Phases 1–15 complete — ready for paper validation)
+## Current Version: v10.1 (2026-04-02: Live-readiness overhaul — Bybit migration, clean data, economics gate)
 
 **v10 Build Summary (feature/v10-rebuild branch):**
 
@@ -52,36 +52,51 @@ A fully autonomous AI-powered trading system that:
 | 14 | Portfolio backtest structural validation | ✅ |
 | 15 | Readiness checker + CLAUDE.md update | ✅ |
 | 16 | v10 scheduler wired (v10_runner.py) + main.py updated + 1-day paper req | ✅ |
+| 17 | Live-readiness overhaul: Bybit migration, economics gate, clean ML data, sizer simplification | ✅ |
 
-**Key v10 architectural decisions (final):**
+**Key v10.1 architectural decisions:**
 - 57 features (not 47 — counted 8+6+5+7+4+5+6+3+5+4+4=57 across 11 groups)
 - 3-agent debate → two-tower signal engine (no agent overhead)
 - 4h time exit → thesis score exit (Priority 3 in 6-priority stack)
 - Telegram → notifications/notification_engine.py (SQLite, dashboard panel)
 - XGBoost 60% + LightGBM 40% ensemble (XGBoost needs `brew install libomp`)
-- Kelly 1/3 → 1/2 path based on trade count and Sharpe
+- Sizing: 3-factor formula (base_risk × quality_mult × heat_factor), not 6-factor chain
 - Default 3x leverage, max 10x (strict gates)
 - ISOLATED margin on all perp positions (never CROSS)
-- Go-live: `python3 scripts/check_v10_readiness.py`
+- **Execution venue: Bybit USDT perps** (via `execution/bybit_broker.py`, pybit v5)
+- **MES venue: IBKR** (via `execution/ibkr_broker.py`, ib_insync) — paper port 7497
+- **Data source: Bybit V5 REST API** — no Binance, no CoinGecko, no yfinance for execution paths
+- **Pre-trade gate: economics_gate.py** — models fees, funding, spread before every entry
+- **Paper = live thresholds** — identical signal thresholds in both modes
+- **ML training data**: clean from 2026-04-02; all prior data tagged `pre_v10_contaminated`
 - Weekly report: `python3 scripts/weekly_report.py`
+- DB migration: `python3 scripts/migrate_clean_start.py` (already run 2026-04-02)
 
-**Go-live criteria (all must pass):**
-1. ML Brier score < 0.22
-2. ≥1 RBI strategy graduated from incubation
-3. Zero kill switch triggers in paper period
-4. Cost per profitable trade < 25% of average win
-5. 1+ day paper trading on v10
-6. Win rate ≥ 52%
+**Go-live readiness (tracked in dashboard SYSTEM tab → READINESS TRACKER):**
+Owner decides when to go live. These are informational readings, not system gates:
+- Clean trade count (source=clean_paper_v10 or live_v10)
+- Win rate on clean trades
+- Profit factor on clean trades
+- Worst single day as % of account
+- Days running on clean data
+- Economics gate veto rate
+- Kill switch triggers (14d)
 
-**v10 paper trading LIVE as of 2026-04-02** on `feature/v10-rebuild`.
-Check readiness: `python3 scripts/check_v10_readiness.py --detailed`
+**v10.1 clean paper trading started 2026-04-02** on `feature/v10-rebuild`.
 
-**US geo-block workarounds applied (2026-04-02):**
-- `scanner.py`: yfinance fallback for 15m klines; drops incomplete current bar
-- `signal_engine.py`: paper mode threshold -20pts (RANGING 68→48, TRENDING 62→42)
-- `perps_engine.py`: paper trades proceed without live Binance broker
-- `position_manager.py`: kill floor = 75% of ACCOUNT_SIZE (not hardcoded $7,500)
-- `main.py`: full logging to logs/bot.log; yfinance errors silenced
+**v10.1 changes vs v10.0:**
+- `scanner.py`: Bybit V5 native (no Binance/CoinGecko/yfinance)
+- `signal_engine.py`: paper threshold reduction REMOVED
+- `execution/bybit_broker.py`: NEW — pybit v5 perp execution
+- `execution/ibkr_broker.py`: fixed telegram import → notification_engine
+- `risk/economics_gate.py`: NEW — pre-trade fee/funding EV veto
+- `risk/unified_sizer.py`: replaced 6-factor chain with 3-factor formula
+- `scheduler/v10_runner.py`: TV signals wired, hardcodes fixed, economics gate wired
+- `ml/walk_forward_trainer.py`: training filter excludes contaminated data
+- `learning/post_trade_analyzer.py`: source default changed to 'paper'
+- Dead files deleted: tradovate_broker, coinbase_broker, binance_spot_broker, ai_agents remnants, Lane 3 files
+- v9 schedulers archived: v9_crypto_scanner.py.archived, v9_perp_scanner.py.archived, v9_exit_monitor.py.archived
+- `dashboard/app.py`: READINESS TRACKER panel added (SYSTEM tab)
 
 **Bug fixes + features applied (2026-04-02):**
 - `execution/ibkr_broker.py`: removed dead `from alerts.telegram_alert import ...` import

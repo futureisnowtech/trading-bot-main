@@ -186,13 +186,6 @@ def get_today_pnl() -> float:
     return r.get("v") or 0
 
 
-def get_scanner_status() -> dict:
-    try:
-        from scanner import get_scan_stats
-        return get_scan_stats()
-    except Exception:
-        return {}
-
 
 def get_recent_events(limit: int = 8) -> list:
     return _q("""
@@ -203,6 +196,29 @@ def get_recent_events(limit: int = 8) -> list:
 
 
 LOG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs", "bot.log")
+
+
+def get_last_scan_age() -> int:
+    """
+    Read bot.log to find the timestamp of the most recent '[v10] scan:' line.
+    Returns seconds since that line, or 9999 if not found.
+    """
+    import re
+    try:
+        with open(LOG_PATH, "r") as f:
+            lines = f.readlines()[-500:]
+    except Exception:
+        return 9999
+    for line in reversed(lines):
+        if "[v10] scan:" in line:
+            m = re.match(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", line)
+            if m:
+                try:
+                    dt = datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S")
+                    return int((datetime.now() - dt).total_seconds())
+                except Exception:
+                    pass
+    return 9999
 
 def get_bot_activity(n: int = 30) -> list:
     """
@@ -326,10 +342,7 @@ def _time_ago(ts_str: str) -> str:
 # ── status bar ────────────────────────────────────────────────────────────────
 
 def render_status_bar():
-    scan  = get_scanner_status()
-    age   = int(scan.get("last_scan_age_s", 0))
-    n     = scan.get("candidate_count", 0)
-    src   = scan.get("data_source", "—")
+    age   = get_last_scan_age()
     today = get_today_pnl()
     tc    = _pnl_color(today)
 
@@ -346,9 +359,8 @@ def render_status_bar():
         f'<span style="color:{TEXT2};">v10.1</span>'
         f'</div>'
 
-        f'<div style="color:{TEXT2};">scanner · {src} · '
-        f'<span style="color:{TEXT};">{age}s ago</span> · '
-        f'<span style="color:{"" if n else TEXT3};">{n} candidates</span></div>'
+        f'<div style="color:{TEXT2};">scanner · kraken_futures · '
+        f'<span style="color:{GREEN if age < 360 else (AMBER if age < 600 else RED)};">{age}s ago</span></div>'
 
         f'<div style="color:{TEXT2};">today · '
         f'<span style="font-weight:700;color:{tc};font-family:{MONO};">{_fmt_pnl(today)}</span>'
@@ -378,8 +390,7 @@ KIND_STYLE = {
 
 @st.fragment(run_every=5)
 def render_live_feed():
-    scan  = get_scanner_status()
-    age   = int(scan.get("last_scan_age_s", 0))
+    age      = get_last_scan_age()
     activity = get_bot_activity(20)
 
     # ── pulse header ──────────────────────────────────────────────────────────

@@ -3038,6 +3038,158 @@ def comp_signal_intelligence():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# V10 NOTIFICATION PANEL
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Severity → display color
+_NOTIF_SEV_COLOR = {
+    'INFO':     '#10c98f',   # GREEN
+    'WARNING':  '#f5a623',   # AMBER
+    'CRITICAL': '#e74c3c',   # RED
+}
+# Category → short label + icon
+_NOTIF_CAT_META = {
+    'TRADE_OPEN':  ('📈', '#10c98f'),
+    'TRADE_CLOSE': ('📉', '#f5a623'),
+    'SIGNAL':      ('⚡', '#7b8ec8'),
+    'RISK':        ('🛡️', '#e74c3c'),
+    'RBI':         ('🔬', '#a78bfa'),
+    'ML':          ('🤖', '#38bdf8'),
+    'KILL_SWITCH': ('🚨', '#e74c3c'),
+    'SYSTEM':      ('⚙️', '#9ca3af'),
+}
+
+
+def comp_notifications_panel():
+    """
+    v10 Notification feed — right-side panel with filter bar + color-coded events.
+    Reads from notifications table via notification_engine.
+    Auto-refreshes with the rest of the page.
+    """
+    try:
+        from notifications.notification_engine import (
+            get_notifications, get_unread_count, get_category_counts,
+            mark_all_read, ALL_CATEGORIES,
+        )
+    except Exception:
+        st.markdown(
+            f'<div style="color:{TEXT3};font-size:12px;">Notifications unavailable</div>',
+            unsafe_allow_html=True
+        )
+        return
+
+    # Filter state stored in session
+    if 'notif_filter' not in st.session_state:
+        st.session_state.notif_filter = 'ALL'
+
+    total_unread = get_unread_count()
+    title_badge = (f' <span style="background:{RED};color:white;'
+                   f'font-size:9px;padding:1px 5px;border-radius:8px;'
+                   f'font-weight:700;">{total_unread}</span>'
+                   if total_unread > 0 else '')
+
+    st.markdown(
+        f'<div style="font-size:11px;font-weight:700;letter-spacing:3px;'
+        f'text-transform:uppercase;color:{TEXT3};margin-bottom:8px;">'
+        f'NOTIFICATIONS{title_badge}</div>',
+        unsafe_allow_html=True,
+    )
+
+    # Filter bar: ALL + 5 dashboard-relevant categories
+    filter_cats = ['ALL', 'TRADE_OPEN', 'TRADE_CLOSE', 'SIGNAL', 'RISK', 'RBI']
+    cat_counts = get_category_counts()
+
+    filter_cols = st.columns(len(filter_cats))
+    for i, cat in enumerate(filter_cats):
+        with filter_cols[i]:
+            label = cat.replace('_', ' ')
+            cnt = cat_counts.get(cat, 0) if cat != 'ALL' else total_unread
+            badge = f' ({cnt})' if cnt > 0 else ''
+            active = st.session_state.notif_filter == cat
+            btn_style = (f'background:{BORDER2};' if active else f'background:{SURFACE};')
+            if st.button(
+                f'{label}{badge}',
+                key=f'notif_filter_{cat}',
+                use_container_width=True,
+            ):
+                st.session_state.notif_filter = cat
+
+    st.markdown('<div style="height:6px;"></div>', unsafe_allow_html=True)
+
+    # Fetch notifications
+    selected = st.session_state.notif_filter
+    notifs = get_notifications(limit=50, category_filter=(None if selected == 'ALL' else selected))
+
+    if not notifs:
+        st.markdown(
+            f'<div style="color:{TEXT3};font-size:12px;text-align:center;'
+            f'padding:20px 0;">No notifications</div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    # Mark-all-read button
+    if total_unread > 0:
+        if st.button('Mark all read', key='notif_mark_all'):
+            mark_all_read(None if selected == 'ALL' else selected)
+
+    # Render notification cards
+    html_parts = []
+    for n in notifs:
+        cat   = n.get('category', 'SYSTEM')
+        sev   = n.get('severity', 'INFO')
+        title = n.get('title', '')
+        msg   = n.get('message', '')
+        why   = n.get('why', {})
+        ts    = n.get('ts', 0)
+        read  = n.get('read', False)
+
+        icon, cat_color = _NOTIF_CAT_META.get(cat, ('•', TEXT3))
+        sev_color = _NOTIF_SEV_COLOR.get(sev, TEXT3)
+        opacity = '0.55' if read else '1.0'
+
+        # Format timestamp
+        try:
+            import pytz as _pytz
+            dt = datetime.fromtimestamp(ts, tz=_pytz.timezone(MARKET_TIMEZONE))
+            ts_str = dt.strftime('%H:%M:%S')
+        except Exception:
+            ts_str = ''
+
+        # WHY block (top 3 reasons + regime + score)
+        why_html = ''
+        top_3 = why.get('top_3_reasons', [])
+        regime = why.get('regime', '')
+        score  = why.get('score', 0)
+        if top_3 or regime:
+            reasons = '  ·  '.join(top_3[:3])
+            score_str = f'score={score:.0f}' if score else ''
+            regime_str = f'[{regime}]' if regime else ''
+            why_html = (
+                f'<div style="font-size:10px;color:{TEXT3};margin-top:2px;">'
+                f'{regime_str} {score_str} {reasons}</div>'
+            )
+
+        html_parts.append(
+            f'<div style="padding:7px 0;border-bottom:1px solid {BORDER};opacity:{opacity};">'
+            f'<div style="display:flex;align-items:baseline;gap:6px;">'
+            f'<span style="font-size:12px;">{icon}</span>'
+            f'<span style="font-size:11px;font-weight:700;color:{sev_color};flex:1;">'
+            f'{title}</span>'
+            f'<span style="font-size:9px;color:{TEXT3};white-space:nowrap;">{ts_str}</span>'
+            f'</div>'
+            f'<div style="font-size:11px;color:{TEXT2};padding-left:18px;">{msg}</div>'
+            f'{why_html}'
+            f'</div>'
+        )
+
+    st.markdown(
+        f'<div style="max-height:520px;overflow-y:auto;">{"".join(html_parts)}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # MAIN
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -3068,7 +3220,17 @@ def main():
                  "Updates every 30 seconds.")
             comp_signal_intelligence()
 
-        comp_markets()
+        # Notification feed — right-side panel (v10)
+        main_col, notif_col = st.columns([3, 2])
+        with main_col:
+            comp_markets()
+        with notif_col:
+            _sec("NOTIFICATION FEED",
+                 "Real-time event stream: trade opens/closes, signals, risk warnings, "
+                 "RBI incubation events, ML retrains, and kill switch alerts. "
+                 "Every event includes a WHY block with top 3 reasons, regime state, "
+                 "and composite signal score. Filter by category below.")
+            comp_notifications_panel()
 
     with tab2:
         st.markdown(

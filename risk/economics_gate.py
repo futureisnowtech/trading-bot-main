@@ -46,7 +46,7 @@ _MIN_STOP_DIST_PCT  = 0.004   # ATR too small → fees consume stop distance
 _MAX_STOP_DIST_PCT  = 0.05    # ATR too large → stop is a prayer
 _MAX_FEE_TO_WIN_PCT = 0.35    # fees must not eat > 35% of gross target
 _MIN_NET_RR         = 1.2     # net R:R (after fees) must be ≥ 1.2
-_MIN_VOLUME_USD     = 10_000_000  # minimum 24h USD volume ($10M)
+_MIN_VOLUME_USD     = 3_000_000   # $3M — Kraken is smaller than Binance ($10M was calibrated for Binance)
 
 # ── Quality tier thresholds ───────────────────────────────────────────────────
 _TIER_APLUS_EV  = 0.008    # 0.8% net EV → A+

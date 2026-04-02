@@ -46,14 +46,17 @@ _REGIME_ML_MULT = {
 
 # ── Entry thresholds by regime ────────────────────────────────────────────────
 _ENTRY_THRESHOLDS = {
-    'TRENDING_UP':   62,
-    'TRENDING_DOWN': 62,
-    'RANGING':       68,
-    'HIGH_VOL':      72,
-    'LOW_VOL':       58,
-    'ACCUMULATION':  62,
-    'DISTRIBUTION':  62,
-    'UNKNOWN':       65,
+    # All thresholds temporarily lowered for OHLCV-only operation.
+    # Max achievable score with OHLCV alone: ~54 (MACD+RSI+no-funding-penalty).
+    # Raise back to 58/62/65/etc once CVD, OB, whale, options, liq feeds are wired.
+    'TRENDING_UP':   47,
+    'TRENDING_DOWN': 47,
+    'RANGING':       47,
+    'HIGH_VOL':      52,    # keep slightly higher — high-vol entries need stronger signal
+    'LOW_VOL':       47,
+    'ACCUMULATION':  47,
+    'DISTRIBUTION':  47,
+    'UNKNOWN':       47,
 }
 
 

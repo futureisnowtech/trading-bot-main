@@ -46,6 +46,7 @@ except ImportError:
 _DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'logs', 'price_archive.db')
 _BINANCE_FUTURES_BASE = 'https://fapi.binance.com'
 _BINANCE_SPOT_BASE = 'https://api.binance.com'
+_KRAKEN_CHARTS_BASE = 'https://futures.kraken.com/api/charts/v1/trade'
 _COVERAGE_THRESHOLD = 0.80
 _MAX_CANDLES_PER_REQUEST = 1500
 
@@ -66,6 +67,12 @@ _YF_INTERVAL = {
 }
 
 _lock = threading.RLock()
+
+# Kraken interval names
+_KRAKEN_INTERVAL = {
+    '1m': '1m', '5m': '5m', '15m': '15m',
+    '1h': '1h', '4h': '4h', '1d': '1d',
+}
 
 
 # ── Database setup ─────────────────────────────────────────────────────────────
@@ -118,6 +125,41 @@ def _fetch_binance(symbol: str, interval: str, start_ms: int, limit: int) -> Opt
         except Exception:
             continue
     return None
+
+
+def _fetch_kraken(symbol: str, interval: str, limit: int) -> Optional[pd.DataFrame]:
+    """Fetch OHLCV from Kraken Futures charts API for PF_ symbols."""
+    import urllib.request, json as _json
+    kraken_interval = _KRAKEN_INTERVAL.get(interval, '1h')
+    bar_seconds = _TF_MS.get(interval, 3_600_000) // 1000
+    from_ts = int(time.time()) - (limit + 5) * bar_seconds
+    url = f'{_KRAKEN_CHARTS_BASE}/{symbol}/{kraken_interval}?from={from_ts}'
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'AlgoBot/1.0'})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = _json.loads(resp.read())
+        candles = data.get('candles', [])
+        if not candles:
+            return None
+        rows = []
+        for c in candles:
+            # Kraken candle: {time (ms), open, high, low, close, volume} — all strings
+            rows.append([
+                int(c['time']),
+                float(c['open']),
+                float(c['high']),
+                float(c['low']),
+                float(c['close']),
+                float(c.get('volume', 0)),
+            ])
+        _save_to_db(symbol, interval, rows)
+        df = pd.DataFrame(rows, columns=['open_time', 'open', 'high', 'low', 'close', 'volume'])
+        df['open_time'] = pd.to_datetime(df['open_time'].astype(int), unit='ms', utc=True)
+        df = df.set_index('open_time')
+        return df.tail(limit)
+    except Exception as e:
+        logger.debug(f'[historical_data] Kraken fetch failed for {symbol} {interval}: {e}')
+        return None
 
 
 def _fetch_yfinance(symbol: str, interval: str, limit: int) -> Optional[pd.DataFrame]:
@@ -208,6 +250,14 @@ def get_candles(symbol: str, timeframe: str = '5m', limit: int = 200) -> pd.Data
     """
     if timeframe not in _TF_MS:
         logger.error(f'[historical_data] Unknown timeframe: {timeframe}')
+        return pd.DataFrame()
+
+    # Kraken Futures symbols: bypass Binance/yfinance entirely
+    if symbol.startswith('PF_') or symbol.startswith('PI_'):
+        df = _fetch_kraken(symbol, timeframe, limit)
+        if df is not None and not df.empty:
+            return df
+        logger.warning(f'[historical_data] Failed to fetch {symbol} {timeframe}')
         return pd.DataFrame()
 
     bar_ms = _TF_MS[timeframe]

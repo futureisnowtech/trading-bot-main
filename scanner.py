@@ -67,12 +67,12 @@ _KRAKEN_INTERVALS = {'1m', '5m', '15m', '30m', '1h', '4h', '1d', '1w'}
 # Filter thresholds
 # ---------------------------------------------------------------------------
 _MIN_VOLUME_24H_USD  = 5_000_000    # volumeQuote (USD) — Kraken is smaller than Bybit
-_MIN_VOL_SPIKE       = 1.2
-_MIN_PRICE_MOVE_1H   = 0.5          # % — 4 bars of 15m
-_MIN_ADX_15M         = 20
-_MIN_OB_DEPTH_USD    = 30_000
+_MIN_VOL_SPIKE       = 0.4           # Kraken is smaller exchange — 0.4× avg is sufficient signal
+_MIN_PRICE_MOVE_1H   = 0.15         # % — 4 bars of 15m (Bybit was 0.5%, Kraken quieter)
+_MIN_ADX_15M         = 15
+_MIN_OB_DEPTH_USD    = 3_000              # Kraken is smaller exchange than Binance
 _MAX_SPREAD_PCT      = 0.15
-_MIN_EXPECTED_PROFIT = 2.00         # $
+_MIN_EXPECTED_PROFIT = 0.50         # $ — Kraken positions are smaller; $0.50 min positive EV
 _TOP_N               = 15
 
 # EV fee model — Kraken taker 0.065% × 2 sides = 0.13%
@@ -243,10 +243,16 @@ def _calc_adx(highs: List[float], lows: List[float], closes: List[float],
     di_minus = 100.0 * dmm_s / (atr_s + eps)
     dx       = 100.0 * np.abs(di_plus - di_minus) / (di_plus + di_minus + eps)
 
-    adx_vals = _smooth(dx[period - 1:], period)
-    if len(adx_vals) == 0:
+    # ADX seed = mean of first 14 DX values (Wilder's definition), not raw sum
+    dx_slice = dx[period - 1:]
+    if len(dx_slice) < period:
         return 20.0
-    return float(adx_vals[-1])
+    adx_s = np.zeros(len(dx_slice))
+    adx_s[period - 1] = dx_slice[:period].mean()
+    for i in range(period, len(dx_slice)):
+        adx_s[i] = adx_s[i - 1] - adx_s[i - 1] / period + dx_slice[i]
+    val = adx_s[-1]
+    return float(min(val, 100.0))  # ADX is always 0-100
 
 
 def _vol_spike(volumes: List[float], window: int = 20) -> float:
@@ -371,9 +377,9 @@ def _step2_momentum(candidates: List[Dict]) -> List[Dict]:
             # ADX(14) on 15m
             adx = _calc_adx(highs, lows, closes, 14)
 
-            if (vs >= _MIN_VOL_SPIKE
-                    and price_move_1h >= _MIN_PRICE_MOVE_1H
-                    and adx >= _MIN_ADX_15M):
+            # Pass if EITHER vol spike OR price move shows activity (plus ADX for trend)
+            activity = (vs >= _MIN_VOL_SPIKE) or (price_move_1h >= _MIN_PRICE_MOVE_1H)
+            if activity and adx >= _MIN_ADX_15M:
                 # Direction from momentum of last 3 closed bars
                 recent_move = (closes[-1] - closes[-4]
                                if len(closes) >= 4 else closes[-1] - closes[0])
@@ -499,9 +505,11 @@ def _step4_expected_value(candidates: List[Dict],
             # Fee model: Kraken taker 0.065% × 2 sides = 0.13%
             fee_pct = _ROUND_TRIP_FEE_PCT
 
-            # Funding cost: funding_rate is a decimal fraction per ~8h period
-            # abs() because cost applies regardless of direction vs rate sign
-            funding_cost = abs(c.get('funding_rate', 0.0)) * _FUNDING_HOLD_PERIODS
+            # Funding cost: Kraken fundingRate is ANNUALIZED as a decimal fraction
+            # (e.g. -0.56 = -56%/year). Convert to per-8h cost:
+            #   / (365 * 3)  →  per-8h rate  ×  expected hold periods
+            annualized_rate = abs(c.get('funding_rate', 0.0))
+            funding_cost = (annualized_rate / (365 * 3)) * _FUNDING_HOLD_PERIODS
 
             # Net distances after costs (fractions of price)
             net_win  = target_pct - fee_pct - max(0.0, funding_cost)

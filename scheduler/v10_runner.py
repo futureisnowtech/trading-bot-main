@@ -397,12 +397,13 @@ def _attempt_entry(candidate, symbol, direction, balance, deployed_usd,
                    classify_from_features, ne, get_size_multiplier):
     """Try to enter a position for one candidate. All exceptions propagate to caller."""
     if get_candles is None or build_features is None:
+        logger.warning(f'[v10] {symbol} — get_candles={get_candles is not None} build_features={build_features is not None} — skip')
         return
 
     # Fetch 1h candles for feature building
     df = get_candles(symbol, '1h', 200)
     if df is None or len(df) < 20:
-        logger.debug(f'[v10] {symbol} — insufficient candle data, skip')
+        logger.info(f'[v10] {symbol} — insufficient candle data ({len(df) if df is not None else 0} bars), skip')
         return
 
     current_price = float(df['close'].iloc[-1])
@@ -423,9 +424,11 @@ def _attempt_entry(candidate, symbol, direction, balance, deployed_usd,
             direction=direction,
             current_price=current_price,
             atr_pct=atr_pct,
-            funding_rate=float(candidate.get('funding_rate', 0.0)),
-            spread_pct=float(candidate.get('spread_pct', 0.001)),
-            volume_24h_usd=float(candidate.get('volume_24h_usd', 50_000_000)),
+            # Kraken fundingRate is annualized fraction; gate expects per-8h fraction
+            funding_rate=float(candidate.get('funding_rate', 0.0)) / (365 * 3),
+            # scanner.spread_pct is in PERCENT (e.g. 0.04 = 0.04%); gate expects fraction
+            spread_pct=float(candidate.get('spread_pct', 0.1)) / 100.0,
+            volume_24h_usd=float(candidate.get('vol_usd', candidate.get('volume_24h_usd', 50_000_000))),
             leverage=3,
             account_balance=balance,
         )
@@ -452,6 +455,16 @@ def _attempt_entry(candidate, symbol, direction, balance, deployed_usd,
 
     # Build 57-feature vector
     features = build_features(df, symbol)
+
+    # Inject scanner-derived features not available from OHLCV alone
+    # vol_spike from Kraken scanner (already computed from 15m klines)
+    scanner_vol_spike = float(candidate.get('vol_spike', 0.0))
+    if scanner_vol_spike > 0:
+        features['vol_spike_5c'] = scanner_vol_spike
+    # funding_rate: Kraken API value is per-8h period (e.g. 0.002 = 0.2%/8h)
+    # Normalize to [-1, 1] range: divide by 0.005 (0.5%/8h = extreme)
+    scanner_funding = float(candidate.get('funding_rate', 0.0))
+    features['deriv_funding_rate'] = float(max(-1.0, min(1.0, scanner_funding / 0.005)))
 
     # Classify regime
     regime = 'UNKNOWN'
@@ -483,8 +496,8 @@ def _attempt_entry(candidate, symbol, direction, balance, deployed_usd,
                 )
             except Exception:
                 pass
-        logger.debug(f'[v10] {symbol} {direction} score={composite:.1f} < '
-                     f'threshold={threshold:.1f}, skip')
+        logger.info(f'[v10] {symbol} {direction} score={composite:.1f} < '
+                    f'threshold={threshold:.1f} (tech={result.get("technical_score",0):.1f} ml={result.get("ml_score",50):.1f}), skip')
         return
 
     logger.info(f'[v10] {symbol} {direction} ENTRY SIGNAL: '
@@ -493,6 +506,7 @@ def _attempt_entry(candidate, symbol, direction, balance, deployed_usd,
 
     # Compute position size
     if pm is None:
+        logger.warning(f'[v10] {symbol} — position_manager is None, skip')
         return
 
     regime_mult = _REGIME_SIZE_MULT.get(regime, 0.90)

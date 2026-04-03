@@ -446,6 +446,8 @@ def _attempt_entry(candidate, symbol, direction, balance, deployed_usd,
         features['wae_bearish']         = 1.0 if _last.get('wae_trend_down', False) else 0.0
         features['fisher_cross_down']   = 1.0 if _last.get('fisher_cross_down', False) else 0.0
         features['wt_overbought']       = 1.0 if _last.get('wt_overbought', False) else 0.0
+        # avwap_dev = (close - anchored_vwap) / anchored_vwap — used by ranging_mr setups
+        features['vwap_session_dist_pct'] = float(_last.get('avwap_dev', 0.0)) * 100.0
     except Exception as _e:
         logger.debug(f'[v10] indicator enrichment error {symbol}: {_e}')
 

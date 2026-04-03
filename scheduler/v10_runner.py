@@ -488,6 +488,32 @@ def _attempt_entry(candidate, symbol, direction, balance, deployed_usd,
     result = se.score(features, direction, regime, model_store=None)
     composite = result['composite_score']
 
+    # ── Bayesian conviction overlay ───────────────────────────────────────────
+    # Apply live-learned signal weights on top of composite score.
+    # dynamic_weights.get_conviction_score() returns Bayesian-adjusted pts for
+    # whichever signals are currently firing, calibrated by live win-rate data.
+    # When <10 fires per signal the Bayesian weights == priors (no-op).
+    # Once live data accumulates, this drifts away from priors and starts
+    # applying a ±5 pt nudge toward signals with demonstrated live edge.
+    try:
+        from learning.dynamic_weights import get_conviction_score as _bayesian_score
+        _bay_raw, _bay_breakdown = _bayesian_score(features, regime)
+        # Normalise: max realistic Bayesian raw ≈ 143 pts → 0-100 scale
+        _bay_norm = min(100.0, _bay_raw / 1.43)
+        # Blend: 85% original composite + 15% Bayesian conviction
+        # Weight is intentionally light — grows more material as Bayesian
+        # weights drift from priors with live trade data.
+        if _bay_raw > 0:
+            _composite_pre = composite
+            composite = round(_composite_pre * 0.85 + _bay_norm * 0.15, 1)
+            if abs(composite - _composite_pre) >= 1.0:
+                logger.debug(
+                    f'[v10] {symbol} Bayesian adj {_composite_pre:.1f}→{composite:.1f} '
+                    f'(bay_raw={_bay_raw:.0f} top={list(_bay_breakdown.keys())[:3]})'
+                )
+    except Exception as _be:
+        logger.debug(f'[v10] Bayesian overlay skipped: {_be}')
+
     # ── Step 4: Entry decision — Tier 1 setup OR Tier 2 score ───────────────
     from signal_engine import detect_primary_setup
     primary_setup = detect_primary_setup(features, direction)

@@ -317,17 +317,36 @@ def check_exits(
     # ── Priority 3: Thesis exit ───────────────────────────────────────────────
     # Tier 1 entries: exit when the specific setup conditions are no longer met.
     # Tier 2 entries: fall back to score comparison (current drops 55%+ from entry).
-    # Minimum hold: 10 minutes before thesis invalidation can fire.
-    # WAE / squeeze signals are bar-level events — they fire on one bar then go
-    # false immediately on the next bar.  Without this guard every wae_explosion
-    # entry was entering and exiting within 30 seconds (enter on bar N,
-    # position-manager next tick bar N+1 WAE gone → instant thesis exit).
-    _min_hold_secs = 600   # 10 minutes
+    # Minimum hold before thesis invalidation can fire — varies by setup type:
+    #
+    #   wae_explosion / squeeze_breakout (momentum setups):
+    #     These signals fire on ONE bar then go false immediately as MACD histograms
+    #     revert.  The trade needs time to develop the move that caused the explosion.
+    #     30-minute minimum: one full bar on 1h charts, 6 bars on 5m charts.
+    #
+    #   wt_reversal / tv_confirmed (reversal/confirmation setups):
+    #     10-minute minimum is sufficient — these are multi-bar pattern setups that
+    #     don't have the single-bar fire problem of WAE/squeeze.
+    #
+    #   ranging_mr_long / ranging_mr_short (mean-reversion):
+    #     15-minute minimum — need a few bars to confirm price is actually reverting.
+    #
+    #   Default: 10 minutes (Tier 2 score-based entries).
+    _entry_setup = position.get('entry_setup', '')
+    _MOMENTUM_SETUPS = {'wae_explosion', 'wae_explosion_short',
+                        'squeeze_breakout', 'squeeze_breakout_short'}
+    _MR_SETUPS = {'ranging_mr_long', 'ranging_mr_short'}
+    if _entry_setup in _MOMENTUM_SETUPS:
+        _min_hold_secs = 1800   # 30 minutes for WAE/squeeze momentum
+    elif _entry_setup in _MR_SETUPS:
+        _min_hold_secs = 900    # 15 minutes for mean-reversion
+    else:
+        _min_hold_secs = 600    # 10 minutes default
     _hold_elapsed  = time.time() - float(position.get('entry_ts', 0))
     _thesis_eligible = _hold_elapsed >= _min_hold_secs
 
     if current_features is not None:
-        entry_setup = position.get('entry_setup', '')
+        entry_setup = _entry_setup   # already read above for hold-time calculation
         if entry_setup and _thesis_eligible:
             try:
                 from signal_engine import check_setup_still_valid

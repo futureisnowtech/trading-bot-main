@@ -41,7 +41,7 @@ import logging_db.trade_logger  # noqa: F401 — pre-warm, prevents EDEADLK
 
 BANNER = """
 ╔══════════════════════════════════════════════════════════════════╗
-║  THE KING'S ALGO TRADING SYSTEM  v10.0                          ║
+║  THE KING'S ALGO TRADING SYSTEM  v10.1                          ║
 ║                                                                  ║
 ║  "Nothing is given. Everything is earned." — LeBron James       ║
 ║                                                                  ║
@@ -81,7 +81,7 @@ def main():
 
     print(f"  Mode:       {mode} TRADING")
     print(f"  Account:    ${ACCOUNT_SIZE}")
-    print(f"  AI Debate:  {'✅ Enabled' if ANTHROPIC_API_KEY else '⚠️ No API key — using MACD fallback'}")
+    print(f"  AI (exits): {'✅ Enabled' if ANTHROPIC_API_KEY else '⚠️ No API key — extended-thinking exits disabled'}")
     print(f"  Time:       {datetime.now(tz).strftime('%Y-%m-%d %H:%M:%S ET')}\n")
 
     if not PAPER_TRADING:

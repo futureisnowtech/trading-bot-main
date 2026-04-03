@@ -39,7 +39,11 @@ from config import (
     BINANCE_TAKER_FEE_PCT, BINANCE_MAKER_FEE_PCT,
 )
 from logging_db.trade_logger import log_trade, log_event
-from alerts.telegram_alert import alert_trade_opened, alert_trade_closed
+
+# Telegram was removed in v10 — notifications go through notification_engine only.
+# These stubs prevent import errors if any call site is still referenced.
+def alert_trade_opened(*args, **kwargs): pass
+def alert_trade_closed(*args, **kwargs): pass
 
 try:
     from binance.client import Client as BinanceClient
@@ -63,7 +67,8 @@ class BinanceBroker:
     Paper mode: uses real Binance public prices (no auth required).
     Live mode: requires BINANCE_API_KEY + BINANCE_API_SECRET in .env.
 
-    Drop-in replacement for BybitBroker — identical public API.
+    Paper mode logs to SQLite via log_trade(). Notifications go through
+    notifications/notification_engine.py (no Telegram in v10).
     """
 
     def __init__(self):

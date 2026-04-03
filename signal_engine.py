@@ -376,10 +376,13 @@ def _technical_short_score(f: Dict) -> Tuple[float, Dict]:
         components['lrsi_overbought'] = 4
 
     # KST below its signal line (bearish momentum): +8
-    # Only score this when kst_bullish is explicitly injected and False (== 0).
-    # Do NOT score when kst_bullish is absent (default 0) — that would silently
-    # give every unenriched candidate a free +8 short bias.
-    if 'kst_bullish' in f and f.get('kst_bullish', 0) == 0:
+    # Guard: require kst_bullish=0 AND kst_value < 0 (KST in negative territory).
+    # kst_bullish=0 alone fires on ~50% of bars (any time KST is below its signal
+    # line including neutral oscillations).  Adding kst_value < 0 restricts scoring
+    # to confirmed negative KST momentum — not just a mild oscillation below signal.
+    # kst_value injected by v10_runner as features['kst_value'].
+    if ('kst_bullish' in f and f.get('kst_bullish', 0) == 0
+            and f.get('kst_value', 1.0) < 0):
         score += 8
         components['kst_bearish'] = 8
 
@@ -698,8 +701,11 @@ _LONG_SETUPS = [
         'label':      'Ranging Mean-Reversion Long (VWAP reclaim)',
         # CHOP confirms ranging AND price stretched below VWAP AND Laguerre oversold
         # AND SuperTrend not actively bearish (don't catch a falling knife in a downtrend)
+        # Threshold raised from -0.15% → -0.30%: Kraken altcoin spread is 0.10-0.15%,
+        # so a 0.15% VWAP deviation is barely outside bid-ask noise.  0.30% ensures
+        # a genuine intraday dislocation, not just random price action within the spread.
         'check':      lambda f: f.get('chop_ranging', 0) > 0
-                                and f.get('vwap_session_dist_pct', 0) < -0.15
+                                and f.get('vwap_session_dist_pct', 0) < -0.30
                                 and f.get('lrsi_value', 0.5) < 0.25
                                 and f.get('supertrend_bearish', 0) == 0,
         # Thesis: price returns to VWAP OR regime shifts to trending OR ST flips down
@@ -754,8 +760,9 @@ _SHORT_SETUPS = [
         'label':      'Ranging Mean-Reversion Short (VWAP fade)',
         # CHOP confirms ranging AND price stretched above VWAP AND Laguerre overbought
         # AND SuperTrend not actively bullish
+        # Threshold raised from 0.15% → 0.30% — symmetric fix for same reason as long side.
         'check':      lambda f: f.get('chop_ranging', 0) > 0
-                                and f.get('vwap_session_dist_pct', 0) > 0.15
+                                and f.get('vwap_session_dist_pct', 0) > 0.30
                                 and f.get('lrsi_value', 0.5) > 0.75
                                 and f.get('supertrend_bullish', 0) == 0,
         # Thesis: price returns to VWAP OR regime shifts OR ST flips up

@@ -340,9 +340,26 @@ def train_walk_forward(pair_key: str = 'GENERIC', direction: str = 'LONG',
 
     from ml.feature_builder import FEATURE_NAMES
 
-    # Use proxy features from stored scores (full feature rebuild would need live data)
-    # In production, features are stored per-trade by learning_loop.py
-    # Here we synthesize from available columns for now
+    # ── KNOWN LIMITATION — 3-proxy feature training ────────────────────────────
+    # The walk-forward trainer currently trains on only 3 aggregate score columns
+    # (technical_score, ml_score, composite_score) because per-trade 57-feature
+    # snapshots are not yet persisted to the DB.
+    #
+    # CONSEQUENCE: Any model saved by this trainer will have input shape (N, 3).
+    # ModelStore.predict_proba() builds a (1, 57) array via to_array(features) and
+    # calls model.predict_proba(arr), which will fail with a shape mismatch and
+    # return None — causing signal_engine to fall back to the neutral score of 50.0.
+    # The ML tower is therefore effectively inactive (returns 50 for all candidates)
+    # until full 57-feature snapshots are stored per trade by learning_loop.py.
+    #
+    # FIX PATH: learning_loop.record_closed_trade() must store the full features dict
+    # to a trade_features table (keyed by trade_id), then _load_training_data() here
+    # joins that table and returns X with 57 columns.  Until that join is implemented,
+    # models saved here are decorative — they will always produce a prediction error
+    # on the live 57-feature input.
+    #
+    # The 3-proxy model is harmless (fails gracefully → 50.0) but wastes compute.
+    # Do not promote a model trained on proxies to production sizing decisions.
     df['won'] = df['won'].fillna(0).astype(int)
     df['pnl_usd'] = df['pnl_usd'].fillna(0).astype(float)
 
@@ -352,6 +369,11 @@ def train_walk_forward(pair_key: str = 'GENERIC', direction: str = 'LONG',
         df['ml_score'].fillna(50).values / 100,
         df['composite_score'].fillna(50).values / 100,
     ])
+    logger.warning(
+        f'[wft] {pair_key}_{direction}: training on 3-proxy features '
+        f'(not 57 — model will fail shape-check at inference, ML tower stays at 50.0 neutral). '
+        f'Wire 57-feature snapshot storage in learning_loop to activate real ML.'
+    )
     y = df['won'].values
     pnls = df['pnl_usd'].values
 

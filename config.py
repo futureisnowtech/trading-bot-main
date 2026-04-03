@@ -70,8 +70,9 @@ CRYPTO_MACD3_FAST: int = 6
 CRYPTO_MACD3_SLOW: int = 20
 CRYPTO_MACD3_SIGNAL: int = 5
 CRYPTO_MACD3_HISTOGRAM_THRESHOLD: float = 0.0
-COINBASE_TAKER_FEE_PCT: float = 0.006
-COINBASE_MAKER_FEE_PCT: float = 0.004
+# Legacy fee constants — v10 uses Kraken fees (see risk/economics_gate.py: 0.065% taker)
+COINBASE_TAKER_FEE_PCT: float = 0.006  # unused in v10
+COINBASE_MAKER_FEE_PCT: float = 0.004  # unused in v10
 MAX_DAILY_FEE_DRAG_PCT: float = 0.50 if PAPER_TRADING else 0.10  # paper: fees never halt learning; live: 10% cap
 MARKET_BREADTH_MIN_SPY_PCT: float = -2.0      # Block equity longs if SPY down more than this
 BACKTEST_SLIPPAGE_PCT: float = float(os.getenv('BACKTEST_SLIPPAGE_PCT', '0.001'))  # 0.1% per leg slippage added to commission
@@ -171,7 +172,7 @@ PERP_STOP_PCT:           float = float(os.getenv('PERP_STOP_PCT', '0.008'))     
 PERP_TAKE_PROFIT_PCT:    float = float(os.getenv('PERP_TAKE_PROFIT_PCT', '0.016'))   # was 0.03, cut 50%, maintains 2:1
 BINANCE_TAKER_FEE_PCT:   float = 0.00040   # 0.040% taker (USD-M futures standard tier)
 BINANCE_MAKER_FEE_PCT:   float = 0.00020   # 0.020% maker
-BINANCE_SPOT_MAKER_FEE_PCT: float = float(os.getenv('BINANCE_SPOT_MAKER_FEE_PCT', '0.001'))  # 0.10% spot maker (4x cheaper than Coinbase 0.40%)
+BINANCE_SPOT_MAKER_FEE_PCT: float = float(os.getenv('BINANCE_SPOT_MAKER_FEE_PCT', '0.001'))  # legacy v9 spot; unused in v10 (perps only)
 
 # ── Mean-reversion strategy (ranging / volatile regimes) ─────────────────────
 MEAN_REVERSION_ENABLED:   bool  = os.getenv('MEAN_REVERSION_ENABLED', 'true').lower() == 'true'
@@ -231,14 +232,17 @@ TV_SIGNAL_MAX_AGE_SECONDS:  int   = int(os.getenv('TV_SIGNAL_MAX_AGE_SECONDS', '
 
 # ════════════════════════════════════════════════════════════════════
 # ALERTS
-# SQLite system_events: always active, displayed on dashboard.
-# Telegram: optional — fill TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID for phone alerts.
+# v10: Telegram removed. All alerts go to SQLite system_events and are
+# displayed on the dashboard Notifications panel.
+# TELEGRAM_* kept here for config compatibility but have no effect.
 # ════════════════════════════════════════════════════════════════════
-TELEGRAM_BOT_TOKEN: str = os.getenv('TELEGRAM_BOT_TOKEN', '')
-TELEGRAM_CHAT_ID:   str = os.getenv('TELEGRAM_CHAT_ID',   '')
+TELEGRAM_BOT_TOKEN: str = os.getenv('TELEGRAM_BOT_TOKEN', '')   # unused in v10
+TELEGRAM_CHAT_ID:   str = os.getenv('TELEGRAM_CHAT_ID',   '')   # unused in v10
 
 # ════════════════════════════════════════════════════════════════════
 # LANE 3 — PREDICTION MARKETS (Polymarket + Kalshi)
+# LEGACY (v9): scanner files moved to legacy/lane3/. Kept here so .env
+# keys don't cause config errors if present. All flags default to false.
 # ════════════════════════════════════════════════════════════════════
 LANE3_ENABLED:      bool  = os.getenv('LANE3_ENABLED',      'false').lower() == 'true'
 POLYMARKET_ENABLED: bool  = os.getenv('POLYMARKET_ENABLED', 'false').lower() == 'true'

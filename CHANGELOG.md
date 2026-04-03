@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-03
+- refactor(cleanup): v10.1 repo cleanup — move v9 files to legacy/, fix stale telegram imports, rewrite CLAUDE.md to v10 truth
+
+## 2026-04-03
 - fix(CRITICAL wae-churn): add 10-minute minimum hold before thesis invalidation can fire — wae_explosion was entering and exiting within 30 seconds every 5-min cycle (~20x on PF_TAOUSD today) because WAE bullish flag is a single-bar event that goes false on the next bar; position_manager now skips thesis check until entry_ts + 600s
 - feat(kst): wire KST oscillator into live scoring path — kst_bullish (KST > signal line) +8 pts long, kst_bearish (KST < signal line) +8 pts short; injected via add_all_indicators in _attempt_entry
 - fix(dashboard): add get_scanner_status() function — scanner tab was crashing with NameError on every render cycle, poisoning the debug tab too

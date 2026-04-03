@@ -367,9 +367,13 @@ class RiskManager:
         self._halt_reason = reason
         log_event('HALT', 'RiskManager', reason)
         print(f"\n🚨 RISK MANAGER HALT: {reason}\n")
+        # Telegram removed in v10 — halt is logged to DB via log_event above.
+        # notification_engine picks it up for the dashboard.
         try:
-            from alerts.telegram_alert import alert_risk_halt
-            alert_risk_halt(reason)
+            from notifications.notification_engine import get_notification_engine as _get_ne
+            _ne = _get_ne()
+            if _ne:
+                _ne.notify_system(title='Risk Halt', detail=reason)
         except Exception:
             pass
 

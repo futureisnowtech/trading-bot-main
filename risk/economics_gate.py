@@ -81,6 +81,7 @@ def check(
     account_balance: float = 5000.0,
     base_risk_pct: float = 0.015,
     is_ranging: bool = False,
+    win_rate_estimate: float = 0.0,   # 0.0 = use default 0.52 baseline
 ) -> dict:
     """
     Hard pre-trade economics veto gate.
@@ -146,7 +147,13 @@ def check(
     net_loss_pct = stop_dist_pct   + fee_drag_pct + max(0.0, funding_cost_pct)
 
     # ── Step 5: Expected value ────────────────────────────────────────────────
-    wr = _BASELINE_WIN_RATE
+    # Use caller-supplied win-rate estimate when available (e.g. from composite score).
+    # Clamp to [0.40, 0.70] — never assume below 40% (no reason to trade) or above
+    # 70% (overfit fantasy).  Fall back to baseline 0.52 when not supplied.
+    if win_rate_estimate > 0.0:
+        wr = float(max(0.40, min(0.70, win_rate_estimate)))
+    else:
+        wr = _BASELINE_WIN_RATE
     ev_pct = (wr * net_win_pct) - ((1.0 - wr) * net_loss_pct)
 
     # ── Step 6: ROI on margin (what the trader actually sees) ─────────────────

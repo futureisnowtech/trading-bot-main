@@ -514,6 +514,11 @@ def _attempt_entry(candidate, symbol, direction, balance, deployed_usd,
     try:
         from risk.economics_gate import check as economics_check
         atr_pct = atr_7 / current_price if current_price > 0 else 0.015
+        # Derive a rough win-rate estimate from tier and composite score.
+        # Tier 1 (primary setup): assume 55%+ based on pattern specificity.
+        # Tier 2 (composite only): scale linearly between 50-60 composite → 0.50-0.56 WR.
+        # These are conservative estimates — the gate uses them for EV calculation only.
+        _wr_est = 0.55 if tier == 1 else float(max(0.50, min(0.56, 0.50 + (composite - 50) / 100)))
         econ = economics_check(
             symbol=symbol,
             direction=direction,
@@ -525,6 +530,7 @@ def _attempt_entry(candidate, symbol, direction, balance, deployed_usd,
             leverage=3,
             account_balance=balance,
             is_ranging=bool(features.get('chop_ranging', 0) > 0),
+            win_rate_estimate=_wr_est,
         )
         candidate['edge_score']    = econ.get('edge_score', 0.5)
         candidate['quality_tier']  = econ.get('quality_tier', 'B')

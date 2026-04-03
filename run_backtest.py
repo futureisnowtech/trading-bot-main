@@ -1,7 +1,14 @@
 """
-run_backtest.py — Standalone backtest runner.
+run_backtest.py — Standalone v9-era backtest runner (reference / offline use only).
 
-Usage:
+NOTE: This file uses the v9 backtest engine which has been moved to legacy/.
+      The v10 live system does NOT use this runner. The live RBI loop in
+      rbi/backtest_loop.py and rbi/research_loop.py handles v10 backtesting.
+
+      To use this file, move legacy/backtest_engine.py back to backtesting/
+      or adjust the import path below.
+
+Usage (v9 reference):
   python3 run_backtest.py                         → BTC crypto, all 3 MACD variants
   python3 run_backtest.py --strategy equity       → Equity momentum on SPY
   python3 run_backtest.py --symbol AAPL           → Equity on AAPL
@@ -23,7 +30,11 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from backtesting.backtest_engine import (
+# v9 backtest engine moved to legacy/ in v10.1 cleanup.
+# Adjust path if you need to run this offline.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'legacy'))
+
+from backtest_engine import (
     run_crypto_backtest, run_equity_backtest,
     optimize_crypto, optimize_equity,
     run_backtest_oos_split, run_walk_forward,

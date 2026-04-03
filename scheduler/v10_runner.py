@@ -691,6 +691,17 @@ def _attempt_entry(candidate, symbol, direction, balance, deployed_usd,
                 f'stop=${stop_price:.4f} tp=${take_profit_price:.4f} '
                 f'lev={leverage}x composite={composite:.1f}{setup_tag}')
 
+    # Persist 57-feature snapshot keyed to this trade for ML training.
+    # walk_forward_trainer._load_training_data() will join trade_features on trade_id
+    # and use the full feature matrix instead of 3-proxy scores when >= MIN_TRADES exist.
+    try:
+        from logging_db.trade_logger import log_trade_features as _log_tf
+        _trade_id = pos.get('trade_id', 0)
+        if _trade_id and _trade_id > 0:
+            _log_tf(_trade_id, symbol, direction, features)
+    except Exception as _tfe:
+        logger.debug(f'[v10] feature snapshot error {symbol}: {_tfe}')
+
     # Post-entry notification
     if ne is not None:
         try:

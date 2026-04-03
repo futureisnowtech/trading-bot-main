@@ -6,6 +6,7 @@ Positions are written to disk on every open/close so a restart never loses state
 import sqlite3
 import csv
 import os
+import time
 import uuid
 from datetime import datetime
 from typing import Optional
@@ -118,6 +119,18 @@ def init_db() -> None:
         final_size_usd REAL,
         debate_type TEXT,
         notes TEXT
+    )""")
+
+    # v10.1: 57-feature snapshots keyed to each trade.
+    # Enables walk_forward_trainer to train on real features instead of 3-proxy scores.
+    # One row per trade entry (trade_id → BUY trade in trades table).
+    cur.execute("""CREATE TABLE IF NOT EXISTS trade_features (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        trade_id INTEGER NOT NULL,
+        ts REAL NOT NULL,
+        symbol TEXT NOT NULL,
+        direction TEXT NOT NULL,
+        features_json TEXT NOT NULL
     )""")
 
     conn.commit()
@@ -251,6 +264,39 @@ def log_edge_snapshot(
     )
     conn.commit()
     conn.close()
+
+
+def log_trade_features(trade_id: int, symbol: str, direction: str,
+                        features: dict) -> None:
+    """
+    Persist a 57-feature snapshot for a trade entry.
+
+    Called immediately after a successful perps_engine.open_long/open_short so
+    walk_forward_trainer._load_training_data() can join features to outcomes and
+    train on the real 57-column feature matrix instead of 3-proxy scores.
+
+    Args:
+        trade_id:  The id returned by log_trade() for the BUY/SELL entry leg.
+        symbol:    Trading pair (e.g. 'BTCUSDT').
+        direction: 'LONG' or 'SHORT'.
+        features:  Dict produced by feature_builder.build_features() + injections
+                   in v10_runner._attempt_entry.  All 57 FEATURE_NAMES keys should
+                   be present; extras are serialised and ignored at training time.
+    """
+    import json
+    if not trade_id or trade_id <= 0:
+        return
+    try:
+        conn = _conn()
+        conn.cursor().execute(
+            "INSERT INTO trade_features (trade_id, ts, symbol, direction, features_json) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (trade_id, time.time(), symbol, direction, json.dumps(features)),
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass  # feature snapshot is best-effort; never block trade execution
 
 
 # ─── Position persistence ─────────────────────────────────────────────────────

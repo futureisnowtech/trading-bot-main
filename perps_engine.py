@@ -119,16 +119,18 @@ def open_long(
             _open_positions[symbol] = pos
 
         # Persist to trades DB so Kelly, _live_trade_days(), and walk_forward_trainer can read it
+        _trade_id = 0
         try:
             from logging_db.trade_logger import log_trade
             _fee = round(position_usd * 0.00065, 4)   # Kraken taker 0.065%
-            log_trade(
+            _trade_id = log_trade(
                 strategy='v10_perp', broker='kraken_paper' if paper else 'kraken',
                 symbol=symbol, action='BUY', order_type='MARKET',
                 qty=qty, price=entry_price, fee_usd=_fee, pnl_usd=0.0,
                 paper=paper,
                 notes=f'LONG lev={leverage}x score={composite_score:.1f} regime={regime} setup={entry_setup}',
             )
+            pos['trade_id'] = _trade_id or 0
         except Exception as _e:
             logger.debug(f'[perps] open_long log_trade error: {_e}')
 
@@ -220,16 +222,18 @@ def open_short(
             _open_positions[symbol] = pos
 
         # Persist to trades DB
+        _trade_id = 0
         try:
             from logging_db.trade_logger import log_trade
             _fee = round(position_usd * 0.00065, 4)   # Kraken taker 0.065%
-            log_trade(
+            _trade_id = log_trade(
                 strategy='v10_perp', broker='kraken_paper' if paper else 'kraken',
                 symbol=symbol, action='SELL', order_type='MARKET',
                 qty=qty, price=entry_price, fee_usd=_fee, pnl_usd=0.0,
                 paper=paper,
                 notes=f'SHORT lev={leverage}x score={composite_score:.1f} regime={regime} setup={entry_setup}',
             )
+            pos['trade_id'] = _trade_id or 0
         except Exception as _e:
             logger.debug(f'[perps] open_short log_trade error: {_e}')
 

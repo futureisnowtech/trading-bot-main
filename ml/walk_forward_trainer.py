@@ -83,21 +83,123 @@ def _model_path(pair_key: str, direction: str, model_type: str) -> str:
 def _load_training_data(pair_key: str, direction: str,
                          paper: bool = True) -> Optional[pd.DataFrame]:
     """
-    Load feature + label data from trade_attribution + features stored in DB.
-    Returns DataFrame with FEATURE_NAMES columns + 'won' label column.
-    Filters to live trades only (not backtest seeds).
+    Load feature + label data from trades joined with trade_features snapshots.
+    Returns DataFrame with 57 FEATURE_NAMES columns + 'won', 'pnl_usd', 'ts', 'symbol'.
+    Only rows with a stored feature snapshot are included (trades entered after the
+    trade_features table was added).
+
+    Falls back to 3-proxy training if fewer than _MIN_TRADES feature snapshots exist —
+    in which case a warning is logged and the returned DataFrame will have proxy columns
+    only (causing models to fail shape-check at inference → neutral 50.0 score).
     """
     try:
-        from logging_db.trade_logger import get_logger
+        import json as _json
+        import sqlite3 as _sqlite3
         from ml.feature_builder import FEATURE_NAMES
-        db = get_logger()
 
-        # Load trades with stored features.
-        # Include both paper=1 (paper_v10) and paper=0 (live_v10) trades tagged with
-        # clean v10 sources. Exclude backtest seeds and pre-v10 contaminated rows.
-        # NOTE: paper=0 filter was wrong — v10 paper trades use paper=1 and source='paper_v10'.
-        #       Using paper=0 alone would return zero rows until live trading begins.
-        rows = db.conn.execute("""
+        from config import DB_PATH as _DB_PATH
+        conn = _sqlite3.connect(_DB_PATH, check_same_thread=False)
+        conn.row_factory = _sqlite3.Row
+
+        # Join trades (close leg: action=SELL for LONG, action=BUY for SHORT) with
+        # trade_features (entry leg).  We match via the open-leg trade that has a
+        # feature snapshot, then find its paired close by symbol + strategy within a
+        # 48-hour forward window.
+        #
+        # Simpler alternative: join close trade ↔ trade_features via symbol + nearest ts.
+        # trade_features.trade_id = the BUY trade id for LONGs, SELL for SHORTs.
+        # The close leg for LONGs is a SELL, for SHORTs a BUY.
+        # We join: open_trade → trade_features → close_trade (same symbol, later ts, won != NULL)
+        close_action = 'SELL' if direction == 'LONG' else 'BUY'
+        open_action  = 'BUY'  if direction == 'LONG' else 'SELL'
+
+        rows = conn.execute(f"""
+            SELECT
+                tc.ts       AS ts,
+                tc.won      AS won,
+                tc.pnl_usd  AS pnl_usd,
+                tc.symbol   AS symbol,
+                tf.features_json AS features_json
+            FROM trades tc
+            JOIN trades to_open
+                ON  to_open.symbol   = tc.symbol
+                AND to_open.strategy = tc.strategy
+                AND to_open.action   = '{open_action}'
+                AND to_open.ts       < tc.ts
+                AND tc.ts <= datetime(to_open.ts, '+48 hours')
+            JOIN trade_features tf ON tf.trade_id = to_open.id
+            WHERE tc.action = '{close_action}'
+              AND tc.source NOT IN ('backtest', 'pre_v10_contaminated', 'bybit_paper')
+              AND tc.won IS NOT NULL
+            ORDER BY tc.ts ASC
+        """).fetchall()
+        conn.close()
+
+        if not rows:
+            # No feature snapshots yet — fall through to proxy training
+            logger.warning(
+                f'[wft] {pair_key}_{direction}: no feature snapshots found. '
+                f'Falling back to 3-proxy training (ML tower stays at 50.0 neutral). '
+                f'Snapshots accumulate automatically with each new trade entry.'
+            )
+            return _load_training_data_proxy(pair_key, direction)
+
+        records = []
+        for row in rows:
+            try:
+                feat = _json.loads(row['features_json'])
+                # Build feature row in canonical FEATURE_NAMES order; missing → 0.0
+                feat_row = [float(feat.get(name, 0.0)) for name in FEATURE_NAMES]
+                records.append([
+                    row['ts'], int(row['won'] or 0),
+                    float(row['pnl_usd'] or 0.0), row['symbol'],
+                ] + feat_row)
+            except Exception:
+                continue
+
+        if not records:
+            return _load_training_data_proxy(pair_key, direction)
+
+        cols = ['ts', 'won', 'pnl_usd', 'symbol'] + list(FEATURE_NAMES)
+        df = pd.DataFrame(records, columns=cols)
+
+        # Filter by pair direction
+        if pair_key != 'GENERIC':
+            pair_syms = [s for s, k in _PAIR_MAP.items() if k == pair_key]
+            df = df[df['symbol'].isin(pair_syms)]
+
+        if len(df) < _MIN_TRADES:
+            logger.warning(
+                f'[wft] {pair_key}_{direction}: only {len(df)} feature-snapshot trades '
+                f'(need {_MIN_TRADES}). Still accumulating.'
+            )
+            return None
+
+        logger.info(
+            f'[wft] {pair_key}_{direction}: loaded {len(df)} trades with full 57-feature snapshots'
+        )
+        return df
+
+    except Exception as e:
+        logger.debug(f'[wft] data load error: {e}')
+        return None
+
+
+def _load_training_data_proxy(pair_key: str, direction: str) -> Optional[pd.DataFrame]:
+    """
+    Fallback training on 3 aggregate scores when full feature snapshots are unavailable.
+    Returns a DataFrame with columns: ts, won, pnl_usd, symbol,
+    technical_score, ml_score, composite_score, regime.
+    Models trained here will always fail the 57-feature shape-check at inference
+    and produce the neutral 50.0 score.  This is harmless but not useful for live trading.
+    """
+    try:
+        from config import DB_PATH as _DB_PATH
+        import sqlite3 as _sqlite3
+        conn = _sqlite3.connect(_DB_PATH, check_same_thread=False)
+        conn.row_factory = _sqlite3.Row
+
+        rows = conn.execute("""
             SELECT t.ts, t.won, t.pnl_usd, t.symbol,
                    ta.technical_score, ta.ml_score, ta.composite_score, ta.regime
             FROM trades t
@@ -107,15 +209,17 @@ def _load_training_data(pair_key: str, direction: str,
               AND t.won IS NOT NULL
             ORDER BY t.ts ASC
         """).fetchall()
+        conn.close()
 
         if not rows:
             return None
 
-        df = pd.DataFrame(rows, columns=['ts', 'won', 'pnl_usd', 'symbol',
-                                           'technical_score', 'ml_score',
-                                           'composite_score', 'regime'])
+        df = pd.DataFrame(
+            [dict(r) for r in rows],
+            columns=['ts', 'won', 'pnl_usd', 'symbol',
+                     'technical_score', 'ml_score', 'composite_score', 'regime']
+        )
 
-        # Filter by pair direction
         if pair_key != 'GENERIC':
             pair_syms = [s for s, k in _PAIR_MAP.items() if k == pair_key]
             df = df[df['symbol'].isin(pair_syms)]
@@ -126,7 +230,7 @@ def _load_training_data(pair_key: str, direction: str,
         return df
 
     except Exception as e:
-        logger.debug(f'[wft] data load error: {e}')
+        logger.debug(f'[wft] proxy data load error: {e}')
         return None
 
 
@@ -340,40 +444,33 @@ def train_walk_forward(pair_key: str = 'GENERIC', direction: str = 'LONG',
 
     from ml.feature_builder import FEATURE_NAMES
 
-    # ── KNOWN LIMITATION — 3-proxy feature training ────────────────────────────
-    # The walk-forward trainer currently trains on only 3 aggregate score columns
-    # (technical_score, ml_score, composite_score) because per-trade 57-feature
-    # snapshots are not yet persisted to the DB.
-    #
-    # CONSEQUENCE: Any model saved by this trainer will have input shape (N, 3).
-    # ModelStore.predict_proba() builds a (1, 57) array via to_array(features) and
-    # calls model.predict_proba(arr), which will fail with a shape mismatch and
-    # return None — causing signal_engine to fall back to the neutral score of 50.0.
-    # The ML tower is therefore effectively inactive (returns 50 for all candidates)
-    # until full 57-feature snapshots are stored per trade by learning_loop.py.
-    #
-    # FIX PATH: learning_loop.record_closed_trade() must store the full features dict
-    # to a trade_features table (keyed by trade_id), then _load_training_data() here
-    # joins that table and returns X with 57 columns.  Until that join is implemented,
-    # models saved here are decorative — they will always produce a prediction error
-    # on the live 57-feature input.
-    #
-    # The 3-proxy model is harmless (fails gracefully → 50.0) but wastes compute.
-    # Do not promote a model trained on proxies to production sizing decisions.
     df['won'] = df['won'].fillna(0).astype(int)
     df['pnl_usd'] = df['pnl_usd'].fillna(0).astype(float)
 
-    # Build feature matrix from stored scores (proxy until full feature logging active)
-    X_proxy = np.column_stack([
-        df['technical_score'].fillna(50).values / 100,
-        df['ml_score'].fillna(50).values / 100,
-        df['composite_score'].fillna(50).values / 100,
-    ])
-    logger.warning(
-        f'[wft] {pair_key}_{direction}: training on 3-proxy features '
-        f'(not 57 — model will fail shape-check at inference, ML tower stays at 50.0 neutral). '
-        f'Wire 57-feature snapshot storage in learning_loop to activate real ML.'
-    )
+    # Detect whether we have full 57-feature snapshots or just 3-proxy scores.
+    # _load_training_data() returns FEATURE_NAMES columns when snapshots exist;
+    # _load_training_data_proxy() returns technical_score / ml_score / composite_score.
+    _has_full_features = all(f in df.columns for f in FEATURE_NAMES)
+
+    if _has_full_features:
+        X = df[list(FEATURE_NAMES)].fillna(0.0).values
+        logger.info(
+            f'[wft] {pair_key}_{direction}: training on full 57-feature snapshots '
+            f'({len(df)} trades) — ML tower will produce real predictions'
+        )
+    else:
+        # Proxy mode: 3-column matrix.  Models trained here fail shape-check at
+        # inference (57-feature input) → neutral 50.0 score.  Harmless but not useful.
+        X = np.column_stack([
+            df['technical_score'].fillna(50).values / 100,
+            df['ml_score'].fillna(50).values / 100,
+            df['composite_score'].fillna(50).values / 100,
+        ])
+        logger.warning(
+            f'[wft] {pair_key}_{direction}: training on 3-proxy features '
+            f'(ML tower stays at 50.0 neutral until feature snapshots accumulate)'
+        )
+
     y = df['won'].values
     pnls = df['pnl_usd'].values
 
@@ -382,8 +479,8 @@ def train_walk_forward(pair_key: str = 'GENERIC', direction: str = 'LONG',
     lgbm_params = None
     if optimize and _OPTUNA_OK:
         logger.info(f'[wft] Optuna HPO for {pair_key}_{direction}...')
-        xgb_params = _optuna_optimize(X_proxy, y, 'xgb', n_trials=15)
-        lgbm_params = _optuna_optimize(X_proxy, y, 'lgbm', n_trials=15)
+        xgb_params = _optuna_optimize(X, y, 'xgb', n_trials=15)
+        lgbm_params = _optuna_optimize(X, y, 'lgbm', n_trials=15)
 
     # Walk-forward folds
     fold_metrics = []
@@ -394,6 +491,18 @@ def train_walk_forward(pair_key: str = 'GENERIC', direction: str = 'LONG',
     # Convert to time-indexed walks
     df['date'] = pd.to_datetime(df['ts'], unit='s')
     df = df.sort_values('ts').reset_index(drop=True)
+    # Re-align X/y/pnls to sorted df
+    if _has_full_features:
+        X    = df[list(FEATURE_NAMES)].fillna(0.0).values
+    else:
+        X = np.column_stack([
+            df['technical_score'].fillna(50).values / 100,
+            df['ml_score'].fillna(50).values / 100,
+            df['composite_score'].fillna(50).values / 100,
+        ])
+    y    = df['won'].values
+    pnls = df['pnl_usd'].values
+
     min_date = df['date'].min()
     max_date = df['date'].max()
 
@@ -408,9 +517,9 @@ def train_walk_forward(pair_key: str = 'GENERIC', direction: str = 'LONG',
         train_mask = (df['date'] >= current_train_start) & (df['date'] < train_end)
         val_mask   = (df['date'] >= train_end) & (df['date'] < val_end)
 
-        X_tr = X_proxy[train_mask]
+        X_tr = X[train_mask]
         y_tr = y[train_mask]
-        X_vl = X_proxy[val_mask]
+        X_vl = X[val_mask]
         y_vl = y[val_mask]
         pnl_vl = pnls[val_mask]
 
@@ -463,8 +572,8 @@ def train_walk_forward(pair_key: str = 'GENERIC', direction: str = 'LONG',
         return result
 
     # Train final model on all data
-    xgb_final = _train_xgb(X_proxy, y, xgb_params)
-    lgb_final  = _train_lgbm(X_proxy, y, lgbm_params)
+    xgb_final = _train_xgb(X, y, xgb_params)
+    lgb_final  = _train_lgbm(X, y, lgbm_params)
 
     saved = False
     if xgb_final is not None:

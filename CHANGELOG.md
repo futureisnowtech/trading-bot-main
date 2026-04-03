@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-03
+- feat(dashboard): complete ground-up rebuild — 5 tabs (WAR ROOM/PERFORMANCE/SIGNAL BRAIN/SCANNER/SYSTEM), all data read from live DB + bot.log + config imports; Bayesian signal stats table, real 37-condition technical tower, Tier1/Tier2 setups from signal_engine, scanner pipeline steps, economics gate + sizer + exit stack from live constants
+
+## 2026-04-03
 - feat(ml): activate 57-feature ML tower — trade_features table stores full feature snapshots per entry; walk_forward_trainer joins snapshots for real 57-col training; perps_engine threads trade_id back to v10_runner; proxy fallback preserved until MIN_TRADES snapshots accumulate
 
 ## 2026-04-03

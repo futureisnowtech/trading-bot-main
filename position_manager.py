@@ -317,9 +317,18 @@ def check_exits(
     # ── Priority 3: Thesis exit ───────────────────────────────────────────────
     # Tier 1 entries: exit when the specific setup conditions are no longer met.
     # Tier 2 entries: fall back to score comparison (current drops 55%+ from entry).
+    # Minimum hold: 10 minutes before thesis invalidation can fire.
+    # WAE / squeeze signals are bar-level events — they fire on one bar then go
+    # false immediately on the next bar.  Without this guard every wae_explosion
+    # entry was entering and exiting within 30 seconds (enter on bar N,
+    # position-manager next tick bar N+1 WAE gone → instant thesis exit).
+    _min_hold_secs = 600   # 10 minutes
+    _hold_elapsed  = time.time() - float(position.get('entry_ts', 0))
+    _thesis_eligible = _hold_elapsed >= _min_hold_secs
+
     if current_features is not None:
         entry_setup = position.get('entry_setup', '')
-        if entry_setup:
+        if entry_setup and _thesis_eligible:
             try:
                 from signal_engine import check_setup_still_valid
                 still_valid, reason = check_setup_still_valid(
@@ -329,7 +338,7 @@ def check_exits(
                     return ExitDecision(True, 3, 'thesis_invalidated', reason, 1.0)
             except Exception as e:
                 logger.debug(f'[pos_mgr] setup validity check error: {e}')
-        elif entry_score > 0:
+        elif entry_score > 0 and _thesis_eligible:
             try:
                 from signal_engine import thesis_still_valid
                 regime = position.get('regime', 'UNKNOWN')

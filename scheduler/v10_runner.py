@@ -448,6 +448,10 @@ def _attempt_entry(candidate, symbol, direction, balance, deployed_usd,
         features['wt_overbought']       = 1.0 if _last.get('wt_overbought', False) else 0.0
         # avwap_dev = (close - anchored_vwap) / anchored_vwap — used by ranging_mr setups
         features['vwap_session_dist_pct'] = float(_last.get('avwap_dev', 0.0)) * 100.0
+        # KST oscillator (equity-origin, also useful on crypto for momentum direction)
+        features['kst_value']           = float(_last.get('kst', 0.0))
+        features['kst_signal_value']    = float(_last.get('kst_signal', 0.0))
+        features['kst_bullish']         = 1.0 if float(_last.get('kst', 0.0)) > float(_last.get('kst_signal', 0.0)) else 0.0
     except Exception as _e:
         logger.debug(f'[v10] indicator enrichment error {symbol}: {_e}')
 

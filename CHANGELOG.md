@@ -1,5 +1,10 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
+## 2026-04-03
+- fix(CRITICAL wae-churn): add 10-minute minimum hold before thesis invalidation can fire — wae_explosion was entering and exiting within 30 seconds every 5-min cycle (~20x on PF_TAOUSD today) because WAE bullish flag is a single-bar event that goes false on the next bar; position_manager now skips thesis check until entry_ts + 600s
+- feat(kst): wire KST oscillator into live scoring path — kst_bullish (KST > signal line) +8 pts long, kst_bearish (KST < signal line) +8 pts short; injected via add_all_indicators in _attempt_entry
+- fix(dashboard): add get_scanner_status() function — scanner tab was crashing with NameError on every render cycle, poisoning the debug tab too
+
 ## 2026-04-02
 - feat(flat-market): 3 strategic fixes for ranging/flat conditions — (1) signal_engine.py: added ranging_mr_long/ranging_mr_short Tier 1 setups (CHOP>61.8 + VWAP dist <-0.15% + LRSI<0.25); all momentum setups (wt_reversal, squeeze_breakout, wae_explosion) gated with chop_ranging==0 so they suppress in flat markets; (2) v10_runner.py: chop_ranging, squeeze_fired, squeeze_direction injected into features dict; economics gate called with is_ranging=bool(chop_ranging>0); (3) economics_gate.py: Bybit fees (0.055%) → Kraken taker (0.065%), ROUND_TRIP=0.130%; added is_ranging param — when True EV floor tightens 0.15%→0.25% and R:R floor 1.2→1.5 (flat markets have smaller expected moves relative to fees)
 - fix(v10 live): signal thresholds lowered to 47 for OHLCV-only operation — first paper trade entered (PF_TAOUSD LONG $850 @ $300.42 composite=54.7)

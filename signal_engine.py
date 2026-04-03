@@ -193,6 +193,11 @@ def _technical_long_score(f: Dict) -> Tuple[float, Dict]:
         score += 4
         components['lrsi_oversold'] = 4
 
+    # KST (Know Sure Thing) oscillator above its signal line: +8
+    if f.get('kst_bullish', 0) > 0:
+        score += 8
+        components['kst_bullish'] = 8
+
     # TradingView signal confirmation: +20
     if f.get('tv_signal', 0) > 0:
         score += 20
@@ -369,6 +374,11 @@ def _technical_short_score(f: Dict) -> Tuple[float, Dict]:
     elif lrsi > 0.75:
         score += 4
         components['lrsi_overbought'] = 4
+
+    # KST below its signal line (bearish momentum): +8
+    if f.get('kst_bullish', 0) == 0:
+        score += 8
+        components['kst_bearish'] = 8
 
     # TradingView signal confirmation: +20
     if f.get('tv_signal', 0) > 0:

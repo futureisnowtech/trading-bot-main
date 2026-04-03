@@ -198,6 +198,64 @@ def get_recent_events(limit: int = 8) -> list:
 LOG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs", "bot.log")
 
 
+def get_scanner_status() -> dict:
+    """
+    Parse bot.log for the most recent scanner cycle.
+    Returns dict: {last_scan_age_s, candidate_count, candidates}
+    where candidates is a list of {symbol, direction, vol_spike, adx, ev, funding}.
+    """
+    import re
+    result = {"last_scan_age_s": 9999, "candidate_count": 0, "candidates": []}
+    try:
+        with open(LOG_PATH, "r") as f:
+            lines = f.readlines()[-600:]
+    except Exception:
+        return result
+
+    # Find the last "Complete: N candidates" line and its index
+    complete_idx = None
+    for i in range(len(lines) - 1, -1, -1):
+        if "[scanner] Complete:" in lines[i]:
+            complete_idx = i
+            break
+
+    if complete_idx is None:
+        return result
+
+    # Parse age from timestamp on that line
+    m = re.match(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", lines[complete_idx])
+    if m:
+        try:
+            dt = datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S")
+            result["last_scan_age_s"] = int((datetime.now() - dt).total_seconds())
+        except Exception:
+            pass
+
+    # Parse candidate count
+    cm = re.search(r"Complete:\s*(\d+)\s*candidates", lines[complete_idx])
+    if cm:
+        result["candidate_count"] = int(cm.group(1))
+
+    # Parse candidate lines that follow (→ SYMBOL DIRECTION spike=X adx=X ev=$X funding=X%)
+    cand_re = re.compile(
+        r"→\s+(\S+)\s+(LONG|SHORT)\s+spike=([\d.]+)\s+adx=([\d.]+)\s+ev=\$([\d.]+)\s+funding=([-\d.]+)%"
+    )
+    candidates = []
+    for line in lines[complete_idx + 1:complete_idx + 20]:
+        cm2 = cand_re.search(line)
+        if cm2:
+            candidates.append({
+                "symbol":    cm2.group(1),
+                "direction": cm2.group(2),
+                "vol_spike": float(cm2.group(3)),
+                "adx":       float(cm2.group(4)),
+                "ev":        float(cm2.group(5)),
+                "funding":   float(cm2.group(6)) / 100.0,
+            })
+    result["candidates"] = candidates
+    return result
+
+
 def get_last_scan_age() -> int:
     """
     Read bot.log to find the timestamp of the most recent '[v10] scan:' line.

@@ -314,18 +314,32 @@ def check_exits(
             return ExitDecision(True, 4, 'hard_stop',
                                 f'Hard stop hit: {current_price:.4f} >= {stop_p:.4f}', 1.0)
 
-    # ── Priority 3: Thesis score ──────────────────────────────────────────
-    if current_features is not None and entry_score > 0:
-        try:
-            from signal_engine import thesis_still_valid
-            regime = position.get('regime', 'UNKNOWN')
-            valid, current_score, reason = thesis_still_valid(
-                entry_score, current_features, direction, regime, model_store
-            )
-            if not valid:
-                return ExitDecision(True, 3, 'thesis_degraded', reason, 1.0)
-        except Exception as e:
-            logger.debug(f'[pos_mgr] thesis check error: {e}')
+    # ── Priority 3: Thesis exit ───────────────────────────────────────────────
+    # Tier 1 entries: exit when the specific setup conditions are no longer met.
+    # Tier 2 entries: fall back to score comparison (current drops 55%+ from entry).
+    if current_features is not None:
+        entry_setup = position.get('entry_setup', '')
+        if entry_setup:
+            try:
+                from signal_engine import check_setup_still_valid
+                still_valid, reason = check_setup_still_valid(
+                    entry_setup, current_features, direction
+                )
+                if still_valid is False:
+                    return ExitDecision(True, 3, 'thesis_invalidated', reason, 1.0)
+            except Exception as e:
+                logger.debug(f'[pos_mgr] setup validity check error: {e}')
+        elif entry_score > 0:
+            try:
+                from signal_engine import thesis_still_valid
+                regime = position.get('regime', 'UNKNOWN')
+                valid, current_score, reason = thesis_still_valid(
+                    entry_score, current_features, direction, regime, model_store
+                )
+                if not valid:
+                    return ExitDecision(True, 3, 'thesis_degraded', reason, 1.0)
+            except Exception as e:
+                logger.debug(f'[pos_mgr] thesis check error: {e}')
 
     # ── Priority 2: Take profit scale-out ────────────────────────────────
     if is_long:

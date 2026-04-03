@@ -46,6 +46,7 @@ def open_long(
     composite_score: float = 65.0,
     atr_at_entry: float = 0.0,
     regime: str = 'UNKNOWN',
+    entry_setup: str = '',
     testnet: bool = True,
     paper: bool = True,
 ) -> Optional[Dict]:
@@ -103,6 +104,7 @@ def open_long(
             'take_profit_price': take_profit_price,
             'atr_at_entry': atr_at_entry,
             'entry_composite_score': composite_score,
+            'entry_setup': entry_setup,
             'regime': regime,
             'peak_price': entry_price,
             'trailing_active': False,
@@ -135,6 +137,7 @@ def open_short(
     composite_score: float = 65.0,
     atr_at_entry: float = 0.0,
     regime: str = 'UNKNOWN',
+    entry_setup: str = '',
     testnet: bool = True,
     paper: bool = True,
 ) -> Optional[Dict]:
@@ -188,6 +191,7 @@ def open_short(
             'take_profit_price': take_profit_price,
             'atr_at_entry': atr_at_entry,
             'entry_composite_score': composite_score,
+            'entry_setup': entry_setup,
             'regime': regime,
             'peak_price': entry_price,
             'trailing_active': False,

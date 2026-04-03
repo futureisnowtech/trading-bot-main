@@ -628,3 +628,143 @@ def thesis_still_valid(
         return False, current_score, reason
 
     return True, current_score, 'Thesis intact'
+
+
+# ── Tier 1 Primary Setup Definitions ─────────────────────────────────────────
+# These are specific indicator combinations that trigger entry unconditionally.
+# Composite score is used only for position sizing, not as an entry gate.
+# Each setup has a 'check' (entry condition) and 'invalidate' (thesis exit condition).
+
+_LONG_SETUPS = [
+    {
+        'name':       'wt_reversal',
+        'label':      'WaveTrend Reversal from Oversold',
+        # WT1 crosses WT2 from below -53 AND SuperTrend currently bullish
+        'check':      lambda f: f.get('wt_oversold_cross', 0) > 0
+                                and f.get('supertrend_bullish', 0) > 0,
+        # Thesis dead when SuperTrend flips bearish
+        'invalidate': lambda f: f.get('supertrend_bearish', 0) > 0,
+    },
+    {
+        'name':       'squeeze_breakout',
+        'label':      'BB-Keltner Squeeze Breakout Long',
+        # Squeeze released after ≥20 bars, direction up, volume confirming
+        'check':      lambda f: f.get('squeeze_fired', 0) > 0
+                                and f.get('squeeze_direction', 0) > 0
+                                and f.get('vol_spike_5c', 1.0) > 1.3,
+        # Thesis dead when SuperTrend flips OR WAE momentum dies
+        'invalidate': lambda f: f.get('supertrend_bearish', 0) > 0
+                                or f.get('wae_bullish', 0) == 0,
+    },
+    {
+        'name':       'wae_explosion',
+        'label':      'WAE Momentum Explosion Long',
+        # WAE bullish AND in explosion zone AND MACD fast histogram positive
+        'check':      lambda f: f.get('wae_bullish', 0) > 0
+                                and f.get('wae_exploding', 0) > 0
+                                and f.get('mom_macd_hist_fast', 0) > 0,
+        # Thesis dead when WAE bullish momentum gone
+        'invalidate': lambda f: f.get('wae_bullish', 0) == 0,
+    },
+    {
+        'name':       'tv_confirmed_long',
+        'label':      'TradingView Alert + Indicator Confirmed Long',
+        # TV alert fired AND at least one bullish indicator confirming
+        'check':      lambda f: f.get('tv_signal', 0) > 0
+                                and (f.get('supertrend_bullish', 0) > 0
+                                     or f.get('wae_bullish', 0) > 0
+                                     or f.get('wt_oversold_cross', 0) > 0),
+        # Thesis dead when SuperTrend AND WAE both bearish
+        'invalidate': lambda f: f.get('supertrend_bearish', 0) > 0
+                                and f.get('wae_bullish', 0) == 0,
+    },
+]
+
+_SHORT_SETUPS = [
+    {
+        'name':       'wt_overbought_reversal',
+        'label':      'WaveTrend Reversal from Overbought',
+        # WT overbought (WT1 > 53) AND SuperTrend currently bearish
+        'check':      lambda f: f.get('wt_overbought', 0) > 0
+                                and f.get('supertrend_bearish', 0) > 0,
+        # Thesis dead when SuperTrend flips bullish
+        'invalidate': lambda f: f.get('supertrend_bullish', 0) > 0,
+    },
+    {
+        'name':       'squeeze_breakout_short',
+        'label':      'BB-Keltner Squeeze Breakout Short',
+        # Squeeze released, direction down, volume confirming
+        'check':      lambda f: f.get('squeeze_fired', 0) > 0
+                                and f.get('squeeze_direction', 0) < 0
+                                and f.get('vol_spike_5c', 1.0) > 1.3,
+        # Thesis dead when SuperTrend flips OR WAE bearish dies
+        'invalidate': lambda f: f.get('supertrend_bullish', 0) > 0
+                                or f.get('wae_bearish', 0) == 0,
+    },
+    {
+        'name':       'wae_explosion_short',
+        'label':      'WAE Momentum Explosion Short',
+        # WAE bearish AND in explosion zone AND MACD fast histogram negative
+        'check':      lambda f: f.get('wae_bearish', 0) > 0
+                                and f.get('wae_exploding', 0) > 0
+                                and f.get('mom_macd_hist_fast', 0) < 0,
+        # Thesis dead when WAE bearish momentum gone
+        'invalidate': lambda f: f.get('wae_bearish', 0) == 0,
+    },
+    {
+        'name':       'tv_confirmed_short',
+        'label':      'TradingView Alert + Indicator Confirmed Short',
+        # TV alert fired AND at least one bearish indicator confirming
+        'check':      lambda f: f.get('tv_signal', 0) > 0
+                                and (f.get('supertrend_bearish', 0) > 0
+                                     or f.get('wae_bearish', 0) > 0
+                                     or f.get('wt_overbought', 0) > 0),
+        # Thesis dead when SuperTrend AND WAE both bullish
+        'invalidate': lambda f: f.get('supertrend_bullish', 0) > 0
+                                and f.get('wae_bearish', 0) == 0,
+    },
+]
+
+
+def detect_primary_setup(features: Dict, direction: str = 'LONG') -> Optional[Dict]:
+    """
+    Scan features for a Tier 1 primary setup.
+
+    Returns {'name', 'label', 'tier': 1} if a setup matches, else None.
+    A Tier 1 match triggers entry regardless of composite score.
+    Composite score is used only for position sizing.
+    """
+    setups = _LONG_SETUPS if direction == 'LONG' else _SHORT_SETUPS
+    for setup in setups:
+        try:
+            if setup['check'](features):
+                return {'name': setup['name'], 'label': setup['label'], 'tier': 1}
+        except Exception:
+            continue
+    return None
+
+
+def check_setup_still_valid(
+    setup_name: str,
+    features: Dict,
+    direction: str,
+) -> Tuple[Optional[bool], str]:
+    """
+    Check if the Tier 1 setup that triggered entry is still intact.
+    Called by Priority 3 thesis exit in position_manager.
+
+    Returns:
+        (False, reason)  — setup invalidated, exit now
+        (True, 'intact') — setup still valid, hold
+        (None, 'unknown setup') — name not found, caller falls back to score comparison
+    """
+    setups = _LONG_SETUPS if direction == 'LONG' else _SHORT_SETUPS
+    for setup in setups:
+        if setup['name'] == setup_name:
+            try:
+                if setup['invalidate'](features):
+                    return False, f'{setup["label"]} — setup conditions invalidated'
+                return True, 'setup intact'
+            except Exception:
+                return True, 'invalidate check error — holding'
+    return None, 'unknown setup'

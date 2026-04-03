@@ -415,7 +415,82 @@ def _attempt_entry(candidate, symbol, direction, balance, deployed_usd,
     if atr_7 <= 0:
         atr_7 = current_price * 0.015   # 1.5% floor
 
-    # ── Economics gate — run before expensive feature building ──────────────
+    # ── Step 1: Build features ───────────────────────────────────────────────
+    features = build_features(df, symbol)
+
+    # Inject scanner-derived features
+    scanner_vol_spike = float(candidate.get('vol_spike', 0.0))
+    if scanner_vol_spike > 0:
+        features['vol_spike_5c'] = scanner_vol_spike
+    scanner_funding = float(candidate.get('funding_rate', 0.0))
+    features['deriv_funding_rate'] = float(max(-1.0, min(1.0, scanner_funding / 0.005)))
+
+    # Inject v4.3 indicator flags + squeeze state (needed for primary setup detection)
+    try:
+        from data.indicators import add_all_indicators as _add_ind
+        _df_ind = _add_ind(df.copy())
+        _last = _df_ind.iloc[-1]
+        features['supertrend_bullish']  = 1.0 if _last.get('supertrend_bullish', False) else 0.0
+        features['cloud_bullish']       = 1.0 if _last.get('cloud_bullish', False) else 0.0
+        features['wae_bullish']         = 1.0 if _last.get('wae_bullish', False) else 0.0
+        features['wae_exploding']       = 1.0 if _last.get('wae_exploding', False) else 0.0
+        features['fisher_cross_up']     = 1.0 if _last.get('fisher_cross_up', False) else 0.0
+        features['chop_trending']       = 1.0 if _last.get('chop_trending', False) else 0.0
+        features['wt_oversold_cross']   = 1.0 if _last.get('wt_oversold_cross', False) else 0.0
+        features['lrsi_value']          = float(_last.get('lrsi', 0.5))
+        features['squeeze_fired']       = 1.0 if _last.get('squeeze_fired', False) else 0.0
+        features['squeeze_direction']   = float(_last.get('squeeze_direction', 0))
+        features['supertrend_bearish']  = 0.0 if bool(_last.get('supertrend_bullish', True)) else 1.0
+        features['cloud_bearish']       = 0.0 if bool(_last.get('cloud_bullish', True)) else 1.0
+        features['wae_bearish']         = 1.0 if _last.get('wae_trend_down', False) else 0.0
+        features['fisher_cross_down']   = 1.0 if _last.get('fisher_cross_down', False) else 0.0
+        features['wt_overbought']       = 1.0 if _last.get('wt_overbought', False) else 0.0
+    except Exception as _e:
+        logger.debug(f'[v10] indicator enrichment error {symbol}: {_e}')
+
+    if candidate.get('tv_signal'):
+        features['tv_signal'] = 1.0
+
+    # ── Step 2: Classify regime ──────────────────────────────────────────────
+    regime = 'UNKNOWN'
+    if classify_from_features is not None:
+        try:
+            regime = classify_from_features(features)
+        except Exception as e:
+            logger.debug(f'[v10] regime classify error {symbol}: {e}')
+
+    # ── Step 3: Score (used for sizing, not gating) ──────────────────────────
+    if se is None:
+        return
+
+    # model_store=None is intentional: ML tower returns 50.0 (neutral) until
+    # walk_forward_trainer has ≥50 live trades with paper=0 to produce a valid model.
+    result = se.score(features, direction, regime, model_store=None)
+    composite = result['composite_score']
+
+    # ── Step 4: Entry decision — Tier 1 setup OR Tier 2 score ───────────────
+    from signal_engine import detect_primary_setup
+    primary_setup = detect_primary_setup(features, direction)
+
+    if primary_setup:
+        # Tier 1: specific setup firing — enter regardless of composite score
+        tier = 1
+        size_mult = 1.0   # full position size
+        logger.info(f'[v10] {symbol} {direction} TIER 1 — {primary_setup["label"]} '
+                    f'(composite={composite:.1f} used for sizing only)')
+    elif composite >= 50:
+        # Tier 2: no primary setup but score clears floor — enter at reduced size
+        tier = 2
+        size_mult = 0.75
+        logger.info(f'[v10] {symbol} {direction} TIER 2 — composite={composite:.1f} '
+                    f'(tech={result.get("technical_score",0):.1f} ml={result.get("ml_score",50):.1f})')
+    else:
+        if composite > 44:
+            logger.info(f'[v10] {symbol} {direction} score={composite:.1f} < 50, '
+                        f'no primary setup — skip')
+        return
+
+    # ── Step 5: Economics gate (runs after setup quality known) ─────────────
     try:
         from risk.economics_gate import check as economics_check
         atr_pct = atr_7 / current_price if current_price > 0 else 0.015
@@ -424,21 +499,18 @@ def _attempt_entry(candidate, symbol, direction, balance, deployed_usd,
             direction=direction,
             current_price=current_price,
             atr_pct=atr_pct,
-            # Kraken fundingRate is annualized fraction; gate expects per-8h fraction
             funding_rate=float(candidate.get('funding_rate', 0.0)) / (365 * 3),
-            # scanner.spread_pct is in PERCENT (e.g. 0.04 = 0.04%); gate expects fraction
             spread_pct=float(candidate.get('spread_pct', 0.1)) / 100.0,
             volume_24h_usd=float(candidate.get('vol_usd', candidate.get('volume_24h_usd', 50_000_000))),
             leverage=3,
             account_balance=balance,
         )
-        # Inject gate outputs back into candidate for downstream sizing
-        candidate['edge_score'] = econ.get('edge_score', 0.5)
-        candidate['quality_tier'] = econ.get('quality_tier', 'B')
+        candidate['edge_score']    = econ.get('edge_score', 0.5)
+        candidate['quality_tier']  = econ.get('quality_tier', 'B')
 
         if not econ.get('approved', True):
             reason = econ.get('reject_reason', 'economics veto')
-            logger.info(f'[v10] {symbol} {direction} ECONOMICS VETO: {reason} '
+            logger.info(f'[v10] {symbol} {direction} ECONOMICS VETO (Tier{tier}): {reason} '
                         f'(ev={econ.get("ev_pct", 0)*100:.3f}% '
                         f'fees={econ.get("fee_drag_pct", 0)*100:.3f}%)')
             if ne is not None:
@@ -449,88 +521,9 @@ def _attempt_entry(candidate, symbol, direction, balance, deployed_usd,
                     pass
             return
     except ImportError:
-        pass   # gate not yet available — allow through, log once
+        pass
     except Exception as e:
         logger.debug(f'[v10] economics gate error {symbol}: {e}')
-
-    # Build 57-feature vector
-    features = build_features(df, symbol)
-
-    # Inject scanner-derived features not available from OHLCV alone
-    # vol_spike from Kraken scanner (already computed from 15m klines)
-    scanner_vol_spike = float(candidate.get('vol_spike', 0.0))
-    if scanner_vol_spike > 0:
-        features['vol_spike_5c'] = scanner_vol_spike
-    # funding_rate: Kraken API value is per-8h period (e.g. 0.002 = 0.2%/8h)
-    # Normalize to [-1, 1] range: divide by 0.005 (0.5%/8h = extreme)
-    scanner_funding = float(candidate.get('funding_rate', 0.0))
-    features['deriv_funding_rate'] = float(max(-1.0, min(1.0, scanner_funding / 0.005)))
-
-    # Inject v4.3 indicator flags: SuperTrend, Ichimoku, WAE, Fisher, Chop, WaveTrend, Laguerre
-    # These live in data/indicators.py (add_all_indicators) — separate from the indicators/ dir.
-    # Called here rather than in feature_builder so the feature builder stays exchange-agnostic.
-    try:
-        from data.indicators import add_all_indicators as _add_ind
-        _df_ind = _add_ind(df.copy())
-        _last = _df_ind.iloc[-1]
-        features['supertrend_bullish'] = 1.0 if _last.get('supertrend_bullish', False) else 0.0
-        features['cloud_bullish']      = 1.0 if _last.get('cloud_bullish', False) else 0.0
-        features['wae_bullish']        = 1.0 if _last.get('wae_bullish', False) else 0.0
-        features['wae_exploding']      = 1.0 if _last.get('wae_exploding', False) else 0.0
-        features['fisher_cross_up']    = 1.0 if _last.get('fisher_cross_up', False) else 0.0
-        features['chop_trending']      = 1.0 if _last.get('chop_trending', False) else 0.0
-        features['wt_oversold_cross']  = 1.0 if _last.get('wt_oversold_cross', False) else 0.0
-        _lrsi = float(_last.get('lrsi', 0.5))
-        features['lrsi_value']         = _lrsi
-        # For SHORT direction: bearish mirror flags
-        features['supertrend_bearish']  = 0.0 if bool(_last.get('supertrend_bullish', True)) else 1.0
-        features['cloud_bearish']       = 0.0 if bool(_last.get('cloud_bullish', True)) else 1.0
-        features['wae_bearish']         = 1.0 if _last.get('wae_trend_down', False) else 0.0
-        features['fisher_cross_down']   = 1.0 if _last.get('fisher_cross_down', False) else 0.0
-        features['wt_overbought']       = 1.0 if _last.get('wt_overbought', False) else 0.0
-    except Exception as _e:
-        logger.debug(f'[v10] indicator enrichment error {symbol}: {_e}')
-
-    # TradingView signal confirmation flag
-    if candidate.get('tv_signal'):
-        features['tv_signal'] = 1.0
-
-    # Classify regime
-    regime = 'UNKNOWN'
-    if classify_from_features is not None:
-        try:
-            regime = classify_from_features(features)
-        except Exception as e:
-            logger.debug(f'[v10] regime classify error {symbol}: {e}')
-
-    # Score the candidate
-    if se is None:
-        return
-
-    # model_store=None is intentional: ML tower returns 50.0 (neutral) until
-    # walk_forward_trainer has ≥50 live trades with paper=0 to produce a valid model.
-    # At that point, wire the model_store from _import_model_store() here.
-    result = se.score(features, direction, regime, model_store=None)
-    composite = result['composite_score']
-    threshold = result['entry_threshold']
-
-    if composite < threshold:
-        # Notify informational signals above 55
-        if composite > 55 and ne is not None:
-            try:
-                ne.notify_signal(
-                    symbol=symbol,
-                    direction=direction,
-                    score=composite,
-                    threshold=threshold,
-                    reason=result.get('signal_description', ''),
-                    regime=regime,
-                )
-            except Exception:
-                pass
-        logger.info(f'[v10] {symbol} {direction} score={composite:.1f} < '
-                    f'threshold={threshold:.1f} (tech={result.get("technical_score",0):.1f} ml={result.get("ml_score",50):.1f}), skip')
-        return
 
     logger.info(f'[v10] {symbol} {direction} ENTRY SIGNAL: '
                 f'composite={composite:.1f} threshold={threshold:.1f} '
@@ -573,7 +566,7 @@ def _attempt_entry(candidate, symbol, direction, balance, deployed_usd,
         paper=_paper,
     )
 
-    size_usd = sizing['position_usd'] * regime_mult
+    size_usd = sizing['position_usd'] * regime_mult * size_mult
 
     # Apply RBI incubation multiplier
     rbi_mult = 1.0
@@ -602,6 +595,8 @@ def _attempt_entry(candidate, symbol, direction, balance, deployed_usd,
     if perps is None:
         return
 
+    entry_setup_name = primary_setup['name'] if primary_setup else ''
+
     if direction == 'LONG':
         pos = perps.open_long(
             symbol=symbol,
@@ -613,6 +608,7 @@ def _attempt_entry(candidate, symbol, direction, balance, deployed_usd,
             composite_score=composite,
             atr_at_entry=atr_7,
             regime=regime,
+            entry_setup=entry_setup_name,
             paper=_paper,
         )
     else:
@@ -626,6 +622,7 @@ def _attempt_entry(candidate, symbol, direction, balance, deployed_usd,
             composite_score=composite,
             atr_at_entry=atr_7,
             regime=regime,
+            entry_setup=entry_setup_name,
             paper=_paper,
         )
 
@@ -633,10 +630,11 @@ def _attempt_entry(candidate, symbol, direction, balance, deployed_usd,
         logger.warning(f'[v10] {symbol} entry returned None — execution failed')
         return
 
+    setup_tag = f' setup={entry_setup_name}' if entry_setup_name else ' tier2:score'
     logger.info(f'[v10] ENTERED {direction} {symbol}: '
                 f'${size_usd:.0f} @ ${current_price:.4f} '
                 f'stop=${stop_price:.4f} tp=${take_profit_price:.4f} '
-                f'lev={leverage}x composite={composite:.1f}')
+                f'lev={leverage}x composite={composite:.1f}{setup_tag}')
 
     # Post-entry notification
     if ne is not None:

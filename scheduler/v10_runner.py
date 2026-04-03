@@ -525,9 +525,9 @@ def _attempt_entry(candidate, symbol, direction, balance, deployed_usd,
     except Exception as e:
         logger.debug(f'[v10] economics gate error {symbol}: {e}')
 
+    setup_str = primary_setup['label'] if primary_setup else f'composite={composite:.1f}'
     logger.info(f'[v10] {symbol} {direction} ENTRY SIGNAL: '
-                f'composite={composite:.1f} threshold={threshold:.1f} '
-                f'regime={regime}')
+                f'{setup_str} composite={composite:.1f} tier={tier} regime={regime}')
 
     # Compute position size
     if pm is None:

@@ -436,6 +436,7 @@ def _attempt_entry(candidate, symbol, direction, balance, deployed_usd,
         features['wae_exploding']       = 1.0 if _last.get('wae_exploding', False) else 0.0
         features['fisher_cross_up']     = 1.0 if _last.get('fisher_cross_up', False) else 0.0
         features['chop_trending']       = 1.0 if _last.get('chop_trending', False) else 0.0
+        features['chop_ranging']        = 1.0 if _last.get('chop_ranging', False) else 0.0
         features['wt_oversold_cross']   = 1.0 if _last.get('wt_oversold_cross', False) else 0.0
         features['lrsi_value']          = float(_last.get('lrsi', 0.5))
         features['squeeze_fired']       = 1.0 if _last.get('squeeze_fired', False) else 0.0
@@ -504,6 +505,7 @@ def _attempt_entry(candidate, symbol, direction, balance, deployed_usd,
             volume_24h_usd=float(candidate.get('vol_usd', candidate.get('volume_24h_usd', 50_000_000))),
             leverage=3,
             account_balance=balance,
+            is_ranging=bool(features.get('chop_ranging', 0) > 0),
         )
         candidate['edge_score']    = econ.get('edge_score', 0.5)
         candidate['quality_tier']  = econ.get('quality_tier', 'B')

@@ -8,8 +8,12 @@ Returns approved=True/False with a reason string and quality tier.
 Quality tiers determine size multiplier:
   A+   (ev_pct >= 0.8%)  → 1.35× base size
   A    (ev_pct >= 0.4%)  → 1.00× base size
-  B    (ev_pct >= 0.15%) → 0.75× base size
-  VETO (ev_pct < 0.15%)  → 0×   (no trade)
+  B    (ev_pct >= 0.15%) → 0.75× base size   (0.25% in ranging markets)
+  VETO (ev_pct < floor)  → 0×   (no trade)
+
+  In ranging markets (is_ranging=True) the EV floor is tightened because
+  expected moves are smaller relative to fees — a standard EV floor that
+  would be profitable in a trending market is marginal in flat conditions.
 
 Usage:
     from risk.economics_gate import check, batch_check
@@ -33,10 +37,10 @@ from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
-# ── Fee constants (Bybit USDT perpetual, standard tier) ──────────────────────
-TAKER_FEE_PCT    = 0.00055   # 0.055% per side (taker)
-MAKER_REBATE_PCT = -0.00025  # -0.025% rebate (maker) — unused in conservative estimate
-ROUND_TRIP_COST  = TAKER_FEE_PCT * 2   # entry taker + exit taker = 0.110%
+# ── Fee constants (Kraken Futures, standard taker tier) ──────────────────────
+TAKER_FEE_PCT    = 0.00065   # 0.065% per side (taker) — Kraken Futures standard
+MAKER_REBATE_PCT = -0.00020  # -0.020% rebate (maker) — unused in conservative estimate
+ROUND_TRIP_COST  = TAKER_FEE_PCT * 2   # entry taker + exit taker = 0.130%
 
 # ── Baseline win-rate assumption (conservative; calibrate as live data grows) ─
 _BASELINE_WIN_RATE = 0.52   # 52% — used for EV calculation
@@ -76,6 +80,7 @@ def check(
     leverage: int = 3,
     account_balance: float = 10000.0,
     base_risk_pct: float = 0.015,
+    is_ranging: bool = False,
 ) -> dict:
     """
     Hard pre-trade economics veto gate.
@@ -93,6 +98,9 @@ def check(
     leverage        : Integer leverage applied to the position (default 3).
     account_balance : Current account equity in USD (used for context/logging only).
     base_risk_pct   : Fraction of account at risk per trade (used for context only).
+    is_ranging      : When True (CHOP > 61.8), tighter EV floor and R:R minimum
+                      are applied — flat markets have smaller expected moves relative
+                      to fees, so the standard floor would be too permissive.
 
     Returns
     -------
@@ -145,6 +153,10 @@ def check(
     roi_on_margin = ev_pct * leverage
 
     # ── Step 7: Veto checks (any single trigger kills the trade) ──────────────
+    # In ranging markets the expected move is smaller relative to fees — tighten.
+    _ev_floor = _TIER_B_EV * 1.67 if is_ranging else _TIER_B_EV   # 0.25% vs 0.15%
+    _rr_floor = _MIN_NET_RR * 1.25 if is_ranging else _MIN_NET_RR  # 1.5  vs 1.2
+
     reject_reason = ''
 
     if volume_24h_usd < _MIN_VOLUME_USD:
@@ -167,18 +179,20 @@ def check(
             f'fee drag {_fee_ratio*100:.1f}% of gross target '
             f'> {_MAX_FEE_TO_WIN_PCT*100:.0f}% ceiling'
         )
-    elif net_loss_pct > 0 and (net_win_pct / net_loss_pct) < _MIN_NET_RR:
+    elif net_loss_pct > 0 and (net_win_pct / net_loss_pct) < _rr_floor:
         _net_rr = net_win_pct / net_loss_pct if net_loss_pct > 0 else 0.0
         reject_reason = (
-            f'net R:R {_net_rr:.2f} < {_MIN_NET_RR} minimum after fees'
+            f'net R:R {_net_rr:.2f} < {_rr_floor:.1f} minimum after fees'
+            + (' (ranging)' if is_ranging else '')
         )
 
-    # Also veto if EV is below the B tier even without the structural veto checks
+    # Also veto if EV is below the floor even without the structural veto checks
     # (catches edge cases where all structural checks pass but EV is still negative)
-    if not reject_reason and ev_pct < _TIER_B_EV:
+    if not reject_reason and ev_pct < _ev_floor:
         reject_reason = (
-            f'net EV {ev_pct*100:.3f}% < {_TIER_B_EV*100:.2f}% minimum — '
+            f'net EV {ev_pct*100:.3f}% < {_ev_floor*100:.2f}% minimum — '
             f'trade not worth taking'
+            + (' (ranging)' if is_ranging else '')
         )
 
     if reject_reason:
@@ -197,9 +211,10 @@ def check(
     edge_score = min(1.0, max(0.0, ev_pct / _EDGE_SCORE_CAP_EV))
 
     logger.debug(
-        '[EconomicsGate] APPROVED %s %s tier=%s ev=%.4f%% roi_margin=%.3f%% edge=%.3f',
+        '[EconomicsGate] APPROVED %s %s tier=%s ev=%.4f%% roi_margin=%.3f%% edge=%.3f%s',
         direction, symbol, tier,
         ev_pct * 100, roi_on_margin * 100, edge_score,
+        ' [ranging]' if is_ranging else '',
     )
 
     return {

@@ -636,92 +636,119 @@ def thesis_still_valid(
 # Each setup has a 'check' (entry condition) and 'invalidate' (thesis exit condition).
 
 _LONG_SETUPS = [
+    # ── Momentum setups (require chop_ranging == 0 — don't trade breakouts in a box) ──
     {
         'name':       'wt_reversal',
         'label':      'WaveTrend Reversal from Oversold',
-        # WT1 crosses WT2 from below -53 AND SuperTrend currently bullish
+        # WT1 crosses WT2 from below -53 AND SuperTrend bullish AND market NOT ranging
         'check':      lambda f: f.get('wt_oversold_cross', 0) > 0
-                                and f.get('supertrend_bullish', 0) > 0,
-        # Thesis dead when SuperTrend flips bearish
+                                and f.get('supertrend_bullish', 0) > 0
+                                and f.get('chop_ranging', 0) == 0,
         'invalidate': lambda f: f.get('supertrend_bearish', 0) > 0,
     },
     {
         'name':       'squeeze_breakout',
         'label':      'BB-Keltner Squeeze Breakout Long',
-        # Squeeze released after ≥20 bars, direction up, volume confirming
+        # Squeeze fires, direction up, volume confirming AND market NOT ranging
+        # (a squeeze firing while CHOP is high is a false breakout — skip it)
         'check':      lambda f: f.get('squeeze_fired', 0) > 0
                                 and f.get('squeeze_direction', 0) > 0
-                                and f.get('vol_spike_5c', 1.0) > 1.3,
-        # Thesis dead when SuperTrend flips OR WAE momentum dies
+                                and f.get('vol_spike_5c', 1.0) > 1.3
+                                and f.get('chop_ranging', 0) == 0,
         'invalidate': lambda f: f.get('supertrend_bearish', 0) > 0
                                 or f.get('wae_bullish', 0) == 0,
     },
     {
         'name':       'wae_explosion',
         'label':      'WAE Momentum Explosion Long',
-        # WAE bullish AND in explosion zone AND MACD fast histogram positive
+        # WAE bullish + exploding + MACD positive AND market NOT ranging
         'check':      lambda f: f.get('wae_bullish', 0) > 0
                                 and f.get('wae_exploding', 0) > 0
-                                and f.get('mom_macd_hist_fast', 0) > 0,
-        # Thesis dead when WAE bullish momentum gone
+                                and f.get('mom_macd_hist_fast', 0) > 0
+                                and f.get('chop_ranging', 0) == 0,
         'invalidate': lambda f: f.get('wae_bullish', 0) == 0,
     },
     {
         'name':       'tv_confirmed_long',
         'label':      'TradingView Alert + Indicator Confirmed Long',
-        # TV alert fired AND at least one bullish indicator confirming
+        # TV alert + confirming indicator — allowed in any regime
         'check':      lambda f: f.get('tv_signal', 0) > 0
                                 and (f.get('supertrend_bullish', 0) > 0
                                      or f.get('wae_bullish', 0) > 0
                                      or f.get('wt_oversold_cross', 0) > 0),
-        # Thesis dead when SuperTrend AND WAE both bearish
         'invalidate': lambda f: f.get('supertrend_bearish', 0) > 0
                                 and f.get('wae_bullish', 0) == 0,
+    },
+    # ── Mean-reversion setups (require chop_ranging — only trade in confirmed ranges) ──
+    {
+        'name':       'ranging_mr_long',
+        'label':      'Ranging Mean-Reversion Long (VWAP reclaim)',
+        # CHOP confirms ranging AND price stretched below VWAP AND Laguerre oversold
+        # AND SuperTrend not actively bearish (don't catch a falling knife in a downtrend)
+        'check':      lambda f: f.get('chop_ranging', 0) > 0
+                                and f.get('vwap_session_dist_pct', 0) < -0.15
+                                and f.get('lrsi_value', 0.5) < 0.25
+                                and f.get('supertrend_bearish', 0) == 0,
+        # Thesis: price returns to VWAP OR regime shifts to trending OR ST flips down
+        'invalidate': lambda f: f.get('vwap_session_dist_pct', 0) > 0.05
+                                or f.get('chop_ranging', 0) == 0
+                                or f.get('supertrend_bearish', 0) > 0,
     },
 ]
 
 _SHORT_SETUPS = [
+    # ── Momentum setups (require chop_ranging == 0) ──────────────────────────
     {
         'name':       'wt_overbought_reversal',
         'label':      'WaveTrend Reversal from Overbought',
-        # WT overbought (WT1 > 53) AND SuperTrend currently bearish
         'check':      lambda f: f.get('wt_overbought', 0) > 0
-                                and f.get('supertrend_bearish', 0) > 0,
-        # Thesis dead when SuperTrend flips bullish
+                                and f.get('supertrend_bearish', 0) > 0
+                                and f.get('chop_ranging', 0) == 0,
         'invalidate': lambda f: f.get('supertrend_bullish', 0) > 0,
     },
     {
         'name':       'squeeze_breakout_short',
         'label':      'BB-Keltner Squeeze Breakout Short',
-        # Squeeze released, direction down, volume confirming
         'check':      lambda f: f.get('squeeze_fired', 0) > 0
                                 and f.get('squeeze_direction', 0) < 0
-                                and f.get('vol_spike_5c', 1.0) > 1.3,
-        # Thesis dead when SuperTrend flips OR WAE bearish dies
+                                and f.get('vol_spike_5c', 1.0) > 1.3
+                                and f.get('chop_ranging', 0) == 0,
         'invalidate': lambda f: f.get('supertrend_bullish', 0) > 0
                                 or f.get('wae_bearish', 0) == 0,
     },
     {
         'name':       'wae_explosion_short',
         'label':      'WAE Momentum Explosion Short',
-        # WAE bearish AND in explosion zone AND MACD fast histogram negative
         'check':      lambda f: f.get('wae_bearish', 0) > 0
                                 and f.get('wae_exploding', 0) > 0
-                                and f.get('mom_macd_hist_fast', 0) < 0,
-        # Thesis dead when WAE bearish momentum gone
+                                and f.get('mom_macd_hist_fast', 0) < 0
+                                and f.get('chop_ranging', 0) == 0,
         'invalidate': lambda f: f.get('wae_bearish', 0) == 0,
     },
     {
         'name':       'tv_confirmed_short',
         'label':      'TradingView Alert + Indicator Confirmed Short',
-        # TV alert fired AND at least one bearish indicator confirming
         'check':      lambda f: f.get('tv_signal', 0) > 0
                                 and (f.get('supertrend_bearish', 0) > 0
                                      or f.get('wae_bearish', 0) > 0
                                      or f.get('wt_overbought', 0) > 0),
-        # Thesis dead when SuperTrend AND WAE both bullish
         'invalidate': lambda f: f.get('supertrend_bullish', 0) > 0
                                 and f.get('wae_bearish', 0) == 0,
+    },
+    # ── Mean-reversion setups (require chop_ranging) ──────────────────────────
+    {
+        'name':       'ranging_mr_short',
+        'label':      'Ranging Mean-Reversion Short (VWAP fade)',
+        # CHOP confirms ranging AND price stretched above VWAP AND Laguerre overbought
+        # AND SuperTrend not actively bullish
+        'check':      lambda f: f.get('chop_ranging', 0) > 0
+                                and f.get('vwap_session_dist_pct', 0) > 0.15
+                                and f.get('lrsi_value', 0.5) > 0.75
+                                and f.get('supertrend_bullish', 0) == 0,
+        # Thesis: price returns to VWAP OR regime shifts OR ST flips up
+        'invalidate': lambda f: f.get('vwap_session_dist_pct', 0) < -0.05
+                                or f.get('chop_ranging', 0) == 0
+                                or f.get('supertrend_bullish', 0) > 0,
     },
 ]
 

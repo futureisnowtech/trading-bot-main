@@ -1,6 +1,12 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-03
+- feat(scripts): add force_10_trades.py — test harness that runs full entry→score→execute→close pipeline with threshold=38, verified 10/10 trades completed
+
+## 2026-04-03
+- fix(historical_data): add Hyperliquid fallback in get_candles() — HL symbols (HYPE, ETHFI, TON, MORPHO, etc.) were returning 0 bars; now tried after Binance+yfinance fail via _fetch_hyperliquid() POST to candleSnapshot API
+
+## 2026-04-03
 - feat(dashboard): add FUTURES tab — st.tabs([CRYPTO PERPS, FUTURES(MES)]); futures tab shows market hours, OR range, daily P&L, position state, today's trades, strategy playbook, config expander; runner writes mes_state to system_events each cycle
 
 ## 2026-04-03

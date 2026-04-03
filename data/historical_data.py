@@ -231,6 +231,56 @@ def _save_to_db(symbol: str, timeframe: str, rows: list):
             conn.close()
 
 
+def _fetch_hyperliquid(coin: str, timeframe: str, limit: int) -> Optional[pd.DataFrame]:
+    """Fetch OHLCV from Hyperliquid candleSnapshot API. Final fallback for HL perp symbols."""
+    import urllib.request as _hl_ur
+    import json as _hl_js
+    tf_secs = {
+        '1m': 60, '5m': 300, '15m': 900, '30m': 1800,
+        '1h': 3600, '4h': 14400, '1d': 86400,
+    }
+    bar_secs = tf_secs.get(timeframe, 3600)
+    end_ms   = int(time.time() * 1000)
+    start_ms = end_ms - (limit + 10) * bar_secs * 1000
+    try:
+        body = _hl_js.dumps({
+            'type': 'candleSnapshot',
+            'req':  {'coin': coin, 'interval': timeframe,
+                     'startTime': start_ms, 'endTime': end_ms},
+        }).encode('utf-8')
+        req = _hl_ur.Request(
+            'https://api.hyperliquid.xyz/info', data=body,
+            headers={'Content-Type': 'application/json', 'User-Agent': 'AlgoBot/1.0'},
+        )
+        with _hl_ur.urlopen(req, timeout=8) as resp:
+            data = _hl_js.loads(resp.read().decode('utf-8'))
+        if not data or not isinstance(data, list):
+            return None
+        rows = []
+        for k in data:
+            try:
+                ts_ms   = int(k.get('T', 0))
+                close   = float(k.get('c', 0))
+                vol_usd = float(k.get('v', 0)) * close   # coin vol × close price
+                rows.append({'timestamp': ts_ms,
+                             'open':   float(k.get('o', 0)),
+                             'high':   float(k.get('h', 0)),
+                             'low':    float(k.get('l', 0)),
+                             'close':  close,
+                             'volume': vol_usd})
+            except Exception:
+                continue
+        if not rows:
+            return None
+        df = pd.DataFrame(rows)
+        df.index = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
+        df = df[['open', 'high', 'low', 'close', 'volume']].sort_index()
+        return df.tail(limit) if len(df) >= 5 else None
+    except Exception as e:
+        logger.debug(f'[historical_data] Hyperliquid fallback failed for {coin}: {e}')
+        return None
+
+
 # ── Main public API ──────────────────────────────────────────────────────────
 
 def get_candles(symbol: str, timeframe: str = '5m', limit: int = 200) -> pd.DataFrame:
@@ -280,6 +330,12 @@ def get_candles(symbol: str, timeframe: str = '5m', limit: int = 200) -> pd.Data
     if not cached.empty:
         logger.debug(f'[historical_data] Returning partial cache ({len(cached)}/{limit}) for {symbol} {timeframe}')
         return cached.tail(limit)
+
+    # Final fallback: Hyperliquid (for HL perp base names like HYPE, ETHFI, TON, etc.)
+    hl_df = _fetch_hyperliquid(symbol, timeframe, limit)
+    if hl_df is not None and not hl_df.empty:
+        logger.debug(f'[historical_data] Hyperliquid fallback OK for {symbol} {timeframe} ({len(hl_df)} bars)')
+        return hl_df
 
     return pd.DataFrame()
 

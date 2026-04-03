@@ -135,9 +135,6 @@ ML_SIGNAL_MIN_PROB: float = float(os.getenv('ML_SIGNAL_MIN_PROB', '0.08'))
 FUNDING_OVERHEATED_PCT:  float = 0.0005  # > this = longs overloaded (Binance decimal: 0.0001 = 0.01%/8h; 0.05% = overheated)
 FUNDING_FAVORABLE_PCT:   float = 0.0001  # < this = low crowding, good long entry window
 
-# Goku removed — was too expensive, now just a compat constant
-GOKU_ENABLED: bool = False
-
 # Auto-tuning thresholds (AI switches debate depth based on account + win rate)
 AUTO_TUNE_FULL_DEBATE_THRESHOLD: float = float(os.getenv('AUTO_TUNE_FULL_DEBATE_THRESHOLD', '1000.0'))  # Account > $1000 → always full debate
 AUTO_TUNE_WIN_RATE_THRESHOLD: float = 0.55         # Win rate > 55% → upgrade debate depth

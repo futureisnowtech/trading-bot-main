@@ -465,6 +465,15 @@ def _attempt_entry(candidate, symbol, direction, balance, deployed_usd,
         features['kst_value']           = float(_last.get('kst', 0.0))
         features['kst_signal_value']    = float(_last.get('kst_signal', 0.0))
         features['kst_bullish']         = 1.0 if float(_last.get('kst', 0.0)) > float(_last.get('kst_signal', 0.0)) else 0.0
+        # Cross signals — fire only on the bar where direction flips (Tier 1 triggers)
+        features['supertrend_cross_up']   = 1.0 if _last.get('supertrend_cross_up', False) else 0.0
+        features['supertrend_cross_down'] = 1.0 if _last.get('supertrend_cross_down', False) else 0.0
+        features['kst_cross_up']          = 1.0 if _last.get('kst_cross_up', False) else 0.0
+        features['kst_cross_down']        = 1.0 if _last.get('kst_cross_down', False) else 0.0
+        features['cloud_cross_up']        = 1.0 if _last.get('cloud_cross_up', False) else 0.0
+        features['cloud_cross_down']      = 1.0 if _last.get('cloud_cross_down', False) else 0.0
+        features['tk_cross_up']           = 1.0 if _last.get('tk_cross_up', False) else 0.0
+        features['tk_cross_down']         = 1.0 if _last.get('tk_cross_down', False) else 0.0
     except Exception as _e:
         logger.debug(f'[v10] indicator enrichment error {symbol}: {_e}')
 

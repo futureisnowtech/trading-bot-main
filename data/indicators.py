@@ -106,6 +106,21 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
         except Exception:
             df['kst'] = 0.0
             df['kst_signal'] = 0.0
+    # KST cross detection: fires only on the bar where KST crosses its signal line.
+    # kst_cross_up  = KST just crossed ABOVE signal (bullish momentum shift)
+    # kst_cross_down = KST just crossed BELOW signal (bearish momentum shift)
+    try:
+        if 'kst' in df.columns and 'kst_signal' in df.columns:
+            _kst      = df['kst'].fillna(0)
+            _kst_sig  = df['kst_signal'].fillna(0)
+            df['kst_cross_up']   = (_kst > _kst_sig) & (_kst.shift(1) <= _kst_sig.shift(1))
+            df['kst_cross_down'] = (_kst < _kst_sig) & (_kst.shift(1) >= _kst_sig.shift(1))
+        else:
+            df['kst_cross_up']   = False
+            df['kst_cross_down'] = False
+    except Exception:
+        df['kst_cross_up']   = False
+        df['kst_cross_down'] = False
 
     # ─── Volume indicators ────────────────────────────────────────────────────
     df['vol_ma20'] = df['volume'].rolling(20).mean()
@@ -327,6 +342,21 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
         print(f"[indicators] supertrend failed: {e}")
         df['supertrend_bullish'] = False
 
+    # SuperTrend cross detection: fires only on the bar where direction flips.
+    # supertrend_cross_up   = ST just turned bullish (dir flipped -1 → +1)
+    # supertrend_cross_down = ST just turned bearish (dir flipped +1 → -1)
+    try:
+        if 'supertrend_dir' in df.columns:
+            _st_dir   = df['supertrend_dir']
+            df['supertrend_cross_up']   = (_st_dir == 1) & (_st_dir.shift(1) == -1)
+            df['supertrend_cross_down'] = (_st_dir == -1) & (_st_dir.shift(1) == 1)
+        else:
+            df['supertrend_cross_up']   = False
+            df['supertrend_cross_down'] = False
+    except Exception:
+        df['supertrend_cross_up']   = False
+        df['supertrend_cross_down'] = False
+
     # ─── 11. Ichimoku Cloud — kumo direction only ─────────────────────────────
     # price above cloud top (Senkou Span A and B both) = bullish structure.
     # The cloud is the most reliable Ichimoku component on sub-hourly charts;
@@ -340,10 +370,22 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
         df['cloud_bottom'] = pd.concat([_senkou_a, _senkou_b], axis=1).min(axis=1)
         df['cloud_bullish'] = df['close'] > df['cloud_top']
         df['cloud_bearish'] = df['close'] < df['cloud_bottom']
+        # Ichimoku breakout cross: price just crossed above/below the cloud.
+        # cloud_cross_up   = close just moved above cloud_top (was at or below last bar)
+        # cloud_cross_down = close just moved below cloud_bottom (was at or above last bar)
+        df['cloud_cross_up']   = df['cloud_bullish'] & (~df['cloud_bullish'].shift(1).fillna(True))
+        df['cloud_cross_down'] = df['cloud_bearish'] & (~df['cloud_bearish'].shift(1).fillna(True))
+        # TK cross (Tenkan/Kijun): additional Ichimoku momentum signal
+        df['tk_cross_up']   = (_tenkan > _kijun) & (_tenkan.shift(1) <= _kijun.shift(1))
+        df['tk_cross_down'] = (_tenkan < _kijun) & (_tenkan.shift(1) >= _kijun.shift(1))
     except Exception as e:
         print(f"[indicators] ichimoku failed: {e}")
-        df['cloud_bullish'] = False
-        df['cloud_bearish'] = False
+        df['cloud_bullish']   = False
+        df['cloud_bearish']   = False
+        df['cloud_cross_up']  = False
+        df['cloud_cross_down']= False
+        df['tk_cross_up']     = False
+        df['tk_cross_down']   = False
 
     # ─── 12. Waddah Attar Explosion (WAE) ────────────────────────────────────
     # Momentum × volatility composite. Direction = MACD(20/40) histogram.

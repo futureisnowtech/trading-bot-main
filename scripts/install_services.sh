@@ -18,6 +18,7 @@ PLISTS=(
     "com.algotrading.backup"
     "com.algotrading.readiness"
     "com.algotrading.brain"
+    "com.algotrading.tradingview"
 )
 
 # Make scripts executable

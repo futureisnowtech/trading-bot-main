@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.algotrading.tradingview.plist
+  Auto-start the TradingView webhook listener on port 8765.
+
+  This server receives Pine Script alerts from TradingView and writes them
+  to the system_events table (source='tradingview') so v10_runner.py can
+  inject them as entry candidates with tv_signal=1.
+
+  INSTALL:
+    cp scripts/com.algotrading.tradingview.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.algotrading.tradingview.plist
+
+  UNINSTALL:
+    launchctl unload ~/Library/LaunchAgents/com.algotrading.tradingview.plist
+    rm ~/Library/LaunchAgents/com.algotrading.tradingview.plist
+
+  AFTER LOADING:
+    Expose to internet: ngrok http 8765
+    Copy the ngrok URL to Pine Script → Strategy → Alert → Webhook URL
+    Set TV_WEBHOOK_SECRET in .env to match Pine Script input.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.algotrading.tradingview</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Library/Frameworks/Python.framework/Versions/3.14/bin/python3</string>
+        <string>-B</string>
+        <string>/Users/joshmacbookair2020/Desktop/algo_trading_final/scripts/tradingview_webhook.py</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/joshmacbookair2020/Desktop/algo_trading_final</string>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>/Users/joshmacbookair2020/Desktop/algo_trading_final/logs/service/tradingview.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/joshmacbookair2020/Desktop/algo_trading_final/logs/service/tradingview_error.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/Library/Frameworks/Python.framework/Versions/3.14/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>/Users/joshmacbookair2020</string>
+        <key>PYTHONDONTWRITEBYTECODE</key>
+        <string>1</string>
+    </dict>
+</dict>
+</plist>

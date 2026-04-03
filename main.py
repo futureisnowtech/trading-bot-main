@@ -41,9 +41,7 @@ import logging_db.trade_logger  # noqa: F401 — pre-warm, prevents EDEADLK
 
 BANNER = """
 ╔══════════════════════════════════════════════════════════════════╗
-║  THE KING'S ALGO TRADING SYSTEM  v10.1                          ║
-║                                                                  ║
-║  "Nothing is given. Everything is earned." — LeBron James       ║
+║  ALGO TRADING SYSTEM  v10.1                                     ║
 ║                                                                  ║
 ║  Scanner:    Kraken Futures perps | 7-filter | top 15          ║
 ║  Signals:    Two-tower (technical 0-100 + ML 0-100)             ║
@@ -120,7 +118,7 @@ if __name__ == '__main__':
     try:
         main()
     except KeyboardInterrupt:
-        print("\n\n👑 Shutdown complete. We came, we worked.")
+        print("\n\nShutdown complete.")
         sys.exit(0)
     except Exception as e:
         print(f"\n💥 Fatal error: {e}")

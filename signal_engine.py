@@ -695,6 +695,49 @@ _LONG_SETUPS = [
         'invalidate': lambda f: f.get('supertrend_bearish', 0) > 0
                                 and f.get('wae_bullish', 0) == 0,
     },
+    # ── SuperTrend flip: trend just turned bullish — high-conviction directional shift ──
+    {
+        'name':       'supertrend_cross_long',
+        'label':      'SuperTrend Bullish Cross',
+        # ST direction just flipped from -1 → +1 on this bar.
+        # Requires KST above its signal line (momentum direction agrees) AND
+        # MACD fast histogram positive (short-term trend confirming).
+        # Blocked in confirmed ranging (chop > 61.8) — ST crosses in a box are noise.
+        'check':      lambda f: f.get('supertrend_cross_up', 0) > 0
+                                and f.get('kst_bullish', 0) > 0
+                                and f.get('mom_macd_hist_fast', 0) > 0
+                                and f.get('chop_ranging', 0) == 0,
+        'invalidate': lambda f: f.get('supertrend_bearish', 0) > 0,
+    },
+    # ── KST cross: momentum oscillator just crossed its signal line bullish ──
+    {
+        'name':       'kst_cross_long',
+        'label':      'KST Bullish Cross + Trend Confirm',
+        # KST just crossed above its signal line AND value positive (above zero line)
+        # confirming that momentum is both turning and has real upside direction.
+        # SuperTrend must agree — prevents trading KST crosses in downtrends.
+        'check':      lambda f: f.get('kst_cross_up', 0) > 0
+                                and f.get('kst_value', 0) > 0
+                                and f.get('supertrend_bullish', 0) > 0
+                                and f.get('chop_ranging', 0) == 0,
+        'invalidate': lambda f: f.get('kst_bullish', 0) == 0
+                                or f.get('supertrend_bearish', 0) > 0,
+    },
+    # ── Ichimoku cloud breakout: price just pushed above kumo — structural bullish shift ──
+    {
+        'name':       'ichimoku_cloud_breakout_long',
+        'label':      'Ichimoku Cloud Breakout Long',
+        # Price just crossed above the kumo top (Senkou A/B max) — rare, high-conviction.
+        # Require SuperTrend bullish + MACD positive to filter fake breaks.
+        # TK cross up (Tenkan above Kijun) can also confirm without requiring cloud cross.
+        'check':      lambda f: (f.get('cloud_cross_up', 0) > 0
+                                 or (f.get('cloud_bullish', 0) > 0 and f.get('tk_cross_up', 0) > 0))
+                                and f.get('supertrend_bullish', 0) > 0
+                                and f.get('mom_macd_hist_fast', 0) > 0
+                                and f.get('chop_ranging', 0) == 0,
+        'invalidate': lambda f: f.get('cloud_bearish', 0) > 0
+                                or f.get('supertrend_bearish', 0) > 0,
+    },
     # ── Mean-reversion setups (require chop_ranging — only trade in confirmed ranges) ──
     {
         'name':       'ranging_mr_long',
@@ -753,6 +796,39 @@ _SHORT_SETUPS = [
                                      or f.get('wt_overbought', 0) > 0),
         'invalidate': lambda f: f.get('supertrend_bullish', 0) > 0
                                 and f.get('wae_bearish', 0) == 0,
+    },
+    # ── SuperTrend flip: trend just turned bearish ────────────────────────────
+    {
+        'name':       'supertrend_cross_short',
+        'label':      'SuperTrend Bearish Cross',
+        'check':      lambda f: f.get('supertrend_cross_down', 0) > 0
+                                and f.get('kst_bullish', 0) == 0
+                                and f.get('mom_macd_hist_fast', 0) < 0
+                                and f.get('chop_ranging', 0) == 0,
+        'invalidate': lambda f: f.get('supertrend_bullish', 0) > 0,
+    },
+    # ── KST cross: momentum oscillator just crossed bearish ──────────────────
+    {
+        'name':       'kst_cross_short',
+        'label':      'KST Bearish Cross + Trend Confirm',
+        'check':      lambda f: f.get('kst_cross_down', 0) > 0
+                                and f.get('kst_value', 0) < 0
+                                and f.get('supertrend_bearish', 0) > 0
+                                and f.get('chop_ranging', 0) == 0,
+        'invalidate': lambda f: f.get('kst_bullish', 0) > 0
+                                or f.get('supertrend_bullish', 0) > 0,
+    },
+    # ── Ichimoku cloud breakdown: price just fell below kumo ─────────────────
+    {
+        'name':       'ichimoku_cloud_breakout_short',
+        'label':      'Ichimoku Cloud Breakdown Short',
+        'check':      lambda f: (f.get('cloud_cross_down', 0) > 0
+                                 or (f.get('cloud_bearish', 0) > 0 and f.get('tk_cross_down', 0) > 0))
+                                and f.get('supertrend_bearish', 0) > 0
+                                and f.get('mom_macd_hist_fast', 0) < 0
+                                and f.get('chop_ranging', 0) == 0,
+        'invalidate': lambda f: f.get('cloud_bullish', 0) > 0
+                                or f.get('supertrend_bullish', 0) > 0,
     },
     # ── Mean-reversion setups (require chop_ranging) ──────────────────────────
     {

@@ -1014,6 +1014,71 @@ def ml_retrain_check():
 
 # ── mes_futures_scan ─────────────────────────────────────────────────────────
 
+def _get_mes_vwap_data() -> dict:
+    """
+    Compute session VWAP, ATR(14), and RSI(14) for MES from yfinance 1-min bars.
+    Used by the VWAP Mean Reversion strategy.
+
+    Returns dict with keys: price, vwap, atr, rsi, dist_atr, signal ('long'/'short'/None).
+    Returns {} on any failure — strategy skips cleanly.
+    """
+    try:
+        import yfinance as yf
+        import numpy as np
+
+        df = yf.Ticker('MES=F').history(period='1d', interval='1m')
+        if df is None or len(df) < 20:
+            return {}
+
+        # Session VWAP (from first bar of the current day)
+        df['tp']      = (df['High'] + df['Low'] + df['Close']) / 3
+        df['cum_tpv'] = (df['tp'] * df['Volume']).cumsum()
+        df['cum_vol'] = df['Volume'].cumsum()
+        df['vwap']    = df['cum_tpv'] / (df['cum_vol'] + 1e-9)
+
+        # ATR (14-bar, 1-min)
+        prev_c = df['Close'].shift(1)
+        tr     = np.maximum(df['High'] - df['Low'],
+                 np.maximum((df['High'] - prev_c).abs(),
+                            (df['Low']  - prev_c).abs()))
+        atr = float(tr.rolling(14).mean().iloc[-1])
+        if np.isnan(atr) or atr <= 0:
+            atr = 2.0
+
+        # RSI (14-bar, 1-min)
+        delta = df['Close'].diff()
+        gain  = delta.clip(lower=0).rolling(14).mean()
+        loss  = (-delta.clip(upper=0)).rolling(14).mean()
+        rsi   = float((100 - 100 / (1 + gain / (loss + 1e-9))).iloc[-1])
+
+        price = float(df['Close'].iloc[-1])
+        vwap  = float(df['vwap'].iloc[-1])
+
+        if np.isnan(price) or np.isnan(vwap):
+            return {}
+
+        dist_atr = (price - vwap) / (atr + 1e-9)
+
+        # Signal: price >2σ from VWAP + RSI confirmation → fade back to VWAP
+        signal = None
+        if dist_atr > 2.0 and rsi > 68:
+            signal = 'short'   # extended above VWAP → fade down
+        elif dist_atr < -2.0 and rsi < 32:
+            signal = 'long'    # extended below VWAP → fade up
+
+        return {
+            'price':    price,
+            'vwap':     round(vwap, 2),
+            'atr':      round(atr, 4),
+            'rsi':      round(rsi, 1),
+            'dist_atr': round(dist_atr, 2),
+            'signal':   signal,
+        }
+    except Exception as e:
+        logger.debug(f'[mes] vwap_data error: {e}')
+        return {}
+
+
 def mes_futures_scan():
     """
     2-minute loop (US market hours only): MES opening-range breakout scanner.
@@ -1205,6 +1270,61 @@ def _mes_scan_inner():
                 target_price=target_price,
                 reason=f'or_breakdown_short OR={_mes_or_low:.2f}-{_mes_or_high:.2f}',
             )
+
+        # ── Strategy 2: VWAP Mean Reversion ──────────────────────────────────
+        # Runs 10:00–14:30 ET; only when no position; OR must be locked.
+        # Entry: price >2 ATR from session VWAP + RSI extreme → fade back to VWAP.
+        # Stop: 1.5 ATR past entry; Target: VWAP (mean reversion).
+        # Conservative: 1 contract only.
+        if not has_pos and _mes_or_locked and 10 <= h <= 14:
+            vd  = _get_mes_vwap_data()
+            sig = vd.get('signal')
+            if sig:
+                vwap = vd['vwap']
+                atr  = vd['atr']
+                p    = vd['price']
+                rsi  = vd['rsi']
+                if sig == 'long':
+                    sl  = round(p - 1.5 * atr, 2)
+                    tp  = round(max(vwap, sl + atr), 2)   # VWAP, never below stop
+                    logger.info(f'[mes] VWAP-MR LONG  @ {p:.2f}  vwap={vwap:.2f} '
+                                f'stop={sl:.2f} target={tp:.2f} rsi={rsi:.0f} '
+                                f'dist={vd["dist_atr"]:.1f}σ')
+                    broker.buy_mes(
+                        qty=1,
+                        stop_price=sl,
+                        target_price=tp,
+                        reason=f'vwap_mr_long vwap={vwap:.2f} dist={vd["dist_atr"]:.1f}σ',
+                    )
+                elif sig == 'short':
+                    sl  = round(p + 1.5 * atr, 2)
+                    tp  = round(min(vwap, sl - atr), 2)   # VWAP, never above stop
+                    logger.info(f'[mes] VWAP-MR SHORT @ {p:.2f}  vwap={vwap:.2f} '
+                                f'stop={sl:.2f} target={tp:.2f} rsi={rsi:.0f} '
+                                f'dist={vd["dist_atr"]:.1f}σ')
+                    broker.short_mes(
+                        qty=1,
+                        stop_price=sl,
+                        target_price=tp,
+                        reason=f'vwap_mr_short vwap={vwap:.2f} dist={vd["dist_atr"]:.1f}σ',
+                    )
+
+        # Write current state snapshot to system_events so the dashboard can read it
+        try:
+            from logging_db.trade_logger import log_event
+            import json as _json_state
+            _state = {
+                'price':     round(price, 2),
+                'or_high':   round(_mes_or_high, 2) if _mes_or_locked else None,
+                'or_low':    round(_mes_or_low,  2) if _mes_or_locked else None,
+                'or_locked': _mes_or_locked,
+                'daily_pnl': round(_mes_daily_pnl, 2),
+                'has_pos':   has_pos,
+                'time_et':   now_et.strftime('%H:%M'),
+            }
+            log_event('INFO', 'mes_state', _json_state.dumps(_state))
+        except Exception:
+            pass
 
     finally:
         try:

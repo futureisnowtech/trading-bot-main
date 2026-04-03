@@ -196,18 +196,22 @@ class IBKRBroker:
 
     def buy_mes(
         self,
-        num_contracts: int = FUTURES_NUM_CONTRACTS,
+        qty: int = FUTURES_NUM_CONTRACTS,
+        stop_price: Optional[float] = None,
+        target_price: Optional[float] = None,
+        reason: str = 'signal',
         order_type: str = 'Market',
-        limit_price: Optional[float] = None,
-        stop_loss_pts: float = 4.0,
-        take_profit_pts: float = 8.0,
         strategy: str = 'futures_scalper',
     ) -> Optional[dict]:
         """Go long MES. Bracket order: market entry + server-side SL + TP."""
         current_price = self._get_mes_price('ask')
-        stop_price   = round(current_price - stop_loss_pts, 2)
-        target_price = round(current_price + take_profit_pts, 2)
-        commission   = IBKR_COMMISSION * num_contracts * 2
+        num_contracts = int(qty)
+        if stop_price is None:
+            stop_price = round(current_price - 4.0, 2)
+        if target_price is None:
+            target_price = round(current_price + 8.0, 2)
+        stop_loss_pts = current_price - stop_price
+        commission    = IBKR_COMMISSION * num_contracts * 2
 
         if self.is_connected():
             try:
@@ -250,7 +254,7 @@ class IBKRBroker:
             symbol='MES', action='BUY', order_type=order_type,
             qty=num_contracts, price=current_price, fee_usd=commission,
             paper=PAPER_TRADING, order_id=order_id,
-            notes=f"SL={stop_price} TP={target_price} risk=${stop_loss_pts*MES_POINT_VALUE*num_contracts:.2f}",
+            notes=f"SL={stop_price} TP={target_price} reason={reason}",
         )
         try:
             if _get_ne:
@@ -267,7 +271,7 @@ class IBKRBroker:
 
     def sell_mes(
         self,
-        num_contracts: int = 1,
+        qty: int = 1,
         strategy: str = 'futures_scalper',
         reason: str = 'Signal',
         entry_price: float = 0.0,
@@ -275,16 +279,16 @@ class IBKRBroker:
         """Close a long MES position at market."""
         exit_price = self._get_mes_price('bid')
         entry = entry_price or self._open_positions.get('MES', {}).get('entry', exit_price)
-        pnl = (exit_price - entry) * MES_POINT_VALUE * num_contracts
+        pnl = (exit_price - entry) * MES_POINT_VALUE * qty
 
         if self.is_connected():
             try:
                 from ib_insync import Future, MarketOrder
                 contract = _get_mes_contract()
                 self._ib.qualifyContracts(contract)
-                order = MarketOrder('SELL', num_contracts)
+                order = MarketOrder('SELL', qty)
                 self._ib.placeOrder(contract, order)
-                print(f"[IBKRBroker] SELL {num_contracts} MES @ {exit_price:.2f} | P&L: ${pnl:+.2f}")
+                print(f"[IBKRBroker] SELL {qty} MES @ {exit_price:.2f} | P&L: ${pnl:+.2f}")
             except Exception as e:
                 log_event('ERROR', 'IBKRBroker', f"sell_mes error: {e}")
         else:
@@ -296,8 +300,8 @@ class IBKRBroker:
         log_trade(
             strategy=strategy, broker='ibkr' if not PAPER_TRADING else 'ibkr_paper',
             symbol='MES', action='SELL', order_type='Market',
-            qty=num_contracts, price=exit_price,
-            fee_usd=IBKR_COMMISSION * num_contracts,
+            qty=qty, price=exit_price,
+            fee_usd=IBKR_COMMISSION * qty,
             pnl_usd=pnl, paper=PAPER_TRADING,
             order_id=f'IBKR_{uuid.uuid4().hex[:8]}',
             notes=f"reason={reason}",
@@ -307,7 +311,7 @@ class IBKRBroker:
                 _ne = _get_ne()
                 _ne.notify_trade_close(
                     symbol='MES', direction='LONG',
-                    pnl_usd=pnl, pnl_pct=pnl / max(abs(entry * num_contracts * MES_POINT_VALUE), 1),
+                    pnl_usd=pnl, pnl_pct=pnl / max(abs(entry * qty * MES_POINT_VALUE), 1),
                     exit_type=reason, top_3=[], features={}, regime='UNKNOWN', score=0.0,
                 )
         except Exception:
@@ -316,18 +320,21 @@ class IBKRBroker:
 
     def short_mes(
         self,
-        num_contracts: int = 1,
+        qty: int = 1,
+        stop_price: Optional[float] = None,
+        target_price: Optional[float] = None,
+        reason: str = 'signal',
         order_type: str = 'Market',
-        limit_price: Optional[float] = None,
-        stop_loss_pts: float = 4.0,
-        take_profit_pts: float = 8.0,
         strategy: str = 'futures_scalper',
     ) -> Optional[dict]:
         """Go short MES. Bracket order: market entry + server-side SL + TP."""
         current_price = self._get_mes_price('bid')
-        stop_price   = round(current_price + stop_loss_pts, 2)
-        target_price = round(current_price - take_profit_pts, 2)
-        commission   = IBKR_COMMISSION * num_contracts * 2
+        num_contracts = int(qty)
+        if stop_price is None:
+            stop_price = round(current_price + 4.0, 2)
+        if target_price is None:
+            target_price = round(current_price - 8.0, 2)
+        commission    = IBKR_COMMISSION * num_contracts * 2
 
         if self.is_connected():
             try:
@@ -367,7 +374,7 @@ class IBKRBroker:
             symbol='MES', action='SHORT', order_type=order_type,
             qty=num_contracts, price=current_price, fee_usd=commission,
             paper=PAPER_TRADING, order_id=order_id,
-            notes=f"SL={stop_price} TP={target_price}",
+            notes=f"SL={stop_price} TP={target_price} reason={reason}",
         )
         try:
             if _get_ne:
@@ -384,7 +391,7 @@ class IBKRBroker:
 
     def cover_mes(
         self,
-        num_contracts: int = 1,
+        qty: int = 1,
         strategy: str = 'futures_scalper',
         reason: str = 'Signal',
         entry_price: float = 0.0,
@@ -392,15 +399,15 @@ class IBKRBroker:
         """Cover (close) a short MES position."""
         exit_price = self._get_mes_price('ask')
         entry = entry_price or self._open_positions.get('MES', {}).get('entry', exit_price)
-        pnl = (entry - exit_price) * MES_POINT_VALUE * num_contracts
+        pnl = (entry - exit_price) * MES_POINT_VALUE * qty
 
         if self.is_connected():
             try:
                 from ib_insync import MarketOrder
                 contract = _get_mes_contract()
                 self._ib.qualifyContracts(contract)
-                self._ib.placeOrder(contract, MarketOrder('BUY', num_contracts))
-                print(f"[IBKRBroker] COVER {num_contracts} MES @ {exit_price:.2f} | P&L: ${pnl:+.2f}")
+                self._ib.placeOrder(contract, MarketOrder('BUY', qty))
+                print(f"[IBKRBroker] COVER {qty} MES @ {exit_price:.2f} | P&L: ${pnl:+.2f}")
             except Exception as e:
                 log_event('ERROR', 'IBKRBroker', f"cover_mes error: {e}")
 
@@ -410,8 +417,8 @@ class IBKRBroker:
         log_trade(
             strategy=strategy, broker='ibkr' if not PAPER_TRADING else 'ibkr_paper',
             symbol='MES', action='COVER', order_type='Market',
-            qty=num_contracts, price=exit_price,
-            fee_usd=IBKR_COMMISSION * num_contracts,
+            qty=qty, price=exit_price,
+            fee_usd=IBKR_COMMISSION * qty,
             pnl_usd=pnl, paper=PAPER_TRADING,
             order_id=f'IBKR_{uuid.uuid4().hex[:8]}',
             notes=f"reason={reason}",
@@ -421,7 +428,7 @@ class IBKRBroker:
                 _ne = _get_ne()
                 _ne.notify_trade_close(
                     symbol='MES', direction='SHORT',
-                    pnl_usd=pnl, pnl_pct=pnl / max(abs(entry * num_contracts * MES_POINT_VALUE), 1),
+                    pnl_usd=pnl, pnl_pct=pnl / max(abs(entry * qty * MES_POINT_VALUE), 1),
                     exit_type=reason, top_3=[], features={}, regime='UNKNOWN', score=0.0,
                 )
         except Exception:

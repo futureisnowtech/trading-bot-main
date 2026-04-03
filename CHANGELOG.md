@@ -1,6 +1,18 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-03
+- feat(dashboard): add FUTURES tab — st.tabs([CRYPTO PERPS, FUTURES(MES)]); futures tab shows market hours, OR range, daily P&L, position state, today's trades, strategy playbook, config expander; runner writes mes_state to system_events each cycle
+
+## 2026-04-03
+- fix(ibkr_broker): rename num_contracts→qty, add stop_price/target_price absolute-price params to buy_mes/short_mes; fixes parameter mismatch with v10_runner calling convention
+
+## 2026-04-03
+- feat(futures): VWAP Mean Reversion strategy for MES — 1-min yfinance bars, session VWAP + RSI(14) + ATR(14); entry >2σ from VWAP with RSI confirmation; 1 contract, stop 1.5 ATR, target VWAP; runs 10:00-14:30 ET alongside ORB
+
+## 2026-04-03
+- feat(scanner): add Hyperliquid perps exchange — 80+ markets, no geo-block, POST-based API (_post helper, _hl_meta_and_ctxs, _hl_klines, _hl_ob), integrated into 7-step pipeline alongside Kraken
+
+## 2026-04-03
 - fix(scanner): ADX recurrence bug — formula was adding full raw DX[i] (Wilder TR-smoothing style) instead of DX[i]/period; all markets showed ADX ≈ 100, blocking ranging_mr setup; fix: use EMA-style ADX[i] = ADX[i-1]*(1-1/n) + DX[i]/n
 
 ## 2026-04-03

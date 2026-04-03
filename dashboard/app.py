@@ -166,6 +166,66 @@ def get_recent_events(limit=20):
     """, (limit,))
 
 
+# ── MES Futures data ──────────────────────────────────────────────────────────
+
+def get_mes_state() -> dict:
+    """Latest MES state snapshot written by the runner each cycle."""
+    row = _q1("""
+        SELECT ts, message FROM system_events
+        WHERE source = 'mes_state'
+        ORDER BY rowid DESC LIMIT 1
+    """)
+    if not row:
+        return {}
+    try:
+        import json
+        state = json.loads(row.get('message', '{}'))
+        state['ts'] = row.get('ts', '')
+        return state
+    except Exception:
+        return {}
+
+def get_mes_trades_today() -> list:
+    today = datetime.now().strftime("%Y-%m-%d")
+    return _q("""
+        SELECT ts, action, qty, price, pnl_usd, notes
+        FROM trades
+        WHERE ts >= ? AND symbol = 'MES'
+        ORDER BY ts DESC
+    """, (today,))
+
+def get_mes_daily_pnl() -> float:
+    today = datetime.now().strftime("%Y-%m-%d")
+    r = _q1("""
+        SELECT SUM(pnl_usd) v FROM trades
+        WHERE ts >= ? AND symbol = 'MES' AND pnl_usd != 0
+    """, (today,))
+    return r.get('v') or 0.0
+
+def get_mes_all_time_stats() -> dict:
+    r = _q1("""
+        SELECT
+            COUNT(*) AS closes,
+            SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END) AS wins,
+            SUM(pnl_usd) AS total_pnl,
+            SUM(CASE WHEN pnl_usd > 0 THEN pnl_usd ELSE 0 END) AS gross_wins,
+            SUM(CASE WHEN pnl_usd < 0 THEN ABS(pnl_usd) ELSE 0 END) AS gross_losses
+        FROM trades
+        WHERE symbol = 'MES' AND pnl_usd != 0
+    """)
+    closes = r.get('closes') or 0
+    wins   = r.get('wins') or 0
+    gw     = r.get('gross_wins') or 0.0
+    gl     = r.get('gross_losses') or 0.0
+    return {
+        'closes':  closes,
+        'wins':    wins,
+        'win_rate': wins / closes * 100 if closes else 0.0,
+        'total_pnl': r.get('total_pnl') or 0.0,
+        'profit_factor': gw / gl if gl > 0 else (float('inf') if gw > 0 else 0.0),
+    }
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # BOT LOG PARSING
 # ══════════════════════════════════════════════════════════════════════════════
@@ -780,36 +840,181 @@ def render_activity():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# RENDER — FUTURES TAB (10s)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@st.fragment(run_every=10)
+def render_futures():
+    import pandas as pd
+
+    # ── Market hours status ───────────────────────────────────────────────────
+    try:
+        import pytz
+        et       = pytz.timezone('America/New_York')
+        now_et   = datetime.now(et)
+        h, m     = now_et.hour, now_et.minute
+        is_open  = (now_et.weekday() < 5 and
+                    ((h == 9 and m >= 30) or (10 <= h <= 15) or (h == 15 and m <= 45)))
+        pre_open = (now_et.weekday() < 5 and h == 9 and m < 30)
+        time_str = now_et.strftime('%H:%M ET')
+        if is_open:
+            mkt_status = "OPEN"
+        elif pre_open:
+            mkt_status = "PRE-OPEN"
+        else:
+            mkt_status = "CLOSED"
+    except Exception:
+        is_open, mkt_status, time_str = False, "UNKNOWN", "--:--"
+
+    mes_state  = get_mes_state()
+    daily_pnl  = get_mes_daily_pnl()
+    all_stats  = get_mes_all_time_stats()
+    trades_today = get_mes_trades_today()
+
+    price      = mes_state.get('price')
+    or_high    = mes_state.get('or_high')
+    or_low     = mes_state.get('or_low')
+    or_locked  = mes_state.get('or_locked', False)
+    has_pos    = mes_state.get('has_pos', False)
+    state_time = mes_state.get('time_et', '--')
+
+    # ── Status row ────────────────────────────────────────────────────────────
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1.metric("Market",       mkt_status, delta=time_str)
+    c2.metric("MES Price",    f"{price:.2f}" if price else "–")
+    c3.metric("Today P&L",   _fmt_pnl(daily_pnl))
+    c4.metric("Position",    "ACTIVE" if has_pos else "FLAT")
+    c5.metric("All-Time W/L", f"{all_stats['wins']}W / {all_stats['closes'] - all_stats['wins']}L")
+    pf = all_stats['profit_factor']
+    c6.metric("Profit Factor", f"{pf:.2f}" if pf != float('inf') else "∞")
+
+    st.divider()
+
+    # ── Opening Range panel ───────────────────────────────────────────────────
+    col_l, col_r = st.columns(2)
+
+    with col_l:
+        st.subheader("Opening Range (9:30–10:00 ET)")
+        if or_locked and or_high and or_low:
+            or_range = or_high - or_low
+            or_mid   = (or_high + or_low) / 2
+            long_entry  = round(or_high + 0.25, 2)
+            short_entry = round(or_low  - 0.25, 2)
+            r1, r2, r3 = st.columns(3)
+            r1.metric("OR High",       f"{or_high:.2f}")
+            r2.metric("OR Low",        f"{or_low:.2f}")
+            r3.metric("Range (pts)",   f"{or_range:.2f}")
+            st.caption(f"Long breakout trigger: ≥ {long_entry}  |  Short breakdown trigger: ≤ {short_entry}")
+            st.caption(f"Last runner update: {state_time}")
+        elif is_open and not or_locked:
+            st.info("Building opening range… (9:30–10:00 ET)")
+        elif not is_open:
+            st.info("Market closed. Opening range resets at 9:30 ET.")
+        else:
+            st.info("Waiting for runner state (FUTURES_ENABLED must be True in .env)")
+
+    with col_r:
+        st.subheader("Strategy Playbook")
+        st.caption("**Strategy 1 — Opening Range Breakout** (fires once, at OR lock)")
+        strats = [
+            ("Trigger",  "Price breaks above OR high (+0.25 pt) → LONG"),
+            ("",         "Price breaks below OR low  (−0.25 pt) → SHORT"),
+            ("Stop",     "Opposite end of OR ± 0.25 pt buffer"),
+            ("Target",   "2× stop distance, minimum 4 pts ($20/contract)"),
+            ("Contracts","Up to 2 (config: FUTURES_NUM_CONTRACTS)"),
+            ("Window",   "10:00–15:45 ET; hard EOD close at 15:45"),
+        ]
+        for k, v in strats:
+            prefix = f"  {k+':':<12}" if k else "               "
+            st.text(f"{prefix}{v}")
+
+        st.divider()
+
+        st.caption("**Strategy 2 — VWAP Mean Reversion** (runs all session)")
+        strats2 = [
+            ("Trigger",  "Price >2 ATR from session VWAP AND RSI >68 → SHORT"),
+            ("",         "Price <2 ATR from session VWAP AND RSI <32 → LONG"),
+            ("Stop",     "1.5 ATR past entry"),
+            ("Target",   "VWAP (mean-reversion)"),
+            ("Contracts","1 (conservative)"),
+            ("Window",   "10:00–14:30 ET; requires no open position"),
+        ]
+        for k, v in strats2:
+            prefix = f"  {k+':':<12}" if k else "               "
+            st.text(f"{prefix}{v}")
+
+    st.divider()
+
+    # ── Today's trades ────────────────────────────────────────────────────────
+    st.subheader(f"Today's MES Trades ({len(trades_today)})")
+    if trades_today:
+        rows = []
+        for t in trades_today:
+            pnl = t.get('pnl_usd') or 0
+            rows.append({
+                "Time":    _time_ago(t.get('ts', '')),
+                "Action":  t.get('action', ''),
+                "Qty":     t.get('qty', ''),
+                "Price":   t.get('price', ''),
+                "P&L":     _fmt_pnl(pnl) if pnl else '–',
+                "Notes":   (t.get('notes') or '')[:80],
+                "Result":  "WIN" if pnl > 0 else ("LOSS" if pnl < 0 else "OPEN"),
+            })
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    else:
+        st.info("No MES trades today." if is_open else "No MES trades today — market closed.")
+
+    st.divider()
+
+    # ── Config + risk rules ───────────────────────────────────────────────────
+    with st.expander("Futures configuration & risk rules"):
+        try:
+            from config import FUTURES_ENABLED, FUTURES_NUM_CONTRACTS, ACCOUNT_SIZE
+            st.text(f"  FUTURES_ENABLED:         {FUTURES_ENABLED}")
+            st.text(f"  FUTURES_NUM_CONTRACTS:   {FUTURES_NUM_CONTRACTS}")
+            st.text(f"  Account size:            ${float(ACCOUNT_SIZE):,.0f}")
+        except Exception as e:
+            st.error(f"config: {e}")
+        st.text("  Contract:   MES (Micro E-mini S&P 500) — CME")
+        st.text("  Expiry:     Q2 2026 — 20260619 (update quarterly)")
+        st.text("  Point value: $5.00 / full point")
+        st.text("  Tick size:   0.25 pts = $1.25 / tick")
+        st.text("  Commission:  ~$0.47/side = $0.94 round-trip per contract")
+        st.text("  Connection:  IBKR TWS port 7497 (paper) / 7496 (live)")
+        st.text("  Daily loss limit: $150 — no new entries after this")
+        st.text("  Hard EOD close:   15:45 ET — all positions closed")
+        st.text("  Max simultaneous: 1 position at a time")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # MAIN
 # ══════════════════════════════════════════════════════════════════════════════
 
 def main():
     st.title("Algo Trading System — v10.1 Paper")
-    st.caption("Kraken Futures perps · Two-tower signal engine · 6-priority exit stack · 57-feature ML · All data live from SQLite + bot.log")
-    st.divider()
+    st.caption("Two-tower signal engine · 6-priority exit stack · 57-feature ML · Kraken + Hyperliquid perps · MES futures")
 
-    render_status()
-    st.divider()
+    tab_crypto, tab_futures = st.tabs(["CRYPTO PERPS", "FUTURES (MES)"])
 
-    render_portfolio()
-    st.divider()
+    with tab_crypto:
+        render_status()
+        st.divider()
+        render_portfolio()
+        st.divider()
+        render_open_positions()
+        st.divider()
+        render_scanner()
+        st.divider()
+        render_signal_brain()
+        st.divider()
+        render_trades()
+        st.divider()
+        render_system_config()
+        st.divider()
+        render_activity()
 
-    render_open_positions()
-    st.divider()
-
-    render_scanner()
-    st.divider()
-
-    render_signal_brain()
-    st.divider()
-
-    render_trades()
-    st.divider()
-
-    render_system_config()
-    st.divider()
-
-    render_activity()
+    with tab_futures:
+        render_futures()
 
 
 if __name__ == "__main__":

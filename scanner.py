@@ -56,6 +56,7 @@ except ImportError:
 _KRAKEN_BASE    = 'https://futures.kraken.com/derivatives/api/v3'
 _KRAKEN_CHARTS  = 'https://futures.kraken.com/api/charts/v1'
 _BINANCE_BASE   = 'https://fapi.binance.com'
+_HL_BASE        = 'https://api.hyperliquid.xyz/info'
 
 # ── Filter thresholds ──────────────────────────────────────────────────────────
 _MIN_VOLUME_24H_USD      = 500_000   # $500K/day minimum — both exchanges
@@ -70,6 +71,7 @@ _MAX_SPREAD_PCT          = 0.25      # relaxed for Kraken
 _MIN_EXPECTED_PROFIT     = 0.25      # $ — lower floor to pass more candidates
 _TOP_N                   = 50
 _MAX_STEP1_BINANCE       = 100       # cap Binance universe at top 100 by volume
+_MAX_STEP1_HYPERLIQUID   = 80        # top 80 HL markets by volume
 _ROUND_TRIP_FEE_PCT      = 0.00130   # 0.065% × 2 (Kraken); conservative for Binance too
 _FUNDING_HOLD_PERIODS    = 1.5       # expected 8h-equivalent funding periods held
 _PARALLEL_WORKERS        = 20        # concurrent kline fetch threads
@@ -101,6 +103,22 @@ def _get(url: str, timeout: int = 10) -> Optional[Dict]:
             return _json.loads(resp.read().decode('utf-8'))
     except Exception as e:
         logger.debug(f'[scanner] GET failed: {url!r} — {e}')
+        return None
+
+
+def _post(url: str, data: dict, timeout: int = 10) -> Optional[Dict]:
+    """HTTP POST with JSON body — used for Hyperliquid API."""
+    if not _HTTP_OK:
+        return None
+    try:
+        body = _json.dumps(data).encode('utf-8')
+        req  = _urllib.Request(url, data=body,
+                               headers={'Content-Type': 'application/json',
+                                        'User-Agent': 'AlgoBot/1.0'})
+        with _urllib.urlopen(req, timeout=timeout) as resp:
+            return _json.loads(resp.read().decode('utf-8'))
+    except Exception as e:
+        logger.debug(f'[scanner] POST failed: {url!r} — {e}')
         return None
 
 
@@ -212,6 +230,109 @@ def _binance_ob(symbol: str) -> Dict:
     # Binance bids: [[price, qty], ...] descending → reverse to ascending for uniform processing
     bids = list(reversed(data.get('bids', [])))
     asks = data.get('asks', [])
+    return {'bids': bids, 'asks': asks}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# HYPERLIQUID DATA FETCHERS
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _hl_meta_and_ctxs() -> List[Dict]:
+    """
+    One POST returns all HL perp markets: price, 24h volume, funding.
+    Already normalised to the same format as Kraken/Binance tickers.
+    Applies $500K/24h volume floor internally.
+    """
+    data = _post(_HL_BASE, {'type': 'metaAndAssetCtxs'}, timeout=10)
+    if not data or not isinstance(data, list) or len(data) < 2:
+        logger.info('[scanner] Hyperliquid unavailable — skipping HL')
+        return []
+
+    universe = data[0].get('universe', [])  # [{name, szDecimals, maxLeverage, ...}]
+    ctxs     = data[1]                       # [{funding, dayNtlVlm, markPx, midPx, ...}]
+
+    result = []
+    for i, meta in enumerate(universe):
+        if i >= len(ctxs):
+            break
+        ctx = ctxs[i]
+        try:
+            name    = str(meta.get('name', '')).upper()
+            if not name:
+                continue
+            mark_px = float(ctx.get('markPx', 0) or 0)
+            if mark_px <= 0:
+                continue
+            vol_usd = float(ctx.get('dayNtlVlm', 0) or 0)
+            if vol_usd < _MIN_VOLUME_24H_USD:
+                continue
+            fund_8h  = float(ctx.get('funding', 0) or 0)
+            fund_ann = fund_8h * 3 * 365          # annualise per-8h → per-year
+            mid_px   = float(ctx.get('midPx', mark_px) or mark_px)
+            result.append({
+                'symbol':         name,
+                'exchange':       'hyperliquid',
+                'base_asset':     name,
+                'price':          mid_px,
+                'volume_24h_usd': vol_usd,
+                'vol_usd':        vol_usd,
+                'funding_rate':   fund_ann,
+                'bid':            mid_px * 0.9998,  # placeholder; real OB in Step 3
+                'ask':            mid_px * 1.0002,
+            })
+        except (ValueError, TypeError):
+            continue
+
+    logger.debug(f'[scanner] Hyperliquid: {len(result)} markets ≥ ${_MIN_VOLUME_24H_USD/1e3:.0f}K vol')
+    return result
+
+
+def _hl_klines(coin: str, interval: str = '15m', n_bars: int = 65) -> List[List[float]]:
+    """OHLCV from Hyperliquid candleSnapshot. Returns [[O,H,L,C,V_usd], ...] oldest first."""
+    bar_secs  = {'1m': 60, '5m': 300, '15m': 900, '1h': 3600, '4h': 14400}.get(interval, 900)
+    end_ms    = int(time.time() * 1000)
+    start_ms  = end_ms - (n_bars + 5) * bar_secs * 1000
+
+    data = _post(_HL_BASE, {
+        'type': 'candleSnapshot',
+        'req':  {'coin': coin, 'interval': interval,
+                 'startTime': start_ms, 'endTime': end_ms},
+    }, timeout=8)
+
+    if not data or not isinstance(data, list):
+        return []
+
+    rows = []
+    for k in data:
+        try:
+            close   = float(k.get('c', 0) or 0)
+            vol_usd = float(k.get('v', 0) or 0) * close   # coin vol × price = USD vol
+            rows.append([float(k['o']), float(k['h']), float(k['l']), close, vol_usd])
+        except Exception:
+            continue
+    return rows  # ascending (oldest first)
+
+
+def _hl_ob(coin: str) -> Dict:
+    """L2 order book from Hyperliquid. Returns {'bids': [[px,sz],...], 'asks': [[px,sz],...]}."""
+    data = _post(_HL_BASE, {'type': 'l2Book', 'coin': coin}, timeout=5)
+    if not data:
+        return {}
+    levels = data.get('levels', [])
+    if len(levels) < 2:
+        return {}
+    # levels[0]=bids (descending), levels[1]=asks (ascending)
+    # Each entry: {'px': '50000', 'sz': '1.5', 'n': 3}  — sz is in coin
+    def _parse(level_list):
+        out = []
+        for l in level_list:
+            try:
+                out.append([float(l['px']), float(l['sz'])])
+            except Exception:
+                pass
+        return out
+    bids = sorted(_parse(levels[0]), key=lambda x: x[0])   # ascending
+    asks = sorted(_parse(levels[1]), key=lambda x: x[0])   # ascending
     return {'bids': bids, 'asks': asks}
 
 
@@ -478,6 +599,8 @@ def _evaluate_one_symbol(c: Dict) -> List[Dict]:
         # Fetch 15m klines (60 bars ≈ 15h; needed for KST which requires ~55 bars)
         if exchange == 'kraken':
             klines = _kraken_klines(sym, '15m', 65)
+        elif exchange == 'hyperliquid':
+            klines = _hl_klines(sym, '15m', 65)
         else:
             klines = _binance_klines(sym, '15m', 65)
 
@@ -628,7 +751,12 @@ def _check_ob_one(c: Dict) -> Optional[Dict]:
     sym      = c['symbol']
     exchange = c['exchange']
     try:
-        ob   = _kraken_ob(sym)  if exchange == 'kraken' else _binance_ob(sym)
+        if exchange == 'kraken':
+            ob = _kraken_ob(sym)
+        elif exchange == 'hyperliquid':
+            ob = _hl_ob(sym)
+        else:
+            ob = _binance_ob(sym)
         bids = ob.get('bids', [])
         asks = ob.get('asks', [])
         if not bids or not asks:
@@ -834,16 +962,21 @@ def scan(open_positions: Optional[List[str]] = None,
             return _last_candidates
 
     t_start = time.time()
-    logger.info('[scanner] Starting multi-exchange scan (Kraken + Binance)...')
+    logger.info('[scanner] Starting multi-exchange scan (Kraken + Binance + Hyperliquid)...')
 
     try:
         # ── Fetch exchange data (3 calls upfront) ─────────────────────────────
         kraken_raw    = _kraken_tickers()
         binance_raw   = _binance_tickers()
         binance_fund  = _binance_funding_all() if binance_raw else {}
+        hl_raw        = _hl_meta_and_ctxs()
 
         # ── Step 1: Universe ──────────────────────────────────────────────────
         universe = _step1_universe(kraken_raw, binance_raw, binance_fund)
+        if hl_raw:
+            hl_capped = sorted(hl_raw, key=lambda x: x['volume_24h_usd'], reverse=True)[:_MAX_STEP1_HYPERLIQUID]
+            universe.extend(hl_capped)
+            logger.info(f'[scanner] Hyperliquid: {len(hl_raw)} eligible → {len(hl_capped)} added to universe')
         if not universe:
             logger.warning('[scanner] No symbols passed Step 1 — scan idle')
             return []
@@ -852,12 +985,13 @@ def scan(open_positions: Optional[List[str]] = None,
         step2 = _step2_multi_setup(universe)
         n_kraken  = sum(1 for c in step2 if c.get('exchange') == 'kraken')
         n_binance = sum(1 for c in step2 if c.get('exchange') == 'binance')
+        n_hl      = sum(1 for c in step2 if c.get('exchange') == 'hyperliquid')
         setup_counts = {}
         for c in step2:
             for s in c.get('scan_setups', []):
                 setup_counts[s] = setup_counts.get(s, 0) + 1
         logger.info(f'[scanner] Step 2 (multi-setup): {len(universe)} → {len(step2)} '
-                    f'({n_kraken} kraken, {n_binance} binance) '
+                    f'({n_kraken} kraken, {n_binance} binance, {n_hl} hyperliquid) '
                     f'setups={setup_counts}')
         if not step2:
             return []

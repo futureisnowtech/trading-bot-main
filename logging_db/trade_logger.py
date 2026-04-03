@@ -64,6 +64,11 @@ def init_db() -> None:
         "ALTER TABLE trade_attribution ADD COLUMN ml_p_win REAL DEFAULT 0",
         # v9.1 super score: unified 0-100 composite intelligence per trade
         "ALTER TABLE trade_attribution ADD COLUMN super_score REAL DEFAULT 0",
+        # v10.1: won flag (1=profitable, 0=loss) and source tag for ML training filters.
+        # walk_forward_trainer and position_manager._get_kelly_fraction both query these columns.
+        "ALTER TABLE trades ADD COLUMN won INTEGER DEFAULT NULL",
+        "ALTER TABLE trades ADD COLUMN source TEXT DEFAULT 'paper'",
+        "ALTER TABLE trades ADD COLUMN pnl_pct REAL DEFAULT 0",
     ]:
         try:
             cur.execute(migration)
@@ -125,9 +130,25 @@ def _ts() -> str:
 
 def log_trade(strategy, broker, symbol, action, order_type,
               qty, price, fee_usd=0.0, pnl_usd=0.0,
-              paper=True, order_id='', notes='') -> int:
+              paper=True, order_id='', notes='',
+              won=None, source=None, pnl_pct=0.0) -> int:
+    """
+    Log a trade to the SQLite trades table.
+
+    Args:
+        won:    1 if trade was profitable, 0 if loss, None for open legs.
+                Used by walk_forward_trainer and _get_kelly_fraction.
+        source: Trade source tag (e.g. 'paper_v10', 'live_v10', 'backtest').
+                Used to filter ML training data to prevent contamination.
+        pnl_pct: P&L as fraction of position size.
+    """
     ts = _ts()
     value_usd = qty * price
+    # Infer won from pnl_usd if not supplied explicitly
+    if won is None and pnl_usd != 0:
+        won = 1 if pnl_usd > 0 else 0
+    if source is None:
+        source = 'paper_v10' if paper else 'live_v10'
     conn = _conn()
     cur = conn.cursor()
 
@@ -148,10 +169,12 @@ def log_trade(strategy, broker, symbol, action, order_type,
 
     cur.execute("""INSERT INTO trades
         (ts,strategy,broker,symbol,action,order_type,qty,price,value_usd,
-         fee_usd,pnl_usd,paper,order_id,notes)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+         fee_usd,pnl_usd,paper,order_id,notes,won,source,pnl_pct)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (ts, strategy, broker, symbol, action, order_type, qty, price,
-         value_usd, fee_usd, pnl_usd, int(paper), order_id or f'PAPER_{uuid.uuid4().hex[:8]}', notes))
+         value_usd, fee_usd, pnl_usd, int(paper),
+         order_id or f'PAPER_{uuid.uuid4().hex[:8]}', notes,
+         won, source, pnl_pct))
     trade_id = cur.lastrowid
     conn.commit()
     conn.close()

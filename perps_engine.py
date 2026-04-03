@@ -118,6 +118,20 @@ def open_long(
         with _lock:
             _open_positions[symbol] = pos
 
+        # Persist to trades DB so Kelly, _live_trade_days(), and walk_forward_trainer can read it
+        try:
+            from logging_db.trade_logger import log_trade
+            _fee = round(position_usd * 0.00065, 4)   # Kraken taker 0.065%
+            log_trade(
+                strategy='v10_perp', broker='kraken_paper' if paper else 'kraken',
+                symbol=symbol, action='BUY', order_type='MARKET',
+                qty=qty, price=entry_price, fee_usd=_fee, pnl_usd=0.0,
+                paper=paper,
+                notes=f'LONG lev={leverage}x score={composite_score:.1f} regime={regime} setup={entry_setup}',
+            )
+        except Exception as _e:
+            logger.debug(f'[perps] open_long log_trade error: {_e}')
+
         logger.info(f'[perps] LONG {symbol}: usd={position_usd:.0f} stop={stop_price:.2f} '
                    f'tp={take_profit_price:.2f} lev={leverage}x composite={composite_score:.1f}')
         return pos
@@ -205,6 +219,20 @@ def open_short(
         with _lock:
             _open_positions[symbol] = pos
 
+        # Persist to trades DB
+        try:
+            from logging_db.trade_logger import log_trade
+            _fee = round(position_usd * 0.00065, 4)   # Kraken taker 0.065%
+            log_trade(
+                strategy='v10_perp', broker='kraken_paper' if paper else 'kraken',
+                symbol=symbol, action='SELL', order_type='MARKET',
+                qty=qty, price=entry_price, fee_usd=_fee, pnl_usd=0.0,
+                paper=paper,
+                notes=f'SHORT lev={leverage}x score={composite_score:.1f} regime={regime} setup={entry_setup}',
+            )
+        except Exception as _e:
+            logger.debug(f'[perps] open_short log_trade error: {_e}')
+
         logger.info(f'[perps] SHORT {symbol}: usd={position_usd:.0f} stop={stop_price:.2f} '
                    f'tp={take_profit_price:.2f} lev={leverage}x composite={composite_score:.1f}')
         return pos
@@ -275,6 +303,36 @@ def close_position(symbol: str, reason: str = 'manual',
                 if symbol in _open_positions:
                     _open_positions[symbol]['qty'] *= (1 - partial_pct)
                     _open_positions[symbol]['position_usd'] *= (1 - partial_pct)
+
+        # Persist close to trades DB so win rate, Kelly, and ML training can read it.
+        if result:
+            try:
+                from logging_db.trade_logger import log_trade
+                _exit_price = float(result.get('exit_price', pos.get('entry_price', 0)))
+                _pnl = float(result.get('pnl_usd', 0))
+                _orig_qty = pos.get('qty', 0)
+                _closed_qty = _orig_qty * partial_pct
+                _notional = abs(_closed_qty * _exit_price)
+                _close_fee = round(_notional * 0.00065, 4)   # Kraken taker 0.065%
+                _entry_price = pos.get('entry_price', _exit_price)
+                _pnl_pct = (_pnl / (_notional + 1e-9)) if _notional > 0 else 0.0
+                # Convention: LONG close = SELL action, SHORT close = BUY action
+                _close_action = 'SELL' if pos.get('direction', 'LONG') == 'LONG' else 'BUY'
+                _won = 1 if _pnl > 0 else 0
+                _source = 'paper_v10' if paper else 'live_v10'
+                log_trade(
+                    strategy='v10_perp', broker='kraken_paper' if paper else 'kraken',
+                    symbol=symbol, action=_close_action, order_type='MARKET',
+                    qty=_closed_qty, price=_exit_price,
+                    fee_usd=_close_fee, pnl_usd=_pnl,
+                    paper=paper,
+                    won=_won,
+                    source=_source,
+                    pnl_pct=round(_pnl_pct, 6),
+                    notes=f'close partial={partial_pct:.0%} reason={reason}',
+                )
+            except Exception as _e:
+                logger.debug(f'[perps] close log_trade error: {_e}')
 
         return result
 

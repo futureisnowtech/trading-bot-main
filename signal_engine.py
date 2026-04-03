@@ -376,7 +376,10 @@ def _technical_short_score(f: Dict) -> Tuple[float, Dict]:
         components['lrsi_overbought'] = 4
 
     # KST below its signal line (bearish momentum): +8
-    if f.get('kst_bullish', 0) == 0:
+    # Only score this when kst_bullish is explicitly injected and False (== 0).
+    # Do NOT score when kst_bullish is absent (default 0) — that would silently
+    # give every unenriched candidate a free +8 short bias.
+    if 'kst_bullish' in f and f.get('kst_bullish', 0) == 0:
         score += 8
         components['kst_bearish'] = 8
 

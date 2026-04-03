@@ -78,7 +78,7 @@ def check(
     spread_pct: float,
     volume_24h_usd: float,
     leverage: int = 3,
-    account_balance: float = 10000.0,
+    account_balance: float = 5000.0,
     base_risk_pct: float = 0.015,
     is_ranging: bool = False,
 ) -> dict:
@@ -237,7 +237,8 @@ def batch_check(candidates: List[dict]) -> List[dict]:
         symbol, direction, price, atr_pct, funding_rate, spread_pct, volume_24h_usd
 
     Optional keys (with defaults):
-        leverage (default 3), account_balance (default 10000.0), base_risk_pct (default 0.015)
+        leverage (default 3), account_balance (default 5000.0), base_risk_pct (default 0.015),
+        is_ranging (default False) — pass True when CHOP > 61.8 to tighten EV floor.
 
     Approved candidates are returned with 'quality_tier' and 'edge_score' merged in.
     Vetoed candidates are dropped entirely.
@@ -254,8 +255,9 @@ def batch_check(candidates: List[dict]) -> List[dict]:
             spread_pct=float(candidate.get('spread_pct', 0.0005)),
             volume_24h_usd=float(candidate.get('volume_24h_usd', 0.0)),
             leverage=int(candidate.get('leverage', 3)),
-            account_balance=float(candidate.get('account_balance', 10000.0)),
+            account_balance=float(candidate.get('account_balance', 5000.0)),
             base_risk_pct=float(candidate.get('base_risk_pct', 0.015)),
+            is_ranging=bool(candidate.get('is_ranging', False)),
         )
         if result['approved']:
             enriched = dict(candidate)

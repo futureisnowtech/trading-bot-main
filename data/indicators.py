@@ -367,7 +367,8 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
         df['wae_exploding'] = (_trend_up > _explosion) | (_trend_dn > _explosion)
     except Exception as e:
         print(f"[indicators] wae failed: {e}")
-        df['wae_bullish']  = False
+        df['wae_bullish']   = False
+        df['wae_trend_down'] = False
         df['wae_exploding'] = False
 
     # ─── 13. Ehlers Fisher Transform ─────────────────────────────────────────
@@ -395,6 +396,7 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
         print(f"[indicators] fisher failed: {e}")
         df['fisher'] = 0.0
         df['fisher_cross_up'] = False
+        df['fisher_cross_down'] = False
 
     # ─── 14. Choppiness Index (CHOP) ─────────────────────────────────────────
     # Measures whether the market is trending or oscillating.
@@ -422,6 +424,7 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
         print(f"[indicators] chop failed: {e}")
         df['chop'] = 50.0
         df['chop_trending'] = False
+        df['chop_ranging'] = False
 
     # ─── 15. WaveTrend Oscillator ────────────────────────────────────────────
     # LazyBear's adaptation of the WT oscillator — highly popular in crypto.
@@ -447,6 +450,7 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
         print(f"[indicators] wavetrend failed: {e}")
         df['wt1'] = 0.0
         df['wt_oversold_cross'] = False
+        df['wt_overbought'] = False
 
     # ─── 16. Laguerre RSI (γ = 0.5) ──────────────────────────────────────────
     # John Ehlers adaptive oscillator using a 4-tap Laguerre filter.

@@ -1,7 +1,8 @@
 """
 scheduler/v10_runner.py — v10 unified scanner + trade loop.
 
-Runs 24/7 paper trading on Binance USDT perp universe.
+Runs 24/7 paper trading. Scanner: Kraken Futures public REST (US-accessible, no auth).
+Execution: perps_engine.py → binance_broker.py (paper mode, no live keys required).
 Replaces v9 job_runner for v10 architecture.
 
 Loop intervals:
@@ -422,8 +423,14 @@ def _attempt_entry(candidate, symbol, direction, balance, deployed_usd,
     scanner_vol_spike = float(candidate.get('vol_spike', 0.0))
     if scanner_vol_spike > 0:
         features['vol_spike_5c'] = scanner_vol_spike
-    scanner_funding = float(candidate.get('funding_rate', 0.0))
-    features['deriv_funding_rate'] = float(max(-1.0, min(1.0, scanner_funding / 0.005)))
+    # Kraken scanner funding_rate is ANNUALIZED as a decimal (e.g. -0.56 = -56%/year).
+    # feature_builder normalises deriv_funding_rate as: per-8h rate / 0.002
+    # Convert: annualized → per-8h by dividing by (365 * 3), then normalise by 0.002.
+    # Previous code divided annualized by 0.005 directly — wrong units AND wrong divisor.
+    # Example: -56%/year → -0.56/(365*3)/0.002 = -0.257 (moderate negative, not clipped).
+    _scanner_funding_annual = float(candidate.get('funding_rate', 0.0))
+    _funding_per_8h = _scanner_funding_annual / (365.0 * 3.0)   # annualized → per-8h rate
+    features['deriv_funding_rate'] = float(max(-1.0, min(1.0, _funding_per_8h / 0.002)))
 
     # Inject v4.3 indicator flags + squeeze state (needed for primary setup detection)
     try:
@@ -441,8 +448,14 @@ def _attempt_entry(candidate, symbol, direction, balance, deployed_usd,
         features['lrsi_value']          = float(_last.get('lrsi', 0.5))
         features['squeeze_fired']       = 1.0 if _last.get('squeeze_fired', False) else 0.0
         features['squeeze_direction']   = float(_last.get('squeeze_direction', 0))
-        features['supertrend_bearish']  = 0.0 if bool(_last.get('supertrend_bullish', True)) else 1.0
-        features['cloud_bearish']       = 0.0 if bool(_last.get('cloud_bullish', True)) else 1.0
+        # supertrend_bearish: SuperTrend is binary — not-bullish means bearish.
+        # Use the column only when it was actually computed (present in _last).
+        # Default of False on missing data keeps both bullish and bearish at 0 (neutral).
+        _st_bullish = bool(_last.get('supertrend_bullish', False))
+        _st_present = 'supertrend_bullish' in _df_ind.columns
+        features['supertrend_bearish']  = (1.0 if (not _st_bullish and _st_present) else 0.0)
+        # cloud_bearish: indicators.py computes cloud_bearish directly — read it.
+        features['cloud_bearish']       = 1.0 if _last.get('cloud_bearish', False) else 0.0
         features['wae_bearish']         = 1.0 if _last.get('wae_trend_down', False) else 0.0
         features['fisher_cross_down']   = 1.0 if _last.get('fisher_cross_down', False) else 0.0
         features['wt_overbought']       = 1.0 if _last.get('wt_overbought', False) else 0.0
@@ -554,7 +567,9 @@ def _attempt_entry(candidate, symbol, direction, balance, deployed_usd,
         vol_regime_int = 1
     else:
         vol_regime_int = 2
-    fg_current = float(features.get('regime_fg_current', 50.0))
+    # regime_fg_current in features is normalized 0-1 (from feature_builder).
+    # position_manager.compute_position_size expects 0-100 scale for F&G comparisons.
+    fg_current = float(features.get('regime_fg_current', 0.50)) * 100.0
     # edge_score sourced from economics gate result (passed via candidate dict)
     edge_score = float(candidate.get('edge_score', 0.5))
 
@@ -814,27 +829,64 @@ def _evaluate_position_exit(symbol, pos, perps, pm, get_candles,
                 f'pnl=${pnl_usd:+.2f} ({pnl_pct:+.1%}) @ {exit_price:.4f}')
 
     # Learning loop record
-    if ll is not None and partial_pct >= 1.0:
+    if partial_pct >= 1.0:
+        _regime = pos.get('regime', 'UNKNOWN')
+        _entry_score = float(pos.get('entry_composite_score', 0.0))
+        _features_snap = current_features or {}
+
+        # 1. ML feature snapshot + retrain queue (learning_loop)
+        if ll is not None:
+            try:
+                trade_id = int(time.time())   # approximate; real DB inserts use auto-increment
+                ll.record_closed_trade(
+                    trade_id=trade_id,
+                    symbol=symbol,
+                    direction=direction,
+                    won=pnl_usd > 0,
+                    pnl_usd=pnl_usd,
+                    entry_price=entry_price,
+                    exit_price=exit_price,
+                    entry_score=_entry_score,
+                    exit_score=0.0,
+                    regime=_regime,
+                    features=_features_snap,
+                )
+            except Exception as e:
+                logger.debug(f'[v10] learning record error {symbol}: {e}')
+
+        # 2. Bayesian signal attribution (post_trade_analyzer) — updates signal_stats
+        #    and dynamic_weights so the system actually learns from every trade.
         try:
-            trade_id = int(time.time())   # approximate; real DB inserts use auto-increment
-            features_snap = current_features or {}
-            regime = pos.get('regime', 'UNKNOWN')
-            entry_score = float(pos.get('entry_composite_score', 0.0))
-            ll.record_closed_trade(
-                trade_id=trade_id,
+            from learning.post_trade_analyzer import analyze_closed_trade as _pta
+            _entry_ts = pos.get('entry_ts')
+            _entry_ts_str = (
+                datetime.utcfromtimestamp(float(_entry_ts)).isoformat()
+                if _entry_ts else datetime.utcnow().isoformat()
+            )
+            _exit_ts_str = datetime.utcnow().isoformat()
+            _qty = float(pos.get('qty', 1.0))
+            _position_usd = float(pos.get('position_usd', entry_price * _qty))
+            _fee_usd = abs(_position_usd * 0.00130)  # Kraken round-trip taker fee estimate
+            # Build a market_data dict from the features snapshot for signal extraction
+            _md_for_pta = dict(_features_snap)
+            _md_for_pta['regime'] = _regime
+            _pta(
                 symbol=symbol,
-                direction=direction,
-                won=pnl_usd > 0,
-                pnl_usd=pnl_usd,
+                strategy='v10_perp',
                 entry_price=entry_price,
                 exit_price=exit_price,
-                entry_score=entry_score,
-                exit_score=0.0,
-                regime=regime,
-                features=features_snap,
+                qty=_qty,
+                fee_usd=_fee_usd,
+                entry_ts=_entry_ts_str,
+                exit_ts=_exit_ts_str,
+                exit_reason=exit_decision.exit_type,
+                market_data_at_entry=_md_for_pta,
+                source='paper_v10' if _paper else 'live_v10',
+                paper=_paper,
+                exit_type=exit_decision.exit_type,
             )
         except Exception as e:
-            logger.debug(f'[v10] learning record error {symbol}: {e}')
+            logger.debug(f'[v10] post_trade_analyzer error {symbol}: {e}')
 
     # Notification
     if ne is not None:

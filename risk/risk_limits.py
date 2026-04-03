@@ -14,7 +14,17 @@ from config import (
     MAX_TRADES_PER_DAY_EQUITY, MAX_TRADES_PER_DAY_CRYPTO,
     COINBASE_TAKER_FEE_PCT, CRYPTO_MIN_PROFIT_FEE_MULTIPLE,
 )
-from data.market_data import is_market_open, is_in_no_trade_window
+try:
+    from data.market_data import is_market_open, is_in_no_trade_window
+except ModuleNotFoundError:
+    # data/market_data.py was moved to legacy/v9_data/ in v10 cleanup.
+    # v10 trades Kraken Futures 24/7 — equity market hours are not needed.
+    # Provide neutral fallbacks so risk_limits can still import cleanly.
+    def is_market_open(market: str = 'crypto') -> bool:  # type: ignore[misc]
+        return True  # Kraken Futures: always open
+
+    def is_in_no_trade_window() -> bool:  # type: ignore[misc]
+        return False  # no equity no-trade window for 24/7 perp system
 from logging_db.trade_logger import get_daily_trade_count
 
 # Crypto correlation clusters — never hold two symbols from the same cluster.

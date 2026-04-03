@@ -21,7 +21,7 @@ Leverage schedule:
   3. Thesis score — current_signal_score < entry_signal_score × 0.45 → close all
   4. Hard stop — stop-market on exchange, never widened
   5. Risk forced exit — margin breach / drawdown / correlation
-  6. Kill switch — balance < $7,500 / API errors / latency
+  6. Kill switch — balance < 75% of ACCOUNT_SIZE (e.g. $3,750 on a $5K account) / API errors / latency
 """
 
 import logging
@@ -254,7 +254,7 @@ def check_exits(
     current_price: float,
     current_features: Optional[Dict] = None,
     model_store=None,
-    account_balance: float = 10000.0,
+    account_balance: float = 5000.0,
     total_deployed_usd: float = 0.0,
     margin_utilization_pct: float = 0.0,
     drawdown_pct: float = 0.0,

@@ -92,15 +92,18 @@ def _load_training_data(pair_key: str, direction: str,
         from ml.feature_builder import FEATURE_NAMES
         db = get_logger()
 
-        # Load trades with stored features
+        # Load trades with stored features.
+        # Include both paper=1 (paper_v10) and paper=0 (live_v10) trades tagged with
+        # clean v10 sources. Exclude backtest seeds and pre-v10 contaminated rows.
+        # NOTE: paper=0 filter was wrong — v10 paper trades use paper=1 and source='paper_v10'.
+        #       Using paper=0 alone would return zero rows until live trading begins.
         rows = db.conn.execute("""
             SELECT t.ts, t.won, t.pnl_usd, t.symbol,
                    ta.technical_score, ta.ml_score, ta.composite_score, ta.regime
             FROM trades t
             LEFT JOIN trade_attribution ta ON t.id = ta.trade_id
             WHERE t.action='SELL'
-              AND t.source NOT IN ('backtest', 'pre_v10_contaminated')
-              AND t.paper = 0
+              AND t.source NOT IN ('backtest', 'pre_v10_contaminated', 'bybit_paper')
               AND t.won IS NOT NULL
             ORDER BY t.ts ASC
         """).fetchall()

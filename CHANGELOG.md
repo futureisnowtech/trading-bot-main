@@ -1,5 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
+## 2026-04-02
+- fix(v10 live): signal thresholds lowered to 47 for OHLCV-only operation — first paper trade entered (PF_TAOUSD LONG $850 @ $300.42 composite=54.7)
+- fix(live-path audit): 4 targeted fixes — (1) scanner.py step4: reject candidates with <15 bars or EV calc exception instead of auto-approving with fake expected_profit; (2) signal_engine.py: raise thresholds 47→50 (47 was below the meaningful signal floor; 50 requires majority OHLCV alignment); (3) ml/walk_forward_trainer.py: add AND t.paper=0 to training filter — previously could include paper trades if source was mistagged; (4) v10_runner.py: document model_store=None intentional until 50+ live trades accumulated
+
 
 ## 2026-04-02 — BYBIT REMOVAL / KRAKEN FUTURES MIGRATION
 

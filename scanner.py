@@ -483,9 +483,8 @@ def _step4_expected_value(candidates: List[Dict],
         try:
             closes = c.get('closes_15m', [])
             if len(closes) < 15:
-                # Not enough history — pass with minimum placeholder
-                c['expected_profit'] = _MIN_EXPECTED_PROFIT + 0.01
-                passed.append(c)
+                # Not enough history — reject; fake EV is not a valid entry basis
+                logger.debug(f'[scanner] step4 {c.get("symbol")}: only {len(closes)} bars — rejected (need ≥15)')
                 continue
 
             # ATR proxy: mean |close[i] - close[i-1]| over last 14 bars
@@ -534,9 +533,8 @@ def _step4_expected_value(candidates: List[Dict],
                              f'fee={fee_pct*100:.3f}% funding={funding_cost*100:.4f}%)')
 
         except Exception as e:
-            logger.debug(f'[scanner] step4 error {c.get("symbol")}: {e}')
-            c['expected_profit'] = _MIN_EXPECTED_PROFIT + 0.01
-            passed.append(c)
+            logger.debug(f'[scanner] step4 error {c.get("symbol")}: {e} — rejected (EV calc failed)')
+            # Reject on exception; auto-approving with fake EV would bypass the economics gate
 
     return passed
 

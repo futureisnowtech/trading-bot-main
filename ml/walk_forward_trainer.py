@@ -100,6 +100,7 @@ def _load_training_data(pair_key: str, direction: str,
             LEFT JOIN trade_attribution ta ON t.id = ta.trade_id
             WHERE t.action='SELL'
               AND t.source NOT IN ('backtest', 'pre_v10_contaminated')
+              AND t.paper = 0
               AND t.won IS NOT NULL
             ORDER BY t.ts ASC
         """).fetchall()

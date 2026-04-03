@@ -46,17 +46,18 @@ _REGIME_ML_MULT = {
 
 # ── Entry thresholds by regime ────────────────────────────────────────────────
 _ENTRY_THRESHOLDS = {
-    # All thresholds temporarily lowered for OHLCV-only operation.
-    # Max achievable score with OHLCV alone: ~54 (MACD+RSI+no-funding-penalty).
-    # Raise back to 58/62/65/etc once CVD, OB, whale, options, liq feeds are wired.
-    'TRENDING_UP':   47,
-    'TRENDING_DOWN': 47,
-    'RANGING':       47,
-    'HIGH_VOL':      52,    # keep slightly higher — high-vol entries need stronger signal
-    'LOW_VOL':       47,
-    'ACCUMULATION':  47,
-    'DISTRIBUTION':  47,
-    'UNKNOWN':       47,
+    # Thresholds calibrated for OHLCV-only operation (CVD, OB, whale, liq feeds not yet wired).
+    # Max achievable score with working OHLCV feeds: ~54 (MACD+VWAP+Williams+funding).
+    # 50 = majority of OHLCV signal components must align (not just one weak signal).
+    # Raise to 58/62/65/etc once CVD, OB, whale, options, liq feeds are wired.
+    'TRENDING_UP':   50,
+    'TRENDING_DOWN': 50,
+    'RANGING':       50,
+    'HIGH_VOL':      54,    # high-vol: require near-max OHLCV signal alignment
+    'LOW_VOL':       50,
+    'ACCUMULATION':  50,
+    'DISTRIBUTION':  50,
+    'UNKNOWN':       50,
 }
 
 

@@ -478,6 +478,9 @@ def _attempt_entry(candidate, symbol, direction, balance, deployed_usd,
     if se is None:
         return
 
+    # model_store=None is intentional: ML tower returns 50.0 (neutral) until
+    # walk_forward_trainer has ≥50 live trades with paper=0 to produce a valid model.
+    # At that point, wire the model_store from _import_model_store() here.
     result = se.score(features, direction, regime, model_store=None)
     composite = result['composite_score']
     threshold = result['entry_threshold']

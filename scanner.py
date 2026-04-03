@@ -247,8 +247,8 @@ def _calc_adx(highs: List[float], lows: List[float], closes: List[float],
     adx_s = np.zeros(len(slc))
     adx_s[period-1] = slc[:period].mean()
     for i in range(period, len(slc)):
-        adx_s[i] = adx_s[i-1] - adx_s[i-1]/period + slc[i]
-    return float(min(adx_s[-1], 100.0))
+        adx_s[i] = adx_s[i-1] * (1.0 - 1.0/period) + slc[i] / period
+    return float(min(max(adx_s[-1], 0.0), 100.0))
 
 
 def _calc_vol_spike(volumes: List[float], window: int = 20) -> float:

@@ -1,6 +1,18 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-03
+- fix(scanner): ADX recurrence bug — formula was adding full raw DX[i] (Wilder TR-smoothing style) instead of DX[i]/period; all markets showed ADX ≈ 100, blocking ranging_mr setup; fix: use EMA-style ADX[i] = ADX[i-1]*(1-1/n) + DX[i]/n
+
+## 2026-04-03
+- feat(scanner): Kraken+Binance dual-exchange, 5 sub-filters (momentum/kst_cross/supertrend/ranging_mr/funding_collect), up to 50 candidates, $500K vol floor, $5K OB floor, parallel ThreadPoolExecutor, scan_setups[] tracking per candidate
+
+## 2026-04-03
+- refactor(dashboard): one page, no tabs, no custom HTML cards — st.metric/dataframe/line_chart only; minimal CSS (hide chrome only); all 8 sections scroll vertically; data layer unchanged
+
+## 2026-04-03
+- feat(signals): wire SuperTrend/KST/Ichimoku as Tier 1 entries; add cross detections in indicators.py; inject 8 cross features in v10_runner; 6 new Tier 1 setups in signal_engine; TV webhook launchd plist + install_services wired; remove LeBron/Goku theme strings from main.py + config.py
+
+## 2026-04-03
 - feat(dashboard): complete ground-up rebuild — 5 tabs (WAR ROOM/PERFORMANCE/SIGNAL BRAIN/SCANNER/SYSTEM), all data read from live DB + bot.log + config imports; Bayesian signal stats table, real 37-condition technical tower, Tier1/Tier2 setups from signal_engine, scanner pipeline steps, economics gate + sizer + exit stack from live constants
 
 ## 2026-04-03

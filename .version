@@ -1,1 +1,1 @@
-2026-04-02 14:33 | 064e819 | fix(ibkr_broker): remove telegram_alert import; wire TV signals into v10_runner
+2026-04-03 16:12 | 89608ac | feat(scanner): multi-exchange Kraken+Binance, 5 sub-filters, up to 50 candidates

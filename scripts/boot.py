@@ -19,6 +19,8 @@ main_path = os.path.join(PROJ, 'main.py')
 
 sys.argv = [main_path, '--mode', 'paper']
 os.chdir(PROJ)
+if PROJ not in sys.path:
+    sys.path.insert(0, PROJ)
 
 with open(main_path, 'rb') as _f:
     _src = _f.read()

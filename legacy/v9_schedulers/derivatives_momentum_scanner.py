@@ -132,12 +132,12 @@ def _detect_liquidation_magnet(symbol: str, mark_price: float, funding_rate: flo
     return funding_rate > 0.0002  # > 0.02%/8h
 
 
-def _run_krillin_gate(symbol: str, mark_price: float, signals: list) -> bool:
+def _run_economics_gate(symbol: str, mark_price: float, signals: list) -> bool:
     """
-    Quick Trade Economics Analyst-only check: does the fee math work? Is risk acceptable?
+    Quick Trade economics check: does the fee math work? Is risk acceptable?
     Returns True if we should enter.
 
-    Trade Economics Analyst's domain: fee math, ATR vs fees, time-of-day, volume gate.
+    Domain: fee math, ATR vs fees, time-of-day, volume gate.
     Here we approximate since we don't have ATR from this scanner.
     """
     if not ANTHROPIC_API_KEY:
@@ -282,7 +282,7 @@ def run_derivatives_momentum_scan() -> None:
     # Gate each hit through Trade Economics Analyst before entering
     for symbol, mp, fr, signals in hits:
         try:
-            passes = _run_krillin_gate(symbol, mp, signals)
+            passes = _run_economics_gate(symbol, mp, signals)
             if passes:
                 _try_enter_position(bb, rm, symbol, mp, signals)
             else:

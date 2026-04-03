@@ -30,7 +30,7 @@ def _get_broker(testnet: bool = True) -> Optional['BinanceBroker']:
     if not _BROKER_OK:
         return None
     try:
-        return get_binance_broker(testnet=testnet)
+        return get_binance_broker()
     except Exception as e:
         logger.error(f'[perps] broker init error: {e}')
         return None

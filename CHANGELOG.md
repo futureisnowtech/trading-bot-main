@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-03
+- feat(ml): activate 57-feature ML tower — trade_features table stores full feature snapshots per entry; walk_forward_trainer joins snapshots for real 57-col training; perps_engine threads trade_id back to v10_runner; proxy fallback preserved until MIN_TRADES snapshots accumulate
+
+## 2026-04-03
 - refactor(cleanup): v10.1 repo cleanup — move v9 files to legacy/, fix stale telegram imports, rewrite CLAUDE.md to v10 truth
 
 ## 2026-04-03

@@ -466,6 +466,35 @@ def _attempt_entry(candidate, symbol, direction, balance, deployed_usd,
     scanner_funding = float(candidate.get('funding_rate', 0.0))
     features['deriv_funding_rate'] = float(max(-1.0, min(1.0, scanner_funding / 0.005)))
 
+    # Inject v4.3 indicator flags: SuperTrend, Ichimoku, WAE, Fisher, Chop, WaveTrend, Laguerre
+    # These live in data/indicators.py (add_all_indicators) — separate from the indicators/ dir.
+    # Called here rather than in feature_builder so the feature builder stays exchange-agnostic.
+    try:
+        from data.indicators import add_all_indicators as _add_ind
+        _df_ind = _add_ind(df.copy())
+        _last = _df_ind.iloc[-1]
+        features['supertrend_bullish'] = 1.0 if _last.get('supertrend_bullish', False) else 0.0
+        features['cloud_bullish']      = 1.0 if _last.get('cloud_bullish', False) else 0.0
+        features['wae_bullish']        = 1.0 if _last.get('wae_bullish', False) else 0.0
+        features['wae_exploding']      = 1.0 if _last.get('wae_exploding', False) else 0.0
+        features['fisher_cross_up']    = 1.0 if _last.get('fisher_cross_up', False) else 0.0
+        features['chop_trending']      = 1.0 if _last.get('chop_trending', False) else 0.0
+        features['wt_oversold_cross']  = 1.0 if _last.get('wt_oversold_cross', False) else 0.0
+        _lrsi = float(_last.get('lrsi', 0.5))
+        features['lrsi_value']         = _lrsi
+        # For SHORT direction: bearish mirror flags
+        features['supertrend_bearish']  = 0.0 if bool(_last.get('supertrend_bullish', True)) else 1.0
+        features['cloud_bearish']       = 0.0 if bool(_last.get('cloud_bullish', True)) else 1.0
+        features['wae_bearish']         = 1.0 if _last.get('wae_trend_down', False) else 0.0
+        features['fisher_cross_down']   = 1.0 if _last.get('fisher_cross_down', False) else 0.0
+        features['wt_overbought']       = 1.0 if _last.get('wt_overbought', False) else 0.0
+    except Exception as _e:
+        logger.debug(f'[v10] indicator enrichment error {symbol}: {_e}')
+
+    # TradingView signal confirmation flag
+    if candidate.get('tv_signal'):
+        features['tv_signal'] = 1.0
+
     # Classify regime
     regime = 'UNKNOWN'
     if classify_from_features is not None:

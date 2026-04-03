@@ -150,6 +150,54 @@ def _technical_long_score(f: Dict) -> Tuple[float, Dict]:
         score += 5
         components['rsi_not_overbought'] = 5
 
+    # ── v4.3 indicator suite (SuperTrend, Ichimoku, WAE, Fisher, Chop, WaveTrend, Laguerre) ──
+    # SuperTrend bullish (ATR 10, mult 3.0): +12
+    if f.get('supertrend_bullish', 0) > 0:
+        score += 12
+        components['supertrend_bull'] = 12
+
+    # Ichimoku cloud bullish (price above cloud): +8
+    if f.get('cloud_bullish', 0) > 0:
+        score += 8
+        components['cloud_bull'] = 8
+
+    # Waddah Attar Explosion bullish: +10 (bullish + exploding), +5 (bullish only)
+    if f.get('wae_bullish', 0) > 0 and f.get('wae_exploding', 0) > 0:
+        score += 10
+        components['wae_bull_exploding'] = 10
+    elif f.get('wae_bullish', 0) > 0:
+        score += 5
+        components['wae_bull'] = 5
+
+    # Ehlers Fisher Transform cross-up from negative: +8
+    if f.get('fisher_cross_up', 0) > 0:
+        score += 8
+        components['fisher_cross_up'] = 8
+
+    # Choppiness Index: strongly trending (< 38.2): +5
+    if f.get('chop_trending', 0) > 0:
+        score += 5
+        components['chop_trending'] = 5
+
+    # WaveTrend oversold cross: +12
+    if f.get('wt_oversold_cross', 0) > 0:
+        score += 12
+        components['wt_oversold_cross'] = 12
+
+    # Laguerre RSI deeply oversold: +8 (< 0.15), +4 (< 0.25)
+    lrsi = f.get('lrsi_value', 0.5)
+    if lrsi < 0.15:
+        score += 8
+        components['lrsi_deep_oversold'] = 8
+    elif lrsi < 0.25:
+        score += 4
+        components['lrsi_oversold'] = 4
+
+    # TradingView signal confirmation: +20
+    if f.get('tv_signal', 0) > 0:
+        score += 20
+        components['tv_signal'] = 20
+
     # ── Deductions ────────────────────────────────────────────
     # Price at 2σ+ above VWAP: -25
     band_pos = f.get('vwap_band_position', 0)
@@ -278,6 +326,54 @@ def _technical_short_score(f: Dict) -> Tuple[float, Dict]:
     if f.get('vol_spike_5c', 1.0) > 1.5 and ret_5c < 0:
         score += 5
         components['vol_spike_down'] = 5
+
+    # ── v4.3 indicator suite (bearish mirror) ───────────────
+    # SuperTrend bearish: +12
+    if f.get('supertrend_bearish', 0) > 0:
+        score += 12
+        components['supertrend_bear'] = 12
+
+    # Ichimoku cloud bearish (price below cloud): +8
+    if f.get('cloud_bearish', 0) > 0:
+        score += 8
+        components['cloud_bear'] = 8
+
+    # WAE bearish (trend_down > 0): +10 (+ exploding), +5 (bearish only)
+    if f.get('wae_bearish', 0) > 0 and f.get('wae_exploding', 0) > 0:
+        score += 10
+        components['wae_bear_exploding'] = 10
+    elif f.get('wae_bearish', 0) > 0:
+        score += 5
+        components['wae_bear'] = 5
+
+    # Fisher cross-down from positive: +8
+    if f.get('fisher_cross_down', 0) > 0:
+        score += 8
+        components['fisher_cross_down'] = 8
+
+    # Choppiness trending (same filter applies both directions): +5
+    if f.get('chop_trending', 0) > 0:
+        score += 5
+        components['chop_trending'] = 5
+
+    # WaveTrend overbought (WT1 > 53): +12
+    if f.get('wt_overbought', 0) > 0:
+        score += 12
+        components['wt_overbought'] = 12
+
+    # Laguerre RSI deeply overbought: +8 (> 0.85), +4 (> 0.75)
+    lrsi = f.get('lrsi_value', 0.5)
+    if lrsi > 0.85:
+        score += 8
+        components['lrsi_deep_overbought'] = 8
+    elif lrsi > 0.75:
+        score += 4
+        components['lrsi_overbought'] = 4
+
+    # TradingView signal confirmation: +20
+    if f.get('tv_signal', 0) > 0:
+        score += 20
+        components['tv_signal'] = 20
 
     # ── Deductions ──────────────────────────────────────────
     # CVD bullish divergence: -20

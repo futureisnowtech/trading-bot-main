@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-03
+- feat(dashboard): Run Scan button + manual trade approval — force=True on scan(), render_manual_scan() with data_editor checkboxes
+
+## 2026-04-03
 - feat(scripts): add force_10_trades.py — test harness that runs full entry→score→execute→close pipeline with threshold=38, verified 10/10 trades completed
 
 ## 2026-04-03

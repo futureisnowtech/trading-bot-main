@@ -814,6 +814,140 @@ def render_system_config():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# RENDER — MANUAL SCAN + TRADE APPROVAL
+# ══════════════════════════════════════════════════════════════════════════════
+
+def render_manual_scan():
+    import pandas as pd
+
+    st.subheader("Manual Scan & Trade Approval")
+    st.caption("Runs a fresh scan (bypasses the 5-min cache). You pick which trades execute.")
+
+    col_btn, col_info = st.columns([1, 4])
+    with col_btn:
+        run_scan = st.button("Run Scan Now", type="primary", key="manual_scan_btn")
+    with col_info:
+        last_ts = st.session_state.get('manual_scan_time')
+        if last_ts:
+            st.caption(f"Last scan: {last_ts}")
+
+    if run_scan:
+        with st.spinner("Scanning Kraken + Hyperliquid (~5–10s)…"):
+            try:
+                sys.path.insert(0, _ROOT)
+                from scanner import scan as _scan
+                candidates = _scan(account_balance=5000.0, force=True)
+                st.session_state['manual_candidates'] = candidates
+                st.session_state['manual_scan_time'] = datetime.now().strftime('%H:%M:%S')
+            except Exception as e:
+                st.error(f"Scan failed: {e}")
+                return
+        st.success(f"Found {len(st.session_state.get('manual_candidates', []))} candidates.")
+
+    candidates = st.session_state.get('manual_candidates', [])
+    if not candidates:
+        st.info("No scan results yet — click **Run Scan Now** above.")
+        return
+
+    # Build display dataframe
+    rows = []
+    for c in candidates:
+        fund_pct = c.get('funding_rate', 0.0) * 100
+        rows.append({
+            "Trade?":   False,
+            "Symbol":   c.get('symbol', ''),
+            "Exch":     c.get('exchange', 'kraken')[:5].upper(),
+            "Dir":      c.get('direction', ''),
+            "Setup":    c.get('primary_setup', ''),
+            "EV $":     round(c.get('expected_profit', 0), 2),
+            "ADX":      round(c.get('adx_15m', 0), 1),
+            "Vol ×":    round(c.get('vol_spike', 0), 2),
+            "Price":    c.get('price', 0),
+            "Fund %":   round(fund_pct, 3),
+        })
+
+    df = pd.DataFrame(rows)
+    edited = st.data_editor(
+        df,
+        use_container_width=True,
+        hide_index=True,
+        column_config={"Trade?": st.column_config.CheckboxColumn("Trade?", default=False)},
+        disabled=["Symbol", "Exch", "Dir", "Setup", "EV $", "ADX", "Vol ×", "Price", "Fund %"],
+        key="manual_scan_editor",
+    )
+
+    selected_idx = edited[edited["Trade?"] == True].index.tolist()
+    n_sel = len(selected_idx)
+
+    if n_sel == 0:
+        st.caption("Check the **Trade?** box on any rows you want to execute, then click Execute.")
+        return
+
+    if st.button(f"Execute {n_sel} Trade(s)", type="primary", key="manual_execute_btn"):
+        from data.historical_data import get_candles
+        import perps_engine as perps
+
+        results = []
+        for idx in selected_idx:
+            cand  = candidates[idx]
+            sym   = cand['symbol']
+            dirn  = cand['direction']
+            setup = cand.get('primary_setup', 'manual')
+
+            try:
+                df_c = get_candles(sym, '1h', 100)
+                if df_c is None or len(df_c) < 10:
+                    results.append((sym, dirn, False, "insufficient candle data"))
+                    continue
+
+                price  = float(df_c['close'].iloc[-1])
+                atr_7  = float(df_c['high'].sub(df_c['low']).tail(7).mean())
+                if atr_7 <= 0:
+                    atr_7 = price * 0.015
+
+                stop_pct   = max(atr_7 / price * 1.5, 0.008)
+                target_pct = stop_pct * 3.0
+                pos_usd    = min(5000.0 * 0.01 / stop_pct, 5000.0 * 0.10)
+                composite  = cand.get('composite_score', 50.0)
+
+                if dirn == 'LONG':
+                    stop_p   = round(price * (1 - stop_pct), 6)
+                    target_p = round(price * (1 + target_pct), 6)
+                    pos = perps.open_long(
+                        symbol=sym, position_usd=pos_usd, entry_price=price,
+                        stop_price=stop_p, take_profit_price=target_p, leverage=3,
+                        composite_score=composite, atr_at_entry=atr_7,
+                        regime='UNKNOWN', entry_setup=f'manual_{setup}', paper=True,
+                    )
+                else:
+                    stop_p   = round(price * (1 + stop_pct), 6)
+                    target_p = round(price * (1 - target_pct), 6)
+                    pos = perps.open_short(
+                        symbol=sym, position_usd=pos_usd, entry_price=price,
+                        stop_price=stop_p, take_profit_price=target_p, leverage=3,
+                        composite_score=composite, atr_at_entry=atr_7,
+                        regime='UNKNOWN', entry_setup=f'manual_{setup}', paper=True,
+                    )
+
+                if pos:
+                    results.append((sym, dirn, True, f"entered @ {price:.6g}  stop={stop_p:.6g}  target={target_p:.6g}  size=${pos_usd:.0f}"))
+                else:
+                    results.append((sym, dirn, False, "open_long/short returned None"))
+
+            except Exception as e:
+                results.append((sym, dirn, False, str(e)[:120]))
+
+        # Show results
+        for sym, dirn, ok, msg in results:
+            icon = "✅" if ok else "❌"
+            st.write(f"{icon} **{sym} {dirn}** — {msg}")
+
+        # Clear selections so user can scan again cleanly
+        st.session_state.pop('manual_candidates', None)
+        st.session_state.pop('manual_scan_time', None)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # RENDER — LIVE ACTIVITY LOG (5s)
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -998,6 +1132,8 @@ def main():
 
     with tab_crypto:
         render_status()
+        st.divider()
+        render_manual_scan()
         st.divider()
         render_portfolio()
         st.divider()

@@ -947,18 +947,21 @@ def _step7_rank_and_top(candidates: List[Dict], n: int = _TOP_N) -> List[Dict]:
 
 def scan(open_positions: Optional[List[str]] = None,
          regime: str = 'UNKNOWN',
-         account_balance: float = 5_000.0) -> List[Dict]:
+         account_balance: float = 5_000.0,
+         force: bool = False) -> List[Dict]:
     """
     Full 7-step multi-exchange scanner pipeline.
 
     Returns up to 50 candidate dicts sorted by expected_profit descending.
     All backward-compatible with v10_runner.py field expectations.
     Returns [] on failure — scheduler sits idle this cycle.
+
+    force=True bypasses the 300s cache (used by dashboard manual scan button).
     """
     global _last_scan_ts, _last_candidates
 
     with _lock:
-        if time.time() - _last_scan_ts < _CACHE_TTL:
+        if not force and time.time() - _last_scan_ts < _CACHE_TTL:
             return _last_candidates
 
     t_start = time.time()

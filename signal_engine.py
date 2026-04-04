@@ -630,11 +630,12 @@ def thesis_still_valid(
     Priority 3 exit: thesis score check.
     Returns (still_valid, current_score, reason).
 
-    Thesis fails when: current_score < entry_score × 0.45
+    Thesis fails when: current_score < entry_score × 0.25
+    (Raised from 0.45 → must drop to <25% of entry score, not 45%, to avoid churn on noise)
     """
     current_result = score(current_features, direction, regime, model_store)
     current_score = current_result['composite_score']
-    threshold = entry_composite_score * 0.45
+    threshold = entry_composite_score * 0.25
 
     if current_score < threshold:
         reason = (

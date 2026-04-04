@@ -99,6 +99,7 @@ def get_account():
 def get_performance_stats():
     # Use the `won` field (set only on real closes) — avoids counting entry rows
     # or mis-fired pnl_usd!=0 entries. Net PnL = pnl_usd - fee_usd per close.
+    # Exclude force_test_close (artificial test trades) and phantom-priced trades.
     r = _q1("""
         SELECT
             COUNT(CASE WHEN won IS NOT NULL THEN 1 END)      AS closes,
@@ -111,6 +112,7 @@ def get_performance_stats():
         FROM trades
         WHERE ts >= ? AND paper=1 AND broker NOT LIKE '%bybit%'
           AND (source IS NULL OR source NOT IN ('backtest','pre_v10_contaminated','bybit_paper'))
+          AND (notes IS NULL OR notes NOT LIKE '%force_test_close%')
     """, (LAUNCH_DATE,))
     closes = r.get("closes") or 0
     wins   = r.get("wins") or 0
@@ -134,6 +136,7 @@ def get_today_pnl():
         SELECT SUM(pnl_usd) v FROM trades
         WHERE ts >= ? AND paper=1 AND broker NOT LIKE '%bybit%' AND pnl_usd != 0
           AND (source IS NULL OR source NOT IN ('backtest','pre_v10_contaminated','bybit_paper'))
+          AND (notes IS NULL OR notes NOT LIKE '%force_test_close%')
     """, (today,))
     return r.get("v") or 0.0
 
@@ -190,7 +193,8 @@ def get_equity_curve():
         FROM trades
         WHERE ts >= ? AND paper=1 AND broker NOT LIKE '%bybit%'
           AND pnl_usd != 0
-          AND source NOT IN ('backtest','pre_v10_contaminated','bybit_paper')
+          AND (source IS NULL OR source NOT IN ('backtest','pre_v10_contaminated','bybit_paper'))
+          AND (notes IS NULL OR notes NOT LIKE '%force_test_close%')
         ORDER BY ts
     """, (LAUNCH_DATE,))
 
@@ -200,7 +204,8 @@ def get_trade_log(limit=50):
         FROM trades
         WHERE ts >= ? AND paper=1 AND broker NOT LIKE '%bybit%'
           AND pnl_usd != 0
-          AND source NOT IN ('backtest','pre_v10_contaminated','bybit_paper')
+          AND (source IS NULL OR source NOT IN ('backtest','pre_v10_contaminated','bybit_paper'))
+          AND (notes IS NULL OR notes NOT LIKE '%force_test_close%')
         ORDER BY ts DESC LIMIT ?
     """, (LAUNCH_DATE, limit))
 
@@ -217,7 +222,8 @@ def get_per_symbol_stats():
         FROM trades
         WHERE ts >= ? AND paper=1 AND broker NOT LIKE '%bybit%'
           AND pnl_usd != 0
-          AND source NOT IN ('backtest','pre_v10_contaminated','bybit_paper')
+          AND (source IS NULL OR source NOT IN ('backtest','pre_v10_contaminated','bybit_paper'))
+          AND (notes IS NULL OR notes NOT LIKE '%force_test_close%')
         GROUP BY symbol ORDER BY total_pnl DESC
     """, (LAUNCH_DATE,))
 
@@ -505,6 +511,7 @@ def render_status():
         SELECT SUM(pnl_usd) - SUM(fee_usd) AS net_pnl FROM trades
         WHERE ts >= ? AND paper=1
           AND (source IS NULL OR source NOT IN ('backtest','pre_v10_contaminated','bybit_paper'))
+          AND (notes IS NULL OR notes NOT LIKE '%force_test_close%')
     """, (LAUNCH_DATE,))
     realized_pnl   = r2.get("net_pnl") or 0.0
     pnl_since_start = balance - base

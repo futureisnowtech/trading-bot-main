@@ -52,6 +52,33 @@ _COOLDOWN_THESIS_SEC: int = 7200   # 2 hours after thesis_invalidated
 _COOLDOWN_OTHER_SEC: int  = 1800   # 30 min after any other exit
 
 
+def _get_underlying(symbol: str) -> str:
+    """
+    Normalize any symbol format to its base asset for dual-exposure detection.
+    Examples:
+      PF_ETHUSD  → ETH     (Kraken futures)
+      ETH        → ETH     (Hyperliquid bare)
+      ETHUSDT    → ETH     (Binance perp)
+      ETH-USDC   → ETH     (Coinbase spot)
+      ETHFI      → ETHFI   (different asset — no match to ETH)
+    """
+    s = symbol.upper().strip()
+    # Strip Kraken futures prefix
+    for pfx in ('PF_', 'PI_'):
+        if s.startswith(pfx):
+            s = s[len(pfx):]
+            break
+    # Handle Coinbase hyphenated pairs (ETH-USDC → ETH)
+    if '-' in s:
+        return s.split('-')[0]
+    # Strip known quote suffixes — longest match first to avoid partial strip
+    for q in ('USDT', 'USDC', 'BUSD', 'USD'):
+        if s.endswith(q) and len(s) > len(q) + 1:
+            s = s[:-len(q)]
+            break
+    return s
+
+
 # ── TradingView signal helpers ────────────────────────────────────────────────
 
 def _get_fresh_tv_signals(max_age_seconds: int = 300) -> list:
@@ -361,30 +388,50 @@ def _scan_and_trade_inner():
         symbol = candidate.get('symbol', '')
         direction = candidate.get('direction', 'LONG')
 
-        # Skip if already in this position (in-memory dict OR SQLite open_positions table)
+        # ── Dual-exposure + duplicate guard ───────────────────────────────────
+        # Normalize to base asset (PF_ETHUSD→ETH, ETHUSDT→ETH, ETH→ETH) so that
+        # trading both the Kraken and Hyperliquid version of the same asset is blocked.
+        _underlying = _get_underlying(symbol)
+
+        # In-memory check (exact symbol)
         if perps is not None and perps.get_open_positions().get(symbol):
-            logger.debug(f'[v10] {symbol} — already have position, skip')
+            logger.debug(f'[v10] {symbol} — already in memory, skip')
             continue
+
+        # SQLite check — match by exact symbol OR same underlying across all open positions
         try:
             import sqlite3 as _sq
             from config import DB_PATH as _DB_PATH
             _conn2 = _sq.connect(_DB_PATH)
-            _row = _conn2.execute(
-                'SELECT 1 FROM open_positions WHERE symbol=? AND strategy=? AND paper=?',
-                (symbol, 'v10_perp', int(_paper)),
-            ).fetchone()
+            _open_rows = _conn2.execute(
+                'SELECT symbol FROM open_positions WHERE strategy=? AND paper=?',
+                ('v10_perp', int(_paper)),
+            ).fetchall()
             _conn2.close()
-            if _row:
-                logger.debug(f'[v10] {symbol} — in SQLite open_positions, skip')
+            _open_underlyings = {_get_underlying(r[0]) for r in _open_rows}
+            _open_symbols_db  = {r[0] for r in _open_rows}
+            if symbol in _open_symbols_db:
+                logger.debug(f'[v10] {symbol} — exact match in SQLite, skip')
+                continue
+            if _underlying in _open_underlyings:
+                # Find which symbol caused the conflict for the log message
+                _conflict = next((r[0] for r in _open_rows
+                                  if _get_underlying(r[0]) == _underlying), '?')
+                logger.info(f'[v10] {symbol} — dual-exposure block: '
+                            f'underlying={_underlying} already open as {_conflict}')
                 continue
         except Exception:
             pass
 
-        # Skip if closed recently (cooldown guard against thesis-invalidated churn)
-        _last_close_ts = _recent_closes.get(symbol, 0)
+        # Cooldown: check both exact symbol AND underlying (catches PF_X / bare-X alternation)
+        _cooldown_key = _underlying   # use underlying so PF_ETHUSD cooldown covers ETH too
+        _last_close_ts = max(
+            _recent_closes.get(symbol, 0),
+            _recent_closes.get(_cooldown_key, 0),
+        )
         if _last_close_ts > 0:
             _elapsed = time.time() - _last_close_ts
-            _cooldown = _COOLDOWN_THESIS_SEC   # conservative: use long cooldown for all
+            _cooldown = _COOLDOWN_THESIS_SEC
             if _elapsed < _cooldown:
                 logger.debug(f'[v10] {symbol} — cooldown {_elapsed/60:.0f}m/{_cooldown/60:.0f}m, skip')
                 continue
@@ -680,7 +727,7 @@ def _attempt_entry(candidate, symbol, direction, balance, deployed_usd,
         account_balance=balance,
         current_price=current_price,
         atr_7=atr_7,
-        stop_multiplier=1.5,
+        stop_multiplier=3.0,   # 3× ATR — wider stop, more room through noise
         vol_regime=vol_regime_int,
         ml_score=ml_score,
         fg_current=fg_current,
@@ -934,9 +981,12 @@ def _evaluate_position_exit(symbol, pos, perps, pm, get_candles,
         logger.warning(f'[v10] close_position returned None for {symbol}')
         return
 
-    # Record close for cooldown — prevents immediate re-entry on next scan
+    # Record close for cooldown — store by BOTH exact symbol and underlying
+    # so that closing ETH blocks PF_ETHUSD (and vice versa) during cooldown.
     global _recent_closes
-    _recent_closes[symbol] = time.time()
+    _ts_now = time.time()
+    _recent_closes[symbol] = _ts_now
+    _recent_closes[_get_underlying(symbol)] = _ts_now
     # Keep dict bounded
     if len(_recent_closes) > 200:
         cutoff = time.time() - max(_COOLDOWN_THESIS_SEC, _COOLDOWN_OTHER_SEC)

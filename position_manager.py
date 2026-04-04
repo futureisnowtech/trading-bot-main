@@ -122,7 +122,7 @@ def compute_position_size(
     account_balance: float,
     current_price: float,
     atr_7: float,
-    stop_multiplier: float = 1.5,
+    stop_multiplier: float = 3.0,
     vol_regime: int = 2,
     ml_score: float = 50.0,
     fg_current: float = 50.0,
@@ -339,11 +339,11 @@ def check_exits(
                         'squeeze_breakout', 'squeeze_breakout_short'}
     _MR_SETUPS = {'ranging_mr_long', 'ranging_mr_short'}
     if _entry_setup in _MOMENTUM_SETUPS:
-        _min_hold_secs = 1800   # 30 minutes for WAE/squeeze momentum
+        _min_hold_secs = 7200   # 2 hours for WAE/squeeze momentum (single-bar signals need room)
     elif _entry_setup in _MR_SETUPS:
-        _min_hold_secs = 900    # 15 minutes for mean-reversion
+        _min_hold_secs = 2700   # 45 minutes for mean-reversion
     else:
-        _min_hold_secs = 600    # 10 minutes default
+        _min_hold_secs = 3600   # 1 hour default (was 10 min — too fast, caused churn)
     _hold_elapsed  = time.time() - float(position.get('entry_ts', 0))
     _thesis_eligible = _hold_elapsed >= _min_hold_secs
 

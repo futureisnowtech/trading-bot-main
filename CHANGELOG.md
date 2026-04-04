@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-03
+- fix(dashboard): get_last_scan_age() reads log backwards without line cap — fixes false STALE when 1000+ noisy lines follow the scan entry
+
+## 2026-04-03
 - feat(dashboard): manual scan redesign — win probability bar + full ℹ detail card per candidate (breakdown table, EV math, raw indicators)
 
 ## 2026-04-03

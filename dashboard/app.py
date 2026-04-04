@@ -300,15 +300,31 @@ def get_scan_status():
     return result
 
 def get_last_scan_age():
-    for line in reversed(_tail_log(400)):
-        if "[v10] scan:" in line:
-            m = re.match(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", line)
-            if m:
-                try:
-                    dt = datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S")
-                    return int((datetime.now() - dt).total_seconds())
-                except Exception:
-                    pass
+    """Scan backwards through bot.log without a line cap — stops at first hit."""
+    try:
+        with open(LOG_PATH, "rb") as f:
+            f.seek(0, 2)
+            file_size = f.tell()
+            buf = b""
+            pos = file_size
+            chunk = 8192
+            while pos > 0:
+                read_size = min(chunk, pos)
+                pos -= read_size
+                f.seek(pos)
+                buf = f.read(read_size) + buf
+                for raw in reversed(buf.split(b"\n")):
+                    line = raw.decode("utf-8", errors="replace")
+                    if "[v10] scan:" in line:
+                        m = re.match(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", line)
+                        if m:
+                            dt = datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S")
+                            return int((datetime.now() - dt).total_seconds())
+                        return 9999
+                # Keep only the last partial line for next iteration
+                buf = buf.split(b"\n")[0]
+    except Exception:
+        pass
     return 9999
 
 def get_bot_activity(n=40):

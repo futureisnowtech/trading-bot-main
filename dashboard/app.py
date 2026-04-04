@@ -61,13 +61,16 @@ def get_account():
         base = float(ACCOUNT_SIZE)
         paper = bool(PAPER_TRADING)
     except Exception:
-        base, paper = 5000.0, True
-    # Actual balance = base + net PnL (gross PnL minus ALL fees, both entry and exit)
+        base, paper = 10000.0, True
+    # Balance = base + net PnL on all v10 rows (entry rows have pnl=0 so they
+    # contribute only their fee_usd; close rows contribute pnl - fee).
+    # NULL source rows (opens) must be included — SQLite NULL NOT IN (...) = NULL
+    # which evaluates false in WHERE, silently dropping entry fees. Use explicit guard.
     r = _q1("""
         SELECT SUM(pnl_usd) - SUM(fee_usd) AS net_pnl
         FROM trades
         WHERE ts >= ? AND paper=1
-          AND source NOT IN ('backtest','pre_v10_contaminated','bybit_paper')
+          AND (source IS NULL OR source NOT IN ('backtest','pre_v10_contaminated','bybit_paper'))
     """, (LAUNCH_DATE,))
     cum_pnl = r.get("net_pnl") or 0.0
     return base + cum_pnl, paper, base
@@ -86,7 +89,7 @@ def get_performance_stats():
             SUM(fee_usd)                                     AS total_fees
         FROM trades
         WHERE ts >= ? AND paper=1 AND broker NOT LIKE '%bybit%'
-          AND source NOT IN ('backtest','pre_v10_contaminated','bybit_paper')
+          AND (source IS NULL OR source NOT IN ('backtest','pre_v10_contaminated','bybit_paper'))
     """, (LAUNCH_DATE,))
     closes = r.get("closes") or 0
     wins   = r.get("wins") or 0
@@ -109,12 +112,56 @@ def get_today_pnl():
     r = _q1("""
         SELECT SUM(pnl_usd) v FROM trades
         WHERE ts >= ? AND paper=1 AND broker NOT LIKE '%bybit%' AND pnl_usd != 0
-          AND source NOT IN ('backtest','pre_v10_contaminated','bybit_paper')
+          AND (source IS NULL OR source NOT IN ('backtest','pre_v10_contaminated','bybit_paper'))
     """, (today,))
     return r.get("v") or 0.0
 
 def get_open_positions():
     return _q("SELECT * FROM open_positions WHERE paper=1 ORDER BY ts_entry DESC")
+
+
+def get_live_prices(symbols: list) -> dict:
+    """
+    Fetch current mark prices for open position symbols.
+    Tries Kraken Futures first (no auth), then Hyperliquid for anything not found.
+    Returns {symbol: price} — missing symbols just won't appear (dashboard falls back to entry).
+    """
+    import urllib.request, json
+    prices = {}
+    if not symbols:
+        return prices
+
+    # ── Kraken Futures ────────────────────────────────────────────────────────
+    try:
+        url = "https://futures.kraken.com/derivatives/api/v3/tickers"
+        with urllib.request.urlopen(url, timeout=4) as resp:
+            data = json.loads(resp.read())
+        for t in data.get("tickers", []):
+            sym = t.get("symbol", "")
+            price = t.get("markPrice") or t.get("last") or 0
+            if sym and price:
+                prices[sym] = float(price)
+    except Exception:
+        pass
+
+    # ── Hyperliquid (for HYPE, PUMP, TRUMP, etc.) ────────────────────────────
+    missing = [s for s in symbols if s not in prices]
+    if missing:
+        try:
+            req_data = json.dumps({"type": "allMids"}).encode()
+            req = urllib.request.Request(
+                "https://api.hyperliquid.xyz/info",
+                data=req_data, headers={"Content-Type": "application/json"}, method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=4) as resp:
+                mids = json.loads(resp.read())   # {"BTC": "95000.0", ...}
+            for sym in missing:
+                if sym in mids:
+                    prices[sym] = float(mids[sym])
+        except Exception:
+            pass
+
+    return prices
 
 def get_equity_curve():
     return _q("""
@@ -496,32 +543,130 @@ def render_portfolio():
 def render_open_positions():
     import pandas as pd
     open_p = get_open_positions()
-    st.subheader(f"Open Positions ({len(open_p)})")
+
+    n = len(open_p)
+    st.subheader(f"Open Positions ({n})")
 
     if not open_p:
         st.info("No open positions. Scanner runs every 5 min.")
         return
 
+    # Fetch live prices for all symbols in one API call
+    symbols = [p.get("symbol", "") for p in open_p]
+    live_prices = get_live_prices(symbols)
+
     rows = []
+    total_deployed = 0.0
+    total_unrealized = 0.0
+    longs = 0
+    shorts = 0
+
     for p in open_p:
-        entry  = float(p.get("entry") or 0)
-        stop   = float(p.get("stop") or 0)
-        target = float(p.get("target") or 0)
-        stop_pct = abs(entry - stop) / entry * 100 if entry else 0
-        tp_pct   = abs(target - entry) / entry * 100 if entry else 0
-        rr       = tp_pct / stop_pct if stop_pct > 0 else 0
+        symbol    = p.get("symbol", "")
+        direction = p.get("direction", "LONG")
+        entry     = float(p.get("entry") or 0)
+        stop      = float(p.get("stop") or 0)
+        target    = float(p.get("target") or 0)
+        qty       = float(p.get("qty") or 0)
+
+        now = live_prices.get(symbol, 0) or entry   # fallback to entry → P&L shows 0
+
+        stop_dist = abs(entry - stop)   / entry * 100 if entry else 0
+        tp_dist   = abs(target - entry) / entry * 100 if entry else 0
+        rr        = tp_dist / stop_dist if stop_dist > 0 else 0
+
+        deployed = qty * entry
+        if direction == "LONG":
+            unreal_usd = (now - entry) * qty
+            longs += 1
+            now_pct = (now - entry) / entry * 100 if entry else 0
+        else:
+            unreal_usd = (entry - now) * qty
+            shorts += 1
+            now_pct = (entry - now) / entry * 100 if entry else 0
+
+        total_deployed   += deployed
+        total_unrealized += unreal_usd
+
         rows.append({
-            "Symbol":    p.get("symbol", ""),
-            "Direction": p.get("direction", ""),
-            "Entry":     f"{entry:.5g}",
-            "Stop":      f"{stop:.5g}  (−{stop_pct:.2f}%)",
-            "Target":    f"{target:.5g}  (+{tp_pct:.2f}%)",
-            "R:R":       f"{rr:.1f}×",
+            "":          "▲" if direction == "LONG" else "▼",
+            "Symbol":    symbol,
+            "Dir":       direction,
+            "Entry $":   entry,
+            "Now $":     now if now != entry else None,   # None = no live price
+            "Now %":     now_pct if now != entry else None,
+            "Unreal P&L": unreal_usd if now != entry else None,
+            "Stop $":    stop,
+            "Stop %":    -stop_dist,
+            "Target $":  target,
+            "Target %":  tp_dist,
+            "R:R":       rr,
             "Age":       _time_ago(p.get("ts_entry", "")),
-            "Setup":     p.get("entry_reason", ""),
+            "Setup":     (p.get("entry_reason") or "")[:22],
+            "_unreal":   unreal_usd,   # hidden — drives row color
         })
 
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    # ── Summary bar ──────────────────────────────────────────────────────────
+    pnl_color = "normal" if total_unrealized >= 0 else "inverse"
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Positions", f"{n}   ({longs}L · {shorts}S)")
+    c2.metric("Deployed",  f"${total_deployed:,.0f}")
+    c3.metric("Unrealized P&L", f"${total_unrealized:+,.2f}", delta_color=pnl_color)
+    c4.metric("Avg / Position", f"${total_unrealized/n:+,.2f}" if n else "$0")
+
+    # ── Styled table ─────────────────────────────────────────────────────────
+    df = pd.DataFrame(rows)
+    display_cols = ["", "Symbol", "Dir", "Entry $", "Now $", "Now %",
+                    "Unreal P&L", "Stop $", "Stop %", "Target $", "Target %",
+                    "R:R", "Age", "Setup"]
+
+    # Keep raw unrealized values as a list for the row-color closure.
+    # _unreal is NOT passed into the Styler — it's captured by the closure
+    # so we never have to fight pandas' .hide() API.
+    _unreal_vals = df["_unreal"].tolist()
+
+    def _row_color(row):
+        v = _unreal_vals[row.name] if row.name < len(_unreal_vals) else 0
+        if not v or v == 0:
+            c = ""
+        elif v > 0:
+            c = "background-color: rgba(74,222,128,0.13)"
+        else:
+            c = "background-color: rgba(248,113,113,0.13)"
+        return [c] * len(row)
+
+    def _pnl_cell(v):
+        if v is None:
+            return "color: inherit"
+        return "color: #4ade80; font-weight:600" if v > 0 else (
+               "color: #f87171; font-weight:600" if v < 0 else "color: inherit")
+
+    def _dir_cell(v):
+        return "color: #4ade80; font-weight:700" if v == "▲" else "color: #f87171; font-weight:700"
+
+    fmt = {
+        "Entry $":    lambda v: f"{v:.5g}" if v else "–",
+        "Now $":      lambda v: f"{v:.5g}" if v is not None else "–",
+        "Now %":      lambda v: f"{v:+.2f}%" if v is not None else "–",
+        "Unreal P&L": lambda v: f"${v:+.2f}" if v is not None else "–",
+        "Stop $":     lambda v: f"{v:.5g}" if v else "–",
+        "Stop %":     lambda v: f"{v:.2f}%" if v else "–",
+        "Target $":   lambda v: f"{v:.5g}" if v else "–",
+        "Target %":   lambda v: f"+{v:.2f}%" if v else "–",
+        "R:R":        lambda v: f"{v:.1f}×" if v else "–",
+    }
+
+    # Build display-only df (no _unreal column), apply styles, then format
+    df_display = df[display_cols].copy()
+    styled = (
+        df_display.style
+        .apply(_row_color, axis=1)
+        .applymap(_pnl_cell, subset=["Unreal P&L"])
+        .applymap(_dir_cell, subset=[""])
+        .format(fmt, na_rep="–")
+    )
+
+    st.dataframe(styled, use_container_width=True, hide_index=True)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

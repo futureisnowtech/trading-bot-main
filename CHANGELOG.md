@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-04
+- fix(dashboard): open positions — live prices via Kraken+HL, unrealized P&L, color-coded rows; fix balance NULL-source filter; fix Styler .hide() crash
+
+## 2026-04-04
 - chore: full pre-live cleanup — delete legacy/, purge stale DB, remove dead telegram/bybit/webull code, update CLAUDE.md
 
 ## 2026-04-04

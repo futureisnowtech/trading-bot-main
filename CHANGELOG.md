@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-04
+- fix(dashboard): price sanity check on manual trades — rejects if candle price >20% off live Kraken/HL price
+
+## 2026-04-04
 - fix(db): purge 4 phantom positions with bad entry prices (ARB 317x, PUMP 8348x, REZ 24879x, SUI 149x off real price)
 
 ## 2026-04-04

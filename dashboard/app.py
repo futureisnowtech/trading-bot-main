@@ -1319,6 +1319,21 @@ def render_manual_scan():
                     continue
 
                 price  = float(df_c['close'].iloc[-1])
+
+                # ── Price sanity check ───────────────────────────────────────
+                # Cross-reference candle price against live Kraken/HL feed.
+                # If they differ by >20%, the candle data is stale or wrong.
+                # We've seen 150x–25000x mismatches cause phantom positions.
+                live_now = get_live_prices([sym]).get(sym, 0)
+                if live_now > 0:
+                    ratio = price / live_now
+                    if not (0.80 <= ratio <= 1.20):
+                        results.append((sym, dirn, False,
+                            f"PRICE MISMATCH — candle=${price:.5g}  "
+                            f"live=${live_now:.5g}  ({ratio:.1f}x off). "
+                            f"Refusing to enter to prevent phantom position."))
+                        continue
+
                 atr_7  = float(df_c['high'].sub(df_c['low']).tail(7).mean())
                 if atr_7 <= 0:
                     atr_7 = price * 0.015

@@ -483,54 +483,84 @@ def _parse_notes(notes):
 
 @st.fragment(run_every=5)
 def render_status():
-    scan_age          = get_last_scan_age()
-    today             = get_today_pnl()
+    scan_age             = get_last_scan_age()
+    today                = get_today_pnl()
     balance, paper, base = get_account()
-    stats             = get_performance_stats()
-    open_p            = get_open_positions()
+    stats                = get_performance_stats()
+    open_p               = get_open_positions()
 
-    mode    = "PAPER" if paper else "LIVE"
-    bot_ok  = scan_age < 600
+    mode   = "PAPER" if paper else "LIVE"
+    bot_ok = scan_age < 600
 
     # Human-readable scan age
     if scan_age >= 9999:
         age_str = "–"
     elif scan_age < 60:
-        age_str = f"{scan_age}s"
+        age_str = f"{scan_age}s ago"
     else:
-        age_str = f"{scan_age // 60}m {scan_age % 60}s"
+        age_str = f"{scan_age // 60}m {scan_age % 60}s ago"
 
-    pnl_since_start = balance - base
-    pf = stats['profit_factor']
-    pf_str = f"PF {pf:.2f}" if pf != float("inf") else "PF ∞"
-
-    # Split realized vs unrealized for the balance delta label
+    # Realized vs unrealized split
     r2 = _q1("""
         SELECT SUM(pnl_usd) - SUM(fee_usd) AS net_pnl FROM trades
         WHERE ts >= ? AND paper=1
           AND (source IS NULL OR source NOT IN ('backtest','pre_v10_contaminated','bybit_paper'))
     """, (LAUNCH_DATE,))
-    realized_pnl = r2.get("net_pnl") or 0.0
+    realized_pnl   = r2.get("net_pnl") or 0.0
+    pnl_since_start = balance - base
     unrealized_pnl = pnl_since_start - realized_pnl
 
-    if abs(unrealized_pnl) > 0.01:
-        bal_delta = f"{_fmt_pnl(realized_pnl)} realized · {_fmt_pnl(unrealized_pnl)} open"
-    else:
-        bal_delta = f"{_fmt_pnl(pnl_since_start)} since {LAUNCH_DATE}"
+    pf = stats['profit_factor']
+    pf_str = f"{pf:.2f}" if pf != float("inf") else "∞"
 
-    c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
-    c1.metric("Mode",        mode)
-    c2.metric("Bot Status",  "RUNNING" if bot_ok else "STALE",
-              delta=f"last scan {age_str} ago")
-    c3.metric("Last Scan",   age_str,
-              delta=f"{stats['closes']} closes logged")
-    c4.metric("Today P&L",   _fmt_pnl(today))
-    c5.metric("Win Rate",    f"{stats['win_rate']:.1f}%",
-              delta=f"{stats['wins']}W / {stats['losses']}L · {pf_str}")
-    c6.metric("Equity",      f"${balance:,.2f}", delta=bal_delta)
-    c7.metric("Open Pos",    str(len(open_p)))
+    # Deployed capital (sum of qty * entry from open positions)
+    deployed = sum(
+        float(p.get("qty", 0)) * float(p.get("entry", 0))
+        for p in open_p
+    )
 
-    st.caption(f"Updated {datetime.now().strftime('%H:%M:%S')} · Paper trades since {LAUNCH_DATE} · Bybit/backtest/contaminated data excluded")
+    # All-time P&L sign prefix
+    sign = "+" if pnl_since_start >= 0 else ""
+
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+
+    c1.metric(
+        label="Account Mode",
+        value=mode,
+        delta=f"Bot {'RUNNING' if bot_ok else 'STALE'} · scan {age_str}",
+        delta_color="normal" if bot_ok else "inverse",
+    )
+    c2.metric(
+        label="Account Equity",
+        value=f"${balance:,.2f}",
+        delta=f"{sign}${pnl_since_start:,.2f} since {LAUNCH_DATE}",
+        delta_color="normal" if pnl_since_start >= 0 else "inverse",
+    )
+    c3.metric(
+        label="Today's P&L",
+        value=_fmt_pnl(today),
+        delta=f"${realized_pnl:+.2f} realized · ${unrealized_pnl:+.2f} open" if abs(unrealized_pnl) > 0.01 else f"{_fmt_pnl(realized_pnl)} realized",
+        delta_color="normal" if today >= 0 else "inverse",
+    )
+    c4.metric(
+        label="Win Rate",
+        value=f"{stats['win_rate']:.1f}%",
+        delta=f"{stats['wins']}W / {stats['losses']}L · {stats['closes']} trades",
+    )
+    c5.metric(
+        label="Profit Factor",
+        value=pf_str,
+        delta=f"need ≥ 1.35 for live",
+        delta_color="normal" if pf >= 1.35 else "off",
+    )
+    c6.metric(
+        label="Open Positions",
+        value=str(len(open_p)),
+        delta=f"${deployed:,.0f} deployed",
+        delta_color="off",
+    )
+
+    st.caption(f"Refreshed {datetime.now().strftime('%H:%M:%S')} · Paper session started {LAUNCH_DATE} · Backtest / contaminated data excluded")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

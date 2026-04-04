@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-04
+- fix(dashboard): redesign status bar — 6 clear columns, no duplicate scan info, equity delta shortened, deployed capital shown
+
+## 2026-04-04
 - fix(dashboard): balance now shows true equity including unrealized P&L from open positions
 
 ## 2026-04-04

@@ -5,17 +5,23 @@ Fetches and caches OHLCV candles for all timeframes needed by the indicator engi
 Stores in SQLite (price_archive.db) with incremental updates — only fetches missing bars.
 
 Supported timeframes: 1m, 5m, 15m, 1h, 4h, 1d
-Source: Binance Futures REST API (fapi/v1/klines), fallback to yfinance
+
+Source routing (in priority order):
+  PF_/PI_ prefix  → Kraken Futures REST (always)
+  Short coin name → Hyperliquid FIRST (HEMI, LIT, SOL, HYPE, etc.)
+                    Avoids yfinance returning stock/ETF prices for same ticker
+  USDT/USDC suffix→ Binance futures/spot → Hyperliquid fallback → yfinance last
 
 Coverage tracking:
-  - Before returning data, checks if SQLite has >= 80% coverage for requested window
+  - Before hitting API, checks SQLite cache for >= 80% coverage
   - If yes: zero API calls, serve from cache
-  - If no: fetch missing bars from API → store → return merged dataset
+  - If no: fetch from appropriate source → store → return merged
 
 Usage:
     from data.historical_data import get_candles
-    df = get_candles('BTCUSDT', '5m', limit=200)
-    # Returns DataFrame: open, high, low, close, volume, open_time (datetime index)
+    df = get_candles('BTCUSDT', '5m', limit=200)   # Binance format
+    df = get_candles('SOL', '1h', limit=100)        # Hyperliquid coin name
+    df = get_candles('PF_SOLUSD', '1h', limit=100) # Kraken perp
 """
 
 import logging
@@ -67,6 +73,12 @@ _YF_INTERVAL = {
 }
 
 _lock = threading.RLock()
+
+# Suffixes that indicate a Binance-format trading pair (quote currency appended).
+# Symbols WITHOUT these suffixes are treated as Hyperliquid coin names and routed
+# to Hyperliquid BEFORE yfinance — prevents yfinance returning stock/ETF prices
+# for tickers like LIT (Lithium ETF), HEMI, REZ, ALT, etc.
+_BINANCE_SUFFIXES = ('USDT', 'USDC', 'BUSD', 'BTC', 'ETH', 'BNB')
 
 # Kraken interval names
 _KRAKEN_INTERVAL = {
@@ -275,9 +287,18 @@ def _fetch_hyperliquid(coin: str, timeframe: str, limit: int) -> Optional[pd.Dat
         df = pd.DataFrame(rows)
         df.index = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
         df = df[['open', 'high', 'low', 'close', 'volume']].sort_index()
-        return df.tail(limit) if len(df) >= 5 else None
+        df = df.tail(limit) if len(df) >= 5 else None
+        if df is not None:
+            # Cache HL data under the coin name so subsequent calls hit SQLite
+            cache_rows = []
+            for ts, row in df.iterrows():
+                ts_ms = int(ts.timestamp() * 1000)
+                cache_rows.append([ts_ms, row['open'], row['high'],
+                                   row['low'], row['close'], row['volume']])
+            _save_to_db(coin, timeframe, cache_rows)
+        return df
     except Exception as e:
-        logger.debug(f'[historical_data] Hyperliquid fallback failed for {coin}: {e}')
+        logger.debug(f'[historical_data] Hyperliquid fetch failed for {coin}: {e}')
         return None
 
 
@@ -287,22 +308,19 @@ def get_candles(symbol: str, timeframe: str = '5m', limit: int = 200) -> pd.Data
     """
     Return a DataFrame of OHLCV candles for symbol/timeframe.
 
-    Checks SQLite cache first. If coverage < 80%: fetches from Binance REST.
-    Falls back to yfinance if Binance fails.
+    Routing:
+      PF_/PI_  → Kraken Futures only
+      No quote suffix (SOL, HEMI, HYPE, LIT …) → cache → Hyperliquid → Binance → yfinance
+      USDT/USDC/… suffix (SOLUSDT …)            → cache → Binance → Hyperliquid → yfinance
 
-    Returns DataFrame with DatetimeIndex (UTC) and columns: open, high, low, close, volume
+    Returns DataFrame with DatetimeIndex (UTC) and columns: open, high, low, close, volume.
     Returns empty DataFrame on failure (never raises).
-
-    Args:
-        symbol:    Binance futures symbol e.g. 'BTCUSDT'
-        timeframe: '1m' | '5m' | '15m' | '1h' | '4h' | '1d'
-        limit:     Number of bars to return
     """
     if timeframe not in _TF_MS:
         logger.error(f'[historical_data] Unknown timeframe: {timeframe}')
         return pd.DataFrame()
 
-    # Kraken Futures symbols: bypass Binance/yfinance entirely
+    # ── 1. Kraken Futures (PF_/PI_) ──────────────────────────────────────────
     if symbol.startswith('PF_') or symbol.startswith('PI_'):
         df = _fetch_kraken(symbol, timeframe, limit)
         if df is not None and not df.empty:
@@ -310,33 +328,61 @@ def get_candles(symbol: str, timeframe: str = '5m', limit: int = 200) -> pd.Data
         logger.warning(f'[historical_data] Failed to fetch {symbol} {timeframe}')
         return pd.DataFrame()
 
-    bar_ms = _TF_MS[timeframe]
-    now_ms = int(time.time() * 1000)
+    bar_ms   = _TF_MS[timeframe]
+    now_ms   = int(time.time() * 1000)
     start_ms = now_ms - (limit * bar_ms)
 
-    # Try cache first
-    cached = _load_from_db(symbol, timeframe, start_ms, now_ms)
+    # ── 2. SQLite cache (shared by all sources) ───────────────────────────────
+    cached   = _load_from_db(symbol, timeframe, start_ms, now_ms)
     coverage = len(cached) / limit if limit > 0 else 0
-
     if coverage >= _COVERAGE_THRESHOLD:
         return cached.tail(limit)
 
-    # Fetch missing bars from API
-    df = _fetch_and_store(symbol, timeframe, start_ms, limit, bar_ms, now_ms)
-    if df is not None and not df.empty:
-        return df.tail(limit)
+    # ── 3. Route by symbol format ─────────────────────────────────────────────
+    is_binance_fmt = symbol.upper().endswith(_BINANCE_SUFFIXES)
 
-    # Return whatever we have from cache even if partial
+    if not is_binance_fmt:
+        # Short coin name (HEMI, LIT, SOL, HYPE, FARTCOIN …)
+        # Hyperliquid FIRST — prevents yfinance returning stock/ETF prices
+        hl_df = _fetch_hyperliquid(symbol, timeframe, limit)
+        if hl_df is not None and not hl_df.empty:
+            logger.debug(f'[historical_data] HL OK {symbol} {timeframe} ({len(hl_df)} bars)')
+            return hl_df
+
+        # HL failed — try Binance (unlikely to work for short names, but cheap attempt)
+        df = _fetch_and_store(symbol, timeframe, start_ms, limit, bar_ms, now_ms)
+        if df is not None and not df.empty:
+            return df.tail(limit)
+    else:
+        # Binance-format pair (SOLUSDT, BTCUSDT …)
+        df = _fetch_and_store(symbol, timeframe, start_ms, limit, bar_ms, now_ms)
+        if df is not None and not df.empty:
+            return df.tail(limit)
+
+        # Binance failed (geo-block) — try Hyperliquid with base coin name
+        base = symbol.rstrip('0123456789')
+        for suffix in _BINANCE_SUFFIXES:
+            if base.endswith(suffix):
+                base = base[:-len(suffix)]
+                break
+        if base and base != symbol:
+            hl_df = _fetch_hyperliquid(base, timeframe, limit)
+            if hl_df is not None and not hl_df.empty:
+                logger.debug(f'[historical_data] HL fallback OK {symbol}→{base} {timeframe}')
+                return hl_df
+
+    # ── 4. Return partial cache if anything exists ────────────────────────────
     if not cached.empty:
-        logger.debug(f'[historical_data] Returning partial cache ({len(cached)}/{limit}) for {symbol} {timeframe}')
+        logger.debug(f'[historical_data] Partial cache ({len(cached)}/{limit}) for {symbol}')
         return cached.tail(limit)
 
-    # Final fallback: Hyperliquid (for HL perp base names like HYPE, ETHFI, TON, etc.)
-    hl_df = _fetch_hyperliquid(symbol, timeframe, limit)
-    if hl_df is not None and not hl_df.empty:
-        logger.debug(f'[historical_data] Hyperliquid fallback OK for {symbol} {timeframe} ({len(hl_df)} bars)')
-        return hl_df
+    # ── 5. yfinance — truly last resort (stock/ETF conflicts possible) ────────
+    yf_df = _fetch_yfinance(symbol, timeframe, limit)
+    if yf_df is not None and not yf_df.empty:
+        logger.debug(f'[historical_data] yfinance last-resort OK for {symbol}')
+        return yf_df
 
+    logger.warning(f'[historical_data] All sources failed for {symbol} {timeframe}')
     return pd.DataFrame()
 
 

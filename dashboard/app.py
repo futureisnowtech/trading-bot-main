@@ -817,9 +817,222 @@ def render_system_config():
 # RENDER — MANUAL SCAN + TRADE APPROVAL
 # ══════════════════════════════════════════════════════════════════════════════
 
-def render_manual_scan():
+# Setup descriptions shown in the ℹ detail card
+_SETUP_DESC = {
+    'momentum':   'Price closed above VWAP with a volume spike. Trend is accelerating — ride the move.',
+    'ranging_mr': 'ADX < 20 (no trend). Price stretched from VWAP. Mean-reversion back toward center expected.',
+    'kst_cross':  'KST momentum oscillator crossed its signal line. Indicates a turning point in medium-term momentum.',
+    'supertrend': 'SuperTrend indicator flipped direction. Trailing stop-based trend-following entry.',
+    'ichimoku':   'Price broke through the Ichimoku cloud. Cloud acts as dynamic support/resistance.',
+}
+
+_SETUP_PRIORITY = ['momentum', 'ranging_mr', 'kst_cross', 'supertrend', 'ichimoku']
+
+
+def _win_prob(c: dict) -> float:
+    """
+    Estimate win probability from scanner fields.
+    Base = 52% (scanner EV formula assumption).
+    Each confirmed signal adds points; capped at 84%.
+    """
+    prob  = 52.0
+    dirn  = c.get('direction', 'LONG')
+    vs    = c.get('vol_spike', 1.0)
+    adx   = c.get('adx_15m', 20.0)
+    setup = c.get('primary_setup', '')
+    vwap_d = abs(c.get('vwap_disp_pct', 0.0))
+    kst_v  = c.get('kst_value',  0.0)
+    kst_s  = c.get('kst_signal', 0.0)
+    st_dir = c.get('supertrend_dir', 0)
+    fund   = abs(c.get('funding_rate', 0.0))
+    pm1h   = c.get('price_move_1h_pct', 0.0)
+
+    # Volume conviction (strongest signal)
+    if vs >= 3.0:   prob += 9
+    elif vs >= 2.0: prob += 6
+    elif vs >= 1.5: prob += 3
+
+    # ADX — setup dependent
+    if 'momentum' in setup and adx >= 25:  prob += 7
+    elif 'ranging' in setup and adx < 20:  prob += 7
+    elif 'kst' in setup and adx < 30:      prob += 4
+    else:                                   prob += 2  # some ADX, some trend
+
+    # KST direction confirmation
+    if (dirn == 'LONG'  and kst_v > kst_s) or \
+       (dirn == 'SHORT' and kst_v < kst_s):
+        prob += 5
+
+    # SuperTrend alignment
+    if (dirn == 'LONG'  and st_dir > 0) or \
+       (dirn == 'SHORT' and st_dir < 0):
+        prob += 5
+
+    # VWAP displacement (mean-reversion edge)
+    if 'ranging' in setup:
+        if vwap_d >= 2.0:  prob += 5
+        elif vwap_d >= 1.0: prob += 3
+
+    # Funding squeeze pressure
+    if fund > 0.002:   prob += 3   # >0.2% annualized, elevated
+    elif fund > 0.0005: prob += 1
+
+    # Short-term momentum alignment
+    if dirn == 'LONG'  and pm1h > 0.3:  prob += 2
+    elif dirn == 'SHORT' and pm1h < -0.3: prob += 2
+
+    return min(round(prob, 1), 84.0)
+
+
+def _win_prob_breakdown(c: dict) -> list:
+    """Returns list of (factor, value_str, points) tuples for the detail card."""
+    rows = []
+    dirn  = c.get('direction', 'LONG')
+    vs    = c.get('vol_spike', 1.0)
+    adx   = c.get('adx_15m', 20.0)
+    setup = c.get('primary_setup', '')
+    vwap_d = abs(c.get('vwap_disp_pct', 0.0))
+    kst_v  = c.get('kst_value',  0.0)
+    kst_s  = c.get('kst_signal', 0.0)
+    st_dir = c.get('supertrend_dir', 0)
+    fund   = abs(c.get('funding_rate', 0.0))
+    pm1h   = c.get('price_move_1h_pct', 0.0)
+
+    rows.append(("Base rate (scanner EV model)", "52% assumed win rate", "+52%"))
+
+    # Volume
+    if vs >= 3.0:    rows.append(("Volume spike", f"{vs:.2f}× avg  (strong conviction)", "+9%"))
+    elif vs >= 2.0:  rows.append(("Volume spike", f"{vs:.2f}× avg  (moderate conviction)", "+6%"))
+    elif vs >= 1.5:  rows.append(("Volume spike", f"{vs:.2f}× avg  (mild conviction)", "+3%"))
+    else:            rows.append(("Volume spike", f"{vs:.2f}× avg  (weak — minimal edge)", "+0%"))
+
+    # ADX
+    if 'momentum' in setup and adx >= 25:
+        rows.append(("ADX trend strength", f"{adx:.1f}  (strong trend confirms momentum entry)", "+7%"))
+    elif 'ranging' in setup and adx < 20:
+        rows.append(("ADX trend strength", f"{adx:.1f}  (low ADX confirms ranging/mean-rev setup)", "+7%"))
+    elif 'kst' in setup and adx < 30:
+        rows.append(("ADX trend strength", f"{adx:.1f}  (moderate trend, KST cross valid)", "+4%"))
+    else:
+        rows.append(("ADX trend strength", f"{adx:.1f}  (partial alignment)", "+2%"))
+
+    # KST
+    kst_ok = (dirn == 'LONG' and kst_v > kst_s) or (dirn == 'SHORT' and kst_v < kst_s)
+    kst_str = f"KST={kst_v:.4f} vs Signal={kst_s:.4f}"
+    if kst_ok:
+        rows.append(("KST momentum cross", f"{kst_str}  ✓ aligned with {dirn}", "+5%"))
+    else:
+        rows.append(("KST momentum cross", f"{kst_str}  ✗ not aligned", "+0%"))
+
+    # SuperTrend
+    st_ok = (dirn == 'LONG' and st_dir > 0) or (dirn == 'SHORT' and st_dir < 0)
+    st_label = "bullish" if st_dir > 0 else ("bearish" if st_dir < 0 else "flat")
+    if st_ok:
+        rows.append(("SuperTrend direction", f"{st_label}  ✓ aligned with {dirn}", "+5%"))
+    else:
+        rows.append(("SuperTrend direction", f"{st_label}  ✗ not aligned", "+0%"))
+
+    # VWAP
+    if 'ranging' in setup:
+        if vwap_d >= 2.0:
+            rows.append(("VWAP displacement", f"{vwap_d:.2f}%  (strongly extended → snap-back likely)", "+5%"))
+        elif vwap_d >= 1.0:
+            rows.append(("VWAP displacement", f"{vwap_d:.2f}%  (moderately extended)", "+3%"))
+        else:
+            rows.append(("VWAP displacement", f"{vwap_d:.2f}%  (close to VWAP — weak MR edge)", "+0%"))
+
+    # Funding
+    if fund > 0.002:
+        rows.append(("Funding rate", f"{fund*100:.4f}% ann  (elevated — squeeze pressure adds edge)", "+3%"))
+    elif fund > 0.0005:
+        rows.append(("Funding rate", f"{fund*100:.4f}% ann  (mild)", "+1%"))
+    else:
+        rows.append(("Funding rate", f"{fund*100:.4f}% ann  (neutral)", "+0%"))
+
+    # Price momentum
+    if dirn == 'LONG' and pm1h > 0.3:
+        rows.append(("1h price momentum", f"+{pm1h:.2f}%  ✓ aligned with LONG", "+2%"))
+    elif dirn == 'SHORT' and pm1h < -0.3:
+        rows.append(("1h price momentum", f"{pm1h:.2f}%  ✓ aligned with SHORT", "+2%"))
+    else:
+        rows.append(("1h price momentum", f"{pm1h:.2f}%  (neutral or against direction)", "+0%"))
+
+    return rows
+
+
+def _render_trade_details(c: dict, prob: float):
+    """Renders the full detail card shown inside the ℹ expander."""
     import pandas as pd
 
+    sym    = c.get('symbol', '')
+    dirn   = c.get('direction', '')
+    exch   = c.get('exchange', 'kraken').upper()
+    setup  = c.get('primary_setup', '')
+    price  = c.get('price', 0)
+    atr    = c.get('atr_15m', 0)
+    stop_p = c.get('stop_pct', 0)
+    tgt_p  = c.get('target_pct', 0)
+    ev     = c.get('expected_profit', 0)
+    fund_ann = c.get('funding_rate', 0.0)
+    fund_cost = c.get('funding_cost_pct', 0.0)
+    pm4h   = c.get('price_move_4h_pct', 0.0)
+    vwap   = c.get('vwap', 0)
+    vwap_d = c.get('vwap_disp_pct', 0.0)
+    all_setups = c.get('scan_setups', [setup])
+
+    # ── Setup explanation ──────────────────────────────────────────────────
+    desc = _SETUP_DESC.get(setup, 'Composite signal — multiple filters triggered.')
+    st.markdown(f"**Setup: `{setup}`** — {desc}")
+    if len(all_setups) > 1:
+        others = [s for s in all_setups if s != setup]
+        st.caption(f"Also triggered: {', '.join(others)}")
+
+    st.divider()
+
+    # ── Win probability breakdown ──────────────────────────────────────────
+    st.markdown("**Win probability breakdown**")
+    breakdown = _win_prob_breakdown(c)
+    df_bp = pd.DataFrame(breakdown, columns=["Factor", "Reading", "Points"])
+    st.dataframe(df_bp, use_container_width=True, hide_index=True)
+    st.markdown(f"**→ Total estimated win probability: {prob:.1f}%**")
+
+    st.divider()
+
+    # ── EV math ───────────────────────────────────────────────────────────
+    st.markdown("**Expected value (EV) calculation**")
+    risk_usd  = 5000.0 * 0.015
+    pos_usd   = risk_usd / (stop_p / 100) if stop_p > 0 else 0
+    fee_pct   = 0.13   # round-trip Kraken taker
+    net_win   = tgt_p / 100 - fee_pct / 100 - fund_cost / 100
+    net_loss  = stop_p / 100 + fee_pct / 100
+    st.text(f"  Position size:      ${pos_usd:,.0f}  (1.5% account risk / stop%)")
+    st.text(f"  Stop loss:          {stop_p:.3f}%  (1.5× ATR = {atr:.6g})")
+    st.text(f"  Take profit:        {tgt_p:.3f}%  (3× ATR)")
+    st.text(f"  Round-trip fee:     {fee_pct:.2f}%  (0.065% × 2)")
+    st.text(f"  Funding cost (est): {fund_cost:.4f}%  ({abs(fund_ann)*100:.4f}% ann ÷ 365×3 × hold)")
+    st.text(f"  Net win if TP hit:  {net_win*100:.3f}%  →  ${net_win*pos_usd:+.2f}")
+    st.text(f"  Net loss if SL hit: {net_loss*100:.3f}%  →  ${-net_loss*pos_usd:.2f}")
+    st.text(f"  EV = 52%×${net_win*pos_usd:.2f} − 48%×${net_loss*pos_usd:.2f}  =  ${ev:+.2f}")
+
+    st.divider()
+
+    # ── Raw indicator readings ─────────────────────────────────────────────
+    st.markdown("**Raw indicator readings**")
+    c1, c2 = st.columns(2)
+    c1.text(f"  Price:           {price:.6g}")
+    c1.text(f"  VWAP:            {vwap:.6g}")
+    c1.text(f"  VWAP disp:       {vwap_d:+.3f}%")
+    c1.text(f"  1h price move:   {c.get('price_move_1h_pct',0):+.3f}%")
+    c1.text(f"  4h price move:   {pm4h:+.3f}%")
+    c2.text(f"  ADX (15m):       {c.get('adx_15m',0):.1f}")
+    c2.text(f"  Vol spike:       {c.get('vol_spike',0):.3f}×")
+    c2.text(f"  KST:             {c.get('kst_value',0):.4f}")
+    c2.text(f"  KST signal:      {c.get('kst_signal',0):.4f}")
+    c2.text(f"  SuperTrend dir:  {'↑ bullish' if c.get('supertrend_dir',0)>0 else ('↓ bearish' if c.get('supertrend_dir',0)<0 else 'flat')}")
+    st.text(f"  Exchange: {exch}   |   Funding (ann): {fund_ann*100:.4f}%")
+
+
+def render_manual_scan():
     st.subheader("Manual Scan & Trade Approval")
     st.caption("Runs a fresh scan (bypasses the 5-min cache). You pick which trades execute.")
 
@@ -834,53 +1047,71 @@ def render_manual_scan():
     if run_scan:
         with st.spinner("Scanning Kraken + Hyperliquid (~5–10s)…"):
             try:
+                import importlib
                 sys.path.insert(0, _ROOT)
-                from scanner import scan as _scan
-                candidates = _scan(account_balance=5000.0, force=True)
+                import scanner as _scanner_mod
+                importlib.reload(_scanner_mod)
+                candidates = _scanner_mod.scan(account_balance=5000.0, force=True)
                 st.session_state['manual_candidates'] = candidates
                 st.session_state['manual_scan_time'] = datetime.now().strftime('%H:%M:%S')
+                # Clear old row selections
+                for k in list(st.session_state.keys()):
+                    if k.startswith('ms_sel_'):
+                        del st.session_state[k]
             except Exception as e:
                 st.error(f"Scan failed: {e}")
                 return
-        st.success(f"Found {len(st.session_state.get('manual_candidates', []))} candidates.")
+        n = len(st.session_state.get('manual_candidates', []))
+        st.success(f"Found {n} candidates.")
 
     candidates = st.session_state.get('manual_candidates', [])
     if not candidates:
         st.info("No scan results yet — click **Run Scan Now** above.")
         return
 
-    # Build display dataframe
-    rows = []
-    for c in candidates:
-        fund_pct = c.get('funding_rate', 0.0) * 100
-        rows.append({
-            "Trade?":   False,
-            "Symbol":   c.get('symbol', ''),
-            "Exch":     c.get('exchange', 'kraken')[:5].upper(),
-            "Dir":      c.get('direction', ''),
-            "Setup":    c.get('primary_setup', ''),
-            "EV $":     round(c.get('expected_profit', 0), 2),
-            "ADX":      round(c.get('adx_15m', 0), 1),
-            "Vol ×":    round(c.get('vol_spike', 0), 2),
-            "Price":    c.get('price', 0),
-            "Fund %":   round(fund_pct, 3),
-        })
+    # ── Column headers ─────────────────────────────────────────────────────
+    hc1, hc2, hc3, hc4 = st.columns([0.4, 3.2, 2.8, 0.6])
+    hc1.caption("Trade?")
+    hc2.caption("Signal")
+    hc3.caption("Win Probability")
+    hc4.caption("Why")
+    st.divider()
 
-    df = pd.DataFrame(rows)
-    edited = st.data_editor(
-        df,
-        use_container_width=True,
-        hide_index=True,
-        column_config={"Trade?": st.column_config.CheckboxColumn("Trade?", default=False)},
-        disabled=["Symbol", "Exch", "Dir", "Setup", "EV $", "ADX", "Vol ×", "Price", "Fund %"],
-        key="manual_scan_editor",
-    )
+    # ── One row per candidate ──────────────────────────────────────────────
+    for i, c in enumerate(candidates):
+        prob  = _win_prob(c)
+        sym   = c.get('symbol', '')
+        dirn  = c.get('direction', '')
+        exch  = c.get('exchange', 'kraken')
+        setup = c.get('primary_setup', '')
+        badge = "🔵" if exch == 'hyperliquid' else "🟠"
 
-    selected_idx = edited[edited["Trade?"] == True].index.tolist()
+        col1, col2, col3, col4 = st.columns([0.4, 3.2, 2.8, 0.6])
+
+        with col1:
+            st.checkbox("", key=f"ms_sel_{i}", label_visibility="collapsed")
+
+        with col2:
+            st.markdown(f"**{sym}** `{dirn}` {badge} `{exch[:5].upper()}` · *{setup}*")
+
+        with col3:
+            bar_color = "normal" if prob >= 65 else "off"
+            label = f"{prob:.0f}% — {'High edge' if prob>=68 else ('Moderate edge' if prob>=60 else 'Lower edge')}"
+            st.progress(prob / 100.0, text=label)
+
+        with col4:
+            with st.expander("ℹ️"):
+                _render_trade_details(c, prob)
+
+    st.divider()
+
+    # ── Execute block ──────────────────────────────────────────────────────
+    selected_idx = [i for i in range(len(candidates))
+                    if st.session_state.get(f"ms_sel_{i}", False)]
     n_sel = len(selected_idx)
 
     if n_sel == 0:
-        st.caption("Check the **Trade?** box on any rows you want to execute, then click Execute.")
+        st.caption("Check the **Trade?** box on rows you want to execute, then click Execute.")
         return
 
     if st.button(f"Execute {n_sel} Trade(s)", type="primary", key="manual_execute_btn"):
@@ -930,19 +1161,18 @@ def render_manual_scan():
                     )
 
                 if pos:
-                    results.append((sym, dirn, True, f"entered @ {price:.6g}  stop={stop_p:.6g}  target={target_p:.6g}  size=${pos_usd:.0f}"))
+                    results.append((sym, dirn, True,
+                        f"entered @ {price:.6g}  stop={stop_p:.6g}  target={target_p:.6g}  size=${pos_usd:.0f}"))
                 else:
                     results.append((sym, dirn, False, "open_long/short returned None"))
 
             except Exception as e:
                 results.append((sym, dirn, False, str(e)[:120]))
 
-        # Show results
         for sym, dirn, ok, msg in results:
-            icon = "✅" if ok else "❌"
-            st.write(f"{icon} **{sym} {dirn}** — {msg}")
+            st.write(f"{'✅' if ok else '❌'} **{sym} {dirn}** — {msg}")
 
-        # Clear selections so user can scan again cleanly
+        # Clear so next scan starts clean
         st.session_state.pop('manual_candidates', None)
         st.session_state.pop('manual_scan_time', None)
 

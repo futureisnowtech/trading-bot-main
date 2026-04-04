@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-03
+- feat(dashboard): manual scan redesign — win probability bar + full ℹ detail card per candidate (breakdown table, EV math, raw indicators)
+
+## 2026-04-03
 - feat(dashboard): Run Scan button + manual trade approval — force=True on scan(), render_manual_scan() with data_editor checkboxes
 
 ## 2026-04-03

@@ -34,9 +34,9 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 _RISK_PCT = 0.02              # 2% account risk per trade
-_MAX_SINGLE_POSITION_PCT = 0.20   # 20% of account max per position (more slots, same capital)
+_MAX_SINGLE_POSITION_USD = 100.0  # $100 hard cap per position (paper — sized conservatively)
 _MAX_DEPLOYED_PCT = 0.95          # 95% max total deployment
-_MIN_NOTIONAL = 100.0             # $100 minimum
+_MIN_NOTIONAL = 10.0              # $10 minimum
 
 # Kelly ramp thresholds
 _KELLY_RAMP = [
@@ -190,16 +190,18 @@ def compute_position_size(
     # Apply chain
     position_usd *= chain_mult
 
+    # Apply Kelly — this is where it actually gets used
+    position_usd *= kelly_frac
+
     # ── Caps ─────────────────────────────────────────────────────────────
     capped_by = 'chain'
 
-    # Single position max: 30% of account
-    max_single = account_balance * _MAX_SINGLE_POSITION_PCT
-    if position_usd > max_single:
-        position_usd = max_single
+    # Single position hard cap: $100
+    if position_usd > _MAX_SINGLE_POSITION_USD:
+        position_usd = _MAX_SINGLE_POSITION_USD
         capped_by = 'max_single_position'
 
-    # Total deployment cap: 80% of account
+    # Total deployment cap: 95% of account
     remaining_capacity = account_balance * _MAX_DEPLOYED_PCT - deployed_usd
     if position_usd > remaining_capacity:
         position_usd = max(0, remaining_capacity)

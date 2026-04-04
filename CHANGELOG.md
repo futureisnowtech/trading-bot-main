@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-03
+- fix(sizing): apply Kelly to position_usd;  hard cap per position; real deployed_usd passed to manual trades; min notional 
+
+## 2026-04-03
 - fix(dashboard): manual execute now uses compute_position_size() — Kelly, ML score, vol regime, 20% cap, leverage schedule; shows lev and kelly in result
 
 ## 2026-04-03

@@ -1185,6 +1185,9 @@ def render_manual_scan():
                 # Use the real position sizer — same logic the bot uses
                 from position_manager import compute_position_size
                 balance, _, _b = get_account()
+                _open_pos = get_open_positions()
+                _deployed = sum(float(p.get('qty', 0)) * float(p.get('entry', 0))
+                                for p in _open_pos)
                 sizing = compute_position_size(
                     account_balance=balance,
                     current_price=price,
@@ -1192,6 +1195,7 @@ def render_manual_scan():
                     stop_multiplier=1.5,
                     ml_score=composite,
                     composite_score=composite,
+                    deployed_usd=_deployed,
                     paper=True,
                 )
                 pos_usd  = sizing['position_usd']

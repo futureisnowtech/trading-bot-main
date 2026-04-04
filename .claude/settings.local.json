@@ -124,7 +124,17 @@
       "Bash(kill 16695)",
       "Bash(nohup /Library/Frameworks/Python.framework/Versions/3.14/bin/python3 main.py --mode paper)",
       "Bash(grep -v \"yfinance ERROR\\\\|1 Failed\\\\|possibly delist\\\\|^$\")",
-      "Bash(grep -v \"yfinance\\\\|urllib3\\\\|1 Failed\\\\|possibly\\\\|Download\\\\|\\\\$\")"
+      "Bash(grep -v \"yfinance\\\\|urllib3\\\\|1 Failed\\\\|possibly\\\\|Download\\\\|\\\\$\")",
+      "Skill(deploy)",
+      "Bash(kill 2997)",
+      "Bash(echo \"New bot PID: $!\" sleep 8 tail -15 logs/bot.log)",
+      "Bash(kill 3967:*)",
+      "Bash(xargs kill:*)",
+      "Bash(echo \"Bot: $!\" python3 -m streamlit run dashboard/app.py --server.runOnSave true --server.headless true)",
+      "Bash(echo \"Dash: $!\")",
+      "Bash(find:*)",
+      "Bash(grep -l \"v9\\\\|bybit\\\\|tradovate\\\\|telegram\\\\|webull\" /Users/joshmacbookair2020/Desktop/algo_trading_final/scripts/*.py)",
+      "Bash(grep -E \"\\\\.\\(bak|archived|tmp|log\\)$|^\\\\.\")"
     ]
   }
 }

@@ -214,13 +214,6 @@ def run_health_check(force: bool = False) -> dict:
 
     if status != 'HEALTHY':
         print(f"[health_check] {summary}")
-        # Fire a real notification so it shows in the dashboard Notifications panel
-        # and any connected alert channel (Telegram if configured)
-        try:
-            from alerts.telegram_alert import alert_system
-            alert_system(level, f"[Health Check] {summary}")
-        except Exception:
-            pass
 
     return {
         'score': passed,

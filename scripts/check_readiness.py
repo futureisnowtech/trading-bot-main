@@ -262,18 +262,17 @@ def print_report(results: dict, fast_track: bool = False) -> bool:
 
 
 def send_ready_alert():
-    """Fire an alert when all criteria are met."""
+    """Write a readiness notification to the dashboard via notification_engine."""
     try:
-        from alerts.telegram_alert import alert_system
-        alert_system('READY',
-            '🏆 PAPER TRADING CRITERIA MET!\n\n'
-            'The system has passed all readiness checks.\n'
-            'Run: python3 main.py --mode live\n\n'
-            'Review the full report:\n'
-            'python3 scripts/check_readiness.py')
-        print('  📧 Alert sent.')
+        from notifications.notification_engine import NotificationEngine
+        ne = NotificationEngine()
+        ne.notify_system(
+            title='PAPER TRADING CRITERIA MET',
+            detail='All readiness checks passed. Run: python3 main.py --mode live',
+        )
+        print('  ✅ Readiness notification written to dashboard.')
     except Exception as e:
-        print(f'  ⚠️  Could not send alert: {e}')
+        print(f'  ⚠️  Could not write notification: {e}')
 
 
 def main():

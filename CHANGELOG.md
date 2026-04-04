@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-04
+- chore: full pre-live cleanup — delete legacy/, purge stale DB, remove dead telegram/bybit/webull code, update CLAUDE.md
+
+## 2026-04-04
 - fix(perps_engine): restore positions from SQLite on startup; fix(v10_runner): 2-hr cooldown after close prevents thesis-exit churn; SQLite guard on entry prevents post-restart double-entry
 
 ## 2026-04-03

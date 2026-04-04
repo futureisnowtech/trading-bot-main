@@ -23,7 +23,7 @@ A fully autonomous AI-powered trading system that:
 
 ## Owner Profile
 - Mac user (MacBook Air 2020, Python 3.14 at /Library/Frameworks/Python.framework/Versions/3.14/bin/python3)
-- Paper account: $5,000 (ACCOUNT_SIZE=5000 in .env)
+- Paper account: $10,000 (ACCOUNT_SIZE=10000 in .env)
 - Relatively technical but wants zero day-to-day intervention
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
@@ -85,20 +85,24 @@ Owner decides when to go live. These are informational readings, not system gate
 - Economics gate veto rate
 - Kill switch triggers (14d)
 
-### v10.1 Changes vs v10.0 (applied 2026-04-02)
+### v10.1 Changes vs v10.0 (applied 2026-04-02–04)
 
 - `scanner.py`: Kraken Futures public REST (no Binance geo-block, no auth required)
 - `signal_engine.py`: paper threshold reduction REMOVED
-- `execution/bybit_broker.py`: DELETED — Bybit geo-blocked for US residents
+- `execution/bybit_broker.py`: DELETED (geo-blocked for US)
 - `execution/ibkr_broker.py`: telegram import removed → notification_engine
 - `risk/economics_gate.py`: NEW — pre-trade fee/funding EV veto
-- `risk/unified_sizer.py`: replaced 6-factor chain with 3-factor formula
-- `scheduler/v10_runner.py`: TV signals wired, economics gate wired, docstring fixed (Binance → Kraken)
+- `risk/unified_sizer.py`: replaced 6-factor chain with 3-factor formula; Kelly applied; $100 hard cap
+- `scheduler/v10_runner.py`: TV signals wired, economics gate wired; cooldown after close (2h); SQLite entry guard; position restore on startup
+- `perps_engine.py`: `load_positions_from_db()` restores positions from SQLite on restart
 - `ml/walk_forward_trainer.py`: training filter excludes contaminated data
-- `execution/binance_broker.py`: hard telegram import replaced with no-op stubs (v10.1 cleanup)
-- `risk/risk_manager.py`: telegram halt alert replaced with notification_engine (v10.1 cleanup)
+- `execution/binance_broker.py`: hard telegram import replaced with no-op stubs
+- `risk/risk_manager.py`: telegram halt alert replaced with notification_engine
 - `position_manager.py`: kill switch docstring fixed ($7,500 → 75% of ACCOUNT_SIZE)
-- v9 schedulers, strategies, data feeds, learning files moved to `legacy/`
+- `legacy/` directory DELETED — all v9 code removed from repo
+- DB purged: api_costs, debate_results, agent_stats, backtest_results, pre-v10 trades/signals
+- `alerts/telegram_alert.py` references removed from monitoring/health_check.py and scripts/check_readiness.py
+- Webull credentials removed from .env
 
 ## Project Structure (v10.1 — live files only)
 
@@ -212,22 +216,6 @@ algo_trading_final/
 │   ├── log_change.sh         ← Append to CHANGELOG.md
 │   ├── backup_db.sh / backup_credentials.sh
 │   └── install_services.sh   ← launchd auto-start setup (run once)
-│
-└── legacy/                   ← v9 + dead code (reference only, not imported)
-    ├── v9_schedulers/        ← job_runner, _helpers, crypto_scanner, perp_scanner,
-    │                            exit_monitor, mes_scanner, derivatives_momentum_scanner,
-    │                            v9_*.archived
-    ├── v9_strategies/        ← crypto_macd, crypto_mean_reversion, base_strategy, etc.
-    ├── v9_execution/         ← prediction_market_base
-    ├── v9_learning/          ← ml_signal, ml_trainer, super_score, live_backtest_validator,
-    │                            intelligence_bridge, forecast_calibrator
-    ├── v9_data/              ← coinbase_feed, market_data, market_context, market_sentiment,
-    │                            macro_feed, news_feed, liquidation_feed, price_archive,
-    │                            cumulative_delta, deribit_feed, options_flow, realtime_feeds,
-    │                            sentiment_data, onchain_feed
-    ├── lane3/                ← whale_tracker (polymarket/kalshi already deleted)
-    ├── backtest_engine.py    ← v9 backtest engine (used by run_backtest.py standalone)
-    └── strategy_validator.py, full_pipeline_backtest.py
 ```
 
 ## Signal Engine (v10 — no AI debate agents)
@@ -381,7 +369,7 @@ Motivation 1-5: "Strive for greatness." / "I like criticism. It makes you strong
 | v9.x | 2026-03-30 – 2026-04-01 | Perp time-exit watchdog, ML data poison fix, full-market perp scanner, race condition lock, dashboard overhaul |
 | v10.0 | 2026-04-01 | Full rewrite: 3-agent debate → two-tower signal engine, 57-feature ML, 6-priority exit stack, RBI loop, clean architecture |
 | v10.1 | 2026-04-02 | Live-readiness overhaul: Kraken scanner, economics gate, sizer simplification, clean ML data (tagged pre_v10_contaminated), Bybit deleted |
-| v10.1 cleanup | 2026-04-03 | legacy/ directory created; v9 schedulers/strategies/data/learning moved; stale telegram imports fixed; CLAUDE.md rewritten to v10 truth |
+| v10.1 cleanup | 2026-04-03 | All v9/legacy code, dead imports, stale DB data, and old credentials purged; legacy/ directory deleted; repo and DB fully clean for go-live |
 
 ## GitHub
 - Repository: `futureisnowtech/trading-bot-main` (private)

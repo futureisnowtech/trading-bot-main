@@ -564,14 +564,14 @@ def render_scanner():
         try:
             from scanner import (
                 _MIN_VOLUME_24H_USD, _MIN_VOL_SPIKE, _MIN_PRICE_MOVE_1H,
-                _MIN_ADX_15M, _MIN_OB_DEPTH_USD, _MAX_SPREAD_PCT,
+                _MIN_ADX_MOMENTUM, _MIN_OB_DEPTH_USD, _MAX_SPREAD_PCT,
                 _MIN_EXPECTED_PROFIT, _ROUND_TRIP_FEE_PCT,
             )
             cfg = {
-                "Min 24h volume (USD)":    f"${_MIN_VOLUME_24H_USD/1e6:.0f}M",
+                "Min 24h volume (USD)":    f"${_MIN_VOLUME_24H_USD/1e6:.1f}M",
                 "Min vol spike":           f"≥ {_MIN_VOL_SPIKE}×",
-                "Min price move 1h":       f"≥ {_MIN_PRICE_MOVE_1H:.1f}%",
-                "Min ADX 15m":             f"≥ {_MIN_ADX_15M}",
+                "Min price move 1h":       f"≥ {_MIN_PRICE_MOVE_1H:.2f}%",
+                "Min ADX momentum":        f"≥ {_MIN_ADX_MOMENTUM}",
                 "Min OB depth each side":  f"≥ ${_MIN_OB_DEPTH_USD/1e3:.0f}K",
                 "Max spread":              f"< {_MAX_SPREAD_PCT:.2f}%",
                 "Min expected profit":     f"≥ ${_MIN_EXPECTED_PROFIT:.2f}",

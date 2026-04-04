@@ -1,1 +1,1 @@
-2026-04-03 16:12 | 89608ac | feat(scanner): multi-exchange Kraken+Binance, 5 sub-filters, up to 50 candidates
+2026-04-04 11:29 | dd45846 | fix: stop thesis-exit churn and position loss on restart

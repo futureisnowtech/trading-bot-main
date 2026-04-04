@@ -62,18 +62,39 @@ def get_account():
         paper = bool(PAPER_TRADING)
     except Exception:
         base, paper = 10000.0, True
-    # Balance = base + net PnL on all v10 rows (entry rows have pnl=0 so they
-    # contribute only their fee_usd; close rows contribute pnl - fee).
-    # NULL source rows (opens) must be included — SQLite NULL NOT IN (...) = NULL
-    # which evaluates false in WHERE, silently dropping entry fees. Use explicit guard.
+
+    # Realized P&L: sum of all closed-trade pnl minus all fees (entry + exit)
     r = _q1("""
         SELECT SUM(pnl_usd) - SUM(fee_usd) AS net_pnl
         FROM trades
         WHERE ts >= ? AND paper=1
           AND (source IS NULL OR source NOT IN ('backtest','pre_v10_contaminated','bybit_paper'))
     """, (LAUNCH_DATE,))
-    cum_pnl = r.get("net_pnl") or 0.0
-    return base + cum_pnl, paper, base
+    realized = r.get("net_pnl") or 0.0
+
+    # Unrealized P&L: mark open positions to live market price.
+    # Without this, opening $1000 of positions shows zero change in balance.
+    unrealized = 0.0
+    try:
+        open_pos = _q("SELECT symbol, direction, qty, entry FROM open_positions WHERE paper=1")
+        if open_pos:
+            syms = [p["symbol"] for p in open_pos]
+            prices = get_live_prices(syms)
+            for p in open_pos:
+                now = prices.get(p["symbol"], 0)
+                if now <= 0:
+                    continue
+                qty   = float(p["qty"] or 0)
+                entry = float(p["entry"] or 0)
+                if p["direction"] == "LONG":
+                    unrealized += (now - entry) * qty
+                else:
+                    unrealized += (entry - now) * qty
+    except Exception:
+        pass
+
+    equity = base + realized + unrealized
+    return equity, paper, base
 
 def get_performance_stats():
     # Use the `won` field (set only on real closes) — avoids counting entry rows
@@ -483,6 +504,20 @@ def render_status():
     pf = stats['profit_factor']
     pf_str = f"PF {pf:.2f}" if pf != float("inf") else "PF ∞"
 
+    # Split realized vs unrealized for the balance delta label
+    r2 = _q1("""
+        SELECT SUM(pnl_usd) - SUM(fee_usd) AS net_pnl FROM trades
+        WHERE ts >= ? AND paper=1
+          AND (source IS NULL OR source NOT IN ('backtest','pre_v10_contaminated','bybit_paper'))
+    """, (LAUNCH_DATE,))
+    realized_pnl = r2.get("net_pnl") or 0.0
+    unrealized_pnl = pnl_since_start - realized_pnl
+
+    if abs(unrealized_pnl) > 0.01:
+        bal_delta = f"{_fmt_pnl(realized_pnl)} realized · {_fmt_pnl(unrealized_pnl)} open"
+    else:
+        bal_delta = f"{_fmt_pnl(pnl_since_start)} since {LAUNCH_DATE}"
+
     c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
     c1.metric("Mode",        mode)
     c2.metric("Bot Status",  "RUNNING" if bot_ok else "STALE",
@@ -492,8 +527,7 @@ def render_status():
     c4.metric("Today P&L",   _fmt_pnl(today))
     c5.metric("Win Rate",    f"{stats['win_rate']:.1f}%",
               delta=f"{stats['wins']}W / {stats['losses']}L · {pf_str}")
-    c6.metric("Balance",     f"${balance:,.2f}",
-              delta=f"{_fmt_pnl(pnl_since_start)} since {LAUNCH_DATE}")
+    c6.metric("Equity",      f"${balance:,.2f}", delta=bal_delta)
     c7.metric("Open Pos",    str(len(open_p)))
 
     st.caption(f"Updated {datetime.now().strftime('%H:%M:%S')} · Paper trades since {LAUNCH_DATE} · Bybit/backtest/contaminated data excluded")

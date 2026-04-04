@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-04
+- fix(dashboard): balance now shows true equity including unrealized P&L from open positions
+
+## 2026-04-04
 - fix(historical_data): route short coin names to Hyperliquid FIRST — prevents yfinance stock-ticker conflicts (LIT ETF, HEMI, REZ, ALT etc.); cache HL data in SQLite
 
 ## 2026-04-04

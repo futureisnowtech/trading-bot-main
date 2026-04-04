@@ -380,6 +380,56 @@ def get_open_positions() -> Dict[str, Dict]:
         return dict(_open_positions)
 
 
+def load_positions_from_db(paper: bool = True) -> int:
+    """
+    Reload open positions from SQLite open_positions table into in-memory dict.
+    Call at startup so a bot restart doesn't re-enter every existing position.
+    Returns number of positions loaded.
+    """
+    try:
+        from logging_db.trade_logger import load_open_positions as _load_op
+        raw_rows = _load_op(paper=paper)
+        # Filter to v10_perp strategy
+        rows = [r for r in raw_rows if (r.get('strategy') or '') == 'v10_perp']
+        loaded = 0
+        with _lock:
+            for row in rows:
+                symbol = row.get('symbol', '')
+                if not symbol or symbol in _open_positions:
+                    continue   # already tracked (e.g. from this session)
+                qty   = float(row.get('qty', 0))
+                entry = float(row.get('entry', 0))
+                _open_positions[symbol] = {
+                    'symbol':              symbol,
+                    'direction':           row.get('direction') or 'LONG',
+                    'qty':                 qty,
+                    'entry_price':         entry,
+                    'stop_price':          float(row.get('stop', 0)),
+                    'take_profit_price':   float(row.get('target', 0)),
+                    'entry_setup':         row.get('entry_reason') or '',
+                    'position_usd':        qty * entry,
+                    'entry_ts':            time.time(),
+                    'leverage':            3,
+                    'atr_at_entry':        0.0,
+                    'entry_composite_score': 0.0,
+                    'regime':              'UNKNOWN',
+                    'peak_price':          entry,
+                    'trailing_active':     False,
+                    'trailing_stop_price': 0.0,
+                    'scale_33_done':       False,
+                    'scale_66_done':       False,
+                    'paper':               paper,
+                    'order_id':            'restored',
+                }
+                loaded += 1
+        if loaded:
+            logger.info(f'[perps] restored {loaded} positions from SQLite (paper={paper})')
+        return loaded
+    except Exception as e:
+        logger.warning(f'[perps] load_positions_from_db error: {e}')
+        return 0
+
+
 def update_position_price(symbol: str, current_price: float):
     """Update last_price and peak_price in open position (call on price tick)."""
     with _lock:

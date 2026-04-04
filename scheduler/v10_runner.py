@@ -45,6 +45,12 @@ _REGIME_SIZE_MULT = {
 # Deduplicate TradingView signals across scan cycles (symbol_direction_ts key)
 _seen_tv_signal_keys: set = set()
 
+# Cooldown after close: symbol → timestamp of last close.
+# Prevents re-entering the same symbol immediately after thesis-invalidated exits.
+_recent_closes: Dict[str, float] = {}
+_COOLDOWN_THESIS_SEC: int = 7200   # 2 hours after thesis_invalidated
+_COOLDOWN_OTHER_SEC: int  = 1800   # 30 min after any other exit
+
 
 # ── TradingView signal helpers ────────────────────────────────────────────────
 
@@ -355,10 +361,33 @@ def _scan_and_trade_inner():
         symbol = candidate.get('symbol', '')
         direction = candidate.get('direction', 'LONG')
 
-        # Skip if already in this position
+        # Skip if already in this position (in-memory dict OR SQLite open_positions table)
         if perps is not None and perps.get_open_positions().get(symbol):
             logger.debug(f'[v10] {symbol} — already have position, skip')
             continue
+        try:
+            import sqlite3 as _sq
+            from config import DB_PATH as _DB_PATH
+            _conn2 = _sq.connect(_DB_PATH)
+            _row = _conn2.execute(
+                'SELECT 1 FROM open_positions WHERE symbol=? AND strategy=? AND paper=?',
+                (symbol, 'v10_perp', int(_paper)),
+            ).fetchone()
+            _conn2.close()
+            if _row:
+                logger.debug(f'[v10] {symbol} — in SQLite open_positions, skip')
+                continue
+        except Exception:
+            pass
+
+        # Skip if closed recently (cooldown guard against thesis-invalidated churn)
+        _last_close_ts = _recent_closes.get(symbol, 0)
+        if _last_close_ts > 0:
+            _elapsed = time.time() - _last_close_ts
+            _cooldown = _COOLDOWN_THESIS_SEC   # conservative: use long cooldown for all
+            if _elapsed < _cooldown:
+                logger.debug(f'[v10] {symbol} — cooldown {_elapsed/60:.0f}m/{_cooldown/60:.0f}m, skip')
+                continue
 
         # Re-check risk gate before each entry attempt
         if re is not None:
@@ -871,6 +900,14 @@ def _evaluate_position_exit(symbol, pos, perps, pm, get_candles,
     if close_result is None:
         logger.warning(f'[v10] close_position returned None for {symbol}')
         return
+
+    # Record close for cooldown — prevents immediate re-entry on next scan
+    global _recent_closes
+    _recent_closes[symbol] = time.time()
+    # Keep dict bounded
+    if len(_recent_closes) > 200:
+        cutoff = time.time() - max(_COOLDOWN_THESIS_SEC, _COOLDOWN_OTHER_SEC)
+        _recent_closes = {s: t for s, t in _recent_closes.items() if t > cutoff}
 
     pnl_usd = float(close_result.get('pnl_usd', 0))
     exit_price = float(close_result.get('exit_price', current_price))
@@ -1412,6 +1449,14 @@ def run_forever():
             ll._ensure_tables()
         except Exception:
             pass
+
+    # Restore open positions from SQLite so bot restart doesn't re-enter everything
+    perps = _import_perps_engine()
+    if perps is not None:
+        try:
+            perps.load_positions_from_db(paper=_paper)
+        except Exception as _e:
+            logger.warning(f'[v10] load_positions_from_db error: {_e}')
 
     # Log startup
     _startup_notification()

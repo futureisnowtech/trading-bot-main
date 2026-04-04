@@ -1,5 +1,8 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
+## 2026-04-04
+- fix(perps_engine): restore positions from SQLite on startup; fix(v10_runner): 2-hr cooldown after close prevents thesis-exit churn; SQLite guard on entry prevents post-restart double-entry
+
 ## 2026-04-03
 - fix(sizing): apply Kelly to position_usd;  hard cap per position; real deployed_usd passed to manual trades; min notional 
 

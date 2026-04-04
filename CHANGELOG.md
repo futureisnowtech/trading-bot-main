@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-04
+- fix(db): purge 4 phantom positions with bad entry prices (ARB 317x, PUMP 8348x, REZ 24879x, SUI 149x off real price)
+
+## 2026-04-04
 - fix(dashboard): open positions — live prices via Kraken+HL, unrealized P&L, color-coded rows; fix balance NULL-source filter; fix Styler .hide() crash
 
 ## 2026-04-04

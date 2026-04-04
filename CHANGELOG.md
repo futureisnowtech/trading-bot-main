@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-03
+- fix(dashboard): manual execute now uses compute_position_size() — Kelly, ML score, vol regime, 20% cap, leverage schedule; shows lev and kelly in result
+
+## 2026-04-03
 - fix(dashboard): balance/winrate/PF now accurate — net fees subtracted, won field used for closes, PF uses net-of-fee PnL
 
 ## 2026-04-03

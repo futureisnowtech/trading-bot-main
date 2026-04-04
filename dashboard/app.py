@@ -1178,33 +1178,48 @@ def render_manual_scan():
                 if atr_7 <= 0:
                     atr_7 = price * 0.015
 
-                stop_pct   = max(atr_7 / price * 1.5, 0.008)
-                target_pct = stop_pct * 3.0
-                pos_usd    = min(5000.0 * 0.01 / stop_pct, 5000.0 * 0.10)
+                stop_dist  = max(atr_7 * 1.5, price * 0.008)
+                target_dist = stop_dist * 3.0
                 composite  = cand.get('composite_score', 50.0)
 
+                # Use the real position sizer — same logic the bot uses
+                from position_manager import compute_position_size
+                balance, _, _b = get_account()
+                sizing = compute_position_size(
+                    account_balance=balance,
+                    current_price=price,
+                    atr_7=atr_7,
+                    stop_multiplier=1.5,
+                    ml_score=composite,
+                    composite_score=composite,
+                    paper=True,
+                )
+                pos_usd  = sizing['position_usd']
+                leverage = sizing['leverage']
+
                 if dirn == 'LONG':
-                    stop_p   = round(price * (1 - stop_pct), 6)
-                    target_p = round(price * (1 + target_pct), 6)
+                    stop_p   = round(price - stop_dist, 6)
+                    target_p = round(price + target_dist, 6)
                     pos = perps.open_long(
                         symbol=sym, position_usd=pos_usd, entry_price=price,
-                        stop_price=stop_p, take_profit_price=target_p, leverage=3,
+                        stop_price=stop_p, take_profit_price=target_p, leverage=leverage,
                         composite_score=composite, atr_at_entry=atr_7,
                         regime='UNKNOWN', entry_setup=f'manual_{setup}', paper=True,
                     )
                 else:
-                    stop_p   = round(price * (1 + stop_pct), 6)
-                    target_p = round(price * (1 - target_pct), 6)
+                    stop_p   = round(price + stop_dist, 6)
+                    target_p = round(price - target_dist, 6)
                     pos = perps.open_short(
                         symbol=sym, position_usd=pos_usd, entry_price=price,
-                        stop_price=stop_p, take_profit_price=target_p, leverage=3,
+                        stop_price=stop_p, take_profit_price=target_p, leverage=leverage,
                         composite_score=composite, atr_at_entry=atr_7,
                         regime='UNKNOWN', entry_setup=f'manual_{setup}', paper=True,
                     )
 
                 if pos:
                     results.append((sym, dirn, True,
-                        f"entered @ {price:.6g}  stop={stop_p:.6g}  target={target_p:.6g}  size=${pos_usd:.0f}"))
+                        f"entered @ {price:.6g}  stop={stop_p:.6g}  target={target_p:.6g}"
+                        f"  size=${pos_usd:.0f}  lev={leverage}x  kelly={sizing['kelly_fraction']:.3f}"))
                 else:
                     results.append((sym, dirn, False, "open_long/short returned None"))
 

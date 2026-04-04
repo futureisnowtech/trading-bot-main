@@ -58,9 +58,19 @@ def _q1(sql, params=()):
 def get_account():
     try:
         from config import ACCOUNT_SIZE, PAPER_TRADING
-        return float(ACCOUNT_SIZE), bool(PAPER_TRADING)
+        base = float(ACCOUNT_SIZE)
+        paper = bool(PAPER_TRADING)
     except Exception:
-        return 5000.0, True
+        base, paper = 5000.0, True
+    # Actual current balance = starting balance + all closed PnL since clean start
+    r = _q1("""
+        SELECT SUM(pnl_usd) v FROM trades
+        WHERE ts >= ? AND paper=1
+          AND pnl_usd != 0
+          AND source NOT IN ('backtest','pre_v10_contaminated','bybit_paper')
+    """, (LAUNCH_DATE,))
+    cum_pnl = r.get("v") or 0.0
+    return base + cum_pnl, paper, base
 
 def get_performance_stats():
     r = _q1("""
@@ -97,6 +107,7 @@ def get_today_pnl():
     r = _q1("""
         SELECT SUM(pnl_usd) v FROM trades
         WHERE ts >= ? AND paper=1 AND broker NOT LIKE '%bybit%' AND pnl_usd != 0
+          AND source NOT IN ('backtest','pre_v10_contaminated','bybit_paper')
     """, (today,))
     return r.get("v") or 0.0
 
@@ -402,26 +413,39 @@ def _parse_notes(notes):
 
 @st.fragment(run_every=5)
 def render_status():
-    scan_age     = get_last_scan_age()
-    today        = get_today_pnl()
-    acct, paper  = get_account()
-    stats        = get_performance_stats()
-    open_p       = get_open_positions()
+    scan_age          = get_last_scan_age()
+    today             = get_today_pnl()
+    balance, paper, base = get_account()
+    stats             = get_performance_stats()
+    open_p            = get_open_positions()
 
-    mode  = "PAPER" if paper else "LIVE"
-    scan_ok = scan_age < 360
+    mode    = "PAPER" if paper else "LIVE"
     bot_ok  = scan_age < 600
 
+    # Human-readable scan age
+    if scan_age >= 9999:
+        age_str = "–"
+    elif scan_age < 60:
+        age_str = f"{scan_age}s"
+    else:
+        age_str = f"{scan_age // 60}m {scan_age % 60}s"
+
+    pnl_since_start = balance - base
+    pf = stats['profit_factor']
+    pf_str = f"PF {pf:.2f}" if pf != float("inf") else "PF ∞"
+
     c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
-    c1.metric("Mode",         mode)
-    c2.metric("Bot Status",   "RUNNING" if bot_ok else "STALE",
-              delta=f"{scan_age}s since last scan")
-    c3.metric("Scan Age",     f"{scan_age}s" if scan_age < 9999 else "–")
-    c4.metric("Today P&L",    _fmt_pnl(today))
-    c5.metric("Win Rate",     f"{stats['win_rate']:.1f}%",
-              delta=f"{stats['wins']}W {stats['losses']}L")
-    c6.metric("Account",      f"${acct:,.0f}")
-    c7.metric("Open Pos",     str(len(open_p)))
+    c1.metric("Mode",        mode)
+    c2.metric("Bot Status",  "RUNNING" if bot_ok else "STALE",
+              delta=f"last scan {age_str} ago")
+    c3.metric("Last Scan",   age_str,
+              delta=f"{stats['closes']} closes logged")
+    c4.metric("Today P&L",   _fmt_pnl(today))
+    c5.metric("Win Rate",    f"{stats['win_rate']:.1f}%",
+              delta=f"{stats['wins']}W / {stats['losses']}L · {pf_str}")
+    c6.metric("Balance",     f"${balance:,.2f}",
+              delta=f"{_fmt_pnl(pnl_since_start)} since {LAUNCH_DATE}")
+    c7.metric("Open Pos",    str(len(open_p)))
 
     st.caption(f"Updated {datetime.now().strftime('%H:%M:%S')} · Paper trades since {LAUNCH_DATE} · Bybit/backtest/contaminated data excluded")
 
@@ -434,7 +458,7 @@ def render_status():
 def render_portfolio():
     import pandas as pd
     stats    = get_performance_stats()
-    acct, _  = get_account()
+    acct, _, _base = get_account()
     eq       = get_equity_curve()
 
     st.subheader("Portfolio Performance")

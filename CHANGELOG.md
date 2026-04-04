@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-03
+- fix(dashboard): status bar accuracy — Balance shows actual PnL+base, scan age human-readable, profit factor in Win Rate delta, today P&L source-filtered
+
+## 2026-04-03
 - fix(perps_engine): open_long/short now call persist_position(); close_position calls delete_position() — open positions finally visible in dashboard
 
 ## 2026-04-03

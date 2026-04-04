@@ -1318,24 +1318,36 @@ def render_manual_scan():
                     results.append((sym, dirn, False, "insufficient candle data"))
                     continue
 
-                price  = float(df_c['close'].iloc[-1])
+                candle_price = float(df_c['close'].iloc[-1])
 
-                # ── Price sanity check ───────────────────────────────────────
-                # Cross-reference candle price against live Kraken/HL feed.
-                # If they differ by >20%, the candle data is stale or wrong.
-                # We've seen 150x–25000x mismatches cause phantom positions.
+                # ── Price authority: live feed wins ──────────────────────────
+                # Always fetch the live mark price (Kraken + Hyperliquid).
+                # If candle price is within 10% → candle is fine, use it.
+                # If candle price is off by >10% → yfinance likely returned a
+                #   stock-ticker price for this symbol (e.g. LIT ETF, HEMI equity).
+                #   Use the live price instead and flag it so the user knows.
+                # If live price is unavailable → use candle price as-is.
                 live_now = get_live_prices([sym]).get(sym, 0)
                 if live_now > 0:
-                    ratio = price / live_now
-                    if not (0.90 <= ratio <= 1.10):
-                        results.append((sym, dirn, False,
-                            f"PRICE MISMATCH — candle=${price:.5g}  "
-                            f"live=${live_now:.5g}  ({ratio:.1f}x off). "
-                            f"Refusing to enter to prevent phantom position."))
-                        continue
+                    ratio = candle_price / live_now
+                    if 0.90 <= ratio <= 1.10:
+                        price = candle_price          # candle is accurate
+                    else:
+                        price = live_now              # live feed overrides bad candle
+                        _pct_off = abs(ratio - 1) * 100
+                        st.warning(f"⚠️ {sym}: candle price ${candle_price:.5g} was "
+                                   f"{_pct_off:.0f}% off live ${live_now:.5g} — "
+                                   f"using live price for entry.")
+                else:
+                    price = candle_price              # no live price, trust candle
+
+                if price <= 0:
+                    results.append((sym, dirn, False, "could not determine valid entry price"))
+                    continue
 
                 atr_7  = float(df_c['high'].sub(df_c['low']).tail(7).mean())
-                if atr_7 <= 0:
+                if atr_7 <= 0 or (live_now > 0 and abs(candle_price / live_now - 1) > 0.10):
+                    # Candle ranges are also untrustworthy if price was wrong — use % of live
                     atr_7 = price * 0.015
 
                 stop_dist  = max(atr_7 * 1.5, price * 0.008)

@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-04
+- fix(dashboard): manual trades use live price when candle is wrong (yfinance stock-ticker conflict); no more hard rejects for HL symbols
+
+## 2026-04-04
 - fix(dashboard): tighten price sanity check to 10% (was 20%)
 
 ## 2026-04-04

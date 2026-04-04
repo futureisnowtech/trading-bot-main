@@ -62,40 +62,42 @@ def get_account():
         paper = bool(PAPER_TRADING)
     except Exception:
         base, paper = 5000.0, True
-    # Actual current balance = starting balance + all closed PnL since clean start
+    # Actual balance = base + net PnL (gross PnL minus ALL fees, both entry and exit)
     r = _q1("""
-        SELECT SUM(pnl_usd) v FROM trades
+        SELECT SUM(pnl_usd) - SUM(fee_usd) AS net_pnl
+        FROM trades
         WHERE ts >= ? AND paper=1
-          AND pnl_usd != 0
           AND source NOT IN ('backtest','pre_v10_contaminated','bybit_paper')
     """, (LAUNCH_DATE,))
-    cum_pnl = r.get("v") or 0.0
+    cum_pnl = r.get("net_pnl") or 0.0
     return base + cum_pnl, paper, base
 
 def get_performance_stats():
+    # Use the `won` field (set only on real closes) — avoids counting entry rows
+    # or mis-fired pnl_usd!=0 entries. Net PnL = pnl_usd - fee_usd per close.
     r = _q1("""
         SELECT
-            SUM(CASE WHEN action IN ('SELL','BUY') AND pnl_usd != 0 THEN 1 END) AS closes,
-            SUM(CASE WHEN action IN ('SELL','BUY') AND pnl_usd > 0 THEN 1 END) AS wins,
-            SUM(CASE WHEN action IN ('SELL','BUY') AND pnl_usd < 0 THEN 1 END) AS losses,
-            SUM(CASE WHEN action IN ('SELL','BUY') THEN pnl_usd ELSE 0 END) AS total_pnl,
-            SUM(CASE WHEN action IN ('SELL','BUY') AND pnl_usd > 0 THEN pnl_usd ELSE 0 END) AS gross_wins,
-            SUM(CASE WHEN action IN ('SELL','BUY') AND pnl_usd < 0 THEN ABS(pnl_usd) ELSE 0 END) AS gross_losses,
-            SUM(ABS(fee_usd)) AS total_fees
+            COUNT(CASE WHEN won IS NOT NULL THEN 1 END)      AS closes,
+            SUM(CASE WHEN won=1 THEN 1 ELSE 0 END)           AS wins,
+            SUM(CASE WHEN won=0 THEN 1 ELSE 0 END)           AS losses,
+            SUM(pnl_usd - fee_usd)                           AS total_net_pnl,
+            SUM(CASE WHEN won=1 THEN pnl_usd - fee_usd ELSE 0 END) AS net_wins_sum,
+            SUM(CASE WHEN won=0 THEN ABS(pnl_usd - fee_usd) ELSE 0 END) AS net_losses_sum,
+            SUM(fee_usd)                                     AS total_fees
         FROM trades
         WHERE ts >= ? AND paper=1 AND broker NOT LIKE '%bybit%'
           AND source NOT IN ('backtest','pre_v10_contaminated','bybit_paper')
     """, (LAUNCH_DATE,))
     closes = r.get("closes") or 0
     wins   = r.get("wins") or 0
-    gw     = r.get("gross_wins") or 0
-    gl     = r.get("gross_losses") or 0
+    gw     = r.get("net_wins_sum") or 0.0
+    gl     = r.get("net_losses_sum") or 0.0
     return {
         "closes":        closes,
         "wins":          wins,
         "losses":        r.get("losses") or 0,
         "win_rate":      wins / closes * 100 if closes else 0.0,
-        "total_pnl":     r.get("total_pnl") or 0.0,
+        "total_pnl":     r.get("total_net_pnl") or 0.0,
         "profit_factor": gw / gl if gl > 0 else (float("inf") if gw > 0 else 0.0),
         "gross_wins":    gw,
         "gross_losses":  gl,

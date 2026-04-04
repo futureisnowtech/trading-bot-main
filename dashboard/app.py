@@ -1327,7 +1327,7 @@ def render_manual_scan():
                 live_now = get_live_prices([sym]).get(sym, 0)
                 if live_now > 0:
                     ratio = price / live_now
-                    if not (0.80 <= ratio <= 1.20):
+                    if not (0.90 <= ratio <= 1.10):
                         results.append((sym, dirn, False,
                             f"PRICE MISMATCH — candle=${price:.5g}  "
                             f"live=${live_now:.5g}  ({ratio:.1f}x off). "

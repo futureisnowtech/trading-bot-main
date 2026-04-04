@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-04
+- fix(dashboard): tighten price sanity check to 10% (was 20%)
+
+## 2026-04-04
 - fix(dashboard): price sanity check on manual trades — rejects if candle price >20% off live Kraken/HL price
 
 ## 2026-04-04

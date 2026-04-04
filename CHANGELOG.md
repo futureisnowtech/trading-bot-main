@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-03
+- fix(perps_engine): open_long/short now call persist_position(); close_position calls delete_position() — open positions finally visible in dashboard
+
+## 2026-04-03
 - fix(dashboard): get_last_scan_age() reads log backwards without line cap — fixes false STALE when 1000+ noisy lines follow the scan entry
 
 ## 2026-04-03

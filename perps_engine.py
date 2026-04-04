@@ -134,6 +134,18 @@ def open_long(
         except Exception as _e:
             logger.debug(f'[perps] open_long log_trade error: {_e}')
 
+        try:
+            from logging_db.trade_logger import persist_position
+            import datetime
+            persist_position(
+                symbol=symbol, strategy='v10_perp', qty=qty,
+                entry=entry_price, stop=stop_price, target=take_profit_price,
+                high_since_entry=entry_price, ts_entry=datetime.datetime.now().isoformat(),
+                paper=paper, direction='LONG', entry_reason=entry_setup,
+            )
+        except Exception as _e:
+            logger.debug(f'[perps] open_long persist_position error: {_e}')
+
         logger.info(f'[perps] LONG {symbol}: usd={position_usd:.0f} stop={stop_price:.2f} '
                    f'tp={take_profit_price:.2f} lev={leverage}x composite={composite_score:.1f}')
         return pos
@@ -237,6 +249,18 @@ def open_short(
         except Exception as _e:
             logger.debug(f'[perps] open_short log_trade error: {_e}')
 
+        try:
+            from logging_db.trade_logger import persist_position
+            import datetime
+            persist_position(
+                symbol=symbol, strategy='v10_perp', qty=qty,
+                entry=entry_price, stop=stop_price, target=take_profit_price,
+                high_since_entry=entry_price, ts_entry=datetime.datetime.now().isoformat(),
+                paper=paper, direction='SHORT', entry_reason=entry_setup,
+            )
+        except Exception as _e:
+            logger.debug(f'[perps] open_short persist_position error: {_e}')
+
         logger.info(f'[perps] SHORT {symbol}: usd={position_usd:.0f} stop={stop_price:.2f} '
                    f'tp={take_profit_price:.2f} lev={leverage}x composite={composite_score:.1f}')
         return pos
@@ -301,6 +325,11 @@ def close_position(symbol: str, reason: str = 'manual',
         if partial_pct >= 1.0:
             with _lock:
                 _open_positions.pop(symbol, None)
+            try:
+                from logging_db.trade_logger import delete_position
+                delete_position(symbol, strategy='v10_perp', paper=paper)
+            except Exception as _e:
+                logger.debug(f'[perps] close delete_position error: {_e}')
         else:
             # Update position qty after partial close
             with _lock:

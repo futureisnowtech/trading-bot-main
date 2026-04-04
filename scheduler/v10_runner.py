@@ -440,6 +440,39 @@ def _attempt_entry(candidate, symbol, direction, balance, deployed_usd,
     if current_price <= 0:
         return
 
+    # ── Price sanity: candle close must be within 20% of live mark price ──────
+    # Prevents entering on wrong-source candles (e.g. yfinance ETF ticker leak).
+    # Always use the live mark price when available — it's more accurate for entry.
+    try:
+        import urllib.request as _ur, json as _json
+        _live = 0.0
+        if symbol.startswith('PF_') or symbol.startswith('PI_'):
+            _kr = _json.loads(_ur.urlopen(
+                'https://futures.kraken.com/derivatives/api/v3/tickers', timeout=3).read())
+            for _t in _kr.get('tickers', []):
+                if _t.get('symbol') == symbol:
+                    _live = float(_t.get('markPrice') or _t.get('last') or 0)
+                    break
+        if _live <= 0:
+            _req = _ur.Request(
+                'https://api.hyperliquid.xyz/info',
+                data=_json.dumps({'type': 'allMids'}).encode(),
+                headers={'Content-Type': 'application/json'}, method='POST',
+            )
+            _mids = _json.loads(_ur.urlopen(_req, timeout=3).read())
+            _live = float(_mids.get(symbol, 0))
+        if _live > 0:
+            _pct_off = abs(current_price - _live) / _live
+            if _pct_off > 0.20:
+                logger.warning(
+                    f'[v10] {symbol} — price sanity FAIL: candle ${current_price:.4f} '
+                    f'vs live ${_live:.4f} ({_pct_off:.1%} off) — SKIP (wrong data source)'
+                )
+                return
+            current_price = _live   # Use live mark price for execution accuracy
+    except Exception as _pe:
+        logger.debug(f'[v10] {symbol} price sanity check error: {_pe}')
+
     # ATR from last 7 candles (high-low range proxy)
     atr_7 = float(df['high'].sub(df['low']).tail(7).mean())
     if atr_7 <= 0:

@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-04
+- fix(runner): price sanity guard on all bot entries — candle vs live mark price must be within 20% or entry is skipped
+
+## 2026-04-04
 - fix(dashboard): redesign status bar — 6 clear columns, no duplicate scan info, equity delta shortened, deployed capital shown
 
 ## 2026-04-04

@@ -53,12 +53,15 @@ _MIN_NET_RR         = 1.2     # net R:R (after fees) must be ≥ 1.2
 _MIN_VOLUME_USD     = 3_000_000   # $3M — Kraken is smaller than Binance ($10M was calibrated for Binance)
 
 # ── Quality tier thresholds ───────────────────────────────────────────────────
-_TIER_APLUS_EV  = 0.008    # 0.8% net EV → A+
-_TIER_A_EV      = 0.004    # 0.4% net EV → A
-_TIER_B_EV      = 0.0015   # 0.15% net EV → B
+# v13: Doubled from v10 values because gate now uses actual 3.0x ATR stop (not 1.5x).
+# EV at 3.0x ATR stop is approximately 2x the value at 1.5x ATR stop for same ATR.
+# Scaling up keeps the same minimum-ATR selectivity as before.
+_TIER_APLUS_EV  = 0.016    # 1.6% net EV → A+  (was 0.8%)
+_TIER_A_EV      = 0.008    # 0.8% net EV → A   (was 0.4%)
+_TIER_B_EV      = 0.003    # 0.3% net EV → B   (was 0.15%)
 
 # ── Edge score normaliser (EV % that maps to 1.0 on edge_score) ───────────────
-_EDGE_SCORE_CAP_EV = 0.015  # 1.5% EV → edge_score = 1.0
+_EDGE_SCORE_CAP_EV = 0.030  # 3.0% EV → edge_score = 1.0  (was 1.5%)
 
 # ── Size multipliers per tier ─────────────────────────────────────────────────
 TIER_MULTIPLIERS = {
@@ -82,6 +85,7 @@ def check(
     base_risk_pct: float = 0.015,
     is_ranging: bool = False,
     win_rate_estimate: float = 0.0,   # 0.0 = use default 0.52 baseline
+    stop_multiplier: float = 1.5,     # v13: matches actual position stop (default 3.0 in v10_runner)
 ) -> dict:
     """
     Hard pre-trade economics veto gate.
@@ -124,8 +128,12 @@ def check(
         return _veto(f'unknown direction: {direction}', 0.0, 0.0, 0.0)
 
     # ── Step 1: Distance calculations ─────────────────────────────────────────
-    stop_dist_pct   = atr_pct * 1.5   # stop = 1.5× ATR from entry
-    target_dist_pct = atr_pct * 3.0   # target = 3.0× ATR from entry  (2:1 gross R:R)
+    # v13: use actual stop multiplier passed from v10_runner (3.0x ATR) instead of
+    # hardcoded 1.5. Previously gate computed EV with half the actual stop distance,
+    # making fee drag look 2x worse relative to the target than it actually is.
+    # Both maintain 2:1 gross R:R (target = 2 * stop), so relative math is preserved.
+    stop_dist_pct   = atr_pct * stop_multiplier        # actual stop distance
+    target_dist_pct = atr_pct * stop_multiplier * 2.0  # 2:1 gross R:R target
 
     # ── Step 2: Fee drag ──────────────────────────────────────────────────────
     # Round-trip taker cost + half of spread paid twice (entry + exit)

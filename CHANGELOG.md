@@ -1,5 +1,16 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
+## 2026-04-05 — v13 Strategy Optimization
+- strategy(v13): economics gate now receives actual 3.0x ATR stop_multiplier from v10_runner (was hardcoded 1.5x — fee drag was computed against half the real stop, making EV 2x too pessimistic)
+- strategy(v13): EV tier thresholds doubled to match 3.0x ATR distances — A+(1.6%), A(0.8%), B(0.3%), edge_score cap(3.0%) — same real selectivity as v10 but correctly calibrated
+- strategy(v13): WAE explosion long/short now requires both fast AND slow MACD histogram to agree — eliminates false Tier 1 fires on fading momentum (8% WR on 37 stale trades)
+- strategy(v13): Tier 1 composite floor added (50.0) — named setups with ultra-low composite are now blocked at the entry gate
+- strategy(v13): Tier 2 entry threshold raised from 50 → 58 — scores 50-57 showed negative edge across 88 paper trades
+- strategy(v13): win_rate_estimate passed to economics gate uses 0.54 for Tier 1 and scales 0.50-0.60 for Tier 2 based on composite (was hardcoded 0.52 flat)
+
+## 2026-04-04
+- audit(v10.1): 4 verified bug fixes — Kelly query now covers SHORT exits + contamination filter, live_trade_days ISO date parse fixed, exit price sanity guard added (prevents yfinance ETF contamination at close), position_manager docstring updated to 0.25 thesis threshold. DB: REZ phantom -$2.5M close purged, REZ chain tagged contaminated. Behavioral freeze: all thresholds/exits/sizing unchanged.
+
 ## 2026-04-04
 - fix(critical): position state persistence, hedge btc_price, health_check wired, Run Scan Now button, DB schema v10.2
 

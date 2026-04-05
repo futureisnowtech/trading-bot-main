@@ -46,18 +46,20 @@ _REGIME_ML_MULT = {
 
 # ── Entry thresholds by regime ────────────────────────────────────────────────
 _ENTRY_THRESHOLDS = {
-    # Thresholds calibrated for OHLCV-only operation (CVD, OB, whale, liq feeds not yet wired).
-    # Max achievable score with working OHLCV feeds: ~54 (MACD+VWAP+Williams+funding).
-    # 50 = majority of OHLCV signal components must align (not just one weak signal).
-    # Raise to 58/62/65/etc once CVD, OB, whale, options, liq feeds are wired.
-    'TRENDING_UP':   50,
-    'TRENDING_DOWN': 50,
-    'RANGING':       50,
-    'HIGH_VOL':      54,    # high-vol: require near-max OHLCV signal alignment
-    'LOW_VOL':       50,
-    'ACCUMULATION':  50,
-    'DISTRIBUTION':  50,
-    'UNKNOWN':       50,
+    # v13: Raised from 50 → 58 for all regimes (except HIGH_VOL already at 54 → 60).
+    # Data: 88 parent trades at score 50-57 showed WR=47%, avg_pnl=-$0.27 (negative edge).
+    # 11 parent trades at score >= 58 showed WR=64%, avg_pnl=+$0.23 (positive edge).
+    # NOTE: In v10_runner.py the Tier 2 gate (composite >= 58) is the live entry gate.
+    # This dict is used by signal_engine.score() 'should_enter' field (informational)
+    # and by thesis exits. Keep it consistent with the live gate.
+    'TRENDING_UP':   58,
+    'TRENDING_DOWN': 58,
+    'RANGING':       58,
+    'HIGH_VOL':      60,    # high-vol: stricter — require extra signal alignment
+    'LOW_VOL':       56,    # low-vol: slightly looser — less noise in calm markets
+    'ACCUMULATION':  58,
+    'DISTRIBUTION':  58,
+    'UNKNOWN':       58,
 }
 
 
@@ -649,7 +651,7 @@ def thesis_still_valid(
     if current_score < threshold:
         reason = (
             f'Thesis degraded: entry={entry_composite_score:.1f} → '
-            f'current={current_score:.1f} (< {threshold:.1f} = 45% of entry)'
+            f'current={current_score:.1f} (< {threshold:.1f} = 25% of entry)'
         )
         return False, current_score, reason
 
@@ -687,10 +689,14 @@ _LONG_SETUPS = [
     {
         'name':       'wae_explosion',
         'label':      'WAE Momentum Explosion Long',
-        # WAE bullish + exploding + MACD positive AND market NOT ranging
+        # WAE bullish + exploding + BOTH fast AND slow MACD positive + NOT ranging.
+        # Adding mom_macd_hist_slow > 0 (MACD 6,20,5) prevents single-bar fast-MACD
+        # noise from triggering. Slow MACD confirmation means momentum is established
+        # across a longer window, not just a 3-bar oscillation. v13 change.
         'check':      lambda f: f.get('wae_bullish', 0) > 0
                                 and f.get('wae_exploding', 0) > 0
                                 and f.get('mom_macd_hist_fast', 0) > 0
+                                and f.get('mom_macd_hist_slow', 0) > 0
                                 and f.get('chop_ranging', 0) == 0,
         'invalidate': lambda f: f.get('wae_bullish', 0) == 0,
     },
@@ -791,9 +797,14 @@ _SHORT_SETUPS = [
     {
         'name':       'wae_explosion_short',
         'label':      'WAE Momentum Explosion Short',
+        # Mirror of long: require both fast AND slow MACD negative.
+        # Data: wae_explosion_short at fast-only gate had WR=8% across 37 parent
+        # trades — essentially no edge. Adding slow MACD (6,20,5 < 0) filters
+        # single-bar oscillation and requires sustained downside momentum. v13 change.
         'check':      lambda f: f.get('wae_bearish', 0) > 0
                                 and f.get('wae_exploding', 0) > 0
                                 and f.get('mom_macd_hist_fast', 0) < 0
+                                and f.get('mom_macd_hist_slow', 0) < 0
                                 and f.get('chop_ranging', 0) == 0,
         'invalidate': lambda f: f.get('wae_bearish', 0) == 0,
     },

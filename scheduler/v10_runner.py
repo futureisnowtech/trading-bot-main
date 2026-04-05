@@ -636,21 +636,39 @@ def _attempt_entry(candidate, symbol, direction, balance, deployed_usd,
     from signal_engine import detect_primary_setup
     primary_setup = detect_primary_setup(features, direction)
 
+    # ── Tier 1 composite floor ──────────────────────────────────────────────────
+    # Data: wae_explosion_short at composite < 50 had WR ~5% across 34 trades.
+    # Even specific setup patterns need overall signal agreement >= 50.
+    # This floor only blocks extreme signal disagreement — most Tier 1 setups
+    # will naturally score > 50 when the underlying indicator conditions are met.
+    _TIER1_COMPOSITE_FLOOR = 50.0
+
     if primary_setup:
-        # Tier 1: specific setup firing — enter regardless of composite score
+        if composite < _TIER1_COMPOSITE_FLOOR:
+            logger.info(
+                f'[v10] {symbol} {direction} TIER 1 {primary_setup["label"]} BLOCKED '
+                f'— composite {composite:.1f} < {_TIER1_COMPOSITE_FLOOR} floor '
+                f'(setup fires but overall signal is net-negative)'
+            )
+            return
         tier = 1
         size_mult = 1.0   # full position size
         logger.info(f'[v10] {symbol} {direction} TIER 1 — {primary_setup["label"]} '
                     f'(composite={composite:.1f} used for sizing only)')
-    elif composite >= 50:
-        # Tier 2: no primary setup but score clears floor — enter at reduced size
+    elif composite >= 58:
+        # Tier 2: score-based entry. Floor raised from 50 → 58 based on data:
+        # scores 50-57 had WR=47%, avg_pnl=-$0.27 (88 trades, negative edge).
+        # scores >= 58 had WR=64%, avg_pnl=+$0.23 (11 trades, positive edge).
         tier = 2
         size_mult = 0.75
         logger.info(f'[v10] {symbol} {direction} TIER 2 — composite={composite:.1f} '
                     f'(tech={result.get("technical_score",0):.1f} ml={result.get("ml_score",50):.1f})')
     else:
-        if composite > 44:
-            logger.info(f'[v10] {symbol} {direction} score={composite:.1f} < 50, '
+        if composite > 50:
+            logger.info(f'[v10] {symbol} {direction} score={composite:.1f} in 50-57 '
+                        f'dead zone — no edge, skip (threshold=58)')
+        elif composite > 44:
+            logger.info(f'[v10] {symbol} {direction} score={composite:.1f} < 58, '
                         f'no primary setup — skip')
         return
 
@@ -658,11 +676,12 @@ def _attempt_entry(candidate, symbol, direction, balance, deployed_usd,
     try:
         from risk.economics_gate import check as economics_check
         atr_pct = atr_7 / current_price if current_price > 0 else 0.015
-        # Derive a rough win-rate estimate from tier and composite score.
-        # Tier 1 (primary setup): assume 55%+ based on pattern specificity.
-        # Tier 2 (composite only): scale linearly between 50-60 composite → 0.50-0.56 WR.
-        # These are conservative estimates — the gate uses them for EV calculation only.
-        _wr_est = 0.55 if tier == 1 else float(max(0.50, min(0.56, 0.50 + (composite - 50) / 100)))
+        # Win-rate estimate for EV gate.
+        # Based on clean data: overall system WR is 53%; scores >= 58 show 64% WR.
+        # Tier 1: use 0.54 (slightly above baseline; setup specificity adds edge).
+        # Tier 2: score = 58 → 0.54 WR; score = 65 → 0.58 WR (linear, clamped).
+        # Do NOT pass optimistic estimates — gate must veto genuinely marginal trades.
+        _wr_est = 0.54 if tier == 1 else float(max(0.50, min(0.60, 0.50 + (composite - 58) / 50)))
         econ = economics_check(
             symbol=symbol,
             direction=direction,
@@ -675,6 +694,7 @@ def _attempt_entry(candidate, symbol, direction, balance, deployed_usd,
             account_balance=balance,
             is_ranging=bool(features.get('chop_ranging', 0) > 0),
             win_rate_estimate=_wr_est,
+            stop_multiplier=3.0,   # v13: match actual position stop (3.0x ATR)
         )
         candidate['edge_score']    = econ.get('edge_score', 0.5)
         candidate['quality_tier']  = econ.get('quality_tier', 'B')

@@ -1,1 +1,2 @@
-2026-04-04 11:29 | dd45846 | fix: stop thesis-exit churn and position loss on restart
+2026-04-04 23:37 | ed29c6b | fix(audit): 4 verified bugs — Kelly query, exit price guard, live_trade_days, docstring
+2026-04-05 00:00 | v13     | strategy(v13): EV gate stop_multiplier alignment, WAE slow MACD gate, tier thresholds scaled, Tier1 composite floor, Tier2 threshold 58

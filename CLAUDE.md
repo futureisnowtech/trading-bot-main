@@ -28,7 +28,7 @@ A fully autonomous AI-powered trading system that:
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
 
-## Current Version: v10.1 (2026-04-02)
+## Current Version: v13 (2026-04-05)
 
 **Active branch:** `feature/v10-rebuild`
 **Clean paper trading started:** 2026-04-02
@@ -84,6 +84,14 @@ Owner decides when to go live. These are informational readings, not system gate
 - Days running on clean data
 - Economics gate veto rate
 - Kill switch triggers (14d)
+
+### v13 Strategy Optimization (applied 2026-04-05)
+
+- `risk/economics_gate.py`: `stop_multiplier` parameter added — v10_runner now passes 3.0 (was hardcoded 1.5); EV tier thresholds doubled to match (A+=1.6%, A=0.8%, B=0.3%); edge_score cap 3.0%
+- `signal_engine.py`: WAE explosion long/short now requires both fast AND slow MACD histogram to agree (eliminates fading momentum false fires); `_live_trade_days()` ISO parse fixed (was always returning 0, keeping ML weight at 20%); thesis threshold docstring corrected to 0.25
+- `scheduler/v10_runner.py`: Tier 1 composite floor added (50.0); Tier 2 threshold raised 50→58; win_rate_estimate now 0.54 (Tier 1) or 0.50–0.60 scaled by composite (Tier 2); stop_multiplier=3.0 passed to economics gate
+- `position_manager.py`: Kelly query fixed to cover SHORT exits (was `action='SELL'` missing all SHORT trade outcomes)
+- DB: REZ phantom -$2.5M close purged; REZ chain tagged `source='pre_v10_contaminated'`
 
 ### v10.1 Changes vs v10.0 (applied 2026-04-02–04)
 

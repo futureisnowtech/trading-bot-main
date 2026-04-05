@@ -31,9 +31,10 @@ MAX_SINGLE_NOTIONAL_PCT: float = 0.25  # single position <= 25% of account (pre-
 MIN_NOTIONAL_USD: float = 20.0      # below this skip — fees eat the edge
 
 _QUALITY_MULT = {
-    'A+': 1.35,
-    'A':  1.00,
-    'B':  0.75,
+    'A+':   1.35,
+    'A':    1.00,
+    'B':    0.75,
+    'VETO': 0.00,   # defense-in-depth: gate should never let VETO reach sizer, but if it does → 0
 }
 
 
@@ -63,6 +64,10 @@ def compute_size(
         stop_dist_pct = 0.015
 
     quality_mult = _QUALITY_MULT.get(quality_tier, 0.75)
+
+    # VETO tier: economics gate vetoed this trade — return 0 immediately
+    if quality_mult == 0.0:
+        return _zero_result(stop_dist_pct, quality_mult)
 
     # Drawdown halt check — if heat controller says stop, return 0
     try:

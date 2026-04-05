@@ -18,7 +18,7 @@ Leverage schedule:
 6-Priority Exit Stack (higher = wins):
   1. Trailing stop — activates after 1x ATR in favor, trails at 1.5x ATR from peak
   2. Take profit scale-out — 2R → 33%; 3.5R → 33%; remainder trails
-  3. Thesis score — current_signal_score < entry_signal_score × 0.45 → close all
+  3. Thesis score — current_signal_score < entry_signal_score × 0.25 → close all
   4. Hard stop — stop-market on exchange, never widened
   5. Risk forced exit — margin breach / drawdown / correlation
   6. Kill switch — balance < 75% of ACCOUNT_SIZE (e.g. $3,750 on a $5K account) / API errors / latency
@@ -57,23 +57,29 @@ def _get_kelly_fraction(account_balance: float, paper: bool = True) -> float:
         from logging_db.trade_logger import get_logger
         db = get_logger()
 
+        # Query ALL closed trades (won IS NOT NULL) — captures both LONG exits
+        # (action='SELL') and SHORT exits (action='BUY').
+        # Excludes entry legs (won IS NULL), force_test_close test trades,
+        # and contaminated pre-v10 data so Kelly is computed on clean paper data only.
         rows = db.conn.execute("""
             SELECT pnl_usd, won FROM trades
-            WHERE paper=? AND action='SELL'
+            WHERE paper=? AND won IS NOT NULL
+              AND source='paper_v10'
+              AND (notes IS NULL OR notes NOT LIKE '%force_test_close%')
             ORDER BY ts DESC LIMIT 200
         """, (1 if paper else 0,)).fetchall()
 
         if len(rows) < 20:
             return 0.33
 
-        pnls  = [float(r[0]) for r in rows]
+        pnls  = [float(r[0]) for r in rows if r[0] is not None]
         wins  = [p for p in pnls if p > 0]
         losses = [abs(p) for p in pnls if p <= 0]
 
         if not wins or not losses:
             return 0.33
 
-        win_rate  = len(wins) / len(rows)
+        win_rate  = len(wins) / len(pnls)
         loss_rate = 1 - win_rate
         avg_win   = np.mean(wins)
         avg_loss  = np.mean(losses)

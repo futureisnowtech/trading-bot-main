@@ -475,16 +475,25 @@ def _composite_weights(live_trade_days: int) -> Tuple[float, float]:
 
 
 def _live_trade_days() -> int:
-    """Count how many days since first live trade in DB."""
+    """Count how many days since first clean paper_v10 close in DB."""
     try:
-        from logging_db.trade_logger import get_logger
-        db = get_logger()
-        row = db.conn.execute(
-            "SELECT MIN(ts) FROM trades WHERE paper=1 AND action='SELL'"
+        import sqlite3 as _sq
+        from datetime import datetime as _dt
+        conn = _sq.connect('logs/trades.db')
+        row = conn.execute(
+            "SELECT MIN(ts) FROM trades WHERE paper=1 AND won IS NOT NULL AND source='paper_v10'"
         ).fetchone()
+        conn.close()
         if row and row[0]:
-            days = (time.time() - float(row[0])) / 86400
-            return int(days)
+            # ts column is ISO-format text (e.g. "2026-04-02T11:30:00.123456-04:00")
+            _ts_str = str(row[0]).replace('Z', '+00:00')
+            try:
+                first_dt = _dt.fromisoformat(_ts_str).replace(tzinfo=None)
+            except ValueError:
+                # Fallback: strip timezone suffix and try again
+                first_dt = _dt.fromisoformat(_ts_str[:26])
+            days = (_dt.now() - first_dt).total_seconds() / 86400
+            return max(0, int(days))
     except Exception:
         pass
     return 0

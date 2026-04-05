@@ -917,6 +917,52 @@ def _evaluate_position_exit(symbol, pos, perps, pm, get_candles,
     if current_price <= 0:
         return
 
+    # ── Exit price sanity guard ───────────────────────────────────────────────
+    # Same class of bug as the ETH/REZ phantom entries: yfinance returns a stock/ETF
+    # price for bare coin tickers (e.g. REZ ETF=$85 vs REZ token=$0.003).
+    # At EXIT time we CANNOT skip the position — instead we correct the price.
+    # Priority: Kraken mark price → Hyperliquid mid → last known position price.
+    try:
+        import urllib.request as _ur
+        import json as _json
+        _live_exit = 0.0
+        # 1. Try Kraken Futures mark price
+        _kr_sym = symbol if symbol.startswith('PF_') else None
+        if _kr_sym:
+            try:
+                _kr = _json.loads(_ur.urlopen(
+                    'https://futures.kraken.com/derivatives/api/v3/tickers',
+                    timeout=3).read())
+                for _t in _kr.get('tickers', []):
+                    if _t.get('symbol') == _kr_sym:
+                        _live_exit = float(_t.get('markPrice') or 0)
+                        break
+            except Exception:
+                pass
+        # 2. Try Hyperliquid allMids (works for bare coin names)
+        if _live_exit <= 0:
+            try:
+                _req = _ur.Request(
+                    'https://api.hyperliquid.xyz/info',
+                    data=_json.dumps({'type': 'allMids'}).encode(),
+                    headers={'Content-Type': 'application/json'}, method='POST',
+                )
+                _mids = _json.loads(_ur.urlopen(_req, timeout=3).read())
+                _live_exit = float(_mids.get(symbol, 0) or _mids.get(symbol.upper(), 0))
+            except Exception:
+                pass
+        if _live_exit > 0:
+            _exit_pct_off = abs(current_price - _live_exit) / _live_exit
+            if _exit_pct_off > 0.20:
+                logger.warning(
+                    f'[v10] {symbol} EXIT price sanity FAIL: '
+                    f'candle ${current_price:.6f} vs live ${_live_exit:.6f} '
+                    f'({_exit_pct_off:.1%} off) — using live price to prevent phantom P&L'
+                )
+                current_price = _live_exit
+    except Exception as _ep:
+        logger.debug(f'[v10] {symbol} exit price sanity check error: {_ep}')
+
     # Update last_price in position
     perps.update_position_price(symbol, current_price)
 

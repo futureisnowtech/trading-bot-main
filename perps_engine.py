@@ -142,6 +142,8 @@ def open_long(
                 entry=entry_price, stop=stop_price, target=take_profit_price,
                 high_since_entry=entry_price, ts_entry=datetime.datetime.now().isoformat(),
                 paper=paper, direction='LONG', entry_reason=entry_setup,
+                atr_at_entry=atr_at_entry, composite_score=composite_score,
+                leverage=leverage,
             )
         except Exception as _e:
             logger.debug(f'[perps] open_long persist_position error: {_e}')
@@ -257,6 +259,8 @@ def open_short(
                 entry=entry_price, stop=stop_price, target=take_profit_price,
                 high_since_entry=entry_price, ts_entry=datetime.datetime.now().isoformat(),
                 paper=paper, direction='SHORT', entry_reason=entry_setup,
+                atr_at_entry=atr_at_entry, composite_score=composite_score,
+                leverage=leverage,
             )
         except Exception as _e:
             logger.debug(f'[perps] open_short persist_position error: {_e}')
@@ -399,27 +403,35 @@ def load_positions_from_db(paper: bool = True) -> int:
                     continue   # already tracked (e.g. from this session)
                 qty   = float(row.get('qty', 0))
                 entry = float(row.get('entry', 0))
+                # Convert stored ISO timestamp → Unix float for hold-time calculations
+                _ts_str = row.get('ts_entry', '')
+                try:
+                    import datetime as _dt
+                    _entry_ts = _dt.datetime.fromisoformat(_ts_str).timestamp()
+                except Exception:
+                    _entry_ts = time.time()
+
                 _open_positions[symbol] = {
-                    'symbol':              symbol,
-                    'direction':           row.get('direction') or 'LONG',
-                    'qty':                 qty,
-                    'entry_price':         entry,
-                    'stop_price':          float(row.get('stop', 0)),
-                    'take_profit_price':   float(row.get('target', 0)),
-                    'entry_setup':         row.get('entry_reason') or '',
-                    'position_usd':        qty * entry,
-                    'entry_ts':            time.time(),
-                    'leverage':            3,
-                    'atr_at_entry':        0.0,
-                    'entry_composite_score': 0.0,
-                    'regime':              'UNKNOWN',
-                    'peak_price':          entry,
-                    'trailing_active':     False,
-                    'trailing_stop_price': 0.0,
-                    'scale_33_done':       False,
-                    'scale_66_done':       False,
-                    'paper':               paper,
-                    'order_id':            'restored',
+                    'symbol':                symbol,
+                    'direction':             row.get('direction') or 'LONG',
+                    'qty':                   qty,
+                    'entry_price':           entry,
+                    'stop_price':            float(row.get('stop', 0)),
+                    'take_profit_price':     float(row.get('target', 0)),
+                    'entry_setup':           row.get('entry_reason') or '',
+                    'position_usd':          qty * entry,
+                    'entry_ts':              _entry_ts,         # real entry time, not now
+                    'leverage':              int(row.get('leverage') or 3),
+                    'atr_at_entry':          float(row.get('atr_at_entry') or entry * 0.015),
+                    'entry_composite_score': float(row.get('composite_score') or 65.0),
+                    'regime':                'UNKNOWN',
+                    'peak_price':            float(row.get('high_since_entry') or entry),
+                    'trailing_active':       bool(row.get('trailing_active') or False),
+                    'trailing_stop_price':   float(row.get('trailing_stop_price') or 0.0),
+                    'scale_33_done':         bool(row.get('scale_33_done') or False),
+                    'scale_66_done':         bool(row.get('scale_66_done') or False),
+                    'paper':                 paper,
+                    'order_id':              'restored',
                 }
                 loaded += 1
         if loaded:

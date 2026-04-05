@@ -752,6 +752,38 @@ def render_scanner():
 
     st.subheader("Scanner — Last Output")
 
+    # ── Run Scan Now button ───────────────────────────────────────────────────
+    _col_btn, _col_status = st.columns([1, 4])
+    with _col_btn:
+        _run_now = st.button("Run Scan Now", type="primary", use_container_width=True)
+    with _col_status:
+        _scan_status_placeholder = st.empty()
+
+    if _run_now:
+        _scan_status_placeholder.info("Running Kraken Futures scan...")
+        try:
+            import importlib
+            import scanner as _sc
+            importlib.reload(_sc)  # picks up any code changes
+            # Get live open positions to pass as filter
+            _open_syms = [p["symbol"] for p in get_open_positions()]
+            try:
+                from config import ACCOUNT_SIZE as _acct_sz
+            except Exception:
+                _acct_sz = 10000
+            _live_candidates = _sc.scan(open_positions=_open_syms, account_balance=float(_acct_sz))
+            if _live_candidates:
+                _scan_status_placeholder.success(f"Scan complete — {len(_live_candidates)} candidates found")
+                _cand_df = pd.DataFrame(_live_candidates)
+                _display_cols = [c for c in ["symbol","direction","vol_spike","adx_15m",
+                                              "funding_rate","expected_profit","edge_score"] if c in _cand_df.columns]
+                st.dataframe(_cand_df[_display_cols] if _display_cols else _cand_df,
+                             use_container_width=True, hide_index=True)
+            else:
+                _scan_status_placeholder.warning("Scan complete — 0 candidates passed all filters")
+        except Exception as _scan_err:
+            _scan_status_placeholder.error(f"Scan error: {_scan_err}")
+
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Last Scan",     f"{age}s ago" if age < 9999 else "No data")
     c2.metric("Candidates",    str(scan["count"]))

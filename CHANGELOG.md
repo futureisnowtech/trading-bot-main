@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-04
+- fix(critical): position state persistence, hedge btc_price, health_check wired, Run Scan Now button, DB schema v10.2
+
+## 2026-04-04
 - fix: widen hard stops 3×ATR, loosen thesis exit, dual-exposure QA guard, exclude force_test_close from all stats
 
 ## 2026-04-04

@@ -70,6 +70,15 @@ def init_db() -> None:
         "ALTER TABLE trades ADD COLUMN won INTEGER DEFAULT NULL",
         "ALTER TABLE trades ADD COLUMN source TEXT DEFAULT 'paper'",
         "ALTER TABLE trades ADD COLUMN pnl_pct REAL DEFAULT 0",
+        # v10.2: position state persistence — survive restarts without losing exit logic state.
+        # These are required to correctly restore trailing stops and scale-out flags.
+        "ALTER TABLE open_positions ADD COLUMN atr_at_entry REAL DEFAULT 0",
+        "ALTER TABLE open_positions ADD COLUMN composite_score REAL DEFAULT 0",
+        "ALTER TABLE open_positions ADD COLUMN trailing_active INTEGER DEFAULT 0",
+        "ALTER TABLE open_positions ADD COLUMN trailing_stop_price REAL DEFAULT 0",
+        "ALTER TABLE open_positions ADD COLUMN scale_33_done INTEGER DEFAULT 0",
+        "ALTER TABLE open_positions ADD COLUMN scale_66_done INTEGER DEFAULT 0",
+        "ALTER TABLE open_positions ADD COLUMN leverage INTEGER DEFAULT 3",
     ]:
         try:
             cur.execute(migration)
@@ -303,15 +312,24 @@ def log_trade_features(trade_id: int, symbol: str, direction: str,
 
 def persist_position(symbol, strategy, qty, entry, stop, target,
                      high_since_entry, ts_entry, paper=True,
-                     direction='LONG', entry_reason='', low_since_entry=None) -> None:
-    """Write open position to DB so restarts can recover it."""
+                     direction='LONG', entry_reason='', low_since_entry=None,
+                     atr_at_entry=0.0, composite_score=0.0,
+                     trailing_active=False, trailing_stop_price=0.0,
+                     scale_33_done=False, scale_66_done=False,
+                     leverage=3) -> None:
+    """Write open position to DB so restarts can recover it (including exit state)."""
     _low = low_since_entry if low_since_entry is not None else entry
     conn = _conn()
     conn.cursor().execute("""INSERT OR REPLACE INTO open_positions
-        (symbol,strategy,qty,entry,stop,target,high_since_entry,low_since_entry,ts_entry,paper,direction,entry_reason)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (symbol,strategy,qty,entry,stop,target,high_since_entry,low_since_entry,ts_entry,paper,
+         direction,entry_reason,atr_at_entry,composite_score,
+         trailing_active,trailing_stop_price,scale_33_done,scale_66_done,leverage)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (symbol, strategy, qty, entry, stop, target, high_since_entry, _low, ts_entry,
-         int(paper), direction, entry_reason or ''))
+         int(paper), direction, entry_reason or '',
+         float(atr_at_entry), float(composite_score),
+         int(trailing_active), float(trailing_stop_price),
+         int(scale_33_done), int(scale_66_done), int(leverage)))
     conn.commit()
     conn.close()
 

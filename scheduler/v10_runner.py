@@ -1078,15 +1078,50 @@ def _evaluate_position_exit(symbol, pos, perps, pm, get_candles,
         except Exception as e:
             logger.debug(f'[v10] trade_close notify error: {e}')
 
-    # Handle scale-out partial flags
+    # Handle scale-out partial flags + persist updated state to DB
     if partial_pct < 1.0:
         if exit_decision.exit_type == 'scale_out_33':
             pos['scale_33_done'] = True
         elif exit_decision.exit_type == 'scale_out_66':
             pos['scale_66_done'] = True
+        # Persist the updated position (reduced qty + updated flags) so a restart
+        # won't re-fire scale-outs that already happened.
+        try:
+            from logging_db.trade_logger import persist_position as _pp
+            import datetime as _dt
+            _pp(
+                symbol=symbol, strategy='v10_perp',
+                qty=pos.get('qty', 0),
+                entry=pos.get('entry_price', 0),
+                stop=pos.get('stop_price', 0),
+                target=pos.get('take_profit_price', 0),
+                high_since_entry=pos.get('peak_price', pos.get('entry_price', 0)),
+                ts_entry=_dt.datetime.fromtimestamp(pos.get('entry_ts', 0)).isoformat(),
+                paper=_paper,
+                direction=pos.get('direction', 'LONG'),
+                entry_reason=pos.get('entry_setup', ''),
+                atr_at_entry=pos.get('atr_at_entry', 0.0),
+                composite_score=pos.get('entry_composite_score', 0.0),
+                trailing_active=pos.get('trailing_active', False),
+                trailing_stop_price=pos.get('trailing_stop_price', 0.0),
+                scale_33_done=pos.get('scale_33_done', False),
+                scale_66_done=pos.get('scale_66_done', False),
+                leverage=pos.get('leverage', 3),
+            )
+        except Exception as _pe:
+            logger.debug(f'[v10] partial close persist error {symbol}: {_pe}')
 
 
 # ── kill_switch_monitor ───────────────────────────────────────────────────────
+
+def _run_health_check():
+    """60-second loop: run 6-invariant health check, write result to system_events."""
+    try:
+        from monitoring.health_check import run_health_check
+        run_health_check(force=False)   # rate-limited internally to once per minute
+    except Exception as e:
+        logger.debug(f'[v10] health_check error: {e}')
+
 
 def kill_switch_monitor():
     """60-second loop: check account balance against kill threshold."""
@@ -1111,7 +1146,19 @@ def hedge_rebalance():
             return
         open_positions = perps.get_open_positions()
         balance = _get_account_balance()
-        he.rebalance(open_positions, balance, paper=_paper)
+        # Fetch live BTC price for hedge sizing (required by rebalance signature)
+        _btc_price = 0.0
+        try:
+            import urllib.request as _ur, json as _js
+            _kr = _js.loads(_ur.urlopen(
+                'https://futures.kraken.com/derivatives/api/v3/tickers', timeout=3).read())
+            for _t in _kr.get('tickers', []):
+                if _t.get('symbol') in ('PF_XBTUSD', 'PF_BTCUSD'):
+                    _btc_price = float(_t.get('markPrice') or 0)
+                    break
+        except Exception:
+            pass
+        he.rebalance(open_positions, balance, btc_price=_btc_price, paper=_paper)
     except Exception as e:
         logger.debug(f'[v10] hedge_rebalance error: {e}')
 
@@ -1550,6 +1597,7 @@ def run_forever():
     schedule.every(30).seconds.do(exit_monitor)
     schedule.every(5).minutes.do(hedge_rebalance)
     schedule.every(60).seconds.do(kill_switch_monitor)
+    schedule.every(60).seconds.do(_run_health_check)
     schedule.every(6).hours.do(ml_retrain_check)
     schedule.every().day.at('07:00').do(rbi_nightly)   # 07:00 UTC ≈ 02:00 ET
 

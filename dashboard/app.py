@@ -1,5 +1,5 @@
 """
-dashboard/app.py — v10.1 single-page dashboard
+dashboard/app.py — v13 single-page dashboard
 One page, no tabs, minimal styling.
 All data read from live system: SQLite DB, bot.log, config/signal_engine imports.
 """
@@ -18,7 +18,7 @@ LOG_PATH    = os.path.join(_ROOT, "logs", "bot.log")
 LAUNCH_DATE = "2026-04-02"
 
 st.set_page_config(
-    page_title="Algo Trading v10.1",
+    page_title="Algo Trading v13",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -1096,7 +1096,7 @@ def render_system_config():
         try:
             import config as _cfg
             import pandas as pd
-            items = sorted({k: v for k, v in vars(_cfg).items()
+            items = sorted({k: str(v) for k, v in vars(_cfg).items()
                             if not k.startswith("_") and isinstance(v, (int, float, str, bool))}.items())
             st.dataframe(pd.DataFrame(items, columns=["Key", "Value"]), use_container_width=True, hide_index=True)
         except Exception as e:
@@ -1691,7 +1691,7 @@ def render_futures():
 # ══════════════════════════════════════════════════════════════════════════════
 
 def main():
-    st.title("Algo Trading System — v10.1 Paper")
+    st.title("Algo Trading System — v13 Paper")
     st.caption("Two-tower signal engine · 6-priority exit stack · 57-feature ML · Kraken + Hyperliquid perps · MES futures")
 
     tab_crypto, tab_futures = st.tabs(["CRYPTO PERPS", "FUTURES (MES)"])

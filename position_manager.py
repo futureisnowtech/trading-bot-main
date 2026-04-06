@@ -317,10 +317,10 @@ def check_exits(
     if stop_p > 0:
         if is_long and current_price <= stop_p:
             return ExitDecision(True, 4, 'hard_stop',
-                                f'Hard stop hit: {current_price:.4f} <= {stop_p:.4f}', 1.0)
+                                f'Hard stop hit: {current_price:.8g} <= {stop_p:.8g}', 1.0)
         elif not is_long and current_price >= stop_p:
             return ExitDecision(True, 4, 'hard_stop',
-                                f'Hard stop hit: {current_price:.4f} >= {stop_p:.4f}', 1.0)
+                                f'Hard stop hit: {current_price:.8g} >= {stop_p:.8g}', 1.0)
 
     # ── Priority 3: Thesis exit ───────────────────────────────────────────────
     # Tier 1 entries: exit when the specific setup conditions are no longer met.

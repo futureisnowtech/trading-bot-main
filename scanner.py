@@ -59,7 +59,7 @@ _BINANCE_BASE   = 'https://fapi.binance.com'
 _HL_BASE        = 'https://api.hyperliquid.xyz/info'
 
 # ── Filter thresholds ──────────────────────────────────────────────────────────
-_MIN_VOLUME_24H_USD      = 500_000   # $500K/day minimum — both exchanges
+_MIN_VOLUME_24H_USD      = 2_500_000  # $2.5M/day — aligned with economics gate $3M floor
 _MIN_VOL_SPIKE           = 0.4       # sub-filter A: vol/20-bar avg
 _MIN_PRICE_MOVE_1H       = 0.15      # sub-filter A: 1h absolute price move %
 _MIN_ADX_MOMENTUM        = 15        # sub-filter A/B/C: trend confirmation

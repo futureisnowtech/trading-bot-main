@@ -1,5 +1,8 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
+## 2026-04-06
+- fix(scanner/runner/perps/pm): 5 audit fixes — scanner vol floor K→.5M, econ veto log cooldown 30min, per-scan funnel summary, duplicate close idempotency guard, hard stop micro-price precision :.4f→:.8g
+
 ## 2026-04-05
 - hook-stack: install 6-hook LAYER A/B/C/D safety system — dangerous command blocker, protected-file blocker, py linter, targeted test runner, command logger, guarded auto-commit; 28/28 tests pass
 

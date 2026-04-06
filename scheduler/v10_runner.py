@@ -51,6 +51,12 @@ _recent_closes: Dict[str, float] = {}
 _COOLDOWN_THESIS_SEC: int = 7200   # 2 hours after thesis_invalidated
 _COOLDOWN_OTHER_SEC: int  = 1800   # 30 min after any other exit
 
+# Economics veto cooldown: suppress repeated identical veto log spam.
+# Key: "{symbol}_{direction}_{reason_prefix}" → epoch of last logged veto.
+# Does NOT skip the gate check — only suppresses the INFO log line.
+_veto_log_cooldowns: Dict[str, float] = {}
+_VETO_LOG_COOLDOWN_SEC: int = 1800  # 30 min between identical veto log messages
+
 
 def _get_underlying(symbol: str) -> str:
     """
@@ -384,6 +390,16 @@ def _scan_and_trade_inner():
                 f'(tv={len(tv_candidates)} scanner={len(candidates) - len(tv_candidates)}), '
                 f'balance=${balance:.0f} deployed=${deployed_usd:.0f}')
 
+    # Funnel counters — reset each scan cycle
+    _funnel = {
+        'total': len(candidates),
+        'dual_exposure': 0,
+        'cooldown': 0,
+        'scored': 0,       # reached _attempt_entry (signal engine ran)
+        'econ_veto': 0,    # vetoed by economics gate (populated via _attempt_entry return)
+        'entries': 0,
+    }
+
     for candidate in candidates:
         symbol = candidate.get('symbol', '')
         direction = candidate.get('direction', 'LONG')
@@ -396,6 +412,7 @@ def _scan_and_trade_inner():
         # In-memory check (exact symbol)
         if perps is not None and perps.get_open_positions().get(symbol):
             logger.debug(f'[v10] {symbol} — already in memory, skip')
+            _funnel['dual_exposure'] += 1
             continue
 
         # SQLite check — match by exact symbol OR same underlying across all open positions
@@ -412,6 +429,7 @@ def _scan_and_trade_inner():
             _open_symbols_db  = {r[0] for r in _open_rows}
             if symbol in _open_symbols_db:
                 logger.debug(f'[v10] {symbol} — exact match in SQLite, skip')
+                _funnel['dual_exposure'] += 1
                 continue
             if _underlying in _open_underlyings:
                 # Find which symbol caused the conflict for the log message
@@ -419,6 +437,7 @@ def _scan_and_trade_inner():
                                   if _get_underlying(r[0]) == _underlying), '?')
                 logger.info(f'[v10] {symbol} — dual-exposure block: '
                             f'underlying={_underlying} already open as {_conflict}')
+                _funnel['dual_exposure'] += 1
                 continue
         except Exception:
             pass
@@ -434,6 +453,7 @@ def _scan_and_trade_inner():
             _cooldown = _COOLDOWN_THESIS_SEC
             if _elapsed < _cooldown:
                 logger.debug(f'[v10] {symbol} — cooldown {_elapsed/60:.0f}m/{_cooldown/60:.0f}m, skip')
+                _funnel['cooldown'] += 1
                 continue
 
         # Re-check risk gate before each entry attempt
@@ -443,6 +463,8 @@ def _scan_and_trade_inner():
                 logger.info(f'[v10] entry blocked by risk: {reason}')
                 break   # stop trying more candidates
 
+        _funnel['scored'] += 1
+        _pos_before = set(perps.get_open_positions().keys()) if perps is not None else set()
         try:
             _attempt_entry(
                 candidate=candidate,
@@ -466,7 +488,21 @@ def _scan_and_trade_inner():
 
         # Update deployed after each successful entry
         if perps is not None:
+            _pos_after = set(perps.get_open_positions().keys())
+            if symbol in _pos_after and symbol not in _pos_before:
+                _funnel['entries'] += 1
             deployed_usd = _get_deployed_usd(perps.get_open_positions())
+
+    # Per-scan funnel summary — always logged at INFO so the operator can see where
+    # candidates are being filtered without trawling individual DEBUG/INFO lines.
+    _econ_veto_est = _funnel['scored'] - _funnel['entries']  # approximate
+    logger.info(
+        f'[v10] funnel: {_funnel["total"]} candidates → '
+        f'scored={_funnel["scored"]} '
+        f'(dropped: dual={_funnel["dual_exposure"]} cooldown={_funnel["cooldown"]}) → '
+        f'entries={_funnel["entries"]} '
+        f'(~{_econ_veto_est} vetoed/skipped in signal engine or econ gate)'
+    )
 
 
 def _attempt_entry(candidate, symbol, direction, balance, deployed_usd,
@@ -701,9 +737,17 @@ def _attempt_entry(candidate, symbol, direction, balance, deployed_usd,
 
         if not econ.get('approved', True):
             reason = econ.get('reject_reason', 'economics veto')
-            logger.info(f'[v10] {symbol} {direction} ECONOMICS VETO (Tier{tier}): {reason} '
-                        f'(ev={econ.get("ev_pct", 0)*100:.3f}% '
-                        f'fees={econ.get("fee_drag_pct", 0)*100:.3f}%)')
+            # Cooldown: suppress repeated identical veto log lines (same symbol+dir+reason prefix)
+            # for _VETO_LOG_COOLDOWN_SEC seconds to reduce log spam from chronic low-volume symbols.
+            # The economics gate check itself always runs — only the INFO log is suppressed.
+            _veto_key = f'{symbol}_{direction}_{reason[:30]}'
+            _veto_now = time.time()
+            _last_veto_log = _veto_log_cooldowns.get(_veto_key, 0.0)
+            if _veto_now - _last_veto_log >= _VETO_LOG_COOLDOWN_SEC:
+                _veto_log_cooldowns[_veto_key] = _veto_now
+                logger.info(f'[v10] {symbol} {direction} ECONOMICS VETO (Tier{tier}): {reason} '
+                            f'(ev={econ.get("ev_pct", 0)*100:.3f}% '
+                            f'fees={econ.get("fee_drag_pct", 0)*100:.3f}%)')
             if ne is not None:
                 try:
                     ne.notify_rejection(symbol=symbol, direction=direction,

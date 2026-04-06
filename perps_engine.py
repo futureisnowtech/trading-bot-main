@@ -24,6 +24,8 @@ except ImportError:
 
 _lock = threading.RLock()
 _open_positions: Dict[str, Dict] = {}   # symbol → position dict
+_recent_close_ts: Dict[str, float] = {} # symbol → epoch of last full close (idempotency guard)
+_IDEMPOTENCY_WINDOW = 60.0              # seconds — duplicate close within this window is suppressed
 
 
 def _get_broker(testnet: bool = True) -> Optional['BinanceBroker']:
@@ -289,6 +291,16 @@ def close_position(symbol: str, reason: str = 'manual',
     """
     with _lock:
         pos = _open_positions.get(symbol)
+        # Idempotency guard: suppress duplicate full-close within _IDEMPOTENCY_WINDOW seconds.
+        # Checked and recorded atomically under the lock so concurrent callers can't both proceed.
+        if partial_pct >= 1.0 and pos is not None:
+            _last_close = _recent_close_ts.get(symbol, 0.0)
+            _now = time.time()
+            if _now - _last_close < _IDEMPOTENCY_WINDOW:
+                logger.warning(f'[perps] duplicate close suppressed for {symbol} '
+                               f'({_now - _last_close:.1f}s since last close)')
+                return None
+            _recent_close_ts[symbol] = _now  # claim this close before releasing lock
 
     if not pos:
         logger.warning(f'[perps] no open position found for {symbol}')

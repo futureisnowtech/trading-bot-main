@@ -85,6 +85,13 @@ Owner decides when to go live. These are informational readings, not system gate
 - Economics gate veto rate
 - Kill switch triggers (14d)
 
+### v13.1 Scanner/Funnel Fixes (applied 2026-04-06)
+
+- `scanner.py`: `_MIN_VOLUME_24H_USD` raised $500K → $2.5M — aligns with economics gate $3M floor; eliminates MOODENG/ZETA/VIRTUAL/FET from ever reaching the signal engine
+- `scheduler/v10_runner.py`: economics veto log cooldown added (30 min between identical veto messages per symbol+direction+reason); per-scan funnel summary logged at INFO (`funnel: N candidates → scored=X (dropped: dual=Y cooldown=Z) → entries=A (~B vetoed/skipped)`)
+- `perps_engine.py`: duplicate close idempotency guard — full close of same symbol within 60s returns None and logs warning; check is atomic under `_lock` to block concurrent callers
+- `position_manager.py`: hard stop reason now uses `:.8g` format (e.g. `3.5191e-06`) instead of `:.4f` (`0.0000`) for micro-priced assets like PEPE
+
 ### v13 Strategy Optimization (applied 2026-04-05)
 
 - `risk/economics_gate.py`: `stop_multiplier` parameter added — v10_runner now passes 3.0 (was hardcoded 1.5); EV tier thresholds doubled to match (A+=1.6%, A=0.8%, B=0.3%); edge_score cap 3.0%

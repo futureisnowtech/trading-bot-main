@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-05
+- hook-stack: install 6-hook LAYER A/B/C/D safety system — dangerous command blocker, protected-file blocker, py linter, targeted test runner, command logger, guarded auto-commit; 28/28 tests pass
+
+## 2026-04-05
 - fix(unified_sizer): added VETO:0.00 to _QUALITY_MULT + early-exit guard so VETO tier always returns 0 notional
 
 ## 2026-04-05

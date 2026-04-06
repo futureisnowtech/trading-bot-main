@@ -49,8 +49,19 @@ fi
 
 # ════════════════════════════════════════════════════════════════════════════
 # BLOCK 3: DESTRUCTIVE GIT — history rewrite / force push
+# Uses python3 regex to match only at command-token boundaries (^, ;, &&,
+# ||, (, newline) — avoids false positives from heredoc/commit message text.
 # ════════════════════════════════════════════════════════════════════════════
-if echo "$CMD" | grep -qE 'git reset --hard|git clean -fd|git clean -f[^a-z]|git push --force|git push -f[ $]|git push.*--force-with-lease'; then
+GIT_DESTRUCTIVE=$(echo "$CMD" | python3 -c "
+import sys, re
+text = sys.stdin.read()
+# Only match 'git <dangerous>' when git starts a command token
+pattern = r'(?:^|;|&&|\|\||\(|\n)\s*git\s+(?:reset\s+--hard|clean\s+-fd?(?!\w)|push\s+(?:[^\n]*?\s)?(?:--force|-f)(?:\s|$)|push\s+--force-with-lease)'
+if re.search(pattern, text, re.MULTILINE):
+    sys.exit(1)
+sys.exit(0)
+" 2>/dev/null; echo $?)
+if [ "$GIT_DESTRUCTIVE" = "1" ]; then
     echo "BLOCKED [GIT-DESTRUCTIVE]: Destructive git command detected." >&2
     echo "Safe alternatives: 'git stash', 'git revert <commit>', or 'git diff' to inspect first." >&2
     exit 2

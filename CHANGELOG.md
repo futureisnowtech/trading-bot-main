@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-06
+- feat(gate): v13.2 execution-quality gates — spread/depth/cost-aware EV floor, vol floor aligned $3M→$2.5M, price sanity 20%→5%, 3-strike veto suppression, scanner unit comment, TV signal spread default, price_archive.db rebuild
+
+## 2026-04-06
 - feat(hooks): add ruff format to post_py_linter.sh — auto-formats all .py files on Edit/Write, format-only on core trading files, no behavior-changing fixes
 
 ## 2026-04-06

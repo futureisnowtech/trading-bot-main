@@ -122,6 +122,34 @@ if echo "$CMD" | grep -qE '^[[:space:]]*(cat|head|tail)[[:space:]].*\.env[[:spac
 fi
 
 # ════════════════════════════════════════════════════════════════════════════
+# BLOCK 10: BOT PROCESS KILL — killing the trading bot without review
+# Blocks SIGKILL (-9) to main.py to prevent unclean shutdown mid-position.
+# Regular SIGTERM (pkill -f "main.py") is allowed — the bot handles it cleanly.
+# ════════════════════════════════════════════════════════════════════════════
+if echo "$CMD" | grep -qE 'kill\s+-9\s+.*main\.py|kill\s+-KILL\s+.*main\.py'; then
+    echo "BLOCKED [PROCESS-RISK]: SIGKILL to main.py is not safe." >&2
+    echo "Use 'pkill -f main.py' (SIGTERM) for clean shutdown with position state preserved." >&2
+    echo "If bot is stuck, inspect first: 'ps aux | grep main.py'" >&2
+    exit 2
+fi
+
+# ════════════════════════════════════════════════════════════════════════════
+# BLOCK 11: PRICE/TRADE ARCHIVE DESTRUCTION
+# These DBs hold historical price data and trade memory. Destruction loses
+# all accumulated learning signal and triggers full-retrain on next start.
+# ════════════════════════════════════════════════════════════════════════════
+if echo "$CMD" | grep -qi 'sqlite3'; then
+    if echo "$CMD" | grep -qE 'price_archive\.db|trade_memory\.db|memory/.*\.db'; then
+        if echo "$CMD" | grep -qiE '\b(DROP|DELETE|VACUUM|TRUNCATE)\b'; then
+            echo "BLOCKED [DB-INTEGRITY]: Destructive op on price_archive.db or trade_memory.db." >&2
+            echo "These hold historical data and vector memory for the learning loop." >&2
+            echo "Work on a safe copy: cp logs/<db>.db /tmp/<db>_test.db" >&2
+            exit 2
+        fi
+    fi
+fi
+
+# ════════════════════════════════════════════════════════════════════════════
 # BLOCK 8: LAUNCHD SERVICE TAMPERING — disabling trading services
 # ════════════════════════════════════════════════════════════════════════════
 if echo "$CMD" | grep -qE 'launchctl (unload|disable|bootout|remove).*algotrading'; then

@@ -58,6 +58,14 @@ FORCE_10=$(printf '%s' 'python3 scripts/force_10_trades.py')
 echo "{\"tool_input\":{\"command\":\"$FORCE_10\"}}" | bash "$REPO/.claude/hooks/pre_bash_blocker.sh" 2>/dev/null
 check "BLOCK: force_10_trades.py" 2 $?
 
+# BLOCK 10: SIGKILL to main.py
+python3 -c "import json,subprocess,sys; p=subprocess.run(['bash','$REPO/.claude/hooks/pre_bash_blocker.sh'],input=json.dumps({'tool_input':{'command':'kill -9 12345 main.py'}}),capture_output=True,text=True); sys.exit(p.returncode)" 2>/dev/null
+check "BLOCK: kill -9 main.py" 2 $?
+
+# BLOCK 11: price_archive destruction
+python3 -c "import json,subprocess,sys; p=subprocess.run(['bash','$REPO/.claude/hooks/pre_bash_blocker.sh'],input=json.dumps({'tool_input':{'command':'sqlite3 price_archive.db DROP TABLE candles'}}),capture_output=True,text=True); sys.exit(p.returncode)" 2>/dev/null
+check "BLOCK: sqlite3 DROP on price_archive.db" 2 $?
+
 # Safe commands — must exit 0
 echo "{\"tool_input\":{\"command\":\"python3 main.py --mode paper\"}}" | bash "$REPO/.claude/hooks/pre_bash_blocker.sh" 2>/dev/null
 check "ALLOW: --mode paper" 0 $?

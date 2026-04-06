@@ -16,7 +16,7 @@ Leverage schedule:
   MAX 10x: ml_score>85 AND cascade_risk<20 AND vol_regime=LOW AND edge_score>0.70
 
 6-Priority Exit Stack (higher = wins):
-  1. Trailing stop — activates after 1x ATR in favor, trails at 1.5x ATR from peak
+  1. Trailing stop — activates after 1x ATR in favor, trails at 4.5x ATR from peak
   2. Take profit scale-out — 2R → 33%; 3.5R → 33%; remainder trails
   3. Thesis score — current_signal_score < entry_signal_score × 0.25 → close all
   4. Hard stop — stop-market on exchange, never widened
@@ -349,7 +349,27 @@ def check_exits(
     elif _entry_setup in _MR_SETUPS:
         _min_hold_secs = 2700   # 45 minutes for mean-reversion
     else:
-        _min_hold_secs = 3600   # 1 hour default (was 10 min — too fast, caused churn)
+        _min_hold_secs = 3600   # 1 hour default
+
+    # SHORT-specific ATR-proportional hold floor.
+    # Problem: short thesis exits were firing at 8% WR across 37 trades — the
+    # thesis invalidation condition fires on the next bar after a short entry
+    # (MACD recovers, SuperTrend flips back) before the trade develops any move.
+    # Shorts need time proportional to the market's volatility to develop.
+    #
+    # Formula: atr_pct × 720,000 seconds
+    #   Derivation: 720,000 = 8 trading hours × 25 (volatility scaling factor).
+    #   A 1% ATR instrument moves ~1% per 8h period (one cycle). To give the trade
+    #   a full cycle to develop before thesis can fire: hold = 1 cycle = 8h.
+    #   But high-ATR instruments are noisier and need proportionally more time.
+    #   At 1% ATR → 2h, 2% ATR → 4h, 3% → 6h, 4% → 8h, 5% → 10h.
+    #   Floor 2h (nothing fires within 2h regardless), ceiling 12h.
+    if not is_long:
+        _atr_pct = atr / entry if entry > 0 else 0.02
+        _dynamic_short_hold = int(_atr_pct * 720_000)
+        _dynamic_short_hold = max(7200, min(_dynamic_short_hold, 43200))
+        _min_hold_secs = max(_min_hold_secs, _dynamic_short_hold)
+
     _hold_elapsed  = time.time() - float(position.get('entry_ts', 0))
     _thesis_eligible = _hold_elapsed >= _min_hold_secs
 
@@ -398,14 +418,17 @@ def check_exits(
     trailing_active = bool(position.get('trailing_active', False))
     trailing_stop   = float(position.get('trailing_stop_price', 0))
 
-    # Activate trailing after 1x ATR profit
+    # Activate trailing after 1x ATR profit, trails at 4.5x ATR from peak.
+    # Wide trail prevents microtrend reversals from stopping out trades where
+    # the macrotrend is still intact. 4.5x = 3x the original 1.5x — requires
+    # a sustained reversal of 4.5 ATR widths before the position is closed.
     if not trailing_active:
         if is_long and current_price >= entry + atr:
-            new_trail = current_price - atr * 1.5
+            new_trail = current_price - atr * 4.5
             return ExitDecision(False, 0, 'trailing_activated',
                                 f'Trailing stop activated at {new_trail:.4f}', 0.0)
         elif not is_long and current_price <= entry - atr:
-            new_trail = current_price + atr * 1.5
+            new_trail = current_price + atr * 4.5
             return ExitDecision(False, 0, 'trailing_activated',
                                 f'Trailing stop activated at {new_trail:.4f}', 0.0)
 
@@ -436,7 +459,7 @@ def update_trailing_stop(position: Dict, current_price: float) -> Dict:
     if direction == 'LONG':
         peak = float(position.get('peak_price', current_price))
         new_peak = max(peak, current_price)
-        new_trail = new_peak - atr * 1.5
+        new_trail = new_peak - atr * 4.5
 
         if new_trail > current_trail:
             position['trailing_stop_price'] = round(new_trail, 4)
@@ -445,7 +468,7 @@ def update_trailing_stop(position: Dict, current_price: float) -> Dict:
     else:   # SHORT
         trough = float(position.get('peak_price', current_price))   # reuse peak as trough for short
         new_trough = min(trough, current_price)
-        new_trail = new_trough + atr * 1.5
+        new_trail = new_trough + atr * 4.5
 
         if new_trail < current_trail or current_trail == 0:
             position['trailing_stop_price'] = round(new_trail, 4)
@@ -464,9 +487,9 @@ def activate_trailing(position: Dict, current_price: float) -> Dict:
     atr       = float(position.get('atr_at_entry', current_price * 0.015))
 
     if direction == 'LONG':
-        trail_price = current_price - atr * 1.5
+        trail_price = current_price - atr * 4.5
     else:
-        trail_price = current_price + atr * 1.5
+        trail_price = current_price + atr * 4.5
 
     position['trailing_active']      = True
     position['trailing_stop_price']  = round(trail_price, 4)

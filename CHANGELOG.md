@@ -1,5 +1,17 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
+## 2026-04-05
+- fix(unified_sizer): added VETO:0.00 to _QUALITY_MULT + early-exit guard so VETO tier always returns 0 notional
+
+## 2026-04-05
+- fix(db): tagged 4 oversized pre-cap losers (TRUMP/STABLE/XMR/PF_AVAXUSD ~$500 notional) as source=pre_v10_contaminated — excluded from PF/WR calculations
+
+## 2026-04-05
+- fix(perps_engine): close trade notes now include score/tier/setup/regime for learning loop attribution
+
+## 2026-04-05
+- fix(position_manager): ATR-proportional min hold for shorts (atr_pct×720000s, 2h-12h clamp); triple trailing stop 1.5×ATR→4.5×ATR (all 6 sites: check_exits LONG/SHORT, update_trailing_stop LONG/SHORT, activate_trailing LONG/SHORT)
+
 ## 2026-04-05 — v13 Strategy Optimization
 - strategy(v13): economics gate now receives actual 3.0x ATR stop_multiplier from v10_runner (was hardcoded 1.5x — fee drag was computed against half the real stop, making EV 2x too pessimistic)
 - strategy(v13): EV tier thresholds doubled to match 3.0x ATR distances — A+(1.6%), A(0.8%), B(0.3%), edge_score cap(3.0%) — same real selectivity as v10 but correctly calibrated

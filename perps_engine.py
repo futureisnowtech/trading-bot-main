@@ -357,6 +357,10 @@ def close_position(symbol: str, reason: str = 'manual',
                 _close_action = 'SELL' if pos.get('direction', 'LONG') == 'LONG' else 'BUY'
                 _won = 1 if _pnl > 0 else 0
                 _source = 'paper_v10' if paper else 'live_v10'
+                _cl_score  = round(float(pos.get('entry_composite_score', 0)), 1)
+                _cl_setup  = pos.get('entry_setup', '') or ''
+                _cl_tier   = '1' if _cl_setup else '2'
+                _cl_regime = pos.get('regime', '')
                 log_trade(
                     strategy='v10_perp', broker='kraken_paper' if paper else 'kraken',
                     symbol=symbol, action=_close_action, order_type='MARKET',
@@ -366,7 +370,11 @@ def close_position(symbol: str, reason: str = 'manual',
                     won=_won,
                     source=_source,
                     pnl_pct=round(_pnl_pct, 6),
-                    notes=f'close partial={partial_pct:.0%} reason={reason}',
+                    notes=(
+                        f'close partial={partial_pct:.0%} reason={reason}'
+                        f' score={_cl_score} tier={_cl_tier}'
+                        f' setup={_cl_setup} regime={_cl_regime}'
+                    ),
                 )
             except Exception as _e:
                 logger.debug(f'[perps] close log_trade error: {_e}')

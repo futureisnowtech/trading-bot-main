@@ -68,7 +68,7 @@ fi
 # ════════════════════════════════════════════════════════════════════════════
 # BLOCK 5: PIPE-TO-SHELL — code execution from untrusted downloads
 # ════════════════════════════════════════════════════════════════════════════
-if echo "$CMD" | grep -qE '(curl|wget)[^|]*\|[[:space:]]*(bash|sh|zsh|python3?)[^/]'; then
+if echo "$CMD" | grep -qE '(curl|wget)[^|]*\|[[:space:]]*(bash|sh|zsh|python3?)'; then
     echo "BLOCKED [SECURITY]: Pipe-to-shell pattern detected (curl/wget | bash)." >&2
     echo "Download the script first, inspect it, then run it explicitly." >&2
     exit 2
@@ -76,19 +76,29 @@ fi
 
 # ════════════════════════════════════════════════════════════════════════════
 # BLOCK 6: RUNTIME DB — destructive SQLite on live databases
+# Check independently for sqlite3 + protected DB path + destructive keyword
+# (order-independent — handles quoted SQL, escaped args, etc.)
 # ════════════════════════════════════════════════════════════════════════════
-if echo "$CMD" | grep -qiE 'sqlite3[[:space:]]+.*logs/trades\.db.*[[:space:]]+(DROP|DELETE FROM|VACUUM|UPDATE|INSERT)'; then
-    echo "BLOCKED [DB-INTEGRITY]: Destructive operation on runtime trades.db." >&2
-    echo "Work on a safe copy: 'cp logs/trades.db /tmp/trades_test.db' then use that path." >&2
-    exit 2
-fi
-if echo "$CMD" | grep -qiE 'sqlite3[[:space:]]+.*trade_memory\.db.*[[:space:]]+(DROP|DELETE FROM|VACUUM)'; then
-    echo "BLOCKED [DB-INTEGRITY]: Destructive operation on runtime trade_memory.db." >&2
-    exit 2
-fi
-if echo "$CMD" | grep -qiE 'sqlite3[[:space:]]+.*price_archive\.db.*[[:space:]]+(DROP|DELETE FROM|VACUUM)'; then
-    echo "BLOCKED [DB-INTEGRITY]: Destructive operation on runtime price_archive.db." >&2
-    exit 2
+if echo "$CMD" | grep -qi 'sqlite3'; then
+    if echo "$CMD" | grep -qE 'logs/trades\.db'; then
+        if echo "$CMD" | grep -qiE '\b(DROP|DELETE|VACUUM|UPDATE|INSERT)\b'; then
+            echo "BLOCKED [DB-INTEGRITY]: Destructive operation on runtime trades.db." >&2
+            echo "Work on a safe copy: 'cp logs/trades.db /tmp/trades_test.db' then use that path." >&2
+            exit 2
+        fi
+    fi
+    if echo "$CMD" | grep -qE 'trade_memory\.db'; then
+        if echo "$CMD" | grep -qiE '\b(DROP|DELETE|VACUUM)\b'; then
+            echo "BLOCKED [DB-INTEGRITY]: Destructive operation on runtime trade_memory.db." >&2
+            exit 2
+        fi
+    fi
+    if echo "$CMD" | grep -qE 'price_archive\.db'; then
+        if echo "$CMD" | grep -qiE '\b(DROP|DELETE|VACUUM)\b'; then
+            echo "BLOCKED [DB-INTEGRITY]: Destructive operation on runtime price_archive.db." >&2
+            exit 2
+        fi
+    fi
 fi
 
 # ════════════════════════════════════════════════════════════════════════════

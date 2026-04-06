@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-06
+- fix(health_check): replace stale learning.ml_signal import with ModelStore check; fix scanner.py comment drift (M → .5M); commit historical_data.py try/except guard for cache unavailability
+
+## 2026-04-06
 - v13.3: ML PnL regression, regime-conditional thesis exits, dashboard April 2 date filters
 
 ## 2026-04-06

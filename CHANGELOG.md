@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-06
+- feat(claude): self-audit command, runtime_skeptic agent, 2 new bash blocker guards (SIGKILL, price_archive destruction), 30/30 hook tests passing
+
+## 2026-04-06
 - fix(scanner/runner/perps/pm): 5 audit fixes — scanner vol floor K→.5M, econ veto log cooldown 30min, per-scan funnel summary, duplicate close idempotency guard, hard stop micro-price precision :.4f→:.8g
 
 ## 2026-04-05

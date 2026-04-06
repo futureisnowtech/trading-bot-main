@@ -60,6 +60,39 @@ _veto_log_counts: Dict[str, int] = {}
 _VETO_LOG_COOLDOWN_SEC: int = 1800  # 30 min window before count resets
 _VETO_LOG_SUPPRESS_AFTER: int = 3  # log first N occurrences, then suppress
 
+# ML model store — lazy-loaded; None until walk_forward_trainer has saved models
+_model_store = None
+_model_store_loaded_at: float = 0.0
+_MODEL_STORE_REFRESH_SEC: int = 3600  # reload from disk every hour
+
+
+def _get_model_store():
+    """Return a live ModelStore if trained models exist on disk, else None."""
+    global _model_store, _model_store_loaded_at
+    now = time.time()
+    if (
+        now - _model_store_loaded_at < _MODEL_STORE_REFRESH_SEC
+        and _model_store is not None
+    ):
+        return _model_store
+    try:
+        from ml.model_store import ModelStore, MODELS_DIR
+        import os
+
+        # Only instantiate if at least one model file exists
+        if any(f.endswith(".pkl") for f in os.listdir(MODELS_DIR)):
+            _model_store = ModelStore()
+            _model_store_loaded_at = now
+            logger.info("[v10] ModelStore loaded from disk")
+        else:
+            _model_store = None
+            _model_store_loaded_at = now
+    except Exception as e:
+        logger.debug(f"[v10] ModelStore load skipped: {e}")
+        _model_store = None
+        _model_store_loaded_at = now
+    return _model_store
+
 
 def _get_underlying(symbol: str) -> str:
     """
@@ -733,9 +766,7 @@ def _attempt_entry(
     if se is None:
         return
 
-    # model_store=None is intentional: ML tower returns 50.0 (neutral) until
-    # walk_forward_trainer has ≥50 live trades with paper=0 to produce a valid model.
-    result = se.score(features, direction, regime, model_store=None)
+    result = se.score(features, direction, regime, model_store=_get_model_store())
     composite = result["composite_score"]
 
     # ── Bayesian conviction overlay ───────────────────────────────────────────
@@ -1213,7 +1244,7 @@ def _evaluate_position_exit(
         position=pos,
         current_price=current_price,
         current_features=current_features,
-        model_store=None,
+        model_store=_get_model_store(),
         account_balance=balance,
         total_deployed_usd=deployed_usd,
         margin_utilization_pct=0.0,

@@ -28,7 +28,7 @@ A fully autonomous AI-powered trading system that:
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
 
-## Current Version: v13.2 (2026-04-06)
+## Current Version: v13.3 (2026-04-06)
 
 **Active branch:** `feature/v10-rebuild`
 **Clean paper trading started:** 2026-04-02
@@ -84,6 +84,14 @@ Owner decides when to go live. These are informational readings, not system gate
 - Days running on clean data
 - Economics gate veto rate
 - Kill switch triggers (14d)
+
+### v13.3 ML Upgrade + Dashboard Clarity (applied 2026-04-06)
+
+- `signal_engine.py`: `thesis_still_valid()` now uses regime-conditional thresholds — TRENDING=30%, RANGING=15%, HIGH_VOL=35%, UNKNOWN=25% — instead of fixed 25%. Faster exits in RANGING (fragile setups), more patience in HIGH_VOL (noisy signal).
+- `ml/walk_forward_trainer.py`: Binary classifier (predict `won`) replaced with PnL regressor (predict `net_pnl` in USD). XGBRegressor + LGBMRegressor with `reg:squarederror`/`regression` objectives. `pnl_scale` (std of training PnL) saved as `{pair}_{dir}_meta.pkl` alongside models. `_compute_metrics` now gates on `predicted_pnl > 0` instead of `probability >= 0.5`. Optuna HPO uses real PnL Sharpe instead of probability-proxy Sharpe.
+- `ml/model_store.py` (NEW): `ModelStore` class loads saved regressor pickles and `pnl_scale` metadata. `predict_ml_score(features, direction)` returns 0-100 via `50 + 50*tanh(predicted_pnl / pnl_scale)`. File-mtime cache — reloads from disk when model is updated by retrainer.
+- `scheduler/v10_runner.py`: Both `se.score()` and `check_exits()` now call `_get_model_store()` — returns `ModelStore` if any pickle files exist in `ml/models/`, else returns `None` (ML stays neutral at 50.0). Refreshes hourly.
+- `dashboard/app.py`: `get_mes_all_time_stats()` now filters `ts >= '2026-04-02'` and excludes contaminated sources; exit stack description updated to show regime-conditional thresholds; scanner source updated to mention all 3 exchanges.
 
 ### v13.2 Gate Architecture + Execution Quality (applied 2026-04-06)
 

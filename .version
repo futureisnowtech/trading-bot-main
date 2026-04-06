@@ -1,2 +1,1 @@
-2026-04-04 23:37 | ed29c6b | fix(audit): 4 verified bugs — Kelly query, exit price guard, live_trade_days, docstring
-2026-04-05 00:00 | v13     | strategy(v13): EV gate stop_multiplier alignment, WAE slow MACD gate, tier thresholds scaled, Tier1 composite floor, Tier2 threshold 58
+2026-04-05 20:48 | ccf0604 | fix(pf): 4 profit-factor improvements — trailing stop 4.5×ATR, ATR-proportional short hold, close notes with score/tier/setup/regime, DB contamination tagged

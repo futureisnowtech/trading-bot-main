@@ -134,7 +134,14 @@
       "Bash(echo \"Dash: $!\")",
       "Bash(find:*)",
       "Bash(grep -l \"v9\\\\|bybit\\\\|tradovate\\\\|telegram\\\\|webull\" /Users/joshmacbookair2020/Desktop/algo_trading_final/scripts/*.py)",
-      "Bash(grep -E \"\\\\.\\(bak|archived|tmp|log\\)$|^\\\\.\")"
+      "Bash(grep -E \"\\\\.\\(bak|archived|tmp|log\\)$|^\\\\.\")",
+      "Bash(echo \"Bot PID: $!\" sleep 8)",
+      "Bash(grep -n \"entry_price\\\\|entry price\\\\|@ \\\\$\\\\|open_position\\\\|place_order\\\\|_attempt_entry\" scheduler/v10_runner.py)",
+      "Bash(echo \"New PID: $!\")",
+      "Bash(ls -la /Users/joshmacbookair2020/Desktop/algo_trading_final/scripts/*.py /Users/joshmacbookair2020/Desktop/algo_trading_final/scripts/*.sh)",
+      "Bash(echo \"PID: $!\")",
+      "Bash(kill 45031)",
+      "Bash(pkill -f \"streamlit run dashboard/app.py\")"
     ]
   }
 }

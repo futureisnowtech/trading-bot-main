@@ -40,3 +40,6 @@ reference_repos/
 .idea/
 *.swp
 *.swo
+
+# ── Claude Code hook logs (observability, not source) ─────────────────────────
+.claude/logs/

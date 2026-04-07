@@ -63,7 +63,7 @@ echo "EXPECTED: _MIN_VOLUME_24H_USD = 2_500_000"
 echo ""
 echo "--- economics_gate.py: EV thresholds + volume floor ---"
 grep "_TIER_APLUS_EV\|_TIER_A_EV\|_TIER_B_EV\|_MIN_VOLUME_USD" risk/economics_gate.py | grep -v "#.*old\|#.*was"
-echo "EXPECTED: A+=0.016 (1.6%), A=0.008 (0.8%), B=0.003 (0.3%), vol=$2.5M"
+echo "EXPECTED: A+=0.016 (1.6%), A=0.008 (0.8%), B=0.003 (0.3%), vol=$3M"
 
 echo ""
 echo "--- v10_runner.py: tier thresholds + stop_multiplier ---"
@@ -331,7 +331,7 @@ If you are uncertain about safety, say: "BLOCKER: [describe it]."
 | Component | File | Frozen Value |
 |---|---|---|
 | Scanner vol floor | scanner.py | `_MIN_VOLUME_24H_USD = 2_500_000` |
-| Economics vol floor | economics_gate.py | `_MIN_VOLUME_USD = 2_500_000` |
+| Economics vol floor | economics_gate.py | `_MIN_VOLUME_USD = 3_000_000` |
 | EV threshold A+ | economics_gate.py | `_TIER_APLUS_EV = 0.016` (1.6%) |
 | EV threshold A | economics_gate.py | `_TIER_A_EV = 0.008` (0.8%) |
 | EV threshold B | economics_gate.py | `_TIER_B_EV = 0.003` (0.3%) |
@@ -343,10 +343,6 @@ If you are uncertain about safety, say: "BLOCKER: [describe it]."
 | Duplicate close window | perps_engine.py | `_IDEMPOTENCY_WINDOW = 60.0` |
 | Entry cooldown (thesis) | v10_runner.py | `_COOLDOWN_THESIS_SEC = 7200` (2h) |
 | Veto log cooldown | v10_runner.py | `_VETO_LOG_COOLDOWN_SEC = 1800` (30min) |
-| Veto 3-strike suppress | v10_runner.py | `_VETO_LOG_SUPPRESS_AFTER = 3` |
-| Spread gate ceiling | economics_gate.py | `_MAX_SPREAD_PCT_GATE = 0.0025` (25 bps) |
-| Depth gate floor | economics_gate.py | `_MIN_NEAR_DEPTH_USD = 5_000.0` ($5K/side, fires when depth data present) |
-| Price sanity threshold | v10_runner.py | `_PRICE_SANITY_PCT = 0.05` (5% global fallback) |
 | Close note format | perps_engine.py | includes `score/tier/setup/regime` |
 | Contamination tag | trades DB | source NOT IN ('backtest','pre_v10_contaminated','bybit_paper') |
 

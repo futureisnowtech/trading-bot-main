@@ -28,7 +28,7 @@ A fully autonomous AI-powered trading system that:
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
 
-## Current Version: v13.3 (2026-04-06)
+## Current Version: v13 (2026-04-05)
 
 **Active branch:** `feature/v10-rebuild`
 **Clean paper trading started:** 2026-04-02
@@ -37,7 +37,7 @@ A fully autonomous AI-powered trading system that:
 
 | Component | File | Role |
 |---|---|---|
-| Scanner | `scanner.py` | **3 sources**: Kraken Futures + Binance USDM perps + Hyperliquid, 7-filter, top 15 candidates |
+| Scanner | `scanner.py` | Kraken Futures public REST, 7-filter, top 15 candidates |
 | Signal engine | `signal_engine.py` | Two-tower: technical 0-100 + ML 0-100 → composite |
 | Entry runner | `scheduler/v10_runner.py` | Scan loop, `_attempt_entry()`, economics gate, setup detection |
 | Exit manager | `position_manager.py` | 6-priority exit stack (trailing/scale/thesis/hard-stop/risk/kill) |
@@ -85,23 +85,9 @@ Owner decides when to go live. These are informational readings, not system gate
 - Economics gate veto rate
 - Kill switch triggers (14d)
 
-### v13.3 ML Upgrade + Dashboard Clarity (applied 2026-04-06)
-
-- `signal_engine.py`: `thesis_still_valid()` now uses regime-conditional thresholds — TRENDING=30%, RANGING=15%, HIGH_VOL=35%, UNKNOWN=25% — instead of fixed 25%. Faster exits in RANGING (fragile setups), more patience in HIGH_VOL (noisy signal).
-- `ml/walk_forward_trainer.py`: Binary classifier (predict `won`) replaced with PnL regressor (predict `net_pnl` in USD). XGBRegressor + LGBMRegressor with `reg:squarederror`/`regression` objectives. `pnl_scale` (std of training PnL) saved as `{pair}_{dir}_meta.pkl` alongside models. `_compute_metrics` now gates on `predicted_pnl > 0` instead of `probability >= 0.5`. Optuna HPO uses real PnL Sharpe instead of probability-proxy Sharpe.
-- `ml/model_store.py` (NEW): `ModelStore` class loads saved regressor pickles and `pnl_scale` metadata. `predict_ml_score(features, direction)` returns 0-100 via `50 + 50*tanh(predicted_pnl / pnl_scale)`. File-mtime cache — reloads from disk when model is updated by retrainer.
-- `scheduler/v10_runner.py`: Both `se.score()` and `check_exits()` now call `_get_model_store()` — returns `ModelStore` if any pickle files exist in `ml/models/`, else returns `None` (ML stays neutral at 50.0). Refreshes hourly.
-- `dashboard/app.py`: `get_mes_all_time_stats()` now filters `ts >= '2026-04-02'` and excludes contaminated sources; exit stack description updated to show regime-conditional thresholds; scanner source updated to mention all 3 exchanges.
-
-### v13.2 Gate Architecture + Execution Quality (applied 2026-04-06)
-
-- `risk/economics_gate.py`: volume floor aligned $3M → $2.5M (matches scanner floor, eliminates dead zone); spread gate added (`_MAX_SPREAD_PCT_GATE = 0.0025`, 25 bps global fallback); depth gate added (`_MIN_NEAR_DEPTH_USD = 5_000`, $5K each side, only fires when depth data available); EV floor upgraded to cost-aware formula: `max(static_tier_b, 2.0 × effective_round_trip_cost)` where effective cost = fees + spread/2 + funding carry
-- `scheduler/v10_runner.py`: price sanity check tightened 20% → 5% global fallback (old 20% threshold missed ETH $19 vs $2130 candle issue); depth fields (`bid_depth_usd`, `ask_depth_usd`) now extracted from candidate and passed to economics gate; veto suppression upgraded from time-only cooldown to 3-strike system — first 3 occurrences log normally, 4th emits "suppressing further" notice, silent thereafter until 30-min window resets
-- `CLAUDE.md`: scanner sources corrected — code actually uses 3 sources (Kraken Futures + Binance USDM + Hyperliquid) every scan cycle; docs were Kraken-centric but code was not
-
 ### v13.1 Scanner/Funnel Fixes (applied 2026-04-06)
 
-- `scanner.py`: `_MIN_VOLUME_24H_USD` raised $500K → $2.5M — eliminates MOODENG/ZETA/VIRTUAL/FET from reaching the signal engine
+- `scanner.py`: `_MIN_VOLUME_24H_USD` raised $500K → $2.5M — aligns with economics gate $3M floor; eliminates MOODENG/ZETA/VIRTUAL/FET from ever reaching the signal engine
 - `scheduler/v10_runner.py`: economics veto log cooldown added (30 min between identical veto messages per symbol+direction+reason); per-scan funnel summary logged at INFO (`funnel: N candidates → scored=X (dropped: dual=Y cooldown=Z) → entries=A (~B vetoed/skipped)`)
 - `perps_engine.py`: duplicate close idempotency guard — full close of same symbol within 60s returns None and logs warning; check is atomic under `_lock` to block concurrent callers
 - `position_manager.py`: hard stop reason now uses `:.8g` format (e.g. `3.5191e-06`) instead of `:.4f` (`0.0000`) for micro-priced assets like PEPE

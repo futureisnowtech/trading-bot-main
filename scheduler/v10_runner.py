@@ -60,39 +60,6 @@ _veto_log_counts: Dict[str, int] = {}
 _VETO_LOG_COOLDOWN_SEC: int = 1800  # 30 min window before count resets
 _VETO_LOG_SUPPRESS_AFTER: int = 3  # log first N occurrences, then suppress
 
-# ML model store — lazy-loaded; None until walk_forward_trainer has saved models
-_model_store = None
-_model_store_loaded_at: float = 0.0
-_MODEL_STORE_REFRESH_SEC: int = 3600  # reload from disk every hour
-
-
-def _get_model_store():
-    """Return a live ModelStore if trained models exist on disk, else None."""
-    global _model_store, _model_store_loaded_at
-    now = time.time()
-    if (
-        now - _model_store_loaded_at < _MODEL_STORE_REFRESH_SEC
-        and _model_store is not None
-    ):
-        return _model_store
-    try:
-        from ml.model_store import ModelStore, MODELS_DIR
-        import os
-
-        # Only instantiate if at least one model file exists
-        if any(f.endswith(".pkl") for f in os.listdir(MODELS_DIR)):
-            _model_store = ModelStore()
-            _model_store_loaded_at = now
-            logger.info("[v10] ModelStore loaded from disk")
-        else:
-            _model_store = None
-            _model_store_loaded_at = now
-    except Exception as e:
-        logger.debug(f"[v10] ModelStore load skipped: {e}")
-        _model_store = None
-        _model_store_loaded_at = now
-    return _model_store
-
 
 def _get_underlying(symbol: str) -> str:
     """
@@ -421,7 +388,7 @@ def _scan_and_trade_inner():
                 "expected_profit": 5.0,
                 "correlation_penalty": 1.0,
                 "regime_penalty": 1.0,
-                "spread_pct": 0.15,  # percent units (÷100 → 0.0015 fraction at gate) — conservative default; no OB data for TV signals
+                "spread_pct": 0.05,
                 "tv_signal": True,
                 "tv_strength": tv.get("strength", "moderate"),
                 "tv_indicator": tv.get("indicator", "tv_alert"),
@@ -622,11 +589,9 @@ def _attempt_entry(
     if current_price <= 0:
         return
 
-    # ── Price sanity: candle close must be within 5% of live mark price ───────
-    # v13.2: tightened from 20% → 5% global fallback (20% missed ETH $19 vs $2130 case).
-    # Kraken PF_ symbols → Kraken mark price first; all others → Hyperliquid allMids.
-    # If live price is unavailable, skip check (don't block on network failures).
-    _PRICE_SANITY_PCT = 0.05  # 5% global fallback threshold
+    # ── Price sanity: candle close must be within 20% of live mark price ──────
+    # Prevents entering on wrong-source candles (e.g. yfinance ETF ticker leak).
+    # Always use the live mark price when available — it's more accurate for entry.
     try:
         import urllib.request as _ur, json as _json
 
@@ -652,10 +617,10 @@ def _attempt_entry(
             _live = float(_mids.get(symbol, 0))
         if _live > 0:
             _pct_off = abs(current_price - _live) / _live
-            if _pct_off > _PRICE_SANITY_PCT:
+            if _pct_off > 0.20:
                 logger.warning(
-                    f"[v10] {symbol} — price sanity FAIL: candle ${current_price:.8g} "
-                    f"vs live ${_live:.8g} ({_pct_off:.1%} off) — SKIP (wrong data source)"
+                    f"[v10] {symbol} — price sanity FAIL: candle ${current_price:.4f} "
+                    f"vs live ${_live:.4f} ({_pct_off:.1%} off) — SKIP (wrong data source)"
                 )
                 return
             current_price = _live  # Use live mark price for execution accuracy
@@ -766,7 +731,9 @@ def _attempt_entry(
     if se is None:
         return
 
-    result = se.score(features, direction, regime, model_store=_get_model_store())
+    # model_store=None is intentional: ML tower returns 50.0 (neutral) until
+    # walk_forward_trainer has ≥50 live trades with paper=0 to produce a valid model.
+    result = se.score(features, direction, regime, model_store=None)
     composite = result["composite_score"]
 
     # ── Bayesian conviction overlay ───────────────────────────────────────────
@@ -883,37 +850,19 @@ def _attempt_entry(
 
         if not econ.get("approved", True):
             reason = econ.get("reject_reason", "economics veto")
-            # 3-strike veto suppression: log first _VETO_LOG_SUPPRESS_AFTER occurrences,
-            # emit one "suppressing" notice on the next hit, then silent until window resets.
-            # Gate always runs — only the INFO log line is throttled.
+            # Cooldown: suppress repeated identical veto log lines (same symbol+dir+reason prefix)
+            # for _VETO_LOG_COOLDOWN_SEC seconds to reduce log spam from chronic low-volume symbols.
+            # The economics gate check itself always runs — only the INFO log is suppressed.
             _veto_key = f"{symbol}_{direction}_{reason[:30]}"
             _veto_now = time.time()
             _last_veto_log = _veto_log_cooldowns.get(_veto_key, 0.0)
-            _veto_count = _veto_log_counts.get(_veto_key, 0)
             if _veto_now - _last_veto_log >= _VETO_LOG_COOLDOWN_SEC:
-                # Window expired — reset and log fresh
                 _veto_log_cooldowns[_veto_key] = _veto_now
-                _veto_log_counts[_veto_key] = 1
                 logger.info(
                     f"[v10] {symbol} {direction} ECONOMICS VETO (Tier{tier}): {reason} "
                     f"(ev={econ.get('ev_pct', 0) * 100:.3f}% "
                     f"fees={econ.get('fee_drag_pct', 0) * 100:.3f}%)"
                 )
-            elif _veto_count < _VETO_LOG_SUPPRESS_AFTER:
-                _veto_log_counts[_veto_key] = _veto_count + 1
-                logger.info(
-                    f"[v10] {symbol} {direction} ECONOMICS VETO (Tier{tier}): {reason} "
-                    f"(ev={econ.get('ev_pct', 0) * 100:.3f}% "
-                    f"fees={econ.get('fee_drag_pct', 0) * 100:.3f}%) "
-                    f"[{_veto_count + 1}/{_VETO_LOG_SUPPRESS_AFTER}]"
-                )
-            elif _veto_count == _VETO_LOG_SUPPRESS_AFTER:
-                _veto_log_counts[_veto_key] = _veto_count + 1
-                logger.info(
-                    f"[v10] {symbol} {direction} ECONOMICS VETO — suppressing further logs "
-                    f"for {_VETO_LOG_COOLDOWN_SEC // 60} min (repeated: {reason[:50]})"
-                )
-            # else: silent (_veto_count > _VETO_LOG_SUPPRESS_AFTER, window not yet expired)
             if ne is not None:
                 try:
                     ne.notify_rejection(
@@ -1244,7 +1193,7 @@ def _evaluate_position_exit(
         position=pos,
         current_price=current_price,
         current_features=current_features,
-        model_store=_get_model_store(),
+        model_store=None,
         account_balance=balance,
         total_deployed_usd=deployed_usd,
         margin_utilization_pct=0.0,

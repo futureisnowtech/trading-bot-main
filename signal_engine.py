@@ -454,12 +454,11 @@ def _get_ml_score(
         return 50.0
 
     try:
-        # predict_ml_score returns 0-100 directly (tanh-normalized PnL regression)
-        raw_score = model_store.predict_ml_score(features, direction)
-        if raw_score is None:
+        raw = model_store.predict_proba(features, direction)
+        if raw is None:
             return 50.0
         mult = _REGIME_ML_MULT.get(regime, {}).get(direction, 1.0)
-        return float(np.clip(raw_score * mult, 0, 100))
+        return float(np.clip(raw * 100 * mult, 0, 100))
     except Exception as e:
         logger.debug(f"[signal_engine] ML score error: {e}")
         return 50.0
@@ -640,19 +639,6 @@ def score_both_directions(
     }
 
 
-# Regime-conditional thesis exit thresholds.
-# TRENDING: slightly looser (trends can pause without dying)
-# RANGING: tighter (ranging setups are fragile; mean-reversion can flip fast)
-# HIGH_VOL: loosest (noisy signal, avoid churn)
-# UNKNOWN: default mid-point
-_THESIS_THRESHOLDS: Dict[str, float] = {
-    "TRENDING": 0.30,
-    "RANGING": 0.15,
-    "HIGH_VOL": 0.35,
-    "UNKNOWN": 0.25,
-}
-
-
 def thesis_still_valid(
     entry_composite_score: float,
     current_features: Dict,
@@ -664,18 +650,17 @@ def thesis_still_valid(
     Priority 3 exit: thesis score check.
     Returns (still_valid, current_score, reason).
 
-    Thesis fails when: current_score < entry_score × regime_threshold
-    Thresholds: TRENDING=30%, RANGING=15%, HIGH_VOL=35%, UNKNOWN=25%
+    Thesis fails when: current_score < entry_score × 0.25
+    (Raised from 0.45 → must drop to <25% of entry score, not 45%, to avoid churn on noise)
     """
     current_result = score(current_features, direction, regime, model_store)
     current_score = current_result["composite_score"]
-    pct = _THESIS_THRESHOLDS.get(regime.upper() if regime else "UNKNOWN", 0.25)
-    threshold = entry_composite_score * pct
+    threshold = entry_composite_score * 0.25
 
     if current_score < threshold:
         reason = (
             f"Thesis degraded: entry={entry_composite_score:.1f} → "
-            f"current={current_score:.1f} (< {threshold:.1f} = {pct * 100:.0f}% of entry, regime={regime})"
+            f"current={current_score:.1f} (< {threshold:.1f} = 25% of entry)"
         )
         return False, current_score, reason
 

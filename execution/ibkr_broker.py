@@ -36,6 +36,13 @@ import uuid
 import threading
 import asyncio
 import time
+
+# eventkit (ib_insync dep) calls asyncio.get_event_loop() at import time.
+# Python 3.10+ no longer auto-creates a loop — set one on the main thread.
+try:
+    asyncio.get_event_loop()
+except RuntimeError:
+    asyncio.set_event_loop(asyncio.new_event_loop())
 from typing import Optional
 from datetime import datetime
 import pytz

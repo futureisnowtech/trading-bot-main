@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-08
+- fix(ibkr): set main-thread event loop before ib_insync import — eventkit calls asyncio.get_event_loop() at import time; Python 3.10+ no longer auto-creates one
+
+## 2026-04-08
 - fix(ibkr): replace dead asyncio.run() pattern with persistent event loop thread — orders now reach TWS instead of silently failing with IBKR_ERR_ IDs; _place_bracket_async and _place_market_async use qualifyContractsAsync on the live loop; _place_market_async cancels open bracket children before market exit
 
 ## 2026-04-06

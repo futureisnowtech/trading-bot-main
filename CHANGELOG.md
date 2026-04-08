@@ -1,6 +1,20 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-08
+- fix(ibkr): eliminate FD leak — use get_ibkr_broker() singleton in MES cycle (was creating new IBKRBroker() each cycle, leaking event loop threads + sockets); add cleanup in connect() before reassigning IB object; remove disconnect() from finally block (singleton must stay connected across cycles)
+
+## 2026-04-08
+- feat(dashboard): full widget-architecture overhaul — 4-phase refactor
+
+Phase 1 — UX wins: renamed tabs (MISSION CONTROL / CRYPTO PERFORMANCE / TRADE APPROVAL / S&P 500 FUTURES / SYSTEM SETTINGS), added per-tab captions in plain English, asset banner on Mission Control clarifying crypto-only scope, blue MES callout on Futures tab
+
+Phase 2 — Clarity layer: new .badge-crypto and .badge-futures CSS classes, _asset_badge() helper applied to every crypto render function and the futures widget, 'What is this?' expanders in deep analysis for Signal Attribution and Failure Mode Analysis sections
+
+Phase 3 — Data layer: extracted all DB/log functions from app.py into dashboard/db.py, dashboard/formatters.py, and 8 files under dashboard/data/ (account, performance, positions, health, scanner_data, execution, notifications, futures)
+
+Phase 4 — Widget architecture: 14 widget files under dashboard/widgets/ — each widget is one public render_*() with its own docstring (Question / Tab / Refresh / Asset class). app.py reduced from 2606 lines to ~120 lines (thin orchestrator only)
+
+## 2026-04-08
 - feat(dashboard): wire tooltips — add tooltips.py (28 plain-English metric definitions) and wire help= into all st.metric() calls across DEEP ANALYSIS, FUTURES, and OPERATOR tabs
 
 ## 2026-04-08

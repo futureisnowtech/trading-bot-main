@@ -1675,17 +1675,21 @@ def _mes_scan_inner():
         _mes_daily_pnl = 0.0
         _mes_daily_date = today_str
 
-    # Import broker
+    # Import broker — use singleton so we don't create a new event loop thread each cycle.
+    # Creating IBKRBroker() every cycle leaks file descriptors (each instance spawns a
+    # persistent asyncio thread + sockets; disconnect() doesn't stop the thread).
     try:
-        from execution.ibkr_broker import IBKRBroker
+        from execution.ibkr_broker import get_ibkr_broker
+
+        broker = get_ibkr_broker()
     except Exception as e:
         logger.debug(f"[mes] ibkr_broker import error: {e}")
         return
 
-    broker = IBKRBroker()
-    if not broker.connect():
-        logger.warning("[mes] IBKR connection failed — skipping cycle")
-        return
+    if not broker.is_connected():
+        if not broker.connect():
+            logger.warning("[mes] IBKR connection failed — skipping cycle")
+            return
 
     try:
         # Get current MES price
@@ -1876,10 +1880,10 @@ def _mes_scan_inner():
             pass
 
     finally:
-        try:
-            broker.disconnect()
-        except Exception:
-            pass
+        # Do NOT disconnect — broker is a singleton that must stay connected across cycles.
+        # Disconnecting here was the cause of the FD leak (each cycle reconnected,
+        # spawning a new event loop thread without cleaning up the old one).
+        pass
 
 
 IBKR_COMMISSION_RT = 0.47 * 2  # round-trip commission per contract

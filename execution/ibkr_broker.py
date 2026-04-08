@@ -58,20 +58,21 @@ except Exception:
 
 # TWS connection settings
 IBKR_HOST = os.getenv("IBKR_HOST", "127.0.0.1")
-IBKR_PORT = int(os.getenv("IBKR_PORT", "7497"))   # 7497=paper TWS, 7496=live TWS
+IBKR_PORT = int(os.getenv("IBKR_PORT", "7497"))  # 7497=paper TWS, 7496=live TWS
 IBKR_CLIENT_ID = int(os.getenv("IBKR_CLIENT_ID", "2"))
 
 # MES contract — update expiry each quarter
 # Q1 Jan-Mar: 20260320  Q2 Apr-Jun: 20260619  Q3 Jul-Sep: 20260918  Q4 Oct-Dec: 20261218
-MES_EXPIRY = os.getenv("MES_EXPIRY", "20260619")   # Current: June 2026
-MES_POINT_VALUE = 5.00    # $ per full point
-MES_TICK_SIZE   = 0.25    # minimum price increment
-MES_TICK_VALUE  = 1.25    # $ per tick
-IBKR_COMMISSION = 0.47    # $ per contract per side
+MES_EXPIRY = os.getenv("MES_EXPIRY", "20260619")  # Current: June 2026
+MES_POINT_VALUE = 5.00  # $ per full point
+MES_TICK_SIZE = 0.25  # minimum price increment
+MES_TICK_VALUE = 1.25  # $ per tick
+IBKR_COMMISSION = 0.47  # $ per contract per side
 
 
 def _get_mes_contract():
     from ib_insync import Future
+
     return Future(
         symbol="MES",
         lastTradeDateOrContractMonth=MES_EXPIRY,
@@ -116,6 +117,15 @@ class IBKRBroker:
 
     def connect(self) -> bool:
         from ib_insync import IB
+
+        # Cleanup any previous IB object before creating a new one.
+        # Skipping this leaks sockets from the old instance (OSError: too many open files).
+        if self._ib is not None:
+            try:
+                self._ib.disconnect()
+            except Exception:
+                pass
+            self._ib = None
 
         self._ib = IB()
         try:
@@ -186,7 +196,7 @@ class IBKRBroker:
         contract = _get_mes_contract()
         await self._ib.qualifyContractsAsync(contract)
         ticker = self._ib.reqMktData(contract, "", False, False)
-        await asyncio.sleep(1.5)   # allow snapshot data to arrive
+        await asyncio.sleep(1.5)  # allow snapshot data to arrive
         price = None
         if side == "ask" and ticker.ask and ticker.ask > 0:
             price = float(ticker.ask)
@@ -212,6 +222,7 @@ class IBKRBroker:
         # yfinance fallback
         try:
             import yfinance as yf
+
             hist = yf.Ticker("MES=F").history(period="1d", interval="1m")
             if hist is not None and not hist.empty:
                 return float(hist["Close"].iloc[-1])
@@ -219,6 +230,7 @@ class IBKRBroker:
             pass
         try:
             import yfinance as yf
+
             hist = yf.download(
                 "ES=F", period="2d", interval="5m", auto_adjust=True, progress=False
             )
@@ -278,7 +290,7 @@ class IBKRBroker:
                     self._ib.cancelOrder(trade.order)
             except Exception:
                 pass
-        await asyncio.sleep(0.3)   # give TWS time to ack cancellations
+        await asyncio.sleep(0.3)  # give TWS time to ack cancellations
 
         contract = _get_mes_contract()
         await self._ib.qualifyContractsAsync(contract)
@@ -388,7 +400,9 @@ class IBKRBroker:
         if self.is_connected():
             try:
                 self._run(self._place_market_async("SELL", qty), timeout=10)
-                print(f"[IBKRBroker] SELL {qty} MES @ {exit_price:.2f} | P&L: ${pnl:+.2f}")
+                print(
+                    f"[IBKRBroker] SELL {qty} MES @ {exit_price:.2f} | P&L: ${pnl:+.2f}"
+                )
             except Exception as e:
                 log_event("ERROR", "IBKRBroker", f"sell_mes error: {e}")
         else:

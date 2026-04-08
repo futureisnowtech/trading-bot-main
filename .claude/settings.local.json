@@ -141,7 +141,27 @@
       "Bash(ls -la /Users/joshmacbookair2020/Desktop/algo_trading_final/scripts/*.py /Users/joshmacbookair2020/Desktop/algo_trading_final/scripts/*.sh)",
       "Bash(echo \"PID: $!\")",
       "Bash(kill 45031)",
-      "Bash(pkill -f \"streamlit run dashboard/app.py\")"
+      "Bash(pkill -f \"streamlit run dashboard/app.py\")",
+      "Bash(rm -f /Users/joshmacbookair2020/Desktop/algo_trading_final/.git/index)",
+      "Bash(git -C /Users/joshmacbookair2020/Desktop/algo_trading_final read-tree HEAD)",
+      "Bash(git -C /Users/joshmacbookair2020/Desktop/algo_trading_final status -s)",
+      "Bash(cp /tmp/dashboard_app_new.py /Users/joshmacbookair2020/Desktop/algo_trading_final/dashboard/app.py)",
+      "Bash(cp /tmp/wft_new.py /Users/joshmacbookair2020/Desktop/algo_trading_final/ml/walk_forward_trainer.py)",
+      "Bash(cp /tmp/ms_new.py /Users/joshmacbookair2020/Desktop/algo_trading_final/ml/model_store.py)",
+      "Bash(ls /Users/joshmacbookair2020/Desktop/algo_trading_final/.git/index*)",
+      "Bash(kill 79946 79948 80054 80056 80244 80247)",
+      "Bash(rm -f \"/Users/joshmacbookair2020/Desktop/algo_trading_final/.git/index 2.lock\" \"/Users/joshmacbookair2020/Desktop/algo_trading_final/.git/index 3.lock\" \"/Users/joshmacbookair2020/Desktop/algo_trading_final/.git/index.lock\")",
+      "Bash(ls \"/Users/joshmacbookair2020/Desktop/algo_trading_final/.git/index\"*)",
+      "Bash(git status:*)",
+      "Bash(pkill -f \"main.py --mode paper\")",
+      "Bash(ls -la logs/trades.db*)",
+      "Bash(ls:*)",
+      "Bash(xattr -l logs/price_archive.db)",
+      "Bash(cp logs/price_archive.db /tmp/price_archive_decomp.db)",
+      "Bash(xattr -c /tmp/price_archive_decomp.db)",
+      "Bash(cp /tmp/price_archive_decomp.db logs/price_archive.db)",
+      "Bash(kill -9 3796 3798 4068 4178 4180 4424 4468 4540)",
+      "Bash(rm -f /Users/joshmacbookair2020/Desktop/algo_trading_final/.git/index.lock)"
     ]
   }
 }

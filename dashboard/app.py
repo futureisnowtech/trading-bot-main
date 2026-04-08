@@ -6,7 +6,15 @@ Tabs: OPERATOR | DEEP ANALYSIS | MANUAL CONTROLS | FUTURES | DEV/CONFIG
 
 import sys, os, re, json
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_DASH_DIR = os.path.dirname(os.path.abspath(__file__))
+if _DASH_DIR not in sys.path:
+    sys.path.insert(0, _DASH_DIR)
+sys.path.append(os.path.dirname(_DASH_DIR))
+
+try:
+    from tooltips import TIPS
+except ImportError:
+    TIPS = {}
 
 import sqlite3
 from datetime import datetime, timedelta
@@ -1443,12 +1451,14 @@ def render_equity_curve_compact():
         f"${dd['max_dd_usd']:.2f}",
         delta=f"{dd['max_dd_pct']:.1f}% of account",
         delta_color="inverse" if dd["max_dd_usd"] > 0 else "off",
+        help=TIPS.get("max_drawdown"),
     )
     col3.metric(
         "Current DD",
         f"${dd['current_dd_usd']:.2f}",
         delta=f"{dd['current_dd_pct']:.1f}%",
         delta_color="inverse" if dd["current_dd_usd"] > 0 else "off",
+        help=TIPS.get("current_dd"),
     )
 
     # 7d rolling Sharpe (simplified)
@@ -1540,23 +1550,29 @@ def render_deep_analysis():
         f"{pf:.2f}" if pf != float("inf") else "∞",
         delta="≥1.35 needed for live",
         delta_color="normal" if pf >= 1.35 else "inverse",
+        help=TIPS.get("profit_factor"),
     )
     c2.metric(
         "Win Rate",
         f"{stats['win_rate']:.1f}%",
         delta=f"{stats['wins']}W / {stats['losses']}L",
+        help=TIPS.get("win_rate"),
     )
     c3.metric(
         "EV / trade",
         _fmt_pnl(stats["total_pnl"] / stats["closes"]) if stats["closes"] else "$0",
         delta_color="normal",
+        help=TIPS.get("ev_per_trade"),
     )
-    c4.metric("R:R Realized", f"{stats['rr_realized']:.2f}×")
+    c4.metric(
+        "R:R Realized", f"{stats['rr_realized']:.2f}×", help=TIPS.get("rr_realized")
+    )
     c5.metric(
         "Max Drawdown",
         f"${dd['max_dd_usd']:.2f}",
         delta=f"{dd['max_dd_pct']:.1f}%",
         delta_color="inverse",
+        help=TIPS.get("max_drawdown"),
     )
 
     col_left, col_right = st.columns(2)
@@ -1614,20 +1630,26 @@ def render_deep_analysis():
             "Entry Timing",
             f"{ex['entry_score']:.1f}/10",
             delta="higher = better entry price",
+            help=TIPS.get("entry_score"),
         )
         c2.metric(
             "Exit Efficiency",
             f"{ex['exit_score']:.1f}/10",
             delta="higher = captured more MFE",
+            help=TIPS.get("exit_score"),
         )
         c3.metric(
             "Fee Trap Rate",
             f"{ex['fee_trap_rate']:.1f}%",
             delta=f"{ex['fee_traps']} traps / {ex['total']} trades",
             delta_color="inverse" if ex["fee_trap_rate"] > 5 else "off",
+            help=TIPS.get("fee_trap"),
         )
         c4.metric(
-            "Avg MAE", f"{ex['avg_mae_pct']:.3f}%", delta="adverse move before recovery"
+            "Avg MAE",
+            f"{ex['avg_mae_pct']:.3f}%",
+            delta="adverse move before recovery",
+            help=TIPS.get("mae"),
         )
 
         # MAE/MFE table from trade_attribution
@@ -1675,6 +1697,7 @@ def render_deep_analysis():
             f"{snap} / {needed}",
             delta=status,
             delta_color="normal" if snap >= needed else "off",
+            help=TIPS.get("ml_gate"),
         )
         st.progress(
             min(snap / needed, 1.0),
@@ -2171,14 +2194,18 @@ def render_futures():
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.metric("Market", mkt_status, delta=time_str)
     c2.metric("MES Price", f"{price:.2f}" if price else "–")
-    c3.metric("Today P&L", _fmt_pnl(daily_pnl))
+    c3.metric("Today P&L", _fmt_pnl(daily_pnl), help=TIPS.get("mes_pnl"))
     c4.metric("Position", "ACTIVE" if has_pos else "FLAT")
     c5.metric(
         "All-Time W/L",
         f"{all_stats['wins']}W / {all_stats['closes'] - all_stats['wins']}L",
     )
     pf = all_stats["profit_factor"]
-    c6.metric("Profit Factor", f"{pf:.2f}" if pf != float("inf") else "∞")
+    c6.metric(
+        "Profit Factor",
+        f"{pf:.2f}" if pf != float("inf") else "∞",
+        help=TIPS.get("mes_profit_factor"),
+    )
 
     st.divider()
 
@@ -2190,9 +2217,9 @@ def render_futures():
             long_entry = round(or_high + 0.25, 2)
             short_entry = round(or_low - 0.25, 2)
             r1, r2, r3 = st.columns(3)
-            r1.metric("OR High", f"{or_high:.2f}")
-            r2.metric("OR Low", f"{or_low:.2f}")
-            r3.metric("Range (pts)", f"{or_range:.2f}")
+            r1.metric("OR High", f"{or_high:.2f}", help=TIPS.get("or_high"))
+            r2.metric("OR Low", f"{or_low:.2f}", help=TIPS.get("or_low"))
+            r3.metric("Range (pts)", f"{or_range:.2f}", help=TIPS.get("or_range"))
             st.caption(
                 f"Long trigger: ≥ {long_entry}  |  Short trigger: ≤ {short_entry}"
             )

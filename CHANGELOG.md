@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-08
+- feat(dashboard): wire tooltips — add tooltips.py (28 plain-English metric definitions) and wire help= into all st.metric() calls across DEEP ANALYSIS, FUTURES, and OPERATOR tabs
+
+## 2026-04-08
 - feat(v13.4): forensic audit fixes — symbol suppression (6 losers), Bayesian taxonomy rewrite (v9→v10 signals), composite_score logging, dynamic_weights key fix, REZ phantom purge script, BANNER update
 
 ## 2026-04-08

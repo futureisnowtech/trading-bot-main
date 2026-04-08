@@ -122,6 +122,25 @@ SIGNAL_PRIOR_PTS: dict[str, int] = {
     "equity_vwap_above": 8,
     "equity_vol_spike": 8,
     "equity_rsi_range": 6,
+    # ── v10 Tier 1 setup names (added v13.4 — replaces v9 taxonomy) ──────────
+    # Priors calibrated to v10 paper period 68.8% WR baseline.
+    # These are the actual signal names fired by signal_engine.detect_primary_setup().
+    "wt_reversal": 12,
+    "squeeze_breakout": 15,
+    "wae_explosion": 12,
+    "tv_confirmed_long": 15,
+    "tv_confirmed_short": 15,
+    "supertrend_cross_long": 12,
+    "supertrend_cross_short": 12,
+    "kst_cross_long": 10,
+    "kst_cross_short": 10,
+    "ichimoku_cloud_breakout_long": 12,
+    "ichimoku_cloud_breakout_short": 12,
+    "ranging_mr_long": 8,
+    "ranging_mr_short": 8,
+    "wt_overbought_reversal": 12,
+    "squeeze_breakout_short": 15,
+    "wae_explosion_short": 12,
 }
 # Bayesian prior weight — how many "phantom trades" of confidence in the prior
 PRIOR_N = 20
@@ -168,6 +187,13 @@ def init_learning_tables():
                 created_at    TEXT
             )
         """)
+        # Add composite_score column if it doesn't exist (safe to call on existing DBs)
+        try:
+            c.execute(
+                "ALTER TABLE trade_attribution ADD COLUMN composite_score REAL DEFAULT 0"
+            )
+        except Exception:
+            pass  # column already exists
         c.execute("""
             CREATE TABLE IF NOT EXISTS signal_stats (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -258,6 +284,7 @@ def record_trade_attribution(
     exit_type: str = "unknown",
     ml_p_win: float = 0,
     super_score: float = 0,
+    composite_score: float = 0,
 ) -> int:
     """
     Record the full attribution for one closed trade.
@@ -277,8 +304,9 @@ def record_trade_attribution(
                  pnl_usd, pnl_pct, fee_usd, won,
                  signals_json, conviction, exit_reason,
                  hold_minutes, paper, lesson, created_at,
-                 mae_pct, mfe_pct, exit_type, is_fee_trap, ml_p_win, super_score)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 mae_pct, mfe_pct, exit_type, is_fee_trap, ml_p_win, super_score,
+                 composite_score)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """,
             (
                 trade_ref,
@@ -307,6 +335,7 @@ def record_trade_attribution(
                 is_fee_trap,
                 ml_p_win,
                 float(super_score or 0),
+                float(composite_score or 0),
             ),
         )
         attr_id = cur.lastrowid

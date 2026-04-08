@@ -22,6 +22,7 @@ from datetime import datetime
 from typing import Dict, Optional
 
 import schedule
+from config import SUPPRESSED_SYMBOLS
 
 logger = logging.getLogger(__name__)
 
@@ -473,6 +474,11 @@ def _scan_and_trade_inner():
     for candidate in candidates:
         symbol = candidate.get("symbol", "")
         direction = candidate.get("direction", "LONG")
+
+        # ── Symbol suppression — skip confirmed structural losers ─────────────
+        if symbol in SUPPRESSED_SYMBOLS:
+            logger.debug(f"[v10] {symbol} — suppressed (negative edge, forensic audit)")
+            continue
 
         # ── Dual-exposure + duplicate guard ───────────────────────────────────
         # Normalize to base asset (PF_ETHUSD→ETH, ETHUSDT→ETH, ETH→ETH) so that
@@ -1376,9 +1382,13 @@ def _evaluate_position_exit(
             _fee_usd = abs(
                 _position_usd * 0.00130
             )  # Kraken round-trip taker fee estimate
-            # Build a market_data dict from the features snapshot for signal extraction
+            # Build a market_data dict from the features snapshot for signal extraction.
+            # primary_setup and composite_score are added so the Bayesian attribution
+            # system can track v10 Tier 1 setup performance instead of v9 signal names.
             _md_for_pta = dict(_features_snap)
             _md_for_pta["regime"] = _regime
+            _md_for_pta["primary_setup"] = pos.get("entry_setup", "")
+            _md_for_pta["direction"] = direction
             _pta(
                 symbol=symbol,
                 strategy="v10_perp",
@@ -1393,6 +1403,7 @@ def _evaluate_position_exit(
                 source="clean_paper_v10" if _paper else "live_v10",
                 paper=_paper,
                 exit_type=exit_decision.exit_type,
+                composite_score=float(pos.get("entry_composite_score", 0.0)),
             )
         except Exception as e:
             logger.warning(f"[v10] post_trade_analyzer error {symbol}: {e}")

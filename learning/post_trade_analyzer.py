@@ -14,6 +14,7 @@ Writes a 'lesson' string fed back into LanceDB memory.
 
 Called from job_runner._execute_crypto_exit() and _execute_equity_exit().
 """
+
 import os
 import sys
 from datetime import datetime, timezone
@@ -30,10 +31,37 @@ from learning.signal_performance import (
 
 # ── Signal extraction ─────────────────────────────────────────────────────────
 
+# v10 Tier 1 setup names — the actual signal names fired by signal_engine.detect_primary_setup()
+_V10_ALL_SETUP_NAMES = {
+    "wt_reversal",
+    "squeeze_breakout",
+    "wae_explosion",
+    "tv_confirmed_long",
+    "tv_confirmed_short",
+    "supertrend_cross_long",
+    "supertrend_cross_short",
+    "kst_cross_long",
+    "kst_cross_short",
+    "ichimoku_cloud_breakout_long",
+    "ichimoku_cloud_breakout_short",
+    "ranging_mr_long",
+    "ranging_mr_short",
+    "wt_overbought_reversal",
+    "squeeze_breakout_short",
+    "wae_explosion_short",
+}
+
+
 def extract_signals_from_market_data(market_data: dict) -> dict[str, bool]:
     """
-    Map the raw market_data dict (built by job_runner._build_market_data)
-    to the canonical signal names used in signal_performance.
+    Map the market_data / features dict to canonical signal names for Bayesian attribution.
+
+    v10 path: market_data contains the 57 ML features + 'regime' + 'primary_setup'
+              (primary_setup is the Tier 1 setup name from signal_engine.detect_primary_setup).
+              One setup → True, all others → False.  Clean, unambiguous attribution.
+
+    v9 legacy path: falls back to indicator-flag extraction for historical records
+                    that don't have a primary_setup key.
 
     Returns {signal_name: bool} — True if the signal was active at entry.
     """
@@ -49,41 +77,42 @@ def extract_signals_from_market_data(market_data: dict) -> dict[str, bool]:
         except Exception:
             return default
 
-    # ── Engine signals (v9 crypto_engine.py — primary trade triggers) ──────────
-    # These are the signals that actually caused the trade to be entered.
-    # Stored in market_data['active_signals'] (list) and market_data['signal_type'].
-    _active = set(md.get('active_signals') or [])
-    _sig_type = str(md.get('signal_type') or '')
+    # ── v10 path: primary_setup key present ──────────────────────────────────
+    primary_setup = str(md.get("primary_setup") or "").strip()
+    if primary_setup and primary_setup in _V10_ALL_SETUP_NAMES:
+        signals = {name: (name == primary_setup) for name in _V10_ALL_SETUP_NAMES}
+        # Also track tradingview_signal for TV-confirmed setups
+        signals["tradingview_signal"] = "tv_confirmed" in primary_setup
+        return signals
+
+    # ── v9 legacy path: extract from indicator flags ──────────────────────────
+    # Used for historical records that predate the primary_setup field.
+    _active = set(md.get("active_signals") or [])
+    _sig_type = str(md.get("signal_type") or "")
 
     signals = {
-        # Engine signals — what actually fired
-        'engine_cascade':       'cascade'      in _active or _sig_type == 'cascade',
-        'engine_divergence':    'divergence'   in _active or _sig_type == 'divergence',
-        'engine_obi':           'obi'          in _active or _sig_type == 'obi',
-        'engine_vwap_reclaim':  'vwap_reclaim' in _active or _sig_type == 'vwap_reclaim',
-        'engine_macd_fallback': 'macd_fallback' in _active or _sig_type == 'macd_fallback',
-        'engine_near_miss':     'near_miss'    in _active or _sig_type == 'near_miss'
-                                or any('near_' in s for s in _active),
-        # Indicator flags (v3-v8 legacy signals — still populated by add_all_indicators)
-        'macd_consensus':       _b('macd_consensus'),
-        'williams_r':           _f('williams_r', 0) <= -80,
-        'momentum_volume':      _f('momentum_score', 0) > 0.6 and _f('vol_spike', 1) > 1.3,
-        'squeeze_fired':        _b('squeeze_fired') and _f('squeeze_bars', 0) >= 20,
-        'rv_expansion':         (_f('rv_ratio') or 0) >= 1.3,
-        'kalman_deviation':     (_f('kalman_dev', 0) or 0) <= -0.01,
-        'avwap_deviation':      (_f('avwap_dev', 0) or 0) <= -0.005,
-        'ou_halflife':          3 <= (_f('ou_halflife_minutes', 0) or 0) <= 60,
-        'kyle_lambda':          0 < (_f('kyle_lambda_pct', 100) or 100) <= 30,
-        'supertrend_bullish':   _b('supertrend_bullish'),
-        'wavetrend_cross':      _b('wt_oversold_cross'),
-        'ichimoku_bullish':     _b('cloud_bullish'),
-        'fisher_cross_up':      _b('fisher_cross_up'),
-        'lrsi_oversold':        (_f('lrsi', 0.5) or 0.5) < 0.15,
-        'wae_bullish_exploding': _b('wae_bullish') and _b('wae_exploding'),
-        'wae_bullish':          _b('wae_bullish') and not _b('wae_exploding'),
-        'chop_trending':        _b('chop_trending'),
-        'lrsi_mild_oversold':   0.15 <= (_f('lrsi', 0.5) or 0.5) < 0.25,
-        'tradingview_signal':   _b('tv_signal_active'),
+        # v9 engine signals
+        "engine_cascade": "cascade" in _active or _sig_type == "cascade",
+        "engine_divergence": "divergence" in _active or _sig_type == "divergence",
+        "engine_obi": "obi" in _active or _sig_type == "obi",
+        "engine_vwap_reclaim": "vwap_reclaim" in _active or _sig_type == "vwap_reclaim",
+        "engine_macd_fallback": "macd_fallback" in _active
+        or _sig_type == "macd_fallback",
+        # v9 indicator flags
+        "macd_consensus": _b("macd_consensus"),
+        "williams_r": _f("williams_r", 0) <= -80,
+        "momentum_volume": _f("momentum_score", 0) > 0.6 and _f("vol_spike", 1) > 1.3,
+        "squeeze_fired": _b("squeeze_fired") and _f("squeeze_bars", 0) >= 20,
+        "supertrend_bullish": _b("supertrend_bullish"),
+        "wavetrend_cross": _b("wt_oversold_cross"),
+        "ichimoku_bullish": _b("cloud_bullish"),
+        "fisher_cross_up": _b("fisher_cross_up"),
+        "lrsi_oversold": (_f("lrsi", 0.5) or 0.5) < 0.15,
+        "wae_bullish_exploding": _b("wae_bullish") and _b("wae_exploding"),
+        "wae_bullish": _b("wae_bullish") and not _b("wae_exploding"),
+        "chop_trending": _b("chop_trending"),
+        "lrsi_mild_oversold": 0.15 <= (_f("lrsi", 0.5) or 0.5) < 0.25,
+        "tradingview_signal": _b("tv_signal_active"),
     }
     return signals
 
@@ -104,18 +133,24 @@ def _generate_lesson(
     Generate a concise, structured 'why this trade worked/failed' lesson string.
     Stored in trade_attribution.lesson and fed into LanceDB memory.
     """
-    outcome = 'WIN' if won else 'LOSS'
+    outcome = "WIN" if won else "LOSS"
     active = [s for s, v in signals.items() if v]
-    inactive_key = [s for s, v in signals.items() if not v and s in (
-        'supertrend_bullish', 'ichimoku_bullish', 'squeeze_fired', 'rv_expansion'
-    )]
+    inactive_key = [
+        s
+        for s, v in signals.items()
+        if not v
+        and s
+        in ("supertrend_bullish", "ichimoku_bullish", "squeeze_fired", "rv_expansion")
+    ]
 
-    buy_agents  = [a for a, v in agent_votes.items() if str(v).upper() == 'BUY']
-    hold_agents = [a for a, v in agent_votes.items() if str(v).upper() == 'HOLD']
-    sell_agents = [a for a, v in agent_votes.items() if str(v).upper() == 'SELL']
+    buy_agents = [a for a, v in agent_votes.items() if str(v).upper() == "BUY"]
+    hold_agents = [a for a, v in agent_votes.items() if str(v).upper() == "HOLD"]
+    sell_agents = [a for a, v in agent_votes.items() if str(v).upper() == "SELL"]
 
     net_after_fee = pnl_usd - fee_usd
-    fee_pct_of_move = abs(fee_usd / max(abs(pnl_usd), 0.01)) * 100 if pnl_usd != 0 else 0
+    fee_pct_of_move = (
+        abs(fee_usd / max(abs(pnl_usd), 0.01)) * 100 if pnl_usd != 0 else 0
+    )
 
     lines = [
         f"OUTCOME: {outcome} | {symbol} | {regime} regime | held {hold_minutes:.0f}min",
@@ -129,25 +164,36 @@ def _generate_lesson(
     # Add interpretation
     if won:
         if len(active) >= 4:
-            lines.append(f"PATTERN: Multi-signal confluence in {regime} regime → confirmed edge")
-        if 'supertrend_bullish' in active and 'wavetrend_cross' in active:
-            lines.append("PATTERN: SuperTrend + WaveTrend combo → strong trend-momentum confluence")
-        if 'squeeze_fired' in active and 'rv_expansion' in active:
+            lines.append(
+                f"PATTERN: Multi-signal confluence in {regime} regime → confirmed edge"
+            )
+        if "supertrend_bullish" in active and "wavetrend_cross" in active:
+            lines.append(
+                "PATTERN: SuperTrend + WaveTrend combo → strong trend-momentum confluence"
+            )
+        if "squeeze_fired" in active and "rv_expansion" in active:
             lines.append("PATTERN: Squeeze + vol expansion → textbook breakout setup")
     else:
         if fee_pct_of_move > 50:
-            lines.append("FAILURE: Fees consumed > 50% of gross move — setup too small to trade")
+            lines.append(
+                "FAILURE: Fees consumed > 50% of gross move — setup too small to trade"
+            )
         if hold_minutes < 5:
-            lines.append("FAILURE: Very short hold — likely choppy entry or premature exit")
+            lines.append(
+                "FAILURE: Very short hold — likely choppy entry or premature exit"
+            )
         if not active:
             lines.append("FAILURE: No signals active at entry — should not have traded")
-        if regime == 'ranging' and 'supertrend_bullish' in active:
-            lines.append("WARNING: SuperTrend in ranging regime — trend signal unreliable")
+        if regime == "ranging" and "supertrend_bullish" in active:
+            lines.append(
+                "WARNING: SuperTrend in ranging regime — trend signal unreliable"
+            )
 
-    return '\n'.join(lines)
+    return "\n".join(lines)
 
 
 # ── Main entry point ──────────────────────────────────────────────────────────
+
 
 def analyze_closed_trade(
     symbol: str,
@@ -161,14 +207,15 @@ def analyze_closed_trade(
     exit_reason: str,
     market_data_at_entry: dict,
     agent_votes: Optional[dict] = None,
-    source: str = 'paper',
+    source: str = "paper",
     paper: bool = True,
-    trade_ref: str = '',
+    trade_ref: str = "",
     mae_pct: float = 0,
     mfe_pct: float = 0,
-    exit_type: str = 'unknown',
+    exit_type: str = "unknown",
     ml_p_win: float = 0,
     super_score: float = 0,
+    composite_score: float = 0,
 ) -> dict:
     """
     Full post-trade attribution analysis. Call this immediately after every trade close.
@@ -190,7 +237,7 @@ def analyze_closed_trade(
     won = net_pnl > 0
 
     # Regime
-    regime = str(md.get('regime', 'unknown')).lower()
+    regime = str(md.get("regime", "unknown")).lower()
 
     # Hold time
     hold_minutes = 0.0
@@ -209,81 +256,112 @@ def analyze_closed_trade(
     signals = extract_signals_from_market_data(md)
 
     # Conviction score at entry (if available)
-    conviction = float(md.get('conviction_score', 0) or 0)
+    conviction = float(md.get("conviction_score", 0) or 0)
 
     # Generate lesson
     lesson = _generate_lesson(
-        symbol=symbol, regime=regime, signals=signals,
-        won=won, pnl_usd=pnl_usd, pnl_pct=pnl_pct,
-        fee_usd=fee_usd, exit_reason=exit_reason,
-        hold_minutes=hold_minutes, agent_votes=agent_votes,
+        symbol=symbol,
+        regime=regime,
+        signals=signals,
+        won=won,
+        pnl_usd=pnl_usd,
+        pnl_pct=pnl_pct,
+        fee_usd=fee_usd,
+        exit_reason=exit_reason,
+        hold_minutes=hold_minutes,
+        agent_votes=agent_votes,
     )
 
     # Record attribution (updates signal_stats + Bayesian weights)
     attr_id = record_trade_attribution(
-        symbol=symbol, strategy=strategy, regime=regime,
-        signals=signals, won=won,
-        pnl_usd=pnl_usd, pnl_pct=pnl_pct, fee_usd=fee_usd,
+        symbol=symbol,
+        strategy=strategy,
+        regime=regime,
+        signals=signals,
+        won=won,
+        pnl_usd=pnl_usd,
+        pnl_pct=pnl_pct,
+        fee_usd=fee_usd,
         conviction=conviction,
-        entry_price=entry_price, exit_price=exit_price,
-        entry_ts=entry_ts, exit_ts=exit_ts or datetime.now(timezone.utc).isoformat(),
-        exit_reason=exit_reason, hold_minutes=hold_minutes,
-        source=source, paper=paper, trade_ref=trade_ref,
+        entry_price=entry_price,
+        exit_price=exit_price,
+        entry_ts=entry_ts,
+        exit_ts=exit_ts or datetime.now(timezone.utc).isoformat(),
+        exit_reason=exit_reason,
+        hold_minutes=hold_minutes,
+        source=source,
+        paper=paper,
+        trade_ref=trade_ref,
         lesson=lesson,
-        mae_pct=mae_pct, mfe_pct=mfe_pct,
-        exit_type=exit_type, ml_p_win=ml_p_win,
+        mae_pct=mae_pct,
+        mfe_pct=mfe_pct,
+        exit_type=exit_type,
+        ml_p_win=ml_p_win,
         super_score=super_score,
+        composite_score=composite_score,
     )
 
     # Update agent accuracy
     if agent_votes:
         record_agent_votes(agent_votes, regime, won)
-        record_agent_votes(agent_votes, 'any', won)  # also update global accuracy
+        record_agent_votes(agent_votes, "any", won)  # also update global accuracy
 
     result = {
-        'attr_id': attr_id,
-        'won': won,
-        'pnl_usd': pnl_usd,
-        'net_pnl': net_pnl,
-        'pnl_pct': pnl_pct,
-        'fee_usd': fee_usd,
-        'regime': regime,
-        'signals': signals,
-        'active_signals': [s for s, v in signals.items() if v],
-        'hold_minutes': hold_minutes,
-        'lesson': lesson,
-        'conviction': conviction,
+        "attr_id": attr_id,
+        "won": won,
+        "pnl_usd": pnl_usd,
+        "net_pnl": net_pnl,
+        "pnl_pct": pnl_pct,
+        "fee_usd": fee_usd,
+        "regime": regime,
+        "signals": signals,
+        "active_signals": [s for s, v in signals.items() if v],
+        "hold_minutes": hold_minutes,
+        "lesson": lesson,
+        "conviction": conviction,
     }
 
-    print(f"[learning] {'✅' if won else '❌'} {symbol} attributed | "
-          f"regime={regime} | {len(result['active_signals'])} signals | "
-          f"net ${net_pnl:+.2f} | {exit_reason[:60]}")
+    print(
+        f"[learning] {'✅' if won else '❌'} {symbol} attributed | "
+        f"regime={regime} | {len(result['active_signals'])} signals | "
+        f"net ${net_pnl:+.2f} | {exit_reason[:60]}"
+    )
 
     # ── Tax lot tracking ───────────────────────────────────────────────────────
     try:
         from learning.tax_tracker import record_tax_lot
+
         # Map strategy name to asset class for tax treatment
         asset_class_map = {
-            'crypto': 'crypto', 'crypto_macd': 'crypto', 'mean_reversion': 'crypto',
-            'equity': 'equity', 'equity_momentum': 'equity',
-            'futures': 'futures', 'futures_scalper': 'futures',
-            'perp': 'perp',
+            "crypto": "crypto",
+            "crypto_macd": "crypto",
+            "mean_reversion": "crypto",
+            "equity": "equity",
+            "equity_momentum": "equity",
+            "futures": "futures",
+            "futures_scalper": "futures",
+            "perp": "perp",
         }
         strat_lower = strategy.lower()
-        if 'perp' in strat_lower:
-            asset_class = 'perp'
-        elif 'futures' in strat_lower:
-            asset_class = 'futures'
-        elif 'equity' in strat_lower:
-            asset_class = 'equity'
+        if "perp" in strat_lower:
+            asset_class = "perp"
+        elif "futures" in strat_lower:
+            asset_class = "futures"
+        elif "equity" in strat_lower:
+            asset_class = "equity"
         else:
-            asset_class = asset_class_map.get(strat_lower.split('_')[0], 'crypto')
+            asset_class = asset_class_map.get(strat_lower.split("_")[0], "crypto")
         record_tax_lot(
-            symbol=symbol, strategy=strategy, asset_class=asset_class,
+            symbol=symbol,
+            strategy=strategy,
+            asset_class=asset_class,
             entry_ts=entry_ts,
             exit_ts=exit_ts or datetime.now(timezone.utc).isoformat(),
-            entry_price=entry_price, exit_price=exit_price,
-            qty=qty, fees_usd=fee_usd, paper=paper,
+            entry_price=entry_price,
+            exit_price=exit_price,
+            qty=qty,
+            fees_usd=fee_usd,
+            paper=paper,
         )
     except Exception as _te:
         print(f"[tax_tracker] record error: {_te}")

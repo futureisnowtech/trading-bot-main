@@ -30,6 +30,20 @@ MAX_DEPLOYED_PCT: float = 0.90
 CASH_RESERVE_PCT: float = 0.10
 
 # ════════════════════════════════════════════════════════════════════
+# SYMBOL SUPPRESSION (v13.4 — forensic audit 2026-04-08)
+# Symbols with statistically negative edge over 10+ clean trades.
+# Review quarterly — remove a symbol when Bayesian WR recovers > 55%.
+# ════════════════════════════════════════════════════════════════════
+SUPPRESSED_SYMBOLS: set = {
+    "PF_TAOUSD",  # 40% WR, -$4.31 net (10 trades)
+    "HYPE",  # 20% WR, -$2.59 net (5 trades)
+    "ALGO",  # 67% WR but -$2.41 net — win/loss ratio broken
+    "PF_ADAUSD",  # 58% WR but -$2.40 net (12 trades, small wins/large losses)
+    "MON",  # 33% WR, -$2.14 net (3 trades — too thin to trust, suppress until 10+)
+    "PF_PEPEUSD",  # 17% WR, -$0.36 net (6 trades)
+}
+
+# ════════════════════════════════════════════════════════════════════
 # RISK — HARDCODED. NO AI CAN OVERRIDE THESE.
 # Paper mode uses looser limits to maximise learning velocity.
 # Live mode uses tight limits to protect real capital.

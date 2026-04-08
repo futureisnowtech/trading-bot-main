@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-08
+- feat(v13.4): forensic audit fixes — symbol suppression (6 losers), Bayesian taxonomy rewrite (v9→v10 signals), composite_score logging, dynamic_weights key fix, REZ phantom purge script, BANNER update
+
+## 2026-04-08
 - fix(ibkr): set main-thread event loop before ib_insync import — eventkit calls asyncio.get_event_loop() at import time; Python 3.10+ no longer auto-creates one
 
 ## 2026-04-08

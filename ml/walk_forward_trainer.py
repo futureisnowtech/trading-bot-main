@@ -466,8 +466,13 @@ def train_walk_forward(
         return result
 
     # Check minimum live days
-    min_ts = df["ts"].min()
-    live_days = (time.time() - min_ts) / 86400
+    # ts may be an ISO datetime string (from trades table) or a unix float
+    _raw_min_ts = df["ts"].min()
+    try:
+        _min_ts_f = float(_raw_min_ts)
+    except (TypeError, ValueError):
+        _min_ts_f = pd.Timestamp(_raw_min_ts).timestamp()
+    live_days = (time.time() - _min_ts_f) / 86400
     if live_days < _MIN_LIVE_DAYS:
         result["reason"] = f"need {_MIN_LIVE_DAYS}d live data, only {live_days:.0f}d"
         return result
@@ -526,7 +531,11 @@ def train_walk_forward(
     val_d = _VALID_DAYS
 
     # Convert to time-indexed walks
-    df["date"] = pd.to_datetime(df["ts"], unit="s")
+    # Handle both unix-float ts and ISO-string ts from trades table
+    if df["ts"].dtype == object:
+        df["date"] = pd.to_datetime(df["ts"], utc=True).dt.tz_localize(None)
+    else:
+        df["date"] = pd.to_datetime(df["ts"], unit="s")
     df = df.sort_values("ts").reset_index(drop=True)
     # Re-align X/y/pnls to sorted df
     if _has_full_features:
@@ -673,4 +682,109 @@ def retrain_all(paper: bool = True):
                 results[key] = {"success": False, "reason": str(e)}
                 logger.error(f"[wft] {key} error: {e}")
 
+    return results
+
+
+def bootstrap_train(
+    pair_key: str = "GENERIC",
+    direction: str = "LONG",
+    paper: bool = True,
+) -> Dict:
+    """
+    Train on ALL available snapshots without walk-forward fold validation.
+
+    Used during early phase (<_MIN_LIVE_DAYS of live data) when the time-series
+    fold windows can't fit into the available data span.  Models are saved
+    identically to walk-forward models and picked up by ModelStore immediately.
+    Walk-forward training will supersede these automatically once 30 days of
+    live data exist (_MIN_LIVE_DAYS gate in train_walk_forward).
+
+    Requires full 57-feature snapshots (not proxy mode).
+    """
+    result: Dict = {
+        "success": False,
+        "folds_total": 0,
+        "folds_passed": 0,
+        "avg_wr": 0.0,
+        "avg_pf": 0.0,
+        "avg_sharpe": 0.0,
+        "model_saved": False,
+        "reason": "not_run",
+    }
+
+    if not _XGB_OK and not _LGB_OK:
+        result["reason"] = "no_ml_library"
+        return result
+
+    df = _load_training_data(pair_key, direction, paper)
+    if df is None or len(df) < _MIN_TRADES:
+        result["reason"] = f"insufficient_data: {0 if df is None else len(df)} trades"
+        return result
+
+    from ml.feature_builder import FEATURE_NAMES
+
+    df["won"] = df["won"].fillna(0).astype(int)
+    df["pnl_usd"] = df["pnl_usd"].fillna(0).astype(float)
+
+    if not all(f in df.columns for f in FEATURE_NAMES):
+        result["reason"] = "proxy_only: need full 57-feature snapshots"
+        return result
+
+    X = df[list(FEATURE_NAMES)].fillna(0.0).values
+    pnls = df["pnl_usd"].values
+    y = pnls
+    pnl_scale = float(np.std(pnls)) if len(pnls) > 1 else 1.0
+    if pnl_scale < 1e-6:
+        pnl_scale = 1.0
+
+    n = len(df)
+    logger.info(
+        f"[wft] bootstrap {pair_key}_{direction}: "
+        f"{n} snapshots, pnl_scale={pnl_scale:.2f} — no OOS validation"
+    )
+
+    xgb_final = _train_xgb(X, y, None)
+    lgb_final = _train_lgbm(X, y, None)
+
+    saved = False
+    if xgb_final is not None:
+        with open(_model_path(pair_key, direction, "xgb"), "wb") as fh:
+            pickle.dump(xgb_final, fh)
+        saved = True
+
+    if lgb_final is not None:
+        with open(_model_path(pair_key, direction, "lgbm"), "wb") as fh:
+            pickle.dump(lgb_final, fh)
+        saved = True
+
+    if saved:
+        with open(_model_path(pair_key, direction, "meta"), "wb") as fh:
+            pickle.dump({"pnl_scale": pnl_scale, "bootstrap": True, "n_trades": n}, fh)
+        logger.info(
+            f"[wft] bootstrap {pair_key}_{direction}: models saved "
+            f"(will auto-supersede when walk-forward gate opens)"
+        )
+
+    result.update(
+        {
+            "success": saved,
+            "model_saved": saved,
+            "reason": f"bootstrap({n} trades, pnl_scale={pnl_scale:.2f})",
+        }
+    )
+    return result
+
+
+def bootstrap_retrain_all(paper: bool = True) -> Dict:
+    """Bootstrap GENERIC LONG+SHORT — the two models that activate the ML tower for all current pairs."""
+    results = {}
+    for direction in ["LONG", "SHORT"]:
+        key = f"GENERIC_{direction}"
+        try:
+            r = bootstrap_train("GENERIC", direction, paper)
+            results[key] = r
+            logger.info(f"[wft] {key}: success={r['success']} {r['reason']}")
+        except Exception as e:
+            results[key] = {"success": False, "reason": str(e)}
+            logger.error(f"[wft] {key} bootstrap error: {e}")
     return results

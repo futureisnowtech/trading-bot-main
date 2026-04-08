@@ -92,11 +92,13 @@ def _load_model_pair(
 def _get_cached(pair_key: str, direction: str) -> Tuple:
     """Return cached model triple, reloading if files have changed."""
     cache_key = f"{pair_key}_{direction}"
-    xgb_path = _model_path(pair_key, direction, "xgb")
 
+    # Use max mtime across all model files — handles xgb-only, lgbm-only, or both
     current_mtime = 0.0
-    if os.path.exists(xgb_path):
-        current_mtime = os.path.getmtime(xgb_path)
+    for model_type in ("xgb", "lgbm", "meta"):
+        p = _model_path(pair_key, direction, model_type)
+        if os.path.exists(p):
+            current_mtime = max(current_mtime, os.path.getmtime(p))
 
     if (
         cache_key not in _model_cache
@@ -140,11 +142,14 @@ class ModelStore:
             return None
 
         # Build feature vector in canonical FEATURE_NAMES order
+        # Use DataFrame so LightGBM doesn't warn about missing feature names
         try:
-            X = np.array(
-                [float(features.get(name, 0.0)) for name in FEATURE_NAMES],
-                dtype=np.float32,
-            ).reshape(1, -1)
+            import pandas as _pd
+
+            X = _pd.DataFrame(
+                [[float(features.get(name, 0.0)) for name in FEATURE_NAMES]],
+                columns=list(FEATURE_NAMES),
+            ).astype(np.float32)
         except Exception as e:
             logger.debug(f"[model_store] feature vector error: {e}")
             return None

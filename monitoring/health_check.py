@@ -26,10 +26,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import (
     DB_PATH,
     PAPER_TRADING,
-    CRYPTO_MAX_HOLD_HOURS,
     FLAT_POSITION_THRESHOLD_PCT,
     CRYPTO_SCAN_INTERVAL_SECONDS,
-    ML_SIGNAL_MIN_PROB,
 )
 from logging_db.trade_logger import log_event
 
@@ -65,8 +63,11 @@ def _check_ml_gate() -> dict:
         return {"ok": False, "detail": f"ModelStore unavailable: {e}"}
 
 
+_STAGNANT_HEALTH_HOURS = 48.0  # health alarm threshold — longer than trading exit logic
+
+
 def _check_stagnant_positions() -> dict:
-    """No position should be past max hold time while still flat."""
+    """No position should be past 48h while still flat (stop not hit, no movement)."""
     try:
         from risk.risk_manager import get_risk_manager
 
@@ -74,7 +75,7 @@ def _check_stagnant_positions() -> dict:
         positions = rm.get_all_positions()
         stagnant = []
         now = datetime.now(timezone.utc)
-        max_mins = CRYPTO_MAX_HOLD_HOURS * 60
+        max_mins = _STAGNANT_HEALTH_HOURS * 60
 
         for strat, syms in positions.items():
             if not syms:
@@ -176,6 +177,7 @@ def _check_error_rate() -> dict:
         conn = _conn()
         n_errors = conn.execute(
             "SELECT COUNT(*) FROM system_events WHERE level='ERROR' "
+            "AND source != 'health_check' "
             "AND ts >= datetime('now', '-1 hour')"
         ).fetchone()[0]
         conn.close()

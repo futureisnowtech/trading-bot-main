@@ -16,6 +16,7 @@ Bayesian blend logic:
   At N=20 live fires, weight is 50/50 prior/observed.
   At N=100 live fires, weight is ~17% prior / ~83% observed.
 """
+
 import json
 import os
 import sqlite3
@@ -23,6 +24,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import sys
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import DB_PATH
 
@@ -32,72 +34,94 @@ from config import DB_PATH
 MAX_PRIOR_PTS = 12.0
 SIGNAL_PRIORS: dict[str, float] = {
     # Tier 1
-    'macd_consensus':       25 / MAX_PRIOR_PTS,   # capped at 1.0 → treated as strong prior
-    'williams_r':           20 / MAX_PRIOR_PTS,
-    'momentum_volume':      15 / MAX_PRIOR_PTS,
+    "macd_consensus": 25 / MAX_PRIOR_PTS,  # capped at 1.0 → treated as strong prior
+    "williams_r": 20 / MAX_PRIOR_PTS,
+    "momentum_volume": 15 / MAX_PRIOR_PTS,
     # Tier 2a
-    'squeeze_fired':        20 / MAX_PRIOR_PTS,
-    'rv_expansion':         15 / MAX_PRIOR_PTS,
-    'kalman_deviation':     10 / MAX_PRIOR_PTS,
-    'avwap_deviation':      10 / MAX_PRIOR_PTS,
-    'ou_halflife':           5 / MAX_PRIOR_PTS,
-    'kyle_lambda':           5 / MAX_PRIOR_PTS,
+    "squeeze_fired": 20 / MAX_PRIOR_PTS,
+    "rv_expansion": 15 / MAX_PRIOR_PTS,
+    "kalman_deviation": 10 / MAX_PRIOR_PTS,
+    "avwap_deviation": 10 / MAX_PRIOR_PTS,
+    "ou_halflife": 5 / MAX_PRIOR_PTS,
+    "kyle_lambda": 5 / MAX_PRIOR_PTS,
     # Tier 2b
-    'supertrend_bullish':   12 / MAX_PRIOR_PTS,
-    'wavetrend_cross':      12 / MAX_PRIOR_PTS,
-    'ichimoku_bullish':      8 / MAX_PRIOR_PTS,
-    'fisher_cross_up':       8 / MAX_PRIOR_PTS,
-    'lrsi_oversold':         8 / MAX_PRIOR_PTS,
-    'wae_bullish_exploding': 10 / MAX_PRIOR_PTS,
-    'wae_bullish':           5 / MAX_PRIOR_PTS,
-    'chop_trending':         5 / MAX_PRIOR_PTS,
-    'lrsi_mild_oversold':    4 / MAX_PRIOR_PTS,
+    "supertrend_bullish": 12 / MAX_PRIOR_PTS,
+    "wavetrend_cross": 12 / MAX_PRIOR_PTS,
+    "ichimoku_bullish": 8 / MAX_PRIOR_PTS,
+    "fisher_cross_up": 8 / MAX_PRIOR_PTS,
+    "lrsi_oversold": 8 / MAX_PRIOR_PTS,
+    "wae_bullish_exploding": 10 / MAX_PRIOR_PTS,
+    "wae_bullish": 5 / MAX_PRIOR_PTS,
+    "chop_trending": 5 / MAX_PRIOR_PTS,
+    "lrsi_mild_oversold": 4 / MAX_PRIOR_PTS,
     # Tier 3
-    'tradingview_signal':   20 / MAX_PRIOR_PTS,
+    "tradingview_signal": 20 / MAX_PRIOR_PTS,
     # Mean reversion strategy signals
-    'bb_proximity':         12 / MAX_PRIOR_PTS,
-    'autocorr_negative':     8 / MAX_PRIOR_PTS,
-    'mean_rev_kalman':      12 / MAX_PRIOR_PTS,
+    "bb_proximity": 12 / MAX_PRIOR_PTS,
+    "autocorr_negative": 8 / MAX_PRIOR_PTS,
+    "mean_rev_kalman": 12 / MAX_PRIOR_PTS,
     # Futures / ORB signals
-    'orb_breakout_long':    18 / MAX_PRIOR_PTS,
-    'orb_breakout_short':   18 / MAX_PRIOR_PTS,
-    'htf_bullish_bias':     10 / MAX_PRIOR_PTS,
-    'htf_bearish_bias':     10 / MAX_PRIOR_PTS,
-    'futures_adx_trend':     8 / MAX_PRIOR_PTS,
+    "orb_breakout_long": 18 / MAX_PRIOR_PTS,
+    "orb_breakout_short": 18 / MAX_PRIOR_PTS,
+    "htf_bullish_bias": 10 / MAX_PRIOR_PTS,
+    "htf_bearish_bias": 10 / MAX_PRIOR_PTS,
+    "futures_adx_trend": 8 / MAX_PRIOR_PTS,
     # Perpetual futures signals
-    'perp_long_breakout':   15 / MAX_PRIOR_PTS,
-    'perp_short_breakout':  15 / MAX_PRIOR_PTS,
-    'rsi_bullish_momentum':  8 / MAX_PRIOR_PTS,
-    'rsi_bearish_momentum':  8 / MAX_PRIOR_PTS,
-    'funding_rate_favorable': 7 / MAX_PRIOR_PTS,
+    "perp_long_breakout": 15 / MAX_PRIOR_PTS,
+    "perp_short_breakout": 15 / MAX_PRIOR_PTS,
+    "rsi_bullish_momentum": 8 / MAX_PRIOR_PTS,
+    "rsi_bearish_momentum": 8 / MAX_PRIOR_PTS,
+    "funding_rate_favorable": 7 / MAX_PRIOR_PTS,
     # Equity momentum signals
-    'equity_macd_positive': 12 / MAX_PRIOR_PTS,
-    'equity_kst_cross':     10 / MAX_PRIOR_PTS,
-    'equity_vwap_above':     8 / MAX_PRIOR_PTS,
-    'equity_vol_spike':      8 / MAX_PRIOR_PTS,
-    'equity_rsi_range':      6 / MAX_PRIOR_PTS,
+    "equity_macd_positive": 12 / MAX_PRIOR_PTS,
+    "equity_kst_cross": 10 / MAX_PRIOR_PTS,
+    "equity_vwap_above": 8 / MAX_PRIOR_PTS,
+    "equity_vol_spike": 8 / MAX_PRIOR_PTS,
+    "equity_rsi_range": 6 / MAX_PRIOR_PTS,
 }
 # Hardcoded conviction POINTS that dynamic_weights will output (same scale as job_runner):
 SIGNAL_PRIOR_PTS: dict[str, int] = {
-    'macd_consensus': 25, 'williams_r': 20, 'momentum_volume': 15,
-    'squeeze_fired': 20, 'rv_expansion': 15, 'kalman_deviation': 10,
-    'avwap_deviation': 10, 'ou_halflife': 5, 'kyle_lambda': 5,
-    'supertrend_bullish': 12, 'wavetrend_cross': 12,
-    'ichimoku_bullish': 8, 'fisher_cross_up': 8, 'lrsi_oversold': 8,
-    'wae_bullish_exploding': 10, 'wae_bullish': 5,
-    'chop_trending': 5, 'lrsi_mild_oversold': 4,
-    'tradingview_signal': 20,
+    "macd_consensus": 25,
+    "williams_r": 20,
+    "momentum_volume": 15,
+    "squeeze_fired": 20,
+    "rv_expansion": 15,
+    "kalman_deviation": 10,
+    "avwap_deviation": 10,
+    "ou_halflife": 5,
+    "kyle_lambda": 5,
+    "supertrend_bullish": 12,
+    "wavetrend_cross": 12,
+    "ichimoku_bullish": 8,
+    "fisher_cross_up": 8,
+    "lrsi_oversold": 8,
+    "wae_bullish_exploding": 10,
+    "wae_bullish": 5,
+    "chop_trending": 5,
+    "lrsi_mild_oversold": 4,
+    "tradingview_signal": 20,
     # Mean reversion strategy signals
-    'bb_proximity': 12, 'autocorr_negative': 8, 'mean_rev_kalman': 12,
+    "bb_proximity": 12,
+    "autocorr_negative": 8,
+    "mean_rev_kalman": 12,
     # Futures / ORB signals
-    'orb_breakout_long': 18, 'orb_breakout_short': 18,
-    'htf_bullish_bias': 10, 'htf_bearish_bias': 10, 'futures_adx_trend': 8,
+    "orb_breakout_long": 18,
+    "orb_breakout_short": 18,
+    "htf_bullish_bias": 10,
+    "htf_bearish_bias": 10,
+    "futures_adx_trend": 8,
     # Perpetual futures signals
-    'perp_long_breakout': 15, 'perp_short_breakout': 15,
-    'rsi_bullish_momentum': 8, 'rsi_bearish_momentum': 8, 'funding_rate_favorable': 7,
+    "perp_long_breakout": 15,
+    "perp_short_breakout": 15,
+    "rsi_bullish_momentum": 8,
+    "rsi_bearish_momentum": 8,
+    "funding_rate_favorable": 7,
     # Equity momentum signals
-    'equity_macd_positive': 12, 'equity_kst_cross': 10,
-    'equity_vwap_above': 8, 'equity_vol_spike': 8, 'equity_rsi_range': 6,
+    "equity_macd_positive": 12,
+    "equity_kst_cross": 10,
+    "equity_vwap_above": 8,
+    "equity_vol_spike": 8,
+    "equity_rsi_range": 6,
 }
 # Bayesian prior weight — how many "phantom trades" of confidence in the prior
 PRIOR_N = 20
@@ -107,9 +131,10 @@ MIN_FIRES_TO_LEARN = 10
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
 
+
 def _conn() -> sqlite3.Connection:
     os.makedirs(os.path.dirname(os.path.abspath(DB_PATH)), exist_ok=True)
-    c = sqlite3.connect(DB_PATH, check_same_thread=False)
+    c = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=10)
     c.row_factory = sqlite3.Row
     c.execute("PRAGMA journal_mode=WAL")
     return c
@@ -207,11 +232,12 @@ init_learning_tables()
 
 # ── Core attribution write ────────────────────────────────────────────────────
 
+
 def record_trade_attribution(
     symbol: str,
     strategy: str,
     regime: str,
-    signals: dict,       # {signal_name: bool} — which signals were active at entry
+    signals: dict,  # {signal_name: bool} — which signals were active at entry
     won: bool,
     pnl_usd: float,
     pnl_pct: float,
@@ -219,17 +245,17 @@ def record_trade_attribution(
     conviction: float = 0,
     entry_price: float = 0,
     exit_price: float = 0,
-    entry_ts: str = '',
-    exit_ts: str = '',
-    exit_reason: str = '',
+    entry_ts: str = "",
+    exit_ts: str = "",
+    exit_reason: str = "",
     hold_minutes: float = 0,
-    source: str = 'live',
+    source: str = "live",
     paper: bool = True,
-    trade_ref: str = '',
-    lesson: str = '',
+    trade_ref: str = "",
+    lesson: str = "",
     mae_pct: float = 0,
     mfe_pct: float = 0,
-    exit_type: str = 'unknown',
+    exit_type: str = "unknown",
     ml_p_win: float = 0,
     super_score: float = 0,
 ) -> int:
@@ -243,7 +269,8 @@ def record_trade_attribution(
     is_fee_trap = int(fee_usd > 0 and abs(pnl_usd) > 0 and fee_usd > abs(pnl_usd) * 0.5)
 
     with _conn() as c:
-        cur = c.execute("""
+        cur = c.execute(
+            """
             INSERT INTO trade_attribution
                 (trade_ref, symbol, strategy, regime, source,
                  entry_ts, exit_ts, entry_price, exit_price,
@@ -252,34 +279,56 @@ def record_trade_attribution(
                  hold_minutes, paper, lesson, created_at,
                  mae_pct, mfe_pct, exit_type, is_fee_trap, ml_p_win, super_score)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        """, (
-            trade_ref, symbol, strategy, regime, source,
-            entry_ts, exit_ts, entry_price, exit_price,
-            pnl_usd, pnl_pct, fee_usd, int(won),
-            signals_json, conviction, exit_reason,
-            hold_minutes, int(paper), lesson, now,
-            mae_pct, mfe_pct, exit_type, is_fee_trap, ml_p_win, float(super_score or 0),
-        ))
+        """,
+            (
+                trade_ref,
+                symbol,
+                strategy,
+                regime,
+                source,
+                entry_ts,
+                exit_ts,
+                entry_price,
+                exit_price,
+                pnl_usd,
+                pnl_pct,
+                fee_usd,
+                int(won),
+                signals_json,
+                conviction,
+                exit_reason,
+                hold_minutes,
+                int(paper),
+                lesson,
+                now,
+                mae_pct,
+                mfe_pct,
+                exit_type,
+                is_fee_trap,
+                ml_p_win,
+                float(super_score or 0),
+            ),
+        )
         attr_id = cur.lastrowid
 
     # Update signal_stats for every active signal
     active_signals = [k for k, v in signals.items() if v]
     for sig in active_signals:
         _update_signal_stat(sig, regime, won, pnl_usd, source)
-        _update_signal_stat(sig, 'any', won, pnl_usd, source)  # regime-agnostic row
+        _update_signal_stat(sig, "any", won, pnl_usd, source)  # regime-agnostic row
 
     return attr_id
 
 
 def _update_signal_stat(
-    signal_name: str, regime: str, won: bool,
-    pnl_usd: float, source: str
+    signal_name: str, regime: str, won: bool, pnl_usd: float, source: str
 ):
     """Upsert one row in signal_stats and recompute Bayesian weight."""
     now = datetime.now(timezone.utc).isoformat()
     with _conn() as c:
         # Upsert the stats row
-        c.execute("""
+        c.execute(
+            """
             INSERT INTO signal_stats (signal_name, regime, source, fires, wins, losses, total_pnl, last_updated)
             VALUES (?, ?, ?, 1, ?, ?, ?, ?)
             ON CONFLICT(signal_name, regime, source) DO UPDATE SET
@@ -288,26 +337,39 @@ def _update_signal_stat(
                 losses      = losses + ?,
                 total_pnl   = total_pnl + ?,
                 last_updated = ?
-        """, (
-            signal_name, regime, source,
-            int(won), int(not won), pnl_usd, now,    # INSERT values (7 params for 7 ?s)
-            int(won), int(not won), pnl_usd, now,    # UPDATE deltas (4 params)
-        ))
+        """,
+            (
+                signal_name,
+                regime,
+                source,
+                int(won),
+                int(not won),
+                pnl_usd,
+                now,  # INSERT values (7 params for 7 ?s)
+                int(won),
+                int(not won),
+                pnl_usd,
+                now,  # UPDATE deltas (4 params)
+            ),
+        )
 
         # Recompute derived fields
-        row = c.execute("""
+        row = c.execute(
+            """
             SELECT fires, wins, total_pnl FROM signal_stats
             WHERE signal_name=? AND regime=? AND source=?
-        """, (signal_name, regime, source)).fetchone()
+        """,
+            (signal_name, regime, source),
+        ).fetchone()
 
-        if row and row['fires'] > 0:
-            obs_win_rate = row['wins'] / row['fires']
-            avg_pnl = row['total_pnl'] / row['fires']
+        if row and row["fires"] > 0:
+            obs_win_rate = row["wins"] / row["fires"]
+            avg_pnl = row["total_pnl"] / row["fires"]
 
             # Bayesian blend
             prior_p = SIGNAL_PRIORS.get(signal_name, 0.5)
             prior_pts = SIGNAL_PRIOR_PTS.get(signal_name, 5)
-            n = row['fires']
+            n = row["fires"]
 
             if n >= MIN_FIRES_TO_LEARN:
                 # Clamp prior_p to [0, 1] — SIGNAL_PRIORS stores pts/12, not win rates,
@@ -321,18 +383,29 @@ def _update_signal_stat(
             else:
                 bayesian_pts = float(prior_pts)  # not enough data — use prior
 
-            c.execute("""
+            c.execute(
+                """
                 UPDATE signal_stats
                 SET win_rate=?, avg_pnl=?, bayesian_pts=?, prior_pts=?
                 WHERE signal_name=? AND regime=? AND source=?
-            """, (obs_win_rate, avg_pnl, bayesian_pts, float(prior_pts),
-                  signal_name, regime, source))
+            """,
+                (
+                    obs_win_rate,
+                    avg_pnl,
+                    bayesian_pts,
+                    float(prior_pts),
+                    signal_name,
+                    regime,
+                    source,
+                ),
+            )
 
 
 # ── Agent accuracy ────────────────────────────────────────────────────────────
 
+
 def record_agent_votes(
-    agent_votes: dict,   # {agent_name: 'BUY'|'HOLD'|'SELL'}
+    agent_votes: dict,  # {agent_name: 'BUY'|'HOLD'|'SELL'}
     regime: str,
     won: bool,
 ):
@@ -341,9 +414,10 @@ def record_agent_votes(
     with _conn() as c:
         for agent, vote in agent_votes.items():
             vote = str(vote).upper()
-            correct_buy = int(vote == 'BUY' and won)
-            incorrect_buy = int(vote == 'BUY' and not won)
-            c.execute("""
+            correct_buy = int(vote == "BUY" and won)
+            incorrect_buy = int(vote == "BUY" and not won)
+            c.execute(
+                """
                 INSERT INTO agent_stats
                     (agent_name, regime, votes_buy, votes_hold, votes_sell,
                      correct_buy, incorrect_buy, total_assessed, last_updated)
@@ -356,61 +430,93 @@ def record_agent_votes(
                     incorrect_buy = incorrect_buy + ?,
                     total_assessed = total_assessed + 1,
                     last_updated  = ?
-            """, (
-                agent, regime,
-                int(vote == 'BUY'), int(vote == 'HOLD'), int(vote == 'SELL'),
-                correct_buy, incorrect_buy, now,
-                # UPDATE deltas:
-                int(vote == 'BUY'), int(vote == 'HOLD'), int(vote == 'SELL'),
-                correct_buy, incorrect_buy, now,
-            ))
+            """,
+                (
+                    agent,
+                    regime,
+                    int(vote == "BUY"),
+                    int(vote == "HOLD"),
+                    int(vote == "SELL"),
+                    correct_buy,
+                    incorrect_buy,
+                    now,
+                    # UPDATE deltas:
+                    int(vote == "BUY"),
+                    int(vote == "HOLD"),
+                    int(vote == "SELL"),
+                    correct_buy,
+                    incorrect_buy,
+                    now,
+                ),
+            )
             # Recompute accuracy
-            row = c.execute("""
+            row = c.execute(
+                """
                 SELECT correct_buy, total_assessed, votes_buy
                 FROM agent_stats WHERE agent_name=? AND regime=?
-            """, (agent, regime)).fetchone()
-            if row and row['votes_buy'] > 0:
-                acc = row['correct_buy'] / row['votes_buy']
-                c.execute("""
+            """,
+                (agent, regime),
+            ).fetchone()
+            if row and row["votes_buy"] > 0:
+                acc = row["correct_buy"] / row["votes_buy"]
+                c.execute(
+                    """
                     UPDATE agent_stats SET accuracy=?
                     WHERE agent_name=? AND regime=?
-                """, (acc, agent, regime))
+                """,
+                    (acc, agent, regime),
+                )
 
 
 # ── Read helpers ──────────────────────────────────────────────────────────────
 
-def get_signal_bayesian_pts(signal_name: str, regime: str = 'any') -> float:
+
+def get_signal_bayesian_pts(signal_name: str, regime: str = "any") -> float:
     """Return current Bayesian conviction points for a signal in a regime."""
     prior = float(SIGNAL_PRIOR_PTS.get(signal_name, 5))
     try:
         with _conn() as c:
-            row = c.execute("""
+            row = c.execute(
+                """
                 SELECT bayesian_pts, fires FROM signal_stats
                 WHERE signal_name=? AND regime=? AND source='combined'
                 ORDER BY fires DESC LIMIT 1
-            """, (signal_name, regime)).fetchone()
-            if row and row['fires'] >= MIN_FIRES_TO_LEARN and row['bayesian_pts'] is not None:
-                return float(row['bayesian_pts'])
+            """,
+                (signal_name, regime),
+            ).fetchone()
+            if (
+                row
+                and row["fires"] >= MIN_FIRES_TO_LEARN
+                and row["bayesian_pts"] is not None
+            ):
+                return float(row["bayesian_pts"])
             # Try 'any' if specific regime has no data
-            if regime != 'any':
-                row2 = c.execute("""
+            if regime != "any":
+                row2 = c.execute(
+                    """
                     SELECT bayesian_pts, fires FROM signal_stats
                     WHERE signal_name=? AND regime='any' AND source='combined'
                     ORDER BY fires DESC LIMIT 1
-                """, (signal_name,)).fetchone()
-                if row2 and row2['fires'] >= MIN_FIRES_TO_LEARN and row2['bayesian_pts'] is not None:
-                    return float(row2['bayesian_pts'])
+                """,
+                    (signal_name,),
+                ).fetchone()
+                if (
+                    row2
+                    and row2["fires"] >= MIN_FIRES_TO_LEARN
+                    and row2["bayesian_pts"] is not None
+                ):
+                    return float(row2["bayesian_pts"])
     except Exception:
         pass
     return prior
 
 
-def get_all_weights(regime: str = 'any') -> dict[str, float]:
+def get_all_weights(regime: str = "any") -> dict[str, float]:
     """Return {signal_name: bayesian_pts} for all signals, falling back to priors."""
     return {sig: get_signal_bayesian_pts(sig, regime) for sig in SIGNAL_PRIOR_PTS}
 
 
-def get_active_signal_stats_brief(active_signals: list, regime: str = 'any') -> str:
+def get_active_signal_stats_brief(active_signals: list, regime: str = "any") -> str:
     """
     Returns a compact table of Bayesian win rates for the signals that fired.
     Injected into every agent's user prompt so AI can calibrate per-signal confidence.
@@ -423,50 +529,72 @@ def get_active_signal_stats_brief(active_signals: list, regime: str = 'any') -> 
             lines = [
                 f"SIGNAL QUALITY (Bayesian evidence — {regime} regime):",
                 f"  {'Signal':<26} {'Fires':>5} {'Win%':>6} {'AvgP&L':>8} {'BayesPts':>9} {'PriorPts':>9}",
-                f"  {'-'*26} {'-'*5} {'-'*6} {'-'*8} {'-'*9} {'-'*9}",
+                f"  {'-' * 26} {'-' * 5} {'-' * 6} {'-' * 8} {'-' * 9} {'-' * 9}",
             ]
             any_live_data = False
             for sig_name in active_signals:
                 prior = SIGNAL_PRIOR_PTS.get(sig_name, 0)
                 # Prefer regime-specific row, fall back to 'any'
-                row = c.execute("""
+                row = c.execute(
+                    """
                     SELECT fires, win_rate, avg_pnl, bayesian_pts, prior_pts
                     FROM signal_stats
                     WHERE signal_name=? AND regime=? AND source='combined'
                     LIMIT 1
-                """, (sig_name, regime)).fetchone()
-                if not row and regime != 'any':
-                    row = c.execute("""
+                """,
+                    (sig_name, regime),
+                ).fetchone()
+                if not row and regime != "any":
+                    row = c.execute(
+                        """
                         SELECT fires, win_rate, avg_pnl, bayesian_pts, prior_pts
                         FROM signal_stats
                         WHERE signal_name=? AND regime='any' AND source='combined'
                         LIMIT 1
-                    """, (sig_name,)).fetchone()
+                    """,
+                        (sig_name,),
+                    ).fetchone()
 
-                if row and (row['fires'] or 0) >= MIN_FIRES_TO_LEARN:
+                if row and (row["fires"] or 0) >= MIN_FIRES_TO_LEARN:
                     any_live_data = True
-                    wr = f"{row['win_rate']*100:.0f}%" if row['win_rate'] is not None else "  ?"
-                    ap = f"${row['avg_pnl']:+.3f}" if row['avg_pnl'] is not None else "     ?"
-                    bp = f"{row['bayesian_pts']:.1f}" if row['bayesian_pts'] is not None else "  ?"
+                    wr = (
+                        f"{row['win_rate'] * 100:.0f}%"
+                        if row["win_rate"] is not None
+                        else "  ?"
+                    )
+                    ap = (
+                        f"${row['avg_pnl']:+.3f}"
+                        if row["avg_pnl"] is not None
+                        else "     ?"
+                    )
+                    bp = (
+                        f"{row['bayesian_pts']:.1f}"
+                        if row["bayesian_pts"] is not None
+                        else "  ?"
+                    )
                     pp = f"{row['prior_pts'] or prior:.1f}"
-                    fires = row['fires'] or 0
-                    lines.append(f"  {sig_name:<26} {fires:>5} {wr:>6} {ap:>8} {bp:>9} {pp:>9}")
+                    fires = row["fires"] or 0
+                    lines.append(
+                        f"  {sig_name:<26} {fires:>5} {wr:>6} {ap:>8} {bp:>9} {pp:>9}"
+                    )
                 else:
-                    fires = (row['fires'] or 0) if row else 0
+                    fires = (row["fires"] or 0) if row else 0
                     lines.append(
                         f"  {sig_name:<26} {fires:>5} {'prior':>6} {'N/A':>8} "
                         f"{'N/A':>9} {prior:>9.0f}"
                     )
 
             if not any_live_data:
-                return (f"Active signals: {', '.join(active_signals)} "
-                        f"— no live win-rate data yet, using priors only.")
-            return '\n'.join(lines)
+                return (
+                    f"Active signals: {', '.join(active_signals)} "
+                    f"— no live win-rate data yet, using priors only."
+                )
+            return "\n".join(lines)
     except Exception:
         return f"Active signals fired: {', '.join(active_signals)} (win-rate DB unavailable)"
 
 
-def get_agent_self_accuracy(agent_name: str, regime: str = 'any') -> str:
+def get_agent_self_accuracy(agent_name: str, regime: str = "any") -> str:
     """
     Returns a one-liner for an agent's own historical accuracy.
     Injected into the USER prompt (not system — keeps caching intact).
@@ -474,21 +602,27 @@ def get_agent_self_accuracy(agent_name: str, regime: str = 'any') -> str:
     try:
         with _conn() as c:
             # Prefer regime-specific, fall back to 'any'
-            row = c.execute("""
+            row = c.execute(
+                """
                 SELECT votes_buy, correct_buy, accuracy
                 FROM agent_stats
                 WHERE agent_name=? AND regime=?
                 LIMIT 1
-            """, (agent_name, regime)).fetchone()
-            if not row or not row['votes_buy'] or row['votes_buy'] < 5:
-                row = c.execute("""
+            """,
+                (agent_name, regime),
+            ).fetchone()
+            if not row or not row["votes_buy"] or row["votes_buy"] < 5:
+                row = c.execute(
+                    """
                     SELECT votes_buy, correct_buy, accuracy
                     FROM agent_stats
                     WHERE agent_name=? AND regime='any'
                     LIMIT 1
-                """, (agent_name,)).fetchone()
-            if row and row['votes_buy'] and row['votes_buy'] >= 5:
-                acc = row['accuracy'] or (row['correct_buy'] / max(row['votes_buy'], 1))
+                """,
+                    (agent_name,),
+                ).fetchone()
+            if row and row["votes_buy"] and row["votes_buy"] >= 5:
+                acc = row["accuracy"] or (row["correct_buy"] / max(row["votes_buy"], 1))
                 return (
                     f"YOUR PAST ACCURACY ({regime} regime): "
                     f"{row['correct_buy']}/{row['votes_buy']} BUY calls correct ({acc:.0%}). "
@@ -499,31 +633,36 @@ def get_agent_self_accuracy(agent_name: str, regime: str = 'any') -> str:
         return ""
 
 
-def get_agent_accuracy_context(regime: str = 'any') -> str:
+def get_agent_accuracy_context(regime: str = "any") -> str:
     """Return a formatted string injected into agent debate prompts."""
     try:
         with _conn() as c:
-            rows = c.execute("""
+            rows = c.execute(
+                """
                 SELECT agent_name, votes_buy, correct_buy, incorrect_buy, accuracy
                 FROM agent_stats
                 WHERE regime IN (?, 'any')
                 ORDER BY agent_name
-            """, (regime,)).fetchall()
+            """,
+                (regime,),
+            ).fetchall()
 
         if not rows:
             return ""
 
         lines = ["AGENT HISTORICAL ACCURACY (this regime):"]
         for r in rows:
-            if r['votes_buy'] < 5:
-                lines.append(f"  {r['agent_name']}: < 5 BUY votes — no track record yet")
+            if r["votes_buy"] < 5:
+                lines.append(
+                    f"  {r['agent_name']}: < 5 BUY votes — no track record yet"
+                )
             else:
-                acc = r['accuracy'] or 0
+                acc = r["accuracy"] or 0
                 lines.append(
                     f"  {r['agent_name']}: {r['correct_buy']}/{r['votes_buy']} BUY calls correct "
                     f"({acc:.0%} accuracy)"
                 )
-        return '\n'.join(lines)
+        return "\n".join(lines)
     except Exception:
         return ""
 
@@ -532,28 +671,34 @@ def get_signal_report(min_fires: int = 5) -> list[dict]:
     """Return signal stats for dashboard / daily summary."""
     try:
         with _conn() as c:
-            rows = c.execute("""
+            rows = c.execute(
+                """
                 SELECT signal_name, regime, fires, wins, win_rate,
                        avg_pnl, bayesian_pts, prior_pts, last_updated
                 FROM signal_stats
                 WHERE fires >= ? AND regime='any' AND source='combined'
                 ORDER BY fires DESC
-            """, (min_fires,)).fetchall()
+            """,
+                (min_fires,),
+            ).fetchall()
         return [dict(r) for r in rows]
     except Exception:
         return []
 
 
-def get_top_signals(regime: str = 'any', top_n: int = 5) -> list[dict]:
+def get_top_signals(regime: str = "any", top_n: int = 5) -> list[dict]:
     """Return top-N performing signals by win_rate (min 10 fires)."""
     try:
         with _conn() as c:
-            rows = c.execute("""
+            rows = c.execute(
+                """
                 SELECT signal_name, fires, win_rate, avg_pnl, bayesian_pts
                 FROM signal_stats
                 WHERE fires >= 10 AND regime=? AND source='combined'
                 ORDER BY win_rate DESC LIMIT ?
-            """, (regime, top_n)).fetchall()
+            """,
+                (regime, top_n),
+            ).fetchall()
         return [dict(r) for r in rows]
     except Exception:
         return []
@@ -564,15 +709,21 @@ def get_attribution_history(symbol: str = None, limit: int = 50) -> list[dict]:
     try:
         with _conn() as c:
             if symbol:
-                rows = c.execute("""
+                rows = c.execute(
+                    """
                     SELECT * FROM trade_attribution WHERE symbol=?
                     ORDER BY created_at DESC LIMIT ?
-                """, (symbol, limit)).fetchall()
+                """,
+                    (symbol, limit),
+                ).fetchall()
             else:
-                rows = c.execute("""
+                rows = c.execute(
+                    """
                     SELECT * FROM trade_attribution
                     ORDER BY created_at DESC LIMIT ?
-                """, (limit,)).fetchall()
+                """,
+                    (limit,),
+                ).fetchall()
         return [dict(r) for r in rows]
     except Exception:
         return []

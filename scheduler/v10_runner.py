@@ -587,6 +587,18 @@ def _scan_and_trade_inner():
         f"(~{_econ_veto_est} vetoed/skipped in signal engine or econ gate)"
     )
 
+    # Write scan heartbeat — read by health_check._check_scan_liveness()
+    try:
+        from logging_db.trade_logger import log_event as _log_hb
+
+        _log_hb(
+            "INFO",
+            "heartbeat",
+            f"scan ok: {_funnel['total']} candidates → {_funnel['entries']} entries",
+        )
+    except Exception:
+        pass
+
 
 def _attempt_entry(
     candidate,
@@ -1383,7 +1395,7 @@ def _evaluate_position_exit(
                 exit_type=exit_decision.exit_type,
             )
         except Exception as e:
-            logger.debug(f"[v10] post_trade_analyzer error {symbol}: {e}")
+            logger.warning(f"[v10] post_trade_analyzer error {symbol}: {e}")
 
     # Notification
     if ne is not None:

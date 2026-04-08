@@ -1,5 +1,8 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
+## 2026-04-08
+- fix(ibkr): replace dead asyncio.run() pattern with persistent event loop thread — orders now reach TWS instead of silently failing with IBKR_ERR_ IDs; _place_bracket_async and _place_market_async use qualifyContractsAsync on the live loop; _place_market_async cancels open bracket children before market exit
+
 ## 2026-04-06
 - fix(health_check): replace stale learning.ml_signal import with ModelStore check; fix scanner.py comment drift (M → .5M); commit historical_data.py try/except guard for cache unavailability
 

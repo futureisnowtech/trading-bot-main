@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-08
+- feat(dashboard): v14 widget architecture — split monolithic app.py into dashboard/data/ (8 data modules) + dashboard/widgets/ (14 widget modules across 5 tabs: MISSION CONTROL, CRYPTO PERFORMANCE, TRADE APPROVAL, S&P 500 FUTURES, SYSTEM SETTINGS)
+
+## 2026-04-08
 - fix(ibkr): eliminate FD leak — use get_ibkr_broker() singleton in MES cycle (was creating new IBKRBroker() each cycle, leaking event loop threads + sockets); add cleanup in connect() before reassigning IB object; remove disconnect() from finally block (singleton must stay connected across cycles)
 
 ## 2026-04-08

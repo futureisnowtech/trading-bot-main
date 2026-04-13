@@ -28,7 +28,7 @@ A fully autonomous AI-powered trading system that:
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
 
-## Current Version: v13.7 (2026-04-13)
+## Current Version: v13.8 (2026-04-13)
 
 **Active branch:** `feature/v10-rebuild`
 **Clean paper trading started:** 2026-04-02
@@ -86,6 +86,19 @@ Owner decides when to go live. These are informational readings, not system gate
 - Days running on clean data
 - Economics gate veto rate
 - Kill switch triggers (14d)
+
+### v13.8 Dead-Money Exit + Dashboard Live Health + Proof Coverage (applied 2026-04-13)
+
+- `scheduler/v10_runner.py` — **Priority-7 dead-money exit** replaces the old time-only (>72h) stagnant check. Now fires when: held >24h AND `|current_price - entry_price| < 0.5 × atr_at_entry` (market empirically proved no edge) AND no trailing activation AND no scale-out done. Hard backstop at 96h regardless. `exit_type` changed from `stagnant_exit` → `dead_money_exit`. Log line includes drift ratio, entry, current price, ATR.
+- `config.py` — `CRYPTO_SCAN_INTERVAL_SECONDS` corrected 15 → 300 (matches actual 5-min scan loop). Was causing `scan_liveness` health check to always fail (45s threshold vs 300s reality).
+- `monitoring/health_check.py` — deduplication: `_last_failure_keys` frozenset comparison suppresses repeated `log_event` writes when failing checks haven't changed; only writes when failure set changes, status changes, or hourly cooldown elapses. Eliminates DB flooding (~60 near-identical ERROR rows/hour → ~1).
+- `dashboard/data/health.py` — **`get_health_status()` substring fix:** `"HEALTHY" in msg` matched "UNHEALTHY" (substring); changed to `"[HEALTHY]" in msg` — bracket-enclosed match. Was silently reading every UNHEALTHY event as HEALTHY, causing `get_health_check_failures()` to always return `[]`.
+- `dashboard/data/health.py` — **`get_error_rate_1h()`** now excludes `source='health_check'`; health_check noise was inflating the banner count to 20+ even when all runtime errors were fixed.
+- `dashboard/data/health.py` — **`get_health_check_failures()`** (NEW): parses the *current* (most recent) health_check event to extract per-check failures. Always reflects live bot state, never 1-hour of stale DB records. Each failure carries `live=True`, `category`, `fix_type` (Claude Code / Codex), `fix_prompt`.
+- `dashboard/data/health.py` — **`get_recent_errors_detail()`** now excludes `source='health_check'`; that source is covered by `get_health_check_failures()` using live data.
+- `dashboard/widgets/mission_control/status_hero.py` — error breakdown panel rebuilt: health_check failures shown from live state (not DB history), other errors from 1h DB window (health_check excluded), `no_errors` banner logic updated to `error_rate == 0 and not _health_issues`, re-check button removed (auto-refreshes every 10s), live timestamp + LIVE badge + green all-clear banner added.
+- `dashboard/data/health.py` — **Error classifier** (`_classify_error`) fix-prompt for "stagnant" updated to reference dead-money exit (not the old 72h block).
+- `tests/proof/test_dashboard_data.py` (NEW) — 16 invariant proof tests for `dashboard/data/health.py`: source exclusion (error rate + detail), deduplication, live-state parsing, banner `no_errors` consistency. **The key invariant test** (`test_banner_no_errors_false_when_health_degraded_and_no_runtime_errors`) explicitly encodes the tunnel-vision bug class so it can never silently regress. All 41 proof tests green.
 
 ### v13.7 Autonomous Journaling Operationalization (applied 2026-04-13)
 
@@ -308,7 +321,7 @@ Two deterministic towers → composite score → regime threshold gate.
 
 Entry: composite >= regime threshold (TRENDING_UP/DOWN=58, RANGING=58, HIGH_VOL=60, LOW_VOL=56, UNKNOWN=58). Same threshold paper and live.
 
-## 6-Priority Exit Stack (position_manager.py) — v13.5
+## 7-Priority Exit Stack (position_manager.py + v10_runner.py) — v13.8
 
 1. **Trailing stop** — regime-aware activation (RANGING=1.0×ATR, TRENDING=1.5×ATR, HIGH_VOL=2.0×ATR) and trail width (RANGING=2.5×, TRENDING=4.5×, HIGH_VOL=5.5×). Trail further compresses as signal health fades toward thesis floor (signal-health trail compression, non-restrictive).
 2. **Take profit scale-out** — conviction-adaptive targets: _factor blends entry_composite_score (60%) + regime extension (40%). First cut 20–30% at 2.0–4.0R; second cut 25% at 4.5–8.0R. Denominator uses actual stop distance (not hardcoded ATR multiple).
@@ -316,6 +329,7 @@ Entry: composite >= regime threshold (TRENDING_UP/DOWN=58, RANGING=58, HIGH_VOL=
 4. **Hard stop** — stop-market on exchange, never widened.
 5. **Risk forced exit** — margin breach / drawdown / correlation.
 6. **Kill switch** — balance < 75% of ACCOUNT_SIZE / API errors / latency.
+7. **Dead-money exit** (`scheduler/v10_runner.py`, `exit_type=dead_money_exit`) — fires when held >24h AND `|current_price - entry_price| < 0.5 × atr_at_entry` (price hasn't moved half an ATR since entry, market proved no edge) AND no trailing activation AND no scale-out. Hard backstop at 96h regardless of drift. Data-driven — time is a gate, market movement is the signal.
 
 ## v10 Learning Architecture
 
@@ -454,6 +468,7 @@ Motivation 1-5: "Strive for greatness." / "I like criticism. It makes you strong
 | v13.5 | 2026-04-13 | Conviction-adaptive exit stack: real-R scale-out denominator, regime-aware trailing, signal-health compression, ATR-proportional hold gates |
 | v13.6 | 2026-04-13 | Candidate journaling at 8 decision gates, automated outcome labeling, nightly audit, proof suite (10 tests) |
 | v13.7 | 2026-04-13 | 15m labeling, exception-only notifications, funnel analytics, retention pruning, dashboard health panel, CI fix, proof suite 25/25 |
+| v13.8 | 2026-04-13 | Dead-money exit (data-driven, replaces time-only stagnant); scan_liveness fix; health_check dedup; UNHEALTHY/HEALTHY substring bug fix; dashboard live health panel; 16 dashboard data proof tests; 41/41 green |
 
 ## GitHub
 - Repository: `futureisnowtech/trading-bot-main` (private)
@@ -462,10 +477,12 @@ Motivation 1-5: "Strive for greatness." / "I like criticism. It makes you strong
 
 ## Claude's Standing Instructions
 When making any change to this project:
-1. Update CLAUDE.md if the change affects how the system works
+1. **Update CLAUDE.md immediately** — not at the end of the session, not as cleanup. The moment a behaviour changes (exit logic, dashboard, health checks, config, proof tests), update the relevant section before moving on. CLAUDE.md is the source of truth for the next session; if it's stale, the next session starts blind.
 2. Append to CHANGELOG.md: `bash scripts/log_change.sh "Description"`
 3. Commit when a logical unit of work is done
 4. Never commit .env or logs/ — .gitignore already excludes them
 5. Always use `python3`, not `python`
 6. Read a file before editing it
 7. Test paper mode before any live-mode changes: `python3 main.py --mode paper`
+8. **Proof tests are part of done** — any change to a data layer function (dashboard/data/, logging_db/, config.py constants) requires a proof test that defines the invariant. If the test doesn't exist, write it. If it would have caught the bug, it's mandatory.
+9. **No tunnel vision on partial changes** — when changing one function in a module, grep for all callers and related functions that touch the same data. Example: changing a query filter in `get_recent_errors_detail()` requires checking `get_error_rate_1h()` and `get_health_status()` too.

@@ -290,7 +290,9 @@ NO_TRADE_UNTIL: dt_time = dt_time(10, 0)
 # SCHEDULER INTERVALS
 # ════════════════════════════════════════════════════════════════════
 EQUITY_SCAN_INTERVAL_SECONDS: int = 60
-CRYPTO_SCAN_INTERVAL_SECONDS: int = 15
+CRYPTO_SCAN_INTERVAL_SECONDS: int = (
+    300  # matches v10_runner 5-minute scan_and_trade loop
+)
 FUTURES_SCAN_INTERVAL_SECONDS: int = 60
 POSITION_MONITOR_INTERVAL_SECONDS: int = 30
 WATCHDOG_INTERVAL_SECONDS: int = 900  # Alert if no scan in 15 min

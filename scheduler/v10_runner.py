@@ -1284,12 +1284,69 @@ def _evaluate_position_exit(
             logger.debug(f"[v10] trailing activate error {symbol}: {e}")
         return
 
+    # Handle signal-health trail compression (non-exit: tighten trail, don't close)
+    # check_exits returns trail_compressed when conviction is fading but thesis hasn't
+    # fully broken yet.  Apply the compressed multiplier so the bot's own conviction
+    # governs how much runway it gives the trade — no extra gate added.
+    if (
+        not exit_decision.should_exit
+        and exit_decision.exit_type == "trail_compressed"
+        and exit_decision.trail_atr_mult is not None
+    ):
+        try:
+            pos["trail_atr_mult"] = exit_decision.trail_atr_mult
+            # Immediately recompute the trailing stop price with the new tighter mult
+            atr = float(pos.get("atr_at_entry", current_price * 0.015))
+            peak = float(pos.get("peak_price", current_price))
+            direction = str(pos.get("direction", "LONG")).upper()
+            if direction == "LONG":
+                new_trail = peak - atr * exit_decision.trail_atr_mult
+                if new_trail > float(pos.get("trailing_stop_price", 0)):
+                    pos["trailing_stop_price"] = round(new_trail, 4)
+            else:
+                new_trail = peak + atr * exit_decision.trail_atr_mult
+                existing = float(pos.get("trailing_stop_price", 0))
+                if existing == 0 or new_trail < existing:
+                    pos["trailing_stop_price"] = round(new_trail, 4)
+            logger.debug(
+                f"[v10] {symbol} trail compressed → {exit_decision.trail_atr_mult:.1f}×ATR "
+                f"({exit_decision.reason})"
+            )
+        except Exception as e:
+            logger.debug(f"[v10] trail compress error {symbol}: {e}")
+        return
+
     # Update trailing stop if active
     if pos.get("trailing_active", False):
         try:
             pm.update_trailing_stop(pos, current_price)
         except Exception as e:
             logger.debug(f"[v10] trailing update error {symbol}: {e}")
+
+    # ── Stagnant position exit (priority 7 — time-based cleanup) ─────────────
+    # If the full 6-priority stack says HOLD, apply a time gate.
+    # Positions open >72h with no trailing activation and no scale-out are
+    # dead weight: price never moved enough to win, never hit stop either.
+    # Close them to free capital slots for the setups the scanner is finding.
+    if not exit_decision.should_exit:
+        _entry_ts = pos.get("entry_ts", time.time())
+        _age_hours = (time.time() - _entry_ts) / 3600
+        if (
+            _age_hours > 72
+            and not pos.get("trailing_active", False)
+            and not pos.get("scale_33_done", False)
+        ):
+            logger.info(
+                f"[v10] STAGNANT {symbol} {pos.get('direction', 'LONG')}: "
+                f"age={_age_hours:.1f}h, no trailing, no scale-out — closing to free slot"
+            )
+            exit_decision = pm.ExitDecision(
+                should_exit=True,
+                priority=7,
+                exit_type="stagnant_exit",
+                partial_pct=1.0,
+                reason=f"Stagnant {_age_hours:.1f}h: no trailing activation, no scale-out — slot recycled",
+            )
 
     if not exit_decision.should_exit:
         return

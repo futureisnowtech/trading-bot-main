@@ -35,6 +35,15 @@ from logging_db.trade_logger import log_event
 _MIN_INTERVAL_SECONDS = 60
 _last_run: float = 0.0
 
+# Deduplication: suppress writing identical failure keys to system_events more
+# than once per hour. Stagnant positions increment their age every minute, so
+# the summary text changes but the *failing checks* don't — without this, the
+# DB fills with hundreds of near-identical ERROR rows per day.
+_last_failure_keys: frozenset = frozenset()
+_last_status: str = ""
+_last_event_written: float = 0.0
+_REPEAT_STATUS_COOLDOWN = 3600  # write repeated identical status at most once per hour
+
 
 def _conn() -> sqlite3.Connection:
     c = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -210,7 +219,7 @@ def run_health_check(force: bool = False) -> dict:
     Writes results to system_events source='health_check'.
     Returns dict with score, total, and per-check results.
     """
-    global _last_run
+    global _last_run, _last_failure_keys, _last_status, _last_event_written
     if not force and time.time() - _last_run < _MIN_INTERVAL_SECONDS:
         return {}
 
@@ -245,10 +254,25 @@ def run_health_check(force: bool = False) -> dict:
         if status == "HEALTHY"
         else ("WARNING" if status == "DEGRADED" else "ERROR")
     )
-    try:
-        log_event(level, "health_check", summary)
-    except Exception:
-        pass
+
+    # Deduplicate: only write to system_events when failure keys change OR
+    # status changes OR the hourly cooldown has elapsed. This prevents stagnant
+    # position age increments from flooding the DB with near-identical ERRORs.
+    failure_keys = frozenset(k for k, v in checks.items() if not v["ok"])
+    now_ts = time.time()
+    should_write = (
+        status != _last_status
+        or failure_keys != _last_failure_keys
+        or (now_ts - _last_event_written) > _REPEAT_STATUS_COOLDOWN
+    )
+    if should_write:
+        try:
+            log_event(level, "health_check", summary)
+        except Exception:
+            pass
+        _last_failure_keys = failure_keys
+        _last_status = status
+        _last_event_written = now_ts
 
     if status != "HEALTHY":
         print(f"[health_check] {summary}")

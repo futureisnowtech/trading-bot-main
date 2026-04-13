@@ -1,5 +1,14 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
+## 2026-04-10
+- fix(validate): treat optional import runtime failures as warnings so pre-flight validation completes on Python 3.14
+
+## 2026-04-10
+- chore(truth): align validator/version sources with current repo truth and proof harness docs
+
+## 2026-04-10
+- feat(proof): add proof-first pytest/CI/replay harness, align dashboard attribution queries with live schema, and harden logger/kill-switch/risk startup state
+
 ## 2026-04-08
 - feat(dashboard): v14 widget architecture — split monolithic app.py into dashboard/data/ (8 data modules) + dashboard/widgets/ (14 widget modules across 5 tabs: MISSION CONTROL, CRYPTO PERFORMANCE, TRADE APPROVAL, S&P 500 FUTURES, SYSTEM SETTINGS)
 

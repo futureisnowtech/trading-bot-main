@@ -42,7 +42,7 @@ jobs:
           cat > .env << 'EOF'
           PAPER_TRADING=true
           ANTHROPIC_API_KEY=test_key_ci
-          ACCOUNT_SIZE=5000
+          ACCOUNT_SIZE=10000
           COINBASE_API_KEY=test_key_ci
           COINBASE_API_SECRET=test_secret_ci
           ALPACA_API_KEY=test_key_ci

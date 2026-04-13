@@ -1,5 +1,5 @@
-# CLAUDE.md — Algo Trading System Knowledge Base
-# Auto-loaded by Claude Code at the start of every session.
+# AGENTS.md — Algo Trading System Knowledge Base
+# Auto-loaded by Codex at the start of every session.
 # This file IS the system memory. Keep it current.
 # When you make changes: update this file AND append to CHANGELOG.md.
 
@@ -60,7 +60,7 @@ A fully autonomous AI-powered trading system that:
 | Kill switch | `kill_switch.py` | Balance < 75% of ACCOUNT_SIZE → halt all |
 | Risk engine | `risk_engine.py` | VaR/CVaR, correlation gates, margin checks |
 | Hedge engine | `hedge_engine.py` | Delta-neutral hedge rebalance (every 5 min) |
-| MCP server | `mcp_server/server.py` | 15 FastMCP tools for Claude Code integration |
+| MCP server | `mcp_server/server.py` | 15 FastMCP tools for Codex integration |
 | Verification | `tests/proof/` + `verification/replay.py` + `.github/workflows/ci.yml` | Proof-first pytest harness, dashboard shell tests, deterministic replay, GitHub Actions CI |
 
 ### Key Decisions
@@ -112,7 +112,7 @@ Owner decides when to go live. These are informational readings, not system gate
 
 - `risk/economics_gate.py`: volume floor aligned $3M → $2.5M (matches scanner floor, eliminates dead zone); spread gate added (`_MAX_SPREAD_PCT_GATE = 0.0025`, 25 bps global fallback); depth gate added (`_MIN_NEAR_DEPTH_USD = 5_000`, $5K each side, only fires when depth data available); EV floor upgraded to cost-aware formula: `max(static_tier_b, 2.0 × effective_round_trip_cost)` where effective cost = fees + spread/2 + funding carry
 - `scheduler/v10_runner.py`: price sanity check tightened 20% → 5% global fallback (old 20% threshold missed ETH $19 vs $2130 candle issue); depth fields (`bid_depth_usd`, `ask_depth_usd`) now extracted from candidate and passed to economics gate; veto suppression upgraded from time-only cooldown to 3-strike system — first 3 occurrences log normally, 4th emits "suppressing further" notice, silent thereafter until 30-min window resets
-- `CLAUDE.md`: scanner sources corrected — code actually uses 3 sources (Kraken Futures + Binance USDM + Hyperliquid) every scan cycle; docs were Kraken-centric but code was not
+- `AGENTS.md`: scanner sources corrected — code actually uses 3 sources (Kraken Futures + Binance USDM + Hyperliquid) every scan cycle; docs were Kraken-centric but code was not
 
 ### v13.1 Scanner/Funnel Fixes (applied 2026-04-06)
 
@@ -152,7 +152,7 @@ Owner decides when to go live. These are informational readings, not system gate
 
 ```
 algo_trading_final/
-├── CLAUDE.md                 ← You are here (keep current)
+├── AGENTS.md                 ← You are here (keep current)
 ├── CHANGELOG.md              ← Append every change: bash scripts/log_change.sh "..."
 ├── main.py                   ← Entry: python3 main.py --mode paper
 ├── config.py                 ← All constants (reads .env)
@@ -343,7 +343,7 @@ Table: trade_experiences — NumPy cosine similarity, SQLite storage (no LanceDB
 python3 main.py --mode paper       # Force paper
 python3 main.py --mode live        # Live (requires typing 'I UNDERSTAND')
 streamlit run dashboard/app.py --server.runOnSave true  # Dashboard on :8501
-python3 mcp_server/server.py       # MCP server (Claude Code integration)
+python3 mcp_server/server.py       # MCP server (Codex integration)
 python3 scripts/weekly_report.py   # Weekly performance report
 python3 -m pytest                  # Proof-first verification suite
 ```
@@ -426,9 +426,9 @@ Motivation 1-5: "Strive for greatness." / "I like criticism. It makes you strong
 - Active branch: `feature/v10-rebuild`
 - Push: `git push origin feature/v10-rebuild` (SSH configured)
 
-## Claude's Standing Instructions
+## Codex's Standing Instructions
 When making any change to this project:
-1. Update CLAUDE.md if the change affects how the system works
+1. Update AGENTS.md if the change affects how the system works
 2. Append to CHANGELOG.md: `bash scripts/log_change.sh "Description"`
 3. Commit when a logical unit of work is done
 4. Never commit .env or logs/ — .gitignore already excludes them

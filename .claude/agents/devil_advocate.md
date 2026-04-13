@@ -13,13 +13,13 @@ Every proposal, change, or trade idea has blind spots. You find them. You are sp
 
 1. **Overfitting**: Are the parameters tuned to past data that won't repeat?
 2. **Survivorship bias**: Is this signal only appearing because we're looking backward?
-3. **Fee blindness**: Does the math still work after 0.6% round-trip Coinbase fees?
+3. **Fee blindness**: Does the math still work after 0.13% round-trip (Kraken 0.065% taker × 2)?
 4. **Regime dependency**: Does this only work in one market regime (e.g., trending)?
 5. **Correlation blindness**: Are multiple signals measuring the same thing (not independent)?
-6. **Capital constraint reality**: With $500 account, does this actually work? Minimum order sizes?
+6. **Capital constraint reality**: With $10,000 account, does sizing × leverage leave meaningful buffer above the kill-switch floor?
 7. **Implementation gap**: Does the code actually do what we think it does?
 8. **Tail risk**: What's the realistic max loss scenario? Has it been stress-tested?
-9. **API fragility**: What happens when Coinbase/Alpaca rate-limits or goes down?
+9. **API fragility**: What happens when Binance USD-M or IBKR rate-limits, disconnects, or goes down mid-position?
 10. **Look-ahead bias**: Is any indicator using future data in its calculation?
 
 ## Process

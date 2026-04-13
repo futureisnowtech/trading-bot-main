@@ -173,6 +173,8 @@ for label, module, consequence in optional_imports:
         ok(f"{label} (optional)")
     except ImportError:
         warn(f"{label} not installed — {consequence}")
+    except Exception as e:
+        warn(f"{label} imported but has error: {e}")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -209,16 +211,26 @@ except Exception as e:
 print("\n─── Version ────────────────────────────────────────────")
 
 try:
-    claude_md = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'CLAUDE.md')
-    if os.path.exists(claude_md):
-        with open(claude_md) as f:
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    version_sources = [
+        os.path.join(repo_root, 'AGENTS.md'),
+        os.path.join(repo_root, 'CLAUDE.md'),
+    ]
+
+    for version_source in version_sources:
+        if not os.path.exists(version_source):
+            continue
+
+        with open(version_source) as f:
             for line in f:
                 if 'Current Version:' in line:
                     version = line.strip().split(':')[-1].strip()
                     ok(f"System version: {version}")
-                    break
-    else:
-        warn("CLAUDE.md not found")
+                    raise StopIteration
+
+    warn("No version source found (checked AGENTS.md, CLAUDE.md)")
+except StopIteration:
+    pass
 except Exception as e:
     warn(f"Version check skipped: {e}")
 

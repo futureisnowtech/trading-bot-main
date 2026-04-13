@@ -12,7 +12,11 @@ import re
 import streamlit as st
 from datetime import datetime
 
-from data.health import get_error_rate_1h
+from data.health import (
+    get_error_rate_1h,
+    get_health_check_failures,
+    get_recent_errors_detail,
+)
 from data.scanner_data import get_last_scan_age
 from data.performance import get_performance_stats
 from data.account import get_today_pnl, get_drawdown
@@ -45,7 +49,8 @@ def render_status_hero():
 
     # ── determine bot status ──────────────────────────────────────────────────
     scan_ok = scan_age < 600  # scanned within 10 minutes
-    no_errors = error_rate == 0
+    _health_issues = get_health_check_failures()
+    no_errors = error_rate == 0 and not _health_issues
 
     if scan_ok and no_errors:
         dot, bg = "#4ade80", "rgba(74,222,128,0.07)"
@@ -84,6 +89,80 @@ def render_status_hero():
         </div>""",
         unsafe_allow_html=True,
     )
+
+    # ── error breakdown ───────────────────────────────────────────────────────
+    # _health_issues already computed above for banner logic — reuse it here.
+    # other_errors: last 1h of non-health_check ERROR rows (scanner, broker, ml, etc).
+    # The panel disappears automatically when both are empty — that IS the all-clear UX.
+    _other_errors = get_recent_errors_detail() if error_rate > 0 else []
+    _all_issues = _health_issues + _other_errors
+
+    if _all_issues:
+        _checked_at = datetime.now().strftime("%H:%M:%S")
+        with st.expander(
+            f"{len(_all_issues)} issue type(s) detected",
+            expanded=True,
+        ):
+            st.markdown(
+                f"<span style='color:#475569; font-size:0.78em;'>Live — checked at "
+                f"<strong style='color:#94a3b8;'>{_checked_at}</strong> · "
+                f"updates every 10s · panel disappears when all resolved</span>",
+                unsafe_allow_html=True,
+            )
+            for err in _all_issues:
+                _is_live = err.get("live", False)
+                badge_color = (
+                    "#7c3aed" if err["fix_type"] == "Claude Code" else "#0ea5e9"
+                )
+                fix_label = err["fix_type"].upper()
+                count_str = f"×{err['count']}" if err["count"] > 1 else ""
+                right_badges = (
+                    '<span style="font-size:0.71em; color:#4ade80; '
+                    "background:rgba(74,222,128,0.12); padding:2px 7px; "
+                    'border-radius:4px; font-weight:600;">LIVE</span>'
+                    if _is_live
+                    else (
+                        f'<span style="font-size:0.71em; color:#64748b;">{count_str}</span>'
+                        if count_str
+                        else ""
+                    )
+                )
+                st.markdown(
+                    f"""<div style="background:rgba(248,113,113,0.06);
+                         border:1px solid rgba(248,113,113,0.18);
+                         border-radius:7px; padding:10px 14px; margin-bottom:4px; margin-top:8px;">
+                      <div style="display:flex; justify-content:space-between;
+                           align-items:center; margin-bottom:5px; flex-wrap:wrap; gap:6px;">
+                        <span style="font-weight:700; color:#fca5a5;
+                              font-size:0.91em;">{err["category"]}</span>
+                        <span style="display:flex; gap:7px; align-items:center;">
+                          <span style="font-size:0.71em; color:#94a3b8;
+                               background:rgba(255,255,255,0.05);
+                               padding:2px 7px; border-radius:4px;">{err["source"]}</span>
+                          <span style="font-size:0.71em; color:#fff;
+                               background:{badge_color};
+                               padding:2px 9px; border-radius:4px;
+                               font-weight:700; letter-spacing:0.04em;">{fix_label}</span>
+                          {right_badges}
+                        </span>
+                      </div>
+                      <div style="font-size:0.75em; color:#64748b; font-family:monospace;
+                           white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+                           max-width:100%;">{err["sample_msg"]}</div>
+                    </div>""",
+                    unsafe_allow_html=True,
+                )
+                st.code(err["fix_prompt"], language=None)
+    elif error_rate > 0:
+        # DB has errors in last 1h but health_check now reads healthy and no other
+        # errors — issues resolved mid-hour. Show a brief confirmation.
+        st.markdown(
+            "<div style='background:rgba(74,222,128,0.06); border:1px solid "
+            "rgba(74,222,128,0.2); border-radius:7px; padding:9px 14px; "
+            "margin-bottom:12px; font-size:0.85em; color:#4ade80;'>"
+            "✓ All issues resolved — system is healthy</div>",
+            unsafe_allow_html=True,
+        )
 
     # ── 4 big metric cards ────────────────────────────────────────────────────
     c1, c2, c3, c4 = st.columns(4)

@@ -47,16 +47,24 @@ section[data-testid="stSidebar"] { display: none; }
 )
 
 # ── widget imports ─────────────────────────────────────────────────────────────
+# Status hero (the new primary overview widget)
+from widgets.mission_control.status_hero import render_status_hero
+
+# Main-view widgets (always visible on Mission Control)
+from widgets.mission_control.open_positions import render_positions_compact
+from widgets.mission_control.activity_log import render_smart_logs
+from widgets.mission_control.equity_curve import render_equity_curve_compact
+
+# Detail widgets (live inside the "System details" expander)
 from widgets.mission_control.system_health import render_system_integrity
 from widgets.mission_control.edge_quality import render_edge_quality
 from widgets.mission_control.alert_feed import render_alert_feed
-from widgets.mission_control.open_positions import render_positions_compact
 from widgets.mission_control.scanner_funnel import render_scanner_funnel
 from widgets.mission_control.failure_modes import render_failures_compact
 from widgets.mission_control.execution_quality import render_execution_quality
 from widgets.mission_control.decision_quality import render_decision_quality
-from widgets.mission_control.equity_curve import render_equity_curve_compact
-from widgets.mission_control.activity_log import render_smart_logs
+
+# Other tabs
 from widgets.crypto_performance.deep_analysis import render_deep_analysis
 from widgets.trade_approval.manual_scan import render_manual_scan
 from widgets.futures.mes_dashboard import render_futures
@@ -65,15 +73,12 @@ from widgets.system_settings.dev_config import render_dev_config
 
 # ── main ───────────────────────────────────────────────────────────────────────
 def main():
-    st.title("Algo Trading — Operator Panel v14")
-    st.caption(
-        "Is the system healthy?  ·  Is it profitable after fees?  ·  Where is it breaking?"
-    )
+    st.title("Algo Trading — Operator Panel")
 
     tab_mc, tab_cp, tab_ta, tab_fut, tab_ss = st.tabs(
         [
             "MISSION CONTROL",
-            "CRYPTO PERFORMANCE",
+            "PERFORMANCE",
             "TRADE APPROVAL",
             "S&P 500 FUTURES (MES)",
             "SYSTEM SETTINGS",
@@ -82,52 +87,60 @@ def main():
 
     # ── Tab 1: MISSION CONTROL ─────────────────────────────────────────────────
     with tab_mc:
-        st.caption(
-            "Is everything running? Are we making money? Any problems right now?"
-        )
-        st.info(
-            "All metrics on this tab are **Crypto Perps** (Kraken Futures / Binance USDM / Hyperliquid). "
-            "For S&P 500 Futures results, see the **S&P 500 FUTURES (MES)** tab.",
-            icon="ℹ️",
-        )
-
-        st.markdown("##### System Status")
-        col_health, col_edge, col_alerts = st.columns(3)
-        with col_health:
-            render_system_integrity()
-        with col_edge:
-            render_edge_quality()
-        with col_alerts:
-            render_alert_feed()
+        # ① Hero: status banner + 4 big metrics + plain-English narrative
+        render_status_hero()
 
         st.divider()
 
-        st.markdown("##### Operational Detail")
-        col_pos, col_scan, col_fail = st.columns(3)
+        # ② What's happening now: open positions + activity feed
+        col_pos, col_act = st.columns([1.1, 0.9])
         with col_pos:
             render_positions_compact()
-        with col_scan:
-            render_scanner_funnel()
-        with col_fail:
-            render_failures_compact()
+        with col_act:
+            render_smart_logs()
 
         st.divider()
 
-        col_exec, col_dec = st.columns(2)
-        with col_exec:
-            render_execution_quality()
-        with col_dec:
-            render_decision_quality()
-
-        st.divider()
-
+        # ③ Equity curve: is the account value growing?
         render_equity_curve_compact()
-        st.divider()
-        render_smart_logs()
 
-    # ── Tab 2: CRYPTO PERFORMANCE ──────────────────────────────────────────────
+        st.divider()
+
+        # ④ System details: all the technical readings, hidden by default.
+        #    Only dig in here if something looks wrong above.
+        with st.expander(
+            "⚙️  System details — health checks, scanner, execution quality",
+            expanded=False,
+        ):
+            st.caption(
+                "Technical readings that power the numbers above. "
+                "These are for diagnosing problems — you don't need to check them unless something looks off."
+            )
+
+            col_a, col_b, col_c = st.columns(3)
+            with col_a:
+                render_system_integrity()
+            with col_b:
+                render_edge_quality()
+            with col_c:
+                render_alert_feed()
+
+            st.markdown("---")
+
+            col_d, col_e = st.columns(2)
+            with col_d:
+                render_scanner_funnel()
+                render_execution_quality()
+            with col_e:
+                render_failures_compact()
+                render_decision_quality()
+
+    # ── Tab 2: PERFORMANCE ─────────────────────────────────────────────────────
     with tab_cp:
-        st.caption("Full breakdown of how our crypto trades are performing over time.")
+        st.caption(
+            "How is the strategy doing over time? Start with the report card — "
+            "expand any section for the full breakdown."
+        )
         render_deep_analysis()
 
     # ── Tab 3: TRADE APPROVAL ──────────────────────────────────────────────────
@@ -148,7 +161,8 @@ def main():
 Trades the <strong>Micro E-mini S&P 500 (MES)</strong> contract via IBKR paper account (port 7497).<br>
 Two strategies: <strong>Opening Range Breakout</strong> (10:00–15:45 ET) and
 <strong>VWAP Mean Reversion</strong> (10:00–14:30 ET).<br>
-This account is <strong>completely separate</strong> from crypto perps — different broker, different capital, different risk rules.
+This account is <strong>completely separate</strong> from crypto perps — different broker,
+different capital, different risk rules.
 </div>
 """,
             unsafe_allow_html=True,

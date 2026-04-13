@@ -1,6 +1,21 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-13
+- test(proof): add tests/proof/test_dashboard_data.py — 16 invariant proofs for dashboard/data/health.py: error_rate source exclusion, error_detail deduplication and source exclusion, health_failures live-state parsing, banner no_errors consistency. Catches the class of bug where partial changes to one function miss related functions.
+
+## 2026-04-13
+- fix(dashboard): get_health_status() was misreading UNHEALTHY events as HEALTHY — 'HEALTHY' in 'UNHEALTHY'.upper() is True; fixed by checking for '[HEALTHY]' (bracket-enclosed). This caused get_health_check_failures() to always return [] for UNHEALTHY events. Bug caught by new proof tests in test_dashboard_data.py.
+
+## 2026-04-13
+- fix(dashboard): error panel now shows live health state not stale DB history — get_health_check_failures() parses current health_check event (always fresh); get_recent_errors_detail() excludes health_check source; removed re-check button (redundant with 10s auto-refresh); added live timestamp + LIVE badge on current-state issues + green all-clear banner when issues resolve mid-hour; updated stagnant fix prompt to reference dead_money_exit
+
+## 2026-04-13
+- feat(dashboard): add Re-check now button to error details expander — clicking forces immediate fragment re-run to pull fresh error data without waiting for 10s auto-refresh
+
+## 2026-04-13
+- feat(exits): replace time-based stagnant exit with data-driven dead-money check — priority 7 now fires when held >24h AND price drift <0.5×ATR_at_entry (market proved no edge), with 96h hard backstop; exit_type changed from stagnant_exit to dead_money_exit; log line includes drift ratio, entry, current price, and ATR for diagnostics
+
+## 2026-04-13
 - v13.7: autonomous journaling operationalization — 15m labeling, exception-only notifications, funnel analytics, retention pruning, dashboard health panel, CI fix, proof suite 25/25 green
 
 ## 2026-04-13

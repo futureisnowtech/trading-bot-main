@@ -28,16 +28,123 @@ from data.execution import get_execution_stats, get_failure_counts
 from data.health import get_ml_status
 
 
+def _render_report_card(stats: dict, dd: dict) -> None:
+    """
+    Plain-English report card shown at the top of the Performance tab.
+    Gives a letter grade + one-sentence interpretation for each key dimension.
+    Only renders after 5+ trades.
+    """
+    closes = stats["closes"]
+
+    if closes < 5:
+        st.info(
+            f"Only {closes} completed trade{'s' if closes != 1 else ''} so far — "
+            "the report card needs at least 5 to be meaningful. Check back soon.",
+            icon="📋",
+        )
+        return
+
+    pf = stats["profit_factor"]
+    wr = stats["win_rate"]
+    max_dd = dd["max_dd_pct"]
+    ev_trade = stats["total_pnl"] / closes if closes else 0.0
+
+    # ── grade helpers ──────────────────────────────────────────────────────────
+    def _grade(v, great, good, ok):
+        if v >= great:
+            return "A", "#4ade80"
+        if v >= good:
+            return "B", "#86efac"
+        if v >= ok:
+            return "C", "#facc15"
+        return "D", "#f87171"
+
+    def _grade_inv(v, great, good, ok):  # lower is better
+        if v <= great:
+            return "A", "#4ade80"
+        if v <= good:
+            return "B", "#86efac"
+        if v <= ok:
+            return "C", "#facc15"
+        return "D", "#f87171"
+
+    pf_grade, pf_color = _grade(pf, 1.5, 1.2, 1.0)
+    wr_grade, wr_color = _grade(wr, 60.0, 52.0, 47.0)
+    dd_grade, dd_color = _grade_inv(max_dd, 2.0, 5.0, 10.0)
+    ev_grade, ev_color = _grade(ev_trade, 8.0, 3.0, 0.01)
+
+    if pf == float("inf"):
+        pf_plain = "No losing trades yet — keep watching"
+    elif pf >= 1.5:
+        pf_plain = f"Making ${pf:.2f} for every $1 lost — strong edge"
+    elif pf >= 1.2:
+        pf_plain = f"Making ${pf:.2f} for every $1 lost — solid"
+    elif pf >= 1.0:
+        pf_plain = f"Making ${pf:.2f} for every $1 lost — barely profitable"
+    else:
+        pf_plain = f"Only making ${pf:.2f} for every $1 lost — losing money overall"
+
+    wr_plain = f"Winning {wr:.0f}% of trades ({stats['wins']}W / {stats['losses']}L)"
+
+    dd_plain = (
+        f"Deepest losing streak: ${dd['max_dd_usd']:.2f} ({max_dd:.1f}% of account)"
+        if dd["max_dd_usd"] > 0
+        else "No drawdown yet"
+    )
+
+    ev_sign = "+" if ev_trade >= 0 else ""
+    ev_plain = f"Average {ev_sign}${ev_trade:.2f} per trade after fees" + (
+        " — fees eating the profit" if ev_trade <= 0 else ""
+    )
+
+    # ── render ─────────────────────────────────────────────────────────────────
+    st.markdown("##### Strategy Report Card")
+    rows = [
+        ("📈", "Profitability", pf_grade, pf_color, pf_plain),
+        ("🎯", "Accuracy", wr_grade, wr_color, wr_plain),
+        ("🛡️", "Risk control", dd_grade, dd_color, dd_plain),
+        ("💵", "Edge per trade", ev_grade, ev_color, ev_plain),
+    ]
+    html = (
+        '<div style="background:rgba(255,255,255,0.02); border-radius:8px;'
+        ' padding:6px 14px; margin-bottom:20px;">'
+    )
+    for icon, label, grade, color, plain in rows:
+        html += (
+            f'<div style="display:flex; align-items:center; padding:9px 0;'
+            f' border-bottom:1px solid rgba(255,255,255,0.04);">'
+            f'  <span style="font-size:1em; width:26px;">{icon}</span>'
+            f'  <span style="color:#94a3b8; font-size:0.82em; width:120px;">{label}</span>'
+            f'  <span style="font-size:1.3em; font-weight:800; color:{color};'
+            f'       width:30px; text-align:center;">{grade}</span>'
+            f'  <span style="color:#64748b; font-size:0.8em; margin-left:14px;">'
+            f"{plain}</span>"
+            f"</div>"
+        )
+    html += "</div>"
+    st.markdown(html, unsafe_allow_html=True)
+
+
 @st.fragment(run_every=30)
 def render_deep_analysis():
     import pandas as pd
 
     st.markdown(_asset_badge("crypto"), unsafe_allow_html=True)
 
-    # ── Full Edge Quality ──────────────────────────────────────────────────────
-    st.subheader("Edge Quality — Full Breakdown")
+    # ── Report Card ───────────────────────────────────────────────────────────
     stats = get_performance_stats()
     dd = get_drawdown()
+    _render_report_card(stats, dd)
+
+    st.divider()
+
+    # ── Full Edge Quality ──────────────────────────────────────────────────────
+    st.subheader("Edge Quality — Full Breakdown")
+    st.caption(
+        "The numbers behind your report card grades. "
+        "Profit Factor ≥ 1.35 and Win Rate ≥ 52% are the targets."
+    )
+    # stats and dd already fetched above for the report card
 
     c1, c2, c3, c4, c5 = st.columns(5)
     pf = stats["profit_factor"]
@@ -74,7 +181,10 @@ def render_deep_analysis():
     col_left, col_right = st.columns(2)
 
     with col_left:
-        st.caption("**Performance by regime**")
+        st.caption(
+            "**Performance by market regime** — "
+            "TRENDING = clear direction, RANGING = choppy, HIGH_VOL = volatile"
+        )
         regime_data = _q(
             """
             SELECT regime,
@@ -84,7 +194,7 @@ def render_deep_analysis():
                 ROUND(AVG(pnl_usd), 2) AS avg_pnl,
                 ROUND(SUM(pnl_usd), 2) AS total_pnl
             FROM trade_attribution
-            WHERE ts >= ? GROUP BY regime ORDER BY total_pnl DESC
+            WHERE COALESCE(created_at, entry_ts, '') >= ? GROUP BY regime ORDER BY total_pnl DESC
         """,
             (LAUNCH_DATE,),
         )
@@ -116,6 +226,11 @@ def render_deep_analysis():
 
     # ── Full Execution Quality ─────────────────────────────────────────────────
     st.subheader("Execution Quality — Full Breakdown")
+    st.caption(
+        "How well the bot times its entries and exits. "
+        "Entry Timing: did it buy before the move or after? "
+        "Fee Trap: trades that technically won but fees ate the profit."
+    )
     ex = get_execution_stats()
     if ex["total"] > 0:
         c1, c2, c3, c4 = st.columns(4)
@@ -149,7 +264,7 @@ def render_deep_analysis():
             """
             SELECT symbol, direction, ROUND(mae_pct*100,3) AS mae_pct, ROUND(mfe_pct*100,3) AS mfe_pct,
                    exit_type, hold_minutes, is_fee_trap, won
-            FROM trade_attribution WHERE ts >= ?
+            FROM trade_attribution WHERE COALESCE(created_at, entry_ts, '') >= ?
             ORDER BY entry_ts DESC LIMIT 30
         """,
             (LAUNCH_DATE,),
@@ -163,8 +278,13 @@ def render_deep_analysis():
     st.divider()
 
     # ── Signal Attribution (Bayesian Learning) ────────────────────────────────
-    st.subheader("Signal Attribution (Bayesian Learning)")
-    with st.expander("What is this?", expanded=False):
+    st.subheader("Which signals are actually working?")
+    st.caption(
+        "The bot tracks whether each signal (e.g. MACD, RSI divergence) leads to winning or losing trades. "
+        "Winners get more weight over time, losers get less. "
+        "pts_drift = how much a signal's influence has shifted — positive means it's outperforming."
+    )
+    with st.expander("More detail on how this works", expanded=False):
         st.markdown(
             "Every time a trade closes, the system figures out which signals fired at entry and "
             "whether the trade won or lost. It then updates the win rate for each signal using "
@@ -184,7 +304,11 @@ def render_deep_analysis():
     st.divider()
 
     # ── Learning / Intelligence ────────────────────────────────────────────────
-    st.subheader("Learning & Intelligence")
+    st.subheader("Is the ML model trained yet?")
+    st.caption(
+        "The AI model needs at least 30 completed trades before it can make useful predictions. "
+        "Until then, it stays neutral and the strategy runs on the technical signals alone."
+    )
 
     ml = get_ml_status()
     col1, col2 = st.columns(2)
@@ -229,8 +353,14 @@ def render_deep_analysis():
     st.divider()
 
     # ── Failure Mode Analysis ─────────────────────────────────────────────────
-    st.subheader("Failure Mode Analysis (7 days)")
-    with st.expander("What is this?", expanded=False):
+    st.subheader("What went wrong? (last 7 days)")
+    st.caption(
+        "**Fee trap** = trade technically won, but fees ate the profit.  "
+        "**Quick stop** = stop-loss hit within 30 minutes — bad timing or a wick.  "
+        "**Economics veto** = trade blocked automatically because it wasn't worth the fees — this is healthy, not a problem.  "
+        "**Scan dropout** = scanner found nothing — usually low-volume hours."
+    )
+    with st.expander("More detail on each failure type", expanded=False):
         st.markdown(
             "Categorized breakdown of things that went wrong in the last 7 days. "
             "**Fee trap** = trade won but fees ate most of the profit — the system is trading too small or on moves that are too tiny. "
@@ -245,7 +375,10 @@ def render_deep_analysis():
     st.divider()
 
     # ── Full Trade Log ────────────────────────────────────────────────────────
-    st.subheader("Trade History (last 100)")
+    st.subheader("Every Trade (last 100)")
+    st.caption(
+        "Net = P&L minus fees. Score = how confident the bot was at entry (0–100)."
+    )
     trades = get_trade_log(100)
     if trades:
         rows = []

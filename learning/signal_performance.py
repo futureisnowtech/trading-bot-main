@@ -184,7 +184,14 @@ def init_learning_tables():
                 hold_minutes  REAL DEFAULT 0,
                 paper         INTEGER DEFAULT 1,
                 lesson        TEXT,
-                created_at    TEXT
+                created_at    TEXT,
+                mae_pct       REAL DEFAULT 0,
+                mfe_pct       REAL DEFAULT 0,
+                exit_type     TEXT DEFAULT 'unknown',
+                is_fee_trap   INTEGER DEFAULT 0,
+                ml_p_win      REAL DEFAULT 0,
+                super_score   REAL DEFAULT 0,
+                composite_score REAL DEFAULT 0
             )
         """)
         # Add composite_score column if it doesn't exist (safe to call on existing DBs)

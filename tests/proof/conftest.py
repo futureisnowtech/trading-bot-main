@@ -27,6 +27,12 @@ def _reset_risk_engine() -> None:
     import risk_engine
 
     risk_engine._state = risk_engine.RiskState()
+    # Override hardcoded $10K defaults to match the $5K paper account
+    # used in proof tests.  Without this, kill_switch fires on $5K balance
+    # (below 75% of $10K = $7.5K) and blocks margin-utilization checks.
+    risk_engine._state.account_balance = 5_000.0
+    risk_engine._state.peak_balance = 5_000.0
+    risk_engine._state.daily_start_balance = 5_000.0
 
 
 def _reset_kill_switch() -> None:

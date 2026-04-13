@@ -38,7 +38,7 @@ def render_decision_quality():
             SUM(CASE WHEN won=0 AND exit_type='thesis_exit' THEN 1 ELSE 0 END) AS thesis_failed,
             SUM(CASE WHEN won=1 AND exit_type='target_hit' THEN 1 ELSE 0 END) AS full_target,
             COUNT(*) AS total
-        FROM trade_attribution WHERE ts >= ?
+        FROM trade_attribution WHERE COALESCE(created_at, entry_ts, '') >= ?
     """,
         (LAUNCH_DATE,),
     )

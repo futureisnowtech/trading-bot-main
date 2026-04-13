@@ -21,7 +21,7 @@ def get_execution_stats() -> dict:
             AVG(CASE WHEN won=0 THEN hold_minutes END) AS avg_hold_loss,
             AVG(CASE WHEN won=1 AND mfe_pct > 0 THEN pnl_pct / mfe_pct END) AS exit_eff
         FROM trade_attribution
-        WHERE source != 'backtest' AND ts >= ?
+        WHERE source != 'backtest' AND COALESCE(created_at, entry_ts, '') >= ?
     """,
         (LAUNCH_DATE,),
     )

@@ -208,8 +208,39 @@ def init_db() -> None:
         FOREIGN KEY (candidate_id) REFERENCES scan_candidates(id)
     )""")
 
+    cur.execute("""CREATE TABLE IF NOT EXISTS kill_switch_log (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts                REAL NOT NULL,
+        reason            TEXT NOT NULL,
+        balance_at_trigger REAL,
+        resolved          INTEGER DEFAULT 0,
+        resolved_ts       REAL,
+        resolved_reason   TEXT
+    )""")
+
     conn.commit()
     conn.close()
+
+
+# ── Logger handle (singleton per process) ────────────────────────────────────
+
+_LOGGER_HANDLE = None
+
+
+class _TradeLoggerHandle:
+    """Thin wrapper holding a persistent sqlite3 connection.
+    Used by risk_engine, kill_switch, position_manager, and RBI modules."""
+
+    def __init__(self) -> None:
+        self.conn = _conn()
+
+
+def get_logger() -> _TradeLoggerHandle:
+    """Return the module-level logger handle, creating it on first call."""
+    global _LOGGER_HANDLE
+    if _LOGGER_HANDLE is None:
+        _LOGGER_HANDLE = _TradeLoggerHandle()
+    return _LOGGER_HANDLE
 
 
 def _ts() -> str:

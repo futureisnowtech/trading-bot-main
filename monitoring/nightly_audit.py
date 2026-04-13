@@ -2,18 +2,26 @@
 monitoring/nightly_audit.py — Automated nightly proof + drift + learning audit.
 
 Runs automatically:
-  - Scheduled by v10_runner at ~03:00 UTC (after RBI nightly loop)
+  - Scheduled by v10_runner at ~08:00 UTC (after RBI nightly loop)
   - Can also be run standalone: python3 monitoring/nightly_audit.py
 
 Checks:
   1. Proof suite status (pytest tests/proof/ in subprocess)
   2. Candidate journaling health (scan_candidates populated / labeled)
-  3. Outcome labeling lag / backlog
-  4. Repo truth drift (CLAUDE.md version vs runtime version)
-  5. Learning layer health (signal_stats Bayesian weight changes)
+  3. Candidate funnel analytics (entered vs vetoed vs blocked, top veto reasons)
+  4. Outcome labeling lag / backlog
+  5. Repo truth drift (CLAUDE.md version vs runtime version)
+  6. Learning layer health (signal_stats Bayesian weight changes)
+  7. Retention (table sizes, prune old rows)
 
-Writes a structured report to system_events (source='nightly_audit').
-Exit code 0 = all green, 1 = warnings, 2 = failures.
+Exception-only reporting:
+  - Writes a JSON report to system_events (source='nightly_audit') ALWAYS (daily heartbeat)
+  - Emits a notification (notifications table) ONLY when:
+      * overall status changes from previous run
+      * overall status is 'warn' or 'fail' (resends after 6h if warning, 1h if critical)
+      * 24h have passed since last INFO notification (healthy heartbeat)
+
+Exit code: 0 = pass, 1 = warn, 2 = fail (for standalone/cron use).
 """
 
 from __future__ import annotations
@@ -21,6 +29,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import time
@@ -31,6 +40,11 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 ROOT = Path(__file__).resolve().parents[1]
+
+# ── Notification cooldowns (seconds) ──────────────────────────────────────────
+_NOTIFY_COOLDOWN_INFO = 23 * 3600  # once per 24h for healthy heartbeat
+_NOTIFY_COOLDOWN_WARN = 6 * 3600  # up to 4× per day for warnings
+_NOTIFY_COOLDOWN_CRIT = 3600  # up to 24× per day for critical failures
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -56,6 +70,116 @@ def _write_report(report: dict) -> None:
         _log_event("INFO", f"NIGHTLY_AUDIT_REPORT: {json.dumps(report)}")
     except Exception:
         pass
+
+
+def _get_last_audit_report() -> dict:
+    """
+    Read the most recent nightly_audit report from system_events.
+    Returns {} if not found.
+    """
+    try:
+        from logging_db.trade_logger import _conn
+
+        conn = _conn()
+        row = conn.execute(
+            """SELECT message FROM system_events
+               WHERE source='nightly_audit' AND message LIKE 'NIGHTLY_AUDIT_REPORT:%'
+               ORDER BY id DESC LIMIT 1"""
+        ).fetchone()
+        conn.close()
+        if row:
+            payload = row[0][len("NIGHTLY_AUDIT_REPORT:") :].strip()
+            return json.loads(payload)
+    except Exception:
+        pass
+    return {}
+
+
+def _get_last_notification_ts(category: str, title_prefix: str) -> float:
+    """
+    Return the timestamp (epoch float) of the most recent notification matching
+    category + title_prefix. Returns 0.0 if not found.
+    """
+    try:
+        from logging_db.trade_logger import _conn
+
+        conn = _conn()
+        row = conn.execute(
+            """SELECT ts FROM notifications
+               WHERE category=? AND title LIKE ?
+               ORDER BY CAST(ts AS REAL) DESC LIMIT 1""",
+            (category, f"{title_prefix}%"),
+        ).fetchone()
+        conn.close()
+        if row:
+            return float(row[0])
+    except Exception:
+        pass
+    return 0.0
+
+
+def _emit_audit_notification(overall: str, summary_lines: list[str]) -> None:
+    """
+    Emit an exception-only notification based on audit result.
+
+    Cooldowns prevent notification spam:
+    - pass   → INFO notification at most once per 23h
+    - warn   → WARNING notification at most once per 6h
+    - fail   → CRITICAL notification at most once per 1h
+    - status change (non-pass → pass) → always notify (recovery)
+    """
+    try:
+        from notifications.notification_engine import (
+            notify,
+            CAT_SYSTEM,
+            SEV_INFO,
+            SEV_WARNING,
+            SEV_CRITICAL,
+        )
+
+        last_report = _get_last_audit_report()
+        last_overall = last_report.get("overall", "unknown")
+        now = time.time()
+
+        # Determine severity and cooldown
+        if overall == "pass":
+            sev = SEV_INFO
+            cooldown = _NOTIFY_COOLDOWN_INFO
+            title = "LEARNING HEALTH: ALL CLEAR"
+            # Always notify on recovery (non-pass → pass)
+            force = last_overall not in ("pass", "unknown")
+        elif overall == "warn":
+            sev = SEV_WARNING
+            cooldown = _NOTIFY_COOLDOWN_WARN
+            title = "LEARNING HEALTH: WARNING"
+            force = last_overall not in ("warn",)
+        else:  # fail / error
+            sev = SEV_CRITICAL
+            cooldown = _NOTIFY_COOLDOWN_CRIT
+            title = "LEARNING HEALTH: ACTION NEEDED"
+            force = True  # always escalate failures
+
+        # Check if we're within the cooldown window
+        last_ts = _get_last_notification_ts(CAT_SYSTEM, title)
+        elapsed = now - last_ts
+        if not force and elapsed < cooldown:
+            return  # still within cooldown, skip
+
+        message = (
+            "; ".join(summary_lines[:3])
+            if summary_lines
+            else f"Audit overall={overall}"
+        )
+
+        notify(
+            category=CAT_SYSTEM,
+            severity=sev,
+            title=title,
+            message=message,
+            data={"overall": overall, "audit_ts": _utc_now()},
+        )
+    except Exception as e:
+        logger.debug(f"[audit] notification emit error: {e}")
 
 
 # ── check 1: proof suite ─────────────────────────────────────────────────────
@@ -98,8 +222,6 @@ def _check_proof_suite() -> dict:
         output = proc.stdout + proc.stderr
 
         # Parse pytest summary line e.g. "3 passed, 1 failed in 4.2s"
-        import re
-
         m = re.search(r"(\d+) passed(?:,\s*(\d+) failed)?(?:,\s*(\d+) error)?", output)
         if m:
             result["passed"] = int(m.group(1) or 0)
@@ -108,7 +230,6 @@ def _check_proof_suite() -> dict:
 
         result["duration_s"] = duration
         result["status"] = "pass" if proc.returncode == 0 else "fail"
-        # Keep last 400 chars of output for the report
         result["detail"] = output[-400:].strip()
     except subprocess.TimeoutExpired:
         result["status"] = "timeout"
@@ -120,7 +241,7 @@ def _check_proof_suite() -> dict:
     return result
 
 
-# ── check 2 + 3: candidate journaling health ─────────────────────────────────
+# ── check 2: candidate journaling health ─────────────────────────────────────
 
 
 def _check_candidate_journaling() -> dict:
@@ -179,6 +300,111 @@ def _check_candidate_journaling() -> dict:
     return result
 
 
+# ── check 3: candidate funnel analytics ──────────────────────────────────────
+
+
+def _check_candidate_funnel() -> dict:
+    """
+    Analyze the candidate decision funnel for the last 24h.
+
+    Returns conversion rate, top veto reasons, and anomaly flags.
+    """
+    result: dict[str, Any] = {
+        "status": "pass",
+        "candidates_24h": 0,
+        "entered_24h": 0,
+        "econ_veto_24h": 0,
+        "below_threshold_24h": 0,
+        "blocked_24h": 0,
+        "conversion_rate_pct": 0.0,
+        "top_veto_reasons": [],
+        "anomaly": "",
+        "detail": "",
+    }
+    try:
+        from logging_db.trade_logger import _conn
+        import datetime as _dt
+
+        cutoff_24h = (datetime.now(timezone.utc) - _dt.timedelta(hours=24)).isoformat()
+
+        conn = _conn()
+
+        # Total candidates in last 24h
+        row = conn.execute(
+            "SELECT COUNT(*) FROM scan_candidates WHERE ts >= ?", (cutoff_24h,)
+        ).fetchone()
+        total_24h = int((row or [0])[0])
+        result["candidates_24h"] = total_24h
+
+        if total_24h == 0:
+            result["status"] = "warn"
+            result["detail"] = "Zero candidates in last 24h — scanner may be down"
+            conn.close()
+            return result
+
+        # Count by decision category
+        rows = conn.execute(
+            """SELECT decision, COUNT(*) AS n FROM scan_candidates
+               WHERE ts >= ? GROUP BY decision""",
+            (cutoff_24h,),
+        ).fetchall()
+        decision_map = {r[0]: r[1] for r in rows}
+
+        entered = decision_map.get("entered", 0)
+        econ_veto = decision_map.get("econ_veto", 0)
+        below_thresh = decision_map.get("below_threshold", 0)
+        blocked = sum(
+            v
+            for k, v in decision_map.items()
+            if k
+            in ("dual_exposure_block", "cooldown_block", "risk_block", "sizing_zero")
+        )
+
+        result["entered_24h"] = entered
+        result["econ_veto_24h"] = econ_veto
+        result["below_threshold_24h"] = below_thresh
+        result["blocked_24h"] = blocked
+        result["conversion_rate_pct"] = (
+            round(entered / total_24h * 100, 1) if total_24h > 0 else 0.0
+        )
+
+        # Top veto reasons
+        veto_rows = conn.execute(
+            """SELECT econ_reject_reason, COUNT(*) AS n FROM scan_candidates
+               WHERE ts >= ? AND decision='econ_veto' AND econ_reject_reason != ''
+               GROUP BY econ_reject_reason ORDER BY n DESC LIMIT 5""",
+            (cutoff_24h,),
+        ).fetchall()
+        result["top_veto_reasons"] = [
+            {"reason": r[0][:80], "count": r[1]} for r in veto_rows
+        ]
+
+        conn.close()
+
+        # Anomaly detection: candidate volume collapse or spike
+        # Collapse: < 5 candidates in 24h (scanner likely down)
+        # Spike: > 10× typical volume in 24h (possible loop or data issue)
+        if total_24h < 5:
+            result["status"] = "warn"
+            result["anomaly"] = f"candidate_collapse: only {total_24h} in 24h"
+        elif total_24h > 5000:
+            result["status"] = "warn"
+            result["anomaly"] = f"candidate_spike: {total_24h} in 24h (>5000)"
+
+        result["detail"] = (
+            f"{total_24h} candidates: "
+            f"entered={entered} econ_veto={econ_veto} "
+            f"below_thresh={below_thresh} blocked={blocked} "
+            f"conversion={result['conversion_rate_pct']:.1f}%"
+        )
+
+    except Exception as e:
+        result["status"] = "error"
+        result["detail"] = str(e)[:200]
+
+    return result
+
+
 # ── check 4: repo truth drift ─────────────────────────────────────────────────
 
 
@@ -194,8 +420,6 @@ def _check_repo_drift() -> dict:
             result["status"] = "warn"
             result["detail"] = "CLAUDE.md not found"
             return result
-
-        import re
 
         text = claude_md.read_text(encoding="utf-8")
         m = re.search(r"Current Version:\s*(v[\d.]+)", text)
@@ -259,13 +483,65 @@ def _check_learning_health() -> dict:
     return result
 
 
+# ── check 6: retention ────────────────────────────────────────────────────────
+
+
+def _check_retention() -> dict:
+    """
+    Prune old scan_candidates rows and report table sizes.
+
+    Policy:
+    - labeled=1 rows older than 90 days → delete (learning value already extracted)
+    - labeled=0 rows older than 30 days → delete (permanently stale; labeler gave up)
+    - candidate_outcomes rows are never pruned (tiny, high value)
+    """
+    result: dict[str, Any] = {
+        "status": "pass",
+        "scan_candidates_total": 0,
+        "candidate_outcomes_total": 0,
+        "pruned_labeled": 0,
+        "pruned_unlabeled": 0,
+        "detail": "",
+    }
+    try:
+        from logging_db.trade_logger import _conn, prune_old_candidates
+
+        prune_result = prune_old_candidates(labeled_days=90, unlabeled_days=30)
+        result["pruned_labeled"] = prune_result.get("pruned_labeled", 0)
+        result["pruned_unlabeled"] = prune_result.get("pruned_unlabeled", 0)
+
+        conn = _conn()
+        row = conn.execute("SELECT COUNT(*) FROM scan_candidates").fetchone()
+        result["scan_candidates_total"] = int((row or [0])[0])
+        row2 = conn.execute("SELECT COUNT(*) FROM candidate_outcomes").fetchone()
+        result["candidate_outcomes_total"] = int((row2 or [0])[0])
+        conn.close()
+
+        pruned_total = result["pruned_labeled"] + result["pruned_unlabeled"]
+        result["detail"] = (
+            f"scan_candidates={result['scan_candidates_total']} "
+            f"candidate_outcomes={result['candidate_outcomes_total']} "
+            f"pruned={pruned_total}"
+        )
+
+        # Warn if table is still very large after pruning (> 500K rows unusual)
+        if result["scan_candidates_total"] > 500_000:
+            result["status"] = "warn"
+            result["detail"] += " — table unusually large, check for insert loop"
+    except Exception as e:
+        result["status"] = "error"
+        result["detail"] = str(e)[:200]
+
+    return result
+
+
 # ── main audit ────────────────────────────────────────────────────────────────
 
 
 def run_audit(run_proof: bool = True) -> dict:
     """
     Run all audit checks and return a structured report dict.
-    Also writes the report to system_events.
+    Also writes the report to system_events and emits exception-only notifications.
 
     Args:
         run_proof: whether to run the pytest proof suite (slow ~30s, skip in tests).
@@ -283,14 +559,24 @@ def run_audit(run_proof: bool = True) -> dict:
     logger.info("[audit] checking candidate journaling...")
     checks["candidate_journaling"] = _check_candidate_journaling()
 
+    logger.info("[audit] checking candidate funnel...")
+    checks["candidate_funnel"] = _check_candidate_funnel()
+
     logger.info("[audit] checking repo drift...")
     checks["repo_drift"] = _check_repo_drift()
 
     logger.info("[audit] checking learning health...")
     checks["learning_health"] = _check_learning_health()
 
-    # Overall status: worst of all checks
-    statuses = [c.get("status", "unknown") for c in checks.values()]
+    logger.info("[audit] running retention pruning...")
+    checks["retention"] = _check_retention()
+
+    # Overall status: worst of all checks (skipped checks don't count)
+    statuses = [
+        c.get("status", "unknown")
+        for c in checks.values()
+        if c.get("status") != "skipped"
+    ]
     if "fail" in statuses or "error" in statuses:
         overall = "fail"
     elif "warn" in statuses or "timeout" in statuses:
@@ -317,6 +603,22 @@ def run_audit(run_proof: bool = True) -> dict:
         f"[audit] complete: overall={overall} "
         + " | ".join(f"{k}={v.get('status', '?')}" for k, v in checks.items())
     )
+
+    # Build summary lines for notification message
+    summary_lines = []
+    for k, v in checks.items():
+        s = v.get("status", "?")
+        if s not in ("pass", "skipped"):
+            summary_lines.append(f"{k}={s}: {v.get('detail', '')[:60]}")
+    if not summary_lines:
+        summary_lines = [
+            checks.get("candidate_journaling", {}).get("detail", "all checks passing")[
+                :80
+            ]
+        ]
+
+    # Exception-only notification emit
+    _emit_audit_notification(overall, summary_lines)
 
     return report
 

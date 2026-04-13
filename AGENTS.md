@@ -28,7 +28,7 @@ A fully autonomous AI-powered trading system that:
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
 
-## Current Version: v13.6 (2026-04-13)
+## Current Version: v13.7 (2026-04-13)
 
 **Active branch:** `feature/v10-rebuild`
 **Clean paper trading started:** 2026-04-02
@@ -89,6 +89,16 @@ Owner decides when to go live. These are informational readings, not system gate
 - Days running on clean data
 - Economics gate veto rate
 - Kill switch triggers (14d)
+
+### v13.7 Autonomous Journaling Operationalization (applied 2026-04-13)
+
+- `logging_db/trade_logger.py`: `candidate_outcomes` DDL now includes `price_15m`/`ret_15m_pct` inline; `prune_old_candidates()` 90d/30d retention; `get_logger()` singleton; `kill_switch_log` table added
+- `learning/candidate_labeler.py`: 15m forward outcome — 50-bar series, `_compute_15m_metrics()`, `price_15m`/`ret_15m_pct` written to DB
+- `monitoring/nightly_audit.py`: exception-only notifications with severity cooldowns (INFO 23h / WARN 6h / CRIT 1h); `_check_candidate_funnel()` anomaly detection; `_check_retention()` + `prune_old_candidates()` call
+- `dashboard/data/journal_health.py` (NEW): `get_journal_health()` for dashboard health panel
+- `dashboard/widgets/system_settings/dev_config.py`: "Learning & Journaling Health" expander with 7 metrics + funnel + veto tables
+- `.github/workflows/ci.yml`: branch list, test target, deps, env vars all aligned
+- `tests/proof/test_candidate_journal.py`: 5 new tests; 25/25 total green
 
 ### v13.6 Candidate Journaling + Automated Outcome Labeling (applied 2026-04-13)
 

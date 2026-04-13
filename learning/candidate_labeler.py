@@ -3,7 +3,7 @@ learning/candidate_labeler.py — Automated forward-outcome labeler for scan_can
 
 Scheduled to run every 15 minutes by v10_runner.
 Finds unlabeled candidates that are >= 4 hours old, fetches forward candles,
-computes 1h / 4h forward returns and MFE / MAE, then writes to candidate_outcomes.
+computes 15m / 1h / 4h forward returns and MFE / MAE, then writes to candidate_outcomes.
 
 Design constraints:
 - Never blocks live scanning or entry (runs in a background thread).
@@ -11,12 +11,18 @@ Design constraints:
 - All writes are SQLite only.
 - Bounded: processes at most MAX_BATCH rows per run.
 - Silent on individual failures (logs warnings, never raises).
+
+15-minute labeling:
+  Fetches an additional 50 × 15m candle series per labeled row.
+  Since labeling occurs >= 4h after the candidate, all 15m forward bars
+  have resolved.  Uses the same "backward approximation" pattern as the
+  1h labeler: ref_idx_15m = len(bars) − 17 ≈ 4h before current last bar.
+  Cost: ~1 extra lightweight REST call per labeled row (bounded at MAX_BATCH).
 """
 
 from __future__ import annotations
 
 import logging
-import time
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -27,24 +33,64 @@ _MAX_BATCH = 50
 # Minimum look-forward age before we attempt labeling (seconds)
 _MIN_AGE_HOURS = 4.0
 
+# 15m candle series length; 50 bars × 15min = 12.5h of data.
+# With MIN_AGE=4h, the reference bar sits at index ≈ len−17
+# (16 × 15min = 4h), and the 15m forward bar is at index ≈ len−16.
+_15M_SERIES_LEN = 50
+
 
 def _fetch_forward_candles(
     symbol: str,
     ref_ts_iso: str,
     get_candles,
+    interval: str = "1h",
+    limit: int = 200,
 ) -> Optional[object]:
     """
-    Fetch 1h candles for `symbol` and return the DataFrame.
-    Returns None if unavailable.
+    Fetch candles for `symbol` and return the DataFrame.
+    Returns None if unavailable or too short.
     """
     try:
-        df = get_candles(symbol, "1h", 200)
+        df = get_candles(symbol, interval, limit)
         if df is None or len(df) < 5:
             return None
         return df
     except Exception as e:
-        logger.debug(f"[labeler] candle fetch error {symbol}: {e}")
+        logger.debug(f"[labeler] candle fetch error {symbol} {interval}: {e}")
         return None
+
+
+def _compute_15m_metrics(
+    df_15m,
+    ref_close: float,
+    direction: str,
+) -> tuple:
+    """
+    Compute 15-minute forward price and return from a 15m candle DataFrame.
+
+    Uses the same backward-approximation pattern as _compute_outcome:
+    the reference bar is approximately 4h before the last bar
+    (16 × 15m bars), and price_15m is the bar immediately after it.
+
+    Returns (price_15m, ret_15m_pct). Both 0.0 on any failure.
+    """
+    try:
+        closes = list(df_15m["close"].values)
+        if len(closes) < 5:
+            return 0.0, 0.0
+        # ref_idx_15m ≈ 4h ago (16 bars at 15m/bar)
+        ref_idx_15m = max(0, len(closes) - 17)
+        price_15m = float(closes[min(ref_idx_15m + 1, len(closes) - 1)])
+        if ref_close <= 0:
+            return price_15m, 0.0
+        is_long = str(direction).upper() == "LONG"
+        if is_long:
+            ret_15m_pct = (price_15m - ref_close) / ref_close * 100.0
+        else:
+            ret_15m_pct = (ref_close - price_15m) / ref_close * 100.0
+        return price_15m, round(ret_15m_pct, 4)
+    except Exception:
+        return 0.0, 0.0
 
 
 def _compute_outcome(
@@ -53,6 +99,7 @@ def _compute_outcome(
     direction: str,
     stop_pct: float,
     atr_15m: float,
+    df_15m=None,
 ) -> dict:
     """
     Compute forward-outcome metrics from a candles DataFrame.
@@ -66,6 +113,8 @@ def _compute_outcome(
       - price_4h  = close 4 bars after last
     Since we're fetching after min_age=4h, the 4h window has already resolved
     and the last 4 bars of the DataFrame are our forward window.
+
+    If df_15m is provided, also computes price_15m and ret_15m_pct.
     """
     closes = list(df["close"].values)
     highs = list(df["high"].values)
@@ -137,11 +186,19 @@ def _compute_outcome(
     best_exit_pct = mfe_4h_pct
     worst_drawdown_pct = mae_4h_pct
 
+    # 15m forward metrics — cheap extra fetch, high analytical value
+    price_15m = 0.0
+    ret_15m_pct = 0.0
+    if df_15m is not None:
+        price_15m, ret_15m_pct = _compute_15m_metrics(df_15m, ref_close, direction)
+
     return {
         "label_status": "complete",
         "entry_ref_price": ref_close,
+        "price_15m": price_15m,
         "price_1h": price_1h,
         "price_4h": price_4h,
+        "ret_15m_pct": ret_15m_pct,
         "ret_1h_pct": round(ret_1h_pct, 4),
         "ret_4h_pct": round(ret_4h_pct, 4),
         "mfe_4h_pct": round(mfe_4h_pct, 4),
@@ -158,7 +215,7 @@ def run_labeling_pass(get_candles=None) -> dict:
     """
     Main entry point — called by v10_runner every 15 minutes.
 
-    Finds unlabeled candidates >= 4h old, fetches forward candles,
+    Finds unlabeled candidates >= 4h old, fetches forward candles (1h + 15m),
     writes outcomes. Returns a summary dict.
 
     Args:
@@ -210,8 +267,8 @@ def run_labeling_pass(get_candles=None) -> dict:
             continue
 
         try:
-            df = _fetch_forward_candles(symbol, ref_ts, get_candles)
-            if df is None:
+            df_1h = _fetch_forward_candles(symbol, ref_ts, get_candles, "1h", 200)
+            if df_1h is None:
                 # Write a partial label so we don't keep retrying stale symbols
                 log_candidate_outcome(
                     candidate_id=candidate_id,
@@ -228,11 +285,20 @@ def run_labeling_pass(get_candles=None) -> dict:
                     hit_stop=0,
                     best_exit_pct=0.0,
                     worst_drawdown_pct=0.0,
+                    price_15m=0.0,
+                    ret_15m_pct=0.0,
                 )
                 skipped += 1
                 continue
 
-            outcome = _compute_outcome(df, ref_price, direction, stop_pct, atr_15m)
+            # Fetch 15m candles for short-term forward return (best-effort)
+            df_15m = _fetch_forward_candles(
+                symbol, ref_ts, get_candles, "15m", _15M_SERIES_LEN
+            )
+
+            outcome = _compute_outcome(
+                df_1h, ref_price, direction, stop_pct, atr_15m, df_15m
+            )
 
             if outcome.get("label_status") == "data_unavailable":
                 log_candidate_outcome(
@@ -250,6 +316,8 @@ def run_labeling_pass(get_candles=None) -> dict:
                     hit_stop=0,
                     best_exit_pct=0.0,
                     worst_drawdown_pct=0.0,
+                    price_15m=0.0,
+                    ret_15m_pct=0.0,
                 )
                 skipped += 1
                 continue
@@ -269,6 +337,8 @@ def run_labeling_pass(get_candles=None) -> dict:
                 hit_stop=outcome["hit_stop"],
                 best_exit_pct=outcome["best_exit_pct"],
                 worst_drawdown_pct=outcome["worst_drawdown_pct"],
+                price_15m=outcome.get("price_15m", 0.0),
+                ret_15m_pct=outcome.get("ret_15m_pct", 0.0),
             )
             labeled += 1
 

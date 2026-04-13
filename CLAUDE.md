@@ -28,7 +28,7 @@ A fully autonomous AI-powered trading system that:
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
 
-## Current Version: v13.6 (2026-04-13)
+## Current Version: v13.7 (2026-04-13)
 
 **Active branch:** `feature/v10-rebuild`
 **Clean paper trading started:** 2026-04-02
@@ -86,6 +86,17 @@ Owner decides when to go live. These are informational readings, not system gate
 - Days running on clean data
 - Economics gate veto rate
 - Kill switch triggers (14d)
+
+### v13.7 Autonomous Journaling Operationalization (applied 2026-04-13)
+
+- `logging_db/trade_logger.py`: `candidate_outcomes` DDL now includes `price_15m`/`ret_15m_pct` columns directly (avoids ALTER TABLE chicken-and-egg on fresh DBs); `prune_old_candidates(labeled_days=90, unlabeled_days=30)` added; `get_logger()` singleton + `_TradeLoggerHandle` wrapper added for `risk_engine`/`kill_switch` callers; `kill_switch_log` table added to `init_db()`
+- `learning/candidate_labeler.py`: 15-minute forward outcome added — fetches 50×15m candles per candidate; `_compute_15m_metrics()` computes `price_15m`, `ret_15m_pct`; both fields passed to `log_candidate_outcome()`
+- `monitoring/nightly_audit.py`: full rewrite — exception-only notification model with severity-gated cooldowns (INFO 23h / WARN 6h / CRIT 1h); `_check_candidate_funnel()` for 24h decision-funnel analytics + anomaly detection; `_check_retention()` calls `prune_old_candidates()` + warns on oversized table; `_emit_audit_notification()` force-emits on status change (recovery always notified)
+- `dashboard/data/journal_health.py` (NEW): `get_journal_health()` — candidates 24h/7d, labeling rate, backlog, conversion %, funnel breakdown, top veto reasons, outcome quality, last audit result
+- `dashboard/widgets/system_settings/dev_config.py`: "Learning & Journaling Health" expander added — 🟢/🟡 status badge, 7 metrics, decision funnel table, top veto reasons table
+- `.github/workflows/ci.yml`: branch list updated to include `feature/v10-rebuild`; test target changed to `tests/proof/`; ACCOUNT_SIZE=5000; stale env vars removed; streamlit added to deps
+- `tests/proof/test_candidate_journal.py`: 5 new proof tests — 15m fields populated/graceful, DB persistence of 15m fields, 90d/30d retention policy, nightly audit funnel+retention checks; total 25/25 green
+- No strategy thresholds changed; no live entry path touched; all new code is fire-and-forget read/write
 
 ### v13.6 Candidate Journaling + Automated Outcome Labeling (applied 2026-04-13)
 
@@ -441,6 +452,8 @@ Motivation 1-5: "Strive for greatness." / "I like criticism. It makes you strong
 | v10.1 cleanup | 2026-04-03 | All v9/legacy code, dead imports, stale DB data, and old credentials purged; legacy/ directory deleted; repo and DB fully clean for go-live |
 | v13.1–13.4 | 2026-04-05–10 | Scanner/funnel fixes, strategy optimization, ML PnL regressor, proof infrastructure, repo truth alignment |
 | v13.5 | 2026-04-13 | Conviction-adaptive exit stack: real-R scale-out denominator, regime-aware trailing, signal-health compression, ATR-proportional hold gates |
+| v13.6 | 2026-04-13 | Candidate journaling at 8 decision gates, automated outcome labeling, nightly audit, proof suite (10 tests) |
+| v13.7 | 2026-04-13 | 15m labeling, exception-only notifications, funnel analytics, retention pruning, dashboard health panel, CI fix, proof suite 25/25 |
 
 ## GitHub
 - Repository: `futureisnowtech/trading-bot-main` (private)

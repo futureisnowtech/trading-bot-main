@@ -235,6 +235,57 @@ def render_dev_config():
         )
 
     st.divider()
+    with st.expander("Learning & Journaling Health", expanded=True):
+        try:
+            from data.journal_health import get_journal_health
+
+            jh = get_journal_health()
+            status = jh.get("health_status", "UNKNOWN")
+            status_icon = "🟢" if status == "OK" else "🟡"
+            st.markdown(f"{status_icon} **{status}** — {jh.get('health_detail', '')}")
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Candidates 24h", jh.get("candidates_24h", 0))
+            c2.metric("Candidates 7d", jh.get("candidates_7d", 0))
+            c3.metric("Labeling rate (7d)", f"{jh.get('labeling_rate_pct', 0):.0f}%")
+            c4.metric("Backlog", jh.get("backlog", 0))
+            c5, c6, c7 = st.columns(3)
+            c5.metric("Conversion 24h", f"{jh.get('conversion_pct', 0):.1f}%")
+            c6.metric("Label quality (7d)", f"{jh.get('outcome_quality_pct', 0):.0f}%")
+            c7.metric("Last audit", jh.get("last_audit_overall", "unknown").upper())
+            funnel = jh.get("funnel", {})
+            if funnel:
+                import pandas as pd
+
+                st.caption("Decision funnel (last 24h)")
+                st.dataframe(
+                    pd.DataFrame(
+                        [
+                            {"Decision": k, "Count": v}
+                            for k, v in sorted(funnel.items(), key=lambda x: -x[1])
+                        ]
+                    ),
+                    use_container_width=False,
+                    hide_index=True,
+                )
+            veto_reasons = jh.get("top_veto_reasons", [])
+            if veto_reasons:
+                import pandas as pd
+
+                st.caption("Top econ gate veto reasons (24h)")
+                st.dataframe(
+                    pd.DataFrame(
+                        [
+                            {"Reason": r.get("reason", ""), "Count": r.get("n", 0)}
+                            for r in veto_reasons
+                        ]
+                    ),
+                    use_container_width=False,
+                    hide_index=True,
+                )
+        except Exception as _jhe:
+            st.error(f"journal_health: {_jhe}")
+
+    st.divider()
     st.caption("**System events log** (last 20)")
     events = get_recent_events(20)
     if events:

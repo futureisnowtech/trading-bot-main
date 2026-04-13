@@ -1,6 +1,12 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-13
+- v13.7: autonomous journaling operationalization — 15m labeling, exception-only notifications, funnel analytics, retention pruning, dashboard health panel, CI fix, proof suite 25/25 green
+
+## 2026-04-13
+- feat(dashboard): error breakdown panel with classified fix prompts — dashboard/data/health.py adds get_recent_errors_detail() (groups errors by source+fingerprint, classifies into 8 categories, assigns Claude Code vs Codex fix prompt per group); status_hero.py renders expandable error panel below status banner showing category, source badge, fix-type badge, message excerpt, and copyable fix prompt via st.code()
+
+## 2026-04-13
 - feat(learning): candidate journaling + automated outcome labeling (v13.6) — scan_candidates table, candidate_outcomes table, background labeler, nightly audit
 
 ## 2026-04-13

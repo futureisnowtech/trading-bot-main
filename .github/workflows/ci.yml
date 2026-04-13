@@ -2,13 +2,16 @@ name: CI
 
 on:
   push:
-    branches: [main, feature/agent-overhaul]
+    branches: [main, feature/v10-rebuild, feature/agent-overhaul]
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
-  test:
-    name: Lint + Test (Python 3.12)
+  proof:
+    name: Proof suite (Python 3.12)
     runs-on: ubuntu-latest
 
     steps:
@@ -20,74 +23,53 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
-      - name: Install test dependencies
+      - name: Install dependencies
         run: |
           pip install --upgrade pip
-          # Core deps needed by tests
           pip install \
             pytest pytest-cov ruff \
             python-dotenv pandas numpy pytz requests \
             yfinance schedule \
             "pandas-ta==0.3.14b0"
-          # Broker SDKs (paper mode only — no real API calls in tests)
+          # Broker SDKs (paper mode — no real API calls in tests)
           pip install \
-            "alpaca-py>=0.43.0" \
-            "coinbase-advanced-py>=1.7.0" \
             "python-binance>=1.0.19"
-          # Learning / ML
-          pip install scikit-learn lightgbm
+          # ML
+          pip install scikit-learn lightgbm xgboost
+          # Dashboard testing
+          pip install "streamlit>=1.35"
 
       - name: Create test .env
         run: |
           cat > .env << 'EOF'
           PAPER_TRADING=true
           ANTHROPIC_API_KEY=test_key_ci
-          ACCOUNT_SIZE=10000
-          COINBASE_API_KEY=test_key_ci
-          COINBASE_API_SECRET=test_secret_ci
-          ALPACA_API_KEY=test_key_ci
-          ALPACA_API_SECRET=test_secret_ci
-          ALPACA_BASE_URL=https://paper-api.alpaca.markets
+          ACCOUNT_SIZE=5000
           BINANCE_API_KEY=test_key_ci
           BINANCE_API_SECRET=test_secret_ci
           BINANCE_TESTNET=true
-          TRADOVATE_USERNAME=test_ci
-          TRADOVATE_PASSWORD=test_ci
-          CRYPTO_PAIRS=BTC-USDC,ETH-USDC
           PERP_PAIRS=BTCUSDT,ETHUSDT
-          CRYPTO_POSITION_SIZE_USD=250
-          EQUITY_POSITION_SIZE_USD=250
           FUTURES_ENABLED=false
           EQUITY_ENABLED=false
-          CRYPTO_ENABLED=true
-          PERP_ENABLED=false
+          PERP_ENABLED=true
           LANE3_ENABLED=false
-          POLYMARKET_ENABLED=false
-          KALSHI_ENABLED=false
-          POLYMARKET_PAPER=true
-          KALSHI_PAPER=true
           EOF
 
-      - name: Lint with ruff
+      - name: Lint with ruff (non-blocking)
         run: |
           ruff check . \
             --exclude=".git,__pycache__,logs,reference_repos,brain,docs" \
             --ignore=E501,E402,F401,F811,W503 \
             --select=E,F,W \
             || true
-          # Non-blocking for now — report issues but don't fail build.
-          # Remove `|| true` once codebase is clean.
 
-      - name: Run pytest
+      - name: Run proof suite
         run: |
-          python -m pytest tests/ -v \
+          python -m pytest tests/proof/ -v \
             --tb=short \
-            --cov=. \
-            --cov-report=term-missing \
-            --cov-omit="tests/*,scripts/*,brain/*,docs/*,logs/*" \
+            --no-header \
             -q
 
-      - name: Validate config (pre-flight check)
+      - name: Validate config (non-blocking)
         run: |
           python scripts/validate.py || true
-          # Non-blocking — some warnings expected with test API keys

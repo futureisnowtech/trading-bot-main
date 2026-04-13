@@ -430,3 +430,237 @@ def test_journal_scan_candidate_is_resilient(proof_runtime, monkeypatch):
         cnt = conn.execute("SELECT COUNT(*) FROM scan_candidates").fetchone()[0]
 
     assert cnt == 2, f"expected 2 rows from resilience test, got {cnt}"
+
+
+# ── 10. 15-minute outcome fields ──────────────────────────────────────────────
+
+
+def test_compute_outcome_includes_15m_fields_when_df_15m_provided():
+    """_compute_outcome: price_15m and ret_15m_pct populated when df_15m passed."""
+    import pandas as pd
+    from learning.candidate_labeler import _compute_outcome
+
+    base = 65000.0
+    n = 200
+    closes = [base] * (n - 5) + [
+        base,
+        base * 1.01,
+        base * 1.02,
+        base * 1.03,
+        base * 1.04,
+    ]
+    highs = [c * 1.001 for c in closes]
+    lows = [c * 0.999 for c in closes]
+    df_1h = pd.DataFrame({"close": closes, "high": highs, "low": lows})
+
+    # 15m series: 50 bars; ref_idx_15m = max(0, 50-17) = 33
+    closes_15m = [base] * 33 + [base * 1.005] + [base * 1.01] * 16
+    df_15m = pd.DataFrame(
+        {
+            "close": closes_15m,
+            "high": [c * 1.001 for c in closes_15m],
+            "low": [c * 0.999 for c in closes_15m],
+        }
+    )
+
+    result = _compute_outcome(
+        df_1h,
+        ref_price=base,
+        direction="LONG",
+        stop_pct=3.0,
+        atr_15m=200.0,
+        df_15m=df_15m,
+    )
+
+    assert result["label_status"] == "complete"
+    assert result["price_15m"] > 0, "price_15m should be populated"
+    assert result["ret_15m_pct"] != 0.0, (
+        "ret_15m_pct should be non-zero for a moving market"
+    )
+
+
+def test_compute_outcome_15m_graceful_without_df_15m():
+    """_compute_outcome: price_15m=0 and ret_15m_pct=0 when df_15m not provided."""
+    import pandas as pd
+    from learning.candidate_labeler import _compute_outcome
+
+    base = 65000.0
+    n = 200
+    closes = [base] * (n - 5) + [
+        base,
+        base * 1.01,
+        base * 1.02,
+        base * 1.03,
+        base * 1.04,
+    ]
+    df = pd.DataFrame(
+        {
+            "close": closes,
+            "high": [c * 1.001 for c in closes],
+            "low": [c * 0.999 for c in closes],
+        }
+    )
+
+    result = _compute_outcome(
+        df, ref_price=base, direction="LONG", stop_pct=3.0, atr_15m=200.0
+    )
+
+    assert result["label_status"] == "complete"
+    assert result["price_15m"] == 0.0
+    assert result["ret_15m_pct"] == 0.0
+
+
+def test_log_candidate_outcome_persists_15m_fields(proof_runtime, monkeypatch):
+    """log_candidate_outcome stores price_15m and ret_15m_pct when provided."""
+    import logging_db.trade_logger as tl
+
+    monkeypatch.setattr(tl, "DB_PATH", str(proof_runtime.db_path))
+
+    with sqlite3.connect(proof_runtime.db_path) as conn:
+        conn.execute(
+            "INSERT INTO scan_candidates (scan_id, ts, symbol, direction, decision, labeled) "
+            "VALUES (?,?,?,?,?,?)",
+            ("sc_15m", "2026-04-10T10:00:00+00:00", "BTCUSDT", "LONG", "entered", 0),
+        )
+        cand_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+    tl.log_candidate_outcome(
+        candidate_id=cand_id,
+        label_status="complete",
+        entry_ref_price=65000.0,
+        price_1h=65500.0,
+        price_4h=66000.0,
+        ret_1h_pct=0.77,
+        ret_4h_pct=1.54,
+        mfe_4h_pct=2.0,
+        mae_4h_pct=-0.5,
+        hit_1r=0,
+        hit_2r=0,
+        hit_stop=0,
+        best_exit_pct=2.0,
+        worst_drawdown_pct=-0.5,
+        price_15m=65200.0,
+        ret_15m_pct=0.31,
+    )
+
+    with sqlite3.connect(proof_runtime.db_path) as conn:
+        row = conn.execute(
+            "SELECT price_15m, ret_15m_pct FROM candidate_outcomes WHERE candidate_id=?",
+            (cand_id,),
+        ).fetchone()
+
+    assert row is not None, "candidate_outcomes row must exist"
+    assert abs(row[0] - 65200.0) < 0.01, f"price_15m wrong: {row[0]}"
+    assert abs(row[1] - 0.31) < 0.001, f"ret_15m_pct wrong: {row[1]}"
+
+
+# ── 11. Retention pruning ─────────────────────────────────────────────────────
+
+
+def test_prune_old_candidates_respects_policy(proof_runtime, monkeypatch):
+    """prune_old_candidates deletes old labeled rows and stale unlabeled rows."""
+    import datetime as _dt
+    import logging_db.trade_logger as tl
+
+    monkeypatch.setattr(tl, "DB_PATH", str(proof_runtime.db_path))
+
+    now = datetime.now(timezone.utc)
+
+    # Insert: old labeled (91d), old unlabeled (31d), recent labeled (5d), recent unlabeled (1d)
+    rows = [
+        (
+            "prune_old_labeled",
+            (now - _dt.timedelta(days=91)).isoformat(),
+            "BTCUSDT",
+            "entered",
+            1,
+        ),
+        (
+            "prune_old_unlabeled",
+            (now - _dt.timedelta(days=31)).isoformat(),
+            "ETHUSDT",
+            "econ_veto",
+            0,
+        ),
+        (
+            "keep_recent_labeled",
+            (now - _dt.timedelta(days=5)).isoformat(),
+            "SOLUSDT",
+            "entered",
+            1,
+        ),
+        (
+            "keep_recent_unlabeled",
+            (now - _dt.timedelta(hours=6)).isoformat(),
+            "BNBUSDT",
+            "below_threshold",
+            0,
+        ),
+    ]
+    with sqlite3.connect(proof_runtime.db_path) as conn:
+        for scan_id, ts, sym, decision, labeled in rows:
+            conn.execute(
+                "INSERT INTO scan_candidates (scan_id, ts, symbol, direction, decision, labeled) "
+                "VALUES (?,?,?,?,?,?)",
+                (scan_id, ts, sym, "LONG", decision, labeled),
+            )
+
+    result = tl.prune_old_candidates(labeled_days=90, unlabeled_days=30)
+
+    assert result["pruned_labeled"] == 1, f"expected 1 pruned labeled, got {result}"
+    assert result["pruned_unlabeled"] == 1, f"expected 1 pruned unlabeled, got {result}"
+    assert result["remaining"] == 2, f"expected 2 remaining, got {result}"
+
+    with sqlite3.connect(proof_runtime.db_path) as conn:
+        scan_ids = {
+            r[0] for r in conn.execute("SELECT scan_id FROM scan_candidates").fetchall()
+        }
+    assert "keep_recent_labeled" in scan_ids
+    assert "keep_recent_unlabeled" in scan_ids
+    assert "prune_old_labeled" not in scan_ids
+    assert "prune_old_unlabeled" not in scan_ids
+
+
+# ── 12. Nightly audit — new checks ───────────────────────────────────────────
+
+
+def test_nightly_audit_includes_funnel_and_retention_checks(proof_runtime, monkeypatch):
+    """run_audit(run_proof=False) now includes candidate_funnel and retention checks."""
+    import logging_db.trade_logger as tl
+    import config
+
+    monkeypatch.setattr(tl, "DB_PATH", str(proof_runtime.db_path))
+    monkeypatch.setattr(config, "DB_PATH", str(proof_runtime.db_path), raising=False)
+
+    from monitoring.nightly_audit import run_audit
+
+    report = run_audit(run_proof=False)
+
+    assert isinstance(report, dict)
+    assert "overall" in report
+    checks = report["checks"]
+
+    # All v13.7 checks must be present
+    required = {
+        "proof_suite",
+        "candidate_journaling",
+        "candidate_funnel",
+        "repo_drift",
+        "learning_health",
+        "retention",
+    }
+    missing = required - set(checks.keys())
+    assert not missing, f"Missing audit checks: {missing}"
+
+    for name, check in checks.items():
+        assert "status" in check, f"check '{name}' missing 'status' field"
+
+    # funnel check has candidate-specific fields
+    funnel = checks["candidate_funnel"]
+    assert "candidates_24h" in funnel
+    assert "conversion_rate_pct" in funnel
+
+    # retention check has table size info
+    retention = checks["retention"]
+    assert "scan_candidates_total" in retention
+    assert "candidate_outcomes_total" in retention

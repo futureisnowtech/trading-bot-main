@@ -81,6 +81,11 @@ def init_db() -> None:
         "ALTER TABLE open_positions ADD COLUMN scale_33_done INTEGER DEFAULT 0",
         "ALTER TABLE open_positions ADD COLUMN scale_66_done INTEGER DEFAULT 0",
         "ALTER TABLE open_positions ADD COLUMN leverage INTEGER DEFAULT 3",
+        # v13.7: 15-minute forward outcome fields for candidate_outcomes
+        "ALTER TABLE candidate_outcomes ADD COLUMN price_15m REAL DEFAULT 0",
+        "ALTER TABLE candidate_outcomes ADD COLUMN ret_15m_pct REAL DEFAULT 0",
+        # v13.7: funding rate at scan time for gate-quality analytics
+        "ALTER TABLE scan_candidates ADD COLUMN funding_rate REAL DEFAULT 0",
     ]:
         try:
             cur.execute(migration)
@@ -188,6 +193,8 @@ def init_db() -> None:
     # v13.6: Forward-outcome labels for each journaled candidate.
     # Populated asynchronously by learning/candidate_labeler.py after the
     # minimum look-forward window (4 h) has elapsed.
+    # v13.7: price_15m / ret_15m_pct columns included in DDL so fresh DBs
+    # get them without relying on the ALTER TABLE migration path.
     cur.execute("""CREATE TABLE IF NOT EXISTS candidate_outcomes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         candidate_id INTEGER NOT NULL,
@@ -205,6 +212,8 @@ def init_db() -> None:
         best_exit_pct REAL,
         worst_drawdown_pct REAL,
         labeled_at TEXT,
+        price_15m REAL DEFAULT 0,
+        ret_15m_pct REAL DEFAULT 0,
         FOREIGN KEY (candidate_id) REFERENCES scan_candidates(id)
     )""")
 
@@ -644,6 +653,8 @@ def log_candidate_outcome(
     hit_stop: int,
     best_exit_pct: float,
     worst_drawdown_pct: float,
+    price_15m: float = 0.0,
+    ret_15m_pct: float = 0.0,
 ) -> None:
     """Insert a candidate outcome row and mark the candidate as labeled=1."""
     try:
@@ -654,8 +665,9 @@ def log_candidate_outcome(
                 candidate_id, label_status, entry_ref_price,
                 price_1h, price_4h, ret_1h_pct, ret_4h_pct,
                 mfe_4h_pct, mae_4h_pct, hit_1r, hit_2r, hit_stop,
-                best_exit_pct, worst_drawdown_pct, labeled_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                best_exit_pct, worst_drawdown_pct, labeled_at,
+                price_15m, ret_15m_pct
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 candidate_id,
                 label_status,
@@ -672,6 +684,8 @@ def log_candidate_outcome(
                 best_exit_pct,
                 worst_drawdown_pct,
                 _ts(),
+                price_15m,
+                ret_15m_pct,
             ),
         )
         cur.execute("UPDATE scan_candidates SET labeled=1 WHERE id=?", (candidate_id,))
@@ -744,6 +758,58 @@ def get_candidate_journal_stats(days: int = 7) -> dict:
         }
     except Exception:
         return defaults
+
+
+def prune_old_candidates(
+    labeled_days: int = 90,
+    unlabeled_days: int = 30,
+) -> dict:
+    """
+    Retention pruning for scan_candidates.
+
+    Keeps the table bounded without destroying learning value:
+    - labeled=1 rows older than `labeled_days` are pruned (default 90 days).
+    - labeled=0 rows older than `unlabeled_days` are pruned as permanently stale
+      (the labeler had ample time; data is unavailable).
+
+    candidate_outcomes rows are never pruned here — they are linked by FK and
+    are tiny compared to scan_candidates.  If scan_candidates rows are pruned,
+    the orphaned candidate_outcomes rows remain harmless.
+
+    Returns:
+        {"pruned_labeled": int, "pruned_unlabeled": int, "remaining": int}
+    """
+    import datetime as _dt
+
+    result = {"pruned_labeled": 0, "pruned_unlabeled": 0, "remaining": 0}
+    try:
+        now = datetime.now(pytz.utc)
+        cutoff_labeled = (now - _dt.timedelta(days=labeled_days)).isoformat()
+        cutoff_unlabeled = (now - _dt.timedelta(days=unlabeled_days)).isoformat()
+
+        conn = _conn()
+        cur = conn.cursor()
+
+        cur.execute(
+            "DELETE FROM scan_candidates WHERE labeled=1 AND ts < ?",
+            (cutoff_labeled,),
+        )
+        result["pruned_labeled"] = cur.rowcount
+
+        cur.execute(
+            "DELETE FROM scan_candidates WHERE labeled=0 AND ts < ?",
+            (cutoff_unlabeled,),
+        )
+        result["pruned_unlabeled"] = cur.rowcount
+
+        cur.execute("SELECT COUNT(*) FROM scan_candidates")
+        result["remaining"] = (cur.fetchone() or [0])[0]
+
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+    return result
 
 
 # ─── Position persistence ─────────────────────────────────────────────────────

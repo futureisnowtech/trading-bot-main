@@ -3,6 +3,7 @@ logging_db/trade_logger.py
 SQLite trade log + position persistence + CSV export.
 Positions are written to disk on every open/close so a restart never loses state.
 """
+
 import sqlite3
 import csv
 import os
@@ -13,6 +14,7 @@ from typing import Optional
 import pytz
 
 import sys
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import DB_PATH, CSV_LOG_DIR, MARKET_TIMEZONE, PAPER_TRADING
 
@@ -142,6 +144,70 @@ def init_db() -> None:
         features_json TEXT NOT NULL
     )""")
 
+    # v13.6: Candidate journaling — one row per decision-grade candidate per scan cycle.
+    # Captures the full decision set (entered + vetoed + blocked) so the learning layer
+    # can analyse selection bias and attribute outcomes to decisions, not just filled trades.
+    cur.execute("""CREATE TABLE IF NOT EXISTS scan_candidates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        scan_id TEXT,
+        ts TEXT NOT NULL,
+        symbol TEXT NOT NULL,
+        exchange TEXT,
+        base_asset TEXT,
+        direction TEXT,
+        primary_setup TEXT,
+        scan_setups_json TEXT,
+        price REAL,
+        volume_24h_usd REAL,
+        spread_pct REAL,
+        bid_depth_usd REAL,
+        ask_depth_usd REAL,
+        atr_15m REAL,
+        stop_pct REAL,
+        target_pct REAL,
+        scanner_expected_profit REAL,
+        regime TEXT,
+        technical_score REAL,
+        ml_score REAL,
+        composite_score REAL,
+        entry_threshold REAL,
+        should_enter_signal INTEGER,
+        econ_approved INTEGER,
+        econ_tier TEXT,
+        econ_reject_reason TEXT,
+        edge_score REAL,
+        size_usd REAL,
+        leverage INTEGER,
+        entry_block_reason TEXT,
+        decision TEXT,
+        paper INTEGER,
+        source TEXT,
+        labeled INTEGER DEFAULT 0
+    )""")
+
+    # v13.6: Forward-outcome labels for each journaled candidate.
+    # Populated asynchronously by learning/candidate_labeler.py after the
+    # minimum look-forward window (4 h) has elapsed.
+    cur.execute("""CREATE TABLE IF NOT EXISTS candidate_outcomes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        candidate_id INTEGER NOT NULL,
+        label_status TEXT,
+        entry_ref_price REAL,
+        price_1h REAL,
+        price_4h REAL,
+        ret_1h_pct REAL,
+        ret_4h_pct REAL,
+        mfe_4h_pct REAL,
+        mae_4h_pct REAL,
+        hit_1r INTEGER,
+        hit_2r INTEGER,
+        hit_stop INTEGER,
+        best_exit_pct REAL,
+        worst_drawdown_pct REAL,
+        labeled_at TEXT,
+        FOREIGN KEY (candidate_id) REFERENCES scan_candidates(id)
+    )""")
+
     conn.commit()
     conn.close()
 
@@ -150,10 +216,23 @@ def _ts() -> str:
     return datetime.now(pytz.timezone(MARKET_TIMEZONE)).isoformat()
 
 
-def log_trade(strategy, broker, symbol, action, order_type,
-              qty, price, fee_usd=0.0, pnl_usd=0.0,
-              paper=True, order_id='', notes='',
-              won=None, source=None, pnl_pct=0.0) -> int:
+def log_trade(
+    strategy,
+    broker,
+    symbol,
+    action,
+    order_type,
+    qty,
+    price,
+    fee_usd=0.0,
+    pnl_usd=0.0,
+    paper=True,
+    order_id="",
+    notes="",
+    won=None,
+    source=None,
+    pnl_pct=0.0,
+) -> int:
     """
     Log a trade to the SQLite trades table.
 
@@ -170,7 +249,7 @@ def log_trade(strategy, broker, symbol, action, order_type,
     if won is None and pnl_usd != 0:
         won = 1 if pnl_usd > 0 else 0
     if source is None:
-        source = 'paper_v10' if paper else 'live_v10'
+        source = "paper_v10" if paper else "live_v10"
     conn = _conn()
     cur = conn.cursor()
 
@@ -178,55 +257,119 @@ def log_trade(strategy, broker, symbol, action, order_type,
     # was already logged within the last 90 seconds, skip. Prevents double-logging
     # caused by the kill window between log_trade and delete_position on restart.
     if pnl_usd != 0:
-        cur.execute("""
+        cur.execute(
+            """
             SELECT id FROM trades
             WHERE symbol=? AND strategy=? AND action=? AND paper=?
               AND ABS(qty - ?) < 0.000001
               AND ts >= datetime('now', '-90 seconds')
             LIMIT 1
-        """, (symbol, strategy, action, int(paper), qty))
+        """,
+            (symbol, strategy, action, int(paper), qty),
+        )
         if cur.fetchone():
             conn.close()
             return -1  # silently skip duplicate
 
-    cur.execute("""INSERT INTO trades
+    cur.execute(
+        """INSERT INTO trades
         (ts,strategy,broker,symbol,action,order_type,qty,price,value_usd,
          fee_usd,pnl_usd,paper,order_id,notes,won,source,pnl_pct)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (ts, strategy, broker, symbol, action, order_type, qty, price,
-         value_usd, fee_usd, pnl_usd, int(paper),
-         order_id or f'PAPER_{uuid.uuid4().hex[:8]}', notes,
-         won, source, pnl_pct))
+        (
+            ts,
+            strategy,
+            broker,
+            symbol,
+            action,
+            order_type,
+            qty,
+            price,
+            value_usd,
+            fee_usd,
+            pnl_usd,
+            int(paper),
+            order_id or f"PAPER_{uuid.uuid4().hex[:8]}",
+            notes,
+            won,
+            source,
+            pnl_pct,
+        ),
+    )
     trade_id = cur.lastrowid
     conn.commit()
     conn.close()
-    _csv_append(ts, strategy, broker, symbol, action, order_type,
-                qty, price, value_usd, fee_usd, pnl_usd, paper, order_id, notes)
+    _csv_append(
+        ts,
+        strategy,
+        broker,
+        symbol,
+        action,
+        order_type,
+        qty,
+        price,
+        value_usd,
+        fee_usd,
+        pnl_usd,
+        paper,
+        order_id,
+        notes,
+    )
     return trade_id
 
 
-def log_signal(strategy, symbol, signal, confidence,
-               reason='', acted_on=False, price=0.0) -> None:
+def log_signal(
+    strategy, symbol, signal, confidence, reason="", acted_on=False, price=0.0
+) -> None:
     conn = _conn()
     conn.cursor().execute(
         "INSERT INTO signals (ts,strategy,symbol,signal,confidence,reason,acted_on,price) VALUES (?,?,?,?,?,?,?,?)",
-        (_ts(), strategy, symbol, signal, confidence, reason, int(acted_on), price))
+        (_ts(), strategy, symbol, signal, confidence, reason, int(acted_on), price),
+    )
     conn.commit()
     conn.close()
 
 
-def log_debate(symbol, buy_votes, hold_votes, sell_votes,
-               final_signal, confidence, reasoning, bull_case,
-               bear_case, key_risk, agent_details, regime='') -> None:
+def log_debate(
+    symbol,
+    buy_votes,
+    hold_votes,
+    sell_votes,
+    final_signal,
+    confidence,
+    reasoning,
+    bull_case,
+    bear_case,
+    key_risk,
+    agent_details,
+    regime="",
+) -> None:
     import json
+
     conn = _conn()
-    conn.cursor().execute("""INSERT INTO debate_results
+    conn.cursor().execute(
+        """INSERT INTO debate_results
         (ts,symbol,buy_votes,hold_votes,sell_votes,final_signal,confidence,
          reasoning,bull_case,bear_case,key_risk,agent_details,regime)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (_ts(), symbol, buy_votes, hold_votes, sell_votes, final_signal,
-         confidence, reasoning, bull_case, bear_case, key_risk,
-         json.dumps(agent_details) if not isinstance(agent_details, str) else agent_details, regime))
+        (
+            _ts(),
+            symbol,
+            buy_votes,
+            hold_votes,
+            sell_votes,
+            final_signal,
+            confidence,
+            reasoning,
+            bull_case,
+            bear_case,
+            key_risk,
+            json.dumps(agent_details)
+            if not isinstance(agent_details, str)
+            else agent_details,
+            regime,
+        ),
+    )
     conn.commit()
     conn.close()
 
@@ -235,16 +378,18 @@ def log_event(level, source, message) -> None:
     conn = _conn()
     conn.cursor().execute(
         "INSERT INTO system_events (ts,level,source,message) VALUES (?,?,?,?)",
-        (_ts(), level, source, message))
+        (_ts(), level, source, message),
+    )
     conn.commit()
     conn.close()
 
 
-def log_api_cost(call_type, input_tokens, output_tokens, cost_usd, symbol='') -> None:
+def log_api_cost(call_type, input_tokens, output_tokens, cost_usd, symbol="") -> None:
     conn = _conn()
     conn.cursor().execute(
         "INSERT INTO api_costs (ts,call_type,input_tokens,output_tokens,cost_usd,symbol) VALUES (?,?,?,?,?,?)",
-        (_ts(), call_type, input_tokens, output_tokens, cost_usd, symbol))
+        (_ts(), call_type, input_tokens, output_tokens, cost_usd, symbol),
+    )
     conn.commit()
     conn.close()
 
@@ -259,8 +404,8 @@ def log_edge_snapshot(
     k_factor: float = 1.0,
     m_score: float = 0.0,
     final_size_usd: float = 0.0,
-    debate_type: str = 'agents',
-    notes: str = '',
+    debate_type: str = "agents",
+    notes: str = "",
 ) -> None:
     """Log a sizing edge snapshot for post-trade attribution and reporting."""
     conn = _conn()
@@ -268,15 +413,28 @@ def log_edge_snapshot(
         "INSERT INTO edge_snapshots "
         "(ts,market,symbol,v_score,e_score,d_factor,t_multiplier,k_factor,m_score,final_size_usd,debate_type,notes) "
         "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-        (_ts(), market, symbol, v_score, e_score, d_factor, t_multiplier,
-         k_factor, m_score, final_size_usd, debate_type, notes),
+        (
+            _ts(),
+            market,
+            symbol,
+            v_score,
+            e_score,
+            d_factor,
+            t_multiplier,
+            k_factor,
+            m_score,
+            final_size_usd,
+            debate_type,
+            notes,
+        ),
     )
     conn.commit()
     conn.close()
 
 
-def log_trade_features(trade_id: int, symbol: str, direction: str,
-                        features: dict) -> None:
+def log_trade_features(
+    trade_id: int, symbol: str, direction: str, features: dict
+) -> None:
     """
     Persist a 57-feature snapshot for a trade entry.
 
@@ -293,6 +451,7 @@ def log_trade_features(trade_id: int, symbol: str, direction: str,
                    be present; extras are serialised and ignored at training time.
     """
     import json
+
     if not trade_id or trade_id <= 0:
         return
     try:
@@ -308,28 +467,309 @@ def log_trade_features(trade_id: int, symbol: str, direction: str,
         pass  # feature snapshot is best-effort; never block trade execution
 
 
+# ─── Candidate journaling (v13.6) ────────────────────────────────────────────
+
+
+def log_scan_candidate(
+    scan_id: str,
+    symbol: str,
+    exchange: str,
+    base_asset: str,
+    direction: str,
+    primary_setup: str,
+    scan_setups_json: str,
+    price: float,
+    volume_24h_usd: float,
+    spread_pct: float,
+    bid_depth_usd: float,
+    ask_depth_usd: float,
+    atr_15m: float,
+    stop_pct: float,
+    target_pct: float,
+    scanner_expected_profit: float,
+    regime: str,
+    technical_score: float,
+    ml_score: float,
+    composite_score: float,
+    entry_threshold: float,
+    should_enter_signal: int,
+    econ_approved: int,
+    econ_tier: str,
+    econ_reject_reason: str,
+    edge_score: float,
+    size_usd: float,
+    leverage: int,
+    entry_block_reason: str,
+    decision: str,
+    paper: bool,
+    source: str,
+) -> int:
+    """
+    Persist one candidate decision to scan_candidates.
+
+    Called at every meaningful gate outcome — entered, econ_veto,
+    below_threshold, dual_exposure_block, cooldown_block, etc.
+    Returns the row id (0 on error — never raises).
+    """
+    try:
+        conn = _conn()
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT INTO scan_candidates (
+                scan_id, ts, symbol, exchange, base_asset, direction,
+                primary_setup, scan_setups_json, price, volume_24h_usd,
+                spread_pct, bid_depth_usd, ask_depth_usd, atr_15m,
+                stop_pct, target_pct, scanner_expected_profit,
+                regime, technical_score, ml_score, composite_score,
+                entry_threshold, should_enter_signal, econ_approved,
+                econ_tier, econ_reject_reason, edge_score, size_usd,
+                leverage, entry_block_reason, decision, paper, source, labeled
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                scan_id,
+                _ts(),
+                symbol,
+                exchange,
+                base_asset,
+                direction,
+                primary_setup,
+                scan_setups_json,
+                price,
+                volume_24h_usd,
+                spread_pct,
+                bid_depth_usd,
+                ask_depth_usd,
+                atr_15m,
+                stop_pct,
+                target_pct,
+                scanner_expected_profit,
+                regime,
+                technical_score,
+                ml_score,
+                composite_score,
+                entry_threshold,
+                int(should_enter_signal),
+                int(econ_approved),
+                econ_tier,
+                econ_reject_reason,
+                edge_score,
+                size_usd,
+                int(leverage),
+                entry_block_reason,
+                decision,
+                int(paper),
+                source,
+                0,
+            ),
+        )
+        row_id = cur.lastrowid or 0
+        conn.commit()
+        conn.close()
+        return row_id
+    except Exception:
+        return 0
+
+
+def get_unlabeled_candidates(min_age_hours: float = 4.0, limit: int = 100) -> list:
+    """
+    Return scan_candidates rows that are old enough to label (labeled=0).
+    Uses a conservative 4-hour look-forward window so candle data exists.
+    """
+    import datetime as _dt
+
+    try:
+        cutoff = (
+            datetime.now(pytz.utc) - _dt.timedelta(hours=min_age_hours)
+        ).isoformat()
+        conn = _conn()
+        cur = conn.cursor()
+        cur.execute(
+            """SELECT id, symbol, direction, price, stop_pct, atr_15m, ts
+               FROM scan_candidates
+               WHERE labeled=0 AND ts <= ?
+               ORDER BY ts ASC
+               LIMIT ?""",
+            (cutoff, limit),
+        )
+        rows = [dict(zip([c[0] for c in cur.description], r)) for r in cur.fetchall()]
+        conn.close()
+        return rows
+    except Exception:
+        return []
+
+
+def log_candidate_outcome(
+    candidate_id: int,
+    label_status: str,
+    entry_ref_price: float,
+    price_1h: float,
+    price_4h: float,
+    ret_1h_pct: float,
+    ret_4h_pct: float,
+    mfe_4h_pct: float,
+    mae_4h_pct: float,
+    hit_1r: int,
+    hit_2r: int,
+    hit_stop: int,
+    best_exit_pct: float,
+    worst_drawdown_pct: float,
+) -> None:
+    """Insert a candidate outcome row and mark the candidate as labeled=1."""
+    try:
+        conn = _conn()
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT INTO candidate_outcomes (
+                candidate_id, label_status, entry_ref_price,
+                price_1h, price_4h, ret_1h_pct, ret_4h_pct,
+                mfe_4h_pct, mae_4h_pct, hit_1r, hit_2r, hit_stop,
+                best_exit_pct, worst_drawdown_pct, labeled_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                candidate_id,
+                label_status,
+                entry_ref_price,
+                price_1h,
+                price_4h,
+                ret_1h_pct,
+                ret_4h_pct,
+                mfe_4h_pct,
+                mae_4h_pct,
+                int(hit_1r),
+                int(hit_2r),
+                int(hit_stop),
+                best_exit_pct,
+                worst_drawdown_pct,
+                _ts(),
+            ),
+        )
+        cur.execute("UPDATE scan_candidates SET labeled=1 WHERE id=?", (candidate_id,))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass  # best-effort; never block the labeler loop
+
+
+def get_candidate_journal_stats(days: int = 7) -> dict:
+    """
+    Return summary stats for the candidate journaling health check.
+
+    Returns:
+        total_candidates  — rows logged in last `days`
+        labeled           — rows with labeled=1
+        unlabeled_backlog — rows with labeled=0 that are old enough to label (>4h)
+        decision_counts   — dict of decision → count
+        last_ts           — ISO timestamp of most recent candidate row
+    """
+    import datetime as _dt
+
+    defaults: dict = {
+        "total_candidates": 0,
+        "labeled": 0,
+        "unlabeled_backlog": 0,
+        "decision_counts": {},
+        "last_ts": None,
+    }
+    try:
+        cutoff_week = (datetime.now(pytz.utc) - _dt.timedelta(days=days)).isoformat()
+        cutoff_label = (datetime.now(pytz.utc) - _dt.timedelta(hours=4)).isoformat()
+        conn = _conn()
+        cur = conn.cursor()
+
+        cur.execute(
+            "SELECT COUNT(*) FROM scan_candidates WHERE ts >= ?", (cutoff_week,)
+        )
+        total = (cur.fetchone() or [0])[0]
+
+        cur.execute(
+            "SELECT COUNT(*) FROM scan_candidates WHERE ts >= ? AND labeled=1",
+            (cutoff_week,),
+        )
+        labeled = (cur.fetchone() or [0])[0]
+
+        cur.execute(
+            "SELECT COUNT(*) FROM scan_candidates WHERE labeled=0 AND ts <= ?",
+            (cutoff_label,),
+        )
+        backlog = (cur.fetchone() or [0])[0]
+
+        cur.execute(
+            "SELECT decision, COUNT(*) FROM scan_candidates WHERE ts >= ? GROUP BY decision",
+            (cutoff_week,),
+        )
+        decision_counts = {r[0]: r[1] for r in cur.fetchall()}
+
+        cur.execute("SELECT MAX(ts) FROM scan_candidates")
+        last_ts_row = cur.fetchone()
+        last_ts = last_ts_row[0] if last_ts_row else None
+
+        conn.close()
+        return {
+            "total_candidates": total,
+            "labeled": labeled,
+            "unlabeled_backlog": backlog,
+            "decision_counts": decision_counts,
+            "last_ts": last_ts,
+        }
+    except Exception:
+        return defaults
+
+
 # ─── Position persistence ─────────────────────────────────────────────────────
 
-def persist_position(symbol, strategy, qty, entry, stop, target,
-                     high_since_entry, ts_entry, paper=True,
-                     direction='LONG', entry_reason='', low_since_entry=None,
-                     atr_at_entry=0.0, composite_score=0.0,
-                     trailing_active=False, trailing_stop_price=0.0,
-                     scale_33_done=False, scale_66_done=False,
-                     leverage=3) -> None:
+
+def persist_position(
+    symbol,
+    strategy,
+    qty,
+    entry,
+    stop,
+    target,
+    high_since_entry,
+    ts_entry,
+    paper=True,
+    direction="LONG",
+    entry_reason="",
+    low_since_entry=None,
+    atr_at_entry=0.0,
+    composite_score=0.0,
+    trailing_active=False,
+    trailing_stop_price=0.0,
+    scale_33_done=False,
+    scale_66_done=False,
+    leverage=3,
+) -> None:
     """Write open position to DB so restarts can recover it (including exit state)."""
     _low = low_since_entry if low_since_entry is not None else entry
     conn = _conn()
-    conn.cursor().execute("""INSERT OR REPLACE INTO open_positions
+    conn.cursor().execute(
+        """INSERT OR REPLACE INTO open_positions
         (symbol,strategy,qty,entry,stop,target,high_since_entry,low_since_entry,ts_entry,paper,
          direction,entry_reason,atr_at_entry,composite_score,
          trailing_active,trailing_stop_price,scale_33_done,scale_66_done,leverage)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (symbol, strategy, qty, entry, stop, target, high_since_entry, _low, ts_entry,
-         int(paper), direction, entry_reason or '',
-         float(atr_at_entry), float(composite_score),
-         int(trailing_active), float(trailing_stop_price),
-         int(scale_33_done), int(scale_66_done), int(leverage)))
+        (
+            symbol,
+            strategy,
+            qty,
+            entry,
+            stop,
+            target,
+            high_since_entry,
+            _low,
+            ts_entry,
+            int(paper),
+            direction,
+            entry_reason or "",
+            float(atr_at_entry),
+            float(composite_score),
+            int(trailing_active),
+            float(trailing_stop_price),
+            int(scale_33_done),
+            int(scale_66_done),
+            int(leverage),
+        ),
+    )
     conn.commit()
     conn.close()
 
@@ -338,7 +778,8 @@ def delete_position(symbol, strategy, paper=True) -> None:
     conn = _conn()
     conn.cursor().execute(
         "DELETE FROM open_positions WHERE symbol=? AND strategy=? AND paper=?",
-        (symbol, strategy, int(paper)))
+        (symbol, strategy, int(paper)),
+    )
     conn.commit()
     conn.close()
 
@@ -354,23 +795,28 @@ def load_open_positions(paper=True) -> list:
 
 # ─── Query helpers ────────────────────────────────────────────────────────────
 
+
 def get_todays_trades(paper=True) -> list:
-    today = datetime.now(pytz.timezone(MARKET_TIMEZONE)).strftime('%Y-%m-%d')
+    today = datetime.now(pytz.timezone(MARKET_TIMEZONE)).strftime("%Y-%m-%d")
     conn = _conn()
     cur = conn.cursor()
-    cur.execute("SELECT * FROM trades WHERE ts LIKE ? AND paper=? ORDER BY ts DESC",
-                (f'{today}%', int(paper)))
+    cur.execute(
+        "SELECT * FROM trades WHERE ts LIKE ? AND paper=? ORDER BY ts DESC",
+        (f"{today}%", int(paper)),
+    )
     rows = [dict(r) for r in cur.fetchall()]
     conn.close()
     return rows
 
 
 def get_todays_signals() -> list:
-    today = datetime.now(pytz.timezone(MARKET_TIMEZONE)).strftime('%Y-%m-%d')
+    today = datetime.now(pytz.timezone(MARKET_TIMEZONE)).strftime("%Y-%m-%d")
     conn = _conn()
     cur = conn.cursor()
-    cur.execute("SELECT * FROM signals WHERE ts LIKE ? ORDER BY ts DESC LIMIT 50",
-                (f'{today}%',))
+    cur.execute(
+        "SELECT * FROM signals WHERE ts LIKE ? ORDER BY ts DESC LIMIT 50",
+        (f"{today}%",),
+    )
     rows = [dict(r) for r in cur.fetchall()]
     conn.close()
     return rows
@@ -386,11 +832,13 @@ def get_recent_debates(limit=10) -> list:
 
 
 def get_todays_pnl(paper=True) -> float:
-    today = datetime.now(pytz.timezone(MARKET_TIMEZONE)).strftime('%Y-%m-%d')
+    today = datetime.now(pytz.timezone(MARKET_TIMEZONE)).strftime("%Y-%m-%d")
     conn = _conn()
     cur = conn.cursor()
-    cur.execute("SELECT COALESCE(SUM(pnl_usd),0) FROM trades WHERE ts LIKE ? AND paper=?",
-                (f'{today}%', int(paper)))
+    cur.execute(
+        "SELECT COALESCE(SUM(pnl_usd),0) FROM trades WHERE ts LIKE ? AND paper=?",
+        (f"{today}%", int(paper)),
+    )
     val = cur.fetchone()[0]
     conn.close()
     return float(val)
@@ -398,14 +846,18 @@ def get_todays_pnl(paper=True) -> float:
 
 def get_todays_fees(paper=True) -> float:
     """Returns total cost today: trading fees + Claude API costs."""
-    today = datetime.now(pytz.timezone(MARKET_TIMEZONE)).strftime('%Y-%m-%d')
+    today = datetime.now(pytz.timezone(MARKET_TIMEZONE)).strftime("%Y-%m-%d")
     conn = _conn()
     cur = conn.cursor()
-    cur.execute("SELECT COALESCE(SUM(fee_usd),0) FROM trades WHERE ts LIKE ? AND paper=?",
-                (f'{today}%', int(paper)))
+    cur.execute(
+        "SELECT COALESCE(SUM(fee_usd),0) FROM trades WHERE ts LIKE ? AND paper=?",
+        (f"{today}%", int(paper)),
+    )
     trade_fees = float(cur.fetchone()[0])
-    cur.execute("SELECT COALESCE(SUM(cost_usd),0) FROM api_costs WHERE ts LIKE ?",
-                (f'{today}%',))
+    cur.execute(
+        "SELECT COALESCE(SUM(cost_usd),0) FROM api_costs WHERE ts LIKE ?",
+        (f"{today}%",),
+    )
     api_fees = float(cur.fetchone()[0])
     conn.close()
     return trade_fees + api_fees
@@ -413,11 +865,13 @@ def get_todays_fees(paper=True) -> float:
 
 def get_todays_trade_fees(paper=True) -> float:
     """Trading exchange fees only (excludes API costs)."""
-    today = datetime.now(pytz.timezone(MARKET_TIMEZONE)).strftime('%Y-%m-%d')
+    today = datetime.now(pytz.timezone(MARKET_TIMEZONE)).strftime("%Y-%m-%d")
     conn = _conn()
     cur = conn.cursor()
-    cur.execute("SELECT COALESCE(SUM(fee_usd),0) FROM trades WHERE ts LIKE ? AND paper=?",
-                (f'{today}%', int(paper)))
+    cur.execute(
+        "SELECT COALESCE(SUM(fee_usd),0) FROM trades WHERE ts LIKE ? AND paper=?",
+        (f"{today}%", int(paper)),
+    )
     val = cur.fetchone()[0]
     conn.close()
     return float(val)
@@ -425,22 +879,26 @@ def get_todays_trade_fees(paper=True) -> float:
 
 def get_todays_api_cost() -> float:
     """Claude API cost today only."""
-    today = datetime.now(pytz.timezone(MARKET_TIMEZONE)).strftime('%Y-%m-%d')
+    today = datetime.now(pytz.timezone(MARKET_TIMEZONE)).strftime("%Y-%m-%d")
     conn = _conn()
     cur = conn.cursor()
-    cur.execute("SELECT COALESCE(SUM(cost_usd),0) FROM api_costs WHERE ts LIKE ?",
-                (f'{today}%',))
+    cur.execute(
+        "SELECT COALESCE(SUM(cost_usd),0) FROM api_costs WHERE ts LIKE ?",
+        (f"{today}%",),
+    )
     val = cur.fetchone()[0]
     conn.close()
     return float(val)
 
 
 def get_daily_trade_count(strategy, paper=True) -> int:
-    today = datetime.now(pytz.timezone(MARKET_TIMEZONE)).strftime('%Y-%m-%d')
+    today = datetime.now(pytz.timezone(MARKET_TIMEZONE)).strftime("%Y-%m-%d")
     conn = _conn()
     cur = conn.cursor()
-    cur.execute("SELECT COUNT(*) FROM trades WHERE ts LIKE ? AND strategy=? AND paper=? AND action='BUY'",
-                (f'{today}%', strategy, int(paper)))
+    cur.execute(
+        "SELECT COUNT(*) FROM trades WHERE ts LIKE ? AND strategy=? AND paper=? AND action='BUY'",
+        (f"{today}%", strategy, int(paper)),
+    )
     count = cur.fetchone()[0]
     conn.close()
     return count
@@ -451,11 +909,15 @@ def get_win_rate(strategy=None, lookback_days=14, paper=True) -> float:
     conn = _conn()
     cur = conn.cursor()
     if strategy:
-        cur.execute("SELECT pnl_usd FROM trades WHERE strategy=? AND paper=? AND pnl_usd != 0 ORDER BY ts DESC LIMIT ?",
-                    (strategy, int(paper), lookback_days * 5))
+        cur.execute(
+            "SELECT pnl_usd FROM trades WHERE strategy=? AND paper=? AND pnl_usd != 0 ORDER BY ts DESC LIMIT ?",
+            (strategy, int(paper), lookback_days * 5),
+        )
     else:
-        cur.execute("SELECT pnl_usd FROM trades WHERE paper=? AND pnl_usd != 0 ORDER BY ts DESC LIMIT ?",
-                    (int(paper), lookback_days * 5))
+        cur.execute(
+            "SELECT pnl_usd FROM trades WHERE paper=? AND pnl_usd != 0 ORDER BY ts DESC LIMIT ?",
+            (int(paper), lookback_days * 5),
+        )
     rows = cur.fetchall()
     conn.close()
     if not rows:
@@ -466,11 +928,12 @@ def get_win_rate(strategy=None, lookback_days=14, paper=True) -> float:
 
 def get_monthly_api_cost() -> float:
     today = datetime.now(pytz.timezone(MARKET_TIMEZONE))
-    month_start = today.strftime('%Y-%m-01')
+    month_start = today.strftime("%Y-%m-01")
     conn = _conn()
     cur = conn.cursor()
-    cur.execute("SELECT COALESCE(SUM(cost_usd),0) FROM api_costs WHERE ts >= ?",
-                (month_start,))
+    cur.execute(
+        "SELECT COALESCE(SUM(cost_usd),0) FROM api_costs WHERE ts >= ?", (month_start,)
+    )
     val = cur.fetchone()[0]
     conn.close()
     return float(val)
@@ -481,31 +944,49 @@ def get_all_time_stats(paper=True) -> dict:
     # action='BUY' with non-zero pnl are counted correctly.
     # Respects TRADE_SESSION_START so pre-overhaul trades don't skew metrics.
     from config import TRADE_SESSION_START
+
     conn = _conn()
     cur = conn.cursor()
-    cur.execute("""SELECT COUNT(*) as total,
+    cur.execute(
+        """SELECT COUNT(*) as total,
         SUM(CASE WHEN pnl_usd>0 THEN 1 ELSE 0 END) as wins,
         SUM(CASE WHEN pnl_usd<0 THEN 1 ELSE 0 END) as losses,
         SUM(pnl_usd) as total_pnl,
         MAX(pnl_usd) as best_trade,
         MIN(pnl_usd) as worst_trade
         FROM trades WHERE paper=? AND pnl_usd != 0
-        AND ts >= ?""", (int(paper), TRADE_SESSION_START))
+        AND ts >= ?""",
+        (int(paper), TRADE_SESSION_START),
+    )
     row = cur.fetchone()
-    cur.execute("SELECT COALESCE(SUM(fee_usd), 0) FROM trades WHERE paper=? AND ts >= ?",
-                (int(paper), TRADE_SESSION_START))
+    cur.execute(
+        "SELECT COALESCE(SUM(fee_usd), 0) FROM trades WHERE paper=? AND ts >= ?",
+        (int(paper), TRADE_SESSION_START),
+    )
     total_fees = float(cur.fetchone()[0])
     conn.close()
     if not row or not row[0]:
-        return {'total': 0, 'wins': 0, 'losses': 0, 'total_pnl': 0,
-                'total_fees': 0, 'best_trade': 0, 'worst_trade': 0, 'win_rate': 0}
+        return {
+            "total": 0,
+            "wins": 0,
+            "losses": 0,
+            "total_pnl": 0,
+            "total_fees": 0,
+            "best_trade": 0,
+            "worst_trade": 0,
+            "win_rate": 0,
+        }
     total = row[0] or 0
     wins = row[1] or 0
     return {
-        'total': total, 'wins': wins, 'losses': row[2] or 0,
-        'total_pnl': row[3] or 0, 'total_fees': total_fees,
-        'best_trade': row[4] or 0, 'worst_trade': row[5] or 0,
-        'win_rate': wins / total if total > 0 else 0,
+        "total": total,
+        "wins": wins,
+        "losses": row[2] or 0,
+        "total_pnl": row[3] or 0,
+        "total_fees": total_fees,
+        "best_trade": row[4] or 0,
+        "worst_trade": row[5] or 0,
+        "win_rate": wins / total if total > 0 else 0,
     }
 
 
@@ -528,30 +1009,37 @@ def get_kelly_stats(strategy: str = None, paper: bool = True, window: int = 50) 
         cur.execute(
             "SELECT pnl_usd FROM trades WHERE paper=? AND strategy=? AND pnl_usd != 0 "
             "ORDER BY ts DESC LIMIT ?",
-            (int(paper), strategy, window)
+            (int(paper), strategy, window),
         )
     else:
         cur.execute(
             "SELECT pnl_usd FROM trades WHERE paper=? AND pnl_usd != 0 "
             "ORDER BY ts DESC LIMIT ?",
-            (int(paper), window)
+            (int(paper), window),
         )
     rows = [r[0] for r in cur.fetchall()]
     conn.close()
 
-    _default = {'kelly_full': 0.0, 'kelly_25pct': 0.0, 'win_rate': 0.0,
-                'avg_win': 0.0, 'avg_loss': 0.0, 'b_ratio': 1.0, 'n_trades': 0}
-    if len(rows) < 10:   # need at least 10 trades for meaningful Kelly
+    _default = {
+        "kelly_full": 0.0,
+        "kelly_25pct": 0.0,
+        "win_rate": 0.0,
+        "avg_win": 0.0,
+        "avg_loss": 0.0,
+        "b_ratio": 1.0,
+        "n_trades": 0,
+    }
+    if len(rows) < 10:  # need at least 10 trades for meaningful Kelly
         return _default
 
-    wins   = [r for r in rows if r > 0]
+    wins = [r for r in rows if r > 0]
     losses = [r for r in rows if r < 0]
     if not wins or not losses:
         return _default
 
     p = len(wins) / len(rows)
     q = 1.0 - p
-    avg_win  = sum(wins)  / len(wins)
+    avg_win = sum(wins) / len(wins)
     avg_loss = abs(sum(losses) / len(losses))
     b = avg_win / avg_loss if avg_loss > 0 else 1.0
 
@@ -559,21 +1047,23 @@ def get_kelly_stats(strategy: str = None, paper: bool = True, window: int = 50) 
     kelly_25pct = max(0.0, kelly_full * 0.25)  # floor at 0 (never negative size)
 
     return {
-        'kelly_full':   round(kelly_full, 4),
-        'kelly_25pct':  round(kelly_25pct, 4),
-        'win_rate':     round(p, 4),
-        'avg_win':      round(avg_win, 4),
-        'avg_loss':     round(avg_loss, 4),
-        'b_ratio':      round(b, 4),
-        'n_trades':     len(rows),
+        "kelly_full": round(kelly_full, 4),
+        "kelly_25pct": round(kelly_25pct, 4),
+        "win_rate": round(p, 4),
+        "avg_win": round(avg_win, 4),
+        "avg_loss": round(avg_loss, 4),
+        "b_ratio": round(b, 4),
+        "n_trades": len(rows),
     }
 
 
 def get_recent_trades(limit=20, paper=True) -> list:
     conn = _conn()
     cur = conn.cursor()
-    cur.execute("SELECT * FROM trades WHERE paper=? ORDER BY ts DESC LIMIT ?",
-                (int(paper), limit))
+    cur.execute(
+        "SELECT * FROM trades WHERE paper=? ORDER BY ts DESC LIMIT ?",
+        (int(paper), limit),
+    )
     rows = [dict(r) for r in cur.fetchall()]
     conn.close()
     return rows
@@ -583,8 +1073,10 @@ def get_recent_events(limit=20, level=None) -> list:
     conn = _conn()
     cur = conn.cursor()
     if level:
-        cur.execute("SELECT * FROM system_events WHERE level=? ORDER BY ts DESC LIMIT ?",
-                    (level, limit))
+        cur.execute(
+            "SELECT * FROM system_events WHERE level=? ORDER BY ts DESC LIMIT ?",
+            (level, limit),
+        )
     else:
         cur.execute("SELECT * FROM system_events ORDER BY ts DESC LIMIT ?", (limit,))
     rows = [dict(r) for r in cur.fetchall()]
@@ -594,31 +1086,38 @@ def get_recent_events(limit=20, level=None) -> list:
 
 def get_today_stats(paper=True) -> dict:
     """Today-only stats: closed trades (pnl_usd != 0), wins, losses, fees, net P&L."""
-    today = datetime.now(pytz.timezone(MARKET_TIMEZONE)).strftime('%Y-%m-%d')
+    today = datetime.now(pytz.timezone(MARKET_TIMEZONE)).strftime("%Y-%m-%d")
     conn = _conn()
     cur = conn.cursor()
     # Closed trade counts and gross P&L — only rows with actual P&L
-    cur.execute("""SELECT
+    cur.execute(
+        """SELECT
         COUNT(*) as total,
         SUM(CASE WHEN pnl_usd>0 THEN 1 ELSE 0 END) as wins,
         SUM(CASE WHEN pnl_usd<0 THEN 1 ELSE 0 END) as losses,
         COALESCE(SUM(pnl_usd), 0) as gross_pnl
         FROM trades WHERE ts LIKE ? AND paper=? AND pnl_usd != 0""",
-        (f'{today}%', int(paper)))
+        (f"{today}%", int(paper)),
+    )
     row = cur.fetchone()
     # Fees across ALL trades today (BUY + SELL both charged fees)
     cur.execute(
         "SELECT COALESCE(SUM(fee_usd), 0) FROM trades WHERE ts LIKE ? AND paper=?",
-        (f'{today}%', int(paper)))
+        (f"{today}%", int(paper)),
+    )
     fees = float(cur.fetchone()[0])
     conn.close()
     total = row[0] or 0
-    wins  = row[1] or 0
+    wins = row[1] or 0
     gross = float(row[3] or 0.0)
     return {
-        'total': total, 'wins': wins, 'losses': row[2] or 0,
-        'win_rate': wins / total if total > 0 else 0.0,
-        'gross_pnl': gross, 'fees': fees, 'net_pnl': gross - fees,
+        "total": total,
+        "wins": wins,
+        "losses": row[2] or 0,
+        "win_rate": wins / total if total > 0 else 0.0,
+        "gross_pnl": gross,
+        "fees": fees,
+        "net_pnl": gross - fees,
     }
 
 
@@ -632,48 +1131,57 @@ def get_tax_summary(paper: bool = False) -> dict:
     cur = conn.cursor()
 
     # All closed trades with P&L — both gains and losses
-    cur.execute("""
+    cur.execute(
+        """
         SELECT ts, strategy, symbol, pnl_usd, fee_usd, value_usd
         FROM trades
         WHERE paper=? AND pnl_usd != 0
         ORDER BY ts ASC
-    """, (int(paper),))
+    """,
+        (int(paper),),
+    )
     rows = [dict(r) for r in cur.fetchall()]
 
     # Annual breakdown
     annual: dict = {}
     for r in rows:
-        year = r['ts'][:4]
+        year = r["ts"][:4]
         if year not in annual:
-            annual[year] = {'gains': 0.0, 'losses': 0.0, 'fees': 0.0,
-                            'trades': 0, 'crypto': 0.0, 'equity': 0.0}
-        pnl = float(r['pnl_usd'] or 0)
-        fee = float(r['fee_usd'] or 0)
-        annual[year]['trades'] += 1
-        annual[year]['fees'] += fee
+            annual[year] = {
+                "gains": 0.0,
+                "losses": 0.0,
+                "fees": 0.0,
+                "trades": 0,
+                "crypto": 0.0,
+                "equity": 0.0,
+            }
+        pnl = float(r["pnl_usd"] or 0)
+        fee = float(r["fee_usd"] or 0)
+        annual[year]["trades"] += 1
+        annual[year]["fees"] += fee
         if pnl > 0:
-            annual[year]['gains'] += pnl
+            annual[year]["gains"] += pnl
         else:
-            annual[year]['losses'] += pnl
-        if 'crypto' in r.get('strategy', ''):
-            annual[year]['crypto'] += pnl
+            annual[year]["losses"] += pnl
+        if "crypto" in r.get("strategy", ""):
+            annual[year]["crypto"] += pnl
         else:
-            annual[year]['equity'] += pnl
+            annual[year]["equity"] += pnl
 
-    total_gains  = sum(v['gains']  for v in annual.values())
-    total_losses = sum(v['losses'] for v in annual.values())
-    total_fees   = sum(v['fees']   for v in annual.values())
-    net_pnl      = total_gains + total_losses  # losses are negative
+    total_gains = sum(v["gains"] for v in annual.values())
+    total_losses = sum(v["losses"] for v in annual.values())
+    total_fees = sum(v["fees"] for v in annual.values())
+    net_pnl = total_gains + total_losses  # losses are negative
 
     conn.close()
     return {
-        'rows': rows,
-        'annual': annual,
-        'total_gains': total_gains,
-        'total_losses': total_losses,
-        'total_fees': total_fees,
-        'net_pnl': net_pnl,
-        'total_trades': len(rows),
+        "rows": rows,
+        "annual": annual,
+        "total_gains": total_gains,
+        "total_losses": total_losses,
+        "total_fees": total_fees,
+        "net_pnl": net_pnl,
+        "total_trades": len(rows),
     }
 
 
@@ -685,9 +1193,10 @@ def get_recent_tv_signal(symbol: str, max_age_seconds: int = 300) -> dict | None
     """
     import json
     from datetime import timezone
+
     try:
         conn = _conn()
-        cur  = conn.cursor()
+        cur = conn.cursor()
         # Pull last 20 tradingview events and find a match (small result set, avoids LIKE index miss)
         cur.execute(
             "SELECT message, ts FROM system_events WHERE source='tradingview' ORDER BY ts DESC LIMIT 20"
@@ -701,10 +1210,10 @@ def get_recent_tv_signal(symbol: str, max_age_seconds: int = 300) -> dict | None
             except Exception:
                 continue
             # Check symbol match
-            if data.get('symbol', '').upper() != symbol.upper():
+            if data.get("symbol", "").upper() != symbol.upper():
                 continue
             # Check age
-            ts_dt = datetime.fromisoformat(data.get('ts', ts_str))
+            ts_dt = datetime.fromisoformat(data.get("ts", ts_str))
             if not ts_dt.tzinfo:
                 ts_dt = ts_dt.replace(tzinfo=timezone.utc)
             age = (now - ts_dt).total_seconds()
@@ -721,7 +1230,8 @@ def get_recent_notifications(limit=30) -> list:
     cur = conn.cursor()
     cur.execute(
         "SELECT * FROM system_events WHERE source='notify' ORDER BY ts DESC LIMIT ?",
-        (limit,))
+        (limit,),
+    )
     rows = [dict(r) for r in cur.fetchall()]
     conn.close()
     return rows
@@ -730,23 +1240,30 @@ def get_recent_notifications(limit=30) -> list:
 def _parse_scan_msg(msg: str, ts: str) -> dict:
     """Parse a scan_feed log message into structured fields for dashboard display."""
     import re
-    out = {'ts': ts, 'symbol': None, 'action': 'HOLD', 'confidence': 0.0,
-           'strategy': 'crypto', 'message': (msg or '')[:120]}
+
+    out = {
+        "ts": ts,
+        "symbol": None,
+        "action": "HOLD",
+        "confidence": 0.0,
+        "strategy": "crypto",
+        "message": (msg or "")[:120],
+    }
     if not msg:
         return out
     # Extract lane and symbol: "[crypto] BTC-USDC ..." or "[perp] BTCUSDT ..."
-    m = re.match(r'\[(crypto|perp|equity|futures|deriv)\]\s+(\S+)', msg)
+    m = re.match(r"\[(crypto|perp|equity|futures|deriv)\]\s+(\S+)", msg)
     if m:
-        out['strategy'] = m.group(1)
-        out['symbol'] = m.group(2).upper()
+        out["strategy"] = m.group(1)
+        out["symbol"] = m.group(2).upper()
     # Extract confidence: "conf=75%" pattern
-    c = re.search(r'conf=(\d+)%', msg)
+    c = re.search(r"conf=(\d+)%", msg)
     if c:
-        out['confidence'] = float(c.group(1)) / 100
+        out["confidence"] = float(c.group(1)) / 100
     # Determine action from message content
     msg_l = msg.lower()
-    if 'calling debate' in msg_l or '✅ buy' in msg or 'near_miss' in msg_l:
-        out['action'] = 'BUY'
+    if "calling debate" in msg_l or "✅ buy" in msg or "near_miss" in msg_l:
+        out["action"] = "BUY"
     # HOLD is the default — skip debate / abort / veto / block all stay HOLD
     return out
 
@@ -762,7 +1279,8 @@ def get_scan_feed(limit=40) -> list:
     cur = conn.cursor()
     cur.execute(
         "SELECT ts, message FROM system_events WHERE source='scan_feed' ORDER BY ts DESC LIMIT ?",
-        (limit,))
+        (limit,),
+    )
     rows = [_parse_scan_msg(r[1], r[0]) for r in cur.fetchall()]
     conn.close()
     return rows
@@ -774,11 +1292,14 @@ def get_performance_attribution(paper=True, lookback_days=30) -> dict:
     Returns: {strategy_name: {total, wins, losses, win_rate, total_pnl, avg_pnl}}
     """
     from datetime import timedelta
-    cutoff = (datetime.now(pytz.timezone(MARKET_TIMEZONE)) -
-              timedelta(days=lookback_days)).strftime('%Y-%m-%d')
+
+    cutoff = (
+        datetime.now(pytz.timezone(MARKET_TIMEZONE)) - timedelta(days=lookback_days)
+    ).strftime("%Y-%m-%d")
     conn = _conn()
     cur = conn.cursor()
-    cur.execute("""
+    cur.execute(
+        """
         SELECT strategy,
                COUNT(*)                                    AS total,
                SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END) AS wins,
@@ -788,20 +1309,22 @@ def get_performance_attribution(paper=True, lookback_days=30) -> dict:
         WHERE paper=? AND pnl_usd != 0 AND ts >= ?
         GROUP BY strategy
         ORDER BY total_pnl DESC
-    """, (int(paper), cutoff))
+    """,
+        (int(paper), cutoff),
+    )
     rows = cur.fetchall()
     conn.close()
     result = {}
     for r in rows:
         total = r[1] or 0
-        wins  = r[2] or 0
+        wins = r[2] or 0
         result[r[0]] = {
-            'total': total,
-            'wins':  wins,
-            'losses': total - wins,
-            'win_rate': wins / total if total > 0 else 0.0,
-            'total_pnl': float(r[3]),
-            'avg_pnl':   float(r[4]),
+            "total": total,
+            "wins": wins,
+            "losses": total - wins,
+            "win_rate": wins / total if total > 0 else 0.0,
+            "total_pnl": float(r[3]),
+            "avg_pnl": float(r[4]),
         }
     return result
 
@@ -810,9 +1333,12 @@ def get_strategy_consecutive_losses(strategy: str, paper=True) -> int:
     """Return the current consecutive loss streak for a strategy (most recent trades first)."""
     conn = _conn()
     cur = conn.cursor()
-    cur.execute("""SELECT pnl_usd FROM trades
+    cur.execute(
+        """SELECT pnl_usd FROM trades
         WHERE strategy=? AND paper=? AND pnl_usd != 0
-        ORDER BY ts DESC LIMIT 20""", (strategy, int(paper)))
+        ORDER BY ts DESC LIMIT 20""",
+        (strategy, int(paper)),
+    )
     rows = cur.fetchall()
     conn.close()
     streak = 0
@@ -839,22 +1365,25 @@ def get_trade_quality_stats(lookback: int = 20, paper: bool = True) -> dict:
       n               : int   (actual row count used)
     """
     _defaults = {
-        'entry_timing':    5.0,
-        'exit_efficiency': 5.0,
-        'thesis_hit_rate': 0.0,
-        'exit_type_dist':  {},
-        'avg_super_score': 0.0,
-        'n':               0,
+        "entry_timing": 5.0,
+        "exit_efficiency": 5.0,
+        "thesis_hit_rate": 0.0,
+        "exit_type_dist": {},
+        "avg_super_score": 0.0,
+        "n": 0,
     }
     try:
         conn = _conn()
         cur = conn.cursor()
-        cur.execute("""
+        cur.execute(
+            """
             SELECT mae_pct, mfe_pct, pnl_pct, exit_type, won, super_score, ml_p_win
             FROM trade_attribution
             ORDER BY entry_ts DESC
             LIMIT ?
-        """, (lookback,))
+        """,
+            (lookback,),
+        )
         rows = [dict(r) for r in cur.fetchall()]
         conn.close()
     except Exception:
@@ -866,15 +1395,15 @@ def get_trade_quality_stats(lookback: int = 20, paper: bool = True) -> dict:
     n = len(rows)
 
     # entry_timing: 10 * (1 - avg(min(|mae_pct| / 0.015, 1.0)))
-    mae_vals = [abs(float(r.get('mae_pct') or 0)) for r in rows]
+    mae_vals = [abs(float(r.get("mae_pct") or 0)) for r in rows]
     avg_mae_ratio = sum(min(v / 0.015, 1.0) for v in mae_vals) / n
     entry_timing = round(10.0 * (1.0 - avg_mae_ratio), 2)
 
     # exit_efficiency: 10 * avg(pnl_pct / mfe_pct) where mfe_pct > 0.001
     eff_pairs = [
-        (float(r.get('pnl_pct') or 0), float(r.get('mfe_pct') or 0))
+        (float(r.get("pnl_pct") or 0), float(r.get("mfe_pct") or 0))
         for r in rows
-        if float(r.get('mfe_pct') or 0) > 0.001
+        if float(r.get("mfe_pct") or 0) > 0.001
     ]
     if eff_pairs:
         ratios = [min(pnl / mfe, 1.0) for pnl, mfe in eff_pairs]  # cap at 1
@@ -883,26 +1412,31 @@ def get_trade_quality_stats(lookback: int = 20, paper: bool = True) -> dict:
         exit_efficiency = 5.0
 
     # thesis_hit_rate: fraction where mfe_pct >= 0.015
-    thesis_hits = sum(1 for r in rows if float(r.get('mfe_pct') or 0) >= 0.015)
+    thesis_hits = sum(1 for r in rows if float(r.get("mfe_pct") or 0) >= 0.015)
     thesis_hit_rate = round(thesis_hits / n, 4)
 
     # exit_type_dist
     from collections import Counter
-    exit_type_dist = dict(Counter(
-        r.get('exit_type') or 'unknown' for r in rows
-    ))
+
+    exit_type_dist = dict(Counter(r.get("exit_type") or "unknown" for r in rows))
 
     # avg_super_score — exclude rows where super_score == 0 (old rows before this column existed)
-    scored_rows = [float(r.get('super_score') or 0) for r in rows if float(r.get('super_score') or 0) > 0]
-    avg_super_score = round(sum(scored_rows) / len(scored_rows), 2) if scored_rows else 0.0
+    scored_rows = [
+        float(r.get("super_score") or 0)
+        for r in rows
+        if float(r.get("super_score") or 0) > 0
+    ]
+    avg_super_score = (
+        round(sum(scored_rows) / len(scored_rows), 2) if scored_rows else 0.0
+    )
 
     return {
-        'entry_timing':    max(0.0, min(10.0, entry_timing)),
-        'exit_efficiency': max(0.0, min(10.0, exit_efficiency)),
-        'thesis_hit_rate': thesis_hit_rate,
-        'exit_type_dist':  exit_type_dist,
-        'avg_super_score': avg_super_score,
-        'n':               n,
+        "entry_timing": max(0.0, min(10.0, entry_timing)),
+        "exit_efficiency": max(0.0, min(10.0, exit_efficiency)),
+        "thesis_hit_rate": thesis_hit_rate,
+        "exit_type_dist": exit_type_dist,
+        "avg_super_score": avg_super_score,
+        "n": n,
     }
 
 
@@ -922,24 +1456,26 @@ def get_open_position_health(paper: bool = True) -> list:
             "SELECT symbol, strategy, qty, entry, stop, target, "
             "high_since_entry, low_since_entry, ts_entry, direction "
             "FROM open_positions WHERE paper=?",
-            (int(paper),)
+            (int(paper),),
         )
         rows = cur.fetchall()
         conn.close()
         result = []
         for r in rows:
-            result.append({
-                'symbol':           r[0],
-                'strategy':         r[1],
-                'qty':              r[2],
-                'entry':            r[3],
-                'stop':             r[4],
-                'target':           r[5],
-                'high_since_entry': r[6],
-                'low_since_entry':  r[7],
-                'ts_entry':         r[8],
-                'direction':        r[9] or 'LONG',
-            })
+            result.append(
+                {
+                    "symbol": r[0],
+                    "strategy": r[1],
+                    "qty": r[2],
+                    "entry": r[3],
+                    "stop": r[4],
+                    "target": r[5],
+                    "high_since_entry": r[6],
+                    "low_since_entry": r[7],
+                    "ts_entry": r[8],
+                    "direction": r[9] or "LONG",
+                }
+            )
         return result
     except Exception:
         return []
@@ -958,27 +1494,37 @@ def get_intelligence_log(limit: int = 30) -> dict:
     """
     try:
         conn = _conn()
-        cur  = conn.cursor()
+        cur = conn.cursor()
 
         # Meta-analysis runs (what Claude learned from recent trades)
         try:
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT created_at, trades_analyzed, win_rate, key_insight, patterns_found, recs_count
                 FROM meta_analysis_log
                 ORDER BY created_at DESC LIMIT ?
-            """, (limit,))
-            meta_analyses = [dict(zip([c[0] for c in cur.description], r)) for r in cur.fetchall()]
+            """,
+                (limit,),
+            )
+            meta_analyses = [
+                dict(zip([c[0] for c in cur.description], r)) for r in cur.fetchall()
+            ]
         except Exception:
             meta_analyses = []
 
         # Active + recent signal weight recommendations
         try:
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT signal_name, regime, weight_delta, reasoning, pattern, confidence, created_at, applied
                 FROM meta_recommendations
                 ORDER BY created_at DESC LIMIT ?
-            """, (limit,))
-            recommendations = [dict(zip([c[0] for c in cur.description], r)) for r in cur.fetchall()]
+            """,
+                (limit,),
+            )
+            recommendations = [
+                dict(zip([c[0] for c in cur.description], r)) for r in cur.fetchall()
+            ]
         except Exception:
             recommendations = []
 
@@ -990,19 +1536,24 @@ def get_intelligence_log(limit: int = 30) -> dict:
                 WHERE regime = 'any'
                 ORDER BY total_assessed DESC
             """)
-            agent_accuracy = [dict(zip([c[0] for c in cur.description], r)) for r in cur.fetchall()]
+            agent_accuracy = [
+                dict(zip([c[0] for c in cur.description], r)) for r in cur.fetchall()
+            ]
         except Exception:
             agent_accuracy = []
 
         # ML retrain events
         try:
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT ts, message FROM system_events
                 WHERE (source='ml_trainer' OR message LIKE '%retrain%' OR message LIKE '%ml_model%'
                        OR message LIKE '%ML model%' OR message LIKE '%Background retrain%')
                 ORDER BY ts DESC LIMIT ?
-            """, (limit,))
-            ml_events = [{'ts': r[0], 'message': r[1]} for r in cur.fetchall()]
+            """,
+                (limit,),
+            )
+            ml_events = [{"ts": r[0], "message": r[1]} for r in cur.fetchall()]
         except Exception:
             ml_events = []
 
@@ -1014,38 +1565,89 @@ def get_intelligence_log(limit: int = 30) -> dict:
                 WHERE fires >= 5
                 ORDER BY bayesian_pts DESC LIMIT 15
             """)
-            signal_shifts = [dict(zip([c[0] for c in cur.description], r)) for r in cur.fetchall()]
+            signal_shifts = [
+                dict(zip([c[0] for c in cur.description], r)) for r in cur.fetchall()
+            ]
         except Exception:
             signal_shifts = []
 
         conn.close()
         return {
-            'meta_analyses':   meta_analyses,
-            'recommendations': recommendations,
-            'agent_accuracy':  agent_accuracy,
-            'ml_events':       ml_events,
-            'signal_shifts':   signal_shifts,
+            "meta_analyses": meta_analyses,
+            "recommendations": recommendations,
+            "agent_accuracy": agent_accuracy,
+            "ml_events": ml_events,
+            "signal_shifts": signal_shifts,
         }
     except Exception:
         return {
-            'meta_analyses': [], 'recommendations': [], 'agent_accuracy': [],
-            'ml_events': [], 'signal_shifts': [],
+            "meta_analyses": [],
+            "recommendations": [],
+            "agent_accuracy": [],
+            "ml_events": [],
+            "signal_shifts": [],
         }
 
 
-def _csv_append(ts, strategy, broker, symbol, action, order_type,
-                qty, price, value_usd, fee_usd, pnl_usd, paper, order_id, notes):
+def _csv_append(
+    ts,
+    strategy,
+    broker,
+    symbol,
+    action,
+    order_type,
+    qty,
+    price,
+    value_usd,
+    fee_usd,
+    pnl_usd,
+    paper,
+    order_id,
+    notes,
+):
     os.makedirs(CSV_LOG_DIR, exist_ok=True)
     date_str = ts[:10]
-    path = os.path.join(CSV_LOG_DIR, f'trades_{date_str}.csv')
+    path = os.path.join(CSV_LOG_DIR, f"trades_{date_str}.csv")
     write_header = not os.path.exists(path)
-    with open(path, 'a', newline='') as f:
+    with open(path, "a", newline="") as f:
         w = csv.writer(f)
         if write_header:
-            w.writerow(['ts','strategy','broker','symbol','action','order_type',
-                        'qty','price','value_usd','fee_usd','pnl_usd','paper','order_id','notes'])
-        w.writerow([ts,strategy,broker,symbol,action,order_type,
-                    qty,price,value_usd,fee_usd,pnl_usd,paper,order_id,notes])
+            w.writerow(
+                [
+                    "ts",
+                    "strategy",
+                    "broker",
+                    "symbol",
+                    "action",
+                    "order_type",
+                    "qty",
+                    "price",
+                    "value_usd",
+                    "fee_usd",
+                    "pnl_usd",
+                    "paper",
+                    "order_id",
+                    "notes",
+                ]
+            )
+        w.writerow(
+            [
+                ts,
+                strategy,
+                broker,
+                symbol,
+                action,
+                order_type,
+                qty,
+                price,
+                value_usd,
+                fee_usd,
+                pnl_usd,
+                paper,
+                order_id,
+                notes,
+            ]
+        )
 
 
 init_db()

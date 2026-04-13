@@ -23,12 +23,12 @@ A fully autonomous AI-powered trading system that:
 
 ## Owner Profile
 - Mac user (MacBook Air 2020, Python 3.14 at /Library/Frameworks/Python.framework/Versions/3.14/bin/python3)
-- Paper account: $10,000 (ACCOUNT_SIZE=10000 in .env)
+- Paper account: $5,000 (ACCOUNT_SIZE=5000 — config default, no .env override)
 - Relatively technical but wants zero day-to-day intervention
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
 
-## Current Version: v13.4 (2026-04-10)
+## Current Version: v13.6 (2026-04-13)
 
 **Active branch:** `feature/v10-rebuild`
 **Clean paper trading started:** 2026-04-02
@@ -61,6 +61,9 @@ A fully autonomous AI-powered trading system that:
 | Risk engine | `risk_engine.py` | VaR/CVaR, correlation gates, margin checks |
 | Hedge engine | `hedge_engine.py` | Delta-neutral hedge rebalance (every 5 min) |
 | MCP server | `mcp_server/server.py` | 15 FastMCP tools for Codex integration |
+| Candidate journal | `logging_db/trade_logger.py` + `scheduler/v10_runner.py` | scan_candidates table — every decision-grade candidate logged with decision reason |
+| Outcome labeler | `learning/candidate_labeler.py` | Async background job (every 15 min): labels scan_candidates with 1h/4h forward returns, MFE, MAE, hit_1r, hit_2r, hit_stop |
+| Nightly audit | `monitoring/nightly_audit.py` | Daily 08:00 UTC: proof suite + candidate journaling health + repo drift + learning health → system_events |
 | Verification | `tests/proof/` + `verification/replay.py` + `.github/workflows/ci.yml` | Proof-first pytest harness, dashboard shell tests, deterministic replay, GitHub Actions CI |
 
 ### Key Decisions
@@ -87,11 +90,20 @@ Owner decides when to go live. These are informational readings, not system gate
 - Economics gate veto rate
 - Kill switch triggers (14d)
 
+### v13.6 Candidate Journaling + Automated Outcome Labeling (applied 2026-04-13)
+
+- `logging_db/trade_logger.py`: added `scan_candidates` and `candidate_outcomes` tables to `init_db()`; added `log_scan_candidate()`, `get_unlabeled_candidates()`, `log_candidate_outcome()`, `get_candidate_journal_stats()` helpers
+- `scheduler/v10_runner.py`: added `_journal_scan_candidate()` module-level helper; added `scan_id` (UUID hex) per scan cycle; journaling calls at all 7 decision gates: `dual_exposure_block`, `cooldown_block`, `risk_block`, `data_unavailable`, `below_threshold`, `econ_veto`, `sizing_zero`, `entered`; wired `candidate_labeler` (every 15 min, background thread) and `nightly_audit` (daily 08:00 UTC) as scheduled jobs
+- `learning/candidate_labeler.py` (NEW): background labeling worker; finds unlabeled candidates >= 4h old; fetches forward 1h candles; computes 1h/4h returns, MFE, MAE, hit_1r, hit_2r, hit_stop; writes to `candidate_outcomes` and marks `scan_candidates.labeled=1`; bounded batch (50 rows/run); never blocks live scan
+- `monitoring/nightly_audit.py` (NEW): automated nightly proof + drift + learning audit; runs pytest proof suite in subprocess; checks candidate journaling health (count, labeling rate, backlog); checks repo version drift; checks learning layer health (signal_stats rows, ML snapshots); writes structured report to system_events; can also be run standalone
+- `tests/proof/test_candidate_journal.py` (NEW): 10 proof tests covering all new components end-to-end
+- `tests/proof/test_dashboard_harness.py`: updated tab name assertion `CRYPTO PERFORMANCE` → `PERFORMANCE` (matches v14 dashboard rename)
+
 ### v13.4 Proof Infrastructure + Repo Truth Alignment (applied 2026-04-10)
 
 - `logging_db/trade_logger.py`: added `get_logger()` compatibility wrapper for current live callers (`risk_engine.py`, `position_manager.py`, `kill_switch.py`, RBI modules) and added `kill_switch_log` table creation to `init_db()`
-- `risk_engine.py`: startup balances now initialize from configured `ACCOUNT_SIZE` instead of hardcoded `$10K`, so drawdown / kill-switch math tracks the real paper account from process start
-- `kill_switch.py`: threshold docs aligned to configured account size; `check_balance()` now defaults its initial balance from config instead of a hardcoded `$10K`
+- `risk_engine.py`: startup balances now initialize from configured `ACCOUNT_SIZE` ($5,000) instead of a hardcoded value, so drawdown / kill-switch math tracks the real paper account from process start
+- `kill_switch.py`: threshold docs aligned to configured account size; `check_balance()` now defaults its initial balance from config ($5,000)
 - `dashboard/data/execution.py`, `dashboard/widgets/mission_control/decision_quality.py`, `dashboard/widgets/crypto_performance/deep_analysis.py`: `trade_attribution` reads aligned to the real schema (`created_at`, no `direction` column)
 - `dashboard/data/health.py` + `main.py`: startup event wording aligned so restart counts match runtime (`Bot started — ... v13.4`)
 - `CLAUDE.md` + `scripts/validate.py`: repo memory and pre-flight validation now read the current version/source-of-truth state (`AGENTS.md` first, `CLAUDE.md` fallback) so startup checks match runtime reality
@@ -276,13 +288,13 @@ Two deterministic towers → composite score → regime threshold gate.
 | Technical | Rule-based point scoring, normalised 0-100 | CVD divergence, MACD multi-variant, RSI divergence, funding squeeze, VWAP reclaim, OB imbalance, Williams %R, liq cascade, vol spike, Fear & Greed, options skew, whale signal |
 | ML | XGBoost 60% + LightGBM 40% walk-forward ensemble, normalised 0-100 | 57 features across 11 groups (price, volume, CVD, momentum, VWAP, orderbook, derivatives, liquidation, regime, time, onchain) |
 
-Entry: composite >= regime threshold (TRENDING=62, RANGING=68, HIGH_VOL=72, UNKNOWN=65). Same threshold paper and live.
+Entry: composite >= regime threshold (TRENDING_UP/DOWN=58, RANGING=58, HIGH_VOL=60, LOW_VOL=56, UNKNOWN=58). Same threshold paper and live.
 
 ## 6-Priority Exit Stack (position_manager.py)
 
-1. Trailing stop — activates after 1x ATR in favor, trails at 1.5x ATR from peak
+1. Trailing stop — activates after 1x ATR in favor, trails at 4.5x ATR from peak
 2. Take profit scale-out — 2R → 33%; 3.5R → 33%; remainder trails
-3. Thesis score exit — current composite < entry composite × 0.45 → close all (10-min hold gate)
+3. Thesis score exit — current composite < entry composite × regime_fraction → close all; regime_fraction: TRENDING=30%, RANGING=15%, HIGH_VOL=35%, UNKNOWN=25%
 4. Hard stop — stop-market on exchange, never widened
 5. Risk forced exit — margin breach / drawdown / correlation
 6. Kill switch — balance < 75% of ACCOUNT_SIZE / API errors / latency

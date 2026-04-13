@@ -130,7 +130,7 @@ def test_operator_panel_renders_all_tabs_with_widget_stubs(monkeypatch):
     assert not at.exception
     assert [tab.label for tab in at.tabs] == [
         "MISSION CONTROL",
-        "CRYPTO PERFORMANCE",
+        "PERFORMANCE",
         "TRADE APPROVAL",
         "S&P 500 FUTURES (MES)",
         "SYSTEM SETTINGS",

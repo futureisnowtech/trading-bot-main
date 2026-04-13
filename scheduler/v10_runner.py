@@ -122,6 +122,97 @@ def _get_underlying(symbol: str) -> str:
     return s
 
 
+# ── Candidate journaling (v13.6) ─────────────────────────────────────────────
+#
+# Every decision-grade candidate is persisted to scan_candidates so the learning
+# layer sees the full decision set, not just executed trades.
+# All journal writes are fire-and-forget (wrapped in try/except) — a DB error
+# must never disrupt live scanning or entry.
+
+
+def _journal_scan_candidate(
+    scan_id: str,
+    candidate: dict,
+    decision: str,
+    *,
+    regime: str = "",
+    technical_score: float = 0.0,
+    ml_score: float = 0.0,
+    composite_score: float = 0.0,
+    entry_threshold: float = 58.0,
+    should_enter_signal: int = 0,
+    econ_approved: int = 0,
+    econ_tier: str = "",
+    econ_reject_reason: str = "",
+    edge_score: float = 0.0,
+    size_usd: float = 0.0,
+    leverage: int = 3,
+    entry_block_reason: str = "",
+) -> None:
+    """
+    Write one candidate decision row to scan_candidates.
+    Called at every gate exit — entered, econ_veto, below_threshold,
+    dual_exposure_block, cooldown_block, risk_block, sizing_zero, data_unavailable.
+    """
+    try:
+        from logging_db.trade_logger import log_scan_candidate
+        import json
+
+        symbol = candidate.get("symbol", "")
+        direction = candidate.get("direction", "LONG")
+        price = float(candidate.get("price", 0) or 0)
+        vol = float(candidate.get("vol_usd", candidate.get("volume_24h_usd", 0)) or 0)
+        spread = float(candidate.get("spread_pct", 0) or 0)
+        bid_dep = float(candidate.get("bid_depth_usd", 0) or 0)
+        ask_dep = float(candidate.get("ask_depth_usd", 0) or 0)
+        atr_15m = float(candidate.get("atr_15m", 0) or 0)
+        stop_pct = float(candidate.get("stop_pct", 3.0) or 3.0)
+        tgt_pct = float(candidate.get("target_pct", 6.0) or 6.0)
+        exp_profit = float(candidate.get("scanner_expected_profit", 0) or 0)
+        setups = candidate.get("scan_setups", [])
+        setups_json = json.dumps(setups) if isinstance(setups, list) else str(setups)
+        primary = candidate.get("primary_setup", "") or ""
+
+        log_scan_candidate(
+            scan_id=scan_id,
+            symbol=symbol,
+            exchange=str(candidate.get("exchange", "")),
+            base_asset=str(candidate.get("base_asset", _get_underlying(symbol))),
+            direction=direction,
+            primary_setup=primary,
+            scan_setups_json=setups_json,
+            price=price,
+            volume_24h_usd=vol,
+            spread_pct=spread,
+            bid_depth_usd=bid_dep,
+            ask_depth_usd=ask_dep,
+            atr_15m=atr_15m,
+            stop_pct=stop_pct,
+            target_pct=tgt_pct,
+            scanner_expected_profit=exp_profit,
+            regime=regime,
+            technical_score=technical_score,
+            ml_score=ml_score,
+            composite_score=composite_score,
+            entry_threshold=entry_threshold,
+            should_enter_signal=should_enter_signal,
+            econ_approved=econ_approved,
+            econ_tier=econ_tier,
+            econ_reject_reason=econ_reject_reason,
+            edge_score=edge_score,
+            size_usd=size_usd,
+            leverage=leverage,
+            entry_block_reason=entry_block_reason,
+            decision=decision,
+            paper=_paper,
+            source="clean_paper_v10" if _paper else "live_v10",
+        )
+    except Exception as _je:
+        logger.debug(
+            f"[v10] candidate journal error ({decision} {candidate.get('symbol', '')}): {_je}"
+        )
+
+
 # ── TradingView signal helpers ────────────────────────────────────────────────
 
 
@@ -461,6 +552,11 @@ def _scan_and_trade_inner():
         f"balance=${balance:.0f} deployed=${deployed_usd:.0f}"
     )
 
+    # Unique ID for this scan cycle — links all candidate rows from the same scan
+    import uuid as _uuid
+
+    _scan_id = _uuid.uuid4().hex[:16]
+
     # Funnel counters — reset each scan cycle
     _funnel = {
         "total": len(candidates),
@@ -489,6 +585,12 @@ def _scan_and_trade_inner():
         if perps is not None and perps.get_open_positions().get(symbol):
             logger.debug(f"[v10] {symbol} — already in memory, skip")
             _funnel["dual_exposure"] += 1
+            _journal_scan_candidate(
+                _scan_id,
+                candidate,
+                "dual_exposure_block",
+                entry_block_reason="already in memory (exact symbol)",
+            )
             continue
 
         # SQLite check — match by exact symbol OR same underlying across all open positions
@@ -507,6 +609,12 @@ def _scan_and_trade_inner():
             if symbol in _open_symbols_db:
                 logger.debug(f"[v10] {symbol} — exact match in SQLite, skip")
                 _funnel["dual_exposure"] += 1
+                _journal_scan_candidate(
+                    _scan_id,
+                    candidate,
+                    "dual_exposure_block",
+                    entry_block_reason="exact symbol in SQLite open_positions",
+                )
                 continue
             if _underlying in _open_underlyings:
                 # Find which symbol caused the conflict for the log message
@@ -519,6 +627,12 @@ def _scan_and_trade_inner():
                     f"underlying={_underlying} already open as {_conflict}"
                 )
                 _funnel["dual_exposure"] += 1
+                _journal_scan_candidate(
+                    _scan_id,
+                    candidate,
+                    "dual_exposure_block",
+                    entry_block_reason=f"underlying={_underlying} open as {_conflict}",
+                )
                 continue
         except Exception:
             pass
@@ -539,6 +653,12 @@ def _scan_and_trade_inner():
                     f"[v10] {symbol} — cooldown {_elapsed / 60:.0f}m/{_cooldown / 60:.0f}m, skip"
                 )
                 _funnel["cooldown"] += 1
+                _journal_scan_candidate(
+                    _scan_id,
+                    candidate,
+                    "cooldown_block",
+                    entry_block_reason=f"cooldown {_elapsed / 60:.0f}m/{_cooldown / 60:.0f}m",
+                )
                 continue
 
         # Re-check risk gate before each entry attempt
@@ -546,6 +666,12 @@ def _scan_and_trade_inner():
             can_trade, reason = re.can_open_new_position()
             if not can_trade:
                 logger.info(f"[v10] entry blocked by risk: {reason}")
+                _journal_scan_candidate(
+                    _scan_id,
+                    candidate,
+                    "risk_block",
+                    entry_block_reason=reason,
+                )
                 break  # stop trying more candidates
 
         _funnel["scored"] += 1
@@ -567,6 +693,7 @@ def _scan_and_trade_inner():
                 classify_from_features=classify_from_features,
                 ne=ne,
                 get_size_multiplier=get_size_multiplier,
+                scan_id=_scan_id,
             )
         except Exception as e:
             logger.error(
@@ -620,11 +747,18 @@ def _attempt_entry(
     classify_from_features,
     ne,
     get_size_multiplier,
+    scan_id: str = "",
 ):
     """Try to enter a position for one candidate. All exceptions propagate to caller."""
     if get_candles is None or build_features is None:
         logger.warning(
             f"[v10] {symbol} — get_candles={get_candles is not None} build_features={build_features is not None} — skip"
+        )
+        _journal_scan_candidate(
+            scan_id,
+            candidate,
+            "data_unavailable",
+            entry_block_reason="get_candles or build_features is None",
         )
         return
 
@@ -633,6 +767,12 @@ def _attempt_entry(
     if df is None or len(df) < 20:
         logger.info(
             f"[v10] {symbol} — insufficient candle data ({len(df) if df is not None else 0} bars), skip"
+        )
+        _journal_scan_candidate(
+            scan_id,
+            candidate,
+            "data_unavailable",
+            entry_block_reason=f"insufficient candles ({len(df) if df is not None else 0} bars)",
         )
         return
 
@@ -826,12 +966,27 @@ def _attempt_entry(
     # will naturally score > 50 when the underlying indicator conditions are met.
     _TIER1_COMPOSITE_FLOOR = 50.0
 
+    _tech_score = float(result.get("technical_score", 0.0))
+    _ml_score = float(result.get("ml_score", 50.0))
+
     if primary_setup:
         if composite < _TIER1_COMPOSITE_FLOOR:
             logger.info(
                 f"[v10] {symbol} {direction} TIER 1 {primary_setup['label']} BLOCKED "
                 f"— composite {composite:.1f} < {_TIER1_COMPOSITE_FLOOR} floor "
                 f"(setup fires but overall signal is net-negative)"
+            )
+            _journal_scan_candidate(
+                scan_id,
+                candidate,
+                "below_threshold",
+                regime=regime,
+                technical_score=_tech_score,
+                ml_score=_ml_score,
+                composite_score=composite,
+                entry_threshold=_TIER1_COMPOSITE_FLOOR,
+                should_enter_signal=0,
+                entry_block_reason=f"tier1 composite {composite:.1f} < floor {_TIER1_COMPOSITE_FLOOR}",
             )
             return
         tier = 1
@@ -861,6 +1016,18 @@ def _attempt_entry(
                 f"[v10] {symbol} {direction} score={composite:.1f} < 58, "
                 f"no primary setup — skip"
             )
+        _journal_scan_candidate(
+            scan_id,
+            candidate,
+            "below_threshold",
+            regime=regime,
+            technical_score=_tech_score,
+            ml_score=_ml_score,
+            composite_score=composite,
+            entry_threshold=58.0,
+            should_enter_signal=0,
+            entry_block_reason=f"composite {composite:.1f} < 58 (no setup, no tier2 score)",
+        )
         return
 
     # ── Step 5: Economics gate (runs after setup quality known) ─────────────
@@ -941,6 +1108,22 @@ def _attempt_entry(
                     )
                 except Exception:
                     pass
+            _journal_scan_candidate(
+                scan_id,
+                candidate,
+                "econ_veto",
+                regime=regime,
+                technical_score=_tech_score,
+                ml_score=_ml_score,
+                composite_score=composite,
+                entry_threshold=58.0,
+                should_enter_signal=1,
+                econ_approved=0,
+                econ_tier=econ.get("quality_tier", "VETO"),
+                econ_reject_reason=reason,
+                edge_score=float(econ.get("edge_score", 0.0)),
+                entry_block_reason=f"economics: {reason}",
+            )
             return
     except ImportError:
         pass
@@ -1007,6 +1190,23 @@ def _attempt_entry(
 
     if size_usd < 10.0:
         logger.debug(f"[v10] {symbol} size ${size_usd:.2f} too small, skip")
+        _journal_scan_candidate(
+            scan_id,
+            candidate,
+            "sizing_zero",
+            regime=regime,
+            technical_score=_tech_score,
+            ml_score=_ml_score,
+            composite_score=composite,
+            entry_threshold=58.0,
+            should_enter_signal=1,
+            econ_approved=1,
+            econ_tier=str(candidate.get("quality_tier", "B")),
+            edge_score=float(candidate.get("edge_score", 0.5)),
+            size_usd=size_usd,
+            leverage=sizing.get("leverage", 3),
+            entry_block_reason=f"size ${size_usd:.2f} < $10 minimum",
+        )
         return
 
     leverage = sizing.get("leverage", 3)
@@ -1064,6 +1264,24 @@ def _attempt_entry(
         f"${size_usd:.0f} @ ${current_price:.4f} "
         f"stop=${stop_price:.4f} tp=${take_profit_price:.4f} "
         f"lev={leverage}x composite={composite:.1f}{setup_tag}"
+    )
+
+    # Journal this entry so the learning layer sees it alongside vetoed candidates.
+    _journal_scan_candidate(
+        scan_id,
+        candidate,
+        "entered",
+        regime=regime,
+        technical_score=_tech_score,
+        ml_score=_ml_score,
+        composite_score=composite,
+        entry_threshold=58.0,
+        should_enter_signal=1,
+        econ_approved=1,
+        econ_tier=str(candidate.get("quality_tier", "B")),
+        edge_score=float(candidate.get("edge_score", 0.5)),
+        size_usd=size_usd,
+        leverage=leverage,
     )
 
     # Persist 57-feature snapshot keyed to this trade for ML training.
@@ -2052,6 +2270,34 @@ def run_forever():
     schedule.every(60).seconds.do(_run_health_check)
     schedule.every(6).hours.do(ml_retrain_check)
     schedule.every().day.at("07:00").do(rbi_nightly)  # 07:00 UTC ≈ 02:00 ET
+
+    # v13.6: candidate outcome labeling — runs every 15 min in a background thread
+    # so it never blocks the scan cycle.
+    def _labeler_job():
+        try:
+            import threading as _thr
+            from learning.candidate_labeler import run_labeling_pass
+            from data.historical_data import get_candles as _gc
+
+            _t = _thr.Thread(target=run_labeling_pass, args=(_gc,), daemon=True)
+            _t.start()
+        except Exception as _le:
+            logger.debug(f"[v10] labeler job error: {_le}")
+
+    schedule.every(15).minutes.do(_labeler_job)
+
+    # v13.6: nightly proof + drift + learning audit at 08:00 UTC (03:00 ET, after RBI)
+    def _nightly_audit_job():
+        try:
+            import threading as _thr
+            from monitoring.nightly_audit import run_audit
+
+            _t = _thr.Thread(target=run_audit, kwargs={"run_proof": True}, daemon=True)
+            _t.start()
+        except Exception as _ae:
+            logger.debug(f"[v10] nightly audit job error: {_ae}")
+
+    schedule.every().day.at("08:00").do(_nightly_audit_job)  # 08:00 UTC ≈ 03:00 ET
 
     from config import FUTURES_ENABLED
 

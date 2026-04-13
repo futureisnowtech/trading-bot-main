@@ -1,5 +1,17 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
+## 2026-04-13
+- feat(learning): candidate journaling + automated outcome labeling (v13.6) — scan_candidates table, candidate_outcomes table, background labeler, nightly audit
+
+## 2026-04-13
+- fix(v13.5): scan_liveness false positive fixed (CRYPTO_SCAN_INTERVAL 15→300), stagnant exit added (priority-7, >72h no-trail no-scale closes position), health_check dedup (identical failure keys suppressed for 1h)
+
+## 2026-04-13
+- feat(exits): conviction-adaptive exit stack — regime-aware trailing, real-R scale-out, signal-health compression (v13.5)
+
+## 2026-04-13
+- feat(dashboard): UX overhaul — plain-English status hero, progressive disclosure, report card, activity feed translation
+
 ## 2026-04-10
 - fix(validate): treat optional import runtime failures as warnings so pre-flight validation completes on Python 3.14
 

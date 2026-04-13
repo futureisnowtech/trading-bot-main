@@ -23,12 +23,12 @@ A fully autonomous AI-powered trading system that:
 
 ## Owner Profile
 - Mac user (MacBook Air 2020, Python 3.14 at /Library/Frameworks/Python.framework/Versions/3.14/bin/python3)
-- Paper account: $10,000 (ACCOUNT_SIZE=10000 in .env)
+- Paper account: $5,000 (ACCOUNT_SIZE=5000 — config default, no .env override)
 - Relatively technical but wants zero day-to-day intervention
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
 
-## Current Version: v13.4 (2026-04-10)
+## Current Version: v13.6 (2026-04-13)
 
 **Active branch:** `feature/v10-rebuild`
 **Clean paper trading started:** 2026-04-02
@@ -87,11 +87,30 @@ Owner decides when to go live. These are informational readings, not system gate
 - Economics gate veto rate
 - Kill switch triggers (14d)
 
+### v13.6 Candidate Journaling + Automated Outcome Labeling (applied 2026-04-13)
+
+- `logging_db/trade_logger.py`: `scan_candidates` + `candidate_outcomes` tables added to `init_db()`; `log_scan_candidate()`, `get_unlabeled_candidates()`, `log_candidate_outcome()`, `get_candidate_journal_stats()` helpers added
+- `scheduler/v10_runner.py`: `_journal_scan_candidate()` helper; per-scan `scan_id` (UUID hex); journaling at 8 decision gates: `dual_exposure_block`, `cooldown_block`, `risk_block`, `data_unavailable`, `below_threshold`, `econ_veto`, `sizing_zero`, `entered`; labeler + nightly audit scheduled
+- `learning/candidate_labeler.py` (NEW): background labeling worker (every 15 min, daemon thread); fetches forward 1h candles; computes 1h/4h returns, MFE, MAE, hit_1r, hit_2r, hit_stop; writes `candidate_outcomes`; bounded batch 50 rows/run
+- `monitoring/nightly_audit.py` (NEW): daily 08:00 UTC; pytest proof suite + candidate journaling health + repo drift + learning health; writes to system_events; runnable standalone
+- `tests/proof/test_candidate_journal.py` (NEW): 10 proof tests — all green
+- No thresholds changed; no strategy logic touched; all journal writes are fire-and-forget
+
+### v13.5 Conviction-Adaptive Exit Stack (applied 2026-04-13)
+
+- `position_manager.py` — **Fix #1 (real-R denominator):** Scale-out R calculation now uses `abs(entry - stop_price)` (the actual risk per the live stop) instead of `atr * 1.5`. The hardcoded denominator was half the real stop, causing "2R" to fire at true 1:1 R:R — first 33% always sold the moment the trade broke even.
+- `position_manager.py` — **Fix #2 (conviction-adaptive scale targets):** Scale-out first/second R levels and slice size now blend `entry_composite_score` (60 weight) + regime extension potential (40 weight). RANGING + low-conviction → 2.0R/4.5R; TRENDING + high-conviction → 4.0R/8.0R. Replaces flat 2R/3.5R.
+- `position_manager.py` — **Fix #3 (regime-aware trailing activation + width):** `_REGIME_TRAIL_CONFIG` dict drives both activation threshold and trail multiplier per regime. `activate_trailing()` now calls `_resolve_trail_config(regime)` and stores `trail_atr_mult` in the position dict. RANGING activates at 1.0×ATR with 2.5× trail; HIGH_VOL at 2.0×ATR with 5.5× trail; etc.
+- `position_manager.py` — **Fix #4 (ATR-proportional thesis hold gate):** LONG positions get 1h–6h hold gate proportional to ATR%; SHORT positions 2h–12h (shorts need twice as long historically). Replaces flat 45-min MR / 2h momentum floors.
+- `position_manager.py` — **Fix #5 (signal-health trail compression):** When trailing is active, `check_exits()` computes `signal_health = (current_score - thesis_floor) / (entry_score - thesis_floor)`. If health < 65%, trail compresses toward 50% of nominal — the bot tightens its own leash as conviction fades without hard-coding an exit. Returns `trail_compressed` non-exit `ExitDecision` carrying `trail_atr_mult`.
+- `position_manager.py` — `update_trailing_stop()` now reads `position.get("trail_atr_mult", 4.0)` instead of hardcoded 4.5, so compression is honoured on every tick.
+- `scheduler/v10_runner.py` — Added `trail_compressed` handler: applies compressed `trail_atr_mult` to position dict and recomputes `trailing_stop_price` immediately without closing the position.
+
 ### v13.4 Proof Infrastructure + Repo Truth Alignment (applied 2026-04-10)
 
 - `logging_db/trade_logger.py`: added `get_logger()` compatibility wrapper for current live callers (`risk_engine.py`, `position_manager.py`, `kill_switch.py`, RBI modules) and added `kill_switch_log` table creation to `init_db()`
-- `risk_engine.py`: startup balances now initialize from configured `ACCOUNT_SIZE` instead of hardcoded `$10K`, so drawdown / kill-switch math tracks the real paper account from process start
-- `kill_switch.py`: threshold docs aligned to configured account size; `check_balance()` now defaults its initial balance from config instead of a hardcoded `$10K`
+- `risk_engine.py`: startup balances now initialize from configured `ACCOUNT_SIZE` ($5,000) instead of a hardcoded value, so drawdown / kill-switch math tracks the real paper account from process start
+- `kill_switch.py`: threshold docs aligned to configured account size; `check_balance()` now defaults its initial balance from config ($5,000)
 - `dashboard/data/execution.py`, `dashboard/widgets/mission_control/decision_quality.py`, `dashboard/widgets/crypto_performance/deep_analysis.py`: `trade_attribution` reads aligned to the real schema (`created_at`, no `direction` column)
 - `dashboard/data/health.py` + `main.py`: startup event wording aligned so restart counts match runtime (`Bot started — ... v13.4`)
 - `CLAUDE.md` + `scripts/validate.py`: repo memory and pre-flight validation now read the current version/source-of-truth state (`AGENTS.md` first, `CLAUDE.md` fallback) so startup checks match runtime reality
@@ -276,16 +295,16 @@ Two deterministic towers → composite score → regime threshold gate.
 | Technical | Rule-based point scoring, normalised 0-100 | CVD divergence, MACD multi-variant, RSI divergence, funding squeeze, VWAP reclaim, OB imbalance, Williams %R, liq cascade, vol spike, Fear & Greed, options skew, whale signal |
 | ML | XGBoost 60% + LightGBM 40% walk-forward ensemble, normalised 0-100 | 57 features across 11 groups (price, volume, CVD, momentum, VWAP, orderbook, derivatives, liquidation, regime, time, onchain) |
 
-Entry: composite >= regime threshold (TRENDING=62, RANGING=68, HIGH_VOL=72, UNKNOWN=65). Same threshold paper and live.
+Entry: composite >= regime threshold (TRENDING_UP/DOWN=58, RANGING=58, HIGH_VOL=60, LOW_VOL=56, UNKNOWN=58). Same threshold paper and live.
 
-## 6-Priority Exit Stack (position_manager.py)
+## 6-Priority Exit Stack (position_manager.py) — v13.5
 
-1. Trailing stop — activates after 1x ATR in favor, trails at 1.5x ATR from peak
-2. Take profit scale-out — 2R → 33%; 3.5R → 33%; remainder trails
-3. Thesis score exit — current composite < entry composite × 0.45 → close all (10-min hold gate)
-4. Hard stop — stop-market on exchange, never widened
-5. Risk forced exit — margin breach / drawdown / correlation
-6. Kill switch — balance < 75% of ACCOUNT_SIZE / API errors / latency
+1. **Trailing stop** — regime-aware activation (RANGING=1.0×ATR, TRENDING=1.5×ATR, HIGH_VOL=2.0×ATR) and trail width (RANGING=2.5×, TRENDING=4.5×, HIGH_VOL=5.5×). Trail further compresses as signal health fades toward thesis floor (signal-health trail compression, non-restrictive).
+2. **Take profit scale-out** — conviction-adaptive targets: _factor blends entry_composite_score (60%) + regime extension (40%). First cut 20–30% at 2.0–4.0R; second cut 25% at 4.5–8.0R. Denominator uses actual stop distance (not hardcoded ATR multiple).
+3. **Thesis score exit** — current composite < entry composite × regime_fraction → close all; TRENDING=30%, RANGING=15%, HIGH_VOL=35%, UNKNOWN=25%. ATR-proportional hold gate (LONG: 1h–6h; SHORT: 2h–12h).
+4. **Hard stop** — stop-market on exchange, never widened.
+5. **Risk forced exit** — margin breach / drawdown / correlation.
+6. **Kill switch** — balance < 75% of ACCOUNT_SIZE / API errors / latency.
 
 ## v10 Learning Architecture
 
@@ -420,6 +439,8 @@ Motivation 1-5: "Strive for greatness." / "I like criticism. It makes you strong
 | v10.0 | 2026-04-01 | Full rewrite: 3-agent debate → two-tower signal engine, 57-feature ML, 6-priority exit stack, RBI loop, clean architecture |
 | v10.1 | 2026-04-02 | Live-readiness overhaul: Kraken scanner, economics gate, sizer simplification, clean ML data (tagged pre_v10_contaminated), Bybit deleted |
 | v10.1 cleanup | 2026-04-03 | All v9/legacy code, dead imports, stale DB data, and old credentials purged; legacy/ directory deleted; repo and DB fully clean for go-live |
+| v13.1–13.4 | 2026-04-05–10 | Scanner/funnel fixes, strategy optimization, ML PnL regressor, proof infrastructure, repo truth alignment |
+| v13.5 | 2026-04-13 | Conviction-adaptive exit stack: real-R scale-out denominator, regime-aware trailing, signal-health compression, ATR-proportional hold gates |
 
 ## GitHub
 - Repository: `futureisnowtech/trading-bot-main` (private)

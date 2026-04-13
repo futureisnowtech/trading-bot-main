@@ -63,12 +63,19 @@ jobs:
             --select=E,F,W \
             || true
 
+      - name: Check environment
+        run: |
+          python -c "import sys; print(sys.version)"
+          python -c "import pandas_ta; print('pandas_ta:', pandas_ta.version)"
+          python -c "import streamlit; print('streamlit:', streamlit.__version__)"
+          python -c "import sklearn; print('sklearn:', sklearn.__version__)"
+
       - name: Run proof suite
         run: |
-          python -m pytest tests/proof/ -v \
-            --tb=short \
+          python -m pytest tests/proof/ \
+            --tb=long \
             --no-header \
-            -q
+            -v
 
       - name: Validate config (non-blocking)
         run: |

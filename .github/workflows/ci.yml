@@ -30,7 +30,7 @@ jobs:
             pytest pytest-cov ruff \
             python-dotenv pandas numpy pytz requests \
             yfinance schedule \
-            "pandas-ta==0.3.14b0"
+            "pandas-ta>=0.3.14b0"
           # Broker SDKs (paper mode — no real API calls in tests)
           pip install \
             "python-binance>=1.0.19"

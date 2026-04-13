@@ -409,7 +409,7 @@ Set TV_WEBHOOK_SECRET in .env. Symbol mapping: BTCUSD → BTCUSDT.
 
 ## Common Errors and Fixes
 
-**pandas-ta import error** → `pip install pandas-ta==0.3.14b0`
+**pandas-ta import error** → `pip install "pandas-ta>=0.3.14b0"` (0.3.14b0 removed from PyPI; 0.4.67b0+ works)
 **XGBoost openmp error** → `brew install libomp`
 **IBKR connection failed** → TWS must be running, port 7497 (paper), API enabled in TWS settings
 **DB lock error** → WAL mode is on; usually a stale connection. Restart bot.

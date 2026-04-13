@@ -40,7 +40,7 @@ def test_dashboard_data_summaries_read_live_schema(proof_runtime):
         proof_runtime.db_path,
         ts=_ts(1),
         source="health_check",
-        message="HEALTHY 6/6 checks passing",
+        message="Health 6/6 [HEALTHY]",
     )
     insert_system_event(
         proof_runtime.db_path,

@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-14
+- fix(ibkr_broker): set event loop on background thread — Python 3.10+ no longer auto-sets asyncio event loop per thread, causing connectAsync to fail with 'no current event loop in thread ibkr-event-loop'; fixed by wrapping run_forever in a _start_loop closure that calls asyncio.set_event_loop(loop) first
+
+## 2026-04-14
 - v13.8.1: fix health_check stagnant false positives — ghost positions + managed positions now excluded via DB ground-truth lookup
 
 ## 2026-04-13

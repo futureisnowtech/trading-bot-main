@@ -95,9 +95,19 @@ class IBKRBroker:
         self._lock = threading.Lock()
 
         # Start the persistent event loop that all ib_insync calls use.
+        # Python 3.10+ no longer auto-sets the event loop per thread, so we
+        # must call asyncio.set_event_loop() explicitly inside the thread
+        # before run_forever(). Without this, ib_insync's connectAsync raises
+        # "There is no current event loop in thread 'ibkr-event-loop'."
         self._loop = asyncio.new_event_loop()
+
+        def _start_loop(loop: asyncio.AbstractEventLoop) -> None:
+            asyncio.set_event_loop(loop)
+            loop.run_forever()
+
         self._loop_thread = threading.Thread(
-            target=self._loop.run_forever,
+            target=_start_loop,
+            args=(self._loop,),
             daemon=True,
             name="ibkr-event-loop",
         )

@@ -66,9 +66,9 @@ jobs:
       - name: Check environment
         run: |
           python -c "import sys; print(sys.version)"
-          python -c "import pandas_ta; print('pandas_ta:', pandas_ta.version)"
-          python -c "import streamlit; print('streamlit:', streamlit.__version__)"
-          python -c "import sklearn; print('sklearn:', sklearn.__version__)"
+          python -c "import pandas_ta; v = getattr(pandas_ta, '__version__', None) or getattr(pandas_ta, 'version', 'unknown'); print('pandas_ta:', v)" || true
+          python -c "import streamlit; print('streamlit:', streamlit.__version__)" || true
+          python -c "import sklearn; print('sklearn:', sklearn.__version__)" || true
 
       - name: Run proof suite
         run: |

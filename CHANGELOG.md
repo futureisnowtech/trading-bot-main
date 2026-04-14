@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-14
+- fix(futures): full MES launch-readiness audit — 6 bugs fixed: (1) contract spec Error 200: switched from lastTradeDateOrContractMonth to localSymbol='MESM26'+multiplier='5'; (2) entry key mismatch: v10_runner read 'entry_price' but broker stores 'entry'; (3) SHORT position never closing correctly: is_long=qty>0 always True (qty always positive), fixed to use pos.get('side'); (4) EOD close same pos['qty']>0 bug; (5) daily loss limit hardcoded  vs config  (5pts x 2 x ); (6) health_check: added _check_ibkr_connection() as 7th check; FUTURES_ENABLED=true in .env; dashboard health.py total fallback 6->7, IBKR fix-prompt added to _classify_error
+
+## 2026-04-14
 - fix(ibkr_broker): set event loop on background thread — Python 3.10+ no longer auto-sets asyncio event loop per thread, causing connectAsync to fail with 'no current event loop in thread ibkr-event-loop'; fixed by wrapping run_forever in a _start_loop closure that calls asyncio.set_event_loop(loop) first
 
 ## 2026-04-14

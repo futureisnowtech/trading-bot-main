@@ -1920,7 +1920,7 @@ def mes_futures_scan():
       - Stop: other side of opening range + 1 point buffer
       - Target: 2× stop distance (min 4 points, ≈ $20/contract)
       - Max 1 position at a time, max 2 contracts
-      - Daily loss limit: $150 (10 pts × $5 × 3 contracts)
+      - Daily loss limit: $50 (FUTURES_DAILY_MAX_LOSS_PTS=5 × 2 contracts × $5/pt)
       - Hard stop at 3:45 PM ET — close any open MES position
     """
     try:
@@ -2028,16 +2028,23 @@ def _mes_scan_inner():
             if pos and pos.get("qty", 0) != 0:
                 logger.info("[mes] EOD close — 15:45 ET hard stop")
                 qty = abs(int(pos["qty"]))
-                if pos["qty"] > 0:
+                # Use "side" key (always set by buy_mes/short_mes) — qty is stored as
+                # positive for both LONG and SHORT, so qty>0 would always be True.
+                if pos.get("side", "LONG") == "LONG":
                     broker.sell_mes(qty=qty, reason="eod_close")
                 else:
                     broker.cover_mes(qty=qty, reason="eod_close")
             return
 
-        # Daily loss limit: $150
-        if _mes_daily_pnl < -150:
+        # Daily loss limit — read from config so it stays in sync with FUTURES_DAILY_MAX_LOSS_PTS.
+        # config: 5pts × 2 contracts × $5/pt = $50 max daily loss.
+        from config import FUTURES_DAILY_MAX_LOSS_PTS, FUTURES_NUM_CONTRACTS as _FNC
+
+        _mes_daily_loss_limit = FUTURES_DAILY_MAX_LOSS_PTS * _FNC * MES_POINT_VALUE
+        if _mes_daily_pnl < -_mes_daily_loss_limit:
             logger.info(
-                f"[mes] Daily loss limit hit: ${_mes_daily_pnl:.2f} — no new trades"
+                f"[mes] Daily loss limit hit: ${_mes_daily_pnl:.2f} "
+                f"(limit=${_mes_daily_loss_limit:.0f}) — no new trades"
             )
             return
 
@@ -2053,34 +2060,45 @@ def _mes_scan_inner():
         has_pos = pos is not None and pos.get("qty", 0) != 0
 
         if has_pos:
-            # Monitor existing position for stop/target
-            entry = float(pos.get("entry_price", or_mid))
-            qty = int(pos.get("qty", 0))
+            # Monitor existing position for stop/target.
+            # "entry" is the key set by buy_mes/short_mes (not "entry_price").
+            # "side" is always "LONG" or "SHORT" — don't rely on qty sign since
+            # short_mes also stores qty as a positive number.
+            entry = float(pos.get("entry", or_mid))
+            qty = abs(int(pos.get("qty", 0)))
             stop = float(pos.get("stop", 0))
             target = float(pos.get("target", 0))
-            is_long = qty > 0
+            is_long = pos.get("side", "LONG") == "LONG"
 
             if is_long:
                 if price <= stop:
-                    pnl = (price - entry) * abs(qty) * 5 - IBKR_COMMISSION_RT * abs(qty)
+                    pnl = (
+                        price - entry
+                    ) * qty * MES_POINT_VALUE - IBKR_COMMISSION_RT * qty
                     _mes_daily_pnl += pnl
-                    broker.sell_mes(qty=abs(qty), reason="stop_hit")
+                    broker.sell_mes(qty=qty, reason="stop_hit")
                     logger.info(f"[mes] STOP HIT LONG @ {price:.2f} pnl=${pnl:.2f}")
                 elif price >= target:
-                    pnl = (price - entry) * abs(qty) * 5 - IBKR_COMMISSION_RT * abs(qty)
+                    pnl = (
+                        price - entry
+                    ) * qty * MES_POINT_VALUE - IBKR_COMMISSION_RT * qty
                     _mes_daily_pnl += pnl
-                    broker.sell_mes(qty=abs(qty), reason="target_hit")
+                    broker.sell_mes(qty=qty, reason="target_hit")
                     logger.info(f"[mes] TARGET HIT LONG @ {price:.2f} pnl=${pnl:.2f}")
             else:
                 if price >= stop:
-                    pnl = (entry - price) * abs(qty) * 5 - IBKR_COMMISSION_RT * abs(qty)
+                    pnl = (
+                        entry - price
+                    ) * qty * MES_POINT_VALUE - IBKR_COMMISSION_RT * qty
                     _mes_daily_pnl += pnl
-                    broker.cover_mes(qty=abs(qty), reason="stop_hit")
+                    broker.cover_mes(qty=qty, reason="stop_hit")
                     logger.info(f"[mes] STOP HIT SHORT @ {price:.2f} pnl=${pnl:.2f}")
                 elif price <= target:
-                    pnl = (entry - price) * abs(qty) * 5 - IBKR_COMMISSION_RT * abs(qty)
+                    pnl = (
+                        entry - price
+                    ) * qty * MES_POINT_VALUE - IBKR_COMMISSION_RT * qty
                     _mes_daily_pnl += pnl
-                    broker.cover_mes(qty=abs(qty), reason="target_hit")
+                    broker.cover_mes(qty=qty, reason="target_hit")
                     logger.info(f"[mes] TARGET HIT SHORT @ {price:.2f} pnl=${pnl:.2f}")
             return
 
@@ -2187,6 +2205,7 @@ def _mes_scan_inner():
 
 
 IBKR_COMMISSION_RT = 0.47 * 2  # round-trip commission per contract
+MES_POINT_VALUE = 5.00  # $ per full MES point (matches ibkr_broker.MES_POINT_VALUE)
 
 
 # ── rbi_nightly ───────────────────────────────────────────────────────────────

@@ -73,11 +73,33 @@ IBKR_COMMISSION = 0.47  # $ per contract per side
 def _get_mes_contract():
     from ib_insync import Future
 
+    # localSymbol (e.g. 'MESM6') is the most reliable identifier — IBKR assigns
+    # it directly and it never causes Error 200 "No security definition" unlike
+    # lastTradeDateOrContractMonth which can fail if the contract hasn't been
+    # pre-loaded in TWS's contract database.
+    # Mapping: Q1=H, Q2=M, Q3=U, Q4=Z  → June 2026 = M6
+    year_str = MES_EXPIRY[2:4]  # '20260619' → '26'
+    month_code = {
+        "01": "F",
+        "02": "G",
+        "03": "H",
+        "04": "J",
+        "05": "K",
+        "06": "M",
+        "07": "N",
+        "08": "Q",
+        "09": "U",
+        "10": "V",
+        "11": "X",
+        "12": "Z",
+    }
+    month_str = MES_EXPIRY[4:6]  # '06'
+    local_sym = f"MES{month_code.get(month_str, 'M')}{year_str}"  # e.g. 'MESM26'
     return Future(
-        symbol="MES",
-        lastTradeDateOrContractMonth=MES_EXPIRY,
+        localSymbol=local_sym,
         exchange="CME",
         currency="USD",
+        multiplier="5",
     )
 
 

@@ -252,6 +252,31 @@ def _check_risk_manager() -> dict:
         return {"ok": False, "detail": f"Exception: {e}"}
 
 
+def _check_ibkr_connection() -> dict:
+    """IBKR/TWS connectivity — only checked when FUTURES_ENABLED=true."""
+    try:
+        from config import FUTURES_ENABLED
+
+        if not FUTURES_ENABLED:
+            return {"ok": True, "detail": "FUTURES_ENABLED=false — skipped"}
+        from execution.ibkr_broker import get_ibkr_broker
+
+        broker = get_ibkr_broker()
+        if not broker.is_connected():
+            # Attempt reconnect once before reporting failure
+            broker.connect()
+        if not broker.is_connected():
+            return {
+                "ok": False,
+                "detail": "IBKR not connected — TWS unreachable on port 7497",
+            }
+        bal = broker.get_account_balance()
+        bal_str = f"${bal:.0f}" if bal > 0 else "unavailable"
+        return {"ok": True, "detail": f"TWS connected | balance={bal_str}"}
+    except Exception as e:
+        return {"ok": False, "detail": f"IBKR check error: {e}"}
+
+
 def run_health_check(force: bool = False) -> dict:
     """
     Run all health checks. Rate-limited to once per minute unless force=True.
@@ -271,6 +296,7 @@ def run_health_check(force: bool = False) -> dict:
         "attribution": _check_attribution_working(),
         "error_rate": _check_error_rate(),
         "risk_manager": _check_risk_manager(),
+        "ibkr": _check_ibkr_connection(),
     }
 
     passed = sum(1 for v in checks.values() if v["ok"])

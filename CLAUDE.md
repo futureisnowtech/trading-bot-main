@@ -28,7 +28,7 @@ A fully autonomous AI-powered trading system that:
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
 
-## Current Version: v13.8 (2026-04-13)
+## Current Version: v13.9 (2026-04-14)
 
 **Active branch:** `feature/v10-rebuild`
 **Clean paper trading started:** 2026-04-02
@@ -86,6 +86,21 @@ Owner decides when to go live. These are informational readings, not system gate
 - Days running on clean data
 - Economics gate veto rate
 - Kill switch triggers (14d)
+
+### v13.9 MES Futures Launch-Readiness Audit (applied 2026-04-14)
+
+Full end-to-end audit and fix of the MES futures stack. 6 correctness bugs fixed, TWS integration verified with 10 live paper round-trips (real TWS order IDs, real price movement in P&L).
+
+- `execution/ibkr_broker.py` — **Contract spec fix (Error 200):** `lastTradeDateOrContractMonth='20260619'` → `localSymbol='MESM26'` + `multiplier='5'`. IBKR's `qualifyContractsAsync` reliably resolves `localSymbol`; the date-string form fails when the contract hasn't been explicitly loaded in TWS's contract DB. `_get_mes_contract()` now derives `localSymbol` from `MES_EXPIRY` (month code table: 06→M, 09→U, 12→Z, etc.) so it stays correct across quarterly rolls.
+- `execution/ibkr_broker.py` — **Event loop fix (Python 3.14):** Background thread now calls `asyncio.set_event_loop(loop)` before `run_forever()`. Python 3.10+ no longer auto-creates a loop per thread — without this, `connectAsync` raised `RuntimeError: There is no current event loop in thread 'ibkr-event-loop'` and every connection silently fell back to offline mode.
+- `scheduler/v10_runner.py` — **`entry` key mismatch:** `_mes_scan_inner()` was reading `pos.get("entry_price", or_mid)` but `buy_mes/short_mes` store `"entry"`. Stop/target P&L was always computed against `or_mid` (opening range midpoint) instead of actual entry price.
+- `scheduler/v10_runner.py` — **SHORT positions never correctly exiting:** `is_long = qty > 0` was always `True` because `short_mes` stores `qty` as a positive integer (same as `buy_mes`). SHORT stop/target monitoring never triggered; SHORT P&L was calculated as LONG P&L. Fixed: `is_long = pos.get("side", "LONG") == "LONG"`.
+- `scheduler/v10_runner.py` — **EOD close same bug:** `if pos["qty"] > 0` at 15:45 always True → called `sell_mes` for SHORT positions (wrong broker call). Fixed to `pos.get("side", "LONG") == "LONG"`.
+- `scheduler/v10_runner.py` — **Daily loss limit hardcoded `$150`** vs config `$50` (5pts × 2 contracts × $5). Comment said "10 pts × $5 × 3 contracts" which matched neither current config nor current contract count. Now reads from `FUTURES_DAILY_MAX_LOSS_PTS * FUTURES_NUM_CONTRACTS * MES_POINT_VALUE`. `MES_POINT_VALUE = 5.00` added as module-level constant in v10_runner.
+- `monitoring/health_check.py` — **7th health check added:** `_check_ibkr_connection()` — verifies TWS is reachable on port 7497 when `FUTURES_ENABLED=true`; attempts one reconnect before reporting failure; logs IBKR paper account balance. Score denominator is now 7/7. Skipped (passes automatically) when `FUTURES_ENABLED=false`.
+- `dashboard/data/health.py` — No-data fallback `"total": 6` → `7`. IBKR fix-prompt added to `_classify_error()` so dashboard shows actionable TWS reconnect steps when the `ibkr` health check fails.
+- `.env` — `FUTURES_ENABLED=true`, `FUTURES_NUM_CONTRACTS=2`, `MES_EXPIRY=20260619`, `IBKR_HOST/PORT/CLIENT_ID` added.
+- **Verified:** 10 MES paper round-trips (5L + 5S) via live TWS, account `DUP590699`, real TWS order IDs (112–202), prices moving tick-by-tick, P&L non-zero reflecting actual price movement. 41/41 proof tests green.
 
 ### v13.8 Dead-Money Exit + Dashboard Live Health + Proof Coverage (applied 2026-04-13)
 
@@ -280,7 +295,7 @@ algo_trading_final/
 │   └── trade_memory.py       ← 8-dim NumPy cosine similarity, SQLite-backed
 │
 ├── monitoring/
-│   └── health_check.py       ← 6-invariant health assertions written to system_events
+│   └── health_check.py       ← 7-invariant health assertions written to system_events (added ibkr check)
 │
 ├── mcp_server/
 │   └── server.py             ← 15 FastMCP tools; start: python3 mcp_server/server.py
@@ -469,6 +484,7 @@ Motivation 1-5: "Strive for greatness." / "I like criticism. It makes you strong
 | v13.6 | 2026-04-13 | Candidate journaling at 8 decision gates, automated outcome labeling, nightly audit, proof suite (10 tests) |
 | v13.7 | 2026-04-13 | 15m labeling, exception-only notifications, funnel analytics, retention pruning, dashboard health panel, CI fix, proof suite 25/25 |
 | v13.8 | 2026-04-13 | Dead-money exit (data-driven, replaces time-only stagnant); scan_liveness fix; health_check dedup; UNHEALTHY/HEALTHY substring bug fix; dashboard live health panel; 16 dashboard data proof tests; 41/41 green |
+| v13.9 | 2026-04-14 | MES futures launch audit: contract Error 200 fix (localSymbol=MESM26), asyncio event loop fix, entry key mismatch, SHORT monitoring never triggering, EOD close wrong side, daily loss limit $150→$50 from config; 7th health check (ibkr); FUTURES_ENABLED=true; 10 live TWS trades verified |
 
 ## GitHub
 - Repository: `futureisnowtech/trading-bot-main` (private)
@@ -486,3 +502,4 @@ When making any change to this project:
 7. Test paper mode before any live-mode changes: `python3 main.py --mode paper`
 8. **Proof tests are part of done** — any change to a data layer function (dashboard/data/, logging_db/, config.py constants) requires a proof test that defines the invariant. If the test doesn't exist, write it. If it would have caught the bug, it's mandatory.
 9. **No tunnel vision on partial changes** — when changing one function in a module, grep for all callers and related functions that touch the same data. Example: changing a query filter in `get_recent_errors_detail()` requires checking `get_error_rate_1h()` and `get_health_status()` too.
+10. **MES futures — key contracts:** Position dict from `buy_mes/short_mes` uses keys `"entry"` (not `"entry_price"`), `"side"` (`"LONG"` or `"SHORT"`), `"qty"` (always positive). Never use `qty > 0` to determine direction — always use `pos.get("side")`. Contract is `localSymbol="MESM26"` (derived from `MES_EXPIRY` in `ibkr_broker._get_mes_contract()`). Update `MES_EXPIRY` in `.env` on each quarterly roll.

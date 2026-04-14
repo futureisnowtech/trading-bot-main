@@ -20,7 +20,7 @@ def get_health_status() -> dict:
         return {
             "status": "UNKNOWN",
             "score": 0,
-            "total": 6,
+            "total": 7,
             "ts": None,
             "message": "No health check data yet",
         }
@@ -158,6 +158,23 @@ def _classify_error(source: str, message: str) -> dict:
                     "to find the bad condition. Fix the check, not the threshold."
                 ),
             }
+
+    # ── IBKR / TWS connection ─────────────────────────────────────────────────
+    if s == "ibkr" or "ibkr" in m or "tws" in m or "7497" in m:
+        return {
+            "category": "IBKR / TWS Disconnected",
+            "fix_type": "Claude Code",
+            "fix_prompt": (
+                "1. Confirm TWS is open and the API is enabled:\n"
+                "   TWS → Edit → Global Configuration → API → Settings\n"
+                "   ✓ Enable ActiveX and Socket Clients  ✓ Port: 7497  ✗ Read-Only API\n"
+                "2. Test connection:\n"
+                'python3 -c "from execution.ibkr_broker import get_ibkr_broker; '
+                "b=get_ibkr_broker(); print('connected:', b.connect())\"\n"
+                "3. If TWS shows 'Waiting for connection': click Trust on the API popup in TWS.\n"
+                "4. Check FUTURES_ENABLED=true is in .env."
+            ),
+        }
 
     # ── Scanner / exchange API errors ─────────────────────────────────────────
     if "scanner" in s or s in ("kraken", "binance", "hyperliquid"):

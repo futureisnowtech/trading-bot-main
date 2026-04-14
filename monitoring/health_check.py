@@ -76,7 +76,16 @@ _STAGNANT_HEALTH_HOURS = 48.0  # health alarm threshold — longer than trading 
 
 
 def _check_stagnant_positions() -> dict:
-    """No position should be past 48h while still flat (stop not hit, no movement)."""
+    """No position should be past 48h while still flat (stop not hit, no movement).
+
+    Uses the open_positions DB table as ground truth so two classes of false
+    positives are avoided:
+      1. Ghost positions — closed trades that were never removed from the
+         risk_manager's in-memory dict (position not in DB → skip).
+      2. Managed positions — entries that hit a profit target or activated a
+         trailing stop are being wound down by the exit stack; flagging them as
+         stagnant is misleading (trailing_active=1 or scale_33_done=1 → skip).
+    """
     try:
         from risk.risk_manager import get_risk_manager
 
@@ -86,11 +95,39 @@ def _check_stagnant_positions() -> dict:
         now = datetime.now(timezone.utc)
         max_mins = _STAGNANT_HEALTH_HOURS * 60
 
+        # Build DB ground-truth lookup: symbol → {trailing_active, scale_33_done, entry, high}
+        _db_state: dict = {}
+        try:
+            with _conn() as c:
+                rows = c.execute(
+                    "SELECT symbol, entry, high_since_entry, trailing_active, scale_33_done "
+                    "FROM open_positions WHERE paper=?",
+                    (1 if PAPER_TRADING else 0,),
+                ).fetchall()
+                for r in rows:
+                    _db_state[r["symbol"]] = {
+                        "entry": r["entry"] or 0,
+                        "high": r["high_since_entry"] or r["entry"] or 0,
+                        "trailing_active": bool(r["trailing_active"]),
+                        "scale_33_done": bool(r["scale_33_done"]),
+                    }
+        except Exception:
+            pass  # if DB unreadable, fall through with empty dict (no false-positive skips)
+
         for strat, syms in positions.items():
             if not syms:
                 continue
             for sym, pos in syms.items():
                 try:
+                    # Skip if position has already been closed (ghost in risk_manager memory)
+                    if _db_state and sym not in _db_state:
+                        continue
+                    # Skip managed positions — trailing stop or scale-out means the exit
+                    # stack is already handling the wind-down; not truly stagnant
+                    db = _db_state.get(sym, {})
+                    if db.get("trailing_active") or db.get("scale_33_done"):
+                        continue
+
                     ts = pos.get("ts_entry", "")
                     entry_dt = datetime.fromisoformat(ts)
                     if not entry_dt.tzinfo:
@@ -98,10 +135,12 @@ def _check_stagnant_positions() -> dict:
                     age_min = (
                         now - entry_dt.astimezone(timezone.utc)
                     ).total_seconds() / 60
-                    entry = pos.get("entry", 0) or 0
-                    high = pos.get("high_since_entry", entry) or entry
-                    # pnl_pct: how far price has moved from entry (use high as proxy for current)
+
+                    # Use DB values for entry/high (risk_manager in-memory can lag)
+                    entry = db.get("entry") or pos.get("entry", 0) or 0
+                    high = db.get("high") or pos.get("high_since_entry", entry) or entry
                     pnl_pct = abs(high - entry) / max(entry, 1e-10) if entry > 0 else 0
+
                     if age_min >= max_mins and pnl_pct < FLAT_POSITION_THRESHOLD_PCT:
                         stagnant.append(f"{sym}({age_min:.0f}m)")
                 except Exception:

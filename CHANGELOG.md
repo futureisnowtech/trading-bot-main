@@ -1,5 +1,8 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
+## 2026-04-14
+- v13.8.1: fix health_check stagnant false positives — ghost positions + managed positions now excluded via DB ground-truth lookup
+
 ## 2026-04-13
 - test(proof): add tests/proof/test_dashboard_data.py — 16 invariant proofs for dashboard/data/health.py: error_rate source exclusion, error_detail deduplication and source exclusion, health_failures live-state parsing, banner no_errors consistency. Catches the class of bug where partial changes to one function miss related functions.
 

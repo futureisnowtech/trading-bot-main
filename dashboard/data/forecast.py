@@ -36,17 +36,21 @@ def _conn() -> sqlite3.Connection:
 def get_forecast_health() -> dict:
     """
     Returns:
-        {tables_exist, active_markets, active_contracts, quote_lag_minutes,
-         bars_5m_count, positions_open, last_discovery_at}
+        {tables_exist, active_markets, underliers_visible, contracts_unavailable_count,
+         active_contracts, quote_lag_minutes, bars_5m_count, positions_open,
+         last_discovery_at, lane_started}
     """
     result = {
         "tables_exist": False,
         "active_markets": 0,
+        "underliers_visible": 0,
+        "contracts_unavailable_count": 0,
         "active_contracts": 0,
         "quote_lag_minutes": None,
         "bars_5m_count": 0,
         "positions_open": 0,
         "last_discovery_at": None,
+        "lane_started": False,
     }
     try:
         with _conn() as c:
@@ -66,10 +70,42 @@ def get_forecast_health() -> dict:
             }
             result["tables_exist"] = required.issubset(tables)
             if not result["tables_exist"]:
+                # Check if lane started even without tables
+                try:
+                    n = c.execute(
+                        "SELECT COUNT(*) FROM system_events "
+                        "WHERE source='ForecastRunner' "
+                        "AND ts >= datetime('now','-2 hours')"
+                    ).fetchone()[0]
+                    result["lane_started"] = n > 0
+                except Exception:
+                    pass
                 return result
 
-            result["active_markets"] = c.execute(
+            # Lane started: recent ForecastRunner system_events
+            try:
+                n = c.execute(
+                    "SELECT COUNT(*) FROM system_events "
+                    "WHERE source='ForecastRunner' "
+                    "AND ts >= datetime('now','-2 hours')"
+                ).fetchone()[0]
+                result["lane_started"] = n > 0
+            except Exception:
+                pass
+
+            # Underliers visible (all markets in DB, regardless of contracts)
+            result["underliers_visible"] = c.execute(
                 "SELECT COUNT(*) FROM forecast_markets WHERE active=1"
+            ).fetchone()[0]
+
+            # Active markets (alias for underliers_visible)
+            result["active_markets"] = result["underliers_visible"]
+
+            # Markets where stub_only / no contracts available
+            result["contracts_unavailable_count"] = c.execute(
+                "SELECT COUNT(*) FROM forecast_markets fm "
+                "WHERE fm.active=1 "
+                "AND NOT EXISTS (SELECT 1 FROM forecast_contracts fc WHERE fc.market_id=fm.id AND fc.active=1)"
             ).fetchone()[0]
 
             result["active_contracts"] = c.execute(
@@ -83,6 +119,8 @@ def get_forecast_health() -> dict:
             if row:
                 try:
                     last_ts = datetime.fromisoformat(row[0])
+                    if not last_ts.tzinfo:
+                        last_ts = last_ts.replace(tzinfo=timezone.utc)
                     lag = (datetime.now(timezone.utc) - last_ts).total_seconds() / 60.0
                     result["quote_lag_minutes"] = round(lag, 1)
                     result["last_discovery_at"] = row[0]
@@ -255,14 +293,33 @@ def get_active_markets_summary() -> list[dict]:
 
 # ── Readiness status ───────────────────────────────────────────────────────────
 
+# Readiness state machine constants
+LANE_NOT_STARTED = "LANE_NOT_STARTED"
+BROKER_DISCONNECTED = "BROKER_DISCONNECTED"
+NO_UNDERLIERS = "NO_UNDERLIERS"
+UNDERLIERS_ONLY = "UNDERLIERS_ONLY"
+NO_QUOTES = "NO_QUOTES"
+QUOTES_NO_BARS = "QUOTES_NO_BARS"
+OPERATIONAL = "OPERATIONAL"
+
 
 def get_forecast_readiness() -> dict:
     """
-    Compute lane readiness for the dashboard READINESS panel.
+    Compute lane readiness using a state machine.
+
+    States (in order of severity):
+      LANE_NOT_STARTED    — no ForecastRunner events in last 2h
+      BROKER_DISCONNECTED — lane started but no recent activity
+      NO_UNDERLIERS       — lane running but 0 markets in DB
+      UNDERLIERS_ONLY     — IND underliers visible but 0 OPT contracts (enrollment pending)
+      NO_QUOTES           — contracts exist but no fresh quotes
+      QUOTES_NO_BARS      — quotes flowing but bars not built yet
+      OPERATIONAL         — fully functional
 
     Returns:
-        {status: "READY"|"BLOCKED"|"ACTION_NEEDED",
-         checks: [{name, status, detail}]}
+        {lane_state: str, status: "READY"|"BLOCKED"|"ACTION_NEEDED",
+         checks: [{name, status, detail}],
+         underliers_visible: int, contracts_unavailable_count: int}
     """
     health = get_forecast_health()
     checks = []
@@ -279,59 +336,101 @@ def get_forecast_readiness() -> dict:
                 blocked = True
         checks.append({"name": name, "status": status, "detail": detail})
 
-    _chk(
-        "DB tables",
-        health["tables_exist"],
-        "All 5 forecast tables present"
-        if health["tables_exist"]
-        else "Run forecast.db.init_forecast_db()",
-    )
-    _chk(
-        "Active markets",
-        health["active_markets"] > 0,
-        f"{health['active_markets']} economic markets cached",
-        needs_human=False,
-    )
-    _chk(
-        "Active contracts",
-        health["active_contracts"] > 0,
-        f"{health['active_contracts']} YES/NO contracts cached",
-    )
+    # Determine lane state via state machine
+    lane_state = LANE_NOT_STARTED
 
+    if not health["tables_exist"]:
+        _chk("DB tables", False, "Run forecast.db.init_forecast_db()")
+        lane_state = LANE_NOT_STARTED
+        return {
+            "lane_state": lane_state,
+            "status": "BLOCKED",
+            "checks": checks,
+            "underliers_visible": 0,
+            "contracts_unavailable_count": 0,
+        }
+
+    _chk("DB tables", True, "All 5 forecast tables present")
+
+    lane_started = health.get("lane_started", False)
+    if not lane_started:
+        _chk(
+            "Lane running",
+            False,
+            "No ForecastRunner events in last 2h — start the forecast lane",
+            needs_human=True,
+        )
+        lane_state = LANE_NOT_STARTED
+        return {
+            "lane_state": lane_state,
+            "status": "ACTION_NEEDED",
+            "checks": checks,
+            "underliers_visible": health.get("underliers_visible", 0),
+            "contracts_unavailable_count": health.get("contracts_unavailable_count", 0),
+        }
+
+    _chk("Lane running", True, "ForecastRunner active (events in last 2h)")
+    lane_state = BROKER_DISCONNECTED  # assume disconnected until quote activity proves otherwise
+
+    underliers = health.get("underliers_visible", 0)
+    contracts = health.get("active_contracts", 0)
+    unavailable = health.get("contracts_unavailable_count", 0)
     lag = health.get("quote_lag_minutes")
-    quote_fresh = lag is not None and lag < 5.0
-    _chk(
-        "Quote freshness",
-        quote_fresh,
-        f"Last quote {lag:.1f}m ago" if lag is not None else "No quotes yet",
-    )
+    bars = health.get("bars_5m_count", 0)
 
-    _chk(
-        "Bars built",
-        health["bars_5m_count"] > 0,
-        f"{health['bars_5m_count']} 5m bars in DB",
-    )
+    if underliers == 0:
+        _chk("Underliers visible", False, "No markets in DB — check IBKR discovery", needs_human=True)
+        lane_state = NO_UNDERLIERS
+    elif contracts == 0:
+        _chk(
+            "Underliers visible",
+            True,
+            f"{underliers} underlier(s) visible in DB",
+        )
+        _chk(
+            "OPT contracts",
+            False,
+            f"{underliers} underlier(s) visible but 0 OPT contracts — ForecastEx enrollment required",
+            needs_human=True,
+        )
+        if unavailable > 0:
+            _chk(
+                "Enrollment status",
+                False,
+                f"{unavailable} underlier(s): IND visible but OPT unavailable — check IBKR portal enrollment",
+                needs_human=True,
+            )
+        lane_state = UNDERLIERS_ONLY
+    else:
+        _chk("Underliers visible", True, f"{underliers} underlier(s) visible")
+        _chk("OPT contracts", True, f"{contracts} active YES/NO contracts")
 
-    # TWS connectivity check (best-effort)
-    twitch_connected = False
-    try:
-        from execution.forecastex_broker import get_forecastex_broker
-
-        twitch_connected = get_forecastex_broker().is_connected()
-    except Exception:
-        pass
-    _chk(
-        "TWS connected",
-        twitch_connected,
-        "ForecastEx broker connected to TWS"
-        if twitch_connected
-        else "TWS not connected — paper mode only",
-        needs_human=not twitch_connected,
-    )
+        quote_fresh = lag is not None and lag < 5.0
+        quote_exists = lag is not None
+        if not quote_exists:
+            _chk("Quote freshness", False, "No quotes yet — harvester initializing", needs_human=False)
+            lane_state = NO_QUOTES
+        elif not quote_fresh:
+            _chk("Quote freshness", False, f"Last quote {lag:.1f}m ago (threshold 5m)")
+            lane_state = NO_QUOTES
+        else:
+            _chk("Quote freshness", True, f"Last quote {lag:.1f}m ago")
+            if bars == 0:
+                _chk("Bars built", False, "No 5m bars yet — collecting quotes to build bars")
+                lane_state = QUOTES_NO_BARS
+            else:
+                _chk("Bars built", True, f"{bars} 5m bars in DB")
+                lane_state = OPERATIONAL
 
     overall = (
         "READY"
-        if not blocked and not action
+        if lane_state == OPERATIONAL
         else ("ACTION_NEEDED" if action else "BLOCKED")
     )
-    return {"status": overall, "checks": checks}
+    return {
+        "lane_state": lane_state,
+        "status": overall,
+        "checks": checks,
+        "underliers_visible": underliers,
+        "contracts_unavailable_count": unavailable,
+    }

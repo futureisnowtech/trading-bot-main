@@ -28,6 +28,8 @@ from config import (
     PAPER_TRADING,
     FLAT_POSITION_THRESHOLD_PCT,
     CRYPTO_SCAN_INTERVAL_SECONDS,
+    FUTURES_LANE_ACTIVE,
+    IBKR_PORT,
 )
 from logging_db.trade_logger import log_event
 
@@ -95,12 +97,13 @@ def _check_stagnant_positions() -> dict:
         now = datetime.now(timezone.utc)
         max_mins = _STAGNANT_HEALTH_HOURS * 60
 
-        # Build DB ground-truth lookup: symbol → {trailing_active, scale_33_done, entry, high}
+        # Build DB ground-truth lookup: symbol → {trailing_active, scale_33_done, scale_66_done, entry, high, ts_entry}
         _db_state: dict = {}
         try:
             with _conn() as c:
                 rows = c.execute(
-                    "SELECT symbol, entry, high_since_entry, trailing_active, scale_33_done "
+                    "SELECT symbol, entry, high_since_entry, trailing_active, "
+                    "scale_33_done, scale_66_done, ts_entry "
                     "FROM open_positions WHERE paper=?",
                     (1 if PAPER_TRADING else 0,),
                 ).fetchall()
@@ -110,9 +113,26 @@ def _check_stagnant_positions() -> dict:
                         "high": r["high_since_entry"] or r["entry"] or 0,
                         "trailing_active": bool(r["trailing_active"]),
                         "scale_33_done": bool(r["scale_33_done"]),
+                        "scale_66_done": bool(r.get("scale_66_done", 0)),
+                        "ts_entry": r.get("ts_entry", ""),
                     }
         except Exception:
             pass  # if DB unreadable, fall through with empty dict (no false-positive skips)
+
+        # Build partial-close ledger: symbols that have had any scale-out/partial activity
+        _partial_close_syms: set = set()
+        try:
+            with _conn() as c:
+                rows = c.execute(
+                    "SELECT DISTINCT symbol FROM trades "
+                    "WHERE paper=? AND (action IN ('SELL','CLOSE') OR notes LIKE '%scale_out%' OR notes LIKE '%partial%') "
+                    "AND broker LIKE '%coinbase%'",
+                    (1 if PAPER_TRADING else 0,),
+                ).fetchall()
+                for r in rows:
+                    _partial_close_syms.add(r["symbol"])
+        except Exception:
+            pass
 
         for strat, syms in positions.items():
             if not syms:
@@ -122,10 +142,12 @@ def _check_stagnant_positions() -> dict:
                     # Skip if position has already been closed (ghost in risk_manager memory)
                     if _db_state and sym not in _db_state:
                         continue
-                    # Skip managed positions — trailing stop or scale-out means the exit
-                    # stack is already handling the wind-down; not truly stagnant
+                    # Skip managed positions — trailing stop or any scale-out means the exit
+                    # stack is already handling the wind-down; not truly stagnant.
+                    # Also skip if there's any partial-close trade in the ledger for this symbol.
                     db = _db_state.get(sym, {})
-                    if db.get("trailing_active") or db.get("scale_33_done"):
+                    if (db.get("trailing_active") or db.get("scale_33_done")
+                            or db.get("scale_66_done") or sym in _partial_close_syms):
                         continue
 
                     ts = pos.get("ts_entry", "")
@@ -253,12 +275,11 @@ def _check_risk_manager() -> dict:
 
 
 def _check_ibkr_connection() -> dict:
-    """IBKR/TWS connectivity — only checked when FUTURES_ENABLED=true."""
+    """IBKR/TWS connectivity — only checked when FUTURES_LANE_ACTIVE=true.
+    When MES lane is dormant (FUTURES_LANE_ACTIVE=false), skip entirely — not a failure."""
+    if not FUTURES_LANE_ACTIVE:
+        return {"ok": True, "detail": "FUTURES_LANE_ACTIVE=false — MES lane dormant, skipped"}
     try:
-        from config import FUTURES_ENABLED
-
-        if not FUTURES_ENABLED:
-            return {"ok": True, "detail": "FUTURES_ENABLED=false — skipped"}
         from execution.ibkr_broker import get_ibkr_broker
 
         broker = get_ibkr_broker()
@@ -268,7 +289,7 @@ def _check_ibkr_connection() -> dict:
         if not broker.is_connected():
             return {
                 "ok": False,
-                "detail": "IBKR not connected — TWS unreachable on port 7497",
+                "detail": f"IBKR not connected — TWS unreachable on port {IBKR_PORT}",
             }
         bal = broker.get_account_balance()
         bal_str = f"${bal:.0f}" if bal > 0 else "unavailable"

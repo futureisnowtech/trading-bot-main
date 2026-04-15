@@ -160,19 +160,27 @@ def _classify_error(source: str, message: str) -> dict:
             }
 
     # ── IBKR / TWS connection ─────────────────────────────────────────────────
-    if s == "ibkr" or "ibkr" in m or "tws" in m or "7497" in m:
+    if s == "ibkr" or "ibkr" in m or "tws" in m or "7497" in m or "7496" in m:
+        try:
+            import sys as _sys, os as _os
+            _r = _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+            if _r not in _sys.path:
+                _sys.path.insert(0, _r)
+            from config import IBKR_PORT as _ibkr_port
+        except Exception:
+            _ibkr_port = 7497
         return {
             "category": "IBKR / TWS Disconnected",
             "fix_type": "Claude Code",
             "fix_prompt": (
                 "1. Confirm TWS is open and the API is enabled:\n"
                 "   TWS → Edit → Global Configuration → API → Settings\n"
-                "   ✓ Enable ActiveX and Socket Clients  ✓ Port: 7497  ✗ Read-Only API\n"
+                f"   ✓ Enable ActiveX and Socket Clients  ✓ Port: {_ibkr_port}  ✗ Read-Only API\n"
                 "2. Test connection:\n"
                 'python3 -c "from execution.ibkr_broker import get_ibkr_broker; '
                 "b=get_ibkr_broker(); print('connected:', b.connect())\"\n"
                 "3. If TWS shows 'Waiting for connection': click Trust on the API popup in TWS.\n"
-                "4. Check FUTURES_ENABLED=true is in .env."
+                "4. Check FUTURES_LANE_ACTIVE=true is in .env (MES lane is dormant by default)."
             ),
         }
 
@@ -245,7 +253,7 @@ def _classify_error(source: str, message: str) -> dict:
                 'python3 -c "from execution.binance_broker import BinanceBroker; '
                 "b=BinanceBroker(); print('paper:', b.paper)\"\n"
                 "Paper mode needs no API keys. Live mode needs BINANCE_API_KEY + SECRET in .env.\n"
-                "For IBKR/MES: TWS must be running on port 7497 with API enabled.\n"
+                "For IBKR/MES: TWS must be running with API enabled (FUTURES_LANE_ACTIVE=true required).\n"
                 "Check perps_engine.py for the specific failing method + traceback in logs/bot.log."
             ),
         }
@@ -304,11 +312,31 @@ def get_health_check_failures() -> list:
     return result
 
 
+def _is_archived_lane_noise(source: str, message: str) -> bool:
+    """Return True if this error is from the dormant MES/IBKR lane when it is inactive."""
+    try:
+        import sys, os
+        _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        if _ROOT not in sys.path:
+            sys.path.insert(0, _ROOT)
+        from config import FUTURES_LANE_ACTIVE
+        if FUTURES_LANE_ACTIVE:
+            return False
+    except Exception:
+        return False
+    src_lower = source.lower()
+    msg_lower = message.lower()
+    # Filter MES/IBKR noise only when lane is dormant
+    archived_markers = ("ibkrbroker", "ibkr", "mes_", "mes ", "twsbroke")
+    return any(m in src_lower or m in msg_lower for m in archived_markers)
+
+
 def get_recent_errors_detail(hours: int = 1, limit: int = 15) -> list:
     """
     Fetch recent ERROR events from non-health_check sources, deduplicated by fingerprint.
     health_check failures are handled separately by get_health_check_failures() so they
     always reflect live state rather than 1-hour of potentially stale DB records.
+    Filters out archived lane (MES/IBKR) noise when FUTURES_LANE_ACTIVE=false.
     Returns list of dicts sorted by count desc:
       {source, count, sample_msg, ts_latest, category, fix_type, fix_prompt}
     """
@@ -324,6 +352,9 @@ def get_recent_errors_detail(hours: int = 1, limit: int = 15) -> list:
         src = row.get("source", "unknown")
         msg = row.get("message", "")
         ts = row.get("ts", "")
+        # Skip noise from dormant lanes
+        if _is_archived_lane_noise(src, msg):
+            continue
         key = f"{src}::{_fingerprint_msg(msg)}"
         if key not in groups:
             groups[key] = {
@@ -340,6 +371,26 @@ def get_recent_errors_detail(hours: int = 1, limit: int = 15) -> list:
         result.append({**g, **classification})
 
     return result
+
+
+def get_runtime_mode() -> str:
+    """
+    Derive runtime mode ('PAPER', 'LIVE', or 'UNKNOWN') from the most recent
+    startup system_event rather than config assumption.
+    """
+    row = _q1("""
+        SELECT message FROM system_events
+        WHERE source='main' AND message LIKE 'Bot started%'
+        ORDER BY rowid DESC LIMIT 1
+    """)
+    if not row:
+        return "UNKNOWN"
+    msg = (row.get("message") or "").lower()
+    if "paper" in msg:
+        return "PAPER"
+    if "live" in msg:
+        return "LIVE"
+    return "UNKNOWN"
 
 
 def get_restart_count_24h() -> int:

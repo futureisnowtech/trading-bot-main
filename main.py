@@ -8,7 +8,7 @@ Usage:
   python main.py --equity-only
 """
 
-import sys, os, argparse, time, traceback, logging
+import sys, os, argparse, time, traceback, logging, threading
 from datetime import datetime
 import pytz
 
@@ -79,6 +79,7 @@ def main():
         MAX_RISK_PER_TRADE_PCT,
         MAX_DAILY_LOSS_PCT,
         MAX_DEPLOYED_PCT,
+        FORECAST_LANE_ACTIVE,
     )
 
     tz = pytz.timezone(MARKET_TIMEZONE)
@@ -127,8 +128,43 @@ def main():
     )
 
     log_event(
-        "INFO", "main", f"System started — {'paper' if PAPER_TRADING else 'live'} v10"
+        "INFO", "main",
+        f"Bot started — {'paper' if PAPER_TRADING else 'live'} mode | v15.1"
     )
+
+    # ── Forecast lane (optional daemon thread) ────────────────────────────────
+    if FORECAST_LANE_ACTIVE:
+        def _forecast_daemon():
+            """Run forecast lane in its own schedule instance (thread-safe)."""
+            import schedule as _s
+            from forecast.db import init_forecast_db
+            from forecast.runner import (
+                run_discovery_cycle,
+                run_strategy_cycle,
+                run_position_monitor,
+                _get_broker,
+                _get_harvester,
+            )
+            try:
+                init_forecast_db()
+                broker = _get_broker()
+                broker.connect()
+                harvester = _get_harvester()
+                harvester.start()
+                run_discovery_cycle()
+                _s.every(30).minutes.do(run_discovery_cycle)
+                _s.every(5).minutes.do(lambda: run_strategy_cycle(100.0))
+                _s.every(30).seconds.do(run_position_monitor)
+                log_event("INFO", "ForecastRunner", "Forecast lane started — FORECAST_LANE_ACTIVE=true")
+                while True:
+                    _s.run_pending()
+                    time.sleep(1)
+            except Exception as _fe:
+                log_event("ERROR", "ForecastRunner", f"Forecast lane crashed: {_fe}")
+
+        _ft = threading.Thread(target=_forecast_daemon, daemon=True, name="ForecastLane")
+        _ft.start()
+        print("   ForecastEx lane started (FORECAST_LANE_ACTIVE=true)")
 
     print("=" * 60)
     print("  Scheduler starting. System is live.")

@@ -2026,9 +2026,9 @@ def _mes_scan_inner():
     global _mes_or_high, _mes_or_low, _mes_or_locked, _mes_or_date
     global _mes_daily_pnl, _mes_daily_date
 
-    from config import FUTURES_ENABLED, FUTURES_NUM_CONTRACTS
+    from config import FUTURES_LANE_ACTIVE, FUTURES_NUM_CONTRACTS
 
-    if not FUTURES_ENABLED:
+    if not FUTURES_LANE_ACTIVE:
         return
 
     try:
@@ -2427,9 +2427,9 @@ def run_forever():
 
     schedule.every().day.at("08:00").do(_nightly_audit_job)  # 08:00 UTC ≈ 03:00 ET
 
-    from config import FUTURES_ENABLED
+    from config import FUTURES_LANE_ACTIVE
 
-    if FUTURES_ENABLED:
+    if FUTURES_LANE_ACTIVE:
         schedule.every(2).minutes.do(mes_futures_scan)
         logger.info("[v10] MES futures scanner wired (every 2 min)")
 

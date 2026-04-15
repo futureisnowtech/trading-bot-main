@@ -198,9 +198,9 @@ def get_ibkr_balance() -> dict:
         paper       bool    — always True for paper TWS account
     """
     try:
-        from config import FUTURES_ENABLED, ACCOUNT_SIZE
+        from config import FUTURES_LANE_ACTIVE, ACCOUNT_SIZE
 
-        futures_enabled = bool(FUTURES_ENABLED)
+        futures_enabled = bool(FUTURES_LANE_ACTIVE)
         base = float(ACCOUNT_SIZE)
     except Exception:
         futures_enabled, base = False, 5000.0
@@ -208,9 +208,10 @@ def get_ibkr_balance() -> dict:
     if not futures_enabled:
         return {
             "balance": 0.0,
-            "source": "disabled",
+            "source": "archived",
             "connected": False,
             "paper": True,
+            "note": "FUTURES_LANE_ACTIVE=false — MES lane dormant",
         }
 
     try:

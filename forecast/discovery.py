@@ -164,7 +164,34 @@ def run_discovery(
     ranked = _rank_contracts(raw_contracts)
     result["skipped_expired"] = result["found"] - len(ranked)
 
+    # Also process stub-only results (IND visible, OPT unavailable) — they skip ranking
+    stubs = [c for c in raw_contracts if c.get("stub_only")]
+    for stub in stubs:
+        sym = stub.get("underlier", "")
+        name = stub.get("long_name", "") or sym
+        try:
+            upsert_market(
+                market_symbol=sym,
+                market_name=name,
+                exchange="FORECASTX",
+                category_path=stub.get("category", ""),
+                underlier_symbol=sym,
+                underlier_conid=stub.get("und_conid"),
+                db_path=db_path,
+            )
+            from logging_db.trade_logger import log_event as _log_event
+            _log_event(
+                "INFO",
+                "ForecastDiscovery",
+                f"Underlier {sym} visible but no OPT contracts — enrollment may be pending",
+            )
+        except Exception as e:
+            logger.warning(f"upsert_market (stub) failed for {sym}: {e}")
+
     for c in ranked:
+        # Skip stubs that ended up in ranked (shouldn't happen, but guard)
+        if c.get("stub_only"):
+            continue
         name = c.get("long_name", "") or c.get("underlier", "")
         symbol = c.get("underlier", "") or ""
 

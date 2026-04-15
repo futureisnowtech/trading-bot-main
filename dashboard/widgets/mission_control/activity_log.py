@@ -11,7 +11,37 @@ import re
 import streamlit as st
 
 from data.scanner_data import get_smart_log_summary
+from db import _q1
 from formatters import _asset_badge
+
+
+def _bot_is_alive() -> bool:
+    """Return True if recent DB activity suggests the bot is running, even if log parsing fails."""
+    try:
+        # Heartbeat in last 10 minutes
+        r = _q1(
+            "SELECT COUNT(*) AS n FROM system_events "
+            "WHERE source='heartbeat' AND ts >= datetime('now','-10 minutes')"
+        )
+        if r.get("n", 0) > 0:
+            return True
+        # Any system_events in last 30 minutes
+        r = _q1(
+            "SELECT COUNT(*) AS n FROM system_events "
+            "WHERE ts >= datetime('now','-30 minutes')"
+        )
+        if r.get("n", 0) > 0:
+            return True
+        # Any trades in last 24h
+        r = _q1(
+            "SELECT COUNT(*) AS n FROM trades "
+            "WHERE ts >= datetime('now','-1 day')"
+        )
+        if r.get("n", 0) > 0:
+            return True
+    except Exception:
+        pass
+    return False
 
 
 # ── plain-English translators ─────────────────────────────────────────────────
@@ -142,6 +172,14 @@ def render_smart_logs():
                 f"</div>"
             )
         st.markdown(html, unsafe_allow_html=True)
+    elif _bot_is_alive():
+        # Bot is running (heartbeat/events in DB) but log parser found nothing displayable
+        st.markdown(
+            '<p style="color:#475569; font-size:0.82em; margin-top:8px;">'
+            "System alive — no recent log activity to display"
+            "</p>",
+            unsafe_allow_html=True,
+        )
     else:
         st.markdown(
             '<p style="color:#475569; font-size:0.82em; margin-top:8px;">'

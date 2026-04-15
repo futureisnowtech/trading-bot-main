@@ -18,7 +18,7 @@ Fully autonomous AI trading system: scans Kraken Futures + Binance USDM + Hyperl
 - Paper account: $5,000 (`ACCOUNT_SIZE=5000` — config default, no .env override)
 - Wants zero day-to-day intervention. Prefers simple explanations, hates fluff.
 
-## Current Version: v15.0 (2026-04-15)
+## Current Version: v15.1 (2026-04-15)
 
 **Active branch:** `feature/v10-rebuild` | **Clean paper trading started:** 2026-04-02
 
@@ -99,6 +99,15 @@ Fully autonomous AI trading system: scans Kraken Futures + Binance USDM + Hyperl
 - **ForecastEx log-odds math:** x_t = log(p/(1-p)); q_hat = logistic(x_t + α·v_1h + β·a_30m - γ·z_t - δ·σ_t - ε·H_t - ζ·Ω_t + η·bias). Defaults: α=0.40, β=0.20, γ=0.30, δ=0.25, ε=0.15, ζ=0.50, η=0.10.
 - **ForecastEx MES archival:** MES lane is dormant — code preserved. Dashboard tab renamed "ARCHIVED FUTURES (MES)". Reactivate: set `FUTURES_LANE_ACTIVE=true`.
 - **sys.path discipline:** all forecast modules use `if _ROOT not in sys.path: sys.path.insert(0, _ROOT)` (conditional). Test files use `if _ROOT not in sys.path: sys.path.append(_ROOT)` to avoid displacing DASHBOARD_ROOT at collection time.
+- **FUTURES_LANE_ACTIVE (v15.1):** gates MES/IBKR lane startup in `scheduler/v10_runner.py` and `monitoring/health_check.py`. Default `false` = archived/dormant. When false, IBKR health check skipped (not a failure), balance.py returns `source='archived'` without connecting. Set `FUTURES_LANE_ACTIVE=true` in `.env` to reactivate MES.
+- **FORECAST_LANE_ACTIVE (v15.1):** gates ForecastEx lane startup from `main.py`. Default `false` = standalone only (run `forecast/runner.py` manually or set env var). When true, main.py starts a daemon thread with its own `schedule` instance — no conflict with v10_runner's schedule loop.
+- **Mission Control error aggregation (v15.1):** `get_recent_errors_detail()` in `dashboard/data/health.py` filters out archived lane noise (IBKR/MES errors when FUTURES_LANE_ACTIVE=false) via `_is_archived_lane_noise()`. Error headline shows deduped group count (fingerprint-based), not raw row count.
+- **Activity feed truth (v15.1):** `_bot_is_alive()` in `activity_log.py` checks DB first (heartbeat/system_events/trades) before showing "start the bot" message. Shows "System alive — no recent log activity" when DB evidence exists but log parser found nothing.
+- **Runtime mode (v15.1):** `get_runtime_mode()` in `dashboard/data/health.py` derives 'PAPER'/'LIVE'/'UNKNOWN' from the most recent "Bot started" system_event, not from config assumption.
+- **Forecast readiness states (v15.1):** 7-state machine in `get_forecast_readiness()`: LANE_NOT_STARTED / BROKER_DISCONNECTED / NO_UNDERLIERS / UNDERLIERS_ONLY / NO_QUOTES / QUOTES_NO_BARS / OPERATIONAL. No singleton broker instantiation — uses DB-only truth.
+- **Discovery stubs (v15.1):** when IND underlier is visible but OPT contracts hang/fail, `forecastex_broker.py._discover_async()` returns a `stub_only=True` dict. `forecast/discovery.py` upserts the underlier to `forecast_markets` with `active=1` but creates no contract rows. Dashboard shows enrollment state via `contracts_unavailable_count`.
+- **Dead-money false positive fix (v15.1):** stagnant check in `health_check.py` also exempts positions with `scale_66_done=1` or any partial-close trade in the `trades` table (`action IN ('SELL','CLOSE') OR notes LIKE '%scale_out%' OR notes LIKE '%partial%' AND broker LIKE '%coinbase%'`).
+- **IBKR_PORT in config (v15.1):** `config.py` now exports `IBKR_PORT` (default 7497) and `IBKR_HOST` (default 127.0.0.1). Health check uses `config.IBKR_PORT` dynamically in error messages — no more hardcoded 7497 strings in monitored files.
 
 ### MES Futures — Critical Contract Facts (v13.9)
 
@@ -254,6 +263,7 @@ Set `TV_WEBHOOK_SECRET` in .env. Symbol mapping: BTCUSD → BTCUSDT.
 | v14.0 | 2026-04-14 | Self-improving architecture: integrity tiers, candidate replay backtester, promotion engine, futures config sub-package, dashboard truth surfaces, recurring self-maintenance loops, 52 proof tests (0 failures) |
 | v14.1 | 2026-04-14 | Coinbase US crypto lane migration: coinbase_broker.py (CDP JWT/ES256, 4 CFTC products BIP/ETP/SLP/XPP), fee model → 0.03% taker, fail-closed CoinbaseSymbolError, executable launch validator, 42 new proof tests, 158 total (0 failures) |
 | v15.0 | 2026-04-15 | ForecastEx event-contract lane: forecastex_broker.py (IBKR clientId=3, economic markets only, YES=Right C/NO=Right P), 5 new DB tables, log-odds probability engine, 3 strategy families (continuation/mean_reversion/late_repricing), 10-check economics gate, fractional Kelly sizing, dashboard FORECAST TRADING tab, MES archived, 37 new proof tests, 195 total (0 failures) |
+| v15.1 | 2026-04-15 | Lane gating hardened: FUTURES_LANE_ACTIVE/FORECAST_LANE_ACTIVE flags in config.py; IBKR health check skips when dormant; balance.py returns archived state; forecast lane wired into main.py as daemon thread; forecast readiness 7-state machine; discovery stubs for OPT-unavailable underliers; Mission Control deduped error types + archived lane noise filter; activity feed DB-first truth; dead-money exempt on partial-close; IBKR_PORT in config; 10 new proof tests, 205 total (0 failures) |
 
 ## GitHub
 - Repository: `futureisnowtech/trading-bot-main` (private)

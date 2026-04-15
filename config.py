@@ -220,6 +220,16 @@ CRYPTO_ENABLED: bool = os.getenv("CRYPTO_ENABLED", "true").lower() == "true"
 FUTURES_ENABLED: bool = os.getenv("FUTURES_ENABLED", "false").lower() == "true"
 PERP_ENABLED: bool = os.getenv("PERP_ENABLED", "false").lower() == "true"
 
+# Lane activation flags (v15.1)
+# FUTURES_LANE_ACTIVE — gates MES/IBKR lane startup. Default false = archived/dormant.
+# FORECAST_LANE_ACTIVE — gates ForecastEx lane startup from main.py. Default false = standalone only.
+FUTURES_LANE_ACTIVE: bool = os.getenv("FUTURES_LANE_ACTIVE", "false").lower() == "true"
+FORECAST_LANE_ACTIVE: bool = os.getenv("FORECAST_LANE_ACTIVE", "false").lower() == "true"
+
+# ── IBKR connection (shared across MES and ForecastEx lanes) ─────────────────
+IBKR_HOST: str = os.getenv("IBKR_HOST", "127.0.0.1")
+IBKR_PORT: int = int(os.getenv("IBKR_PORT", "7497"))  # 7497=paper, 7496=live
+
 # ── Binance USD-M perpetual futures (replaced Bybit, Sprint 1 overhaul) ──────
 BINANCE_API_KEY: str = os.getenv("BINANCE_API_KEY", "")
 BINANCE_API_SECRET: str = os.getenv("BINANCE_API_SECRET", "")

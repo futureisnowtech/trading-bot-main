@@ -312,14 +312,30 @@ class ForecastExBroker:
                 "WARN", "ForecastExBroker", f"OPT discovery error for {underlier}: {e}"
             )
             # Account may not have ForecastEx event trading enabled.
-            # Log the IND underlier as a market stub (no tradeable contracts yet).
+            # Return a stub so callers can persist the underlier visibility to DB.
             log_event(
                 "INFO",
                 "ForecastExBroker",
                 f"IND {underlier} (conId={ind_conid}) found but OPT layer unavailable "
                 f"— account may need ForecastEx enrollment: {e}",
             )
-            return []
+            return [
+                {
+                    "underlier": underlier,
+                    "und_conid": ind_conid,
+                    "long_name": long_name,
+                    "category": category,
+                    "stub_only": True,
+                    "opt_unavailable": True,
+                    "local_symbol": underlier,
+                    "conid": None,
+                    "right": None,
+                    "strike": None,
+                    "last_trade_at": None,
+                    "exchange": "FORECASTX",
+                    "currency": "USD",
+                }
+            ]
 
         results = []
         now_str = datetime.now(timezone.utc).date().isoformat()
@@ -391,7 +407,9 @@ class ForecastExBroker:
                 and category_filter.lower() not in c.get("category", "").lower()
             ):
                 continue
-            c["side"] = "YES" if c["right"] == "C" else "NO"
+            # Stub-only entries don't have a right/side — pass through without labelling
+            if not c.get("stub_only"):
+                c["side"] = "YES" if c["right"] == "C" else "NO"
             results.append(c)
 
         log_event(

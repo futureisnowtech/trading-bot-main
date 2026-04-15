@@ -28,7 +28,7 @@ A fully autonomous AI-powered trading system that:
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
 
-## Current Version: v15.0 (2026-04-15)
+## Current Version: v15.1 (2026-04-15)
 
 **Active branch:** `feature/v10-rebuild`
 **Clean paper trading started:** 2026-04-02
@@ -108,6 +108,11 @@ A fully autonomous AI-powered trading system that:
 - **ForecastEx risk caps (hardcoded, no override):** max deployed 35%, per-event 10%, max concurrent 2, fractional Kelly cap 0.10.
 - **ForecastEx economic markets only:** CPI, NFP, FOMC, Unemployment, PCE, GDP, PPI. Sports/politics/entertainment rejected at discovery.
 - **ForecastEx MES archival:** MES lane is dormant — code preserved. Dashboard tab "ARCHIVED FUTURES (MES)". Reactivate: `FUTURES_LANE_ACTIVE=true`.
+- **FUTURES_LANE_ACTIVE (v15.1):** gates MES/IBKR activation. Default false. When false: health check skips IBKR, balance returns archived state.
+- **FORECAST_LANE_ACTIVE (v15.1):** gates ForecastEx lane startup from main.py. Default false = standalone. When true, main.py spawns daemon thread with its own schedule instance.
+- **Forecast readiness states (v15.1):** LANE_NOT_STARTED / BROKER_DISCONNECTED / NO_UNDERLIERS / UNDERLIERS_ONLY / NO_QUOTES / QUOTES_NO_BARS / OPERATIONAL.
+- **Discovery stubs (v15.1):** IND visible but OPT unavailable → stub persisted to forecast_markets, no contracts created, dashboard shows enrollment state.
+- **IBKR_PORT in config (v15.1):** `config.IBKR_PORT` and `config.IBKR_HOST` exported. No hardcoded 7497 in monitored files.
 - **ForecastEx IBKR symbol truth (confirmed 2026-04-15):** FORECASTX uses SecType=IND with short symbols: CPI=573031126, CPIY=712856682, CPIC=727520252, DISSN=806285268, DISSA=804725704. FRED codes (CPIAUCSL/UNRATE/PAYEMS) do NOT exist. Discovery: two-pass IND→OPT.
 - **ForecastEx live blocker:** OPT event contracts require live funded IBKR account with ForecastEx enrollment. Paper account (DUP590699) sees IND underliers but OPT layer hangs. IBKR_PORT=7496 (corrected from 7497 in .env).
 
@@ -535,6 +540,7 @@ Motivation 1-5: "Strive for greatness." / "I like criticism. It makes you strong
 | v14.0 | 2026-04-14 | Self-improving architecture: integrity tiers, candidate replay backtester, promotion engine, futures config sub-package, dashboard truth surfaces, recurring self-maintenance loops |
 | v14.1 | 2026-04-14 | Coinbase US crypto lane migration: coinbase_broker.py (CDP JWT/ES256, 4 CFTC products), fee model → 0.03% taker, fail-closed CoinbaseSymbolError, 158 proof tests |
 | v15.0 | 2026-04-15 | ForecastEx event-contract lane: forecastex_broker.py, 5 new DB tables, log-odds engine, 3 strategy families, 10-check economics gate, fractional Kelly, FORECAST TRADING dashboard tab, MES archived, 195 proof tests |
+| v15.1 | 2026-04-15 | Lane gating: FUTURES_LANE_ACTIVE/FORECAST_LANE_ACTIVE flags; forecast readiness state machine; discovery stubs; Mission Control dedup; activity feed DB-first; dead-money partial-close exempt; IBKR_PORT in config; 205 proof tests |
 
 ## GitHub
 - Repository: `futureisnowtech/trading-bot-main` (private)

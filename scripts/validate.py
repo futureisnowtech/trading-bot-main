@@ -480,6 +480,7 @@ try:
     import config as _cfg
 
     _mes_active = getattr(_cfg, "FUTURES_LANE_ACTIVE", False)
+    _fc_active = getattr(_cfg, "FORECAST_LANE_ACTIVE", False)
     if _mes_active:
         _fx(
             "MES archived",
@@ -490,10 +491,62 @@ try:
         _fx(
             "MES archived",
             "READY",
-            "FUTURES_LANE_ACTIVE is False/absent — MES is dormant",
+            "FUTURES_LANE_ACTIVE is False — MES is dormant (expected)",
         )
+    _fx(
+        "Forecast lane flag",
+        "READY",
+        f"FORECAST_LANE_ACTIVE={'True' if _fc_active else 'False'} — {'active, wired into main.py' if _fc_active else 'standalone/disabled (start manually or set FORECAST_LANE_ACTIVE=true)'}",
+    )
 except Exception as _e:
     _fx("MES archived", "BLOCKED", f"Config check error: {_e}")
+
+# 9b. Forecast lane DB activity
+try:
+    if os.path.exists(_fx_db):
+        _c = _sq3.connect(_fx_db)
+        try:
+            _lane_events = 0
+            _markets_count = 0
+            _stub_count = 0
+            try:
+                _lane_events = _c.execute(
+                    "SELECT COUNT(*) FROM system_events "
+                    "WHERE source='ForecastRunner' AND ts >= datetime('now','-2 hours')"
+                ).fetchone()[0]
+            except Exception:
+                pass
+            try:
+                _markets_count = _c.execute(
+                    "SELECT COUNT(*) FROM forecast_markets WHERE active=1"
+                ).fetchone()[0]
+                _stub_count = _c.execute(
+                    "SELECT COUNT(*) FROM forecast_markets fm WHERE fm.active=1 "
+                    "AND NOT EXISTS (SELECT 1 FROM forecast_contracts fc "
+                    "WHERE fc.market_id=fm.id AND fc.active=1)"
+                ).fetchone()[0]
+            except Exception:
+                pass
+            _c.close()
+            if _lane_events > 0:
+                _fx("Forecast lane active", "READY", f"ForecastRunner: {_lane_events} events in last 2h")
+            else:
+                _fx("Forecast lane active", "ACTION NEEDED", "No ForecastRunner events in last 2h — lane not running")
+            if _stub_count > 0:
+                _fx(
+                    "Forecast enrollment",
+                    "ACTION NEEDED",
+                    f"{_stub_count} underlier(s) visible but no OPT contracts — check ForecastEx portal enrollment",
+                )
+            elif _markets_count > 0:
+                _fx("Forecast enrollment", "READY", f"{_markets_count} market(s) with active contracts")
+        except Exception as _e:
+            _c.close()
+            _fx("Forecast lane active", "BLOCKED", f"DB check error: {_e}")
+    else:
+        _fx("Forecast lane active", "BLOCKED", "DB not found")
+except Exception as _e:
+    _fx("Forecast lane active", "BLOCKED", f"Check error: {_e}")
 
 # 10. Tiny live test trades allowed (all READY, TWS connected, bankroll sufficient)
 try:

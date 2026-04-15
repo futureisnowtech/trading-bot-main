@@ -224,7 +224,9 @@ PERP_ENABLED: bool = os.getenv("PERP_ENABLED", "false").lower() == "true"
 # FUTURES_LANE_ACTIVE — gates MES/IBKR lane startup. Default false = archived/dormant.
 # FORECAST_LANE_ACTIVE — gates ForecastEx lane startup from main.py. Default false = standalone only.
 FUTURES_LANE_ACTIVE: bool = os.getenv("FUTURES_LANE_ACTIVE", "false").lower() == "true"
-FORECAST_LANE_ACTIVE: bool = os.getenv("FORECAST_LANE_ACTIVE", "false").lower() == "true"
+FORECAST_LANE_ACTIVE: bool = (
+    os.getenv("FORECAST_LANE_ACTIVE", "false").lower() == "true"
+)
 
 # ── IBKR connection (shared across MES and ForecastEx lanes) ─────────────────
 IBKR_HOST: str = os.getenv("IBKR_HOST", "127.0.0.1")

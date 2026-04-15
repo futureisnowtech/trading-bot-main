@@ -3,7 +3,7 @@
 # Always starts in PAPER mode so it's safe to auto-restart.
 # For live trading, start main.py manually in a terminal.
 
-PROJ="/Users/joshmacbookair2020/Desktop/algo_trading_final"
+PROJ="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PYTHON="/Library/Frameworks/Python.framework/Versions/3.14/bin/python3"
 LOG_DIR="$PROJ/logs/service"
 

@@ -11,7 +11,7 @@
 #   Ctrl+A, d  →  detach (session stays alive, reconnect anytime)
 
 SESSION="trading"
-DIR="$HOME/Desktop/algo_trading_final"
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DB="$DIR/logs/trades.db"
 
 # If session already exists, just attach to it

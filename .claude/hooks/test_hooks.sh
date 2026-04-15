@@ -4,7 +4,7 @@
 # Tests each hook in isolation without triggering live-Claude hooks.
 # Run manually: bash .claude/hooks/test_hooks.sh
 # ─────────────────────────────────────────────────────────────────────────────
-REPO="/Users/joshmacbookair2020/Desktop/algo_trading_final"
+REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 PASS=0; FAIL=0
 
 check() {
@@ -66,6 +66,10 @@ check "BLOCK: kill -9 main.py" 2 $?
 python3 -c "import json,subprocess,sys; p=subprocess.run(['bash','$REPO/.claude/hooks/pre_bash_blocker.sh'],input=json.dumps({'tool_input':{'command':'sqlite3 price_archive.db DROP TABLE candles'}}),capture_output=True,text=True); sys.exit(p.returncode)" 2>/dev/null
 check "BLOCK: sqlite3 DROP on price_archive.db" 2 $?
 
+# BLOCK 1b: implicit live-start via stdin pipe
+python3 -c "import json,subprocess,sys; p=subprocess.run(['bash','$REPO/.claude/hooks/pre_bash_blocker.sh'],input=json.dumps({'tool_input':{'command':'echo \"I UNDERSTAND\" | python3 main.py'}}),capture_output=True,text=True); sys.exit(p.returncode)" 2>/dev/null
+check "BLOCK: implicit live-start via stdin pipe" 2 $?
+
 # Safe commands — must exit 0
 echo "{\"tool_input\":{\"command\":\"python3 main.py --mode paper\"}}" | bash "$REPO/.claude/hooks/pre_bash_blocker.sh" 2>/dev/null
 check "ALLOW: --mode paper" 0 $?
@@ -83,25 +87,25 @@ check "ALLOW: sqlite3 SELECT on trades.db" 0 $?
 echo ""
 echo "── pre_edit_protector.sh ───────────────────────────────────────────"
 
-echo "{\"tool_input\":{\"file_path\":\"/Users/joshmacbookair2020/Desktop/algo_trading_final/.env\"}}" | bash "$REPO/.claude/hooks/pre_edit_protector.sh" 2>/dev/null
+echo "{\"tool_input\":{\"file_path\":\"$REPO/.env\"}}" | bash "$REPO/.claude/hooks/pre_edit_protector.sh" 2>/dev/null
 check "BLOCK: .env edit" 2 $?
 
-echo "{\"tool_input\":{\"file_path\":\"/Users/joshmacbookair2020/Desktop/algo_trading_final/logs/trades.db\"}}" | bash "$REPO/.claude/hooks/pre_edit_protector.sh" 2>/dev/null
+echo "{\"tool_input\":{\"file_path\":\"$REPO/logs/trades.db\"}}" | bash "$REPO/.claude/hooks/pre_edit_protector.sh" 2>/dev/null
 check "BLOCK: trades.db edit" 2 $?
 
-echo "{\"tool_input\":{\"file_path\":\"/Users/joshmacbookair2020/Desktop/algo_trading_final/.git/config\"}}" | bash "$REPO/.claude/hooks/pre_edit_protector.sh" 2>/dev/null
+echo "{\"tool_input\":{\"file_path\":\"$REPO/.git/config\"}}" | bash "$REPO/.claude/hooks/pre_edit_protector.sh" 2>/dev/null
 check "BLOCK: .git/config edit" 2 $?
 
-echo "{\"tool_input\":{\"file_path\":\"/Users/joshmacbookair2020/Desktop/algo_trading_final/scripts/com.algotrading.king.plist\"}}" | bash "$REPO/.claude/hooks/pre_edit_protector.sh" 2>/dev/null
+echo "{\"tool_input\":{\"file_path\":\"$REPO/scripts/com.algotrading.king.plist\"}}" | bash "$REPO/.claude/hooks/pre_edit_protector.sh" 2>/dev/null
 check "BLOCK: plist edit" 2 $?
 
-echo "{\"tool_input\":{\"file_path\":\"/Users/joshmacbookair2020/Desktop/algo_trading_final/logs/bot.log\"}}" | bash "$REPO/.claude/hooks/pre_edit_protector.sh" 2>/dev/null
+echo "{\"tool_input\":{\"file_path\":\"$REPO/logs/bot.log\"}}" | bash "$REPO/.claude/hooks/pre_edit_protector.sh" 2>/dev/null
 check "BLOCK: logs/bot.log edit" 2 $?
 
-echo "{\"tool_input\":{\"file_path\":\"/Users/joshmacbookair2020/Desktop/algo_trading_final/signal_engine.py\"}}" | bash "$REPO/.claude/hooks/pre_edit_protector.sh" 2>/dev/null
+echo "{\"tool_input\":{\"file_path\":\"$REPO/signal_engine.py\"}}" | bash "$REPO/.claude/hooks/pre_edit_protector.sh" 2>/dev/null
 check "ALLOW: signal_engine.py edit" 0 $?
 
-echo "{\"tool_input\":{\"file_path\":\"/Users/joshmacbookair2020/Desktop/algo_trading_final/tests/test_indicators.py\"}}" | bash "$REPO/.claude/hooks/pre_edit_protector.sh" 2>/dev/null
+echo "{\"tool_input\":{\"file_path\":\"$REPO/tests/test_indicators.py\"}}" | bash "$REPO/.claude/hooks/pre_edit_protector.sh" 2>/dev/null
 check "ALLOW: tests/test_indicators.py edit" 0 $?
 
 # ── post_cmd_logger.sh ────────────────────────────────────────────────────────

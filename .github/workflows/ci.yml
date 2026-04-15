@@ -49,10 +49,8 @@ jobs:
           BINANCE_API_SECRET=test_secret_ci
           BINANCE_TESTNET=true
           PERP_PAIRS=BTCUSDT,ETHUSDT
-          FUTURES_ENABLED=false
-          EQUITY_ENABLED=false
-          PERP_ENABLED=true
-          LANE3_ENABLED=false
+          FUTURES_LANE_ACTIVE=false
+          FORECAST_LANE_ACTIVE=false
           EOF
 
       - name: Lint with ruff (non-blocking)
@@ -80,3 +78,7 @@ jobs:
       - name: Validate config (non-blocking)
         run: |
           python scripts/validate.py || true
+
+      - name: Repo truth gate (strict)
+        run: |
+          python scripts/repo_truth_gate.py --strict

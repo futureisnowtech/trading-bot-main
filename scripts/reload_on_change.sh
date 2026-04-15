@@ -8,6 +8,8 @@
 #   3. LOCK WAIT — 6s pause for Python 3.14 importlib file lock release (prevents EDEADLK)
 
 INPUT=$(cat)
+_REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
+[ -z "$_REPO_ROOT" ] && _REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 # Extract file path from hook JSON payload
 FILE_PATH=$(echo "$INPUT" | python3 -c "
@@ -24,7 +26,7 @@ if [[ "$FILE_PATH" != *.py ]] || [[ "$FILE_PATH" != */algo_trading_final/* ]]; t
     exit 0
 fi
 
-DB_PATH="/Users/joshmacbookair2020/Desktop/algo_trading_final/logs/trades.db"
+DB_PATH="$_REPO_ROOT/logs/trades.db"
 LOG="/tmp/.algo_reload_log"
 SENTINEL="/tmp/.algo_reload_pending"
 PAPER=1  # 1 = paper trading
@@ -81,8 +83,8 @@ echo "$TRIGGER_ID" > "$SENTINEL"
     # ── RESTART ────────────────────────────────────────────────────────────────
     PYTHONDONTWRITEBYTECODE=1 TQDM_DISABLE=1 TOKENIZERS_PARALLELISM=false \
       nohup /Library/Frameworks/Python.framework/Versions/3.14/bin/python3 \
-      /Users/joshmacbookair2020/Desktop/algo_trading_final/main.py --mode paper \
-      >> /Users/joshmacbookair2020/Desktop/algo_trading_final/logs/service/bot.log 2>&1 &
+      "$_REPO_ROOT/main.py" --mode paper \
+      >> "$_REPO_ROOT/logs/service/bot.log" 2>&1 &
 
     echo "$(date +%H:%M:%S): Bot restarted" >> "$LOG"
 ) &

@@ -32,6 +32,21 @@ if echo "$CMD" | grep -qE -- '--mode live'; then
     exit 2
 fi
 
+# ════════════════════════════════════════════════════════════════════════════
+# BLOCK 1b: IMPLICIT LIVE START — stdin-pipe bypass of --mode live
+# Blocks "echo 'I UNDERSTAND' | python3 main.py" which implicitly starts
+# live trading when PAPER_TRADING=false is in .env. Claude must never
+# initiate a live-start regardless of how it's invoked.
+# Live trading must be started by the owner directly in a terminal.
+# ════════════════════════════════════════════════════════════════════════════
+if echo "$CMD" | grep -qiE 'I[[:space:]]+UNDERSTAND' && echo "$CMD" | grep -qE 'main\.py'; then
+    echo "BLOCKED [LIVE-RISK]: Implicit live-start via stdin pipe detected." >&2
+    echo "Live trading must be started manually in a terminal by the owner." >&2
+    echo "Open a terminal, cd to the project, run: python3 main.py" >&2
+    echo "(Type 'I UNDERSTAND' at the interactive prompt — not via Claude.)" >&2
+    exit 2
+fi
+
 if echo "$CMD" | grep -qE 'promote_perp_live\.py'; then
     echo "BLOCKED [LIVE-RISK]: promote_perp_live.py would flip the system to live trading." >&2
     echo "This requires an explicit human decision, not an automated action." >&2
@@ -166,7 +181,8 @@ fi
 # ════════════════════════════════════════════════════════════════════════════
 if echo "$CMD" | grep -qE 'gh pr create'; then
     echo "PR gate: running smoke tests before allowing PR creation..." >&2
-    REPO_ROOT="/Users/joshmacbookair2020/Desktop/algo_trading_final"
+    REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
+    [ -z "$REPO_ROOT" ] && REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
     RESULT=$(cd "$REPO_ROOT" && timeout 45 python3 -m pytest tests/test_indicators.py tests/test_exit_logic.py tests/test_ml_consistency.py -q --tb=no --no-header 2>&1 | tail -3)
     if echo "$RESULT" | grep -qiE 'failed|error'; then
         echo "BLOCKED [TEST-GATE]: Tests must pass before creating a PR." >&2

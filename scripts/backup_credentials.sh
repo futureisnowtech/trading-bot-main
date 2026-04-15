@@ -6,7 +6,7 @@
 # Storage location: ~/.algo_backup/credentials/
 # Keeps the last 10 versions.
 
-PROJ="/Users/joshmacbookair2020/Desktop/algo_trading_final"
+PROJ="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_SRC="$PROJ/.env"
 BACKUP_DIR="$HOME/.algo_backup/credentials"
 DATE=$(date +%Y-%m-%d_%H%M%S)

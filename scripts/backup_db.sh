@@ -3,7 +3,7 @@
 # Run manually or via launchd (see com.algotrading.backup.plist).
 # Keeps the last 30 daily backups, then prunes older ones.
 
-PROJ="/Users/joshmacbookair2020/Desktop/algo_trading_final"
+PROJ="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BACKUP_DIR="$HOME/.algo_backup/db"
 DB_SRC="$PROJ/logs/trades.db"
 CSV_SRC="$PROJ/logs/csv"

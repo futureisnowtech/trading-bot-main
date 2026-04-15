@@ -23,7 +23,7 @@ if [ -z "$CMD" ]; then
     exit 0
 fi
 
-LOG_DIR="/Users/joshmacbookair2020/Desktop/algo_trading_final/.claude/logs"
+LOG_DIR="$(cd "$(dirname "$0")/../.." && pwd)/.claude/logs"
 LOG_FILE="$LOG_DIR/commands.log"
 
 # Ensure log dir exists (safe — never in logs/)

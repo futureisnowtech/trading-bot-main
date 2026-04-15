@@ -25,7 +25,7 @@ if [[ "$FILE" != *.py ]] || [ ! -f "$FILE" ]; then
     exit 0
 fi
 
-REPO_ROOT="/Users/joshmacbookair2020/Desktop/algo_trading_final"
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 PYTEST="python3 -m pytest"
 
 BASENAME=$(basename "$FILE" .py)

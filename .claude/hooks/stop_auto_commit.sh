@@ -14,7 +14,8 @@
 #   .env, *.db, *.db-shm, *.db-wal, logs/, *.plist, .claude/logs/
 # ─────────────────────────────────────────────────────────────────────────────
 
-REPO_ROOT="/Users/joshmacbookair2020/Desktop/algo_trading_final"
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
+[ -z "$REPO_ROOT" ] && REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$REPO_ROOT" || exit 0
 
 # ── GUARD: must be in a git repo ─────────────────────────────────────────────

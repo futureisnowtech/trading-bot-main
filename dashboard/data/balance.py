@@ -152,7 +152,7 @@ def get_coinbase_balance() -> dict:
         if not broker.is_connected():
             broker.connect()
         if broker.is_connected():
-            data = broker._request("GET", "/api/v3/brokerage/futures/balance_summary")
+            data = broker._request("GET", "/api/v3/brokerage/cfm/balance_summary")
             summary = data.get("balance_summary", {})
             equity = float(summary.get("futures_buying_power", {}).get("value", 0) or 0)
             total_balance = float(

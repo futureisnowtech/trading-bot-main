@@ -7,6 +7,15 @@ from datetime import datetime, timedelta
 from db import _q, _q1, LAUNCH_DATE
 
 
+def _paper_flag() -> int:
+    try:
+        from config import PAPER_TRADING
+
+        return 1 if PAPER_TRADING else 0
+    except Exception:
+        return 1
+
+
 def get_performance_stats():
     r = _q1(
         """SELECT
@@ -20,10 +29,10 @@ def get_performance_stats():
             AVG(CASE WHEN won=1 THEN pnl_usd - fee_usd END)  AS avg_win,
             AVG(CASE WHEN won=0 THEN ABS(pnl_usd - fee_usd) END) AS avg_loss
         FROM trades
-        WHERE ts >= ? AND paper=1 AND broker NOT LIKE '%bybit%'
+        WHERE ts >= ? AND paper=? AND broker NOT LIKE '%bybit%'
           AND (source IS NULL OR source NOT IN ('backtest','pre_v10_contaminated','bybit_paper'))
           AND (notes IS NULL OR notes NOT LIKE '%force_test_close%')""",
-        (LAUNCH_DATE,),
+        (LAUNCH_DATE, _paper_flag()),
     )
     closes = r.get("closes") or 0
     wins = r.get("wins") or 0
@@ -56,10 +65,10 @@ def get_rolling_pf(days=7):
             COUNT(CASE WHEN won IS NOT NULL THEN 1 END) AS closes,
             SUM(CASE WHEN won=1 THEN 1 ELSE 0 END) AS wins
         FROM trades
-        WHERE ts >= ? AND paper=1 AND broker NOT LIKE '%bybit%'
+        WHERE ts >= ? AND paper=? AND broker NOT LIKE '%bybit%'
           AND (source IS NULL OR source NOT IN ('backtest','pre_v10_contaminated','bybit_paper'))
           AND (notes IS NULL OR notes NOT LIKE '%force_test_close%')""",
-        (cutoff,),
+        (cutoff, _paper_flag()),
     )
     gw = r.get("gw") or 0.0
     gl = r.get("gl") or 0.0
@@ -83,12 +92,12 @@ def get_per_symbol_stats():
             ROUND(MAX(pnl_usd), 2) AS best,
             ROUND(MIN(pnl_usd), 2) AS worst
         FROM trades
-        WHERE ts >= ? AND paper=1 AND broker NOT LIKE '%bybit%'
+        WHERE ts >= ? AND paper=? AND broker NOT LIKE '%bybit%'
           AND pnl_usd != 0
           AND (source IS NULL OR source NOT IN ('backtest','pre_v10_contaminated','bybit_paper'))
           AND (notes IS NULL OR notes NOT LIKE '%force_test_close%')
         GROUP BY symbol ORDER BY total_pnl DESC""",
-        (LAUNCH_DATE,),
+        (LAUNCH_DATE, _paper_flag()),
     )
 
 

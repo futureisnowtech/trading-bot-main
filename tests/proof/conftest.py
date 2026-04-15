@@ -65,6 +65,7 @@ def proof_runtime(tmp_path, monkeypatch) -> ProofRuntime:
     monkeypatch.setattr(config, "DB_PATH", str(db_path), raising=False)
     monkeypatch.setattr(config, "CSV_LOG_DIR", str(csv_dir), raising=False)
     monkeypatch.setattr(config, "ACCOUNT_SIZE", 5_000.0, raising=False)
+    monkeypatch.setattr(config, "PAPER_TRADING", True, raising=False)
 
     monkeypatch.setattr(trade_logger, "DB_PATH", str(db_path), raising=False)
     monkeypatch.setattr(trade_logger, "CSV_LOG_DIR", str(csv_dir), raising=False)

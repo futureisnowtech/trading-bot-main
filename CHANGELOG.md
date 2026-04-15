@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-15
+- fix(dashboard): performance.py paper=1 hardcode replaced with _paper_flag(); balance.py /futures/ → /cfm/ API path; conftest isolates PAPER_TRADING from live .env
+
+## 2026-04-15
 - fix(go_live): add ROOT to sys.path before coinbase_broker import; live trading started 2026-04-15
 
 ## 2026-04-15

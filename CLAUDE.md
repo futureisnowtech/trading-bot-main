@@ -18,7 +18,7 @@ Fully autonomous AI trading system: scans Kraken Futures + Binance USDM + Hyperl
 - Paper account: $5,000 (`ACCOUNT_SIZE=5000` — config default, no .env override)
 - Wants zero day-to-day intervention. Prefers simple explanations, hates fluff.
 
-## Current Version: v14.1 (2026-04-14)
+## Current Version: v15.0 (2026-04-15)
 
 **Active branch:** `feature/v10-rebuild` | **Clean paper trading started:** 2026-04-02
 
@@ -32,7 +32,14 @@ Fully autonomous AI trading system: scans Kraken Futures + Binance USDM + Hyperl
 | Position sizing | `position_manager.py` | Kelly + ATR sizing, leverage schedule, deployment caps |
 | Exit manager | `position_manager.py` | 7-priority exit stack |
 | Perp execution | `perps_engine.py` → `execution/coinbase_broker.py` | Coinbase US nano perp futures; CDP JWT auth; ISOLATED margin; BTC/ETH/SOL/XRP only |
-| MES execution | `scheduler/v10_runner.py` → `execution/ibkr_broker.py` | IBKR paper port 7497 |
+| MES execution | `scheduler/v10_runner.py` → `execution/ibkr_broker.py` | IBKR paper port 7497 (ARCHIVED — dormant) |
+| ForecastEx broker | `execution/forecastex_broker.py` | IBKR ForecastEx event contracts; SecType=OPT, Exchange=FORECASTX; clientId=3; economic markets only; bid/ask/mid pricing only |
+| ForecastEx lane | `forecast/runner.py` | Discovery (30m), quote harvest (60s), strategy eval (5m), position monitor (30s) |
+| ForecastEx DB | `forecast/db.py` | 5 tables: forecast_markets, forecast_contracts, forecast_quotes, forecast_bars, forecast_resolutions |
+| ForecastEx primitives | `forecast/primitives.py` | Log-odds math: x_t, v_t, a_t, σ_t, H_t, Ω_t, G_t, z_t; compute_q_hat; EV; fractional Kelly |
+| ForecastEx strategy | `forecast/strategy_engine.py` | 3 families: continuation, mean_reversion, late_repricing; 10-check economics gate; sizing |
+| ForecastEx discovery | `forecast/discovery.py` | Scans IBKR for economic event contracts, ranks, upserts to DB |
+| ForecastEx harvester | `forecast/quote_harvester.py` | Polls quotes every 60s; builds 5m/30m/1h/4h/1d OHLC bars from midpoint |
 | Indicators | `data/indicators.py` (`add_all_indicators()`) | SuperTrend, Ichimoku, WAE, Fisher, CHOP, WaveTrend, Laguerre RSI, etc. |
 | ML features | `ml/feature_builder.py` | 57 features across 11 groups (imports `indicators/` package) |
 | ML training | `ml/walk_forward_trainer.py` + `ml/model_store.py` | XGBoost 60% + LightGBM 40%, PnL regressor, clean data only |
@@ -48,8 +55,8 @@ Fully autonomous AI trading system: scans Kraken Futures + Binance USDM + Hyperl
 | Config sub-package | `config/venue_specs.py` + `config/alpha_specs.py` | Venue fees + futures-native constants separated from strategy thresholds |
 | Dashboard integrity | `dashboard/data/integrity.py` | Truth-tiered metrics: verified/suspect counts, attribution coverage, exit quality, promotion state |
 | Notifications | `notifications/notification_engine.py` | SQLite only, no Telegram |
-| Dashboard | `dashboard/app.py` | Streamlit Operator Panel, 5 tabs: MISSION CONTROL, CRYPTO PERFORMANCE, TRADE APPROVAL, S&P 500 FUTURES (MES), SYSTEM SETTINGS |
-| DB | `logs/trades.db` | WAL mode SQLite — positions, trades, system_events, scan_candidates, candidate_outcomes, trade_integrity, exit_evaluations, challenger_state |
+| Dashboard | `dashboard/app.py` | Streamlit Operator Panel, 6 tabs: MISSION CONTROL, PERFORMANCE, TRADE APPROVAL, FORECAST TRADING, ARCHIVED FUTURES (MES), SYSTEM SETTINGS |
+| DB | `logs/trades.db` | WAL mode SQLite — positions, trades, system_events, scan_candidates, candidate_outcomes, trade_integrity, exit_evaluations, challenger_state, forecast_markets, forecast_contracts, forecast_quotes, forecast_bars, forecast_resolutions |
 | Vector memory | `memory/trade_memory.py` | NumPy cosine similarity, SQLite-backed, 8-dim feature vectors |
 | Kill switch | `kill_switch.py` | Balance < 75% of ACCOUNT_SIZE → halt all |
 | Risk engine | `risk_engine.py` | VaR/CVaR, correlation gates, margin checks |
@@ -81,6 +88,14 @@ Fully autonomous AI trading system: scans Kraken Futures + Binance USDM + Hyperl
 - **Backtesting (v14.0):** `backtesting/event_backtester.py` replays `scan_candidates` through live stack. Results tagged `source='candidate_replay'` (RESEARCH-GRADE). Promotion requires human confirmation — `backtesting/promotion_engine.py` surfaces `PROMOTED_PENDING_HUMAN` tier; never auto-applies to live.
 - **Nightly audit (v14.0):** `monitoring/nightly_audit.py` runs at 08:00 UTC via scheduler. 7 checks: proof suite, candidate journal health, funnel analytics, labeling lag, CLAUDE.md version drift, Bayesian weight changes, retention pruning.
 - **Migration scripts:** `scripts/migrate_integrity_backfill.py` backfills integrity tiers for historical closes. Idempotent (INSERT OR IGNORE). Run once after upgrade.
+- **ForecastEx venue (v15.0):** IBKR ForecastEx exchange (`Exchange=FORECASTX`, `SecType=OPT`). YES = `Right='C'`, NO = `Right='P'`. Cannot short — flatten by buying the opposite right. Zero commission. ~$100 bankroll.
+- **ForecastEx pricing:** bid/ask/midpoint ONLY — never last/trade prints. All OHLC bars built from midpoint series.
+- **ForecastEx clientId:** 3 (MES = 2, main IBKR = 1). Must not collide.
+- **ForecastEx risk caps (hardcoded, no override):** max deployed 35%, per-event 10%, max concurrent 2, fractional Kelly cap 0.10.
+- **ForecastEx economic markets only:** CPI, NFP, FOMC, Unemployment, PCE, GDP, PPI. Sports/politics/entertainment → rejected at discovery (fail-closed).
+- **ForecastEx log-odds math:** x_t = log(p/(1-p)); q_hat = logistic(x_t + α·v_1h + β·a_30m - γ·z_t - δ·σ_t - ε·H_t - ζ·Ω_t + η·bias). Defaults: α=0.40, β=0.20, γ=0.30, δ=0.25, ε=0.15, ζ=0.50, η=0.10.
+- **ForecastEx MES archival:** MES lane is dormant — code preserved. Dashboard tab renamed "ARCHIVED FUTURES (MES)". Reactivate: set `FUTURES_LANE_ACTIVE=true`.
+- **sys.path discipline:** all forecast modules use `if _ROOT not in sys.path: sys.path.insert(0, _ROOT)` (conditional). Test files use `if _ROOT not in sys.path: sys.path.append(_ROOT)` to avoid displacing DASHBOARD_ROOT at collection time.
 
 ### MES Futures — Critical Contract Facts (v13.9)
 
@@ -235,6 +250,7 @@ Set `TV_WEBHOOK_SECRET` in .env. Symbol mapping: BTCUSD → BTCUSDT.
 | v13.9 | 2026-04-14 | MES audit: contract localSymbol fix, asyncio event loop fix, SHORT monitoring fix, EOD close fix, daily loss limit from config, 7th health check (ibkr); 10 TWS trades verified |
 | v14.0 | 2026-04-14 | Self-improving architecture: integrity tiers, candidate replay backtester, promotion engine, futures config sub-package, dashboard truth surfaces, recurring self-maintenance loops, 52 proof tests (0 failures) |
 | v14.1 | 2026-04-14 | Coinbase US crypto lane migration: coinbase_broker.py (CDP JWT/ES256, 4 CFTC products BIP/ETP/SLP/XPP), fee model → 0.03% taker, fail-closed CoinbaseSymbolError, executable launch validator, 42 new proof tests, 158 total (0 failures) |
+| v15.0 | 2026-04-15 | ForecastEx event-contract lane: forecastex_broker.py (IBKR clientId=3, economic markets only, YES=Right C/NO=Right P), 5 new DB tables, log-odds probability engine, 3 strategy families (continuation/mean_reversion/late_repricing), 10-check economics gate, fractional Kelly sizing, dashboard FORECAST TRADING tab, MES archived, 37 new proof tests, 195 total (0 failures) |
 
 ## GitHub
 - Repository: `futureisnowtech/trading-bot-main` (private)
@@ -253,4 +269,4 @@ When making any change to this project:
 7. **Proof tests are part of done** — any change to a data layer function (`dashboard/data/`, `logging_db/`, `config.py` constants) requires a proof test that defines the invariant. If it would have caught the bug, it's mandatory.
 8. **No tunnel vision on partial changes** — when changing one function, grep for all callers and related functions touching the same data. Example: changing `get_recent_errors_detail()` requires checking `get_error_rate_1h()` and `get_health_status()` too.
 9. **MES position dict keys:** `"entry"` (not `"entry_price"`), `"side"` (`"LONG"`/`"SHORT"`), `"qty"` (always positive). Never use `qty > 0` for direction — always `pos.get("side") == "LONG"`.
-10. **DO NOT TOUCH without explicit instruction:** `scanner.py`, `signal_engine.py`, `position_manager.py`, `perps_engine.py`, `scheduler/v10_runner.py`, `data/indicators.py`, `ml/feature_builder.py`, `ml/walk_forward_trainer.py`, `ml/model_store.py`, `risk/economics_gate.py`, `learning/post_trade_analyzer.py`, `learning/signal_performance.py`, `learning/dynamic_weights.py`, `notifications/notification_engine.py`, `logging_db/trade_logger.py`, `dashboard/app.py`.
+10. **DO NOT TOUCH without explicit instruction:** `scanner.py`, `signal_engine.py`, `position_manager.py`, `perps_engine.py`, `scheduler/v10_runner.py`, `data/indicators.py`, `ml/feature_builder.py`, `ml/walk_forward_trainer.py`, `ml/model_store.py`, `risk/economics_gate.py`, `learning/post_trade_analyzer.py`, `learning/signal_performance.py`, `learning/dynamic_weights.py`, `notifications/notification_engine.py`, `logging_db/trade_logger.py`, `dashboard/app.py`, `forecast/primitives.py`, `forecast/strategy_engine.py`, `execution/forecastex_broker.py`.

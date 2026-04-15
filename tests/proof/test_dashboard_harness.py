@@ -117,6 +117,10 @@ def test_operator_panel_renders_all_tabs_with_widget_stubs(monkeypatch):
         ),
         "widgets.trade_approval.manual_scan": ("render_manual_scan", "manual-scan"),
         "widgets.futures.mes_dashboard": ("render_futures", "futures"),
+        "widgets.forecast.forecast_dashboard": (
+            "render_forecast_trading",
+            "forecast-trading",
+        ),
         "widgets.system_settings.dev_config": ("render_dev_config", "dev-config"),
     }
 
@@ -132,7 +136,8 @@ def test_operator_panel_renders_all_tabs_with_widget_stubs(monkeypatch):
         "MISSION CONTROL",
         "PERFORMANCE",
         "TRADE APPROVAL",
-        "S&P 500 FUTURES (MES)",
+        "FORECAST TRADING",
+        "ARCHIVED FUTURES (MES)",
         "SYSTEM SETTINGS",
     ]
     rendered = [node.value for node in at.markdown]

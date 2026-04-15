@@ -28,7 +28,7 @@ A fully autonomous AI-powered trading system that:
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
 
-## Current Version: v14.0 (2026-04-14)
+## Current Version: v15.0 (2026-04-15)
 
 **Active branch:** `feature/v10-rebuild`
 **Clean paper trading started:** 2026-04-02
@@ -43,7 +43,14 @@ A fully autonomous AI-powered trading system that:
 | Position sizing | `position_manager.py` | Kelly + ATR sizing, leverage schedule, deployment caps |
 | Exit manager | `position_manager.py` | 7-priority exit stack (trailing/scale/thesis/hard-stop/risk/kill/dead-money) |
 | Perp execution | `perps_engine.py` → `execution/coinbase_broker.py` | Coinbase US nano perp-style futures; paper mode + live CDP JWT; ISOLATED margin; BTC/ETH/SOL/XRP only |
-| MES execution | `scheduler/v10_runner.py` → `execution/ibkr_broker.py` | IBKR paper port 7497 |
+| MES execution | `scheduler/v10_runner.py` → `execution/ibkr_broker.py` | IBKR paper port 7497 (ARCHIVED — dormant) |
+| ForecastEx broker | `execution/forecastex_broker.py` | IBKR ForecastEx; SecType=OPT, Exchange=FORECASTX; clientId=3; YES=Right C / NO=Right P; economic markets only |
+| ForecastEx lane | `forecast/runner.py` | Discovery (30m), quote harvest (60s), strategy eval (5m), position monitor (30s) |
+| ForecastEx DB | `forecast/db.py` | 5 tables: forecast_markets, forecast_contracts, forecast_quotes, forecast_bars, forecast_resolutions |
+| ForecastEx primitives | `forecast/primitives.py` | Log-odds math; compute_q_hat; EV; fractional Kelly sizing |
+| ForecastEx strategy | `forecast/strategy_engine.py` | 3 families: continuation, mean_reversion, late_repricing; 10-check economics gate |
+| ForecastEx discovery | `forecast/discovery.py` | Scans IBKR for economic event contracts, ranks, upserts to DB |
+| ForecastEx harvester | `forecast/quote_harvester.py` | Polls quotes every 60s; builds 5m/30m/1h/4h/1d OHLC bars from midpoint |
 | Indicators | `data/indicators.py` (`add_all_indicators()`) | SuperTrend, Ichimoku, WAE, Fisher, CHOP, WaveTrend, Laguerre RSI, etc. |
 | ML features | `ml/feature_builder.py` | 57 features across 11 groups (imports `indicators/` package) |
 | ML training | `ml/walk_forward_trainer.py` + `ml/model_store.py` | XGBoost 60% + LightGBM 40%, PnL regressor, clean data only |
@@ -61,8 +68,8 @@ A fully autonomous AI-powered trading system that:
 | Dashboard integrity | `dashboard/data/integrity.py` | Truth-tiered metrics: verified/suspect counts, attribution coverage, exit quality, promotion state |
 | Operator audits | `scripts/net_truth_audit.py` + `scripts/go_live_audit.py` | Trust-aware net-of-fee scorecards and evidence-backed launch constraints |
 | Notifications | `notifications/notification_engine.py` | SQLite only, no Telegram |
-| Dashboard | `dashboard/app.py` | Streamlit Operator Panel, 5 tabs: MISSION CONTROL, CRYPTO PERFORMANCE, TRADE APPROVAL, S&P 500 FUTURES (MES), SYSTEM SETTINGS |
-| DB | `logs/trades.db` | WAL mode SQLite — positions, trades, system_events, scan_candidates, candidate_outcomes, trade_integrity, exit_evaluations, challenger_state |
+| Dashboard | `dashboard/app.py` | Streamlit Operator Panel, 6 tabs: MISSION CONTROL, PERFORMANCE, TRADE APPROVAL, FORECAST TRADING, ARCHIVED FUTURES (MES), SYSTEM SETTINGS |
+| DB | `logs/trades.db` | WAL mode SQLite — positions, trades, system_events, scan_candidates, candidate_outcomes, trade_integrity, exit_evaluations, challenger_state, forecast_markets, forecast_contracts, forecast_quotes, forecast_bars, forecast_resolutions |
 | Vector memory | `memory/trade_memory.py` | NumPy cosine similarity, SQLite-backed, 8-dim feature vectors |
 | Kill switch | `kill_switch.py` | Balance < 75% of ACCOUNT_SIZE → halt all |
 | Risk engine | `risk_engine.py` | VaR/CVaR, correlation gates, margin checks |
@@ -95,6 +102,12 @@ A fully autonomous AI-powered trading system that:
 - **`config/` package (v14.0):** `config/__init__.py` re-exports symbols from `config.py` for backward compatibility. Use `config.venue_specs` for venue constants and `config.alpha_specs` for strategy thresholds.
 - **Backtesting (v14.0):** `backtesting/event_backtester.py` replays `scan_candidates` through the live stack. Results are tagged `source='candidate_replay'` and remain research-grade only. Promotion requires human confirmation.
 - **Nightly audit (v14.0):** `monitoring/nightly_audit.py` runs at 08:00 UTC and checks proof suite health, candidate journal health, funnel analytics, labeling lag, repo drift, Bayesian weight changes, and retention pruning.
+- **ForecastEx venue (v15.0):** IBKR ForecastEx exchange (`Exchange=FORECASTX`, `SecType=OPT`). YES = `Right='C'`, NO = `Right='P'`. Cannot short — flatten by buying the opposite right. Zero commission. ~$100 bankroll.
+- **ForecastEx pricing:** bid/ask/midpoint ONLY — never last/trade prints. All OHLC bars built from midpoint series.
+- **ForecastEx clientId:** 3 (MES = 2). Never collide.
+- **ForecastEx risk caps (hardcoded, no override):** max deployed 35%, per-event 10%, max concurrent 2, fractional Kelly cap 0.10.
+- **ForecastEx economic markets only:** CPI, NFP, FOMC, Unemployment, PCE, GDP, PPI. Sports/politics/entertainment rejected at discovery.
+- **ForecastEx MES archival:** MES lane is dormant — code preserved. Dashboard tab "ARCHIVED FUTURES (MES)". Reactivate: `FUTURES_LANE_ACTIVE=true`.
 
 ### Go-Live Readiness (dashboard SYSTEM tab → READINESS TRACKER)
 
@@ -518,6 +531,8 @@ Motivation 1-5: "Strive for greatness." / "I like criticism. It makes you strong
 | v13.8 | 2026-04-14 | Launch integrity hotfixes: short attribution PnL fix, fail-closed learning truth, tighter exit sanity, dashboard de-spam |
 | v13.9 | 2026-04-14 | Net truth audit + go-live audit surface for trustworthy net-of-fee launch decisions |
 | v14.0 | 2026-04-14 | Self-improving architecture: integrity tiers, candidate replay backtester, promotion engine, futures config sub-package, dashboard truth surfaces, recurring self-maintenance loops |
+| v14.1 | 2026-04-14 | Coinbase US crypto lane migration: coinbase_broker.py (CDP JWT/ES256, 4 CFTC products), fee model → 0.03% taker, fail-closed CoinbaseSymbolError, 158 proof tests |
+| v15.0 | 2026-04-15 | ForecastEx event-contract lane: forecastex_broker.py, 5 new DB tables, log-odds engine, 3 strategy families, 10-check economics gate, fractional Kelly, FORECAST TRADING dashboard tab, MES archived, 195 proof tests |
 
 ## GitHub
 - Repository: `futureisnowtech/trading-bot-main` (private)

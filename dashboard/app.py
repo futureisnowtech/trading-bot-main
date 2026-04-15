@@ -40,7 +40,8 @@ section[data-testid="stSidebar"] { display: none; }
 .badge-fail    { background: rgba(248,113,113,0.18); color:#f87171; padding:2px 8px; border-radius:4px; font-size:0.8em; font-weight:700; }
 .panel-title   { font-size:1em; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:#94a3b8; margin-bottom:4px; }
 .badge-crypto  { background: rgba(251,146,60,0.15);  color:#fb923c; padding:2px 8px; border-radius:4px; font-size:0.8em; font-weight:700; border-left:3px solid #fb923c; margin-bottom:6px; display:inline-block; }
-.badge-futures { background: rgba(96,165,250,0.15);  color:#60a5fa; padding:2px 8px; border-radius:4px; font-size:0.8em; font-weight:700; border-left:3px solid #60a5fa; margin-bottom:6px; display:inline-block; }
+.badge-futures  { background: rgba(96,165,250,0.15);  color:#60a5fa; padding:2px 8px; border-radius:4px; font-size:0.8em; font-weight:700; border-left:3px solid #60a5fa; margin-bottom:6px; display:inline-block; }
+.badge-forecast { background: rgba(168,85,247,0.15);  color:#a855f7; padding:2px 8px; border-radius:4px; font-size:0.8em; font-weight:700; border-left:3px solid #a855f7; margin-bottom:6px; display:inline-block; }
 </style>
 """,
     unsafe_allow_html=True,
@@ -68,6 +69,7 @@ from widgets.mission_control.decision_quality import render_decision_quality
 from widgets.crypto_performance.deep_analysis import render_deep_analysis
 from widgets.trade_approval.manual_scan import render_manual_scan
 from widgets.futures.mes_dashboard import render_futures
+from widgets.forecast.forecast_dashboard import render_forecast_trading
 from widgets.system_settings.dev_config import render_dev_config
 
 
@@ -75,12 +77,13 @@ from widgets.system_settings.dev_config import render_dev_config
 def main():
     st.title("Algo Trading — Operator Panel")
 
-    tab_mc, tab_cp, tab_ta, tab_fut, tab_ss = st.tabs(
+    tab_mc, tab_cp, tab_ta, tab_fc, tab_fut, tab_ss = st.tabs(
         [
             "MISSION CONTROL",
             "PERFORMANCE",
             "TRADE APPROVAL",
-            "S&P 500 FUTURES (MES)",
+            "FORECAST TRADING",
+            "ARCHIVED FUTURES (MES)",
             "SYSTEM SETTINGS",
         ]
     )
@@ -148,21 +151,45 @@ def main():
         st.caption("Run a fresh scan and hand-pick which trades to execute.")
         render_manual_scan()
 
-    # ── Tab 4: S&P 500 FUTURES (MES) ──────────────────────────────────────────
-    with tab_fut:
+    # ── Tab 4: FORECAST TRADING ────────────────────────────────────────────────
+    with tab_fc:
         st.caption(
-            "Our automated S&P 500 futures strategy — completely separate from crypto."
+            "ForecastEx event-contract trading lane — U.S. economic indicators only. "
+            "Zero commission. ~$100 bankroll. Max 2 concurrent positions."
         )
         st.markdown(
             """
-<div style="background:rgba(96,165,250,0.08); border-left:3px solid #60a5fa;
+<div style="background:rgba(168,85,247,0.08); border-left:3px solid #a855f7;
             padding:10px 14px; border-radius:4px; margin-bottom:12px; font-size:0.85em;">
-<strong style="color:#60a5fa">S&P 500 FUTURES · MES</strong><br>
-Trades the <strong>Micro E-mini S&P 500 (MES)</strong> contract via IBKR paper account (port 7497).<br>
-Two strategies: <strong>Opening Range Breakout</strong> (10:00–15:45 ET) and
-<strong>VWAP Mean Reversion</strong> (10:00–14:30 ET).<br>
-This account is <strong>completely separate</strong> from crypto perps — different broker,
-different capital, different risk rules.
+<strong style="color:#a855f7">FORECAST EVENT CONTRACTS · ForecastEx (IBKR)</strong><br>
+Trades YES/NO event contracts on <strong>U.S. economic events</strong>
+(CPI, NFP, FOMC, Unemployment) via IBKR ForecastEx.<br>
+Pricing substrate: <strong>bid/ask midpoint only</strong> — no trade prints.<br>
+Zero commission. Cannot short — flatten by buying the opposite side.<br>
+Max deployed: <strong>35%</strong> · Max per event: <strong>10%</strong> ·
+Max concurrent: <strong>2</strong> · Kelly cap: <strong>0.10</strong>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+        render_forecast_trading()
+
+    # ── Tab 5: ARCHIVED FUTURES (MES) ─────────────────────────────────────────
+    with tab_fut:
+        st.caption(
+            "MES futures lane — currently dormant. Code and history preserved. "
+            "Reactivate by re-enabling FUTURES_LANE_ACTIVE in config."
+        )
+        st.markdown(
+            """
+<div style="background:rgba(148,163,184,0.08); border-left:3px solid #64748b;
+            padding:10px 14px; border-radius:4px; margin-bottom:12px; font-size:0.85em;">
+<strong style="color:#64748b">ARCHIVED · S&P 500 FUTURES · MES</strong><br>
+This lane is <strong>dormant</strong> — not the active live lane. All code, history,
+and configuration is preserved for reactivation.<br>
+Traded <strong>Micro E-mini S&P 500 (MES)</strong> via IBKR (port 7497).<br>
+Strategies: <strong>Opening Range Breakout</strong> + <strong>VWAP Mean Reversion</strong>.<br>
+To reactivate: set <code>FUTURES_LANE_ACTIVE=true</code> and restart the bot.
 </div>
 """,
             unsafe_allow_html=True,

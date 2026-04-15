@@ -265,6 +265,269 @@ except Exception as e:
 
 
 # ─────────────────────────────────────────────────────────────
+# 5. FORECASTEX LANE READINESS
+# ─────────────────────────────────────────────────────────────
+# Autonomously answers 9 questions.  Each resolves to:
+#   READY         — check passed, lane can proceed
+#   BLOCKED       — automated fix needed; lane cannot start
+#   ACTION NEEDED — human-only step required
+# ─────────────────────────────────────────────────────────────
+print("\n─── ForecastEx lane ────────────────────────────────────")
+
+_fx_checks: list[dict] = []  # {name, status, detail}
+_fx_blocked = False
+_fx_action = False
+
+
+def _fx(name: str, status: str, detail: str) -> None:
+    """Record a ForecastEx check result and print it."""
+    global _fx_blocked, _fx_action
+    icon = {"READY": PASS, "BLOCKED": FAIL, "ACTION NEEDED": WARN}.get(status, WARN)
+    print(f"  {icon} [{status:13s}] {name}: {detail}")
+    _fx_checks.append({"name": name, "status": status, "detail": detail})
+    if status == "BLOCKED":
+        _fx_blocked = True
+    elif status == "ACTION NEEDED":
+        _fx_action = True
+
+
+# 1. Forecast DB tables present
+try:
+    import sqlite3 as _sq3
+
+    _fx_db = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs", "trades.db"
+    )
+    _required_tables = {
+        "forecast_markets",
+        "forecast_contracts",
+        "forecast_quotes",
+        "forecast_bars",
+        "forecast_resolutions",
+    }
+    if os.path.exists(_fx_db):
+        _c = _sq3.connect(_fx_db)
+        _found = {
+            r[0]
+            for r in _c.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        _c.close()
+        _missing = _required_tables - _found
+        if _missing:
+            _fx(
+                "DB tables",
+                "BLOCKED",
+                f"Missing: {', '.join(sorted(_missing))} — run forecast.db.init_forecast_db()",
+            )
+        else:
+            _fx("DB tables", "READY", "All 5 forecast tables present")
+    else:
+        _fx("DB tables", "BLOCKED", "trades.db not found — run setup first")
+except Exception as _e:
+    _fx("DB tables", "BLOCKED", f"DB check error: {_e}")
+
+# 2. ForecastEx discovery imports and is runnable
+try:
+    import importlib as _il
+
+    _il.import_module("forecast.discovery")
+    _il.import_module("forecast.db")
+    _fx("Discovery module", "READY", "forecast.discovery imports cleanly")
+except ImportError as _e:
+    _fx("Discovery module", "BLOCKED", f"Import error: {_e}")
+
+# 3. ForecastEx broker importable
+try:
+    _il.import_module("execution.forecastex_broker")
+    _fx("ForecastEx broker", "READY", "execution.forecastex_broker imports cleanly")
+except ImportError as _e:
+    _fx("ForecastEx broker", "BLOCKED", f"Import error: {_e}")
+
+# 4. Conids cached in DB (active contracts > 0)
+try:
+    if os.path.exists(_fx_db):
+        _c = _sq3.connect(_fx_db)
+        try:
+            _n = _c.execute(
+                "SELECT COUNT(*) FROM forecast_contracts WHERE active=1"
+            ).fetchone()[0]
+            _c.close()
+            if _n > 0:
+                _fx("Conids cached", "READY", f"{_n} active contracts in DB")
+            else:
+                _fx(
+                    "Conids cached",
+                    "ACTION NEEDED",
+                    "No contracts yet — connect TWS and run discovery",
+                )
+        except Exception:
+            _c.close()
+            _fx(
+                "Conids cached",
+                "BLOCKED",
+                "forecast_contracts table missing or unreadable",
+            )
+    else:
+        _fx("Conids cached", "BLOCKED", "DB not found")
+except Exception as _e:
+    _fx("Conids cached", "BLOCKED", f"Check error: {_e}")
+
+# 5. Quotes ingesting (last quote < 10 min ago)
+try:
+    if os.path.exists(_fx_db):
+        _c = _sq3.connect(_fx_db)
+        try:
+            _row = _c.execute(
+                "SELECT ts FROM forecast_quotes ORDER BY rowid DESC LIMIT 1"
+            ).fetchone()
+            _c.close()
+            if _row:
+                from datetime import datetime as _dt, timezone as _tz
+
+                _lag = (
+                    _dt.now(_tz.utc) - _dt.fromisoformat(_row[0].replace("Z", "+00:00"))
+                ).total_seconds()
+                if _lag < 600:
+                    _fx("Quotes ingesting", "READY", f"Last quote {_lag / 60:.1f}m ago")
+                else:
+                    _fx(
+                        "Quotes ingesting",
+                        "ACTION NEEDED",
+                        f"Last quote {_lag / 3600:.1f}h ago — harvester may be stopped",
+                    )
+            else:
+                _fx(
+                    "Quotes ingesting",
+                    "ACTION NEEDED",
+                    "No quotes yet — start the forecast lane to collect quotes",
+                )
+        except Exception:
+            _c.close()
+            _fx("Quotes ingesting", "BLOCKED", "forecast_quotes unreadable")
+    else:
+        _fx("Quotes ingesting", "BLOCKED", "DB not found")
+except Exception as _e:
+    _fx("Quotes ingesting", "BLOCKED", f"Check error: {_e}")
+
+# 6. Derived bars present (at least one 5m bar)
+try:
+    if os.path.exists(_fx_db):
+        _c = _sq3.connect(_fx_db)
+        try:
+            _n = _c.execute(
+                "SELECT COUNT(*) FROM forecast_bars WHERE interval='5m'"
+            ).fetchone()[0]
+            _c.close()
+            if _n > 0:
+                _fx("Bars built", "READY", f"{_n} 5m bars in DB")
+            else:
+                _fx(
+                    "Bars built",
+                    "ACTION NEEDED",
+                    "No 5m bars yet — collect quotes first",
+                )
+        except Exception:
+            _c.close()
+            _fx("Bars built", "BLOCKED", "forecast_bars unreadable")
+    else:
+        _fx("Bars built", "BLOCKED", "DB not found")
+except Exception as _e:
+    _fx("Bars built", "BLOCKED", f"Check error: {_e}")
+
+# 7. Strategy path functional (all strategy engine imports resolve)
+try:
+    _il.import_module("forecast.strategy_engine")
+    _il.import_module("forecast.primitives")
+    _fx(
+        "Strategy path", "READY", "forecast.strategy_engine + primitives import cleanly"
+    )
+except ImportError as _e:
+    _fx("Strategy path", "BLOCKED", f"Import error: {_e}")
+
+# 8. Dashboard aligned (FORECAST TRADING tab present in app.py)
+try:
+    _app_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "dashboard",
+        "app.py",
+    )
+    _app_src = open(_app_path).read() if os.path.exists(_app_path) else ""
+    _has_fc_tab = "FORECAST TRADING" in _app_src
+    _has_arc_mes = "ARCHIVED FUTURES (MES)" in _app_src
+    _has_widget = "render_forecast_trading" in _app_src
+    if _has_fc_tab and _has_arc_mes and _has_widget:
+        _fx(
+            "Dashboard aligned",
+            "READY",
+            "FORECAST TRADING tab + MES archived + widget wired",
+        )
+    else:
+        _missing_items = []
+        if not _has_fc_tab:
+            _missing_items.append("FORECAST TRADING tab")
+        if not _has_arc_mes:
+            _missing_items.append("ARCHIVED FUTURES (MES) tab")
+        if not _has_widget:
+            _missing_items.append("render_forecast_trading import")
+        _fx("Dashboard aligned", "BLOCKED", f"Missing: {', '.join(_missing_items)}")
+except Exception as _e:
+    _fx("Dashboard aligned", "BLOCKED", f"Check error: {_e}")
+
+# 9. MES archived correctly (FUTURES_LANE_ACTIVE not True, or key is absent)
+try:
+    import config as _cfg
+
+    _mes_active = getattr(_cfg, "FUTURES_LANE_ACTIVE", False)
+    if _mes_active:
+        _fx(
+            "MES archived",
+            "ACTION NEEDED",
+            "FUTURES_LANE_ACTIVE=True — set to False to fully archive MES lane",
+        )
+    else:
+        _fx(
+            "MES archived",
+            "READY",
+            "FUTURES_LANE_ACTIVE is False/absent — MES is dormant",
+        )
+except Exception as _e:
+    _fx("MES archived", "BLOCKED", f"Config check error: {_e}")
+
+# 10. Tiny live test trades allowed (all READY, TWS connected, bankroll sufficient)
+try:
+    _live_allowed = (
+        not _fx_blocked
+        and not _fx_action
+        and os.getenv("PAPER_TRADING", "true").lower() != "true"
+    )
+    if _fx_blocked:
+        _fx("Live test trades", "BLOCKED", "Blocked checks must be resolved first")
+    elif _fx_action:
+        _fx(
+            "Live test trades",
+            "ACTION NEEDED",
+            "Complete ACTION NEEDED steps then re-run validator",
+        )
+    else:
+        _is_paper = os.getenv("PAPER_TRADING", "true").lower() != "false"
+        if _is_paper:
+            _fx(
+                "Live test trades",
+                "ACTION NEEDED",
+                "PAPER_TRADING=true — set PAPER_TRADING=false and confirm account balance",
+            )
+        else:
+            _fx(
+                "Live test trades",
+                "READY",
+                "All checks green + PAPER_TRADING=false — tiny live trades ENABLED",
+            )
+except Exception as _e:
+    _fx("Live test trades", "BLOCKED", f"Check error: {_e}")
+
+# ─────────────────────────────────────────────────────────────
 # 5. VERSION CONSISTENCY
 # ─────────────────────────────────────────────────────────────
 print("\n─── Version ────────────────────────────────────────────")

@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-15
+- feat(forecast): ForecastEx event-contract lane v15.0 — forecastex_broker (IBKR clientId=3, SecType=OPT), 5 DB tables (forecast_markets/contracts/quotes/bars/resolutions), log-odds probability engine, 3 strategy families (continuation/mean_reversion/late_repricing), 10-check economics gate, fractional Kelly sizing (cap=0.10), dashboard FORECAST TRADING tab, MES archived, 37 new proof tests (195 total, 0 failures)
+
+## 2026-04-15
 - v14.1: Coinbase US crypto lane migration — coinbase_broker.py (CDP JWT/ES256, BIP/ETP/SLP/XPP), 0.03% taker fee, fail-closed CoinbaseSymbolError, launch validator, 42 proof tests (158 total, 0 failures)
 
 ## 2026-04-15

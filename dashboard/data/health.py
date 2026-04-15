@@ -353,5 +353,5 @@ def get_restart_count_24h() -> int:
 
 
 def get_ml_status():
-    r = _q1("SELECT COUNT(*) AS n FROM trade_features")
+    r = _q1("SELECT COUNT(*) AS n FROM ml_feature_snapshots")
     return {"snapshots": r.get("n") or 0, "min_needed": 30}

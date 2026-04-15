@@ -46,12 +46,12 @@ import logging_db.trade_logger  # noqa: F401 — pre-warm, prevents EDEADLK
 
 BANNER = """
 ╔══════════════════════════════════════════════════════════════════╗
-║  ALGO TRADING SYSTEM  v13.4                                     ║
+║  ALGO TRADING SYSTEM  v14.0                                     ║
 ║                                                                  ║
 ║  Scanner:    Kraken + Binance + Hyperliquid | 7-filter | top 50 ║
 ║  Signals:    Two-tower (technical 0-100 + ML 0-100)             ║
-║  Exits:      6-priority stack (trailing / scale / thesis)       ║
-║  Learning:   57-feature snapshots | walk-forward retrain        ║
+║  Exits:      7-priority stack (trailing / scale / thesis)       ║
+║  Learning:   57-feature snapshots | integrity tiers | retrain   ║
 ╚══════════════════════════════════════════════════════════════════╝
 """
 

@@ -99,9 +99,16 @@ def _render_trade_details(c: dict, prob: float):
     st.markdown(f"**→ Estimated win probability: {prob:.1f}%**")
     st.divider()
     st.markdown("**EV calculation**")
-    risk_usd = 5000.0 * 0.015
+    try:
+        from config import ACCOUNT_SIZE, MAX_RISK_PER_TRADE_PCT
+
+        _acct = float(ACCOUNT_SIZE)
+        _risk_pct = float(MAX_RISK_PER_TRADE_PCT)
+    except Exception:
+        _acct, _risk_pct = 5000.0, 0.01
+    risk_usd = _acct * _risk_pct
     pos_usd = risk_usd / (stop_p / 100) if stop_p > 0 else 0
-    fee_pct = 0.13
+    fee_pct = 0.13  # 0.065% Kraken taker × 2 sides = 0.13% round-trip
     net_win = tgt_p / 100 - fee_pct / 100 - fund_cost / 100
     net_loss = stop_p / 100 + fee_pct / 100
     st.text(

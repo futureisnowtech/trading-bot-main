@@ -286,7 +286,7 @@ def render_dev_config():
             st.error(f"journal_health: {_jhe}")
 
     with col_right:
-        with st.expander("Integrity & Truth (v14.0)", expanded=False):
+        with st.expander("Integrity & Truth", expanded=False):
             try:
                 from data.integrity import (
                     get_integrity_summary,

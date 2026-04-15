@@ -152,17 +152,30 @@ def render_futures():
     with st.expander("Futures configuration & risk rules"):
         try:
             from config import FUTURES_ENABLED, FUTURES_NUM_CONTRACTS, ACCOUNT_SIZE
+            from config.venue_specs import (
+                MES_EXPIRY,
+                MES_POINT_VALUE,
+                MES_TICK_SIZE,
+                MES_TICK_VALUE,
+                MES_EOD_CLOSE_TIME,
+                MES_MAX_DAILY_LOSS_USD,
+                IBKR_PORT,
+            )
 
             st.text(f"  FUTURES_ENABLED:       {FUTURES_ENABLED}")
             st.text(f"  FUTURES_NUM_CONTRACTS: {FUTURES_NUM_CONTRACTS}")
             st.text(f"  Account size:          ${float(ACCOUNT_SIZE):,.0f}")
+            st.text("  Contract:    MES (Micro E-mini S&P 500) — CME")
+            st.text(f"  Expiry:      {MES_EXPIRY}  (update .env on quarterly roll)")
+            st.text(f"  Point value: ${MES_POINT_VALUE:.2f} / full point")
+            st.text(
+                f"  Tick size:   {MES_TICK_SIZE} pts = ${MES_TICK_VALUE:.2f} / tick"
+            )
+            st.text("  Commission:  ~$0.47/side = $0.94 round-trip (IBKR)")
+            st.text(f"  Connection:  IBKR TWS port {IBKR_PORT}")
+            st.text(
+                f"  Daily limit: ${MES_MAX_DAILY_LOSS_USD:.0f} — no new entries after this"
+            )
+            st.text(f"  Hard EOD:    {MES_EOD_CLOSE_TIME} ET — all positions closed")
         except Exception as e:
             st.error(f"config: {e}")
-        st.text("  Contract:    MES (Micro E-mini S&P 500) — CME")
-        st.text("  Expiry:      Q2 2026 — 20260619 (update quarterly)")
-        st.text("  Point value: $5.00 / full point")
-        st.text("  Tick size:   0.25 pts = $1.25 / tick")
-        st.text("  Commission:  ~$0.47/side = $0.94 round-trip")
-        st.text("  Connection:  IBKR TWS port 7497 (paper) / 7496 (live)")
-        st.text("  Daily limit: $150 — no new entries after this")
-        st.text("  Hard EOD:    15:45 ET — all positions closed")

@@ -19,27 +19,25 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 # ── MES Futures (IBKR) ────────────────────────────────────────────────────────
-# These are derived from config.py env-backed constants so quarterly rolls
-# only require updating .env / config.py, not this file.
+# FUTURES_NUM_CONTRACTS and FUTURES_DAILY_MAX_LOSS_PTS live in config.py.
+# MES_EXPIRY, IBKR_* come from .env directly (not in config.py).
 
 try:
     from config import (
-        MES_EXPIRY,
         FUTURES_NUM_CONTRACTS,
         FUTURES_DAILY_MAX_LOSS_PTS,
         FUTURES_ENABLED,
-        IBKR_HOST,
-        IBKR_PORT,
-        IBKR_CLIENT_ID,
     )
 except ImportError:
-    MES_EXPIRY = os.getenv("MES_EXPIRY", "20260619")
     FUTURES_NUM_CONTRACTS = int(os.getenv("FUTURES_NUM_CONTRACTS", "2"))
-    FUTURES_DAILY_MAX_LOSS_PTS = float(os.getenv("FUTURES_DAILY_MAX_LOSS_PTS", "10"))
+    FUTURES_DAILY_MAX_LOSS_PTS = float(os.getenv("FUTURES_DAILY_MAX_LOSS_PTS", "5"))
     FUTURES_ENABLED = os.getenv("FUTURES_ENABLED", "false").lower() == "true"
-    IBKR_HOST = os.getenv("IBKR_HOST", "127.0.0.1")
-    IBKR_PORT = int(os.getenv("IBKR_PORT", "7497"))
-    IBKR_CLIENT_ID = int(os.getenv("IBKR_CLIENT_ID", "1"))
+
+# These are .env-only — update .env on quarterly roll or IBKR config change.
+MES_EXPIRY: str = os.getenv("MES_EXPIRY", "20260619")
+IBKR_HOST: str = os.getenv("IBKR_HOST", "127.0.0.1")
+IBKR_PORT: int = int(os.getenv("IBKR_PORT", "7497"))
+IBKR_CLIENT_ID: int = int(os.getenv("IBKR_CLIENT_ID", "1"))
 
 MES_POINT_VALUE: float = 5.00  # dollars per point
 MES_TICK_SIZE: float = 0.25  # minimum price increment

@@ -1,5 +1,8 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
+## 2026-04-15
+- fix(dashboard): 7 data correctness fixes — ML snapshot table, source filtering, config-driven values, v14 banner
+
 ## 2026-04-14
 - chore: import claude/ skills dir from Desktop session + update .version to v14+playbook
 

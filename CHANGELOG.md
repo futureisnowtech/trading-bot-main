@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-14
+- feat(playbook): Forever Playbook v1 — market-type router, symbol governance, funding doctrine, audit scripts, proof suite
+
+## 2026-04-14
 - fix(services): fix Desktop paths in all 6 source plists; make install_services.sh sed substitution portable (Projects path instead of Desktop)
 
 ## 2026-04-14

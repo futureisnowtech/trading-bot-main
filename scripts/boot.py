@@ -11,23 +11,36 @@ Fix: Run THIS tiny file as the script argument. boot.py only imports stdlib
 reads main.py as raw bytes via open() and exec()s it in a fresh namespace.
 main.py is never the argv[1] script, so launchd never locks it.
 """
+
 import sys
 import os
 
 PROJ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-main_path = os.path.join(PROJ, 'main.py')
+main_path = os.path.join(PROJ, "main.py")
 
-sys.argv = [main_path, '--mode', 'paper']
+# Force paper mode in the environment BEFORE any import can cache PAPER_TRADING=false.
+# config.py calls load_dotenv() + evaluates PAPER_TRADING at module import time (line 15).
+# main.py pre-warms config via `import logging_db.trade_logger` at module level (line 50),
+# which fires BEFORE parse_args() sets os.environ. Without this line, .env=false wins and
+# the live-mode `input()` prompt fires — crashing with EOFError in launchd (no TTY).
+os.environ["PAPER_TRADING"] = "true"
+
+sys.argv = [main_path, "--mode", "paper"]
 os.chdir(PROJ)
 if PROJ not in sys.path:
     sys.path.insert(0, PROJ)
 
-with open(main_path, 'rb') as _f:
+with open(main_path, "rb") as _f:
     _src = _f.read()
 
 exec(
-    compile(_src, main_path, 'exec'),
-    {'__name__': '__main__', '__file__': main_path,
-     '__doc__': None, '__package__': None, '__spec__': None,
-     '__builtins__': __builtins__},
+    compile(_src, main_path, "exec"),
+    {
+        "__name__": "__main__",
+        "__file__": main_path,
+        "__doc__": None,
+        "__package__": None,
+        "__spec__": None,
+        "__builtins__": __builtins__,
+    },
 )

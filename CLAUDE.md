@@ -6,362 +6,137 @@
 ## Strategic Brain
 
 The `/brain/` directory is the living strategic intelligence layer.
-- Hub: `brain/README.md`
-- Governed by: `brain_constitution.md` + `brain_execution_os.md`
+- Hub: `brain/README.md` — governed by `brain_constitution.md` + `brain_execution_os.md`
 - Key notes: `brain/01_current_system/`, `brain/03_parameter_sets/`, `brain/10_decisions/`
 
 ## What This System Is
 
-A fully autonomous AI-powered trading system that:
-- Scans Kraken Futures + Binance USDM + Hyperliquid perps 24/7 with a 7-filter pipeline (no hardcoded watchlist)
-- Scores every candidate with a two-tower signal engine (technical 0-100 + ML 0-100 → composite)
-- Enforces unbreakable emotional safeguards (the amygdala is removed)
-- Learns from every completed trade via Bayesian signal attribution + 57-feature ML snapshots
-- Writes all notifications to SQLite; dashboard Notifications panel displays them
-- Displays everything on a LeBron James / Dragon Ball Z themed dashboard
-- Trades 100% autonomously — owner is never asked to approve anything
+Fully autonomous AI trading system: scans Kraken Futures + Binance USDM + Hyperliquid perps 24/7, scores candidates with a two-tower signal engine (technical 0-100 + ML 0-100 → composite), enforces emotional safeguards, learns from every trade via Bayesian attribution + 57-feature ML, writes all notifications to SQLite, displays on LeBron/DBZ-themed dashboard. Owner is never asked to approve anything.
 
 ## Owner Profile
-- Mac user (MacBook Air 2020, Python 3.14 at /Library/Frameworks/Python.framework/Versions/3.14/bin/python3)
-- Paper account: $5,000 (ACCOUNT_SIZE=5000 — config default, no .env override)
-- Relatively technical but wants zero day-to-day intervention
-- Wants the system to WIN — everything tuned for performance
-- Prefers simple explanations, hates fluff
+- Mac user (MacBook Air 2020, Python 3.14 at `/Library/Frameworks/Python.framework/Versions/3.14/bin/python3`)
+- Paper account: $5,000 (`ACCOUNT_SIZE=5000` — config default, no .env override)
+- Wants zero day-to-day intervention. Prefers simple explanations, hates fluff.
 
-## Current Version: v13.9 (2026-04-14)
+## Current Version: v14.0 (2026-04-14)
 
-**Active branch:** `feature/v10-rebuild`
-**Clean paper trading started:** 2026-04-02
+**Active branch:** `feature/v10-rebuild` | **Clean paper trading started:** 2026-04-02
 
 ### Live Architecture (source of truth)
 
 | Component | File | Role |
 |---|---|---|
-| Scanner | `scanner.py` | **3 sources**: Kraken Futures + Binance USDM perps + Hyperliquid, 7-filter, top 50 candidates |
+| Scanner | `scanner.py` | 3 sources: Kraken Futures + Binance USDM + Hyperliquid, 7-filter, top 50 candidates |
 | Signal engine | `signal_engine.py` | Two-tower: technical 0-100 + ML 0-100 → composite |
 | Entry runner | `scheduler/v10_runner.py` | Scan loop, tier selection, economics gate, setup detection, execution handoff |
 | Position sizing | `position_manager.py` | Kelly + ATR sizing, leverage schedule, deployment caps |
-| Exit manager | `position_manager.py` | 6-priority exit stack (trailing/scale/thesis/hard-stop/risk/kill) |
+| Exit manager | `position_manager.py` | 7-priority exit stack |
 | Perp execution | `perps_engine.py` → `execution/binance_broker.py` | Paper mode, ISOLATED margin |
 | MES execution | `scheduler/v10_runner.py` → `execution/ibkr_broker.py` | IBKR paper port 7497 |
 | Indicators | `data/indicators.py` (`add_all_indicators()`) | SuperTrend, Ichimoku, WAE, Fisher, CHOP, WaveTrend, Laguerre RSI, etc. |
 | ML features | `ml/feature_builder.py` | 57 features across 11 groups (imports `indicators/` package) |
-| ML training | `ml/walk_forward_trainer.py` + `ml/model_store.py` | XGBoost 60% + LightGBM 40%, clean data only |
-| Indicators package | `indicators/` | atr_regime, cvd, funding_rate, liquidation_levels, macd_advanced, microstructure, open_interest, orderbook, orderflow, rsi_advanced, vwap_mtf, williams_r |
+| ML training | `ml/walk_forward_trainer.py` + `ml/model_store.py` | XGBoost 60% + LightGBM 40%, PnL regressor, clean data only |
 | Economics gate | `risk/economics_gate.py` | Pre-trade fee/funding EV veto (Kraken 0.065% taker) |
 | Learning loop | `learning_loop.py` | 57-feature snapshots, retrain queue, RBI trigger |
 | Bayesian learning | `learning/post_trade_analyzer.py` + `learning/signal_performance.py` | Per-signal Bayesian win rates |
 | Dynamic weights | `learning/dynamic_weights.py` | Live conviction weights, 5-min cache |
 | RBI nightly | `rbi/research_loop.py` + `rbi/backtest_loop.py` + `rbi/incubation_manager.py` | Research 575 combos, promote to live at 25% size |
+| Candidate journal | `logging_db/trade_logger.py` + `learning/candidate_labeler.py` | 8-gate journaling, 15m/1h/4h outcome labeling, nightly audit |
+| Integrity substrate | `logging_db/trade_logger.py` (`log_trade_integrity`, `log_exit_evaluation`) | Durable trust tiers (verified/suspect/quarantined/excluded) per close; exit quality capture |
+| Backtesting | `backtesting/event_backtester.py` + `backtesting/run.py` | Live-faithful candidate-replay backtester; RESEARCH-GRADE only |
+| Promotion engine | `backtesting/promotion_engine.py` | Challenger state machine; PROMOTED_PENDING_HUMAN requires owner confirmation |
+| Config sub-package | `config/venue_specs.py` + `config/alpha_specs.py` | Venue fees + futures-native constants separated from strategy thresholds |
+| Dashboard integrity | `dashboard/data/integrity.py` | Truth-tiered metrics: verified/suspect counts, attribution coverage, exit quality, promotion state |
 | Notifications | `notifications/notification_engine.py` | SQLite only, no Telegram |
 | Dashboard | `dashboard/app.py` | Streamlit Operator Panel, 5 tabs: MISSION CONTROL, CRYPTO PERFORMANCE, TRADE APPROVAL, S&P 500 FUTURES (MES), SYSTEM SETTINGS |
-| DB | `logs/trades.db` | WAL mode SQLite — all positions, trades, system_events |
+| DB | `logs/trades.db` | WAL mode SQLite — positions, trades, system_events, scan_candidates, candidate_outcomes, trade_integrity, exit_evaluations, challenger_state |
 | Vector memory | `memory/trade_memory.py` | NumPy cosine similarity, SQLite-backed, 8-dim feature vectors |
 | Kill switch | `kill_switch.py` | Balance < 75% of ACCOUNT_SIZE → halt all |
 | Risk engine | `risk_engine.py` | VaR/CVaR, correlation gates, margin checks |
 | Hedge engine | `hedge_engine.py` | Delta-neutral hedge rebalance (every 5 min) |
+| Health check | `monitoring/health_check.py` | 7-invariant assertions written to system_events; check 7 includes IBKR |
 | MCP server | `mcp_server/server.py` | 15 FastMCP tools for Claude Code integration |
-| Verification | `tests/proof/` + `verification/replay.py` + `.github/workflows/ci.yml` | Proof-first pytest harness, dashboard shell tests, deterministic replay, GitHub Actions CI |
+| Verification | `tests/proof/` + `verification/replay.py` + `.github/workflows/ci.yml` | Proof-first pytest harness, deterministic replay, GitHub Actions CI |
 
 ### Key Decisions
 
-- **Scanner sources:** Kraken Futures public REST + Binance USDM public REST + Hyperliquid public API
+- **Scanner sources:** Kraken Futures public REST + Binance USDM public REST + Hyperliquid public API (all 3 every scan)
 - **Execution:** `binance_broker.py` in paper mode (no live keys required; real API for live)
-- **No AI debate for entries:** Two-tower signal engine replaces all v9 debate agents
-- **Telegram removed:** Replaced by `notifications/notification_engine.py` (SQLite + dashboard only)
+- **No AI debate:** Two-tower signal engine replaces all v9 debate agents
+- **Telegram removed:** `notifications/notification_engine.py` — SQLite + dashboard only
 - **Paper = live thresholds:** No reduced thresholds in paper mode (clean data from 2026-04-02)
 - **ML training data:** Tagged `pre_v10_contaminated` for all data before 2026-04-02
 - **57 features:** 8 price + 6 volume + 5 CVD + 7 momentum + 4 VWAP + 5 OB + 6 deriv + 3 liq + 5 regime + 4 time + 4 onchain
-- **Kill switch:** balance < 75% of ACCOUNT_SIZE (= $3,750 on a $5K account), not hardcoded $7,500
-- **Live position sizing path:** `scheduler/v10_runner.py` sizes via `position_manager.compute_position_size()`; `risk/unified_sizer.py` is no longer on the live entry path
+- **Kill switch:** balance < 75% of ACCOUNT_SIZE (= $3,750 on $5K), not hardcoded
+- **Live position sizing path:** `v10_runner.py` → `position_manager.compute_position_size()`; `risk/unified_sizer.py` is NOT on the live entry path
 - **ISOLATED margin** on all perp positions — never CROSS
+- **ML model:** PnL regressor (XGBRegressor + LGBMRegressor). Score = `50 + 50*tanh(predicted_pnl / pnl_scale)`. Falls back to 50.0 if no pickle files exist.
+- **MES daily loss limit:** reads `FUTURES_DAILY_MAX_LOSS_PTS * FUTURES_NUM_CONTRACTS * MES_POINT_VALUE` (MES_POINT_VALUE=5.00). Never hardcode $150.
+- **Integrity tiers (v14.0):** every perp close writes to `trade_integrity` table (verified/suspect/quarantined/excluded). Bayesian/Kelly/ML consumers must not use quarantined or excluded rows. Gate: `is_integrity_trusted(close_order_id)`.
+- **Replay/synthetic sources:** any `source` containing `"replay"`, `"synthetic"`, `"bootstrap"`, or `"backtest_only"` is set to `excluded` tier — never reaches live Bayesian signal weights.
+- **Exit quality (v14.0):** every perp close writes to `exit_evaluations` table (opportunity_loss_pct, stop_overshoot_pct, mfe_at_exit, path_label). Dashboard reads via `dashboard/data/integrity.get_exit_quality_summary()`.
+- **config/ package (v14.0):** `config/__init__.py` re-exports all symbols from `config.py` for backward compatibility. Use `from config.venue_specs import KRAKEN_TAKER_FEE` for venue-specific constants; use `from config.alpha_specs import ...` for strategy thresholds.
+- **Backtesting (v14.0):** `backtesting/event_backtester.py` replays `scan_candidates` through live stack. Results tagged `source='candidate_replay'` (RESEARCH-GRADE). Promotion requires human confirmation — `backtesting/promotion_engine.py` surfaces `PROMOTED_PENDING_HUMAN` tier; never auto-applies to live.
+- **Nightly audit (v14.0):** `monitoring/nightly_audit.py` runs at 08:00 UTC via scheduler. 7 checks: proof suite, candidate journal health, funnel analytics, labeling lag, CLAUDE.md version drift, Bayesian weight changes, retention pruning.
+- **Migration scripts:** `scripts/migrate_integrity_backfill.py` backfills integrity tiers for historical closes. Idempotent (INSERT OR IGNORE). Run once after upgrade.
+
+### MES Futures — Critical Contract Facts (v13.9)
+
+- Contract resolved via `localSymbol='MESM26'` + `multiplier='5'` — NOT `lastTradeDateOrContractMonth`. Date-string form fails when contract isn't in TWS's DB.
+- `_get_mes_contract()` derives `localSymbol` from `MES_EXPIRY` (month codes: 03→H, 06→M, 09→U, 12→Z). Update `MES_EXPIRY` in `.env` on each quarterly roll.
+- Current: `MES_EXPIRY=20260619` → `localSymbol=MESM26`
+- Position dict keys from `buy_mes`/`short_mes`: `"entry"` (not `"entry_price"`), `"side"` (`"LONG"` or `"SHORT"`), `"qty"` (always positive integer).
+- **Never use `qty > 0` to determine direction** — always `pos.get("side") == "LONG"`.
+- Python 3.14: background thread must call `asyncio.set_event_loop(loop)` before `run_forever()`.
+- Verified: 10 paper round-trips (5L + 5S) via live TWS, account `DUP590699`.
 
 ### Go-Live Readiness (dashboard SYSTEM tab → READINESS TRACKER)
 
-Owner decides when to go live. These are informational readings, not system gates:
-- Clean trade count (source=clean_paper_v10 or live_v10)
-- Win rate on clean trades
-- Profit factor on clean trades
+Owner decides when to go live. Informational only — not system gates:
+- Clean trade count (source=`clean_paper_v10` or `live_v10`)
+- Win rate + profit factor on clean trades
 - Worst single day as % of account
 - Days running on clean data
 - Economics gate veto rate
 - Kill switch triggers (14d)
 
-### v13.9 MES Futures Launch-Readiness Audit (applied 2026-04-14)
-
-Full end-to-end audit and fix of the MES futures stack. 6 correctness bugs fixed, TWS integration verified with 10 live paper round-trips (real TWS order IDs, real price movement in P&L).
-
-- `execution/ibkr_broker.py` — **Contract spec fix (Error 200):** `lastTradeDateOrContractMonth='20260619'` → `localSymbol='MESM26'` + `multiplier='5'`. IBKR's `qualifyContractsAsync` reliably resolves `localSymbol`; the date-string form fails when the contract hasn't been explicitly loaded in TWS's contract DB. `_get_mes_contract()` now derives `localSymbol` from `MES_EXPIRY` (month code table: 06→M, 09→U, 12→Z, etc.) so it stays correct across quarterly rolls.
-- `execution/ibkr_broker.py` — **Event loop fix (Python 3.14):** Background thread now calls `asyncio.set_event_loop(loop)` before `run_forever()`. Python 3.10+ no longer auto-creates a loop per thread — without this, `connectAsync` raised `RuntimeError: There is no current event loop in thread 'ibkr-event-loop'` and every connection silently fell back to offline mode.
-- `scheduler/v10_runner.py` — **`entry` key mismatch:** `_mes_scan_inner()` was reading `pos.get("entry_price", or_mid)` but `buy_mes/short_mes` store `"entry"`. Stop/target P&L was always computed against `or_mid` (opening range midpoint) instead of actual entry price.
-- `scheduler/v10_runner.py` — **SHORT positions never correctly exiting:** `is_long = qty > 0` was always `True` because `short_mes` stores `qty` as a positive integer (same as `buy_mes`). SHORT stop/target monitoring never triggered; SHORT P&L was calculated as LONG P&L. Fixed: `is_long = pos.get("side", "LONG") == "LONG"`.
-- `scheduler/v10_runner.py` — **EOD close same bug:** `if pos["qty"] > 0` at 15:45 always True → called `sell_mes` for SHORT positions (wrong broker call). Fixed to `pos.get("side", "LONG") == "LONG"`.
-- `scheduler/v10_runner.py` — **Daily loss limit hardcoded `$150`** vs config `$50` (5pts × 2 contracts × $5). Comment said "10 pts × $5 × 3 contracts" which matched neither current config nor current contract count. Now reads from `FUTURES_DAILY_MAX_LOSS_PTS * FUTURES_NUM_CONTRACTS * MES_POINT_VALUE`. `MES_POINT_VALUE = 5.00` added as module-level constant in v10_runner.
-- `monitoring/health_check.py` — **7th health check added:** `_check_ibkr_connection()` — verifies TWS is reachable on port 7497 when `FUTURES_ENABLED=true`; attempts one reconnect before reporting failure; logs IBKR paper account balance. Score denominator is now 7/7. Skipped (passes automatically) when `FUTURES_ENABLED=false`.
-- `dashboard/data/health.py` — No-data fallback `"total": 6` → `7`. IBKR fix-prompt added to `_classify_error()` so dashboard shows actionable TWS reconnect steps when the `ibkr` health check fails.
-- `.env` — `FUTURES_ENABLED=true`, `FUTURES_NUM_CONTRACTS=2`, `MES_EXPIRY=20260619`, `IBKR_HOST/PORT/CLIENT_ID` added.
-- **Verified:** 10 MES paper round-trips (5L + 5S) via live TWS, account `DUP590699`, real TWS order IDs (112–202), prices moving tick-by-tick, P&L non-zero reflecting actual price movement. 41/41 proof tests green.
-
-### v13.8 Dead-Money Exit + Dashboard Live Health + Proof Coverage (applied 2026-04-13)
-
-- `scheduler/v10_runner.py` — **Priority-7 dead-money exit** replaces the old time-only (>72h) stagnant check. Now fires when: held >24h AND `|current_price - entry_price| < 0.5 × atr_at_entry` (market empirically proved no edge) AND no trailing activation AND no scale-out done. Hard backstop at 96h regardless. `exit_type` changed from `stagnant_exit` → `dead_money_exit`. Log line includes drift ratio, entry, current price, ATR.
-- `config.py` — `CRYPTO_SCAN_INTERVAL_SECONDS` corrected 15 → 300 (matches actual 5-min scan loop). Was causing `scan_liveness` health check to always fail (45s threshold vs 300s reality).
-- `monitoring/health_check.py` — deduplication: `_last_failure_keys` frozenset comparison suppresses repeated `log_event` writes when failing checks haven't changed; only writes when failure set changes, status changes, or hourly cooldown elapses. Eliminates DB flooding (~60 near-identical ERROR rows/hour → ~1).
-- `dashboard/data/health.py` — **`get_health_status()` substring fix:** `"HEALTHY" in msg` matched "UNHEALTHY" (substring); changed to `"[HEALTHY]" in msg` — bracket-enclosed match. Was silently reading every UNHEALTHY event as HEALTHY, causing `get_health_check_failures()` to always return `[]`.
-- `dashboard/data/health.py` — **`get_error_rate_1h()`** now excludes `source='health_check'`; health_check noise was inflating the banner count to 20+ even when all runtime errors were fixed.
-- `dashboard/data/health.py` — **`get_health_check_failures()`** (NEW): parses the *current* (most recent) health_check event to extract per-check failures. Always reflects live bot state, never 1-hour of stale DB records. Each failure carries `live=True`, `category`, `fix_type` (Claude Code / Codex), `fix_prompt`.
-- `dashboard/data/health.py` — **`get_recent_errors_detail()`** now excludes `source='health_check'`; that source is covered by `get_health_check_failures()` using live data.
-- `dashboard/widgets/mission_control/status_hero.py` — error breakdown panel rebuilt: health_check failures shown from live state (not DB history), other errors from 1h DB window (health_check excluded), `no_errors` banner logic updated to `error_rate == 0 and not _health_issues`, re-check button removed (auto-refreshes every 10s), live timestamp + LIVE badge + green all-clear banner added.
-- `dashboard/data/health.py` — **Error classifier** (`_classify_error`) fix-prompt for "stagnant" updated to reference dead-money exit (not the old 72h block).
-- `tests/proof/test_dashboard_data.py` (NEW) — 16 invariant proof tests for `dashboard/data/health.py`: source exclusion (error rate + detail), deduplication, live-state parsing, banner `no_errors` consistency. **The key invariant test** (`test_banner_no_errors_false_when_health_degraded_and_no_runtime_errors`) explicitly encodes the tunnel-vision bug class so it can never silently regress. All 41 proof tests green.
-
-### v13.7 Autonomous Journaling Operationalization (applied 2026-04-13)
-
-- `logging_db/trade_logger.py`: `candidate_outcomes` DDL now includes `price_15m`/`ret_15m_pct` columns directly (avoids ALTER TABLE chicken-and-egg on fresh DBs); `prune_old_candidates(labeled_days=90, unlabeled_days=30)` added; `get_logger()` singleton + `_TradeLoggerHandle` wrapper added for `risk_engine`/`kill_switch` callers; `kill_switch_log` table added to `init_db()`
-- `learning/candidate_labeler.py`: 15-minute forward outcome added — fetches 50×15m candles per candidate; `_compute_15m_metrics()` computes `price_15m`, `ret_15m_pct`; both fields passed to `log_candidate_outcome()`
-- `monitoring/nightly_audit.py`: full rewrite — exception-only notification model with severity-gated cooldowns (INFO 23h / WARN 6h / CRIT 1h); `_check_candidate_funnel()` for 24h decision-funnel analytics + anomaly detection; `_check_retention()` calls `prune_old_candidates()` + warns on oversized table; `_emit_audit_notification()` force-emits on status change (recovery always notified)
-- `dashboard/data/journal_health.py` (NEW): `get_journal_health()` — candidates 24h/7d, labeling rate, backlog, conversion %, funnel breakdown, top veto reasons, outcome quality, last audit result
-- `dashboard/widgets/system_settings/dev_config.py`: "Learning & Journaling Health" expander added — 🟢/🟡 status badge, 7 metrics, decision funnel table, top veto reasons table
-- `.github/workflows/ci.yml`: branch list updated to include `feature/v10-rebuild`; test target changed to `tests/proof/`; ACCOUNT_SIZE=5000; stale env vars removed; streamlit added to deps
-- `tests/proof/test_candidate_journal.py`: 5 new proof tests — 15m fields populated/graceful, DB persistence of 15m fields, 90d/30d retention policy, nightly audit funnel+retention checks; total 25/25 green
-- No strategy thresholds changed; no live entry path touched; all new code is fire-and-forget read/write
-
-### v13.6 Candidate Journaling + Automated Outcome Labeling (applied 2026-04-13)
-
-- `logging_db/trade_logger.py`: `scan_candidates` + `candidate_outcomes` tables added to `init_db()`; `log_scan_candidate()`, `get_unlabeled_candidates()`, `log_candidate_outcome()`, `get_candidate_journal_stats()` helpers added
-- `scheduler/v10_runner.py`: `_journal_scan_candidate()` helper; per-scan `scan_id` (UUID hex); journaling at 8 decision gates: `dual_exposure_block`, `cooldown_block`, `risk_block`, `data_unavailable`, `below_threshold`, `econ_veto`, `sizing_zero`, `entered`; labeler + nightly audit scheduled
-- `learning/candidate_labeler.py` (NEW): background labeling worker (every 15 min, daemon thread); fetches forward 1h candles; computes 1h/4h returns, MFE, MAE, hit_1r, hit_2r, hit_stop; writes `candidate_outcomes`; bounded batch 50 rows/run
-- `monitoring/nightly_audit.py` (NEW): daily 08:00 UTC; pytest proof suite + candidate journaling health + repo drift + learning health; writes to system_events; runnable standalone
-- `tests/proof/test_candidate_journal.py` (NEW): 10 proof tests — all green
-- No thresholds changed; no strategy logic touched; all journal writes are fire-and-forget
-
-### v13.5 Conviction-Adaptive Exit Stack (applied 2026-04-13)
-
-- `position_manager.py` — **Fix #1 (real-R denominator):** Scale-out R calculation now uses `abs(entry - stop_price)` (the actual risk per the live stop) instead of `atr * 1.5`. The hardcoded denominator was half the real stop, causing "2R" to fire at true 1:1 R:R — first 33% always sold the moment the trade broke even.
-- `position_manager.py` — **Fix #2 (conviction-adaptive scale targets):** Scale-out first/second R levels and slice size now blend `entry_composite_score` (60 weight) + regime extension potential (40 weight). RANGING + low-conviction → 2.0R/4.5R; TRENDING + high-conviction → 4.0R/8.0R. Replaces flat 2R/3.5R.
-- `position_manager.py` — **Fix #3 (regime-aware trailing activation + width):** `_REGIME_TRAIL_CONFIG` dict drives both activation threshold and trail multiplier per regime. `activate_trailing()` now calls `_resolve_trail_config(regime)` and stores `trail_atr_mult` in the position dict. RANGING activates at 1.0×ATR with 2.5× trail; HIGH_VOL at 2.0×ATR with 5.5× trail; etc.
-- `position_manager.py` — **Fix #4 (ATR-proportional thesis hold gate):** LONG positions get 1h–6h hold gate proportional to ATR%; SHORT positions 2h–12h (shorts need twice as long historically). Replaces flat 45-min MR / 2h momentum floors.
-- `position_manager.py` — **Fix #5 (signal-health trail compression):** When trailing is active, `check_exits()` computes `signal_health = (current_score - thesis_floor) / (entry_score - thesis_floor)`. If health < 65%, trail compresses toward 50% of nominal — the bot tightens its own leash as conviction fades without hard-coding an exit. Returns `trail_compressed` non-exit `ExitDecision` carrying `trail_atr_mult`.
-- `position_manager.py` — `update_trailing_stop()` now reads `position.get("trail_atr_mult", 4.0)` instead of hardcoded 4.5, so compression is honoured on every tick.
-- `scheduler/v10_runner.py` — Added `trail_compressed` handler: applies compressed `trail_atr_mult` to position dict and recomputes `trailing_stop_price` immediately without closing the position.
-
-### v13.4 Proof Infrastructure + Repo Truth Alignment (applied 2026-04-10)
-
-- `logging_db/trade_logger.py`: added `get_logger()` compatibility wrapper for current live callers (`risk_engine.py`, `position_manager.py`, `kill_switch.py`, RBI modules) and added `kill_switch_log` table creation to `init_db()`
-- `risk_engine.py`: startup balances now initialize from configured `ACCOUNT_SIZE` ($5,000) instead of a hardcoded value, so drawdown / kill-switch math tracks the real paper account from process start
-- `kill_switch.py`: threshold docs aligned to configured account size; `check_balance()` now defaults its initial balance from config ($5,000)
-- `dashboard/data/execution.py`, `dashboard/widgets/mission_control/decision_quality.py`, `dashboard/widgets/crypto_performance/deep_analysis.py`: `trade_attribution` reads aligned to the real schema (`created_at`, no `direction` column)
-- `dashboard/data/health.py` + `main.py`: startup event wording aligned so restart counts match runtime (`Bot started — ... v13.4`)
-- `CLAUDE.md` + `scripts/validate.py`: repo memory and pre-flight validation now read the current version/source-of-truth state (`AGENTS.md` first, `CLAUDE.md` fallback) so startup checks match runtime reality
-- `scripts/validate.py`: optional imports now degrade to warnings even on runtime import errors (for example `pandas_ta`/`numba` cache issues on Python 3.14) instead of aborting validation
-- `tests/proof/`: new proof-first pytest suite covering scanner, economics gate, position sizing, risk engine, kill switch, attribution/logging, dashboard harness, and deterministic replay
-- `verification/replay.py`: deterministic scanner → signal → economics → sizing → risk → attribution harness for staging proofs
-- `.github/workflows/ci.yml` + `pytest.ini`: GitHub Actions proof suite runs automatically on pushes and pull requests; default `pytest` target is the proof harness
-
-### v13.3 ML Upgrade + Dashboard Clarity (applied 2026-04-06)
-
-- `signal_engine.py`: `thesis_still_valid()` now uses regime-conditional thresholds — TRENDING=30%, RANGING=15%, HIGH_VOL=35%, UNKNOWN=25% — instead of fixed 25%. Faster exits in RANGING (fragile setups), more patience in HIGH_VOL (noisy signal).
-- `ml/walk_forward_trainer.py`: Binary classifier (predict `won`) replaced with PnL regressor (predict `net_pnl` in USD). XGBRegressor + LGBMRegressor with `reg:squarederror`/`regression` objectives. `pnl_scale` (std of training PnL) saved as `{pair}_{dir}_meta.pkl` alongside models. `_compute_metrics` now gates on `predicted_pnl > 0` instead of `probability >= 0.5`. Optuna HPO uses real PnL Sharpe instead of probability-proxy Sharpe.
-- `ml/model_store.py` (NEW): `ModelStore` class loads saved regressor pickles and `pnl_scale` metadata. `predict_ml_score(features, direction)` returns 0-100 via `50 + 50*tanh(predicted_pnl / pnl_scale)`. File-mtime cache — reloads from disk when model is updated by retrainer.
-- `scheduler/v10_runner.py`: Both `se.score()` and `check_exits()` now call `_get_model_store()` — returns `ModelStore` if any pickle files exist in `ml/models/`, else returns `None` (ML stays neutral at 50.0). Refreshes hourly.
-- `dashboard/app.py`: `get_mes_all_time_stats()` now filters `ts >= '2026-04-02'` and excludes contaminated sources; exit stack description updated to show regime-conditional thresholds; scanner source updated to mention all 3 exchanges.
-
-### v13.2 Gate Architecture + Execution Quality (applied 2026-04-06)
-
-- `risk/economics_gate.py`: volume floor aligned $3M → $2.5M (matches scanner floor, eliminates dead zone); spread gate added (`_MAX_SPREAD_PCT_GATE = 0.0025`, 25 bps global fallback); depth gate added (`_MIN_NEAR_DEPTH_USD = 5_000`, $5K each side, only fires when depth data available); EV floor upgraded to cost-aware formula: `max(static_tier_b, 2.0 × effective_round_trip_cost)` where effective cost = fees + spread/2 + funding carry
-- `scheduler/v10_runner.py`: price sanity check tightened 20% → 5% global fallback (old 20% threshold missed ETH $19 vs $2130 candle issue); depth fields (`bid_depth_usd`, `ask_depth_usd`) now extracted from candidate and passed to economics gate; veto suppression upgraded from time-only cooldown to 3-strike system — first 3 occurrences log normally, 4th emits "suppressing further" notice, silent thereafter until 30-min window resets
-- `CLAUDE.md`: scanner sources corrected — code actually uses 3 sources (Kraken Futures + Binance USDM + Hyperliquid) every scan cycle; docs were Kraken-centric but code was not
-
-### v13.1 Scanner/Funnel Fixes (applied 2026-04-06)
-
-- `scanner.py`: `_MIN_VOLUME_24H_USD` raised $500K → $2.5M — eliminates MOODENG/ZETA/VIRTUAL/FET from reaching the signal engine
-- `scheduler/v10_runner.py`: economics veto log cooldown added (30 min between identical veto messages per symbol+direction+reason); per-scan funnel summary logged at INFO (`funnel: N candidates → scored=X (dropped: dual=Y cooldown=Z) → entries=A (~B vetoed/skipped)`)
-- `perps_engine.py`: duplicate close idempotency guard — full close of same symbol within 60s returns None and logs warning; check is atomic under `_lock` to block concurrent callers
-- `position_manager.py`: hard stop reason now uses `:.8g` format (e.g. `3.5191e-06`) instead of `:.4f` (`0.0000`) for micro-priced assets like PEPE
-
-### v13 Strategy Optimization (applied 2026-04-05)
-
-- `risk/economics_gate.py`: `stop_multiplier` parameter added — v10_runner now passes 3.0 (was hardcoded 1.5); EV tier thresholds doubled to match (A+=1.6%, A=0.8%, B=0.3%); edge_score cap 3.0%
-- `signal_engine.py`: WAE explosion long/short now requires both fast AND slow MACD histogram to agree (eliminates fading momentum false fires); `_live_trade_days()` ISO parse fixed (was always returning 0, keeping ML weight at 20%); thesis threshold docstring corrected to 0.25
-- `scheduler/v10_runner.py`: Tier 1 composite floor added (50.0); Tier 2 threshold raised 50→58; win_rate_estimate now 0.54 (Tier 1) or 0.50–0.60 scaled by composite (Tier 2); stop_multiplier=3.0 passed to economics gate
-- `position_manager.py`: Kelly query fixed to cover SHORT exits (was `action='SELL'` missing all SHORT trade outcomes)
-- DB: REZ phantom -$2.5M close purged; REZ chain tagged `source='pre_v10_contaminated'`
-
-### v10.1 Changes vs v10.0 (applied 2026-04-02–04)
-
-- `scanner.py`: Kraken Futures public REST (no Binance geo-block, no auth required)
-- `signal_engine.py`: paper threshold reduction REMOVED
-- `execution/bybit_broker.py`: DELETED (geo-blocked for US)
-- `execution/ibkr_broker.py`: telegram import removed → notification_engine
-- `risk/economics_gate.py`: NEW — pre-trade fee/funding EV veto
-- `risk/unified_sizer.py`: replaced 6-factor chain with 3-factor formula; Kelly applied; $100 hard cap
-- `scheduler/v10_runner.py`: TV signals wired, economics gate wired; cooldown after close (2h); SQLite entry guard; position restore on startup
-- `perps_engine.py`: `load_positions_from_db()` restores positions from SQLite on restart
-- `ml/walk_forward_trainer.py`: training filter excludes contaminated data
-- `execution/binance_broker.py`: hard telegram import replaced with no-op stubs
-- `risk/risk_manager.py`: telegram halt alert replaced with notification_engine
-- `position_manager.py`: kill switch docstring fixed ($7,500 → 75% of ACCOUNT_SIZE)
-- `legacy/` directory DELETED — all v9 code removed from repo
-- DB purged: api_costs, debate_results, agent_stats, backtest_results, pre-v10 trades/signals
-- `alerts/telegram_alert.py` references removed from monitoring/health_check.py and scripts/check_readiness.py
-- Webull credentials removed from .env
-
-## Project Structure (v10.1 — live files only)
-
-```
-algo_trading_final/
-├── CLAUDE.md                 ← You are here (keep current)
-├── CHANGELOG.md              ← Append every change: bash scripts/log_change.sh "..."
-├── main.py                   ← Entry: python3 main.py --mode paper
-├── config.py                 ← All constants (reads .env)
-├── scanner.py                ← Multi-exchange perp scanner (Kraken + Binance + Hyperliquid) (DO NOT TOUCH)
-├── signal_engine.py          ← Two-tower signal engine (DO NOT TOUCH)
-├── position_manager.py       ← Live position sizing + 6-priority exit stack (DO NOT TOUCH)
-├── perps_engine.py           ← Perp execution wrapper (DO NOT TOUCH)
-├── risk_engine.py            ← VaR/CVaR/correlation/margin
-├── hedge_engine.py           ← Delta-neutral hedge
-├── kill_switch.py            ← Hard halt on balance < 75% ACCOUNT_SIZE
-├── learning_loop.py          ← Post-trade ML snapshot + RBI trigger
-├── pair_intelligence.py      ← Per-pair win rate / vol profile (reads trade_attribution)
-├── run_backtest.py           ← Standalone v9-era backtest runner (reference only)
-│
-├── scheduler/
-│   ├── v10_runner.py         ← THE live loop (scan/exit/hedge/kill/rbi) (DO NOT TOUCH)
-│   └── __init__.py
-│
-├── data/
-│   ├── indicators.py         ← add_all_indicators() — all v10 indicators (DO NOT TOUCH)
-│   ├── historical_data.py    ← get_candles() — OHLCV from Kraken / yfinance fallback
-│   └── edge_monitor.py       ← Rolling edge score per market (read by dashboard)
-│
-├── indicators/               ← v10 indicator modules (all imported by ml/feature_builder.py)
-│   ├── atr_regime.py
-│   ├── cvd.py
-│   ├── funding_rate.py
-│   ├── liquidation_levels.py
-│   ├── macd_advanced.py
-│   ├── microstructure.py
-│   ├── open_interest.py
-│   ├── orderbook.py
-│   ├── orderflow.py
-│   ├── rsi_advanced.py
-│   ├── vwap_mtf.py
-│   └── williams_r.py
-│
-├── ml/
-│   ├── feature_builder.py    ← 57 features (DO NOT TOUCH)
-│   ├── walk_forward_trainer.py ← XGBoost + LightGBM walk-forward (DO NOT TOUCH)
-│   ├── model_store.py        ← Model persistence (DO NOT TOUCH)
-│   ├── calibration.py        ← Platt scaling
-│   ├── online_learner.py     ← Incremental updates between retrains
-│   └── regime_classifier.py  ← TRENDING/RANGING/HIGH_VOL/UNKNOWN
-│
-├── risk/
-│   ├── economics_gate.py     ← Pre-trade fee/funding EV veto (DO NOT TOUCH)
-│   ├── unified_sizer.py      ← Legacy/reference sizer — not on live v10_runner entry path
-│   ├── risk_manager.py       ← Thin orchestrator
-│   ├── drawdown_controller.py
-│   ├── position_sizer.py
-│   ├── stop_loss_manager.py
-│   ├── risk_limits.py
-│   ├── var_calculator.py     ← VaR 95/99%
-│   ├── volatility_regime.py
-│   └── edge_monitor.py       ← Rolling edge score per market
-│
-├── rbi/
-│   ├── research_loop.py      ← Nightly: 575 signal combo tests
-│   ├── backtest_loop.py      ← Walk-forward validation for promoted combos
-│   └── incubation_manager.py ← Live trading at 25% size for new combos
-│
-├── learning/
-│   ├── post_trade_analyzer.py  ← Bayesian attribution on every close (DO NOT TOUCH)
-│   ├── signal_performance.py   ← Running signal stats (DO NOT TOUCH)
-│   └── dynamic_weights.py      ← Live conviction weights, 5-min cache (DO NOT TOUCH)
-│
-├── execution/
-│   ├── binance_broker.py     ← Perp execution (paper + live) — Binance USD-M
-│   └── ibkr_broker.py        ← MES futures — IBKR via ib_insync, paper port 7497
-│
-├── notifications/
-│   └── notification_engine.py ← SQLite only (DO NOT TOUCH)
-│
-├── logging_db/
-│   └── trade_logger.py       ← SQLite trades.db WAL mode (DO NOT TOUCH)
-│
-├── dashboard/
-│   └── app.py                ← Streamlit Operator Panel (5 tabs, widget architecture) (DO NOT TOUCH)
-│
-├── memory/
-│   └── trade_memory.py       ← 8-dim NumPy cosine similarity, SQLite-backed
-│
-├── monitoring/
-│   └── health_check.py       ← 7-invariant health assertions written to system_events (added ibkr check)
-│
-├── mcp_server/
-│   └── server.py             ← 15 FastMCP tools; start: python3 mcp_server/server.py
-│
-├── alerts/
-│   └── __init__.py           ← Empty — telegram_alert.py deleted in v10
-│
-├── tests/
-│   ├── proof/               ← Default pytest target — self-verification harness
-│   ├── test_indicators.py
-│   ├── test_risk_manager.py
-│   └── test_broker_paper.py
-│
-├── verification/
-│   ├── __init__.py
-│   └── replay.py            ← Deterministic replay/staging harness
-│
-├── scripts/                  ← Ops scripts (mostly still valid for v10)
-│   ├── weekly_report.py      ← python3 scripts/weekly_report.py
-│   ├── migrate_clean_start.py ← Already run 2026-04-02
-│   ├── check_v10_readiness.py ← Readiness checker
-│   ├── validate.py           ← Pre-flight validator
-│   ├── tradingview_webhook.py ← TradingView Pine Script alert ingestion
-│   ├── tradingview_pine.pine ← Pine Script v5 template
-│   ├── log_change.sh         ← Append to CHANGELOG.md
-│   ├── backup_db.sh / backup_credentials.sh
-│   └── install_services.sh   ← launchd auto-start setup (run once)
-```
-
-## Signal Engine (v10 — no AI debate agents)
+## Signal Engine
 
 Two deterministic towers → composite score → regime threshold gate.
 
 | Tower | Method | Signals |
 |-------|--------|---------|
-| Technical | Rule-based point scoring, normalised 0-100 | CVD divergence, MACD multi-variant, RSI divergence, funding squeeze, VWAP reclaim, OB imbalance, Williams %R, liq cascade, vol spike, Fear & Greed, options skew, whale signal |
-| ML | XGBoost 60% + LightGBM 40% walk-forward ensemble, normalised 0-100 | 57 features across 11 groups (price, volume, CVD, momentum, VWAP, orderbook, derivatives, liquidation, regime, time, onchain) |
+| Technical | Rule-based point scoring, 0-100 | CVD divergence, MACD multi-variant, RSI divergence, funding squeeze, VWAP reclaim, OB imbalance, Williams %R, liq cascade, vol spike, Fear & Greed, options skew, whale signal |
+| ML | XGBoost 60% + LightGBM 40% PnL regressor, 0-100 | 57 features across 11 groups |
 
-Entry: composite >= regime threshold (TRENDING_UP/DOWN=58, RANGING=58, HIGH_VOL=60, LOW_VOL=56, UNKNOWN=58). Same threshold paper and live.
+Entry: composite >= regime threshold: TRENDING_UP/DOWN=58, RANGING=58, HIGH_VOL=60, LOW_VOL=56, UNKNOWN=58. Same threshold paper and live. WAE explosion requires both fast AND slow MACD histogram to agree.
 
-## 7-Priority Exit Stack (position_manager.py + v10_runner.py) — v13.8
+## 7-Priority Exit Stack (position_manager.py + v10_runner.py)
 
-1. **Trailing stop** — regime-aware activation (RANGING=1.0×ATR, TRENDING=1.5×ATR, HIGH_VOL=2.0×ATR) and trail width (RANGING=2.5×, TRENDING=4.5×, HIGH_VOL=5.5×). Trail further compresses as signal health fades toward thesis floor (signal-health trail compression, non-restrictive).
-2. **Take profit scale-out** — conviction-adaptive targets: _factor blends entry_composite_score (60%) + regime extension (40%). First cut 20–30% at 2.0–4.0R; second cut 25% at 4.5–8.0R. Denominator uses actual stop distance (not hardcoded ATR multiple).
-3. **Thesis score exit** — current composite < entry composite × regime_fraction → close all; TRENDING=30%, RANGING=15%, HIGH_VOL=35%, UNKNOWN=25%. ATR-proportional hold gate (LONG: 1h–6h; SHORT: 2h–12h).
+1. **Trailing stop** — regime-aware: RANGING=1.0×ATR activation/2.5× width; TRENDING=1.5×ATR/4.5×; HIGH_VOL=2.0×ATR/5.5×. Compresses toward 50% of nominal when `signal_health < 65%`.
+2. **Take profit scale-out** — conviction-adaptive: blends `entry_composite_score` (60%) + regime extension (40%). First cut 20–30% at 2.0–4.0R; second cut 25% at 4.5–8.0R. Denominator = `abs(entry - stop_price)` (actual stop distance, not hardcoded ATR).
+3. **Thesis score exit** — composite < entry × regime_fraction: TRENDING=30%, RANGING=15%, HIGH_VOL=35%, UNKNOWN=25%. ATR-proportional hold gate: LONG 1h–6h, SHORT 2h–12h.
 4. **Hard stop** — stop-market on exchange, never widened.
 5. **Risk forced exit** — margin breach / drawdown / correlation.
-6. **Kill switch** — balance < 75% of ACCOUNT_SIZE / API errors / latency.
-7. **Dead-money exit** (`scheduler/v10_runner.py`, `exit_type=dead_money_exit`) — fires when held >24h AND `|current_price - entry_price| < 0.5 × atr_at_entry` (price hasn't moved half an ATR since entry, market proved no edge) AND no trailing activation AND no scale-out. Hard backstop at 96h regardless of drift. Data-driven — time is a gate, market movement is the signal.
+6. **Kill switch** — balance < 75% ACCOUNT_SIZE / API errors / latency.
+7. **Dead-money exit** (`exit_type=dead_money_exit`) — held >24h AND `|current - entry| < 0.5×atr_at_entry` AND no trailing activation AND no scale-out done. Hard backstop at 96h regardless.
 
-## v10 Learning Architecture
+## Learning Architecture
 
-Every closed trade triggers `learning_loop.record_closed_trade()` which:
-1. Persists 57-feature snapshot + outcome to `ml_feature_snapshots` table
-2. Calls `learning/post_trade_analyzer.py` → Bayesian attribution on signal stats
-3. Checks `ml_retrain_queue` — triggers walk-forward retrain when enough data accumulates
-4. Feeds incubating RBI strategies with live results
+Every closed trade triggers `learning_loop.record_closed_trade()`:
+1. Persists 57-feature snapshot + outcome to `ml_feature_snapshots`
+2. Calls `learning/post_trade_analyzer.py` → Bayesian attribution
+3. Checks `ml_retrain_queue` → triggers walk-forward retrain when enough data
+4. Feeds incubating RBI strategies
 
 Bayesian weight formula:
 ```
 posterior_wr = (PRIOR_N * prior_p + N * obs_win_rate) / (PRIOR_N + N)
 bayesian_pts = prior_pts * (posterior_wr / prior_p)
 ```
-- PRIOR_N = 20 phantom trades
-- MIN_FIRES_TO_LEARN = 10 (use hardcoded prior below this)
-- Cap: 2.5x original prior points, per signal per regime
+PRIOR_N=20, MIN_FIRES_TO_LEARN=10, cap=2.5× original prior points per signal per regime.
+
+Candidate journaling: 8 decision gates logged per scan (`dual_exposure_block`, `cooldown_block`, `risk_block`, `data_unavailable`, `below_threshold`, `econ_veto`, `sizing_zero`, `entered`). Labeler runs every 15 min computing 15m/1h/4h returns, MFE, MAE, hit_1r, hit_2r. Nightly audit at 08:00 UTC.
 
 ## The Amygdala Removal Rules (HARDCODED — NO OVERRIDE)
 
@@ -374,117 +149,89 @@ bayesian_pts = prior_pts * (posterior_wr / prior_p)
 7. When in doubt, HOLD — a skipped trade costs nothing
 8. The goal is being in business next month, not winning today
 
-## Risk Rules (v10.1 current values)
+## Risk Rules (current values)
 
 - **1%** max account risk per trade
 - **4%** max daily loss → halt ALL trading (paper: no cap, never halts learning)
 - **90%** max deployed capital
-- Default **3x** leverage, max **10x** (strict gates in signal_engine)
+- Default **3×** leverage, max **10×**
 - ISOLATED margin on all perp positions — never CROSS
 - Kraken taker fee: **0.065%** (modeled in economics_gate.py before every entry)
 - Kill switch at balance < **75% of ACCOUNT_SIZE**
+- Economics gate EV tiers: A+=1.6%, A=0.8%, B=0.3%; stop_multiplier=3.0; spread gate=25bps; depth gate=$5K/side
+- Volume floor: $2.5M/24h (scanner + economics gate aligned)
 
 ## Key Data Formats
 
-### Trade log (SQLite trades table)
-ts, strategy, broker, symbol, action, order_type, qty, price,
-value_usd, fee_usd, pnl_usd, paper, order_id, notes
+### Trade log (SQLite `trades` table)
+`ts, strategy, broker, symbol, action, order_type, qty, price, value_usd, fee_usd, pnl_usd, paper, order_id, notes`
 
-### Position (risk_manager in-memory + SQLite open_positions table)
-symbol, strategy, qty, entry, stop, target, high_since_entry, ts_entry
+### Position (in-memory + SQLite `open_positions`)
+`symbol, strategy, qty, entry, stop, target, high_since_entry, ts_entry`
 
-### Vector Memory Schema (logs/memory/trade_memory.db)
-Table: trade_experiences — NumPy cosine similarity, SQLite storage (no LanceDB)
-8-dim vector: [rsi/100, tanh(macd*10), adx/100, min(vol/5,1), regime_trending, regime_ranging, regime_volatile, regime_unknown]
+### Vector Memory (`logs/memory/trade_memory.db` → `trade_experiences`)
+8-dim: `[rsi/100, tanh(macd*10), adx/100, min(vol/5,1), regime_trending, regime_ranging, regime_volatile, regime_unknown]`
 
 ## How to Start the System
 ```bash
 python3 main.py --mode paper       # Force paper
 python3 main.py --mode live        # Live (requires typing 'I UNDERSTAND')
-streamlit run dashboard/app.py --server.runOnSave true  # Dashboard on :8501
-python3 mcp_server/server.py       # MCP server (Claude Code integration)
+streamlit run dashboard/app.py --server.runOnSave true  # Dashboard :8501
+python3 mcp_server/server.py       # MCP server
 python3 scripts/weekly_report.py   # Weekly performance report
-python3 -m pytest                  # Proof-first verification suite
+python3 -m pytest                  # Proof-first verification suite (tests/proof/)
 ```
 
-## Notifications (v10)
-All alerts written to `system_events` SQLite table via `notifications/notification_engine.py`.
-Dashboard Notifications panel reads and displays them in real time.
-No Telegram, no email. Works offline. `alerts/` directory is empty (telegram_alert.py deleted).
+## Notifications
+All alerts → `system_events` SQLite table via `notifications/notification_engine.py`. No Telegram, no email. `alerts/` directory is empty.
 
-## Auto-Start & Auto-Restart
+## Auto-Start (launchd)
 ```bash
 bash scripts/install_services.sh
 ```
-Registers three launchd services:
-- **com.algotrading.king** — starts bot on login, restarts on crash (paper mode)
-- **com.algotrading.backup** — backs up DB + credentials at 2:00 AM daily
-- **com.algotrading.readiness** — readiness check at 7:00 AM daily
+Services: `com.algotrading.king` (bot, restarts on crash), `com.algotrading.backup` (2am daily), `com.algotrading.readiness` (7am daily). Logs: `logs/service/`
 
-Service logs: `logs/service/`
-
-## TradingView Integration (v10 — still wired)
-TradingView Pine Script → webhook → SQLite `system_events` (source='tradingview')
-v10_runner reads these every scan cycle, prepends as candidates with edge_score=0.6.
+## TradingView Integration
+Pine Script → webhook → SQLite `system_events` (source='tradingview'). v10_runner reads every scan cycle, prepends as candidates with `edge_score=0.6`.
 ```bash
-python3 scripts/tradingview_webhook.py   # HTTP server (port 8765)
-ngrok http 8765                          # Expose to internet
+python3 scripts/tradingview_webhook.py   # port 8765
+ngrok http 8765
 ```
-Set TV_WEBHOOK_SECRET in .env. Symbol mapping: BTCUSD → BTCUSDT.
+Set `TV_WEBHOOK_SECRET` in .env. Symbol mapping: BTCUSD → BTCUSDT.
 
 ## MES Contract Symbols (update quarterly)
-- Q2 (Apr-Jun): MESM6 — **ACTIVE** (current front month, June 2026)
-- Update: change MES_EXPIRY in `execution/ibkr_broker.py` (currently '20260619')
+- Q2 2026 (Apr-Jun): `MESM26` — **ACTIVE** (`MES_EXPIRY=20260619`)
+- On quarterly roll: update `MES_EXPIRY` in `.env`
 
 ## Common Errors and Fixes
 
-**pandas-ta import error** → `pip install "pandas-ta>=0.3.14b0"` (0.3.14b0 removed from PyPI; 0.4.67b0+ works)
-**XGBoost openmp error** → `brew install libomp`
-**IBKR connection failed** → TWS must be running, port 7497 (paper), API enabled in TWS settings
-**DB lock error** → WAL mode is on; usually a stale connection. Restart bot.
-**Schedule not running** → Check nothing is blocking the while True loop in v10_runner.py
-**TV webhook 403** → TV_WEBHOOK_SECRET in .env doesn't match Pine Script input
-**launchd not starting** → `launchctl list | grep algotrading`; check logs/service/bot_error.log
-**DB backup fails** → `sqlite3 --version` to confirm CLI installed
-**Kraken scanner empty** → Check internet / Kraken status at futures.kraken.com
-**ML gate always 0.5** → Not enough clean trades yet (< MIN_TRADES_FOR_ML). Normal during early paper phase.
+| Error | Fix |
+|-------|-----|
+| pandas-ta import | `pip install "pandas-ta>=0.4.67b0"` |
+| XGBoost openmp | `brew install libomp` |
+| IBKR connection failed | TWS running, port 7497, API enabled in TWS settings |
+| DB lock | WAL mode on; stale connection — restart bot |
+| Schedule not running | Check while-True loop in v10_runner.py not blocked |
+| TV webhook 403 | `TV_WEBHOOK_SECRET` mismatch |
+| launchd not starting | `launchctl list \| grep algotrading`; check `logs/service/bot_error.log` |
+| Kraken scanner empty | Check internet / futures.kraken.com |
+| ML gate always 0.5 | Not enough clean trades yet (< MIN_TRADES_FOR_ML). Normal early paper phase. |
+| IBKR Error 200 | Use `localSymbol='MESxxx'` not `lastTradeDateOrContractMonth` |
 
-## Dashboard Views
-1. THE KING — Lakers gold/navy, LeBron quotes, championship energy (default)
-2. SAIYAN MODE — Dragon Ball Z, power levels, ki energy bars
-3. FILM ROOM — Chalk/blackboard, full reasoning, no animations
-4. RING CEREMONY — Unlocks on milestones, trophy room
-
-## LeBron Quotes Used in Dashboard
-Morning: "We're in the lab. Let's get to work."
-Win: "That's preparation meeting opportunity."
-Loss: "Losses are tuition. On to the next."
-Halt: "Not today. Live to play tomorrow."
-Goal: "We came, we worked, we're done."
-Patience: "Sometimes the best move is no move."
-New high: "This is what the work looks like."
-Motivation 1-5: "Strive for greatness." / "I like criticism. It makes you strong." / "I promise you I will do everything in my power." / "The best come from somewhere. Remember yours." / "Nothing is given. Everything is earned."
-
-## Version History (compact)
+## Version History
 
 | Version | Date | Summary |
 |---------|------|---------|
-| v1.0 | 2026-03 | Basic MACD equity + crypto, manual watchlist |
-| v2.0 | 2026-03 | AI debate engine, auto-screener, Tradovate futures, LeBron dashboard |
-| v3.x | 2026-03-22–24 | Extended thinking exits, WAL crash safety, launchd auto-restart, 8-signal gate, Bybit perps, TradingView webhook, ATR math signals |
-| v5.0 | 2026-03-25 | True Brain: Bayesian attribution, dynamic weights, price archive flywheel, NumPy vector memory |
-| v8.0 | 2026-03-26 | 3-agent debate (Bardock/Vegeta/Krillin), LightGBM gate, walk-forward OOS, RBIPMS framework |
-| v9.0 | 2026-03-26–28 | Risk decomposition (5 modules), MCP server, parallel lane scanning, SUPER SCORE, Binance Spot, Lane 3 prediction markets |
-| v9.x | 2026-03-30 – 2026-04-01 | Perp time-exit watchdog, ML data poison fix, full-market perp scanner, race condition lock, dashboard overhaul |
-| v10.0 | 2026-04-01 | Full rewrite: 3-agent debate → two-tower signal engine, 57-feature ML, 6-priority exit stack, RBI loop, clean architecture |
-| v10.1 | 2026-04-02 | Live-readiness overhaul: Kraken scanner, economics gate, sizer simplification, clean ML data (tagged pre_v10_contaminated), Bybit deleted |
-| v10.1 cleanup | 2026-04-03 | All v9/legacy code, dead imports, stale DB data, and old credentials purged; legacy/ directory deleted; repo and DB fully clean for go-live |
-| v13.1–13.4 | 2026-04-05–10 | Scanner/funnel fixes, strategy optimization, ML PnL regressor, proof infrastructure, repo truth alignment |
-| v13.5 | 2026-04-13 | Conviction-adaptive exit stack: real-R scale-out denominator, regime-aware trailing, signal-health compression, ATR-proportional hold gates |
-| v13.6 | 2026-04-13 | Candidate journaling at 8 decision gates, automated outcome labeling, nightly audit, proof suite (10 tests) |
-| v13.7 | 2026-04-13 | 15m labeling, exception-only notifications, funnel analytics, retention pruning, dashboard health panel, CI fix, proof suite 25/25 |
-| v13.8 | 2026-04-13 | Dead-money exit (data-driven, replaces time-only stagnant); scan_liveness fix; health_check dedup; UNHEALTHY/HEALTHY substring bug fix; dashboard live health panel; 16 dashboard data proof tests; 41/41 green |
-| v13.9 | 2026-04-14 | MES futures launch audit: contract Error 200 fix (localSymbol=MESM26), asyncio event loop fix, entry key mismatch, SHORT monitoring never triggering, EOD close wrong side, daily loss limit $150→$50 from config; 7th health check (ibkr); FUTURES_ENABLED=true; 10 live TWS trades verified |
+| v1.0–v9.x | 2026-03 | MACD equity, AI debate, Bybit/Tradovate, LightGBM gate, risk decomposition |
+| v10.0 | 2026-04-01 | Full rewrite: two-tower signal engine, 57-feature ML, 6-priority exit stack, RBI loop |
+| v10.1 | 2026-04-02–04 | Kraken scanner, economics gate, Bybit deleted, legacy purged, clean ML data |
+| v13.1–13.4 | 2026-04-05–10 | Scanner/funnel fixes, strategy optimization, ML PnL regressor, proof infrastructure |
+| v13.5 | 2026-04-13 | Conviction-adaptive exit: real-R denominator, regime trailing, signal-health compression |
+| v13.6 | 2026-04-13 | Candidate journaling at 8 gates, automated 1h/4h outcome labeling, nightly audit |
+| v13.7 | 2026-04-13 | 15m labeling, exception-only notifications, funnel analytics, retention pruning, CI fix |
+| v13.8 | 2026-04-13 | Dead-money exit; health_check dedup; UNHEALTHY substring fix; live health dashboard panel; 41 proof tests |
+| v13.9 | 2026-04-14 | MES audit: contract localSymbol fix, asyncio event loop fix, SHORT monitoring fix, EOD close fix, daily loss limit from config, 7th health check (ibkr); 10 TWS trades verified |
+| v14.0 | 2026-04-14 | Self-improving architecture: integrity tiers, candidate replay backtester, promotion engine, futures config sub-package, dashboard truth surfaces, recurring self-maintenance loops, 52 proof tests (0 failures) |
 
 ## GitHub
 - Repository: `futureisnowtech/trading-bot-main` (private)
@@ -492,14 +239,15 @@ Motivation 1-5: "Strive for greatness." / "I like criticism. It makes you strong
 - Push: `git push origin feature/v10-rebuild` (SSH configured)
 
 ## Claude's Standing Instructions
+
 When making any change to this project:
-1. **Update CLAUDE.md immediately** — not at the end of the session, not as cleanup. The moment a behaviour changes (exit logic, dashboard, health checks, config, proof tests), update the relevant section before moving on. CLAUDE.md is the source of truth for the next session; if it's stale, the next session starts blind.
+1. **Update CLAUDE.md immediately** — not at end of session. CLAUDE.md is the source of truth for the next session; if it's stale, the next session starts blind.
 2. Append to CHANGELOG.md: `bash scripts/log_change.sh "Description"`
-3. Commit when a logical unit of work is done
-4. Never commit .env or logs/ — .gitignore already excludes them
-5. Always use `python3`, not `python`
-6. Read a file before editing it
-7. Test paper mode before any live-mode changes: `python3 main.py --mode paper`
-8. **Proof tests are part of done** — any change to a data layer function (dashboard/data/, logging_db/, config.py constants) requires a proof test that defines the invariant. If the test doesn't exist, write it. If it would have caught the bug, it's mandatory.
-9. **No tunnel vision on partial changes** — when changing one function in a module, grep for all callers and related functions that touch the same data. Example: changing a query filter in `get_recent_errors_detail()` requires checking `get_error_rate_1h()` and `get_health_status()` too.
-10. **MES futures — key contracts:** Position dict from `buy_mes/short_mes` uses keys `"entry"` (not `"entry_price"`), `"side"` (`"LONG"` or `"SHORT"`), `"qty"` (always positive). Never use `qty > 0` to determine direction — always use `pos.get("side")`. Contract is `localSymbol="MESM26"` (derived from `MES_EXPIRY` in `ibkr_broker._get_mes_contract()`). Update `MES_EXPIRY` in `.env` on each quarterly roll.
+3. Commit when a logical unit of work is done. Never commit `.env` or `logs/`.
+4. Always use `python3`, not `python`.
+5. Read a file before editing it.
+6. Test paper mode before any live-mode changes: `python3 main.py --mode paper`
+7. **Proof tests are part of done** — any change to a data layer function (`dashboard/data/`, `logging_db/`, `config.py` constants) requires a proof test that defines the invariant. If it would have caught the bug, it's mandatory.
+8. **No tunnel vision on partial changes** — when changing one function, grep for all callers and related functions touching the same data. Example: changing `get_recent_errors_detail()` requires checking `get_error_rate_1h()` and `get_health_status()` too.
+9. **MES position dict keys:** `"entry"` (not `"entry_price"`), `"side"` (`"LONG"`/`"SHORT"`), `"qty"` (always positive). Never use `qty > 0` for direction — always `pos.get("side") == "LONG"`.
+10. **DO NOT TOUCH without explicit instruction:** `scanner.py`, `signal_engine.py`, `position_manager.py`, `perps_engine.py`, `scheduler/v10_runner.py`, `data/indicators.py`, `ml/feature_builder.py`, `ml/walk_forward_trainer.py`, `ml/model_store.py`, `risk/economics_gate.py`, `learning/post_trade_analyzer.py`, `learning/signal_performance.py`, `learning/dynamic_weights.py`, `notifications/notification_engine.py`, `logging_db/trade_logger.py`, `dashboard/app.py`.

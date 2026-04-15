@@ -348,13 +348,9 @@ class CoinbaseBroker:
     # ── Balance ───────────────────────────────────────────────────────────────
 
     def get_wallet_balance(self) -> float:
+        """Return current account equity.  Paper = ACCOUNT_SIZE + realized P&L from DB."""
         if self._paper:
-            try:
-                from config import ACCOUNT_SIZE
-
-                return float(ACCOUNT_SIZE)
-            except Exception:
-                return 5000.0
+            return self._paper_equity()
         try:
             data = self._request("GET", "/api/v3/brokerage/futures/balance_summary")
             val = (
@@ -366,6 +362,44 @@ class CoinbaseBroker:
         except Exception as e:
             logger.debug(f"[cb] get_wallet_balance error: {e}")
             return 0.0
+
+    def get_account_balance(self) -> float:
+        """Alias for get_wallet_balance — compatible with v10_runner._get_account_balance()."""
+        return self.get_wallet_balance()
+
+    def _paper_equity(self) -> float:
+        """Compute paper account equity: ACCOUNT_SIZE + SUM(net pnl) from trades DB."""
+        try:
+            from config import ACCOUNT_SIZE
+
+            base = float(ACCOUNT_SIZE)
+        except Exception:
+            base = 5000.0
+        try:
+            import sqlite3
+            import os
+
+            db_path = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                "logs",
+                "trades.db",
+            )
+            if not os.path.exists(db_path):
+                return base
+            with sqlite3.connect(db_path, timeout=5) as conn:
+                conn.row_factory = sqlite3.Row
+                row = conn.execute(
+                    """SELECT COALESCE(SUM(pnl_usd) - SUM(COALESCE(fee_usd,0)), 0) AS net
+                       FROM trades
+                       WHERE paper=1
+                         AND (source IS NULL OR source NOT IN
+                              ('backtest','pre_v10_contaminated','bybit_paper','paper_v10'))"""
+                ).fetchone()
+                net = float(row["net"]) if row and row["net"] is not None else 0.0
+            return base + net
+        except Exception as e:
+            logger.debug(f"[cb] _paper_equity error: {e}")
+            return base
 
     # ── Funding rate (not applicable to dated contracts) ──────────────────────
 

@@ -17,11 +17,12 @@ def get_account():
     except Exception:
         base, paper = 10000.0, True
 
+    paper_flag = 1 if paper else 0
     r = _q1(
-        """SELECT SUM(pnl_usd) - SUM(fee_usd) AS net_pnl FROM trades
-           WHERE ts >= ? AND paper=1
-             AND (source IS NULL OR source NOT IN ('backtest','pre_v10_contaminated','bybit_paper'))""",
-        (LAUNCH_DATE,),
+        """SELECT SUM(pnl_usd) - SUM(COALESCE(fee_usd,0)) AS net_pnl FROM trades
+           WHERE ts >= ? AND paper=?
+             AND (source IS NULL OR source NOT IN ('backtest','pre_v10_contaminated','bybit_paper','paper_v10'))""",
+        (LAUNCH_DATE, paper_flag),
     )
     realized = r.get("net_pnl") or 0.0
     unrealized = 0.0
@@ -45,14 +46,23 @@ def get_account():
     return base + realized + unrealized, paper, base
 
 
+def _paper_flag() -> int:
+    try:
+        from config import PAPER_TRADING
+
+        return 1 if PAPER_TRADING else 0
+    except Exception:
+        return 1
+
+
 def get_today_pnl():
     today = datetime.now().strftime("%Y-%m-%d")
     r = _q1(
         """SELECT SUM(pnl_usd) v FROM trades
-           WHERE ts >= ? AND paper=1 AND broker NOT LIKE '%bybit%' AND pnl_usd != 0
-             AND (source IS NULL OR source NOT IN ('backtest','pre_v10_contaminated','bybit_paper'))
+           WHERE ts >= ? AND paper=? AND broker NOT LIKE '%bybit%' AND pnl_usd != 0
+             AND (source IS NULL OR source NOT IN ('backtest','pre_v10_contaminated','bybit_paper','paper_v10'))
              AND (notes IS NULL OR notes NOT LIKE '%force_test_close%')""",
-        (today,),
+        (today, _paper_flag()),
     )
     return r.get("v") or 0.0
 
@@ -61,12 +71,12 @@ def get_equity_curve():
     return _q(
         """SELECT ts, SUM(pnl_usd) OVER (ORDER BY ts) AS cum_pnl
            FROM trades
-           WHERE ts >= ? AND paper=1 AND broker NOT LIKE '%bybit%'
+           WHERE ts >= ? AND paper=? AND broker NOT LIKE '%bybit%'
              AND pnl_usd != 0
-             AND (source IS NULL OR source NOT IN ('backtest','pre_v10_contaminated','bybit_paper'))
+             AND (source IS NULL OR source NOT IN ('backtest','pre_v10_contaminated','bybit_paper','paper_v10'))
              AND (notes IS NULL OR notes NOT LIKE '%force_test_close%')
            ORDER BY ts""",
-        (LAUNCH_DATE,),
+        (LAUNCH_DATE, _paper_flag()),
     )
 
 
@@ -116,10 +126,10 @@ def get_trade_log(limit=50):
     return _q(
         """SELECT ts, symbol, action, qty, price, pnl_usd, fee_usd, notes
            FROM trades
-           WHERE ts >= ? AND paper=1 AND broker NOT LIKE '%bybit%'
+           WHERE ts >= ? AND paper=? AND broker NOT LIKE '%bybit%'
              AND pnl_usd != 0
-             AND (source IS NULL OR source NOT IN ('backtest','pre_v10_contaminated','bybit_paper'))
+             AND (source IS NULL OR source NOT IN ('backtest','pre_v10_contaminated','bybit_paper','paper_v10'))
              AND (notes IS NULL OR notes NOT LIKE '%force_test_close%')
            ORDER BY ts DESC LIMIT ?""",
-        (LAUNCH_DATE, limit),
+        (LAUNCH_DATE, _paper_flag(), limit),
     )

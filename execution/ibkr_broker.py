@@ -630,6 +630,7 @@ class IBKRBroker:
         return self._open_positions.get(symbol)
 
     def get_account_balance(self) -> float:
+        """Return IBKR account NetLiquidation in USD.  Returns 0.0 when not connected."""
         if not self.is_connected():
             return 0.0
         try:

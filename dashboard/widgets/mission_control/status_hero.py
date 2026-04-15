@@ -21,6 +21,7 @@ from data.scanner_data import get_last_scan_age
 from data.performance import get_performance_stats
 from data.account import get_today_pnl, get_drawdown
 from data.positions import get_open_positions
+from data.balance import get_all_balances
 from db import LAUNCH_DATE
 
 
@@ -213,6 +214,83 @@ def render_status_hero():
         "active trade" + ("s" if n_pos != 1 else ""),
         pos_c,
     )
+
+    # ── live account balances ─────────────────────────────────────────────────
+    try:
+        balances = get_all_balances()
+        cb = balances["coinbase"]
+        ib = balances["ibkr"]
+
+        def _source_badge(source: str, connected: bool) -> str:
+            if source == "live_api":
+                return "<span style='color:#4ade80;font-size:0.72em;font-weight:700;'>● LIVE API</span>"
+            if source == "live_tws":
+                return "<span style='color:#4ade80;font-size:0.72em;font-weight:700;'>● LIVE TWS</span>"
+            if source == "paper_computed":
+                return "<span style='color:#60a5fa;font-size:0.72em;font-weight:700;'>● PAPER</span>"
+            if source == "disabled":
+                return "<span style='color:#475569;font-size:0.72em;'>DISABLED</span>"
+            return "<span style='color:#f87171;font-size:0.72em;'>● UNAVAILABLE</span>"
+
+        def _balance_card(col, title, bal_dict, subtitle=""):
+            bal = bal_dict["balance"]
+            src = bal_dict["source"]
+            connected = bal_dict.get("connected", False)
+            badge = _source_badge(src, connected)
+            color = "#e2e8f0"
+            sub = subtitle or src.replace("_", " ")
+            # Show realized P&L delta for paper accounts
+            if src == "paper_computed":
+                rpnl = bal_dict.get("realized_pnl", 0.0)
+                upnl = bal_dict.get("unrealized_pnl", 0.0)
+                sign = "+" if rpnl >= 0 else ""
+                pnl_color = "#4ade80" if rpnl >= 0 else "#f87171"
+                sub = f"<span style='color:{pnl_color};'>{sign}${rpnl:.2f} realized</span>"
+                if abs(upnl) > 0.01:
+                    u_sign = "+" if upnl >= 0 else ""
+                    u_color = "#4ade80" if upnl >= 0 else "#f87171"
+                    sub += f"  <span style='color:{u_color};font-size:0.9em;'>{u_sign}${upnl:.2f} open</span>"
+            col.markdown(
+                f"""<div style="background:rgba(255,255,255,0.03); border-radius:8px;
+                         padding:14px 16px; min-height:92px;">
+                  <div style="display:flex; justify-content:space-between; align-items:center;
+                       margin-bottom:5px;">
+                    <span style="font-size:0.69em; color:#64748b; text-transform:uppercase;
+                         letter-spacing:0.09em;">{title}</span>
+                    {badge}
+                  </div>
+                  <div style="font-size:1.65em; font-weight:800; color:{color};
+                       line-height:1.1;">${bal:,.2f}</div>
+                  <div style="font-size:0.74em; color:#64748b; margin-top:4px;">{sub}</div>
+                </div>""",
+                unsafe_allow_html=True,
+            )
+
+        st.markdown(
+            "<div style='margin-top:10px; margin-bottom:4px; font-size:0.72em; "
+            "color:#475569; text-transform:uppercase; letter-spacing:0.1em;'>"
+            "Account Balances</div>",
+            unsafe_allow_html=True,
+        )
+        b1, b2, b3 = st.columns(3)
+        _balance_card(b1, "Coinbase  (crypto perps)", cb)
+        _balance_card(b2, "IBKR  (MES futures)", ib)
+        total = balances["total_usd"]
+        b3.markdown(
+            f"""<div style="background:rgba(255,255,255,0.03); border-radius:8px;
+                     padding:14px 16px; min-height:92px;">
+              <div style="font-size:0.69em; color:#64748b; text-transform:uppercase;
+                   letter-spacing:0.09em; margin-bottom:5px;">Total portfolio</div>
+              <div style="font-size:1.65em; font-weight:800; color:#e2e8f0;
+                   line-height:1.1;">${total:,.2f}</div>
+              <div style="font-size:0.74em; color:#475569; margin-top:4px;">
+                Coinbase + IBKR combined
+              </div>
+            </div>""",
+            unsafe_allow_html=True,
+        )
+    except Exception as _be:
+        st.caption(f"Balance panel error: {_be}")
 
     # ── plain-English narrative ───────────────────────────────────────────────
     try:

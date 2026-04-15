@@ -18,7 +18,7 @@ Fully autonomous AI trading system: scans Kraken Futures + Binance USDM + Hyperl
 - Paper account: $5,000 (`ACCOUNT_SIZE=5000` — config default, no .env override)
 - Wants zero day-to-day intervention. Prefers simple explanations, hates fluff.
 
-## Current Version: v15.1 (2026-04-15)
+## Current Version: v15.2 (2026-04-15)
 
 **Active branch:** `feature/v10-rebuild` | **Clean paper trading started:** 2026-04-02
 
@@ -40,6 +40,13 @@ Fully autonomous AI trading system: scans Kraken Futures + Binance USDM + Hyperl
 | ForecastEx strategy | `forecast/strategy_engine.py` | 3 families: continuation, mean_reversion, late_repricing; 10-check economics gate; sizing |
 | ForecastEx discovery | `forecast/discovery.py` | Scans IBKR for economic event contracts, ranks, upserts to DB |
 | ForecastEx harvester | `forecast/quote_harvester.py` | Polls quotes every 60s; builds 5m/30m/1h/4h/1d OHLC bars from midpoint |
+| Runtime truth | `runtime/runtime_state.py` | system_runtime_state + lane_runtime_state tables; process mode, lane health, heartbeats |
+| Lane registry | `runtime/lane_registry.py` | Control plane for lane activation; crypto/forecast/mes_archived |
+| Incident tracker | `runtime/incident_tracker.py` | Groups repeated errors into fingerprint incidents; filters archived lane noise |
+| Position reconciler | `runtime/position_reconciler.py` | Reconciles scale_33_done/scale_66_done vs trade ledger at startup |
+| Allocator scaffold | `runtime/allocator.py` | Cross-lane capital allocation substrate (v16.0 stub ranker) |
+| Economics interface | `runtime/economics.py` | Per-lane friction: taker fee, round-trip cost, min viable edge |
+| Live audit hooks | `scripts/live_runtime_audit.py` + `scripts/lane_status_audit.py` | Post-restart operator-grade pass/fail verification |
 | Indicators | `data/indicators.py` (`add_all_indicators()`) | SuperTrend, Ichimoku, WAE, Fisher, CHOP, WaveTrend, Laguerre RSI, etc. |
 | ML features | `ml/feature_builder.py` | 57 features across 11 groups (imports `indicators/` package) |
 | ML training | `ml/walk_forward_trainer.py` + `ml/model_store.py` | XGBoost 60% + LightGBM 40%, PnL regressor, clean data only |
@@ -56,7 +63,7 @@ Fully autonomous AI trading system: scans Kraken Futures + Binance USDM + Hyperl
 | Dashboard integrity | `dashboard/data/integrity.py` | Truth-tiered metrics: verified/suspect counts, attribution coverage, exit quality, promotion state |
 | Notifications | `notifications/notification_engine.py` | SQLite only, no Telegram |
 | Dashboard | `dashboard/app.py` | Streamlit Operator Panel, 6 tabs: MISSION CONTROL, PERFORMANCE, TRADE APPROVAL, FORECAST TRADING, ARCHIVED FUTURES (MES), SYSTEM SETTINGS |
-| DB | `logs/trades.db` | WAL mode SQLite — positions, trades, system_events, scan_candidates, candidate_outcomes, trade_integrity, exit_evaluations, challenger_state, forecast_markets, forecast_contracts, forecast_quotes, forecast_bars, forecast_resolutions |
+| DB | `logs/trades.db` | WAL mode SQLite — positions, trades, system_events, scan_candidates, candidate_outcomes, trade_integrity, exit_evaluations, challenger_state, forecast_markets, forecast_contracts, forecast_quotes, forecast_bars, forecast_resolutions, system_runtime_state, lane_runtime_state, incidents |
 | Vector memory | `memory/trade_memory.py` | NumPy cosine similarity, SQLite-backed, 8-dim feature vectors |
 | Kill switch | `kill_switch.py` | Balance < 75% of ACCOUNT_SIZE → halt all |
 | Risk engine | `risk_engine.py` | VaR/CVaR, correlation gates, margin checks |
@@ -108,6 +115,13 @@ Fully autonomous AI trading system: scans Kraken Futures + Binance USDM + Hyperl
 - **Discovery stubs (v15.1):** when IND underlier is visible but OPT contracts hang/fail, `forecastex_broker.py._discover_async()` returns a `stub_only=True` dict. `forecast/discovery.py` upserts the underlier to `forecast_markets` with `active=1` but creates no contract rows. Dashboard shows enrollment state via `contracts_unavailable_count`.
 - **Dead-money false positive fix (v15.1):** stagnant check in `health_check.py` also exempts positions with `scale_66_done=1` or any partial-close trade in the `trades` table (`action IN ('SELL','CLOSE') OR notes LIKE '%scale_out%' OR notes LIKE '%partial%' AND broker LIKE '%coinbase%'`).
 - **IBKR_PORT in config (v15.1):** `config.py` now exports `IBKR_PORT` (default 7497) and `IBKR_HOST` (default 127.0.0.1). Health check uses `config.IBKR_PORT` dynamically in error messages — no more hardcoded 7497 strings in monitored files.
+- **Runtime truth tables (v15.2):** `system_runtime_state` (1 row — process mode, startup_ts, active_lanes, global_status) + `lane_runtime_state` (1 row per lane — enabled, active, mode, health, readiness_state, heartbeat). Written by main.py on startup; read by dashboard, validator, audit scripts.
+- **Lane registry (v15.2):** `runtime/lane_registry.py` — single control plane for all lane activation. crypto=always active, forecast=FORECAST_LANE_ACTIVE flag, mes_archived=FUTURES_LANE_ACTIVE flag (default false=dormant).
+- **Incident model (v15.2):** `incidents` table groups repeated system_events by lane+fingerprint. Dashboard Mission Control reads incidents (not raw rows) for headline truth. Archived MES incidents suppressed when FUTURES_LANE_ACTIVE=false.
+- **Position reconciler (v15.2):** `runtime/position_reconciler.py` — run at startup, reconciles `scale_33_done`/`scale_66_done` flags in open_positions against the trades ledger. Trade ledger outranks stale flag columns.
+- **Allocator scaffold (v15.2):** `runtime/allocator.py` — GlobalAllocator interface defined; full cross-lane ranking logic deferred to v16.0.
+- **Economics interface (v15.2):** `runtime/economics.py` — per-lane friction: crypto=0.030% taker/0.060% round-trip, forecast=0% commission, mes_archived=archived.
+- **Live verification hooks (v15.2):** `scripts/live_runtime_audit.py` (post-restart pass/fail audit) + `scripts/lane_status_audit.py` (quick lane snapshot). Run after every restart.
 
 ### MES Futures — Critical Contract Facts (v13.9)
 
@@ -264,6 +278,7 @@ Set `TV_WEBHOOK_SECRET` in .env. Symbol mapping: BTCUSD → BTCUSDT.
 | v14.1 | 2026-04-14 | Coinbase US crypto lane migration: coinbase_broker.py (CDP JWT/ES256, 4 CFTC products BIP/ETP/SLP/XPP), fee model → 0.03% taker, fail-closed CoinbaseSymbolError, executable launch validator, 42 new proof tests, 158 total (0 failures) |
 | v15.0 | 2026-04-15 | ForecastEx event-contract lane: forecastex_broker.py (IBKR clientId=3, economic markets only, YES=Right C/NO=Right P), 5 new DB tables, log-odds probability engine, 3 strategy families (continuation/mean_reversion/late_repricing), 10-check economics gate, fractional Kelly sizing, dashboard FORECAST TRADING tab, MES archived, 37 new proof tests, 195 total (0 failures) |
 | v15.1 | 2026-04-15 | Lane gating hardened: FUTURES_LANE_ACTIVE/FORECAST_LANE_ACTIVE flags in config.py; IBKR health check skips when dormant; balance.py returns archived state; forecast lane wired into main.py as daemon thread; forecast readiness 7-state machine; discovery stubs for OPT-unavailable underliers; Mission Control deduped error types + archived lane noise filter; activity feed DB-first truth; dead-money exempt on partial-close; IBKR_PORT in config; 10 new proof tests, 205 total (0 failures) |
+| v15.2 | 2026-04-15 | Runtime truth layer: system/lane state tables, lane registry, incident model, position reconciler, allocator scaffold, economics interface, live audit hooks, 219 proof tests |
 
 ## GitHub
 - Repository: `futureisnowtech/trading-bot-main` (private)

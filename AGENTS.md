@@ -28,7 +28,7 @@ A fully autonomous AI-powered trading system that:
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
 
-## Current Version: v15.1 (2026-04-15)
+## Current Version: v15.2 (2026-04-15)
 
 **Active branch:** `feature/v10-rebuild`
 **Clean paper trading started:** 2026-04-02
@@ -115,6 +115,13 @@ A fully autonomous AI-powered trading system that:
 - **IBKR_PORT in config (v15.1):** `config.IBKR_PORT` and `config.IBKR_HOST` exported. No hardcoded 7497 in monitored files.
 - **ForecastEx IBKR symbol truth (confirmed 2026-04-15):** FORECASTX uses SecType=IND with short symbols: CPI=573031126, CPIY=712856682, CPIC=727520252, DISSN=806285268, DISSA=804725704. FRED codes (CPIAUCSL/UNRATE/PAYEMS) do NOT exist. Discovery: two-pass IND→OPT.
 - **ForecastEx live blocker:** OPT event contracts require live funded IBKR account with ForecastEx enrollment. Paper account (DUP590699) sees IND underliers but OPT layer hangs. IBKR_PORT=7496 (corrected from 7497 in .env).
+- **Runtime truth tables (v15.2):** `system_runtime_state` (1 row — process mode, startup_ts, active_lanes) + `lane_runtime_state` (1 row per lane — enabled, active, mode, health, heartbeat). Written at startup; read by dashboard and audit scripts.
+- **Lane registry (v15.2):** `runtime/lane_registry.py` — single control plane: crypto=always active, forecast=FORECAST_LANE_ACTIVE, mes_archived=FUTURES_LANE_ACTIVE (default false).
+- **Incident model (v15.2):** `incidents` table groups system_events by lane+fingerprint. Archived MES incidents suppressed when FUTURES_LANE_ACTIVE=false.
+- **Position reconciler (v15.2):** `runtime/position_reconciler.py` — startup reconciliation of scale_33_done/scale_66_done against trades ledger. Trade ledger outranks stale flags.
+- **Allocator scaffold (v15.2):** `runtime/allocator.py` — GlobalAllocator stub; full cross-lane ranker deferred to v16.0.
+- **Economics interface (v15.2):** `runtime/economics.py` — crypto=0.03% taker/0.06% round-trip, forecast=0%, mes_archived=archived.
+- **Live audit hooks (v15.2):** `scripts/live_runtime_audit.py` + `scripts/lane_status_audit.py`. Run after every restart.
 
 ### Go-Live Readiness (dashboard SYSTEM tab → READINESS TRACKER)
 
@@ -541,6 +548,7 @@ Motivation 1-5: "Strive for greatness." / "I like criticism. It makes you strong
 | v14.1 | 2026-04-14 | Coinbase US crypto lane migration: coinbase_broker.py (CDP JWT/ES256, 4 CFTC products), fee model → 0.03% taker, fail-closed CoinbaseSymbolError, 158 proof tests |
 | v15.0 | 2026-04-15 | ForecastEx event-contract lane: forecastex_broker.py, 5 new DB tables, log-odds engine, 3 strategy families, 10-check economics gate, fractional Kelly, FORECAST TRADING dashboard tab, MES archived, 195 proof tests |
 | v15.1 | 2026-04-15 | Lane gating: FUTURES_LANE_ACTIVE/FORECAST_LANE_ACTIVE flags; forecast readiness state machine; discovery stubs; Mission Control dedup; activity feed DB-first; dead-money partial-close exempt; IBKR_PORT in config; 205 proof tests |
+| v15.2 | 2026-04-15 | Runtime truth layer: system/lane state tables, lane registry, incident model, position reconciler, allocator scaffold, economics interface, live audit hooks, 219 proof tests |
 
 ## GitHub
 - Repository: `futureisnowtech/trading-bot-main` (private)

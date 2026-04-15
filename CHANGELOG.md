@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-15
+- feat(runtime): v15.2 expanded proof tests, CLAUDE.md/AGENTS.md updated to v15.2
+
+## 2026-04-15
 - feat(runtime): v15.2 runtime truth layer, lane registry, incident model, allocator scaffold
 
 ## 2026-04-15

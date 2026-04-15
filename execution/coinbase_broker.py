@@ -261,8 +261,8 @@ class CoinbaseBroker:
             return False
 
         try:
-            # Verify auth with a balance check
-            data = self._request("GET", "/api/v3/brokerage/futures/balance_summary")
+            # Verify auth with a balance check (CFM = Coinbase Financial Markets, CFTC nano futures)
+            data = self._request("GET", "/api/v3/brokerage/cfm/balance_summary")
             bal = float(
                 data.get("balance_summary", {})
                 .get("futures_buying_power", {})
@@ -352,7 +352,7 @@ class CoinbaseBroker:
         if self._paper:
             return self._paper_equity()
         try:
-            data = self._request("GET", "/api/v3/brokerage/futures/balance_summary")
+            data = self._request("GET", "/api/v3/brokerage/cfm/balance_summary")
             val = (
                 data.get("balance_summary", {})
                 .get("futures_buying_power", {})

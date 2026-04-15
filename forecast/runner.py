@@ -370,3 +370,27 @@ def stop_forecast_lane() -> None:
         _harvester.stop()
         _harvester = None
     logger.info("[ForecastRunner] Forecast lane stopped")
+
+
+if __name__ == "__main__":
+    import schedule
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(name)s %(levelname)s %(message)s",
+        handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler(
+                os.path.join(_ROOT, "logs", "forecastex.log"), encoding="utf-8"
+            ),
+        ],
+    )
+    start_forecast_lane(bankroll=100.0)
+    logger.info("[ForecastRunner] Scheduler loop running — Ctrl+C to stop")
+    try:
+        while True:
+            schedule.run_pending()
+            time.sleep(1)
+    except KeyboardInterrupt:
+        stop_forecast_lane()
+        logger.info("[ForecastRunner] Stopped")

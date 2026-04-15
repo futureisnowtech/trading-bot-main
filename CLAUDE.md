@@ -70,6 +70,7 @@ Fully autonomous AI trading system: scans Kraken Futures + Binance USDM + Hyperl
 - **Scanner sources:** Kraken Futures public REST + Binance USDM public REST + Hyperliquid public API (all 3 every scan — intelligence only; broader than live set)
 - **Live crypto execution venue:** Coinbase US nano perp-style futures (`coinbase_broker.py`). Supported: BTC→BIP-20DEC30-CDE, ETH→ETP-20DEC30-CDE, SOL→SLP-20DEC30-CDE, XRP→XPP-20DEC30-CDE. Any other symbol → `CoinbaseSymbolError` (fail-closed).
 - **Coinbase auth:** CDP JWT / ES256. Env vars: `COINBASE_CDP_KEY_NAME` + `COINBASE_CDP_PRIVATE_KEY`. Paper mode = zero API calls, no credentials needed.
+- **Coinbase futures API path:** CFTC nano futures use `/api/v3/brokerage/cfm/` (CFM = Coinbase Financial Markets), NOT `/api/v3/brokerage/futures/`. The `/futures/` path returns 401. Both `connect()` and `get_wallet_balance()` in `coinbase_broker.py` use `/cfm/balance_summary`.
 - **Coinbase fees:** 0.03% taker, 0.00% maker. Round-trip = 0.06%. These feed `risk/economics_gate.py` and `perps_engine.py` fee logging.
 - **No AI debate:** Two-tower signal engine replaces all v9 debate agents
 - **Telegram removed:** `notifications/notification_engine.py` — SQLite + dashboard only

@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-15
+- fix(coinbase): use /cfm/ endpoint path for CFTC nano futures balance — /futures/ returns 401
+
+## 2026-04-15
 - fix(forecast): correct FORECASTX discovery symbols (IND not OPT, IBKR short codes not FRED codes); two-pass IND→OPT discovery; IBKR_PORT 7497→7496 in .env; paper acct ForecastEx enrollment blocker documented
 
 ## 2026-04-15

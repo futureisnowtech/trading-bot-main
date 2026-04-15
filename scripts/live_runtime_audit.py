@@ -243,26 +243,40 @@ def main() -> int:
     # ── 5. IBKR port ─────────────────────────────────────────────────────────
     print("\n── IBKR Port ─────────────────────────────────────────")
     try:
-        from config import FUTURES_LANE_ACTIVE, IBKR_PORT
+        from config import FUTURES_LANE_ACTIVE, FORECAST_LANE_ACTIVE, IBKR_PORT
 
         port_open = _check_ibkr_port(port=IBKR_PORT)
-        if FUTURES_LANE_ACTIVE:
+        ibkr_needed = FUTURES_LANE_ACTIVE or FORECAST_LANE_ACTIVE
+        if ibkr_needed:
             if port_open:
-                _pr(PASS, f"IBKR TWS port {IBKR_PORT}", "open — MES lane can connect")
+                who = []
+                if FUTURES_LANE_ACTIVE:
+                    who.append("MES")
+                if FORECAST_LANE_ACTIVE:
+                    who.append("ForecastEx")
+                _pr(
+                    PASS,
+                    f"IBKR TWS port {IBKR_PORT}",
+                    f"open — {'/'.join(who)} can connect",
+                )
             else:
-                _pr(FAIL, f"IBKR TWS port {IBKR_PORT}", "closed — TWS not running")
+                _pr(
+                    FAIL,
+                    f"IBKR TWS port {IBKR_PORT}",
+                    "closed — TWS not running (required)",
+                )
         else:
             if port_open:
                 _pr(
-                    WARN,
+                    PASS,
                     f"IBKR TWS port {IBKR_PORT}",
-                    "open but FUTURES_LANE_ACTIVE=False — MES dormant (expected)",
+                    "open — MES dormant and ForecastEx inactive (benign)",
                 )
             else:
                 _pr(
                     PASS,
                     f"IBKR TWS port {IBKR_PORT}",
-                    "closed — MES dormant (FUTURES_LANE_ACTIVE=False, expected)",
+                    "closed — MES dormant and ForecastEx inactive (expected)",
                 )
     except Exception as e:
         _pr(WARN, "IBKR port check failed", str(e))

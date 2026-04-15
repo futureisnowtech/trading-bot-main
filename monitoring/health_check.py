@@ -146,8 +146,12 @@ def _check_stagnant_positions() -> dict:
                     # stack is already handling the wind-down; not truly stagnant.
                     # Also skip if there's any partial-close trade in the ledger for this symbol.
                     db = _db_state.get(sym, {})
-                    if (db.get("trailing_active") or db.get("scale_33_done")
-                            or db.get("scale_66_done") or sym in _partial_close_syms):
+                    if (
+                        db.get("trailing_active")
+                        or db.get("scale_33_done")
+                        or db.get("scale_66_done")
+                        or sym in _partial_close_syms
+                    ):
                         continue
 
                     ts = pos.get("ts_entry", "")
@@ -242,15 +246,26 @@ def _check_attribution_working() -> dict:
 
 
 def _check_error_rate() -> dict:
-    """Less than 10 errors in the last hour."""
+    """Less than 10 errors in the last hour (excluding archived lane noise)."""
     try:
         conn = _conn()
-        n_errors = conn.execute(
-            "SELECT COUNT(*) FROM system_events WHERE level='ERROR' "
+        rows = conn.execute(
+            "SELECT source, message FROM system_events WHERE level='ERROR' "
             "AND source != 'health_check' "
             "AND ts >= datetime('now', '-1 hour')"
-        ).fetchone()[0]
+        ).fetchall()
         conn.close()
+        # Filter archived-lane noise: IBKRBroker/MES errors when FUTURES_LANE_ACTIVE=false
+        _archived_markers = ("ibkrbroker", "ibkr", "mes_", "mes ", "twsbroke")
+        n_errors = 0
+        for row in rows:
+            src = (row[0] or "").lower()
+            msg = (row[1] or "").lower()
+            if not FUTURES_LANE_ACTIVE and any(
+                m in src or m in msg for m in _archived_markers
+            ):
+                continue
+            n_errors += 1
         if n_errors >= 10:
             return {"ok": False, "detail": f"{n_errors} errors in last hour"}
         return {"ok": True, "detail": f"{n_errors} errors in last hour"}
@@ -278,7 +293,10 @@ def _check_ibkr_connection() -> dict:
     """IBKR/TWS connectivity — only checked when FUTURES_LANE_ACTIVE=true.
     When MES lane is dormant (FUTURES_LANE_ACTIVE=false), skip entirely — not a failure."""
     if not FUTURES_LANE_ACTIVE:
-        return {"ok": True, "detail": "FUTURES_LANE_ACTIVE=false — MES lane dormant, skipped"}
+        return {
+            "ok": True,
+            "detail": "FUTURES_LANE_ACTIVE=false — MES lane dormant, skipped",
+        }
     try:
         from execution.ibkr_broker import get_ibkr_broker
 
@@ -313,6 +331,7 @@ def run_health_check(force: bool = False) -> dict:
     # Keep incident tracker current before running checks
     try:
         from runtime.incident_tracker import ingest_system_events
+
         ingest_system_events()
     except Exception:
         pass
@@ -373,8 +392,11 @@ def run_health_check(force: bool = False) -> dict:
     # Update runtime truth tables with fresh heartbeat
     try:
         from runtime.runtime_state import write_system_heartbeat, upsert_lane_state
+
         write_system_heartbeat()
-        upsert_lane_state("crypto", last_heartbeat_at=datetime.now(tz=timezone.utc).isoformat())
+        upsert_lane_state(
+            "crypto", last_heartbeat_at=datetime.now(tz=timezone.utc).isoformat()
+        )
     except Exception:
         pass
 

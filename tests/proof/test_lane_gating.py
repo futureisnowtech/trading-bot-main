@@ -12,6 +12,8 @@ Invariants proven:
   8. Forecast readiness state machine transitions
   9. Discovery stub persisted on OPT failure (broker mock)
  10. No hardcoded "7497" in monitored source files (except known safe contexts)
+ 11. _check_error_rate() filters IBKRBroker errors when FUTURES_LANE_ACTIVE=false
+ 12. _check_error_rate() still counts real (non-IBKR) errors when lane inactive
 """
 
 from __future__ import annotations
@@ -524,4 +526,65 @@ def test_no_hardcoded_7497():
 
     assert violations == [], "Hardcoded '7497' found in monitored files:\n" + "\n".join(
         violations
+    )
+
+
+# ── Test 11: _check_error_rate() filters IBKRBroker noise when lane dormant ──
+
+
+def test_error_rate_filters_archived_lane_noise(proof_runtime, monkeypatch):
+    """_check_error_rate() must not count IBKRBroker errors when FUTURES_LANE_ACTIVE=false.
+    Without this filter, IBKRBroker generates ~679 errors/hour causing perpetual UNHEALTHY."""
+    import config
+    import monitoring.health_check as hc
+
+    monkeypatch.setattr(config, "FUTURES_LANE_ACTIVE", False, raising=False)
+    monkeypatch.setattr(hc, "FUTURES_LANE_ACTIVE", False, raising=False)
+
+    # Insert 20 IBKRBroker errors (archived lane noise) — must be filtered
+    for i in range(20):
+        _insert_event(
+            proof_runtime.db_path,
+            source="IBKRBroker",
+            level="ERROR",
+            message="Connection refused to TWS port 7496",
+            minutes_ago=i,
+        )
+
+    result = hc._check_error_rate()
+    assert result["ok"] is True, (
+        f"IBKRBroker errors with FUTURES_LANE_ACTIVE=false must be filtered — got: {result}"
+    )
+    assert "0 errors" in result["detail"], (
+        f"Expected 0 errors after filtering, got: {result['detail']}"
+    )
+
+
+# ── Test 12: _check_error_rate() still counts real errors when lane inactive ─
+
+
+def test_error_rate_counts_real_errors_with_lane_inactive(proof_runtime, monkeypatch):
+    """Non-IBKR errors are still counted toward the threshold even when FUTURES_LANE_ACTIVE=false."""
+    import config
+    import monitoring.health_check as hc
+
+    monkeypatch.setattr(config, "FUTURES_LANE_ACTIVE", False, raising=False)
+    monkeypatch.setattr(hc, "FUTURES_LANE_ACTIVE", False, raising=False)
+
+    # Insert 15 real bot errors (not IBKR noise) — must still trigger UNHEALTHY
+    for i in range(15):
+        _insert_event(
+            proof_runtime.db_path,
+            source="v10_runner",
+            level="ERROR",
+            message="Scanner returned empty results",
+            minutes_ago=i,
+        )
+
+    result = hc._check_error_rate()
+    assert result["ok"] is False, (
+        f"Real bot errors must still trigger UNHEALTHY — got: {result}"
+    )
+    assert "15 errors" in result["detail"], (
+        f"Expected 15 errors counted, got: {result['detail']}"
     )

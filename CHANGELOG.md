@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-15
+- fix(health): _check_error_rate() filters archived-lane (IBKRBroker) noise when FUTURES_LANE_ACTIVE=false; 2 new proof tests (240 total)
+
+## 2026-04-15
 - chore(repo): stop tracking generated .version file so post-commit dashboard stamp no longer leaves the repo dirty after every commit
 
 ## 2026-04-15

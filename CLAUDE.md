@@ -18,7 +18,7 @@ Fully autonomous AI trading system: scans Kraken Futures + Binance USDM + Hyperl
 - Paper account: $5,000 (`ACCOUNT_SIZE=5000` — config default, no .env override)
 - Wants zero day-to-day intervention. Prefers simple explanations, hates fluff.
 
-## Current Version: v15.4 (2026-04-15)
+## Current Version: v15.5 (2026-04-15)
 
 **Active branch:** `feature/v10-rebuild` | **Clean paper trading started:** 2026-04-02
 
@@ -126,6 +126,9 @@ Fully autonomous AI trading system: scans Kraken Futures + Binance USDM + Hyperl
 - **Truth gate hardening (v15.4):** truth gate now catches both absolute `/Users/*/` + Desktop + `/algo_trading_final` paths AND tilde-prefixed Desktop paths. `.md` added to `ACTIVE_EXTS` so `.claude/commands/`, `.claude/agents/`, `AGENTS.md`, `CLAUDE.md` are scanned. `CHANGELOG.md` added to `SKIP_FILES` (historical commit descriptions only). Pre-commit now runs `repo_truth_gate.py --fast` before `validate.py`. 237 proof tests.
 - **Hook path discipline (v15.4):** all `.claude/settings.json` hook commands use `$CLAUDE_PROJECT_DIR/...` (Anthropic documented mechanism) for path-independent execution. `post_cmd_logger.sh` supports `POST_CMD_LOG_OVERRIDE` env var for test-harness isolation and uses `$CLAUDE_PROJECT_DIR` when set. Both approaches ensure the hook works regardless of the CWD at hook invocation time.
 - **Stale 7497 closure (v15.4):** `CLAUDE.md` and `AGENTS.md` Common Errors tables updated: IBKR connection error now says "port from IBKR_PORT in .env (7496=live, 7497=paper)". `dashboard/data/health.py` fallback for failed config import changed from hardcoded 7497 to `os.environ.get('IBKR_PORT', '7496')`. No fresh 7497 health_check events possible when FUTURES_LANE_ACTIVE=false (IBKR check skipped entirely).
+- **Schedule isolation (v15.5):** `_forecast_daemon` in `main.py` uses `schedule.Scheduler()` private instance (not the global default) to prevent race with `v10_runner`'s `schedule.run_pending()` main loop. Without isolation, the forecast thread consumed exit_monitor jobs from the global scheduler, silently preventing exits from firing. Fix: `_s = _sched_lib.Scheduler()` + `_s.run_pending()` in the daemon loop.
+- **DB staleness — peak_price/trailing_active (v15.5):** `perps_engine.update_position_price()` updates `peak_price` and `trailing_active` in-memory only; it does NOT write back to `open_positions.high_since_entry` or `open_positions.trailing_active`. Consequence: health_check stagnant alarm fires false positives for positions whose price has moved. Fix: `_check_stagnant_positions()` in `monitoring/health_check.py` now reads live `peak_price` + `trailing_active` from `perps_engine.get_open_positions()` to augment stale DB values.
+- **Error rate filter in dashboard (v15.5):** `get_error_rate_1h()` in `dashboard/data/health.py` now applies the same archived-lane noise filter (`_is_archived_lane_noise()`) that `_check_error_rate()` in `health_check.py` already uses. Without this, the dashboard showed ~679 IBKRBroker errors/hour as real errors when FUTURES_LANE_ACTIVE=false.
 
 ### MES Futures — Critical Contract Facts (v13.9)
 
@@ -285,6 +288,7 @@ Set `TV_WEBHOOK_SECRET` in .env. Symbol mapping: BTCUSD → BTCUSDT.
 | v15.2 | 2026-04-15 | Runtime truth layer: system/lane state tables, lane registry, incident model, position reconciler, allocator scaffold, economics interface, live audit hooks, 219 proof tests |
 | v15.3 | 2026-04-15 | Repo truth closure: repo_truth_gate.py (Desktop path + hook root + live-start policy + CI checks), 18-file Desktop path purge, BLOCK 1b implicit live-start policy, pre-push git hook, CI strict gate, 231 proof tests |
 | v15.4 | 2026-04-15 | Final truth-closure: tilde ~/Desktop pattern in truth gate; .md added to ACTIVE_EXTS (covers .claude/commands/, AGENTS.md, CLAUDE.md); pre-commit hardened with repo_truth_gate.py --fast; post_cmd_logger supports POST_CMD_LOG_OVERRIDE + $CLAUDE_PROJECT_DIR; all settings.json hook paths use $CLAUDE_PROJECT_DIR; stale 7497 eliminated from CLAUDE.md/AGENTS.md/dashboard fallback; 237 proof tests |
+| v15.5 | 2026-04-15 | Dashboard error fixes: schedule isolation for forecast daemon (exit_monitor race fix), error rate filter in dashboard/data/health.py, stagnant check uses live perps_engine peak_price to avoid false positives from stale DB high_since_entry; 240 proof tests |
 
 ## GitHub
 - Repository: `futureisnowtech/trading-bot-main` (private)

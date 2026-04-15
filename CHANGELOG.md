@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-15
+- chore(docs): update CLAUDE.md + CHANGELOG for v15.5 dashboard error fixes
+
+## 2026-04-15
 - fix(health,stagnant): fix 3 root causes — schedule isolation for forecast daemon, error rate filter in dashboard, live peak_price in stagnant check
 
 ## 2026-04-15

@@ -134,6 +134,23 @@ def _check_stagnant_positions() -> dict:
         except Exception:
             pass
 
+        # Build live in-memory lookup from perps_engine: symbol → {peak_price, trailing_active}
+        # perps_engine updates peak_price + trailing_active in-memory but does NOT write back to
+        # the open_positions DB (high_since_entry and trailing_active columns stay stale).
+        # Using in-memory state prevents false-positive stagnant alarms for positions that have
+        # moved or already had their trailing stop activated.
+        _perps_state: dict = {}
+        try:
+            import perps_engine as _pe
+
+            for _sym, _ppos in _pe.get_open_positions().items():
+                _perps_state[_sym] = {
+                    "peak_price": float(_ppos.get("peak_price") or 0),
+                    "trailing_active": bool(_ppos.get("trailing_active", False)),
+                }
+        except Exception:
+            pass
+
         for strat, syms in positions.items():
             if not syms:
                 continue
@@ -146,8 +163,13 @@ def _check_stagnant_positions() -> dict:
                     # stack is already handling the wind-down; not truly stagnant.
                     # Also skip if there's any partial-close trade in the ledger for this symbol.
                     db = _db_state.get(sym, {})
+                    _live = _perps_state.get(sym, {})
+                    # Trailing active: DB flag OR live in-memory flag (DB lags activation)
+                    _trailing_active = db.get("trailing_active") or _live.get(
+                        "trailing_active", False
+                    )
                     if (
-                        db.get("trailing_active")
+                        _trailing_active
                         or db.get("scale_33_done")
                         or db.get("scale_66_done")
                         or sym in _partial_close_syms
@@ -162,9 +184,15 @@ def _check_stagnant_positions() -> dict:
                         now - entry_dt.astimezone(timezone.utc)
                     ).total_seconds() / 60
 
-                    # Use DB values for entry/high (risk_manager in-memory can lag)
+                    # Use live peak_price from perps_engine in-memory when available; fall back
+                    # to DB high_since_entry (which is only updated at position open, not live).
                     entry = db.get("entry") or pos.get("entry", 0) or 0
-                    high = db.get("high") or pos.get("high_since_entry", entry) or entry
+                    _live_peak = _live.get("peak_price", 0)
+                    high = max(
+                        db.get("high") or entry,
+                        _live_peak if _live_peak > 0 else entry,
+                        pos.get("high_since_entry", entry) or entry,
+                    )
                     pnl_pct = abs(high - entry) / max(entry, 1e-10) if entry > 0 else 0
 
                     if age_min >= max_mins and pnl_pct < FLAT_POSITION_THRESHOLD_PCT:

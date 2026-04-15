@@ -53,15 +53,19 @@ def get_heartbeat_age() -> int:
 
 
 def get_error_rate_1h() -> int:
-    """Count of ERROR events in last 60 minutes, excluding health_check source.
-    health_check failures are surfaced live via get_health_check_failures() instead."""
+    """Count of ERROR events in last 60 minutes, excluding health_check source
+    and archived-lane (IBKRBroker/MES) noise when FUTURES_LANE_ACTIVE=false."""
     cutoff = (datetime.now() - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
-    r = _q1(
-        "SELECT COUNT(*) AS n FROM system_events "
+    rows = _q(
+        "SELECT source, message FROM system_events "
         "WHERE level='ERROR' AND source != 'health_check' AND ts >= ?",
         (cutoff,),
     )
-    return r.get("n") or 0
+    return sum(
+        1
+        for r in rows
+        if not _is_archived_lane_noise(r.get("source", ""), r.get("message", ""))
+    )
 
 
 def _fingerprint_msg(msg: str) -> str:

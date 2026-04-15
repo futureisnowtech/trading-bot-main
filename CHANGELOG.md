@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-15
+- fix(health,stagnant): fix 3 root causes — schedule isolation for forecast daemon, error rate filter in dashboard, live peak_price in stagnant check
+
+## 2026-04-15
 - fix(boot): set PAPER_TRADING=true in env before exec to prevent EOFError when .env has PAPER_TRADING=false
 
 ## 2026-04-15

@@ -214,7 +214,11 @@ def main():
 
         def _forecast_daemon():
             """Run forecast lane in its own schedule instance (thread-safe)."""
-            import schedule as _s
+            import schedule as _sched_lib
+
+            _s = (
+                _sched_lib.Scheduler()
+            )  # isolated instance — never touches the global default used by v10_runner
             from forecast.db import init_forecast_db
             from forecast.runner import (
                 run_discovery_cycle,

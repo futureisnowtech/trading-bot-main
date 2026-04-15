@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-15
+- v14.1: Coinbase US crypto lane migration — coinbase_broker.py (CDP JWT/ES256, BIP/ETP/SLP/XPP), 0.03% taker fee, fail-closed CoinbaseSymbolError, launch validator, 42 proof tests (158 total, 0 failures)
+
+## 2026-04-15
 - fix(dashboard): 7 data correctness fixes — ML snapshot table, source filtering, config-driven values, v14 banner
 
 ## 2026-04-14

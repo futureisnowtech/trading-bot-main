@@ -37,10 +37,10 @@ from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
-# ── Fee constants (Kraken Futures, standard taker tier) ──────────────────────
-TAKER_FEE_PCT = 0.00065  # 0.065% per side (taker) — Kraken Futures standard
-MAKER_REBATE_PCT = -0.00020  # -0.020% rebate (maker) — unused in conservative estimate
-ROUND_TRIP_COST = TAKER_FEE_PCT * 2  # entry taker + exit taker = 0.130%
+# ── Fee constants (Coinbase nano perp-style futures, Advanced Trade API) ─────
+TAKER_FEE_PCT = 0.0003  # 0.03% per side (taker) — Coinbase perp futures (promotional)
+MAKER_REBATE_PCT = 0.0000  # 0.00% maker — Coinbase perp futures (promotional)
+ROUND_TRIP_COST = TAKER_FEE_PCT * 2  # entry taker + exit taker = 0.060%
 
 # ── Baseline win-rate assumption (conservative; calibrate as live data grows) ─
 _BASELINE_WIN_RATE = 0.52  # 52% — used for EV calculation

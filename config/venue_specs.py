@@ -52,14 +52,18 @@ MES_MAX_DAILY_LOSS_USD: float = (
 
 # ── Exchange fees ─────────────────────────────────────────────────────────────
 
-KRAKEN_TAKER_FEE: float = 0.00065  # 0.065% — modeled in economics_gate.py
+KRAKEN_TAKER_FEE: float = 0.00065  # 0.065%
 BINANCE_TAKER_FEE: float = 0.0004  # 0.04%
 HYPERLIQUID_TAKER_FEE: float = 0.0005  # 0.05%
+COINBASE_TAKER_FEE: float = 0.0003  # 0.03% — live crypto execution venue (perp futures)
+COINBASE_MAKER_FEE: float = 0.0000  # 0.00% — maker (promotional rate)
 
 VENUE_FEES: dict[str, float] = {
     "kraken": KRAKEN_TAKER_FEE,
     "binance": BINANCE_TAKER_FEE,
     "hyperliquid": HYPERLIQUID_TAKER_FEE,
+    "coinbase": COINBASE_TAKER_FEE,
+    "coinbase_paper": COINBASE_TAKER_FEE,
 }
 
 # Effective round-trip cost (entry + exit, same venue)

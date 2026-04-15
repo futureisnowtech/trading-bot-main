@@ -42,13 +42,13 @@ A fully autonomous AI-powered trading system that:
 | Entry runner | `scheduler/v10_runner.py` | Scan loop, tier selection, economics gate, setup detection, execution handoff |
 | Position sizing | `position_manager.py` | Kelly + ATR sizing, leverage schedule, deployment caps |
 | Exit manager | `position_manager.py` | 7-priority exit stack (trailing/scale/thesis/hard-stop/risk/kill/dead-money) |
-| Perp execution | `perps_engine.py` → `execution/binance_broker.py` | Paper mode, ISOLATED margin |
+| Perp execution | `perps_engine.py` → `execution/coinbase_broker.py` | Coinbase US nano perp-style futures; paper mode + live CDP JWT; ISOLATED margin; BTC/ETH/SOL/XRP only |
 | MES execution | `scheduler/v10_runner.py` → `execution/ibkr_broker.py` | IBKR paper port 7497 |
 | Indicators | `data/indicators.py` (`add_all_indicators()`) | SuperTrend, Ichimoku, WAE, Fisher, CHOP, WaveTrend, Laguerre RSI, etc. |
 | ML features | `ml/feature_builder.py` | 57 features across 11 groups (imports `indicators/` package) |
 | ML training | `ml/walk_forward_trainer.py` + `ml/model_store.py` | XGBoost 60% + LightGBM 40%, PnL regressor, clean data only |
 | Indicators package | `indicators/` | atr_regime, cvd, funding_rate, liquidation_levels, macd_advanced, microstructure, open_interest, orderbook, orderflow, rsi_advanced, vwap_mtf, williams_r |
-| Economics gate | `risk/economics_gate.py` | Pre-trade fee/funding EV veto (Kraken 0.065% taker) |
+| Economics gate | `risk/economics_gate.py` | Pre-trade fee/funding EV veto (Coinbase 0.03% taker) |
 | Learning loop | `learning_loop.py` | 57-feature snapshots, retrain queue, RBI trigger |
 | Bayesian learning | `learning/post_trade_analyzer.py` + `learning/signal_performance.py` | Per-signal Bayesian win rates |
 | Dynamic weights | `learning/dynamic_weights.py` | Live conviction weights, 5-min cache |
@@ -73,8 +73,12 @@ A fully autonomous AI-powered trading system that:
 
 ### Key Decisions
 
-- **Scanner sources:** Kraken Futures public REST + Binance USDM public REST + Hyperliquid public API
-- **Execution:** `binance_broker.py` in paper mode (no live keys required; real API for live)
+- **Scanner sources:** Kraken Futures public REST + Binance USDM public REST + Hyperliquid public API (all 3 every scan — intelligence only)
+- **Live crypto execution venue:** Coinbase US nano perp-style futures (`coinbase_broker.py`) — BIP/ETP/SLP/XPP (BTC/ETH/SOL/XRP only). Scanner is broader; only these 4 are routed to live execution.
+- **Coinbase auth:** CDP JWT / ES256. Credentials: `COINBASE_CDP_KEY_NAME` (organizations/{org_id}/apiKeys/{key_id}) + `COINBASE_CDP_PRIVATE_KEY` (EC PEM, \\n-escaped in .env). Paper mode: no API calls, zero credentials required.
+- **Coinbase products (CFTC-regulated, expire Dec 2030):** BIP-20DEC30-CDE (0.01 BTC/contract), ETP-20DEC30-CDE (0.1 ETH/contract), SLP-20DEC30-CDE (5 SOL/contract), XPP-20DEC30-CDE (500 XRP/contract)
+- **Coinbase fees:** 0.03% taker, 0.00% maker (Advanced Trade API direct, promotional). Round-trip cost = 0.06%.
+- **Fail-closed:** Any symbol not in {BTC,ETH,SOL,XRP} raises `CoinbaseSymbolError` — never routed to live execution.
 - **No AI debate for entries:** Two-tower signal engine replaces all v9 debate agents
 - **Telegram removed:** Replaced by `notifications/notification_engine.py` (SQLite + dashboard only)
 - **Paper = live thresholds:** No reduced thresholds in paper mode (clean data from 2026-04-02)
@@ -284,7 +288,8 @@ algo_trading_final/
 │   └── dynamic_weights.py      ← Live conviction weights, 5-min cache (DO NOT TOUCH)
 │
 ├── execution/
-│   ├── binance_broker.py     ← Perp execution (paper + live) — Binance USD-M
+│   ├── coinbase_broker.py    ← Perp execution (paper + live) — Coinbase US nano perp futures (BIP/ETP/SLP/XPP)
+│   ├── binance_broker.py     ← Legacy — not on live crypto path; kept for reference
 │   └── ibkr_broker.py        ← MES futures — IBKR via ib_insync, paper port 7497
 │
 ├── backtesting/
@@ -405,7 +410,7 @@ Candidate journaling: 8 decision gates logged per scan (`dual_exposure_block`, `
 - **90%** max deployed capital
 - Default **3x** leverage, max **10x**
 - ISOLATED margin on all perp positions — never CROSS
-- Kraken taker fee: **0.065%** (modeled in economics_gate.py before every entry)
+- Coinbase taker fee: **0.030%** (modeled in economics_gate.py before every entry; round-trip = 0.060%)
 - Kill switch at balance < **75% of ACCOUNT_SIZE**
 - Economics gate EV tiers: A+=1.6%, A=0.8%, B=0.3%; `stop_multiplier=3.0`; spread gate=25 bps; depth gate=$5K/side
 - Volume floor: $2.5M/24h (scanner + economics gate aligned)

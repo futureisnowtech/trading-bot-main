@@ -32,7 +32,7 @@ def render_dev_config():
                 )
 
                 st.text(
-                    f"  Taker fee (per side):    {TAKER_FEE_PCT * 100:.3f}%  (Kraken Futures)"
+                    f"  Taker fee (per side):    {TAKER_FEE_PCT * 100:.3f}%  (Coinbase perp futures)"
                 )
                 st.text(f"  Round-trip cost:         {ROUND_TRIP_COST * 100:.3f}%")
                 st.text(f"  Min net R:R:             ≥ {_MIN_NET_RR}:1 after fees")
@@ -116,7 +116,7 @@ def render_dev_config():
                 st.text(f"  Max deployed:        90%")
                 st.text(f"  Max risk per trade:  1% of account")
                 st.text(f"  Margin type:         ISOLATED — never CROSS")
-                st.text(f"  Kraken taker fee:    0.065%")
+                st.text(f"  Coinbase taker fee:  0.030%  (perp futures)")
                 st.text(f"  No double-entry:     one position per symbol, ever")
                 st.text(f"  No chase:            skip if price moved > 3% since signal")
                 st.text(f"  Stop sacred:         never moved wider after entry")
@@ -164,7 +164,10 @@ def render_dev_config():
                 st.text(f"  Min EV:          ≥ ${_MIN_EXPECTED_PROFIT:.2f}")
                 st.text(f"  Round-trip fee:  {_ROUND_TRIP_FEE_PCT * 100:.3f}%")
                 st.text(
-                    f"  Sources:         Kraken Futures + Binance USDM + Hyperliquid"
+                    f"  Sources:         Kraken Futures + Binance USDM + Hyperliquid  (scan only)"
+                )
+                st.text(
+                    f"  Live execution:  Coinbase nano perp-style futures (BIP/ETP/SLP/XPP)"
                 )
             except Exception as e:
                 st.error(f"scanner: {e}")

@@ -18,7 +18,7 @@ Fully autonomous AI trading system: scans Kraken Futures + Binance USDM + Hyperl
 - Paper account: $5,000 (`ACCOUNT_SIZE=5000` — config default, no .env override)
 - Wants zero day-to-day intervention. Prefers simple explanations, hates fluff.
 
-## Current Version: v14.0 (2026-04-14)
+## Current Version: v14.1 (2026-04-14)
 
 **Active branch:** `feature/v10-rebuild` | **Clean paper trading started:** 2026-04-02
 
@@ -31,12 +31,12 @@ Fully autonomous AI trading system: scans Kraken Futures + Binance USDM + Hyperl
 | Entry runner | `scheduler/v10_runner.py` | Scan loop, tier selection, economics gate, setup detection, execution handoff |
 | Position sizing | `position_manager.py` | Kelly + ATR sizing, leverage schedule, deployment caps |
 | Exit manager | `position_manager.py` | 7-priority exit stack |
-| Perp execution | `perps_engine.py` → `execution/binance_broker.py` | Paper mode, ISOLATED margin |
+| Perp execution | `perps_engine.py` → `execution/coinbase_broker.py` | Coinbase US nano perp futures; CDP JWT auth; ISOLATED margin; BTC/ETH/SOL/XRP only |
 | MES execution | `scheduler/v10_runner.py` → `execution/ibkr_broker.py` | IBKR paper port 7497 |
 | Indicators | `data/indicators.py` (`add_all_indicators()`) | SuperTrend, Ichimoku, WAE, Fisher, CHOP, WaveTrend, Laguerre RSI, etc. |
 | ML features | `ml/feature_builder.py` | 57 features across 11 groups (imports `indicators/` package) |
 | ML training | `ml/walk_forward_trainer.py` + `ml/model_store.py` | XGBoost 60% + LightGBM 40%, PnL regressor, clean data only |
-| Economics gate | `risk/economics_gate.py` | Pre-trade fee/funding EV veto (Kraken 0.065% taker) |
+| Economics gate | `risk/economics_gate.py` | Pre-trade fee/funding EV veto (Coinbase 0.030% taker; round-trip 0.060%) |
 | Learning loop | `learning_loop.py` | 57-feature snapshots, retrain queue, RBI trigger |
 | Bayesian learning | `learning/post_trade_analyzer.py` + `learning/signal_performance.py` | Per-signal Bayesian win rates |
 | Dynamic weights | `learning/dynamic_weights.py` | Live conviction weights, 5-min cache |
@@ -60,8 +60,10 @@ Fully autonomous AI trading system: scans Kraken Futures + Binance USDM + Hyperl
 
 ### Key Decisions
 
-- **Scanner sources:** Kraken Futures public REST + Binance USDM public REST + Hyperliquid public API (all 3 every scan)
-- **Execution:** `binance_broker.py` in paper mode (no live keys required; real API for live)
+- **Scanner sources:** Kraken Futures public REST + Binance USDM public REST + Hyperliquid public API (all 3 every scan — intelligence only; broader than live set)
+- **Live crypto execution venue:** Coinbase US nano perp-style futures (`coinbase_broker.py`). Supported: BTC→BIP-20DEC30-CDE, ETH→ETP-20DEC30-CDE, SOL→SLP-20DEC30-CDE, XRP→XPP-20DEC30-CDE. Any other symbol → `CoinbaseSymbolError` (fail-closed).
+- **Coinbase auth:** CDP JWT / ES256. Env vars: `COINBASE_CDP_KEY_NAME` + `COINBASE_CDP_PRIVATE_KEY`. Paper mode = zero API calls, no credentials needed.
+- **Coinbase fees:** 0.03% taker, 0.00% maker. Round-trip = 0.06%. These feed `risk/economics_gate.py` and `perps_engine.py` fee logging.
 - **No AI debate:** Two-tower signal engine replaces all v9 debate agents
 - **Telegram removed:** `notifications/notification_engine.py` — SQLite + dashboard only
 - **Paper = live thresholds:** No reduced thresholds in paper mode (clean data from 2026-04-02)
@@ -156,7 +158,7 @@ Candidate journaling: 8 decision gates logged per scan (`dual_exposure_block`, `
 - **90%** max deployed capital
 - Default **3×** leverage, max **10×**
 - ISOLATED margin on all perp positions — never CROSS
-- Kraken taker fee: **0.065%** (modeled in economics_gate.py before every entry)
+- Coinbase taker fee: **0.030%** (modeled in economics_gate.py before every entry; round-trip = 0.060%)
 - Kill switch at balance < **75% of ACCOUNT_SIZE**
 - Economics gate EV tiers: A+=1.6%, A=0.8%, B=0.3%; stop_multiplier=3.0; spread gate=25bps; depth gate=$5K/side
 - Volume floor: $2.5M/24h (scanner + economics gate aligned)
@@ -232,6 +234,7 @@ Set `TV_WEBHOOK_SECRET` in .env. Symbol mapping: BTCUSD → BTCUSDT.
 | v13.8 | 2026-04-13 | Dead-money exit; health_check dedup; UNHEALTHY substring fix; live health dashboard panel; 41 proof tests |
 | v13.9 | 2026-04-14 | MES audit: contract localSymbol fix, asyncio event loop fix, SHORT monitoring fix, EOD close fix, daily loss limit from config, 7th health check (ibkr); 10 TWS trades verified |
 | v14.0 | 2026-04-14 | Self-improving architecture: integrity tiers, candidate replay backtester, promotion engine, futures config sub-package, dashboard truth surfaces, recurring self-maintenance loops, 52 proof tests (0 failures) |
+| v14.1 | 2026-04-14 | Coinbase US crypto lane migration: coinbase_broker.py (CDP JWT/ES256, 4 CFTC products BIP/ETP/SLP/XPP), fee model → 0.03% taker, fail-closed CoinbaseSymbolError, executable launch validator, 42 new proof tests, 158 total (0 failures) |
 
 ## GitHub
 - Repository: `futureisnowtech/trading-bot-main` (private)

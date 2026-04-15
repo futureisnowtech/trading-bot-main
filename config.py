@@ -89,9 +89,11 @@ CRYPTO_MACD3_FAST: int = 6
 CRYPTO_MACD3_SLOW: int = 20
 CRYPTO_MACD3_SIGNAL: int = 5
 CRYPTO_MACD3_HISTOGRAM_THRESHOLD: float = 0.0
-# Legacy fee constants — v10 uses Kraken fees (see risk/economics_gate.py: 0.065% taker)
-COINBASE_TAKER_FEE_PCT: float = 0.006  # unused in v10
-COINBASE_MAKER_FEE_PCT: float = 0.004  # unused in v10
+# Coinbase nano perp-style futures fees (Advanced Trade API direct, promotional)
+COINBASE_TAKER_FEE_PCT: float = 0.0003  # 0.03% taker — Coinbase perp futures
+COINBASE_MAKER_FEE_PCT: float = (
+    0.0000  # 0.00% maker — Coinbase perp futures (promotional)
+)
 MAX_DAILY_FEE_DRAG_PCT: float = (
     0.50 if PAPER_TRADING else 0.10
 )  # paper: fees never halt learning; live: 10% cap
@@ -201,8 +203,16 @@ WEBULL_TRADE_PIN: str = os.getenv("WEBULL_TRADE_PIN", "")
 WEBULL_MFA: str = os.getenv("WEBULL_MFA", "")
 WEBULL_DEVICE_ID: str = os.getenv("WEBULL_DEVICE_ID", "algo_bot_001")
 
+# Legacy Coinbase spot API keys (unused in v10 — CDP JWT auth used instead)
 COINBASE_API_KEY: str = os.getenv("COINBASE_API_KEY", "")
 COINBASE_API_SECRET: str = os.getenv("COINBASE_API_SECRET", "")
+
+# ── Coinbase Developer Platform (CDP) JWT credentials — live crypto execution ──
+# Required for live mode. Paper mode does not call the API.
+# Key format: COINBASE_CDP_KEY_NAME = organizations/{org_id}/apiKeys/{key_id}
+# Key format: COINBASE_CDP_PRIVATE_KEY = EC PEM (\\n-escaped in .env)
+COINBASE_CDP_KEY_NAME: str = os.getenv("COINBASE_CDP_KEY_NAME", "")
+COINBASE_CDP_PRIVATE_KEY: str = os.getenv("COINBASE_CDP_PRIVATE_KEY", "")
 UPTIME_PING_URL: str = os.getenv("UPTIME_PING_URL", "")  # UptimeRobot heartbeat URL
 
 EQUITY_ENABLED: bool = os.getenv("EQUITY_ENABLED", "true").lower() == "true"

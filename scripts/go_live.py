@@ -22,6 +22,9 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 PYTHON = "/Library/Frameworks/Python.framework/Versions/3.14/bin/python3"
 PAPER_PLIST = Path.home() / "Library" / "LaunchAgents" / "com.algotrading.king.plist"
 LIVE_LOG = ROOT / "logs" / "service" / "manual_live_bot.log"
@@ -209,7 +212,14 @@ def main() -> int:
         if paper_was_stopped and PAPER_PLIST.exists():
             print("[go_live] Restoring paper launchd bot after failed live launch...")
             _run(["launchctl", "load", str(PAPER_PLIST)])
-            _run(["launchctl", "kickstart", "-k", f"gui/{os.getuid()}/com.algotrading.king"])
+            _run(
+                [
+                    "launchctl",
+                    "kickstart",
+                    "-k",
+                    f"gui/{os.getuid()}/com.algotrading.king",
+                ]
+            )
         raise
 
 

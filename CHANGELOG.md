@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-15
+- fix(go_live): add ROOT to sys.path before coinbase_broker import; live trading started 2026-04-15
+
+## 2026-04-15
 - feat(launch): add controlled live launch workflow — mode-aware boot.py, go_live.py/go_paper.py transitions, hook allowlist for sanctioned mode changes, docs/tests updated so Claude can use a single safe live path
 
 ## 2026-04-15

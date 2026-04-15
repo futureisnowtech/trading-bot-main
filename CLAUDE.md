@@ -20,7 +20,7 @@ Fully autonomous AI trading system: scans Kraken Futures + Binance USDM + Hyperl
 
 ## Current Version: v15.6 (2026-04-15)
 
-**Active branch:** `feature/v10-rebuild` | **Clean paper trading started:** 2026-04-02
+**Active branch:** `feature/v10-rebuild` | **Clean paper trading started:** 2026-04-02 | **Live trading started:** 2026-04-15
 
 ### Live Architecture (source of truth)
 

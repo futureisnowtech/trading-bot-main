@@ -122,6 +122,7 @@ Fully autonomous AI trading system: scans Kraken Futures + Binance USDM + Hyperl
 - **Allocator scaffold (v15.2):** `runtime/allocator.py` — GlobalAllocator interface defined; full cross-lane ranking logic deferred to v16.0.
 - **Economics interface (v15.2):** `runtime/economics.py` — per-lane friction: crypto=0.030% taker/0.060% round-trip, forecast=0% commission, mes_archived=archived.
 - **Live verification hooks (v15.2):** `scripts/live_runtime_audit.py` (post-restart pass/fail audit) + `scripts/lane_status_audit.py` (quick lane snapshot). Run after every restart.
+- **Repo truth gate (v15.3):** `scripts/repo_truth_gate.py` — shared gate enforcing Desktop-path-free repo, dynamic hook roots, live-start policy compliance. `--fast` for pre-commit, `--strict` for pre-push/CI. Installed as git pre-push hook via `scripts/install_hooks.sh`. CI step added. 231 proof tests.
 
 ### MES Futures — Critical Contract Facts (v13.9)
 
@@ -279,6 +280,7 @@ Set `TV_WEBHOOK_SECRET` in .env. Symbol mapping: BTCUSD → BTCUSDT.
 | v15.0 | 2026-04-15 | ForecastEx event-contract lane: forecastex_broker.py (IBKR clientId=3, economic markets only, YES=Right C/NO=Right P), 5 new DB tables, log-odds probability engine, 3 strategy families (continuation/mean_reversion/late_repricing), 10-check economics gate, fractional Kelly sizing, dashboard FORECAST TRADING tab, MES archived, 37 new proof tests, 195 total (0 failures) |
 | v15.1 | 2026-04-15 | Lane gating hardened: FUTURES_LANE_ACTIVE/FORECAST_LANE_ACTIVE flags in config.py; IBKR health check skips when dormant; balance.py returns archived state; forecast lane wired into main.py as daemon thread; forecast readiness 7-state machine; discovery stubs for OPT-unavailable underliers; Mission Control deduped error types + archived lane noise filter; activity feed DB-first truth; dead-money exempt on partial-close; IBKR_PORT in config; 10 new proof tests, 205 total (0 failures) |
 | v15.2 | 2026-04-15 | Runtime truth layer: system/lane state tables, lane registry, incident model, position reconciler, allocator scaffold, economics interface, live audit hooks, 219 proof tests |
+| v15.3 | 2026-04-15 | Repo truth closure: repo_truth_gate.py (Desktop path + hook root + live-start policy + CI checks), 18-file Desktop path purge, BLOCK 1b implicit live-start policy, pre-push git hook, CI strict gate, 231 proof tests |
 
 ## GitHub
 - Repository: `futureisnowtech/trading-bot-main` (private)

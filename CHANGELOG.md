@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-15
+- fix(truth): eliminate Desktop-path coupling in hooks/scripts/CI — repo_truth_gate.py, 18-file path fix, BLOCK 1b live-start policy, 231 proof tests
+
+## 2026-04-15
 - fix(runtime): heartbeat wiring, active_lanes population, audit improvements
 
 ## 2026-04-15

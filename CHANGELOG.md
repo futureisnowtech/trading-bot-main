@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-14
+- feat(audit): add trust-aware net truth and go-live audit CLIs with proof tests; reconcile AGENTS.md to v14.0 launch branch state
+
+## 2026-04-14
 - v14.0: integrity tiers + exit quality wired into close path; integrity proof tests (10 new); config/ package shim; signal_performance v14 columns; replay-source Bayesian gate test
 
 ## 2026-04-14

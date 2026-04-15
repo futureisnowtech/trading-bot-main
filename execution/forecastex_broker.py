@@ -57,25 +57,23 @@ FORECASTX_CLIENT_ID = int(
 FORECASTX_FEE_PER_CONTRACT = 0.0
 
 # Economic event underlier symbols to scan during discovery.
-# These are the IBKR underlying symbols for U.S. economic indicators on FORECASTX.
+# These are the ACTUAL IBKR FORECASTX IND symbols confirmed via reqMatchingSymbols.
+# FRED/FRED-style codes (CPIAUCSL, UNRATE, PAYEMS) do NOT exist on FORECASTX.
+# Confirmed live: CPI=573031126, CPIY=712856682, CPIC=727520252,
+#                 DISSN=806285268, DISSA=804725704
 ECONOMIC_UNDERLIERS: list[str] = [
-    "CPIAUCSL",  # CPI All Items
-    "CPILFESL",  # CPI Core (ex food/energy)
-    "UNRATE",  # Unemployment Rate
-    "PAYEMS",  # Nonfarm Payrolls
-    "FEDFUNDS",  # Fed Funds Rate (FOMC target)
-    "GDPC1",  # Real GDP
-    "PCE",  # PCE Price Index
-    "PCEPI",  # PCE Inflation
-    "INDPRO",  # Industrial Production
-    "RETAILSL",  # Retail Sales
-    "HOUST",  # Housing Starts
-    "UMCSENT",  # Consumer Sentiment (U. Michigan)
-    "CPI",  # Generic CPI shorthand IBKR may use
-    "NFP",  # Nonfarm Payrolls shorthand
-    "UNEMPLOYMENT",
-    "FOMC",
+    "CPI",  # US CPI All Items (confirmed IND on FORECASTX)
+    "CPIY",  # US CPI Year-over-Year (confirmed IND on FORECASTX)
+    "CPIC",  # US Core CPI (confirmed IND on FORECASTX)
+    "DISSN",  # Number of Dissenting FOMC Members (confirmed IND on FORECASTX)
+    "DISSA",  # Any FOMC Members Dissent (confirmed IND on FORECASTX)
+    "PCE",  # PCE Price Index (short form)
+    "NFP",  # Nonfarm Payrolls
+    "GDP",  # Real GDP
     "PPI",  # Producer Price Index
+    "UR",  # Unemployment Rate (IBKR short form)
+    "RETAIL",  # Retail Sales
+    "FOMC",  # FOMC rate decision
 ]
 
 # Markets to EXCLUDE from v1 (non-economic)
@@ -262,20 +260,64 @@ class ForecastExBroker:
     # ── Market discovery ───────────────────────────────────────────────────────
 
     async def _discover_async(self, underlier: str) -> list[dict]:
-        """Request contract details for one economic underlier on FORECASTX."""
+        """
+        Discover event contracts for one FORECASTX underlier.
+
+        Two-pass approach (confirmed via live TWS probing 2026-04-15):
+          Pass 1 — IND: find the underlying IND contract on FORECASTX to confirm
+                   the symbol exists and get its conId + long_name.
+                   IBKR FORECASTX uses short symbols (CPI, CPIY, CPIC, DISSA,
+                   DISSN) NOT FRED codes (CPIAUCSL, UNRATE, PAYEMS).
+          Pass 2 — OPT: request event contracts (YES/NO binary options) on the
+                   confirmed IND underlier.  If the account is not enrolled in
+                   ForecastEx event-contract trading, this will return empty or
+                   hang — handled with a short timeout.
+        """
         from ib_insync import Contract
 
-        contract = Contract(
+        # Pass 1: confirm IND underlier exists
+        ind_contract = Contract(
+            secType="IND",
+            symbol=underlier,
+            exchange="FORECASTX",
+            currency="USD",
+        )
+        try:
+            ind_details = await self._ib.reqContractDetailsAsync(ind_contract)
+        except Exception as e:
+            log_event(
+                "WARN", "ForecastExBroker", f"IND discovery error for {underlier}: {e}"
+            )
+            return []
+
+        if not ind_details:
+            return []  # symbol not on FORECASTX — skip silently
+
+        ind_info = ind_details[0]
+        long_name = ind_info.longName or ""
+        category = ind_info.category or ""
+        ind_conid = ind_info.contract.conId
+
+        # Pass 2: get OPT event contracts (YES=Right C, NO=Right P)
+        opt_contract = Contract(
             secType="OPT",
             symbol=underlier,
             exchange="FORECASTX",
             currency="USD",
         )
         try:
-            details = await self._ib.reqContractDetailsAsync(contract)
+            details = await self._ib.reqContractDetailsAsync(opt_contract)
         except Exception as e:
             log_event(
-                "WARN", "ForecastExBroker", f"Discovery error for {underlier}: {e}"
+                "WARN", "ForecastExBroker", f"OPT discovery error for {underlier}: {e}"
+            )
+            # Account may not have ForecastEx event trading enabled.
+            # Log the IND underlier as a market stub (no tradeable contracts yet).
+            log_event(
+                "INFO",
+                "ForecastExBroker",
+                f"IND {underlier} (conId={ind_conid}) found but OPT layer unavailable "
+                f"— account may need ForecastEx enrollment: {e}",
             )
             return []
 
@@ -297,8 +339,9 @@ class ForecastExBroker:
                     "last_trade_at": expiry,
                     "exchange": c.exchange,
                     "currency": c.currency,
-                    "long_name": d.longName or "",
-                    "category": d.category or "",
+                    "long_name": d.longName or long_name,
+                    "category": d.category or category,
+                    "und_conid": ind_conid,
                 }
             )
         return results
@@ -327,7 +370,7 @@ class ForecastExBroker:
         all_contracts = []
         for underlier in targets:
             try:
-                contracts = self._run(self._discover_async(underlier), timeout=15)
+                contracts = self._run(self._discover_async(underlier), timeout=25)
                 all_contracts.extend(contracts)
             except Exception as e:
                 log_event(

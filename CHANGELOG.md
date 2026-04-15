@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-15
+- fix(forecast): correct FORECASTX discovery symbols (IND not OPT, IBKR short codes not FRED codes); two-pass IND→OPT discovery; IBKR_PORT 7497→7496 in .env; paper acct ForecastEx enrollment blocker documented
+
+## 2026-04-15
 - feat(forecast): ForecastEx event-contract lane v15.0 — forecastex_broker (IBKR clientId=3, SecType=OPT), 5 DB tables (forecast_markets/contracts/quotes/bars/resolutions), log-odds probability engine, 3 strategy families (continuation/mean_reversion/late_repricing), 10-check economics gate, fractional Kelly sizing (cap=0.10), dashboard FORECAST TRADING tab, MES archived, 37 new proof tests (195 total, 0 failures)
 
 ## 2026-04-15

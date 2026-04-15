@@ -93,6 +93,8 @@ Fully autonomous AI trading system: scans Kraken Futures + Binance USDM + Hyperl
 - **ForecastEx clientId:** 3 (MES = 2, main IBKR = 1). Must not collide.
 - **ForecastEx risk caps (hardcoded, no override):** max deployed 35%, per-event 10%, max concurrent 2, fractional Kelly cap 0.10.
 - **ForecastEx economic markets only:** CPI, NFP, FOMC, Unemployment, PCE, GDP, PPI. Sports/politics/entertainment → rejected at discovery (fail-closed).
+- **ForecastEx IBKR symbol truth (confirmed 2026-04-15 via reqMatchingSymbols):** FORECASTX underliers use SecType=IND with SHORT symbols — NOT FRED codes. Confirmed live: CPI=573031126, CPIY=712856682, CPIC=727520252, DISSN=806285268, DISSA=804725704. CPIAUCSL/UNRATE/PAYEMS/FEDFUNDS do NOT exist on FORECASTX. Discovery uses two-pass: IND confirmation → OPT event contracts.
+- **ForecastEx account enrollment blocker:** Paper account DUP590699 has IND underliers visible but OPT event contracts hang (IBKR returns no response). ForecastEx event-contract trading requires: (1) live funded IBKR account, (2) explicit ForecastEx enrollment via IBKR portal. IBKR_PORT must be 7496 (live session); .env corrected from 7497→7496.
 - **ForecastEx log-odds math:** x_t = log(p/(1-p)); q_hat = logistic(x_t + α·v_1h + β·a_30m - γ·z_t - δ·σ_t - ε·H_t - ζ·Ω_t + η·bias). Defaults: α=0.40, β=0.20, γ=0.30, δ=0.25, ε=0.15, ζ=0.50, η=0.10.
 - **ForecastEx MES archival:** MES lane is dormant — code preserved. Dashboard tab renamed "ARCHIVED FUTURES (MES)". Reactivate: set `FUTURES_LANE_ACTIVE=true`.
 - **sys.path discipline:** all forecast modules use `if _ROOT not in sys.path: sys.path.insert(0, _ROOT)` (conditional). Test files use `if _ROOT not in sys.path: sys.path.append(_ROOT)` to avoid displacing DASHBOARD_ROOT at collection time.

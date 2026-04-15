@@ -108,6 +108,8 @@ A fully autonomous AI-powered trading system that:
 - **ForecastEx risk caps (hardcoded, no override):** max deployed 35%, per-event 10%, max concurrent 2, fractional Kelly cap 0.10.
 - **ForecastEx economic markets only:** CPI, NFP, FOMC, Unemployment, PCE, GDP, PPI. Sports/politics/entertainment rejected at discovery.
 - **ForecastEx MES archival:** MES lane is dormant — code preserved. Dashboard tab "ARCHIVED FUTURES (MES)". Reactivate: `FUTURES_LANE_ACTIVE=true`.
+- **ForecastEx IBKR symbol truth (confirmed 2026-04-15):** FORECASTX uses SecType=IND with short symbols: CPI=573031126, CPIY=712856682, CPIC=727520252, DISSN=806285268, DISSA=804725704. FRED codes (CPIAUCSL/UNRATE/PAYEMS) do NOT exist. Discovery: two-pass IND→OPT.
+- **ForecastEx live blocker:** OPT event contracts require live funded IBKR account with ForecastEx enrollment. Paper account (DUP590699) sees IND underliers but OPT layer hangs. IBKR_PORT=7496 (corrected from 7497 in .env).
 
 ### Go-Live Readiness (dashboard SYSTEM tab → READINESS TRACKER)
 

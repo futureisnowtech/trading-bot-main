@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-15
+- fix(truth): close final truth-closure gaps — tilde Desktop pattern + .md scan in truth gate; pre-commit hardened with repo_truth_gate.py --fast; post_cmd_logger env-override + CLAUDE_PROJECT_DIR; settings.json CLAUDE_PROJECT_DIR hook paths; stale 7497 eliminated from CLAUDE.md/AGENTS.md/dashboard fallback; 6 new proof tests (237 total)
+
+## 2026-04-15
 - fix(truth): eliminate Desktop-path coupling in hooks/scripts/CI — repo_truth_gate.py, 18-file path fix, BLOCK 1b live-start policy, 231 proof tests
 
 ## 2026-04-15

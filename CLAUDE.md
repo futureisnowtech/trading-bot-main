@@ -18,7 +18,7 @@ Fully autonomous AI trading system: scans Kraken Futures + Binance USDM + Hyperl
 - Paper account: $5,000 (`ACCOUNT_SIZE=5000` — config default, no .env override)
 - Wants zero day-to-day intervention. Prefers simple explanations, hates fluff.
 
-## Current Version: v15.2 (2026-04-15)
+## Current Version: v15.4 (2026-04-15)
 
 **Active branch:** `feature/v10-rebuild` | **Clean paper trading started:** 2026-04-02
 
@@ -123,6 +123,9 @@ Fully autonomous AI trading system: scans Kraken Futures + Binance USDM + Hyperl
 - **Economics interface (v15.2):** `runtime/economics.py` — per-lane friction: crypto=0.030% taker/0.060% round-trip, forecast=0% commission, mes_archived=archived.
 - **Live verification hooks (v15.2):** `scripts/live_runtime_audit.py` (post-restart pass/fail audit) + `scripts/lane_status_audit.py` (quick lane snapshot). Run after every restart.
 - **Repo truth gate (v15.3):** `scripts/repo_truth_gate.py` — shared gate enforcing Desktop-path-free repo, dynamic hook roots, live-start policy compliance. `--fast` for pre-commit, `--strict` for pre-push/CI. Installed as git pre-push hook via `scripts/install_hooks.sh`. CI step added. 231 proof tests.
+- **Truth gate hardening (v15.4):** truth gate now catches both absolute `/Users/*/` + Desktop + `/algo_trading_final` paths AND tilde-prefixed Desktop paths. `.md` added to `ACTIVE_EXTS` so `.claude/commands/`, `.claude/agents/`, `AGENTS.md`, `CLAUDE.md` are scanned. `CHANGELOG.md` added to `SKIP_FILES` (historical commit descriptions only). Pre-commit now runs `repo_truth_gate.py --fast` before `validate.py`. 237 proof tests.
+- **Hook path discipline (v15.4):** all `.claude/settings.json` hook commands use `$CLAUDE_PROJECT_DIR/...` (Anthropic documented mechanism) for path-independent execution. `post_cmd_logger.sh` supports `POST_CMD_LOG_OVERRIDE` env var for test-harness isolation and uses `$CLAUDE_PROJECT_DIR` when set. Both approaches ensure the hook works regardless of the CWD at hook invocation time.
+- **Stale 7497 closure (v15.4):** `CLAUDE.md` and `AGENTS.md` Common Errors tables updated: IBKR connection error now says "port from IBKR_PORT in .env (7496=live, 7497=paper)". `dashboard/data/health.py` fallback for failed config import changed from hardcoded 7497 to `os.environ.get('IBKR_PORT', '7496')`. No fresh 7497 health_check events possible when FUTURES_LANE_ACTIVE=false (IBKR check skipped entirely).
 
 ### MES Futures — Critical Contract Facts (v13.9)
 
@@ -281,6 +284,7 @@ Set `TV_WEBHOOK_SECRET` in .env. Symbol mapping: BTCUSD → BTCUSDT.
 | v15.1 | 2026-04-15 | Lane gating hardened: FUTURES_LANE_ACTIVE/FORECAST_LANE_ACTIVE flags in config.py; IBKR health check skips when dormant; balance.py returns archived state; forecast lane wired into main.py as daemon thread; forecast readiness 7-state machine; discovery stubs for OPT-unavailable underliers; Mission Control deduped error types + archived lane noise filter; activity feed DB-first truth; dead-money exempt on partial-close; IBKR_PORT in config; 10 new proof tests, 205 total (0 failures) |
 | v15.2 | 2026-04-15 | Runtime truth layer: system/lane state tables, lane registry, incident model, position reconciler, allocator scaffold, economics interface, live audit hooks, 219 proof tests |
 | v15.3 | 2026-04-15 | Repo truth closure: repo_truth_gate.py (Desktop path + hook root + live-start policy + CI checks), 18-file Desktop path purge, BLOCK 1b implicit live-start policy, pre-push git hook, CI strict gate, 231 proof tests |
+| v15.4 | 2026-04-15 | Final truth-closure: tilde ~/Desktop pattern in truth gate; .md added to ACTIVE_EXTS (covers .claude/commands/, AGENTS.md, CLAUDE.md); pre-commit hardened with repo_truth_gate.py --fast; post_cmd_logger supports POST_CMD_LOG_OVERRIDE + $CLAUDE_PROJECT_DIR; all settings.json hook paths use $CLAUDE_PROJECT_DIR; stale 7497 eliminated from CLAUDE.md/AGENTS.md/dashboard fallback; 237 proof tests |
 
 ## GitHub
 - Repository: `futureisnowtech/trading-bot-main` (private)

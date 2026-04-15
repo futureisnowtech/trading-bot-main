@@ -15,7 +15,7 @@
 
   NOTES:
   - Always starts in PAPER mode (safe for auto-restart).
-  - For live trading, start main.py manually in a terminal.
+  - For live trading, use the controlled launcher: python3 scripts/go_live.py
   - Logs stdout to logs/service/bot.log, stderr to logs/service/bot_error.log
   - KeepAlive = true → restarts automatically if the process exits.
   - RunAtLoad = true → starts when you load the plist (and on reboot).

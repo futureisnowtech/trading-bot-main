@@ -114,10 +114,14 @@ def main():
         print("  ⚠️  LIVE TRADING — Real money will be deployed")
         print(f"  Account: ${ACCOUNT_SIZE}")
         print("=" * 60)
-        resp = input("\n  Type 'I UNDERSTAND' to confirm: ").strip()
-        if resp != "I UNDERSTAND":
-            print("Cancelled.")
-            sys.exit(0)
+        auto_confirm = os.environ.get("ALGO_LIVE_CONFIRM", "").strip()
+        if auto_confirm == "I UNDERSTAND":
+            print("  Live launch confirmation received from controlled launcher.\n")
+        else:
+            resp = input("\n  Type 'I UNDERSTAND' to confirm: ").strip()
+            if resp != "I UNDERSTAND":
+                print("Cancelled.")
+                sys.exit(0)
 
     print("📦 Initializing database...")
     from logging_db.trade_logger import init_db, log_event

@@ -253,7 +253,7 @@ def print_report(results: dict, fast_track: bool = False) -> bool:
     print('='*60)
     if all_pass:
         print('  🏆 ALL CRITERIA MET — System is ready for live trading!')
-        print('  Next step: python3 main.py --mode live')
+        print('  Next step: python3 scripts/go_live.py')
     else:
         failed = sum(1 for r in results.values() if not r['pass'])
         print(f'  ⏳ {failed} criteria not yet met. Keep paper trading.')
@@ -268,7 +268,7 @@ def send_ready_alert():
         ne = NotificationEngine()
         ne.notify_system(
             title='PAPER TRADING CRITERIA MET',
-            detail='All readiness checks passed. Run: python3 main.py --mode live',
+            detail='All readiness checks passed. Run: python3 scripts/go_live.py',
         )
         print('  ✅ Readiness notification written to dashboard.')
     except Exception as e:

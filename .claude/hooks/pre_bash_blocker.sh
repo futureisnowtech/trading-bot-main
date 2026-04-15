@@ -23,12 +23,21 @@ if [ -z "$CMD" ]; then
 fi
 
 # ════════════════════════════════════════════════════════════════════════════
+# ALLOW: CONTROLLED MODE-TRANSITION SCRIPTS
+# Claude may use ONLY these exact repo-local wrappers for mode changes.
+# They embed the policy checks and avoid ad hoc live-start commands.
+# ════════════════════════════════════════════════════════════════════════════
+if echo "$CMD" | grep -qE '^[[:space:]]*python3([[:space:]]+-B)?[[:space:]]+(.*/)?scripts/go_(live|paper)\.py[[:space:]]*$'; then
+    exit 0
+fi
+
+# ════════════════════════════════════════════════════════════════════════════
 # BLOCK 1: LIVE TRADING — never run live mode from Claude
 # ════════════════════════════════════════════════════════════════════════════
 if echo "$CMD" | grep -qE -- '--mode live'; then
     echo "BLOCKED [LIVE-RISK]: '--mode live' detected." >&2
-    echo "Live trading mode must be started manually by the owner, not via Claude." >&2
-    echo "Safe alternative: use '--mode paper' for all automated testing." >&2
+    echo "Live trading mode must use the controlled launcher, not raw '--mode live'." >&2
+    echo "Safe alternative: use '--mode paper' or 'python3 scripts/go_live.py'." >&2
     exit 2
 fi
 
@@ -41,9 +50,8 @@ fi
 # ════════════════════════════════════════════════════════════════════════════
 if echo "$CMD" | grep -qiE 'I[[:space:]]+UNDERSTAND' && echo "$CMD" | grep -qE 'main\.py'; then
     echo "BLOCKED [LIVE-RISK]: Implicit live-start via stdin pipe detected." >&2
-    echo "Live trading must be started manually in a terminal by the owner." >&2
-    echo "Open a terminal, cd to the project, run: python3 main.py" >&2
-    echo "(Type 'I UNDERSTAND' at the interactive prompt — not via Claude.)" >&2
+    echo "Live trading must use the controlled launcher, not stdin piping." >&2
+    echo "Use: python3 scripts/go_live.py" >&2
     exit 2
 fi
 

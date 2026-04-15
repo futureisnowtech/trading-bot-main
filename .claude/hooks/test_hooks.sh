@@ -83,6 +83,12 @@ check "ALLOW: pytest" 0 $?
 echo "{\"tool_input\":{\"command\":\"sqlite3 logs/trades.db \\\"SELECT COUNT(*) FROM trades\\\"\"}}" | bash "$REPO/.claude/hooks/pre_bash_blocker.sh" 2>/dev/null
 check "ALLOW: sqlite3 SELECT on trades.db" 0 $?
 
+echo "{\"tool_input\":{\"command\":\"python3 scripts/go_live.py\"}}" | bash "$REPO/.claude/hooks/pre_bash_blocker.sh" 2>/dev/null
+check "ALLOW: controlled go_live.py" 0 $?
+
+echo "{\"tool_input\":{\"command\":\"python3 scripts/go_paper.py\"}}" | bash "$REPO/.claude/hooks/pre_bash_blocker.sh" 2>/dev/null
+check "ALLOW: controlled go_paper.py" 0 $?
+
 # ── pre_edit_protector.sh ────────────────────────────────────────────────────
 echo ""
 echo "── pre_edit_protector.sh ───────────────────────────────────────────"

@@ -28,7 +28,7 @@ A fully autonomous AI-powered trading system that:
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
 
-## Current Version: v15.4 (2026-04-15)
+## Current Version: v15.6 (2026-04-15)
 
 **Active branch:** `feature/v10-rebuild`
 **Clean paper trading started:** 2026-04-02
@@ -458,7 +458,8 @@ Table: trade_experiences — NumPy cosine similarity, SQLite storage (no LanceDB
 ## How to Start the System
 ```bash
 python3 main.py --mode paper       # Force paper
-python3 main.py --mode live        # Live (requires typing 'I UNDERSTAND')
+python3 scripts/go_live.py         # Controlled live transition (Claude-safe path)
+python3 scripts/go_paper.py        # Return to paper launchd bot
 streamlit run dashboard/app.py --server.runOnSave true  # Dashboard on :8501
 python3 mcp_server/server.py       # MCP server (Codex integration)
 python3 scripts/weekly_report.py   # Weekly performance report
@@ -480,6 +481,10 @@ Registers three launchd services:
 - **com.algotrading.readiness** — readiness check at 7:00 AM daily
 
 Service logs: `logs/service/`
+
+Controlled live transition:
+- `python3 scripts/go_live.py` — verifies Coinbase live auth, stops the paper launchd bot, starts a live `boot.py` process, waits for runtime truth to confirm `mode=live`
+- `python3 scripts/go_paper.py` — stops the live `boot.py` process and restores the paper launchd bot
 
 ## TradingView Integration (v10 — still wired)
 TradingView Pine Script → webhook → SQLite `system_events` (source='tradingview')
@@ -549,6 +554,10 @@ Motivation 1-5: "Strive for greatness." / "I like criticism. It makes you strong
 | v15.0 | 2026-04-15 | ForecastEx event-contract lane: forecastex_broker.py, 5 new DB tables, log-odds engine, 3 strategy families, 10-check economics gate, fractional Kelly, FORECAST TRADING dashboard tab, MES archived, 195 proof tests |
 | v15.1 | 2026-04-15 | Lane gating: FUTURES_LANE_ACTIVE/FORECAST_LANE_ACTIVE flags; forecast readiness state machine; discovery stubs; Mission Control dedup; activity feed DB-first; dead-money partial-close exempt; IBKR_PORT in config; 205 proof tests |
 | v15.2 | 2026-04-15 | Runtime truth layer: system/lane state tables, lane registry, incident model, position reconciler, allocator scaffold, economics interface, live audit hooks, 219 proof tests |
+| v15.3 | 2026-04-15 | Repo truth closure: Desktop path purge, repo_truth_gate.py, stronger git hooks/CI, hook path hardening, 231 proof tests |
+| v15.4 | 2026-04-15 | Final truth closure: tilde Desktop detection, markdown truth surfaces, pre-commit truth gate, stale 7497 cleanup, 237 proof tests |
+| v15.5 | 2026-04-15 | Dashboard/runtime truth fixes: forecast schedule isolation, archived-lane error filter, stagnant false-positive fix using live perps state, 240 proof tests |
+| v15.6 | 2026-04-15 | Controlled live-launch path: mode-aware boot.py, go_live.py/go_paper.py transitions, hook allowlist for controlled mode changes, Claude-safe live launch docs |
 
 ## GitHub
 - Repository: `futureisnowtech/trading-bot-main` (private)

@@ -1,7 +1,7 @@
 #!/bin/bash
 # start_bot.sh — Wrapper used by launchd to start the trading bot.
 # Always starts in PAPER mode so it's safe to auto-restart.
-# For live trading, start main.py manually in a terminal.
+# For live trading, use python3 scripts/go_live.py.
 
 PROJ="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PYTHON="/Library/Frameworks/Python.framework/Versions/3.14/bin/python3"

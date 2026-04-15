@@ -283,7 +283,7 @@ def print_live_readiness():
     print(f'  To go live when paper results are ready:')
     info('  1. python3 scripts/check_readiness.py  ← must show ALL PASS')
     info('  2. Edit .env: PAPER_TRADING=false')
-    info('  3. python3 main.py --mode live         ← requires typing "I UNDERSTAND"')
+    info('  3. python3 scripts/go_live.py          ← controlled live transition')
     info('  4. Subscribe to Tradovate live plan once account exceeds $1000')
     print()
 

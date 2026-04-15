@@ -351,7 +351,7 @@ if not _BLOCKED and not _ACTION:
     print("\nSTATUS: READY TO LAUNCH (paper mode)")
     print("  All automated checks passed.")
     print("  To launch live: ensure ACTION NEEDED steps above are complete,")
-    print("  then run: python3 main.py --mode live")
+    print("  then run: python3 scripts/go_live.py")
 elif not _BLOCKED:
     print(
         f"\nSTATUS: CODE READY — {len(_ACTION)} human action(s) remaining before live launch"

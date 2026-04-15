@@ -217,7 +217,7 @@ def main():
     if all_pass:
         print('  🟢  READY FOR LIVE TRADING')
         print('     Fund account to $10,000 and set PAPER_TRADING=false')
-        print('     Run: python3 main.py --mode live')
+        print('     Run: python3 scripts/go_live.py')
     elif pass_count >= 4:
         print('  🟡  CLOSE — address remaining criteria before going live')
     else:

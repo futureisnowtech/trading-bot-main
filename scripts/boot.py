@@ -12,20 +12,63 @@ reads main.py as raw bytes via open() and exec()s it in a fresh namespace.
 main.py is never the argv[1] script, so launchd never locks it.
 """
 
-import sys
 import os
+import sys
 
 PROJ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 main_path = os.path.join(PROJ, "main.py")
 
-# Force paper mode in the environment BEFORE any import can cache PAPER_TRADING=false.
-# config.py calls load_dotenv() + evaluates PAPER_TRADING at module import time (line 15).
-# main.py pre-warms config via `import logging_db.trade_logger` at module level (line 50),
-# which fires BEFORE parse_args() sets os.environ. Without this line, .env=false wins and
-# the live-mode `input()` prompt fires — crashing with EOFError in launchd (no TTY).
-os.environ["PAPER_TRADING"] = "true"
+def _resolve_mode(argv: list[str]) -> tuple[str, bool]:
+    """
+    Resolve the boot mode before any project import can cache PAPER_TRADING.
 
-sys.argv = [main_path, "--mode", "paper"]
+    Priority:
+      1. Explicit CLI flag:   scripts/boot.py --mode paper|live
+      2. Explicit env var:    ALGO_BOOT_MODE=paper|live
+      3. Safe default:        paper
+    """
+    mode = os.environ.get("ALGO_BOOT_MODE", "paper").strip().lower() or "paper"
+    confirm_live = os.environ.get("ALGO_LIVE_CONFIRM", "").strip() == "I UNDERSTAND"
+
+    i = 1
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--mode" and i + 1 < len(argv):
+            mode = argv[i + 1].strip().lower()
+            i += 2
+            continue
+        if arg == "--confirm-live":
+            confirm_live = True
+        i += 1
+
+    if mode not in {"paper", "live"}:
+        print(f"boot.py: unsupported mode '{mode}'", file=sys.stderr)
+        sys.exit(2)
+
+    return mode, confirm_live
+
+
+BOOT_MODE, LIVE_CONFIRMED = _resolve_mode(sys.argv)
+
+# Force the target mode in the environment BEFORE any import can cache
+# PAPER_TRADING from .env. config.py calls load_dotenv() + evaluates the flag
+# at module import time, and main.py pre-warms config-related imports before
+# parse_args() gets a chance to override anything.
+os.environ["PAPER_TRADING"] = "false" if BOOT_MODE == "live" else "true"
+
+if BOOT_MODE == "live":
+    if not LIVE_CONFIRMED:
+        print(
+            "boot.py: refusing live launch without ALGO_LIVE_CONFIRM='I UNDERSTAND' "
+            "or --confirm-live",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    os.environ["ALGO_LIVE_CONFIRM"] = "I UNDERSTAND"
+    sys.argv = [main_path, "--mode", "live"]
+else:
+    os.environ.pop("ALGO_LIVE_CONFIRM", None)
+    sys.argv = [main_path, "--mode", "paper"]
 os.chdir(PROJ)
 if PROJ not in sys.path:
     sys.path.insert(0, PROJ)

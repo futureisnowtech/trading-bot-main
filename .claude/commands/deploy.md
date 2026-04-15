@@ -58,7 +58,7 @@ python3 main.py --mode paper {extra_flags}
 
 Live mode (only if readiness = 7/7 and user confirmed):
 ```bash
-python3 main.py --mode live {extra_flags}
+python3 scripts/go_live.py
 ```
 
 ### 7. Health Check

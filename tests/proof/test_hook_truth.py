@@ -18,6 +18,9 @@ Invariants:
 14. install_hooks.sh pre-commit includes repo_truth_gate.py --fast
 15. settings.json hook commands use $CLAUDE_PROJECT_DIR-rooted paths
 16. .version is treated as a generated local artifact, not tracked source
+17. pre_bash_blocker.sh allows the controlled go_live.py launcher
+18. pre_bash_blocker.sh allows the controlled go_paper.py launcher
+19. boot.py supports controlled live/paper mode selection
 """
 
 import json
@@ -405,3 +408,24 @@ def test_version_file_is_gitignored():
     assert ".version" in entries, (
         ".version must be gitignored because it is a local post-commit dashboard stamp"
     )
+
+
+def test_pre_bash_blocker_allows_go_live_launcher():
+    """pre_bash_blocker.sh must allow the controlled go_live.py launcher."""
+    rc = _run_bash_blocker("python3 scripts/go_live.py")
+    assert rc == 0, f"Expected exit 0 for go_live.py, got {rc}"
+
+
+def test_pre_bash_blocker_allows_go_paper_launcher():
+    """pre_bash_blocker.sh must allow the controlled go_paper.py launcher."""
+    rc = _run_bash_blocker("python3 scripts/go_paper.py")
+    assert rc == 0, f"Expected exit 0 for go_paper.py, got {rc}"
+
+
+def test_boot_py_supports_controlled_mode_switch():
+    """boot.py must support explicit mode selection and controlled live confirmation."""
+    boot = _ROOT / "scripts" / "boot.py"
+    assert boot.exists(), "scripts/boot.py not found"
+    text = _read(boot)
+    for token in ("ALGO_BOOT_MODE", "ALGO_LIVE_CONFIRM", "--confirm-live"):
+        assert token in text, f"boot.py missing controlled launch token: {token}"

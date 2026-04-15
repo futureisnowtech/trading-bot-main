@@ -18,7 +18,7 @@ Fully autonomous AI trading system: scans Kraken Futures + Binance USDM + Hyperl
 - Paper account: $5,000 (`ACCOUNT_SIZE=5000` — config default, no .env override)
 - Wants zero day-to-day intervention. Prefers simple explanations, hates fluff.
 
-## Current Version: v15.5 (2026-04-15)
+## Current Version: v15.6 (2026-04-15)
 
 **Active branch:** `feature/v10-rebuild` | **Clean paper trading started:** 2026-04-02
 
@@ -129,6 +129,7 @@ Fully autonomous AI trading system: scans Kraken Futures + Binance USDM + Hyperl
 - **Schedule isolation (v15.5):** `_forecast_daemon` in `main.py` uses `schedule.Scheduler()` private instance (not the global default) to prevent race with `v10_runner`'s `schedule.run_pending()` main loop. Without isolation, the forecast thread consumed exit_monitor jobs from the global scheduler, silently preventing exits from firing. Fix: `_s = _sched_lib.Scheduler()` + `_s.run_pending()` in the daemon loop.
 - **DB staleness — peak_price/trailing_active (v15.5):** `perps_engine.update_position_price()` updates `peak_price` and `trailing_active` in-memory only; it does NOT write back to `open_positions.high_since_entry` or `open_positions.trailing_active`. Consequence: health_check stagnant alarm fires false positives for positions whose price has moved. Fix: `_check_stagnant_positions()` in `monitoring/health_check.py` now reads live `peak_price` + `trailing_active` from `perps_engine.get_open_positions()` to augment stale DB values.
 - **Error rate filter in dashboard (v15.5):** `get_error_rate_1h()` in `dashboard/data/health.py` now applies the same archived-lane noise filter (`_is_archived_lane_noise()`) that `_check_error_rate()` in `health_check.py` already uses. Without this, the dashboard showed ~679 IBKRBroker errors/hour as real errors when FUTURES_LANE_ACTIVE=false.
+- **Controlled live launch (v15.6):** `scripts/boot.py` now supports explicit `paper` vs `live` mode before any config import can cache `.env` state. `scripts/go_live.py` is the single sanctioned Claude/Codex live-launch path: it verifies Coinbase live auth, stops the paper launchd bot, starts `boot.py --mode live --confirm-live`, and waits for runtime truth to confirm `mode=live`. `scripts/go_paper.py` restores the paper launchd bot.
 
 ### MES Futures — Critical Contract Facts (v13.9)
 
@@ -225,7 +226,8 @@ Candidate journaling: 8 decision gates logged per scan (`dual_exposure_block`, `
 ## How to Start the System
 ```bash
 python3 main.py --mode paper       # Force paper
-python3 main.py --mode live        # Live (requires typing 'I UNDERSTAND')
+python3 scripts/go_live.py         # Controlled live transition (Claude-safe path)
+python3 scripts/go_paper.py        # Return to paper launchd bot
 streamlit run dashboard/app.py --server.runOnSave true  # Dashboard :8501
 python3 mcp_server/server.py       # MCP server
 python3 scripts/weekly_report.py   # Weekly performance report
@@ -239,7 +241,7 @@ All alerts → `system_events` SQLite table via `notifications/notification_engi
 ```bash
 bash scripts/install_services.sh
 ```
-Services: `com.algotrading.king` (bot, restarts on crash), `com.algotrading.backup` (2am daily), `com.algotrading.readiness` (7am daily). Logs: `logs/service/`
+Services: `com.algotrading.king` (paper bot, restarts on crash), `com.algotrading.backup` (2am daily), `com.algotrading.readiness` (7am daily). Logs: `logs/service/`. Use `python3 scripts/go_live.py` for a controlled live transition and `python3 scripts/go_paper.py` to restore the paper bot.
 
 ## TradingView Integration
 Pine Script → webhook → SQLite `system_events` (source='tradingview'). v10_runner reads every scan cycle, prepends as candidates with `edge_score=0.6`.
@@ -289,6 +291,7 @@ Set `TV_WEBHOOK_SECRET` in .env. Symbol mapping: BTCUSD → BTCUSDT.
 | v15.3 | 2026-04-15 | Repo truth closure: repo_truth_gate.py (Desktop path + hook root + live-start policy + CI checks), 18-file Desktop path purge, BLOCK 1b implicit live-start policy, pre-push git hook, CI strict gate, 231 proof tests |
 | v15.4 | 2026-04-15 | Final truth-closure: tilde ~/Desktop pattern in truth gate; .md added to ACTIVE_EXTS (covers .claude/commands/, AGENTS.md, CLAUDE.md); pre-commit hardened with repo_truth_gate.py --fast; post_cmd_logger supports POST_CMD_LOG_OVERRIDE + $CLAUDE_PROJECT_DIR; all settings.json hook paths use $CLAUDE_PROJECT_DIR; stale 7497 eliminated from CLAUDE.md/AGENTS.md/dashboard fallback; 237 proof tests |
 | v15.5 | 2026-04-15 | Dashboard error fixes: schedule isolation for forecast daemon (exit_monitor race fix), error rate filter in dashboard/data/health.py, stagnant check uses live perps_engine peak_price to avoid false positives from stale DB high_since_entry; 240 proof tests |
+| v15.6 | 2026-04-15 | Controlled live-launch workflow: mode-aware boot.py, go_live.py/go_paper.py mode transitions, hook allowlist for the sanctioned launcher scripts, docs updated so Claude uses the controlled path instead of raw `--mode live` |
 
 ## GitHub
 - Repository: `futureisnowtech/trading-bot-main` (private)

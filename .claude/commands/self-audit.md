@@ -95,7 +95,6 @@ echo "EXPECTED: hard stop reason uses :.8g format (not :.4f)"
 
 ```bash
 echo "=== SMOKE TESTS ==="
-cd /Users/joshmacbookair2020/Desktop/algo_trading_final
 python3 -m pytest tests/test_indicators.py tests/test_exit_logic.py -q --tb=short --no-header -p no:warnings 2>&1 | tail -15
 ```
 

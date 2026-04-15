@@ -498,7 +498,7 @@ Set TV_WEBHOOK_SECRET in .env. Symbol mapping: BTCUSD → BTCUSDT.
 
 **pandas-ta import error** → `pip install "pandas-ta>=0.4.67b0"`
 **XGBoost openmp error** → `brew install libomp`
-**IBKR connection failed** → TWS must be running, port 7497 (paper), API enabled in TWS settings
+**IBKR connection failed** → TWS must be running, API enabled in TWS settings; port from `IBKR_PORT` in .env (7496=live, 7497=paper)
 **DB lock error** → WAL mode is on; usually a stale connection. Restart bot.
 **Schedule not running** → Check nothing is blocking the while True loop in v10_runner.py
 **TV webhook 403** → TV_WEBHOOK_SECRET in .env doesn't match Pine Script input

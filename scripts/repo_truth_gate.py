@@ -32,7 +32,8 @@ _ROOT = Path(__file__).resolve().parent.parent
 # Split to avoid self-match: the regex won't match its own raw-string source
 _D = "Desktop"
 BANNED_PATTERNS: list[tuple[str, str]] = [
-    (rf"/Users/\w+/{_D}/algo_trading_final", "Desktop path hardcode"),
+    (rf"/Users/\w+/{_D}/algo_trading_final", "Desktop path hardcode (absolute)"),
+    (rf"~/{_D}/algo_trading_final", "Desktop path hardcode (tilde form)"),
 ]
 
 # Dirs to skip during file scan
@@ -51,10 +52,13 @@ SKIP_FILES: set[str] = {
     "repo_truth_gate.py",
     "test_hook_truth.py",
     "settings.local.json",  # permission allow-list: legacy entries, not active code
+    "CHANGELOG.md",  # historical commit log — mentions Desktop in past-tense descriptions only
 }
 
 # Active file extensions to scan
-ACTIVE_EXTS: set[str] = {".py", ".sh", ".json", ".yml", ".yaml"}
+# .md is included to catch Desktop references in instruction surfaces
+# (.claude/commands/, .claude/agents/, AGENTS.md, CLAUDE.md)
+ACTIVE_EXTS: set[str] = {".py", ".sh", ".json", ".yml", ".yaml", ".md"}
 
 # ── CI config requirements ────────────────────────────────────────────────────
 CI_FILE = _ROOT / ".github" / "workflows" / "ci.yml"

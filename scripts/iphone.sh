@@ -2,7 +2,7 @@
 # iphone.sh — Run this after SSH'ing in from iPhone.
 # Creates (or re-attaches to) a screen session with 3 pre-loaded windows.
 #
-# Usage:  bash ~/Desktop/algo_trading_final/scripts/iphone.sh
+# Usage:  bash ~/Projects/algo_trading_final/scripts/iphone.sh
 #
 # Navigation inside screen:
 #   Ctrl+A, 1  →  LOGS   (live bot log feed)

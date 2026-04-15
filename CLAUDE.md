@@ -253,7 +253,7 @@ Set `TV_WEBHOOK_SECRET` in .env. Symbol mapping: BTCUSD → BTCUSDT.
 |-------|-----|
 | pandas-ta import | `pip install "pandas-ta>=0.4.67b0"` |
 | XGBoost openmp | `brew install libomp` |
-| IBKR connection failed | TWS running, port 7497, API enabled in TWS settings |
+| IBKR connection failed | TWS running, API enabled in TWS settings; port from `IBKR_PORT` in .env (7496=live, 7497=paper) |
 | DB lock | WAL mode on; stale connection — restart bot |
 | Schedule not running | Check while-True loop in v10_runner.py not blocked |
 | TV webhook 403 | `TV_WEBHOOK_SECRET` mismatch |

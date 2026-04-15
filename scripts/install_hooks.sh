@@ -7,28 +7,38 @@ HOOKS_DIR="$REPO_ROOT/.git/hooks"
 
 echo "Installing git hooks..."
 
-# ── pre-commit: run validate.py before every commit ──────────────────────────
+# ── pre-commit: repo truth gate (fast) + validate.py ─────────────────────────
 cat > "$HOOKS_DIR/pre-commit" << 'HOOK'
 #!/bin/bash
-# pre-commit hook: validate system config before committing
+# pre-commit hook: truth gate (fast) + config validation before every commit
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 echo ""
-echo "Running pre-commit validation..."
+echo "Running pre-commit checks..."
+
+# 1. Repo truth gate (fast) — catches Desktop paths, bad hook roots, live-start bypasses
+python3 "$REPO_ROOT/scripts/repo_truth_gate.py" --fast
+if [ $? -ne 0 ]; then
+    echo ""
+    echo "❌ Repo truth gate (fast) failed. Fix Desktop paths / policy issues before committing."
+    echo "   To skip (dangerous): git commit --no-verify"
+    exit 1
+fi
+
+# 2. Config validation
 python3 "$REPO_ROOT/scripts/validate.py"
-STATUS=$?
-if [ $STATUS -ne 0 ]; then
+if [ $? -ne 0 ]; then
     echo ""
     echo "❌ Pre-commit validation failed. Fix errors before committing."
     echo "   To skip (dangerous): git commit --no-verify"
     exit 1
 fi
-echo "✅ Validation passed."
+echo "✅ Pre-commit checks passed."
 echo ""
 exit 0
 HOOK
 
 chmod +x "$HOOKS_DIR/pre-commit"
-echo "  ✅ pre-commit hook installed"
+echo "  ✅ pre-commit hook installed (repo_truth_gate.py --fast + validate.py)"
 
 # ── post-commit: auto-log to CHANGELOG.md ────────────────────────────────────
 cat > "$HOOKS_DIR/post-commit" << 'HOOK'

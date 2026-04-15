@@ -163,12 +163,19 @@ def _classify_error(source: str, message: str) -> dict:
     if s == "ibkr" or "ibkr" in m or "tws" in m or "7497" in m or "7496" in m:
         try:
             import sys as _sys, os as _os
-            _r = _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+
+            _r = _os.path.dirname(
+                _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+            )
             if _r not in _sys.path:
                 _sys.path.insert(0, _r)
             from config import IBKR_PORT as _ibkr_port
         except Exception:
-            _ibkr_port = 7497
+            # Read from env if config import fails; default to 7496 (live session port
+            # per .env). 7497 = IBKR paper TWS — set IBKR_PORT in .env to override.
+            import os as _os2
+
+            _ibkr_port = int(_os2.environ.get("IBKR_PORT", "7496"))
         return {
             "category": "IBKR / TWS Disconnected",
             "fix_type": "Claude Code",
@@ -316,10 +323,14 @@ def _is_archived_lane_noise(source: str, message: str) -> bool:
     """Return True if this error is from the dormant MES/IBKR lane when it is inactive."""
     try:
         import sys, os
-        _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+        _ROOT = os.path.dirname(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        )
         if _ROOT not in sys.path:
             sys.path.insert(0, _ROOT)
         from config import FUTURES_LANE_ACTIVE
+
         if FUTURES_LANE_ACTIVE:
             return False
     except Exception:

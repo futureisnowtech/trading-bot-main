@@ -2,13 +2,21 @@
 tests/proof/test_hook_truth.py — Hook/script path truth invariants.
 
 Invariants:
-1. No tracked hook script contains a hardcoded absolute REPO_ROOT/REPO variable
-2. No tracked operational script contains a Desktop path hardcode
-3. repo_truth_gate.py --fast exits 0 on the current repo
-4. repo_truth_gate.py exits 1 when given content with a Desktop path
-5. pre_bash_blocker.sh blocks --mode live
-6. pre_bash_blocker.sh blocks implicit live-start via stdin pipe
-7. settings.json reload hook uses bash scripts/reload_on_change.sh (not inline Desktop path)
+1.  No tracked hook script contains a hardcoded absolute REPO_ROOT/REPO variable
+2.  No tracked operational script contains a Desktop path hardcode (absolute form)
+3.  repo_truth_gate.py --fast exits 0 on the current repo
+4.  repo_truth_gate.py exits 1 when given content with a Desktop path
+5.  pre_bash_blocker.sh blocks --mode live
+6.  pre_bash_blocker.sh blocks implicit live-start via stdin pipe
+7.  settings.json reload hook uses bash scripts/reload_on_change.sh (not inline Desktop path)
+8.  settings.json reload hook is clean (no Desktop path)
+9.  reload_on_change.sh uses dynamic root
+10. repo_truth_gate.py rejects tilde-form ~/Desktop path
+11. repo_truth_gate.py ACTIVE_EXTS includes .md (covers markdown instruction surfaces)
+12. .claude/commands/self-audit.md has no Desktop path
+13. scripts/iphone.sh has no Desktop path (tilde or absolute)
+14. install_hooks.sh pre-commit includes repo_truth_gate.py --fast
+15. settings.json hook commands use $CLAUDE_PROJECT_DIR-rooted paths
 """
 
 import json
@@ -27,6 +35,7 @@ _SCRIPTS_DIR = _ROOT / "scripts"
 # Note: split segment to avoid triggering the truth gate regex on this test file.
 _D_SEG = "Desktop"
 _DESKTOP_PATTERN = re.compile(r"/Users/\w+/" + _D_SEG + r"/algo_trading_final")
+_DESKTOP_TILDE_PATTERN = re.compile(r"~/" + _D_SEG + r"/algo_trading_final")
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -222,3 +231,159 @@ def test_reload_on_change_no_desktop_path():
     assert not _DESKTOP_PATTERN.search(_read(script)), (
         "reload_on_change.sh contains a Desktop path hardcode"
     )
+
+
+# ── Test 10: truth gate rejects tilde-form ~/Desktop path ────────────────────
+
+
+def test_repo_truth_gate_catches_tilde_desktop_path(tmp_path):
+    """repo_truth_gate.py must exit 1 when a tracked file contains ~/Desktop/algo_trading_final."""
+    gate = _ROOT / "scripts" / "repo_truth_gate.py"
+    assert gate.exists(), "scripts/repo_truth_gate.py not found"
+
+    test_repo = tmp_path / "test_repo_tilde"
+    test_repo.mkdir()
+    subprocess.run(["git", "init"], cwd=str(test_repo), capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@test.com"],
+        cwd=str(test_repo),
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=str(test_repo),
+        capture_output=True,
+    )
+
+    # Create a tracked .sh file with the tilde banned pattern (split to avoid self-match)
+    bad_script = test_repo / "bad_tilde.sh"
+    bad_content = (
+        "#!/bin/bash\n# Usage: bash ~/"
+        + _D_SEG
+        + "/algo_trading_final/scripts/run.sh\n"
+    )
+    bad_script.write_text(bad_content)
+    subprocess.run(["git", "add", "."], cwd=str(test_repo), capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "init"],
+        cwd=str(test_repo),
+        capture_output=True,
+    )
+
+    scripts_dir = test_repo / "scripts"
+    scripts_dir.mkdir()
+    import shutil
+
+    shutil.copy(str(gate), str(scripts_dir / "repo_truth_gate.py"))
+    subprocess.run(["git", "add", "."], cwd=str(test_repo), capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "add gate"],
+        cwd=str(test_repo),
+        capture_output=True,
+    )
+
+    result = subprocess.run(
+        [sys.executable, str(scripts_dir / "repo_truth_gate.py"), "--fast"],
+        cwd=str(test_repo),
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert result.returncode == 1, (
+        "gate should have failed on tilde Desktop path but exited 0\n" + result.stdout
+    )
+
+
+# ── Test 11: truth gate ACTIVE_EXTS includes .md ─────────────────────────────
+
+
+def test_repo_truth_gate_active_exts_includes_md():
+    """repo_truth_gate.py must include .md in ACTIVE_EXTS to cover markdown surfaces."""
+    gate = _ROOT / "scripts" / "repo_truth_gate.py"
+    assert gate.exists(), "scripts/repo_truth_gate.py not found"
+    text = _read(gate)
+    assert '".md"' in text or "'.md'" in text, (
+        "repo_truth_gate.py ACTIVE_EXTS does not include .md — "
+        "markdown instruction surfaces (.claude/commands/, AGENTS.md, CLAUDE.md) "
+        "will not be scanned for Desktop path references"
+    )
+
+
+# ── Test 12: self-audit.md has no Desktop path ───────────────────────────────
+
+
+def test_self_audit_md_no_desktop_path():
+    """self-audit.md must not contain a Desktop repo path."""
+    cmd_file = _ROOT / ".claude" / "commands" / "self-audit.md"
+    assert cmd_file.exists(), ".claude/commands/self-audit.md not found"
+    text = _read(cmd_file)
+    assert not _DESKTOP_PATTERN.search(text), (
+        "self-audit.md still contains an absolute Desktop path hardcode"
+    )
+    assert not _DESKTOP_TILDE_PATTERN.search(text), (
+        "self-audit.md still contains a tilde Desktop path hardcode"
+    )
+
+
+# ── Test 13: iphone.sh has no Desktop path ───────────────────────────────────
+
+
+def test_iphone_sh_no_desktop_path():
+    """scripts/iphone.sh must not reference the Desktop repo path (absolute or tilde)."""
+    script = _ROOT / "scripts" / "iphone.sh"
+    assert script.exists(), "scripts/iphone.sh not found"
+    text = _read(script)
+    assert not _DESKTOP_PATTERN.search(text), (
+        "scripts/iphone.sh still contains an absolute Desktop path hardcode"
+    )
+    assert not _DESKTOP_TILDE_PATTERN.search(text), (
+        "scripts/iphone.sh still contains a tilde Desktop path hardcode"
+    )
+
+
+# ── Test 14: install_hooks.sh pre-commit includes truth gate --fast ───────────
+
+
+def test_install_hooks_pre_commit_includes_truth_gate():
+    """install_hooks.sh must wire repo_truth_gate.py --fast into the pre-commit hook."""
+    script = _ROOT / "scripts" / "install_hooks.sh"
+    assert script.exists(), "scripts/install_hooks.sh not found"
+    text = _read(script)
+    # Must have both the gate invocation AND --fast flag in the pre-commit block
+    assert "repo_truth_gate.py" in text and "--fast" in text, (
+        "install_hooks.sh pre-commit does not include repo_truth_gate.py --fast"
+    )
+    # Verify it appears BEFORE the pre-push section (i.e., in the pre-commit block)
+    precommit_idx = text.find("pre-commit")
+    prepush_idx = text.find("pre-push")
+    gate_idx = text.find("repo_truth_gate.py")
+    assert precommit_idx < gate_idx < prepush_idx, (
+        "repo_truth_gate.py --fast is not in the pre-commit block of install_hooks.sh"
+    )
+
+
+# ── Test 15: settings.json hook commands use $CLAUDE_PROJECT_DIR ─────────────
+
+
+def test_settings_json_uses_claude_project_dir():
+    """settings.json hook commands must use $CLAUDE_PROJECT_DIR for robust absolute paths."""
+    settings = _ROOT / ".claude" / "settings.json"
+    assert settings.exists(), ".claude/settings.json not found"
+    data = json.loads(_read(settings))
+
+    # Collect all hook commands
+    hook_commands = []
+    for trigger, matchers in data.get("hooks", {}).items():
+        for matcher_block in matchers:
+            for h in matcher_block.get("hooks", []):
+                cmd = h.get("command", "")
+                if cmd:
+                    hook_commands.append(cmd)
+
+    assert hook_commands, "settings.json has no hook commands"
+
+    for cmd in hook_commands:
+        assert "$CLAUDE_PROJECT_DIR" in cmd, (
+            f"settings.json hook command does not use $CLAUDE_PROJECT_DIR: {cmd!r}\n"
+            "All hook commands must use $CLAUDE_PROJECT_DIR/... for robust path resolution"
+        )

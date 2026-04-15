@@ -112,18 +112,22 @@ check "ALLOW: tests/test_indicators.py edit" 0 $?
 echo ""
 echo "── post_cmd_logger.sh ──────────────────────────────────────────────"
 
-LOG_FILE="$REPO/.claude/logs/commands.log"
-LOG_SIZE_BEFORE=$(wc -l < "$LOG_FILE" 2>/dev/null || echo "0")
-echo "{\"tool_input\":{\"command\":\"echo test_log_entry\"}}" | bash "$REPO/.claude/hooks/post_cmd_logger.sh" 2>/dev/null
-LOG_SIZE_AFTER=$(wc -l < "$LOG_FILE" 2>/dev/null || echo "0")
+# Use a temp file via POST_CMD_LOG_OVERRIDE so the test is environment-independent:
+# it doesn't depend on .claude/logs/ existing or having write permission in any
+# particular CWD. This is the supported override path in post_cmd_logger.sh.
+TEMP_LOG=$(mktemp /tmp/test_cmd_log_XXXXXX)
+LOG_SIZE_BEFORE=$(wc -l < "$TEMP_LOG" 2>/dev/null || echo "0")
+echo "{\"tool_input\":{\"command\":\"echo test_log_entry\"}}" | POST_CMD_LOG_OVERRIDE="$TEMP_LOG" bash "$REPO/.claude/hooks/post_cmd_logger.sh" 2>/dev/null
+LOG_SIZE_AFTER=$(wc -l < "$TEMP_LOG" 2>/dev/null || echo "0")
 if [ "$LOG_SIZE_AFTER" -gt "$LOG_SIZE_BEFORE" ]; then
     echo "  PASS: Command logged (lines: $LOG_SIZE_BEFORE → $LOG_SIZE_AFTER)"
     PASS=$((PASS+1))
-    echo "  Last log entry: $(tail -1 $LOG_FILE)"
+    echo "  Last log entry: $(tail -1 "$TEMP_LOG")"
 else
     echo "  FAIL: No new log entry written"
     FAIL=$((FAIL+1))
 fi
+rm -f "$TEMP_LOG"
 
 echo "{\"tool_input\":{\"command\":\"echo test_log_entry\"}}" | bash "$REPO/.claude/hooks/post_cmd_logger.sh" 2>/dev/null
 check "ALLOW: logger always exits 0" 0 $?

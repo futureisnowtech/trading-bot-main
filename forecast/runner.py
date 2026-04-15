@@ -311,6 +311,7 @@ def run_position_monitor() -> None:
     # Heartbeat — run_position_monitor is the most frequent forecast loop (30s)
     try:
         from runtime.runtime_state import mark_lane_heartbeat
+
         mark_lane_heartbeat("forecast")
     except Exception:
         pass
@@ -343,9 +344,15 @@ def start_forecast_lane(bankroll: float = 100.0) -> None:
         logger.error(f"[ForecastRunner] DB init failed: {e}")
         return
 
-    # Connect broker
+    # Connect broker — ib_insync connect() is async; the return value from the
+    # synchronous wrapper may be False even though the connection completes moments
+    # later.  Re-check is_connected() after a short grace period.
     broker = _get_broker()
     connected = broker.connect()
+    if not connected:
+        # Give the async connection up to 4s to complete before giving up.
+        time.sleep(4)
+        connected = broker.is_connected()
     if not connected:
         logger.warning(
             "[ForecastRunner] ForecastEx broker not connected — "
@@ -354,6 +361,7 @@ def start_forecast_lane(bankroll: float = 100.0) -> None:
 
     try:
         from runtime.runtime_state import upsert_lane_state
+
         upsert_lane_state(
             "forecast",
             active=1,

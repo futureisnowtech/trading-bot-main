@@ -126,7 +126,11 @@ def main():
     print("   ✅ logs/trades.db ready\n")
 
     # ── Runtime truth tables ──────────────────────────────────────────────────
-    from runtime.runtime_state import init_runtime_tables, upsert_system_state, upsert_lane_state
+    from runtime.runtime_state import (
+        init_runtime_tables,
+        upsert_system_state,
+        upsert_lane_state,
+    )
     from runtime.incident_tracker import init_incident_table
     from runtime.position_reconciler import run_reconciliation
     from config import FUTURES_LANE_ACTIVE as _FLA
@@ -146,27 +150,48 @@ def main():
         active_lanes="[]",
     )
     # crypto lane — always active
-    upsert_lane_state("crypto", db_path=_db_path, enabled=1, active=1, configured=1,
-                      mode=_rt_mode, health="OK", readiness_state="OPERATIONAL")
+    upsert_lane_state(
+        "crypto",
+        db_path=_db_path,
+        enabled=1,
+        active=1,
+        configured=1,
+        mode=_rt_mode,
+        health="OK",
+        readiness_state="OPERATIONAL",
+    )
     # forecast lane
-    upsert_lane_state("forecast", db_path=_db_path,
-                      enabled=int(FORECAST_LANE_ACTIVE), active=int(FORECAST_LANE_ACTIVE),
-                      configured=1,
-                      mode=_rt_mode if FORECAST_LANE_ACTIVE else "disabled",
-                      health="UNKNOWN",
-                      readiness_state="LANE_NOT_STARTED" if not FORECAST_LANE_ACTIVE else "BROKER_DISCONNECTED")
+    upsert_lane_state(
+        "forecast",
+        db_path=_db_path,
+        enabled=int(FORECAST_LANE_ACTIVE),
+        active=int(FORECAST_LANE_ACTIVE),
+        configured=1,
+        mode=_rt_mode if FORECAST_LANE_ACTIVE else "disabled",
+        health="UNKNOWN",
+        readiness_state="LANE_NOT_STARTED"
+        if not FORECAST_LANE_ACTIVE
+        else "BROKER_DISCONNECTED",
+    )
     # mes archived lane
-    upsert_lane_state("mes_archived", db_path=_db_path,
-                      enabled=int(_FLA), active=0, configured=int(_FLA),
-                      mode="archived",
-                      health="OK", readiness_state="DORMANT",
-                      blocked_reason="" if _FLA else "FUTURES_LANE_ACTIVE=false")
+    upsert_lane_state(
+        "mes_archived",
+        db_path=_db_path,
+        enabled=int(_FLA),
+        active=0,
+        configured=int(_FLA),
+        mode="archived",
+        health="OK",
+        readiness_state="DORMANT",
+        blocked_reason="" if _FLA else "FUTURES_LANE_ACTIVE=false",
+    )
 
     # Run position reconciliation
     run_reconciliation(_db_path)
 
     # Write startup heartbeat immediately so last_global_heartbeat_at is never blank
     from runtime.runtime_state import write_system_heartbeat
+
     write_system_heartbeat(_db_path)
 
     print("   ✅ Runtime state tables ready\n")
@@ -179,12 +204,14 @@ def main():
     )
 
     log_event(
-        "INFO", "main",
-        f"Bot started — {'paper' if PAPER_TRADING else 'live'} mode v15.2"
+        "INFO",
+        "main",
+        f"Bot started — {'paper' if PAPER_TRADING else 'live'} mode v15.2",
     )
 
     # ── Forecast lane (optional daemon thread) ────────────────────────────────
     if FORECAST_LANE_ACTIVE:
+
         def _forecast_daemon():
             """Run forecast lane in its own schedule instance (thread-safe)."""
             import schedule as _s
@@ -196,27 +223,59 @@ def main():
                 _get_broker,
                 _get_harvester,
             )
+
             try:
                 init_forecast_db()
                 broker = _get_broker()
-                broker.connect()
+                _connected = broker.connect()
+                if not _connected:
+                    time.sleep(4)
+                    _connected = broker.is_connected()
+                try:
+                    from runtime.runtime_state import upsert_lane_state as _uls
+
+                    _uls(
+                        "forecast",
+                        db_path=_db_path,
+                        connected=int(_connected),
+                        readiness_state="BROKER_DISCONNECTED"
+                        if not _connected
+                        else "NO_UNDERLIERS",
+                    )
+                except Exception:
+                    pass
                 harvester = _get_harvester()
                 harvester.start()
                 run_discovery_cycle()
                 _s.every(30).minutes.do(run_discovery_cycle)
                 _s.every(5).minutes.do(lambda: run_strategy_cycle(100.0))
                 _s.every(30).seconds.do(run_position_monitor)
-                log_event("INFO", "ForecastRunner", "Forecast lane started — FORECAST_LANE_ACTIVE=true")
+                log_event(
+                    "INFO",
+                    "ForecastRunner",
+                    "Forecast lane started — FORECAST_LANE_ACTIVE=true",
+                )
                 while True:
                     _s.run_pending()
                     time.sleep(1)
             except Exception as _fe:
                 log_event("ERROR", "ForecastRunner", f"Forecast lane crashed: {_fe}")
 
-        _ft = threading.Thread(target=_forecast_daemon, daemon=True, name="ForecastLane")
+        _ft = threading.Thread(
+            target=_forecast_daemon, daemon=True, name="ForecastLane"
+        )
         _ft.start()
-        upsert_lane_state("forecast", db_path=_db_path, active=1, readiness_state="BROKER_DISCONNECTED")
-        log_event("INFO", "ForecastRunner", "Forecast lane started (FORECAST_LANE_ACTIVE=true)")
+        upsert_lane_state(
+            "forecast",
+            db_path=_db_path,
+            active=1,
+            readiness_state="BROKER_DISCONNECTED",
+        )
+        log_event(
+            "INFO",
+            "ForecastRunner",
+            "Forecast lane started (FORECAST_LANE_ACTIVE=true)",
+        )
         print("   ForecastEx lane started (FORECAST_LANE_ACTIVE=true)")
 
     # Populate active_lanes now that all lane startup is done

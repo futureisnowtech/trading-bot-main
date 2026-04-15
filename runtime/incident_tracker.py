@@ -81,6 +81,7 @@ def _severity_from_level(level: str) -> str:
 
 # ── Table init ────────────────────────────────────────────────────────────────
 
+
 def init_incident_table(db_path: str = DB_PATH) -> None:
     """CREATE TABLE IF NOT EXISTS incidents."""
     with _conn(db_path) as c:
@@ -88,6 +89,7 @@ def init_incident_table(db_path: str = DB_PATH) -> None:
 
 
 # ── Ingestion ─────────────────────────────────────────────────────────────────
+
 
 def ingest_system_events(lookback_minutes: int = 60, db_path: str = DB_PATH) -> int:
     """
@@ -115,13 +117,17 @@ def ingest_system_events(lookback_minutes: int = 60, db_path: str = DB_PATH) -> 
     for row in rows:
         source = row["source"] or ""
         level = row["level"] or "INFO"
-        message = (row["message"] or "")
+        message = row["message"] or ""
         ts = row["ts"] or _now_iso()
 
         lane_id = _lane_from_source(source)
 
         # Skip archived lane sources when FUTURES_LANE_ACTIVE=False
         if lane_id == "mes_archived" and not FUTURES_LANE_ACTIVE:
+            continue
+
+        # Only track WARNING and above as actionable incidents — INFO is noise
+        if (level or "INFO").upper() == "INFO":
             continue
 
         fp = f"{source}::{message[:80].lower().strip()}"
@@ -194,6 +200,7 @@ def ingest_system_events(lookback_minutes: int = 60, db_path: str = DB_PATH) -> 
 
 # ── Read ──────────────────────────────────────────────────────────────────────
 
+
 def get_open_incidents(exclude_archived: bool = True, db_path: str = DB_PATH) -> list:
     """
     Returns open incidents as list of dicts.
@@ -241,6 +248,7 @@ def get_incident_summary(db_path: str = DB_PATH) -> dict:
 
 
 # ── Stale resolution ──────────────────────────────────────────────────────────
+
 
 def resolve_stale_incidents(stale_minutes: int = 30, db_path: str = DB_PATH) -> int:
     """

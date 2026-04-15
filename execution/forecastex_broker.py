@@ -56,6 +56,16 @@ FORECASTX_CLIENT_ID = int(
 # Zero commission on ForecastEx
 FORECASTX_FEE_PER_CONTRACT = 0.0
 
+# Known IND conIds confirmed live on FORECASTX (2026-04-15).
+# Used to persist stubs when the IND pass times out or OPT layer is unavailable.
+KNOWN_FORECASTX_CONIDS: dict[str, int] = {
+    "CPI": 573031126,
+    "CPIY": 712856682,
+    "CPIC": 727520252,
+    "DISSN": 806285268,
+    "DISSA": 804725704,
+}
+
 # Economic event underlier symbols to scan during discovery.
 # These are the ACTUAL IBKR FORECASTX IND symbols confirmed via reqMatchingSymbols.
 # FRED/FRED-style codes (CPIAUCSL, UNRATE, PAYEMS) do NOT exist on FORECASTX.
@@ -275,49 +285,54 @@ class ForecastExBroker:
         """
         from ib_insync import Contract
 
-        # Pass 1: confirm IND underlier exists
+        # Pass 1: confirm IND underlier exists (10s timeout — DISSN/DISSA/GDP can hang)
         ind_contract = Contract(
             secType="IND",
             symbol=underlier,
             exchange="FORECASTX",
             currency="USD",
         )
+        ind_conid = KNOWN_FORECASTX_CONIDS.get(underlier)
+        long_name = ""
+        category = ""
         try:
-            ind_details = await self._ib.reqContractDetailsAsync(ind_contract)
+            ind_details = await asyncio.wait_for(
+                self._ib.reqContractDetailsAsync(ind_contract), timeout=10
+            )
+            if not ind_details:
+                # Symbol not on FORECASTX this session.  If we have a known conId,
+                # fall through and try OPT anyway; otherwise bail.
+                if not ind_conid:
+                    return []
+            else:
+                ind_info = ind_details[0]
+                long_name = ind_info.longName or ""
+                category = ind_info.category or ""
+                ind_conid = ind_info.contract.conId
         except Exception as e:
             log_event(
                 "WARN", "ForecastExBroker", f"IND discovery error for {underlier}: {e}"
             )
-            return []
-
-        if not ind_details:
-            return []  # symbol not on FORECASTX — skip silently
-
-        ind_info = ind_details[0]
-        long_name = ind_info.longName or ""
-        category = ind_info.category or ""
-        ind_conid = ind_info.contract.conId
+            # If we have a confirmed conId from the known map, still attempt OPT pass.
+            if not ind_conid:
+                return []
 
         # Pass 2: get OPT event contracts (YES=Right C, NO=Right P)
+        # 12s timeout — OPT layer hangs when account not enrolled for event trading.
         opt_contract = Contract(
             secType="OPT",
             symbol=underlier,
             exchange="FORECASTX",
             currency="USD",
         )
-        try:
-            details = await self._ib.reqContractDetailsAsync(opt_contract)
-        except Exception as e:
-            log_event(
-                "WARN", "ForecastExBroker", f"OPT discovery error for {underlier}: {e}"
-            )
-            # Account may not have ForecastEx event trading enabled.
-            # Return a stub so callers can persist the underlier visibility to DB.
+
+        def _stub() -> list[dict]:
+            """Return an IND-only stub when OPT layer is unavailable."""
             log_event(
                 "INFO",
                 "ForecastExBroker",
                 f"IND {underlier} (conId={ind_conid}) found but OPT layer unavailable "
-                f"— account may need ForecastEx enrollment: {e}",
+                f"— account may need ForecastEx enrollment",
             )
             return [
                 {
@@ -336,6 +351,18 @@ class ForecastExBroker:
                     "currency": "USD",
                 }
             ]
+
+        try:
+            details = await asyncio.wait_for(
+                self._ib.reqContractDetailsAsync(opt_contract), timeout=12
+            )
+        except Exception as e:
+            log_event(
+                "WARN", "ForecastExBroker", f"OPT discovery error for {underlier}: {e}"
+            )
+            # Account may not have ForecastEx event trading enabled.
+            # Return a stub so callers can persist the underlier visibility to DB.
+            return _stub()
 
         results = []
         now_str = datetime.now(timezone.utc).date().isoformat()
@@ -386,7 +413,7 @@ class ForecastExBroker:
         all_contracts = []
         for underlier in targets:
             try:
-                contracts = self._run(self._discover_async(underlier), timeout=25)
+                contracts = self._run(self._discover_async(underlier), timeout=30)
                 all_contracts.extend(contracts)
             except Exception as e:
                 log_event(
@@ -394,11 +421,35 @@ class ForecastExBroker:
                     "ForecastExBroker",
                     f"Discovery timeout for {underlier}: {e}",
                 )
+                # If this underlier has a confirmed conId, emit a stub so the DB
+                # records that the IND is visible even though OPT timed out.
+                if underlier in KNOWN_FORECASTX_CONIDS:
+                    all_contracts.append(
+                        {
+                            "underlier": underlier,
+                            "und_conid": KNOWN_FORECASTX_CONIDS[underlier],
+                            "long_name": "",
+                            "category": "",
+                            "stub_only": True,
+                            "opt_unavailable": True,
+                            "local_symbol": underlier,
+                            "conid": None,
+                            "right": None,
+                            "strike": None,
+                            "last_trade_at": None,
+                            "exchange": "FORECASTX",
+                            "currency": "USD",
+                        }
+                    )
 
         # Label YES/NO and apply economic filter
         results = []
         for c in all_contracts:
-            if not _is_economic_market(
+            # Known confirmed underliers bypass the economic keyword filter —
+            # DISSN/DISSA have short symbols that don't match any keyword when
+            # long_name/category are empty (stub case).
+            is_known = c.get("underlier") in KNOWN_FORECASTX_CONIDS
+            if not is_known and not _is_economic_market(
                 c["underlier"], c.get("long_name", ""), c.get("category", "")
             ):
                 continue

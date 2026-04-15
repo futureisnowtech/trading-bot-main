@@ -298,6 +298,7 @@ LANE_NOT_STARTED = "LANE_NOT_STARTED"
 BROKER_DISCONNECTED = "BROKER_DISCONNECTED"
 NO_UNDERLIERS = "NO_UNDERLIERS"
 UNDERLIERS_ONLY = "UNDERLIERS_ONLY"
+NO_TRADABLE_CONTRACTS_RIGHT_NOW = "NO_TRADABLE_CONTRACTS_RIGHT_NOW"
 NO_QUOTES = "NO_QUOTES"
 QUOTES_NO_BARS = "QUOTES_NO_BARS"
 OPERATIONAL = "OPERATIONAL"
@@ -308,13 +309,16 @@ def get_forecast_readiness() -> dict:
     Compute lane readiness using a state machine.
 
     States (in order of severity):
-      LANE_NOT_STARTED    — no ForecastRunner events in last 2h
-      BROKER_DISCONNECTED — lane started but no recent activity
-      NO_UNDERLIERS       — lane running but 0 markets in DB
-      UNDERLIERS_ONLY     — IND underliers visible but 0 OPT contracts (enrollment pending)
-      NO_QUOTES           — contracts exist but no fresh quotes
-      QUOTES_NO_BARS      — quotes flowing but bars not built yet
-      OPERATIONAL         — fully functional
+      LANE_NOT_STARTED              — no ForecastRunner events in last 2h
+      BROKER_DISCONNECTED           — lane started but no DB/quote activity detected
+      NO_UNDERLIERS                 — lane running but 0 markets in DB
+      UNDERLIERS_ONLY               — stubs in DB but lane not confirmed running yet
+      NO_TRADABLE_CONTRACTS_RIGHT_NOW — lane running, underliers confirmed, but 0 OPT
+                                      contracts available (no active event period or
+                                      enrollment/permissions limitation)
+      NO_QUOTES                     — contracts exist but no fresh quotes
+      QUOTES_NO_BARS                — quotes flowing but bars not built yet
+      OPERATIONAL                   — tradable contracts + quotes + bars + runtime working
 
     Returns:
         {lane_state: str, status: "READY"|"BLOCKED"|"ACTION_NEEDED",
@@ -370,7 +374,9 @@ def get_forecast_readiness() -> dict:
         }
 
     _chk("Lane running", True, "ForecastRunner active (events in last 2h)")
-    lane_state = BROKER_DISCONNECTED  # assume disconnected until quote activity proves otherwise
+    lane_state = (
+        BROKER_DISCONNECTED  # assume disconnected until quote activity proves otherwise
+    )
 
     underliers = health.get("underliers_visible", 0)
     contracts = health.get("active_contracts", 0)
@@ -379,7 +385,12 @@ def get_forecast_readiness() -> dict:
     bars = health.get("bars_5m_count", 0)
 
     if underliers == 0:
-        _chk("Underliers visible", False, "No markets in DB — check IBKR discovery", needs_human=True)
+        _chk(
+            "Underliers visible",
+            False,
+            "No markets in DB — check IBKR discovery",
+            needs_human=True,
+        )
         lane_state = NO_UNDERLIERS
     elif contracts == 0:
         _chk(
@@ -390,17 +401,22 @@ def get_forecast_readiness() -> dict:
         _chk(
             "OPT contracts",
             False,
-            f"{underliers} underlier(s) visible but 0 OPT contracts — ForecastEx enrollment required",
+            f"{underliers} underlier(s) confirmed but 0 tradable OPT contracts — "
+            "no active event period and/or ForecastEx enrollment/permissions limitation",
             needs_human=True,
         )
         if unavailable > 0:
             _chk(
                 "Enrollment status",
                 False,
-                f"{unavailable} underlier(s): IND visible but OPT unavailable — check IBKR portal enrollment",
+                f"{unavailable} underlier(s): IND visible but OPT unavailable — "
+                "check IBKR portal ForecastEx enrollment",
                 needs_human=True,
             )
-        lane_state = UNDERLIERS_ONLY
+        # Lane is running and discovery confirmed no tradable contracts.
+        # This is NOT an enrollment code/runtime failure — it is a market-availability
+        # or enrollment/permissions limitation at the brokerage side.
+        lane_state = NO_TRADABLE_CONTRACTS_RIGHT_NOW
     else:
         _chk("Underliers visible", True, f"{underliers} underlier(s) visible")
         _chk("OPT contracts", True, f"{contracts} active YES/NO contracts")
@@ -408,7 +424,12 @@ def get_forecast_readiness() -> dict:
         quote_fresh = lag is not None and lag < 5.0
         quote_exists = lag is not None
         if not quote_exists:
-            _chk("Quote freshness", False, "No quotes yet — harvester initializing", needs_human=False)
+            _chk(
+                "Quote freshness",
+                False,
+                "No quotes yet — harvester initializing",
+                needs_human=False,
+            )
             lane_state = NO_QUOTES
         elif not quote_fresh:
             _chk("Quote freshness", False, f"Last quote {lag:.1f}m ago (threshold 5m)")
@@ -416,7 +437,11 @@ def get_forecast_readiness() -> dict:
         else:
             _chk("Quote freshness", True, f"Last quote {lag:.1f}m ago")
             if bars == 0:
-                _chk("Bars built", False, "No 5m bars yet — collecting quotes to build bars")
+                _chk(
+                    "Bars built",
+                    False,
+                    "No 5m bars yet — collecting quotes to build bars",
+                )
                 lane_state = QUOTES_NO_BARS
             else:
                 _chk("Bars built", True, f"{bars} 5m bars in DB")

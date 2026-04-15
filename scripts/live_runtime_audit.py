@@ -38,11 +38,14 @@ def _pr(icon: str, label: str, detail: str = "") -> None:
     _results.append((icon, label))
 
 
-def _check_ibkr_port(host: str = "127.0.0.1", port: int = 0, timeout: float = 1.5) -> bool:
+def _check_ibkr_port(
+    host: str = "127.0.0.1", port: int = 0, timeout: float = 1.5
+) -> bool:
     """Return True if IBKR/TWS port is open. Port 0 means read from config."""
     if port == 0:
         try:
             from config import IBKR_PORT as _ibkr_port
+
             port = _ibkr_port
         except Exception:
             port = 7496  # live port default (read from IBKR_PORT in config)
@@ -77,8 +80,11 @@ def main() -> int:
             readiness = sys_state.get("launch_readiness_state", "UNKNOWN")
             hb = sys_state.get("last_global_heartbeat_at", "never")
 
-            _pr(PASS if alive else WARN, "Process alive",
-                f"mode={mode}, status={status}")
+            _pr(
+                PASS if alive else WARN,
+                "Process alive",
+                f"mode={mode}, status={status}",
+            )
             _pr(PASS, "Startup time", startup)
             _pr(PASS, "Launch readiness", readiness)
             _pr(PASS if hb and hb != "never" else WARN, "Last heartbeat", hb or "never")
@@ -113,26 +119,44 @@ def main() -> int:
 
                 if lid == "mes_archived":
                     if active:
-                        _pr(FAIL, f"Lane [{lid}]",
-                            f"active=True but FUTURES_LANE_ACTIVE={FUTURES_LANE_ACTIVE} — should be dormant")
+                        _pr(
+                            FAIL,
+                            f"Lane [{lid}]",
+                            f"active=True but FUTURES_LANE_ACTIVE={FUTURES_LANE_ACTIVE} — should be dormant",
+                        )
                     else:
-                        _pr(PASS, f"Lane [{lid}] DORMANT",
-                            f"enabled={enabled}, readiness={readiness}")
+                        _pr(
+                            PASS,
+                            f"Lane [{lid}] DORMANT",
+                            f"enabled={enabled}, readiness={readiness}",
+                        )
                 elif lid == "forecast":
                     if FORECAST_LANE_ACTIVE and not active:
-                        _pr(WARN, f"Lane [{lid}]",
-                            f"FORECAST_LANE_ACTIVE=True but active=False, readiness={readiness}")
+                        _pr(
+                            WARN,
+                            f"Lane [{lid}]",
+                            f"FORECAST_LANE_ACTIVE=True but active=False, readiness={readiness}",
+                        )
                     elif not FORECAST_LANE_ACTIVE:
-                        _pr(PASS, f"Lane [{lid}] DISABLED",
-                            f"FORECAST_LANE_ACTIVE=False, readiness={readiness}")
+                        _pr(
+                            PASS,
+                            f"Lane [{lid}] DISABLED",
+                            f"FORECAST_LANE_ACTIVE=False, readiness={readiness}",
+                        )
                     else:
                         icon = PASS if health in ("OK", "UNKNOWN") else WARN
-                        _pr(icon, f"Lane [{lid}]",
-                            f"active={active}, health={health}, readiness={readiness}")
+                        _pr(
+                            icon,
+                            f"Lane [{lid}]",
+                            f"active={active}, health={health}, readiness={readiness}",
+                        )
                 else:  # crypto
                     icon = PASS if (active and health != "ERROR") else WARN
-                    _pr(icon, f"Lane [{lid}]",
-                        f"active={active}, health={health}, readiness={readiness}, hb={hb or 'never'}")
+                    _pr(
+                        icon,
+                        f"Lane [{lid}]",
+                        f"active={active}, health={health}, readiness={readiness}, hb={hb or 'never'}",
+                    )
 
     except Exception as e:
         _pr(FAIL, "Lane states read failed", str(e))
@@ -141,6 +165,7 @@ def main() -> int:
     print("\n── Incidents ─────────────────────────────────────────")
     try:
         from runtime.incident_tracker import ingest_system_events, get_incident_summary
+
         ingest_system_events()
         summary = get_incident_summary()
         total = summary.get("total_open", 0)
@@ -149,7 +174,9 @@ def main() -> int:
         errors = by_sev.get("ERROR", 0)
 
         if critical > 0:
-            _pr(FAIL, "Incidents", f"{total} open ({critical} CRITICAL, {errors} ERROR)")
+            _pr(
+                FAIL, "Incidents", f"{total} open ({critical} CRITICAL, {errors} ERROR)"
+            )
         elif errors > 0:
             _pr(WARN, "Incidents", f"{total} open ({errors} ERROR)")
         elif total > 0:
@@ -167,28 +194,45 @@ def main() -> int:
     # ── 4. Coinbase auth (paper=True — no API call) ───────────────────────────
     print("\n── Coinbase Auth ─────────────────────────────────────")
     try:
-        from config import PAPER_TRADING, COINBASE_CDP_KEY_NAME, COINBASE_CDP_PRIVATE_KEY
+        from config import (
+            PAPER_TRADING,
+            COINBASE_CDP_KEY_NAME,
+            COINBASE_CDP_PRIVATE_KEY,
+        )
+
         if PAPER_TRADING:
             _pr(PASS, "Coinbase auth", "Paper mode — no credentials required")
         elif COINBASE_CDP_KEY_NAME and COINBASE_CDP_PRIVATE_KEY:
-            key_preview = COINBASE_CDP_KEY_NAME[:40] + "..." if len(COINBASE_CDP_KEY_NAME) > 40 else COINBASE_CDP_KEY_NAME
+            key_preview = (
+                COINBASE_CDP_KEY_NAME[:40] + "..."
+                if len(COINBASE_CDP_KEY_NAME) > 40
+                else COINBASE_CDP_KEY_NAME
+            )
             _pr(PASS, "Coinbase credentials", f"CDP key present: {key_preview}")
         else:
-            _pr(FAIL, "Coinbase credentials", "COINBASE_CDP_KEY_NAME or COINBASE_CDP_PRIVATE_KEY missing — live trading will fail")
+            _pr(
+                FAIL,
+                "Coinbase credentials",
+                "COINBASE_CDP_KEY_NAME or COINBASE_CDP_PRIVATE_KEY missing — live trading will fail",
+            )
     except Exception as e:
         _pr(WARN, "Coinbase auth check failed", str(e))
 
     # Live Coinbase connectivity check (only when credentials are present)
     try:
         from config import COINBASE_CDP_KEY_NAME
+
         if COINBASE_CDP_KEY_NAME:
             try:
                 from execution.coinbase_broker import CoinbaseBroker
+
                 cb = CoinbaseBroker(paper=False)
                 ok = cb.connect()
                 if ok:
                     bp = cb.get_account_balance()
-                    _pr(PASS, "Coinbase LIVE auth", f"connected, buying_power=${bp:.2f}")
+                    _pr(
+                        PASS, "Coinbase LIVE auth", f"connected, buying_power=${bp:.2f}"
+                    )
                 else:
                     _pr(FAIL, "Coinbase LIVE auth", "connect() returned False")
             except Exception as e:
@@ -200,6 +244,7 @@ def main() -> int:
     print("\n── IBKR Port ─────────────────────────────────────────")
     try:
         from config import FUTURES_LANE_ACTIVE, IBKR_PORT
+
         port_open = _check_ibkr_port(port=IBKR_PORT)
         if FUTURES_LANE_ACTIVE:
             if port_open:
@@ -208,11 +253,17 @@ def main() -> int:
                 _pr(FAIL, f"IBKR TWS port {IBKR_PORT}", "closed — TWS not running")
         else:
             if port_open:
-                _pr(WARN, f"IBKR TWS port {IBKR_PORT}",
-                    "open but FUTURES_LANE_ACTIVE=False — MES dormant (expected)")
+                _pr(
+                    WARN,
+                    f"IBKR TWS port {IBKR_PORT}",
+                    "open but FUTURES_LANE_ACTIVE=False — MES dormant (expected)",
+                )
             else:
-                _pr(PASS, f"IBKR TWS port {IBKR_PORT}",
-                    "closed — MES dormant (FUTURES_LANE_ACTIVE=False, expected)")
+                _pr(
+                    PASS,
+                    f"IBKR TWS port {IBKR_PORT}",
+                    "closed — MES dormant (FUTURES_LANE_ACTIVE=False, expected)",
+                )
     except Exception as e:
         _pr(WARN, "IBKR port check failed", str(e))
 
@@ -220,10 +271,19 @@ def main() -> int:
     print("\n── MES Dormant Check ─────────────────────────────────")
     try:
         from config import FUTURES_LANE_ACTIVE
+
         if not FUTURES_LANE_ACTIVE:
-            _pr(PASS, "MES dormant", "FUTURES_LANE_ACTIVE=False — MES fully archived (expected)")
+            _pr(
+                PASS,
+                "MES dormant",
+                "FUTURES_LANE_ACTIVE=False — MES fully archived (expected)",
+            )
         else:
-            _pr(WARN, "MES active", "FUTURES_LANE_ACTIVE=True — MES lane is NOT archived")
+            _pr(
+                WARN,
+                "MES active",
+                "FUTURES_LANE_ACTIVE=True — MES lane is NOT archived",
+            )
     except Exception as e:
         _pr(WARN, "MES dormant check failed", str(e))
 
@@ -231,6 +291,7 @@ def main() -> int:
     print("\n── Heartbeat Age ─────────────────────────────────────")
     try:
         from runtime.runtime_state import get_system_state as _get_sys
+
         state = _get_sys()
         if state.get("last_global_heartbeat_at"):
             try:
@@ -247,20 +308,89 @@ def main() -> int:
     except Exception as e:
         _pr(WARN, "Heartbeat age check failed", str(e))
 
-    # ── 8. Forecast DB detail ─────────────────────────────────────────────────
+    # ── 8. Forecast DB detail + readiness ────────────────────────────────────
     print("\n── Forecast DB ───────────────────────────────────────")
     try:
         import sqlite3 as _sqlite3
         from config import DB_PATH
+
         with _sqlite3.connect(DB_PATH) as _conn:
-            n_markets = _conn.execute("SELECT COUNT(*) FROM forecast_markets WHERE active=1").fetchone()[0]
-            n_contracts = _conn.execute("SELECT COUNT(*) FROM forecast_contracts WHERE active=1").fetchone()[0]
-            n_quotes = _conn.execute("SELECT COUNT(*) FROM forecast_quotes").fetchone()[0]
-            n_bars = _conn.execute("SELECT COUNT(*) FROM forecast_bars WHERE interval='5m'").fetchone()[0]
-        _pr(PASS, "Forecast DB",
-            f"markets={n_markets}, contracts={n_contracts}, quotes={n_quotes}, bars_5m={n_bars}")
+            _conn.row_factory = _sqlite3.Row
+            n_markets = _conn.execute(
+                "SELECT COUNT(*) FROM forecast_markets WHERE active=1"
+            ).fetchone()[0]
+            n_contracts = _conn.execute(
+                "SELECT COUNT(*) FROM forecast_contracts WHERE active=1"
+            ).fetchone()[0]
+            n_quotes = _conn.execute("SELECT COUNT(*) FROM forecast_quotes").fetchone()[
+                0
+            ]
+            n_bars = _conn.execute(
+                "SELECT COUNT(*) FROM forecast_bars WHERE interval='5m'"
+            ).fetchone()[0]
+            n_stubs = _conn.execute(
+                "SELECT COUNT(*) FROM forecast_markets fm WHERE fm.active=1 "
+                "AND NOT EXISTS (SELECT 1 FROM forecast_contracts fc WHERE fc.market_id=fm.id AND fc.active=1)"
+            ).fetchone()[0]
+        icon = PASS if (n_markets > 0 or n_contracts > 0) else WARN
+        _pr(
+            icon,
+            "Forecast DB",
+            f"markets={n_markets} (stubs={n_stubs}), contracts={n_contracts}, "
+            f"quotes={n_quotes}, bars_5m={n_bars}",
+        )
+
+        # Sample forecast_markets rows
+        if n_markets > 0:
+            with _sqlite3.connect(DB_PATH) as _conn2:
+                _conn2.row_factory = _sqlite3.Row
+                sample = _conn2.execute(
+                    "SELECT market_symbol, market_name, underlier_conid, first_seen_at "
+                    "FROM forecast_markets WHERE active=1 LIMIT 8"
+                ).fetchall()
+            for r in sample:
+                print(
+                    f"       {r['market_symbol']}: conid={r['underlier_conid']}, "
+                    f"name='{r['market_name'] or '(stub)'}', first_seen={r['first_seen_at'][:16]}"
+                )
+
     except Exception as e:
         _pr(WARN, "Forecast DB", f"error — {e}")
+
+    # ── 9. Forecast readiness classification ─────────────────────────────────
+    print("\n── Forecast Readiness ────────────────────────────────")
+    try:
+        from dashboard.data.forecast import get_forecast_readiness
+
+        r = get_forecast_readiness()
+        lane_state = r.get("lane_state", "UNKNOWN")
+        status = r.get("status", "UNKNOWN")
+        underliers = r.get("underliers_visible", 0)
+        unavailable = r.get("contracts_unavailable_count", 0)
+
+        ready_states = {"OPERATIONAL"}
+        blocked_states = {"BROKER_DISCONNECTED", "NO_UNDERLIERS", "LANE_NOT_STARTED"}
+        icon = (
+            PASS
+            if lane_state in ready_states
+            else (WARN if lane_state not in blocked_states else FAIL)
+        )
+        _pr(
+            icon,
+            "Forecast readiness",
+            f"{lane_state} | underliers={underliers}, stubs_unavail={unavailable}",
+        )
+
+        for chk in r.get("checks", []):
+            chk_icon = (
+                PASS
+                if chk["status"] == "PASS"
+                else (WARN if chk["status"] == "ACTION_NEEDED" else FAIL)
+            )
+            print(f"       {chk_icon} {chk['name']}: {chk['detail']}")
+
+    except Exception as e:
+        _pr(WARN, "Forecast readiness check failed", str(e))
 
     # ── Verdict ────────────────────────────────────────────────────────────────
     print()
@@ -272,7 +402,9 @@ def main() -> int:
         print(f"  {FAIL} OVERALL: NOT_READY — {n_fail} failure(s), {n_warn} warning(s)")
         verdict = 1
     elif n_warn > 0:
-        print(f"  {WARN} OVERALL: NOT_READY — 0 failures, {n_warn} warning(s) require review")
+        print(
+            f"  {WARN} OVERALL: NOT_READY — 0 failures, {n_warn} warning(s) require review"
+        )
         verdict = 0
     else:
         print(f"  {PASS} OVERALL: READY — all checks passed")

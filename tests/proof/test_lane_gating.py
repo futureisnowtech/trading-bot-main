@@ -36,11 +36,19 @@ if str(DASHBOARD_ROOT) not in sys.path:
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 
-def _insert_event(db_path: Path, source: str, level: str = "INFO",
-                  message: str = "test", minutes_ago: int = 0) -> None:
+def _insert_event(
+    db_path: Path,
+    source: str,
+    level: str = "INFO",
+    message: str = "test",
+    minutes_ago: int = 0,
+) -> None:
     # Use UTC timestamps (SQLite datetime('now') is UTC)
     from datetime import timezone as _tz
-    ts = (datetime.now(_tz.utc) - timedelta(minutes=minutes_ago)).strftime("%Y-%m-%d %H:%M:%S")
+
+    ts = (datetime.now(_tz.utc) - timedelta(minutes=minutes_ago)).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
     with sqlite3.connect(db_path) as c:
         c.execute(
             "INSERT INTO system_events (ts, level, source, message) VALUES (?,?,?,?)",
@@ -153,7 +161,9 @@ def test_futures_lane_inactive_no_mes_in_health(proof_runtime, monkeypatch):
 
     result = hc._check_ibkr_connection()
     assert result["ok"] is True
-    assert "dormant" in result["detail"].lower() or "skipped" in result["detail"].lower()
+    assert (
+        "dormant" in result["detail"].lower() or "skipped" in result["detail"].lower()
+    )
 
 
 # ── Test 2: FUTURES_LANE_ACTIVE=false → balance returns archived state ────────
@@ -173,6 +183,7 @@ def test_futures_lane_inactive_balance_no_ibkr(proof_runtime, monkeypatch):
         raise RuntimeError("Should not connect when lane is dormant")
 
     import dashboard.data.balance as balance_mod
+
     result = balance_mod.get_ibkr_balance()
 
     assert result["connected"] is False
@@ -224,8 +235,13 @@ def test_activity_no_start_bot_with_heartbeat(proof_runtime, monkeypatch):
     assert _bot_is_alive() is False
 
     # Insert heartbeat
-    _insert_event(proof_runtime.db_path, source="heartbeat", level="INFO",
-                  message="scan ok", minutes_ago=2)
+    _insert_event(
+        proof_runtime.db_path,
+        source="heartbeat",
+        level="INFO",
+        message="scan ok",
+        minutes_ago=2,
+    )
 
     assert _bot_is_alive() is True
 
@@ -244,13 +260,16 @@ def test_dead_money_exempt_with_partial_close(proof_runtime, monkeypatch):
     # Insert an open position (stale — > 48h old)
     old_ts = (datetime.now() - timedelta(hours=50)).strftime("%Y-%m-%d %H:%M:%S")
     with sqlite3.connect(proof_runtime.db_path) as c:
-        c.execute("""
+        c.execute(
+            """
             INSERT INTO open_positions
             (symbol, strategy, qty, entry, stop, target, high_since_entry, ts_entry,
              paper, trailing_active, scale_33_done, scale_66_done)
             VALUES ('AAVEUSDT', 'crypto_perp', 1.0, 100.0, 95.0, 110.0, 100.5,
                     ?, 1, 0, 0, 0)
-        """, (old_ts,))
+        """,
+            (old_ts,),
+        )
 
     # Without partial close — should flag as stagnant
     result = hc._check_stagnant_positions()
@@ -258,12 +277,14 @@ def test_dead_money_exempt_with_partial_close(proof_runtime, monkeypatch):
     # The key test is that after adding a partial-close trade, it's exempt.
 
     # Insert a partial-close trade for AAVEUSDT
-    _insert_trade(proof_runtime.db_path,
-                  symbol="AAVEUSDT",
-                  action="SELL",
-                  broker="coinbase_paper",
-                  notes="scale_out partial 33%",
-                  paper=1)
+    _insert_trade(
+        proof_runtime.db_path,
+        symbol="AAVEUSDT",
+        action="SELL",
+        broker="coinbase_paper",
+        notes="scale_out partial 33%",
+        paper=1,
+    )
 
     # Now the partial_close_syms set should contain AAVEUSDT
     # Verify directly by querying the query logic
@@ -294,11 +315,13 @@ def test_forecast_lane_not_started_state(proof_runtime, monkeypatch):
     assert result["status"] in ("ACTION_NEEDED", "BLOCKED")
 
 
-# ── Test 7: forecast readiness — markets but no contracts → UNDERLIERS_ONLY ──
+# ── Test 7: forecast readiness — lane running + markets but no contracts ───────
+#    State = NO_TRADABLE_CONTRACTS_RIGHT_NOW (lane confirmed active, discovery ran)
+#    Note: UNDERLIERS_ONLY is for stubs visible but lane not confirmed running.
 
 
 def test_forecast_stub_only_state(proof_runtime, monkeypatch):
-    """Markets in DB but 0 active contracts → readiness.lane_state == UNDERLIERS_ONLY."""
+    """Lane running + markets in DB but 0 active contracts → NO_TRADABLE_CONTRACTS_RIGHT_NOW."""
     import dashboard.data.forecast as fd
 
     monkeypatch.setattr(fd, "DB_PATH", str(proof_runtime.db_path), raising=False)
@@ -307,11 +330,14 @@ def test_forecast_stub_only_state(proof_runtime, monkeypatch):
 
     # Insert a ForecastRunner system event (lane started) directly into the DB (UTC)
     from datetime import timezone as _tz
-    ts_recent = (datetime.now(_tz.utc) - timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S")
+
+    ts_recent = (datetime.now(_tz.utc) - timedelta(minutes=10)).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
     with sqlite3.connect(proof_runtime.db_path) as c:
         c.execute(
             "INSERT INTO system_events (ts, level, source, message) VALUES (?, 'INFO', 'ForecastRunner', 'Forecast lane started')",
-            (ts_recent,)
+            (ts_recent,),
         )
 
     # Insert a market but NO contracts
@@ -324,7 +350,9 @@ def test_forecast_stub_only_state(proof_runtime, monkeypatch):
         )
 
     result = fd.get_forecast_readiness()
-    assert result["lane_state"] == fd.UNDERLIERS_ONLY, f"Expected UNDERLIERS_ONLY, got {result['lane_state']}: {result}"
+    assert result["lane_state"] == fd.NO_TRADABLE_CONTRACTS_RIGHT_NOW, (
+        f"Expected NO_TRADABLE_CONTRACTS_RIGHT_NOW, got {result['lane_state']}: {result}"
+    )
     assert result["underliers_visible"] == 1
     assert result["contracts_unavailable_count"] == 1
 
@@ -342,21 +370,27 @@ def test_forecast_readiness_distinguishes_states(proof_runtime, monkeypatch):
 
     # Lane started (UTC timestamps to match SQLite datetime('now'))
     from datetime import timezone as _tz
-    ts_recent = (datetime.now(_tz.utc) - timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
+
+    ts_recent = (datetime.now(_tz.utc) - timedelta(minutes=5)).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
     with sqlite3.connect(proof_runtime.db_path) as c:
         c.execute(
             "INSERT INTO system_events (ts, level, source, message) VALUES (?, 'INFO', 'ForecastRunner', 'Lane started')",
-            (ts_recent,)
+            (ts_recent,),
         )
 
     now_str = datetime.now(_tz.utc).strftime("%Y-%m-%d %H:%M:%S")
-    recent_ts = (datetime.now(_tz.utc) - timedelta(minutes=2)).strftime("%Y-%m-%d %H:%M:%S")
+    recent_ts = (datetime.now(_tz.utc) - timedelta(minutes=2)).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
 
     with sqlite3.connect(proof_runtime.db_path) as c:
         # Insert market
         cur = c.execute(
             "INSERT INTO forecast_markets (market_symbol, market_name, active, first_seen_at, last_seen_at) "
-            "VALUES ('CPI', 'US CPI', 1, ?, ?)", (now_str, now_str)
+            "VALUES ('CPI', 'US CPI', 1, ?, ?)",
+            (now_str, now_str),
         )
         mkt_id = cur.lastrowid
 
@@ -365,25 +399,27 @@ def test_forecast_readiness_distinguishes_states(proof_runtime, monkeypatch):
             "INSERT INTO forecast_contracts "
             "(market_id, local_symbol, right, strike, active, first_seen_at, last_seen_at) "
             "VALUES (?, 'CPI_YES_3.0', 'C', 3.0, 1, ?, ?)",
-            (mkt_id, now_str, now_str)
+            (mkt_id, now_str, now_str),
         )
         contr_id = cur2.lastrowid
 
         # Insert fresh quote
         c.execute(
             "INSERT INTO forecast_quotes (contract_id, ts, mid, bid, ask) VALUES (?, ?, 0.55, 0.54, 0.56)",
-            (contr_id, recent_ts)
+            (contr_id, recent_ts),
         )
 
         # Insert bars
         c.execute(
             "INSERT INTO forecast_bars (contract_id, interval, ts_open, ts_close, o, h, l, c, derived_from_quotes) "
             "VALUES (?, '5m', ?, ?, 0.50, 0.56, 0.49, 0.55, 1)",
-            (contr_id, now_str, now_str)
+            (contr_id, now_str, now_str),
         )
 
     result = fd.get_forecast_readiness()
-    assert result["lane_state"] == fd.OPERATIONAL, f"Expected OPERATIONAL, got {result['lane_state']}: {result}"
+    assert result["lane_state"] == fd.OPERATIONAL, (
+        f"Expected OPERATIONAL, got {result['lane_state']}: {result}"
+    )
     assert result["status"] == "READY"
 
 
@@ -433,9 +469,7 @@ def test_discovery_stub_persists_on_opt_fail(proof_runtime, monkeypatch):
     assert n == 1, f"Stub market not persisted to DB (found {n} rows)"
     # No contracts should have been created (stub_only)
     with sqlite3.connect(_db_str) as c:
-        n_contracts = c.execute(
-            "SELECT COUNT(*) FROM forecast_contracts"
-        ).fetchone()[0]
+        n_contracts = c.execute("SELECT COUNT(*) FROM forecast_contracts").fetchone()[0]
     assert n_contracts == 0, f"Stub should not create contracts (found {n_contracts})"
 
 
@@ -482,10 +516,12 @@ def test_no_hardcoded_7497():
                     if stripped.startswith("#"):
                         continue
                     if "7497" in line:
-                        violations.append(f"{py_file.relative_to(ROOT)}:{i}: {stripped[:80]}")
+                        violations.append(
+                            f"{py_file.relative_to(ROOT)}:{i}: {stripped[:80]}"
+                        )
             except Exception:
                 pass
 
-    assert violations == [], (
-        "Hardcoded '7497' found in monitored files:\n" + "\n".join(violations)
+    assert violations == [], "Hardcoded '7497' found in monitored files:\n" + "\n".join(
+        violations
     )

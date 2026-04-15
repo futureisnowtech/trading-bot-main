@@ -17,6 +17,7 @@ Invariants:
 13. scripts/iphone.sh has no Desktop path (tilde or absolute)
 14. install_hooks.sh pre-commit includes repo_truth_gate.py --fast
 15. settings.json hook commands use $CLAUDE_PROJECT_DIR-rooted paths
+16. .version is treated as a generated local artifact, not tracked source
 """
 
 import json
@@ -387,3 +388,20 @@ def test_settings_json_uses_claude_project_dir():
             f"settings.json hook command does not use $CLAUDE_PROJECT_DIR: {cmd!r}\n"
             "All hook commands must use $CLAUDE_PROJECT_DIR/... for robust path resolution"
         )
+
+
+# ── Test 16: .version is ignored as a local generated artifact ───────────────
+
+
+def test_version_file_is_gitignored():
+    """.version must be gitignored so the local post-commit stamp does not dirty the repo."""
+    gitignore = _ROOT / ".gitignore"
+    assert gitignore.exists(), ".gitignore not found"
+    entries = {
+        line.strip()
+        for line in _read(gitignore).splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+    assert ".version" in entries, (
+        ".version must be gitignored because it is a local post-commit dashboard stamp"
+    )

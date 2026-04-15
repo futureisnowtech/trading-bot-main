@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-15
+- chore(repo): stop tracking generated .version file so post-commit dashboard stamp no longer leaves the repo dirty after every commit
+
+## 2026-04-15
 - fix(truth): close final truth-closure gaps — tilde Desktop pattern + .md scan in truth gate; pre-commit hardened with repo_truth_gate.py --fast; post_cmd_logger env-override + CLAUDE_PROJECT_DIR; settings.json CLAUDE_PROJECT_DIR hook paths; stale 7497 eliminated from CLAUDE.md/AGENTS.md/dashboard fallback; 6 new proof tests (237 total)
 
 ## 2026-04-15

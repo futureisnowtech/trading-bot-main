@@ -40,10 +40,10 @@ HOOK
 chmod +x "$HOOKS_DIR/pre-commit"
 echo "  ✅ pre-commit hook installed (repo_truth_gate.py --fast + validate.py)"
 
-# ── post-commit: auto-log to CHANGELOG.md ────────────────────────────────────
+# ── post-commit: refresh local dashboard version stamp ───────────────────────
 cat > "$HOOKS_DIR/post-commit" << 'HOOK'
 #!/bin/bash
-# post-commit: stamp version + commit hash into a version file for the dashboard
+# post-commit: stamp version + commit hash into a local version file for the dashboard
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 COMMIT_HASH=$(git rev-parse --short HEAD)
 COMMIT_MSG=$(git log -1 --pretty=%s)
@@ -54,7 +54,7 @@ exit 0
 HOOK
 
 chmod +x "$HOOKS_DIR/post-commit"
-echo "  ✅ post-commit hook installed (.version file updated on every commit)"
+echo "  ✅ post-commit hook installed (.version updated locally on every commit; ignored by git)"
 
 # ── pre-push: full gate (proof suite + validate + truth gate) ─────────────────
 cat > "$HOOKS_DIR/pre-push" << 'HOOK'

@@ -43,3 +43,6 @@ reference_repos/
 
 # ── Claude Code hook logs (observability, not source) ─────────────────────────
 .claude/logs/
+
+# ── Local generated version stamp (dashboard/local hook artifact) ────────────
+.version

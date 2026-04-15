@@ -216,6 +216,10 @@ def analyze_closed_trade(
     ml_p_win: float = 0,
     super_score: float = 0,
     composite_score: float = 0,
+    # v14.0: lineage / integrity fields
+    close_order_id: str = "",
+    entry_order_id: str = None,
+    feature_snapshot_id: int = None,
 ) -> dict:
     """
     Full post-trade attribution analysis. Call this immediately after every trade close.
@@ -272,7 +276,52 @@ def analyze_closed_trade(
         agent_votes=agent_votes,
     )
 
+    # v14.0: Compute integrity tier and write record before attribution update.
+    # Fail-closed: any missing lineage or suspect source → at most 'suspect'.
+    _integrity_tier = "suspect"
+    _lineage_complete = False
+    _lineage_notes = []
+
+    try:
+        from logging_db.trade_logger import log_trade_integrity, get_integrity_tier
+
+        _src_lower = (source or "").lower()
+        _EXCLUDED_SOURCES = (
+            "contaminated",
+            "synthetic",
+            "replay",
+            "bootstrap",
+            "backtest",
+        )
+        if any(tag in _src_lower for tag in _EXCLUDED_SOURCES):
+            _integrity_tier = "excluded"
+            _lineage_notes.append(f"source_excluded:{source}")
+        elif not entry_order_id:
+            _integrity_tier = "suspect"
+            _lineage_notes.append("missing_entry_order_id")
+        elif feature_snapshot_id is None:
+            _integrity_tier = "suspect"
+            _lineage_notes.append("missing_feature_snapshot")
+        else:
+            _integrity_tier = "verified"
+            _lineage_complete = True
+
+        # Write integrity record if not already present
+        if close_order_id:
+            existing = get_integrity_tier(close_order_id)
+            if existing == "suspect" and close_order_id:  # not yet set by backfill
+                log_trade_integrity(
+                    close_order_id=close_order_id,
+                    tier=_integrity_tier,
+                    reason="; ".join(_lineage_notes) or "ok",
+                    source_check="post_trade_analyzer",
+                )
+    except Exception as _ie:
+        _integrity_tier = "suspect"
+        _lineage_notes.append(f"integrity_error:{_ie}")
+
     # Record attribution (updates signal_stats + Bayesian weights)
+    # Bayesian updates are blocked for quarantined/excluded trades (see signal_performance.py).
     attr_id = record_trade_attribution(
         symbol=symbol,
         strategy=strategy,
@@ -299,6 +348,11 @@ def analyze_closed_trade(
         ml_p_win=ml_p_win,
         super_score=super_score,
         composite_score=composite_score,
+        entry_order_id=entry_order_id,
+        feature_snapshot_id=feature_snapshot_id,
+        lineage_complete=_lineage_complete,
+        lineage_notes="; ".join(_lineage_notes) if _lineage_notes else None,
+        integrity_tier=_integrity_tier,
     )
 
     # Update agent accuracy

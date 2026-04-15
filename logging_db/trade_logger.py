@@ -227,6 +227,70 @@ def init_db() -> None:
         resolved_reason   TEXT
     )""")
 
+    # v14.0: Trade integrity — durable trust tier for every close-side trade.
+    # Tier: 'verified' | 'suspect' | 'quarantined' | 'excluded'
+    # No Bayesian or Kelly update proceeds if tier is 'quarantined' or 'excluded'.
+    cur.execute("""CREATE TABLE IF NOT EXISTS trade_integrity (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        trade_id       INTEGER,
+        close_order_id TEXT,
+        tier           TEXT NOT NULL DEFAULT 'suspect',
+        reason         TEXT NOT NULL DEFAULT '',
+        source_check   TEXT NOT NULL DEFAULT '',
+        created_at     TEXT NOT NULL,
+        notes          TEXT,
+        UNIQUE(close_order_id)
+    )""")
+
+    # v14.0: Exit evaluation substrate — research-grade quality tracking per exit.
+    # Populated after close; used to surface exit improvement opportunities.
+    cur.execute("""CREATE TABLE IF NOT EXISTS exit_evaluations (
+        id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+        trade_id               TEXT,
+        close_order_id         TEXT,
+        exit_type              TEXT,
+        actual_exit_price      REAL,
+        actual_exit_pct        REAL,
+        optimal_exit_price     REAL,
+        opportunity_loss_pct   REAL,
+        stop_overshoot_pct     REAL,
+        regime                 TEXT,
+        composite_score_at_exit REAL,
+        mfe_at_exit            REAL,
+        mae_at_exit            REAL,
+        path_label             TEXT,
+        created_at             TEXT,
+        UNIQUE(close_order_id)
+    )""")
+
+    # v14.0: Challenger state — promotion/demotion tracking for backtested strategies.
+    cur.execute("""CREATE TABLE IF NOT EXISTS challenger_state (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        strategy         TEXT NOT NULL,
+        run_id           TEXT NOT NULL,
+        promotion_tier   TEXT NOT NULL DEFAULT 'CANDIDATE',
+        criteria_met_json TEXT,
+        promoted_at      TEXT,
+        demoted_at       TEXT,
+        notes            TEXT,
+        created_at       TEXT NOT NULL,
+        UNIQUE(strategy, run_id)
+    )""")
+
+    # v14.0: Trade lineage — extended attribution lineage columns.
+    # Added as migrations to trade_attribution to avoid creating a new table.
+    for migration in [
+        "ALTER TABLE trade_attribution ADD COLUMN entry_order_id TEXT",
+        "ALTER TABLE trade_attribution ADD COLUMN feature_snapshot_id INTEGER",
+        "ALTER TABLE trade_attribution ADD COLUMN lineage_complete INTEGER DEFAULT 0",
+        "ALTER TABLE trade_attribution ADD COLUMN lineage_notes TEXT",
+        "ALTER TABLE trade_attribution ADD COLUMN integrity_tier TEXT DEFAULT 'suspect'",
+    ]:
+        try:
+            cur.execute(migration)
+        except Exception:
+            pass
+
     conn.commit()
     conn.close()
 
@@ -810,6 +874,364 @@ def prune_old_candidates(
     except Exception:
         pass
     return result
+
+
+# ─── Trade integrity (v14.0) ──────────────────────────────────────────────────
+
+_VALID_TIERS = frozenset({"verified", "suspect", "quarantined", "excluded"})
+
+
+def log_trade_integrity(
+    close_order_id: str,
+    tier: str,
+    reason: str,
+    source_check: str,
+    trade_id: int = None,
+    notes: str = None,
+) -> bool:
+    """
+    Write an integrity record for a close-side trade.
+
+    INSERT OR IGNORE so calling this multiple times is idempotent.
+    Returns True if a new row was inserted, False if already present.
+    """
+    if tier not in _VALID_TIERS:
+        tier = "suspect"
+    try:
+        conn = _conn()
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT OR IGNORE INTO trade_integrity
+               (trade_id, close_order_id, tier, reason, source_check, created_at, notes)
+               VALUES (?,?,?,?,?,?,?)""",
+            (trade_id, close_order_id or "", tier, reason, source_check, _ts(), notes),
+        )
+        inserted = cur.rowcount > 0
+        conn.commit()
+        conn.close()
+        return inserted
+    except Exception:
+        return False
+
+
+def get_integrity_tier(close_order_id: str) -> str:
+    """
+    Return the integrity tier for a close_order_id.
+    Returns 'suspect' if no record exists (fail-closed).
+    """
+    if not close_order_id:
+        return "suspect"
+    try:
+        conn = _conn()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT tier FROM trade_integrity WHERE close_order_id=? LIMIT 1",
+            (close_order_id,),
+        )
+        row = cur.fetchone()
+        conn.close()
+        return row[0] if row else "suspect"
+    except Exception:
+        return "suspect"
+
+
+def is_integrity_trusted(close_order_id: str) -> bool:
+    """Return True only if the trade is 'verified'. Used as gate for Bayesian/Kelly updates."""
+    tier = get_integrity_tier(close_order_id)
+    return tier == "verified"
+
+
+def get_integrity_summary() -> dict:
+    """Return counts by tier and coverage percentage."""
+    defaults = {
+        "verified": 0,
+        "suspect": 0,
+        "quarantined": 0,
+        "excluded": 0,
+        "total_closes": 0,
+        "coverage_pct": 0.0,
+    }
+    try:
+        conn = _conn()
+        cur = conn.cursor()
+        # Count close-side trades (pnl_usd != 0)
+        cur.execute("SELECT COUNT(*) FROM trades WHERE pnl_usd != 0")
+        total_closes = (cur.fetchone() or [0])[0]
+        cur.execute("SELECT tier, COUNT(*) FROM trade_integrity GROUP BY tier")
+        tier_counts = {r[0]: r[1] for r in cur.fetchall()}
+        conn.close()
+        covered = sum(tier_counts.values())
+        return {
+            "verified": tier_counts.get("verified", 0),
+            "suspect": tier_counts.get("suspect", 0),
+            "quarantined": tier_counts.get("quarantined", 0),
+            "excluded": tier_counts.get("excluded", 0),
+            "total_closes": total_closes,
+            "coverage_pct": round(covered / total_closes * 100, 1)
+            if total_closes > 0
+            else 0.0,
+        }
+    except Exception:
+        return defaults
+
+
+def bulk_backfill_integrity() -> dict:
+    """
+    Idempotent backfill: assigns a tier to every close-side trade not yet in trade_integrity.
+
+    Rules applied in order:
+      1. source contains 'contaminated'/'synthetic'/'replay'/'backtest'/'bootstrap' → excluded
+      2. |pnl_usd| > 50% of ACCOUNT_SIZE → quarantined (suspect_pnl_magnitude)
+      3. price <= 0 or qty <= 0 → quarantined (invalid_price_or_qty)
+      4. has trade_attribution + trade_features → verified (lineage_complete)
+      5. else → suspect (lineage_incomplete)
+
+    INSERT OR IGNORE so running multiple times is safe.
+    Returns counts by tier of newly inserted rows.
+    """
+    from config import ACCOUNT_SIZE
+
+    result = {
+        "verified": 0,
+        "suspect": 0,
+        "quarantined": 0,
+        "excluded": 0,
+        "skipped": 0,
+    }
+    try:
+        conn = _conn()
+        cur = conn.cursor()
+        # Load all close-side trades not yet in trade_integrity
+        cur.execute("""
+            SELECT t.id, t.order_id, t.pnl_usd, t.price, t.qty, t.source, t.notes
+            FROM trades t
+            LEFT JOIN trade_integrity ti ON ti.close_order_id = COALESCE(t.order_id, CAST(t.id AS TEXT))
+            WHERE t.pnl_usd != 0 AND ti.id IS NULL
+        """)
+        rows = cur.fetchall()
+        half_account = ACCOUNT_SIZE * 0.5
+
+        for row in rows:
+            trade_id, order_id, pnl_usd, price, qty, source, notes = row
+            close_key = order_id or str(trade_id)
+            src = (source or "").lower()
+            note_str = (notes or "").lower()
+
+            # Rule 1: contaminated / synthetic / replay
+            if any(
+                tag in src
+                for tag in (
+                    "contaminated",
+                    "synthetic",
+                    "replay",
+                    "backtest",
+                    "bootstrap",
+                )
+            ):
+                tier, reason = "excluded", f"source_tag:{source}"
+            elif any(
+                tag in note_str for tag in ("contaminated", "synthetic", "replay")
+            ):
+                tier, reason = "excluded", "notes_tag:contaminated_or_synthetic"
+            # Rule 2: suspect PnL magnitude
+            elif abs(pnl_usd or 0) > half_account:
+                tier, reason = "quarantined", "suspect_pnl_magnitude"
+            # Rule 3: invalid price / qty
+            elif (price or 0) <= 0 or (qty or 0) <= 0:
+                tier, reason = "quarantined", "invalid_price_or_qty"
+            else:
+                # Rule 4: lineage check
+                cur2 = conn.cursor()
+                cur2.execute(
+                    "SELECT id FROM trade_attribution WHERE trade_ref=? LIMIT 1",
+                    (close_key,),
+                )
+                has_attr = cur2.fetchone() is not None
+                cur2.execute(
+                    "SELECT id FROM trade_features WHERE trade_id=? LIMIT 1",
+                    (trade_id,),
+                )
+                has_features = cur2.fetchone() is not None
+                if has_attr and has_features:
+                    tier, reason = "verified", "lineage_complete"
+                else:
+                    tier, reason = "suspect", "lineage_incomplete"
+
+            try:
+                cur.execute(
+                    """INSERT OR IGNORE INTO trade_integrity
+                       (trade_id, close_order_id, tier, reason, source_check, created_at)
+                       VALUES (?,?,?,?,?,?)""",
+                    (trade_id, close_key, tier, reason, "bulk_backfill", _ts()),
+                )
+                if cur.rowcount > 0:
+                    result[tier] = result.get(tier, 0) + 1
+                else:
+                    result["skipped"] = result.get("skipped", 0) + 1
+            except Exception:
+                pass
+
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+    return result
+
+
+# ─── Exit evaluations (v14.0) ─────────────────────────────────────────────────
+
+
+def log_exit_evaluation(
+    close_order_id: str,
+    exit_type: str,
+    actual_exit_price: float,
+    actual_exit_pct: float,
+    optimal_exit_price: float = None,
+    opportunity_loss_pct: float = None,
+    stop_overshoot_pct: float = 0.0,
+    regime: str = "",
+    composite_score_at_exit: float = 0.0,
+    mfe_at_exit: float = 0.0,
+    mae_at_exit: float = 0.0,
+    path_label: str = "",
+    trade_id: str = None,
+) -> bool:
+    """
+    Record an exit quality evaluation. INSERT OR IGNORE for idempotency.
+    Returns True if inserted.
+    """
+    try:
+        conn = _conn()
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT OR IGNORE INTO exit_evaluations (
+                trade_id, close_order_id, exit_type,
+                actual_exit_price, actual_exit_pct,
+                optimal_exit_price, opportunity_loss_pct,
+                stop_overshoot_pct, regime,
+                composite_score_at_exit, mfe_at_exit, mae_at_exit,
+                path_label, created_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                str(trade_id) if trade_id else None,
+                close_order_id or "",
+                exit_type,
+                actual_exit_price,
+                actual_exit_pct,
+                optimal_exit_price,
+                opportunity_loss_pct,
+                stop_overshoot_pct,
+                regime,
+                composite_score_at_exit,
+                mfe_at_exit,
+                mae_at_exit,
+                path_label,
+                _ts(),
+            ),
+        )
+        inserted = cur.rowcount > 0
+        conn.commit()
+        conn.close()
+        return inserted
+    except Exception:
+        return False
+
+
+def get_exit_quality_summary(
+    strategy: str = None,
+    regime: str = None,
+    exit_type: str = None,
+    days: int = 30,
+) -> dict:
+    """Aggregate exit quality metrics from exit_evaluations."""
+    import datetime as _dt
+
+    defaults = {
+        "count": 0,
+        "avg_opportunity_loss_pct": 0.0,
+        "avg_stop_overshoot_pct": 0.0,
+        "path_label_counts": {},
+        "exit_type_counts": {},
+    }
+    try:
+        cutoff = (datetime.now(pytz.utc) - _dt.timedelta(days=days)).isoformat()
+        conn = _conn()
+        cur = conn.cursor()
+        cur.execute(
+            """SELECT exit_type, opportunity_loss_pct, stop_overshoot_pct, path_label
+               FROM exit_evaluations
+               WHERE created_at >= ?""",
+            (cutoff,),
+        )
+        rows = cur.fetchall()
+        conn.close()
+        if not rows:
+            return defaults
+        count = len(rows)
+        opp_losses = [r[1] for r in rows if r[1] is not None]
+        overshots = [r[2] for r in rows if r[2] is not None]
+        path_labels = {}
+        exit_types = {}
+        for r in rows:
+            path_labels[r[3] or "unknown"] = path_labels.get(r[3] or "unknown", 0) + 1
+            exit_types[r[0] or "unknown"] = exit_types.get(r[0] or "unknown", 0) + 1
+        return {
+            "count": count,
+            "avg_opportunity_loss_pct": sum(opp_losses) / len(opp_losses)
+            if opp_losses
+            else 0.0,
+            "avg_stop_overshoot_pct": sum(overshots) / len(overshots)
+            if overshots
+            else 0.0,
+            "path_label_counts": path_labels,
+            "exit_type_counts": exit_types,
+        }
+    except Exception:
+        return defaults
+
+
+# ─── Challenger / promotion state (v14.0) ─────────────────────────────────────
+
+
+def upsert_challenger_state(
+    strategy: str,
+    run_id: str,
+    promotion_tier: str,
+    criteria_met_json: str = None,
+    notes: str = None,
+) -> None:
+    """Insert or update a challenger promotion state row."""
+    try:
+        conn = _conn()
+        cur = conn.cursor()
+        now = _ts()
+        cur.execute(
+            """INSERT INTO challenger_state
+               (strategy, run_id, promotion_tier, criteria_met_json, notes, created_at)
+               VALUES (?,?,?,?,?,?)
+               ON CONFLICT(strategy, run_id) DO UPDATE SET
+                 promotion_tier=excluded.promotion_tier,
+                 criteria_met_json=excluded.criteria_met_json,
+                 notes=excluded.notes""",
+            (strategy, run_id, promotion_tier, criteria_met_json, notes, now),
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+def get_promotion_state() -> list:
+    """Return all challenger_state rows ordered by created_at desc."""
+    try:
+        conn = _conn()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM challenger_state ORDER BY created_at DESC LIMIT 50")
+        rows = [dict(zip([c[0] for c in cur.description], r)) for r in cur.fetchall()]
+        conn.close()
+        return rows
+    except Exception:
+        return []
 
 
 # ─── Position persistence ─────────────────────────────────────────────────────

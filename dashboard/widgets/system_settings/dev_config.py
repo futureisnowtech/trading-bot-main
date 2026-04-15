@@ -285,6 +285,108 @@ def render_dev_config():
         except Exception as _jhe:
             st.error(f"journal_health: {_jhe}")
 
+    with col_right:
+        with st.expander("Integrity & Truth (v14.0)", expanded=False):
+            try:
+                from data.integrity import (
+                    get_integrity_summary,
+                    get_attribution_coverage,
+                    get_candidate_labeling_coverage,
+                    get_promotion_state,
+                    get_exit_quality_summary,
+                )
+
+                integ = get_integrity_summary()
+                attr = get_attribution_coverage()
+                cand = get_candidate_labeling_coverage(days=7)
+                promo = get_promotion_state()
+                exit_q = get_exit_quality_summary(days=30)
+
+                # Integrity tier breakdown
+                coverage = integ.get("coverage_pct", 0.0)
+                badge = (
+                    "green" if coverage >= 80 else "orange" if coverage >= 50 else "red"
+                )
+                st.markdown(
+                    f"**Trade integrity coverage:** :{badge}[{coverage:.0f}%]"
+                    f" of {integ.get('total_closes', 0)} closes"
+                )
+                ic1, ic2, ic3, ic4 = st.columns(4)
+                ic1.metric("Verified", integ.get("verified", 0))
+                ic2.metric("Suspect", integ.get("suspect", 0))
+                ic3.metric("Quarantined", integ.get("quarantined", 0))
+                ic4.metric("Excluded", integ.get("excluded", 0))
+
+                st.divider()
+
+                # Attribution coverage
+                attr_pct = attr.get("coverage_pct", 0.0)
+                lin_pct = attr.get("lineage_pct", 0.0)
+                ac1, ac2 = st.columns(2)
+                ac1.metric(
+                    "Attribution coverage",
+                    f"{attr_pct:.0f}%",
+                    help=f"{attr.get('attributed', 0)} / {attr.get('total_closes', 0)} closes",
+                )
+                ac2.metric(
+                    "Lineage complete",
+                    f"{lin_pct:.0f}%",
+                    help=f"{attr.get('lineage_complete', 0)} / {attr.get('attributed', 0)} attributed",
+                )
+
+                st.divider()
+
+                # Candidate labeling
+                lab_pct = cand.get("coverage_pct", 0.0)
+                backlog = cand.get("backlog", 0)
+                cl1, cl2 = st.columns(2)
+                cl1.metric(
+                    "Candidate labeling (7d)",
+                    f"{lab_pct:.0f}%",
+                    help=f"{cand.get('labeled', 0)} / {cand.get('total_candidates', 0)} labeled",
+                )
+                cl2.metric(
+                    "Labeling backlog",
+                    backlog,
+                    delta=f"-{backlog}" if backlog > 0 else "0",
+                    delta_color="inverse",
+                )
+
+                st.divider()
+
+                # Promotion state
+                st.markdown("**Challenger promotions**")
+                if promo:
+                    import pandas as pd
+
+                    promo_rows = [
+                        {
+                            "Strategy": r.get("strategy", "")[:20],
+                            "Run": str(r.get("run_id", ""))[:8],
+                            "Tier": r.get("promotion_tier", ""),
+                            "Notes": str(r.get("notes", ""))[:60],
+                        }
+                        for r in promo[:5]
+                    ]
+                    st.dataframe(
+                        pd.DataFrame(promo_rows),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                else:
+                    st.caption("No challenger runs yet.")
+
+                # Exit quality
+                if exit_q.get("count", 0) > 0:
+                    st.divider()
+                    st.markdown(
+                        f"**Exit quality** ({exit_q['count']} evaluated, 30d) — "
+                        f"avg opportunity loss: {exit_q['avg_opportunity_loss_pct']:.2%}"
+                    )
+
+            except Exception as _ie:
+                st.error(f"integrity panel: {_ie}")
+
     st.divider()
     st.caption("**System events log** (last 20)")
     events = get_recent_events(20)

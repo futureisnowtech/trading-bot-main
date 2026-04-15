@@ -1667,6 +1667,7 @@ def _evaluate_position_exit(
 
         # 2. Bayesian signal attribution (post_trade_analyzer) — updates signal_stats
         #    and dynamic_weights so the system actually learns from every trade.
+        _pta_ok = False
         try:
             from learning.post_trade_analyzer import analyze_closed_trade as _pta
 
@@ -1705,8 +1706,91 @@ def _evaluate_position_exit(
                 exit_type=exit_decision.exit_type,
                 composite_score=float(pos.get("entry_composite_score", 0.0)),
             )
+            _pta_ok = True
         except Exception as e:
             logger.warning(f"[v10] post_trade_analyzer error {symbol}: {e}")
+
+        # 3. Integrity tier + exit quality substrate (v14.0)
+        #    Assigns a durable trust tier to every close and records exit quality
+        #    metrics so the system can evaluate whether exits are leaving money on
+        #    the table.  Fail-safe: any exception here is silent and non-blocking.
+        try:
+            from logging_db.trade_logger import log_trade_integrity, log_exit_evaluation
+            from config import ACCOUNT_SIZE as _ACCT_SIZE
+
+            _close_oid = (
+                str(close_result.get("order_id", "")).strip()
+                or f"close_{symbol}_{int(time.time())}"
+            )
+            _src_tag = "clean_paper_v10" if _paper else "live_v10"
+
+            # Tier: quarantine impossible PnL; verify if attribution ran; else suspect
+            _acct = float(_ACCT_SIZE)
+            if abs(pnl_usd) > _acct * 0.5:
+                _integ_tier = "quarantined"
+                _integ_reason = f"pnl_sanity:|{pnl_usd:.2f}|>50%_account"
+            elif _pta_ok:
+                _integ_tier = "verified"
+                _integ_reason = "attribution_succeeded"
+            else:
+                _integ_tier = "suspect"
+                _integ_reason = "attribution_failed_or_incomplete"
+
+            log_trade_integrity(
+                close_order_id=_close_oid,
+                tier=_integ_tier,
+                reason=_integ_reason,
+                source_check=_src_tag,
+                notes=f"exit={exit_decision.exit_type}",
+            )
+
+            # Exit quality: opportunity loss, stop overshoot, path label
+            _dir = str(pos.get("direction", direction)).upper()
+            _peak = float(
+                pos.get("peak_price", exit_price)
+            )  # best-case price (direction-aware)
+            _stop = float(pos.get("stop_price", 0.0))
+
+            if _dir == "LONG":
+                _mfe = (_peak - entry_price) / max(entry_price, 1e-9)
+                _optimal = _peak
+                _opp_loss = max(0.0, (_peak - exit_price) / max(entry_price, 1e-9))
+                _overshoot = (
+                    max(0.0, (_stop - exit_price) / max(entry_price, 1e-9))
+                    if _stop > 0
+                    else 0.0
+                )
+            else:  # SHORT
+                _mfe = (entry_price - _peak) / max(entry_price, 1e-9)
+                _optimal = _peak
+                _opp_loss = max(0.0, (exit_price - _peak) / max(entry_price, 1e-9))
+                _overshoot = (
+                    max(0.0, (exit_price - _stop) / max(entry_price, 1e-9))
+                    if _stop > 0
+                    else 0.0
+                )
+
+            _path = (
+                "winner" if pnl_usd > 0 else ("loser" if pnl_usd < 0 else "breakeven")
+            )
+
+            log_exit_evaluation(
+                close_order_id=_close_oid,
+                exit_type=exit_decision.exit_type,
+                actual_exit_price=exit_price,
+                actual_exit_pct=pnl_pct,
+                optimal_exit_price=_optimal,
+                opportunity_loss_pct=_opp_loss,
+                stop_overshoot_pct=_overshoot,
+                regime=pos.get("regime", "UNKNOWN"),
+                composite_score_at_exit=float(pos.get("entry_composite_score", 0.0)),
+                mfe_at_exit=_mfe,
+                mae_at_exit=0.0,  # trough not tracked in pos dict; computed post-hoc in nightly audit
+                path_label=_path,
+                trade_id=_close_oid,
+            )
+        except Exception as _ie:
+            logger.debug(f"[v10] integrity/exit-eval error {symbol}: {_ie}")
 
     # Notification
     if ne is not None:

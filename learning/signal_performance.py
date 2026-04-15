@@ -191,16 +191,43 @@ def init_learning_tables():
                 is_fee_trap   INTEGER DEFAULT 0,
                 ml_p_win      REAL DEFAULT 0,
                 super_score   REAL DEFAULT 0,
-                composite_score REAL DEFAULT 0
+                composite_score REAL DEFAULT 0,
+                entry_order_id        TEXT,
+                feature_snapshot_id   INTEGER,
+                lineage_complete      INTEGER DEFAULT 0,
+                lineage_notes         TEXT,
+                integrity_tier        TEXT DEFAULT 'suspect',
+                technical_score       REAL DEFAULT 0,
+                ml_score              REAL DEFAULT 0,
+                entry_thesis_score    REAL DEFAULT 0,
+                exit_thesis_score     REAL DEFAULT 0,
+                trailing_stop_activated INTEGER DEFAULT 0,
+                scale_out_triggered   INTEGER DEFAULT 0,
+                funding_collected     REAL DEFAULT 0,
+                maker_rebate          REAL DEFAULT 0
             )
         """)
-        # Add composite_score column if it doesn't exist (safe to call on existing DBs)
-        try:
-            c.execute(
-                "ALTER TABLE trade_attribution ADD COLUMN composite_score REAL DEFAULT 0"
-            )
-        except Exception:
-            pass  # column already exists
+        # Add composite_score and v14 lineage columns if they don't exist (safe on existing DBs)
+        for _migration in [
+            "ALTER TABLE trade_attribution ADD COLUMN composite_score REAL DEFAULT 0",
+            "ALTER TABLE trade_attribution ADD COLUMN entry_order_id TEXT",
+            "ALTER TABLE trade_attribution ADD COLUMN feature_snapshot_id INTEGER",
+            "ALTER TABLE trade_attribution ADD COLUMN lineage_complete INTEGER DEFAULT 0",
+            "ALTER TABLE trade_attribution ADD COLUMN lineage_notes TEXT",
+            "ALTER TABLE trade_attribution ADD COLUMN integrity_tier TEXT DEFAULT 'suspect'",
+            "ALTER TABLE trade_attribution ADD COLUMN technical_score REAL DEFAULT 0",
+            "ALTER TABLE trade_attribution ADD COLUMN ml_score REAL DEFAULT 0",
+            "ALTER TABLE trade_attribution ADD COLUMN entry_thesis_score REAL DEFAULT 0",
+            "ALTER TABLE trade_attribution ADD COLUMN exit_thesis_score REAL DEFAULT 0",
+            "ALTER TABLE trade_attribution ADD COLUMN trailing_stop_activated INTEGER DEFAULT 0",
+            "ALTER TABLE trade_attribution ADD COLUMN scale_out_triggered INTEGER DEFAULT 0",
+            "ALTER TABLE trade_attribution ADD COLUMN funding_collected REAL DEFAULT 0",
+            "ALTER TABLE trade_attribution ADD COLUMN maker_rebate REAL DEFAULT 0",
+        ]:
+            try:
+                c.execute(_migration)
+            except Exception:
+                pass  # column already exists
         c.execute("""
             CREATE TABLE IF NOT EXISTS signal_stats (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -292,10 +319,20 @@ def record_trade_attribution(
     ml_p_win: float = 0,
     super_score: float = 0,
     composite_score: float = 0,
+    # v14.0: lineage fields
+    entry_order_id: str = None,
+    feature_snapshot_id: int = None,
+    lineage_complete: bool = False,
+    lineage_notes: str = None,
+    integrity_tier: str = "suspect",
 ) -> int:
     """
     Record the full attribution for one closed trade.
     Updates signal_stats for every active signal.
+
+    v14.0: Integrity-gated Bayesian updates — if integrity_tier is 'quarantined'
+    or 'excluded', signal_stats are NOT updated (fail-closed on data quality).
+
     Returns the inserted attribution ID.
     """
     now = datetime.now(timezone.utc).isoformat()
@@ -312,8 +349,10 @@ def record_trade_attribution(
                  signals_json, conviction, exit_reason,
                  hold_minutes, paper, lesson, created_at,
                  mae_pct, mfe_pct, exit_type, is_fee_trap, ml_p_win, super_score,
-                 composite_score)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 composite_score,
+                 entry_order_id, feature_snapshot_id, lineage_complete,
+                 lineage_notes, integrity_tier)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """,
             (
                 trade_ref,
@@ -343,9 +382,20 @@ def record_trade_attribution(
                 ml_p_win,
                 float(super_score or 0),
                 float(composite_score or 0),
+                entry_order_id,
+                feature_snapshot_id,
+                int(lineage_complete),
+                lineage_notes,
+                integrity_tier,
             ),
         )
         attr_id = cur.lastrowid
+
+    # v14.0: Integrity gate — quarantined/excluded trades do NOT update signal weights.
+    # This ensures corrupted or synthetic data cannot silently shift live Bayesian weights.
+    _BLOCKED_TIERS = frozenset({"quarantined", "excluded"})
+    if integrity_tier in _BLOCKED_TIERS:
+        return attr_id  # attribution recorded for audit, but weights NOT updated
 
     # Update signal_stats for every active signal
     active_signals = [k for k, v in signals.items() if v]

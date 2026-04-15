@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-14
+- fix(services): install_services.sh now self-locates PROJ and substitutes paths in plists at install time — was hardcoded to Desktop checkout
+
+## 2026-04-14
 - feat(audit): add trust-aware net truth and go-live audit CLIs with proof tests; reconcile AGENTS.md to v14.0 launch branch state
 
 ## 2026-04-14

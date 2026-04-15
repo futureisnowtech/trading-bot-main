@@ -11,7 +11,7 @@
 # To uninstall everything:
 #   bash scripts/install_services.sh --uninstall
 
-PROJ="/Users/joshmacbookair2020/Desktop/algo_trading_final"
+PROJ="$(cd "$(dirname "$0")/.." && pwd)"
 AGENTS="$HOME/Library/LaunchAgents"
 PLISTS=(
     "com.algotrading.king"
@@ -53,6 +53,8 @@ for label in "${PLISTS[@]}"; do
     fi
 
     cp "$src" "$dst"
+    # Substitute any hardcoded checkout path with the actual PROJ location
+    sed -i '' "s|/Users/joshmacbookair2020/Desktop/algo_trading_final|$PROJ|g" "$dst"
 
     # Unload first in case it was already registered
     launchctl unload "$dst" 2>/dev/null

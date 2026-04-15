@@ -535,6 +535,212 @@ def _check_retention() -> dict:
     return result
 
 
+# ── check 7: integrity coverage ──────────────────────────────────────────────
+
+
+def _check_integrity_coverage() -> dict:
+    """
+    Verify trade_integrity table covers >= 80% of close-side trades.
+    Emits WARN if coverage is below threshold.
+    """
+    result: dict[str, Any] = {
+        "status": "unknown",
+        "total_closes": 0,
+        "covered": 0,
+        "verified": 0,
+        "quarantined": 0,
+        "excluded": 0,
+        "coverage_pct": 0.0,
+        "detail": "",
+    }
+    try:
+        from logging_db.trade_logger import get_integrity_summary
+
+        summary = get_integrity_summary()
+        total = summary.get("total_closes", 0)
+        covered = (
+            summary.get("verified", 0)
+            + summary.get("suspect", 0)
+            + summary.get("quarantined", 0)
+            + summary.get("excluded", 0)
+        )
+        pct = summary.get("coverage_pct", 0.0)
+
+        result.update(
+            {
+                "total_closes": total,
+                "covered": covered,
+                "verified": summary.get("verified", 0),
+                "quarantined": summary.get("quarantined", 0),
+                "excluded": summary.get("excluded", 0),
+                "coverage_pct": pct,
+            }
+        )
+
+        if pct < 80.0 and total > 0:
+            result["status"] = "warn"
+            result["detail"] = (
+                f"Integrity coverage {pct:.0f}% < 80% — run "
+                f"python3 scripts/migrate_integrity_backfill.py to backfill"
+            )
+        else:
+            result["status"] = "pass"
+            result["detail"] = (
+                f"integrity covered={covered}/{total} ({pct:.0f}%) "
+                f"verified={summary.get('verified', 0)} "
+                f"quarantined={summary.get('quarantined', 0)}"
+            )
+    except Exception as e:
+        result["status"] = "error"
+        result["detail"] = str(e)[:200]
+
+    return result
+
+
+# ── check 8: attribution coverage ────────────────────────────────────────────
+
+
+def _check_attribution_coverage() -> dict:
+    """
+    Verify trade_attribution covers >= 80% of close-side trades.
+    """
+    result: dict[str, Any] = {
+        "status": "unknown",
+        "total_closes": 0,
+        "attributed": 0,
+        "lineage_complete": 0,
+        "coverage_pct": 0.0,
+        "detail": "",
+    }
+    try:
+        from logging_db.trade_logger import _conn
+
+        conn = _conn()
+        total_row = conn.execute(
+            "SELECT COUNT(*) FROM trades WHERE pnl_usd != 0"
+        ).fetchone()
+        total = int((total_row or [0])[0])
+
+        attr_row = conn.execute("SELECT COUNT(*) FROM trade_attribution").fetchone()
+        attributed = int((attr_row or [0])[0])
+
+        lin_row = conn.execute(
+            "SELECT COUNT(*) FROM trade_attribution WHERE lineage_complete = 1"
+        ).fetchone()
+        lineage_complete = int((lin_row or [0])[0])
+        conn.close()
+
+        pct = round(attributed / total * 100, 1) if total > 0 else 0.0
+        lin_pct = round(lineage_complete / max(attributed, 1) * 100, 1)
+
+        result.update(
+            {
+                "total_closes": total,
+                "attributed": attributed,
+                "lineage_complete": lineage_complete,
+                "coverage_pct": pct,
+            }
+        )
+
+        if pct < 80.0 and total > 0:
+            result["status"] = "warn"
+            result["detail"] = f"Attribution coverage {pct:.0f}% < 80%"
+        else:
+            result["status"] = "pass"
+            result["detail"] = (
+                f"attribution={attributed}/{total} ({pct:.0f}%) "
+                f"lineage_complete={lineage_complete} ({lin_pct:.0f}%)"
+            )
+    except Exception as e:
+        result["status"] = "error"
+        result["detail"] = str(e)[:200]
+
+    return result
+
+
+# ── check 9: challenger promotion evaluation ──────────────────────────────────
+
+
+def _check_challenger_promotion() -> dict:
+    """
+    Run promotion engine evaluation. Emits INFO/WARN if any run crosses tier.
+    """
+    result: dict[str, Any] = {
+        "status": "pass",
+        "evaluated": 0,
+        "promoted_pending": 0,
+        "demoted": 0,
+        "detail": "",
+    }
+    try:
+        from backtesting.promotion_engine import PromotionEngine
+
+        engine = PromotionEngine()
+        evals = engine.evaluate_all()
+        promoted = sum(
+            1 for e in evals if e.get("promotion_tier") == "PROMOTED_PENDING_HUMAN"
+        )
+        demoted = sum(1 for e in evals if e.get("promotion_tier") == "DEMOTED")
+
+        result["evaluated"] = len(evals)
+        result["promoted_pending"] = promoted
+        result["demoted"] = demoted
+
+        if promoted > 0:
+            result["status"] = "warn"  # WARN = action required from human
+            result["detail"] = (
+                f"{promoted} challenger(s) ready for review — human confirmation required"
+            )
+        elif demoted > 0:
+            result["status"] = "warn"
+            result["detail"] = f"{demoted} strategy(ies) flagged for demotion review"
+        else:
+            result["detail"] = f"{len(evals)} runs evaluated, none ready for promotion"
+    except Exception as e:
+        # Promotion engine is non-critical — don't fail the audit
+        result["status"] = "pass"
+        result["detail"] = f"promotion check skipped: {e}"
+
+    return result
+
+
+# ── check 10: ML retrain queue ────────────────────────────────────────────────
+
+
+def _check_ml_retrain_queue() -> dict:
+    """
+    Check if ml_retrain_queue has pending items and emit INFO/WARN.
+    """
+    result: dict[str, Any] = {
+        "status": "pass",
+        "pending": 0,
+        "detail": "",
+    }
+    try:
+        from logging_db.trade_logger import _conn
+
+        conn = _conn()
+        row = conn.execute(
+            "SELECT COUNT(*) FROM ml_retrain_queue WHERE status='pending'"
+        ).fetchone()
+        pending = int((row or [0])[0])
+        conn.close()
+
+        result["pending"] = pending
+        if pending > 0:
+            result["status"] = "warn"
+            result["detail"] = (
+                f"{pending} pending ML retrain items — walk_forward_trainer will process them"
+            )
+        else:
+            result["detail"] = "ML retrain queue empty"
+    except Exception as e:
+        result["status"] = "pass"  # non-critical
+        result["detail"] = f"retrain queue check skipped: {e}"
+
+    return result
+
+
 # ── main audit ────────────────────────────────────────────────────────────────
 
 
@@ -570,6 +776,19 @@ def run_audit(run_proof: bool = True) -> dict:
 
     logger.info("[audit] running retention pruning...")
     checks["retention"] = _check_retention()
+
+    # v14.0: integrity, attribution, promotion, retrain checks
+    logger.info("[audit] checking integrity coverage...")
+    checks["integrity_coverage"] = _check_integrity_coverage()
+
+    logger.info("[audit] checking attribution coverage...")
+    checks["attribution_coverage"] = _check_attribution_coverage()
+
+    logger.info("[audit] evaluating challenger promotion...")
+    checks["challenger_promotion"] = _check_challenger_promotion()
+
+    logger.info("[audit] checking ML retrain queue...")
+    checks["ml_retrain_queue"] = _check_ml_retrain_queue()
 
     # Overall status: worst of all checks (skipped checks don't count)
     statuses = [

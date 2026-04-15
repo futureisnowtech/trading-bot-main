@@ -2,7 +2,36 @@
 
 #active
 
-**Last updated: 2026-03-25**
+> ## HISTORICAL SECTION BELOW
+> Questions dated 2026-03-25 reference the v4.3 architecture (Coinbase Advanced Trade,
+> Bybit perps, Tradovate MES, 5-agent debate). That system no longer exists.
+> The current live system is **v15.2** (2026-04-15). See CLAUDE.md for current truth.
+> Historical questions are preserved for audit trail only.
+
+---
+
+## v15.2 OPEN QUESTIONS (2026-04-15)
+
+### Q-A: Will ForecastEx OPT contracts become available?
+- **Context**: IBKR paper account DUP590699 can see IND underliers (CPI/CPIY/CPIC/DISSN/DISSA)
+  but OPT event contracts hang with no response. Likely requires: (1) live funded account,
+  (2) explicit ForecastEx enrollment via IBKR portal.
+- **Resolution**: Enroll live account; switch IBKR_PORT to 7496.
+
+### Q-B: How many clean paper trades needed before ML model activates meaningfully?
+- **Context**: ML score falls back to 50.0 until enough `clean_paper_v10`/`live_v10` trades
+  accumulate. MIN_TRADES_FOR_ML threshold gates retraining.
+- **Resolution**: Monitor `ml_retrain_queue` table; check after 50+ clean closes.
+
+### Q-C: When should MES lane be reactivated?
+- **Context**: MES is DORMANT (FUTURES_LANE_ACTIVE=false). Code and DB tables are preserved.
+- **Resolution**: Set FUTURES_LANE_ACTIVE=true in .env + verify TWS on port 7496 + confirm
+  MESM26 contract is still current.
+
+---
+
+**Last updated: 2026-04-15**
+Historical questions (v4.3 era) preserved below for audit trail only.
 These are unresolved questions that affect system behavior or decision quality.
 Each question is marked by urgency and what would resolve it.
 

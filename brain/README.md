@@ -38,22 +38,25 @@ and the system can learn over time.
 
 ## PRIORITY READS
 
-- [[01_current_system/Current Active Logic.md]] — best-known live state
-- [[03_parameter_sets/Param Set - v4.3 Active.md]] — current signal gates + conviction thresholds
+- [[01_current_system/Current Active Logic.md]] — current live state (v15.2, 2026-04-15)
 - [[10_decisions/Decision Log.md]] — why key changes were made
-- [[08_agent_intelligence/Agent Panel.md]] — current 5-agent panel + roles
+- CLAUDE.md (repo root) — authoritative source of truth for all system state
 
 ---
 
 ## SYSTEM VERSION
 
-BELIEVED: v4.3 (TradingView integration + 7 new indicators)
-Last confirmed commit: ff5782d — 2026-03-25
+**v15.2** (2026-04-15)
+Active branch: `feature/v10-rebuild`
+Clean paper trading started: 2026-04-02
 
 ---
 
 ## UNCERTAINTY STATUS
 
-As of 2026-03-25: No live paper trading data yet. All notes are derived from code
-inspection and changelog history — not from observed trading outcomes.
+As of 2026-04-15: System is live (PAPER_TRADING=false). Crypto lane executing via Coinbase
+US CFTC nano perp futures. ForecastEx lane started, enrollment pending. MES archived.
 Labels used throughout: CONFIRMED | BELIEVED | TESTING | RETIRED | ASSUMPTION
+
+> NOTE: Notes in `brain/` folders dated 2026-03-25 or earlier reference v4.3 architecture
+> and are HISTORICAL. The current live system is v15.2. See CLAUDE.md for current truth.

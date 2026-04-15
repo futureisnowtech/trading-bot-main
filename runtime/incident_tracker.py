@@ -153,6 +153,17 @@ def ingest_system_events(lookback_minutes: int = 60, db_path: str = DB_PATH) -> 
                 groups[key]["severity"] = new_sev
 
     if not groups:
+        # Even with no new groups to ingest, auto-resolve any lingering INFO incidents
+        # (can exist if ingest ran before the INFO filter was deployed).
+        try:
+            with _conn(db_path) as c:
+                c.execute(
+                    "UPDATE incidents SET state='resolved', updated_at=? "
+                    "WHERE state='open' AND severity='INFO'",
+                    (_now_iso(),),
+                )
+        except Exception:
+            pass
         return 0
 
     now = _now_iso()
@@ -192,6 +203,13 @@ def ingest_system_events(lookback_minutes: int = 60, db_path: str = DB_PATH) -> 
                     ),
                 )
                 upserted += 1
+
+            # Auto-resolve any open INFO incidents that pre-date the INFO filter.
+            c.execute(
+                "UPDATE incidents SET state='resolved', updated_at=? "
+                "WHERE state='open' AND severity='INFO'",
+                (now,),
+            )
     except Exception:
         pass
 

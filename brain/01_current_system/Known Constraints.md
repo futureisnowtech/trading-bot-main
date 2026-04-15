@@ -2,8 +2,67 @@
 
 #active
 
-**Status as of: 2026-03-25**
-All constraints are CONFIRMED from code/config.py unless labeled otherwise.
+> ## HISTORICAL SECTION BELOW
+> Constraints dated 2026-03-25 reference the v4.3 architecture ($500 account,
+> Coinbase Advanced Trade 0.6% fees, Bybit, Tradovate, 5-agent debate).
+> That system no longer exists. The current live system is **v15.2** (2026-04-15).
+> See CLAUDE.md for current truth. Historical content preserved for audit trail.
+
+---
+
+## v15.2 CONSTRAINTS (2026-04-15)
+
+### Account
+| Constraint | Value | Source |
+|-----------|-------|--------|
+| Account size | $5,000 (paper) | CONFIRMED — ACCOUNT_SIZE=5000 in config |
+| Max deployed capital | 90% | CONFIRMED — MAX_DEPLOYED_PCT=0.90 |
+| Kill switch threshold | $3,750 (75% of $5K) | CONFIRMED — kill_switch.py |
+
+### Risk Hard Rules
+| Rule | Value |
+|------|-------|
+| Max risk per trade | 1% of account |
+| Max daily loss → halt | 4% of account |
+| Default leverage | 3× |
+| Max leverage | 10× |
+| Margin mode | ISOLATED — never CROSS |
+| Kill switch | balance < 75% ACCOUNT_SIZE |
+
+### Platform Constraints (v15.2)
+
+#### Coinbase US CFTC Nano Perp Futures (LIVE execution)
+- Taker fee: 0.030% | Maker fee: 0.00% | Round-trip: 0.060%
+- Auth: CDP JWT / ES256 (`COINBASE_CDP_KEY_NAME` + `COINBASE_CDP_PRIVATE_KEY`)
+- API path: `/api/v3/brokerage/cfm/` (NOT `/futures/` — returns 401)
+- Supported symbols: BTC→BIP-20DEC30-CDE, ETH→ETP-20DEC30-CDE, SOL→SLP-20DEC30-CDE, XRP→XPP-20DEC30-CDE
+- Any other symbol → `CoinbaseSymbolError` (fail-closed)
+
+#### IBKR ForecastEx (lane STARTED, enrollment pending)
+- clientId=3 | Exchange=FORECASTX | SecType=OPT
+- Economic markets only: CPI/CPIY/CPIC/DISSN/DISSA
+- NO short selling — flatten by buying opposite right
+- Risk caps (hardcoded): max deployed 35%, per-event 10%, max concurrent 2, Kelly cap 0.10
+- IBKR_PORT=7496 (live session required)
+
+#### MES / IBKR (DORMANT)
+- FUTURES_LANE_ACTIVE=false — no IBKR connection attempted
+- Reactivate: set FUTURES_LANE_ACTIVE=true in .env
+
+### Amygdala Removal Rules (HARDCODED — unchanged)
+1. Never chase — skip if price moved >3% since signal
+2. Never average down — one position per symbol, ever
+3. Stop losses are sacred — never moved wider after entry
+4. Wins don't justify ignoring rules on the next trade
+5. Losses don't justify revenge trading or larger size
+6. FOMO is not a signal
+7. When in doubt, HOLD — a skipped trade costs nothing
+8. Goal is being in business next month, not winning today
+
+---
+
+**Status as of: 2026-03-25 (HISTORICAL — v4.3 era)**
+All constraints below are CONFIRMED from code/config.py unless labeled otherwise.
 
 ---
 

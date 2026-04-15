@@ -166,6 +166,7 @@ def run_discovery(
 
     # Also process stub-only results (IND visible, OPT unavailable) — they skip ranking
     stubs = [c for c in raw_contracts if c.get("stub_only")]
+    stubs_persisted = 0
     for stub in stubs:
         sym = stub.get("underlier", "")
         name = stub.get("long_name", "") or sym
@@ -179,7 +180,9 @@ def run_discovery(
                 underlier_conid=stub.get("und_conid"),
                 db_path=db_path,
             )
+            stubs_persisted += 1
             from logging_db.trade_logger import log_event as _log_event
+
             _log_event(
                 "INFO",
                 "ForecastDiscovery",
@@ -187,6 +190,7 @@ def run_discovery(
             )
         except Exception as e:
             logger.warning(f"upsert_market (stub) failed for {sym}: {e}")
+    result["stubs_persisted"] = stubs_persisted
 
     for c in ranked:
         # Skip stubs that ended up in ranked (shouldn't happen, but guard)

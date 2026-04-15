@@ -2,7 +2,41 @@
 
 #active #strategy
 
-**Status as of: 2026-03-25**
+> ## HISTORICAL SECTION BELOW
+> This document was written for the v4.3 architecture (Coinbase Advanced Trade spot,
+> Bybit perps, Tradovate MES, MACD-based conviction scoring, 5-agent debate).
+> That system no longer exists. The current live system is **v15.2** (2026-04-15).
+> See CLAUDE.md and `brain/01_current_system/Current Active Logic.md` for current truth.
+> Historical strategies are preserved for research reference only.
+
+---
+
+## v15.2 STRATEGY SUMMARY (2026-04-15)
+
+### Unified Perp Strategy (Crypto Lane — LIVE)
+**Entry runner**: `scheduler/v10_runner.py`
+**Signal engine**: `signal_engine.py` — two-tower (Technical 0-100 + ML 0-100)
+**Execution**: `perps_engine.py` → `execution/coinbase_broker.py`
+**Symbols**: BTC/ETH/SOL/XRP (Coinbase CFTC nano perp futures only)
+**Scanning**: Kraken Futures + Binance USDM + Hyperliquid (intelligence only)
+**Entry**: composite >= regime threshold (TRENDING/RANGING=58, HIGH_VOL=60, LOW_VOL=56)
+**Exit**: 7-priority stack (trailing stop, scale-out, thesis score, hard stop, risk forced, kill switch, dead-money)
+**Sizing**: Kelly + ATR via `position_manager.compute_position_size()`
+**ML**: XGBoost 60% + LightGBM 40%, 57 features, PnL regressor
+
+### ForecastEx Strategy (Forecast Lane — STARTED, enrollment pending)
+**Entry runner**: `forecast/runner.py`
+**Signal engine**: `forecast/strategy_engine.py` — 3 families (continuation, mean_reversion, late_repricing)
+**Execution**: `execution/forecastex_broker.py` (IBKR clientId=3)
+**Markets**: Economic events only (CPI/NFP/FOMC/PCE/GDP/PPI/Unemployment)
+**Sizing**: Fractional Kelly (cap 0.10), max deployed 35%, per-event 10%
+
+### MES Scalper (DORMANT)
+**Status**: ARCHIVED. FUTURES_LANE_ACTIVE=false. Code preserved in `execution/ibkr_broker.py`.
+
+---
+
+**Status as of: 2026-03-25 (HISTORICAL — v4.3 era)**
 
 ---
 

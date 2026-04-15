@@ -77,10 +77,27 @@ def run_discovery_cycle() -> dict:
             init_forecast_db()
             broker = _get_broker()
             result = run_discovery(broker=broker)
+            stubs = result.get("stubs_persisted", 0)
+            contracts = result.get("persisted", 0)
             logger.info(
                 f"[ForecastRunner] Discovery: found={result['found']} "
-                f"persisted={result['persisted']} active={result['active_in_db']}"
+                f"persisted={contracts} "
+                f"stubs={stubs} "
+                f"active={result['active_in_db']}"
             )
+            # Update lane readiness_state to reflect post-discovery truth.
+            try:
+                from runtime.runtime_state import upsert_lane_state as _uls
+
+                if contracts > 0:
+                    _rs = "NO_QUOTES"  # contracts exist but quotes not yet flowing
+                elif stubs > 0:
+                    _rs = "NO_TRADABLE_CONTRACTS_RIGHT_NOW"
+                else:
+                    _rs = "NO_UNDERLIERS"
+                _uls("forecast", readiness_state=_rs)
+            except Exception:
+                pass
             return result
         except Exception as e:
             logger.error(f"[ForecastRunner] Discovery cycle error: {e}")

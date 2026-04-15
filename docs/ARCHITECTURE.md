@@ -1,3 +1,22 @@
+# HISTORICAL REFERENCE — v10.0 Architecture Design Doc
+
+> **This document captures the v10.0 initial design (2026-04-01).**
+> The current live system is **v15.2** (2026-04-15). See CLAUDE.md for current truth.
+>
+> Key things that changed since this doc was written:
+> - Live execution venue: was Binance USDM → now **Coinbase US CFTC nano perp futures** (`coinbase_broker.py`)
+> - 47 ML features → **57 features** (11 groups)
+> - 6-priority exit stack → **7-priority** (dead-money exit added v13.8)
+> - 5-tab dashboard → **6 tabs** (FORECAST TRADING added v15.0; ARCHIVED FUTURES (MES) renamed)
+> - ForecastEx lane added (v15.0): IBKR ForecastEx event contracts
+> - Runtime truth layer added (v15.2): `system_runtime_state`, `lane_runtime_state`, incidents
+> - MES/IBKR futures: DORMANT (`FUTURES_LANE_ACTIVE=false`)
+> - Notifications: SQLite only (no Telegram — this was already the design)
+>
+> Do not use the exchange decision, risk limits, or feature counts in this doc as current values.
+
+---
+
 # ARCHITECTURE.md — v10 System Design
 **Version:** v10.0 (build started 2026-04-01)
 **Branch:** feature/v10-rebuild

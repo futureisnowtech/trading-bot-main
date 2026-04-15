@@ -178,6 +178,24 @@ def main() -> int:
     except Exception as e:
         _pr(WARN, "Coinbase auth check failed", str(e))
 
+    # Live Coinbase connectivity check (only when credentials are present)
+    try:
+        from config import COINBASE_CDP_KEY_NAME
+        if COINBASE_CDP_KEY_NAME:
+            try:
+                from execution.coinbase_broker import CoinbaseBroker
+                cb = CoinbaseBroker(paper=False)
+                ok = cb.connect()
+                if ok:
+                    bp = cb.get_account_balance()
+                    _pr(PASS, "Coinbase LIVE auth", f"connected, buying_power=${bp:.2f}")
+                else:
+                    _pr(FAIL, "Coinbase LIVE auth", "connect() returned False")
+            except Exception as e:
+                _pr(FAIL, "Coinbase LIVE auth error", str(e))
+    except Exception:
+        pass
+
     # ── 5. IBKR port ─────────────────────────────────────────────────────────
     print("\n── IBKR Port ─────────────────────────────────────────")
     try:
@@ -208,6 +226,41 @@ def main() -> int:
             _pr(WARN, "MES active", "FUTURES_LANE_ACTIVE=True — MES lane is NOT archived")
     except Exception as e:
         _pr(WARN, "MES dormant check failed", str(e))
+
+    # ── 7. Heartbeat age ──────────────────────────────────────────────────────
+    print("\n── Heartbeat Age ─────────────────────────────────────")
+    try:
+        from runtime.runtime_state import get_system_state as _get_sys
+        state = _get_sys()
+        if state.get("last_global_heartbeat_at"):
+            try:
+                hb_ts = datetime.fromisoformat(state["last_global_heartbeat_at"])
+                age_min = (datetime.now(timezone.utc) - hb_ts).total_seconds() / 60
+                if age_min < 5:
+                    _pr(PASS, "System heartbeat", f"{age_min:.1f}m ago")
+                else:
+                    _pr(WARN, "System heartbeat", f"{age_min:.1f}m ago (stale)")
+            except Exception:
+                _pr(WARN, "System heartbeat", "could not parse timestamp")
+        else:
+            _pr(WARN, "System heartbeat", "never written")
+    except Exception as e:
+        _pr(WARN, "Heartbeat age check failed", str(e))
+
+    # ── 8. Forecast DB detail ─────────────────────────────────────────────────
+    print("\n── Forecast DB ───────────────────────────────────────")
+    try:
+        import sqlite3 as _sqlite3
+        from config import DB_PATH
+        with _sqlite3.connect(DB_PATH) as _conn:
+            n_markets = _conn.execute("SELECT COUNT(*) FROM forecast_markets WHERE active=1").fetchone()[0]
+            n_contracts = _conn.execute("SELECT COUNT(*) FROM forecast_contracts WHERE active=1").fetchone()[0]
+            n_quotes = _conn.execute("SELECT COUNT(*) FROM forecast_quotes").fetchone()[0]
+            n_bars = _conn.execute("SELECT COUNT(*) FROM forecast_bars WHERE interval='5m'").fetchone()[0]
+        _pr(PASS, "Forecast DB",
+            f"markets={n_markets}, contracts={n_contracts}, quotes={n_quotes}, bars_5m={n_bars}")
+    except Exception as e:
+        _pr(WARN, "Forecast DB", f"error — {e}")
 
     # ── Verdict ────────────────────────────────────────────────────────────────
     print()

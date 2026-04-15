@@ -16,6 +16,9 @@ Invariants proven:
   12. test_allocator_scaffold             — GlobalAllocator register + get_available_capital doesn't raise
   13. test_lane_registry_mes_disabled_by_default — mes_archived not in get_active_lane_ids() when FUTURES_LANE_ACTIVE=False
   14. test_is_trade_viable_crypto         — is_trade_viable('crypto', 0.01)=True; is_trade_viable('crypto', 0.0001)=False
+  15. test_active_lanes_populated         — upsert_system_state(active_lanes='["crypto"]') → get_system_state() contains "crypto"
+  16. test_mark_lane_heartbeat            — mark_lane_heartbeat("crypto") sets last_heartbeat_at to a recent ISO timestamp
+  17. test_forecast_lane_state_update     — upsert_lane_state forecast active=1,connected=1,readiness=NO_UNDERLIERS is readable
 """
 
 from __future__ import annotations
@@ -407,3 +410,77 @@ def test_is_trade_viable_crypto():
 
     # Just below minimum should fail
     assert is_trade_viable("crypto", econ.min_viable_edge_pct - 0.0001) is False
+
+
+# ── Test 15: active_lanes populated via upsert_system_state ──────────────────
+
+def test_active_lanes_populated(proof_runtime, monkeypatch):
+    """upsert_system_state(active_lanes='["crypto"]') → get_system_state() contains 'crypto'."""
+    import json
+    import runtime.runtime_state as rs
+
+    db = str(proof_runtime.db_path)
+    monkeypatch.setattr(rs, "DB_PATH", db, raising=False)
+
+    rs.init_runtime_tables(db_path=db)
+    rs.upsert_system_state(db_path=db, active_lanes=json.dumps(["crypto"]))
+
+    state = rs.get_system_state(db_path=db)
+    active_lanes_raw = state.get("active_lanes", "[]")
+    active_lanes = json.loads(active_lanes_raw)
+    assert "crypto" in active_lanes, (
+        f"Expected 'crypto' in active_lanes, got: {active_lanes}"
+    )
+
+
+# ── Test 16: mark_lane_heartbeat sets a recent timestamp ─────────────────────
+
+def test_mark_lane_heartbeat(proof_runtime, monkeypatch):
+    """mark_lane_heartbeat('crypto') sets last_heartbeat_at to a recent ISO timestamp (within 5s)."""
+    import runtime.runtime_state as rs
+
+    db = str(proof_runtime.db_path)
+    monkeypatch.setattr(rs, "DB_PATH", db, raising=False)
+
+    rs.init_runtime_tables(db_path=db)
+    rs.upsert_lane_state("crypto", db_path=db, enabled=1)
+
+    before = datetime.now(timezone.utc)
+    rs.mark_lane_heartbeat("crypto", db_path=db)
+    after = datetime.now(timezone.utc)
+
+    lane = rs.get_lane_state("crypto", db_path=db)
+    hb_raw = lane.get("last_heartbeat_at")
+    assert hb_raw is not None and hb_raw != "", "last_heartbeat_at should not be blank"
+
+    hb_ts = datetime.fromisoformat(hb_raw)
+    if not hb_ts.tzinfo:
+        hb_ts = hb_ts.replace(tzinfo=timezone.utc)
+    age_secs = (after - hb_ts).total_seconds()
+    assert age_secs <= 5, f"Heartbeat timestamp too old: {age_secs:.2f}s"
+    assert hb_ts >= before, "Heartbeat timestamp should be >= time before call"
+
+
+# ── Test 17: forecast lane state update (active/connected/readiness) ──────────
+
+def test_forecast_lane_state_update(proof_runtime, monkeypatch):
+    """upsert_lane_state('forecast', active=1, connected=1, readiness_state='NO_UNDERLIERS') is readable."""
+    import runtime.runtime_state as rs
+
+    db = str(proof_runtime.db_path)
+    monkeypatch.setattr(rs, "DB_PATH", db, raising=False)
+
+    rs.init_runtime_tables(db_path=db)
+    rs.upsert_lane_state(
+        "forecast",
+        db_path=db,
+        active=1,
+        connected=1,
+        readiness_state="NO_UNDERLIERS",
+    )
+
+    lane = rs.get_lane_state("forecast", db_path=db)
+    assert lane["lane_id"] == "forecast"
+    assert lane["active"] == 1
+    assert lane["connected"] == 1
+    assert lane["readiness_state"] == "NO_UNDERLIERS"

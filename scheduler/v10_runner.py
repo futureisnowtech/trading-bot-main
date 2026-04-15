@@ -2427,6 +2427,18 @@ def run_forever():
 
     schedule.every().day.at("08:00").do(_nightly_audit_job)  # 08:00 UTC ≈ 03:00 ET
 
+    # Periodic system + crypto lane heartbeat (every 1 minute)
+    def _write_heartbeat():
+        try:
+            from runtime.runtime_state import write_system_heartbeat, upsert_lane_state
+            from datetime import datetime, timezone
+            write_system_heartbeat()
+            upsert_lane_state("crypto", last_heartbeat_at=datetime.now(timezone.utc).isoformat())
+        except Exception:
+            pass
+
+    schedule.every(1).minutes.do(_write_heartbeat)
+
     from config import FUTURES_LANE_ACTIVE
 
     if FUTURES_LANE_ACTIVE:

@@ -8,7 +8,7 @@ Usage:
   python main.py --equity-only
 """
 
-import sys, os, argparse, time, traceback, logging, threading
+import sys, os, argparse, time, traceback, logging, threading, json
 from datetime import datetime
 import pytz
 
@@ -164,6 +164,11 @@ def main():
 
     # Run position reconciliation
     run_reconciliation(_db_path)
+
+    # Write startup heartbeat immediately so last_global_heartbeat_at is never blank
+    from runtime.runtime_state import write_system_heartbeat
+    write_system_heartbeat(_db_path)
+
     print("   ✅ Runtime state tables ready\n")
 
     from memory.trade_memory import get_memory_stats
@@ -213,6 +218,16 @@ def main():
         upsert_lane_state("forecast", db_path=_db_path, active=1, readiness_state="BROKER_DISCONNECTED")
         log_event("INFO", "ForecastRunner", "Forecast lane started (FORECAST_LANE_ACTIVE=true)")
         print("   ForecastEx lane started (FORECAST_LANE_ACTIVE=true)")
+
+    # Populate active_lanes now that all lane startup is done
+    _active = ["crypto"]
+    if FORECAST_LANE_ACTIVE:
+        _active.append("forecast")
+    upsert_system_state(
+        db_path=_db_path,
+        active_lanes=json.dumps(_active),
+        launch_readiness_state="READY",
+    )
 
     print("=" * 60)
     print("  Scheduler starting. System is live.")

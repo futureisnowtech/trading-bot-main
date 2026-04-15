@@ -308,6 +308,13 @@ def run_position_monitor() -> None:
     except Exception as e:
         logger.error(f"[ForecastRunner] Position monitor error: {e}")
 
+    # Heartbeat — run_position_monitor is the most frequent forecast loop (30s)
+    try:
+        from runtime.runtime_state import mark_lane_heartbeat
+        mark_lane_heartbeat("forecast")
+    except Exception:
+        pass
+
 
 # ── Startup / teardown ─────────────────────────────────────────────────────────
 
@@ -344,6 +351,17 @@ def start_forecast_lane(bankroll: float = 100.0) -> None:
             "[ForecastRunner] ForecastEx broker not connected — "
             "running in paper/offline mode (no live orders)"
         )
+
+    try:
+        from runtime.runtime_state import upsert_lane_state
+        upsert_lane_state(
+            "forecast",
+            active=1,
+            connected=int(connected),
+            readiness_state="BROKER_DISCONNECTED" if not connected else "NO_UNDERLIERS",
+        )
+    except Exception:
+        pass
 
     # Start quote harvester
     harvester = _get_harvester()

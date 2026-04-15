@@ -4,20 +4,20 @@ dashboard/data/account.py — Account balance, P&L, equity curve, drawdown, trad
 
 from datetime import datetime
 
-from db import _q, _q1, LAUNCH_DATE
+from db import _q, _q1, LAUNCH_DATE, _runtime_paper_flag
 from data.positions import get_open_positions, get_live_prices
 
 
 def get_account():
     try:
-        from config import ACCOUNT_SIZE, PAPER_TRADING
+        from config import ACCOUNT_SIZE
 
         base = float(ACCOUNT_SIZE)
-        paper = bool(PAPER_TRADING)
     except Exception:
-        base, paper = 10000.0, True
+        base = 10000.0
 
-    paper_flag = 1 if paper else 0
+    paper_flag = _runtime_paper_flag()
+    paper = bool(paper_flag)
     r = _q1(
         """SELECT SUM(pnl_usd) - SUM(COALESCE(fee_usd,0)) AS net_pnl FROM trades
            WHERE ts >= ? AND paper=?
@@ -47,12 +47,7 @@ def get_account():
 
 
 def _paper_flag() -> int:
-    try:
-        from config import PAPER_TRADING
-
-        return 1 if PAPER_TRADING else 0
-    except Exception:
-        return 1
+    return _runtime_paper_flag()
 
 
 def get_today_pnl():

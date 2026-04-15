@@ -18,7 +18,7 @@ Fully autonomous AI trading system: scans Kraken Futures + Binance USDM + Hyperl
 - Paper account: $5,000 (`ACCOUNT_SIZE=5000` — config default, no .env override)
 - Wants zero day-to-day intervention. Prefers simple explanations, hates fluff.
 
-## Current Version: v15.6 (2026-04-15)
+## Current Version: v15.7 (2026-04-15)
 
 **Active branch:** `feature/v10-rebuild` | **Clean paper trading started:** 2026-04-02 | **Live trading started:** 2026-04-15
 
@@ -130,6 +130,7 @@ Fully autonomous AI trading system: scans Kraken Futures + Binance USDM + Hyperl
 - **DB staleness — peak_price/trailing_active (v15.5):** `perps_engine.update_position_price()` updates `peak_price` and `trailing_active` in-memory only; it does NOT write back to `open_positions.high_since_entry` or `open_positions.trailing_active`. Consequence: health_check stagnant alarm fires false positives for positions whose price has moved. Fix: `_check_stagnant_positions()` in `monitoring/health_check.py` now reads live `peak_price` + `trailing_active` from `perps_engine.get_open_positions()` to augment stale DB values.
 - **Error rate filter in dashboard (v15.5):** `get_error_rate_1h()` in `dashboard/data/health.py` now applies the same archived-lane noise filter (`_is_archived_lane_noise()`) that `_check_error_rate()` in `health_check.py` already uses. Without this, the dashboard showed ~679 IBKRBroker errors/hour as real errors when FUTURES_LANE_ACTIVE=false.
 - **Controlled live launch (v15.6):** `scripts/boot.py` now supports explicit `paper` vs `live` mode before any config import can cache `.env` state. `scripts/go_live.py` is the single sanctioned Claude/Codex live-launch path: it verifies Coinbase live auth, stops the paper launchd bot, starts `boot.py --mode live --confirm-live`, and waits for runtime truth to confirm `mode=live`. `scripts/go_paper.py` restores the paper launchd bot.
+- **Dashboard runtime truth (v15.7):** `dashboard/db.py` exports `_runtime_paper_flag()` — the ONLY place in the dashboard that determines paper vs live mode. It reads `system_runtime_state.process_mode` first (DB truth), falls back to `config.PAPER_TRADING`. ALL dashboard data modules import this helper; no module may define its own `_paper_flag()` that reads config directly. `dashboard/data/positions.py` must NEVER hardcode `WHERE paper=1`. `dashboard/data/balance.py` uses `_balance_paper_mode()` which reads the same runtime state via its own sqlite3 connection (balance.py cannot import from db due to separate sys.path setup). Proof test fixture (`conftest.py`) patches `config.PAPER_TRADING=True` so test trades (paper=1) are found regardless of system mode.
 
 ### MES Futures — Critical Contract Facts (v13.9)
 
@@ -292,6 +293,7 @@ Set `TV_WEBHOOK_SECRET` in .env. Symbol mapping: BTCUSD → BTCUSDT.
 | v15.4 | 2026-04-15 | Final truth-closure: tilde ~/Desktop pattern in truth gate; .md added to ACTIVE_EXTS (covers .claude/commands/, AGENTS.md, CLAUDE.md); pre-commit hardened with repo_truth_gate.py --fast; post_cmd_logger supports POST_CMD_LOG_OVERRIDE + $CLAUDE_PROJECT_DIR; all settings.json hook paths use $CLAUDE_PROJECT_DIR; stale 7497 eliminated from CLAUDE.md/AGENTS.md/dashboard fallback; 237 proof tests |
 | v15.5 | 2026-04-15 | Dashboard error fixes: schedule isolation for forecast daemon (exit_monitor race fix), error rate filter in dashboard/data/health.py, stagnant check uses live perps_engine peak_price to avoid false positives from stale DB high_since_entry; 240 proof tests |
 | v15.6 | 2026-04-15 | Controlled live-launch workflow: mode-aware boot.py, go_live.py/go_paper.py mode transitions, hook allowlist for the sanctioned launcher scripts, docs updated so Claude uses the controlled path instead of raw `--mode live` |
+| v15.7 | 2026-04-15 | Dashboard live-mode paper gate fix: added `_runtime_paper_flag()` to dashboard/db.py (reads system_runtime_state.process_mode; config fallback); positions.py hardcoded paper=1 replaced; account.py + performance.py local _paper_flag() replaced; balance.py mode detection uses runtime DB via _balance_paper_mode(); conftest patches config.PAPER_TRADING=True for test isolation; 10 new proof tests covering DB-overrides-config, paper positions hidden in live, cross-contamination prevention; 253 proof tests |
 
 ## GitHub
 - Repository: `futureisnowtech/trading-bot-main` (private)

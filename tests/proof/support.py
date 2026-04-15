@@ -210,3 +210,59 @@ def insert_system_event(db_path: Path, **overrides) -> None:
 def write_log(log_path: Path, *lines: str) -> None:
     rendered = "\n".join(lines).rstrip() + "\n"
     log_path.write_text(rendered, encoding="utf-8")
+
+
+def insert_open_position(db_path: Path, **overrides) -> None:
+    """Insert a row into open_positions. Defaults to paper=1 (paper mode)."""
+    row = {
+        "symbol": "BTCUSDT",
+        "strategy": "crypto_perp",
+        "qty": 0.01,
+        "entry": 50000.0,
+        "stop": 49000.0,
+        "target": 52000.0,
+        "high_since_entry": 50100.0,
+        "ts_entry": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+        "paper": 1,
+        "direction": "LONG",
+    }
+    row.update(overrides)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """INSERT OR REPLACE INTO open_positions
+               (symbol, strategy, qty, entry, stop, target, high_since_entry,
+                ts_entry, paper, direction)
+               VALUES (:symbol, :strategy, :qty, :entry, :stop, :target,
+                       :high_since_entry, :ts_entry, :paper, :direction)""",
+            row,
+        )
+
+
+def upsert_runtime_state(db_path: Path, process_mode: str = "live") -> None:
+    """
+    Write (or replace) the single system_runtime_state row so that
+    _runtime_paper_flag() reads the given process_mode from the test DB.
+    Creates the table if absent.
+    """
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS system_runtime_state (
+               id INTEGER PRIMARY KEY DEFAULT 1,
+               process_mode TEXT,
+               startup_ts TEXT,
+               process_alive INTEGER DEFAULT 0,
+               active_lanes TEXT DEFAULT '[]',
+               global_status TEXT DEFAULT 'OK',
+               last_global_heartbeat_at TEXT,
+               launch_readiness_state TEXT DEFAULT 'NOT_READY',
+               updated_at TEXT
+            )"""
+        )
+        conn.execute(
+            """INSERT INTO system_runtime_state (id, process_mode, startup_ts, updated_at)
+               VALUES (1, ?, datetime('now'), datetime('now'))
+               ON CONFLICT(id) DO UPDATE SET
+                   process_mode=excluded.process_mode,
+                   updated_at=excluded.updated_at""",
+            (process_mode,),
+        )

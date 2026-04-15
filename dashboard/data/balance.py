@@ -47,6 +47,31 @@ def _set_cache(data: dict) -> None:
 _DB_PATH = os.path.join(_ROOT, "logs", "trades.db")
 
 
+def _balance_paper_mode() -> bool:
+    """
+    Determine paper vs live mode for balance computation.
+
+    Reads system_runtime_state.process_mode (primary truth).
+    Falls back to config.PAPER_TRADING if the table is absent or empty.
+    Returns True = paper, False = live.
+    """
+    try:
+        with sqlite3.connect(_DB_PATH, check_same_thread=False, timeout=3) as c:
+            row = c.execute(
+                "SELECT process_mode FROM system_runtime_state ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            if row and row[0] == "live":
+                return False
+    except Exception:
+        pass
+    try:
+        from config import PAPER_TRADING
+
+        return bool(PAPER_TRADING)
+    except Exception:
+        return True
+
+
 def _paper_equity(base: float) -> float:
     """Compute paper account equity from trades DB: base + net realized P&L."""
     try:
@@ -122,12 +147,12 @@ def get_coinbase_balance() -> dict:
         paper       bool
     """
     try:
-        from config import ACCOUNT_SIZE, PAPER_TRADING
+        from config import ACCOUNT_SIZE
 
         base = float(ACCOUNT_SIZE)
-        paper = bool(PAPER_TRADING)
     except Exception:
-        base, paper = 5000.0, True
+        base = 5000.0
+    paper = _balance_paper_mode()
 
     if paper:
         realized = _paper_equity(base)

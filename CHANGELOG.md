@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-15
+- fix(dashboard): v15.7 live-mode paper gate — _runtime_paper_flag() in db.py; positions/account/performance/balance all read DB runtime truth; 10 new proof tests; 253 total
+
+## 2026-04-15
 - fix(dashboard): performance.py paper=1 hardcode replaced with _paper_flag(); balance.py /futures/ → /cfm/ API path; conftest isolates PAPER_TRADING from live .env
 
 ## 2026-04-15

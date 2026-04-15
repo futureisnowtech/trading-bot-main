@@ -4,16 +4,11 @@ dashboard/data/performance.py — Trade performance stats, rolling PF, per-symbo
 
 from datetime import datetime, timedelta
 
-from db import _q, _q1, LAUNCH_DATE
+from db import _q, _q1, LAUNCH_DATE, _runtime_paper_flag
 
 
 def _paper_flag() -> int:
-    try:
-        from config import PAPER_TRADING
-
-        return 1 if PAPER_TRADING else 0
-    except Exception:
-        return 1
+    return _runtime_paper_flag()
 
 
 def get_performance_stats():

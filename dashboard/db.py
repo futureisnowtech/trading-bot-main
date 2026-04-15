@@ -25,6 +25,34 @@ def _q1(sql, params=()):
     return rows[0] if rows else {}
 
 
+def _runtime_paper_flag() -> int:
+    """
+    Runtime-truth paper flag for all dashboard queries.
+
+    Reads system_runtime_state.process_mode (primary source of truth).
+    Falls back to config.PAPER_TRADING if the table is absent or empty.
+    Returns 0 for live mode, 1 for paper mode.
+
+    This is the single place in the dashboard that decides paper vs live.
+    All data modules import this — never define local _paper_flag() functions.
+    """
+    try:
+        with sqlite3.connect(DB_PATH, check_same_thread=False, timeout=3) as c:
+            row = c.execute(
+                "SELECT process_mode FROM system_runtime_state ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            if row and row[0] == "live":
+                return 0
+    except Exception:
+        pass
+    try:
+        from config import PAPER_TRADING
+
+        return 1 if PAPER_TRADING else 0
+    except Exception:
+        return 1
+
+
 def _tail_log(n=800):
     try:
         with open(LOG_PATH, "r") as f:

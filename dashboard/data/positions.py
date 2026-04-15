@@ -5,11 +5,14 @@ dashboard/data/positions.py — Open positions and live price fetching.
 import json
 import urllib.request
 
-from db import _q
+from db import _q, _runtime_paper_flag
 
 
 def get_open_positions():
-    return _q("SELECT * FROM open_positions WHERE paper=1 ORDER BY ts_entry DESC")
+    return _q(
+        "SELECT * FROM open_positions WHERE paper=? ORDER BY ts_entry DESC",
+        (_runtime_paper_flag(),),
+    )
 
 
 def get_live_prices(symbols: list) -> dict:

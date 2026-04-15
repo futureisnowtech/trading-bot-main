@@ -28,10 +28,11 @@ A fully autonomous AI-powered trading system that:
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
 
-## Current Version: v15.6 (2026-04-15)
+## Current Version: v15.7 (2026-04-15)
 
 **Active branch:** `feature/v10-rebuild`
 **Clean paper trading started:** 2026-04-02
+**Live trading started:** 2026-04-15
 
 ### Live Architecture (source of truth)
 

@@ -12,6 +12,11 @@ import sys, os, argparse, time, traceback, logging, threading
 from datetime import datetime
 import pytz
 
+# Ensure project root is on sys.path so runtime/ resolves cleanly
+_MAIN_ROOT = os.path.dirname(os.path.abspath(__file__))
+if _MAIN_ROOT not in sys.path:
+    sys.path.insert(0, _MAIN_ROOT)
+
 
 # Configure root logger to bot.log + console before anything imports
 def _setup_logging():
@@ -120,6 +125,47 @@ def main():
     init_db()
     print("   ✅ logs/trades.db ready\n")
 
+    # ── Runtime truth tables ──────────────────────────────────────────────────
+    from runtime.runtime_state import init_runtime_tables, upsert_system_state, upsert_lane_state
+    from runtime.incident_tracker import init_incident_table
+    from runtime.position_reconciler import run_reconciliation
+    from config import FUTURES_LANE_ACTIVE as _FLA
+
+    _db_path = os.path.join(_MAIN_ROOT, "logs", "trades.db")
+    init_runtime_tables(_db_path)
+    init_incident_table(_db_path)
+
+    _rt_mode = "live" if not PAPER_TRADING else "paper"
+    upsert_system_state(
+        db_path=_db_path,
+        process_mode=_rt_mode,
+        startup_ts=datetime.now(pytz.utc).isoformat(),
+        process_alive=1,
+        global_status="OK",
+        launch_readiness_state="NOT_READY",
+        active_lanes="[]",
+    )
+    # crypto lane — always active
+    upsert_lane_state("crypto", db_path=_db_path, enabled=1, active=1, configured=1,
+                      mode=_rt_mode, health="OK", readiness_state="OPERATIONAL")
+    # forecast lane
+    upsert_lane_state("forecast", db_path=_db_path,
+                      enabled=int(FORECAST_LANE_ACTIVE), active=int(FORECAST_LANE_ACTIVE),
+                      configured=1,
+                      mode=_rt_mode if FORECAST_LANE_ACTIVE else "disabled",
+                      health="UNKNOWN",
+                      readiness_state="LANE_NOT_STARTED" if not FORECAST_LANE_ACTIVE else "BROKER_DISCONNECTED")
+    # mes archived lane
+    upsert_lane_state("mes_archived", db_path=_db_path,
+                      enabled=int(_FLA), active=0, configured=int(_FLA),
+                      mode="archived",
+                      health="OK", readiness_state="DORMANT",
+                      blocked_reason="" if _FLA else "FUTURES_LANE_ACTIVE=false")
+
+    # Run position reconciliation
+    run_reconciliation(_db_path)
+    print("   ✅ Runtime state tables ready\n")
+
     from memory.trade_memory import get_memory_stats
 
     mem = get_memory_stats()
@@ -129,7 +175,7 @@ def main():
 
     log_event(
         "INFO", "main",
-        f"Bot started — {'paper' if PAPER_TRADING else 'live'} mode | v15.1"
+        f"Bot started — {'paper' if PAPER_TRADING else 'live'} mode v15.2"
     )
 
     # ── Forecast lane (optional daemon thread) ────────────────────────────────
@@ -164,6 +210,8 @@ def main():
 
         _ft = threading.Thread(target=_forecast_daemon, daemon=True, name="ForecastLane")
         _ft.start()
+        upsert_lane_state("forecast", db_path=_db_path, active=1, readiness_state="BROKER_DISCONNECTED")
+        log_event("INFO", "ForecastRunner", "Forecast lane started (FORECAST_LANE_ACTIVE=true)")
         print("   ForecastEx lane started (FORECAST_LANE_ACTIVE=true)")
 
     print("=" * 60)

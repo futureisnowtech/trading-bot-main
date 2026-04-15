@@ -310,6 +310,13 @@ def run_health_check(force: bool = False) -> dict:
 
     _last_run = time.time()
 
+    # Keep incident tracker current before running checks
+    try:
+        from runtime.incident_tracker import ingest_system_events
+        ingest_system_events()
+    except Exception:
+        pass
+
     checks = {
         "ml_gate": _check_ml_gate(),
         "stagnant": _check_stagnant_positions(),
@@ -362,6 +369,14 @@ def run_health_check(force: bool = False) -> dict:
 
     if status != "HEALTHY":
         print(f"[health_check] {summary}")
+
+    # Update runtime truth tables with fresh heartbeat
+    try:
+        from runtime.runtime_state import write_system_heartbeat, upsert_lane_state
+        write_system_heartbeat()
+        upsert_lane_state("crypto", last_heartbeat_at=datetime.now(tz=timezone.utc).isoformat())
+    except Exception:
+        pass
 
     return {
         "score": passed,

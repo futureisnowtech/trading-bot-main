@@ -581,7 +581,111 @@ except Exception as _e:
     _fx("Live test trades", "BLOCKED", f"Check error: {_e}")
 
 # ─────────────────────────────────────────────────────────────
-# 5. VERSION CONSISTENCY
+# 5. RUNTIME STATE
+# ─────────────────────────────────────────────────────────────
+print("\n─── Runtime State ──────────────────────────────────────")
+
+try:
+    import sqlite3 as _sq3_rt
+    import config as _cfg_rt
+
+    _rt_db = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs", "trades.db"
+    )
+
+    if not os.path.exists(_rt_db):
+        warn("trades.db not found — runtime state tables not yet initialized")
+    else:
+        _rc = _sq3_rt.connect(_rt_db)
+        _rc.row_factory = _sq3_rt.Row
+
+        # Check system_runtime_state table
+        _tables = {
+            r[0] for r in _rc.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+
+        if "system_runtime_state" not in _tables:
+            warn("system_runtime_state table missing — bot not yet started")
+        else:
+            _sys_row = _rc.execute(
+                "SELECT * FROM system_runtime_state WHERE id=1"
+            ).fetchone()
+            if _sys_row:
+                ok(f"system_runtime_state: mode={_sys_row['process_mode']}, status={_sys_row['global_status']}, alive={_sys_row['process_alive']}")
+            else:
+                warn("system_runtime_state exists but has no row — bot not yet started")
+
+        # Check lane_runtime_state table
+        if "lane_runtime_state" not in _tables:
+            warn("lane_runtime_state table missing — bot not yet started")
+        else:
+            _expected_lanes = ("crypto", "forecast", "mes_archived")
+            _lane_rows = {
+                r["lane_id"]: r for r in _rc.execute(
+                    "SELECT * FROM lane_runtime_state"
+                ).fetchall()
+            }
+            _missing_lanes = [l for l in _expected_lanes if l not in _lane_rows]
+            if _missing_lanes:
+                warn(f"lane_runtime_state missing rows for: {', '.join(_missing_lanes)} — bot not yet started")
+            else:
+                ok(f"lane_runtime_state: {len(_lane_rows)} lane(s) registered")
+                for _lid in _expected_lanes:
+                    _lr = _lane_rows.get(_lid)
+                    if _lr is None:
+                        warn(f"  Lane {_lid}: NOT FOUND")
+                        continue
+                    _enabled = bool(_lr["enabled"])
+                    _active = bool(_lr["active"])
+                    _health = _lr["health"] or "UNKNOWN"
+                    _rs = _lr["readiness_state"] or "UNKNOWN"
+                    _status_str = f"enabled={_enabled}, active={_active}, health={_health}, readiness={_rs}"
+
+                    if _lid == "mes_archived":
+                        _mes_flag = getattr(_cfg_rt, "FUTURES_LANE_ACTIVE", False)
+                        if not _mes_flag and _active:
+                            fail(f"  Lane {_lid}: FUTURES_LANE_ACTIVE=false but lane is active ({_status_str})")
+                        else:
+                            ok(f"  Lane {_lid} [DORMANT]: {_status_str}")
+                    elif _lid == "forecast":
+                        _fc_flag = getattr(_cfg_rt, "FORECAST_LANE_ACTIVE", False)
+                        if _fc_flag and not _active:
+                            warn(f"  Lane {_lid} [ACTION_NEEDED]: FORECAST_LANE_ACTIVE=true but not active ({_status_str})")
+                        elif not _fc_flag:
+                            ok(f"  Lane {_lid} [DISABLED]: {_status_str}")
+                        else:
+                            ok(f"  Lane {_lid} [ACTIVE]: {_status_str}")
+                    else:
+                        _icon = ok if _active else warn
+                        _icon(f"  Lane {_lid}: {_status_str}")
+
+        # Check incidents table
+        if "incidents" not in _tables:
+            warn("incidents table missing — bot not yet started or incident_tracker not initialized")
+        else:
+            _n_open = _rc.execute(
+                "SELECT COUNT(*) FROM incidents WHERE state='open'"
+            ).fetchone()[0]
+            _n_critical = _rc.execute(
+                "SELECT COUNT(*) FROM incidents WHERE state='open' AND severity='CRITICAL'"
+            ).fetchone()[0]
+            if _n_critical > 0:
+                fail(f"incidents: {_n_open} open ({_n_critical} CRITICAL) — review required")
+            elif _n_open > 5:
+                warn(f"incidents: {_n_open} open — review recommended")
+            else:
+                ok(f"incidents: {_n_open} open incident(s)")
+
+        _rc.close()
+
+except Exception as _e_rt:
+    warn(f"Runtime state check failed: {_e_rt}")
+
+
+# ─────────────────────────────────────────────────────────────
+# 6. VERSION CONSISTENCY
 # ─────────────────────────────────────────────────────────────
 print("\n─── Version ────────────────────────────────────────────")
 

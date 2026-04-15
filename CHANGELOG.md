@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-15
+- feat(runtime): v15.2 runtime truth layer, lane registry, incident model, allocator scaffold
+
+## 2026-04-15
 - v15.1: lane gating hardened (FUTURES_LANE_ACTIVE/FORECAST_LANE_ACTIVE), forecast readiness state machine, discovery stubs, Mission Control dedup+noise filter, activity feed DB-first truth, dead-money partial-close exempt, IBKR_PORT in config, 205 proof tests
 
 ## 2026-04-15

@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-14
+- chore: import claude/ skills dir from Desktop session + update .version to v14+playbook
+
+## 2026-04-14
 - feat(playbook): Forever Playbook v1 — market-type router, symbol governance, funding doctrine, audit scripts, proof suite
 
 ## 2026-04-14

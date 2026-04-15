@@ -26,11 +26,11 @@
     <key>ProgramArguments</key>
     <array>
         <string>/Library/Frameworks/Python.framework/Versions/3.14/bin/python3</string>
-        <string>/Users/joshmacbookair2020/Desktop/algo_trading_final/scripts/generate_daily_summary.py</string>
+        <string>/Users/joshmacbookair2020/Projects/algo_trading_final/scripts/generate_daily_summary.py</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/Users/joshmacbookair2020/Desktop/algo_trading_final</string>
+    <string>/Users/joshmacbookair2020/Projects/algo_trading_final</string>
 
     <!-- Run at 9:47 PM every day -->
     <key>StartCalendarInterval</key>
@@ -43,9 +43,9 @@
 
     <!-- Capture logs -->
     <key>StandardOutPath</key>
-    <string>/Users/joshmacbookair2020/Desktop/algo_trading_final/logs/service/brain.log</string>
+    <string>/Users/joshmacbookair2020/Projects/algo_trading_final/logs/service/brain.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/joshmacbookair2020/Desktop/algo_trading_final/logs/service/brain_error.log</string>
+    <string>/Users/joshmacbookair2020/Projects/algo_trading_final/logs/service/brain_error.log</string>
 
     <!-- Environment -->
     <key>EnvironmentVariables</key>

@@ -18,11 +18,11 @@
     <key>ProgramArguments</key>
     <array>
         <string>/Library/Frameworks/Python.framework/Versions/3.14/bin/python3</string>
-        <string>/Users/joshmacbookair2020/Desktop/algo_trading_final/scripts/check_readiness.py</string>
+        <string>/Users/joshmacbookair2020/Projects/algo_trading_final/scripts/check_readiness.py</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/Users/joshmacbookair2020/Desktop/algo_trading_final</string>
+    <string>/Users/joshmacbookair2020/Projects/algo_trading_final</string>
 
     <!-- Run daily at 7:00 AM -->
     <key>StartCalendarInterval</key>
@@ -34,8 +34,8 @@
     </dict>
 
     <key>StandardOutPath</key>
-    <string>/Users/joshmacbookair2020/Desktop/algo_trading_final/logs/service/readiness.log</string>
+    <string>/Users/joshmacbookair2020/Projects/algo_trading_final/logs/service/readiness.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/joshmacbookair2020/Desktop/algo_trading_final/logs/service/readiness_error.log</string>
+    <string>/Users/joshmacbookair2020/Projects/algo_trading_final/logs/service/readiness_error.log</string>
 </dict>
 </plist>

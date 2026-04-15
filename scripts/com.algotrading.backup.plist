@@ -19,8 +19,8 @@
         <string>/bin/bash</string>
         <string>-c</string>
         <string>
-            /Users/joshmacbookair2020/Desktop/algo_trading_final/scripts/backup_db.sh &amp;&amp;
-            /Users/joshmacbookair2020/Desktop/algo_trading_final/scripts/backup_credentials.sh
+            /Users/joshmacbookair2020/Projects/algo_trading_final/scripts/backup_db.sh &amp;&amp;
+            /Users/joshmacbookair2020/Projects/algo_trading_final/scripts/backup_credentials.sh
         </string>
     </array>
 
@@ -34,8 +34,8 @@
     </dict>
 
     <key>StandardOutPath</key>
-    <string>/Users/joshmacbookair2020/Desktop/algo_trading_final/logs/service/backup.log</string>
+    <string>/Users/joshmacbookair2020/Projects/algo_trading_final/logs/service/backup.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/joshmacbookair2020/Desktop/algo_trading_final/logs/service/backup_error.log</string>
+    <string>/Users/joshmacbookair2020/Projects/algo_trading_final/logs/service/backup_error.log</string>
 </dict>
 </plist>

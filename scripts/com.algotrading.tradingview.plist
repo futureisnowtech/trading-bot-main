@@ -31,11 +31,11 @@
     <array>
         <string>/Library/Frameworks/Python.framework/Versions/3.14/bin/python3</string>
         <string>-B</string>
-        <string>/Users/joshmacbookair2020/Desktop/algo_trading_final/scripts/tradingview_webhook.py</string>
+        <string>/Users/joshmacbookair2020/Projects/algo_trading_final/scripts/tradingview_webhook.py</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/Users/joshmacbookair2020/Desktop/algo_trading_final</string>
+    <string>/Users/joshmacbookair2020/Projects/algo_trading_final</string>
 
     <key>KeepAlive</key>
     <true/>
@@ -47,9 +47,9 @@
     <integer>10</integer>
 
     <key>StandardOutPath</key>
-    <string>/Users/joshmacbookair2020/Desktop/algo_trading_final/logs/service/tradingview.log</string>
+    <string>/Users/joshmacbookair2020/Projects/algo_trading_final/logs/service/tradingview.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/joshmacbookair2020/Desktop/algo_trading_final/logs/service/tradingview_error.log</string>
+    <string>/Users/joshmacbookair2020/Projects/algo_trading_final/logs/service/tradingview_error.log</string>
 
     <key>EnvironmentVariables</key>
     <dict>

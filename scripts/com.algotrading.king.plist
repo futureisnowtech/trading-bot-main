@@ -29,11 +29,11 @@
     <array>
         <string>/Library/Frameworks/Python.framework/Versions/3.14/bin/python3</string>
         <string>-B</string>
-        <string>/Users/joshmacbookair2020/Desktop/algo_trading_final/scripts/boot.py</string>
+        <string>/Users/joshmacbookair2020/Projects/algo_trading_final/scripts/boot.py</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/Users/joshmacbookair2020/Desktop/algo_trading_final</string>
+    <string>/Users/joshmacbookair2020/Projects/algo_trading_final</string>
 
     <!-- Restart if it crashes -->
     <key>KeepAlive</key>
@@ -49,9 +49,9 @@
 
     <!-- Capture logs -->
     <key>StandardOutPath</key>
-    <string>/Users/joshmacbookair2020/Desktop/algo_trading_final/logs/service/bot.log</string>
+    <string>/Users/joshmacbookair2020/Projects/algo_trading_final/logs/service/bot.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/joshmacbookair2020/Desktop/algo_trading_final/logs/service/bot_error.log</string>
+    <string>/Users/joshmacbookair2020/Projects/algo_trading_final/logs/service/bot_error.log</string>
 
     <!-- Environment variables -->
     <key>EnvironmentVariables</key>

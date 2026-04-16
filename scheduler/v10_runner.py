@@ -149,6 +149,8 @@ def _journal_scan_candidate(
         setups = candidate.get("scan_setups", [])
         setups_json = json.dumps(setups) if isinstance(setups, list) else str(setups)
         primary = candidate.get("primary_setup", "") or ""
+        theor_pos = candidate.get("scanner_theoretical_position_usd")
+        eff_pos = candidate.get("scanner_effective_position_usd")
 
         log_scan_candidate(
             scan_id=scan_id,
@@ -183,6 +185,8 @@ def _journal_scan_candidate(
             decision=decision,
             paper=_paper,
             source="clean_paper_v10" if _paper else "live_v10",
+            scanner_theoretical_position_usd=theor_pos,
+            scanner_effective_position_usd=eff_pos,
         )
     except Exception as _je:
         logger.debug(
@@ -534,15 +538,17 @@ def _scan_and_trade_inner():
 
     _scan_id = _uuid.uuid4().hex[:16]
 
-    # Funnel counters — reset each scan cycle
-    _funnel = {
-        "total": len(candidates),
-        "dual_exposure": 0,
-        "cooldown": 0,
-        "scored": 0,  # reached _attempt_entry (signal engine ran)
-        "econ_veto": 0,  # vetoed by economics gate (populated via _attempt_entry return)
-        "entries": 0,
-    }
+    # Exact funnel counters — reset each scan cycle
+    _f_dual_exposure = 0
+    _f_cooldown = 0
+    _f_risk_block = 0
+    _f_data_unavailable = 0
+    _f_below_threshold = 0
+    _f_econ_veto = 0
+    _f_research_only_block = 0
+    _f_sizing_zero = 0
+    _f_execution_failed = 0
+    _f_entered = 0
 
     for candidate in candidates:
         symbol = candidate.get("symbol", "")
@@ -561,7 +567,7 @@ def _scan_and_trade_inner():
         # In-memory check (exact symbol)
         if perps is not None and perps.get_open_positions().get(symbol):
             logger.debug(f"[v10] {symbol} — already in memory, skip")
-            _funnel["dual_exposure"] += 1
+            _f_dual_exposure += 1
             _journal_scan_candidate(
                 _scan_id,
                 candidate,
@@ -585,7 +591,7 @@ def _scan_and_trade_inner():
             _open_symbols_db = {r[0] for r in _open_rows}
             if symbol in _open_symbols_db:
                 logger.debug(f"[v10] {symbol} — exact match in SQLite, skip")
-                _funnel["dual_exposure"] += 1
+                _f_dual_exposure += 1
                 _journal_scan_candidate(
                     _scan_id,
                     candidate,
@@ -603,7 +609,7 @@ def _scan_and_trade_inner():
                     f"[v10] {symbol} — dual-exposure block: "
                     f"underlying={_underlying} already open as {_conflict}"
                 )
-                _funnel["dual_exposure"] += 1
+                _f_dual_exposure += 1
                 _journal_scan_candidate(
                     _scan_id,
                     candidate,
@@ -629,7 +635,7 @@ def _scan_and_trade_inner():
                 logger.debug(
                     f"[v10] {symbol} — cooldown {_elapsed / 60:.0f}m/{_cooldown / 60:.0f}m, skip"
                 )
-                _funnel["cooldown"] += 1
+                _f_cooldown += 1
                 _journal_scan_candidate(
                     _scan_id,
                     candidate,
@@ -643,6 +649,7 @@ def _scan_and_trade_inner():
             can_trade, reason = re.can_open_new_position()
             if not can_trade:
                 logger.info(f"[v10] entry blocked by risk: {reason}")
+                _f_risk_block += 1
                 _journal_scan_candidate(
                     _scan_id,
                     candidate,
@@ -651,12 +658,8 @@ def _scan_and_trade_inner():
                 )
                 break  # stop trying more candidates
 
-        _funnel["scored"] += 1
-        _pos_before = (
-            set(perps.get_open_positions().keys()) if perps is not None else set()
-        )
         try:
-            _attempt_entry(
+            _decision = _attempt_entry(
                 candidate=candidate,
                 symbol=symbol,
                 direction=direction,
@@ -677,25 +680,60 @@ def _scan_and_trade_inner():
                 f"[v10] entry attempt error {symbol}: {e}\n"
                 f"{traceback.format_exc()[:800]}"
             )
+            _f_execution_failed += 1
             continue
 
+        # Tally exact decision from _attempt_entry return value
+        if _decision == "data_unavailable":
+            _f_data_unavailable += 1
+        elif _decision == "below_threshold":
+            _f_below_threshold += 1
+        elif _decision == "econ_veto":
+            _f_econ_veto += 1
+        elif _decision == "research_only_block":
+            _f_research_only_block += 1
+        elif _decision == "sizing_zero":
+            _f_sizing_zero += 1
+        elif _decision == "execution_failed":
+            _f_execution_failed += 1
+        elif _decision == "entered":
+            _f_entered += 1
+
         # Update deployed after each successful entry
-        if perps is not None:
-            _pos_after = set(perps.get_open_positions().keys())
-            if symbol in _pos_after and symbol not in _pos_before:
-                _funnel["entries"] += 1
+        if _decision == "entered" and perps is not None:
             deployed_usd = _get_deployed_usd(perps.get_open_positions())
 
     # Per-scan funnel summary — always logged at INFO so the operator can see where
     # candidates are being filtered without trawling individual DEBUG/INFO lines.
-    _econ_veto_est = _funnel["scored"] - _funnel["entries"]  # approximate
     logger.info(
-        f"[v10] funnel: {_funnel['total']} candidates → "
-        f"scored={_funnel['scored']} "
-        f"(dropped: dual={_funnel['dual_exposure']} cooldown={_funnel['cooldown']}) → "
-        f"entries={_funnel['entries']} "
-        f"(~{_econ_veto_est} vetoed/skipped in signal engine or econ gate)"
+        f"[v10] funnel: {len(candidates)} candidates → "
+        f"dual={_f_dual_exposure} cooldown={_f_cooldown} risk={_f_risk_block} "
+        f"data_unavail={_f_data_unavailable} below_thresh={_f_below_threshold} "
+        f"econ_veto={_f_econ_veto} research_only={_f_research_only_block} "
+        f"sizing_zero={_f_sizing_zero} exec_fail={_f_execution_failed} "
+        f"entered={_f_entered}"
     )
+
+    # Persist exact funnel row to DB for audit scripts
+    try:
+        from logging_db.trade_logger import log_scan_funnel as _log_sf
+
+        _log_sf(
+            scan_id=_scan_id,
+            scanner_candidates_total=len(candidates),
+            dual_exposure_block=_f_dual_exposure,
+            cooldown_block=_f_cooldown,
+            risk_block=_f_risk_block,
+            data_unavailable=_f_data_unavailable,
+            below_threshold=_f_below_threshold,
+            econ_veto=_f_econ_veto,
+            research_only_block=_f_research_only_block,
+            sizing_zero=_f_sizing_zero,
+            execution_failed=_f_execution_failed,
+            entered=_f_entered,
+        )
+    except Exception as _sf_err:
+        logger.debug(f"[v10] log_scan_funnel error: {_sf_err}")
 
     # Write scan heartbeat — read by health_check._check_scan_liveness()
     try:
@@ -704,7 +742,7 @@ def _scan_and_trade_inner():
         _log_hb(
             "INFO",
             "heartbeat",
-            f"scan ok: {_funnel['total']} candidates → {_funnel['entries']} entries",
+            f"scan ok: {len(candidates)} candidates → {_f_entered} entries",
         )
     except Exception:
         pass
@@ -737,7 +775,7 @@ def _attempt_entry(
             "data_unavailable",
             entry_block_reason="get_candles or build_features is None",
         )
-        return
+        return "data_unavailable"
 
     # Fetch 1h candles for feature building
     df = get_candles(symbol, "1h", 200)
@@ -751,11 +789,11 @@ def _attempt_entry(
             "data_unavailable",
             entry_block_reason=f"insufficient candles ({len(df) if df is not None else 0} bars)",
         )
-        return
+        return "data_unavailable"
 
     current_price = float(df["close"].iloc[-1])
     if current_price <= 0:
-        return
+        return "data_unavailable"
 
     # ── Price sanity: candle close must be within 5% of live mark price ───────
     # v13.2: tightened from 20% → 5% global fallback (20% missed ETH $19 vs $2130 case).
@@ -792,7 +830,7 @@ def _attempt_entry(
                     f"[v10] {symbol} — price sanity FAIL: candle ${current_price:.8g} "
                     f"vs live ${_live:.8g} ({_pct_off:.1%} off) — SKIP (wrong data source)"
                 )
-                return
+                return "data_unavailable"
             current_price = _live  # Use live mark price for execution accuracy
     except Exception as _pe:
         logger.debug(f"[v10] {symbol} price sanity check error: {_pe}")
@@ -899,7 +937,7 @@ def _attempt_entry(
 
     # ── Step 3: Score (used for sizing, not gating) ──────────────────────────
     if se is None:
-        return
+        return "data_unavailable"
 
     result = se.score(features, direction, regime, model_store=_get_model_store())
     composite = result["composite_score"]
@@ -965,7 +1003,7 @@ def _attempt_entry(
                 should_enter_signal=0,
                 entry_block_reason=f"tier1 composite {composite:.1f} < floor {_TIER1_COMPOSITE_FLOOR}",
             )
-            return
+            return "below_threshold"
         tier = 1
         size_mult = 1.0  # full position size
         logger.info(
@@ -1005,7 +1043,7 @@ def _attempt_entry(
             should_enter_signal=0,
             entry_block_reason=f"composite {composite:.1f} < 58 (no setup, no tier2 score)",
         )
-        return
+        return "below_threshold"
 
     # ── Step 5: Economics gate (runs after setup quality known) ─────────────
     try:
@@ -1013,15 +1051,38 @@ def _attempt_entry(
 
         atr_pct = atr_7 / current_price if current_price > 0 else 0.015
         # Win-rate estimate for EV gate.
-        # Based on clean data: overall system WR is 53%; scores >= 58 show 64% WR.
-        # Tier 1: use 0.54 (slightly above baseline; setup specificity adds edge).
-        # Tier 2: score = 58 → 0.54 WR; score = 65 → 0.58 WR (linear, clamped).
-        # Do NOT pass optimistic estimates — gate must veto genuinely marginal trades.
-        _wr_est = (
-            0.54
-            if tier == 1
-            else float(max(0.50, min(0.60, 0.50 + (composite - 58) / 50)))
-        )
+        # Use Bayesian local priors from entered-candidate outcomes instead of hardcoded estimates.
+        # Falls back to smoothed 0.52 prior when insufficient data.
+        try:
+            from learning.entry_priors import estimate_candidate_win_rate as _est_wr
+
+            _setup_name = (
+                primary_setup["name"]
+                if primary_setup and "name" in primary_setup
+                else (
+                    primary_setup["label"]
+                    if primary_setup and "label" in primary_setup
+                    else ""
+                )
+            )
+            _prior = _est_wr(
+                exchange=str(candidate.get("exchange", "")),
+                primary_setup=_setup_name,
+                regime=regime,
+                direction=direction,
+            )
+            _wr_est = float(_prior["win_rate_estimate"])
+            logger.debug(
+                f"[v10] {symbol} WR prior: {_wr_est:.3f} "
+                f"(bucket={_prior['bucket_used']} n={_prior['sample_n']})"
+            )
+        except Exception as _wr_err:
+            logger.debug(f"[v10] WR prior fallback: {_wr_err}")
+            _wr_est = (
+                0.54
+                if tier == 1
+                else float(max(0.50, min(0.60, 0.50 + (composite - 58) / 50)))
+            )
         econ = economics_check(
             symbol=symbol,
             direction=direction,
@@ -1101,7 +1162,7 @@ def _attempt_entry(
                 edge_score=float(econ.get("edge_score", 0.0)),
                 entry_block_reason=f"economics: {reason}",
             )
-            return
+            return "econ_veto"
     except ImportError:
         pass
     except Exception as e:
@@ -1134,7 +1195,7 @@ def _attempt_entry(
                 econ_approved=1,
                 entry_block_reason=f"non_core_execution_universe:{underlying}",
             )
-            return
+            return "research_only_block"
     except Exception as _eu_err:
         logger.debug(f"[v10] execution universe check error {symbol}: {_eu_err}")
 
@@ -1149,7 +1210,7 @@ def _attempt_entry(
     # Compute position size
     if pm is None:
         logger.warning(f"[v10] {symbol} — position_manager is None, skip")
-        return
+        return "data_unavailable"
 
     regime_mult = _REGIME_SIZE_MULT.get(regime, 0.90)
     ml_score = result.get("ml_score", 50.0)
@@ -1215,7 +1276,7 @@ def _attempt_entry(
             leverage=sizing.get("leverage", 3),
             entry_block_reason=f"size ${size_usd:.2f} < $10 minimum",
         )
-        return
+        return "sizing_zero"
 
     leverage = sizing.get("leverage", 3)
     stop_distance = sizing.get("stop_distance", atr_7 * 1.5)
@@ -1229,7 +1290,7 @@ def _attempt_entry(
 
     # Execute entry
     if perps is None:
-        return
+        return "data_unavailable"
 
     entry_setup_name = primary_setup["name"] if primary_setup else ""
 
@@ -1264,7 +1325,24 @@ def _attempt_entry(
 
     if pos is None:
         logger.warning(f"[v10] {symbol} entry returned None — execution failed")
-        return
+        _journal_scan_candidate(
+            scan_id,
+            candidate,
+            "execution_failed",
+            regime=regime,
+            technical_score=_tech_score,
+            ml_score=_ml_score,
+            composite_score=composite,
+            entry_threshold=58.0,
+            should_enter_signal=1,
+            econ_approved=1,
+            econ_tier=str(candidate.get("quality_tier", "B")),
+            edge_score=float(candidate.get("edge_score", 0.5)),
+            size_usd=size_usd,
+            leverage=leverage,
+            entry_block_reason="open_long/short returned None",
+        )
+        return "execution_failed"
 
     setup_tag = f" setup={entry_setup_name}" if entry_setup_name else " tier2:score"
     logger.info(
@@ -1327,6 +1405,8 @@ def _attempt_entry(
             )
         except Exception as e:
             logger.debug(f"[v10] trade_open notify error: {e}")
+
+    return "entered"
 
 
 # ── exit_monitor ──────────────────────────────────────────────────────────────

@@ -953,7 +953,8 @@ def _step4_expected_value(
                 continue
 
             dollar_risk = account_balance * risk_pct
-            position_usd = dollar_risk / stop_pct
+            theoretical_position_usd = dollar_risk / stop_pct
+            effective_position_usd = min(theoretical_position_usd, 100.0)
             fee_pct = _ROUND_TRIP_FEE_PCT
 
             # funding_rate is annualized decimal → per-8h
@@ -963,7 +964,13 @@ def _step4_expected_value(
 
             net_win = target_pct - fee_pct - max(0.0, fund_cost)
             net_loss = stop_pct + fee_pct
-            ev = (0.52 * net_win * position_usd) - (0.48 * net_loss * position_usd)
+            ev = (0.52 * net_win * effective_position_usd) - (
+                0.48 * net_loss * effective_position_usd
+            )
+
+            # Always write position diagnostics to candidate (even if rejected by EV floor)
+            c["scanner_theoretical_position_usd"] = round(theoretical_position_usd, 2)
+            c["scanner_effective_position_usd"] = round(effective_position_usd, 2)
 
             if ev >= _MIN_EXPECTED_PROFIT:
                 c.update(

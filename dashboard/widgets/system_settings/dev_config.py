@@ -255,6 +255,14 @@ def render_dev_config():
             c5.metric("Conversion 24h", f"{jh.get('conversion_pct', 0):.1f}%")
             c6.metric("Label quality (7d)", f"{jh.get('outcome_quality_pct', 0):.0f}%")
             c7.metric("Last audit", jh.get("last_audit_overall", "unknown").upper())
+            c8, c9, c10 = st.columns(3)
+            c8.metric("Research-only blocks 24h", jh.get("research_only_blocks_24h", 0))
+            c9.metric("Research-only blocks 7d", jh.get("research_only_blocks_7d", 0))
+            c10.metric("Core universe only", "BTC/ETH/SOL/XRP +6")
+            st.caption(
+                "Scanner stays broad — only core-10 underlyings reach live execution. "
+                "Non-core are journaled for learning."
+            )
             funnel = jh.get("funnel", {})
             if funnel:
                 import pandas as pd

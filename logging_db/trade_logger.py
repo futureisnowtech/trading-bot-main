@@ -86,6 +86,9 @@ def init_db() -> None:
         "ALTER TABLE candidate_outcomes ADD COLUMN ret_15m_pct REAL DEFAULT 0",
         # v13.7: funding rate at scan time for gate-quality analytics
         "ALTER TABLE scan_candidates ADD COLUMN funding_rate REAL DEFAULT 0",
+        # v16: scanner EV calibration — theoretical vs capped effective position
+        "ALTER TABLE scan_candidates ADD COLUMN scanner_theoretical_position_usd REAL",
+        "ALTER TABLE scan_candidates ADD COLUMN scanner_effective_position_usd REAL",
     ]:
         try:
             cur.execute(migration)
@@ -187,7 +190,9 @@ def init_db() -> None:
         decision TEXT,
         paper INTEGER,
         source TEXT,
-        labeled INTEGER DEFAULT 0
+        labeled INTEGER DEFAULT 0,
+        scanner_theoretical_position_usd REAL,
+        scanner_effective_position_usd REAL
     )""")
 
     # v13.6: Forward-outcome labels for each journaled candidate.
@@ -214,6 +219,10 @@ def init_db() -> None:
         labeled_at TEXT,
         price_15m REAL DEFAULT 0,
         ret_15m_pct REAL DEFAULT 0,
+        time_to_05r_min REAL,
+        time_to_1r_min REAL,
+        time_to_2r_min REAL,
+        peak_r_4h REAL,
         FOREIGN KEY (candidate_id) REFERENCES scan_candidates(id)
     )""")
 
@@ -264,6 +273,27 @@ def init_db() -> None:
         UNIQUE(close_order_id)
     )""")
 
+    # v16.0: Scan funnels — exact per-scan-cycle funnel counters.
+    cur.execute("""CREATE TABLE IF NOT EXISTS scan_funnels (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        scan_id TEXT,
+        ts TEXT NOT NULL,
+        scanner_candidates_total INTEGER DEFAULT 0,
+        dual_exposure_block INTEGER DEFAULT 0,
+        cooldown_block INTEGER DEFAULT 0,
+        risk_block INTEGER DEFAULT 0,
+        data_unavailable INTEGER DEFAULT 0,
+        below_threshold INTEGER DEFAULT 0,
+        econ_veto INTEGER DEFAULT 0,
+        research_only_block INTEGER DEFAULT 0,
+        sizing_zero INTEGER DEFAULT 0,
+        execution_failed INTEGER DEFAULT 0,
+        entered INTEGER DEFAULT 0,
+        scored_total INTEGER DEFAULT 0,
+        econ_passed_total INTEGER DEFAULT 0,
+        final_entryable_total INTEGER DEFAULT 0
+    )""")
+
     # v14.0: Challenger state — promotion/demotion tracking for backtested strategies.
     cur.execute("""CREATE TABLE IF NOT EXISTS challenger_state (
         id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -303,6 +333,18 @@ def init_db() -> None:
     ]:
         try:
             cur.execute(migration)
+        except Exception:
+            pass
+
+    # v16.0: candidate_outcomes — path timing columns.
+    for _migration in [
+        "ALTER TABLE candidate_outcomes ADD COLUMN time_to_05r_min REAL",
+        "ALTER TABLE candidate_outcomes ADD COLUMN time_to_1r_min REAL",
+        "ALTER TABLE candidate_outcomes ADD COLUMN time_to_2r_min REAL",
+        "ALTER TABLE candidate_outcomes ADD COLUMN peak_r_4h REAL",
+    ]:
+        try:
+            cur.execute(_migration)
         except Exception:
             pass
 
@@ -622,6 +664,8 @@ def log_scan_candidate(
     decision: str,
     paper: bool,
     source: str,
+    scanner_theoretical_position_usd: float | None = None,
+    scanner_effective_position_usd: float | None = None,
 ) -> int:
     """
     Persist one candidate decision to scan_candidates.
@@ -642,8 +686,9 @@ def log_scan_candidate(
                 regime, technical_score, ml_score, composite_score,
                 entry_threshold, should_enter_signal, econ_approved,
                 econ_tier, econ_reject_reason, edge_score, size_usd,
-                leverage, entry_block_reason, decision, paper, source, labeled
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                leverage, entry_block_reason, decision, paper, source, labeled,
+                scanner_theoretical_position_usd, scanner_effective_position_usd
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 scan_id,
                 _ts(),
@@ -679,6 +724,8 @@ def log_scan_candidate(
                 int(paper),
                 source,
                 0,
+                scanner_theoretical_position_usd,
+                scanner_effective_position_usd,
             ),
         )
         row_id = cur.lastrowid or 0
@@ -686,6 +733,72 @@ def log_scan_candidate(
         conn.close()
         return row_id
     except Exception:
+        return 0
+
+
+def log_scan_funnel(
+    scan_id: str,
+    scanner_candidates_total: int = 0,
+    dual_exposure_block: int = 0,
+    cooldown_block: int = 0,
+    risk_block: int = 0,
+    data_unavailable: int = 0,
+    below_threshold: int = 0,
+    econ_veto: int = 0,
+    research_only_block: int = 0,
+    sizing_zero: int = 0,
+    execution_failed: int = 0,
+    entered: int = 0,
+) -> int:
+    """Persist one exact scan funnel row for the given scan_id. Returns row id or 0 on error."""
+    scored_total = (
+        below_threshold
+        + econ_veto
+        + research_only_block
+        + sizing_zero
+        + execution_failed
+        + entered
+    )
+    econ_passed_total = research_only_block + sizing_zero + execution_failed + entered
+    final_entryable_total = sizing_zero + execution_failed + entered
+
+    ts = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
+    try:
+        conn = _conn()
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT INTO scan_funnels (
+                scan_id, ts, scanner_candidates_total,
+                dual_exposure_block, cooldown_block, risk_block,
+                data_unavailable, below_threshold, econ_veto,
+                research_only_block, sizing_zero, execution_failed, entered,
+                scored_total, econ_passed_total, final_entryable_total
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                scan_id,
+                ts,
+                scanner_candidates_total,
+                dual_exposure_block,
+                cooldown_block,
+                risk_block,
+                data_unavailable,
+                below_threshold,
+                econ_veto,
+                research_only_block,
+                sizing_zero,
+                execution_failed,
+                entered,
+                scored_total,
+                econ_passed_total,
+                final_entryable_total,
+            ),
+        )
+        conn.commit()
+        row_id = cur.lastrowid or 0
+        conn.close()
+        return row_id
+    except Exception as e:
+        logger.debug(f"[trade_logger] log_scan_funnel error: {e}")
         return 0
 
 
@@ -734,6 +847,10 @@ def log_candidate_outcome(
     worst_drawdown_pct: float,
     price_15m: float = 0.0,
     ret_15m_pct: float = 0.0,
+    time_to_05r_min: float | None = None,
+    time_to_1r_min: float | None = None,
+    time_to_2r_min: float | None = None,
+    peak_r_4h: float | None = None,
 ) -> None:
     """Insert a candidate outcome row and mark the candidate as labeled=1."""
     try:
@@ -745,8 +862,9 @@ def log_candidate_outcome(
                 price_1h, price_4h, ret_1h_pct, ret_4h_pct,
                 mfe_4h_pct, mae_4h_pct, hit_1r, hit_2r, hit_stop,
                 best_exit_pct, worst_drawdown_pct, labeled_at,
-                price_15m, ret_15m_pct
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                price_15m, ret_15m_pct,
+                time_to_05r_min, time_to_1r_min, time_to_2r_min, peak_r_4h
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 candidate_id,
                 label_status,
@@ -765,6 +883,10 @@ def log_candidate_outcome(
                 _ts(),
                 price_15m,
                 ret_15m_pct,
+                time_to_05r_min,
+                time_to_1r_min,
+                time_to_2r_min,
+                peak_r_4h,
             ),
         )
         cur.execute("UPDATE scan_candidates SET labeled=1 WHERE id=?", (candidate_id,))

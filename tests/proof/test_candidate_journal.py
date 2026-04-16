@@ -664,3 +664,171 @@ def test_nightly_audit_includes_funnel_and_retention_checks(proof_runtime, monke
     retention = checks["retention"]
     assert "scan_candidates_total" in retention
     assert "candidate_outcomes_total" in retention
+
+
+# ── 13–16. Path timing ────────────────────────────────────────────────────────
+
+
+def test_compute_path_timing_long_hits_thresholds():
+    """_compute_path_timing returns correct bar offsets for a LONG with clear upward move."""
+    import pandas as pd
+    from learning.candidate_labeler import _compute_path_timing
+
+    # Build a synthetic 20-bar 15m DataFrame where ref_idx ≈ bar 3 (len=20, ref=3)
+    # After ref bar (bars 4-19): price moves up 1%, 2%, 5%, 8%... to trigger R multiples
+    # stop_pct = 4.0 → 0.5R = 2%, 1R = 4%, 2R = 8%
+    ref_close = 100.0
+    stop_pct = 4.0  # 0.5R = 2%, 1R = 4%, 2R = 8%
+
+    # 20 bars; ref_idx = 20-17 = 3; forward bars start at idx 4
+    highs = [100.0] * 20
+    lows = [100.0] * 20
+    closes = [100.0] * 20
+
+    # bar 4 (offset=1): high = 102.5 → move_pct = 2.5% → hits 0.5R (2%) at 15 min
+    highs[4] = 102.5
+    # bar 5 (offset=2): high = 104.5 → hits 1R (4%) at 30 min
+    highs[5] = 104.5
+    # bar 7 (offset=4): high = 108.5 → hits 2R (8%) at 60 min
+    highs[7] = 108.5
+
+    df_15m = pd.DataFrame({"high": highs, "low": lows, "close": closes})
+
+    result = _compute_path_timing(df_15m, ref_close, "LONG", stop_pct)
+
+    assert result["time_to_05r_min"] == 15, (
+        f"expected 15, got {result['time_to_05r_min']}"
+    )
+    assert result["time_to_1r_min"] == 30, (
+        f"expected 30, got {result['time_to_1r_min']}"
+    )
+    assert result["time_to_2r_min"] == 60, (
+        f"expected 60, got {result['time_to_2r_min']}"
+    )
+
+
+def test_compute_path_timing_short_hits_thresholds():
+    """_compute_path_timing uses bar lows for SHORT direction."""
+    import pandas as pd
+    from learning.candidate_labeler import _compute_path_timing
+
+    ref_close = 200.0
+    stop_pct = 2.0  # 0.5R = 1%, 1R = 2%, 2R = 4%
+
+    highs = [200.0] * 20
+    lows = [200.0] * 20
+    closes = [200.0] * 20
+
+    # ref_idx = 20 - 17 = 3; forward starts at idx 4
+    # bar 4 (offset=1): low = 197.8 → move_pct = (200-197.8)/200 = 1.1% → hits 0.5R (1%)
+    lows[4] = 197.8
+    # bar 6 (offset=3): low = 195.9 → move_pct = 2.05% → hits 1R (2%)
+    lows[6] = 195.9
+    # bar 9 (offset=6): low = 191.5 → move_pct = 4.25% → hits 2R (4%)
+    lows[9] = 191.5
+
+    df_15m = pd.DataFrame({"high": highs, "low": lows, "close": closes})
+
+    result = _compute_path_timing(df_15m, ref_close, "SHORT", stop_pct)
+
+    assert result["time_to_05r_min"] == 15, (
+        f"expected 15, got {result['time_to_05r_min']}"
+    )
+    assert result["time_to_1r_min"] == 45, (
+        f"expected 45, got {result['time_to_1r_min']}"
+    )
+    assert result["time_to_2r_min"] == 90, (
+        f"expected 90, got {result['time_to_2r_min']}"
+    )
+
+
+def test_compute_path_timing_none_when_threshold_not_reached():
+    """Returns None for thresholds the price never reaches."""
+    import pandas as pd
+    from learning.candidate_labeler import _compute_path_timing
+
+    ref_close = 100.0
+    stop_pct = 5.0  # 0.5R = 2.5%, 1R = 5%, 2R = 10%
+
+    # All bars move up only 1% — not enough to hit any R threshold
+    highs = [101.0] * 20
+    lows = [99.0] * 20
+    closes = [100.0] * 20
+
+    df_15m = pd.DataFrame({"high": highs, "low": lows, "close": closes})
+
+    result = _compute_path_timing(df_15m, ref_close, "LONG", stop_pct)
+
+    assert result["time_to_05r_min"] is None
+    assert result["time_to_1r_min"] is None
+    assert result["time_to_2r_min"] is None
+
+
+def test_peak_r_4h_in_outcome_and_persisted(proof_runtime, monkeypatch):
+    """_compute_outcome returns peak_r_4h and log_candidate_outcome persists it."""
+    import sqlite3
+    import pandas as pd
+    import logging_db.trade_logger as tl
+    from learning.candidate_labeler import _compute_outcome
+
+    monkeypatch.setattr(tl, "DB_PATH", str(proof_runtime.db_path))
+
+    # Build a 1h DataFrame with clear 4h forward window
+    # ref_idx = len-5 = 5; forward bars 6-9 go up +6%
+    closes = [100.0] * 10
+    highs = [100.0] * 10
+    lows = [100.0] * 10
+    # Forward bars (idx 6-9): high = 106 → mfe_4h_pct = 6.0%
+    for i in range(6, 10):
+        highs[i] = 106.0
+        lows[i] = 99.0
+    df_1h = pd.DataFrame({"close": closes, "high": highs, "low": lows})
+
+    stop_pct = 3.0
+    outcome = _compute_outcome(df_1h, 100.0, "LONG", stop_pct, 0.0, df_15m=None)
+
+    assert outcome["label_status"] == "complete"
+    assert outcome["peak_r_4h"] is not None
+    # peak_r_4h = mfe_4h_pct / stop_pct = 6.0 / 3.0 = 2.0
+    assert abs(outcome["peak_r_4h"] - 2.0) < 0.1, (
+        f"expected peak_r_4h ~2.0, got {outcome['peak_r_4h']}"
+    )
+
+    # Persist via log_candidate_outcome and verify DB write
+    with sqlite3.connect(proof_runtime.db_path) as conn:
+        conn.execute(
+            "INSERT INTO scan_candidates (scan_id, ts, symbol, direction, decision, labeled) "
+            "VALUES (?,?,?,?,?,?)",
+            ("sc_peak_r", "2026-04-10T10:00:00", "BTCUSDT", "LONG", "entered", 0),
+        )
+        cand_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+    tl.log_candidate_outcome(
+        candidate_id=cand_id,
+        label_status=outcome["label_status"],
+        entry_ref_price=outcome["entry_ref_price"],
+        price_1h=outcome["price_1h"],
+        price_4h=outcome["price_4h"],
+        ret_1h_pct=outcome["ret_1h_pct"],
+        ret_4h_pct=outcome["ret_4h_pct"],
+        mfe_4h_pct=outcome["mfe_4h_pct"],
+        mae_4h_pct=outcome["mae_4h_pct"],
+        hit_1r=outcome["hit_1r"],
+        hit_2r=outcome["hit_2r"],
+        hit_stop=outcome["hit_stop"],
+        best_exit_pct=outcome["best_exit_pct"],
+        worst_drawdown_pct=outcome["worst_drawdown_pct"],
+        price_15m=0.0,
+        ret_15m_pct=0.0,
+        peak_r_4h=outcome["peak_r_4h"],
+    )
+
+    with sqlite3.connect(proof_runtime.db_path) as conn:
+        row = conn.execute(
+            "SELECT peak_r_4h FROM candidate_outcomes WHERE candidate_id=?",
+            (cand_id,),
+        ).fetchone()
+
+    assert row is not None, "outcome row not written"
+    assert row[0] is not None, "peak_r_4h not persisted"
+    assert abs(row[0] - 2.0) < 0.1, f"expected ~2.0, got {row[0]}"

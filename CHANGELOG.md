@@ -1,5 +1,8 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
+## 2026-04-16
+- v16: truth/instrumentation tranche — scanner EV cap, exact scan_funnels, Bayesian entry priors, path timing, entry/path audit scripts, 318 proof tests
+
 ## 2026-04-15
 - v15.9: forecast truth-layer + trade approval import fix: manual_scan execute-trade crash fixed (importlib.util replaces ambiguous from data.historical_data); forecast health/readiness uses lane_runtime_state primary; validate.py forecast check uses runtime state + normalized ts fallback; forecast dashboard upgraded to operational-funnel + zero-state handling; 276 proof tests
 

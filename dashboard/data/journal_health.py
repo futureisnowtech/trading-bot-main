@@ -62,6 +62,18 @@ def get_journal_health() -> dict:
     entered = funnel.get("entered", 0)
     conversion_pct = round(entered / candidates_24h * 100, 1) if candidates_24h else 0.0
 
+    # ── research_only_block counts ────────────────────────────────────────────
+    research_block_24h_row = _q1(
+        "SELECT COUNT(*) AS n FROM scan_candidates WHERE ts >= ? AND decision='research_only_block'",
+        (cutoff_24h,),
+    )
+    research_block_7d_row = _q1(
+        "SELECT COUNT(*) AS n FROM scan_candidates WHERE ts >= ? AND decision='research_only_block'",
+        (cutoff_7d,),
+    )
+    research_only_blocks_24h = research_block_24h_row.get("n") or 0
+    research_only_blocks_7d = research_block_7d_row.get("n") or 0
+
     # ── Top veto reasons (24h) ────────────────────────────────────────────────
     veto_rows = _q(
         """SELECT econ_reject_reason AS reason, COUNT(*) AS n
@@ -140,4 +152,6 @@ def get_journal_health() -> dict:
         "outcome_quality_pct": outcome_quality_pct,
         "last_audit_ts": last_audit_ts,
         "last_audit_overall": last_audit_overall,
+        "research_only_blocks_24h": research_only_blocks_24h,
+        "research_only_blocks_7d": research_only_blocks_7d,
     }

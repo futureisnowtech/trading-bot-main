@@ -93,6 +93,71 @@ def _compute_15m_metrics(
         return 0.0, 0.0
 
 
+def _compute_path_timing(
+    df_15m,
+    ref_close: float,
+    direction: str,
+    stop_pct: float,
+) -> dict:
+    """
+    Compute how many minutes it took for the trade to reach 0.5R, 1R, and 2R.
+
+    Scans 15m bars AFTER the reference bar.  Uses the favorable extreme per bar:
+    - LONG: bar high for MFE (favorable = up)
+    - SHORT: bar low for MFE (favorable = down)
+
+    R multiples are derived from stop_pct (1R = stop distance as % of entry).
+
+    Returns dict with keys: time_to_05r_min, time_to_1r_min, time_to_2r_min.
+    All values are None if the threshold was not reached within available bars.
+    """
+    result: dict = {
+        "time_to_05r_min": None,
+        "time_to_1r_min": None,
+        "time_to_2r_min": None,
+    }
+    try:
+        if df_15m is None or len(df_15m) < 5:
+            return result
+        if ref_close <= 0:
+            return result
+
+        _stop_pct = float(stop_pct) if stop_pct and stop_pct > 0 else 3.0
+        target_05r = _stop_pct * 0.5
+        target_1r = _stop_pct * 1.0
+        target_2r = _stop_pct * 2.0
+
+        highs = list(df_15m["high"].values)
+        lows = list(df_15m["low"].values)
+        is_long = str(direction).upper() == "LONG"
+
+        # Reference bar ≈ 4h ago (same approximation as _compute_15m_metrics)
+        ref_idx_15m = max(0, len(highs) - 17)
+
+        for bar_offset, idx in enumerate(range(ref_idx_15m + 1, len(highs)), start=1):
+            if is_long:
+                extreme = float(highs[idx])
+                move_pct = (extreme - ref_close) / ref_close * 100.0
+            else:
+                extreme = float(lows[idx])
+                move_pct = (ref_close - extreme) / ref_close * 100.0
+
+            minutes = bar_offset * 15
+            if result["time_to_05r_min"] is None and move_pct >= target_05r:
+                result["time_to_05r_min"] = minutes
+            if result["time_to_1r_min"] is None and move_pct >= target_1r:
+                result["time_to_1r_min"] = minutes
+            if result["time_to_2r_min"] is None and move_pct >= target_2r:
+                result["time_to_2r_min"] = minutes
+
+            if all(v is not None for v in result.values()):
+                break  # all thresholds hit — stop scanning
+
+    except Exception as e:
+        logger.debug(f"[labeler] path timing error: {e}")
+    return result
+
+
 def _compute_outcome(
     df,
     ref_price: float,
@@ -192,6 +257,12 @@ def _compute_outcome(
     if df_15m is not None:
         price_15m, ret_15m_pct = _compute_15m_metrics(df_15m, ref_close, direction)
 
+    # Path timing: how many minutes to reach 0.5R / 1R / 2R
+    timing = _compute_path_timing(df_15m, ref_close, direction, _stop_pct)
+
+    # peak_r_4h: MFE expressed in R units (mfe_4h_pct / stop_pct)
+    peak_r_4h = round(mfe_4h_pct / _stop_pct, 4) if _stop_pct > 0 else None
+
     return {
         "label_status": "complete",
         "entry_ref_price": ref_close,
@@ -208,6 +279,10 @@ def _compute_outcome(
         "hit_stop": hit_stop,
         "best_exit_pct": round(best_exit_pct, 4),
         "worst_drawdown_pct": round(worst_drawdown_pct, 4),
+        "time_to_05r_min": timing["time_to_05r_min"],
+        "time_to_1r_min": timing["time_to_1r_min"],
+        "time_to_2r_min": timing["time_to_2r_min"],
+        "peak_r_4h": peak_r_4h,
     }
 
 
@@ -339,6 +414,10 @@ def run_labeling_pass(get_candles=None) -> dict:
                 worst_drawdown_pct=outcome["worst_drawdown_pct"],
                 price_15m=outcome.get("price_15m", 0.0),
                 ret_15m_pct=outcome.get("ret_15m_pct", 0.0),
+                time_to_05r_min=outcome.get("time_to_05r_min"),
+                time_to_1r_min=outcome.get("time_to_1r_min"),
+                time_to_2r_min=outcome.get("time_to_2r_min"),
+                peak_r_4h=outcome.get("peak_r_4h"),
             )
             labeled += 1
 

@@ -20,6 +20,19 @@ _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 # _ROOT = repo root (3 levels up from dashboard/widgets/trade_approval/)
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(_THIS_DIR)))
 
+
+def _get_tier_info(sym: str) -> dict:
+    """Return execution tier dict for a candidate symbol."""
+    try:
+        if _ROOT not in sys.path:
+            sys.path.insert(0, _ROOT)
+        from runtime.execution_universe import get_execution_policy
+
+        return get_execution_policy(sym)
+    except Exception:
+        return {"tier": "core", "execute": True, "reason": "unknown"}
+
+
 _SETUP_DESC = {
     "momentum": "Price closed above VWAP with a volume spike. Trend is accelerating — ride the move.",
     "ranging_mr": "ADX < 20 (no trend). Price stretched from VWAP. Mean-reversion back toward center expected.",
@@ -189,17 +202,39 @@ def render_manual_scan():
         exch = c.get("exchange", "kraken")
         setup = c.get("primary_setup", "")
         badge = "🔵" if exch == "hyperliquid" else "🟠"
+        _tier = _get_tier_info(sym)
+        _can_execute = _tier["execute"]
 
         col1, col2, col3, col4 = st.columns([0.4, 3.2, 2.8, 0.6])
         with col1:
-            st.checkbox("", key=f"ms_sel_{i}", label_visibility="collapsed")
+            if _can_execute:
+                st.checkbox("", key=f"ms_sel_{i}", label_visibility="collapsed")
+            else:
+                st.checkbox(
+                    "",
+                    key=f"ms_sel_{i}",
+                    label_visibility="collapsed",
+                    disabled=True,
+                    value=False,
+                )
         with col2:
-            st.markdown(f"**{sym}** `{dirn}` {badge} `{exch[:5].upper()}` · *{setup}*")
+            _tier_label = _tier.get("tier", "core")
+            if _tier_label == "core":
+                _badge_str = ":green[CORE]"
+            elif _tier_label == "research_only":
+                _badge_str = ":orange[RESEARCH ONLY]"
+            else:
+                _badge_str = ":red[SUPPRESSED]"
+            st.markdown(
+                f"**{sym}** `{dirn}` {badge} `{exch[:5].upper()}` · *{setup}* {_badge_str}"
+            )
+            if not _can_execute:
+                st.caption(f"Not executable — {_tier['reason']}")
         with col3:
             label = f"{prob:.0f}% — {'High edge' if prob >= 68 else ('Moderate edge' if prob >= 60 else 'Lower edge')}"
             st.progress(prob / 100.0, text=label)
         with col4:
-            with st.expander("ℹ️"):
+            with st.expander("i"):
                 _render_trade_details(c, prob)
 
     st.divider()
@@ -241,6 +276,17 @@ def render_manual_scan():
             sym = cand["symbol"]
             dirn = cand["direction"]
             setup = cand.get("primary_setup", "manual")
+            _policy = _get_tier_info(sym)
+            if not _policy["execute"]:
+                results.append(
+                    (
+                        sym,
+                        dirn,
+                        False,
+                        f"blocked: {_policy['reason']} — only core execution symbols allowed",
+                    )
+                )
+                continue
             try:
                 df_c = get_candles(sym, "1h", 100)
                 if df_c is None or len(df_c) < 10:

@@ -559,6 +559,9 @@ Motivation 1-5: "Strive for greatness." / "I like criticism. It makes you strong
 | v15.4 | 2026-04-15 | Final truth closure: tilde Desktop detection, markdown truth surfaces, pre-commit truth gate, stale 7497 cleanup, 237 proof tests |
 | v15.5 | 2026-04-15 | Dashboard/runtime truth fixes: forecast schedule isolation, archived-lane error filter, stagnant false-positive fix using live perps state, 240 proof tests |
 | v15.6 | 2026-04-15 | Controlled live-launch path: mode-aware boot.py, go_live.py/go_paper.py transitions, hook allowlist for controlled mode changes, Claude-safe live launch docs |
+| v15.7–15.9 | 2026-04-15–16 | Dashboard live-mode gate, kill switch live-mode fix, ISO timestamp fix, forecast truth-layer, trade approval import fix |
+| v15.10 | 2026-04-16 | Execution-universe split: runtime/execution_universe.py, CORE_EXECUTION_UNDERLYINGS, research_only_block gate in v10_runner, tier labels in manual_scan, journal_health metrics |
+| v16 | 2026-04-16 | Truth/instrumentation tranche: scanner EV cap ($100 effective), scan_funnels exact persistence, Bayesian entry priors (entry_priors.py), path timing (time_to_05r/1r/2r/peak_r_4h), entry_truth_audit.py, path_truth_audit.py, 318 proof tests |
 
 ## GitHub
 - Repository: `futureisnowtech/trading-bot-main` (private)

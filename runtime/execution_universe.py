@@ -2,12 +2,13 @@
 runtime/execution_universe.py — Execution universe classification (v15.10).
 
 Defines three tiers for every candidate symbol:
-  core           — top-10 underlyings with Coinbase nano-futures support
+  core           — actual live-broker-supported Coinbase underlyings
   research_only  — scanner-visible but no live execution path
   suppressed     — statistically negative edge (config.SUPPRESSED_SYMBOLS)
 
-The scanner stays broad (Kraken + Binance + Hyperliquid — all 3 sources).
-Only core symbols enter the live execution path.  research_only candidates
+The scanner can still run broad in research mode, but the live scheduler and
+manual scan default to the actual tradable set. Only core symbols enter the
+live execution path. research_only candidates
 are journaled with decision='research_only_block' so the learning layer can
 observe their outcomes without committing capital.
 

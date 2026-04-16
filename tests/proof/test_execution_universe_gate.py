@@ -3,7 +3,7 @@ tests/proof/test_execution_universe_gate.py — Proof tests for execution univer
 
 Coverage:
   1. get_underlying normalises all expected formats
-  2. CORE_EXECUTION_UNDERLYINGS contains exactly the 10 expected symbols
+  2. CORE_EXECUTION_UNDERLYINGS contains exactly the live broker-supported symbols
   3. Core symbols return tier='core', execute=True
   4. SUPPRESSED_SYMBOLS return tier='suppressed', execute=False, reason='suppressed_symbol'
   5. Non-core non-suppressed symbols return tier='research_only', execute=False
@@ -14,6 +14,8 @@ Coverage:
   10. CORE_EXECUTION_UNDERLYINGS is a set in config (not a list)
   11. scanner Step 1 core_only filtering keeps only core underlyings
   12. manual_scan requests core-only scans and fails closed on policy lookup failure
+  13. core execution universe matches Coinbase broker-supported symbols exactly
+  14. v10_runner drops unsupported TradingView signals before live candidate processing
 """
 
 import ast
@@ -38,12 +40,12 @@ def test_get_underlying_normalises_formats():
     assert get_underlying("SOLUSDT") == "SOL"
 
 
-def test_core_execution_underlyings_has_10_symbols():
+def test_core_execution_underlyings_has_4_symbols():
     from config import CORE_EXECUTION_UNDERLYINGS
 
     assert isinstance(CORE_EXECUTION_UNDERLYINGS, set), "must be a set"
-    assert len(CORE_EXECUTION_UNDERLYINGS) == 10, (
-        f"expected 10 core symbols, got {len(CORE_EXECUTION_UNDERLYINGS)}: {CORE_EXECUTION_UNDERLYINGS}"
+    assert len(CORE_EXECUTION_UNDERLYINGS) == 4, (
+        f"expected 4 core symbols, got {len(CORE_EXECUTION_UNDERLYINGS)}: {CORE_EXECUTION_UNDERLYINGS}"
     )
 
 
@@ -55,15 +57,18 @@ def test_core_execution_underlyings_contains_expected():
         "ETH",
         "SOL",
         "XRP",
-        "DOGE",
-        "AVAX",
-        "LINK",
-        "AAVE",
-        "INJ",
-        "NEAR",
     }
     assert expected == CORE_EXECUTION_UNDERLYINGS, (
         f"mismatch: expected={expected}, got={CORE_EXECUTION_UNDERLYINGS}"
+    )
+
+
+def test_core_execution_universe_matches_coinbase_supported_symbols():
+    from config import CORE_EXECUTION_UNDERLYINGS
+    from execution.coinbase_broker import SUPPORTED_SYMBOLS
+
+    assert CORE_EXECUTION_UNDERLYINGS == SUPPORTED_SYMBOLS, (
+        "config core execution universe must match Coinbase live supported symbols exactly"
     )
 
 
@@ -103,7 +108,7 @@ def test_v10_runner_imports_get_underlying_from_execution_universe():
     """v10_runner must not define its own _get_underlying function."""
     runner_path = os.path.join(_ROOT, "scheduler", "v10_runner.py")
     src = open(runner_path).read()
-    assert "from runtime.execution_universe import get_underlying" in src, (
+    assert "runtime.execution_universe" in src and "get_underlying as _get_underlying" in src, (
         "v10_runner must import _get_underlying from runtime.execution_universe"
     )
     # Must NOT define a local _get_underlying function
@@ -236,3 +241,14 @@ def test_manual_scan_requests_core_only_scan_and_fails_closed():
     src = open(widget_path).read()
     assert "core_only=True" in src, "manual scan must request core-only scans"
     assert '"execute": False' in src, "manual scan policy lookup must fail closed"
+
+
+def test_v10_runner_skips_unsupported_tradingview_symbols_before_candidate_build():
+    runner_path = os.path.join(_ROOT, "scheduler", "v10_runner.py")
+    src = open(runner_path).read()
+    assert "TV signal skipped" in src, (
+        "v10_runner must skip unsupported TradingView symbols before they enter live candidate flow"
+    )
+    assert "_get_execution_policy(tv[\"symbol\"])" in src, (
+        "TradingView signals must be checked against the execution universe"
+    )

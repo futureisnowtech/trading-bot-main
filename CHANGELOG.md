@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-16
+- v16.3: align live crypto universe to actual Coinbase-supported BTC/ETH/SOL/XRP set, filter unsupported TradingView live candidates, tighten default crypto/perp pairs, update proofs/docs
+
+## 2026-04-16
 - v16.2: core-only scanner alignment, manual-scan fail-closed policy, timestamp-anchored path timing, truthful audit denominators, expected_profit journaling fallback, 325 proof tests
 
 ## 2026-04-16

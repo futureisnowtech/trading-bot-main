@@ -155,8 +155,12 @@ def _render_trade_details(c: dict, prob: float):
 def render_manual_scan():
     st.subheader("Trade Approval")
     st.caption(
-        "Runs a fresh scan on the core execution universe only "
-        "(bypasses the 5-min cache). You pick which trades execute."
+        "Runs a fresh scan on the actual live-tradable universe only "
+        "(BTC / ETH / SOL / XRP only; bypasses the 5-min cache)."
+    )
+    st.caption(
+        "Unsupported long-tail coins are intentionally excluded here so manual "
+        "execution stays aligned with the live Coinbase execution set."
     )
 
     col_btn, col_info = st.columns([1, 4])

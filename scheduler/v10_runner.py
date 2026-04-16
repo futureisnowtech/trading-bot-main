@@ -23,7 +23,10 @@ from typing import Dict, Optional
 
 import schedule
 from config import SUPPRESSED_SYMBOLS
-from runtime.execution_universe import get_underlying as _get_underlying
+from runtime.execution_universe import (
+    get_execution_policy as _get_execution_policy,
+    get_underlying as _get_underlying,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -483,6 +486,13 @@ def _scan_and_trade_inner():
         # Keep set bounded
         if len(_seen_tv_signal_keys) > 500:
             _seen_tv_signal_keys.clear()
+        _tv_policy = _get_execution_policy(tv["symbol"])
+        if not _tv_policy.get("execute"):
+            logger.info(
+                f"[v10] TV signal skipped — {tv['symbol']} {tv['direction']} "
+                f"outside live execution universe ({_tv_policy.get('reason', 'blocked')})"
+            )
+            continue
         # Build candidate dict matching scanner output format
         tv_candidates.append(
             {

@@ -44,25 +44,17 @@ SUPPRESSED_SYMBOLS: set = {
 }
 
 # ════════════════════════════════════════════════════════════════════
-# EXECUTION UNIVERSE (v15.10)
-# Core underlyings: top-10 assets with Coinbase nano-futures support.
-# Scanner stays broad (Kraken + Binance + Hyperliquid — all 3 sources).
-# Only core underlyings reach the live execution path; non-core are
-# journaled as research_only_block so the learning layer can observe
-# their outcomes without committing capital.
-# Review quarterly — add an underlying when it gets Coinbase futures.
+# EXECUTION UNIVERSE (v16.3)
+# Core underlyings = the ACTUAL live-broker-supported Coinbase nano futures set.
+# Live scanner / runner / manual scan should focus only on names we can
+# truly execute right now. Add an underlying here only after live broker
+# support exists.
 # ════════════════════════════════════════════════════════════════════
 CORE_EXECUTION_UNDERLYINGS: set = {
     "BTC",  # BIP-20DEC30-CDE — live Coinbase nano futures
     "ETH",  # ETP-20DEC30-CDE — live Coinbase nano futures
     "SOL",  # SLP-20DEC30-CDE — live Coinbase nano futures
     "XRP",  # XPP-20DEC30-CDE — live Coinbase nano futures
-    "DOGE",  # high-liquidity scanner hit — pending Coinbase futures listing
-    "AVAX",  # high-liquidity scanner hit — pending Coinbase futures listing
-    "LINK",  # high-liquidity scanner hit — pending Coinbase futures listing
-    "AAVE",  # high-liquidity scanner hit — pending Coinbase futures listing
-    "INJ",  # high-liquidity scanner hit — pending Coinbase futures listing
-    "NEAR",  # high-liquidity scanner hit — pending Coinbase futures listing
 }
 
 # ════════════════════════════════════════════════════════════════════
@@ -258,7 +250,7 @@ IBKR_PORT: int = int(os.getenv("IBKR_PORT", "7497"))  # 7497=paper, 7496=live
 BINANCE_API_KEY: str = os.getenv("BINANCE_API_KEY", "")
 BINANCE_API_SECRET: str = os.getenv("BINANCE_API_SECRET", "")
 BINANCE_TESTNET: bool = os.getenv("BINANCE_TESTNET", "true").lower() == "true"
-PERP_PAIRS: list = os.getenv("PERP_PAIRS", "AVAXUSDT,SOLUSDT,ETHUSDT,BTCUSDT").split(
+PERP_PAIRS: list = os.getenv("PERP_PAIRS", "BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT").split(
     ","
 )
 PERP_POSITION_SIZE_USD: float = float(
@@ -312,7 +304,7 @@ FUTURES_MAX_TRADES_DAY: int = 10
 # ════════════════════════════════════════════════════════════════════
 CRYPTO_PAIRS: list = os.getenv(
     "CRYPTO_PAIRS",
-    "BTC-USDC,ETH-USDC,SOL-USDC,AVAX-USDC,XRP-USDC,DOGE-USDC,LINK-USDC,ADA-USDC",
+    "BTC-USDC,ETH-USDC,SOL-USDC,XRP-USDC",
 ).split(",")
 CRYPTO_CANDLE_GRANULARITY: str = (
     "FIVE_MINUTE"  # v5.0 Sprint 2: 5-min bars (was ONE_MINUTE)

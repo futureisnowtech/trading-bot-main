@@ -18,7 +18,7 @@ Fully autonomous AI trading system: scans Kraken Futures + Binance USDM + Hyperl
 - Paper account: $5,000 (`ACCOUNT_SIZE=5000` — config default, no .env override)
 - Wants zero day-to-day intervention. Prefers simple explanations, hates fluff.
 
-## Current Version: v16.2 (2026-04-16)
+## Current Version: v16.3 (2026-04-16)
 
 **Active branch:** `feature/v10-rebuild` | **Clean paper trading started:** 2026-04-02 | **Live trading started:** 2026-04-15
 
@@ -145,6 +145,7 @@ Fully autonomous AI trading system: scans Kraken Futures + Binance USDM + Hyperl
 - **Path timing truth (v16.2):** `candidate_outcomes` now also stores `path_timing_evaluated`. `learning/candidate_labeler.py:_compute_path_timing()` anchors 15m/1h/4h timing to `scan_candidates.ts` whenever the fetched candle index supports it, instead of relying only on a tail-of-series heuristic.
 - **Manual scan fail-closed (v16.2):** `dashboard/widgets/trade_approval/manual_scan.py` treats execution-policy lookup failures as blocked (`tier='suppressed'`, `execute=False`) and only runs `scanner.scan(..., core_only=True)`. Dashboard execution can no longer silently fail open into non-core names.
 - **Audit semantics (v16.2):** `scripts/path_truth_audit.py` uses only `path_timing_evaluated=1` rows as the denominator for timing reach percentages. `scripts/entry_truth_audit.py` now separates `scored_total`, `below_threshold`, and `above_threshold`, so conversion and economics-veto rates are calculated from truthful threshold-passed counts.
+- **Broker-aligned live universe (v16.3):** `CORE_EXECUTION_UNDERLYINGS` now matches the Coinbase broker-supported set exactly: `BTC`, `ETH`, `SOL`, `XRP`. Unsupported TradingView symbols are dropped before they enter the live candidate path. Default `PERP_PAIRS` / `CRYPTO_PAIRS` were tightened to the same four-name live set.
 
 ### MES Futures — Critical Contract Facts (v13.9)
 
@@ -314,6 +315,7 @@ Set `TV_WEBHOOK_SECRET` in .env. Symbol mapping: BTCUSD → BTCUSDT.
 | v16 | 2026-04-16 | Truth/instrumentation tranche: scanner EV cap (effective_position_usd = min(theoretical, $100) prevents phantom EV); exact scan_funnels persistence with log_scan_funnel() + terminal decision strings from _attempt_entry; Bayesian entry priors (learning/entry_priors.py — 5-level fallback, hit_1r=1 AND hit_stop=0 win label, smoothed with prior_n=20/prior_p=0.52, clipped [0.40,0.70]); path timing columns (time_to_05r_min/time_to_1r_min/time_to_2r_min/peak_r_4h in candidate_outcomes, computed from 15m bars in candidate_labeler.py); entry_truth_audit.py (6 sections: funnel/EV/source/setup/symbol-class/integrity); path_truth_audit.py (4 sections: R-reach/timing/path-by-group/exit-quality); scanner_theoretical/effective_position_usd persisted to scan_candidates; 318 proof tests |
 | v16.1 | 2026-04-16 | Audit/version cleanup: entry_truth_audit fixed for real DB schema, symbol class audit uses actual underlyings, UTC timestamp handling aligned, repo version truth corrected, 319 proof tests |
 | v16.2 | 2026-04-16 | Truth hardening + core-only alignment: scanner/runner/manual scan default to core-only universe, manual scan fails closed on policy lookup errors, candidate timing anchored to candidate ts with path_timing_evaluated flag, path_truth_audit denominator fixed, entry_truth_audit threshold math fixed, scanner EV journaling fallback corrected, 325 proof tests |
+| v16.3 | 2026-04-16 | Live universe alignment: CORE_EXECUTION_UNDERLYINGS reduced to actual Coinbase-supported BTC/ETH/SOL/XRP set, TradingView live candidates filtered through execution policy, default crypto/perp pair lists tightened to supported coins, proof coverage updated |
 
 ## GitHub
 - Repository: `futureisnowtech/trading-bot-main` (private)

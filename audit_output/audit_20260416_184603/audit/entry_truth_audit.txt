@@ -1,0 +1,48 @@
+
+============================================================
+  ENTRY TRUTH AUDIT  (last 30 days)
+============================================================
+
+── 1. Funnel Summary (132 scan cycles) ─────────────────
+   Scanned:             3965
+   Scored total:        2147
+   Below threshold:     1912
+   Above threshold:      235
+   Econ vetoed:           41  (17.4%)
+   Research-only:         98
+   Sizing zero:            0
+   Execution failed:      96
+   ENTERED:                0  (conversion 0.0%)
+
+── 2. Scanner EV Calibration (n=2178) ──────────────────────
+   Avg theoretical pos: $2888.18  (range $436–$9628)
+   Avg effective pos:   $100.00  (capped at $100)
+   Capped rate:         96.5% of candidates were capped
+
+── 3. Source Quality ─────────────────────────────────────────────
+   Exchange         Source                   n    WR%   AvgMFE
+   ---------------- --------------------   ---    ---   ------
+   kraken           clean_paper_v10         20  40.0%   1.405%
+   hyperliquid      clean_paper_v10         15  20.0%   0.598%
+
+── 4. Setup Quality (top 10) ─────────────────────────────────────
+   Setup                  Regime             n    WR%
+   ---------------------- --------------   ---    ---
+   momentum               RANGING           27  29.6%
+   ranging_mr             RANGING            4  50.0%
+   funding_collect        RANGING            3  33.3%
+   kst_cross              RANGING            1   0.0%
+
+── 5. Symbol Class Quality ───────────────────────────────────────
+   Tier                 n    WR%   AvgMFE   AvgMAE
+   ----------------   ---    ---   ------   ------
+   core                 7  71.4%   2.035%   0.158%
+   research_only       28  21.4%   0.815%  -0.974%
+
+── 6. Integrity Snapshot ─────────────────────────────────────────
+   Total closes: 11  trust rate: 63.6%
+     suspect         : 4
+     verified        : 7
+   No duplicate close events detected.
+     suspect         : attribution_failed_or_incomplete (4)
+

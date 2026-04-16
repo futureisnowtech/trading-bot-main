@@ -1,0 +1,76 @@
+================================================================
+  ALGO TRADING SYSTEM — FULL AUDIT SNAPSHOT
+  Generated: 2026-04-16T18:46 UTC
+  Lookback:  30 days
+================================================================
+
+── GIT ────────────────────────────────────────────────
+  Branch:  feature/v10-rebuild
+  Commit:  2552c89ca3f7ac88874a65d91710800cec261dc4
+  Message: fix(v16.7): block duplicate/opposing live trades and cap per-trade size 2026-04-16 14:43:02 -0400
+
+── PROCESS ────────────────────────────────────────────
+  RUNNING  PID=70767  /Library/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -B /Users/joshmacbookair2020/Projects/algo_trading_final/scripts/boot.py --mode
+
+── RUNTIME STATE ──────────────────────────────────────
+  Mode:         live
+  Active lanes: ["crypto", "forecast"]
+  Status:       OK
+  Startup:      2026-04-16T18:10:56.384584+00:00
+
+── LANES ──────────────────────────────────────────────
+  crypto           enabled=1 active=1 mode=live health=OK
+                   heartbeat: 2026-04-16T18:45:47.534098+00:00
+  forecast         enabled=1 active=1 mode=live health=UNKNOWN
+                   heartbeat: 2026-04-16T18:46:03.702415+00:00
+  mes_archived     enabled=0 active=0 mode=archived health=OK
+                   heartbeat: never
+
+── KILL SWITCH ────────────────────────────────────────
+  Active halts: 0
+
+── OPEN POSITIONS (19) ───────────────────────────────
+  AAVE               qty=0.6528  entry=97.6595  since=2026-04-13
+  PF_NEARUSD         qty=46.0426  entry=1.38459  since=2026-04-14
+  PF_LINKUSD         qty=6.9986  entry=9.10901  since=2026-04-14
+  PF_AVAXUSD         qty=6.8087  entry=9.36305  since=2026-04-14
+  WLD                qty=214.4299  entry=0.2973  since=2026-04-14
+  PF_XBTUSD          qty=0.0009  entry=74762.6  since=2026-04-14
+  PUMP               qty=34496.7532  entry=0.001848  since=2026-04-14
+  PF_XRPUSD          qty=46.7858  entry=1.36259  since=2026-04-14
+  PF_DOGEUSD         qty=683.4832  entry=0.0932722  since=2026-04-14
+  ZRO                qty=33.5968  entry=1.8975  since=2026-04-15
+  ... and 9 more (see open_positions.csv)
+
+── SCAN FUNNEL (last 10 cycles) ───────────────────────
+  ts                    cands  data_unavail  below  econ_veto  ronly  entered
+  2026-04-16T18:41:28    5      0             0      0          0      0
+  2026-04-16T18:36:25    4      0             0      0          0      0
+  2026-04-16T18:31:21    5      0             0      0          0      0
+  2026-04-16T18:26:15    6      0             0      0          0      0
+  2026-04-16T18:21:13    5      0             0      0          0      0
+  2026-04-16T18:16:09    6      1             3      0          0      0
+  2026-04-16T18:11:10    6      1             4      0          0      0
+  2026-04-16T18:09:30    6      0             3      0          0      0
+  2026-04-16T18:04:22    5      0             3      0          0      0
+  2026-04-16T17:58:58    5      0             3      0          0      0
+
+── RECENT SYSTEM EVENTS ───────────────────────────────
+  [2026-04-16T18:10:56] [INFO] PositionReconciler: Reconciliation complete: no repairs needed
+  [2026-04-16T17:53:20] [INFO] PositionReconciler: Reconciliation complete: no repairs needed
+  [2026-04-16T17:34:23] [INFO] PositionReconciler: Reconciliation complete: no repairs needed
+  [2026-04-16T14:43:01] [INFO] ForecastDiscovery: Underlier GDP visible but no OPT contracts — enrollment may be pending
+  [2026-04-16T14:43:01] [INFO] ForecastDiscovery: Underlier DISSA visible but no OPT contracts — enrollment may be pending
+  [2026-04-16T14:43:01] [INFO] ForecastDiscovery: Underlier DISSN visible but no OPT contracts — enrollment may be pending
+  [2026-04-16T14:43:01] [INFO] ForecastDiscovery: Underlier CPIC visible but no OPT contracts — enrollment may be pending
+  [2026-04-16T14:43:01] [INFO] ForecastDiscovery: Underlier CPIY visible but no OPT contracts — enrollment may be pending
+  [2026-04-16T14:43:01] [INFO] ForecastExBroker: Discovery found 5 contracts across 12 underliers
+  [2026-04-16T14:43:01] [INFO] ForecastExBroker: IND GDP (conId=573031111) found but OPT layer unavailable — account may need ForecastEx en
+
+── FILES IN THIS BUNDLE ───────────────────────────────
+  audit/                    all audit script outputs
+  db_exports/               CSV + JSON exports of key tables
+  bot_log_recent.txt        last 500 lines of bot.log
+  snapshot_context.txt      this file
+
+================================================================

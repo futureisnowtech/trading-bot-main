@@ -1,0 +1,73 @@
+
+[1] Python dependencies
+  READY          PyJWT importable
+  READY          cryptography importable
+  READY          requests importable
+
+[2] Coinbase broker module
+  READY          execution/coinbase_broker.py imports cleanly
+  READY          SUPPORTED_SYMBOLS = ['BTC', 'ETH', 'SOL', 'XRP']
+  READY          COINBASE_TAKER_FEE = 0.0003 (0.030%)
+
+[3] Symbol → Coinbase product mapping
+  READY          BTC → BIP-20DEC30-CDE  contract_size=0.01
+  READY          ETH → ETP-20DEC30-CDE  contract_size=0.1
+  READY          SOL → SLP-20DEC30-CDE  contract_size=5.0
+  READY          XRP → XPP-20DEC30-CDE  contract_size=500.0
+  READY          Unsupported symbol DOGE correctly raises CoinbaseSymbolError (fail-closed)
+
+[4] Coinbase CDP credentials
+  READY          COINBASE_CDP_KEY_NAME present and has correct format
+  READY          COINBASE_CDP_PRIVATE_KEY present and looks like EC PEM
+
+[5] Paper mode broker initialization
+  READY          CoinbaseBroker(paper=True) initializes without error
+  READY          Paper open_long BTC succeeded: orderId=cb_paper_BTC_1776365
+  READY          Paper close_position BTC succeeded
+
+[6] CDP JWT generation (live creds check)
+  READY          CDP JWT generated successfully (ES256)
+
+[7] perps_engine → coinbase_broker wiring
+  READY          perps_engine.py imports from coinbase_broker
+  READY          perps_engine.py uses Coinbase 0.03% taker fee (Binance fee removed)
+  READY          perps_engine.py uses 'coinbase_paper' broker string (Kraken string removed)
+
+[8] Economics gate fee model
+  READY          economics_gate TAKER_FEE_PCT = 0.030% (Coinbase)
+  READY          ROUND_TRIP_COST = 0.0600% (0.060% round-trip)
+
+[9] config.py CDP key exports
+  READY          config.py exports COINBASE_CDP_KEY_NAME and COINBASE_CDP_PRIVATE_KEY
+  READY          config.py COINBASE_TAKER_FEE_PCT = 0.030%
+
+[10] Stale Binance references in critical files
+  READY          perps_engine.py — no stale Binance/Kraken execution strings
+  READY          risk/economics_gate.py — no stale Binance/Kraken execution strings
+
+[11] Proof test suite
+  READY          Coinbase broker proof tests: 42 passed, 1 warning in 2.21s
+
+[12] Exchange approval and account state (human-only checks)
+  ACTION NEEDED  Verify Coinbase derivatives trading is approved on your account at https://www.coinbase.com/advanced-trade
+  ACTION NEEDED  Fund your Coinbase derivatives buying power (USD) sufficient for at least 1 BIP contract (~$900 notional at BTC=$90K)
+  ACTION NEEDED  Create a fresh Coinbase CDP API key at https://portal.cdp.coinbase.com with 'trade' scope and place COINBASE_CDP_KEY_NAME + COINBASE_CDP_PRIVATE_KEY in .env
+
+======================================================================
+LAUNCH READINESS SUMMARY
+  READY:         27
+  BLOCKED:       0
+  ACTION NEEDED: 3
+======================================================================
+
+ACTION NEEDED (human-only steps):
+  • Verify Coinbase derivatives trading is approved on your account at https://www.coinbase.com/advanced-trade
+  • Fund your Coinbase derivatives buying power (USD) sufficient for at least 1 BIP contract (~$900 notional at BTC=$90K)
+  • Create a fresh Coinbase CDP API key at https://portal.cdp.coinbase.com with 'trade' scope and place COINBASE_CDP_KEY_NAME + COINBASE_CDP_PRIVATE_KEY in .env
+
+STATUS: CODE READY — 3 human action(s) remaining before live launch
+
+
+── STDERR ──
+/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/site-packages/requests/__init__.py:113: RequestsDependencyWarning: urllib3 (2.6.3) or chardet (7.2.0)/charset_normalizer (3.4.6) doesn't match a supported version!
+  warnings.warn(

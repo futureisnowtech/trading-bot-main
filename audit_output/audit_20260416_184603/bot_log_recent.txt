@@ -1,0 +1,500 @@
+2026-04-16 13:31:07,279 scheduler.v10_runner WARNING [v10] ENA — price sanity FAIL: candle $0.099846 vs live $0.10802 (7.6% off) — SKIP (wrong data source)
+2026-04-16 13:31:07,503 scheduler.v10_runner WARNING [v10] SPX — price sanity FAIL: candle $0.32058 vs live $0.34334 (6.6% off) — SKIP (wrong data source)
+2026-04-16 13:31:07,755 scheduler.v10_runner WARNING [v10] ARB — price sanity FAIL: candle $0.11591 vs live $0.12271 (5.5% off) — SKIP (wrong data source)
+2026-04-16 13:31:08,049 scheduler.v10_runner WARNING [v10] LIT — price sanity FAIL: candle $79.629997 vs live $1.0234 (7680.9% off) — SKIP (wrong data source)
+2026-04-16 13:31:08,313 scheduler.v10_runner WARNING [v10] WLD — price sanity FAIL: candle $0.29806 vs live $0.31435 (5.2% off) — SKIP (wrong data source)
+2026-04-16 13:31:08,544 scheduler.v10_runner WARNING [v10] WLD — price sanity FAIL: candle $0.29806 vs live $0.31435 (5.2% off) — SKIP (wrong data source)
+2026-04-16 13:31:08,909 scheduler.v10_runner WARNING [v10] PUMP — price sanity FAIL: candle $14.505 vs live $0.001948 (744509.9% off) — SKIP (wrong data source)
+2026-04-16 13:31:09,487 scheduler.v10_runner WARNING [v10] DOT — price sanity FAIL: candle $1.1669 vs live $1.30505 (10.6% off) — SKIP (wrong data source)
+2026-04-16 13:31:10,291 scheduler.v10_runner INFO [v10] AAVE LONG TIER 2 — composite=68.6 (tech=76.6 ml=52.5)
+2026-04-16 13:31:10,431 scheduler.v10_runner INFO [v10] AAVE LONG ENTRY SIGNAL: composite=68.6 composite=68.6 tier=2 regime=RANGING
+2026-04-16 13:31:10,449 execution.coinbase_broker WARNING [cb] 'AAVE' is not in the Coinbase supported launch set (supported: ['BTC', 'ETH', 'SOL', 'XRP']).  No trade placed.
+2026-04-16 13:31:10,449 scheduler.v10_runner WARNING [v10] AAVE entry returned None — execution failed
+2026-04-16 13:31:10,676 scheduler.v10_runner WARNING [v10] UNI — price sanity FAIL: candle $3.1537 vs live $3.3606 (6.2% off) — SKIP (wrong data source)
+2026-04-16 13:31:12,621 scheduler.v10_runner INFO [v10] ZEC LONG score=54.3 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 13:31:13,328 scheduler.v10_runner INFO [v10] ONDO SHORT score=51.4 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 13:31:14,042 scheduler.v10_runner INFO [v10] SUI SHORT score=51.4 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 13:31:14,815 scheduler.v10_runner INFO [v10] CRV SHORT score=44.1 < 58, no primary setup — skip
+2026-04-16 13:31:15,415 scheduler.v10_runner INFO [v10] CRV LONG score=49.0 < 58, no primary setup — skip
+2026-04-16 13:31:16,107 scheduler.v10_runner INFO [v10] MORPHO LONG score=49.0 < 58, no primary setup — skip
+2026-04-16 13:31:17,157 scheduler.v10_runner INFO [v10] TAO LONG score=50.8 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 13:31:18,745 scheduler.v10_runner INFO [v10] DOGE LONG score=51.9 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 13:31:19,461 scheduler.v10_runner INFO [v10] ZRO SHORT score=55.4 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 13:31:20,019 scheduler.v10_runner INFO [v10] ZRO LONG score=55.6 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 13:31:21,069 scheduler.v10_runner INFO [v10] PF_AVAXUSD SHORT score=48.9 < 58, no primary setup — skip
+2026-04-16 13:31:21,303 scheduler.v10_runner WARNING [v10] NEAR — price sanity FAIL: candle $50.859901 vs live $1.40145 (3529.1% off) — SKIP (wrong data source)
+2026-04-16 13:31:22,001 scheduler.v10_runner INFO [v10] AVAX LONG score=52.3 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 13:31:22,709 scheduler.v10_runner INFO [v10] LINK SHORT score=45.9 < 58, no primary setup — skip
+2026-04-16 13:31:23,253 scheduler.v10_runner INFO [v10] LINK LONG score=45.1 < 58, no primary setup — skip
+2026-04-16 13:31:23,959 scheduler.v10_runner INFO [v10] XRP SHORT score=48.4 < 58, no primary setup — skip
+2026-04-16 13:31:25,047 scheduler.v10_runner INFO [v10] PF_SOLUSD SHORT score=46.9 < 58, no primary setup — skip
+2026-04-16 13:31:26,056 scheduler.v10_runner INFO [v10] PF_ETHUSD LONG score=44.1 < 58, no primary setup — skip
+2026-04-16 13:31:26,765 scheduler.v10_runner INFO [v10] TON LONG TIER 2 — composite=60.2 (tech=59.6 ml=89.3)
+2026-04-16 13:31:26,906 scheduler.v10_runner INFO [v10] TON LONG ECONOMICS VETO (Tier2): net EV 0.237% < 0.30% minimum — trade not worth taking (ev=0.237% fees=0.067%) [3/3]
+2026-04-16 13:31:28,121 scheduler.v10_runner INFO [v10] PF_XBTUSD LONG score=51.2 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 13:31:28,955 scheduler.v10_runner INFO [v10] funnel: 47 candidates → dual=0 cooldown=0 risk=0 data_unavail=16 below_thresh=25 econ_veto=1 research_only=0 sizing_zero=0 exec_fail=1 entered=0
+2026-04-16 13:34:23,944 scheduler.v10_runner INFO [v10] mode=LIVE initial_balance=$5000
+2026-04-16 13:34:24,032 ib_insync.client INFO Connecting to 127.0.0.1:7496 with clientId 3...
+2026-04-16 13:34:24,033 ib_insync.client INFO Connected
+2026-04-16 13:34:24,287 ib_insync.client INFO Logged on to server version 176
+2026-04-16 13:34:24,346 ib_insync.client INFO API connection ready
+2026-04-16 13:34:24,359 ib_insync.wrapper INFO Warning 2104, reqId -1: Market data farm connection is OK:hfarm
+2026-04-16 13:34:24,360 ib_insync.wrapper INFO Warning 2104, reqId -1: Market data farm connection is OK:usfarm.nj
+2026-04-16 13:34:24,364 ib_insync.wrapper INFO Warning 2104, reqId -1: Market data farm connection is OK:usfuture
+2026-04-16 13:34:24,364 ib_insync.wrapper INFO Warning 2104, reqId -1: Market data farm connection is OK:jfarm
+2026-04-16 13:34:24,364 ib_insync.wrapper INFO Warning 2104, reqId -1: Market data farm connection is OK:usopt.nj
+2026-04-16 13:34:24,365 ib_insync.wrapper INFO Warning 2104, reqId -1: Market data farm connection is OK:cashfarm
+2026-04-16 13:34:24,365 ib_insync.wrapper INFO Warning 2104, reqId -1: Market data farm connection is OK:eufarmnj
+2026-04-16 13:34:24,365 ib_insync.wrapper INFO Warning 2104, reqId -1: Market data farm connection is OK:usfarm
+2026-04-16 13:34:24,365 ib_insync.wrapper INFO Warning 2106, reqId -1: HMDS data farm connection is OK:euhmds
+2026-04-16 13:34:24,365 ib_insync.wrapper INFO Warning 2106, reqId -1: HMDS data farm connection is OK:fundfarm
+2026-04-16 13:34:24,365 ib_insync.wrapper INFO Warning 2106, reqId -1: HMDS data farm connection is OK:ushmds
+2026-04-16 13:34:24,365 ib_insync.wrapper INFO Warning 2158, reqId -1: Sec-def data farm connection is OK:secdefil
+2026-04-16 13:34:24,560 scheduler.v10_runner INFO [v10] Scheduler starting — wiring schedules...
+2026-04-16 13:34:24,561 scheduler.v10_runner INFO [v10] All schedules wired. Running scan immediately...
+2026-04-16 13:34:24,749 execution.coinbase_broker INFO [cb] Connected (LIVE) account=futures buying_power=$1,965.91
+2026-04-16 13:34:24,781 ib_insync.ib INFO Synchronization complete
+2026-04-16 13:34:24,788 forecast.quote_harvester INFO [QuoteHarvester] Started (poll_interval=60s)
+2026-04-16 13:34:24,998 scanner INFO [scanner] Starting multi-exchange scan (Kraken + Binance + Hyperliquid) scope=core_only...
+2026-04-16 13:34:25,381 scanner INFO [scanner] Binance tickers unavailable (geo-block or down) — Kraken only
+2026-04-16 13:34:25,514 ib_insync.wrapper ERROR Error 200, reqId 4: No security definition has been found for the request, contract: Contract(secType='OPT', symbol='CPI', exchange='FORECASTX', currency='USD')
+2026-04-16 13:34:25,944 scanner INFO [scanner] Step 1 (vol>$2500K): 338 kraken + 0 binance → 4 candidates (4 kraken, 0 binance) scope=core_only
+2026-04-16 13:34:25,945 scanner INFO [scanner] Hyperliquid: 47 eligible → 4 added to universe
+2026-04-16 13:34:26,302 scanner INFO [scanner] Step 2 (multi-setup): 8 → 9 (4 kraken, 0 binance, 5 hyperliquid) setups={'momentum': 6, 'ranging_mr': 5}
+2026-04-16 13:34:26,581 scanner INFO [scanner] Step 3 (liquidity): 9 → 7
+2026-04-16 13:34:26,581 scanner INFO [scanner] Step 4 (EV≥$0.25): 7 → 6
+2026-04-16 13:34:26,581 scanner INFO [scanner] Step 6 (regime=UNKNOWN): 6 → 6
+2026-04-16 13:34:26,581 scanner INFO [scanner] Complete: 4 candidates in 1.6s
+2026-04-16 13:34:26,581 scanner INFO [scanner] → PF_SOLUSD SHORT [momentum,ranging_mr] spike=0.63 adx=18 ev=$0.42 funding=0.1338% (kraken)
+2026-04-16 13:34:26,581 scanner INFO [scanner] → XRP LONG [momentum] spike=0.15 adx=17 ev=$0.40 funding=1.3688% (hyperliquid)
+2026-04-16 13:34:26,581 scanner INFO [scanner] → XRP SHORT [ranging_mr] spike=0.15 adx=17 ev=$0.40 funding=1.3688% (hyperliquid)
+2026-04-16 13:34:26,581 scanner INFO [scanner] → PF_ETHUSD LONG [momentum] spike=0.16 adx=20 ev=$0.35 funding=-1.5273% (kraken)
+2026-04-16 13:34:26,582 scheduler.v10_runner INFO [v10] scan: 4 candidates (tv=0 scanner=4), balance=$1966 deployed=$0
+2026-04-16 13:34:28,382 scheduler.v10_runner INFO [v10] ModelStore loaded from disk
+2026-04-16 13:34:29,490 scheduler.v10_runner INFO [v10] PF_SOLUSD SHORT score=46.9 < 58, no primary setup — skip
+2026-04-16 13:34:30,186 scheduler.v10_runner INFO [v10] XRP LONG score=57.0 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 13:34:30,806 scheduler.v10_runner INFO [v10] XRP SHORT score=47.8 < 58, no primary setup — skip
+2026-04-16 13:34:31,795 scheduler.v10_runner INFO [v10] PF_ETHUSD LONG score=51.8 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 13:34:31,797 scheduler.v10_runner INFO [v10] funnel: 4 candidates → dual=0 cooldown=0 risk=0 data_unavail=0 below_thresh=4 econ_veto=0 research_only=0 sizing_zero=0 exec_fail=0 entered=0
+2026-04-16 13:34:31,799 scheduler.v10_runner INFO [v10] Main loop running. Press Ctrl+C to stop.
+2026-04-16 13:35:13,983 ib_insync.wrapper ERROR Error 200, reqId 13: No security definition has been found for the request, contract: Contract(secType='IND', symbol='PCE', exchange='FORECASTX', currency='USD')
+2026-04-16 13:35:14,061 ib_insync.wrapper ERROR Error 200, reqId 14: No security definition has been found for the request, contract: Contract(secType='IND', symbol='NFP', exchange='FORECASTX', currency='USD')
+2026-04-16 13:35:25,331 kill_switch INFO [kill_switch] live_baseline auto-set to $1965.91
+2026-04-16 13:35:26,191 ib_insync.wrapper ERROR Error 200, reqId 17: No security definition has been found for the request, contract: Contract(secType='IND', symbol='PPI', exchange='FORECASTX', currency='USD')
+2026-04-16 13:35:26,257 ib_insync.wrapper ERROR Error 200, reqId 18: No security definition has been found for the request, contract: Contract(secType='IND', symbol='UR', exchange='FORECASTX', currency='USD')
+2026-04-16 13:35:26,320 ib_insync.wrapper ERROR Error 200, reqId 19: No security definition has been found for the request, contract: Contract(secType='IND', symbol='RETAIL', exchange='FORECASTX', currency='USD')
+2026-04-16 13:35:26,393 ib_insync.wrapper ERROR Error 200, reqId 20: No security definition has been found for the request, contract: Contract(secType='IND', symbol='FOMC', exchange='FORECASTX', currency='USD')
+2026-04-16 13:35:26,411 forecast.discovery INFO [Discovery] found=5 persisted=0 active_in_db=0 errors=0
+2026-04-16 13:35:26,411 forecast.runner INFO [ForecastRunner] Discovery: found=5 persisted=0 stubs=5 active=0
+2026-04-16 13:39:24,906 scheduler.v10_runner INFO [v10] scan: 4 candidates (tv=0 scanner=4), balance=$1966 deployed=$0
+2026-04-16 13:39:25,102 ib_insync.wrapper ERROR Error 200, reqId 16: No security definition has been found for the request, contract: Contract(secType='OPT', symbol='GDP', exchange='FORECASTX', currency='USD')
+2026-04-16 13:39:26,470 scheduler.v10_runner INFO [v10] PF_SOLUSD SHORT score=46.9 < 58, no primary setup — skip
+2026-04-16 13:39:27,173 scheduler.v10_runner INFO [v10] XRP LONG score=57.0 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 13:39:28,069 scheduler.v10_runner INFO [v10] XRP SHORT score=47.8 < 58, no primary setup — skip
+2026-04-16 13:39:29,535 scheduler.v10_runner INFO [v10] PF_ETHUSD LONG score=51.4 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 13:39:29,536 scheduler.v10_runner INFO [v10] funnel: 4 candidates → dual=0 cooldown=0 risk=0 data_unavail=0 below_thresh=4 econ_veto=0 research_only=0 sizing_zero=0 exec_fail=0 entered=0
+2026-04-16 13:44:29,889 scanner INFO [scanner] Starting multi-exchange scan (Kraken + Binance + Hyperliquid) scope=core_only...
+2026-04-16 13:44:30,292 scanner INFO [scanner] Binance tickers unavailable (geo-block or down) — Kraken only
+2026-04-16 13:44:31,088 scanner INFO [scanner] Step 1 (vol>$2500K): 338 kraken + 0 binance → 4 candidates (4 kraken, 0 binance) scope=core_only
+2026-04-16 13:44:31,088 scanner INFO [scanner] Hyperliquid: 47 eligible → 4 added to universe
+2026-04-16 13:44:31,370 scanner INFO [scanner] Step 2 (multi-setup): 8 → 12 (6 kraken, 0 binance, 6 hyperliquid) setups={'momentum': 8, 'ranging_mr': 4}
+2026-04-16 13:44:31,865 scanner INFO [scanner] Step 3 (liquidity): 12 → 12
+2026-04-16 13:44:31,865 scanner INFO [scanner] Step 4 (EV≥$0.25): 12 → 12
+2026-04-16 13:44:31,865 scanner INFO [scanner] Step 6 (regime=UNKNOWN): 12 → 12
+2026-04-16 13:44:31,866 scanner INFO [scanner] Complete: 6 candidates in 2.0s
+2026-04-16 13:44:31,866 scanner INFO [scanner] → PF_XRPUSD LONG [momentum] spike=0.18 adx=19 ev=$0.46 funding=-0.0003% (kraken)
+2026-04-16 13:44:31,866 scanner INFO [scanner] → PF_XRPUSD SHORT [ranging_mr] spike=0.18 adx=19 ev=$0.46 funding=-0.0003% (kraken)
+2026-04-16 13:44:31,866 scanner INFO [scanner] → PF_SOLUSD SHORT [ranging_mr] spike=0.45 adx=18 ev=$0.41 funding=0.1338% (kraken)
+2026-04-16 13:44:31,866 scanner INFO [scanner] → PF_SOLUSD LONG [momentum] spike=0.45 adx=18 ev=$0.41 funding=0.1338% (kraken)
+2026-04-16 13:44:31,866 scanner INFO [scanner] → PF_ETHUSD LONG [momentum] spike=0.60 adx=20 ev=$0.37 funding=-1.5273% (kraken)
+2026-04-16 13:44:31,867 scanner INFO [scanner] → PF_XBTUSD LONG [momentum] spike=0.39 adx=18 ev=$0.26 funding=1.0422% (kraken)
+2026-04-16 13:44:31,867 scheduler.v10_runner INFO [v10] scan: 6 candidates (tv=0 scanner=6), balance=$1966 deployed=$0
+2026-04-16 13:44:33,306 scheduler.v10_runner INFO [v10] PF_XRPUSD LONG score=50.7 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 13:44:34,232 scheduler.v10_runner INFO [v10] PF_XRPUSD SHORT score=54.3 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 13:44:35,369 scheduler.v10_runner INFO [v10] PF_SOLUSD SHORT score=46.8 < 58, no primary setup — skip
+2026-04-16 13:44:36,244 scheduler.v10_runner INFO [v10] PF_SOLUSD LONG TIER 2 — composite=60.1 (tech=65.3 ml=58.5)
+2026-04-16 13:44:36,369 scheduler.v10_runner INFO [v10] PF_SOLUSD LONG ENTRY SIGNAL: composite=60.1 composite=60.1 tier=2 regime=RANGING
+2026-04-16 13:44:36,371 execution.coinbase_broker WARNING [cb] 'PF_SOLUSD' is not in the Coinbase supported launch set (supported: ['BTC', 'ETH', 'SOL', 'XRP']).  No trade placed.
+2026-04-16 13:44:36,371 scheduler.v10_runner WARNING [v10] PF_SOLUSD entry returned None — execution failed
+2026-04-16 13:44:37,445 scheduler.v10_runner INFO [v10] PF_ETHUSD LONG score=51.9 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 13:44:38,519 scheduler.v10_runner INFO [v10] PF_XBTUSD LONG TIER 2 — composite=58.8 (tech=69.4 ml=51.1)
+2026-04-16 13:44:38,522 scheduler.v10_runner INFO [v10] PF_XBTUSD LONG RESEARCH_ONLY_BLOCK — not in core execution universe (underlying=XBT)
+2026-04-16 13:44:38,524 scheduler.v10_runner INFO [v10] funnel: 6 candidates → dual=0 cooldown=0 risk=0 data_unavail=0 below_thresh=4 econ_veto=0 research_only=1 sizing_zero=0 exec_fail=1 entered=0
+2026-04-16 13:49:28,266 data.historical_data WARNING [historical_data] Failed to fetch BNB 1h
+2026-04-16 13:49:28,308 data.historical_data WARNING [historical_data] All sources failed for BNB 1h
+2026-04-16 13:49:28,590 data.historical_data WARNING [historical_data] Failed to fetch BNB 1h
+2026-04-16 13:49:28,627 data.historical_data WARNING [historical_data] All sources failed for BNB 1h
+2026-04-16 13:49:32,127 data.historical_data WARNING [historical_data] Failed to fetch BNB 1h
+2026-04-16 13:49:32,163 data.historical_data WARNING [historical_data] All sources failed for BNB 1h
+2026-04-16 13:49:32,494 data.historical_data WARNING [historical_data] Failed to fetch BNB 1h
+2026-04-16 13:49:32,533 data.historical_data WARNING [historical_data] All sources failed for BNB 1h
+2026-04-16 13:49:32,584 learning.candidate_labeler INFO [labeler] labeled 20/50 candidates (skipped=30 errors=0)
+2026-04-16 13:49:39,244 scanner INFO [scanner] Starting multi-exchange scan (Kraken + Binance + Hyperliquid) scope=core_only...
+2026-04-16 13:49:39,575 scanner INFO [scanner] Binance tickers unavailable (geo-block or down) — Kraken only
+2026-04-16 13:49:40,118 scanner INFO [scanner] Step 1 (vol>$2500K): 338 kraken + 0 binance → 4 candidates (4 kraken, 0 binance) scope=core_only
+2026-04-16 13:49:40,119 scanner INFO [scanner] Hyperliquid: 47 eligible → 4 added to universe
+2026-04-16 13:49:40,592 scanner INFO [scanner] Step 2 (multi-setup): 8 → 12 (6 kraken, 0 binance, 6 hyperliquid) setups={'momentum': 8, 'ranging_mr': 4}
+2026-04-16 13:49:41,174 scanner INFO [scanner] Step 3 (liquidity): 12 → 12
+2026-04-16 13:49:41,174 scanner INFO [scanner] Step 4 (EV≥$0.25): 12 → 10
+2026-04-16 13:49:41,174 scanner INFO [scanner] Step 6 (regime=UNKNOWN): 10 → 10
+2026-04-16 13:49:41,174 scanner INFO [scanner] Complete: 5 candidates in 1.9s
+2026-04-16 13:49:41,175 scanner INFO [scanner] → PF_XRPUSD LONG [momentum] spike=0.18 adx=18 ev=$0.46 funding=-0.0003% (kraken)
+2026-04-16 13:49:41,175 scanner INFO [scanner] → PF_XRPUSD SHORT [ranging_mr] spike=0.18 adx=18 ev=$0.46 funding=-0.0003% (kraken)
+2026-04-16 13:49:41,175 scanner INFO [scanner] → PF_SOLUSD SHORT [ranging_mr] spike=0.06 adx=17 ev=$0.39 funding=0.1338% (kraken)
+2026-04-16 13:49:41,175 scanner INFO [scanner] → PF_SOLUSD LONG [momentum] spike=0.06 adx=17 ev=$0.39 funding=0.1338% (kraken)
+2026-04-16 13:49:41,175 scanner INFO [scanner] → PF_ETHUSD LONG [momentum] spike=0.10 adx=20 ev=$0.34 funding=-1.5273% (kraken)
+2026-04-16 13:49:41,175 scheduler.v10_runner INFO [v10] scan: 5 candidates (tv=0 scanner=5), balance=$1966 deployed=$0
+2026-04-16 13:49:42,579 scheduler.v10_runner INFO [v10] PF_XRPUSD LONG score=50.6 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 13:49:43,732 scheduler.v10_runner INFO [v10] PF_XRPUSD SHORT score=54.3 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 13:49:45,175 scheduler.v10_runner INFO [v10] PF_SOLUSD SHORT score=46.2 < 58, no primary setup — skip
+2026-04-16 13:49:46,156 scheduler.v10_runner INFO [v10] PF_SOLUSD LONG TIER 2 — composite=59.4 (tech=65.3 ml=54.6)
+2026-04-16 13:49:46,246 scheduler.v10_runner INFO [v10] PF_SOLUSD LONG ENTRY SIGNAL: composite=59.4 composite=59.4 tier=2 regime=RANGING
+2026-04-16 13:49:46,247 execution.coinbase_broker WARNING [cb] 'PF_SOLUSD' is not in the Coinbase supported launch set (supported: ['BTC', 'ETH', 'SOL', 'XRP']).  No trade placed.
+2026-04-16 13:49:46,247 scheduler.v10_runner WARNING [v10] PF_SOLUSD entry returned None — execution failed
+2026-04-16 13:49:47,464 scheduler.v10_runner INFO [v10] PF_ETHUSD LONG score=46.6 < 58, no primary setup — skip
+2026-04-16 13:49:47,465 scheduler.v10_runner INFO [v10] funnel: 5 candidates → dual=0 cooldown=0 risk=0 data_unavail=0 below_thresh=4 econ_veto=0 research_only=0 sizing_zero=0 exec_fail=1 entered=0
+2026-04-16 13:53:20,841 scheduler.v10_runner INFO [v10] mode=LIVE initial_balance=$5000
+2026-04-16 13:53:20,924 ib_insync.client INFO Connecting to 127.0.0.1:7496 with clientId 3...
+2026-04-16 13:53:20,924 ib_insync.client INFO Connected
+2026-04-16 13:53:20,968 ib_insync.client INFO Logged on to server version 176
+2026-04-16 13:53:20,995 ib_insync.wrapper INFO Warning 2104, reqId -1: Market data farm connection is OK:hfarm
+2026-04-16 13:53:20,995 ib_insync.wrapper INFO Warning 2104, reqId -1: Market data farm connection is OK:usfarm.nj
+2026-04-16 13:53:20,995 ib_insync.wrapper INFO Warning 2104, reqId -1: Market data farm connection is OK:usfuture
+2026-04-16 13:53:20,995 ib_insync.wrapper INFO Warning 2104, reqId -1: Market data farm connection is OK:jfarm
+2026-04-16 13:53:20,995 ib_insync.wrapper INFO Warning 2104, reqId -1: Market data farm connection is OK:usopt.nj
+2026-04-16 13:53:20,995 ib_insync.wrapper INFO Warning 2104, reqId -1: Market data farm connection is OK:cashfarm
+2026-04-16 13:53:20,995 ib_insync.wrapper INFO Warning 2104, reqId -1: Market data farm connection is OK:eufarmnj
+2026-04-16 13:53:20,995 ib_insync.wrapper INFO Warning 2104, reqId -1: Market data farm connection is OK:usfarm
+2026-04-16 13:53:20,995 ib_insync.wrapper INFO Warning 2106, reqId -1: HMDS data farm connection is OK:euhmds
+2026-04-16 13:53:20,995 ib_insync.wrapper INFO Warning 2106, reqId -1: HMDS data farm connection is OK:fundfarm
+2026-04-16 13:53:20,995 ib_insync.wrapper INFO Warning 2106, reqId -1: HMDS data farm connection is OK:ushmds
+2026-04-16 13:53:20,995 ib_insync.wrapper INFO Warning 2158, reqId -1: Sec-def data farm connection is OK:secdefil
+2026-04-16 13:53:20,997 ib_insync.client INFO API connection ready
+2026-04-16 13:53:21,315 perps_engine INFO [perps] restored 1 positions from SQLite (paper=False)
+2026-04-16 13:53:21,320 scheduler.v10_runner INFO [v10] Scheduler starting — wiring schedules...
+2026-04-16 13:53:21,320 scheduler.v10_runner INFO [v10] All schedules wired. Running scan immediately...
+2026-04-16 13:53:21,412 ib_insync.ib INFO Synchronization complete
+2026-04-16 13:53:21,417 forecast.quote_harvester INFO [QuoteHarvester] Started (poll_interval=60s)
+2026-04-16 13:53:21,578 execution.coinbase_broker INFO [cb] Connected (LIVE) account=futures buying_power=$1,941.89
+2026-04-16 13:53:21,777 scanner INFO [scanner] Starting multi-exchange scan (Kraken + Binance + Hyperliquid) scope=core_only...
+2026-04-16 13:53:22,019 ib_insync.wrapper ERROR Error 200, reqId 4: No security definition has been found for the request, contract: Contract(secType='OPT', symbol='CPI', exchange='FORECASTX', currency='USD')
+2026-04-16 13:53:22,180 scanner INFO [scanner] Binance tickers unavailable (geo-block or down) — Kraken only
+2026-04-16 13:53:22,744 scanner INFO [scanner] Step 1 (vol>$2500K): 338 kraken + 0 binance → 4 candidates (4 kraken, 0 binance) scope=core_only
+2026-04-16 13:53:22,744 scanner INFO [scanner] Hyperliquid: 47 eligible → 4 added to universe
+2026-04-16 13:53:23,512 scanner INFO [scanner] Step 2 (multi-setup): 8 → 12 (6 kraken, 0 binance, 6 hyperliquid) setups={'momentum': 8, 'ranging_mr': 4}
+2026-04-16 13:53:23,903 scanner INFO [scanner] Step 3 (liquidity): 12 → 10
+2026-04-16 13:53:23,903 scanner INFO [scanner] Step 4 (EV≥$0.25): 10 → 8
+2026-04-16 13:53:23,903 scanner INFO [scanner] Step 6 (regime=UNKNOWN): 8 → 8
+2026-04-16 13:53:23,904 scanner INFO [scanner] Complete: 5 candidates in 2.1s
+2026-04-16 13:53:23,904 scanner INFO [scanner] → PF_SOLUSD LONG [momentum] spike=0.42 adx=17 ev=$0.41 funding=0.1338% (kraken)
+2026-04-16 13:53:23,904 scanner INFO [scanner] → PF_SOLUSD SHORT [ranging_mr] spike=0.42 adx=17 ev=$0.41 funding=0.1338% (kraken)
+2026-04-16 13:53:23,904 scanner INFO [scanner] → XRP LONG [momentum] spike=0.09 adx=18 ev=$0.40 funding=0.9548% (hyperliquid)
+2026-04-16 13:53:23,904 scanner INFO [scanner] → XRP SHORT [ranging_mr] spike=0.09 adx=18 ev=$0.40 funding=0.9548% (hyperliquid)
+2026-04-16 13:53:23,904 scanner INFO [scanner] → PF_ETHUSD LONG [momentum] spike=0.18 adx=20 ev=$0.35 funding=-1.5273% (kraken)
+2026-04-16 13:53:23,905 scheduler.v10_runner INFO [v10] scan: 5 candidates (tv=0 scanner=5), balance=$1942 deployed=$244
+2026-04-16 13:53:25,582 scheduler.v10_runner INFO [v10] ModelStore loaded from disk
+2026-04-16 13:53:26,407 scheduler.v10_runner INFO [v10] PF_SOLUSD LONG TIER 2 — composite=58.1 (tech=65.3 ml=46.8)
+2026-04-16 13:53:26,499 scheduler.v10_runner INFO [v10] PF_SOLUSD LONG ENTRY SIGNAL: composite=58.1 composite=58.1 tier=2 regime=RANGING
+2026-04-16 13:53:26,500 execution.coinbase_broker WARNING [cb] 'PF_SOLUSD' is not in the Coinbase supported launch set (supported: ['BTC', 'ETH', 'SOL', 'XRP']).  No trade placed.
+2026-04-16 13:53:26,500 scheduler.v10_runner WARNING [v10] PF_SOLUSD entry returned None — execution failed
+2026-04-16 13:53:27,878 scheduler.v10_runner INFO [v10] PF_SOLUSD SHORT score=47.7 < 58, no primary setup — skip
+2026-04-16 13:53:28,970 scheduler.v10_runner INFO [v10] XRP LONG score=56.9 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 13:53:29,538 scheduler.v10_runner INFO [v10] XRP SHORT score=46.0 < 58, no primary setup — skip
+2026-04-16 13:53:29,540 scheduler.v10_runner INFO [v10] PF_ETHUSD — dual-exposure block: underlying=ETH already open as ETH
+2026-04-16 13:53:29,540 scheduler.v10_runner INFO [v10] funnel: 5 candidates → dual=1 cooldown=0 risk=0 data_unavail=0 below_thresh=3 econ_veto=0 research_only=0 sizing_zero=0 exec_fail=1 entered=0
+2026-04-16 13:53:29,542 scheduler.v10_runner INFO [v10] Main loop running. Press Ctrl+C to stop.
+2026-04-16 13:53:53,920 scheduler.v10_runner WARNING [v10] ETH EXIT price sanity FAIL: candle $22.075100 vs live $2324.850000 (99.1% off) — using live price to prevent phantom P&L
+2026-04-16 13:53:55,513 scheduler.v10_runner INFO [v10] EXIT ETH LONG: priority=5 type=risk_forced partial=100% reason=Balance $1942 below kill threshold $3750
+2026-04-16 13:53:56,018 execution.coinbase_broker INFO [cb] LIVE CLOSE ETH: 1 contracts @ ~2326.2800 pnl=$-0.06
+2026-04-16 13:53:56,035 scheduler.v10_runner INFO [v10] CLOSED LONG ETH: pnl=$-0.06 (-0.0%) @ 2326.2800
+2026-04-16 13:54:10,521 ib_insync.wrapper ERROR Error 200, reqId 13: No security definition has been found for the request, contract: Contract(secType='IND', symbol='PCE', exchange='FORECASTX', currency='USD')
+2026-04-16 13:54:10,586 ib_insync.wrapper ERROR Error 200, reqId 14: No security definition has been found for the request, contract: Contract(secType='IND', symbol='NFP', exchange='FORECASTX', currency='USD')
+2026-04-16 13:54:22,366 kill_switch INFO [kill_switch] live_baseline auto-set to $1965.19
+2026-04-16 13:54:22,728 ib_insync.wrapper ERROR Error 200, reqId 17: No security definition has been found for the request, contract: Contract(secType='IND', symbol='PPI', exchange='FORECASTX', currency='USD')
+2026-04-16 13:54:22,789 ib_insync.wrapper ERROR Error 200, reqId 18: No security definition has been found for the request, contract: Contract(secType='IND', symbol='UR', exchange='FORECASTX', currency='USD')
+2026-04-16 13:54:22,849 ib_insync.wrapper ERROR Error 200, reqId 19: No security definition has been found for the request, contract: Contract(secType='IND', symbol='RETAIL', exchange='FORECASTX', currency='USD')
+2026-04-16 13:54:22,910 ib_insync.wrapper ERROR Error 200, reqId 20: No security definition has been found for the request, contract: Contract(secType='IND', symbol='FOMC', exchange='FORECASTX', currency='USD')
+2026-04-16 13:54:22,929 forecast.discovery INFO [Discovery] found=5 persisted=0 active_in_db=0 errors=0
+2026-04-16 13:54:22,929 forecast.runner INFO [ForecastRunner] Discovery: found=5 persisted=0 stubs=5 active=0
+2026-04-16 13:58:14,518 ib_insync.wrapper INFO Warning 2103, reqId -1: Market data farm connection is broken:jfarm
+2026-04-16 13:58:23,355 ib_insync.wrapper ERROR Error 200, reqId 16: No security definition has been found for the request, contract: Contract(secType='OPT', symbol='GDP', exchange='FORECASTX', currency='USD')
+2026-04-16 13:58:27,371 scanner INFO [scanner] Starting multi-exchange scan (Kraken + Binance + Hyperliquid) scope=core_only...
+2026-04-16 13:58:30,293 scanner INFO [scanner] Binance tickers unavailable (geo-block or down) — Kraken only
+2026-04-16 13:58:31,242 scanner INFO [scanner] Step 1 (vol>$2500K): 338 kraken + 0 binance → 4 candidates (4 kraken, 0 binance) scope=core_only
+2026-04-16 13:58:31,244 scanner INFO [scanner] Hyperliquid: 47 eligible → 4 added to universe
+2026-04-16 13:58:32,389 scanner INFO [scanner] Step 2 (multi-setup): 8 → 12 (6 kraken, 0 binance, 6 hyperliquid) setups={'momentum': 8, 'ranging_mr': 8}
+2026-04-16 13:58:32,777 scanner INFO [scanner] Step 3 (liquidity): 12 → 9
+2026-04-16 13:58:32,778 scanner INFO [scanner] Step 4 (EV≥$0.25): 9 → 8
+2026-04-16 13:58:32,778 scanner INFO [scanner] Step 6 (regime=UNKNOWN): 8 → 8
+2026-04-16 13:58:32,778 scanner INFO [scanner] Complete: 5 candidates in 5.5s
+2026-04-16 13:58:32,778 scanner INFO [scanner] → PF_SOLUSD LONG [momentum] spike=0.69 adx=18 ev=$0.41 funding=0.1338% (kraken)
+2026-04-16 13:58:32,778 scanner INFO [scanner] → PF_SOLUSD SHORT [ranging_mr] spike=0.69 adx=18 ev=$0.41 funding=0.1338% (kraken)
+2026-04-16 13:58:32,778 scanner INFO [scanner] → XRP SHORT [ranging_mr] spike=0.14 adx=18 ev=$0.40 funding=0.7970% (hyperliquid)
+2026-04-16 13:58:32,778 scanner INFO [scanner] → XRP LONG [momentum] spike=0.14 adx=18 ev=$0.40 funding=0.7970% (hyperliquid)
+2026-04-16 13:58:32,778 scanner INFO [scanner] → PF_ETHUSD LONG [momentum,ranging_mr] spike=0.37 adx=20 ev=$0.36 funding=-1.5273% (kraken)
+2026-04-16 13:58:32,786 scheduler.v10_runner INFO [v10] scan: 5 candidates (tv=0 scanner=5), balance=$1965 deployed=$0
+2026-04-16 13:58:38,132 ib_insync.wrapper INFO Warning 2105, reqId -1: HMDS data farm connection is broken:fundfarm
+2026-04-16 13:58:38,764 ib_insync.wrapper INFO Warning 2103, reqId -1: Market data farm connection is broken:eufarmnj
+2026-04-16 13:58:38,765 ib_insync.wrapper INFO Warning 2105, reqId -1: HMDS data farm connection is broken:euhmds
+2026-04-16 13:58:38,832 ib_insync.wrapper INFO Warning 2105, reqId -1: HMDS data farm connection is broken:ushmds
+2026-04-16 13:58:40,250 scheduler.v10_runner INFO [v10] PF_SOLUSD LONG TIER 2 — composite=59.6 (tech=65.3 ml=55.3)
+2026-04-16 13:58:40,257 ib_insync.wrapper INFO Warning 2103, reqId -1: Market data farm connection is broken:cashfarm
+2026-04-16 13:58:40,502 ib_insync.wrapper INFO Warning 2103, reqId -1: Market data farm connection is broken:usopt.nj
+2026-04-16 13:58:40,903 ib_insync.wrapper INFO Warning 2103, reqId -1: Market data farm connection is broken:usfuture
+2026-04-16 13:58:41,064 ib_insync.wrapper INFO Warning 2103, reqId -1: Market data farm connection is broken:usfarm.nj
+2026-04-16 13:58:42,591 scheduler.v10_runner INFO [v10] PF_SOLUSD LONG ENTRY SIGNAL: composite=59.6 composite=59.6 tier=2 regime=RANGING
+2026-04-16 13:58:42,928 execution.coinbase_broker WARNING [cb] 'PF_SOLUSD' is not in the Coinbase supported launch set (supported: ['BTC', 'ETH', 'SOL', 'XRP']).  No trade placed.
+2026-04-16 13:58:42,929 scheduler.v10_runner WARNING [v10] PF_SOLUSD entry returned None — execution failed
+2026-04-16 13:58:49,687 scheduler.v10_runner INFO [v10] PF_SOLUSD SHORT score=46.9 < 58, no primary setup — skip
+2026-04-16 13:58:52,868 ib_insync.wrapper INFO Warning 2103, reqId -1: Market data farm connection is broken:usfarm
+2026-04-16 13:58:53,318 ib_insync.wrapper INFO Warning 2103, reqId -1: Market data farm connection is broken:hfarm
+2026-04-16 13:58:53,526 ib_insync.wrapper INFO Warning 2157, reqId -1: Sec-def data farm connection is broken:secdefil
+2026-04-16 13:58:53,786 scheduler.v10_runner INFO [v10] XRP SHORT score=46.0 < 58, no primary setup — skip
+2026-04-16 13:58:54,421 ib_insync.wrapper INFO Warning 2104, reqId -1: Market data farm connection is OK:usopt.nj
+2026-04-16 13:58:54,469 ib_insync.wrapper INFO Warning 2106, reqId -1: HMDS data farm connection is OK:fundfarm
+2026-04-16 13:58:54,571 ib_insync.wrapper INFO Warning 2158, reqId -1: Sec-def data farm connection is OK:secdefil
+2026-04-16 13:58:54,587 ib_insync.wrapper INFO Warning 2104, reqId -1: Market data farm connection is OK:hfarm
+2026-04-16 13:58:54,609 ib_insync.wrapper INFO Warning 2104, reqId -1: Market data farm connection is OK:cashfarm
+2026-04-16 13:58:54,617 ib_insync.wrapper INFO Warning 2104, reqId -1: Market data farm connection is OK:usfarm
+2026-04-16 13:58:54,638 ib_insync.wrapper INFO Warning 2104, reqId -1: Market data farm connection is OK:jfarm
+2026-04-16 13:58:54,666 ib_insync.wrapper INFO Warning 2106, reqId -1: HMDS data farm connection is OK:euhmds
+2026-04-16 13:58:54,670 ib_insync.wrapper INFO Warning 2104, reqId -1: Market data farm connection is OK:usfarm.nj
+2026-04-16 13:58:54,671 ib_insync.wrapper INFO Warning 2106, reqId -1: HMDS data farm connection is OK:ushmds
+2026-04-16 13:58:57,851 ib_insync.wrapper INFO Warning 2104, reqId -1: Market data farm connection is OK:eufarmnj
+2026-04-16 13:58:58,247 ib_insync.wrapper INFO Warning 2104, reqId -1: Market data farm connection is OK:usfuture
+2026-04-16 13:58:58,247 scheduler.v10_runner INFO [v10] XRP LONG score=56.9 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 13:58:58,603 scheduler.v10_runner INFO [v10] funnel: 5 candidates → dual=0 cooldown=1 risk=0 data_unavail=0 below_thresh=3 econ_veto=0 research_only=0 sizing_zero=0 exec_fail=1 entered=0
+2026-04-16 14:04:03,149 scanner INFO [scanner] Starting multi-exchange scan (Kraken + Binance + Hyperliquid) scope=core_only...
+2026-04-16 14:04:04,335 scanner INFO [scanner] Binance tickers unavailable (geo-block or down) — Kraken only
+2026-04-16 14:04:05,013 scanner INFO [scanner] Step 1 (vol>$2500K): 338 kraken + 0 binance → 4 candidates (4 kraken, 0 binance) scope=core_only
+2026-04-16 14:04:05,014 scanner INFO [scanner] Hyperliquid: 47 eligible → 4 added to universe
+2026-04-16 14:04:05,733 scanner INFO [scanner] Step 2 (multi-setup): 8 → 12 (6 kraken, 0 binance, 6 hyperliquid) setups={'momentum': 7, 'ranging_mr': 4, 'funding_collect': 1}
+2026-04-16 14:04:06,238 scanner INFO [scanner] Step 3 (liquidity): 12 → 12
+2026-04-16 14:04:06,244 scanner INFO [scanner] Step 4 (EV≥$0.25): 12 → 9
+2026-04-16 14:04:06,244 scanner INFO [scanner] Step 6 (regime=UNKNOWN): 9 → 9
+2026-04-16 14:04:06,245 scanner INFO [scanner] Complete: 5 candidates in 3.1s
+2026-04-16 14:04:06,245 scanner INFO [scanner] → PF_XRPUSD SHORT [ranging_mr] spike=0.09 adx=17 ev=$0.42 funding=-0.0009% (kraken)
+2026-04-16 14:04:06,245 scanner INFO [scanner] → PF_SOLUSD LONG [momentum] spike=1.94 adx=18 ev=$0.42 funding=-0.0307% (kraken)
+2026-04-16 14:04:06,245 scanner INFO [scanner] → PF_SOLUSD SHORT [ranging_mr] spike=1.94 adx=18 ev=$0.42 funding=-0.0307% (kraken)
+2026-04-16 14:04:06,245 scanner INFO [scanner] → PF_XRPUSD LONG [momentum] spike=0.09 adx=17 ev=$0.42 funding=-0.0009% (kraken)
+2026-04-16 14:04:06,245 scanner INFO [scanner] → ETH LONG [momentum] spike=0.40 adx=18 ev=$0.32 funding=-1.5904% (hyperliquid)
+2026-04-16 14:04:06,276 scheduler.v10_runner INFO [v10] scan: 5 candidates (tv=0 scanner=5), balance=$1965 deployed=$0
+2026-04-16 14:04:14,253 scheduler.v10_runner INFO [v10] PF_XRPUSD SHORT score=51.9 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 14:04:17,274 scheduler.v10_runner INFO [v10] PF_SOLUSD LONG TIER 2 — composite=63.1 (tech=67.2 ml=52.2)
+2026-04-16 14:04:18,022 scheduler.v10_runner INFO [v10] PF_SOLUSD LONG ENTRY SIGNAL: composite=63.1 composite=63.1 tier=2 regime=RANGING
+2026-04-16 14:04:18,119 execution.coinbase_broker WARNING [cb] 'PF_SOLUSD' is not in the Coinbase supported launch set (supported: ['BTC', 'ETH', 'SOL', 'XRP']).  No trade placed.
+2026-04-16 14:04:18,119 scheduler.v10_runner WARNING [v10] PF_SOLUSD entry returned None — execution failed
+2026-04-16 14:04:21,434 scheduler.v10_runner INFO [v10] PF_SOLUSD SHORT score=53.3 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 14:04:22,752 scheduler.v10_runner INFO [v10] PF_XRPUSD LONG score=52.1 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 14:04:22,802 scheduler.v10_runner INFO [v10] funnel: 5 candidates → dual=0 cooldown=1 risk=0 data_unavail=0 below_thresh=3 econ_veto=0 research_only=0 sizing_zero=0 exec_fail=1 entered=0
+2026-04-16 14:08:26,561 data.historical_data WARNING [historical_data] Failed to fetch BNB 1h
+2026-04-16 14:08:26,603 data.historical_data WARNING [historical_data] All sources failed for BNB 1h
+2026-04-16 14:08:26,749 learning.candidate_labeler INFO [labeler] labeled 20/50 candidates (skipped=30 errors=0)
+2026-04-16 14:09:24,208 scanner INFO [scanner] Starting multi-exchange scan (Kraken + Binance + Hyperliquid) scope=core_only...
+2026-04-16 14:09:24,537 scanner INFO [scanner] Binance tickers unavailable (geo-block or down) — Kraken only
+2026-04-16 14:09:25,101 scanner INFO [scanner] Step 1 (vol>$2500K): 338 kraken + 0 binance → 4 candidates (4 kraken, 0 binance) scope=core_only
+2026-04-16 14:09:25,102 scanner INFO [scanner] Hyperliquid: 48 eligible → 4 added to universe
+2026-04-16 14:09:25,464 scanner INFO [scanner] Step 2 (multi-setup): 8 → 13 (6 kraken, 0 binance, 7 hyperliquid) setups={'ranging_mr': 7, 'momentum': 5, 'funding_collect': 1}
+2026-04-16 14:09:25,843 scanner INFO [scanner] Step 3 (liquidity): 13 → 11
+2026-04-16 14:09:25,844 scanner INFO [scanner] Step 4 (EV≥$0.25): 11 → 9
+2026-04-16 14:09:25,844 scanner INFO [scanner] Step 6 (regime=UNKNOWN): 9 → 9
+2026-04-16 14:09:25,844 scanner INFO [scanner] Complete: 6 candidates in 1.6s
+2026-04-16 14:09:25,844 scanner INFO [scanner] → PF_SOLUSD LONG [momentum] spike=2.00 adx=18 ev=$0.42 funding=-0.0307% (kraken)
+2026-04-16 14:09:25,844 scanner INFO [scanner] → PF_SOLUSD SHORT [ranging_mr] spike=2.00 adx=18 ev=$0.42 funding=-0.0307% (kraken)
+2026-04-16 14:09:25,845 scanner INFO [scanner] → XRP LONG [momentum] spike=0.52 adx=17 ev=$0.39 funding=-0.1304% (hyperliquid)
+2026-04-16 14:09:25,845 scanner INFO [scanner] → XRP SHORT [ranging_mr] spike=0.52 adx=17 ev=$0.39 funding=-0.1304% (hyperliquid)
+2026-04-16 14:09:25,845 scanner INFO [scanner] → PF_ETHUSD LONG [ranging_mr] spike=0.35 adx=18 ev=$0.35 funding=-1.1363% (kraken)
+2026-04-16 14:09:25,845 scanner INFO [scanner] → ETH SHORT [momentum] spike=0.57 adx=18 ev=$0.32 funding=-1.2406% (hyperliquid)
+2026-04-16 14:09:25,847 scheduler.v10_runner INFO [v10] scan: 6 candidates (tv=0 scanner=6), balance=$1965 deployed=$0
+2026-04-16 14:09:27,218 scheduler.v10_runner INFO [v10] PF_SOLUSD LONG TIER 2 — composite=63.1 (tech=67.2 ml=52.2)
+2026-04-16 14:09:27,356 scheduler.v10_runner INFO [v10] PF_SOLUSD LONG ENTRY SIGNAL: composite=63.1 composite=63.1 tier=2 regime=RANGING
+2026-04-16 14:09:27,357 execution.coinbase_broker WARNING [cb] 'PF_SOLUSD' is not in the Coinbase supported launch set (supported: ['BTC', 'ETH', 'SOL', 'XRP']).  No trade placed.
+2026-04-16 14:09:27,358 scheduler.v10_runner WARNING [v10] PF_SOLUSD entry returned None — execution failed
+2026-04-16 14:09:28,430 scheduler.v10_runner INFO [v10] PF_SOLUSD SHORT score=53.3 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 14:09:29,310 scheduler.v10_runner INFO [v10] XRP LONG score=48.4 < 58, no primary setup — skip
+2026-04-16 14:09:30,591 scheduler.v10_runner INFO [v10] XRP SHORT score=50.0 < 58, no primary setup — skip
+2026-04-16 14:09:30,595 scheduler.v10_runner INFO [v10] funnel: 6 candidates → dual=0 cooldown=2 risk=0 data_unavail=0 below_thresh=3 econ_veto=0 research_only=0 sizing_zero=0 exec_fail=1 entered=0
+2026-04-16 14:10:56,426 scheduler.v10_runner INFO [v10] mode=LIVE initial_balance=$5000
+2026-04-16 14:10:56,510 ib_insync.client INFO Connecting to 127.0.0.1:7496 with clientId 3...
+2026-04-16 14:10:56,512 ib_insync.client INFO Connected
+2026-04-16 14:10:56,577 ib_insync.client INFO Logged on to server version 176
+2026-04-16 14:10:56,701 ib_insync.client INFO API connection ready
+2026-04-16 14:10:56,702 ib_insync.wrapper INFO Warning 2104, reqId -1: Market data farm connection is OK:hfarm
+2026-04-16 14:10:56,702 ib_insync.wrapper INFO Warning 2104, reqId -1: Market data farm connection is OK:usfarm.nj
+2026-04-16 14:10:56,702 ib_insync.wrapper INFO Warning 2104, reqId -1: Market data farm connection is OK:usfuture
+2026-04-16 14:10:56,702 ib_insync.wrapper INFO Warning 2104, reqId -1: Market data farm connection is OK:jfarm
+2026-04-16 14:10:56,702 ib_insync.wrapper INFO Warning 2104, reqId -1: Market data farm connection is OK:usopt.nj
+2026-04-16 14:10:56,702 ib_insync.wrapper INFO Warning 2104, reqId -1: Market data farm connection is OK:cashfarm
+2026-04-16 14:10:56,703 ib_insync.wrapper INFO Warning 2104, reqId -1: Market data farm connection is OK:eufarmnj
+2026-04-16 14:10:56,703 ib_insync.wrapper INFO Warning 2104, reqId -1: Market data farm connection is OK:usfarm
+2026-04-16 14:10:56,703 ib_insync.wrapper INFO Warning 2106, reqId -1: HMDS data farm connection is OK:euhmds
+2026-04-16 14:10:56,704 ib_insync.wrapper INFO Warning 2106, reqId -1: HMDS data farm connection is OK:fundfarm
+2026-04-16 14:10:56,704 ib_insync.wrapper INFO Warning 2106, reqId -1: HMDS data farm connection is OK:ushmds
+2026-04-16 14:10:56,704 ib_insync.wrapper INFO Warning 2158, reqId -1: Sec-def data farm connection is OK:secdefil
+2026-04-16 14:10:56,943 scheduler.v10_runner INFO [v10] Scheduler starting — wiring schedules...
+2026-04-16 14:10:56,943 scheduler.v10_runner INFO [v10] All schedules wired. Running scan immediately...
+2026-04-16 14:10:57,115 execution.coinbase_broker INFO [cb] Connected (LIVE) account=futures buying_power=$1,965.19
+2026-04-16 14:10:57,360 ib_insync.ib INFO Synchronization complete
+2026-04-16 14:10:57,363 forecast.quote_harvester INFO [QuoteHarvester] Started (poll_interval=60s)
+2026-04-16 14:10:57,449 scanner INFO [scanner] Starting multi-exchange scan (Kraken + Binance + Hyperliquid) scope=core_only...
+2026-04-16 14:10:57,823 scanner INFO [scanner] Binance tickers unavailable (geo-block or down) — Kraken only
+2026-04-16 14:10:58,061 ib_insync.wrapper ERROR Error 200, reqId 4: No security definition has been found for the request, contract: Contract(secType='OPT', symbol='CPI', exchange='FORECASTX', currency='USD')
+2026-04-16 14:10:58,400 scanner INFO [scanner] Step 1 (vol>$2500K): 338 kraken + 0 binance → 4 candidates (4 kraken, 0 binance) scope=core_only
+2026-04-16 14:10:58,401 scanner INFO [scanner] Hyperliquid: 48 eligible → 4 added to universe
+2026-04-16 14:10:58,720 scanner INFO [scanner] Step 2 (multi-setup): 8 → 13 (6 kraken, 0 binance, 7 hyperliquid) setups={'ranging_mr': 7, 'momentum': 5, 'funding_collect': 1}
+2026-04-16 14:10:59,214 scanner INFO [scanner] Step 3 (liquidity): 13 → 12
+2026-04-16 14:10:59,214 scanner INFO [scanner] Step 4 (EV≥$0.25): 12 → 11
+2026-04-16 14:10:59,214 scanner INFO [scanner] Step 6 (regime=UNKNOWN): 11 → 11
+2026-04-16 14:10:59,214 scanner INFO [scanner] Complete: 6 candidates in 1.8s
+2026-04-16 14:10:59,214 scanner INFO [scanner] → PF_XRPUSD SHORT [ranging_mr] spike=0.12 adx=17 ev=$0.44 funding=-0.0009% (kraken)
+2026-04-16 14:10:59,214 scanner INFO [scanner] → PF_XRPUSD LONG [momentum] spike=0.12 adx=17 ev=$0.44 funding=-0.0009% (kraken)
+2026-04-16 14:10:59,214 scanner INFO [scanner] → PF_SOLUSD SHORT [ranging_mr] spike=2.07 adx=18 ev=$0.43 funding=-0.0307% (kraken)
+2026-04-16 14:10:59,214 scanner INFO [scanner] → PF_SOLUSD LONG [momentum] spike=2.07 adx=18 ev=$0.43 funding=-0.0307% (kraken)
+2026-04-16 14:10:59,214 scanner INFO [scanner] → PF_ETHUSD LONG [ranging_mr] spike=0.37 adx=18 ev=$0.36 funding=-1.1363% (kraken)
+2026-04-16 14:10:59,214 scanner INFO [scanner] → ETH SHORT [momentum] spike=0.78 adx=18 ev=$0.33 funding=-1.3378% (hyperliquid)
+2026-04-16 14:10:59,215 scheduler.v10_runner INFO [v10] scan: 6 candidates (tv=0 scanner=6), balance=$1965 deployed=$0
+2026-04-16 14:11:03,225 scheduler.v10_runner INFO [v10] ModelStore loaded from disk
+2026-04-16 14:11:04,332 scheduler.v10_runner INFO [v10] PF_XRPUSD SHORT score=51.5 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 14:11:05,282 scheduler.v10_runner INFO [v10] PF_XRPUSD LONG score=51.4 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 14:11:06,215 scheduler.v10_runner INFO [v10] PF_SOLUSD SHORT score=53.0 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 14:11:06,991 scheduler.v10_runner INFO [v10] PF_SOLUSD LONG TIER 2 — composite=63.2 (tech=67.2 ml=52.7)
+2026-04-16 14:11:07,193 scheduler.v10_runner INFO [v10] PF_SOLUSD LONG ENTRY SIGNAL: composite=63.2 composite=63.2 tier=2 regime=RANGING
+2026-04-16 14:11:07,197 execution.coinbase_broker WARNING [cb] 'PF_SOLUSD' is not in the Coinbase supported launch set (supported: ['BTC', 'ETH', 'SOL', 'XRP']).  No trade placed.
+2026-04-16 14:11:07,197 scheduler.v10_runner WARNING [v10] PF_SOLUSD entry returned None — execution failed
+2026-04-16 14:11:08,378 scheduler.v10_runner INFO [v10] PF_ETHUSD LONG score=52.2 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 14:11:10,233 scheduler.v10_runner WARNING [v10] ETH — price sanity FAIL: candle $22.02 vs live $2321.95 (99.1% off) — SKIP (wrong data source)
+2026-04-16 14:11:10,233 scheduler.v10_runner INFO [v10] funnel: 6 candidates → dual=0 cooldown=0 risk=0 data_unavail=1 below_thresh=4 econ_veto=0 research_only=0 sizing_zero=0 exec_fail=1 entered=0
+2026-04-16 14:11:10,245 scheduler.v10_runner INFO [v10] Main loop running. Press Ctrl+C to stop.
+2026-04-16 14:11:46,605 ib_insync.wrapper ERROR Error 200, reqId 13: No security definition has been found for the request, contract: Contract(secType='IND', symbol='PCE', exchange='FORECASTX', currency='USD')
+2026-04-16 14:11:46,668 ib_insync.wrapper ERROR Error 200, reqId 14: No security definition has been found for the request, contract: Contract(secType='IND', symbol='NFP', exchange='FORECASTX', currency='USD')
+2026-04-16 14:11:57,684 kill_switch INFO [kill_switch] live_baseline auto-set to $1965.19
+2026-04-16 14:11:58,868 ib_insync.wrapper ERROR Error 200, reqId 17: No security definition has been found for the request, contract: Contract(secType='IND', symbol='PPI', exchange='FORECASTX', currency='USD')
+2026-04-16 14:11:58,931 ib_insync.wrapper ERROR Error 200, reqId 18: No security definition has been found for the request, contract: Contract(secType='IND', symbol='UR', exchange='FORECASTX', currency='USD')
+2026-04-16 14:11:59,009 ib_insync.wrapper ERROR Error 200, reqId 19: No security definition has been found for the request, contract: Contract(secType='IND', symbol='RETAIL', exchange='FORECASTX', currency='USD')
+2026-04-16 14:11:59,073 ib_insync.wrapper ERROR Error 200, reqId 20: No security definition has been found for the request, contract: Contract(secType='IND', symbol='FOMC', exchange='FORECASTX', currency='USD')
+2026-04-16 14:11:59,115 forecast.discovery INFO [Discovery] found=5 persisted=0 active_in_db=0 errors=0
+2026-04-16 14:11:59,116 forecast.runner INFO [ForecastRunner] Discovery: found=5 persisted=0 stubs=5 active=0
+2026-04-16 14:15:57,605 ib_insync.wrapper ERROR Error 200, reqId 16: No security definition has been found for the request, contract: Contract(secType='OPT', symbol='GDP', exchange='FORECASTX', currency='USD')
+2026-04-16 14:15:57,995 scheduler.v10_runner INFO [v10] scan: 6 candidates (tv=0 scanner=6), balance=$1965 deployed=$0
+2026-04-16 14:15:59,954 scheduler.v10_runner INFO [v10] PF_XRPUSD SHORT score=54.2 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 14:16:01,511 scheduler.v10_runner INFO [v10] PF_XRPUSD LONG TIER 1 — KST Bullish Cross + Trend Confirm (composite=53.1 used for sizing only)
+2026-04-16 14:16:01,656 scheduler.v10_runner INFO [v10] PF_XRPUSD LONG ENTRY SIGNAL: KST Bullish Cross + Trend Confirm composite=53.1 tier=1 regime=RANGING
+2026-04-16 14:16:01,657 execution.coinbase_broker WARNING [cb] 'PF_XRPUSD' is not in the Coinbase supported launch set (supported: ['BTC', 'ETH', 'SOL', 'XRP']).  No trade placed.
+2026-04-16 14:16:01,657 scheduler.v10_runner WARNING [v10] PF_XRPUSD entry returned None — execution failed
+2026-04-16 14:16:04,666 scheduler.v10_runner INFO [v10] PF_SOLUSD SHORT score=56.7 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 14:16:06,069 scheduler.v10_runner INFO [v10] PF_SOLUSD LONG TIER 1 — BB-Keltner Squeeze Breakout Long (composite=66.3 used for sizing only)
+2026-04-16 14:16:06,095 scheduler.v10_runner INFO [v10] PF_SOLUSD LONG ENTRY SIGNAL: BB-Keltner Squeeze Breakout Long composite=66.3 tier=1 regime=RANGING
+2026-04-16 14:16:06,096 execution.coinbase_broker WARNING [cb] 'PF_SOLUSD' is not in the Coinbase supported launch set (supported: ['BTC', 'ETH', 'SOL', 'XRP']).  No trade placed.
+2026-04-16 14:16:06,096 scheduler.v10_runner WARNING [v10] PF_SOLUSD entry returned None — execution failed
+2026-04-16 14:16:07,659 scheduler.v10_runner INFO [v10] PF_ETHUSD LONG score=53.0 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 14:16:09,799 scheduler.v10_runner WARNING [v10] ETH — price sanity FAIL: candle $22.094999 vs live $2327.55 (99.1% off) — SKIP (wrong data source)
+2026-04-16 14:16:09,806 scheduler.v10_runner INFO [v10] funnel: 6 candidates → dual=0 cooldown=0 risk=0 data_unavail=1 below_thresh=3 econ_veto=0 research_only=0 sizing_zero=0 exec_fail=2 entered=0
+2026-04-16 14:21:11,203 scanner INFO [scanner] Starting multi-exchange scan (Kraken + Binance + Hyperliquid) scope=core_only...
+2026-04-16 14:21:11,655 scanner INFO [scanner] Binance tickers unavailable (geo-block or down) — Kraken only
+2026-04-16 14:21:12,211 scanner INFO [scanner] Step 1 (vol>$2500K): 338 kraken + 0 binance → 4 candidates (4 kraken, 0 binance) scope=core_only
+2026-04-16 14:21:12,212 scanner INFO [scanner] Hyperliquid: 48 eligible → 4 added to universe
+2026-04-16 14:21:12,590 scanner INFO [scanner] Step 2 (multi-setup): 8 → 9 (5 kraken, 0 binance, 4 hyperliquid) setups={'momentum': 5, 'ranging_mr': 3, 'funding_collect': 1}
+2026-04-16 14:21:13,144 scanner INFO [scanner] Step 3 (liquidity): 9 → 7
+2026-04-16 14:21:13,144 scanner INFO [scanner] Step 4 (EV≥$0.25): 7 → 6
+2026-04-16 14:21:13,144 scanner INFO [scanner] Step 6 (regime=UNKNOWN): 6 → 6
+2026-04-16 14:21:13,145 scanner INFO [scanner] Complete: 5 candidates in 1.9s
+2026-04-16 14:21:13,145 scanner INFO [scanner] → PF_SOLUSD LONG [momentum] spike=0.85 adx=20 ev=$0.44 funding=-0.0307% (kraken)
+2026-04-16 14:21:13,145 scanner INFO [scanner] → SOL SHORT [ranging_mr] spike=1.02 adx=18 ev=$0.40 funding=-0.7527% (hyperliquid)
+2026-04-16 14:21:13,145 scanner INFO [scanner] → XRP LONG [momentum] spike=0.24 adx=17 ev=$0.38 funding=-0.2619% (hyperliquid)
+2026-04-16 14:21:13,145 scanner INFO [scanner] → XRP SHORT [ranging_mr] spike=0.24 adx=17 ev=$0.38 funding=-0.2619% (hyperliquid)
+2026-04-16 14:21:13,145 scanner INFO [scanner] → PF_ETHUSD LONG [momentum] spike=0.54 adx=17 ev=$0.34 funding=-1.1363% (kraken)
+2026-04-16 14:21:13,145 scheduler.v10_runner INFO [v10] scan: 5 candidates (tv=0 scanner=5), balance=$1938 deployed=$0
+2026-04-16 14:21:13,161 scheduler.v10_runner INFO [v10] PF_SOLUSD — dual-exposure block: underlying=SOL already open as SOL
+2026-04-16 14:21:13,182 scheduler.v10_runner INFO [v10] PF_ETHUSD — dual-exposure block: underlying=ETH already open as ETH
+2026-04-16 14:21:13,183 scheduler.v10_runner INFO [v10] funnel: 5 candidates → dual=5 cooldown=0 risk=0 data_unavail=0 below_thresh=0 econ_veto=0 research_only=0 sizing_zero=0 exec_fail=0 entered=0
+2026-04-16 14:24:51,320 ib_insync.wrapper INFO Warning 2103, reqId -1: Market data farm connection is broken:hfarm
+2026-04-16 14:24:54,560 ib_insync.wrapper INFO Warning 2104, reqId -1: Market data farm connection is OK:hfarm
+2026-04-16 14:26:02,666 data.historical_data WARNING [historical_data] Failed to fetch BNB 1h
+2026-04-16 14:26:02,743 data.historical_data WARNING [historical_data] All sources failed for BNB 1h
+2026-04-16 14:26:02,788 learning.candidate_labeler INFO [labeler] labeled 16/50 candidates (skipped=34 errors=0)
+2026-04-16 14:26:14,082 scanner INFO [scanner] Starting multi-exchange scan (Kraken + Binance + Hyperliquid) scope=core_only...
+2026-04-16 14:26:14,476 scanner INFO [scanner] Binance tickers unavailable (geo-block or down) — Kraken only
+2026-04-16 14:26:15,024 scanner INFO [scanner] Step 1 (vol>$2500K): 338 kraken + 0 binance → 4 candidates (4 kraken, 0 binance) scope=core_only
+2026-04-16 14:26:15,025 scanner INFO [scanner] Hyperliquid: 48 eligible → 4 added to universe
+2026-04-16 14:26:15,351 scanner INFO [scanner] Step 2 (multi-setup): 8 → 12 (6 kraken, 0 binance, 6 hyperliquid) setups={'momentum': 7, 'ranging_mr': 4, 'funding_collect': 1}
+2026-04-16 14:26:15,691 scanner INFO [scanner] Step 3 (liquidity): 12 → 10
+2026-04-16 14:26:15,692 scanner INFO [scanner] Step 4 (EV≥$0.25): 10 → 8
+2026-04-16 14:26:15,692 scanner INFO [scanner] Step 6 (regime=UNKNOWN): 8 → 8
+2026-04-16 14:26:15,692 scanner INFO [scanner] Complete: 6 candidates in 1.6s
+2026-04-16 14:26:15,692 scanner INFO [scanner] → PF_SOLUSD LONG [momentum] spike=1.52 adx=20 ev=$0.44 funding=-0.0307% (kraken)
+2026-04-16 14:26:15,692 scanner INFO [scanner] → SOL SHORT [ranging_mr] spike=1.85 adx=18 ev=$0.41 funding=-0.7523% (hyperliquid)
+2026-04-16 14:26:15,692 scanner INFO [scanner] → XRP SHORT [ranging_mr] spike=0.27 adx=17 ev=$0.38 funding=-0.2597% (hyperliquid)
+2026-04-16 14:26:15,692 scanner INFO [scanner] → XRP LONG [momentum] spike=0.27 adx=17 ev=$0.38 funding=-0.2597% (hyperliquid)
+2026-04-16 14:26:15,692 scanner INFO [scanner] → PF_ETHUSD SHORT [momentum] spike=0.67 adx=17 ev=$0.34 funding=-1.1363% (kraken)
+2026-04-16 14:26:15,692 scanner INFO [scanner] → PF_ETHUSD LONG [ranging_mr] spike=0.67 adx=17 ev=$0.34 funding=-1.1363% (kraken)
+2026-04-16 14:26:15,693 scheduler.v10_runner INFO [v10] scan: 6 candidates (tv=0 scanner=6), balance=$1937 deployed=$0
+2026-04-16 14:26:15,696 scheduler.v10_runner INFO [v10] PF_SOLUSD — dual-exposure block: underlying=SOL already open as SOL
+2026-04-16 14:26:15,704 scheduler.v10_runner INFO [v10] PF_ETHUSD — dual-exposure block: underlying=ETH already open as ETH
+2026-04-16 14:26:15,706 scheduler.v10_runner INFO [v10] PF_ETHUSD — dual-exposure block: underlying=ETH already open as ETH
+2026-04-16 14:26:15,707 scheduler.v10_runner INFO [v10] funnel: 6 candidates → dual=6 cooldown=0 risk=0 data_unavail=0 below_thresh=0 econ_veto=0 research_only=0 sizing_zero=0 exec_fail=0 entered=0
+2026-04-16 14:31:17,304 scanner INFO [scanner] Starting multi-exchange scan (Kraken + Binance + Hyperliquid) scope=core_only...
+2026-04-16 14:31:18,821 scanner INFO [scanner] Binance tickers unavailable (geo-block or down) — Kraken only
+2026-04-16 14:31:20,044 scanner INFO [scanner] Step 1 (vol>$2500K): 338 kraken + 0 binance → 4 candidates (4 kraken, 0 binance) scope=core_only
+2026-04-16 14:31:20,046 scanner INFO [scanner] Hyperliquid: 48 eligible → 4 added to universe
+2026-04-16 14:31:20,779 scanner INFO [scanner] Step 2 (multi-setup): 8 → 11 (5 kraken, 0 binance, 6 hyperliquid) setups={'momentum': 7, 'ranging_mr': 3, 'funding_collect': 1}
+2026-04-16 14:31:21,595 scanner INFO [scanner] Step 3 (liquidity): 11 → 9
+2026-04-16 14:31:21,607 scanner INFO [scanner] Step 4 (EV≥$0.25): 9 → 7
+2026-04-16 14:31:21,607 scanner INFO [scanner] Step 6 (regime=UNKNOWN): 7 → 7
+2026-04-16 14:31:21,607 scanner INFO [scanner] Complete: 5 candidates in 4.3s
+2026-04-16 14:31:21,607 scanner INFO [scanner] → SOL SHORT [ranging_mr] spike=2.11 adx=19 ev=$0.41 funding=-0.6178% (hyperliquid)
+2026-04-16 14:31:21,607 scanner INFO [scanner] → PF_SOLUSD LONG [momentum] spike=0.15 adx=21 ev=$0.41 funding=-0.0307% (kraken)
+2026-04-16 14:31:21,607 scanner INFO [scanner] → XRP SHORT [ranging_mr] spike=0.29 adx=18 ev=$0.38 funding=-0.1082% (hyperliquid)
+2026-04-16 14:31:21,607 scanner INFO [scanner] → XRP LONG [momentum] spike=0.29 adx=18 ev=$0.38 funding=-0.1082% (hyperliquid)
+2026-04-16 14:31:21,608 scanner INFO [scanner] → PF_ETHUSD SHORT [momentum] spike=0.81 adx=16 ev=$0.35 funding=-1.1363% (kraken)
+2026-04-16 14:31:21,637 scheduler.v10_runner INFO [v10] scan: 5 candidates (tv=0 scanner=5), balance=$1937 deployed=$0
+2026-04-16 14:31:21,739 scheduler.v10_runner INFO [v10] PF_SOLUSD — dual-exposure block: underlying=SOL already open as SOL
+2026-04-16 14:31:21,807 scheduler.v10_runner INFO [v10] PF_ETHUSD — dual-exposure block: underlying=ETH already open as ETH
+2026-04-16 14:31:21,814 scheduler.v10_runner INFO [v10] funnel: 5 candidates → dual=5 cooldown=0 risk=0 data_unavail=0 below_thresh=0 econ_veto=0 research_only=0 sizing_zero=0 exec_fail=0 entered=0
+2026-04-16 14:31:42,679 ib_insync.wrapper INFO Warning 2103, reqId -1: Market data farm connection is broken:jfarm
+2026-04-16 14:31:48,223 ib_insync.wrapper INFO Warning 2104, reqId -1: Market data farm connection is OK:jfarm
+2026-04-16 14:36:23,426 scanner INFO [scanner] Starting multi-exchange scan (Kraken + Binance + Hyperliquid) scope=core_only...
+2026-04-16 14:36:24,009 scanner INFO [scanner] Binance tickers unavailable (geo-block or down) — Kraken only
+2026-04-16 14:36:24,633 scanner INFO [scanner] Step 1 (vol>$2500K): 338 kraken + 0 binance → 4 candidates (4 kraken, 0 binance) scope=core_only
+2026-04-16 14:36:24,634 scanner INFO [scanner] Hyperliquid: 47 eligible → 4 added to universe
+2026-04-16 14:36:25,315 scanner INFO [scanner] Step 2 (multi-setup): 8 → 9 (4 kraken, 0 binance, 5 hyperliquid) setups={'momentum': 6, 'funding_collect': 1, 'ranging_mr': 2}
+2026-04-16 14:36:25,571 scanner INFO [scanner] Step 3 (liquidity): 9 → 7
+2026-04-16 14:36:25,571 scanner INFO [scanner] Step 4 (EV≥$0.25): 7 → 5
+2026-04-16 14:36:25,571 scanner INFO [scanner] Step 6 (regime=UNKNOWN): 5 → 5
+2026-04-16 14:36:25,571 scanner INFO [scanner] Complete: 4 candidates in 2.1s
+2026-04-16 14:36:25,571 scanner INFO [scanner] → PF_SOLUSD LONG [momentum] spike=0.44 adx=21 ev=$0.43 funding=-0.0307% (kraken)
+2026-04-16 14:36:25,571 scanner INFO [scanner] → XRP SHORT [ranging_mr] spike=0.49 adx=18 ev=$0.36 funding=0.0083% (hyperliquid)
+2026-04-16 14:36:25,571 scanner INFO [scanner] → XRP LONG [momentum] spike=0.49 adx=18 ev=$0.36 funding=0.0083% (hyperliquid)
+2026-04-16 14:36:25,571 scanner INFO [scanner] → ETH LONG [momentum] spike=0.10 adx=16 ev=$0.30 funding=-0.8045% (hyperliquid)
+2026-04-16 14:36:25,572 scheduler.v10_runner INFO [v10] scan: 4 candidates (tv=0 scanner=4), balance=$1938 deployed=$0
+2026-04-16 14:36:25,579 scheduler.v10_runner INFO [v10] PF_SOLUSD — dual-exposure block: underlying=SOL already open as SOL
+2026-04-16 14:36:25,588 scheduler.v10_runner INFO [v10] funnel: 4 candidates → dual=4 cooldown=0 risk=0 data_unavail=0 below_thresh=0 econ_veto=0 research_only=0 sizing_zero=0 exec_fail=0 entered=0
+2026-04-16 14:41:05,636 data.historical_data WARNING [historical_data] Failed to fetch BNB 1h
+2026-04-16 14:41:05,737 data.historical_data WARNING [historical_data] All sources failed for BNB 1h
+2026-04-16 14:41:06,992 learning.candidate_labeler INFO [labeler] labeled 19/50 candidates (skipped=31 errors=0)
+2026-04-16 14:41:26,936 scanner INFO [scanner] Starting multi-exchange scan (Kraken + Binance + Hyperliquid) scope=core_only...
+2026-04-16 14:41:27,304 scanner INFO [scanner] Binance tickers unavailable (geo-block or down) — Kraken only
+2026-04-16 14:41:27,960 scanner INFO [scanner] Step 1 (vol>$2500K): 338 kraken + 0 binance → 4 candidates (4 kraken, 0 binance) scope=core_only
+2026-04-16 14:41:27,960 scanner INFO [scanner] Hyperliquid: 47 eligible → 4 added to universe
+2026-04-16 14:41:28,261 scanner INFO [scanner] Step 2 (multi-setup): 8 → 11 (5 kraken, 0 binance, 6 hyperliquid) setups={'momentum': 7, 'ranging_mr': 4, 'funding_collect': 1}
+2026-04-16 14:41:28,777 scanner INFO [scanner] Step 3 (liquidity): 11 → 9
+2026-04-16 14:41:28,778 scanner INFO [scanner] Step 4 (EV≥$0.25): 9 → 7
+2026-04-16 14:41:28,778 scanner INFO [scanner] Step 6 (regime=UNKNOWN): 7 → 7
+2026-04-16 14:41:28,778 scanner INFO [scanner] Complete: 5 candidates in 1.8s
+2026-04-16 14:41:28,778 scanner INFO [scanner] → PF_SOLUSD LONG [momentum] spike=0.89 adx=22 ev=$0.45 funding=-0.0307% (kraken)
+2026-04-16 14:41:28,778 scanner INFO [scanner] → XRP SHORT [ranging_mr] spike=1.00 adx=19 ev=$0.37 funding=0.1554% (hyperliquid)
+2026-04-16 14:41:28,778 scanner INFO [scanner] → XRP LONG [momentum] spike=1.00 adx=19 ev=$0.37 funding=0.1554% (hyperliquid)
+2026-04-16 14:41:28,778 scanner INFO [scanner] → PF_ETHUSD LONG [momentum] spike=0.27 adx=16 ev=$0.33 funding=-1.1363% (kraken)
+2026-04-16 14:41:28,778 scanner INFO [scanner] → ETH SHORT [ranging_mr] spike=0.56 adx=16 ev=$0.31 funding=-0.6388% (hyperliquid)
+2026-04-16 14:41:28,781 scheduler.v10_runner INFO [v10] scan: 5 candidates (tv=0 scanner=5), balance=$1938 deployed=$0
+2026-04-16 14:41:28,784 scheduler.v10_runner INFO [v10] PF_SOLUSD — dual-exposure block: underlying=SOL already open as SOL
+2026-04-16 14:41:28,797 scheduler.v10_runner INFO [v10] PF_ETHUSD — dual-exposure block: underlying=ETH already open as ETH
+2026-04-16 14:41:28,800 scheduler.v10_runner INFO [v10] funnel: 5 candidates → dual=5 cooldown=0 risk=0 data_unavail=0 below_thresh=0 econ_veto=0 research_only=0 sizing_zero=0 exec_fail=0 entered=0
+2026-04-16 14:42:00,321 ib_insync.wrapper ERROR Error 200, reqId 22: No security definition has been found for the request, contract: Contract(secType='OPT', symbol='CPI', exchange='FORECASTX', currency='USD')
+2026-04-16 14:42:49,528 ib_insync.wrapper ERROR Error 200, reqId 31: No security definition has been found for the request, contract: Contract(secType='IND', symbol='PCE', exchange='FORECASTX', currency='USD')
+2026-04-16 14:42:49,614 ib_insync.wrapper ERROR Error 200, reqId 32: No security definition has been found for the request, contract: Contract(secType='IND', symbol='NFP', exchange='FORECASTX', currency='USD')
+2026-04-16 14:43:01,779 ib_insync.wrapper ERROR Error 200, reqId 35: No security definition has been found for the request, contract: Contract(secType='IND', symbol='PPI', exchange='FORECASTX', currency='USD')
+2026-04-16 14:43:01,842 ib_insync.wrapper ERROR Error 200, reqId 36: No security definition has been found for the request, contract: Contract(secType='IND', symbol='UR', exchange='FORECASTX', currency='USD')
+2026-04-16 14:43:01,901 ib_insync.wrapper ERROR Error 200, reqId 37: No security definition has been found for the request, contract: Contract(secType='IND', symbol='RETAIL', exchange='FORECASTX', currency='USD')
+2026-04-16 14:43:01,968 ib_insync.wrapper ERROR Error 200, reqId 38: No security definition has been found for the request, contract: Contract(secType='IND', symbol='FOMC', exchange='FORECASTX', currency='USD')
+2026-04-16 14:43:01,996 forecast.discovery INFO [Discovery] found=5 persisted=0 active_in_db=0 errors=0
+2026-04-16 14:43:01,997 forecast.runner INFO [ForecastRunner] Discovery: found=5 persisted=0 stubs=5 active=0

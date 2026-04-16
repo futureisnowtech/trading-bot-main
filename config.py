@@ -44,6 +44,28 @@ SUPPRESSED_SYMBOLS: set = {
 }
 
 # ════════════════════════════════════════════════════════════════════
+# EXECUTION UNIVERSE (v15.10)
+# Core underlyings: top-10 assets with Coinbase nano-futures support.
+# Scanner stays broad (Kraken + Binance + Hyperliquid — all 3 sources).
+# Only core underlyings reach the live execution path; non-core are
+# journaled as research_only_block so the learning layer can observe
+# their outcomes without committing capital.
+# Review quarterly — add an underlying when it gets Coinbase futures.
+# ════════════════════════════════════════════════════════════════════
+CORE_EXECUTION_UNDERLYINGS: set = {
+    "BTC",  # BIP-20DEC30-CDE — live Coinbase nano futures
+    "ETH",  # ETP-20DEC30-CDE — live Coinbase nano futures
+    "SOL",  # SLP-20DEC30-CDE — live Coinbase nano futures
+    "XRP",  # XPP-20DEC30-CDE — live Coinbase nano futures
+    "DOGE",  # high-liquidity scanner hit — pending Coinbase futures listing
+    "AVAX",  # high-liquidity scanner hit — pending Coinbase futures listing
+    "LINK",  # high-liquidity scanner hit — pending Coinbase futures listing
+    "AAVE",  # high-liquidity scanner hit — pending Coinbase futures listing
+    "INJ",  # high-liquidity scanner hit — pending Coinbase futures listing
+    "NEAR",  # high-liquidity scanner hit — pending Coinbase futures listing
+}
+
+# ════════════════════════════════════════════════════════════════════
 # RISK — HARDCODED. NO AI CAN OVERRIDE THESE.
 # Paper mode uses looser limits to maximise learning velocity.
 # Live mode uses tight limits to protect real capital.

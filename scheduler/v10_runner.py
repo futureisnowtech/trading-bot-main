@@ -23,6 +23,7 @@ from typing import Dict, Optional
 
 import schedule
 from config import SUPPRESSED_SYMBOLS
+from runtime.execution_universe import get_underlying as _get_underlying
 
 logger = logging.getLogger(__name__)
 
@@ -95,31 +96,7 @@ def _get_model_store():
     return _model_store
 
 
-def _get_underlying(symbol: str) -> str:
-    """
-    Normalize any symbol format to its base asset for dual-exposure detection.
-    Examples:
-      PF_ETHUSD  → ETH     (Kraken futures)
-      ETH        → ETH     (Hyperliquid bare)
-      ETHUSDT    → ETH     (Binance perp)
-      ETH-USDC   → ETH     (Coinbase spot)
-      ETHFI      → ETHFI   (different asset — no match to ETH)
-    """
-    s = symbol.upper().strip()
-    # Strip Kraken futures prefix
-    for pfx in ("PF_", "PI_"):
-        if s.startswith(pfx):
-            s = s[len(pfx) :]
-            break
-    # Handle Coinbase hyphenated pairs (ETH-USDC → ETH)
-    if "-" in s:
-        return s.split("-")[0]
-    # Strip known quote suffixes — longest match first to avoid partial strip
-    for q in ("USDT", "USDC", "BUSD", "USD"):
-        if s.endswith(q) and len(s) > len(q) + 1:
-            s = s[: -len(q)]
-            break
-    return s
+# _get_underlying imported from runtime.execution_universe (v15.10 — shared helper)
 
 
 # ── Candidate journaling (v13.6) ─────────────────────────────────────────────
@@ -1129,6 +1106,37 @@ def _attempt_entry(
         pass
     except Exception as e:
         logger.debug(f"[v10] economics gate error {symbol}: {e}")
+
+    # ── Step 5b: Execution universe gate (v15.10) ────────────────────────────
+    # Scanner stays broad; only core-10 underlyings reach live execution.
+    # Non-core (and suppressed) are journaled so the learning layer can
+    # observe their outcomes without committing capital.
+    try:
+        from runtime.execution_universe import get_execution_policy as _exec_policy
+
+        _eu_policy = _exec_policy(symbol)
+        if not _eu_policy["execute"]:
+            underlying = _get_underlying(symbol)
+            logger.info(
+                f"[v10] {symbol} {direction} RESEARCH_ONLY_BLOCK "
+                f"— not in core execution universe (underlying={underlying})"
+            )
+            _journal_scan_candidate(
+                scan_id,
+                candidate,
+                "research_only_block",
+                regime=regime,
+                technical_score=_tech_score,
+                ml_score=_ml_score,
+                composite_score=composite,
+                entry_threshold=58.0,
+                should_enter_signal=1,
+                econ_approved=1,
+                entry_block_reason=f"non_core_execution_universe:{underlying}",
+            )
+            return
+    except Exception as _eu_err:
+        logger.debug(f"[v10] execution universe check error {symbol}: {_eu_err}")
 
     setup_str = (
         primary_setup["label"] if primary_setup else f"composite={composite:.1f}"
@@ -2432,8 +2440,11 @@ def run_forever():
         try:
             from runtime.runtime_state import write_system_heartbeat, upsert_lane_state
             from datetime import datetime, timezone
+
             write_system_heartbeat()
-            upsert_lane_state("crypto", last_heartbeat_at=datetime.now(timezone.utc).isoformat())
+            upsert_lane_state(
+                "crypto", last_heartbeat_at=datetime.now(timezone.utc).isoformat()
+            )
         except Exception:
             pass
 

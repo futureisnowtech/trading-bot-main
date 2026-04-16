@@ -36,6 +36,29 @@ def render_system_integrity():
     scan_color = _age_color(scan_age, warn=120, crit=300)
     hb_color = _age_color(heartbeat_age, warn=360, crit=720)
     err_color = "green" if error_rate == 0 else ("yellow" if error_rate <= 5 else "red")
+
+    # Enrich scan label with kill-switch context when scans are paused
+    _scan_label = f"{scan_age}s ago" if scan_age < 9999 else "no data"
+    _ks_active = False
+    try:
+        from db import _q1 as _dq1
+
+        _ks_row = _dq1(
+            "SELECT message FROM system_events WHERE source='kill_switch' "
+            "AND level='CRITICAL' ORDER BY rowid DESC LIMIT 1"
+        )
+        if _ks_row and "TRIGGERED" in (_ks_row.get("message") or ""):
+            # Check if it was later resumed
+            _ks_resumed = _dq1(
+                "SELECT message FROM system_events WHERE source='kill_switch' "
+                "AND level='INFO' ORDER BY rowid DESC LIMIT 1"
+            )
+            if not _ks_resumed or "RESUMED" not in (_ks_resumed.get("message") or ""):
+                _ks_active = True
+    except Exception:
+        pass
+    if _ks_active and scan_color == "red":
+        _scan_label = "paused (kill switch)"
     health_status = health.get("status", "UNKNOWN")
     score = health.get("score", 0)
     total_checks = health.get("total", 6)
@@ -65,7 +88,7 @@ def render_system_integrity():
             if health_status == "HEALTHY"
             else ("yellow" if health_status == "DEGRADED" else "red"),
         ),
-        ("Last scan", f"{scan_age}s ago" if scan_age < 9999 else "no data", scan_color),
+        ("Last scan", _scan_label, scan_color),
         (
             "Heartbeat",
             f"{heartbeat_age}s ago" if heartbeat_age < 9999 else "no data",

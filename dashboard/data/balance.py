@@ -21,11 +21,14 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Ensure repo root is importable
-_DASH_DIR = os.path.dirname(os.path.abspath(__file__))
-_ROOT = os.path.dirname(os.path.dirname(_DASH_DIR))
+# Ensure repo root and dashboard dir are importable
+_DASH_DIR = os.path.dirname(os.path.abspath(__file__))  # dashboard/data/
+_DASHBOARD_DIR = os.path.dirname(_DASH_DIR)  # dashboard/
+_ROOT = os.path.dirname(_DASHBOARD_DIR)  # project root
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
+if _DASHBOARD_DIR not in sys.path:
+    sys.path.insert(0, _DASHBOARD_DIR)
 
 # ── Cache ─────────────────────────────────────────────────────────────────────
 _CACHE_TTL = 60.0  # seconds
@@ -49,12 +52,18 @@ _DB_PATH = os.path.join(_ROOT, "logs", "trades.db")
 
 def _balance_paper_mode() -> bool:
     """
-    Determine paper vs live mode for balance computation.
-
-    Reads system_runtime_state.process_mode (primary truth).
-    Falls back to config.PAPER_TRADING if the table is absent or empty.
+    Single canonical paper/live flag for balance computations.
+    Delegates to dashboard/db.py _runtime_paper_flag() — the one authoritative
+    helper that reads system_runtime_state.process_mode first, then config fallback.
     Returns True = paper, False = live.
     """
+    try:
+        from db import _runtime_paper_flag
+
+        return bool(_runtime_paper_flag())
+    except Exception:
+        pass
+    # Hard fallback if db module is not importable (e.g. standalone CLI context)
     try:
         with sqlite3.connect(_DB_PATH, check_same_thread=False, timeout=3) as c:
             row = c.execute(

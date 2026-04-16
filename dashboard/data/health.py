@@ -41,7 +41,25 @@ def get_health_status() -> dict:
 
 
 def get_heartbeat_age() -> int:
-    """Seconds since last heartbeat write."""
+    """
+    Seconds since last heartbeat.
+
+    Primary source: lane_runtime_state.last_heartbeat_at for the crypto lane,
+    which is updated every minute by v10_runner regardless of whether scans
+    are running (so it stays current even when kill switch blocks scans).
+
+    Fallback: system_events heartbeat rows written only on successful scans.
+    """
+    row = _q1("""
+        SELECT last_heartbeat_at FROM lane_runtime_state
+        WHERE lane_id = 'crypto'
+        ORDER BY id DESC LIMIT 1
+    """)
+    if row and row.get("last_heartbeat_at"):
+        age = _ts_age_s(row["last_heartbeat_at"])
+        if age < 9999:
+            return age
+    # Fallback: system_events heartbeat (written on each successful scan)
     row = _q1("""
         SELECT ts FROM system_events
         WHERE source = 'heartbeat'
@@ -54,11 +72,13 @@ def get_heartbeat_age() -> int:
 
 def get_error_rate_1h() -> int:
     """Count of ERROR events in last 60 minutes, excluding health_check source
-    and archived-lane (IBKRBroker/MES) noise when FUTURES_LANE_ACTIVE=false."""
+    and archived-lane (IBKRBroker/MES) noise when FUTURES_LANE_ACTIVE=false.
+    Uses normalized datetime comparison to handle ISO timestamps with T separator."""
     cutoff = (datetime.now() - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
     rows = _q(
         "SELECT source, message FROM system_events "
-        "WHERE level='ERROR' AND source != 'health_check' AND ts >= ?",
+        "WHERE level='ERROR' AND source != 'health_check' "
+        "AND datetime(replace(substr(ts,1,19),'T',' ')) >= ?",
         (cutoff,),
     )
     return sum(
@@ -358,7 +378,8 @@ def get_recent_errors_detail(hours: int = 1, limit: int = 15) -> list:
     cutoff = (datetime.now() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
     rows = _q(
         "SELECT ts, source, message FROM system_events "
-        "WHERE level='ERROR' AND source != 'health_check' AND ts >= ? ORDER BY id DESC LIMIT ?",
+        "WHERE level='ERROR' AND source != 'health_check' "
+        "AND datetime(replace(substr(ts,1,19),'T',' ')) >= ? ORDER BY id DESC LIMIT ?",
         (cutoff, limit * 6),
     )
 
@@ -412,7 +433,8 @@ def get_restart_count_24h() -> int:
     """Number of bot start events in last 24h."""
     cutoff = (datetime.now() - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
     r = _q1(
-        "SELECT COUNT(*) AS n FROM system_events WHERE ts >= ? AND message LIKE '%Bot started%'",
+        "SELECT COUNT(*) AS n FROM system_events "
+        "WHERE datetime(replace(substr(ts,1,19),'T',' ')) >= ? AND message LIKE '%Bot started%'",
         (cutoff,),
     )
     return r.get("n") or 0

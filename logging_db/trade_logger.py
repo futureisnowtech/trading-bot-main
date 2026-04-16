@@ -218,13 +218,14 @@ def init_db() -> None:
     )""")
 
     cur.execute("""CREATE TABLE IF NOT EXISTS kill_switch_log (
-        id                INTEGER PRIMARY KEY AUTOINCREMENT,
-        ts                REAL NOT NULL,
-        reason            TEXT NOT NULL,
-        balance_at_trigger REAL,
-        resolved          INTEGER DEFAULT 0,
-        resolved_ts       REAL,
-        resolved_reason   TEXT
+        id              TEXT PRIMARY KEY,
+        ts              TEXT NOT NULL,
+        reason          TEXT NOT NULL,
+        balance         REAL,
+        peak_balance    REAL,
+        positions_closed INTEGER,
+        resumed_at      TEXT,
+        trigger_type    TEXT DEFAULT 'trigger'
     )""")
 
     # v14.0: Trade integrity — durable trust tier for every close-side trade.
@@ -285,6 +286,20 @@ def init_db() -> None:
         "ALTER TABLE trade_attribution ADD COLUMN lineage_complete INTEGER DEFAULT 0",
         "ALTER TABLE trade_attribution ADD COLUMN lineage_notes TEXT",
         "ALTER TABLE trade_attribution ADD COLUMN integrity_tier TEXT DEFAULT 'suspect'",
+    ]:
+        try:
+            cur.execute(migration)
+        except Exception:
+            pass
+
+    # v15.8: kill_switch_log schema migration — align with new column names.
+    # Production DBs may have the old schema (balance_at_trigger, resolved, etc.).
+    for migration in [
+        "ALTER TABLE kill_switch_log ADD COLUMN balance REAL",
+        "ALTER TABLE kill_switch_log ADD COLUMN peak_balance REAL",
+        "ALTER TABLE kill_switch_log ADD COLUMN positions_closed INTEGER",
+        "ALTER TABLE kill_switch_log ADD COLUMN resumed_at TEXT",
+        "ALTER TABLE kill_switch_log ADD COLUMN trigger_type TEXT DEFAULT 'trigger'",
     ]:
         try:
             cur.execute(migration)

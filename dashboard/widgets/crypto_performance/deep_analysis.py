@@ -454,10 +454,20 @@ def render_deep_analysis():
             )
         except Exception:
             c3.metric("Daily P&L", _fmt_pnl(today_pnl))
+        try:
+            from db import _runtime_paper_flag
+
+            _is_paper = bool(_runtime_paper_flag())
+        except Exception:
+            _is_paper = True
+        if _is_paper:
+            _ks_pct, _ks_label = 0.75, "75% of initial"
+        else:
+            _ks_pct, _ks_label = 0.50, "50% of live baseline"
         c4.metric(
             "Kill Switch",
-            f"${base * 0.75:,.0f}",
-            delta=f"balance < 75% of ${base:,.0f}",
+            f"~${base * _ks_pct:,.0f}",
+            delta=f"balance < {_ks_label} (${base:,.0f})",
             delta_color="off",
         )
 

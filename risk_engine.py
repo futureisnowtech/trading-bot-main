@@ -29,41 +29,50 @@ _lock = threading.RLock()
 
 # Drawdown-based position size multipliers
 _DRAWDOWN_MULT = [
-    (0.05, 0.75),    # 5% DD → 75% of normal size
-    (0.08, 0.50),    # 8% DD → 50%
-    (0.12, 0.0),     # 12% DD → halt new entries
-    (0.15, 0.0),     # 15% DD → close all + halt
+    (0.05, 0.75),  # 5% DD → 75% of normal size
+    (0.08, 0.50),  # 8% DD → 50%
+    (0.12, 0.0),  # 12% DD → halt new entries
+    (0.15, 0.0),  # 15% DD → close all + halt
 ]
 
 # Margin utilization thresholds
-_MARGIN_NO_NEW    = 0.60
-_MARGIN_REDUCE    = 0.75
+_MARGIN_NO_NEW = 0.60
+_MARGIN_REDUCE = 0.75
 _MARGIN_EMERGENCY = 0.85
 
 
 class RiskState:
     """Live snapshot of portfolio risk metrics."""
+
     __slots__ = [
-        'account_balance', 'peak_balance', 'daily_start_balance',
-        'total_deployed_usd', 'margin_utilization',
-        'drawdown_pct', 'daily_loss_pct',
-        'var_95', 'cvar_95', 'var_99', 'cvar_99',
-        'correlation_breach', 'ts',
+        "account_balance",
+        "peak_balance",
+        "daily_start_balance",
+        "total_deployed_usd",
+        "margin_utilization",
+        "drawdown_pct",
+        "daily_loss_pct",
+        "var_95",
+        "cvar_95",
+        "var_99",
+        "cvar_99",
+        "correlation_breach",
+        "ts",
     ]
 
     def __init__(self):
-        self.account_balance      = 10000.0
-        self.peak_balance         = 10000.0
-        self.daily_start_balance  = 10000.0
-        self.total_deployed_usd   = 0.0
-        self.margin_utilization   = 0.0
-        self.drawdown_pct         = 0.0
-        self.daily_loss_pct       = 0.0
-        self.var_95  = 0.0
+        self.account_balance = 10000.0
+        self.peak_balance = 10000.0
+        self.daily_start_balance = 10000.0
+        self.total_deployed_usd = 0.0
+        self.margin_utilization = 0.0
+        self.drawdown_pct = 0.0
+        self.daily_loss_pct = 0.0
+        self.var_95 = 0.0
         self.cvar_95 = 0.0
-        self.var_99  = 0.0
+        self.var_99 = 0.0
         self.cvar_99 = 0.0
-        self.correlation_breach   = False
+        self.correlation_breach = False
         self.ts = time.time()
 
     def to_dict(self) -> Dict:
@@ -73,35 +82,37 @@ class RiskState:
 _state = RiskState()
 
 
-def update_balances(current_balance: float, deployed_usd: float = 0.0,
-                     margin_usd: float = 0.0):
+def update_balances(
+    current_balance: float, deployed_usd: float = 0.0, margin_usd: float = 0.0
+):
     """
     Update core balance metrics. Call whenever balance or deployment changes.
     """
     with _lock:
-        _state.account_balance   = current_balance
-        _state.peak_balance      = max(_state.peak_balance, current_balance)
+        _state.account_balance = current_balance
+        _state.peak_balance = max(_state.peak_balance, current_balance)
         _state.total_deployed_usd = deployed_usd
 
         if _state.peak_balance > 0:
-            _state.drawdown_pct = (_state.peak_balance - current_balance) / _state.peak_balance
+            _state.drawdown_pct = (
+                _state.peak_balance - current_balance
+            ) / _state.peak_balance
 
         if _state.daily_start_balance > 0:
             _state.daily_loss_pct = max(
                 0.0,
-                (_state.daily_start_balance - current_balance) / _state.daily_start_balance,
+                (_state.daily_start_balance - current_balance)
+                / _state.daily_start_balance,
             )
 
         if current_balance > 0:
             _state.margin_utilization = margin_usd / current_balance
         _state.ts = time.time()
 
-    # Kill switch check
-    try:
-        import kill_switch
-        kill_switch.check_balance(current_balance, _state.peak_balance)
-    except Exception:
-        pass
+    # Kill switch check is handled by v10_runner.kill_switch_monitor() which
+    # passes the correct paper/live flag.  Do NOT call it here — peak_balance
+    # starts at the hardcoded 10 000 default and has no mode awareness, which
+    # caused false live-mode triggers (1966 < 0.75*10000 = 7500).
 
 
 def reset_daily(balance: float):
@@ -110,7 +121,9 @@ def reset_daily(balance: float):
         _state.daily_start_balance = balance
 
 
-def compute_var_cvar(returns: List[float], confidence: float = 0.95) -> Tuple[float, float]:
+def compute_var_cvar(
+    returns: List[float], confidence: float = 0.95
+) -> Tuple[float, float]:
     """
     Historical VaR and CVaR from a list of P&L returns.
 
@@ -139,12 +152,16 @@ def update_var_from_db(paper: bool = True):
     """Compute VaR/CVaR from trade history. Call periodically."""
     try:
         from logging_db.trade_logger import get_logger
+
         db = get_logger()
-        rows = db.conn.execute("""
+        rows = db.conn.execute(
+            """
             SELECT pnl_usd FROM trades
             WHERE paper=? AND action='SELL'
             ORDER BY ts DESC LIMIT 200
-        """, (1 if paper else 0,)).fetchall()
+        """,
+            (1 if paper else 0,),
+        ).fetchall()
 
         if len(rows) < 10:
             return
@@ -154,13 +171,13 @@ def update_var_from_db(paper: bool = True):
         var99, cvar99 = compute_var_cvar(pnls, 0.99)
 
         with _lock:
-            _state.var_95  = var95
+            _state.var_95 = var95
             _state.cvar_95 = cvar95
-            _state.var_99  = var99
+            _state.var_99 = var99
             _state.cvar_99 = cvar99
 
     except Exception as e:
-        logger.debug(f'[risk_engine] var update error: {e}')
+        logger.debug(f"[risk_engine] var update error: {e}")
 
 
 def compute_correlation_matrix(open_positions: Dict) -> Optional[np.ndarray]:
@@ -174,12 +191,13 @@ def compute_correlation_matrix(open_positions: Dict) -> Optional[np.ndarray]:
 
     try:
         from data.historical_data import get_candles
+
         returns_by_sym = {}
 
         for sym in symbols:
-            df = get_candles(sym, '1h', 48)
+            df = get_candles(sym, "1h", 48)
             if df is not None and len(df) >= 20:
-                closes = df['close'].values.astype(float)
+                closes = df["close"].values.astype(float)
                 rets = np.diff(closes) / closes[:-1]
                 returns_by_sym[sym] = rets
 
@@ -193,11 +211,13 @@ def compute_correlation_matrix(open_positions: Dict) -> Optional[np.ndarray]:
         return corr
 
     except Exception as e:
-        logger.debug(f'[risk_engine] correlation error: {e}')
+        logger.debug(f"[risk_engine] correlation error: {e}")
         return None
 
 
-def check_correlation_breach(open_positions: Dict, threshold: float = 0.85) -> List[Tuple[str, str, float]]:
+def check_correlation_breach(
+    open_positions: Dict, threshold: float = 0.85
+) -> List[Tuple[str, str, float]]:
     """
     Return list of (sym1, sym2, correlation) pairs breaching threshold.
     """
@@ -209,7 +229,7 @@ def check_correlation_breach(open_positions: Dict, threshold: float = 0.85) -> L
     symbols = list(open_positions.keys())
     n = len(symbols)
     for i in range(n):
-        for j in range(i+1, n):
+        for j in range(i + 1, n):
             val = float(corr[i, j])
             if abs(val) > threshold:
                 breaches.append((symbols[i], symbols[j], round(val, 3)))
@@ -243,35 +263,36 @@ def can_open_new_position() -> Tuple[bool, str]:
     # Kill switch
     try:
         import kill_switch
+
         if kill_switch.is_halted():
-            return False, f'Kill switch active: {kill_switch.get_halt_reason()}'
+            return False, f"Kill switch active: {kill_switch.get_halt_reason()}"
     except Exception:
         pass
 
     with _lock:
         daily_loss = _state.daily_loss_pct
-        margin     = _state.margin_utilization
-        deployed   = _state.total_deployed_usd
-        balance    = _state.account_balance
-        dd         = _state.drawdown_pct
+        margin = _state.margin_utilization
+        deployed = _state.total_deployed_usd
+        balance = _state.account_balance
+        dd = _state.drawdown_pct
 
     # Daily loss halt: -5%
     if daily_loss >= 0.05:
-        return False, f'Daily loss {daily_loss:.1%} >= 5% halt threshold'
+        return False, f"Daily loss {daily_loss:.1%} >= 5% halt threshold"
 
     # Drawdown halt
     if dd >= 0.12:
-        return False, f'Drawdown {dd:.1%} >= 12% — halting new entries'
+        return False, f"Drawdown {dd:.1%} >= 12% — halting new entries"
 
     # Margin check
     if margin >= _MARGIN_NO_NEW:
-        return False, f'Margin utilization {margin:.0%} >= {_MARGIN_NO_NEW:.0%}'
+        return False, f"Margin utilization {margin:.0%} >= {_MARGIN_NO_NEW:.0%}"
 
     # Max deployed — 95% in paper/perps-focused mode
     if deployed >= balance * 0.95:
-        return False, f'Deployed ${deployed:.0f} >= 95% of balance ${balance:.0f}'
+        return False, f"Deployed ${deployed:.0f} >= 95% of balance ${balance:.0f}"
 
-    return True, 'OK'
+    return True, "OK"
 
 
 def margin_action_required() -> Optional[str]:
@@ -283,9 +304,9 @@ def margin_action_required() -> Optional[str]:
         margin = _state.margin_utilization
 
     if margin >= _MARGIN_EMERGENCY:
-        return 'emergency_reduce'
+        return "emergency_reduce"
     elif margin >= _MARGIN_REDUCE:
-        return 'reduce_existing'
+        return "reduce_existing"
     return None
 
 
@@ -294,15 +315,15 @@ def get_risk_report() -> Dict:
     with _lock:
         s = _state.to_dict()
 
-    s['can_trade'], s['block_reason'] = can_open_new_position()
-    s['size_multiplier'] = position_size_multiplier()
-    s['margin_action']   = margin_action_required()
+    s["can_trade"], s["block_reason"] = can_open_new_position()
+    s["size_multiplier"] = position_size_multiplier()
+    s["margin_action"] = margin_action_required()
 
     # Format key values
-    s['drawdown_pct_str']   = f'{s["drawdown_pct"]:.1%}'
-    s['daily_loss_pct_str'] = f'{s["daily_loss_pct"]:.1%}'
-    s['margin_pct_str']     = f'{s["margin_utilization"]:.0%}'
-    s['var_95_str']         = f'${s["var_95"]:.0f}'
-    s['cvar_95_str']        = f'${s["cvar_95"]:.0f}'
+    s["drawdown_pct_str"] = f"{s['drawdown_pct']:.1%}"
+    s["daily_loss_pct_str"] = f"{s['daily_loss_pct']:.1%}"
+    s["margin_pct_str"] = f"{s['margin_utilization']:.0%}"
+    s["var_95_str"] = f"${s['var_95']:.0f}"
+    s["cvar_95_str"] = f"${s['cvar_95']:.0f}"
 
     return s

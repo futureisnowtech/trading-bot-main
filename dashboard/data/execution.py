@@ -4,14 +4,23 @@ dashboard/data/execution.py — Execution quality, failure modes, recent events.
 
 from datetime import datetime, timedelta
 
-from db import _q, _q1, LAUNCH_DATE
+from db import _q, _q1, _runtime_paper_flag, LAUNCH_DATE
 from formatters import _time_ago
+
+# Normalized 7-day cutoff helper — avoids the ISO 'T'-separator false-positive bug
+# where raw `ts >= ?` treats all same-day rows as in-window because ASCII('T') > ASCII(' ').
+_TS_NORM = "datetime(replace(substr(ts,1,19),'T',' '))"
+
+
+def _cutoff_7d() -> str:
+    return (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def get_execution_stats() -> dict:
     """MAE/MFE efficiency, fee trap rate, hold duration from trade_attribution."""
+    paper_flag = _runtime_paper_flag()
     r = _q1(
-        """
+        f"""
         SELECT
             AVG(ABS(COALESCE(mae_pct, 0)))  AS avg_mae,
             AVG(COALESCE(mfe_pct, 0))       AS avg_mfe,
@@ -21,10 +30,11 @@ def get_execution_stats() -> dict:
             AVG(CASE WHEN won=0 THEN hold_minutes END) AS avg_hold_loss,
             AVG(CASE WHEN won=1 AND mfe_pct > 0 THEN pnl_pct / mfe_pct END) AS exit_eff
         FROM trade_attribution
-        WHERE source NOT IN ('backtest','pre_v10_contaminated','bybit_paper','paper_v10')
+        WHERE paper = ?
+          AND source NOT IN ('backtest','pre_v10_contaminated','bybit_paper','paper_v10')
           AND COALESCE(created_at, entry_ts, '') >= ?
     """,
-        (LAUNCH_DATE,),
+        (paper_flag, LAUNCH_DATE),
     )
     total = r.get("total") or 0
     avg_mae = r.get("avg_mae") or 0.0
@@ -49,15 +59,25 @@ def get_execution_stats() -> dict:
 
 
 def get_failure_counts() -> list:
-    """Return categorized failure counts from trade_attribution + system_events."""
-    cutoff_7d = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+    """Return categorized failure counts from trade_attribution + system_events.
+
+    All time-window queries use normalized datetime comparison to avoid the
+    ISO-timestamp 'T'-separator false-positive that inflated counts to 751+.
+    Execution errors are collapsed into distinct incidents (GROUP BY fingerprint)
+    rather than raw row counts.
+    """
+    cutoff_7d = _cutoff_7d()
+    paper_flag = _runtime_paper_flag()
     failures = []
 
+    # ── Fee Trap ──────────────────────────────────────────────────────────────
     r = _q1(
-        """SELECT COUNT(*) AS n, MAX(entry_ts) AS last FROM trade_attribution
-           WHERE is_fee_trap=1 AND entry_ts >= ?
+        f"""SELECT COUNT(*) AS n, MAX(entry_ts) AS last FROM trade_attribution
+           WHERE is_fee_trap=1
+             AND paper=?
+             AND {_TS_NORM.replace("ts", "entry_ts")} >= ?
              AND source NOT IN ('backtest','pre_v10_contaminated','bybit_paper','paper_v10')""",
-        (cutoff_7d,),
+        (paper_flag, cutoff_7d),
     )
     failures.append(
         {
@@ -69,11 +89,14 @@ def get_failure_counts() -> list:
         }
     )
 
+    # ── Quick Stop ────────────────────────────────────────────────────────────
     r = _q1(
-        """SELECT COUNT(*) AS n, MAX(entry_ts) AS last FROM trade_attribution
-           WHERE exit_type='stop_hit' AND COALESCE(hold_minutes,999) < 30 AND entry_ts >= ?
+        f"""SELECT COUNT(*) AS n, MAX(entry_ts) AS last FROM trade_attribution
+           WHERE exit_type='stop_hit' AND COALESCE(hold_minutes,999) < 30
+             AND paper=?
+             AND {_TS_NORM.replace("ts", "entry_ts")} >= ?
              AND source NOT IN ('backtest','pre_v10_contaminated','bybit_paper','paper_v10')""",
-        (cutoff_7d,),
+        (paper_flag, cutoff_7d),
     )
     failures.append(
         {
@@ -85,9 +108,18 @@ def get_failure_counts() -> list:
         }
     )
 
+    # ── Execution Error — distinct incidents, excluding archived-lane noise ───
+    # Collapse repeated identical errors into distinct incidents via GROUP BY.
+    # Excludes IBKRBroker (archived MES lane) and health_check (shown separately).
     r = _q1(
-        """SELECT COUNT(*) AS n, MAX(ts) AS last FROM system_events
-           WHERE level='ERROR' AND source NOT IN ('IBKRBroker') AND ts >= ?""",
+        f"""SELECT COUNT(*) AS n, MAX(ts) AS last FROM (
+               SELECT MAX(ts) AS ts
+               FROM system_events
+               WHERE level='ERROR'
+                 AND source NOT IN ('IBKRBroker','health_check')
+                 AND {_TS_NORM} >= ?
+               GROUP BY source, substr(message,1,80)
+           )""",
         (cutoff_7d,),
     )
     failures.append(
@@ -96,13 +128,15 @@ def get_failure_counts() -> list:
             "Count (7d)": r.get("n") or 0,
             "Last": _time_ago(r.get("last") or ""),
             "Severity": "CRIT" if (r.get("n") or 0) > 0 else "OK",
-            "Description": "ERROR level events from broker/system",
+            "Description": "Distinct error types from broker/system (not MES/IBKR)",
         }
     )
 
+    # ── Scan Dropout ──────────────────────────────────────────────────────────
     r = _q1(
-        """SELECT COUNT(*) AS n, MAX(ts) AS last FROM system_events
-           WHERE source='heartbeat' AND message LIKE '%candidates=0%' AND ts >= ?""",
+        f"""SELECT COUNT(*) AS n, MAX(ts) AS last FROM system_events
+           WHERE source='heartbeat' AND message LIKE '%candidates=0%'
+             AND {_TS_NORM} >= ?""",
         (cutoff_7d,),
     )
     failures.append(
@@ -115,9 +149,11 @@ def get_failure_counts() -> list:
         }
     )
 
+    # ── Duplicate Close ───────────────────────────────────────────────────────
     r = _q1(
-        """SELECT COUNT(*) AS n, MAX(ts) AS last FROM system_events
-           WHERE message LIKE '%duplicate close%' AND ts >= ?""",
+        f"""SELECT COUNT(*) AS n, MAX(ts) AS last FROM system_events
+           WHERE message LIKE '%duplicate close%'
+             AND {_TS_NORM} >= ?""",
         (cutoff_7d,),
     )
     failures.append(
@@ -130,9 +166,11 @@ def get_failure_counts() -> list:
         }
     )
 
+    # ── Economics Veto — parentheses fix prevents OR precedence bug ───────────
     r = _q1(
-        """SELECT COUNT(*) AS n, MAX(ts) AS last FROM system_events
-           WHERE source='economics_gate' OR message LIKE '%ECONOMICS VETO%' AND ts >= ?""",
+        f"""SELECT COUNT(*) AS n, MAX(ts) AS last FROM system_events
+           WHERE (source='economics_gate' OR message LIKE '%ECONOMICS VETO%')
+             AND {_TS_NORM} >= ?""",
         (cutoff_7d,),
     )
     failures.append(
@@ -145,9 +183,11 @@ def get_failure_counts() -> list:
         }
     )
 
+    # ── Stagnant Position ─────────────────────────────────────────────────────
     r = _q1(
-        """SELECT COUNT(*) AS n, MAX(ts) AS last FROM system_events
-           WHERE message LIKE '%stagnant%' AND ts >= ?""",
+        f"""SELECT COUNT(*) AS n, MAX(ts) AS last FROM system_events
+           WHERE message LIKE '%stagnant%'
+             AND {_TS_NORM} >= ?""",
         (cutoff_7d,),
     )
     failures.append(

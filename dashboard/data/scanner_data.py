@@ -10,6 +10,13 @@ from db import _q, _q1, _tail_log, LOG_PATH
 
 
 def get_last_scan_age():
+    """
+    Seconds since last scan.  Reads bot.log for [v10] scan: lines (written on
+    each completed scan).  If the log is stale (kill switch blocking scans,
+    log rotation, etc.), falls back to lane_runtime_state.last_heartbeat_at
+    for the crypto lane, which is updated every minute regardless.
+    """
+    log_age = 9999
     try:
         with open(LOG_PATH, "rb") as f:
             f.seek(0, 2)
@@ -28,11 +35,22 @@ def get_last_scan_age():
                         m = re.match(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", line)
                         if m:
                             dt = datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S")
-                            return int((datetime.now() - dt).total_seconds())
-                        return 9999
+                            log_age = int((datetime.now() - dt).total_seconds())
+                        return log_age
                 buf = buf.split(b"\n")[0]
     except Exception:
         pass
+    # Fallback: runtime lane heartbeat (stays current even when scans are paused)
+    row = _q1("""
+        SELECT last_heartbeat_at FROM lane_runtime_state
+        WHERE lane_id = 'crypto' ORDER BY id DESC LIMIT 1
+    """)
+    if row and row.get("last_heartbeat_at"):
+        from formatters import _ts_age_s
+
+        age = _ts_age_s(row["last_heartbeat_at"])
+        if age < 9999:
+            return age
     return 9999
 
 
@@ -160,19 +178,29 @@ def get_smart_log_summary(n=200) -> dict:
             buckets[k].append({"ts": ts, "msg": msg})
 
     cutoff_1h = (datetime.now() - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
+    # Use normalized datetime comparison — raw ts >= ? fails for ISO timestamps
+    # with 'T' separator because 'T' > ' ', making all same-day rows appear recent.
     r = _q1(
-        "SELECT COUNT(*) AS n FROM system_events WHERE level='ERROR' AND ts >= ?",
+        "SELECT COUNT(*) AS n FROM system_events WHERE level='ERROR' "
+        "AND datetime(replace(substr(ts,1,19),'T',' ')) >= ?",
         (cutoff_1h,),
     )
     error_count_1h = r.get("n") or 0
     rv = _q1(
-        "SELECT COUNT(*) AS n FROM system_events WHERE message LIKE '%VETO%' AND ts >= ?",
+        "SELECT COUNT(*) AS n FROM system_events WHERE message LIKE '%VETO%' "
+        "AND datetime(replace(substr(ts,1,19),'T',' ')) >= ?",
         (cutoff_1h,),
     )
     veto_count_1h = rv.get("n") or 0
+    # Use runtime paper flag instead of hardcoded paper=1
+    from db import _runtime_paper_flag
+
+    _paper_flag = _runtime_paper_flag()
     re2 = _q1(
-        "SELECT COUNT(*) AS n FROM trades WHERE ts >= ? AND paper=1 AND action IN ('BUY','SELL') AND pnl_usd=0",
-        (cutoff_1h,),
+        "SELECT COUNT(*) AS n FROM trades "
+        "WHERE datetime(replace(substr(ts,1,19),'T',' ')) >= ? "
+        "AND paper=? AND action IN ('BUY','SELL') AND pnl_usd=0",
+        (cutoff_1h, _paper_flag),
     )
     entry_count_1h = re2.get("n") or 0
     return {

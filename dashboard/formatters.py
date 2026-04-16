@@ -11,10 +11,30 @@ def _fmt_pnl(v):
     return f"{s}${v:,.2f}"
 
 
+def _parse_ts(ts_str) -> datetime:
+    """
+    Parse a timestamp string into a datetime object.
+    Handles both ISO-8601 strings (with T or space separator, with/without timezone)
+    and Unix epoch floats stored as strings (e.g. '1775843246.789').
+    """
+    if not ts_str:
+        raise ValueError("empty ts")
+    s = str(ts_str).strip()
+    # Detect epoch: digits with optional dot/decimal, no letters except maybe 'e'
+    if s.replace(".", "", 1).lstrip("-").replace("e", "", 1).isdigit():
+        return datetime.fromtimestamp(float(s))
+    # ISO / datetime string — strip sub-seconds and timezone offset
+    s = s.replace("T", " ").split(".")[0]
+    # Remove timezone suffix (+HH:MM or -HH:MM at end)
+    if len(s) > 19 and (s[19] in ("+", "-")):
+        s = s[:19]
+    s = s[:19]
+    return datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
+
+
 def _time_ago(ts_str):
     try:
-        ts_str = ts_str.replace("T", " ").split(".")[0].split("+")[0][:19]
-        dt = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+        dt = _parse_ts(ts_str)
         secs = int((datetime.now() - dt).total_seconds())
         if secs < 60:
             return f"{secs}s ago"
@@ -24,13 +44,12 @@ def _time_ago(ts_str):
             return f"{secs // 3600}h {(secs % 3600) // 60}m ago"
         return f"{secs // 86400}d ago"
     except Exception:
-        return ts_str[:16] if ts_str else "–"
+        return str(ts_str)[:16] if ts_str else "–"
 
 
 def _ts_age_s(ts_str) -> int:
     try:
-        ts_str = ts_str.replace("T", " ").split(".")[0].split("+")[0][:19]
-        dt = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+        dt = _parse_ts(ts_str)
         return max(0, int((datetime.now() - dt).total_seconds()))
     except Exception:
         return 9999

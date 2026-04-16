@@ -29,7 +29,9 @@ def test_risk_engine_blocks_new_positions_when_margin_is_too_high():
     import risk_engine
 
     risk_engine.reset_daily(5_000.0)
-    risk_engine.update_balances(current_balance=5_000.0, deployed_usd=2_000.0, margin_usd=3_500.0)
+    risk_engine.update_balances(
+        current_balance=5_000.0, deployed_usd=2_000.0, margin_usd=3_500.0
+    )
 
     allowed, reason = risk_engine.can_open_new_position()
 
@@ -37,28 +39,148 @@ def test_risk_engine_blocks_new_positions_when_margin_is_too_high():
     assert "Margin utilization" in reason
 
 
-def test_kill_switch_triggers_and_resolves_with_db_audit_trail(proof_runtime):
+def test_risk_engine_does_not_call_kill_switch_directly():
+    """
+    After the live-mode false-trigger fix, risk_engine.update_balances() must NOT
+    call kill_switch.check_balance().  The v10_runner.kill_switch_monitor() handles
+    that with the correct paper/live flag.
+
+    Regression guard: calling update_balances with a live-scale balance (1966)
+    must not trigger the kill switch even though 1966 < 0.75*10000 = 7500.
+    """
+    import kill_switch
+    import risk_engine
+
+    # Ensure kill switch is clear
+    with kill_switch._lock:
+        kill_switch._halted = False
+        kill_switch._halt_reason = ""
+
+    # Simulate a live balance that is smaller than the old $7,500 hardcode
+    risk_engine.update_balances(
+        current_balance=1_966.0, deployed_usd=0.0, margin_usd=0.0
+    )
+
+    assert kill_switch.is_halted() is False, (
+        "risk_engine.update_balances() must not trigger kill_switch; "
+        "kill_switch_monitor() in v10_runner handles that with the correct paper flag."
+    )
+
+
+# ── kill_switch live-mode policy tests ───────────────────────────────────────
+
+
+def test_live_kill_switch_uses_50_pct_of_live_baseline():
+    """
+    THE KEY INVARIANT: paper=False mode uses 50% of live_baseline, not $7,500.
+    With live_baseline=1966, threshold=983.  Balance 1966 > 983 → no trigger.
+    """
     import kill_switch
 
-    for _ in range(5):
-        kill_switch.record_api_error("proof failure")
+    kill_switch._live_baseline = 0.0  # reset so auto-set fires
+    kill_switch.check_balance(1_966.0, initial_balance=5_000.0, paper=False)
+
+    # Baseline should be auto-set to first valid balance
+    assert kill_switch._live_baseline == 1_966.0
+    # Should NOT have triggered (1966 > 983)
+    assert kill_switch.is_halted() is False
+
+
+def test_live_baseline_1966_gives_threshold_983():
+    """Verify the exact threshold arithmetic for the live account."""
+    import kill_switch
+
+    kill_switch.set_live_baseline(1_966.0)
+    status = kill_switch.get_status()
+
+    assert abs(status["live_baseline"] - 1_966.0) < 0.01
+    assert abs(status["live_threshold"] - 983.0) < 0.01
+
+
+def test_live_kill_switch_triggers_below_50pct_of_baseline(proof_runtime):
+    """Balance below 50% of live baseline must trigger the kill switch."""
+    import kill_switch
+
+    kill_switch.set_live_baseline(1_966.0)
+    # Balance at 40% of baseline → below threshold
+    kill_switch.check_balance(786.0, initial_balance=5_000.0, paper=False)
 
     assert kill_switch.is_halted() is True
-    assert "API errors" in kill_switch.get_halt_reason()
+    reason = kill_switch.get_halt_reason()
+    assert (
+        "983" in reason or "50%" in reason.lower() or "live baseline" in reason.lower()
+    ), f"Halt reason must report baseline and threshold. Got: {reason}"
+
+
+def test_live_halt_reason_reports_baseline_and_threshold(proof_runtime):
+    """Halt reason string must include the computed threshold and baseline."""
+    import kill_switch
+
+    kill_switch.set_live_baseline(2_000.0)
+    kill_switch.check_balance(900.0, paper=False)
+
+    reason = kill_switch.get_halt_reason()
+    # Must mention the live baseline concept
+    assert "live baseline" in reason.lower() or "50%" in reason.lower(), (
+        f"Halt reason must mention live baseline policy. Got: {reason}"
+    )
+    # Must mention the balance value
+    assert "900" in reason, f"Halt reason must include current balance. Got: {reason}"
+
+
+def test_paper_kill_switch_still_uses_75_pct(proof_runtime):
+    """Regression guard: paper mode must still use 75% of initial balance."""
+    import kill_switch
+
+    # Paper account: balance at 60% of initial → below 75% → should trigger
+    kill_switch.check_balance(3_000.0, initial_balance=5_000.0, paper=True)
+
+    assert kill_switch.is_halted() is True
+    reason = kill_switch.get_halt_reason()
+    assert "3000" in reason or "3750" in reason, (
+        f"Paper halt reason should mention balance/threshold. Got: {reason}"
+    )
+
+
+def test_live_kill_switch_db_log_uses_correct_schema(proof_runtime):
+    """
+    After the schema-mismatch fix, triggering the kill switch must write a row
+    to kill_switch_log using the actual column names (balance, not balance_at_trigger).
+    """
+    import kill_switch
+
+    kill_switch.set_live_baseline(1_000.0)
+    kill_switch.check_balance(400.0, paper=False)
+
+    assert kill_switch.is_halted() is True
 
     with sqlite3.connect(proof_runtime.db_path) as conn:
         row = conn.execute(
-            "SELECT reason, resolved FROM kill_switch_log ORDER BY id DESC LIMIT 1"
+            "SELECT reason, balance, resumed_at, trigger_type FROM kill_switch_log "
+            "ORDER BY id DESC LIMIT 1"
         ).fetchone()
-    assert row is not None
-    assert row[1] == 0
+    assert row is not None, "kill_switch_log row must be written on trigger"
+    assert "400" in row[0] or "500" in row[0], "Reason must include balance"
+    assert row[2] is None, "resumed_at must be NULL (not yet resumed)"
+    assert row[3] == "trigger"
+
+
+def test_kill_switch_resume_clears_db_log(proof_runtime):
+    """Resume must set resumed_at in kill_switch_log using the correct schema."""
+    import kill_switch
+
+    # Trigger first
+    for _ in range(5):
+        kill_switch.record_api_error("proof failure")
+    assert kill_switch.is_halted() is True
 
     kill_switch.resume("proof reset")
-    status = kill_switch.get_status()
+    assert kill_switch.is_halted() is False
 
-    assert status["halted"] is False
     with sqlite3.connect(proof_runtime.db_path) as conn:
-        resolved = conn.execute(
-            "SELECT resolved, resolved_reason FROM kill_switch_log ORDER BY id DESC LIMIT 1"
+        row = conn.execute(
+            "SELECT resumed_at FROM kill_switch_log ORDER BY id DESC LIMIT 1"
         ).fetchone()
-    assert resolved == (1, "proof reset")
+    # resumed_at should be set (not NULL) after resume
+    assert row is not None
+    assert row[0] is not None, "resumed_at must be set after resume()"

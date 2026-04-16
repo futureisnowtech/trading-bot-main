@@ -245,7 +245,9 @@ def render_manual_scan():
             )
             if not _can_execute:
                 if _tier.get("reason") == "non_core_execution_universe":
-                    st.caption("Visible for discovery only — not in core execution universe")
+                    st.caption(
+                        "Visible for discovery only — not in core execution universe"
+                    )
                 elif _tier.get("reason") == "suppressed_symbol":
                     st.caption("Suppressed symbol — execution blocked")
                 else:
@@ -273,6 +275,21 @@ def render_manual_scan():
         return
 
     if st.button(f"Execute {n_sel} Trade(s)", type="primary", key="manual_execute_btn"):
+        # Determine paper/live mode from runtime state (same source of truth as rest of dashboard).
+        # Fail-safe: if import fails fall back to PAPER_TRADING config, then True.
+        try:
+            from db import _runtime_paper_flag as _rflag
+
+            _exec_paper = bool(_rflag())
+        except Exception:
+            try:
+                sys.path.insert(0, _ROOT)
+                from config import PAPER_TRADING
+
+                _exec_paper = bool(PAPER_TRADING)
+            except Exception:
+                _exec_paper = True
+
         # Load get_candles from repo-root data/historical_data.py via explicit path.
         # We CANNOT use `from data.historical_data import get_candles` here because the
         # dashboard process caches `data` as `dashboard/data` (sys.path puts dashboard/
@@ -310,6 +327,9 @@ def render_manual_scan():
                 )
                 continue
             try:
+                # Use underlying symbol for execution (PF_SOLUSD → SOL, etc.)
+                # so the Coinbase broker gets the normalised name it maps to a product.
+                exec_sym = _policy.get("underlying", sym)
                 df_c = get_candles(sym, "1h", 100)
                 if df_c is None or len(df_c) < 10:
                     results.append((sym, dirn, False, "insufficient candle data"))
@@ -355,7 +375,7 @@ def render_manual_scan():
                     ml_score=composite,
                     composite_score=composite,
                     deployed_usd=_deployed,
-                    paper=True,
+                    paper=_exec_paper,
                 )
                 pos_usd = sizing["position_usd"]
                 leverage = sizing["leverage"]
@@ -363,7 +383,7 @@ def render_manual_scan():
                     stop_p = round(price - stop_dist, 6)
                     target_p = round(price + target_dist, 6)
                     pos = perps.open_long(
-                        symbol=sym,
+                        symbol=exec_sym,
                         position_usd=pos_usd,
                         entry_price=price,
                         stop_price=stop_p,
@@ -373,13 +393,13 @@ def render_manual_scan():
                         atr_at_entry=atr_7,
                         regime="UNKNOWN",
                         entry_setup=f"manual_{setup}",
-                        paper=True,
+                        paper=_exec_paper,
                     )
                 else:
                     stop_p = round(price + stop_dist, 6)
                     target_p = round(price - target_dist, 6)
                     pos = perps.open_short(
-                        symbol=sym,
+                        symbol=exec_sym,
                         position_usd=pos_usd,
                         entry_price=price,
                         stop_price=stop_p,
@@ -389,15 +409,16 @@ def render_manual_scan():
                         atr_at_entry=atr_7,
                         regime="UNKNOWN",
                         entry_setup=f"manual_{setup}",
-                        paper=True,
+                        paper=_exec_paper,
                     )
                 if pos:
+                    mode_tag = "PAPER" if _exec_paper else "LIVE"
                     results.append(
                         (
                             sym,
                             dirn,
                             True,
-                            f"entered @ {price:.6g}  stop={stop_p:.6g}  target={target_p:.6g}  size=${pos_usd:.0f}  lev={leverage}x",
+                            f"[{mode_tag}] entered @ {price:.6g}  stop={stop_p:.6g}  target={target_p:.6g}  size=${pos_usd:.0f}  lev={leverage}x",
                         )
                     )
                 else:

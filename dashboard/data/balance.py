@@ -189,9 +189,12 @@ def get_coinbase_balance() -> dict:
             data = broker._request("GET", "/api/v3/brokerage/cfm/balance_summary")
             summary = data.get("balance_summary", {})
             equity = float(summary.get("futures_buying_power", {}).get("value", 0) or 0)
-            total_balance = float(
-                summary.get("total_usd_balance", {}).get("value", equity) or equity
-            )
+            # total_usd_balance.value may be "0" (truthy string) when uninitialised —
+            # fall back to buying_power if the converted value is 0 or absent.
+            raw_total = summary.get("total_usd_balance", {}).get("value")
+            total_balance = float(raw_total or 0)
+            if total_balance <= 0 and equity > 0:
+                total_balance = equity
             return {
                 "balance": round(total_balance, 2),
                 "base": base,

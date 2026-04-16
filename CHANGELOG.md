@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-16
+- fix(v16.4): manual scan live-mode paper flag, symbol normalization, Coinbase balance total_usd_balance string-zero bug
+
+## 2026-04-16
 - v16.3: align live crypto universe to actual Coinbase-supported BTC/ETH/SOL/XRP set, filter unsupported TradingView live candidates, tighten default crypto/perp pairs, update proofs/docs
 
 ## 2026-04-16

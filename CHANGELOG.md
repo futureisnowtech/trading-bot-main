@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-16
+- fix(v16.7): block duplicate/opposing live trades and cap per-trade size
+
+## 2026-04-16
 - fix(v16.6): balance uses futures_buying_power not total_usd_balance
 
 ## 2026-04-16

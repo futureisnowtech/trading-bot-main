@@ -498,7 +498,7 @@ class CoinbaseBroker:
             logger.info(
                 f"[cb] LIVE LONG {symbol} ({spec['product_id']}): {contracts} contracts @ ~{price:.4f}"
             )
-            return {
+            result = {
                 "orderId": order.get("order_id", body["client_order_id"]),
                 "symbol": symbol,
                 "product_id": spec["product_id"],
@@ -510,6 +510,17 @@ class CoinbaseBroker:
                 "paper": False,
                 "venue": "coinbase",
             }
+            # Track in-process position so the duplicate guard fires for subsequent
+            # calls within the same Python process (e.g. manual scan executing multiple
+            # trades in one button click). Without this, the guard at line 444 is always
+            # empty in live mode and lets SOL LONG → SOL SHORT both go through.
+            self._open_positions[symbol] = {
+                "direction": "LONG",
+                "entry_price": price,
+                "qty": contracts * spec["contract_size"],
+                "symbol": symbol,
+            }
+            return result
         except Exception as e:
             logger.error(f"[cb] open_long LIVE error {symbol}: {e}")
             return None
@@ -592,7 +603,7 @@ class CoinbaseBroker:
             logger.info(
                 f"[cb] LIVE SHORT {symbol} ({spec['product_id']}): {contracts} contracts @ ~{price:.4f}"
             )
-            return {
+            result = {
                 "orderId": order.get("order_id", body["client_order_id"]),
                 "symbol": symbol,
                 "product_id": spec["product_id"],
@@ -604,6 +615,15 @@ class CoinbaseBroker:
                 "paper": False,
                 "venue": "coinbase",
             }
+            # Track in-process position so the duplicate guard fires for subsequent
+            # calls within the same Python process (same fix as open_long live path).
+            self._open_positions[symbol] = {
+                "direction": "SHORT",
+                "entry_price": price,
+                "qty": contracts * spec["contract_size"],
+                "symbol": symbol,
+            }
+            return result
         except Exception as e:
             logger.error(f"[cb] open_short LIVE error {symbol}: {e}")
             return None

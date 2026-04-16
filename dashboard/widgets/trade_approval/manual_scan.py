@@ -352,6 +352,12 @@ def render_manual_scan():
             sys.path.insert(0, _ROOT)
         import perps_engine as perps
 
+        # Symbols already held in live DB — block duplicate entries
+        _held_syms = {p.get("symbol", "") for p in _open_pos}
+        # Track symbols entered in this batch to catch same-underlying conflicts
+        # (e.g. PF_SOLUSD + SOL both map to SOL, or LONG + SHORT same coin selected)
+        _batch_syms: set = set()
+
         results = []
         for idx in selected_idx:
             cand = candidates[idx]
@@ -366,6 +372,31 @@ def render_manual_scan():
                 # Normalise to underlying symbol for execution and price/candle fetching.
                 # PF_SOLUSD → SOL, PF_ETHUSD → ETH, etc.
                 exec_sym = _policy.get("underlying", sym)
+
+                # Guard: already holding this underlying in live DB
+                if not _exec_paper and exec_sym in _held_syms:
+                    results.append(
+                        (
+                            sym,
+                            dirn,
+                            False,
+                            f"already holding {exec_sym} — close existing position first",
+                        )
+                    )
+                    continue
+
+                # Guard: same underlying already in this execution batch
+                # (catches LONG + SHORT same coin, or PF_SOLUSD + SOL both checked)
+                if exec_sym in _batch_syms:
+                    results.append(
+                        (
+                            sym,
+                            dirn,
+                            False,
+                            f"conflict: {exec_sym} already queued in this batch",
+                        )
+                    )
+                    continue
 
                 # ── Fetch candles: try exec_sym first, fall back to raw sym ──
                 df_c = None
@@ -435,11 +466,25 @@ def render_manual_scan():
                 pos_usd = sizing["position_usd"]
                 leverage = sizing["leverage"]
 
-                # ── Enforce minimum 1-contract size in live mode ───────────────
-                # Coinbase rejects orders < 1 whole contract. Round up with 2% buffer.
-                # Show what was adjusted so the operator sees it.
+                # ── Live-mode size guards ──────────────────────────────────────
                 if not _exec_paper:
                     _min_usd = _min_contract_usd(exec_sym, price)
+                    # Hard cap: no single trade > 15% of account. If even the
+                    # minimum 1-contract cost exceeds that, the account is too
+                    # small for this instrument — skip rather than force a huge bet.
+                    _max_single = round(_acct_balance * 0.15, 2)
+                    if _min_usd > 0 and _min_usd > _max_single:
+                        results.append(
+                            (
+                                sym,
+                                dirn,
+                                False,
+                                f"min contract ${_min_usd:.0f} exceeds 15% account "
+                                f"cap ${_max_single:.0f} — account too small for {exec_sym}",
+                            )
+                        )
+                        continue
+                    # Bump up to 1-contract minimum if signal sizing falls short.
                     if _min_usd > 0 and pos_usd < _min_usd:
                         _original_pos = pos_usd
                         pos_usd = round(_min_usd * 1.02, 2)
@@ -447,6 +492,10 @@ def render_manual_scan():
                             f"ℹ️ {exec_sym}: signal sizing ${_original_pos:.0f} < "
                             f"1 contract (≈${_min_usd:.0f}) — using ${pos_usd:.0f}"
                         )
+                    # Apply per-trade cap regardless (catches cases where signal
+                    # sizing itself is oversized).
+                    if pos_usd > _max_single:
+                        pos_usd = _max_single
 
                 if dirn == "LONG":
                     stop_p = round(price - stop_dist, 6)
@@ -493,6 +542,10 @@ def render_manual_scan():
                             f"size=${pos_usd:.0f}  lev={leverage}x",
                         )
                     )
+                    # Register underlying so subsequent batch entries on same
+                    # coin are blocked (prevents LONG+SHORT same asset in one click).
+                    _batch_syms.add(exec_sym)
+                    _held_syms.add(exec_sym)
                 else:
                     # Explain why the broker returned None
                     if not _exec_paper:

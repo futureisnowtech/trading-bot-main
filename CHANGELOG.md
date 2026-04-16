@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-16
+- fix(v16.6): balance uses futures_buying_power not total_usd_balance
+
+## 2026-04-16
 - fix(v16.5): manual scan end-to-end — min contract size, real balance, exec_sym candles, persistent results, live tested ETH LONG
 
 ## 2026-04-16

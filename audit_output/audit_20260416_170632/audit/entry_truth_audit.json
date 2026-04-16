@@ -1,0 +1,116 @@
+{
+  "days": 30,
+  "funnel": {
+    "days": 30,
+    "cycles": 112,
+    "scanned": 3664,
+    "scored_total": 1975,
+    "above_threshold": 219,
+    "below_threshold": 1756,
+    "econ_passed": 181,
+    "econ_veto": 38,
+    "research_only_block": 97,
+    "sizing_zero": 0,
+    "execution_failed": 84,
+    "entered": 0,
+    "conversion_rate_pct": 0.0,
+    "econ_veto_rate_pct": 17.4
+  },
+  "scanner_ev": {
+    "n": 1976,
+    "avg_theoretical_usd": 2902.31,
+    "avg_effective_usd": 100.0,
+    "min_theoretical_usd": 435.77,
+    "max_theoretical_usd": 9627.73,
+    "min_effective_usd": 100.0,
+    "max_effective_usd": 100.0,
+    "effective_cap_rate_pct": 96.6,
+    "note": "effective = min(theoretical, $100) to prevent unrealistic EV"
+  },
+  "source_quality": [
+    {
+      "exchange": "kraken",
+      "source": "clean_paper_v10",
+      "n": 20,
+      "wins": 8,
+      "win_rate_pct": 40.0,
+      "avg_mfe_pct": 1.405
+    },
+    {
+      "exchange": "hyperliquid",
+      "source": "clean_paper_v10",
+      "n": 15,
+      "wins": 3,
+      "win_rate_pct": 20.0,
+      "avg_mfe_pct": 0.598
+    }
+  ],
+  "setup_quality": [
+    {
+      "primary_setup": "momentum",
+      "regime": "RANGING",
+      "n": 27,
+      "wins": 8,
+      "win_rate_pct": 29.6,
+      "avg_mfe_pct": 1.048
+    },
+    {
+      "primary_setup": "ranging_mr",
+      "regime": "RANGING",
+      "n": 4,
+      "wins": 2,
+      "win_rate_pct": 50.0,
+      "avg_mfe_pct": 1.358
+    },
+    {
+      "primary_setup": "funding_collect",
+      "regime": "RANGING",
+      "n": 3,
+      "wins": 1,
+      "win_rate_pct": 33.3,
+      "avg_mfe_pct": 0.964
+    },
+    {
+      "primary_setup": "kst_cross",
+      "regime": "RANGING",
+      "n": 1,
+      "wins": 0,
+      "win_rate_pct": 0,
+      "avg_mfe_pct": 0.433
+    }
+  ],
+  "symbol_class_quality": [
+    {
+      "tier": "core",
+      "n": 7,
+      "wins": 5,
+      "win_rate_pct": 71.4,
+      "avg_mfe_pct": 2.035,
+      "avg_mae_pct": 0.158
+    },
+    {
+      "tier": "research_only",
+      "n": 28,
+      "wins": 6,
+      "win_rate_pct": 21.4,
+      "avg_mfe_pct": 0.815,
+      "avg_mae_pct": -0.974
+    }
+  ],
+  "integrity": {
+    "total_closes": 10,
+    "tiers": {
+      "verified": 6,
+      "suspect": 4
+    },
+    "trust_rate_pct": 60.0,
+    "duplicate_close_event_count": 0,
+    "top_non_verified_reasons": [
+      {
+        "tier": "suspect",
+        "reason": "attribution_failed_or_incomplete",
+        "count": 4
+      }
+    ]
+  }
+}

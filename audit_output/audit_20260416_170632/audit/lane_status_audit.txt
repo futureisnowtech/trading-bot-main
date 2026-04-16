@@ -1,0 +1,17 @@
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  LANE STATUS SNAPSHOT
+  2026-04-16 17:06:34 UTC
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  System: mode=live, alive=YES, status=OK, heartbeat=2026-04-16T17:05:49.344162+00:00
+
+  Lane             Enabled  Active  Mode       Health     Readiness              Last Heartbeat
+  --------------------------------------------------------------------------------------
+  crypto           YES      YES     live       OK         OPERATIONAL            2026-04-16 17:05:50 UTC
+  forecast         YES      YES     live       UNKNOWN    NO_UNDERLIERS          2026-04-16 03:42:24 UTC
+  mes_archived     NO       NO      archived   OK         DORMANT                never
+
+  [mes_archived] blocked_reason: FUTURES_LANE_ACTIVE=false
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+

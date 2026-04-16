@@ -149,7 +149,9 @@ def _journal_scan_candidate(
         stop_pct = float(candidate.get("stop_pct", 3.0) or 3.0)
         tgt_pct = float(candidate.get("target_pct", 6.0) or 6.0)
         exp_profit = float(
-            candidate.get("scanner_expected_profit", candidate.get("expected_profit", 0))
+            candidate.get(
+                "scanner_expected_profit", candidate.get("expected_profit", 0)
+            )
             or 0
         )
         setups = candidate.get("scan_setups", [])
@@ -1642,56 +1644,6 @@ def _evaluate_position_exit(
             pm.update_trailing_stop(pos, current_price)
         except Exception as e:
             logger.debug(f"[v10] trailing update error {symbol}: {e}")
-
-    # ── Dead-money exit (priority 7 — data-driven position quality check) ────
-    # Replaces the old time-only (>72h) stagnant check.
-    # A position is "dead money" when the market has had sufficient time to prove
-    # the thesis but price hasn't moved meaningfully — measured by actual price
-    # displacement relative to ATR at entry, not just elapsed time.
-    #
-    # Primary trigger (all must be true):
-    #   • Held > 24h  — enough time for any reasonable setup to develop
-    #   • |current_price - entry_price| < 0.5 × ATR_at_entry  — price is stuck
-    #   • No trailing activation  — never had a winning leg
-    #   • No scale-out done  — never hit first profit target
-    #
-    # Hard backstop:
-    #   • Held > 96h with no progress — absolute maximum; should rarely fire
-    #     if the 0.5×ATR check is working correctly
-    if not exit_decision.should_exit:
-        _entry_ts = pos.get("entry_ts", time.time())
-        _age_hours = (time.time() - _entry_ts) / 3600
-        _no_progress = not pos.get("trailing_active", False) and not pos.get(
-            "scale_33_done", False
-        )
-
-        if _age_hours > 24 and _no_progress:
-            _entry_price = pos.get("entry_price", current_price) or current_price
-            _atr = pos.get("atr_at_entry") or (current_price * 0.015)
-            _price_drift = abs(current_price - _entry_price)
-            _drift_atr = _price_drift / max(_atr, 1e-10)
-
-            _dead_money = _drift_atr < 0.5  # price hasn't moved half an ATR since entry
-            _hard_backstop = _age_hours > 96  # absolute cap regardless of drift
-
-            if _dead_money or _hard_backstop:
-                _trigger = (
-                    f"price drift {_drift_atr:.2f}×ATR (<0.5 threshold)"
-                    if _dead_money
-                    else f"max hold {_age_hours:.0f}h exceeded"
-                )
-                logger.info(
-                    f"[v10] DEAD_MONEY {symbol} {pos.get('direction', 'LONG')}: "
-                    f"age={_age_hours:.1f}h drift={_drift_atr:.2f}×ATR "
-                    f"entry={_entry_price:.6g} cur={current_price:.6g} atr={_atr:.6g}"
-                )
-                exit_decision = pm.ExitDecision(
-                    should_exit=True,
-                    priority=7,
-                    exit_type="dead_money_exit",
-                    partial_pct=1.0,
-                    reason=f"Dead money {_age_hours:.1f}h: {_trigger} — no edge remaining",
-                )
 
     if not exit_decision.should_exit:
         return

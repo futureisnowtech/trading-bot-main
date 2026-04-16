@@ -30,7 +30,7 @@ Fully autonomous AI trading system: scans Kraken Futures + Binance USDM + Hyperl
 | Signal engine | `signal_engine.py` | Two-tower: technical 0-100 + ML 0-100 → composite |
 | Entry runner | `scheduler/v10_runner.py` | Scan loop, tier selection, economics gate, setup detection, execution handoff |
 | Position sizing | `position_manager.py` | Kelly + ATR sizing, leverage schedule, deployment caps |
-| Exit manager | `position_manager.py` | 7-priority exit stack |
+| Exit manager | `position_manager.py` | 6-priority exit stack |
 | Perp execution | `perps_engine.py` → `execution/coinbase_broker.py` | Coinbase US nano perp futures; CDP JWT auth; ISOLATED margin; BTC/ETH/SOL/XRP only |
 | MES execution | `scheduler/v10_runner.py` → `execution/ibkr_broker.py` | IBKR paper port 7497 (ARCHIVED — dormant) |
 | ForecastEx broker | `execution/forecastex_broker.py` | IBKR ForecastEx event contracts; SecType=OPT, Exchange=FORECASTX; clientId=3; economic markets only; bid/ask/mid pricing only |
@@ -191,7 +191,7 @@ Entry: composite >= regime threshold: TRENDING_UP/DOWN=58, RANGING=58, HIGH_VOL=
 4. **Hard stop** — stop-market on exchange, never widened.
 5. **Risk forced exit** — margin breach / drawdown / correlation.
 6. **Kill switch** — balance < 75% ACCOUNT_SIZE / API errors / latency.
-7. **Dead-money exit** (`exit_type=dead_money_exit`) — held >24h AND `|current - entry| < 0.5×atr_at_entry` AND no trailing activation AND no scale-out done. Hard backstop at 96h regardless.
+~~7. Dead-money exit~~ — **removed (v16.9).** Thesis holds until one of exits 1–6 triggers. No time-based or drift-based forced exit.
 
 ## Learning Architecture
 

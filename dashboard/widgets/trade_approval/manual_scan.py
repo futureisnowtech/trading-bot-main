@@ -469,17 +469,17 @@ def render_manual_scan():
                 # ── Live-mode size guards ──────────────────────────────────────
                 if not _exec_paper:
                     _min_usd = _min_contract_usd(exec_sym, price)
-                    # Hard cap: no single trade > 15% of account. If even the
+                    # Hard cap: no single trade > 3% of account. If even the
                     # minimum 1-contract cost exceeds that, the account is too
                     # small for this instrument — skip rather than force a huge bet.
-                    _max_single = round(_acct_balance * 0.15, 2)
+                    _max_single = round(_acct_balance * 0.03, 2)
                     if _min_usd > 0 and _min_usd > _max_single:
                         results.append(
                             (
                                 sym,
                                 dirn,
                                 False,
-                                f"min contract ${_min_usd:.0f} exceeds 15% account "
+                                f"min contract ${_min_usd:.0f} exceeds 3% account "
                                 f"cap ${_max_single:.0f} — account too small for {exec_sym}",
                             )
                         )

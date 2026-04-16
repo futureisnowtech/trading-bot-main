@@ -168,4 +168,4 @@ def test_step4_small_position_unchanged():
 def test_v10_runner_candidate_journal_uses_expected_profit_fallback():
     runner_path = os.path.join(_ROOT, "scheduler", "v10_runner.py")
     src = open(runner_path).read()
-    assert 'candidate.get("scanner_expected_profit", candidate.get("expected_profit", 0))' in src
+    assert 'scanner_expected_profit", candidate.get("expected_profit", 0)' in src

@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-16
+- feat(v16.9): remove dead-money exit; tighten manual trade size cap to 3%
+
+## 2026-04-16
 - fix(v16.8): audit cleanup — permissions, KNOWN_STRATEGIES, phantom positions
 
 ## 2026-04-16

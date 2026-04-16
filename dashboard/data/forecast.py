@@ -33,12 +33,35 @@ def _conn() -> sqlite3.Connection:
 # ── Health / status ────────────────────────────────────────────────────────────
 
 
+_TS_NORM = "datetime(replace(substr(ts,1,19),'T',' '))"
+
+
+def _lane_active_from_runtime(c) -> tuple[bool, str | None]:
+    """
+    Check lane_runtime_state for forecast lane active status.
+
+    Returns (is_active, heartbeat_ts_or_None).
+    Primary truth source — updated every minute by the runner regardless of
+    whether scans succeed. Does not depend on ForecastRunner system_events.
+    """
+    try:
+        row = c.execute(
+            "SELECT active, last_heartbeat_at FROM lane_runtime_state "
+            "WHERE lane_id='forecast' ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        if row:
+            return bool(row[0]), row[1]
+    except Exception:
+        pass
+    return False, None
+
+
 def get_forecast_health() -> dict:
     """
     Returns:
         {tables_exist, active_markets, underliers_visible, contracts_unavailable_count,
          active_contracts, quote_lag_minutes, bars_5m_count, positions_open,
-         last_discovery_at, lane_started}
+         last_discovery_at, lane_started, lane_heartbeat_at, lane_readiness_state}
     """
     result = {
         "tables_exist": False,
@@ -51,9 +74,43 @@ def get_forecast_health() -> dict:
         "positions_open": 0,
         "last_discovery_at": None,
         "lane_started": False,
+        "lane_heartbeat_at": None,
+        "lane_readiness_state": None,
     }
     try:
         with _conn() as c:
+            # ── Lane alive: runtime state first (updated every minute by runner) ──
+            # Falls back to system_events only if runtime table is unavailable.
+            try:
+                rt_row = c.execute(
+                    "SELECT active, last_heartbeat_at, readiness_state "
+                    "FROM lane_runtime_state "
+                    "WHERE lane_id='forecast' ORDER BY id DESC LIMIT 1"
+                ).fetchone()
+                if rt_row is not None:
+                    result["lane_started"] = bool(rt_row[0])
+                    result["lane_heartbeat_at"] = rt_row[1]
+                    result["lane_readiness_state"] = rt_row[2]
+                else:
+                    # No runtime row yet — fall back to system_events
+                    n = c.execute(
+                        "SELECT COUNT(*) FROM system_events "
+                        "WHERE source='ForecastRunner' "
+                        f"AND {_TS_NORM} >= datetime('now','-2 hours')"
+                    ).fetchone()[0]
+                    result["lane_started"] = n > 0
+            except Exception:
+                # lane_runtime_state may not exist yet; try system_events
+                try:
+                    n = c.execute(
+                        "SELECT COUNT(*) FROM system_events "
+                        "WHERE source='ForecastRunner' "
+                        f"AND {_TS_NORM} >= datetime('now','-2 hours')"
+                    ).fetchone()[0]
+                    result["lane_started"] = n > 0
+                except Exception:
+                    pass
+
             # Check tables exist
             tables = {
                 r[0]
@@ -70,28 +127,7 @@ def get_forecast_health() -> dict:
             }
             result["tables_exist"] = required.issubset(tables)
             if not result["tables_exist"]:
-                # Check if lane started even without tables
-                try:
-                    n = c.execute(
-                        "SELECT COUNT(*) FROM system_events "
-                        "WHERE source='ForecastRunner' "
-                        "AND ts >= datetime('now','-2 hours')"
-                    ).fetchone()[0]
-                    result["lane_started"] = n > 0
-                except Exception:
-                    pass
                 return result
-
-            # Lane started: recent ForecastRunner system_events
-            try:
-                n = c.execute(
-                    "SELECT COUNT(*) FROM system_events "
-                    "WHERE source='ForecastRunner' "
-                    "AND ts >= datetime('now','-2 hours')"
-                ).fetchone()[0]
-                result["lane_started"] = n > 0
-            except Exception:
-                pass
 
             # Underliers visible (all markets in DB, regardless of contracts)
             result["underliers_visible"] = c.execute(
@@ -357,11 +393,14 @@ def get_forecast_readiness() -> dict:
     _chk("DB tables", True, "All 5 forecast tables present")
 
     lane_started = health.get("lane_started", False)
+    lane_hb = health.get("lane_heartbeat_at")
+    lane_rs = health.get("lane_readiness_state")
+
     if not lane_started:
         _chk(
             "Lane running",
             False,
-            "No ForecastRunner events in last 2h — start the forecast lane",
+            "Forecast lane inactive — start the bot with FORECAST_LANE_ACTIVE=true",
             needs_human=True,
         )
         lane_state = LANE_NOT_STARTED
@@ -371,9 +410,22 @@ def get_forecast_readiness() -> dict:
             "checks": checks,
             "underliers_visible": health.get("underliers_visible", 0),
             "contracts_unavailable_count": health.get("contracts_unavailable_count", 0),
+            "lane_heartbeat_at": lane_hb,
         }
 
-    _chk("Lane running", True, "ForecastRunner active (events in last 2h)")
+    # Build a human-readable heartbeat age for the check detail
+    hb_desc = ""
+    if lane_hb:
+        try:
+            _hb_dt = datetime.fromisoformat(lane_hb.replace("Z", "+00:00"))
+            if not _hb_dt.tzinfo:
+                _hb_dt = _hb_dt.replace(tzinfo=timezone.utc)
+            _age_s = (datetime.now(timezone.utc) - _hb_dt).total_seconds()
+            hb_desc = f", heartbeat {_age_s:.0f}s ago"
+        except Exception:
+            pass
+
+    _chk("Lane running", True, f"Forecast lane active (runtime state=active{hb_desc})")
     lane_state = (
         BROKER_DISCONNECTED  # assume disconnected until quote activity proves otherwise
     )
@@ -458,4 +510,5 @@ def get_forecast_readiness() -> dict:
         "checks": checks,
         "underliers_visible": underliers,
         "contracts_unavailable_count": unavailable,
+        "lane_heartbeat_at": lane_hb,
     }

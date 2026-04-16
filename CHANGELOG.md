@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-15
+- v15.9: forecast truth-layer + trade approval import fix: manual_scan execute-trade crash fixed (importlib.util replaces ambiguous from data.historical_data); forecast health/readiness uses lane_runtime_state primary; validate.py forecast check uses runtime state + normalized ts fallback; forecast dashboard upgraded to operational-funnel + zero-state handling; 276 proof tests
+
+## 2026-04-15
 - v15.8: kill switch live-mode fix (50% live baseline, remove risk_engine false-trigger, schema fix), ISO timestamp T-separator fix across dashboard queries, economics veto operator-precedence fix, execution error dedup, unified dashboard mode via _runtime_paper_flag(), heartbeat age uses lane_runtime_state primary, epoch timestamps display in alert feed; 260 proof tests (0 failures)
 
 ## 2026-04-15

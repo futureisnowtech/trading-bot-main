@@ -6,15 +6,18 @@ Refresh: manual (button-driven)
 Asset class: CRYPTO PERPS
 """
 
+import importlib.util as _ilu
 import os
 import sys
 import streamlit as st
 from datetime import datetime
 
+# dashboard/data/ imports — intentionally from dashboard data layer (not repo-root data/)
 from data.positions import get_open_positions, get_live_prices
 from data.account import get_account
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+# _ROOT = repo root (3 levels up from dashboard/widgets/trade_approval/)
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(_THIS_DIR)))
 
 _SETUP_DESC = {
@@ -213,7 +216,23 @@ def render_manual_scan():
         return
 
     if st.button(f"Execute {n_sel} Trade(s)", type="primary", key="manual_execute_btn"):
-        from data.historical_data import get_candles
+        # Load get_candles from repo-root data/historical_data.py via explicit path.
+        # We CANNOT use `from data.historical_data import get_candles` here because the
+        # dashboard process caches `data` as `dashboard/data` (sys.path puts dashboard/
+        # first; __init__.py makes it a package). dashboard/data has no historical_data.py.
+        # importlib.util bypasses the sys.modules cache entirely.
+        try:
+            _hd_spec = _ilu.spec_from_file_location(
+                "_root_data_historical_data",
+                os.path.join(_ROOT, "data", "historical_data.py"),
+            )
+            _hd_mod = _ilu.module_from_spec(_hd_spec)  # type: ignore[arg-type]
+            _hd_spec.loader.exec_module(_hd_mod)  # type: ignore[union-attr]
+            get_candles = _hd_mod.get_candles
+        except Exception as _imp_err:
+            st.error(f"Cannot load candle data module: {_imp_err}")
+            return
+
         import perps_engine as perps
 
         results = []

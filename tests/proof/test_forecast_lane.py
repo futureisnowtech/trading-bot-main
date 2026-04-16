@@ -778,3 +778,337 @@ def test_forecast_db_coexists_with_trades_table(tmp_path):
     assert n_trades == 1, "Existing trades row must not be lost"
     assert "forecast_markets" in tables
     assert "forecast_contracts" in tables
+
+
+# ── 21-28. Forecast dashboard truth-layer tests (v15.9) ───────────────────────
+
+
+def test_forecast_health_uses_lane_runtime_state_as_primary_truth(tmp_path):
+    """
+    get_forecast_health() must read lane_runtime_state.active as the primary
+    source of lane_started truth when that table is available.
+    It must NOT solely rely on system_events ForecastRunner counts.
+    """
+    import importlib
+
+    # Build a DB with forecast tables + lane_runtime_state but ZERO system_events
+    db = str(tmp_path / "health_test.db")
+    from forecast.db import init_forecast_db
+
+    init_forecast_db(db_path=db)
+
+    c = sqlite3.connect(db)
+    # Create lane_runtime_state table and mark forecast as active
+    c.executescript("""
+        CREATE TABLE IF NOT EXISTS lane_runtime_state (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            lane_id TEXT UNIQUE,
+            active INTEGER DEFAULT 0,
+            last_heartbeat_at TEXT,
+            readiness_state TEXT
+        );
+        INSERT INTO lane_runtime_state (lane_id, active, last_heartbeat_at, readiness_state)
+        VALUES ('forecast', 1, datetime('now'), 'NO_TRADABLE_CONTRACTS_RIGHT_NOW');
+        CREATE TABLE IF NOT EXISTS system_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts TEXT, level TEXT, source TEXT, message TEXT
+        );
+        -- NO ForecastRunner events inserted
+    """)
+    c.commit()
+    c.close()
+
+    # Patch DB_PATH so the module uses our tmp DB
+    import dashboard.data.forecast as _fc_mod
+
+    orig_path = _fc_mod.DB_PATH
+    _fc_mod.DB_PATH = db
+    try:
+        result = _fc_mod.get_forecast_health()
+    finally:
+        _fc_mod.DB_PATH = orig_path
+
+    assert result["lane_started"] is True, (
+        "get_forecast_health() must return lane_started=True when lane_runtime_state "
+        "shows active=1, even if there are zero ForecastRunner system_events. "
+        "The primary truth source must be lane_runtime_state."
+    )
+
+
+def test_forecast_health_falls_back_to_system_events_when_no_runtime_table(tmp_path):
+    """
+    When lane_runtime_state table does not exist, get_forecast_health() must
+    fall back to system_events ForecastRunner count.
+    """
+    db = str(tmp_path / "no_runtime.db")
+    from forecast.db import init_forecast_db
+
+    init_forecast_db(db_path=db)
+
+    c = sqlite3.connect(db)
+    # Add system_events with a recent ForecastRunner entry (no lane_runtime_state)
+    c.executescript("""
+        CREATE TABLE IF NOT EXISTS system_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts TEXT, level TEXT, source TEXT, message TEXT
+        );
+        INSERT INTO system_events (ts, level, source, message)
+        VALUES (datetime('now'), 'INFO', 'ForecastRunner', 'test event');
+    """)
+    c.commit()
+    c.close()
+
+    import dashboard.data.forecast as _fc_mod
+
+    orig_path = _fc_mod.DB_PATH
+    _fc_mod.DB_PATH = db
+    try:
+        result = _fc_mod.get_forecast_health()
+    finally:
+        _fc_mod.DB_PATH = orig_path
+
+    assert result["lane_started"] is True, (
+        "get_forecast_health() must fall back to system_events when "
+        "lane_runtime_state table does not exist."
+    )
+
+
+def test_forecast_health_system_events_uses_normalized_timestamp(tmp_path):
+    """
+    The system_events fallback must use datetime(replace(substr(ts,1,19),'T',' '))
+    for timestamp comparison, not raw ts >= ? (which fails for ISO T-separator timestamps).
+    """
+    db = str(tmp_path / "ts_norm.db")
+    from forecast.db import init_forecast_db
+
+    init_forecast_db(db_path=db)
+
+    c = sqlite3.connect(db)
+    # Insert a ForecastRunner event with ISO T-separator timestamp from 30 min ago
+    import datetime as _dtt
+
+    ts_iso = (
+        _dtt.datetime.now(_dtt.timezone.utc) - _dtt.timedelta(minutes=30)
+    ).strftime("%Y-%m-%dT%H:%M:%S")  # ISO with T, no timezone suffix
+    c.executescript(f"""
+        CREATE TABLE IF NOT EXISTS system_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts TEXT, level TEXT, source TEXT, message TEXT
+        );
+        INSERT INTO system_events (ts, level, source, message)
+        VALUES ('{ts_iso}', 'INFO', 'ForecastRunner', 'iso ts test');
+    """)
+    c.commit()
+    c.close()
+
+    import dashboard.data.forecast as _fc_mod
+
+    orig_path = _fc_mod.DB_PATH
+    _fc_mod.DB_PATH = db
+    try:
+        result = _fc_mod.get_forecast_health()
+    finally:
+        _fc_mod.DB_PATH = orig_path
+
+    # The event is 30 min old — within the 2h window — must be found
+    assert result["lane_started"] is True, (
+        "get_forecast_health() fallback must find ISO T-separator timestamps within 2h "
+        "using datetime(replace(substr(ts,1,19),'T',' ')) normalization. "
+        "Raw `ts >= datetime('now','-2 hours')` fails for space-vs-T separator."
+    )
+
+
+def test_forecast_readiness_active_lane_with_no_contracts(tmp_path):
+    """
+    When lane_runtime_state shows active=1 and underliers exist but contracts=0,
+    get_forecast_readiness() must return NO_TRADABLE_CONTRACTS_RIGHT_NOW —
+    NOT LANE_NOT_STARTED.
+    """
+    db = str(tmp_path / "readiness_test.db")
+    from forecast.db import init_forecast_db, upsert_market
+
+    init_forecast_db(db_path=db)
+    upsert_market("CPI", "CPI Test Market", db_path=db)  # underlier with no contracts
+
+    c = sqlite3.connect(db)
+    c.executescript("""
+        CREATE TABLE IF NOT EXISTS lane_runtime_state (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            lane_id TEXT UNIQUE,
+            active INTEGER DEFAULT 0,
+            last_heartbeat_at TEXT,
+            readiness_state TEXT
+        );
+        INSERT INTO lane_runtime_state (lane_id, active, last_heartbeat_at, readiness_state)
+        VALUES ('forecast', 1, datetime('now'), 'NO_TRADABLE_CONTRACTS_RIGHT_NOW');
+        CREATE TABLE IF NOT EXISTS system_events (
+            id INTEGER PRIMARY KEY, ts TEXT, level TEXT, source TEXT, message TEXT
+        );
+    """)
+    c.commit()
+    c.close()
+
+    import dashboard.data.forecast as _fc_mod
+
+    orig = _fc_mod.DB_PATH
+    _fc_mod.DB_PATH = db
+    try:
+        r = _fc_mod.get_forecast_readiness()
+    finally:
+        _fc_mod.DB_PATH = orig
+
+    assert r["lane_state"] == _fc_mod.NO_TRADABLE_CONTRACTS_RIGHT_NOW, (
+        f"Expected NO_TRADABLE_CONTRACTS_RIGHT_NOW, got {r['lane_state']}. "
+        "When runtime state shows active=1 and underliers exist but contracts=0, "
+        "the readiness state must reflect that — not LANE_NOT_STARTED."
+    )
+    # Must not say the lane is not running
+    lane_not_started_checks = [
+        ch for ch in r.get("checks", [])
+        if ch.get("status") != "PASS" and "not started" in ch.get("detail", "").lower()
+    ]
+    assert not lane_not_started_checks, (
+        "Readiness checks must not report the lane as 'not started' when "
+        "runtime state shows active=1. Got problematic checks: "
+        + str(lane_not_started_checks)
+    )
+
+
+def test_forecast_readiness_zero_state_returns_useful_info(tmp_path):
+    """
+    In full zero-state (no contracts, no quotes, no bars, no trades),
+    get_forecast_readiness() must still return useful non-empty checks
+    and a lane_state that is not OPERATIONAL or LANE_NOT_STARTED
+    (assuming the lane is alive per runtime state).
+    """
+    db = str(tmp_path / "zero_state.db")
+    from forecast.db import init_forecast_db, upsert_market
+
+    init_forecast_db(db_path=db)
+    upsert_market("NFP", "NFP Jobs Test", db_path=db)
+
+    c = sqlite3.connect(db)
+    c.executescript("""
+        CREATE TABLE IF NOT EXISTS lane_runtime_state (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            lane_id TEXT UNIQUE,
+            active INTEGER DEFAULT 0,
+            last_heartbeat_at TEXT,
+            readiness_state TEXT
+        );
+        INSERT INTO lane_runtime_state (lane_id, active, last_heartbeat_at, readiness_state)
+        VALUES ('forecast', 1, datetime('now'), 'NO_TRADABLE_CONTRACTS_RIGHT_NOW');
+        CREATE TABLE IF NOT EXISTS system_events (
+            id INTEGER PRIMARY KEY, ts TEXT, level TEXT, source TEXT, message TEXT
+        );
+    """)
+    c.commit()
+    c.close()
+
+    import dashboard.data.forecast as _fc_mod
+
+    orig = _fc_mod.DB_PATH
+    _fc_mod.DB_PATH = db
+    try:
+        r = _fc_mod.get_forecast_readiness()
+    finally:
+        _fc_mod.DB_PATH = orig
+
+    assert r["lane_state"] != _fc_mod.OPERATIONAL, (
+        "Zero-state must not report OPERATIONAL"
+    )
+    assert r["lane_state"] != _fc_mod.LANE_NOT_STARTED, (
+        "Zero-state with active runtime must not report LANE_NOT_STARTED"
+    )
+    assert len(r.get("checks", [])) > 0, (
+        "Readiness checks must be non-empty even in zero-state"
+    )
+
+
+def test_validate_forecast_lane_check_references_lane_runtime_state():
+    """
+    validate.py Forecast lane active check must reference lane_runtime_state
+    (not solely ForecastRunner system_events) as primary truth.
+    """
+    validate_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "scripts",
+        "validate.py",
+    )
+    with open(validate_path, encoding="utf-8") as f:
+        src = f.read()
+
+    assert "lane_runtime_state" in src, (
+        "validate.py must reference lane_runtime_state in its forecast-lane check. "
+        "Relying solely on ForecastRunner system_events is incorrect — events may be "
+        "absent even when the lane is running (race at startup, fresh restart, etc.)."
+    )
+
+
+def test_forecast_dashboard_widget_uses_operational_funnel():
+    """
+    forecast_dashboard.py must render an 'Operational Funnel' section that
+    shows pipeline stages from lane-alive through to trades.
+    """
+    widget_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "dashboard",
+        "widgets",
+        "forecast",
+        "forecast_dashboard.py",
+    )
+    with open(widget_path, encoding="utf-8") as f:
+        src = f.read()
+
+    assert "Operational Funnel" in src or "funnel" in src.lower(), (
+        "forecast_dashboard.py must include an operational funnel section "
+        "showing the pipeline from lane-alive to trades"
+    )
+    # Must handle zero-state without crashing
+    assert "No forecast trades" in src or "no trades" in src.lower() or "total_trades" in src, (
+        "forecast_dashboard.py must handle zero-state (no trades yet) gracefully"
+    )
+
+
+def test_forecast_health_exposes_heartbeat_at(tmp_path):
+    """
+    get_forecast_health() must expose lane_heartbeat_at from lane_runtime_state
+    so the dashboard can display a heartbeat age without an extra query.
+    """
+    db = str(tmp_path / "hb_test.db")
+    from forecast.db import init_forecast_db
+
+    init_forecast_db(db_path=db)
+    c = sqlite3.connect(db)
+    c.executescript("""
+        CREATE TABLE IF NOT EXISTS lane_runtime_state (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            lane_id TEXT UNIQUE,
+            active INTEGER DEFAULT 0,
+            last_heartbeat_at TEXT,
+            readiness_state TEXT
+        );
+        INSERT INTO lane_runtime_state (lane_id, active, last_heartbeat_at, readiness_state)
+        VALUES ('forecast', 1, '2026-04-16T03:00:00+00:00', 'NO_TRADABLE_CONTRACTS_RIGHT_NOW');
+        CREATE TABLE IF NOT EXISTS system_events (
+            id INTEGER PRIMARY KEY, ts TEXT, level TEXT, source TEXT, message TEXT
+        );
+    """)
+    c.commit()
+    c.close()
+
+    import dashboard.data.forecast as _fc_mod
+
+    orig = _fc_mod.DB_PATH
+    _fc_mod.DB_PATH = db
+    try:
+        result = _fc_mod.get_forecast_health()
+    finally:
+        _fc_mod.DB_PATH = orig
+
+    assert "lane_heartbeat_at" in result, (
+        "get_forecast_health() must include lane_heartbeat_at in its return dict"
+    )
+    assert result["lane_heartbeat_at"] == "2026-04-16T03:00:00+00:00", (
+        "lane_heartbeat_at must match the value from lane_runtime_state"
+    )

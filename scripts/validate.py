@@ -501,21 +501,52 @@ try:
 except Exception as _e:
     _fx("MES archived", "BLOCKED", f"Config check error: {_e}")
 
-# 9b. Forecast lane DB activity
+# 9b. Forecast lane activity — primary truth from lane_runtime_state
 try:
     if os.path.exists(_fx_db):
         _c = _sq3.connect(_fx_db)
         try:
-            _lane_events = 0
+            _lane_active = False
+            _lane_hb_age = None
             _markets_count = 0
             _stub_count = 0
+
+            # PRIMARY: lane_runtime_state (updated every minute by runner)
             try:
-                _lane_events = _c.execute(
-                    "SELECT COUNT(*) FROM system_events "
-                    "WHERE source='ForecastRunner' AND ts >= datetime('now','-2 hours')"
-                ).fetchone()[0]
+                _rt = _c.execute(
+                    "SELECT active, last_heartbeat_at FROM lane_runtime_state "
+                    "WHERE lane_id='forecast' ORDER BY id DESC LIMIT 1"
+                ).fetchone()
+                if _rt is not None:
+                    _lane_active = bool(_rt[0])
+                    if _rt[1]:
+                        try:
+                            from datetime import datetime as _dt2, timezone as _tz2
+
+                            _hb = _dt2.fromisoformat(_rt[1].replace("Z", "+00:00"))
+                            if not _hb.tzinfo:
+                                _hb = _hb.replace(tzinfo=_tz2.utc)
+                            _lane_hb_age = (_dt2.now(_tz2.utc) - _hb).total_seconds()
+                        except Exception:
+                            pass
             except Exception:
                 pass
+
+            # FALLBACK: system_events (normalized timestamp comparison)
+            if not _lane_active:
+                try:
+                    _ev_n = _c.execute(
+                        "SELECT COUNT(*) FROM system_events "
+                        "WHERE source='ForecastRunner' "
+                        "AND datetime(replace(substr(ts,1,19),'T',' ')) >= "
+                        "datetime('now','-2 hours')"
+                    ).fetchone()[0]
+                    if _ev_n > 0:
+                        _lane_active = True
+                        _lane_hb_age = None  # unknown from events alone
+                except Exception:
+                    pass
+
             try:
                 _markets_count = _c.execute(
                     "SELECT COUNT(*) FROM forecast_markets WHERE active=1"
@@ -528,10 +559,24 @@ try:
             except Exception:
                 pass
             _c.close()
-            if _lane_events > 0:
-                _fx("Forecast lane active", "READY", f"ForecastRunner: {_lane_events} events in last 2h")
+
+            if _lane_active:
+                _hb_desc = (
+                    f", heartbeat {_lane_hb_age:.0f}s ago"
+                    if _lane_hb_age is not None
+                    else ""
+                )
+                _fx(
+                    "Forecast lane active",
+                    "READY",
+                    f"Runtime state: lane active=True{_hb_desc}",
+                )
             else:
-                _fx("Forecast lane active", "ACTION NEEDED", "No ForecastRunner events in last 2h — lane not running")
+                _fx(
+                    "Forecast lane active",
+                    "ACTION NEEDED",
+                    "Forecast lane not active — start bot with FORECAST_LANE_ACTIVE=true",
+                )
             if _stub_count > 0:
                 _fx(
                     "Forecast enrollment",
@@ -539,7 +584,11 @@ try:
                     f"{_stub_count} underlier(s) visible but no OPT contracts — check ForecastEx portal enrollment",
                 )
             elif _markets_count > 0:
-                _fx("Forecast enrollment", "READY", f"{_markets_count} market(s) with active contracts")
+                _fx(
+                    "Forecast enrollment",
+                    "READY",
+                    f"{_markets_count} market(s) with active contracts",
+                )
         except Exception as _e:
             _c.close()
             _fx("Forecast lane active", "BLOCKED", f"DB check error: {_e}")
@@ -601,7 +650,8 @@ try:
 
         # Check system_runtime_state table
         _tables = {
-            r[0] for r in _rc.execute(
+            r[0]
+            for r in _rc.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"
             ).fetchall()
         }
@@ -613,7 +663,9 @@ try:
                 "SELECT * FROM system_runtime_state WHERE id=1"
             ).fetchone()
             if _sys_row:
-                ok(f"system_runtime_state: mode={_sys_row['process_mode']}, status={_sys_row['global_status']}, alive={_sys_row['process_alive']}")
+                ok(
+                    f"system_runtime_state: mode={_sys_row['process_mode']}, status={_sys_row['global_status']}, alive={_sys_row['process_alive']}"
+                )
             else:
                 warn("system_runtime_state exists but has no row — bot not yet started")
 
@@ -623,13 +675,14 @@ try:
         else:
             _expected_lanes = ("crypto", "forecast", "mes_archived")
             _lane_rows = {
-                r["lane_id"]: r for r in _rc.execute(
-                    "SELECT * FROM lane_runtime_state"
-                ).fetchall()
+                r["lane_id"]: r
+                for r in _rc.execute("SELECT * FROM lane_runtime_state").fetchall()
             }
             _missing_lanes = [l for l in _expected_lanes if l not in _lane_rows]
             if _missing_lanes:
-                warn(f"lane_runtime_state missing rows for: {', '.join(_missing_lanes)} — bot not yet started")
+                warn(
+                    f"lane_runtime_state missing rows for: {', '.join(_missing_lanes)} — bot not yet started"
+                )
             else:
                 ok(f"lane_runtime_state: {len(_lane_rows)} lane(s) registered")
                 for _lid in _expected_lanes:
@@ -646,13 +699,17 @@ try:
                     if _lid == "mes_archived":
                         _mes_flag = getattr(_cfg_rt, "FUTURES_LANE_ACTIVE", False)
                         if not _mes_flag and _active:
-                            fail(f"  Lane {_lid}: FUTURES_LANE_ACTIVE=false but lane is active ({_status_str})")
+                            fail(
+                                f"  Lane {_lid}: FUTURES_LANE_ACTIVE=false but lane is active ({_status_str})"
+                            )
                         else:
                             ok(f"  Lane {_lid} [DORMANT]: {_status_str}")
                     elif _lid == "forecast":
                         _fc_flag = getattr(_cfg_rt, "FORECAST_LANE_ACTIVE", False)
                         if _fc_flag and not _active:
-                            warn(f"  Lane {_lid} [ACTION_NEEDED]: FORECAST_LANE_ACTIVE=true but not active ({_status_str})")
+                            warn(
+                                f"  Lane {_lid} [ACTION_NEEDED]: FORECAST_LANE_ACTIVE=true but not active ({_status_str})"
+                            )
                         elif not _fc_flag:
                             ok(f"  Lane {_lid} [DISABLED]: {_status_str}")
                         else:
@@ -663,7 +720,9 @@ try:
 
         # Check incidents table
         if "incidents" not in _tables:
-            warn("incidents table missing — bot not yet started or incident_tracker not initialized")
+            warn(
+                "incidents table missing — bot not yet started or incident_tracker not initialized"
+            )
         else:
             _n_open = _rc.execute(
                 "SELECT COUNT(*) FROM incidents WHERE state='open'"
@@ -672,7 +731,9 @@ try:
                 "SELECT COUNT(*) FROM incidents WHERE state='open' AND severity='CRITICAL'"
             ).fetchone()[0]
             if _n_critical > 0:
-                fail(f"incidents: {_n_open} open ({_n_critical} CRITICAL) — review required")
+                fail(
+                    f"incidents: {_n_open} open ({_n_critical} CRITICAL) — review required"
+                )
             elif _n_open > 5:
                 warn(f"incidents: {_n_open} open — review recommended")
             else:

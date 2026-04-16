@@ -219,6 +219,7 @@ def init_db() -> None:
         labeled_at TEXT,
         price_15m REAL DEFAULT 0,
         ret_15m_pct REAL DEFAULT 0,
+        path_timing_evaluated INTEGER DEFAULT 0,
         time_to_05r_min REAL,
         time_to_1r_min REAL,
         time_to_2r_min REAL,
@@ -338,6 +339,7 @@ def init_db() -> None:
 
     # v16.0: candidate_outcomes — path timing columns.
     for _migration in [
+        "ALTER TABLE candidate_outcomes ADD COLUMN path_timing_evaluated INTEGER DEFAULT 0",
         "ALTER TABLE candidate_outcomes ADD COLUMN time_to_05r_min REAL",
         "ALTER TABLE candidate_outcomes ADD COLUMN time_to_1r_min REAL",
         "ALTER TABLE candidate_outcomes ADD COLUMN time_to_2r_min REAL",
@@ -347,6 +349,17 @@ def init_db() -> None:
             cur.execute(_migration)
         except Exception:
             pass
+    try:
+        cur.execute(
+            """
+            UPDATE candidate_outcomes
+            SET path_timing_evaluated = 1
+            WHERE COALESCE(path_timing_evaluated, 0) = 0
+              AND peak_r_4h IS NOT NULL
+            """
+        )
+    except Exception:
+        pass
 
     conn.commit()
     conn.close()
@@ -847,6 +860,7 @@ def log_candidate_outcome(
     worst_drawdown_pct: float,
     price_15m: float = 0.0,
     ret_15m_pct: float = 0.0,
+    path_timing_evaluated: int = 0,
     time_to_05r_min: float | None = None,
     time_to_1r_min: float | None = None,
     time_to_2r_min: float | None = None,
@@ -862,9 +876,9 @@ def log_candidate_outcome(
                 price_1h, price_4h, ret_1h_pct, ret_4h_pct,
                 mfe_4h_pct, mae_4h_pct, hit_1r, hit_2r, hit_stop,
                 best_exit_pct, worst_drawdown_pct, labeled_at,
-                price_15m, ret_15m_pct,
+                price_15m, ret_15m_pct, path_timing_evaluated,
                 time_to_05r_min, time_to_1r_min, time_to_2r_min, peak_r_4h
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 candidate_id,
                 label_status,
@@ -883,6 +897,7 @@ def log_candidate_outcome(
                 _ts(),
                 price_15m,
                 ret_15m_pct,
+                int(path_timing_evaluated),
                 time_to_05r_min,
                 time_to_1r_min,
                 time_to_2r_min,

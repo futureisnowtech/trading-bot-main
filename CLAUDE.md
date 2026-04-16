@@ -18,7 +18,7 @@ Fully autonomous AI trading system: scans Kraken Futures + Binance USDM + Hyperl
 - Paper account: $5,000 (`ACCOUNT_SIZE=5000` — config default, no .env override)
 - Wants zero day-to-day intervention. Prefers simple explanations, hates fluff.
 
-## Current Version: v16.1 (2026-04-16)
+## Current Version: v16.2 (2026-04-16)
 
 **Active branch:** `feature/v10-rebuild` | **Clean paper trading started:** 2026-04-02 | **Live trading started:** 2026-04-15
 
@@ -74,7 +74,7 @@ Fully autonomous AI trading system: scans Kraken Futures + Binance USDM + Hyperl
 
 ### Key Decisions
 
-- **Scanner sources:** Kraken Futures public REST + Binance USDM public REST + Hyperliquid public API (all 3 every scan — intelligence only; broader than live set)
+- **Scanner sources:** Kraken Futures public REST + Binance USDM public REST + Hyperliquid public API. Live scheduler and manual scan now call `scanner.scan(..., core_only=True)`, so the operational universe is limited to `CORE_EXECUTION_UNDERLYINGS`; broad-universe scans are opt-in research mode only.
 - **Live crypto execution venue:** Coinbase US nano perp-style futures (`coinbase_broker.py`). Supported: BTC→BIP-20DEC30-CDE, ETH→ETP-20DEC30-CDE, SOL→SLP-20DEC30-CDE, XRP→XPP-20DEC30-CDE. Any other symbol → `CoinbaseSymbolError` (fail-closed).
 - **Coinbase auth:** CDP JWT / ES256. Env vars: `COINBASE_CDP_KEY_NAME` + `COINBASE_CDP_PRIVATE_KEY`. Paper mode = zero API calls, no credentials needed.
 - **Coinbase futures API path:** CFTC nano futures use `/api/v3/brokerage/cfm/` (CFM = Coinbase Financial Markets), NOT `/api/v3/brokerage/futures/`. The `/futures/` path returns 401. Both `connect()` and `get_wallet_balance()` in `coinbase_broker.py` use `/cfm/balance_summary`.
@@ -142,8 +142,9 @@ Fully autonomous AI trading system: scans Kraken Futures + Binance USDM + Hyperl
 - **Scanner EV cap (v16):** `_step4_expected_value` in scanner.py uses `effective_position_usd = min(theoretical_position_usd, 100.0)` to prevent phantom EV from tight stops implying unrealistic $7K+ notional on $5K account. Both `scanner_theoretical_position_usd` and `scanner_effective_position_usd` persisted to `scan_candidates` via `log_scan_candidate()`.
 - **Exact scan funnel (v16):** `scan_funnels` table (17 columns) stores exact per-cycle counts. `_attempt_entry()` returns terminal decision strings (`data_unavailable`/`below_threshold`/`econ_veto`/`research_only_block`/`sizing_zero`/`execution_failed`/`entered`). `log_scan_funnel()` called at end of each scan cycle. `execution_failed` = open_long/open_short returned None.
 - **Bayesian entry priors (v16):** `learning/entry_priors.py` — `estimate_candidate_win_rate(exchange, primary_setup, regime, direction)`. Win label: `hit_1r=1 AND hit_stop=0`. 5-level fallback: exchange+setup+regime+direction → setup+regime+direction → setup+regime → regime+direction → global. Bayesian smoothing: `(prior_n*prior_p + wins)/(prior_n + n)`, prior_p=0.52, prior_n=20, clipped [0.40, 0.70]. Replaces hardcoded `_wr_est = 0.54 if tier == 1 else ...` in v10_runner.py economics gate.
-- **Path timing (v16):** `candidate_outcomes` has 4 new columns: `time_to_05r_min`, `time_to_1r_min`, `time_to_2r_min` (minutes to reach R threshold from 15m bars, NULL if not reached), `peak_r_4h` (mfe_4h_pct / stop_pct). Computed in `learning/candidate_labeler.py:_compute_path_timing()` — scans 15m bars after reference bar, uses highs (LONG) or lows (SHORT).
-- **Audit scripts (v16):** `scripts/entry_truth_audit.py` (6 sections: Funnel/EV/Source/Setup/SymbolClass/Integrity) and `scripts/path_truth_audit.py` (4 sections: R-reach/Timing/PathByGroup/ExitQuality). Both support `--days N` and `--json`. Win label aligned with Bayesian priors: `hit_1r=1 AND hit_stop=0`.
+- **Path timing truth (v16.2):** `candidate_outcomes` now also stores `path_timing_evaluated`. `learning/candidate_labeler.py:_compute_path_timing()` anchors 15m/1h/4h timing to `scan_candidates.ts` whenever the fetched candle index supports it, instead of relying only on a tail-of-series heuristic.
+- **Manual scan fail-closed (v16.2):** `dashboard/widgets/trade_approval/manual_scan.py` treats execution-policy lookup failures as blocked (`tier='suppressed'`, `execute=False`) and only runs `scanner.scan(..., core_only=True)`. Dashboard execution can no longer silently fail open into non-core names.
+- **Audit semantics (v16.2):** `scripts/path_truth_audit.py` uses only `path_timing_evaluated=1` rows as the denominator for timing reach percentages. `scripts/entry_truth_audit.py` now separates `scored_total`, `below_threshold`, and `above_threshold`, so conversion and economics-veto rates are calculated from truthful threshold-passed counts.
 
 ### MES Futures — Critical Contract Facts (v13.9)
 
@@ -311,6 +312,8 @@ Set `TV_WEBHOOK_SECRET` in .env. Symbol mapping: BTCUSD → BTCUSDT.
 | v15.9 | 2026-04-16 | Forecast truth-layer + trade approval import fix: manual_scan.py execute-trade crash fixed (from data.historical_data collision with dashboard/data namespace — replaced with importlib.util explicit-path load); forecast dashboard truth now reads lane_runtime_state as primary source (not stale system_events); validate.py forecast-lane check uses runtime state primary + ISO-normalized timestamp fallback; eliminated validate.py vs runtime contradiction; forecast dashboard upgraded to operational-funnel display + zero-state graceful handling + exact operator wording for NO_TRADABLE_CONTRACTS; 276 proof tests |
 | v15.10 | 2026-04-16 | Execution-universe split: runtime/execution_universe.py (single source of truth for tier lookup), CORE_EXECUTION_UNDERLYINGS in config.py (BTC/ETH/SOL/XRP/DOGE/AVAX/LINK/AAVE/INJ/NEAR), research_only_block gate in _attempt_entry (fires after econ gate), tier labels + disabled checkboxes in manual_scan.py, research_only_blocks_24h/7d in journal_health.py, dev_config.py metrics, 10 new proof tests |
 | v16 | 2026-04-16 | Truth/instrumentation tranche: scanner EV cap (effective_position_usd = min(theoretical, $100) prevents phantom EV); exact scan_funnels persistence with log_scan_funnel() + terminal decision strings from _attempt_entry; Bayesian entry priors (learning/entry_priors.py — 5-level fallback, hit_1r=1 AND hit_stop=0 win label, smoothed with prior_n=20/prior_p=0.52, clipped [0.40,0.70]); path timing columns (time_to_05r_min/time_to_1r_min/time_to_2r_min/peak_r_4h in candidate_outcomes, computed from 15m bars in candidate_labeler.py); entry_truth_audit.py (6 sections: funnel/EV/source/setup/symbol-class/integrity); path_truth_audit.py (4 sections: R-reach/timing/path-by-group/exit-quality); scanner_theoretical/effective_position_usd persisted to scan_candidates; 318 proof tests |
+| v16.1 | 2026-04-16 | Audit/version cleanup: entry_truth_audit fixed for real DB schema, symbol class audit uses actual underlyings, UTC timestamp handling aligned, repo version truth corrected, 319 proof tests |
+| v16.2 | 2026-04-16 | Truth hardening + core-only alignment: scanner/runner/manual scan default to core-only universe, manual scan fails closed on policy lookup errors, candidate timing anchored to candidate ts with path_timing_evaluated flag, path_truth_audit denominator fixed, entry_truth_audit threshold math fixed, scanner EV journaling fallback corrected, 325 proof tests |
 
 ## GitHub
 - Repository: `futureisnowtech/trading-bot-main` (private)

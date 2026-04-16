@@ -764,6 +764,41 @@ def test_compute_path_timing_none_when_threshold_not_reached():
     assert result["time_to_2r_min"] is None
 
 
+def test_compute_path_timing_uses_timestamp_anchor_when_available():
+    """Timestamp anchor must override the old tail-based fallback when a DatetimeIndex is present."""
+    import pandas as pd
+    from learning.candidate_labeler import _compute_path_timing
+
+    ref_close = 100.0
+    stop_pct = 2.0  # 0.5R=1%, 1R=2%, 2R=4%
+    idx = pd.date_range("2026-04-10T00:00:00Z", periods=20, freq="15min")
+    highs = [100.0] * 20
+    lows = [100.0] * 20
+    closes = [100.0] * 20
+
+    # Pre-anchor spikes that must be ignored once ref_ts is honored.
+    highs[4] = 108.0
+    # Post-anchor moves: 0.5R at +15m, 1R at +45m, 2R at +75m
+    highs[11] = 101.2
+    highs[13] = 102.1
+    highs[15] = 104.2
+
+    df_15m = pd.DataFrame({"high": highs, "low": lows, "close": closes}, index=idx)
+    ref_ts_iso = idx[10].isoformat()
+
+    result = _compute_path_timing(
+        df_15m,
+        ref_close,
+        "LONG",
+        stop_pct,
+        ref_ts_iso=ref_ts_iso,
+    )
+
+    assert result["time_to_05r_min"] == 15
+    assert result["time_to_1r_min"] == 45
+    assert result["time_to_2r_min"] == 75
+
+
 def test_peak_r_4h_in_outcome_and_persisted(proof_runtime, monkeypatch):
     """_compute_outcome returns peak_r_4h and log_candidate_outcome persists it."""
     import sqlite3

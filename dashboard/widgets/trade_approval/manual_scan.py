@@ -30,7 +30,13 @@ def _get_tier_info(sym: str) -> dict:
 
         return get_execution_policy(sym)
     except Exception:
-        return {"tier": "core", "execute": True, "reason": "unknown"}
+        return {
+            "symbol": sym,
+            "underlying": sym,
+            "tier": "suppressed",
+            "execute": False,
+            "reason": "policy_lookup_failed",
+        }
 
 
 _SETUP_DESC = {
@@ -149,7 +155,8 @@ def _render_trade_details(c: dict, prob: float):
 def render_manual_scan():
     st.subheader("Trade Approval")
     st.caption(
-        "Runs a fresh scan (bypasses the 5-min cache). You pick which trades execute."
+        "Runs a fresh scan on the core execution universe only "
+        "(bypasses the 5-min cache). You pick which trades execute."
     )
 
     col_btn, col_info = st.columns([1, 4])
@@ -169,7 +176,11 @@ def render_manual_scan():
                 import scanner as _scanner_mod
 
                 importlib.reload(_scanner_mod)
-                candidates = _scanner_mod.scan(account_balance=5000.0, force=True)
+                candidates = _scanner_mod.scan(
+                    account_balance=5000.0,
+                    force=True,
+                    core_only=True,
+                )
                 st.session_state["manual_candidates"] = candidates
                 st.session_state["manual_scan_time"] = datetime.now().strftime(
                     "%H:%M:%S"
@@ -229,7 +240,14 @@ def render_manual_scan():
                 f"**{sym}** `{dirn}` {badge} `{exch[:5].upper()}` · *{setup}* {_badge_str}"
             )
             if not _can_execute:
-                st.caption(f"Not executable — {_tier['reason']}")
+                if _tier.get("reason") == "non_core_execution_universe":
+                    st.caption("Visible for discovery only — not in core execution universe")
+                elif _tier.get("reason") == "suppressed_symbol":
+                    st.caption("Suppressed symbol — execution blocked")
+                else:
+                    st.caption(
+                        f"Execution blocked — {_tier.get('reason', 'policy lookup failed')}"
+                    )
         with col3:
             label = f"{prob:.0f}% — {'High edge' if prob >= 68 else ('Moderate edge' if prob >= 60 else 'Lower edge')}"
             st.progress(prob / 100.0, text=label)
@@ -283,7 +301,7 @@ def render_manual_scan():
                         sym,
                         dirn,
                         False,
-                        f"blocked: {_policy['reason']} — only core execution symbols allowed",
+                        f"blocked: {_policy['tier']}",
                     )
                 )
                 continue

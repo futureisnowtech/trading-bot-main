@@ -12,6 +12,8 @@ Coverage:
   8. research_only_block gate fires after econ gate (correct order in source)
   9. get_execution_tier is case-insensitive
   10. CORE_EXECUTION_UNDERLYINGS is a set in config (not a list)
+  11. scanner Step 1 core_only filtering keeps only core underlyings
+  12. manual_scan requests core-only scans and fails closed on policy lookup failure
 """
 
 import ast
@@ -164,3 +166,73 @@ def test_core_execution_underlyings_is_set_in_config():
     assert isinstance(config.CORE_EXECUTION_UNDERLYINGS, set), (
         "CORE_EXECUTION_UNDERLYINGS must be a set, not a list or tuple"
     )
+
+
+def test_scanner_step1_core_only_filters_non_core_underlyings():
+    from scanner import _step1_universe
+
+    kraken_tickers = [
+        {
+            "symbol": "PF_BTCUSD",
+            "tag": "perpetual",
+            "suspended": False,
+            "volumeQuote": 5_000_000,
+            "last": 50000,
+            "fundingRate": 0.0,
+            "bid": 49990,
+            "ask": 50010,
+        },
+        {
+            "symbol": "PF_ARBUSD",
+            "tag": "perpetual",
+            "suspended": False,
+            "volumeQuote": 5_000_000,
+            "last": 1.2,
+            "fundingRate": 0.0,
+            "bid": 1.19,
+            "ask": 1.21,
+        },
+    ]
+    binance_tickers = [
+        {
+            "symbol": "BTCUSDT",
+            "quoteVolume": 9_000_000,
+            "lastPrice": 50000,
+            "bidPrice": 49990,
+            "askPrice": 50010,
+        },
+        {
+            "symbol": "ARBUSDT",
+            "quoteVolume": 9_000_000,
+            "lastPrice": 1.2,
+            "bidPrice": 1.19,
+            "askPrice": 1.21,
+        },
+    ]
+
+    core_only = _step1_universe(kraken_tickers, binance_tickers, {}, core_only=True)
+    full = _step1_universe(kraken_tickers, binance_tickers, {}, core_only=False)
+
+    core_symbols = {c["symbol"] for c in core_only}
+    full_symbols = {c["symbol"] for c in full}
+
+    assert "PF_BTCUSD" in core_symbols
+    assert "BTCUSDT" in core_symbols
+    assert "PF_ARBUSD" not in core_symbols
+    assert "ARBUSDT" not in core_symbols
+    assert "PF_ARBUSD" in full_symbols
+    assert "ARBUSDT" in full_symbols
+
+
+def test_scanner_scan_defaults_to_core_only():
+    import inspect
+    from scanner import scan
+
+    assert inspect.signature(scan).parameters["core_only"].default is True
+
+
+def test_manual_scan_requests_core_only_scan_and_fails_closed():
+    widget_path = os.path.join(_ROOT, "dashboard", "widgets", "trade_approval", "manual_scan.py")
+    src = open(widget_path).read()
+    assert "core_only=True" in src, "manual scan must request core-only scans"
+    assert '"execute": False' in src, "manual scan policy lookup must fail closed"

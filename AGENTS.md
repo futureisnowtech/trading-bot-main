@@ -28,7 +28,7 @@ A fully autonomous AI-powered trading system that:
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
 
-## Current Version: v16.1 (2026-04-16)
+## Current Version: v16.2 (2026-04-16)
 
 **Active branch:** `feature/v10-rebuild`
 **Clean paper trading started:** 2026-04-02
@@ -38,7 +38,7 @@ A fully autonomous AI-powered trading system that:
 
 | Component | File | Role |
 |---|---|---|
-| Scanner | `scanner.py` | **3 sources**: Kraken Futures + Binance USDM perps + Hyperliquid, 7-filter, top 50 candidates |
+| Scanner | `scanner.py` | **3 sources**: Kraken Futures + Binance USDM perps + Hyperliquid, 7-filter, top 50 candidates, `core_only=True` by default |
 | Signal engine | `signal_engine.py` | Two-tower: technical 0-100 + ML 0-100 → composite |
 | Entry runner | `scheduler/v10_runner.py` | Scan loop, tier selection, economics gate, setup detection, execution handoff |
 | Position sizing | `position_manager.py` | Kelly + ATR sizing, leverage schedule, deployment caps |
@@ -81,8 +81,11 @@ A fully autonomous AI-powered trading system that:
 
 ### Key Decisions
 
-- **Scanner sources:** Kraken Futures public REST + Binance USDM public REST + Hyperliquid public API (all 3 every scan — intelligence only)
-- **Live crypto execution venue:** Coinbase US nano perp-style futures (`coinbase_broker.py`) — BIP/ETP/SLP/XPP (BTC/ETH/SOL/XRP only). Scanner is broader; only these 4 are routed to live execution.
+- **Scanner sources:** Kraken Futures public REST + Binance USDM public REST + Hyperliquid public API. Live scheduler and manual scan now call `scanner.scan(..., core_only=True)`, so the operational universe is limited to `CORE_EXECUTION_UNDERLYINGS`; broad-universe scans are opt-in research mode only.
+- **Live crypto execution venue:** Coinbase US nano perp-style futures (`coinbase_broker.py`) — BIP/ETP/SLP/XPP (BTC/ETH/SOL/XRP only). Scanner, runner, and manual scan are now aligned to the core execution universe instead of spending live-cycle energy on long-tail names we do not trade.
+- **Manual scan fail-closed (v16.2):** `dashboard/widgets/trade_approval/manual_scan.py` treats execution-policy lookup failures as blocked (`tier='suppressed'`, `execute=False`) and only runs `scanner.scan(..., core_only=True)`. Dashboard execution can no longer silently fail open into non-core names.
+- **Path timing truth (v16.2):** `learning/candidate_labeler.py` now anchors 15m/1h/4h outcome timing to `scan_candidates.ts` whenever the fetched candle index supports it. `candidate_outcomes.path_timing_evaluated` marks whether timing metrics were truly computed from available forward bars.
+- **Audit semantics (v16.2):** `scripts/path_truth_audit.py` uses only `path_timing_evaluated=1` rows as the denominator for timing reach percentages. `scripts/entry_truth_audit.py` now separates `scored_total`, `below_threshold`, and `above_threshold`, so conversion and econ-veto rates are calculated from truthful threshold-passed counts.
 - **Coinbase auth:** CDP JWT / ES256. Credentials: `COINBASE_CDP_KEY_NAME` (organizations/{org_id}/apiKeys/{key_id}) + `COINBASE_CDP_PRIVATE_KEY` (EC PEM, \\n-escaped in .env). Paper mode: no API calls, zero credentials required.
 - **Coinbase products (CFTC-regulated, expire Dec 2030):** BIP-20DEC30-CDE (0.01 BTC/contract), ETP-20DEC30-CDE (0.1 ETH/contract), SLP-20DEC30-CDE (5 SOL/contract), XPP-20DEC30-CDE (500 XRP/contract)
 - **Coinbase fees:** 0.03% taker, 0.00% maker (Advanced Trade API direct, promotional). Round-trip cost = 0.06%.
@@ -562,6 +565,8 @@ Motivation 1-5: "Strive for greatness." / "I like criticism. It makes you strong
 | v15.7–15.9 | 2026-04-15–16 | Dashboard live-mode gate, kill switch live-mode fix, ISO timestamp fix, forecast truth-layer, trade approval import fix |
 | v15.10 | 2026-04-16 | Execution-universe split: runtime/execution_universe.py, CORE_EXECUTION_UNDERLYINGS, research_only_block gate in v10_runner, tier labels in manual_scan, journal_health metrics |
 | v16 | 2026-04-16 | Truth/instrumentation tranche: scanner EV cap ($100 effective), scan_funnels exact persistence, Bayesian entry priors (entry_priors.py), path timing (time_to_05r/1r/2r/peak_r_4h), entry_truth_audit.py, path_truth_audit.py, 318 proof tests |
+| v16.1 | 2026-04-16 | Audit/version cleanup: entry_truth_audit fixed for real DB schema, symbol class audit uses actual underlyings, UTC timestamp hygiene aligned, docs/version truth fixed, 319 proof tests |
+| v16.2 | 2026-04-16 | Truth hardening + core-only alignment: scanner/runner/manual scan default to core-only universe, manual scan fails closed on policy lookup errors, candidate timing anchored to candidate ts with path_timing_evaluated flag, path_truth_audit denominator fixed, entry_truth_audit threshold math fixed, scanner EV journaling fallback corrected, 325 proof tests |
 
 ## GitHub
 - Repository: `futureisnowtech/trading-bot-main` (private)

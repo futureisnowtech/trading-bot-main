@@ -23,6 +23,7 @@ Design constraints:
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,45 @@ _MIN_AGE_HOURS = 4.0
 # With MIN_AGE=4h, the reference bar sits at index ≈ len−17
 # (16 × 15min = 4h), and the 15m forward bar is at index ≈ len−16.
 _15M_SERIES_LEN = 50
+
+
+def _parse_ref_ts(ref_ts_iso: str):
+    """Parse candidate timestamp into a timezone-aware UTC datetime."""
+    if not ref_ts_iso:
+        return None
+    try:
+        ts = datetime.fromisoformat(str(ref_ts_iso))
+    except Exception:
+        return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts.astimezone(timezone.utc)
+
+
+def _resolve_reference_index(df, ref_ts_iso: str, fallback_idx: int) -> int:
+    """
+    Resolve the reference bar index from the candidate timestamp.
+
+    Falls back to the historical tail-based heuristic when the timestamp cannot
+    be mapped onto the candle index.
+    """
+    try:
+        n = len(df)
+        if n <= 0:
+            return 0
+        fallback_idx = max(0, min(fallback_idx, n - 1))
+        ts = _parse_ref_ts(ref_ts_iso)
+        if ts is None or not hasattr(df, "index"):
+            return fallback_idx
+        idx = df.index
+        if not hasattr(idx, "searchsorted"):
+            return fallback_idx
+        pos = int(idx.searchsorted(ts, side="right")) - 1
+        if pos < 0:
+            return fallback_idx
+        return min(pos, n - 1)
+    except Exception:
+        return fallback_idx
 
 
 def _fetch_forward_candles(
@@ -64,6 +104,7 @@ def _compute_15m_metrics(
     df_15m,
     ref_close: float,
     direction: str,
+    ref_ts_iso: str = "",
 ) -> tuple:
     """
     Compute 15-minute forward price and return from a 15m candle DataFrame.
@@ -78,8 +119,11 @@ def _compute_15m_metrics(
         closes = list(df_15m["close"].values)
         if len(closes) < 5:
             return 0.0, 0.0
-        # ref_idx_15m ≈ 4h ago (16 bars at 15m/bar)
-        ref_idx_15m = max(0, len(closes) - 17)
+        ref_idx_15m = _resolve_reference_index(
+            df_15m,
+            ref_ts_iso,
+            max(0, len(closes) - 17),
+        )
         price_15m = float(closes[min(ref_idx_15m + 1, len(closes) - 1)])
         if ref_close <= 0:
             return price_15m, 0.0
@@ -98,6 +142,7 @@ def _compute_path_timing(
     ref_close: float,
     direction: str,
     stop_pct: float,
+    ref_ts_iso: str = "",
 ) -> dict:
     """
     Compute how many minutes it took for the trade to reach 0.5R, 1R, and 2R.
@@ -131,8 +176,11 @@ def _compute_path_timing(
         lows = list(df_15m["low"].values)
         is_long = str(direction).upper() == "LONG"
 
-        # Reference bar ≈ 4h ago (same approximation as _compute_15m_metrics)
-        ref_idx_15m = max(0, len(highs) - 17)
+        ref_idx_15m = _resolve_reference_index(
+            df_15m,
+            ref_ts_iso,
+            max(0, len(highs) - 17),
+        )
 
         for bar_offset, idx in enumerate(range(ref_idx_15m + 1, len(highs)), start=1):
             if is_long:
@@ -165,6 +213,7 @@ def _compute_outcome(
     stop_pct: float,
     atr_15m: float,
     df_15m=None,
+    ref_ts_iso: str = "",
 ) -> dict:
     """
     Compute forward-outcome metrics from a candles DataFrame.
@@ -192,7 +241,7 @@ def _compute_outcome(
     # Since we are re-fetching 4h+ later, the "forward" bars are now in the tail.
     # We approximate: look back 4 bars from the current last bar as the entry bar,
     # then use the following bars as the forward window.
-    ref_idx = max(0, len(closes) - 5)
+    ref_idx = _resolve_reference_index(df, ref_ts_iso, max(0, len(closes) - 5))
     ref_close = float(closes[ref_idx])
 
     # If actual ref_price is very different from reconstructed ref, use the stored one
@@ -255,10 +304,22 @@ def _compute_outcome(
     price_15m = 0.0
     ret_15m_pct = 0.0
     if df_15m is not None:
-        price_15m, ret_15m_pct = _compute_15m_metrics(df_15m, ref_close, direction)
+        price_15m, ret_15m_pct = _compute_15m_metrics(
+            df_15m,
+            ref_close,
+            direction,
+            ref_ts_iso=ref_ts_iso,
+        )
 
     # Path timing: how many minutes to reach 0.5R / 1R / 2R
-    timing = _compute_path_timing(df_15m, ref_close, direction, _stop_pct)
+    timing = _compute_path_timing(
+        df_15m,
+        ref_close,
+        direction,
+        _stop_pct,
+        ref_ts_iso=ref_ts_iso,
+    )
+    path_timing_evaluated = int(df_15m is not None and len(df_15m) >= 5)
 
     # peak_r_4h: MFE expressed in R units (mfe_4h_pct / stop_pct)
     peak_r_4h = round(mfe_4h_pct / _stop_pct, 4) if _stop_pct > 0 else None
@@ -283,6 +344,7 @@ def _compute_outcome(
         "time_to_1r_min": timing["time_to_1r_min"],
         "time_to_2r_min": timing["time_to_2r_min"],
         "peak_r_4h": peak_r_4h,
+        "path_timing_evaluated": path_timing_evaluated,
     }
 
 
@@ -372,7 +434,13 @@ def run_labeling_pass(get_candles=None) -> dict:
             )
 
             outcome = _compute_outcome(
-                df_1h, ref_price, direction, stop_pct, atr_15m, df_15m
+                df_1h,
+                ref_price,
+                direction,
+                stop_pct,
+                atr_15m,
+                df_15m,
+                ref_ts_iso=ref_ts,
             )
 
             if outcome.get("label_status") == "data_unavailable":
@@ -414,6 +482,7 @@ def run_labeling_pass(get_candles=None) -> dict:
                 worst_drawdown_pct=outcome["worst_drawdown_pct"],
                 price_15m=outcome.get("price_15m", 0.0),
                 ret_15m_pct=outcome.get("ret_15m_pct", 0.0),
+                path_timing_evaluated=outcome.get("path_timing_evaluated", 0),
                 time_to_05r_min=outcome.get("time_to_05r_min"),
                 time_to_1r_min=outcome.get("time_to_1r_min"),
                 time_to_2r_min=outcome.get("time_to_2r_min"),

@@ -70,7 +70,8 @@ def funnel_summary(conn: sqlite3.Connection, days: int) -> dict:
 
     Column mapping (actual scan_funnels schema):
       scanner_candidates_total → scanned
-      scored_total             → above_threshold (scored above composite threshold)
+      scored_total             → all scored decisions
+      above_threshold          → scored_total - below_threshold
       econ_passed_total        → econ_passed (research_only + sizing + exec_fail + entered)
     """
     cut = _cutoff(days)
@@ -79,7 +80,8 @@ def funnel_summary(conn: sqlite3.Connection, days: int) -> dict:
         """
         SELECT
             SUM(scanner_candidates_total) AS scanned,
-            SUM(scored_total)             AS above_threshold,
+            SUM(scored_total)             AS scored_total,
+            SUM(below_threshold)          AS below_threshold,
             SUM(econ_passed_total)        AS econ_passed,
             SUM(econ_veto)                AS econ_veto,
             SUM(research_only_block)      AS research_only_block,
@@ -95,7 +97,9 @@ def funnel_summary(conn: sqlite3.Connection, days: int) -> dict:
     row = rows[0] if rows else {}
 
     scanned = row.get("scanned") or 0
-    above = row.get("above_threshold") or 0
+    scored_total = row.get("scored_total") or 0
+    below_threshold = row.get("below_threshold") or 0
+    above = max(0, scored_total - below_threshold)
     econ = row.get("econ_passed") or 0
     entered = row.get("entered") or 0
     econ_veto = row.get("econ_veto") or 0
@@ -107,7 +111,9 @@ def funnel_summary(conn: sqlite3.Connection, days: int) -> dict:
         "days": days,
         "cycles": row.get("cycles") or 0,
         "scanned": scanned,
+        "scored_total": scored_total,
         "above_threshold": above,
+        "below_threshold": below_threshold,
         "econ_passed": econ,
         "econ_veto": econ_veto,
         "research_only_block": row.get("research_only_block") or 0,
@@ -382,6 +388,8 @@ def _print_report(report: dict) -> None:
     f = report["funnel"]
     print(f"\n── 1. Funnel Summary ({f['cycles']} scan cycles) ─────────────────")
     print(f"   Scanned:          {f['scanned']:>7}")
+    print(f"   Scored total:     {f['scored_total']:>7}")
+    print(f"   Below threshold:  {f['below_threshold']:>7}")
     print(f"   Above threshold:  {f['above_threshold']:>7}")
     print(f"   Econ vetoed:      {f['econ_veto']:>7}  ({f['econ_veto_rate_pct']}%)")
     print(f"   Research-only:    {f['research_only_block']:>7}")

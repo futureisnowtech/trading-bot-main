@@ -30,10 +30,10 @@ def _insert_scan_funnel(
     conn, ts, scanned, above, econ, ro_block, sizing, exec_fail, entered
 ):
     """Insert a scan_funnels row using the actual schema column names."""
-    econ_veto = above - econ  # inferred
+    econ_veto = above - econ  # inferred from threshold-passed rows
     below_threshold = scanned - above
     econ_passed_total = ro_block + sizing + exec_fail + entered
-    scored_total = above  # scored_total = those that scored above composite threshold
+    scored_total = below_threshold + above
     conn.execute(
         """
         INSERT INTO scan_funnels
@@ -162,7 +162,9 @@ def test_funnel_summary_keys_and_conversion(proof_runtime, monkeypatch):
     required = {
         "cycles",
         "scanned",
+        "scored_total",
         "above_threshold",
+        "below_threshold",
         "econ_passed",
         "econ_veto",
         "research_only_block",
@@ -176,7 +178,9 @@ def test_funnel_summary_keys_and_conversion(proof_runtime, monkeypatch):
     assert not missing, f"Missing keys: {missing}"
 
     assert result["scanned"] == 100
+    assert result["scored_total"] == 100
     assert result["above_threshold"] == 40
+    assert result["below_threshold"] == 60
     assert result["econ_passed"] == 30
     assert result["entered"] == 22
     assert result["research_only_block"] == 5

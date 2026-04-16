@@ -7,6 +7,7 @@ Coverage:
   3. expected_profit is computed from effective_position_usd, not uncapped theoretical
   4. _MIN_EXPECTED_PROFIT remains unchanged
   5. For a large position (theoretical > $100), EV is from capped $100
+  6. v10_runner journals scanner EV from expected_profit when scanner_expected_profit is absent
 """
 
 import os
@@ -162,3 +163,9 @@ def test_step4_small_position_unchanged():
             f"When theoretical <= $100, effective should equal theoretical: "
             f"theoretical={theoretical}, effective={effective}"
         )
+
+
+def test_v10_runner_candidate_journal_uses_expected_profit_fallback():
+    runner_path = os.path.join(_ROOT, "scheduler", "v10_runner.py")
+    src = open(runner_path).read()
+    assert 'candidate.get("scanner_expected_profit", candidate.get("expected_profit", 0))' in src

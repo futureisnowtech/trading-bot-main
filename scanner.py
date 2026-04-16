@@ -92,6 +92,7 @@ _CACHE_TTL = 300
 _lock = threading.RLock()
 _last_scan_ts: float = 0.0
 _last_candidates: List[Dict] = []
+_last_scope: str = "core_only"
 
 # ── Kraken → universal symbol mapping ────────────────────────────────────────
 _KRAKEN_BASE_MAP = {"XBT": "BTC", "XDG": "DOGE"}
@@ -599,6 +600,7 @@ def _step1_universe(
     kraken_tickers: List[Dict],
     binance_tickers: List[Dict],
     binance_funding: Dict[str, float],
+    core_only: bool = True,
 ) -> List[Dict]:
     """
     Filter both exchanges to liquid active perpetuals.
@@ -677,12 +679,21 @@ def _step1_universe(
     binance_candidates.sort(key=lambda x: x["volume_24h_usd"], reverse=True)
     result.extend(binance_candidates[:_MAX_STEP1_BINANCE])
 
+    if core_only:
+        try:
+            from runtime.execution_universe import is_core_underlying
+
+            result = [c for c in result if is_core_underlying(c.get("base_asset", ""))]
+        except Exception as e:
+            logger.warning(f"[scanner] core universe filter unavailable — falling through: {e}")
+
     logger.info(
         f"[scanner] Step 1 (vol>${_MIN_VOLUME_24H_USD / 1e3:.0f}K): "
         f"{len(kraken_tickers)} kraken + {len(binance_tickers)} binance "
         f"→ {len(result)} candidates "
         f"({sum(1 for c in result if c['exchange'] == 'kraken')} kraken, "
-        f"{sum(1 for c in result if c['exchange'] == 'binance')} binance)"
+        f"{sum(1 for c in result if c['exchange'] == 'binance')} binance) "
+        f"scope={'core_only' if core_only else 'full_universe'}"
     )
     return result
 
@@ -1101,6 +1112,7 @@ def scan(
     regime: str = "UNKNOWN",
     account_balance: float = 5_000.0,
     force: bool = False,
+    core_only: bool = True,
 ) -> List[Dict]:
     """
     Full 7-step multi-exchange scanner pipeline.
@@ -1111,15 +1123,20 @@ def scan(
 
     force=True bypasses the 300s cache (used by dashboard manual scan button).
     """
-    global _last_scan_ts, _last_candidates
+    global _last_scan_ts, _last_candidates, _last_scope
 
     with _lock:
-        if not force and time.time() - _last_scan_ts < _CACHE_TTL:
+        if (
+            not force
+            and time.time() - _last_scan_ts < _CACHE_TTL
+            and _last_scope == ("core_only" if core_only else "full_universe")
+        ):
             return _last_candidates
 
     t_start = time.time()
     logger.info(
-        "[scanner] Starting multi-exchange scan (Kraken + Binance + Hyperliquid)..."
+        f"[scanner] Starting multi-exchange scan (Kraken + Binance + Hyperliquid) "
+        f"scope={'core_only' if core_only else 'full_universe'}..."
     )
 
     try:
@@ -1130,11 +1147,27 @@ def scan(
         hl_raw = _hl_meta_and_ctxs()
 
         # ── Step 1: Universe ──────────────────────────────────────────────────
-        universe = _step1_universe(kraken_raw, binance_raw, binance_fund)
+        universe = _step1_universe(
+            kraken_raw,
+            binance_raw,
+            binance_fund,
+            core_only=core_only,
+        )
         if hl_raw:
             hl_capped = sorted(hl_raw, key=lambda x: x["volume_24h_usd"], reverse=True)[
                 :_MAX_STEP1_HYPERLIQUID
             ]
+            if core_only:
+                try:
+                    from runtime.execution_universe import is_core_underlying
+
+                    hl_capped = [
+                        c for c in hl_capped if is_core_underlying(c.get("base_asset", ""))
+                    ]
+                except Exception as e:
+                    logger.warning(
+                        f"[scanner] core universe filter unavailable for Hyperliquid: {e}"
+                    )
             universe.extend(hl_capped)
             logger.info(
                 f"[scanner] Hyperliquid: {len(hl_raw)} eligible → {len(hl_capped)} added to universe"
@@ -1195,6 +1228,7 @@ def scan(
         with _lock:
             _last_scan_ts = time.time()
             _last_candidates = final
+            _last_scope = "core_only" if core_only else "full_universe"
 
         return final
 
@@ -1211,6 +1245,7 @@ def get_scan_stats() -> Dict:
     return {
         "last_scan_ts": _last_scan_ts,
         "last_scan_age_s": round(time.time() - _last_scan_ts, 0),
+        "scope": _last_scope,
         "candidate_count": len(_last_candidates),
         "exchanges": list({c.get("exchange", "?") for c in _last_candidates}),
         "candidates": [

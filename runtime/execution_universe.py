@@ -77,6 +77,15 @@ def is_core_execution_symbol(symbol: str) -> bool:
     return get_execution_tier(symbol) == _TIER_CORE
 
 
+def is_core_underlying(underlying: str) -> bool:
+    """Return True iff *underlying* is in the configured core execution universe."""
+    try:
+        from config import CORE_EXECUTION_UNDERLYINGS
+    except ImportError:
+        return False
+    return underlying.upper().strip() in {u.upper() for u in CORE_EXECUTION_UNDERLYINGS}
+
+
 def get_execution_policy(symbol: str) -> dict:
     """
     Return a policy dict for *symbol*:
@@ -87,8 +96,27 @@ def get_execution_policy(symbol: str) -> dict:
       }
     """
     tier = get_execution_tier(symbol)
+    underlying = get_underlying(symbol)
     if tier == _TIER_CORE:
-        return {"tier": tier, "execute": True, "reason": "core_execution_underlying"}
+        return {
+            "symbol": symbol,
+            "underlying": underlying,
+            "tier": tier,
+            "execute": True,
+            "reason": "core_execution_underlying",
+        }
     if tier == _TIER_SUPPRESSED:
-        return {"tier": tier, "execute": False, "reason": "suppressed_symbol"}
-    return {"tier": tier, "execute": False, "reason": "non_core_execution_universe"}
+        return {
+            "symbol": symbol,
+            "underlying": underlying,
+            "tier": tier,
+            "execute": False,
+            "reason": "suppressed_symbol",
+        }
+    return {
+        "symbol": symbol,
+        "underlying": underlying,
+        "tier": tier,
+        "execute": False,
+        "reason": "non_core_execution_universe",
+    }

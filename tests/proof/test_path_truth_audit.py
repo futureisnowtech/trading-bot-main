@@ -41,6 +41,7 @@ def _insert_entered(
     time_to_1r_min=None,
     time_to_2r_min=None,
     peak_r_4h=None,
+    path_timing_evaluated=1,
 ):
     conn.execute(
         """
@@ -67,11 +68,11 @@ def _insert_entered(
         """
         INSERT INTO candidate_outcomes
         (candidate_id, label_status, hit_1r, hit_stop, hit_2r,
-         mfe_4h_pct, mae_4h_pct, peak_r_4h,
+         mfe_4h_pct, mae_4h_pct, peak_r_4h, path_timing_evaluated,
          time_to_05r_min, time_to_1r_min, time_to_2r_min,
          entry_ref_price, price_1h, price_4h, ret_1h_pct, ret_4h_pct,
          best_exit_pct, worst_drawdown_pct)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """,
         (
             cand_id,
@@ -82,6 +83,7 @@ def _insert_entered(
             mfe_4h_pct,
             mae_4h_pct,
             peak_r_4h,
+            path_timing_evaluated,
             time_to_05r_min,
             time_to_1r_min,
             time_to_2r_min,
@@ -266,6 +268,7 @@ def test_timing_to_threshold_keys_and_n_reached(proof_runtime, monkeypatch):
 
     required = {
         "total_entered_labeled",
+        "timing_evaluated_n",
         "time_to_05r",
         "time_to_1r",
         "time_to_2r",
@@ -275,13 +278,83 @@ def test_timing_to_threshold_keys_and_n_reached(proof_runtime, monkeypatch):
     assert not missing, f"Missing keys: {missing}"
 
     assert result["total_entered_labeled"] == 3
+    assert result["timing_evaluated_n"] == 3
 
     t1r = result["time_to_1r"]
     assert t1r["n_reached"] == 2, f"expected 2 with time_to_1r, got {t1r['n_reached']}"
     assert t1r["median_min"] == 52.5, f"expected median 52.5m, got {t1r['median_min']}"
+    assert abs(t1r["reach_pct"] - 66.7) < 0.2, (
+        f"expected ~66.7%, got {t1r['reach_pct']}"
+    )
 
     t2r = result["time_to_2r"]
     assert t2r["n_reached"] == 0, "no candidates reached 2R in test data"
+
+
+def test_timing_to_threshold_uses_timing_evaluated_denominator(proof_runtime, monkeypatch):
+    """reach_pct must use timing-evaluated rows, not all labeled entered rows."""
+    import logging_db.trade_logger as tl
+
+    monkeypatch.setattr(tl, "DB_PATH", str(proof_runtime.db_path))
+
+    with sqlite3.connect(proof_runtime.db_path) as conn:
+        _insert_entered(
+            conn,
+            "te1",
+            "2026-04-14T10:00:00",
+            "BTCUSDT",
+            "TRENDING_UP",
+            "LONG",
+            3.0,
+            hit_1r=1,
+            hit_stop=0,
+            hit_2r=0,
+            mfe_4h_pct=4.0,
+            mae_4h_pct=-0.5,
+            time_to_1r_min=30,
+            path_timing_evaluated=1,
+        )
+        _insert_entered(
+            conn,
+            "te2",
+            "2026-04-14T11:00:00",
+            "ETHUSDT",
+            "TRENDING_UP",
+            "LONG",
+            3.0,
+            hit_1r=1,
+            hit_stop=0,
+            hit_2r=0,
+            mfe_4h_pct=4.0,
+            mae_4h_pct=-0.5,
+            time_to_1r_min=None,
+            path_timing_evaluated=1,
+        )
+        _insert_entered(
+            conn,
+            "te3",
+            "2026-04-14T12:00:00",
+            "SOLUSDT",
+            "RANGING",
+            "LONG",
+            3.0,
+            hit_1r=1,
+            hit_stop=0,
+            hit_2r=0,
+            mfe_4h_pct=4.0,
+            mae_4h_pct=-0.5,
+            time_to_1r_min=None,
+            path_timing_evaluated=0,
+        )
+
+    from scripts.path_truth_audit import timing_to_threshold
+
+    with sqlite3.connect(proof_runtime.db_path) as conn:
+        result = timing_to_threshold(conn, days=30)
+
+    assert result["total_entered_labeled"] == 3
+    assert result["timing_evaluated_n"] == 2
+    assert abs(result["time_to_1r"]["reach_pct"] - 50.0) < 0.2
 
 
 def test_path_by_group_returns_list_with_required_keys(proof_runtime, monkeypatch):

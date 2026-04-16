@@ -145,7 +145,10 @@ def _journal_scan_candidate(
         atr_15m = float(candidate.get("atr_15m", 0) or 0)
         stop_pct = float(candidate.get("stop_pct", 3.0) or 3.0)
         tgt_pct = float(candidate.get("target_pct", 6.0) or 6.0)
-        exp_profit = float(candidate.get("scanner_expected_profit", 0) or 0)
+        exp_profit = float(
+            candidate.get("scanner_expected_profit", candidate.get("expected_profit", 0))
+            or 0
+        )
         setups = candidate.get("scan_setups", [])
         setups_json = json.dumps(setups) if isinstance(setups, list) else str(setups)
         primary = candidate.get("primary_setup", "") or ""
@@ -516,6 +519,7 @@ def _scan_and_trade_inner():
         scanner_candidates = scanner.scan(
             open_positions=open_symbols,
             account_balance=balance,
+            core_only=True,
         )
         # TV candidates take priority; skip scanner duplicate symbols
         tv_symbols = {c["symbol"] for c in tv_candidates}

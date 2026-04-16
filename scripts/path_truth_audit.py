@@ -172,22 +172,42 @@ def timing_to_threshold(conn: sqlite3.Connection, days: int) -> dict:
         (cut,),
     )
     total_n = (total_rows[0].get("n") or 0) if total_rows else 0
+    timing_rows = _query(
+        conn,
+        """
+        SELECT COUNT(*) AS n
+        FROM scan_candidates sc
+        JOIN candidate_outcomes co ON co.candidate_id = sc.id
+        WHERE sc.decision = 'entered'
+          AND sc.source IN ('clean_paper_v10', 'live_v10')
+          AND co.label_status = 'complete'
+          AND COALESCE(co.path_timing_evaluated, 0) = 1
+          AND datetime(replace(substr(sc.ts,1,19),'T',' ')) >= datetime(?)
+        """,
+        (cut,),
+    )
+    timing_evaluated_n = (timing_rows[0].get("n") or 0) if timing_rows else 0
 
     s05 = _stats("co.time_to_05r_min")
     s1r = _stats("co.time_to_1r_min")
     s2r = _stats("co.time_to_2r_min")
 
     def _reach_pct(n_reached: int) -> float:
-        return round(n_reached / total_n * 100, 1) if total_n > 0 else 0.0
+        return (
+            round(n_reached / timing_evaluated_n * 100, 1)
+            if timing_evaluated_n > 0
+            else 0.0
+        )
 
     return {
         "total_entered_labeled": total_n,
+        "timing_evaluated_n": timing_evaluated_n,
         "time_to_05r": {**s05, "reach_pct": _reach_pct(s05["n_reached"])},
         "time_to_1r": {**s1r, "reach_pct": _reach_pct(s1r["n_reached"])},
         "time_to_2r": {**s2r, "reach_pct": _reach_pct(s2r["n_reached"])},
         "note": (
             "NULL timing = threshold not reached within available bars. "
-            "reach_pct based on total labeled entered candidates."
+            "reach_pct uses only rows where path timing was actually evaluated."
         ),
     }
 
@@ -314,7 +334,10 @@ def _print_report(report: dict) -> None:
     # Section 2
     tm = report["timing"]
     total = tm["total_entered_labeled"]
-    print(f"\n── 2. Timing to Threshold (n={total} total labeled) ─────────────")
+    eval_n = tm.get("timing_evaluated_n", 0)
+    print(
+        f"\n── 2. Timing to Threshold (n={total} total labeled, {eval_n} timing-evaluated) ─────────────"
+    )
     for key, label in [
         ("time_to_05r", "0.5R"),
         ("time_to_1r", "1R"),

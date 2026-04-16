@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-16
+- v16.1 cleanup: fixed entry_truth_audit integrity schema query, aligned symbol-class audit to execution-universe underlyings, corrected version truth/docs, removed utcnow() deprecations
+
+## 2026-04-16
 - v16: truth/instrumentation tranche — scanner EV cap, exact scan_funnels, Bayesian entry priors, path timing, entry/path audit scripts, 318 proof tests
 
 ## 2026-04-15

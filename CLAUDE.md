@@ -18,7 +18,7 @@ Fully autonomous AI trading system: scans Kraken Futures + Binance USDM + Hyperl
 - Paper account: $5,000 (`ACCOUNT_SIZE=5000` — config default, no .env override)
 - Wants zero day-to-day intervention. Prefers simple explanations, hates fluff.
 
-## Current Version: v16 (2026-04-16)
+## Current Version: v16.1 (2026-04-16)
 
 **Active branch:** `feature/v10-rebuild` | **Clean paper trading started:** 2026-04-02 | **Live trading started:** 2026-04-15
 
@@ -141,7 +141,7 @@ Fully autonomous AI trading system: scans Kraken Futures + Binance USDM + Hyperl
 - **Execution universe (v15.10/v16):** `runtime/execution_universe.py` is the single source of truth for symbol→tier mapping. Tiers: `core` (CORE_EXECUTION_UNDERLYINGS in config.py), `research_only` (scanner-visible, no execution), `suppressed`. `_get_underlying()` normalization shared via import — not duplicated. research_only_block gate fires in `_attempt_entry` AFTER econ gate (signals were valid, just wrong universe). Journaled as `decision='research_only_block'` with `econ_approved=1, should_enter_signal=1`.
 - **Scanner EV cap (v16):** `_step4_expected_value` in scanner.py uses `effective_position_usd = min(theoretical_position_usd, 100.0)` to prevent phantom EV from tight stops implying unrealistic $7K+ notional on $5K account. Both `scanner_theoretical_position_usd` and `scanner_effective_position_usd` persisted to `scan_candidates` via `log_scan_candidate()`.
 - **Exact scan funnel (v16):** `scan_funnels` table (17 columns) stores exact per-cycle counts. `_attempt_entry()` returns terminal decision strings (`data_unavailable`/`below_threshold`/`econ_veto`/`research_only_block`/`sizing_zero`/`execution_failed`/`entered`). `log_scan_funnel()` called at end of each scan cycle. `execution_failed` = open_long/open_short returned None.
-- **Bayesian entry priors (v16):** `learning/entry_priors.py` — `estimate_candidate_win_rate(exchange, primary_setup, regime, direction)`. Win label: `hit_1r=1 AND hit_stop=0`. 5-level fallback: exchange+setup+regime+direction → exchange+setup+regime → exchange+setup → global. Bayesian smoothing: `(prior_n*prior_p + wins)/(prior_n + n)`, prior_p=0.52, prior_n=20, clipped [0.40, 0.70]. Replaces hardcoded `_wr_est = 0.54 if tier == 1 else ...` in v10_runner.py economics gate.
+- **Bayesian entry priors (v16):** `learning/entry_priors.py` — `estimate_candidate_win_rate(exchange, primary_setup, regime, direction)`. Win label: `hit_1r=1 AND hit_stop=0`. 5-level fallback: exchange+setup+regime+direction → setup+regime+direction → setup+regime → regime+direction → global. Bayesian smoothing: `(prior_n*prior_p + wins)/(prior_n + n)`, prior_p=0.52, prior_n=20, clipped [0.40, 0.70]. Replaces hardcoded `_wr_est = 0.54 if tier == 1 else ...` in v10_runner.py economics gate.
 - **Path timing (v16):** `candidate_outcomes` has 4 new columns: `time_to_05r_min`, `time_to_1r_min`, `time_to_2r_min` (minutes to reach R threshold from 15m bars, NULL if not reached), `peak_r_4h` (mfe_4h_pct / stop_pct). Computed in `learning/candidate_labeler.py:_compute_path_timing()` — scans 15m bars after reference bar, uses highs (LONG) or lows (SHORT).
 - **Audit scripts (v16):** `scripts/entry_truth_audit.py` (6 sections: Funnel/EV/Source/Setup/SymbolClass/Integrity) and `scripts/path_truth_audit.py` (4 sections: R-reach/Timing/PathByGroup/ExitQuality). Both support `--days N` and `--json`. Win label aligned with Bayesian priors: `hit_1r=1 AND hit_stop=0`.
 

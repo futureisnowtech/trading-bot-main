@@ -6,6 +6,7 @@ Coverage:
   2. scanner_ev_calibration returns required keys and cap rate is non-negative
   3. source_quality returns list of dicts with required keys
   4. symbol_class_quality differentiates entered (core) vs research_only_block
+  5. integrity_snapshot reads actual trade_integrity schema and duplicate-close events
 """
 
 from __future__ import annotations
@@ -345,13 +346,13 @@ def test_symbol_class_quality_separates_tiers(proof_runtime, monkeypatch):
                 mfe_4h_pct=4.0,
                 mae_4h_pct=-0.5,
             )
-        # 3 research_only_block — all lose
+        # 3 research_only_block on a long-tail symbol — all lose
         for i in range(3):
             _insert_candidate_with_outcome(
                 conn,
                 f"ro_{i}",
                 "2026-04-14T11:00:00",
-                "DOGEUSDT",
+                "PEPEUSDT",
                 "research_only_block",
                 "clean_paper_v10",
                 "binance",
@@ -374,9 +375,7 @@ def test_symbol_class_quality_separates_tiers(proof_runtime, monkeypatch):
     tiers = {r["tier"]: r for r in result}
 
     assert "core" in tiers, f"'core' tier missing from result: {list(tiers)}"
-    assert "research_only" in tiers, (
-        f"'research_only' tier missing from result: {list(tiers)}"
-    )
+    assert "research_only" in tiers, f"'research_only' tier missing from result: {list(tiers)}"
 
     core = tiers["core"]
     ro = tiers["research_only"]
@@ -385,3 +384,61 @@ def test_symbol_class_quality_separates_tiers(proof_runtime, monkeypatch):
     assert ro["win_rate_pct"] == 0.0, "research_only wins should be 0%"
     assert core["n"] == 2
     assert ro["n"] == 3
+
+
+def test_integrity_snapshot_reads_actual_schema_and_duplicate_events(
+    proof_runtime, monkeypatch
+):
+    """integrity_snapshot must query trade_integrity.tier and system_events duplicate-close rows."""
+    import logging_db.trade_logger as tl
+
+    monkeypatch.setattr(tl, "DB_PATH", str(proof_runtime.db_path))
+
+    with sqlite3.connect(proof_runtime.db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO trade_integrity
+            (trade_id, close_order_id, tier, reason, source_check, created_at, notes)
+            VALUES (?,?,?,?,?,?,?)
+            """,
+            (1, "close_1", "verified", "ok", "test", "2026-04-15T10:00:00", ""),
+        )
+        conn.execute(
+            """
+            INSERT INTO trade_integrity
+            (trade_id, close_order_id, tier, reason, source_check, created_at, notes)
+            VALUES (?,?,?,?,?,?,?)
+            """,
+            (
+                2,
+                "close_2",
+                "suspect",
+                "missing_lineage",
+                "test",
+                "2026-04-15T11:00:00",
+                "",
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO system_events (ts, level, source, message)
+            VALUES (?,?,?,?)
+            """,
+            (
+                "2026-04-15T11:30:00",
+                "WARN",
+                "perps_engine",
+                "duplicate close suppressed for BTCUSDT",
+            ),
+        )
+
+    from scripts.entry_truth_audit import integrity_snapshot
+
+    with sqlite3.connect(proof_runtime.db_path) as conn:
+        result = integrity_snapshot(conn, days=30)
+
+    assert result["total_closes"] == 2
+    assert result["tiers"]["verified"] == 1
+    assert result["tiers"]["suspect"] == 1
+    assert result["duplicate_close_event_count"] == 1
+    assert result["top_non_verified_reasons"][0]["reason"] == "missing_lineage"

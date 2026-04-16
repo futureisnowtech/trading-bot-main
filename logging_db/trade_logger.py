@@ -9,7 +9,7 @@ import csv
 import os
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 import pytz
 
@@ -762,7 +762,7 @@ def log_scan_funnel(
     econ_passed_total = research_only_block + sizing_zero + execution_failed + entered
     final_entryable_total = sizing_zero + execution_failed + entered
 
-    ts = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
     try:
         conn = _conn()
         cur = conn.cursor()

@@ -7,7 +7,7 @@ All queries are read-only and fail silently so they never crash the dashboard.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from db import _q, _q1
 
@@ -24,7 +24,7 @@ def get_journal_health() -> dict:
     - Last nightly audit result
     - Outcome label quality (% complete vs data_unavailable)
     """
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     cutoff_24h = (now - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%S")
     cutoff_7d = (now - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%S")
     cutoff_label = (now - timedelta(hours=4)).strftime("%Y-%m-%dT%H:%M:%S")

@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-16
+- fix(v16.5): manual scan end-to-end — min contract size, real balance, exec_sym candles, persistent results, live tested ETH LONG
+
+## 2026-04-16
 - fix(v16.4): manual scan live-mode paper flag, symbol normalization, Coinbase balance total_usd_balance string-zero bug
 
 ## 2026-04-16

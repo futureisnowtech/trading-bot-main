@@ -39,6 +39,19 @@ def _get_tier_info(sym: str) -> dict:
         }
 
 
+def _min_contract_usd(exec_sym: str, price: float) -> float:
+    """Return USD value of 1 Coinbase contract for exec_sym at given price. 0 if unknown."""
+    try:
+        if _ROOT not in sys.path:
+            sys.path.insert(0, _ROOT)
+        from execution.coinbase_broker import PRODUCT_SPECS
+
+        spec = PRODUCT_SPECS.get(exec_sym, {})
+        return price * spec.get("contract_size", 0)
+    except Exception:
+        return 0.0
+
+
 _SETUP_DESC = {
     "momentum": "Price closed above VWAP with a volume spike. Trend is accelerating — ride the move.",
     "ranging_mr": "ADX < 20 (no trend). Price stretched from VWAP. Mean-reversion back toward center expected.",
@@ -163,6 +176,20 @@ def render_manual_scan():
         "execution stays aligned with the live Coinbase execution set."
     )
 
+    # ── Persistent execution results (survive page rerenders) ─────────────────
+    _last_results = st.session_state.get("manual_results")
+    if _last_results:
+        st.markdown("**Last execution results:**")
+        for r_sym, r_dirn, r_ok, r_msg in _last_results:
+            if r_ok:
+                st.success(f"✅ **{r_sym} {r_dirn}** — {r_msg}")
+            else:
+                st.error(f"❌ **{r_sym} {r_dirn}** — {r_msg}")
+        if st.button("Clear results", key="clear_results_btn", type="secondary"):
+            st.session_state.pop("manual_results", None)
+            st.rerun()
+        st.divider()
+
     col_btn, col_info = st.columns([1, 4])
     with col_btn:
         run_scan = st.button("Run Scan Now", type="primary", key="manual_scan_btn")
@@ -172,6 +199,8 @@ def render_manual_scan():
             st.caption(f"Last scan: {last_ts}")
 
     if run_scan:
+        # Clear stale results when starting a new scan
+        st.session_state.pop("manual_results", None)
         with st.spinner("Scanning Kraken + Hyperliquid (~5–10s)…"):
             try:
                 import importlib
@@ -275,8 +304,7 @@ def render_manual_scan():
         return
 
     if st.button(f"Execute {n_sel} Trade(s)", type="primary", key="manual_execute_btn"):
-        # Determine paper/live mode from runtime state (same source of truth as rest of dashboard).
-        # Fail-safe: if import fails fall back to PAPER_TRADING config, then True.
+        # ── Determine paper/live mode from runtime state ───────────────────────
         try:
             from db import _runtime_paper_flag as _rflag
 
@@ -290,11 +318,24 @@ def render_manual_scan():
             except Exception:
                 _exec_paper = True
 
-        # Load get_candles from repo-root data/historical_data.py via explicit path.
-        # We CANNOT use `from data.historical_data import get_candles` here because the
-        # dashboard process caches `data` as `dashboard/data` (sys.path puts dashboard/
-        # first; __init__.py makes it a package). dashboard/data has no historical_data.py.
-        # importlib.util bypasses the sys.modules cache entirely.
+        # ── Get real account balance ───────────────────────────────────────────
+        # In live mode use the Coinbase API balance (not config ACCOUNT_SIZE).
+        # In paper mode use the DB-computed paper equity.
+        if not _exec_paper:
+            try:
+                from data.balance import get_coinbase_balance
+
+                _cb = get_coinbase_balance()
+                if _cb.get("connected") and _cb.get("balance", 0) > 0:
+                    _acct_balance = float(_cb["balance"])
+                else:
+                    _acct_balance, _, _ = get_account()
+            except Exception:
+                _acct_balance, _, _ = get_account()
+        else:
+            _acct_balance, _, _ = get_account()
+
+        # ── Load get_candles via explicit path (avoids dashboard/data namespace) ─
         try:
             _hd_spec = _ilu.spec_from_file_location(
                 "_root_data_historical_data",
@@ -307,6 +348,8 @@ def render_manual_scan():
             st.error(f"Cannot load candle data module: {_imp_err}")
             return
 
+        if _ROOT not in sys.path:
+            sys.path.insert(0, _ROOT)
         import perps_engine as perps
 
         results = []
@@ -317,25 +360,33 @@ def render_manual_scan():
             setup = cand.get("primary_setup", "manual")
             _policy = _get_tier_info(sym)
             if not _policy["execute"]:
-                results.append(
-                    (
-                        sym,
-                        dirn,
-                        False,
-                        f"blocked: {_policy['tier']}",
-                    )
-                )
+                results.append((sym, dirn, False, f"blocked: {_policy['tier']}"))
                 continue
             try:
-                # Use underlying symbol for execution (PF_SOLUSD → SOL, etc.)
-                # so the Coinbase broker gets the normalised name it maps to a product.
+                # Normalise to underlying symbol for execution and price/candle fetching.
+                # PF_SOLUSD → SOL, PF_ETHUSD → ETH, etc.
                 exec_sym = _policy.get("underlying", sym)
-                df_c = get_candles(sym, "1h", 100)
+
+                # ── Fetch candles: try exec_sym first, fall back to raw sym ──
+                df_c = None
+                for _fsym in [exec_sym, sym] if exec_sym != sym else [sym]:
+                    try:
+                        _df = get_candles(_fsym, "1h", 100)
+                        if _df is not None and len(_df) >= 10:
+                            df_c = _df
+                            break
+                    except Exception:
+                        pass
                 if df_c is None or len(df_c) < 10:
                     results.append((sym, dirn, False, "insufficient candle data"))
                     continue
+
                 candle_price = float(df_c["close"].iloc[-1])
-                live_now = get_live_prices([sym]).get(sym, 0)
+
+                # Live price: try exec_sym first, then raw sym
+                live_now = get_live_prices([exec_sym]).get(
+                    exec_sym, 0
+                ) or get_live_prices([sym]).get(sym, 0)
                 if live_now > 0:
                     ratio = candle_price / live_now
                     if 0.95 <= ratio <= 1.05:
@@ -343,32 +394,36 @@ def render_manual_scan():
                     else:
                         price = live_now
                         st.warning(
-                            f"⚠️ {sym}: candle price ${candle_price:.5g} off by {abs(ratio - 1) * 100:.0f}% — using live ${live_now:.5g}"
+                            f"⚠️ {exec_sym}: candle ${candle_price:.5g} off by "
+                            f"{abs(ratio - 1) * 100:.0f}% from live ${live_now:.5g} — using live price"
                         )
                 else:
                     price = candle_price
+
                 if price <= 0:
                     results.append(
                         (sym, dirn, False, "could not determine valid entry price")
                     )
                     continue
+
                 atr_7 = float(df_c["high"].sub(df_c["low"]).tail(7).mean())
                 if atr_7 <= 0 or (
                     live_now > 0 and abs(candle_price / live_now - 1) > 0.10
                 ):
                     atr_7 = price * 0.015
+
                 stop_dist = max(atr_7 * 1.5, price * 0.008)
                 target_dist = stop_dist * 3.0
                 composite = cand.get("composite_score", 50.0)
+
                 from position_manager import compute_position_size
 
-                balance, _, _b = get_account()
                 _open_pos = get_open_positions()
                 _deployed = sum(
                     float(p.get("qty", 0)) * float(p.get("entry", 0)) for p in _open_pos
                 )
                 sizing = compute_position_size(
-                    account_balance=balance,
+                    account_balance=_acct_balance,
                     current_price=price,
                     atr_7=atr_7,
                     stop_multiplier=1.5,
@@ -379,6 +434,20 @@ def render_manual_scan():
                 )
                 pos_usd = sizing["position_usd"]
                 leverage = sizing["leverage"]
+
+                # ── Enforce minimum 1-contract size in live mode ───────────────
+                # Coinbase rejects orders < 1 whole contract. Round up with 2% buffer.
+                # Show what was adjusted so the operator sees it.
+                if not _exec_paper:
+                    _min_usd = _min_contract_usd(exec_sym, price)
+                    if _min_usd > 0 and pos_usd < _min_usd:
+                        _original_pos = pos_usd
+                        pos_usd = round(_min_usd * 1.02, 2)
+                        st.info(
+                            f"ℹ️ {exec_sym}: signal sizing ${_original_pos:.0f} < "
+                            f"1 contract (≈${_min_usd:.0f}) — using ${pos_usd:.0f}"
+                        )
+
                 if dirn == "LONG":
                     stop_p = round(price - stop_dist, 6)
                     target_p = round(price + target_dist, 6)
@@ -411,6 +480,7 @@ def render_manual_scan():
                         entry_setup=f"manual_{setup}",
                         paper=_exec_paper,
                     )
+
                 if pos:
                     mode_tag = "PAPER" if _exec_paper else "LIVE"
                     results.append(
@@ -418,16 +488,31 @@ def render_manual_scan():
                             sym,
                             dirn,
                             True,
-                            f"[{mode_tag}] entered @ {price:.6g}  stop={stop_p:.6g}  target={target_p:.6g}  size=${pos_usd:.0f}  lev={leverage}x",
+                            f"[{mode_tag}] entered @ {price:.6g}  "
+                            f"stop={stop_p:.6g}  target={target_p:.6g}  "
+                            f"size=${pos_usd:.0f}  lev={leverage}x",
                         )
                     )
                 else:
-                    results.append((sym, dirn, False, "open_long/short returned None"))
+                    # Explain why the broker returned None
+                    if not _exec_paper:
+                        _min_usd = _min_contract_usd(exec_sym, price)
+                        _why = (
+                            f"size ${pos_usd:.0f} < 1 contract (≈${_min_usd:.0f})"
+                            if _min_usd > 0 and pos_usd < _min_usd
+                            else "broker returned None — check logs/service/manual_live_bot.log"
+                        )
+                        results.append((sym, dirn, False, _why))
+                    else:
+                        results.append(
+                            (sym, dirn, False, "open_long/short returned None")
+                        )
+
             except Exception as e:
-                results.append((sym, dirn, False, str(e)[:120]))
+                results.append((sym, dirn, False, str(e)[:200]))
 
-        for sym, dirn, ok, msg in results:
-            st.write(f"{'✅' if ok else '❌'} **{sym} {dirn}** — {msg}")
-
+        # ── Store results persistently and rerender ────────────────────────────
+        st.session_state["manual_results"] = results
         st.session_state.pop("manual_candidates", None)
         st.session_state.pop("manual_scan_time", None)
+        st.rerun()

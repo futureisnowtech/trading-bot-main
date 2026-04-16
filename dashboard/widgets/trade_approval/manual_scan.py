@@ -299,273 +299,481 @@ def render_manual_scan():
 
     if n_sel == 0:
         st.caption(
-            "Check the **Trade?** box on rows you want to execute, then click Execute."
+            "Check the **Trade?** box on rows you want to execute, then click Review."
         )
         return
 
-    if st.button(f"Execute {n_sel} Trade(s)", type="primary", key="manual_execute_btn"):
-        # ── Determine paper/live mode from runtime state ───────────────────────
-        try:
-            from db import _runtime_paper_flag as _rflag
+    # ── Helper: compute sizing for one candidate (shared by Review + Execute) ──
+    def _compute_preview(cand, exec_paper, acct_balance, get_candles_fn, open_pos):
+        sym = cand["symbol"]
+        dirn = cand["direction"]
+        setup = cand.get("primary_setup", "manual")
+        policy = _get_tier_info(sym)
+        exec_sym = policy.get("underlying", sym)
+        prob = _win_prob(cand)
 
-            _exec_paper = bool(_rflag())
-        except Exception:
+        if not policy["execute"]:
+            return {
+                "sym": sym,
+                "exec_sym": exec_sym,
+                "dirn": dirn,
+                "setup": setup,
+                "blocked": True,
+                "block_reason": f"tier={policy['tier']}",
+                "prob": prob,
+                "cand": cand,
+            }
+
+        # Fetch candles
+        df_c = None
+        for fsym in [exec_sym, sym] if exec_sym != sym else [sym]:
             try:
-                sys.path.insert(0, _ROOT)
-                from config import PAPER_TRADING
-
-                _exec_paper = bool(PAPER_TRADING)
+                df = get_candles_fn(fsym, "1h", 100)
+                if df is not None and len(df) >= 10:
+                    df_c = df
+                    break
             except Exception:
-                _exec_paper = True
+                pass
+        if df_c is None or len(df_c) < 10:
+            return {
+                "sym": sym,
+                "exec_sym": exec_sym,
+                "dirn": dirn,
+                "setup": setup,
+                "blocked": True,
+                "block_reason": "insufficient candle data",
+                "prob": prob,
+                "cand": cand,
+            }
 
-        # ── Get real account balance ───────────────────────────────────────────
-        # In live mode use the Coinbase API balance (not config ACCOUNT_SIZE).
-        # In paper mode use the DB-computed paper equity.
-        if not _exec_paper:
-            try:
-                from data.balance import get_coinbase_balance
-
-                _cb = get_coinbase_balance()
-                if _cb.get("connected") and _cb.get("balance", 0) > 0:
-                    _acct_balance = float(_cb["balance"])
-                else:
-                    _acct_balance, _, _ = get_account()
-            except Exception:
-                _acct_balance, _, _ = get_account()
+        candle_price = float(df_c["close"].iloc[-1])
+        live_now = get_live_prices([exec_sym]).get(exec_sym, 0) or get_live_prices(
+            [sym]
+        ).get(sym, 0)
+        if live_now > 0:
+            ratio = candle_price / live_now
+            price = candle_price if 0.95 <= ratio <= 1.05 else live_now
         else:
-            _acct_balance, _, _ = get_account()
+            price = candle_price
+        if price <= 0:
+            return {
+                "sym": sym,
+                "exec_sym": exec_sym,
+                "dirn": dirn,
+                "setup": setup,
+                "blocked": True,
+                "block_reason": "no valid price",
+                "prob": prob,
+                "cand": cand,
+            }
 
-        # ── Load get_candles via explicit path (avoids dashboard/data namespace) ─
-        try:
-            _hd_spec = _ilu.spec_from_file_location(
-                "_root_data_historical_data",
-                os.path.join(_ROOT, "data", "historical_data.py"),
-            )
-            _hd_mod = _ilu.module_from_spec(_hd_spec)  # type: ignore[arg-type]
-            _hd_spec.loader.exec_module(_hd_mod)  # type: ignore[union-attr]
-            get_candles = _hd_mod.get_candles
-        except Exception as _imp_err:
-            st.error(f"Cannot load candle data module: {_imp_err}")
-            return
+        atr_7 = float(df_c["high"].sub(df_c["low"]).tail(7).mean())
+        if atr_7 <= 0 or (live_now > 0 and abs(candle_price / live_now - 1) > 0.10):
+            atr_7 = price * 0.015
 
-        if _ROOT not in sys.path:
-            sys.path.insert(0, _ROOT)
-        import perps_engine as perps
+        stop_dist = max(atr_7 * 1.5, price * 0.008)
+        target_dist = stop_dist * 3.0
+        composite = cand.get("composite_score", 50.0)
 
-        # Symbols already held in live DB — block duplicate entries
-        _held_syms = {p.get("symbol", "") for p in _open_pos}
-        # Track symbols entered in this batch to catch same-underlying conflicts
-        # (e.g. PF_SOLUSD + SOL both map to SOL, or LONG + SHORT same coin selected)
-        _batch_syms: set = set()
+        from position_manager import compute_position_size
 
-        results = []
-        for idx in selected_idx:
-            cand = candidates[idx]
-            sym = cand["symbol"]
-            dirn = cand["direction"]
-            setup = cand.get("primary_setup", "manual")
-            _policy = _get_tier_info(sym)
-            if not _policy["execute"]:
-                results.append((sym, dirn, False, f"blocked: {_policy['tier']}"))
-                continue
+        deployed = sum(
+            float(p.get("qty", 0)) * float(p.get("entry", 0)) for p in open_pos
+        )
+        sizing = compute_position_size(
+            account_balance=acct_balance,
+            current_price=price,
+            atr_7=atr_7,
+            stop_multiplier=1.5,
+            ml_score=composite,
+            composite_score=composite,
+            deployed_usd=deployed,
+            paper=exec_paper,
+        )
+        pos_usd = sizing["position_usd"]
+        leverage = sizing["leverage"]
+
+        # Size guards (live only)
+        size_note = None
+        if not exec_paper:
+            min_usd = _min_contract_usd(exec_sym, price)
+            max_single = round(acct_balance * 0.03, 2)
+            if min_usd > 0 and min_usd > max_single:
+                return {
+                    "sym": sym,
+                    "exec_sym": exec_sym,
+                    "dirn": dirn,
+                    "setup": setup,
+                    "blocked": True,
+                    "block_reason": f"min contract ${min_usd:.0f} > 3% cap ${max_single:.0f}",
+                    "prob": prob,
+                    "cand": cand,
+                }
+            if min_usd > 0 and pos_usd < min_usd:
+                size_note = f"bumped from ${pos_usd:.0f} to 1-contract minimum"
+                pos_usd = round(min_usd * 1.02, 2)
+            if pos_usd > max_single:
+                pos_usd = max_single
+
+        stop_p = (
+            round(price - stop_dist, 6)
+            if dirn == "LONG"
+            else round(price + stop_dist, 6)
+        )
+        target_p = (
+            round(price + target_dist, 6)
+            if dirn == "LONG"
+            else round(price - target_dist, 6)
+        )
+        stop_pct = stop_dist / price * 100
+        target_pct = target_dist / price * 100
+        max_loss = round(pos_usd * (stop_pct / 100), 2)
+        fee_cost = round(pos_usd * 0.0006, 2)  # round-trip 0.06%
+
+        return {
+            "sym": sym,
+            "exec_sym": exec_sym,
+            "dirn": dirn,
+            "setup": setup,
+            "blocked": False,
+            "block_reason": None,
+            "price": price,
+            "stop_p": stop_p,
+            "target_p": target_p,
+            "stop_pct": stop_pct,
+            "target_pct": target_pct,
+            "pos_usd": pos_usd,
+            "leverage": leverage,
+            "max_loss": max_loss,
+            "fee_cost": fee_cost,
+            "atr_7": atr_7,
+            "composite": composite,
+            "prob": prob,
+            "size_note": size_note,
+            "cand": cand,
+        }
+
+    # ── PHASE 1: Review button — compute previews, don't execute yet ──────────
+    previews = st.session_state.get("ms_previews")
+
+    if previews is None:
+        if st.button(f"Review {n_sel} Order(s)", type="primary", key="ms_review_btn"):
+            # Resolve mode + balance once
             try:
-                # Normalise to underlying symbol for execution and price/candle fetching.
-                # PF_SOLUSD → SOL, PF_ETHUSD → ETH, etc.
-                exec_sym = _policy.get("underlying", sym)
+                from db import _runtime_paper_flag as _rflag
 
-                # Guard: already holding this underlying in live DB
-                if not _exec_paper and exec_sym in _held_syms:
-                    results.append(
-                        (
-                            sym,
-                            dirn,
-                            False,
-                            f"already holding {exec_sym} — close existing position first",
-                        )
+                _exec_paper = bool(_rflag())
+            except Exception:
+                try:
+                    from config import PAPER_TRADING
+
+                    _exec_paper = bool(PAPER_TRADING)
+                except Exception:
+                    _exec_paper = True
+
+            if not _exec_paper:
+                try:
+                    from data.balance import get_coinbase_balance
+
+                    _cb = get_coinbase_balance()
+                    _acct_balance = (
+                        float(_cb["balance"])
+                        if _cb.get("connected") and _cb.get("balance", 0) > 0
+                        else get_account()[0]
                     )
+                except Exception:
+                    _acct_balance = get_account()[0]
+            else:
+                _acct_balance = get_account()[0]
+
+            try:
+                _hd_spec = _ilu.spec_from_file_location(
+                    "_root_data_historical_data",
+                    os.path.join(_ROOT, "data", "historical_data.py"),
+                )
+                _hd_mod = _ilu.module_from_spec(_hd_spec)
+                _hd_spec.loader.exec_module(_hd_mod)
+                get_candles = _hd_mod.get_candles
+            except Exception as e:
+                st.error(f"Cannot load candle module: {e}")
+                return
+
+            _open_pos_now = get_open_positions()
+
+            with st.spinner("Computing order details…"):
+                computed = []
+                for idx in selected_idx:
+                    pv = _compute_preview(
+                        candidates[idx],
+                        _exec_paper,
+                        _acct_balance,
+                        get_candles,
+                        _open_pos_now,
+                    )
+                    pv["exec_paper"] = _exec_paper
+                    pv["acct_balance"] = _acct_balance
+                    computed.append(pv)
+
+            st.session_state["ms_previews"] = computed
+            st.rerun()
+        return
+
+    # ── PHASE 2: Confirmation panel ───────────────────────────────────────────
+    _exec_paper = previews[0].get("exec_paper", True)
+    _acct_balance = previews[0].get("acct_balance", 5000.0)
+    mode_label = "PAPER" if _exec_paper else "LIVE"
+    mode_color = "orange" if _exec_paper else "red"
+
+    st.markdown(f"### Order Review — :{mode_color}[{mode_label} MODE]")
+    st.caption(
+        "Prices and sizes were computed when you clicked Review. "
+        "Execution uses fresh prices — small slippage is normal."
+    )
+
+    any_executable = False
+    for pv in previews:
+        sym = pv["sym"]
+        dirn = pv["dirn"]
+        setup = pv["setup"]
+
+        if pv["blocked"]:
+            st.error(f"**{sym} {dirn}** — blocked: {pv['block_reason']}")
+            continue
+
+        any_executable = True
+        price = pv["price"]
+        stop_p = pv["stop_p"]
+        target_p = pv["target_p"]
+        pos_usd = pv["pos_usd"]
+        leverage = pv["leverage"]
+        max_loss = pv["max_loss"]
+        fee_cost = pv["fee_cost"]
+        stop_pct = pv["stop_pct"]
+        target_pct = pv["target_pct"]
+        prob = pv["prob"]
+        composite = pv["composite"]
+        cand = pv["cand"]
+
+        arrow = "▲" if dirn == "LONG" else "▼"
+        dir_color = "green" if dirn == "LONG" else "red"
+
+        with st.container(border=True):
+            st.markdown(f"#### :{dir_color}[{arrow} {sym} {dirn}]  `{setup}`")
+
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Entry (approx)", f"${price:.5g}")
+            c2.metric(
+                "Stop", f"${stop_p:.5g}", f"-{stop_pct:.2f}%", delta_color="inverse"
+            )
+            c3.metric("Target", f"${target_p:.5g}", f"+{target_pct:.2f}%")
+
+            c4, c5, c6, c7 = st.columns(4)
+            c4.metric("Position size", f"${pos_usd:.2f}")
+            c5.metric("Leverage", f"{leverage}×")
+            c6.metric("Max loss (at stop)", f"-${max_loss:.2f}")
+            c7.metric("Est. fees (round-trip)", f"${fee_cost:.2f}")
+
+            st.divider()
+
+            th1, th2 = st.columns([1, 1])
+            with th1:
+                st.markdown("**Signal thesis**")
+                st.markdown(
+                    f"- Setup: `{setup}` — {_SETUP_DESC.get(setup, 'Composite signal.')}"
+                )
+                st.markdown(f"- Win probability (heuristic): **{prob:.1f}%**")
+                st.markdown(f"- Composite score: **{composite:.1f} / 100**")
+                st.markdown(
+                    f"- R:R ratio: **3:1** (stop {stop_pct:.2f}% → target {target_pct:.2f}%)"
+                )
+                all_setups = cand.get("scan_setups", [setup])
+                if len(all_setups) > 1:
+                    others = [s for s in all_setups if s != setup]
+                    st.markdown(f"- Also triggered: {', '.join(others)}")
+            with th2:
+                st.markdown("**Key indicators**")
+                adx = cand.get("adx_15m", 0)
+                vs = cand.get("vol_spike", 1.0)
+                fund = cand.get("funding_rate", 0.0)
+                vwap_d = cand.get("vwap_disp_pct", 0.0)
+                pm1h = cand.get("price_move_1h_pct", 0.0)
+                pm4h = cand.get("price_move_4h_pct", 0.0)
+                st.markdown(
+                    f"- ADX (15m): `{adx:.1f}` {'(trending)' if adx >= 25 else '(ranging)'}"
+                )
+                st.markdown(f"- Volume spike: `{vs:.2f}×`")
+                st.markdown(f"- VWAP displacement: `{vwap_d:+.3f}%`")
+                st.markdown(f"- 1h / 4h move: `{pm1h:+.2f}%` / `{pm4h:+.2f}%`")
+                st.markdown(f"- Funding rate: `{fund * 100:.4f}%`")
+                st.markdown(f"- Exchange: `{cand.get('exchange', '?').upper()}`")
+
+            if pv.get("size_note"):
+                st.info(f"ℹ️ Size note: {pv['size_note']}")
+
+    if not any_executable:
+        st.warning("All selected trades are blocked. Nothing to execute.")
+        if st.button("Back", key="ms_back_all_blocked"):
+            st.session_state.pop("ms_previews", None)
+            st.rerun()
+        return
+
+    st.divider()
+    ca, cb = st.columns([1, 1])
+    with ca:
+        if st.button("Confirm & Execute", type="primary", key="ms_confirm_btn"):
+            # ── PHASE 3: Execute confirmed orders ─────────────────────────────
+            try:
+                _hd_spec = _ilu.spec_from_file_location(
+                    "_root_data_historical_data",
+                    os.path.join(_ROOT, "data", "historical_data.py"),
+                )
+                _hd_mod = _ilu.module_from_spec(_hd_spec)
+                _hd_spec.loader.exec_module(_hd_mod)
+                get_candles = _hd_mod.get_candles
+            except Exception as e:
+                st.error(f"Cannot load candle module: {e}")
+                return
+
+            if _ROOT not in sys.path:
+                sys.path.insert(0, _ROOT)
+            import perps_engine as perps
+
+            _open_pos_now = get_open_positions()
+            _held_syms = {p.get("symbol", "") for p in _open_pos_now}
+            _batch_syms: set = set()
+            results = []
+
+            for pv in previews:
+                if pv["blocked"]:
+                    results.append((pv["sym"], pv["dirn"], False, pv["block_reason"]))
                     continue
 
-                # Guard: same underlying already in this execution batch
-                # (catches LONG + SHORT same coin, or PF_SOLUSD + SOL both checked)
+                sym = pv["sym"]
+                dirn = pv["dirn"]
+                setup = pv["setup"]
+                exec_sym = pv["exec_sym"]
+
+                # Re-run guards with fresh held list
+                if not _exec_paper and exec_sym in _held_syms:
+                    results.append((sym, dirn, False, f"already holding {exec_sym}"))
+                    continue
                 if exec_sym in _batch_syms:
                     results.append(
-                        (
-                            sym,
-                            dirn,
-                            False,
-                            f"conflict: {exec_sym} already queued in this batch",
-                        )
+                        (sym, dirn, False, f"conflict: {exec_sym} already in batch")
                     )
                     continue
 
-                # ── Fetch candles: try exec_sym first, fall back to raw sym ──
-                df_c = None
-                for _fsym in [exec_sym, sym] if exec_sym != sym else [sym]:
-                    try:
-                        _df = get_candles(_fsym, "1h", 100)
-                        if _df is not None and len(_df) >= 10:
-                            df_c = _df
-                            break
-                    except Exception:
-                        pass
-                if df_c is None or len(df_c) < 10:
-                    results.append((sym, dirn, False, "insufficient candle data"))
-                    continue
+                # Re-fetch fresh price/ATR at execution time
+                try:
+                    df_c = None
+                    for fsym in [exec_sym, sym] if exec_sym != sym else [sym]:
+                        try:
+                            df = get_candles(fsym, "1h", 100)
+                            if df is not None and len(df) >= 10:
+                                df_c = df
+                                break
+                        except Exception:
+                            pass
 
-                candle_price = float(df_c["close"].iloc[-1])
-
-                # Live price: try exec_sym first, then raw sym
-                live_now = get_live_prices([exec_sym]).get(
-                    exec_sym, 0
-                ) or get_live_prices([sym]).get(sym, 0)
-                if live_now > 0:
-                    ratio = candle_price / live_now
-                    if 0.95 <= ratio <= 1.05:
-                        price = candle_price
+                    candle_price = (
+                        float(df_c["close"].iloc[-1])
+                        if df_c is not None
+                        else pv["price"]
+                    )
+                    live_now = get_live_prices([exec_sym]).get(
+                        exec_sym, 0
+                    ) or get_live_prices([sym]).get(sym, 0)
+                    if live_now > 0:
+                        ratio = candle_price / live_now
+                        price = candle_price if 0.95 <= ratio <= 1.05 else live_now
                     else:
-                        price = live_now
-                        st.warning(
-                            f"⚠️ {exec_sym}: candle ${candle_price:.5g} off by "
-                            f"{abs(ratio - 1) * 100:.0f}% from live ${live_now:.5g} — using live price"
-                        )
-                else:
-                    price = candle_price
+                        price = candle_price
+                    if price <= 0:
+                        price = pv["price"]  # fall back to preview price
 
-                if price <= 0:
-                    results.append(
-                        (sym, dirn, False, "could not determine valid entry price")
+                    atr_7 = (
+                        float(df_c["high"].sub(df_c["low"]).tail(7).mean())
+                        if df_c is not None
+                        else pv["atr_7"]
                     )
-                    continue
+                    if atr_7 <= 0:
+                        atr_7 = price * 0.015
 
-                atr_7 = float(df_c["high"].sub(df_c["low"]).tail(7).mean())
-                if atr_7 <= 0 or (
-                    live_now > 0 and abs(candle_price / live_now - 1) > 0.10
-                ):
-                    atr_7 = price * 0.015
+                    stop_dist = max(atr_7 * 1.5, price * 0.008)
+                    target_dist = stop_dist * 3.0
+                    pos_usd = pv["pos_usd"]
+                    leverage = pv["leverage"]
 
-                stop_dist = max(atr_7 * 1.5, price * 0.008)
-                target_dist = stop_dist * 3.0
-                composite = cand.get("composite_score", 50.0)
+                    if dirn == "LONG":
+                        stop_p = round(price - stop_dist, 6)
+                        target_p = round(price + target_dist, 6)
+                        pos = perps.open_long(
+                            symbol=exec_sym,
+                            position_usd=pos_usd,
+                            entry_price=price,
+                            stop_price=stop_p,
+                            take_profit_price=target_p,
+                            leverage=leverage,
+                            composite_score=pv["composite"],
+                            atr_at_entry=atr_7,
+                            regime="UNKNOWN",
+                            entry_setup=f"manual_{setup}",
+                            paper=_exec_paper,
+                        )
+                    else:
+                        stop_p = round(price + stop_dist, 6)
+                        target_p = round(price - target_dist, 6)
+                        pos = perps.open_short(
+                            symbol=exec_sym,
+                            position_usd=pos_usd,
+                            entry_price=price,
+                            stop_price=stop_p,
+                            take_profit_price=target_p,
+                            leverage=leverage,
+                            composite_score=pv["composite"],
+                            atr_at_entry=atr_7,
+                            regime="UNKNOWN",
+                            entry_setup=f"manual_{setup}",
+                            paper=_exec_paper,
+                        )
 
-                from position_manager import compute_position_size
-
-                _open_pos = get_open_positions()
-                _deployed = sum(
-                    float(p.get("qty", 0)) * float(p.get("entry", 0)) for p in _open_pos
-                )
-                sizing = compute_position_size(
-                    account_balance=_acct_balance,
-                    current_price=price,
-                    atr_7=atr_7,
-                    stop_multiplier=1.5,
-                    ml_score=composite,
-                    composite_score=composite,
-                    deployed_usd=_deployed,
-                    paper=_exec_paper,
-                )
-                pos_usd = sizing["position_usd"]
-                leverage = sizing["leverage"]
-
-                # ── Live-mode size guards ──────────────────────────────────────
-                if not _exec_paper:
-                    _min_usd = _min_contract_usd(exec_sym, price)
-                    # Hard cap: no single trade > 3% of account. If even the
-                    # minimum 1-contract cost exceeds that, the account is too
-                    # small for this instrument — skip rather than force a huge bet.
-                    _max_single = round(_acct_balance * 0.03, 2)
-                    if _min_usd > 0 and _min_usd > _max_single:
+                    if pos:
                         results.append(
                             (
                                 sym,
                                 dirn,
-                                False,
-                                f"min contract ${_min_usd:.0f} exceeds 3% account "
-                                f"cap ${_max_single:.0f} — account too small for {exec_sym}",
+                                True,
+                                f"[{mode_label}] entered @ {price:.6g}  "
+                                f"stop={stop_p:.6g}  target={target_p:.6g}  "
+                                f"size=${pos_usd:.0f}  lev={leverage}x",
                             )
                         )
-                        continue
-                    # Bump up to 1-contract minimum if signal sizing falls short.
-                    if _min_usd > 0 and pos_usd < _min_usd:
-                        _original_pos = pos_usd
-                        pos_usd = round(_min_usd * 1.02, 2)
-                        st.info(
-                            f"ℹ️ {exec_sym}: signal sizing ${_original_pos:.0f} < "
-                            f"1 contract (≈${_min_usd:.0f}) — using ${pos_usd:.0f}"
-                        )
-                    # Apply per-trade cap regardless (catches cases where signal
-                    # sizing itself is oversized).
-                    if pos_usd > _max_single:
-                        pos_usd = _max_single
-
-                if dirn == "LONG":
-                    stop_p = round(price - stop_dist, 6)
-                    target_p = round(price + target_dist, 6)
-                    pos = perps.open_long(
-                        symbol=exec_sym,
-                        position_usd=pos_usd,
-                        entry_price=price,
-                        stop_price=stop_p,
-                        take_profit_price=target_p,
-                        leverage=leverage,
-                        composite_score=composite,
-                        atr_at_entry=atr_7,
-                        regime="UNKNOWN",
-                        entry_setup=f"manual_{setup}",
-                        paper=_exec_paper,
-                    )
-                else:
-                    stop_p = round(price + stop_dist, 6)
-                    target_p = round(price - target_dist, 6)
-                    pos = perps.open_short(
-                        symbol=exec_sym,
-                        position_usd=pos_usd,
-                        entry_price=price,
-                        stop_price=stop_p,
-                        take_profit_price=target_p,
-                        leverage=leverage,
-                        composite_score=composite,
-                        atr_at_entry=atr_7,
-                        regime="UNKNOWN",
-                        entry_setup=f"manual_{setup}",
-                        paper=_exec_paper,
-                    )
-
-                if pos:
-                    mode_tag = "PAPER" if _exec_paper else "LIVE"
-                    results.append(
-                        (
-                            sym,
-                            dirn,
-                            True,
-                            f"[{mode_tag}] entered @ {price:.6g}  "
-                            f"stop={stop_p:.6g}  target={target_p:.6g}  "
-                            f"size=${pos_usd:.0f}  lev={leverage}x",
-                        )
-                    )
-                    # Register underlying so subsequent batch entries on same
-                    # coin are blocked (prevents LONG+SHORT same asset in one click).
-                    _batch_syms.add(exec_sym)
-                    _held_syms.add(exec_sym)
-                else:
-                    # Explain why the broker returned None
-                    if not _exec_paper:
-                        _min_usd = _min_contract_usd(exec_sym, price)
-                        _why = (
-                            f"size ${pos_usd:.0f} < 1 contract (≈${_min_usd:.0f})"
-                            if _min_usd > 0 and pos_usd < _min_usd
-                            else "broker returned None — check logs/service/manual_live_bot.log"
-                        )
-                        results.append((sym, dirn, False, _why))
+                        _batch_syms.add(exec_sym)
+                        _held_syms.add(exec_sym)
                     else:
-                        results.append(
-                            (sym, dirn, False, "open_long/short returned None")
-                        )
+                        if not _exec_paper:
+                            min_usd = _min_contract_usd(exec_sym, price)
+                            why = (
+                                f"size ${pos_usd:.0f} < 1 contract (≈${min_usd:.0f})"
+                                if min_usd > 0 and pos_usd < min_usd
+                                else "broker returned None — check bot log"
+                            )
+                            results.append((sym, dirn, False, why))
+                        else:
+                            results.append(
+                                (sym, dirn, False, "open_long/short returned None")
+                            )
 
-            except Exception as e:
-                results.append((sym, dirn, False, str(e)[:200]))
+                except Exception as e:
+                    results.append((sym, dirn, False, str(e)[:200]))
 
-        # ── Store results persistently and rerender ────────────────────────────
-        st.session_state["manual_results"] = results
-        st.session_state.pop("manual_candidates", None)
-        st.session_state.pop("manual_scan_time", None)
-        st.rerun()
+            st.session_state["manual_results"] = results
+            st.session_state.pop("ms_previews", None)
+            st.session_state.pop("manual_candidates", None)
+            st.session_state.pop("manual_scan_time", None)
+            st.rerun()
+
+    with cb:
+        if st.button("Cancel", type="secondary", key="ms_cancel_btn"):
+            st.session_state.pop("ms_previews", None)
+            st.rerun()

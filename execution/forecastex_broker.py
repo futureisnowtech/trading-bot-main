@@ -56,34 +56,54 @@ FORECASTX_CLIENT_ID = int(
 # Zero commission on ForecastEx
 FORECASTX_FEE_PER_CONTRACT = 0.0
 
-# Known IND conIds confirmed live on FORECASTX (2026-04-15).
+# Known IND conIds confirmed live on FORECASTX (2026-04-15/17).
 # Used to persist stubs when the IND pass times out or OPT layer is unavailable.
+# Correct IBKR short symbols (NOT FRED codes): PREMP (not NFP), UNR (not UR),
+# RGDP (not GDP), PCEY (not PCE), FEDRO/FEDRC (not FOMC).
 KNOWN_FORECASTX_CONIDS: dict[str, int] = {
     "CPI": 573031126,
     "CPIY": 712856682,
     "CPIC": 727520252,
     "DISSN": 806285268,
     "DISSA": 804725704,
+    "PREMP": 582530257,  # Nonfarm Payrolls (confirmed 2026-04-17)
+    "UNR": 573031117,  # US Unemployment Rate (confirmed 2026-04-17)
+    "RGDP": 712856689,  # Real GDP (confirmed 2026-04-17)
+    "PCEY": 726203930,  # PCE Year-over-Year (confirmed 2026-04-17)
+    "FEDRO": 800591710,  # Fed Funds Rate Outstanding (confirmed 2026-04-17)
+    "FEDRC": 815813254,  # Fed Rate Change (confirmed 2026-04-17)
 }
 
 # Economic event underlier symbols to scan during discovery.
 # These are the ACTUAL IBKR FORECASTX IND symbols confirmed via reqMatchingSymbols.
 # FRED/FRED-style codes (CPIAUCSL, UNRATE, PAYEMS) do NOT exist on FORECASTX.
 # Confirmed live: CPI=573031126, CPIY=712856682, CPIC=727520252,
-#                 DISSN=806285268, DISSA=804725704
+#                 DISSN=806285268, DISSA=804725704, PREMP=582530257,
+#                 UNR=573031117, RGDP=712856689, PCEY=726203930,
+#                 FEDRO=800591710, FEDRC=815813254
 ECONOMIC_UNDERLIERS: list[str] = [
-    "CPI",  # US CPI All Items (confirmed IND on FORECASTX)
-    "CPIY",  # US CPI Year-over-Year (confirmed IND on FORECASTX)
-    "CPIC",  # US Core CPI (confirmed IND on FORECASTX)
-    "DISSN",  # Number of Dissenting FOMC Members (confirmed IND on FORECASTX)
-    "DISSA",  # Any FOMC Members Dissent (confirmed IND on FORECASTX)
-    "PCE",  # PCE Price Index (short form)
-    "NFP",  # Nonfarm Payrolls
-    "GDP",  # Real GDP
-    "PPI",  # Producer Price Index
-    "UR",  # Unemployment Rate (IBKR short form)
-    "RETAIL",  # Retail Sales
-    "FOMC",  # FOMC rate decision
+    # US CPI family (confirmed IND on FORECASTX)
+    "CPI",  # US CPI All Items
+    "CPIY",  # US CPI Year-over-Year
+    "CPIC",  # US Core CPI
+    # FOMC dissent (confirmed IND on FORECASTX)
+    "DISSN",  # Number of Dissenting FOMC Members
+    "DISSA",  # Any FOMC Members Dissent
+    # Employment (confirmed short symbols via reqMatchingSymbols)
+    "PREMP",  # Nonfarm Payrolls (was 'NFP' — wrong)
+    "UNR",  # US Unemployment Rate (was 'UR' — wrong)
+    # GDP / growth
+    "RGDP",  # Real GDP (was 'GDP' — wrong)
+    # PCE inflation
+    "PCEY",  # PCE Year-over-Year (was 'PCE' — wrong)
+    # Fed rate
+    "FEDRO",  # Fed Funds Rate Outstanding
+    "FEDRC",  # Fed Rate Change
+    # Keep old names as fallback attempts (some may be valid on live)
+    "GDP",
+    "PCE",
+    "PPI",
+    "FOMC",
 ]
 
 # Markets to EXCLUDE from v1 (non-economic)
@@ -364,6 +384,25 @@ class ForecastExBroker:
             # Return a stub so callers can persist the underlier visibility to DB.
             return _stub()
 
+        # Fallback: plain OPT returned nothing — try with right specified.
+        # Some TWS versions require an explicit right to return event contracts.
+        if not details:
+            for right in ["C", "P"]:
+                try:
+                    alt = Contract(
+                        secType="OPT",
+                        symbol=underlier,
+                        exchange="FORECASTX",
+                        currency="USD",
+                        right=right,
+                    )
+                    alt_details = await asyncio.wait_for(
+                        self._ib.reqContractDetailsAsync(alt), timeout=6
+                    )
+                    details.extend(alt_details)
+                except Exception:
+                    pass
+
         results = []
         now_str = datetime.now(timezone.utc).date().isoformat()
         for d in details:
@@ -387,7 +426,79 @@ class ForecastExBroker:
                     "und_conid": ind_conid,
                 }
             )
+
+        # If OPT layer returned nothing (no active contracts OR enrollment pending),
+        # emit a stub so callers can persist the IND visibility to the DB.
+        if not results and ind_conid:
+            return _stub()
         return results
+
+    def refresh_known_underliers(self) -> dict[str, int]:
+        """
+        Scan IBKR for new FORECASTX IND symbols via reqMatchingSymbols.
+
+        Returns dict of symbol→conId for all found FORECASTX IND contracts.
+        Logs any symbols not in KNOWN_FORECASTX_CONIDS so they can be added
+        in a future update.  Non-blocking best-effort: exceptions are swallowed
+        so a TWS hiccup never prevents the main discovery loop from running.
+        """
+        if not self.is_connected():
+            return {}
+
+        search_patterns = [
+            "CPI",
+            "GDP",
+            "PCE",
+            "FED",
+            "PAYROLL",
+            "UNEMPLOY",
+            "FOMC",
+            "NFP",
+            "PPI",
+            "RETAIL",
+            "INFLATION",
+            "RATE",
+            "DISSENT",
+        ]
+
+        found: dict[str, int] = {}
+        for pattern in search_patterns:
+            try:
+
+                async def _search(p: str = pattern) -> list:
+                    return await asyncio.wait_for(
+                        self._ib.reqMatchingSymbolsAsync(p), timeout=8
+                    )
+
+                matches = self._run(_search(), timeout=10)
+                for cd in matches:
+                    c = cd.contract
+                    if c.exchange == "FORECASTX" and c.secType == "IND" and c.symbol:
+                        found[c.symbol] = c.conId
+            except Exception as e:
+                log_event(
+                    "DEBUG",
+                    "ForecastExBroker",
+                    f"refresh_known_underliers search '{pattern}' error: {e}",
+                )
+
+        # Log any newly discovered symbols not in the hardcoded map
+        new_symbols = {
+            s: cid for s, cid in found.items() if s not in KNOWN_FORECASTX_CONIDS
+        }
+        if new_symbols:
+            log_event(
+                "INFO",
+                "ForecastExBroker",
+                f"refresh_known_underliers found NEW symbols not in KNOWN_FORECASTX_CONIDS: "
+                f"{new_symbols} — add to hardcoded map for next session",
+            )
+        log_event(
+            "INFO",
+            "ForecastExBroker",
+            f"refresh_known_underliers found {len(found)} FORECASTX IND symbols total",
+        )
+        return found
 
     def discover_markets(
         self,
@@ -408,6 +519,17 @@ class ForecastExBroker:
                 "WARN", "ForecastExBroker", "discover_markets called while disconnected"
             )
             return []
+
+        # Best-effort refresh: probe IBKR for any new IND symbols not in the
+        # hardcoded map.  Non-blocking — a failure here does not abort discovery.
+        try:
+            self.refresh_known_underliers()
+        except Exception as e:
+            log_event(
+                "WARN",
+                "ForecastExBroker",
+                f"refresh_known_underliers failed (non-fatal): {e}",
+            )
 
         targets = underliers or ECONOMIC_UNDERLIERS
         all_contracts = []

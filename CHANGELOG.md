@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-17
+- feat(v16.12): expand ForecastEx KNOWN_FORECASTX_CONIDS (PREMP/UNR/RGDP/PCEY/FEDRO/FEDRC), correct ECONOMIC_UNDERLIERS short symbols, add OPT right-fallback + stub-on-empty in _discover_async, add refresh_known_underliers() method
+
+## 2026-04-17
 - feat(v16.11): spot starter lane (BTC/ETH spot) + live perp safety (autonomous gate + one-live-perp-at-a-time + not_autonomous_live_eligible for BTC/SOL/XRP), 346 proof tests
 
 ## 2026-04-16

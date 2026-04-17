@@ -55,15 +55,14 @@ _MAX_SPREAD_PCT_GATE = 0.0025  # 25 bps — defense-in-depth spread ceiling
 _MIN_NEAR_DEPTH_USD = 5_000.0  # $5K each side — minimum near-touch OB depth
 
 # ── Quality tier thresholds ───────────────────────────────────────────────────
-# v13: Doubled from v10 values because gate now uses actual 3.0x ATR stop (not 1.5x).
-# EV at 3.0x ATR stop is approximately 2x the value at 1.5x ATR stop for same ATR.
-# Scaling up keeps the same minimum-ATR selectivity as before.
-_TIER_APLUS_EV = 0.016  # 1.6% net EV → A+  (was 0.8%)
-_TIER_A_EV = 0.008  # 0.8% net EV → A   (was 0.4%)
-_TIER_B_EV = 0.003  # 0.3% net EV → B   (was 0.15%)
+# Restored to original pre-v13 values. The v13 doubling was overly conservative
+# and was vetoing trades with real edge. Minimal sizing enforces capital discipline.
+_TIER_APLUS_EV = 0.008  # 0.8% net EV → A+
+_TIER_A_EV = 0.004  # 0.4% net EV → A
+_TIER_B_EV = 0.0015  # 0.15% net EV → B
 
 # ── Edge score normaliser (EV % that maps to 1.0 on edge_score) ───────────────
-_EDGE_SCORE_CAP_EV = 0.030  # 3.0% EV → edge_score = 1.0  (was 1.5%)
+_EDGE_SCORE_CAP_EV = 0.015  # 1.5% EV → edge_score = 1.0
 
 # ── Size multipliers per tier ─────────────────────────────────────────────────
 TIER_MULTIPLIERS = {
@@ -179,7 +178,7 @@ def check(
         ROUND_TRIP_COST + abs(spread_pct) / 2 + max(0.0, abs(funding_cost_pct))
     )
     _cost_floor = 2.0 * _effective_cost
-    _static_floor = _TIER_B_EV * 1.67 if is_ranging else _TIER_B_EV  # 0.50% vs 0.30%
+    _static_floor = _TIER_B_EV  # same floor for trending and ranging regimes
     _ev_floor = max(_static_floor, _cost_floor)
     _rr_floor = _MIN_NET_RR * 1.25 if is_ranging else _MIN_NET_RR  # 1.5 vs 1.2
 

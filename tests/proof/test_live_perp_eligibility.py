@@ -1,15 +1,15 @@
 """
-tests/proof/test_live_perp_eligibility.py — Proof suite for live perp safety (v16.11).
+tests/proof/test_live_perp_eligibility.py — Proof suite for live perp safety.
 
 Invariants proved:
-  LP-01  AUTONOMOUS_LIVE_PERP_SYMBOLS default is ['ETH'] only
-  LP-02  _attempt_entry returns not_autonomous_live_eligible for BTC in live mode
-  LP-03  _attempt_entry returns not_autonomous_live_eligible for SOL in live mode
-  LP-04  _attempt_entry returns not_autonomous_live_eligible for XRP in live mode
-  LP-05  _attempt_entry does NOT fire the gate for ETH in live mode (passes through)
-  LP-06  one_live_perp_max blocks open_long when a live position already exists
-  LP-07  one_live_perp_max blocks open_short when a live position already exists
-  LP-08  paper mode is NOT blocked by one_live_perp_max (learning uncapped)
+  LP-01  AUTONOMOUS_LIVE_PERP_SYMBOLS default includes all four core symbols
+  LP-02  BTC passes the autonomous gate in live mode (no longer blocked)
+  LP-03  SOL passes the autonomous gate in live mode (no longer blocked)
+  LP-04  XRP passes the autonomous gate in live mode (no longer blocked)
+  LP-05  ETH passes the autonomous gate in live mode (unchanged)
+  LP-06  max_live_perps=3 blocks open_long when 3 live positions already exist
+  LP-07  max_live_perps=3 blocks open_short when 3 live positions already exist
+  LP-08  paper mode is NOT blocked by max_live_perps (learning uncapped)
   LP-09  opposing side blocked by broker duplicate guard (same symbol, any direction)
   LP-10  CORE_EXECUTION_UNDERLYINGS still contains BTC/ETH/SOL/XRP
 """
@@ -26,15 +26,15 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 
-# ── LP-01: AUTONOMOUS_LIVE_PERP_SYMBOLS default is ['ETH'] ───────────────────
+# ── LP-01: AUTONOMOUS_LIVE_PERP_SYMBOLS default includes all four core symbols ──
 
 
 def test_lp01_autonomous_symbols_default_is_eth_only():
     import config
 
-    syms = list(config.AUTONOMOUS_LIVE_PERP_SYMBOLS)
-    assert syms == ["ETH"], (
-        f"AUTONOMOUS_LIVE_PERP_SYMBOLS must default to ['ETH'], got {syms}"
+    syms = set(config.AUTONOMOUS_LIVE_PERP_SYMBOLS)
+    assert syms == {"BTC", "ETH", "SOL", "XRP"}, (
+        f"AUTONOMOUS_LIVE_PERP_SYMBOLS must default to all four core symbols, got {syms}"
     )
 
 
@@ -200,24 +200,24 @@ def _run_attempt_entry_gate(symbol: str, paper: bool) -> str:
     return decision
 
 
-def test_lp02_btc_blocked_in_live_mode():
+def test_lp02_btc_passes_autonomous_gate_in_live_mode():
     decision = _run_attempt_entry_gate("BTC", paper=False)
-    assert decision == "not_autonomous_live_eligible", (
-        f"BTC live must return 'not_autonomous_live_eligible', got {decision!r}"
+    assert decision != "not_autonomous_live_eligible", (
+        f"BTC live must NOT be blocked by autonomous gate, got {decision!r}"
     )
 
 
-def test_lp03_sol_blocked_in_live_mode():
+def test_lp03_sol_passes_autonomous_gate_in_live_mode():
     decision = _run_attempt_entry_gate("SOL", paper=False)
-    assert decision == "not_autonomous_live_eligible", (
-        f"SOL live must return 'not_autonomous_live_eligible', got {decision!r}"
+    assert decision != "not_autonomous_live_eligible", (
+        f"SOL live must NOT be blocked by autonomous gate, got {decision!r}"
     )
 
 
-def test_lp04_xrp_blocked_in_live_mode():
+def test_lp04_xrp_passes_autonomous_gate_in_live_mode():
     decision = _run_attempt_entry_gate("XRP", paper=False)
-    assert decision == "not_autonomous_live_eligible", (
-        f"XRP live must return 'not_autonomous_live_eligible', got {decision!r}"
+    assert decision != "not_autonomous_live_eligible", (
+        f"XRP live must NOT be blocked by autonomous gate, got {decision!r}"
     )
 
 
@@ -236,16 +236,35 @@ def test_lp05_eth_passes_autonomous_gate_in_live_mode():
 def test_lp06_one_live_perp_max_blocks_open_long():
     import perps_engine
 
-    # Seed a live position directly into in-process dict
-    with perps_engine._lock:
-        perps_engine._open_positions["ETH"] = {
+    # Seed 3 live positions — cap is now 3, so a 4th must be blocked
+    _seed = {
+        "ETH": {
             "symbol": "ETH",
             "direction": "LONG",
             "entry_price": 2500.0,
             "qty": 0.1,
             "position_usd": 250.0,
-            "paper": False,  # <-- live position
-        }
+            "paper": False,
+        },
+        "SOL": {
+            "symbol": "SOL",
+            "direction": "LONG",
+            "entry_price": 150.0,
+            "qty": 1.0,
+            "position_usd": 150.0,
+            "paper": False,
+        },
+        "XRP": {
+            "symbol": "XRP",
+            "direction": "LONG",
+            "entry_price": 2.0,
+            "qty": 100.0,
+            "position_usd": 200.0,
+            "paper": False,
+        },
+    }
+    with perps_engine._lock:
+        perps_engine._open_positions.update(_seed)
 
     try:
         result = perps_engine.open_long(
@@ -257,39 +276,64 @@ def test_lp06_one_live_perp_max_blocks_open_long():
             leverage=3,
             paper=False,
         )
-        assert result is None, "open_long must return None when live position exists"
+        assert result is None, (
+            "open_long must return None when 3 live positions exist (max_live_perps=3)"
+        )
     finally:
         with perps_engine._lock:
-            perps_engine._open_positions.pop("ETH", None)
+            for k in _seed:
+                perps_engine._open_positions.pop(k, None)
 
 
 def test_lp07_one_live_perp_max_blocks_open_short():
     import perps_engine
 
-    with perps_engine._lock:
-        perps_engine._open_positions["ETH"] = {
+    _seed = {
+        "ETH": {
             "symbol": "ETH",
             "direction": "LONG",
             "entry_price": 2500.0,
             "qty": 0.1,
             "position_usd": 250.0,
             "paper": False,
-        }
+        },
+        "SOL": {
+            "symbol": "SOL",
+            "direction": "LONG",
+            "entry_price": 150.0,
+            "qty": 1.0,
+            "position_usd": 150.0,
+            "paper": False,
+        },
+        "XRP": {
+            "symbol": "XRP",
+            "direction": "LONG",
+            "entry_price": 2.0,
+            "qty": 100.0,
+            "position_usd": 200.0,
+            "paper": False,
+        },
+    }
+    with perps_engine._lock:
+        perps_engine._open_positions.update(_seed)
 
     try:
         result = perps_engine.open_short(
-            symbol="SOL",
+            symbol="BTC",
             position_usd=300.0,
-            entry_price=150.0,
-            stop_price=155.0,
-            take_profit_price=140.0,
+            entry_price=90000.0,
+            stop_price=91000.0,
+            take_profit_price=87000.0,
             leverage=3,
             paper=False,
         )
-        assert result is None, "open_short must return None when live position exists"
+        assert result is None, (
+            "open_short must return None when 3 live positions exist (max_live_perps=3)"
+        )
     finally:
         with perps_engine._lock:
-            perps_engine._open_positions.pop("ETH", None)
+            for k in _seed:
+                perps_engine._open_positions.pop(k, None)
 
 
 def test_lp08_paper_not_blocked_by_one_live_perp_max():

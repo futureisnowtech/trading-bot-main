@@ -4,7 +4,7 @@ tests/proof/test_entry_priors.py — Proof tests for Bayesian entry priors (v16)
 Coverage:
   1. estimate_candidate_win_rate returns required keys
   2. Bayesian smoothing math is correct
-  3. win_rate_estimate is clipped to [0.40, 0.70]
+  3. win_rate_estimate is clipped to [0.40, 0.80]
   4. Fallback hierarchy (most specific -> global) fires in order
   5. hit_1r=1 AND hit_stop=0 is the win label (not just hit_1r)
   6. v10_runner uses estimate_candidate_win_rate (not just hardcoded 0.54)
@@ -42,16 +42,16 @@ def test_bayesian_smoothing_math():
     # 10 wins out of 10 trials
     posterior = _bayesian_posterior(wins=10, n=10)
     expected = (_PRIOR_N * _PRIOR_P + 10) / (_PRIOR_N + 10)
-    expected = max(0.40, min(0.70, expected))
+    expected = max(0.40, min(0.80, expected))
     assert abs(posterior - expected) < 0.001
 
 
 def test_win_rate_clipped_to_bounds():
-    """win_rate_estimate must be clipped to [0.40, 0.70]."""
+    """win_rate_estimate must be clipped to [0.40, 0.80]."""
     from learning.entry_priors import _bayesian_posterior
 
-    # All wins -> should not exceed 0.70
-    assert _bayesian_posterior(wins=1000, n=1000) <= 0.70
+    # All wins -> should not exceed 0.80
+    assert _bayesian_posterior(wins=1000, n=1000) <= 0.80
     # All losses -> should not go below 0.40
     assert _bayesian_posterior(wins=0, n=1000) >= 0.40
 

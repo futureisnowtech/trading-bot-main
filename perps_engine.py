@@ -72,16 +72,15 @@ def open_long(
         return None
 
     # ── One-live-perp-at-a-time enforcement (v16.11) ─────────────────────────
-    # Prevents the bot from stacking multiple live positions simultaneously.
-    # Paper mode: uncapped (learning velocity matters more than capital safety).
+    # Cap concurrent live perp positions at 3. Paper mode: uncapped.
     if not paper:
         with _lock:
             live_count = sum(
                 1 for p in _open_positions.values() if not p.get("paper", True)
             )
-        if live_count >= 1:
+        if live_count >= 3:
             logger.warning(
-                f"[perps] open_long {symbol} blocked — one_live_perp_max "
+                f"[perps] open_long {symbol} blocked — max_live_perps=3 "
                 f"({live_count} live position(s) already open)"
             )
             return None
@@ -224,15 +223,15 @@ def open_short(
         logger.warning(f"[perps] no broker for {symbol} short (live mode)")
         return None
 
-    # ── One-live-perp-at-a-time enforcement (v16.11) ─────────────────────────
+    # Cap concurrent live perp positions at 3. Paper mode: uncapped.
     if not paper:
         with _lock:
             live_count = sum(
                 1 for p in _open_positions.values() if not p.get("paper", True)
             )
-        if live_count >= 1:
+        if live_count >= 3:
             logger.warning(
-                f"[perps] open_short {symbol} blocked — one_live_perp_max "
+                f"[perps] open_short {symbol} blocked — max_live_perps=3 "
                 f"({live_count} live position(s) already open)"
             )
             return None

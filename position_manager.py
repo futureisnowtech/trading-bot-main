@@ -34,9 +34,7 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 _RISK_PCT = 0.02  # 2% account risk per trade
-_MAX_SINGLE_POSITION_USD = (
-    100.0  # $100 hard cap per position (paper — sized conservatively)
-)
+_MAX_SINGLE_POSITION_PCT = 0.12  # 12% of account per position (scales with balance)
 _MAX_DEPLOYED_PCT = 0.95  # 95% max total deployment
 _MIN_NOTIONAL = 10.0  # $10 minimum
 
@@ -68,7 +66,7 @@ def _get_kelly_fraction(account_balance: float, paper: bool = True) -> float:
             """
             SELECT pnl_usd, won FROM trades
             WHERE paper=? AND won IS NOT NULL
-              AND source='clean_paper_v10'
+              AND source IN ('clean_paper_v10','live_v10')
               AND (notes IS NULL OR notes NOT LIKE '%force_test_close%')
             ORDER BY ts DESC LIMIT 200
         """,
@@ -208,9 +206,10 @@ def compute_position_size(
     # ── Caps ─────────────────────────────────────────────────────────────
     capped_by = "chain"
 
-    # Single position hard cap: $100
-    if position_usd > _MAX_SINGLE_POSITION_USD:
-        position_usd = _MAX_SINGLE_POSITION_USD
+    # Single position cap: 12% of account, scales with balance
+    _max_single = account_balance * _MAX_SINGLE_POSITION_PCT
+    if position_usd > _max_single:
+        position_usd = _max_single
         capped_by = "max_single_position"
 
     # Total deployment cap: 95% of account
@@ -227,8 +226,14 @@ def compute_position_size(
     # Recompute units
     position_units = position_usd / (current_price + 1e-9)
 
-    # Leverage
-    leverage = _get_leverage(vol_regime, ml_score, cascade_risk_score, edge_score)
+    # Leverage — when ML model is untrained (default 50.0), use composite_score as proxy
+    # so high-conviction signals can access higher leverage tiers without a trained model.
+    _ml_for_leverage = (
+        composite_score if (ml_score == 50.0 and composite_score > 50.0) else ml_score
+    )
+    leverage = _get_leverage(
+        vol_regime, _ml_for_leverage, cascade_risk_score, edge_score
+    )
 
     return {
         "position_usd": round(position_usd, 2),

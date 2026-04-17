@@ -19,7 +19,7 @@ Bayesian smoothing:
   prior_p = 0.52
   prior_n = 20
   posterior = (prior_n * prior_p + wins) / (prior_n + n)
-  clipped to [0.40, 0.70]
+  clipped to [0.40, 0.80]
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 _PRIOR_P = 0.52
 _PRIOR_N = 20
 _CLIP_LOW = 0.40
-_CLIP_HIGH = 0.70
+_CLIP_HIGH = 0.80
 
 _VALID_SOURCES = ("clean_paper_v10", "live_v10")
 
@@ -103,7 +103,7 @@ def _fetch_bucket(
 
 
 def _bayesian_posterior(wins: int, n: int) -> float:
-    """Apply Bayesian smoothing and clip to [0.40, 0.70]."""
+    """Apply Bayesian smoothing and clip to [0.40, 0.80]."""
     posterior = (_PRIOR_N * _PRIOR_P + wins) / (_PRIOR_N + n)
     return max(_CLIP_LOW, min(_CLIP_HIGH, posterior))
 
@@ -119,7 +119,7 @@ def estimate_candidate_win_rate(
 
     Returns:
         {
-            "win_rate_estimate": float,  # Bayesian posterior, clipped [0.40, 0.70]
+            "win_rate_estimate": float,  # Bayesian posterior, clipped [0.40, 0.80]
             "sample_n": int,             # sample size used (0 = fallback to global)
             "bucket_used": str,          # bucket label
         }

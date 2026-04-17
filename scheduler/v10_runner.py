@@ -50,12 +50,6 @@ _REGIME_SIZE_MULT = {
 # Deduplicate TradingView signals across scan cycles (symbol_direction_ts key)
 _seen_tv_signal_keys: set = set()
 
-# Cooldown after close: symbol → timestamp of last close.
-# Prevents re-entering the same symbol immediately after thesis-invalidated exits.
-_recent_closes: Dict[str, float] = {}
-_COOLDOWN_THESIS_SEC: int = 7200  # 2 hours after thesis_invalidated
-_COOLDOWN_OTHER_SEC: int = 1800  # 30 min after any other exit
-
 # Economics veto suppression: 3-strike system per symbol+direction+reason prefix.
 # Logs on occurrences 1-3, emits a "suppressing" notice on occurrence 4, silent thereafter.
 # Window resets after _VETO_LOG_COOLDOWN_SEC — count and timestamp reset together.
@@ -556,7 +550,6 @@ def _scan_and_trade_inner():
 
     # Exact funnel counters — reset each scan cycle
     _f_dual_exposure = 0
-    _f_cooldown = 0
     _f_risk_block = 0
     _f_data_unavailable = 0
     _f_below_threshold = 0
@@ -637,30 +630,6 @@ def _scan_and_trade_inner():
         except Exception:
             pass
 
-        # Cooldown: check both exact symbol AND underlying (catches PF_X / bare-X alternation)
-        _cooldown_key = (
-            _underlying  # use underlying so PF_ETHUSD cooldown covers ETH too
-        )
-        _last_close_ts = max(
-            _recent_closes.get(symbol, 0),
-            _recent_closes.get(_cooldown_key, 0),
-        )
-        if _last_close_ts > 0:
-            _elapsed = time.time() - _last_close_ts
-            _cooldown = _COOLDOWN_THESIS_SEC
-            if _elapsed < _cooldown:
-                logger.debug(
-                    f"[v10] {symbol} — cooldown {_elapsed / 60:.0f}m/{_cooldown / 60:.0f}m, skip"
-                )
-                _f_cooldown += 1
-                _journal_scan_candidate(
-                    _scan_id,
-                    candidate,
-                    "cooldown_block",
-                    entry_block_reason=f"cooldown {_elapsed / 60:.0f}m/{_cooldown / 60:.0f}m",
-                )
-                continue
-
         # Re-check risk gate before each entry attempt
         if re is not None:
             can_trade, reason = re.can_open_new_position()
@@ -726,7 +695,7 @@ def _scan_and_trade_inner():
     # candidates are being filtered without trawling individual DEBUG/INFO lines.
     logger.info(
         f"[v10] funnel: {len(candidates)} candidates → "
-        f"dual={_f_dual_exposure} cooldown={_f_cooldown} risk={_f_risk_block} "
+        f"dual={_f_dual_exposure} risk={_f_risk_block} "
         f"data_unavail={_f_data_unavailable} below_thresh={_f_below_threshold} "
         f"econ_veto={_f_econ_veto} research_only={_f_research_only_block} "
         f"not_autonomous={_f_not_autonomous} "
@@ -742,7 +711,7 @@ def _scan_and_trade_inner():
             scan_id=_scan_id,
             scanner_candidates_total=len(candidates),
             dual_exposure_block=_f_dual_exposure,
-            cooldown_block=_f_cooldown,
+            cooldown_block=0,
             risk_block=_f_risk_block,
             data_unavailable=_f_data_unavailable,
             below_threshold=_f_below_threshold,
@@ -995,11 +964,9 @@ def _attempt_entry(
     primary_setup = detect_primary_setup(features, direction)
 
     # ── Tier 1 composite floor ──────────────────────────────────────────────────
-    # Data: wae_explosion_short at composite < 50 had WR ~5% across 34 trades.
-    # Even specific setup patterns need overall signal agreement >= 50.
-    # This floor only blocks extreme signal disagreement — most Tier 1 setups
-    # will naturally score > 50 when the underlying indicator conditions are met.
-    _TIER1_COMPOSITE_FLOOR = 50.0
+    # Blocks extreme signal disagreement only — setup fires but everything else is red.
+    # Lowered from 50 → 45 to allow borderline-agreement setups through.
+    _TIER1_COMPOSITE_FLOOR = 45.0
 
     _tech_score = float(result.get("technical_score", 0.0))
     _ml_score = float(result.get("ml_score", 50.0))
@@ -1030,10 +997,9 @@ def _attempt_entry(
             f"[v10] {symbol} {direction} TIER 1 — {primary_setup['label']} "
             f"(composite={composite:.1f} used for sizing only)"
         )
-    elif composite >= 58:
-        # Tier 2: score-based entry. Floor raised from 50 → 58 based on data:
-        # scores 50-57 had WR=47%, avg_pnl=-$0.27 (88 trades, negative edge).
-        # scores >= 58 had WR=64%, avg_pnl=+$0.23 (11 trades, positive edge).
+    elif composite >= 55:
+        # Tier 2: score-based entry. Lowered from 58 → 55 to capture more edge.
+        # The 58 threshold was set on only 11 trades — insufficient sample.
         tier = 2
         size_mult = 0.75
         logger.info(
@@ -1041,15 +1007,9 @@ def _attempt_entry(
             f"(tech={result.get('technical_score', 0):.1f} ml={result.get('ml_score', 50):.1f})"
         )
     else:
-        if composite > 50:
+        if composite > 45:
             logger.info(
-                f"[v10] {symbol} {direction} score={composite:.1f} in 50-57 "
-                f"dead zone — no edge, skip (threshold=58)"
-            )
-        elif composite > 44:
-            logger.info(
-                f"[v10] {symbol} {direction} score={composite:.1f} < 58, "
-                f"no primary setup — skip"
+                f"[v10] {symbol} {direction} score={composite:.1f} below 55 threshold, skip"
             )
         _journal_scan_candidate(
             scan_id,
@@ -1059,9 +1019,9 @@ def _attempt_entry(
             technical_score=_tech_score,
             ml_score=_ml_score,
             composite_score=composite,
-            entry_threshold=58.0,
+            entry_threshold=55.0,
             should_enter_signal=0,
-            entry_block_reason=f"composite {composite:.1f} < 58 (no setup, no tier2 score)",
+            entry_block_reason=f"composite {composite:.1f} < 55 (no setup, no tier2 score)",
         )
         return "below_threshold"
 
@@ -1101,7 +1061,7 @@ def _attempt_entry(
             _wr_est = (
                 0.54
                 if tier == 1
-                else float(max(0.50, min(0.60, 0.50 + (composite - 58) / 50)))
+                else float(max(0.50, min(0.60, 0.50 + (composite - 55) / 50)))
             )
         econ = economics_check(
             symbol=symbol,
@@ -1174,7 +1134,7 @@ def _attempt_entry(
                 technical_score=_tech_score,
                 ml_score=_ml_score,
                 composite_score=composite,
-                entry_threshold=58.0,
+                entry_threshold=55.0,
                 should_enter_signal=1,
                 econ_approved=0,
                 econ_tier=econ.get("quality_tier", "VETO"),
@@ -1210,7 +1170,7 @@ def _attempt_entry(
                 technical_score=_tech_score,
                 ml_score=_ml_score,
                 composite_score=composite,
-                entry_threshold=58.0,
+                entry_threshold=55.0,
                 should_enter_signal=1,
                 econ_approved=1,
                 entry_block_reason=f"non_core_execution_universe:{underlying}",
@@ -1243,7 +1203,7 @@ def _attempt_entry(
                     technical_score=_tech_score,
                     ml_score=_ml_score,
                     composite_score=composite,
-                    entry_threshold=58.0,
+                    entry_threshold=55.0,
                     should_enter_signal=1,
                     econ_approved=1,
                     entry_block_reason=(
@@ -1261,6 +1221,33 @@ def _attempt_entry(
         f"[v10] {symbol} {direction} ENTRY SIGNAL: "
         f"{setup_str} composite={composite:.1f} tier={tier} regime={regime}"
     )
+
+    # ── Spot lane parallel entry (LONG BTC/ETH only — no leverage, no econ gate) ──
+    if direction == "LONG":
+        _spot_underlying = _get_underlying(symbol)
+        if _spot_underlying in ("BTC", "ETH"):
+            try:
+                from config import SPOT_LANE_ACTIVE as _spot_active
+
+                if _spot_active:
+                    import spot_engine as _spot_eng
+
+                    _spot_size = balance * 0.08  # 8% of account for spot
+                    _sr = _spot_eng.open_spot(
+                        _spot_underlying, _spot_size, paper=_paper
+                    )
+                    if _sr and not _sr.get("blocked"):
+                        logger.info(
+                            f"[v10] spot {_spot_underlying} entered "
+                            f"${_spot_size:.0f}: order={_sr.get('order_id', '?')}"
+                        )
+                    elif _sr and _sr.get("blocked"):
+                        logger.debug(
+                            f"[v10] spot {_spot_underlying} blocked: "
+                            f"{_sr.get('blocked')}"
+                        )
+            except Exception as _spot_err:
+                logger.debug(f"[v10] spot entry error: {_spot_err}")
 
     # Compute position size
     if pm is None:
@@ -1322,7 +1309,7 @@ def _attempt_entry(
             technical_score=_tech_score,
             ml_score=_ml_score,
             composite_score=composite,
-            entry_threshold=58.0,
+            entry_threshold=55.0,
             should_enter_signal=1,
             econ_approved=1,
             econ_tier=str(candidate.get("quality_tier", "B")),
@@ -1392,7 +1379,7 @@ def _attempt_entry(
             technical_score=_tech_score,
             ml_score=_ml_score,
             composite_score=composite,
-            entry_threshold=58.0,
+            entry_threshold=55.0,
             should_enter_signal=1,
             econ_approved=1,
             econ_tier=str(candidate.get("quality_tier", "B")),
@@ -1420,7 +1407,7 @@ def _attempt_entry(
         technical_score=_tech_score,
         ml_score=_ml_score,
         composite_score=composite,
-        entry_threshold=58.0,
+        entry_threshold=55.0,
         should_enter_signal=1,
         econ_approved=1,
         econ_tier=str(candidate.get("quality_tier", "B")),
@@ -1719,17 +1706,6 @@ def _evaluate_position_exit(
     if close_result is None:
         logger.warning(f"[v10] close_position returned None for {symbol}")
         return
-
-    # Record close for cooldown — store by BOTH exact symbol and underlying
-    # so that closing ETH blocks PF_ETHUSD (and vice versa) during cooldown.
-    global _recent_closes
-    _ts_now = time.time()
-    _recent_closes[symbol] = _ts_now
-    _recent_closes[_get_underlying(symbol)] = _ts_now
-    # Keep dict bounded
-    if len(_recent_closes) > 200:
-        cutoff = time.time() - max(_COOLDOWN_THESIS_SEC, _COOLDOWN_OTHER_SEC)
-        _recent_closes = {s: t for s, t in _recent_closes.items() if t > cutoff}
 
     pnl_usd = float(close_result.get("pnl_usd", 0))
     exit_price = float(close_result.get("exit_price", current_price))

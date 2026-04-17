@@ -718,15 +718,15 @@ _LONG_SETUPS = [
     {
         "name": "wae_explosion",
         "label": "WAE Momentum Explosion Long",
-        # WAE bullish + exploding + BOTH fast AND slow MACD positive + NOT ranging.
-        # Adding mom_macd_hist_slow > 0 (MACD 6,20,5) prevents single-bar fast-MACD
-        # noise from triggering. Slow MACD confirmation means momentum is established
-        # across a longer window, not just a 3-bar oscillation. v13 change.
+        # WAE bullish + exploding + at least one MACD timeframe confirming + NOT ranging.
+        # OR condition (fast OR slow MACD) since WAE already confirms sustained momentum;
+        # requiring both was double-filtering the same signal and blocking valid setups.
         "check": lambda f: (
             f.get("wae_bullish", 0) > 0
             and f.get("wae_exploding", 0) > 0
-            and f.get("mom_macd_hist_fast", 0) > 0
-            and f.get("mom_macd_hist_slow", 0) > 0
+            and (
+                f.get("mom_macd_hist_fast", 0) > 0 or f.get("mom_macd_hist_slow", 0) > 0
+            )
             and f.get("chop_ranging", 0) == 0
         ),
         "invalidate": lambda f: f.get("wae_bullish", 0) == 0,
@@ -752,13 +752,12 @@ _LONG_SETUPS = [
         "name": "supertrend_cross_long",
         "label": "SuperTrend Bullish Cross",
         # ST direction just flipped from -1 → +1 on this bar.
-        # Requires KST above its signal line (momentum direction agrees) AND
-        # MACD fast histogram positive (short-term trend confirming).
+        # Requires KST OR MACD confirming the flip (either momentum signal agrees).
+        # Requiring both was too strict — they often lag each other by 1-2 bars.
         # Blocked in confirmed ranging (chop > 61.8) — ST crosses in a box are noise.
         "check": lambda f: (
             f.get("supertrend_cross_up", 0) > 0
-            and f.get("kst_bullish", 0) > 0
-            and f.get("mom_macd_hist_fast", 0) > 0
+            and (f.get("kst_bullish", 0) > 0 or f.get("mom_macd_hist_fast", 0) > 0)
             and f.get("chop_ranging", 0) == 0
         ),
         "invalidate": lambda f: f.get("supertrend_bearish", 0) > 0,
@@ -806,12 +805,11 @@ _LONG_SETUPS = [
         "label": "Ranging Mean-Reversion Long (VWAP reclaim)",
         # CHOP confirms ranging AND price stretched below VWAP AND Laguerre oversold
         # AND SuperTrend not actively bearish (don't catch a falling knife in a downtrend)
-        # Threshold raised from -0.15% → -0.30%: Kraken altcoin spread is 0.10-0.15%,
-        # so a 0.15% VWAP deviation is barely outside bid-ask noise.  0.30% ensures
-        # a genuine intraday dislocation, not just random price action within the spread.
+        # VWAP threshold restored to -0.20%: 0.30% was too rare, missing most MR setups.
+        # 0.20% is clearly outside spread noise while still being an actionable dislocation.
         "check": lambda f: (
             f.get("chop_ranging", 0) > 0
-            and f.get("vwap_session_dist_pct", 0) < -0.30
+            and f.get("vwap_session_dist_pct", 0) < -0.20
             and f.get("lrsi_value", 0.5) < 0.25
             and f.get("supertrend_bearish", 0) == 0
         ),
@@ -929,10 +927,10 @@ _SHORT_SETUPS = [
         "label": "Ranging Mean-Reversion Short (VWAP fade)",
         # CHOP confirms ranging AND price stretched above VWAP AND Laguerre overbought
         # AND SuperTrend not actively bullish
-        # Threshold raised from 0.15% → 0.30% — symmetric fix for same reason as long side.
+        # VWAP threshold restored to 0.20% (symmetric with long side fix).
         "check": lambda f: (
             f.get("chop_ranging", 0) > 0
-            and f.get("vwap_session_dist_pct", 0) > 0.30
+            and f.get("vwap_session_dist_pct", 0) > 0.20
             and f.get("lrsi_value", 0.5) > 0.75
             and f.get("supertrend_bullish", 0) == 0
         ),

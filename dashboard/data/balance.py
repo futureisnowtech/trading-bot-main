@@ -279,6 +279,72 @@ def get_ibkr_balance() -> dict:
     }
 
 
+# ── Spot balance (v16.11) ─────────────────────────────────────────────────────
+
+
+def get_spot_balance_summary() -> dict:
+    """
+    Return Coinbase spot balance summary for BTC-USD / ETH-USD.
+    Completely isolated from perp futures_buying_power.
+
+    Returns dict:
+        usd_available   float  — USD available for spot purchases
+        btc_held_usd    float  — BTC held converted to USD at current price
+        eth_held_usd    float  — ETH held converted to USD at current price
+        source          str    — 'live_api' | 'paper' | 'disabled'
+    """
+    try:
+        from config import SPOT_LANE_ACTIVE
+    except Exception:
+        SPOT_LANE_ACTIVE = False
+
+    if not SPOT_LANE_ACTIVE:
+        return {
+            "usd_available": 0.0,
+            "btc_held_usd": 0.0,
+            "eth_held_usd": 0.0,
+            "source": "disabled",
+        }
+
+    paper = _balance_paper_mode()
+
+    if paper:
+        return {
+            "usd_available": 0.0,
+            "btc_held_usd": 0.0,
+            "eth_held_usd": 0.0,
+            "source": "paper",
+        }
+
+    # Live mode — call spot broker
+    try:
+        from execution.coinbase_spot_broker import get_spot_broker
+
+        broker = get_spot_broker()
+        if not broker.is_connected():
+            broker.connect()
+        bal = broker.get_spot_balance()
+        btc_qty = float(bal.get("btc_available", 0))
+        eth_qty = float(bal.get("eth_available", 0))
+        usd = float(bal.get("usd_available", 0))
+        btc_price = broker.get_mark_price("BTC") if btc_qty > 0 else 0.0
+        eth_price = broker.get_mark_price("ETH") if eth_qty > 0 else 0.0
+        return {
+            "usd_available": round(usd, 2),
+            "btc_held_usd": round(btc_qty * btc_price, 2),
+            "eth_held_usd": round(eth_qty * eth_price, 2),
+            "source": "live_api",
+        }
+    except Exception as e:
+        logger.warning(f"[balance] get_spot_balance_summary error: {e}")
+        return {
+            "usd_available": 0.0,
+            "btc_held_usd": 0.0,
+            "eth_held_usd": 0.0,
+            "source": "live_api_error",
+        }
+
+
 # ── Combined ──────────────────────────────────────────────────────────────────
 
 

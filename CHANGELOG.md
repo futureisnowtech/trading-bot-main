@@ -1,5 +1,8 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
+## 2026-04-17
+- feat(v16.11): spot starter lane (BTC/ETH spot) + live perp safety (autonomous gate + one-live-perp-at-a-time + not_autonomous_live_eligible for BTC/SOL/XRP), 346 proof tests
+
 ## 2026-04-16
 - feat(v16.9): remove dead-money exit; tighten manual trade size cap to 3%
 

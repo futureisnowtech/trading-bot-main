@@ -71,6 +71,21 @@ def open_long(
         logger.warning(f"[perps] no broker for {symbol} long (live mode)")
         return None
 
+    # ── One-live-perp-at-a-time enforcement (v16.11) ─────────────────────────
+    # Prevents the bot from stacking multiple live positions simultaneously.
+    # Paper mode: uncapped (learning velocity matters more than capital safety).
+    if not paper:
+        with _lock:
+            live_count = sum(
+                1 for p in _open_positions.values() if not p.get("paper", True)
+            )
+        if live_count >= 1:
+            logger.warning(
+                f"[perps] open_long {symbol} blocked — one_live_perp_max "
+                f"({live_count} live position(s) already open)"
+            )
+            return None
+
     try:
         qty = position_usd / entry_price
 
@@ -208,6 +223,19 @@ def open_short(
     if broker is None and not paper:
         logger.warning(f"[perps] no broker for {symbol} short (live mode)")
         return None
+
+    # ── One-live-perp-at-a-time enforcement (v16.11) ─────────────────────────
+    if not paper:
+        with _lock:
+            live_count = sum(
+                1 for p in _open_positions.values() if not p.get("paper", True)
+            )
+        if live_count >= 1:
+            logger.warning(
+                f"[perps] open_short {symbol} blocked — one_live_perp_max "
+                f"({live_count} live position(s) already open)"
+            )
+            return None
 
     try:
         qty = position_usd / entry_price

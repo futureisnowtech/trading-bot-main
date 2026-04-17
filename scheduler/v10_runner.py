@@ -562,6 +562,7 @@ def _scan_and_trade_inner():
     _f_below_threshold = 0
     _f_econ_veto = 0
     _f_research_only_block = 0
+    _f_not_autonomous = 0  # v16.11: live-only gate for contract-min-safe symbols
     _f_sizing_zero = 0
     _f_execution_failed = 0
     _f_entered = 0
@@ -708,6 +709,8 @@ def _scan_and_trade_inner():
             _f_econ_veto += 1
         elif _decision == "research_only_block":
             _f_research_only_block += 1
+        elif _decision == "not_autonomous_live_eligible":
+            _f_not_autonomous += 1
         elif _decision == "sizing_zero":
             _f_sizing_zero += 1
         elif _decision == "execution_failed":
@@ -726,6 +729,7 @@ def _scan_and_trade_inner():
         f"dual={_f_dual_exposure} cooldown={_f_cooldown} risk={_f_risk_block} "
         f"data_unavail={_f_data_unavailable} below_thresh={_f_below_threshold} "
         f"econ_veto={_f_econ_veto} research_only={_f_research_only_block} "
+        f"not_autonomous={_f_not_autonomous} "
         f"sizing_zero={_f_sizing_zero} exec_fail={_f_execution_failed} "
         f"entered={_f_entered}"
     )
@@ -1214,6 +1218,41 @@ def _attempt_entry(
             return "research_only_block"
     except Exception as _eu_err:
         logger.debug(f"[v10] execution universe check error {symbol}: {_eu_err}")
+
+    # ── Step 5c: Autonomous live eligibility gate (v16.11) ────────────────────
+    # In live mode, only symbols in AUTONOMOUS_LIVE_PERP_SYMBOLS may be entered
+    # autonomously. ETH passes (contract min ~$233 < 15% of ~$1,966 account).
+    # BTC/SOL/XRP exceed the safe per-trade cap and require manual approval.
+    # Paper mode: gate is skipped so all CORE symbols generate paper trades.
+    if not _paper:
+        try:
+            from config import AUTONOMOUS_LIVE_PERP_SYMBOLS as _auto_syms
+
+            _underlying_auto = _get_underlying(symbol)
+            if _underlying_auto not in _auto_syms:
+                logger.info(
+                    f"[v10] {symbol} {direction} NOT_AUTONOMOUS_LIVE_ELIGIBLE "
+                    f"— underlying={_underlying_auto} not in AUTONOMOUS_LIVE_PERP_SYMBOLS "
+                    f"(contract min > safe policy; use manual scan)"
+                )
+                _journal_scan_candidate(
+                    scan_id,
+                    candidate,
+                    "not_autonomous_live_eligible",
+                    regime=regime,
+                    technical_score=_tech_score,
+                    ml_score=_ml_score,
+                    composite_score=composite,
+                    entry_threshold=58.0,
+                    should_enter_signal=1,
+                    econ_approved=1,
+                    entry_block_reason=(
+                        f"not_autonomous_live_eligible:{_underlying_auto}"
+                    ),
+                )
+                return "not_autonomous_live_eligible"
+        except Exception as _auto_err:
+            logger.debug(f"[v10] autonomous eligibility check error: {_auto_err}")
 
     setup_str = (
         primary_setup["label"] if primary_setup else f"composite={composite:.1f}"

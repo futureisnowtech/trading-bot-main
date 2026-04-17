@@ -58,6 +58,28 @@ CORE_EXECUTION_UNDERLYINGS: set = {
 }
 
 # ════════════════════════════════════════════════════════════════════
+# AUTONOMOUS LIVE PERP SYMBOLS (v16.11)
+# Only symbols where contract_min < PERP_MAX_TRADE_PCT * live account
+# are safe for autonomous (bot-initiated) live entries.
+# ETH min ~$233 < 15% of $1,966 (~$295) → passes.
+# BTC ~$845, SOL ~$435, XRP ~$710 → all exceed 15% cap → manual only.
+# CORE_EXECUTION_UNDERLYINGS stays [BTC,ETH,SOL,XRP] for manual + research.
+# ════════════════════════════════════════════════════════════════════
+AUTONOMOUS_LIVE_PERP_SYMBOLS: list = os.getenv(
+    "AUTONOMOUS_LIVE_PERP_SYMBOLS", "ETH"
+).split(",")
+
+# ════════════════════════════════════════════════════════════════════
+# SPOT LANE (v16.11)
+# BTC/ETH spot only — no leverage, no shorting, no margin.
+# SPOT_LANE_ACTIVE gates the lane; default false = disabled.
+# ════════════════════════════════════════════════════════════════════
+SPOT_LANE_ACTIVE: bool = os.getenv("SPOT_LANE_ACTIVE", "false").lower() == "true"
+SPOT_SYMBOLS: list = ["BTC", "ETH"]
+SPOT_MAX_DEPLOYED_PCT: float = float(os.getenv("SPOT_MAX_DEPLOYED_PCT", "0.40"))
+SPOT_MIN_ORDER_USD: float = float(os.getenv("SPOT_MIN_ORDER_USD", "10.0"))
+
+# ════════════════════════════════════════════════════════════════════
 # RISK — HARDCODED. NO AI CAN OVERRIDE THESE.
 # Paper mode uses looser limits to maximise learning velocity.
 # Live mode uses tight limits to protect real capital.
@@ -250,9 +272,7 @@ IBKR_PORT: int = int(os.getenv("IBKR_PORT", "7497"))  # 7497=paper, 7496=live
 BINANCE_API_KEY: str = os.getenv("BINANCE_API_KEY", "")
 BINANCE_API_SECRET: str = os.getenv("BINANCE_API_SECRET", "")
 BINANCE_TESTNET: bool = os.getenv("BINANCE_TESTNET", "true").lower() == "true"
-PERP_PAIRS: list = os.getenv("PERP_PAIRS", "BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT").split(
-    ","
-)
+PERP_PAIRS: list = os.getenv("PERP_PAIRS", "BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT").split(",")
 PERP_POSITION_SIZE_USD: float = float(
     os.getenv("PERP_POSITION_SIZE_USD", "50")
 )  # was 100, cut 50%

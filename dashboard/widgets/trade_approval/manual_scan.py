@@ -283,6 +283,29 @@ def render_manual_scan():
                     st.caption(
                         f"Execution blocked — {_tier.get('reason', 'policy lookup failed')}"
                     )
+            elif _tier_label == "core":
+                # Show autonomous-eligibility note for live mode (informational, not a block)
+                try:
+                    from db import _runtime_paper_flag as _ms_rflag
+
+                    _ms_live = not bool(_ms_rflag())
+                except Exception:
+                    _ms_live = False
+                if _ms_live:
+                    try:
+                        if _ROOT not in sys.path:
+                            sys.path.insert(0, _ROOT)
+                        from config import AUTONOMOUS_LIVE_PERP_SYMBOLS as _auto_s
+
+                        _underlying_sym = _tier.get("underlying", sym)
+                        if _underlying_sym not in _auto_s:
+                            st.caption(
+                                "Manual only — not autonomous-live-eligible "
+                                "(contract min > safe policy). "
+                                "Execute here is fine; bot will not auto-enter."
+                            )
+                    except Exception:
+                        pass
         with col3:
             label = f"{prob:.0f}% — {'High edge' if prob >= 68 else ('Moderate edge' if prob >= 60 else 'Lower edge')}"
             st.progress(prob / 100.0, text=label)
@@ -777,3 +800,144 @@ def render_manual_scan():
         if st.button("Cancel", type="secondary", key="ms_cancel_btn"):
             st.session_state.pop("ms_previews", None)
             st.rerun()
+
+
+# ── Spot section (appended below perp section) ────────────────────────────────
+
+
+def render_spot_section():
+    """
+    Render the SPOT sub-panel inside the Trade Approval tab.
+    Shows BTC/ETH spot status and buy/sell controls when SPOT_LANE_ACTIVE=True.
+    Always reads paper flag from runtime state (never hardcoded).
+    """
+    st.divider()
+    st.subheader("Spot Trading (BTC / ETH)")
+
+    try:
+        if _ROOT not in sys.path:
+            sys.path.insert(0, _ROOT)
+        from config import SPOT_LANE_ACTIVE, SPOT_SYMBOLS, SPOT_MIN_ORDER_USD
+
+        spot_active = bool(SPOT_LANE_ACTIVE)
+        spot_symbols = list(SPOT_SYMBOLS)
+        spot_min = float(SPOT_MIN_ORDER_USD)
+    except Exception:
+        spot_active = False
+        spot_symbols = ["BTC", "ETH"]
+        spot_min = 10.0
+
+    if not spot_active:
+        st.info(
+            "Spot lane disabled — set SPOT_LANE_ACTIVE=true in .env to enable BTC/ETH spot trading."
+        )
+        return
+
+    # Paper flag
+    try:
+        from db import _runtime_paper_flag as _rflag
+
+        _exec_paper = bool(_rflag())
+    except Exception:
+        try:
+            from config import PAPER_TRADING
+
+            _exec_paper = bool(PAPER_TRADING)
+        except Exception:
+            _exec_paper = True
+
+    mode_label = "PAPER" if _exec_paper else "LIVE"
+
+    st.caption(
+        f"Mode: **{mode_label}** | Allowed: {', '.join(spot_symbols)} | Min order: ${spot_min:.0f}"
+    )
+
+    # Load current spot positions
+    try:
+        import spot_engine as _se
+
+        spot_positions = _se.get_spot_positions(paper=_exec_paper)
+    except Exception as e:
+        st.error(f"Could not load spot positions: {e}")
+        return
+
+    # Balance summary
+    try:
+        from data.balance import get_spot_balance_summary
+
+        _spot_bal = get_spot_balance_summary()
+        usd_avail = _spot_bal.get("usd_available", 0.0)
+        btc_held = _spot_bal.get("btc_held_usd", 0.0)
+        eth_held = _spot_bal.get("eth_held_usd", 0.0)
+        _bal_source = _spot_bal.get("source", "unknown")
+        sc1, sc2, sc3 = st.columns(3)
+        sc1.metric("USD available (spot)", f"${usd_avail:,.2f}")
+        sc2.metric("BTC held (USD)", f"${btc_held:,.2f}")
+        sc3.metric("ETH held (USD)", f"${eth_held:,.2f}")
+        if _bal_source != "live_api":
+            st.caption(f"Balance source: {_bal_source}")
+    except Exception:
+        pass
+
+    # Show open spot positions
+    if spot_positions:
+        st.markdown("**Open spot positions:**")
+        for pos in spot_positions:
+            sym = pos.get("symbol", "?")
+            qty = float(pos.get("qty", 0))
+            entry = float(pos.get("entry", 0))
+            st.markdown(f"- **{sym}**: {qty:.6f} units @ ${entry:.4f} entry")
+            sell_key = f"spot_sell_{sym}"
+            if st.button(f"Sell all {sym}", key=sell_key, type="secondary"):
+                try:
+                    result = _se.close_spot(sym, paper=_exec_paper)
+                    if result:
+                        pnl = result.get("pnl_usd", 0.0)
+                        st.success(
+                            f"[{mode_label}] Sold {sym}: "
+                            f"exit @ ${result['exit_price']:.4f}  "
+                            f"pnl=${pnl:+.2f}"
+                        )
+                    else:
+                        st.error(f"close_spot {sym} returned None — check bot log")
+                except Exception as ex:
+                    st.error(f"Sell error: {ex}")
+                st.rerun()
+    else:
+        st.caption("No open spot positions.")
+
+    # Buy controls — only show for symbols not already held
+    held_syms = {pos.get("symbol", "").upper() for pos in spot_positions}
+    for sym in spot_symbols:
+        if sym in held_syms:
+            st.caption(f"{sym}: position already open — sell before re-buying.")
+            continue
+
+        with st.expander(f"Buy {sym}"):
+            size_input = st.number_input(
+                f"Size USD for {sym}",
+                min_value=float(spot_min),
+                max_value=5000.0,
+                value=float(spot_min * 2),
+                step=10.0,
+                key=f"spot_size_{sym}",
+            )
+            buy_key = f"spot_buy_{sym}"
+            if st.button(f"Buy {sym} (${size_input:.0f})", key=buy_key, type="primary"):
+                try:
+                    pos = _se.open_spot(sym, size_input, paper=_exec_paper)
+                    if pos:
+                        st.success(
+                            f"[{mode_label}] Bought {sym}: "
+                            f"{pos['qty']:.6f} units @ ${pos['entry']:.4f}  "
+                            f"order={pos['order_id']}"
+                        )
+                    else:
+                        st.error(
+                            f"open_spot {sym} returned None — "
+                            "check: SPOT_LANE_ACTIVE, symbol allowed, size >= minimum, "
+                            "not already holding, deployment cap"
+                        )
+                except Exception as ex:
+                    st.error(f"Buy error: {ex}")
+                st.rerun()

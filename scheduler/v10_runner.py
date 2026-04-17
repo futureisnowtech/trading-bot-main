@@ -1349,9 +1349,13 @@ def _attempt_entry(
 
     entry_setup_name = primary_setup["name"] if primary_setup else ""
 
+    # Normalize symbol to base asset before broker call (PF_ETHUSD→ETH, ETHUSDT→ETH).
+    # Coinbase broker requires bare underlying names; raw scanner symbols cause CoinbaseSymbolError.
+    _exec_symbol = _get_underlying(symbol)
+
     if direction == "LONG":
         pos = perps.open_long(
-            symbol=symbol,
+            symbol=_exec_symbol,
             position_usd=size_usd,
             entry_price=current_price,
             stop_price=stop_price,
@@ -1365,7 +1369,7 @@ def _attempt_entry(
         )
     else:
         pos = perps.open_short(
-            symbol=symbol,
+            symbol=_exec_symbol,
             position_usd=size_usd,
             entry_price=current_price,
             stop_price=stop_price,

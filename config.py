@@ -76,7 +76,7 @@ AUTONOMOUS_LIVE_PERP_SYMBOLS: list = os.getenv(
 # BTC/ETH spot only — no leverage, no shorting, no margin.
 # SPOT_LANE_ACTIVE gates the lane; default false = disabled.
 # ════════════════════════════════════════════════════════════════════
-SPOT_LANE_ACTIVE: bool = os.getenv("SPOT_LANE_ACTIVE", "false").lower() == "true"
+SPOT_LANE_ACTIVE: bool = os.getenv("SPOT_LANE_ACTIVE", "true").lower() == "true"
 SPOT_SYMBOLS: list = ["BTC", "ETH"]
 SPOT_MAX_DEPLOYED_PCT: float = float(os.getenv("SPOT_MAX_DEPLOYED_PCT", "0.40"))
 SPOT_MIN_ORDER_USD: float = float(os.getenv("SPOT_MIN_ORDER_USD", "10.0"))

@@ -801,8 +801,10 @@ def render_manual_scan():
             st.session_state.pop("ms_previews", None)
             st.rerun()
 
+    render_spot_section()
 
-# ── Spot section (appended below perp section) ────────────────────────────────
+
+# ── Spot section — auto-called from render_manual_scan (wired here) ──────────
 
 
 def render_spot_section():

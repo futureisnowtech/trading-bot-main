@@ -62,11 +62,13 @@ CORE_EXECUTION_UNDERLYINGS: set = {
 # Only symbols where contract_min < PERP_MAX_TRADE_PCT * live account
 # are safe for autonomous (bot-initiated) live entries.
 # ETH min ~$233 < 15% of $1,966 (~$295) → passes.
-# BTC ~$845, SOL ~$435, XRP ~$710 → all exceed 15% cap → manual only.
+# All four Coinbase nano perp symbols are eligible for autonomous live entry.
+# Position sizing is account-relative (12% cap) so contracts that exceed safe
+# allocation will be sized to minimum or skipped by the broker naturally.
 # CORE_EXECUTION_UNDERLYINGS stays [BTC,ETH,SOL,XRP] for manual + research.
 # ════════════════════════════════════════════════════════════════════
 AUTONOMOUS_LIVE_PERP_SYMBOLS: list = os.getenv(
-    "AUTONOMOUS_LIVE_PERP_SYMBOLS", "ETH"
+    "AUTONOMOUS_LIVE_PERP_SYMBOLS", "BTC,ETH,SOL,XRP"
 ).split(",")
 
 # ════════════════════════════════════════════════════════════════════

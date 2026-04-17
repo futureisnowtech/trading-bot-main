@@ -78,6 +78,9 @@ SPOT_LANE_ACTIVE: bool = os.getenv("SPOT_LANE_ACTIVE", "false").lower() == "true
 SPOT_SYMBOLS: list = ["BTC", "ETH"]
 SPOT_MAX_DEPLOYED_PCT: float = float(os.getenv("SPOT_MAX_DEPLOYED_PCT", "0.40"))
 SPOT_MIN_ORDER_USD: float = float(os.getenv("SPOT_MIN_ORDER_USD", "10.0"))
+# Conservative hard stop: close position if price drops this % below entry.
+# 3% default — tight enough to limit loss on small account, loose enough to avoid noise wicks.
+SPOT_STOP_PCT: float = float(os.getenv("SPOT_STOP_PCT", "0.03"))
 
 # ════════════════════════════════════════════════════════════════════
 # RISK — HARDCODED. NO AI CAN OVERRIDE THESE.

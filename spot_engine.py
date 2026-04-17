@@ -37,22 +37,30 @@ _SPOT_MAX_DEPLOYED_PCT: float = 0.40  # 40% of spot USD balance
 _SPOT_MIN_ORDER_USD: float = 10.0
 _SPOT_SYMBOLS: list = ["BTC", "ETH"]
 _SPOT_LANE_ACTIVE: bool = False
+_SPOT_STOP_PCT: float = 0.03  # 3% hard stop below entry
 
 
 def _load_config() -> None:
-    global _SPOT_MAX_DEPLOYED_PCT, _SPOT_MIN_ORDER_USD, _SPOT_SYMBOLS, _SPOT_LANE_ACTIVE
+    global \
+        _SPOT_MAX_DEPLOYED_PCT, \
+        _SPOT_MIN_ORDER_USD, \
+        _SPOT_SYMBOLS, \
+        _SPOT_LANE_ACTIVE, \
+        _SPOT_STOP_PCT
     try:
         from config import (
             SPOT_MAX_DEPLOYED_PCT,
             SPOT_MIN_ORDER_USD,
             SPOT_SYMBOLS,
             SPOT_LANE_ACTIVE,
+            SPOT_STOP_PCT,
         )
 
         _SPOT_MAX_DEPLOYED_PCT = float(SPOT_MAX_DEPLOYED_PCT)
         _SPOT_MIN_ORDER_USD = float(SPOT_MIN_ORDER_USD)
         _SPOT_SYMBOLS = list(SPOT_SYMBOLS)
         _SPOT_LANE_ACTIVE = bool(SPOT_LANE_ACTIVE)
+        _SPOT_STOP_PCT = float(SPOT_STOP_PCT)
     except Exception:
         pass  # use defaults above
 
@@ -146,12 +154,18 @@ def open_spot(symbol: str, size_usd: float, paper: bool = True) -> Optional[Dict
     price = broker.get_mark_price(clean)
     qty = size_usd / price if price > 0 else float(order.get("filled_size", 0))
 
+    # Conservative hard stop: entry * (1 - SPOT_STOP_PCT). Stored in open_positions.stop.
+    stop_price = round(price * (1.0 - _SPOT_STOP_PCT), 8) if price > 0 else 0.0
+    max_loss_usd = round(size_usd * _SPOT_STOP_PCT, 2)
+
     pos = {
         "symbol": clean,
         "strategy": f"spot_{clean.lower()}",
         "broker": "coinbase_spot",
         "qty": qty,
         "entry": price,
+        "stop_price": stop_price,
+        "max_loss_usd": max_loss_usd,
         "entry_ts": time.time(),
         "size_usd": size_usd,
         "order_id": order.get("order_id", ""),
@@ -170,15 +184,15 @@ def open_spot(symbol: str, size_usd: float, paper: bool = True) -> Optional[Dict
             order_type="MARKET",
             qty=qty,
             price=price,
-            fee_usd=0.0,  # Coinbase spot fees vary; 0 for now
+            fee_usd=0.0,
             pnl_usd=0.0,
             paper=paper,
-            notes=f"spot_buy size_usd={size_usd:.2f}",
+            notes=f"spot_buy size_usd={size_usd:.2f} stop={stop_price:.4f} max_loss=${max_loss_usd:.2f}",
         )
     except Exception as e:
         logger.debug(f"[spot_engine] log_trade error: {e}")
 
-    # Persist to open_positions
+    # Persist to open_positions — stop column holds the hard stop price
     try:
         from logging_db.trade_logger import persist_position
         import datetime
@@ -188,7 +202,7 @@ def open_spot(symbol: str, size_usd: float, paper: bool = True) -> Optional[Dict
             strategy=f"spot_{clean.lower()}",
             qty=qty,
             entry=price,
-            stop=0.0,
+            stop=stop_price,
             target=0.0,
             high_since_entry=price,
             ts_entry=datetime.datetime.now().isoformat(),
@@ -204,7 +218,7 @@ def open_spot(symbol: str, size_usd: float, paper: bool = True) -> Optional[Dict
 
     logger.info(
         f"[spot_engine] {'PAPER' if paper else 'LIVE'} BUY {clean}: "
-        f"${size_usd:.2f} = {qty:.6f} @ {price:.4f}"
+        f"${size_usd:.2f} = {qty:.6f} @ {price:.4f}  stop={stop_price:.4f} (-{_SPOT_STOP_PCT:.1%})"
     )
     return pos
 
@@ -318,3 +332,74 @@ def _load_spot_positions_from_db(paper: bool = True) -> List[Dict]:
     except Exception as e:
         logger.debug(f"[spot_engine] load_spot_positions error: {e}")
         return []
+
+
+# ── check_spot_stops ──────────────────────────────────────────────────────────
+
+
+def check_spot_stops(paper: bool = True) -> List[Dict]:
+    """
+    Check all open spot positions against their hard stop price.
+    Called every 30s from exit_monitor in v10_runner.
+
+    For each position:
+      - stop = open_positions.stop  (set at buy time = entry * (1 - SPOT_STOP_PCT))
+      - if current_price <= stop: close the position immediately
+
+    Returns list of closed position dicts (empty if nothing triggered).
+    """
+    _load_config()
+    closed = []
+
+    positions = _load_spot_positions_from_db(paper=paper)
+    if not positions:
+        return closed
+
+    broker = _get_broker(paper)
+    if broker is None:
+        return closed
+
+    for pos in positions:
+        sym = str(pos.get("symbol", "")).upper()
+        stop_price = float(pos.get("stop", 0.0))
+        entry_price = float(pos.get("entry", 0.0))
+
+        if stop_price <= 0:
+            # No stop stored (legacy row or manual entry) — apply current config pct
+            if entry_price > 0:
+                stop_price = entry_price * (1.0 - _SPOT_STOP_PCT)
+            else:
+                continue
+
+        current_price = broker.get_mark_price(sym)
+        if current_price <= 0:
+            logger.warning(
+                f"[spot_engine] check_spot_stops: cannot get price for {sym}"
+            )
+            continue
+
+        if current_price <= stop_price:
+            loss_pct = (
+                (current_price - entry_price) / entry_price * 100
+                if entry_price > 0
+                else 0
+            )
+            logger.warning(
+                f"[spot_engine] STOP HIT {sym}: price={current_price:.4f} "
+                f"<= stop={stop_price:.4f} ({loss_pct:.2f}%) — closing"
+            )
+            result = close_spot(sym, paper=paper)
+            if result:
+                result["trigger"] = "hard_stop"
+                result["stop_price"] = stop_price
+                closed.append(result)
+                logger.info(
+                    f"[spot_engine] {'PAPER' if paper else 'LIVE'} STOP CLOSE {sym}: "
+                    f"pnl=${result.get('pnl_usd', 0):.2f}"
+                )
+            else:
+                logger.error(
+                    f"[spot_engine] STOP CLOSE FAILED for {sym} — position still open"
+                )
+
+    return closed

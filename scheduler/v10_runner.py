@@ -1470,11 +1470,18 @@ def _attempt_entry(
 def exit_monitor():
     """
     30-second loop: evaluate 6-priority exit stack for all open positions.
+    Also checks spot hard stops.
     """
     try:
         _exit_monitor_inner()
     except Exception as e:
         logger.error(f"[v10] exit_monitor fatal: {e}\n{traceback.format_exc()[:1000]}")
+    try:
+        from spot_engine import check_spot_stops
+
+        check_spot_stops(paper=config.PAPER_TRADING)
+    except Exception as e:
+        logger.debug(f"[v10] check_spot_stops error: {e}")
 
 
 def _exit_monitor_inner():

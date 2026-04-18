@@ -68,6 +68,7 @@ from widgets.mission_control.decision_quality import render_decision_quality
 # Other tabs
 from widgets.crypto_performance.deep_analysis import render_deep_analysis
 from widgets.trade_approval.manual_scan import render_manual_scan
+from widgets.trade_approval.scan_breakdown import render_scan_breakdown
 from widgets.futures.mes_dashboard import render_futures
 from widgets.forecast.forecast_dashboard import render_forecast_trading
 from widgets.system_settings.dev_config import render_dev_config
@@ -149,6 +150,8 @@ def main():
     # ── Tab 3: TRADE APPROVAL ──────────────────────────────────────────────────
     with tab_ta:
         st.caption("Run a fresh scan and hand-pick which trades to execute.")
+        render_scan_breakdown()
+        st.divider()
         render_manual_scan()
 
     # ── Tab 4: FORECAST TRADING ────────────────────────────────────────────────

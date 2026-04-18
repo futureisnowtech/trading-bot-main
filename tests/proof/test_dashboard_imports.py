@@ -142,6 +142,8 @@ DASHBOARD_MODULES = [
     "widgets.futures.mes_dashboard",
     "widgets.system_settings.dev_config",
     "widgets.trade_approval.manual_scan",
+    "widgets.trade_approval.scan_breakdown",
+    "data.scan_trace",
 ]
 
 

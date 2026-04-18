@@ -211,7 +211,40 @@ def _check_stagnant_positions() -> dict:
 
 
 def _check_scan_liveness() -> dict:
-    """Heartbeat must have been written within 2× scan interval."""
+    """Heartbeat must have been written within 3× scan interval.
+
+    Primary: lane_runtime_state.last_heartbeat_at — updated every 1 minute by
+    v10_runner._write_heartbeat() and by this health_check itself, regardless
+    of candidate count.  Authoritative liveness signal.
+
+    Secondary: system_events WHERE source='heartbeat' — only written when
+    _scan_and_trade_inner() completes with candidates > 0, so it goes stale
+    during quiet markets.  Used only as a fallback tiebreaker.
+    """
+    threshold = CRYPTO_SCAN_INTERVAL_SECONDS * 3  # 900s = 15 min
+
+    # --- Primary: lane_runtime_state.last_heartbeat_at ---
+    try:
+        conn = _conn()
+        row = conn.execute(
+            "SELECT last_heartbeat_at FROM lane_runtime_state "
+            "WHERE lane_id='crypto' ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        conn.close()
+        if row and row["last_heartbeat_at"]:
+            dt = datetime.fromisoformat(row["last_heartbeat_at"])
+            if not dt.tzinfo:
+                dt = dt.replace(tzinfo=timezone.utc)
+            age_secs = (
+                datetime.now(timezone.utc) - dt.astimezone(timezone.utc)
+            ).total_seconds()
+            if age_secs <= threshold:
+                return {"ok": True, "detail": f"Last heartbeat {age_secs:.0f}s ago"}
+            # Runtime table is stale — fall through to system_events check
+    except Exception:
+        pass
+
+    # --- Secondary: system_events heartbeat rows ---
     try:
         conn = _conn()
         row = conn.execute(
@@ -226,9 +259,6 @@ def _check_scan_liveness() -> dict:
         age_secs = (
             datetime.now(timezone.utc) - dt.astimezone(timezone.utc)
         ).total_seconds()
-        threshold = (
-            CRYPTO_SCAN_INTERVAL_SECONDS * 3
-        )  # 3× scan interval = definitely stale
         if age_secs > threshold:
             return {
                 "ok": False,

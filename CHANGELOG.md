@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-18
+- v16.14c: fix scan liveness false alarm — health_check._check_scan_liveness() now uses lane_runtime_state.last_heartbeat_at as primary (updated every 1m regardless of candidate count); v10_runner._scan_and_trade_inner() now writes heartbeat before 0-candidate early return so system_events stays current during quiet markets
+
+## 2026-04-18
 - v16.14b: fix get_last_scan_age() using stale log when all scans return 0 candidates — now uses min(heartbeat_age, log_age) so heartbeat (updated every minute) wins over stale log-based age
 
 ## 2026-04-18

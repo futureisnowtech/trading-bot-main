@@ -535,6 +535,14 @@ def _scan_and_trade_inner():
 
     if not candidates:
         logger.debug("[v10] scan returned 0 candidates")
+        # Write scan heartbeat even on 0-candidate cycles so health_check
+        # _check_scan_liveness() doesn't go stale during quiet markets.
+        try:
+            from logging_db.trade_logger import log_event as _log_hb0
+
+            _log_hb0("INFO", "heartbeat", "scan ok: 0 candidates → 0 entries")
+        except Exception:
+            pass
         return
 
     logger.info(

@@ -8,7 +8,7 @@ Asset class: CRYPTO PERPS
 
 import streamlit as st
 
-from db import LAUNCH_DATE
+from db import get_effective_launch_date
 from formatters import _badge, _fmt_pnl, _asset_badge
 from data.performance import get_performance_stats, get_rolling_pf
 
@@ -67,4 +67,4 @@ def render_edge_quality():
         rows_html += f'<div style="display:flex; justify-content:space-between; margin:2px 0; font-size:0.82em"><span style="color:#94a3b8">{label}</span><span style="color:#e2e8f0; font-weight:600">{val}</span></div>'
 
     st.markdown(rows_html, unsafe_allow_html=True)
-    st.caption(f"{closes} clean trades since {LAUNCH_DATE}")
+    st.caption(f"{closes} clean trades since {get_effective_launch_date()}")

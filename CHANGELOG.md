@@ -1,5 +1,8 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
+## 2026-04-18
+- v16.14: dashboard live-mode data isolation — LIVE_START_DATE/get_effective_launch_date in db.py; paper filter added to decision_quality/deep_analysis trade_attribution queries (was leaking 18K paper rows into live view); balance.py _unrealized_pnl hardcoded paper=1 fixed; stale 8 paper open_positions purged from DB
+
 ## 2026-04-17
 - v16.13: expand live universe to all 4 symbols, activate spot lane, remove cooldowns, loosen gates
 

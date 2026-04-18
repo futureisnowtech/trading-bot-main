@@ -4,7 +4,7 @@ dashboard/data/execution.py — Execution quality, failure modes, recent events.
 
 from datetime import datetime, timedelta
 
-from db import _q, _q1, _runtime_paper_flag, LAUNCH_DATE
+from db import _q, _q1, _runtime_paper_flag, get_effective_launch_date
 from formatters import _time_ago
 
 # Normalized 7-day cutoff helper — avoids the ISO 'T'-separator false-positive bug
@@ -34,7 +34,7 @@ def get_execution_stats() -> dict:
           AND source NOT IN ('backtest','pre_v10_contaminated','bybit_paper','paper_v10')
           AND COALESCE(created_at, entry_ts, '') >= ?
     """,
-        (paper_flag, LAUNCH_DATE),
+        (paper_flag, get_effective_launch_date()),
     )
     total = r.get("total") or 0
     avg_mae = r.get("avg_mae") or 0.0

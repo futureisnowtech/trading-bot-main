@@ -22,7 +22,7 @@ from data.performance import get_performance_stats
 from data.account import get_today_pnl, get_drawdown
 from data.positions import get_open_positions
 from data.balance import get_all_balances
-from db import LAUNCH_DATE
+from db import get_effective_launch_date
 
 
 def _sign(v: float) -> str:
@@ -294,7 +294,7 @@ def render_status_hero():
 
     # ── plain-English narrative ───────────────────────────────────────────────
     try:
-        launch_dt = datetime.strptime(LAUNCH_DATE[:10], "%Y-%m-%d")
+        launch_dt = datetime.strptime(get_effective_launch_date()[:10], "%Y-%m-%d")
         days_running = (datetime.now() - launch_dt).days
     except Exception:
         days_running = 0

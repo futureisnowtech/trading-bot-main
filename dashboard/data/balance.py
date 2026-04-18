@@ -107,10 +107,12 @@ def _unrealized_pnl() -> float:
     try:
         if not os.path.exists(_DB_PATH):
             return 0.0
+        _paper_int = 1 if _balance_paper_mode() else 0
         with sqlite3.connect(_DB_PATH, timeout=5, check_same_thread=False) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
-                "SELECT symbol, direction, qty, entry FROM open_positions WHERE paper=1"
+                "SELECT symbol, direction, qty, entry FROM open_positions WHERE paper=?",
+                (_paper_int,),
             ).fetchall()
         if not rows:
             return 0.0

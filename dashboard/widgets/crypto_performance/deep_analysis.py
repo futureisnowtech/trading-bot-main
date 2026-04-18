@@ -8,7 +8,7 @@ Asset class: CRYPTO PERPS
 
 import streamlit as st
 
-from db import _q, LAUNCH_DATE
+from db import _q, get_effective_launch_date, _runtime_paper_flag
 from tooltips import TIPS
 from formatters import _fmt_pnl, _time_ago, _parse_notes, _asset_badge
 from data.account import (
@@ -185,6 +185,8 @@ def render_deep_analysis():
             "**Performance by market regime** — "
             "TRENDING = clear direction, RANGING = choppy, HIGH_VOL = volatile"
         )
+        _eff_date = get_effective_launch_date()
+        _paper = _runtime_paper_flag()
         regime_data = _q(
             """
             SELECT regime,
@@ -194,9 +196,10 @@ def render_deep_analysis():
                 ROUND(AVG(pnl_usd), 2) AS avg_pnl,
                 ROUND(SUM(pnl_usd), 2) AS total_pnl
             FROM trade_attribution
-            WHERE COALESCE(created_at, entry_ts, '') >= ? GROUP BY regime ORDER BY total_pnl DESC
+            WHERE COALESCE(created_at, entry_ts, '') >= ? AND paper=?
+            GROUP BY regime ORDER BY total_pnl DESC
         """,
-            (LAUNCH_DATE,),
+            (_eff_date, _paper),
         )
         if regime_data:
             st.dataframe(
@@ -264,10 +267,10 @@ def render_deep_analysis():
             """
             SELECT symbol, direction, ROUND(mae_pct*100,3) AS mae_pct, ROUND(mfe_pct*100,3) AS mfe_pct,
                    exit_type, hold_minutes, is_fee_trap, won
-            FROM trade_attribution WHERE COALESCE(created_at, entry_ts, '') >= ?
+            FROM trade_attribution WHERE COALESCE(created_at, entry_ts, '') >= ? AND paper=?
             ORDER BY entry_ts DESC LIMIT 30
         """,
-            (LAUNCH_DATE,),
+            (_eff_date, _paper),
         )
         if attr:
             st.caption("Last 30 trade attributions")

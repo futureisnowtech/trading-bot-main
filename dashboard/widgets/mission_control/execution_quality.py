@@ -8,7 +8,7 @@ Asset class: CRYPTO PERPS
 
 import streamlit as st
 
-from db import LAUNCH_DATE
+from db import get_effective_launch_date
 from formatters import _status_dot, _asset_badge
 from data.execution import get_execution_stats
 
@@ -79,4 +79,6 @@ def render_execution_quality():
         rows_html += f'<div style="display:flex; justify-content:space-between; margin:2px 0; font-size:0.82em"><span style="color:#94a3b8">{dot} {label}</span><span style="color:#e2e8f0; font-weight:600">{val}</span></div>'
 
     st.markdown(rows_html, unsafe_allow_html=True)
-    st.caption(f"Based on {total} attributed trades since {LAUNCH_DATE}")
+    st.caption(
+        f"Based on {total} attributed trades since {get_effective_launch_date()}"
+    )

@@ -8,7 +8,13 @@ import sqlite3
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(_ROOT, "logs", "trades.db")
 LOG_PATH = os.path.join(_ROOT, "logs", "bot.log")
-LAUNCH_DATE = "2026-04-02"
+LAUNCH_DATE = "2026-04-02"  # paper trading start
+LIVE_START_DATE = "2026-04-15"  # live trading start
+
+
+def get_effective_launch_date() -> str:
+    """Return LIVE_START_DATE in live mode, LAUNCH_DATE in paper mode."""
+    return LIVE_START_DATE if not _runtime_paper_flag() else LAUNCH_DATE
 
 
 def _q(sql, params=()):

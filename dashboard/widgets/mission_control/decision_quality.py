@@ -8,7 +8,7 @@ Asset class: CRYPTO PERPS
 
 import streamlit as st
 
-from db import LAUNCH_DATE, _q1
+from db import _q1, get_effective_launch_date, _runtime_paper_flag
 from formatters import _asset_badge
 from data.performance import get_performance_stats, get_signal_bayesian_stats
 
@@ -40,9 +40,10 @@ def render_decision_quality():
             COUNT(*) AS total
         FROM trade_attribution
         WHERE COALESCE(created_at, entry_ts, '') >= ?
+          AND paper=?
           AND source NOT IN ('backtest','pre_v10_contaminated','bybit_paper','paper_v10')
     """,
-        (LAUNCH_DATE,),
+        (get_effective_launch_date(), _runtime_paper_flag()),
     )
     attr_total = r.get("total") or 0
 

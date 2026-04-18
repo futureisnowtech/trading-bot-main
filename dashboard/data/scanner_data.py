@@ -11,11 +11,33 @@ from db import _q, _q1, _tail_log, LOG_PATH
 
 def get_last_scan_age():
     """
-    Seconds since last scan.  Reads bot.log for [v10] scan: lines (written on
-    each completed scan).  If the log is stale (kill switch blocking scans,
-    log rotation, etc.), falls back to lane_runtime_state.last_heartbeat_at
-    for the crypto lane, which is updated every minute regardless.
+    Seconds since last scan activity.
+
+    Primary: lane_runtime_state.last_heartbeat_at (updated every minute by
+    v10_runner regardless of candidate count — always current when bot is alive).
+
+    Secondary: bot.log [v10] scan: lines (only written when candidates > 0,
+    so stale when every scan returns 0 candidates — used only as a tiebreaker).
+
+    Returns min(heartbeat_age, log_age) so the freshest signal always wins.
     """
+    # Always get the heartbeat age first — it's the most reliable liveness signal
+    heartbeat_age = 9999
+    try:
+        row = _q1("""
+            SELECT last_heartbeat_at FROM lane_runtime_state
+            WHERE lane_id = 'crypto' ORDER BY id DESC LIMIT 1
+        """)
+        if row and row.get("last_heartbeat_at"):
+            from formatters import _ts_age_s
+
+            age = _ts_age_s(row["last_heartbeat_at"])
+            if age < 9999:
+                heartbeat_age = age
+    except Exception:
+        pass
+
+    # Also check the log for [v10] scan: lines as a secondary signal
     log_age = 9999
     try:
         with open(LOG_PATH, "rb") as f:
@@ -36,22 +58,14 @@ def get_last_scan_age():
                         if m:
                             dt = datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S")
                             log_age = int((datetime.now() - dt).total_seconds())
-                        return log_age
+                        break
+                if log_age < 9999:
+                    break
                 buf = buf.split(b"\n")[0]
     except Exception:
         pass
-    # Fallback: runtime lane heartbeat (stays current even when scans are paused)
-    row = _q1("""
-        SELECT last_heartbeat_at FROM lane_runtime_state
-        WHERE lane_id = 'crypto' ORDER BY id DESC LIMIT 1
-    """)
-    if row and row.get("last_heartbeat_at"):
-        from formatters import _ts_age_s
 
-        age = _ts_age_s(row["last_heartbeat_at"])
-        if age < 9999:
-            return age
-    return 9999
+    return min(heartbeat_age, log_age)
 
 
 def get_scan_status():

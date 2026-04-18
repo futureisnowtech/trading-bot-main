@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-18
+- v16.14b: fix get_last_scan_age() using stale log when all scans return 0 candidates — now uses min(heartbeat_age, log_age) so heartbeat (updated every minute) wins over stale log-based age
+
+## 2026-04-18
 - v16.14: dashboard live-mode data isolation — LIVE_START_DATE/get_effective_launch_date in db.py; paper filter added to decision_quality/deep_analysis trade_attribution queries (was leaking 18K paper rows into live view); balance.py _unrealized_pnl hardcoded paper=1 fixed; stale 8 paper open_positions purged from DB
 
 ## 2026-04-17

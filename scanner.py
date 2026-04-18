@@ -74,7 +74,7 @@ _MIN_EXPECTED_PROFIT = 0.25  # $ — lower floor to pass more candidates
 _TOP_N = 50
 _MAX_STEP1_BINANCE = 100  # cap Binance universe at top 100 by volume
 _MAX_STEP1_HYPERLIQUID = 80  # top 80 HL markets by volume
-_ROUND_TRIP_FEE_PCT = 0.00130  # 0.065% × 2 (Kraken); conservative for Binance too
+_ROUND_TRIP_FEE_PCT = 0.00060  # 0.030% × 2 (Coinbase taker); matches economics_gate
 _FUNDING_HOLD_PERIODS = 1.5  # expected 8h-equivalent funding periods held
 _PARALLEL_WORKERS = 20  # concurrent kline fetch threads
 
@@ -685,7 +685,9 @@ def _step1_universe(
 
             result = [c for c in result if is_core_underlying(c.get("base_asset", ""))]
         except Exception as e:
-            logger.warning(f"[scanner] core universe filter unavailable — falling through: {e}")
+            logger.warning(
+                f"[scanner] core universe filter unavailable — falling through: {e}"
+            )
 
     logger.info(
         f"[scanner] Step 1 (vol>${_MIN_VOLUME_24H_USD / 1e3:.0f}K): "
@@ -965,7 +967,7 @@ def _step4_expected_value(
 
             dollar_risk = account_balance * risk_pct
             theoretical_position_usd = dollar_risk / stop_pct
-            effective_position_usd = min(theoretical_position_usd, 100.0)
+            effective_position_usd = min(theoretical_position_usd, 500.0)
             fee_pct = _ROUND_TRIP_FEE_PCT
 
             # funding_rate is annualized decimal → per-8h
@@ -1162,7 +1164,9 @@ def scan(
                     from runtime.execution_universe import is_core_underlying
 
                     hl_capped = [
-                        c for c in hl_capped if is_core_underlying(c.get("base_asset", ""))
+                        c
+                        for c in hl_capped
+                        if is_core_underlying(c.get("base_asset", ""))
                     ]
                 except Exception as e:
                     logger.warning(

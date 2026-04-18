@@ -8,7 +8,7 @@ Asset class: CRYPTO PERPS
 
 import streamlit as st
 
-from db import _q, get_effective_launch_date, _runtime_paper_flag
+from db import _q, get_effective_launch_date
 from tooltips import TIPS
 from formatters import _fmt_pnl, _time_ago, _parse_notes, _asset_badge
 from data.account import (
@@ -186,7 +186,9 @@ def render_deep_analysis():
             "TRENDING = clear direction, RANGING = choppy, HIGH_VOL = volatile"
         )
         _eff_date = get_effective_launch_date()
-        _paper = _runtime_paper_flag()
+        from db import _runtime_paper_flag as _rtpf
+
+        _paper = _rtpf()
         regime_data = _q(
             """
             SELECT regime,

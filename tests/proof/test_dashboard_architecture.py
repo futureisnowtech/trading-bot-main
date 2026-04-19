@@ -149,3 +149,98 @@ def test_forecast_heartbeat_check_in_page():
     assert "heartbeat" in src.lower() or "stale" in src.lower(), (
         "forecast_page.py must check heartbeat staleness"
     )
+
+
+# ── gap-closure contracts (v17.0 patch) ──────────────────────────────────────
+
+
+def test_control_tower_snapshot_accepts_hours():
+    """get_control_tower_snapshot() must accept a hours parameter."""
+    import ast
+
+    src = _src("data/control_tower.py")
+    tree = ast.parse(src)
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.FunctionDef)
+            and node.name == "get_control_tower_snapshot"
+        ):
+            args = [a.arg for a in node.args.args]
+            defaults = node.args.defaults
+            assert "hours" in args, "get_control_tower_snapshot must accept hours param"
+            return
+    assert False, "get_control_tower_snapshot not found"
+
+
+def test_lifecycle_stages_function_exists():
+    """trading_control.py must expose get_lifecycle_stages()."""
+    src = _src("data/trading_control.py")
+    assert "def get_lifecycle_stages" in src
+
+
+def test_lifecycle_stages_has_all_8_stages():
+    """get_lifecycle_stages must return all 8 standardized stage names."""
+    src = _src("data/trading_control.py")
+    required = [
+        "discovered",
+        "signal_pass",
+        "econ_pass",
+        "route_decided",
+        "size_pass",
+        "execution_attempted",
+        "position_open",
+        "exit_complete",
+    ]
+    for stage in required:
+        assert f'"{stage}"' in src or f"'{stage}'" in src, (
+            f"Stage '{stage}' missing from get_lifecycle_stages"
+        )
+
+
+def test_control_tower_page_uses_lifecycle():
+    """control_tower page must render lifecycle_stages, not coarse stage_rows."""
+    src = _src("widgets/pages/control_tower.py")
+    assert "lifecycle_stages" in src, "control_tower page must use lifecycle_stages"
+    assert "lifecycle" in src.lower(), "central funnel must reference lifecycle"
+
+
+def test_control_tower_window_wired_to_snapshot():
+    """control_tower page must pass window_hours to get_control_tower_snapshot."""
+    src = _src("widgets/pages/control_tower.py")
+    assert "get_control_tower_snapshot(hours=window_hours)" in src, (
+        "window selector must be passed to get_control_tower_snapshot"
+    )
+
+
+def test_crypto_header_has_deployed_pcts():
+    """get_crypto_header must compute spot_deployed_pct and perp_deployed_pct."""
+    src = _src("data/crypto_dashboard.py")
+    assert "spot_deployed_pct" in src
+    assert "perp_deployed_pct" in src
+    assert "spot_notional" in src, "must compute spot notional from positions"
+    assert "perp_notional" in src, "must compute perp notional from positions"
+
+
+def test_crypto_page_renders_deployed_pcts():
+    """crypto_page must render both spot_deployed_pct and perp_deployed_pct."""
+    src = _src("widgets/pages/crypto_page.py")
+    assert "spot_deployed_pct" in src
+    assert "perp_deployed_pct" in src
+
+
+def test_crypto_page_has_auto_only_filter():
+    """Opportunity board must include Auto-only filter."""
+    src = _src("widgets/pages/crypto_page.py")
+    assert "Auto-only" in src, "Auto-only filter missing from opportunity board"
+
+
+def test_crypto_page_surfaces_size_block_reason():
+    """Opportunity board must surface trade_size_block_reason."""
+    src = _src("widgets/pages/crypto_page.py")
+    assert "trade_size_block_reason" in src or "size_block" in src
+
+
+def test_crypto_page_surfaces_source_reason():
+    """Opportunity board must surface trade_source_reason."""
+    src = _src("widgets/pages/crypto_page.py")
+    assert "trade_source_reason" in src or "source_reason" in src

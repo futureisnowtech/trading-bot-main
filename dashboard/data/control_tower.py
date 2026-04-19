@@ -28,15 +28,23 @@ def _safe(fn, default=None):
         return default
 
 
-def get_control_tower_snapshot() -> dict:
+def get_control_tower_snapshot(hours: int = 24) -> dict:
     """
-    Returns a flat dict with everything the CONTROL TOWER page needs:
+    Returns a flat dict with everything the CONTROL TOWER page needs.
+
+    hours — the operator-selected window (1, 24, or 168). All windowed
+    sub-readers (crypto_funnel, lifecycle_stages, action_items) use this
+    value. Non-windowed panels (open positions, lane health, heartbeat)
+    are always current and labeled as such in the UI.
+
+    Returns:
       health, heartbeat_age, error_count, runtime_mode,
       open_positions, perp_positions, spot_positions, forecast_positions,
       account_equity, daily_pnl, deployed_usd, deployed_pct,
-      crypto_funnel, forecast_snapshot, incident_count, action_items
+      crypto_funnel, lifecycle_stages, forecast_snapshot,
+      incident_count, action_items, window_hours
     """
-    result: dict = {}
+    result: dict = {"window_hours": hours}
 
     # ── Health / heartbeat ─────────────────────────────────────────────────────
     result["health"] = _safe(
@@ -114,12 +122,20 @@ def get_control_tower_snapshot() -> dict:
     except Exception:
         result["deployed_pct"] = 0.0
 
-    # ── Crypto funnel ──────────────────────────────────────────────────────────
+    # ── Crypto funnel (windowed) ───────────────────────────────────────────────
     result["crypto_funnel"] = _safe(
         lambda: __import__(
             "data.trading_control", fromlist=["get_crypto_control_snapshot"]
-        ).get_crypto_control_snapshot(24),
+        ).get_crypto_control_snapshot(hours),
         {},
+    )
+
+    # ── Lifecycle stages (windowed) ────────────────────────────────────────────
+    result["lifecycle_stages"] = _safe(
+        lambda: __import__(
+            "data.trading_control", fromlist=["get_lifecycle_stages"]
+        ).get_lifecycle_stages(hours),
+        [],
     )
 
     # ── Forecast snapshot ──────────────────────────────────────────────────────
@@ -159,14 +175,16 @@ def get_control_tower_snapshot() -> dict:
     )
     if exec_failed > 0:
         actions.append(
-            f"{exec_failed} execution failures in 24h — check broker connection"
+            f"{exec_failed} execution failures in {hours}h window — check broker connection"
         )
 
     blank_count = int(
         (result["crypto_funnel"] or {}).get("blank_tradeability_count", 0)
     )
     if blank_count > 0:
-        actions.append(f"{blank_count} candidates with blank tradeability fields")
+        actions.append(
+            f"{blank_count} candidates with blank tradeability fields in {hours}h window"
+        )
 
     if result["incident_count"] and result["incident_count"] > 0:
         actions.append(f"{result['incident_count']} open incidents")

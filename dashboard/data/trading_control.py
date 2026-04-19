@@ -184,6 +184,95 @@ def get_crypto_control_snapshot(hours: int = 24) -> dict:
     }
 
 
+def get_lifecycle_stages(hours: int = 24) -> list[dict]:
+    """
+    Return the standardized 8-stage candidate lifecycle for the Control Tower
+    central funnel.  Each stage is:
+      {stage, count, source, derived}
+
+    Stage sources:
+      discovered        — scan_funnels.scanner_candidates_total (persisted)
+      signal_pass       — scan_funnels.scored_total (persisted)
+      econ_pass         — scan_funnels.econ_passed_total (persisted)
+      route_decided     — econ_pass minus research_only_block and
+                          not_autonomous_live_eligible (DERIVED from funnels +
+                          decision counts)
+      size_pass         — route_decided minus sizing_zero (DERIVED)
+      execution_attempted — scan_funnels.final_entryable_total (persisted)
+      position_open     — scan_funnels.entered (persisted)
+      exit_complete     — trades table closes in window (DERIVED from trades)
+    """
+    cutoff = _cutoff_hours(hours)
+
+    funnel = _q1(
+        f"""
+        SELECT
+            COALESCE(SUM(scanner_candidates_total), 0) AS discovered,
+            COALESCE(SUM(scored_total), 0)             AS signal_pass,
+            COALESCE(SUM(econ_passed_total), 0)        AS econ_pass,
+            COALESCE(SUM(research_only_block), 0)      AS research_only_block,
+            COALESCE(SUM(sizing_zero), 0)              AS sizing_zero,
+            COALESCE(SUM(final_entryable_total), 0)    AS execution_attempted,
+            COALESCE(SUM(entered), 0)                  AS position_open
+        FROM scan_funnels
+        WHERE {_TS_NORM} >= datetime(replace(substr(?,1,19),'T',' '))
+        """,
+        (cutoff,),
+    )
+
+    # not_autonomous_live_eligible is in scan_candidates, not scan_funnels
+    not_auto = (
+        _q1(
+            f"""
+        SELECT COUNT(*) AS n FROM scan_candidates
+        WHERE {_TS_NORM} >= datetime(replace(substr(?,1,19),'T',' '))
+          AND decision = 'not_autonomous_live_eligible'
+        """,
+            (cutoff,),
+        ).get("n")
+        or 0
+    )
+
+    # exit_complete — trades with a closing action in window (DERIVED)
+    exit_complete_row = _q1(
+        f"""
+        SELECT COUNT(*) AS n FROM trades
+        WHERE {_TS_NORM} >= datetime(replace(substr(?,1,19),'T',' '))
+          AND action IN ('SELL', 'CLOSE', 'SHORT_CLOSE', 'LONG_CLOSE')
+          AND pnl_usd != 0
+        """,
+        (cutoff,),
+    )
+    exit_complete = int(exit_complete_row.get("n") or 0)
+
+    discovered = int(funnel.get("discovered") or 0)
+    signal_pass = int(funnel.get("signal_pass") or 0)
+    econ_pass = int(funnel.get("econ_pass") or 0)
+    # DERIVED: route_decided = econ_pass minus routing-stage blocks
+    route_decided = max(
+        0, econ_pass - int(funnel.get("research_only_block") or 0) - int(not_auto)
+    )
+    # DERIVED: size_pass = route_decided minus sizing_zero
+    size_pass = max(0, route_decided - int(funnel.get("sizing_zero") or 0))
+    execution_attempted = int(funnel.get("execution_attempted") or 0)
+    position_open = int(funnel.get("position_open") or 0)
+
+    return [
+        {"stage": "discovered", "count": discovered, "derived": False},
+        {"stage": "signal_pass", "count": signal_pass, "derived": False},
+        {"stage": "econ_pass", "count": econ_pass, "derived": False},
+        {"stage": "route_decided", "count": route_decided, "derived": True},
+        {"stage": "size_pass", "count": size_pass, "derived": True},
+        {
+            "stage": "execution_attempted",
+            "count": execution_attempted,
+            "derived": False,
+        },
+        {"stage": "position_open", "count": position_open, "derived": False},
+        {"stage": "exit_complete", "count": exit_complete, "derived": True},
+    ]
+
+
 def get_forecast_control_snapshot() -> dict:
     from data.forecast import get_forecast_health, get_forecast_readiness
 

@@ -52,7 +52,10 @@ def render_control_tower():
     window = st.selectbox("Window", ["1h", "24h", "7d"], index=1, key="ct_window")
     window_hours = {"1h": 1, "24h": 24, "7d": 168}[window]
 
-    snap = get_control_tower_snapshot()
+    # All windowed panels (funnel, lifecycle, blockers, opportunities, action items)
+    # use window_hours. Non-windowed panels (positions, lane health, heartbeat) are
+    # always current and labeled "as of now" in their headings.
+    snap = get_control_tower_snapshot(hours=window_hours)
     crypto_funnel = snap.get("crypto_funnel") or {}
 
     st.divider()
@@ -151,38 +154,76 @@ def render_control_tower():
 
     st.divider()
 
-    # ── C. Why trades are dying ────────────────────────────────────────────────
+    # ── C. Candidate lifecycle funnel (standardized 8-stage) ─────────────────
+    # Primary view: where candidates die across routing / sizing / execution.
+    # Secondary view: coarse blocker breakdown (strategy / system / bug).
     left, right = st.columns([1.2, 0.8])
 
     with left:
-        st.markdown("**Trade Funnel Breakdown**")
-        stage_rows = crypto_funnel.get("stage_rows") or []
-        if stage_rows:
-            for row in stage_rows:
-                stage = row.get("stage", "")
-                count = row.get("count", 0)
-                cls = row.get("class", "flow")
-                color_map = {
-                    "flow": "#94a3b8",
-                    "strategy": "#facc15",
-                    "system": "#60a5fa",
-                    "bug": "#f87171",
-                    "success": "#4ade80",
-                }
-                color = color_map.get(cls, "#94a3b8")
+        st.markdown(f"**Candidate Lifecycle — last {window}**")
+        lifecycle = snap.get("lifecycle_stages") or []
+        if lifecycle:
+            # Compute max for relative bar width
+            max_count = max((s.get("count", 0) for s in lifecycle), default=1) or 1
+            _lc_colors = {
+                "discovered": "#94a3b8",
+                "signal_pass": "#facc15",
+                "econ_pass": "#fb923c",
+                "route_decided": "#60a5fa",
+                "size_pass": "#a78bfa",
+                "execution_attempted": "#38bdf8",
+                "position_open": "#4ade80",
+                "exit_complete": "#86efac",
+            }
+            for s in lifecycle:
+                stage = s.get("stage", "")
+                count = s.get("count", 0)
+                derived = s.get("derived", False)
+                color = _lc_colors.get(stage, "#94a3b8")
+                bar_pct = int(count / max_count * 100) if max_count else 0
+                derived_note = " ·derived" if derived else ""
                 st.markdown(
+                    f'<div style="margin-bottom:3px;">'
                     f'<div style="display:flex;justify-content:space-between;'
-                    f"padding:4px 8px;margin-bottom:2px;border-left:3px solid {color};"
-                    f'background:rgba(0,0,0,0.1);border-radius:2px;">'
-                    f'<span style="color:{color}">{stage}</span>'
-                    f'<strong style="color:{color}">{count}</strong></div>',
+                    f"padding:3px 8px;border-left:3px solid {color};"
+                    f'background:rgba(0,0,0,0.10);border-radius:2px;">'
+                    f'<span style="color:{color};font-size:0.82em;">'
+                    f'{stage}<span style="color:#475569;font-size:0.85em;">{derived_note}</span>'
+                    f"</span>"
+                    f'<strong style="color:{color}">{count}</strong></div>'
+                    f'<div style="height:3px;width:{bar_pct}%;background:{color};'
+                    f'opacity:0.35;border-radius:0 0 2px 2px;"></div>'
+                    f"</div>",
                     unsafe_allow_html=True,
                 )
+            st.caption(
+                "·derived = computed from existing persisted fields, "
+                "not a dedicated persisted column"
+            )
         else:
-            st.caption("No funnel data for this window.")
+            st.caption("No lifecycle data for this window.")
 
     with right:
-        st.markdown("**Top Blockers**")
+        st.markdown(f"**Where candidates die — last {window}**")
+        issue = crypto_funnel.get("issue_breakdown") or {}
+        _issue_colors = {
+            "strategy": ("#facc15", "Signal / economics"),
+            "system": ("#60a5fa", "Policy / routing"),
+            "bug": ("#f87171", "Bug / data"),
+            "success": ("#4ade80", "Entered"),
+        }
+        for key, (color, label) in _issue_colors.items():
+            n = issue.get(key, 0)
+            st.markdown(
+                f'<div style="display:flex;justify-content:space-between;'
+                f"padding:3px 8px;margin-bottom:2px;border-left:3px solid {color};"
+                f'background:rgba(0,0,0,0.08);border-radius:2px;">'
+                f'<span style="color:{color};font-size:0.82em;">{label}</span>'
+                f'<strong style="color:{color}">{n}</strong></div>',
+                unsafe_allow_html=True,
+            )
+
+        st.markdown(f"**Top blockers — last {window}**")
         blockers = crypto_funnel.get("top_blockers") or []
         if blockers:
             for b in blockers[:6]:

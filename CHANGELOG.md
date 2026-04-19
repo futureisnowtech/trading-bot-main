@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-19
+- v17.0 gap-closure: window selector fully wired, 8-stage lifecycle funnel, spot/perp deployed_pct, Auto-only filter + size/source diagnostics, test isolation fixed via conftest, AGENTS.md version aligned, 441 proof tests
+
+## 2026-04-19
 - v17.0: dashboard control-tower architecture — 5 tabs (CONTROL TOWER/CRYPTO/FORECAST/PERFORMANCE LAB/ENGINEERING CONSOLE), new page composition layer, control_tower/crypto_dashboard/engineering_console data orchestrators, archived MES moved to Engineering Console, 23 new proof tests (431 total)
 
 ## 2026-04-19

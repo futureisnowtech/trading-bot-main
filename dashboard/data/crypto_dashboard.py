@@ -88,6 +88,42 @@ def get_crypto_header() -> dict:
     except Exception:
         pass
 
+    # ── Deployment percentages (spot and perp, computed separately) ───────────
+    # spot_deployed_pct = spot notional / spot_usd_available (from spot balance truth)
+    # perp_deployed_pct = perp notional / total account equity
+    try:
+        from data.positions import get_spot_positions_dashboard, get_perp_positions
+
+        spot_positions = get_spot_positions_dashboard()
+        spot_notional = sum(
+            abs(float(p.get("qty") or 0)) * float(p.get("entry") or 0)
+            for p in spot_positions
+        )
+        try:
+            from data.balance import get_spot_balance_summary
+
+            spot_bal = get_spot_balance_summary()
+            # usd_available is how much USD remains for spot; add back notional to get total spot USD
+            spot_total = float(spot_bal.get("usd_available") or 0) + spot_notional
+            result["spot_deployed_pct"] = (
+                round(spot_notional / spot_total * 100, 1) if spot_total > 0 else 0.0
+            )
+        except Exception:
+            result["spot_deployed_pct"] = 0.0
+
+        perp_positions = get_perp_positions()
+        perp_notional = sum(
+            abs(float(p.get("qty") or 0)) * float(p.get("entry") or 0)
+            for p in perp_positions
+        )
+        # Use buying_power already fetched as the perp account base
+        perp_base = result["buying_power"]
+        result["perp_deployed_pct"] = (
+            round(perp_notional / perp_base * 100, 1) if perp_base > 0 else 0.0
+        )
+    except Exception:
+        pass  # defaults already 0.0
+
     return result
 
 

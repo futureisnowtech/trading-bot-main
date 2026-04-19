@@ -6,6 +6,19 @@ from pathlib import Path
 
 import pytest
 
+# ---------------------------------------------------------------------------
+# Pre-load real streamlit into sys.modules BEFORE any test module's
+# module-level code runs.  test_dashboard_imports.py uses
+# sys.modules.setdefault() which will NOT override an already-loaded entry,
+# so real streamlit (with streamlit.testing.v1.AppTest) stays available
+# for test_dashboard_harness.py regardless of pytest collection order.
+# ---------------------------------------------------------------------------
+try:
+    import streamlit as _real_st  # noqa: F401
+    import streamlit.testing.v1  # noqa: F401 — ensure testing submodule is cached
+except ImportError:
+    pass  # streamlit not installed — tests that need it will skip or fail naturally
+
 
 ROOT = Path(__file__).resolve().parents[2]
 DASHBOARD_ROOT = ROOT / "dashboard"

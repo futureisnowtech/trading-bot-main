@@ -28,7 +28,7 @@ A fully autonomous AI-powered trading system that:
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
 
-## Current Version: v16.16 (2026-04-19)
+## Current Version: v17.0 (2026-04-19)
 
 **Active branch:** `feature/v10-rebuild`
 **Clean paper trading started:** 2026-04-02

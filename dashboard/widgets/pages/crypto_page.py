@@ -35,13 +35,15 @@ def render_crypto_page():
     # ── A. Crypto header strip ─────────────────────────────────────────────────
     hdr = get_crypto_header()
 
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1, c2, c3, c4, c5, c6, c7, c8 = st.columns(8)
     c1.metric("Lane health", hdr.get("lane_health", "UNKNOWN"))
     c2.metric("Mode", hdr.get("mode_label", "UNKNOWN"))
     c3.metric("Perp lane", "ACTIVE" if hdr.get("perp_active") else "INACTIVE")
     c4.metric("Spot lane", "ACTIVE" if hdr.get("spot_active") else "INACTIVE")
     c5.metric("Buying power", f"${hdr.get('buying_power', 0.0):,.0f}")
-    c6.metric("Open positions", hdr.get("open_count", 0))
+    c6.metric("Perp deployed", f"{hdr.get('perp_deployed_pct', 0.0):.1f}%")
+    c7.metric("Spot deployed", f"{hdr.get('spot_deployed_pct', 0.0):.1f}%")
+    c8.metric("Open positions", hdr.get("open_count", 0))
 
     st.divider()
 
@@ -56,7 +58,7 @@ def render_crypto_page():
 
     filter_sel = st.radio(
         "Filter",
-        ["All", "Executable", "Spot", "Perp", "Blocked", "Manual-only"],
+        ["All", "Executable", "Spot", "Perp", "Blocked", "Manual-only", "Auto-only"],
         horizontal=True,
         key="crypto_board_filter",
     )
@@ -83,6 +85,8 @@ def render_crypto_page():
             for r in rows
             if r.get("manual_executable") and not r.get("auto_executable")
         ]
+    elif filter_sel == "Auto-only":
+        rows = [r for r in rows if r.get("auto_executable")]
 
     # Apply sort
     if sort_sel == "Executable first":
@@ -137,9 +141,20 @@ def render_crypto_page():
                 else ""
             )
 
+            size_block = row.get("trade_size_block_reason") or ""
+            source_reason = row.get("trade_source_reason") or ""
+
             detail = f"Lane: **{lane or 'unknown'}** | Score: **{score:.0f}** | {ts[:16] if ts else ''}"
+
+            # Diagnostic lines — only shown when non-empty and meaningful
+            diag_parts = []
             if blocked and status == "blocked":
-                detail += f" | Block: `{blocked}`"
+                diag_parts.append(f"Block: `{blocked}`")
+            if size_block and size_block not in ("none", ""):
+                diag_parts.append(f"Size: `{size_block}`")
+            if source_reason and source_reason not in ("not_applicable", ""):
+                diag_parts.append(f"Source: `{source_reason}`")
+            diag_line = " &nbsp;·&nbsp; ".join(diag_parts)
 
             st.markdown(
                 f'<div style="border-left:3px solid {badge_color};padding:4px 10px;'
@@ -148,7 +163,12 @@ def render_crypto_page():
                 f"&nbsp;&nbsp;<strong>{underlying or sym}</strong> {direction}"
                 f"&nbsp;{auto_badge}&nbsp;{manual_badge}"
                 f'<br><span style="color:#94a3b8;font-size:0.8em;">{detail}</span>'
-                f"</div>",
+                + (
+                    f'<br><span style="color:#f87171;font-size:0.78em;">{diag_line}</span>'
+                    if diag_line
+                    else ""
+                )
+                + "</div>",
                 unsafe_allow_html=True,
             )
     else:

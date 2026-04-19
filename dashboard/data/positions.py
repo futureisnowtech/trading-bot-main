@@ -9,8 +9,25 @@ from db import _q, _runtime_paper_flag
 
 
 def get_open_positions():
+    """All open positions for current mode (perp + spot)."""
     return _q(
         "SELECT * FROM open_positions WHERE paper=? ORDER BY ts_entry DESC",
+        (_runtime_paper_flag(),),
+    )
+
+
+def get_perp_positions():
+    """Open perp-only positions (excludes spot_ strategy rows). For P&L and margin calcs."""
+    return _q(
+        "SELECT * FROM open_positions WHERE strategy NOT LIKE 'spot_%' AND paper=? ORDER BY ts_entry DESC",
+        (_runtime_paper_flag(),),
+    )
+
+
+def get_spot_positions_dashboard():
+    """Open spot-only positions (strategy LIKE 'spot_%'). For spot section display."""
+    return _q(
+        "SELECT * FROM open_positions WHERE strategy LIKE 'spot_%' AND paper=? ORDER BY ts_entry DESC",
         (_runtime_paper_flag(),),
     )
 

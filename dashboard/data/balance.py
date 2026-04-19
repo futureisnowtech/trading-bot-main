@@ -111,7 +111,8 @@ def _unrealized_pnl() -> float:
         with sqlite3.connect(_DB_PATH, timeout=5, check_same_thread=False) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
-                "SELECT symbol, direction, qty, entry FROM open_positions WHERE paper=?",
+                "SELECT symbol, direction, qty, entry FROM open_positions "
+                "WHERE paper=? AND strategy NOT LIKE 'spot_%'",
                 (_paper_int,),
             ).fetchall()
         if not rows:

@@ -122,6 +122,14 @@ def _journal_scan_candidate(
     size_usd: float = 0.0,
     leverage: int = 3,
     entry_block_reason: str = "",
+    # Tradeability fields (v16.14) — optional, populated when tradeability gate fires
+    recommended_lane: str = "",
+    tradeability_status: str = "",
+    trade_blocked_reason: str = "",
+    trade_size_block_reason: str = "",
+    trade_source_reason: str = "",
+    manual_executable: int = 0,
+    auto_executable: int = 0,
 ) -> None:
     """
     Write one candidate decision row to scan_candidates.
@@ -189,6 +197,13 @@ def _journal_scan_candidate(
             source="clean_paper_v10" if _paper else "live_v10",
             scanner_theoretical_position_usd=theor_pos,
             scanner_effective_position_usd=eff_pos,
+            recommended_lane=recommended_lane,
+            tradeability_status=tradeability_status,
+            trade_blocked_reason=trade_blocked_reason,
+            trade_size_block_reason=trade_size_block_reason,
+            trade_source_reason=trade_source_reason,
+            manual_executable=manual_executable,
+            auto_executable=auto_executable,
         )
     except Exception as _je:
         logger.debug(
@@ -1186,26 +1201,99 @@ def _attempt_entry(
     except Exception as _eu_err:
         logger.debug(f"[v10] execution universe check error {symbol}: {_eu_err}")
 
-    # ── Step 5c: Autonomous live eligibility gate (v16.11) ────────────────────
-    # In live mode, only symbols in AUTONOMOUS_LIVE_PERP_SYMBOLS may be entered
-    # autonomously. ETH passes (contract min ~$233 < 15% of ~$1,966 account).
-    # BTC/SOL/XRP exceed the safe per-trade cap and require manual approval.
-    # Paper mode: gate is skipped so all CORE symbols generate paper trades.
-    if not _paper:
-        try:
-            from config import AUTONOMOUS_LIVE_PERP_SYMBOLS as _auto_syms
+    # ── Step 5c: Tradeability gate + spot/perp routing (v16.14) ─────────────────
+    # Single call to get_crypto_tradeability() replaces: autonomous-eligibility
+    # gate, spot-lane parallel entry, and contract-min policy check.
+    # Paper mode: symbol/direction rules enforced; balance/count checks skipped.
+    try:
+        from runtime.crypto_tradeability import (
+            get_crypto_tradeability as _get_tradeable,
+        )
 
-            _underlying_auto = _get_underlying(symbol)
-            if _underlying_auto not in _auto_syms:
+        _underlying_for_trade = _get_underlying(symbol)
+        _trade = _get_tradeable(
+            symbol,
+            direction,
+            candidate,
+            live=not _paper,
+            manual=False,
+        )
+    except Exception as _trade_err:
+        logger.debug(f"[v10] tradeability check error: {_trade_err}")
+        _trade = {
+            "status": "blocked",
+            "blocked_reason": "execution_policy_unavailable",
+            "lane": "blocked",
+            "auto_executable": 0,
+        }
+
+    if _trade.get("status") == "blocked":
+        _block_reason = _trade.get("blocked_reason", "execution_policy_unavailable")
+        # Map tradeability reasons to existing journal decision strings
+        if _block_reason == "perp_not_autonomous_eligible":
+            _journal_decision = "not_autonomous_live_eligible"
+        elif _block_reason in (
+            "perp_contract_min_exceeds_policy",
+            "perp_deployment_cap_exceeded",
+            "spot_deployment_cap_exceeded",
+        ):
+            _journal_decision = "sizing_zero"
+        elif _block_reason in (
+            "perp_symbol_not_supported",
+            "unknown_symbol_mapping",
+            "spot_symbol_not_allowed",
+        ):
+            _journal_decision = "research_only_block"
+        else:
+            _journal_decision = "execution_failed"
+        logger.info(
+            f"[v10] {symbol} {direction} TRADEABILITY_BLOCK "
+            f"reason={_block_reason} journal={_journal_decision}"
+        )
+        _journal_scan_candidate(
+            scan_id,
+            candidate,
+            _journal_decision,
+            regime=regime,
+            technical_score=_tech_score,
+            ml_score=_ml_score,
+            composite_score=composite,
+            entry_threshold=50.0,
+            should_enter_signal=1,
+            econ_approved=1,
+            entry_block_reason=_block_reason,
+            recommended_lane=_trade.get("recommended_lane", ""),
+            tradeability_status=_trade.get("status", "blocked"),
+            trade_blocked_reason=_block_reason,
+            trade_size_block_reason=_trade.get("size_block_reason", ""),
+            trade_source_reason=_trade.get("source_reason", ""),
+            manual_executable=int(_trade.get("manual_executable", 0)),
+            auto_executable=int(_trade.get("auto_executable", 0)),
+        )
+        return _journal_decision
+
+    # Route spot lane if tradeability says so
+    _routed_lane = _trade.get("lane", "perp")
+    if _routed_lane == "spot":
+        try:
+            import spot_engine as _spot_eng
+
+            _spot_size = balance * 0.08  # 8% of account for spot
+            _sr = _spot_eng.open_spot(
+                _trade.get("underlying", _get_underlying(symbol)),
+                _spot_size,
+                paper=_paper,
+            )
+            if _sr and not _sr.get("blocked"):
                 logger.info(
-                    f"[v10] {symbol} {direction} NOT_AUTONOMOUS_LIVE_ELIGIBLE "
-                    f"— underlying={_underlying_auto} not in AUTONOMOUS_LIVE_PERP_SYMBOLS "
-                    f"(contract min > safe policy; use manual scan)"
+                    f"[v10] spot {_trade.get('underlying')} entered "
+                    f"${_spot_size:.0f}: order={_sr.get('order_id', '?')}"
                 )
+                # Spot-only entry — journal and return entered
                 _journal_scan_candidate(
                     scan_id,
                     candidate,
-                    "not_autonomous_live_eligible",
+                    "entered",
                     regime=regime,
                     technical_score=_tech_score,
                     ml_score=_ml_score,
@@ -1213,13 +1301,18 @@ def _attempt_entry(
                     entry_threshold=50.0,
                     should_enter_signal=1,
                     econ_approved=1,
-                    entry_block_reason=(
-                        f"not_autonomous_live_eligible:{_underlying_auto}"
-                    ),
+                    entry_block_reason="",
                 )
-                return "not_autonomous_live_eligible"
-        except Exception as _auto_err:
-            logger.debug(f"[v10] autonomous eligibility check error: {_auto_err}")
+                return "entered"
+            else:
+                logger.debug(
+                    f"[v10] spot {_trade.get('underlying')} blocked by engine: "
+                    f"{_sr.get('blocked') if _sr else 'None returned'}"
+                )
+                # Fall through to perp path
+        except Exception as _spot_err:
+            logger.debug(f"[v10] spot entry error: {_spot_err}")
+            # Fall through to perp path
 
     setup_str = (
         primary_setup["label"] if primary_setup else f"composite={composite:.1f}"
@@ -1228,33 +1321,6 @@ def _attempt_entry(
         f"[v10] {symbol} {direction} ENTRY SIGNAL: "
         f"{setup_str} composite={composite:.1f} tier={tier} regime={regime}"
     )
-
-    # ── Spot lane parallel entry (LONG BTC/ETH only — no leverage, no econ gate) ──
-    if direction == "LONG":
-        _spot_underlying = _get_underlying(symbol)
-        if _spot_underlying in ("BTC", "ETH"):
-            try:
-                from config import SPOT_LANE_ACTIVE as _spot_active
-
-                if _spot_active:
-                    import spot_engine as _spot_eng
-
-                    _spot_size = balance * 0.08  # 8% of account for spot
-                    _sr = _spot_eng.open_spot(
-                        _spot_underlying, _spot_size, paper=_paper
-                    )
-                    if _sr and not _sr.get("blocked"):
-                        logger.info(
-                            f"[v10] spot {_spot_underlying} entered "
-                            f"${_spot_size:.0f}: order={_sr.get('order_id', '?')}"
-                        )
-                    elif _sr and _sr.get("blocked"):
-                        logger.debug(
-                            f"[v10] spot {_spot_underlying} blocked: "
-                            f"{_sr.get('blocked')}"
-                        )
-            except Exception as _spot_err:
-                logger.debug(f"[v10] spot entry error: {_spot_err}")
 
     # Compute position size
     if pm is None:
@@ -1306,32 +1372,9 @@ def _attempt_entry(
             logger.debug(f"[v10] RBI multiplier error: {e}")
     size_usd *= rbi_mult
 
-    # Bump to minimum contract size if needed (broker rejects sub-contract orders)
-    if not _paper:
-        try:
-            from execution.coinbase_broker import PRODUCT_SPECS
-            from runtime.execution_universe import get_execution_policy
-
-            _pol = get_execution_policy(symbol)
-            _exec_sym = _pol.get("underlying", symbol) if _pol else symbol
-            _spec = PRODUCT_SPECS.get(_exec_sym, {})
-            _min_contract = current_price * _spec.get("contract_size", 0)
-            if _min_contract > 0 and size_usd < _min_contract * 1.02:
-                _bumped = _min_contract * 1.02
-                _cap = balance * 0.15  # never force more than 15% of account
-                if _bumped > _cap:
-                    logger.warning(
-                        f"[v10] {symbol} min contract ${_min_contract:.0f} > 15% of account — skip"
-                    )
-                    return "sizing_zero"
-                logger.info(
-                    f"[v10] {symbol} size bumped ${size_usd:.0f} → ${_bumped:.0f} "
-                    f"(min contract ${_min_contract:.0f})"
-                )
-                size_usd = _bumped
-        except Exception as _ce:
-            logger.debug(f"[v10] min contract check error: {_ce}")
-
+    # Contract-min and autonomous-eligibility checks are now handled upstream
+    # by get_crypto_tradeability() in Step 5c (v16.14).  Any sizing that reaches
+    # here has already passed those gates; only the $10 floor remains.
     if size_usd < 10.0:
         logger.debug(f"[v10] {symbol} size ${size_usd:.2f} too small, skip")
         _journal_scan_candidate(

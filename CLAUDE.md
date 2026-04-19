@@ -18,7 +18,7 @@ Fully autonomous AI trading system: scans Kraken Futures + Binance USDM + Hyperl
 - Paper account: $5,000 (`ACCOUNT_SIZE=5000` — config default, no .env override)
 - Wants zero day-to-day intervention. Prefers simple explanations, hates fluff.
 
-## Current Version: v16.14c (2026-04-18)
+## Current Version: v16.15 (2026-04-19)
 
 **Active branch:** `feature/v10-rebuild` | **Clean paper trading started:** 2026-04-02 | **Live trading started:** 2026-04-15
 
@@ -43,6 +43,7 @@ Fully autonomous AI trading system: scans Kraken Futures + Binance USDM + Hyperl
 | ForecastEx harvester | `forecast/quote_harvester.py` | Polls quotes every 60s; builds 5m/30m/1h/4h/1d OHLC bars from midpoint |
 | Runtime truth | `runtime/runtime_state.py` | system_runtime_state + lane_runtime_state tables; process mode, lane health, heartbeats |
 | Lane registry | `runtime/lane_registry.py` | Control plane for lane activation; crypto/forecast/mes_archived |
+| Crypto tradeability | `runtime/crypto_tradeability.py` | Single source of truth for spot/perp/blocked routing; called by both v10_runner and manual_scan; returns typed blocked reasons (see exact string constants in module) |
 | Incident tracker | `runtime/incident_tracker.py` | Groups repeated errors into fingerprint incidents; filters archived lane noise |
 | Position reconciler | `runtime/position_reconciler.py` | Reconciles scale_33_done/scale_66_done vs trade ledger at startup |
 | Allocator scaffold | `runtime/allocator.py` | Cross-lane capital allocation substrate (v16.0 stub ranker) |
@@ -154,6 +155,7 @@ Fully autonomous AI trading system: scans Kraken Futures + Binance USDM + Hyperl
 - **Broker-aligned live universe (v16.3):** `CORE_EXECUTION_UNDERLYINGS` now matches the Coinbase broker-supported set exactly: `BTC`, `ETH`, `SOL`, `XRP`. Unsupported TradingView symbols are dropped before they enter the live candidate path. Default `PERP_PAIRS` / `CRYPTO_PAIRS` were tightened to the same four-name live set.
 - **Spot lane (v16.13):** `execution/coinbase_spot_broker.py` + `spot_engine.py`. BTC-USD and ETH-USD spot only, no leverage, no shorting, no margin. `SPOT_LANE_ACTIVE` default is now `true`. Auto-entry wired into `_attempt_entry()`: when direction=LONG and underlying is BTC or ETH, calls `spot_engine.open_spot()` at 8% of balance in parallel with the perp path. `SPOT_MAX_DEPLOYED_PCT=0.40` (40% of USD available), `SPOT_MIN_ORDER_USD=10.0`. Strategy column = `spot_btc`/`spot_eth` — `get_spot_positions()` filters by `strategy.startswith("spot_")`, never contaminates perp `open_positions`. `get_spot_balance_summary()` in `dashboard/data/balance.py` reads Coinbase spot accounts API (not CFM). Manual Sell/Buy controls added to `render_spot_section()` in `manual_scan.py`.
 - **Autonomous live perp gate (v16.13):** `AUTONOMOUS_LIVE_PERP_SYMBOLS` in `config.py` (default `["BTC","ETH","SOL","XRP"]`). All four Coinbase nano perp symbols are eligible for autonomous live entry. Position sizing is account-relative (12% cap via `_MAX_SINGLE_POSITION_PCT=0.12`) so oversized contracts will be naturally bounded. `CORE_EXECUTION_UNDERLYINGS` stays [BTC,ETH,SOL,XRP] for manual + research.
+- **Shared tradeability engine (v16.14):** `runtime/crypto_tradeability.py` is the single source of truth for spot/perp/blocked routing. Called by `v10_runner._attempt_entry()` (Step 5c) and `manual_scan._compute_preview()`. Returns exact typed reason strings. BTC/ETH LONG prefers spot when `SPOT_LANE_ACTIVE=True` and no existing spot position; falls back to perp. SOL/XRP and SHORT always route to perp. Blocked reasons: `unknown_symbol_mapping`, `spot_lane_disabled`, `spot_direction_not_allowed`, `spot_position_already_open`, `spot_deployment_cap_exceeded`, `spot_balance_unavailable`, `perp_symbol_not_supported`, `perp_not_autonomous_eligible`, `perp_position_limit_reached`, `perp_opposite_side_block`, `perp_deployment_cap_exceeded`, `perp_contract_min_exceeds_policy`, `execution_policy_unavailable`. Tradeability fields persisted to `scan_candidates` table (7 new columns). `get_perp_positions()` and `get_spot_positions_dashboard()` added to `dashboard/data/positions.py`; `_unrealized_pnl()` in `balance.py` excludes spot_ rows.
 - **Max-live-perps=3 (v16.13):** `perps_engine.open_long()` and `open_short()` allow up to 3 concurrent live positions (raised from 1). Blocks at `live_count >= 3` with `max_live_perps=3` warning. Paper mode: uncapped.
 - **Deployed-cap (existing, confirmed v16.11):** `position_manager.compute_position_size()` enforces 95% deployment cap via `remaining_capacity = account_balance * 0.95 - deployed_usd`. `risk_engine.can_open_new_position()` also blocks at 95% deployed. Both fire on every live entry path.
 

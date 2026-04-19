@@ -89,6 +89,14 @@ def init_db() -> None:
         # v16: scanner EV calibration — theoretical vs capped effective position
         "ALTER TABLE scan_candidates ADD COLUMN scanner_theoretical_position_usd REAL",
         "ALTER TABLE scan_candidates ADD COLUMN scanner_effective_position_usd REAL",
+        # v16.14: shared tradeability engine fields
+        "ALTER TABLE scan_candidates ADD COLUMN recommended_lane TEXT DEFAULT ''",
+        "ALTER TABLE scan_candidates ADD COLUMN tradeability_status TEXT DEFAULT ''",
+        "ALTER TABLE scan_candidates ADD COLUMN trade_blocked_reason TEXT DEFAULT ''",
+        "ALTER TABLE scan_candidates ADD COLUMN trade_size_block_reason TEXT DEFAULT ''",
+        "ALTER TABLE scan_candidates ADD COLUMN trade_source_reason TEXT DEFAULT ''",
+        "ALTER TABLE scan_candidates ADD COLUMN manual_executable INTEGER DEFAULT 0",
+        "ALTER TABLE scan_candidates ADD COLUMN auto_executable INTEGER DEFAULT 0",
     ]:
         try:
             cur.execute(migration)
@@ -192,7 +200,14 @@ def init_db() -> None:
         source TEXT,
         labeled INTEGER DEFAULT 0,
         scanner_theoretical_position_usd REAL,
-        scanner_effective_position_usd REAL
+        scanner_effective_position_usd REAL,
+        recommended_lane TEXT DEFAULT '',
+        tradeability_status TEXT DEFAULT '',
+        trade_blocked_reason TEXT DEFAULT '',
+        trade_size_block_reason TEXT DEFAULT '',
+        trade_source_reason TEXT DEFAULT '',
+        manual_executable INTEGER DEFAULT 0,
+        auto_executable INTEGER DEFAULT 0
     )""")
 
     # v13.6: Forward-outcome labels for each journaled candidate.
@@ -679,6 +694,13 @@ def log_scan_candidate(
     source: str,
     scanner_theoretical_position_usd: float | None = None,
     scanner_effective_position_usd: float | None = None,
+    recommended_lane: str = "",
+    tradeability_status: str = "",
+    trade_blocked_reason: str = "",
+    trade_size_block_reason: str = "",
+    trade_source_reason: str = "",
+    manual_executable: int = 0,
+    auto_executable: int = 0,
 ) -> int:
     """
     Persist one candidate decision to scan_candidates.
@@ -700,8 +722,11 @@ def log_scan_candidate(
                 entry_threshold, should_enter_signal, econ_approved,
                 econ_tier, econ_reject_reason, edge_score, size_usd,
                 leverage, entry_block_reason, decision, paper, source, labeled,
-                scanner_theoretical_position_usd, scanner_effective_position_usd
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                scanner_theoretical_position_usd, scanner_effective_position_usd,
+                recommended_lane, tradeability_status, trade_blocked_reason,
+                trade_size_block_reason, trade_source_reason,
+                manual_executable, auto_executable
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 scan_id,
                 _ts(),
@@ -739,6 +764,13 @@ def log_scan_candidate(
                 0,
                 scanner_theoretical_position_usd,
                 scanner_effective_position_usd,
+                recommended_lane,
+                tradeability_status,
+                trade_blocked_reason,
+                trade_size_block_reason,
+                trade_source_reason,
+                int(manual_executable),
+                int(auto_executable),
             ),
         )
         row_id = cur.lastrowid or 0

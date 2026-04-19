@@ -5,7 +5,7 @@ dashboard/data/account.py — Account balance, P&L, equity curve, drawdown, trad
 from datetime import datetime
 
 from db import _q, _q1, LAUNCH_DATE, _runtime_paper_flag
-from data.positions import get_open_positions, get_live_prices
+from data.positions import get_open_positions, get_perp_positions, get_live_prices
 
 
 def get_account():
@@ -27,7 +27,9 @@ def get_account():
     realized = r.get("net_pnl") or 0.0
     unrealized = 0.0
     try:
-        open_pos = get_open_positions()
+        open_pos = (
+            get_perp_positions()
+        )  # perp-only for unrealized P&L; spot balance handled separately
         if open_pos:
             syms = [p["symbol"] for p in open_pos]
             prices = get_live_prices(syms)

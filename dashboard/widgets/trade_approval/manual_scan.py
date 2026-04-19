@@ -20,6 +20,16 @@ _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 # _ROOT = repo root (3 levels up from dashboard/widgets/trade_approval/)
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(_THIS_DIR)))
 
+# Safe import of shared tradeability engine (v16.14)
+try:
+    if _ROOT not in sys.path:
+        sys.path.insert(0, _ROOT)
+    from runtime.crypto_tradeability import get_crypto_tradeability as _get_tradeability
+
+    _TRADEABILITY_OK = True
+except Exception:
+    _TRADEABILITY_OK = False
+
 
 def _get_tier_info(sym: str) -> dict:
     """Return execution tier dict for a candidate symbol."""
@@ -331,18 +341,46 @@ def render_manual_scan():
         sym = cand["symbol"]
         dirn = cand["direction"]
         setup = cand.get("primary_setup", "manual")
-        policy = _get_tier_info(sym)
-        exec_sym = policy.get("underlying", sym)
         prob = _win_prob(cand)
 
-        if not policy["execute"]:
+        # ── Tradeability routing (v16.14) ─────────────────────────────────────
+        # Use shared engine if available; fall back to tier-only gate on import error.
+        if _TRADEABILITY_OK:
+            _trade_result = _get_tradeability(
+                sym,
+                dirn,
+                cand,
+                live=not exec_paper,
+                manual=True,
+            )
+        else:
+            # Fallback: use execution tier only
+            _policy_fb = _get_tier_info(sym)
+            _trade_result = {
+                "status": "blocked" if not _policy_fb["execute"] else "executable",
+                "blocked_reason": "execution_policy_unavailable"
+                if not _policy_fb["execute"]
+                else "none",
+                "lane": "perp",
+                "underlying": _policy_fb.get("underlying", sym),
+            }
+
+        exec_sym = _trade_result.get("underlying") or _get_tier_info(sym).get(
+            "underlying", sym
+        )
+
+        if _trade_result.get("status") == "blocked":
             return {
                 "sym": sym,
                 "exec_sym": exec_sym,
                 "dirn": dirn,
                 "setup": setup,
                 "blocked": True,
-                "block_reason": f"tier={policy['tier']}",
+                "block_reason": _trade_result.get(
+                    "blocked_reason", "execution_policy_unavailable"
+                ),
+                "display_label": _trade_result.get("display_label", "BLOCKED"),
+                "trade_lane": "blocked",
                 "prob": prob,
                 "cand": cand,
             }
@@ -416,7 +454,9 @@ def render_manual_scan():
         pos_usd = sizing["position_usd"]
         leverage = sizing["leverage"]
 
-        # Size guards (live only)
+        # ── Size guards + lane from tradeability (live only) ─────────────────
+        # Tradeability engine already checked contract-min policy for live mode.
+        # Here we keep the bump/cap logic for cases the engine let through.
         size_note = None
         if not exec_paper:
             min_usd = _min_contract_usd(exec_sym, price)
@@ -428,7 +468,9 @@ def render_manual_scan():
                     "dirn": dirn,
                     "setup": setup,
                     "blocked": True,
-                    "block_reason": f"min contract ${min_usd:.0f} > 15% cap ${max_single:.0f}",
+                    "block_reason": f"perp_contract_min_exceeds_policy (${min_usd:.0f} > 15% cap ${max_single:.0f})",
+                    "display_label": "BLOCKED",
+                    "trade_lane": "blocked",
                     "prob": prob,
                     "cand": cand,
                 }
@@ -460,6 +502,8 @@ def render_manual_scan():
             "setup": setup,
             "blocked": False,
             "block_reason": None,
+            "display_label": _trade_result.get("display_label", "PERP EXECUTABLE"),
+            "trade_lane": _trade_result.get("lane", "perp"),
             "price": price,
             "stop_p": stop_p,
             "target_p": target_p,
@@ -727,65 +771,99 @@ def render_manual_scan():
                     pos_usd = pv["pos_usd"]
                     leverage = pv["leverage"]
 
-                    if dirn == "LONG":
+                    # ── Lane routing from tradeability result (v16.14) ────────
+                    _exec_lane = pv.get("trade_lane", "perp")
+
+                    if _exec_lane == "spot":
+                        # Spot execution — no leverage, no short, no stop/target
+                        import spot_engine as _se_exec
+
                         stop_p = round(price - stop_dist, 6)
                         target_p = round(price + target_dist, 6)
-                        pos = perps.open_long(
-                            symbol=exec_sym,
-                            position_usd=pos_usd,
-                            entry_price=price,
-                            stop_price=stop_p,
-                            take_profit_price=target_p,
-                            leverage=leverage,
-                            composite_score=pv["composite"],
-                            atr_at_entry=atr_7,
-                            regime="UNKNOWN",
-                            entry_setup=f"manual_{setup}",
-                            paper=_exec_paper,
-                        )
-                    else:
-                        stop_p = round(price + stop_dist, 6)
-                        target_p = round(price - target_dist, 6)
-                        pos = perps.open_short(
-                            symbol=exec_sym,
-                            position_usd=pos_usd,
-                            entry_price=price,
-                            stop_price=stop_p,
-                            take_profit_price=target_p,
-                            leverage=leverage,
-                            composite_score=pv["composite"],
-                            atr_at_entry=atr_7,
-                            regime="UNKNOWN",
-                            entry_setup=f"manual_{setup}",
-                            paper=_exec_paper,
-                        )
-
-                    if pos:
-                        results.append(
-                            (
-                                sym,
-                                dirn,
-                                True,
-                                f"[{mode_label}] entered @ {price:.6g}  "
-                                f"stop={stop_p:.6g}  target={target_p:.6g}  "
-                                f"size=${pos_usd:.0f}  lev={leverage}x",
+                        pos = _se_exec.open_spot(exec_sym, pos_usd, paper=_exec_paper)
+                        if pos:
+                            results.append(
+                                (
+                                    sym,
+                                    dirn,
+                                    True,
+                                    f"[{mode_label}][SPOT] entered @ {pos.get('entry', price):.6g}  "
+                                    f"qty={pos.get('qty', 0):.6g}  "
+                                    f"size=${pos_usd:.0f}  order={pos.get('order_id', '?')}",
+                                )
                             )
-                        )
-                        _batch_syms.add(exec_sym)
-                        _held_syms.add(exec_sym)
-                    else:
-                        if not _exec_paper:
-                            min_usd = _min_contract_usd(exec_sym, price)
-                            why = (
-                                f"size ${pos_usd:.0f} < 1 contract (≈${min_usd:.0f})"
-                                if min_usd > 0 and pos_usd < min_usd
-                                else "broker returned None — check bot log"
-                            )
-                            results.append((sym, dirn, False, why))
+                            _batch_syms.add(exec_sym)
+                            _held_syms.add(exec_sym)
                         else:
                             results.append(
-                                (sym, dirn, False, "open_long/short returned None")
+                                (
+                                    sym,
+                                    dirn,
+                                    False,
+                                    "spot engine returned None — check lane config",
+                                )
                             )
+                    else:
+                        # Perp execution path
+                        if dirn == "LONG":
+                            stop_p = round(price - stop_dist, 6)
+                            target_p = round(price + target_dist, 6)
+                            pos = perps.open_long(
+                                symbol=exec_sym,
+                                position_usd=pos_usd,
+                                entry_price=price,
+                                stop_price=stop_p,
+                                take_profit_price=target_p,
+                                leverage=leverage,
+                                composite_score=pv["composite"],
+                                atr_at_entry=atr_7,
+                                regime="UNKNOWN",
+                                entry_setup=f"manual_{setup}",
+                                paper=_exec_paper,
+                            )
+                        else:
+                            stop_p = round(price + stop_dist, 6)
+                            target_p = round(price - target_dist, 6)
+                            pos = perps.open_short(
+                                symbol=exec_sym,
+                                position_usd=pos_usd,
+                                entry_price=price,
+                                stop_price=stop_p,
+                                take_profit_price=target_p,
+                                leverage=leverage,
+                                composite_score=pv["composite"],
+                                atr_at_entry=atr_7,
+                                regime="UNKNOWN",
+                                entry_setup=f"manual_{setup}",
+                                paper=_exec_paper,
+                            )
+
+                        if pos:
+                            results.append(
+                                (
+                                    sym,
+                                    dirn,
+                                    True,
+                                    f"[{mode_label}] entered @ {price:.6g}  "
+                                    f"stop={stop_p:.6g}  target={target_p:.6g}  "
+                                    f"size=${pos_usd:.0f}  lev={leverage}x",
+                                )
+                            )
+                            _batch_syms.add(exec_sym)
+                            _held_syms.add(exec_sym)
+                        else:
+                            if not _exec_paper:
+                                min_usd = _min_contract_usd(exec_sym, price)
+                                why = (
+                                    f"size ${pos_usd:.0f} < 1 contract (≈${min_usd:.0f})"
+                                    if min_usd > 0 and pos_usd < min_usd
+                                    else "broker returned None — check bot log"
+                                )
+                                results.append((sym, dirn, False, why))
+                            else:
+                                results.append(
+                                    (sym, dirn, False, "open_long/short returned None")
+                                )
 
                 except Exception as e:
                     results.append((sym, dirn, False, str(e)[:200]))

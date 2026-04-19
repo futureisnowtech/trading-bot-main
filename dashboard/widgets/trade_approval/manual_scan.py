@@ -420,7 +420,7 @@ def render_manual_scan():
         size_note = None
         if not exec_paper:
             min_usd = _min_contract_usd(exec_sym, price)
-            max_single = round(acct_balance * 0.03, 2)
+            max_single = round(acct_balance * 0.15, 2)
             if min_usd > 0 and min_usd > max_single:
                 return {
                     "sym": sym,
@@ -428,7 +428,7 @@ def render_manual_scan():
                     "dirn": dirn,
                     "setup": setup,
                     "blocked": True,
-                    "block_reason": f"min contract ${min_usd:.0f} > 3% cap ${max_single:.0f}",
+                    "block_reason": f"min contract ${min_usd:.0f} > 15% cap ${max_single:.0f}",
                     "prob": prob,
                     "cand": cand,
                 }

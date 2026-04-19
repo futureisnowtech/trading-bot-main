@@ -79,53 +79,16 @@ def test_dashboard_data_summaries_read_live_schema(proof_runtime):
 
 
 def test_operator_panel_renders_all_tabs_with_widget_stubs(monkeypatch):
+    # v17.0: 5-tab architecture — stub the page-level render functions
     widget_map = {
-        "widgets.mission_control.system_health": (
-            "render_system_integrity",
-            "system-health",
+        "widgets.pages.control_tower": ("render_control_tower", "control-tower"),
+        "widgets.pages.crypto_page": ("render_crypto_page", "crypto-page"),
+        "widgets.pages.forecast_page": ("render_forecast_page", "forecast-page"),
+        "widgets.pages.performance_lab": ("render_performance_lab", "performance-lab"),
+        "widgets.pages.engineering_console": (
+            "render_engineering_console",
+            "engineering-console",
         ),
-        "widgets.mission_control.edge_quality": ("render_edge_quality", "edge-quality"),
-        "widgets.mission_control.alert_feed": ("render_alert_feed", "alert-feed"),
-        "widgets.mission_control.open_positions": (
-            "render_positions_compact",
-            "open-positions",
-        ),
-        "widgets.mission_control.scanner_funnel": (
-            "render_scanner_funnel",
-            "scanner-funnel",
-        ),
-        "widgets.mission_control.failure_modes": (
-            "render_failures_compact",
-            "failure-modes",
-        ),
-        "widgets.mission_control.execution_quality": (
-            "render_execution_quality",
-            "execution-quality",
-        ),
-        "widgets.mission_control.decision_quality": (
-            "render_decision_quality",
-            "decision-quality",
-        ),
-        "widgets.mission_control.equity_curve": (
-            "render_equity_curve_compact",
-            "equity-curve",
-        ),
-        "widgets.mission_control.activity_log": ("render_smart_logs", "activity-log"),
-        "widgets.crypto_performance.deep_analysis": (
-            "render_deep_analysis",
-            "deep-analysis",
-        ),
-        "widgets.trade_approval.manual_scan": ("render_manual_scan", "manual-scan"),
-        "widgets.futures.mes_dashboard": ("render_futures", "futures"),
-        "widgets.forecast.forecast_dashboard": (
-            "render_forecast_trading",
-            "forecast-trading",
-        ),
-        "widgets.system_settings.master_control": (
-            "render_master_control",
-            "master-control",
-        ),
-        "widgets.system_settings.dev_config": ("render_dev_config", "dev-config"),
     }
 
     for module_path, (func_name, label) in widget_map.items():
@@ -137,18 +100,16 @@ def test_operator_panel_renders_all_tabs_with_widget_stubs(monkeypatch):
 
     assert not at.exception
     assert [tab.label for tab in at.tabs] == [
-        "MISSION CONTROL",
-        "PERFORMANCE",
-        "TRADE APPROVAL",
-        "FORECAST TRADING",
-        "ARCHIVED FUTURES (MES)",
-        "SYSTEM SETTINGS",
+        "CONTROL TOWER",
+        "CRYPTO",
+        "FORECAST",
+        "PERFORMANCE LAB",
+        "ENGINEERING CONSOLE",
     ]
     rendered = [node.value for node in at.markdown]
-    assert any("stub:system-health" in value for value in rendered)
-    assert any("stub:deep-analysis" in value for value in rendered)
-    assert any("stub:master-control" in value for value in rendered)
-    assert any("stub:dev-config" in value for value in rendered)
+    assert any("stub:control-tower" in value for value in rendered)
+    assert any("stub:crypto-page" in value for value in rendered)
+    assert any("stub:engineering-console" in value for value in rendered)
 
 
 def test_decision_quality_widget_renders_created_at_backed_summary(proof_runtime):

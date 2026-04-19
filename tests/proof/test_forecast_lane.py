@@ -668,21 +668,23 @@ def test_dashboard_forecast_widget_importable():
 
 
 def test_dashboard_app_tab_structure():
-    """dashboard/app.py must contain FORECAST TRADING tab and ARCHIVED FUTURES (MES)."""
+    """dashboard/app.py must use 5-tab v17.0 architecture; forecast and MES preserved in pages."""
     app_path = os.path.join(_ROOT, "dashboard", "app.py")
     assert os.path.exists(app_path), "dashboard/app.py not found"
     src = open(app_path).read()
-    assert "FORECAST TRADING" in src, "FORECAST TRADING tab missing from app.py"
-    assert "ARCHIVED FUTURES (MES)" in src, (
-        "ARCHIVED FUTURES (MES) tab missing from app.py"
+    # v17.0: FORECAST is a top-level tab (renamed from FORECAST TRADING)
+    assert "FORECAST" in src, "FORECAST tab missing from app.py"
+    # render_forecast_page wires the forecast page
+    assert "render_forecast_page" in src, "render_forecast_page not wired in app.py"
+    # MES archived content moved to engineering console — must still exist there
+    mes_path = os.path.join(
+        _ROOT, "dashboard", "widgets", "pages", "engineering_console.py"
     )
-    assert "render_forecast_trading" in src, (
-        "render_forecast_trading not wired in app.py"
+    mes_src = open(mes_path).read()
+    assert "mes_dashboard" in mes_src or "render_futures" in mes_src, (
+        "Archived MES widget missing from engineering_console.py"
     )
-    # MES tab must still be present (not deleted)
-    assert "render_futures" in src, (
-        "render_futures (MES) must still be present in app.py"
-    )
+    # v17.0: render_futures lives in engineering_console.py, not app.py — already checked above
 
 
 # ── 18. MES archival ──────────────────────────────────────────────────────────
@@ -964,7 +966,8 @@ def test_forecast_readiness_active_lane_with_no_contracts(tmp_path):
     )
     # Must not say the lane is not running
     lane_not_started_checks = [
-        ch for ch in r.get("checks", [])
+        ch
+        for ch in r.get("checks", [])
         if ch.get("status") != "PASS" and "not started" in ch.get("detail", "").lower()
     ]
     assert not lane_not_started_checks, (
@@ -1065,9 +1068,11 @@ def test_forecast_dashboard_widget_uses_operational_funnel():
         "showing the pipeline from lane-alive to trades"
     )
     # Must handle zero-state without crashing
-    assert "No forecast trades" in src or "no trades" in src.lower() or "total_trades" in src, (
-        "forecast_dashboard.py must handle zero-state (no trades yet) gracefully"
-    )
+    assert (
+        "No forecast trades" in src
+        or "no trades" in src.lower()
+        or "total_trades" in src
+    ), "forecast_dashboard.py must handle zero-state (no trades yet) gracefully"
 
 
 def test_forecast_health_exposes_heartbeat_at(tmp_path):

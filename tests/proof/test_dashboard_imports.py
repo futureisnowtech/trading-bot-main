@@ -144,6 +144,16 @@ DASHBOARD_MODULES = [
     "widgets.trade_approval.manual_scan",
     "widgets.trade_approval.scan_breakdown",
     "data.scan_trace",
+    # v17.0 data orchestrators
+    "data.control_tower",
+    "data.crypto_dashboard",
+    "data.engineering_console",
+    # v17.0 page widgets
+    "widgets.pages.control_tower",
+    "widgets.pages.crypto_page",
+    "widgets.pages.forecast_page",
+    "widgets.pages.performance_lab",
+    "widgets.pages.engineering_console",
 ]
 
 

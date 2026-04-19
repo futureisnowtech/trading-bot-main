@@ -93,10 +93,13 @@ def get_crypto_control_snapshot(hours: int = 24) -> dict:
         """,
         (cutoff,),
     )
-    decision_counts = {r["decision"]: int(r["n"]) for r in decisions if r.get("decision")}
+    decision_counts = {
+        r["decision"]: int(r["n"]) for r in decisions if r.get("decision")
+    }
 
-    blank_tradeability = _q1(
-        f"""
+    blank_tradeability = (
+        _q1(
+            f"""
         SELECT COUNT(*) AS n
         FROM scan_candidates
         WHERE {_TS_NORM} >= datetime(replace(substr(?,1,19),'T',' '))
@@ -106,8 +109,10 @@ def get_crypto_control_snapshot(hours: int = 24) -> dict:
           )
           AND COALESCE(recommended_lane, '') = ''
         """,
-        (cutoff,),
-    ).get("n", 0) or 0
+            (cutoff,),
+        ).get("n", 0)
+        or 0
+    )
 
     top_blockers = _q(
         f"""
@@ -132,9 +137,21 @@ def get_crypto_control_snapshot(hours: int = 24) -> dict:
     conversion_pct = round((entered / scored) * 100, 1) if scored else 0.0
 
     stage_rows = [
-        {"stage": "Scanned", "count": int(funnel.get("scanner_candidates_total") or 0), "class": "flow"},
-        {"stage": "Signal rejected", "count": int(funnel.get("below_threshold") or 0), "class": "strategy"},
-        {"stage": "Economics veto", "count": int(funnel.get("econ_veto") or 0), "class": "strategy"},
+        {
+            "stage": "Scanned",
+            "count": int(funnel.get("scanner_candidates_total") or 0),
+            "class": "flow",
+        },
+        {
+            "stage": "Signal rejected",
+            "count": int(funnel.get("below_threshold") or 0),
+            "class": "strategy",
+        },
+        {
+            "stage": "Economics veto",
+            "count": int(funnel.get("econ_veto") or 0),
+            "class": "strategy",
+        },
         {
             "stage": "Policy/system block",
             "count": int(
@@ -147,7 +164,11 @@ def get_crypto_control_snapshot(hours: int = 24) -> dict:
             ),
             "class": "system",
         },
-        {"stage": "Execution failed", "count": int(funnel.get("execution_failed") or 0), "class": "bug"},
+        {
+            "stage": "Execution failed",
+            "count": int(funnel.get("execution_failed") or 0),
+            "class": "bug",
+        },
         {"stage": "Entered", "count": entered, "class": "success"},
     ]
 
@@ -164,7 +185,7 @@ def get_crypto_control_snapshot(hours: int = 24) -> dict:
 
 
 def get_forecast_control_snapshot() -> dict:
-    from dashboard.data.forecast import get_forecast_health, get_forecast_readiness
+    from data.forecast import get_forecast_health, get_forecast_readiness
 
     health = get_forecast_health()
     readiness = get_forecast_readiness()
@@ -185,16 +206,24 @@ def get_forecast_control_snapshot() -> dict:
         contradictions.append(
             "forecast runtime readiness_state does not match dashboard-derived lane_state"
         )
-    if health.get("underliers_visible", 0) > 0 and readiness.get("lane_state") == "NO_UNDERLIERS":
+    if (
+        health.get("underliers_visible", 0) > 0
+        and readiness.get("lane_state") == "NO_UNDERLIERS"
+    ):
         contradictions.append(
             "forecast has discovered underliers in DB but readiness still says NO_UNDERLIERS"
         )
-    if health.get("active_contracts", 0) == 0 and health.get("underliers_visible", 0) > 0:
+    if (
+        health.get("active_contracts", 0) == 0
+        and health.get("underliers_visible", 0) > 0
+    ):
         contradictions.append(
             "forecast underliers exist but no active contracts are tradable right now"
         )
     if lane.get("active") and not lane.get("last_heartbeat_at"):
-        contradictions.append("forecast lane marked active without a heartbeat timestamp")
+        contradictions.append(
+            "forecast lane marked active without a heartbeat timestamp"
+        )
     if lane.get("active") and not health.get("lane_started", False):
         contradictions.append("forecast lane marked active but heartbeat is stale")
 

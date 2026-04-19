@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-19
+- v17.0: dashboard control-tower architecture — 5 tabs (CONTROL TOWER/CRYPTO/FORECAST/PERFORMANCE LAB/ENGINEERING CONSOLE), new page composition layer, control_tower/crypto_dashboard/engineering_console data orchestrators, archived MES moved to Engineering Console, 23 new proof tests (431 total)
+
+## 2026-04-19
 - v16.16: master trading control, DB-first scanner/control truth, shared manual tradeability, paper spot balance truth, dashboard DB alias unification, forecast heartbeat freshness/runtime truth, 408 proof tests
 
 ## 2026-04-19

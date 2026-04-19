@@ -1005,9 +1005,8 @@ def _attempt_entry(
             f"[v10] {symbol} {direction} TIER 1 — {primary_setup['label']} "
             f"(composite={composite:.1f} used for sizing only)"
         )
-    elif composite >= 55:
-        # Tier 2: score-based entry. Lowered from 58 → 55 to capture more edge.
-        # The 58 threshold was set on only 11 trades — insufficient sample.
+    elif composite >= 50:
+        # Tier 2: score-based entry. Lowered from 55 → 50 to capture more edge.
         tier = 2
         size_mult = 0.75
         logger.info(
@@ -1017,7 +1016,7 @@ def _attempt_entry(
     else:
         if composite > 45:
             logger.info(
-                f"[v10] {symbol} {direction} score={composite:.1f} below 55 threshold, skip"
+                f"[v10] {symbol} {direction} score={composite:.1f} below 50 threshold, skip"
             )
         _journal_scan_candidate(
             scan_id,
@@ -1027,9 +1026,9 @@ def _attempt_entry(
             technical_score=_tech_score,
             ml_score=_ml_score,
             composite_score=composite,
-            entry_threshold=55.0,
+            entry_threshold=50.0,
             should_enter_signal=0,
-            entry_block_reason=f"composite {composite:.1f} < 55 (no setup, no tier2 score)",
+            entry_block_reason=f"composite {composite:.1f} < 50 (no setup, no tier2 score)",
         )
         return "below_threshold"
 
@@ -1069,7 +1068,7 @@ def _attempt_entry(
             _wr_est = (
                 0.54
                 if tier == 1
-                else float(max(0.50, min(0.60, 0.50 + (composite - 55) / 50)))
+                else float(max(0.50, min(0.60, 0.50 + (composite - 50) / 50)))
             )
         econ = economics_check(
             symbol=symbol,
@@ -1142,7 +1141,7 @@ def _attempt_entry(
                 technical_score=_tech_score,
                 ml_score=_ml_score,
                 composite_score=composite,
-                entry_threshold=55.0,
+                entry_threshold=50.0,
                 should_enter_signal=1,
                 econ_approved=0,
                 econ_tier=econ.get("quality_tier", "VETO"),
@@ -1178,7 +1177,7 @@ def _attempt_entry(
                 technical_score=_tech_score,
                 ml_score=_ml_score,
                 composite_score=composite,
-                entry_threshold=55.0,
+                entry_threshold=50.0,
                 should_enter_signal=1,
                 econ_approved=1,
                 entry_block_reason=f"non_core_execution_universe:{underlying}",
@@ -1211,7 +1210,7 @@ def _attempt_entry(
                     technical_score=_tech_score,
                     ml_score=_ml_score,
                     composite_score=composite,
-                    entry_threshold=55.0,
+                    entry_threshold=50.0,
                     should_enter_signal=1,
                     econ_approved=1,
                     entry_block_reason=(
@@ -1317,7 +1316,7 @@ def _attempt_entry(
             technical_score=_tech_score,
             ml_score=_ml_score,
             composite_score=composite,
-            entry_threshold=55.0,
+            entry_threshold=50.0,
             should_enter_signal=1,
             econ_approved=1,
             econ_tier=str(candidate.get("quality_tier", "B")),
@@ -1387,7 +1386,7 @@ def _attempt_entry(
             technical_score=_tech_score,
             ml_score=_ml_score,
             composite_score=composite,
-            entry_threshold=55.0,
+            entry_threshold=50.0,
             should_enter_signal=1,
             econ_approved=1,
             econ_tier=str(candidate.get("quality_tier", "B")),
@@ -1415,7 +1414,7 @@ def _attempt_entry(
         technical_score=_tech_score,
         ml_score=_ml_score,
         composite_score=composite,
-        entry_threshold=55.0,
+        entry_threshold=50.0,
         should_enter_signal=1,
         econ_approved=1,
         econ_tier=str(candidate.get("quality_tier", "B")),

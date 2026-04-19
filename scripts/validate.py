@@ -446,7 +446,7 @@ try:
 except ImportError as _e:
     _fx("Strategy path", "BLOCKED", f"Import error: {_e}")
 
-# 8. Dashboard aligned (FORECAST TRADING tab present in app.py)
+# 8. Dashboard aligned (v17.0 5-tab architecture)
 try:
     _app_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -454,23 +454,44 @@ try:
         "app.py",
     )
     _app_src = open(_app_path).read() if os.path.exists(_app_path) else ""
-    _has_fc_tab = "FORECAST TRADING" in _app_src
-    _has_arc_mes = "ARCHIVED FUTURES (MES)" in _app_src
-    _has_widget = "render_forecast_trading" in _app_src
-    if _has_fc_tab and _has_arc_mes and _has_widget:
+    _ec_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "dashboard",
+        "widgets",
+        "pages",
+        "engineering_console.py",
+    )
+    _ec_src = open(_ec_path).read() if os.path.exists(_ec_path) else ""
+    _fc_page_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "dashboard",
+        "widgets",
+        "pages",
+        "forecast_page.py",
+    )
+    _has_ct = "CONTROL TOWER" in _app_src
+    _has_crypto = '"CRYPTO"' in _app_src
+    _has_fc = "FORECAST" in _app_src
+    _has_fc_page = "render_forecast_page" in _app_src
+    _has_mes_in_ec = "mes_dashboard" in _ec_src or "render_futures" in _ec_src
+    if _has_ct and _has_crypto and _has_fc and _has_fc_page and _has_mes_in_ec:
         _fx(
             "Dashboard aligned",
             "READY",
-            "FORECAST TRADING tab + MES archived + widget wired",
+            "v17.0 5-tab layout: CONTROL TOWER + CRYPTO + FORECAST + PERFORMANCE LAB + ENGINEERING CONSOLE; MES in engineering console",
         )
     else:
         _missing_items = []
-        if not _has_fc_tab:
-            _missing_items.append("FORECAST TRADING tab")
-        if not _has_arc_mes:
-            _missing_items.append("ARCHIVED FUTURES (MES) tab")
-        if not _has_widget:
-            _missing_items.append("render_forecast_trading import")
+        if not _has_ct:
+            _missing_items.append("CONTROL TOWER tab")
+        if not _has_crypto:
+            _missing_items.append("CRYPTO tab")
+        if not _has_fc:
+            _missing_items.append("FORECAST tab")
+        if not _has_fc_page:
+            _missing_items.append("render_forecast_page import")
+        if not _has_mes_in_ec:
+            _missing_items.append("MES widget in engineering_console.py")
         _fx("Dashboard aligned", "BLOCKED", f"Missing: {', '.join(_missing_items)}")
 except Exception as _e:
     _fx("Dashboard aligned", "BLOCKED", f"Check error: {_e}")
@@ -563,7 +584,11 @@ try:
                 pass
             _c.close()
 
-            if _lane_active and _lane_hb_age is not None and _lane_hb_age > _HB_FRESH_SEC:
+            if (
+                _lane_active
+                and _lane_hb_age is not None
+                and _lane_hb_age > _HB_FRESH_SEC
+            ):
                 _fx(
                     "Forecast lane active",
                     "ACTION NEEDED",

@@ -145,6 +145,49 @@ def _unrealized_pnl() -> float:
         return 0.0
 
 
+def _paper_spot_balance_summary(base: float) -> dict:
+    """
+    Paper-mode spot balance summary derived from open_positions.
+
+    We keep spot truth isolated from perp balances, but paper spot should still
+    surface something useful in the dashboard instead of all-zero placeholders.
+    """
+    try:
+        with sqlite3.connect(_DB_PATH, timeout=5, check_same_thread=False) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """
+                SELECT symbol, qty, entry
+                FROM open_positions
+                WHERE strategy LIKE 'spot_%' AND paper=1
+                """
+            ).fetchall()
+    except Exception as e:
+        logger.debug(f"[balance] paper spot summary query error: {e}")
+        rows = []
+
+    btc_held_usd = 0.0
+    eth_held_usd = 0.0
+    deployed_usd = 0.0
+    for row in rows:
+        sym = str(row["symbol"] or "").upper()
+        qty = float(row["qty"] or 0.0)
+        entry = float(row["entry"] or 0.0)
+        current_value = qty * entry
+        deployed_usd += current_value
+        if sym == "BTC":
+            btc_held_usd += current_value
+        elif sym == "ETH":
+            eth_held_usd += current_value
+
+    return {
+        "usd_available": round(max(base - deployed_usd, 0.0), 2),
+        "btc_held_usd": round(btc_held_usd, 2),
+        "eth_held_usd": round(eth_held_usd, 2),
+        "source": "paper_db",
+    }
+
+
 # ── Coinbase balance ──────────────────────────────────────────────────────────
 
 
@@ -312,12 +355,13 @@ def get_spot_balance_summary() -> dict:
     paper = _balance_paper_mode()
 
     if paper:
-        return {
-            "usd_available": 0.0,
-            "btc_held_usd": 0.0,
-            "eth_held_usd": 0.0,
-            "source": "paper",
-        }
+        try:
+            from config import ACCOUNT_SIZE
+
+            base = float(ACCOUNT_SIZE)
+        except Exception:
+            base = 5000.0
+        return _paper_spot_balance_summary(base)
 
     # Live mode — call spot broker
     try:

@@ -14,11 +14,14 @@ import sys
 from datetime import datetime, timedelta, timezone
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_DASHBOARD_DIR = os.path.join(_ROOT, "dashboard")
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
+if _DASHBOARD_DIR not in sys.path:
+    sys.path.insert(0, _DASHBOARD_DIR)
 
 try:
-    from config import DB_PATH
+    from db import DB_PATH
 except Exception:
     DB_PATH = os.path.join(_ROOT, "logs", "trades.db")
 
@@ -34,6 +37,7 @@ def _conn() -> sqlite3.Connection:
 
 
 _TS_NORM = "datetime(replace(substr(ts,1,19),'T',' '))"
+_HEARTBEAT_FRESH_SEC = 180
 
 
 def _lane_active_from_runtime(c) -> tuple[bool, str | None]:
@@ -75,6 +79,7 @@ def get_forecast_health() -> dict:
         "last_discovery_at": None,
         "lane_started": False,
         "lane_heartbeat_at": None,
+        "lane_heartbeat_age_sec": None,
         "lane_readiness_state": None,
     }
     try:
@@ -88,9 +93,28 @@ def get_forecast_health() -> dict:
                     "WHERE lane_id='forecast' ORDER BY id DESC LIMIT 1"
                 ).fetchone()
                 if rt_row is not None:
-                    result["lane_started"] = bool(rt_row[0])
                     result["lane_heartbeat_at"] = rt_row[1]
                     result["lane_readiness_state"] = rt_row[2]
+                    _active = bool(rt_row[0])
+                    _hb_age = None
+                    if rt_row[1]:
+                        try:
+                            _hb_dt = datetime.fromisoformat(
+                                str(rt_row[1]).replace("Z", "+00:00")
+                            )
+                            if not _hb_dt.tzinfo:
+                                _hb_dt = _hb_dt.replace(tzinfo=timezone.utc)
+                            _hb_age = (
+                                datetime.now(timezone.utc) - _hb_dt
+                            ).total_seconds()
+                            result["lane_heartbeat_age_sec"] = round(_hb_age, 1)
+                        except Exception:
+                            pass
+                    result["lane_started"] = bool(
+                        _active
+                        and _hb_age is not None
+                        and _hb_age <= _HEARTBEAT_FRESH_SEC
+                    )
                 else:
                     # No runtime row yet — fall back to system_events
                     n = c.execute(
@@ -394,13 +418,23 @@ def get_forecast_readiness() -> dict:
 
     lane_started = health.get("lane_started", False)
     lane_hb = health.get("lane_heartbeat_at")
+    lane_hb_age = health.get("lane_heartbeat_age_sec")
     lane_rs = health.get("lane_readiness_state")
 
     if not lane_started:
+        if lane_hb_age is not None:
+            _detail = (
+                "Forecast lane inactive or stale — "
+                f"last heartbeat {lane_hb_age:.0f}s ago (threshold {_HEARTBEAT_FRESH_SEC}s)"
+            )
+        else:
+            _detail = (
+                "Forecast lane inactive — start the bot with FORECAST_LANE_ACTIVE=true"
+            )
         _chk(
             "Lane running",
             False,
-            "Forecast lane inactive — start the bot with FORECAST_LANE_ACTIVE=true",
+            _detail,
             needs_human=True,
         )
         lane_state = LANE_NOT_STARTED

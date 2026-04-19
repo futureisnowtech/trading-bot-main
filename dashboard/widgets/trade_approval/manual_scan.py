@@ -3,7 +3,7 @@ Widget: Trade Approval / Manual Scan
 Question: Run a fresh scan and hand-pick which trades to execute.
 Tab: TRADE APPROVAL
 Refresh: manual (button-driven)
-Asset class: CRYPTO PERPS
+Asset class: CRYPTO SPOT + CRYPTO PERPS
 """
 
 import importlib.util as _ilu
@@ -47,6 +47,54 @@ def _get_tier_info(sym: str) -> dict:
             "execute": False,
             "reason": "policy_lookup_failed",
         }
+
+
+def _runtime_live_flag() -> bool:
+    try:
+        from db import _runtime_paper_flag as _rflag
+
+        return not bool(_rflag())
+    except Exception:
+        try:
+            from config import PAPER_TRADING
+
+            return not bool(PAPER_TRADING)
+        except Exception:
+            return False
+
+
+def _blocked_tradeability(sym: str, reason: str) -> dict:
+    underlying = _get_tier_info(sym).get("underlying", sym)
+    return {
+        "symbol": sym,
+        "underlying": underlying,
+        "lane": "blocked",
+        "recommended_lane": "blocked",
+        "status": "blocked",
+        "auto_executable": 0,
+        "manual_executable": 0,
+        "blocked_reason": reason,
+        "size_block_reason": "none",
+        "source_reason": "not_applicable",
+        "display_label": "BLOCKED",
+    }
+
+
+def _manual_tradeability(candidate: dict) -> dict:
+    sym = str(candidate.get("symbol", ""))
+    dirn = str(candidate.get("direction", "LONG"))
+    if not _TRADEABILITY_OK:
+        return _blocked_tradeability(sym, "execution_policy_unavailable")
+    try:
+        return _get_tradeability(
+            sym,
+            dirn,
+            candidate,
+            live=_runtime_live_flag(),
+            manual=True,
+        )
+    except Exception:
+        return _blocked_tradeability(sym, "execution_policy_unavailable")
 
 
 def _min_contract_usd(exec_sym: str, price: float) -> float:
@@ -240,6 +288,7 @@ def render_manual_scan():
     candidates = st.session_state.get("manual_candidates", [])
     if not candidates:
         st.info("No scan results yet — click **Run Scan Now** above.")
+        render_spot_section()
         return
 
     hc1, hc2, hc3, hc4 = st.columns([0.4, 3.2, 2.8, 0.6])
@@ -256,8 +305,15 @@ def render_manual_scan():
         exch = c.get("exchange", "kraken")
         setup = c.get("primary_setup", "")
         badge = "🔵" if exch == "hyperliquid" else "🟠"
-        _tier = _get_tier_info(sym)
-        _can_execute = _tier["execute"]
+        _trade_row = _manual_tradeability(c)
+        _can_execute = bool(_trade_row.get("manual_executable")) and (
+            _trade_row.get("status") == "executable"
+        )
+        _display = _trade_row.get("display_label", "BLOCKED")
+        _lane = _trade_row.get("lane", "blocked")
+        _recommended = _trade_row.get("recommended_lane", _lane)
+        _blocked_reason = _trade_row.get("blocked_reason", "")
+        _auto_executable = bool(_trade_row.get("auto_executable", 0))
 
         col1, col2, col3, col4 = st.columns([0.4, 3.2, 2.8, 0.6])
         with col1:
@@ -272,50 +328,29 @@ def render_manual_scan():
                     value=False,
                 )
         with col2:
-            _tier_label = _tier.get("tier", "core")
-            if _tier_label == "core":
-                _badge_str = ":green[CORE]"
-            elif _tier_label == "research_only":
-                _badge_str = ":orange[RESEARCH ONLY]"
+            if _display == "SPOT EXECUTABLE":
+                _badge_str = ":green[SPOT EXECUTABLE]"
+            elif _display == "PERP EXECUTABLE":
+                _badge_str = ":blue[PERP EXECUTABLE]"
             else:
-                _badge_str = ":red[SUPPRESSED]"
+                _badge_str = ":red[BLOCKED]"
             st.markdown(
                 f"**{sym}** `{dirn}` {badge} `{exch[:5].upper()}` · *{setup}* {_badge_str}"
             )
             if not _can_execute:
-                if _tier.get("reason") == "non_core_execution_universe":
+                st.caption(
+                    f"Blocked: {_blocked_reason or 'execution_policy_unavailable'}"
+                )
+            else:
+                st.caption(f"Route: {_lane}")
+                if _recommended and _recommended != _lane and _recommended != "blocked":
                     st.caption(
-                        "Visible for discovery only — not in core execution universe"
+                        f"Preferred lane `{_recommended}` currently unavailable; using `{_lane}` instead"
                     )
-                elif _tier.get("reason") == "suppressed_symbol":
-                    st.caption("Suppressed symbol — execution blocked")
-                else:
+                if _runtime_live_flag() and not _auto_executable:
                     st.caption(
-                        f"Execution blocked — {_tier.get('reason', 'policy lookup failed')}"
+                        "Manual only right now — bot will not auto-enter this route."
                     )
-            elif _tier_label == "core":
-                # Show autonomous-eligibility note for live mode (informational, not a block)
-                try:
-                    from db import _runtime_paper_flag as _ms_rflag
-
-                    _ms_live = not bool(_ms_rflag())
-                except Exception:
-                    _ms_live = False
-                if _ms_live:
-                    try:
-                        if _ROOT not in sys.path:
-                            sys.path.insert(0, _ROOT)
-                        from config import AUTONOMOUS_LIVE_PERP_SYMBOLS as _auto_s
-
-                        _underlying_sym = _tier.get("underlying", sym)
-                        if _underlying_sym not in _auto_s:
-                            st.caption(
-                                "Manual only — not autonomous-live-eligible "
-                                "(contract min > safe policy). "
-                                "Execute here is fine; bot will not auto-enter."
-                            )
-                    except Exception:
-                        pass
         with col3:
             label = f"{prob:.0f}% — {'High edge' if prob >= 68 else ('Moderate edge' if prob >= 60 else 'Lower edge')}"
             st.progress(prob / 100.0, text=label)
@@ -334,6 +369,7 @@ def render_manual_scan():
         st.caption(
             "Check the **Trade?** box on rows you want to execute, then click Review."
         )
+        render_spot_section()
         return
 
     # ── Helper: compute sizing for one candidate (shared by Review + Execute) ──
@@ -345,29 +381,8 @@ def render_manual_scan():
 
         # ── Tradeability routing (v16.14) ─────────────────────────────────────
         # Use shared engine if available; fall back to tier-only gate on import error.
-        if _TRADEABILITY_OK:
-            _trade_result = _get_tradeability(
-                sym,
-                dirn,
-                cand,
-                live=not exec_paper,
-                manual=True,
-            )
-        else:
-            # Fallback: use execution tier only
-            _policy_fb = _get_tier_info(sym)
-            _trade_result = {
-                "status": "blocked" if not _policy_fb["execute"] else "executable",
-                "blocked_reason": "execution_policy_unavailable"
-                if not _policy_fb["execute"]
-                else "none",
-                "lane": "perp",
-                "underlying": _policy_fb.get("underlying", sym),
-            }
-
-        exec_sym = _trade_result.get("underlying") or _get_tier_info(sym).get(
-            "underlying", sym
-        )
+        _trade_result = _manual_tradeability(cand)
+        exec_sym = _trade_result.get("underlying") or sym
 
         if _trade_result.get("status") == "blocked":
             return {
@@ -583,6 +598,7 @@ def render_manual_scan():
 
             st.session_state["ms_previews"] = computed
             st.rerun()
+        render_spot_section()
         return
 
     # ── PHASE 2: Confirmation panel ───────────────────────────────────────────
@@ -682,6 +698,7 @@ def render_manual_scan():
         if st.button("Back", key="ms_back_all_blocked"):
             st.session_state.pop("ms_previews", None)
             st.rerun()
+        render_spot_section()
         return
 
     st.divider()
@@ -718,7 +735,23 @@ def render_manual_scan():
                 sym = pv["sym"]
                 dirn = pv["dirn"]
                 setup = pv["setup"]
-                exec_sym = pv["exec_sym"]
+                _trade_now = _manual_tradeability(pv["cand"])
+                if (
+                    _trade_now.get("status") != "executable"
+                    or not _trade_now.get("manual_executable", 0)
+                ):
+                    results.append(
+                        (
+                            sym,
+                            dirn,
+                            False,
+                            _trade_now.get(
+                                "blocked_reason", "execution_policy_unavailable"
+                            ),
+                        )
+                    )
+                    continue
+                exec_sym = _trade_now.get("underlying") or pv["exec_sym"]
 
                 # Re-run guards with fresh held list
                 if not _exec_paper and exec_sym in _held_syms:
@@ -772,7 +805,7 @@ def render_manual_scan():
                     leverage = pv["leverage"]
 
                     # ── Lane routing from tradeability result (v16.14) ────────
-                    _exec_lane = pv.get("trade_lane", "perp")
+                    _exec_lane = _trade_now.get("lane", pv.get("trade_lane", "perp"))
 
                     if _exec_lane == "spot":
                         # Spot execution — no leverage, no short, no stop/target
@@ -932,6 +965,20 @@ def render_spot_section():
         f"Mode: **{mode_label}** | Allowed: {', '.join(spot_symbols)} | Min order: ${spot_min:.0f}"
     )
 
+    _spot_msg = st.session_state.get("spot_manual_message")
+    if _spot_msg:
+        _level = _spot_msg.get("level", "info")
+        _text = _spot_msg.get("text", "")
+        if _level == "success":
+            st.success(_text)
+        elif _level == "error":
+            st.error(_text)
+        else:
+            st.info(_text)
+        if st.button("Clear spot result", key="clear_spot_result_btn"):
+            st.session_state.pop("spot_manual_message", None)
+            st.rerun()
+
     # Load current spot positions
     try:
         import spot_engine as _se
@@ -973,15 +1020,24 @@ def render_spot_section():
                     result = _se.close_spot(sym, paper=_exec_paper)
                     if result:
                         pnl = result.get("pnl_usd", 0.0)
-                        st.success(
-                            f"[{mode_label}] Sold {sym}: "
-                            f"exit @ ${result['exit_price']:.4f}  "
-                            f"pnl=${pnl:+.2f}"
-                        )
+                        st.session_state["spot_manual_message"] = {
+                            "level": "success",
+                            "text": (
+                                f"[{mode_label}] Sold {sym}: "
+                                f"exit @ ${result['exit_price']:.4f}  "
+                                f"pnl=${pnl:+.2f}"
+                            ),
+                        }
                     else:
-                        st.error(f"close_spot {sym} returned None — check bot log")
+                        st.session_state["spot_manual_message"] = {
+                            "level": "error",
+                            "text": f"close_spot {sym} returned None — broker ack/persist/reconcile failed",
+                        }
                 except Exception as ex:
-                    st.error(f"Sell error: {ex}")
+                    st.session_state["spot_manual_message"] = {
+                        "level": "error",
+                        "text": f"Sell error: {ex}",
+                    }
                 st.rerun()
     else:
         st.caption("No open spot positions.")
@@ -1005,19 +1061,37 @@ def render_spot_section():
             buy_key = f"spot_buy_{sym}"
             if st.button(f"Buy {sym} (${size_input:.0f})", key=buy_key, type="primary"):
                 try:
-                    pos = _se.open_spot(sym, size_input, paper=_exec_paper)
-                    if pos:
-                        st.success(
-                            f"[{mode_label}] Bought {sym}: "
-                            f"{pos['qty']:.6f} units @ ${pos['entry']:.4f}  "
-                            f"order={pos['order_id']}"
-                        )
+                    _trade = _manual_tradeability({"symbol": sym, "direction": "LONG"})
+                    if (
+                        _trade.get("status") != "executable"
+                        or _trade.get("lane") != "spot"
+                        or not _trade.get("manual_executable", 0)
+                    ):
+                        st.session_state["spot_manual_message"] = {
+                            "level": "error",
+                            "text": _trade.get(
+                                "blocked_reason", "execution_policy_unavailable"
+                            ),
+                        }
                     else:
-                        st.error(
-                            f"open_spot {sym} returned None — "
-                            "check: SPOT_LANE_ACTIVE, symbol allowed, size >= minimum, "
-                            "not already holding, deployment cap"
-                        )
+                        pos = _se.open_spot(sym, size_input, paper=_exec_paper)
+                        if pos:
+                            st.session_state["spot_manual_message"] = {
+                                "level": "success",
+                                "text": (
+                                    f"[{mode_label}] Bought {sym}: "
+                                    f"{pos['qty']:.6f} units @ ${pos['entry']:.4f}  "
+                                    f"order={pos['order_id']}"
+                                ),
+                            }
+                        else:
+                            st.session_state["spot_manual_message"] = {
+                                "level": "error",
+                                "text": f"open_spot {sym} returned None — broker ack/persist/reconcile failed",
+                            }
                 except Exception as ex:
-                    st.error(f"Buy error: {ex}")
+                    st.session_state["spot_manual_message"] = {
+                        "level": "error",
+                        "text": f"Buy error: {ex}",
+                    }
                 st.rerun()

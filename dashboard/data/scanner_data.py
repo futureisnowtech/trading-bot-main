@@ -11,9 +11,21 @@ Log parsing remains as a fallback only when the DB truth surfaces are absent.
 """
 
 import re
+import os
+import sys
 from datetime import datetime, timedelta
 
-from db import _q, _q1, _tail_log, LOG_PATH
+_DASH_DIR = os.path.dirname(os.path.abspath(__file__))
+_DASHBOARD_DIR = os.path.dirname(_DASH_DIR)
+if _DASHBOARD_DIR not in sys.path:
+    sys.path.insert(0, _DASHBOARD_DIR)
+
+import db as _db
+
+_q = _db._q
+_q1 = _db._q1
+_tail_log = getattr(_db, "_tail_log", lambda n=200: [])
+LOG_PATH = getattr(_db, "LOG_PATH", "")
 
 
 def get_last_scan_age():

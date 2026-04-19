@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-19
+- v16.16: master trading control, DB-first scanner/control truth, shared manual tradeability, paper spot balance truth, dashboard DB alias unification, forecast heartbeat freshness/runtime truth, 408 proof tests
+
+## 2026-04-19
 - feat(tradeability): shared crypto tradeability engine — spot/perp/blocked routing unified for manual + autonomous paths
 
 ## 2026-04-18

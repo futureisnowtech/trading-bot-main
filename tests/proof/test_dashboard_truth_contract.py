@@ -179,3 +179,25 @@ def test_dt05_spot_perp_counts_are_independent(tmp_path, monkeypatch):
     assert spot_count == 1, f"Expected 1 spot position, got {spot_count}"
     # Total = sum of both, not double-counted
     assert perp_count + spot_count == 2
+
+
+def test_dt06_paper_spot_balance_summary_uses_db_positions(tmp_path, monkeypatch):
+    """
+    Paper spot balance summary must not show all-zero placeholders when spot
+    positions exist in open_positions.
+    """
+    db = _make_db_with_mixed_positions(tmp_path, paper_int=1)
+    db_mock = _make_db_mock(db)
+
+    monkeypatch.setitem(sys.modules, "db", db_mock)
+    monkeypatch.delitem(sys.modules, "data.balance", raising=False)
+
+    from data import balance as balance_mod
+
+    monkeypatch.setattr(balance_mod, "_DB_PATH", db, raising=False)
+    monkeypatch.setattr(balance_mod, "_balance_paper_mode", lambda: True, raising=False)
+
+    summary = balance_mod.get_spot_balance_summary()
+    assert summary["source"] == "paper_db"
+    assert summary["btc_held_usd"] > 0.0
+    assert summary["eth_held_usd"] == 0.0

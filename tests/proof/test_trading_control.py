@@ -13,7 +13,18 @@ if DASHBOARD_ROOT not in sys.path:
     sys.path.insert(0, DASHBOARD_ROOT)
 
 
-def test_trading_control_crypto_snapshot_classifies_strategy_system_bug(proof_runtime):
+def _bind_dashboard_db(monkeypatch, db_path: str) -> None:
+    import dashboard.db as dash_db
+    import db as db_shim
+
+    monkeypatch.setattr(dash_db, "DB_PATH", db_path, raising=False)
+    monkeypatch.setattr(db_shim, "DB_PATH", db_path, raising=False)
+
+
+def test_trading_control_crypto_snapshot_classifies_strategy_system_bug(
+    proof_runtime, monkeypatch
+):
+    _bind_dashboard_db(monkeypatch, str(proof_runtime.db_path))
     from logging_db.trade_logger import log_scan_candidate, log_scan_funnel
 
     scan_id = "scanabc123"
@@ -184,6 +195,7 @@ def test_trading_control_crypto_snapshot_classifies_strategy_system_bug(proof_ru
         entered=1,
     )
 
+    monkeypatch.delitem(sys.modules, "data.trading_control", raising=False)
     from data.trading_control import get_crypto_control_snapshot
 
     snap = get_crypto_control_snapshot(hours=24)
@@ -194,7 +206,10 @@ def test_trading_control_crypto_snapshot_classifies_strategy_system_bug(proof_ru
     assert snap["funnel"]["entered"] >= 1
 
 
-def test_scanner_data_prefers_db_truth_when_scan_funnels_exist(proof_runtime):
+def test_scanner_data_prefers_db_truth_when_scan_funnels_exist(
+    proof_runtime, monkeypatch
+):
+    _bind_dashboard_db(monkeypatch, str(proof_runtime.db_path))
     from logging_db.trade_logger import log_scan_candidate, log_scan_funnel
     from runtime.runtime_state import init_runtime_tables, upsert_lane_state
 
@@ -258,6 +273,7 @@ def test_scanner_data_prefers_db_truth_when_scan_funnels_exist(proof_runtime):
         entered=1,
     )
 
+    monkeypatch.delitem(sys.modules, "data.scanner_data", raising=False)
     from data.scanner_data import get_scan_status
 
     status = get_scan_status()
@@ -266,7 +282,10 @@ def test_scanner_data_prefers_db_truth_when_scan_funnels_exist(proof_runtime):
     assert status["candidates"][0]["symbol"] == "BTC"
 
 
-def test_trading_control_forecast_detects_runtime_data_contradiction(proof_runtime):
+def test_trading_control_forecast_detects_runtime_data_contradiction(
+    proof_runtime, monkeypatch
+):
+    _bind_dashboard_db(monkeypatch, str(proof_runtime.db_path))
     from runtime.runtime_state import init_runtime_tables, upsert_lane_state
 
     init_runtime_tables(db_path=str(proof_runtime.db_path))
@@ -298,8 +317,53 @@ def test_trading_control_forecast_detects_runtime_data_contradiction(proof_runti
         last_heartbeat_at="2026-04-19T12:00:00+00:00",
     )
 
+    monkeypatch.delitem(sys.modules, "data.forecast", raising=False)
+    monkeypatch.delitem(sys.modules, "dashboard.data.forecast", raising=False)
+    monkeypatch.delitem(sys.modules, "data.trading_control", raising=False)
     from data.trading_control import get_forecast_control_snapshot
 
     snap = get_forecast_control_snapshot()
     assert snap["health"]["underliers_visible"] == 1
     assert snap["contradictions"], "Expected contradiction for underliers + NO_UNDERLIERS"
+
+
+def test_forecast_health_marks_stale_runtime_heartbeat_not_started(
+    proof_runtime, monkeypatch
+):
+    _bind_dashboard_db(monkeypatch, str(proof_runtime.db_path))
+    from runtime.runtime_state import init_runtime_tables, upsert_lane_state
+
+    init_runtime_tables(db_path=str(proof_runtime.db_path))
+    with sqlite3.connect(proof_runtime.db_path) as c:
+        c.execute(
+            "CREATE TABLE forecast_markets (id INTEGER PRIMARY KEY, market_symbol TEXT, market_name TEXT, category_path TEXT, active INTEGER DEFAULT 1)"
+        )
+        c.execute(
+            "CREATE TABLE forecast_contracts (id INTEGER PRIMARY KEY, market_id INTEGER, active INTEGER DEFAULT 1)"
+        )
+        c.execute(
+            "CREATE TABLE forecast_quotes (id INTEGER PRIMARY KEY, contract_id INTEGER, ts TEXT, mid REAL)"
+        )
+        c.execute(
+            "CREATE TABLE forecast_bars (id INTEGER PRIMARY KEY, contract_id INTEGER, interval TEXT, ts_open TEXT, ts_close TEXT, c REAL)"
+        )
+        c.execute(
+            "CREATE TABLE forecast_resolutions (id INTEGER PRIMARY KEY, contract_id INTEGER, resolution_ts TEXT)"
+        )
+    upsert_lane_state(
+        "forecast",
+        db_path=str(proof_runtime.db_path),
+        active=1,
+        enabled=1,
+        readiness_state="NO_UNDERLIERS",
+        last_heartbeat_at="2026-04-01T00:00:00+00:00",
+    )
+
+    monkeypatch.delitem(sys.modules, "data.forecast", raising=False)
+    monkeypatch.delitem(sys.modules, "dashboard.data.forecast", raising=False)
+    from data.forecast import get_forecast_health, get_forecast_readiness
+
+    health = get_forecast_health()
+    readiness = get_forecast_readiness()
+    assert health["lane_started"] is False
+    assert readiness["lane_state"] == "LANE_NOT_STARTED"

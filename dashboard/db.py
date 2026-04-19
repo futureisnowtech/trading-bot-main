@@ -4,12 +4,20 @@ dashboard/db.py — Database primitives shared across all dashboard modules.
 
 import os
 import sqlite3
+import sys
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(_ROOT, "logs", "trades.db")
 LOG_PATH = os.path.join(_ROOT, "logs", "bot.log")
 LAUNCH_DATE = "2026-04-02"  # paper trading start
 LIVE_START_DATE = "2026-04-15"  # live trading start
+
+# Ensure `import db` and `import dashboard.db` resolve to the same module object.
+# Without this, monkeypatching DB_PATH in tests or runtime shims can diverge across
+# dashboard modules depending on how they imported the DB helper.
+_THIS_MODULE = sys.modules[__name__]
+sys.modules.setdefault("db", _THIS_MODULE)
+sys.modules.setdefault("dashboard.db", _THIS_MODULE)
 
 
 def get_effective_launch_date() -> str:

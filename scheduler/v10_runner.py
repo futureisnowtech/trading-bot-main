@@ -818,6 +818,12 @@ def _attempt_entry(
     scan_id: str = "",
 ):
     """Try to enter a position for one candidate. All exceptions propagate to caller."""
+    _route_hint = _tradeability_hint(
+        symbol,
+        direction,
+        candidate,
+        live=not _paper,
+    )
     if get_candles is None or build_features is None:
         logger.warning(
             f"[v10] {symbol} — get_candles={get_candles is not None} build_features={build_features is not None} — skip"
@@ -827,6 +833,7 @@ def _attempt_entry(
             candidate,
             "data_unavailable",
             entry_block_reason="get_candles or build_features is None",
+            **_route_hint,
         )
         return "data_unavailable"
 
@@ -841,11 +848,19 @@ def _attempt_entry(
             candidate,
             "data_unavailable",
             entry_block_reason=f"insufficient candles ({len(df) if df is not None else 0} bars)",
+            **_route_hint,
         )
         return "data_unavailable"
 
     current_price = float(df["close"].iloc[-1])
     if current_price <= 0:
+        _journal_scan_candidate(
+            scan_id,
+            candidate,
+            "data_unavailable",
+            entry_block_reason="non-positive current_price from candles",
+            **_route_hint,
+        )
         return "data_unavailable"
 
     # ── Price sanity: candle close must be within 5% of live mark price ───────
@@ -882,6 +897,13 @@ def _attempt_entry(
                 logger.warning(
                     f"[v10] {symbol} — price sanity FAIL: candle ${current_price:.8g} "
                     f"vs live ${_live:.8g} ({_pct_off:.1%} off) — SKIP (wrong data source)"
+                )
+                _journal_scan_candidate(
+                    scan_id,
+                    candidate,
+                    "data_unavailable",
+                    entry_block_reason=f"price sanity fail ({_pct_off:.1%} off live)",
+                    **_route_hint,
                 )
                 return "data_unavailable"
             current_price = _live  # Use live mark price for execution accuracy
@@ -1383,6 +1405,13 @@ def _attempt_entry(
     # Compute position size
     if pm is None:
         logger.warning(f"[v10] {symbol} — position_manager is None, skip")
+        _journal_scan_candidate(
+            scan_id,
+            candidate,
+            "data_unavailable",
+            entry_block_reason="position_manager is None",
+            **_route_hint,
+        )
         return "data_unavailable"
 
     regime_mult = _REGIME_SIZE_MULT.get(regime, 0.90)
@@ -1473,6 +1502,20 @@ def _attempt_entry(
 
     # Execute entry
     if perps is None:
+        _journal_scan_candidate(
+            scan_id,
+            candidate,
+            "data_unavailable",
+            regime=regime,
+            technical_score=_tech_score,
+            ml_score=_ml_score,
+            composite_score=composite,
+            entry_threshold=50.0,
+            should_enter_signal=1,
+            econ_approved=1,
+            entry_block_reason="perps engine unavailable",
+            **_route_hint,
+        )
         return "data_unavailable"
 
     entry_setup_name = primary_setup["name"] if primary_setup else ""

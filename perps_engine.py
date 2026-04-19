@@ -35,6 +35,7 @@ _recent_close_ts: Dict[
     str, float
 ] = {}  # symbol → epoch of last full close (idempotency guard)
 _IDEMPOTENCY_WINDOW = 60.0  # seconds — duplicate close within this window is suppressed
+_MAX_LIVE_PERPS = 3
 
 
 def _get_broker(testnet: bool = True) -> Optional["CoinbaseBroker"]:
@@ -78,9 +79,9 @@ def open_long(
             live_count = sum(
                 1 for p in _open_positions.values() if not p.get("paper", True)
             )
-        if live_count >= 3:
+        if live_count >= _MAX_LIVE_PERPS:
             logger.warning(
-                f"[perps] open_long {symbol} blocked — max_live_perps=3 "
+                f"[perps] open_long {symbol} blocked — max_live_perps={_MAX_LIVE_PERPS} "
                 f"({live_count} live position(s) already open)"
             )
             return None
@@ -229,9 +230,9 @@ def open_short(
             live_count = sum(
                 1 for p in _open_positions.values() if not p.get("paper", True)
             )
-        if live_count >= 3:
+        if live_count >= _MAX_LIVE_PERPS:
             logger.warning(
-                f"[perps] open_short {symbol} blocked — max_live_perps=3 "
+                f"[perps] open_short {symbol} blocked — max_live_perps={_MAX_LIVE_PERPS} "
                 f"({live_count} live position(s) already open)"
             )
             return None

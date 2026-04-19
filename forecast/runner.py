@@ -46,6 +46,45 @@ _discovery_lock = threading.Lock()
 _eval_lock = threading.Lock()
 
 
+def _forecast_runtime_snapshot(*, connected: bool, contracts: int, stubs: int) -> dict:
+    """Canonical runtime-state mapping for the forecast lane."""
+    if not connected:
+        return {
+            "connected": 0,
+            "tradable": 0,
+            "health": "WARN",
+            "blocked_reason": "broker_disconnected",
+            "action_needed": "connect_forecastex",
+            "readiness_state": "BROKER_DISCONNECTED",
+        }
+    if contracts > 0:
+        return {
+            "connected": 1,
+            "tradable": 1,
+            "health": "OK",
+            "blocked_reason": "",
+            "action_needed": "",
+            "readiness_state": "NO_QUOTES",
+        }
+    if stubs > 0:
+        return {
+            "connected": 1,
+            "tradable": 0,
+            "health": "WARN",
+            "blocked_reason": "no_tradable_contracts_right_now",
+            "action_needed": "check_forecastex_enrollment",
+            "readiness_state": "NO_TRADABLE_CONTRACTS_RIGHT_NOW",
+        }
+    return {
+        "connected": 1,
+        "tradable": 0,
+        "health": "WARN",
+        "blocked_reason": "no_underliers",
+        "action_needed": "check_discovery",
+        "readiness_state": "NO_UNDERLIERS",
+    }
+
+
 def _get_broker():
     from execution.forecastex_broker import get_forecastex_broker
 
@@ -89,18 +128,41 @@ def run_discovery_cycle() -> dict:
             try:
                 from runtime.runtime_state import upsert_lane_state as _uls
 
-                if contracts > 0:
-                    _rs = "NO_QUOTES"  # contracts exist but quotes not yet flowing
-                elif stubs > 0:
-                    _rs = "NO_TRADABLE_CONTRACTS_RIGHT_NOW"
-                else:
-                    _rs = "NO_UNDERLIERS"
-                _uls("forecast", readiness_state=_rs)
+                _connected = bool(broker.is_connected())
+                _snapshot = _forecast_runtime_snapshot(
+                    connected=_connected,
+                    contracts=contracts,
+                    stubs=stubs,
+                )
+                _uls(
+                    "forecast",
+                    enabled=1,
+                    active=1,
+                    connected=_snapshot["connected"],
+                    tradable=_snapshot["tradable"],
+                    health=_snapshot["health"],
+                    blocked_reason=_snapshot["blocked_reason"],
+                    action_needed=_snapshot["action_needed"],
+                    readiness_state=_snapshot["readiness_state"],
+                )
             except Exception:
                 pass
             return result
         except Exception as e:
             logger.error(f"[ForecastRunner] Discovery cycle error: {e}")
+            try:
+                from runtime.runtime_state import upsert_lane_state as _uls
+
+                _uls(
+                    "forecast",
+                    enabled=1,
+                    active=1,
+                    health="ERROR",
+                    blocked_reason=str(e)[:160],
+                    action_needed="inspect_forecast_runner",
+                )
+            except Exception:
+                pass
             return {"found": 0, "persisted": 0, "errors": [str(e)]}
 
 
@@ -379,11 +441,21 @@ def start_forecast_lane(bankroll: float = 100.0) -> None:
     try:
         from runtime.runtime_state import upsert_lane_state
 
+        _snapshot = _forecast_runtime_snapshot(
+            connected=bool(connected),
+            contracts=0,
+            stubs=0,
+        )
         upsert_lane_state(
             "forecast",
+            enabled=1,
             active=1,
-            connected=int(connected),
-            readiness_state="BROKER_DISCONNECTED" if not connected else "NO_UNDERLIERS",
+            connected=_snapshot["connected"],
+            tradable=_snapshot["tradable"],
+            health=_snapshot["health"],
+            blocked_reason=_snapshot["blocked_reason"],
+            action_needed=_snapshot["action_needed"],
+            readiness_state=_snapshot["readiness_state"],
         )
     except Exception:
         pass

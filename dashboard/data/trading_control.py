@@ -16,7 +16,14 @@ Primary sources of truth:
 
 from __future__ import annotations
 
+import os
+import sys
 from datetime import datetime, timedelta, timezone
+
+_DASH_DIR = os.path.dirname(os.path.abspath(__file__))
+_DASHBOARD_DIR = os.path.dirname(_DASH_DIR)
+if _DASHBOARD_DIR not in sys.path:
+    sys.path.insert(0, _DASHBOARD_DIR)
 
 from db import _q, _q1
 
@@ -77,10 +84,10 @@ def get_crypto_control_snapshot(hours: int = 24) -> dict:
         (cutoff,),
     )
     decisions = _q(
-        """
+        f"""
         SELECT decision, COUNT(*) AS n
         FROM scan_candidates
-        WHERE ts >= ?
+        WHERE {_TS_NORM} >= datetime(replace(substr(?,1,19),'T',' '))
         GROUP BY decision
         ORDER BY n DESC
         """,
@@ -89,10 +96,10 @@ def get_crypto_control_snapshot(hours: int = 24) -> dict:
     decision_counts = {r["decision"]: int(r["n"]) for r in decisions if r.get("decision")}
 
     blank_tradeability = _q1(
-        """
+        f"""
         SELECT COUNT(*) AS n
         FROM scan_candidates
-        WHERE ts >= ?
+        WHERE {_TS_NORM} >= datetime(replace(substr(?,1,19),'T',' '))
           AND decision IN (
             'below_threshold','econ_veto','research_only_block','not_autonomous_live_eligible',
             'sizing_zero','execution_failed','entered','dual_exposure_block','risk_block'
@@ -103,12 +110,12 @@ def get_crypto_control_snapshot(hours: int = 24) -> dict:
     ).get("n", 0) or 0
 
     top_blockers = _q(
-        """
+        f"""
         SELECT
             COALESCE(NULLIF(trade_blocked_reason,''), NULLIF(entry_block_reason,''), NULLIF(econ_reject_reason,''), decision) AS reason,
             COUNT(*) AS n
         FROM scan_candidates
-        WHERE ts >= ?
+        WHERE {_TS_NORM} >= datetime(replace(substr(?,1,19),'T',' '))
         GROUP BY 1
         ORDER BY n DESC
         LIMIT 8
@@ -172,6 +179,12 @@ def get_forecast_control_snapshot() -> dict:
     )
 
     contradictions: list[str] = []
+    if lane.get("readiness_state") and lane.get("readiness_state") != readiness.get(
+        "lane_state"
+    ):
+        contradictions.append(
+            "forecast runtime readiness_state does not match dashboard-derived lane_state"
+        )
     if health.get("underliers_visible", 0) > 0 and readiness.get("lane_state") == "NO_UNDERLIERS":
         contradictions.append(
             "forecast has discovered underliers in DB but readiness still says NO_UNDERLIERS"
@@ -182,6 +195,8 @@ def get_forecast_control_snapshot() -> dict:
         )
     if lane.get("active") and not lane.get("last_heartbeat_at"):
         contradictions.append("forecast lane marked active without a heartbeat timestamp")
+    if lane.get("active") and not health.get("lane_started", False):
+        contradictions.append("forecast lane marked active but heartbeat is stale")
 
     return {
         "lane": lane,

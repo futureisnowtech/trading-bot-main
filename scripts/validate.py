@@ -508,13 +508,15 @@ try:
         try:
             _lane_active = False
             _lane_hb_age = None
+            _lane_readiness_state = ""
             _markets_count = 0
             _stub_count = 0
+            _HB_FRESH_SEC = 180
 
             # PRIMARY: lane_runtime_state (updated every minute by runner)
             try:
                 _rt = _c.execute(
-                    "SELECT active, last_heartbeat_at FROM lane_runtime_state "
+                    "SELECT active, last_heartbeat_at, readiness_state FROM lane_runtime_state "
                     "WHERE lane_id='forecast' ORDER BY id DESC LIMIT 1"
                 ).fetchone()
                 if _rt is not None:
@@ -529,6 +531,7 @@ try:
                             _lane_hb_age = (_dt2.now(_tz2.utc) - _hb).total_seconds()
                         except Exception:
                             pass
+                    _lane_readiness_state = str(_rt[2] or "")
             except Exception:
                 pass
 
@@ -560,7 +563,14 @@ try:
                 pass
             _c.close()
 
-            if _lane_active:
+            if _lane_active and _lane_hb_age is not None and _lane_hb_age > _HB_FRESH_SEC:
+                _fx(
+                    "Forecast lane active",
+                    "ACTION NEEDED",
+                    f"Runtime state is stale: active=True but heartbeat {_lane_hb_age:.0f}s ago "
+                    f"(threshold {_HB_FRESH_SEC}s, readiness={_lane_readiness_state or 'UNKNOWN'})",
+                )
+            elif _lane_active:
                 _hb_desc = (
                     f", heartbeat {_lane_hb_age:.0f}s ago"
                     if _lane_hb_age is not None
@@ -569,7 +579,12 @@ try:
                 _fx(
                     "Forecast lane active",
                     "READY",
-                    f"Runtime state: lane active=True{_hb_desc}",
+                    f"Runtime state: lane active=True{_hb_desc}"
+                    + (
+                        f", readiness={_lane_readiness_state}"
+                        if _lane_readiness_state
+                        else ""
+                    ),
                 )
             else:
                 _fx(

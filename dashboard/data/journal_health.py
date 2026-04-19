@@ -7,9 +7,18 @@ All queries are read-only and fail silently so they never crash the dashboard.
 
 from __future__ import annotations
 
+import os
+import sys
 from datetime import datetime, timedelta, timezone
 
+_DASH_DIR = os.path.dirname(os.path.abspath(__file__))
+_DASHBOARD_DIR = os.path.dirname(_DASH_DIR)
+if _DASHBOARD_DIR not in sys.path:
+    sys.path.insert(0, _DASHBOARD_DIR)
+
 from db import _q, _q1
+
+_TS_NORM = "datetime(replace(substr(ts,1,19),'T',' '))"
 
 
 def get_journal_health() -> dict:
@@ -31,15 +40,19 @@ def get_journal_health() -> dict:
 
     # ── Candidate counts ──────────────────────────────────────────────────────
     r_24h = _q1(
-        "SELECT COUNT(*) AS n FROM scan_candidates WHERE ts >= ?", (cutoff_24h,)
+        f"SELECT COUNT(*) AS n FROM scan_candidates WHERE {_TS_NORM} >= datetime(replace(substr(?,1,19),'T',' '))",
+        (cutoff_24h,),
     )
-    r_7d = _q1("SELECT COUNT(*) AS n FROM scan_candidates WHERE ts >= ?", (cutoff_7d,))
+    r_7d = _q1(
+        f"SELECT COUNT(*) AS n FROM scan_candidates WHERE {_TS_NORM} >= datetime(replace(substr(?,1,19),'T',' '))",
+        (cutoff_7d,),
+    )
     r_labeled = _q1(
-        "SELECT COUNT(*) AS n FROM scan_candidates WHERE ts >= ? AND labeled=1",
+        f"SELECT COUNT(*) AS n FROM scan_candidates WHERE {_TS_NORM} >= datetime(replace(substr(?,1,19),'T',' ')) AND labeled=1",
         (cutoff_7d,),
     )
     r_backlog = _q1(
-        "SELECT COUNT(*) AS n FROM scan_candidates WHERE labeled=0 AND ts <= ?",
+        f"SELECT COUNT(*) AS n FROM scan_candidates WHERE labeled=0 AND {_TS_NORM} <= datetime(replace(substr(?,1,19),'T',' '))",
         (cutoff_label,),
     )
 
@@ -53,8 +66,8 @@ def get_journal_health() -> dict:
 
     # ── Decision funnel (24h) ─────────────────────────────────────────────────
     funnel_rows = _q(
-        """SELECT decision, COUNT(*) AS n FROM scan_candidates
-           WHERE ts >= ? GROUP BY decision ORDER BY n DESC""",
+        f"""SELECT decision, COUNT(*) AS n FROM scan_candidates
+           WHERE {_TS_NORM} >= datetime(replace(substr(?,1,19),'T',' ')) GROUP BY decision ORDER BY n DESC""",
         (cutoff_24h,),
     )
     funnel = {r["decision"]: r["n"] for r in funnel_rows if r.get("decision")}
@@ -64,11 +77,11 @@ def get_journal_health() -> dict:
 
     # ── research_only_block counts ────────────────────────────────────────────
     research_block_24h_row = _q1(
-        "SELECT COUNT(*) AS n FROM scan_candidates WHERE ts >= ? AND decision='research_only_block'",
+        f"SELECT COUNT(*) AS n FROM scan_candidates WHERE {_TS_NORM} >= datetime(replace(substr(?,1,19),'T',' ')) AND decision='research_only_block'",
         (cutoff_24h,),
     )
     research_block_7d_row = _q1(
-        "SELECT COUNT(*) AS n FROM scan_candidates WHERE ts >= ? AND decision='research_only_block'",
+        f"SELECT COUNT(*) AS n FROM scan_candidates WHERE {_TS_NORM} >= datetime(replace(substr(?,1,19),'T',' ')) AND decision='research_only_block'",
         (cutoff_7d,),
     )
     research_only_blocks_24h = research_block_24h_row.get("n") or 0
@@ -76,9 +89,10 @@ def get_journal_health() -> dict:
 
     # ── Top veto reasons (24h) ────────────────────────────────────────────────
     veto_rows = _q(
-        """SELECT econ_reject_reason AS reason, COUNT(*) AS n
+        f"""SELECT econ_reject_reason AS reason, COUNT(*) AS n
            FROM scan_candidates
-           WHERE ts >= ? AND decision='econ_veto' AND econ_reject_reason != ''
+           WHERE {_TS_NORM} >= datetime(replace(substr(?,1,19),'T',' '))
+             AND decision='econ_veto' AND econ_reject_reason != ''
            GROUP BY econ_reject_reason ORDER BY n DESC LIMIT 5""",
         (cutoff_24h,),
     )
@@ -91,7 +105,7 @@ def get_journal_health() -> dict:
                SUM(CASE WHEN label_status='data_unavailable' THEN 1 ELSE 0 END) AS unavailable
            FROM candidate_outcomes co
            JOIN scan_candidates sc ON co.candidate_id = sc.id
-           WHERE sc.ts >= ?""",
+           WHERE datetime(replace(substr(sc.ts,1,19),'T',' ')) >= datetime(replace(substr(?,1,19),'T',' '))""",
         (cutoff_7d,),
     )
     outcomes_total = label_q.get("total") or 0

@@ -23,7 +23,7 @@ if ROOT not in sys.path:
 # ── MT-01: manual_scan calls get_crypto_tradeability ─────────────────────────
 
 
-def test_mt01_manual_scan_imports_tradeability_engine():
+def test_mt01_manual_scan_imports_tradeability_engine(monkeypatch):
     """
     The _TRADEABILITY_OK flag must be True after import — confirming the engine
     import succeeded and is wired into manual_scan.
@@ -60,7 +60,7 @@ def test_mt01_manual_scan_imports_tradeability_engine():
         setattr(st_mock, attr, lambda *a, **kw: None)
     # session_state needs dict-like behaviour
     st_mock.session_state = {}
-    sys.modules["streamlit"] = st_mock
+    monkeypatch.setitem(sys.modules, "streamlit", st_mock)
 
     # dashboard/db shim
     db_mock = types.ModuleType("db")
@@ -68,7 +68,7 @@ def test_mt01_manual_scan_imports_tradeability_engine():
     db_mock._q = lambda *a, **kw: []
     db_mock._q1 = lambda *a, **kw: {}
     db_mock.get_effective_launch_date = lambda: "2026-04-15"
-    sys.modules.setdefault("db", db_mock)
+    monkeypatch.setitem(sys.modules, "db", db_mock)
 
     # minimal data stubs
     for stub_name in ("data.positions", "data.account"):
@@ -78,7 +78,7 @@ def test_mt01_manual_scan_imports_tradeability_engine():
             m.get_perp_positions = lambda: []
             m.get_live_prices = lambda s: {}
             m.get_account = lambda: (5000.0, True, 5000.0)
-            sys.modules[stub_name] = m
+            monkeypatch.setitem(sys.modules, stub_name, m)
 
     # Ensure _ROOT is on path for runtime.crypto_tradeability
     if ROOT not in sys.path:
@@ -244,3 +244,52 @@ def test_mt05_blocked_tradeability_prevents_execution():
     # Execution guard: if blocked is True, no engine call may be made
     assert preview["blocked"] is True
     assert preview["trade_lane"] == "blocked"
+
+
+def test_mt06_manual_scan_rows_use_shared_tradeability_source():
+    """
+    Row-level executability must come from the shared tradeability engine,
+    not from execution-tier-only checks.
+    """
+    path = os.path.join(
+        ROOT, "dashboard", "widgets", "trade_approval", "manual_scan.py"
+    )
+    src = open(path, encoding="utf-8").read()
+
+    assert "_manual_tradeability(" in src, (
+        "manual_scan row and review flow must call the shared _manual_tradeability helper"
+    )
+    assert '_tier["execute"]' not in src, (
+        "manual_scan must not gate row executability directly from execution-tier-only logic"
+    )
+
+
+def test_mt07_spot_controls_use_shared_tradeability_before_open_spot():
+    """
+    Direct BTC/ETH spot buys from the widget must fail closed through the shared
+    tradeability engine before calling spot_engine.open_spot().
+    """
+    path = os.path.join(
+        ROOT, "dashboard", "widgets", "trade_approval", "manual_scan.py"
+    )
+    src = open(path, encoding="utf-8").read()
+
+    assert 'open_spot(sym, size_input' in src
+    assert '_manual_tradeability({"symbol": sym, "direction": "LONG"})' in src, (
+        "Spot buy controls must call shared tradeability before open_spot()"
+    )
+
+
+def test_mt08_spot_section_not_hidden_behind_scan_selection():
+    """
+    Spot controls must still render even when there are no scan candidates or
+    no selected crypto rows.
+    """
+    path = os.path.join(
+        ROOT, "dashboard", "widgets", "trade_approval", "manual_scan.py"
+    )
+    src = open(path, encoding="utf-8").read()
+    assert src.count("render_spot_section()") >= 5, (
+        "render_spot_section() should be reachable from the no-candidates, "
+        "no-selection, blocked-preview, and normal render paths"
+    )

@@ -28,7 +28,7 @@ A fully autonomous AI-powered trading system that:
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
 
-## Current Version: v16.3 (2026-04-16)
+## Current Version: v16.16 (2026-04-19)
 
 **Active branch:** `feature/v10-rebuild`
 **Clean paper trading started:** 2026-04-02
@@ -44,6 +44,8 @@ A fully autonomous AI-powered trading system that:
 | Position sizing | `position_manager.py` | Kelly + ATR sizing, leverage schedule, deployment caps |
 | Exit manager | `position_manager.py` | 7-priority exit stack (trailing/scale/thesis/hard-stop/risk/kill/dead-money) |
 | Perp execution | `perps_engine.py` → `execution/coinbase_broker.py` | Coinbase US nano perp-style futures; paper mode + live CDP JWT; ISOLATED margin; BTC/ETH/SOL/XRP only |
+| Spot execution | `spot_engine.py` → `execution/coinbase_spot_broker.py` | Coinbase spot BTC-USD/ETH-USD; no leverage, no shorting; one spot position max; deployment cap enforced |
+| Crypto tradeability | `runtime/crypto_tradeability.py` | Single source of truth for spot/perp/blocked routing; used by both autonomous runner and manual scan; typed blocked reasons persisted to `scan_candidates` |
 | MES execution | `scheduler/v10_runner.py` → `execution/ibkr_broker.py` | IBKR paper port 7497 (ARCHIVED — dormant) |
 | ForecastEx broker | `execution/forecastex_broker.py` | IBKR ForecastEx; SecType=OPT, Exchange=FORECASTX; clientId=3; YES=Right C / NO=Right P; economic markets only |
 | ForecastEx lane | `forecast/runner.py` | Discovery (30m), quote harvest (60s), strategy eval (5m), position monitor (30s) |
@@ -67,6 +69,7 @@ A fully autonomous AI-powered trading system that:
 | Promotion engine | `backtesting/promotion_engine.py` | Challenger state machine; `PROMOTED_PENDING_HUMAN` requires owner confirmation |
 | Config sub-package | `config/venue_specs.py` + `config/alpha_specs.py` | Venue fees + futures-native constants separated from strategy thresholds |
 | Dashboard integrity | `dashboard/data/integrity.py` | Truth-tiered metrics: verified/suspect counts, attribution coverage, exit quality, promotion state |
+| Trading control plane | `dashboard/data/trading_control.py` + `dashboard/widgets/system_settings/master_control.py` | Master SYSTEM SETTINGS view: crypto funnel, blocker classification (strategy/system/bug), forecast contradictions, truth checks |
 | Operator audits | `scripts/net_truth_audit.py` + `scripts/go_live_audit.py` | Trust-aware net-of-fee scorecards and evidence-backed launch constraints |
 | Notifications | `notifications/notification_engine.py` | SQLite only, no Telegram |
 | Dashboard | `dashboard/app.py` | Streamlit Operator Panel, 6 tabs: MISSION CONTROL, PERFORMANCE, TRADE APPROVAL, FORECAST TRADING, ARCHIVED FUTURES (MES), SYSTEM SETTINGS |
@@ -83,10 +86,17 @@ A fully autonomous AI-powered trading system that:
 
 - **Scanner sources:** Kraken Futures public REST + Binance USDM public REST + Hyperliquid public API. Live scheduler and manual scan now call `scanner.scan(..., core_only=True)`, so the operational universe is limited to `CORE_EXECUTION_UNDERLYINGS`; broad-universe scans are opt-in research mode only.
 - **Live crypto execution venue:** Coinbase US nano perp-style futures (`coinbase_broker.py`) — BIP/ETP/SLP/XPP (BTC/ETH/SOL/XRP only). Scanner, runner, and manual scan are now aligned to the core execution universe instead of spending live-cycle energy on long-tail names we do not trade.
-- **Manual scan fail-closed (v16.2):** `dashboard/widgets/trade_approval/manual_scan.py` treats execution-policy lookup failures as blocked (`tier='suppressed'`, `execute=False`) and only runs `scanner.scan(..., core_only=True)`. Dashboard execution can no longer silently fail open into non-core names.
+- **Shared crypto tradeability (v16.14+):** `runtime/crypto_tradeability.py` is now the canonical spot/perp/blocked router. `scheduler/v10_runner.py` and `dashboard/widgets/trade_approval/manual_scan.py` both call it instead of re-implementing crypto lane eligibility locally.
+- **Manual scan fail-closed (v16.2 → v16.16):** manual scan still scans `core_only=True`, but row labels, preview gating, direct spot controls, and final execute path now all defer to shared tradeability. If the tradeability engine fails, manual execution blocks with `execution_policy_unavailable`.
 - **Path timing truth (v16.2):** `learning/candidate_labeler.py` now anchors 15m/1h/4h outcome timing to `scan_candidates.ts` whenever the fetched candle index supports it. `candidate_outcomes.path_timing_evaluated` marks whether timing metrics were truly computed from available forward bars.
 - **Audit semantics (v16.2):** `scripts/path_truth_audit.py` uses only `path_timing_evaluated=1` rows as the denominator for timing reach percentages. `scripts/entry_truth_audit.py` now separates `scored_total`, `below_threshold`, and `above_threshold`, so conversion and econ-veto rates are calculated from truthful threshold-passed counts.
 - **Broker-aligned live universe (v16.3):** `CORE_EXECUTION_UNDERLYINGS` now matches the Coinbase broker-supported set exactly: `BTC`, `ETH`, `SOL`, `XRP`. Unsupported TradingView symbols are dropped before they enter the live candidate path. Default `PERP_PAIRS` / `CRYPTO_PAIRS` were tightened to the same four-name live set.
+- **Paper spot balance truth (v16.16):** `dashboard/data/balance.py:get_spot_balance_summary()` uses DB-backed paper truth in paper mode via `_paper_spot_balance_summary()` instead of placeholder zeros. Available USD = `ACCOUNT_SIZE - deployed_spot_usd`; held BTC/ETH USD comes from `open_positions` rows where `strategy` starts with `spot_`.
+- **Dashboard DB alias unification (v16.16):** `dashboard/db.py` now aliases both `db` and `dashboard.db` to the same module object via `sys.modules.setdefault(...)`, preventing split-brain `DB_PATH` truth between dashboard readers and proof harnesses.
+- **Master trading control (v16.16):** `dashboard/data/trading_control.py` and `dashboard/widgets/system_settings/master_control.py` provide one operator control plane that classifies crypto failures into strategy vs system/policy vs bug/integrity buckets, surfaces top blockers, and shows forecast truth contradictions directly in SYSTEM SETTINGS.
+- **Forecast heartbeat freshness (v16.16):** `dashboard/data/forecast.py:get_forecast_health()` treats `lane_started` as true only when `lane_runtime_state.active=1` AND the forecast heartbeat is fresh (threshold 180s). `scripts/validate.py` now warns when forecast runtime state is active but stale.
+- **Forecast runtime truth (v16.16):** `forecast/runner.py` discovery/startup now write richer `lane_runtime_state` fields (`connected`, `tradable`, `blocked_reason`, `readiness_state`, `action_needed`) so the dashboard reads runtime truth instead of guessing from partial evidence.
+- **Crypto tradeability persistence (v16.16):** `logging_db/trade_logger.py:init_db()` backfills blank `scan_candidates` tradeability fields to `tradeability_status='not_evaluated'` and preserves lane hints, so recent decision-grade candidates no longer disappear into blank dashboard truth.
 - **Coinbase auth:** CDP JWT / ES256. Credentials: `COINBASE_CDP_KEY_NAME` (organizations/{org_id}/apiKeys/{key_id}) + `COINBASE_CDP_PRIVATE_KEY` (EC PEM, \\n-escaped in .env). Paper mode: no API calls, zero credentials required.
 - **Coinbase products (CFTC-regulated, expire Dec 2030):** BIP-20DEC30-CDE (0.01 BTC/contract), ETP-20DEC30-CDE (0.1 ETH/contract), SLP-20DEC30-CDE (5 SOL/contract), XPP-20DEC30-CDE (500 XRP/contract)
 - **Coinbase fees:** 0.03% taker, 0.00% maker (Advanced Trade API direct, promotional). Round-trip cost = 0.06%.
@@ -569,6 +579,7 @@ Motivation 1-5: "Strive for greatness." / "I like criticism. It makes you strong
 | v16.1 | 2026-04-16 | Audit/version cleanup: entry_truth_audit fixed for real DB schema, symbol class audit uses actual underlyings, UTC timestamp hygiene aligned, docs/version truth fixed, 319 proof tests |
 | v16.2 | 2026-04-16 | Truth hardening + core-only alignment: scanner/runner/manual scan default to core-only universe, manual scan fails closed on policy lookup errors, candidate timing anchored to candidate ts with path_timing_evaluated flag, path_truth_audit denominator fixed, entry_truth_audit threshold math fixed, scanner EV journaling fallback corrected, 325 proof tests |
 | v16.3 | 2026-04-16 | Live universe alignment: CORE_EXECUTION_UNDERLYINGS reduced to actual Coinbase-supported BTC/ETH/SOL/XRP set, TradingView live candidates filtered through execution policy, default crypto/perp pair lists tightened to supported coins, proof coverage updated |
+| v16.16 | 2026-04-19 | Truth-control pass: master trading control dashboard, DB-first scanner/control-plane truth, shared manual-scan tradeability on rows/preview/spot controls, paper spot balance summary from DB, dashboard DB alias unification, forecast heartbeat freshness + richer runtime-state truth, 408 proof tests |
 
 ## GitHub
 - Repository: `futureisnowtech/trading-bot-main` (private)

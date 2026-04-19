@@ -161,8 +161,12 @@ def main():
         active=1,
         configured=1,
         mode=_rt_mode,
-        health="OK",
-        readiness_state="OPERATIONAL",
+        health="UNKNOWN",
+        connected=0,
+        tradable=0,
+        capital_deployed_usd=0.0,
+        buying_power_usd=0.0,
+        readiness_state="STARTING",
     )
     # forecast lane
     upsert_lane_state(

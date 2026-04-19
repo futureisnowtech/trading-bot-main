@@ -362,19 +362,36 @@ def check_exits(
         )
 
     # ── Priority 5: Risk forced exit ──────────────────────────────────────
-    # Kill threshold = 75% of configured account size (not hardcoded $10K architecture)
+    # Live and paper must use the same baseline policy as kill_switch.py.
+    _kill_floor = 0.0
+    _kill_desc = ""
     try:
-        from config import ACCOUNT_SIZE as _ACCT
+        is_paper = bool(position.get("paper", True))
+        if is_paper:
+            from config import ACCOUNT_SIZE as _ACCT
 
-        _kill_floor = float(_ACCT) * 0.75
+            _kill_floor = float(_ACCT) * 0.75
+            _kill_desc = f"75% of paper account ${float(_ACCT):.0f}"
+        else:
+            import kill_switch as _ks
+
+            _ks_status = _ks.get_status()
+            _kill_floor = float(_ks_status.get("live_threshold") or 0.0)
+            _baseline = float(_ks_status.get("live_baseline") or 0.0)
+            if _kill_floor > 0 and _baseline > 0:
+                _kill_desc = f"50% of live baseline ${_baseline:.2f}"
     except Exception:
-        _kill_floor = 7500.0
+        _kill_floor = 0.0
+        _kill_desc = ""
     if account_balance < _kill_floor:
+        _reason = f"Balance ${account_balance:.0f} below kill threshold ${_kill_floor:.0f}"
+        if _kill_desc:
+            _reason += f" ({_kill_desc})"
         return ExitDecision(
             True,
             5,
             "risk_forced",
-            f"Balance ${account_balance:.0f} below kill threshold ${_kill_floor:.0f}",
+            _reason,
             1.0,
         )
 

@@ -457,6 +457,79 @@ def _get_deployed_usd(open_positions: Dict) -> float:
     return sum(float(p.get("position_usd", 0)) for p in open_positions.values())
 
 
+def _write_crypto_lane_runtime(open_positions: Optional[Dict] = None) -> None:
+    """Persist current crypto lane runtime truth for dashboard / launcher surfaces."""
+    try:
+        from runtime.runtime_state import upsert_lane_state
+
+        perps = _import_perps_engine()
+        broker = perps._get_broker(testnet=True) if perps is not None else None
+        connected = bool(broker and broker.is_connected())
+        if broker is not None and not connected and not _paper:
+            try:
+                connected = bool(broker.connect())
+            except Exception:
+                connected = False
+
+        if open_positions is None and perps is not None:
+            try:
+                open_positions = perps.get_open_positions()
+            except Exception:
+                open_positions = {}
+        open_positions = open_positions or {}
+
+        buying_power = float(_get_account_balance() or 0.0)
+        deployed_usd = float(_get_deployed_usd(open_positions))
+        positions_open = len(open_positions)
+
+        ks = _import_kill_switch()
+        kill_halted = bool(ks and ks.is_halted())
+
+        health = "OK"
+        readiness = "OPERATIONAL"
+        blocked_reason = ""
+        action_needed = ""
+        tradable = 1
+
+        if not connected and not _paper:
+            health = "WARN"
+            readiness = "BROKER_DISCONNECTED"
+            blocked_reason = "broker_disconnected"
+            action_needed = "check_coinbase_live_connection"
+            tradable = 0
+        elif buying_power <= 0:
+            health = "WARN"
+            readiness = "NO_BUYING_POWER"
+            blocked_reason = "no_buying_power"
+            action_needed = "fund_account_or_check_balance_sync"
+            tradable = 0
+        elif kill_halted:
+            health = "WARN"
+            readiness = "KILL_SWITCH_ACTIVE"
+            blocked_reason = "kill_switch_active"
+            action_needed = "review_kill_switch_trigger"
+            tradable = 0
+
+        upsert_lane_state(
+            "crypto",
+            enabled=1,
+            active=1,
+            configured=1,
+            mode="paper" if _paper else "live",
+            connected=int(connected or _paper),
+            tradable=int(tradable),
+            health=health,
+            blocked_reason=blocked_reason,
+            action_needed=action_needed,
+            positions_open=positions_open,
+            capital_deployed_usd=round(deployed_usd, 2),
+            buying_power_usd=round(buying_power, 2),
+            readiness_state=readiness,
+        )
+    except Exception as e:
+        logger.debug(f"[v10] crypto lane runtime write error: {e}")
+
+
 # ── scan_and_trade ────────────────────────────────────────────────────────────
 
 
@@ -515,6 +588,7 @@ def _scan_and_trade_inner():
 
     open_symbols = list(open_pos.keys())
     deployed_usd = _get_deployed_usd(open_pos)
+    _write_crypto_lane_runtime(open_pos)
 
     # Check for fresh TradingView signals — promote them to priority candidates
     global _seen_tv_signal_keys
@@ -2145,6 +2219,7 @@ def kill_switch_monitor():
             return
         current = _get_account_balance()
         ks.check_balance(current, _initial_balance, paper=_paper)
+        _write_crypto_lane_runtime()
     except Exception as e:
         logger.debug(f"[v10] kill_switch_monitor error: {e}")
 
@@ -2708,13 +2783,10 @@ def run_forever():
     # Periodic system + crypto lane heartbeat (every 1 minute)
     def _write_heartbeat():
         try:
-            from runtime.runtime_state import write_system_heartbeat, upsert_lane_state
-            from datetime import datetime, timezone
+            from runtime.runtime_state import write_system_heartbeat
 
             write_system_heartbeat()
-            upsert_lane_state(
-                "crypto", last_heartbeat_at=datetime.now(timezone.utc).isoformat()
-            )
+            _write_crypto_lane_runtime()
         except Exception:
             pass
 

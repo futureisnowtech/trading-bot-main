@@ -103,6 +103,23 @@ def _load_mode() -> str | None:
         conn.close()
 
 
+def _load_crypto_lane() -> tuple[int, float, str]:
+    """Return (connected, buying_power_usd, readiness_state) for the crypto lane."""
+    if not DB_PATH.exists():
+        return 0, 0.0, ""
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        row = conn.execute(
+            "SELECT connected, buying_power_usd, readiness_state "
+            "FROM lane_runtime_state WHERE lane_id='crypto' ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        if not row:
+            return 0, 0.0, ""
+        return int(row[0] or 0), float(row[1] or 0.0), str(row[2] or "")
+    finally:
+        conn.close()
+
+
 def _coinbase_live_ready() -> None:
     print("[go_live] Verifying Coinbase live auth...")
     from execution.coinbase_broker import CoinbaseBroker
@@ -193,14 +210,20 @@ def main() -> int:
         deadline = time.time() + 20
         while time.time() < deadline:
             mode = _load_mode()
-            if mode == "live":
-                print("[go_live] Runtime state confirms mode=live")
+            connected, buying_power, readiness = _load_crypto_lane()
+            if mode == "live" and connected and buying_power > 0:
+                print(
+                    "[go_live] Runtime state confirms mode=live "
+                    f"and crypto connected=1 buying_power=${buying_power:,.2f} "
+                    f"readiness={readiness or 'UNKNOWN'}"
+                )
                 print(f"[go_live] Log: {LIVE_LOG}")
                 return 0
             time.sleep(1)
 
         raise RuntimeError(
-            "Live bot did not confirm mode=live in system_runtime_state within 20 seconds. "
+            "Live bot did not confirm mode=live with a connected crypto lane and non-zero buying power "
+            "in runtime state within 20 seconds. "
             f"Check {LIVE_LOG}"
         )
     except Exception:

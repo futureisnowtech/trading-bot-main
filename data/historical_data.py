@@ -436,7 +436,40 @@ def get_candles(symbol: str, timeframe: str = "5m", limit: int = 200) -> pd.Data
             )
             return hl_df
 
-        # HL failed — try Binance (unlikely to work for short names, but cheap attempt)
+        # HL failed — try a crypto-safe Binance/yfinance alias first for bare
+        # core symbols (BTC → BTCUSDT → BTC-USD) so we never fall into the
+        # stock/ETF ticker collision path (e.g. BTC stock ≈ $34).
+        _alias = f"{symbol.upper()}USDT" if symbol.isalpha() and symbol.isupper() else ""
+        if _alias and _alias != symbol:
+            df = _fetch_and_store(_alias, timeframe, start_ms, limit, bar_ms, now_ms)
+            if df is not None and not df.empty:
+                try:
+                    rows_alias = []
+                    for ts, row in df.iterrows():
+                        ts_ms = (
+                            int(ts.timestamp() * 1000)
+                            if hasattr(ts, "timestamp")
+                            else int(ts) * 1000
+                        )
+                        rows_alias.append(
+                            [
+                                ts_ms,
+                                row["open"],
+                                row["high"],
+                                row["low"],
+                                row["close"],
+                                row["volume"],
+                            ]
+                        )
+                    _save_to_db(symbol, timeframe, rows_alias)
+                except Exception:
+                    pass
+                logger.debug(
+                    f"[historical_data] crypto alias fallback OK {symbol}→{_alias} {timeframe}"
+                )
+                return df.tail(limit)
+
+        # Alias failed — try the original symbol as a cheap last crypto attempt.
         df = _fetch_and_store(symbol, timeframe, start_ms, limit, bar_ms, now_ms)
         if df is not None and not df.empty:
             return df.tail(limit)

@@ -1306,6 +1306,32 @@ def _attempt_entry(
             logger.debug(f"[v10] RBI multiplier error: {e}")
     size_usd *= rbi_mult
 
+    # Bump to minimum contract size if needed (broker rejects sub-contract orders)
+    if not _paper:
+        try:
+            from execution.coinbase_broker import PRODUCT_SPECS
+            from runtime.execution_universe import get_execution_policy
+
+            _pol = get_execution_policy(symbol)
+            _exec_sym = _pol.get("underlying", symbol) if _pol else symbol
+            _spec = PRODUCT_SPECS.get(_exec_sym, {})
+            _min_contract = current_price * _spec.get("contract_size", 0)
+            if _min_contract > 0 and size_usd < _min_contract * 1.02:
+                _bumped = _min_contract * 1.02
+                _cap = balance * 0.15  # never force more than 15% of account
+                if _bumped > _cap:
+                    logger.warning(
+                        f"[v10] {symbol} min contract ${_min_contract:.0f} > 15% of account — skip"
+                    )
+                    return "sizing_zero"
+                logger.info(
+                    f"[v10] {symbol} size bumped ${size_usd:.0f} → ${_bumped:.0f} "
+                    f"(min contract ${_min_contract:.0f})"
+                )
+                size_usd = _bumped
+        except Exception as _ce:
+            logger.debug(f"[v10] min contract check error: {_ce}")
+
     if size_usd < 10.0:
         logger.debug(f"[v10] {symbol} size ${size_usd:.2f} too small, skip")
         _journal_scan_candidate(

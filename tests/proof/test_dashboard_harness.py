@@ -121,6 +121,10 @@ def test_operator_panel_renders_all_tabs_with_widget_stubs(monkeypatch):
             "render_forecast_trading",
             "forecast-trading",
         ),
+        "widgets.system_settings.master_control": (
+            "render_master_control",
+            "master-control",
+        ),
         "widgets.system_settings.dev_config": ("render_dev_config", "dev-config"),
     }
 
@@ -143,6 +147,7 @@ def test_operator_panel_renders_all_tabs_with_widget_stubs(monkeypatch):
     rendered = [node.value for node in at.markdown]
     assert any("stub:system-health" in value for value in rendered)
     assert any("stub:deep-analysis" in value for value in rendered)
+    assert any("stub:master-control" in value for value in rendered)
     assert any("stub:dev-config" in value for value in rendered)
 
 

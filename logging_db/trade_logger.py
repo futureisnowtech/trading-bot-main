@@ -376,8 +376,76 @@ def init_db() -> None:
     except Exception:
         pass
 
+    try:
+        _backfill_tradeability_truth(cur)
+    except Exception:
+        pass
+
     conn.commit()
     conn.close()
+
+
+def _backfill_tradeability_truth(cur) -> None:
+    """
+    Backfill route hints for older scan_candidates rows created before the
+    shared tradeability engine wrote canonical fields.
+
+    We only write stable policy-level hints here:
+      - recommended_lane
+      - tradeability_status = 'not_evaluated'
+      - trade_source_reason = 'not_applicable'
+
+    Existing non-empty rows are preserved.
+    """
+    try:
+        from runtime.crypto_tradeability import get_recommended_crypto_lane
+    except Exception:
+        return
+
+    try:
+        rows = cur.execute(
+            """
+            SELECT id, symbol, direction, paper
+            FROM scan_candidates
+            WHERE COALESCE(recommended_lane, '') = ''
+            ORDER BY id DESC
+            LIMIT 25000
+            """
+        ).fetchall()
+    except Exception:
+        return
+
+    for row in rows:
+        try:
+            row_id = row[0]
+            symbol = row[1] or ""
+            direction = row[2] or "LONG"
+            paper = bool(row[3])
+            if not symbol:
+                continue
+            lane = get_recommended_crypto_lane(
+                symbol,
+                direction,
+                live=not paper,
+            )
+            cur.execute(
+                """
+                UPDATE scan_candidates
+                SET recommended_lane = ?,
+                    tradeability_status = CASE
+                        WHEN COALESCE(tradeability_status, '') = '' THEN 'not_evaluated'
+                        ELSE tradeability_status
+                    END,
+                    trade_source_reason = CASE
+                        WHEN COALESCE(trade_source_reason, '') = '' THEN 'not_applicable'
+                        ELSE trade_source_reason
+                    END
+                WHERE id = ?
+                """,
+                (lane, row_id),
+            )
+        except Exception:
+            continue
 
 
 # ── Logger handle (singleton per process) ────────────────────────────────────

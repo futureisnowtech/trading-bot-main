@@ -211,6 +211,37 @@ def _journal_scan_candidate(
         )
 
 
+def _tradeability_hint(symbol: str, direction: str, candidate: dict, *, live: bool) -> dict:
+    """
+    Lightweight policy-only lane hint used for early journaling rows.
+
+    This intentionally avoids runtime eligibility checks so below-threshold /
+    econ-veto / duplicate-block rows still carry a stable route recommendation
+    without forcing balance/position checks for every candidate.
+    """
+    hint = {
+        "recommended_lane": "",
+        "tradeability_status": "not_evaluated",
+        "trade_blocked_reason": "",
+        "trade_size_block_reason": "none",
+        "trade_source_reason": "not_applicable",
+        "manual_executable": 0,
+        "auto_executable": 0,
+    }
+    try:
+        from runtime.crypto_tradeability import get_recommended_crypto_lane
+
+        hint["recommended_lane"] = get_recommended_crypto_lane(
+            symbol,
+            direction,
+            candidate,
+            live=live,
+        )
+    except Exception:
+        pass
+    return hint
+
+
 # ── TradingView signal helpers ────────────────────────────────────────────────
 
 
@@ -586,6 +617,12 @@ def _scan_and_trade_inner():
     for candidate in candidates:
         symbol = candidate.get("symbol", "")
         direction = candidate.get("direction", "LONG")
+        _route_hint = _tradeability_hint(
+            symbol,
+            direction,
+            candidate,
+            live=not _paper,
+        )
 
         # ── Symbol suppression — skip confirmed structural losers ─────────────
         if symbol in SUPPRESSED_SYMBOLS:
@@ -606,6 +643,7 @@ def _scan_and_trade_inner():
                 candidate,
                 "dual_exposure_block",
                 entry_block_reason="already in memory (exact symbol)",
+                **_route_hint,
             )
             continue
 
@@ -630,6 +668,7 @@ def _scan_and_trade_inner():
                     candidate,
                     "dual_exposure_block",
                     entry_block_reason="exact symbol in SQLite open_positions",
+                    **_route_hint,
                 )
                 continue
             if _underlying in _open_underlyings:
@@ -648,6 +687,7 @@ def _scan_and_trade_inner():
                     candidate,
                     "dual_exposure_block",
                     entry_block_reason=f"underlying={_underlying} open as {_conflict}",
+                    **_route_hint,
                 )
                 continue
         except Exception:
@@ -664,6 +704,7 @@ def _scan_and_trade_inner():
                     candidate,
                     "risk_block",
                     entry_block_reason=reason,
+                    **_route_hint,
                 )
                 break  # stop trying more candidates
 
@@ -993,6 +1034,12 @@ def _attempt_entry(
 
     _tech_score = float(result.get("technical_score", 0.0))
     _ml_score = float(result.get("ml_score", 50.0))
+    _route_hint = _tradeability_hint(
+        symbol,
+        direction,
+        candidate,
+        live=not _paper,
+    )
 
     if primary_setup:
         if composite < _TIER1_COMPOSITE_FLOOR:
@@ -1012,6 +1059,7 @@ def _attempt_entry(
                 entry_threshold=_TIER1_COMPOSITE_FLOOR,
                 should_enter_signal=0,
                 entry_block_reason=f"tier1 composite {composite:.1f} < floor {_TIER1_COMPOSITE_FLOOR}",
+                **_route_hint,
             )
             return "below_threshold"
         tier = 1
@@ -1044,6 +1092,7 @@ def _attempt_entry(
             entry_threshold=50.0,
             should_enter_signal=0,
             entry_block_reason=f"composite {composite:.1f} < 50 (no setup, no tier2 score)",
+            **_route_hint,
         )
         return "below_threshold"
 
@@ -1163,6 +1212,7 @@ def _attempt_entry(
                 econ_reject_reason=reason,
                 edge_score=float(econ.get("edge_score", 0.0)),
                 entry_block_reason=f"economics: {reason}",
+                **_route_hint,
             )
             return "econ_veto"
     except ImportError:
@@ -1196,6 +1246,7 @@ def _attempt_entry(
                 should_enter_signal=1,
                 econ_approved=1,
                 entry_block_reason=f"non_core_execution_universe:{underlying}",
+                **_route_hint,
             )
             return "research_only_block"
     except Exception as _eu_err:
@@ -1302,6 +1353,13 @@ def _attempt_entry(
                     should_enter_signal=1,
                     econ_approved=1,
                     entry_block_reason="",
+                    recommended_lane=_trade.get("recommended_lane", ""),
+                    tradeability_status=_trade.get("status", "executable"),
+                    trade_blocked_reason=_trade.get("blocked_reason", ""),
+                    trade_size_block_reason=_trade.get("size_block_reason", "none"),
+                    trade_source_reason=_trade.get("source_reason", "trusted_source"),
+                    manual_executable=int(_trade.get("manual_executable", 0)),
+                    auto_executable=int(_trade.get("auto_executable", 0)),
                 )
                 return "entered"
             else:
@@ -1393,6 +1451,13 @@ def _attempt_entry(
             size_usd=size_usd,
             leverage=sizing.get("leverage", 3),
             entry_block_reason=f"size ${size_usd:.2f} < $10 minimum",
+            recommended_lane=_trade.get("recommended_lane", ""),
+            tradeability_status=_trade.get("status", "executable"),
+            trade_blocked_reason="",
+            trade_size_block_reason="none",
+            trade_source_reason=_trade.get("source_reason", "trusted_source"),
+            manual_executable=int(_trade.get("manual_executable", 0)),
+            auto_executable=int(_trade.get("auto_executable", 0)),
         )
         return "sizing_zero"
 
@@ -1463,6 +1528,13 @@ def _attempt_entry(
             size_usd=size_usd,
             leverage=leverage,
             entry_block_reason="open_long/short returned None",
+            recommended_lane=_trade.get("recommended_lane", ""),
+            tradeability_status=_trade.get("status", "executable"),
+            trade_blocked_reason="",
+            trade_size_block_reason=_trade.get("size_block_reason", "none"),
+            trade_source_reason=_trade.get("source_reason", "trusted_source"),
+            manual_executable=int(_trade.get("manual_executable", 0)),
+            auto_executable=int(_trade.get("auto_executable", 0)),
         )
         return "execution_failed"
 
@@ -1490,6 +1562,13 @@ def _attempt_entry(
         edge_score=float(candidate.get("edge_score", 0.5)),
         size_usd=size_usd,
         leverage=leverage,
+        recommended_lane=_trade.get("recommended_lane", ""),
+        tradeability_status=_trade.get("status", "executable"),
+        trade_blocked_reason="",
+        trade_size_block_reason=_trade.get("size_block_reason", "none"),
+        trade_source_reason=_trade.get("source_reason", "trusted_source"),
+        manual_executable=int(_trade.get("manual_executable", 0)),
+        auto_executable=int(_trade.get("auto_executable", 0)),
     )
 
     # Persist 57-feature snapshot keyed to this trade for ML training.

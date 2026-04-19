@@ -1,6 +1,13 @@
 """
-dashboard/data/scanner_data.py — Scanner status, funnel steps, log summary.
+dashboard/data/scanner_data.py — Scanner status, funnel truth, log summary.
 Named scanner_data to avoid shadowing the project-root scanner.py.
+
+Primary source of truth:
+  - scan_funnels
+  - scan_candidates
+  - lane_runtime_state
+
+Log parsing remains as a fallback only when the DB truth surfaces are absent.
 """
 
 import re
@@ -69,6 +76,90 @@ def get_last_scan_age():
 
 
 def get_scan_status():
+    db_result = _get_scan_status_from_db()
+    if db_result is not None:
+        return db_result
+
+    return _get_scan_status_from_logs()
+
+
+def _get_scan_status_from_db():
+    """Preferred truth path using scan_funnels + scan_candidates."""
+    try:
+        lane_row = _q1(
+            """
+            SELECT last_heartbeat_at, capital_deployed_usd, buying_power_usd
+            FROM lane_runtime_state
+            WHERE lane_id='crypto'
+            ORDER BY id DESC LIMIT 1
+            """
+        )
+        f = _q1(
+            """
+            SELECT *
+            FROM scan_funnels
+            ORDER BY id DESC LIMIT 1
+            """
+        )
+        if not f:
+            return None
+
+        scan_id = f.get("scan_id", "")
+        candidates = []
+        if scan_id:
+            candidates = _q(
+                """
+                SELECT symbol, direction, COALESCE(volume_24h_usd, 0) AS volume_24h_usd,
+                       COALESCE(edge_score, 0) AS edge_score,
+                       COALESCE(scanner_expected_profit, 0) AS expected_profit,
+                       COALESCE(recommended_lane, '') AS recommended_lane,
+                       COALESCE(tradeability_status, '') AS tradeability_status,
+                       COALESCE(primary_setup, '') AS primary_setup
+                FROM scan_candidates
+                WHERE scan_id=?
+                ORDER BY id DESC
+                LIMIT 8
+                """,
+                (scan_id,),
+            )
+
+        hb_age = get_last_scan_age()
+        count = int(f.get("scanner_candidates_total") or 0)
+        steps = []
+        stage_rows = [
+            ("Scored", int(f.get("scored_total") or 0)),
+            ("Econ passed", int(f.get("econ_passed_total") or 0)),
+            ("Final entryable", int(f.get("final_entryable_total") or 0)),
+            ("Entered", int(f.get("entered") or 0)),
+        ]
+        prev_in = count
+        for idx, (label, out_val) in enumerate(stage_rows, start=1):
+            dropped = max(prev_in - out_val, 0)
+            steps.append(
+                {
+                    "step": idx,
+                    "in": prev_in,
+                    "out": out_val,
+                    "dropped": dropped,
+                    "label": label,
+                }
+            )
+            prev_in = out_val
+
+        return {
+            "age_s": hb_age,
+            "count": count,
+            "candidates": candidates,
+            "steps": steps,
+            "duration_s": 0.0,
+            "balance": float(lane_row.get("buying_power_usd") or 0.0),
+            "deployed": float(lane_row.get("capital_deployed_usd") or 0.0),
+        }
+    except Exception:
+        return None
+
+
+def _get_scan_status_from_logs():
     lines = _tail_log(800)
     result = {
         "age_s": 9999,

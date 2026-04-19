@@ -339,12 +339,12 @@ def _evaluate_tradeability(
     # BTC/ETH LONG → prefer spot when it's active; otherwise prefer perp.
     # SHORT always perp.
     spot_eligible_symbol = underlying in ("BTC", "ETH") and direction == "LONG"
-    if spot_eligible_symbol and spot_active:
-        recommended_lane = "spot"
-    elif perp_supported:
-        recommended_lane = "perp"
-    else:
-        recommended_lane = "blocked"
+    recommended_lane = _policy_recommended_lane(
+        underlying,
+        direction,
+        spot_active=spot_active,
+        perp_supported=perp_supported,
+    )
 
     # ── 5. Evaluate SPOT lane ─────────────────────────────────────────────────
     spot_blocked_reason = _check_spot_eligibility(
@@ -590,12 +590,47 @@ def get_recommended_crypto_lane(
 ) -> str:
     """
     Return recommended lane string: "spot" | "perp" | "blocked".
-    Does not check runtime state (positions, balance) — policy only.
+    Pure policy only: does not look at positions, balances, deployment, or
+    contract-minimum runtime state.
     """
     try:
-        result = get_crypto_tradeability(
-            symbol, direction, candidate, live=live, manual=True
+        clean_direction = direction.upper().strip()
+        underlying = _normalise_underlying(symbol)
+        if not underlying:
+            return "blocked"
+
+        from config import SPOT_LANE_ACTIVE, CORE_EXECUTION_UNDERLYINGS
+
+        spot_active = bool(SPOT_LANE_ACTIVE)
+        try:
+            from execution.coinbase_broker import PRODUCT_SPECS
+
+            perp_supported = underlying in PRODUCT_SPECS
+        except Exception:
+            perp_supported = underlying in {
+                s.upper() for s in CORE_EXECUTION_UNDERLYINGS
+            }
+
+        return _policy_recommended_lane(
+            underlying,
+            clean_direction,
+            spot_active=spot_active,
+            perp_supported=perp_supported,
         )
-        return result.get("recommended_lane", "blocked")
     except Exception:
         return "blocked"
+
+
+def _policy_recommended_lane(
+    underlying: str,
+    direction: str,
+    *,
+    spot_active: bool,
+    perp_supported: bool,
+) -> str:
+    """Pure route ownership policy with no runtime-state checks."""
+    if underlying in ("BTC", "ETH") and direction == "LONG" and spot_active:
+        return "spot"
+    if perp_supported:
+        return "perp"
+    return "blocked"

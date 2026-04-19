@@ -71,6 +71,7 @@ from widgets.trade_approval.manual_scan import render_manual_scan
 from widgets.trade_approval.scan_breakdown import render_scan_breakdown
 from widgets.futures.mes_dashboard import render_futures
 from widgets.forecast.forecast_dashboard import render_forecast_trading
+from widgets.system_settings.master_control import render_master_control
 from widgets.system_settings.dev_config import render_dev_config
 
 
@@ -202,6 +203,8 @@ To reactivate: set <code>FUTURES_LANE_ACTIVE=true</code> and restart the bot.
     # ── Tab 5: SYSTEM SETTINGS ─────────────────────────────────────────────────
     with tab_ss:
         st.caption("All tuning knobs, signal scoring rules, and raw system constants.")
+        render_master_control()
+        st.divider()
         render_dev_config()
 
 

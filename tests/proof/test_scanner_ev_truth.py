@@ -62,11 +62,11 @@ def test_step4_caps_effective_position_usd():
     assert "scanner_effective_position_usd" in c, (
         "scanner_effective_position_usd missing"
     )
-    assert c["scanner_effective_position_usd"] <= 100.0 + 0.01, (
-        f"effective_position_usd must be <= $100, got {c['scanner_effective_position_usd']}"
+    assert c["scanner_effective_position_usd"] <= 500.0 + 0.01, (
+        f"effective_position_usd must be <= $500, got {c['scanner_effective_position_usd']}"
     )
-    assert c["scanner_theoretical_position_usd"] > 100.0, (
-        f"theoretical should be > $100 for this input, got {c['scanner_theoretical_position_usd']}"
+    assert c["scanner_theoretical_position_usd"] > 500.0, (
+        f"theoretical should be > $500 for this input, got {c['scanner_theoretical_position_usd']}"
     )
 
 

@@ -1,5 +1,8 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
+## 2026-04-20
+- fix(MES): use lastTradeDateOrContractMonth for contract lookup; add reqMarketDataType(3) for delayed data; fix forecast discovery interval 30min→5min
+
 ## 2026-04-19
 - feat: remove spot_position_already_open and same-direction perp block — allow adding to positions
 

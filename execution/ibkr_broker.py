@@ -73,31 +73,14 @@ IBKR_COMMISSION = 0.47  # $ per contract per side
 def _get_mes_contract():
     from ib_insync import Future
 
-    # localSymbol (e.g. 'MESM6') is the most reliable identifier — IBKR assigns
-    # it directly and it never causes Error 200 "No security definition" unlike
-    # lastTradeDateOrContractMonth which can fail if the contract hasn't been
-    # pre-loaded in TWS's contract database.
-    # Mapping: Q1=H, Q2=M, Q3=U, Q4=Z  → June 2026 = M6
-    year_str = MES_EXPIRY[2:4]  # '20260619' → '26'
-    month_code = {
-        "01": "F",
-        "02": "G",
-        "03": "H",
-        "04": "J",
-        "05": "K",
-        "06": "M",
-        "07": "N",
-        "08": "Q",
-        "09": "U",
-        "10": "V",
-        "11": "X",
-        "12": "Z",
-    }
-    month_str = MES_EXPIRY[4:6]  # '06'
-    local_sym = f"MES{month_code.get(month_str, 'M')}{year_str}"  # e.g. 'MESM26'
+    # Primary: symbol+expiry approach for account U250288849 (live).
+    # localSymbol='MESM26' returns Error 200 on this account regardless of exchange.
+    # Use lastTradeDateOrContractMonth (YYYYMM) which works when secdefil farm is up.
+    expiry_ym = MES_EXPIRY[:6]  # '20260619' → '202606'
     return Future(
-        localSymbol=local_sym,
-        exchange="GLOBEX",
+        symbol="MES",
+        lastTradeDateOrContractMonth=expiry_ym,
+        exchange="CME",
         currency="USD",
         multiplier="5",
     )
@@ -227,6 +210,7 @@ class IBKRBroker:
         """Fetch live MES price from TWS market data (runs on persistent loop)."""
         contract = _get_mes_contract()
         await self._ib.qualifyContractsAsync(contract)
+        self._ib.reqMarketDataType(3)  # delayed data — no subscription needed
         ticker = self._ib.reqMktData(contract, "", False, False)
         await asyncio.sleep(1.5)  # allow snapshot data to arrive
         price = None

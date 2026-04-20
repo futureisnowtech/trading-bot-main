@@ -176,9 +176,10 @@ Fully autonomous AI trading system: scans Kraken Futures + Binance USDM + Hyperl
 
 ### MES Futures — Critical Contract Facts (v13.9)
 
-- Contract resolved via `localSymbol='MESM26'` + `multiplier='5'` — NOT `lastTradeDateOrContractMonth`. Date-string form fails when contract isn't in TWS's DB.
-- `_get_mes_contract()` derives `localSymbol` from `MES_EXPIRY` (month codes: 03→H, 06→M, 09→U, 12→Z). Update `MES_EXPIRY` in `.env` on each quarterly roll.
-- Current: `MES_EXPIRY=20260619` → `localSymbol=MESM26`
+- Contract resolved via `lastTradeDateOrContractMonth=expiry_ym` (YYYYMM from MES_EXPIRY[:6]) + `exchange='CME'`. IBKR resolves to `conId=770561194, localSymbol='MESM6'` for June 2026. localSymbol approach returns Error 200 on U250288849.
+- `_get_mes_contract()` uses `symbol='MES'` + `lastTradeDateOrContractMonth=MES_EXPIRY[:6]`. Update `MES_EXPIRY` in `.env` on each quarterly roll.
+- Current: `MES_EXPIRY=20260619` → IBKR resolves to `localSymbol='MESM6'` (single-digit year, not MESM26)
+- Market data subscription not enabled for U250288849 — bot uses `reqMarketDataType(3)` (delayed) as fallback; price data flows with Warning 10167 (not an error).
 - Position dict keys from `buy_mes`/`short_mes`: `"entry"` (not `"entry_price"`), `"side"` (`"LONG"` or `"SHORT"`), `"qty"` (always positive integer).
 - **Never use `qty > 0` to determine direction** — always `pos.get("side") == "LONG"`.
 - Python 3.14: background thread must call `asyncio.set_event_loop(loop)` before `run_forever()`.
@@ -311,7 +312,7 @@ Set `TV_WEBHOOK_SECRET` in .env. Symbol mapping: BTCUSD → BTCUSDT.
 | launchd not starting | `launchctl list \| grep algotrading`; check `logs/service/bot_error.log` |
 | Kraken scanner empty | Check internet / futures.kraken.com |
 | ML gate always 0.5 | Not enough clean trades yet (< MIN_TRADES_FOR_ML). Normal early paper phase. |
-| IBKR Error 200 | Use `localSymbol='MESxxx'` not `lastTradeDateOrContractMonth` |
+| IBKR Error 200 on MES | Use `lastTradeDateOrContractMonth=MES_EXPIRY[:6]` + `exchange='CME'`; localSymbol fails on U250288849 |
 
 ## Version History
 

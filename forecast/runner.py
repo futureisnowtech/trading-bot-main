@@ -468,7 +468,7 @@ def start_forecast_lane(bankroll: float = 100.0) -> None:
     run_discovery_cycle()
 
     # Register scheduler jobs
-    schedule.every(30).minutes.do(run_discovery_cycle)
+    schedule.every(5).minutes.do(run_discovery_cycle)
     schedule.every(5).minutes.do(lambda: run_strategy_cycle(bankroll))
     schedule.every(30).seconds.do(run_position_monitor)
 

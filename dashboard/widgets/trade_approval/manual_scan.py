@@ -854,7 +854,15 @@ def render_manual_scan():
 
                         stop_p = round(price - stop_dist, 6)
                         target_p = round(price + target_dist, 6)
-                        pos = _se_exec.open_spot(exec_sym, pos_usd, paper=_exec_paper)
+                        try:
+                            pos = _se_exec.open_spot(
+                                exec_sym, pos_usd, paper=_exec_paper
+                            )
+                        except Exception as _spot_exc:
+                            results.append(
+                                (sym, dirn, False, f"spot exception: {_spot_exc}")
+                            )
+                            continue
                         if pos:
                             results.append(
                                 (
@@ -863,18 +871,23 @@ def render_manual_scan():
                                     True,
                                     f"[{mode_label}][SPOT] entered @ {pos.get('entry', price):.6g}  "
                                     f"qty={pos.get('qty', 0):.6g}  "
-                                    f"size=${pos_usd:.0f}  order={pos.get('order_id', '?')}",
+                                    f"size=${pos.get('size_usd', pos_usd):.0f}  order={pos.get('order_id', '?')}",
                                 )
                             )
                             _batch_syms.add(exec_sym)
                             _held_syms.add(exec_sym)
                         else:
+                            _se_exec._load_config()
+                            _lane_on = getattr(_se_exec, "_SPOT_LANE_ACTIVE", "?")
+                            _syms = getattr(_se_exec, "_SPOT_SYMBOLS", [])
+                            _min_sz = getattr(_se_exec, "_SPOT_MIN_ORDER_USD", 10.0)
                             results.append(
                                 (
                                     sym,
                                     dirn,
                                     False,
-                                    "spot engine returned None — check lane config",
+                                    f"spot None (lane={_lane_on}, sym_ok={exec_sym in _syms}, "
+                                    f"size=${pos_usd:.0f}>=${_min_sz:.0f}, paper={_exec_paper})",
                                 )
                             )
                     else:

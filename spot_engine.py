@@ -159,19 +159,26 @@ def open_spot(
         )
         return None
 
-    # Deployment cap
+    # Get broker
     broker = _get_broker(paper)
+
+    # Live: clamp size to available USD rather than hard-blocking
     if broker is not None and not paper:
         bal = broker.get_spot_balance()
         usd_avail = float(bal.get("usd_available", 0))
-        if usd_avail > 0:
-            cap = usd_avail * _SPOT_MAX_DEPLOYED_PCT
-            if size_usd > cap:
+        if usd_avail > 0 and size_usd > usd_avail * 0.95:
+            clamped = round(usd_avail * 0.95, 2)
+            if clamped < _SPOT_MIN_ORDER_USD:
                 logger.warning(
-                    f"[spot_engine] {clean} blocked — spot_deployment_cap_exceeded "
-                    f"(${size_usd:.2f} > {_SPOT_MAX_DEPLOYED_PCT:.0%} of ${usd_avail:.2f})"
+                    f"[spot_engine] {clean} blocked — available USD ${usd_avail:.2f} "
+                    f"below min order ${_SPOT_MIN_ORDER_USD:.2f}"
                 )
                 return None
+            logger.info(
+                f"[spot_engine] {clean} size clamped ${size_usd:.2f}→${clamped:.2f} "
+                f"(95% of available ${usd_avail:.2f})"
+            )
+            size_usd = clamped
 
     # Execute
     if broker is None:

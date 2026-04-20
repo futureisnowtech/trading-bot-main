@@ -613,7 +613,13 @@ def render_manual_scan():
         return
 
     # ── PHASE 2: Confirmation panel ───────────────────────────────────────────
-    _exec_paper = previews[0].get("exec_paper", True)
+    # Always re-read runtime paper flag — never trust stale session-state preview
+    try:
+        from db import _runtime_paper_flag as _rflag_p2
+
+        _exec_paper = bool(_rflag_p2())
+    except Exception:
+        _exec_paper = previews[0].get("exec_paper", True)
     _acct_balance = previews[0].get("acct_balance", 5000.0)
     mode_label = "PAPER" if _exec_paper else "LIVE"
     mode_color = "orange" if _exec_paper else "red"
@@ -717,6 +723,18 @@ def render_manual_scan():
     with ca:
         if st.button("Confirm & Execute", type="primary", key="ms_confirm_btn"):
             # ── PHASE 3: Execute confirmed orders ─────────────────────────────
+            # Re-read paper flag fresh at execute time — never trust stale preview cache
+            try:
+                from db import _runtime_paper_flag as _rflag_exec
+
+                _exec_paper = bool(_rflag_exec())
+            except Exception:
+                try:
+                    from config import PAPER_TRADING as _PT
+
+                    _exec_paper = bool(_PT)
+                except Exception:
+                    _exec_paper = True
             try:
                 _hd_spec = _ilu.spec_from_file_location(
                     "_root_data_historical_data",

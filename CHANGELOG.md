@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-20
+- fix(MES): set tif=GTC + outsideRth=True on bracket orders for 24/7 extended-hours trading
+
+## 2026-04-20
 - feat(MES): remove session time gates — 24/7 scanning with rolling range lock; promote MES to first-class dashboard tab
 
 ## 2026-04-20

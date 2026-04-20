@@ -290,7 +290,8 @@ class IBKRBroker:
         )
         trades = []
         for order in bracket:
-            order.outsideRth = False
+            order.outsideRth = True  # MES trades 24/7
+            order.tif = "GTC"  # prevent DAY preset from cancelling after RTH
             trade = self._ib.placeOrder(contract, order)
             trades.append(trade)
         return trades

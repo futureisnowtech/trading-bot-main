@@ -135,7 +135,7 @@ def set_live_baseline(amount: float) -> None:
 
 
 def check_balance(
-    current_balance: float, initial_balance: float = 5000.0, paper: bool = True
+    current_balance: float, initial_balance: float | None = None, paper: bool = True
 ):
     """
     Check if balance has fallen below kill threshold.
@@ -148,6 +148,14 @@ def check_balance(
                     first broker-reported balance; ~$1,966 → threshold ~$983)
     """
     global _live_baseline
+
+    if initial_balance is None:
+        try:
+            from runtime.live_account import get_live_account_size
+
+            initial_balance = float(get_live_account_size(paper=paper))
+        except Exception:
+            initial_balance = 5000.0
 
     if is_halted():
         return
@@ -163,7 +171,7 @@ def check_balance(
                 logger.info(
                     f"[kill_switch] live_baseline auto-set to ${_live_baseline:.2f}"
                 )
-            baseline = _live_baseline if _live_baseline > 0.0 else initial_balance
+            baseline = _live_baseline if _live_baseline > 0.0 else float(initial_balance)
         threshold = baseline * _LIVE_KILL_PCT
         baseline_desc = f"50% of live baseline ${baseline:.2f}"
 

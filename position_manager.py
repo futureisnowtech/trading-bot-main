@@ -368,10 +368,11 @@ def check_exits(
     try:
         is_paper = bool(position.get("paper", True))
         if is_paper:
-            from config import ACCOUNT_SIZE as _ACCT
+            from runtime.live_account import get_live_account_size
 
-            _kill_floor = float(_ACCT) * 0.75
-            _kill_desc = f"75% of paper account ${float(_ACCT):.0f}"
+            _paper_size = float(get_live_account_size(paper=True))
+            _kill_floor = _paper_size * 0.75
+            _kill_desc = f"75% of paper account ${_paper_size:.0f}"
         else:
             import kill_switch as _ks
 

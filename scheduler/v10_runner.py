@@ -432,7 +432,7 @@ def _import_incubation_manager():
 
 
 def _get_account_balance() -> float:
-    """Try broker; fall back to config ACCOUNT_SIZE."""
+    """Try broker; fall back to the canonical live/paper account-size helper."""
     perps = _import_perps_engine()
     if perps is not None:
         try:
@@ -445,9 +445,9 @@ def _get_account_balance() -> float:
             logger.debug(f"[v10] broker balance error: {e}")
 
     try:
-        from config import ACCOUNT_SIZE
+        from runtime.live_account import get_live_account_size
 
-        return float(ACCOUNT_SIZE)
+        return float(get_live_account_size(paper=_paper))
     except Exception:
         return 5000.0
 
@@ -455,6 +455,18 @@ def _get_account_balance() -> float:
 def _get_deployed_usd(open_positions: Dict) -> float:
     """Sum notional of all open positions."""
     return sum(float(p.get("position_usd", 0)) for p in open_positions.values())
+
+
+def _persist_live_account_size(balance: float) -> None:
+    """Persist the real live funded account size once it is known."""
+    if _paper or balance <= 0:
+        return
+    try:
+        from runtime.runtime_state import upsert_system_state
+
+        upsert_system_state(account_size_live=round(float(balance), 2))
+    except Exception as e:
+        logger.debug(f"[v10] live account size persist error: {e}")
 
 
 def _write_crypto_lane_runtime(open_positions: Optional[Dict] = None) -> None:
@@ -479,6 +491,7 @@ def _write_crypto_lane_runtime(open_positions: Optional[Dict] = None) -> None:
         open_positions = open_positions or {}
 
         buying_power = float(_get_account_balance() or 0.0)
+        _persist_live_account_size(buying_power)
         deployed_usd = float(_get_deployed_usd(open_positions))
         positions_open = len(open_positions)
 
@@ -2068,7 +2081,7 @@ def _evaluate_position_exit(
         #    the table.  Fail-safe: any exception here is silent and non-blocking.
         try:
             from logging_db.trade_logger import log_trade_integrity, log_exit_evaluation
-            from config import ACCOUNT_SIZE as _ACCT_SIZE
+            from runtime.live_account import get_live_account_size
 
             _close_oid = (
                 str(close_result.get("order_id", "")).strip()
@@ -2077,7 +2090,7 @@ def _evaluate_position_exit(
             _src_tag = "clean_paper_v10" if _paper else "live_v10"
 
             # Tier: quarantine impossible PnL; verify if attribution ran; else suspect
-            _acct = float(_ACCT_SIZE)
+            _acct = float(get_live_account_size(paper=_paper))
             if abs(pnl_usd) > _acct * 0.5:
                 _integ_tier = "quarantined"
                 _integ_reason = f"pnl_sanity:|{pnl_usd:.2f}|>50%_account"
@@ -2678,10 +2691,12 @@ def _init_globals():
     """Set module-level globals from config at startup."""
     global _initial_balance, _paper
     try:
-        from config import PAPER_TRADING, ACCOUNT_SIZE
+        from config import PAPER_TRADING
 
         _paper = bool(PAPER_TRADING)
-        _initial_balance = float(ACCOUNT_SIZE)
+        from runtime.live_account import get_live_account_size
+
+        _initial_balance = float(get_live_account_size(paper=_paper))
     except Exception as e:
         logger.warning(f"[v10] config read error: {e} — using defaults")
         _paper = True

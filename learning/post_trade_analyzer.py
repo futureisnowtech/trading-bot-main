@@ -417,6 +417,8 @@ def analyze_closed_trade(
             fees_usd=fee_usd,
             paper=paper,
         )
+    except ModuleNotFoundError:
+        pass
     except Exception as _te:
         print(f"[tax_tracker] record error: {_te}")
 

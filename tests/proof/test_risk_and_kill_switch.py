@@ -142,6 +142,44 @@ def test_paper_kill_switch_still_uses_75_pct(proof_runtime):
     )
 
 
+def test_live_position_manager_does_not_use_account_size_kill_floor(monkeypatch):
+    """
+    position_manager.check_exits() must honor the live kill-switch baseline
+    instead of force-exiting at 75% of config ACCOUNT_SIZE.
+    """
+    import kill_switch
+    import position_manager as pm
+
+    kill_switch.set_live_baseline(1_966.0)  # live threshold = 983
+
+    pos = {
+        "paper": False,
+        "entry_price": 2_260.0,
+        "direction": "SHORT",
+        "atr_at_entry": 20.0,
+        "stop_price": 2_500.0,
+        "peak_price": 2_200.0,
+        "entry_composite_score": 65.0,
+        "regime": "UNKNOWN",
+    }
+
+    decision = pm.check_exits(
+        position=pos,
+        current_price=2_255.0,
+        current_features=None,
+        account_balance=1_926.0,
+        total_deployed_usd=0.0,
+        margin_utilization_pct=0.0,
+        drawdown_pct=0.0,
+        kill_switch_triggered=False,
+    )
+
+    assert decision.should_exit is False, (
+        "Live positions must not risk-force exit at 75% of ACCOUNT_SIZE once "
+        "kill_switch live_baseline policy is in effect."
+    )
+
+
 def test_live_kill_switch_db_log_uses_correct_schema(proof_runtime):
     """
     After the schema-mismatch fix, triggering the kill switch must write a row

@@ -424,7 +424,10 @@ def get_candles(symbol: str, timeframe: str = "5m", limit: int = 200) -> pd.Data
         return cached.tail(limit)
 
     # ── 3. Route by symbol format ─────────────────────────────────────────────
-    is_binance_fmt = symbol.upper().endswith(_BINANCE_SUFFIXES)
+    is_binance_fmt = any(
+        symbol.upper().endswith(sfx) and len(symbol) > len(sfx)
+        for sfx in _BINANCE_SUFFIXES
+    )
 
     if not is_binance_fmt:
         # Short coin name (HEMI, LIT, SOL, HYPE, FARTCOIN …)

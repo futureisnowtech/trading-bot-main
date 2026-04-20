@@ -201,13 +201,13 @@ def get_coinbase_balance() -> dict:
         buying_power float  — futures buying power (live only, else same as balance)
         paper       bool
     """
+    paper = _balance_paper_mode()
     try:
-        from config import ACCOUNT_SIZE
+        from runtime.live_account import get_live_account_size
 
-        base = float(ACCOUNT_SIZE)
+        base = float(get_live_account_size(paper=paper))
     except Exception:
         base = 5000.0
-    paper = _balance_paper_mode()
 
     if paper:
         realized = _paper_equity(base)
@@ -284,10 +284,11 @@ def get_ibkr_balance() -> dict:
         paper       bool    — always True for paper TWS account
     """
     try:
-        from config import FUTURES_LANE_ACTIVE, ACCOUNT_SIZE
+        from config import FUTURES_LANE_ACTIVE
+        from runtime.live_account import get_live_account_size
 
         futures_enabled = bool(FUTURES_LANE_ACTIVE)
-        base = float(ACCOUNT_SIZE)
+        base = float(get_live_account_size())
     except Exception:
         futures_enabled, base = False, 5000.0
 
@@ -356,9 +357,9 @@ def get_spot_balance_summary() -> dict:
 
     if paper:
         try:
-            from config import ACCOUNT_SIZE
+            from runtime.live_account import get_live_account_size
 
-            base = float(ACCOUNT_SIZE)
+            base = float(get_live_account_size(paper=True))
         except Exception:
             base = 5000.0
         return _paper_spot_balance_summary(base)

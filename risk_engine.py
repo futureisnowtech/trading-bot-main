@@ -27,6 +27,15 @@ logger = logging.getLogger(__name__)
 
 _lock = threading.RLock()
 
+
+def _default_account_size() -> float:
+    try:
+        from runtime.live_account import get_live_account_size
+
+        return float(get_live_account_size())
+    except Exception:
+        return 5000.0
+
 # Drawdown-based position size multipliers
 _DRAWDOWN_MULT = [
     (0.05, 0.75),  # 5% DD → 75% of normal size
@@ -61,9 +70,10 @@ class RiskState:
     ]
 
     def __init__(self):
-        self.account_balance = 10000.0
-        self.peak_balance = 10000.0
-        self.daily_start_balance = 10000.0
+        _base = _default_account_size()
+        self.account_balance = _base
+        self.peak_balance = _base
+        self.daily_start_balance = _base
         self.total_deployed_usd = 0.0
         self.margin_utilization = 0.0
         self.drawdown_pct = 0.0

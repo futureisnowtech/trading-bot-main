@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS system_runtime_state (
     id                      INTEGER PRIMARY KEY DEFAULT 1,
     process_mode            TEXT,
     startup_ts              TEXT,
+    account_size_live       REAL,
     process_alive           INTEGER DEFAULT 0,
     active_lanes            TEXT DEFAULT '[]',
     global_status           TEXT DEFAULT 'OK',
@@ -90,6 +91,12 @@ def init_runtime_tables(db_path: str = DB_PATH) -> None:
     with _conn(db_path) as c:
         c.execute(_DDL_SYSTEM)
         c.execute(_DDL_LANE)
+        _sys_cols = {
+            r["name"]
+            for r in c.execute("PRAGMA table_info(system_runtime_state)").fetchall()
+        }
+        if "account_size_live" not in _sys_cols:
+            c.execute("ALTER TABLE system_runtime_state ADD COLUMN account_size_live REAL")
 
 
 # ── System-level state ────────────────────────────────────────────────────────

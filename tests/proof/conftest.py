@@ -55,6 +55,7 @@ def _reset_kill_switch() -> None:
         kill_switch._halted = False
         kill_switch._halt_reason = ""
         kill_switch._halt_ts = 0.0
+        kill_switch._live_baseline = 0.0
         kill_switch._api_errors.clear()
         kill_switch._last_latency_ms = 0.0
 

@@ -457,10 +457,6 @@ def _check_spot_eligibility(
     if not spot_active:
         return "spot_lane_disabled"
 
-    # Duplicate position gate (always enforced even in paper)
-    if _count_open_spot_positions(underlying, paper_int) > 0:
-        return "spot_position_already_open"
-
     # Paper mode: skip balance/deployment checks
     if not live:
         return "none"
@@ -513,14 +509,11 @@ def _check_perp_eligibility(
     if not live:
         return "none"
 
-    # Opposite-side block (live perp only)
+    # Opposite-side block (live perp only) — same direction is allowed (pyramiding)
     open_directions = _get_open_perp_directions(underlying, paper_int)
     for d in open_directions:
         if d.upper() != direction.upper():
             return "perp_opposite_side_block"
-        else:
-            # Same direction already open — treat as already-in-position block
-            return "perp_position_limit_reached"
 
     # Live perp count gate
     live_count = _count_open_perp_positions(0)  # live paper_int=0

@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-19
+- feat: remove spot_position_already_open and same-direction perp block — allow adding to positions
+
+## 2026-04-19
 - feat(dashboard): premium UI redesign — all 5 tabs with design system, subtabs, and candidate cards
 
 ## 2026-04-19

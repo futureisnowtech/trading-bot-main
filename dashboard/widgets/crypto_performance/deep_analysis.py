@@ -448,9 +448,10 @@ def render_deep_analysis():
             delta_color="normal" if total_unrealized >= 0 else "inverse",
         )
         try:
-            from config import MAX_DAILY_LOSS_PCT, ACCOUNT_SIZE
+            from config import MAX_DAILY_LOSS_PCT
+            from runtime.live_account import get_live_account_size
 
-            daily_limit = float(ACCOUNT_SIZE) * MAX_DAILY_LOSS_PCT
+            daily_limit = float(get_live_account_size()) * MAX_DAILY_LOSS_PCT
             c3.metric(
                 "Daily P&L",
                 _fmt_pnl(today_pnl),

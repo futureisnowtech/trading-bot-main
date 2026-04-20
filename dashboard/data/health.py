@@ -177,7 +177,7 @@ def _classify_error(source: str, message: str) -> dict:
                     'python3 -c "from risk.risk_manager import get_risk_manager; '
                     "rm=get_risk_manager(); "
                     "print('halted:', rm.is_halted, 'reason:', getattr(rm, 'halt_reason', 'none'))\"\n"
-                    "Kill-switch threshold is 75% of ACCOUNT_SIZE = $3,750 on a $5K account. "
+                    "Kill-switch threshold is 75% of live account size (read from system_runtime_state.account_size_live). "
                     "If falsely halted: read risk_manager.py.halt() and kill_switch.py.check_balance() "
                     "to find the bad condition. Fix the check, not the threshold."
                 ),
@@ -269,7 +269,7 @@ def _classify_error(source: str, message: str) -> dict:
                 'python3 -c "from kill_switch import check_balance; print(check_balance())"\n'
                 'python3 -c "from risk.risk_manager import get_risk_manager; '
                 "rm=get_risk_manager(); print('halted:', rm.is_halted)\"\n"
-                "Kill-switch fires at balance < $3,750 (75% of $5K ACCOUNT_SIZE). "
+                "Kill-switch fires at balance < 75% of live account size (system_runtime_state.account_size_live). "
                 "If halted: read kill_switch.py and risk_manager.py halt() call sites "
                 "to understand what triggered it before unhalting."
             ),

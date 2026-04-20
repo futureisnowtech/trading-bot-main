@@ -9,15 +9,19 @@ from data.positions import get_open_positions, get_perp_positions, get_live_pric
 
 
 def get_account():
-    try:
-        from config import ACCOUNT_SIZE
-
-        base = float(ACCOUNT_SIZE)
-    except Exception:
-        base = 10000.0
-
     paper_flag = _runtime_paper_flag()
     paper = bool(paper_flag)
+    try:
+        from runtime.live_account import get_live_account_size
+
+        base = float(get_live_account_size(paper=paper))
+    except Exception:
+        try:
+            from config import ACCOUNT_SIZE
+
+            base = float(ACCOUNT_SIZE)
+        except Exception:
+            base = 5000.0
     r = _q1(
         """SELECT SUM(pnl_usd) - SUM(COALESCE(fee_usd,0)) AS net_pnl FROM trades
            WHERE ts >= ? AND paper=?
@@ -106,11 +110,16 @@ def get_drawdown():
     current_val = pnls[-1]
     current_dd = max(0.0, current_peak - current_val)
     try:
-        from config import ACCOUNT_SIZE
+        from runtime.live_account import get_live_account_size
 
-        base = float(ACCOUNT_SIZE)
+        base = float(get_live_account_size())
     except Exception:
-        base = 10000.0
+        try:
+            from config import ACCOUNT_SIZE
+
+            base = float(ACCOUNT_SIZE)
+        except Exception:
+            base = 5000.0
     return {
         "max_dd_usd": max_dd,
         "max_dd_pct": max_dd / base * 100 if base else 0.0,

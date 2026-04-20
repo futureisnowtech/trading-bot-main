@@ -234,6 +234,22 @@ def render_manual_scan():
         "execution stays aligned with the live Coinbase execution set."
     )
 
+    # ── Toast popup — fires once immediately after execution, then clears ────────
+    if st.session_state.pop("manual_toast_pending", False):
+        _toast_results = st.session_state.get("manual_results", [])
+        _ok_trades = [(s, d, m) for s, d, ok, m in _toast_results if ok]
+        _fail_trades = [(s, d, m) for s, d, ok, m in _toast_results if not ok]
+        if _ok_trades and not _fail_trades:
+            _label = ", ".join(f"{s} {d}" for s, d, _ in _ok_trades)
+            st.toast(f"Trade filled — {_label}", icon="✅")
+        elif _ok_trades and _fail_trades:
+            st.toast(
+                f"{len(_ok_trades)} filled, {len(_fail_trades)} failed — see results below",
+                icon="⚠️",
+            )
+        else:
+            st.toast("Execution failed — see results below", icon="❌")
+
     # ── Persistent execution results (survive page rerenders) ─────────────────
     _last_results = st.session_state.get("manual_results")
     if _last_results:
@@ -930,6 +946,7 @@ def render_manual_scan():
                     results.append((sym, dirn, False, str(e)[:200]))
 
             st.session_state["manual_results"] = results
+            st.session_state["manual_toast_pending"] = True
             st.session_state.pop("ms_previews", None)
             st.session_state.pop("manual_candidates", None)
             st.session_state.pop("manual_scan_time", None)

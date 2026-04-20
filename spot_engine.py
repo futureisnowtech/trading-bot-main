@@ -151,15 +151,6 @@ def open_spot(
         logger.warning(f"[spot_engine] {clean} blocked — spot_symbol_not_allowed")
         return None
 
-    # Duplicate position gate (DB)
-    existing = _load_spot_positions_from_db(paper=paper)
-    for pos in existing:
-        if pos.get("symbol", "").upper() == clean:
-            logger.warning(
-                f"[spot_engine] {clean} blocked — spot_position_already_open"
-            )
-            return None
-
     # Size minimum
     if size_usd < _SPOT_MIN_ORDER_USD:
         logger.warning(

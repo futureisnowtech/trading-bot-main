@@ -1087,13 +1087,8 @@ def render_spot_section():
     else:
         st.caption("No open spot positions.")
 
-    # Buy controls — only show for symbols not already held
-    held_syms = {pos.get("symbol", "").upper() for pos in spot_positions}
+    # Buy controls — always show, even if a position is already open
     for sym in spot_symbols:
-        if sym in held_syms:
-            st.caption(f"{sym}: position already open — sell before re-buying.")
-            continue
-
         with st.expander(f"Buy {sym}"):
             size_input = st.number_input(
                 f"Size USD for {sym}",

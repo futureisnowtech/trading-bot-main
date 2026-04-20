@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-19
+- v17.1 stabilization baseline: added `runtime/live_account.py` plus `system_runtime_state.account_size_live` so live denominators stop routing through stale `ACCOUNT_SIZE`; `scheduler/v10_runner.py` now persists real crypto lane runtime truth (connected/tradable/positions/deployed/buying_power), `main.py` seeds crypto as `STARTING`, `position_manager.py` aligns live risk-forced exits with the kill-switch baseline, `data/historical_data.py` fixes bare-BTC routing to avoid stock/ETF collisions, `scripts/go_live.py` now waits for connected crypto lane + non-zero buying power, and missing `learning.tax_tracker` noise is suppressed
+
+## 2026-04-19
 - v17.0 gap-closure: window selector fully wired, 8-stage lifecycle funnel, spot/perp deployed_pct, Auto-only filter + size/source diagnostics, test isolation fixed via conftest, AGENTS.md version aligned, 441 proof tests
 
 ## 2026-04-19

@@ -28,7 +28,7 @@ A fully autonomous AI-powered trading system that:
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
 
-## Current Version: v17.0 (2026-04-19)
+## Current Version: v17.1 (2026-04-19)
 
 **Active branch:** `feature/v10-rebuild`
 **Clean paper trading started:** 2026-04-02
@@ -97,6 +97,10 @@ A fully autonomous AI-powered trading system that:
 - **Forecast heartbeat freshness (v16.16):** `dashboard/data/forecast.py:get_forecast_health()` treats `lane_started` as true only when `lane_runtime_state.active=1` AND the forecast heartbeat is fresh (threshold 180s). `scripts/validate.py` now warns when forecast runtime state is active but stale.
 - **Forecast runtime truth (v16.16):** `forecast/runner.py` discovery/startup now write richer `lane_runtime_state` fields (`connected`, `tradable`, `blocked_reason`, `readiness_state`, `action_needed`) so the dashboard reads runtime truth instead of guessing from partial evidence.
 - **Crypto tradeability persistence (v16.16):** `logging_db/trade_logger.py:init_db()` backfills blank `scan_candidates` tradeability fields to `tradeability_status='not_evaluated'` and preserves lane hints, so recent decision-grade candidates no longer disappear into blank dashboard truth.
+- **Live account size truth (v17.1):** `runtime/live_account.py:get_live_account_size()` is now the single source of truth for account-size denominators. In live mode it reads `system_runtime_state.account_size_live` (persisted from the first real Coinbase balance seen at runtime); in paper mode it uses `config.ACCOUNT_SIZE`. `config.ACCOUNT_SIZE` remains the paper default / fallback only.
+- **Crypto lane runtime truth (v17.1):** `scheduler/v10_runner.py` now writes real crypto lane state into `lane_runtime_state` (connected, tradable, positions_open, capital_deployed_usd, buying_power_usd, readiness_state) instead of leaving the startup placeholder row in place. `main.py` seeds crypto as `STARTING`, not `OPERATIONAL`.
+- **Live risk-floor alignment (v17.1):** `position_manager.check_exits()` no longer force-exits live trades at `75% * ACCOUNT_SIZE`. Live forced exits now respect the same live-baseline policy as `kill_switch.py` while paper mode keeps the 75% paper threshold.
+- **Bare BTC candle routing fix (v17.1):** `data/historical_data.py:get_candles()` no longer treats bare symbols like `BTC` as Binance-format tickers. Bare core symbols try a crypto-safe alias (`BTCUSDT -> BTC-USD`) before any raw-symbol yfinance fallback, preventing stock/ETF collisions such as `$34 BTC`.
 - **Coinbase auth:** CDP JWT / ES256. Credentials: `COINBASE_CDP_KEY_NAME` (organizations/{org_id}/apiKeys/{key_id}) + `COINBASE_CDP_PRIVATE_KEY` (EC PEM, \\n-escaped in .env). Paper mode: no API calls, zero credentials required.
 - **Coinbase products (CFTC-regulated, expire Dec 2030):** BIP-20DEC30-CDE (0.01 BTC/contract), ETP-20DEC30-CDE (0.1 ETH/contract), SLP-20DEC30-CDE (5 SOL/contract), XPP-20DEC30-CDE (500 XRP/contract)
 - **Coinbase fees:** 0.03% taker, 0.00% maker (Advanced Trade API direct, promotional). Round-trip cost = 0.06%.
@@ -580,6 +584,8 @@ Motivation 1-5: "Strive for greatness." / "I like criticism. It makes you strong
 | v16.2 | 2026-04-16 | Truth hardening + core-only alignment: scanner/runner/manual scan default to core-only universe, manual scan fails closed on policy lookup errors, candidate timing anchored to candidate ts with path_timing_evaluated flag, path_truth_audit denominator fixed, entry_truth_audit threshold math fixed, scanner EV journaling fallback corrected, 325 proof tests |
 | v16.3 | 2026-04-16 | Live universe alignment: CORE_EXECUTION_UNDERLYINGS reduced to actual Coinbase-supported BTC/ETH/SOL/XRP set, TradingView live candidates filtered through execution policy, default crypto/perp pair lists tightened to supported coins, proof coverage updated |
 | v16.16 | 2026-04-19 | Truth-control pass: master trading control dashboard, DB-first scanner/control-plane truth, shared manual-scan tradeability on rows/preview/spot controls, paper spot balance summary from DB, dashboard DB alias unification, forecast heartbeat freshness + richer runtime-state truth, 408 proof tests |
+| v17.0 | 2026-04-19 | Dashboard control-tower architecture + gap closure: 5-tab operator shell, Control Tower lifecycle funnel, crypto opportunity-board diagnostics, dashboard proof isolation fix, 441 proof tests |
+| v17.1 | 2026-04-19 | Stabilization baseline: live account-size truth persisted in system_runtime_state.account_size_live, crypto lane runtime row now writes real connected/tradable/buying-power state, live risk-floor aligned with kill-switch baseline, bare BTC candle routing fixed, go_live now waits for connected crypto lane + non-zero buying power, tax-tracker missing-module noise removed |
 
 ## GitHub
 - Repository: `futureisnowtech/trading-bot-main` (private)

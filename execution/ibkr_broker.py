@@ -97,7 +97,7 @@ def _get_mes_contract():
     local_sym = f"MES{month_code.get(month_str, 'M')}{year_str}"  # e.g. 'MESM26'
     return Future(
         localSymbol=local_sym,
-        exchange="CME",
+        exchange="GLOBEX",
         currency="USD",
         multiplier="5",
     )

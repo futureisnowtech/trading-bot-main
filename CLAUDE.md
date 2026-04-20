@@ -107,7 +107,7 @@ Fully autonomous AI trading system: scans Kraken Futures + Binance USDM + Hyperl
 - **ForecastEx risk caps (hardcoded, no override):** max deployed 35%, per-event 10%, max concurrent 2, fractional Kelly cap 0.10.
 - **ForecastEx economic markets only:** CPI, NFP, FOMC, Unemployment, PCE, GDP, PPI. Sports/politics/entertainment → rejected at discovery (fail-closed).
 - **ForecastEx IBKR symbol truth (confirmed 2026-04-15/17 via reqMatchingSymbols):** FORECASTX underliers use SecType=IND with SHORT symbols — NOT FRED codes. Correct short symbols: CPI=573031126, CPIY=712856682, CPIC=727520252, DISSN=806285268, DISSA=804725704, PREMP=582530257 (Nonfarm Payrolls — NOT 'NFP'), UNR=573031117 (Unemployment Rate — NOT 'UR'), RGDP=712856689 (Real GDP — NOT 'GDP'), PCEY=726203930 (PCE YoY — NOT 'PCE'), FEDRO=800591710 (Fed Rate Outstanding), FEDRC=815813254 (Fed Rate Change). CPIAUCSL/UNRATE/PAYEMS/FEDFUNDS do NOT exist on FORECASTX. Discovery uses two-pass: IND confirmation → OPT event contracts. OPT fallback tries right='C'/'P' explicitly if plain OPT returns empty. `refresh_known_underliers()` scans 13 keyword patterns at start of each discovery run and logs any new IND symbols found.
-- **ForecastEx account enrollment blocker:** Paper account DUP590699 has IND underliers visible but OPT event contracts hang (IBKR returns no response). ForecastEx event-contract trading requires: (1) live funded IBKR account, (2) explicit ForecastEx enrollment via IBKR portal. IBKR_PORT must be 7496 (live session); .env corrected from 7497→7496.
+- **ForecastEx account enrollment blocker:** Live IBKR account U250288849 (TWS on port 7496) has IND underliers visible but OPT event contracts require ForecastEx enrollment. ForecastEx event-contract trading requires explicit enrollment via IBKR Client Portal → Account → Trading Permissions → ForecastEx. IBKR_PORT=7496 (live session). Old note about DUP590699 paper account is obsolete.
 - **ForecastEx log-odds math:** x_t = log(p/(1-p)); q_hat = logistic(x_t + α·v_1h + β·a_30m - γ·z_t - δ·σ_t - ε·H_t - ζ·Ω_t + η·bias). Defaults: α=0.40, β=0.20, γ=0.30, δ=0.25, ε=0.15, ζ=0.50, η=0.10.
 - **ForecastEx MES archival:** MES lane is dormant — code preserved. Dashboard tab renamed "ARCHIVED FUTURES (MES)". Reactivate: set `FUTURES_LANE_ACTIVE=true`.
 - **sys.path discipline:** all forecast modules use `if _ROOT not in sys.path: sys.path.insert(0, _ROOT)` (conditional). Test files use `if _ROOT not in sys.path: sys.path.append(_ROOT)` to avoid displacing DASHBOARD_ROOT at collection time.
@@ -182,7 +182,7 @@ Fully autonomous AI trading system: scans Kraken Futures + Binance USDM + Hyperl
 - Position dict keys from `buy_mes`/`short_mes`: `"entry"` (not `"entry_price"`), `"side"` (`"LONG"` or `"SHORT"`), `"qty"` (always positive integer).
 - **Never use `qty > 0` to determine direction** — always `pos.get("side") == "LONG"`.
 - Python 3.14: background thread must call `asyncio.set_event_loop(loop)` before `run_forever()`.
-- Verified: 10 paper round-trips (5L + 5S) via live TWS, account `DUP590699`.
+- Verified: 10 paper round-trips (5L + 5S) via live TWS, account `U250288849` (live IBKR account).
 
 ### Go-Live Readiness (dashboard SYSTEM tab → READINESS TRACKER)
 

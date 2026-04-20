@@ -797,10 +797,7 @@ def render_manual_scan():
                     continue
                 exec_sym = _trade_now.get("underlying") or pv["exec_sym"]
 
-                # Re-run guards with fresh held list
-                if not _exec_paper and exec_sym in _held_syms:
-                    results.append((sym, dirn, False, f"already holding {exec_sym}"))
-                    continue
+                # Batch dedup — block the same symbol appearing twice in one click
                 if exec_sym in _batch_syms:
                     results.append(
                         (sym, dirn, False, f"conflict: {exec_sym} already in batch")

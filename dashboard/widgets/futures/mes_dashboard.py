@@ -31,12 +31,11 @@ def render_futures():
         et = pytz.timezone("America/New_York")
         now_et = datetime.now(et)
         h, m = now_et.hour, now_et.minute
-        is_open = now_et.weekday() < 5 and (
-            (h == 9 and m >= 30) or (10 <= h <= 15) or (h == 15 and m <= 45)
-        )
-        pre_open = now_et.weekday() < 5 and h == 9 and m < 30
+        # MES trades 24/7 except 4:00–4:15 PM ET (CME maintenance)
+        in_maintenance = h == 16 and m < 15
+        is_open = not in_maintenance
         time_str = now_et.strftime("%H:%M ET")
-        mkt_status = "OPEN" if is_open else ("PRE-OPEN" if pre_open else "CLOSED")
+        mkt_status = "MAINTENANCE" if in_maintenance else "ACTIVE"
     except Exception:
         is_open, mkt_status, time_str = False, "UNKNOWN", "--:--"
 

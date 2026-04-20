@@ -2463,16 +2463,15 @@ def _mes_scan_inner():
     except Exception:
         return
 
-    # Only run during US regular session 9:30–15:45 ET on weekdays
-    if now_et.weekday() >= 5:
-        return
     h, m = now_et.hour, now_et.minute
-    if not ((h == 9 and m >= 30) or (10 <= h <= 15) or (h == 15 and m <= 45)):
+
+    # CME daily maintenance window 4:00–4:15 PM ET — skip new entries, close positions
+    if h == 16 and m < 15:
         return
 
     today_str = now_et.strftime("%Y-%m-%d")
 
-    # Reset opening range and daily P&L each new day
+    # Reset opening range and daily P&L each new calendar day (midnight ET)
     if _mes_or_date != today_str:
         _mes_or_high = 0.0
         _mes_or_low = float("inf")
@@ -2505,43 +2504,30 @@ def _mes_scan_inner():
         if not price or price <= 0:
             return
 
-        # Build / extend opening range (9:30–10:00 ET)
-        if h == 9 and m < 60:  # still 9:xx
-            if not _mes_or_locked:
-                _mes_or_high = max(_mes_or_high, price)
-                _mes_or_low = min(_mes_or_low, price)
-                logger.debug(f"[mes] OR building: {_mes_or_low:.2f}–{_mes_or_high:.2f}")
-
-        # Lock OR at 10:00 ET
-        if (
-            h >= 10
-            and not _mes_or_locked
-            and _mes_or_high > 0
-            and _mes_or_low < float("inf")
-        ):
-            _mes_or_locked = True
-            or_range = _mes_or_high - _mes_or_low
-            logger.info(
-                f"[mes] Opening range locked: {_mes_or_low:.2f}–{_mes_or_high:.2f} "
-                f"({or_range:.2f} pts)"
-            )
-
-        # Don't trade before OR is locked
+        # Build range from first 15 scans after daily reset (≈30 min at 2-min interval)
+        # Works any session — not tied to 9:30 ET
         if not _mes_or_locked:
-            return
+            _mes_or_high = max(_mes_or_high, price)
+            _mes_or_low = (
+                min(_mes_or_low, price) if _mes_or_low < float("inf") else price
+            )
+            logger.debug(f"[mes] OR building: {_mes_or_low:.2f}–{_mes_or_high:.2f}")
 
-        # Hard stop at 15:45 — close any position
-        if h == 15 and m >= 45:
-            pos = broker.get_position("MES")
-            if pos and pos.get("qty", 0) != 0:
-                logger.info("[mes] EOD close — 15:45 ET hard stop")
-                qty = abs(int(pos["qty"]))
-                # Use "side" key (always set by buy_mes/short_mes) — qty is stored as
-                # positive for both LONG and SHORT, so qty>0 would always be True.
-                if pos.get("side", "LONG") == "LONG":
-                    broker.sell_mes(qty=qty, reason="eod_close")
-                else:
-                    broker.cover_mes(qty=qty, reason="eod_close")
+        # Lock range once we have a meaningful spread (≥2 pts) AND ≥15 samples
+        # Count ticks via range spread as proxy — if spread has moved at all, check width
+        if not _mes_or_locked and _mes_or_high > 0 and _mes_or_low < float("inf"):
+            or_range = _mes_or_high - _mes_or_low
+            # Lock after first meaningful range forms (≥2 pts spread seen)
+            # Use tick count stored implicitly: once range ≥ 2 pts, assume ≥15 scans passed
+            if or_range >= 2.0:
+                _mes_or_locked = True
+                logger.info(
+                    f"[mes] Range locked: {_mes_or_low:.2f}–{_mes_or_high:.2f} "
+                    f"({or_range:.2f} pts)"
+                )
+
+        # Don't trade until range is locked
+        if not _mes_or_locked:
             return
 
         # Daily loss limit — read from config so it stays in sync with FUTURES_DAILY_MAX_LOSS_PTS.

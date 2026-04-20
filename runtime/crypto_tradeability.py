@@ -457,6 +457,10 @@ def _check_spot_eligibility(
     if not spot_active:
         return "spot_lane_disabled"
 
+    # Duplicate position gate (paper and live)
+    if _count_open_spot_positions(underlying, paper_int) > 0:
+        return "spot_position_already_open"
+
     # Paper mode: skip balance/deployment checks
     if not live:
         return "none"

@@ -166,6 +166,16 @@ def _candidate_card(row: dict) -> str:
         kill_parts.append(
             f'Size: <span style="color:{ui.C_AMBER};">{size_block.replace("_", " ")}</span>'
         )
+    source_reason = row.get("trade_source_reason") or row.get("source_reason") or ""
+    if source_reason and source_reason not in (
+        "none",
+        "not_applicable",
+        "trusted_source",
+        "",
+    ):
+        kill_parts.append(
+            f'Source: <span style="color:{ui.C_AMBER};">{source_reason.replace("_", " ")}</span>'
+        )
     if not kill_parts:
         if status == "executable":
             kill_parts.append(

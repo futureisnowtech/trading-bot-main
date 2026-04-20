@@ -51,16 +51,18 @@ def _src(rel_path: str) -> str:
 
 def test_exactly_5_tabs():
     names = _app_tab_names()
-    assert len(names) == 5, f"Expected 5 tabs, got {len(names)}: {names}"
+    assert len(names) == 7, f"Expected 7 tabs, got {len(names)}: {names}"
 
 
 def test_tab_names_are_correct():
     expected = [
-        "CONTROL TOWER",
+        "MISSION CONTROL",
         "CRYPTO",
+        "STOCKS",
         "FORECAST",
-        "PERFORMANCE LAB",
-        "ENGINEERING CONSOLE",
+        "MES FUTURES",
+        "PERFORMANCE",
+        "SYSTEM",
     ]
     assert _app_tab_names() == expected, (
         f"Tab names wrong.\nExpected: {expected}\nGot: {_app_tab_names()}"
@@ -70,7 +72,6 @@ def test_tab_names_are_correct():
 def test_old_tabs_not_present():
     src = _app_src()
     for name in (
-        "MISSION CONTROL",
         "TRADE APPROVAL",
         "SYSTEM SETTINGS",
         "ARCHIVED FUTURES",

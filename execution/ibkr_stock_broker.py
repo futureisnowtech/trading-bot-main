@@ -42,7 +42,7 @@ except Exception:
 
 # Connection settings — read from env, not hardcoded
 IBKR_HOST = os.getenv("IBKR_HOST", "127.0.0.1")
-IBKR_PORT = int(os.getenv("IBKR_PORT", "7496"))  # 7496=live TWS, 7497=paper TWS
+IBKR_PORT = int(os.getenv("IBKR_PORT", "7496"))  # live TWS port
 IBKR_STOCK_CLIENT_ID = 4  # fixed — must not collide with MES(2) or ForecastEx(3)
 
 # PDT rolling window (trading days)

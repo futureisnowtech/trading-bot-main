@@ -211,7 +211,9 @@ def _journal_scan_candidate(
         )
 
 
-def _tradeability_hint(symbol: str, direction: str, candidate: dict, *, live: bool) -> dict:
+def _tradeability_hint(
+    symbol: str, direction: str, candidate: dict, *, live: bool
+) -> dict:
     """
     Lightweight policy-only lane hint used for early journaling rows.
 
@@ -1438,11 +1440,54 @@ def _attempt_entry(
         try:
             import spot_engine as _spot_eng
 
-            _spot_size = balance * 0.08  # 8% of account for spot
+            # Scale spot size with signal conviction: 6% base + up to 4% at full conviction
+            _score_factor = max(
+                0.0, min(1.0, (composite - 50) / 40)
+            )  # 0 at score=50, 1 at score=90+
+            _spot_size = balance * (0.06 + 0.04 * _score_factor)
+            try:
+                from risk.spot_economics_gate import check_spot_economics as _spot_econ
+
+                _econ = _spot_econ(
+                    _trade.get("underlying", _get_underlying(symbol)),
+                    _spot_size,
+                    composite,
+                    paper=_paper,
+                )
+                if not _econ["approved"]:
+                    logger.info(
+                        f"[v10] spot {_trade.get('underlying')} econ_gate blocked: {_econ['reason']}"
+                    )
+                    # do NOT fall through to perp — spot-routed symbols stay in spot lane
+                    _journal_scan_candidate(
+                        scan_id,
+                        candidate,
+                        "econ_veto",
+                        regime=regime,
+                        technical_score=_tech_score,
+                        ml_score=_ml_score,
+                        composite_score=composite,
+                        entry_threshold=50.0,
+                        should_enter_signal=1,
+                        econ_approved=0,
+                        entry_block_reason=_econ["reason"],
+                        recommended_lane=_trade.get("recommended_lane", ""),
+                        tradeability_status=_trade.get("status", "executable"),
+                        trade_blocked_reason=_econ["reason"],
+                        trade_size_block_reason="",
+                        trade_source_reason="",
+                        manual_executable=int(_trade.get("manual_executable", 0)),
+                        auto_executable=int(_trade.get("auto_executable", 0)),
+                    )
+                    return "econ_veto"
+            except ImportError:
+                pass  # gate not available — proceed
             _sr = _spot_eng.open_spot(
                 _trade.get("underlying", _get_underlying(symbol)),
                 _spot_size,
                 paper=_paper,
+                composite_score=composite,
+                atr_at_entry=atr_7,  # ATR from last 7 candles, computed above at line 1001
             )
             if _sr and not _sr.get("blocked"):
                 logger.info(
@@ -1476,9 +1521,15 @@ def _attempt_entry(
                     f"[v10] spot {_trade.get('underlying')} blocked by engine: "
                     f"{_sr.get('blocked') if _sr else 'None returned'}"
                 )
+                logger.info(
+                    f"[v10] spot {_trade.get('underlying')} fallthrough to perp: spot engine returned no position"
+                )
                 # Fall through to perp path
         except Exception as _spot_err:
             logger.debug(f"[v10] spot entry error: {_spot_err}")
+            logger.info(
+                f"[v10] spot {_trade.get('underlying')} fallthrough to perp: spot engine returned no position"
+            )
             # Fall through to perp path
 
     setup_str = (
@@ -1758,6 +1809,13 @@ def exit_monitor():
         check_spot_stops(paper=config.PAPER_TRADING)
     except Exception as e:
         logger.debug(f"[v10] check_spot_stops error: {e}")
+    try:
+        from spot_engine import check_spot_trailing, check_spot_thesis_exits
+
+        check_spot_trailing(paper=config.PAPER_TRADING)
+        check_spot_thesis_exits(paper=config.PAPER_TRADING)
+    except Exception as e:
+        logger.debug(f"[v10] spot trailing/thesis check error: {e}")
 
 
 def _exit_monitor_inner():

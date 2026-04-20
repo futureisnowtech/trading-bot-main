@@ -1,11 +1,11 @@
 """
 risk_engine.py — Portfolio-level risk: VaR/CVaR, correlation matrix, margin utilization.
 
-Hard limits ($10K architecture):
-  Kill switch threshold : balance < $7,500 (75% peak)
-  Daily loss halt       : -5% = -$500
-  Max single position   : 30% = $3,000
-  Max deployed          : 80% = $8,000
+Hard limits (account-size aware):
+  Kill switch threshold : delegated to kill_switch / live-account truth
+  Daily loss halt       : -5%
+  Max single position   : account-aware via downstream sizing
+  Max deployed          : 95% of current account balance
   Margin above 60%      : No new positions
   Margin above 75%      : Reduce existing
   Margin above 85%      : Emergency reduce

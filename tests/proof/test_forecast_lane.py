@@ -710,15 +710,17 @@ def test_mes_broker_code_preserved():
 
 
 def test_validator_has_forecastex_section():
-    """scripts/validate.py must contain the ForecastEx lane section."""
-    val_path = os.path.join(_ROOT, "scripts", "validate.py")
-    assert os.path.exists(val_path), "validate.py not found"
-    src = open(val_path).read()
-    assert "ForecastEx lane" in src, "ForecastEx section missing from validate.py"
-    assert "READY" in src, "READY status string missing from validate.py"
-    assert "BLOCKED" in src, "BLOCKED status string missing from validate.py"
+    """Validator implementation must contain the ForecastEx lane section."""
+    wrapper_path = os.path.join(_ROOT, "scripts", "validate.py")
+    body_path = os.path.join(_ROOT, "scripts", "validate_body.py")
+    assert os.path.exists(wrapper_path), "validate.py not found"
+    assert os.path.exists(body_path), "validate_body.py not found"
+    src = open(body_path).read()
+    assert "ForecastEx lane" in src, "ForecastEx section missing from validate_body.py"
+    assert "READY" in src, "READY status string missing from validate_body.py"
+    assert "BLOCKED" in src, "BLOCKED status string missing from validate_body.py"
     assert "ACTION NEEDED" in src, (
-        "ACTION NEEDED status string missing from validate.py"
+        "ACTION NEEDED status string missing from validate_body.py"
     )
 
 
@@ -1030,19 +1032,19 @@ def test_forecast_readiness_zero_state_returns_useful_info(tmp_path):
 
 def test_validate_forecast_lane_check_references_lane_runtime_state():
     """
-    validate.py Forecast lane active check must reference lane_runtime_state
+    validator implementation Forecast lane active check must reference lane_runtime_state
     (not solely ForecastRunner system_events) as primary truth.
     """
     validate_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
         "scripts",
-        "validate.py",
+        "validate_body.py",
     )
     with open(validate_path, encoding="utf-8") as f:
         src = f.read()
 
     assert "lane_runtime_state" in src, (
-        "validate.py must reference lane_runtime_state in its forecast-lane check. "
+        "validate_body.py must reference lane_runtime_state in its forecast-lane check. "
         "Relying solely on ForecastRunner system_events is incorrect — events may be "
         "absent even when the lane is running (race at startup, fresh restart, etc.)."
     )

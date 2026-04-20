@@ -2694,9 +2694,13 @@ def _init_globals():
         from config import PAPER_TRADING
 
         _paper = bool(PAPER_TRADING)
-        from runtime.live_account import get_live_account_size
+        if _paper:
+            from runtime.live_account import get_live_account_size
 
-        _initial_balance = float(get_live_account_size(paper=_paper))
+            _initial_balance = float(get_live_account_size(paper=True))
+        else:
+            _initial_balance = float(_get_account_balance())
+            _persist_live_account_size(_initial_balance)
     except Exception as e:
         logger.warning(f"[v10] config read error: {e} — using defaults")
         _paper = True

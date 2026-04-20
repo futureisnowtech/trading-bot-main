@@ -89,6 +89,12 @@ def main():
 
     tz = pytz.timezone(MARKET_TIMEZONE)
     mode = "📄 PAPER" if PAPER_TRADING else "💰 LIVE"
+    try:
+        from runtime.live_account import get_live_account_size
+
+        account_display = float(get_live_account_size(paper=PAPER_TRADING))
+    except Exception:
+        account_display = float(ACCOUNT_SIZE)
 
     # Sanity-check hardcoded risk values — catch accidental misconfiguration
     assert 0 < MAX_RISK_PER_TRADE_PCT <= 0.10, (
@@ -103,7 +109,7 @@ def main():
     )
 
     print(f"  Mode:       {mode} TRADING")
-    print(f"  Account:    ${ACCOUNT_SIZE}")
+    print(f"  Account:    ${account_display}")
     print(
         f"  AI (exits): {'✅ Enabled' if ANTHROPIC_API_KEY else '⚠️ No API key — extended-thinking exits disabled'}"
     )
@@ -112,7 +118,7 @@ def main():
     if not PAPER_TRADING:
         print("=" * 60)
         print("  ⚠️  LIVE TRADING — Real money will be deployed")
-        print(f"  Account: ${ACCOUNT_SIZE}")
+        print(f"  Account: ${account_display}")
         print("=" * 60)
         auto_confirm = os.environ.get("ALGO_LIVE_CONFIRM", "").strip()
         if auto_confirm == "I UNDERSTAND":

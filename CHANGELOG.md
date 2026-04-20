@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-19
+- v17.1a: split validator into stable wrapper + `scripts/validate_body.py` implementation so proof/runtime validation can use one canonical body while the public `python3 scripts/validate.py` entrypoint remains available; updated forecast proof expectations accordingly
+
+## 2026-04-19
 - v17.1 stabilization baseline: added `runtime/live_account.py` plus `system_runtime_state.account_size_live` so live denominators stop routing through stale `ACCOUNT_SIZE`; `scheduler/v10_runner.py` now persists real crypto lane runtime truth (connected/tradable/positions/deployed/buying_power), `main.py` seeds crypto as `STARTING`, `position_manager.py` aligns live risk-forced exits with the kill-switch baseline, `data/historical_data.py` fixes bare-BTC routing to avoid stock/ETF collisions, `scripts/go_live.py` now waits for connected crypto lane + non-zero buying power, and missing `learning.tax_tracker` noise is suppressed
 
 ## 2026-04-19

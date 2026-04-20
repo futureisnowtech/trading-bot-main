@@ -452,7 +452,8 @@ GOOGLE_API_KEY: str = os.getenv("GOOGLE_API_KEY", "")
 # ════════════════════════════════════════════════════════════════════
 # DATABASE & LOGGING
 # ════════════════════════════════════════════════════════════════════
-DB_PATH: str = "logs/trades.db"
-LANCEDB_PATH: str = "logs/memory"
-CSV_LOG_DIR: str = "logs/csv"
+_ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH: str = os.path.join(_ROOT_DIR, "logs", "trades.db")
+LANCEDB_PATH: str = os.path.join(_ROOT_DIR, "logs", "memory")
+CSV_LOG_DIR: str = os.path.join(_ROOT_DIR, "logs", "csv")
 LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")

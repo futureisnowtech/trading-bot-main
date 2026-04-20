@@ -21,7 +21,7 @@ Leverage schedule:
   3. Thesis score — current_signal_score < entry_signal_score × regime_fraction → close all (TRENDING=0.30, RANGING=0.15, HIGH_VOL=0.35, UNKNOWN=0.25)
   4. Hard stop — stop-market on exchange, never widened
   5. Risk forced exit — margin breach / drawdown / correlation
-  6. Kill switch — balance < 75% of ACCOUNT_SIZE (e.g. $3,750 on a $5K account) / API errors / latency
+  6. Kill switch — paper: 75% of paper account; live: 50% of live baseline / API errors / latency
 """
 
 import logging

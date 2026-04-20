@@ -269,6 +269,22 @@ FORECAST_LANE_ACTIVE: bool = (
     os.getenv("FORECAST_LANE_ACTIVE", "false").lower() == "true"
 )
 
+# ── Stocks lane (v17.2) ───────────────────────────────────────────────────────
+# STOCKS_LANE_ACTIVE — gates US equity swing-trading lane. Default false = disabled.
+# Connects to IBKR TWS live account on port 7496, clientId=4.
+STOCKS_LANE_ACTIVE: bool = os.getenv("STOCKS_LANE_ACTIVE", "false").lower() == "true"
+STOCK_UNIVERSE: list = [
+    s.strip()
+    for s in os.getenv(
+        "STOCK_UNIVERSE",
+        "AMD,GOOGL,AAPL,AMZN,TSLA,COIN,IWM,XLF,XLE,XLK,NFLX,UBER",
+    ).split(",")
+    if s.strip()
+]
+STOCKS_MAX_POSITIONS: int = int(os.getenv("STOCKS_MAX_POSITIONS", "3"))
+STOCKS_RISK_PCT: float = float(os.getenv("STOCKS_RISK_PCT", "0.02"))
+STOCKS_MAX_POSITION_PCT: float = float(os.getenv("STOCKS_MAX_POSITION_PCT", "0.15"))
+
 # ── IBKR connection (shared across MES and ForecastEx lanes) ─────────────────
 IBKR_HOST: str = os.getenv("IBKR_HOST", "127.0.0.1")
 IBKR_PORT: int = int(os.getenv("IBKR_PORT", "7497"))  # 7497=paper, 7496=live

@@ -85,6 +85,7 @@ def main():
         MAX_DAILY_LOSS_PCT,
         MAX_DEPLOYED_PCT,
         FORECAST_LANE_ACTIVE,
+        STOCKS_LANE_ACTIVE,
     )
 
     tz = pytz.timezone(MARKET_TIMEZONE)
@@ -200,6 +201,19 @@ def main():
         blocked_reason="" if _FLA else "FUTURES_LANE_ACTIVE=false",
     )
 
+    # stocks lane
+    upsert_lane_state(
+        "stocks",
+        db_path=_db_path,
+        enabled=int(STOCKS_LANE_ACTIVE),
+        active=int(STOCKS_LANE_ACTIVE),
+        configured=int(STOCKS_LANE_ACTIVE),
+        mode=_rt_mode if STOCKS_LANE_ACTIVE else "disabled",
+        health="UNKNOWN",
+        readiness_state="LANE_NOT_STARTED" if not STOCKS_LANE_ACTIVE else "STARTING",
+        blocked_reason="" if STOCKS_LANE_ACTIVE else "STOCKS_LANE_ACTIVE=false",
+    )
+
     # Run position reconciliation
     run_reconciliation(_db_path)
 
@@ -296,10 +310,37 @@ def main():
         )
         print("   ForecastEx lane started (FORECAST_LANE_ACTIVE=true)")
 
+    # ── Stocks lane (optional daemon thread) ──────────────────────────────────
+    if STOCKS_LANE_ACTIVE:
+
+        def _stocks_daemon():
+            """Run stock lane in its own schedule instance (thread-safe)."""
+            from scheduler.stock_runner import run_forever as _stocks_run_forever
+
+            try:
+                _stocks_run_forever()
+            except Exception as _se:
+                log_event("ERROR", "StockRunner", f"Stocks lane crashed: {_se}")
+
+        _st = threading.Thread(target=_stocks_daemon, daemon=True, name="StocksLane")
+        _st.start()
+        upsert_lane_state(
+            "stocks",
+            db_path=_db_path,
+            active=1,
+            readiness_state="STARTING",
+        )
+        log_event(
+            "INFO", "StockRunner", "Stocks lane started (STOCKS_LANE_ACTIVE=true)"
+        )
+        print("   Stocks lane started (STOCKS_LANE_ACTIVE=true)")
+
     # Populate active_lanes now that all lane startup is done
     _active = ["crypto"]
     if FORECAST_LANE_ACTIVE:
         _active.append("forecast")
+    if STOCKS_LANE_ACTIVE:
+        _active.append("stocks")
     upsert_system_state(
         db_path=_db_path,
         active_lanes=json.dumps(_active),

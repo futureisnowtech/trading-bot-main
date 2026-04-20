@@ -26,15 +26,15 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 
-# ── LP-01: AUTONOMOUS_LIVE_PERP_SYMBOLS default includes all four core symbols ──
+# ── LP-01: AUTONOMOUS_LIVE_PERP_SYMBOLS default is ETH only ─────────────────
 
 
 def test_lp01_autonomous_symbols_default_is_eth_only():
     import config
 
     syms = set(config.AUTONOMOUS_LIVE_PERP_SYMBOLS)
-    assert syms == {"BTC", "ETH", "SOL", "XRP"}, (
-        f"AUTONOMOUS_LIVE_PERP_SYMBOLS must default to all four core symbols, got {syms}"
+    assert syms == {"ETH"}, (
+        f"AUTONOMOUS_LIVE_PERP_SYMBOLS must default to ETH only, got {syms}"
     )
 
 
@@ -207,17 +207,17 @@ def test_lp02_btc_passes_autonomous_gate_in_live_mode():
     )
 
 
-def test_lp03_sol_passes_autonomous_gate_in_live_mode():
+def test_lp03_sol_blocked_by_autonomous_gate_in_live_mode():
     decision = _run_attempt_entry_gate("SOL", paper=False)
-    assert decision != "not_autonomous_live_eligible", (
-        f"SOL live must NOT be blocked by autonomous gate, got {decision!r}"
+    assert decision == "not_autonomous_live_eligible", (
+        f"SOL live MUST be blocked by autonomous gate (ETH-only perps), got {decision!r}"
     )
 
 
-def test_lp04_xrp_passes_autonomous_gate_in_live_mode():
+def test_lp04_xrp_blocked_by_autonomous_gate_in_live_mode():
     decision = _run_attempt_entry_gate("XRP", paper=False)
-    assert decision != "not_autonomous_live_eligible", (
-        f"XRP live must NOT be blocked by autonomous gate, got {decision!r}"
+    assert decision == "not_autonomous_live_eligible", (
+        f"XRP live MUST be blocked by autonomous gate (ETH-only perps), got {decision!r}"
     )
 
 

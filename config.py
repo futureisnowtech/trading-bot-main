@@ -68,7 +68,7 @@ CORE_EXECUTION_UNDERLYINGS: set = {
 # CORE_EXECUTION_UNDERLYINGS stays [BTC,ETH,SOL,XRP] for manual + research.
 # ════════════════════════════════════════════════════════════════════
 AUTONOMOUS_LIVE_PERP_SYMBOLS: list = os.getenv(
-    "AUTONOMOUS_LIVE_PERP_SYMBOLS", "BTC,ETH,SOL,XRP"
+    "AUTONOMOUS_LIVE_PERP_SYMBOLS", "ETH"
 ).split(",")
 
 # ════════════════════════════════════════════════════════════════════

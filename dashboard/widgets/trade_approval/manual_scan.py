@@ -291,6 +291,17 @@ def render_manual_scan():
         render_spot_section()
         return
 
+    # In live mode, hide SOL and XRP — perp-only symbols with no eligible perp slot.
+    if _runtime_live_flag():
+        candidates = [
+            c
+            for c in candidates
+            if _get_tier_info(c.get("symbol", "")).get(
+                "underlying", c.get("symbol", "")
+            )
+            not in {"SOL", "XRP"}
+        ]
+
     hc1, hc2, hc3, hc4 = st.columns([0.4, 3.2, 2.8, 0.6])
     hc1.caption("Trade?")
     hc2.caption("Signal")
@@ -736,9 +747,8 @@ def render_manual_scan():
                 dirn = pv["dirn"]
                 setup = pv["setup"]
                 _trade_now = _manual_tradeability(pv["cand"])
-                if (
-                    _trade_now.get("status") != "executable"
-                    or not _trade_now.get("manual_executable", 0)
+                if _trade_now.get("status") != "executable" or not _trade_now.get(
+                    "manual_executable", 0
                 ):
                     results.append(
                         (

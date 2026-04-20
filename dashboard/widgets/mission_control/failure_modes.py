@@ -1,52 +1,64 @@
 """
-Widget: Failure Modes
-Question: What's been going wrong in the last 7 days?
-Tab: MISSION CONTROL
+Widget: Failure Modes — What has been going wrong in the last 7 days?
 Refresh: 30s
-Asset class: CRYPTO PERPS
 """
 
 import streamlit as st
 
-from formatters import _asset_badge
+import ui
 from data.execution import get_failure_counts
 
 
 @st.fragment(run_every=30)
 def render_failures_compact():
-    st.markdown(_asset_badge("crypto"), unsafe_allow_html=True)
     st.markdown(
-        '<div class="panel-title">Failure Modes (7d)</div>', unsafe_allow_html=True
+        ui.section_header(
+            "FAILURE MODES",
+            "Recurring problems in the last 7 days — zero is the goal",
+        ),
+        unsafe_allow_html=True,
     )
 
     failures = get_failure_counts()
     active = sorted(
-        [f for f in failures if f["Count (7d)"] > 0], key=lambda x: -x["Count (7d)"]
+        [f for f in failures if f["Count (7d)"] > 0],
+        key=lambda x: -x["Count (7d)"],
     )
-    show = active[:5] if active else failures[:5]
+    show = active[:6] if active else []
 
     if not show:
         st.markdown(
-            '<span style="color:#4ade80; font-size:0.85em">✓ No failures detected in last 7 days</span>',
+            ui.info_callout("No failures detected in the last 7 days.", "good"),
             unsafe_allow_html=True,
         )
         return
 
+    rows_html = ""
     for f in show:
         sev = f["Severity"]
         color = (
-            "#f87171" if sev == "CRIT" else ("#facc15" if sev == "WARN" else "#94a3b8")
+            ui.C_RED if sev == "CRIT" else ui.C_AMBER if sev == "WARN" else ui._TEXT_CAP
         )
         count = f["Count (7d)"]
         cat = f["Category"]
-        desc = f["Description"][:60]
+        desc = f["Description"][:55]
         last = f["Last"]
-        st.markdown(
-            f'<div style="display:flex; justify-content:space-between; font-size:0.8em; padding:3px 0; border-bottom:1px solid rgba(255,255,255,0.05)">'
-            f'<span><span style="color:{color}; font-weight:700">{cat}</span>'
-            f'<br><span style="color:#64748b; font-size:0.85em">{desc}</span></span>'
-            f'<span style="text-align:right"><span style="color:{color}; font-weight:700">{count}</span>'
-            f'<br><span style="color:#64748b; font-size:0.85em">{last}</span></span>'
-            f"</div>",
-            unsafe_allow_html=True,
+        rows_html += (
+            f'<div style="display:flex;justify-content:space-between;align-items:flex-start;'
+            f'padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.04);">'
+            f'<div style="flex:1;min-width:0;">'
+            f'<div style="color:{color};font-weight:700;font-size:0.80em;">{cat}</div>'
+            f'<div style="color:{ui._TEXT_CAP};font-size:0.73em;margin-top:1px;">{desc}</div>'
+            f"</div>"
+            f'<div style="text-align:right;flex-shrink:0;margin-left:10px;">'
+            f'<div style="color:{color};font-weight:700;font-size:0.88em;">{count}×</div>'
+            f'<div style="color:{ui._TEXT_CAP};font-size:0.70em;">{last}</div>'
+            f"</div>"
+            f"</div>"
         )
+
+    st.markdown(
+        f'<div style="background:{ui._BG_CARD};border:1px solid {ui._BORDER};'
+        f'border-radius:{ui._RADIUS_SM};padding:12px 14px;">{rows_html}</div>',
+        unsafe_allow_html=True,
+    )

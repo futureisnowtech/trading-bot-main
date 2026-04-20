@@ -102,3 +102,49 @@ def _asset_badge(kind: str) -> str:
     if kind == "crypto":
         return '<span class="badge-crypto">CRYPTO PERPS</span>'
     return '<span class="badge-futures">S&P FUTURES · MES</span>'
+
+
+def _plain_pf(pf: float) -> str:
+    """Plain-English profit factor interpretation."""
+    if pf == float("inf"):
+        return "No losing trades yet — keep watching"
+    if pf >= 1.5:
+        return f"Making ${pf:.2f} for every $1 lost — strong edge"
+    if pf >= 1.2:
+        return f"Making ${pf:.2f} for every $1 lost — solid"
+    if pf >= 1.0:
+        return f"Making ${pf:.2f} for every $1 lost — barely profitable"
+    return f"Only making ${pf:.2f} for every $1 lost — losing money overall"
+
+
+def _verdict(
+    value: float,
+    good_threshold: float,
+    warn_threshold: float,
+    higher_is_better: bool = True,
+) -> tuple:
+    """Return (chip_status, chip_label) for a scalar metric."""
+    if higher_is_better:
+        if value >= good_threshold:
+            return "good", "Good"
+        if value >= warn_threshold:
+            return "watch", "Watch"
+        return "problem", "Problem"
+    else:
+        if value <= good_threshold:
+            return "good", "Good"
+        if value <= warn_threshold:
+            return "watch", "Watch"
+        return "problem", "Problem"
+
+
+def _pct_bar(pct: float, color: str = "#58a6ff", height: int = 4) -> str:
+    """Return an HTML percentage progress bar."""
+    w = max(0, min(100, int(pct)))
+    return (
+        f'<div style="background:rgba(255,255,255,0.06);border-radius:3px;'
+        f'height:{height}px;margin:4px 0;">'
+        f'<div style="width:{w}%;background:{color};border-radius:3px;height:100%;'
+        f'opacity:0.8;"></div>'
+        f"</div>"
+    )

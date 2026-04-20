@@ -1,84 +1,95 @@
 """
-Widget: Execution Quality
-Question: Are we entering at good prices and exiting efficiently?
-Tab: MISSION CONTROL
+Widget: Execution Quality — Are entries and exits clean?
 Refresh: 30s
-Asset class: CRYPTO PERPS
 """
 
 import streamlit as st
 
+import ui
 from db import get_effective_launch_date
-from formatters import _status_dot, _asset_badge
+from formatters import _status_dot
 from data.execution import get_execution_stats
 
 
 @st.fragment(run_every=30)
 def render_execution_quality():
-    st.markdown(_asset_badge("crypto"), unsafe_allow_html=True)
     st.markdown(
-        '<div class="panel-title">Execution Quality</div>', unsafe_allow_html=True
+        ui.section_header(
+            "EXECUTION QUALITY",
+            "Are we entering at good prices and exiting efficiently?",
+        ),
+        unsafe_allow_html=True,
     )
 
     ex = get_execution_stats()
     total = ex["total"]
 
     if total == 0:
-        st.info("No trade attribution data yet — populates after first closed trade.")
+        st.markdown(
+            ui.info_callout(
+                "No trade attribution data yet — populates after the first closed trade.",
+                "info",
+            ),
+            unsafe_allow_html=True,
+        )
         return
 
-    rows_html = ""
-    metrics = [
-        (
-            "Entry timing score",
+    def _score_color(v, good=6, ok=4):
+        if v >= good:
+            return ui.C_GREEN
+        if v >= ok:
+            return ui.C_AMBER
+        return ui.C_RED
+
+    def _rate_color(v, good=5, ok=15):
+        if v <= good:
+            return ui.C_GREEN
+        if v <= ok:
+            return ui.C_AMBER
+        return ui.C_RED
+
+    rows = (
+        ui.metric_row(
+            "Entry timing  (10 = perfect)",
             f"{ex['entry_score']:.1f} / 10",
-            "green"
-            if ex["entry_score"] >= 6
-            else "yellow"
-            if ex["entry_score"] >= 4
-            else "red",
-        ),
-        (
-            "Exit efficiency score",
+            value_color=_score_color(ex["entry_score"]),
+        )
+        + ui.metric_row(
+            "Exit efficiency  (10 = captured all profit)",
             f"{ex['exit_score']:.1f} / 10",
-            "green"
-            if ex["exit_score"] >= 6
-            else "yellow"
-            if ex["exit_score"] >= 4
-            else "red",
-        ),
-        (
-            "Avg MAE (adverse move)",
+            value_color=_score_color(ex["exit_score"]),
+        )
+        + ui.metric_row(
+            "Avg adverse move (MAE)",
             f"{ex['avg_mae_pct']:.3f}%",
-            "green" if ex["avg_mae_pct"] < 0.5 else "yellow",
-        ),
-        ("Avg MFE (best possible)", f"{ex['avg_mfe_pct']:.3f}%", "gray"),
-        (
-            "Fee trap rate",
+            value_color=ui.C_GREEN if ex["avg_mae_pct"] < 0.5 else ui.C_AMBER,
+        )
+        + ui.metric_row("Avg best potential (MFE)", f"{ex['avg_mfe_pct']:.3f}%")
+        + ui.metric_row(
+            "Fee trap rate  (fees > 50% of gross profit)",
             f"{ex['fee_trap_rate']:.1f}%  ({ex['fee_traps']}/{total})",
-            "green"
-            if ex["fee_trap_rate"] < 5
-            else "yellow"
-            if ex["fee_trap_rate"] < 15
-            else "red",
-        ),
-        (
+            value_color=_rate_color(ex["fee_trap_rate"]),
+        )
+        + ui.metric_row(
             "Avg hold — wins",
             f"{ex['avg_hold_win_min']:.0f}m" if ex["avg_hold_win_min"] else "n/a",
-            "gray",
-        ),
-        (
+        )
+        + ui.metric_row(
             "Avg hold — losses",
             f"{ex['avg_hold_loss_min']:.0f}m" if ex["avg_hold_loss_min"] else "n/a",
-            "gray",
-        ),
-        ("Slippage", "N/A — not yet instrumented", "gray"),
-    ]
-    for label, val, color in metrics:
-        dot = _status_dot(color)
-        rows_html += f'<div style="display:flex; justify-content:space-between; margin:2px 0; font-size:0.82em"><span style="color:#94a3b8">{dot} {label}</span><span style="color:#e2e8f0; font-weight:600">{val}</span></div>'
+        )
+        + ui.metric_row(
+            "Slippage",
+            "Not yet instrumented",
+            value_color=ui._TEXT_CAP,
+        )
+    )
 
-    st.markdown(rows_html, unsafe_allow_html=True)
+    st.markdown(
+        f'<div style="background:{ui._BG_CARD};border:1px solid {ui._BORDER};'
+        f'border-radius:{ui._RADIUS_SM};padding:12px 14px;">{rows}</div>',
+        unsafe_allow_html=True,
+    )
     st.caption(
         f"Based on {total} attributed trades since {get_effective_launch_date()}"
     )

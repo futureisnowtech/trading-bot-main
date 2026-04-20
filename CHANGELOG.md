@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-19
+- feat(dashboard): premium UI redesign — all 5 tabs with design system, subtabs, and candidate cards
+
+## 2026-04-19
 - v17.1a: split validator into stable wrapper + `scripts/validate_body.py` implementation so proof/runtime validation can use one canonical body while the public `python3 scripts/validate.py` entrypoint remains available; updated forecast proof expectations accordingly
 
 ## 2026-04-19

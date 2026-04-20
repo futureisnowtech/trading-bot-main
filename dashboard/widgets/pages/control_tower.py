@@ -1,15 +1,13 @@
 """
-dashboard/widgets/pages/control_tower.py — CONTROL TOWER page (default landing).
+dashboard/widgets/pages/control_tower.py — MISSION CONTROL page (v17.1 premium layout)
 
-Sections:
-  A. Global status strip — mode, alive, lanes, scan age, incidents
-  B. Summary card row — portfolio, funnel, problem split, action needed
-  C. Why trades are dying — stage funnel + top blockers
-  D. Live opportunities now — executable scan_candidates
-  E. Open positions
-  F. Lane health strip
-  G. Action center / alert feed
+ROW 1  — 4 hero cards: Bot Status · Account Snapshot · Trade Quality · Biggest Issue
+ROW 2  — 3-zone: LEFT (positions + scanner + activity) · CENTER (performance panel)
+         · RIGHT (risk + decision + execution + learning)
+ROW 3  — Lower band: Failure Modes · Funnel Detail · Recent Activity · Trade Log
 """
+
+from __future__ import annotations
 
 import os
 import sys
@@ -25,290 +23,643 @@ for _p in (_DASH_DIR, _ROOT):
 
 import streamlit as st
 
+import ui
 from data.control_tower import get_control_tower_snapshot
-from data.crypto_dashboard import get_crypto_opportunity_board
-from data.health import get_heartbeat_age
-from db import _q, _q1, _runtime_paper_flag
 from formatters import _time_ago
+
+
+# ── plain-English blocker labels ──────────────────────────────────────────────
+_BLOCKER_PLAIN: dict[str, str] = {
+    "below_threshold": "Signal score too low",
+    "econ_veto": "Economics check failed — fees exceed expected profit",
+    "dual_exposure_block": "Already holding this symbol",
+    "cooldown_block": "In cooldown after recent trade",
+    "risk_block": "Risk limits reached",
+    "data_unavailable": "Price or signal data unavailable",
+    "sizing_zero": "Position size calculated to $0",
+    "execution_failed": "Broker order failed",
+    "research_only_block": "Symbol not in live trading universe",
+    "perp_not_autonomous_eligible": "Symbol not eligible for autonomous trading",
+    "perp_deployment_cap_exceeded": "Capital deployment cap reached",
+    "perp_position_limit_reached": "Max open positions reached",
+    "spot_deployment_cap_exceeded": "Spot deployment cap reached",
+    "perp_opposite_side_block": "Opposite-side position already open",
+}
+
+
+def _plain_blocker(reason: str) -> str:
+    return _BLOCKER_PLAIN.get(reason, reason.replace("_", " "))
 
 
 def _age_label(seconds: int) -> str:
     if seconds >= 9999:
-        return "UNKNOWN"
+        return "unknown"
     if seconds < 60:
         return f"{seconds}s ago"
     return f"{seconds // 60}m ago"
 
 
-def _badge(label: str, color: str) -> str:
+def _derive_biggest_issue(
+    snap: dict,
+    stats: dict,
+    dd: dict,
+    ex: dict,
+) -> tuple[str, str, str, str]:
+    """Return (title, why, action, chip_status)."""
+    hb = snap.get("heartbeat_age", 9999)
+    err = snap.get("error_count", 0)
+    exec_fail = int(
+        (snap.get("crypto_funnel") or {})
+        .get("decision_counts", {})
+        .get("execution_failed", 0)
+    )
+    pf = stats.get("profit_factor", 0)
+    closes = stats.get("closes", 0)
+    curr_dd = dd.get("current_dd_pct", 0.0)
+
+    if hb >= 300:
+        return (
+            "Bot appears offline",
+            "No heartbeat in 5+ minutes.",
+            "Check if main.py is running.",
+            "problem",
+        )
+    if err > 10:
+        return (
+            f"{err} errors in last hour",
+            "A high error rate can cause missed or bad trades.",
+            "Check System → Event Log.",
+            "problem",
+        )
+    if exec_fail >= 2:
+        return (
+            f"{exec_fail} trade orders failed",
+            "Signals were good but broker orders weren't placed.",
+            "Check broker connection in System tab.",
+            "problem",
+        )
+    if closes >= 5 and pf < 1.0:
+        return (
+            "Strategy losing money after fees",
+            "More is being lost than won across all trades.",
+            "Review Performance → Fees & Execution.",
+            "problem",
+        )
+    if curr_dd > 5.0:
+        return (
+            f"Account {curr_dd:.1f}% below peak",
+            "Drawdown from recent high is above 5%.",
+            "Risk limits will auto-enforce — monitor closely.",
+            "watch",
+        )
+    if closes >= 5 and pf < 1.2:
+        return (
+            "Trade quality is marginal",
+            f"Profit factor {pf:.2f} is below the 1.35 target.",
+            "Review which signals are dragging performance.",
+            "watch",
+        )
+    if err > 0:
+        return (
+            f"{err} minor error(s) in last hour",
+            "Some non-critical errors are present.",
+            "Check System → Event Log if persistent.",
+            "watch",
+        )
+    if closes == 0:
+        return (
+            "No completed trades yet",
+            "The bot hasn't finished its first trade — normal early on.",
+            "Monitor to ensure the scanner is finding candidates.",
+            "info",
+        )
     return (
-        f'<span style="background:rgba({color},0.15);color:rgb({color});'
-        f"padding:2px 8px;border-radius:4px;font-size:0.8em;font-weight:700;"
-        f'display:inline-block;">{label}</span>'
+        "No critical issues",
+        "System is running normally with no major problems.",
+        "Keep monitoring — the bot is working.",
+        "good",
     )
 
 
 def render_control_tower():
-    window = st.selectbox("Window", ["1h", "24h", "7d"], index=1, key="ct_window")
+    # ── Window selector ────────────────────────────────────────────────────────
+    _wc1, _wc2 = st.columns([4, 1])
+    with _wc2:
+        window = st.selectbox(
+            "Window",
+            ["1h", "24h", "7d"],
+            index=1,
+            key="ct_window",
+            label_visibility="collapsed",
+        )
+    with _wc1:
+        st.markdown(
+            f'<div style="font-size:0.72em;color:{ui._TEXT_CAP};padding-top:8px;">'
+            f"Showing funnel & blocker data for the last "
+            f'<strong style="color:{ui._TEXT_SEC};">{window}</strong></div>',
+            unsafe_allow_html=True,
+        )
+
     window_hours = {"1h": 1, "24h": 24, "7d": 168}[window]
 
-    # All windowed panels (funnel, lifecycle, blockers, opportunities, action items)
-    # use window_hours. Non-windowed panels (positions, lane health, heartbeat) are
-    # always current and labeled "as of now" in their headings.
+    # ── Pull all data ──────────────────────────────────────────────────────────
     snap = get_control_tower_snapshot(hours=window_hours)
-    crypto_funnel = snap.get("crypto_funnel") or {}
 
-    st.divider()
+    try:
+        from data.performance import get_performance_stats
 
-    # ── A. Global status strip ─────────────────────────────────────────────────
-    st.markdown("**System Status**")
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
+        stats = get_performance_stats()
+    except Exception:
+        stats = {
+            "closes": 0,
+            "wins": 0,
+            "losses": 0,
+            "profit_factor": 0.0,
+            "win_rate": 0.0,
+            "total_pnl": 0.0,
+            "total_fees": 0.0,
+            "avg_win": 0.0,
+            "avg_loss": 0.0,
+            "rr_realized": 0.0,
+        }
 
-    mode = snap.get("runtime_mode", "UNKNOWN")
-    c1.metric("Mode", mode)
+    try:
+        from data.account import get_drawdown
 
-    hb = snap.get("heartbeat_age", 9999)
-    alive_label = "ALIVE" if hb < 120 else "STALE"
-    alive_delta = f"{_age_label(hb)}"
-    c2.metric("Bot", alive_label, delta=alive_delta, delta_color="off")
+        dd = get_drawdown()
+    except Exception:
+        dd = {
+            "current_dd_pct": 0.0,
+            "max_dd_pct": 0.0,
+            "current_dd_usd": 0.0,
+            "max_dd_usd": 0.0,
+        }
 
-    # Crypto lane from lane_runtime_state
-    crypto_lane = _q1(
-        "SELECT health, active FROM lane_runtime_state WHERE lane_id='crypto' ORDER BY id DESC LIMIT 1"
-    )
-    crypto_health = crypto_lane.get("health") or "UNKNOWN"
-    c3.metric("Crypto lane", crypto_health)
+    try:
+        from data.execution import get_execution_stats
 
-    # Forecast lane
-    fc_lane = _q1(
-        "SELECT readiness_state, active FROM lane_runtime_state WHERE lane_id='forecast' ORDER BY id DESC LIMIT 1"
-    )
-    fc_state = fc_lane.get("readiness_state") or (
-        "ACTIVE" if fc_lane.get("active") else "INACTIVE"
-    )
-    c4.metric("Forecast lane", fc_state)
+        ex = get_execution_stats()
+    except Exception:
+        ex = {"total": 0, "entry_score": 0.0, "exit_score": 0.0, "fee_trap_rate": 0.0}
 
-    # Last scan age
+    scan_age = 9999
     try:
         from data.scanner_data import get_last_scan_age
 
-        scan_age = get_last_scan_age()
-        c5.metric("Last scan", _age_label(scan_age) if scan_age else "UNKNOWN")
+        scan_age = get_last_scan_age() or 9999
     except Exception:
-        c5.metric("Last scan", "UNKNOWN")
+        pass
 
-    # Open incidents
-    incidents = snap.get("incident_count", 0)
-    c6.metric("Open incidents", incidents)
+    # ══════════════════════════════════════════════════════════════════════════
+    # ROW 1 — 4 top cards
+    # ══════════════════════════════════════════════════════════════════════════
+    c1, c2, c3, c4 = st.columns([1, 1.2, 1, 1])
 
-    st.divider()
+    # ── Card 1: Bot Status ─────────────────────────────────────────────────────
+    with c1:
+        hb = snap.get("heartbeat_age", 9999)
+        err = snap.get("error_count", 0)
 
-    # ── B. Summary card row ────────────────────────────────────────────────────
-    b1, b2, b3, b4 = st.columns(4)
+        if hb < 120 and err == 0:
+            chip_s, chip_l = "good", "Good"
+            verdict = "Running Normally"
+        elif hb < 300:
+            chip_s, chip_l = "watch", "Watch"
+            verdict = "Running with Issues"
+        else:
+            chip_s, chip_l = "problem", "Problem"
+            verdict = "Bot May Be Offline"
 
-    with b1:
-        st.markdown("**Portfolio Snapshot**")
+        hb_str = _age_label(hb)
+        scan_str = _age_label(scan_age)
+        expl = (
+            f"Heartbeat {hb_str} · "
+            f"Last scan {scan_str} · "
+            f"{err} error{'s' if err != 1 else ''} in last hour. "
+            "Is the bot alive and scanning normally?"
+        )
+        st.markdown(
+            ui.summary_card("BOT STATUS", verdict, chip_l, chip_s, expl),
+            unsafe_allow_html=True,
+        )
+
+    # ── Card 2: Account Snapshot (hero) ───────────────────────────────────────
+    with c2:
         equity = snap.get("account_equity", 0.0)
         daily_pnl = snap.get("daily_pnl", 0.0)
-        deployed_pct = snap.get("deployed_pct", 0.0)
-        open_count = len(snap.get("open_positions", []))
-        st.metric("Equity", f"${equity:,.2f}")
-        st.metric("Daily P&L", f"${daily_pnl:+.2f}")
-        st.metric(
-            "Deployed",
-            f"{deployed_pct:.1f}%",
-            help="% of equity in open perp positions",
-        )
-        st.metric("Open positions", open_count)
+        dep_pct = snap.get("deployed_pct", 0.0)
+        dep_usd = snap.get("deployed_usd", 0.0)
+        curr_dd = dd.get("current_dd_pct", 0.0)
 
-    with b2:
-        st.markdown("**Trade Funnel**")
+        pnl_sign = "+" if daily_pnl >= 0 else ""
+        pnl_color = ui.C_GREEN if daily_pnl >= 0 else ui.C_RED
+        dd_color = (
+            ui.C_RED if curr_dd > 3 else ui.C_AMBER if curr_dd > 1 else ui.C_GREEN
+        )
+        st.markdown(
+            ui.hero_card(
+                "ACCOUNT SNAPSHOT",
+                f"${equity:,.2f}",
+                [
+                    ("Today's P&L", f"{pnl_sign}${abs(daily_pnl):.2f}", pnl_color),
+                    (
+                        "Capital deployed",
+                        f"{dep_pct:.1f}%  (${dep_usd:,.0f})",
+                        ui.C_CYAN if dep_pct > 0 else None,
+                    ),
+                    ("Drawdown from peak", f"{curr_dd:.1f}%", dd_color),
+                ],
+                "Your full account at a glance.",
+                gradient=True,
+            ),
+            unsafe_allow_html=True,
+        )
+
+    # ── Card 3: Trade Quality ──────────────────────────────────────────────────
+    with c3:
+        pf = stats.get("profit_factor", 0.0)
+        wr = stats.get("win_rate", 0.0)
+        closes = stats.get("closes", 0)
+        ev = stats.get("total_pnl", 0.0) / closes if closes else 0.0
+        fees = stats.get("total_fees", 0.0)
+        pf_str = f"{pf:.2f}" if pf != float("inf") else "∞"
+
+        chip_s = "good" if pf >= 1.35 else ("watch" if pf >= 1.0 else "problem")
+        chip_l = (
+            "Good  ≥ 1.35"
+            if pf >= 1.35
+            else "Marginal  ≥ 1.0"
+            if pf >= 1.0
+            else "Problem  < 1.0"
+        )
+        pf_color = ui.C_GREEN if pf >= 1.35 else (ui.C_AMBER if pf >= 1.0 else ui.C_RED)
+
+        metrics = (
+            ui.metric_row(
+                "Win rate",
+                f"{wr:.0f}%  ({stats.get('wins', 0)}W / {stats.get('losses', 0)}L)",
+            )
+            + ui.metric_row(
+                "EV / trade (after fees)",
+                f"${ev:+.2f}",
+                value_color=ui.C_GREEN if ev > 0 else ui.C_RED,
+            )
+            + ui.metric_row("Total fees paid", f"${fees:.2f}", value_color=ui.C_AMBER)
+            + (
+                f'<div style="font-size:0.70em;color:{ui._TEXT_CAP};margin-top:5px;">'
+                f"{closes} closed trades since launch</div>"
+                if closes
+                else f'<div style="font-size:0.70em;color:{ui._TEXT_CAP};margin-top:5px;">'
+                f"No completed trades yet</div>"
+            )
+        )
+
+        card_html = (
+            f'<div style="background:{ui._BG_CARD};border:1px solid {ui._BORDER};'
+            f"border-top:2px solid {pf_color};border-radius:{ui._RADIUS};"
+            f'padding:20px 22px;box-shadow:{ui._SHADOW};height:100%;box-sizing:border-box;">'
+            f'<div style="font-size:0.68em;color:{ui._TEXT_CAP};text-transform:uppercase;'
+            f'letter-spacing:0.11em;margin-bottom:10px;">TRADE QUALITY</div>'
+            f'<div style="font-size:2.0em;font-weight:800;color:{pf_color};line-height:1.1;'
+            f'margin-bottom:8px;">PF&nbsp;{pf_str}</div>'
+            f'<div style="margin-bottom:12px;">{ui.chip(chip_l, chip_s)}</div>'
+            f'<div style="border-top:1px solid {ui._BORDER};padding-top:10px;">{metrics}</div>'
+            f'<div style="font-size:0.70em;color:{ui._TEXT_CAP};margin-top:8px;line-height:1.5;">'
+            f"Is the strategy profitable enough to beat fees? Target: PF ≥ 1.35</div>"
+            f"</div>"
+        )
+        st.markdown(card_html, unsafe_allow_html=True)
+
+    # ── Card 4: Biggest Issue ──────────────────────────────────────────────────
+    with c4:
+        issue, why, action, issue_status = _derive_biggest_issue(snap, stats, dd, ex)
+        st.markdown(
+            ui.summary_card(
+                "BIGGEST ISSUE RIGHT NOW",
+                issue,
+                issue_status.capitalize(),
+                issue_status,
+                f"{why}  {action}",
+            ),
+            unsafe_allow_html=True,
+        )
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # ROW 2 — 3-zone layout
+    # ══════════════════════════════════════════════════════════════════════════
+    st.markdown('<div class="ds-spacer-md"></div>', unsafe_allow_html=True)
+    left, center, right = st.columns([0.26, 0.48, 0.26])
+
+    # ── LEFT: Positions + Scanner Summary + Activity ───────────────────────────
+    with left:
+        try:
+            from widgets.mission_control.open_positions import render_positions_compact
+
+            render_positions_compact()
+        except Exception as e:
+            st.caption(f"Positions unavailable: {e}")
+
+        st.markdown('<div class="ds-spacer-sm"></div>', unsafe_allow_html=True)
+
+        # Inline scanner summary
+        crypto_funnel = snap.get("crypto_funnel") or {}
         funnel = crypto_funnel.get("funnel") or {}
         scanned = int(funnel.get("scanner_candidates_total") or 0)
-        entered = int(funnel.get("entered") or 0)
         scored = int(funnel.get("scored_total") or 0)
-        conv = f"{crypto_funnel.get('conversion_pct', 0.0):.1f}%"
-        st.metric("Scanned", scanned)
-        st.metric("Scored", scored)
-        st.metric("Entered", entered)
-        st.metric("Conversion", conv)
+        entered = int(funnel.get("entered") or 0)
+        conv_pct = crypto_funnel.get("conversion_pct", 0.0)
+        blockers = crypto_funnel.get("top_blockers") or []
+        top_b = blockers[0].get("reason", "") if blockers else ""
+        top_b_n = blockers[0].get("n", 0) if blockers else 0
 
-    with b3:
-        st.markdown("**Problem Split**")
-        issue = crypto_funnel.get("issue_breakdown") or {}
-        strategy_n = issue.get("strategy", 0)
-        system_n = issue.get("system", 0)
-        bug_n = issue.get("bug", 0)
-        st.metric("Strategy rejects", strategy_n, help="below_threshold + econ_veto")
-        st.metric("System blocks", system_n, help="policy/risk/cooldown blocks")
-        st.metric("Bug/data flags", bug_n, help="data_unavailable + execution_failed")
+        scan_body = (
+            ui.metric_row("Symbols scanned", str(scanned))
+            + ui.metric_row("Passed signal score", str(scored))
+            + ui.metric_row("Trades entered", str(entered))
+            + ui.metric_row(
+                "Conversion rate",
+                f"{conv_pct:.1f}%",
+                value_color=ui.C_GREEN if conv_pct > 1 else ui.C_AMBER,
+            )
+        )
+        if top_b:
+            scan_body += (
+                f'<div style="font-size:0.71em;color:{ui.C_AMBER};margin-top:6px;">'
+                f"Top filter: {_plain_blocker(top_b)} ({top_b_n}×)</div>"
+            )
 
-    with b4:
-        st.markdown("**Action Needed**")
-        actions = snap.get("action_items") or []
-        if actions:
-            for a in actions[:4]:
-                st.warning(a)
-        else:
-            st.success("No action items")
+        st.markdown(
+            ui.detail_card(
+                "SCANNER SUMMARY",
+                f"Where trade ideas are filtered out — last {window}",
+                scan_body,
+            ),
+            unsafe_allow_html=True,
+        )
 
-    st.divider()
+        try:
+            from widgets.mission_control.activity_log import render_smart_logs
 
-    # ── C. Candidate lifecycle funnel (standardized 8-stage) ─────────────────
-    # Primary view: where candidates die across routing / sizing / execution.
-    # Secondary view: coarse blocker breakdown (strategy / system / bug).
-    left, right = st.columns([1.2, 0.8])
+            render_smart_logs()
+        except Exception as e:
+            st.caption(f"Activity log unavailable: {e}")
 
-    with left:
-        st.markdown(f"**Candidate Lifecycle — last {window}**")
+    # ── CENTER: Main Performance Panel ────────────────────────────────────────
+    with center:
+        st.markdown(
+            ui.section_header(
+                "PERFORMANCE",
+                "Account growth since launch — each point is one completed trade",
+            ),
+            unsafe_allow_html=True,
+        )
+
+        try:
+            from widgets.mission_control.equity_curve import render_equity_curve_compact
+
+            render_equity_curve_compact()
+        except Exception as e:
+            st.caption(f"Equity curve unavailable: {e}")
+
+        # Summary strip
+        st.markdown('<div class="ds-spacer-sm"></div>', unsafe_allow_html=True)
+        total_pnl = stats.get("total_pnl", 0.0)
+        n_pos = len(snap.get("open_positions", []))
+        ex_entry = ex.get("entry_score", 0.0) if ex.get("total", 0) > 0 else None
+        ex_exit = ex.get("exit_score", 0.0) if ex.get("total", 0) > 0 else None
+
+        sc1, sc2, sc3, sc4 = st.columns(4)
+        pnl_s = "+" if total_pnl >= 0 else ""
+        sc1.metric(
+            "After-fee P&L",
+            f"{pnl_s}${abs(total_pnl):.2f}",
+            help="Total profit or loss after all fees since launch",
+        )
+        sc2.metric(
+            "Open positions",
+            str(n_pos),
+            help="Number of active trades right now",
+        )
+        sc3.metric(
+            "Entry quality",
+            f"{ex_entry:.1f}/10" if ex_entry is not None else "—",
+            help="How well-timed our entries are (10 = entered right before the move)",
+        )
+        sc4.metric(
+            "Exit quality",
+            f"{ex_exit:.1f}/10" if ex_exit is not None else "—",
+            help="Fraction of each price move we actually captured (10 = perfect)",
+        )
+
+    # ── RIGHT: Risk + Decision + Execution + Learning ──────────────────────────
+    with right:
+        # A. Risk Overview
+        max_dd = dd.get("max_dd_pct", 0.0)
+        mode = snap.get("runtime_mode", "PAPER")
+        mode_c = ui.C_RED if mode == "LIVE" else ui.C_CYAN
+
+        risk_body = (
+            ui.metric_row("Trading mode", mode, value_color=mode_c)
+            + ui.metric_row("Open positions", str(n_pos))
+            + ui.metric_row(
+                "Capital deployed",
+                f"${dep_usd:,.0f}  ({dep_pct:.1f}%)",
+            )
+            + ui.metric_row(
+                "Current drawdown",
+                f"{curr_dd:.1f}%",
+                value_color=ui.C_RED if curr_dd > 3 else ui.C_GREEN,
+            )
+            + ui.metric_row("Max drawdown (ever)", f"{max_dd:.1f}%")
+        )
+        st.markdown(
+            ui.detail_card(
+                "RISK OVERVIEW",
+                "How exposed is the account right now?",
+                risk_body,
+            ),
+            unsafe_allow_html=True,
+        )
+
+        # B. Decision Quality
+        try:
+            from widgets.mission_control.decision_quality import render_decision_quality
+
+            render_decision_quality()
+        except Exception as e:
+            st.caption(f"Decision quality unavailable: {e}")
+
+        # C. Execution Quality
+        try:
+            from widgets.mission_control.execution_quality import (
+                render_execution_quality,
+            )
+
+            render_execution_quality()
+        except Exception as e:
+            st.caption(f"Execution quality unavailable: {e}")
+
+        # D. Learning Status
+        try:
+            from data.health import get_ml_status
+
+            ml = get_ml_status()
+        except Exception:
+            ml = {"snapshots": 0, "min_needed": 200}
+
+        ml_snaps = ml.get("snapshots", 0)
+        ml_min = ml.get("min_needed", 200)
+        ml_on = ml_snaps >= ml_min
+
+        ml_body = ui.metric_row(
+            "ML model active",
+            "Yes — scoring trades" if ml_on else "Not yet active",
+            value_color=ui.C_GREEN if ml_on else ui.C_AMBER,
+        ) + ui.metric_row(
+            "Training snapshots",
+            f"{ml_snaps} / {ml_min} needed",
+            value_color=ui.C_GREEN if ml_on else ui._TEXT_PRI,
+        )
+        if not ml_on:
+            remaining = ml_min - ml_snaps
+            ml_body += ui.info_callout(
+                f"Needs {remaining} more completed trades before ML activates. "
+                "Using rule-based signals only until then — fully normal.",
+                "info",
+            )
+
+        st.markdown(
+            ui.detail_card(
+                "LEARNING STATUS",
+                "Is the bot improving from past trades?",
+                ml_body,
+            ),
+            unsafe_allow_html=True,
+        )
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # ROW 3 — Lower band
+    # ══════════════════════════════════════════════════════════════════════════
+    st.markdown('<div class="ds-spacer-md"></div>', unsafe_allow_html=True)
+    st.markdown(
+        ui.section_header(
+            "DETAILS",
+            "Deeper diagnostics without leaving this page",
+        ),
+        unsafe_allow_html=True,
+    )
+
+    r1, r2, r3, r4 = st.columns(4)
+
+    with r1:
+        try:
+            from widgets.mission_control.failure_modes import render_failures_compact
+
+            render_failures_compact()
+        except Exception as e:
+            st.caption(f"Failure modes unavailable: {e}")
+
+    with r2:
         lifecycle = snap.get("lifecycle_stages") or []
+        _lc_colors = {
+            "discovered": "#6e7681",
+            "signal_pass": "#d29922",
+            "econ_pass": "#bc8cff",
+            "route_decided": "#58a6ff",
+            "size_pass": "#a78bfa",
+            "execution_attempted": "#38bdf8",
+            "position_open": "#3fb950",
+            "exit_complete": "#86efac",
+        }
         if lifecycle:
-            # Compute max for relative bar width
-            max_count = max((s.get("count", 0) for s in lifecycle), default=1) or 1
-            _lc_colors = {
-                "discovered": "#94a3b8",
-                "signal_pass": "#facc15",
-                "econ_pass": "#fb923c",
-                "route_decided": "#60a5fa",
-                "size_pass": "#a78bfa",
-                "execution_attempted": "#38bdf8",
-                "position_open": "#4ade80",
-                "exit_complete": "#86efac",
-            }
+            max_c = max((s.get("count", 0) for s in lifecycle), default=1) or 1
+            bars_html = ""
             for s in lifecycle:
-                stage = s.get("stage", "")
-                count = s.get("count", 0)
-                derived = s.get("derived", False)
-                color = _lc_colors.get(stage, "#94a3b8")
-                bar_pct = int(count / max_count * 100) if max_count else 0
-                derived_note = " ·derived" if derived else ""
-                st.markdown(
-                    f'<div style="margin-bottom:3px;">'
-                    f'<div style="display:flex;justify-content:space-between;'
-                    f"padding:3px 8px;border-left:3px solid {color};"
-                    f'background:rgba(0,0,0,0.10);border-radius:2px;">'
-                    f'<span style="color:{color};font-size:0.82em;">'
-                    f'{stage}<span style="color:#475569;font-size:0.85em;">{derived_note}</span>'
-                    f"</span>"
-                    f'<strong style="color:{color}">{count}</strong></div>'
-                    f'<div style="height:3px;width:{bar_pct}%;background:{color};'
-                    f'opacity:0.35;border-radius:0 0 2px 2px;"></div>'
-                    f"</div>",
-                    unsafe_allow_html=True,
+                color = _lc_colors.get(s.get("stage", ""), "#6e7681")
+                note = " ·derived" if s.get("derived") else ""
+                bars_html += ui.funnel_bar(
+                    s.get("stage", ""), s.get("count", 0), max_c, color, note
                 )
-            st.caption(
-                "·derived = computed from existing persisted fields, "
-                "not a dedicated persisted column"
+            st.markdown(
+                ui.detail_card(
+                    "SCANNER FUNNEL DETAIL",
+                    f"Where trade ideas die — last {window}",
+                    bars_html,
+                    "·derived = computed from persisted fields, not a dedicated column",
+                ),
+                unsafe_allow_html=True,
             )
         else:
-            st.caption("No lifecycle data for this window.")
-
-    with right:
-        st.markdown(f"**Where candidates die — last {window}**")
-        issue = crypto_funnel.get("issue_breakdown") or {}
-        _issue_colors = {
-            "strategy": ("#facc15", "Signal / economics"),
-            "system": ("#60a5fa", "Policy / routing"),
-            "bug": ("#f87171", "Bug / data"),
-            "success": ("#4ade80", "Entered"),
-        }
-        for key, (color, label) in _issue_colors.items():
-            n = issue.get(key, 0)
             st.markdown(
-                f'<div style="display:flex;justify-content:space-between;'
-                f"padding:3px 8px;margin-bottom:2px;border-left:3px solid {color};"
-                f'background:rgba(0,0,0,0.08);border-radius:2px;">'
-                f'<span style="color:{color};font-size:0.82em;">{label}</span>'
-                f'<strong style="color:{color}">{n}</strong></div>',
+                ui.detail_card(
+                    "SCANNER FUNNEL DETAIL",
+                    f"Where trade ideas die — last {window}",
+                    ui.empty_state(
+                        "No funnel data yet",
+                        "Populates after the bot runs a scan.",
+                    ),
+                ),
                 unsafe_allow_html=True,
             )
 
-        st.markdown(f"**Top blockers — last {window}**")
-        blockers = crypto_funnel.get("top_blockers") or []
-        if blockers:
-            for b in blockers[:6]:
-                reason = b.get("reason") or "unknown"
-                n = b.get("n", 0)
-                st.caption(f"`{reason}` — **{n}**")
+    with r3:
+        try:
+            from widgets.mission_control.alert_feed import render_alert_feed
+
+            render_alert_feed()
+        except Exception as e:
+            st.caption(f"Alert feed unavailable: {e}")
+
+    with r4:
+        try:
+            from data.account import get_trade_log
+
+            trades = get_trade_log(limit=8)
+        except Exception:
+            trades = []
+
+        if trades:
+            rows_html = ""
+            for t in trades:
+                pnl = float(t.get("pnl_usd") or 0)
+                p_c = ui.C_GREEN if pnl >= 0 else ui.C_RED
+                p_sign = "+" if pnl >= 0 else ""
+                sym = t.get("symbol", "?")
+                action = t.get("action", "")
+                ts = str(t.get("ts", ""))[:16]
+                rows_html += (
+                    f'<div style="display:flex;justify-content:space-between;'
+                    f"padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.04);"
+                    f'font-size:0.79em;">'
+                    f"<div>"
+                    f'<span style="color:{ui._TEXT_PRI};font-weight:600;">{sym}</span>'
+                    f'&nbsp;<span style="color:{ui._TEXT_CAP};font-size:0.88em;">{action}</span>'
+                    f"</div>"
+                    f'<span style="color:{p_c};font-weight:700;">'
+                    f"{p_sign}${abs(pnl):.2f}</span>"
+                    f"</div>"
+                )
+            rows_html += (
+                f'<div style="font-size:0.68em;color:{ui._TEXT_CAP};margin-top:6px;">'
+                f"Showing last {len(trades)} trades</div>"
+            )
+            st.markdown(
+                ui.detail_card(
+                    "TRADE LOG",
+                    "Recent completed trades",
+                    rows_html,
+                ),
+                unsafe_allow_html=True,
+            )
         else:
-            st.caption("No blocker data.")
-
-    st.divider()
-
-    # ── D. Live opportunities now ──────────────────────────────────────────────
-    st.markdown("**Live Opportunities (Executable)**")
-    try:
-        board = get_crypto_opportunity_board(hours=window_hours)
-        executable = [r for r in board if r.get("status") == "executable"][:10]
-        if executable:
-            cols = [
-                "symbol",
-                "underlying",
-                "direction",
-                "recommended_lane",
-                "score",
-                "auto_executable",
-            ]
-            import pandas as pd
-
-            df = pd.DataFrame(executable)[cols]
-            df.columns = ["Symbol", "Underlying", "Direction", "Lane", "Score", "Auto"]
-            st.dataframe(df, use_container_width=True, hide_index=True)
-        else:
-            st.caption("No currently executable candidates in this window.")
-    except Exception as e:
-        st.caption(f"Opportunity board unavailable: {e}")
-
-    st.divider()
-
-    # ── E. Open positions ──────────────────────────────────────────────────────
-    try:
-        from widgets.mission_control.open_positions import render_positions_compact
-
-        render_positions_compact()
-    except Exception as e:
-        st.caption(f"Positions widget unavailable: {e}")
-
-    st.divider()
-
-    # ── F. Lane health strip ───────────────────────────────────────────────────
-    st.markdown("**Lane Health**")
-    lanes = _q(
-        "SELECT lane_id, enabled, active, health, readiness_state, last_heartbeat_at "
-        "FROM lane_runtime_state ORDER BY id DESC"
-    )
-    # Deduplicate — keep most recent row per lane_id
-    seen: set = set()
-    lane_rows: list = []
-    for lane in lanes:
-        lid = lane.get("lane_id")
-        if lid and lid not in seen:
-            seen.add(lid)
-            lane_rows.append(lane)
-
-    if lane_rows:
-        lane_cols = st.columns(len(lane_rows))
-        for i, lane in enumerate(lane_rows):
-            with lane_cols[i]:
-                lid = lane.get("lane_id", "unknown")
-                health = lane.get("health") or "UNKNOWN"
-                readiness = lane.get("readiness_state") or ""
-                hb_ts = lane.get("last_heartbeat_at")
-                hb_age = _time_ago(hb_ts) if hb_ts else "never"
-                st.markdown(f"**{lid.upper()}**")
-                st.caption(f"Health: {health}")
-                if readiness:
-                    st.caption(f"Readiness: {readiness}")
-                st.caption(f"Heartbeat: {hb_age}")
-    else:
-        st.caption("Lane runtime state not available.")
-
-    st.divider()
-
-    # ── G. Action center / alert feed ─────────────────────────────────────────
-    try:
-        from widgets.mission_control.alert_feed import render_alert_feed
-
-        render_alert_feed()
-    except Exception as e:
-        st.caption(f"Alert feed unavailable: {e}")
+            st.markdown(
+                ui.detail_card(
+                    "TRADE LOG",
+                    "Recent completed trades",
+                    ui.empty_state(
+                        "No trades yet",
+                        "Will populate after the first completed trade.",
+                    ),
+                ),
+                unsafe_allow_html=True,
+            )

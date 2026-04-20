@@ -294,6 +294,14 @@ class IBKRBroker:
             order.tif = "GTC"  # prevent DAY preset from cancelling after RTH
             trade = self._ib.placeOrder(contract, order)
             trades.append(trade)
+        # Wait briefly so IBKR can reject the entry with Error 460 / permissions
+        await asyncio.sleep(0.5)
+        entry_status = trades[0].orderStatus.status if trades else ""
+        if entry_status == "Cancelled":
+            err_codes = [e.errorCode for e in trades[0].log if e.errorCode]
+            raise RuntimeError(
+                f"MES bracket entry cancelled by IBKR (status=Cancelled, codes={err_codes})"
+            )
         return trades
 
     async def _place_market_async(self, action: str, qty: int) -> object:
@@ -311,7 +319,10 @@ class IBKRBroker:
 
         contract = _get_mes_contract()
         await self._ib.qualifyContractsAsync(contract)
-        return self._ib.placeOrder(contract, MarketOrder(action, qty))
+        order = MarketOrder(action, qty)
+        order.outsideRth = True
+        order.tif = "GTC"
+        return self._ib.placeOrder(contract, order)
 
     # ── Order placement ───────────────────────────────────────────────────────
 
@@ -352,7 +363,7 @@ class IBKRBroker:
                 )
             except Exception as e:
                 log_event("ERROR", "IBKRBroker", f"buy_mes order error: {e}")
-                order_id = f"IBKR_ERR_{uuid.uuid4().hex[:8]}"
+                return None  # order was rejected — do not log a fake position
         else:
             order_id = f"IBKR_OFFLINE_{uuid.uuid4().hex[:8]}"
             print(
@@ -370,19 +381,22 @@ class IBKRBroker:
                 "order_id": order_id,
             }
 
-        log_trade(
-            strategy=strategy,
-            broker="ibkr" if not PAPER_TRADING else "ibkr_paper",
-            symbol="MES",
-            action="BUY",
-            order_type=order_type,
-            qty=num_contracts,
-            price=current_price,
-            fee_usd=commission,
-            paper=PAPER_TRADING,
-            order_id=order_id,
-            notes=f"SL={stop_price} TP={target_price} reason={reason}",
-        )
+        try:
+            log_trade(
+                strategy=strategy,
+                broker="ibkr" if not PAPER_TRADING else "ibkr_paper",
+                symbol="MES",
+                action="BUY",
+                order_type=order_type,
+                qty=num_contracts,
+                price=current_price,
+                fee_usd=commission,
+                paper=PAPER_TRADING,
+                order_id=order_id,
+                notes=f"SL={stop_price} TP={target_price} reason={reason}",
+            )
+        except Exception as _e:
+            log_event("ERROR", "IBKRBroker", f"buy_mes log_trade failed: {_e}")
         try:
             if _get_ne:
                 _ne = _get_ne()
@@ -499,7 +513,7 @@ class IBKRBroker:
                 )
             except Exception as e:
                 log_event("ERROR", "IBKRBroker", f"short_mes order error: {e}")
-                order_id = f"IBKR_ERR_{uuid.uuid4().hex[:8]}"
+                return None  # order was rejected — do not log a fake position
         else:
             order_id = f"IBKR_OFFLINE_{uuid.uuid4().hex[:8]}"
             print(
@@ -517,19 +531,22 @@ class IBKRBroker:
                 "order_id": order_id,
             }
 
-        log_trade(
-            strategy=strategy,
-            broker="ibkr" if not PAPER_TRADING else "ibkr_paper",
-            symbol="MES",
-            action="SHORT",
-            order_type=order_type,
-            qty=num_contracts,
-            price=current_price,
-            fee_usd=commission,
-            paper=PAPER_TRADING,
-            order_id=order_id,
-            notes=f"SL={stop_price} TP={target_price} reason={reason}",
-        )
+        try:
+            log_trade(
+                strategy=strategy,
+                broker="ibkr" if not PAPER_TRADING else "ibkr_paper",
+                symbol="MES",
+                action="SHORT",
+                order_type=order_type,
+                qty=num_contracts,
+                price=current_price,
+                fee_usd=commission,
+                paper=PAPER_TRADING,
+                order_id=order_id,
+                notes=f"SL={stop_price} TP={target_price} reason={reason}",
+            )
+        except Exception as _e:
+            log_event("ERROR", "IBKRBroker", f"short_mes log_trade failed: {_e}")
         try:
             if _get_ne:
                 _ne = _get_ne()

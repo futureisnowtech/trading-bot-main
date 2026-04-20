@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-20
+- feat(spot): day-trading exits — target hit (3R) + EOD flatten (15:45 ET) + both BTC/ETH fully wired
+
+## 2026-04-20
 - feat(v17.2): add US equity swing-trading lane — ibkr_stock_broker, stock_runner, stocks dashboard, STOCKS tab
 
 ## 2026-04-20

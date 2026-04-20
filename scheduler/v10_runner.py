@@ -1816,6 +1816,13 @@ def exit_monitor():
         check_spot_thesis_exits(paper=config.PAPER_TRADING)
     except Exception as e:
         logger.debug(f"[v10] spot trailing/thesis check error: {e}")
+    try:
+        from spot_engine import check_spot_targets, check_spot_eod_close
+
+        check_spot_targets(paper=config.PAPER_TRADING)
+        check_spot_eod_close(paper=config.PAPER_TRADING)
+    except Exception as e:
+        logger.debug(f"[v10] spot target/eod check error: {e}")
 
 
 def _exit_monitor_inner():

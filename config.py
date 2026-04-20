@@ -83,6 +83,13 @@ SPOT_MIN_ORDER_USD: float = float(os.getenv("SPOT_MIN_ORDER_USD", "10.0"))
 # Conservative hard stop: close position if price drops this % below entry.
 # 3% default — tight enough to limit loss on small account, loose enough to avoid noise wicks.
 SPOT_STOP_PCT: float = float(os.getenv("SPOT_STOP_PCT", "0.03"))
+# Profit target expressed as a multiple of the stop distance (R-multiple).
+# 3.0 = 3R: with a 3% stop, target = 9% gain. At 1.2% round-trip fee the
+# break-even win rate is ~35% — well within the economics gate's score floor.
+SPOT_TARGET_R: float = float(os.getenv("SPOT_TARGET_R", "3.0"))
+# End-of-day flatten time (HH:MM ET, 24h). All spot positions closed at or
+# after this time on weekdays to prevent overnight gap exposure.
+SPOT_EOD_CLOSE_TIME: str = os.getenv("SPOT_EOD_CLOSE_TIME", "15:45")
 
 # ════════════════════════════════════════════════════════════════════
 # RISK — HARDCODED. NO AI CAN OVERRIDE THESE.

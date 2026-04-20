@@ -44,6 +44,8 @@ _SPOT_STOP_PCT: float = 0.03  # 3% hard stop below entry
 _SPOT_TRAIL_MULT: float = 1.5  # ATR multiplier for trailing stop width
 _SPOT_THESIS_MIN_HOLD_MINS: float = 20.0  # min hold before thesis exit fires
 _SPOT_THESIS_MIN_SCORE: float = 42.0  # composite score below this → thesis exit
+_SPOT_TARGET_R: float = 3.0  # profit target as R-multiple of stop distance
+_SPOT_EOD_CLOSE_TIME: str = "15:45"  # HH:MM ET — flatten all spot by this time
 
 
 def _load_config() -> None:
@@ -55,7 +57,9 @@ def _load_config() -> None:
         _SPOT_STOP_PCT, \
         _SPOT_TRAIL_MULT, \
         _SPOT_THESIS_MIN_HOLD_MINS, \
-        _SPOT_THESIS_MIN_SCORE
+        _SPOT_THESIS_MIN_SCORE, \
+        _SPOT_TARGET_R, \
+        _SPOT_EOD_CLOSE_TIME
     try:
         from config import (
             SPOT_MAX_DEPLOYED_PCT,
@@ -63,6 +67,8 @@ def _load_config() -> None:
             SPOT_SYMBOLS,
             SPOT_LANE_ACTIVE,
             SPOT_STOP_PCT,
+            SPOT_TARGET_R,
+            SPOT_EOD_CLOSE_TIME,
         )
 
         _SPOT_MAX_DEPLOYED_PCT = float(SPOT_MAX_DEPLOYED_PCT)
@@ -70,10 +76,12 @@ def _load_config() -> None:
         _SPOT_SYMBOLS = list(SPOT_SYMBOLS)
         _SPOT_LANE_ACTIVE = bool(SPOT_LANE_ACTIVE)
         _SPOT_STOP_PCT = float(SPOT_STOP_PCT)
+        _SPOT_TARGET_R = float(SPOT_TARGET_R)
+        _SPOT_EOD_CLOSE_TIME = str(SPOT_EOD_CLOSE_TIME)
     except Exception:
         pass  # use defaults above
 
-    # New optional config constants — env-var overrides only
+    # Env-var overrides for non-config knobs
     try:
         _SPOT_TRAIL_MULT = float(os.environ.get("SPOT_TRAIL_MULT", _SPOT_TRAIL_MULT))
         _SPOT_THESIS_MIN_HOLD_MINS = float(
@@ -201,6 +209,9 @@ def open_spot(
         stop_pct = _SPOT_STOP_PCT
 
     stop_price = round(price * (1.0 - stop_pct), 8) if price > 0 else 0.0
+    target_price = (
+        round(price * (1.0 + stop_pct * _SPOT_TARGET_R), 8) if price > 0 else 0.0
+    )
     max_loss_usd = round(size_usd * stop_pct, 2)
 
     pos = {
@@ -251,7 +262,7 @@ def open_spot(
             qty=qty,
             entry=price,
             stop=stop_price,
-            target=0.0,
+            target=target_price,
             high_since_entry=price,
             ts_entry=datetime.datetime.now().isoformat(),
             paper=paper,
@@ -268,6 +279,7 @@ def open_spot(
         f"[spot_engine] {'PAPER' if paper else 'LIVE'} BUY {clean}: "
         f"${size_usd:.2f} = {qty:.6f} @ {price:.4f}  "
         f"stop={stop_price:.4f} (-{stop_pct:.2%})  "
+        f"target={target_price:.4f} (+{stop_pct * _SPOT_TARGET_R:.2%})  "
         f"composite={composite_score:.1f}  atr={atr_at_entry:.4f}"
     )
     return pos
@@ -689,5 +701,129 @@ def check_spot_thesis_exits(paper: bool = True) -> List[Dict]:
 
         except Exception as e:
             logger.warning(f"[spot_engine] check_spot_thesis_exits error for pos: {e}")
+
+    return closed
+
+
+# ── check_spot_targets ────────────────────────────────────────────────────────
+
+
+def check_spot_targets(paper: bool = True) -> List[Dict]:
+    """
+    Close spot positions that have reached their fixed profit target.
+
+    Target = entry * (1 + stop_pct * SPOT_TARGET_R), stored in
+    open_positions.target at buy time (3R default → 9% gain on 3% stop).
+
+    Fee math: at 1.2% round-trip cost and 3R target the break-even win
+    rate is ~35%, well within what the economics gate's score floor (≥74)
+    delivers empirically.
+
+    Returns list of closed position dicts.
+    """
+    _load_config()
+    closed: List[Dict] = []
+
+    positions = _load_spot_positions_from_db(paper=paper)
+    if not positions:
+        return closed
+
+    broker = _get_broker(paper)
+    if broker is None:
+        return closed
+
+    for pos in positions:
+        try:
+            sym = str(pos.get("symbol", "")).upper()
+            target_price = float(pos.get("target", 0.0))
+            entry_price = float(pos.get("entry", 0.0))
+
+            if target_price <= 0 or target_price <= entry_price:
+                continue  # no valid target stored (pre-upgrade position)
+
+            current_price = broker.get_mark_price(sym)
+            if current_price <= 0:
+                logger.warning(
+                    f"[spot_engine] check_spot_targets: cannot get price for {sym}"
+                )
+                continue
+
+            if current_price >= target_price:
+                profit_pct = (current_price - entry_price) / entry_price * 100
+                logger.info(
+                    f"[spot_engine] TARGET HIT {sym}: price={current_price:.4f} "
+                    f">= target={target_price:.4f} ({profit_pct:.2f}%) — closing"
+                )
+                result = close_spot(sym, paper=paper)
+                if result:
+                    result["trigger"] = "target_hit"
+                    result["target_price"] = target_price
+                    closed.append(result)
+                    logger.info(
+                        f"[spot_engine] {'PAPER' if paper else 'LIVE'} TARGET CLOSE {sym}: "
+                        f"pnl=${result.get('pnl_usd', 0):.2f}"
+                    )
+                else:
+                    logger.error(
+                        f"[spot_engine] TARGET CLOSE FAILED for {sym} — position still open"
+                    )
+        except Exception as e:
+            logger.warning(f"[spot_engine] check_spot_targets error for pos: {e}")
+
+    return closed
+
+
+# ── check_spot_eod_close ──────────────────────────────────────────────────────
+
+
+def check_spot_eod_close(paper: bool = True) -> List[Dict]:
+    """
+    Flatten all open spot positions at or after SPOT_EOD_CLOSE_TIME ET on weekdays.
+
+    Prevents overnight gap exposure. Default close time is 15:45 ET — 15 minutes
+    before the US equity close, when crypto liquidity is still high.
+
+    Returns list of closed position dicts (empty if not yet EOD or no positions).
+    """
+    import pytz
+
+    _load_config()
+    closed: List[Dict] = []
+
+    et = pytz.timezone("America/New_York")
+    now_et = datetime.datetime.now(et)
+
+    if now_et.weekday() >= 5:  # Saturday=5, Sunday=6
+        return closed
+
+    try:
+        eod_h, eod_m = [int(x) for x in _SPOT_EOD_CLOSE_TIME.split(":")]
+    except Exception:
+        eod_h, eod_m = 15, 45
+
+    if now_et.hour < eod_h or (now_et.hour == eod_h and now_et.minute < eod_m):
+        return closed  # not yet EOD close time
+
+    positions = _load_spot_positions_from_db(paper=paper)
+    if not positions:
+        return closed
+
+    for pos in positions:
+        sym = str(pos.get("symbol", "")).upper()
+        logger.info(
+            f"[spot_engine] EOD CLOSE {sym}: {_SPOT_EOD_CLOSE_TIME} ET reached — flattening"
+        )
+        result = close_spot(sym, paper=paper)
+        if result:
+            result["trigger"] = "eod_close"
+            closed.append(result)
+            logger.info(
+                f"[spot_engine] {'PAPER' if paper else 'LIVE'} EOD CLOSE {sym}: "
+                f"pnl=${result.get('pnl_usd', 0):.2f}"
+            )
+        else:
+            logger.error(
+                f"[spot_engine] EOD CLOSE FAILED for {sym} — position still open"
+            )
 
     return closed

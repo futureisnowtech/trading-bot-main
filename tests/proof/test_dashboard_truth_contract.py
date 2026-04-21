@@ -7,6 +7,8 @@ Invariants proved:
   DT-03  get_spot_positions_dashboard returns only spot_ strategy rows
   DT-04  balance.py _unrealized_pnl excludes spot_ strategy rows
   DT-05  spot and perp position counts are independent
+  DT-06  paper spot balance summary uses DB-backed spot rows
+  DT-07  account equity includes spot unrealized P&L
 """
 
 from __future__ import annotations
@@ -201,3 +203,30 @@ def test_dt06_paper_spot_balance_summary_uses_db_positions(tmp_path, monkeypatch
     assert summary["source"] == "paper_db"
     assert summary["btc_held_usd"] > 0.0
     assert summary["eth_held_usd"] == 0.0
+
+
+def test_dt07_get_account_includes_spot_unrealized(tmp_path, monkeypatch):
+    db = _make_db_with_mixed_positions(tmp_path, paper_int=1)
+    db_mock = _make_db_mock(db)
+    db_mock.LAUNCH_DATE = "2026-01-01"
+
+    with sqlite3.connect(db) as c:
+        c.execute(
+            """CREATE TABLE trades (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts TEXT, pnl_usd REAL, fee_usd REAL, paper INTEGER, source TEXT
+            )"""
+        )
+
+    monkeypatch.setitem(sys.modules, "db", db_mock)
+    monkeypatch.delitem(sys.modules, "data.account", raising=False)
+    monkeypatch.delitem(sys.modules, "data.positions", raising=False)
+
+    from data import account as account_mod
+
+    monkeypatch.setattr(account_mod, "_spot_unrealized_pnl", lambda: 12.5, raising=False)
+    monkeypatch.setattr(account_mod, "get_perp_positions", lambda: [], raising=False)
+    monkeypatch.setattr(account_mod, "get_live_prices", lambda symbols: {}, raising=False)
+
+    equity, paper, base = account_mod.get_account()
+    assert equity > base, "spot unrealized should lift headline account equity above base"

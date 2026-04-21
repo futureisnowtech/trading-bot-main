@@ -8,8 +8,8 @@ Invariants proved:
   SDT-04  check_spot_eod_close flattens all positions at/after EOD time
   SDT-05  check_spot_eod_close does nothing before EOD time
   SDT-06  open_spot persists a non-zero target price to open_positions
-  SDT-07  target_price is always > stop_price (3R > 1R by construction)
-  SDT-08  fee math: 3R target break-even win rate is below the economics gate floor
+  SDT-07  target_price is always > stop_price (2R > 1R by construction)
+  SDT-08  fee math: 2R target still clears a realistic intraday hurdle
 """
 
 from __future__ import annotations
@@ -65,7 +65,7 @@ def test_sdt01_target_hit_closes_position(proof_runtime, monkeypatch):
     import spot_engine
 
     monkeypatch.setattr(config, "SPOT_LANE_ACTIVE", True, raising=False)
-    monkeypatch.setattr(config, "SPOT_TARGET_R", 3.0, raising=False)
+    monkeypatch.setattr(config, "SPOT_TARGET_R", 2.0, raising=False)
     spot_engine._load_config()
 
     db_path = str(proof_runtime.db_path)
@@ -189,7 +189,7 @@ def test_sdt06_open_spot_persists_target(proof_runtime, monkeypatch):
 
     monkeypatch.setattr(config, "SPOT_LANE_ACTIVE", True, raising=False)
     monkeypatch.setattr(config, "SPOT_STOP_PCT", 0.03, raising=False)
-    monkeypatch.setattr(config, "SPOT_TARGET_R", 3.0, raising=False)
+    monkeypatch.setattr(config, "SPOT_TARGET_R", 2.0, raising=False)
     monkeypatch.setattr(config, "SPOT_MIN_ORDER_USD", 10.0, raising=False)
     monkeypatch.setattr(config, "SPOT_SYMBOLS", ["BTC", "ETH"], raising=False)
     spot_engine._load_config()
@@ -211,8 +211,8 @@ def test_sdt06_open_spot_persists_target(proof_runtime, monkeypatch):
 
     assert row is not None, "open_spot must persist a row to open_positions"
     assert row[0] > 0, f"target must be non-zero, got {row[0]}"
-    # 3% stop × 3R = 9% gain → target ≈ entry * 1.09
-    assert row[0] == pytest.approx(2000.0 * 1.09, rel=0.01), (
+    # 3% stop × 2R = 6% gain → target ≈ entry * 1.06
+    assert row[0] == pytest.approx(2000.0 * 1.06, rel=0.01), (
         f"target should be entry*(1+stop_pct*R), got {row[0]}"
     )
 
@@ -225,7 +225,7 @@ def test_sdt07_target_above_stop():
     entry = 2000.0
     for stop_pct in (0.02, 0.03, 0.05, 0.08):
         stop = entry * (1 - stop_pct)
-        target = entry * (1 + stop_pct * 3.0)
+        target = entry * (1 + stop_pct * 2.0)
         assert target > entry > stop, (
             f"stop_pct={stop_pct}: target={target} entry={entry} stop={stop}"
         )
@@ -236,21 +236,20 @@ def test_sdt07_target_above_stop():
 
 def test_sdt08_fee_math_break_even_win_rate():
     """
-    With 1.2% round-trip fee and a 3R target the break-even win rate is ~35%.
-    The spot economics gate requires composite ≥ 74 which empirically delivers
-    well above 35% win rate — confirms the system is EV-positive by construction.
+    With 1.2% round-trip fee and a 2R target the break-even win rate is still
+    below 50%, which is a viable hurdle for an intraday spot lane.
     """
     round_trip_fee_pct = 0.012  # 0.6% × 2 legs
     stop_pct = 0.03
-    target_r = 3.0
+    target_r = 2.0
 
     gross_loss = stop_pct + round_trip_fee_pct  # 4.2%
     gross_gain = stop_pct * target_r - round_trip_fee_pct  # 7.8%
 
     breakeven_wr = gross_loss / (gross_loss + gross_gain)
 
-    assert breakeven_wr < 0.40, (
-        f"Break-even WR {breakeven_wr:.1%} should be well below 40%"
+    assert breakeven_wr < 0.50, (
+        f"Break-even WR {breakeven_wr:.1%} should stay below 50%"
     )
     assert breakeven_wr > 0.25, (
         f"Break-even WR {breakeven_wr:.1%} sanity check — should not be absurdly low"

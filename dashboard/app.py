@@ -1,6 +1,6 @@
 """
-dashboard/app.py — Algo Trading Operator Panel (v17.1 premium redesign)
-5-page design: MISSION CONTROL · CRYPTO · FORECAST · PERFORMANCE · SYSTEM
+dashboard/app.py — Algo Trading Operator Panel (v17.2 premium redesign)
+5-page design: CONTROL TOWER · CRYPTO · FORECAST · PERFORMANCE LAB · ENGINEERING CONSOLE
 """
 
 import os
@@ -248,9 +248,7 @@ hr {
 # ── page imports ───────────────────────────────────────────────────────────────
 from widgets.pages.control_tower import render_control_tower
 from widgets.pages.crypto_page import render_crypto_page
-from widgets.pages.stocks_page import render_stocks_page
 from widgets.pages.forecast_page import render_forecast_page
-from widgets.pages.mes_page import render_mes_page
 from widgets.pages.performance_lab import render_performance_lab
 from widgets.pages.engineering_console import render_engineering_console
 
@@ -273,15 +271,13 @@ def main():
         unsafe_allow_html=True,
     )
 
-    tab_ct, tab_cr, tab_st, tab_fc, tab_mes, tab_pl, tab_ec = st.tabs(
+    tab_ct, tab_cr, tab_fc, tab_pl, tab_ec = st.tabs(
         [
-            "MISSION CONTROL",
+            "CONTROL TOWER",
             "CRYPTO",
-            "STOCKS",
             "FORECAST",
-            "MES FUTURES",
-            "PERFORMANCE",
-            "SYSTEM",
+            "PERFORMANCE LAB",
+            "ENGINEERING CONSOLE",
         ]
     )
 
@@ -291,14 +287,8 @@ def main():
     with tab_cr:
         render_crypto_page()
 
-    with tab_st:
-        render_stocks_page()
-
     with tab_fc:
         render_forecast_page()
-
-    with tab_mes:
-        render_mes_page()
 
     with tab_pl:
         render_performance_lab()

@@ -41,6 +41,9 @@ def get_crypto_header() -> dict:
         "perp_active": False,
         "mode_label": "UNKNOWN",
         "buying_power": 0.0,
+        "spot_cash_available": 0.0,
+        "spot_equity": 0.0,
+        "spot_symbols": [],
         "spot_deployed_pct": 0.0,
         "perp_deployed_pct": 0.0,
         "open_count": 0,
@@ -56,10 +59,13 @@ def get_crypto_header() -> dict:
     # Spot lane active flag from config
     try:
         from config import SPOT_LANE_ACTIVE
+        from config import SPOT_SYMBOLS
 
         result["spot_active"] = bool(SPOT_LANE_ACTIVE)
+        result["spot_symbols"] = list(SPOT_SYMBOLS)
     except Exception:
         result["spot_active"] = False
+        result["spot_symbols"] = ["BTC", "ETH", "SOL", "XRP"]
 
     # Runtime mode
     try:
@@ -103,8 +109,12 @@ def get_crypto_header() -> dict:
             from data.balance import get_spot_balance_summary
 
             spot_bal = get_spot_balance_summary()
+            result["spot_cash_available"] = float(spot_bal.get("usd_available") or 0.0)
+            result["spot_equity"] = float(spot_bal.get("spot_equity") or 0.0)
             # usd_available is how much USD remains for spot; add back notional to get total spot USD
-            spot_total = float(spot_bal.get("usd_available") or 0) + spot_notional
+            spot_total = float(spot_bal.get("spot_equity") or 0) or (
+                float(spot_bal.get("usd_available") or 0) + spot_notional
+            )
             result["spot_deployed_pct"] = (
                 round(spot_notional / spot_total * 100, 1) if spot_total > 0 else 0.0
             )

@@ -8,6 +8,28 @@ from db import _q, _q1, LAUNCH_DATE, _runtime_paper_flag
 from data.positions import get_open_positions, get_perp_positions, get_live_prices
 
 
+def _spot_unrealized_pnl() -> float:
+    try:
+        from data.positions import get_spot_positions_dashboard
+        from execution.coinbase_spot_broker import get_spot_broker
+
+        broker = get_spot_broker()
+        total = 0.0
+        for p in get_spot_positions_dashboard():
+            sym = str(p.get("symbol") or "").upper()
+            qty = float(p.get("qty") or 0.0)
+            entry = float(p.get("entry") or 0.0)
+            if qty <= 0 or entry <= 0:
+                continue
+            now = float(broker.get_mark_price(sym) or 0.0)
+            if now <= 0:
+                continue
+            total += (now - entry) * qty
+        return total
+    except Exception:
+        return 0.0
+
+
 def get_account():
     paper_flag = _runtime_paper_flag()
     paper = bool(paper_flag)
@@ -49,7 +71,8 @@ def get_account():
                     unrealized += (entry - now) * qty
     except Exception:
         pass
-    return base + realized + unrealized, paper, base
+    spot_unrealized = _spot_unrealized_pnl()
+    return base + realized + unrealized + spot_unrealized, paper, base
 
 
 def _paper_flag() -> int:

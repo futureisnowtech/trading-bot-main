@@ -177,8 +177,8 @@ def test_mt03_spot_executable_result_has_correct_structure():
 
 def test_mt04_perp_executable_result_has_correct_structure():
     """
-    SOL LONG (no spot) returns lane=perp with correct structure.
-    manual_scan uses lane to dispatch to perps_engine.
+    SOL LONG returns lane=spot once the configured spot universe includes SOL.
+    manual_scan uses lane to dispatch to the correct execution engine.
     """
     import os
     import sqlite3
@@ -200,6 +200,7 @@ def test_mt04_perp_executable_result_has_correct_structure():
         original_db = ct._db_path
         try:
             config.SPOT_LANE_ACTIVE = True
+            config.SPOT_SYMBOLS = ["BTC", "ETH", "SOL", "XRP"]
             config.SPOT_MAX_DEPLOYED_PCT = 0.40
             config.SPOT_MIN_ORDER_USD = 10.0
             config.AUTONOMOUS_LIVE_PERP_SYMBOLS = ["BTC", "ETH", "SOL", "XRP"]
@@ -207,9 +208,9 @@ def test_mt04_perp_executable_result_has_correct_structure():
             ct._db_path = lambda: db
 
             result = ct.get_crypto_tradeability("SOL", "LONG", live=False, manual=True)
-            assert result["lane"] == "perp", f"Expected perp for SOL, got {result}"
+            assert result["lane"] == "spot", f"Expected spot for SOL, got {result}"
             assert result["status"] == "executable"
-            assert result["display_label"] == "PERP EXECUTABLE"
+            assert result["display_label"] == "SPOT EXECUTABLE"
             assert result["manual_executable"] == 1
         finally:
             ct._db_path = original_db

@@ -1,7 +1,7 @@
 """
-spot_engine.py — Coinbase spot execution engine (BTC/ETH only, starter lane).
+spot_engine.py — Coinbase spot execution engine for the supported spot universe.
 
-Manages one spot position at a time (BTC or ETH).  No leverage, no shorting.
+Manages one spot position per symbol. No leverage, no shorting.
 Wraps execution/coinbase_spot_broker.py with v10-style persistence.
 
 Blocked reasons (returned as strings in result dicts):
@@ -38,13 +38,13 @@ except ImportError:
 # ── Config defaults (overridden by config.py when imported) ───────────────────
 _SPOT_MAX_DEPLOYED_PCT: float = 0.40  # 40% of spot USD balance
 _SPOT_MIN_ORDER_USD: float = 10.0
-_SPOT_SYMBOLS: list = ["BTC", "ETH"]
+_SPOT_SYMBOLS: list = ["BTC", "ETH", "SOL", "XRP"]
 _SPOT_LANE_ACTIVE: bool = False
 _SPOT_STOP_PCT: float = 0.03  # 3% hard stop below entry
 _SPOT_TRAIL_MULT: float = 1.5  # ATR multiplier for trailing stop width
-_SPOT_THESIS_MIN_HOLD_MINS: float = 20.0  # min hold before thesis exit fires
+_SPOT_THESIS_MIN_HOLD_MINS: float = 30.0  # min hold before thesis exit fires
 _SPOT_THESIS_MIN_SCORE: float = 42.0  # composite score below this → thesis exit
-_SPOT_TARGET_R: float = 3.0  # profit target as R-multiple of stop distance
+_SPOT_TARGET_R: float = 2.0  # profit target as R-multiple of stop distance
 _SPOT_EOD_CLOSE_TIME: str = "15:45"  # HH:MM ET — flatten all spot by this time
 
 
@@ -69,6 +69,8 @@ def _load_config() -> None:
             SPOT_STOP_PCT,
             SPOT_TARGET_R,
             SPOT_EOD_CLOSE_TIME,
+            SPOT_THESIS_MIN_HOLD_MINS,
+            SPOT_THESIS_MIN_SCORE,
         )
 
         _SPOT_MAX_DEPLOYED_PCT = float(SPOT_MAX_DEPLOYED_PCT)
@@ -78,6 +80,8 @@ def _load_config() -> None:
         _SPOT_STOP_PCT = float(SPOT_STOP_PCT)
         _SPOT_TARGET_R = float(SPOT_TARGET_R)
         _SPOT_EOD_CLOSE_TIME = str(SPOT_EOD_CLOSE_TIME)
+        _SPOT_THESIS_MIN_HOLD_MINS = float(SPOT_THESIS_MIN_HOLD_MINS)
+        _SPOT_THESIS_MIN_SCORE = float(SPOT_THESIS_MIN_SCORE)
     except Exception:
         pass  # use defaults above
 
@@ -114,6 +118,16 @@ def _get_db_path() -> str:
 def _get_broker(paper: bool) -> Optional["CoinbaseSpotBroker"]:
     if not _BROKER_OK:
         return None
+
+
+def _current_spot_deployed_usd(paper: bool = True) -> float:
+    try:
+        return sum(
+            abs(float(p.get("qty") or 0.0)) * float(p.get("entry") or 0.0)
+            for p in _load_spot_positions_from_db(paper=paper)
+        )
+    except Exception:
+        return 0.0
     try:
         broker = get_spot_broker()
         # Override paper flag if broker was constructed with different mode
@@ -135,7 +149,7 @@ def open_spot(
     atr_at_entry: float = 0.0,
 ) -> Optional[Dict]:
     """
-    Open a spot position for symbol (BTC or ETH).
+    Open a spot position for symbol in the configured spot universe.
     Returns position dict on success, None with logged reason on failure.
 
     Blocks:
@@ -159,6 +173,23 @@ def open_spot(
         logger.warning(f"[spot_engine] {clean} blocked — spot_symbol_not_allowed")
         return None
 
+    # Duplicate-position gate
+    existing = _load_spot_positions_from_db(paper=paper)
+    if any(str(p.get("symbol", "")).upper() == clean for p in existing):
+        logger.warning(f"[spot_engine] {clean} blocked — spot_position_already_open")
+        return None
+
+    # Live session gate
+    if not paper:
+        try:
+            from runtime.spot_session import is_spot_entry_session_open
+
+            if not is_spot_entry_session_open():
+                logger.info(f"[spot_engine] {clean} blocked — spot_outside_session")
+                return None
+        except Exception:
+            pass
+
     # Size minimum
     if size_usd < _SPOT_MIN_ORDER_USD:
         logger.warning(
@@ -174,6 +205,22 @@ def open_spot(
     if broker is not None and not paper:
         bal = broker.get_spot_balance()
         usd_avail = float(bal.get("usd_available", 0))
+        deployed = _current_spot_deployed_usd(paper=paper)
+        cap_base = max(usd_avail + deployed, 0.0)
+        cap_limit = cap_base * _SPOT_MAX_DEPLOYED_PCT
+        remaining_cap = max(cap_limit - deployed, 0.0)
+        if remaining_cap < _SPOT_MIN_ORDER_USD:
+            logger.warning(
+                f"[spot_engine] {clean} blocked — spot_deployment_cap_exceeded "
+                f"(remaining ${remaining_cap:.2f})"
+            )
+            return None
+        if size_usd > remaining_cap:
+            logger.warning(
+                f"[spot_engine] {clean} blocked — spot_deployment_cap_exceeded "
+                f"(${size_usd:.2f} > remaining ${remaining_cap:.2f})"
+            )
+            return None
         if usd_avail > 0 and size_usd > usd_avail * 0.95:
             clamped = round(usd_avail * 0.95, 2)
             if clamped < _SPOT_MIN_ORDER_USD:

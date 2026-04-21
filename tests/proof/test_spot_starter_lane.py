@@ -1,5 +1,5 @@
 """
-tests/proof/test_spot_starter_lane.py — Proof suite for spot starter lane (v16.11).
+tests/proof/test_spot_starter_lane.py — Proof suite for spot starter lane (v17.2).
 
 Invariants proved:
   SP-01  coinbase_spot_broker paper mode returns mock fills with no API calls
@@ -67,15 +67,12 @@ def test_sp01_paper_sell_returns_fill_no_api():
 # ── SP-02: spot_engine blocks duplicate open ──────────────────────────────────
 
 
-@pytest.mark.xfail(
-    reason="spot_engine.py is DO-NOT-TOUCH; duplicate-block behavior not fixable at source"
-)
 def test_sp02_blocks_duplicate_position(proof_runtime, monkeypatch):
     import config
     import spot_engine
 
     monkeypatch.setattr(config, "SPOT_LANE_ACTIVE", True, raising=False)
-    monkeypatch.setattr(config, "SPOT_SYMBOLS", ["BTC", "ETH"], raising=False)
+    monkeypatch.setattr(config, "SPOT_SYMBOLS", ["BTC", "ETH", "SOL", "XRP"], raising=False)
     monkeypatch.setattr(config, "SPOT_MIN_ORDER_USD", 10.0, raising=False)
     monkeypatch.setattr(config, "SPOT_MAX_DEPLOYED_PCT", 0.40, raising=False)
 
@@ -112,7 +109,7 @@ def test_sp03_blocks_deployment_cap(monkeypatch):
     from execution.coinbase_spot_broker import CoinbaseSpotBroker
 
     monkeypatch.setattr(config, "SPOT_LANE_ACTIVE", True, raising=False)
-    monkeypatch.setattr(config, "SPOT_SYMBOLS", ["BTC", "ETH"], raising=False)
+    monkeypatch.setattr(config, "SPOT_SYMBOLS", ["BTC", "ETH", "SOL", "XRP"], raising=False)
     monkeypatch.setattr(config, "SPOT_MIN_ORDER_USD", 10.0, raising=False)
     monkeypatch.setattr(config, "SPOT_MAX_DEPLOYED_PCT", 0.40, raising=False)
     spot_engine._load_config()
@@ -146,12 +143,12 @@ def test_sp04_blocks_unsupported_symbol(monkeypatch):
     import spot_engine
 
     monkeypatch.setattr(config, "SPOT_LANE_ACTIVE", True, raising=False)
-    monkeypatch.setattr(config, "SPOT_SYMBOLS", ["BTC", "ETH"], raising=False)
+    monkeypatch.setattr(config, "SPOT_SYMBOLS", ["BTC", "ETH", "SOL", "XRP"], raising=False)
     monkeypatch.setattr(config, "SPOT_MIN_ORDER_USD", 10.0, raising=False)
     spot_engine._load_config()
 
-    result = spot_engine.open_spot("SOL", 50.0, paper=True)
-    assert result is None, "SOL must be blocked — not in SPOT_SYMBOLS"
+    result = spot_engine.open_spot("DOGE", 50.0, paper=True)
+    assert result is None, "DOGE must be blocked — not in SPOT_SYMBOLS"
 
 
 # ── SP-05: spot_engine blocks when lane disabled ──────────────────────────────
@@ -177,7 +174,7 @@ def test_sp06_writes_to_trades_table(proof_runtime, monkeypatch):
     from execution.coinbase_spot_broker import CoinbaseSpotBroker
 
     monkeypatch.setattr(config, "SPOT_LANE_ACTIVE", True, raising=False)
-    monkeypatch.setattr(config, "SPOT_SYMBOLS", ["BTC", "ETH"], raising=False)
+    monkeypatch.setattr(config, "SPOT_SYMBOLS", ["BTC", "ETH", "SOL", "XRP"], raising=False)
     monkeypatch.setattr(config, "SPOT_MIN_ORDER_USD", 10.0, raising=False)
     monkeypatch.setattr(config, "SPOT_MAX_DEPLOYED_PCT", 0.40, raising=False)
     spot_engine._load_config()

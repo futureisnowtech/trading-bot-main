@@ -283,8 +283,14 @@ def render_manual_scan():
                 import scanner as _scanner_mod
 
                 importlib.reload(_scanner_mod)
+                try:
+                    from data.account import get_account as _get_account
+
+                    _acct_balance = float(_get_account()[0])
+                except Exception:
+                    _acct_balance = 5000.0
                 candidates = _scanner_mod.scan(
-                    account_balance=5000.0,
+                    account_balance=_acct_balance,
                     force=True,
                     core_only=True,
                 )
@@ -306,17 +312,6 @@ def render_manual_scan():
         st.info("No scan results yet — click **Run Scan Now** above.")
         render_spot_section()
         return
-
-    # In live mode, hide SOL and XRP — perp-only symbols with no eligible perp slot.
-    if _runtime_live_flag():
-        candidates = [
-            c
-            for c in candidates
-            if _get_tier_info(c.get("symbol", "")).get(
-                "underlying", c.get("symbol", "")
-            )
-            not in {"SOL", "XRP"}
-        ]
 
     hc1, hc2, hc3, hc4 = st.columns([0.4, 3.2, 2.8, 0.6])
     hc1.caption("Trade?")
@@ -976,11 +971,11 @@ def render_manual_scan():
 def render_spot_section():
     """
     Render the SPOT sub-panel inside the Trade Approval tab.
-    Shows BTC/ETH spot status and buy/sell controls when SPOT_LANE_ACTIVE=True.
+    Shows configured spot-lane status and buy/sell controls when SPOT_LANE_ACTIVE=True.
     Always reads paper flag from runtime state (never hardcoded).
     """
     st.divider()
-    st.subheader("Spot Trading (BTC / ETH)")
+    st.subheader("Spot Trading")
 
     try:
         if _ROOT not in sys.path:
@@ -997,7 +992,7 @@ def render_spot_section():
 
     if not spot_active:
         st.info(
-            "Spot lane disabled — set SPOT_LANE_ACTIVE=true in .env to enable BTC/ETH spot trading."
+            "Spot lane disabled — set SPOT_LANE_ACTIVE=true in .env to enable the spot lane."
         )
         return
 
@@ -1049,13 +1044,18 @@ def render_spot_section():
 
         _spot_bal = get_spot_balance_summary()
         usd_avail = _spot_bal.get("usd_available", 0.0)
-        btc_held = _spot_bal.get("btc_held_usd", 0.0)
-        eth_held = _spot_bal.get("eth_held_usd", 0.0)
+        held_map = _spot_bal.get("held_usd_by_symbol") or {}
         _bal_source = _spot_bal.get("source", "unknown")
         sc1, sc2, sc3 = st.columns(3)
         sc1.metric("USD available (spot)", f"${usd_avail:,.2f}")
-        sc2.metric("BTC held (USD)", f"${btc_held:,.2f}")
-        sc3.metric("ETH held (USD)", f"${eth_held:,.2f}")
+        sc2.metric("Spot equity", f"${float(_spot_bal.get('spot_equity') or 0.0):,.2f}")
+        sc3.metric("Active spot names", str(len([v for v in held_map.values() if v > 0])))
+        if held_map:
+            pretty = " · ".join(
+                f"{sym} ${amt:,.0f}" for sym, amt in sorted(held_map.items()) if amt > 0
+            )
+            if pretty:
+                st.caption(f"Held now: {pretty}")
         if _bal_source != "live_api":
             st.caption(f"Balance source: {_bal_source}")
     except Exception:

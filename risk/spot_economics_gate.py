@@ -114,8 +114,24 @@ def check_spot_economics(
             "edge_score": edge_score,
         }
 
-    # Gate 2: edge must clear the fee hurdle by the required multiplier
-    min_required_edge_pct: float = SPOT_MIN_EDGE_MULT * round_trip_pct
+    # Gate 2: edge must clear the fee hurdle by the required multiplier.
+    # During the defined intraday session we permit a slightly lower hurdle so
+    # the lane can recycle more often without opening the door to off-session
+    # churn.
+    min_edge_mult = SPOT_MIN_EDGE_MULT
+    try:
+        from config import SPOT_SESSION_MIN_EDGE_MULT, SPOT_OFFSESSION_MIN_EDGE_MULT
+        from runtime.spot_session import is_spot_entry_session_open
+
+        min_edge_mult = (
+            float(SPOT_SESSION_MIN_EDGE_MULT)
+            if is_spot_entry_session_open()
+            else float(SPOT_OFFSESSION_MIN_EDGE_MULT)
+        )
+    except Exception:
+        min_edge_mult = SPOT_MIN_EDGE_MULT
+
+    min_required_edge_pct: float = min_edge_mult * round_trip_pct
     if edge_pct < min_required_edge_pct:
         logger.info(
             "spot_econ VETO symbol=%s score=%.1f edge_pct=%.4f < required=%.4f "
@@ -124,7 +140,7 @@ def check_spot_economics(
             composite_score,
             edge_pct,
             min_required_edge_pct,
-            SPOT_MIN_EDGE_MULT,
+            min_edge_mult,
             round_trip_pct,
         )
         return {

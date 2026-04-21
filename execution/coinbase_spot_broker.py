@@ -1,7 +1,8 @@
 """
 execution/coinbase_spot_broker.py — Coinbase Advanced Trade spot broker adapter.
 
-Supports BTC-USD and ETH-USD spot only.  No leverage, no shorting, no margin.
+Supports BTC-USD, ETH-USD, SOL-USD, and XRP-USD spot.  No leverage, no shorting,
+no margin.
 
 Authentication — same CDP JWT / ES256 credentials as coinbase_broker.py:
   COINBASE_CDP_KEY_NAME    organizations/{org_id}/apiKeys/{key_id}
@@ -54,6 +55,8 @@ except ImportError:
 SPOT_PRODUCT_SPECS: dict[str, dict] = {
     "BTC": {"product_id": "BTC-USD", "min_order_usd": 1.0},
     "ETH": {"product_id": "ETH-USD", "min_order_usd": 1.0},
+    "SOL": {"product_id": "SOL-USD", "min_order_usd": 1.0},
+    "XRP": {"product_id": "XRP-USD", "min_order_usd": 1.0},
 }
 
 SPOT_SUPPORTED_SYMBOLS = set(SPOT_PRODUCT_SPECS.keys())
@@ -62,17 +65,17 @@ _API_BASE = "https://api.coinbase.com"
 
 
 class CoinbaseSpotSymbolError(ValueError):
-    """Raised when a symbol outside BTC/ETH is requested. Fail-closed."""
+    """Raised when a symbol outside the supported spot set is requested. Fail-closed."""
 
 
 class CoinbaseSpotBroker:
     """
-    Minimal spot broker for BTC-USD and ETH-USD.
+    Minimal spot broker for BTC-USD / ETH-USD / SOL-USD / XRP-USD.
 
     Interface:
       connect()
       is_connected() → bool
-      get_spot_balance() → {"btc_available": float, "eth_available": float, "usd_available": float}
+      get_spot_balance() → {"usd_available": float, "symbol_balances": {...}, ...}
       buy_spot(symbol, size_usd) → dict | None
       sell_spot(symbol, size_units) → dict | None
       get_spot_positions() → list[{symbol, qty, avg_entry, current_value}]
@@ -168,7 +171,7 @@ class CoinbaseSpotBroker:
 
     def connect(self) -> bool:
         if self._paper:
-            logger.info("[spot] Connected (PAPER) — Coinbase spot BTC/ETH")
+            logger.info("[spot] Connected (PAPER) — Coinbase spot BTC/ETH/SOL/XRP")
             self._connected = True
             return True
 
@@ -182,7 +185,7 @@ class CoinbaseSpotBroker:
         try:
             # Verify auth with a lightweight accounts call
             self._request("GET", "/api/v3/brokerage/accounts")
-            logger.info("[spot] Connected (LIVE) — Coinbase spot BTC/ETH")
+            logger.info("[spot] Connected (LIVE) — Coinbase spot BTC/ETH/SOL/XRP")
             self._connected = True
             return True
         except Exception as e:
@@ -198,31 +201,36 @@ class CoinbaseSpotBroker:
     def get_spot_balance(self) -> dict:
         """
         Return available spot balances.
-        Returns {"btc_available": float, "eth_available": float, "usd_available": float}
+        Returns symbol balances plus USD available.
         """
         if self._paper:
-            # Paper mode: return static defaults
-            return {"btc_available": 0.0, "eth_available": 0.0, "usd_available": 0.0}
+            balances = {f"{sym.lower()}_available": 0.0 for sym in SPOT_SUPPORTED_SYMBOLS}
+            balances["symbol_balances"] = {sym: 0.0 for sym in SPOT_SUPPORTED_SYMBOLS}
+            balances["usd_available"] = 0.0
+            return balances
 
         try:
             data = self._request("GET", "/api/v3/brokerage/accounts")
             accounts = data.get("accounts", [])
-            btc = 0.0
-            eth = 0.0
+            symbol_balances = {sym: 0.0 for sym in SPOT_SUPPORTED_SYMBOLS}
             usd = 0.0
             for acct in accounts:
                 currency = acct.get("currency", "")
                 avail = float(acct.get("available_balance", {}).get("value", 0) or 0)
-                if currency == "BTC":
-                    btc = avail
-                elif currency == "ETH":
-                    eth = avail
+                if currency in symbol_balances:
+                    symbol_balances[currency] = avail
                 elif currency in ("USD", "USDC"):
                     usd += avail
-            return {"btc_available": btc, "eth_available": eth, "usd_available": usd}
+            result = {"usd_available": usd, "symbol_balances": symbol_balances}
+            for sym, qty in symbol_balances.items():
+                result[f"{sym.lower()}_available"] = qty
+            return result
         except Exception as e:
             logger.warning(f"[spot] get_spot_balance error: {e}")
-            return {"btc_available": 0.0, "eth_available": 0.0, "usd_available": 0.0}
+            balances = {f"{sym.lower()}_available": 0.0 for sym in SPOT_SUPPORTED_SYMBOLS}
+            balances["symbol_balances"] = {sym: 0.0 for sym in SPOT_SUPPORTED_SYMBOLS}
+            balances["usd_available"] = 0.0
+            return balances
 
     # ── Mark price ────────────────────────────────────────────────────────────
 
@@ -247,6 +255,8 @@ class CoinbaseSpotBroker:
     _PAPER_PRICE_FALLBACKS: dict[str, float] = {
         "BTC": 90_000.0,
         "ETH": 2_500.0,
+        "SOL": 180.0,
+        "XRP": 2.0,
     }
 
     def _fallback_price(self, clean_sym: str) -> float:

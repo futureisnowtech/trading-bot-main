@@ -166,8 +166,7 @@ def _paper_spot_balance_summary(base: float) -> dict:
         logger.debug(f"[balance] paper spot summary query error: {e}")
         rows = []
 
-    btc_held_usd = 0.0
-    eth_held_usd = 0.0
+    held_by_symbol: dict[str, float] = {}
     deployed_usd = 0.0
     for row in rows:
         sym = str(row["symbol"] or "").upper()
@@ -175,15 +174,16 @@ def _paper_spot_balance_summary(base: float) -> dict:
         entry = float(row["entry"] or 0.0)
         current_value = qty * entry
         deployed_usd += current_value
-        if sym == "BTC":
-            btc_held_usd += current_value
-        elif sym == "ETH":
-            eth_held_usd += current_value
+        held_by_symbol[sym] = held_by_symbol.get(sym, 0.0) + current_value
 
     return {
         "usd_available": round(max(base - deployed_usd, 0.0), 2),
-        "btc_held_usd": round(btc_held_usd, 2),
-        "eth_held_usd": round(eth_held_usd, 2),
+        "btc_held_usd": round(held_by_symbol.get("BTC", 0.0), 2),
+        "eth_held_usd": round(held_by_symbol.get("ETH", 0.0), 2),
+        "sol_held_usd": round(held_by_symbol.get("SOL", 0.0), 2),
+        "xrp_held_usd": round(held_by_symbol.get("XRP", 0.0), 2),
+        "held_usd_by_symbol": {k: round(v, 2) for k, v in held_by_symbol.items()},
+        "spot_equity": round(max(base - deployed_usd, 0.0) + deployed_usd, 2),
         "source": "paper_db",
     }
 
@@ -331,13 +331,17 @@ def get_ibkr_balance() -> dict:
 
 def get_spot_balance_summary() -> dict:
     """
-    Return Coinbase spot balance summary for BTC-USD / ETH-USD.
+    Return Coinbase spot balance summary for the configured Coinbase spot universe.
     Completely isolated from perp futures_buying_power.
 
     Returns dict:
         usd_available   float  — USD available for spot purchases
         btc_held_usd    float  — BTC held converted to USD at current price
         eth_held_usd    float  — ETH held converted to USD at current price
+        sol_held_usd    float  — SOL held converted to USD at current price
+        xrp_held_usd    float  — XRP held converted to USD at current price
+        held_usd_by_symbol dict — symbol → held USD
+        spot_equity     float  — USD cash + held USD across the spot book
         source          str    — 'live_api' | 'paper' | 'disabled'
     """
     try:
@@ -350,6 +354,10 @@ def get_spot_balance_summary() -> dict:
             "usd_available": 0.0,
             "btc_held_usd": 0.0,
             "eth_held_usd": 0.0,
+            "sol_held_usd": 0.0,
+            "xrp_held_usd": 0.0,
+            "held_usd_by_symbol": {},
+            "spot_equity": 0.0,
             "source": "disabled",
         }
 
@@ -372,15 +380,24 @@ def get_spot_balance_summary() -> dict:
         if not broker.is_connected():
             broker.connect()
         bal = broker.get_spot_balance()
-        btc_qty = float(bal.get("btc_available", 0))
-        eth_qty = float(bal.get("eth_available", 0))
         usd = float(bal.get("usd_available", 0))
-        btc_price = broker.get_mark_price("BTC") if btc_qty > 0 else 0.0
-        eth_price = broker.get_mark_price("ETH") if eth_qty > 0 else 0.0
+        symbol_balances = bal.get("symbol_balances") or {}
+        held_usd_by_symbol: dict[str, float] = {}
+        for sym, qty in symbol_balances.items():
+            qty_f = float(qty or 0.0)
+            if qty_f <= 0:
+                continue
+            px = broker.get_mark_price(sym)
+            held_usd_by_symbol[sym] = round(qty_f * px, 2) if px > 0 else 0.0
+        spot_equity = round(usd + sum(held_usd_by_symbol.values()), 2)
         return {
             "usd_available": round(usd, 2),
-            "btc_held_usd": round(btc_qty * btc_price, 2),
-            "eth_held_usd": round(eth_qty * eth_price, 2),
+            "btc_held_usd": round(held_usd_by_symbol.get("BTC", 0.0), 2),
+            "eth_held_usd": round(held_usd_by_symbol.get("ETH", 0.0), 2),
+            "sol_held_usd": round(held_usd_by_symbol.get("SOL", 0.0), 2),
+            "xrp_held_usd": round(held_usd_by_symbol.get("XRP", 0.0), 2),
+            "held_usd_by_symbol": held_usd_by_symbol,
+            "spot_equity": spot_equity,
             "source": "live_api",
         }
     except Exception as e:
@@ -389,6 +406,10 @@ def get_spot_balance_summary() -> dict:
             "usd_available": 0.0,
             "btc_held_usd": 0.0,
             "eth_held_usd": 0.0,
+            "sol_held_usd": 0.0,
+            "xrp_held_usd": 0.0,
+            "held_usd_by_symbol": {},
+            "spot_equity": 0.0,
             "source": "live_api_error",
         }
 

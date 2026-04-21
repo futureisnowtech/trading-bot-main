@@ -73,23 +73,41 @@ AUTONOMOUS_LIVE_PERP_SYMBOLS: list = os.getenv(
 
 # ════════════════════════════════════════════════════════════════════
 # SPOT LANE (v16.11)
-# BTC/ETH spot only — no leverage, no shorting, no margin.
+# Coinbase spot lane — no leverage, no shorting, no margin.
 # SPOT_LANE_ACTIVE gates the lane; default false = disabled.
 # ════════════════════════════════════════════════════════════════════
 SPOT_LANE_ACTIVE: bool = os.getenv("SPOT_LANE_ACTIVE", "true").lower() == "true"
-SPOT_SYMBOLS: list = ["BTC", "ETH"]
+SPOT_SYMBOLS: list = [
+    s.strip().upper()
+    for s in os.getenv("SPOT_SYMBOLS", "BTC,ETH,SOL,XRP").split(",")
+    if s.strip()
+]
 SPOT_MAX_DEPLOYED_PCT: float = float(os.getenv("SPOT_MAX_DEPLOYED_PCT", "0.40"))
 SPOT_MIN_ORDER_USD: float = float(os.getenv("SPOT_MIN_ORDER_USD", "10.0"))
+SPOT_WEEKDAYS_ONLY: bool = os.getenv("SPOT_WEEKDAYS_ONLY", "true").lower() == "true"
+SPOT_ENTRY_START_TIME: str = os.getenv("SPOT_ENTRY_START_TIME", "09:35")
+SPOT_ENTRY_END_TIME: str = os.getenv("SPOT_ENTRY_END_TIME", "15:15")
 # Conservative hard stop: close position if price drops this % below entry.
 # 3% default — tight enough to limit loss on small account, loose enough to avoid noise wicks.
 SPOT_STOP_PCT: float = float(os.getenv("SPOT_STOP_PCT", "0.03"))
 # Profit target expressed as a multiple of the stop distance (R-multiple).
-# 3.0 = 3R: with a 3% stop, target = 9% gain. At 1.2% round-trip fee the
-# break-even win rate is ~35% — well within the economics gate's score floor.
-SPOT_TARGET_R: float = float(os.getenv("SPOT_TARGET_R", "3.0"))
+# 2.0 = 2R: with a 3% stop, target = 6% gain. This recycles capital faster
+# for intraday spot while still clearing fee drag when paired with the
+# session-aware economics gate.
+SPOT_TARGET_R: float = float(os.getenv("SPOT_TARGET_R", "2.0"))
 # End-of-day flatten time (HH:MM ET, 24h). All spot positions closed at or
 # after this time on weekdays to prevent overnight gap exposure.
 SPOT_EOD_CLOSE_TIME: str = os.getenv("SPOT_EOD_CLOSE_TIME", "15:45")
+SPOT_THESIS_MIN_HOLD_MINS: float = float(
+    os.getenv("SPOT_THESIS_MIN_HOLD_MINS", "30.0")
+)
+SPOT_THESIS_MIN_SCORE: float = float(os.getenv("SPOT_THESIS_MIN_SCORE", "42.0"))
+SPOT_SESSION_MIN_EDGE_MULT: float = float(
+    os.getenv("SPOT_SESSION_MIN_EDGE_MULT", "1.5")
+)
+SPOT_OFFSESSION_MIN_EDGE_MULT: float = float(
+    os.getenv("SPOT_OFFSESSION_MIN_EDGE_MULT", "2.0")
+)
 
 # ════════════════════════════════════════════════════════════════════
 # RISK — HARDCODED. NO AI CAN OVERRIDE THESE.

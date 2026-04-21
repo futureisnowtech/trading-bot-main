@@ -79,13 +79,11 @@ def test_dashboard_data_summaries_read_live_schema(proof_runtime):
 
 
 def test_operator_panel_renders_all_tabs_with_widget_stubs(monkeypatch):
-    # 7-tab architecture — stub the page-level render functions
+    # 5-tab architecture — stub the page-level render functions
     widget_map = {
         "widgets.pages.control_tower": ("render_control_tower", "control-tower"),
         "widgets.pages.crypto_page": ("render_crypto_page", "crypto-page"),
-        "widgets.pages.stocks_page": ("render_stocks_page", "stocks-page"),
         "widgets.pages.forecast_page": ("render_forecast_page", "forecast-page"),
-        "widgets.pages.mes_page": ("render_mes_page", "mes-page"),
         "widgets.pages.performance_lab": ("render_performance_lab", "performance-lab"),
         "widgets.pages.engineering_console": (
             "render_engineering_console",
@@ -102,18 +100,16 @@ def test_operator_panel_renders_all_tabs_with_widget_stubs(monkeypatch):
 
     assert not at.exception
     assert [tab.label for tab in at.tabs] == [
-        "MISSION CONTROL",
+        "CONTROL TOWER",
         "CRYPTO",
-        "STOCKS",
         "FORECAST",
-        "MES FUTURES",
-        "PERFORMANCE",
-        "SYSTEM",
+        "PERFORMANCE LAB",
+        "ENGINEERING CONSOLE",
     ]
     rendered = [node.value for node in at.markdown]
     assert any("stub:control-tower" in value for value in rendered)
     assert any("stub:crypto-page" in value for value in rendered)
-    assert any("stub:stocks-page" in value for value in rendered)
+    assert any("stub:forecast-page" in value for value in rendered)
 
 
 def test_decision_quality_widget_renders_created_at_backed_summary(proof_runtime):

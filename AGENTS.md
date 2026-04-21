@@ -28,7 +28,7 @@ A fully autonomous AI-powered trading system that:
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
 
-## Current Version: v17.1 (2026-04-19)
+## Current Version: v17.2 (2026-04-21)
 
 **Active branch:** `feature/v10-rebuild`
 **Clean paper trading started:** 2026-04-02
@@ -44,7 +44,7 @@ A fully autonomous AI-powered trading system that:
 | Position sizing | `position_manager.py` | Kelly + ATR sizing, leverage schedule, deployment caps |
 | Exit manager | `position_manager.py` | 7-priority exit stack (trailing/scale/thesis/hard-stop/risk/kill/dead-money) |
 | Perp execution | `perps_engine.py` → `execution/coinbase_broker.py` | Coinbase US nano perp-style futures; paper mode + live CDP JWT; ISOLATED margin; BTC/ETH/SOL/XRP only |
-| Spot execution | `spot_engine.py` → `execution/coinbase_spot_broker.py` | Coinbase spot BTC-USD/ETH-USD; no leverage, no shorting; one spot position max; deployment cap enforced |
+| Spot execution | `spot_engine.py` → `execution/coinbase_spot_broker.py` | Coinbase spot BTC-USD/ETH-USD/SOL-USD/XRP-USD; no leverage, no shorting; one spot position per symbol; deployment cap + session gate enforced |
 | Crypto tradeability | `runtime/crypto_tradeability.py` | Single source of truth for spot/perp/blocked routing; used by both autonomous runner and manual scan; typed blocked reasons persisted to `scan_candidates` |
 | MES execution | `scheduler/v10_runner.py` → `execution/ibkr_broker.py` | IBKR paper port 7497 (ARCHIVED — dormant) |
 | ForecastEx broker | `execution/forecastex_broker.py` | IBKR ForecastEx; SecType=OPT, Exchange=FORECASTX; clientId=3; YES=Right C / NO=Right P; economic markets only |
@@ -72,7 +72,7 @@ A fully autonomous AI-powered trading system that:
 | Trading control plane | `dashboard/data/trading_control.py` + `dashboard/widgets/system_settings/master_control.py` | Master SYSTEM SETTINGS view: crypto funnel, blocker classification (strategy/system/bug), forecast contradictions, truth checks |
 | Operator audits | `scripts/net_truth_audit.py` + `scripts/go_live_audit.py` | Trust-aware net-of-fee scorecards and evidence-backed launch constraints |
 | Notifications | `notifications/notification_engine.py` | SQLite only, no Telegram |
-| Dashboard | `dashboard/app.py` | Streamlit Operator Panel, 6 tabs: MISSION CONTROL, PERFORMANCE, TRADE APPROVAL, FORECAST TRADING, ARCHIVED FUTURES (MES), SYSTEM SETTINGS |
+| Dashboard | `dashboard/app.py` | Streamlit Operator Panel, 5 tabs: CONTROL TOWER, CRYPTO, FORECAST, PERFORMANCE LAB, ENGINEERING CONSOLE |
 | DB | `logs/trades.db` | WAL mode SQLite — positions, trades, system_events, scan_candidates, candidate_outcomes, trade_integrity, exit_evaluations, challenger_state, forecast_markets, forecast_contracts, forecast_quotes, forecast_bars, forecast_resolutions |
 | Vector memory | `memory/trade_memory.py` | NumPy cosine similarity, SQLite-backed, 8-dim feature vectors |
 | Kill switch | `kill_switch.py` | Balance < 75% of ACCOUNT_SIZE → halt all |
@@ -91,7 +91,10 @@ A fully autonomous AI-powered trading system that:
 - **Path timing truth (v16.2):** `learning/candidate_labeler.py` now anchors 15m/1h/4h outcome timing to `scan_candidates.ts` whenever the fetched candle index supports it. `candidate_outcomes.path_timing_evaluated` marks whether timing metrics were truly computed from available forward bars.
 - **Audit semantics (v16.2):** `scripts/path_truth_audit.py` uses only `path_timing_evaluated=1` rows as the denominator for timing reach percentages. `scripts/entry_truth_audit.py` now separates `scored_total`, `below_threshold`, and `above_threshold`, so conversion and econ-veto rates are calculated from truthful threshold-passed counts.
 - **Broker-aligned live universe (v16.3):** `CORE_EXECUTION_UNDERLYINGS` now matches the Coinbase broker-supported set exactly: `BTC`, `ETH`, `SOL`, `XRP`. Unsupported TradingView symbols are dropped before they enter the live candidate path. Default `PERP_PAIRS` / `CRYPTO_PAIRS` were tightened to the same four-name live set.
-- **Paper spot balance truth (v16.16):** `dashboard/data/balance.py:get_spot_balance_summary()` uses DB-backed paper truth in paper mode via `_paper_spot_balance_summary()` instead of placeholder zeros. Available USD = `ACCOUNT_SIZE - deployed_spot_usd`; held BTC/ETH USD comes from `open_positions` rows where `strategy` starts with `spot_`.
+- **Spot ops model (v17.2):** spot lane now supports `BTC`, `ETH`, `SOL`, and `XRP` long-only. Autonomous spot entries are weekday-session gated (`SPOT_ENTRY_START_TIME` → `SPOT_ENTRY_END_TIME` ET), target faster intraday recycling (`SPOT_TARGET_R=2.0` by default), and no longer fall through to perp when a spot-routed long fails.
+- **Cross-lane ownership (v17.2):** the same underlying cannot be open in both spot and perp at once. `runtime/crypto_tradeability.py` blocks cross-lane duplicate exposure with `underlying_exposure_already_open`.
+- **Paper/live spot balance truth (v17.2):** `dashboard/data/balance.py:get_spot_balance_summary()` now returns dynamic per-symbol held USD plus `spot_equity`, not just BTC/ETH placeholders, so dashboard crypto/account surfaces can reflect the full live spot universe.
+- **Dashboard spot equity truth (v17.2):** `dashboard/data/account.py:get_account()` now includes spot unrealized P&L in headline equity instead of treating the account snapshot as perp-only unrealized.
 - **Dashboard DB alias unification (v16.16):** `dashboard/db.py` now aliases both `db` and `dashboard.db` to the same module object via `sys.modules.setdefault(...)`, preventing split-brain `DB_PATH` truth between dashboard readers and proof harnesses.
 - **Master trading control (v16.16):** `dashboard/data/trading_control.py` and `dashboard/widgets/system_settings/master_control.py` provide one operator control plane that classifies crypto failures into strategy vs system/policy vs bug/integrity buckets, surfaces top blockers, and shows forecast truth contradictions directly in SYSTEM SETTINGS.
 - **Forecast heartbeat freshness (v16.16):** `dashboard/data/forecast.py:get_forecast_health()` treats `lane_started` as true only when `lane_runtime_state.active=1` AND the forecast heartbeat is fresh (threshold 180s). `scripts/validate.py` now warns when forecast runtime state is active but stale.

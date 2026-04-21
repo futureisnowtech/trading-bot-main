@@ -6,8 +6,8 @@ Invariants proved:
   CT-02  ETH LONG with spot lane active → lane=spot
   CT-03  BTC SHORT never routes to spot → lane=perp or blocked
   CT-04  ETH SHORT never routes to spot → lane=perp or blocked
-  CT-05  SOL LONG → lane=perp (not spot)
-  CT-06  XRP LONG → lane=perp
+  CT-05  SOL LONG with spot lane active → lane=spot
+  CT-06  XRP LONG with spot lane active → lane=spot
   CT-07  Unknown symbol → blocked with specific reason
   CT-08  SPOT_LANE_ACTIVE=False BTC LONG falls to perp
   CT-09  Spot position already open blocks spot, tries perp
@@ -193,14 +193,15 @@ def test_ct04_eth_short_never_spot(tmp_path, monkeypatch):
     assert result["lane"] != "spot", "SHORT must never route to spot"
 
 
-# ── CT-05: SOL LONG → perp only ───────────────────────────────────────────────
+# ── CT-05: SOL LONG → spot when spot universe includes SOL ────────────────────
 
 
-def test_ct05_sol_long_perp_only(tmp_path, monkeypatch):
+def test_ct05_sol_long_prefers_spot(tmp_path, monkeypatch):
     import config
     import runtime.crypto_tradeability as ct
 
     monkeypatch.setattr(config, "SPOT_LANE_ACTIVE", True, raising=False)
+    monkeypatch.setattr(config, "SPOT_SYMBOLS", ["BTC", "ETH", "SOL", "XRP"], raising=False)
     monkeypatch.setattr(config, "SPOT_MAX_DEPLOYED_PCT", 0.40, raising=False)
     monkeypatch.setattr(config, "SPOT_MIN_ORDER_USD", 10.0, raising=False)
     monkeypatch.setattr(
@@ -222,24 +223,20 @@ def test_ct05_sol_long_perp_only(tmp_path, monkeypatch):
     _fresh_db(tmp_path)
 
     result = ct.get_crypto_tradeability("SOL", "LONG", live=False, manual=False)
-    # SOL is not in spot symbols (BTC/ETH only) → must be perp or blocked, never spot
-    assert result["lane"] != "spot", (
-        f"SOL LONG must not route to spot, got lane={result['lane']}"
-    )
-    # In paper mode with no existing SOL perp positions, should be executable via perp
-    assert result["lane"] == "perp", (
-        f"Expected perp for SOL, got {result['lane']} (reason={result['blocked_reason']})"
+    assert result["lane"] == "spot", (
+        f"Expected spot for SOL long, got {result['lane']} (reason={result['blocked_reason']})"
     )
 
 
-# ── CT-06: XRP LONG → perp only ───────────────────────────────────────────────
+# ── CT-06: XRP LONG → spot when spot universe includes XRP ────────────────────
 
 
-def test_ct06_xrp_long_perp_only(tmp_path, monkeypatch):
+def test_ct06_xrp_long_prefers_spot(tmp_path, monkeypatch):
     import config
     import runtime.crypto_tradeability as ct
 
     monkeypatch.setattr(config, "SPOT_LANE_ACTIVE", True, raising=False)
+    monkeypatch.setattr(config, "SPOT_SYMBOLS", ["BTC", "ETH", "SOL", "XRP"], raising=False)
     monkeypatch.setattr(config, "SPOT_MAX_DEPLOYED_PCT", 0.40, raising=False)
     monkeypatch.setattr(config, "SPOT_MIN_ORDER_USD", 10.0, raising=False)
     monkeypatch.setattr(
@@ -261,8 +258,7 @@ def test_ct06_xrp_long_perp_only(tmp_path, monkeypatch):
     _fresh_db(tmp_path)
 
     result = ct.get_crypto_tradeability("XRP", "LONG", live=False, manual=False)
-    assert result["lane"] != "spot", "XRP must not route to spot"
-    assert result["lane"] == "perp"
+    assert result["lane"] == "spot"
 
 
 # ── CT-07: Unknown/unsupported symbol → blocked ───────────────────────────────
@@ -310,6 +306,7 @@ def test_ct08_spot_disabled_falls_to_perp(tmp_path, monkeypatch):
     import runtime.crypto_tradeability as ct
 
     monkeypatch.setattr(config, "SPOT_LANE_ACTIVE", False, raising=False)
+    monkeypatch.setattr(config, "SPOT_SYMBOLS", ["BTC", "ETH", "SOL", "XRP"], raising=False)
     monkeypatch.setattr(config, "SPOT_MAX_DEPLOYED_PCT", 0.40, raising=False)
     monkeypatch.setattr(config, "SPOT_MIN_ORDER_USD", 10.0, raising=False)
     monkeypatch.setattr(
@@ -346,6 +343,7 @@ def test_ct09_spot_position_already_open_blocks_spot(tmp_path, monkeypatch):
     import runtime.crypto_tradeability as ct
 
     monkeypatch.setattr(config, "SPOT_LANE_ACTIVE", True, raising=False)
+    monkeypatch.setattr(config, "SPOT_SYMBOLS", ["BTC", "ETH", "SOL", "XRP"], raising=False)
     monkeypatch.setattr(config, "SPOT_MAX_DEPLOYED_PCT", 0.40, raising=False)
     monkeypatch.setattr(config, "SPOT_MIN_ORDER_USD", 10.0, raising=False)
     monkeypatch.setattr(
@@ -379,6 +377,40 @@ def test_ct09_spot_position_already_open_blocks_spot(tmp_path, monkeypatch):
     )
     if result["lane"] == "perp":
         assert result["status"] == "executable"
+
+
+def test_ct12_cross_lane_underlying_blocked_when_spot_open(tmp_path, monkeypatch):
+    import config
+    import runtime.crypto_tradeability as ct
+
+    monkeypatch.setattr(config, "SPOT_LANE_ACTIVE", True, raising=False)
+    monkeypatch.setattr(config, "SPOT_SYMBOLS", ["BTC", "ETH", "SOL", "XRP"], raising=False)
+    monkeypatch.setattr(config, "SPOT_MAX_DEPLOYED_PCT", 0.40, raising=False)
+    monkeypatch.setattr(config, "SPOT_MIN_ORDER_USD", 10.0, raising=False)
+    monkeypatch.setattr(
+        config,
+        "AUTONOMOUS_LIVE_PERP_SYMBOLS",
+        ["BTC", "ETH", "SOL", "XRP"],
+        raising=False,
+    )
+    monkeypatch.setattr(
+        config,
+        "CORE_EXECUTION_UNDERLYINGS",
+        {"BTC", "ETH", "SOL", "XRP"},
+        raising=False,
+    )
+    monkeypatch.setattr(ct, "_db_path", lambda: str(tmp_path / "trades.db"), raising=False)
+
+    db = _fresh_db(tmp_path)
+    with sqlite3.connect(db) as c:
+        c.execute(
+            "INSERT INTO open_positions (symbol, strategy, qty, entry, paper) VALUES (?,?,?,?,?)",
+            ("BTC", "spot_btc", 0.001, 85000.0, 0),
+        )
+
+    result = ct.get_crypto_tradeability("BTC", "SHORT", live=True, manual=False)
+    assert result["status"] == "blocked"
+    assert result["blocked_reason"] == "underlying_exposure_already_open"
 
 
 # ── CT-10: Engine error returns execution_policy_unavailable ──────────────────

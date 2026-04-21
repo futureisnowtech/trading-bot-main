@@ -1517,20 +1517,61 @@ def _attempt_entry(
                 )
                 return "entered"
             else:
+                _spot_reason = "spot_entry_failed"
                 logger.debug(
                     f"[v10] spot {_trade.get('underlying')} blocked by engine: "
                     f"{_sr.get('blocked') if _sr else 'None returned'}"
                 )
                 logger.info(
-                    f"[v10] spot {_trade.get('underlying')} fallthrough to perp: spot engine returned no position"
+                    f"[v10] spot {_trade.get('underlying')} failed — staying in spot lane"
                 )
-                # Fall through to perp path
+                _journal_scan_candidate(
+                    scan_id,
+                    candidate,
+                    "execution_failed",
+                    regime=regime,
+                    technical_score=_tech_score,
+                    ml_score=_ml_score,
+                    composite_score=composite,
+                    entry_threshold=50.0,
+                    should_enter_signal=1,
+                    econ_approved=1,
+                    entry_block_reason=_spot_reason,
+                    recommended_lane=_trade.get("recommended_lane", ""),
+                    tradeability_status=_trade.get("status", "executable"),
+                    trade_blocked_reason=_spot_reason,
+                    trade_size_block_reason=_trade.get("size_block_reason", "none"),
+                    trade_source_reason=_trade.get("source_reason", "trusted_source"),
+                    manual_executable=int(_trade.get("manual_executable", 0)),
+                    auto_executable=int(_trade.get("auto_executable", 0)),
+                )
+                return "execution_failed"
         except Exception as _spot_err:
             logger.debug(f"[v10] spot entry error: {_spot_err}")
             logger.info(
-                f"[v10] spot {_trade.get('underlying')} fallthrough to perp: spot engine returned no position"
+                f"[v10] spot {_trade.get('underlying')} exception — staying in spot lane"
             )
-            # Fall through to perp path
+            _journal_scan_candidate(
+                scan_id,
+                candidate,
+                "execution_failed",
+                regime=regime,
+                technical_score=_tech_score,
+                ml_score=_ml_score,
+                composite_score=composite,
+                entry_threshold=50.0,
+                should_enter_signal=1,
+                econ_approved=1,
+                entry_block_reason=f"spot_entry_exception: {_spot_err}",
+                recommended_lane=_trade.get("recommended_lane", ""),
+                tradeability_status=_trade.get("status", "executable"),
+                trade_blocked_reason="spot_entry_exception",
+                trade_size_block_reason=_trade.get("size_block_reason", "none"),
+                trade_source_reason=_trade.get("source_reason", "trusted_source"),
+                manual_executable=int(_trade.get("manual_executable", 0)),
+                auto_executable=int(_trade.get("auto_executable", 0)),
+            )
+            return "execution_failed"
 
     setup_str = (
         primary_setup["label"] if primary_setup else f"composite={composite:.1f}"

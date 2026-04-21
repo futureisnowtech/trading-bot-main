@@ -51,8 +51,10 @@ _BLOCKED_LABELS = {
     "spot_lane_disabled": "Spot lane is off",
     "spot_direction_not_allowed": "No spot shorts allowed",
     "spot_position_already_open": "Spot position already open",
+    "spot_outside_session": "Outside spot entry session",
     "spot_deployment_cap_exceeded": "Spot capital cap reached",
     "spot_balance_unavailable": "Spot balance unavailable",
+    "underlying_exposure_already_open": "Underlying already active in another lane",
     "perp_symbol_not_supported": "Perp symbol not in Coinbase universe",
     "perp_not_autonomous_eligible": "Manual-only (not auto-eligible)",
     "perp_position_limit_reached": "Max 3 live perps already open",
@@ -245,6 +247,8 @@ def render_crypto_page():
     )
 
     bp = hdr.get("buying_power", 0.0)
+    spot_cash = hdr.get("spot_cash_available", 0.0)
+    spot_symbols = hdr.get("spot_symbols", ["BTC", "ETH", "SOL", "XRP"])
     perp_pct = hdr.get("perp_deployed_pct", 0.0)
     spot_pct = hdr.get("spot_deployed_pct", 0.0)
     open_ct = hdr.get("open_count", 0)
@@ -270,7 +274,7 @@ def render_crypto_page():
                 f"${bp:,.0f}",
                 "Available" if bp > 200 else "Low",
                 "good" if bp > 200 else "watch",
-                "Futures buying power from Coinbase CFM account — usable for new perp entries",
+                f"Perp buying power ${bp:,.0f} · Spot cash ${spot_cash:,.0f}",
             ),
             unsafe_allow_html=True,
         )
@@ -290,7 +294,7 @@ def render_crypto_page():
                 else "watch"
                 if deployed_total < 85
                 else "problem",
-                f"Perp {perp_pct:.1f}% + Spot {spot_pct:.1f}% · Cap is 95% combined",
+                f"Perp {perp_pct:.1f}% + Spot {spot_pct:.1f}% · Spot lane capped separately",
             ),
             unsafe_allow_html=True,
         )
@@ -301,7 +305,7 @@ def render_crypto_page():
                 str(open_ct),
                 "Flat" if open_ct == 0 else f"{open_ct} open",
                 "neutral" if open_ct == 0 else "good" if open_ct <= 2 else "watch",
-                "Perp max 3 concurrent live positions · Spot holds BTC-USD / ETH-USD",
+                f"Perp max 3 live · Spot universe: {', '.join(spot_symbols)}",
             ),
             unsafe_allow_html=True,
         )

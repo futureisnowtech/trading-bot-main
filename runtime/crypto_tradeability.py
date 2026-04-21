@@ -9,11 +9,11 @@ Public API:
     get_recommended_crypto_lane(symbol, direction, candidate, *, live) -> str
 
 Lanes:
-    "spot"    — Coinbase spot BTC-USD/ETH-USD, LONG only, no leverage
+    "spot"    — Coinbase spot configured universe, LONG only, no leverage
     "perp"    — Coinbase nano perp futures (BTC/ETH/SOL/XRP), long or short
     "blocked" — not executable via any lane
 
-Version: v16.14 (2026-04-18)
+Version: v17.2 (2026-04-21)
 """
 
 from __future__ import annotations
@@ -35,8 +35,10 @@ _BLOCKED_REASONS = frozenset(
         "spot_lane_disabled",
         "spot_direction_not_allowed",
         "spot_position_already_open",
+        "spot_outside_session",
         "spot_deployment_cap_exceeded",
         "spot_balance_unavailable",
+        "underlying_exposure_already_open",
         "perp_symbol_not_supported",
         "perp_not_autonomous_eligible",
         "perp_position_limit_reached",
@@ -311,6 +313,7 @@ def _evaluate_tradeability(
     try:
         from config import (
             SPOT_LANE_ACTIVE,
+            SPOT_SYMBOLS,
             SPOT_MAX_DEPLOYED_PCT,
             SPOT_MIN_ORDER_USD,
             AUTONOMOUS_LIVE_PERP_SYMBOLS,
@@ -318,6 +321,7 @@ def _evaluate_tradeability(
         )
 
         spot_active = bool(SPOT_LANE_ACTIVE)
+        spot_symbols = {s.upper() for s in SPOT_SYMBOLS}
         spot_max_pct = float(SPOT_MAX_DEPLOYED_PCT)
         spot_min_usd = float(SPOT_MIN_ORDER_USD)
         auto_perp_syms = [s.upper() for s in AUTONOMOUS_LIVE_PERP_SYMBOLS]
@@ -338,7 +342,7 @@ def _evaluate_tradeability(
     # ── 4. Determine recommended lane ────────────────────────────────────────
     # BTC/ETH LONG → prefer spot when it's active; otherwise prefer perp.
     # SHORT always perp.
-    spot_eligible_symbol = underlying in ("BTC", "ETH") and direction == "LONG"
+    spot_eligible_symbol = underlying in spot_symbols and direction == "LONG"
     recommended_lane = _policy_recommended_lane(
         underlying,
         direction,
@@ -354,6 +358,7 @@ def _evaluate_tradeability(
         spot_active=spot_active,
         spot_max_pct=spot_max_pct,
         spot_min_usd=spot_min_usd,
+        spot_symbols=spot_symbols,
         live=live,
         paper_int=paper_int,
         manual=manual,
@@ -437,6 +442,7 @@ def _check_spot_eligibility(
     spot_active: bool,
     spot_max_pct: float,
     spot_min_usd: float,
+    spot_symbols: set[str],
     live: bool,
     paper_int: int,
     manual: bool,
@@ -446,7 +452,7 @@ def _check_spot_eligibility(
     Paper mode: skip balance/deployment checks (symbol/direction routing still enforced).
     """
     # Symbol gate
-    if underlying not in ("BTC", "ETH"):
+    if underlying not in spot_symbols:
         return "spot_symbol_not_allowed"
 
     # Direction gate (no shorting spot)
@@ -460,10 +466,20 @@ def _check_spot_eligibility(
     # Duplicate position gate (paper and live)
     if _count_open_spot_positions(underlying, paper_int) > 0:
         return "spot_position_already_open"
+    if _get_open_perp_directions(underlying, paper_int):
+        return "underlying_exposure_already_open"
 
     # Paper mode: skip balance/deployment checks
     if not live:
         return "none"
+
+    try:
+        from runtime.spot_session import is_spot_entry_session_open
+
+        if not is_spot_entry_session_open():
+            return "spot_outside_session"
+    except Exception:
+        pass
 
     # Live: balance and deployment checks
     usd_avail, ok = _get_spot_balance_usd()
@@ -512,6 +528,9 @@ def _check_perp_eligibility(
     # Paper mode: no further checks
     if not live:
         return "none"
+
+    if _count_open_spot_positions(underlying, paper_int) > 0:
+        return "underlying_exposure_already_open"
 
     # Opposite-side block (live perp only) — same direction is allowed (pyramiding)
     open_directions = _get_open_perp_directions(underlying, paper_int)
@@ -626,7 +645,13 @@ def _policy_recommended_lane(
     perp_supported: bool,
 ) -> str:
     """Pure route ownership policy with no runtime-state checks."""
-    if underlying in ("BTC", "ETH") and direction == "LONG" and spot_active:
+    try:
+        from config import SPOT_SYMBOLS
+
+        spot_symbols = {s.upper() for s in SPOT_SYMBOLS}
+    except Exception:
+        spot_symbols = {"BTC", "ETH", "SOL", "XRP"}
+    if underlying in spot_symbols and direction == "LONG" and spot_active:
         return "spot"
     if perp_supported:
         return "perp"

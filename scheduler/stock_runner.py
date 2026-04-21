@@ -1,7 +1,7 @@
 """
 scheduler/stock_runner.py — US equity swing-trading lane.
 
-Scans STOCK_UNIVERSE every 30 minutes during market hours (9:30–16:00 ET, weekdays).
+Scans STOCK_UNIVERSE every 30 minutes.
 Standalone signal tower (no imports from signal_engine, scanner, v10_runner, etc.).
 
 Signal scoring (0–100 technical tower):
@@ -33,6 +33,16 @@ if _RUNNER_ROOT not in sys.path:
     sys.path.insert(0, _RUNNER_ROOT)
 
 from logging_db.trade_logger import log_event
+
+try:
+    from runtime.runtime_state import upsert_lane_state
+
+    def _upsert_stocks(**kw):
+        upsert_lane_state("stocks", **kw)
+except Exception:
+
+    def _upsert_stocks(**kw):
+        pass
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -392,13 +402,13 @@ def _log_scan_candidate_safe(symbol: str, score: int, decision: str, notes: str)
 def run_scan_cycle():
     """
     Main scan loop:
-    1. Gate on market hours.
-    2. Score each symbol in STOCK_UNIVERSE.
-    3. Enter if score >= threshold, not already held, position limit not reached.
-    4. Monitor existing positions and exit if stop triggered.
+    1. Score each symbol in STOCK_UNIVERSE.
+    2. Enter if score >= threshold, not already held, position limit not reached.
+    3. Monitor existing positions and exit if stop triggered.
     """
-    if not _is_market_hours():
-        return
+    from datetime import timezone
+
+    _upsert_stocks(last_heartbeat_at=datetime.now(timezone.utc).isoformat())
 
     log_event("INFO", "StockRunner", "Stock scan cycle starting")
 
@@ -411,13 +421,23 @@ def run_scan_cycle():
             log_event(
                 "WARN", "StockRunner", "Cannot connect to IBKR TWS — skipping cycle"
             )
+            _upsert_stocks(
+                connected=0,
+                readiness_state="BROKER_DISCONNECTED",
+                health="DEGRADED",
+                blocked_reason="ibkr_connection_failed",
+            )
             return
+        _upsert_stocks(
+            connected=1, readiness_state="OPERATIONAL", health="OK", blocked_reason=""
+        )
 
     account_value = broker.get_account_value()
     if account_value <= 0:
         log_event(
             "WARN", "StockRunner", "Could not read account value — skipping cycle"
         )
+        _upsert_stocks(health="DEGRADED", blocked_reason="no_account_value")
         return
 
     # Reconcile in-memory positions against DB
@@ -549,6 +569,7 @@ def run_scan_cycle():
                 f"broker returned None for {symbol}",
             )
 
+    _upsert_stocks(readiness_state="OPERATIONAL", health="OK", blocked_reason="")
     log_event("INFO", "StockRunner", "Stock scan cycle complete")
 
 
@@ -563,16 +584,25 @@ def run_forever():
     """
     import schedule as _sched_lib
 
+    _upsert_stocks(
+        enabled=1,
+        active=1,
+        connected=0,
+        readiness_state="STARTING",
+        health="UNKNOWN",
+        blocked_reason="",
+    )
+
     _s = _sched_lib.Scheduler()
     _s.every(30).minutes.do(run_scan_cycle)
 
     log_event(
         "INFO",
         "StockRunner",
-        "Stock lane started — scanning every 30m during market hours",
+        "Stock lane started — scanning every 30m",
     )
 
-    # Run immediately on startup (if market is open)
+    # Run immediately on startup
     try:
         run_scan_cycle()
     except Exception as e:

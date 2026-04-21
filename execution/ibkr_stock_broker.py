@@ -284,13 +284,21 @@ class IBKRStockBroker:
 
         stop_trade = self._ib.placeOrder(contract, stop_order)
 
-        # Wait briefly to detect immediate Cancelled (Error 460 / permissions)
-        await asyncio.sleep(0.5)
+        # Wait for IBKR to respond with acceptance or rejection.
+        # 0.5s misses "Inactive" (insufficient funds) which arrives ~1-2s later.
+        await asyncio.sleep(2.5)
         entry_status = entry_trade.orderStatus.status if entry_trade else ""
-        if entry_status == "Cancelled":
+        _REJECTED = {"Cancelled", "Inactive", "ApiCancelled", "PendingCancel"}
+        if entry_status in _REJECTED:
             err_codes = [e.errorCode for e in entry_trade.log if e.errorCode]
             raise RuntimeError(
-                f"Stock bracket entry cancelled by IBKR (Cancelled, codes={err_codes})"
+                f"Stock bracket rejected by IBKR: status={entry_status} codes={err_codes}"
+            )
+        # Must be Submitted/PreSubmitted/Filled to be considered live
+        _LIVE = {"Submitted", "PreSubmitted", "Filled"}
+        if entry_status and entry_status not in _LIVE:
+            raise RuntimeError(
+                f"Stock bracket unexpected status={entry_status} — treating as failed"
             )
 
         return [entry_trade]

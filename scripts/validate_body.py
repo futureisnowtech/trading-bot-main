@@ -480,16 +480,44 @@ try:
         "pages",
         "forecast_page.py",
     )
+    _stocks_page_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "dashboard",
+        "widgets",
+        "pages",
+        "stocks_page.py",
+    )
+    _futures_page_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "dashboard",
+        "widgets",
+        "pages",
+        "mes_page.py",
+    )
     _has_ct = "CONTROL TOWER" in _app_src
     _has_crypto = '"CRYPTO"' in _app_src
+    _has_stocks = '"STOCKS"' in _app_src
     _has_fc = "FORECAST" in _app_src
+    _has_futures = '"FUTURES"' in _app_src
     _has_fc_page = "render_forecast_page" in _app_src
+    _has_stocks_page = os.path.exists(_stocks_page_path)
+    _has_futures_page = os.path.exists(_futures_page_path)
     _has_mes_in_ec = "mes_dashboard" in _ec_src or "render_futures" in _ec_src
-    if _has_ct and _has_crypto and _has_fc and _has_fc_page and _has_mes_in_ec:
+    if (
+        _has_ct
+        and _has_crypto
+        and _has_stocks
+        and _has_fc
+        and _has_futures
+        and _has_fc_page
+        and _has_stocks_page
+        and _has_futures_page
+        and _has_mes_in_ec
+    ):
         _fx(
             "Dashboard aligned",
             "READY",
-            "v17.0 5-tab layout: CONTROL TOWER + CRYPTO + FORECAST + PERFORMANCE LAB + ENGINEERING CONSOLE; MES in engineering console",
+            "v17.3 7-tab layout: CONTROL TOWER + CRYPTO + STOCKS + FORECAST + FUTURES + PERFORMANCE LAB + ENGINEERING CONSOLE",
         )
     else:
         _missing_items = []
@@ -497,12 +525,20 @@ try:
             _missing_items.append("CONTROL TOWER tab")
         if not _has_crypto:
             _missing_items.append("CRYPTO tab")
+        if not _has_stocks:
+            _missing_items.append("STOCKS tab")
         if not _has_fc:
             _missing_items.append("FORECAST tab")
+        if not _has_futures:
+            _missing_items.append("FUTURES tab")
         if not _has_fc_page:
             _missing_items.append("render_forecast_page import")
+        if not _has_stocks_page:
+            _missing_items.append("stocks_page.py")
+        if not _has_futures_page:
+            _missing_items.append("mes_page.py")
         if not _has_mes_in_ec:
-            _missing_items.append("MES widget in engineering_console.py")
+            _missing_items.append("MES widget preserved in engineering_console.py")
         _fx("Dashboard aligned", "BLOCKED", f"Missing: {', '.join(_missing_items)}")
 except Exception as _e:
     _fx("Dashboard aligned", "BLOCKED", f"Check error: {_e}")

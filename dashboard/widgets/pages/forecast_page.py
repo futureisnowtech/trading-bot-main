@@ -134,6 +134,13 @@ def render_forecast_page():
         )
 
     st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+    st.markdown(
+        ui.info_callout(
+            "FORECAST is a blocked-ready lane. Keep it visible as a promotion surface, but do not treat it as a primary trading engine until enrollment, tradable contracts, and stable heartbeat truth are all present.",
+            "info",
+        ),
+        unsafe_allow_html=True,
+    )
 
     # ── Stale / not-active banners ─────────────────────────────────────────────
     if not lane_active:

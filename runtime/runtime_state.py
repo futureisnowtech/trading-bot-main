@@ -43,9 +43,13 @@ _DDL_LANE = """
 CREATE TABLE IF NOT EXISTS lane_runtime_state (
     id                   INTEGER PRIMARY KEY AUTOINCREMENT,
     lane_id              TEXT UNIQUE NOT NULL,
+    lane_role            TEXT DEFAULT 'secondary',
     enabled              INTEGER DEFAULT 0,
     active               INTEGER DEFAULT 0,
     configured           INTEGER DEFAULT 0,
+    dashboard_visible    INTEGER DEFAULT 1,
+    autonomous_enabled   INTEGER DEFAULT 0,
+    manual_allowed       INTEGER DEFAULT 0,
     mode                 TEXT DEFAULT 'disabled',
     connected            INTEGER DEFAULT 0,
     discovering          INTEGER DEFAULT 0,
@@ -62,6 +66,7 @@ CREATE TABLE IF NOT EXISTS lane_runtime_state (
     buying_power_usd     REAL DEFAULT 0.0,
     issue_count          INTEGER DEFAULT 0,
     readiness_state      TEXT DEFAULT 'UNKNOWN',
+    promotion_condition  TEXT DEFAULT '',
     updated_at           TEXT
 )
 """
@@ -97,6 +102,19 @@ def init_runtime_tables(db_path: str = DB_PATH) -> None:
         }
         if "account_size_live" not in _sys_cols:
             c.execute("ALTER TABLE system_runtime_state ADD COLUMN account_size_live REAL")
+        _lane_cols = {
+            r["name"] for r in c.execute("PRAGMA table_info(lane_runtime_state)").fetchall()
+        }
+        if "lane_role" not in _lane_cols:
+            c.execute("ALTER TABLE lane_runtime_state ADD COLUMN lane_role TEXT DEFAULT 'secondary'")
+        if "dashboard_visible" not in _lane_cols:
+            c.execute("ALTER TABLE lane_runtime_state ADD COLUMN dashboard_visible INTEGER DEFAULT 1")
+        if "autonomous_enabled" not in _lane_cols:
+            c.execute("ALTER TABLE lane_runtime_state ADD COLUMN autonomous_enabled INTEGER DEFAULT 0")
+        if "manual_allowed" not in _lane_cols:
+            c.execute("ALTER TABLE lane_runtime_state ADD COLUMN manual_allowed INTEGER DEFAULT 0")
+        if "promotion_condition" not in _lane_cols:
+            c.execute("ALTER TABLE lane_runtime_state ADD COLUMN promotion_condition TEXT DEFAULT ''")
 
 
 # ── System-level state ────────────────────────────────────────────────────────

@@ -46,7 +46,13 @@ class LaneRegistry:
 
     def _register_defaults(self) -> None:
         """Pre-register all known lanes based on current config."""
-        from config import PAPER_TRADING, COINBASE_CDP_KEY_NAME, FUTURES_LANE_ACTIVE, FORECAST_LANE_ACTIVE
+        from config import (
+            PAPER_TRADING,
+            COINBASE_CDP_KEY_NAME,
+            FUTURES_LANE_ACTIVE,
+            FORECAST_LANE_ACTIVE,
+            STOCKS_LANE_ACTIVE,
+        )
 
         # crypto: enabled when paper mode OR Coinbase credentials present
         crypto_enabled = PAPER_TRADING or bool(COINBASE_CDP_KEY_NAME)
@@ -57,6 +63,9 @@ class LaneRegistry:
 
         # mes_archived: enabled when FUTURES_LANE_ACTIVE=True (default False)
         self.register("mes_archived", enabled_flag=bool(FUTURES_LANE_ACTIVE))
+
+        # stocks: enabled when STOCKS_LANE_ACTIVE=True
+        self.register("stocks", enabled_flag=bool(STOCKS_LANE_ACTIVE))
 
     def register(
         self,

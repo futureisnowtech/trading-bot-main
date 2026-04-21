@@ -86,6 +86,13 @@ def main():
         MAX_DEPLOYED_PCT,
         FORECAST_LANE_ACTIVE,
         STOCKS_LANE_ACTIVE,
+        FORECAST_DASHBOARD_VISIBLE,
+        FORECAST_AUTONOMOUS_ENABLED,
+        FORECAST_MANUAL_ENABLED,
+        FUTURES_DASHBOARD_VISIBLE,
+        STOCKS_DASHBOARD_VISIBLE,
+        STOCKS_AUTONOMOUS_ENABLED,
+        STOCKS_MANUAL_ENABLED,
     )
 
     tz = pytz.timezone(MARKET_TIMEZONE)
@@ -164,9 +171,13 @@ def main():
     upsert_lane_state(
         "crypto",
         db_path=_db_path,
+        lane_role="primary",
         enabled=1,
         active=1,
         configured=1,
+        dashboard_visible=1,
+        autonomous_enabled=1,
+        manual_allowed=1,
         mode=_rt_mode,
         health="UNKNOWN",
         connected=0,
@@ -174,44 +185,63 @@ def main():
         capital_deployed_usd=0.0,
         buying_power_usd=0.0,
         readiness_state="STARTING",
+        promotion_condition="Primary live lane — keep crypto active and truth-aligned",
     )
     # forecast lane
     upsert_lane_state(
         "forecast",
         db_path=_db_path,
+        lane_role="blocked_ready",
         enabled=int(FORECAST_LANE_ACTIVE),
         active=int(FORECAST_LANE_ACTIVE),
         configured=1,
+        dashboard_visible=int(FORECAST_DASHBOARD_VISIBLE),
+        autonomous_enabled=int(FORECAST_AUTONOMOUS_ENABLED and FORECAST_LANE_ACTIVE),
+        manual_allowed=int(FORECAST_MANUAL_ENABLED),
         mode=_rt_mode if FORECAST_LANE_ACTIVE else "disabled",
         health="UNKNOWN",
         readiness_state="LANE_NOT_STARTED"
         if not FORECAST_LANE_ACTIVE
         else "BROKER_DISCONNECTED",
+        blocked_reason=""
+        if FORECAST_LANE_ACTIVE
+        else "FORECAST_LANE_ACTIVE=false",
+        promotion_condition="Promote only after enrollment, tradable contracts, and stable heartbeat truth",
     )
     # mes archived lane
     upsert_lane_state(
         "mes_archived",
         db_path=_db_path,
+        lane_role="archived",
         enabled=int(_FLA),
         active=0,
         configured=int(_FLA),
+        dashboard_visible=int(FUTURES_DASHBOARD_VISIBLE),
+        autonomous_enabled=0,
+        manual_allowed=0,
         mode="archived",
         health="OK",
         readiness_state="DORMANT",
         blocked_reason="" if _FLA else "FUTURES_LANE_ACTIVE=false",
+        promotion_condition="Reactivate only after futures approval, lane validation, and FUTURES_LANE_ACTIVE=true",
     )
 
     # stocks lane
     upsert_lane_state(
         "stocks",
         db_path=_db_path,
+        lane_role="dormant_ready",
         enabled=int(STOCKS_LANE_ACTIVE),
         active=int(STOCKS_LANE_ACTIVE),
         configured=int(STOCKS_LANE_ACTIVE),
+        dashboard_visible=int(STOCKS_DASHBOARD_VISIBLE),
+        autonomous_enabled=int(STOCKS_AUTONOMOUS_ENABLED and STOCKS_LANE_ACTIVE),
+        manual_allowed=int(STOCKS_MANUAL_ENABLED),
         mode=_rt_mode if STOCKS_LANE_ACTIVE else "disabled",
         health="UNKNOWN",
         readiness_state="LANE_NOT_STARTED" if not STOCKS_LANE_ACTIVE else "STARTING",
         blocked_reason="" if STOCKS_LANE_ACTIVE else "STOCKS_LANE_ACTIVE=false",
+        promotion_condition="Promote only after equity edge and PDT-aware operating rules are proven",
     )
 
     # Run position reconciliation

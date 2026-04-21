@@ -1,5 +1,11 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
+## 2026-04-21
+- Implemented crypto-first lane governance: 7-tab dashboard shell (CONTROL TOWER/CRYPTO/STOCKS/FORECAST/FUTURES/PERFORMANCE LAB/ENGINEERING CONSOLE), lane_role/autonomy/manual metadata in lane_runtime_state, stocks restored to lane registry, and readiness-first stocks/futures/forecast operator surfaces with updated proofs/validator
+
+## 2026-04-21
+- Adopted crypto-first evolution plan artifact with lane-role governance, 7-page dashboard target, and promotion-ready side-lane strategy
+
 ## 2026-04-20
 - feat(spot): day-trading exits — target hit (3R) + EOD flatten (15:45 ET) + both BTC/ETH fully wired
 

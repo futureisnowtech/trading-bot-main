@@ -286,18 +286,49 @@ CRYPTO_ENABLED: bool = os.getenv("CRYPTO_ENABLED", "true").lower() == "true"
 FUTURES_ENABLED: bool = os.getenv("FUTURES_ENABLED", "false").lower() == "true"
 PERP_ENABLED: bool = os.getenv("PERP_ENABLED", "false").lower() == "true"
 
-# Lane activation flags (v15.1)
-# FUTURES_LANE_ACTIVE — gates MES/IBKR lane startup. Default false = archived/dormant.
-# FORECAST_LANE_ACTIVE — gates ForecastEx lane startup from main.py. Default false = standalone only.
+# Lane activation + operator-governance flags (v17.3)
+# *_LANE_ACTIVE controls whether the runner is started.
+# *_DASHBOARD_VISIBLE controls whether the lane gets an explicit operator surface.
+# *_AUTONOMOUS_ENABLED controls whether the lane is allowed to place autonomous trades.
+# *_MANUAL_ENABLED controls whether the lane is allowed to place manual trades.
+# This separates visibility from autonomy so side lanes can stay promotion-ready
+# without competing with the primary crypto workflow.
 FUTURES_LANE_ACTIVE: bool = os.getenv("FUTURES_LANE_ACTIVE", "false").lower() == "true"
 FORECAST_LANE_ACTIVE: bool = (
     os.getenv("FORECAST_LANE_ACTIVE", "false").lower() == "true"
 )
+FORECAST_DASHBOARD_VISIBLE: bool = (
+    os.getenv("FORECAST_DASHBOARD_VISIBLE", "true").lower() == "true"
+)
+FORECAST_AUTONOMOUS_ENABLED: bool = (
+    os.getenv("FORECAST_AUTONOMOUS_ENABLED", "false").lower() == "true"
+)
+FORECAST_MANUAL_ENABLED: bool = (
+    os.getenv("FORECAST_MANUAL_ENABLED", "false").lower() == "true"
+)
+FUTURES_DASHBOARD_VISIBLE: bool = (
+    os.getenv("FUTURES_DASHBOARD_VISIBLE", "true").lower() == "true"
+)
+FUTURES_AUTONOMOUS_ENABLED: bool = (
+    os.getenv("FUTURES_AUTONOMOUS_ENABLED", "false").lower() == "true"
+)
+FUTURES_MANUAL_ENABLED: bool = (
+    os.getenv("FUTURES_MANUAL_ENABLED", "false").lower() == "true"
+)
 
 # ── Stocks lane (v17.2) ───────────────────────────────────────────────────────
-# STOCKS_LANE_ACTIVE — gates US equity swing-trading lane. Default false = disabled.
+# STOCKS_LANE_ACTIVE — gates US equity swing-trading lane runner startup.
 # Connects to IBKR TWS live account on port 7496, clientId=4.
 STOCKS_LANE_ACTIVE: bool = os.getenv("STOCKS_LANE_ACTIVE", "false").lower() == "true"
+STOCKS_DASHBOARD_VISIBLE: bool = (
+    os.getenv("STOCKS_DASHBOARD_VISIBLE", "true").lower() == "true"
+)
+STOCKS_AUTONOMOUS_ENABLED: bool = (
+    os.getenv("STOCKS_AUTONOMOUS_ENABLED", "false").lower() == "true"
+)
+STOCKS_MANUAL_ENABLED: bool = (
+    os.getenv("STOCKS_MANUAL_ENABLED", "false").lower() == "true"
+)
 STOCK_UNIVERSE: list = [
     s.strip()
     for s in os.getenv(

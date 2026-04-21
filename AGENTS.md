@@ -9,6 +9,7 @@ The `/brain/` directory is the living strategic intelligence layer.
 - Hub: `brain/README.md`
 - Governed by: `brain_constitution.md` + `brain_execution_os.md`
 - Key notes: `brain/01_current_system/`, `brain/03_parameter_sets/`, `brain/10_decisions/`
+- Current strategic evolution plan: `brain/10_decisions/2026-04-21_crypto_first_evolution_plan.md`
 
 ## What This System Is
 
@@ -28,7 +29,7 @@ A fully autonomous AI-powered trading system that:
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
 
-## Current Version: v17.2 (2026-04-21)
+## Current Version: v17.3 (2026-04-21)
 
 **Active branch:** `feature/v10-rebuild`
 **Clean paper trading started:** 2026-04-02
@@ -72,7 +73,7 @@ A fully autonomous AI-powered trading system that:
 | Trading control plane | `dashboard/data/trading_control.py` + `dashboard/widgets/system_settings/master_control.py` | Master SYSTEM SETTINGS view: crypto funnel, blocker classification (strategy/system/bug), forecast contradictions, truth checks |
 | Operator audits | `scripts/net_truth_audit.py` + `scripts/go_live_audit.py` | Trust-aware net-of-fee scorecards and evidence-backed launch constraints |
 | Notifications | `notifications/notification_engine.py` | SQLite only, no Telegram |
-| Dashboard | `dashboard/app.py` | Streamlit Operator Panel, 5 tabs: CONTROL TOWER, CRYPTO, FORECAST, PERFORMANCE LAB, ENGINEERING CONSOLE |
+| Dashboard | `dashboard/app.py` | Streamlit Operator Panel, 7 tabs: CONTROL TOWER, CRYPTO, STOCKS, FORECAST, FUTURES, PERFORMANCE LAB, ENGINEERING CONSOLE |
 | DB | `logs/trades.db` | WAL mode SQLite — positions, trades, system_events, scan_candidates, candidate_outcomes, trade_integrity, exit_evaluations, challenger_state, forecast_markets, forecast_contracts, forecast_quotes, forecast_bars, forecast_resolutions |
 | Vector memory | `memory/trade_memory.py` | NumPy cosine similarity, SQLite-backed, 8-dim feature vectors |
 | Kill switch | `kill_switch.py` | Balance < 75% of ACCOUNT_SIZE → halt all |
@@ -87,6 +88,7 @@ A fully autonomous AI-powered trading system that:
 - **Scanner sources:** Kraken Futures public REST + Binance USDM public REST + Hyperliquid public API. Live scheduler and manual scan now call `scanner.scan(..., core_only=True)`, so the operational universe is limited to `CORE_EXECUTION_UNDERLYINGS`; broad-universe scans are opt-in research mode only.
 - **Live crypto execution venue:** Coinbase US nano perp-style futures (`coinbase_broker.py`) — BIP/ETP/SLP/XPP (BTC/ETH/SOL/XRP only). Scanner, runner, and manual scan are now aligned to the core execution universe instead of spending live-cycle energy on long-tail names we do not trade.
 - **Shared crypto tradeability (v16.14+):** `runtime/crypto_tradeability.py` is now the canonical spot/perp/blocked router. `scheduler/v10_runner.py` and `dashboard/widgets/trade_approval/manual_scan.py` both call it instead of re-implementing crypto lane eligibility locally.
+- **Crypto-first operating model (v17.3):** `CRYPTO` is the primary business lane; spot is the main trade-frequency engine; perps remain tactical. `STOCKS` is dormant-ready, `FORECAST` is blocked-ready, and `FUTURES/MES` is archived. Dashboard shell and runtime metadata now expose those roles explicitly instead of hiding side lanes inside engineering surfaces.
 - **Manual scan fail-closed (v16.2 → v16.16):** manual scan still scans `core_only=True`, but row labels, preview gating, direct spot controls, and final execute path now all defer to shared tradeability. If the tradeability engine fails, manual execution blocks with `execution_policy_unavailable`.
 - **Path timing truth (v16.2):** `learning/candidate_labeler.py` now anchors 15m/1h/4h outcome timing to `scan_candidates.ts` whenever the fetched candle index supports it. `candidate_outcomes.path_timing_evaluated` marks whether timing metrics were truly computed from available forward bars.
 - **Audit semantics (v16.2):** `scripts/path_truth_audit.py` uses only `path_timing_evaluated=1` rows as the denominator for timing reach percentages. `scripts/entry_truth_audit.py` now separates `scored_total`, `below_threshold`, and `above_threshold`, so conversion and econ-veto rates are calculated from truthful threshold-passed counts.
@@ -138,7 +140,8 @@ A fully autonomous AI-powered trading system that:
 - **ForecastEx IBKR symbol truth (confirmed 2026-04-15):** FORECASTX uses SecType=IND with short symbols: CPI=573031126, CPIY=712856682, CPIC=727520252, DISSN=806285268, DISSA=804725704. FRED codes (CPIAUCSL/UNRATE/PAYEMS) do NOT exist. Discovery: two-pass IND→OPT.
 - **ForecastEx live blocker:** OPT event contracts require live funded IBKR account with ForecastEx enrollment. Paper account (DUP590699) sees IND underliers but OPT layer hangs. IBKR_PORT=7496 (corrected from 7497 in .env).
 - **Runtime truth tables (v15.2):** `system_runtime_state` (1 row — process mode, startup_ts, active_lanes) + `lane_runtime_state` (1 row per lane — enabled, active, mode, health, heartbeat). Written at startup; read by dashboard and audit scripts.
-- **Lane registry (v15.2):** `runtime/lane_registry.py` — single control plane: crypto=always active, forecast=FORECAST_LANE_ACTIVE, mes_archived=FUTURES_LANE_ACTIVE (default false).
+- **Lane registry (v17.3):** `runtime/lane_registry.py` registers `crypto`, `forecast`, `mes_archived`, and `stocks`. It remains memory/test hygiene; the live operational truth is `main.py` + `lane_runtime_state`.
+- **Lane governance metadata (v17.3):** `lane_runtime_state` now persists `lane_role`, `dashboard_visible`, `autonomous_enabled`, `manual_allowed`, and `promotion_condition` so dashboard surfaces can separate visibility from runner startup and autonomy.
 - **Incident model (v15.2):** `incidents` table groups system_events by lane+fingerprint. Archived MES incidents suppressed when FUTURES_LANE_ACTIVE=false.
 - **Position reconciler (v15.2):** `runtime/position_reconciler.py` — startup reconciliation of scale_33_done/scale_66_done against trades ledger. Trade ledger outranks stale flags.
 - **Allocator scaffold (v15.2):** `runtime/allocator.py` — GlobalAllocator stub; full cross-lane ranker deferred to v16.0.
@@ -358,7 +361,7 @@ algo_trading_final/
 │   └── trade_logger.py       ← SQLite trades.db WAL mode (DO NOT TOUCH)
 │
 ├── dashboard/
-│   ├── app.py                ← Streamlit Operator Panel (5 tabs, widget architecture) (DO NOT TOUCH)
+│   ├── app.py                ← Streamlit Operator Panel (7 tabs, lane-aligned operator shell) (DO NOT TOUCH)
 │   └── data/
 │       └── integrity.py      ← Truth-tiered integrity / exit-quality data helpers
 │

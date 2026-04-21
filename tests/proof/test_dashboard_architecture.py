@@ -1,11 +1,11 @@
 """
-tests/proof/test_dashboard_architecture.py — Proof tests for v17.0 5-tab dashboard architecture.
+tests/proof/test_dashboard_architecture.py — Proof tests for v17.3 7-tab dashboard architecture.
 
 These tests are pure source-analysis (AST + file reads) — no imports, no streamlit stub.
 Import-level sanity for the new page modules lives in test_dashboard_imports.py.
 
 Invariants:
-  - Exactly 5 top-level tabs: CONTROL TOWER, CRYPTO, FORECAST, PERFORMANCE LAB, ENGINEERING CONSOLE
+  - Exactly 7 top-level tabs: CONTROL TOWER, CRYPTO, STOCKS, FORECAST, FUTURES, PERFORMANCE LAB, ENGINEERING CONSOLE
   - Old top-level tabs removed (MISSION CONTROL, TRADE APPROVAL, SYSTEM SETTINGS, ARCHIVED FUTURES)
   - All 5 page modules exist with the expected render functions
   - Data orchestrators exist and expose expected public functions
@@ -49,16 +49,18 @@ def _src(rel_path: str) -> str:
 # ── tab structure ─────────────────────────────────────────────────────────────
 
 
-def test_exactly_5_tabs():
+def test_exactly_7_tabs():
     names = _app_tab_names()
-    assert len(names) == 5, f"Expected 5 tabs, got {len(names)}: {names}"
+    assert len(names) == 7, f"Expected 7 tabs, got {len(names)}: {names}"
 
 
 def test_tab_names_are_correct():
     expected = [
         "CONTROL TOWER",
         "CRYPTO",
+        "STOCKS",
         "FORECAST",
+        "FUTURES",
         "PERFORMANCE LAB",
         "ENGINEERING CONSOLE",
     ]
@@ -96,6 +98,14 @@ def test_forecast_page_exists():
     assert "def render_forecast_page" in _src("widgets/pages/forecast_page.py")
 
 
+def test_stocks_page_exists():
+    assert "def render_stocks_page" in _src("widgets/pages/stocks_page.py")
+
+
+def test_futures_page_exists():
+    assert "def render_mes_page" in _src("widgets/pages/mes_page.py")
+
+
 def test_performance_lab_exists():
     assert "def render_performance_lab" in _src("widgets/pages/performance_lab.py")
 
@@ -129,12 +139,20 @@ def test_engineering_console_data_module():
 
 
 def test_archived_futures_not_top_level():
-    assert "ARCHIVED FUTURES" not in _app_src()
+    src = _app_src()
+    assert "ARCHIVED FUTURES" not in src
+    assert "FUTURES" in src
 
 
 def test_archived_futures_in_engineering_console():
     src = _src("widgets/pages/engineering_console.py")
     assert "mes_dashboard" in src or "render_futures" in src
+
+
+def test_control_tower_has_lane_roles():
+    src = _src("widgets/pages/control_tower.py")
+    assert "LANE ROLES" in src
+    assert "promotion" in src.lower()
 
 
 def test_trade_approval_not_top_level():

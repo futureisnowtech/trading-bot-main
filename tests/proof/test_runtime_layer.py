@@ -370,6 +370,7 @@ def test_lane_registry_mes_disabled_by_default(monkeypatch):
     monkeypatch.setattr(config, "FUTURES_LANE_ACTIVE", False, raising=False)
     monkeypatch.setattr(config, "PAPER_TRADING", True, raising=False)
     monkeypatch.setattr(config, "FORECAST_LANE_ACTIVE", False, raising=False)
+    monkeypatch.setattr(config, "STOCKS_LANE_ACTIVE", False, raising=False)
     monkeypatch.setattr(config, "COINBASE_CDP_KEY_NAME", "", raising=False)
 
     # Re-import with patched config values
@@ -384,8 +385,12 @@ def test_lane_registry_mes_disabled_by_default(monkeypatch):
 
     # mes_archived should be registered but not active
     assert "mes_archived" in all_ids, "mes_archived should always be registered"
+    assert "stocks" in all_ids, "stocks should always be registered"
     assert "mes_archived" not in active_ids, (
         f"mes_archived should not be active when FUTURES_LANE_ACTIVE=False, got: {active_ids}"
+    )
+    assert "stocks" not in active_ids, (
+        f"stocks should not be active when STOCKS_LANE_ACTIVE=False, got: {active_ids}"
     )
     # crypto should be active (PAPER_TRADING=True)
     assert "crypto" in active_ids, "crypto should be active in paper mode"

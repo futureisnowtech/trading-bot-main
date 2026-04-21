@@ -28,6 +28,118 @@ def _safe(fn, default=None):
         return default
 
 
+def _lane_defaults() -> dict[str, dict]:
+    try:
+        from config import (
+            STOCKS_DASHBOARD_VISIBLE,
+            STOCKS_AUTONOMOUS_ENABLED,
+            STOCKS_MANUAL_ENABLED,
+            FORECAST_DASHBOARD_VISIBLE,
+            FORECAST_AUTONOMOUS_ENABLED,
+            FORECAST_MANUAL_ENABLED,
+            FUTURES_DASHBOARD_VISIBLE,
+        )
+    except Exception:
+        STOCKS_DASHBOARD_VISIBLE = True
+        STOCKS_AUTONOMOUS_ENABLED = False
+        STOCKS_MANUAL_ENABLED = False
+        FORECAST_DASHBOARD_VISIBLE = True
+        FORECAST_AUTONOMOUS_ENABLED = False
+        FORECAST_MANUAL_ENABLED = False
+        FUTURES_DASHBOARD_VISIBLE = True
+
+    return {
+        "crypto": {
+            "display_name": "Crypto",
+            "lane_role": "primary",
+            "dashboard_visible": 1,
+            "autonomous_enabled": 1,
+            "manual_allowed": 1,
+            "promotion_condition": "Primary live lane",
+        },
+        "stocks": {
+            "display_name": "Stocks",
+            "lane_role": "dormant_ready",
+            "dashboard_visible": int(STOCKS_DASHBOARD_VISIBLE),
+            "autonomous_enabled": int(STOCKS_AUTONOMOUS_ENABLED),
+            "manual_allowed": int(STOCKS_MANUAL_ENABLED),
+            "promotion_condition": "Promote after equity edge and PDT-aware rules are proven",
+        },
+        "forecast": {
+            "display_name": "Forecast",
+            "lane_role": "blocked_ready",
+            "dashboard_visible": int(FORECAST_DASHBOARD_VISIBLE),
+            "autonomous_enabled": int(FORECAST_AUTONOMOUS_ENABLED),
+            "manual_allowed": int(FORECAST_MANUAL_ENABLED),
+            "promotion_condition": "Promote after enrollment, tradable contracts, and stable heartbeat truth",
+        },
+        "mes_archived": {
+            "display_name": "Futures",
+            "lane_role": "archived",
+            "dashboard_visible": int(FUTURES_DASHBOARD_VISIBLE),
+            "autonomous_enabled": 0,
+            "manual_allowed": 0,
+            "promotion_condition": "Reactivate after futures approval and MES lane validation",
+        },
+    }
+
+
+def _lane_overview() -> list[dict]:
+    defaults = _lane_defaults()
+    lane_ids = tuple(defaults.keys())
+    try:
+        rows = _q(
+            """
+            SELECT lane_id, lane_role, dashboard_visible, autonomous_enabled,
+                   manual_allowed, active, connected, tradable, readiness_state,
+                   blocked_reason, mode, promotion_condition, buying_power_usd,
+                   capital_deployed_usd, positions_open
+            FROM lane_runtime_state
+            WHERE lane_id IN (?,?,?,?)
+            ORDER BY CASE lane_id
+                WHEN 'crypto' THEN 1
+                WHEN 'stocks' THEN 2
+                WHEN 'forecast' THEN 3
+                WHEN 'mes_archived' THEN 4
+                ELSE 99 END
+            """,
+            lane_ids,
+        )
+    except Exception:
+        rows = _q(
+            """
+            SELECT lane_id, active, connected, tradable, readiness_state,
+                   blocked_reason, mode, buying_power_usd, capital_deployed_usd,
+                   positions_open
+            FROM lane_runtime_state
+            WHERE lane_id IN (?,?,?,?)
+            ORDER BY CASE lane_id
+                WHEN 'crypto' THEN 1
+                WHEN 'stocks' THEN 2
+                WHEN 'forecast' THEN 3
+                WHEN 'mes_archived' THEN 4
+                ELSE 99 END
+            """,
+            lane_ids,
+        )
+
+    by_id = {r.get("lane_id"): r for r in (rows or [])}
+    result: list[dict] = []
+    for lane_id in ("crypto", "stocks", "forecast", "mes_archived"):
+        base = defaults[lane_id].copy()
+        row = by_id.get(lane_id, {})
+        base.update(row or {})
+        base["lane_id"] = lane_id
+        base["active"] = int(base.get("active") or 0)
+        base["connected"] = int(base.get("connected") or 0)
+        base["tradable"] = int(base.get("tradable") or 0)
+        base["dashboard_visible"] = int(base.get("dashboard_visible") or 0)
+        base["autonomous_enabled"] = int(base.get("autonomous_enabled") or 0)
+        base["manual_allowed"] = int(base.get("manual_allowed") or 0)
+        result.append(base)
+    return [r for r in result if r.get("dashboard_visible")]
+
+
 def get_control_tower_snapshot(hours: int = 24) -> dict:
     """
     Returns a flat dict with everything the CONTROL TOWER page needs.
@@ -42,7 +154,7 @@ def get_control_tower_snapshot(hours: int = 24) -> dict:
       open_positions, perp_positions, spot_positions, forecast_positions,
       account_equity, daily_pnl, deployed_usd, deployed_pct,
       crypto_funnel, lifecycle_stages, forecast_snapshot,
-      incident_count, action_items, window_hours
+      incident_count, action_items, lane_overview, window_hours
     """
     result: dict = {"window_hours": hours}
 
@@ -145,6 +257,7 @@ def get_control_tower_snapshot(hours: int = 24) -> dict:
         ).get_forecast_control_snapshot(),
         {},
     )
+    result["lane_overview"] = _safe(_lane_overview, [])
 
     # ── Open incident count ────────────────────────────────────────────────────
     result["incident_count"] = _safe(

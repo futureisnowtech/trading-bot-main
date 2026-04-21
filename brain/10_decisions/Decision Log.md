@@ -125,3 +125,15 @@ These questions were debated and settled:
 
 ### 2026-03-26 02:02 — auto_env_updater
 🧠 ML gate auto-updated: ML_SIGNAL_MIN_PROB 0.08 → 0.45 (101 live trades). ML gate tightened — model has 100+ real AI-debated trades
+
+---
+
+## 2026-04-21 — Crypto-first lane evolution adopted
+
+**Decision**: Evolve the system into a crypto-first operating model with crypto as the primary business lane, spot as the main trade-frequency engine, perps as the tactical lane, stocks as dormant-ready, forecast as blocked-ready, and MES futures as archived
+**Reason**: On the current broker/exchange stack, crypto is the only lane with a realistic path to materially more opportunities without changing venues. Side lanes should remain one click away from promotion, but they should stop competing with the primary workflow for operator attention.
+**Evidence**: Current repo already supports Coinbase spot + nano perps cleanly, while stocks are not top-level in the dashboard despite still existing in runtime truth, forecast remains readiness-constrained, and MES is archived.
+**Replaces/Overrides**: Replaces the implicit assumption that all non-crypto lanes should either stay hidden inside engineering surfaces or compete equally for top-level operator focus.
+**Expected benefit**: Higher-quality trade throughput from the cleanest current lane, clearer operator attention model, and a dashboard that mirrors actual lane roles instead of flattening everything into one shell.
+**Risk**: Reintroducing tab sprawl or vague “ready” labels without matching runtime/autonomy semantics.
+**Reversal condition**: If spot expansion degrades trade quality materially, if perps become clearly more capital-efficient on current account size, or if forecast/stocks become operationally superior to crypto on real readiness and opportunity flow.

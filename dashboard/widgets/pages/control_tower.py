@@ -59,6 +59,18 @@ def _age_label(seconds: int) -> str:
     return f"{seconds // 60}m ago"
 
 
+def _lane_role_label(role: str) -> tuple[str, str]:
+    role = (role or "").lower()
+    mapping = {
+        "primary": ("PRIMARY", "good"),
+        "tactical": ("TACTICAL", "watch"),
+        "dormant_ready": ("DORMANT READY", "info"),
+        "blocked_ready": ("BLOCKED READY", "watch"),
+        "archived": ("ARCHIVED", "neutral"),
+    }
+    return mapping.get(role, (role.replace("_", " ").upper() or "UNKNOWN", "neutral"))
+
+
 def _derive_biggest_issue(
     snap: dict,
     stats: dict,
@@ -343,6 +355,42 @@ def render_control_tower():
             ),
             unsafe_allow_html=True,
         )
+
+    st.markdown('<div class="ds-spacer-md"></div>', unsafe_allow_html=True)
+    st.markdown(
+        ui.section_header(
+            "LANE ROLES",
+            "Primary crypto workflow and promotion-ready side lanes",
+        ),
+        unsafe_allow_html=True,
+    )
+    lane_rows = snap.get("lane_overview") or []
+    if lane_rows:
+        lane_cols = st.columns(len(lane_rows))
+        for col, lane in zip(lane_cols, lane_rows):
+            with col:
+                role_label, chip_status = _lane_role_label(lane.get("lane_role", ""))
+                readiness = (lane.get("readiness_state") or "UNKNOWN").replace("_", " ")
+                runner = "Running" if lane.get("active") else "Stopped"
+                autonomy = "Enabled" if lane.get("autonomous_enabled") else "Disabled"
+                manual = "Allowed" if lane.get("manual_allowed") else "Disabled"
+                promotion = lane.get("promotion_condition") or "No promotion condition set"
+                body = (
+                    ui.metric_row("Readiness", readiness)
+                    + ui.metric_row("Runner", runner)
+                    + ui.metric_row("Autonomy", autonomy)
+                    + ui.metric_row("Manual", manual)
+                    + ui.metric_row("Promotion", promotion)
+                )
+                st.markdown(
+                    ui.detail_card(
+                        str(lane.get("display_name") or lane.get("lane_id", "")).upper(),
+                        f"{role_label} lane",
+                        body,
+                        footer=lane.get("blocked_reason") or "",
+                    ),
+                    unsafe_allow_html=True,
+                )
 
     # ══════════════════════════════════════════════════════════════════════════
     # ROW 2 — 3-zone layout

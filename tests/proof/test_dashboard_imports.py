@@ -151,7 +151,9 @@ DASHBOARD_MODULES = [
     # v17.0 page widgets
     "widgets.pages.control_tower",
     "widgets.pages.crypto_page",
+    "widgets.pages.stocks_page",
     "widgets.pages.forecast_page",
+    "widgets.pages.mes_page",
     "widgets.pages.performance_lab",
     "widgets.pages.engineering_console",
 ]

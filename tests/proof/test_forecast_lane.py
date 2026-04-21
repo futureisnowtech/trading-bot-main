@@ -668,23 +668,18 @@ def test_dashboard_forecast_widget_importable():
 
 
 def test_dashboard_app_tab_structure():
-    """dashboard/app.py must use 5-tab v17.0 architecture; forecast and MES preserved in pages."""
+    """dashboard/app.py must use 7-tab v17.3 architecture with explicit side-lane pages."""
     app_path = os.path.join(_ROOT, "dashboard", "app.py")
     assert os.path.exists(app_path), "dashboard/app.py not found"
     src = open(app_path).read()
-    # v17.0: FORECAST is a top-level tab (renamed from FORECAST TRADING)
+    assert "CONTROL TOWER" in src, "CONTROL TOWER tab missing from app.py"
+    assert "CRYPTO" in src, "CRYPTO tab missing from app.py"
+    assert "STOCKS" in src, "STOCKS tab missing from app.py"
     assert "FORECAST" in src, "FORECAST tab missing from app.py"
-    # render_forecast_page wires the forecast page
+    assert "FUTURES" in src, "FUTURES tab missing from app.py"
     assert "render_forecast_page" in src, "render_forecast_page not wired in app.py"
-    # MES archived content moved to engineering console — must still exist there
-    mes_path = os.path.join(
-        _ROOT, "dashboard", "widgets", "pages", "engineering_console.py"
-    )
-    mes_src = open(mes_path).read()
-    assert "mes_dashboard" in mes_src or "render_futures" in mes_src, (
-        "Archived MES widget missing from engineering_console.py"
-    )
-    # v17.0: render_futures lives in engineering_console.py, not app.py — already checked above
+    assert "render_stocks_page" in src, "render_stocks_page not wired in app.py"
+    assert "render_mes_page" in src, "render_mes_page not wired in app.py"
 
 
 # ── 18. MES archival ──────────────────────────────────────────────────────────

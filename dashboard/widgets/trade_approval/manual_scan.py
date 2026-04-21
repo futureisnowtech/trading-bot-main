@@ -968,14 +968,84 @@ def render_manual_scan():
 # ── Spot section — auto-called from render_manual_scan (wired here) ──────────
 
 
+def _get_latest_spot_scan(underlying: str) -> dict:
+    """
+    Return the most recent scan assessment for a spot-eligible underlying.
+    Checks in-session manual scan results first (freshest), then DB scan_candidates.
+    Returns dict with: score, decision, age_secs, source, notes.
+    """
+    import sqlite3 as _sq
+    from datetime import datetime, timezone
+
+    # 1. Try the in-session manual scan results (Run Scan Now was clicked this page load)
+    session_candidates = st.session_state.get("manual_candidates", [])
+    best_session = None
+    best_score = -1.0
+    for c in session_candidates:
+        # Resolve underlying via execution policy
+        try:
+            from runtime.execution_universe import get_execution_policy
+
+            _u = get_execution_policy(c.get("symbol", "")).get("underlying", "")
+        except Exception:
+            _u = c.get("symbol", "")
+        if _u == underlying:
+            sc = float(c.get("composite_score", 0))
+            if sc > best_score:
+                best_score = sc
+                best_session = c
+    if best_session is not None:
+        return {
+            "score": best_score,
+            "decision": "scanned (not yet submitted to runner)",
+            "age_secs": 0,
+            "source": "manual_scan",
+            "notes": best_session.get("primary_setup", ""),
+        }
+
+    # 2. Fall back to DB scan_candidates
+    try:
+        _db_path = os.path.join(_ROOT, "logs", "trades.db")
+        _conn = _sq.connect(_db_path, timeout=5)
+        _conn.row_factory = _sq.Row
+        row = _conn.execute(
+            "SELECT composite_score, decision, ts, notes FROM scan_candidates "
+            "WHERE underlying=? OR symbol=? "
+            "ORDER BY ts DESC LIMIT 1",
+            (underlying, underlying),
+        ).fetchone()
+        _conn.close()
+        if row:
+            try:
+                ts_str = row["ts"].replace("Z", "+00:00")
+                ts_dt = datetime.fromisoformat(ts_str)
+                age = (datetime.now(timezone.utc) - ts_dt).total_seconds()
+            except Exception:
+                age = -1
+            return {
+                "score": float(row["composite_score"]),
+                "decision": row["decision"] or "unknown",
+                "age_secs": age,
+                "source": "db",
+                "notes": row["notes"] or "",
+            }
+    except Exception:
+        pass
+
+    return {}
+
+
 def render_spot_section():
     """
-    Render the SPOT sub-panel inside the Trade Approval tab.
-    Shows configured spot-lane status and buy/sell controls when SPOT_LANE_ACTIVE=True.
-    Always reads paper flag from runtime state (never hardcoded).
+    Spot lane panel — surfaces autonomous scanner state, then offers manual override.
+
+    The bot already scans BTC and ETH on every cycle and enters spot automatically
+    when composite score >= threshold AND the economics gate approves.  This panel
+    shows what the scanner found so the operator understands WHY the bot did or
+    didn't enter, and provides a clearly-labeled manual override.
     """
     st.divider()
-    st.subheader("Spot Trading")
+    st.subheader("Spot Lane")
 
     try:
         if _ROOT not in sys.path:
@@ -991,9 +1061,7 @@ def render_spot_section():
         spot_min = 10.0
 
     if not spot_active:
-        st.info(
-            "Spot lane disabled — set SPOT_LANE_ACTIVE=true in .env to enable the spot lane."
-        )
+        st.info("Spot lane disabled — set SPOT_LANE_ACTIVE=true in .env to enable.")
         return
 
     # Paper flag
@@ -1012,9 +1080,13 @@ def render_spot_section():
     mode_label = "PAPER" if _exec_paper else "LIVE"
 
     st.caption(
-        f"Mode: **{mode_label}** | Allowed: {', '.join(spot_symbols)} | Min order: ${spot_min:.0f}"
+        "The bot scans BTC and ETH on every cycle and enters spot **automatically** "
+        "when the signal clears the entry threshold and the economics gate approves. "
+        "Click **Run Scan Now** above to see current scores. "
+        "Manual override is available below each symbol."
     )
 
+    # ── Persistent feedback from last manual action ───────────────────────────
     _spot_msg = st.session_state.get("spot_manual_message")
     if _spot_msg:
         _level = _spot_msg.get("level", "info")
@@ -1029,7 +1101,7 @@ def render_spot_section():
             st.session_state.pop("spot_manual_message", None)
             st.rerun()
 
-    # Load current spot positions
+    # ── Load spot positions + balance ─────────────────────────────────────────
     try:
         import spot_engine as _se
 
@@ -1038,7 +1110,6 @@ def render_spot_section():
         st.error(f"Could not load spot positions: {e}")
         return
 
-    # Balance summary
     try:
         from data.balance import get_spot_balance_summary
 
@@ -1049,28 +1120,90 @@ def render_spot_section():
         sc1, sc2, sc3 = st.columns(3)
         sc1.metric("USD available (spot)", f"${usd_avail:,.2f}")
         sc2.metric("Spot equity", f"${float(_spot_bal.get('spot_equity') or 0.0):,.2f}")
-        sc3.metric("Active spot names", str(len([v for v in held_map.values() if v > 0])))
+        sc3.metric(
+            "Active spot positions", str(len([v for v in held_map.values() if v > 0]))
+        )
         if held_map:
             pretty = " · ".join(
-                f"{sym} ${amt:,.0f}" for sym, amt in sorted(held_map.items()) if amt > 0
+                f"{s} ${a:,.0f}" for s, a in sorted(held_map.items()) if a > 0
             )
             if pretty:
-                st.caption(f"Held now: {pretty}")
+                st.caption(f"Currently holding: {pretty}")
         if _bal_source != "live_api":
             st.caption(f"Balance source: {_bal_source}")
     except Exception:
         pass
 
-    # Show open spot positions
-    if spot_positions:
-        st.markdown("**Open spot positions:**")
-        for pos in spot_positions:
-            sym = pos.get("symbol", "?")
+    _ENTRY_THRESHOLD = 58  # matches v10_runner composite threshold
+
+    # ── Per-symbol: signal state + open position + manual override ────────────
+    held_syms = {p.get("symbol", ""): p for p in spot_positions}
+
+    for sym in spot_symbols:
+        st.markdown(f"---\n**{sym}-USD**")
+        scan = _get_latest_spot_scan(sym)
+        score = scan.get("score")
+        decision = scan.get("decision", "")
+        age_secs = scan.get("age_secs", -1)
+        scan_source = scan.get("source", "")
+
+        # Signal status block
+        if score is not None:
+            age_str = (
+                "this scan"
+                if scan_source == "manual_scan"
+                else (f"{int(age_secs // 60)}m ago" if age_secs >= 0 else "unknown age")
+            )
+            if score >= _ENTRY_THRESHOLD:
+                score_display = (
+                    f":green[{score:.0f}/100 ✅ above threshold ({_ENTRY_THRESHOLD})]"
+                )
+            elif score >= _ENTRY_THRESHOLD * 0.85:
+                score_display = (
+                    f":orange[{score:.0f}/100 ⚠️ near threshold ({_ENTRY_THRESHOLD})]"
+                )
+            else:
+                score_display = (
+                    f":red[{score:.0f}/100 ✗ below threshold ({_ENTRY_THRESHOLD})]"
+                )
+
+            st.markdown(f"Signal score: {score_display} · scanned {age_str}")
+
+            # Translate decision into plain language
+            _decision_plain = {
+                "entered": "Bot entered this position automatically.",
+                "below_threshold": f"Bot skipped — signal score too low (needs {_ENTRY_THRESHOLD}).",
+                "econ_veto": "Bot skipped — expected edge doesn't clear fee hurdle.",
+                "sizing_zero": "Bot skipped — position size computed to zero.",
+                "research_only_block": "Symbol is research-only, not in live execution universe.",
+                "scanned (not yet submitted to runner)": "Freshly scanned — not yet processed by the autonomous runner.",
+            }.get(
+                decision,
+                f"Bot decision: {decision}"
+                if decision
+                else "No decision recorded yet.",
+            )
+            st.caption(_decision_plain)
+        else:
+            st.caption(
+                "No scan data yet — click **Run Scan Now** above to score this symbol."
+            )
+
+        # Open position for this symbol
+        pos = held_syms.get(sym)
+        if pos:
             qty = float(pos.get("qty", 0))
             entry = float(pos.get("entry", 0))
-            st.markdown(f"- **{sym}**: {qty:.6f} units @ ${entry:.4f} entry")
-            sell_key = f"spot_sell_{sym}"
-            if st.button(f"Sell all {sym}", key=sell_key, type="secondary"):
+            target = float(pos.get("target", 0))
+            stop = float(pos.get("stop", 0))
+            st.markdown(
+                f"**Open position:** {qty:.6f} units @ ${entry:.4f} entry"
+                + (f" · target ${target:.4f}" if target else "")
+                + (f" · stop ${stop:.4f}" if stop else "")
+            )
+            if st.button(
+                f"Sell all {sym} now", key=f"spot_sell_{sym}", type="secondary"
+            ):
                 try:
                     result = _se.close_spot(sym, paper=_exec_paper)
                     if result:
@@ -1079,14 +1212,13 @@ def render_spot_section():
                             "level": "success",
                             "text": (
                                 f"[{mode_label}] Sold {sym}: "
-                                f"exit @ ${result['exit_price']:.4f}  "
-                                f"pnl=${pnl:+.2f}"
+                                f"exit @ ${result['exit_price']:.4f}  pnl=${pnl:+.2f}"
                             ),
                         }
                     else:
                         st.session_state["spot_manual_message"] = {
                             "level": "error",
-                            "text": f"close_spot {sym} returned None — broker ack/persist/reconcile failed",
+                            "text": f"close_spot {sym} returned None",
                         }
                 except Exception as ex:
                     st.session_state["spot_manual_message"] = {
@@ -1094,22 +1226,34 @@ def render_spot_section():
                         "text": f"Sell error: {ex}",
                     }
                 st.rerun()
-    else:
-        st.caption("No open spot positions.")
 
-    # Buy controls — always show, even if a position is already open
-    for sym in spot_symbols:
-        with st.expander(f"Buy {sym}"):
+        # Manual override buy — clearly secondary
+        with st.expander(f"Manual override — Buy {sym}"):
+            # Warn if signal doesn't support entry
+            if score is not None and score < _ENTRY_THRESHOLD:
+                st.warning(
+                    f"Signal is below the entry threshold ({score:.0f} < {_ENTRY_THRESHOLD}). "
+                    "The bot would not enter here autonomously. Only override if you have "
+                    "independent conviction the chart warrants it."
+                )
+            elif score is None:
+                st.warning(
+                    "No scan data — run a scan first so you can see the signal before buying."
+                )
+
             size_input = st.number_input(
-                f"Size USD for {sym}",
+                f"Size USD",
                 min_value=float(spot_min),
                 max_value=5000.0,
                 value=float(spot_min * 2),
                 step=10.0,
                 key=f"spot_size_{sym}",
             )
-            buy_key = f"spot_buy_{sym}"
-            if st.button(f"Buy {sym} (${size_input:.0f})", key=buy_key, type="primary"):
+            if st.button(
+                f"Buy {sym} — Manual Override (${size_input:.0f})",
+                key=f"spot_buy_{sym}",
+                type="primary",
+            ):
                 try:
                     _trade = _manual_tradeability({"symbol": sym, "direction": "LONG"})
                     if (
@@ -1124,14 +1268,14 @@ def render_spot_section():
                             ),
                         }
                     else:
-                        pos = _se.open_spot(sym, size_input, paper=_exec_paper)
-                        if pos:
+                        pos_result = _se.open_spot(sym, size_input, paper=_exec_paper)
+                        if pos_result:
                             st.session_state["spot_manual_message"] = {
                                 "level": "success",
                                 "text": (
-                                    f"[{mode_label}] Bought {sym}: "
-                                    f"{pos['qty']:.6f} units @ ${pos['entry']:.4f}  "
-                                    f"order={pos['order_id']}"
+                                    f"[{mode_label}][MANUAL] Bought {sym}: "
+                                    f"{pos_result['qty']:.6f} units @ ${pos_result['entry']:.4f}  "
+                                    f"order={pos_result['order_id']}"
                                 ),
                             }
                         else:

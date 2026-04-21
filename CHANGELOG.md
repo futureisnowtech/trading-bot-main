@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-21
+- Hotfix: stocks dormant-ready mode no longer starts the runner unless STOCKS_AUTONOMOUS_ENABLED=true; runtime state now reports standby/dormant-ready instead of active side-lane drift
+
+## 2026-04-21
 - Implemented crypto-first lane governance: 7-tab dashboard shell (CONTROL TOWER/CRYPTO/STOCKS/FORECAST/FUTURES/PERFORMANCE LAB/ENGINEERING CONSOLE), lane_role/autonomy/manual metadata in lane_runtime_state, stocks restored to lane registry, and readiness-first stocks/futures/forecast operator surfaces with updated proofs/validator
 
 ## 2026-04-21

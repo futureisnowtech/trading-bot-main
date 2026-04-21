@@ -232,15 +232,33 @@ def main():
         db_path=_db_path,
         lane_role="dormant_ready",
         enabled=int(STOCKS_LANE_ACTIVE),
-        active=int(STOCKS_LANE_ACTIVE),
+        active=int(STOCKS_LANE_ACTIVE and STOCKS_AUTONOMOUS_ENABLED),
         configured=int(STOCKS_LANE_ACTIVE),
         dashboard_visible=int(STOCKS_DASHBOARD_VISIBLE),
         autonomous_enabled=int(STOCKS_AUTONOMOUS_ENABLED and STOCKS_LANE_ACTIVE),
         manual_allowed=int(STOCKS_MANUAL_ENABLED),
-        mode=_rt_mode if STOCKS_LANE_ACTIVE else "disabled",
+        mode=(
+            _rt_mode
+            if STOCKS_LANE_ACTIVE and STOCKS_AUTONOMOUS_ENABLED
+            else "standby"
+            if STOCKS_DASHBOARD_VISIBLE
+            else "disabled"
+        ),
         health="UNKNOWN",
-        readiness_state="LANE_NOT_STARTED" if not STOCKS_LANE_ACTIVE else "STARTING",
-        blocked_reason="" if STOCKS_LANE_ACTIVE else "STOCKS_LANE_ACTIVE=false",
+        readiness_state=(
+            "STARTING"
+            if STOCKS_LANE_ACTIVE and STOCKS_AUTONOMOUS_ENABLED
+            else "DORMANT_READY"
+            if STOCKS_DASHBOARD_VISIBLE
+            else "LANE_NOT_STARTED"
+        ),
+        blocked_reason=(
+            ""
+            if STOCKS_LANE_ACTIVE and STOCKS_AUTONOMOUS_ENABLED
+            else "STOCKS_AUTONOMOUS_ENABLED=false"
+            if STOCKS_DASHBOARD_VISIBLE
+            else "STOCKS_LANE_ACTIVE=false"
+        ),
         promotion_condition="Promote only after equity edge and PDT-aware operating rules are proven",
     )
 
@@ -341,7 +359,7 @@ def main():
         print("   ForecastEx lane started (FORECAST_LANE_ACTIVE=true)")
 
     # ── Stocks lane (optional daemon thread) ──────────────────────────────────
-    if STOCKS_LANE_ACTIVE:
+    if STOCKS_LANE_ACTIVE and STOCKS_AUTONOMOUS_ENABLED:
 
         def _stocks_daemon():
             """Run stock lane in its own schedule instance (thread-safe)."""
@@ -355,10 +373,7 @@ def main():
         _st = threading.Thread(target=_stocks_daemon, daemon=True, name="StocksLane")
         _st.start()
         upsert_lane_state(
-            "stocks",
-            db_path=_db_path,
-            active=1,
-            readiness_state="STARTING",
+            "stocks", db_path=_db_path, active=1, readiness_state="STARTING"
         )
         log_event(
             "INFO", "StockRunner", "Stocks lane started (STOCKS_LANE_ACTIVE=true)"
@@ -369,7 +384,7 @@ def main():
     _active = ["crypto"]
     if FORECAST_LANE_ACTIVE:
         _active.append("forecast")
-    if STOCKS_LANE_ACTIVE:
+    if STOCKS_LANE_ACTIVE and STOCKS_AUTONOMOUS_ENABLED:
         _active.append("stocks")
     upsert_system_state(
         db_path=_db_path,

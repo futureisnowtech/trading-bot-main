@@ -453,15 +453,15 @@ def run_scan_cycle():
 
     open_count = len(broker.get_open_positions())
 
-    # PDT advisory (swing trades shouldn't trigger PDT, but log as warning)
+    # PDT hard block — stop new entries once 3 day trades recorded in rolling 5 days
     pdt_count = broker.get_pdt_count()
     if pdt_count >= _MAX_PDT_WARN_THRESHOLD:
         log_event(
             "WARN",
             "StockRunner",
-            f"PDT advisory: {pdt_count} day trades in rolling 5 days. "
-            "Swing trades should not close same day.",
+            f"PDT BLOCK: {pdt_count} day trades in rolling 5 days — no new entries until count drops below 3.",
         )
+        return
 
     # ── Scan for new entries ──────────────────────────────────────────────────
     for symbol in STOCK_UNIVERSE:

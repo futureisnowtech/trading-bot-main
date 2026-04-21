@@ -506,6 +506,33 @@ class IBKRStockBroker:
             )
             return None
 
+        # PDT guard — block manual sell if position was opened today (would create a day trade)
+        try:
+            import sqlite3 as _sq
+
+            _db_path = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                "logs",
+                "trades.db",
+            )
+            _c = _sq.connect(_db_path, timeout=5)
+            _row = _c.execute(
+                "SELECT 1 FROM trades WHERE broker='ibkr_stocks' AND symbol=? "
+                "AND action='BUY' AND date(ts)=date('now') LIMIT 1",
+                (symbol,),
+            ).fetchone()
+            _c.close()
+            if _row:
+                log_event(
+                    "WARN",
+                    "IBKRStockBroker",
+                    f"PDT BLOCK: {symbol} was bought today — manual sell blocked to prevent day trade. "
+                    "Server-side bracket stop/target still active at IBKR.",
+                )
+                return None
+        except Exception:
+            pass
+
         try:
             trade = self._run(
                 self._place_market_sell_async(symbol, qty),

@@ -63,6 +63,7 @@ _TF_MS = {
     "1m": 60_000,
     "5m": 300_000,
     "15m": 900_000,
+    "30m": 1_800_000,
     "1h": 3_600_000,
     "4h": 14_400_000,
     "1d": 86_400_000,
@@ -73,6 +74,7 @@ _YF_INTERVAL = {
     "1m": "1m",
     "5m": "5m",
     "15m": "15m",
+    "30m": "30m",
     "1h": "1h",
     "4h": "1h",
     "1d": "1d",
@@ -91,6 +93,7 @@ _KRAKEN_INTERVAL = {
     "1m": "1m",
     "5m": "5m",
     "15m": "15m",
+    "30m": "30m",
     "1h": "1h",
     "4h": "4h",
     "1d": "1d",
@@ -442,7 +445,9 @@ def get_candles(symbol: str, timeframe: str = "5m", limit: int = 200) -> pd.Data
         # HL failed — try a crypto-safe Binance/yfinance alias first for bare
         # core symbols (BTC → BTCUSDT → BTC-USD) so we never fall into the
         # stock/ETF ticker collision path (e.g. BTC stock ≈ $34).
-        _alias = f"{symbol.upper()}USDT" if symbol.isalpha() and symbol.isupper() else ""
+        _alias = (
+            f"{symbol.upper()}USDT" if symbol.isalpha() and symbol.isupper() else ""
+        )
         if _alias and _alias != symbol:
             df = _fetch_and_store(_alias, timeframe, start_ms, limit, bar_ms, now_ms)
             if df is not None and not df.empty:

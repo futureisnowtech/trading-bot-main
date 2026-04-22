@@ -33,7 +33,12 @@ except RuntimeError:
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import PAPER_TRADING
-from logging_db.trade_logger import log_trade, log_event
+from logging_db.trade_logger import (
+    log_trade,
+    log_event,
+    persist_position,
+    delete_position,
+)
 
 try:
     from notifications.notification_engine import get_notification_engine as _get_ne
@@ -104,9 +109,7 @@ class IBKRStockBroker:
         self._ib = IB()
         try:
             self._run(
-                self._ib.connectAsync(
-                    IBKR_HOST, IBKR_PORT, clientId=self._client_id
-                ),
+                self._ib.connectAsync(IBKR_HOST, IBKR_PORT, clientId=self._client_id),
                 timeout=15,
             )
             self._connected = self._ib.isConnected()
@@ -381,6 +384,26 @@ class IBKRStockBroker:
                 log_event(
                     "WARN", "IBKRStockBroker", f"log_trade error (paper buy): {e}"
                 )
+            try:
+                persist_position(
+                    symbol=symbol,
+                    strategy=strategy,
+                    qty=qty,
+                    entry=price,
+                    stop=stop_price,
+                    target=target_price,
+                    high_since_entry=price,
+                    ts_entry=datetime.utcnow().isoformat(),
+                    paper=True,
+                    direction="LONG",
+                    entry_reason=f"ibkr_stocks_paper order={order_id}",
+                )
+            except Exception as e:
+                log_event(
+                    "WARN",
+                    "IBKRStockBroker",
+                    f"persist_position error (paper buy): {e}",
+                )
             return {"order_id": order_id, "price": price, "qty": qty}
 
         # Live mode
@@ -449,6 +472,25 @@ class IBKRStockBroker:
         except Exception as e:
             log_event("WARN", "IBKRStockBroker", f"log_trade error (live buy): {e}")
 
+        try:
+            persist_position(
+                symbol=symbol,
+                strategy=strategy,
+                qty=qty,
+                entry=limit_price,
+                stop=stop_price,
+                target=target_price,
+                high_since_entry=limit_price,
+                ts_entry=datetime.utcnow().isoformat(),
+                paper=False,
+                direction="LONG",
+                entry_reason=f"ibkr_stocks order={order_id}",
+            )
+        except Exception as e:
+            log_event(
+                "WARN", "IBKRStockBroker", f"persist_position error (live buy): {e}"
+            )
+
         log_event(
             "INFO",
             "IBKRStockBroker",
@@ -507,6 +549,14 @@ class IBKRStockBroker:
                 )
             with self._lock:
                 self._open_positions.pop(symbol, None)
+            try:
+                delete_position(symbol, strategy, paper=True)
+            except Exception as e:
+                log_event(
+                    "WARN",
+                    "IBKRStockBroker",
+                    f"delete_position error (paper sell): {e}",
+                )
             return {"exit_price": exit_price, "pnl": pnl}
 
         # Live mode
@@ -580,6 +630,12 @@ class IBKRStockBroker:
 
         with self._lock:
             self._open_positions.pop(symbol, None)
+        try:
+            delete_position(symbol, strategy, paper=False)
+        except Exception as e:
+            log_event(
+                "WARN", "IBKRStockBroker", f"delete_position error (live sell): {e}"
+            )
 
         log_event(
             "INFO",

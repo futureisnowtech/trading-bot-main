@@ -1475,7 +1475,10 @@ def _attempt_entry(
             import spot_engine as _spot_eng
             from config import SPOT_SCALP_SYMBOL_CONFIG, SPOT_TOTAL_ALLOC_CAP_PCT
             from risk.spot_economics_gate import check_spot_economics as _spot_econ
-            from runtime.spot_momentum import build_spot_state, final_spot_score as _final_spot_score
+            from runtime.spot_momentum import (
+                build_spot_state,
+                final_spot_score as _final_spot_score,
+            )
             from runtime.live_account import get_live_account_size
 
             _underlying = _trade.get("underlying", _get_underlying(symbol))
@@ -1483,7 +1486,9 @@ def _attempt_entry(
             _spot_regime = _spot_state.get("regime", "NEUTRAL")
             _final_score = _final_spot_score(composite, _spot_state["derivative_score"])
             _cfg = SPOT_SCALP_SYMBOL_CONFIG.get(_underlying, {})
-            _stop_pct = _spot_eng._compute_stop_pct(_underlying, _spot_state, atr_at_entry=atr_7)
+            _stop_pct = _spot_eng._compute_stop_pct(
+                _underlying, _spot_state, atr_at_entry=atr_7
+            )
             _risk_fraction = float(_cfg.get("risk_fraction", 0.0015))
             _alloc_cap_pct = float(_cfg.get("allocation_cap_pct", 0.05))
             _account_equity = float(get_live_account_size(paper=_paper))
@@ -1493,8 +1498,14 @@ def _attempt_entry(
             _symbol_cap = _account_equity * _alloc_cap_pct
             _spot_deployed = _spot_eng._current_spot_deployed_usd(paper=_paper)
             _top = _spot_eng._get_broker(_paper).get_spot_top_of_book(_underlying)
-            _available_spot_usd = float(_spot_eng._get_broker(_paper).get_spot_balance().get("usd_available", 0.0))
-            _liquidity_cap = max(float(_top.get("top_depth_usd") or 0.0) * 0.10, 0.0) or _symbol_cap
+            _available_spot_usd = float(
+                _spot_eng._get_broker(_paper)
+                .get_spot_balance()
+                .get("usd_available", 0.0)
+            )
+            _liquidity_cap = (
+                max(float(_top.get("top_depth_usd") or 0.0) * 0.10, 0.0) or _symbol_cap
+            )
             _spot_size = min(
                 _size_raw,
                 _symbol_cap,
@@ -1945,6 +1956,7 @@ def exit_monitor():
 def spot_exit_monitor():
     """Fast software-stop loop for the crypto spot scalp lane."""
     try:
+        from config import PAPER_TRADING as _paper_flag
         from spot_engine import (
             check_spot_eod_close,
             check_spot_stagnation_exits,
@@ -1954,12 +1966,12 @@ def spot_exit_monitor():
             check_spot_trailing,
         )
 
-        check_spot_stops(paper=config.PAPER_TRADING)
-        check_spot_trailing(paper=config.PAPER_TRADING)
-        check_spot_targets(paper=config.PAPER_TRADING)
-        check_spot_stagnation_exits(paper=config.PAPER_TRADING)
-        check_spot_thesis_exits(paper=config.PAPER_TRADING)
-        check_spot_eod_close(paper=config.PAPER_TRADING)
+        check_spot_stops(paper=_paper_flag)
+        check_spot_trailing(paper=_paper_flag)
+        check_spot_targets(paper=_paper_flag)
+        check_spot_stagnation_exits(paper=_paper_flag)
+        check_spot_thesis_exits(paper=_paper_flag)
+        check_spot_eod_close(paper=_paper_flag)
     except Exception as e:
         logger.error(
             f"[v10] spot_exit_monitor fatal: {e}\n{traceback.format_exc()[:1000]}"

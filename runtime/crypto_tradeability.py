@@ -325,6 +325,7 @@ def _evaluate_tradeability(
         spot_max_pct = float(SPOT_MAX_DEPLOYED_PCT)
         spot_min_usd = float(SPOT_MIN_ORDER_USD)
         auto_perp_syms = [s.upper() for s in AUTONOMOUS_LIVE_PERP_SYMBOLS]
+        auto_spot_syms = set(spot_symbols)
         core_underlyings = {s.upper() for s in CORE_EXECUTION_UNDERLYINGS}
     except Exception as e:
         logger.error(f"[tradeability] config import failed: {e}")
@@ -381,7 +382,7 @@ def _evaluate_tradeability(
     # ── 7. Route: prefer spot (for eligible symbols), fall back to perp ───────
     if spot_eligible_symbol and spot_blocked_reason == "none":
         # Spot is available
-        auto_ex = 1 if (not live or underlying in auto_perp_syms) else 0
+        auto_ex = 1 if (not live or underlying in auto_spot_syms) else 0
         return _executable_result(
             symbol,
             underlying,
@@ -472,14 +473,6 @@ def _check_spot_eligibility(
     # Paper mode: skip balance/deployment checks
     if not live:
         return "none"
-
-    try:
-        from runtime.spot_session import is_spot_entry_session_open
-
-        if not is_spot_entry_session_open():
-            return "spot_outside_session"
-    except Exception:
-        pass
 
     # Live: balance and deployment checks
     usd_avail, ok = _get_spot_balance_usd()

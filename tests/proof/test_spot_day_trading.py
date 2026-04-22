@@ -1,45 +1,53 @@
 """
-tests/proof/test_spot_day_trading.py — Proof suite for spot day-trading exits (v17.3).
+tests/proof/test_spot_day_trading.py — proof coverage for the v17 spot scalp lane.
 
 Invariants proved:
-  SDT-01  check_spot_targets closes position when current_price >= target
-  SDT-02  check_spot_targets does NOT close when current_price < target
-  SDT-03  check_spot_targets skips positions with no valid target (target=0)
-  SDT-04  check_spot_eod_close flattens all positions at/after EOD time
-  SDT-05  check_spot_eod_close does nothing before EOD time
-  SDT-06  open_spot persists a non-zero target price to open_positions
-  SDT-07  target_price is always > stop_price (2R > 1R by construction)
-  SDT-08  fee math: 2R target still clears a realistic intraday hurdle
+  SDT-01  check_spot_targets closes when mark >= persisted target
+  SDT-02  check_spot_targets does not close below target
+  SDT-03  EOD flatten is disabled by default for crypto spot
+  SDT-04  EOD flatten closes only when explicitly enabled and past the configured time
+  SDT-05  open_spot persists scalp target metadata
+  SDT-06  stagnation exits close dead trades after the expected half-life
+  SDT-07  thesis decay respects the minimum-hold gate
+  SDT-08  thesis decay closes after the hold gate when the live derivative stack breaks
 """
 
 from __future__ import annotations
 
 import os
-import sys
 import sqlite3
-import pytest
+import sys
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
-from datetime import datetime
+
+import pytest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 
-# ── helpers ───────────────────────────────────────────────────────────────────
-
-
 def _seed_spot_position(
-    db_path, symbol="ETH", entry=2000.0, stop=1940.0, target=2180.0, paper=1
+    db_path,
+    *,
+    symbol="ETH",
+    entry=2000.0,
+    stop=1980.0,
+    target=2036.0,
+    ts_entry: str | None = None,
+    spot_regime="TREND",
+    target_r=1.8,
+    trail_arm_r=1.0,
+    entry_fee_usd=0.0,
 ):
-    """Insert a fake open spot position directly into open_positions."""
     with sqlite3.connect(db_path) as conn:
         conn.execute(
             """
-            INSERT OR IGNORE INTO open_positions
+            INSERT OR REPLACE INTO open_positions
                 (symbol, strategy, qty, entry, stop, target, high_since_entry,
-                 ts_entry, paper, direction, leverage)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 low_since_entry, ts_entry, paper, direction, leverage,
+                 spot_regime, target_r, trail_arm_r, entry_fee_usd)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 symbol,
@@ -49,208 +57,213 @@ def _seed_spot_position(
                 stop,
                 target,
                 entry,
-                datetime.now().isoformat(),
-                paper,
+                entry,
+                ts_entry or datetime.now().isoformat(),
+                1,
                 "LONG",
                 1,
+                spot_regime,
+                target_r,
+                trail_arm_r,
+                entry_fee_usd,
             ),
         )
 
 
-# ── SDT-01: target hit → position closed ──────────────────────────────────────
+def _trend_state(symbol="ETH", derivative_score=72.0, five_v=0.25, five_a=0.10):
+    return {
+        "symbol": symbol,
+        "regime": "TREND",
+        "derivative_score": derivative_score,
+        "setup_family": "impulse_continuation",
+        "structural_confirm_count": 2,
+        "structural_confirms": "kst,supertrend",
+        "tf_5m_state": "z=0.40|v=0.25|a=0.10|score=71.0",
+        "tf_30m_state": "z=0.30|v=0.12|a=0.05|score=65.0",
+        "tf_4h_state": "z=0.20|v=0.05|a=0.02|score=60.0",
+        "tf_1d_state": "z=0.10|v=0.03|a=0.01|score=56.0",
+        "ou_halflife_minutes": 10.0,
+        "rv_ratio": 1.0,
+        "frames": {
+            "5m": {
+                "v": five_v,
+                "a": five_a,
+                "frame_score": 71.0,
+                "atr_pct": 0.006,
+                "price": 2000.0,
+            },
+            "30m": {
+                "v": 0.12,
+                "a": 0.05,
+                "z": 0.30,
+                "frame_score": 65.0,
+            },
+            "4h": {"v": 0.05, "a": 0.02, "z": 0.20, "frame_score": 60.0},
+            "1d": {"v": 0.03, "a": 0.01, "z": 0.10, "frame_score": 56.0},
+        },
+    }
+
+
+def _paper_broker(mark_price=2000.0):
+    broker = MagicMock()
+    broker.get_mark_price.return_value = mark_price
+    broker.get_spot_balance.return_value = {"usd_available": 1000.0}
+    broker.buy_spot.return_value = {
+        "order_id": "buy_1",
+        "filled_size": 0.05,
+        "average_filled_price": mark_price,
+        "fee_usd": 0.25,
+        "execution_route": "paper_market",
+    }
+    broker.sell_spot.return_value = {
+        "order_id": "sell_1",
+        "filled_size": 0.05,
+        "average_filled_price": mark_price,
+        "fee_usd": 0.25,
+        "execution_route": "paper_market",
+    }
+    return broker
 
 
 def test_sdt01_target_hit_closes_position(proof_runtime, monkeypatch):
-    import config
     import spot_engine
 
-    monkeypatch.setattr(config, "SPOT_LANE_ACTIVE", True, raising=False)
-    monkeypatch.setattr(config, "SPOT_TARGET_R", 2.0, raising=False)
-    spot_engine._load_config()
-
-    db_path = str(proof_runtime.db_path)
-    _seed_spot_position(db_path, symbol="ETH", entry=2000.0, stop=1940.0, target=2180.0)
-
-    mock_broker = MagicMock()
-    mock_broker.get_mark_price.return_value = 2200.0  # above target 2180
-    mock_broker.sell_spot.return_value = {"order_id": "test_sell", "side": "SELL"}
-    mock_broker.get_spot_balance.return_value = {"usd_available": 500.0}
-
-    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper: mock_broker)
+    _seed_spot_position(str(proof_runtime.db_path), target=2036.0)
+    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper: _paper_broker(2040.0))
 
     closed = spot_engine.check_spot_targets(paper=True)
-    assert len(closed) == 1, f"Expected 1 close, got {len(closed)}"
+    assert len(closed) == 1
     assert closed[0]["trigger"] == "target_hit"
-    assert closed[0]["target_price"] == pytest.approx(2180.0)
-
-
-# ── SDT-02: below target → position held ──────────────────────────────────────
+    assert closed[0]["exit_reason"] == "target_hit"
 
 
 def test_sdt02_below_target_no_close(proof_runtime, monkeypatch):
     import spot_engine
 
-    db_path = str(proof_runtime.db_path)
-    _seed_spot_position(db_path, symbol="ETH", entry=2000.0, stop=1940.0, target=2180.0)
+    _seed_spot_position(str(proof_runtime.db_path), target=2036.0)
+    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper: _paper_broker(2020.0))
 
-    mock_broker = MagicMock()
-    mock_broker.get_mark_price.return_value = 2100.0  # below target
-
-    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper: mock_broker)
-
-    closed = spot_engine.check_spot_targets(paper=True)
-    assert len(closed) == 0, "Must not close when price < target"
+    assert spot_engine.check_spot_targets(paper=True) == []
 
 
-# ── SDT-03: zero target → skipped gracefully ──────────────────────────────────
-
-
-def test_sdt03_zero_target_skipped(proof_runtime, monkeypatch):
+def test_sdt03_eod_flatten_disabled_by_default(proof_runtime, monkeypatch):
     import spot_engine
 
-    db_path = str(proof_runtime.db_path)
-    _seed_spot_position(db_path, symbol="ETH", entry=2000.0, stop=1940.0, target=0.0)
-
-    mock_broker = MagicMock()
-    mock_broker.get_mark_price.return_value = 9999.0  # any price
-
-    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper: mock_broker)
-
-    closed = spot_engine.check_spot_targets(paper=True)
-    assert len(closed) == 0, "Must skip positions with no valid target"
+    _seed_spot_position(str(proof_runtime.db_path))
+    monkeypatch.setattr(spot_engine, "SPOT_EOD_FLATTEN_ENABLED", False)
+    assert spot_engine.check_spot_eod_close(paper=True) == []
 
 
-# ── SDT-04: EOD time reached → flatten ────────────────────────────────────────
-
-
-def test_sdt04_eod_close_at_time(proof_runtime, monkeypatch):
-    import config
-    import spot_engine
+def test_sdt04_eod_close_at_time_when_enabled(proof_runtime, monkeypatch):
     import pytz
+    import spot_engine
 
-    monkeypatch.setattr(config, "SPOT_EOD_CLOSE_TIME", "15:45", raising=False)
-    spot_engine._load_config()
+    _seed_spot_position(str(proof_runtime.db_path))
+    monkeypatch.setattr(spot_engine, "SPOT_EOD_FLATTEN_ENABLED", True)
+    monkeypatch.setattr(spot_engine, "SPOT_EOD_CLOSE_TIME", "15:45")
+    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper: _paper_broker(2050.0))
 
-    db_path = str(proof_runtime.db_path)
-    _seed_spot_position(db_path, symbol="ETH", entry=2000.0, stop=1940.0, target=2180.0)
-
-    # Patch datetime to 15:46 ET on a weekday (Monday)
     et = pytz.timezone("America/New_York")
-    fake_now = et.localize(datetime(2026, 4, 20, 15, 46, 0))  # Monday
-
-    mock_broker = MagicMock()
-    mock_broker.sell_spot.return_value = {"order_id": "eod_sell", "side": "SELL"}
-    mock_broker.get_mark_price.return_value = 2050.0
-    mock_broker.get_spot_balance.return_value = {"usd_available": 500.0}
-
-    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper: mock_broker)
-
+    fake_now = et.localize(datetime(2026, 4, 20, 15, 46, 0))
     with patch("spot_engine.datetime") as mock_dt:
         mock_dt.datetime.now.return_value = fake_now
         mock_dt.datetime.fromisoformat = datetime.fromisoformat
         closed = spot_engine.check_spot_eod_close(paper=True)
 
-    assert len(closed) == 1, f"Expected 1 EOD close, got {len(closed)}"
+    assert len(closed) == 1
     assert closed[0]["trigger"] == "eod_close"
 
 
-# ── SDT-05: before EOD time → no close ────────────────────────────────────────
-
-
-def test_sdt05_before_eod_no_close(proof_runtime, monkeypatch):
-    import config
-    import spot_engine
-    import pytz
-
-    monkeypatch.setattr(config, "SPOT_EOD_CLOSE_TIME", "15:45", raising=False)
-    spot_engine._load_config()
-
-    db_path = str(proof_runtime.db_path)
-    _seed_spot_position(db_path, symbol="ETH", entry=2000.0, stop=1940.0, target=2180.0)
-
-    et = pytz.timezone("America/New_York")
-    fake_now = et.localize(datetime(2026, 4, 20, 14, 0, 0))  # 2:00 PM ET Monday
-
-    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper: MagicMock())
-
-    with patch("spot_engine.datetime") as mock_dt:
-        mock_dt.datetime.now.return_value = fake_now
-        closed = spot_engine.check_spot_eod_close(paper=True)
-
-    assert len(closed) == 0, "Must not close before EOD time"
-
-
-# ── SDT-06: open_spot persists non-zero target ────────────────────────────────
-
-
-def test_sdt06_open_spot_persists_target(proof_runtime, monkeypatch):
-    import config
+def test_sdt05_open_spot_persists_scalp_target_metadata(proof_runtime, monkeypatch):
     import spot_engine
 
-    monkeypatch.setattr(config, "SPOT_LANE_ACTIVE", True, raising=False)
-    monkeypatch.setattr(config, "SPOT_STOP_PCT", 0.03, raising=False)
-    monkeypatch.setattr(config, "SPOT_TARGET_R", 2.0, raising=False)
-    monkeypatch.setattr(config, "SPOT_MIN_ORDER_USD", 10.0, raising=False)
-    monkeypatch.setattr(config, "SPOT_SYMBOLS", ["BTC", "ETH"], raising=False)
-    spot_engine._load_config()
+    monkeypatch.setattr(spot_engine, "SPOT_LANE_ACTIVE", True)
+    monkeypatch.setattr(spot_engine, "SPOT_SYMBOLS", ["BTC", "ETH", "SOL", "XRP", "LTC", "DOGE", "ADA", "LINK"])
+    monkeypatch.setattr(spot_engine, "SPOT_TOTAL_ALLOC_CAP_PCT", 0.95)
+    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper: _paper_broker(2000.0))
+    monkeypatch.setattr(spot_engine, "_load_spot_positions_from_db", lambda paper=True: [])
+    monkeypatch.setattr(spot_engine, "build_spot_state", lambda symbol: _trend_state(symbol))
 
-    mock_broker = MagicMock()
-    mock_broker.buy_spot.return_value = {"order_id": "test_buy", "filled_size": "0.05"}
-    mock_broker.get_mark_price.return_value = 2000.0
-    mock_broker.get_spot_balance.return_value = {"usd_available": 1000.0}
-
-    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper: mock_broker)
-
-    result = spot_engine.open_spot("ETH", 100.0, paper=True, composite_score=80.0)
+    result = spot_engine.open_spot(
+        "ETH",
+        100.0,
+        paper=True,
+        composite_score=70.0,
+        final_spot_score=72.0,
+    )
     assert result is not None
+    assert result["target_r"] == pytest.approx(1.8)
+    assert result["trail_arm_r"] == pytest.approx(1.0)
 
     with sqlite3.connect(str(proof_runtime.db_path)) as conn:
         row = conn.execute(
-            "SELECT target FROM open_positions WHERE strategy='spot_eth' LIMIT 1"
+            """
+            SELECT target, target_r, trail_arm_r, stop_model_version, target_model_version
+            FROM open_positions
+            WHERE strategy='spot_eth'
+            LIMIT 1
+            """
         ).fetchone()
 
-    assert row is not None, "open_spot must persist a row to open_positions"
-    assert row[0] > 0, f"target must be non-zero, got {row[0]}"
-    # 3% stop × 2R = 6% gain → target ≈ entry * 1.06
-    assert row[0] == pytest.approx(2000.0 * 1.06, rel=0.01), (
-        f"target should be entry*(1+stop_pct*R), got {row[0]}"
+    assert row is not None
+    assert row[0] > 0
+    assert row[1] == pytest.approx(1.8)
+    assert row[2] == pytest.approx(1.0)
+    assert row[3] == "spot_scalp_v1"
+    assert row[4] == "spot_scalp_v1"
+
+
+def test_sdt06_stagnation_exit_closes_dead_trade(proof_runtime, monkeypatch):
+    import spot_engine
+
+    old_ts = (datetime.now() - timedelta(minutes=40)).isoformat()
+    _seed_spot_position(
+        str(proof_runtime.db_path),
+        entry=2000.0,
+        stop=1980.0,
+        target=2036.0,
+        ts_entry=old_ts,
+    )
+    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper: _paper_broker(2003.0))
+    monkeypatch.setattr(
+        spot_engine,
+        "build_spot_state",
+        lambda symbol: _trend_state(symbol, derivative_score=55.0, five_v=-0.10, five_a=-0.06),
     )
 
-
-# ── SDT-07: target always > stop (3R > 1R) ────────────────────────────────────
-
-
-def test_sdt07_target_above_stop():
-    """Algebraic invariant: target_price > stop_price for any valid entry."""
-    entry = 2000.0
-    for stop_pct in (0.02, 0.03, 0.05, 0.08):
-        stop = entry * (1 - stop_pct)
-        target = entry * (1 + stop_pct * 2.0)
-        assert target > entry > stop, (
-            f"stop_pct={stop_pct}: target={target} entry={entry} stop={stop}"
-        )
+    closed = spot_engine.check_spot_stagnation_exits(paper=True)
+    assert len(closed) == 1
+    assert closed[0]["trigger"] == "stagnation_exit"
 
 
-# ── SDT-08: fee math — 3R break-even WR < economics gate score floor ─────────
+def test_sdt07_thesis_decay_respects_min_hold_gate(proof_runtime, monkeypatch):
+    import spot_engine
 
-
-def test_sdt08_fee_math_break_even_win_rate():
-    """
-    With 1.2% round-trip fee and a 2R target the break-even win rate is still
-    below 50%, which is a viable hurdle for an intraday spot lane.
-    """
-    round_trip_fee_pct = 0.012  # 0.6% × 2 legs
-    stop_pct = 0.03
-    target_r = 2.0
-
-    gross_loss = stop_pct + round_trip_fee_pct  # 4.2%
-    gross_gain = stop_pct * target_r - round_trip_fee_pct  # 7.8%
-
-    breakeven_wr = gross_loss / (gross_loss + gross_gain)
-
-    assert breakeven_wr < 0.50, (
-        f"Break-even WR {breakeven_wr:.1%} should stay below 50%"
+    recent_ts = (datetime.now() - timedelta(minutes=2)).isoformat()
+    _seed_spot_position(str(proof_runtime.db_path), ts_entry=recent_ts)
+    monkeypatch.setattr(spot_engine, "SPOT_THESIS_MIN_HOLD_MINS", 8.0)
+    monkeypatch.setattr(
+        spot_engine,
+        "build_spot_state",
+        lambda symbol: _trend_state(symbol, derivative_score=20.0, five_v=-0.10, five_a=-0.05),
     )
-    assert breakeven_wr > 0.25, (
-        f"Break-even WR {breakeven_wr:.1%} sanity check — should not be absurdly low"
+
+    assert spot_engine.check_spot_thesis_exits(paper=True) == []
+
+
+def test_sdt08_thesis_decay_closes_after_hold_gate(proof_runtime, monkeypatch):
+    import spot_engine
+
+    old_ts = (datetime.now() - timedelta(minutes=20)).isoformat()
+    _seed_spot_position(str(proof_runtime.db_path), ts_entry=old_ts)
+    monkeypatch.setattr(spot_engine, "SPOT_THESIS_MIN_HOLD_MINS", 8.0)
+    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper: _paper_broker(1995.0))
+    monkeypatch.setattr(
+        spot_engine,
+        "build_spot_state",
+        lambda symbol: _trend_state(symbol, derivative_score=20.0, five_v=-0.10, five_a=-0.05),
     )
+
+    closed = spot_engine.check_spot_thesis_exits(paper=True)
+    assert len(closed) == 1
+    assert closed[0]["trigger"] == "thesis_decay"

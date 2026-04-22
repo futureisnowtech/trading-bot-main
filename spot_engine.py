@@ -1,15 +1,7 @@
 """
 spot_engine.py — Coinbase spot execution engine for the supported spot universe.
 
-Manages one spot position per symbol. No leverage, no shorting.
-Wraps execution/coinbase_spot_broker.py with v10-style persistence.
-
-Blocked reasons (returned as strings in result dicts):
-  spot_position_already_open
-  spot_deployment_cap_exceeded
-  spot_size_below_minimum
-  spot_symbol_not_allowed
-  spot_lane_disabled
+Manages one long-only spot position per symbol with restart-safe persistence.
 """
 
 from __future__ import annotations
@@ -21,95 +13,78 @@ import sqlite3
 import time
 from typing import Dict, List, Optional
 
+from config import (
+    SPOT_EOD_FLATTEN_ENABLED,
+    SPOT_EOD_CLOSE_TIME,
+    SPOT_LANE_ACTIVE,
+    SPOT_MAKER_POLL_SECONDS,
+    SPOT_MIN_ORDER_USD,
+    SPOT_SCALP_SYMBOL_CONFIG,
+    SPOT_SYMBOLS,
+    SPOT_TARGET_R,
+    SPOT_THESIS_MIN_HOLD_MINS,
+    SPOT_THESIS_MIN_SCORE,
+    SPOT_TOTAL_ALLOC_CAP_PCT,
+)
+from runtime.spot_execution_policy import (
+    limit_buy_price,
+    limit_sell_price,
+    maker_poll_count,
+)
+from runtime.spot_momentum import build_spot_state
+
 logger = logging.getLogger(__name__)
 
 try:
-    from execution.coinbase_spot_broker import (
-        CoinbaseSpotBroker,
-        get_spot_broker,
-        SPOT_SUPPORTED_SYMBOLS,
-    )
+    from execution.coinbase_spot_broker import CoinbaseSpotBroker, get_spot_broker
 
     _BROKER_OK = True
-except ImportError:
+except Exception:
     _BROKER_OK = False
-    logger.warning("[spot_engine] coinbase_spot_broker not available")
-
-# ── Config defaults (overridden by config.py when imported) ───────────────────
-_SPOT_MAX_DEPLOYED_PCT: float = 0.40  # 40% of spot USD balance
-_SPOT_MIN_ORDER_USD: float = 10.0
-_SPOT_SYMBOLS: list = ["BTC", "ETH", "SOL", "XRP"]
-_SPOT_LANE_ACTIVE: bool = False
-_SPOT_STOP_PCT: float = 0.03  # 3% hard stop below entry
-_SPOT_TRAIL_MULT: float = 1.5  # ATR multiplier for trailing stop width
-_SPOT_THESIS_MIN_HOLD_MINS: float = 30.0  # min hold before thesis exit fires
-_SPOT_THESIS_MIN_SCORE: float = 42.0  # composite score below this → thesis exit
-_SPOT_TARGET_R: float = 2.0  # profit target as R-multiple of stop distance
-_SPOT_EOD_CLOSE_TIME: str = "15:45"  # HH:MM ET — flatten all spot by this time
+    CoinbaseSpotBroker = None  # type: ignore[assignment]
 
 
 def _load_config() -> None:
-    global \
-        _SPOT_MAX_DEPLOYED_PCT, \
-        _SPOT_MIN_ORDER_USD, \
-        _SPOT_SYMBOLS, \
-        _SPOT_LANE_ACTIVE, \
-        _SPOT_STOP_PCT, \
-        _SPOT_TRAIL_MULT, \
-        _SPOT_THESIS_MIN_HOLD_MINS, \
-        _SPOT_THESIS_MIN_SCORE, \
-        _SPOT_TARGET_R, \
-        _SPOT_EOD_CLOSE_TIME
-    try:
-        from config import (
-            SPOT_MAX_DEPLOYED_PCT,
-            SPOT_MIN_ORDER_USD,
-            SPOT_SYMBOLS,
-            SPOT_LANE_ACTIVE,
-            SPOT_STOP_PCT,
-            SPOT_TARGET_R,
-            SPOT_EOD_CLOSE_TIME,
-            SPOT_THESIS_MIN_HOLD_MINS,
-            SPOT_THESIS_MIN_SCORE,
-        )
+    """Backward-compatible config refresh for proof tests and runtime callers."""
+    import config as _cfg
 
-        _SPOT_MAX_DEPLOYED_PCT = float(SPOT_MAX_DEPLOYED_PCT)
-        _SPOT_MIN_ORDER_USD = float(SPOT_MIN_ORDER_USD)
-        _SPOT_SYMBOLS = list(SPOT_SYMBOLS)
-        _SPOT_LANE_ACTIVE = bool(SPOT_LANE_ACTIVE)
-        _SPOT_STOP_PCT = float(SPOT_STOP_PCT)
-        _SPOT_TARGET_R = float(SPOT_TARGET_R)
-        _SPOT_EOD_CLOSE_TIME = str(SPOT_EOD_CLOSE_TIME)
-        _SPOT_THESIS_MIN_HOLD_MINS = float(SPOT_THESIS_MIN_HOLD_MINS)
-        _SPOT_THESIS_MIN_SCORE = float(SPOT_THESIS_MIN_SCORE)
-    except Exception:
-        pass  # use defaults above
-
-    # Env-var overrides for non-config knobs
-    try:
-        _SPOT_TRAIL_MULT = float(os.environ.get("SPOT_TRAIL_MULT", _SPOT_TRAIL_MULT))
-        _SPOT_THESIS_MIN_HOLD_MINS = float(
-            os.environ.get("SPOT_THESIS_MIN_HOLD_MINS", _SPOT_THESIS_MIN_HOLD_MINS)
-        )
-        _SPOT_THESIS_MIN_SCORE = float(
-            os.environ.get("SPOT_THESIS_MIN_SCORE", _SPOT_THESIS_MIN_SCORE)
-        )
-    except Exception:
-        pass
-
-
-_load_config()
+    globals()["SPOT_EOD_FLATTEN_ENABLED"] = getattr(
+        _cfg, "SPOT_EOD_FLATTEN_ENABLED", SPOT_EOD_FLATTEN_ENABLED
+    )
+    globals()["SPOT_EOD_CLOSE_TIME"] = getattr(
+        _cfg, "SPOT_EOD_CLOSE_TIME", SPOT_EOD_CLOSE_TIME
+    )
+    globals()["SPOT_LANE_ACTIVE"] = getattr(_cfg, "SPOT_LANE_ACTIVE", SPOT_LANE_ACTIVE)
+    globals()["SPOT_MAKER_POLL_SECONDS"] = getattr(
+        _cfg, "SPOT_MAKER_POLL_SECONDS", SPOT_MAKER_POLL_SECONDS
+    )
+    globals()["SPOT_MIN_ORDER_USD"] = getattr(
+        _cfg, "SPOT_MIN_ORDER_USD", SPOT_MIN_ORDER_USD
+    )
+    globals()["SPOT_SCALP_SYMBOL_CONFIG"] = getattr(
+        _cfg, "SPOT_SCALP_SYMBOL_CONFIG", SPOT_SCALP_SYMBOL_CONFIG
+    )
+    globals()["SPOT_SYMBOLS"] = getattr(_cfg, "SPOT_SYMBOLS", SPOT_SYMBOLS)
+    globals()["SPOT_TARGET_R"] = getattr(_cfg, "SPOT_TARGET_R", SPOT_TARGET_R)
+    globals()["SPOT_THESIS_MIN_HOLD_MINS"] = getattr(
+        _cfg, "SPOT_THESIS_MIN_HOLD_MINS", SPOT_THESIS_MIN_HOLD_MINS
+    )
+    globals()["SPOT_THESIS_MIN_SCORE"] = getattr(
+        _cfg, "SPOT_THESIS_MIN_SCORE", SPOT_THESIS_MIN_SCORE
+    )
+    globals()["SPOT_TOTAL_ALLOC_CAP_PCT"] = getattr(
+        _cfg, "SPOT_TOTAL_ALLOC_CAP_PCT", SPOT_TOTAL_ALLOC_CAP_PCT
+    )
 
 
 def _get_db_path() -> str:
-    """Derive DB path the same way the rest of spot_engine does via trade_logger."""
     try:
         from config import DB_PATH
 
         return DB_PATH
     except Exception:
         return os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            os.path.dirname(os.path.abspath(__file__)),
             "logs",
             "trades.db",
         )
@@ -118,321 +93,18 @@ def _get_db_path() -> str:
 def _get_broker(paper: bool) -> Optional["CoinbaseSpotBroker"]:
     if not _BROKER_OK:
         return None
-
-
-def _current_spot_deployed_usd(paper: bool = True) -> float:
-    try:
-        return sum(
-            abs(float(p.get("qty") or 0.0)) * float(p.get("entry") or 0.0)
-            for p in _load_spot_positions_from_db(paper=paper)
-        )
-    except Exception:
-        return 0.0
     try:
         broker = get_spot_broker()
-        # Override paper flag if broker was constructed with different mode
-        broker._paper = paper
+        broker._paper = bool(paper)
+        if not broker.is_connected():
+            broker.connect()
         return broker
     except Exception as e:
         logger.error(f"[spot_engine] broker init error: {e}")
         return None
 
 
-# ── open_spot ─────────────────────────────────────────────────────────────────
-
-
-def open_spot(
-    symbol: str,
-    size_usd: float,
-    paper: bool = True,
-    composite_score: float = 0.0,
-    atr_at_entry: float = 0.0,
-) -> Optional[Dict]:
-    """
-    Open a spot position for symbol in the configured spot universe.
-    Returns position dict on success, None with logged reason on failure.
-
-    Blocks:
-      - SPOT_LANE_ACTIVE=False  → spot_lane_disabled
-      - symbol not in SPOT_SYMBOLS → spot_symbol_not_allowed
-      - already holding that symbol (DB) → spot_position_already_open
-      - size_usd < SPOT_MIN_ORDER_USD → spot_size_below_minimum
-      - size_usd > SPOT_MAX_DEPLOYED_PCT * usd_balance → spot_deployment_cap_exceeded
-    """
-    _load_config()
-
-    clean = symbol.upper().replace("USDT", "").replace("USD", "").replace("-USD", "")
-
-    # Lane gate
-    if not _SPOT_LANE_ACTIVE:
-        logger.info(f"[spot_engine] {clean} blocked — spot_lane_disabled")
-        return None
-
-    # Symbol gate
-    if clean not in _SPOT_SYMBOLS:
-        logger.warning(f"[spot_engine] {clean} blocked — spot_symbol_not_allowed")
-        return None
-
-    # Duplicate-position gate
-    existing = _load_spot_positions_from_db(paper=paper)
-    if any(str(p.get("symbol", "")).upper() == clean for p in existing):
-        logger.warning(f"[spot_engine] {clean} blocked — spot_position_already_open")
-        return None
-
-    # Live session gate
-    if not paper:
-        try:
-            from runtime.spot_session import is_spot_entry_session_open
-
-            if not is_spot_entry_session_open():
-                logger.info(f"[spot_engine] {clean} blocked — spot_outside_session")
-                return None
-        except Exception:
-            pass
-
-    # Size minimum
-    if size_usd < _SPOT_MIN_ORDER_USD:
-        logger.warning(
-            f"[spot_engine] {clean} blocked — spot_size_below_minimum "
-            f"(${size_usd:.2f} < ${_SPOT_MIN_ORDER_USD})"
-        )
-        return None
-
-    # Get broker
-    broker = _get_broker(paper)
-
-    # Live: clamp size to available USD rather than hard-blocking
-    if broker is not None and not paper:
-        bal = broker.get_spot_balance()
-        usd_avail = float(bal.get("usd_available", 0))
-        deployed = _current_spot_deployed_usd(paper=paper)
-        cap_base = max(usd_avail + deployed, 0.0)
-        cap_limit = cap_base * _SPOT_MAX_DEPLOYED_PCT
-        remaining_cap = max(cap_limit - deployed, 0.0)
-        if remaining_cap < _SPOT_MIN_ORDER_USD:
-            logger.warning(
-                f"[spot_engine] {clean} blocked — spot_deployment_cap_exceeded "
-                f"(remaining ${remaining_cap:.2f})"
-            )
-            return None
-        if size_usd > remaining_cap:
-            logger.warning(
-                f"[spot_engine] {clean} blocked — spot_deployment_cap_exceeded "
-                f"(${size_usd:.2f} > remaining ${remaining_cap:.2f})"
-            )
-            return None
-        if usd_avail > 0 and size_usd > usd_avail * 0.95:
-            clamped = round(usd_avail * 0.95, 2)
-            if clamped < _SPOT_MIN_ORDER_USD:
-                logger.warning(
-                    f"[spot_engine] {clean} blocked — available USD ${usd_avail:.2f} "
-                    f"below min order ${_SPOT_MIN_ORDER_USD:.2f}"
-                )
-                return None
-            logger.info(
-                f"[spot_engine] {clean} size clamped ${size_usd:.2f}→${clamped:.2f} "
-                f"(95% of available ${usd_avail:.2f})"
-            )
-            size_usd = clamped
-
-    # Execute
-    if broker is None:
-        logger.error(f"[spot_engine] {clean} — broker unavailable")
-        return None
-
-    order = broker.buy_spot(clean, size_usd)
-    if not order:
-        logger.error(f"[spot_engine] {clean} buy_spot returned None")
-        return None
-
-    price = broker.get_mark_price(clean)
-    qty = size_usd / price if price > 0 else float(order.get("filled_size", 0))
-
-    # Gap 2 — ATR-calibrated stop: respects 3% floor, caps at 8%, adapts to volatility
-    if atr_at_entry > 0 and price > 0:
-        atr_pct = atr_at_entry / price
-        stop_pct = max(_SPOT_STOP_PCT, min(_SPOT_TRAIL_MULT * atr_pct, 0.08))
-    else:
-        stop_pct = _SPOT_STOP_PCT
-
-    stop_price = round(price * (1.0 - stop_pct), 8) if price > 0 else 0.0
-    target_price = (
-        round(price * (1.0 + stop_pct * _SPOT_TARGET_R), 8) if price > 0 else 0.0
-    )
-    max_loss_usd = round(size_usd * stop_pct, 2)
-
-    pos = {
-        "symbol": clean,
-        "strategy": f"spot_{clean.lower()}",
-        "broker": "coinbase_spot",
-        "qty": qty,
-        "entry": price,
-        "stop_price": stop_price,
-        "max_loss_usd": max_loss_usd,
-        "entry_ts": time.time(),
-        "size_usd": size_usd,
-        "order_id": order.get("order_id", ""),
-        "paper": paper,
-    }
-
-    # Persist to trades table
-    try:
-        from logging_db.trade_logger import log_trade
-
-        log_trade(
-            strategy=f"spot_{clean.lower()}",
-            broker="coinbase_spot",
-            symbol=clean,
-            action="BUY",
-            order_type="MARKET",
-            qty=qty,
-            price=price,
-            fee_usd=0.0,
-            pnl_usd=0.0,
-            paper=paper,
-            notes=(
-                f"spot_buy size_usd={size_usd:.2f} stop={stop_price:.4f} "
-                f"stop_pct={stop_pct:.2%} max_loss=${max_loss_usd:.2f}"
-            ),
-        )
-    except Exception as e:
-        logger.debug(f"[spot_engine] log_trade error: {e}")
-
-    # Persist to open_positions — stop column holds the hard stop price
-    # Gap 4 — pass real composite_score and atr_at_entry through to persist_position
-    try:
-        from logging_db.trade_logger import persist_position
-
-        persist_position(
-            symbol=clean,
-            strategy=f"spot_{clean.lower()}",
-            qty=qty,
-            entry=price,
-            stop=stop_price,
-            target=target_price,
-            high_since_entry=price,
-            ts_entry=datetime.datetime.now().isoformat(),
-            paper=paper,
-            direction="LONG",
-            entry_reason="spot_buy",
-            atr_at_entry=atr_at_entry,
-            composite_score=composite_score,
-            leverage=1,
-        )
-    except Exception as e:
-        logger.debug(f"[spot_engine] persist_position error: {e}")
-
-    logger.info(
-        f"[spot_engine] {'PAPER' if paper else 'LIVE'} BUY {clean}: "
-        f"${size_usd:.2f} = {qty:.6f} @ {price:.4f}  "
-        f"stop={stop_price:.4f} (-{stop_pct:.2%})  "
-        f"target={target_price:.4f} (+{stop_pct * _SPOT_TARGET_R:.2%})  "
-        f"composite={composite_score:.1f}  atr={atr_at_entry:.4f}"
-    )
-    return pos
-
-
-# ── close_spot ────────────────────────────────────────────────────────────────
-
-
-def close_spot(symbol: str, paper: bool = True) -> Optional[Dict]:
-    """
-    Close the spot position for symbol.
-    Returns close result dict or None.
-    """
-    _load_config()
-
-    clean = symbol.upper().replace("USDT", "").replace("USD", "").replace("-USD", "")
-
-    # Find position in DB
-    existing = _load_spot_positions_from_db(paper=paper)
-    pos = next((p for p in existing if p.get("symbol", "").upper() == clean), None)
-    if not pos:
-        logger.warning(f"[spot_engine] close_spot {clean}: no open position found")
-        return None
-
-    qty = float(pos.get("qty", 0))
-    entry_price = float(pos.get("entry", 0))
-    if qty <= 0:
-        logger.warning(f"[spot_engine] close_spot {clean}: qty=0")
-        return None
-
-    broker = _get_broker(paper)
-    if broker is None:
-        logger.error(f"[spot_engine] close_spot {clean}: broker unavailable")
-        return None
-
-    order = broker.sell_spot(clean, qty)
-    if not order:
-        logger.error(f"[spot_engine] close_spot {clean}: sell_spot returned None")
-        return None
-
-    exit_price = broker.get_mark_price(clean)
-    if exit_price <= 0:
-        exit_price = entry_price
-    pnl_usd = (exit_price - entry_price) * qty
-
-    # Persist close to trades table
-    try:
-        from logging_db.trade_logger import log_trade
-
-        log_trade(
-            strategy=f"spot_{clean.lower()}",
-            broker="coinbase_spot",
-            symbol=clean,
-            action="SELL",
-            order_type="MARKET",
-            qty=qty,
-            price=exit_price,
-            fee_usd=0.0,
-            pnl_usd=pnl_usd,
-            paper=paper,
-            won=1 if pnl_usd > 0 else 0,
-            notes=f"spot_sell exit={exit_price:.4f} pnl={pnl_usd:.2f}",
-        )
-    except Exception as e:
-        logger.debug(f"[spot_engine] close log_trade error: {e}")
-
-    # Remove from open_positions
-    try:
-        from logging_db.trade_logger import delete_position
-
-        delete_position(clean, strategy=f"spot_{clean.lower()}", paper=paper)
-    except Exception as e:
-        logger.debug(f"[spot_engine] delete_position error: {e}")
-
-    result = {
-        "symbol": clean,
-        "exit_price": exit_price,
-        "entry_price": entry_price,
-        "qty": qty,
-        "pnl_usd": round(pnl_usd, 4),
-        "order_id": order.get("order_id", ""),
-        "paper": paper,
-    }
-    logger.info(
-        f"[spot_engine] {'PAPER' if paper else 'LIVE'} SELL {clean}: "
-        f"{qty:.6f} @ {exit_price:.4f} pnl=${pnl_usd:.2f}"
-    )
-    return result
-
-
-# ── get_spot_positions ────────────────────────────────────────────────────────
-
-
-def get_spot_positions(paper: bool = True) -> List[Dict]:
-    """
-    Return open spot positions (strategy='spot_*' — no perp contamination).
-    """
-    return _load_spot_positions_from_db(paper=paper)
-
-
 def _load_spot_positions_from_db(paper: bool = True) -> List[Dict]:
-    """
-    Load spot open positions from open_positions table.
-    Filtered by strategy starting with 'spot_' — no contamination with perp positions
-    (perp strategy = 'v10_perp', spot strategies = 'spot_btc' / 'spot_eth').
-    """
     try:
         from logging_db.trade_logger import load_open_positions
 
@@ -443,434 +115,587 @@ def _load_spot_positions_from_db(paper: bool = True) -> List[Dict]:
         return []
 
 
-# ── check_spot_stops ──────────────────────────────────────────────────────────
+def _current_spot_deployed_usd(paper: bool = True) -> float:
+    try:
+        return sum(
+            abs(float(p.get("qty") or 0.0)) * float(p.get("entry") or 0.0)
+            for p in _load_spot_positions_from_db(paper=paper)
+        )
+    except Exception:
+        return 0.0
+
+
+def _symbol_cfg(symbol: str) -> dict:
+    clean = _clean_symbol(symbol)
+    return dict(SPOT_SCALP_SYMBOL_CONFIG.get(clean, {}))
+
+
+def _clean_symbol(symbol: str) -> str:
+    return symbol.upper().replace("USDT", "").replace("USD", "").replace("-USD", "")
+
+
+def _position_strategy(symbol: str) -> str:
+    return f"spot_{_clean_symbol(symbol).lower()}"
+
+
+def get_spot_positions(paper: bool = True) -> List[Dict]:
+    return _load_spot_positions_from_db(paper=paper)
+
+
+def _sync_position_high(symbol: str, strategy: str, paper: bool, high_price: float) -> None:
+    try:
+        con = sqlite3.connect(_get_db_path(), timeout=5)
+        con.execute(
+            "UPDATE open_positions SET high_since_entry=? WHERE symbol=? AND strategy=? AND paper=?",
+            (high_price, _clean_symbol(symbol), strategy, 1 if paper else 0),
+        )
+        con.commit()
+        con.close()
+    except Exception as e:
+        logger.debug(f"[spot_engine] high sync error {symbol}: {e}")
+
+
+def _sync_position_exit_reason(symbol: str, strategy: str, paper: bool, exit_reason: str) -> None:
+    try:
+        con = sqlite3.connect(_get_db_path(), timeout=5)
+        con.execute(
+            "UPDATE open_positions SET exit_reason=? WHERE symbol=? AND strategy=? AND paper=?",
+            (exit_reason, _clean_symbol(symbol), strategy, 1 if paper else 0),
+        )
+        con.commit()
+        con.close()
+    except Exception as e:
+        logger.debug(f"[spot_engine] exit_reason sync error {symbol}: {e}")
+
+
+def _state_payload(spot_state: dict | None) -> dict:
+    if not spot_state:
+        return {
+            "spot_regime": "",
+            "setup_family": "",
+            "tf_5m_state": "",
+            "tf_30m_state": "",
+            "tf_4h_state": "",
+            "tf_1d_state": "",
+            "structural_confirms": "",
+        }
+    return {
+        "spot_regime": spot_state.get("regime", ""),
+        "setup_family": spot_state.get("setup_family", ""),
+        "tf_5m_state": spot_state.get("tf_5m_state", ""),
+        "tf_30m_state": spot_state.get("tf_30m_state", ""),
+        "tf_4h_state": spot_state.get("tf_4h_state", ""),
+        "tf_1d_state": spot_state.get("tf_1d_state", ""),
+        "structural_confirms": spot_state.get("structural_confirms", ""),
+    }
+
+
+def _entry_floor(regime: str) -> float:
+    return {"TREND": 62.0, "NEUTRAL": 66.0, "CHOP": 70.0}.get(regime, 66.0)
+
+
+def _target_r(regime: str) -> float:
+    return {"TREND": 1.8, "NEUTRAL": 1.2, "CHOP": 0.9}.get(regime, SPOT_TARGET_R)
+
+
+def _trail_arm_r(regime: str) -> float:
+    return {"TREND": 1.0, "NEUTRAL": 0.8, "CHOP": 0.6}.get(regime, 0.8)
+
+
+def _compute_stop_pct(symbol: str, spot_state: dict | None, atr_at_entry: float = 0.0) -> float:
+    cfg = _symbol_cfg(symbol)
+    floor = float(cfg.get("stop_floor_pct", 0.01))
+    cap = float(cfg.get("stop_cap_pct", 0.02))
+    symbol_k = float(cfg.get("symbol_k", 1.1))
+    frames = (spot_state or {}).get("frames", {})
+    s5 = frames.get("5m", {}) if isinstance(frames, dict) else {}
+    atr_pct = float(s5.get("atr_pct") or 0.0)
+    if atr_pct <= 0 and atr_at_entry > 0:
+        price = float(s5.get("price") or 0.0)
+        atr_pct = (atr_at_entry / price) if price > 0 else 0.0
+    penalty = 0.0
+    if (spot_state or {}).get("regime") == "CHOP":
+        penalty += 0.10
+    rv_ratio = float((spot_state or {}).get("rv_ratio") or 1.0)
+    if rv_ratio > 1.30:
+        penalty += min(0.20, (rv_ratio - 1.30) * 0.25)
+    if abs(float(s5.get("a") or 0.0)) < 0.05 and abs(float(s5.get("v") or 0.0)) < 0.10:
+        penalty += 0.05
+    base_vol_stop = max(atr_pct * symbol_k, floor)
+    return max(floor, min(base_vol_stop * (1.0 + penalty), cap))
+
+
+def _execution_micro_ok(symbol: str, top: dict) -> tuple[bool, str]:
+    cfg = _symbol_cfg(symbol)
+    spread_cap = float(cfg.get("spread_cap_pct", 0.0025))
+    depth_min = float(cfg.get("depth_min_usd", 5000))
+    spread_pct = float(top.get("spread_pct") or 0.0)
+    depth = float(top.get("top_depth_usd") or 0.0)
+    if spread_pct > spread_cap:
+        return False, "spread_cap_exceeded"
+    if depth > 0 and depth < depth_min:
+        return False, "depth_below_minimum"
+    return True, "none"
+
+
+def _maker_first_buy(
+    broker: "CoinbaseSpotBroker", symbol: str, size_usd: float
+) -> tuple[Optional[dict], str, str]:
+    top = broker.get_spot_top_of_book(symbol)
+    ok, veto = _execution_micro_ok(symbol, top)
+    if not ok:
+        return None, "skipped_microstructure", veto
+
+    bid = float(top.get("best_bid") or 0.0)
+    ask = float(top.get("best_ask") or 0.0)
+    limit_px = limit_buy_price(bid, ask)
+    order = broker.place_limit_buy_spot(symbol, size_usd, limit_px, post_only=True)
+    if not order:
+        return None, "maker_first_failed", "limit_order_rejected"
+
+    polls = maker_poll_count()
+    for _ in range(polls):
+        time.sleep(max(1, SPOT_MAKER_POLL_SECONDS))
+        status = broker.get_spot_order_status(order["order_id"], fallback_symbol=_clean_symbol(symbol))
+        completion = float(status.get("completion_pct") or 0.0)
+        if completion >= 80.0 or str(status.get("status", "")).upper() == "FILLED":
+            status["execution_route"] = "maker_first"
+            return status, "maker_first", "none"
+
+    broker.cancel_spot_order(order["order_id"])
+    taker = broker.buy_spot(symbol, size_usd)
+    if taker:
+        taker["execution_route"] = "taker_fallback"
+        return taker, "taker_fallback", "none"
+    return None, "taker_fallback_failed", "unfilled_after_maker"
+
+
+def _maker_first_sell(
+    broker: "CoinbaseSpotBroker", symbol: str, size_units: float
+) -> tuple[Optional[dict], str, str]:
+    top = broker.get_spot_top_of_book(symbol)
+    ok, veto = _execution_micro_ok(symbol, top)
+    if not ok:
+        return None, "skipped_microstructure", veto
+
+    bid = float(top.get("best_bid") or 0.0)
+    ask = float(top.get("best_ask") or 0.0)
+    limit_px = limit_sell_price(bid, ask)
+    order = broker.place_limit_sell_spot(symbol, size_units, limit_px, post_only=True)
+    if not order:
+        return None, "maker_first_failed", "limit_order_rejected"
+
+    polls = maker_poll_count()
+    for _ in range(polls):
+        time.sleep(max(1, SPOT_MAKER_POLL_SECONDS))
+        status = broker.get_spot_order_status(order["order_id"], fallback_symbol=_clean_symbol(symbol))
+        completion = float(status.get("completion_pct") or 0.0)
+        if completion >= 80.0 or str(status.get("status", "")).upper() == "FILLED":
+            status["execution_route"] = "maker_first"
+            return status, "maker_first", "none"
+
+    broker.cancel_spot_order(order["order_id"])
+    taker = broker.sell_spot(symbol, size_units)
+    if taker:
+        taker["execution_route"] = "taker_fallback"
+        return taker, "taker_fallback", "none"
+    return None, "taker_fallback_failed", "unfilled_after_maker"
+
+
+def open_spot(
+    symbol: str,
+    size_usd: float,
+    paper: bool = True,
+    composite_score: float = 0.0,
+    atr_at_entry: float = 0.0,
+    spot_state: dict | None = None,
+    final_spot_score: float | None = None,
+    risk_dollars: float = 0.0,
+    cooldown_until: str = "",
+) -> Optional[Dict]:
+    clean = _clean_symbol(symbol)
+    if not SPOT_LANE_ACTIVE:
+        logger.info(f"[spot_engine] {clean} blocked — spot_lane_disabled")
+        return None
+    if clean not in SPOT_SYMBOLS:
+        logger.warning(f"[spot_engine] {clean} blocked — spot_symbol_not_allowed")
+        return None
+    if any(str(p.get("symbol", "")).upper() == clean for p in _load_spot_positions_from_db(paper=paper)):
+        logger.warning(f"[spot_engine] {clean} blocked — spot_position_already_open")
+        return None
+    if size_usd < SPOT_MIN_ORDER_USD:
+        logger.warning(f"[spot_engine] {clean} blocked — spot_size_below_minimum")
+        return None
+
+    broker = _get_broker(paper)
+    if broker is None:
+        logger.error(f"[spot_engine] {clean} — broker unavailable")
+        return None
+
+    try:
+        bal = broker.get_spot_balance() or {}
+        usd_available = float(bal.get("usd_available") or 0.0)
+        deployed = float(_current_spot_deployed_usd(paper=paper))
+        total_spot_equity = max(usd_available + deployed, deployed)
+        projected = deployed + float(size_usd)
+        if total_spot_equity > 0 and (projected / total_spot_equity) > float(
+            SPOT_TOTAL_ALLOC_CAP_PCT
+        ):
+            logger.info(f"[spot_engine] {clean} blocked — spot_deployment_cap_exceeded")
+            return None
+    except Exception:
+        pass
+
+    if spot_state is None:
+        try:
+            spot_state = build_spot_state(clean)
+        except Exception as e:
+            logger.warning(f"[spot_engine] {clean} spot_state unavailable: {e}")
+            spot_state = None
+
+    regime = str((spot_state or {}).get("regime") or "NEUTRAL")
+    stop_pct = _compute_stop_pct(clean, spot_state, atr_at_entry=atr_at_entry)
+    target_r = _target_r(regime)
+    trail_arm_r = _trail_arm_r(regime)
+    score_used = float(final_spot_score if final_spot_score is not None else composite_score)
+
+    if score_used < _entry_floor(regime):
+        logger.info(f"[spot_engine] {clean} blocked — final_spot_score {score_used:.1f} below regime floor")
+        return None
+    if spot_state:
+        s5 = ((spot_state.get("frames") or {}).get("5m") or {})
+        s30 = ((spot_state.get("frames") or {}).get("30m") or {})
+        if float(s5.get("v") or 0.0) <= 0 or float(s5.get("a") or 0.0) <= 0:
+            logger.info(f"[spot_engine] {clean} blocked — 5m derivative stack not positive")
+            return None
+        if float(s30.get("frame_score") or 0.0) < 45.0 and float(s30.get("v") or 0.0) < 0.0:
+            logger.info(f"[spot_engine] {clean} blocked — 30m materially adverse")
+            return None
+        if int(spot_state.get("structural_confirm_count") or 0) < 2:
+            logger.info(f"[spot_engine] {clean} blocked — structural confirmations < 2")
+            return None
+
+    order = None
+    execution_route = "paper_market"
+    micro_veto = "none"
+    if paper:
+        order = broker.buy_spot(clean, size_usd)
+        execution_route = str(order.get("execution_route") or "paper_market") if order else "paper_market"
+    else:
+        order, execution_route, micro_veto = _maker_first_buy(broker, clean, size_usd)
+        if execution_route == "skipped_microstructure":
+            logger.info(f"[spot_engine] {clean} blocked — microstructure {micro_veto}")
+            return None
+    if not order:
+        logger.error(f"[spot_engine] {clean} buy failed")
+        return None
+
+    price = float(order.get("average_filled_price") or broker.get_mark_price(clean) or 0.0)
+    qty = float(order.get("filled_size") or 0.0)
+    if qty <= 0 and price > 0:
+        qty = size_usd / price
+    fee_usd = float(order.get("fee_usd") or 0.0)
+    stop_price = round(price * (1.0 - stop_pct), 8) if price > 0 else 0.0
+    target_price = round(price * (1.0 + stop_pct * target_r), 8) if price > 0 else 0.0
+
+    from logging_db.trade_logger import log_trade, persist_position
+
+    state_payload = _state_payload(spot_state)
+    log_trade(
+        strategy=_position_strategy(clean),
+        broker="coinbase_spot",
+        symbol=clean,
+        action="BUY",
+        order_type="LIMIT" if execution_route == "maker_first" else "MARKET",
+        qty=qty,
+        price=price,
+        fee_usd=fee_usd,
+        pnl_usd=0.0,
+        paper=paper,
+        notes=(
+            f"spot_buy route={execution_route} stop={stop_price:.8g} "
+            f"target={target_price:.8g} stop_pct={stop_pct:.4%} "
+            f"final_spot_score={score_used:.1f}"
+        ),
+    )
+    persist_position(
+        symbol=clean,
+        strategy=_position_strategy(clean),
+        qty=qty,
+        entry=price,
+        stop=stop_price,
+        target=target_price,
+        high_since_entry=price,
+        ts_entry=datetime.datetime.now().isoformat(),
+        paper=paper,
+        direction="LONG",
+        entry_reason="spot_scalp_entry",
+        atr_at_entry=atr_at_entry,
+        composite_score=composite_score,
+        leverage=1,
+        spot_regime=regime,
+        setup_family=(spot_state or {}).get("setup_family", ""),
+        tf_5m_state=state_payload["tf_5m_state"],
+        tf_30m_state=state_payload["tf_30m_state"],
+        tf_4h_state=state_payload["tf_4h_state"],
+        tf_1d_state=state_payload["tf_1d_state"],
+        structural_confirms=state_payload["structural_confirms"],
+        execution_route=execution_route,
+        cooldown_until=cooldown_until,
+        microstructure_veto=micro_veto,
+        stop_model_version="spot_scalp_v1",
+        target_model_version="spot_scalp_v1",
+        target_r=target_r,
+        trail_arm_r=trail_arm_r,
+        risk_dollars=risk_dollars,
+        entry_fee_usd=fee_usd,
+        exit_reason="",
+    )
+    return {
+        "symbol": clean,
+        "strategy": _position_strategy(clean),
+        "qty": qty,
+        "entry": price,
+        "stop_price": stop_price,
+        "target_price": target_price,
+        "size_usd": size_usd,
+        "risk_dollars": risk_dollars,
+        "stop_pct": stop_pct,
+        "target_r": target_r,
+        "trail_arm_r": trail_arm_r,
+        "order_id": order.get("order_id", ""),
+        "fee_usd": fee_usd,
+        "execution_route": execution_route,
+        "paper": paper,
+    }
+
+
+def close_spot(
+    symbol: str,
+    paper: bool = True,
+    exit_reason: str = "manual_exit",
+) -> Optional[Dict]:
+    clean = _clean_symbol(symbol)
+    pos = next(
+        (p for p in _load_spot_positions_from_db(paper=paper) if str(p.get("symbol", "")).upper() == clean),
+        None,
+    )
+    if not pos:
+        logger.warning(f"[spot_engine] close_spot {clean}: no open position found")
+        return None
+
+    qty = float(pos.get("qty") or 0.0)
+    entry_price = float(pos.get("entry") or 0.0)
+    strategy = str(pos.get("strategy") or _position_strategy(clean))
+    if qty <= 0:
+        return None
+    broker = _get_broker(paper)
+    if broker is None:
+        return None
+
+    order = None
+    execution_route = "paper_market"
+    micro_veto = "none"
+    if paper:
+        order = broker.sell_spot(clean, qty)
+        execution_route = str(order.get("execution_route") or "paper_market") if order else "paper_market"
+    else:
+        order, execution_route, micro_veto = _maker_first_sell(broker, clean, qty)
+        if execution_route == "skipped_microstructure":
+            order = broker.sell_spot(clean, qty)
+            execution_route = "taker_fallback"
+    if not order:
+        logger.error(f"[spot_engine] close_spot {clean}: sell failed")
+        return None
+
+    exit_price = float(order.get("average_filled_price") or broker.get_mark_price(clean) or entry_price)
+    filled_qty = float(order.get("filled_size") or qty)
+    fee_usd = float(order.get("fee_usd") or 0.0)
+    pnl_usd = (exit_price - entry_price) * filled_qty - fee_usd - float(pos.get("entry_fee_usd") or 0.0)
+
+    from logging_db.trade_logger import log_trade, delete_position
+
+    _sync_position_exit_reason(clean, strategy, paper, exit_reason)
+    log_trade(
+        strategy=strategy,
+        broker="coinbase_spot",
+        symbol=clean,
+        action="SELL",
+        order_type="LIMIT" if execution_route == "maker_first" else "MARKET",
+        qty=filled_qty,
+        price=exit_price,
+        fee_usd=fee_usd,
+        pnl_usd=pnl_usd,
+        paper=paper,
+        won=1 if pnl_usd > 0 else 0,
+        notes=(
+            f"spot_sell exit_reason={exit_reason} route={execution_route} "
+            f"micro_veto={micro_veto} pnl={pnl_usd:.2f}"
+        ),
+    )
+    delete_position(clean, strategy=strategy, paper=paper)
+    return {
+        "symbol": clean,
+        "entry_price": entry_price,
+        "exit_price": exit_price,
+        "qty": filled_qty,
+        "pnl_usd": round(pnl_usd, 4),
+        "fee_usd": fee_usd,
+        "execution_route": execution_route,
+        "exit_reason": exit_reason,
+        "order_id": order.get("order_id", ""),
+        "paper": paper,
+    }
 
 
 def check_spot_stops(paper: bool = True) -> List[Dict]:
-    """
-    Check all open spot positions against their hard stop price.
-    Called every 30s from exit_monitor in v10_runner.
-
-    For each position:
-      - stop = open_positions.stop  (set at buy time = entry * (1 - SPOT_STOP_PCT))
-      - if current_price <= stop: close the position immediately
-
-    Returns list of closed position dicts (empty if nothing triggered).
-    """
-    _load_config()
-    closed = []
-
-    positions = _load_spot_positions_from_db(paper=paper)
-    if not positions:
-        return closed
-
+    closed: List[Dict] = []
     broker = _get_broker(paper)
     if broker is None:
         return closed
-
-    for pos in positions:
-        sym = str(pos.get("symbol", "")).upper()
-        stop_price = float(pos.get("stop", 0.0))
-        entry_price = float(pos.get("entry", 0.0))
-
+    for pos in _load_spot_positions_from_db(paper=paper):
+        sym = str(pos.get("symbol") or "").upper()
+        stop_price = float(pos.get("stop") or 0.0)
         if stop_price <= 0:
-            # No stop stored (legacy row or manual entry) — apply current config pct
-            if entry_price > 0:
-                stop_price = entry_price * (1.0 - _SPOT_STOP_PCT)
-            else:
-                continue
-
-        current_price = broker.get_mark_price(sym)
-        if current_price <= 0:
-            logger.warning(
-                f"[spot_engine] check_spot_stops: cannot get price for {sym}"
-            )
             continue
-
-        if current_price <= stop_price:
-            loss_pct = (
-                (current_price - entry_price) / entry_price * 100
-                if entry_price > 0
-                else 0
-            )
-            logger.warning(
-                f"[spot_engine] STOP HIT {sym}: price={current_price:.4f} "
-                f"<= stop={stop_price:.4f} ({loss_pct:.2f}%) — closing"
-            )
-            result = close_spot(sym, paper=paper)
+        current_price = float(broker.get_mark_price(sym) or 0.0)
+        if current_price > 0 and current_price <= stop_price:
+            result = close_spot(sym, paper=paper, exit_reason="hard_stop")
             if result:
                 result["trigger"] = "hard_stop"
-                result["stop_price"] = stop_price
                 closed.append(result)
-                logger.info(
-                    f"[spot_engine] {'PAPER' if paper else 'LIVE'} STOP CLOSE {sym}: "
-                    f"pnl=${result.get('pnl_usd', 0):.2f}"
-                )
-            else:
-                logger.error(
-                    f"[spot_engine] STOP CLOSE FAILED for {sym} — position still open"
-                )
-
     return closed
-
-
-# ── check_spot_trailing ───────────────────────────────────────────────────────
 
 
 def check_spot_trailing(paper: bool = True) -> List[Dict]:
-    """
-    ATR-calibrated trailing stop for open spot positions.
-    Called every 30s from exit_monitor in v10_runner alongside check_spot_stops.
-
-    Logic per position:
-    1. Fetch current price.
-    2. If current_price > high_since_entry: update high_since_entry in DB.
-    3. Trail activates only when high_since_entry has moved at least SPOT_STOP_PCT
-       above entry (avoids noise at entry).
-    4. Trail level = high_since_entry * (1 - trail_pct) where trail_pct is
-       ATR-calibrated (1.5 * atr/high) bounded by [SPOT_STOP_PCT, 0.08].
-    5. If current_price <= trail_stop AND current_price > entry_price: close
-       (locks in profit — never a loss-expanding trail).
-
-    Returns list of closed position dicts.
-    """
-    _load_config()
     closed: List[Dict] = []
-
-    positions = _load_spot_positions_from_db(paper=paper)
-    if not positions:
-        return closed
-
     broker = _get_broker(paper)
     if broker is None:
         return closed
-
-    db_path = _get_db_path()
-
-    for pos in positions:
-        try:
-            sym = str(pos.get("symbol", "")).upper()
-            entry_price = float(pos.get("entry", 0.0))
-            high_since_entry = float(
-                pos.get("high_since_entry", entry_price) or entry_price
-            )
-            atr_at_entry = float(pos.get("atr_at_entry", 0.0) or 0.0)
-            strategy = str(pos.get("strategy", f"spot_{sym.lower()}"))
-
-            if entry_price <= 0:
-                continue
-
-            current_price = broker.get_mark_price(sym)
-            if current_price <= 0:
-                logger.warning(
-                    f"[spot_engine] check_spot_trailing: cannot get price for {sym}"
-                )
-                continue
-
-            # Step 2: update high_since_entry in DB if new high reached
-            if current_price > high_since_entry:
-                high_since_entry = current_price
-                try:
-                    con = sqlite3.connect(db_path, timeout=5)
-                    con.execute(
-                        "UPDATE open_positions SET high_since_entry = ? "
-                        "WHERE symbol = ? AND strategy = ? AND paper = ?",
-                        (high_since_entry, sym, strategy, 1 if paper else 0),
-                    )
-                    con.commit()
-                    con.close()
-                except Exception as db_err:
-                    logger.debug(
-                        f"[spot_engine] trailing high_since_entry update error for {sym}: {db_err}"
-                    )
-
-            # Step 3: trail only activates after meaningful upward move
-            meaningful_move_threshold = entry_price * (1.0 + _SPOT_STOP_PCT)
-            if high_since_entry < meaningful_move_threshold:
-                continue  # too early — trail hasn't activated yet
-
-            # Compute ATR-calibrated trail width
-            if atr_at_entry > 0 and high_since_entry > 0:
-                trail_pct = max(
-                    _SPOT_STOP_PCT,
-                    min(_SPOT_TRAIL_MULT * atr_at_entry / high_since_entry, 0.08),
-                )
-            else:
-                trail_pct = _SPOT_STOP_PCT
-
-            trail_stop = high_since_entry * (1.0 - trail_pct)
-
-            # Step 4+5: fire only when trailing stop is hit AND price > entry (profit lock)
-            if current_price <= trail_stop and current_price > entry_price:
-                profit_pct = (current_price - entry_price) / entry_price * 100
-                logger.info(
-                    f"[spot_engine] TRAILING STOP {sym}: price={current_price:.4f} "
-                    f"<= trail={trail_stop:.4f} (high={high_since_entry:.4f} "
-                    f"trail_pct={trail_pct:.2%}) profit={profit_pct:.2f}% — closing"
-                )
-                result = close_spot(sym, paper=paper)
-                if result:
-                    result["trigger"] = "trailing_stop"
-                    result["trail_stop"] = trail_stop
-                    result["high_since_entry"] = high_since_entry
-                    closed.append(result)
-                    logger.info(
-                        f"[spot_engine] {'PAPER' if paper else 'LIVE'} TRAIL CLOSE {sym}: "
-                        f"pnl=${result.get('pnl_usd', 0):.2f}"
-                    )
-                else:
-                    logger.error(
-                        f"[spot_engine] TRAIL CLOSE FAILED for {sym} — position still open"
-                    )
-
-        except Exception as e:
-            logger.warning(f"[spot_engine] check_spot_trailing error for pos: {e}")
-
+    for pos in _load_spot_positions_from_db(paper=paper):
+        sym = str(pos.get("symbol") or "").upper()
+        strategy = str(pos.get("strategy") or _position_strategy(sym))
+        entry = float(pos.get("entry") or 0.0)
+        stop = float(pos.get("stop") or 0.0)
+        high_since_entry = float(pos.get("high_since_entry") or entry)
+        target_r = float(pos.get("target_r") or _target_r(str(pos.get("spot_regime") or "NEUTRAL")))
+        trail_arm_r = float(pos.get("trail_arm_r") or _trail_arm_r(str(pos.get("spot_regime") or "NEUTRAL")))
+        current_price = float(broker.get_mark_price(sym) or 0.0)
+        if current_price <= 0 or entry <= 0 or stop <= 0:
+            continue
+        if current_price > high_since_entry:
+            high_since_entry = current_price
+            _sync_position_high(sym, strategy, paper, high_since_entry)
+        risk_per_unit = entry - stop
+        if risk_per_unit <= 0:
+            continue
+        arm_price = entry + risk_per_unit * trail_arm_r
+        if high_since_entry < arm_price:
+            continue
+        trail_width = risk_per_unit * max(0.6, min(target_r, 1.0))
+        trail_stop = high_since_entry - trail_width
+        if current_price <= trail_stop and current_price > entry:
+            result = close_spot(sym, paper=paper, exit_reason="trailing_stop")
+            if result:
+                result["trigger"] = "trailing_stop"
+                closed.append(result)
     return closed
-
-
-# ── check_spot_thesis_exits ───────────────────────────────────────────────────
-
-
-def check_spot_thesis_exits(paper: bool = True) -> List[Dict]:
-    """
-    Thesis score exit for open spot positions.
-    Closes a spot position when the scanner's composite score for that symbol
-    drops below SPOT_THESIS_MIN_SCORE, but only after a minimum hold period
-    and only when fresh scan data exists within the last 45 minutes.
-
-    Logic per position:
-    1. Skip if held less than SPOT_THESIS_MIN_HOLD_MINS.
-    2. Look up most recent composite_score from scan_candidates within 45 min.
-    3. If fresh score exists AND score < SPOT_THESIS_MIN_SCORE: close.
-    4. If no fresh data: skip (never close on stale data).
-
-    Returns list of closed position dicts.
-    """
-    _load_config()
-    closed: List[Dict] = []
-
-    positions = _load_spot_positions_from_db(paper=paper)
-    if not positions:
-        return closed
-
-    broker = _get_broker(paper)
-    if broker is None:
-        return closed
-
-    db_path = _get_db_path()
-
-    for pos in positions:
-        try:
-            sym = str(pos.get("symbol", "")).upper()
-            entry_price = float(pos.get("entry", 0.0))
-
-            if entry_price <= 0:
-                continue
-
-            # Step 1: enforce minimum hold time
-            ts_entry_raw = pos.get("ts_entry", None)
-            if ts_entry_raw:
-                try:
-                    ts_entry_dt = datetime.datetime.fromisoformat(str(ts_entry_raw))
-                    held_mins = (
-                        datetime.datetime.now() - ts_entry_dt
-                    ).total_seconds() / 60.0
-                except Exception:
-                    held_mins = (
-                        _SPOT_THESIS_MIN_HOLD_MINS  # assume enough time if parse fails
-                    )
-            else:
-                held_mins = _SPOT_THESIS_MIN_HOLD_MINS
-
-            if held_mins < _SPOT_THESIS_MIN_HOLD_MINS:
-                logger.debug(
-                    f"[spot_engine] thesis_exit {sym}: held {held_mins:.1f}m "
-                    f"< min {_SPOT_THESIS_MIN_HOLD_MINS:.0f}m — skipping"
-                )
-                continue
-
-            # Step 2: look up most recent composite_score within 45 min
-            fresh_score: Optional[float] = None
-            try:
-                con = sqlite3.connect(db_path, timeout=5)
-                row = con.execute(
-                    """
-                    SELECT composite_score
-                    FROM scan_candidates
-                    WHERE (symbol LIKE ? OR underlying = ?)
-                      AND datetime(replace(substr(ts,1,19),'T',' '))
-                          >= datetime('now','-45 minutes')
-                    ORDER BY ts DESC
-                    LIMIT 1
-                    """,
-                    (f"%{sym}%", sym),
-                ).fetchone()
-                con.close()
-                if row and row[0] is not None:
-                    fresh_score = float(row[0])
-            except Exception as db_err:
-                logger.debug(
-                    f"[spot_engine] thesis_exit scan_candidates query error for {sym}: {db_err}"
-                )
-
-            # Step 4: if no fresh data, skip — never close on stale data
-            if fresh_score is None:
-                logger.debug(
-                    f"[spot_engine] thesis_exit {sym}: no fresh scan data in 45m — skipping"
-                )
-                continue
-
-            # Step 3: close if score has degraded below threshold
-            if fresh_score < _SPOT_THESIS_MIN_SCORE:
-                logger.info(
-                    f"[spot_engine] THESIS EXIT {sym}: composite={fresh_score:.1f} "
-                    f"< {_SPOT_THESIS_MIN_SCORE:.1f} after {held_mins:.1f}m hold — closing"
-                )
-                result = close_spot(sym, paper=paper)
-                if result:
-                    result["trigger"] = "thesis_exit"
-                    result["composite_score_at_exit"] = fresh_score
-                    closed.append(result)
-                    logger.info(
-                        f"[spot_engine] {'PAPER' if paper else 'LIVE'} THESIS CLOSE {sym}: "
-                        f"pnl=${result.get('pnl_usd', 0):.2f}"
-                    )
-                else:
-                    logger.error(
-                        f"[spot_engine] THESIS CLOSE FAILED for {sym} — position still open"
-                    )
-            else:
-                logger.debug(
-                    f"[spot_engine] thesis_exit {sym}: score={fresh_score:.1f} OK "
-                    f"(threshold={_SPOT_THESIS_MIN_SCORE:.1f}) — holding"
-                )
-
-        except Exception as e:
-            logger.warning(f"[spot_engine] check_spot_thesis_exits error for pos: {e}")
-
-    return closed
-
-
-# ── check_spot_targets ────────────────────────────────────────────────────────
 
 
 def check_spot_targets(paper: bool = True) -> List[Dict]:
-    """
-    Close spot positions that have reached their fixed profit target.
-
-    Target = entry * (1 + stop_pct * SPOT_TARGET_R), stored in
-    open_positions.target at buy time (3R default → 9% gain on 3% stop).
-
-    Fee math: at 1.2% round-trip cost and 3R target the break-even win
-    rate is ~35%, well within what the economics gate's score floor (≥74)
-    delivers empirically.
-
-    Returns list of closed position dicts.
-    """
-    _load_config()
     closed: List[Dict] = []
-
-    positions = _load_spot_positions_from_db(paper=paper)
-    if not positions:
-        return closed
-
     broker = _get_broker(paper)
     if broker is None:
         return closed
-
-    for pos in positions:
-        try:
-            sym = str(pos.get("symbol", "")).upper()
-            target_price = float(pos.get("target", 0.0))
-            entry_price = float(pos.get("entry", 0.0))
-
-            if target_price <= 0 or target_price <= entry_price:
-                continue  # no valid target stored (pre-upgrade position)
-
-            current_price = broker.get_mark_price(sym)
-            if current_price <= 0:
-                logger.warning(
-                    f"[spot_engine] check_spot_targets: cannot get price for {sym}"
-                )
-                continue
-
-            if current_price >= target_price:
-                profit_pct = (current_price - entry_price) / entry_price * 100
-                logger.info(
-                    f"[spot_engine] TARGET HIT {sym}: price={current_price:.4f} "
-                    f">= target={target_price:.4f} ({profit_pct:.2f}%) — closing"
-                )
-                result = close_spot(sym, paper=paper)
-                if result:
-                    result["trigger"] = "target_hit"
-                    result["target_price"] = target_price
-                    closed.append(result)
-                    logger.info(
-                        f"[spot_engine] {'PAPER' if paper else 'LIVE'} TARGET CLOSE {sym}: "
-                        f"pnl=${result.get('pnl_usd', 0):.2f}"
-                    )
-                else:
-                    logger.error(
-                        f"[spot_engine] TARGET CLOSE FAILED for {sym} — position still open"
-                    )
-        except Exception as e:
-            logger.warning(f"[spot_engine] check_spot_targets error for pos: {e}")
-
+    for pos in _load_spot_positions_from_db(paper=paper):
+        sym = str(pos.get("symbol") or "").upper()
+        target = float(pos.get("target") or 0.0)
+        current_price = float(broker.get_mark_price(sym) or 0.0)
+        if target > 0 and current_price >= target:
+            result = close_spot(sym, paper=paper, exit_reason="target_hit")
+            if result:
+                result["trigger"] = "target_hit"
+                closed.append(result)
     return closed
 
 
-# ── check_spot_eod_close ──────────────────────────────────────────────────────
+def check_spot_stagnation_exits(paper: bool = True) -> List[Dict]:
+    closed: List[Dict] = []
+    broker = _get_broker(paper)
+    if broker is None:
+        return closed
+    for pos in _load_spot_positions_from_db(paper=paper):
+        sym = str(pos.get("symbol") or "").upper()
+        try:
+            spot_state = build_spot_state(sym)
+        except Exception:
+            continue
+        entry = float(pos.get("entry") or 0.0)
+        stop = float(pos.get("stop") or 0.0)
+        current_price = float(broker.get_mark_price(sym) or 0.0)
+        ts_entry = str(pos.get("ts_entry") or "")
+        if not ts_entry or entry <= 0 or stop <= 0 or current_price <= 0:
+            continue
+        held_min = (
+            datetime.datetime.now() - datetime.datetime.fromisoformat(ts_entry)
+        ).total_seconds() / 60.0
+        expected_half_life = max(6.0, min(45.0, float(spot_state.get("ou_halflife_minutes") or 15.0)))
+        risk_per_unit = entry - stop
+        progress_r = ((current_price - entry) / risk_per_unit) if risk_per_unit > 0 else 0.0
+        s5 = spot_state["frames"]["5m"]
+        if held_min > expected_half_life and progress_r < 0.25 and s5["v"] <= 0 and s5["a"] <= 0:
+            result = close_spot(sym, paper=paper, exit_reason="stagnation_exit")
+            if result:
+                result["trigger"] = "stagnation_exit"
+                closed.append(result)
+    return closed
+
+
+def check_spot_thesis_exits(paper: bool = True) -> List[Dict]:
+    closed: List[Dict] = []
+    for pos in _load_spot_positions_from_db(paper=paper):
+        sym = str(pos.get("symbol") or "").upper()
+        ts_entry = str(pos.get("ts_entry") or "")
+        if ts_entry:
+            try:
+                held_min = (
+                    datetime.datetime.now() - datetime.datetime.fromisoformat(ts_entry)
+                ).total_seconds() / 60.0
+                if held_min < float(SPOT_THESIS_MIN_HOLD_MINS):
+                    continue
+            except Exception:
+                pass
+        try:
+            spot_state = build_spot_state(sym)
+        except Exception:
+            continue
+        if spot_state["derivative_score"] < SPOT_THESIS_MIN_SCORE or spot_state["frames"]["5m"]["v"] <= 0:
+            result = close_spot(sym, paper=paper, exit_reason="thesis_decay")
+            if result:
+                result["trigger"] = "thesis_decay"
+                closed.append(result)
+    return closed
 
 
 def check_spot_eod_close(paper: bool = True) -> List[Dict]:
-    """
-    Flatten all open spot positions at or after SPOT_EOD_CLOSE_TIME ET on weekdays.
-
-    Prevents overnight gap exposure. Default close time is 15:45 ET — 15 minutes
-    before the US equity close, when crypto liquidity is still high.
-
-    Returns list of closed position dicts (empty if not yet EOD or no positions).
-    """
+    if not SPOT_EOD_FLATTEN_ENABLED:
+        return []
     import pytz
-
-    _load_config()
-    closed: List[Dict] = []
 
     et = pytz.timezone("America/New_York")
     now_et = datetime.datetime.now(et)
-
-    if now_et.weekday() >= 5:  # Saturday=5, Sunday=6
-        return closed
-
+    if now_et.weekday() >= 5:
+        return []
     try:
-        eod_h, eod_m = [int(x) for x in _SPOT_EOD_CLOSE_TIME.split(":")]
+        eod_h, eod_m = [int(x) for x in SPOT_EOD_CLOSE_TIME.split(":")]
     except Exception:
         eod_h, eod_m = 15, 45
-
     if now_et.hour < eod_h or (now_et.hour == eod_h and now_et.minute < eod_m):
-        return closed  # not yet EOD close time
-
-    positions = _load_spot_positions_from_db(paper=paper)
-    if not positions:
-        return closed
-
-    for pos in positions:
-        sym = str(pos.get("symbol", "")).upper()
-        logger.info(
-            f"[spot_engine] EOD CLOSE {sym}: {_SPOT_EOD_CLOSE_TIME} ET reached — flattening"
-        )
-        result = close_spot(sym, paper=paper)
+        return []
+    closed: List[Dict] = []
+    for pos in _load_spot_positions_from_db(paper=paper):
+        result = close_spot(str(pos.get("symbol") or ""), paper=paper, exit_reason="eod_close")
         if result:
             result["trigger"] = "eod_close"
             closed.append(result)
-            logger.info(
-                f"[spot_engine] {'PAPER' if paper else 'LIVE'} EOD CLOSE {sym}: "
-                f"pnl=${result.get('pnl_usd', 0):.2f}"
-            )
-        else:
-            logger.error(
-                f"[spot_engine] EOD CLOSE FAILED for {sym} — position still open"
-            )
-
     return closed

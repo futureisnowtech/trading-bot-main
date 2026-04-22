@@ -176,7 +176,7 @@ def _paper_spot_balance_summary(base: float) -> dict:
         deployed_usd += current_value
         held_by_symbol[sym] = held_by_symbol.get(sym, 0.0) + current_value
 
-    return {
+    result = {
         "usd_available": round(max(base - deployed_usd, 0.0), 2),
         "btc_held_usd": round(held_by_symbol.get("BTC", 0.0), 2),
         "eth_held_usd": round(held_by_symbol.get("ETH", 0.0), 2),
@@ -186,6 +186,9 @@ def _paper_spot_balance_summary(base: float) -> dict:
         "spot_equity": round(max(base - deployed_usd, 0.0) + deployed_usd, 2),
         "source": "paper_db",
     }
+    for sym, amt in held_by_symbol.items():
+        result[f"{sym.lower()}_held_usd"] = round(amt, 2)
+    return result
 
 
 # ── Coinbase balance ──────────────────────────────────────────────────────────
@@ -390,7 +393,7 @@ def get_spot_balance_summary() -> dict:
             px = broker.get_mark_price(sym)
             held_usd_by_symbol[sym] = round(qty_f * px, 2) if px > 0 else 0.0
         spot_equity = round(usd + sum(held_usd_by_symbol.values()), 2)
-        return {
+        result = {
             "usd_available": round(usd, 2),
             "btc_held_usd": round(held_usd_by_symbol.get("BTC", 0.0), 2),
             "eth_held_usd": round(held_usd_by_symbol.get("ETH", 0.0), 2),
@@ -400,6 +403,9 @@ def get_spot_balance_summary() -> dict:
             "spot_equity": spot_equity,
             "source": "live_api",
         }
+        for sym, amt in held_usd_by_symbol.items():
+            result[f"{sym.lower()}_held_usd"] = round(amt, 2)
+        return result
     except Exception as e:
         logger.warning(f"[balance] get_spot_balance_summary error: {e}")
         return {

@@ -24,6 +24,29 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 
+def _spot_state(symbol="ETH"):
+    return {
+        "symbol": symbol,
+        "regime": "TREND",
+        "derivative_score": 72.0,
+        "setup_family": "impulse_continuation",
+        "structural_confirm_count": 2,
+        "structural_confirms": "kst,supertrend",
+        "tf_5m_state": "z=0.4|v=0.2|a=0.1|score=71",
+        "tf_30m_state": "z=0.3|v=0.1|a=0.04|score=64",
+        "tf_4h_state": "z=0.2|v=0.05|a=0.02|score=60",
+        "tf_1d_state": "z=0.1|v=0.03|a=0.01|score=56",
+        "ou_halflife_minutes": 10.0,
+        "rv_ratio": 1.0,
+        "frames": {
+            "5m": {"v": 0.2, "a": 0.1, "frame_score": 71.0, "atr_pct": 0.006, "price": 2500.0},
+            "30m": {"v": 0.1, "a": 0.04, "z": 0.3, "frame_score": 64.0},
+            "4h": {"v": 0.05, "a": 0.02, "z": 0.2, "frame_score": 60.0},
+            "1d": {"v": 0.03, "a": 0.01, "z": 0.1, "frame_score": 56.0},
+        },
+    }
+
+
 # ── SP-01: paper mode returns mock fill, no API calls ────────────────────────
 
 
@@ -76,7 +99,6 @@ def test_sp02_blocks_duplicate_position(proof_runtime, monkeypatch):
     monkeypatch.setattr(config, "SPOT_MIN_ORDER_USD", 10.0, raising=False)
     monkeypatch.setattr(config, "SPOT_MAX_DEPLOYED_PCT", 0.40, raising=False)
 
-    # Reload config into spot_engine
     spot_engine._load_config()
 
     # Seed a fake open position in DB
@@ -96,7 +118,8 @@ def test_sp02_blocks_duplicate_position(proof_runtime, monkeypatch):
         leverage=1,
     )
 
-    result = spot_engine.open_spot("ETH", 50.0, paper=True)
+    monkeypatch.setattr(spot_engine, "build_spot_state", lambda symbol: _spot_state(symbol))
+    result = spot_engine.open_spot("ETH", 50.0, paper=True, final_spot_score=72.0)
     assert result is None, "must block when position already open"
 
 
@@ -130,8 +153,11 @@ def test_sp03_blocks_deployment_cap(monkeypatch):
         spot_engine, "_load_spot_positions_from_db", lambda paper=True: []
     )
 
-    # Request $50 which exceeds 40% of $100 = $40
-    result = spot_engine.open_spot("ETH", 50.0, paper=False)
+    monkeypatch.setattr(spot_engine, "build_spot_state", lambda symbol: _spot_state(symbol))
+
+    # Request $50 which exceeds 50% of $100 = $50? no, set total alloc cap lower for this proof.
+    monkeypatch.setattr(spot_engine, "SPOT_TOTAL_ALLOC_CAP_PCT", 0.40)
+    result = spot_engine.open_spot("ETH", 50.0, paper=False, final_spot_score=72.0)
     assert result is None, "must block when size_usd > deployment cap"
 
 
@@ -147,7 +173,7 @@ def test_sp04_blocks_unsupported_symbol(monkeypatch):
     monkeypatch.setattr(config, "SPOT_MIN_ORDER_USD", 10.0, raising=False)
     spot_engine._load_config()
 
-    result = spot_engine.open_spot("DOGE", 50.0, paper=True)
+    result = spot_engine.open_spot("DOGE", 50.0, paper=True, final_spot_score=72.0)
     assert result is None, "DOGE must be blocked — not in SPOT_SYMBOLS"
 
 
@@ -161,7 +187,7 @@ def test_sp05_blocks_lane_disabled(monkeypatch):
     monkeypatch.setattr(config, "SPOT_LANE_ACTIVE", False, raising=False)
     spot_engine._load_config()
 
-    result = spot_engine.open_spot("ETH", 50.0, paper=True)
+    result = spot_engine.open_spot("ETH", 50.0, paper=True, final_spot_score=72.0)
     assert result is None, "must block when SPOT_LANE_ACTIVE=False"
 
 
@@ -191,8 +217,9 @@ def test_sp06_writes_to_trades_table(proof_runtime, monkeypatch):
     mock_broker._fallback_price = lambda sym: 2500.0
 
     monkeypatch.setattr(spot_engine, "_get_broker", lambda paper: mock_broker)
+    monkeypatch.setattr(spot_engine, "build_spot_state", lambda symbol: _spot_state(symbol))
 
-    result = spot_engine.open_spot("ETH", 25.0, paper=True)
+    result = spot_engine.open_spot("ETH", 25.0, paper=True, final_spot_score=72.0)
     assert result is not None, "open_spot should succeed"
 
     # Verify trade written

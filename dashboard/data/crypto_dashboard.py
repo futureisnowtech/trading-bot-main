@@ -51,7 +51,13 @@ def get_crypto_header() -> dict:
 
     # Lane runtime state
     lane = _q1(
-        "SELECT health, active FROM lane_runtime_state WHERE lane_id='crypto' ORDER BY id DESC LIMIT 1"
+        """
+        SELECT health, active, autonomous_enabled, mode
+        FROM lane_runtime_state
+        WHERE lane_id='crypto'
+        ORDER BY id DESC
+        LIMIT 1
+        """
     )
     result["lane_health"] = lane.get("health") or "UNKNOWN"
     result["perp_active"] = bool(lane.get("active"))
@@ -61,7 +67,7 @@ def get_crypto_header() -> dict:
         from config import SPOT_LANE_ACTIVE
         from config import SPOT_SYMBOLS
 
-        result["spot_active"] = bool(SPOT_LANE_ACTIVE)
+        result["spot_active"] = bool(SPOT_LANE_ACTIVE) and bool(lane.get("active", 1))
         result["spot_symbols"] = list(SPOT_SYMBOLS)
     except Exception:
         result["spot_active"] = False
@@ -84,16 +90,6 @@ def get_crypto_header() -> dict:
     except Exception:
         pass
 
-    # Open position count
-    try:
-        from db import _runtime_paper_flag
-
-        paper = _runtime_paper_flag()
-        r = _q1("SELECT COUNT(*) AS n FROM open_positions WHERE paper=?", (paper,))
-        result["open_count"] = int(r.get("n") or 0)
-    except Exception:
-        pass
-
     # ── Deployment percentages (spot and perp, computed separately) ───────────
     # spot_deployed_pct = spot notional / spot_usd_available (from spot balance truth)
     # perp_deployed_pct = perp notional / total account equity
@@ -101,8 +97,11 @@ def get_crypto_header() -> dict:
         from data.positions import get_spot_positions_dashboard, get_perp_positions
 
         spot_positions = get_spot_positions_dashboard()
+        perp_positions = get_perp_positions()
+        result["open_count"] = len(spot_positions) + len(perp_positions)
         spot_notional = sum(
-            abs(float(p.get("qty") or 0)) * float(p.get("entry") or 0)
+            float(p.get("current_value") or 0.0)
+            or abs(float(p.get("qty") or 0)) * float(p.get("current_price") or p.get("entry") or 0)
             for p in spot_positions
         )
         try:
@@ -121,9 +120,8 @@ def get_crypto_header() -> dict:
         except Exception:
             result["spot_deployed_pct"] = 0.0
 
-        perp_positions = get_perp_positions()
         perp_notional = sum(
-            abs(float(p.get("qty") or 0)) * float(p.get("entry") or 0)
+            abs(float(p.get("qty") or 0)) * float(p.get("current_price") or p.get("entry") or 0)
             for p in perp_positions
         )
         # Use buying_power already fetched as the perp account base
@@ -151,7 +149,9 @@ def get_crypto_opportunity_board(hours: int = 24) -> list[dict]:
         f"""
         SELECT
             COALESCE(symbol, '') AS symbol,
-            COALESCE(underlying, symbol, '') AS underlying,
+            COALESCE(base_asset, symbol, '') AS underlying,
+            COALESCE(exchange, source, '') AS exchange,
+            COALESCE(primary_setup, '') AS primary_setup,
             COALESCE(direction, '') AS direction,
             COALESCE(recommended_lane, '') AS recommended_lane,
             COALESCE(tradeability_status, 'not_evaluated') AS status,
@@ -159,11 +159,21 @@ def get_crypto_opportunity_board(hours: int = 24) -> list[dict]:
             COALESCE(manual_executable, 0) AS manual_executable,
             COALESCE(composite_score, 0.0) AS score,
             COALESCE(econ_approved, 0) AS econ_approved,
-            COALESCE(expected_profit, 0.0) AS expected_profit,
+            COALESCE(scanner_expected_profit, 0.0) AS expected_profit,
             COALESCE(stop_pct, 0.0) AS stop_pct,
             COALESCE(trade_blocked_reason, '') AS trade_blocked_reason,
             COALESCE(trade_size_block_reason, '') AS trade_size_block_reason,
             COALESCE(trade_source_reason, '') AS trade_source_reason,
+            COALESCE(spot_regime, '') AS spot_regime,
+            COALESCE(setup_family, '') AS setup_family,
+            COALESCE(tf_5m_state, '') AS tf_5m_state,
+            COALESCE(tf_30m_state, '') AS tf_30m_state,
+            COALESCE(tf_4h_state, '') AS tf_4h_state,
+            COALESCE(tf_1d_state, '') AS tf_1d_state,
+            COALESCE(structural_confirms, '') AS structural_confirms,
+            COALESCE(execution_route, '') AS execution_route,
+            COALESCE(cooldown_until, '') AS cooldown_until,
+            COALESCE(microstructure_veto, '') AS microstructure_veto,
             ts,
             COALESCE(decision, '') AS decision
         FROM scan_candidates

@@ -1,8 +1,8 @@
 """
 execution/coinbase_spot_broker.py — Coinbase Advanced Trade spot broker adapter.
 
-Supports BTC-USD, ETH-USD, SOL-USD, and XRP-USD spot.  No leverage, no shorting,
-no margin.
+Supports BTC-USD, ETH-USD, SOL-USD, XRP-USD, LTC-USD, DOGE-USD, ADA-USD,
+and LINK-USD spot. No leverage, no shorting, no margin.
 
 Authentication — same CDP JWT / ES256 credentials as coinbase_broker.py:
   COINBASE_CDP_KEY_NAME    organizations/{org_id}/apiKeys/{key_id}
@@ -57,6 +57,10 @@ SPOT_PRODUCT_SPECS: dict[str, dict] = {
     "ETH": {"product_id": "ETH-USD", "min_order_usd": 1.0},
     "SOL": {"product_id": "SOL-USD", "min_order_usd": 1.0},
     "XRP": {"product_id": "XRP-USD", "min_order_usd": 1.0},
+    "LTC": {"product_id": "LTC-USD", "min_order_usd": 1.0},
+    "DOGE": {"product_id": "DOGE-USD", "min_order_usd": 1.0},
+    "ADA": {"product_id": "ADA-USD", "min_order_usd": 1.0},
+    "LINK": {"product_id": "LINK-USD", "min_order_usd": 1.0},
 }
 
 SPOT_SUPPORTED_SYMBOLS = set(SPOT_PRODUCT_SPECS.keys())
@@ -91,7 +95,7 @@ class CoinbaseSpotSymbolError(ValueError):
 
 class CoinbaseSpotBroker:
     """
-    Minimal spot broker for BTC-USD / ETH-USD / SOL-USD / XRP-USD.
+    Minimal spot broker for the configured 8-symbol Coinbase spot universe.
 
     Interface:
       connect()
@@ -192,7 +196,7 @@ class CoinbaseSpotBroker:
 
     def connect(self) -> bool:
         if self._paper:
-            logger.info("[spot] Connected (PAPER) — Coinbase spot BTC/ETH/SOL/XRP")
+            logger.info("[spot] Connected (PAPER) — Coinbase spot 8-symbol universe")
             self._connected = True
             return True
 
@@ -206,7 +210,7 @@ class CoinbaseSpotBroker:
         try:
             # Verify auth with a lightweight accounts call
             self._request("GET", "/api/v3/brokerage/accounts")
-            logger.info("[spot] Connected (LIVE) — Coinbase spot BTC/ETH/SOL/XRP")
+            logger.info("[spot] Connected (LIVE) — Coinbase spot 8-symbol universe")
             self._connected = True
             return True
         except Exception as e:
@@ -305,6 +309,10 @@ class CoinbaseSpotBroker:
         "ETH": 2_500.0,
         "SOL": 180.0,
         "XRP": 2.0,
+        "LTC": 85.0,
+        "DOGE": 0.22,
+        "ADA": 0.95,
+        "LINK": 22.0,
     }
 
     def _fallback_price(self, clean_sym: str) -> float:
@@ -318,6 +326,263 @@ class CoinbaseSpotBroker:
         except Exception:
             pass
         return self._PAPER_PRICE_FALLBACKS.get(clean_sym, 0.0)
+
+    def get_spot_top_of_book(self, symbol: str) -> dict:
+        """Return best bid/ask and simple depth truth for symbol."""
+        clean = self._clean_symbol(symbol)
+        if self._paper:
+            px = self._fallback_price(clean)
+            return {
+                "best_bid": px * 0.9995 if px > 0 else 0.0,
+                "best_ask": px * 1.0005 if px > 0 else 0.0,
+                "spread_pct": 0.001 if px > 0 else 0.0,
+                "top_depth_usd": 1_000_000.0,
+            }
+        try:
+            spec = self._spec(symbol)
+            data = self._request(
+                "GET", f"/api/v3/brokerage/product_book?product_id={spec['product_id']}&limit=5"
+            )
+            book = data.get("pricebook") or {}
+            bids = book.get("bids") or []
+            asks = book.get("asks") or []
+            best_bid = float((bids[0] or {}).get("price", 0) if bids else 0)
+            best_ask = float((asks[0] or {}).get("price", 0) if asks else 0)
+            bid_depth = sum(
+                float(b.get("price", 0) or 0) * float(b.get("size", 0) or 0) for b in bids[:3]
+            )
+            ask_depth = sum(
+                float(a.get("price", 0) or 0) * float(a.get("size", 0) or 0) for a in asks[:3]
+            )
+            mid = (best_bid + best_ask) / 2.0 if best_bid > 0 and best_ask > 0 else 0.0
+            spread_pct = ((best_ask - best_bid) / mid) if mid > 0 else 0.0
+            return {
+                "best_bid": best_bid,
+                "best_ask": best_ask,
+                "spread_pct": spread_pct,
+                "top_depth_usd": min(bid_depth, ask_depth),
+            }
+        except Exception as e:
+            logger.warning(f"[spot] get_spot_top_of_book error {symbol}: {e}")
+            px = self.get_mark_price(symbol)
+            return {
+                "best_bid": px * 0.9995 if px > 0 else 0.0,
+                "best_ask": px * 1.0005 if px > 0 else 0.0,
+                "spread_pct": 0.001 if px > 0 else 0.0,
+                "top_depth_usd": 0.0,
+            }
+
+    def _normalise_order_status(self, order_id: str, fallback_symbol: str = "") -> dict:
+        if self._paper:
+            return {
+                "order_id": order_id,
+                "status": "FILLED",
+                "filled_size": 0.0,
+                "filled_value": 0.0,
+                "average_filled_price": 0.0,
+                "completion_pct": 100.0,
+                "fee_usd": 0.0,
+                "symbol": fallback_symbol,
+            }
+        data = self._request("GET", f"/api/v3/brokerage/orders/historical/{order_id}")
+        order = data.get("order") or {}
+        fee_usd = 0.0
+        fills = self.list_spot_fills(order_id)
+        if fills:
+            fee_usd = sum(float(f.get("fee_usd") or 0.0) for f in fills)
+        avg_price = float(
+            order.get("average_filled_price")
+            or order.get("avg_price")
+            or order.get("filled_average_price")
+            or 0.0
+        )
+        filled_size = float(order.get("filled_size") or order.get("base_size") or 0.0)
+        filled_value = float(order.get("filled_value") or 0.0)
+        completion = float(
+            order.get("completion_percentage")
+            or order.get("completion_percent")
+            or (100.0 if str(order.get("status", "")).upper() == "FILLED" else 0.0)
+        )
+        return {
+            "order_id": order_id,
+            "status": str(order.get("status") or "UNKNOWN").upper(),
+            "filled_size": filled_size,
+            "filled_value": filled_value,
+            "average_filled_price": avg_price,
+            "completion_pct": completion,
+            "fee_usd": fee_usd,
+            "symbol": fallback_symbol or self._clean_symbol(order.get("product_id", "")),
+        }
+
+    def get_spot_order_status(self, order_id: str, fallback_symbol: str = "") -> dict:
+        try:
+            return self._normalise_order_status(order_id, fallback_symbol=fallback_symbol)
+        except Exception as e:
+            logger.warning(f"[spot] get_spot_order_status error {order_id}: {e}")
+            return {
+                "order_id": order_id,
+                "status": "UNKNOWN",
+                "filled_size": 0.0,
+                "filled_value": 0.0,
+                "average_filled_price": 0.0,
+                "completion_pct": 0.0,
+                "fee_usd": 0.0,
+                "symbol": fallback_symbol,
+            }
+
+    def cancel_spot_order(self, order_id: str) -> bool:
+        if self._paper:
+            return True
+        try:
+            self._request(
+                "POST",
+                "/api/v3/brokerage/orders/batch_cancel",
+                {"order_ids": [order_id]},
+            )
+            return True
+        except Exception as e:
+            logger.warning(f"[spot] cancel_spot_order error {order_id}: {e}")
+            return False
+
+    def list_spot_fills(self, order_id: str) -> List[dict]:
+        if self._paper:
+            return []
+        try:
+            data = self._request(
+                "GET", f"/api/v3/brokerage/orders/historical/fills?order_id={order_id}"
+            )
+            fills = data.get("fills") or []
+            result = []
+            for fill in fills:
+                comm = fill.get("commission_detail_total") or {}
+                fee_usd = float(
+                    comm.get("total_commission")
+                    or fill.get("commission")
+                    or fill.get("fee")
+                    or 0.0
+                )
+                result.append(
+                    {
+                        "order_id": str(fill.get("order_id") or order_id),
+                        "price": float(fill.get("price") or 0.0),
+                        "size": float(fill.get("size") or fill.get("size_in_quote") or 0.0),
+                        "fee_usd": fee_usd,
+                    }
+                )
+            return result
+        except Exception as e:
+            logger.warning(f"[spot] list_spot_fills error {order_id}: {e}")
+            return []
+
+    def place_limit_buy_spot(
+        self, symbol: str, size_usd: float, limit_price: float, post_only: bool = True
+    ) -> Optional[dict]:
+        try:
+            spec = self._spec(symbol)
+        except CoinbaseSpotSymbolError as e:
+            logger.warning(str(e))
+            return None
+        clean = self._clean_symbol(symbol)
+        qty = size_usd / limit_price if limit_price > 0 else 0.0
+        if qty <= 0:
+            return None
+        if self._paper:
+            order_id = f"spot_limit_paper_{clean}_{int(time.time())}"
+            return {
+                "order_id": order_id,
+                "symbol": clean,
+                "side": "BUY",
+                "status": "OPEN",
+                "filled_size": 0.0,
+                "filled_value": 0.0,
+                "average_filled_price": 0.0,
+                "paper": True,
+            }
+        body = {
+            "client_order_id": str(uuid.uuid4()),
+            "product_id": spec["product_id"],
+            "side": "BUY",
+            "order_configuration": {
+                "limit_limit_gtc": {
+                    "quote_size": str(round(size_usd, 2)),
+                    "base_size": str(round(qty, 8)),
+                    "limit_price": str(round(limit_price, 8)),
+                    "post_only": bool(post_only),
+                    "rfq_disabled": True,
+                }
+            },
+        }
+        try:
+            resp = self._request("POST", "/api/v3/brokerage/orders", body)
+            order = resp.get("success_response") or resp.get("order") or {}
+            order_id = order.get("order_id", body["client_order_id"])
+            return {
+                "order_id": order_id,
+                "symbol": clean,
+                "side": "BUY",
+                "status": "OPEN",
+                "filled_size": 0.0,
+                "filled_value": 0.0,
+                "average_filled_price": 0.0,
+                "paper": False,
+            }
+        except Exception as e:
+            logger.error(f"[spot] place_limit_buy_spot error {symbol}: {e}")
+            return None
+
+    def place_limit_sell_spot(
+        self, symbol: str, size_units: float, limit_price: float, post_only: bool = True
+    ) -> Optional[dict]:
+        try:
+            spec = self._spec(symbol)
+        except CoinbaseSpotSymbolError as e:
+            logger.warning(str(e))
+            return None
+        clean = self._clean_symbol(symbol)
+        if size_units <= 0 or limit_price <= 0:
+            return None
+        if self._paper:
+            order_id = f"spot_limit_paper_{clean}_{int(time.time())}"
+            return {
+                "order_id": order_id,
+                "symbol": clean,
+                "side": "SELL",
+                "status": "OPEN",
+                "filled_size": 0.0,
+                "filled_value": 0.0,
+                "average_filled_price": 0.0,
+                "paper": True,
+            }
+        body = {
+            "client_order_id": str(uuid.uuid4()),
+            "product_id": spec["product_id"],
+            "side": "SELL",
+            "order_configuration": {
+                "limit_limit_gtc": {
+                    "base_size": str(round(size_units, 8)),
+                    "limit_price": str(round(limit_price, 8)),
+                    "post_only": bool(post_only),
+                    "rfq_disabled": True,
+                }
+            },
+        }
+        try:
+            resp = self._request("POST", "/api/v3/brokerage/orders", body)
+            order = resp.get("success_response") or resp.get("order") or {}
+            order_id = order.get("order_id", body["client_order_id"])
+            return {
+                "order_id": order_id,
+                "symbol": clean,
+                "side": "SELL",
+                "status": "OPEN",
+                "filled_size": 0.0,
+                "filled_value": 0.0,
+                "average_filled_price": 0.0,
+                "paper": False,
+            }
+        except Exception as e:
+            logger.error(f"[spot] place_limit_sell_spot error {symbol}: {e}")
+            return None
 
     # ── Orders ────────────────────────────────────────────────────────────────
 
@@ -352,6 +617,9 @@ class CoinbaseSpotBroker:
                 "side": "BUY",
                 "filled_size": str(round(qty, 6)),
                 "filled_value": str(round(size_usd, 2)),
+                "average_filled_price": str(round(price, 8)),
+                "fee_usd": 0.0,
+                "execution_route": "paper_market",
                 "status": "FILLED",
                 "paper": True,
             }
@@ -382,22 +650,31 @@ class CoinbaseSpotBroker:
                 raise RuntimeError(f"spot_broker_ack_missing: {resp}")
             real_id = order.get("order_id", body["client_order_id"])
             logger.info(f"[spot] LIVE BUY {clean}: ${size_usd:.2f} order_id={real_id}")
+            status = self.get_spot_order_status(real_id, fallback_symbol=clean)
+            avg_price = float(status.get("average_filled_price") or price or 0.0)
+            filled_size = float(status.get("filled_size") or qty or 0.0)
+            filled_value = float(status.get("filled_value") or size_usd or 0.0)
             result = {
                 "order_id": real_id,
                 "symbol": clean,
                 "product_id": spec["product_id"],
                 "side": "BUY",
-                "filled_size": str(round(qty, 6)),
-                "filled_value": str(round(size_usd, 2)),
+                "filled_size": str(round(filled_size, 8)),
+                "filled_value": str(round(filled_value, 2)),
+                "average_filled_price": str(round(avg_price or price, 8)),
+                "fee_usd": float(status.get("fee_usd") or 0.0),
+                "execution_route": "taker_market",
                 "status": "FILLED",
                 "paper": False,
             }
             existing = self._holdings.get(clean, {"qty": 0.0, "avg_entry": 0.0})
             old_qty = existing["qty"]
             old_avg = existing["avg_entry"]
-            new_qty = old_qty + qty
+            new_qty = old_qty + filled_size
             new_avg = (
-                (old_qty * old_avg + qty * price) / new_qty if new_qty > 0 else price
+                (old_qty * old_avg + filled_size * (avg_price or price)) / new_qty
+                if new_qty > 0
+                else (avg_price or price)
             )
             self._holdings[clean] = {"qty": new_qty, "avg_entry": new_avg}
             return result
@@ -436,6 +713,9 @@ class CoinbaseSpotBroker:
                 "side": "SELL",
                 "filled_size": str(round(size_units, 6)),
                 "filled_value": str(round(value_usd, 2)),
+                "average_filled_price": str(round(price, 8)),
+                "fee_usd": 0.0,
+                "execution_route": "paper_market",
                 "status": "FILLED",
                 "paper": True,
             }
@@ -466,19 +746,26 @@ class CoinbaseSpotBroker:
             logger.info(
                 f"[spot] LIVE SELL {clean}: {size_units:.6f} units @ ~{price:.4f} order_id={real_id}"
             )
+            status = self.get_spot_order_status(real_id, fallback_symbol=clean)
+            filled_size = float(status.get("filled_size") or size_units or 0.0)
+            filled_value = float(status.get("filled_value") or value_usd or 0.0)
+            avg_price = float(status.get("average_filled_price") or price or 0.0)
             result = {
                 "order_id": real_id,
                 "symbol": clean,
                 "product_id": spec["product_id"],
                 "side": "SELL",
-                "filled_size": str(round(size_units, 6)),
-                "filled_value": str(round(value_usd, 2)),
+                "filled_size": str(round(filled_size, 8)),
+                "filled_value": str(round(filled_value, 2)),
+                "average_filled_price": str(round(avg_price or price, 8)),
+                "fee_usd": float(status.get("fee_usd") or 0.0),
+                "execution_route": "taker_market",
                 "status": "FILLED",
                 "paper": False,
             }
             holding = self._holdings.get(clean)
             if holding:
-                new_qty = max(0.0, holding["qty"] - size_units)
+                new_qty = max(0.0, holding["qty"] - filled_size)
                 if new_qty < 1e-8:
                     self._holdings.pop(clean, None)
                 else:

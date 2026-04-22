@@ -88,6 +88,12 @@ def _candidate_card(row: dict) -> str:
     direction = (row.get("direction") or "").upper()
     lane = row.get("recommended_lane", "")
     score = float(row.get("score") or 0)
+    spot_regime = row.get("spot_regime") or ""
+    setup_family = row.get("setup_family") or ""
+    structural_confirms = row.get("structural_confirms") or ""
+    execution_route = row.get("execution_route") or ""
+    cooldown_until = row.get("cooldown_until") or ""
+    microstructure_veto = row.get("microstructure_veto") or ""
     auto_ex = bool(row.get("auto_executable"))
     manual_ex = bool(row.get("manual_executable"))
     blocked_raw = row.get("trade_blocked_reason") or row.get("decision") or ""
@@ -138,6 +144,10 @@ def _candidate_card(row: dict) -> str:
     why_appeared_parts = []
     if setup_raw:
         why_appeared_parts.append(f"Setup: <strong>{_setup_label(setup_raw)}</strong>")
+    if setup_family:
+        why_appeared_parts.append(
+            f"Scalp family: <strong>{setup_family.replace('_', ' ').title()}</strong>"
+        )
     if exchange:
         why_appeared_parts.append(f"Source: {exchange.replace('_', ' ').title()}")
     if ts:
@@ -154,6 +164,16 @@ def _candidate_card(row: dict) -> str:
     if lane:
         why_works_parts.append(
             f"Venue: <strong style='color:{lane_color};'>{lane_label}</strong>"
+        )
+    if spot_regime:
+        why_works_parts.append(f"Regime: <strong>{spot_regime.title()}</strong>")
+    if structural_confirms:
+        why_works_parts.append(
+            f"Confirms: <strong>{structural_confirms.replace(',', ', ')}</strong>"
+        )
+    if execution_route:
+        why_works_parts.append(
+            f"Route: <strong>{execution_route.replace('_', ' ')}</strong>"
         )
     why_works = "<br>".join(why_works_parts)
 
@@ -177,6 +197,14 @@ def _candidate_card(row: dict) -> str:
     ):
         kill_parts.append(
             f'Source: <span style="color:{ui.C_AMBER};">{source_reason.replace("_", " ")}</span>'
+        )
+    if cooldown_until:
+        kill_parts.append(
+            f'Cooldown: <span style="color:{ui.C_AMBER};">{cooldown_until}</span>'
+        )
+    if microstructure_veto:
+        kill_parts.append(
+            f'Microstructure: <span style="color:{ui.C_AMBER};">{microstructure_veto.replace("_", " ")}</span>'
         )
     if not kill_parts:
         if status == "executable":

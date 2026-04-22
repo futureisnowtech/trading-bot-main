@@ -1,191 +1,111 @@
 """
-risk/spot_economics_gate.py — Pre-trade economics veto gate for Coinbase spot trades.
-
-Coinbase Advanced Trade charges ~0.6% taker per leg (1.2% round-trip) for small
-accounts. This gate blocks spot entries where fee burden is prohibitive relative
-to signal conviction.
-
-Usage:
-    from risk.spot_economics_gate import check_spot_economics
-
-    result = check_spot_economics(
-        symbol="BTC",
-        size_usd=400.0,
-        composite_score=72.0,
-        paper=False,
-    )
-    if result["approved"]:
-        # proceed with spot entry
-        ...
-
-Return dict keys (always present):
-    approved   bool   — True if trade may proceed
-    reason     str    — human-readable veto reason, or "approved"
-    fee_usd    float  — estimated round-trip fee in USD
-    edge_score float  — estimated edge pct minus round-trip fee pct (negative = losing)
+risk/spot_economics_gate.py — cost-aware economics gate for spot scalp entries.
 """
 
-import logging
+from __future__ import annotations
+
 import os
 
-logger = logging.getLogger(__name__)
+from config import SPOT_SCALP_SYMBOL_CONFIG
 
-# ── Config constants (overridable via environment) ────────────────────────────
-
-# Coinbase Advanced Trade taker fee for small accounts (~<$10K 30-day volume)
-SPOT_TAKER_FEE_PCT: float = float(
-    os.getenv("SPOT_TAKER_FEE_PCT", "0.006")
-)  # 0.6% per leg
-
-# Minimum composite signal score to allow a spot entry at all
-SPOT_MIN_COMPOSITE_SCORE: float = float(os.getenv("SPOT_MIN_COMPOSITE_SCORE", "55.0"))
-
-# Edge must be at least this many times the round-trip fee to be viable
-SPOT_MIN_EDGE_MULT: float = float(os.getenv("SPOT_MIN_EDGE_MULT", "2.0"))
-
-# Edge mapping: score 50 → 0% edge, score 100 → 5% edge (linear)
-_EDGE_SCALE: float = 0.05  # max edge pct at score=100
+SPOT_TAKER_FEE_PCT: float = float(os.getenv("SPOT_TAKER_FEE_PCT", "0.006"))
+SPOT_MAKER_FEE_PCT: float = float(os.getenv("SPOT_MAKER_FEE_PCT", "0.004"))
 
 
-# ── Public gate function ──────────────────────────────────────────────────────
+def _min_score_for_regime(regime: str) -> float:
+    return {"TREND": 62.0, "NEUTRAL": 66.0, "CHOP": 70.0}.get(regime, 66.0)
 
 
 def check_spot_economics(
     symbol: str,
     size_usd: float,
-    composite_score: float,
+    final_spot_score: float,
+    stop_pct: float,
+    target_r: float,
+    spread_pct: float,
+    bid_depth_usd: float,
+    ask_depth_usd: float,
+    regime: str,
+    execution_route_guess: str = "maker_first",
     paper: bool = False,
 ) -> dict:
-    """
-    Evaluate spot-trade economics before entry.
+    clean = symbol.upper()
+    cfg = SPOT_SCALP_SYMBOL_CONFIG.get(clean, {})
+    spread_cap = float(cfg.get("spread_cap_pct", 0.0025))
+    depth_min = float(cfg.get("depth_min_usd", 5000))
+    fee_leg = SPOT_MAKER_FEE_PCT if execution_route_guess == "maker_first" else SPOT_TAKER_FEE_PCT
+    total_fee_pct = fee_leg + SPOT_TAKER_FEE_PCT
+    total_cost_pct = total_fee_pct + max(0.0, spread_pct / 2.0)
+    fee_usd = size_usd * total_fee_pct
+    target_pct = stop_pct * target_r
+    net_target_pct = target_pct - total_cost_pct
+    net_stop_pct = stop_pct + total_cost_pct
+    projected_net_win_usd = size_usd * net_target_pct
 
-    Args:
-        symbol:          Underlying symbol (e.g. "BTC", "ETH"). Used for logging only.
-        size_usd:        Notional trade size in USD.
-        composite_score: Two-tower composite signal score (0–100).
-        paper:           If True, bypass all fee checks (paper trades are never blocked).
-
-    Returns:
-        {
-            "approved":   bool,
-            "reason":     str,   # "approved" | "below_min_composite" | "insufficient_edge_vs_fees"
-            "fee_usd":    float, # estimated round-trip fee in USD
-            "edge_score": float, # edge_pct - round_trip_fee_pct (positive = net positive EV)
-        }
-    """
-    round_trip_pct: float = 2.0 * SPOT_TAKER_FEE_PCT
-    fee_usd: float = size_usd * round_trip_pct
-
-    # Edge estimate: linear map from composite_score.
-    # score=50 → 0% edge, score=100 → +5% edge, score=0 → -5% edge.
-    edge_pct: float = (composite_score - 50.0) / 50.0 * _EDGE_SCALE
-
-    # Net edge after fees (positive = EV-positive trade)
-    edge_score: float = edge_pct - round_trip_pct
-
-    # Paper mode — never block, fees are not real
-    if paper:
-        logger.debug(
-            "spot_econ paper=%s symbol=%s score=%.1f fee_usd=%.4f → approved (paper)",
-            paper,
-            symbol,
-            composite_score,
-            fee_usd,
-        )
-        return {
-            "approved": True,
-            "reason": "approved",
-            "fee_usd": fee_usd,
-            "edge_score": edge_score,
-        }
-
-    # Gate 1: minimum composite score
-    if composite_score < SPOT_MIN_COMPOSITE_SCORE:
-        logger.info(
-            "spot_econ VETO symbol=%s score=%.1f < min=%.1f reason=below_min_composite",
-            symbol,
-            composite_score,
-            SPOT_MIN_COMPOSITE_SCORE,
-        )
+    if final_spot_score < _min_score_for_regime(regime):
         return {
             "approved": False,
-            "reason": "below_min_composite",
+            "reason": "below_regime_floor",
             "fee_usd": fee_usd,
-            "edge_score": edge_score,
+            "edge_score": net_target_pct - net_stop_pct,
+            "net_target_pct": net_target_pct,
+            "net_stop_pct": net_stop_pct,
+            "projected_net_win_usd": projected_net_win_usd,
+            "total_cost_pct": total_cost_pct,
         }
-
-    # Gate 2: edge must clear the fee hurdle by the required multiplier.
-    # During the defined intraday session we permit a slightly lower hurdle so
-    # the lane can recycle more often without opening the door to off-session
-    # churn.
-    min_edge_mult = SPOT_MIN_EDGE_MULT
-    try:
-        from config import SPOT_SESSION_MIN_EDGE_MULT, SPOT_OFFSESSION_MIN_EDGE_MULT
-        from runtime.spot_session import is_spot_entry_session_open
-
-        min_edge_mult = (
-            float(SPOT_SESSION_MIN_EDGE_MULT)
-            if is_spot_entry_session_open()
-            else float(SPOT_OFFSESSION_MIN_EDGE_MULT)
-        )
-    except Exception:
-        min_edge_mult = SPOT_MIN_EDGE_MULT
-
-    min_required_edge_pct: float = min_edge_mult * round_trip_pct
-    if edge_pct < min_required_edge_pct:
-        logger.info(
-            "spot_econ VETO symbol=%s score=%.1f edge_pct=%.4f < required=%.4f "
-            "(%.1f× round_trip=%.4f) reason=insufficient_edge_vs_fees",
-            symbol,
-            composite_score,
-            edge_pct,
-            min_required_edge_pct,
-            min_edge_mult,
-            round_trip_pct,
-        )
+    if spread_pct > spread_cap:
         return {
             "approved": False,
-            "reason": "insufficient_edge_vs_fees",
+            "reason": "spread_cap_exceeded",
             "fee_usd": fee_usd,
-            "edge_score": edge_score,
+            "edge_score": net_target_pct - net_stop_pct,
+            "net_target_pct": net_target_pct,
+            "net_stop_pct": net_stop_pct,
+            "projected_net_win_usd": projected_net_win_usd,
+            "total_cost_pct": total_cost_pct,
         }
-
-    logger.debug(
-        "spot_econ APPROVED symbol=%s score=%.1f edge_pct=%.4f fee_usd=%.4f edge_score=%.4f",
-        symbol,
-        composite_score,
-        edge_pct,
-        fee_usd,
-        edge_score,
-    )
+    if min(bid_depth_usd or 0.0, ask_depth_usd or 0.0) > 0 and min(
+        bid_depth_usd or 0.0, ask_depth_usd or 0.0
+    ) < depth_min:
+        return {
+            "approved": False,
+            "reason": "depth_below_minimum",
+            "fee_usd": fee_usd,
+            "edge_score": net_target_pct - net_stop_pct,
+            "net_target_pct": net_target_pct,
+            "net_stop_pct": net_stop_pct,
+            "projected_net_win_usd": projected_net_win_usd,
+            "total_cost_pct": total_cost_pct,
+        }
+    if net_target_pct <= 0:
+        return {
+            "approved": False,
+            "reason": "non_positive_net_target",
+            "fee_usd": fee_usd,
+            "edge_score": net_target_pct - net_stop_pct,
+            "net_target_pct": net_target_pct,
+            "net_stop_pct": net_stop_pct,
+            "projected_net_win_usd": projected_net_win_usd,
+            "total_cost_pct": total_cost_pct,
+        }
+    if projected_net_win_usd < fee_usd + 0.01:
+        return {
+            "approved": False,
+            "reason": "projected_net_win_too_small",
+            "fee_usd": fee_usd,
+            "edge_score": net_target_pct - net_stop_pct,
+            "net_target_pct": net_target_pct,
+            "net_stop_pct": net_stop_pct,
+            "projected_net_win_usd": projected_net_win_usd,
+            "total_cost_pct": total_cost_pct,
+        }
     return {
         "approved": True,
         "reason": "approved",
         "fee_usd": fee_usd,
-        "edge_score": edge_score,
+        "edge_score": net_target_pct - net_stop_pct,
+        "net_target_pct": net_target_pct,
+        "net_stop_pct": net_stop_pct,
+        "projected_net_win_usd": projected_net_win_usd,
+        "total_cost_pct": total_cost_pct,
     }
-
-
-# ── Self-audit (run as script) ────────────────────────────────────────────────
-
-if __name__ == "__main__":
-    # Case 1: paper=True should always return approved regardless of score
-    r1 = check_spot_economics("BTC", 400.0, 50.0, paper=True)
-    assert r1["approved"] is True, f"FAIL case1 paper bypass: {r1}"
-    assert r1["fee_usd"] > 0, f"FAIL case1 fee_usd missing: {r1}"
-    print(f"case1 PASS — paper bypass: {r1}")
-
-    # Case 2: composite_score=50 (zero edge) must be rejected in live mode
-    r2 = check_spot_economics("ETH", 400.0, 50.0, paper=False)
-    assert r2["approved"] is False, f"FAIL case2 score=50 should reject: {r2}"
-    print(f"case2 PASS — score=50 rejected: {r2}")
-
-    # Case 3: composite_score=80 with reasonable size should be approved
-    # edge_pct = (80-50)/50 * 0.05 = 0.03 (3%)
-    # round_trip = 1.2%, min_required = 2 × 1.2% = 2.4%
-    # 3% > 2.4% → approved
-    r3 = check_spot_economics("BTC", 500.0, 80.0, paper=False)
-    assert r3["approved"] is True, f"FAIL case3 score=80 should approve: {r3}"
-    print(f"case3 PASS — score=80 approved: {r3}")
-
-    print("\nAll self-audit assertions passed.")

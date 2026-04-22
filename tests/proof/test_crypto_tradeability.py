@@ -287,8 +287,8 @@ def test_ct07_unknown_symbol_blocked(tmp_path, monkeypatch):
 
     _fresh_db(tmp_path)
 
-    # DOGE is not in CORE_EXECUTION_UNDERLYINGS and not in spot symbols
-    result = ct.get_crypto_tradeability("DOGE", "LONG", live=False, manual=False)
+    # PEPE is not in the supported spot scalp universe and not in core perps.
+    result = ct.get_crypto_tradeability("PEPE", "LONG", live=False, manual=False)
     assert result["status"] == "blocked"
     assert result["lane"] == "blocked"
     assert result["blocked_reason"] in (

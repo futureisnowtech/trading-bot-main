@@ -18,7 +18,7 @@ import logging
 import threading
 import time
 import traceback
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Optional
 
 import schedule
@@ -130,6 +130,16 @@ def _journal_scan_candidate(
     trade_source_reason: str = "",
     manual_executable: int = 0,
     auto_executable: int = 0,
+    spot_regime: str = "",
+    setup_family: str = "",
+    tf_5m_state: str = "",
+    tf_30m_state: str = "",
+    tf_4h_state: str = "",
+    tf_1d_state: str = "",
+    structural_confirms: str = "",
+    execution_route: str = "",
+    cooldown_until: str = "",
+    microstructure_veto: str = "",
 ) -> None:
     """
     Write one candidate decision row to scan_candidates.
@@ -204,6 +214,16 @@ def _journal_scan_candidate(
             trade_source_reason=trade_source_reason,
             manual_executable=manual_executable,
             auto_executable=auto_executable,
+            spot_regime=spot_regime,
+            setup_family=setup_family,
+            tf_5m_state=tf_5m_state,
+            tf_30m_state=tf_30m_state,
+            tf_4h_state=tf_4h_state,
+            tf_1d_state=tf_1d_state,
+            structural_confirms=structural_confirms,
+            execution_route=execution_route,
+            cooldown_until=cooldown_until,
+            microstructure_veto=microstructure_veto,
         )
     except Exception as _je:
         logger.debug(
@@ -548,7 +568,7 @@ def _write_crypto_lane_runtime(open_positions: Optional[Dict] = None) -> None:
 # ── scan_and_trade ────────────────────────────────────────────────────────────
 
 
-def scan_and_trade():
+def scan_and_trade(spot_only: bool = False):
     """
     Main 5-minute loop: run scanner, score candidates, open new positions.
     Protected by _scan_lock to prevent parallel runs.
@@ -558,7 +578,7 @@ def scan_and_trade():
         return
 
     try:
-        _scan_and_trade_inner()
+        _scan_and_trade_inner(spot_only=spot_only)
     except Exception as e:
         logger.error(
             f"[v10] scan_and_trade fatal: {e}\n{traceback.format_exc()[:1000]}"
@@ -567,7 +587,7 @@ def scan_and_trade():
         _scan_lock.release()
 
 
-def _scan_and_trade_inner():
+def _scan_and_trade_inner(spot_only: bool = False):
     """Inner body of scan_and_trade — separated so the lock release is guaranteed."""
     ks = _import_kill_switch()
     re = _import_risk_engine()
@@ -668,6 +688,20 @@ def _scan_and_trade_inner():
             c for c in scanner_candidates if c["symbol"] not in tv_symbols
         ]
 
+    if spot_only:
+        try:
+            from config import SPOT_SYMBOLS as _SPOT_SYMBOLS
+
+            _spot_universe = {str(s).upper() for s in _SPOT_SYMBOLS}
+        except Exception:
+            _spot_universe = {"BTC", "ETH", "SOL", "XRP"}
+        candidates = [
+            c
+            for c in candidates
+            if str(c.get("direction", "LONG")).upper() == "LONG"
+            and _get_underlying(str(c.get("symbol", "")).upper()) in _spot_universe
+        ]
+
     if not candidates:
         logger.debug("[v10] scan returned 0 candidates")
         # Write scan heartbeat even on 0-candidate cycles so health_check
@@ -681,7 +715,7 @@ def _scan_and_trade_inner():
         return
 
     logger.info(
-        f"[v10] scan: {len(candidates)} candidates "
+        f"[v10] {'spot scalp ' if spot_only else ''}scan: {len(candidates)} candidates "
         f"(tv={len(tv_candidates)} scanner={len(candidates) - len(tv_candidates)}), "
         f"balance=${balance:.0f} deployed=${deployed_usd:.0f}"
     )
@@ -1439,59 +1473,101 @@ def _attempt_entry(
     if _routed_lane == "spot":
         try:
             import spot_engine as _spot_eng
+            from config import SPOT_SCALP_SYMBOL_CONFIG, SPOT_TOTAL_ALLOC_CAP_PCT
+            from risk.spot_economics_gate import check_spot_economics as _spot_econ
+            from runtime.spot_momentum import build_spot_state, final_spot_score as _final_spot_score
+            from runtime.live_account import get_live_account_size
 
-            # Scale spot size with signal conviction: 6% base + up to 4% at full conviction
-            _score_factor = max(
-                0.0, min(1.0, (composite - 50) / 40)
-            )  # 0 at score=50, 1 at score=90+
-            _spot_size = balance * (0.06 + 0.04 * _score_factor)
-            try:
-                from risk.spot_economics_gate import check_spot_economics as _spot_econ
-
-                _econ = _spot_econ(
-                    _trade.get("underlying", _get_underlying(symbol)),
-                    _spot_size,
-                    composite,
-                    paper=_paper,
+            _underlying = _trade.get("underlying", _get_underlying(symbol))
+            _spot_state = build_spot_state(_underlying)
+            _spot_regime = _spot_state.get("regime", "NEUTRAL")
+            _final_score = _final_spot_score(composite, _spot_state["derivative_score"])
+            _cfg = SPOT_SCALP_SYMBOL_CONFIG.get(_underlying, {})
+            _stop_pct = _spot_eng._compute_stop_pct(_underlying, _spot_state, atr_at_entry=atr_7)
+            _risk_fraction = float(_cfg.get("risk_fraction", 0.0015))
+            _alloc_cap_pct = float(_cfg.get("allocation_cap_pct", 0.05))
+            _account_equity = float(get_live_account_size(paper=_paper))
+            _risk_dollars = _account_equity * _risk_fraction
+            _size_raw = _risk_dollars / max(_stop_pct, 1e-6)
+            _total_spot_cap = _account_equity * float(SPOT_TOTAL_ALLOC_CAP_PCT)
+            _symbol_cap = _account_equity * _alloc_cap_pct
+            _spot_deployed = _spot_eng._current_spot_deployed_usd(paper=_paper)
+            _top = _spot_eng._get_broker(_paper).get_spot_top_of_book(_underlying)
+            _available_spot_usd = float(_spot_eng._get_broker(_paper).get_spot_balance().get("usd_available", 0.0))
+            _liquidity_cap = max(float(_top.get("top_depth_usd") or 0.0) * 0.10, 0.0) or _symbol_cap
+            _spot_size = min(
+                _size_raw,
+                _symbol_cap,
+                max(0.0, _total_spot_cap - _spot_deployed),
+                _available_spot_usd * 0.95,
+                _liquidity_cap,
+            )
+            _cooldown_min = int(_cfg.get("cooldown_min", 15))
+            _cooldown_until = (
+                datetime.utcnow() + timedelta(minutes=_cooldown_min)
+            ).isoformat()
+            _econ = _spot_econ(
+                symbol=_underlying,
+                size_usd=_spot_size,
+                final_spot_score=_final_score,
+                stop_pct=_stop_pct,
+                target_r=_spot_eng._target_r(_spot_regime),
+                spread_pct=float(candidate.get("spread_pct", 0.0) or 0.0),
+                bid_depth_usd=float(candidate.get("bid_depth_usd", 0.0) or 0.0),
+                ask_depth_usd=float(candidate.get("ask_depth_usd", 0.0) or 0.0),
+                regime=_spot_regime,
+                execution_route_guess="maker_first",
+                paper=_paper,
+            )
+            if not _econ["approved"]:
+                logger.info(
+                    f"[v10] spot {_underlying} econ_gate blocked: {_econ['reason']}"
                 )
-                if not _econ["approved"]:
-                    logger.info(
-                        f"[v10] spot {_trade.get('underlying')} econ_gate blocked: {_econ['reason']}"
-                    )
-                    # do NOT fall through to perp — spot-routed symbols stay in spot lane
-                    _journal_scan_candidate(
-                        scan_id,
-                        candidate,
-                        "econ_veto",
-                        regime=regime,
-                        technical_score=_tech_score,
-                        ml_score=_ml_score,
-                        composite_score=composite,
-                        entry_threshold=50.0,
-                        should_enter_signal=1,
-                        econ_approved=0,
-                        entry_block_reason=_econ["reason"],
-                        recommended_lane=_trade.get("recommended_lane", ""),
-                        tradeability_status=_trade.get("status", "executable"),
-                        trade_blocked_reason=_econ["reason"],
-                        trade_size_block_reason="",
-                        trade_source_reason="",
-                        manual_executable=int(_trade.get("manual_executable", 0)),
-                        auto_executable=int(_trade.get("auto_executable", 0)),
-                    )
-                    return "econ_veto"
-            except ImportError:
-                pass  # gate not available — proceed
+                _journal_scan_candidate(
+                    scan_id,
+                    candidate,
+                    "econ_veto",
+                    regime=regime,
+                    technical_score=_tech_score,
+                    ml_score=_ml_score,
+                    composite_score=composite,
+                    entry_threshold=_final_score,
+                    should_enter_signal=1,
+                    econ_approved=0,
+                    entry_block_reason=_econ["reason"],
+                    recommended_lane=_trade.get("recommended_lane", ""),
+                    tradeability_status=_trade.get("status", "executable"),
+                    trade_blocked_reason=_econ["reason"],
+                    trade_size_block_reason="",
+                    trade_source_reason="trusted_source",
+                    manual_executable=int(_trade.get("manual_executable", 0)),
+                    auto_executable=int(_trade.get("auto_executable", 0)),
+                    spot_regime=_spot_regime,
+                    setup_family=_spot_state.get("setup_family", ""),
+                    tf_5m_state=_spot_state.get("tf_5m_state", ""),
+                    tf_30m_state=_spot_state.get("tf_30m_state", ""),
+                    tf_4h_state=_spot_state.get("tf_4h_state", ""),
+                    tf_1d_state=_spot_state.get("tf_1d_state", ""),
+                    structural_confirms=_spot_state.get("structural_confirms", ""),
+                    execution_route="",
+                    cooldown_until="",
+                    microstructure_veto="",
+                )
+                return "econ_veto"
             _sr = _spot_eng.open_spot(
-                _trade.get("underlying", _get_underlying(symbol)),
+                _underlying,
                 _spot_size,
                 paper=_paper,
                 composite_score=composite,
-                atr_at_entry=atr_7,  # ATR from last 7 candles, computed above at line 1001
+                atr_at_entry=atr_7,
+                spot_state=_spot_state,
+                final_spot_score=_final_score,
+                risk_dollars=_risk_dollars,
+                cooldown_until=_cooldown_until,
             )
             if _sr and not _sr.get("blocked"):
                 logger.info(
-                    f"[v10] spot {_trade.get('underlying')} entered "
+                    f"[v10] spot {_underlying} entered "
                     f"${_spot_size:.0f}: order={_sr.get('order_id', '?')}"
                 )
                 # Spot-only entry — journal and return entered
@@ -1503,7 +1579,7 @@ def _attempt_entry(
                     technical_score=_tech_score,
                     ml_score=_ml_score,
                     composite_score=composite,
-                    entry_threshold=50.0,
+                    entry_threshold=_final_score,
                     should_enter_signal=1,
                     econ_approved=1,
                     entry_block_reason="",
@@ -1514,6 +1590,16 @@ def _attempt_entry(
                     trade_source_reason=_trade.get("source_reason", "trusted_source"),
                     manual_executable=int(_trade.get("manual_executable", 0)),
                     auto_executable=int(_trade.get("auto_executable", 0)),
+                    spot_regime=_spot_regime,
+                    setup_family=_spot_state.get("setup_family", ""),
+                    tf_5m_state=_spot_state.get("tf_5m_state", ""),
+                    tf_30m_state=_spot_state.get("tf_30m_state", ""),
+                    tf_4h_state=_spot_state.get("tf_4h_state", ""),
+                    tf_1d_state=_spot_state.get("tf_1d_state", ""),
+                    structural_confirms=_spot_state.get("structural_confirms", ""),
+                    execution_route=_sr.get("execution_route", ""),
+                    cooldown_until=_cooldown_until,
+                    microstructure_veto="",
                 )
                 return "entered"
             else:
@@ -1533,7 +1619,7 @@ def _attempt_entry(
                     technical_score=_tech_score,
                     ml_score=_ml_score,
                     composite_score=composite,
-                    entry_threshold=50.0,
+                    entry_threshold=_final_score,
                     should_enter_signal=1,
                     econ_approved=1,
                     entry_block_reason=_spot_reason,
@@ -1544,6 +1630,16 @@ def _attempt_entry(
                     trade_source_reason=_trade.get("source_reason", "trusted_source"),
                     manual_executable=int(_trade.get("manual_executable", 0)),
                     auto_executable=int(_trade.get("auto_executable", 0)),
+                    spot_regime=_spot_regime,
+                    setup_family=_spot_state.get("setup_family", ""),
+                    tf_5m_state=_spot_state.get("tf_5m_state", ""),
+                    tf_30m_state=_spot_state.get("tf_30m_state", ""),
+                    tf_4h_state=_spot_state.get("tf_4h_state", ""),
+                    tf_1d_state=_spot_state.get("tf_1d_state", ""),
+                    structural_confirms=_spot_state.get("structural_confirms", ""),
+                    execution_route=_sr.get("execution_route", "") if _sr else "",
+                    cooldown_until=_cooldown_until,
+                    microstructure_veto="",
                 )
                 return "execution_failed"
         except Exception as _spot_err:
@@ -1838,32 +1934,46 @@ def _attempt_entry(
 def exit_monitor():
     """
     30-second loop: evaluate 6-priority exit stack for all open positions.
-    Also checks spot hard stops.
+    Perp exit loop. Spot scalp exits run on their own faster poll.
     """
     try:
         _exit_monitor_inner()
     except Exception as e:
         logger.error(f"[v10] exit_monitor fatal: {e}\n{traceback.format_exc()[:1000]}")
+
+
+def spot_exit_monitor():
+    """Fast software-stop loop for the crypto spot scalp lane."""
     try:
-        from spot_engine import check_spot_stops
+        from spot_engine import (
+            check_spot_eod_close,
+            check_spot_stagnation_exits,
+            check_spot_stops,
+            check_spot_targets,
+            check_spot_thesis_exits,
+            check_spot_trailing,
+        )
 
         check_spot_stops(paper=config.PAPER_TRADING)
-    except Exception as e:
-        logger.debug(f"[v10] check_spot_stops error: {e}")
-    try:
-        from spot_engine import check_spot_trailing, check_spot_thesis_exits
-
         check_spot_trailing(paper=config.PAPER_TRADING)
-        check_spot_thesis_exits(paper=config.PAPER_TRADING)
-    except Exception as e:
-        logger.debug(f"[v10] spot trailing/thesis check error: {e}")
-    try:
-        from spot_engine import check_spot_targets, check_spot_eod_close
-
         check_spot_targets(paper=config.PAPER_TRADING)
+        check_spot_stagnation_exits(paper=config.PAPER_TRADING)
+        check_spot_thesis_exits(paper=config.PAPER_TRADING)
         check_spot_eod_close(paper=config.PAPER_TRADING)
     except Exception as e:
-        logger.debug(f"[v10] spot target/eod check error: {e}")
+        logger.error(
+            f"[v10] spot_exit_monitor fatal: {e}\n{traceback.format_exc()[:1000]}"
+        )
+
+
+def spot_scalp_scan():
+    """Dedicated 60-second spot scalp scan/decision loop for the spot universe."""
+    try:
+        scan_and_trade(spot_only=True)
+    except Exception as e:
+        logger.error(
+            f"[v10] spot_scalp_scan fatal: {e}\n{traceback.format_exc()[:1000]}"
+        )
 
 
 def _exit_monitor_inner():
@@ -2854,9 +2964,13 @@ def run_forever():
     _startup_notification()
     logger.info("[v10] Scheduler starting — wiring schedules...")
 
+    from config import SPOT_EXIT_POLL_SECONDS, SPOT_SCALP_SCAN_SECONDS
+
     # Wire schedules
     schedule.every(5).minutes.do(scan_and_trade)
     schedule.every(30).seconds.do(exit_monitor)
+    schedule.every(SPOT_SCALP_SCAN_SECONDS).seconds.do(spot_scalp_scan)
+    schedule.every(SPOT_EXIT_POLL_SECONDS).seconds.do(spot_exit_monitor)
     schedule.every(5).minutes.do(hedge_rebalance)
     schedule.every(60).seconds.do(kill_switch_monitor)
     schedule.every(60).seconds.do(_run_health_check)

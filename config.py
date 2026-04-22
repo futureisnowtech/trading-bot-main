@@ -79,14 +79,14 @@ AUTONOMOUS_LIVE_PERP_SYMBOLS: list = os.getenv(
 SPOT_LANE_ACTIVE: bool = os.getenv("SPOT_LANE_ACTIVE", "true").lower() == "true"
 SPOT_SYMBOLS: list = [
     s.strip().upper()
-    for s in os.getenv("SPOT_SYMBOLS", "BTC,ETH,SOL,XRP").split(",")
+    for s in os.getenv("SPOT_SYMBOLS", "BTC,ETH,SOL,XRP,LTC,DOGE,ADA,LINK").split(",")
     if s.strip()
 ]
-SPOT_MAX_DEPLOYED_PCT: float = float(os.getenv("SPOT_MAX_DEPLOYED_PCT", "0.40"))
+SPOT_MAX_DEPLOYED_PCT: float = float(os.getenv("SPOT_MAX_DEPLOYED_PCT", "0.50"))
 SPOT_MIN_ORDER_USD: float = float(os.getenv("SPOT_MIN_ORDER_USD", "10.0"))
-SPOT_WEEKDAYS_ONLY: bool = os.getenv("SPOT_WEEKDAYS_ONLY", "true").lower() == "true"
-SPOT_ENTRY_START_TIME: str = os.getenv("SPOT_ENTRY_START_TIME", "09:35")
-SPOT_ENTRY_END_TIME: str = os.getenv("SPOT_ENTRY_END_TIME", "15:15")
+SPOT_WEEKDAYS_ONLY: bool = os.getenv("SPOT_WEEKDAYS_ONLY", "false").lower() == "true"
+SPOT_ENTRY_START_TIME: str = os.getenv("SPOT_ENTRY_START_TIME", "00:00")
+SPOT_ENTRY_END_TIME: str = os.getenv("SPOT_ENTRY_END_TIME", "23:59")
 # Conservative hard stop: close position if price drops this % below entry.
 # 3% default — tight enough to limit loss on small account, loose enough to avoid noise wicks.
 SPOT_STOP_PCT: float = float(os.getenv("SPOT_STOP_PCT", "0.03"))
@@ -94,20 +94,123 @@ SPOT_STOP_PCT: float = float(os.getenv("SPOT_STOP_PCT", "0.03"))
 # 2.0 = 2R: with a 3% stop, target = 6% gain. This recycles capital faster
 # for intraday spot while still clearing fee drag when paired with the
 # session-aware economics gate.
-SPOT_TARGET_R: float = float(os.getenv("SPOT_TARGET_R", "2.0"))
+SPOT_TARGET_R: float = float(os.getenv("SPOT_TARGET_R", "1.2"))
 # End-of-day flatten time (HH:MM ET, 24h). All spot positions closed at or
 # after this time on weekdays to prevent overnight gap exposure.
 SPOT_EOD_CLOSE_TIME: str = os.getenv("SPOT_EOD_CLOSE_TIME", "15:45")
-SPOT_THESIS_MIN_HOLD_MINS: float = float(
-    os.getenv("SPOT_THESIS_MIN_HOLD_MINS", "30.0")
+SPOT_EOD_FLATTEN_ENABLED: bool = (
+    os.getenv("SPOT_EOD_FLATTEN_ENABLED", "false").lower() == "true"
 )
-SPOT_THESIS_MIN_SCORE: float = float(os.getenv("SPOT_THESIS_MIN_SCORE", "42.0"))
+SPOT_THESIS_MIN_HOLD_MINS: float = float(
+    os.getenv("SPOT_THESIS_MIN_HOLD_MINS", "8.0")
+)
+SPOT_THESIS_MIN_SCORE: float = float(os.getenv("SPOT_THESIS_MIN_SCORE", "48.0"))
 SPOT_SESSION_MIN_EDGE_MULT: float = float(
     os.getenv("SPOT_SESSION_MIN_EDGE_MULT", "1.5")
 )
 SPOT_OFFSESSION_MIN_EDGE_MULT: float = float(
     os.getenv("SPOT_OFFSESSION_MIN_EDGE_MULT", "2.0")
 )
+SPOT_TOTAL_ALLOC_CAP_PCT: float = float(os.getenv("SPOT_TOTAL_ALLOC_CAP_PCT", "0.50"))
+SPOT_EXIT_POLL_SECONDS: int = int(os.getenv("SPOT_EXIT_POLL_SECONDS", "5"))
+SPOT_SCALP_SCAN_SECONDS: int = int(os.getenv("SPOT_SCALP_SCAN_SECONDS", "60"))
+SPOT_MAKER_WAIT_SECONDS: int = int(os.getenv("SPOT_MAKER_WAIT_SECONDS", "6"))
+SPOT_MAKER_POLL_SECONDS: int = int(os.getenv("SPOT_MAKER_POLL_SECONDS", "2"))
+SPOT_MICROSTRUCTURE_MAX_SPREAD_PCT: float = float(
+    os.getenv("SPOT_MICROSTRUCTURE_MAX_SPREAD_PCT", "0.0025")
+)
+SPOT_MICROSTRUCTURE_MIN_DEPTH_USD: float = float(
+    os.getenv("SPOT_MICROSTRUCTURE_MIN_DEPTH_USD", "5000")
+)
+SPOT_SCALP_SCORE_WEIGHT_COMPOSITE: float = float(
+    os.getenv("SPOT_SCALP_SCORE_WEIGHT_COMPOSITE", "0.60")
+)
+SPOT_SCALP_SCORE_WEIGHT_DERIVATIVE: float = float(
+    os.getenv("SPOT_SCALP_SCORE_WEIGHT_DERIVATIVE", "0.40")
+)
+
+SPOT_SCALP_SYMBOL_CONFIG: dict[str, dict[str, float | int]] = {
+    "BTC": {
+        "stop_floor_pct": 0.008,
+        "stop_cap_pct": 0.012,
+        "risk_fraction": 0.0030,
+        "allocation_cap_pct": 0.20,
+        "spread_cap_pct": 0.0010,
+        "depth_min_usd": 15000,
+        "cooldown_min": 10,
+        "symbol_k": 1.05,
+    },
+    "ETH": {
+        "stop_floor_pct": 0.010,
+        "stop_cap_pct": 0.014,
+        "risk_fraction": 0.0025,
+        "allocation_cap_pct": 0.15,
+        "spread_cap_pct": 0.0012,
+        "depth_min_usd": 12000,
+        "cooldown_min": 12,
+        "symbol_k": 1.10,
+    },
+    "SOL": {
+        "stop_floor_pct": 0.013,
+        "stop_cap_pct": 0.018,
+        "risk_fraction": 0.0018,
+        "allocation_cap_pct": 0.07,
+        "spread_cap_pct": 0.0018,
+        "depth_min_usd": 8000,
+        "cooldown_min": 15,
+        "symbol_k": 1.15,
+    },
+    "XRP": {
+        "stop_floor_pct": 0.014,
+        "stop_cap_pct": 0.020,
+        "risk_fraction": 0.0015,
+        "allocation_cap_pct": 0.05,
+        "spread_cap_pct": 0.0022,
+        "depth_min_usd": 8000,
+        "cooldown_min": 18,
+        "symbol_k": 1.18,
+    },
+    "LTC": {
+        "stop_floor_pct": 0.010,
+        "stop_cap_pct": 0.015,
+        "risk_fraction": 0.0018,
+        "allocation_cap_pct": 0.08,
+        "spread_cap_pct": 0.0016,
+        "depth_min_usd": 6000,
+        "cooldown_min": 12,
+        "symbol_k": 1.12,
+    },
+    "DOGE": {
+        "stop_floor_pct": 0.015,
+        "stop_cap_pct": 0.022,
+        "risk_fraction": 0.0015,
+        "allocation_cap_pct": 0.05,
+        "spread_cap_pct": 0.0025,
+        "depth_min_usd": 5000,
+        "cooldown_min": 18,
+        "symbol_k": 1.20,
+    },
+    "ADA": {
+        "stop_floor_pct": 0.013,
+        "stop_cap_pct": 0.019,
+        "risk_fraction": 0.0015,
+        "allocation_cap_pct": 0.05,
+        "spread_cap_pct": 0.0022,
+        "depth_min_usd": 5000,
+        "cooldown_min": 16,
+        "symbol_k": 1.16,
+    },
+    "LINK": {
+        "stop_floor_pct": 0.013,
+        "stop_cap_pct": 0.019,
+        "risk_fraction": 0.0018,
+        "allocation_cap_pct": 0.07,
+        "spread_cap_pct": 0.0020,
+        "depth_min_usd": 6000,
+        "cooldown_min": 15,
+        "symbol_k": 1.15,
+    },
+}
 
 # ════════════════════════════════════════════════════════════════════
 # RISK — HARDCODED. NO AI CAN OVERRIDE THESE.

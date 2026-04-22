@@ -98,6 +98,9 @@ PRODUCT_SPECS: dict[str, dict] = {
 }
 
 SUPPORTED_SYMBOLS = set(PRODUCT_SPECS.keys())
+PRODUCT_ID_TO_SYMBOL = {
+    spec["product_id"]: symbol for symbol, spec in PRODUCT_SPECS.items()
+}
 
 # Taker fee for Coinbase Advanced Trade API direct (nano perp-style futures).
 # 0.00% maker, 0.03% taker — verify at help.coinbase.com/en/derivatives.
@@ -412,9 +415,57 @@ class CoinbaseBroker:
     # ── Positions ─────────────────────────────────────────────────────────────
 
     def get_position(self, symbol: str) -> Optional[dict]:
+        if not self._paper and self._connected:
+            try:
+                return self.get_all_positions().get(self._spec(symbol)["base"])
+            except Exception:
+                pass
         return self._open_positions.get(symbol)
 
+    def sync_live_positions(self) -> Optional[dict]:
+        if self._paper or not self._connected:
+            return dict(self._open_positions)
+        try:
+            data = self._request("GET", "/api/v3/brokerage/cfm/positions")
+            live_positions: Dict[str, Dict] = {}
+            for raw in data.get("positions", []):
+                product_id = str(raw.get("product_id") or "")
+                symbol = PRODUCT_ID_TO_SYMBOL.get(product_id)
+                if not symbol:
+                    continue
+
+                side = str(raw.get("side") or "UNKNOWN").upper()
+                contracts = float(raw.get("number_of_contracts") or 0.0)
+                if contracts <= 0 or side == "UNKNOWN":
+                    continue
+
+                spec = PRODUCT_SPECS[symbol]
+                qty = contracts * float(spec["contract_size"])
+                live_positions[symbol] = {
+                    "symbol": symbol,
+                    "product_id": product_id,
+                    "direction": "LONG" if side == "LONG" else "SHORT",
+                    "entry_price": float(raw.get("avg_entry_price") or 0.0),
+                    "qty": qty,
+                    "contracts": contracts,
+                    "current_price": float(raw.get("current_price") or 0.0),
+                    "unrealized_pnl": float(raw.get("unrealized_pnl") or 0.0),
+                    "paper": False,
+                    "venue": "coinbase",
+                }
+
+            self._open_positions = live_positions
+            return dict(live_positions)
+        except Exception as e:
+            logger.warning(f"[cb] get_all_positions live sync error: {e}")
+            return None
+
     def get_all_positions(self) -> dict:
+        if self._paper or not self._connected:
+            return dict(self._open_positions)
+        synced = self.sync_live_positions()
+        if synced is not None:
+            return synced
         return dict(self._open_positions)
 
     # ── Order placement ───────────────────────────────────────────────────────

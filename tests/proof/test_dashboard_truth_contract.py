@@ -18,6 +18,8 @@ import sys
 import sqlite3
 import types
 
+import pytest
+
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DASHBOARD_ROOT = os.path.join(ROOT, "dashboard")
 
@@ -25,6 +27,13 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 if DASHBOARD_ROOT not in sys.path:
     sys.path.insert(0, DASHBOARD_ROOT)
+
+
+@pytest.fixture(autouse=True)
+def _clear_dashboard_module_cache():
+    yield
+    for mod_name in ("data.positions", "data.account", "data.balance"):
+        sys.modules.pop(mod_name, None)
 
 
 def _make_db_with_mixed_positions(tmp_path, paper_int: int = 1) -> str:
@@ -56,12 +65,12 @@ def _make_db_with_mixed_positions(tmp_path, paper_int: int = 1) -> str:
     return db
 
 
-def _make_db_mock(db_path: str):
+def _make_db_mock(db_path: str, paper_flag: int = 1):
     """Build a minimal db module mock for the given DB path."""
     db_mock = types.ModuleType("db")
     db_mock.DB_PATH = db_path
     db_mock.LOG_PATH = db_path + ".log"
-    db_mock._runtime_paper_flag = lambda: 1
+    db_mock._runtime_paper_flag = lambda: paper_flag
 
     def _q(sql, params=()):
         with sqlite3.connect(db_path) as c:
@@ -138,6 +147,70 @@ def test_dt03_get_spot_positions_returns_only_spot(tmp_path, monkeypatch):
         )
     assert len(positions) == 1
     assert positions[0]["symbol"] == "BTC"
+
+
+def test_dt03b_live_perp_positions_follow_exchange_truth(tmp_path, monkeypatch):
+    """
+    In live mode, stale DB perp rows must disappear when Coinbase reports no open
+    CFM positions. This is the exact phantom-open-perp dashboard bug class.
+    """
+    db = _make_db_with_mixed_positions(tmp_path, paper_int=0)
+    db_mock = _make_db_mock(db, paper_flag=0)
+
+    class _Broker:
+        def is_connected(self):
+            return True
+
+        def connect(self):
+            return True
+
+        def sync_live_positions(self):
+            return {}
+
+    broker_mod = types.ModuleType("execution.coinbase_broker")
+    broker_mod.get_coinbase_broker = lambda: _Broker()
+
+    monkeypatch.setitem(sys.modules, "db", db_mock)
+    monkeypatch.setitem(sys.modules, "execution.coinbase_broker", broker_mod)
+    monkeypatch.delitem(sys.modules, "data.positions", raising=False)
+
+    from data.positions import get_perp_positions
+
+    assert get_perp_positions() == []
+
+
+def test_dt03c_live_open_positions_keep_spot_but_drop_stale_perp(
+    tmp_path, monkeypatch
+):
+    """
+    Live open-positions view must keep real spot rows while dropping stale perp DB
+    rows when the exchange says futures are flat.
+    """
+    db = _make_db_with_mixed_positions(tmp_path, paper_int=0)
+    db_mock = _make_db_mock(db, paper_flag=0)
+
+    class _Broker:
+        def is_connected(self):
+            return True
+
+        def connect(self):
+            return True
+
+        def sync_live_positions(self):
+            return {}
+
+    broker_mod = types.ModuleType("execution.coinbase_broker")
+    broker_mod.get_coinbase_broker = lambda: _Broker()
+
+    monkeypatch.setitem(sys.modules, "db", db_mock)
+    monkeypatch.setitem(sys.modules, "execution.coinbase_broker", broker_mod)
+    monkeypatch.delitem(sys.modules, "data.positions", raising=False)
+
+    from data.positions import get_open_positions
+
+    positions = get_open_positions()
+    assert len(positions) == 1
+    assert positions[0]["strategy"] == "spot_btc"
 
 
 # ── DT-04: balance.py _unrealized_pnl excludes spot_ strategy rows ───────────

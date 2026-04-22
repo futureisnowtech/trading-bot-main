@@ -1,5 +1,8 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
+## 2026-04-22
+- fix(dashboard): live perp positions now use Coinbase /cfm/positions as canonical truth so stale closed perps in open_positions no longer render as active
+
 ## 2026-04-21
 - Hotfix: stocks dormant-ready mode no longer starts the runner unless STOCKS_AUTONOMOUS_ENABLED=true; runtime state now reports standby/dormant-ready instead of active side-lane drift
 

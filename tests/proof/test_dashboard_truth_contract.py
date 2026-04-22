@@ -58,7 +58,10 @@ def _make_db_with_mixed_positions(tmp_path, paper_int: int = 1) -> str:
         c.execute(
             """CREATE TABLE lane_runtime_state (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                lane_id TEXT, connected INTEGER DEFAULT 0, mode TEXT DEFAULT 'disabled'
+                lane_id TEXT, connected INTEGER DEFAULT 0, mode TEXT DEFAULT 'disabled',
+                positions_open INTEGER DEFAULT 0,
+                capital_deployed_usd REAL DEFAULT 0.0,
+                updated_at TEXT DEFAULT NULL
             )"""
         )
         # Perp position
@@ -191,7 +194,14 @@ def test_dt03b_live_perp_positions_follow_exchange_truth(tmp_path, monkeypatch):
             return True
 
         def sync_live_holdings(self):
-            return [{"symbol": "BTC", "qty": 0.001, "avg_entry": 85000.0, "current_value": 85.0}]
+            return [
+                {
+                    "symbol": "BTC",
+                    "qty": 0.001,
+                    "avg_entry": 85000.0,
+                    "current_value": 85.0,
+                }
+            ]
 
     spot_mod = types.ModuleType("execution.coinbase_spot_broker")
     spot_mod.get_spot_broker = lambda: _SpotBroker()
@@ -210,9 +220,7 @@ def test_dt03b_live_perp_positions_follow_exchange_truth(tmp_path, monkeypatch):
     assert get_perp_positions() == []
 
 
-def test_dt03c_live_open_positions_keep_spot_but_drop_stale_perp(
-    tmp_path, monkeypatch
-):
+def test_dt03c_live_open_positions_keep_spot_but_drop_stale_perp(tmp_path, monkeypatch):
     """
     Live open-positions view must keep real spot rows while dropping stale perp DB
     rows when the exchange says futures are flat.
@@ -391,9 +399,15 @@ def test_dt07_get_account_includes_spot_unrealized(tmp_path, monkeypatch):
 
     from data import account as account_mod
 
-    monkeypatch.setattr(account_mod, "_spot_unrealized_pnl", lambda: 12.5, raising=False)
+    monkeypatch.setattr(
+        account_mod, "_spot_unrealized_pnl", lambda: 12.5, raising=False
+    )
     monkeypatch.setattr(account_mod, "get_perp_positions", lambda: [], raising=False)
-    monkeypatch.setattr(account_mod, "get_live_prices", lambda symbols: {}, raising=False)
+    monkeypatch.setattr(
+        account_mod, "get_live_prices", lambda symbols: {}, raising=False
+    )
 
     equity, paper, base = account_mod.get_account()
-    assert equity > base, "spot unrealized should lift headline account equity above base"
+    assert equity > base, (
+        "spot unrealized should lift headline account equity above base"
+    )

@@ -64,6 +64,27 @@ SPOT_SUPPORTED_SYMBOLS = set(SPOT_PRODUCT_SPECS.keys())
 _API_BASE = "https://api.coinbase.com"
 
 
+def _holdings_to_positions(
+    holdings: Dict[str, Dict], price_getter
+) -> List[dict]:
+    result = []
+    for sym, h in holdings.items():
+        qty = h.get("qty", 0.0)
+        if qty < 1e-8:
+            continue
+        avg = h.get("avg_entry", 0.0)
+        price = price_getter(sym)
+        result.append(
+            {
+                "symbol": sym,
+                "qty": qty,
+                "avg_entry": avg,
+                "current_value": round(qty * price, 2) if price > 0 else 0.0,
+            }
+        )
+    return result
+
+
 class CoinbaseSpotSymbolError(ValueError):
     """Raised when a symbol outside the supported spot set is requested. Fail-closed."""
 
@@ -231,6 +252,33 @@ class CoinbaseSpotBroker:
             balances["symbol_balances"] = {sym: 0.0 for sym in SPOT_SUPPORTED_SYMBOLS}
             balances["usd_available"] = 0.0
             return balances
+
+    def sync_live_holdings(self) -> Optional[List[dict]]:
+        """
+        Refresh in-process holdings from the live Coinbase spot account.
+
+        Returns a list of canonical live holdings or None on failure.
+        """
+        if self._paper or not self._connected:
+            return _holdings_to_positions(self._holdings, self.get_mark_price)
+        try:
+            balances = self.get_spot_balance()
+            symbol_balances = balances.get("symbol_balances") or {}
+            live_holdings: Dict[str, Dict] = {}
+            for sym, qty in symbol_balances.items():
+                qty_f = float(qty or 0.0)
+                if qty_f <= 1e-8:
+                    continue
+                existing = self._holdings.get(sym, {"avg_entry": 0.0})
+                live_holdings[sym] = {
+                    "qty": qty_f,
+                    "avg_entry": float(existing.get("avg_entry") or 0.0),
+                }
+            self._holdings = live_holdings
+            return _holdings_to_positions(self._holdings, self.get_mark_price)
+        except Exception as e:
+            logger.warning(f"[spot] sync_live_holdings error: {e}")
+            return None
 
     # ── Mark price ────────────────────────────────────────────────────────────
 
@@ -447,22 +495,11 @@ class CoinbaseSpotBroker:
         Return current spot holdings as a list.
         Each entry: {symbol, qty, avg_entry, current_value}
         """
-        result = []
-        for sym, h in self._holdings.items():
-            qty = h.get("qty", 0.0)
-            if qty < 1e-8:
-                continue
-            avg = h.get("avg_entry", 0.0)
-            price = self.get_mark_price(sym)
-            result.append(
-                {
-                    "symbol": sym,
-                    "qty": qty,
-                    "avg_entry": avg,
-                    "current_value": round(qty * price, 2) if price > 0 else 0.0,
-                }
-            )
-        return result
+        if not self._paper and self._connected:
+            synced = self.sync_live_holdings()
+            if synced is not None:
+                return synced
+        return _holdings_to_positions(self._holdings, self.get_mark_price)
 
 
 # ── Singleton ─────────────────────────────────────────────────────────────────

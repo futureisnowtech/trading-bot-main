@@ -32,7 +32,12 @@ if DASHBOARD_ROOT not in sys.path:
 @pytest.fixture(autouse=True)
 def _clear_dashboard_module_cache():
     yield
-    for mod_name in ("data.positions", "data.account", "data.balance"):
+    for mod_name in (
+        "data.positions",
+        "data.account",
+        "data.balance",
+        "data.stocks",
+    ):
         sys.modules.pop(mod_name, None)
 
 
@@ -48,6 +53,12 @@ def _make_db_with_mixed_positions(tmp_path, paper_int: int = 1) -> str:
                 direction TEXT DEFAULT 'LONG',
                 paper INTEGER DEFAULT 1, ts_entry TEXT,
                 leverage INTEGER DEFAULT 3
+            )"""
+        )
+        c.execute(
+            """CREATE TABLE lane_runtime_state (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                lane_id TEXT, connected INTEGER DEFAULT 0, mode TEXT DEFAULT 'disabled'
             )"""
         )
         # Perp position
@@ -79,7 +90,7 @@ def _make_db_mock(db_path: str, paper_flag: int = 1):
         return [dict(r) for r in rows]
 
     db_mock._q = _q
-    db_mock._q1 = lambda *a, **kw: {}
+    db_mock._q1 = lambda sql, params=(): (_q(sql, params) or [{}])[0]
     db_mock.get_effective_launch_date = lambda: "2026-01-01"
     return db_mock
 
@@ -170,8 +181,28 @@ def test_dt03b_live_perp_positions_follow_exchange_truth(tmp_path, monkeypatch):
     broker_mod = types.ModuleType("execution.coinbase_broker")
     broker_mod.get_coinbase_broker = lambda: _Broker()
 
+    class _SpotBroker:
+        _paper = False
+
+        def is_connected(self):
+            return True
+
+        def connect(self):
+            return True
+
+        def sync_live_holdings(self):
+            return [{"symbol": "BTC", "qty": 0.001, "avg_entry": 85000.0, "current_value": 85.0}]
+
+    spot_mod = types.ModuleType("execution.coinbase_spot_broker")
+    spot_mod.get_spot_broker = lambda: _SpotBroker()
+
     monkeypatch.setitem(sys.modules, "db", db_mock)
+    with sqlite3.connect(db) as c:
+        c.execute(
+            "INSERT INTO lane_runtime_state (lane_id, connected, mode) VALUES ('crypto',1,'live')"
+        )
     monkeypatch.setitem(sys.modules, "execution.coinbase_broker", broker_mod)
+    monkeypatch.setitem(sys.modules, "execution.coinbase_spot_broker", spot_mod)
     monkeypatch.delitem(sys.modules, "data.positions", raising=False)
 
     from data.positions import get_perp_positions
@@ -202,8 +233,35 @@ def test_dt03c_live_open_positions_keep_spot_but_drop_stale_perp(
     broker_mod = types.ModuleType("execution.coinbase_broker")
     broker_mod.get_coinbase_broker = lambda: _Broker()
 
+    class _SpotBroker:
+        _paper = False
+
+        def is_connected(self):
+            return True
+
+        def connect(self):
+            return True
+
+        def sync_live_holdings(self):
+            return [
+                {
+                    "symbol": "BTC",
+                    "qty": 0.001,
+                    "avg_entry": 85000.0,
+                    "current_value": 85.0,
+                }
+            ]
+
+    spot_mod = types.ModuleType("execution.coinbase_spot_broker")
+    spot_mod.get_spot_broker = lambda: _SpotBroker()
+
     monkeypatch.setitem(sys.modules, "db", db_mock)
+    with sqlite3.connect(db) as c:
+        c.execute(
+            "INSERT INTO lane_runtime_state (lane_id, connected, mode) VALUES ('crypto',1,'live')"
+        )
     monkeypatch.setitem(sys.modules, "execution.coinbase_broker", broker_mod)
+    monkeypatch.setitem(sys.modules, "execution.coinbase_spot_broker", spot_mod)
     monkeypatch.delitem(sys.modules, "data.positions", raising=False)
 
     from data.positions import get_open_positions
@@ -211,6 +269,42 @@ def test_dt03c_live_open_positions_keep_spot_but_drop_stale_perp(
     positions = get_open_positions()
     assert len(positions) == 1
     assert positions[0]["strategy"] == "spot_btc"
+
+
+def test_dt03d_live_spot_positions_follow_exchange_truth(tmp_path, monkeypatch):
+    """
+    In live mode, stale spot DB rows must disappear when Coinbase spot holdings are
+    empty. The live account snapshot, not open_positions, is canonical.
+    """
+    db = _make_db_with_mixed_positions(tmp_path, paper_int=0)
+    db_mock = _make_db_mock(db, paper_flag=0)
+
+    class _SpotBroker:
+        _paper = False
+
+        def is_connected(self):
+            return True
+
+        def connect(self):
+            return True
+
+        def sync_live_holdings(self):
+            return []
+
+    spot_mod = types.ModuleType("execution.coinbase_spot_broker")
+    spot_mod.get_spot_broker = lambda: _SpotBroker()
+
+    monkeypatch.setitem(sys.modules, "db", db_mock)
+    with sqlite3.connect(db) as c:
+        c.execute(
+            "INSERT INTO lane_runtime_state (lane_id, connected, mode) VALUES ('crypto',1,'live')"
+        )
+    monkeypatch.setitem(sys.modules, "execution.coinbase_spot_broker", spot_mod)
+    monkeypatch.delitem(sys.modules, "data.positions", raising=False)
+
+    from data.positions import get_spot_positions_dashboard
+
+    assert get_spot_positions_dashboard() == []
 
 
 # ── DT-04: balance.py _unrealized_pnl excludes spot_ strategy rows ───────────

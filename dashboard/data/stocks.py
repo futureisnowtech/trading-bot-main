@@ -16,7 +16,7 @@ _DASHBOARD_DIR = os.path.dirname(_DASH_DIR)
 if _DASHBOARD_DIR not in sys.path:
     sys.path.insert(0, _DASHBOARD_DIR)
 
-from db import _q, _q1
+from db import _q, _q1, _runtime_paper_flag
 
 _TS_NORM = "datetime(replace(substr(ts,1,19),'T',' '))"
 
@@ -58,10 +58,7 @@ def get_stock_header() -> dict:
         "WHERE lane_id='stocks' ORDER BY id DESC LIMIT 1"
     )
     result["connected"] = bool(lane.get("connected"))
-
-    # Open position count from DB
-    rows = _q("SELECT COUNT(*) AS n FROM open_positions WHERE strategy LIKE 'stocks_%'")
-    result["open_count"] = int((rows[0].get("n") or 0) if rows else 0)
+    live_mode = not bool(_runtime_paper_flag())
 
     # PDT count (day trades open+close same day in last 7 days)
     pdt_rows = _q(
@@ -79,17 +76,39 @@ def get_stock_header() -> dict:
     )
     result["pdt_count"] = int((pdt_rows[0].get("n") or 0) if pdt_rows else 0)
 
-    # Account value — read from lane_runtime_state if persisted, else 0
-    try:
-        av_row = _q1(
-            "SELECT buying_power_usd FROM lane_runtime_state "
-            "WHERE lane_id='stocks' ORDER BY id DESC LIMIT 1"
+    live_positions = _get_live_stock_positions()
+    if live_positions is not None:
+        result["open_count"] = len(live_positions)
+        try:
+            from execution.ibkr_stock_broker import get_dashboard_stock_broker
+
+            broker = get_dashboard_stock_broker()
+            av = float(broker.get_account_value() or 0.0)
+            if av > 0:
+                result["account_value"] = av
+            result["connected"] = bool(broker.is_connected())
+        except Exception:
+            pass
+    else:
+        if live_mode:
+            result["connected"] = False
+            result["open_count"] = 0
+            result["account_value"] = 0.0
+            return result
+        rows = _q(
+            "SELECT COUNT(*) AS n FROM open_positions WHERE strategy LIKE 'stocks_%'"
         )
-        av = float(av_row.get("buying_power_usd") or 0.0)
-        if av > 0:
-            result["account_value"] = av
-    except Exception:
-        pass
+        result["open_count"] = int((rows[0].get("n") or 0) if rows else 0)
+        try:
+            av_row = _q1(
+                "SELECT buying_power_usd FROM lane_runtime_state "
+                "WHERE lane_id='stocks' ORDER BY id DESC LIMIT 1"
+            )
+            av = float(av_row.get("buying_power_usd") or 0.0)
+            if av > 0:
+                result["account_value"] = av
+        except Exception:
+            pass
 
     return result
 
@@ -105,7 +124,51 @@ def get_stock_positions() -> list[dict]:
         "WHERE strategy LIKE 'stocks_%' "
         "ORDER BY ts_entry DESC"
     )
+    live_positions = _get_live_stock_positions()
+    if live_positions is not None:
+        return _merge_live_stock_rows(live_positions, rows or [])
+    if not _runtime_paper_flag():
+        return []
     return rows or []
+
+
+def _get_live_stock_positions() -> dict | None:
+    if _runtime_paper_flag():
+        return None
+    try:
+        from execution.ibkr_stock_broker import get_dashboard_stock_broker
+
+        broker = get_dashboard_stock_broker()
+        if not broker.is_connected():
+            broker.connect()
+        if not broker.is_connected():
+            return None
+        return broker.sync_live_positions()
+    except Exception:
+        return None
+
+
+def _merge_live_stock_rows(live_positions: dict, db_rows: list[dict]) -> list[dict]:
+    db_by_symbol = {str(row.get("symbol") or "").upper(): row for row in db_rows}
+    merged: list[dict] = []
+    for symbol, live in live_positions.items():
+        db_row = dict(db_by_symbol.get(symbol, {}))
+        merged.append(
+            {
+                **db_row,
+                "symbol": symbol,
+                "qty": int(live.get("qty") or db_row.get("qty") or 0),
+                "entry": float(live.get("entry") or db_row.get("entry") or 0.0),
+                "stop": float(db_row.get("stop") or live.get("stop") or 0.0),
+                "target": float(db_row.get("target") or live.get("target") or 0.0),
+                "strategy": db_row.get("strategy") or f"stocks_{symbol.lower()}",
+                "ts_entry": db_row.get("ts_entry") or "",
+                "side": live.get("side") or db_row.get("side") or "LONG",
+                "order_id": live.get("order_id") or db_row.get("order_id") or "",
+            }
+        )
+    merged.sort(key=lambda row: row.get("ts_entry") or "", reverse=True)
+    return merged
 
 
 def get_stock_trades_today() -> list[dict]:

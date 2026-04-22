@@ -44,6 +44,7 @@ except Exception:
 IBKR_HOST = os.getenv("IBKR_HOST", "127.0.0.1")
 IBKR_PORT = int(os.getenv("IBKR_PORT", "7496"))  # live TWS port
 IBKR_STOCK_CLIENT_ID = 4  # fixed — must not collide with MES(2) or ForecastEx(3)
+IBKR_STOCK_DASHBOARD_CLIENT_ID = int(os.getenv("IBKR_STOCK_DASHBOARD_CLIENT_ID", "14"))
 
 # PDT rolling window (trading days)
 _PDT_WINDOW_DAYS = 5
@@ -58,11 +59,12 @@ class IBKRStockBroker:
     clientId=4 — never collides with IBKRBroker (MES=2) or ForecastEx (3).
     """
 
-    def __init__(self):
+    def __init__(self, client_id: int = IBKR_STOCK_CLIENT_ID):
         self._ib = None
         self._connected = False
         self._open_positions: dict = {}  # {symbol: {"qty", "entry", "stop", "target", "side", "order_id"}}
         self._lock = threading.Lock()
+        self._client_id = int(client_id)
 
         # Start the persistent event loop — same pattern as ibkr_broker.py.
         # Python 3.10+ requires asyncio.set_event_loop() inside the new thread.
@@ -103,7 +105,7 @@ class IBKRStockBroker:
         try:
             self._run(
                 self._ib.connectAsync(
-                    IBKR_HOST, IBKR_PORT, clientId=IBKR_STOCK_CLIENT_ID
+                    IBKR_HOST, IBKR_PORT, clientId=self._client_id
                 ),
                 timeout=15,
             )
@@ -117,7 +119,7 @@ class IBKRStockBroker:
                 )
                 print(
                     f"[IBKRStockBroker] Connected to TWS ({mode}) account={acct} "
-                    f"port={IBKR_PORT} clientId={IBKR_STOCK_CLIENT_ID}"
+                    f"port={IBKR_PORT} clientId={self._client_id}"
                 )
                 log_event(
                     "INFO", "IBKRStockBroker", f"Connected ({mode}) account={acct}"
@@ -593,6 +595,14 @@ class IBKRStockBroker:
         with self._lock:
             return dict(self._open_positions)
 
+    def sync_live_positions(self) -> dict:
+        """
+        Refresh in-memory positions from TWS and return the canonical live snapshot.
+        """
+        if self.is_connected():
+            self._sync_positions()
+        return self.get_open_positions()
+
     def get_pdt_count(self) -> int:
         """
         Count day trades (open+close same day) in last 5 trading days from trades table.
@@ -627,3 +637,25 @@ class IBKRStockBroker:
         except Exception as e:
             log_event("WARN", "IBKRStockBroker", f"get_pdt_count error: {e}")
             return 0
+
+
+_stock_broker: Optional[IBKRStockBroker] = None
+_dashboard_stock_broker: Optional[IBKRStockBroker] = None
+
+
+def get_stock_broker() -> IBKRStockBroker:
+    global _stock_broker
+    if _stock_broker is None:
+        _stock_broker = IBKRStockBroker()
+        _stock_broker.connect()
+    return _stock_broker
+
+
+def get_dashboard_stock_broker() -> IBKRStockBroker:
+    global _dashboard_stock_broker
+    if _dashboard_stock_broker is None:
+        _dashboard_stock_broker = IBKRStockBroker(
+            client_id=IBKR_STOCK_DASHBOARD_CLIENT_ID
+        )
+        _dashboard_stock_broker.connect()
+    return _dashboard_stock_broker

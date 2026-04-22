@@ -6,7 +6,7 @@ from datetime import datetime
 import json
 import urllib.request
 
-from db import _q, _runtime_paper_flag
+from db import _q, _q1, _runtime_paper_flag
 
 
 def _db_open_positions():
@@ -25,10 +25,14 @@ def _db_perp_positions():
 
 def get_spot_positions_dashboard():
     """Open spot-only positions (strategy LIKE 'spot_%'). For spot section display."""
-    return _q(
+    db_rows = _q(
         "SELECT * FROM open_positions WHERE strategy LIKE 'spot_%' AND paper=? ORDER BY ts_entry DESC",
         (_runtime_paper_flag(),),
     )
+    live_positions = _get_live_coinbase_spot_positions()
+    if live_positions is not None:
+        return _merge_live_spot_rows(live_positions, db_rows)
+    return db_rows
 
 
 def _ts_sort_key(row: dict) -> datetime:
@@ -41,6 +45,8 @@ def _ts_sort_key(row: dict) -> datetime:
 
 def _get_live_coinbase_perp_positions() -> dict | None:
     if _runtime_paper_flag():
+        return None
+    if not _crypto_live_snapshot_enabled():
         return None
     try:
         from execution.coinbase_broker import get_coinbase_broker
@@ -55,6 +61,34 @@ def _get_live_coinbase_perp_positions() -> dict | None:
         return broker.sync_live_positions()
     except Exception:
         return None
+
+
+def _get_live_coinbase_spot_positions() -> list[dict] | None:
+    if _runtime_paper_flag():
+        return None
+    if not _crypto_live_snapshot_enabled():
+        return None
+    try:
+        from execution.coinbase_spot_broker import get_spot_broker
+
+        broker = get_spot_broker()
+        if bool(getattr(broker, "_paper", False)):
+            return None
+        if not broker.is_connected():
+            broker.connect()
+        if not broker.is_connected():
+            return None
+        return broker.sync_live_holdings()
+    except Exception:
+        return None
+
+
+def _crypto_live_snapshot_enabled() -> bool:
+    row = _q1(
+        "SELECT connected, mode FROM lane_runtime_state "
+        "WHERE lane_id='crypto' ORDER BY id DESC LIMIT 1"
+    )
+    return bool(row.get("connected")) and str(row.get("mode") or "").lower() == "live"
 
 
 def _merge_live_perp_rows(live_positions: dict, db_rows: list[dict]) -> list[dict]:
@@ -77,6 +111,31 @@ def _merge_live_perp_rows(live_positions: dict, db_rows: list[dict]) -> list[dic
                 "current_price": float(live.get("current_price") or 0.0),
                 "unrealized_pnl": float(live.get("unrealized_pnl") or 0.0),
                 "venue": live.get("venue") or "coinbase",
+            }
+        )
+    merged.sort(key=_ts_sort_key, reverse=True)
+    return merged
+
+
+def _merge_live_spot_rows(live_positions: list[dict], db_rows: list[dict]) -> list[dict]:
+    db_by_symbol = {str(row.get("symbol") or "").upper(): row for row in db_rows}
+    merged: list[dict] = []
+    for live in live_positions:
+        symbol = str(live.get("symbol") or "").upper()
+        db_row = dict(db_by_symbol.get(symbol, {}))
+        merged.append(
+            {
+                **db_row,
+                "symbol": symbol,
+                "strategy": db_row.get("strategy") or f"spot_{symbol.lower()}",
+                "paper": 0,
+                "direction": "LONG",
+                "qty": float(live.get("qty") or db_row.get("qty") or 0.0),
+                "entry": float(
+                    live.get("avg_entry") or db_row.get("entry") or 0.0
+                ),
+                "current_value": float(live.get("current_value") or 0.0),
+                "venue": "coinbase_spot",
             }
         )
     merged.sort(key=_ts_sort_key, reverse=True)

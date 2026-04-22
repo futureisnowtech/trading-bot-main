@@ -23,6 +23,30 @@ def _db_perp_positions():
     )
 
 
+def _runtime_perp_truth() -> tuple[int, float]:
+    """Return (positions_open, capital_deployed_usd) from lane_runtime_state crypto row."""
+    row = _q1(
+        "SELECT positions_open, capital_deployed_usd, updated_at "
+        "FROM lane_runtime_state WHERE lane_id='crypto' ORDER BY id DESC LIMIT 1"
+    )
+    if not row:
+        return -1, -1.0  # unknown — don't suppress
+    # Only trust if the heartbeat is fresh (< 3 minutes old)
+    updated_at = str(row.get("updated_at") or "")
+    try:
+        from datetime import timezone
+
+        ts = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+        age_s = (datetime.now(timezone.utc) - ts).total_seconds()
+        if age_s > 180:
+            return -1, -1.0  # stale runtime — don't suppress
+    except Exception:
+        return -1, -1.0
+    return int(row.get("positions_open") or 0), float(
+        row.get("capital_deployed_usd") or 0.0
+    )
+
+
 def get_spot_positions_dashboard():
     """Open spot-only positions (strategy LIKE 'spot_%'). For spot section display."""
     db_rows = _q(
@@ -104,9 +128,7 @@ def _merge_live_perp_rows(live_positions: dict, db_rows: list[dict]) -> list[dic
                 "paper": 0,
                 "direction": live.get("direction") or db_row.get("direction") or "LONG",
                 "qty": float(live.get("qty") or db_row.get("qty") or 0.0),
-                "entry": float(
-                    live.get("entry_price") or db_row.get("entry") or 0.0
-                ),
+                "entry": float(live.get("entry_price") or db_row.get("entry") or 0.0),
                 "contracts": float(live.get("contracts") or 0.0),
                 "current_price": float(live.get("current_price") or 0.0),
                 "unrealized_pnl": float(live.get("unrealized_pnl") or 0.0),
@@ -117,7 +139,9 @@ def _merge_live_perp_rows(live_positions: dict, db_rows: list[dict]) -> list[dic
     return merged
 
 
-def _merge_live_spot_rows(live_positions: list[dict], db_rows: list[dict]) -> list[dict]:
+def _merge_live_spot_rows(
+    live_positions: list[dict], db_rows: list[dict]
+) -> list[dict]:
     db_by_symbol = {str(row.get("symbol") or "").upper(): row for row in db_rows}
     merged: list[dict] = []
     for live in live_positions:
@@ -131,9 +155,7 @@ def _merge_live_spot_rows(live_positions: list[dict], db_rows: list[dict]) -> li
                 "paper": 0,
                 "direction": "LONG",
                 "qty": float(live.get("qty") or db_row.get("qty") or 0.0),
-                "entry": float(
-                    live.get("avg_entry") or db_row.get("entry") or 0.0
-                ),
+                "entry": float(live.get("avg_entry") or db_row.get("entry") or 0.0),
                 "current_value": float(live.get("current_value") or 0.0),
                 "venue": "coinbase_spot",
             }
@@ -146,21 +168,39 @@ def get_perp_positions():
     """
     Open perp-only positions.
 
-    Live mode uses Coinbase CFM `/cfm/positions` as the canonical source of truth
-    and only borrows DB metadata (stop/target/ts_entry/notes) when a matching row
-    exists. Paper mode and live API fallback continue to use open_positions.
+    Live mode: Coinbase CFM API is canonical — only DB metadata borrowed for
+    matching rows.  DB stale rows invisible (no position on exchange → not shown).
+
+    Paper mode: DB is primary, but reconciled against lane_runtime_state truth.
+    If the bot reports 0 positions/deployed with a fresh heartbeat, any DB rows
+    are stale (delete_position failed or bot restarted mid-close) and suppressed.
     """
     db_rows = _db_perp_positions()
     live_positions = _get_live_coinbase_perp_positions()
     if live_positions is not None:
         return _merge_live_perp_rows(live_positions, db_rows)
+
+    # Paper mode: reconcile against runtime truth before returning DB rows
+    if _runtime_paper_flag() and db_rows:
+        rt_count, rt_deployed = _runtime_perp_truth()
+        if rt_count == 0 and rt_deployed == 0.0:
+            # Bot says no open perp positions — DB rows are stale, suppress them
+            return []
+
     return db_rows
 
 
 def get_open_positions():
     """All open positions for current mode (perp + spot)."""
     if _runtime_paper_flag():
-        return _db_open_positions()
+        perps = get_perp_positions()
+        spots = _q(
+            "SELECT * FROM open_positions WHERE strategy LIKE 'spot_%' AND paper=? ORDER BY ts_entry DESC",
+            (1,),
+        )
+        combined = perps + spots
+        combined.sort(key=_ts_sort_key, reverse=True)
+        return combined
     combined = get_perp_positions() + get_spot_positions_dashboard()
     combined.sort(key=_ts_sort_key, reverse=True)
     return combined

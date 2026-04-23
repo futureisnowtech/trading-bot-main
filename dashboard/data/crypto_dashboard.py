@@ -157,10 +157,11 @@ def get_crypto_opportunity_board(hours: int = 24) -> list[dict]:
             COALESCE(tradeability_status, 'not_evaluated') AS status,
             COALESCE(auto_executable, 0) AS auto_executable,
             COALESCE(manual_executable, 0) AS manual_executable,
-            COALESCE(composite_score, 0.0) AS score,
+            COALESCE(final_spot_score, composite_score, 0.0) AS score,
             COALESCE(econ_approved, 0) AS econ_approved,
             COALESCE(scanner_expected_profit, 0.0) AS expected_profit,
             COALESCE(stop_pct, 0.0) AS stop_pct,
+            COALESCE(regime_floor, 0.0) AS regime_floor,
             COALESCE(trade_blocked_reason, '') AS trade_blocked_reason,
             COALESCE(trade_size_block_reason, '') AS trade_size_block_reason,
             COALESCE(trade_source_reason, '') AS trade_source_reason,
@@ -190,7 +191,8 @@ def get_crypto_failure_summary(hours: int = 24) -> dict:
     """
     Returns:
       execution_failures   — list of recent execution_failed rows
-      top_policy_blocks    — list of {reason, count} for policy blocks
+      top_quality_blocks   — list of {reason, count} for score / setup gating
+      top_econ_blocks      — list of {reason, count} for economics / microstructure gating
       top_bug_flags        — list of {reason, count} for bug/data failures
     """
     cutoff = _cutoff(hours)
@@ -207,17 +209,32 @@ def get_crypto_failure_summary(hours: int = 24) -> dict:
         (cutoff,),
     )
 
-    top_policy_blocks = _q(
+    top_quality_blocks = _q(
         f"""
         SELECT
             COALESCE(NULLIF(trade_blocked_reason,''), NULLIF(entry_block_reason,''), decision) AS reason,
             COUNT(*) AS n
         FROM scan_candidates
         WHERE {_TS_NORM} >= datetime(replace(substr(?,1,19),'T',' '))
-          AND decision IN (
-            'dual_exposure_block','cooldown_block','risk_block',
-            'research_only_block','not_autonomous_live_eligible','sizing_zero'
+          AND (
+            decision='below_threshold'
+            OR COALESCE(trade_blocked_reason,'')='below_regime_floor'
           )
+        GROUP BY 1
+        ORDER BY n DESC
+        LIMIT 8
+        """,
+        (cutoff,),
+    )
+
+    top_econ_blocks = _q(
+        f"""
+        SELECT
+            COALESCE(NULLIF(trade_blocked_reason,''), NULLIF(entry_block_reason,''), decision) AS reason,
+            COUNT(*) AS n
+        FROM scan_candidates
+        WHERE {_TS_NORM} >= datetime(replace(substr(?,1,19),'T',' '))
+          AND decision='econ_veto'
         GROUP BY 1
         ORDER BY n DESC
         LIMIT 8
@@ -242,6 +259,7 @@ def get_crypto_failure_summary(hours: int = 24) -> dict:
 
     return {
         "execution_failures": execution_failures,
-        "top_policy_blocks": top_policy_blocks,
+        "top_quality_blocks": top_quality_blocks,
+        "top_econ_blocks": top_econ_blocks,
         "top_bug_flags": top_bug_flags,
     }

@@ -1023,6 +1023,8 @@ def _get_latest_spot_scan(underlying: str) -> dict:
             """
             SELECT
                 composite_score,
+                final_spot_score,
+                regime_floor,
                 decision,
                 ts,
                 primary_setup,
@@ -1054,7 +1056,8 @@ def _get_latest_spot_scan(underlying: str) -> dict:
                 age = -1
             return {
                 "score": float(row["composite_score"]),
-                "final_spot_score": float(row["composite_score"]),
+                "final_spot_score": float(row["final_spot_score"] or row["composite_score"] or 0.0),
+                "regime_floor": float(row["regime_floor"] or 0.0),
                 "decision": row["decision"] or "unknown",
                 "age_secs": age,
                 "source": "db",
@@ -1190,9 +1193,20 @@ def render_spot_section():
         setup_family = scan.get("setup_family", "")
         confirms = scan.get("structural_confirms", "")
         stop_pct = float(scan.get("stop_pct") or 0.0)
-        threshold = {"TREND": 62, "NEUTRAL": 66, "CHOP": 70}.get(
-            regime or "NEUTRAL", 66
-        )
+        threshold = float(scan.get("regime_floor") or 0.0)
+        if threshold <= 0:
+            try:
+                from runtime.spot_regime import score_floor_for_regime
+
+                threshold = float(
+                    score_floor_for_regime(
+                        regime or "NEUTRAL",
+                        structural_confirm_count=len([x for x in confirms.split(",") if x.strip()]),
+                        setup_family=setup_family or "",
+                    )
+                )
+            except Exception:
+                threshold = 61.0
 
         # Signal status block
         if score is not None:
@@ -1232,6 +1246,7 @@ def render_spot_section():
                 "entered": "Bot entered this position automatically.",
                 "below_threshold": f"Bot skipped — signal score too low (needs {threshold}).",
                 "econ_veto": "Bot skipped — expected edge doesn't clear fee hurdle.",
+                "data_unavailable": "Bot skipped — live multi-timeframe spot state was unavailable.",
                 "sizing_zero": "Bot skipped — position size computed to zero.",
                 "research_only_block": "Symbol is research-only, not in live execution universe.",
                 "scanned (not yet submitted to runner)": "Freshly scanned — not yet processed by the autonomous runner.",

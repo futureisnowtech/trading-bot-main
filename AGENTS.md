@@ -29,7 +29,7 @@ A fully autonomous AI-powered trading system that:
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
 
-## Current Version: v17.4 (2026-04-22)
+## Current Version: v17.5 (2026-04-23)
 
 **Active branch:** `feature/v10-rebuild`
 **Clean paper trading started:** 2026-04-02
@@ -97,6 +97,9 @@ A fully autonomous AI-powered trading system that:
 - **Spot sizing / exits (v17.4):** live spot sizing path in `scheduler/v10_runner.py` is now risk-from-stop based instead of `6%–10% of balance`. Stops are ATR/instability-based with symbol clamp bands, targets are regime-based (`1.8R/1.2R/0.9R`), and spot exits now include hard stop, trailing stop, target hit, stagnation exit, and thesis decay on a dedicated 5-second spot loop.
 - **Spot execution truth (v17.4):** `execution/coinbase_spot_broker.py` now supports 8-symbol product specs, top-of-book reads, limit post-only spot orders, order-status polling, cancel, fill aggregation, and best-effort fee truth. `spot_engine.py` persists execution route (`maker_first` / `taker_fallback` / `skipped_microstructure`) and stop/target model versions into `open_positions`.
 - **Spot dashboard/manual truth (v17.4):** `dashboard/data/crypto_dashboard.py`, `dashboard/widgets/pages/crypto_page.py`, and `dashboard/widgets/trade_approval/manual_scan.py` now expose broker-truth spot holdings plus persisted scalp truth fields (`spot_regime`, `setup_family`, timeframe summaries, structural confirmations, execution route, cooldown, microstructure veto). Manual spot controls now preview the same scalp model the autonomous lane uses.
+- **Spot blocker truth + warm state (v17.5):** spot state now warms/caches the `5m/30m/4h/1d` substrate for the 8-symbol spot universe, with stale-cache fallback allowed for exit safety but not for fresh entry decisions. `scheduler/v10_runner.py` now classifies `below_regime_floor` as a quality/threshold block instead of mislabeling it as an economics veto, and spot data failures surface as `spot_data_unavailable` instead of generic execution failure.
+- **Spot score calibration (v17.5):** spot regime promotion and score floors were recalibrated around actual live spot distributions. `runtime/spot_regime.py` now promotes clean `TREND` states earlier, `score_floor_for_regime()` softens `TREND/NEUTRAL` floors for high-quality impulse setups, and the live spot route uses those dynamic floors consistently in runner, economics gate, and manual/dashboard surfaces.
+- **Spot operator diagnostics (v17.5):** CRYPTO opportunity cards and diagnostics now show the actual `final_spot_score` and `regime_floor` the spot bot used, and the diagnostics tab splits spot rejections into quality blocks, economics/microstructure blocks, and data/execution failures instead of collapsing them into a single vague veto bucket.
 - **Cross-lane ownership (v17.2):** the same underlying cannot be open in both spot and perp at once. `runtime/crypto_tradeability.py` blocks cross-lane duplicate exposure with `underlying_exposure_already_open`.
 - **Paper/live spot balance truth (v17.4):** `dashboard/data/balance.py:get_spot_balance_summary()` now treats `held_usd_by_symbol` as canonical and emits generic `<symbol>_held_usd` keys for the live 8-symbol spot universe while keeping legacy BTC/ETH/SOL/XRP keys for compatibility.
 - **Dashboard spot equity truth (v17.2):** `dashboard/data/account.py:get_account()` now includes spot unrealized P&L in headline equity instead of treating the account snapshot as perp-only unrealized.

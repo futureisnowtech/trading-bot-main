@@ -64,7 +64,13 @@ _BLOCKED_LABELS = {
     "execution_policy_unavailable": "Policy engine unavailable",
     "research_only_block": "Research-only — not in live universe",
     "below_threshold": "Score below entry threshold",
+    "below_regime_floor": "Final spot score below live regime floor",
     "econ_veto": "Economics gate failed (fees/spread)",
+    "projected_net_win_too_small": "Net profit too small after fees",
+    "non_positive_net_target": "Target does not clear trading costs",
+    "spread_cap_exceeded": "Spread too wide for scalp economics",
+    "depth_below_minimum": "Book depth too thin for scalp entry",
+    "spot_data_unavailable": "Spot state unavailable from live candles",
     "data_unavailable": "No candle data for this pair",
     "sizing_zero": "Position size computed to zero",
 }
@@ -94,6 +100,7 @@ def _candidate_card(row: dict) -> str:
     execution_route = row.get("execution_route") or ""
     cooldown_until = row.get("cooldown_until") or ""
     microstructure_veto = row.get("microstructure_veto") or ""
+    regime_floor = float(row.get("regime_floor") or 0.0)
     auto_ex = bool(row.get("auto_executable"))
     manual_ex = bool(row.get("manual_executable"))
     blocked_raw = row.get("trade_blocked_reason") or row.get("decision") or ""
@@ -159,7 +166,7 @@ def _candidate_card(row: dict) -> str:
     # WHY IT MIGHT WORK
     why_works_parts = [
         f"Direction: <strong style='color:{dir_color};'>{dir_arrow} {direction}</strong>",
-        f"Composite: <strong style='color:{sc_color};'>{score:.0f}/100</strong>",
+        f"Score: <strong style='color:{sc_color};'>{score:.0f}/100</strong>",
     ]
     if lane:
         why_works_parts.append(
@@ -171,6 +178,8 @@ def _candidate_card(row: dict) -> str:
         why_works_parts.append(
             f"Confirms: <strong>{structural_confirms.replace(',', ', ')}</strong>"
         )
+    if regime_floor > 0:
+        why_works_parts.append(f"Floor: <strong>{regime_floor:.0f}</strong>")
     if execution_route:
         why_works_parts.append(
             f"Route: <strong>{execution_route.replace('_', ' ')}</strong>"
@@ -399,7 +408,7 @@ def render_crypto_page():
         st.markdown(
             ui.info_callout(
                 "All recent scan candidates — executable, blocked, and researched. "
-                "Each card explains why the bot saw it, why it might work, and what's in the way.",
+                "Each card shows the real live score, regime floor, and blocker category the bot used.",
                 "info",
             ),
             unsafe_allow_html=True,
@@ -539,7 +548,7 @@ def render_crypto_page():
         try:
             failure_data = get_crypto_failure_summary(hours=diag_hours)
 
-            d_left, d_right = st.columns(2)
+            d_left, d_mid, d_right = st.columns(3)
 
             with d_left:
                 exec_fails = failure_data.get("execution_failures") or []
@@ -566,10 +575,10 @@ def render_crypto_page():
                     unsafe_allow_html=True,
                 )
 
-            with d_right:
-                policy_blocks = failure_data.get("top_policy_blocks") or []
+            with d_mid:
+                quality_blocks = failure_data.get("top_quality_blocks") or []
                 body_html = ""
-                for b in policy_blocks[:8]:
+                for b in quality_blocks[:8]:
                     reason_b = b.get("reason", "unknown")
                     count_b = b.get("n", 0)
                     body_html += ui.metric_row(
@@ -579,12 +588,35 @@ def render_crypto_page():
                     )
                 if not body_html:
                     body_html = ui.info_callout(
-                        "No policy blocks in this window.", "good"
+                        "No score / setup blocks in this window.", "good"
                     )
                 st.markdown(
                     ui.detail_card(
-                        "Policy Blocks",
-                        "System rules that prevented entry",
+                        "Quality Blocks",
+                        "Setups the bot saw but rejected on score / regime quality",
+                        body_html,
+                    ),
+                    unsafe_allow_html=True,
+                )
+            with d_right:
+                econ_blocks = failure_data.get("top_econ_blocks") or []
+                body_html = ""
+                for b in econ_blocks[:8]:
+                    reason_b = b.get("reason", "unknown")
+                    count_b = b.get("n", 0)
+                    body_html += ui.metric_row(
+                        _blocked_label(reason_b) or reason_b,
+                        f"{count_b}×",
+                        ui.C_AMBER,
+                    )
+                if not body_html:
+                    body_html = ui.info_callout(
+                        "No economics / microstructure blocks in this window.", "good"
+                    )
+                st.markdown(
+                    ui.detail_card(
+                        "Economics Blocks",
+                        "Trades that passed setup review but failed costs or microstructure",
                         body_html,
                     ),
                     unsafe_allow_html=True,

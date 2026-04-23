@@ -124,6 +124,8 @@ def init_db() -> None:
         "ALTER TABLE scan_candidates ADD COLUMN execution_route TEXT DEFAULT ''",
         "ALTER TABLE scan_candidates ADD COLUMN cooldown_until TEXT DEFAULT ''",
         "ALTER TABLE scan_candidates ADD COLUMN microstructure_veto TEXT DEFAULT ''",
+        "ALTER TABLE scan_candidates ADD COLUMN final_spot_score REAL DEFAULT 0",
+        "ALTER TABLE scan_candidates ADD COLUMN regime_floor REAL DEFAULT 0",
         "ALTER TABLE open_positions ADD COLUMN spot_regime TEXT DEFAULT ''",
         "ALTER TABLE open_positions ADD COLUMN setup_family TEXT DEFAULT ''",
         "ALTER TABLE open_positions ADD COLUMN tf_5m_state TEXT DEFAULT ''",
@@ -261,7 +263,9 @@ def init_db() -> None:
         structural_confirms TEXT DEFAULT '',
         execution_route TEXT DEFAULT '',
         cooldown_until TEXT DEFAULT '',
-        microstructure_veto TEXT DEFAULT ''
+        microstructure_veto TEXT DEFAULT '',
+        final_spot_score REAL DEFAULT 0,
+        regime_floor REAL DEFAULT 0
     )""")
 
     # v13.6: Forward-outcome labels for each journaled candidate.
@@ -833,6 +837,8 @@ def log_scan_candidate(
     execution_route: str = "",
     cooldown_until: str = "",
     microstructure_veto: str = "",
+    final_spot_score: float = 0.0,
+    regime_floor: float = 0.0,
 ) -> int:
     """
     Persist one candidate decision to scan_candidates.
@@ -860,8 +866,8 @@ def log_scan_candidate(
                 manual_executable, auto_executable,
                 spot_regime, setup_family, tf_5m_state, tf_30m_state, tf_4h_state,
                 tf_1d_state, structural_confirms, execution_route, cooldown_until,
-                microstructure_veto
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                microstructure_veto, final_spot_score, regime_floor
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 scan_id,
                 _ts(),
@@ -916,6 +922,8 @@ def log_scan_candidate(
                 execution_route,
                 cooldown_until,
                 microstructure_veto,
+                final_spot_score,
+                regime_floor,
             ),
         )
         row_id = cur.lastrowid or 0

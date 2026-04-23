@@ -67,8 +67,9 @@ def test_ssdt02_opportunity_board_reads_canonical_spot_scalp_fields(monkeypatch)
                 "execution_route": "maker_first",
                 "cooldown_until": "",
                 "microstructure_veto": "",
+                "regime_floor": 60.0,
                 "expected_profit": 1.23,
-                "score": 71.0,
+                "score": 68.5,
                 "status": "executable",
                 "recommended_lane": "spot",
                 "direction": "LONG",
@@ -89,3 +90,28 @@ def test_ssdt02_opportunity_board_reads_canonical_spot_scalp_fields(monkeypatch)
     assert rows[0]["expected_profit"] == 1.23
     assert rows[0]["spot_regime"] == "TREND"
     assert rows[0]["execution_route"] == "maker_first"
+    assert rows[0]["score"] == 68.5
+    assert rows[0]["regime_floor"] == 60.0
+
+
+def test_ssdt03_failure_summary_separates_quality_and_econ_blocks(monkeypatch):
+    import dashboard.data.crypto_dashboard as cd
+
+    calls = []
+
+    def _fake_q(*args, **kwargs):
+        sql = args[0]
+        calls.append(sql)
+        if "decision = 'execution_failed'" in sql:
+            return [{"symbol": "ETH", "direction": "LONG", "reason": "broker_reject", "ts": "2026-04-22T12:00:00"}]
+        if "decision='econ_veto'" in sql:
+            return [{"reason": "spread_cap_exceeded", "n": 3}]
+        if "decision='below_threshold'" in sql:
+            return [{"reason": "below_regime_floor", "n": 7}]
+        return [{"reason": "spot_state_unavailable", "n": 2}]
+
+    monkeypatch.setattr(cd, "_q", _fake_q)
+
+    summary = cd.get_crypto_failure_summary(hours=24)
+    assert summary["top_quality_blocks"][0]["reason"] == "below_regime_floor"
+    assert summary["top_econ_blocks"][0]["reason"] == "spread_cap_exceeded"

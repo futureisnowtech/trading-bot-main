@@ -49,3 +49,6 @@ reference_repos/
 
 # ── Local brain scratch / session notes that should stay off-branch ──────────
 brain/06_daily_summaries/2026-04-20.md
+
+# ── Audit exports / generated DB dumps ───────────────────────────────────────
+audit_output/*/db_exports/

@@ -1,5 +1,8 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
+## 2026-04-23
+- fix(v17.5): warm and cache the 8-symbol spot scalp state, separate spot quality-floor blocks from real economics/microstructure vetoes, persist/display final_spot_score + regime_floor truth, recalibrate spot regime floors for live candidate distributions, and align CRYPTO/manual diagnostics with the real live blocker categories
+
 ## 2026-04-22
 - feat(v17.4): implement 8-symbol 24/7 crypto spot scalp lane with derivative/regime logic, risk-from-stop sizing, maker-first spot routing, restart-safe scalp state, broker-truth crypto dashboard/manual alignment, and new spot scalp proofs
 

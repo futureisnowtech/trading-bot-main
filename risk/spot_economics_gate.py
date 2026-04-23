@@ -7,13 +7,10 @@ from __future__ import annotations
 import os
 
 from config import SPOT_SCALP_SYMBOL_CONFIG
+from runtime.spot_regime import score_floor_for_regime
 
 SPOT_TAKER_FEE_PCT: float = float(os.getenv("SPOT_TAKER_FEE_PCT", "0.006"))
 SPOT_MAKER_FEE_PCT: float = float(os.getenv("SPOT_MAKER_FEE_PCT", "0.004"))
-
-
-def _min_score_for_regime(regime: str) -> float:
-    return {"TREND": 62.0, "NEUTRAL": 66.0, "CHOP": 70.0}.get(regime, 66.0)
 
 
 def check_spot_economics(
@@ -28,6 +25,8 @@ def check_spot_economics(
     regime: str,
     execution_route_guess: str = "maker_first",
     paper: bool = False,
+    structural_confirm_count: int = 0,
+    setup_family: str = "",
 ) -> dict:
     clean = symbol.upper()
     cfg = SPOT_SCALP_SYMBOL_CONFIG.get(clean, {})
@@ -41,11 +40,18 @@ def check_spot_economics(
     net_target_pct = target_pct - total_cost_pct
     net_stop_pct = stop_pct + total_cost_pct
     projected_net_win_usd = size_usd * net_target_pct
+    score_floor = score_floor_for_regime(
+        regime,
+        structural_confirm_count=structural_confirm_count,
+        setup_family=setup_family,
+    )
 
-    if final_spot_score < _min_score_for_regime(regime):
+    if final_spot_score < score_floor:
         return {
             "approved": False,
             "reason": "below_regime_floor",
+            "gate_class": "quality",
+            "score_floor": score_floor,
             "fee_usd": fee_usd,
             "edge_score": net_target_pct - net_stop_pct,
             "net_target_pct": net_target_pct,
@@ -57,6 +63,8 @@ def check_spot_economics(
         return {
             "approved": False,
             "reason": "spread_cap_exceeded",
+            "gate_class": "microstructure",
+            "score_floor": score_floor,
             "fee_usd": fee_usd,
             "edge_score": net_target_pct - net_stop_pct,
             "net_target_pct": net_target_pct,
@@ -70,6 +78,8 @@ def check_spot_economics(
         return {
             "approved": False,
             "reason": "depth_below_minimum",
+            "gate_class": "microstructure",
+            "score_floor": score_floor,
             "fee_usd": fee_usd,
             "edge_score": net_target_pct - net_stop_pct,
             "net_target_pct": net_target_pct,
@@ -81,6 +91,8 @@ def check_spot_economics(
         return {
             "approved": False,
             "reason": "non_positive_net_target",
+            "gate_class": "economics",
+            "score_floor": score_floor,
             "fee_usd": fee_usd,
             "edge_score": net_target_pct - net_stop_pct,
             "net_target_pct": net_target_pct,
@@ -92,6 +104,8 @@ def check_spot_economics(
         return {
             "approved": False,
             "reason": "projected_net_win_too_small",
+            "gate_class": "economics",
+            "score_floor": score_floor,
             "fee_usd": fee_usd,
             "edge_score": net_target_pct - net_stop_pct,
             "net_target_pct": net_target_pct,
@@ -102,6 +116,8 @@ def check_spot_economics(
     return {
         "approved": True,
         "reason": "approved",
+        "gate_class": "approved",
+        "score_floor": score_floor,
         "fee_usd": fee_usd,
         "edge_score": net_target_pct - net_stop_pct,
         "net_target_pct": net_target_pct,

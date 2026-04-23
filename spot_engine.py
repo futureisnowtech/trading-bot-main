@@ -32,6 +32,7 @@ from runtime.spot_execution_policy import (
     maker_poll_count,
 )
 from runtime.spot_momentum import build_spot_state
+from runtime.spot_regime import score_floor_for_regime
 
 logger = logging.getLogger(__name__)
 
@@ -190,8 +191,15 @@ def _state_payload(spot_state: dict | None) -> dict:
     }
 
 
+def _resolve_spot_state(symbol: str, *, allow_stale: bool) -> dict | None:
+    try:
+        return build_spot_state(symbol, allow_stale=allow_stale)
+    except TypeError:
+        return build_spot_state(symbol)
+
+
 def _entry_floor(regime: str) -> float:
-    return {"TREND": 62.0, "NEUTRAL": 66.0, "CHOP": 70.0}.get(regime, 66.0)
+    return score_floor_for_regime(regime)
 
 
 def _target_r(regime: str) -> float:
@@ -348,7 +356,7 @@ def open_spot(
 
     if spot_state is None:
         try:
-            spot_state = build_spot_state(clean)
+            spot_state = _resolve_spot_state(clean, allow_stale=False)
         except Exception as e:
             logger.warning(f"[spot_engine] {clean} spot_state unavailable: {e}")
             spot_state = None
@@ -359,7 +367,12 @@ def open_spot(
     trail_arm_r = _trail_arm_r(regime)
     score_used = float(final_spot_score if final_spot_score is not None else composite_score)
 
-    if score_used < _entry_floor(regime):
+    score_floor = score_floor_for_regime(
+        regime,
+        structural_confirm_count=int((spot_state or {}).get("structural_confirm_count") or 0),
+        setup_family=str((spot_state or {}).get("setup_family") or ""),
+    )
+    if score_used < score_floor:
         logger.info(f"[spot_engine] {clean} blocked — final_spot_score {score_used:.1f} below regime floor")
         return None
     if spot_state:
@@ -627,7 +640,7 @@ def check_spot_stagnation_exits(paper: bool = True) -> List[Dict]:
     for pos in _load_spot_positions_from_db(paper=paper):
         sym = str(pos.get("symbol") or "").upper()
         try:
-            spot_state = build_spot_state(sym)
+            spot_state = _resolve_spot_state(sym, allow_stale=True)
         except Exception:
             continue
         entry = float(pos.get("entry") or 0.0)
@@ -666,7 +679,7 @@ def check_spot_thesis_exits(paper: bool = True) -> List[Dict]:
             except Exception:
                 pass
         try:
-            spot_state = build_spot_state(sym)
+            spot_state = _resolve_spot_state(sym, allow_stale=True)
         except Exception:
             continue
         if spot_state["derivative_score"] < SPOT_THESIS_MIN_SCORE or spot_state["frames"]["5m"]["v"] <= 0:

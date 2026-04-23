@@ -7,6 +7,7 @@ from __future__ import annotations
 import os
 import sys
 import importlib.util
+import time
 from typing import Any
 
 import numpy as np
@@ -19,6 +20,7 @@ if _ROOT not in sys.path:
 from config import (
     SPOT_SCALP_SCORE_WEIGHT_COMPOSITE,
     SPOT_SCALP_SCORE_WEIGHT_DERIVATIVE,
+    SPOT_STATE_CACHE_SECONDS,
 )
 try:
     from data.historical_data import get_candles
@@ -40,6 +42,13 @@ except Exception:
     _ind_spec.loader.exec_module(_ind_mod)
     add_all_indicators = _ind_mod.add_all_indicators
 from runtime.spot_regime import classify_spot_regime
+
+
+class SpotStateUnavailable(ValueError):
+    """Raised when the spot state cannot be built from current market data."""
+
+
+_STATE_CACHE: dict[str, dict[str, Any]] = {}
 
 
 def _clip(value: float, lo: float = -1.0, hi: float = 1.0) -> float:
@@ -77,6 +86,10 @@ def _bool_series(df: pd.DataFrame, name: str) -> pd.Series:
     if name in df.columns:
         return df[name].astype(bool)
     return pd.Series([False] * len(df), index=df.index, dtype=bool)
+
+
+def _clean_symbol(symbol: str) -> str:
+    return str(symbol or "").upper().replace("-USD", "").replace("USD", "").replace("USDT", "")
 
 
 def _timeframe_state(df: pd.DataFrame) -> dict[str, Any]:
@@ -173,7 +186,7 @@ def _timeframe_state(df: pd.DataFrame) -> dict[str, Any]:
     }
 
 
-def build_spot_state(symbol: str) -> dict[str, Any]:
+def _build_spot_state_fresh(symbol: str) -> dict[str, Any]:
     frames = {
         "5m": get_candles(symbol, "5m", 200),
         "30m": get_candles(symbol, "30m", 200),
@@ -183,7 +196,7 @@ def build_spot_state(symbol: str) -> dict[str, Any]:
     states: dict[str, dict[str, Any]] = {}
     for tf, df in frames.items():
         if df is None or len(df) < 50:
-            raise ValueError(f"insufficient {tf} candles for {symbol}")
+            raise SpotStateUnavailable(f"insufficient {tf} candles for {symbol}")
         states[tf] = _timeframe_state(df)
 
     regime = classify_spot_regime(states["30m"], states["4h"])
@@ -214,7 +227,51 @@ def build_spot_state(symbol: str) -> dict[str, Any]:
         ),
         "ou_halflife_minutes": float(states["30m"]["ou_halflife_minutes"]),
         "rv_ratio": float(states["30m"]["rv_ratio"]),
+        "cache_stale": False,
+        "state_source": "fresh",
+        "data_warning": "",
     }
+
+
+def build_spot_state(
+    symbol: str,
+    *,
+    use_cache: bool = True,
+    allow_stale: bool = False,
+) -> dict[str, Any]:
+    clean = _clean_symbol(symbol)
+    now = time.time()
+    cached = _STATE_CACHE.get(clean)
+    if use_cache and cached and (now - float(cached.get("ts") or 0.0) <= SPOT_STATE_CACHE_SECONDS):
+        return dict(cached["state"])
+
+    try:
+        state = _build_spot_state_fresh(clean)
+        _STATE_CACHE[clean] = {"ts": now, "state": dict(state)}
+        return dict(state)
+    except Exception as exc:
+        if allow_stale and cached and cached.get("state"):
+            stale = dict(cached["state"])
+            stale["cache_stale"] = True
+            stale["state_source"] = "stale_cache"
+            stale["data_warning"] = f"stale_cache:{exc}"
+            return stale
+        if isinstance(exc, SpotStateUnavailable):
+            raise
+        raise SpotStateUnavailable(str(exc)) from exc
+
+
+def warm_spot_state(symbol: str) -> dict[str, Any]:
+    clean = _clean_symbol(symbol)
+    try:
+        state = build_spot_state(clean, use_cache=False, allow_stale=False)
+        return {"symbol": clean, "ok": True, "state_source": state.get("state_source", "fresh")}
+    except Exception as exc:
+        return {"symbol": clean, "ok": False, "reason": str(exc)}
+
+
+def warm_spot_universe(symbols: list[str]) -> list[dict[str, Any]]:
+    return [warm_spot_state(sym) for sym in symbols]
 
 
 def classify_setup_family(states: dict[str, dict], regime: str) -> str:

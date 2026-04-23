@@ -114,6 +114,7 @@ SPOT_OFFSESSION_MIN_EDGE_MULT: float = float(
 SPOT_TOTAL_ALLOC_CAP_PCT: float = float(os.getenv("SPOT_TOTAL_ALLOC_CAP_PCT", "0.50"))
 SPOT_EXIT_POLL_SECONDS: int = int(os.getenv("SPOT_EXIT_POLL_SECONDS", "5"))
 SPOT_SCALP_SCAN_SECONDS: int = int(os.getenv("SPOT_SCALP_SCAN_SECONDS", "60"))
+SPOT_STATE_CACHE_SECONDS: int = int(os.getenv("SPOT_STATE_CACHE_SECONDS", "45"))
 SPOT_MAKER_WAIT_SECONDS: int = int(os.getenv("SPOT_MAKER_WAIT_SECONDS", "6"))
 SPOT_MAKER_POLL_SECONDS: int = int(os.getenv("SPOT_MAKER_POLL_SECONDS", "2"))
 SPOT_MICROSTRUCTURE_MAX_SPREAD_PCT: float = float(
@@ -128,6 +129,11 @@ SPOT_SCALP_SCORE_WEIGHT_COMPOSITE: float = float(
 SPOT_SCALP_SCORE_WEIGHT_DERIVATIVE: float = float(
     os.getenv("SPOT_SCALP_SCORE_WEIGHT_DERIVATIVE", "0.40")
 )
+SPOT_REGIME_SCORE_FLOORS: dict[str, float] = {
+    "TREND": float(os.getenv("SPOT_TREND_SCORE_FLOOR", "60.0")),
+    "NEUTRAL": float(os.getenv("SPOT_NEUTRAL_SCORE_FLOOR", "61.0")),
+    "CHOP": float(os.getenv("SPOT_CHOP_SCORE_FLOOR", "67.0")),
+}
 
 SPOT_SCALP_SYMBOL_CONFIG: dict[str, dict[str, float | int]] = {
     "BTC": {

@@ -24,6 +24,7 @@ from config import (
     SPOT_SCALP_SCORE_WEIGHT_DERIVATIVE,
     SPOT_STATE_CACHE_SECONDS,
 )
+
 try:
     from data.historical_data import get_candles
     from data.indicators import add_all_indicators
@@ -91,7 +92,13 @@ def _bool_series(df: pd.DataFrame, name: str) -> pd.Series:
 
 
 def _clean_symbol(symbol: str) -> str:
-    return str(symbol or "").upper().replace("-USD", "").replace("USD", "").replace("USDT", "")
+    return (
+        str(symbol or "")
+        .upper()
+        .replace("-USD", "")
+        .replace("USD", "")
+        .replace("USDT", "")
+    )
 
 
 def _timeframe_state(df: pd.DataFrame) -> dict[str, Any]:
@@ -131,14 +138,9 @@ def _timeframe_state(df: pd.DataFrame) -> dict[str, Any]:
             0.22 * _series_zscore(kst - kst_signal, x)
             + 0.20 * _series_zscore(macd_hist, y)
             + 0.18 * _clip(float(v) * 2.0)
-            + 0.16 * (
-                1.0
-                if bool(cb)
-                else -1.0
-                if bool(cbr)
-                else 0.0
-            )
-            + 0.14 * (
+            + 0.16 * (1.0 if bool(cb) else -1.0 if bool(cbr) else 0.0)
+            + 0.14
+            * (
                 1.0
                 if bool(stb)
                 else -1.0
@@ -163,7 +165,7 @@ def _timeframe_state(df: pd.DataFrame) -> dict[str, Any]:
     z = float(z_series.iloc[-1])
     v = float(v_series.iloc[-1])
     a = float(a_series.iloc[-1])
-    frame_score = float(np.clip(50.0 + 22.0 * z + 14.0 * v + 10.0 * a, 0.0, 100.0))
+    frame_score = float(np.clip(55.0 + 22.0 * z + 14.0 * v + 10.0 * a, 0.0, 100.0))
 
     structural_confirms = {
         "kst": 1 if float(kst.iloc[-1]) > float(kst_signal.iloc[-1]) else 0,
@@ -244,7 +246,11 @@ def build_spot_state(
     clean = _clean_symbol(symbol)
     now = time.time()
     cached = _STATE_CACHE.get(clean)
-    if use_cache and cached and (now - float(cached.get("ts") or 0.0) <= SPOT_STATE_CACHE_SECONDS):
+    if (
+        use_cache
+        and cached
+        and (now - float(cached.get("ts") or 0.0) <= SPOT_STATE_CACHE_SECONDS)
+    ):
         return dict(cached["state"])
 
     try:
@@ -267,7 +273,11 @@ def warm_spot_state(symbol: str) -> dict[str, Any]:
     clean = _clean_symbol(symbol)
     try:
         state = build_spot_state(clean, use_cache=False, allow_stale=False)
-        return {"symbol": clean, "ok": True, "state_source": state.get("state_source", "fresh")}
+        return {
+            "symbol": clean,
+            "ok": True,
+            "state_source": state.get("state_source", "fresh"),
+        }
     except Exception as exc:
         return {"symbol": clean, "ok": False, "reason": str(exc)}
 

@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-23
+- fix(spot-scalp): raise frame score neutral anchor from 50 to 55
+
+## 2026-04-23
 - fix(v17.6): bias NEUTRAL spot final-score blending to 0.90 composite / 0.10 derivative so mixed-regime crypto spot scalps lean more on the broader trade-quality stack while TREND/CHOP keep the original 0.60 / 0.40 blend
 
 ## 2026-04-23

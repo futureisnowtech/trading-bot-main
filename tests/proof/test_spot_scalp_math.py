@@ -11,7 +11,13 @@ if ROOT not in sys.path:
 def test_ssm01_final_spot_score_blends_composite_and_derivative():
     from runtime.spot_momentum import final_spot_score
 
-    assert final_spot_score(60.0, 80.0) == 68.0
+    assert final_spot_score(60.0, 80.0, regime="TREND") == 68.0
+
+
+def test_ssm01b_final_spot_score_neutral_leans_on_composite():
+    from runtime.spot_momentum import final_spot_score
+
+    assert final_spot_score(62.7, 46.7, regime="NEUTRAL") == 61.1
 
 
 def test_ssm02_regime_classifier_trend():

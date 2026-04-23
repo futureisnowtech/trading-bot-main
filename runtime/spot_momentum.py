@@ -18,6 +18,8 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from config import (
+    SPOT_NEUTRAL_SCORE_WEIGHT_COMPOSITE,
+    SPOT_NEUTRAL_SCORE_WEIGHT_DERIVATIVE,
     SPOT_SCALP_SCORE_WEIGHT_COMPOSITE,
     SPOT_SCALP_SCORE_WEIGHT_DERIVATIVE,
     SPOT_STATE_CACHE_SECONDS,
@@ -296,9 +298,19 @@ def classify_setup_family(states: dict[str, dict], regime: str) -> str:
     return "compression_breakout"
 
 
-def final_spot_score(existing_composite: float, derivative_score: float) -> float:
+def final_spot_score(
+    existing_composite: float,
+    derivative_score: float,
+    regime: str = "NEUTRAL",
+) -> float:
+    if str(regime or "NEUTRAL").upper() == "NEUTRAL":
+        composite_w = SPOT_NEUTRAL_SCORE_WEIGHT_COMPOSITE
+        derivative_w = SPOT_NEUTRAL_SCORE_WEIGHT_DERIVATIVE
+    else:
+        composite_w = SPOT_SCALP_SCORE_WEIGHT_COMPOSITE
+        derivative_w = SPOT_SCALP_SCORE_WEIGHT_DERIVATIVE
     return round(
-        float(existing_composite) * SPOT_SCALP_SCORE_WEIGHT_COMPOSITE
-        + float(derivative_score) * SPOT_SCALP_SCORE_WEIGHT_DERIVATIVE,
+        float(existing_composite) * composite_w
+        + float(derivative_score) * derivative_w,
         1,
     )

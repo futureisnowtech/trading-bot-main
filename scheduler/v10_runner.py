@@ -1517,7 +1517,11 @@ def _attempt_entry(
                 )
                 return "data_unavailable"
             _spot_regime = _spot_state.get("regime", "NEUTRAL")
-            _final_score = _final_spot_score(composite, _spot_state["derivative_score"])
+            _final_score = _final_spot_score(
+                composite,
+                _spot_state["derivative_score"],
+                regime=_spot_regime,
+            )
             _score_floor = _spot_floor(
                 _spot_regime,
                 structural_confirm_count=int(_spot_state.get("structural_confirm_count") or 0),

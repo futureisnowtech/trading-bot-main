@@ -17,7 +17,7 @@ def test_ssp01_spot_econ_separates_quality_from_economics():
     result = check_spot_economics(
         symbol="XRP",
         size_usd=100.0,
-        final_spot_score=59.0,
+        final_spot_score=57.0,
         stop_pct=0.015,
         target_r=1.2,
         spread_pct=0.0010,
@@ -96,3 +96,34 @@ def test_ssp03_build_spot_state_can_fall_back_to_stale_cache(monkeypatch):
     stale = sm.build_spot_state("ETH", use_cache=False, allow_stale=True)
     assert stale["cache_stale"] is True
     assert stale["state_source"] == "stale_cache"
+
+
+def test_ssp04_quality_gate_uses_replay_edge_conditions():
+    from runtime.spot_strategy import spot_quality_block_reason
+
+    state = {
+        "symbol": "BTC",
+        "regime": "NEUTRAL",
+        "setup_family": "pullback_reclaim",
+        "setup_score": 0.92,
+        "structural_confirm_count": 2,
+        "frames": {
+            "5m": {
+                "v": 0.2,
+                "a": 0.1,
+                "frame_score": 58.0,
+                "momentum_impulse": 0.3,
+                "structure_component": 0.2,
+                "path_efficiency": 0.4,
+                "participation_component": 0.1,
+            },
+            "30m": {
+                "v": 0.1,
+                "frame_score": 57.0,
+                "volatility_quality": 0.0,
+            },
+        },
+    }
+
+    reason, _ = spot_quality_block_reason("BTC", state, final_spot_score=65.0)
+    assert reason == "edge_setup_family_mismatch"

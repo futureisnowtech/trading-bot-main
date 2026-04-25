@@ -48,5 +48,30 @@ def test_ssm03_setup_family_impulse_continuation():
 def test_ssm04_score_floor_softens_for_clean_impulse():
     from runtime.spot_regime import score_floor_for_regime
 
-    assert score_floor_for_regime("NEUTRAL", structural_confirm_count=2, setup_family="impulse_continuation") == 60.0
-    assert score_floor_for_regime("CHOP", structural_confirm_count=2, setup_family="compression_breakout") == 68.0
+    assert score_floor_for_regime("NEUTRAL", structural_confirm_count=2, setup_family="impulse_continuation") == 58.0
+    assert score_floor_for_regime("CHOP", structural_confirm_count=2, setup_family="compression_breakout") == 67.0
+
+
+def test_ssm05_timeframe_state_reports_impulse_and_path_metrics():
+    import pandas as pd
+    import numpy as np
+    from runtime.spot_momentum import timeframe_state_from_history
+
+    idx = pd.date_range("2026-01-01", periods=160, freq="5min", tz="UTC")
+    base = np.linspace(100, 112, len(idx))
+    df = pd.DataFrame(
+        {
+            "open": base - 0.2,
+            "high": base + 0.4,
+            "low": base - 0.4,
+            "close": base,
+            "volume": np.linspace(1_000, 5_000, len(idx)),
+        },
+        index=idx,
+    )
+    state = timeframe_state_from_history(df)
+    assert "momentum_impulse" in state
+    assert "accel_impulse" in state
+    assert "path_efficiency" in state
+    assert "j" in state
+    assert 0.0 <= state["frame_score"] <= 100.0

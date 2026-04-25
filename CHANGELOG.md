@@ -1,5 +1,20 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
+## 2026-04-25
+- feat(v18.3): translate the replay-discovered 8-coin spot edge board into live policy by storing exact per-coin edge conditions and replay metrics in `config.py`, teaching `runtime/spot_strategy.py` to evaluate those conditions directly and derive exit targets from replay edge profiles, wiring `spot_engine.py` to persist replay-derived target model versions, and updating the manual spot panel plus CRYPTO candidate cards to show the same replay edge profile/filter/metric truth the live spot lane now uses
+- feat(v18.2): add a per-coin strategy-surgery optimizer to `backtesting/spot_replay_optimizer.py` that performs local coordinate-search on each symbol’s replay surface, emits baseline-vs-optimized scorecards and parameter deltas, compares all improvements against a shared symbol baseline, and caps tiny-sample PF blowups so one-trade mirages do not dominate the research result
+- feat(v18.1): upgrade `backtesting/spot_replay_optimizer.py` with an expectancy-first strategy extractor that builds per-symbol research frontiers from replay trials, interpolates local/family strategy centroids, penalizes zero-trade and too-thin candidates so inactive policies cannot rank above tradable ones, and writes auditable strategy-extraction artifacts; add proof coverage for the new utility/viability behavior in `tests/proof/test_spot_replay_optimizer.py`
+
+## 2026-04-24
+- feat(v18.0): shift the 8-symbol spot lane to a setup-first dynamic policy — add finite setup library + symbol preferences + opportunistic/wildcard setup allowances in `runtime/spot_strategy.py`; align quality/economics floors on setup evidence; persist `setup_score` + `setup_preference` to `scan_candidates`/`open_positions`; and update manual spot + CRYPTO dashboard surfaces to render the same stored setup truth the live runner uses
+- feat(v17.9): replace the one-size-fits-all spot scalp policy with symbol-specific live strategies for BTC/ETH/SOL/XRP/LTC/DOGE/ADA/LINK via new `runtime/spot_strategy.py`; wire symbol policy overrides through spot scoring, quality gates, routing, exits, and spot economics; and extend the spot replay optimizer to fit and emit recommended per-symbol live policies
+
+## 2026-04-23
+- feat(v17.8): replay-fit the live spot scalp lane to the first truthful >52% bounded result by narrowing autonomous spot to BTC/LINK, lowering TREND/NEUTRAL spot floors to 58, requiring `5m` path_efficiency >= 0.20, switching spot exits to a tighter micro target/trail profile, and extending the spot replay optimizer surface to search richer derivative/quality filters
+
+## 2026-04-23
+- feat(v17.7): deepen spot derivative math with jerk, path integrals, participation/volatility quality, and WAE/squeeze/ADX/dollar-volume inputs; add research-grade `backtesting/spot_replay_optimizer.py` that backfills deep spot `5m` history, resamples `30m/4h/1d`, and ranks spot scalp parameter surfaces from real candles
+
 ## 2026-04-23
 - fix(spot-scalp): raise frame score neutral anchor from 50 to 55
 

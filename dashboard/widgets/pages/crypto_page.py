@@ -26,6 +26,7 @@ from data.crypto_dashboard import (
     get_crypto_failure_summary,
 )
 from formatters import _time_ago
+from runtime.spot_strategy import edge_policy_for_symbol, setup_preference_for_symbol
 
 
 # ── Setup-name human labels ────────────────────────────────────────────────────
@@ -65,6 +66,15 @@ _BLOCKED_LABELS = {
     "research_only_block": "Research-only — not in live universe",
     "below_threshold": "Score below entry threshold",
     "below_regime_floor": "Final spot score below live regime floor",
+    "setup_score_too_low": "Setup evidence too weak for an opportunistic scalp",
+    "preferred_setup_score_too_low": "Preferred setup detected, but derivative evidence is still too weak",
+    "edge_setup_family_mismatch": "Doesn't match this coin's replay-derived edge setup",
+    "edge_setup_score_too_low": "Setup evidence is below this coin's replay edge threshold",
+    "edge_structure_component_too_low": "5m structure is too weak for this coin's edge",
+    "edge_volatility_quality_too_low": "30m volatility quality is below this coin's edge",
+    "edge_acceleration_too_low": "5m acceleration is too weak for this coin's edge",
+    "edge_momentum_impulse_too_low": "5m momentum impulse is below this coin's edge",
+    "edge_regime_mismatch": "Current regime doesn't match this coin's replay edge",
     "econ_veto": "Economics gate failed (fees/spread)",
     "projected_net_win_too_small": "Net profit too small after fees",
     "non_positive_net_target": "Target does not clear trading costs",
@@ -96,6 +106,10 @@ def _candidate_card(row: dict) -> str:
     score = float(row.get("score") or 0)
     spot_regime = row.get("spot_regime") or ""
     setup_family = row.get("setup_family") or ""
+    setup_pref = row.get("setup_preference") or (
+        setup_preference_for_symbol(sym, setup_family) if setup_family else ""
+    )
+    setup_score = float(row.get("setup_score") or 0.0)
     structural_confirms = row.get("structural_confirms") or ""
     execution_route = row.get("execution_route") or ""
     cooldown_until = row.get("cooldown_until") or ""
@@ -107,6 +121,10 @@ def _candidate_card(row: dict) -> str:
     setup_raw = row.get("setup_label") or row.get("primary_setup") or ""
     exchange = row.get("exchange") or row.get("source") or ""
     ts = row.get("ts", "")
+    edge_policy = edge_policy_for_symbol(sym)
+    edge_metrics = edge_policy.get("metrics") or {}
+    edge_profile = str(edge_policy.get("profile") or "").title()
+    edge_summary = str(edge_policy.get("conditions_summary") or "")
 
     # Status color + label
     if status == "executable":
@@ -155,6 +173,19 @@ def _candidate_card(row: dict) -> str:
         why_appeared_parts.append(
             f"Scalp family: <strong>{setup_family.replace('_', ' ').title()}</strong>"
         )
+    if setup_pref and setup_pref not in {"unknown", "disallowed"}:
+        why_appeared_parts.append(f"Policy bias: <strong>{setup_pref.title()}</strong>")
+    if setup_score > 0:
+        why_appeared_parts.append(f"Setup evidence: <strong>{setup_score:.2f}</strong>")
+    if edge_profile:
+        why_appeared_parts.append(f"Replay edge: <strong>{edge_profile}</strong>")
+    if edge_metrics:
+        why_appeared_parts.append(
+            "Replay stats: "
+            f"PF <strong>{float(edge_metrics.get('pf') or 0.0):.2f}</strong> · "
+            f"WR <strong>{float(edge_metrics.get('wr') or 0.0) * 100:.1f}%</strong> · "
+            f"n <strong>{int(edge_metrics.get('n') or 0)}</strong>"
+        )
     if exchange:
         why_appeared_parts.append(f"Source: {exchange.replace('_', ' ').title()}")
     if ts:
@@ -180,6 +211,8 @@ def _candidate_card(row: dict) -> str:
         )
     if regime_floor > 0:
         why_works_parts.append(f"Floor: <strong>{regime_floor:.0f}</strong>")
+    if edge_summary:
+        why_works_parts.append(f"Edge filter: <strong>{edge_summary}</strong>")
     if execution_route:
         why_works_parts.append(
             f"Route: <strong>{execution_route.replace('_', ' ')}</strong>"

@@ -132,6 +132,8 @@ def _journal_scan_candidate(
     auto_executable: int = 0,
     spot_regime: str = "",
     setup_family: str = "",
+    setup_score: float = 0.0,
+    setup_preference: str = "",
     tf_5m_state: str = "",
     tf_30m_state: str = "",
     tf_4h_state: str = "",
@@ -218,6 +220,8 @@ def _journal_scan_candidate(
             auto_executable=auto_executable,
             spot_regime=spot_regime,
             setup_family=setup_family,
+            setup_score=setup_score,
+            setup_preference=setup_preference,
             tf_5m_state=tf_5m_state,
             tf_30m_state=tf_30m_state,
             tf_4h_state=tf_4h_state,
@@ -694,11 +698,11 @@ def _scan_and_trade_inner(spot_only: bool = False):
 
     if spot_only:
         try:
-            from config import SPOT_SYMBOLS as _SPOT_SYMBOLS
+            from runtime.spot_strategy import strategy_spot_symbols
 
-            _spot_universe = {str(s).upper() for s in _SPOT_SYMBOLS}
+            _spot_universe = {str(s).upper() for s in strategy_spot_symbols()}
         except Exception:
-            _spot_universe = {"BTC", "ETH", "SOL", "XRP"}
+            _spot_universe = {"BTC", "ETH", "SOL", "XRP", "LTC", "DOGE", "ADA", "LINK"}
         candidates = [
             c
             for c in candidates
@@ -1477,17 +1481,49 @@ def _attempt_entry(
     if _routed_lane == "spot":
         try:
             import spot_engine as _spot_eng
-            from config import SPOT_SCALP_SYMBOL_CONFIG, SPOT_TOTAL_ALLOC_CAP_PCT
+            from config import (
+                SPOT_SCALP_SYMBOL_CONFIG,
+                SPOT_TOTAL_ALLOC_CAP_PCT,
+            )
             from risk.spot_economics_gate import check_spot_economics as _spot_econ
             from runtime.spot_momentum import (
                 SpotStateUnavailable,
                 build_spot_state,
                 final_spot_score as _final_spot_score,
             )
-            from runtime.spot_regime import score_floor_for_regime as _spot_floor
+            from runtime.spot_strategy import (
+                setup_policy_for_symbol as _setup_policy_for_symbol,
+                spot_quality_block_reason as _spot_quality_block_reason,
+                strategy_spot_symbols as _strategy_spot_symbols,
+            )
             from runtime.live_account import get_live_account_size
 
             _underlying = _trade.get("underlying", _get_underlying(symbol))
+            _strategy_symbols = {str(s).upper() for s in _strategy_spot_symbols()}
+            if _underlying not in _strategy_symbols:
+                _reason = "spot_strategy_symbol_disabled"
+                logger.info(f"[v10] spot {_underlying} blocked: {_reason}")
+                _journal_scan_candidate(
+                    scan_id,
+                    candidate,
+                    "research_only_block",
+                    regime=regime,
+                    technical_score=_tech_score,
+                    ml_score=_ml_score,
+                    composite_score=composite,
+                    entry_threshold=0.0,
+                    should_enter_signal=1,
+                    econ_approved=0,
+                    entry_block_reason=_reason,
+                    recommended_lane=_trade.get("recommended_lane", ""),
+                    tradeability_status=_trade.get("status", "executable"),
+                    trade_blocked_reason=_reason,
+                    trade_size_block_reason="",
+                    trade_source_reason="trusted_source",
+                    manual_executable=int(_trade.get("manual_executable", 0)),
+                    auto_executable=int(_trade.get("auto_executable", 0)),
+                )
+                return "research_only_block"
             try:
                 _spot_state = build_spot_state(_underlying, allow_stale=False)
             except SpotStateUnavailable as _state_err:
@@ -1517,16 +1553,59 @@ def _attempt_entry(
                 )
                 return "data_unavailable"
             _spot_regime = _spot_state.get("regime", "NEUTRAL")
+            _setup_family = str(_spot_state.get("setup_family") or "")
+            _setup_score = float(_spot_state.get("setup_score") or 0.0)
+            _setup_policy = _setup_policy_for_symbol(
+                _underlying,
+                _setup_family,
+                _setup_score,
+            )
+            _setup_preference = str(_setup_policy.get("preference") or "")
             _final_score = _final_spot_score(
                 composite,
                 _spot_state["derivative_score"],
                 regime=_spot_regime,
+                symbol=_underlying,
             )
-            _score_floor = _spot_floor(
-                _spot_regime,
-                structural_confirm_count=int(_spot_state.get("structural_confirm_count") or 0),
-                setup_family=str(_spot_state.get("setup_family") or ""),
+            _reason, _score_floor = _spot_quality_block_reason(
+                _underlying,
+                _spot_state,
+                final_spot_score=_final_score,
             )
+            if _reason:
+                logger.info(f"[v10] spot {_underlying} quality blocked: {_reason}")
+                _journal_scan_candidate(
+                    scan_id,
+                    candidate,
+                    "below_threshold",
+                    regime=regime,
+                    technical_score=_tech_score,
+                    ml_score=_ml_score,
+                    composite_score=composite,
+                    entry_threshold=_score_floor,
+                    should_enter_signal=1,
+                    econ_approved=0,
+                    entry_block_reason=_reason,
+                    recommended_lane=_trade.get("recommended_lane", ""),
+                    tradeability_status=_trade.get("status", "executable"),
+                    trade_blocked_reason=_reason,
+                    trade_size_block_reason="",
+                    trade_source_reason="trusted_source",
+                    manual_executable=int(_trade.get("manual_executable", 0)),
+                    auto_executable=int(_trade.get("auto_executable", 0)),
+                    spot_regime=_spot_regime,
+                    setup_family=_setup_family,
+                    setup_score=_setup_score,
+                    setup_preference=_setup_preference,
+                    tf_5m_state=_spot_state.get("tf_5m_state", ""),
+                    tf_30m_state=_spot_state.get("tf_30m_state", ""),
+                    tf_4h_state=_spot_state.get("tf_4h_state", ""),
+                    tf_1d_state=_spot_state.get("tf_1d_state", ""),
+                    structural_confirms=_spot_state.get("structural_confirms", ""),
+                    final_spot_score=_final_score,
+                    regime_floor=_score_floor,
+                )
+                return "below_threshold"
             _cfg = SPOT_SCALP_SYMBOL_CONFIG.get(_underlying, {})
             _stop_pct = _spot_eng._compute_stop_pct(
                 _underlying, _spot_state, atr_at_entry=atr_7
@@ -1599,7 +1678,9 @@ def _attempt_entry(
                     manual_executable=int(_trade.get("manual_executable", 0)),
                     auto_executable=int(_trade.get("auto_executable", 0)),
                     spot_regime=_spot_regime,
-                    setup_family=_spot_state.get("setup_family", ""),
+                    setup_family=_setup_family,
+                    setup_score=_setup_score,
+                    setup_preference=_setup_preference,
                     tf_5m_state=_spot_state.get("tf_5m_state", ""),
                     tf_30m_state=_spot_state.get("tf_30m_state", ""),
                     tf_4h_state=_spot_state.get("tf_4h_state", ""),
@@ -1625,7 +1706,8 @@ def _attempt_entry(
                 execution_route_guess="maker_first",
                 paper=_paper,
                 structural_confirm_count=int(_spot_state.get("structural_confirm_count") or 0),
-                setup_family=str(_spot_state.get("setup_family") or ""),
+                setup_family=_setup_family,
+                setup_score=_setup_score,
             )
             if not _econ["approved"]:
                 logger.info(
@@ -1651,7 +1733,9 @@ def _attempt_entry(
                     manual_executable=int(_trade.get("manual_executable", 0)),
                     auto_executable=int(_trade.get("auto_executable", 0)),
                     spot_regime=_spot_regime,
-                    setup_family=_spot_state.get("setup_family", ""),
+                    setup_family=_setup_family,
+                    setup_score=_setup_score,
+                    setup_preference=_setup_preference,
                     tf_5m_state=_spot_state.get("tf_5m_state", ""),
                     tf_30m_state=_spot_state.get("tf_30m_state", ""),
                     tf_4h_state=_spot_state.get("tf_4h_state", ""),
@@ -1703,7 +1787,9 @@ def _attempt_entry(
                     manual_executable=int(_trade.get("manual_executable", 0)),
                     auto_executable=int(_trade.get("auto_executable", 0)),
                     spot_regime=_spot_regime,
-                    setup_family=_spot_state.get("setup_family", ""),
+                    setup_family=_setup_family,
+                    setup_score=_setup_score,
+                    setup_preference=_setup_preference,
                     tf_5m_state=_spot_state.get("tf_5m_state", ""),
                     tf_30m_state=_spot_state.get("tf_30m_state", ""),
                     tf_4h_state=_spot_state.get("tf_4h_state", ""),
@@ -1745,7 +1831,9 @@ def _attempt_entry(
                     manual_executable=int(_trade.get("manual_executable", 0)),
                     auto_executable=int(_trade.get("auto_executable", 0)),
                     spot_regime=_spot_regime,
-                    setup_family=_spot_state.get("setup_family", ""),
+                    setup_family=_setup_family,
+                    setup_score=_setup_score,
+                    setup_preference=_setup_preference,
                     tf_5m_state=_spot_state.get("tf_5m_state", ""),
                     tf_30m_state=_spot_state.get("tf_30m_state", ""),
                     tf_4h_state=_spot_state.get("tf_4h_state", ""),
@@ -2087,10 +2175,10 @@ def spot_exit_monitor():
 def spot_scalp_scan():
     """Dedicated 60-second spot scalp scan/decision loop for the spot universe."""
     try:
-        from config import SPOT_SYMBOLS
+        from runtime.spot_strategy import strategy_spot_symbols
         from runtime.spot_momentum import warm_spot_universe
 
-        warm_spot_universe(list(SPOT_SYMBOLS))
+        warm_spot_universe(list(strategy_spot_symbols()))
         scan_and_trade(spot_only=True)
     except Exception as e:
         logger.error(

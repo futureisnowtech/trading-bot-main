@@ -1030,6 +1030,8 @@ def _get_latest_spot_scan(underlying: str) -> dict:
                 primary_setup,
                 spot_regime,
                 setup_family,
+                setup_score,
+                setup_preference,
                 tf_5m_state,
                 tf_30m_state,
                 tf_4h_state,
@@ -1064,6 +1066,8 @@ def _get_latest_spot_scan(underlying: str) -> dict:
                 "primary_setup": row["primary_setup"] or "",
                 "spot_regime": row["spot_regime"] or "",
                 "setup_family": row["setup_family"] or "",
+                "setup_score": float(row["setup_score"] or 0.0),
+                "setup_preference": row["setup_preference"] or "",
                 "tf_5m_state": row["tf_5m_state"] or "",
                 "tf_30m_state": row["tf_30m_state"] or "",
                 "tf_4h_state": row["tf_4h_state"] or "",
@@ -1096,6 +1100,7 @@ def render_spot_section():
         if _ROOT not in sys.path:
             sys.path.insert(0, _ROOT)
         from config import SPOT_LANE_ACTIVE, SPOT_SYMBOLS, SPOT_MIN_ORDER_USD
+        from runtime.spot_strategy import edge_policy_for_symbol, setup_preference_for_symbol
 
         spot_active = bool(SPOT_LANE_ACTIVE)
         spot_symbols = list(SPOT_SYMBOLS)
@@ -1104,6 +1109,8 @@ def render_spot_section():
         spot_active = False
         spot_symbols = ["BTC", "ETH", "SOL", "XRP", "LTC", "DOGE", "ADA", "LINK"]
         spot_min = 10.0
+        edge_policy_for_symbol = lambda _sym: {}
+        setup_preference_for_symbol = lambda _sym, _setup: "unknown"
 
     if not spot_active:
         st.info("Spot lane disabled — set SPOT_LANE_ACTIVE=true in .env to enable.")
@@ -1126,9 +1133,10 @@ def render_spot_section():
 
     st.caption(
         "The bot scans the full 8-symbol spot scalp universe continuously and enters "
-        "spot **automatically** when the score, derivative stack, confirmations, and "
-        "economics gate all agree. Click **Run Scan Now** above to see the live truth. "
-        "Manual override is available below each symbol."
+        "spot **automatically** when setup quality, momentum derivatives, confirmations, "
+        "and economics all agree. Each symbol has preferred setups, but exceptional "
+        "opportunistic setups can still qualify if the derivative evidence is strong enough. "
+        "Click **Run Scan Now** above to see the live truth. Manual override is available below each symbol."
     )
 
     # ── Persistent feedback from last manual action ───────────────────────────
@@ -1191,8 +1199,16 @@ def render_spot_section():
         scan_source = scan.get("source", "")
         regime = scan.get("spot_regime", "")
         setup_family = scan.get("setup_family", "")
+        setup_pref = scan.get("setup_preference") or (
+            setup_preference_for_symbol(sym, setup_family) if setup_family else ""
+        )
+        setup_score = float(scan.get("setup_score") or 0.0)
         confirms = scan.get("structural_confirms", "")
         stop_pct = float(scan.get("stop_pct") or 0.0)
+        edge_policy = edge_policy_for_symbol(sym)
+        edge_profile = str(edge_policy.get("profile") or "").title()
+        edge_summary = str(edge_policy.get("conditions_summary") or "")
+        edge_metrics = edge_policy.get("metrics") or {}
         threshold = float(scan.get("regime_floor") or 0.0)
         if threshold <= 0:
             try:
@@ -1203,6 +1219,8 @@ def render_spot_section():
                         regime or "NEUTRAL",
                         structural_confirm_count=len([x for x in confirms.split(",") if x.strip()]),
                         setup_family=setup_family or "",
+                        setup_score=setup_score,
+                        symbol=sym,
                     )
                 )
             except Exception:
@@ -1233,11 +1251,33 @@ def render_spot_section():
             if regime:
                 meta_bits.append(f"regime `{regime}`")
             if setup_family:
-                meta_bits.append(f"setup `{setup_family}`")
+                if setup_pref and setup_pref != "unknown":
+                    if setup_score > 0:
+                        meta_bits.append(
+                            f"setup `{setup_family}` ({setup_pref}, evidence {setup_score:.2f})"
+                        )
+                    else:
+                        meta_bits.append(f"setup `{setup_family}` ({setup_pref})")
+                else:
+                    if setup_score > 0:
+                        meta_bits.append(f"setup `{setup_family}` (evidence {setup_score:.2f})")
+                    else:
+                        meta_bits.append(f"setup `{setup_family}`")
             if confirms:
                 meta_bits.append(f"confirms `{confirms}`")
             if stop_pct > 0:
                 meta_bits.append(f"stop `{stop_pct:.2%}`")
+            if edge_profile:
+                meta_bits.append(f"edge `{edge_profile}`")
+            if edge_summary:
+                meta_bits.append(edge_summary)
+            if edge_metrics:
+                meta_bits.append(
+                    f"replay PF `{float(edge_metrics.get('pf') or 0.0):.2f}`"
+                )
+                meta_bits.append(
+                    f"replay WR `{float(edge_metrics.get('wr') or 0.0) * 100:.1f}%`"
+                )
             if meta_bits:
                 st.caption(" · ".join(meta_bits))
 

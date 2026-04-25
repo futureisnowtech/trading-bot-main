@@ -65,6 +65,7 @@ def test_ct01_btc_long_prefers_spot_when_eligible(tmp_path, monkeypatch):
     import runtime.crypto_tradeability as ct
 
     monkeypatch.setattr(config, "SPOT_LANE_ACTIVE", True, raising=False)
+    monkeypatch.setattr(config, "SPOT_STRATEGY_SYMBOLS", ["BTC", "ETH"], raising=False)
     monkeypatch.setattr(config, "SPOT_MAX_DEPLOYED_PCT", 0.40, raising=False)
     monkeypatch.setattr(config, "SPOT_MIN_ORDER_USD", 10.0, raising=False)
     monkeypatch.setattr(
@@ -102,6 +103,7 @@ def test_ct02_eth_long_prefers_spot_when_eligible(tmp_path, monkeypatch):
     import runtime.crypto_tradeability as ct
 
     monkeypatch.setattr(config, "SPOT_LANE_ACTIVE", True, raising=False)
+    monkeypatch.setattr(config, "SPOT_STRATEGY_SYMBOLS", ["BTC", "ETH"], raising=False)
     monkeypatch.setattr(config, "SPOT_MAX_DEPLOYED_PCT", 0.40, raising=False)
     monkeypatch.setattr(config, "SPOT_MIN_ORDER_USD", 10.0, raising=False)
     monkeypatch.setattr(
@@ -202,6 +204,7 @@ def test_ct05_sol_long_prefers_spot(tmp_path, monkeypatch):
 
     monkeypatch.setattr(config, "SPOT_LANE_ACTIVE", True, raising=False)
     monkeypatch.setattr(config, "SPOT_SYMBOLS", ["BTC", "ETH", "SOL", "XRP"], raising=False)
+    monkeypatch.setattr(config, "SPOT_STRATEGY_SYMBOLS", ["BTC", "ETH", "SOL", "XRP"], raising=False)
     monkeypatch.setattr(config, "SPOT_MAX_DEPLOYED_PCT", 0.40, raising=False)
     monkeypatch.setattr(config, "SPOT_MIN_ORDER_USD", 10.0, raising=False)
     monkeypatch.setattr(
@@ -237,6 +240,7 @@ def test_ct06_xrp_long_prefers_spot(tmp_path, monkeypatch):
 
     monkeypatch.setattr(config, "SPOT_LANE_ACTIVE", True, raising=False)
     monkeypatch.setattr(config, "SPOT_SYMBOLS", ["BTC", "ETH", "SOL", "XRP"], raising=False)
+    monkeypatch.setattr(config, "SPOT_STRATEGY_SYMBOLS", ["BTC", "ETH", "SOL", "XRP"], raising=False)
     monkeypatch.setattr(config, "SPOT_MAX_DEPLOYED_PCT", 0.40, raising=False)
     monkeypatch.setattr(config, "SPOT_MIN_ORDER_USD", 10.0, raising=False)
     monkeypatch.setattr(
@@ -307,6 +311,7 @@ def test_ct08_spot_disabled_falls_to_perp(tmp_path, monkeypatch):
 
     monkeypatch.setattr(config, "SPOT_LANE_ACTIVE", False, raising=False)
     monkeypatch.setattr(config, "SPOT_SYMBOLS", ["BTC", "ETH", "SOL", "XRP"], raising=False)
+    monkeypatch.setattr(config, "SPOT_STRATEGY_SYMBOLS", ["BTC", "ETH", "SOL", "XRP"], raising=False)
     monkeypatch.setattr(config, "SPOT_MAX_DEPLOYED_PCT", 0.40, raising=False)
     monkeypatch.setattr(config, "SPOT_MIN_ORDER_USD", 10.0, raising=False)
     monkeypatch.setattr(
@@ -344,6 +349,7 @@ def test_ct09_spot_position_already_open_blocks_spot(tmp_path, monkeypatch):
 
     monkeypatch.setattr(config, "SPOT_LANE_ACTIVE", True, raising=False)
     monkeypatch.setattr(config, "SPOT_SYMBOLS", ["BTC", "ETH", "SOL", "XRP"], raising=False)
+    monkeypatch.setattr(config, "SPOT_STRATEGY_SYMBOLS", ["BTC", "ETH", "SOL", "XRP"], raising=False)
     monkeypatch.setattr(config, "SPOT_MAX_DEPLOYED_PCT", 0.40, raising=False)
     monkeypatch.setattr(config, "SPOT_MIN_ORDER_USD", 10.0, raising=False)
     monkeypatch.setattr(
@@ -385,6 +391,7 @@ def test_ct12_cross_lane_underlying_blocked_when_spot_open(tmp_path, monkeypatch
 
     monkeypatch.setattr(config, "SPOT_LANE_ACTIVE", True, raising=False)
     monkeypatch.setattr(config, "SPOT_SYMBOLS", ["BTC", "ETH", "SOL", "XRP"], raising=False)
+    monkeypatch.setattr(config, "SPOT_STRATEGY_SYMBOLS", ["BTC", "ETH", "SOL", "XRP"], raising=False)
     monkeypatch.setattr(config, "SPOT_MAX_DEPLOYED_PCT", 0.40, raising=False)
     monkeypatch.setattr(config, "SPOT_MIN_ORDER_USD", 10.0, raising=False)
     monkeypatch.setattr(

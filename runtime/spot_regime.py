@@ -25,7 +25,19 @@ def score_floor_for_regime(
     regime: str,
     structural_confirm_count: int = 0,
     setup_family: str = "",
+    setup_score: float = 0.0,
+    symbol: str | None = None,
 ) -> float:
+    if symbol:
+        from runtime.spot_strategy import score_floor_for_symbol
+
+        return score_floor_for_symbol(
+            symbol,
+            regime,
+            structural_confirm_count=structural_confirm_count,
+            setup_family=setup_family,
+            setup_score=setup_score,
+        )
     base = float(SPOT_REGIME_SCORE_FLOORS.get(regime, SPOT_REGIME_SCORE_FLOORS["NEUTRAL"]))
     if regime in {"TREND", "NEUTRAL"} and setup_family == "impulse_continuation":
         base -= 1.0

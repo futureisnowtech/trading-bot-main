@@ -82,6 +82,11 @@ SPOT_SYMBOLS: list = [
     for s in os.getenv("SPOT_SYMBOLS", "BTC,ETH,SOL,XRP,LTC,DOGE,ADA,LINK").split(",")
     if s.strip()
 ]
+SPOT_STRATEGY_SYMBOLS: list = [
+    s.strip().upper()
+    for s in os.getenv("SPOT_STRATEGY_SYMBOLS", "BTC,ETH,SOL,XRP,LTC,DOGE,ADA,LINK").split(",")
+    if s.strip()
+]
 SPOT_MAX_DEPLOYED_PCT: float = float(os.getenv("SPOT_MAX_DEPLOYED_PCT", "0.50"))
 SPOT_MIN_ORDER_USD: float = float(os.getenv("SPOT_MIN_ORDER_USD", "10.0"))
 SPOT_WEEKDAYS_ONLY: bool = os.getenv("SPOT_WEEKDAYS_ONLY", "false").lower() == "true"
@@ -117,6 +122,15 @@ SPOT_SCALP_SCAN_SECONDS: int = int(os.getenv("SPOT_SCALP_SCAN_SECONDS", "60"))
 SPOT_STATE_CACHE_SECONDS: int = int(os.getenv("SPOT_STATE_CACHE_SECONDS", "45"))
 SPOT_MAKER_WAIT_SECONDS: int = int(os.getenv("SPOT_MAKER_WAIT_SECONDS", "6"))
 SPOT_MAKER_POLL_SECONDS: int = int(os.getenv("SPOT_MAKER_POLL_SECONDS", "2"))
+SPOT_FRAME_SCORE_ANCHOR: float = float(
+    os.getenv("SPOT_FRAME_SCORE_ANCHOR", "55.0")
+)
+SPOT_MOMENTUM_IMPULSE_WINDOW: int = int(
+    os.getenv("SPOT_MOMENTUM_IMPULSE_WINDOW", "12")
+)
+SPOT_ACCEL_IMPULSE_WINDOW: int = int(
+    os.getenv("SPOT_ACCEL_IMPULSE_WINDOW", "8")
+)
 SPOT_MICROSTRUCTURE_MAX_SPREAD_PCT: float = float(
     os.getenv("SPOT_MICROSTRUCTURE_MAX_SPREAD_PCT", "0.0025")
 )
@@ -136,10 +150,462 @@ SPOT_NEUTRAL_SCORE_WEIGHT_DERIVATIVE: float = float(
     os.getenv("SPOT_NEUTRAL_SCORE_WEIGHT_DERIVATIVE", "0.10")
 )
 SPOT_REGIME_SCORE_FLOORS: dict[str, float] = {
-    "TREND": float(os.getenv("SPOT_TREND_SCORE_FLOOR", "60.0")),
-    "NEUTRAL": float(os.getenv("SPOT_NEUTRAL_SCORE_FLOOR", "61.0")),
-    "CHOP": float(os.getenv("SPOT_CHOP_SCORE_FLOOR", "67.0")),
+    "TREND": float(os.getenv("SPOT_TREND_SCORE_FLOOR", "58.0")),
+    "NEUTRAL": float(os.getenv("SPOT_NEUTRAL_SCORE_FLOOR", "58.0")),
+    "CHOP": float(os.getenv("SPOT_CHOP_SCORE_FLOOR", "66.0")),
 }
+SPOT_ALLOWED_REGIMES: set[str] = {
+    s.strip().upper()
+    for s in os.getenv("SPOT_ALLOWED_REGIMES", "TREND,NEUTRAL").split(",")
+    if s.strip()
+}
+SPOT_MIN_PATH_EFFICIENCY: float = float(
+    os.getenv("SPOT_MIN_PATH_EFFICIENCY", "0.20")
+)
+SPOT_TARGET_R_BY_REGIME: dict[str, float] = {
+    "TREND": float(os.getenv("SPOT_TREND_TARGET_R", "0.85")),
+    "NEUTRAL": float(os.getenv("SPOT_NEUTRAL_TARGET_R", "0.65")),
+    "CHOP": float(os.getenv("SPOT_CHOP_TARGET_R", "0.50")),
+}
+SPOT_TRAIL_ARM_R_BY_REGIME: dict[str, float] = {
+    "TREND": float(os.getenv("SPOT_TREND_TRAIL_ARM_R", "0.55")),
+    "NEUTRAL": float(os.getenv("SPOT_NEUTRAL_TRAIL_ARM_R", "0.40")),
+    "CHOP": float(os.getenv("SPOT_CHOP_TRAIL_ARM_R", "0.30")),
+}
+SPOT_EXIT_PROFILE_TARGETS: dict[str, dict[str, tuple[float, float]]] = {
+    "balanced": {
+        "TREND": (1.8, 1.0),
+        "NEUTRAL": (1.2, 0.8),
+        "CHOP": (0.9, 0.6),
+    },
+    "quick": {
+        "TREND": (1.5, 0.9),
+        "NEUTRAL": (1.0, 0.7),
+        "CHOP": (0.8, 0.5),
+    },
+    "precision": {
+        "TREND": (1.05, 0.65),
+        "NEUTRAL": (0.80, 0.50),
+        "CHOP": (0.65, 0.40),
+    },
+    "micro": {
+        "TREND": (0.85, 0.55),
+        "NEUTRAL": (0.65, 0.40),
+        "CHOP": (0.50, 0.30),
+    },
+    "nano": {
+        "TREND": (0.60, 0.40),
+        "NEUTRAL": (0.45, 0.28),
+        "CHOP": (0.35, 0.22),
+    },
+}
+SPOT_SYMBOL_STRATEGY_OVERRIDES: dict[str, dict] = {
+    "BTC": {
+        "allowed_regimes": ("TREND", "NEUTRAL", "CHOP"),
+        "allowed_setups": (
+            "impulse_continuation",
+            "pullback_reclaim",
+            "compression_breakout",
+            "trend_resume_after_shakeout",
+            "compression_expansion_retest",
+        ),
+        "preferred_setups": ("compression_breakout",),
+        "edge_profile": "quick",
+        "edge_conditions": (
+            {
+                "field": "setup_family",
+                "operator": "eq",
+                "value": "compression_breakout",
+                "reason": "edge_setup_family_mismatch",
+            },
+            {
+                "field": "structure",
+                "operator": "gte",
+                "value": -0.10,
+                "reason": "edge_structure_component_too_low",
+            },
+        ),
+        "edge_metrics": {
+            "n": 29,
+            "wr": 0.3448,
+            "pf": 1.6751,
+            "exp": 0.000573,
+            "net": 0.01663,
+            "score": 8.797,
+        },
+        "opportunistic_setup_score": 0.72,
+        "wildcard_setup_score": 0.82,
+        "score_floors": {"TREND": 58.0, "NEUTRAL": 58.0, "CHOP": 60.0},
+        "score_weights": {
+            "TREND": {"composite": 0.70, "derivative": 0.30},
+            "NEUTRAL": {"composite": 0.88, "derivative": 0.12},
+            "CHOP": {"composite": 0.62, "derivative": 0.38},
+        },
+        "min_confirm_count": 2,
+        "min_5m_frame": 50.0,
+        "min_30m_frame": 50.0,
+        "min_momentum_impulse": -1.0,
+        "min_structure_component": -1.0,
+        "min_path_efficiency": 0.0,
+        "min_participation_component": -1.0,
+        "min_volatility_quality": -1.0,
+    },
+    "ETH": {
+        "allowed_regimes": ("TREND", "NEUTRAL", "CHOP"),
+        "allowed_setups": (
+            "impulse_continuation",
+            "pullback_reclaim",
+            "compression_breakout",
+            "trend_resume_after_shakeout",
+            "compression_expansion_retest",
+        ),
+        "preferred_setups": (),
+        "edge_profile": "quick",
+        "edge_conditions": (
+            {
+                "field": "setup_score",
+                "operator": "gte",
+                "value": 0.80,
+                "reason": "edge_setup_score_too_low",
+            },
+            {
+                "field": "vol_quality",
+                "operator": "gte",
+                "value": -0.0225,
+                "reason": "edge_volatility_quality_too_low",
+            },
+        ),
+        "edge_metrics": {
+            "n": 47,
+            "wr": 0.3830,
+            "pf": 1.7722,
+            "exp": 0.001168,
+            "net": 0.054873,
+            "score": 12.3816,
+        },
+        "opportunistic_setup_score": 0.72,
+        "wildcard_setup_score": 0.82,
+        "score_floors": {"TREND": 58.0, "NEUTRAL": 58.0, "CHOP": 60.0},
+        "score_weights": {
+            "TREND": {"composite": 0.72, "derivative": 0.28},
+            "NEUTRAL": {"composite": 0.86, "derivative": 0.14},
+            "CHOP": {"composite": 0.64, "derivative": 0.36},
+        },
+        "min_confirm_count": 2,
+        "min_5m_frame": 50.0,
+        "min_30m_frame": 50.0,
+        "min_momentum_impulse": -1.0,
+        "min_structure_component": -1.0,
+        "min_path_efficiency": 0.0,
+        "min_participation_component": -1.0,
+        "min_volatility_quality": -1.0,
+    },
+    "SOL": {
+        "allowed_regimes": ("TREND", "NEUTRAL", "CHOP"),
+        "allowed_setups": (
+            "impulse_continuation",
+            "pullback_reclaim",
+            "compression_breakout",
+            "trend_resume_after_shakeout",
+            "compression_expansion_retest",
+        ),
+        "preferred_setups": (),
+        "edge_profile": "balanced",
+        "edge_conditions": (
+            {
+                "field": "regime",
+                "operator": "eq",
+                "value": "CHOP",
+                "reason": "edge_regime_mismatch",
+            },
+            {
+                "field": "a5",
+                "operator": "gte",
+                "value": 0.05,
+                "reason": "edge_acceleration_too_low",
+            },
+        ),
+        "edge_metrics": {
+            "n": 45,
+            "wr": 0.4000,
+            "pf": 1.9427,
+            "exp": 0.001357,
+            "net": 0.061048,
+            "score": 14.5696,
+        },
+        "opportunistic_setup_score": 0.76,
+        "wildcard_setup_score": 0.86,
+        "score_floors": {"TREND": 60.0, "NEUTRAL": 60.0, "CHOP": 60.0},
+        "score_weights": {
+            "TREND": {"composite": 0.76, "derivative": 0.24},
+            "NEUTRAL": {"composite": 0.82, "derivative": 0.18},
+            "CHOP": {"composite": 0.66, "derivative": 0.34},
+        },
+        "min_confirm_count": 2,
+        "min_5m_frame": 50.0,
+        "min_30m_frame": 50.0,
+        "min_momentum_impulse": -1.0,
+        "min_structure_component": -1.0,
+        "min_path_efficiency": 0.0,
+        "min_participation_component": -1.0,
+        "min_volatility_quality": -1.0,
+    },
+    "XRP": {
+        "allowed_regimes": ("TREND", "NEUTRAL", "CHOP"),
+        "allowed_setups": (
+            "impulse_continuation",
+            "pullback_reclaim",
+            "compression_breakout",
+            "trend_resume_after_shakeout",
+            "compression_expansion_retest",
+        ),
+        "preferred_setups": (),
+        "edge_profile": "micro",
+        "edge_conditions": (
+            {
+                "field": "setup_score",
+                "operator": "gte",
+                "value": 0.80,
+                "reason": "edge_setup_score_too_low",
+            },
+            {
+                "field": "vol_quality",
+                "operator": "gte",
+                "value": 0.0,
+                "reason": "edge_volatility_quality_too_low",
+            },
+        ),
+        "edge_metrics": {
+            "n": 24,
+            "wr": 0.4167,
+            "pf": 2.6119,
+            "exp": 0.001644,
+            "net": 0.039448,
+            "score": 20.7380,
+        },
+        "opportunistic_setup_score": 0.74,
+        "wildcard_setup_score": 0.84,
+        "score_floors": {"TREND": 60.0, "NEUTRAL": 60.0, "CHOP": 60.0},
+        "score_weights": {
+            "TREND": {"composite": 0.74, "derivative": 0.26},
+            "NEUTRAL": {"composite": 0.84, "derivative": 0.16},
+            "CHOP": {"composite": 0.64, "derivative": 0.36},
+        },
+        "min_confirm_count": 2,
+        "min_5m_frame": 50.0,
+        "min_30m_frame": 50.0,
+        "min_momentum_impulse": -1.0,
+        "min_structure_component": -1.0,
+        "min_path_efficiency": 0.0,
+        "min_participation_component": -1.0,
+        "min_volatility_quality": -1.0,
+    },
+    "LTC": {
+        "allowed_regimes": ("TREND", "NEUTRAL", "CHOP"),
+        "allowed_setups": (
+            "impulse_continuation",
+            "pullback_reclaim",
+            "compression_breakout",
+            "trend_resume_after_shakeout",
+            "compression_expansion_retest",
+        ),
+        "preferred_setups": ("impulse_continuation",),
+        "edge_profile": "balanced",
+        "edge_conditions": (
+            {
+                "field": "mom_impulse",
+                "operator": "gte",
+                "value": 0.3667,
+                "reason": "edge_momentum_impulse_too_low",
+            },
+            {
+                "field": "setup_family",
+                "operator": "eq",
+                "value": "impulse_continuation",
+                "reason": "edge_setup_family_mismatch",
+            },
+        ),
+        "edge_metrics": {
+            "n": 12,
+            "wr": 0.5000,
+            "pf": 3.2662,
+            "exp": 0.001732,
+            "net": 0.020781,
+            "score": 26.3576,
+        },
+        "opportunistic_setup_score": 0.72,
+        "wildcard_setup_score": 0.82,
+        "score_floors": {"TREND": 58.0, "NEUTRAL": 58.0, "CHOP": 60.0},
+        "score_weights": {
+            "TREND": {"composite": 0.72, "derivative": 0.28},
+            "NEUTRAL": {"composite": 0.86, "derivative": 0.14},
+            "CHOP": {"composite": 0.64, "derivative": 0.36},
+        },
+        "min_confirm_count": 2,
+        "min_5m_frame": 50.0,
+        "min_30m_frame": 50.0,
+        "min_momentum_impulse": -1.0,
+        "min_structure_component": -1.0,
+        "min_path_efficiency": 0.0,
+        "min_participation_component": -1.0,
+        "min_volatility_quality": -1.0,
+    },
+    "DOGE": {
+        "allowed_regimes": ("TREND", "NEUTRAL", "CHOP"),
+        "allowed_setups": (
+            "impulse_continuation",
+            "pullback_reclaim",
+            "compression_breakout",
+            "trend_resume_after_shakeout",
+            "compression_expansion_retest",
+        ),
+        "preferred_setups": ("impulse_continuation",),
+        "edge_profile": "balanced",
+        "edge_conditions": (
+            {
+                "field": "setup_family",
+                "operator": "eq",
+                "value": "impulse_continuation",
+                "reason": "edge_setup_family_mismatch",
+            },
+            {
+                "field": "vol_quality",
+                "operator": "gte",
+                "value": -0.1438,
+                "reason": "edge_volatility_quality_too_low",
+            },
+        ),
+        "edge_metrics": {
+            "n": 19,
+            "wr": 0.4737,
+            "pf": 5.6269,
+            "exp": 0.002809,
+            "net": 0.053366,
+            "score": 44.6058,
+        },
+        "opportunistic_setup_score": 0.78,
+        "wildcard_setup_score": 0.88,
+        "score_floors": {"TREND": 60.0, "NEUTRAL": 60.0, "CHOP": 60.0},
+        "score_weights": {
+            "TREND": {"composite": 0.78, "derivative": 0.22},
+            "NEUTRAL": {"composite": 0.84, "derivative": 0.16},
+            "CHOP": {"composite": 0.66, "derivative": 0.34},
+        },
+        "min_confirm_count": 2,
+        "min_5m_frame": 50.0,
+        "min_30m_frame": 50.0,
+        "min_momentum_impulse": -1.0,
+        "min_structure_component": -1.0,
+        "min_path_efficiency": 0.0,
+        "min_participation_component": -1.0,
+        "min_volatility_quality": -1.0,
+    },
+    "ADA": {
+        "allowed_regimes": ("TREND", "NEUTRAL", "CHOP"),
+        "allowed_setups": (
+            "impulse_continuation",
+            "pullback_reclaim",
+            "compression_breakout",
+            "trend_resume_after_shakeout",
+            "compression_expansion_retest",
+        ),
+        "preferred_setups": ("impulse_continuation",),
+        "edge_profile": "balanced",
+        "edge_conditions": (
+            {
+                "field": "setup_family",
+                "operator": "eq",
+                "value": "impulse_continuation",
+                "reason": "edge_setup_family_mismatch",
+            },
+            {
+                "field": "setup_score",
+                "operator": "gte",
+                "value": 0.50,
+                "reason": "edge_setup_score_too_low",
+            },
+        ),
+        "edge_metrics": {
+            "n": 12,
+            "wr": 0.3333,
+            "pf": 3.0753,
+            "exp": 0.001569,
+            "net": 0.018832,
+            "score": 23.5116,
+        },
+        "opportunistic_setup_score": 0.76,
+        "wildcard_setup_score": 0.86,
+        "score_floors": {"TREND": 59.0, "NEUTRAL": 59.0, "CHOP": 60.0},
+        "score_weights": {
+            "TREND": {"composite": 0.76, "derivative": 0.24},
+            "NEUTRAL": {"composite": 0.82, "derivative": 0.18},
+            "CHOP": {"composite": 0.66, "derivative": 0.34},
+        },
+        "min_confirm_count": 2,
+        "min_5m_frame": 50.0,
+        "min_30m_frame": 50.0,
+        "min_momentum_impulse": -1.0,
+        "min_structure_component": -1.0,
+        "min_path_efficiency": 0.0,
+        "min_participation_component": -1.0,
+        "min_volatility_quality": -1.0,
+    },
+    "LINK": {
+        "allowed_regimes": ("TREND", "NEUTRAL", "CHOP"),
+        "allowed_setups": (
+            "impulse_continuation",
+            "pullback_reclaim",
+            "compression_breakout",
+            "trend_resume_after_shakeout",
+            "compression_expansion_retest",
+        ),
+        "preferred_setups": ("compression_breakout",),
+        "edge_profile": "balanced",
+        "edge_conditions": (
+            {
+                "field": "setup_family",
+                "operator": "eq",
+                "value": "compression_breakout",
+                "reason": "edge_setup_family_mismatch",
+            },
+            {
+                "field": "a5",
+                "operator": "gte",
+                "value": 0.05,
+                "reason": "edge_acceleration_too_low",
+            },
+        ),
+        "edge_metrics": {
+            "n": 18,
+            "wr": 0.4444,
+            "pf": 2.8022,
+            "exp": 0.001080,
+            "net": 0.019446,
+            "score": 19.9652,
+        },
+        "opportunistic_setup_score": 0.73,
+        "wildcard_setup_score": 0.83,
+        "score_floors": {"TREND": 59.0, "NEUTRAL": 59.0, "CHOP": 60.0},
+        "score_weights": {
+            "TREND": {"composite": 0.70, "derivative": 0.30},
+            "NEUTRAL": {"composite": 0.88, "derivative": 0.12},
+            "CHOP": {"composite": 0.62, "derivative": 0.38},
+        },
+        "min_confirm_count": 2,
+        "min_5m_frame": 50.0,
+        "min_30m_frame": 50.0,
+        "min_momentum_impulse": -1.0,
+        "min_structure_component": -1.0,
+        "min_path_efficiency": 0.0,
+        "min_participation_component": -1.0,
+        "min_volatility_quality": -1.0,
+    },
+}
+SPOT_REPLAY_LOOKBACK_DAYS: int = int(os.getenv("SPOT_REPLAY_LOOKBACK_DAYS", "365"))
+SPOT_REPLAY_EVAL_TIMEFRAME: str = os.getenv("SPOT_REPLAY_EVAL_TIMEFRAME", "30m")
+SPOT_REPLAY_OBJECTIVE: str = os.getenv(
+    "SPOT_REPLAY_OBJECTIVE", "net_expectancy_per_trade"
+)
 
 SPOT_SCALP_SYMBOL_CONFIG: dict[str, dict[str, float | int]] = {
     "BTC": {

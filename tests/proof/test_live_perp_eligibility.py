@@ -2,10 +2,10 @@
 tests/proof/test_live_perp_eligibility.py — Proof suite for live perp safety.
 
 Invariants proved:
-  LP-01  AUTONOMOUS_LIVE_PERP_SYMBOLS default includes all four core symbols
-  LP-02  BTC passes the autonomous gate in live mode (no longer blocked)
-  LP-03  SOL passes the autonomous gate in live mode (no longer blocked)
-  LP-04  XRP passes the autonomous gate in live mode (no longer blocked)
+  LP-01  AUTONOMOUS_LIVE_PERP_SYMBOLS default is ETH only
+  LP-02  BTC passes the autonomous gate in live mode through spot ownership
+  LP-03  SOL passes the autonomous gate in live mode through its symbol strategy
+  LP-04  XRP passes the autonomous gate in live mode through its symbol strategy
   LP-05  ETH passes the autonomous gate in live mode (unchanged)
   LP-06  max_live_perps=3 blocks open_long when 3 live positions already exist
   LP-07  max_live_perps=3 blocks open_short when 3 live positions already exist
@@ -38,7 +38,7 @@ def test_lp01_autonomous_symbols_default_is_eth_only():
     )
 
 
-# ── LP-02/03/04: non-ETH symbols blocked in live mode ────────────────────────
+# ── LP-02/03/04: symbol-specific spot strategies own live long routing ──────
 
 
 def _run_attempt_entry_gate(symbol: str, paper: bool) -> str:
@@ -207,17 +207,17 @@ def test_lp02_btc_passes_autonomous_gate_in_live_mode():
     )
 
 
-def test_lp03_sol_long_prefers_spot_in_live_mode():
+def test_lp03_sol_long_prefers_symbol_specific_spot_in_live_mode():
     decision = _run_attempt_entry_gate("SOL", paper=False)
     assert decision != "not_autonomous_live_eligible", (
-        f"SOL live long should route through spot, not hit the perp autonomous gate, got {decision!r}"
+        f"SOL live long should route through its own spot strategy, got {decision!r}"
     )
 
 
-def test_lp04_xrp_long_prefers_spot_in_live_mode():
+def test_lp04_xrp_long_prefers_symbol_specific_spot_in_live_mode():
     decision = _run_attempt_entry_gate("XRP", paper=False)
     assert decision != "not_autonomous_live_eligible", (
-        f"XRP live long should route through spot, not hit the perp autonomous gate, got {decision!r}"
+        f"XRP live long should route through its own spot strategy, got {decision!r}"
     )
 
 

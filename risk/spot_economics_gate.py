@@ -27,6 +27,7 @@ def check_spot_economics(
     paper: bool = False,
     structural_confirm_count: int = 0,
     setup_family: str = "",
+    setup_score: float = 0.0,
 ) -> dict:
     clean = symbol.upper()
     cfg = SPOT_SCALP_SYMBOL_CONFIG.get(clean, {})
@@ -44,6 +45,8 @@ def check_spot_economics(
         regime,
         structural_confirm_count=structural_confirm_count,
         setup_family=setup_family,
+        setup_score=setup_score,
+        symbol=clean,
     )
 
     if final_spot_score < score_floor:

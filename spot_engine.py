@@ -14,17 +14,20 @@ import time
 from typing import Dict, List, Optional
 
 from config import (
+    SPOT_ALLOWED_REGIMES,
     SPOT_EOD_FLATTEN_ENABLED,
     SPOT_EOD_CLOSE_TIME,
     SPOT_LANE_ACTIVE,
     SPOT_MAKER_POLL_SECONDS,
     SPOT_MIN_ORDER_USD,
+    SPOT_MIN_PATH_EFFICIENCY,
     SPOT_SCALP_SYMBOL_CONFIG,
     SPOT_SYMBOLS,
-    SPOT_TARGET_R,
     SPOT_THESIS_MIN_HOLD_MINS,
     SPOT_THESIS_MIN_SCORE,
+    SPOT_TARGET_R_BY_REGIME,
     SPOT_TOTAL_ALLOC_CAP_PCT,
+    SPOT_TRAIL_ARM_R_BY_REGIME,
 )
 from runtime.spot_execution_policy import (
     limit_buy_price,
@@ -33,6 +36,14 @@ from runtime.spot_execution_policy import (
 )
 from runtime.spot_momentum import build_spot_state
 from runtime.spot_regime import score_floor_for_regime
+from runtime.spot_strategy import (
+    edge_policy_for_symbol,
+    get_spot_strategy,
+    setup_policy_for_symbol,
+    spot_quality_block_reason,
+    target_r_for_symbol,
+    trail_arm_r_for_symbol,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -66,15 +77,26 @@ def _load_config() -> None:
         _cfg, "SPOT_SCALP_SYMBOL_CONFIG", SPOT_SCALP_SYMBOL_CONFIG
     )
     globals()["SPOT_SYMBOLS"] = getattr(_cfg, "SPOT_SYMBOLS", SPOT_SYMBOLS)
-    globals()["SPOT_TARGET_R"] = getattr(_cfg, "SPOT_TARGET_R", SPOT_TARGET_R)
+    globals()["SPOT_ALLOWED_REGIMES"] = getattr(
+        _cfg, "SPOT_ALLOWED_REGIMES", SPOT_ALLOWED_REGIMES
+    )
+    globals()["SPOT_MIN_PATH_EFFICIENCY"] = getattr(
+        _cfg, "SPOT_MIN_PATH_EFFICIENCY", SPOT_MIN_PATH_EFFICIENCY
+    )
     globals()["SPOT_THESIS_MIN_HOLD_MINS"] = getattr(
         _cfg, "SPOT_THESIS_MIN_HOLD_MINS", SPOT_THESIS_MIN_HOLD_MINS
     )
     globals()["SPOT_THESIS_MIN_SCORE"] = getattr(
         _cfg, "SPOT_THESIS_MIN_SCORE", SPOT_THESIS_MIN_SCORE
     )
+    globals()["SPOT_TARGET_R_BY_REGIME"] = getattr(
+        _cfg, "SPOT_TARGET_R_BY_REGIME", SPOT_TARGET_R_BY_REGIME
+    )
     globals()["SPOT_TOTAL_ALLOC_CAP_PCT"] = getattr(
         _cfg, "SPOT_TOTAL_ALLOC_CAP_PCT", SPOT_TOTAL_ALLOC_CAP_PCT
+    )
+    globals()["SPOT_TRAIL_ARM_R_BY_REGIME"] = getattr(
+        _cfg, "SPOT_TRAIL_ARM_R_BY_REGIME", SPOT_TRAIL_ARM_R_BY_REGIME
     )
 
 
@@ -174,6 +196,8 @@ def _state_payload(spot_state: dict | None) -> dict:
         return {
             "spot_regime": "",
             "setup_family": "",
+            "setup_score": 0.0,
+            "setup_preference": "",
             "tf_5m_state": "",
             "tf_30m_state": "",
             "tf_4h_state": "",
@@ -183,6 +207,15 @@ def _state_payload(spot_state: dict | None) -> dict:
     return {
         "spot_regime": spot_state.get("regime", ""),
         "setup_family": spot_state.get("setup_family", ""),
+        "setup_score": float(spot_state.get("setup_score") or 0.0),
+        "setup_preference": str(
+            setup_policy_for_symbol(
+                spot_state.get("symbol", ""),
+                spot_state.get("setup_family", ""),
+                float(spot_state.get("setup_score") or 0.0),
+            ).get("preference")
+            or ""
+        ),
         "tf_5m_state": spot_state.get("tf_5m_state", ""),
         "tf_30m_state": spot_state.get("tf_30m_state", ""),
         "tf_4h_state": spot_state.get("tf_4h_state", ""),
@@ -203,11 +236,16 @@ def _entry_floor(regime: str) -> float:
 
 
 def _target_r(regime: str) -> float:
-    return {"TREND": 1.8, "NEUTRAL": 1.2, "CHOP": 0.9}.get(regime, SPOT_TARGET_R)
+    return float(SPOT_TARGET_R_BY_REGIME.get(regime, SPOT_TARGET_R_BY_REGIME.get("NEUTRAL", 0.65)))
 
 
 def _trail_arm_r(regime: str) -> float:
-    return {"TREND": 1.0, "NEUTRAL": 0.8, "CHOP": 0.6}.get(regime, 0.8)
+    return float(
+        SPOT_TRAIL_ARM_R_BY_REGIME.get(
+            regime,
+            SPOT_TRAIL_ARM_R_BY_REGIME.get("NEUTRAL", 0.40),
+        )
+    )
 
 
 def _compute_stop_pct(symbol: str, spot_state: dict | None, atr_at_entry: float = 0.0) -> float:
@@ -328,6 +366,9 @@ def open_spot(
     if clean not in SPOT_SYMBOLS:
         logger.warning(f"[spot_engine] {clean} blocked — spot_symbol_not_allowed")
         return None
+    if not get_spot_strategy(clean)["enabled"]:
+        logger.warning(f"[spot_engine] {clean} blocked — spot_strategy_symbol_disabled")
+        return None
     if any(str(p.get("symbol", "")).upper() == clean for p in _load_spot_positions_from_db(paper=paper)):
         logger.warning(f"[spot_engine] {clean} blocked — spot_position_already_open")
         return None
@@ -363,30 +404,19 @@ def open_spot(
 
     regime = str((spot_state or {}).get("regime") or "NEUTRAL")
     stop_pct = _compute_stop_pct(clean, spot_state, atr_at_entry=atr_at_entry)
-    target_r = _target_r(regime)
-    trail_arm_r = _trail_arm_r(regime)
+    target_r = target_r_for_symbol(clean, regime)
+    trail_arm_r = trail_arm_r_for_symbol(clean, regime)
+    edge_policy = edge_policy_for_symbol(clean)
+    edge_profile = str(edge_policy.get("profile") or "balanced")
     score_used = float(final_spot_score if final_spot_score is not None else composite_score)
-
-    score_floor = score_floor_for_regime(
-        regime,
-        structural_confirm_count=int((spot_state or {}).get("structural_confirm_count") or 0),
-        setup_family=str((spot_state or {}).get("setup_family") or ""),
+    block_reason, score_floor = spot_quality_block_reason(
+        clean,
+        spot_state,
+        final_spot_score=score_used,
     )
-    if score_used < score_floor:
-        logger.info(f"[spot_engine] {clean} blocked — final_spot_score {score_used:.1f} below regime floor")
+    if block_reason:
+        logger.info(f"[spot_engine] {clean} blocked — {block_reason}")
         return None
-    if spot_state:
-        s5 = ((spot_state.get("frames") or {}).get("5m") or {})
-        s30 = ((spot_state.get("frames") or {}).get("30m") or {})
-        if float(s5.get("v") or 0.0) <= 0 or float(s5.get("a") or 0.0) <= 0:
-            logger.info(f"[spot_engine] {clean} blocked — 5m derivative stack not positive")
-            return None
-        if float(s30.get("frame_score") or 0.0) < 45.0 and float(s30.get("v") or 0.0) < 0.0:
-            logger.info(f"[spot_engine] {clean} blocked — 30m materially adverse")
-            return None
-        if int(spot_state.get("structural_confirm_count") or 0) < 2:
-            logger.info(f"[spot_engine] {clean} blocked — structural confirmations < 2")
-            return None
 
     order = None
     execution_route = "paper_market"
@@ -428,7 +458,7 @@ def open_spot(
         notes=(
             f"spot_buy route={execution_route} stop={stop_price:.8g} "
             f"target={target_price:.8g} stop_pct={stop_pct:.4%} "
-            f"final_spot_score={score_used:.1f}"
+            f"final_spot_score={score_used:.1f} edge_profile={edge_profile}"
         ),
     )
     persist_position(
@@ -448,6 +478,8 @@ def open_spot(
         leverage=1,
         spot_regime=regime,
         setup_family=(spot_state or {}).get("setup_family", ""),
+        setup_score=state_payload["setup_score"],
+        setup_preference=state_payload["setup_preference"],
         tf_5m_state=state_payload["tf_5m_state"],
         tf_30m_state=state_payload["tf_30m_state"],
         tf_4h_state=state_payload["tf_4h_state"],
@@ -457,7 +489,7 @@ def open_spot(
         cooldown_until=cooldown_until,
         microstructure_veto=micro_veto,
         stop_model_version="spot_scalp_v1",
-        target_model_version="spot_scalp_v1",
+        target_model_version=f"spot_scalp_{edge_profile}_v1",
         target_r=target_r,
         trail_arm_r=trail_arm_r,
         risk_dollars=risk_dollars,
@@ -476,6 +508,9 @@ def open_spot(
         "stop_pct": stop_pct,
         "target_r": target_r,
         "trail_arm_r": trail_arm_r,
+        "setup_family": state_payload["setup_family"],
+        "setup_score": state_payload["setup_score"],
+        "setup_preference": state_payload["setup_preference"],
         "order_id": order.get("order_id", ""),
         "fee_usd": fee_usd,
         "execution_route": execution_route,

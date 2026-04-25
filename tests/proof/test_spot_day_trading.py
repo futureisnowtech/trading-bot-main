@@ -36,8 +36,8 @@ def _seed_spot_position(
     target=2036.0,
     ts_entry: str | None = None,
     spot_regime="TREND",
-    target_r=1.8,
-    trail_arm_r=1.0,
+    target_r=0.85,
+    trail_arm_r=0.55,
     entry_fee_usd=0.0,
 ):
     with sqlite3.connect(db_path) as conn:
@@ -76,6 +76,7 @@ def _trend_state(symbol="ETH", derivative_score=72.0, five_v=0.25, five_a=0.10):
         "regime": "TREND",
         "derivative_score": derivative_score,
         "setup_family": "impulse_continuation",
+        "setup_score": 0.86,
         "structural_confirm_count": 2,
         "structural_confirms": "kst,supertrend",
         "tf_5m_state": "z=0.40|v=0.25|a=0.10|score=71.0",
@@ -91,12 +92,17 @@ def _trend_state(symbol="ETH", derivative_score=72.0, five_v=0.25, five_a=0.10):
                 "frame_score": 71.0,
                 "atr_pct": 0.006,
                 "price": 2000.0,
+                "path_efficiency": 0.25,
+                "momentum_impulse": 0.20,
+                "structure_component": 0.10,
+                "participation_component": 0.05,
             },
             "30m": {
                 "v": 0.12,
                 "a": 0.05,
                 "z": 0.30,
                 "frame_score": 65.0,
+                "volatility_quality": 0.10,
             },
             "4h": {"v": 0.05, "a": 0.02, "z": 0.20, "frame_score": 60.0},
             "1d": {"v": 0.03, "a": 0.01, "z": 0.10, "frame_score": 56.0},
@@ -192,8 +198,8 @@ def test_sdt05_open_spot_persists_scalp_target_metadata(proof_runtime, monkeypat
         final_spot_score=72.0,
     )
     assert result is not None
-    assert result["target_r"] == pytest.approx(1.8)
-    assert result["trail_arm_r"] == pytest.approx(1.0)
+    assert result["target_r"] == pytest.approx(1.5)
+    assert result["trail_arm_r"] == pytest.approx(0.9)
 
     with sqlite3.connect(str(proof_runtime.db_path)) as conn:
         row = conn.execute(
@@ -207,10 +213,10 @@ def test_sdt05_open_spot_persists_scalp_target_metadata(proof_runtime, monkeypat
 
     assert row is not None
     assert row[0] > 0
-    assert row[1] == pytest.approx(1.8)
-    assert row[2] == pytest.approx(1.0)
+    assert row[1] == pytest.approx(1.5)
+    assert row[2] == pytest.approx(0.9)
     assert row[3] == "spot_scalp_v1"
-    assert row[4] == "spot_scalp_v1"
+    assert row[4] == "spot_scalp_quick_v1"
 
 
 def test_sdt06_stagnation_exit_closes_dead_trade(proof_runtime, monkeypatch):

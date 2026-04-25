@@ -167,6 +167,8 @@ def get_crypto_opportunity_board(hours: int = 24) -> list[dict]:
             COALESCE(trade_source_reason, '') AS trade_source_reason,
             COALESCE(spot_regime, '') AS spot_regime,
             COALESCE(setup_family, '') AS setup_family,
+            COALESCE(setup_score, 0.0) AS setup_score,
+            COALESCE(setup_preference, '') AS setup_preference,
             COALESCE(tf_5m_state, '') AS tf_5m_state,
             COALESCE(tf_30m_state, '') AS tf_30m_state,
             COALESCE(tf_4h_state, '') AS tf_4h_state,

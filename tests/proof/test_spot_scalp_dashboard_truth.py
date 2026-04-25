@@ -59,6 +59,8 @@ def test_ssdt02_opportunity_board_reads_canonical_spot_scalp_fields(monkeypatch)
                 "primary_setup": "impulse_continuation",
                 "spot_regime": "TREND",
                 "setup_family": "impulse_continuation",
+                "setup_score": 0.87,
+                "setup_preference": "preferred",
                 "tf_5m_state": "z=0.4",
                 "tf_30m_state": "z=0.3",
                 "tf_4h_state": "z=0.2",
@@ -92,6 +94,8 @@ def test_ssdt02_opportunity_board_reads_canonical_spot_scalp_fields(monkeypatch)
     assert rows[0]["execution_route"] == "maker_first"
     assert rows[0]["score"] == 68.5
     assert rows[0]["regime_floor"] == 60.0
+    assert rows[0]["setup_score"] == 0.87
+    assert rows[0]["setup_preference"] == "preferred"
 
 
 def test_ssdt03_failure_summary_separates_quality_and_econ_blocks(monkeypatch):

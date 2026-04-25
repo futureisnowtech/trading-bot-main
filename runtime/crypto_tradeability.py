@@ -319,13 +319,15 @@ def _evaluate_tradeability(
             AUTONOMOUS_LIVE_PERP_SYMBOLS,
             CORE_EXECUTION_UNDERLYINGS,
         )
+        from runtime.spot_strategy import strategy_spot_symbols
 
         spot_active = bool(SPOT_LANE_ACTIVE)
         spot_symbols = {s.upper() for s in SPOT_SYMBOLS}
+        strategy_spot_symbols = {s.upper() for s in strategy_spot_symbols()}
         spot_max_pct = float(SPOT_MAX_DEPLOYED_PCT)
         spot_min_usd = float(SPOT_MIN_ORDER_USD)
         auto_perp_syms = [s.upper() for s in AUTONOMOUS_LIVE_PERP_SYMBOLS]
-        auto_spot_syms = set(spot_symbols)
+        auto_spot_syms = set(strategy_spot_symbols)
         core_underlyings = {s.upper() for s in CORE_EXECUTION_UNDERLYINGS}
     except Exception as e:
         logger.error(f"[tradeability] config import failed: {e}")
@@ -343,7 +345,8 @@ def _evaluate_tradeability(
     # ── 4. Determine recommended lane ────────────────────────────────────────
     # BTC/ETH LONG → prefer spot when it's active; otherwise prefer perp.
     # SHORT always perp.
-    spot_eligible_symbol = underlying in spot_symbols and direction == "LONG"
+    spot_route_symbols = spot_symbols if manual else strategy_spot_symbols
+    spot_eligible_symbol = underlying in spot_route_symbols and direction == "LONG"
     recommended_lane = _policy_recommended_lane(
         underlying,
         direction,
@@ -359,7 +362,7 @@ def _evaluate_tradeability(
         spot_active=spot_active,
         spot_max_pct=spot_max_pct,
         spot_min_usd=spot_min_usd,
-        spot_symbols=spot_symbols,
+        spot_symbols=spot_route_symbols,
         live=live,
         paper_int=paper_int,
         manual=manual,
@@ -639,11 +642,11 @@ def _policy_recommended_lane(
 ) -> str:
     """Pure route ownership policy with no runtime-state checks."""
     try:
-        from config import SPOT_SYMBOLS
+        from runtime.spot_strategy import strategy_spot_symbols
 
-        spot_symbols = {s.upper() for s in SPOT_SYMBOLS}
+        spot_symbols = {s.upper() for s in strategy_spot_symbols()}
     except Exception:
-        spot_symbols = {"BTC", "ETH", "SOL", "XRP"}
+        spot_symbols = {"BTC", "ETH", "SOL", "XRP", "LTC", "DOGE", "ADA", "LINK"}
     if underlying in spot_symbols and direction == "LONG" and spot_active:
         return "spot"
     if perp_supported:

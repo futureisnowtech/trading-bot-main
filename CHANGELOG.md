@@ -1,5 +1,8 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
+## 2026-04-24
+- fix(manual-scan): spot trades no longer blocked by perp contract min; scan goes straight to execute
+
 ## 2026-04-25
 - feat(v18.3): translate the replay-discovered 8-coin spot edge board into live policy by storing exact per-coin edge conditions and replay metrics in `config.py`, teaching `runtime/spot_strategy.py` to evaluate those conditions directly and derive exit targets from replay edge profiles, wiring `spot_engine.py` to persist replay-derived target model versions, and updating the manual spot panel plus CRYPTO candidate cards to show the same replay edge profile/filter/metric truth the live spot lane now uses
 - feat(v18.2): add a per-coin strategy-surgery optimizer to `backtesting/spot_replay_optimizer.py` that performs local coordinate-search on each symbol’s replay surface, emits baseline-vs-optimized scorecards and parameter deltas, compares all improvements against a shared symbol baseline, and caps tiny-sample PF blowups so one-trade mirages do not dominate the research result

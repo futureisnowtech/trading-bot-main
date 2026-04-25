@@ -24,6 +24,8 @@ except ImportError:
 
     def get_spot_positions_dashboard():
         return []
+
+
 from data.account import get_account
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -311,6 +313,12 @@ def render_manual_scan():
                 for k in list(st.session_state.keys()):
                     if k.startswith("ms_sel_"):
                         del st.session_state[k]
+                # Auto-select executable candidates so Review fires immediately
+                for _j, _c in enumerate(candidates):
+                    if _manual_tradeability(_c).get("status") == "executable":
+                        st.session_state[f"ms_sel_{_j}"] = True
+                st.session_state["ms_auto_review"] = True
+                st.session_state.pop("ms_previews", None)
             except Exception as e:
                 st.error(f"Scan failed: {e}")
                 return
@@ -502,27 +510,43 @@ def render_manual_scan():
         leverage = sizing["leverage"]
 
         # ── Size guards + lane from tradeability (live only) ─────────────────
-        # Tradeability engine already checked contract-min policy for live mode.
-        # Here we keep the bump/cap logic for cases the engine let through.
         size_note = None
+        trade_lane = _trade_result.get("lane", "perp")
         if not exec_paper:
-            min_usd = _min_contract_usd(exec_sym, price)
-            max_single = round(acct_balance * 0.15, 2)
-            if min_usd > 0 and min_usd > max_single:
-                return {
-                    "sym": sym,
-                    "exec_sym": exec_sym,
-                    "dirn": dirn,
-                    "setup": setup,
-                    "blocked": True,
-                    "block_reason": f"perp_contract_min_exceeds_policy (${min_usd:.0f} > 15% cap ${max_single:.0f})",
-                    "display_label": "BLOCKED",
-                    "trade_lane": "blocked",
-                    "prob": prob,
-                    "cand": cand,
-                }
-            if min_usd > 0 and pos_usd < min_usd:
-                size_note = f"bumped from ${pos_usd:.0f} to 1-contract minimum"
+            if trade_lane == "spot":
+                # Spot has no perp contract minimum — floor/cap by spot policy
+                try:
+                    from config import (
+                        SPOT_MAX_DEPLOYED_PCT as _spct,
+                        SPOT_MIN_ORDER_USD as _smin,
+                    )
+
+                    spot_floor = float(_smin)
+                    spot_cap = round(acct_balance * float(_spct), 2)
+                except Exception:
+                    spot_floor, spot_cap = 10.0, round(acct_balance * 0.50, 2)
+                if pos_usd < spot_floor:
+                    pos_usd = spot_floor
+                if pos_usd > spot_cap:
+                    pos_usd = spot_cap
+            else:
+                min_usd = _min_contract_usd(exec_sym, price)
+                max_single = round(acct_balance * 0.15, 2)
+                if min_usd > 0 and min_usd > max_single:
+                    return {
+                        "sym": sym,
+                        "exec_sym": exec_sym,
+                        "dirn": dirn,
+                        "setup": setup,
+                        "blocked": True,
+                        "block_reason": f"perp_contract_min_exceeds_policy (${min_usd:.0f} > 15% cap ${max_single:.0f})",
+                        "display_label": "BLOCKED",
+                        "trade_lane": "blocked",
+                        "prob": prob,
+                        "cand": cand,
+                    }
+                if min_usd > 0 and pos_usd < min_usd:
+                    size_note = f"bumped from ${pos_usd:.0f} to 1-contract minimum"
                 pos_usd = round(min_usd * 1.02, 2)
             if pos_usd > max_single:
                 pos_usd = max_single
@@ -571,7 +595,10 @@ def render_manual_scan():
     previews = st.session_state.get("ms_previews")
 
     if previews is None:
-        if st.button(f"Review {n_sel} Order(s)", type="primary", key="ms_review_btn"):
+        _auto_review = st.session_state.pop("ms_auto_review", False)
+        if _auto_review or st.button(
+            f"Review {n_sel} Order(s)", type="primary", key="ms_review_btn"
+        ):
             # Resolve mode + balance once
             try:
                 from db import _runtime_paper_flag as _rflag
@@ -1058,7 +1085,9 @@ def _get_latest_spot_scan(underlying: str) -> dict:
                 age = -1
             return {
                 "score": float(row["composite_score"]),
-                "final_spot_score": float(row["final_spot_score"] or row["composite_score"] or 0.0),
+                "final_spot_score": float(
+                    row["final_spot_score"] or row["composite_score"] or 0.0
+                ),
                 "regime_floor": float(row["regime_floor"] or 0.0),
                 "decision": row["decision"] or "unknown",
                 "age_secs": age,
@@ -1100,7 +1129,10 @@ def render_spot_section():
         if _ROOT not in sys.path:
             sys.path.insert(0, _ROOT)
         from config import SPOT_LANE_ACTIVE, SPOT_SYMBOLS, SPOT_MIN_ORDER_USD
-        from runtime.spot_strategy import edge_policy_for_symbol, setup_preference_for_symbol
+        from runtime.spot_strategy import (
+            edge_policy_for_symbol,
+            setup_preference_for_symbol,
+        )
 
         spot_active = bool(SPOT_LANE_ACTIVE)
         spot_symbols = list(SPOT_SYMBOLS)
@@ -1217,7 +1249,9 @@ def render_spot_section():
                 threshold = float(
                     score_floor_for_regime(
                         regime or "NEUTRAL",
-                        structural_confirm_count=len([x for x in confirms.split(",") if x.strip()]),
+                        structural_confirm_count=len(
+                            [x for x in confirms.split(",") if x.strip()]
+                        ),
                         setup_family=setup_family or "",
                         setup_score=setup_score,
                         symbol=sym,
@@ -1242,9 +1276,7 @@ def render_spot_section():
                     f":orange[{score:.0f}/100 ⚠️ near threshold ({threshold})]"
                 )
             else:
-                score_display = (
-                    f":red[{score:.0f}/100 ✗ below threshold ({threshold})]"
-                )
+                score_display = f":red[{score:.0f}/100 ✗ below threshold ({threshold})]"
 
             st.markdown(f"Signal score: {score_display} · scanned {age_str}")
             meta_bits = []
@@ -1260,7 +1292,9 @@ def render_spot_section():
                         meta_bits.append(f"setup `{setup_family}` ({setup_pref})")
                 else:
                     if setup_score > 0:
-                        meta_bits.append(f"setup `{setup_family}` (evidence {setup_score:.2f})")
+                        meta_bits.append(
+                            f"setup `{setup_family}` (evidence {setup_score:.2f})"
+                        )
                     else:
                         meta_bits.append(f"setup `{setup_family}`")
             if confirms:
@@ -1393,7 +1427,9 @@ def render_spot_section():
                             except Exception:
                                 _spot_state = None
 
-                        pos_result = _se.open_spot(sym, size_input,
+                        pos_result = _se.open_spot(
+                            sym,
+                            size_input,
                             paper=_exec_paper,
                             composite_score=float(scan.get("score") or 0.0),
                             spot_state=_spot_state,

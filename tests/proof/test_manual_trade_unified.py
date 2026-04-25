@@ -275,7 +275,7 @@ def test_mt07_spot_controls_use_shared_tradeability_before_open_spot():
     )
     src = open(path, encoding="utf-8").read()
 
-    assert 'open_spot(sym, size_input' in src
+    assert "open_spot(" in src and "size_input" in src
     assert '_manual_tradeability({"symbol": sym, "direction": "LONG"})' in src, (
         "Spot buy controls must call shared tradeability before open_spot()"
     )

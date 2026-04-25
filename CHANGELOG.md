@@ -1,5 +1,8 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
+## 2026-04-25
+- fix(stocks-dashboard): stop IBKRStockBroker reconnect spam — 175 errors/hr eliminated
+
 ## 2026-04-24
 - fix(manual-scan): spot trades no longer blocked by perp contract min; scan goes straight to execute
 

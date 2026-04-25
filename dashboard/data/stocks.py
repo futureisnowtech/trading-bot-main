@@ -140,8 +140,6 @@ def _get_live_stock_positions() -> dict | None:
 
         broker = get_dashboard_stock_broker()
         if not broker.is_connected():
-            broker.connect()
-        if not broker.is_connected():
             return None
         return broker.sync_live_positions()
     except Exception:

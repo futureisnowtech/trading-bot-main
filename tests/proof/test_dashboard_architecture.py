@@ -153,7 +153,7 @@ def test_control_tower_has_compact_operator_sections():
     src = _src("widgets/pages/control_tower.py")
     assert "BIGGEST ISSUE" in src
     assert "render_positions_compact" in src
-    assert "RECENT ACTIVITY" in src
+    assert "render_smart_logs" in src
     assert "RECENT CLOSED TRADES" in src
     assert "LANE ROLES" not in src
 

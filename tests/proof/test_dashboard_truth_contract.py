@@ -315,6 +315,32 @@ def test_dt03d_live_spot_positions_follow_exchange_truth(tmp_path, monkeypatch):
     assert get_spot_positions_dashboard() == []
 
 
+def test_dt03e_live_perp_positions_fail_closed_when_snapshot_unavailable(
+    tmp_path, monkeypatch
+):
+    """
+    In live mode, if the perp broker snapshot is unavailable, the dashboard must
+    fail closed to [] rather than reviving stale DB perp rows.
+    """
+    db = _make_db_with_mixed_positions(tmp_path, paper_int=0)
+    db_mock = _make_db_mock(db, paper_flag=0)
+
+    monkeypatch.setitem(sys.modules, "db", db_mock)
+    with sqlite3.connect(db) as c:
+        c.execute(
+            "INSERT INTO lane_runtime_state (lane_id, connected, mode) VALUES ('crypto',1,'live')"
+        )
+    monkeypatch.delitem(sys.modules, "data.positions", raising=False)
+
+    from data import positions as positions_mod
+
+    monkeypatch.setattr(
+        positions_mod, "_get_live_coinbase_perp_positions", lambda: None, raising=False
+    )
+
+    assert positions_mod.get_perp_positions() == []
+
+
 # ── DT-04: balance.py _unrealized_pnl excludes spot_ strategy rows ───────────
 
 

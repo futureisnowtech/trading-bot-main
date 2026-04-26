@@ -50,14 +50,19 @@ def render_positions_compact():
         stop = float(p.get("stop") or 0)
         target = float(p.get("target") or entry * 1.02)
         now = live_prices.get(symbol, 0) or entry
-        deployed = qty * entry
+        current_value = float(p.get("current_value") or 0.0)
+        has_entry_truth = entry > 0
+        deployed = qty * entry if has_entry_truth else (current_value or qty * now)
 
-        if direction == "LONG":
+        if has_entry_truth and direction == "LONG":
             unreal = (now - entry) * qty
             stop_pct = (entry - stop) / entry * 100 if entry else 0
-        else:
+        elif has_entry_truth:
             unreal = (entry - now) * qty
             stop_pct = (stop - entry) / entry * 100 if entry else 0
+        else:
+            unreal = 0.0
+            stop_pct = 0.0
 
         total_deployed += deployed
         total_unrealized += unreal
@@ -69,16 +74,19 @@ def render_positions_compact():
         setup_str = f"{setup} · {lev}x lev" if lev else setup
 
         is_live = not bool(p.get("paper", 1))
-        risk_note = f"Stop at ${stop:,.4g} — {stop_pct:.1f}% away" if stop else ""
+        risk_note = f"Stop at ${stop:,.4g} — {stop_pct:.1f}% away" if stop and has_entry_truth else ""
         if is_live:
-            risk_note = "LIVE " + risk_note if risk_note else "LIVE POSITION"
+            risk_note = "LIVE " + risk_note if risk_note else "LIVE HOLDING"
+
+        display_entry = entry if has_entry_truth else now
+        display_target = target if has_entry_truth and target > 0 else now
 
         age = _time_ago(p.get("ts_entry", ""))
         cards_html += ui.position_card(
             symbol=symbol,
             direction=direction,
             pnl=unreal,
-            entry=entry,
+            entry=display_entry,
             current=now,
             stop_pct=stop_pct,
             setup=setup_str,
@@ -87,8 +95,8 @@ def render_positions_compact():
         )
 
         # risk bar for each position
-        if stop and target:
-            cards_html += ui.risk_bar(symbol, entry, stop, target)
+        if has_entry_truth and stop and target:
+            cards_html += ui.risk_bar(symbol, entry, stop, display_target)
 
     st.markdown(cards_html, unsafe_allow_html=True)
 

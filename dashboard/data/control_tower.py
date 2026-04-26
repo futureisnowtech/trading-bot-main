@@ -17,6 +17,10 @@ if _DASHBOARD_DIR not in sys.path:
     sys.path.insert(0, _DASHBOARD_DIR)
 
 from db import _q, _q1
+try:
+    from db import get_current_strategy_start_date
+except Exception:  # pragma: no cover - fail-soft for runtime import drift
+    get_current_strategy_start_date = lambda normalized=True: "2026-04-24 00:00:00"
 
 _TS_NORM = "datetime(replace(substr(ts,1,19),'T',' '))"
 
@@ -157,6 +161,7 @@ def get_control_tower_snapshot(hours: int = 24) -> dict:
       incident_count, action_items, lane_overview, window_hours
     """
     result: dict = {"window_hours": hours}
+    result["metrics_since"] = get_current_strategy_start_date(normalized=True)
 
     # ── Health / heartbeat ─────────────────────────────────────────────────────
     result["health"] = _safe(
@@ -187,19 +192,15 @@ def get_control_tower_snapshot(hours: int = 24) -> dict:
         result["runtime_mode"] = "UNKNOWN"
 
     # ── Positions ──────────────────────────────────────────────────────────────
-    all_pos = _safe(
+    pos_snapshot = _safe(
         lambda: __import__(
-            "data.positions", fromlist=["get_open_positions"]
-        ).get_open_positions(),
-        [],
-    )
-    result["open_positions"] = all_pos or []
-    result["perp_positions"] = [
-        p for p in (all_pos or []) if not str(p.get("strategy", "")).startswith("spot_")
-    ]
-    result["spot_positions"] = [
-        p for p in (all_pos or []) if str(p.get("strategy", "")).startswith("spot_")
-    ]
+            "data.positions", fromlist=["get_crypto_deployed_snapshot"]
+        ).get_crypto_deployed_snapshot(),
+        {},
+    ) or {}
+    result["perp_positions"] = pos_snapshot.get("perp_positions") or []
+    result["spot_positions"] = pos_snapshot.get("spot_positions") or []
+    result["open_positions"] = (result["perp_positions"] or []) + (result["spot_positions"] or [])
 
     # Forecast open positions count from DB
     result["forecast_positions"] = len(
@@ -218,12 +219,7 @@ def get_control_tower_snapshot(hours: int = 24) -> dict:
         result["daily_pnl"] = 0.0
 
     # ── Deployed capital ───────────────────────────────────────────────────────
-    deployed_usd = 0.0
-    for p in result["perp_positions"]:
-        try:
-            deployed_usd += abs(float(p.get("qty") or 0)) * float(p.get("entry") or 0)
-        except Exception:
-            pass
+    deployed_usd = float(pos_snapshot.get("deployed_usd") or 0.0)
     result["deployed_usd"] = deployed_usd
     try:
         result["deployed_pct"] = (
@@ -240,6 +236,12 @@ def get_control_tower_snapshot(hours: int = 24) -> dict:
             "data.trading_control", fromlist=["get_crypto_control_snapshot"]
         ).get_crypto_control_snapshot(hours),
         {},
+    )
+    result["current_trade_stats"] = _safe(
+        lambda: __import__(
+            "data.performance", fromlist=["get_performance_stats"]
+        ).get_performance_stats(current_only=True),
+        {"closes": 0, "wins": 0, "losses": 0, "win_rate": 0.0, "profit_factor": 0.0, "total_pnl": 0.0, "total_fees": 0.0},
     )
 
     # ── Lifecycle stages (windowed) ────────────────────────────────────────────

@@ -4,7 +4,17 @@ dashboard/data/execution.py — Execution quality, failure modes, recent events.
 
 from datetime import datetime, timedelta
 
-from db import _q, _q1, _runtime_paper_flag, get_effective_launch_date
+import db as _db
+
+_q = _db._q
+_q1 = _db._q1
+_runtime_paper_flag = _db._runtime_paper_flag
+clamp_metrics_cutoff = getattr(_db, "clamp_metrics_cutoff", lambda s: s)
+get_current_strategy_start_date = getattr(
+    _db,
+    "get_current_strategy_start_date",
+    lambda normalized=True: "2026-04-24 00:00:00" if normalized else "2026-04-24T00:00:00",
+)
 from formatters import _time_ago
 
 # Normalized 7-day cutoff helper — avoids the ISO 'T'-separator false-positive bug
@@ -13,7 +23,8 @@ _TS_NORM = "datetime(replace(substr(ts,1,19),'T',' '))"
 
 
 def _cutoff_7d() -> str:
-    return (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+    raw = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+    return clamp_metrics_cutoff(raw)
 
 
 def get_execution_stats() -> dict:
@@ -32,9 +43,9 @@ def get_execution_stats() -> dict:
         FROM trade_attribution
         WHERE paper = ?
           AND source NOT IN ('backtest','pre_v10_contaminated','bybit_paper','paper_v10')
-          AND COALESCE(created_at, entry_ts, '') >= ?
+          AND datetime(replace(substr(COALESCE(created_at, entry_ts, ''),1,19),'T',' ')) >= datetime(?)
     """,
-        (paper_flag, get_effective_launch_date()),
+        (paper_flag, get_current_strategy_start_date(normalized=True)),
     )
     total = r.get("total") or 0
     avg_mae = r.get("avg_mae") or 0.0

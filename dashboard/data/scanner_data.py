@@ -26,6 +26,7 @@ _q = _db._q
 _q1 = _db._q1
 _tail_log = getattr(_db, "_tail_log", lambda n=200: [])
 LOG_PATH = getattr(_db, "LOG_PATH", "")
+_clamp_metrics_cutoff = getattr(_db, "clamp_metrics_cutoff", lambda s: s)
 
 
 def get_last_scan_age():
@@ -165,10 +166,23 @@ def _get_scan_status_from_db():
             "steps": steps,
             "duration_s": 0.0,
             "balance": float(lane_row.get("buying_power_usd") or 0.0),
-            "deployed": float(lane_row.get("capital_deployed_usd") or 0.0),
+            "deployed": _current_crypto_deployed(float(lane_row.get("capital_deployed_usd") or 0.0)),
         }
     except Exception:
         return None
+
+
+def _current_crypto_deployed(fallback: float = 0.0) -> float:
+    try:
+        from data.positions import get_crypto_deployed_snapshot
+
+        snap = get_crypto_deployed_snapshot()
+        deployed = float(snap.get("deployed_usd") or 0.0)
+        if deployed > 0:
+            return deployed
+    except Exception:
+        pass
+    return fallback
 
 
 def _get_scan_status_from_logs():

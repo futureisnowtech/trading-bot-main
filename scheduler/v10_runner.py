@@ -487,6 +487,56 @@ def _get_deployed_usd(open_positions: Dict) -> float:
     return sum(float(p.get("position_usd", 0)) for p in open_positions.values())
 
 
+def _get_spot_runtime_truth() -> tuple[int, float]:
+    """
+    Return (open_count, deployed_usd) for the spot lane.
+
+    Live mode prefers broker-truth holdings; paper mode falls back to persisted
+    spot positions.
+    """
+    try:
+        import spot_engine as _spot_eng
+
+        if _paper:
+            rows = _spot_eng.get_spot_positions(paper=True) or []
+            deployed = sum(
+                abs(float(p.get("qty") or 0.0)) * float(p.get("entry") or 0.0)
+                for p in rows
+            )
+            return len(rows), float(deployed)
+
+        broker = _spot_eng._get_broker(False)
+        if broker is not None:
+            try:
+                if not broker.is_connected():
+                    broker.connect()
+            except Exception:
+                pass
+            try:
+                holdings = broker.sync_live_holdings()
+            except Exception:
+                holdings = None
+            if holdings is not None:
+                deployed = sum(
+                    float(p.get("current_value") or 0.0)
+                    or (
+                        abs(float(p.get("qty") or 0.0))
+                        * float(p.get("current_price") or p.get("entry") or 0.0)
+                    )
+                    for p in holdings
+                )
+                return len(holdings), float(deployed)
+
+        rows = _spot_eng.get_spot_positions(paper=False) or []
+        deployed = sum(
+            abs(float(p.get("qty") or 0.0)) * float(p.get("entry") or 0.0)
+            for p in rows
+        )
+        return len(rows), float(deployed)
+    except Exception:
+        return 0, 0.0
+
+
 def _persist_live_account_size(balance: float) -> None:
     """Persist the real live funded account size once it is known."""
     if _paper or balance <= 0:
@@ -522,8 +572,11 @@ def _write_crypto_lane_runtime(open_positions: Optional[Dict] = None) -> None:
 
         buying_power = float(_get_account_balance() or 0.0)
         _persist_live_account_size(buying_power)
-        deployed_usd = float(_get_deployed_usd(open_positions))
-        positions_open = len(open_positions)
+        perp_deployed_usd = float(_get_deployed_usd(open_positions))
+        perp_positions_open = len(open_positions)
+        spot_positions_open, spot_deployed_usd = _get_spot_runtime_truth()
+        deployed_usd = perp_deployed_usd + spot_deployed_usd
+        positions_open = perp_positions_open + spot_positions_open
 
         ks = _import_kill_switch()
         kill_halted = bool(ks and ks.is_halted())

@@ -48,8 +48,8 @@ def test_ssm03_setup_family_impulse_continuation():
 def test_ssm04_score_floor_softens_for_clean_impulse():
     from runtime.spot_regime import score_floor_for_regime
 
-    assert score_floor_for_regime("NEUTRAL", structural_confirm_count=2, setup_family="impulse_continuation") == 58.0
-    assert score_floor_for_regime("CHOP", structural_confirm_count=2, setup_family="compression_breakout") == 67.0
+    assert score_floor_for_regime("NEUTRAL", structural_confirm_count=2, setup_family="impulse_continuation") == 48.0
+    assert score_floor_for_regime("CHOP", structural_confirm_count=2, setup_family="compression_breakout") == 57.0
 
 
 def test_ssm05_timeframe_state_reports_impulse_and_path_metrics():

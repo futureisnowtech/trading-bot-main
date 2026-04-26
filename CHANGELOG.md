@@ -1,6 +1,15 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-25
+- v18.6: fail-close live dashboard positions to broker truth so stale DB perp/spot rows never appear when live snapshots are unavailable; add proofs for unavailable-snapshot phantom-position bug class
+
+## 2026-04-25
+- v18.5 simplify Control Tower to current-rollout operator truth, add current_only performance/account readers anchored to strategy epoch, and stop open-position cards from faking live spot P&L when entry metadata is missing
+
+## 2026-04-25
+- v18.4 dashboard truth pass: clamp current crypto/control/execution metrics to strategy epoch and unify spot+perp deployed capital across runtime, overview, and scanner surfaces
+
+## 2026-04-25
 - fix(stocks-dashboard): stop IBKRStockBroker reconnect spam — 175 errors/hr eliminated
 
 ## 2026-04-24

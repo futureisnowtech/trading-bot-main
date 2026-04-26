@@ -18,15 +18,25 @@ _DASHBOARD_DIR = os.path.dirname(_DASH_DIR)
 if _DASHBOARD_DIR not in sys.path:
     sys.path.insert(0, _DASHBOARD_DIR)
 
-from db import _q, _q1
+import db as _db
+
+_q = _db._q
+_q1 = _db._q1
+clamp_metrics_cutoff = getattr(_db, "clamp_metrics_cutoff", lambda s: s)
+get_current_strategy_start_date = getattr(
+    _db,
+    "get_current_strategy_start_date",
+    lambda normalized=True: "2026-04-24 00:00:00" if normalized else "2026-04-24T00:00:00",
+)
 
 _TS_NORM = "datetime(replace(substr(ts,1,19),'T',' '))"
 
 
 def _cutoff(hours: int) -> str:
-    return (datetime.now(timezone.utc) - timedelta(hours=hours)).strftime(
-        "%Y-%m-%dT%H:%M:%S"
+    raw = (datetime.now(timezone.utc) - timedelta(hours=hours)).strftime(
+        "%Y-%m-%d %H:%M:%S"
     )
+    return clamp_metrics_cutoff(raw)
 
 
 def get_crypto_header() -> dict:
@@ -47,6 +57,7 @@ def get_crypto_header() -> dict:
         "spot_deployed_pct": 0.0,
         "perp_deployed_pct": 0.0,
         "open_count": 0,
+        "metrics_since": get_current_strategy_start_date(normalized=True),
     }
 
     # Lane runtime state

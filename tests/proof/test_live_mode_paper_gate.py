@@ -106,16 +106,36 @@ def test_paper_open_positions_not_shown_in_live_dashboard(proof_runtime):
     )
 
 
-def test_live_open_positions_appear_in_live_dashboard(proof_runtime):
+def test_live_open_positions_appear_in_live_dashboard(proof_runtime, monkeypatch):
     """
-    A paper=0 position (written by the live bot) must appear when runtime=live.
+    A live position must appear in the live dashboard when the broker snapshot
+    confirms it. DB metadata may enrich the row, but the exchange snapshot is
+    the gating truth.
     """
     insert_open_position(proof_runtime.db_path, symbol="BTCUSDT", paper=0)
     upsert_runtime_state(proof_runtime.db_path, process_mode="live")
 
-    from data.positions import get_open_positions
+    from data import positions as positions_mod
 
-    positions = get_open_positions()
+    monkeypatch.setattr(
+        positions_mod,
+        "_get_live_coinbase_perp_positions",
+        lambda: {
+            "BTCUSDT": {
+                "direction": "LONG",
+                "qty": 1.0,
+                "entry_price": 10000.0,
+                "current_price": 10100.0,
+                "unrealized_pnl": 100.0,
+            }
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(
+        positions_mod, "_get_live_coinbase_spot_positions", lambda: [], raising=False
+    )
+
+    positions = positions_mod.get_open_positions()
     assert len(positions) == 1
     assert positions[0]["symbol"] == "BTCUSDT"
     assert positions[0]["paper"] == 0
@@ -133,6 +153,30 @@ def test_paper_positions_still_shown_in_paper_dashboard(proof_runtime):
     positions = get_open_positions()
     assert len(positions) == 1
     assert positions[0]["symbol"] == "XRPUSDT"
+
+
+def test_live_perp_positions_fail_closed_when_broker_snapshot_unavailable(
+    proof_runtime, monkeypatch
+):
+    """
+    Live perp dashboard truth must never fall back to stale DB rows when the
+    broker snapshot is unavailable. Unknown is safer than phantom.
+    """
+    insert_open_position(
+        proof_runtime.db_path, symbol="SOL", strategy="v10_perp", paper=0
+    )
+    upsert_runtime_state(proof_runtime.db_path, process_mode="live")
+
+    from data import positions as positions_mod
+
+    monkeypatch.setattr(
+        positions_mod, "_get_live_coinbase_perp_positions", lambda: None, raising=False
+    )
+    monkeypatch.setattr(
+        positions_mod, "_crypto_live_snapshot_enabled", lambda: True, raising=False
+    )
+
+    assert positions_mod.get_perp_positions() == []
 
 
 # ══════════════════════════════════════════════════════════════════════════════

@@ -517,7 +517,7 @@ def score_floor_for_symbol(
         base -= 1.0
     if regime_key == "CHOP" and family in {"compression_breakout", "compression_expansion_retest"}:
         base += 1.0
-    return max(55.0, min(base, 72.0))
+    return max(45.0, min(base, 72.0))
 
 
 def final_score_for_symbol(

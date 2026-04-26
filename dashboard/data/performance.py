@@ -4,14 +4,32 @@ dashboard/data/performance.py — Trade performance stats, rolling PF, per-symbo
 
 from datetime import datetime, timedelta
 
-from db import _q, _q1, LAUNCH_DATE, _runtime_paper_flag
+import db as _db
+
+_q = _db._q
+_q1 = _db._q1
+LAUNCH_DATE = _db.LAUNCH_DATE
+_runtime_paper_flag = _db._runtime_paper_flag
+get_current_strategy_start_date = getattr(
+    _db,
+    "get_current_strategy_start_date",
+    lambda normalized=True: LAUNCH_DATE if normalized else LAUNCH_DATE,
+)
 
 
 def _paper_flag() -> int:
     return _runtime_paper_flag()
 
 
-def get_performance_stats():
+def _metrics_start(*, current_only: bool = False) -> str:
+    return (
+        get_current_strategy_start_date(normalized=True)
+        if current_only
+        else LAUNCH_DATE
+    )
+
+
+def get_performance_stats(*, current_only: bool = False):
     r = _q1(
         """SELECT
             COUNT(CASE WHEN won IS NOT NULL THEN 1 END)      AS closes,
@@ -27,7 +45,7 @@ def get_performance_stats():
         WHERE ts >= ? AND paper=? AND broker NOT LIKE '%bybit%'
           AND (source IS NULL OR source NOT IN ('backtest','pre_v10_contaminated','bybit_paper'))
           AND (notes IS NULL OR notes NOT LIKE '%force_test_close%')""",
-        (LAUNCH_DATE, _paper_flag()),
+        (_metrics_start(current_only=current_only), _paper_flag()),
     )
     closes = r.get("closes") or 0
     wins = r.get("wins") or 0
@@ -51,8 +69,14 @@ def get_performance_stats():
     }
 
 
-def get_rolling_pf(days=7):
+def get_rolling_pf(days=7, *, current_only: bool = False):
     cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    if current_only:
+        try:
+            floor = get_current_strategy_start_date(normalized=True)
+            cutoff = max(cutoff, floor)
+        except Exception:
+            pass
     r = _q1(
         """SELECT
             SUM(CASE WHEN won=1 THEN pnl_usd - fee_usd ELSE 0 END) AS gw,
@@ -76,7 +100,7 @@ def get_rolling_pf(days=7):
     }
 
 
-def get_per_symbol_stats():
+def get_per_symbol_stats(*, current_only: bool = False):
     return _q(
         """SELECT symbol,
             COUNT(*) AS trades,
@@ -92,7 +116,7 @@ def get_per_symbol_stats():
           AND (source IS NULL OR source NOT IN ('backtest','pre_v10_contaminated','bybit_paper'))
           AND (notes IS NULL OR notes NOT LIKE '%force_test_close%')
         GROUP BY symbol ORDER BY total_pnl DESC""",
-        (LAUNCH_DATE, _paper_flag()),
+        (_metrics_start(current_only=current_only), _paper_flag()),
     )
 
 

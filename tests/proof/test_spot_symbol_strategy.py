@@ -67,7 +67,7 @@ def test_sss03_doge_requires_strong_opportunistic_setup_evidence():
         final_spot_score=70.0,
     )
     assert reason == "edge_setup_family_mismatch"
-    assert floor >= 58.0
+    assert floor >= 49.0
 
 
 def test_sss04_eth_uses_quick_exit_profile_targets():

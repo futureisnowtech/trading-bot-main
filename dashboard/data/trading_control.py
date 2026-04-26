@@ -25,7 +25,16 @@ _DASHBOARD_DIR = os.path.dirname(_DASH_DIR)
 if _DASHBOARD_DIR not in sys.path:
     sys.path.insert(0, _DASHBOARD_DIR)
 
-from db import _q, _q1
+import db as _db
+
+_q = _db._q
+_q1 = _db._q1
+clamp_metrics_cutoff = getattr(_db, "clamp_metrics_cutoff", lambda s: s)
+get_current_strategy_start_date = getattr(
+    _db,
+    "get_current_strategy_start_date",
+    lambda normalized=True: "2026-04-24 00:00:00" if normalized else "2026-04-24T00:00:00",
+)
 
 _TS_NORM = "datetime(replace(substr(ts,1,19),'T',' '))"
 
@@ -42,9 +51,10 @@ _BUG_DECISIONS = {"data_unavailable", "execution_failed"}
 
 
 def _cutoff_hours(hours: int) -> str:
-    return (datetime.now(timezone.utc) - timedelta(hours=hours)).strftime(
-        "%Y-%m-%dT%H:%M:%S"
+    raw = (datetime.now(timezone.utc) - timedelta(hours=hours)).strftime(
+        "%Y-%m-%d %H:%M:%S"
     )
+    return clamp_metrics_cutoff(raw)
 
 
 def _classify_decision(decision: str) -> str:
@@ -174,6 +184,7 @@ def get_crypto_control_snapshot(hours: int = 24) -> dict:
 
     return {
         "window_hours": hours,
+        "metrics_since": get_current_strategy_start_date(normalized=True),
         "funnel": funnel,
         "decision_counts": decision_counts,
         "issue_breakdown": issue_breakdown,

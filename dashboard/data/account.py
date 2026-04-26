@@ -4,7 +4,17 @@ dashboard/data/account.py — Account balance, P&L, equity curve, drawdown, trad
 
 from datetime import datetime
 
-from db import _q, _q1, LAUNCH_DATE, _runtime_paper_flag
+import db as _db
+
+_q = _db._q
+_q1 = _db._q1
+LAUNCH_DATE = _db.LAUNCH_DATE
+_runtime_paper_flag = _db._runtime_paper_flag
+get_current_strategy_start_date = getattr(
+    _db,
+    "get_current_strategy_start_date",
+    lambda normalized=True: LAUNCH_DATE if normalized else LAUNCH_DATE,
+)
 from data.positions import get_open_positions, get_perp_positions, get_live_prices
 
 
@@ -79,6 +89,14 @@ def _paper_flag() -> int:
     return _runtime_paper_flag()
 
 
+def _metrics_start(*, current_only: bool = False) -> str:
+    return (
+        get_current_strategy_start_date(normalized=True)
+        if current_only
+        else LAUNCH_DATE
+    )
+
+
 def get_today_pnl():
     today = datetime.now().strftime("%Y-%m-%d")
     r = _q1(
@@ -91,7 +109,7 @@ def get_today_pnl():
     return r.get("v") or 0.0
 
 
-def get_equity_curve():
+def get_equity_curve(*, current_only: bool = False):
     return _q(
         """SELECT ts, SUM(pnl_usd) OVER (ORDER BY ts) AS cum_pnl
            FROM trades
@@ -100,12 +118,12 @@ def get_equity_curve():
              AND (source IS NULL OR source NOT IN ('backtest','pre_v10_contaminated','bybit_paper','paper_v10'))
              AND (notes IS NULL OR notes NOT LIKE '%force_test_close%')
            ORDER BY ts""",
-        (LAUNCH_DATE, _paper_flag()),
+        (_metrics_start(current_only=current_only), _paper_flag()),
     )
 
 
-def get_drawdown():
-    curve = get_equity_curve()
+def get_drawdown(*, current_only: bool = False):
+    curve = get_equity_curve(current_only=current_only)
     if len(curve) < 2:
         return {
             "max_dd_usd": 0.0,
@@ -151,7 +169,7 @@ def get_drawdown():
     }
 
 
-def get_trade_log(limit=50):
+def get_trade_log(limit=50, *, current_only: bool = False):
     return _q(
         """SELECT ts, symbol, action, qty, price, pnl_usd, fee_usd, notes
            FROM trades
@@ -160,5 +178,5 @@ def get_trade_log(limit=50):
              AND (source IS NULL OR source NOT IN ('backtest','pre_v10_contaminated','bybit_paper','paper_v10'))
              AND (notes IS NULL OR notes NOT LIKE '%force_test_close%')
            ORDER BY ts DESC LIMIT ?""",
-        (LAUNCH_DATE, _paper_flag(), limit),
+        (_metrics_start(current_only=current_only), _paper_flag(), limit),
     )

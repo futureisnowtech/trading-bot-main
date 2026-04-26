@@ -6,7 +6,11 @@ from datetime import datetime
 import json
 import urllib.request
 
-from db import _q, _q1, _runtime_paper_flag
+import db as _db
+
+_q = _db._q
+_q1 = _db._q1
+_runtime_paper_flag = _db._runtime_paper_flag
 
 
 def _db_open_positions():
@@ -21,6 +25,10 @@ def _db_perp_positions():
         "SELECT * FROM open_positions WHERE strategy NOT LIKE 'spot_%' AND paper=? ORDER BY ts_entry DESC",
         (_runtime_paper_flag(),),
     )
+
+
+def _runtime_live_mode() -> bool:
+    return _runtime_paper_flag() == 0
 
 
 def _runtime_perp_truth() -> tuple[int, float]:
@@ -48,7 +56,12 @@ def _runtime_perp_truth() -> tuple[int, float]:
 
 
 def get_spot_positions_dashboard():
-    """Open spot-only positions (strategy LIKE 'spot_%'). For spot section display."""
+    """
+    Open spot-only positions (strategy LIKE 'spot_%').
+
+    Live mode must be broker-truth only. If the live Coinbase spot snapshot is
+    unavailable, fail closed to [] instead of resurfacing stale DB rows.
+    """
     db_rows = _q(
         "SELECT * FROM open_positions WHERE strategy LIKE 'spot_%' AND paper=? ORDER BY ts_entry DESC",
         (_runtime_paper_flag(),),
@@ -56,6 +69,8 @@ def get_spot_positions_dashboard():
     live_positions = _get_live_coinbase_spot_positions()
     if live_positions is not None:
         return _merge_live_spot_rows(live_positions, db_rows)
+    if _runtime_live_mode():
+        return []
     return db_rows
 
 
@@ -169,7 +184,9 @@ def get_perp_positions():
     Open perp-only positions.
 
     Live mode: Coinbase CFM API is canonical — only DB metadata borrowed for
-    matching rows.  DB stale rows invisible (no position on exchange → not shown).
+    matching rows. DB stale rows invisible (no position on exchange → not shown).
+    If the live perp snapshot is unavailable, fail closed to [] instead of
+    falling back to DB rows.
 
     Paper mode: DB is primary, but reconciled against lane_runtime_state truth.
     If the bot reports 0 positions/deployed with a fresh heartbeat, any DB rows
@@ -179,6 +196,8 @@ def get_perp_positions():
     live_positions = _get_live_coinbase_perp_positions()
     if live_positions is not None:
         return _merge_live_perp_rows(live_positions, db_rows)
+    if _runtime_live_mode():
+        return []
 
     # Paper mode: reconcile against runtime truth before returning DB rows
     if _runtime_paper_flag() and db_rows:
@@ -204,6 +223,45 @@ def get_open_positions():
     combined = get_perp_positions() + get_spot_positions_dashboard()
     combined.sort(key=_ts_sort_key, reverse=True)
     return combined
+
+
+def get_crypto_deployed_snapshot() -> dict:
+    """
+    Canonical crypto deployment truth for dashboard surfaces.
+
+    Uses the same live/broker-first readers as the rest of the dashboard so spot
+    holdings are not lost behind perp-only runtime counters.
+    """
+    perp_positions = get_perp_positions()
+    spot_positions = get_spot_positions_dashboard()
+
+    perp_deployed_usd = 0.0
+    for p in perp_positions:
+        try:
+            perp_deployed_usd += abs(float(p.get("qty") or 0.0)) * float(
+                p.get("current_price") or p.get("entry") or 0.0
+            )
+        except Exception:
+            pass
+
+    spot_deployed_usd = 0.0
+    for p in spot_positions:
+        try:
+            spot_deployed_usd += float(p.get("current_value") or 0.0) or (
+                abs(float(p.get("qty") or 0.0))
+                * float(p.get("current_price") or p.get("entry") or 0.0)
+            )
+        except Exception:
+            pass
+
+    return {
+        "perp_positions": perp_positions,
+        "spot_positions": spot_positions,
+        "perp_deployed_usd": round(perp_deployed_usd, 2),
+        "spot_deployed_usd": round(spot_deployed_usd, 2),
+        "deployed_usd": round(perp_deployed_usd + spot_deployed_usd, 2),
+        "open_count": len(perp_positions) + len(spot_positions),
+    }
 
 
 def get_live_prices(symbols: list) -> dict:

@@ -149,10 +149,13 @@ def test_archived_futures_in_engineering_console():
     assert "mes_dashboard" in src or "render_futures" in src
 
 
-def test_control_tower_has_lane_roles():
+def test_control_tower_has_compact_operator_sections():
     src = _src("widgets/pages/control_tower.py")
-    assert "LANE ROLES" in src
-    assert "promotion" in src.lower()
+    assert "BIGGEST ISSUE" in src
+    assert "render_positions_compact" in src
+    assert "RECENT ACTIVITY" in src
+    assert "RECENT CLOSED TRADES" in src
+    assert "LANE ROLES" not in src
 
 
 def test_trade_approval_not_top_level():
@@ -214,11 +217,12 @@ def test_lifecycle_stages_has_all_8_stages():
         )
 
 
-def test_control_tower_page_uses_lifecycle():
-    """control_tower page must render lifecycle_stages, not coarse stage_rows."""
+def test_control_tower_page_uses_compact_current_board():
+    """control_tower page should stay on the simplified current-rollout board."""
     src = _src("widgets/pages/control_tower.py")
-    assert "lifecycle_stages" in src, "control_tower page must use lifecycle_stages"
-    assert "lifecycle" in src.lower(), "central funnel must reference lifecycle"
+    assert "metrics_since" in src
+    assert "current_trade_stats" in src
+    assert "RECENT CLOSED TRADES" in src
 
 
 def test_control_tower_window_wired_to_snapshot():

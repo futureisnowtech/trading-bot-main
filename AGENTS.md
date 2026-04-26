@@ -29,7 +29,7 @@ A fully autonomous AI-powered trading system that:
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
 
-## Current Version: v18.6 (2026-04-25)
+## Current Version: v18.7 (2026-04-26)
 
 **Active branch:** `feature/v10-rebuild`
 **Clean paper trading started:** 2026-04-02
@@ -111,6 +111,7 @@ A fully autonomous AI-powered trading system that:
 - **Current-rollout performance surfaces (v18.5):** `dashboard/data/performance.py` and `dashboard/data/account.py` now expose `current_only=True` paths anchored to the strategy epoch, and the Control Tower uses those for PF/win-rate/EV/trade-log/drawdown context so the main page stops mixing old strategy-era trades into present-tense operator decisions.
 - **Live spot position-card truth (v18.5):** `dashboard/widgets/mission_control/open_positions.py` now fail-softs when broker-truth spot holdings lack entry metadata. It uses current notional for deployment, suppresses fake unrealized P&L from `entry=0`, and labels those rows as live holdings instead of implying a real entry/stop model that does not exist in the persisted row.
 - **Fail-closed live position truth (v18.6):** `dashboard/data/positions.py` now treats live broker snapshots as the only source of truth for live open positions, for both perps and spot. If the live Coinbase perp or spot snapshot is unavailable, the dashboard returns `[]` instead of falling back to stale `open_positions` rows, and the proof suite now explicitly guards the “snapshot unavailable but stale DB row exists” phantom-position bug class.
+- **Explicit live spot labeling (v18.7):** `dashboard/widgets/mission_control/open_positions.py` now labels live Coinbase holdings as `COINBASE SPOT` with `LIVE SPOT ...` risk/status notes instead of rendering them as generic live long positions. This prevents real spot holdings with partial entry metadata from being mistaken for phantom perp positions on the Control Tower and CRYPTO pages.
 - **Spot blocker truth + warm state (v17.5):** spot state now warms/caches the `5m/30m/4h/1d` substrate for the 8-symbol spot universe, with stale-cache fallback allowed for exit safety but not for fresh entry decisions. `scheduler/v10_runner.py` now classifies `below_regime_floor` as a quality/threshold block instead of mislabeling it as an economics veto, and spot data failures surface as `spot_data_unavailable` instead of generic execution failure.
 - **Spot score calibration (v17.5):** spot regime promotion and score floors were recalibrated around actual live spot distributions. `runtime/spot_regime.py` now promotes clean `TREND` states earlier, `score_floor_for_regime()` softens `TREND/NEUTRAL` floors for high-quality impulse setups, and the live spot route uses those dynamic floors consistently in runner, economics gate, and manual/dashboard surfaces.
 - **Neutral blend bias (v17.6):** `runtime/spot_momentum.py:final_spot_score()` is now regime-aware. `NEUTRAL` spot setups use a `0.90 * composite + 0.10 * derivative` blend so near-miss spot scalps in mixed tape lean more on the broader trade-quality stack, while `TREND` and `CHOP` keep the original `0.60 / 0.40` blend.

@@ -1,5 +1,8 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
+## 2026-04-26
+- v18.7: explicitly label live Coinbase holdings as COINBASE SPOT / LIVE SPOT in open-position cards so real spot holdings cannot be mistaken for phantom perp positions
+
 ## 2026-04-25
 - v18.6: fail-close live dashboard positions to broker truth so stale DB perp/spot rows never appear when live snapshots are unavailable; add proofs for unavailable-snapshot phantom-position bug class
 

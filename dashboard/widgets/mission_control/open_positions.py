@@ -45,6 +45,8 @@ def render_positions_compact():
     for p in open_p:
         symbol = p.get("symbol", "")
         direction = p.get("direction", "LONG")
+        strategy = str(p.get("strategy") or "")
+        venue = str(p.get("venue") or "")
         entry = float(p.get("entry") or 0)
         qty = float(p.get("qty") or 0)
         stop = float(p.get("stop") or 0)
@@ -52,6 +54,7 @@ def render_positions_compact():
         now = live_prices.get(symbol, 0) or entry
         current_value = float(p.get("current_value") or 0.0)
         has_entry_truth = entry > 0
+        is_spot_holding = strategy.startswith("spot_") or venue == "coinbase_spot"
         deployed = qty * entry if has_entry_truth else (current_value or qty * now)
 
         if has_entry_truth and direction == "LONG":
@@ -71,12 +74,27 @@ def render_positions_compact():
         meta = _parse_notes(notes)
         setup = meta.get("setup", "") or meta.get("regime", "")
         lev = meta.get("lev", "")
-        setup_str = f"{setup} · {lev}x lev" if lev else setup
+        if is_spot_holding:
+            setup_parts = ["COINBASE SPOT"]
+            if setup:
+                setup_parts.append(setup)
+            setup_str = " · ".join(setup_parts)
+        else:
+            setup_str = f"{setup} · {lev}x lev" if lev else setup
 
         is_live = not bool(p.get("paper", 1))
-        risk_note = f"Stop at ${stop:,.4g} — {stop_pct:.1f}% away" if stop and has_entry_truth else ""
+        risk_note = (
+            f"Stop at ${stop:,.4g} — {stop_pct:.1f}% away"
+            if stop and has_entry_truth
+            else ""
+        )
         if is_live:
-            risk_note = "LIVE " + risk_note if risk_note else "LIVE HOLDING"
+            if is_spot_holding:
+                risk_note = (
+                    "LIVE SPOT " + risk_note if risk_note else "LIVE SPOT HOLDING"
+                )
+            else:
+                risk_note = "LIVE " + risk_note if risk_note else "LIVE POSITION"
 
         display_entry = entry if has_entry_truth else now
         display_target = target if has_entry_truth and target > 0 else now

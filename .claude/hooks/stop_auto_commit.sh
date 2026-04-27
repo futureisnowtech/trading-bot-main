@@ -121,6 +121,27 @@ Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
 
 git commit -m "$COMMIT_MSG" 2>&1 | tail -2 >&2
 
+# ── STUB VALUE INTEGRITY CHECK ────────────────────────────────────────────────
+# Warn if any recent scan_candidates rows have placeholder stop/target values
+STUB_COUNT=$(python3 -c "
+import sqlite3, sys
+try:
+    conn = sqlite3.connect('logs/trades.db')
+    n = conn.execute('''SELECT COUNT(*) FROM scan_candidates
+        WHERE datetime(replace(substr(ts,1,19),\"T\",\" \")) >= datetime(\"now\",\"-1 hour\")
+        AND decision != \"data_unavailable\"
+        AND (stop_pct IN (0,50,100) OR target_pct IN (0,50,100))
+    ''').fetchone()[0]
+    print(n)
+    conn.close()
+except Exception:
+    print(0)
+" 2>/dev/null)
+if [ -n "$STUB_COUNT" ] && [ "$STUB_COUNT" -gt 0 ]; then
+    echo "[stub-check] ⚠️  $STUB_COUNT scan_candidates row(s) in last hour have placeholder stop/target values (0, 50, or 100%)" >&2
+    echo "[stub-check] Gates are evaluating junk data. Check log_scan_candidate callers." >&2
+fi
+
 # ── PUSH TO CURRENT BRANCH ───────────────────────────────────────────────────
 if git remote get-url origin > /dev/null 2>&1; then
     git push origin "$BRANCH" --quiet 2>&1 | tail -2 >&2 && \

@@ -47,6 +47,17 @@ for hot in "${HOT_FILES[@]}"; do
     fi
 done
 
+# ── Auto-log config.py parameter changes to brain/parameter_changelog.md ─────
+if echo "$ALL_CHANGED" | grep -q "config.py"; then
+    CHANGELOG="$REPO_ROOT/brain/parameter_changelog.md"
+    mkdir -p "$(dirname "$CHANGELOG")"
+    DIFF=$(git diff HEAD config.py 2>/dev/null | grep '^[-+]' | grep -v '^---\|^+++' | grep -v '^[-+]#' | head -8 | tr '\n' ' ')
+    if [ -n "$DIFF" ]; then
+        TS=$(date '+%Y-%m-%d %H:%M')
+        echo "| $TS | config.py | $DIFF |" >> "$CHANGELOG"
+    fi
+fi
+
 if [ "$NEEDS_RESTART" -eq 0 ]; then
     exit 0
 fi

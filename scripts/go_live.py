@@ -218,6 +218,36 @@ def main() -> int:
                     f"readiness={readiness or 'UNKNOWN'}"
                 )
                 print(f"[go_live] Log: {LIVE_LOG}")
+                # Print account state snapshot so the restart is fully auditable
+                try:
+                    import sqlite3 as _sq
+
+                    _conn = _sq.connect(str(ROOT / "logs" / "trades.db"))
+                    _conn.row_factory = _sq.Row
+                    _pos = _conn.execute(
+                        "SELECT symbol, strategy, qty, entry, stop, target FROM open_positions ORDER BY ts_entry DESC LIMIT 5"
+                    ).fetchall()
+                    _trades = _conn.execute(
+                        "SELECT symbol, action, qty, price, pnl_usd, ts FROM trades WHERE paper=0 ORDER BY ts DESC LIMIT 3"
+                    ).fetchall()
+                    _conn.close()
+                    print(f"[go_live] Open positions ({len(_pos)}):")
+                    for p in _pos:
+                        print(
+                            f"  {p['symbol']:6} {p['strategy']:20} qty={p['qty']:.4f} entry={p['entry']:.4f} stop={p['stop']:.4f}"
+                        )
+                    print(f"[go_live] Last 3 live trades:")
+                    for t in _trades:
+                        pnl = (
+                            f"pnl=${t['pnl_usd']:.2f}"
+                            if t["pnl_usd"] is not None
+                            else ""
+                        )
+                        print(
+                            f"  {str(t['ts'])[:19]} {t['symbol']:6} {t['action']:5} qty={t['qty']:.4f} @{t['price']:.4f} {pnl}"
+                        )
+                except Exception as _e:
+                    print(f"[go_live] Account state: could not read DB ({_e})")
                 return 0
             time.sleep(1)
 

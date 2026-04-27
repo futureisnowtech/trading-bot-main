@@ -130,6 +130,11 @@ def init_db() -> None:
         "ALTER TABLE scan_candidates ADD COLUMN microstructure_veto TEXT DEFAULT ''",
         "ALTER TABLE scan_candidates ADD COLUMN final_spot_score REAL DEFAULT 0",
         "ALTER TABLE scan_candidates ADD COLUMN regime_floor REAL DEFAULT 0",
+        "ALTER TABLE scan_candidates ADD COLUMN actual_stop_pct REAL DEFAULT NULL",
+        "ALTER TABLE scan_candidates ADD COLUMN actual_target_pct REAL DEFAULT NULL",
+        "ALTER TABLE scan_candidates ADD COLUMN net_rr REAL DEFAULT NULL",
+        "ALTER TABLE scan_candidates ADD COLUMN net_win_usd REAL DEFAULT NULL",
+        "ALTER TABLE scan_candidates ADD COLUMN econ_gate_class TEXT DEFAULT ''",
         "ALTER TABLE open_positions ADD COLUMN spot_regime TEXT DEFAULT ''",
         "ALTER TABLE open_positions ADD COLUMN setup_family TEXT DEFAULT ''",
         "ALTER TABLE open_positions ADD COLUMN setup_score REAL DEFAULT 0",
@@ -273,7 +278,12 @@ def init_db() -> None:
         cooldown_until TEXT DEFAULT '',
         microstructure_veto TEXT DEFAULT '',
         final_spot_score REAL DEFAULT 0,
-        regime_floor REAL DEFAULT 0
+        regime_floor REAL DEFAULT 0,
+        actual_stop_pct REAL DEFAULT NULL,
+        actual_target_pct REAL DEFAULT NULL,
+        net_rr REAL DEFAULT NULL,
+        net_win_usd REAL DEFAULT NULL,
+        econ_gate_class TEXT DEFAULT ''
     )""")
 
     # v13.6: Forward-outcome labels for each journaled candidate.
@@ -872,6 +882,11 @@ def log_scan_candidate(
     microstructure_veto: str = "",
     final_spot_score: float = 0.0,
     regime_floor: float = 0.0,
+    actual_stop_pct: float | None = None,
+    actual_target_pct: float | None = None,
+    net_rr: float | None = None,
+    net_win_usd: float | None = None,
+    econ_gate_class: str = "",
 ) -> int:
     """
     Persist one candidate decision to scan_candidates.
@@ -900,8 +915,9 @@ def log_scan_candidate(
                 spot_regime, setup_family, setup_score, setup_preference,
                 tf_5m_state, tf_30m_state, tf_4h_state,
                 tf_1d_state, structural_confirms, execution_route, cooldown_until,
-                microstructure_veto, final_spot_score, regime_floor
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                microstructure_veto, final_spot_score, regime_floor,
+                actual_stop_pct, actual_target_pct, net_rr, net_win_usd, econ_gate_class
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 scan_id,
                 _ts(),
@@ -960,6 +976,11 @@ def log_scan_candidate(
                 microstructure_veto,
                 final_spot_score,
                 regime_floor,
+                actual_stop_pct,
+                actual_target_pct,
+                net_rr,
+                net_win_usd,
+                econ_gate_class,
             ),
         )
         row_id = cur.lastrowid or 0

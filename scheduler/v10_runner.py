@@ -1811,6 +1811,13 @@ def _attempt_entry(
                     ),
                     final_spot_score=_final_score,
                     regime_floor=float(_econ.get("score_floor") or _score_floor),
+                    actual_stop_pct=_stop_pct,
+                    actual_target_pct=_stop_pct * _spot_eng._target_r(_spot_regime),
+                    net_rr=float(_econ.get("net_target_pct", 0) / _econ["net_stop_pct"])
+                    if _econ.get("net_stop_pct")
+                    else None,
+                    net_win_usd=float(_econ.get("projected_net_win_usd") or 0),
+                    econ_gate_class=str(_econ.get("gate_class") or "economics"),
                 )
                 return "econ_veto"
             _sr = _spot_eng.open_spot(
@@ -1863,6 +1870,13 @@ def _attempt_entry(
                     microstructure_veto="",
                     final_spot_score=_final_score,
                     regime_floor=_score_floor,
+                    actual_stop_pct=_stop_pct,
+                    actual_target_pct=_stop_pct * _spot_eng._target_r(_spot_regime),
+                    net_rr=float(_econ.get("net_target_pct", 0) / _econ["net_stop_pct"])
+                    if _econ.get("net_stop_pct")
+                    else None,
+                    net_win_usd=float(_econ.get("projected_net_win_usd") or 0),
+                    econ_gate_class="approved",
                 )
                 return "entered"
             else:

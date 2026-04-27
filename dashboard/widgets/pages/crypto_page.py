@@ -383,17 +383,24 @@ def render_crypto_page():
     st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
 
     # ── Internal subtabs ───────────────────────────────────────────────────────
-    tab_overview, tab_board, tab_console, tab_positions, tab_diag, tab_scanner = (
-        st.tabs(
-            [
-                "Overview",
-                "Opportunity Board",
-                "Trade Console",
-                "Open Positions",
-                "Diagnostics",
-                "Scanner Detail",
-            ]
-        )
+    (
+        tab_overview,
+        tab_board,
+        tab_console,
+        tab_positions,
+        tab_diag,
+        tab_scanner,
+        tab_history,
+    ) = st.tabs(
+        [
+            "Overview",
+            "Opportunity Board",
+            "Trade Console",
+            "Open Positions",
+            "Diagnostics",
+            "Scanner Detail",
+            "Coinbase History",
+        ]
     )
 
     # ── TAB 1: Overview ────────────────────────────────────────────────────────
@@ -672,3 +679,97 @@ def render_crypto_page():
             render_scan_breakdown()
         except Exception as e:
             st.caption(f"Scan breakdown unavailable: {e}")
+
+    # ── TAB 7: Coinbase Order History ──────────────────────────────────────────
+    with tab_history:
+        st.markdown(
+            ui.info_callout(
+                "Orders placed by the bot via its Coinbase API key. "
+                "Purchases made through the Coinbase app or website are NOT visible here — "
+                "only orders this bot placed programmatically.",
+                "info",
+            ),
+            unsafe_allow_html=True,
+        )
+
+        _paper_mode = False
+        try:
+            import sys as _sys, os as _os
+
+            _root = _os.path.join(_os.path.dirname(__file__), "../../..")
+            if _root not in _sys.path:
+                _sys.path.insert(0, _root)
+            from dashboard.db import _runtime_paper_flag
+
+            _paper_mode = _runtime_paper_flag()
+        except Exception:
+            pass
+
+        if _paper_mode:
+            st.info("Running in PAPER mode — no real Coinbase orders to show.")
+        else:
+            _limit = st.slider(
+                "Orders to fetch", min_value=10, max_value=200, value=50, step=10
+            )
+            if st.button("Load Coinbase Order History", key="load_cb_history"):
+                with st.spinner("Fetching from Coinbase..."):
+                    try:
+                        from execution.coinbase_spot_broker import get_spot_broker
+
+                        _broker = get_spot_broker()
+                        if not _broker.is_connected():
+                            _broker.connect()
+                        _orders = _broker.get_order_history(limit=_limit)
+                        st.session_state["cb_order_history"] = _orders
+                    except Exception as _e:
+                        st.error(f"Failed to fetch order history: {_e}")
+                        st.session_state["cb_order_history"] = []
+
+            _orders = st.session_state.get("cb_order_history")
+            if _orders is None:
+                st.caption(
+                    "Click the button above to load your Coinbase order history."
+                )
+            elif not _orders:
+                st.caption("No filled orders found for this API key.")
+            else:
+                # Summary metrics
+                _buys = [o for o in _orders if o["side"] == "BUY"]
+                _sells = [o for o in _orders if o["side"] == "SELL"]
+                _total_fees = sum(o["fee_usd"] for o in _orders)
+                _total_vol = sum(o["total_value_usd"] for o in _orders)
+                mc1, mc2, mc3, mc4 = st.columns(4)
+                mc1.metric("Total Orders", len(_orders))
+                mc2.metric("Buys / Sells", f"{len(_buys)} / {len(_sells)}")
+                mc3.metric("Total Volume", f"${_total_vol:,.2f}")
+                mc4.metric("Total Fees Paid", f"${_total_fees:.4f}")
+
+                st.markdown("---")
+
+                # Order rows
+                rows_html = ""
+                for o in _orders:
+                    side_color = ui.C_GREEN if o["side"] == "BUY" else ui.C_RED
+                    side_label = "▲ BUY" if o["side"] == "BUY" else "▼ SELL"
+                    ts_raw = o.get("created_time", "")[:19].replace("T", " ")
+                    rows_html += (
+                        f'<div style="display:flex;justify-content:space-between;align-items:center;'
+                        f'padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.04);font-size:0.80em;">'
+                        f'<div style="width:110px;color:#8b949e;">{ts_raw}</div>'
+                        f'<div style="width:60px;font-weight:700;color:#e6edf3;">{o["symbol"]}</div>'
+                        f'<div style="width:60px;color:{side_color};font-weight:600;">{side_label}</div>'
+                        f'<div style="width:90px;color:#e6edf3;">{o["filled_size"]:.6g} units</div>'
+                        f'<div style="width:100px;color:#e6edf3;">@ ${o["avg_fill_price"]:,.4g}</div>'
+                        f'<div style="width:100px;font-weight:700;color:#e6edf3;">${o["total_value_usd"]:,.2f}</div>'
+                        f'<div style="width:80px;color:#d29922;">fee ${o["fee_usd"]:.4f}</div>'
+                        f'<div style="width:80px;color:#484f58;font-size:0.85em;">{o["order_id"][:12]}…</div>'
+                        f"</div>"
+                    )
+                st.markdown(
+                    ui.detail_card(
+                        "FILLED ORDERS",
+                        f"{len(_orders)} most recent — API key orders only",
+                        rows_html,
+                    ),
+                    unsafe_allow_html=True,
+                )

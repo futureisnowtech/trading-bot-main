@@ -802,6 +802,48 @@ class CoinbaseSpotBroker:
                 return synced
         return _holdings_to_positions(self._holdings, self.get_mark_price)
 
+    def get_order_history(self, limit: int = 50) -> list[dict]:
+        """
+        Return filled orders from the Coinbase Advanced Trade API.
+        Only sees orders placed via this API key — not app/website purchases.
+
+        Each entry: {order_id, product_id, symbol, side, filled_size, avg_fill_price,
+                     total_value_usd, fee_usd, created_time, status}
+        """
+        if self._paper:
+            return []
+        try:
+            data = self._request(
+                "GET",
+                f"/api/v3/brokerage/orders/historical/batch?order_status=FILLED&limit={limit}",
+            )
+            orders = data.get("orders") or []
+            result = []
+            for o in orders:
+                product_id = o.get("product_id", "")
+                symbol = product_id.replace("-USD", "").replace("-USDT", "")
+                filled = float(o.get("filled_size") or 0)
+                avg_price = float(o.get("average_filled_price") or 0)
+                fee = float((o.get("total_fees") or "0"))
+                result.append(
+                    {
+                        "order_id": o.get("order_id", ""),
+                        "product_id": product_id,
+                        "symbol": symbol,
+                        "side": o.get("side", ""),
+                        "filled_size": filled,
+                        "avg_fill_price": avg_price,
+                        "total_value_usd": round(filled * avg_price, 2),
+                        "fee_usd": round(fee, 4),
+                        "created_time": o.get("created_time", ""),
+                        "status": o.get("status", ""),
+                    }
+                )
+            return result
+        except Exception as e:
+            logger.warning(f"[spot] get_order_history error: {e}")
+            return []
+
 
 # ── Singleton ─────────────────────────────────────────────────────────────────
 

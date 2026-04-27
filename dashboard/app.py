@@ -3,6 +3,7 @@ dashboard/app.py — Algo Trading Operator Panel (v17.2 premium redesign)
 7-page design: CONTROL TOWER · CRYPTO · STOCKS · FORECAST · FUTURES · PERFORMANCE LAB · ENGINEERING CONSOLE
 """
 
+import importlib.util
 import os
 import sys
 
@@ -14,13 +15,20 @@ if _DASH_DIR not in sys.path:
 if _ROOT not in sys.path:
     sys.path.append(_ROOT)
 
-# Evict any stale root data/ package from sys.modules so that dashboard/data/
-# is always resolved when widgets do `from data.X import Y`.
-# This can happen on Streamlit reruns where the module cache persists.
-for _k in [k for k in sys.modules if k == "data" or k.startswith("data.")]:
-    _cached_file = getattr(sys.modules[_k], "__file__", "") or ""
-    if _DASH_DIR not in _cached_file:
-        del sys.modules[_k]
+# Force dashboard/data/ to own the 'data' namespace unconditionally.
+# Streamlit reruns re-exec this file in the same process; without this,
+# the root data/ package (indicators, historical_data, etc.) can win the
+# 'data' slot in sys.modules and break every `from data.X import Y` in
+# every widget with ModuleNotFoundError.
+_dash_data_dir = os.path.join(_DASH_DIR, "data")
+_dash_data_init = os.path.join(_dash_data_dir, "__init__.py")
+_spec = importlib.util.spec_from_file_location(
+    "data", _dash_data_init, submodule_search_locations=[_dash_data_dir]
+)
+_data_pkg = importlib.util.module_from_spec(_spec)
+_data_pkg.__path__ = [_dash_data_dir]
+_spec.loader.exec_module(_data_pkg)
+sys.modules["data"] = _data_pkg
 
 import streamlit as st
 

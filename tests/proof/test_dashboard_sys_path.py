@@ -132,14 +132,14 @@ def test_eviction_loop_fixes_engineering_console():
     assert hasattr(mod, "get_engineering_truth_summary")
 
 
-def test_app_py_contains_eviction_loop():
-    """app.py must contain the eviction loop — removing it would re-introduce the crash."""
+def test_app_py_forces_dashboard_data_package():
+    """app.py must unconditionally force dashboard/data/ as sys.modules['data']."""
     src = open(os.path.join(_DASH, "app.py")).read()
-    assert "del sys.modules[_k]" in src, (
-        "app.py must contain the sys.modules eviction loop (del sys.modules[_k])"
+    assert 'sys.modules["data"] = _data_pkg' in src, (
+        "app.py must register dashboard/data/ as sys.modules['data'] unconditionally"
     )
-    assert "_DASH_DIR not in _cached_file" in src, (
-        "Eviction loop must check _DASH_DIR to distinguish root data/ from dashboard/data/"
+    assert "spec_from_file_location" in src, (
+        "app.py must use importlib.util.spec_from_file_location to load dashboard/data/"
     )
 
 

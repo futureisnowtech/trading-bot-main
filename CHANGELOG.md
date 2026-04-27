@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-26
+- fix(spot_engine): reconcile broker qty before sell to prevent INSUFFICIENT_FUND loop — when DB qty > actual Coinbase balance, close_spot now fetches live holdings and uses min(db_qty, actual_qty). Stopped a 39h/5803-error XRP exit loop. Also auto-remediated 10 stale brain AUTO-ALERTs from 2026-03-25 through 2026-04-25.
+
+## 2026-04-26
 - v18.7: explicitly label live Coinbase holdings as COINBASE SPOT / LIVE SPOT in open-position cards so real spot holdings cannot be mistaken for phantom perp positions
 
 ## 2026-04-25

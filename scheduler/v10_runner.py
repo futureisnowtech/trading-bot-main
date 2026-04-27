@@ -213,7 +213,8 @@ def _journal_scan_candidate(
             scanner_effective_position_usd=eff_pos,
             recommended_lane=recommended_lane,
             tradeability_status=tradeability_status,
-            trade_blocked_reason=trade_blocked_reason,
+            trade_blocked_reason=trade_blocked_reason
+            or (decision if decision != "entered" else ""),
             trade_size_block_reason=trade_size_block_reason,
             trade_source_reason=trade_source_reason,
             manual_executable=manual_executable,
@@ -529,8 +530,7 @@ def _get_spot_runtime_truth() -> tuple[int, float]:
 
         rows = _spot_eng.get_spot_positions(paper=False) or []
         deployed = sum(
-            abs(float(p.get("qty") or 0.0)) * float(p.get("entry") or 0.0)
-            for p in rows
+            abs(float(p.get("qty") or 0.0)) * float(p.get("entry") or 0.0) for p in rows
         )
         return len(rows), float(deployed)
     except Exception:
@@ -1196,6 +1196,14 @@ def _attempt_entry(
 
     # ── Step 3: Score (used for sizing, not gating) ──────────────────────────
     if se is None:
+        _journal_scan_candidate(
+            scan_id,
+            candidate,
+            "data_unavailable",
+            regime=regime,
+            entry_block_reason="signal_engine is None",
+            **_route_hint,
+        )
         return "data_unavailable"
 
     result = se.score(features, direction, regime, model_store=_get_model_store())
@@ -1673,9 +1681,7 @@ def _attempt_entry(
             _spot_deployed = _spot_eng._current_spot_deployed_usd(paper=_paper)
             _top = _spot_eng._get_broker(_paper).get_spot_top_of_book(_underlying)
             _spread_for_gate = float(
-                _top.get("spread_pct")
-                or candidate.get("spread_pct", 0.0)
-                or 0.0
+                _top.get("spread_pct") or candidate.get("spread_pct", 0.0) or 0.0
             )
             _depth_for_gate = float(
                 _top.get("top_depth_usd")
@@ -1758,7 +1764,9 @@ def _attempt_entry(
                 regime=_spot_regime,
                 execution_route_guess="maker_first",
                 paper=_paper,
-                structural_confirm_count=int(_spot_state.get("structural_confirm_count") or 0),
+                structural_confirm_count=int(
+                    _spot_state.get("structural_confirm_count") or 0
+                ),
                 setup_family=_setup_family,
                 setup_score=_setup_score,
             )
@@ -1797,7 +1805,9 @@ def _attempt_entry(
                     execution_route="",
                     cooldown_until="",
                     microstructure_veto=(
-                        _econ["reason"] if _econ.get("gate_class") == "microstructure" else ""
+                        _econ["reason"]
+                        if _econ.get("gate_class") == "microstructure"
+                        else ""
                     ),
                     final_spot_score=_final_score,
                     regime_floor=float(_econ.get("score_floor") or _score_floor),
@@ -1919,7 +1929,9 @@ def _attempt_entry(
                 entry_block_reason=f"spot_entry_exception: {_spot_err}",
                 recommended_lane=_trade.get("recommended_lane", ""),
                 tradeability_status=_trade.get("status", "executable"),
-                trade_blocked_reason="spot_data_unavailable" if _is_data_issue else "spot_entry_exception",
+                trade_blocked_reason="spot_data_unavailable"
+                if _is_data_issue
+                else "spot_entry_exception",
                 trade_size_block_reason=_trade.get("size_block_reason", "none"),
                 trade_source_reason=_trade.get("source_reason", "trusted_source"),
                 manual_executable=int(_trade.get("manual_executable", 0)),
@@ -3251,7 +3263,7 @@ def run_forever():
             _t = _thr.Thread(target=run_labeling_pass, args=(_gc,), daemon=True)
             _t.start()
         except Exception as _le:
-            logger.debug(f"[v10] labeler job error: {_le}")
+            logger.warning(f"[v10] labeler job error: {_le}")
 
     schedule.every(15).minutes.do(_labeler_job)
 

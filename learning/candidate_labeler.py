@@ -502,9 +502,21 @@ def run_labeling_pass(get_candles=None) -> dict:
         "skipped": skipped,
         "errors": errors,
     }
-    if labeled > 0:
-        logger.info(
-            f"[labeler] labeled {labeled}/{len(candidates)} candidates "
-            f"(skipped={skipped} errors={errors})"
+    logger.info(
+        f"[labeler] labeled {labeled}/{len(candidates)} candidates "
+        f"(skipped={skipped} errors={errors})"
+    )
+    try:
+        from notifications.notification_engine import NotificationEngine
+
+        NotificationEngine().emit(
+            source="candidate_labeler",
+            level="INFO",
+            message=(
+                f"Labeling pass: processed={len(candidates)} "
+                f"labeled={labeled} skipped={skipped} errors={errors}"
+            ),
         )
+    except Exception:
+        pass
     return summary

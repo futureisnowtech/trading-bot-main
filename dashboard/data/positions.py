@@ -157,11 +157,14 @@ def _merge_live_perp_rows(live_positions: dict, db_rows: list[dict]) -> list[dic
 def _merge_live_spot_rows(
     live_positions: list[dict], db_rows: list[dict]
 ) -> list[dict]:
+    # Only show holdings the bot opened — manual Coinbase purchases have no DB row.
     db_by_symbol = {str(row.get("symbol") or "").upper(): row for row in db_rows}
     merged: list[dict] = []
     for live in live_positions:
         symbol = str(live.get("symbol") or "").upper()
-        db_row = dict(db_by_symbol.get(symbol, {}))
+        db_row = db_by_symbol.get(symbol)
+        if not db_row:
+            continue  # not bot-managed — skip
         merged.append(
             {
                 **db_row,

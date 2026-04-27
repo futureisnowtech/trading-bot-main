@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-27
+- fix(trading): unblock auto entries — lower econ gate floors, relax spot derivative check, fix max_single scope bug
+
+## 2026-04-27
 - feat(spot): strip hardcoded edge_conditions, add self-calibrating spot_edge_calibrator
 
 ## 2026-04-27

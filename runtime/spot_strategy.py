@@ -710,8 +710,8 @@ def spot_quality_block_reason(
 
     if final_spot_score is not None and float(final_spot_score) < float(floor):
         return "below_regime_floor", floor
-    if float(s5.get("v") or 0.0) <= 0 or float(s5.get("a") or 0.0) <= 0:
-        return "5m_derivative_not_positive", floor
+    if float(s5.get("v") or 0.0) <= 0:
+        return "5m_velocity_not_positive", floor
     if confirm_count < int(policy["min_confirm_count"]):
         return "structural_confirm_count_too_low", floor
     if float(s5.get("frame_score") or 0.0) < float(policy["min_5m_frame"]):

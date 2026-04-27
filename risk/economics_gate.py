@@ -46,7 +46,9 @@ ROUND_TRIP_COST = TAKER_FEE_PCT * 2  # entry taker + exit taker = 0.060%
 _BASELINE_WIN_RATE = 0.52  # 52% — used for EV calculation
 
 # ── Veto thresholds ───────────────────────────────────────────────────────────
-_MIN_STOP_DIST_PCT = 0.004  # ATR too small → fees consume stop distance
+_MIN_STOP_DIST_PCT = (
+    0.002  # ATR too small → fees consume stop distance (lowered from 0.4%)
+)
 _MAX_STOP_DIST_PCT = 0.05  # ATR too large → stop is a prayer
 _MAX_FEE_TO_WIN_PCT = 0.35  # fees must not eat > 35% of gross target
 _MIN_NET_RR = 1.2  # net R:R (after fees) must be ≥ 1.2
@@ -59,7 +61,9 @@ _MIN_NEAR_DEPTH_USD = 5_000.0  # $5K each side — minimum near-touch OB depth
 # and was vetoing trades with real edge. Minimal sizing enforces capital discipline.
 _TIER_APLUS_EV = 0.008  # 0.8% net EV → A+
 _TIER_A_EV = 0.004  # 0.4% net EV → A
-_TIER_B_EV = 0.0015  # 0.15% net EV → B
+_TIER_B_EV = (
+    0.0005  # 0.05% net EV → B (lowered from 0.15% to allow marginal-positive trades)
+)
 
 # ── Edge score normaliser (EV % that maps to 1.0 on edge_score) ───────────────
 _EDGE_SCORE_CAP_EV = 0.015  # 1.5% EV → edge_score = 1.0
@@ -177,7 +181,7 @@ def check(
     _effective_cost = (
         ROUND_TRIP_COST + abs(spread_pct) / 2 + max(0.0, abs(funding_cost_pct))
     )
-    _cost_floor = 2.0 * _effective_cost
+    _cost_floor = 1.0 * _effective_cost  # require 1× cost coverage (down from 2×)
     _static_floor = _TIER_B_EV  # same floor for trending and ranging regimes
     _ev_floor = max(_static_floor, _cost_floor)
     _rr_floor = _MIN_NET_RR * 1.25 if is_ranging else _MIN_NET_RR  # 1.5 vs 1.2

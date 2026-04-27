@@ -548,8 +548,8 @@ def render_manual_scan():
                 if min_usd > 0 and pos_usd < min_usd:
                     size_note = f"bumped from ${pos_usd:.0f} to 1-contract minimum"
                 pos_usd = round(min_usd * 1.02, 2)
-            if pos_usd > max_single:
-                pos_usd = max_single
+                if pos_usd > max_single:
+                    pos_usd = max_single
 
         stop_p = (
             round(price - stop_dist, 6)

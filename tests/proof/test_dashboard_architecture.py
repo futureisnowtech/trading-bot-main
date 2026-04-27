@@ -151,7 +151,7 @@ def test_archived_futures_in_engineering_console():
 
 def test_control_tower_has_compact_operator_sections():
     src = _src("widgets/pages/control_tower.py")
-    assert "BIGGEST ISSUE" in src
+    assert "ACTIVE ISSUES" in src
     assert "render_positions_compact" in src
     assert "render_smart_logs" in src
     assert "RECENT CLOSED TRADES" in src

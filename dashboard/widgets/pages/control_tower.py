@@ -125,7 +125,7 @@ def _collect_all_issues(
         )
 
     # ── Execution failures (broken into real vs sizing) ────────────────────────
-    if exec_fail_total >= 2:
+    if exec_fail_total >= 1:
         # Try to break down spot_min_order_not_met vs actual broker failures
         try:
             import sqlite3, os as _os
@@ -402,14 +402,24 @@ def render_control_tower():
         )
 
     with c4:
-        issue, why, action, issue_status = _derive_biggest_issue(snap, stats, dd, ex)
+        _issues = _collect_all_issues(snap, stats, dd, ex)
+        _worst_sev = "good"
+        for _i in _issues:
+            if _i["severity"] == "problem":
+                _worst_sev = "problem"
+                break
+            if _i["severity"] == "watch":
+                _worst_sev = "watch"
+        _subtitle = (
+            f"{len(_issues)} active issue{'s' if len(_issues) != 1 else ''}"
+            if _issues[0]["severity"] != "good"
+            else "All systems nominal"
+        )
         st.markdown(
-            ui.summary_card(
-                "BIGGEST ISSUE",
-                issue,
-                issue_status.capitalize(),
-                issue_status,
-                f"{why} {action}",
+            ui.detail_card(
+                "ACTIVE ISSUES",
+                _subtitle,
+                _render_issues_card(_issues),
             ),
             unsafe_allow_html=True,
         )

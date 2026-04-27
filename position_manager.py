@@ -34,8 +34,8 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 _RISK_PCT = 0.02  # 2% account risk per trade
-_MAX_SINGLE_POSITION_PCT = 0.12  # 12% of account per position (scales with balance)
-_MAX_DEPLOYED_PCT = 0.95  # 95% max total deployment
+_MAX_SINGLE_POSITION_PCT = 0.05  # 5% of account per position (scales with balance)
+_MAX_DEPLOYED_PCT = 0.30  # 30% max total deployment
 _MIN_NOTIONAL = 10.0  # $10 minimum
 
 # Kelly ramp thresholds
@@ -385,7 +385,9 @@ def check_exits(
         _kill_floor = 0.0
         _kill_desc = ""
     if account_balance < _kill_floor:
-        _reason = f"Balance ${account_balance:.0f} below kill threshold ${_kill_floor:.0f}"
+        _reason = (
+            f"Balance ${account_balance:.0f} below kill threshold ${_kill_floor:.0f}"
+        )
         if _kill_desc:
             _reason += f" ({_kill_desc})"
         return ExitDecision(

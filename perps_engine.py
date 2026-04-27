@@ -35,7 +35,7 @@ _recent_close_ts: Dict[
     str, float
 ] = {}  # symbol → epoch of last full close (idempotency guard)
 _IDEMPOTENCY_WINDOW = 60.0  # seconds — duplicate close within this window is suppressed
-_MAX_LIVE_PERPS = 3
+_MAX_LIVE_PERPS = 15
 
 
 def _get_broker(testnet: bool = True) -> Optional["CoinbaseBroker"]:

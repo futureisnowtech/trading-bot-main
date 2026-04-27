@@ -154,6 +154,9 @@ class CoinbaseBroker:
         self._key_name: str = ""
         self._private_key_pem: bytes = b""
         self._open_positions: Dict[str, Dict] = {}
+        self._symbol_count: Dict[
+            str, int
+        ] = {}  # tracks entries per symbol for per-symbol cap
         self._session = None
 
         # Load credentials
@@ -491,11 +494,17 @@ class CoinbaseBroker:
             logger.warning(f"[cb] open_long {symbol}: cannot get price")
             return None
 
-        # One net position per symbol (no doubling down, no same-asset hedge stacking)
-        if symbol in self._open_positions:
+        # Block opposite-side hedge stacking (LONG while SHORT open)
+        _existing = self._open_positions.get(symbol, {})
+        if _existing.get("direction") == "SHORT":
+            logger.warning(f"[cb] open_long blocked — SHORT already open on {symbol}.")
+            return None
+        # Per-symbol position cap (default 3 — allows scaling in same direction)
+        _MAX_PER_SYMBOL = 3
+        if self._symbol_count.get(symbol, 0) >= _MAX_PER_SYMBOL:
             logger.warning(
-                f"[cb] open_long blocked — already holding a position in {symbol}. "
-                "Close existing position first."
+                f"[cb] open_long blocked — {symbol} already has "
+                f"{self._symbol_count[symbol]}/{_MAX_PER_SYMBOL} positions open."
             )
             return None
 
@@ -522,6 +531,7 @@ class CoinbaseBroker:
                 "qty": qty,
                 "symbol": symbol,
             }
+            self._symbol_count[symbol] = self._symbol_count.get(symbol, 0) + 1
             return order
 
         # Live path
@@ -571,6 +581,7 @@ class CoinbaseBroker:
                 "qty": contracts * spec["contract_size"],
                 "symbol": symbol,
             }
+            self._symbol_count[symbol] = self._symbol_count.get(symbol, 0) + 1
             return result
         except Exception as e:
             logger.error(f"[cb] open_long LIVE error {symbol}: {e}")
@@ -597,11 +608,17 @@ class CoinbaseBroker:
             logger.warning(f"[cb] open_short {symbol}: cannot get price")
             return None
 
-        # One net position per symbol
-        if symbol in self._open_positions:
+        # Block opposite-side hedge stacking (SHORT while LONG open)
+        _existing = self._open_positions.get(symbol, {})
+        if _existing.get("direction") == "LONG":
+            logger.warning(f"[cb] open_short blocked — LONG already open on {symbol}.")
+            return None
+        # Per-symbol position cap (default 3 — allows scaling in same direction)
+        _MAX_PER_SYMBOL = 3
+        if self._symbol_count.get(symbol, 0) >= _MAX_PER_SYMBOL:
             logger.warning(
-                f"[cb] open_short blocked — already holding a position in {symbol}. "
-                "Close existing position first."
+                f"[cb] open_short blocked — {symbol} already has "
+                f"{self._symbol_count[symbol]}/{_MAX_PER_SYMBOL} positions open."
             )
             return None
 
@@ -628,6 +645,7 @@ class CoinbaseBroker:
                 "qty": qty,
                 "symbol": symbol,
             }
+            self._symbol_count[symbol] = self._symbol_count.get(symbol, 0) + 1
             return order
 
         # Live path
@@ -674,6 +692,7 @@ class CoinbaseBroker:
                 "qty": contracts * spec["contract_size"],
                 "symbol": symbol,
             }
+            self._symbol_count[symbol] = self._symbol_count.get(symbol, 0) + 1
             return result
         except Exception as e:
             logger.error(f"[cb] open_short LIVE error {symbol}: {e}")
@@ -738,6 +757,9 @@ class CoinbaseBroker:
             )
 
         self._open_positions.pop(symbol, None)
+        self._symbol_count[symbol] = max(0, self._symbol_count.get(symbol, 0) - 1)
+        if self._symbol_count[symbol] == 0:
+            del self._symbol_count[symbol]
         return {
             "symbol": symbol,
             "exit_price": exit_price,

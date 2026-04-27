@@ -199,26 +199,36 @@ def test_cb06_paper_close_short_position(broker):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def test_cb07_duplicate_open_long_blocked():
+def test_cb07_duplicate_open_long_allowed_up_to_3():
+    """Up to 3 same-direction entries per symbol allowed (scaling in); 4th is blocked."""
     from execution.coinbase_broker import CoinbaseBroker
 
     b = CoinbaseBroker(paper=True)
     first = b.open_long(symbol="XRP", size_usd=100.0, leverage=3)
     assert first is not None, "First open should succeed"
     second = b.open_long(symbol="XRP", size_usd=100.0, leverage=3)
-    assert second is None, (
-        "Second open_long on same symbol must be blocked (one position per asset)"
+    assert second is not None, (
+        "Second open_long on same symbol should be allowed (scaling in)"
     )
+    third = b.open_long(symbol="XRP", size_usd=100.0, leverage=3)
+    assert third is not None, "Third open_long on same symbol should be allowed"
+    fourth = b.open_long(symbol="XRP", size_usd=100.0, leverage=3)
+    assert fourth is None, "Fourth open_long must be blocked (per-symbol cap=3)"
 
 
-def test_cb07_duplicate_open_short_blocked():
+def test_cb07_duplicate_open_short_allowed_up_to_3():
+    """Up to 3 same-direction entries per symbol allowed; 4th is blocked."""
     from execution.coinbase_broker import CoinbaseBroker
 
     b = CoinbaseBroker(paper=True)
     first = b.open_short(symbol="BTC", size_usd=100.0, leverage=3)
     assert first is not None
     second = b.open_short(symbol="BTC", size_usd=100.0, leverage=3)
-    assert second is None, "Second open_short on same symbol must be blocked"
+    assert second is not None, "Second open_short on same symbol should be allowed"
+    third = b.open_short(symbol="BTC", size_usd=100.0, leverage=3)
+    assert third is not None, "Third open_short should be allowed"
+    fourth = b.open_short(symbol="BTC", size_usd=100.0, leverage=3)
+    assert fourth is None, "Fourth open_short must be blocked (per-symbol cap=3)"
 
 
 def test_cb07_close_then_reopen_allowed():

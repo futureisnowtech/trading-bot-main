@@ -1244,7 +1244,7 @@ def _attempt_entry(
     # ── Tier 1 composite floor ──────────────────────────────────────────────────
     # Blocks extreme signal disagreement only — setup fires but everything else is red.
     # Lowered from 50 → 45 to allow borderline-agreement setups through.
-    _TIER1_COMPOSITE_FLOOR = 45.0
+    _TIER1_COMPOSITE_FLOOR = 25.0
 
     _tech_score = float(result.get("technical_score", 0.0))
     _ml_score = float(result.get("ml_score", 50.0))
@@ -1282,8 +1282,8 @@ def _attempt_entry(
             f"[v10] {symbol} {direction} TIER 1 — {primary_setup['label']} "
             f"(composite={composite:.1f} used for sizing only)"
         )
-    elif composite >= 50:
-        # Tier 2: score-based entry. Lowered from 55 → 50 to capture more edge.
+    elif composite >= 30:
+        # Tier 2: score-based entry. Lowered from 50 → 30 to capture more edge.
         tier = 2
         size_mult = 0.75
         logger.info(
@@ -1291,9 +1291,9 @@ def _attempt_entry(
             f"(tech={result.get('technical_score', 0):.1f} ml={result.get('ml_score', 50):.1f})"
         )
     else:
-        if composite > 45:
+        if composite > 20:
             logger.info(
-                f"[v10] {symbol} {direction} score={composite:.1f} below 50 threshold, skip"
+                f"[v10] {symbol} {direction} score={composite:.1f} below 30 threshold, skip"
             )
         _journal_scan_candidate(
             scan_id,
@@ -1303,9 +1303,9 @@ def _attempt_entry(
             technical_score=_tech_score,
             ml_score=_ml_score,
             composite_score=composite,
-            entry_threshold=50.0,
+            entry_threshold=30.0,
             should_enter_signal=0,
-            entry_block_reason=f"composite {composite:.1f} < 50 (no setup, no tier2 score)",
+            entry_block_reason=f"composite {composite:.1f} < 30 (no setup, no tier2 score)",
             **_route_hint,
         )
         return "below_threshold"

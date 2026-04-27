@@ -360,6 +360,22 @@ _BLOCK_REASONS = {
     "perp_deployment_cap_exceeded": "perp budget fully deployed",
     "perp_not_autonomous_eligible": "manual-only symbol",
     "research_only_block": "research-only symbol, not tradeable live",
+    "spot_min_order_not_met": "spot account has insufficient USD",
+    "spot_balance_unavailable": "can't read spot account balance",
+}
+
+_BELOW_THRESHOLD_REASONS = {
+    "below_regime_floor": "score below entry floor for this regime",
+    "5m_derivative_not_positive": "5m momentum stalled — waiting for upward push",
+    "5m_velocity_not_positive": "5m momentum stalled — waiting for upward push",
+    "structural_confirm_count_too_low": "waiting for trend confirmation signals",
+    "frame_score_5m_too_low": "5m momentum signals too weak",
+    "frame_score_30m_too_low": "30m momentum signals too weak",
+    "momentum_impulse_too_low": "momentum impulse too weak",
+    "path_efficiency_too_low": "price path too choppy",
+    "participation_component_too_low": "low participation in the move",
+    "structure_component_too_low": "market structure not aligned",
+    "spot_state_unavailable": "market data unavailable",
 }
 
 
@@ -456,7 +472,11 @@ def get_recent_scan_summaries(limit: int = 6) -> list[dict]:
             block_raw = str(top.get("trade_blocked_reason") or "")
 
             if decision == "below_threshold":
-                block = f"best score was {top_sym} at {top_score:.0f} — not strong enough yet"
+                below_reason = _BELOW_THRESHOLD_REASONS.get(block_raw)
+                if below_reason:
+                    block = f"{top_sym} scored {top_score:.0f} — {below_reason}"
+                else:
+                    block = f"best score was {top_sym} at {top_score:.0f} — not strong enough yet"
             elif decision == "econ_veto":
                 reason = _ECON_REASONS.get(
                     econ_raw,

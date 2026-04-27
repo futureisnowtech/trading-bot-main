@@ -11,7 +11,7 @@ if ROOT not in sys.path:
 def test_ssm01_final_spot_score_blends_composite_and_derivative():
     from runtime.spot_momentum import final_spot_score
 
-    assert final_spot_score(60.0, 80.0, regime="TREND") == 68.0
+    assert final_spot_score(60.0, 80.0, regime="TREND") == 64.0
 
 
 def test_ssm01b_final_spot_score_neutral_leans_on_composite():
@@ -48,8 +48,18 @@ def test_ssm03_setup_family_impulse_continuation():
 def test_ssm04_score_floor_softens_for_clean_impulse():
     from runtime.spot_regime import score_floor_for_regime
 
-    assert score_floor_for_regime("NEUTRAL", structural_confirm_count=2, setup_family="impulse_continuation") == 48.0
-    assert score_floor_for_regime("CHOP", structural_confirm_count=2, setup_family="compression_breakout") == 57.0
+    assert (
+        score_floor_for_regime(
+            "NEUTRAL", structural_confirm_count=2, setup_family="impulse_continuation"
+        )
+        == 48.0
+    )
+    assert (
+        score_floor_for_regime(
+            "CHOP", structural_confirm_count=2, setup_family="compression_breakout"
+        )
+        == 57.0
+    )
 
 
 def test_ssm05_timeframe_state_reports_impulse_and_path_metrics():

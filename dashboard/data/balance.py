@@ -385,8 +385,23 @@ def get_spot_balance_summary() -> dict:
         bal = broker.get_spot_balance()
         usd = float(bal.get("usd_available", 0))
         symbol_balances = bal.get("symbol_balances") or {}
+
+        # Only surface bot-managed positions (open_positions WHERE strategy LIKE 'spot_%')
+        # Manual Coinbase purchases are excluded — they are irrelevant to this bot.
+        try:
+            with sqlite3.connect(_DB_PATH, timeout=3, check_same_thread=False) as _c:
+                _rows = _c.execute(
+                    "SELECT DISTINCT symbol FROM open_positions "
+                    "WHERE strategy LIKE 'spot_%' AND paper=0"
+                ).fetchall()
+            _bot_symbols = {str(r[0]).upper() for r in _rows}
+        except Exception:
+            _bot_symbols = set(symbol_balances.keys())
+
         held_usd_by_symbol: dict[str, float] = {}
         for sym, qty in symbol_balances.items():
+            if sym.upper() not in _bot_symbols:
+                continue
             qty_f = float(qty or 0.0)
             if qty_f <= 0:
                 continue

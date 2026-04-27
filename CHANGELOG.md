@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-27
+- feat(spot): strip hardcoded edge_conditions, add self-calibrating spot_edge_calibrator
+
+## 2026-04-27
 - fix(audit): close 2026-04-26 self-audit work queue — JWT fix for product_book 401 (maker orders now receive real bid/ask), candidate labeler emits system_events, trade_blocked_reason populated from decision fallback (42% unknown → labeled), log rotation script, CLAUDE.md EV tier + SPOT_TARGET_R drift corrected
 
 ## 2026-04-26

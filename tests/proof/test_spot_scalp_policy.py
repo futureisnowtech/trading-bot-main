@@ -92,13 +92,20 @@ def test_ssp03_build_spot_state_can_fall_back_to_stale_cache(monkeypatch):
     fresh = sm.build_spot_state("ETH", use_cache=False, allow_stale=False)
     assert fresh["cache_stale"] is False
 
-    monkeypatch.setattr(sm, "get_candles", lambda symbol, tf, bars: candles.head(10).copy())
+    monkeypatch.setattr(
+        sm, "get_candles", lambda symbol, tf, bars: candles.head(10).copy()
+    )
     stale = sm.build_spot_state("ETH", use_cache=False, allow_stale=True)
     assert stale["cache_stale"] is True
     assert stale["state_source"] == "stale_cache"
 
 
-def test_ssp04_quality_gate_uses_replay_edge_conditions():
+def test_ssp04_quality_gate_open_before_calibration():
+    """
+    Before the calibrator has accumulated >= 30 real BTC spot trades, there must
+    be no active edge conditions (open gate).  The old test asserted the hardcoded
+    compression_breakout-only restriction which has been replaced by self-calibration.
+    """
     from runtime.spot_strategy import spot_quality_block_reason
 
     state = {
@@ -126,4 +133,5 @@ def test_ssp04_quality_gate_uses_replay_edge_conditions():
     }
 
     reason, _ = spot_quality_block_reason("BTC", state, final_spot_score=65.0)
-    assert reason == "edge_setup_family_mismatch"
+    # Open gate: no hardcoded edge conditions before real data is collected
+    assert reason == "", f"Expected open gate (empty reason), got: {reason!r}"

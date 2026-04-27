@@ -741,6 +741,23 @@ def _check_ml_retrain_queue() -> dict:
     return result
 
 
+def _check_spot_edge_calibration() -> dict:
+    """Run spot_edge_calibrator and report how many symbols have derived conditions."""
+    result: dict[str, Any] = {"status": "pass", "detail": ""}
+    try:
+        from learning.spot_edge_calibrator import run_calibration
+
+        summary = run_calibration()
+        calibrated = sum(1 for v in summary.values() if v > 0)
+        pending = sum(1 for v in summary.values() if v == 0)
+        result["detail"] = (
+            f"{calibrated} symbol(s) calibrated, {pending} pending >= 30 trades — {summary}"
+        )
+    except Exception as e:
+        result["detail"] = f"calibration skipped: {e}"
+    return result
+
+
 # ── main audit ────────────────────────────────────────────────────────────────
 
 
@@ -789,6 +806,9 @@ def run_audit(run_proof: bool = True) -> dict:
 
     logger.info("[audit] checking ML retrain queue...")
     checks["ml_retrain_queue"] = _check_ml_retrain_queue()
+
+    logger.info("[audit] running spot edge calibration...")
+    checks["spot_edge_calibration"] = _check_spot_edge_calibration()
 
     # Overall status: worst of all checks (skipped checks don't count)
     statuses = [

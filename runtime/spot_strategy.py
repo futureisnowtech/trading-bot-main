@@ -59,7 +59,13 @@ _SETUP_LIBRARY: dict[str, dict[str, float | str]] = {
 
 
 def _clean_symbol(symbol: str) -> str:
-    return str(symbol or "").upper().replace("-USD", "").replace("USD", "").replace("USDT", "")
+    return (
+        str(symbol or "")
+        .upper()
+        .replace("-USD", "")
+        .replace("USD", "")
+        .replace("USDT", "")
+    )
 
 
 def _tupled(values: Any, *, upper: bool = True) -> tuple[str, ...]:
@@ -76,6 +82,63 @@ def _setup_value(policy: dict[str, Any], setup_family: str, key: str) -> float:
     setup_cfg = (policy.get("setup_overrides") or {}).get(setup_family, {})
     base = _SETUP_LIBRARY.get(setup_family, {})
     return float(setup_cfg.get(key, base.get(key, 0.0)))
+
+
+def _load_db_conditions(symbol: str) -> tuple[dict[str, Any], ...] | None:
+    """
+    Load active derived conditions from spot_edge_conditions DB table.
+    Returns None if table doesn't exist or no active rows for symbol.
+    Returns empty tuple () if the calibrator has run but derived zero conditions
+    (meaning the bot should trade freely — all conditions are good).
+    """
+    import json as _json
+
+    try:
+        import sqlite3 as _sq
+
+        try:
+            import logging_db.trade_logger as _tl
+
+            _db = str(_tl.DB_PATH)
+        except Exception:
+            import os as _os
+
+            _db = _os.path.join(_os.path.dirname(__file__), "../logs/trades.db")
+
+        conn = _sq.connect(_db)
+        conn.row_factory = _sq.Row
+        # Check if calibrator has ever run for this symbol (any row, active or not)
+        ever_calibrated = conn.execute(
+            "SELECT COUNT(*) FROM spot_edge_conditions WHERE symbol=?", (symbol,)
+        ).fetchone()[0]
+        if ever_calibrated == 0:
+            conn.close()
+            return (
+                None  # Never calibrated — use config conditions (now empty = open gate)
+            )
+        rows = conn.execute(
+            "SELECT field, operator, value, reason FROM spot_edge_conditions "
+            "WHERE symbol=? AND active=1",
+            (symbol,),
+        ).fetchall()
+        conn.close()
+        conditions = []
+        for r in rows:
+            try:
+                val = _json.loads(r["value"])
+            except Exception:
+                val = r["value"]
+            conditions.append(
+                {
+                    "field": r["field"],
+                    "operator": r["operator"],
+                    "value": val,
+                    "reason": r["reason"],
+                }
+            )
+        return tuple(conditions)
+    except Exception:
+        return None
 
 
 def _edge_conditions(override: dict[str, Any]) -> tuple[dict[str, Any], ...]:
@@ -111,7 +174,9 @@ def _required_setup_families(policy: dict[str, Any]) -> tuple[str, ...]:
     return tuple(required)
 
 
-def _exit_targets(profile: str, regime: str, policy: dict[str, Any]) -> tuple[float, float]:
+def _exit_targets(
+    profile: str, regime: str, policy: dict[str, Any]
+) -> tuple[float, float]:
     import config as _cfg
 
     profile_map = getattr(_cfg, "SPOT_EXIT_PROFILE_TARGETS", {})
@@ -121,7 +186,11 @@ def _exit_targets(profile: str, regime: str, policy: dict[str, Any]) -> tuple[fl
     if regime_key in targets:
         target_r, trail_r = targets[regime_key]
         return float(target_r), float(trail_r)
-    target_r = float(policy["target_r_by_regime"].get(regime_key, policy["target_r_by_regime"]["NEUTRAL"]))
+    target_r = float(
+        policy["target_r_by_regime"].get(
+            regime_key, policy["target_r_by_regime"]["NEUTRAL"]
+        )
+    )
     trail_r = float(
         policy["trail_arm_r_by_regime"].get(
             regime_key,
@@ -153,7 +222,9 @@ def _edge_state_value(spot_state: dict[str, Any], field: str) -> Any:
     return mapping.get(field)
 
 
-def _edge_condition_matches(spot_state: dict[str, Any], condition: dict[str, Any]) -> bool:
+def _edge_condition_matches(
+    spot_state: dict[str, Any], condition: dict[str, Any]
+) -> bool:
     actual = _edge_state_value(spot_state, str(condition.get("field") or ""))
     op = str(condition.get("operator") or "gte").lower()
     expected = condition.get("value")
@@ -212,7 +283,14 @@ def _edge_condition_label(condition: dict[str, Any]) -> str:
         "regime": "regime",
     }
     op = str(condition.get("operator") or "gte")
-    op_label = {"eq": "=", "gte": ">=", "gt": ">", "lte": "<=", "lt": "<", "in": "in"}.get(op, op)
+    op_label = {
+        "eq": "=",
+        "gte": ">=",
+        "gt": ">",
+        "lte": "<=",
+        "lt": "<",
+        "in": "in",
+    }.get(op, op)
     if isinstance(value, float):
         value_text = f"{value:.4f}".rstrip("0").rstrip(".")
     else:
@@ -230,17 +308,24 @@ def get_spot_strategy(symbol: str) -> dict[str, Any]:
     clean = _clean_symbol(symbol)
     override = dict(getattr(_cfg, "SPOT_SYMBOL_STRATEGY_OVERRIDES", {}).get(clean, {}))
     edge_conditions = _edge_conditions(override)
+    edge_conditions = _load_db_conditions(clean) or edge_conditions
     allowed_regimes = _tupled(
-        override.get("allowed_regimes", getattr(_cfg, "SPOT_ALLOWED_REGIMES", {"TREND", "NEUTRAL"}))
+        override.get(
+            "allowed_regimes",
+            getattr(_cfg, "SPOT_ALLOWED_REGIMES", {"TREND", "NEUTRAL"}),
+        )
     )
     preferred_setups = _tupled(
         override.get("preferred_setups", ()),
         upper=False,
     )
-    allowed_setups = _tupled(
-        override.get("allowed_setups", KNOWN_SETUP_FAMILIES),
-        upper=False,
-    ) or KNOWN_SETUP_FAMILIES
+    allowed_setups = (
+        _tupled(
+            override.get("allowed_setups", KNOWN_SETUP_FAMILIES),
+            upper=False,
+        )
+        or KNOWN_SETUP_FAMILIES
+    )
     score_floors = {
         "TREND": float(
             override.get("score_floors", {}).get(
@@ -264,11 +349,19 @@ def get_spot_strategy(symbol: str) -> dict[str, Any]:
     score_weights = override.get("score_weights", {})
     target_r_by_regime = override.get(
         "target_r_by_regime",
-        getattr(_cfg, "SPOT_TARGET_R_BY_REGIME", {"TREND": 0.85, "NEUTRAL": 0.65, "CHOP": 0.50}),
+        getattr(
+            _cfg,
+            "SPOT_TARGET_R_BY_REGIME",
+            {"TREND": 0.85, "NEUTRAL": 0.65, "CHOP": 0.50},
+        ),
     )
     trail_arm_r_by_regime = override.get(
         "trail_arm_r_by_regime",
-        getattr(_cfg, "SPOT_TRAIL_ARM_R_BY_REGIME", {"TREND": 0.55, "NEUTRAL": 0.40, "CHOP": 0.30}),
+        getattr(
+            _cfg,
+            "SPOT_TRAIL_ARM_R_BY_REGIME",
+            {"TREND": 0.55, "NEUTRAL": 0.40, "CHOP": 0.30},
+        ),
     )
     policy = {
         "symbol": clean,
@@ -288,12 +381,18 @@ def get_spot_strategy(symbol: str) -> dict[str, Any]:
         ),
         "allowed_regimes": allowed_regimes,
         "allowed_setups": tuple(s for s in allowed_setups if s in KNOWN_SETUP_FAMILIES),
-        "preferred_setups": tuple(s for s in preferred_setups if s in KNOWN_SETUP_FAMILIES),
-        "required_setup_families": tuple(s for s in _required_setup_families({"edge_conditions": edge_conditions})),
+        "preferred_setups": tuple(
+            s for s in preferred_setups if s in KNOWN_SETUP_FAMILIES
+        ),
+        "required_setup_families": tuple(
+            s for s in _required_setup_families({"edge_conditions": edge_conditions})
+        ),
         "edge_profile": str(override.get("edge_profile") or "").strip().lower(),
         "edge_conditions": edge_conditions,
         "edge_metrics": dict(override.get("edge_metrics") or {}),
-        "opportunistic_setup_score": float(override.get("opportunistic_setup_score", 0.74)),
+        "opportunistic_setup_score": float(
+            override.get("opportunistic_setup_score", 0.74)
+        ),
         "wildcard_setup_score": float(override.get("wildcard_setup_score", 0.84)),
         "score_floors": score_floors,
         "score_weights": {
@@ -351,7 +450,9 @@ def get_spot_strategy(symbol: str) -> dict[str, Any]:
                 getattr(_cfg, "SPOT_MIN_PATH_EFFICIENCY", 0.20),
             )
         ),
-        "min_participation_component": float(override.get("min_participation_component", -1.0)),
+        "min_participation_component": float(
+            override.get("min_participation_component", -1.0)
+        ),
         "min_volatility_quality": float(override.get("min_volatility_quality", -1.0)),
         "target_r_by_regime": {
             "TREND": float(
@@ -363,7 +464,9 @@ def get_spot_strategy(symbol: str) -> dict[str, Any]:
             "NEUTRAL": float(
                 target_r_by_regime.get(
                     "NEUTRAL",
-                    getattr(_cfg, "SPOT_TARGET_R_BY_REGIME", {"NEUTRAL": 0.65})["NEUTRAL"],
+                    getattr(_cfg, "SPOT_TARGET_R_BY_REGIME", {"NEUTRAL": 0.65})[
+                        "NEUTRAL"
+                    ],
                 )
             ),
             "CHOP": float(
@@ -377,13 +480,17 @@ def get_spot_strategy(symbol: str) -> dict[str, Any]:
             "TREND": float(
                 trail_arm_r_by_regime.get(
                     "TREND",
-                    getattr(_cfg, "SPOT_TRAIL_ARM_R_BY_REGIME", {"TREND": 0.55})["TREND"],
+                    getattr(_cfg, "SPOT_TRAIL_ARM_R_BY_REGIME", {"TREND": 0.55})[
+                        "TREND"
+                    ],
                 )
             ),
             "NEUTRAL": float(
                 trail_arm_r_by_regime.get(
                     "NEUTRAL",
-                    getattr(_cfg, "SPOT_TRAIL_ARM_R_BY_REGIME", {"NEUTRAL": 0.40})["NEUTRAL"],
+                    getattr(_cfg, "SPOT_TRAIL_ARM_R_BY_REGIME", {"NEUTRAL": 0.40})[
+                        "NEUTRAL"
+                    ],
                 )
             ),
             "CHOP": float(
@@ -412,7 +519,9 @@ def strategy_spot_symbols() -> list[str]:
     return enabled
 
 
-def setup_policy_for_symbol(symbol: str, setup_family: str, setup_score: float) -> dict[str, Any]:
+def setup_policy_for_symbol(
+    symbol: str, setup_family: str, setup_score: float
+) -> dict[str, Any]:
     policy = get_spot_strategy(symbol)
     family = str(setup_family or "")
     score = float(setup_score or 0.0)
@@ -482,7 +591,9 @@ def edge_policy_for_symbol(symbol: str) -> dict[str, Any]:
         "symbol": policy["symbol"],
         "profile": str(policy.get("edge_profile") or "balanced"),
         "conditions": conditions,
-        "conditions_summary": " + ".join(_edge_condition_label(cond) for cond in conditions),
+        "conditions_summary": " + ".join(
+            _edge_condition_label(cond) for cond in conditions
+        ),
         "metrics": dict(policy.get("edge_metrics") or {}),
     }
 
@@ -497,7 +608,9 @@ def score_floor_for_symbol(
 ) -> float:
     policy = get_spot_strategy(symbol)
     regime_key = str(regime or "NEUTRAL").upper()
-    base = float(policy["score_floors"].get(regime_key, policy["score_floors"]["NEUTRAL"]))
+    base = float(
+        policy["score_floors"].get(regime_key, policy["score_floors"]["NEUTRAL"])
+    )
     family = str(setup_family or "")
     if family in KNOWN_SETUP_FAMILIES and (
         policy.get("preferred_setups") or policy.get("required_setup_families")
@@ -509,13 +622,18 @@ def score_floor_for_symbol(
             base += _setup_value(policy, family, "opportunistic_floor_delta")
         elif setup_policy["preference"] == "wildcard":
             base += _setup_value(policy, family, "wildcard_floor_delta")
-    if regime_key in {"TREND", "NEUTRAL"} and family == "impulse_continuation" and (
-        policy.get("preferred_setups") or policy.get("required_setup_families")
+    if (
+        regime_key in {"TREND", "NEUTRAL"}
+        and family == "impulse_continuation"
+        and (policy.get("preferred_setups") or policy.get("required_setup_families"))
     ):
         base -= 0.5
     if regime_key != "CHOP" and structural_confirm_count >= 3:
         base -= 1.0
-    if regime_key == "CHOP" and family in {"compression_breakout", "compression_expansion_retest"}:
+    if regime_key == "CHOP" and family in {
+        "compression_breakout",
+        "compression_expansion_retest",
+    }:
         base += 1.0
     return max(45.0, min(base, 72.0))
 
@@ -527,7 +645,9 @@ def final_score_for_symbol(
     regime: str,
 ) -> float:
     policy = get_spot_strategy(symbol)
-    weights = policy["score_weights"].get(str(regime or "NEUTRAL").upper(), policy["score_weights"]["NEUTRAL"])
+    weights = policy["score_weights"].get(
+        str(regime or "NEUTRAL").upper(), policy["score_weights"]["NEUTRAL"]
+    )
     return round(
         float(existing_composite) * float(weights["composite"])
         + float(derivative_score) * float(weights["derivative"]),
@@ -584,7 +704,9 @@ def spot_quality_block_reason(
 
     for condition in policy.get("edge_conditions") or ():
         if not _edge_condition_matches(spot_state, condition):
-            return str(condition.get("reason") or _default_edge_reason(condition)), floor
+            return str(
+                condition.get("reason") or _default_edge_reason(condition)
+            ), floor
 
     if final_spot_score is not None and float(final_spot_score) < float(floor):
         return "below_regime_floor", floor
@@ -598,7 +720,9 @@ def spot_quality_block_reason(
         return "frame_score_30m_too_low", floor
     if float(s5.get("momentum_impulse") or 0.0) < float(policy["min_momentum_impulse"]):
         return "momentum_impulse_too_low", floor
-    if float(s5.get("structure_component") or 0.0) < float(policy["min_structure_component"]):
+    if float(s5.get("structure_component") or 0.0) < float(
+        policy["min_structure_component"]
+    ):
         return "structure_component_too_low", floor
     if float(s5.get("path_efficiency") or 0.0) < float(policy["min_path_efficiency"]):
         return "path_efficiency_too_low", floor
@@ -606,6 +730,8 @@ def spot_quality_block_reason(
         policy["min_participation_component"]
     ):
         return "participation_component_too_low", floor
-    if float(s30.get("volatility_quality") or 0.0) < float(policy["min_volatility_quality"]):
+    if float(s30.get("volatility_quality") or 0.0) < float(
+        policy["min_volatility_quality"]
+    ):
         return "volatility_quality_too_low", floor
     return "", floor

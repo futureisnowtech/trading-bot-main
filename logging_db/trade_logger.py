@@ -447,6 +447,29 @@ def init_db() -> None:
     except Exception:
         pass
 
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS spot_edge_conditions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL,
+                field TEXT NOT NULL,
+                operator TEXT NOT NULL,
+                value TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                n_total INTEGER NOT NULL DEFAULT 0,
+                n_bucket INTEGER NOT NULL DEFAULT 0,
+                wr REAL NOT NULL DEFAULT 0.0,
+                pf REAL NOT NULL DEFAULT 0.0,
+                baseline_pf REAL NOT NULL DEFAULT 0.0,
+                confidence REAL NOT NULL DEFAULT 0.0,
+                active INTEGER NOT NULL DEFAULT 1,
+                derived_at TEXT NOT NULL,
+                UNIQUE(symbol, field)
+            )
+        """)
+    except Exception:
+        pass
+
     conn.commit()
     conn.close()
 

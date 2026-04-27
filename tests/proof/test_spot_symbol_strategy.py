@@ -37,7 +37,13 @@ def test_sss02_final_score_is_symbol_specific():
     assert btc > sol
 
 
-def test_sss03_doge_requires_strong_opportunistic_setup_evidence():
+def test_sss03_doge_open_gate_before_calibration():
+    """
+    Before the calibrator has accumulated >= 30 real trades, DOGE must have an
+    open gate (no edge conditions) so trades are not blocked by stale backtest data.
+    Previously this asserted edge_setup_family_mismatch — that was the old
+    hardcoded config behaviour which is now replaced by self-calibration.
+    """
     from runtime.spot_strategy import spot_quality_block_reason
 
     spot_state = {
@@ -66,7 +72,8 @@ def test_sss03_doge_requires_strong_opportunistic_setup_evidence():
         spot_state,
         final_spot_score=70.0,
     )
-    assert reason == "edge_setup_family_mismatch"
+    # Open gate: no hardcoded edge conditions, so the signal passes through
+    assert reason == "", f"Expected open gate (empty reason), got: {reason!r}"
     assert floor >= 49.0
 
 
@@ -77,10 +84,20 @@ def test_sss04_eth_uses_quick_exit_profile_targets():
     assert trail_arm_r_for_symbol("ETH", "TREND") == 0.9
 
 
-def test_sss05_link_edge_policy_exposes_replay_summary():
+def test_sss05_link_edge_policy_open_gate_before_calibration():
+    """
+    Before the calibrator has accumulated >= 30 real trades for LINK, the edge
+    policy must have no active conditions (open gate) so the symbol can trade.
+    The edge_metrics snapshot from the original backtest is preserved for reference.
+    """
     from runtime.spot_strategy import edge_policy_for_symbol
 
     policy = edge_policy_for_symbol("LINK")
     assert policy["profile"] == "balanced"
-    assert "setup = compression_breakout" in policy["conditions_summary"]
+    # No conditions until calibrator derives them from >= 30 real trades
+    assert policy["conditions"] == (), (
+        f"Expected empty conditions, got: {policy['conditions']}"
+    )
+    assert policy["conditions_summary"] == ""
+    # Backtest snapshot still present for reference
     assert policy["metrics"]["pf"] == 2.8022

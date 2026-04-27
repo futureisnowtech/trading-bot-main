@@ -84,7 +84,9 @@ SPOT_SYMBOLS: list = [
 ]
 SPOT_STRATEGY_SYMBOLS: list = [
     s.strip().upper()
-    for s in os.getenv("SPOT_STRATEGY_SYMBOLS", "BTC,ETH,SOL,XRP,LTC,DOGE,ADA,LINK").split(",")
+    for s in os.getenv(
+        "SPOT_STRATEGY_SYMBOLS", "BTC,ETH,SOL,XRP,LTC,DOGE,ADA,LINK"
+    ).split(",")
     if s.strip()
 ]
 SPOT_MAX_DEPLOYED_PCT: float = float(os.getenv("SPOT_MAX_DEPLOYED_PCT", "0.50"))
@@ -106,9 +108,7 @@ SPOT_EOD_CLOSE_TIME: str = os.getenv("SPOT_EOD_CLOSE_TIME", "15:45")
 SPOT_EOD_FLATTEN_ENABLED: bool = (
     os.getenv("SPOT_EOD_FLATTEN_ENABLED", "false").lower() == "true"
 )
-SPOT_THESIS_MIN_HOLD_MINS: float = float(
-    os.getenv("SPOT_THESIS_MIN_HOLD_MINS", "8.0")
-)
+SPOT_THESIS_MIN_HOLD_MINS: float = float(os.getenv("SPOT_THESIS_MIN_HOLD_MINS", "8.0"))
 SPOT_THESIS_MIN_SCORE: float = float(os.getenv("SPOT_THESIS_MIN_SCORE", "48.0"))
 SPOT_SESSION_MIN_EDGE_MULT: float = float(
     os.getenv("SPOT_SESSION_MIN_EDGE_MULT", "1.5")
@@ -122,15 +122,9 @@ SPOT_SCALP_SCAN_SECONDS: int = int(os.getenv("SPOT_SCALP_SCAN_SECONDS", "60"))
 SPOT_STATE_CACHE_SECONDS: int = int(os.getenv("SPOT_STATE_CACHE_SECONDS", "45"))
 SPOT_MAKER_WAIT_SECONDS: int = int(os.getenv("SPOT_MAKER_WAIT_SECONDS", "6"))
 SPOT_MAKER_POLL_SECONDS: int = int(os.getenv("SPOT_MAKER_POLL_SECONDS", "2"))
-SPOT_FRAME_SCORE_ANCHOR: float = float(
-    os.getenv("SPOT_FRAME_SCORE_ANCHOR", "55.0")
-)
-SPOT_MOMENTUM_IMPULSE_WINDOW: int = int(
-    os.getenv("SPOT_MOMENTUM_IMPULSE_WINDOW", "12")
-)
-SPOT_ACCEL_IMPULSE_WINDOW: int = int(
-    os.getenv("SPOT_ACCEL_IMPULSE_WINDOW", "8")
-)
+SPOT_FRAME_SCORE_ANCHOR: float = float(os.getenv("SPOT_FRAME_SCORE_ANCHOR", "55.0"))
+SPOT_MOMENTUM_IMPULSE_WINDOW: int = int(os.getenv("SPOT_MOMENTUM_IMPULSE_WINDOW", "12"))
+SPOT_ACCEL_IMPULSE_WINDOW: int = int(os.getenv("SPOT_ACCEL_IMPULSE_WINDOW", "8"))
 SPOT_MICROSTRUCTURE_MAX_SPREAD_PCT: float = float(
     os.getenv("SPOT_MICROSTRUCTURE_MAX_SPREAD_PCT", "0.0025")
 )
@@ -159,9 +153,7 @@ SPOT_ALLOWED_REGIMES: set[str] = {
     for s in os.getenv("SPOT_ALLOWED_REGIMES", "TREND,NEUTRAL").split(",")
     if s.strip()
 }
-SPOT_MIN_PATH_EFFICIENCY: float = float(
-    os.getenv("SPOT_MIN_PATH_EFFICIENCY", "0.20")
-)
+SPOT_MIN_PATH_EFFICIENCY: float = float(os.getenv("SPOT_MIN_PATH_EFFICIENCY", "0.20"))
 SPOT_TARGET_R_BY_REGIME: dict[str, float] = {
     "TREND": float(os.getenv("SPOT_TREND_TARGET_R", "0.85")),
     "NEUTRAL": float(os.getenv("SPOT_NEUTRAL_TARGET_R", "0.65")),
@@ -211,20 +203,6 @@ SPOT_SYMBOL_STRATEGY_OVERRIDES: dict[str, dict] = {
         ),
         "preferred_setups": ("compression_breakout",),
         "edge_profile": "quick",
-        "edge_conditions": (
-            {
-                "field": "setup_family",
-                "operator": "eq",
-                "value": "compression_breakout",
-                "reason": "edge_setup_family_mismatch",
-            },
-            {
-                "field": "structure",
-                "operator": "gte",
-                "value": -0.10,
-                "reason": "edge_structure_component_too_low",
-            },
-        ),
         "edge_metrics": {
             "n": 29,
             "wr": 0.3448,
@@ -261,20 +239,6 @@ SPOT_SYMBOL_STRATEGY_OVERRIDES: dict[str, dict] = {
         ),
         "preferred_setups": (),
         "edge_profile": "quick",
-        "edge_conditions": (
-            {
-                "field": "setup_score",
-                "operator": "gte",
-                "value": 0.80,
-                "reason": "edge_setup_score_too_low",
-            },
-            {
-                "field": "vol_quality",
-                "operator": "gte",
-                "value": -0.0225,
-                "reason": "edge_volatility_quality_too_low",
-            },
-        ),
         "edge_metrics": {
             "n": 47,
             "wr": 0.3830,
@@ -311,20 +275,6 @@ SPOT_SYMBOL_STRATEGY_OVERRIDES: dict[str, dict] = {
         ),
         "preferred_setups": (),
         "edge_profile": "balanced",
-        "edge_conditions": (
-            {
-                "field": "regime",
-                "operator": "eq",
-                "value": "CHOP",
-                "reason": "edge_regime_mismatch",
-            },
-            {
-                "field": "a5",
-                "operator": "gte",
-                "value": 0.05,
-                "reason": "edge_acceleration_too_low",
-            },
-        ),
         "edge_metrics": {
             "n": 45,
             "wr": 0.4000,
@@ -361,20 +311,6 @@ SPOT_SYMBOL_STRATEGY_OVERRIDES: dict[str, dict] = {
         ),
         "preferred_setups": (),
         "edge_profile": "micro",
-        "edge_conditions": (
-            {
-                "field": "setup_score",
-                "operator": "gte",
-                "value": 0.80,
-                "reason": "edge_setup_score_too_low",
-            },
-            {
-                "field": "vol_quality",
-                "operator": "gte",
-                "value": 0.0,
-                "reason": "edge_volatility_quality_too_low",
-            },
-        ),
         "edge_metrics": {
             "n": 24,
             "wr": 0.4167,
@@ -411,20 +347,6 @@ SPOT_SYMBOL_STRATEGY_OVERRIDES: dict[str, dict] = {
         ),
         "preferred_setups": ("impulse_continuation",),
         "edge_profile": "balanced",
-        "edge_conditions": (
-            {
-                "field": "mom_impulse",
-                "operator": "gte",
-                "value": 0.3667,
-                "reason": "edge_momentum_impulse_too_low",
-            },
-            {
-                "field": "setup_family",
-                "operator": "eq",
-                "value": "impulse_continuation",
-                "reason": "edge_setup_family_mismatch",
-            },
-        ),
         "edge_metrics": {
             "n": 12,
             "wr": 0.5000,
@@ -461,20 +383,6 @@ SPOT_SYMBOL_STRATEGY_OVERRIDES: dict[str, dict] = {
         ),
         "preferred_setups": ("impulse_continuation",),
         "edge_profile": "balanced",
-        "edge_conditions": (
-            {
-                "field": "setup_family",
-                "operator": "eq",
-                "value": "impulse_continuation",
-                "reason": "edge_setup_family_mismatch",
-            },
-            {
-                "field": "vol_quality",
-                "operator": "gte",
-                "value": -0.1438,
-                "reason": "edge_volatility_quality_too_low",
-            },
-        ),
         "edge_metrics": {
             "n": 19,
             "wr": 0.4737,
@@ -511,20 +419,6 @@ SPOT_SYMBOL_STRATEGY_OVERRIDES: dict[str, dict] = {
         ),
         "preferred_setups": ("impulse_continuation",),
         "edge_profile": "balanced",
-        "edge_conditions": (
-            {
-                "field": "setup_family",
-                "operator": "eq",
-                "value": "impulse_continuation",
-                "reason": "edge_setup_family_mismatch",
-            },
-            {
-                "field": "setup_score",
-                "operator": "gte",
-                "value": 0.50,
-                "reason": "edge_setup_score_too_low",
-            },
-        ),
         "edge_metrics": {
             "n": 12,
             "wr": 0.3333,
@@ -561,20 +455,6 @@ SPOT_SYMBOL_STRATEGY_OVERRIDES: dict[str, dict] = {
         ),
         "preferred_setups": ("compression_breakout",),
         "edge_profile": "balanced",
-        "edge_conditions": (
-            {
-                "field": "setup_family",
-                "operator": "eq",
-                "value": "compression_breakout",
-                "reason": "edge_setup_family_mismatch",
-            },
-            {
-                "field": "a5",
-                "operator": "gte",
-                "value": 0.05,
-                "reason": "edge_acceleration_too_low",
-            },
-        ),
         "edge_metrics": {
             "n": 18,
             "wr": 0.4444,

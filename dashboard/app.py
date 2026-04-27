@@ -14,6 +14,14 @@ if _DASH_DIR not in sys.path:
 if _ROOT not in sys.path:
     sys.path.append(_ROOT)
 
+# Evict any stale root data/ package from sys.modules so that dashboard/data/
+# is always resolved when widgets do `from data.X import Y`.
+# This can happen on Streamlit reruns where the module cache persists.
+for _k in [k for k in sys.modules if k == "data" or k.startswith("data.")]:
+    _cached_file = getattr(sys.modules[_k], "__file__", "") or ""
+    if _DASH_DIR not in _cached_file:
+        del sys.modules[_k]
+
 import streamlit as st
 
 # ── page config ────────────────────────────────────────────────────────────────

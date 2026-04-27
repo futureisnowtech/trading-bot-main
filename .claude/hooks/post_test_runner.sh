@@ -32,6 +32,23 @@ BASENAME=$(basename "$FILE" .py)
 DIRPART=$(dirname "$FILE")
 TEST_FILE=""
 
+# ── DASHBOARD FILE DETECTION ─────────────────────────────────────────────────
+# Any edit under dashboard/ (app.py, data/*, widgets/**) runs the import smoke
+# suite + sys.path collision guard.  This catches the data/ namespace collision
+# (ModuleNotFoundError: No module named 'data.control_tower') before it reaches
+# the browser.
+if echo "$FILE" | grep -q "/dashboard/"; then
+    TEST_FILE="tests/proof/test_dashboard_imports.py tests/proof/test_dashboard_sys_path.py"
+    echo "" >&2
+    echo "── dashboard import guard ─────────────────────────────────────────────" >&2
+    echo "File touched: $FILE" >&2
+    echo "Running: $TEST_FILE" >&2
+    echo "──────────────────────────────────────────────────────────────────────" >&2
+    cd "$REPO_ROOT"
+    timeout 60 $PYTEST $TEST_FILE -q --tb=short --no-header -p no:warnings 2>&1 | tail -20 >&2
+    exit 0
+fi
+
 # ── FILE → TEST MAPPING ──────────────────────────────────────────────────────
 case "$BASENAME" in
     # Indicator stack

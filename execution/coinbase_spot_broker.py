@@ -68,9 +68,7 @@ SPOT_SUPPORTED_SYMBOLS = set(SPOT_PRODUCT_SPECS.keys())
 _API_BASE = "https://api.coinbase.com"
 
 
-def _holdings_to_positions(
-    holdings: Dict[str, Dict], price_getter
-) -> List[dict]:
+def _holdings_to_positions(holdings: Dict[str, Dict], price_getter) -> List[dict]:
     result = []
     for sym, h in holdings.items():
         qty = h.get("qty", 0.0)
@@ -144,12 +142,16 @@ class CoinbaseSpotBroker:
         if not _JWT_OK:
             raise RuntimeError("PyJWT / cryptography required for live spot mode")
         now = int(time.time())
+        # CDP JWT URI claim must be PATH-only — strip query string if present.
+        # product_book is a GET with ?product_id=&limit= which uniquely triggers 401
+        # when query params are included in the URI claim.
+        path_only = path.split("?")[0]
         payload = {
             "sub": self._key_name,
             "iss": "cdp",
             "nbf": now,
             "exp": now + 120,
-            "uri": f"{method} api.coinbase.com{path}",
+            "uri": f"{method} api.coinbase.com{path_only}",
         }
         headers = {
             "kid": self._key_name,
@@ -229,7 +231,9 @@ class CoinbaseSpotBroker:
         Returns symbol balances plus USD available.
         """
         if self._paper:
-            balances = {f"{sym.lower()}_available": 0.0 for sym in SPOT_SUPPORTED_SYMBOLS}
+            balances = {
+                f"{sym.lower()}_available": 0.0 for sym in SPOT_SUPPORTED_SYMBOLS
+            }
             balances["symbol_balances"] = {sym: 0.0 for sym in SPOT_SUPPORTED_SYMBOLS}
             balances["usd_available"] = 0.0
             return balances
@@ -252,7 +256,9 @@ class CoinbaseSpotBroker:
             return result
         except Exception as e:
             logger.warning(f"[spot] get_spot_balance error: {e}")
-            balances = {f"{sym.lower()}_available": 0.0 for sym in SPOT_SUPPORTED_SYMBOLS}
+            balances = {
+                f"{sym.lower()}_available": 0.0 for sym in SPOT_SUPPORTED_SYMBOLS
+            }
             balances["symbol_balances"] = {sym: 0.0 for sym in SPOT_SUPPORTED_SYMBOLS}
             balances["usd_available"] = 0.0
             return balances
@@ -341,7 +347,8 @@ class CoinbaseSpotBroker:
         try:
             spec = self._spec(symbol)
             data = self._request(
-                "GET", f"/api/v3/brokerage/product_book?product_id={spec['product_id']}&limit=5"
+                "GET",
+                f"/api/v3/brokerage/product_book?product_id={spec['product_id']}&limit=5",
             )
             book = data.get("pricebook") or {}
             bids = book.get("bids") or []
@@ -349,10 +356,12 @@ class CoinbaseSpotBroker:
             best_bid = float((bids[0] or {}).get("price", 0) if bids else 0)
             best_ask = float((asks[0] or {}).get("price", 0) if asks else 0)
             bid_depth = sum(
-                float(b.get("price", 0) or 0) * float(b.get("size", 0) or 0) for b in bids[:3]
+                float(b.get("price", 0) or 0) * float(b.get("size", 0) or 0)
+                for b in bids[:3]
             )
             ask_depth = sum(
-                float(a.get("price", 0) or 0) * float(a.get("size", 0) or 0) for a in asks[:3]
+                float(a.get("price", 0) or 0) * float(a.get("size", 0) or 0)
+                for a in asks[:3]
             )
             mid = (best_bid + best_ask) / 2.0 if best_bid > 0 and best_ask > 0 else 0.0
             spread_pct = ((best_ask - best_bid) / mid) if mid > 0 else 0.0
@@ -411,12 +420,15 @@ class CoinbaseSpotBroker:
             "average_filled_price": avg_price,
             "completion_pct": completion,
             "fee_usd": fee_usd,
-            "symbol": fallback_symbol or self._clean_symbol(order.get("product_id", "")),
+            "symbol": fallback_symbol
+            or self._clean_symbol(order.get("product_id", "")),
         }
 
     def get_spot_order_status(self, order_id: str, fallback_symbol: str = "") -> dict:
         try:
-            return self._normalise_order_status(order_id, fallback_symbol=fallback_symbol)
+            return self._normalise_order_status(
+                order_id, fallback_symbol=fallback_symbol
+            )
         except Exception as e:
             logger.warning(f"[spot] get_spot_order_status error {order_id}: {e}")
             return {
@@ -465,7 +477,9 @@ class CoinbaseSpotBroker:
                     {
                         "order_id": str(fill.get("order_id") or order_id),
                         "price": float(fill.get("price") or 0.0),
-                        "size": float(fill.get("size") or fill.get("size_in_quote") or 0.0),
+                        "size": float(
+                            fill.get("size") or fill.get("size_in_quote") or 0.0
+                        ),
                         "fee_usd": fee_usd,
                     }
                 )

@@ -384,7 +384,18 @@ def run_labeling_pass(get_candles=None) -> dict:
         min_age_hours=_MIN_AGE_HOURS, limit=_MAX_BATCH
     )
     if not candidates:
-        return {"processed": 0, "labeled": 0, "skipped": 0, "errors": 0}
+        _empty = {"processed": 0, "labeled": 0, "skipped": 0, "errors": 0}
+        try:
+            from logging_db.trade_logger import log_event
+
+            log_event(
+                "INFO",
+                "candidate_labeler",
+                "Labeling pass: processed=0 labeled=0 skipped=0 errors=0",
+            )
+        except Exception:
+            pass
+        return _empty
 
     labeled = 0
     skipped = 0
@@ -507,15 +518,12 @@ def run_labeling_pass(get_candles=None) -> dict:
         f"(skipped={skipped} errors={errors})"
     )
     try:
-        from notifications.notification_engine import NotificationEngine
+        from logging_db.trade_logger import log_event
 
-        NotificationEngine().emit(
-            source="candidate_labeler",
-            level="INFO",
-            message=(
-                f"Labeling pass: processed={len(candidates)} "
-                f"labeled={labeled} skipped={skipped} errors={errors}"
-            ),
+        log_event(
+            "INFO",
+            "candidate_labeler",
+            f"Labeling pass: processed={len(candidates)} labeled={labeled} skipped={skipped} errors={errors}",
         )
     except Exception:
         pass

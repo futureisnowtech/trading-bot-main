@@ -240,10 +240,11 @@ def position_card(
     setup: str,
     risk_note: str,
     age: str,
+    direction_label: str | None = None,
 ) -> str:
     is_long = direction.upper() == "LONG"
     dir_color = C_GREEN if is_long else C_RED
-    dir_label = "▲ LONG" if is_long else "▼ SHORT"
+    dir_label = direction_label or ("▲ LONG" if is_long else "▼ SHORT")
     pnl_color = C_GREEN if pnl >= 0 else C_RED
     pnl_sign = "+" if pnl >= 0 else ""
     move_pct = ((current - entry) / entry * 100) if entry else 0

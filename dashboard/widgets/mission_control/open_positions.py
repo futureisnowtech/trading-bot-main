@@ -100,6 +100,7 @@ def render_positions_compact():
         display_target = target if has_entry_truth and target > 0 else now
 
         age = _time_ago(p.get("ts_entry", ""))
+        spot_label = "● SPOT" if is_spot_holding else None
         cards_html += ui.position_card(
             symbol=symbol,
             direction=direction,
@@ -110,6 +111,7 @@ def render_positions_compact():
             setup=setup_str,
             risk_note=risk_note,
             age=age,
+            direction_label=spot_label,
         )
 
         # risk bar for each position

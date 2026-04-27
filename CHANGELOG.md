@@ -1,5 +1,8 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
+## 2026-04-27
+- fix(audit): close 2026-04-26 self-audit work queue — JWT fix for product_book 401 (maker orders now receive real bid/ask), candidate labeler emits system_events, trade_blocked_reason populated from decision fallback (42% unknown → labeled), log rotation script, CLAUDE.md EV tier + SPOT_TARGET_R drift corrected
+
 ## 2026-04-26
 - fix(spot_engine): reconcile broker qty before sell to prevent INSUFFICIENT_FUND loop — when DB qty > actual Coinbase balance, close_spot now fetches live holdings and uses min(db_qty, actual_qty). Stopped a 39h/5803-error XRP exit loop. Also auto-remediated 10 stale brain AUTO-ALERTs from 2026-03-25 through 2026-04-25.
 

@@ -166,7 +166,9 @@ def _get_scan_status_from_db():
             "steps": steps,
             "duration_s": 0.0,
             "balance": float(lane_row.get("buying_power_usd") or 0.0),
-            "deployed": _current_crypto_deployed(float(lane_row.get("capital_deployed_usd") or 0.0)),
+            "deployed": _current_crypto_deployed(
+                float(lane_row.get("capital_deployed_usd") or 0.0)
+            ),
         }
     except Exception:
         return None
@@ -340,3 +342,150 @@ def get_smart_log_summary(n=200) -> dict:
         "veto_count_1h": veto_count_1h,
         "entry_count_1h": entry_count_1h,
     }
+
+
+_ECON_REASONS = {
+    "ev_below_floor": "fees would eat the profit",
+    "spread_too_wide": "bid-ask spread too wide",
+    "volume_too_low": "volume too low",
+    "rr_below_min": "risk/reward too low",
+    "depth_too_thin": "order book too thin",
+}
+
+_BLOCK_REASONS = {
+    "spot_position_already_open": "already holding this coin",
+    "spot_deployment_cap_exceeded": "spot budget fully deployed",
+    "perp_position_limit_reached": "already at max 3 perp trades",
+    "perp_opposite_side_block": "opposite position is open",
+    "perp_deployment_cap_exceeded": "perp budget fully deployed",
+    "perp_not_autonomous_eligible": "manual-only symbol",
+    "research_only_block": "research-only symbol, not tradeable live",
+}
+
+
+def _clean_sym(raw: str) -> str:
+    s = (
+        raw.upper()
+        .replace("USDT", "")
+        .replace("USDC", "")
+        .replace("PF_", "")
+        .replace("USD", "")
+        .strip()
+    )
+    return s or raw.upper()
+
+
+def get_recent_scan_summaries(limit: int = 6) -> list[dict]:
+    """
+    Return the last `limit` scan cycles as plain-English summaries drawn
+    directly from scan_funnels + scan_candidates.  Replaces log-file SCAN parsing.
+    Uses the candidate's `decision` field as ground truth — avoids funnel-count
+    arithmetic that can contradict per-row data.
+    """
+    funnels = _q(
+        "SELECT scan_id, ts, scanner_candidates_total, entered "
+        "FROM scan_funnels ORDER BY ts DESC LIMIT ?",
+        (limit,),
+    )
+    results = []
+    for f in funnels:
+        scan_id = f.get("scan_id") or ""
+        ts_raw = str(f.get("ts") or "")
+        ts = ts_raw[11:19] if len(ts_raw) > 10 else ts_raw
+        scanned = int(f.get("scanner_candidates_total") or 0)
+        entered = int(f.get("entered") or 0)
+        entered_sym = ""
+        block = ""
+
+        if not scan_id:
+            results.append(
+                {
+                    "ts": ts,
+                    "scanned": scanned,
+                    "entered": 0,
+                    "entered_sym": "",
+                    "top_symbol": "",
+                    "top_score": 0,
+                    "top_dir": "LONG",
+                    "block": "no scan data",
+                }
+            )
+            continue
+
+        # All candidates for this scan, best score first
+        candidates = _q(
+            "SELECT symbol, direction, composite_score, decision, "
+            "trade_blocked_reason, econ_reject_reason "
+            "FROM scan_candidates WHERE scan_id=? "
+            "ORDER BY CAST(composite_score AS REAL) DESC",
+            (scan_id,),
+        )
+
+        if not candidates:
+            results.append(
+                {
+                    "ts": ts,
+                    "scanned": scanned,
+                    "entered": 0,
+                    "entered_sym": "",
+                    "top_symbol": "",
+                    "top_score": 0,
+                    "top_dir": "LONG",
+                    "block": "no candidates",
+                }
+            )
+            continue
+
+        top = candidates[0]
+        top_sym = _clean_sym(str(top.get("symbol") or ""))
+        top_score = float(top.get("composite_score") or 0)
+        top_dir = str(top.get("direction") or "LONG").upper()
+
+        if entered > 0:
+            for c in candidates:
+                if str(c.get("decision") or "") == "entered":
+                    entered_sym = _clean_sym(str(c.get("symbol") or ""))
+                    break
+            entered_sym = entered_sym or top_sym
+        elif scanned == 0:
+            block = "no symbols passed the scanner"
+        else:
+            # Use the top candidate's own decision as ground truth
+            decision = str(top.get("decision") or "")
+            econ_raw = str(top.get("econ_reject_reason") or "")
+            block_raw = str(top.get("trade_blocked_reason") or "")
+
+            if decision == "below_threshold":
+                block = f"best score was {top_sym} at {top_score:.0f} — not strong enough yet"
+            elif decision == "econ_veto":
+                reason = _ECON_REASONS.get(
+                    econ_raw,
+                    econ_raw.replace("_", " ")
+                    if econ_raw
+                    else "economics check failed",
+                )
+                block = f"{top_sym} scored {top_score:.0f} but skipped — {reason}"
+            elif block_raw in _BLOCK_REASONS:
+                block = (
+                    f"{top_sym} scored {top_score:.0f} — {_BLOCK_REASONS[block_raw]}"
+                )
+            elif block_raw:
+                block = (
+                    f"{top_sym} scored {top_score:.0f} — {block_raw.replace('_', ' ')}"
+                )
+            else:
+                block = f"best was {top_sym} at {top_score:.0f} — waiting for stronger setup"
+
+        results.append(
+            {
+                "ts": ts,
+                "scanned": scanned,
+                "entered": entered,
+                "entered_sym": entered_sym,
+                "top_symbol": top_sym,
+                "top_score": top_score,
+                "top_dir": top_dir,
+                "block": block,
+            }
+        )
+    return results

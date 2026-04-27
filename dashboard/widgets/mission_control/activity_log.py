@@ -8,7 +8,7 @@ import re
 import streamlit as st
 
 import ui
-from data.scanner_data import get_smart_log_summary
+from data.scanner_data import get_recent_scan_summaries, get_smart_log_summary
 from db import _q1
 
 
@@ -130,7 +130,9 @@ def render_smart_logs():
     )
 
     rows: list[tuple] = []
-    for kind in _ORDER:
+
+    # Non-scan events from log buckets (trades, vetoes, errors, ML)
+    for kind in [k for k in _ORDER if k != "SCAN"]:
         events = buckets.get(kind, [])
         if not events:
             continue
@@ -138,6 +140,19 @@ def render_smart_logs():
         for ev in events[:2]:
             text = _plain(kind, ev["msg"])
             rows.append((icon, color, text, ev.get("ts", "")))
+
+    # Scan events — rich DB-sourced summaries replace the log-parsed "5 pairs across 3 exchanges"
+    scan_icon, scan_color = _ICON["SCAN"]
+    for s in get_recent_scan_summaries(limit=3):
+        if s["entered"] > 0:
+            sym = s["entered_sym"] or s["top_symbol"]
+            text = f"Entered {sym} {s['top_dir']} — score {s['top_score']:.0f}/100"
+            rows.append(("✅", ui.C_GREEN, text, s["ts"]))
+        elif s["scanned"] == 0:
+            rows.append((scan_icon, scan_color, "Scan returned no candidates", s["ts"]))
+        else:
+            text = f"{s['scanned']} symbol{'s' if s['scanned'] != 1 else ''} checked — {s['block']}"
+            rows.append((scan_icon, scan_color, text, s["ts"]))
 
     if rows:
         html = ""

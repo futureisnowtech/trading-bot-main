@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-28
+- v18.8: lightly retighten live spot entry policy with higher per-coin floors, a 30m frame minimum, and route-aware synthetic/taker score surcharges while keeping the gate stack intentionally minimal
+
+## 2026-04-28
 - v18.10: all 8 spot symbols trading — ADA/DOGE entered, LTC/LINK blocked only by deployment cap (correct). Full pipeline fixed: synthetic inject → tier → skip perp econ + research_only gates → spot_economics_gate → execution
 
 ## 2026-04-28

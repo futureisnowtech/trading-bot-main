@@ -1682,6 +1682,7 @@ def _attempt_entry(
                 _underlying,
                 _spot_state,
                 final_spot_score=_final_score,
+                synthetic_candidate=bool(candidate.get("spot_only_synthetic")),
             )
             if _reason:
                 logger.info(f"[v10] spot {_underlying} quality blocked: {_reason}")

@@ -174,6 +174,20 @@ def _required_setup_families(policy: dict[str, Any]) -> tuple[str, ...]:
     return tuple(required)
 
 
+def _taker_score_surcharge(symbol: str, execution_route: str) -> float:
+    route = str(execution_route or "").strip().lower()
+    if route not in {"taker_fallback", "taker_market"}:
+        return 0.0
+    clean = _clean_symbol(symbol)
+    if clean in {"SOL", "XRP", "DOGE"}:
+        return 4.0
+    return 3.0
+
+
+def _synthetic_score_surcharge(synthetic_candidate: bool) -> float:
+    return 2.0 if synthetic_candidate else 0.0
+
+
 def _exit_targets(
     profile: str, regime: str, policy: dict[str, Any]
 ) -> tuple[float, float]:
@@ -605,8 +619,11 @@ def score_floor_for_symbol(
     structural_confirm_count: int = 0,
     setup_family: str = "",
     setup_score: float = 0.0,
+    execution_route: str = "",
+    synthetic_candidate: bool = False,
 ) -> float:
-    policy = get_spot_strategy(symbol)
+    clean = _clean_symbol(symbol)
+    policy = get_spot_strategy(clean)
     regime_key = str(regime or "NEUTRAL").upper()
     base = float(
         policy["score_floors"].get(regime_key, policy["score_floors"]["NEUTRAL"])
@@ -615,7 +632,7 @@ def score_floor_for_symbol(
     if family in KNOWN_SETUP_FAMILIES and (
         policy.get("preferred_setups") or policy.get("required_setup_families")
     ):
-        setup_policy = setup_policy_for_symbol(symbol, family, setup_score)
+        setup_policy = setup_policy_for_symbol(clean, family, setup_score)
         if setup_policy["preference"] == "preferred":
             base += _setup_value(policy, family, "preferred_floor_delta")
         elif setup_policy["preference"] == "opportunistic":
@@ -635,6 +652,8 @@ def score_floor_for_symbol(
         "compression_expansion_retest",
     }:
         base += 1.0
+    base += _synthetic_score_surcharge(synthetic_candidate)
+    base += _taker_score_surcharge(clean, execution_route)
     return max(35.0, min(base, 72.0))
 
 
@@ -672,6 +691,8 @@ def spot_quality_block_reason(
     spot_state: dict[str, Any] | None,
     *,
     final_spot_score: float | None = None,
+    execution_route: str = "",
+    synthetic_candidate: bool = False,
 ) -> tuple[str, float]:
     policy = get_spot_strategy(symbol)
     clean = _clean_symbol(symbol)
@@ -690,6 +711,8 @@ def spot_quality_block_reason(
         structural_confirm_count=confirm_count,
         setup_family=setup_family,
         setup_score=setup_score,
+        execution_route=execution_route,
+        synthetic_candidate=synthetic_candidate,
     )
     frames = spot_state.get("frames") or {}
     s5 = frames.get("5m") or {}

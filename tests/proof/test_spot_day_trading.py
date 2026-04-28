@@ -273,3 +273,62 @@ def test_sdt08_thesis_decay_closes_after_hold_gate(proof_runtime, monkeypatch):
     closed = spot_engine.check_spot_thesis_exits(paper=True)
     assert len(closed) == 1
     assert closed[0]["trigger"] == "thesis_decay"
+
+
+def test_sdt09_taker_fallback_requires_higher_score(proof_runtime, monkeypatch):
+    import spot_engine
+
+    class _LiveBroker:
+        _paper = False
+
+        def is_connected(self):
+            return True
+
+        def get_spot_balance(self):
+            return {"usd_available": 1000.0}
+
+        def get_spot_top_of_book(self, symbol):
+            return {
+                "best_bid": 2000.0,
+                "best_ask": 2001.0,
+                "spread_pct": 0.0005,
+                "top_depth_usd": 20000.0,
+            }
+
+        def place_limit_buy_spot(self, symbol, size_usd, limit_price, post_only=True):
+            return {"order_id": "maker_try"}
+
+        def get_spot_order_status(self, order_id, fallback_symbol=None):
+            return {"status": "OPEN", "completion_pct": 0.0}
+
+        def cancel_spot_order(self, order_id):
+            return True
+
+        def buy_spot(self, symbol, size_usd):
+            raise AssertionError("taker fallback should have been blocked by score")
+
+        def get_mark_price(self, symbol):
+            return 2000.0
+
+    monkeypatch.setattr(spot_engine, "SPOT_LANE_ACTIVE", True)
+    monkeypatch.setattr(
+        spot_engine,
+        "SPOT_SYMBOLS",
+        ["BTC", "ETH", "SOL", "XRP", "LTC", "DOGE", "ADA", "LINK"],
+    )
+    monkeypatch.setattr(spot_engine, "SPOT_TOTAL_ALLOC_CAP_PCT", 0.95)
+    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper: _LiveBroker())
+    monkeypatch.setattr(
+        spot_engine, "_load_spot_positions_from_db", lambda paper=True: []
+    )
+    monkeypatch.setattr(spot_engine, "time", MagicMock(sleep=lambda *_: None))
+
+    result = spot_engine.open_spot(
+        "BTC",
+        100.0,
+        paper=False,
+        composite_score=50.0,
+        final_spot_score=51.0,
+        spot_state=_trend_state("BTC"),
+    )
+    assert result is None

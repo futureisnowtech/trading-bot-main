@@ -39,6 +39,7 @@ from runtime.spot_regime import score_floor_for_regime
 from runtime.spot_strategy import (
     edge_policy_for_symbol,
     get_spot_strategy,
+    score_floor_for_symbol,
     setup_policy_for_symbol,
     spot_quality_block_reason,
     target_r_for_symbol,
@@ -295,7 +296,12 @@ def _execution_micro_ok(symbol: str, top: dict) -> tuple[bool, str]:
 
 
 def _maker_first_buy(
-    broker: "CoinbaseSpotBroker", symbol: str, size_usd: float
+    broker: "CoinbaseSpotBroker",
+    symbol: str,
+    size_usd: float,
+    *,
+    final_spot_score: float | None = None,
+    spot_state: dict | None = None,
 ) -> tuple[Optional[dict], str, str]:
     top = broker.get_spot_top_of_book(symbol)
     ok, veto = _execution_micro_ok(symbol, top)
@@ -321,6 +327,20 @@ def _maker_first_buy(
             return status, "maker_first", "none"
 
     broker.cancel_spot_order(order["order_id"])
+    if final_spot_score is not None:
+        regime = str((spot_state or {}).get("regime") or "NEUTRAL").upper()
+        taker_floor = score_floor_for_symbol(
+            symbol,
+            regime,
+            structural_confirm_count=int(
+                (spot_state or {}).get("structural_confirm_count") or 0
+            ),
+            setup_family=str((spot_state or {}).get("setup_family") or ""),
+            setup_score=float((spot_state or {}).get("setup_score") or 0.0),
+            execution_route="taker_fallback",
+        )
+        if float(final_spot_score) < float(taker_floor):
+            return None, "skipped_taker_score", "taker_score_below_threshold"
     taker = broker.buy_spot(symbol, size_usd)
     if taker:
         taker["execution_route"] = "taker_fallback"
@@ -448,9 +468,18 @@ def open_spot(
             else "paper_market"
         )
     else:
-        order, execution_route, micro_veto = _maker_first_buy(broker, clean, size_usd)
+        order, execution_route, micro_veto = _maker_first_buy(
+            broker,
+            clean,
+            size_usd,
+            final_spot_score=score_used,
+            spot_state=spot_state,
+        )
         if execution_route == "skipped_microstructure":
             logger.info(f"[spot_engine] {clean} blocked — microstructure {micro_veto}")
+            return None
+        if execution_route == "skipped_taker_score":
+            logger.info(f"[spot_engine] {clean} blocked — {micro_veto}")
             return None
     if not order:
         logger.error(f"[spot_engine] {clean} buy failed")

@@ -101,3 +101,26 @@ def test_sss05_link_edge_policy_open_gate_before_calibration():
     assert policy["conditions_summary"] == ""
     # Backtest snapshot still present for reference
     assert policy["metrics"]["pf"] == 2.8022
+
+
+def test_sss06_score_floor_adds_synthetic_and_taker_surcharges():
+    from runtime.spot_strategy import score_floor_for_symbol
+
+    base = score_floor_for_symbol("BTC", "TREND")
+    synthetic = score_floor_for_symbol("BTC", "TREND", synthetic_candidate=True)
+    taker = score_floor_for_symbol(
+        "BTC",
+        "TREND",
+        execution_route="taker_fallback",
+    )
+    synthetic_taker = score_floor_for_symbol(
+        "BTC",
+        "TREND",
+        execution_route="taker_fallback",
+        synthetic_candidate=True,
+    )
+
+    assert base == 50.0
+    assert synthetic == 52.0
+    assert taker == 53.0
+    assert synthetic_taker == 55.0

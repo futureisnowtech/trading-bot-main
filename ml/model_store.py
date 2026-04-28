@@ -30,9 +30,22 @@ logger = logging.getLogger(__name__)
 MODELS_DIR = os.path.join(os.path.dirname(__file__), "models")
 
 _PAIR_MAP = {
+    "BTC": "BTC",
     "BTCUSDT": "BTC",
+    "BTC-USD": "BTC",
+    "BTC-USDC": "BTC",
+    "ETH": "ETH",
     "ETHUSDT": "ETH",
+    "ETH-USD": "ETH",
+    "ETH-USDC": "ETH",
+    "SOL": "SOL",
     "SOLUSDT": "SOL",
+    "SOL-USD": "SOL",
+    "SOL-USDC": "SOL",
+    "XRP": "XRP",
+    "XRPUSDT": "XRP",
+    "XRP-USD": "XRP",
+    "XRP-USDC": "XRP",
 }
 
 # Cache: pair_direction → (xgb_model, lgbm_model, pnl_scale)
@@ -41,7 +54,14 @@ _cache_mtime: Dict[str, float] = {}
 
 
 def _get_pair_key(symbol: str) -> str:
-    return _PAIR_MAP.get(symbol.upper(), "GENERIC")
+    raw = str(symbol or "").upper().replace("/", "-").strip()
+    clean = raw
+    for suffix in ("-USDC", "-USDT", "-USD", "USDC", "USDT", "USD"):
+        if clean.endswith(suffix):
+            clean = clean[: -len(suffix)]
+            break
+    clean = clean.replace("-", "")
+    return _PAIR_MAP.get(clean, _PAIR_MAP.get(raw, "GENERIC"))
 
 
 def _model_path(pair_key: str, direction: str, model_type: str) -> str:

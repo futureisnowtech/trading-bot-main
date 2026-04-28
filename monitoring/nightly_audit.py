@@ -721,7 +721,7 @@ def _check_ml_retrain_queue() -> dict:
 
         conn = _conn()
         row = conn.execute(
-            "SELECT COUNT(*) FROM ml_retrain_queue WHERE status='pending'"
+            "SELECT COALESCE(SUM(pending), 0) FROM ml_retrain_queue"
         ).fetchone()
         pending = int((row or [0])[0])
         conn.close()

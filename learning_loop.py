@@ -78,9 +78,53 @@ def _ensure_tables():
                 regime          TEXT    DEFAULT 'UNKNOWN',
                 incubation_id   INTEGER,
                 features_json   TEXT    NOT NULL,
+                candidate_id    INTEGER DEFAULT 0,
+                scan_id         TEXT DEFAULT '',
+                raw_scanner_symbol TEXT DEFAULT '',
+                base_asset      TEXT DEFAULT '',
+                executed_symbol TEXT DEFAULT '',
+                trade_ref       TEXT DEFAULT '',
+                route_type      TEXT DEFAULT '',
+                setup_family    TEXT DEFAULT '',
+                setup_score     REAL DEFAULT 0,
+                spot_regime     TEXT DEFAULT '',
+                tv_profile_name TEXT DEFAULT '',
+                tv_htf_bias     TEXT DEFAULT '',
+                tv_signal_age_sec REAL DEFAULT 0,
+                tv_veto_state   TEXT DEFAULT '',
+                fast_follow_through INTEGER DEFAULT 0,
+                thesis_decay_risk INTEGER DEFAULT 0,
+                expected_net_pnl_after_fees REAL DEFAULT 0,
+                route_conditional_value REAL DEFAULT 0,
+                reconstructed   INTEGER DEFAULT 0,
                 ts              REAL    NOT NULL
             )
         """)
+        for migration in [
+            "ALTER TABLE ml_feature_snapshots ADD COLUMN candidate_id INTEGER DEFAULT 0",
+            "ALTER TABLE ml_feature_snapshots ADD COLUMN scan_id TEXT DEFAULT ''",
+            "ALTER TABLE ml_feature_snapshots ADD COLUMN raw_scanner_symbol TEXT DEFAULT ''",
+            "ALTER TABLE ml_feature_snapshots ADD COLUMN base_asset TEXT DEFAULT ''",
+            "ALTER TABLE ml_feature_snapshots ADD COLUMN executed_symbol TEXT DEFAULT ''",
+            "ALTER TABLE ml_feature_snapshots ADD COLUMN trade_ref TEXT DEFAULT ''",
+            "ALTER TABLE ml_feature_snapshots ADD COLUMN route_type TEXT DEFAULT ''",
+            "ALTER TABLE ml_feature_snapshots ADD COLUMN setup_family TEXT DEFAULT ''",
+            "ALTER TABLE ml_feature_snapshots ADD COLUMN setup_score REAL DEFAULT 0",
+            "ALTER TABLE ml_feature_snapshots ADD COLUMN spot_regime TEXT DEFAULT ''",
+            "ALTER TABLE ml_feature_snapshots ADD COLUMN tv_profile_name TEXT DEFAULT ''",
+            "ALTER TABLE ml_feature_snapshots ADD COLUMN tv_htf_bias TEXT DEFAULT ''",
+            "ALTER TABLE ml_feature_snapshots ADD COLUMN tv_signal_age_sec REAL DEFAULT 0",
+            "ALTER TABLE ml_feature_snapshots ADD COLUMN tv_veto_state TEXT DEFAULT ''",
+            "ALTER TABLE ml_feature_snapshots ADD COLUMN fast_follow_through INTEGER DEFAULT 0",
+            "ALTER TABLE ml_feature_snapshots ADD COLUMN thesis_decay_risk INTEGER DEFAULT 0",
+            "ALTER TABLE ml_feature_snapshots ADD COLUMN expected_net_pnl_after_fees REAL DEFAULT 0",
+            "ALTER TABLE ml_feature_snapshots ADD COLUMN route_conditional_value REAL DEFAULT 0",
+            "ALTER TABLE ml_feature_snapshots ADD COLUMN reconstructed INTEGER DEFAULT 0",
+        ]:
+            try:
+                conn.execute(migration)
+            except Exception:
+                pass
         conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_mlfs_symbol_dir
             ON ml_feature_snapshots(symbol, direction, ts DESC)
@@ -119,6 +163,9 @@ def record_closed_trade(
     regime:         str          = 'UNKNOWN',
     features:       Optional[Dict] = None,
     incubation_id:  Optional[int]  = None,
+    exit_reason:    str          = "",
+    trade_ref:      str          = "",
+    reconstructed:  bool         = False,
 ) -> None:
     """
     Main entry point: record one closed trade with its feature snapshot.
@@ -132,6 +179,23 @@ def record_closed_trade(
 
     features = features or {}
     ts = time.time()
+    candidate_id = int(features.get("candidate_id") or 0)
+    scan_id = str(features.get("scan_id") or "")
+    raw_scanner_symbol = str(features.get("raw_scanner_symbol") or "")
+    base_asset = str(features.get("base_asset") or symbol)
+    executed_symbol = str(features.get("executed_symbol") or symbol)
+    route_type = str(features.get("route_type") or features.get("execution_route") or "")
+    setup_family = str(features.get("setup_family") or "")
+    setup_score = float(features.get("setup_score") or 0.0)
+    spot_regime = str(features.get("spot_regime") or regime or "UNKNOWN")
+    tv_profile_name = str(features.get("tv_profile_name") or "")
+    tv_htf_bias = str(features.get("tv_htf_bias") or "")
+    tv_signal_age_sec = float(features.get("tv_signal_age_sec") or 0.0)
+    tv_veto_state = str(features.get("tv_veto_state") or "")
+    fast_follow_through = int(bool(pnl_usd > 0))
+    thesis_decay_risk = int(str(exit_reason or "").strip().lower() == "thesis_decay")
+    expected_net_pnl_after_fees = round(float(pnl_usd or 0.0), 4)
+    route_conditional_value = round(float(pnl_usd or 0.0), 4)
 
     try:
         conn = _db_conn()
@@ -141,8 +205,14 @@ def record_closed_trade(
             INSERT INTO ml_feature_snapshots
             (trade_id, symbol, direction, won, pnl_usd,
              entry_price, exit_price, entry_score, exit_score,
-             regime, incubation_id, features_json, ts)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             regime, incubation_id, features_json,
+             candidate_id, scan_id, raw_scanner_symbol, base_asset, executed_symbol,
+             trade_ref, route_type, setup_family, setup_score, spot_regime,
+             tv_profile_name, tv_htf_bias, tv_signal_age_sec, tv_veto_state,
+             fast_follow_through, thesis_decay_risk,
+             expected_net_pnl_after_fees, route_conditional_value,
+             reconstructed, ts)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             trade_id, symbol, direction,
             1 if won else 0,
@@ -151,6 +221,25 @@ def record_closed_trade(
             round(entry_score, 4), round(exit_score, 4),
             regime, incubation_id,
             json.dumps(features),
+            candidate_id,
+            scan_id,
+            raw_scanner_symbol,
+            base_asset,
+            executed_symbol,
+            str(trade_ref or ""),
+            route_type,
+            setup_family,
+            setup_score,
+            spot_regime,
+            tv_profile_name,
+            tv_htf_bias,
+            tv_signal_age_sec,
+            tv_veto_state,
+            fast_follow_through,
+            thesis_decay_risk,
+            expected_net_pnl_after_fees,
+            route_conditional_value,
+            int(bool(reconstructed)),
             ts,
         ))
 

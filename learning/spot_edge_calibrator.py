@@ -65,24 +65,25 @@ def _get_conn() -> sqlite3.Connection:
 
 
 def _fetch_closed_spot_trades(conn: sqlite3.Connection, symbol: str) -> list[dict]:
-    """Return closed real spot trades with their entry-time state from scan_candidates."""
+    """Return closed real spot trades with entry-time lineage from ml_feature_snapshots."""
     rows = conn.execute(
         """
-        SELECT t.ts, t.symbol, t.pnl_usd,
-               sc.spot_regime as regime,
-               sc.setup_family,
-               sc.composite_score,
-               sc.setup_score,
-               sc.tf_5m_state,
-               sc.tf_30m_state
-        FROM trades t
-        LEFT JOIN scan_candidates sc
-            ON sc.symbol = t.symbol
-            AND sc.decision = 'entered'
-            AND ABS(
-                strftime('%s', replace(substr(sc.ts,1,19),'T',' ')) -
-                strftime('%s', replace(substr(t.ts,1,19),'T',' '))
-            ) < 300
+        SELECT
+            t.ts,
+            t.symbol,
+            COALESCE(m.expected_net_pnl_after_fees, t.pnl_usd, 0) AS pnl_usd,
+            COALESCE(NULLIF(m.spot_regime, ''), NULLIF(m.regime, ''), 'UNKNOWN') AS regime,
+            COALESCE(NULLIF(m.setup_family, ''), json_extract(m.features_json, '$.setup_family'), '') AS setup_family,
+            COALESCE(m.setup_score, json_extract(m.features_json, '$.setup_score'), 0) AS setup_score,
+            COALESCE(json_extract(m.features_json, '$.volatility_quality'), 0) AS vol_quality,
+            COALESCE(json_extract(m.features_json, '$.structure_component'), 0) AS structure,
+            COALESCE(json_extract(m.features_json, '$.a5'), 0) AS a5,
+            COALESCE(json_extract(m.features_json, '$.momentum_impulse'), 0) AS mom_impulse,
+            COALESCE(m.route_type, '') AS route_type,
+            COALESCE(m.candidate_id, 0) AS candidate_id,
+            COALESCE(m.reconstructed, 0) AS reconstructed
+        FROM ml_feature_snapshots m
+        JOIN trades t ON t.id = m.trade_id
         WHERE t.strategy LIKE 'spot_%'
           AND t.action = 'SELL'
           AND t.paper = 0

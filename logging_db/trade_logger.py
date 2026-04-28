@@ -163,6 +163,11 @@ def init_db() -> None:
         "ALTER TABLE open_positions ADD COLUMN tv_signal_age_sec REAL DEFAULT 0",
         "ALTER TABLE open_positions ADD COLUMN tv_indicator_name TEXT DEFAULT ''",
         "ALTER TABLE open_positions ADD COLUMN tv_signal_strength TEXT DEFAULT ''",
+        "ALTER TABLE open_positions ADD COLUMN candidate_id INTEGER DEFAULT 0",
+        "ALTER TABLE open_positions ADD COLUMN candidate_scan_id TEXT DEFAULT ''",
+        "ALTER TABLE open_positions ADD COLUMN raw_scanner_symbol TEXT DEFAULT ''",
+        "ALTER TABLE open_positions ADD COLUMN base_asset TEXT DEFAULT ''",
+        "ALTER TABLE open_positions ADD COLUMN tv_veto_state TEXT DEFAULT ''",
     ]:
         try:
             cur.execute(migration)
@@ -1024,6 +1029,66 @@ def log_scan_candidate(
         return 0
 
 
+def update_scan_candidate_result(candidate_id: int, **updates) -> bool:
+    """
+    Patch an existing scan_candidates row after execution.
+
+    Used by the spot lane to preserve one canonical candidate row across:
+      admitted -> entered / execution_failed
+    instead of inserting a second near-duplicate row.
+    """
+    if int(candidate_id or 0) <= 0:
+        return False
+
+    allowed = {
+        "decision",
+        "entry_block_reason",
+        "execution_route",
+        "cooldown_until",
+        "microstructure_veto",
+        "final_spot_score",
+        "regime_floor",
+        "actual_stop_pct",
+        "actual_target_pct",
+        "net_rr",
+        "net_win_usd",
+        "econ_gate_class",
+        "trade_blocked_reason",
+        "trade_size_block_reason",
+        "trade_source_reason",
+        "spot_regime",
+        "setup_family",
+        "setup_score",
+        "setup_preference",
+        "tf_5m_state",
+        "tf_30m_state",
+        "tf_4h_state",
+        "tf_1d_state",
+        "structural_confirms",
+        "size_usd",
+        "econ_approved",
+    }
+    payload = {k: v for k, v in updates.items() if k in allowed}
+    if not payload:
+        return False
+
+    try:
+        conn = _conn()
+        cur = conn.cursor()
+        assignments = ", ".join(f"{col}=?" for col in payload)
+        values = list(payload.values()) + [int(candidate_id)]
+        cur.execute(
+            f"UPDATE scan_candidates SET {assignments} WHERE id=?",
+            values,
+        )
+        conn.commit()
+        changed = cur.rowcount > 0
+        conn.close()
+        return changed
+    except Exception:
+        return False
+
+
 def log_scan_funnel(
     scan_id: str,
     scanner_candidates_total: int = 0,
@@ -1712,6 +1777,11 @@ def persist_position(
     tv_signal_age_sec=0.0,
     tv_indicator_name="",
     tv_signal_strength="",
+    candidate_id=0,
+    candidate_scan_id="",
+    raw_scanner_symbol="",
+    base_asset="",
+    tv_veto_state="",
 ) -> None:
     """Write open position to DB so restarts can recover it (including exit state)."""
     _low = low_since_entry if low_since_entry is not None else entry
@@ -1763,6 +1833,11 @@ def persist_position(
         float(tv_signal_age_sec or 0.0),
         str(tv_indicator_name or ""),
         str(tv_signal_strength or ""),
+        int(candidate_id or 0),
+        str(candidate_scan_id or ""),
+        str(raw_scanner_symbol or ""),
+        str(base_asset or ""),
+        str(tv_veto_state or ""),
     )
     conn = _conn()
     placeholders = ",".join(["?"] * len(values))
@@ -1777,7 +1852,8 @@ def persist_position(
          stop_model_version,target_model_version,target_r,trail_arm_r,risk_dollars,
          entry_fee_usd,exit_reason,entry_trade_id,entry_order_id,entry_feature_snapshot_id,
          tv_profile_name,tv_signal_bias,tv_signal_ts,tv_signal_age_sec,
-         tv_indicator_name,tv_signal_strength)
+         tv_indicator_name,tv_signal_strength,candidate_id,candidate_scan_id,
+         raw_scanner_symbol,base_asset,tv_veto_state)
         VALUES ({placeholders})""",
         values,
     )

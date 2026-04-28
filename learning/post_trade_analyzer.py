@@ -299,7 +299,7 @@ def analyze_closed_trade(
         elif not entry_order_id:
             _integrity_tier = "suspect"
             _lineage_notes.append("missing_entry_order_id")
-        elif feature_snapshot_id is None:
+        elif int(feature_snapshot_id or 0) <= 0:
             _integrity_tier = "suspect"
             _lineage_notes.append("missing_feature_snapshot")
         else:
@@ -353,6 +353,19 @@ def analyze_closed_trade(
         lineage_complete=_lineage_complete,
         lineage_notes="; ".join(_lineage_notes) if _lineage_notes else None,
         integrity_tier=_integrity_tier,
+        candidate_id=int(md.get("candidate_id") or 0),
+        scan_id=str(md.get("scan_id") or ""),
+        raw_scanner_symbol=str(md.get("raw_scanner_symbol") or ""),
+        base_asset=str(md.get("base_asset") or symbol),
+        executed_symbol=str(md.get("executed_symbol") or symbol),
+        route_type=str(md.get("route_type") or md.get("execution_route") or ""),
+        setup_family=str(md.get("setup_family") or ""),
+        setup_score=float(md.get("setup_score") or 0.0),
+        tv_profile_name=str(md.get("tv_profile_name") or ""),
+        tv_signal_age_sec=float(md.get("tv_signal_age_sec") or 0.0),
+        tv_htf_bias=str(md.get("tv_htf_bias") or ""),
+        tv_veto_state=str(md.get("tv_veto_state") or ""),
+        reconstructed=bool(md.get("reconstructed")),
     )
 
     # Update agent accuracy

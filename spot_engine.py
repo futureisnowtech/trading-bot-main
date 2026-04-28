@@ -270,6 +270,11 @@ def _spot_entry_features(
     execution_route: str,
     edge_profile: str,
     tv_context: dict | None,
+    candidate_id: int = 0,
+    candidate_scan_id: str = "",
+    raw_scanner_symbol: str = "",
+    base_asset: str = "",
+    tv_veto_state: str = "",
 ) -> dict:
     state = spot_state or {}
     frames = state.get("frames") or {}
@@ -299,6 +304,8 @@ def _spot_entry_features(
         "momentum_impulse": float(s5.get("momentum_impulse") or 0.0),
         "structure_component": float(s5.get("structure_component") or 0.0),
         "participation_component": float(s5.get("participation_component") or 0.0),
+        "a5": float(s5.get("a") or 0.0),
+        "v30": float(s30.get("v") or 0.0),
         "frame_score_5m": float(s5.get("frame_score") or 0.0),
         "frame_score_30m": float(s30.get("frame_score") or 0.0),
         "volatility_quality": float(s30.get("volatility_quality") or 0.0),
@@ -307,6 +314,13 @@ def _spot_entry_features(
         "wae_bullish": "wae" in confirms,
         "wt_oversold_cross": ("wt" in confirms) or ("wavetrend" in confirms),
         "kst_bullish": "kst" in confirms,
+        "candidate_id": int(candidate_id or 0),
+        "scan_id": str(candidate_scan_id or ""),
+        "raw_scanner_symbol": str(raw_scanner_symbol or ""),
+        "base_asset": str(base_asset or _clean_symbol(symbol)),
+        "executed_symbol": _clean_symbol(symbol),
+        "route_type": str(execution_route or ""),
+        "tv_veto_state": str(tv_veto_state or ""),
         "tv_signal_active": bool(tv_payload["tv_signal_active"]),
         "tv_profile_name": tv_payload["tv_profile_name"],
         "tv_htf_bias": tv_payload["tv_signal_bias"],
@@ -507,6 +521,10 @@ def open_spot(
     risk_dollars: float = 0.0,
     cooldown_until: str = "",
     tv_context: dict | None = None,
+    candidate_id: int = 0,
+    candidate_scan_id: str = "",
+    raw_scanner_symbol: str = "",
+    base_asset: str = "",
 ) -> Optional[Dict]:
     clean = _clean_symbol(symbol)
     if not SPOT_LANE_ACTIVE:
@@ -641,6 +659,11 @@ def open_spot(
         execution_route=execution_route,
         edge_profile=edge_profile,
         tv_context=tv_context,
+        candidate_id=int(candidate_id or 0),
+        candidate_scan_id=str(candidate_scan_id or ""),
+        raw_scanner_symbol=str(raw_scanner_symbol or ""),
+        base_asset=str(base_asset or clean),
+        tv_veto_state=str(block_reason or ""),
     )
     entry_feature_snapshot_id = log_trade_features(
         entry_trade_id,
@@ -691,6 +714,11 @@ def open_spot(
         tv_signal_age_sec=tv_payload["tv_signal_age_sec"],
         tv_indicator_name=tv_payload["tv_indicator_name"],
         tv_signal_strength=tv_payload["tv_signal_strength"],
+        candidate_id=int(candidate_id or 0),
+        candidate_scan_id=str(candidate_scan_id or ""),
+        raw_scanner_symbol=str(raw_scanner_symbol or ""),
+        base_asset=str(base_asset or clean),
+        tv_veto_state=str(block_reason or ""),
     )
     return {
         "symbol": clean,
@@ -710,6 +738,8 @@ def open_spot(
         "order_id": order.get("order_id", ""),
         "fee_usd": fee_usd,
         "execution_route": execution_route,
+        "candidate_id": int(candidate_id or 0),
+        "scan_id": str(candidate_scan_id or ""),
         "paper": paper,
     }
 
@@ -826,9 +856,32 @@ def close_spot(
     )
     total_fee_usd = fee_usd + float(pos.get("entry_fee_usd") or 0.0)
     if close_trade_id > 0:
+        trade_ref = f"spot:{int(pos.get('entry_trade_id') or 0)}:{close_trade_id}"
         try:
             import learning_loop as _ll
 
+            entry_features.setdefault("candidate_id", int(pos.get("candidate_id") or 0))
+            entry_features.setdefault("scan_id", str(pos.get("candidate_scan_id") or ""))
+            entry_features.setdefault(
+                "raw_scanner_symbol", str(pos.get("raw_scanner_symbol") or clean)
+            )
+            entry_features.setdefault("base_asset", str(pos.get("base_asset") or clean))
+            entry_features.setdefault("executed_symbol", clean)
+            entry_features.setdefault(
+                "route_type", str(pos.get("execution_route") or execution_route or "")
+            )
+            entry_features.setdefault(
+                "tv_veto_state", str(pos.get("tv_veto_state") or "")
+            )
+            entry_features.setdefault(
+                "tv_profile_name", str(pos.get("tv_profile_name") or "")
+            )
+            entry_features.setdefault(
+                "tv_htf_bias", str(pos.get("tv_signal_bias") or "")
+            )
+            entry_features.setdefault(
+                "tv_signal_age_sec", float(pos.get("tv_signal_age_sec") or 0.0)
+            )
             _ll.record_closed_trade(
                 trade_id=close_trade_id,
                 symbol=clean,
@@ -846,6 +899,8 @@ def close_spot(
                     or "UNKNOWN"
                 ),
                 features=entry_features,
+                exit_reason=exit_reason,
+                trade_ref=trade_ref,
             )
         except Exception as e:
             logger.debug(f"[spot_engine] learning_loop close error {clean}: {e}")
@@ -865,7 +920,7 @@ def close_spot(
                 market_data_at_entry=entry_features,
                 source="clean_paper_v10" if paper else "live_v10",
                 paper=paper,
-                trade_ref=str(order.get("order_id") or close_trade_id),
+                trade_ref=trade_ref,
                 exit_type=exit_reason,
                 composite_score=float(entry_features.get("composite_score") or 0.0),
                 close_order_id=str(order.get("order_id") or ""),

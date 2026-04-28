@@ -223,6 +223,19 @@ def init_learning_tables():
             "ALTER TABLE trade_attribution ADD COLUMN scale_out_triggered INTEGER DEFAULT 0",
             "ALTER TABLE trade_attribution ADD COLUMN funding_collected REAL DEFAULT 0",
             "ALTER TABLE trade_attribution ADD COLUMN maker_rebate REAL DEFAULT 0",
+            "ALTER TABLE trade_attribution ADD COLUMN candidate_id INTEGER DEFAULT 0",
+            "ALTER TABLE trade_attribution ADD COLUMN scan_id TEXT DEFAULT ''",
+            "ALTER TABLE trade_attribution ADD COLUMN raw_scanner_symbol TEXT DEFAULT ''",
+            "ALTER TABLE trade_attribution ADD COLUMN base_asset TEXT DEFAULT ''",
+            "ALTER TABLE trade_attribution ADD COLUMN executed_symbol TEXT DEFAULT ''",
+            "ALTER TABLE trade_attribution ADD COLUMN route_type TEXT DEFAULT ''",
+            "ALTER TABLE trade_attribution ADD COLUMN setup_family TEXT DEFAULT ''",
+            "ALTER TABLE trade_attribution ADD COLUMN setup_score REAL DEFAULT 0",
+            "ALTER TABLE trade_attribution ADD COLUMN tv_profile_name TEXT DEFAULT ''",
+            "ALTER TABLE trade_attribution ADD COLUMN tv_signal_age_sec REAL DEFAULT 0",
+            "ALTER TABLE trade_attribution ADD COLUMN tv_htf_bias TEXT DEFAULT ''",
+            "ALTER TABLE trade_attribution ADD COLUMN tv_veto_state TEXT DEFAULT ''",
+            "ALTER TABLE trade_attribution ADD COLUMN reconstructed INTEGER DEFAULT 0",
         ]:
             try:
                 c.execute(_migration)
@@ -233,6 +246,7 @@ def init_learning_tables():
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
                 signal_name   TEXT NOT NULL,
                 regime        TEXT NOT NULL DEFAULT 'any',
+                strategy      TEXT NOT NULL DEFAULT 'any',
                 source        TEXT NOT NULL DEFAULT 'combined',
                 fires         INTEGER NOT NULL DEFAULT 0,
                 wins          INTEGER NOT NULL DEFAULT 0,
@@ -243,9 +257,15 @@ def init_learning_tables():
                 bayesian_pts  REAL,
                 prior_pts     REAL,
                 last_updated  TEXT,
-                UNIQUE(signal_name, regime, source)
+                UNIQUE(signal_name, regime, strategy, source)
             )
         """)
+        try:
+            c.execute(
+                "ALTER TABLE signal_stats ADD COLUMN strategy TEXT NOT NULL DEFAULT 'any'"
+            )
+        except Exception:
+            pass
         c.execute("""
             CREATE TABLE IF NOT EXISTS agent_stats (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -325,6 +345,19 @@ def record_trade_attribution(
     lineage_complete: bool = False,
     lineage_notes: str = None,
     integrity_tier: str = "suspect",
+    candidate_id: int = 0,
+    scan_id: str = "",
+    raw_scanner_symbol: str = "",
+    base_asset: str = "",
+    executed_symbol: str = "",
+    route_type: str = "",
+    setup_family: str = "",
+    setup_score: float = 0.0,
+    tv_profile_name: str = "",
+    tv_signal_age_sec: float = 0.0,
+    tv_htf_bias: str = "",
+    tv_veto_state: str = "",
+    reconstructed: bool = False,
 ) -> int:
     """
     Record the full attribution for one closed trade.
@@ -338,10 +371,58 @@ def record_trade_attribution(
     now = datetime.now(timezone.utc).isoformat()
     signals_json = json.dumps({k: bool(v) for k, v in signals.items()})
     is_fee_trap = int(fee_usd > 0 and abs(pnl_usd) > 0 and fee_usd > abs(pnl_usd) * 0.5)
+    values = (
+        trade_ref,
+        symbol,
+        strategy,
+        regime,
+        source,
+        entry_ts,
+        exit_ts,
+        entry_price,
+        exit_price,
+        pnl_usd,
+        pnl_pct,
+        fee_usd,
+        int(won),
+        signals_json,
+        conviction,
+        exit_reason,
+        hold_minutes,
+        int(paper),
+        lesson,
+        now,
+        mae_pct,
+        mfe_pct,
+        exit_type,
+        is_fee_trap,
+        ml_p_win,
+        float(super_score or 0),
+        float(composite_score or 0),
+        entry_order_id,
+        feature_snapshot_id,
+        int(lineage_complete),
+        lineage_notes,
+        integrity_tier,
+        int(candidate_id or 0),
+        str(scan_id or ""),
+        str(raw_scanner_symbol or ""),
+        str(base_asset or ""),
+        str(executed_symbol or ""),
+        str(route_type or ""),
+        str(setup_family or ""),
+        float(setup_score or 0.0),
+        str(tv_profile_name or ""),
+        float(tv_signal_age_sec or 0.0),
+        str(tv_htf_bias or ""),
+        str(tv_veto_state or ""),
+        int(bool(reconstructed)),
+    )
+    placeholders = ",".join(["?"] * len(values))
 
     with _conn() as c:
         cur = c.execute(
-            """
+            f"""
             INSERT INTO trade_attribution
                 (trade_ref, symbol, strategy, regime, source,
                  entry_ts, exit_ts, entry_price, exit_price,
@@ -351,43 +432,13 @@ def record_trade_attribution(
                  mae_pct, mfe_pct, exit_type, is_fee_trap, ml_p_win, super_score,
                  composite_score,
                  entry_order_id, feature_snapshot_id, lineage_complete,
-                 lineage_notes, integrity_tier)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 lineage_notes, integrity_tier, candidate_id, scan_id,
+                 raw_scanner_symbol, base_asset, executed_symbol, route_type,
+                 setup_family, setup_score, tv_profile_name, tv_signal_age_sec,
+                 tv_htf_bias, tv_veto_state, reconstructed)
+            VALUES ({placeholders})
         """,
-            (
-                trade_ref,
-                symbol,
-                strategy,
-                regime,
-                source,
-                entry_ts,
-                exit_ts,
-                entry_price,
-                exit_price,
-                pnl_usd,
-                pnl_pct,
-                fee_usd,
-                int(won),
-                signals_json,
-                conviction,
-                exit_reason,
-                hold_minutes,
-                int(paper),
-                lesson,
-                now,
-                mae_pct,
-                mfe_pct,
-                exit_type,
-                is_fee_trap,
-                ml_p_win,
-                float(super_score or 0),
-                float(composite_score or 0),
-                entry_order_id,
-                feature_snapshot_id,
-                int(lineage_complete),
-                lineage_notes,
-                integrity_tier,
-            ),
+            values,
         )
         attr_id = cur.lastrowid
 
@@ -400,53 +451,99 @@ def record_trade_attribution(
     # Update signal_stats for every active signal
     active_signals = [k for k, v in signals.items() if v]
     for sig in active_signals:
-        _update_signal_stat(sig, regime, won, pnl_usd, source)
-        _update_signal_stat(sig, "any", won, pnl_usd, source)  # regime-agnostic row
+        _update_signal_stat(sig, regime, won, pnl_usd, source, strategy="any")
+        _update_signal_stat(
+            sig, "any", won, pnl_usd, source, strategy="any"
+        )  # regime-agnostic row
 
     return attr_id
 
 
 def _update_signal_stat(
-    signal_name: str, regime: str, won: bool, pnl_usd: float, source: str
+    signal_name: str,
+    regime: str,
+    won: bool,
+    pnl_usd: float,
+    source: str,
+    strategy: str = "any",
 ):
     """Upsert one row in signal_stats and recompute Bayesian weight."""
     now = datetime.now(timezone.utc).isoformat()
     with _conn() as c:
-        # Upsert the stats row
-        c.execute(
-            """
-            INSERT INTO signal_stats (signal_name, regime, source, fires, wins, losses, total_pnl, last_updated)
-            VALUES (?, ?, ?, 1, ?, ?, ?, ?)
-            ON CONFLICT(signal_name, regime, source) DO UPDATE SET
-                fires       = fires + 1,
-                wins        = wins + ?,
-                losses      = losses + ?,
-                total_pnl   = total_pnl + ?,
-                last_updated = ?
-        """,
-            (
-                signal_name,
-                regime,
-                source,
-                int(won),
-                int(not won),
-                pnl_usd,
-                now,  # INSERT values (7 params for 7 ?s)
-                int(won),
-                int(not won),
-                pnl_usd,
-                now,  # UPDATE deltas (4 params)
-            ),
-        )
+        cols = {row["name"] for row in c.execute("PRAGMA table_info(signal_stats)")}
+        if "strategy" in cols:
+            c.execute(
+                """
+                INSERT INTO signal_stats (
+                    signal_name, regime, strategy, source, fires, wins, losses, total_pnl, last_updated
+                )
+                VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)
+                ON CONFLICT(signal_name, regime, strategy, source) DO UPDATE SET
+                    fires       = fires + 1,
+                    wins        = wins + ?,
+                    losses      = losses + ?,
+                    total_pnl   = total_pnl + ?,
+                    last_updated = ?
+            """,
+                (
+                    signal_name,
+                    regime,
+                    str(strategy or "any"),
+                    source,
+                    int(won),
+                    int(not won),
+                    pnl_usd,
+                    now,
+                    int(won),
+                    int(not won),
+                    pnl_usd,
+                    now,
+                ),
+            )
+        else:
+            c.execute(
+                """
+                INSERT INTO signal_stats (signal_name, regime, source, fires, wins, losses, total_pnl, last_updated)
+                VALUES (?, ?, ?, 1, ?, ?, ?, ?)
+                ON CONFLICT(signal_name, regime, source) DO UPDATE SET
+                    fires       = fires + 1,
+                    wins        = wins + ?,
+                    losses      = losses + ?,
+                    total_pnl   = total_pnl + ?,
+                    last_updated = ?
+            """,
+                (
+                    signal_name,
+                    regime,
+                    source,
+                    int(won),
+                    int(not won),
+                    pnl_usd,
+                    now,
+                    int(won),
+                    int(not won),
+                    pnl_usd,
+                    now,
+                ),
+            )
 
         # Recompute derived fields
-        row = c.execute(
-            """
-            SELECT fires, wins, total_pnl FROM signal_stats
-            WHERE signal_name=? AND regime=? AND source=?
-        """,
-            (signal_name, regime, source),
-        ).fetchone()
+        if "strategy" in cols:
+            row = c.execute(
+                """
+                SELECT fires, wins, total_pnl FROM signal_stats
+                WHERE signal_name=? AND regime=? AND source=? AND strategy=?
+            """,
+                (signal_name, regime, source, str(strategy or "any")),
+            ).fetchone()
+        else:
+            row = c.execute(
+                """
+                SELECT fires, wins, total_pnl FROM signal_stats
+                WHERE signal_name=? AND regime=? AND source=?
+            """,
+                (signal_name, regime, source),
+            ).fetchone()
 
         if row and row["fires"] > 0:
             obs_win_rate = row["wins"] / row["fires"]
@@ -469,22 +566,41 @@ def _update_signal_stat(
             else:
                 bayesian_pts = float(prior_pts)  # not enough data — use prior
 
-            c.execute(
-                """
-                UPDATE signal_stats
-                SET win_rate=?, avg_pnl=?, bayesian_pts=?, prior_pts=?
-                WHERE signal_name=? AND regime=? AND source=?
-            """,
-                (
-                    obs_win_rate,
-                    avg_pnl,
-                    bayesian_pts,
-                    float(prior_pts),
-                    signal_name,
-                    regime,
-                    source,
-                ),
-            )
+            if "strategy" in cols:
+                c.execute(
+                    """
+                    UPDATE signal_stats
+                    SET win_rate=?, avg_pnl=?, bayesian_pts=?, prior_pts=?
+                    WHERE signal_name=? AND regime=? AND source=? AND strategy=?
+                """,
+                    (
+                        obs_win_rate,
+                        avg_pnl,
+                        bayesian_pts,
+                        float(prior_pts),
+                        signal_name,
+                        regime,
+                        source,
+                        str(strategy or "any"),
+                    ),
+                )
+            else:
+                c.execute(
+                    """
+                    UPDATE signal_stats
+                    SET win_rate=?, avg_pnl=?, bayesian_pts=?, prior_pts=?
+                    WHERE signal_name=? AND regime=? AND source=?
+                """,
+                    (
+                        obs_win_rate,
+                        avg_pnl,
+                        bayesian_pts,
+                        float(prior_pts),
+                        signal_name,
+                        regime,
+                        source,
+                    ),
+                )
 
 
 # ── Agent accuracy ────────────────────────────────────────────────────────────

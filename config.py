@@ -965,6 +965,66 @@ TV_HTF_MIN_ATR_PCT: float = float(os.getenv("TV_HTF_MIN_ATR_PCT", "0.5"))
 TV_HTF_MAX_ATR_PCT: float = float(os.getenv("TV_HTF_MAX_ATR_PCT", "8.0"))
 
 # ════════════════════════════════════════════════════════════════════
+# SPOT GOVERNANCE / DEPLOYMENT SAFETY
+# ════════════════════════════════════════════════════════════════════
+SPOT_FAILURE_WINDOW_START: str = os.getenv(
+    "SPOT_FAILURE_WINDOW_START", "2026-04-22T21:36:39.390822+00:00"
+).strip()
+SPOT_GOV_WINDOW_DAYS: int = int(os.getenv("SPOT_GOV_WINDOW_DAYS", "30"))
+SPOT_GOV_MIN_CLUSTER_TRADES: int = int(os.getenv("SPOT_GOV_MIN_CLUSTER_TRADES", "5"))
+SPOT_GOV_CONFIDENT_TRADES: int = int(os.getenv("SPOT_GOV_CONFIDENT_TRADES", "20"))
+SPOT_GOV_HIGH_CONF_TRADES: int = int(os.getenv("SPOT_GOV_HIGH_CONF_TRADES", "50"))
+SPOT_GOV_SETUP_QUARANTINE_MIN_TRADES: int = int(
+    os.getenv("SPOT_GOV_SETUP_QUARANTINE_MIN_TRADES", "20")
+)
+SPOT_GOV_SYMBOL_PROBATION_MIN_TRADES: int = int(
+    os.getenv("SPOT_GOV_SYMBOL_PROBATION_MIN_TRADES", "10")
+)
+SPOT_GOV_ROUTE_DISABLE_MIN_TRADES: int = int(
+    os.getenv("SPOT_GOV_ROUTE_DISABLE_MIN_TRADES", "5")
+)
+SPOT_GOV_MIN_EXPECTED_NET_PNL: float = float(
+    os.getenv("SPOT_GOV_MIN_EXPECTED_NET_PNL", "0.0")
+)
+SPOT_GOV_MAX_THESIS_DECAY_RATE: float = float(
+    os.getenv("SPOT_GOV_MAX_THESIS_DECAY_RATE", "0.60")
+)
+SPOT_GOV_MIN_FAST_FOLLOW_RATE: float = float(
+    os.getenv("SPOT_GOV_MIN_FAST_FOLLOW_RATE", "0.25")
+)
+SPOT_GOV_MIN_PROFIT_FACTOR: float = float(
+    os.getenv("SPOT_GOV_MIN_PROFIT_FACTOR", "1.00")
+)
+SPOT_TINY_LIVE_MAX_CONCURRENT: int = int(
+    os.getenv("SPOT_TINY_LIVE_MAX_CONCURRENT", "1")
+)
+SPOT_TINY_LIVE_MAX_POSITION_USD: float = float(
+    os.getenv("SPOT_TINY_LIVE_MAX_POSITION_USD", "50.0")
+)
+SPOT_TINY_LIVE_ALLOWED_ROUTE: str = os.getenv(
+    "SPOT_TINY_LIVE_ALLOWED_ROUTE", "maker_first"
+).strip().lower()
+SPOT_STOP_MATRIX_VERSION: str = os.getenv(
+    "SPOT_STOP_MATRIX_VERSION", "spot_stop_matrix_2026_04_28_v1"
+).strip()
+SPOT_STOP_TIGHTEN_NEUTRAL: float = float(
+    os.getenv("SPOT_STOP_TIGHTEN_NEUTRAL", "0.92")
+)
+SPOT_STOP_TIGHTEN_CHOP: float = float(os.getenv("SPOT_STOP_TIGHTEN_CHOP", "0.88"))
+SPOT_STOP_TIGHTEN_PULLBACK: float = float(
+    os.getenv("SPOT_STOP_TIGHTEN_PULLBACK", "0.90")
+)
+SPOT_STOP_TIGHTEN_TAKER: float = float(
+    os.getenv("SPOT_STOP_TIGHTEN_TAKER", "0.90")
+)
+SPOT_STOP_TIGHTEN_LOW_SETUP: float = float(
+    os.getenv("SPOT_STOP_TIGHTEN_LOW_SETUP", "0.90")
+)
+SPOT_STOP_TIGHTEN_WEAK_HTF: float = float(
+    os.getenv("SPOT_STOP_TIGHTEN_WEAK_HTF", "0.95")
+)
+
+# ════════════════════════════════════════════════════════════════════
 # ALERTS
 # v10: Telegram removed. All alerts go to SQLite system_events and are
 # displayed on the dashboard Notifications panel.

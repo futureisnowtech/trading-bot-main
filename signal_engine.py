@@ -467,8 +467,14 @@ def _get_ml_score(
         return 50.0
 
     try:
+        symbol_hint = str(
+            features.get("symbol")
+            or features.get("base_asset")
+            or features.get("executed_symbol")
+            or ""
+        ).strip()
         # predict_ml_score returns 0-100 directly (tanh-normalized PnL regression)
-        raw_score = model_store.predict_ml_score(features, direction)
+        raw_score = model_store.predict_ml_score(features, direction, symbol=symbol_hint)
         if raw_score is None:
             return 50.0
         mult = _REGIME_ML_MULT.get(regime, {}).get(direction, 1.0)

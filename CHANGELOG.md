@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-28
+- Added deep spot-system audit reports covering live strategy, real learning/ML/RBI status, root causes, and recent trade metrics.
+
+## 2026-04-28
 - housekeeping: remove duplicate generated brain alert and ignore local live launchd plist artifact so machine-specific service files stop appearing as repo dirt
 
 ## 2026-04-28

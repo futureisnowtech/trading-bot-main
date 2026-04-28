@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-28
+- v18.10: all 8 spot symbols trading — ADA/DOGE entered, LTC/LINK blocked only by deployment cap (correct). Full pipeline fixed: synthetic inject → tier → skip perp econ + research_only gates → spot_economics_gate → execution
+
+## 2026-04-28
 - fix(v18.8): aggressive gate loosening + LTC/DOGE/ADA/LINK synthetic candidate injection
 
 - SPOT_TARGET_R_BY_REGIME: TREND=4.0, NEUTRAL=3.0, CHOP=3.0 (from 2.0/1.5/1.2) — clears projected_net_win_too_small for BTC/ETH at 1% round-trip spot fees

@@ -144,6 +144,11 @@ def _journal_scan_candidate(
     microstructure_veto: str = "",
     final_spot_score: float = 0.0,
     regime_floor: float = 0.0,
+    actual_stop_pct: float | None = None,
+    actual_target_pct: float | None = None,
+    net_rr: float | None = None,
+    net_win_usd: float | None = None,
+    econ_gate_class: str = "",
 ) -> None:
     """
     Write one candidate decision row to scan_candidates.
@@ -233,6 +238,11 @@ def _journal_scan_candidate(
             microstructure_veto=microstructure_veto,
             final_spot_score=final_spot_score,
             regime_floor=regime_floor,
+            actual_stop_pct=actual_stop_pct,
+            actual_target_pct=actual_target_pct,
+            net_rr=net_rr,
+            net_win_usd=net_win_usd,
+            econ_gate_class=econ_gate_class,
         )
     except Exception as _je:
         logger.debug(

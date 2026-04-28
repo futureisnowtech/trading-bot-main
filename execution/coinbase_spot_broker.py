@@ -518,7 +518,6 @@ class CoinbaseSpotBroker:
             "side": "BUY",
             "order_configuration": {
                 "limit_limit_gtc": {
-                    "quote_size": str(round(size_usd, 2)),
                     "base_size": str(round(qty, 8)),
                     "limit_price": str(round(limit_price, 8)),
                     "post_only": bool(post_only),

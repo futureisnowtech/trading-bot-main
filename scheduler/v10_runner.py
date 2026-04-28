@@ -1489,8 +1489,10 @@ def _attempt_entry(
     try:
         from runtime.execution_universe import get_execution_policy as _exec_policy
 
+        # Synthetic spot-only candidates are valid for spot execution even if
+        # they're outside CORE_EXECUTION_UNDERLYINGS (which is the perp universe).
         _eu_policy = _exec_policy(symbol)
-        if not _eu_policy["execute"]:
+        if not _eu_policy["execute"] and not candidate.get("spot_only_synthetic"):
             underlying = _get_underlying(symbol)
             logger.info(
                 f"[v10] {symbol} {direction} RESEARCH_ONLY_BLOCK "

@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-28
+- ops: add pre-superprompt state snapshot manifest for v18.10 baseline archive
+
+## 2026-04-28
 - v18.10: harden TradingView webhook to explicitly load the Projects-repo .env, verify live secret auth end-to-end, and remove stale +20 candidate-injection references from docs and operator surfaces
 
 ## 2026-04-28

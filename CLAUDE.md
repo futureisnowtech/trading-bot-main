@@ -18,7 +18,7 @@ Fully autonomous AI trading system: scans Kraken Futures + Binance USDM + Hyperl
 - Paper account: $5,000 (`ACCOUNT_SIZE=5000` — config default, no .env override)
 - Wants zero day-to-day intervention. Prefers simple explanations, hates fluff.
 
-## Current Version: v17.5 (2026-04-27)
+## Current Version: v18.7 (2026-04-27)
 
 **Active branch:** `feature/v10-rebuild` | **Clean paper trading started:** 2026-04-02 | **Live trading started:** 2026-04-15
 

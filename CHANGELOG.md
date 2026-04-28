@@ -1,6 +1,12 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-27
+- fix(config): expand perp universe BTC/ETH/SOL/XRP all autonomous; fix target_r (TREND=2.0/NEUTRAL=1.5/CHOP=1.2 — old values created negative R:R after fees); lower depth_min_usd across all 8 spot symbols
+
+## 2026-04-27
+- fix(spot): Coinbase limit order 400 fix — remove quote_size from limit_limit_gtc (protobuf oneof conflict was silently failing all XRP/SOL spot limit buys)
+
+## 2026-04-27
 - fix(trading): unblock auto entries — lower econ gate floors, relax spot derivative check, fix max_single scope bug
 
 ## 2026-04-27

@@ -36,6 +36,8 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Optional, Tuple
 
+from config import SCANNER_PARALLEL_WORKERS, SCANNER_TOP_N
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -71,12 +73,12 @@ _MIN_FUNDING_COLLECT = 0.0001  # sub-filter E: |per-8h rate| to collect
 _MIN_OB_DEPTH_USD = 5_000  # $5K each side — relaxed for Kraken thin books
 _MAX_SPREAD_PCT = 0.25  # PERCENT units (= 0.25%) — spread_pct is stored as % so 0.25 means 25 bps; economics gate uses fraction units (÷100 before passing)
 _MIN_EXPECTED_PROFIT = 0.25  # $ — lower floor to pass more candidates
-_TOP_N = 50
+_TOP_N = SCANNER_TOP_N
 _MAX_STEP1_BINANCE = 100  # cap Binance universe at top 100 by volume
 _MAX_STEP1_HYPERLIQUID = 80  # top 80 HL markets by volume
 _ROUND_TRIP_FEE_PCT = 0.00060  # 0.030% × 2 (Coinbase taker); matches economics_gate
 _FUNDING_HOLD_PERIODS = 1.5  # expected 8h-equivalent funding periods held
-_PARALLEL_WORKERS = 20  # concurrent kline fetch threads
+_PARALLEL_WORKERS = SCANNER_PARALLEL_WORKERS  # concurrent kline fetch threads
 
 # ── Setup priority order (for primary_setup selection) ───────────────────────
 _SETUP_PRIORITY = [

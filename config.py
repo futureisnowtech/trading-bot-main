@@ -890,16 +890,79 @@ CRYPTO_SCAN_INTERVAL_SECONDS: int = (
 FUTURES_SCAN_INTERVAL_SECONDS: int = 60
 POSITION_MONITOR_INTERVAL_SECONDS: int = 30
 WATCHDOG_INTERVAL_SECONDS: int = 900  # Alert if no scan in 15 min
+LABELER_INTERVAL_MINUTES: int = int(os.getenv("LABELER_INTERVAL_MINUTES", "60"))
+ML_RETRAIN_MIN_HOURS: int = int(os.getenv("ML_RETRAIN_MIN_HOURS", "24"))
+ML_RETRAIN_MIN_NEW_CLEAN_TRADES: int = int(
+    os.getenv("ML_RETRAIN_MIN_NEW_CLEAN_TRADES", "20")
+)
+RBI_MIN_DAYS: int = int(os.getenv("RBI_MIN_DAYS", "7"))
+RBI_MIN_NEW_CLEAN_TRADES: int = int(os.getenv("RBI_MIN_NEW_CLEAN_TRADES", "20"))
+RBI_SCHEDULE_MODE: str = os.getenv("RBI_SCHEDULE_MODE", "weekly_or_threshold").strip().lower()
+RBI_WEEKDAY: str = os.getenv("RBI_WEEKDAY", "SUN").strip().upper()
+RBI_TIME_UTC: str = os.getenv("RBI_TIME_UTC", "07:00").strip()
+NIGHTLY_AUDIT_RUN_PROOF: bool = (
+    os.getenv("NIGHTLY_AUDIT_RUN_PROOF", "false").lower() == "true"
+)
+NIGHTLY_AUDIT_FULL_PROOF_WEEKDAY: str = os.getenv(
+    "NIGHTLY_AUDIT_FULL_PROOF_WEEKDAY", "SUN"
+).strip().upper()
+NIGHTLY_AUDIT_TIME_UTC: str = os.getenv("NIGHTLY_AUDIT_TIME_UTC", "08:00").strip()
+HEDGE_MIN_NOTIONAL_USD: float = float(os.getenv("HEDGE_MIN_NOTIONAL_USD", "100.0"))
+
+# ════════════════════════════════════════════════════════════════════
+# SCANNER THROTTLES
+# ════════════════════════════════════════════════════════════════════
+SCANNER_TOP_N: int = int(os.getenv("SCANNER_TOP_N", "20"))
+SCANNER_PARALLEL_WORKERS: int = int(os.getenv("SCANNER_PARALLEL_WORKERS", "8"))
 
 # ════════════════════════════════════════════════════════════════════
 # TRADINGVIEW WEBHOOK INTEGRATION
 # ════════════════════════════════════════════════════════════════════
+TV_SIGNALS_ENABLED: bool = os.getenv("TV_SIGNALS_ENABLED", "true").lower() == "true"
 TV_WEBHOOK_PORT: int = int(os.getenv("TV_WEBHOOK_PORT", "8765"))
 TV_WEBHOOK_SECRET: str = os.getenv("TV_WEBHOOK_SECRET", "")
-TV_SIGNAL_BOOST_CONVICTION: int = int(os.getenv("TV_SIGNAL_BOOST_CONVICTION", "20"))
+TV_SIGNAL_PROFILE_NAME: str = os.getenv("TV_SIGNAL_PROFILE_NAME", "algobot_htf_v2").strip()
+TV_SIGNAL_INDICATOR_NAME: str = os.getenv(
+    "TV_SIGNAL_INDICATOR_NAME", "AlgoBot HTF Confluence Engine v2"
+).strip()
+TV_SIGNAL_MODE: str = os.getenv("TV_SIGNAL_MODE", "context_filter").strip().lower()
+TV_REQUIRE_SCANNER_CONFIRMATION: bool = (
+    os.getenv("TV_REQUIRE_SCANNER_CONFIRMATION", "true").lower() == "true"
+)
+TV_PROMOTE_SYNTHETIC_CANDIDATES: bool = (
+    os.getenv("TV_PROMOTE_SYNTHETIC_CANDIDATES", "false").lower() == "true"
+)
+TV_SIGNAL_BOOST_CONVICTION: int = int(os.getenv("TV_SIGNAL_BOOST_CONVICTION", "6"))
 TV_SIGNAL_MAX_AGE_SECONDS: int = int(
-    os.getenv("TV_SIGNAL_MAX_AGE_SECONDS", "300")
-)  # ignore TV signals older than 5 min
+    os.getenv("TV_SIGNAL_MAX_AGE_SECONDS", "900")
+)  # ignore TV signals older than 15 min
+TV_ALLOWED_UNDERLYINGS: list[str] = [
+    s.strip().upper()
+    for s in os.getenv("TV_ALLOWED_UNDERLYINGS", "BTC,ETH,SOL,XRP").split(",")
+    if s.strip()
+]
+TV_BLOCK_ON_HTF_SHORT: bool = (
+    os.getenv("TV_BLOCK_ON_HTF_SHORT", "true").lower() == "true"
+)
+TV_BLOCK_ON_HTF_CLOSE: bool = (
+    os.getenv("TV_BLOCK_ON_HTF_CLOSE", "true").lower() == "true"
+)
+TV_HTF_TIMEFRAME_MINUTES: int = int(os.getenv("TV_HTF_TIMEFRAME_MINUTES", "240"))
+TV_HTF_SUPERTREND_ATR_MULTIPLIER: float = float(
+    os.getenv("TV_HTF_SUPERTREND_ATR_MULTIPLIER", "3.0")
+)
+TV_HTF_SUPERTREND_ATR_PERIOD: int = int(
+    os.getenv("TV_HTF_SUPERTREND_ATR_PERIOD", "10")
+)
+TV_HTF_WAVETREND_CHANNEL: int = int(os.getenv("TV_HTF_WAVETREND_CHANNEL", "10"))
+TV_HTF_WAVETREND_AVG: int = int(os.getenv("TV_HTF_WAVETREND_AVG", "21"))
+TV_HTF_WAVETREND_OB: float = float(os.getenv("TV_HTF_WAVETREND_OB", "58"))
+TV_HTF_WAVETREND_OS: float = float(os.getenv("TV_HTF_WAVETREND_OS", "-58"))
+TV_HTF_VOLUME_FILTER_ENABLED: bool = (
+    os.getenv("TV_HTF_VOLUME_FILTER_ENABLED", "true").lower() == "true"
+)
+TV_HTF_MIN_ATR_PCT: float = float(os.getenv("TV_HTF_MIN_ATR_PCT", "0.5"))
+TV_HTF_MAX_ATR_PCT: float = float(os.getenv("TV_HTF_MAX_ATR_PCT", "8.0"))
 
 # ════════════════════════════════════════════════════════════════════
 # ALERTS

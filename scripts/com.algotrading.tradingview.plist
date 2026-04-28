@@ -6,8 +6,8 @@
   Auto-start the TradingView webhook listener on port 8765.
 
   This server receives Pine Script alerts from TradingView and writes them
-  to the system_events table (source='tradingview') so v10_runner.py can
-  inject them as entry candidates with tv_signal=1.
+  to the tv_signals / system_events tables so v10_runner.py can apply the
+  HTF confluence as a context filter for the spot lane.
 
   INSTALL:
     cp scripts/com.algotrading.tradingview.plist ~/Library/LaunchAgents/

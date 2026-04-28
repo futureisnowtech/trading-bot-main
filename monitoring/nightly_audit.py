@@ -758,6 +758,43 @@ def _check_spot_edge_calibration() -> dict:
     return result
 
 
+def _check_tradingview_health() -> dict:
+    result: dict[str, Any] = {
+        "status": "pass",
+        "enabled": False,
+        "secret_configured": False,
+        "recent_signals": 0,
+        "freshest_age_seconds": None,
+        "detail": "",
+    }
+    try:
+        from config import TV_SIGNALS_ENABLED, TV_WEBHOOK_SECRET
+        from logging_db.trade_logger import get_recent_tv_signals
+
+        result["enabled"] = bool(TV_SIGNALS_ENABLED)
+        result["secret_configured"] = bool(str(TV_WEBHOOK_SECRET or "").strip())
+        recent = get_recent_tv_signals(max_age_seconds=86400)
+        result["recent_signals"] = len(recent)
+        if recent:
+            result["freshest_age_seconds"] = round(
+                float(recent[0].get("age_seconds") or 0.0),
+                1,
+            )
+        if result["enabled"] and not result["secret_configured"]:
+            result["status"] = "warn"
+            result["detail"] = "TradingView enabled but TV_WEBHOOK_SECRET is empty"
+        else:
+            result["detail"] = (
+                f"enabled={int(result['enabled'])} "
+                f"secret={int(result['secret_configured'])} "
+                f"recent_24h={result['recent_signals']}"
+            )
+    except Exception as e:
+        result["status"] = "error"
+        result["detail"] = str(e)[:200]
+    return result
+
+
 # ── main audit ────────────────────────────────────────────────────────────────
 
 
@@ -809,6 +846,9 @@ def run_audit(run_proof: bool = True) -> dict:
 
     logger.info("[audit] running spot edge calibration...")
     checks["spot_edge_calibration"] = _check_spot_edge_calibration()
+
+    logger.info("[audit] checking TradingView health...")
+    checks["tradingview_health"] = _check_tradingview_health()
 
     # Overall status: worst of all checks (skipped checks don't count)
     statuses = [

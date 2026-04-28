@@ -17,8 +17,10 @@ PLISTS=(
     "com.algotrading.king"
     "com.algotrading.backup"
     "com.algotrading.readiness"
-    "com.algotrading.brain"
     "com.algotrading.tradingview"
+)
+OPTIONAL_PLISTS=(
+    "com.algotrading.brain"
 )
 
 # Generate the live bot plist from template so it always has the correct PROJ path.
@@ -80,7 +82,7 @@ chmod +x "$PROJ/scripts/check_readiness.py"
 
 if [ "$1" == "--uninstall" ]; then
     echo "Uninstalling launchd services..."
-    for label in "${PLISTS[@]}"; do
+    for label in "${PLISTS[@]}" "${OPTIONAL_PLISTS[@]}"; do
         launchctl unload "$AGENTS/$label.plist" 2>/dev/null
         rm -f "$AGENTS/$label.plist"
         echo "  Removed $label"
@@ -123,13 +125,36 @@ for label in "${PLISTS[@]}"; do
     fi
 done
 
+if [ "${INSTALL_BRAIN_SERVICE:-false}" = "true" ]; then
+    for label in "${OPTIONAL_PLISTS[@]}"; do
+        src="$PROJ/scripts/$label.plist"
+        dst="$AGENTS/$label.plist"
+
+        if [ ! -f "$src" ]; then
+            echo "  ERROR: $src not found — skipping"
+            continue
+        fi
+
+        cp "$src" "$dst"
+        sed -i '' "s|/Users/joshmacbookair2020/Projects/algo_trading_final|$PROJ|g" "$dst"
+        launchctl unload "$dst" 2>/dev/null
+        if launchctl load "$dst"; then
+            echo "  ✅ $label loaded (optional)"
+        else
+            echo "  ❌ Failed to load $label"
+        fi
+    done
+else
+    echo "  Skipping optional brain service (set INSTALL_BRAIN_SERVICE=true to load it)"
+fi
+
 echo ""
 echo "Services installed. The bot will now:"
 echo "  • Start automatically when you log in"
 echo "  • Restart if it crashes (paper mode only)"
 echo "  • Back up the database and credentials at 2:00 AM daily"
 echo "  • Check readiness for live trading at 7:00 AM daily
-  • Generate daily brain summary at 9:47 PM daily"
+  • Keep the TradingView webhook available for HTF context alerts"
 echo ""
 echo "To check service status:"
 echo "  launchctl list | grep algotrading"

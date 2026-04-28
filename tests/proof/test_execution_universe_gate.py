@@ -243,12 +243,15 @@ def test_manual_scan_requests_core_only_scan_and_fails_closed():
     assert '"execute": False' in src, "manual scan policy lookup must fail closed"
 
 
-def test_v10_runner_skips_unsupported_tradingview_symbols_before_candidate_build():
+def test_v10_runner_uses_tradingview_as_htf_context_not_synthetic_candidates():
     runner_path = os.path.join(_ROOT, "scheduler", "v10_runner.py")
     src = open(runner_path).read()
-    assert "TV signal skipped" in src, (
-        "v10_runner must skip unsupported TradingView symbols before they enter live candidate flow"
+    assert "_tv_context_map(tv_signals)" in src, (
+        "v10_runner must normalize fresh TradingView rows into an HTF context map"
     )
-    assert "_get_execution_policy(tv[\"symbol\"])" in src, (
-        "TradingView signals must be checked against the execution universe"
+    assert "TV HTF context" in src, (
+        "v10_runner should log TradingView as HTF context instead of treating it as a synthetic entry source"
+    )
+    assert "tv_candidates" not in src, (
+        "TradingView alerts should no longer be promoted into synthetic trade candidates"
     )

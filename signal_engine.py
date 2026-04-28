@@ -33,6 +33,17 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+
+def _tv_signal_score() -> float:
+    try:
+        import config as _cfg
+
+        if str(getattr(_cfg, "TV_SIGNAL_MODE", "context_filter")).lower() != "synthetic_candidate":
+            return 0.0
+        return float(getattr(_cfg, "TV_SIGNAL_BOOST_CONVICTION", 0.0) or 0.0)
+    except Exception:
+        return 0.0
+
 # ── Regime multipliers for ML tower ─────────────────────────────────────────
 _REGIME_ML_MULT = {
     "TRENDING_UP": {"LONG": 1.15, "SHORT": 0.85},
@@ -200,10 +211,11 @@ def _technical_long_score(f: Dict) -> Tuple[float, Dict]:
         score += 8
         components["kst_bullish"] = 8
 
-    # TradingView signal confirmation: +20
-    if f.get("tv_signal", 0) > 0:
-        score += 20
-        components["tv_signal"] = 20
+    # TradingView synthetic-candidate boost (disabled in HTF context-filter mode)
+    _tv_pts = _tv_signal_score()
+    if f.get("tv_signal", 0) > 0 and _tv_pts > 0:
+        score += _tv_pts
+        components["tv_signal"] = _tv_pts
 
     # ── Deductions ────────────────────────────────────────────
     # Price at 2σ+ above VWAP: -25
@@ -391,10 +403,11 @@ def _technical_short_score(f: Dict) -> Tuple[float, Dict]:
         score += 8
         components["kst_bearish"] = 8
 
-    # TradingView signal confirmation: +20
-    if f.get("tv_signal", 0) > 0:
-        score += 20
-        components["tv_signal"] = 20
+    # TradingView synthetic-candidate boost (disabled in HTF context-filter mode)
+    _tv_pts = _tv_signal_score()
+    if f.get("tv_signal", 0) > 0 and _tv_pts > 0:
+        score += _tv_pts
+        components["tv_signal"] = _tv_pts
 
     # ── Deductions ──────────────────────────────────────────
     # CVD bullish divergence: -20
@@ -736,7 +749,8 @@ _LONG_SETUPS = [
         "label": "TradingView Alert + Indicator Confirmed Long",
         # TV alert + confirming indicator — allowed in any regime
         "check": lambda f: (
-            f.get("tv_signal", 0) > 0
+            _tv_signal_score() > 0
+            and f.get("tv_signal", 0) > 0
             and (
                 f.get("supertrend_bullish", 0) > 0
                 or f.get("wae_bullish", 0) > 0
@@ -867,7 +881,8 @@ _SHORT_SETUPS = [
         "name": "tv_confirmed_short",
         "label": "TradingView Alert + Indicator Confirmed Short",
         "check": lambda f: (
-            f.get("tv_signal", 0) > 0
+            _tv_signal_score() > 0
+            and f.get("tv_signal", 0) > 0
             and (
                 f.get("supertrend_bearish", 0) > 0
                 or f.get("wae_bearish", 0) > 0

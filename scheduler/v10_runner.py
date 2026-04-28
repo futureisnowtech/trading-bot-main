@@ -19,7 +19,7 @@ import threading
 import time
 import traceback
 from datetime import datetime, timedelta
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 import schedule
 from config import SUPPRESSED_SYMBOLS
@@ -47,9 +47,6 @@ _REGIME_SIZE_MULT = {
     "UNKNOWN": 0.90,
 }
 
-# Deduplicate TradingView signals across scan cycles (symbol_direction_ts key)
-_seen_tv_signal_keys: set = set()
-
 # Economics veto suppression: 3-strike system per symbol+direction+reason prefix.
 # Logs on occurrences 1-3, emits a "suppressing" notice on occurrence 4, silent thereafter.
 # Window resets after _VETO_LOG_COOLDOWN_SEC — count and timestamp reset together.
@@ -63,6 +60,10 @@ _VETO_LOG_SUPPRESS_AFTER: int = 3  # log first N occurrences, then suppress
 _model_store = None
 _model_store_loaded_at: float = 0.0
 _MODEL_STORE_REFRESH_SEC: int = 3600  # reload from disk every hour
+_last_ml_retrain_ts: float = 0.0
+_last_ml_retrain_snapshot_count: int = -1
+_last_rbi_run_ts: float = 0.0
+_last_rbi_snapshot_count: int = -1
 
 
 def _get_model_store():
@@ -286,54 +287,68 @@ def _tradeability_hint(
 # ── TradingView signal helpers ────────────────────────────────────────────────
 
 
-def _get_fresh_tv_signals(max_age_seconds: int = 300) -> list:
-    """
-    Query system_events for TradingView signals received in the last max_age_seconds.
-    Returns list of dicts with: symbol, direction, indicator, strength, price, ts
-    """
+def _get_fresh_tv_signals(max_age_seconds: int | None = None) -> list[dict[str, Any]]:
+    """Return recent TradingView HTF signals from the dedicated tv_signals table."""
     try:
-        from logging_db.trade_logger import get_logger
+        from config import TV_ALLOWED_UNDERLYINGS, TV_SIGNAL_MAX_AGE_SECONDS, TV_SIGNALS_ENABLED
+        from logging_db.trade_logger import get_recent_tv_signals
 
-        db = get_logger()
-        cutoff = time.time() - max_age_seconds
-        rows = db.conn.execute(
-            """
-            SELECT message, ts FROM system_events
-            WHERE source = 'tradingview'
-              AND ts > datetime(?, 'unixepoch')
-            ORDER BY ts DESC LIMIT 20
-        """,
-            (cutoff,),
-        ).fetchall()
+        if not TV_SIGNALS_ENABLED:
+            return []
 
-        signals = []
-        for msg, ts in rows:
-            try:
-                import json
-
-                data = json.loads(msg) if isinstance(msg, str) else msg
-                symbol = data.get("symbol", "").upper()
-                direction = data.get("direction", "LONG").upper()
-                if not symbol or direction not in ("LONG", "SHORT"):
-                    continue
-                # Normalize symbol: BTCUSD → BTCUSDT, BTC-USDT → BTCUSDT etc.
-                if not symbol.endswith("USDT"):
-                    symbol = symbol.replace("-", "").replace("USD", "") + "USDT"
-                signals.append(
-                    {
-                        "symbol": symbol,
-                        "direction": direction,
-                        "indicator": data.get("indicator", "tv_alert"),
-                        "strength": data.get("strength", "moderate"),
-                        "price": float(data.get("price", 0)),
-                        "ts": ts,
-                    }
-                )
-            except Exception:
+        max_age = int(max_age_seconds or TV_SIGNAL_MAX_AGE_SECONDS or 300)
+        allowed = {str(s).upper() for s in (TV_ALLOWED_UNDERLYINGS or [])}
+        rows = get_recent_tv_signals(max_age_seconds=max_age)
+        fresh: list[dict[str, Any]] = []
+        for row in rows:
+            symbol = str(row.get("symbol") or "").upper()
+            underlying = _get_underlying(symbol)
+            if allowed and underlying not in allowed:
                 continue
-        return signals
+            row = dict(row)
+            row["symbol"] = symbol
+            row["underlying"] = underlying
+            fresh.append(row)
+        return fresh
     except Exception:
         return []
+
+
+def _tv_context_map(signals: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    context: dict[str, dict[str, Any]] = {}
+    for signal in signals:
+        underlying = str(signal.get("underlying") or _get_underlying(signal.get("symbol", ""))).upper()
+        if not underlying or underlying in context:
+            continue
+        context[underlying] = dict(signal)
+    return context
+
+
+def _learning_snapshot_count() -> int:
+    try:
+        import sqlite3
+        from config import DB_PATH
+
+        conn = sqlite3.connect(DB_PATH)
+        row = conn.execute("SELECT COUNT(*) FROM ml_feature_snapshots").fetchone()
+        conn.close()
+        return int((row or [0])[0] or 0)
+    except Exception:
+        return 0
+
+
+def _schedule_weekly_job(weekday: str, at_time: str, fn) -> None:
+    token = str(weekday or "SUN").strip().upper()[:3]
+    weekly = {
+        "MON": schedule.every().monday,
+        "TUE": schedule.every().tuesday,
+        "WED": schedule.every().wednesday,
+        "THU": schedule.every().thursday,
+        "FRI": schedule.every().friday,
+        "SAT": schedule.every().saturday,
+        "SUN": schedule.every().sunday,
+    }
+    weekly.get(token, schedule.every().sunday).at(at_time).do(fn)
 
 
 # ── Lazy imports (all wrapped so import errors never crash the loop) ──────────
@@ -696,68 +711,26 @@ def _scan_and_trade_inner(spot_only: bool = False):
     deployed_usd = _get_deployed_usd(open_pos)
     _write_crypto_lane_runtime(open_pos)
 
-    # Check for fresh TradingView signals — promote them to priority candidates
-    global _seen_tv_signal_keys
-    tv_signals = _get_fresh_tv_signals(max_age_seconds=300)
-    tv_candidates = []
-    for tv in tv_signals:
-        key = f"{tv['symbol']}_{tv['direction']}_{tv.get('ts', '')}"
-        if key in _seen_tv_signal_keys:
-            continue
-        _seen_tv_signal_keys.add(key)
-        # Keep set bounded
-        if len(_seen_tv_signal_keys) > 500:
-            _seen_tv_signal_keys.clear()
-        _tv_policy = _get_execution_policy(tv["symbol"])
-        if not _tv_policy.get("execute"):
-            logger.info(
-                f"[v10] TV signal skipped — {tv['symbol']} {tv['direction']} "
-                f"outside live execution universe ({_tv_policy.get('reason', 'blocked')})"
-            )
-            continue
-        # Build candidate dict matching scanner output format
-        tv_candidates.append(
-            {
-                "symbol": tv["symbol"],
-                "direction": tv["direction"],
-                "vol_spike": 1.5,  # TV signal = elevated priority
-                "adx_15m": 25.0,  # assume trending (TV only fires on structured setups)
-                "price_move_4h_pct": 1.0,
-                "atr_15m": 0.0,  # will be computed from candles in _attempt_entry
-                "stop_pct": 1.5,
-                "target_pct": 4.5,
-                "expected_profit": 5.0,
-                "correlation_penalty": 1.0,
-                "regime_penalty": 1.0,
-                "spread_pct": 0.15,  # percent units (÷100 → 0.0015 fraction at gate) — conservative default; no OB data for TV signals
-                "tv_signal": True,
-                "tv_strength": tv.get("strength", "moderate"),
-                "tv_indicator": tv.get("indicator", "tv_alert"),
-                "edge_score": 0.6,  # TV signal gets moderate edge score until validated
-            }
-        )
+    # TradingView is now an HTF context layer, not a synthetic candidate source.
+    tv_signals = _get_fresh_tv_signals()
+    tv_context_by_underlying = _tv_context_map(tv_signals)
+    for underlying, tv in tv_context_by_underlying.items():
         logger.info(
-            f"[v10] TV signal: {tv['symbol']} {tv['direction']} "
-            f"indicator={tv.get('indicator')} strength={tv.get('strength')}"
+            f"[v10] TV HTF context: {underlying} bias={tv.get('htf_bias') or tv.get('direction')} "
+            f"profile={tv.get('profile_name') or tv.get('indicator_name') or 'tv'} "
+            f"age={float(tv.get('age_seconds') or 0.0):.0f}s"
         )
 
     # Run scanner
     if scanner is None:
         logger.debug("[v10] scanner unavailable — skipping")
-        if not tv_candidates:
-            return
-        candidates = tv_candidates
+        return
     else:
-        scanner_candidates = scanner.scan(
+        candidates = scanner.scan(
             open_positions=open_symbols,
             account_balance=balance,
             core_only=True,
         )
-        # TV candidates take priority; skip scanner duplicate symbols
-        tv_symbols = {c["symbol"] for c in tv_candidates}
-        candidates = tv_candidates + [
-            c for c in scanner_candidates if c["symbol"] not in tv_symbols
-        ]
 
     if spot_only:
         try:
@@ -818,7 +791,7 @@ def _scan_and_trade_inner(spot_only: bool = False):
 
     logger.info(
         f"[v10] {'spot scalp ' if spot_only else ''}scan: {len(candidates)} candidates "
-        f"(tv={len(tv_candidates)} scanner={len(candidates) - len(tv_candidates)}), "
+        f"(fresh_tv_contexts={len(tv_context_by_underlying)}), "
         f"balance=${balance:.0f} deployed=${deployed_usd:.0f}"
     )
 
@@ -1224,9 +1197,6 @@ def _attempt_entry(
     except Exception as _e:
         logger.debug(f"[v10] indicator enrichment error {symbol}: {_e}")
 
-    if candidate.get("tv_signal"):
-        features["tv_signal"] = 1.0
-
     # ── Step 2: Classify regime ──────────────────────────────────────────────
     regime = "UNKNOWN"
     if classify_from_features is not None:
@@ -1610,6 +1580,7 @@ def _attempt_entry(
             from runtime.live_account import get_live_account_size
 
             _underlying = _trade.get("underlying", _get_underlying(symbol))
+            _tv_context = tv_context_by_underlying.get(str(_underlying).upper())
             _strategy_symbols = {str(s).upper() for s in _strategy_spot_symbols()}
             if _underlying not in _strategy_symbols:
                 _reason = "spot_strategy_symbol_disabled"
@@ -1677,12 +1648,16 @@ def _attempt_entry(
                 _spot_state["derivative_score"],
                 regime=_spot_regime,
                 symbol=_underlying,
+                direction="LONG",
+                tv_context=_tv_context,
             )
             _reason, _score_floor = _spot_quality_block_reason(
                 _underlying,
                 _spot_state,
                 final_spot_score=_final_score,
                 synthetic_candidate=bool(candidate.get("spot_only_synthetic")),
+                execution_route="maker_first",
+                tv_context=_tv_context,
             )
             if _reason:
                 logger.info(f"[v10] spot {_underlying} quality blocked: {_reason}")
@@ -1881,6 +1856,7 @@ def _attempt_entry(
                 final_spot_score=_final_score,
                 risk_dollars=_risk_dollars,
                 cooldown_until=_cooldown_until,
+                tv_context=_tv_context,
             )
             if _sr and not _sr.get("blocked"):
                 logger.info(
@@ -2799,11 +2775,16 @@ def kill_switch_monitor():
 def hedge_rebalance():
     """5-minute loop: rebalance delta-neutral hedge position."""
     try:
+        from config import HEDGE_MIN_NOTIONAL_USD
+
         he = _import_hedge_engine()
         perps = _import_perps_engine()
         if he is None or perps is None:
             return
         open_positions = perps.get_open_positions()
+        deployed_usd = _get_deployed_usd(open_positions)
+        if not open_positions or deployed_usd < float(HEDGE_MIN_NOTIONAL_USD or 0.0):
+            return
         balance = _get_account_balance()
         # Fetch live BTC price for hedge sizing (required by rebalance signature)
         _btc_price = 0.0
@@ -2830,12 +2811,29 @@ def hedge_rebalance():
 
 
 def ml_retrain_check():
-    """6-hour loop: trigger walk-forward retrains for slots with enough new data."""
+    """Threshold-gated retrain loop: run only after enough new closes and enough time."""
+    global _last_ml_retrain_ts, _last_ml_retrain_snapshot_count
     try:
+        from config import ML_RETRAIN_MIN_HOURS, ML_RETRAIN_MIN_NEW_CLEAN_TRADES
+
         ll = _import_learning_loop()
         if ll is None:
             return
+        now = time.time()
+        current_count = _learning_snapshot_count()
+        if _last_ml_retrain_snapshot_count < 0:
+            _last_ml_retrain_snapshot_count = current_count
+            _last_ml_retrain_ts = now
+            return
+        if (now - _last_ml_retrain_ts) < float(ML_RETRAIN_MIN_HOURS) * 3600:
+            return
+        if (current_count - _last_ml_retrain_snapshot_count) < int(
+            ML_RETRAIN_MIN_NEW_CLEAN_TRADES
+        ):
+            return
         triggered = ll.maybe_trigger_retrains(paper=_paper)
+        _last_ml_retrain_ts = now
+        _last_ml_retrain_snapshot_count = current_count
         if triggered:
             logger.info(
                 f"[v10] ml_retrain_check: triggered {len(triggered)} retrains: "
@@ -3204,13 +3202,28 @@ MES_POINT_VALUE = 5.00  # $ per full MES point (matches ibkr_broker.MES_POINT_VA
 
 
 def rbi_nightly():
-    """2:00 AM ET nightly: run RBI research + backtest pipeline on BTCUSDT."""
-    logger.info("[v10] rbi_nightly: starting BTCUSDT RBI pipeline")
+    """Threshold-gated RBI research loop."""
+    global _last_rbi_run_ts, _last_rbi_snapshot_count
     try:
+        from config import RBI_MIN_DAYS, RBI_MIN_NEW_CLEAN_TRADES
+
         ll = _import_learning_loop()
         if ll is None:
             return
+        now = time.time()
+        current_count = _learning_snapshot_count()
+        if _last_rbi_snapshot_count < 0:
+            _last_rbi_snapshot_count = current_count
+            _last_rbi_run_ts = now
+            return
+        if (now - _last_rbi_run_ts) < float(RBI_MIN_DAYS) * 86400:
+            return
+        if (current_count - _last_rbi_snapshot_count) < int(RBI_MIN_NEW_CLEAN_TRADES):
+            return
+        logger.info("[v10] rbi_nightly: starting BTCUSDT RBI pipeline")
         results = ll.run_nightly_rbi(symbol="BTCUSDT", paper=_paper)
+        _last_rbi_run_ts = now
+        _last_rbi_snapshot_count = current_count
         logger.info(f"[v10] rbi_nightly done: {results}")
         ne = _import_notification_engine()
         if ne is not None:
@@ -3304,7 +3317,19 @@ def run_forever():
     _startup_notification()
     logger.info("[v10] Scheduler starting — wiring schedules...")
 
-    from config import SPOT_EXIT_POLL_SECONDS, SPOT_SCALP_SCAN_SECONDS
+    from config import (
+        FUTURES_LANE_ACTIVE,
+        LABELER_INTERVAL_MINUTES,
+        ML_RETRAIN_MIN_HOURS,
+        NIGHTLY_AUDIT_FULL_PROOF_WEEKDAY,
+        NIGHTLY_AUDIT_RUN_PROOF,
+        NIGHTLY_AUDIT_TIME_UTC,
+        RBI_SCHEDULE_MODE,
+        RBI_TIME_UTC,
+        RBI_WEEKDAY,
+        SPOT_EXIT_POLL_SECONDS,
+        SPOT_SCALP_SCAN_SECONDS,
+    )
 
     # Wire schedules
     schedule.every(5).minutes.do(scan_and_trade)
@@ -3314,8 +3339,9 @@ def run_forever():
     schedule.every(5).minutes.do(hedge_rebalance)
     schedule.every(60).seconds.do(kill_switch_monitor)
     schedule.every(60).seconds.do(_run_health_check)
-    schedule.every(6).hours.do(ml_retrain_check)
-    schedule.every().day.at("07:00").do(rbi_nightly)  # 07:00 UTC ≈ 02:00 ET
+    schedule.every(int(max(1, ML_RETRAIN_MIN_HOURS))).hours.do(ml_retrain_check)
+    if str(RBI_SCHEDULE_MODE or "").lower() != "manual":
+        _schedule_weekly_job(str(RBI_WEEKDAY), str(RBI_TIME_UTC), rbi_nightly)
 
     # v13.6: candidate outcome labeling — runs every 15 min in a background thread
     # so it never blocks the scan cycle.
@@ -3330,7 +3356,7 @@ def run_forever():
         except Exception as _le:
             logger.warning(f"[v10] labeler job error: {_le}")
 
-    schedule.every(15).minutes.do(_labeler_job)
+    schedule.every(int(max(15, LABELER_INTERVAL_MINUTES))).minutes.do(_labeler_job)
 
     # v13.6: nightly proof + drift + learning audit at 08:00 UTC (03:00 ET, after RBI)
     def _nightly_audit_job():
@@ -3338,12 +3364,31 @@ def run_forever():
             import threading as _thr
             from monitoring.nightly_audit import run_audit
 
-            _t = _thr.Thread(target=run_audit, kwargs={"run_proof": True}, daemon=True)
+            _t = _thr.Thread(
+                target=run_audit,
+                kwargs={"run_proof": bool(NIGHTLY_AUDIT_RUN_PROOF)},
+                daemon=True,
+            )
             _t.start()
         except Exception as _ae:
             logger.debug(f"[v10] nightly audit job error: {_ae}")
 
-    schedule.every().day.at("08:00").do(_nightly_audit_job)  # 08:00 UTC ≈ 03:00 ET
+    def _weekly_full_audit_job():
+        try:
+            import threading as _thr
+            from monitoring.nightly_audit import run_audit
+
+            _t = _thr.Thread(target=run_audit, kwargs={"run_proof": True}, daemon=True)
+            _t.start()
+        except Exception as _ae:
+            logger.debug(f"[v10] weekly full audit job error: {_ae}")
+
+    schedule.every().day.at(str(NIGHTLY_AUDIT_TIME_UTC)).do(_nightly_audit_job)
+    _schedule_weekly_job(
+        str(NIGHTLY_AUDIT_FULL_PROOF_WEEKDAY),
+        str(NIGHTLY_AUDIT_TIME_UTC),
+        _weekly_full_audit_job,
+    )
 
     # Periodic system + crypto lane heartbeat (every 1 minute)
     def _write_heartbeat():
@@ -3356,8 +3401,6 @@ def run_forever():
             pass
 
     schedule.every(1).minutes.do(_write_heartbeat)
-
-    from config import FUTURES_LANE_ACTIVE
 
     if FUTURES_LANE_ACTIVE:
         schedule.every(2).minutes.do(mes_futures_scan)

@@ -29,7 +29,7 @@ A fully autonomous AI-powered trading system that:
 - Wants the system to WIN — everything tuned for performance
 - Prefers simple explanations, hates fluff
 
-## Current Version: v18.8 (2026-04-28)
+## Current Version: v18.10 (2026-04-28)
 
 **Active branch:** `feature/v10-rebuild`
 **Clean paper trading started:** 2026-04-02
@@ -39,7 +39,7 @@ A fully autonomous AI-powered trading system that:
 
 | Component | File | Role |
 |---|---|---|
-| Scanner | `scanner.py` | **3 sources**: Kraken Futures + Binance USDM perps + Hyperliquid, 7-filter, top 50 candidates, `core_only=True` by default |
+| Scanner | `scanner.py` | **3 sources**: Kraken Futures + Binance USDM perps + Hyperliquid, 7-filter, `core_only=True` by default, config-backed breadth (`SCANNER_TOP_N`, `SCANNER_PARALLEL_WORKERS`; defaults `20 / 8`) |
 | Signal engine | `signal_engine.py` | Two-tower: technical 0-100 + ML 0-100 → composite |
 | Entry runner | `scheduler/v10_runner.py` | Scan loop, tier selection, economics gate, setup detection, execution handoff |
 | Position sizing | `position_manager.py` | Kelly + ATR sizing, leverage schedule, deployment caps |
@@ -61,11 +61,11 @@ A fully autonomous AI-powered trading system that:
 | ML training | `ml/walk_forward_trainer.py` + `ml/model_store.py` | XGBoost 60% + LightGBM 40%, PnL regressor, clean data only |
 | Indicators package | `indicators/` | atr_regime, cvd, funding_rate, liquidation_levels, macd_advanced, microstructure, open_interest, orderbook, orderflow, rsi_advanced, vwap_mtf, williams_r |
 | Economics gate | `risk/economics_gate.py` | Pre-trade fee/funding EV veto (Coinbase 0.03% taker) |
-| Learning loop | `learning_loop.py` | 57-feature snapshots, retrain queue, RBI trigger |
+| Learning loop | `learning_loop.py` | 57-feature snapshots, retrain queue, RBI trigger; spot closes now feed the same learning path as perp closes |
 | Bayesian learning | `learning/post_trade_analyzer.py` + `learning/signal_performance.py` | Per-signal Bayesian win rates |
 | Dynamic weights | `learning/dynamic_weights.py` | Live conviction weights, 5-min cache |
-| RBI nightly | `rbi/research_loop.py` + `rbi/backtest_loop.py` + `rbi/incubation_manager.py` | Research 575 combos, promote to live at 25% size |
-| Candidate journal | `logging_db/trade_logger.py` + `learning/candidate_labeler.py` | 8-gate journaling, 15m/1h/4h outcome labeling, nightly audit, and persisted spot setup evidence (`setup_score`, `setup_preference`, `final_spot_score`, `regime_floor`) |
+| RBI nightly | `rbi/research_loop.py` + `rbi/backtest_loop.py` + `rbi/incubation_manager.py` | Research 575 combos, promote to live at 25% size; scheduler now runs it weekly/threshold-gated instead of daily churn |
+| Candidate journal | `logging_db/trade_logger.py` + `learning/candidate_labeler.py` | 8-gate journaling, hourly outcome labeling, nightly-lite / weekly-full audit, persisted spot setup evidence (`setup_score`, `setup_preference`, `final_spot_score`, `regime_floor`), and dedicated `tv_signals` HTF context table |
 | Integrity substrate | `logging_db/trade_logger.py` (`log_trade_integrity`, `log_exit_evaluation`) | Durable trust tiers (verified/suspect/quarantined/excluded) per close; exit quality capture |
 | Backtesting | `backtesting/event_backtester.py` + `backtesting/run.py` | Live-faithful candidate-replay backtester; RESEARCH-GRADE only |
 | Promotion engine | `backtesting/promotion_engine.py` | Challenger state machine; `PROMOTED_PENDING_HUMAN` requires owner confirmation |
@@ -115,6 +115,11 @@ A fully autonomous AI-powered trading system that:
 - **Spot lane light retighten (v18.8):** after the floodgate loosening produced high-volume but low-quality spot entries, the live spot policy was tightened in the smallest viable way instead of restoring the old overbuilt gate stack. `config.py` now uses higher per-coin score floors (`BTC 50`, `ETH 47`, `SOL 49`, `XRP 49`, `LTC 44`, `DOGE 54`, `ADA 44`, `LINK 44`) plus a higher global regime baseline (`44/44/49`) while keeping confirm/path/structure/participation gates effectively off.
 - **Route-aware spot score premiums (v18.8):** `runtime/spot_strategy.py`, `scheduler/v10_runner.py`, and `spot_engine.py` now add small score surcharges instead of extra checklist gates. Synthetic spot candidates require `+2` score points, taker routes require `+3` (`BTC/ETH/LTC/ADA/LINK`) or `+4` (`SOL/XRP/DOGE`), and live taker fallback is blocked if the trade no longer clears the taker-adjusted floor.
 - **Single contextual frame gate (v18.8):** the only contextual filter reintroduced in the live spot lane is a lightweight `30m` frame minimum. `BTC/ETH` now require `30m >= 48`, and the six other spot names require `30m >= 50`, preserving trade volume while reducing the “burst into weak backdrop then thesis-decay” failure mode.
+- **TradingView HTF context mode (v18.9):** TradingView is no longer promoted into synthetic live candidates. `scripts/tradingview_webhook.py` now writes normalized rows into `tv_signals`, `scheduler/v10_runner.py` reads fresh HTF context from that table, and `runtime/spot_strategy.py` applies it only as a modest long-bias boost or a hard veto on `HTF SHORT` / `HTF CLOSE`. The intended profile is `algobot_htf_v2`, used as a spot context filter rather than a primary trigger.
+- **TradingView auth hardening (v18.10):** `scripts/tradingview_webhook.py` now explicitly loads the canonical Projects-repo `.env` instead of relying on whichever checkout happens to be the current working directory. The launchd webhook listener should always read `TV_WEBHOOK_SECRET` from the Projects repo, and live verification now expects bad secrets to 403 and good secrets to write normalized rows into `tv_signals`.
+- **Spot learning repair (v18.9):** `spot_engine.py` now persists spot entry lineage (`entry_trade_id`, `entry_feature_snapshot_id`, TV context fields) into `open_positions`, logs a real entry feature snapshot, and sends every spot close through `learning_loop.record_closed_trade()` plus `learning.post_trade_analyzer.analyze_closed_trade()`. Recent spot trades can now actually update `ml_feature_snapshots`, `trade_attribution`, and Bayesian signal stats instead of silently bypassing the learning loop.
+- **Lean scheduler cadence (v18.9):** `scheduler/v10_runner.py` now uses config-driven cadence knobs: `LABELER_INTERVAL_MINUTES=60`, `ML_RETRAIN_MIN_HOURS=24`, `ML_RETRAIN_MIN_NEW_CLEAN_TRADES=20`, `RBI_MIN_DAYS=7`, `RBI_MIN_NEW_CLEAN_TRADES=20`, lite nightly audit by default with weekly full proof, and hedge rebalance only when hedge-relevant exposure exists.
+- **Lean ops defaults (v18.9):** dashboard usage is now explicitly on-demand via `scripts/start_dashboard.sh` / `scripts/stop_dashboard.sh`; runtime and dev dependency footprints are split into `requirements-runtime.txt` and `requirements-dev.txt`; `scripts/install_services.sh` keeps the TradingView webhook available but no longer auto-loads the brain helper unless `INSTALL_BRAIN_SERVICE=true`.
 - **Spot blocker truth + warm state (v17.5):** spot state now warms/caches the `5m/30m/4h/1d` substrate for the 8-symbol spot universe, with stale-cache fallback allowed for exit safety but not for fresh entry decisions. `scheduler/v10_runner.py` now classifies `below_regime_floor` as a quality/threshold block instead of mislabeling it as an economics veto, and spot data failures surface as `spot_data_unavailable` instead of generic execution failure.
 - **Spot score calibration (v17.5):** spot regime promotion and score floors were recalibrated around actual live spot distributions. `runtime/spot_regime.py` now promotes clean `TREND` states earlier, `score_floor_for_regime()` softens `TREND/NEUTRAL` floors for high-quality impulse setups, and the live spot route uses those dynamic floors consistently in runner, economics gate, and manual/dashboard surfaces.
 - **Neutral blend bias (v17.6):** `runtime/spot_momentum.py:final_spot_score()` is now regime-aware. `NEUTRAL` spot setups use a `0.90 * composite + 0.10 * derivative` blend so near-miss spot scalps in mixed tape lean more on the broader trade-quality stack, while `TREND` and `CHOP` keep the original `0.60 / 0.40` blend.
@@ -546,14 +551,14 @@ Controlled live transition:
 - `python3 scripts/go_live.py` — verifies Coinbase live auth, stops the paper launchd bot, starts a live `boot.py` process, waits for runtime truth to confirm `mode=live`
 - `python3 scripts/go_paper.py` — stops the live `boot.py` process and restores the paper launchd bot
 
-## TradingView Integration (v10 — still wired)
-TradingView Pine Script → webhook → SQLite `system_events` (source='tradingview')
-v10_runner reads these every scan cycle, prepends as candidates with edge_score=0.6.
+## TradingView Integration (v18.10)
+TradingView Pine Script → webhook → SQLite `tv_signals` + `system_events` (`source='tradingview'`)
+`v10_runner.py` reads fresh HTF context from `tv_signals` and applies it to the spot lane as a bias/veto layer; it no longer prepends TradingView alerts as synthetic entry candidates.
 ```bash
 python3 scripts/tradingview_webhook.py   # HTTP server (port 8765)
 ngrok http 8765                          # Expose to internet
 ```
-Set TV_WEBHOOK_SECRET in .env. Symbol mapping: BTCUSD → BTCUSDT.
+The live launchd listener reads `TV_WEBHOOK_SECRET` from the canonical Projects-repo `.env`; keep TradingView using that same value. The TradingView alert Webhook URL must be the current public HTTPS tunnel plus `/webhook` (for example `https://<your-ngrok-subdomain>.ngrok-free.app/webhook`). Recommended current HTF profile: `algobot_htf_v2` with 4H timeframe, SuperTrend `3 / 10`, WaveTrend `10 / 21`, volume filter on, and tighter live defaults of `WT OB/OS = ±58`, `Min ATR% = 0.5`, `Max ATR% = 8`.
 
 ## MES Contract Symbols (update quarterly)
 - Q2 2026 (Apr-Jun): `MESM26` — **ACTIVE** (`MES_EXPIRY=20260619`)

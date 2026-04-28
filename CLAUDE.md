@@ -296,12 +296,12 @@ bash scripts/install_services.sh
 Services: `com.algotrading.king` (paper bot, restarts on crash), `com.algotrading.backup` (2am daily), `com.algotrading.readiness` (7am daily). Logs: `logs/service/`. Use `python3 scripts/go_live.py` for a controlled live transition and `python3 scripts/go_paper.py` to restore the paper bot.
 
 ## TradingView Integration
-Pine Script → webhook → SQLite `system_events` (source='tradingview'). v10_runner reads every scan cycle, prepends as candidates with `edge_score=0.6`.
+Pine Script / HTF confluence alert → webhook → SQLite `tv_signals` + `system_events` (`source='tradingview'`). `v10_runner.py` reads fresh HTF context from `tv_signals` and applies it only as a modest long-bias boost or a veto on `HTF SHORT` / `HTF CLOSE`; TradingView alerts are no longer promoted into synthetic entry candidates.
 ```bash
 python3 scripts/tradingview_webhook.py   # port 8765
 ngrok http 8765
 ```
-Set `TV_WEBHOOK_SECRET` in .env. Symbol mapping: BTCUSD → BTCUSDT.
+Set `TV_WEBHOOK_SECRET` in `.env` and keep TradingView using the same value. Recommended current HTF profile: `algobot_htf_v2` on 4H with SuperTrend `3 / 10`, WaveTrend `10 / 21`, volume filter on, `WT OB/OS = ±58`, `Min ATR% = 0.5`, `Max ATR% = 8`.
 
 ## MES Contract Symbols (update quarterly)
 - Q2 2026 (Apr-Jun): `MESM26` — **ACTIVE** (`MES_EXPIRY=20260619`)

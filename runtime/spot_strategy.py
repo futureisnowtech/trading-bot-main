@@ -59,13 +59,12 @@ _SETUP_LIBRARY: dict[str, dict[str, float | str]] = {
 
 
 def _clean_symbol(symbol: str) -> str:
-    return (
-        str(symbol or "")
-        .upper()
-        .replace("-USD", "")
-        .replace("USD", "")
-        .replace("USDT", "")
-    )
+    clean = str(symbol or "").upper().replace("/", "-")
+    for suffix in ("-USDC", "-USDT", "-USD", "USDC", "USDT", "USD"):
+        if clean.endswith(suffix):
+            clean = clean[: -len(suffix)]
+            break
+    return clean.replace("-", "")
 
 
 def _tupled(values: Any, *, upper: bool = True) -> tuple[str, ...]:
@@ -234,6 +233,66 @@ def _edge_state_value(spot_state: dict[str, Any], field: str) -> Any:
         "frame_30m": float(s30.get("frame_score") or 0.0),
     }
     return mapping.get(field)
+
+
+def _tv_context_policy() -> dict[str, Any]:
+    import config as _cfg
+
+    return {
+        "enabled": bool(getattr(_cfg, "TV_SIGNALS_ENABLED", False)),
+        "profile_name": str(getattr(_cfg, "TV_SIGNAL_PROFILE_NAME", "") or "").strip(),
+        "mode": str(getattr(_cfg, "TV_SIGNAL_MODE", "context_filter") or "").strip().lower(),
+        "boost": float(getattr(_cfg, "TV_SIGNAL_BOOST_CONVICTION", 0) or 0.0),
+        "max_age_seconds": float(
+            getattr(_cfg, "TV_SIGNAL_MAX_AGE_SECONDS", 300) or 300.0
+        ),
+        "timeframe_min": int(getattr(_cfg, "TV_HTF_TIMEFRAME_MINUTES", 240) or 240),
+        "block_short": bool(getattr(_cfg, "TV_BLOCK_ON_HTF_SHORT", True)),
+        "block_close": bool(getattr(_cfg, "TV_BLOCK_ON_HTF_CLOSE", True)),
+    }
+
+
+def tv_context_score_adjustment(
+    symbol: str,
+    direction: str = "LONG",
+    tv_context: dict[str, Any] | None = None,
+) -> tuple[float, str]:
+    policy = _tv_context_policy()
+    if not policy["enabled"] or not isinstance(tv_context, dict):
+        return 0.0, ""
+
+    clean = _clean_symbol(symbol)
+    payload_symbol = _clean_symbol(str(tv_context.get("symbol") or clean))
+    if payload_symbol and payload_symbol != clean:
+        return 0.0, ""
+
+    profile_name = str(tv_context.get("profile_name") or "").strip()
+    if policy["profile_name"] and profile_name and profile_name != policy["profile_name"]:
+        return 0.0, ""
+
+    try:
+        tf_min = int(float(tv_context.get("tf_min") or 0))
+    except Exception:
+        tf_min = 0
+    if tf_min and tf_min < int(policy["timeframe_min"]):
+        return 0.0, ""
+
+    try:
+        age_seconds = float(tv_context.get("age_seconds") or 0.0)
+    except Exception:
+        age_seconds = 0.0
+    if age_seconds and age_seconds > float(policy["max_age_seconds"]):
+        return 0.0, ""
+
+    htf_bias = str(tv_context.get("htf_bias") or tv_context.get("direction") or "").upper()
+    normalized_direction = str(direction or "LONG").upper()
+    if htf_bias == "SHORT" and policy["block_short"] and normalized_direction == "LONG":
+        return 0.0, "tv_htf_short_bias_block"
+    if htf_bias == "CLOSE" and policy["block_close"] and normalized_direction == "LONG":
+        return 0.0, "tv_htf_close_bias_block"
+    if htf_bias == normalized_direction:
+        return float(policy["boost"]), ""
+    return 0.0, ""
 
 
 def _edge_condition_matches(
@@ -662,16 +721,25 @@ def final_score_for_symbol(
     existing_composite: float,
     derivative_score: float,
     regime: str,
+    *,
+    direction: str = "LONG",
+    tv_context: dict[str, Any] | None = None,
 ) -> float:
     policy = get_spot_strategy(symbol)
     weights = policy["score_weights"].get(
         str(regime or "NEUTRAL").upper(), policy["score_weights"]["NEUTRAL"]
     )
-    return round(
+    base = round(
         float(existing_composite) * float(weights["composite"])
         + float(derivative_score) * float(weights["derivative"]),
         1,
     )
+    boost, _ = tv_context_score_adjustment(
+        symbol,
+        direction=direction,
+        tv_context=tv_context,
+    )
+    return round(base + boost, 1)
 
 
 def target_r_for_symbol(symbol: str, regime: str) -> float:
@@ -693,6 +761,7 @@ def spot_quality_block_reason(
     final_spot_score: float | None = None,
     execution_route: str = "",
     synthetic_candidate: bool = False,
+    tv_context: dict[str, Any] | None = None,
 ) -> tuple[str, float]:
     policy = get_spot_strategy(symbol)
     clean = _clean_symbol(symbol)
@@ -724,6 +793,14 @@ def spot_quality_block_reason(
     setup_policy = setup_policy_for_symbol(clean, setup_family, setup_score)
     if not setup_policy["allowed"]:
         return str(setup_policy["reason"] or "setup_family_not_allowed"), floor
+
+    _, tv_block = tv_context_score_adjustment(
+        clean,
+        direction="LONG",
+        tv_context=tv_context,
+    )
+    if tv_block:
+        return tv_block, floor
 
     for condition in policy.get("edge_conditions") or ():
         if not _edge_condition_matches(spot_state, condition):

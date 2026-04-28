@@ -196,7 +196,7 @@ def render_dev_config():
         long_signals = [
             ("CVD bullish divergence", "+25"),
             ("MACD all variants aligned long", "+20"),
-            ("TradingView webhook confirmed", "+20"),
+            ("TradingView HTF long alignment", "+6 context"),
             ("RSI bullish divergence", "+15"),
             ("Funding squeeze (< −0.3 norm)", "+15"),
             ("VWAP reclaim on volume", "+15"),

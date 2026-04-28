@@ -584,6 +584,8 @@ def final_spot_score(
     derivative_score: float,
     regime: str = "NEUTRAL",
     symbol: str | None = None,
+    direction: str = "LONG",
+    tv_context: dict | None = None,
 ) -> float:
     if symbol:
         return final_score_for_symbol(
@@ -591,6 +593,8 @@ def final_spot_score(
             existing_composite=existing_composite,
             derivative_score=derivative_score,
             regime=regime,
+            direction=direction,
+            tv_context=tv_context,
         )
     if str(regime or "NEUTRAL").upper() == "NEUTRAL":
         composite_w = SPOT_NEUTRAL_SCORE_WEIGHT_COMPOSITE

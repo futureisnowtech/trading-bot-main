@@ -11,8 +11,7 @@ Paste the ngrok URL into TradingView alert → Webhook URL:
     https://xxxx.ngrok.io/webhook
 
 Pine Script sends JSON; this server validates the secret, normalises the symbol,
-and writes a row to system_events (source='tradingview').  job_runner adds
-TV_SIGNAL_BOOST_CONVICTION pts to conviction when a matching signal is fresh.
+and writes a normalized TradingView HTF context row to SQLite.
 
 Payload format expected from Pine Script:
     {
@@ -28,26 +27,35 @@ Payload format expected from Pine Script:
 import json
 import os
 import sys
-import sqlite3
 import logging
+from pathlib import Path
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 # ── path ─────────────────────────────────────────────────────────────────────
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+
+    # Explicitly load the canonical repo .env so launchd always reads the
+    # Projects checkout even if another clone exists elsewhere on disk.
+    load_dotenv(ROOT / ".env")
 except ImportError:
     pass
 
-from config import DB_PATH, MARKET_TIMEZONE
+from config import (
+    TV_SIGNAL_INDICATOR_NAME,
+    TV_SIGNAL_PROFILE_NAME,
+    TV_SIGNALS_ENABLED,
+    TV_WEBHOOK_PORT,
+    TV_WEBHOOK_SECRET,
+)
 
 # ── config ────────────────────────────────────────────────────────────────────
-PORT:   int = int(os.getenv('TV_WEBHOOK_PORT', '8765'))
-SECRET: str = os.getenv('TV_WEBHOOK_SECRET', '')
+PORT: int = int(TV_WEBHOOK_PORT or 8765)
+SECRET: str = str(TV_WEBHOOK_SECRET or "")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -86,30 +94,21 @@ def _normalise_symbol(raw: str) -> str:
     return s  # unknown, pass through
 
 
-# ── DB writer ─────────────────────────────────────────────────────────────────
-def _write_signal(symbol: str, action: str, price: float, tf: str, signal_desc: str) -> None:
-    ts = datetime.now(timezone.utc).isoformat()
-    message = json.dumps({
-        'symbol': symbol,
-        'action': action,
-        'price':  price,
-        'tf_min': tf,
-        'signal': signal_desc,
-        'ts':     ts,
-    })
-    try:
-        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-        conn = sqlite3.connect(DB_PATH)
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute(
-            "INSERT INTO system_events (ts, level, source, message) VALUES (?, ?, ?, ?)",
-            (ts, 'INFO', 'tradingview', message),
-        )
-        conn.commit()
-        conn.close()
-        log.info(f"Saved TV signal: {symbol} {action.upper()} @ {price:.4f}  [{signal_desc}]")
-    except Exception as e:
-        log.error(f"DB write failed: {e}")
+def _normalize_bias(data: dict) -> tuple[str, str, str]:
+    action_raw = str(
+        data.get("action")
+        or data.get("direction")
+        or data.get("bias")
+        or data.get("signal_type")
+        or "buy"
+    ).strip().lower()
+    if action_raw in {"buy", "long"}:
+        return action_raw, "LONG", "LONG"
+    if action_raw in {"sell", "short"}:
+        return action_raw, "SHORT", "SHORT"
+    if action_raw in {"close", "flat", "exit"}:
+        return action_raw, "CLOSE", "CLOSE"
+    return action_raw, "LONG", "LONG"
 
 
 # ── HTTP handler ──────────────────────────────────────────────────────────────
@@ -135,6 +134,9 @@ class WebhookHandler(BaseHTTPRequestHandler):
             self._send(404, json.dumps({'error': 'not found'}))
 
     def do_POST(self):
+        if not TV_SIGNALS_ENABLED:
+            self._send(503, json.dumps({'error': 'tv_signals_disabled'}))
+            return
         if urlparse(self.path).path != '/webhook':
             self._send(404, json.dumps({'error': 'not found'}))
             return
@@ -153,12 +155,14 @@ class WebhookHandler(BaseHTTPRequestHandler):
             return
 
         # ── secret validation ───────────────────────────────────────────────
+        secret_validated = False
         if SECRET:
             incoming_secret = str(data.get('secret', ''))
             if incoming_secret != SECRET:
                 log.warning(f"Bad secret from {self.client_address[0]} — rejected")
                 self._send(403, json.dumps({'error': 'forbidden'}))
                 return
+            secret_validated = True
 
         # ── parse fields ────────────────────────────────────────────────────
         raw_symbol = str(data.get('symbol', '')).strip()
@@ -167,15 +171,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
             return
 
         symbol = _normalise_symbol(raw_symbol)
-        action = str(data.get('action', 'buy')).lower().strip()
-        if action not in ('buy', 'sell', 'close', 'long', 'short'):
-            self._send(400, json.dumps({'error': f'unknown action: {action}'}))
-            return
-        # Normalise buy/long → "buy", sell/short/close → "sell"
-        if action in ('long',):
-            action = 'buy'
-        elif action in ('short', 'close'):
-            action = 'sell'
+        action_raw, direction, htf_bias = _normalize_bias(data)
 
         try:
             price = float(data.get('price', 0))
@@ -184,13 +180,56 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
         tf         = str(data.get('tf', '1'))
         signal_desc = str(data.get('signal', ''))[:200]  # cap to 200 chars
+        indicator_name = str(
+            data.get("indicator")
+            or data.get("indicator_name")
+            or TV_SIGNAL_INDICATOR_NAME
+        )[:120]
+        profile_name = str(data.get("profile_name") or TV_SIGNAL_PROFILE_NAME)[:120]
+        strength = str(data.get("strength") or "moderate")[:40]
+        try:
+            from logging_db.trade_logger import log_tv_signal
 
-        _write_signal(symbol, action, price, tf, signal_desc)
-        self._send(200, json.dumps({'status': 'ok', 'symbol': symbol, 'action': action}))
+            log_tv_signal(
+                symbol=symbol,
+                action_raw=action_raw,
+                direction=direction,
+                htf_bias=htf_bias,
+                price=price,
+                tf_min=tf,
+                indicator_name=indicator_name,
+                profile_name=profile_name,
+                strength=strength,
+                signal_desc=signal_desc,
+                secret_validated=secret_validated,
+                raw_payload_json=json.dumps(data),
+            )
+            log.info(
+                f"Saved TV HTF signal: {symbol} bias={htf_bias} tf={tf} "
+                f"indicator={indicator_name} strength={strength}"
+            )
+        except Exception as e:
+            log.error(f"DB write failed: {e}")
+            self._send(500, json.dumps({'error': 'db_write_failed'}))
+            return
+        self._send(
+            200,
+            json.dumps(
+                {
+                    'status': 'ok',
+                    'symbol': symbol,
+                    'direction': direction,
+                    'htf_bias': htf_bias,
+                    'profile_name': profile_name,
+                }
+            ),
+        )
 
 
 # ── entrypoint ────────────────────────────────────────────────────────────────
 def main():
+    if not TV_SIGNALS_ENABLED:
+        log.warning("TV_SIGNALS_ENABLED=false — webhook will reject all POST requests")
     if not SECRET:
         log.warning("TV_WEBHOOK_SECRET not set in .env — all POST requests will be accepted without auth!")
     else:

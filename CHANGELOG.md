@@ -1,6 +1,12 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-28
+- v18.10: harden TradingView webhook to explicitly load the Projects-repo .env, verify live secret auth end-to-end, and remove stale +20 candidate-injection references from docs and operator surfaces
+
+## 2026-04-28
+- v18.9: rewire TradingView into HTF context mode, repair spot learning ingestion on closes, throttle labeler/retrain/RBI/audit cadences, reduce scanner defaults to 20/8, add dashboard start/stop scripts, split runtime/dev requirements, and make brain launchd helper optional by default
+
+## 2026-04-28
 - Added deep spot-system audit reports covering live strategy, real learning/ML/RBI status, root causes, and recent trade metrics.
 
 ## 2026-04-28

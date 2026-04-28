@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// TradingView Pine Script v5 — Alert sender for algo_trading_final webhook
+// TradingView Pine Script v5 — generic alert sender for algo_trading_final webhook
 //
 // SETUP INSTRUCTIONS:
 //   1. In TradingView, open Pine Editor (bottom panel)
@@ -11,8 +11,13 @@
 //      (Pine Script fills in the JSON alert body automatically)
 //   7. Set TV_WEBHOOK_SECRET in your .env to match the secret below
 //
-// The alerts sent to the webhook will add +20 conviction pts to any matching
-// symbol scan in job_runner.py (TV_SIGNAL_BOOST_CONVICTION in config.py).
+// Current architecture note:
+//   TradingView alerts are ingested as higher-timeframe context rows, not as
+//   standalone trade candidates. The live spot lane uses them as a modest
+//   long-bias boost or a veto on HTF SHORT / HTF CLOSE.
+//
+// This file is now just a reference sender template. The preferred live setup
+// is the external "AlgoBot HTF Confluence Engine v2" script/profile.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 //@version=5

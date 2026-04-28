@@ -154,6 +154,15 @@ def init_db() -> None:
         "ALTER TABLE open_positions ADD COLUMN risk_dollars REAL DEFAULT 0",
         "ALTER TABLE open_positions ADD COLUMN entry_fee_usd REAL DEFAULT 0",
         "ALTER TABLE open_positions ADD COLUMN exit_reason TEXT DEFAULT ''",
+        "ALTER TABLE open_positions ADD COLUMN entry_trade_id INTEGER DEFAULT 0",
+        "ALTER TABLE open_positions ADD COLUMN entry_order_id TEXT DEFAULT ''",
+        "ALTER TABLE open_positions ADD COLUMN entry_feature_snapshot_id INTEGER DEFAULT 0",
+        "ALTER TABLE open_positions ADD COLUMN tv_profile_name TEXT DEFAULT ''",
+        "ALTER TABLE open_positions ADD COLUMN tv_signal_bias TEXT DEFAULT ''",
+        "ALTER TABLE open_positions ADD COLUMN tv_signal_ts TEXT DEFAULT ''",
+        "ALTER TABLE open_positions ADD COLUMN tv_signal_age_sec REAL DEFAULT 0",
+        "ALTER TABLE open_positions ADD COLUMN tv_indicator_name TEXT DEFAULT ''",
+        "ALTER TABLE open_positions ADD COLUMN tv_signal_strength TEXT DEFAULT ''",
     ]:
         try:
             cur.execute(migration)
@@ -181,6 +190,27 @@ def init_db() -> None:
         ts TEXT NOT NULL, level TEXT NOT NULL,
         source TEXT NOT NULL, message TEXT NOT NULL
     )""")
+
+    cur.execute("""CREATE TABLE IF NOT EXISTS tv_signals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts TEXT NOT NULL,
+        symbol TEXT NOT NULL,
+        action_raw TEXT NOT NULL,
+        direction TEXT NOT NULL,
+        htf_bias TEXT NOT NULL,
+        price REAL DEFAULT 0,
+        tf_min TEXT DEFAULT '',
+        indicator_name TEXT DEFAULT '',
+        profile_name TEXT DEFAULT '',
+        strength TEXT DEFAULT '',
+        signal_desc TEXT DEFAULT '',
+        secret_validated INTEGER DEFAULT 0,
+        raw_payload_json TEXT DEFAULT ''
+    )""")
+    cur.execute(
+        """CREATE INDEX IF NOT EXISTS idx_tv_signals_symbol_ts
+           ON tv_signals(symbol, ts DESC)"""
+    )
 
     cur.execute("""CREATE TABLE IF NOT EXISTS api_costs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -790,7 +820,7 @@ def log_edge_snapshot(
 
 def log_trade_features(
     trade_id: int, symbol: str, direction: str, features: dict
-) -> None:
+) -> int:
     """
     Persist a 57-feature snapshot for a trade entry.
 
@@ -809,18 +839,21 @@ def log_trade_features(
     import json
 
     if not trade_id or trade_id <= 0:
-        return
+        return 0
     try:
         conn = _conn()
-        conn.cursor().execute(
+        cur = conn.cursor()
+        cur.execute(
             "INSERT INTO trade_features (trade_id, ts, symbol, direction, features_json) "
             "VALUES (?, ?, ?, ?, ?)",
             (trade_id, time.time(), symbol, direction, json.dumps(features)),
         )
+        row_id = int(cur.lastrowid or 0)
         conn.commit()
         conn.close()
+        return row_id
     except Exception:
-        pass  # feature snapshot is best-effort; never block trade execution
+        return 0  # feature snapshot is best-effort; never block trade execution
 
 
 # ─── Candidate journaling (v13.6) ────────────────────────────────────────────
@@ -1670,6 +1703,15 @@ def persist_position(
     risk_dollars=0.0,
     entry_fee_usd=0.0,
     exit_reason="",
+    entry_trade_id=0,
+    entry_order_id="",
+    entry_feature_snapshot_id=0,
+    tv_profile_name="",
+    tv_signal_bias="",
+    tv_signal_ts="",
+    tv_signal_age_sec=0.0,
+    tv_indicator_name="",
+    tv_signal_strength="",
 ) -> None:
     """Write open position to DB so restarts can recover it (including exit state)."""
     _low = low_since_entry if low_since_entry is not None else entry
@@ -1712,10 +1754,20 @@ def persist_position(
         float(risk_dollars or 0.0),
         float(entry_fee_usd or 0.0),
         str(exit_reason or ""),
+        int(entry_trade_id or 0),
+        str(entry_order_id or ""),
+        int(entry_feature_snapshot_id or 0),
+        str(tv_profile_name or ""),
+        str(tv_signal_bias or ""),
+        str(tv_signal_ts or ""),
+        float(tv_signal_age_sec or 0.0),
+        str(tv_indicator_name or ""),
+        str(tv_signal_strength or ""),
     )
     conn = _conn()
+    placeholders = ",".join(["?"] * len(values))
     conn.cursor().execute(
-        """INSERT OR REPLACE INTO open_positions
+        f"""INSERT OR REPLACE INTO open_positions
         (symbol,strategy,qty,entry,stop,target,high_since_entry,low_since_entry,ts_entry,paper,
          direction,entry_reason,atr_at_entry,composite_score,
          trailing_active,trailing_stop_price,scale_33_done,scale_66_done,leverage,
@@ -1723,8 +1775,10 @@ def persist_position(
          tf_5m_state,tf_30m_state,tf_4h_state,tf_1d_state,
          structural_confirms,execution_route,cooldown_until,microstructure_veto,
          stop_model_version,target_model_version,target_r,trail_arm_r,risk_dollars,
-         entry_fee_usd,exit_reason)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+         entry_fee_usd,exit_reason,entry_trade_id,entry_order_id,entry_feature_snapshot_id,
+         tv_profile_name,tv_signal_bias,tv_signal_ts,tv_signal_age_sec,
+         tv_indicator_name,tv_signal_strength)
+        VALUES ({placeholders})""",
         values,
     )
     conn.commit()
@@ -2148,10 +2202,17 @@ def get_recent_tv_signal(symbol: str, max_age_seconds: int = 300) -> dict | None
 
     The returned dict has keys: symbol, action, price, tf_min, signal, ts
     """
-    import json
     from datetime import timezone
 
     try:
+        recent = get_recent_tv_signals(max_age_seconds=max_age_seconds, symbol=symbol)
+        if recent:
+            return recent[0]
+    except Exception:
+        pass
+
+    try:
+        import json
         conn = _conn()
         cur = conn.cursor()
         # Pull last 20 tradingview events and find a match (small result set, avoids LIKE index miss)
@@ -2179,6 +2240,140 @@ def get_recent_tv_signal(symbol: str, max_age_seconds: int = 300) -> dict | None
         return None
     except Exception:
         return None
+
+
+def log_tv_signal(
+    *,
+    symbol: str,
+    action_raw: str,
+    direction: str,
+    htf_bias: str,
+    price: float = 0.0,
+    tf_min: str = "",
+    indicator_name: str = "",
+    profile_name: str = "",
+    strength: str = "",
+    signal_desc: str = "",
+    secret_validated: bool = False,
+    raw_payload_json: str = "",
+) -> int:
+    import json
+
+    ts = _ts()
+    payload = {
+        "symbol": str(symbol or "").upper(),
+        "action_raw": str(action_raw or "").lower(),
+        "direction": str(direction or "").upper(),
+        "htf_bias": str(htf_bias or "").upper(),
+        "price": float(price or 0.0),
+        "tf_min": str(tf_min or ""),
+        "indicator_name": str(indicator_name or ""),
+        "profile_name": str(profile_name or ""),
+        "strength": str(strength or ""),
+        "signal": str(signal_desc or ""),
+        "secret_validated": bool(secret_validated),
+        "ts": ts,
+    }
+    conn = _conn()
+    cur = conn.cursor()
+    cur.execute(
+        """INSERT INTO tv_signals
+           (ts,symbol,action_raw,direction,htf_bias,price,tf_min,indicator_name,
+            profile_name,strength,signal_desc,secret_validated,raw_payload_json)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            ts,
+            payload["symbol"],
+            payload["action_raw"],
+            payload["direction"],
+            payload["htf_bias"],
+            payload["price"],
+            payload["tf_min"],
+            payload["indicator_name"],
+            payload["profile_name"],
+            payload["strength"],
+            payload["signal"],
+            1 if secret_validated else 0,
+            raw_payload_json,
+        ),
+    )
+    cur.execute(
+        "INSERT INTO system_events (ts, level, source, message) VALUES (?, ?, ?, ?)",
+        (ts, "INFO", "tradingview", json.dumps(payload)),
+    )
+    row_id = int(cur.lastrowid or 0)
+    conn.commit()
+    conn.close()
+    return row_id
+
+
+def get_recent_tv_signals(
+    max_age_seconds: int = 300,
+    *,
+    symbol: str = "",
+) -> list[dict]:
+    from datetime import datetime, timezone
+
+    try:
+        conn = _conn()
+        cur = conn.cursor()
+        if symbol:
+            cur.execute(
+                """
+                SELECT ts, symbol, action_raw, direction, htf_bias, price, tf_min,
+                       indicator_name, profile_name, strength, signal_desc, secret_validated
+                FROM tv_signals
+                WHERE symbol=?
+                ORDER BY ts DESC
+                LIMIT 20
+                """,
+                (str(symbol or "").upper(),),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT ts, symbol, action_raw, direction, htf_bias, price, tf_min,
+                       indicator_name, profile_name, strength, signal_desc, secret_validated
+                FROM tv_signals
+                ORDER BY ts DESC
+                LIMIT 50
+                """
+            )
+        rows = cur.fetchall()
+        conn.close()
+        now = datetime.now(timezone.utc)
+        out: list[dict] = []
+        for row in rows:
+            ts_str = str(row[0] or "")
+            try:
+                ts_dt = datetime.fromisoformat(ts_str)
+                if not ts_dt.tzinfo:
+                    ts_dt = ts_dt.replace(tzinfo=timezone.utc)
+                age = (now - ts_dt).total_seconds()
+            except Exception:
+                age = max_age_seconds + 1
+            if age > max_age_seconds:
+                continue
+            out.append(
+                {
+                    "ts": ts_str,
+                    "symbol": str(row[1] or "").upper(),
+                    "action_raw": str(row[2] or "").lower(),
+                    "direction": str(row[3] or "").upper(),
+                    "htf_bias": str(row[4] or "").upper(),
+                    "price": float(row[5] or 0.0),
+                    "tf_min": str(row[6] or ""),
+                    "indicator_name": str(row[7] or ""),
+                    "profile_name": str(row[8] or ""),
+                    "strength": str(row[9] or ""),
+                    "signal": str(row[10] or ""),
+                    "secret_validated": bool(row[11]),
+                    "age_seconds": age,
+                }
+            )
+        return out
+    except Exception:
+        return []
 
 
 def get_recent_notifications(limit=30) -> list:

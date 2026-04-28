@@ -7,6 +7,7 @@ Manages one long-only spot position per symbol with restart-safe persistence.
 from __future__ import annotations
 
 import datetime
+import json
 import logging
 import os
 import sqlite3
@@ -155,7 +156,12 @@ def _symbol_cfg(symbol: str) -> dict:
 
 
 def _clean_symbol(symbol: str) -> str:
-    return symbol.upper().replace("USDT", "").replace("USD", "").replace("-USD", "")
+    clean = str(symbol or "").upper().replace("/", "-")
+    for suffix in ("-USDC", "-USDT", "-USD", "USDC", "USDT", "USD"):
+        if clean.endswith(suffix):
+            clean = clean[: -len(suffix)]
+            break
+    return clean.replace("-", "")
 
 
 def _position_strategy(symbol: str) -> str:
@@ -227,6 +233,114 @@ def _state_payload(spot_state: dict | None) -> dict:
         "tf_1d_state": spot_state.get("tf_1d_state", ""),
         "structural_confirms": spot_state.get("structural_confirms", ""),
     }
+
+
+def _tv_payload(tv_context: dict | None) -> dict:
+    if not isinstance(tv_context, dict):
+        return {
+            "tv_profile_name": "",
+            "tv_signal_bias": "",
+            "tv_signal_ts": "",
+            "tv_signal_age_sec": 0.0,
+            "tv_indicator_name": "",
+            "tv_signal_strength": "",
+            "tv_signal_active": False,
+        }
+    bias = str(tv_context.get("htf_bias") or tv_context.get("direction") or "").upper()
+    profile = str(tv_context.get("profile_name") or "").strip()
+    return {
+        "tv_profile_name": profile,
+        "tv_signal_bias": bias,
+        "tv_signal_ts": str(tv_context.get("ts") or "").strip(),
+        "tv_signal_age_sec": float(tv_context.get("age_seconds") or 0.0),
+        "tv_indicator_name": str(
+            tv_context.get("indicator_name") or tv_context.get("indicator") or ""
+        ).strip(),
+        "tv_signal_strength": str(tv_context.get("strength") or "").strip(),
+        "tv_signal_active": bool(profile and bias == "LONG"),
+    }
+
+
+def _spot_entry_features(
+    symbol: str,
+    *,
+    composite_score: float,
+    final_spot_score: float,
+    spot_state: dict | None,
+    execution_route: str,
+    edge_profile: str,
+    tv_context: dict | None,
+) -> dict:
+    state = spot_state or {}
+    frames = state.get("frames") or {}
+    s5 = frames.get("5m") or {}
+    s30 = frames.get("30m") or {}
+    confirms = {
+        token.strip().lower()
+        for token in str(state.get("structural_confirms") or "").split(",")
+        if token.strip()
+    }
+    tv_payload = _tv_payload(tv_context)
+    return {
+        "symbol": _clean_symbol(symbol),
+        "regime": str(state.get("regime") or "UNKNOWN"),
+        "spot_regime": str(state.get("regime") or "UNKNOWN"),
+        "setup_family": str(state.get("setup_family") or ""),
+        "setup_score": float(state.get("setup_score") or 0.0),
+        "composite_score": float(composite_score or 0.0),
+        "conviction_score": float(final_spot_score or 0.0),
+        "entry_thesis_score": float(final_spot_score or 0.0),
+        "final_spot_score": float(final_spot_score or 0.0),
+        "derivative_score": float(state.get("derivative_score") or 0.0),
+        "structural_confirm_count": int(state.get("structural_confirm_count") or 0),
+        "execution_route": str(execution_route or ""),
+        "edge_profile": str(edge_profile or ""),
+        "path_efficiency": float(s5.get("path_efficiency") or 0.0),
+        "momentum_impulse": float(s5.get("momentum_impulse") or 0.0),
+        "structure_component": float(s5.get("structure_component") or 0.0),
+        "participation_component": float(s5.get("participation_component") or 0.0),
+        "frame_score_5m": float(s5.get("frame_score") or 0.0),
+        "frame_score_30m": float(s30.get("frame_score") or 0.0),
+        "volatility_quality": float(s30.get("volatility_quality") or 0.0),
+        "supertrend_bullish": "supertrend" in confirms,
+        "cloud_bullish": ("cloud" in confirms) or ("ichimoku" in confirms),
+        "wae_bullish": "wae" in confirms,
+        "wt_oversold_cross": ("wt" in confirms) or ("wavetrend" in confirms),
+        "kst_bullish": "kst" in confirms,
+        "tv_signal_active": bool(tv_payload["tv_signal_active"]),
+        "tv_profile_name": tv_payload["tv_profile_name"],
+        "tv_htf_bias": tv_payload["tv_signal_bias"],
+        "tv_signal_age_sec": float(tv_payload["tv_signal_age_sec"] or 0.0),
+    }
+
+
+def _load_entry_feature_snapshot(position: dict) -> dict:
+    snapshot_id = int(position.get("entry_feature_snapshot_id") or 0)
+    trade_id = int(position.get("entry_trade_id") or 0)
+    if snapshot_id <= 0 and trade_id <= 0:
+        return {}
+    try:
+        con = sqlite3.connect(_get_db_path(), timeout=5)
+        cur = con.cursor()
+        if snapshot_id > 0:
+            cur.execute(
+                "SELECT features_json FROM trade_features WHERE id=? LIMIT 1",
+                (snapshot_id,),
+            )
+        else:
+            cur.execute(
+                "SELECT features_json FROM trade_features WHERE trade_id=? ORDER BY id DESC LIMIT 1",
+                (trade_id,),
+            )
+        row = cur.fetchone()
+        con.close()
+        if not row or not row[0]:
+            return {}
+        data = json.loads(row[0])
+        return data if isinstance(data, dict) else {}
+    except Exception as e:
+        logger.debug(f"[spot_engine] feature snapshot load error: {e}")
+        return {}
 
 
 def _resolve_spot_state(symbol: str, *, allow_stale: bool) -> dict | None:
@@ -392,6 +506,7 @@ def open_spot(
     final_spot_score: float | None = None,
     risk_dollars: float = 0.0,
     cooldown_until: str = "",
+    tv_context: dict | None = None,
 ) -> Optional[Dict]:
     clean = _clean_symbol(symbol)
     if not SPOT_LANE_ACTIVE:
@@ -452,6 +567,8 @@ def open_spot(
         clean,
         spot_state,
         final_spot_score=score_used,
+        execution_route="maker_first" if not paper else "paper_market",
+        tv_context=tv_context,
     )
     if block_reason:
         logger.info(f"[spot_engine] {clean} blocked — {block_reason}")
@@ -495,10 +612,11 @@ def open_spot(
     stop_price = round(price * (1.0 - stop_pct), 8) if price > 0 else 0.0
     target_price = round(price * (1.0 + stop_pct * target_r), 8) if price > 0 else 0.0
 
-    from logging_db.trade_logger import log_trade, persist_position
+    from logging_db.trade_logger import log_trade, log_trade_features, persist_position
 
     state_payload = _state_payload(spot_state)
-    log_trade(
+    tv_payload = _tv_payload(tv_context)
+    entry_trade_id = log_trade(
         strategy=_position_strategy(clean),
         broker="coinbase_spot",
         symbol=clean,
@@ -514,6 +632,21 @@ def open_spot(
             f"target={target_price:.8g} stop_pct={stop_pct:.4%} "
             f"final_spot_score={score_used:.1f} edge_profile={edge_profile}"
         ),
+    )
+    entry_features = _spot_entry_features(
+        clean,
+        composite_score=composite_score,
+        final_spot_score=score_used,
+        spot_state=spot_state,
+        execution_route=execution_route,
+        edge_profile=edge_profile,
+        tv_context=tv_context,
+    )
+    entry_feature_snapshot_id = log_trade_features(
+        entry_trade_id,
+        clean,
+        "LONG",
+        entry_features,
     )
     persist_position(
         symbol=clean,
@@ -549,6 +682,15 @@ def open_spot(
         risk_dollars=risk_dollars,
         entry_fee_usd=fee_usd,
         exit_reason="",
+        entry_trade_id=entry_trade_id,
+        entry_order_id=str(order.get("order_id") or ""),
+        entry_feature_snapshot_id=entry_feature_snapshot_id,
+        tv_profile_name=tv_payload["tv_profile_name"],
+        tv_signal_bias=tv_payload["tv_signal_bias"],
+        tv_signal_ts=tv_payload["tv_signal_ts"],
+        tv_signal_age_sec=tv_payload["tv_signal_age_sec"],
+        tv_indicator_name=tv_payload["tv_indicator_name"],
+        tv_signal_strength=tv_payload["tv_signal_strength"],
     )
     return {
         "symbol": clean,
@@ -657,9 +799,15 @@ def close_spot(
     )
 
     from logging_db.trade_logger import log_trade, delete_position
+    entry_features = _load_entry_feature_snapshot(pos)
+    exit_state = None
+    try:
+        exit_state = _resolve_spot_state(clean, allow_stale=True)
+    except Exception:
+        exit_state = None
 
     _sync_position_exit_reason(clean, strategy, paper, exit_reason)
-    log_trade(
+    close_trade_id = log_trade(
         strategy=strategy,
         broker="coinbase_spot",
         symbol=clean,
@@ -676,6 +824,56 @@ def close_spot(
             f"micro_veto={micro_veto} pnl={pnl_usd:.2f}"
         ),
     )
+    total_fee_usd = fee_usd + float(pos.get("entry_fee_usd") or 0.0)
+    if close_trade_id > 0:
+        try:
+            import learning_loop as _ll
+
+            _ll.record_closed_trade(
+                trade_id=close_trade_id,
+                symbol=clean,
+                direction="LONG",
+                won=pnl_usd > 0,
+                pnl_usd=pnl_usd,
+                entry_price=entry_price,
+                exit_price=exit_price,
+                entry_score=float(entry_features.get("entry_thesis_score") or 0.0),
+                exit_score=float((exit_state or {}).get("derivative_score") or 0.0),
+                regime=str(
+                    entry_features.get("regime")
+                    or pos.get("spot_regime")
+                    or (exit_state or {}).get("regime")
+                    or "UNKNOWN"
+                ),
+                features=entry_features,
+            )
+        except Exception as e:
+            logger.debug(f"[spot_engine] learning_loop close error {clean}: {e}")
+        try:
+            from learning.post_trade_analyzer import analyze_closed_trade as _pta
+
+            _pta(
+                symbol=clean,
+                strategy=strategy,
+                entry_price=entry_price,
+                exit_price=exit_price,
+                qty=filled_qty,
+                fee_usd=total_fee_usd,
+                entry_ts=str(pos.get("ts_entry") or datetime.datetime.utcnow().isoformat()),
+                exit_ts=datetime.datetime.utcnow().isoformat(),
+                exit_reason=exit_reason,
+                market_data_at_entry=entry_features,
+                source="clean_paper_v10" if paper else "live_v10",
+                paper=paper,
+                trade_ref=str(order.get("order_id") or close_trade_id),
+                exit_type=exit_reason,
+                composite_score=float(entry_features.get("composite_score") or 0.0),
+                close_order_id=str(order.get("order_id") or ""),
+                entry_order_id=str(pos.get("entry_order_id") or ""),
+                feature_snapshot_id=int(pos.get("entry_feature_snapshot_id") or 0),
+            )
+        except Exception as e:
+            logger.debug(f"[spot_engine] post_trade_analyzer close error {clean}: {e}")
     delete_position(clean, strategy=strategy, paper=paper)
     return {
         "symbol": clean,

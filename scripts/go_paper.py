@@ -18,8 +18,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 PAPER_PLIST = Path.home() / "Library" / "LaunchAgents" / "com.algotrading.king.plist"
+LIVE_PLIST = (
+    Path.home() / "Library" / "LaunchAgents" / "com.algotrading.king.live.plist"
+)
 LIVE_PID = ROOT / "logs" / "service" / "manual_live_bot.pid"
 DB_PATH = ROOT / "logs" / "trades.db"
+_LIVE_LABEL = "com.algotrading.king.live"
 
 
 def _run(cmd: list[str]) -> subprocess.CompletedProcess[str]:
@@ -49,7 +53,9 @@ def _live_pids() -> list[int]:
 def _terminate(pids: list[int]) -> None:
     if not pids:
         return
-    print(f"[go_paper] Stopping live boot process(es): {', '.join(str(p) for p in pids)}")
+    print(
+        f"[go_paper] Stopping live boot process(es): {', '.join(str(p) for p in pids)}"
+    )
     for pid in pids:
         try:
             os.kill(pid, signal.SIGTERM)
@@ -84,6 +90,11 @@ def _load_mode() -> str | None:
 
 
 def main() -> int:
+    # Unload the live launchd service first (prevents auto-restart after kill)
+    if LIVE_PLIST.exists():
+        print(f"[go_paper] Unloading live launchd service: {LIVE_PLIST}")
+        _run(["launchctl", "unload", str(LIVE_PLIST)])
+
     _terminate(_live_pids())
     if LIVE_PID.exists():
         LIVE_PID.unlink()

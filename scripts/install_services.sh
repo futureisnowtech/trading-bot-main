@@ -21,6 +21,57 @@ PLISTS=(
     "com.algotrading.tradingview"
 )
 
+# Generate the live bot plist from template so it always has the correct PROJ path.
+# This file is not stored in git (live mode requires deliberate activation).
+_generate_live_plist() {
+    cat > "$PROJ/scripts/com.algotrading.king.live.plist" << PLISTEOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.algotrading.king.live</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Library/Frameworks/Python.framework/Versions/3.14/bin/python3</string>
+        <string>-B</string>
+        <string>$PROJ/scripts/boot.py</string>
+        <string>--mode</string>
+        <string>live</string>
+        <string>--confirm-live</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>$PROJ</string>
+    <key>KeepAlive</key>
+    <true/>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>ThrottleInterval</key>
+    <integer>60</integer>
+    <key>StandardOutPath</key>
+    <string>$PROJ/logs/service/manual_live_bot.log</string>
+    <key>StandardErrorPath</key>
+    <string>$PROJ/logs/service/bot_error.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/Library/Frameworks/Python.framework/Versions/3.14/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>$HOME</string>
+        <key>PYTHONDONTWRITEBYTECODE</key>
+        <string>1</string>
+        <key>TQDM_DISABLE</key>
+        <string>1</string>
+        <key>TOKENIZERS_PARALLELISM</key>
+        <string>false</string>
+    </dict>
+</dict>
+</plist>
+PLISTEOF
+    echo "  Generated com.algotrading.king.live.plist (RunAtLoad=false — activated by go_live.py)"
+}
+
 # Make scripts executable
 chmod +x "$PROJ/scripts/start_bot.sh"
 chmod +x "$PROJ/scripts/backup_db.sh"
@@ -42,6 +93,12 @@ echo "Installing launchd services..."
 
 # Create log dir so launchd can write to it before the bot creates it
 mkdir -p "$PROJ/logs/service"
+
+# Generate live plist with correct paths baked in
+_generate_live_plist
+# Copy to LaunchAgents (NOT loaded — go_live.py activates it)
+cp "$PROJ/scripts/com.algotrading.king.live.plist" "$AGENTS/com.algotrading.king.live.plist"
+echo "  Installed com.algotrading.king.live.plist (inactive until go_live.py)"
 
 for label in "${PLISTS[@]}"; do
     src="$PROJ/scripts/$label.plist"
@@ -80,7 +137,6 @@ echo ""
 echo "To view bot logs:"
 echo "  tail -f $PROJ/logs/service/bot.log"
 echo ""
-echo "IMPORTANT: Live trading is NOT auto-started. Use the controlled launcher:"
-echo "  python3 scripts/go_live.py"
-echo "Return to paper:"
-echo "  python3 scripts/go_paper.py"
+echo "IMPORTANT: Live trading requires explicit activation:"
+echo "  python3 scripts/go_live.py   # switch to live (survives reboots)"
+echo "  python3 scripts/go_paper.py  # switch back to paper"

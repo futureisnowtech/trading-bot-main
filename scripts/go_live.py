@@ -27,9 +27,14 @@ if str(ROOT) not in sys.path:
 
 PYTHON = "/Library/Frameworks/Python.framework/Versions/3.14/bin/python3"
 PAPER_PLIST = Path.home() / "Library" / "LaunchAgents" / "com.algotrading.king.plist"
+LIVE_PLIST_SRC = ROOT / "scripts" / "com.algotrading.king.live.plist"
+LIVE_PLIST = (
+    Path.home() / "Library" / "LaunchAgents" / "com.algotrading.king.live.plist"
+)
 LIVE_LOG = ROOT / "logs" / "service" / "manual_live_bot.log"
 LIVE_PID = ROOT / "logs" / "service" / "manual_live_bot.pid"
 DB_PATH = ROOT / "logs" / "trades.db"
+_LIVE_LABEL = "com.algotrading.king.live"
 
 
 def _run(cmd: list[str], *, check: bool = False) -> subprocess.CompletedProcess[str]:
@@ -164,7 +169,6 @@ def main() -> int:
             f"Live bot already appears to be running: {', '.join(str(p) for p in live_pids)}"
         )
 
-    proc: subprocess.Popen[bytes] | None = None
     paper_was_stopped = False
     try:
         if PAPER_PLIST.exists():
@@ -174,38 +178,25 @@ def main() -> int:
         _terminate(paper_pids, "paper boot process(es)")
         paper_was_stopped = True
 
-        env = os.environ.copy()
-        env.update(
-            {
-                "ALGO_BOOT_MODE": "live",
-                "ALGO_LIVE_CONFIRM": "I UNDERSTAND",
-                "PYTHONDONTWRITEBYTECODE": "1",
-                "TQDM_DISABLE": "1",
-                "TOKENIZERS_PARALLELISM": "false",
-            }
-        )
+        # Install live plist if not already in LaunchAgents
+        if not LIVE_PLIST.exists():
+            if not LIVE_PLIST_SRC.exists():
+                raise RuntimeError(
+                    f"Live plist not found: {LIVE_PLIST_SRC}\n"
+                    "Run: bash scripts/install_services.sh"
+                )
+            import shutil
 
-        print(f"[go_live] Launching live bot via {ROOT / 'scripts' / 'boot.py'}")
-        with LIVE_LOG.open("ab") as logf:
-            proc = subprocess.Popen(
-                [
-                    PYTHON,
-                    "-B",
-                    str(ROOT / "scripts" / "boot.py"),
-                    "--mode",
-                    "live",
-                    "--confirm-live",
-                ],
-                cwd=str(ROOT),
-                stdin=subprocess.DEVNULL,
-                stdout=logf,
-                stderr=subprocess.STDOUT,
-                env=env,
-                start_new_session=True,
-            )
+            shutil.copy2(str(LIVE_PLIST_SRC), str(LIVE_PLIST))
 
-        LIVE_PID.write_text(f"{proc.pid}\n", encoding="utf-8")
-        print(f"[go_live] Live bot PID: {proc.pid}")
+        # Unload first in case it was already registered, then load fresh
+        _run(["launchctl", "unload", str(LIVE_PLIST)])
+        print(f"[go_live] Loading live launchd service: {LIVE_PLIST}")
+        result = _run(["launchctl", "load", str(LIVE_PLIST)])
+        if result.returncode != 0:
+            raise RuntimeError(f"launchctl load failed: {result.stderr}")
+        _run(["launchctl", "kickstart", "-k", f"gui/{os.getuid()}/{_LIVE_LABEL}"])
+        print(f"[go_live] Live launchd service started (survives reboots)")
 
         deadline = time.time() + 20
         while time.time() < deadline:
@@ -257,11 +248,8 @@ def main() -> int:
             f"Check {LIVE_LOG}"
         )
     except Exception:
-        if proc is not None:
-            try:
-                os.kill(proc.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
+        # On failure: stop the live service and restore paper
+        _run(["launchctl", "unload", str(LIVE_PLIST)])
         if paper_was_stopped and PAPER_PLIST.exists():
             print("[go_live] Restoring paper launchd bot after failed live launch...")
             _run(["launchctl", "load", str(PAPER_PLIST)])

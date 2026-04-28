@@ -1,5 +1,19 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
+## 2026-04-28
+- fix(v18.8): aggressive gate loosening + LTC/DOGE/ADA/LINK synthetic candidate injection
+
+- SPOT_TARGET_R_BY_REGIME: TREND=4.0, NEUTRAL=3.0, CHOP=3.0 (from 2.0/1.5/1.2) — clears projected_net_win_too_small for BTC/ETH at 1% round-trip spot fees
+- SPOT_REGIME_SCORE_FLOORS: TREND=24.0, NEUTRAL=24.0, CHOP=28.0 (halved from 48/48/56)
+- All 8 symbol score_floors halved (TREND/NEUTRAL: ~24-25, CHOP: 25)
+- min_confirm_count=0 for all 8 symbols (removes structural_confirm_count_too_low block)
+- depth_min_usd=0 for all 8 SPOT_SCALP_SYMBOL_CONFIG entries (disables depth gate; real depth from live API)
+- spot_strategy.py score_floor_for_symbol hard minimum: 45.0→35.0
+- economics_gate.py _MIN_NEAR_DEPTH_USD: 5000→1000
+- v10_runner.py spot_only path: inject synthetic LONG candidates for LTC/DOGE/ADA/LINK (not in CORE_EXECUTION_UNDERLYINGS, never appear from perp scanner)
+- 3 proof tests updated to match new intentional gate thresholds
+- Disk cleanup: truncated manual_live_bot.log (167MB→0) and bot.log
+
 ## 2026-04-27
 - fix(config): expand perp universe BTC/ETH/SOL/XRP all autonomous; fix target_r (TREND=2.0/NEUTRAL=1.5/CHOP=1.2 — old values created negative R:R after fees); lower depth_min_usd across all 8 spot symbols
 

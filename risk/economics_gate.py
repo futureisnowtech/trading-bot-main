@@ -54,7 +54,7 @@ _MAX_FEE_TO_WIN_PCT = 0.35  # fees must not eat > 35% of gross target
 _MIN_NET_RR = 1.2  # net R:R (after fees) must be ≥ 1.2
 _MIN_VOLUME_USD = 2_500_000  # $2.5M — aligned with scanner floor (v13.2)
 _MAX_SPREAD_PCT_GATE = 0.0025  # 25 bps — defense-in-depth spread ceiling
-_MIN_NEAR_DEPTH_USD = 5_000.0  # $5K each side — minimum near-touch OB depth
+_MIN_NEAR_DEPTH_USD = 1_000.0  # $1K each side — minimum near-touch OB depth
 
 # ── Quality tier thresholds ───────────────────────────────────────────────────
 # Restored to original pre-v13 values. The v13 doubling was overly conservative

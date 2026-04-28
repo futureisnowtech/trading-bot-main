@@ -635,7 +635,7 @@ def score_floor_for_symbol(
         "compression_expansion_retest",
     }:
         base += 1.0
-    return max(45.0, min(base, 72.0))
+    return max(35.0, min(base, 72.0))
 
 
 def final_score_for_symbol(

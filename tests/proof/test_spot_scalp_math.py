@@ -58,7 +58,7 @@ def test_ssm04_score_floor_softens_for_clean_impulse():
         score_floor_for_regime(
             "CHOP", structural_confirm_count=2, setup_family="compression_breakout"
         )
-        == 57.0
+        == 48.0
     )
 
 

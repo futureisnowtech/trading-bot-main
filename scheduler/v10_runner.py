@@ -772,6 +772,36 @@ def _scan_and_trade_inner(spot_only: bool = False):
             if str(c.get("direction", "LONG")).upper() == "LONG"
             and _get_underlying(str(c.get("symbol", "")).upper()) in _spot_universe
         ]
+        # Inject synthetic LONG candidates for spot-only symbols the perp scanner
+        # never covers (LTC/DOGE/ADA/LINK are not in CORE_EXECUTION_UNDERLYINGS).
+        try:
+            from config import CORE_EXECUTION_UNDERLYINGS as _core_syms
+
+            _core = {s.upper() for s in _core_syms}
+        except Exception:
+            _core = {"BTC", "ETH", "SOL", "XRP"}
+        _already = {_get_underlying(c["symbol"].upper()) for c in candidates}
+        for _sym in sorted(_spot_universe - _core - _already):
+            candidates.append(
+                {
+                    "symbol": _sym,
+                    "direction": "LONG",
+                    "vol_usd": 0.0,
+                    "spread_pct": 0.0,
+                    "bid_depth_usd": 0.0,
+                    "ask_depth_usd": 0.0,
+                    "atr_15m": 0.0,
+                    "stop_pct": 0.0,
+                    "target_pct": 0.0,
+                    "expected_profit": 0.0,
+                    "funding_rate": 0.0,
+                    "correlation_penalty": 1.0,
+                    "regime_penalty": 1.0,
+                    "price": 0.0,
+                    "edge_score": 0.5,
+                    "spot_only_synthetic": True,
+                }
+            )
 
     if not candidates:
         logger.debug("[v10] scan returned 0 candidates")

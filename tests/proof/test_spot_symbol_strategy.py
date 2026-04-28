@@ -74,7 +74,7 @@ def test_sss03_doge_open_gate_before_calibration():
     )
     # Open gate: no hardcoded edge conditions, so the signal passes through
     assert reason == "", f"Expected open gate (empty reason), got: {reason!r}"
-    assert floor >= 49.0
+    assert floor >= 35.0
 
 
 def test_sss04_eth_uses_quick_exit_profile_targets():

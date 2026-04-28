@@ -17,7 +17,7 @@ def test_ssp01_spot_econ_separates_quality_from_economics():
     result = check_spot_economics(
         symbol="XRP",
         size_usd=100.0,
-        final_spot_score=47.0,
+        final_spot_score=34.0,
         stop_pct=0.015,
         target_r=1.2,
         spread_pct=0.0010,
@@ -31,7 +31,7 @@ def test_ssp01_spot_econ_separates_quality_from_economics():
     assert result["approved"] is False
     assert result["reason"] == "below_regime_floor"
     assert result["gate_class"] == "quality"
-    assert result["score_floor"] == pytest.approx(50.0)
+    assert result["score_floor"] == pytest.approx(35.0)
 
 
 def test_ssp02_spot_econ_marks_spread_fail_as_microstructure():

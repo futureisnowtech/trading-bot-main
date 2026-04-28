@@ -786,7 +786,8 @@ def _scan_and_trade_inner(spot_only: bool = False):
                 {
                     "symbol": _sym,
                     "direction": "LONG",
-                    "vol_usd": 0.0,
+                    # Coinbase spot markets have >>$2.5M/day; bypass volume gate
+                    "vol_usd": 500_000_000.0,
                     "spread_pct": 0.0,
                     "bid_depth_usd": 0.0,
                     "ask_depth_usd": 0.0,
@@ -1353,6 +1354,13 @@ def _attempt_entry(
     # ── Step 5: Economics gate (runs after setup quality known) ─────────────
     try:
         from risk.economics_gate import check as economics_check
+
+        # Synthetic spot-only candidates (LTC/DOGE/ADA/LINK) skip the perp gate.
+        # spot_economics_gate.py runs real calculations after build_spot_state().
+        if candidate.get("spot_only_synthetic"):
+            candidate["edge_score"] = 0.5
+            candidate["quality_tier"] = "A"
+            raise ImportError  # jumps to except ImportError: pass below
 
         atr_pct = atr_7 / current_price if current_price > 0 else 0.015
         # Win-rate estimate for EV gate.

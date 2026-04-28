@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-28
+- housekeeping: remove duplicate generated brain alert and ignore local live launchd plist artifact so machine-specific service files stop appearing as repo dirt
+
+## 2026-04-28
 - v18.8: lightly retighten live spot entry policy with higher per-coin floors, a 30m frame minimum, and route-aware synthetic/taker score surcharges while keeping the gate stack intentionally minimal
 
 ## 2026-04-28

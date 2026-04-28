@@ -52,3 +52,6 @@ brain/06_daily_summaries/2026-04-20.md
 
 # ── Audit exports / generated DB dumps ───────────────────────────────────────
 audit_output/*/db_exports/
+
+# ── Local generated launchd artifacts ────────────────────────────────────────
+scripts/com.algotrading.king.live.plist

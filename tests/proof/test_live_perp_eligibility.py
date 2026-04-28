@@ -26,15 +26,15 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 
-# ── LP-01: AUTONOMOUS_LIVE_PERP_SYMBOLS default is ETH only ─────────────────
+# ── LP-01: AUTONOMOUS_LIVE_PERP_SYMBOLS contains all 4 core symbols ──────────
 
 
 def test_lp01_autonomous_symbols_default_is_eth_only():
     import config
 
     syms = set(config.AUTONOMOUS_LIVE_PERP_SYMBOLS)
-    assert syms == {"ETH"}, (
-        f"AUTONOMOUS_LIVE_PERP_SYMBOLS must default to ETH only, got {syms}"
+    assert syms == {"BTC", "ETH", "SOL", "XRP"}, (
+        f"AUTONOMOUS_LIVE_PERP_SYMBOLS must be all 4 core symbols, got {syms}"
     )
 
 

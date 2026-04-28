@@ -68,7 +68,7 @@ CORE_EXECUTION_UNDERLYINGS: set = {
 # CORE_EXECUTION_UNDERLYINGS stays [BTC,ETH,SOL,XRP] for manual + research.
 # ════════════════════════════════════════════════════════════════════
 AUTONOMOUS_LIVE_PERP_SYMBOLS: list = os.getenv(
-    "AUTONOMOUS_LIVE_PERP_SYMBOLS", "ETH"
+    "AUTONOMOUS_LIVE_PERP_SYMBOLS", "BTC,ETH,SOL,XRP"
 ).split(",")
 
 # ════════════════════════════════════════════════════════════════════
@@ -155,9 +155,9 @@ SPOT_ALLOWED_REGIMES: set[str] = {
 }
 SPOT_MIN_PATH_EFFICIENCY: float = float(os.getenv("SPOT_MIN_PATH_EFFICIENCY", "0.20"))
 SPOT_TARGET_R_BY_REGIME: dict[str, float] = {
-    "TREND": float(os.getenv("SPOT_TREND_TARGET_R", "0.85")),
-    "NEUTRAL": float(os.getenv("SPOT_NEUTRAL_TARGET_R", "0.65")),
-    "CHOP": float(os.getenv("SPOT_CHOP_TARGET_R", "0.50")),
+    "TREND": float(os.getenv("SPOT_TREND_TARGET_R", "2.0")),
+    "NEUTRAL": float(os.getenv("SPOT_NEUTRAL_TARGET_R", "1.5")),
+    "CHOP": float(os.getenv("SPOT_CHOP_TARGET_R", "1.2")),
 }
 SPOT_TRAIL_ARM_R_BY_REGIME: dict[str, float] = {
     "TREND": float(os.getenv("SPOT_TREND_TRAIL_ARM_R", "0.55")),
@@ -494,7 +494,7 @@ SPOT_SCALP_SYMBOL_CONFIG: dict[str, dict[str, float | int]] = {
         "risk_fraction": 0.0030,
         "allocation_cap_pct": 0.20,
         "spread_cap_pct": 0.0010,
-        "depth_min_usd": 15000,
+        "depth_min_usd": 3000,
         "cooldown_min": 10,
         "symbol_k": 1.05,
     },
@@ -504,7 +504,7 @@ SPOT_SCALP_SYMBOL_CONFIG: dict[str, dict[str, float | int]] = {
         "risk_fraction": 0.0025,
         "allocation_cap_pct": 0.15,
         "spread_cap_pct": 0.0012,
-        "depth_min_usd": 12000,
+        "depth_min_usd": 3000,
         "cooldown_min": 12,
         "symbol_k": 1.10,
     },
@@ -514,7 +514,7 @@ SPOT_SCALP_SYMBOL_CONFIG: dict[str, dict[str, float | int]] = {
         "risk_fraction": 0.0018,
         "allocation_cap_pct": 0.07,
         "spread_cap_pct": 0.0018,
-        "depth_min_usd": 8000,
+        "depth_min_usd": 3000,
         "cooldown_min": 15,
         "symbol_k": 1.15,
     },
@@ -524,7 +524,7 @@ SPOT_SCALP_SYMBOL_CONFIG: dict[str, dict[str, float | int]] = {
         "risk_fraction": 0.0015,
         "allocation_cap_pct": 0.05,
         "spread_cap_pct": 0.0022,
-        "depth_min_usd": 8000,
+        "depth_min_usd": 3000,
         "cooldown_min": 18,
         "symbol_k": 1.18,
     },
@@ -534,7 +534,7 @@ SPOT_SCALP_SYMBOL_CONFIG: dict[str, dict[str, float | int]] = {
         "risk_fraction": 0.0018,
         "allocation_cap_pct": 0.08,
         "spread_cap_pct": 0.0016,
-        "depth_min_usd": 6000,
+        "depth_min_usd": 2000,
         "cooldown_min": 12,
         "symbol_k": 1.12,
     },
@@ -544,7 +544,7 @@ SPOT_SCALP_SYMBOL_CONFIG: dict[str, dict[str, float | int]] = {
         "risk_fraction": 0.0015,
         "allocation_cap_pct": 0.05,
         "spread_cap_pct": 0.0025,
-        "depth_min_usd": 5000,
+        "depth_min_usd": 2000,
         "cooldown_min": 18,
         "symbol_k": 1.20,
     },
@@ -554,7 +554,7 @@ SPOT_SCALP_SYMBOL_CONFIG: dict[str, dict[str, float | int]] = {
         "risk_fraction": 0.0015,
         "allocation_cap_pct": 0.05,
         "spread_cap_pct": 0.0022,
-        "depth_min_usd": 5000,
+        "depth_min_usd": 2000,
         "cooldown_min": 16,
         "symbol_k": 1.16,
     },
@@ -564,7 +564,7 @@ SPOT_SCALP_SYMBOL_CONFIG: dict[str, dict[str, float | int]] = {
         "risk_fraction": 0.0018,
         "allocation_cap_pct": 0.07,
         "spread_cap_pct": 0.0020,
-        "depth_min_usd": 6000,
+        "depth_min_usd": 1500,
         "cooldown_min": 15,
         "symbol_k": 1.15,
     },

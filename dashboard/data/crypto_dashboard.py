@@ -26,7 +26,9 @@ clamp_metrics_cutoff = getattr(_db, "clamp_metrics_cutoff", lambda s: s)
 get_current_strategy_start_date = getattr(
     _db,
     "get_current_strategy_start_date",
-    lambda normalized=True: "2026-04-24 00:00:00" if normalized else "2026-04-24T00:00:00",
+    lambda normalized=True: (
+        "2026-04-24 00:00:00" if normalized else "2026-04-24T00:00:00"
+    ),
 )
 
 _TS_NORM = "datetime(replace(substr(ts,1,19),'T',' '))"
@@ -112,7 +114,8 @@ def get_crypto_header() -> dict:
         result["open_count"] = len(spot_positions) + len(perp_positions)
         spot_notional = sum(
             float(p.get("current_value") or 0.0)
-            or abs(float(p.get("qty") or 0)) * float(p.get("current_price") or p.get("entry") or 0)
+            or abs(float(p.get("qty") or 0))
+            * float(p.get("current_price") or p.get("entry") or 0)
             for p in spot_positions
         )
         try:
@@ -132,7 +135,8 @@ def get_crypto_header() -> dict:
             result["spot_deployed_pct"] = 0.0
 
         perp_notional = sum(
-            abs(float(p.get("qty") or 0)) * float(p.get("current_price") or p.get("entry") or 0)
+            abs(float(p.get("qty") or 0))
+            * float(p.get("current_price") or p.get("entry") or 0)
             for p in perp_positions
         )
         # Use buying_power already fetched as the perp account base
@@ -168,7 +172,7 @@ def get_crypto_opportunity_board(hours: int = 24) -> list[dict]:
             COALESCE(tradeability_status, 'not_evaluated') AS status,
             COALESCE(auto_executable, 0) AS auto_executable,
             COALESCE(manual_executable, 0) AS manual_executable,
-            COALESCE(final_spot_score, composite_score, 0.0) AS score,
+            COALESCE(NULLIF(final_spot_score, 0.0), composite_score, 0.0) AS score,
             COALESCE(econ_approved, 0) AS econ_approved,
             COALESCE(scanner_expected_profit, 0.0) AS expected_profit,
             COALESCE(stop_pct, 0.0) AS stop_pct,

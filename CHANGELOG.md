@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-28
+- v18.13: remove default quarantines, reset kill switch, delete stale spot positions
+
+## 2026-04-28
 - v18.12: kill switch schema fix + live BTC round-trip acceptance test — all learning pipeline checks pass
 
 ## 2026-04-28

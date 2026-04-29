@@ -102,12 +102,15 @@ def test_ssp03_build_spot_state_can_fall_back_to_stale_cache(monkeypatch):
 
 def test_ssp04_quality_gate_open_before_calibration():
     """
-    Evidence-based quarantine (2026-04-28 surgery pass):
-    - pullback_reclaim in NEUTRAL is quarantined (0% WR, n=115 in failure window)
-    - impulse_continuation in NEUTRAL retains open gate (no hardcoded edge blocks)
-    The old invariant (all setups open before calibration) is superseded by the
-    empirically-derived setup-family quarantine.
+    Quarantine mechanism is config-flag gated:
+    - When SPOT_PULLBACK_RECLAIM_NEUTRAL_BLOCKED=True, pullback_reclaim×NEUTRAL is blocked.
+    - When the flag is False (default), the gate is open for all families.
+    - impulse_continuation in NEUTRAL always has open gate (no edge blocks).
+    SG-01 / SG-02 test the mechanism with explicit patches; this test confirms
+    that the default-off state does not quarantine impulse_continuation.
     """
+    from unittest.mock import patch
+
     from runtime.spot_strategy import spot_quality_block_reason
 
     _frames = {
@@ -123,7 +126,7 @@ def test_ssp04_quality_gate_open_before_calibration():
         "30m": {"v": 0.1, "frame_score": 57.0, "volatility_quality": 0.0},
     }
 
-    # pullback_reclaim in NEUTRAL must now be quarantined
+    # When the flag is explicitly enabled, pullback_reclaim×NEUTRAL IS quarantined
     pr_state = {
         "symbol": "BTC",
         "regime": "NEUTRAL",
@@ -132,12 +135,13 @@ def test_ssp04_quality_gate_open_before_calibration():
         "structural_confirm_count": 2,
         "frames": _frames,
     }
-    reason, _ = spot_quality_block_reason("BTC", pr_state, final_spot_score=65.0)
+    with patch("config.SPOT_PULLBACK_RECLAIM_NEUTRAL_BLOCKED", True):
+        reason, _ = spot_quality_block_reason("BTC", pr_state, final_spot_score=65.0)
     assert reason == "pullback_reclaim_neutral_quarantined", (
-        f"pullback_reclaim NEUTRAL must be quarantined; got: {reason!r}"
+        f"pullback_reclaim NEUTRAL must be quarantined when flag=True; got: {reason!r}"
     )
 
-    # impulse_continuation in NEUTRAL must still have open gate (no edge blocks)
+    # impulse_continuation in NEUTRAL must always have open gate (no edge blocks)
     ic_state = {
         "symbol": "BTC",
         "regime": "NEUTRAL",

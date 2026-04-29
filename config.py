@@ -1025,10 +1025,10 @@ SPOT_STOP_TIGHTEN_WEAK_HTF: float = float(
 # pullback_reclaim NEUTRAL: n=115, 0% WR, avg -$1.28 — quarantined
 # pullback_reclaim CHOP:    n=22,  0% WR, avg -$0.70 — quarantined (insufficient sample for positive case)
 SPOT_PULLBACK_RECLAIM_NEUTRAL_BLOCKED: bool = os.getenv(
-    "SPOT_PULLBACK_RECLAIM_NEUTRAL_BLOCKED", "true"
+    "SPOT_PULLBACK_RECLAIM_NEUTRAL_BLOCKED", "false"
 ).strip().lower() in ("true", "1", "yes")
 SPOT_PULLBACK_RECLAIM_CHOP_BLOCKED: bool = os.getenv(
-    "SPOT_PULLBACK_RECLAIM_CHOP_BLOCKED", "true"
+    "SPOT_PULLBACK_RECLAIM_CHOP_BLOCKED", "false"
 ).strip().lower() in ("true", "1", "yes")
 # Taker fallback disabled: all 113 taker trades in failure window were losers ($-131, 0% WR).
 # Maker-only policy: if maker order does not fill within SPOT_MAKER_WAIT_SECONDS, cancel and skip.

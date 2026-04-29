@@ -931,6 +931,7 @@ def _scan_and_trade_inner(spot_only: bool = False):
                 ne=ne,
                 get_size_multiplier=get_size_multiplier,
                 scan_id=_scan_id,
+                tv_context_by_underlying=tv_context_by_underlying,
             )
         except Exception as e:
             logger.error(
@@ -1023,6 +1024,7 @@ def _attempt_entry(
     ne,
     get_size_multiplier,
     scan_id: str = "",
+    tv_context_by_underlying: dict = None,
 ):
     """Try to enter a position for one candidate. All exceptions propagate to caller."""
     _route_hint = _tradeability_hint(
@@ -1618,7 +1620,7 @@ def _attempt_entry(
             from runtime.live_account import get_live_account_size
 
             _underlying = _trade.get("underlying", _get_underlying(symbol))
-            _tv_context = tv_context_by_underlying.get(str(_underlying).upper())
+            _tv_context = (tv_context_by_underlying or {}).get(str(_underlying).upper())
             _strategy_symbols = {str(s).upper() for s in _strategy_spot_symbols()}
             if _underlying not in _strategy_symbols:
                 _reason = "spot_strategy_symbol_disabled"

@@ -897,15 +897,17 @@ ML_RETRAIN_MIN_NEW_CLEAN_TRADES: int = int(
 )
 RBI_MIN_DAYS: int = int(os.getenv("RBI_MIN_DAYS", "7"))
 RBI_MIN_NEW_CLEAN_TRADES: int = int(os.getenv("RBI_MIN_NEW_CLEAN_TRADES", "20"))
-RBI_SCHEDULE_MODE: str = os.getenv("RBI_SCHEDULE_MODE", "weekly_or_threshold").strip().lower()
+RBI_SCHEDULE_MODE: str = (
+    os.getenv("RBI_SCHEDULE_MODE", "weekly_or_threshold").strip().lower()
+)
 RBI_WEEKDAY: str = os.getenv("RBI_WEEKDAY", "SUN").strip().upper()
 RBI_TIME_UTC: str = os.getenv("RBI_TIME_UTC", "07:00").strip()
 NIGHTLY_AUDIT_RUN_PROOF: bool = (
     os.getenv("NIGHTLY_AUDIT_RUN_PROOF", "false").lower() == "true"
 )
-NIGHTLY_AUDIT_FULL_PROOF_WEEKDAY: str = os.getenv(
-    "NIGHTLY_AUDIT_FULL_PROOF_WEEKDAY", "SUN"
-).strip().upper()
+NIGHTLY_AUDIT_FULL_PROOF_WEEKDAY: str = (
+    os.getenv("NIGHTLY_AUDIT_FULL_PROOF_WEEKDAY", "SUN").strip().upper()
+)
 NIGHTLY_AUDIT_TIME_UTC: str = os.getenv("NIGHTLY_AUDIT_TIME_UTC", "08:00").strip()
 HEDGE_MIN_NOTIONAL_USD: float = float(os.getenv("HEDGE_MIN_NOTIONAL_USD", "100.0"))
 
@@ -921,7 +923,9 @@ SCANNER_PARALLEL_WORKERS: int = int(os.getenv("SCANNER_PARALLEL_WORKERS", "8"))
 TV_SIGNALS_ENABLED: bool = os.getenv("TV_SIGNALS_ENABLED", "true").lower() == "true"
 TV_WEBHOOK_PORT: int = int(os.getenv("TV_WEBHOOK_PORT", "8765"))
 TV_WEBHOOK_SECRET: str = os.getenv("TV_WEBHOOK_SECRET", "")
-TV_SIGNAL_PROFILE_NAME: str = os.getenv("TV_SIGNAL_PROFILE_NAME", "algobot_htf_v2").strip()
+TV_SIGNAL_PROFILE_NAME: str = os.getenv(
+    "TV_SIGNAL_PROFILE_NAME", "algobot_htf_v2"
+).strip()
 TV_SIGNAL_INDICATOR_NAME: str = os.getenv(
     "TV_SIGNAL_INDICATOR_NAME", "AlgoBot HTF Confluence Engine v2"
 ).strip()
@@ -951,9 +955,7 @@ TV_HTF_TIMEFRAME_MINUTES: int = int(os.getenv("TV_HTF_TIMEFRAME_MINUTES", "240")
 TV_HTF_SUPERTREND_ATR_MULTIPLIER: float = float(
     os.getenv("TV_HTF_SUPERTREND_ATR_MULTIPLIER", "3.0")
 )
-TV_HTF_SUPERTREND_ATR_PERIOD: int = int(
-    os.getenv("TV_HTF_SUPERTREND_ATR_PERIOD", "10")
-)
+TV_HTF_SUPERTREND_ATR_PERIOD: int = int(os.getenv("TV_HTF_SUPERTREND_ATR_PERIOD", "10"))
 TV_HTF_WAVETREND_CHANNEL: int = int(os.getenv("TV_HTF_WAVETREND_CHANNEL", "10"))
 TV_HTF_WAVETREND_AVG: int = int(os.getenv("TV_HTF_WAVETREND_AVG", "21"))
 TV_HTF_WAVETREND_OB: float = float(os.getenv("TV_HTF_WAVETREND_OB", "58"))
@@ -1001,28 +1003,44 @@ SPOT_TINY_LIVE_MAX_CONCURRENT: int = int(
 SPOT_TINY_LIVE_MAX_POSITION_USD: float = float(
     os.getenv("SPOT_TINY_LIVE_MAX_POSITION_USD", "50.0")
 )
-SPOT_TINY_LIVE_ALLOWED_ROUTE: str = os.getenv(
-    "SPOT_TINY_LIVE_ALLOWED_ROUTE", "maker_first"
-).strip().lower()
+SPOT_TINY_LIVE_ALLOWED_ROUTE: str = (
+    os.getenv("SPOT_TINY_LIVE_ALLOWED_ROUTE", "maker_first").strip().lower()
+)
 SPOT_STOP_MATRIX_VERSION: str = os.getenv(
     "SPOT_STOP_MATRIX_VERSION", "spot_stop_matrix_2026_04_28_v1"
 ).strip()
-SPOT_STOP_TIGHTEN_NEUTRAL: float = float(
-    os.getenv("SPOT_STOP_TIGHTEN_NEUTRAL", "0.92")
-)
+SPOT_STOP_TIGHTEN_NEUTRAL: float = float(os.getenv("SPOT_STOP_TIGHTEN_NEUTRAL", "0.92"))
 SPOT_STOP_TIGHTEN_CHOP: float = float(os.getenv("SPOT_STOP_TIGHTEN_CHOP", "0.88"))
 SPOT_STOP_TIGHTEN_PULLBACK: float = float(
     os.getenv("SPOT_STOP_TIGHTEN_PULLBACK", "0.90")
 )
-SPOT_STOP_TIGHTEN_TAKER: float = float(
-    os.getenv("SPOT_STOP_TIGHTEN_TAKER", "0.90")
-)
+SPOT_STOP_TIGHTEN_TAKER: float = float(os.getenv("SPOT_STOP_TIGHTEN_TAKER", "0.90"))
 SPOT_STOP_TIGHTEN_LOW_SETUP: float = float(
     os.getenv("SPOT_STOP_TIGHTEN_LOW_SETUP", "0.90")
 )
 SPOT_STOP_TIGHTEN_WEAK_HTF: float = float(
     os.getenv("SPOT_STOP_TIGHTEN_WEAK_HTF", "0.95")
 )
+# Evidence-based setup quarantine (derived from 140-trade live failure window 2026-04-22):
+# pullback_reclaim NEUTRAL: n=115, 0% WR, avg -$1.28 — quarantined
+# pullback_reclaim CHOP:    n=22,  0% WR, avg -$0.70 — quarantined (insufficient sample for positive case)
+SPOT_PULLBACK_RECLAIM_NEUTRAL_BLOCKED: bool = os.getenv(
+    "SPOT_PULLBACK_RECLAIM_NEUTRAL_BLOCKED", "true"
+).strip().lower() in ("true", "1", "yes")
+SPOT_PULLBACK_RECLAIM_CHOP_BLOCKED: bool = os.getenv(
+    "SPOT_PULLBACK_RECLAIM_CHOP_BLOCKED", "true"
+).strip().lower() in ("true", "1", "yes")
+# Taker fallback disabled: all 113 taker trades in failure window were losers ($-131, 0% WR).
+# Maker-only policy: if maker order does not fill within SPOT_MAKER_WAIT_SECONDS, cancel and skip.
+SPOT_TAKER_FALLBACK_ENABLED: bool = os.getenv(
+    "SPOT_TAKER_FALLBACK_ENABLED", "false"
+).strip().lower() in ("true", "1", "yes")
+# Loss-cluster kill switch thresholds (KS10)
+SPOT_KS_DAILY_LOSS_PCT: float = float(os.getenv("SPOT_KS_DAILY_LOSS_PCT", "0.02"))
+SPOT_KS_CONSECUTIVE_LOSSES: int = int(os.getenv("SPOT_KS_CONSECUTIVE_LOSSES", "4"))
+SPOT_KS_ROLLING_LOSSES_10: int = int(
+    os.getenv("SPOT_KS_ROLLING_LOSSES_10", "3")
+)  # max net-negative R over last 10
 
 # ════════════════════════════════════════════════════════════════════
 # ALERTS

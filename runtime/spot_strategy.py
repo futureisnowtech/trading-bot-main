@@ -241,7 +241,9 @@ def _tv_context_policy() -> dict[str, Any]:
     return {
         "enabled": bool(getattr(_cfg, "TV_SIGNALS_ENABLED", False)),
         "profile_name": str(getattr(_cfg, "TV_SIGNAL_PROFILE_NAME", "") or "").strip(),
-        "mode": str(getattr(_cfg, "TV_SIGNAL_MODE", "context_filter") or "").strip().lower(),
+        "mode": str(getattr(_cfg, "TV_SIGNAL_MODE", "context_filter") or "")
+        .strip()
+        .lower(),
         "boost": float(getattr(_cfg, "TV_SIGNAL_BOOST_CONVICTION", 0) or 0.0),
         "max_age_seconds": float(
             getattr(_cfg, "TV_SIGNAL_MAX_AGE_SECONDS", 300) or 300.0
@@ -267,7 +269,11 @@ def tv_context_score_adjustment(
         return 0.0, ""
 
     profile_name = str(tv_context.get("profile_name") or "").strip()
-    if policy["profile_name"] and profile_name and profile_name != policy["profile_name"]:
+    if (
+        policy["profile_name"]
+        and profile_name
+        and profile_name != policy["profile_name"]
+    ):
         return 0.0, ""
 
     try:
@@ -284,7 +290,9 @@ def tv_context_score_adjustment(
     if age_seconds and age_seconds > float(policy["max_age_seconds"]):
         return 0.0, ""
 
-    htf_bias = str(tv_context.get("htf_bias") or tv_context.get("direction") or "").upper()
+    htf_bias = str(
+        tv_context.get("htf_bias") or tv_context.get("direction") or ""
+    ).upper()
     normalized_direction = str(direction or "LONG").upper()
     if htf_bias == "SHORT" and policy["block_short"] and normalized_direction == "LONG":
         return 0.0, "tv_htf_short_bias_block"
@@ -789,6 +797,21 @@ def spot_quality_block_reason(
 
     if policy["allowed_regimes"] and regime not in set(policy["allowed_regimes"]):
         return f"spot_regime_not_allowed:{regime}", floor
+
+    # Evidence-derived quarantine: pullback_reclaim in NEUTRAL/CHOP
+    # Data: 115 NEUTRAL trades → 0% WR, avg -$1.28; 22 CHOP trades → 0% WR, avg -$0.70
+    # Governed by SPOT_PULLBACK_RECLAIM_NEUTRAL_BLOCKED / SPOT_PULLBACK_RECLAIM_CHOP_BLOCKED
+    if setup_family == "pullback_reclaim":
+        import config as _qs_cfg
+
+        if regime == "NEUTRAL" and getattr(
+            _qs_cfg, "SPOT_PULLBACK_RECLAIM_NEUTRAL_BLOCKED", True
+        ):
+            return "pullback_reclaim_neutral_quarantined", floor
+        if regime == "CHOP" and getattr(
+            _qs_cfg, "SPOT_PULLBACK_RECLAIM_CHOP_BLOCKED", True
+        ):
+            return "pullback_reclaim_chop_quarantined", floor
 
     setup_policy = setup_policy_for_symbol(clean, setup_family, setup_score)
     if not setup_policy["allowed"]:

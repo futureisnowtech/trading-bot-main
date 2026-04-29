@@ -150,7 +150,7 @@ def _journal_scan_candidate(
     net_rr: float | None = None,
     net_win_usd: float | None = None,
     econ_gate_class: str = "",
- ) -> int:
+) -> int:
     """
     Write one candidate decision row to scan_candidates.
     Called at every gate exit — entered, econ_veto, below_threshold,
@@ -184,67 +184,67 @@ def _journal_scan_candidate(
 
         return int(
             log_scan_candidate(
-            scan_id=scan_id,
-            symbol=symbol,
-            exchange=str(candidate.get("exchange", "")),
-            base_asset=str(candidate.get("base_asset", _get_underlying(symbol))),
-            direction=direction,
-            primary_setup=primary,
-            scan_setups_json=setups_json,
-            price=price,
-            volume_24h_usd=vol,
-            spread_pct=spread,
-            bid_depth_usd=bid_dep,
-            ask_depth_usd=ask_dep,
-            atr_15m=atr_15m,
-            stop_pct=stop_pct,
-            target_pct=tgt_pct,
-            scanner_expected_profit=exp_profit,
-            regime=regime,
-            technical_score=technical_score,
-            ml_score=ml_score,
-            composite_score=composite_score,
-            entry_threshold=entry_threshold,
-            should_enter_signal=should_enter_signal,
-            econ_approved=econ_approved,
-            econ_tier=econ_tier,
-            econ_reject_reason=econ_reject_reason,
-            edge_score=edge_score,
-            size_usd=size_usd,
-            leverage=leverage,
-            entry_block_reason=entry_block_reason,
-            decision=decision,
-            paper=_paper,
-            source="clean_paper_v10" if _paper else "live_v10",
-            scanner_theoretical_position_usd=theor_pos,
-            scanner_effective_position_usd=eff_pos,
-            recommended_lane=recommended_lane,
-            tradeability_status=tradeability_status,
-            trade_blocked_reason=trade_blocked_reason
-            or (decision if decision != "entered" else ""),
-            trade_size_block_reason=trade_size_block_reason,
-            trade_source_reason=trade_source_reason,
-            manual_executable=manual_executable,
-            auto_executable=auto_executable,
-            spot_regime=spot_regime,
-            setup_family=setup_family,
-            setup_score=setup_score,
-            setup_preference=setup_preference,
-            tf_5m_state=tf_5m_state,
-            tf_30m_state=tf_30m_state,
-            tf_4h_state=tf_4h_state,
-            tf_1d_state=tf_1d_state,
-            structural_confirms=structural_confirms,
-            execution_route=execution_route,
-            cooldown_until=cooldown_until,
-            microstructure_veto=microstructure_veto,
-            final_spot_score=final_spot_score,
-            regime_floor=regime_floor,
-            actual_stop_pct=actual_stop_pct,
-            actual_target_pct=actual_target_pct,
-            net_rr=net_rr,
-            net_win_usd=net_win_usd,
-            econ_gate_class=econ_gate_class,
+                scan_id=scan_id,
+                symbol=symbol,
+                exchange=str(candidate.get("exchange", "")),
+                base_asset=str(candidate.get("base_asset", _get_underlying(symbol))),
+                direction=direction,
+                primary_setup=primary,
+                scan_setups_json=setups_json,
+                price=price,
+                volume_24h_usd=vol,
+                spread_pct=spread,
+                bid_depth_usd=bid_dep,
+                ask_depth_usd=ask_dep,
+                atr_15m=atr_15m,
+                stop_pct=stop_pct,
+                target_pct=tgt_pct,
+                scanner_expected_profit=exp_profit,
+                regime=regime,
+                technical_score=technical_score,
+                ml_score=ml_score,
+                composite_score=composite_score,
+                entry_threshold=entry_threshold,
+                should_enter_signal=should_enter_signal,
+                econ_approved=econ_approved,
+                econ_tier=econ_tier,
+                econ_reject_reason=econ_reject_reason,
+                edge_score=edge_score,
+                size_usd=size_usd,
+                leverage=leverage,
+                entry_block_reason=entry_block_reason,
+                decision=decision,
+                paper=_paper,
+                source="clean_paper_v10" if _paper else "live_v10",
+                scanner_theoretical_position_usd=theor_pos,
+                scanner_effective_position_usd=eff_pos,
+                recommended_lane=recommended_lane,
+                tradeability_status=tradeability_status,
+                trade_blocked_reason=trade_blocked_reason
+                or (decision if decision != "entered" else ""),
+                trade_size_block_reason=trade_size_block_reason,
+                trade_source_reason=trade_source_reason,
+                manual_executable=manual_executable,
+                auto_executable=auto_executable,
+                spot_regime=spot_regime,
+                setup_family=setup_family,
+                setup_score=setup_score,
+                setup_preference=setup_preference,
+                tf_5m_state=tf_5m_state,
+                tf_30m_state=tf_30m_state,
+                tf_4h_state=tf_4h_state,
+                tf_1d_state=tf_1d_state,
+                structural_confirms=structural_confirms,
+                execution_route=execution_route,
+                cooldown_until=cooldown_until,
+                microstructure_veto=microstructure_veto,
+                final_spot_score=final_spot_score,
+                regime_floor=regime_floor,
+                actual_stop_pct=actual_stop_pct,
+                actual_target_pct=actual_target_pct,
+                net_rr=net_rr,
+                net_win_usd=net_win_usd,
+                econ_gate_class=econ_gate_class,
             )
         )
     except Exception as _je:
@@ -293,7 +293,11 @@ def _tradeability_hint(
 def _get_fresh_tv_signals(max_age_seconds: int | None = None) -> list[dict[str, Any]]:
     """Return recent TradingView HTF signals from the dedicated tv_signals table."""
     try:
-        from config import TV_ALLOWED_UNDERLYINGS, TV_SIGNAL_MAX_AGE_SECONDS, TV_SIGNALS_ENABLED
+        from config import (
+            TV_ALLOWED_UNDERLYINGS,
+            TV_SIGNAL_MAX_AGE_SECONDS,
+            TV_SIGNALS_ENABLED,
+        )
         from logging_db.trade_logger import get_recent_tv_signals
 
         if not TV_SIGNALS_ENABLED:
@@ -320,7 +324,9 @@ def _get_fresh_tv_signals(max_age_seconds: int | None = None) -> list[dict[str, 
 def _tv_context_map(signals: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     context: dict[str, dict[str, Any]] = {}
     for signal in signals:
-        underlying = str(signal.get("underlying") or _get_underlying(signal.get("symbol", ""))).upper()
+        underlying = str(
+            signal.get("underlying") or _get_underlying(signal.get("symbol", ""))
+        ).upper()
         if not underlying or underlying in context:
             continue
         context[underlying] = dict(signal)
@@ -1118,7 +1124,9 @@ def _attempt_entry(
 
     # ── Step 1: Build features ───────────────────────────────────────────────
     features = build_features(df, symbol)
-    features["symbol"] = str(candidate.get("base_asset") or _get_underlying(symbol) or symbol)
+    features["symbol"] = str(
+        candidate.get("base_asset") or _get_underlying(symbol) or symbol
+    )
 
     # Inject scanner-derived features
     scanner_vol_spike = float(candidate.get("vol_spike", 0.0))
@@ -1564,6 +1572,31 @@ def _attempt_entry(
     # Route spot lane if tradeability says so
     _routed_lane = _trade.get("lane", "perp")
     if _routed_lane == "spot":
+        # KS10 / KS8 — check loss-cluster kill switch before attempting spot entry
+        try:
+            from runtime.spot_kill_switch import check_spot_kill_switch as _ks_check
+
+            _ks_halt, _ks_reason = _ks_check(paper=paper)
+            if _ks_halt:
+                logger.warning(
+                    f"[v10] spot {symbol} blocked by kill switch: {_ks_reason}"
+                )
+                _journal_scan_candidate(
+                    scan_id,
+                    candidate,
+                    "execution_failed",
+                    regime=regime,
+                    technical_score=_tech_score,
+                    ml_score=_ml_score,
+                    composite_score=composite,
+                    entry_threshold=_score_floor,
+                    should_enter_signal=1,
+                    econ_approved=0,
+                    entry_block_reason=_ks_reason,
+                )
+                return "execution_failed"
+        except Exception as _ks_exc:
+            logger.debug(f"[v10] kill switch check error: {_ks_exc}")
         try:
             import spot_engine as _spot_eng
             from config import (

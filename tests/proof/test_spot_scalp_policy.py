@@ -102,36 +102,51 @@ def test_ssp03_build_spot_state_can_fall_back_to_stale_cache(monkeypatch):
 
 def test_ssp04_quality_gate_open_before_calibration():
     """
-    Before the calibrator has accumulated >= 30 real BTC spot trades, there must
-    be no active edge conditions (open gate).  The old test asserted the hardcoded
-    compression_breakout-only restriction which has been replaced by self-calibration.
+    Evidence-based quarantine (2026-04-28 surgery pass):
+    - pullback_reclaim in NEUTRAL is quarantined (0% WR, n=115 in failure window)
+    - impulse_continuation in NEUTRAL retains open gate (no hardcoded edge blocks)
+    The old invariant (all setups open before calibration) is superseded by the
+    empirically-derived setup-family quarantine.
     """
     from runtime.spot_strategy import spot_quality_block_reason
 
-    state = {
+    _frames = {
+        "5m": {
+            "v": 0.2,
+            "a": 0.1,
+            "frame_score": 58.0,
+            "momentum_impulse": 0.3,
+            "structure_component": 0.2,
+            "path_efficiency": 0.4,
+            "participation_component": 0.1,
+        },
+        "30m": {"v": 0.1, "frame_score": 57.0, "volatility_quality": 0.0},
+    }
+
+    # pullback_reclaim in NEUTRAL must now be quarantined
+    pr_state = {
         "symbol": "BTC",
         "regime": "NEUTRAL",
         "setup_family": "pullback_reclaim",
         "setup_score": 0.92,
         "structural_confirm_count": 2,
-        "frames": {
-            "5m": {
-                "v": 0.2,
-                "a": 0.1,
-                "frame_score": 58.0,
-                "momentum_impulse": 0.3,
-                "structure_component": 0.2,
-                "path_efficiency": 0.4,
-                "participation_component": 0.1,
-            },
-            "30m": {
-                "v": 0.1,
-                "frame_score": 57.0,
-                "volatility_quality": 0.0,
-            },
-        },
+        "frames": _frames,
     }
+    reason, _ = spot_quality_block_reason("BTC", pr_state, final_spot_score=65.0)
+    assert reason == "pullback_reclaim_neutral_quarantined", (
+        f"pullback_reclaim NEUTRAL must be quarantined; got: {reason!r}"
+    )
 
-    reason, _ = spot_quality_block_reason("BTC", state, final_spot_score=65.0)
-    # Open gate: no hardcoded edge conditions before real data is collected
-    assert reason == "", f"Expected open gate (empty reason), got: {reason!r}"
+    # impulse_continuation in NEUTRAL must still have open gate (no edge blocks)
+    ic_state = {
+        "symbol": "BTC",
+        "regime": "NEUTRAL",
+        "setup_family": "impulse_continuation",
+        "setup_score": 0.92,
+        "structural_confirm_count": 2,
+        "frames": _frames,
+    }
+    ic_reason, _ = spot_quality_block_reason("BTC", ic_state, final_spot_score=65.0)
+    assert "quarantined" not in ic_reason, (
+        f"impulse_continuation NEUTRAL must not be quarantined; got: {ic_reason!r}"
+    )

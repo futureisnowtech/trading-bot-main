@@ -407,7 +407,22 @@ def _compute_stop_pct(
     if abs(float(s5.get("a") or 0.0)) < 0.05 and abs(float(s5.get("v") or 0.0)) < 0.10:
         penalty += 0.05
     base_vol_stop = max(atr_pct * symbol_k, floor)
-    return max(floor, min(base_vol_stop * (1.0 + penalty), cap))
+    raw_stop = max(floor, min(base_vol_stop * (1.0 + penalty), cap))
+    # Apply evidence-derived stop tighten multipliers (config SPOT_STOP_TIGHTEN_*)
+    import config as _sc
+
+    _regime = str((spot_state or {}).get("regime") or "NEUTRAL").upper()
+    _sf = str((spot_state or {}).get("setup_family") or "")
+    _tighten = 1.0
+    if _regime == "NEUTRAL":
+        _tighten = min(_tighten, float(getattr(_sc, "SPOT_STOP_TIGHTEN_NEUTRAL", 0.92)))
+    elif _regime == "CHOP":
+        _tighten = min(_tighten, float(getattr(_sc, "SPOT_STOP_TIGHTEN_CHOP", 0.88)))
+    if _sf == "pullback_reclaim":
+        _tighten = min(
+            _tighten, float(getattr(_sc, "SPOT_STOP_TIGHTEN_PULLBACK", 0.90))
+        )
+    return max(floor, raw_stop * _tighten)
 
 
 def _execution_micro_ok(symbol: str, top: dict) -> tuple[bool, str]:
@@ -455,6 +470,12 @@ def _maker_first_buy(
             return status, "maker_first", "none"
 
     broker.cancel_spot_order(order["order_id"])
+    # Taker fallback gate: disabled when SPOT_TAKER_FALLBACK_ENABLED=false (default).
+    # Evidence: 113 taker trades in failure window, 0% WR, avg -$1.16, higher fee burn.
+    import config as _tfc
+
+    if not getattr(_tfc, "SPOT_TAKER_FALLBACK_ENABLED", False):
+        return None, "taker_fallback_disabled", "maker_unfilled_no_taker"
     if final_spot_score is not None:
         regime = str((spot_state or {}).get("regime") or "NEUTRAL").upper()
         taker_floor = score_floor_for_symbol(
@@ -503,6 +524,10 @@ def _maker_first_sell(
             return status, "maker_first", "none"
 
     broker.cancel_spot_order(order["order_id"])
+    import config as _tfc_sell
+
+    if not getattr(_tfc_sell, "SPOT_TAKER_FALLBACK_ENABLED", False):
+        return None, "taker_fallback_disabled", "maker_unfilled_no_taker"
     taker = broker.sell_spot(symbol, size_units)
     if taker:
         taker["execution_route"] = "taker_fallback"
@@ -829,6 +854,7 @@ def close_spot(
     )
 
     from logging_db.trade_logger import log_trade, delete_position
+
     entry_features = _load_entry_feature_snapshot(pos)
     exit_state = None
     try:
@@ -861,7 +887,9 @@ def close_spot(
             import learning_loop as _ll
 
             entry_features.setdefault("candidate_id", int(pos.get("candidate_id") or 0))
-            entry_features.setdefault("scan_id", str(pos.get("candidate_scan_id") or ""))
+            entry_features.setdefault(
+                "scan_id", str(pos.get("candidate_scan_id") or "")
+            )
             entry_features.setdefault(
                 "raw_scanner_symbol", str(pos.get("raw_scanner_symbol") or clean)
             )
@@ -914,7 +942,9 @@ def close_spot(
                 exit_price=exit_price,
                 qty=filled_qty,
                 fee_usd=total_fee_usd,
-                entry_ts=str(pos.get("ts_entry") or datetime.datetime.utcnow().isoformat()),
+                entry_ts=str(
+                    pos.get("ts_entry") or datetime.datetime.utcnow().isoformat()
+                ),
                 exit_ts=datetime.datetime.utcnow().isoformat(),
                 exit_reason=exit_reason,
                 market_data_at_entry=entry_features,

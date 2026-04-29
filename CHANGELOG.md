@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-28
+- v18.11 spot governance: pullback_reclaim NEUTRAL/CHOP quarantine, taker disabled, stop tighten, KS10 kill switch, 14 new proof tests, 7 governance docs
+
+## 2026-04-28
 - ops: add pre-superprompt state snapshot manifest for v18.10 baseline archive
 
 ## 2026-04-28

@@ -938,11 +938,13 @@ TV_PROMOTE_SYNTHETIC_CANDIDATES: bool = (
 )
 TV_SIGNAL_BOOST_CONVICTION: int = int(os.getenv("TV_SIGNAL_BOOST_CONVICTION", "6"))
 TV_SIGNAL_MAX_AGE_SECONDS: int = int(
-    os.getenv("TV_SIGNAL_MAX_AGE_SECONDS", "900")
-)  # ignore TV signals older than 15 min
+    os.getenv("TV_SIGNAL_MAX_AGE_SECONDS", "14400")
+)  # 4h — matches the 4H candle duration; signal stays valid until next candle closes
 TV_ALLOWED_UNDERLYINGS: list[str] = [
     s.strip().upper()
-    for s in os.getenv("TV_ALLOWED_UNDERLYINGS", "BTC,ETH,SOL,XRP").split(",")
+    for s in os.getenv(
+        "TV_ALLOWED_UNDERLYINGS", "BTC,ETH,SOL,XRP,LTC,DOGE,ADA,LINK"
+    ).split(",")
     if s.strip()
 ]
 TV_BLOCK_ON_HTF_SHORT: bool = (

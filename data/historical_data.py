@@ -280,7 +280,11 @@ def _save_to_db(symbol: str, timeframe: str, rows: list):
     if not rows:
         return
     with _lock:
-        conn = _get_db()
+        try:
+            conn = _get_db()
+        except Exception as e:
+            logger.debug(f"[historical_data] cache write skipped ({e})")
+            return
         try:
             conn.executemany(
                 """INSERT OR REPLACE INTO ohlcv

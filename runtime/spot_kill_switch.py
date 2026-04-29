@@ -55,15 +55,6 @@ def _log_halt(conn: sqlite3.Connection, reason: str, detail: dict) -> None:
     except Exception:
         pass
     try:
-        conn.execute(
-            """UPDATE lane_runtime_state
-               SET spot_kill_switch_active=1, last_halt_reason=?, last_halt_ts=?
-               WHERE lane='crypto'""",
-            (reason, _now()),
-        )
-    except Exception:
-        pass
-    try:
         conn.commit()
     except Exception:
         pass
@@ -71,12 +62,15 @@ def _log_halt(conn: sqlite3.Connection, reason: str, detail: dict) -> None:
 
 
 def _is_halted(conn: sqlite3.Connection) -> bool:
-    """Return True if the spot kill switch is already active."""
+    """Return True if the spot kill switch is active (uncleared CRITICAL event in system_events)."""
     try:
+        # Halted = most recent spot_kill_switch event is CRITICAL (not a RESET INFO)
         row = conn.execute(
-            "SELECT spot_kill_switch_active FROM lane_runtime_state WHERE lane='crypto'"
+            """SELECT level FROM system_events
+               WHERE source='spot_kill_switch'
+               ORDER BY ts DESC LIMIT 1"""
         ).fetchone()
-        return bool(row and row["spot_kill_switch_active"])
+        return bool(row and row["level"] == "CRITICAL")
     except Exception:
         return False
 
@@ -173,11 +167,6 @@ def reset_spot_kill_switch() -> bool:
     """Human-initiated reset. Returns True if successful."""
     try:
         conn = _conn()
-        conn.execute(
-            """UPDATE lane_runtime_state
-               SET spot_kill_switch_active=0, last_halt_reason=NULL
-               WHERE lane='crypto'""",
-        )
         conn.execute(
             "INSERT INTO system_events (ts, level, source, message) VALUES (?,?,?,?)",
             (_now(), "INFO", _HALT_SOURCE, "SPOT KILL SWITCH RESET by operator"),

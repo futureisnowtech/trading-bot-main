@@ -759,7 +759,7 @@ FORECAST_LANE_ACTIVE: bool = (
     os.getenv("FORECAST_LANE_ACTIVE", "false").lower() == "true"
 )
 FORECAST_DASHBOARD_VISIBLE: bool = (
-    os.getenv("FORECAST_DASHBOARD_VISIBLE", "true").lower() == "true"
+    os.getenv("FORECAST_DASHBOARD_VISIBLE", "false").lower() == "true"
 )
 FORECAST_AUTONOMOUS_ENABLED: bool = (
     os.getenv("FORECAST_AUTONOMOUS_ENABLED", "false").lower() == "true"
@@ -768,7 +768,7 @@ FORECAST_MANUAL_ENABLED: bool = (
     os.getenv("FORECAST_MANUAL_ENABLED", "false").lower() == "true"
 )
 FUTURES_DASHBOARD_VISIBLE: bool = (
-    os.getenv("FUTURES_DASHBOARD_VISIBLE", "true").lower() == "true"
+    os.getenv("FUTURES_DASHBOARD_VISIBLE", "false").lower() == "true"
 )
 FUTURES_AUTONOMOUS_ENABLED: bool = (
     os.getenv("FUTURES_AUTONOMOUS_ENABLED", "false").lower() == "true"
@@ -782,7 +782,7 @@ FUTURES_MANUAL_ENABLED: bool = (
 # Connects to IBKR TWS live account on port 7496, clientId=4.
 STOCKS_LANE_ACTIVE: bool = os.getenv("STOCKS_LANE_ACTIVE", "false").lower() == "true"
 STOCKS_DASHBOARD_VISIBLE: bool = (
-    os.getenv("STOCKS_DASHBOARD_VISIBLE", "true").lower() == "true"
+    os.getenv("STOCKS_DASHBOARD_VISIBLE", "false").lower() == "true"
 )
 STOCKS_AUTONOMOUS_ENABLED: bool = (
     os.getenv("STOCKS_AUTONOMOUS_ENABLED", "false").lower() == "true"
@@ -929,14 +929,14 @@ TV_SIGNAL_PROFILE_NAME: str = os.getenv(
 TV_SIGNAL_INDICATOR_NAME: str = os.getenv(
     "TV_SIGNAL_INDICATOR_NAME", "AlgoBot HTF Confluence Engine v2"
 ).strip()
-TV_SIGNAL_MODE: str = os.getenv("TV_SIGNAL_MODE", "context_filter").strip().lower()
+TV_SIGNAL_MODE: str = os.getenv("TV_SIGNAL_MODE", "monitor_only").strip().lower()
 TV_REQUIRE_SCANNER_CONFIRMATION: bool = (
     os.getenv("TV_REQUIRE_SCANNER_CONFIRMATION", "true").lower() == "true"
 )
 TV_PROMOTE_SYNTHETIC_CANDIDATES: bool = (
     os.getenv("TV_PROMOTE_SYNTHETIC_CANDIDATES", "false").lower() == "true"
 )
-TV_SIGNAL_BOOST_CONVICTION: int = int(os.getenv("TV_SIGNAL_BOOST_CONVICTION", "6"))
+TV_SIGNAL_BOOST_CONVICTION: int = int(os.getenv("TV_SIGNAL_BOOST_CONVICTION", "0"))
 TV_SIGNAL_MAX_AGE_SECONDS: int = int(
     os.getenv("TV_SIGNAL_MAX_AGE_SECONDS", "14400")
 )  # 4h — matches the 4H candle duration; signal stays valid until next candle closes
@@ -1008,6 +1008,64 @@ SPOT_TINY_LIVE_MAX_POSITION_USD: float = float(
 SPOT_TINY_LIVE_ALLOWED_ROUTE: str = (
     os.getenv("SPOT_TINY_LIVE_ALLOWED_ROUTE", "maker_first").strip().lower()
 )
+SPOT_TINY_LIVE_ENABLEMENT_CONFIRMED: bool = os.getenv(
+    "SPOT_TINY_LIVE_ENABLEMENT_CONFIRMED", "false"
+).strip().lower() in ("true", "1", "yes")
+SPOT_EXTERNAL_MANUAL_HOLDINGS: list[str] = [
+    s.strip().upper()
+    for s in os.getenv(
+        "SPOT_EXTERNAL_MANUAL_HOLDINGS", "BTC,LTC,SOL,XRP,ADA,MANA,CLOV,STETH"
+    ).split(",")
+    if s.strip()
+]
+SPOT_ALLOWED_SETUP_FAMILIES_TINY_LIVE: tuple[str, ...] = (
+    "impulse_continuation",
+    "compression_breakout",
+    "trend_resume_after_shakeout",
+    "compression_expansion_retest",
+)
+SPOT_DISABLED_SETUP_FAMILIES_TINY_LIVE: tuple[str, ...] = ("pullback_reclaim",)
+SPOT_TINY_LIVE_MIN_CONFIRMS: dict[str, int] = {"TREND": 2, "NEUTRAL": 3, "CHOP": 99}
+SPOT_TINY_LIVE_MIN_5M_FRAME: dict[str, float] = {
+    "TREND": 52.0,
+    "NEUTRAL": 55.0,
+    "CHOP": 99.0,
+}
+SPOT_TINY_LIVE_MIN_30M_FRAME: dict[str, float] = {
+    "TREND": 55.0,
+    "NEUTRAL": 58.0,
+    "CHOP": 99.0,
+}
+SPOT_TINY_LIVE_MIN_STRUCTURE_COMPONENT: dict[str, float] = {
+    "TREND": 0.000001,
+    "NEUTRAL": 0.0,
+    "CHOP": 999.0,
+}
+SPOT_TINY_LIVE_MIN_PARTICIPATION_COMPONENT: dict[str, float] = {
+    "TREND": -999.0,
+    "NEUTRAL": 0.000001,
+    "CHOP": 999.0,
+}
+SPOT_TINY_LIVE_MIN_MOMENTUM_IMPULSE: dict[str, float] = {
+    "TREND": 0.000001,
+    "NEUTRAL": 0.000001,
+    "CHOP": 999.0,
+}
+SPOT_TINY_LIVE_SCORE_FLOORS: dict[str, float] = {
+    "TREND": 58.0,
+    "NEUTRAL": 60.0,
+    "CHOP": 99.0,
+}
+SPOT_TINY_LIVE_SCORE_WEIGHTS: dict[str, dict[str, float]] = {
+    "TREND": {"composite": 0.70, "derivative": 0.30},
+    "NEUTRAL": {"composite": 0.90, "derivative": 0.10},
+    "CHOP": {"composite": 0.90, "derivative": 0.10},
+}
+SPOT_TINY_LIVE_EXIT_PROFILE_BY_REGIME: dict[str, str] = {
+    "TREND": "precision",
+    "NEUTRAL": "micro",
+    "CHOP": "nano",
+}
 SPOT_STOP_MATRIX_VERSION: str = os.getenv(
     "SPOT_STOP_MATRIX_VERSION", "spot_stop_matrix_2026_04_28_v1"
 ).strip()
@@ -1027,10 +1085,10 @@ SPOT_STOP_TIGHTEN_WEAK_HTF: float = float(
 # pullback_reclaim NEUTRAL: n=115, 0% WR, avg -$1.28 — quarantined
 # pullback_reclaim CHOP:    n=22,  0% WR, avg -$0.70 — quarantined (insufficient sample for positive case)
 SPOT_PULLBACK_RECLAIM_NEUTRAL_BLOCKED: bool = os.getenv(
-    "SPOT_PULLBACK_RECLAIM_NEUTRAL_BLOCKED", "false"
+    "SPOT_PULLBACK_RECLAIM_NEUTRAL_BLOCKED", "true"
 ).strip().lower() in ("true", "1", "yes")
 SPOT_PULLBACK_RECLAIM_CHOP_BLOCKED: bool = os.getenv(
-    "SPOT_PULLBACK_RECLAIM_CHOP_BLOCKED", "false"
+    "SPOT_PULLBACK_RECLAIM_CHOP_BLOCKED", "true"
 ).strip().lower() in ("true", "1", "yes")
 # Taker fallback disabled: all 113 taker trades in failure window were losers ($-131, 0% WR).
 # Maker-only policy: if maker order does not fill within SPOT_MAKER_WAIT_SECONDS, cancel and skip.

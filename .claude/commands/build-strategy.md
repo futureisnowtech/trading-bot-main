@@ -1,7 +1,7 @@
 ---
 name: build-strategy
-description: Scaffold a new trading strategy from spec to working code
-argument-hint: "<strategy_name> [--lane=crypto|equity|futures|perp]"
+description: Add or scaffold a strategy within the current repo architecture without contaminating the active spot truth-lane
+argument-hint: "<strategy_name> [--lane=spot|perp|forecast|stocks|research]"
 allowed-tools:
   - Read
   - Write
@@ -11,68 +11,28 @@ allowed-tools:
   - Grep
 ---
 
-Build a new trading strategy from scratch, following the existing architecture.
+Build new strategy code carefully. The active live lane is spot; anything else must be clearly marked dormant, research-only, or lane-specific.
+
+## Read First
+
+1. `AGENTS.md`
+2. the closest existing lane implementation
+3. relevant proof tests
 
 ## Process
 
-### 1. Parse Arguments
+1. Identify the target lane.
+2. State whether the strategy is:
+   - active-lane extension
+   - dormant-lane work
+   - research-only
+3. Reuse existing architecture before creating new scaffolding.
+4. Keep all new parameters in `config.py`.
+5. Update `AGENTS.md` if the repo’s active truth changes.
 
-Extract strategy name and lane from `$ARGUMENTS`.
-Default lane: crypto.
+## Rules
 
-### 2. Review Existing Patterns
+- Do not silently expand the active live lane.
+- Do not add indicator bloat to the spot truth-lane.
+- If a strategy is not part of the active live spot lane, say so explicitly in docs/comments.
 
-Read the most similar existing strategy:
-- Crypto: `strategies/crypto_macd.py`
-- Equity: `strategies/equity_momentum.py`
-- Mean-reversion: `strategies/crypto_mean_reversion.py`
-- Futures: `strategies/futures_scalper.py`
-
-Read `strategies/base_strategy.py` for the Signal dataclass and abstract base.
-
-### 3. Design the Strategy
-
-Before writing code, output a design summary:
-- **Entry signals**: Which indicators trigger entry? (use `data/indicators.py` output fields)
-- **Exit logic**: Stop %, take-profit %, trailing conditions
-- **Regime filter**: Which market regimes (trending/ranging/volatile) this strategy targets
-- **Debate integration**: Does this go through the 3-agent debate or use direct signal?
-- **Risk params**: Default position size, stop %, take-profit %
-
-### 4. Implement
-
-Create `strategies/{strategy_name}.py` with:
-- Class inheriting from `BaseStrategy`
-- `generate_signal(market_data: dict) -> Signal` method
-- All params read from `config.py` (never hardcoded)
-- Inline comments for any non-obvious math
-
-### 5. Wire Config
-
-Add any new params to `config.py` with sensible defaults.
-Add corresponding placeholders to `.env.example`.
-
-### 6. Register in Job Runner
-
-Show the user exactly which lines in `scheduler/job_runner.py` need to be updated to run this strategy.
-Do NOT edit job_runner.py automatically — show the diff and ask for confirmation.
-
-### 7. Backtest
-
-Run a quick backtest to verify the strategy fires at least some trades:
-```bash
-python3 run_backtest.py --strategy {strategy_name} --period 1mo
-```
-
-Output the results and flag if win_rate < 30% or total_trades < 5.
-
-### 8. Update CLAUDE.md
-
-Add a one-line entry to the Project Structure section for the new file.
-
-## Success Criteria
-
-- [ ] Strategy file created and importable (`python3 -c "from strategies.{name} import ..."`)
-- [ ] At least one signal fires in backtest
-- [ ] All params in config.py (no hardcoded values)
-- [ ] CLAUDE.md updated

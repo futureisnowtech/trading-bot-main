@@ -28,8 +28,6 @@ from config import (
     PAPER_TRADING,
     FLAT_POSITION_THRESHOLD_PCT,
     CRYPTO_SCAN_INTERVAL_SECONDS,
-    FUTURES_LANE_ACTIVE,
-    IBKR_PORT,
 )
 from logging_db.trade_logger import log_event
 
@@ -269,35 +267,83 @@ def _check_scan_liveness() -> dict:
         return {"ok": False, "detail": f"Exception: {e}"}
 
 
-def _check_attribution_working() -> dict:
-    """trade_attribution rows must be written for recent closed trades."""
+def _check_spot_truth() -> dict:
+    """Live spot health must be broker-canonical and free of unresolved blockers."""
+    try:
+        from runtime.spot_position_truth import get_spot_position_truth
+
+        truth = get_spot_position_truth(paper=bool(PAPER_TRADING))
+        if not truth.get("snapshot_ok"):
+            return {"ok": False, "detail": "spot broker snapshot unavailable"}
+        blockers = truth.get("blocking_issues") or []
+        if blockers:
+            rendered = ", ".join(
+                f"{b.get('symbol') or 'GLOBAL'}:{b.get('position_truth_status')}"
+                for b in blockers
+            )
+            return {"ok": False, "detail": f"spot truth blockers: {rendered}"}
+        return {
+            "ok": True,
+            "detail": (
+                f"spot truth ok | holdings={truth.get('positions_open', 0)} "
+                f"deployed=${float(truth.get('deployment_notional') or 0.0):.2f}"
+            ),
+        }
+    except Exception as e:
+        return {"ok": False, "detail": f"spot truth check error: {e}"}
+
+
+def _check_spot_learning_truth() -> dict:
+    """Recent closed spot trades must write both attribution and feature snapshots."""
     try:
         conn = _conn()
-        # Check if any trades closed in last 24h have attribution rows
         recent_trades = conn.execute(
-            "SELECT COUNT(*) FROM trades WHERE paper=? AND pnl_usd != 0 "
+            "SELECT COUNT(*) FROM trades WHERE strategy LIKE 'spot_%' AND paper=? AND pnl_usd != 0 "
             "AND ts >= datetime('now', '-24 hours')",
             (1 if PAPER_TRADING else 0,),
         ).fetchone()[0]
 
         if recent_trades == 0:
             conn.close()
-            return {"ok": True, "detail": "No closed trades in last 24h to attribute"}
+            return {"ok": True, "detail": "No recent closed spot trades to verify"}
 
         attributed = conn.execute(
-            "SELECT COUNT(*) FROM trade_attribution WHERE created_at >= datetime('now', '-24 hours')"
+            """
+            SELECT COUNT(*)
+            FROM trade_attribution ta
+            WHERE ta.strategy LIKE 'spot_%'
+              AND datetime(replace(substr(ta.created_at,1,19),'T',' ')) >= datetime('now', '-24 hours')
+            """
+        ).fetchone()[0]
+        snapshots = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM ml_feature_snapshots m
+            JOIN trades t ON t.id = m.trade_id
+            WHERE t.strategy LIKE 'spot_%'
+              AND t.paper=?
+              AND datetime(replace(substr(t.ts,1,19),'T',' ')) >= datetime('now', '-24 hours')
+            """,
+            (1 if PAPER_TRADING else 0,),
         ).fetchone()[0]
         conn.close()
 
-        ratio = attributed / recent_trades if recent_trades > 0 else 0
-        if ratio < 0.5 and recent_trades >= 3:
+        attr_ratio = attributed / recent_trades if recent_trades > 0 else 0
+        snap_ratio = snapshots / recent_trades if recent_trades > 0 else 0
+        if (attr_ratio < 1.0 or snap_ratio < 1.0) and recent_trades >= 1:
             return {
                 "ok": False,
-                "detail": f"Attribution gap: {attributed}/{recent_trades} trades attributed",
+                "detail": (
+                    f"spot learning gap: attr={attributed}/{recent_trades} "
+                    f"snapshots={snapshots}/{recent_trades}"
+                ),
             }
         return {
             "ok": True,
-            "detail": f"{attributed}/{recent_trades} trades attributed (last 24h)",
+            "detail": (
+                f"spot learning ok: attr={attributed}/{recent_trades} "
+                f"snapshots={snapshots}/{recent_trades}"
+            ),
         }
     except Exception as e:
         return {"ok": False, "detail": f"Exception: {e}"}
@@ -306,6 +352,9 @@ def _check_attribution_working() -> dict:
 def _check_error_rate() -> dict:
     """Less than 10 errors in the last hour (excluding archived lane noise)."""
     try:
+        import config as _cfg
+
+        futures_lane_active = bool(getattr(_cfg, "FUTURES_LANE_ACTIVE", False))
         conn = _conn()
         rows = conn.execute(
             "SELECT source, message FROM system_events WHERE level='ERROR' "
@@ -319,7 +368,7 @@ def _check_error_rate() -> dict:
         for row in rows:
             src = (row[0] or "").lower()
             msg = (row[1] or "").lower()
-            if not FUTURES_LANE_ACTIVE and any(
+            if not futures_lane_active and any(
                 m in src or m in msg for m in _archived_markers
             ):
                 continue
@@ -331,47 +380,20 @@ def _check_error_rate() -> dict:
         return {"ok": False, "detail": f"Exception: {e}"}
 
 
-def _check_risk_manager() -> dict:
-    """Risk manager should not be halted without a reason."""
+def _check_spot_kill_switch() -> dict:
+    """Spot lane kill switch must not be active."""
     try:
-        from risk.risk_manager import get_risk_manager
+        from runtime.spot_kill_switch import kill_switch_status
 
-        rm = get_risk_manager()
-        if rm.is_halted:
-            reason = getattr(rm, "halt_reason", "") or "unknown reason"
-            return {"ok": False, "detail": f"HALTED: {reason}"}
-        positions = rm.get_all_positions()
-        n = sum(len(s) for s in positions.values() if s)
-        return {"ok": True, "detail": f"Not halted | {n} open positions"}
-    except Exception as e:
-        return {"ok": False, "detail": f"Exception: {e}"}
-
-
-def _check_ibkr_connection() -> dict:
-    """IBKR/TWS connectivity — only checked when FUTURES_LANE_ACTIVE=true.
-    When MES lane is dormant (FUTURES_LANE_ACTIVE=false), skip entirely — not a failure."""
-    if not FUTURES_LANE_ACTIVE:
-        return {
-            "ok": True,
-            "detail": "FUTURES_LANE_ACTIVE=false — MES lane dormant, skipped",
-        }
-    try:
-        from execution.ibkr_broker import get_ibkr_broker
-
-        broker = get_ibkr_broker()
-        if not broker.is_connected():
-            # Attempt reconnect once before reporting failure
-            broker.connect()
-        if not broker.is_connected():
+        status = kill_switch_status()
+        if status.get("halted"):
             return {
                 "ok": False,
-                "detail": f"IBKR not connected — TWS unreachable on port {IBKR_PORT}",
+                "detail": f"HALTED: {status.get('last_halt_reason') or 'spot kill switch active'}",
             }
-        bal = broker.get_account_balance()
-        bal_str = f"${bal:.0f}" if bal > 0 else "unavailable"
-        return {"ok": True, "detail": f"TWS connected | balance={bal_str}"}
+        return {"ok": True, "detail": "spot kill switch clear"}
     except Exception as e:
-        return {"ok": False, "detail": f"IBKR check error: {e}"}
+        return {"ok": False, "detail": f"Exception: {e}"}
 
 
 def run_health_check(force: bool = False) -> dict:
@@ -396,12 +418,11 @@ def run_health_check(force: bool = False) -> dict:
 
     checks = {
         "ml_gate": _check_ml_gate(),
-        "stagnant": _check_stagnant_positions(),
         "scan_liveness": _check_scan_liveness(),
-        "attribution": _check_attribution_working(),
+        "spot_truth": _check_spot_truth(),
+        "spot_learning": _check_spot_learning_truth(),
         "error_rate": _check_error_rate(),
-        "risk_manager": _check_risk_manager(),
-        "ibkr": _check_ibkr_connection(),
+        "spot_kill_switch": _check_spot_kill_switch(),
     }
 
     passed = sum(1 for v in checks.values() if v["ok"])

@@ -41,6 +41,7 @@ def check_spot_economics(
     net_target_pct = target_pct - total_cost_pct
     net_stop_pct = stop_pct + total_cost_pct
     projected_net_win_usd = size_usd * net_target_pct
+    net_rr = net_target_pct / max(net_stop_pct, 1e-9)
     score_floor = score_floor_for_regime(
         regime,
         structural_confirm_count=structural_confirm_count,
@@ -59,6 +60,7 @@ def check_spot_economics(
             "edge_score": net_target_pct - net_stop_pct,
             "net_target_pct": net_target_pct,
             "net_stop_pct": net_stop_pct,
+            "net_rr": net_rr,
             "projected_net_win_usd": projected_net_win_usd,
             "total_cost_pct": total_cost_pct,
         }
@@ -72,6 +74,7 @@ def check_spot_economics(
             "edge_score": net_target_pct - net_stop_pct,
             "net_target_pct": net_target_pct,
             "net_stop_pct": net_stop_pct,
+            "net_rr": net_rr,
             "projected_net_win_usd": projected_net_win_usd,
             "total_cost_pct": total_cost_pct,
         }
@@ -87,6 +90,7 @@ def check_spot_economics(
             "edge_score": net_target_pct - net_stop_pct,
             "net_target_pct": net_target_pct,
             "net_stop_pct": net_stop_pct,
+            "net_rr": net_rr,
             "projected_net_win_usd": projected_net_win_usd,
             "total_cost_pct": total_cost_pct,
         }
@@ -100,10 +104,11 @@ def check_spot_economics(
             "edge_score": net_target_pct - net_stop_pct,
             "net_target_pct": net_target_pct,
             "net_stop_pct": net_stop_pct,
+            "net_rr": net_rr,
             "projected_net_win_usd": projected_net_win_usd,
             "total_cost_pct": total_cost_pct,
         }
-    if projected_net_win_usd < fee_usd + 0.01:
+    if projected_net_win_usd < (2.0 * fee_usd):
         return {
             "approved": False,
             "reason": "projected_net_win_too_small",
@@ -113,6 +118,21 @@ def check_spot_economics(
             "edge_score": net_target_pct - net_stop_pct,
             "net_target_pct": net_target_pct,
             "net_stop_pct": net_stop_pct,
+            "net_rr": net_rr,
+            "projected_net_win_usd": projected_net_win_usd,
+            "total_cost_pct": total_cost_pct,
+        }
+    if net_rr < 1.25:
+        return {
+            "approved": False,
+            "reason": "net_rr_below_minimum",
+            "gate_class": "economics",
+            "score_floor": score_floor,
+            "fee_usd": fee_usd,
+            "edge_score": net_target_pct - net_stop_pct,
+            "net_target_pct": net_target_pct,
+            "net_stop_pct": net_stop_pct,
+            "net_rr": net_rr,
             "projected_net_win_usd": projected_net_win_usd,
             "total_cost_pct": total_cost_pct,
         }
@@ -125,6 +145,7 @@ def check_spot_economics(
         "edge_score": net_target_pct - net_stop_pct,
         "net_target_pct": net_target_pct,
         "net_stop_pct": net_stop_pct,
+        "net_rr": net_rr,
         "projected_net_win_usd": projected_net_win_usd,
         "total_cost_pct": total_cost_pct,
     }

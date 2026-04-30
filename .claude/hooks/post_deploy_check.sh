@@ -9,6 +9,7 @@
 #   2. Bot started AFTER the latest commit (not running stale code)
 #   3. Remote HEAD matches local HEAD (push landed)
 # Prints a clear warning to stderr if anything is out of sync.
+# The active live path is the controlled tiny-live launcher (`scripts/go_live.py`).
 # ─────────────────────────────────────────────────────────────────────────────
 
 INPUT=$(cat)
@@ -52,7 +53,9 @@ fi
 # ── 2. Find bot process ───────────────────────────────────────────────────────
 BOT_PID=$(pgrep -f "boot.py" | head -1)
 if [ -z "$BOT_PID" ]; then
-    echo "  ⚠️  NO BOT PROCESS FOUND — start with: python3 scripts/go_live.py" >&2
+    echo "  ⚠️  NO BOT PROCESS FOUND — start with the controlled launcher for the target mode" >&2
+    echo "     tiny live: python3 scripts/go_live.py" >&2
+    echo "     paper:     python3 scripts/go_paper.py" >&2
     FAIL=1
 else
     # ── 3. Compare bot start time to latest commit time ───────────────────────
@@ -74,7 +77,7 @@ else
             echo "     Latest commit: $COMMIT_HASH" >&2
             echo "     Commit time:   $(date -r "$COMMIT_EPOCH" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo epoch=$COMMIT_EPOCH)" >&2
             echo "     Bot started:   $BOT_START" >&2
-            echo "     ACTION NEEDED: python3 scripts/go_live.py" >&2
+            echo "     ACTION NEEDED: restart with the controlled launcher for the target mode" >&2
             FAIL=1
         fi
     else

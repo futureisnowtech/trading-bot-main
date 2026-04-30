@@ -1,5 +1,8 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
+## 2026-04-30
+- v18.14: implement the Coinbase spot truth-lane refactor and tiny-live readiness hardening — add `runtime/spot_position_truth.py` plus `spot_holding_classifications`, make broker spot holdings canonical for dashboard/runtime/readiness counts, hide dormant lanes from live control surfaces, move TradingView to `monitor_only`, tighten live spot governance (`CHOP` blocked, `pullback_reclaim` quarantined, maker-only, precision/micro exit profiles, harsher score/frame/confirm floors), harden spot close reconciliation so residual live inventory is re-persisted instead of silently deleted, switch `go_live.py` to spot-broker + truth-blocker preflight, update spot health/kill-switch checks to be lane-specific, and add proof coverage for broker-truth rendering, external/manual blocking, residual-close persistence, truth-gated health, and truth-gated launch.
+
 ## 2026-04-28
 - v18.13: remove default quarantines, reset kill switch, delete stale spot positions
 

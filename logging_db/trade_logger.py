@@ -216,6 +216,12 @@ def init_db() -> None:
         """CREATE INDEX IF NOT EXISTS idx_tv_signals_symbol_ts
            ON tv_signals(symbol, ts DESC)"""
     )
+    cur.execute("""CREATE TABLE IF NOT EXISTS spot_holding_classifications (
+        symbol TEXT PRIMARY KEY,
+        classification TEXT NOT NULL,
+        note TEXT DEFAULT '',
+        updated_at TEXT NOT NULL
+    )""")
 
     cur.execute("""CREATE TABLE IF NOT EXISTS api_costs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,

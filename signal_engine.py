@@ -38,11 +38,15 @@ def _tv_signal_score() -> float:
     try:
         import config as _cfg
 
-        if str(getattr(_cfg, "TV_SIGNAL_MODE", "context_filter")).lower() != "synthetic_candidate":
+        if (
+            str(getattr(_cfg, "TV_SIGNAL_MODE", "context_filter")).lower()
+            != "synthetic_candidate"
+        ):
             return 0.0
         return float(getattr(_cfg, "TV_SIGNAL_BOOST_CONVICTION", 0.0) or 0.0)
     except Exception:
         return 0.0
+
 
 # ── Regime multipliers for ML tower ─────────────────────────────────────────
 _REGIME_ML_MULT = {
@@ -474,7 +478,9 @@ def _get_ml_score(
             or ""
         ).strip()
         # predict_ml_score returns 0-100 directly (tanh-normalized PnL regression)
-        raw_score = model_store.predict_ml_score(features, direction, symbol=symbol_hint)
+        raw_score = model_store.predict_ml_score(
+            features, direction, symbol=symbol_hint
+        )
         if raw_score is None:
             return 50.0
         mult = _REGIME_ML_MULT.get(regime, {}).get(direction, 1.0)

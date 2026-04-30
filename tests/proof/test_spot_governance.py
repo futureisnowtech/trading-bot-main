@@ -6,10 +6,10 @@ Proof tests for the evidence-derived spot governance layer added in the
 
 SG-01  pullback_reclaim in NEUTRAL is quarantined by spot_quality_block_reason
 SG-02  pullback_reclaim in CHOP   is quarantined by spot_quality_block_reason
-SG-03  pullback_reclaim in TREND  is NOT quarantined (different regime)
+SG-03  pullback_reclaim in TREND is also quarantined in tiny-live mode
 SG-04  impulse_continuation in NEUTRAL is NOT quarantined
-SG-05  SPOT_PULLBACK_RECLAIM_NEUTRAL_BLOCKED=false unblocks NEUTRAL pullback_reclaim
-SG-06  SPOT_PULLBACK_RECLAIM_CHOP_BLOCKED=false    unblocks CHOP pullback_reclaim
+SG-05  legacy neutral flag no longer re-enables pullback_reclaim
+SG-06  legacy chop flag no longer re-enables pullback_reclaim
 SG-07  _compute_stop_pct applies NEUTRAL tighten multiplier (< raw stop)
 SG-08  _compute_stop_pct applies CHOP tighten multiplier (< raw stop)
 SG-09  _compute_stop_pct applies pullback_reclaim tighten (< raw stop)
@@ -74,7 +74,7 @@ def test_sg01_pullback_reclaim_neutral_quarantined():
             _spot_state("NEUTRAL", "pullback_reclaim"),
             final_spot_score=60.0,
         )
-    assert reason == "pullback_reclaim_neutral_quarantined", reason
+    assert reason == "pullback_reclaim_quarantined", reason
 
 
 def test_sg02_pullback_reclaim_chop_quarantined():
@@ -86,19 +86,18 @@ def test_sg02_pullback_reclaim_chop_quarantined():
             _spot_state("CHOP", "pullback_reclaim"),
             final_spot_score=60.0,
         )
-    assert reason == "pullback_reclaim_chop_quarantined", reason
+    assert reason == "spot_regime_not_allowed:CHOP", reason
 
 
-def test_sg03_pullback_reclaim_trend_not_quarantined():
+def test_sg03_pullback_reclaim_trend_quarantined():
     from runtime.spot_strategy import spot_quality_block_reason
 
-    # TREND pullback_reclaim should NOT be quarantined (only NEUTRAL/CHOP)
     reason, _ = spot_quality_block_reason(
         "SOL",
         _spot_state("TREND", "pullback_reclaim", setup_score=0.8),
         final_spot_score=70.0,
     )
-    assert "quarantined" not in reason, f"Unexpected quarantine for TREND: {reason}"
+    assert reason == "pullback_reclaim_quarantined", reason
 
 
 def test_sg04_impulse_continuation_neutral_not_quarantined():
@@ -122,7 +121,7 @@ def test_sg05_flag_false_unblocks_neutral():
             _spot_state("NEUTRAL", "pullback_reclaim", setup_score=0.9),
             final_spot_score=72.0,
         )
-    assert reason != "pullback_reclaim_neutral_quarantined", reason
+    assert reason == "pullback_reclaim_quarantined", reason
 
 
 def test_sg06_flag_false_unblocks_chop():
@@ -134,7 +133,7 @@ def test_sg06_flag_false_unblocks_chop():
             _spot_state("CHOP", "pullback_reclaim", setup_score=0.9),
             final_spot_score=72.0,
         )
-    assert reason != "pullback_reclaim_chop_quarantined", reason
+    assert reason == "spot_regime_not_allowed:CHOP", reason
 
 
 # ── SG-07 through SG-09: stop tighten ────────────────────────────────────────
@@ -300,6 +299,10 @@ def test_sg12_kill_switch_consecutive_losses_fires():
         patch("config.SPOT_KS_CONSECUTIVE_LOSSES", 4),
         patch("config.SPOT_KS_DAILY_LOSS_PCT", 0.99),  # daily threshold disabled
         patch("config.ACCOUNT_SIZE", 5000),
+        patch(
+            "runtime.spot_position_truth.get_spot_position_truth",
+            return_value={"snapshot_ok": True, "blocking_issues": []},
+        ),
     ):
         halt, reason = _ks.check_spot_kill_switch(paper=False)
     assert halt is True, f"Expected halt, got reason={reason}"
@@ -316,6 +319,10 @@ def test_sg13_kill_switch_does_not_fire_below_threshold():
         patch("config.SPOT_KS_CONSECUTIVE_LOSSES", 4),
         patch("config.SPOT_KS_DAILY_LOSS_PCT", 0.99),
         patch("config.ACCOUNT_SIZE", 5000),
+        patch(
+            "runtime.spot_position_truth.get_spot_position_truth",
+            return_value={"snapshot_ok": True, "blocking_issues": []},
+        ),
     ):
         halt, reason = _ks.check_spot_kill_switch(paper=False)
     assert halt is False, f"Should not halt, got reason={reason}"

@@ -108,31 +108,57 @@ def _load_mode() -> str | None:
         conn.close()
 
 
-def _load_crypto_lane() -> tuple[int, float, str]:
-    """Return (connected, buying_power_usd, readiness_state) for the crypto lane."""
+def _load_crypto_lane() -> tuple[int, float, str, str]:
+    """Return (connected, buying_power_usd, readiness_state, blocked_reason)."""
     if not DB_PATH.exists():
-        return 0, 0.0, ""
+        return 0, 0.0, "", ""
     conn = sqlite3.connect(DB_PATH)
     try:
         row = conn.execute(
-            "SELECT connected, buying_power_usd, readiness_state "
+            "SELECT connected, buying_power_usd, readiness_state, blocked_reason "
             "FROM lane_runtime_state WHERE lane_id='crypto' ORDER BY id DESC LIMIT 1"
         ).fetchone()
         if not row:
-            return 0, 0.0, ""
-        return int(row[0] or 0), float(row[1] or 0.0), str(row[2] or "")
+            return 0, 0.0, "", ""
+        return (
+            int(row[0] or 0),
+            float(row[1] or 0.0),
+            str(row[2] or ""),
+            str(row[3] or ""),
+        )
     finally:
         conn.close()
 
 
 def _coinbase_live_ready() -> None:
-    print("[go_live] Verifying Coinbase live auth...")
-    from execution.coinbase_broker import CoinbaseBroker
+    print("[go_live] Verifying Coinbase spot live auth...")
+    from execution.coinbase_spot_broker import get_spot_broker
 
-    broker = CoinbaseBroker(paper=False)
+    broker = get_spot_broker()
     if not broker.connect():
         raise RuntimeError(
-            "Coinbase LIVE auth/connect() failed. Fix CDP auth/network first."
+            "Coinbase SPOT live auth/connect() failed. Fix CDP auth/network first."
+        )
+    holdings = broker.sync_live_holdings()
+    if holdings is None:
+        raise RuntimeError("Coinbase SPOT live snapshot unavailable after connect().")
+
+
+def _spot_truth_ready() -> None:
+    from runtime.spot_position_truth import get_spot_position_truth
+
+    truth = get_spot_position_truth(paper=False)
+    if not truth.get("snapshot_ok"):
+        raise RuntimeError("Spot truth snapshot unavailable — refusing live launch.")
+    blockers = truth.get("blocking_issues") or []
+    if blockers:
+        rendered = ", ".join(
+            f"{b.get('symbol') or 'GLOBAL'}:{b.get('position_truth_status')}"
+            for b in blockers
+        )
+        raise RuntimeError(
+            "Spot truth blockers present — refusing live launch: "
+            f"{rendered}"
         )
 
 
@@ -161,7 +187,19 @@ def main() -> int:
     os.makedirs(LIVE_LOG.parent, exist_ok=True)
 
     _coinbase_live_ready()
+    _spot_truth_ready()
     _forecast_status()
+
+    connected, buying_power, readiness, blocked_reason = _load_crypto_lane()
+    if readiness != "READY_FOR_TINY_LIVE":
+        raise RuntimeError(
+            "Crypto lane is not READY_FOR_TINY_LIVE. "
+            f"Current readiness={readiness or 'UNKNOWN'} blocked_reason={blocked_reason or 'none'}"
+        )
+    print(
+        "[go_live] Preflight readiness OK: "
+        f"connected={connected} buying_power=${buying_power:,.2f} readiness={readiness}"
+    )
 
     paper_pids, live_pids = _boot_processes()
     if live_pids:
@@ -201,8 +239,8 @@ def main() -> int:
         deadline = time.time() + 20
         while time.time() < deadline:
             mode = _load_mode()
-            connected, buying_power, readiness = _load_crypto_lane()
-            if mode == "live" and connected and buying_power > 0:
+            connected, buying_power, readiness, blocked_reason = _load_crypto_lane()
+            if mode == "live" and connected and buying_power > 0 and readiness == "TINY_LIVE":
                 print(
                     "[go_live] Runtime state confirms mode=live "
                     f"and crypto connected=1 buying_power=${buying_power:,.2f} "
@@ -243,8 +281,9 @@ def main() -> int:
             time.sleep(1)
 
         raise RuntimeError(
-            "Live bot did not confirm mode=live with a connected crypto lane and non-zero buying power "
-            "in runtime state within 20 seconds. "
+            "Live bot did not confirm mode=live with connected crypto spot truth and TINY_LIVE readiness "
+            f"(last readiness={readiness or 'UNKNOWN'} blocked_reason={blocked_reason or 'none'}) "
+            "within 20 seconds. "
             f"Check {LIVE_LOG}"
         )
     except Exception:

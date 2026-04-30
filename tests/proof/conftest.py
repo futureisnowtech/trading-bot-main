@@ -75,6 +75,9 @@ def proof_runtime(tmp_path, monkeypatch) -> ProofRuntime:
     import learning.signal_performance as signal_performance
     import logging_db.trade_logger as trade_logger
     import monitoring.health_check as health_check
+    import runtime.spot_kill_switch as spot_kill_switch
+    import runtime.spot_position_truth as spot_position_truth
+    import runtime.runtime_state as runtime_state
 
     monkeypatch.setattr(config, "DB_PATH", str(db_path), raising=False)
     monkeypatch.setattr(config, "CSV_LOG_DIR", str(csv_dir), raising=False)
@@ -86,6 +89,9 @@ def proof_runtime(tmp_path, monkeypatch) -> ProofRuntime:
     monkeypatch.setattr(trade_logger, "_LOGGER_HANDLE", None, raising=False)
 
     monkeypatch.setattr(signal_performance, "DB_PATH", str(db_path), raising=False)
+    monkeypatch.setattr(spot_position_truth, "DB_PATH", str(db_path), raising=False)
+    monkeypatch.setattr(spot_kill_switch, "_DB", db_path, raising=False)
+    monkeypatch.setattr(runtime_state, "DB_PATH", str(db_path), raising=False)
 
     monkeypatch.setattr(dashboard_db, "DB_PATH", str(db_path), raising=False)
     monkeypatch.setattr(dashboard_db, "LOG_PATH", str(log_path), raising=False)

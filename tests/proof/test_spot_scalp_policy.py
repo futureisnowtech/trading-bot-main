@@ -31,7 +31,7 @@ def test_ssp01_spot_econ_separates_quality_from_economics():
     assert result["approved"] is False
     assert result["reason"] == "below_regime_floor"
     assert result["gate_class"] == "quality"
-    assert result["score_floor"] == pytest.approx(56.0)
+    assert result["score_floor"] == pytest.approx(60.0)
 
 
 def test_ssp02_spot_econ_marks_spread_fail_as_microstructure():
@@ -102,12 +102,9 @@ def test_ssp03_build_spot_state_can_fall_back_to_stale_cache(monkeypatch):
 
 def test_ssp04_quality_gate_open_before_calibration():
     """
-    Quarantine mechanism is config-flag gated:
-    - When SPOT_PULLBACK_RECLAIM_NEUTRAL_BLOCKED=True, pullback_reclaim×NEUTRAL is blocked.
-    - When the flag is False (default), the gate is open for all families.
-    - impulse_continuation in NEUTRAL always has open gate (no edge blocks).
-    SG-01 / SG-02 test the mechanism with explicit patches; this test confirms
-    that the default-off state does not quarantine impulse_continuation.
+    pullback_reclaim is a hard tiny-live quarantine and impulse_continuation
+    should still avoid quarantine semantics even if another quality gate later
+    blocks the candidate.
     """
     from unittest.mock import patch
 
@@ -126,7 +123,7 @@ def test_ssp04_quality_gate_open_before_calibration():
         "30m": {"v": 0.1, "frame_score": 57.0, "volatility_quality": 0.0},
     }
 
-    # When the flag is explicitly enabled, pullback_reclaim×NEUTRAL IS quarantined
+    # pullback_reclaim remains hard quarantined in tiny-live mode
     pr_state = {
         "symbol": "BTC",
         "regime": "NEUTRAL",
@@ -137,8 +134,8 @@ def test_ssp04_quality_gate_open_before_calibration():
     }
     with patch("config.SPOT_PULLBACK_RECLAIM_NEUTRAL_BLOCKED", True):
         reason, _ = spot_quality_block_reason("BTC", pr_state, final_spot_score=65.0)
-    assert reason == "pullback_reclaim_neutral_quarantined", (
-        f"pullback_reclaim NEUTRAL must be quarantined when flag=True; got: {reason!r}"
+    assert reason == "pullback_reclaim_quarantined", (
+        f"pullback_reclaim must be quarantined in tiny live; got: {reason!r}"
     )
 
     # impulse_continuation in NEUTRAL must always have open gate (no edge blocks)

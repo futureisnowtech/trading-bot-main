@@ -39,6 +39,7 @@ from runtime.spot_momentum import build_spot_state
 from runtime.spot_regime import score_floor_for_regime
 from runtime.spot_strategy import (
     edge_policy_for_symbol,
+    exit_profile_for_symbol,
     get_spot_strategy,
     score_floor_for_symbol,
     setup_policy_for_symbol,
@@ -46,6 +47,7 @@ from runtime.spot_strategy import (
     target_r_for_symbol,
     trail_arm_r_for_symbol,
 )
+from runtime.spot_position_truth import get_spot_position_truth, get_spot_symbol_truth
 
 logger = logging.getLogger(__name__)
 
@@ -202,6 +204,65 @@ def _sync_position_exit_reason(
         logger.debug(f"[spot_engine] exit_reason sync error {symbol}: {e}")
 
 
+def _persist_position_from_row(row: dict, *, qty: float | None = None) -> None:
+    from logging_db.trade_logger import persist_position
+
+    persist_position(
+        symbol=str(row.get("symbol") or ""),
+        strategy=str(row.get("strategy") or _position_strategy(row.get("symbol") or "")),
+        qty=float(qty if qty is not None else row.get("qty") or 0.0),
+        entry=float(row.get("entry") or 0.0),
+        stop=float(row.get("stop") or 0.0),
+        target=float(row.get("target") or 0.0),
+        high_since_entry=float(row.get("high_since_entry") or row.get("entry") or 0.0),
+        ts_entry=str(row.get("ts_entry") or datetime.datetime.utcnow().isoformat()),
+        paper=bool(row.get("paper")),
+        direction=str(row.get("direction") or "LONG"),
+        entry_reason=str(row.get("entry_reason") or ""),
+        low_since_entry=float(row.get("low_since_entry") or row.get("entry") or 0.0),
+        atr_at_entry=float(row.get("atr_at_entry") or 0.0),
+        composite_score=float(row.get("composite_score") or 0.0),
+        trailing_active=bool(row.get("trailing_active")),
+        trailing_stop_price=float(row.get("trailing_stop_price") or 0.0),
+        scale_33_done=bool(row.get("scale_33_done")),
+        scale_66_done=bool(row.get("scale_66_done")),
+        leverage=int(row.get("leverage") or 1),
+        spot_regime=str(row.get("spot_regime") or ""),
+        setup_family=str(row.get("setup_family") or ""),
+        setup_score=float(row.get("setup_score") or 0.0),
+        setup_preference=str(row.get("setup_preference") or ""),
+        tf_5m_state=str(row.get("tf_5m_state") or ""),
+        tf_30m_state=str(row.get("tf_30m_state") or ""),
+        tf_4h_state=str(row.get("tf_4h_state") or ""),
+        tf_1d_state=str(row.get("tf_1d_state") or ""),
+        structural_confirms=str(row.get("structural_confirms") or ""),
+        execution_route=str(row.get("execution_route") or ""),
+        cooldown_until=str(row.get("cooldown_until") or ""),
+        microstructure_veto=str(row.get("microstructure_veto") or ""),
+        stop_model_version=str(row.get("stop_model_version") or ""),
+        target_model_version=str(row.get("target_model_version") or ""),
+        target_r=float(row.get("target_r") or 0.0),
+        trail_arm_r=float(row.get("trail_arm_r") or 0.0),
+        risk_dollars=float(row.get("risk_dollars") or 0.0),
+        entry_fee_usd=float(row.get("entry_fee_usd") or 0.0),
+        exit_reason=str(row.get("exit_reason") or ""),
+        entry_trade_id=int(row.get("entry_trade_id") or 0),
+        entry_order_id=str(row.get("entry_order_id") or ""),
+        entry_feature_snapshot_id=int(row.get("entry_feature_snapshot_id") or 0),
+        tv_profile_name=str(row.get("tv_profile_name") or ""),
+        tv_signal_bias=str(row.get("tv_signal_bias") or ""),
+        tv_signal_ts=str(row.get("tv_signal_ts") or ""),
+        tv_signal_age_sec=float(row.get("tv_signal_age_sec") or 0.0),
+        tv_indicator_name=str(row.get("tv_indicator_name") or ""),
+        tv_signal_strength=str(row.get("tv_signal_strength") or ""),
+        candidate_id=int(row.get("candidate_id") or 0),
+        candidate_scan_id=str(row.get("candidate_scan_id") or ""),
+        raw_scanner_symbol=str(row.get("raw_scanner_symbol") or ""),
+        base_asset=str(row.get("base_asset") or ""),
+        tv_veto_state=str(row.get("tv_veto_state") or ""),
+    )
+
+
 def _state_payload(spot_state: dict | None) -> dict:
     if not spot_state:
         return {
@@ -269,6 +330,7 @@ def _spot_entry_features(
     spot_state: dict | None,
     execution_route: str,
     edge_profile: str,
+    target_profile: str,
     tv_context: dict | None,
     candidate_id: int = 0,
     candidate_scan_id: str = "",
@@ -300,6 +362,7 @@ def _spot_entry_features(
         "structural_confirm_count": int(state.get("structural_confirm_count") or 0),
         "execution_route": str(execution_route or ""),
         "edge_profile": str(edge_profile or ""),
+        "target_profile": str(target_profile or ""),
         "path_efficiency": float(s5.get("path_efficiency") or 0.0),
         "momentum_impulse": float(s5.get("momentum_impulse") or 0.0),
         "structure_component": float(s5.get("structure_component") or 0.0),
@@ -309,6 +372,8 @@ def _spot_entry_features(
         "frame_score_5m": float(s5.get("frame_score") or 0.0),
         "frame_score_30m": float(s30.get("frame_score") or 0.0),
         "volatility_quality": float(s30.get("volatility_quality") or 0.0),
+        "price_above_vwap": bool(s5.get("price_above_vwap")),
+        "compression_release": str(state.get("setup_family") or "").startswith("compression"),
         "supertrend_bullish": "supertrend" in confirms,
         "cloud_bullish": ("cloud" in confirms) or ("ichimoku" in confirms),
         "wae_bullish": "wae" in confirms,
@@ -561,6 +626,22 @@ def open_spot(
     if not get_spot_strategy(clean)["enabled"]:
         logger.warning(f"[spot_engine] {clean} blocked — spot_strategy_symbol_disabled")
         return None
+    truth_row = get_spot_symbol_truth(clean, paper=paper)
+    if truth_row:
+        truth_status = str(truth_row.get("position_truth_status") or "")
+        if truth_status == "external_manual":
+            logger.warning(f"[spot_engine] {clean} blocked — external_manual_holding_present")
+            return None
+        if truth_status in {
+            "matched_bot_position",
+            "unclassified",
+            "needs_bot_repair",
+            "qty_mismatch",
+            "metadata_missing",
+            "db_only_stale",
+        }:
+            logger.warning(f"[spot_engine] {clean} blocked — spot_truth_{truth_status}")
+            return None
     if any(
         str(p.get("symbol", "")).upper() == clean
         for p in _load_spot_positions_from_db(paper=paper)
@@ -603,6 +684,7 @@ def open_spot(
     trail_arm_r = trail_arm_r_for_symbol(clean, regime)
     edge_policy = edge_policy_for_symbol(clean)
     edge_profile = str(edge_policy.get("profile") or "balanced")
+    target_profile = str(exit_profile_for_symbol(clean, regime) or edge_profile or "balanced")
     score_used = float(
         final_spot_score if final_spot_score is not None else composite_score
     )
@@ -673,7 +755,8 @@ def open_spot(
         notes=(
             f"spot_buy route={execution_route} stop={stop_price:.8g} "
             f"target={target_price:.8g} stop_pct={stop_pct:.4%} "
-            f"final_spot_score={score_used:.1f} edge_profile={edge_profile}"
+            f"final_spot_score={score_used:.1f} edge_profile={edge_profile} "
+            f"target_profile={target_profile}"
         ),
     )
     entry_features = _spot_entry_features(
@@ -683,6 +766,7 @@ def open_spot(
         spot_state=spot_state,
         execution_route=execution_route,
         edge_profile=edge_profile,
+        target_profile=target_profile,
         tv_context=tv_context,
         candidate_id=int(candidate_id or 0),
         candidate_scan_id=str(candidate_scan_id or ""),
@@ -724,7 +808,7 @@ def open_spot(
         cooldown_until=cooldown_until,
         microstructure_veto=micro_veto,
         stop_model_version="spot_scalp_v1",
-        target_model_version=f"spot_scalp_{edge_profile}_v1",
+        target_model_version=f"spot_scalp_{target_profile}_v1",
         target_r=target_r,
         trail_arm_r=trail_arm_r,
         risk_dollars=risk_dollars,
@@ -760,6 +844,7 @@ def open_spot(
         "setup_family": state_payload["setup_family"],
         "setup_score": state_payload["setup_score"],
         "setup_preference": state_payload["setup_preference"],
+        "target_profile": target_profile,
         "order_id": order.get("order_id", ""),
         "fee_usd": fee_usd,
         "execution_route": execution_route,
@@ -853,7 +938,7 @@ def close_spot(
         - float(pos.get("entry_fee_usd") or 0.0)
     )
 
-    from logging_db.trade_logger import log_trade, delete_position
+    from logging_db.trade_logger import log_trade
 
     entry_features = _load_entry_feature_snapshot(pos)
     exit_state = None
@@ -881,6 +966,8 @@ def close_spot(
         ),
     )
     total_fee_usd = fee_usd + float(pos.get("entry_fee_usd") or 0.0)
+    learning_snapshot_written = False
+    attribution_written = False
     if close_trade_id > 0:
         trade_ref = f"spot:{int(pos.get('entry_trade_id') or 0)}:{close_trade_id}"
         try:
@@ -959,7 +1046,79 @@ def close_spot(
             )
         except Exception as e:
             logger.debug(f"[spot_engine] post_trade_analyzer close error {clean}: {e}")
-    delete_position(clean, strategy=strategy, paper=paper)
+        try:
+            con = sqlite3.connect(_get_db_path(), timeout=5)
+            learning_snapshot_written = bool(
+                con.execute(
+                    "SELECT 1 FROM ml_feature_snapshots WHERE trade_id=? LIMIT 1",
+                    (close_trade_id,),
+                ).fetchone()
+            )
+            attribution_written = bool(
+                con.execute(
+                    "SELECT 1 FROM trade_attribution WHERE trade_ref=? LIMIT 1",
+                    (trade_ref,),
+                ).fetchone()
+            )
+            con.close()
+        except Exception:
+            learning_snapshot_written = False
+            attribution_written = False
+
+    if not paper and close_trade_id > 0 and (
+        not learning_snapshot_written or not attribution_written
+    ):
+        try:
+            from runtime.spot_kill_switch import trigger_spot_halt
+
+            reason = (
+                "spot_learning_snapshot_missing"
+                if not learning_snapshot_written
+                else "spot_trade_attribution_missing"
+            )
+            trigger_spot_halt(
+                reason,
+                {
+                    "symbol": clean,
+                    "trade_ref": trade_ref,
+                    "close_trade_id": close_trade_id,
+                    "snapshot_written": learning_snapshot_written,
+                    "attribution_written": attribution_written,
+                },
+            )
+        except Exception as e:
+            logger.warning(f"[spot_engine] unable to trigger spot halt for {clean}: {e}")
+
+    if not paper:
+        try:
+            truth = get_spot_position_truth(paper=False)
+            residual = next(
+                (
+                    row
+                    for row in truth.get("all_live_holdings") or []
+                    if str(row.get("symbol") or "").upper() == clean
+                ),
+                None,
+            )
+        except Exception:
+            residual = None
+        if residual and float(residual.get("qty") or 0.0) > 1e-8:
+            updated_row = dict(pos)
+            updated_row["qty"] = float(residual.get("qty") or 0.0)
+            updated_row["entry"] = float(
+                residual.get("entry") or pos.get("entry") or entry_price
+            )
+            updated_row["paper"] = 0
+            updated_row["exit_reason"] = str(exit_reason or "")
+            _persist_position_from_row(updated_row, qty=updated_row["qty"])
+        else:
+            from logging_db.trade_logger import delete_position
+
+            delete_position(clean, strategy=strategy, paper=paper)
+    else:
+        from logging_db.trade_logger import delete_position
+
+        delete_position(clean, strategy=strategy, paper=paper)
     return {
         "symbol": clean,
         "entry_price": entry_price,

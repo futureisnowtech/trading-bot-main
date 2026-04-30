@@ -47,6 +47,7 @@ def render_positions_compact():
         direction = p.get("direction", "LONG")
         strategy = str(p.get("strategy") or "")
         venue = str(p.get("venue") or "")
+        truth_status = str(p.get("position_truth_status") or "")
         entry = float(p.get("entry") or 0)
         qty = float(p.get("qty") or 0)
         stop = float(p.get("stop") or 0)
@@ -90,9 +91,22 @@ def render_positions_compact():
         )
         if is_live:
             if is_spot_holding:
-                risk_note = (
-                    "LIVE SPOT " + risk_note if risk_note else "LIVE SPOT HOLDING"
-                )
+                if truth_status == "external_manual":
+                    risk_note = "LIVE SPOT EXTERNAL HOLDING"
+                elif truth_status in {
+                    "unclassified",
+                    "needs_bot_repair",
+                    "qty_mismatch",
+                    "metadata_missing",
+                    "db_only_stale",
+                }:
+                    risk_note = (
+                        f"LIVE SPOT TRUTH ALERT: {truth_status.replace('_', ' ')}"
+                    )
+                else:
+                    risk_note = (
+                        "LIVE SPOT " + risk_note if risk_note else "LIVE SPOT HOLDING"
+                    )
             else:
                 risk_note = "LIVE " + risk_note if risk_note else "LIVE POSITION"
 

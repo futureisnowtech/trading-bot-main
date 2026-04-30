@@ -75,6 +75,18 @@ def _is_halted(conn: sqlite3.Connection) -> bool:
         return False
 
 
+def trigger_spot_halt(reason: str, detail: dict | None = None) -> bool:
+    """Public helper for other spot-lane components to force a hard halt."""
+    try:
+        conn = _conn()
+        _log_halt(conn, reason, detail or {})
+        conn.close()
+        return True
+    except Exception as exc:
+        logger.error("[spot_kill_switch] trigger failed: %s", exc)
+        return False
+
+
 def check_spot_kill_switch(paper: bool) -> tuple[bool, str]:
     """
     Check all spot kill switches.  Returns (halt, reason).
@@ -87,6 +99,40 @@ def check_spot_kill_switch(paper: bool) -> tuple[bool, str]:
             if not paper and _is_halted(conn):
                 conn.close()
                 return True, "spot_kill_switch_already_active"
+
+            if not paper:
+                try:
+                    from runtime.spot_position_truth import get_spot_position_truth
+
+                    truth = get_spot_position_truth(paper=False)
+                    if not truth.get("snapshot_ok"):
+                        reason = "ks_spot_truth_snapshot_unavailable"
+                        _log_halt(conn, reason, {"trigger": reason})
+                        conn.close()
+                        return True, reason
+                    truth_blockers = truth.get("blocking_issues") or []
+                    if truth_blockers:
+                        reason = "ks_spot_truth_blocker"
+                        _log_halt(
+                            conn,
+                            reason,
+                            {
+                                "trigger": reason,
+                                "blockers": [
+                                    {
+                                        "symbol": str(b.get("symbol") or ""),
+                                        "status": str(
+                                            b.get("position_truth_status") or ""
+                                        ),
+                                    }
+                                    for b in truth_blockers
+                                ],
+                            },
+                        )
+                        conn.close()
+                        return True, reason
+                except Exception as exc:
+                    logger.warning("[spot_kill_switch] truth blocker check error: %s", exc)
 
             paper_int = 1 if paper else 0
             import config as _cfg

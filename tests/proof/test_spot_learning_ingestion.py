@@ -14,7 +14,7 @@ def _trend_state(symbol="ETH", derivative_score=72.0):
         "symbol": symbol,
         "regime": "TREND",
         "derivative_score": derivative_score,
-        "setup_family": "pullback_reclaim",
+        "setup_family": "impulse_continuation",
         "setup_score": 0.84,
         "structural_confirm_count": 2,
         "structural_confirms": "supertrend,kst",

@@ -148,6 +148,46 @@ def _ensure_tables():
         logger.debug(f'[learning] table init error: {e}')
 
 
+def _load_trade_strategy(trade_id: int) -> str:
+    try:
+        conn = _db_conn()
+        row = conn.execute(
+            "SELECT strategy FROM trades WHERE id=? LIMIT 1", (int(trade_id or 0),)
+        ).fetchone()
+        conn.close()
+        return str(row[0] if row else "")
+    except Exception:
+        return ""
+
+
+def _load_candidate_metrics(candidate_id: int) -> dict:
+    if int(candidate_id or 0) <= 0:
+        return {}
+    try:
+        conn = _db_conn()
+        row = conn.execute(
+            """
+            SELECT
+                sc.spread_pct,
+                sc.execution_route,
+                co.mfe_4h_pct,
+                co.time_to_05r_min,
+                co.hit_1r,
+                co.hit_stop,
+                co.peak_r_4h
+            FROM scan_candidates sc
+            LEFT JOIN candidate_outcomes co ON co.candidate_id = sc.id
+            WHERE sc.id=?
+            LIMIT 1
+            """,
+            (int(candidate_id),),
+        ).fetchone()
+        conn.close()
+        return dict(row) if row else {}
+    except Exception:
+        return {}
+
+
 # ── Core API ──────────────────────────────────────────────────────────────────
 
 def record_closed_trade(
@@ -192,8 +232,30 @@ def record_closed_trade(
     tv_htf_bias = str(features.get("tv_htf_bias") or "")
     tv_signal_age_sec = float(features.get("tv_signal_age_sec") or 0.0)
     tv_veto_state = str(features.get("tv_veto_state") or "")
-    fast_follow_through = int(bool(pnl_usd > 0))
-    thesis_decay_risk = int(str(exit_reason or "").strip().lower() == "thesis_decay")
+    trade_strategy = _load_trade_strategy(trade_id)
+    candidate_metrics = _load_candidate_metrics(candidate_id)
+    spread_pct = float(candidate_metrics.get("spread_pct") or 0.0)
+    route_hint = str(candidate_metrics.get("execution_route") or route_type or "")
+    entry_fee_pct = (0.0 if entry_price <= 0 else max(0.0, float(features.get("entry_fee_usd") or 0.0) / max(abs(entry_price), 1e-9)))
+    exit_fee_pct = 0.0 if exit_price <= 0 else max(0.0, 0.0)
+    assumed_slippage_pct = 0.0005 if str(route_hint or route_type).lower() == "maker_first" else 0.0010
+    total_cost_pct = entry_fee_pct + exit_fee_pct + max(0.0, spread_pct / 2.0) + assumed_slippage_pct
+    mfe_pct = float(candidate_metrics.get("mfe_4h_pct") or 0.0)
+    time_to_05r_min = float(candidate_metrics.get("time_to_05r_min") or 0.0)
+    fast_follow_through = int(
+        bool(
+            (time_to_05r_min > 0 and time_to_05r_min <= 15.0)
+            or mfe_pct >= (1.25 * total_cost_pct)
+        )
+    ) if str(trade_strategy).startswith("spot_") else int(bool(pnl_usd > 0))
+    thesis_decay_risk = int(
+        str(exit_reason or "").strip().lower() in {"thesis_decay", "stagnation_exit"}
+        or (
+            str(trade_strategy).startswith("spot_")
+            and float(exit_score or 0.0) < float(entry_score or 0.0)
+            and pnl_usd <= 0
+        )
+    )
     expected_net_pnl_after_fees = round(float(pnl_usd or 0.0), 4)
     route_conditional_value = round(float(pnl_usd or 0.0), 4)
 

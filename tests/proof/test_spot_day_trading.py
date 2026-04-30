@@ -198,8 +198,8 @@ def test_sdt05_open_spot_persists_scalp_target_metadata(proof_runtime, monkeypat
         final_spot_score=72.0,
     )
     assert result is not None
-    assert result["target_r"] == pytest.approx(1.5)
-    assert result["trail_arm_r"] == pytest.approx(0.9)
+    assert result["target_r"] == pytest.approx(1.05)
+    assert result["trail_arm_r"] == pytest.approx(0.65)
 
     with sqlite3.connect(str(proof_runtime.db_path)) as conn:
         row = conn.execute(
@@ -213,10 +213,10 @@ def test_sdt05_open_spot_persists_scalp_target_metadata(proof_runtime, monkeypat
 
     assert row is not None
     assert row[0] > 0
-    assert row[1] == pytest.approx(1.5)
-    assert row[2] == pytest.approx(0.9)
+    assert row[1] == pytest.approx(1.05)
+    assert row[2] == pytest.approx(0.65)
     assert row[3] == "spot_scalp_v1"
-    assert row[4] == "spot_scalp_quick_v1"
+    assert row[4] == "spot_scalp_precision_v1"
 
 
 def test_sdt06_stagnation_exit_closes_dead_trade(proof_runtime, monkeypatch):

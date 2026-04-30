@@ -59,8 +59,8 @@ def get_spot_positions_dashboard():
     """
     Open spot-only positions (strategy LIKE 'spot_%').
 
-    Live mode must be broker-truth only. If the live Coinbase spot snapshot is
-    unavailable, fail closed to [] instead of resurfacing stale DB rows.
+    Live mode must be broker-truth first and must never hide real holdings just
+    because the DB is missing lineage.
     """
     db_rows = _q(
         "SELECT * FROM open_positions WHERE strategy LIKE 'spot_%' AND paper=? ORDER BY ts_entry DESC",
@@ -68,7 +68,17 @@ def get_spot_positions_dashboard():
     )
     live_positions = _get_live_coinbase_spot_positions()
     if live_positions is not None:
-        return _merge_live_spot_rows(live_positions, db_rows)
+        try:
+            from runtime.spot_position_truth import get_spot_position_truth
+
+            truth = get_spot_position_truth(
+                paper=False,
+                broker_holdings=live_positions,
+                db_path=getattr(_db, "DB_PATH", None),
+            )
+            return list(truth.get("all_live_holdings") or [])
+        except Exception:
+            return _merge_live_spot_rows(live_positions, db_rows)
     if _runtime_live_mode():
         return []
     return db_rows
@@ -157,25 +167,31 @@ def _merge_live_perp_rows(live_positions: dict, db_rows: list[dict]) -> list[dic
 def _merge_live_spot_rows(
     live_positions: list[dict], db_rows: list[dict]
 ) -> list[dict]:
-    # Only show holdings the bot opened — manual Coinbase purchases have no DB row.
+    # Legacy fail-soft path. The live truth service should normally own this merge.
     db_by_symbol = {str(row.get("symbol") or "").upper(): row for row in db_rows}
     merged: list[dict] = []
     for live in live_positions:
         symbol = str(live.get("symbol") or "").upper()
         db_row = db_by_symbol.get(symbol)
-        if not db_row:
-            continue  # not bot-managed — skip
         merged.append(
             {
-                **db_row,
+                **(db_row or {}),
                 "symbol": symbol,
-                "strategy": db_row.get("strategy") or f"spot_{symbol.lower()}",
+                "strategy": (db_row or {}).get("strategy") or f"spot_{symbol.lower()}",
                 "paper": 0,
                 "direction": "LONG",
-                "qty": float(live.get("qty") or db_row.get("qty") or 0.0),
-                "entry": float(live.get("avg_entry") or db_row.get("entry") or 0.0),
+                "qty": float(live.get("qty") or (db_row or {}).get("qty") or 0.0),
+                "entry": float(
+                    live.get("avg_entry") or (db_row or {}).get("entry") or 0.0
+                ),
                 "current_value": float(live.get("current_value") or 0.0),
                 "venue": "coinbase_spot",
+                "position_truth_status": (
+                    "matched_bot_position" if db_row else "unclassified"
+                ),
+                "is_bot_managed": bool(db_row),
+                "is_external_manual": False,
+                "truth_blocking": not bool(db_row),
             }
         )
     merged.sort(key=_ts_sort_key, reverse=True)

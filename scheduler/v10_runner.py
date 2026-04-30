@@ -530,43 +530,18 @@ def _get_spot_runtime_truth() -> tuple[int, float]:
     spot positions.
     """
     try:
-        import spot_engine as _spot_eng
+        from runtime.spot_position_truth import get_spot_position_truth
 
         if _paper:
-            rows = _spot_eng.get_spot_positions(paper=True) or []
-            deployed = sum(
-                abs(float(p.get("qty") or 0.0)) * float(p.get("entry") or 0.0)
-                for p in rows
+            truth = get_spot_position_truth(paper=True)
+            return int(truth.get("positions_open") or 0), float(
+                truth.get("deployment_notional") or 0.0
             )
-            return len(rows), float(deployed)
 
-        broker = _spot_eng._get_broker(False)
-        if broker is not None:
-            try:
-                if not broker.is_connected():
-                    broker.connect()
-            except Exception:
-                pass
-            try:
-                holdings = broker.sync_live_holdings()
-            except Exception:
-                holdings = None
-            if holdings is not None:
-                deployed = sum(
-                    float(p.get("current_value") or 0.0)
-                    or (
-                        abs(float(p.get("qty") or 0.0))
-                        * float(p.get("current_price") or p.get("entry") or 0.0)
-                    )
-                    for p in holdings
-                )
-                return len(holdings), float(deployed)
-
-        rows = _spot_eng.get_spot_positions(paper=False) or []
-        deployed = sum(
-            abs(float(p.get("qty") or 0.0)) * float(p.get("entry") or 0.0) for p in rows
+        truth = get_spot_position_truth(paper=False)
+        return int(truth.get("positions_open") or 0), float(
+            truth.get("deployment_notional") or 0.0
         )
-        return len(rows), float(deployed)
     except Exception:
         return 0, 0.0
 
@@ -586,7 +561,9 @@ def _persist_live_account_size(balance: float) -> None:
 def _write_crypto_lane_runtime(open_positions: Optional[Dict] = None) -> None:
     """Persist current crypto lane runtime truth for dashboard / launcher surfaces."""
     try:
-        from runtime.runtime_state import upsert_lane_state
+        from runtime.runtime_state import upsert_lane_state, upsert_system_state
+        from runtime.spot_position_truth import get_spot_position_truth
+        import config as _cfg
 
         perps = _import_perps_engine()
         broker = perps._get_broker(testnet=True) if perps is not None else None
@@ -608,7 +585,9 @@ def _write_crypto_lane_runtime(open_positions: Optional[Dict] = None) -> None:
         _persist_live_account_size(buying_power)
         perp_deployed_usd = float(_get_deployed_usd(open_positions))
         perp_positions_open = len(open_positions)
-        spot_positions_open, spot_deployed_usd = _get_spot_runtime_truth()
+        spot_truth = get_spot_position_truth(paper=_paper)
+        spot_positions_open = int(spot_truth.get("positions_open") or 0)
+        spot_deployed_usd = float(spot_truth.get("deployment_notional") or 0.0)
         deployed_usd = perp_deployed_usd + spot_deployed_usd
         positions_open = perp_positions_open + spot_positions_open
 
@@ -616,28 +595,71 @@ def _write_crypto_lane_runtime(open_positions: Optional[Dict] = None) -> None:
         kill_halted = bool(ks and ks.is_halted())
 
         health = "OK"
-        readiness = "OPERATIONAL"
+        readiness = "NOT_READY"
+        launch_state = "NOT_READY"
         blocked_reason = ""
         action_needed = ""
         tradable = 1
 
-        if not connected and not _paper:
+        truth_blockers = spot_truth.get("blocking_issues") or []
+        if not bool(spot_truth.get("snapshot_ok", True)) and not _paper:
             health = "WARN"
-            readiness = "BROKER_DISCONNECTED"
+            readiness = "DEGRADED"
+            launch_state = "DEGRADED"
+            blocked_reason = "spot_broker_snapshot_unavailable"
+            action_needed = "restore_coinbase_spot_snapshot"
+            tradable = 0
+        elif truth_blockers:
+            health = "WARN"
+            readiness = "DEGRADED" if not _paper else "NOT_READY"
+            launch_state = readiness
+            blocked_symbols = ",".join(
+                sorted(
+                    {
+                        str(b.get("symbol") or "").upper()
+                        for b in truth_blockers
+                        if str(b.get("symbol") or "").strip()
+                    }
+                )
+            )
+            blocked_reason = "spot_truth_blockers"
+            action_needed = (
+                f"resolve_spot_truth_blockers:{blocked_symbols}"
+                if blocked_symbols
+                else "resolve_spot_truth_blockers"
+            )
+            tradable = 0
+        elif not connected and not _paper:
+            health = "WARN"
+            readiness = "NOT_READY"
+            launch_state = "NOT_READY"
             blocked_reason = "broker_disconnected"
             action_needed = "check_coinbase_live_connection"
             tradable = 0
         elif buying_power <= 0:
             health = "WARN"
-            readiness = "NO_BUYING_POWER"
+            readiness = "NOT_READY"
+            launch_state = "NOT_READY"
             blocked_reason = "no_buying_power"
             action_needed = "fund_account_or_check_balance_sync"
             tradable = 0
         elif kill_halted:
             health = "WARN"
-            readiness = "KILL_SWITCH_ACTIVE"
+            readiness = "HALTED"
+            launch_state = "HALTED"
             blocked_reason = "kill_switch_active"
             action_needed = "review_kill_switch_trigger"
+            tradable = 0
+        elif bool(getattr(_cfg, "SPOT_TINY_LIVE_ENABLEMENT_CONFIRMED", False)):
+            readiness = "TINY_LIVE" if not _paper else "READY_FOR_TINY_LIVE"
+            launch_state = readiness
+            tradable = 1
+        else:
+            health = "WARN"
+            readiness = "NOT_READY"
+            launch_state = "NOT_READY"
+            blocked_reason = "tiny_live_enablement_not_confirmed"
+            action_needed = "complete_acceptance_tests_and_confirm_tiny_live"
             tradable = 0
 
         upsert_lane_state(
@@ -655,6 +677,10 @@ def _write_crypto_lane_runtime(open_positions: Optional[Dict] = None) -> None:
             capital_deployed_usd=round(deployed_usd, 2),
             buying_power_usd=round(buying_power, 2),
             readiness_state=readiness,
+        )
+        upsert_system_state(
+            launch_readiness_state=launch_state,
+            global_status="HALTED" if launch_state == "HALTED" else health,
         )
     except Exception as e:
         logger.debug(f"[v10] crypto lane runtime write error: {e}")

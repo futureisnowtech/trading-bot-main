@@ -28,27 +28,26 @@ def test_sss01_strategy_symbols_can_enable_all_8_spot_names(monkeypatch):
     assert symbols == {"BTC", "ETH", "SOL", "XRP", "LTC", "DOGE", "ADA", "LINK"}
 
 
-def test_sss02_final_score_is_symbol_specific():
+def test_sss02_final_score_is_regime_weighted_under_tiny_live_defaults():
     from runtime.spot_momentum import final_spot_score
 
     btc = final_spot_score(62.0, 54.0, regime="NEUTRAL", symbol="BTC")
     sol = final_spot_score(62.0, 54.0, regime="NEUTRAL", symbol="SOL")
-    assert btc != sol
-    assert btc > sol
+    assert btc == sol
+    assert btc == 61.2
 
 
 def test_sss03_doge_open_gate_before_calibration():
     """
     Before the calibrator has accumulated >= 30 real trades, DOGE must have an
     open gate (no edge conditions) so trades are not blocked by stale backtest data.
-    Previously this asserted edge_setup_family_mismatch — that was the old
-    hardcoded config behaviour which is now replaced by self-calibration.
+    The candidate still has to satisfy the active tiny-live setup contract.
     """
     from runtime.spot_strategy import spot_quality_block_reason
 
     spot_state = {
         "regime": "TREND",
-        "setup_family": "pullback_reclaim",
+        "setup_family": "impulse_continuation",
         "structural_confirm_count": 3,
         "frames": {
             "5m": {
@@ -72,16 +71,20 @@ def test_sss03_doge_open_gate_before_calibration():
         spot_state,
         final_spot_score=70.0,
     )
-    # Open gate: no hardcoded edge conditions, so the signal passes through
     assert reason == "", f"Expected open gate (empty reason), got: {reason!r}"
-    assert floor >= 35.0
+    assert floor == 58.0
 
 
-def test_sss04_eth_uses_quick_exit_profile_targets():
-    from runtime.spot_strategy import trail_arm_r_for_symbol, target_r_for_symbol
+def test_sss04_eth_uses_precision_exit_profile_targets():
+    from runtime.spot_strategy import (
+        exit_profile_for_symbol,
+        trail_arm_r_for_symbol,
+        target_r_for_symbol,
+    )
 
-    assert target_r_for_symbol("ETH", "TREND") == 1.5
-    assert trail_arm_r_for_symbol("ETH", "TREND") == 0.9
+    assert exit_profile_for_symbol("ETH", "TREND") == "precision"
+    assert target_r_for_symbol("ETH", "TREND") == 1.05
+    assert trail_arm_r_for_symbol("ETH", "TREND") == 0.65
 
 
 def test_sss05_link_edge_policy_open_gate_before_calibration():
@@ -103,7 +106,7 @@ def test_sss05_link_edge_policy_open_gate_before_calibration():
     assert policy["metrics"]["pf"] == 2.8022
 
 
-def test_sss06_score_floor_adds_synthetic_and_taker_surcharges():
+def test_sss06_score_floor_is_strategy_constant_under_tiny_live_defaults():
     from runtime.spot_strategy import score_floor_for_symbol
 
     base = score_floor_for_symbol("BTC", "TREND")
@@ -120,7 +123,7 @@ def test_sss06_score_floor_adds_synthetic_and_taker_surcharges():
         synthetic_candidate=True,
     )
 
-    assert base == 57.0
-    assert synthetic == 59.0
-    assert taker == 60.0
-    assert synthetic_taker == 62.0
+    assert base == 58.0
+    assert synthetic == 58.0
+    assert taker == 58.0
+    assert synthetic_taker == 58.0

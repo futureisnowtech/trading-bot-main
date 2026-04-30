@@ -77,6 +77,20 @@ def extract_signals_from_market_data(market_data: dict) -> dict[str, bool]:
         except Exception:
             return default
 
+    # ── spot-native path: setup_family + structural confirm language ─────────
+    setup_family = str(md.get("setup_family") or "").strip()
+    if setup_family:
+        return {
+            "supertrend_bullish": _b("supertrend_bullish"),
+            "ichimoku_bullish": _b("cloud_bullish"),
+            "kst_bullish": _b("kst_bullish"),
+            "price_above_vwap": _b("price_above_vwap"),
+            "momentum_impulse_positive": _f("momentum_impulse", 0.0) > 0,
+            "participation_positive": _f("participation_component", 0.0) > 0,
+            "compression_release": _b("compression_release"),
+            f"setup_family::{setup_family}": True,
+        }
+
     # ── v10 path: primary_setup key present ──────────────────────────────────
     primary_setup = str(md.get("primary_setup") or "").strip()
     if primary_setup and primary_setup in _V10_ALL_SETUP_NAMES:

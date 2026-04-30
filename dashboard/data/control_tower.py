@@ -33,25 +33,6 @@ def _safe(fn, default=None):
 
 
 def _lane_defaults() -> dict[str, dict]:
-    try:
-        from config import (
-            STOCKS_DASHBOARD_VISIBLE,
-            STOCKS_AUTONOMOUS_ENABLED,
-            STOCKS_MANUAL_ENABLED,
-            FORECAST_DASHBOARD_VISIBLE,
-            FORECAST_AUTONOMOUS_ENABLED,
-            FORECAST_MANUAL_ENABLED,
-            FUTURES_DASHBOARD_VISIBLE,
-        )
-    except Exception:
-        STOCKS_DASHBOARD_VISIBLE = True
-        STOCKS_AUTONOMOUS_ENABLED = False
-        STOCKS_MANUAL_ENABLED = False
-        FORECAST_DASHBOARD_VISIBLE = True
-        FORECAST_AUTONOMOUS_ENABLED = False
-        FORECAST_MANUAL_ENABLED = False
-        FUTURES_DASHBOARD_VISIBLE = True
-
     return {
         "crypto": {
             "display_name": "Crypto",
@@ -59,31 +40,7 @@ def _lane_defaults() -> dict[str, dict]:
             "dashboard_visible": 1,
             "autonomous_enabled": 1,
             "manual_allowed": 1,
-            "promotion_condition": "Primary live lane",
-        },
-        "stocks": {
-            "display_name": "Stocks",
-            "lane_role": "dormant_ready",
-            "dashboard_visible": int(STOCKS_DASHBOARD_VISIBLE),
-            "autonomous_enabled": int(STOCKS_AUTONOMOUS_ENABLED),
-            "manual_allowed": int(STOCKS_MANUAL_ENABLED),
-            "promotion_condition": "Promote after equity edge and PDT-aware rules are proven",
-        },
-        "forecast": {
-            "display_name": "Forecast",
-            "lane_role": "blocked_ready",
-            "dashboard_visible": int(FORECAST_DASHBOARD_VISIBLE),
-            "autonomous_enabled": int(FORECAST_AUTONOMOUS_ENABLED),
-            "manual_allowed": int(FORECAST_MANUAL_ENABLED),
-            "promotion_condition": "Promote after enrollment, tradable contracts, and stable heartbeat truth",
-        },
-        "mes_archived": {
-            "display_name": "Futures",
-            "lane_role": "archived",
-            "dashboard_visible": int(FUTURES_DASHBOARD_VISIBLE),
-            "autonomous_enabled": 0,
-            "manual_allowed": 0,
-            "promotion_condition": "Reactivate after futures approval and MES lane validation",
+            "promotion_condition": "Primary spot scalp lane",
         },
     }
 
@@ -99,12 +56,9 @@ def _lane_overview() -> list[dict]:
                    blocked_reason, mode, promotion_condition, buying_power_usd,
                    capital_deployed_usd, positions_open
             FROM lane_runtime_state
-            WHERE lane_id IN (?,?,?,?)
+            WHERE lane_id IN (?)
             ORDER BY CASE lane_id
                 WHEN 'crypto' THEN 1
-                WHEN 'stocks' THEN 2
-                WHEN 'forecast' THEN 3
-                WHEN 'mes_archived' THEN 4
                 ELSE 99 END
             """,
             lane_ids,
@@ -116,12 +70,9 @@ def _lane_overview() -> list[dict]:
                    blocked_reason, mode, buying_power_usd, capital_deployed_usd,
                    positions_open
             FROM lane_runtime_state
-            WHERE lane_id IN (?,?,?,?)
+            WHERE lane_id IN (?)
             ORDER BY CASE lane_id
                 WHEN 'crypto' THEN 1
-                WHEN 'stocks' THEN 2
-                WHEN 'forecast' THEN 3
-                WHEN 'mes_archived' THEN 4
                 ELSE 99 END
             """,
             lane_ids,
@@ -129,7 +80,7 @@ def _lane_overview() -> list[dict]:
 
     by_id = {r.get("lane_id"): r for r in (rows or [])}
     result: list[dict] = []
-    for lane_id in ("crypto", "stocks", "forecast", "mes_archived"):
+    for lane_id in ("crypto",):
         base = defaults[lane_id].copy()
         row = by_id.get(lane_id, {})
         base.update(row or {})
@@ -202,10 +153,7 @@ def get_control_tower_snapshot(hours: int = 24) -> dict:
     result["spot_positions"] = pos_snapshot.get("spot_positions") or []
     result["open_positions"] = (result["perp_positions"] or []) + (result["spot_positions"] or [])
 
-    # Forecast open positions count from DB
-    result["forecast_positions"] = len(
-        _q("SELECT id FROM open_positions WHERE strategy LIKE 'forecast_%'")
-    )
+    result["forecast_positions"] = 0
 
     # ── Account / equity ───────────────────────────────────────────────────────
     try:
@@ -253,12 +201,7 @@ def get_control_tower_snapshot(hours: int = 24) -> dict:
     )
 
     # ── Forecast snapshot ──────────────────────────────────────────────────────
-    result["forecast_snapshot"] = _safe(
-        lambda: __import__(
-            "data.trading_control", fromlist=["get_forecast_control_snapshot"]
-        ).get_forecast_control_snapshot(),
-        {},
-    )
+    result["forecast_snapshot"] = {}
     result["lane_overview"] = _safe(_lane_overview, [])
 
     # ── Open incident count ────────────────────────────────────────────────────

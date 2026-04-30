@@ -195,7 +195,7 @@ def main():
         enabled=int(FORECAST_LANE_ACTIVE),
         active=int(FORECAST_LANE_ACTIVE),
         configured=1,
-        dashboard_visible=int(FORECAST_DASHBOARD_VISIBLE),
+        dashboard_visible=0,
         autonomous_enabled=int(FORECAST_AUTONOMOUS_ENABLED and FORECAST_LANE_ACTIVE),
         manual_allowed=int(FORECAST_MANUAL_ENABLED),
         mode=_rt_mode if FORECAST_LANE_ACTIVE else "disabled",
@@ -216,7 +216,7 @@ def main():
         enabled=int(_FLA),
         active=0,
         configured=int(_FLA),
-        dashboard_visible=int(FUTURES_DASHBOARD_VISIBLE),
+        dashboard_visible=0,
         autonomous_enabled=0,
         manual_allowed=0,
         mode="archived",
@@ -234,7 +234,7 @@ def main():
         enabled=int(STOCKS_LANE_ACTIVE),
         active=int(STOCKS_LANE_ACTIVE and STOCKS_AUTONOMOUS_ENABLED),
         configured=int(STOCKS_LANE_ACTIVE),
-        dashboard_visible=int(STOCKS_DASHBOARD_VISIBLE),
+        dashboard_visible=0,
         autonomous_enabled=int(STOCKS_AUTONOMOUS_ENABLED and STOCKS_LANE_ACTIVE),
         manual_allowed=int(STOCKS_MANUAL_ENABLED),
         mode=(
@@ -381,15 +381,10 @@ def main():
         print("   Stocks lane started (STOCKS_LANE_ACTIVE=true)")
 
     # Populate active_lanes now that all lane startup is done
-    _active = ["crypto"]
-    if FORECAST_LANE_ACTIVE:
-        _active.append("forecast")
-    if STOCKS_LANE_ACTIVE and STOCKS_AUTONOMOUS_ENABLED:
-        _active.append("stocks")
     upsert_system_state(
         db_path=_db_path,
-        active_lanes=json.dumps(_active),
-        launch_readiness_state="READY",
+        active_lanes=json.dumps(["crypto"]),
+        launch_readiness_state="NOT_READY",
     )
 
     print("=" * 60)

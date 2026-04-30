@@ -38,15 +38,16 @@ and the system can learn over time.
 
 ## PRIORITY READS
 
-- [[01_current_system/Current Active Logic.md]] — current live state (v15.2, 2026-04-15)
+- [[01_current_system/Current Active Logic.md]] — current active spot truth-lane state
 - [[10_decisions/Decision Log.md]] — why key changes were made
-- CLAUDE.md (repo root) — authoritative source of truth for all system state
+- AGENTS.md (repo root) — canonical source of truth
+- CLAUDE.md (repo root) — concise Claude-facing companion
 
 ---
 
 ## SYSTEM VERSION
 
-**v15.2** (2026-04-15)
+**v18.15** (2026-04-30)
 Active branch: `feature/v10-rebuild`
 Clean paper trading started: 2026-04-02
 
@@ -54,9 +55,10 @@ Clean paper trading started: 2026-04-02
 
 ## UNCERTAINTY STATUS
 
-As of 2026-04-15: System is live (PAPER_TRADING=false). Crypto lane executing via Coinbase
-US CFTC nano perp futures. ForecastEx lane started, enrollment pending. MES archived.
-Labels used throughout: CONFIRMED | BELIEVED | TESTING | RETIRED | ASSUMPTION
+As of 2026-04-30: the active authoritative lane is Coinbase spot scalp governed by
+the broker-first spot truth-lane contract. Other lanes remain in-repo but are
+not authoritative for live spot readiness or live spot health.
+Labels used throughout: CONFIRMED | TESTING | ARCHIVED | RESEARCH | ASSUMPTION
 
 > NOTE: Notes in `brain/` folders dated 2026-03-25 or earlier reference v4.3 architecture
-> and are HISTORICAL. The current live system is v15.2. See CLAUDE.md for current truth.
+> and are HISTORICAL. The current canonical truth is in AGENTS.md.

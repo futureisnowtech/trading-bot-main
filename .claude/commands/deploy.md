@@ -1,103 +1,97 @@
 ---
 name: deploy
-description: Pre-flight check and deployment sequence for starting or restarting the trading bot
-argument-hint: "[--mode=paper|live] [--crypto-only|--equity-only]"
+description: Controlled deployment workflow for paper mode, paper recovery, and spot tiny-live preflight
+argument-hint: "[--mode=paper|live]"
 allowed-tools:
   - Read
   - Bash
   - Glob
 ---
 
-Run the full pre-flight checklist and deploy the trading bot safely.
+Use the controlled deployment path only. Raw `main.py --mode live` is never the correct answer.
+
+## Read First
+
+1. `AGENTS.md`
+2. `scripts/go_live.py`
+3. `scripts/go_paper.py`
+4. `scripts/check_readiness.py`
+5. `scripts/live_runtime_audit.py`
 
 ## Process
 
-### 1. Parse Mode
+### 1. Parse mode
 
-Extract `--mode` from `$ARGUMENTS`. Default: paper.
-If `--mode=live`: display a WARNING and require explicit confirmation before proceeding.
+- Default mode: `paper`
+- `--mode=live` means: prepare a **tiny-live** launch only
 
-### 2. Environment Check
+### 2. Validate environment
 
 ```bash
 python3 scripts/validate.py
 ```
 
-Must pass: env vars set, config loads, DB accessible, broker imports work.
-Stop if any check fails — do not deploy a broken system.
+Stop immediately if validation fails.
 
-### 3. Readiness Score (Live Mode Only)
+### 3. Inspect current runtime truth
 
-If deploying live, call `get_readiness_score` via MCP and display all 7 criteria.
-Refuse to proceed if score < 7/7.
-
-### 4. Process Cleanup
-
-Check for existing bot processes:
 ```bash
-ps aux | grep "main.py" | grep -v grep
+python3 scripts/check_readiness.py
+python3 scripts/live_runtime_audit.py
 ```
 
-If running: show the PID and ask the user whether to kill it before starting fresh.
-Never kill automatically — ask first.
+For live deployment, do not proceed unless:
+- runtime state is already `READY_FOR_TINY_LIVE`
+- spot truth blockers are zero
+- broker snapshot is healthy
+- spot kill switch is not halted
 
-### 5. Database Backup
+### 4. Backup runtime DB
 
 ```bash
 bash scripts/backup_db.sh
 ```
 
-Confirm backup succeeded before starting the bot.
+### 5. Launch
 
-### 6. Launch
-
-Paper mode:
+Paper:
 ```bash
-python3 main.py --mode paper {extra_flags}
+python3 scripts/go_paper.py
 ```
 
-Live mode (only if readiness = 7/7 and user confirmed):
+Live tiny mode:
 ```bash
 python3 scripts/go_live.py
 ```
 
-### 7. Health Check
+### 6. Post-launch verification
 
-Wait 30 seconds then verify the bot is running:
+Run:
+
 ```bash
-ps aux | grep "main.py" | grep -v grep
+python3 scripts/live_runtime_audit.py
+python3 scripts/check_readiness.py
 ```
 
-Query recent notifications:
-```bash
-python3 -c "from logging_db.trade_logger import get_recent_notifications; import json; print(json.dumps(get_recent_notifications(limit=5), indent=2))"
-```
+If live launch succeeds, runtime truth should show:
+- `process_mode=live`
+- crypto lane `connected=1`
+- readiness `TINY_LIVE`
 
-### 8. Output
+### 7. Output
 
-Deployment summary:
-- Mode: paper / live
-- Process PID
-- First 5 system events from the new session
-- Dashboard URL: http://localhost:8501
+Return:
+- mode requested
+- exact command run
+- readiness before launch
+- readiness after launch
+- spot truth blocker summary
+- whether launch is paper / tiny live / failed
 
-### 9. Lane 3 Status (if LANE3_ENABLED=true)
+## Rules
 
-If Lane 3 is configured, show prediction market status:
-```bash
-python3 -c "
-from config import LANE3_ENABLED, POLYMARKET_ENABLED, KALSHI_ENABLED, POLYMARKET_PAPER, KALSHI_PAPER
-print(f'Lane 3: {LANE3_ENABLED} | Polymarket: {POLYMARKET_ENABLED} (paper={POLYMARKET_PAPER}) | Kalshi: {KALSHI_ENABLED} (paper={KALSHI_PAPER})')
-"
-```
+- Never use raw `python3 main.py --mode live`
+- Never claim live readiness from old `7/7` language
+- Never skip broker-truth checks
+- Never treat dormant lanes as blockers for the active spot lane unless they directly contaminate live truth
 
-Note: Lane 3 starts in paper mode by default (POLYMARKET_PAPER=true, KALSHI_PAPER=true).
-Polymarket live requires a Polygon crypto wallet. Kalshi live requires a verified Kalshi account.
-
-## Safety Rules
-
-- NEVER deploy live without 7/7 readiness score
-- ALWAYS backup DB before starting
-- NEVER kill a running live-mode process without user confirmation
-- If deployment fails (process not found after 30s): show the last 20 lines of logs/bot.log
-- NEVER enable LANE3 live trading without separate confirmation from user (prediction markets are real money)

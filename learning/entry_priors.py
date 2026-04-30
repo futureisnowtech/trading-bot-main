@@ -1,19 +1,25 @@
 """
 learning/entry_priors.py — Bayesian local win-rate priors for economics gate (v16).
 
-Uses entered-candidate outcomes to estimate per-bucket win-rate priors,
-replacing the crude hardcoded 0.54 / linear estimates in v10_runner.
+Uses entered-candidate outcomes to estimate per-bucket priors for fast,
+fee-cleared follow-through instead of the older `hit_1r && !hit_stop` proxy.
 
-Win label: hit_1r=1 AND hit_stop=0 (clean 1R winner, not stopped out).
 Data source: scan_candidates JOIN candidate_outcomes, decision='entered',
              label_status='complete', source IN ('clean_paper_v10','live_v10').
 
-Fallback hierarchy (most to least specific):
-  1. exchange + primary_setup + regime + direction -> 'exchange_setup_regime_direction'
-  2. primary_setup + regime + direction            -> 'setup_regime_direction'
-  3. primary_setup + regime                        -> 'setup_regime'
-  4. regime + direction                            -> 'regime_direction'
-  5. global                                        -> 'global'
+Spot fallback hierarchy (most to least specific):
+  1. base_asset + setup_family + spot_regime + candidate_route_hint
+  2. setup_family + spot_regime + candidate_route_hint
+  3. setup_family + spot_regime
+  4. spot_regime + direction
+  5. global
+
+Legacy non-spot fallback hierarchy remains supported:
+  1. exchange + primary_setup + regime + direction
+  2. primary_setup + regime + direction
+  3. primary_setup + regime
+  4. regime + direction
+  5. global
 
 Bayesian smoothing:
   prior_p = 0.52
@@ -55,6 +61,9 @@ def _fetch_bucket(
     primary_setup: str = "",
     regime: str = "",
     direction: str = "",
+    base_asset: str = "",
+    setup_family: str = "",
+    candidate_route_hint: str = "",
 ) -> tuple[int, int]:
     """Return (wins, n) for the given bucket from the live DB. Returns (0,0) on any error."""
     import sqlite3
@@ -63,10 +72,18 @@ def _fetch_bucket(
         "sc.decision = 'entered'",
         "co.label_status = 'complete'",
         f"sc.source IN ({','.join('?' for _ in _VALID_SOURCES)})",
-        "co.hit_1r IS NOT NULL",
-        "co.hit_stop IS NOT NULL",
+        "co.path_timing_evaluated = 1",
     ]
     params: list = list(_VALID_SOURCES)
+
+    follow_expr = (
+        "(CASE WHEN "
+        "((co.time_to_05r_min IS NOT NULL AND co.time_to_05r_min <= 15) "
+        "OR (co.mfe_4h_pct IS NOT NULL AND co.mfe_4h_pct >= "
+        "((CASE WHEN COALESCE(sc.execution_route, '') = 'maker_first' THEN 0.006 ELSE 0.007 END) "
+        "+ COALESCE(sc.spread_pct, 0) / 2.0 + 0.0005) * 1.25)) "
+        "THEN 1 ELSE 0 END)"
+    )
 
     if exchange:
         conditions.append("sc.exchange = ?")
@@ -80,10 +97,19 @@ def _fetch_bucket(
     if direction:
         conditions.append("sc.direction = ?")
         params.append(direction)
+    if base_asset:
+        conditions.append("COALESCE(sc.base_asset, '') = ?")
+        params.append(base_asset)
+    if setup_family:
+        conditions.append("COALESCE(sc.setup_family, '') = ?")
+        params.append(setup_family)
+    if candidate_route_hint:
+        conditions.append("COALESCE(sc.execution_route, '') = ?")
+        params.append(candidate_route_hint)
 
     sql = f"""
         SELECT
-            SUM(CASE WHEN co.hit_1r = 1 AND co.hit_stop = 0 THEN 1 ELSE 0 END) AS wins,
+            SUM{follow_expr} AS wins,
             COUNT(*) AS n
         FROM scan_candidates sc
         JOIN candidate_outcomes co ON co.candidate_id = sc.id
@@ -113,6 +139,9 @@ def estimate_candidate_win_rate(
     primary_setup: str = "",
     regime: str = "",
     direction: str = "",
+    base_asset: str = "",
+    setup_family: str = "",
+    candidate_route_hint: str = "",
 ) -> dict:
     """
     Estimate win-rate prior for the given candidate attributes.
@@ -125,33 +154,66 @@ def estimate_candidate_win_rate(
         }
     """
     # Hierarchy: most specific -> global
-    buckets = [
-        (
-            dict(
-                exchange=exchange,
-                primary_setup=primary_setup,
-                regime=regime,
-                direction=direction,
+    if base_asset or setup_family or candidate_route_hint:
+        buckets = [
+            (
+                dict(
+                    base_asset=base_asset,
+                    setup_family=setup_family,
+                    regime=regime,
+                    candidate_route_hint=candidate_route_hint,
+                ),
+                "base_setup_regime_route",
             ),
-            "exchange_setup_regime_direction",
-        ),
-        (
-            dict(primary_setup=primary_setup, regime=regime, direction=direction),
-            "setup_regime_direction",
-        ),
-        (
-            dict(primary_setup=primary_setup, regime=regime),
-            "setup_regime",
-        ),
-        (
-            dict(regime=regime, direction=direction),
-            "regime_direction",
-        ),
-        (
-            {},
-            "global",
-        ),
-    ]
+            (
+                dict(
+                    setup_family=setup_family,
+                    regime=regime,
+                    candidate_route_hint=candidate_route_hint,
+                ),
+                "setup_regime_route",
+            ),
+            (
+                dict(setup_family=setup_family, regime=regime),
+                "setup_regime",
+            ),
+            (
+                dict(regime=regime, direction=direction),
+                "regime_direction",
+            ),
+            (
+                {},
+                "global",
+            ),
+        ]
+    else:
+        buckets = [
+            (
+                dict(
+                    exchange=exchange,
+                    primary_setup=primary_setup,
+                    regime=regime,
+                    direction=direction,
+                ),
+                "exchange_setup_regime_direction",
+            ),
+            (
+                dict(primary_setup=primary_setup, regime=regime, direction=direction),
+                "setup_regime_direction",
+            ),
+            (
+                dict(primary_setup=primary_setup, regime=regime),
+                "setup_regime",
+            ),
+            (
+                dict(regime=regime, direction=direction),
+                "regime_direction",
+            ),
+            (
+                {},
+                "global",
+            ),
+        ]
 
     for kwargs, bucket_label in buckets:
         wins, n = _fetch_bucket(**kwargs)

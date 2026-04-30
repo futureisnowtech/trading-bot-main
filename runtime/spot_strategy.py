@@ -187,14 +187,25 @@ def _synthetic_score_surcharge(synthetic_candidate: bool) -> float:
     return 2.0 if synthetic_candidate else 0.0
 
 
+def _resolved_exit_profile(profile: str, regime: str) -> str:
+    import config as _cfg
+
+    regime_key = str(regime or "NEUTRAL").upper()
+    return str(
+        getattr(_cfg, "SPOT_TINY_LIVE_EXIT_PROFILE_BY_REGIME", {}).get(regime_key)
+        or profile
+        or ""
+    ).strip().lower()
+
+
 def _exit_targets(
     profile: str, regime: str, policy: dict[str, Any]
 ) -> tuple[float, float]:
     import config as _cfg
 
     profile_map = getattr(_cfg, "SPOT_EXIT_PROFILE_TARGETS", {})
-    chosen = str(profile or "").strip().lower()
     regime_key = str(regime or "NEUTRAL").upper()
+    chosen = _resolved_exit_profile(profile, regime)
     targets = profile_map.get(chosen, {})
     if regime_key in targets:
         target_r, trail_r = targets[regime_key]
@@ -261,6 +272,8 @@ def tv_context_score_adjustment(
 ) -> tuple[float, str]:
     policy = _tv_context_policy()
     if not policy["enabled"] or not isinstance(tv_context, dict):
+        return 0.0, ""
+    if policy["mode"] == "monitor_only":
         return 0.0, ""
 
     clean = _clean_symbol(symbol)
@@ -390,44 +403,25 @@ def get_spot_strategy(symbol: str) -> dict[str, Any]:
     override = dict(getattr(_cfg, "SPOT_SYMBOL_STRATEGY_OVERRIDES", {}).get(clean, {}))
     edge_conditions = _edge_conditions(override)
     edge_conditions = _load_db_conditions(clean) or edge_conditions
-    allowed_regimes = _tupled(
-        override.get(
-            "allowed_regimes",
-            getattr(_cfg, "SPOT_ALLOWED_REGIMES", {"TREND", "NEUTRAL"}),
-        )
-    )
-    preferred_setups = _tupled(
-        override.get("preferred_setups", ()),
-        upper=False,
-    )
-    allowed_setups = (
-        _tupled(
-            override.get("allowed_setups", KNOWN_SETUP_FAMILIES),
-            upper=False,
-        )
-        or KNOWN_SETUP_FAMILIES
-    )
+    allowed_regimes = _tupled(getattr(_cfg, "SPOT_ALLOWED_REGIMES", {"TREND", "NEUTRAL"}))
+    preferred_setups = _tupled(override.get("preferred_setups", ()), upper=False)
+    allowed_setups = tuple(
+        str(s).strip().lower()
+        for s in getattr(_cfg, "SPOT_ALLOWED_SETUP_FAMILIES_TINY_LIVE", KNOWN_SETUP_FAMILIES)
+        if str(s).strip().lower() in KNOWN_SETUP_FAMILIES
+    ) or KNOWN_SETUP_FAMILIES
     score_floors = {
         "TREND": float(
-            override.get("score_floors", {}).get(
-                "TREND",
-                getattr(_cfg, "SPOT_REGIME_SCORE_FLOORS", {"TREND": 58.0})["TREND"],
-            )
+            getattr(_cfg, "SPOT_TINY_LIVE_SCORE_FLOORS", {"TREND": 58.0})["TREND"]
         ),
         "NEUTRAL": float(
-            override.get("score_floors", {}).get(
-                "NEUTRAL",
-                getattr(_cfg, "SPOT_REGIME_SCORE_FLOORS", {"NEUTRAL": 58.0})["NEUTRAL"],
-            )
+            getattr(_cfg, "SPOT_TINY_LIVE_SCORE_FLOORS", {"NEUTRAL": 60.0})["NEUTRAL"]
         ),
         "CHOP": float(
-            override.get("score_floors", {}).get(
-                "CHOP",
-                getattr(_cfg, "SPOT_REGIME_SCORE_FLOORS", {"CHOP": 66.0})["CHOP"],
-            )
+            getattr(_cfg, "SPOT_TINY_LIVE_SCORE_FLOORS", {"CHOP": 99.0})["CHOP"]
         ),
     }
-    score_weights = override.get("score_weights", {})
+    score_weights = getattr(_cfg, "SPOT_TINY_LIVE_SCORE_WEIGHTS", {})
     target_r_by_regime = override.get(
         "target_r_by_regime",
         getattr(
@@ -463,7 +457,7 @@ def get_spot_strategy(symbol: str) -> dict[str, Any]:
         "allowed_regimes": allowed_regimes,
         "allowed_setups": tuple(s for s in allowed_setups if s in KNOWN_SETUP_FAMILIES),
         "preferred_setups": tuple(
-            s for s in preferred_setups if s in KNOWN_SETUP_FAMILIES
+            s for s in preferred_setups if s in KNOWN_SETUP_FAMILIES and s in allowed_setups
         ),
         "required_setup_families": tuple(
             s for s in _required_setup_families({"edge_conditions": edge_conditions})
@@ -479,60 +473,57 @@ def get_spot_strategy(symbol: str) -> dict[str, Any]:
         "score_weights": {
             "TREND": {
                 "composite": float(
-                    score_weights.get("TREND", {}).get(
-                        "composite",
-                        getattr(_cfg, "SPOT_SCALP_SCORE_WEIGHT_COMPOSITE", 0.60),
-                    )
+                    score_weights.get("TREND", {}).get("composite", 0.70)
                 ),
                 "derivative": float(
-                    score_weights.get("TREND", {}).get(
-                        "derivative",
-                        getattr(_cfg, "SPOT_SCALP_SCORE_WEIGHT_DERIVATIVE", 0.40),
-                    )
+                    score_weights.get("TREND", {}).get("derivative", 0.30)
                 ),
             },
             "NEUTRAL": {
                 "composite": float(
-                    score_weights.get("NEUTRAL", {}).get(
-                        "composite",
-                        getattr(_cfg, "SPOT_NEUTRAL_SCORE_WEIGHT_COMPOSITE", 0.90),
-                    )
+                    score_weights.get("NEUTRAL", {}).get("composite", 0.90)
                 ),
                 "derivative": float(
-                    score_weights.get("NEUTRAL", {}).get(
-                        "derivative",
-                        getattr(_cfg, "SPOT_NEUTRAL_SCORE_WEIGHT_DERIVATIVE", 0.10),
-                    )
+                    score_weights.get("NEUTRAL", {}).get("derivative", 0.10)
                 ),
             },
             "CHOP": {
                 "composite": float(
-                    score_weights.get("CHOP", {}).get(
-                        "composite",
-                        getattr(_cfg, "SPOT_SCALP_SCORE_WEIGHT_COMPOSITE", 0.60),
-                    )
+                    score_weights.get("CHOP", {}).get("composite", 0.90)
                 ),
                 "derivative": float(
-                    score_weights.get("CHOP", {}).get(
-                        "derivative",
-                        getattr(_cfg, "SPOT_SCALP_SCORE_WEIGHT_DERIVATIVE", 0.40),
-                    )
+                    score_weights.get("CHOP", {}).get("derivative", 0.10)
                 ),
             },
         },
-        "min_confirm_count": int(override.get("min_confirm_count", 2)),
-        "min_5m_frame": float(override.get("min_5m_frame", 0.0)),
-        "min_30m_frame": float(override.get("min_30m_frame", 0.0)),
-        "min_momentum_impulse": float(override.get("min_momentum_impulse", -1.0)),
-        "min_structure_component": float(override.get("min_structure_component", -1.0)),
+        "min_confirm_count": int(
+            getattr(_cfg, "SPOT_TINY_LIVE_MIN_CONFIRMS", {"TREND": 2})["TREND"]
+        ),
+        "min_5m_frame": float(
+            getattr(_cfg, "SPOT_TINY_LIVE_MIN_5M_FRAME", {"TREND": 52.0})["TREND"]
+        ),
+        "min_30m_frame": float(
+            getattr(_cfg, "SPOT_TINY_LIVE_MIN_30M_FRAME", {"TREND": 55.0})["TREND"]
+        ),
+        "min_momentum_impulse": float(
+            getattr(
+                _cfg, "SPOT_TINY_LIVE_MIN_MOMENTUM_IMPULSE", {"TREND": 0.000001}
+            )["TREND"]
+        ),
+        "min_structure_component": float(
+            getattr(
+                _cfg, "SPOT_TINY_LIVE_MIN_STRUCTURE_COMPONENT", {"TREND": 0.000001}
+            )["TREND"]
+        ),
         "min_path_efficiency": float(
-            override.get(
-                "min_path_efficiency",
-                getattr(_cfg, "SPOT_MIN_PATH_EFFICIENCY", 0.20),
-            )
+            getattr(_cfg, "SPOT_MIN_PATH_EFFICIENCY", 0.20)
         ),
         "min_participation_component": float(
-            override.get("min_participation_component", -1.0)
+            getattr(
+                _cfg,
+                "SPOT_TINY_LIVE_MIN_PARTICIPATION_COMPONENT",
+                {"TREND": -999.0},
+            )["TREND"]
         ),
         "min_volatility_quality": float(override.get("min_volatility_quality", -1.0)),
         "target_r_by_regime": {
@@ -689,39 +680,16 @@ def score_floor_for_symbol(
     execution_route: str = "",
     synthetic_candidate: bool = False,
 ) -> float:
-    clean = _clean_symbol(symbol)
-    policy = get_spot_strategy(clean)
     regime_key = str(regime or "NEUTRAL").upper()
-    base = float(
-        policy["score_floors"].get(regime_key, policy["score_floors"]["NEUTRAL"])
+    import config as _cfg
+
+    floors = getattr(
+        _cfg,
+        "SPOT_TINY_LIVE_SCORE_FLOORS",
+        {"TREND": 58.0, "NEUTRAL": 60.0, "CHOP": 99.0},
     )
-    family = str(setup_family or "")
-    if family in KNOWN_SETUP_FAMILIES and (
-        policy.get("preferred_setups") or policy.get("required_setup_families")
-    ):
-        setup_policy = setup_policy_for_symbol(clean, family, setup_score)
-        if setup_policy["preference"] == "preferred":
-            base += _setup_value(policy, family, "preferred_floor_delta")
-        elif setup_policy["preference"] == "opportunistic":
-            base += _setup_value(policy, family, "opportunistic_floor_delta")
-        elif setup_policy["preference"] == "wildcard":
-            base += _setup_value(policy, family, "wildcard_floor_delta")
-    if (
-        regime_key in {"TREND", "NEUTRAL"}
-        and family == "impulse_continuation"
-        and (policy.get("preferred_setups") or policy.get("required_setup_families"))
-    ):
-        base -= 0.5
-    if regime_key != "CHOP" and structural_confirm_count >= 3:
-        base -= 1.0
-    if regime_key == "CHOP" and family in {
-        "compression_breakout",
-        "compression_expansion_retest",
-    }:
-        base += 1.0
-    base += _synthetic_score_surcharge(synthetic_candidate)
-    base += _taker_score_surcharge(clean, execution_route)
-    return max(35.0, min(base, 72.0))
+    base = float(floors.get(regime_key, floors["NEUTRAL"]))
+    return max(35.0, min(base, 99.0))
 
 
 def final_score_for_symbol(
@@ -762,6 +730,11 @@ def trail_arm_r_for_symbol(symbol: str, regime: str) -> float:
     return float(trail_r)
 
 
+def exit_profile_for_symbol(symbol: str, regime: str) -> str:
+    policy = get_spot_strategy(symbol)
+    return _resolved_exit_profile(str(policy.get("edge_profile") or ""), regime)
+
+
 def spot_quality_block_reason(
     symbol: str,
     spot_state: dict[str, Any] | None,
@@ -797,21 +770,15 @@ def spot_quality_block_reason(
 
     if policy["allowed_regimes"] and regime not in set(policy["allowed_regimes"]):
         return f"spot_regime_not_allowed:{regime}", floor
+    if regime == "CHOP":
+        return "spot_regime_not_allowed:CHOP", floor
 
-    # Evidence-derived quarantine: pullback_reclaim in NEUTRAL/CHOP
-    # Data: 115 NEUTRAL trades → 0% WR, avg -$1.28; 22 CHOP trades → 0% WR, avg -$0.70
-    # Governed by SPOT_PULLBACK_RECLAIM_NEUTRAL_BLOCKED / SPOT_PULLBACK_RECLAIM_CHOP_BLOCKED
-    if setup_family == "pullback_reclaim":
-        import config as _qs_cfg
+    import config as _qs_cfg
 
-        if regime == "NEUTRAL" and getattr(
-            _qs_cfg, "SPOT_PULLBACK_RECLAIM_NEUTRAL_BLOCKED", True
-        ):
-            return "pullback_reclaim_neutral_quarantined", floor
-        if regime == "CHOP" and getattr(
-            _qs_cfg, "SPOT_PULLBACK_RECLAIM_CHOP_BLOCKED", True
-        ):
-            return "pullback_reclaim_chop_quarantined", floor
+    if setup_family in set(
+        getattr(_qs_cfg, "SPOT_DISABLED_SETUP_FAMILIES_TINY_LIVE", ("pullback_reclaim",))
+    ):
+        return f"{setup_family}_quarantined", floor
 
     setup_policy = setup_policy_for_symbol(clean, setup_family, setup_score)
     if not setup_policy["allowed"]:
@@ -833,23 +800,55 @@ def spot_quality_block_reason(
 
     if final_spot_score is not None and float(final_spot_score) < float(floor):
         return "below_regime_floor", floor
-    if confirm_count < int(policy["min_confirm_count"]):
+    regime_min_confirms = int(
+        getattr(_qs_cfg, "SPOT_TINY_LIVE_MIN_CONFIRMS", {"TREND": 2, "NEUTRAL": 3})[
+            regime
+        ]
+    )
+    if confirm_count < regime_min_confirms:
         return "structural_confirm_count_too_low", floor
-    if float(s5.get("frame_score") or 0.0) < float(policy["min_5m_frame"]):
+    min_5m_frame = float(
+        getattr(_qs_cfg, "SPOT_TINY_LIVE_MIN_5M_FRAME", {"TREND": 52.0, "NEUTRAL": 55.0})[
+            regime
+        ]
+    )
+    if float(s5.get("frame_score") or 0.0) < min_5m_frame:
         return "frame_score_5m_too_low", floor
-    if float(s30.get("frame_score") or 0.0) < float(policy["min_30m_frame"]):
+    min_30m_frame = float(
+        getattr(_qs_cfg, "SPOT_TINY_LIVE_MIN_30M_FRAME", {"TREND": 55.0, "NEUTRAL": 58.0})[
+            regime
+        ]
+    )
+    if float(s30.get("frame_score") or 0.0) < min_30m_frame:
         return "frame_score_30m_too_low", floor
-    if float(s5.get("momentum_impulse") or 0.0) < float(policy["min_momentum_impulse"]):
+    min_momentum = float(
+        getattr(
+            _qs_cfg,
+            "SPOT_TINY_LIVE_MIN_MOMENTUM_IMPULSE",
+            {"TREND": 0.000001, "NEUTRAL": 0.000001},
+        )[regime]
+    )
+    if float(s5.get("momentum_impulse") or 0.0) < min_momentum:
         return "momentum_impulse_too_low", floor
-    if float(s5.get("structure_component") or 0.0) < float(
-        policy["min_structure_component"]
-    ):
+    min_structure = float(
+        getattr(
+            _qs_cfg,
+            "SPOT_TINY_LIVE_MIN_STRUCTURE_COMPONENT",
+            {"TREND": 0.000001, "NEUTRAL": 0.0},
+        )[regime]
+    )
+    if float(s5.get("structure_component") or 0.0) < min_structure:
         return "structure_component_too_low", floor
     if float(s5.get("path_efficiency") or 0.0) < float(policy["min_path_efficiency"]):
         return "path_efficiency_too_low", floor
-    if float(s5.get("participation_component") or 0.0) < float(
-        policy["min_participation_component"]
-    ):
+    min_participation = float(
+        getattr(
+            _qs_cfg,
+            "SPOT_TINY_LIVE_MIN_PARTICIPATION_COMPONENT",
+            {"TREND": -999.0, "NEUTRAL": 0.000001},
+        )[regime]
+    )
+    if float(s5.get("participation_component") or 0.0) < min_participation:
         return "participation_component_too_low", floor
     if float(s30.get("volatility_quality") or 0.0) < float(
         policy["min_volatility_quality"]

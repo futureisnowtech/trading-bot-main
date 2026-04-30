@@ -40,7 +40,10 @@ def test_go_live_waits_for_connected_crypto_lane_not_just_process_mode():
     assert "def _load_crypto_lane" in src, (
         "go_live.py must read crypto lane runtime state during launch verification."
     )
-    assert "connected, buying_power, readiness = _load_crypto_lane()" in src
-    assert "mode == \"live\" and connected and buying_power > 0" in src, (
+    assert "connected, buying_power, readiness, blocked_reason = _load_crypto_lane()" in src
+    assert "_spot_truth_ready()" in src, (
+        "go_live.py must preflight the broker-canonical spot truth contract."
+    )
+    assert 'mode == "live" and connected and buying_power > 0 and readiness == "TINY_LIVE"' in src, (
         "go_live.py must not declare success on process_mode alone."
     )

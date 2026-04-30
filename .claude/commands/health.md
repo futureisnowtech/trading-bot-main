@@ -1,89 +1,69 @@
 ---
 name: health
-description: Quick 30-second system health check — is the bot running, is it trading, are there errors?
+description: Fast spot truth-lane health check
 argument-hint: ""
 allowed-tools:
   - Bash
   - Read
 ---
 
-Fast system health check. Designed to run in under 30 seconds.
+Run a quick health check for the **active Coinbase spot truth-lane**.
+
+## Read First
+
+1. `AGENTS.md`
+2. `scripts/live_runtime_audit.py`
+3. `runtime/spot_position_truth.py`
 
 ## Process
 
-### 1. Process Status
+### 1. Process and mode
 
 ```bash
 ps aux | grep "main.py" | grep -v grep
+python3 -c "from runtime.runtime_state import get_system_state; print(get_system_state())"
 ```
 
-Output: RUNNING (PID: XXXX) or NOT RUNNING.
-
-### 2. Recent Activity
+### 2. Spot truth snapshot
 
 ```bash
 python3 -c "
-from logging_db.trade_logger import get_recent_notifications, get_today_stats
-from config import PAPER_TRADING
+from runtime.spot_position_truth import get_spot_position_truth
 import json
-notifs = get_recent_notifications(limit=10)
-stats = get_today_stats(paper=PAPER_TRADING)
-print('STATS:', json.dumps(stats))
-print('RECENT:')
-for n in notifs[:5]:
-    print(f'  [{n.get(\"level\",\"?\")}] {n.get(\"message\",\"?\")}')
+print(json.dumps(get_spot_position_truth(paper=False), indent=2, default=str))
 "
 ```
 
-### 3. Error Check
+### 3. Runtime audit
 
 ```bash
-grep -c "ERROR\|HALT\|Exception\|Traceback" logs/bot.log 2>/dev/null | head -1
+python3 scripts/live_runtime_audit.py
 ```
 
-If > 0 errors: show last 3 error lines.
-
-### 4. Database Check
+### 4. Kill-switch state
 
 ```bash
 python3 -c "
-import sqlite3, os
-db = 'logs/trades.db'
-if os.path.exists(db):
-    conn = sqlite3.connect(db)
-    cur = conn.cursor()
-    cur.execute('SELECT COUNT(*) FROM trades WHERE paper=1')
-    n = cur.fetchone()[0]
-    conn.close()
-    print(f'DB OK — {n} paper trades recorded')
-else:
-    print('DB MISSING')
+from runtime.spot_kill_switch import kill_switch_status
+import json
+print(json.dumps(kill_switch_status(), indent=2))
 "
 ```
 
-### 5. Output
+## Output
 
-Single dashboard block:
+Return:
+- process state
+- launch readiness state
+- spot truth snapshot health
+- blocker count
+- external/manual holdings visibility
+- kill-switch state
+- verdict: `HEALTHY`, `DEGRADED`, `HALTED`, or `NOT_READY`
 
-```
-╔══════════════════════════════════════╗
-║  SYSTEM HEALTH CHECK                 ║
-╠══════════════════════════════════════╣
-║  Bot:      RUNNING (PID: 12345)      ║
-║  Mode:     PAPER                     ║
-║  Trades:   X today (X wins / X loss) ║
-║  P&L:      +$X.XX net               ║
-║  Halted:   NO                        ║
-║  Errors:   0 in log                  ║
-║  DB:       OK — XXXX trades          ║
-╠══════════════════════════════════════╣
-║  STATUS: 🟢 HEALTHY                  ║
-╚══════════════════════════════════════╝
-```
+## Rules
 
-Status: 🟢 HEALTHY / 🟡 DEGRADED / 🔴 DOWN
+- Health is about the active spot lane first.
+- A dashboard that looks fine but hides broker-held positions is **not healthy**.
+- A system with broker snapshot failure or spot truth blockers is **not healthy**.
 
-DEGRADED = running but has errors or is halted.
-DOWN = process not found.
-
-If DOWN or DEGRADED: suggest `bash scripts/log_change.sh` and `python3 main.py --mode paper` to restart.

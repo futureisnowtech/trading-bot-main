@@ -1,81 +1,77 @@
 ---
 name: audit
-description: Full system health audit — signals, agents, risk, P&L, ML gate, and strategy performance
-argument-hint: "[--lane=crypto|equity|all] [--period=today|7d|30d]"
+description: Evidence-based audit for the active Coinbase spot truth-lane
+argument-hint: "[--period=24h|7d|30d]"
 allowed-tools:
   - Read
   - Bash
   - Glob
 ---
 
-Run a comprehensive audit of the trading system's current health and performance.
+Run a full audit of the **active spot truth-lane**, not the old mixed-lane stack.
+
+## Read First
+
+1. `AGENTS.md`
+2. `scripts/net_truth_audit.py`
+3. `scripts/go_live_audit.py`
+4. `scripts/check_readiness.py`
+5. `scripts/live_runtime_audit.py`
 
 ## Process
 
-### 1. Daily Summary
+### 1. Runtime truth
 
-Call `get_daily_summary` via MCP. Display:
-- Net P&L (after fees)
-- Win rate today vs all-time
-- Fees as % of account
-- Halt status
+```bash
+python3 scripts/check_readiness.py
+python3 scripts/live_runtime_audit.py
+```
 
-### 2. Signal Leaderboard
+### 2. Net performance truth
 
-Call `get_signal_stats(regime="all", min_fires=5)`.
+```bash
+python3 scripts/net_truth_audit.py
+python3 scripts/go_live_audit.py
+```
 
-Build a ranked table:
-| Signal | Regime | Win Rate | Bayesian Pts | Fires |
+### 3. Spot truth snapshot
 
-Flag signals with win_rate < 40% (underperforming) and win_rate > 65% (potential overfitting).
+```bash
+python3 -c "
+from runtime.spot_position_truth import get_spot_position_truth
+import json
+print(json.dumps(get_spot_position_truth(paper=False), indent=2, default=str))
+"
+```
 
-### 3. Agent Accuracy
+### 4. Candidate / setup / route truth
 
-Call `get_agent_accuracy`. For each of the 3 agents (funding_regime, momentum_structure, risk_economics):
-- Show accuracy %
-- Flag if any agent is below 45% accuracy (worse than coin flip)
-- Flag if agents are highly correlated (all 3 always agree = no debate value)
+Use DB queries or existing reports to answer:
+- what setups actually traded
+- what routes actually executed
+- what clusters are quarantined
+- what symbols are suppressed or probationary
 
-### 4. Open Positions
+### 5. Learning / monitoring truth
 
-Call `get_positions`. For each open position:
-- Time in trade
-- Unrealized P&L
-- Distance from stop (in %)
-- Distance from target (in %)
-- Flag any position > 4h old in crypto (stagnant trade risk)
-
-### 5. ML Signal Gate
-
-Call `get_ml_signal` for BTC-USDC, ETH-USDC, SOL-USDC. Display p_win for each.
-Check current ML_SIGNAL_MIN_PROB from config.py.
-Flag if p_win is consistently near the threshold (gate calibration check).
-
-### 6. Risk Status
-
-Read `risk/risk_manager.py` status_report. Display deployed capital, halt status, positions count.
-
-### 7. Recent Notifications
-
-Call `get_notifications(limit=20)`. Highlight any ERROR or HALT level events.
-
-### 8. Audit Score
-
-Score 6 dimensions (0–10 each):
-1. P&L health (positive/trending up = 10)
-2. Signal quality (average Bayesian win rate)
-3. Agent calibration (all agents > 50% accuracy)
-4. Risk compliance (no limit breaches)
-5. ML gate health (model trained + filtering correctly)
-6. System stability (no halts/errors in last 24h)
-
-Output: **Audit Score: XX/60** with breakdown.
-
-### 9. Top 3 Action Items
-
-Based on findings, list the 3 highest-priority things to investigate or fix.
+Check:
+- spot attribution freshness
+- spot feature snapshot freshness
+- spot kill switch state
+- latest health check status
 
 ## Output Format
 
-Use clear section headers. Lead each section with a one-line verdict.
-End with the audit score and action items.
+- Runtime truth verdict
+- Performance truth verdict
+- Position truth verdict
+- Learning / monitoring verdict
+- Biggest blockers
+- Recommended next actions
+
+## Rules
+
+- Never use old MCP-only agent metrics as the primary truth.
+- Never treat dormant-lane status as equal to the active spot lane.
+- Never call the system ready if runtime truth and audit truth disagree.
+

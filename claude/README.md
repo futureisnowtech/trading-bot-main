@@ -12,6 +12,7 @@ How to use:
 3. When a task matches one of the skills, tell Claude to use it explicitly, or let the prompt route Claude to the best match.
 
 Design rule:
-- Keep long-term project truth in `CLAUDE.md` and `AGENTS.md`.
+- Keep canonical project truth in `AGENTS.md`.
+- Keep `CLAUDE.md` as the concise Claude-facing companion.
 - Keep repeatable task workflows in `claude/skills/*.md`.
 - Keep skills narrow and operational, not generic.

@@ -150,22 +150,30 @@ def _init_forecast_tables(db_path: Path) -> None:
         """)
 
 
-# ── Test 1: FUTURES_LANE_ACTIVE=false → IBKR health check skipped ────────────
+# ── Test 1: FUTURES_LANE_ACTIVE=false → live health no longer runs IBKR ──────
 
 
 def test_futures_lane_inactive_no_mes_in_health(proof_runtime, monkeypatch):
-    """When FUTURES_LANE_ACTIVE=false, the IBKR health check returns ok=True (skipped)."""
+    """Live health must be crypto-spot scoped and contain no IBKR check."""
     import config
     import monitoring.health_check as hc
 
     monkeypatch.setattr(config, "FUTURES_LANE_ACTIVE", False, raising=False)
-    monkeypatch.setattr(hc, "FUTURES_LANE_ACTIVE", False, raising=False)
-
-    result = hc._check_ibkr_connection()
-    assert result["ok"] is True
-    assert (
-        "dormant" in result["detail"].lower() or "skipped" in result["detail"].lower()
+    monkeypatch.setattr(hc, "_check_ml_gate", lambda: {"ok": True, "detail": "ok"})
+    monkeypatch.setattr(hc, "_check_scan_liveness", lambda: {"ok": True, "detail": "ok"})
+    monkeypatch.setattr(hc, "_check_spot_truth", lambda: {"ok": True, "detail": "ok"})
+    monkeypatch.setattr(
+        hc, "_check_spot_learning_truth", lambda: {"ok": True, "detail": "ok"}
     )
+    monkeypatch.setattr(hc, "_check_error_rate", lambda: {"ok": True, "detail": "ok"})
+    monkeypatch.setattr(
+        hc, "_check_spot_kill_switch", lambda: {"ok": True, "detail": "ok"}
+    )
+
+    result = hc.run_health_check(force=True)
+    assert "_check_ibkr_connection" not in dir(hc)
+    assert all("ibkr" not in key for key in result["checks"])
+    assert result["status"] == "HEALTHY"
 
 
 # ── Test 2: FUTURES_LANE_ACTIVE=false → balance returns archived state ────────

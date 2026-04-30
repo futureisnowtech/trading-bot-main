@@ -11,7 +11,7 @@ if ROOT not in sys.path:
 def _spot_state():
     return {
         "regime": "TREND",
-        "setup_family": "pullback_reclaim",
+        "setup_family": "impulse_continuation",
         "setup_score": 0.82,
         "structural_confirm_count": 2,
         "frames": {
@@ -30,7 +30,7 @@ def _spot_state():
     }
 
 
-def test_stv01_aligned_htf_long_adds_small_score_boost():
+def test_stv01_monitor_only_tv_context_does_not_boost_score():
     from runtime.spot_momentum import final_spot_score
 
     base = final_spot_score(60.0, 56.0, regime="TREND", symbol="BTC")
@@ -47,10 +47,10 @@ def test_stv01_aligned_htf_long_adds_small_score_boost():
             "age_seconds": 60,
         },
     )
-    assert boosted == base + 6.0
+    assert boosted == base
 
 
-def test_stv02_htf_short_blocks_spot_long():
+def test_stv02_monitor_only_tv_context_does_not_veto_spot_long():
     from runtime.spot_strategy import spot_quality_block_reason
 
     reason, _ = spot_quality_block_reason(
@@ -65,4 +65,4 @@ def test_stv02_htf_short_blocks_spot_long():
             "age_seconds": 60,
         },
     )
-    assert reason == "tv_htf_short_bias_block"
+    assert reason == ""

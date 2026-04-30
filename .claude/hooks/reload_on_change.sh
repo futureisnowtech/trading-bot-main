@@ -16,20 +16,28 @@ cd "$REPO_ROOT" || exit 0
 HOT_FILES=(
     "config.py"
     "scheduler/v10_runner.py"
+    "runtime/spot_position_truth.py"
     "runtime/spot_strategy.py"
     "runtime/spot_momentum.py"
     "runtime/spot_regime.py"
     "runtime/spot_execution_policy.py"
     "runtime/crypto_tradeability.py"
+    "runtime/spot_kill_switch.py"
     "risk/economics_gate.py"
     "position_manager.py"
     "perps_engine.py"
     "spot_engine.py"
     "kill_switch.py"
+    "monitoring/health_check.py"
     "signal_engine.py"
     "execution/coinbase_broker.py"
     "execution/coinbase_spot_broker.py"
+    "dashboard/data/positions.py"
+    "dashboard/data/control_tower.py"
     "main.py"
+    "scripts/go_live.py"
+    "scripts/check_readiness.py"
+    "scripts/live_runtime_audit.py"
     "scripts/boot.py"
 )
 
@@ -65,14 +73,16 @@ fi
 BOT_PID=$(pgrep -f "boot.py" | head -1)
 
 echo "" >&2
-echo "⚠️  LIVE-BOT FILES CHANGED — restart required to take effect:" >&2
+echo "⚠️  RUNTIME-TRUTH FILES CHANGED — controlled restart required to take effect:" >&2
 for f in $CHANGED_HOT; do
     echo "   • $f" >&2
 done
 echo "" >&2
 echo "   Steps:" >&2
 echo "   1. git add → git commit → git push" >&2
-echo "   2. python3 scripts/go_live.py   (restarts live bot)" >&2
+echo "   2. use the controlled launcher that matches target mode:" >&2
+echo "      python3 scripts/go_paper.py" >&2
+echo "      python3 scripts/go_live.py" >&2
 if [ -n "$BOT_PID" ]; then
     echo "   (Bot PID $BOT_PID is currently running OLD code)" >&2
 else

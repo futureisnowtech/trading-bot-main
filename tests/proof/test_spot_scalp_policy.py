@@ -31,7 +31,7 @@ def test_ssp01_spot_econ_separates_quality_from_economics():
     assert result["approved"] is False
     assert result["reason"] == "below_regime_floor"
     assert result["gate_class"] == "quality"
-    assert result["score_floor"] == pytest.approx(49.0)
+    assert result["score_floor"] == pytest.approx(56.0)
 
 
 def test_ssp02_spot_econ_marks_spread_fail_as_microstructure():

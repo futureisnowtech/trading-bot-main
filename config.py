@@ -109,7 +109,7 @@ SPOT_EOD_FLATTEN_ENABLED: bool = (
     os.getenv("SPOT_EOD_FLATTEN_ENABLED", "false").lower() == "true"
 )
 SPOT_THESIS_MIN_HOLD_MINS: float = float(os.getenv("SPOT_THESIS_MIN_HOLD_MINS", "8.0"))
-SPOT_THESIS_MIN_SCORE: float = float(os.getenv("SPOT_THESIS_MIN_SCORE", "48.0"))
+SPOT_THESIS_MIN_SCORE: float = float(os.getenv("SPOT_THESIS_MIN_SCORE", "52.0"))
 SPOT_SESSION_MIN_EDGE_MULT: float = float(
     os.getenv("SPOT_SESSION_MIN_EDGE_MULT", "1.5")
 )
@@ -144,9 +144,9 @@ SPOT_NEUTRAL_SCORE_WEIGHT_DERIVATIVE: float = float(
     os.getenv("SPOT_NEUTRAL_SCORE_WEIGHT_DERIVATIVE", "0.10")
 )
 SPOT_REGIME_SCORE_FLOORS: dict[str, float] = {
-    "TREND": float(os.getenv("SPOT_TREND_SCORE_FLOOR", "44.0")),
-    "NEUTRAL": float(os.getenv("SPOT_NEUTRAL_SCORE_FLOOR", "44.0")),
-    "CHOP": float(os.getenv("SPOT_CHOP_SCORE_FLOOR", "49.0")),
+    "TREND": float(os.getenv("SPOT_TREND_SCORE_FLOOR", "55.0")),
+    "NEUTRAL": float(os.getenv("SPOT_NEUTRAL_SCORE_FLOOR", "55.0")),
+    "CHOP": float(os.getenv("SPOT_CHOP_SCORE_FLOOR", "60.0")),
 }
 SPOT_ALLOWED_REGIMES: set[str] = {
     s.strip().upper()
@@ -213,7 +213,7 @@ SPOT_SYMBOL_STRATEGY_OVERRIDES: dict[str, dict] = {
         },
         "opportunistic_setup_score": 0.72,
         "wildcard_setup_score": 0.82,
-        "score_floors": {"TREND": 50.0, "NEUTRAL": 50.0, "CHOP": 50.0},
+        "score_floors": {"TREND": 57.0, "NEUTRAL": 57.0, "CHOP": 60.0},
         "score_weights": {
             "TREND": {"composite": 0.70, "derivative": 0.30},
             "NEUTRAL": {"composite": 0.88, "derivative": 0.12},
@@ -249,7 +249,7 @@ SPOT_SYMBOL_STRATEGY_OVERRIDES: dict[str, dict] = {
         },
         "opportunistic_setup_score": 0.72,
         "wildcard_setup_score": 0.82,
-        "score_floors": {"TREND": 47.0, "NEUTRAL": 47.0, "CHOP": 47.0},
+        "score_floors": {"TREND": 55.0, "NEUTRAL": 55.0, "CHOP": 60.0},
         "score_weights": {
             "TREND": {"composite": 0.72, "derivative": 0.28},
             "NEUTRAL": {"composite": 0.86, "derivative": 0.14},
@@ -285,7 +285,7 @@ SPOT_SYMBOL_STRATEGY_OVERRIDES: dict[str, dict] = {
         },
         "opportunistic_setup_score": 0.76,
         "wildcard_setup_score": 0.86,
-        "score_floors": {"TREND": 49.0, "NEUTRAL": 49.0, "CHOP": 49.0},
+        "score_floors": {"TREND": 56.0, "NEUTRAL": 56.0, "CHOP": 60.0},
         "score_weights": {
             "TREND": {"composite": 0.76, "derivative": 0.24},
             "NEUTRAL": {"composite": 0.82, "derivative": 0.18},
@@ -321,7 +321,7 @@ SPOT_SYMBOL_STRATEGY_OVERRIDES: dict[str, dict] = {
         },
         "opportunistic_setup_score": 0.74,
         "wildcard_setup_score": 0.84,
-        "score_floors": {"TREND": 49.0, "NEUTRAL": 49.0, "CHOP": 49.0},
+        "score_floors": {"TREND": 56.0, "NEUTRAL": 56.0, "CHOP": 60.0},
         "score_weights": {
             "TREND": {"composite": 0.74, "derivative": 0.26},
             "NEUTRAL": {"composite": 0.84, "derivative": 0.16},
@@ -357,7 +357,7 @@ SPOT_SYMBOL_STRATEGY_OVERRIDES: dict[str, dict] = {
         },
         "opportunistic_setup_score": 0.72,
         "wildcard_setup_score": 0.82,
-        "score_floors": {"TREND": 44.0, "NEUTRAL": 44.0, "CHOP": 44.0},
+        "score_floors": {"TREND": 55.0, "NEUTRAL": 55.0, "CHOP": 60.0},
         "score_weights": {
             "TREND": {"composite": 0.72, "derivative": 0.28},
             "NEUTRAL": {"composite": 0.86, "derivative": 0.14},
@@ -393,7 +393,7 @@ SPOT_SYMBOL_STRATEGY_OVERRIDES: dict[str, dict] = {
         },
         "opportunistic_setup_score": 0.78,
         "wildcard_setup_score": 0.88,
-        "score_floors": {"TREND": 54.0, "NEUTRAL": 54.0, "CHOP": 54.0},
+        "score_floors": {"TREND": 57.0, "NEUTRAL": 57.0, "CHOP": 60.0},
         "score_weights": {
             "TREND": {"composite": 0.78, "derivative": 0.22},
             "NEUTRAL": {"composite": 0.84, "derivative": 0.16},
@@ -429,7 +429,7 @@ SPOT_SYMBOL_STRATEGY_OVERRIDES: dict[str, dict] = {
         },
         "opportunistic_setup_score": 0.76,
         "wildcard_setup_score": 0.86,
-        "score_floors": {"TREND": 44.0, "NEUTRAL": 44.0, "CHOP": 44.0},
+        "score_floors": {"TREND": 55.0, "NEUTRAL": 55.0, "CHOP": 60.0},
         "score_weights": {
             "TREND": {"composite": 0.76, "derivative": 0.24},
             "NEUTRAL": {"composite": 0.82, "derivative": 0.18},
@@ -465,7 +465,7 @@ SPOT_SYMBOL_STRATEGY_OVERRIDES: dict[str, dict] = {
         },
         "opportunistic_setup_score": 0.73,
         "wildcard_setup_score": 0.83,
-        "score_floors": {"TREND": 44.0, "NEUTRAL": 44.0, "CHOP": 44.0},
+        "score_floors": {"TREND": 55.0, "NEUTRAL": 55.0, "CHOP": 60.0},
         "score_weights": {
             "TREND": {"composite": 0.70, "derivative": 0.30},
             "NEUTRAL": {"composite": 0.88, "derivative": 0.12},

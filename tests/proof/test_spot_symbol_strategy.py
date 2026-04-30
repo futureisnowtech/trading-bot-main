@@ -120,7 +120,7 @@ def test_sss06_score_floor_adds_synthetic_and_taker_surcharges():
         synthetic_candidate=True,
     )
 
-    assert base == 50.0
-    assert synthetic == 52.0
-    assert taker == 53.0
-    assert synthetic_taker == 55.0
+    assert base == 57.0
+    assert synthetic == 59.0
+    assert taker == 60.0
+    assert synthetic_taker == 62.0

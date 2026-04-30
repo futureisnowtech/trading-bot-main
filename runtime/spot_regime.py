@@ -38,11 +38,13 @@ def score_floor_for_regime(
             setup_family=setup_family,
             setup_score=setup_score,
         )
-    base = float(SPOT_REGIME_SCORE_FLOORS.get(regime, SPOT_REGIME_SCORE_FLOORS["NEUTRAL"]))
+    base = float(
+        SPOT_REGIME_SCORE_FLOORS.get(regime, SPOT_REGIME_SCORE_FLOORS["NEUTRAL"])
+    )
     if regime in {"TREND", "NEUTRAL"} and setup_family == "impulse_continuation":
         base -= 1.0
     if regime != "CHOP" and structural_confirm_count >= 3:
         base -= 1.0
     if regime == "CHOP" and setup_family == "compression_breakout":
         base += 1.0
-    return max(48.0, min(base, 70.0))
+    return max(54.0, min(base, 70.0))

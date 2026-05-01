@@ -2,61 +2,161 @@
 
 #active #strategy
 
-**Status as of: 2026-04-15**
-**System version: v15.2**
-**Source: CLAUDE.md + runtime verified**
+**Status as of: 2026-04-30**  
+**System version: v18.15**  
+**Source: runtime code + proof tests + current operator contract**
 
----
+## Authoritative Live Lane
 
-## CONFIRMED
+The only authoritative live lane is:
 
-### System Mode
-- PAPER_TRADING=false (LIVE mode — confirmed by runtime)
-- FORECAST_LANE_ACTIVE=true
-- FUTURES_LANE_ACTIVE=false (MES archived/dormant)
-- Entry: `python3 main.py --mode live`
-- Dashboard: `streamlit run dashboard/app.py` port 8501
+- **Coinbase spot scalp**
 
-### Active Execution Venues
-- **Crypto (LIVE)**: Coinbase US CFTC nano perp futures (`coinbase_broker.py`). CDP JWT/ES256 auth. Symbols: BTC→BIP-20DEC30-CDE, ETH→ETP-20DEC30-CDE, SOL→SLP-20DEC30-CDE, XRP→XPP-20DEC30-CDE. Taker 0.030%. ISOLATED margin.
-- **ForecastEx (STARTED, enrollment pending)**: IBKR ForecastEx event contracts (SecType=OPT, Exchange=FORECASTX). Economic markets: CPI/CPIY/CPIC/DISSN/DISSA. Account U25028849. Broker connected. 0 tradable OPT contracts currently (no active event period / enrollment limitation).
-- **MES futures**: DORMANT. Code preserved, FUTURES_LANE_ACTIVE=false.
+Everything else in the repo is either dormant, research-grade, or archived from a live-operator-truth perspective.
 
-### Scanner Sources
-- Kraken Futures public REST + Binance USDM public REST + Hyperliquid — for intelligence/scanning only
-- Live execution: Coinbase only
+## Live Execution Contract
 
-### Signal Engine
-- Two-tower: Technical 0-100 + ML 0-100 (XGBoost 60% + LightGBM 40%, 57 features)
-- Entry composite >= 58 (TRENDING) or regime-specific threshold
-- No AI debate agents — replaced entirely in v10.0
+### Position truth
 
-### Risk
-- Max risk/trade: 1%. Max daily loss: 4%. Max deployed: 90%. ISOLATED margin.
-- Kill switch at balance < 75% of ACCOUNT_SIZE ($3,750 on $5K paper account)
+- Coinbase broker holdings are canonical for whether a spot position exists.
+- The DB enriches that holding with lineage and strategy metadata.
+- Dashboard open positions must always show broker-held exposure, even if DB lineage is missing.
+- Same-symbol bot entries are blocked if the broker already holds that symbol as `external_manual`.
 
-### Key DB Tables (`logs/trades.db`)
-- `trades`, `open_positions`, `system_events`, `scan_candidates`
-- `forecast_markets`, `forecast_contracts`, `forecast_quotes`, `forecast_bars`, `forecast_resolutions`
-- `system_runtime_state`, `lane_runtime_state`, `incidents`
-- `trade_integrity`, `exit_evaluations`, `challenger_state`
+### Active spot statuses
 
-### Dashboard Tabs (v15.2)
-6 tabs: MISSION CONTROL, PERFORMANCE, TRADE APPROVAL, FORECAST TRADING, ARCHIVED FUTURES (MES), SYSTEM SETTINGS
+Every live spot symbol must resolve to one of:
 
----
+- `matched_bot_position`
+- `external_manual`
+- `needs_bot_repair`
+- `unclassified`
+- `db_only_stale`
+- `qty_mismatch`
+- `metadata_missing`
 
-## RETIRED (historical — do not treat as current)
+Truth blockers:
 
-- **Coinbase Advanced Trade** — replaced by Coinbase US CFTC nano perp futures (v14.1)
-- **Bybit perps** — removed; never used in production
-- **Tradovate MES** — replaced by IBKR MES, now dormant (FUTURES_LANE_ACTIVE=false)
-- **5-agent AI debate panel** — removed v10.0; replaced by two-tower signal engine
-- **MACD-only / equity lane** — removed v10.0
-- **Conviction scoring (point stack)** — replaced by technical tower 0-100 scoring
+- `needs_bot_repair`
+- `unclassified`
+- `db_only_stale`
+- `qty_mismatch`
+- `metadata_missing`
+- broker snapshot unavailable
 
----
+## Spot Entry Chain
 
-## OPEN QUESTIONS
+Every live spot candidate must pass this chain in order:
 
-→ See [[01_current_system/Open Questions.md]]
+1. **Universe / symbol truth**
+   - symbol is in the active spot universe
+   - no same-symbol `external_manual` broker holding
+   - no open bot-managed holding on the symbol
+   - no symbol-level truth blocker
+
+2. **Spot state availability**
+   - no stale fallback in live mode
+   - if `build_spot_state()` cannot produce fresh state, block the trade
+
+3. **Regime admission**
+   - allowed: `TREND`, `NEUTRAL`
+   - blocked: `CHOP`
+
+4. **Setup-family admission**
+   - quarantined: `pullback_reclaim`
+   - initial live-eligible families:
+     - `impulse_continuation`
+     - `compression_breakout`
+     - `trend_resume_after_shakeout`
+     - `compression_expansion_retest`
+
+5. **Setup-score admission**
+   - `impulse_continuation >= 0.62`
+   - `compression_breakout >= 0.62`
+   - `trend_resume_after_shakeout >= 0.60`
+   - `compression_expansion_retest >= 0.64`
+
+6. **Structural confirm admission**
+   - `TREND >= 2`
+   - `NEUTRAL >= 3`
+
+7. **Frame-score admission**
+   - `TREND`: `5m >= 52`, `30m >= 55`
+   - `NEUTRAL`: `5m >= 55`, `30m >= 58`
+
+8. **Derivative-quality admission**
+   - `path_efficiency >= 0.20`
+   - `momentum_impulse > 0`
+   - `TREND`: `structure_component > 0`
+   - `NEUTRAL`: `structure_component >= 0` and `participation_component > 0`
+
+9. **Final-score admission**
+   - `TREND >= 58`
+   - `NEUTRAL >= 60`
+
+10. **Route admission**
+    - `maker_first` only
+    - `taker_fallback` disabled
+    - if maker does not fill in the allowed window, cancel the entry
+
+11. **Economics admission**
+    - projected target must be net-positive after costs
+    - `projected_net_win_usd >= 2.0 * fee_usd`
+    - `net_rr >= 1.25`
+    - cluster must not be quarantined
+
+## Spot Exit Contract
+
+- stop widening: forbidden
+- stopless entries: forbidden
+- averaging down: forbidden
+
+### Bound exit profiles
+
+- `TREND` uses `precision`
+- `NEUTRAL` uses `micro`
+- `CHOP` is not live-eligible
+
+### Thesis and stagnation
+
+- thesis invalidation remains active
+- stagnation exits should fire faster than old swing-style hold logic
+- the design goal is to cut dead trades before fee drag compounds
+
+## TradingView Contract
+
+TradingView is **monitor-only**.
+
+Allowed:
+- ingest webhook payloads
+- normalize/store them
+- report freshness / malformed payloads
+- display operator diagnostics
+
+Not allowed:
+- create candidates
+- add score boost
+- veto entries
+- alter stops
+
+Binding higher-timeframe context comes from the bot’s internal multi-timeframe stack.
+
+## Dormant Lanes
+
+These remain in-repo but are not current live operator truth:
+
+- perp futures
+- ForecastEx
+- MES archived futures
+- stocks
+
+They should not define live readiness, live health, or live control-tower truth for the active spot lane.
+
+## Current Operating Stance
+
+- trade less
+- prefer fewer setups
+- prefer clearer route economics
+- prefer clean broker-truth visibility over pretty dashboards
+- prefer hard blockers over hopeful exceptions
+

@@ -28,6 +28,9 @@ from runtime.spot_kill_switch import kill_switch_status
 from runtime.spot_position_truth import get_spot_position_truth
 from scripts.truth_audit_lib import build_go_live_audit, default_db_path
 
+ALLOWED_SYSTEM_STATES = {"NOT_READY", "READY_FOR_TINY_LIVE", "TINY_LIVE", "DEGRADED", "HALTED"}
+ALLOWED_LANE_STATES = {"NOT_READY", "READY_FOR_TINY_LIVE", "TINY_LIVE", "DEGRADED", "HALTED"}
+
 
 def _conn() -> sqlite3.Connection:
     conn = sqlite3.connect(default_db_path())
@@ -69,12 +72,19 @@ def main() -> int:
     ]
     lane_readiness = str(crypto.get("readiness_state") or "UNKNOWN")
     system_readiness = str(sys_state.get("launch_readiness_state") or "UNKNOWN")
+    legacy_state_mismatch = (
+        system_readiness not in ALLOWED_SYSTEM_STATES
+        or lane_readiness not in ALLOWED_LANE_STATES
+    )
+    legacy_health_surface = "7/7" in str(health.get("message") or "")
 
     ready = (
         lane_readiness in {"READY_FOR_TINY_LIVE", "TINY_LIVE"}
         and truth.get("snapshot_ok")
         and not blockers
         and not ks.get("halted")
+        and not legacy_state_mismatch
+        and not legacy_health_surface
     )
 
     print("\n" + "=" * 72)
@@ -86,6 +96,9 @@ def main() -> int:
     print(f"  system: {system_readiness}")
     print(f"  crypto lane: {lane_readiness}")
     print(f"  process mode: {sys_state.get('process_mode') or 'unknown'}")
+    if legacy_state_mismatch:
+        print("  legacy_state_mismatch: True")
+        print("    - runtime rows still contain pre-state-machine readiness language")
 
     print("\nBroker Truth")
     print(f"  snapshot_ok: {truth.get('snapshot_ok')}")
@@ -118,6 +131,9 @@ def main() -> int:
         print(f"  ts: {health.get('ts')}")
         print(f"  level: {health.get('level')}")
         print(f"  message: {health.get('message')}")
+        if legacy_health_surface:
+            print("  legacy_health_surface: True")
+            print("    - old '7/7 HEALTHY' wording is not accepted as spot truth-lane proof")
     else:
         print("  no health_check row found")
 
@@ -135,7 +151,7 @@ def main() -> int:
         print("  TINY_LIVE (already launched)")
     elif ks.get("halted"):
         print("  HALTED")
-    elif blockers or not truth.get("snapshot_ok"):
+    elif blockers or not truth.get("snapshot_ok") or legacy_state_mismatch or legacy_health_surface:
         print("  NOT_READY — spot truth blockers present")
     else:
         print(f"  {lane_readiness or 'NOT_READY'}")

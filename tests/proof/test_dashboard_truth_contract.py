@@ -149,7 +149,29 @@ def test_dt03_get_spot_positions_returns_only_spot(tmp_path, monkeypatch):
     db = _make_db_with_mixed_positions(tmp_path, paper_int=1)
     db_mock = _make_db_mock(db)
 
+    class _SpotBroker:
+        def is_connected(self):
+            return True
+
+        def connect(self):
+            return True
+
+        def sync_live_holdings(self):
+            return [
+                {
+                    "symbol": "BTC",
+                    "qty": 0.001,
+                    "avg_entry": 85000.0,
+                    "current_value": 85.0,
+                }
+            ]
+
+    spot_mod = types.ModuleType("execution.coinbase_spot_broker")
+    spot_mod.get_spot_broker = lambda: _SpotBroker()
+    spot_mod.CoinbaseSpotBroker = lambda paper=True: _SpotBroker()
+
     monkeypatch.setitem(sys.modules, "db", db_mock)
+    monkeypatch.setitem(sys.modules, "execution.coinbase_spot_broker", spot_mod)
     monkeypatch.delitem(sys.modules, "data.positions", raising=False)
 
     from data.positions import get_spot_positions_dashboard
@@ -205,6 +227,7 @@ def test_dt03b_live_perp_positions_follow_exchange_truth(tmp_path, monkeypatch):
 
     spot_mod = types.ModuleType("execution.coinbase_spot_broker")
     spot_mod.get_spot_broker = lambda: _SpotBroker()
+    spot_mod.CoinbaseSpotBroker = lambda paper=True: _SpotBroker()
 
     monkeypatch.setitem(sys.modules, "db", db_mock)
     with sqlite3.connect(db) as c:
@@ -262,6 +285,7 @@ def test_dt03c_live_open_positions_keep_spot_but_drop_stale_perp(tmp_path, monke
 
     spot_mod = types.ModuleType("execution.coinbase_spot_broker")
     spot_mod.get_spot_broker = lambda: _SpotBroker()
+    spot_mod.CoinbaseSpotBroker = lambda paper=True: _SpotBroker()
 
     monkeypatch.setitem(sys.modules, "db", db_mock)
     with sqlite3.connect(db) as c:
@@ -301,6 +325,7 @@ def test_dt03d_live_spot_positions_follow_exchange_truth(tmp_path, monkeypatch):
 
     spot_mod = types.ModuleType("execution.coinbase_spot_broker")
     spot_mod.get_spot_broker = lambda: _SpotBroker()
+    spot_mod.CoinbaseSpotBroker = lambda paper=True: _SpotBroker()
 
     monkeypatch.setitem(sys.modules, "db", db_mock)
     with sqlite3.connect(db) as c:
@@ -370,7 +395,29 @@ def test_dt05_spot_perp_counts_are_independent(tmp_path, monkeypatch):
     db = _make_db_with_mixed_positions(tmp_path, paper_int=1)
     db_mock = _make_db_mock(db)
 
+    class _SpotBroker:
+        def is_connected(self):
+            return True
+
+        def connect(self):
+            return True
+
+        def sync_live_holdings(self):
+            return [
+                {
+                    "symbol": "BTC",
+                    "qty": 0.001,
+                    "avg_entry": 85000.0,
+                    "current_value": 85.0,
+                }
+            ]
+
+    spot_mod = types.ModuleType("execution.coinbase_spot_broker")
+    spot_mod.get_spot_broker = lambda: _SpotBroker()
+    spot_mod.CoinbaseSpotBroker = lambda paper=True: _SpotBroker()
+
     monkeypatch.setitem(sys.modules, "db", db_mock)
+    monkeypatch.setitem(sys.modules, "execution.coinbase_spot_broker", spot_mod)
     monkeypatch.delitem(sys.modules, "data.positions", raising=False)
 
     from data.positions import get_perp_positions, get_spot_positions_dashboard

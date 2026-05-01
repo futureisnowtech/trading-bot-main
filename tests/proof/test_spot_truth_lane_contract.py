@@ -60,10 +60,10 @@ def test_stl02_truth_service_marks_seeded_manual_holdings_visible(proof_runtime)
         paper=False,
         broker_holdings=[
             {
-                "symbol": "BTC",
-                "qty": 0.001,
-                "avg_entry": 85000.0,
-                "current_value": 85.0,
+                "symbol": "ETH",
+                "qty": 0.05,
+                "avg_entry": 2500.0,
+                "current_value": 125.0,
             }
         ],
         db_path=str(proof_runtime.db_path),
@@ -72,7 +72,7 @@ def test_stl02_truth_service_marks_seeded_manual_holdings_visible(proof_runtime)
     assert truth["positions_open"] == 1
     assert len(truth["all_live_holdings"]) == 1
     row = truth["all_live_holdings"][0]
-    assert row["symbol"] == "BTC"
+    assert row["symbol"] == "ETH"
     assert row["position_truth_status"] == "external_manual"
     assert row["is_external_manual"] is True
     assert row["truth_blocking"] is False
@@ -95,6 +95,69 @@ def test_stl03_open_spot_blocks_external_manual_same_symbol(monkeypatch):
 
     result = spot_engine.open_spot("BTC", 50.0, paper=False, final_spot_score=72.0)
     assert result is None
+
+
+def test_stl03b_open_spot_halts_on_paper_like_live_order(monkeypatch):
+    import config
+    import spot_engine
+
+    monkeypatch.setattr(config, "SPOT_LANE_ACTIVE", True, raising=False)
+    monkeypatch.setattr(config, "SPOT_SYMBOLS", ["BTC", "ETH", "SOL", "XRP"], raising=False)
+    monkeypatch.setattr(config, "SPOT_MIN_ORDER_USD", 10.0, raising=False)
+    spot_engine._load_config()
+
+    class _Broker:
+        def get_spot_balance(self):
+            return {"usd_available": 1000.0}
+
+        def get_mark_price(self, symbol):
+            return 85000.0
+
+    halted = {}
+
+    monkeypatch.setattr(spot_engine, "get_spot_symbol_truth", lambda symbol, paper=True: None)
+    monkeypatch.setattr(spot_engine, "_load_spot_positions_from_db", lambda paper=False: [])
+    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper: _Broker())
+    monkeypatch.setattr(spot_engine, "_resolve_spot_state", lambda symbol, allow_stale=False: {
+        "regime": "TREND",
+        "setup_family": "impulse_continuation",
+        "setup_score": 0.8,
+        "structural_confirm_count": 3,
+    })
+    monkeypatch.setattr(spot_engine, "_compute_stop_pct", lambda *a, **k: 0.01)
+    monkeypatch.setattr(spot_engine, "target_r_for_symbol", lambda *a, **k: 1.05)
+    monkeypatch.setattr(spot_engine, "trail_arm_r_for_symbol", lambda *a, **k: 0.65)
+    monkeypatch.setattr(spot_engine, "edge_policy_for_symbol", lambda *a, **k: {"profile": "precision"})
+    monkeypatch.setattr(spot_engine, "exit_profile_for_symbol", lambda *a, **k: "precision")
+    monkeypatch.setattr(spot_engine, "spot_quality_block_reason", lambda *a, **k: (None, 58.0))
+    monkeypatch.setattr(
+        spot_engine,
+        "_maker_first_buy",
+        lambda *a, **k: (
+            {
+                "order_id": "spot_paper_BTC_123",
+                "paper": True,
+                "filled_size": "0.001",
+                "average_filled_price": "85000.0",
+                "fee_usd": 0.0,
+            },
+            "maker_first",
+            "none",
+        ),
+    )
+
+    import runtime.spot_kill_switch as ks
+
+    monkeypatch.setattr(
+        ks,
+        "trigger_spot_halt",
+        lambda reason, detail=None: halted.setdefault("payload", (reason, detail)) or True,
+    )
+
+    result = spot_engine.open_spot("BTC", 50.0, paper=False, final_spot_score=72.0)
+    assert result is None
+    assert halted["payload"][0] == "ks_spot_mixed_mode_order_artifact"
+    assert halted["payload"][1]["order_id"] == "spot_paper_BTC_123"
 
 
 def test_stl04_close_spot_live_residual_repersists_position(

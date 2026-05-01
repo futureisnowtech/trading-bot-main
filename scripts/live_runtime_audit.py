@@ -30,6 +30,8 @@ from scripts.truth_audit_lib import default_db_path
 PASS = "PASS"
 WARN = "WARN"
 FAIL = "FAIL"
+ALLOWED_SYSTEM_STATES = {"NOT_READY", "READY_FOR_TINY_LIVE", "TINY_LIVE", "DEGRADED", "HALTED"}
+ALLOWED_LANE_STATES = {"NOT_READY", "READY_FOR_TINY_LIVE", "TINY_LIVE", "DEGRADED", "HALTED"}
 
 
 def _conn() -> sqlite3.Connection:
@@ -71,35 +73,59 @@ def main() -> int:
     health = _latest_health()
 
     print("\n── System State ─────────────────────────────────────")
+    sys_readiness = str(sys_state.get("launch_readiness_state") or "UNKNOWN")
+    sys_legacy = sys_readiness not in ALLOWED_SYSTEM_STATES
     findings.append(
         _line(
-            PASS if sys_state else WARN,
+            FAIL if sys_legacy else (PASS if sys_state else WARN),
             "system_runtime_state",
             (
                 f"mode={sys_state.get('process_mode')} "
                 f"status={sys_state.get('global_status')} "
-                f"readiness={sys_state.get('launch_readiness_state')}"
+                f"readiness={sys_readiness}"
             )
             if sys_state
             else "missing",
         )
     )
+    if sys_legacy:
+        findings.append(
+            _line(
+                FAIL,
+                "system_runtime_state_legacy",
+                "runtime row still uses pre-state-machine readiness language",
+            )
+        )
 
     print("\n── Crypto Lane ──────────────────────────────────────")
+    lane_readiness = str(crypto.get("readiness_state") or "UNKNOWN") if crypto else "UNKNOWN"
+    lane_legacy = lane_readiness not in ALLOWED_LANE_STATES
     findings.append(
         _line(
-            PASS
-            if crypto and crypto.get("readiness_state") in {"READY_FOR_TINY_LIVE", "TINY_LIVE"}
-            else WARN,
+            FAIL
+            if lane_legacy
+            else (
+                PASS
+                if crypto and lane_readiness in {"READY_FOR_TINY_LIVE", "TINY_LIVE"}
+                else WARN
+            ),
             "crypto lane",
             (
                 f"active={crypto.get('active')} connected={crypto.get('connected')} "
-                f"health={crypto.get('health')} readiness={crypto.get('readiness_state')}"
+                f"health={crypto.get('health')} readiness={lane_readiness}"
             )
             if crypto
             else "missing",
         )
     )
+    if lane_legacy:
+        findings.append(
+            _line(
+                FAIL,
+                "crypto_lane_legacy",
+                "lane row still uses pre-state-machine readiness language",
+            )
+        )
 
     print("\n── Spot Truth ───────────────────────────────────────")
     blockers = truth.get("blocking_issues") or []
@@ -137,13 +163,23 @@ def main() -> int:
     )
 
     print("\n── Spot Health ──────────────────────────────────────")
+    health_message = str(health.get("message") or "")
+    legacy_health = "7/7" in health_message
     findings.append(
         _line(
-            PASS if health and health.get("level") != "ERROR" else WARN,
+            FAIL if legacy_health else (PASS if health and health.get("level") != "ERROR" else WARN),
             "latest health_check",
-            health.get("message", "missing"),
+            health_message or "missing",
         )
     )
+    if legacy_health:
+        findings.append(
+            _line(
+                FAIL,
+                "health_check_legacy",
+                "old '7/7 HEALTHY' wording is not accepted as spot truth-lane proof",
+            )
+        )
     findings.append(
         _line(
             FAIL if ks.get("halted") else PASS,

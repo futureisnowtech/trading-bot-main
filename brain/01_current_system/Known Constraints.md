@@ -2,165 +2,108 @@
 
 #active
 
-> ## HISTORICAL SECTION BELOW
-> Constraints dated 2026-03-25 reference the v4.3 architecture ($500 account,
-> Coinbase Advanced Trade 0.6% fees, Bybit, Tradovate, 5-agent debate).
-> That system no longer exists. The current live system is **v15.2** (2026-04-15).
-> See CLAUDE.md for current truth. Historical content preserved for audit trail.
+**Status as of: 2026-04-30**  
+**Scope: active Coinbase spot truth-lane only**
 
----
+## Account / Truth Constraints
 
-## v15.2 CONSTRAINTS (2026-04-15)
+| Constraint | Value | Notes |
+|---|---|---|
+| Canonical open-position truth | Broker holdings | DB cannot hide live exposure |
+| Broker cash | Observational only | Read from broker snapshot, never hardcode |
+| Current external/manual symbols | BTC, ETH, LTC, SOL, XRP, ADA, MANA, CLOV, STETH | Visible, blocked from bot reuse, never auto-closed; ETH covers broker-normalized staked ETH |
+| Spot truth blockers | `unclassified`, `needs_bot_repair`, `db_only_stale`, `qty_mismatch`, `metadata_missing`, broker snapshot unavailable | Any blocker keeps tiny live unavailable |
 
-### Account
-| Constraint | Value | Source |
-|-----------|-------|--------|
-| Account size | $5,000 (paper) | CONFIRMED — ACCOUNT_SIZE=5000 in config |
-| Max deployed capital | 90% | CONFIRMED — MAX_DEPLOYED_PCT=0.90 |
-| Kill switch threshold | $3,750 (75% of $5K) | CONFIRMED — kill_switch.py |
+## Active Spot Lane Constraints
 
-### Risk Hard Rules
-| Rule | Value |
-|------|-------|
-| Max risk per trade | 1% of account |
-| Max daily loss → halt | 4% of account |
-| Default leverage | 3× |
-| Max leverage | 10× |
-| Margin mode | ISOLATED — never CROSS |
-| Kill switch | balance < 75% ACCOUNT_SIZE |
+| Constraint | Value |
+|---|---|
+| Direction | LONG only |
+| Allowed regimes | `TREND`, `NEUTRAL` |
+| Blocked regime | `CHOP` |
+| Quarantined setup | `pullback_reclaim` |
+| Default route | `maker_first` |
+| Taker fallback | Disabled |
+| Stop widening | Never |
+| Stopless entries | Never |
+| Same-symbol duplicate exposure | Never |
+| TradingView decision weight | None (`monitor_only`) |
 
-### Platform Constraints (v15.2)
+## Binding Entry Floors
 
-#### Coinbase US CFTC Nano Perp Futures (LIVE execution)
-- Taker fee: 0.030% | Maker fee: 0.00% | Round-trip: 0.060%
-- Auth: CDP JWT / ES256 (`COINBASE_CDP_KEY_NAME` + `COINBASE_CDP_PRIVATE_KEY`)
-- API path: `/api/v3/brokerage/cfm/` (NOT `/futures/` — returns 401)
-- Supported symbols: BTC→BIP-20DEC30-CDE, ETH→ETP-20DEC30-CDE, SOL→SLP-20DEC30-CDE, XRP→XPP-20DEC30-CDE
-- Any other symbol → `CoinbaseSymbolError` (fail-closed)
+| Item | TREND | NEUTRAL |
+|---|---:|---:|
+| Structural confirms | 2 | 3 |
+| Final score floor | 58 | 60 |
+| 5m frame floor | 52 | 55 |
+| 30m frame floor | 55 | 58 |
+| Path efficiency | 0.20 | 0.20 |
 
-#### IBKR ForecastEx (lane STARTED, enrollment pending)
-- clientId=3 | Exchange=FORECASTX | SecType=OPT
-- Economic markets only: CPI/CPIY/CPIC/DISSN/DISSA
-- NO short selling — flatten by buying opposite right
-- Risk caps (hardcoded): max deployed 35%, per-event 10%, max concurrent 2, Kelly cap 0.10
-- IBKR_PORT=7496 (live session required)
+## Exit Constraints
 
-#### MES / IBKR (DORMANT)
-- FUTURES_LANE_ACTIVE=false — no IBKR connection attempted
-- Reactivate: set FUTURES_LANE_ACTIVE=true in .env
+| Item | Value |
+|---|---|
+| TREND target profile | `precision` |
+| NEUTRAL target profile | `micro` |
+| Faster dead-trade handling | Required |
+| Hidden override | Forbidden |
+| Averaging down | Forbidden |
 
-### Amygdala Removal Rules (HARDCODED — unchanged)
-1. Never chase — skip if price moved >3% since signal
-2. Never average down — one position per symbol, ever
-3. Stop losses are sacred — never moved wider after entry
-4. Wins don't justify ignoring rules on the next trade
-5. Losses don't justify revenge trading or larger size
+## Readiness Constraints
+
+Canonical readiness states:
+
+- `NOT_READY`
+- `READY_FOR_TINY_LIVE`
+- `TINY_LIVE`
+- `DEGRADED`
+- `HALTED`
+
+Launch constraints:
+
+- launch through `python3 scripts/go_live.py` only
+- raw `python3 main.py --mode live` is not acceptable
+- `READY_FOR_TINY_LIVE` must already be true before controlled launch
+- launch must fail if broker truth or spot truth blockers fail
+
+## Health Constraints
+
+The active spot lane is unhealthy if any of these are stale or broken:
+
+- broker spot snapshot
+- spot truth service
+- spot attribution freshness
+- spot feature snapshot freshness
+- route integrity
+- scanner governance integrity
+- deployment-state integrity
+- kill-switch status truth
+
+## TradingView Constraints
+
+- keep webhook operational if needed
+- keep secret validation and payload integrity
+- keep freshness / malformed-payload reporting
+- do not use TradingView to boost, veto, or trigger spot entries
+
+## Dormant-Lane Constraints
+
+Perps / forecast / MES / stocks may remain in the repo, but:
+
+- they are not authoritative for active live health
+- they are not authoritative for spot readiness
+- they are not allowed to override spot position truth
+- their old regime language should not leak into active spot operator guidance
+
+## Amygdala Rules
+
+These remain hard constraints:
+
+1. Never chase
+2. Never average down
+3. Stop losses are sacred
+4. Wins do not justify breaking the next rule
+5. Losses do not justify revenge risk
 6. FOMO is not a signal
-7. When in doubt, HOLD — a skipped trade costs nothing
-8. Goal is being in business next month, not winning today
-
----
-
-**Status as of: 2026-03-25 (HISTORICAL — v4.3 era)**
-All constraints below are CONFIRMED from code/config.py unless labeled otherwise.
-
----
-
-## ACCOUNT CONSTRAINTS
-
-| Constraint | Value | Source |
-|-----------|-------|--------|
-| Account size | $500 (starting) | CONFIRMED — config.py ACCOUNT_SIZE default |
-| Max deployed capital | 90% | CONFIRMED — MAX_DEPLOYED_PCT = 0.90 |
-| Cash reserve | 10% | CONFIRMED |
-| Position size crypto | $250 | CONFIRMED — .env CRYPTO_POSITION_SIZE_USD |
-| Position size equity | $250 | CONFIRMED — .env EQUITY_POSITION_SIZE_USD |
-| Perp position size | BELIEVED $250 | BELIEVED — .env default |
-
----
-
-## RISK HARD RULES (NO AI CAN OVERRIDE)
-
-| Rule | Value |
-|------|-------|
-| Max risk per trade | 1% of account |
-| Max daily loss → halt | 4% of account ($20 on $500) |
-| Max crypto positions | 5 |
-| Max equity positions | 3 |
-| Max equity trades/day | 3 (PDT cash compliance) |
-| Crypto stop loss | 1.5% |
-| Crypto take profit | 4.5% (3:1 R:R maintained) |
-| Equity stop loss | 2.5% |
-| Equity take profit | 7.5% (3:1 R:R maintained) |
-| Daily fee cap | 10% of account ($50 on $500) |
-| Circuit breaker | 4 consecutive strategy losses → pause |
-| Min agent agreement | 2 of 5 agents explicit (not percentage) |
-| Symbol cooldown | 20 min after losing crypto exit |
-| Stagnant trade exit | 45 min with < 15% target progress |
-| Max crypto hold | 12 hours |
-| Max equity hold | 6 hours |
-
----
-
-## PLATFORM CONSTRAINTS
-
-### Coinbase
-- 0.6% taker fee / 0.4% maker fee
-- Round-trip cost: ~1.2% minimum
-- Min gross move to trade: 2.4% (fee floor guard in code: ATR/price < 0.4% = skip)
-- API requires "Advanced Trade" scope with View+Trade
-
-### Tradovate (MES Futures)
-- No free demo API tier — paper simulation uses yfinance ES prices
-- Current front month: MESM6 (June 2026, expires before quarter rollover)
-- Paid subscription required for live API
-
-### Alpaca (Equity)
-- Currently wired but disabled (EQUITY_ENABLED=false)
-- Webull 403-blocked — Alpaca is the actual broker
-- PDT rules apply (3 day trades in 5 days with < $25k)
-
-### Bybit (Perp)
-- BYBIT_TESTNET=true in .env by default
-- Fill BYBIT_API_KEY/SECRET to activate live
-- Leverage cap: 10× (halved from 20× in v4.0 de-risk)
-
----
-
-## INFRASTRUCTURE CONSTRAINTS
-
-| Item | Constraint |
-|------|-----------|
-| Python version | 3.14 — has .pyc file lock bug (EDEADLK) on some restarts |
-| launchd auto-restart | Registered but uses subprocess.Popen bypass (not launchctl) due to EDEADLK |
-| TradingView webhook | Requires ngrok running — free tier URL changes on restart |
-| LanceDB | Kelly sizing only activates after 15 completed trades |
-| Anthropic API | CLAUDE_MODEL = claude-sonnet-4-6 (always latest) |
-
----
-
-## AMYGDALA REMOVAL RULES (HARDCODED)
-
-These are the emotional safeguards. They cannot be overridden by any parameter change.
-
-1. Never chase — skip if price moved > 3% since signal
-2. Never average down — one position per symbol, ever
-3. Stop losses are sacred — never moved wider after entry
-4. Wins don't justify ignoring rules on the next trade
-5. Losses don't justify revenge trading or larger size
-6. FOMO is not a signal
-7. When in doubt, HOLD — a skipped trade costs nothing
-8. Goal is being in business next month, not winning today
-
----
-
-## FEE ECONOMICS (CRITICAL)
-
-At $250 position size, Coinbase 0.6% taker:
-- Round trip cost: $250 × 0.012 = **$3.00 per trade**
-- Break-even move: 1.2%
-- At 3:1 R:R (1.5% stop / 4.5% target): target = $11.25, stop = $3.75
-- Win rate needed to break even: ~26%
-- Win rate needed to profit after fees: > 30%
-
-Fee drag halted at $50/day limit (10% of $500 account).
+7. When in doubt, hold fire
+8. Staying alive matters more than being right today

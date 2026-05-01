@@ -14,7 +14,9 @@ dashboard will show stale paper data on a live account.
 
 from __future__ import annotations
 
+import importlib
 import sqlite3
+import sys
 from pathlib import Path
 
 import pytest
@@ -86,7 +88,7 @@ def test_runtime_paper_flag_falls_back_to_config_when_no_db_row(
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-def test_paper_open_positions_not_shown_in_live_dashboard(proof_runtime):
+def test_paper_open_positions_not_shown_in_live_dashboard(proof_runtime, monkeypatch):
     """
     After go_live.py, 18 paper=1 positions remain in open_positions from
     the paper trading phase.  With runtime=live, get_open_positions() must
@@ -98,9 +100,12 @@ def test_paper_open_positions_not_shown_in_live_dashboard(proof_runtime):
     )
     upsert_runtime_state(proof_runtime.db_path, process_mode="live")
 
-    from data.positions import get_open_positions
-
-    positions = get_open_positions()
+    monkeypatch.delitem(sys.modules, "data.positions", raising=False)
+    positions_mod = importlib.import_module("data.positions")
+    monkeypatch.setattr(
+        positions_mod, "_get_live_coinbase_spot_positions", lambda: [], raising=False
+    )
+    positions = positions_mod.get_open_positions()
     assert positions == [], (
         f"Live dashboard must not show paper=1 positions. Got: {positions}"
     )
@@ -115,8 +120,8 @@ def test_live_open_positions_appear_in_live_dashboard(proof_runtime, monkeypatch
     insert_open_position(proof_runtime.db_path, symbol="BTCUSDT", paper=0)
     upsert_runtime_state(proof_runtime.db_path, process_mode="live")
 
-    from data import positions as positions_mod
-
+    monkeypatch.delitem(sys.modules, "data.positions", raising=False)
+    positions_mod = importlib.import_module("data.positions")
     monkeypatch.setattr(
         positions_mod,
         "_get_live_coinbase_perp_positions",
@@ -153,6 +158,54 @@ def test_paper_positions_still_shown_in_paper_dashboard(proof_runtime):
     positions = get_open_positions()
     assert len(positions) == 1
     assert positions[0]["symbol"] == "XRPUSDT"
+
+
+def test_spot_dashboard_uses_live_broker_truth_even_when_runtime_is_paper(
+    proof_runtime, monkeypatch
+):
+    """
+    Spot holdings on the dashboard must come from the live Coinbase account even
+    while the bot process is running paper mode. The DB may enrich, but it may
+    not suppress or replace broker-held spot exposure.
+    """
+    upsert_runtime_state(proof_runtime.db_path, process_mode="paper")
+
+    from data import positions as positions_mod
+
+    monkeypatch.setattr(
+        positions_mod,
+        "_get_live_coinbase_spot_positions",
+        lambda: [
+            {"symbol": "ETH", "qty": 0.05, "avg_entry": 2500.0, "current_value": 125.0}
+        ],
+        raising=False,
+    )
+
+    import runtime.spot_position_truth as spt
+
+    monkeypatch.setattr(
+        spt,
+        "get_spot_position_truth",
+        lambda paper=False, broker_holdings=None, db_path=None: {
+            "all_live_holdings": [
+                {
+                    "symbol": "ETH",
+                    "qty": 0.05,
+                    "current_value": 125.0,
+                    "position_truth_status": "external_manual",
+                    "is_external_manual": True,
+                    "paper": 0,
+                    "venue": "coinbase_spot",
+                }
+            ]
+        },
+        raising=False,
+    )
+
+    rows = positions_mod.get_spot_positions_dashboard()
+    assert len(rows) == 1
+    assert rows[0]["symbol"] == "ETH"
+    assert rows[0]["position_truth_status"] == "external_manual"
 
 
 def test_live_perp_positions_fail_closed_when_broker_snapshot_unavailable(

@@ -102,8 +102,8 @@ def test_hierarchy_fallback_uses_data_over_global(proof_runtime, monkeypatch):
         cand_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
         conn.execute(
             "INSERT INTO candidate_outcomes "
-            "(candidate_id, label_status, hit_1r, hit_stop) VALUES (?,?,?,?)",
-            (cand_id, "complete", 1, 0),  # win
+            "(candidate_id, label_status, hit_1r, hit_stop, path_timing_evaluated) VALUES (?,?,?,?,?)",
+            (cand_id, "complete", 1, 0, 1),  # win
         )
 
     # Monkeypatch the DB path for entry_priors
@@ -124,19 +124,19 @@ def test_hierarchy_fallback_uses_data_over_global(proof_runtime, monkeypatch):
 
 
 def test_win_label_requires_hit_1r_and_not_hit_stop(proof_runtime, monkeypatch):
-    """Win label = hit_1r=1 AND hit_stop=0. A stopped-out candidate is NOT a win."""
+    """Win = time_to_05r_min <= 15. A stopped-out or slow candidate is NOT a win."""
     import logging_db.trade_logger as tl
     from learning.entry_priors import estimate_candidate_win_rate
 
     monkeypatch.setattr(tl, "DB_PATH", str(proof_runtime.db_path))
 
     with sqlite3.connect(proof_runtime.db_path) as conn:
-        # Insert: 1 win (hit_1r=1, hit_stop=0), 1 stopped (hit_1r=1, hit_stop=1), 1 loss (hit_1r=0)
-        for i, (h1r, hstop, src) in enumerate(
+        # Insert: 1 win (time_to_05r_min=10), 1 stopped (no timing), 1 loss (no timing)
+        for i, (t05r, src) in enumerate(
             [
-                (1, 0, "clean_paper_v10"),  # WIN
-                (1, 1, "clean_paper_v10"),  # NOT a win (stopped out)
-                (0, 0, "clean_paper_v10"),  # loss
+                (10.0, "clean_paper_v10"),  # WIN  — reached 0.5R in 10 min
+                (None, "clean_paper_v10"),  # NOT a win (stopped out, no timing)
+                (None, "clean_paper_v10"),  # loss
             ]
         ):
             conn.execute(
@@ -159,8 +159,9 @@ def test_win_label_requires_hit_1r_and_not_hit_stop(proof_runtime, monkeypatch):
             cand_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
             conn.execute(
                 "INSERT INTO candidate_outcomes "
-                "(candidate_id, label_status, hit_1r, hit_stop) VALUES (?,?,?,?)",
-                (cand_id, "complete", h1r, hstop),
+                "(candidate_id, label_status, hit_1r, hit_stop, path_timing_evaluated, time_to_05r_min) "
+                "VALUES (?,?,?,?,?,?)",
+                (cand_id, "complete", 1 if t05r else 0, 0, 1, t05r),
             )
 
     import learning.entry_priors as ep

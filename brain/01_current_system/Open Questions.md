@@ -2,123 +2,41 @@
 
 #active
 
-> ## HISTORICAL SECTION BELOW
-> Questions dated 2026-03-25 reference the v4.3 architecture (Coinbase Advanced Trade,
-> Bybit perps, Tradovate MES, 5-agent debate). That system no longer exists.
-> The current live system is **v15.2** (2026-04-15). See CLAUDE.md for current truth.
-> Historical questions are preserved for audit trail only.
+**Status as of: 2026-04-30**  
+**Scope: active Coinbase spot truth-lane only**
 
----
+Legacy open questions are archived at:
+- `brain/01_current_system/archive/Open Questions - legacy through 2026-04-30.md`
 
-## v15.2 OPEN QUESTIONS (2026-04-15)
+## Current Open Questions
 
-### Q-A: Will ForecastEx OPT contracts become available?
-- **Context**: IBKR paper account DUP590699 can see IND underliers (CPI/CPIY/CPIC/DISSN/DISSA)
-  but OPT event contracts hang with no response. Likely requires: (1) live funded account,
-  (2) explicit ForecastEx enrollment via IBKR portal.
-- **Resolution**: Enroll live account; switch IBKR_PORT to 7496.
+### Q1: Which setup/regime cluster earns promotion from `PROBATION` to `ALLOWED` first?
+- **Context**: The spot lane is intentionally harsh. `pullback_reclaim` is quarantined, `CHOP` is blocked, and tiny live must remain constrained until at least one cluster proves positive post-fee expectancy.
+- **Why it matters**: Tiny live should be evidence-promoted, not vibes-promoted.
+- **Resolution**: Use replay + fresh live sample + `SCANNER_PRECISION_REPORT.md` / `PROFIT_GOVERNANCE.md` evidence to promote the first cluster.
 
-### Q-B: How many clean paper trades needed before ML model activates meaningfully?
-- **Context**: ML score falls back to 50.0 until enough `clean_paper_v10`/`live_v10` trades
-  accumulate. MIN_TRADES_FOR_ML threshold gates retraining.
-- **Resolution**: Monitor `ml_retrain_queue` table; check after 50+ clean closes.
+### Q2: When should any `external_manual` holding be reclassified into bot-managed inventory?
+- **Context**: Current holdings are intentionally treated as manual/external and blocked from bot reuse.
+- **Why it matters**: Reclassification changes whether the bot may manage or re-enter those symbols.
+- **Resolution**: Only after explicit operator decision plus repaired canonical lineage for that holding.
 
-### Q-C: When should MES lane be reactivated?
-- **Context**: MES is DORMANT (FUTURES_LANE_ACTIVE=false). Code and DB tables are preserved.
-- **Resolution**: Set FUTURES_LANE_ACTIVE=true in .env + verify TWS on port 7496 + confirm
-  MESM26 contract is still current.
+### Q3: Do any current spot setup families besides the quarantined one deserve tighter symbol-level suppression?
+- **Context**: The lane now blocks the obvious weak species, but per-symbol setup risk may still differ materially.
+- **Why it matters**: Tiny live should suppress weak clusters before they become live fee burn.
+- **Resolution**: Re-evaluate rolling symbol × setup × regime expectancy after new clean closes accumulate.
 
----
+### Q4: When is there enough fresh evidence to replace conservative static spot suppressions with more dynamic governance?
+- **Context**: The lane now defaults to harsh static protections plus rolling governance.
+- **Why it matters**: Dynamic rules should only take over when samples are strong enough.
+- **Resolution**: Define explicit minimum sample sizes and positive post-fee expectancy thresholds for promotion.
 
-**Last updated: 2026-04-15**
-Historical questions (v4.3 era) preserved below for audit trail only.
-These are unresolved questions that affect system behavior or decision quality.
-Each question is marked by urgency and what would resolve it.
+### Q5: How far should we continue narrowing operator surfaces for dormant lanes?
+- **Context**: Dormant lanes remain in-repo, but operator truth should stay spot-first.
+- **Why it matters**: Confused surfaces create false readiness and false health.
+- **Resolution**: Continue hiding or labeling dormant-lane surfaces unless there is a live operational need.
 
----
+### Q6: Should TradingView webhook infrastructure remain enabled long-term if it stays `monitor_only`?
+- **Context**: TV no longer carries live decision weight.
+- **Why it matters**: Operational plumbing that adds no measurable value should justify its upkeep.
+- **Resolution**: Keep it if monitoring value is real; retire it if payload health adds noise without operator benefit.
 
-## URGENT — Affects live readiness
-
-### Q1: Are the 7 new indicators (v4.3) additive or noise?
-- **Context**: SuperTrend, Ichimoku, WAE, Fisher, CHOP, WaveTrend, LaguerreRSI were added
-  to conviction scoring in v4.3. No backtest or paper trading data exists yet.
-- **Risk**: Overfitting. Adding 7 signals increases conviction for marginal setups.
-  Could lower the practical bar by stacking signals that all fire simultaneously.
-- **Resolution**: Run 30+ paper trades. Track which Tier 2b signals were active on winners vs losers.
-  If Tier 2b doesn't improve win rate, consider dropping them or raising individual thresholds.
-
-### Q2: Is the TradingView webhook integration actually working end-to-end?
-- **Context**: webhook server + Pine Script template are built, but the full chain
-  (TV → ngrok → webhook → SQLite → conviction boost) has not been tested live.
-- **Risk**: TV_WEBHOOK_SECRET mismatch or ngrok URL stale = silent failure (TV signals never reach bot).
-- **Resolution**: Manual test: start webhook server, start ngrok, set TradingView alert, verify
-  `system_events` table gets a row with source='tradingview'.
-
-### Q3: What is Tradovate paper simulation actually producing?
-- **Context**: Tradovate has no free demo API. Paper mode uses yfinance ES prices.
-  Is the simulated fill quality realistic? Are slippage assumptions sensible?
-- **Resolution**: Review `execution/tradovate_broker.py` paper simulation logic.
-  Compare fills to real MES bid/ask spreads.
-
----
-
-## MEDIUM — Affects optimization decisions
-
-### Q4: What is the actual conviction score distribution in live scans?
-- **Context**: Normal threshold is 30 pts. Dead zone is 70 pts. Max theoretical score
-  is ~175 pts (all signals fire simultaneously). What does a typical scan look like?
-  Are most symbols scoring 0-20 and nothing is firing? Or are there frequent 30-50 scores?
-- **Resolution**: Add conviction score logging to `system_events` for every symbol scanned
-  (not just debate-callers). Review after 1-2 days of paper trading.
-
-### Q5: Is the 5-agent panel correctly calibrated for 1-min crypto?
-- **Context**: Full panel (5 agents) was narrowed in v3.5 from 8. Min agreement = 2 of 5.
-  This means 40% agreement required. Are the agents ever disagreeing in a useful way,
-  or do they mostly all agree and the gate provides little filtering?
-- **Resolution**: Log individual agent votes to SQLite. Track per-agent agree/disagree rates.
-
-### Q6: Is PERP (Bybit) actually scanning and executing in paper mode?
-- **Context**: `PERP_ENABLED=true` is in .env. Bybit testnet is on.
-  But no confirmed paper trades via perp have been observed.
-- **Resolution**: Start bot, check logs for `run_perp_scan()` output.
-
----
-
-## LOW — Future improvements
-
-### Q7: Should the system log conviction scores per signal tier?
-- **Context**: Right now conviction total is logged but not decomposed by tier.
-  Understanding which tiers are contributing most would be very useful for tuning.
-- **Resolution**: Add `conviction_breakdown` JSON field to trade log notes.
-
-### Q8: When should equity be re-enabled?
-- **Context**: Equity disabled to reduce complexity on $500 account.
-  Alpaca broker is wired and ready. When account grows, or when a specific
-  equity opportunity arises, what criteria should trigger re-enabling?
-- **Resolution**: Define a re-enable threshold (e.g., account > $2,500 + 30-day positive track record).
-
----
-
-## RESOLVED (for reference)
-
-- ~~Should we use Hurst as an entry gate?~~ → No, removed v4.0 (noise on 1-min)
-- ~~Should RSI gate entries?~~ → No, RSI is exit-only since v4.0
-- ~~8 agents or 5?~~ → 5 focused agents since v3.5; 3-agent quick debate for crypto
-- ~~Webull or Alpaca?~~ → Alpaca (Webull 403-blocked), but equity still disabled
-- ~~Should CNN Fear&Greed stay?~~ → Replaced with Alternative.me (CNN was silently failing) v3.7
-
----
-
-## AUTO-ALERT — 2026-03-25 through 2026-04-25 [DISMISSED]
-
-*"No trades today" alerts from 2026-03-25, 2026-03-28, 2026-04-15–19, 2026-04-23–25 consolidated and dismissed by self-audit 2026-04-26. These reflect early system bring-up and the XRP stuck-position period — not a persistent signal problem.*
-
-*Generated by generate_daily_summary.py — review and resolve or dismiss.*
-
----
-
-## AUTO-ALERT — 2026-04-26
-
-- No trades today — bot may not be running or no signals fired
-
-*Generated by generate_daily_summary.py — review and resolve or dismiss.*

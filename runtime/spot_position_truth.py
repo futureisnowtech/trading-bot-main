@@ -26,6 +26,7 @@ except Exception:  # pragma: no cover - fail-soft for scripts/tests
 _CLASS_TABLE = "spot_holding_classifications"
 _DEFAULT_EXTERNAL_MANUAL = {
     "BTC",
+    "ETH",
     "LTC",
     "SOL",
     "XRP",

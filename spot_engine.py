@@ -600,6 +600,16 @@ def _maker_first_sell(
     return None, "taker_fallback_failed", "unfilled_after_maker"
 
 
+def _is_paper_like_live_order(order: dict | None, paper: bool) -> bool:
+    """Fail closed if a live lane receives a paper-style execution artifact."""
+    if paper or not order:
+        return False
+    if bool(order.get("paper")):
+        return True
+    order_id = str(order.get("order_id") or "").strip().upper()
+    return order_id.startswith("PAPER_") or order_id.startswith("SPOT_PAPER_")
+
+
 def open_spot(
     symbol: str,
     size_usd: float,
@@ -725,6 +735,23 @@ def open_spot(
             return None
     if not order:
         logger.error(f"[spot_engine] {clean} buy failed")
+        return None
+    if _is_paper_like_live_order(order, paper=paper):
+        detail = {
+            "symbol": clean,
+            "paper_flag": bool(order.get("paper")),
+            "order_id": str(order.get("order_id") or ""),
+            "execution_route": execution_route,
+        }
+        logger.error(
+            f"[spot_engine] {clean} blocked — mixed_mode_paper_like_live_order {detail}"
+        )
+        try:
+            from runtime.spot_kill_switch import trigger_spot_halt
+
+            trigger_spot_halt("ks_spot_mixed_mode_order_artifact", detail)
+        except Exception:
+            pass
         return None
 
     price = float(

@@ -1014,7 +1014,7 @@ SPOT_TINY_LIVE_ENABLEMENT_CONFIRMED: bool = os.getenv(
 SPOT_EXTERNAL_MANUAL_HOLDINGS: list[str] = [
     s.strip().upper()
     for s in os.getenv(
-        "SPOT_EXTERNAL_MANUAL_HOLDINGS", "BTC,LTC,SOL,XRP,ADA,MANA,CLOV,STETH"
+        "SPOT_EXTERNAL_MANUAL_HOLDINGS", "BTC,ETH,LTC,SOL,XRP,ADA,MANA,CLOV,STETH"
     ).split(",")
     if s.strip()
 ]

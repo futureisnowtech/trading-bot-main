@@ -1,6 +1,12 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 ## 2026-04-30
+- v18.16: classify broker-normalized staked ETH as durable `external_manual`, keep ADA as ignored manual dust while removing the stale mixed-mode `spot_ada` live open-position row, add a fail-closed live invariant that halts if a paper-style spot order artifact reaches `open_spot()`, and normalize runtime/readiness rows so spot audits reflect current truth instead of legacy `READY` / `OPERATIONAL` state.
+
+## 2026-04-30
+- v18.15: align support surfaces to the Coinbase spot truth-lane contract — make `AGENTS.md` the canonical repo memory, shrink `CLAUDE.md` into a companion file, rewrite active brain notes around broker-canonical spot truth / tiny-live / TradingView `monitor_only`, archive legacy open questions, rewrite Claude command-agent-skill surfaces for the spot truth-lane, replace old readiness scripts with spot runtime audits, and expand hook reminders/tests around controlled launch and runtime-truth files.
+
+## 2026-04-30
 - v18.14: implement the Coinbase spot truth-lane refactor and tiny-live readiness hardening — add `runtime/spot_position_truth.py` plus `spot_holding_classifications`, make broker spot holdings canonical for dashboard/runtime/readiness counts, hide dormant lanes from live control surfaces, move TradingView to `monitor_only`, tighten live spot governance (`CHOP` blocked, `pullback_reclaim` quarantined, maker-only, precision/micro exit profiles, harsher score/frame/confirm floors), harden spot close reconciliation so residual live inventory is re-persisted instead of silently deleted, switch `go_live.py` to spot-broker + truth-blocker preflight, update spot health/kill-switch checks to be lane-specific, and add proof coverage for broker-truth rendering, external/manual blocking, residual-close persistence, truth-gated health, and truth-gated launch.
 
 ## 2026-04-28

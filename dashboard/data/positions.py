@@ -79,9 +79,7 @@ def get_spot_positions_dashboard():
             return list(truth.get("all_live_holdings") or [])
         except Exception:
             return _merge_live_spot_rows(live_positions, db_rows)
-    if _runtime_live_mode():
-        return []
-    return db_rows
+    return []
 
 
 def _ts_sort_key(row: dict) -> datetime:
@@ -113,16 +111,10 @@ def _get_live_coinbase_perp_positions() -> dict | None:
 
 
 def _get_live_coinbase_spot_positions() -> list[dict] | None:
-    if _runtime_paper_flag():
-        return None
-    if not _crypto_live_snapshot_enabled():
-        return None
     try:
-        from execution.coinbase_spot_broker import get_spot_broker
+        from execution.coinbase_spot_broker import CoinbaseSpotBroker
 
-        broker = get_spot_broker()
-        if bool(getattr(broker, "_paper", False)):
-            return None
+        broker = CoinbaseSpotBroker(paper=False)
         if not broker.is_connected():
             broker.connect()
         if not broker.is_connected():

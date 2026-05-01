@@ -6,7 +6,7 @@
 ## Canonical Truth
 
 - Repo root: `/Users/joshmacbookair2020/Projects/algo_trading_final`
-- Canonical version: `v18.15` (`2026-04-30`)
+- Canonical version: `v18.16` (`2026-04-30`)
 - Canonical active lane: **Coinbase spot scalp**
 - Canonical launch path: `python3 scripts/go_live.py`
 - Canonical memory order:
@@ -106,6 +106,7 @@ Every live spot symbol must classify to exactly one status:
 
 Current seeded `external_manual` holdings:
 - `BTC`
+- `ETH` (covers broker-normalized staked ETH exposure)
 - `LTC`
 - `SOL`
 - `XRP`
@@ -205,6 +206,7 @@ Live launch must fail if any of these are true:
 - no new signal bloat
 - no fake readiness claims
 - no fake “learning is healthy” language
+- no live spot persistence from paper-style order artifacts
 - no raw `python3 main.py --mode live`
 - no live launch outside `scripts/go_live.py`
 - no automatic resume after `HALTED`
@@ -268,4 +270,3 @@ When behavior changes:
 - update `CLAUDE.md` if Claude workflow guidance changed
 - append `CHANGELOG.md`
 - prefer targeted proof tests in `tests/proof/`
-

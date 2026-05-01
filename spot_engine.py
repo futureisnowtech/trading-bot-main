@@ -143,6 +143,10 @@ def _load_spot_positions_from_db(paper: bool = True) -> List[Dict]:
 
 
 def _current_spot_deployed_usd(paper: bool = True) -> float:
+    if not paper:
+        # Live: broker cash balance is the binding constraint in v10_runner (usd_available*0.95).
+        # Returning 0 here avoids stale DB positions inflating the deployed total.
+        return 0.0
     try:
         return sum(
             abs(float(p.get("qty") or 0.0)) * float(p.get("entry") or 0.0)
@@ -209,7 +213,9 @@ def _persist_position_from_row(row: dict, *, qty: float | None = None) -> None:
 
     persist_position(
         symbol=str(row.get("symbol") or ""),
-        strategy=str(row.get("strategy") or _position_strategy(row.get("symbol") or "")),
+        strategy=str(
+            row.get("strategy") or _position_strategy(row.get("symbol") or "")
+        ),
         qty=float(qty if qty is not None else row.get("qty") or 0.0),
         entry=float(row.get("entry") or 0.0),
         stop=float(row.get("stop") or 0.0),
@@ -373,7 +379,9 @@ def _spot_entry_features(
         "frame_score_30m": float(s30.get("frame_score") or 0.0),
         "volatility_quality": float(s30.get("volatility_quality") or 0.0),
         "price_above_vwap": bool(s5.get("price_above_vwap")),
-        "compression_release": str(state.get("setup_family") or "").startswith("compression"),
+        "compression_release": str(state.get("setup_family") or "").startswith(
+            "compression"
+        ),
         "supertrend_bullish": "supertrend" in confirms,
         "cloud_bullish": ("cloud" in confirms) or ("ichimoku" in confirms),
         "wae_bullish": "wae" in confirms,
@@ -640,7 +648,9 @@ def open_spot(
     if truth_row:
         truth_status = str(truth_row.get("position_truth_status") or "")
         if truth_status == "external_manual":
-            logger.warning(f"[spot_engine] {clean} blocked — external_manual_holding_present")
+            logger.warning(
+                f"[spot_engine] {clean} blocked — external_manual_holding_present"
+            )
             return None
         if truth_status in {
             "matched_bot_position",
@@ -694,7 +704,9 @@ def open_spot(
     trail_arm_r = trail_arm_r_for_symbol(clean, regime)
     edge_policy = edge_policy_for_symbol(clean)
     edge_profile = str(edge_policy.get("profile") or "balanced")
-    target_profile = str(exit_profile_for_symbol(clean, regime) or edge_profile or "balanced")
+    target_profile = str(
+        exit_profile_for_symbol(clean, regime) or edge_profile or "balanced"
+    )
     score_used = float(
         final_spot_score if final_spot_score is not None else composite_score
     )
@@ -1092,8 +1104,10 @@ def close_spot(
             learning_snapshot_written = False
             attribution_written = False
 
-    if not paper and close_trade_id > 0 and (
-        not learning_snapshot_written or not attribution_written
+    if (
+        not paper
+        and close_trade_id > 0
+        and (not learning_snapshot_written or not attribution_written)
     ):
         try:
             from runtime.spot_kill_switch import trigger_spot_halt
@@ -1114,7 +1128,9 @@ def close_spot(
                 },
             )
         except Exception as e:
-            logger.warning(f"[spot_engine] unable to trigger spot halt for {clean}: {e}")
+            logger.warning(
+                f"[spot_engine] unable to trigger spot halt for {clean}: {e}"
+            )
 
     if not paper:
         try:

@@ -15,10 +15,10 @@ _ddir = os.path.join(_DASH_DIR, "data")
 _spec = importlib.util.spec_from_file_location(
     "data", os.path.join(_ddir, "__init__.py"), submodule_search_locations=[_ddir]
 )
-_pkg = importlib.util.module_from_spec(_spec)
-_pkg.__path__ = [_ddir]
-_spec.loader.exec_module(_pkg)
-sys.modules["data"] = _pkg
+_data_pkg = importlib.util.module_from_spec(_spec)
+_data_pkg.__path__ = [_ddir]
+_spec.loader.exec_module(_data_pkg)
+sys.modules["data"] = _data_pkg
 
 import streamlit as st
 

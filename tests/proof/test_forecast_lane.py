@@ -668,18 +668,13 @@ def test_dashboard_forecast_widget_importable():
 
 
 def test_dashboard_app_tab_structure():
-    """dashboard/app.py must use 7-tab v17.3 architecture with explicit side-lane pages."""
+    """dashboard/app.py is single-page (v18.15+) — bot-reasoning-first, no tab structure."""
     app_path = os.path.join(_ROOT, "dashboard", "app.py")
     assert os.path.exists(app_path), "dashboard/app.py not found"
     src = open(app_path).read()
-    assert "CONTROL TOWER" in src, "CONTROL TOWER tab missing from app.py"
-    assert "CRYPTO" in src, "CRYPTO tab missing from app.py"
-    assert "STOCKS" in src, "STOCKS tab missing from app.py"
-    assert "FORECAST" in src, "FORECAST tab missing from app.py"
-    assert "FUTURES" in src, "FUTURES tab missing from app.py"
-    assert "render_forecast_page" in src, "render_forecast_page not wired in app.py"
-    assert "render_stocks_page" in src, "render_stocks_page not wired in app.py"
-    assert "render_mes_page" in src, "render_mes_page not wired in app.py"
+    assert "get_symbol_grid" in src, "single-page dashboard must call get_symbol_grid"
+    assert "get_bot_pulse" in src, "single-page dashboard must call get_bot_pulse"
+    assert "bot_state" in src, "single-page dashboard must import bot_state"
 
 
 # ── 18. MES archival ──────────────────────────────────────────────────────────

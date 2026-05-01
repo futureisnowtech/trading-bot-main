@@ -50,23 +50,18 @@ def _src(rel_path: str) -> str:
 
 
 def test_exactly_7_tabs():
+    # v18.15+ dashboard is single-page (no st.tabs) — enforce zero tabs
     names = _app_tab_names()
-    assert len(names) == 7, f"Expected 7 tabs, got {len(names)}: {names}"
+    assert len(names) == 0, (
+        f"New dashboard is single-page — expected 0 tabs, got {len(names)}: {names}"
+    )
 
 
 def test_tab_names_are_correct():
-    expected = [
-        "CONTROL TOWER",
-        "CRYPTO",
-        "STOCKS",
-        "FORECAST",
-        "FUTURES",
-        "PERFORMANCE LAB",
-        "ENGINEERING CONSOLE",
-    ]
-    assert _app_tab_names() == expected, (
-        f"Tab names wrong.\nExpected: {expected}\nGot: {_app_tab_names()}"
-    )
+    # v18.15+ is single-page; key sections are rendered as markdown blocks not tabs
+    src = _app_src()
+    for section in ("get_symbol_grid", "get_bot_pulse", "get_decision_log"):
+        assert section in src, f"Single-page dashboard must call {section}"
 
 
 def test_old_tabs_not_present():
@@ -139,9 +134,9 @@ def test_engineering_console_data_module():
 
 
 def test_archived_futures_not_top_level():
+    # v18.15+ single-page dashboard has no tab sections; FUTURES lane is dormant
     src = _app_src()
     assert "ARCHIVED FUTURES" not in src
-    assert "FUTURES" in src
 
 
 def test_archived_futures_in_engineering_console():

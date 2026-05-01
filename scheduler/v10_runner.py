@@ -835,6 +835,54 @@ def _scan_and_trade_inner(spot_only: bool = False):
 
     _scan_id = _uuid.uuid4().hex[:16]
 
+    # ── Parallel I/O Pre-fetch ────────────────────────────────────────────────
+    import concurrent.futures as _cf
+    import urllib.request as _ur
+    import json as _json
+
+    def _prefetch_data(c):
+        sym = c.get("symbol", "")
+        try:
+            c["_df"] = get_candles(sym, "1h", 200) if get_candles else None
+        except Exception as e:
+            logger.debug(f"[v10] prefetch df error {sym}: {e}")
+            c["_df"] = None
+        
+        live = 0.0
+        try:
+            if c.get("spot_only_synthetic"):
+                try:
+                    from execution.coinbase_spot_broker import get_spot_broker
+                    live = float(get_spot_broker().get_mark_price(sym) or 0.0)
+                except Exception:
+                    pass
+
+            if live <= 0 and (sym.startswith("PF_") or sym.startswith("PI_")):
+                try:
+                    kr = _json.loads(_ur.urlopen("https://futures.kraken.com/derivatives/api/v3/tickers", timeout=3).read())
+                    for t in kr.get("tickers", []):
+                        if t.get("symbol") == sym:
+                            live = float(t.get("markPrice") or t.get("last") or 0)
+                            break
+                except Exception:
+                    pass
+
+            if live <= 0:
+                try:
+                    req = _ur.Request("https://api.hyperliquid.xyz/info", data=_json.dumps({"type": "allMids"}).encode(), headers={"Content-Type": "application/json"}, method="POST")
+                    mids = _json.loads(_ur.urlopen(req, timeout=3).read())
+                    live = float(mids.get(sym, 0))
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.debug(f"[v10] prefetch live price error {sym}: {e}")
+
+        c["_live_price"] = live
+
+    if candidates:
+        with _cf.ThreadPoolExecutor(max_workers=min(10, len(candidates))) as executor:
+            list(executor.map(_prefetch_data, candidates))
+
     # Exact funnel counters — reset each scan cycle
     _f_dual_exposure = 0
     _f_risk_block = 0
@@ -1073,7 +1121,7 @@ def _attempt_entry(
         return "data_unavailable"
 
     # Fetch 1h candles for feature building
-    df = get_candles(symbol, "1h", 200)
+    df = candidate.get("_df")
     if df is None or len(df) < 20:
         logger.info(
             f"[v10] {symbol} — insufficient candle data ({len(df) if df is not None else 0} bars), skip"
@@ -1099,33 +1147,10 @@ def _attempt_entry(
         return "data_unavailable"
 
     # ── Price sanity: candle close must be within 5% of live mark price ───────
-    # v13.2: tightened from 20% → 5% global fallback (20% missed ETH $19 vs $2130 case).
-    # Kraken PF_ symbols → Kraken mark price first; all others → Hyperliquid allMids.
-    # If live price is unavailable, skip check (don't block on network failures).
+    # v18.16: Validated via parallel pre-fetch block.
     _PRICE_SANITY_PCT = 0.05  # 5% global fallback threshold
     try:
-        import urllib.request as _ur, json as _json
-
-        _live = 0.0
-        if symbol.startswith("PF_") or symbol.startswith("PI_"):
-            _kr = _json.loads(
-                _ur.urlopen(
-                    "https://futures.kraken.com/derivatives/api/v3/tickers", timeout=3
-                ).read()
-            )
-            for _t in _kr.get("tickers", []):
-                if _t.get("symbol") == symbol:
-                    _live = float(_t.get("markPrice") or _t.get("last") or 0)
-                    break
-        if _live <= 0:
-            _req = _ur.Request(
-                "https://api.hyperliquid.xyz/info",
-                data=_json.dumps({"type": "allMids"}).encode(),
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            _mids = _json.loads(_ur.urlopen(_req, timeout=3).read())
-            _live = float(_mids.get(symbol, 0))
+        _live = float(candidate.get("_live_price", 0.0))
         if _live > 0:
             _pct_off = abs(current_price - _live) / _live
             if _pct_off > _PRICE_SANITY_PCT:
@@ -3451,6 +3476,18 @@ def run_forever():
         str(NIGHTLY_AUDIT_TIME_UTC),
         _weekly_full_audit_job,
     )
+
+    # Nightly DB -> Broker reconciliation
+    def _nightly_recon_job():
+        try:
+            import threading as _thr
+            from scripts.nightly_recon import run_reconciliation
+            _t = _thr.Thread(target=run_reconciliation, daemon=True)
+            _t.start()
+        except Exception as _re:
+            logger.debug(f"[v10] nightly recon job error: {_re}")
+
+    schedule.every().day.at("03:00").do(_nightly_recon_job)
 
     # Periodic system + crypto lane heartbeat (every 1 minute)
     def _write_heartbeat():

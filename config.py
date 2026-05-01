@@ -1053,13 +1053,13 @@ SPOT_TINY_LIVE_MIN_MOMENTUM_IMPULSE: dict[str, float] = {
 }
 SPOT_TINY_LIVE_SCORE_FLOORS: dict[str, float] = {
     "TREND": 58.0,
-    "NEUTRAL": 60.0,
+    "NEUTRAL": 57.0,
     "CHOP": 99.0,
 }
 SPOT_TINY_LIVE_SCORE_WEIGHTS: dict[str, dict[str, float]] = {
-    "TREND": {"composite": 0.70, "derivative": 0.30},
-    "NEUTRAL": {"composite": 0.90, "derivative": 0.10},
-    "CHOP": {"composite": 0.90, "derivative": 0.10},
+    "TREND": {"composite": 1.0, "derivative": 0.0},
+    "NEUTRAL": {"composite": 1.0, "derivative": 0.0},
+    "CHOP": {"composite": 1.0, "derivative": 0.0},
 }
 SPOT_TINY_LIVE_EXIT_PROFILE_BY_REGIME: dict[str, str] = {
     "TREND": "precision",

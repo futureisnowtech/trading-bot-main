@@ -1005,6 +1005,11 @@ SPOT_TINY_LIVE_MAX_POSITION_USD: float = float(
 SPOT_TINY_LIVE_ALLOWED_ROUTE: str = (
     os.getenv("SPOT_TINY_LIVE_ALLOWED_ROUTE", "maker_only").strip().lower()
 )
+# Conviction floor for quarantined setup families. If a setup is quarantined, 
+# it must clear this higher score to be tradeable.
+SPOT_QUARANTINE_OVERRIDE_SCORE: float = float(
+    os.getenv("SPOT_QUARANTINE_OVERRIDE_SCORE", "72.0")
+)
 SPOT_TINY_LIVE_ENABLEMENT_CONFIRMED: bool = os.getenv(
     "SPOT_TINY_LIVE_ENABLEMENT_CONFIRMED", "false"
 ).strip().lower() in ("true", "1", "yes")

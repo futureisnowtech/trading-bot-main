@@ -26,20 +26,23 @@ SCORE_FLOORS: dict[str, dict[str, float]] = {
 }
 
 DECISION_LABELS: dict[str, tuple[str, str]] = {
-    "entered": ("ENTERED", "good"),
-    "below_threshold": ("BELOW FLOOR", "watch"),
+    "entered": ("✓ ENTERED", "good"),
+    "below_threshold": ("SCORE TOO LOW", "watch"),
     "data_unavailable": ("NO DATA", "neutral"),
-    "sizing_zero": ("SIZE = 0", "watch"),
+    "sizing_zero": ("ALREADY HELD", "neutral"),
     "research_only_block": ("RESEARCH ONLY", "neutral"),
     "dual_exposure_block": ("DUAL EXPOSURE", "neutral"),
-    "chop_blocked": ("CHOP BLOCK", "neutral"),
+    "chop_blocked": ("CHOP — BLOCKED", "neutral"),
     "pullback_reclaim_quarantined": ("QUARANTINED", "neutral"),
     "economics_fail": ("ECON FAIL", "watch"),
     "kill_switch": ("KILL SWITCH", "problem"),
     "regime_blocked": ("REGIME BLOCK", "neutral"),
     "score_gate": ("SCORE GATE", "watch"),
     "system_block": ("SYS BLOCK", "neutral"),
-    "bug_integrity": ("INTEGRITY", "problem"),
+    "bug_integrity": ("INTEGRITY ERR", "problem"),
+    "below_regime_floor": ("REGIME FLOOR", "watch"),
+    "frame_score_3m_too_low": ("3M SCORE LOW", "watch"),
+    "projected_net_win_too_small": ("SMALL EDGE", "watch"),
 }
 
 REGIME_META: dict[str, tuple[str, str]] = {
@@ -49,6 +52,7 @@ REGIME_META: dict[str, tuple[str, str]] = {
     "NEUTRAL": ("NEUTRAL", "#d29922"),
     "RANGING": ("NEUTRAL", "#d29922"),
     "CHOP": ("CHOP", "#6e7681"),
+    "UNKNOWN": ("UNKNOWN", "#37415a"),
     "": ("—", "#484f58"),
 }
 
@@ -98,9 +102,18 @@ def get_symbol_grid() -> list[dict[str, Any]]:
         floor = floors.get(regime_key, 55.0)
         score = float(row.get("composite_score") or 0.0)
         decision_raw = str(row.get("decision") or "")
-        d_label, d_status = DECISION_LABELS.get(
-            decision_raw, (decision_raw.upper().replace("_", " ") or "—", "neutral")
-        )
+
+        # UNKNOWN regime: bot can't classify — override label regardless of score
+        if regime_raw == "UNKNOWN":
+            d_label, d_status = "REGIME UNKNOWN", "neutral"
+        else:
+            d_label, d_status = DECISION_LABELS.get(
+                decision_raw, (decision_raw.upper().replace("_", " ") or "—", "neutral")
+            )
+
+        # entered is only true if DB actually recorded the entry
+        entered = decision_raw == "entered"
+
         setup = str(row.get("primary_setup") or "")
         direction = str(row.get("direction") or "")
         result.append(
@@ -108,14 +121,15 @@ def get_symbol_grid() -> list[dict[str, Any]]:
                 "symbol": sym,
                 "regime_label": regime_label,
                 "regime_color": regime_color,
-                "score": score,
+                "score": score if regime_raw != "UNKNOWN" else 0.0,
                 "floor": floor,
                 "decision_label": d_label,
                 "decision_status": d_status,
+                "entered": entered,
                 "setup": setup,
                 "direction": direction,
                 "age": _age_str(str(row.get("ts") or "")),
-                "has_data": bool(row),
+                "has_data": bool(row) and regime_raw != "UNKNOWN",
             }
         )
     return result

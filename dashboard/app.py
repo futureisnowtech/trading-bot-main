@@ -59,46 +59,45 @@ holdings = get_spot_positions_dashboard()
 sym_stats = get_per_symbol_stats()
 perf = get_performance_stats()
 
-deployed = sum(float(h.get("current_value") or 0) for h in holdings)
 pnl_total = perf.get("total_pnl") or 0.0
 closes = perf.get("closes") or 0
+wins = perf.get("wins") or 0
 ks_active = pulse["kill_switch_active"]
 mode = pulse["mode"].upper()
 
-# ── Hero narrative ─────────────────────────────────────────────────────────────
-valid = [s for s in syms if s["score"] > 0 and s["floor"] > 0]
-above = [s for s in valid if s["score"] >= s["floor"]]
-near = sorted(
-    [s for s in valid if s["score"] < s["floor"]], key=lambda s: s["floor"] - s["score"]
-)
-best = near[0] if near else (above[0] if above else None)
+# ── Hero narrative — trust DB decision, never recalculate ──────────────────────
+entered_now = [s for s in syms if s.get("entered")]
+valid = [s for s in syms if s["has_data"] and s["score"] > 0 and s["floor"] > 0]
+near = sorted(valid, key=lambda s: s["floor"] - s["score"])
+best = near[0] if near else None
 
 if ks_active:
     hero_title = "HALTED"
     hero_color = "#ff1744"
     hero_sub = f"Kill switch armed · {pulse['ks_reason'][:80] if pulse['ks_reason'] else 'manual halt'}"
-elif above:
-    hero_title = "SETUP READY"
+elif entered_now:
+    s = entered_now[0]
+    hero_title = "ENTERED"
     hero_color = "#00e676"
-    s = above[0]
-    hero_sub = f"{s['symbol']} cleared entry threshold · score {s['score']:.1f} vs {s['floor']:.0f} floor · {s['regime_label']}"
+    hero_sub = f"{s['symbol']} · {s['setup'] or 'setup'} · {s['regime_label']} · score {s['score']:.1f}"
 elif best:
     gap = best["floor"] - best["score"]
-    hero_title = "WATCHING"
-    hero_color = "#ffb300"
-    hero_sub = (
-        f"Best candidate: {best['symbol']} · {best['score']:.1f} vs {best['floor']:.0f} floor "
-        f"({gap:.1f} pts short) · regime {best['regime_label']}"
-    )
+    if gap <= 2:
+        hero_title = "CLOSE"
+        hero_color = "#ffb300"
+        hero_sub = f"{best['symbol']} is {gap:.1f} pts from entry · score {best['score']:.1f} vs floor {best['floor']:.0f} · {best['regime_label']}"
+    else:
+        hero_title = "WATCHING"
+        hero_color = "#37415a"
+        hero_sub = f"Best candidate: {best['symbol']} · {best['score']:.1f} vs floor {best['floor']:.0f} ({gap:.1f} pts short) · {best['regime_label']}"
 else:
     hero_title = "WATCHING"
     hero_color = "#37415a"
-    hero_sub = "Awaiting scan data — bot is initialising or all symbols missing data"
+    hero_sub = "Scanning 8 symbols — no classifiable setups yet this cycle"
 
 pnl_color = "#00e676" if pnl_total >= 0 else "#ff4757"
 pnl_sign = "+" if pnl_total >= 0 else "−"
-drawdown = max(0.0, (cash - eq) / cash * 100) if cash > 0 else 0.0
-dd_color = "#ff4757" if drawdown > 3 else ("#ffb300" if drawdown > 1 else "#00e676")
+wr = wins / closes * 100 if closes else 0.0
 
 
 def _score_color(score, floor):
@@ -185,47 +184,45 @@ st.markdown(
 )
 
 
-# ── Account strip ──────────────────────────────────────────────────────────────
+# ── Account strip — bot trading capital only, no external holdings ─────────────
+wr_color = "#00e676" if wr >= 50 else ("#ffb300" if wr >= 35 else "#ff4757")
 st.markdown(
     f"""
 <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:28px;">
 
   <div style="background:#0d1018;border:1px solid rgba(255,255,255,0.05);
-              border-top:2px solid #00e676;border-radius:18px;padding:20px 22px;">
+              border-top:2px solid #40c4ff;border-radius:18px;padding:20px 22px;">
     <div style="font-size:0.56em;font-weight:700;letter-spacing:0.14em;
-                text-transform:uppercase;color:#2a3040;margin-bottom:10px;">Account Equity</div>
+                text-transform:uppercase;color:#2a3040;margin-bottom:10px;">Trading Capital</div>
     <div style="font-size:2.0em;font-weight:800;color:#e8edf3;line-height:1;
-                font-variant-numeric:tabular-nums;">${eq:,.2f}</div>
-    <div style="font-size:0.72em;color:#2a3040;margin-top:8px;">
-      <span style="color:{pnl_color};">{pnl_sign}${abs(pnl_total):,.2f}</span> realized · {closes} trades
-    </div>
+                font-variant-numeric:tabular-nums;">${cash:,.2f}</div>
+    <div style="font-size:0.72em;color:#2a3040;margin-top:8px;">Coinbase · available to deploy</div>
+  </div>
+
+  <div style="background:#0d1018;border:1px solid rgba(255,255,255,0.05);
+              border-top:2px solid {pnl_color};border-radius:18px;padding:20px 22px;">
+    <div style="font-size:0.56em;font-weight:700;letter-spacing:0.14em;
+                text-transform:uppercase;color:#2a3040;margin-bottom:10px;">Realized P&amp;L</div>
+    <div style="font-size:2.0em;font-weight:800;color:{pnl_color};line-height:1;
+                font-variant-numeric:tabular-nums;">{pnl_sign}${abs(pnl_total):,.2f}</div>
+    <div style="font-size:0.72em;color:#2a3040;margin-top:8px;">{closes} closed trades · all time</div>
+  </div>
+
+  <div style="background:#0d1018;border:1px solid rgba(255,255,255,0.05);
+              border-top:2px solid {wr_color};border-radius:18px;padding:20px 22px;">
+    <div style="font-size:0.56em;font-weight:700;letter-spacing:0.14em;
+                text-transform:uppercase;color:#2a3040;margin-bottom:10px;">Win Rate</div>
+    <div style="font-size:2.0em;font-weight:800;color:{wr_color};line-height:1;
+                font-variant-numeric:tabular-nums;">{wr:.1f}%</div>
+    <div style="font-size:0.72em;color:#2a3040;margin-top:8px;">{wins}W / {closes - wins}L · live trades</div>
   </div>
 
   <div style="background:#0d1018;border:1px solid rgba(255,255,255,0.05);
               border-top:2px solid #37415a;border-radius:18px;padding:20px 22px;">
     <div style="font-size:0.56em;font-weight:700;letter-spacing:0.14em;
-                text-transform:uppercase;color:#2a3040;margin-bottom:10px;">Cash Available</div>
-    <div style="font-size:2.0em;font-weight:800;color:#e8edf3;line-height:1;
-                font-variant-numeric:tabular-nums;">${cash:,.2f}</div>
-    <div style="font-size:0.72em;color:#2a3040;margin-top:8px;">Coinbase spot · ready to deploy</div>
-  </div>
-
-  <div style="background:#0d1018;border:1px solid rgba(255,255,255,0.05);
-              border-top:2px solid #40c4ff;border-radius:18px;padding:20px 22px;">
-    <div style="font-size:0.56em;font-weight:700;letter-spacing:0.14em;
-                text-transform:uppercase;color:#2a3040;margin-bottom:10px;">Holdings</div>
-    <div style="font-size:2.0em;font-weight:800;color:#e8edf3;line-height:1;
-                font-variant-numeric:tabular-nums;">${deployed:,.2f}</div>
-    <div style="font-size:0.72em;color:#2a3040;margin-top:8px;">{len(holdings)} position{"s" if len(holdings) != 1 else ""} · external/manual</div>
-  </div>
-
-  <div style="background:#0d1018;border:1px solid rgba(255,255,255,0.05);
-              border-top:2px solid {dd_color};border-radius:18px;padding:20px 22px;">
-    <div style="font-size:0.56em;font-weight:700;letter-spacing:0.14em;
-                text-transform:uppercase;color:#2a3040;margin-bottom:10px;">Drawdown</div>
-    <div style="font-size:2.0em;font-weight:800;color:{dd_color};line-height:1;
-                font-variant-numeric:tabular-nums;">{drawdown:.1f}%</div>
-    <div style="font-size:0.72em;color:#2a3040;margin-top:8px;">from starting capital</div>
+                text-transform:uppercase;color:#2a3040;margin-bottom:10px;">Bot Status</div>
+    <div style="font-size:2.0em;font-weight:800;color:#e8edf3;line-height:1;">{pulse["readiness"].replace("_", " ")}</div>
+    <div style="font-size:0.72em;color:#2a3040;margin-top:8px;">{"Kill switch armed" if ks_active else "Scanning · " + pulse["last_scan_age"]}</div>
   </div>
 
 </div>

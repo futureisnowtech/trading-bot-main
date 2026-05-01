@@ -157,8 +157,7 @@ def _spot_truth_ready() -> None:
             for b in blockers
         )
         raise RuntimeError(
-            "Spot truth blockers present — refusing live launch: "
-            f"{rendered}"
+            f"Spot truth blockers present — refusing live launch: {rendered}"
         )
 
 
@@ -240,7 +239,12 @@ def main() -> int:
         while time.time() < deadline:
             mode = _load_mode()
             connected, buying_power, readiness, blocked_reason = _load_crypto_lane()
-            if mode == "live" and connected and buying_power > 0 and readiness == "TINY_LIVE":
+            if (
+                mode == "live"
+                and connected
+                and buying_power > 0
+                and readiness == "TINY_LIVE"
+            ):
                 print(
                     "[go_live] Runtime state confirms mode=live "
                     f"and crypto connected=1 buying_power=${buying_power:,.2f} "
@@ -254,7 +258,7 @@ def main() -> int:
                     _conn = _sq.connect(str(ROOT / "logs" / "trades.db"))
                     _conn.row_factory = _sq.Row
                     _pos = _conn.execute(
-                        "SELECT symbol, strategy, qty, entry, stop, target FROM open_positions ORDER BY ts_entry DESC LIMIT 5"
+                        "SELECT symbol, strategy, qty, entry, stop, target FROM open_positions WHERE paper=0 ORDER BY ts_entry DESC LIMIT 5"
                     ).fetchall()
                     _trades = _conn.execute(
                         "SELECT symbol, action, qty, price, pnl_usd, ts FROM trades WHERE paper=0 ORDER BY ts DESC LIMIT 3"

@@ -166,22 +166,11 @@ def _normalise_underlying(symbol: str) -> str:
 
 def _count_open_spot_positions(underlying: str, paper_int: int) -> int:
     """
-    Live mode: broker is canonical — check Coinbase symbol balance.
-    Paper mode: DB is acceptable (no real broker to query).
-    Fails closed (returns 1) if live broker unreachable, to prevent double-entry.
+    DB is authoritative for bot-managed spot positions (strategy LIKE 'spot_%').
+    Manual Coinbase holdings never appear in open_positions, so broker balance
+    must NOT be used here — it would count the user's non-bot holdings as blocks.
+    Fail-open (return 0) on DB error so a transient lock never prevents entry.
     """
-    if paper_int == 0:
-        try:
-            from execution.coinbase_spot_broker import get_spot_broker
-
-            bal = get_spot_broker().get_spot_balance()
-            qty = float((bal.get("symbol_balances") or {}).get(underlying, 0) or 0)
-            return 1 if qty > 0.0001 else 0
-        except Exception as e:
-            logger.warning(
-                f"[tradeability] live spot balance unavailable for {underlying}: {e}"
-            )
-            return 1  # fail closed — don't double-enter if broker unreachable
     try:
         with sqlite3.connect(_db_path(), timeout=3, check_same_thread=False) as conn:
             row = conn.execute(

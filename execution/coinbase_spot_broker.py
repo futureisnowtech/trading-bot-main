@@ -256,12 +256,7 @@ class CoinbaseSpotBroker:
             return result
         except Exception as e:
             logger.warning(f"[spot] get_spot_balance error: {e}")
-            balances = {
-                f"{sym.lower()}_available": 0.0 for sym in SPOT_SUPPORTED_SYMBOLS
-            }
-            balances["symbol_balances"] = {sym: 0.0 for sym in SPOT_SUPPORTED_SYMBOLS}
-            balances["usd_available"] = 0.0
-            return balances
+            raise
 
     def sync_live_holdings(self) -> Optional[List[dict]]:
         """

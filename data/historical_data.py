@@ -208,8 +208,12 @@ def _fetch_yfinance(symbol: str, interval: str, limit: int) -> Optional[pd.DataF
         return None
     try:
         yf_interval = _YF_INTERVAL.get(interval, "5m")
-        # Map BTCUSDT → BTC-USD for yfinance
+        # Map BTCUSDT → BTC-USD for yfinance. 
+        # If it's a bare ticker (no suffix, no dash), append -USD to avoid 
+        # stock collisions (e.g. LINK stock vs LINK-USD crypto).
         yf_sym = symbol.replace("USDT", "-USD").replace("USDC", "-USD")
+        if "-" not in yf_sym and not yf_sym.endswith("=F"):
+            yf_sym = f"{yf_sym}-USD"
         period_map = {
             "1m": "7d",
             "5m": "60d",

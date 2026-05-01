@@ -22,7 +22,6 @@
 - Active operator notes:
   - `brain/01_current_system/Current Active Logic.md`
   - `brain/01_current_system/Known Constraints.md`
-  - `brain/01_current_system/Open Questions.md`
 - Strategy / governance references:
   - `SCANNER_PRECISION_REPORT.md`
   - `STOP_MATRIX.md`
@@ -119,7 +118,7 @@ Rules for `external_manual` holdings:
 - always visible
 - never auto-closed
 - never adopted as bot-managed inventory
-- same-symbol bot entries are blocked while they exist
+- do NOT block same-symbol bot entries — `_count_open_spot_positions` checks only `open_positions WHERE strategy LIKE 'spot_%'` (bot-managed rows), not broker balance (which would include manual holdings and produce false blocks)
 
 ## Tiny-Live Spot Governance
 
@@ -220,15 +219,16 @@ Live launch must fail if any of these are true:
 | `spot_engine.py` | spot execution lifecycle, stop/target persistence, close reconciliation |
 | `runtime/spot_strategy.py` | setup / regime / score / route governance |
 | `scheduler/v10_runner.py` | scan loop, admission path, runtime lane state |
-| `execution/coinbase_spot_broker.py` | broker snapshot, spot orders, spot balances |
+| `execution/coinbase_spot_broker.py` | broker snapshot, spot orders, spot balances — raises on network error (no silent zeros) |
+| `runtime/crypto_tradeability.py` | tradeability gates: position count (DB-only, bot-managed), deployed USD, dual exposure |
 | `monitoring/health_check.py` | live health assertions for the spot lane |
 | `runtime/spot_kill_switch.py` | lane-specific hard halt logic |
 | `learning_loop.py` | close-to-snapshot path |
 | `learning/post_trade_analyzer.py` | spot-native attribution semantics |
 | `learning/entry_priors.py` | spot priors / target semantics |
 | `learning/spot_edge_calibrator.py` | spot edge condition derivation |
-| `dashboard/data/positions.py` | broker-truth holdings rendering |
-| `dashboard/data/control_tower.py` | live control surfaces, narrowed to spot authority |
+| `dashboard/app.py` | single-page operator dashboard (no tabs, bot-reasoning-first, v18.15+) |
+| `dashboard/data/bot_state.py` | symbol grid, decision log, bot pulse — primary dashboard data layer |
 | `scripts/go_live.py` | controlled tiny-live launcher |
 | `scripts/go_paper.py` | controlled return to paper |
 | `scripts/check_readiness.py` | operator readiness snapshot |

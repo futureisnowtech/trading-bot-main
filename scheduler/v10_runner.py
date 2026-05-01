@@ -1755,7 +1755,7 @@ def _attempt_entry(
                 _journal_scan_candidate(
                     scan_id,
                     candidate,
-                    "below_threshold",
+                    _reason,
                     regime=regime,
                     technical_score=_tech_score,
                     ml_score=_ml_score,
@@ -1835,7 +1835,7 @@ def _attempt_entry(
                 _journal_scan_candidate(
                     scan_id,
                     candidate,
-                    "below_threshold",
+                    "below_regime_floor",
                     regime=regime,
                     technical_score=_tech_score,
                     ml_score=_ml_score,
@@ -1868,7 +1868,7 @@ def _attempt_entry(
                     final_spot_score=_final_score,
                     regime_floor=_score_floor,
                 )
-                return "below_threshold"
+                return "below_regime_floor"
             _econ = _spot_econ(
                 symbol=_underlying,
                 size_usd=_spot_size,

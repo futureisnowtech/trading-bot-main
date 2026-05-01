@@ -21,8 +21,8 @@ SCORE_FLOORS: dict[str, dict[str, float]] = {
     "XRP": {"TREND": 56.0, "NEUTRAL": 56.0, "CHOP": 60.0},
     "LTC": {"TREND": 55.0, "NEUTRAL": 55.0, "CHOP": 60.0},
     "DOGE": {"TREND": 57.0, "NEUTRAL": 57.0, "CHOP": 60.0},
-    "ADA": {"TREND": 55.0, "NEUTRAL": 55.0, "CHOP": 60.0},
-    "LINK": {"TREND": 55.0, "NEUTRAL": 55.0, "CHOP": 60.0},
+    "ADA": {"TREND": 55.0, "NEUTRAL": 57.0, "CHOP": 60.0},
+    "LINK": {"TREND": 55.0, "NEUTRAL": 57.0, "CHOP": 60.0},
 }
 
 DECISION_LABELS: dict[str, tuple[str, str]] = {
@@ -34,6 +34,8 @@ DECISION_LABELS: dict[str, tuple[str, str]] = {
     "dual_exposure_block": ("DUAL EXPOSURE", "neutral"),
     "chop_blocked": ("CHOP — BLOCKED", "neutral"),
     "pullback_reclaim_quarantined": ("QUARANTINED", "neutral"),
+    "impulse_continuation_quarantined": ("QUARANTINED", "neutral"),
+    "compression_breakout_quarantined": ("QUARANTINED", "neutral"),
     "economics_fail": ("ECON FAIL", "watch"),
     "kill_switch": ("KILL SWITCH", "problem"),
     "regime_blocked": ("REGIME BLOCK", "neutral"),
@@ -41,7 +43,11 @@ DECISION_LABELS: dict[str, tuple[str, str]] = {
     "system_block": ("SYS BLOCK", "neutral"),
     "bug_integrity": ("INTEGRITY ERR", "problem"),
     "below_regime_floor": ("REGIME FLOOR", "watch"),
-    "frame_score_3m_too_low": ("3M SCORE LOW", "watch"),
+    "frame_score_5m_too_low": ("5M SCORE LOW", "watch"),
+    "frame_score_30m_too_low": ("30M SCORE LOW", "watch"),
+    "momentum_impulse_too_low": ("NO MOMENTUM", "watch"),
+    "path_efficiency_too_low": ("LOW EFFICIENCY", "watch"),
+    "volatility_quality_too_low": ("BAD VOL", "watch"),
     "projected_net_win_too_small": ("SMALL EDGE", "watch"),
 }
 
@@ -62,14 +68,25 @@ def _age_str(ts_str: str) -> str:
         return "—"
     try:
         ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+        # Ensure ts is offset-aware for comparison with now(utc)
         if ts.tzinfo is None:
             ts = ts.replace(tzinfo=timezone.utc)
-        secs = int((datetime.now(timezone.utc) - ts).total_seconds())
+        
+        now_utc = datetime.now(timezone.utc)
+        diff = now_utc - ts
+        secs = int(diff.total_seconds())
+        
+        # Guard against slight clock drifts showing "future" times
+        if secs < 0:
+            return "just now"
+            
         if secs < 60:
             return f"{secs}s ago"
         if secs < 3600:
             return f"{secs // 60}m ago"
-        return f"{secs // 3600}h ago"
+        if secs < 86400:
+            return f"{secs // 3600}h ago"
+        return f"{secs // 86400}d ago"
     except Exception:
         return "—"
 

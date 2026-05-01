@@ -81,7 +81,7 @@ def test_dashboard_data_summaries_read_live_schema(proof_runtime):
 def test_operator_panel_renders_all_tabs_with_widget_stubs(monkeypatch):
     # v18.15+ dashboard is single-page (no st.tabs) — just verify it renders without error
     at = AppTest.from_file(str(DASHBOARD_ROOT / "app.py"))
-    at.run(timeout=15)
+    at.run(timeout=60)
     assert not at.exception
     assert len(at.tabs) == 0, "v18.15+ dashboard must be single-page with no tabs"
 

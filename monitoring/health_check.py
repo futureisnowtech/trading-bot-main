@@ -267,6 +267,36 @@ def _check_scan_liveness() -> dict:
         return {"ok": False, "detail": f"Exception: {e}"}
 
 
+def _check_candle_freshness() -> dict:
+    """Indicator health: candles must be fresh (last 1h candle < 2h old)."""
+    try:
+        conn = _conn()
+        # Query last candidate TS — candidates are only written if candles are fetched
+        row = conn.execute(
+            "SELECT ts FROM scan_candidates ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        conn.close()
+        if not row:
+            return {"ok": True, "detail": "No candidates logged yet"}
+        
+        from datetime import datetime, timezone
+        import pytz
+        
+        # scan_candidates.ts is ISO8601
+        dt = datetime.fromisoformat(row["ts"])
+        if not dt.tzinfo:
+            dt = dt.replace(tzinfo=timezone.utc)
+        
+        age_secs = (datetime.now(timezone.utc) - dt.astimezone(timezone.utc)).total_seconds()
+        threshold = 7200 # 2 hours (allows for gap between scans but catches stuck data)
+        
+        if age_secs > threshold:
+            return {"ok": False, "detail": f"Candles stale: last scan {age_secs/60:.1f}m ago"}
+        return {"ok": True, "detail": f"Candles fresh: {age_secs/60:.1f}m old"}
+    except Exception as e:
+        return {"ok": False, "detail": f"Freshness check error: {e}"}
+
+
 def _check_spot_truth() -> dict:
     """Live spot health must be broker-canonical and free of unresolved blockers."""
     try:
@@ -419,6 +449,7 @@ def run_health_check(force: bool = False) -> dict:
     checks = {
         "ml_gate": _check_ml_gate(),
         "scan_liveness": _check_scan_liveness(),
+        "candle_freshness": _check_candle_freshness(),
         "spot_truth": _check_spot_truth(),
         "spot_learning": _check_spot_learning_truth(),
         "error_rate": _check_error_rate(),

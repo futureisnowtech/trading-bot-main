@@ -94,14 +94,11 @@ SPOT_MIN_ORDER_USD: float = float(os.getenv("SPOT_MIN_ORDER_USD", "10.0"))
 SPOT_WEEKDAYS_ONLY: bool = os.getenv("SPOT_WEEKDAYS_ONLY", "false").lower() == "true"
 SPOT_ENTRY_START_TIME: str = os.getenv("SPOT_ENTRY_START_TIME", "00:00")
 SPOT_ENTRY_END_TIME: str = os.getenv("SPOT_ENTRY_END_TIME", "23:59")
-# Conservative hard stop: close position if price drops this % below entry.
-# 3% default — tight enough to limit loss on small account, loose enough to avoid noise wicks.
-SPOT_STOP_PCT: float = float(os.getenv("SPOT_STOP_PCT", "0.03"))
+# 1.5% - Tightened from 3% to reduce capital drag and improve net R:R in high-fee environments.
+SPOT_STOP_PCT: float = float(os.getenv("SPOT_STOP_PCT", "0.015"))
 # Profit target expressed as a multiple of the stop distance (R-multiple).
-# 2.0 = 2R: with a 3% stop, target = 6% gain. This recycles capital faster
-# for intraday spot while still clearing fee drag when paired with the
-# session-aware economics gate.
-SPOT_TARGET_R: float = float(os.getenv("SPOT_TARGET_R", "1.2"))
+# 3.0 = 3R: with a 1.5% stop, target = 4.5% gain. This ensures winners clear fee drag.
+SPOT_TARGET_R: float = float(os.getenv("SPOT_TARGET_R", "3.0"))
 # End-of-day flatten time (HH:MM ET, 24h). All spot positions closed at or
 # after this time on weekdays to prevent overnight gap exposure.
 SPOT_EOD_CLOSE_TIME: str = os.getenv("SPOT_EOD_CLOSE_TIME", "15:45")
@@ -160,35 +157,35 @@ SPOT_TARGET_R_BY_REGIME: dict[str, float] = {
     "CHOP": float(os.getenv("SPOT_CHOP_TARGET_R", "3.0")),
 }
 SPOT_TRAIL_ARM_R_BY_REGIME: dict[str, float] = {
-    "TREND": float(os.getenv("SPOT_TREND_TRAIL_ARM_R", "0.55")),
-    "NEUTRAL": float(os.getenv("SPOT_NEUTRAL_TRAIL_ARM_R", "0.40")),
-    "CHOP": float(os.getenv("SPOT_CHOP_TRAIL_ARM_R", "0.30")),
+    "TREND": float(os.getenv("SPOT_TREND_TRAIL_ARM_R", "1.5")),
+    "NEUTRAL": float(os.getenv("SPOT_NEUTRAL_TRAIL_ARM_R", "1.0")),
+    "CHOP": float(os.getenv("SPOT_CHOP_TRAIL_ARM_R", "1.0")),
 }
 SPOT_EXIT_PROFILE_TARGETS: dict[str, dict[str, tuple[float, float]]] = {
     "balanced": {
-        "TREND": (1.8, 1.0),
-        "NEUTRAL": (1.2, 0.8),
-        "CHOP": (0.9, 0.6),
+        "TREND": (4.0, 1.5),
+        "NEUTRAL": (3.0, 1.0),
+        "CHOP": (2.0, 0.8),
     },
     "quick": {
-        "TREND": (1.5, 0.9),
-        "NEUTRAL": (1.0, 0.7),
-        "CHOP": (0.8, 0.5),
+        "TREND": (3.5, 1.5),
+        "NEUTRAL": (2.5, 1.0),
+        "CHOP": (1.8, 0.7),
     },
     "precision": {
-        "TREND": (1.05, 0.65),
-        "NEUTRAL": (0.80, 0.50),
-        "CHOP": (0.65, 0.40),
+        "TREND": (3.0, 1.2),
+        "NEUTRAL": (2.0, 0.8),
+        "CHOP": (1.5, 0.6),
     },
     "micro": {
-        "TREND": (0.85, 0.55),
-        "NEUTRAL": (0.65, 0.40),
-        "CHOP": (0.50, 0.30),
+        "TREND": (2.5, 1.0),
+        "NEUTRAL": (1.8, 0.7),
+        "CHOP": (1.2, 0.5),
     },
     "nano": {
-        "TREND": (0.60, 0.40),
-        "NEUTRAL": (0.45, 0.28),
-        "CHOP": (0.35, 0.22),
+        "TREND": (2.0, 0.8),
+        "NEUTRAL": (1.5, 0.6),
+        "CHOP": (1.0, 0.4),
     },
 }
 SPOT_SYMBOL_STRATEGY_OVERRIDES: dict[str, dict] = {
@@ -1000,13 +997,13 @@ SPOT_GOV_MIN_PROFIT_FACTOR: float = float(
     os.getenv("SPOT_GOV_MIN_PROFIT_FACTOR", "1.00")
 )
 SPOT_TINY_LIVE_MAX_CONCURRENT: int = int(
-    os.getenv("SPOT_TINY_LIVE_MAX_CONCURRENT", "1")
+    os.getenv("SPOT_TINY_LIVE_MAX_CONCURRENT", "5")
 )
 SPOT_TINY_LIVE_MAX_POSITION_USD: float = float(
     os.getenv("SPOT_TINY_LIVE_MAX_POSITION_USD", "50.0")
 )
 SPOT_TINY_LIVE_ALLOWED_ROUTE: str = (
-    os.getenv("SPOT_TINY_LIVE_ALLOWED_ROUTE", "maker_first").strip().lower()
+    os.getenv("SPOT_TINY_LIVE_ALLOWED_ROUTE", "maker_only").strip().lower()
 )
 SPOT_TINY_LIVE_ENABLEMENT_CONFIRMED: bool = os.getenv(
     "SPOT_TINY_LIVE_ENABLEMENT_CONFIRMED", "false"

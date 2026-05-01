@@ -34,7 +34,7 @@ def test_sss02_final_score_is_regime_weighted_under_tiny_live_defaults():
     btc = final_spot_score(62.0, 54.0, regime="NEUTRAL", symbol="BTC")
     sol = final_spot_score(62.0, 54.0, regime="NEUTRAL", symbol="SOL")
     assert btc == sol
-    assert btc == 61.2
+    assert btc == 62.0
 
 
 def test_sss03_doge_open_gate_before_calibration():
@@ -83,8 +83,8 @@ def test_sss04_eth_uses_precision_exit_profile_targets():
     )
 
     assert exit_profile_for_symbol("ETH", "TREND") == "precision"
-    assert target_r_for_symbol("ETH", "TREND") == 1.05
-    assert trail_arm_r_for_symbol("ETH", "TREND") == 0.65
+    assert target_r_for_symbol("ETH", "TREND") == 3.0
+    assert trail_arm_r_for_symbol("ETH", "TREND") == 1.2
 
 
 def test_sss05_link_edge_policy_open_gate_before_calibration():

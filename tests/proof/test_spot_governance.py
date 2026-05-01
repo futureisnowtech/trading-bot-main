@@ -119,7 +119,7 @@ def test_sg05_flag_false_unblocks_neutral():
         reason, _ = spot_quality_block_reason(
             "BTC",
             _spot_state("NEUTRAL", "pullback_reclaim", setup_score=0.9),
-            final_spot_score=72.0,
+            final_spot_score=71.0,
         )
     assert reason == "pullback_reclaim_quarantined", reason
 
@@ -131,7 +131,7 @@ def test_sg06_flag_false_unblocks_chop():
         reason, _ = spot_quality_block_reason(
             "ETH",
             _spot_state("CHOP", "pullback_reclaim", setup_score=0.9),
-            final_spot_score=72.0,
+            final_spot_score=71.0,
         )
     assert reason == "spot_regime_not_allowed:CHOP", reason
 

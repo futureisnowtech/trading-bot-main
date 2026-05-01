@@ -9,7 +9,10 @@ This module keeps the spot strategy auditable:
 
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 KNOWN_SETUP_FAMILIES: tuple[str, ...] = (
     "impulse_continuation",

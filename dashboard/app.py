@@ -1,31 +1,24 @@
 """
 dashboard/app.py — Algo Trading Operator Panel
-Single-page redesign: bot reasoning transparency + account reality.
 """
 
 from __future__ import annotations
+import importlib.util, os, sys
 
-import importlib.util
-import os
-import sys
-import time
-
-# ── path setup ─────────────────────────────────────────────────────────────────
 _DASH_DIR = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_DASH_DIR)
 for _p in (_DASH_DIR, _ROOT):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-_dash_data_dir = os.path.join(_DASH_DIR, "data")
-_dash_data_init = os.path.join(_dash_data_dir, "__init__.py")
+_ddir = os.path.join(_DASH_DIR, "data")
 _spec = importlib.util.spec_from_file_location(
-    "data", _dash_data_init, submodule_search_locations=[_dash_data_dir]
+    "data", os.path.join(_ddir, "__init__.py"), submodule_search_locations=[_ddir]
 )
-_data_pkg = importlib.util.module_from_spec(_spec)
-_data_pkg.__path__ = [_dash_data_dir]
-_spec.loader.exec_module(_data_pkg)
-sys.modules["data"] = _data_pkg
+_pkg = importlib.util.module_from_spec(_spec)
+_pkg.__path__ = [_ddir]
+_spec.loader.exec_module(_pkg)
+sys.modules["data"] = _pkg
 
 import streamlit as st
 
@@ -36,236 +29,156 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# ── Design tokens ──────────────────────────────────────────────────────────────
 st.markdown(
-    """
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap');
-
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-[data-testid="stAppViewContainer"], [data-testid="stMain"], .main {
-    background: #06080c !important;
-    font-family: 'Inter', sans-serif !important;
-}
-section[data-testid="stSidebar"] { display: none !important; }
-#MainMenu, footer, header, .stDeployButton, [data-testid="stToolbar"] {
-    visibility: hidden !important;
-}
-.block-container {
-    padding: 24px 32px 80px 32px !important;
-    max-width: 1440px !important;
-    margin: 0 auto !important;
-}
-
-/* ── Typography ── */
-.op-label {
-    font-size: 0.62em; font-weight: 700; letter-spacing: 0.12em;
-    text-transform: uppercase; color: #3d4451;
-}
-.op-value-lg {
-    font-size: 2.4em; font-weight: 800; color: #e8edf3; line-height: 1;
-    font-family: 'Inter', sans-serif;
-}
-.op-value-md {
-    font-size: 1.35em; font-weight: 700; color: #e8edf3; line-height: 1.1;
-}
-.op-muted { color: #3d4451; font-size: 0.76em; }
-.mono { font-family: 'JetBrains Mono', monospace; }
-
-/* ── Top bar ── */
-.top-bar {
-    display: flex; align-items: center; gap: 14px;
-    padding: 0 0 22px 0;
-    border-bottom: 1px solid rgba(255,255,255,0.04);
-    margin-bottom: 24px;
-}
-.top-bar-title {
-    font-size: 0.72em; font-weight: 700; letter-spacing: 0.18em;
-    text-transform: uppercase; color: #3d4451; flex: 1;
-}
-.badge {
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 4px 12px; border-radius: 100px;
-    font-size: 0.64em; font-weight: 700; letter-spacing: 0.08em;
-    text-transform: uppercase;
-}
-.badge-live   { background: rgba(248,81,73,0.12); color: #f85149; border: 1px solid rgba(248,81,73,0.2); }
-.badge-paper  { background: rgba(88,166,255,0.10); color: #58a6ff; border: 1px solid rgba(88,166,255,0.2); }
-.badge-good   { background: rgba(0,212,129,0.10); color: #00d481; border: 1px solid rgba(0,212,129,0.2); }
-.badge-warn   { background: rgba(245,166,35,0.10); color: #f5a623; border: 1px solid rgba(245,166,35,0.2); }
-.badge-halt   { background: rgba(248,81,73,0.12); color: #f85149; border: 1px solid rgba(248,81,73,0.25); }
-.badge-neutral{ background: rgba(61,68,81,0.30);  color: #6e7681; border: 1px solid rgba(255,255,255,0.06); }
-.pulse { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
-.pulse-green { background: #00d481; box-shadow: 0 0 6px rgba(0,212,129,0.6); }
-.pulse-red   { background: #f85149; box-shadow: 0 0 6px rgba(248,81,73,0.6); }
-.pulse-amber { background: #f5a623; box-shadow: 0 0 6px rgba(245,166,35,0.6); }
-
-/* ── Account strip ── */
-.acct-strip {
-    display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px;
-    margin-bottom: 28px;
-}
-.acct-card {
-    background: #0c0f14; border: 1px solid rgba(255,255,255,0.05);
-    border-radius: 16px; padding: 18px 20px;
-}
-.acct-card-accent { border-top: 2px solid #00d481; }
-.acct-card-warn   { border-top: 2px solid #f5a623; }
-.acct-card-red    { border-top: 2px solid #f85149; }
-.acct-card-neutral{ border-top: 2px solid #1e2430; }
-
-/* ── Section headers ── */
-.section-title {
-    font-size: 0.60em; font-weight: 700; letter-spacing: 0.16em;
-    text-transform: uppercase; color: #2a3040;
-    margin-bottom: 14px; padding-bottom: 10px;
-    border-bottom: 1px solid rgba(255,255,255,0.03);
-}
-
-/* ── Symbol grid ── */
-.sym-card {
-    background: #0c0f14; border: 1px solid rgba(255,255,255,0.05);
-    border-radius: 18px; padding: 18px 18px 14px 18px;
-    height: 100%; position: relative;
-    transition: border-color 0.2s;
-}
-.sym-card-entered { border-color: rgba(0,212,129,0.35) !important; }
-.sym-card-watch   { border-color: rgba(245,166,35,0.2) !important; }
-.sym-card-nodata  { opacity: 0.45; }
-.sym-name {
-    font-size: 1.1em; font-weight: 800; color: #e8edf3;
-    letter-spacing: 0.02em; display: inline-block; margin-right: 8px;
-}
-.regime-chip {
-    display: inline-flex; align-items: center;
-    padding: 2px 9px; border-radius: 100px;
-    font-size: 0.58em; font-weight: 700; letter-spacing: 0.07em;
-    text-transform: uppercase;
-}
-.score-row {
-    display: flex; align-items: baseline; gap: 6px;
-    margin: 12px 0 6px 0;
-}
-.score-num {
-    font-size: 1.55em; font-weight: 800; line-height: 1;
-    font-family: 'JetBrains Mono', monospace;
-}
-.score-floor {
-    font-size: 0.68em; color: #3d4451; font-family: 'JetBrains Mono', monospace;
-}
-.score-bar-wrap {
-    height: 3px; background: rgba(255,255,255,0.05);
-    border-radius: 2px; margin-bottom: 12px; overflow: hidden;
-}
-.score-bar-fill { height: 100%; border-radius: 2px; }
-.decision-row {
-    display: flex; justify-content: space-between; align-items: center;
-    margin-top: 2px;
-}
-.decision-label {
-    font-size: 0.62em; font-weight: 700; letter-spacing: 0.07em;
-    text-transform: uppercase;
-}
-.setup-tag {
-    font-size: 0.58em; color: #3d4451; font-family: 'JetBrains Mono', monospace;
-    margin-top: 4px;
-}
-.sym-age { font-size: 0.55em; color: #2a3040; }
-
-/* ── Decision log ── */
-.dlog-row {
-    display: flex; align-items: center; gap: 12px;
-    padding: 9px 14px; border-radius: 10px;
-    margin-bottom: 4px; background: #0c0f14;
-    border: 1px solid rgba(255,255,255,0.04);
-}
-.dlog-sym {
-    font-size: 0.76em; font-weight: 800; color: #e8edf3;
-    width: 36px; flex-shrink: 0; letter-spacing: 0.03em;
-}
-.dlog-decision { font-size: 0.67em; font-weight: 700; letter-spacing: 0.06em; flex: 1; }
-.dlog-score {
-    font-size: 0.66em; color: #3d4451;
-    font-family: 'JetBrains Mono', monospace; width: 38px; text-align: right;
-}
-.dlog-regime { font-size: 0.60em; width: 54px; text-align: right; }
-.dlog-age { font-size: 0.60em; color: #2a3040; width: 46px; text-align: right; }
-
-/* ── Streamlit overrides ── */
-[data-testid="stMetric"]          { display: none !important; }
-[data-testid="column"]            { padding: 0 6px !important; }
-div[data-testid="stHorizontalBlock"] { gap: 0 !important; }
-</style>
-""",
+    """<style>
+[data-testid="stAppViewContainer"],[data-testid="stMain"],.main{background:#07090e!important;}
+section[data-testid="stSidebar"]{display:none!important;}
+#MainMenu,footer,header,.stDeployButton,[data-testid="stToolbar"]{visibility:hidden!important;}
+.block-container{padding:28px 36px 80px!important;max-width:1480px!important;margin:0 auto!important;}
+[data-testid="column"]{padding:0 5px!important;}
+div[data-testid="stHorizontalBlock"]{gap:0!important;}
+[data-testid="stButton"]>button{
+  background:#0d1018!important;border:1px solid rgba(255,255,255,0.08)!important;
+  border-radius:10px!important;color:#8892a4!important;font-size:0.75em!important;
+  font-weight:600!important;padding:6px 16px!important;letter-spacing:0.05em!important;}
+</style>""",
     unsafe_allow_html=True,
 )
-
 
 # ── Data ───────────────────────────────────────────────────────────────────────
 from data.bot_state import get_symbol_grid, get_decision_log, get_bot_pulse
 from data.account import get_account
 from data.positions import get_spot_positions_dashboard
+from data.performance import get_per_symbol_stats, get_performance_stats
 
-
-def _fmt_money(v: float, sign: bool = False) -> str:
-    s = "+" if sign and v > 0 else ""
-    return f"{s}${abs(v):,.2f}"
-
-
-def _score_color(score: float, floor: float) -> str:
-    if score == 0:
-        return "#2a3040"
-    ratio = score / floor if floor else 0
-    if ratio >= 1.0:
-        return "#00d481"
-    if ratio >= 0.88:
-        return "#f5a623"
-    return "#f85149"
-
-
-def _decision_color(status: str) -> str:
-    return {
-        "good": "#00d481",
-        "watch": "#f5a623",
-        "problem": "#f85149",
-        "neutral": "#3d4451",
-    }.get(status, "#3d4451")
-
-
-# ── Fetch ──────────────────────────────────────────────────────────────────────
 pulse = get_bot_pulse()
-symbols = get_symbol_grid()
-decisions = get_decision_log(14)
-equity, is_paper, cash = get_account()
+syms = get_symbol_grid()
+decisions = get_decision_log(12)
+eq, is_paper, cash = get_account()
 holdings = get_spot_positions_dashboard()
+sym_stats = get_per_symbol_stats()
+perf = get_performance_stats()
+
 deployed = sum(float(h.get("current_value") or 0) for h in holdings)
-unrealized = equity - cash  # rough: equity = cash + realized PnL delta
-drawdown_pct = ((cash - equity) / cash * 100) if cash > 0 and equity < cash else 0.0
-
-mode_cls = "badge-paper" if is_paper else "badge-live"
-mode_label = "PAPER" if is_paper else "LIVE"
-pulse_cls = (
-    "pulse-green"
-    if pulse["healthy"] and not pulse["kill_switch_active"]
-    else ("pulse-red" if pulse["kill_switch_active"] else "pulse-amber")
-)
+pnl_total = perf.get("total_pnl") or 0.0
+closes = perf.get("closes") or 0
 ks_active = pulse["kill_switch_active"]
+mode = pulse["mode"].upper()
 
+# ── Hero narrative ─────────────────────────────────────────────────────────────
+valid = [s for s in syms if s["score"] > 0 and s["floor"] > 0]
+above = [s for s in valid if s["score"] >= s["floor"]]
+near = sorted(
+    [s for s in valid if s["score"] < s["floor"]], key=lambda s: s["floor"] - s["score"]
+)
+best = near[0] if near else (above[0] if above else None)
+
+if ks_active:
+    hero_title = "HALTED"
+    hero_color = "#ff1744"
+    hero_sub = f"Kill switch armed · {pulse['ks_reason'][:80] if pulse['ks_reason'] else 'manual halt'}"
+elif above:
+    hero_title = "SETUP READY"
+    hero_color = "#00e676"
+    s = above[0]
+    hero_sub = f"{s['symbol']} cleared entry threshold · score {s['score']:.1f} vs {s['floor']:.0f} floor · {s['regime_label']}"
+elif best:
+    gap = best["floor"] - best["score"]
+    hero_title = "WATCHING"
+    hero_color = "#ffb300"
+    hero_sub = (
+        f"Best candidate: {best['symbol']} · {best['score']:.1f} vs {best['floor']:.0f} floor "
+        f"({gap:.1f} pts short) · regime {best['regime_label']}"
+    )
+else:
+    hero_title = "WATCHING"
+    hero_color = "#37415a"
+    hero_sub = "Awaiting scan data — bot is initialising or all symbols missing data"
+
+pnl_color = "#00e676" if pnl_total >= 0 else "#ff4757"
+pnl_sign = "+" if pnl_total >= 0 else "−"
+drawdown = max(0.0, (cash - eq) / cash * 100) if cash > 0 else 0.0
+dd_color = "#ff4757" if drawdown > 3 else ("#ffb300" if drawdown > 1 else "#00e676")
+
+
+def _score_color(score, floor):
+    if not score or not floor:
+        return "#2a3040"
+    r = score / floor
+    if r >= 1.0:
+        return "#00e676"
+    if r >= 0.92:
+        return "#ffb300"
+    return "#ff4757"
+
+
+def _decision_color(status):
+    return {
+        "good": "#00e676",
+        "watch": "#ffb300",
+        "problem": "#ff4757",
+        "neutral": "#37415a",
+    }.get(status, "#37415a")
+
+
+def _bar(score, floor):
+    if not floor:
+        return 0
+    return min(100, int(score / floor * 100))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# RENDER — one big HTML block keeps CSS control away from Streamlit
+# ══════════════════════════════════════════════════════════════════════════════
 
 # ── Top bar ────────────────────────────────────────────────────────────────────
+mode_bg = "rgba(255,23,68,0.12)" if mode == "LIVE" else "rgba(64,196,255,0.10)"
+mode_fg = "#ff4757" if mode == "LIVE" else "#40c4ff"
+pulse_col = (
+    "#00e676"
+    if pulse["healthy"] and not ks_active
+    else ("#ff4757" if ks_active else "#ffb300")
+)
+ks_badge = (
+    f'<span style="background:rgba(255,23,68,0.15);color:#ff4757;border:1px solid rgba(255,23,68,0.3);padding:4px 14px;border-radius:100px;font-size:0.68em;font-weight:700;letter-spacing:0.08em;">⚠ KILL SWITCH</span>'
+    if ks_active
+    else ""
+)
+
 st.markdown(
     f"""
-<div class="top-bar">
-  <span class="top-bar-title">Algo Trading — Operator</span>
-  <span class="badge {mode_cls}">
-    <span class="pulse {pulse_cls}"></span>{mode_label}
+<div style="display:flex;align-items:center;gap:12px;padding-bottom:22px;
+            border-bottom:1px solid rgba(255,255,255,0.04);margin-bottom:28px;">
+  <span style="flex:1;font-size:0.60em;font-weight:700;letter-spacing:0.20em;
+               text-transform:uppercase;color:#2a3040;">Algo Trading — Operator Panel</span>
+  <span style="background:{mode_bg};color:{mode_fg};border:1px solid {mode_fg}30;
+               padding:4px 14px;border-radius:100px;font-size:0.68em;font-weight:800;
+               letter-spacing:0.10em;display:flex;align-items:center;gap:7px;">
+    <span style="width:7px;height:7px;border-radius:50%;background:{pulse_col};
+                 box-shadow:0 0 8px {pulse_col};display:inline-block;"></span>
+    {mode}
   </span>
-  {'<span class="badge badge-halt">⚠ Kill Switch</span>' if ks_active else ""}
-  <span class="badge badge-neutral">Last scan {pulse["last_scan_age"]}</span>
-  <span class="badge {"badge-good" if pulse["healthy"] else "badge-warn"}">
-    {"● Healthy" if pulse["healthy"] else "● Degraded"}
-  </span>
+  {ks_badge}
+  <span style="color:#2a3040;font-size:0.65em;">Last scan {pulse["last_scan_age"]}</span>
+  <span style="color:#2a3040;font-size:0.65em;">{"● Healthy" if pulse["healthy"] else "⚠ Degraded"}</span>
+</div>
+""",
+    unsafe_allow_html=True,
+)
+
+
+# ── Hero status ────────────────────────────────────────────────────────────────
+st.markdown(
+    f"""
+<div style="background:linear-gradient(135deg,#0d1018 0%,#0a0c12 100%);
+            border:1px solid rgba(255,255,255,0.05);
+            border-left:4px solid {hero_color};
+            border-radius:20px;padding:28px 32px;margin-bottom:24px;">
+  <div style="font-size:0.58em;font-weight:700;letter-spacing:0.18em;
+              text-transform:uppercase;color:#2a3040;margin-bottom:10px;">Bot Status</div>
+  <div style="font-size:2.2em;font-weight:900;color:{hero_color};
+              letter-spacing:0.04em;line-height:1;">{hero_title}</div>
+  <div style="font-size:0.88em;color:#8892a4;margin-top:10px;line-height:1.5;">{hero_sub}</div>
 </div>
 """,
     unsafe_allow_html=True,
@@ -273,38 +186,48 @@ st.markdown(
 
 
 # ── Account strip ──────────────────────────────────────────────────────────────
-pnl = equity - cash
-pnl_color = "#00d481" if pnl >= 0 else "#f85149"
-pnl_sign = "+" if pnl >= 0 else "−"
-dd_color = (
-    "#f85149" if drawdown_pct > 2 else ("#f5a623" if drawdown_pct > 0.5 else "#00d481")
-)
-
 st.markdown(
     f"""
-<div class="acct-strip">
-  <div class="acct-card acct-card-accent">
-    <div class="op-label">Account Equity</div>
-    <div class="op-value-lg">{_fmt_money(equity)}</div>
-    <div class="op-muted" style="margin-top:6px;">
-      {pnl_sign}{_fmt_money(abs(pnl))} realized
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:28px;">
+
+  <div style="background:#0d1018;border:1px solid rgba(255,255,255,0.05);
+              border-top:2px solid #00e676;border-radius:18px;padding:20px 22px;">
+    <div style="font-size:0.56em;font-weight:700;letter-spacing:0.14em;
+                text-transform:uppercase;color:#2a3040;margin-bottom:10px;">Account Equity</div>
+    <div style="font-size:2.0em;font-weight:800;color:#e8edf3;line-height:1;
+                font-variant-numeric:tabular-nums;">${eq:,.2f}</div>
+    <div style="font-size:0.72em;color:#2a3040;margin-top:8px;">
+      <span style="color:{pnl_color};">{pnl_sign}${abs(pnl_total):,.2f}</span> realized · {closes} trades
     </div>
   </div>
-  <div class="acct-card acct-card-neutral">
-    <div class="op-label">Cash Available</div>
-    <div class="op-value-lg">{_fmt_money(cash)}</div>
-    <div class="op-muted" style="margin-top:6px;">Coinbase spot</div>
+
+  <div style="background:#0d1018;border:1px solid rgba(255,255,255,0.05);
+              border-top:2px solid #37415a;border-radius:18px;padding:20px 22px;">
+    <div style="font-size:0.56em;font-weight:700;letter-spacing:0.14em;
+                text-transform:uppercase;color:#2a3040;margin-bottom:10px;">Cash Available</div>
+    <div style="font-size:2.0em;font-weight:800;color:#e8edf3;line-height:1;
+                font-variant-numeric:tabular-nums;">${cash:,.2f}</div>
+    <div style="font-size:0.72em;color:#2a3040;margin-top:8px;">Coinbase spot · ready to deploy</div>
   </div>
-  <div class="acct-card {"acct-card-red" if deployed > 0 else "acct-card-neutral"}">
-    <div class="op-label">Deployed</div>
-    <div class="op-value-lg">{_fmt_money(deployed)}</div>
-    <div class="op-muted" style="margin-top:6px;">{len(holdings)} position{"s" if len(holdings) != 1 else ""}</div>
+
+  <div style="background:#0d1018;border:1px solid rgba(255,255,255,0.05);
+              border-top:2px solid #40c4ff;border-radius:18px;padding:20px 22px;">
+    <div style="font-size:0.56em;font-weight:700;letter-spacing:0.14em;
+                text-transform:uppercase;color:#2a3040;margin-bottom:10px;">Holdings</div>
+    <div style="font-size:2.0em;font-weight:800;color:#e8edf3;line-height:1;
+                font-variant-numeric:tabular-nums;">${deployed:,.2f}</div>
+    <div style="font-size:0.72em;color:#2a3040;margin-top:8px;">{len(holdings)} position{"s" if len(holdings) != 1 else ""} · external/manual</div>
   </div>
-  <div class="acct-card {"acct-card-warn" if drawdown_pct > 1 else "acct-card-neutral"}">
-    <div class="op-label">Drawdown</div>
-    <div class="op-value-lg" style="color:{dd_color};">{drawdown_pct:.1f}%</div>
-    <div class="op-muted" style="margin-top:6px;">from starting capital</div>
+
+  <div style="background:#0d1018;border:1px solid rgba(255,255,255,0.05);
+              border-top:2px solid {dd_color};border-radius:18px;padding:20px 22px;">
+    <div style="font-size:0.56em;font-weight:700;letter-spacing:0.14em;
+                text-transform:uppercase;color:#2a3040;margin-bottom:10px;">Drawdown</div>
+    <div style="font-size:2.0em;font-weight:800;color:{dd_color};line-height:1;
+                font-variant-numeric:tabular-nums;">{drawdown:.1f}%</div>
+    <div style="font-size:0.72em;color:#2a3040;margin-top:8px;">from starting capital</div>
   </div>
+
 </div>
 """,
     unsafe_allow_html=True,
@@ -313,108 +236,145 @@ st.markdown(
 
 # ── Symbol grid ────────────────────────────────────────────────────────────────
 st.markdown(
-    '<div class="section-title">Market Scan — Bot\'s Current View</div>',
+    """<div style="font-size:0.56em;font-weight:700;letter-spacing:0.16em;
+  text-transform:uppercase;color:#2a3040;margin-bottom:14px;padding-bottom:10px;
+  border-bottom:1px solid rgba(255,255,255,0.03);">Live Market Scan — Bot's Current View</div>""",
     unsafe_allow_html=True,
 )
 
-cols = st.columns(4, gap="small")
-for i, sym in enumerate(symbols):
+cards_html = '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:28px;">'
+
+for sym in syms:
     score = sym["score"]
     floor = sym["floor"]
-    bar_pct = min(100, int(score / floor * 100)) if floor and score else 0
-    bar_color = _score_color(score, floor)
-    d_color = _decision_color(sym["decision_status"])
-    r_color = sym["regime_color"]
+    bar_pct = _bar(score, floor)
+    sc_color = _score_color(score, floor)
+    dc_color = _decision_color(sym["decision_status"])
+    rc_color = sym["regime_color"]
     entered = sym["decision_status"] == "good"
-    nodata = not sym["has_data"]
+    no_data = not sym["has_data"] or score == 0
+    gap = floor - score if not entered and floor and score else 0
+    gap_html = (
+        f'<span style="font-size:0.70em;color:#2a3040;margin-left:6px;">({gap:.1f} short)</span>'
+        if gap > 0
+        else ""
+    )
+    direction = sym.get("direction", "")
+    dir_html = (
+        f'<span style="color:#37415a;font-size:0.70em;margin-left:4px;">{direction}</span>'
+        if direction
+        else ""
+    )
 
-    card_cls = (
-        "sym-card-entered"
+    border_col = (
+        "#00e67630"
         if entered
         else (
-            "sym-card-nodata"
-            if nodata
-            else "sym-card-watch"
+            "#ffb30020"
             if sym["decision_status"] == "watch"
-            else ""
+            else "rgba(255,255,255,0.04)"
         )
     )
-    score_disp = f"{score:.1f}" if score else "—"
-    dir_tag = f" · {sym['direction']}" if sym["direction"] else ""
-    setup_disp = (
-        f"{sym['setup']}{dir_tag}" if sym["setup"] else dir_tag.lstrip(" · ") or "—"
-    )
+    opacity = "opacity:0.38;" if no_data else ""
 
-    with cols[i % 4]:
-        st.markdown(
-            f"""
-<div class="sym-card {card_cls}" style="margin-bottom:12px;">
-  <div style="display:flex;justify-content:space-between;align-items:center;">
-    <span class="sym-name">{sym["symbol"]}</span>
-    <span class="regime-chip"
-      style="background:{r_color}18;color:{r_color};border:1px solid {r_color}30;">
-      {sym["regime_label"]}
-    </span>
+    cards_html += f"""
+<div style="background:#0d1018;border:1px solid {border_col};border-radius:18px;
+            padding:20px 20px 16px;{opacity}">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;">
+    <span style="font-size:1.3em;font-weight:900;color:#e8edf3;letter-spacing:0.01em;">{sym["symbol"]}</span>
+    <span style="background:{rc_color}18;color:{rc_color};border:1px solid {rc_color}28;
+                 padding:3px 10px;border-radius:100px;font-size:0.58em;font-weight:700;
+                 letter-spacing:0.08em;text-transform:uppercase;">{sym["regime_label"]}</span>
   </div>
 
-  <div class="score-row">
-    <span class="score-num" style="color:{bar_color};">{score_disp}</span>
-    <span class="score-floor">/ {floor:.0f}</span>
+  <div style="font-size:2.4em;font-weight:900;color:{sc_color};line-height:1;
+              font-variant-numeric:tabular-nums;margin-bottom:4px;">
+    {f"{score:.1f}" if score else "—"}
+  </div>
+  <div style="font-size:0.65em;color:#2a3040;margin-bottom:10px;font-variant-numeric:tabular-nums;">
+    floor {floor:.0f}{gap_html}
   </div>
 
-  <div class="score-bar-wrap">
-    <div class="score-bar-fill" style="width:{bar_pct}%;background:{bar_color};opacity:0.75;"></div>
+  <div style="height:4px;background:rgba(255,255,255,0.05);border-radius:2px;margin-bottom:14px;overflow:hidden;">
+    <div style="height:100%;width:{bar_pct}%;background:{sc_color};border-radius:2px;opacity:0.8;"></div>
   </div>
 
-  <div class="decision-row">
-    <span class="decision-label" style="color:{d_color};">{sym["decision_label"]}</span>
-    <span class="sym-age">{sym["age"]}</span>
+  <div style="font-size:0.70em;font-weight:700;letter-spacing:0.07em;
+              text-transform:uppercase;color:{dc_color};">{sym["decision_label"]}</div>
+  <div style="font-size:0.60em;color:#2a3040;margin-top:4px;">
+    {sym.get("setup", "") or "—"}{dir_html}&nbsp;&nbsp;<span style="color:#1e2430;">{sym["age"]}</span>
   </div>
-  <div class="setup-tag mono">{setup_disp}</div>
-</div>
-""",
-            unsafe_allow_html=True,
-        )
-
-    if i == 3:
-        cols = st.columns(4, gap="small")
-
-
-# ── Decision log ───────────────────────────────────────────────────────────────
-st.markdown(
-    '<div class="section-title" style="margin-top:28px;">Decision Log — Last 14 Scans</div>',
-    unsafe_allow_html=True,
-)
-
-log_html = ""
-for d in decisions:
-    d_color = _decision_color(d["decision_status"])
-    score_disp = f"{d['score']:.1f}" if d["score"] else "—"
-    log_html += f"""
-<div class="dlog-row">
-  <span class="dlog-sym">{d["symbol"]}</span>
-  <span class="dlog-decision" style="color:{d_color};">{d["decision_label"]}</span>
-  <span class="dlog-score mono">{score_disp}</span>
-  <span class="dlog-regime" style="color:{d["regime_color"]};font-size:0.60em;font-weight:600;">{d["regime_label"]}</span>
-  <span class="dlog-age">{d["age"]}</span>
 </div>"""
 
-st.markdown(log_html, unsafe_allow_html=True)
+cards_html += "</div>"
+st.markdown(cards_html, unsafe_allow_html=True)
 
-# ── Auto-refresh ───────────────────────────────────────────────────────────────
-st.markdown("<div style='height:32px'></div>", unsafe_allow_html=True)
-col_r, col_s = st.columns([6, 1])
-with col_s:
-    if st.button("↻ Refresh", use_container_width=True):
-        st.rerun()
+
+# ── Bottom two columns: P&L by symbol | Decision log ──────────────────────────
+col_l, col_r = st.columns([1, 1], gap="medium")
+
+with col_l:
+    st.markdown(
+        """<div style="font-size:0.56em;font-weight:700;letter-spacing:0.16em;
+      text-transform:uppercase;color:#2a3040;margin-bottom:14px;padding-bottom:10px;
+      border-bottom:1px solid rgba(255,255,255,0.03);">P&L by Symbol</div>""",
+        unsafe_allow_html=True,
+    )
+
+    max_loss = max((abs(s["total_pnl"]) for s in sym_stats), default=1) or 1
+    bars_html = ""
+    for s in sym_stats:
+        pnl = s["total_pnl"]
+        w = int(abs(pnl) / max_loss * 100)
+        col = "#00e676" if pnl >= 0 else "#ff4757"
+        sign = "+" if pnl >= 0 else "−"
+        bars_html += f"""
+<div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;">
+  <span style="font-size:0.72em;font-weight:700;color:#8892a4;width:36px;">{s["symbol"]}</span>
+  <div style="flex:1;height:6px;background:rgba(255,255,255,0.04);border-radius:3px;overflow:hidden;">
+    <div style="height:100%;width:{w}%;background:{col};border-radius:3px;opacity:0.75;"></div>
+  </div>
+  <span style="font-size:0.70em;font-weight:600;color:{col};width:58px;text-align:right;
+               font-variant-numeric:tabular-nums;">{sign}${abs(pnl):,.2f}</span>
+</div>"""
+    st.markdown(
+        f'<div style="background:#0d1018;border:1px solid rgba(255,255,255,0.04);border-radius:18px;padding:20px 22px;">{bars_html}</div>',
+        unsafe_allow_html=True,
+    )
+
 with col_r:
     st.markdown(
-        f"<div class='op-muted' style='padding-top:8px;'>"
-        f"Auto-refresh off · {pulse['last_scan_msg'] or 'awaiting scan'}"
-        f"</div>",
+        """<div style="font-size:0.56em;font-weight:700;letter-spacing:0.16em;
+      text-transform:uppercase;color:#2a3040;margin-bottom:14px;padding-bottom:10px;
+      border-bottom:1px solid rgba(255,255,255,0.03);">Decision Log</div>""",
+        unsafe_allow_html=True,
+    )
+
+    log_html = ""
+    for d in decisions:
+        dc = _decision_color(d["decision_status"])
+        rc = d["regime_color"]
+        sc_disp = f"{d['score']:.1f}" if d["score"] else "—"
+        log_html += f"""
+<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:10px;
+            margin-bottom:4px;background:rgba(255,255,255,0.015);">
+  <span style="font-size:0.76em;font-weight:800;color:#e8edf3;width:38px;flex-shrink:0;">{d["symbol"]}</span>
+  <span style="font-size:0.65em;font-weight:700;letter-spacing:0.05em;
+               text-transform:uppercase;color:{dc};flex:1;">{d["decision_label"]}</span>
+  <span style="font-size:0.64em;color:#37415a;font-variant-numeric:tabular-nums;width:34px;text-align:right;">{sc_disp}</span>
+  <span style="font-size:0.60em;font-weight:600;color:{rc};width:50px;text-align:right;">{d["regime_label"]}</span>
+  <span style="font-size:0.58em;color:#1e2430;width:44px;text-align:right;">{d["age"]}</span>
+</div>"""
+
+    st.markdown(
+        f'<div style="background:#0d1018;border:1px solid rgba(255,255,255,0.04);border-radius:18px;padding:14px 14px;">{log_html}</div>',
         unsafe_allow_html=True,
     )
 
 
-if __name__ == "__main__":
-    pass
+# ── Refresh ────────────────────────────────────────────────────────────────────
+st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+c1, c2 = st.columns([8, 1])
+with c2:
+    if st.button("↻ Refresh"):
+        st.rerun()

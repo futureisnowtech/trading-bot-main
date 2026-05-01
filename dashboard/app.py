@@ -67,8 +67,14 @@ mode = pulse["mode"].upper()
 
 # ── Hero narrative — trust DB decision, never recalculate ──────────────────────
 entered_now = [s for s in syms if s.get("entered")]
-valid = [s for s in syms if s["has_data"] and s["score"] > 0 and s["floor"] > 0]
-near = sorted(valid, key=lambda s: s["floor"] - s["score"])
+valid = [s for s in syms if s["has_data"] and s["score"] > 0]
+# Use effective floor: 72.0 for quarantined setups, otherwise the regime floor
+for s in valid:
+    is_quarantined = "QUARANTINED" in s["decision_label"].upper()
+    s["eff_floor"] = 72.0 if is_quarantined else s["floor"]
+    s["eff_gap"] = s["eff_floor"] - s["score"]
+
+near = sorted(valid, key=lambda s: s["eff_gap"])
 best = near[0] if near else None
 
 if ks_active:
@@ -81,15 +87,20 @@ elif entered_now:
     hero_color = "#00e676"
     hero_sub = f"{s['symbol']} · {s['setup'] or 'setup'} · {s['regime_label']} · score {s['score']:.1f}"
 elif best:
-    gap = best["floor"] - best["score"]
-    if gap <= 2:
+    gap = best["eff_gap"]
+    if gap <= 0:
+        # Exceeded floor but still here? Must be blocked (e.g. Quarantined < 72, or Econ)
+        hero_title = "VETOED"
+        hero_color = "#37415a"
+        hero_sub = f"{best['symbol']} signal {best['score']:.1f} passed floor {best['floor']:.0f} but was blocked: {best['decision_label']}"
+    elif gap <= 2:
         hero_title = "CLOSE"
         hero_color = "#ffb300"
-        hero_sub = f"{best['symbol']} is {gap:.1f} pts from entry · score {best['score']:.1f} vs floor {best['floor']:.0f} · {best['regime_label']}"
+        hero_sub = f"{best['symbol']} is {gap:.1f} pts from entry · score {best['score']:.1f} vs effective floor {best['eff_floor']:.1f} · {best['regime_label']}"
     else:
         hero_title = "WATCHING"
         hero_color = "#37415a"
-        hero_sub = f"Best candidate: {best['symbol']} · {best['score']:.1f} vs floor {best['floor']:.0f} ({gap:.1f} pts short) · {best['regime_label']}"
+        hero_sub = f"Best candidate: {best['symbol']} · {best['score']:.1f} vs floor {best['eff_floor']:.0f} ({gap:.1f} pts short) · {best['regime_label']}"
 else:
     hero_title = "WATCHING"
     hero_color = "#37415a"

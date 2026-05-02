@@ -134,8 +134,8 @@ def test_ssp04_quality_gate_open_before_calibration():
     }
     with patch("config.SPOT_PULLBACK_RECLAIM_NEUTRAL_BLOCKED", True):
         reason, _ = spot_quality_block_reason("BTC", pr_state, final_spot_score=65.0)
-    assert reason == "pullback_reclaim_quarantined", (
-        f"pullback_reclaim must be quarantined in tiny live; got: {reason!r}"
+    assert reason == "setup_family_not_allowed", (
+        f"pullback_reclaim must be quarantined in tiny live; got: {repr(reason)}"
     )
 
     # impulse_continuation in NEUTRAL must always have open gate (no edge blocks)

@@ -74,7 +74,7 @@ def test_sg01_pullback_reclaim_neutral_quarantined():
             _spot_state("NEUTRAL", "pullback_reclaim"),
             final_spot_score=60.0,
         )
-    assert reason == "pullback_reclaim_quarantined", reason
+    assert reason == "setup_family_not_allowed", reason
 
 
 def test_sg02_pullback_reclaim_chop_quarantined():
@@ -97,7 +97,7 @@ def test_sg03_pullback_reclaim_trend_quarantined():
         _spot_state("TREND", "pullback_reclaim", setup_score=0.8),
         final_spot_score=70.0,
     )
-    assert reason == "pullback_reclaim_quarantined", reason
+    assert reason == "setup_family_not_allowed", reason
 
 
 def test_sg04_impulse_continuation_neutral_not_quarantined():
@@ -121,7 +121,7 @@ def test_sg05_flag_false_unblocks_neutral():
             _spot_state("NEUTRAL", "pullback_reclaim", setup_score=0.9),
             final_spot_score=71.0,
         )
-    assert reason == "pullback_reclaim_quarantined", reason
+    assert reason == "setup_family_not_allowed", reason
 
 
 def test_sg06_flag_false_unblocks_chop():

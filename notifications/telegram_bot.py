@@ -119,34 +119,45 @@ async def uptime_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"System Uptime: {h}h {m}m")
 
 async def run_bot():
-    """Start the Telegram bot."""
-    print("DEBUG: Initializing Telegram Application...")
-    app = ApplicationBuilder().token(TOKEN).build()
-    
-    app.add_handler(CommandHandler("status", status_command))
-    app.add_handler(CommandHandler("logs", logs_command))
-    app.add_handler(CommandHandler("metrics", metrics_command))
-    app.add_handler(CommandHandler("positions", positions_command))
-    app.add_handler(CommandHandler("exposure", exposure_command))
-    app.add_handler(CommandHandler("reboot", reboot_command))
-    app.add_handler(CommandHandler("spread", spread_command))
-    app.add_handler(CommandHandler("audit", audit_command))
-    app.add_handler(CommandHandler("cancel_all", cancel_all_command))
-    app.add_handler(CommandHandler("report", report_command))
-    app.add_handler(CommandHandler("uptime", uptime_command))
+    """Start the Telegram bot manually to avoid loop conflicts."""
+    try:
+        app = ApplicationBuilder().token(TOKEN).build()
+        
+        app.add_handler(CommandHandler("status", status_command))
+        app.add_handler(CommandHandler("logs", logs_command))
+        app.add_handler(CommandHandler("metrics", metrics_command))
+        app.add_handler(CommandHandler("positions", positions_command))
+        app.add_handler(CommandHandler("exposure", exposure_command))
+        app.add_handler(CommandHandler("reboot", reboot_command))
+        app.add_handler(CommandHandler("spread", spread_command))
+        app.add_handler(CommandHandler("audit", audit_command))
+        app.add_handler(CommandHandler("cancel_all", cancel_all_command))
+        app.add_handler(CommandHandler("report", report_command))
+        app.add_handler(CommandHandler("uptime", uptime_command))
 
-    logger.info("Telegram Bot handlers registered. Starting polling...")
-    print("DEBUG: Starting Telegram polling (stop_signals=None)...")
-    await app.run_polling(stop_signals=None)
+        await app.initialize()
+        await app.start()
+        await app.updater.start_polling(stop_signals=None)
+        
+        logger.info("Telegram Bot (Command Suite) is now live and polling.")
+        
+        # Block until the bot is stopped (which it won't be in this daemon thread)
+        stop_event = asyncio.Event()
+        await stop_event.wait()
+        
+    except Exception as e:
+        logger.error(f"Telegram run_bot error: {e}")
 
 def start_bot_thread():
     def _run():
-        print("DEBUG: Telegram thread started.")
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         try:
-            asyncio.run(run_bot())
+            loop.run_until_complete(run_bot())
         except Exception as e:
-            print(f"DEBUG: Telegram bot crashed: {e}")
-            logger.error(f"Telegram bot crashed: {e}")
+            logger.error(f"Telegram thread loop error: {e}")
+        finally:
+            loop.close()
     
     import threading
     t = threading.Thread(target=_run, daemon=True, name="TelegramBotThread")

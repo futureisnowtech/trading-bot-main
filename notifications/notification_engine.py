@@ -181,6 +181,16 @@ def push(event: NotificationEvent) -> Optional[str]:
         conn.commit()
         conn.close()
         logger.debug(f'[notif] {event.severity} {event.category}: {event.title}')
+
+        # Production integration: Send to Telegram if critical or trade event
+        if event.severity == SEV_CRITICAL or event.category in (CAT_TRADE_OPEN, CAT_TRADE_CLOSE):
+            try:
+                from notifications.telegram_bot import send_message as tg_send
+                tg_text = f"<b>{event.title}</b>\n{event.message}"
+                tg_send(tg_text)
+            except Exception as e:
+                logger.error(f"Telegram dispatch error: {e}")
+
         return row_id
     except Exception as e:
         logger.warning(f'[notif] push error: {e}')

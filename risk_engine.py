@@ -119,6 +119,15 @@ def update_balances(
             _state.margin_utilization = margin_usd / current_balance
         _state.ts = time.time()
 
+        # 📊 Metrics
+        try:
+            from monitoring.metrics import update_performance
+            # Daily PnL estimate: current - daily_start
+            pnl = current_balance - _state.daily_start_balance
+            update_performance(pnl, current_balance, _state.drawdown_pct)
+        except ImportError:
+            pass
+
     # Kill switch check is handled by v10_runner.kill_switch_monitor() which
     # passes the correct paper/live flag.  Do NOT call it here — peak_balance
     # starts at the hardcoded 10 000 default and has no mode awareness, which

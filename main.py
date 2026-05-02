@@ -270,6 +270,19 @@ def main():
 
     write_system_heartbeat(_db_path)
 
+    # 📊 Start Prometheus Metrics Server
+    from monitoring.metrics import start_metrics_server
+    start_metrics_server(port=8000)
+
+    # 📡 Start Coinbase WebSocket Feed (Asynchronous Ticker Data + Circuit Breaker)
+    from config import COINBASE_CDP_KEY_NAME, COINBASE_CDP_PRIVATE_KEY
+    if COINBASE_CDP_KEY_NAME and COINBASE_CDP_PRIVATE_KEY:
+        from data.coinbase_websocket import start_coinbase_feed
+        # Nano Perp Products
+        products = ["BIP-20DEC30-CDE", "ETP-20DEC30-CDE", "SLP-20DEC30-CDE", "XPP-20DEC30-CDE"]
+        start_coinbase_feed(COINBASE_CDP_KEY_NAME, COINBASE_CDP_PRIVATE_KEY, products)
+        print("   ✅ Coinbase WebSocket feed started\n")
+
     print("   ✅ Runtime state tables ready\n")
 
     from memory.trade_memory import get_memory_stats

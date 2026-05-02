@@ -75,6 +75,13 @@ def _trigger(reason: str, balance: float = 0.0):
         _halt_ts = time.time()
 
     logger.critical(f"[kill_switch] TRIGGERED: {reason}")
+    
+    # 📊 Metrics
+    try:
+        from monitoring.metrics import update_kill_switch
+        update_kill_switch(True)
+    except ImportError:
+        pass
 
     _now_iso = datetime.now(timezone.utc).isoformat()
 
@@ -188,6 +195,13 @@ def record_api_error(error_msg: str = ""):
     Record an API error. Triggers halt if 5+ errors in 10 minutes.
     Call from perps_engine / binance_broker on any OrderRejected / timeout.
     """
+    # 📊 Metrics
+    try:
+        from monitoring.metrics import increment_api_errors
+        increment_api_errors()
+    except ImportError:
+        pass
+
     now = time.time()
     with _lock:
         _api_errors.append(now)
@@ -208,6 +222,13 @@ def record_latency(latency_seconds: float):
     """
     global _last_latency_ms
     _last_latency_ms = latency_seconds * 1000
+
+    # 📊 Metrics
+    try:
+        from monitoring.metrics import update_latency
+        update_latency(_last_latency_ms)
+    except ImportError:
+        pass
 
     if latency_seconds > _LATENCY_THRESHOLD_S:
         _trigger(
@@ -231,6 +252,13 @@ def resume(reason: str = "manual"):
         _halted = False
         _halt_reason = ""
         _halt_ts = 0.0
+
+    # 📊 Metrics
+    try:
+        from monitoring.metrics import update_kill_switch
+        update_kill_switch(False)
+    except ImportError:
+        pass
 
     try:
         from logging_db.trade_logger import get_logger

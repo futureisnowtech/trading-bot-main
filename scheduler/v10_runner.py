@@ -734,6 +734,15 @@ def _scan_and_trade_inner(spot_only: bool = False):
             logger.info(f"[v10] scan skipped — risk gate: {reason}")
             return
 
+    # 🚨 Volatility Circuit Breaker
+    try:
+        from data.coinbase_websocket import is_volatility_halted, get_halt_time_remaining
+        if is_volatility_halted():
+            logger.warning(f"[v10] scan skipped — VOLATILITY HALT active ({get_halt_time_remaining():.0f}s remaining)")
+            return
+    except ImportError:
+        pass
+
     # Account balance for scanner and sizing
     balance = _get_account_balance()
 
@@ -3505,10 +3514,24 @@ def run_forever():
         schedule.every(2).minutes.do(mes_futures_scan)
         logger.info("[v10] MES futures scanner wired (every 2 min)")
 
+    # 📊 9:00 PM ET 'War Room' Report
+    try:
+        from notifications.reports import send_war_room_report
+        schedule.every().day.at("21:00").do(send_war_room_report)
+    except ImportError:
+        pass
+
     logger.info("[v10] All schedules wired. Running scan immediately...")
 
     # Run immediately on startup (don't wait 5 minutes for first scan)
     scan_and_trade()
+
+    # Production: Send Liftoff message
+    try:
+        from notifications.telegram_bot import send_liftoff
+        send_liftoff()
+    except Exception as _e:
+        logger.debug(f"Liftoff message error: {_e}")
 
     logger.info("[v10] Main loop running. Press Ctrl+C to stop.")
     while True:

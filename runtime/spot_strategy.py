@@ -778,18 +778,6 @@ def spot_quality_block_reason(
 
     import config as _qs_cfg
 
-    if setup_family in set(
-        getattr(_qs_cfg, "SPOT_DISABLED_SETUP_FAMILIES_TINY_LIVE", ("pullback_reclaim",))
-    ):
-        override_score = float(getattr(_qs_cfg, "SPOT_QUARANTINE_OVERRIDE_SCORE", 72.0))
-        if final_spot_score is not None and float(final_spot_score) >= override_score:
-            logger.info(
-                f"[spot_strategy] {clean} quarantined setup {setup_family} "
-                f"OVERRIDDEN by high conviction: {final_spot_score:.1f} >= {override_score}"
-            )
-        else:
-            return f"{setup_family}_quarantined", floor
-
     setup_policy = setup_policy_for_symbol(clean, setup_family, setup_score)
     if not setup_policy["allowed"]:
         return str(setup_policy["reason"] or "setup_family_not_allowed"), floor

@@ -68,13 +68,7 @@ mode = pulse["mode"].upper()
 # ── Hero narrative — trust DB decision, never recalculate ──────────────────────
 entered_now = [s for s in syms if s.get("entered")]
 valid = [s for s in syms if s["has_data"] and s["score"] > 0]
-# Use effective floor: 72.0 for quarantined setups, otherwise the regime floor
-for s in valid:
-    is_quarantined = "QUARANTINED" in s["decision_label"].upper()
-    s["eff_floor"] = 72.0 if is_quarantined else s["floor"]
-    s["eff_gap"] = s["eff_floor"] - s["score"]
-
-near = sorted(valid, key=lambda s: s["eff_gap"])
+near = sorted(valid, key=lambda s: s["floor"] - s["score"])
 best = near[0] if near else None
 
 if ks_active:
@@ -87,20 +81,20 @@ elif entered_now:
     hero_color = "#00e676"
     hero_sub = f"{s['symbol']} · {s['setup'] or 'setup'} · {s['regime_label']} · score {s['score']:.1f}"
 elif best:
-    gap = best["eff_gap"]
+    gap = best["floor"] - best["score"]
     if gap <= 0:
-        # Exceeded floor but still here? Must be blocked (e.g. Quarantined < 72, or Econ)
-        hero_title = "VETOED"
+        # Exceeded floor but still here? Must be blocked (e.g. Econ or dual exposure)
+        hero_title = "BLOCKED"
         hero_color = "#37415a"
         hero_sub = f"{best['symbol']} signal {best['score']:.1f} passed floor {best['floor']:.0f} but was blocked: {best['decision_label']}"
     elif gap <= 2:
         hero_title = "CLOSE"
         hero_color = "#ffb300"
-        hero_sub = f"{best['symbol']} is {gap:.1f} pts from entry · score {best['score']:.1f} vs effective floor {best['eff_floor']:.1f} · {best['regime_label']}"
+        hero_sub = f"{best['symbol']} is {gap:.1f} pts from entry · score {best['score']:.1f} vs floor {best['floor']:.1f} · {best['regime_label']}"
     else:
         hero_title = "WATCHING"
         hero_color = "#37415a"
-        hero_sub = f"Best candidate: {best['symbol']} · {best['score']:.1f} vs floor {best['eff_floor']:.0f} ({gap:.1f} pts short) · {best['regime_label']}"
+        hero_sub = f"Best candidate: {best['symbol']} · {best['score']:.1f} vs floor {best['floor']:.0f} ({gap:.1f} pts short) · {best['regime_label']}"
 else:
     hero_title = "WATCHING"
     hero_color = "#37415a"
@@ -172,9 +166,23 @@ st.markdown(
   <span style="color:#2a3040;font-size:0.65em;">Last scan {pulse["last_scan_age"]}</span>
   <span style="color:#2a3040;font-size:0.65em;">{"● Healthy" if pulse["healthy"] else "⚠ Degraded"}</span>
 </div>
-""",
+""" ,
     unsafe_allow_html=True,
 )
+
+# ── Global Kill-Switch Control ────────────────────────────────────────────────
+col_ks1, col_ks2 = st.columns([10, 2])
+with col_ks2:
+    if ks_active:
+        if st.button("🔓 RESUME SYSTEM", use_container_width=True):
+            import kill_switch
+            kill_switch.resume(reason="Manual resume via dashboard")
+            st.rerun()
+    else:
+        if st.button("🛑 EMERGENCY HALT", use_container_width=True):
+            import kill_switch
+            kill_switch._trigger(reason="Manual halt via dashboard")
+            st.rerun()
 
 
 # ── Hero status ────────────────────────────────────────────────────────────────

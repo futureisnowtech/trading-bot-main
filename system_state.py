@@ -87,11 +87,8 @@ class SystemState:
                 # System Metrics
                 metrics.CPU_PERCENT_GAUGE.set(s["system"]["cpu_percent"])
                 metrics.RAM_PERCENT_GAUGE.set(s["system"]["ram_percent"])
-                
-                if obi != 0:
-                    print(f"DEBUG: Pushing OBI {obi} to Prometheus")
         except Exception as e:
-            print(f"DEBUG: update_prometheus error: {e}")
+            pass
 
     def set_mode(self, mode: str):
         with self.lock:

@@ -64,13 +64,16 @@ def recreate_dashboard(prom_uid, loki_uid):
                     'gridPos': {'h': 8, 'w': 12, 'x': 12, 'y': 0},
                     'datasource': {'type': 'prometheus', 'uid': prom_uid},
                     'targets': [
-                        {'expr': 'algo_bot_microprice_usd', 'refId': 'A', 'legendFormat': 'Micro'},
-                        {'expr': 'algo_bot_mid_price_usd', 'refId': 'B', 'legendFormat': 'Mid'}
+                        {'expr': 'last_over_time(algo_bot_microprice_usd[2m])', 'refId': 'A', 'legendFormat': 'Micro'},
+                        {'expr': 'last_over_time(algo_bot_mid_price_usd[2m])', 'refId': 'B', 'legendFormat': 'Mid'}
                     ],
                     'fieldConfig': {
                         'defaults': {
                             'unit': 'usd',
-                            'decimals': 2
+                            'decimals': 2,
+                            'min': None,
+                            'max': None,
+                            'custom': {'axisSoftMin': None, 'axisSoftMax': None}
                         }
                     },
                     'options': {
@@ -141,11 +144,17 @@ def recreate_dashboard(prom_uid, loki_uid):
                     'type': 'logs',
                     'gridPos': {'h': 12, 'w': 24, 'x': 0, 'y': 16},
                     'datasource': {'type': 'loki', 'uid': loki_uid},
-                    'targets': [{'expr': '{job="algo-bot-logs"} | json | line_format "{{.message}}"', 'refId': 'A'}]
+                    'targets': [{'expr': '{job="algo-bot-logs"} | json | line_format "{{.message}}"', 'refId': 'A'}],
+                    'transformations': [
+                        {
+                            'id': 'extractFields',
+                            'options': {'source': 'labels'}
+                        }
+                    ]
                 }
             ],
             'schemaVersion': 39,
-            'version': 15
+            'version': 20
         },
         'overwrite': True
     }

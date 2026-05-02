@@ -765,8 +765,10 @@ def spot_quality_block_reason(
         active_symbol=clean,
         signal=setup_family,
         obi=float((spot_state.get("frames") or {}).get("5m", {}).get("obi") or 0.0),
-        microprice=float(spot_state.get("microprice") or 0.0)
+        microprice=float(spot_state.get("microprice") or 0.0),
+        mid_price=float(spot_state.get("mid_price") or 0.0)
     )
+    system_state.state.update_prometheus()
 
     floor = score_floor_for_symbol(
         clean,

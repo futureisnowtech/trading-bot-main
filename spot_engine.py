@@ -135,6 +135,8 @@ def _get_broker(paper: bool) -> Optional["CoinbaseSpotBroker"]:
                 system_state.state.update_exchange(buying_power=float(bal.get("usd_available") or 0.0))
         except Exception:
             pass
+        
+        system_state.state.update_prometheus()
             
         return broker
     except Exception as e:
@@ -736,6 +738,7 @@ def open_spot(
     order = None
     execution_route = "paper_market"
     micro_veto = "none"
+    t0 = time.time()
     if paper:
         order = broker.buy_spot(clean, size_usd)
         execution_route = (
@@ -757,9 +760,19 @@ def open_spot(
         if execution_route == "skipped_taker_score":
             logger.info(f"[spot_engine] {clean} blocked — {micro_veto}")
             return None
+    
+    latency = time.time() - t0
     if not order:
         logger.error(f"[spot_engine] {clean} buy failed")
         return None
+    
+    # Push to Prometheus
+    try:
+        from monitoring import metrics
+        metrics.TRADES_COUNTER.inc()
+        metrics.EXECUTION_LATENCY_HISTOGRAM.observe(latency)
+    except Exception:
+        pass
     if _is_paper_like_live_order(order, paper=paper):
         detail = {
             "symbol": clean,
@@ -962,6 +975,7 @@ def close_spot(
     order = None
     execution_route = "paper_market"
     micro_veto = "none"
+    t0 = time.time()
     if paper:
         order = broker.sell_spot(clean, qty)
         execution_route = (
@@ -974,9 +988,19 @@ def close_spot(
         if execution_route == "skipped_microstructure":
             order = broker.sell_spot(clean, qty)
             execution_route = "taker_fallback"
+    
+    latency = time.time() - t0
     if not order:
         logger.error(f"[spot_engine] close_spot {clean}: sell failed")
         return None
+    
+    # Push to Prometheus
+    try:
+        from monitoring import metrics
+        metrics.TRADES_COUNTER.inc()
+        metrics.EXECUTION_LATENCY_HISTOGRAM.observe(latency)
+    except Exception:
+        pass
 
     exit_price = float(
         order.get("average_filled_price") or broker.get_mark_price(clean) or entry_price

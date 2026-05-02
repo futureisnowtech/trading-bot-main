@@ -8,9 +8,26 @@ logger = logging.getLogger(__name__)
 # PnL & Performance
 PNL_GAUGE = Gauge('algo_bot_pnl_usd', 'Real-time PnL in USD (Daily or Session)')
 EQUITY_GAUGE = Gauge('algo_bot_equity_usd', 'Total account equity in USD')
+TOTAL_EQUITY_GAUGE = Gauge('algo_bot_total_equity_usd', 'Total account equity in USD (v2)')
 DRAWDOWN_GAUGE = Gauge('algo_bot_drawdown_pct', 'Current drawdown percentage')
+BUYING_POWER_GAUGE = Gauge('algo_bot_buying_power_usd', 'Available buying power in USD')
 
-# Latency (Target < 15ms)
+# Strategy Vitals
+OBI_GAUGE = Gauge('algo_bot_obi_score', 'Real-time Order Book Imbalance score')
+MICROPRICE_GAUGE = Gauge('algo_bot_microprice', 'Asset microprice (weighted mid)')
+MID_PRICE_GAUGE = Gauge('algo_bot_mid_price', 'Asset mid price')
+
+# Execution & Latency
+TRADES_COUNTER = Counter('algo_bot_total_trades_executed_total', 'Monotonically increasing trade count')
+EXECUTION_LATENCY_HISTOGRAM = Histogram(
+    'algo_bot_execution_latency_seconds',
+    'Order execution latency in seconds',
+    buckets=(.01, .025, .05, .1, .25, .5)
+)
+
+# Legacy / System
+CPU_PERCENT_GAUGE = Gauge('algo_bot_cpu_percent', 'System CPU usage percentage')
+RAM_PERCENT_GAUGE = Gauge('algo_bot_ram_percent', 'System RAM usage percentage')
 LATENCY_GAUGE = Gauge('algo_bot_order_latency_ms', 'Last order fill latency in ms')
 LATENCY_HISTOGRAM = Histogram(
     'algo_bot_order_latency_seconds', 

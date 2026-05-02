@@ -30,6 +30,7 @@ class SystemState:
                 "current_signal": "NONE",
                 "obi": 0.0,
                 "microprice": 0.0,
+                "mid_price": 0.0,
                 "active_positions": [],
             },
             "system": {
@@ -51,7 +52,7 @@ class SystemState:
             if buying_power is not None:
                 self.state["exchange"]["buying_power"] = buying_power
 
-    def update_strategy(self, active_symbol: str = None, signal: str = None, obi: float = None, microprice: float = None, positions: List[Dict] = None):
+    def update_strategy(self, active_symbol: str = None, signal: str = None, obi: float = None, microprice: float = None, mid_price: float = None, positions: List[Dict] = None):
         with self.lock:
             if active_symbol is not None:
                 self.state["strategy"]["active_symbol"] = active_symbol
@@ -61,8 +62,30 @@ class SystemState:
                 self.state["strategy"]["obi"] = obi
             if microprice is not None:
                 self.state["strategy"]["microprice"] = microprice
+            if mid_price is not None:
+                self.state["strategy"]["mid_price"] = mid_price
             if positions is not None:
                 self.state["strategy"]["active_positions"] = positions
+
+    def update_prometheus(self):
+        """Push internal state to Prometheus gauges."""
+        try:
+            from monitoring import metrics
+            with self.lock:
+                s = self.state
+                metrics.OBI_GAUGE.set(s["strategy"]["obi"])
+                metrics.MICROPRICE_GAUGE.set(s["strategy"]["microprice"])
+                metrics.MID_PRICE_GAUGE.set(s["strategy"]["mid_price"])
+                metrics.BUYING_POWER_GAUGE.set(s["exchange"]["buying_power"])
+                # Total equity estimation (Buying Power + Positions)
+                total_pos_val = sum(float(p.get("qty", 0)) * float(p.get("entry", 0)) for p in s["strategy"]["active_positions"])
+                metrics.TOTAL_EQUITY_GAUGE.set(s["exchange"]["buying_power"] + total_pos_val)
+                
+                # System Metrics
+                metrics.CPU_PERCENT_GAUGE.set(s["system"]["cpu_percent"])
+                metrics.RAM_PERCENT_GAUGE.set(s["system"]["ram_percent"])
+        except Exception:
+            pass
 
     def set_mode(self, mode: str):
         with self.lock:

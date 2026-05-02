@@ -39,6 +39,10 @@ $SSH_CMD $NYC_USER@$NYC_IP << EOF
     echo "🏥 Running health check..."
     sleep 10
     docker ps | grep algo-bot-live
+    
+    # 7. Grafana Final Provisioning
+    echo "📊 Finalizing Grafana Dashboards..."
+    docker exec algo-bot-live python3 provision_grafana_final.py
 EOF
 
 echo "✅ Deployment Successful. NYC3 is now LIVE."

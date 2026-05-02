@@ -69,6 +69,7 @@ class SystemState:
 
     def update_prometheus(self):
         """Push internal state to Prometheus gauges."""
+        self.refresh_system_metrics()
         try:
             from monitoring import metrics
             with self.lock:

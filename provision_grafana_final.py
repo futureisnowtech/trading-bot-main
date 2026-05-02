@@ -38,7 +38,7 @@ def hard_reset_datasources():
     return prom_uid, loki_uid
 
 def recreate_dashboard(prom_uid, loki_uid):
-    print("📊 Recreating Dashboard...")
+    print("📊 Recreating Calibrated Watchtower...")
     dashboard = {
         'dashboard': {
             'title': 'Master Sniper Dashboard v2',
@@ -50,7 +50,13 @@ def recreate_dashboard(prom_uid, loki_uid):
                     'type': 'timeseries',
                     'gridPos': {'h': 8, 'w': 12, 'x': 0, 'y': 0},
                     'datasource': {'type': 'prometheus', 'uid': prom_uid},
-                    'targets': [{'expr': 'algo_bot_obi_score', 'refId': 'A'}]
+                    'targets': [{'expr': 'algo_bot_obi_score{instance="algo-bot:8000"}', 'refId': 'A'}],
+                    'fieldConfig': {
+                        'defaults': {
+                            'decimals': 2,
+                            'custom': {'drawStyle': 'line', 'lineInterpolation': 'smooth'}
+                        }
+                    }
                 },
                 {
                     'title': 'Price Vitals (Micro/Mid)',
@@ -58,30 +64,88 @@ def recreate_dashboard(prom_uid, loki_uid):
                     'gridPos': {'h': 8, 'w': 12, 'x': 12, 'y': 0},
                     'datasource': {'type': 'prometheus', 'uid': prom_uid},
                     'targets': [
-                        {'expr': 'algo_bot_microprice', 'refId': 'A', 'legendFormat': 'Micro'},
-                        {'expr': 'algo_bot_mid_price', 'refId': 'B', 'legendFormat': 'Mid'}
-                    ]
+                        {'expr': 'algo_bot_microprice_usd', 'refId': 'A', 'legendFormat': 'Micro'},
+                        {'expr': 'algo_bot_mid_price_usd', 'refId': 'B', 'legendFormat': 'Mid'}
+                    ],
+                    'fieldConfig': {
+                        'defaults': {
+                            'unit': 'usd',
+                            'decimals': 2
+                        }
+                    },
+                    'options': {
+                        'tooltip': {'mode': 'multi'}
+                    }
                 },
                 {
-                    'title': 'System Health: CPU/RAM',
+                    'title': 'CPU Load',
+                    'type': 'gauge',
+                    'gridPos': {'h': 8, 'w': 6, 'x': 0, 'y': 8},
+                    'datasource': {'type': 'prometheus', 'uid': prom_uid},
+                    'targets': [{'expr': 'algo_bot_cpu_percent', 'refId': 'A'}],
+                    'fieldConfig': {
+                        'defaults': {
+                            'unit': 'percent',
+                            'min': 0,
+                            'max': 100,
+                            'thresholds': {
+                                'mode': 'absolute',
+                                'steps': [
+                                    {'color': 'green', 'value': None},
+                                    {'color': 'yellow', 'value': 60},
+                                    {'color': 'orange', 'value': 85},
+                                    {'color': 'red', 'value': 95}
+                                ]
+                            }
+                        }
+                    }
+                },
+                {
+                    'title': 'Memory Saturation',
+                    'type': 'gauge',
+                    'gridPos': {'h': 8, 'w': 6, 'x': 6, 'y': 8},
+                    'datasource': {'type': 'prometheus', 'uid': prom_uid},
+                    'targets': [{'expr': 'algo_bot_ram_percent', 'refId': 'A'}],
+                    'fieldConfig': {
+                        'defaults': {
+                            'unit': 'percent',
+                            'min': 0,
+                            'max': 100,
+                            'thresholds': {
+                                'mode': 'absolute',
+                                'steps': [
+                                    {'color': 'green', 'value': None},
+                                    {'color': 'yellow', 'value': 60},
+                                    {'color': 'orange', 'value': 85},
+                                    {'color': 'red', 'value': 95}
+                                ]
+                            }
+                        }
+                    }
+                },
+                {
+                    'title': 'Account Vitals',
                     'type': 'timeseries',
-                    'gridPos': {'h': 8, 'w': 24, 'x': 0, 'y': 8},
+                    'gridPos': {'h': 8, 'w': 12, 'x': 12, 'y': 8},
                     'datasource': {'type': 'prometheus', 'uid': prom_uid},
                     'targets': [
-                        {'expr': 'algo_bot_cpu_percent', 'refId': 'A', 'legendFormat': 'CPU %'},
-                        {'expr': 'algo_bot_ram_percent', 'refId': 'B', 'legendFormat': 'RAM %'}
-                    ]
+                        {'expr': 'algo_bot_buying_power_usd', 'refId': 'A', 'legendFormat': 'Buying Power'},
+                        {'expr': 'algo_bot_total_equity_usd', 'refId': 'B', 'legendFormat': 'Total Equity'}
+                    ],
+                    'fieldConfig': {
+                        'defaults': {'unit': 'usd', 'decimals': 2}
+                    }
                 },
                 {
                     'title': 'Real-time Logs (Loki)',
                     'type': 'logs',
-                    'gridPos': {'h': 10, 'w': 24, 'x': 0, 'y': 16},
+                    'gridPos': {'h': 12, 'w': 24, 'x': 0, 'y': 16},
                     'datasource': {'type': 'loki', 'uid': loki_uid},
-                    'targets': [{'expr': '{job="algo-bot"}', 'refId': 'A'}]
+                    'targets': [{'expr': '{job="algo-bot-logs"} | json | line_format "{{.message}}"', 'refId': 'A'}]
                 }
             ],
             'schemaVersion': 39,
-            'version': 10
+            'version': 15
         },
         'overwrite': True
     }
@@ -89,7 +153,6 @@ def recreate_dashboard(prom_uid, loki_uid):
     print(f'✅ Dashboard Re-Sync Complete.')
 
 if __name__ == '__main__':
-    # Wait for Grafana to be ready
     time.sleep(2)
     p_uid, l_uid = hard_reset_datasources()
     recreate_dashboard(p_uid, l_uid)

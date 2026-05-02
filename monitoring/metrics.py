@@ -14,8 +14,8 @@ BUYING_POWER_GAUGE = Gauge('algo_bot_buying_power_usd', 'Available buying power 
 
 # Strategy Vitals
 OBI_GAUGE = Gauge('algo_bot_obi_score', 'Real-time Order Book Imbalance score')
-MICROPRICE_GAUGE = Gauge('algo_bot_microprice', 'Asset microprice (weighted mid)')
-MID_PRICE_GAUGE = Gauge('algo_bot_mid_price', 'Asset mid price')
+MICROPRICE_GAUGE = Gauge('algo_bot_microprice_usd', 'Asset microprice (weighted mid)')
+MID_PRICE_GAUGE = Gauge('algo_bot_mid_price_usd', 'Asset mid price')
 
 # Execution & Latency
 TRADES_COUNTER = Counter('algo_bot_total_trades_executed_total', 'Monotonically increasing trade count')

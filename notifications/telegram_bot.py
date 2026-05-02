@@ -137,7 +137,7 @@ async def run_bot():
 
         await app.initialize()
         await app.start()
-        await app.updater.start_polling(stop_signals=None)
+        await app.updater.start_polling()
         
         logger.info("Telegram Bot (Command Suite) is now live and polling.")
         

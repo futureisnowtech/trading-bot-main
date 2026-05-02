@@ -3534,9 +3534,12 @@ def run_forever():
         logger.debug(f"Liftoff message error: {_e}")
 
     logger.info("[v10] Main loop running. Press Ctrl+C to stop.")
+    import system_state
     while True:
         try:
             schedule.run_pending()
+            # 💓 Periodic Metric Heartbeat
+            system_state.state.update_prometheus()
             time.sleep(1)
         except KeyboardInterrupt:
             logger.info("[v10] Shutdown requested via KeyboardInterrupt")

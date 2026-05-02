@@ -2,7 +2,7 @@ import requests
 import json
 import time
 
-GRAFANA_URL = 'http://localhost:3000'
+GRAFANA_URL = 'http://grafana:3000'
 AUTH = ('admin', 'Sniper2026!')
 
 def hard_reset_datasources():

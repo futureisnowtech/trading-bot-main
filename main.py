@@ -274,6 +274,10 @@ def main():
     from monitoring.metrics import start_metrics_server
     start_metrics_server(port=8000)
 
+    # 🤖 Start Telegram Bot (Command Suite)
+    from notifications.telegram_bot import start_bot_thread
+    start_bot_thread()
+
     # 📡 Start Coinbase WebSocket Feed (Asynchronous Ticker Data + Circuit Breaker)
     from config import COINBASE_CDP_KEY_NAME, COINBASE_CDP_PRIVATE_KEY
     if COINBASE_CDP_KEY_NAME and COINBASE_CDP_PRIVATE_KEY:

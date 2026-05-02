@@ -53,7 +53,7 @@ logger = logging.getLogger(__name__)
 
 try:
     from execution.coinbase_spot_broker import CoinbaseSpotBroker, get_spot_broker
-
+    import system_state
     _BROKER_OK = True
 except Exception:
     _BROKER_OK = False
@@ -119,15 +119,27 @@ def _get_db_path() -> str:
 
 def _get_broker(paper: bool) -> Optional["CoinbaseSpotBroker"]:
     if not _BROKER_OK:
+        system_state.state.update_exchange(connected=False)
         return None
     try:
         broker = get_spot_broker()
         broker._paper = bool(paper)
         if not broker.is_connected():
             broker.connect()
+        
+        # Update system state
+        system_state.state.update_exchange(connected=True)
+        try:
+            bal = broker.get_spot_balance()
+            if bal:
+                system_state.state.update_exchange(buying_power=float(bal.get("usd_available") or 0.0))
+        except Exception:
+            pass
+            
         return broker
     except Exception as e:
         logger.error(f"[spot_engine] broker init error: {e}")
+        system_state.state.update_exchange(connected=False)
         return None
 
 

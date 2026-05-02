@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+import system_state
 
 logger = logging.getLogger(__name__)
 
@@ -758,6 +759,14 @@ def spot_quality_block_reason(
     setup_family = str(spot_state.get("setup_family") or "")
     setup_score = float(spot_state.get("setup_score") or 0.0)
     confirm_count = int(spot_state.get("structural_confirm_count") or 0)
+    
+    # Push to system state
+    system_state.state.update_strategy(
+        signal=setup_family,
+        obi=float((spot_state.get("frames") or {}).get("5m", {}).get("obi") or 0.0),
+        microprice=float(spot_state.get("microprice") or 0.0)
+    )
+
     floor = score_floor_for_symbol(
         clean,
         regime,

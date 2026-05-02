@@ -16,6 +16,7 @@ class SystemState:
 
     def _initialize(self):
         self.start_time = time.time()
+        self.last_metrics_refresh = 0
         self.state = {
             "mode": "PAPER",  # PAPER or LIVE
             "exchange": {
@@ -68,10 +69,14 @@ class SystemState:
             self.state["mode"] = mode.upper()
 
     def refresh_system_metrics(self):
+        now = time.time()
         with self.lock:
+            if now - self.last_metrics_refresh < 5.0:
+                return
+            self.last_metrics_refresh = now
             self.state["system"]["cpu_percent"] = psutil.cpu_percent()
             self.state["system"]["ram_percent"] = psutil.virtual_memory().percent
-            self.state["system"]["uptime_seconds"] = int(time.time() - self.start_time)
+            self.state["system"]["uptime_seconds"] = int(now - self.start_time)
 
     def get_state(self) -> Dict[str, Any]:
         self.refresh_system_metrics()

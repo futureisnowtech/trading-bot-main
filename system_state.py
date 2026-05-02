@@ -73,10 +73,12 @@ class SystemState:
             from monitoring import metrics
             with self.lock:
                 s = self.state
-                metrics.OBI_GAUGE.set(s["strategy"]["obi"])
+                obi = float(s["strategy"]["obi"])
+                metrics.OBI_GAUGE.set(obi)
                 metrics.MICROPRICE_GAUGE.set(s["strategy"]["microprice"])
                 metrics.MID_PRICE_GAUGE.set(s["strategy"]["mid_price"])
                 metrics.BUYING_POWER_GAUGE.set(s["exchange"]["buying_power"])
+                
                 # Total equity estimation (Buying Power + Positions)
                 total_pos_val = sum(float(p.get("qty", 0)) * float(p.get("entry", 0)) for p in s["strategy"]["active_positions"])
                 metrics.TOTAL_EQUITY_GAUGE.set(s["exchange"]["buying_power"] + total_pos_val)
@@ -84,8 +86,11 @@ class SystemState:
                 # System Metrics
                 metrics.CPU_PERCENT_GAUGE.set(s["system"]["cpu_percent"])
                 metrics.RAM_PERCENT_GAUGE.set(s["system"]["ram_percent"])
-        except Exception:
-            pass
+                
+                if obi != 0:
+                    print(f"DEBUG: Pushing OBI {obi} to Prometheus")
+        except Exception as e:
+            print(f"DEBUG: update_prometheus error: {e}")
 
     def set_mode(self, mode: str):
         with self.lock:

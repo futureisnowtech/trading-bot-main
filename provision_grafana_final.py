@@ -17,7 +17,7 @@ def hard_reset_datasources():
     ds_prom = {
         'name': 'Prometheus',
         'type': 'prometheus',
-        'url': 'http://localhost:9090',
+        'url': 'http://prometheus:9090',
         'access': 'proxy',
         'isDefault': True
     }
@@ -28,7 +28,7 @@ def hard_reset_datasources():
     ds_loki = {
         'name': 'Loki',
         'type': 'loki',
-        'url': 'http://localhost:3100',
+        'url': 'http://loki:3100',
         'access': 'proxy'
     }
     r2 = requests.post(f'{GRAFANA_URL}/api/datasources', json=ds_loki, auth=AUTH)

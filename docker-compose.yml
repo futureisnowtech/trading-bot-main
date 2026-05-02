@@ -3,7 +3,10 @@ services:
     build: .
     container_name: algo-bot-live
     restart: unless-stopped
-    network_mode: "host"
+    networks:
+      - trading-network
+    ports:
+      - "8000:8000"
     env_file:
       - .env
     volumes:
@@ -23,7 +26,10 @@ services:
     image: prom/prometheus:latest
     container_name: prometheus
     restart: unless-stopped
-    network_mode: "host"
+    networks:
+      - trading-network
+    ports:
+      - "9090:9090"
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus_data:/prometheus
@@ -38,7 +44,10 @@ services:
     image: grafana/loki:latest
     container_name: loki
     restart: unless-stopped
-    network_mode: "host"
+    networks:
+      - trading-network
+    ports:
+      - "3100:3100"
     volumes:
       - ./monitoring/loki-config.yml:/etc/loki/local-config.yaml
     command: -config.file=/etc/loki/local-config.yaml
@@ -47,7 +56,8 @@ services:
     image: grafana/promtail:latest
     container_name: promtail
     restart: unless-stopped
-    network_mode: "host"
+    networks:
+      - trading-network
     volumes:
       - ./logs:/app/logs
       - ./monitoring/promtail-config.yml:/etc/promtail/config.yml
@@ -57,7 +67,10 @@ services:
     image: grafana/grafana:latest
     container_name: grafana
     restart: unless-stopped
-    network_mode: "host"
+    networks:
+      - trading-network
+    ports:
+      - "3000:3000"
     environment:
       - GF_INSTALL_PLUGINS=volkovlabs-echarts-panel
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
@@ -66,6 +79,10 @@ services:
     depends_on:
       - prometheus
       - loki
+
+networks:
+  trading-network:
+    driver: bridge
 
 volumes:
   prometheus_data:

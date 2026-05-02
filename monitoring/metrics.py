@@ -45,8 +45,8 @@ STRATEGY_DRIFT_GAUGE = Gauge('algo_bot_strategy_drift', 'Difference between sign
 def start_metrics_server(port=8000):
     """Start the Prometheus metrics HTTP server."""
     try:
-        start_http_server(port)
-        logger.info(f"📊 Prometheus metrics server started on port {port}")
+        start_http_server(port, addr='0.0.0.0')
+        logger.info(f"📊 Prometheus metrics server started on 0.0.0.0:{port}")
     except Exception as e:
         logger.error(f"❌ Failed to start metrics server: {e}")
 

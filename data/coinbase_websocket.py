@@ -10,6 +10,8 @@ from typing import Dict, List, Optional
 import websockets
 from threading import Thread
 
+import system_state
+
 logger = logging.getLogger(__name__)
 
 # ─── Volatility Circuit Breaker State ────────────────────────────────────────
@@ -103,6 +105,7 @@ class CoinbaseWebsocketFeed:
         while self._running:
             try:
                 async with websockets.connect(self.uri) as ws:
+                    system_state.state.update_exchange(ws_connected=True)
                     # Subscribe
                     jwt_token = self._generate_jwt()
                     subscribe_msg = {
@@ -125,6 +128,7 @@ class CoinbaseWebsocketFeed:
                                         latest_prices[symbol] = price
                                         _check_circuit_breaker(symbol, price)
             except Exception as e:
+                system_state.state.update_exchange(ws_connected=False)
                 logger.error(f"❌ Coinbase WS Error: {e}")
                 await asyncio.sleep(5) # Backoff
 

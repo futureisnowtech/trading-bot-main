@@ -34,9 +34,10 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bp = state["exchange"]["buying_power"]
     obi = state["strategy"]["obi"]
     msg = (
-        f"<b>SYSTEM: ACTIVE</b>\n"
+        f"<b>SYSTEM: {state['mode']}</b>\n"
+        f"REST: {'✅' if state['exchange']['connected'] else '❌'} | WS: {'✅' if state['exchange']['ws_connected'] else '❌'}\n"
         f"CP: ${bp:,.2f} | OBI: {obi:+.2f}\n"
-        f"Signal: {state['strategy']['current_signal']}"
+        f"Signal: {state['strategy']['current_signal']} ({state['strategy']['active_symbol']})"
     )
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
@@ -95,8 +96,17 @@ async def spread_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @restricted_access
 async def audit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("📜 Triggering system audit...")
-    # Logic to trigger audit can be added here
+    # System sanity check
+    state = system_state.state.get_state()
+    issues = []
+    if not state["exchange"]["connected"]: issues.append("REST Disconnected")
+    if not state["exchange"]["ws_connected"]: issues.append("WS Disconnected")
+    if state["system"]["cpu_percent"] > 90: issues.append("High CPU Usage")
+    
+    if not issues:
+        await update.message.reply_text("✅ Audit Passed: System integrity verified.")
+    else:
+        await update.message.reply_text(f"⚠️ Audit Issues Found:\n- " + "\n- ".join(issues))
 
 @restricted_access
 async def cancel_all_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -109,7 +119,25 @@ async def cancel_all_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 @restricted_access
 async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("📊 Generating daily report...")
+    # Today's summary (simplified)
+    from logging_db.trade_logger import load_trade_history
+    try:
+        trades = load_trade_history(limit=50)
+        # Filter for today
+        today = time.strftime("%Y-%m-%d")
+        today_trades = [t for v in trades.values() for t in v if str(t.get("exit_time", "")).startswith(today)]
+        wins = len([t for t in today_trades if float(t.get("pnl_net_usd", 0)) > 0])
+        total_pnl = sum(float(t.get("pnl_net_usd", 0)) for t in today_trades)
+        
+        msg = (
+            f"<b>Daily Report ({today})</b>\n"
+            f"Trades: {len(today_trades)}\n"
+            f"Win Rate: {(wins/len(today_trades)*100 if today_trades else 0):.1f}%\n"
+            f"Net PnL: ${total_pnl:+.2f}"
+        )
+        await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+    except Exception as e:
+        await update.message.reply_text(f"Error generating report: {e}")
 
 @restricted_access
 async def uptime_command(update: Update, context: ContextTypes.DEFAULT_TYPE):

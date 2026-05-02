@@ -76,6 +76,9 @@ def main():
     if args.mode:
         os.environ["PAPER_TRADING"] = "true" if args.mode == "paper" else "false"
 
+    import system_state
+    system_state.state.set_mode("PAPER" if os.environ.get("PAPER_TRADING", "true").lower() == "true" else "LIVE")
+
     from config import (
         PAPER_TRADING,
         ACCOUNT_SIZE,

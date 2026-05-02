@@ -762,6 +762,7 @@ def spot_quality_block_reason(
     
     # Push to system state
     system_state.state.update_strategy(
+        active_symbol=clean,
         signal=setup_family,
         obi=float((spot_state.get("frames") or {}).get("5m", {}).get("obi") or 0.0),
         microprice=float(spot_state.get("microprice") or 0.0)

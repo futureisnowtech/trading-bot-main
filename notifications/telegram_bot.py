@@ -120,6 +120,7 @@ async def uptime_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def run_bot():
     """Start the Telegram bot."""
+    print("DEBUG: Initializing Telegram Application...")
     app = ApplicationBuilder().token(TOKEN).build()
     
     app.add_handler(CommandHandler("status", status_command))
@@ -135,14 +136,20 @@ async def run_bot():
     app.add_handler(CommandHandler("uptime", uptime_command))
 
     logger.info("Telegram Bot handlers registered. Starting polling...")
-    await app.run_polling()
+    print("DEBUG: Starting Telegram polling (stop_signals=None)...")
+    await app.run_polling(stop_signals=None)
 
 def start_bot_thread():
     def _run():
-        asyncio.run(run_bot())
+        print("DEBUG: Telegram thread started.")
+        try:
+            asyncio.run(run_bot())
+        except Exception as e:
+            print(f"DEBUG: Telegram bot crashed: {e}")
+            logger.error(f"Telegram bot crashed: {e}")
     
     import threading
-    t = threading.Thread(target=_run, daemon=True)
+    t = threading.Thread(target=_run, daemon=True, name="TelegramBotThread")
     t.start()
     return t
 

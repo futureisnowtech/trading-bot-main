@@ -74,7 +74,7 @@ class SystemState:
             if now - self.last_metrics_refresh < 5.0:
                 return
             self.last_metrics_refresh = now
-            self.state["system"]["cpu_percent"] = psutil.cpu_percent()
+            self.state["system"]["cpu_percent"] = psutil.cpu_percent(interval=0.1)
             self.state["system"]["ram_percent"] = psutil.virtual_memory().percent
             self.state["system"]["uptime_seconds"] = int(now - self.start_time)
 

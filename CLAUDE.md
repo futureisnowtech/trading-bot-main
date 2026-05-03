@@ -14,7 +14,7 @@ If this file ever conflicts with `AGENTS.md`, `AGENTS.md` wins.
 ## Current Repo Truth
 
 - Canonical repo: `/Users/joshmacbookair2020/Projects/algo_trading_final`
-- Current version: `v18.15`
+- Current version: `v18.16`
 - Authoritative live lane: **Coinbase spot scalp**
 - Launch target: **tiny live only**
 - Canonical live-launch path: `python3 scripts/go_live.py`

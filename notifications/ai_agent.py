@@ -76,8 +76,8 @@ def ask_ai(query: str) -> str:
         return "Error: ANTHROPIC_API_KEY is not set."
 
     model = os.environ.get("CLAUDE_MODEL") or CLAUDE_MODEL
-    if model == "claude-sonnet-4-6": # Handle placeholder in config.py
-        model = "claude-3-5-sonnet-latest"
+    # In May 2026, the 'legacy' 3.5 names might be 404ing.
+    # We will trust the canonical 'config.py' which specifies 'claude-sonnet-4-6'.
     
     context = get_repo_context()
     

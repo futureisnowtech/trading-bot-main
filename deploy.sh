@@ -101,6 +101,12 @@ cat ${PROJECT_DIR}/version.txt
 REMOTE_EOF
 
 echo "Refreshing local SOP live snapshot..."
+SOP_BRANCH="${BRANCH}" \
+SOP_DEPLOYED_SHA="${LOCAL_SHA}" \
+SOP_DEPLOYED_AT_UTC="${DEPLOY_UTC}" \
+SOP_DASHBOARD_UID="${DASHBOARD_UID}" \
+SOP_PROMETHEUS_TARGET="${PROMETHEUS_TARGET}" \
+SOP_DOCKER_HEALTH="healthy" \
 python3 scripts/refresh_sop.py
 
 echo ""

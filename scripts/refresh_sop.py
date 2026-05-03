@@ -28,13 +28,20 @@ FALLBACK_UID = "d9ecf89d-5e95-4e63-b0ae-f8008debbc0f"
 FALLBACK_PROM_TARGET = "algo-bot-live:8000"
 
 
-def _run(cmd: list[str], *, cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
+def _run(
+    cmd: list[str],
+    *,
+    cwd: Path | None = None,
+    check: bool = True,
+    timeout: float | None = None,
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         cmd,
         cwd=str(cwd or ROOT),
         check=check,
         text=True,
         capture_output=True,
+        timeout=timeout,
     )
 
 
@@ -153,18 +160,26 @@ print(json.dumps(data))
 PY"""
 
     remote_cmd = f"bash -lc {shlex.quote(remote_python)}"
-    result = _run(
-        [
-            "ssh",
-            "-p",
-            REMOTE_PORT,
-            "-o",
-            "StrictHostKeyChecking=no",
-            REMOTE_HOST,
-            remote_cmd,
-        ],
-        check=False,
-    )
+    try:
+        result = _run(
+            [
+                "ssh",
+                "-p",
+                REMOTE_PORT,
+                "-o",
+                "StrictHostKeyChecking=no",
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "ConnectTimeout=5",
+                REMOTE_HOST,
+                remote_cmd,
+            ],
+            check=False,
+            timeout=10,
+        )
+    except subprocess.TimeoutExpired:
+        return {}, "ssh snapshot timed out"
     if result.returncode != 0:
         return {}, (result.stderr or result.stdout or "ssh failed").strip()
     try:
@@ -174,6 +189,13 @@ PY"""
 
 
 def main() -> int:
+    env_branch = os.getenv("SOP_BRANCH")
+    env_deployed_sha = os.getenv("SOP_DEPLOYED_SHA")
+    env_deployed_at = os.getenv("SOP_DEPLOYED_AT_UTC")
+    env_dashboard_uid = os.getenv("SOP_DASHBOARD_UID")
+    env_prom_target = os.getenv("SOP_PROMETHEUS_TARGET")
+    env_docker_health = os.getenv("SOP_DOCKER_HEALTH")
+
     remote, remote_error = _remote_snapshot()
     manifest = remote.get("manifest") or {}
     version_txt = remote.get("version") or {}
@@ -182,15 +204,15 @@ def main() -> int:
     payload = {
         "generated_at_local": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
         "canonical_version": _extract_version(),
-        "branch": _git_branch(),
+        "branch": env_branch or _git_branch(),
         "local_head_sha": _git_head(),
         "github_sha": _git_github_sha(),
         "worktree_dirty": _worktree_dirty(),
-        "deployed_sha": version_txt.get("sha") or manifest.get("sha"),
-        "deployed_at_utc": version_txt.get("deployed_at_utc") or manifest.get("deployed_at_utc"),
-        "dashboard_uid": manifest.get("dashboard_uid") or FALLBACK_UID,
-        "prometheus_target": manifest.get("prometheus_target") or FALLBACK_PROM_TARGET,
-        "docker_health": remote.get("docker_health"),
+        "deployed_sha": env_deployed_sha or version_txt.get("sha") or manifest.get("sha"),
+        "deployed_at_utc": env_deployed_at or version_txt.get("deployed_at_utc") or manifest.get("deployed_at_utc"),
+        "dashboard_uid": env_dashboard_uid or manifest.get("dashboard_uid") or FALLBACK_UID,
+        "prometheus_target": env_prom_target or manifest.get("prometheus_target") or FALLBACK_PROM_TARGET,
+        "docker_health": env_docker_health or remote.get("docker_health"),
         "runtime_mode": remote.get("runtime_mode"),
         "launch_readiness": remote.get("launch_readiness"),
         "global_status": remote.get("global_status"),

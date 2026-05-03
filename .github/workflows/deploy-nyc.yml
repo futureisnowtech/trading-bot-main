@@ -73,7 +73,7 @@ jobs:
           pip install \
             pytest pytest-cov ruff \
             python-dotenv pandas numpy pytz requests \
-            yfinance schedule \
+            yfinance schedule psutil \
             "pandas-ta>=0.3.14b0"
           pip install "python-binance>=1.0.19"
           pip install scikit-learn lightgbm xgboost

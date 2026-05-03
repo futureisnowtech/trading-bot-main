@@ -47,6 +47,7 @@ praw>=7.7.0           # Reddit sentiment (optional — graceful fallback if not 
 tabulate>=0.9.0
 colorama>=0.4.6
 loguru>=0.7.2
+psutil>=5.9.0
 
 # ─── Testing / CI ─────────────────────────────────────────────────────────────
 pytest>=8.0.0

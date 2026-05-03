@@ -44,7 +44,7 @@ def test_error_rate_excludes_health_check(proof_runtime):
             source="health_check",
             message=f"Health 4/6 [UNHEALTHY] | FAIL: stagnant: ZRO({i + 100}m)",
         )
-    from data.health import get_error_rate_1h
+    from dashboard.data.health import get_error_rate_1h
 
     assert get_error_rate_1h() == 0, (
         "health_check ERRORs must not count — they are shown via get_health_check_failures()"
@@ -65,7 +65,7 @@ def test_error_rate_counts_real_runtime_errors(proof_runtime):
         source="v10_runner",
         message="Entry failed: size returned zero",
     )
-    from data.health import get_error_rate_1h
+    from dashboard.data.health import get_error_rate_1h
 
     assert get_error_rate_1h() == 2
 
@@ -87,7 +87,7 @@ def test_error_rate_mixed_sources_counts_only_real_errors(proof_runtime):
         source="perps_engine",
         message="close_position failed: connection reset",
     )
-    from data.health import get_error_rate_1h
+    from dashboard.data.health import get_error_rate_1h
 
     assert get_error_rate_1h() == 1
 
@@ -103,7 +103,7 @@ def test_error_rate_ignores_info_and_warning(proof_runtime):
         source="risk_manager",
         message="low margin",
     )
-    from data.health import get_error_rate_1h
+    from dashboard.data.health import get_error_rate_1h
 
     assert get_error_rate_1h() == 0
 
@@ -126,7 +126,7 @@ def test_error_detail_excludes_health_check(proof_runtime):
             source="health_check",
             message="Health 4/6 [UNHEALTHY] | FAIL: stagnant: XRP(6000m)",
         )
-    from data.health import get_recent_errors_detail
+    from dashboard.data.health import get_recent_errors_detail
 
     assert get_recent_errors_detail() == [], (
         "health_check source must be excluded — use get_health_check_failures() for those"
@@ -141,7 +141,7 @@ def test_error_detail_includes_scanner_errors(proof_runtime):
         source="scanner",
         message="Binance fetch failed: ReadTimeout",
     )
-    from data.health import get_recent_errors_detail
+    from dashboard.data.health import get_recent_errors_detail
 
     errors = get_recent_errors_detail()
     assert len(errors) == 1
@@ -164,7 +164,7 @@ def test_error_detail_deduplicates_by_fingerprint(proof_runtime):
             source="scanner",
             message=f"Binance timeout after {i + 1}s attempt {i}",
         )
-    from data.health import get_recent_errors_detail
+    from dashboard.data.health import get_recent_errors_detail
 
     errors = get_recent_errors_detail()
     assert len(errors) == 1, "8 similar scanner errors must collapse to 1 group"
@@ -185,7 +185,7 @@ def test_error_detail_separates_different_sources(proof_runtime):
         source="perps_engine",
         message="close_position failed",
     )
-    from data.health import get_recent_errors_detail
+    from dashboard.data.health import get_recent_errors_detail
 
     errors = get_recent_errors_detail()
     sources = {e["source"] for e in errors}
@@ -220,7 +220,7 @@ def test_health_failures_empty_when_latest_event_is_healthy(proof_runtime):
         source="health_check",
         message="Health 6/6 [HEALTHY]",
     )
-    from data.health import get_health_check_failures
+    from dashboard.data.health import get_health_check_failures
 
     assert get_health_check_failures() == [], (
         "Old UNHEALTHY records must not show once latest event is HEALTHY"
@@ -239,7 +239,7 @@ def test_health_failures_parses_multiple_failing_checks(proof_runtime):
             "scan_liveness: Last heartbeat 1200s ago (threshold 900s)"
         ),
     )
-    from data.health import get_health_check_failures
+    from dashboard.data.health import get_health_check_failures
 
     failures = get_health_check_failures()
     assert len(failures) == 2
@@ -261,7 +261,7 @@ def test_health_failures_every_entry_has_fix_prompt(proof_runtime):
             "error_rate: 12 errors in last hour"
         ),
     )
-    from data.health import get_health_check_failures
+    from dashboard.data.health import get_health_check_failures
 
     for f in get_health_check_failures():
         assert f.get("fix_prompt"), f"Missing fix_prompt on check '{f['source']}'"
@@ -278,7 +278,7 @@ def test_health_failures_are_flagged_live(proof_runtime):
         source="health_check",
         message="Health 5/6 [DEGRADED] | FAIL: stagnant: Stagnant positions: PEPE(100m)",
     )
-    from data.health import get_health_check_failures
+    from dashboard.data.health import get_health_check_failures
 
     for f in get_health_check_failures():
         assert f.get("live") is True, (
@@ -288,7 +288,7 @@ def test_health_failures_are_flagged_live(proof_runtime):
 
 def test_health_failures_empty_when_no_events(proof_runtime):
     """No health_check events at all must return empty list (not raise)."""
-    from data.health import get_health_check_failures
+    from dashboard.data.health import get_health_check_failures
 
     assert get_health_check_failures() == []
 
@@ -315,7 +315,7 @@ def test_banner_no_errors_false_when_health_degraded_and_no_runtime_errors(
         source="health_check",
         message="Health 5/6 [DEGRADED] | FAIL: stagnant: ZRO(4253m)",
     )
-    from data.health import get_error_rate_1h, get_health_check_failures
+    from dashboard.data.health import get_error_rate_1h, get_health_check_failures
 
     error_rate = get_error_rate_1h()
     health_issues = get_health_check_failures()
@@ -345,7 +345,7 @@ def test_banner_no_errors_true_when_all_clear(proof_runtime):
         source="heartbeat",
         message="scan ok: 42 candidates → 1 entries",
     )
-    from data.health import get_error_rate_1h, get_health_check_failures
+    from dashboard.data.health import get_error_rate_1h, get_health_check_failures
 
     error_rate = get_error_rate_1h()
     health_issues = get_health_check_failures()
@@ -368,7 +368,7 @@ def test_banner_no_errors_false_when_runtime_errors_exist(proof_runtime):
         source="scanner",
         message="All 3 exchange fetches failed",
     )
-    from data.health import get_error_rate_1h, get_health_check_failures
+    from dashboard.data.health import get_error_rate_1h, get_health_check_failures
 
     error_rate = get_error_rate_1h()
     health_issues = get_health_check_failures()

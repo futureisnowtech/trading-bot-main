@@ -5,12 +5,13 @@ import psutil
 import time
 import subprocess
 from functools import wraps
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters, CallbackQueryHandler
 from telegram.constants import ParseMode
 
 import system_state
 from spot_engine import get_spot_positions, _get_broker
+from notifications.ai_agent import ask_ai
 
 logger = logging.getLogger(__name__)
 
@@ -285,6 +286,57 @@ async def uptime_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 @restricted_access
+async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = " ".join(context.args)
+    if not query:
+        await update.message.reply_text("Please provide a question. Usage: /ask <question>")
+        return
+    await _handle_ai_query(update, query)
+
+
+@restricted_access
+async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.message.text:
+        return
+    await _handle_ai_query(update, update.message.text)
+
+
+async def _handle_ai_query(update: Update, query: str):
+    thinking_msg = await update.message.reply_text("<i>Thinking...</i>", parse_mode=ParseMode.HTML)
+    
+    try:
+        response = await asyncio.to_thread(ask_ai, query)
+        
+        keyboard = [
+            [
+                InlineKeyboardButton("🔍 View Logs", callback_data="cmd_logs"),
+                InlineKeyboardButton("📉 Show OBI", callback_data="cmd_spread"),
+            ],
+            [
+                InlineKeyboardButton("🛠️ Fix Issue (Reboot)", callback_data="cmd_reboot"),
+            ],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await thinking_msg.edit_text(response, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+    except Exception as e:
+        logger.error(f"AI handler error: {e}")
+        await thinking_msg.edit_text(f"Error: {str(e)}")
+
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data == "cmd_logs":
+        await logs_command(query, context)
+    elif query.data == "cmd_spread":
+        await spread_command(query, context)
+    elif query.data == "cmd_reboot":
+        await reboot_command(query, context)
+
+
+@restricted_access
 async def everything_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Aggregated command: status + audit + metrics + uptime + positions + exposure + report + spread.
@@ -371,6 +423,9 @@ async def run_bot():
         app.add_handler(CommandHandler("report", report_command))
         app.add_handler(CommandHandler("uptime", uptime_command))
         app.add_handler(CommandHandler("everything", everything_command))
+        app.add_handler(CommandHandler("ask", ask_command))
+        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat_handler))
+        app.add_handler(CallbackQueryHandler(button_handler))
 
         await app.initialize()
         await app.start()

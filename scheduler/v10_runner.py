@@ -736,9 +736,15 @@ def _scan_and_trade_inner(spot_only: bool = False):
 
     # 🚨 Volatility Circuit Breaker
     try:
-        from data.coinbase_websocket import is_volatility_halted, get_halt_time_remaining
+        from data.coinbase_websocket import (
+            is_volatility_halted,
+            get_halt_time_remaining,
+        )
+
         if is_volatility_halted():
-            logger.warning(f"[v10] scan skipped — VOLATILITY HALT active ({get_halt_time_remaining():.0f}s remaining)")
+            logger.warning(
+                f"[v10] scan skipped — VOLATILITY HALT active ({get_halt_time_remaining():.0f}s remaining)"
+            )
             return
     except ImportError:
         pass
@@ -856,19 +862,25 @@ def _scan_and_trade_inner(spot_only: bool = False):
         except Exception as e:
             logger.debug(f"[v10] prefetch df error {sym}: {e}")
             c["_df"] = None
-        
+
         live = 0.0
         try:
             if c.get("spot_only_synthetic"):
                 try:
                     from execution.coinbase_spot_broker import get_spot_broker
+
                     live = float(get_spot_broker().get_mark_price(sym) or 0.0)
                 except Exception:
                     pass
 
             if live <= 0 and (sym.startswith("PF_") or sym.startswith("PI_")):
                 try:
-                    kr = _json.loads(_ur.urlopen("https://futures.kraken.com/derivatives/api/v3/tickers", timeout=3).read())
+                    kr = _json.loads(
+                        _ur.urlopen(
+                            "https://futures.kraken.com/derivatives/api/v3/tickers",
+                            timeout=3,
+                        ).read()
+                    )
                     for t in kr.get("tickers", []):
                         if t.get("symbol") == sym:
                             live = float(t.get("markPrice") or t.get("last") or 0)
@@ -878,7 +890,12 @@ def _scan_and_trade_inner(spot_only: bool = False):
 
             if live <= 0:
                 try:
-                    req = _ur.Request("https://api.hyperliquid.xyz/info", data=_json.dumps({"type": "allMids"}).encode(), headers={"Content-Type": "application/json"}, method="POST")
+                    req = _ur.Request(
+                        "https://api.hyperliquid.xyz/info",
+                        data=_json.dumps({"type": "allMids"}).encode(),
+                        headers={"Content-Type": "application/json"},
+                        method="POST",
+                    )
                     mids = _json.loads(_ur.urlopen(req, timeout=3).read())
                     live = float(mids.get(sym, 0))
                 except Exception:
@@ -3428,7 +3445,7 @@ def run_forever():
     )
 
     # Wire schedules
-    schedule.every(5).minutes.do(scan_and_trade)
+    schedule.every(5).minutes.do(lambda: scan_and_trade(spot_only=True))
     schedule.every(30).seconds.do(exit_monitor)
     schedule.every(SPOT_SCALP_SCAN_SECONDS).seconds.do(spot_scalp_scan)
     schedule.every(SPOT_EXIT_POLL_SECONDS).seconds.do(spot_exit_monitor)
@@ -3491,6 +3508,7 @@ def run_forever():
         try:
             import threading as _thr
             from scripts.nightly_recon import run_reconciliation
+
             _t = _thr.Thread(target=run_reconciliation, daemon=True)
             _t.start()
         except Exception as _re:
@@ -3517,6 +3535,7 @@ def run_forever():
     # 📊 9:00 PM ET 'War Room' Report
     try:
         from notifications.reports import send_war_room_report
+
         schedule.every().day.at("21:00").do(send_war_room_report)
     except ImportError:
         pass
@@ -3524,17 +3543,19 @@ def run_forever():
     logger.info("[v10] All schedules wired. Running scan immediately...")
 
     # Run immediately on startup (don't wait 5 minutes for first scan)
-    scan_and_trade()
+    scan_and_trade(spot_only=True)
 
     # Production: Send Liftoff message
     try:
         from notifications.telegram_bot import send_liftoff
+
         send_liftoff()
     except Exception as _e:
         logger.debug(f"Liftoff message error: {_e}")
 
     logger.info("[v10] Main loop running. Press Ctrl+C to stop.")
     from system_state import state
+
     while True:
         try:
             schedule.run_pending()

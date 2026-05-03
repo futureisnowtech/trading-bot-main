@@ -283,8 +283,14 @@ def main():
 
     # 🤖 Start Telegram Bot (Command Suite)
     from notifications.telegram_bot import start_bot_thread
+    from monitoring.log_alerter import start_log_alerter
 
     start_bot_thread()
+
+    try:
+        start_log_alerter()
+    except Exception as _e:
+        logging.getLogger(__name__).warning(f"log_alerter start failed: {_e}")
 
     # 📡 Start Coinbase WebSocket Feed (Asynchronous Ticker Data + Circuit Breaker)
     from config import COINBASE_CDP_KEY_NAME, COINBASE_CDP_PRIVATE_KEY

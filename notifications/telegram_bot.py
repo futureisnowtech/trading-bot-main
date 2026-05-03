@@ -14,8 +14,7 @@ from spot_engine import get_spot_positions, _get_broker
 
 logger = logging.getLogger(__name__)
 
-# Hardcoded production credentials
-TOKEN = "8681504660:AAGddi9r0PEtqC1TFA4973SwsgytRH3x5BU"
+TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 AUTHORIZED_USER_ID = 8224826883
 
 
@@ -287,6 +286,8 @@ async def uptime_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def run_bot():
     """Start the Telegram bot manually to avoid loop conflicts."""
+    if not TOKEN:
+        raise RuntimeError("TELEGRAM_BOT_TOKEN environment variable is not set")
     try:
         app = ApplicationBuilder().token(TOKEN).build()
 

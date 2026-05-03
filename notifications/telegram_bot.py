@@ -284,6 +284,74 @@ async def uptime_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"System Uptime: {h}h {m}m")
 
 
+@restricted_access
+async def everything_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Aggregated command: status + audit + metrics + uptime + positions + exposure + report + spread.
+    """
+    from logging_db.trade_logger import load_trade_history
+
+    state = system_state.state.get_state()
+    is_live = _runtime_is_live()
+    mode_label = "LIVE" if is_live else "PAPER"
+    paper = not is_live
+
+    # 1. Operational Vitals
+    upt = state["system"]["uptime_seconds"]
+    h, m = divmod(upt // 60, 60)
+    
+    issues = []
+    if not state["exchange"]["connected"]: issues.append("REST Disconnected")
+    if not state["exchange"]["ws_connected"]: issues.append("WS Disconnected")
+    if state["system"]["cpu_percent"] > 90: issues.append("High CPU")
+    audit_str = "PASSED" if not issues else f"ISSUES: {', '.join(issues)}"
+
+    # 2. Portfolio & Risk
+    positions = get_spot_positions(paper=paper)
+    total_exposure = sum(float(p.get("qty", 0)) * float(p.get("entry", 0)) for p in positions)
+    
+    pos_str = ""
+    if not positions:
+        pos_str = "None"
+    else:
+        for p in positions:
+            pos_str += f"\n  • {p['symbol']}: {p['qty']:.4f} @ ${p['entry']:.2f}"
+
+    # 3. Daily Performance
+    try:
+        trades = load_trade_history(limit=50)
+        today = time.strftime("%Y-%m-%d")
+        today_trades = [
+            t for v in trades.values() for t in v
+            if str(t.get("exit_time", "")).startswith(today)
+        ]
+        wins = len([t for t in today_trades if float(t.get("pnl_net_usd", 0)) > 0])
+        total_pnl = sum(float(t.get("pnl_net_usd", 0)) for t in today_trades)
+        perf_str = f"PnL: ${total_pnl:+.2f} | WR: {(wins/len(today_trades)*100 if today_trades else 0):.1f}% ({len(today_trades)} trd)"
+    except:
+        perf_str = "PnL: Error fetching"
+
+    msg = (
+        f"<b>═══ SOVEREIGN SNAPSHOT [{mode_label}] ═══</b>\n\n"
+        f"<b>[SYSTEM]</b>\n"
+        f"Status: REST:{'OK' if state['exchange']['connected'] else 'NO'} | WS:{'OK' if state['exchange']['ws_connected'] else 'NO'}\n"
+        f"Audit: {audit_str}\n"
+        f"Uptime: {h}h {m}m | Latency: {state['exchange']['latency_ms']}ms\n"
+        f"Load: CPU {state['system']['cpu_percent']:.1f}% | RAM {state['system']['ram_percent']:.1f}%\n\n"
+        f"<b>[STRATEGY]</b>\n"
+        f"Signal: {state['strategy']['current_signal']} ({state['strategy']['active_symbol']})\n"
+        f"OBI: {state['strategy']['obi']:+.2f} | Micro: ${state['strategy']['microprice']:,.2f}\n\n"
+        f"<b>[PORTFOLIO]</b>\n"
+        f"BP: ${state['exchange']['buying_power']:,.2f}\n"
+        f"Exposure: ${total_exposure:,.2f}\n"
+        f"Positions: {pos_str}\n\n"
+        f"<b>[PERFORMANCE]</b>\n"
+        f"{perf_str}\n"
+        f"════════════════════════"
+    )
+    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+
+
 async def run_bot():
     """Start the Telegram bot manually to avoid loop conflicts."""
     if not TOKEN:
@@ -302,6 +370,7 @@ async def run_bot():
         app.add_handler(CommandHandler("cancel_all", cancel_all_command))
         app.add_handler(CommandHandler("report", report_command))
         app.add_handler(CommandHandler("uptime", uptime_command))
+        app.add_handler(CommandHandler("everything", everything_command))
 
         await app.initialize()
         await app.start()

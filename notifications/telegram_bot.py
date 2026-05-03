@@ -377,7 +377,7 @@ async def everything_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     """
     Aggregated command: status + audit + metrics + uptime + positions + exposure + report + spread.
     """
-    from logging_db.trade_logger import load_trade_history
+    from logging_db.trade_logger import get_todays_trades
 
     state = system_state.state.get_state()
     is_live = _runtime_is_live()
@@ -412,16 +412,9 @@ async def everything_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     # 3. Daily Performance
     try:
-        trades = load_trade_history(limit=50)
-        today = time.strftime("%Y-%m-%d")
-        today_trades = [
-            t
-            for v in trades.values()
-            for t in v
-            if str(t.get("exit_time", "")).startswith(today)
-        ]
-        wins = len([t for t in today_trades if float(t.get("pnl_net_usd", 0)) > 0])
-        total_pnl = sum(float(t.get("pnl_net_usd", 0)) for t in today_trades)
+        today_trades = get_todays_trades(paper=paper)
+        wins = len([t for t in today_trades if float(t.get("pnl_usd", 0)) > 0])
+        total_pnl = sum(float(t.get("pnl_usd", 0)) for t in today_trades)
         perf_str = f"PnL: ${total_pnl:+.2f} | WR: {(wins / len(today_trades) * 100 if today_trades else 0):.1f}% ({len(today_trades)} trd)"
     except:
         perf_str = "PnL: Error fetching"

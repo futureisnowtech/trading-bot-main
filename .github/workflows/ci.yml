@@ -9,16 +9,19 @@ on:
 permissions:
   contents: read
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   proof:
     name: Proof suite (Python 3.12)
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v5.4.0
         with:
           python-version: "3.12"
           cache: "pip"
@@ -29,7 +32,7 @@ jobs:
           pip install \
             pytest pytest-cov ruff \
             python-dotenv pandas numpy pytz requests \
-            yfinance schedule \
+            yfinance schedule psutil \
             "pandas-ta>=0.3.14b0"
           # Broker SDKs (paper mode — no real API calls in tests)
           pip install \

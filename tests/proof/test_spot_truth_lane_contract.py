@@ -104,6 +104,7 @@ def test_stl03b_open_spot_halts_on_paper_like_live_order(monkeypatch):
     monkeypatch.setattr(config, "SPOT_LANE_ACTIVE", True, raising=False)
     monkeypatch.setattr(config, "SPOT_SYMBOLS", ["BTC", "ETH", "SOL", "XRP"], raising=False)
     monkeypatch.setattr(config, "SPOT_MIN_ORDER_USD", 10.0, raising=False)
+    monkeypatch.setattr(config, "PAPER_TRADING", False, raising=False)
     spot_engine._load_config()
 
     class _Broker:

@@ -144,13 +144,7 @@ def recreate_dashboard(prom_uid, loki_uid):
                     'type': 'logs',
                     'gridPos': {'h': 12, 'w': 24, 'x': 0, 'y': 16},
                     'datasource': {'type': 'loki', 'uid': loki_uid},
-                    'targets': [{'expr': '{job="algo-bot-logs"} | json | line_format "{{.message}}"', 'refId': 'A'}],
-                    'transformations': [
-                        {
-                            'id': 'extractFields',
-                            'options': {'source': 'labels'}
-                        }
-                    ]
+                    'targets': [{'expr': '{job="algo-bot-logs"}', 'refId': 'A'}]
                 }
             ],
             'schemaVersion': 39,

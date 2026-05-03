@@ -7,7 +7,14 @@ import subprocess
 from html import escape
 from functools import wraps
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters, CallbackQueryHandler
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+    CallbackQueryHandler,
+)
 from telegram.constants import ParseMode
 
 import system_state
@@ -163,10 +170,7 @@ async def positions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     positions = get_spot_positions(paper=paper)
     if not positions:
-        await _reply_text(
-            update,
-            f"No active spot positions ({mode_label} mode)."
-        )
+        await _reply_text(update, f"No active spot positions ({mode_label} mode).")
         return
 
     msg = f"<b>Active Positions [{mode_label}]</b>\n"
@@ -221,13 +225,11 @@ async def audit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not issues:
         await _reply_text(
-            update,
-            f"Audit Passed [{mode_label}]: System integrity verified."
+            update, f"Audit Passed [{mode_label}]: System integrity verified."
         )
     else:
         await _reply_text(
-            update,
-            f"Audit Issues [{mode_label}]:\n- " + "\n- ".join(issues)
+            update, f"Audit Issues [{mode_label}]:\n- " + "\n- ".join(issues)
         )
 
 
@@ -249,7 +251,7 @@ async def cancel_all_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await _reply_text(
             update,
             "cancel_all REFUSED: runtime mode is PAPER. "
-            "Destructive actions are only permitted in live mode."
+            "Destructive actions are only permitted in live mode.",
         )
         return
 
@@ -257,7 +259,7 @@ async def cancel_all_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await _reply_text(
             update,
             "cancel_all REFUSED: TELEGRAM_ALLOW_LIVE_ACTIONS is not set to 'true'. "
-            "Set this environment variable on the server to permit live destructive actions."
+            "Set this environment variable on the server to permit live destructive actions.",
         )
         return
 
@@ -274,21 +276,16 @@ async def cancel_all_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 @restricted_access
 async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    from logging_db.trade_logger import load_trade_history
+    from logging_db.trade_logger import get_todays_trades
 
     is_live = _runtime_is_live()
     mode_label = "LIVE" if is_live else "PAPER"
+    paper = not is_live
     try:
-        trades = load_trade_history(limit=50)
+        today_trades = get_todays_trades(paper=paper)
         today = time.strftime("%Y-%m-%d")
-        today_trades = [
-            t
-            for v in trades.values()
-            for t in v
-            if str(t.get("exit_time", "")).startswith(today)
-        ]
-        wins = len([t for t in today_trades if float(t.get("pnl_net_usd", 0)) > 0])
-        total_pnl = sum(float(t.get("pnl_net_usd", 0)) for t in today_trades)
+        wins = len([t for t in today_trades if float(t.get("pnl_usd", 0)) > 0])
+        total_pnl = sum(float(t.get("pnl_usd", 0)) for t in today_trades)
 
         msg = (
             f"<b>Daily Report ({today}) [{mode_label}]</b>\n"
@@ -326,14 +323,18 @@ async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def _handle_ai_query(update: Update, query: str):
-    thinking_msg = await _reply_text(update, "<i>Thinking...</i>", parse_mode=ParseMode.HTML)
+    thinking_msg = await _reply_text(
+        update, "<i>Thinking...</i>", parse_mode=ParseMode.HTML
+    )
     if thinking_msg is None:
-        logger.error("AI handler cannot respond because no effective message target was found.")
+        logger.error(
+            "AI handler cannot respond because no effective message target was found."
+        )
         return
-    
+
     try:
         response = await asyncio.to_thread(ask_ai, query)
-        
+
         keyboard = [
             [
                 InlineKeyboardButton("🔍 View Logs", callback_data="cmd_logs"),
@@ -344,8 +345,10 @@ async def _handle_ai_query(update: Update, query: str):
             ],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await thinking_msg.edit_text(response, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+
+        await thinking_msg.edit_text(
+            response, reply_markup=reply_markup, parse_mode=ParseMode.HTML
+        )
     except Exception as e:
         logger.error(f"AI handler error: {e}")
         await thinking_msg.edit_text(f"Error: {str(e)}")
@@ -357,7 +360,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.warning("Button handler invoked without a callback query.")
         return
     await query.answer()
-    
+
     if query.data == "cmd_logs":
         await logs_command(update, context)
     elif query.data == "cmd_spread":
@@ -384,17 +387,22 @@ async def everything_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     # 1. Operational Vitals
     upt = state["system"]["uptime_seconds"]
     h, m = divmod(upt // 60, 60)
-    
+
     issues = []
-    if not state["exchange"]["connected"]: issues.append("REST Disconnected")
-    if not state["exchange"]["ws_connected"]: issues.append("WS Disconnected")
-    if state["system"]["cpu_percent"] > 90: issues.append("High CPU")
+    if not state["exchange"]["connected"]:
+        issues.append("REST Disconnected")
+    if not state["exchange"]["ws_connected"]:
+        issues.append("WS Disconnected")
+    if state["system"]["cpu_percent"] > 90:
+        issues.append("High CPU")
     audit_str = "PASSED" if not issues else f"ISSUES: {', '.join(issues)}"
 
     # 2. Portfolio & Risk
     positions = get_spot_positions(paper=paper)
-    total_exposure = sum(float(p.get("qty", 0)) * float(p.get("entry", 0)) for p in positions)
-    
+    total_exposure = sum(
+        float(p.get("qty", 0)) * float(p.get("entry", 0)) for p in positions
+    )
+
     pos_str = ""
     if not positions:
         pos_str = "None"
@@ -407,12 +415,14 @@ async def everything_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         trades = load_trade_history(limit=50)
         today = time.strftime("%Y-%m-%d")
         today_trades = [
-            t for v in trades.values() for t in v
+            t
+            for v in trades.values()
+            for t in v
             if str(t.get("exit_time", "")).startswith(today)
         ]
         wins = len([t for t in today_trades if float(t.get("pnl_net_usd", 0)) > 0])
         total_pnl = sum(float(t.get("pnl_net_usd", 0)) for t in today_trades)
-        perf_str = f"PnL: ${total_pnl:+.2f} | WR: {(wins/len(today_trades)*100 if today_trades else 0):.1f}% ({len(today_trades)} trd)"
+        perf_str = f"PnL: ${total_pnl:+.2f} | WR: {(wins / len(today_trades) * 100 if today_trades else 0):.1f}% ({len(today_trades)} trd)"
     except:
         perf_str = "PnL: Error fetching"
 

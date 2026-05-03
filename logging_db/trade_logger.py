@@ -1688,7 +1688,7 @@ def get_exit_quality_summary(
         return defaults
 
 
-# ─── Challenger / promotion state (v14.0) ─────────────────────────────────────
+# ─── Challenger / promotion state (v18.16) ─────────────────────────────────────
 
 
 def upsert_challenger_state(

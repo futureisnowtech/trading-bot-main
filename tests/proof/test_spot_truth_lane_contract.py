@@ -213,6 +213,8 @@ def test_stl04_close_spot_live_residual_repersists_position(
         },
     )
     monkeypatch.setattr(ks, "trigger_spot_halt", lambda reason, detail=None: True)
+    import config
+    monkeypatch.setattr(config, "PAPER_TRADING", False)
 
     closed = spot_engine.close_spot("ETH", paper=False, exit_reason="thesis_decay")
     assert closed is not None

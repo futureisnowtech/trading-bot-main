@@ -879,7 +879,7 @@ _SHORT_SETUPS = [
         # Mirror of long: require both fast AND slow MACD negative.
         # Data: wae_explosion_short at fast-only gate had WR=8% across 37 parent
         # trades — essentially no edge. Adding slow MACD (6,20,5 < 0) filters
-        # single-bar oscillation and requires sustained downside momentum. v13 change.
+        # single-bar oscillation and requires sustained downside momentum. v18.16 change.
         "check": lambda f: (
             f.get("wae_bearish", 0) > 0
             and f.get("wae_exploding", 0) > 0

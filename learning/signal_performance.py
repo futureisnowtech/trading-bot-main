@@ -207,7 +207,7 @@ def init_learning_tables():
                 maker_rebate          REAL DEFAULT 0
             )
         """)
-        # Add composite_score and v14 lineage columns if they don't exist (safe on existing DBs)
+        # Add composite_score and v18.16 lineage columns if they don't exist (safe on existing DBs)
         for _migration in [
             "ALTER TABLE trade_attribution ADD COLUMN composite_score REAL DEFAULT 0",
             "ALTER TABLE trade_attribution ADD COLUMN entry_order_id TEXT",

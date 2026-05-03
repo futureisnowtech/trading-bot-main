@@ -1,152 +1,156 @@
 # MIGRATION MANIFEST: V14 (Archive) to V18 (Current Spot)
-## The "Migration Bible" for Autonomous Spot Scalping
+## The "Migration Bible" for Autonomous Spot Scalping (V2 - Smart Execution Edition)
 
-**Purpose**: This document serves as the definitive technical reference for porting high-leverage mathematical logic and governance frameworks from the v14 Perp-First archive to the v18 Spot-Scalp repository. 
+**Purpose**: This document serves as the definitive technical reference for porting high-leverage mathematical logic and governance frameworks from the v14 Perp-First archive to the v18 Spot-Scalp repository.
 
-**Execution Strategy**: "Bolt-on" integration. Enhance the existing pre-trade funnel and signal scoring without modifying the core broker or order execution logic.
+**Execution Strategy**: **"Smart Bolt-on"**. We utilize **Soft-Vetoes**, **Bayesian Dampening**, and **Parallel Shadow-State Tracking** to extract alpha without the risk of over-filtering or execution latency.
 
 ---
 
 ## Section 1: Advanced Microstructure & Volatility Math
 
-### 1.1 Kyle's Lambda ($\lambda$) - Market Impact
+### 1.1 Kyle's Lambda ($\lambda$) - Market Impact (Adaptive Estimation)
 **Logic**: Measures the price impact per unit of volume. High $\lambda$ indicates an illiquid market where even small trades move the price significantly.
 **Math**: OLS slope of $\Delta P$ (returns) against $S \cdot V$ (signed volume).
 $$ r_t = \lambda \cdot (Sign(r_t) \cdot V_t) + \epsilon $$
-**Refinement (External Validation)**: 
-- **Kalman Estimation**: Instead of static OLS windows, use a 1D Kalman Filter to track $\lambda$ as a time-varying state. This adapts to liquidity "holes" in real-time.
-- **Data Requirement**: Must use `aggressor_side` from WebSocket trades. Aggregating 1-min OHLCV without knowing the aggressor side is insufficient for high-conviction $\lambda$ modeling.
+**Smart Implementation**:
+- **Technique**: Use a **1D Kalman Filter** to track $\lambda$ as a time-varying state rather than a static OLS window.
+- **Dampening**: If $\lambda$ spikes $> 2\sigma$ above its 24-hour mean, we classify the market as "Fragile."
+- **Reasoning**: Static windows lag. A state-space estimation of $\lambda$ detects "liquidity holes" before they result in massive slippage.
 
-### 1.2 OBI / TFI Veto (Spoof Protection)
-**Logic**: Protects against "Quote Stuffing" where the order book looks bullish but actual market orders are bearish.
-**Order Book Imbalance (OBI)**:
-$$ OBI = \frac{BidQty - AskQty}{BidQty + AskQty} $$
-**Trade Flow Imbalance (TFI)**:
-$$ TFI = \frac{BuyVol - SellVol}{TotalVol} $$
-**Veto Trigger**: Veto "Buy" signal if $OBI > 0.20$ (Bullish Quotes) but $TFI < -0.10$ (Bearish Aggressors).
-**Hard Veto**: `OBI < -0.35 AND TFI < -0.20` (Severe selling pressure).
+### 1.2 OBI / TFI "Soft-Veto" (Position Sizing Modifier)
+**Logic**: Protects against "Quote Stuffing" where the order book looks bullish but actual market orders (Tape) are bearish.
+**Math**:
+- **Order Book Imbalance (OBI)**: $(BidQty - AskQty) / (BidQty + AskQty)$
+- **Trade Flow Imbalance (TFI)**: $(BuyVol - SellVol) / TotalVol$
+**Smart Scaling (Not Blocking)**:
+- **Condition**: If $OBI > 0.20$ but $TFI < -0.10$ (Bullish Quotes / Bearish Tape).
+- **Action**: **Reduce Position Size by 50%**.
+- **Hard Veto**: Only skip entirely if $OBI < -0.35$ AND $TFI < -0.20$ (Extreme Selling Aggression).
+- **Reasoning**: Binary vetoes cause "Signal Starvation." Position scaling allows us to collect data on "murky" trades while protecting capital.
 
-### 1.3 ATR Fee Floor Guard
+### 1.3 ATR Fee Floor Guard (The Absolute Gate)
 **Logic**: A coin must be volatile enough to "outrun" the high fees on Coinbase (1.2% round-trip).
-**Formula**: 
-$$ \text{Skip if } \frac{ATR}{Price} < 0.004 \text{ (0.4\%)} $$
-**Rationale**: If 1-min ATR is 0.4%, a 4x ATR target is 1.6%. After 1.2% fees, you are left with only 0.4% net profit for a "perfect" trade.
+**Formula**: Skip if $\frac{ATR}{Price} < 0.004$ (0.4%).
+**Reasoning**: Fee math is deterministic, not probabilistic. If the coin doesn't move enough to cover the tax, the expected value (EV) is negative regardless of the signal quality. This remains a **Hard Veto**.
 
 ---
 
 ## Section 2: Adaptive Filtering & State-Space Models
 
-### 2.1 1D Kalman Filter (Adaptive Fair Value)
-**Logic**: Estimates the "latent" fair price by balancing the predicted state with noisy observations. 
-**Math**:
-1. **Predict**: 
-   $\hat{x}_{t|t-1} = \hat{x}_{t-1|t-1}$
-   $P_{t|t-1} = P_{t-1|t-1} + Q$ (Process Noise)
-2. **Update**:
-   $K_t = \frac{P_{t|t-1}}{P_{t|t-1} + R}$ (Kalman Gain)
-   $\hat{x}_{t|t} = \hat{x}_{t|t-1} + K_t(z_t - \hat{x}_{t|t-1})$
-   $P_{t|t} = (1 - K_t)P_{t|t-1}$
-**Threshold**: `kalman_dev <= -1.0%` (Price is 1% below adaptive fair value).
+### 2.1 1D Kalman Filter (Shadow State Tracking)
+**Logic**: Estimates the "latent" fair price by balancing the predicted state with noisy observations.
+**Math**: Recursive Bayesian update.
+**Shadow Implementation**:
+- **Technique**: Run the Kalman recursion in an **Async Shadow Process**.
+- **Latency Optimization**: The Signal Engine reads the "Last Known Good" state from the previous bar (Latency = 0).
+- **Threshold**: `kalman_dev <= -1.0%` (Buy when price is 1% below adaptive fair value).
+- **Reasoning**: Calculating a 100-bar recursion at the moment of entry introduces "Systemic Jitter." Shadow tracking provides the math without the lag.
 
-### 2.2 Ornstein-Uhlenbeck (OU) Half-Life
-**Logic**: Measures how fast a price reverts to its mean.
-**Math**: Based on the AR(1) process: $x_t = a + b \cdot x_{t-1} + \epsilon$.
-$$ \kappa = -\ln(b) $$
-$$ t_{1/2} = \frac{\ln(2)}{\kappa} $$
-**Refinement (External Validation)**:
-- **ADF Pre-flight**: Before calculating $t_{1/2}$, perform an **Augmented Dickey-Fuller (ADF)** test.
-- **Constraint**: If $p$-value $> 0.05$ (Series is Trending/Non-Stationary), the OU model is mathematically invalid. Veto the mean-reversion setup.
-- **Entry Window**: Allowed only if $t_{1/2} \in [3, 60]$ minutes AND $p < 0.05$.
+### 2.2 Ornstein-Uhlenbeck (OU) & ADF Pre-Flight
+**Logic**: Measures how fast price reverts to its mean.
+**Smart Gate**:
+- **Pre-Flight**: Perform an **Augmented Dickey-Fuller (ADF)** test first.
+- **Rule**: If $p$-value $> 0.05$ (Series is Trending), **Disable Mean-Reversion Setups**.
+- **Reasoning**: OU math assumes stationarity. If the market is trending, mean-reversion signals are "Falling Knives." We use the ADF test as a safety fuse.
 
 ---
 
 ## Section 3: ML Confidence Calibration
 
-### 3.1 Platt Scaling (Logistic Calibration)
+### 3.1 Beta Calibration (Non-Linear Probability Mapping)
 **Logic**: Converts raw model scores (0-100) into true statistical probabilities.
-**Math**: Fits a logistic regression on the log-odds of the model output.
-**Pros**: Robust against overfitting on small/noisy crypto datasets.
-
-### 3.2 Beta Calibration (Advanced Alternative)
-**Logic**: A more flexible parametric model than Platt Scaling that handles skewed probability distributions.
-**Math**: 
+**Math**: Fits a 3-parameter beta distribution to the model outputs.
 $$ P(y=1 | f) = \frac{1}{1 + \exp(a \cdot \ln(f) + b \cdot \ln(1-f) + c)} $$
-**Usage**: Implement as the "Tier 2" calibrator once symbol-specific trade history exceeds 100 rows.
+**Implementation**:
+- **Phase 1**: Use Platt Scaling (Logistic) for $N < 100$ trades.
+- **Phase 2**: Transition to Beta Calibration for $N \ge 100$ trades.
+- **Reasoning**: Beta calibration handles "skewed" distributions (where the model is over-confident at the extremes) better than Platt Scaling.
 
 ---
 
-## Section 4: Real-time Bayesian Adaptation
+## Section 4: Bayesian Online Learner
 
-### 4.1 Online Learner (Rolling Perceptron)
-**Logic**: Adapts to "Today's Market" between major weekly XGBoost retrains.
-**Math**: Stochastic Gradient Descent (SGD) on a 57-feature vector.
-$$ w_{t+1} = w_t - \eta \nabla L(w_t) $$
-**Constraint**: Adjustment is bounded to $\pm 15\%$. If the bot loses 3 trades in a row on "Momentum," the Online Learner will suppress the "Momentum" score by 15 points immediately.
+### 4.1 "Surprise-Only" Updates (Bayesian Dampening)
+**Logic**: Adapts to "Today's Market" without overfitting to random noise.
+**Math**: Stochastic Gradient Descent (SGD) on model weights.
+**Smart Update Rule**:
+- **Condition**: Only update the learner if the outcome is a **"Statistically Significant Surprise."**
+- **Definition**: $|Outcome - PredictedProb| > 0.4$.
+- **Reasoning**: If the model predicts a 60% win and it loses, the model was "Correct but Unlucky." Updating on every trade causes the model to "Chase its Tail." We only learn from failures of prediction, not failures of luck.
 
 ---
 
 ## Section 5: Tactical Indicators (Tier 2b Suite)
 
-### 5.1 Waddah Attar Explosion (WAE)
-**Logic**: Momentum exceeding the volatility baseline.
-$$ \text{Trend} = (EMA(C, 20) - EMA(C, 40)) \cdot 150 $$
-$$ \text{Explosion} = UpperBB(20) - LowerBB(20) $$
-**Signal**: `Trend > Explosion` AND `Trend > 0`.
-
-### 5.2 Laguerre RSI (Zero-Lag)
-**Logic**: Uses a 4-tap filter to eliminate lag without adding noise.
-$$ L_0 = (1-\gamma)C + \gamma L_{0, t-1} $$
-**Threshold**: `LRSI < 0.15` is deeply oversold.
-
-### 5.3 Indicator Synergy (WAE + Squeeze)
-**Logic**: Backtests show WAE filters fakeouts, while Squeeze Momentum catches "God Candles."
-**Operational Modes**:
-- **Conservative (Default)**: Enter only when *both* WAE is exploding AND Squeeze is firing.
-- **Aggressive (Trending Only)**: Enter on WAE explosion if $ADX > 25$.
+### 5.1 WAE + Squeeze Confluence
+**Logic**: Momentum × Volatility.
+**Operational Synergy**:
+- **Default**: Enter only if $WAE_{Exploding}$ AND $Squeeze_{Firing}$.
+- **Recovery Mode**: If we have had $> 3$ "Missed Winners" (logged by scanner), loosen to $WAE_{Exploding}$ only if $ADX > 25$.
+- **Reasoning**: Squeeze catch trends; WAE filters noise. Combining them maximizes the Sharpe Ratio of the entry.
 
 ---
 
-## Section 6: RBIPMS Governance Framework
+## Section 6: RBIPMS Governance & Recovery
 
-### 6.1 The Strategy Ladder
-1.  **Phase R (Research)**: Falsifiable hypothesis + manual review.
-2.  **Phase B (Backtest)**: Walk-forward OOS validation.
-3.  **Phase I (Incubation)**: 14 days, 50% position size, zero halts.
-4.  **Phase P (Promote)**: 75% size for 30 days, then 100%.
-
-### 6.2 Auto-Demotion Triggers
-- Rolling 14-day Win Rate $< 20\%$.
-- Rolling 14-day Profit Factor $< 0.8$.
-- 3 consecutive system halts in 7 days.
+### 6.1 The Strategy Ladder (Automated Probation)
+**Logic**: Enforces discipline in scaling.
+**Smart Recovery Clause**:
+- **Demotion**: If Rolling 14-day Win Rate $< 20\%$.
+- **Probation**: The strategy continues to trade in **Shadow Mode** (logging only).
+- **Re-Entry**: If the "Shadow Win Rate" recovers to $\ge 40\%$ over the next 10 candidates, the strategy is automatically fast-tracked back to **Incubation**.
+- **Reasoning**: A winning strategy can have a "Bad Week" due to regime mismatch. Automated probation ensures we don't permanently discard alpha due to temporary market noise.
 
 ---
 
-## Section 7: Integration Blueprint (v18 Bolt-On)
+## Section 7: Integration Blueprint (The "Smart Bolt-On")
 
-### Step 1: Veto Logic in `runtime/spot_strategy.py`
-Add a `VetoEngine` that sits inside `spot_quality_block_reason`.
+### Step 1: The "Soft" Veto Engine
+Modify `runtime/spot_strategy.py` to return a `sizing_multiplier` instead of a boolean block.
 ```python
-def check_vetoes(symbol, data):
-    if data['atr'] / data['price'] < 0.004: return "FEE_FLOOR_VETO"
-    if data['obi'] > 0.20 and data['tfi'] < -0.10: return "SPOOF_VETO"
-    if data['is_mr_setup'] and data['adf_p_value'] > 0.05: return "NON_STATIONARY_VETO"
-    return None
+def calculate_execution_profile(symbol, data):
+    multiplier = 1.0
+    # Hard Veto (Block)
+    if data['atr_floor_failed']: return 0.0, "FEE_FLOOR"
+    
+    # Soft Veto (Scaling)
+    if data['kyle_lambda_spike']: multiplier *= 0.7
+    if data['obi_tfi_divergence']: multiplier *= 0.5
+    
+    return multiplier, "ACTIVE"
 ```
 
-### Step 2: Probability Scaling in `signal_engine.py`
-Wrap the final composite score in the `apply_calibration` function.
+### Step 2: Surprise-Aware Online Learner
+Update the ML feedback loop in `learning/online_learner.py`.
 ```python
-# Before
-composite = tech_w * tech_score + ml_w * ml_score
-# After
-composite = calibrate_score(tech_w * tech_score + ml_w * ml_score)
+def record_trade_outcome(features, outcome, predicted_prob):
+    # Bayesian Dampening Check
+    surprise = abs(outcome - predicted_prob)
+    if surprise > 0.4:
+        learner.partial_fit(features, outcome)
+        logger.info(f"Learner updated: Surprise={surprise:.2f}")
+    else:
+        logger.info("Learner skipped: Outcome within expectation range.")
 ```
 
-### Step 3: Lifecycle Enforcement
-Update `runtime/crypto_tradeability.py` to check the `spot_lifecycle_registry.json`.
-- `RESEARCH`: Max size $5.
-- `INCUBATE`: Max size 50%.
-- `PROMOTED`: Max size 100%.
+### Step 3: Shadow Kalman Update
+Implement in `data/edge_monitor.py`.
+```python
+async def update_shadow_state():
+    while True:
+        state = calculate_kalman_recursion(df)
+        shared_memory.set('kalman_state', state)
+        await asyncio.sleep(60) # Sync with 1-min bars
+```
 
 ---
-**End of Manifest**
+## Pre-Implementation Confirmation Protocol
+**The Agent MUST confirm the following logic before executing a port:**
+1.  **Confirmation**: I understand that `Kyle's Lambda` and `OBI/TFI` must NOT block trades unless they hit "Hard Veto" levels; otherwise, they scale position size.
+2.  **Confirmation**: I understand the `Online Learner` must only update on "Surprises" to prevent overfitting.
+3.  **Confirmation**: I understand the `Kalman Filter` must be read from shared state to avoid entry latency.
+4.  **Confirmation**: I understand the `ADF Test` is the master safety fuse for mean-reversion setups.
+
+---
+**End of Manifest V2**

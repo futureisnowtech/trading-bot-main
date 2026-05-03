@@ -49,6 +49,30 @@ from runtime.spot_strategy import (
 )
 from runtime.spot_position_truth import get_spot_position_truth, get_spot_symbol_truth
 
+from functools import wraps
+
+def safety_gated(func):
+    """
+    Decorator to block functions from executing live broker actions 
+    if config.PAPER_TRADING is True.
+    """
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        # Try to find 'paper' argument in kwargs or args
+        is_paper = kwargs.get("paper", True)
+        # If it was an index-based arg, we'd need more complex logic, 
+        # but in this repo we prefer explicit kwargs for paper/live gates.
+        
+        from config import PAPER_TRADING
+        if not is_paper and PAPER_TRADING:
+            logger.warning(
+                f"SAFETY BLOCK: Function '{func.__name__}' attempted LIVE action "
+                "while config.PAPER_TRADING is True. Blocking call."
+            )
+            return None
+        return func(*args, **kwargs)
+    return wrapper
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -117,6 +141,7 @@ def _get_db_path() -> str:
         )
 
 
+@safety_gated
 def _get_broker(paper: bool) -> Optional["CoinbaseSpotBroker"]:
     if not _BROKER_OK:
         system_state.state.update_exchange(connected=False)
@@ -632,6 +657,7 @@ def _is_paper_like_live_order(order: dict | None, paper: bool) -> bool:
     return order_id.startswith("PAPER_") or order_id.startswith("SPOT_PAPER_")
 
 
+@safety_gated
 def open_spot(
     symbol: str,
     size_usd: float,
@@ -918,6 +944,7 @@ def open_spot(
     }
 
 
+@safety_gated
 def close_spot(
     symbol: str,
     paper: bool = True,

@@ -831,7 +831,7 @@ def run_audit(run_proof: bool = True) -> dict:
     logger.info("[audit] running retention pruning...")
     checks["retention"] = _check_retention()
 
-    # v14.0: integrity, attribution, promotion, retrain checks
+    # v18.16: integrity, attribution, promotion, retrain checks
     logger.info("[audit] checking integrity coverage...")
     checks["integrity_coverage"] = _check_integrity_coverage()
 

@@ -54,7 +54,7 @@ MAX_DEPLOYED_PCT: float = 0.90
 CASH_RESERVE_PCT: float = 0.10
 
 # ════════════════════════════════════════════════════════════════════
-# SYMBOL SUPPRESSION (v13.4 — forensic audit 2026-04-08)
+# SYMBOL SUPPRESSION (v18.16 — forensic audit 2026-04-08)
 # Symbols with statistically negative edge over 10+ clean trades.
 # Review quarterly — remove a symbol when Bayesian WR recovers > 55%.
 # ════════════════════════════════════════════════════════════════════

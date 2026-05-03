@@ -23,7 +23,7 @@ if ROOT not in sys.path:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Algo Trading Backtester (v14.0)")
+    parser = argparse.ArgumentParser(description="Algo Trading Backtester (v18.16)")
     parser.add_argument(
         "--mode",
         default="candidate_replay",

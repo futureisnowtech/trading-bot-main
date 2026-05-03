@@ -1,7 +1,7 @@
 """
 tests/proof/test_integrity_tiers.py
 
-Proof suite for the integrity tier substrate (v14.0).
+Proof suite for the integrity tier substrate (v18.16).
 
 Verifies the invariants that prevent quarantined/suspect/excluded rows from
 silently contaminating live learning (Bayesian weights, Kelly sizing, ML training).

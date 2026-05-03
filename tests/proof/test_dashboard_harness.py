@@ -52,7 +52,7 @@ def test_dashboard_data_summaries_read_live_schema(proof_runtime):
         proof_runtime.db_path,
         ts=_ts(2),
         source="main",
-        message="Bot started — paper v13.4",
+        message="Bot started — paper v18.16",
     )
     write_log(
         proof_runtime.log_path,

@@ -15,7 +15,7 @@ from spot_engine import get_spot_positions, _get_broker
 logger = logging.getLogger(__name__)
 
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-AUTHORIZED_USER_ID = 8224826883
+AUTHORIZED_USER_ID = int(os.environ.get("TELEGRAM_AUTHORIZED_USER_ID", "8224826883"))
 
 
 def _runtime_is_live() -> bool:

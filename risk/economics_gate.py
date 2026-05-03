@@ -90,7 +90,7 @@ def check(
     base_risk_pct: float = 0.015,
     is_ranging: bool = False,
     win_rate_estimate: float = 0.0,  # 0.0 = use default 0.52 baseline
-    stop_multiplier: float = 1.5,  # v13: matches actual position stop (default 3.0 in v10_runner)
+    stop_multiplier: float = 1.5,  # v18.16: matches actual position stop (default 3.0 in v10_runner)
     bid_depth_usd: float = 0.0,  # near-touch bid-side OB depth in USD (0 = skip depth gate)
     ask_depth_usd: float = 0.0,  # near-touch ask-side OB depth in USD (0 = skip depth gate)
 ) -> dict:

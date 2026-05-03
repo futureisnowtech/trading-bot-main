@@ -197,7 +197,7 @@ def insert_system_event(db_path: Path, **overrides) -> None:
         "ts": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "level": "INFO",
         "source": "main",
-        "message": "Bot started — paper v13.4",
+        "message": "Bot started — paper v18.16",
     }
     row.update(overrides)
     with sqlite3.connect(db_path) as conn:

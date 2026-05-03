@@ -640,7 +640,7 @@ def test_nightly_audit_includes_funnel_and_retention_checks(proof_runtime, monke
     assert "overall" in report
     checks = report["checks"]
 
-    # All v13.7 checks must be present
+    # All v18.16 checks must be present
     required = {
         "proof_suite",
         "candidate_journaling",

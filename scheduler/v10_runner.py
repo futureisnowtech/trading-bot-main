@@ -3454,7 +3454,7 @@ def run_forever():
 
     schedule.every(int(max(15, LABELER_INTERVAL_MINUTES))).minutes.do(_labeler_job)
 
-    # v13.6: nightly proof + drift + learning audit at 08:00 UTC (03:00 ET, after RBI)
+    # v18.16: nightly proof + drift + learning audit at 08:00 UTC (03:00 ET, after RBI)
     def _nightly_audit_job():
         try:
             import threading as _thr

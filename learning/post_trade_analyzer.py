@@ -290,7 +290,7 @@ def analyze_closed_trade(
         agent_votes=agent_votes,
     )
 
-    # v14.0: Compute integrity tier and write record before attribution update.
+    # v18.16: Compute integrity tier and write record before attribution update.
     # Fail-closed: any missing lineage or suspect source → at most 'suspect'.
     _integrity_tier = "suspect"
     _lineage_complete = False

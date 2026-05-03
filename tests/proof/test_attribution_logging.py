@@ -113,7 +113,7 @@ def test_analyze_closed_trade_updates_attribution_and_signal_stats(proof_runtime
 
 def test_replay_source_blocked_from_signal_stats(proof_runtime):
     """
-    v14.0 invariant: 'replay_harness' source must NOT update signal_stats.
+    v18.16 invariant: 'replay_harness' source must NOT update signal_stats.
     Attribution row is written (for audit) but Bayesian weights are not touched.
     """
     from learning.post_trade_analyzer import analyze_closed_trade

@@ -211,7 +211,8 @@ def _timeframe_state_from_enriched_df(df: pd.DataFrame) -> dict[str, Any]:
         0.22 * kst_z
         + 0.20 * macd_z
         + 0.18 * avwap_component_series
-        + 0.16 * pd.Series(
+        + 0.16
+        * pd.Series(
             np.where(cloud_bullish, 1.0, np.where(cloud_bearish, -1.0, 0.0)),
             index=df.index,
             dtype=float,
@@ -252,7 +253,13 @@ def _timeframe_state_from_enriched_df(df: pd.DataFrame) -> dict[str, Any]:
     ou = float(ou_halflife.iloc[-1] or 15.0)
     ou_quality = 1.0 - min(abs(ou - 18.0) / 30.0, 1.0)
     volatility_quality = _clip(
-        (0.45 * rv_quality + 0.30 * ((autocorr_component + 1.0) / 2.0) + 0.25 * ou_quality) * 2.0 - 1.0
+        (
+            0.45 * rv_quality
+            + 0.30 * ((autocorr_component + 1.0) / 2.0)
+            + 0.25 * ou_quality
+        )
+        * 2.0
+        - 1.0
     )
 
     momentum_impulse = _clip(
@@ -362,7 +369,11 @@ def _build_spot_state_fresh(symbol: str) -> dict[str, Any]:
         states["30m"]["structural_confirm_count"],
     )
     setup_candidates = classify_setup_candidates(states, regime)
-    best_setup = setup_candidates[0] if setup_candidates else {"family": "compression_breakout", "score": 0.0}
+    best_setup = (
+        setup_candidates[0]
+        if setup_candidates
+        else {"family": "compression_breakout", "score": 0.0}
+    )
     setup_family = str(best_setup.get("family") or "compression_breakout")
     setup_score = float(best_setup.get("score") or 0.0)
     return {
@@ -438,7 +449,9 @@ def warm_spot_universe(symbols: list[str]) -> list[dict[str, Any]]:
     return [warm_spot_state(sym) for sym in symbols]
 
 
-def classify_setup_candidates(states: dict[str, dict], regime: str) -> list[dict[str, Any]]:
+def classify_setup_candidates(
+    states: dict[str, dict], regime: str
+) -> list[dict[str, Any]]:
     s5 = states["5m"]
     s30 = states["30m"]
     s4 = states["4h"]
@@ -474,27 +487,8 @@ def classify_setup_candidates(states: dict[str, dict], regime: str) -> list[dict
         }
     )
 
-    reclaim_score = max(
-        0.0,
-        min(
-            1.0,
-            0.18 * max(float(s30.get("frame_score") or 0.0) - 50.0, 0.0) / 20.0
-            + 0.16 * max(float(s4.get("frame_score") or 0.0) - 50.0, 0.0) / 20.0
-            + 0.14 * max(float(s5.get("structure_component") or 0.0), 0.0)
-            + 0.12 * max(float(s5.get("path_efficiency") or 0.0), 0.0)
-            + 0.10 * max(float(s30.get("path_efficiency") or 0.0), 0.0)
-            + 0.08 * max(float(s5["z"]), 0.0)
-            + (0.10 if regime != "CHOP" else 0.0)
-            + (0.12 if bool(s5.get("price_above_vwap")) else 0.0),
-        ),
-    )
-    candidates.append(
-        {
-            "family": "pullback_reclaim",
-            "score": round(reclaim_score, 4),
-            "reason": "trend context plus reclaim of structure / VWAP",
-        }
-    )
+    # pullback_reclaim excluded: 0% WR across 115 live trades (2026-04-22), evidence-quarantined.
+    # Removed from candidate pool so it never wins and blocks the scan via setup_family_not_allowed.
 
     compression_score = max(
         0.0,

@@ -1,0 +1,2646 @@
+# LLM Context Snapshot
+# Generated: 2026-05-03 17:09:48 UTC
+
+### FILE: CLAUDE.md ###
+```
+# CLAUDE.md — Claude Code Companion
+
+This file is a concise companion for Claude-facing workflows.
+
+## Read Order
+
+1. `AGENTS.md` — canonical repo memory
+2. touched code / proof tests
+3. `brain/01_current_system/*`
+4. this file
+
+If this file ever conflicts with `AGENTS.md`, `AGENTS.md` wins.
+
+## Current Repo Truth
+
+- Canonical repo: `/Users/joshmacbookair2020/Projects/algo_trading_final`
+- Current version: `v18.16`
+- Authoritative live lane: **Coinbase spot scalp**
+- Launch target: **tiny live only**
+- Canonical live-launch path: `python3 scripts/go_live.py`
+- Canonical return-to-paper path: `python3 scripts/go_paper.py`
+
+## What Claude Should Assume
+
+- Broker truth is canonical for live spot holdings.
+- `runtime/spot_position_truth.py` is the first-class truth layer for open exposure.
+- `TradingView` is `monitor_only` for live spot.
+- `CHOP` is blocked for the live spot lane.
+- `pullback_reclaim` is quarantined for tiny live.
+- `maker_first` is the only default live route.
+- Dormant lanes remain in-repo but are not authoritative for live spot readiness or health.
+
+## What Claude Should Not Assume
+
+- Do not assume old `7/7 readiness` language is still valid.
+- Do not assume older multi-lane control surfaces reflect current truth.
+- Do not assume raw `main.py --mode live` is an acceptable launch path.
+- Do not assume dashboard position cards are correct unless they reconcile to broker truth.
+- Do not assume TradingView has live edge authority.
+
+## Default Workflow
+
+1. Read `AGENTS.md`
+2. Read the directly affected code path
+3. Read the closest relevant proof tests
+4. Patch the smallest truthful layer
+5. Run the smallest meaningful verification
+6. Update `AGENTS.md` / `CHANGELOG.md`
+
+## High-Value Entry Points
+
+- `runtime/spot_position_truth.py`
+- `spot_engine.py`
+- `runtime/spot_strategy.py`
+- `scheduler/v10_runner.py`
+- `monitoring/health_check.py`
+- `runtime/spot_kill_switch.py`
+- `scripts/go_live.py`
+- `scripts/check_readiness.py`
+- `scripts/live_runtime_audit.py`
+
+## Support-Surface Rule
+
+When editing Claude helper surfaces:
+- point them at `AGENTS.md` first
+- keep them aligned to the spot truth-lane contract
+- prefer concise operator truth over historical detail
+
+```
+
+### FILE: AGENTS.md ###
+```
+# AGENTS.md — Algo Trading System Knowledge Base
+# Auto-loaded by Codex at the start of every session.
+# This file is the canonical repo memory.
+# When you change runtime truth, update this file and append CHANGELOG.md.
+
+## Canonical Truth
+
+- Repo root: `/Users/joshmacbookair2020/Projects/algo_trading_final`
+- Canonical version: `v18.16` (`2026-04-30`)
+- Canonical active lane: **Coinbase spot scalp**
+- Canonical launch path: `python3 scripts/go_live.py`
+- Canonical guarded deploy path: local `./deploy.sh`
+- Canonical memory order:
+  1. `AGENTS.md`
+  2. repo code and proof tests
+  3. `brain/01_current_system/*`
+  4. `CLAUDE.md` as a concise companion, not the primary source of truth
+
+## Strategic Brain
+
+- Hub: `brain/README.md`
+- Governed by: `brain_constitution.md` + `brain_execution_os.md`
+- Active operator notes:
+  - `brain/01_current_system/Current Active Logic.md`
+  - `brain/01_current_system/Known Constraints.md`
+- Strategy / governance references:
+  - `SCANNER_PRECISION_REPORT.md`
+  - `STOP_MATRIX.md`
+  - `PROFIT_GOVERNANCE.md`
+  - `RUNTIME_INVARIANTS.md`
+  - `DEPLOYMENT_STATE_MACHINE.md`
+  - `MATRIX_DECISION_UNIVERSE.md`
+
+## What This System Is Now
+
+This repository still contains multiple strategy lanes and historical infrastructure, but operationally it is governed as:
+
+- **Authoritative live lane:** Coinbase spot scalp
+- **Current live decision standard:** truth-first, fee-aware, route-aware, evidence-gated
+- **Current launch target:** tiny live only
+- **Current dashboard / readiness authority:** the spot truth-lane contract
+
+The following systems remain in-repo but are **not authoritative** for live spot health, readiness, deployment counts, or operator truth:
+
+- Coinbase nano perp futures
+- ForecastEx
+- MES archived futures
+- stocks lane
+- older multi-lane regime language
+- legacy readiness scripts based on generic paper metrics alone
+
+They are preserved for research, later reactivation, or historical context. They must not be allowed to override the spot lane’s broker-first truth.
+
+## Owner Profile
+
+- Mac user (MacBook Air 2020)
+- Python: `/Library/Frameworks/Python.framework/Versions/3.14/bin/python3`
+- Prefers simple explanations and zero fluff
+- Wants live-capital protection over activity
+- Current live cash / holdings must be treated as broker truth, not hardcoded config
+
+## Current Operational Contract
+
+### Active lane
+
+- Venue: Coinbase spot
+- Direction: long-only
+- Focus: fewer, cleaner, fee-cleared spot scalps
+- Live mode target: `TINY_LIVE`
+
+### Protected deploy automation
+
+- GitHub deploy workflow: `.github/workflows/deploy-nyc.yml`
+- GitHub deploy environment: `nyc-production`
+- Auto-deploy after CI is opt-in only via repo variable `NYC_AUTO_DEPLOY_ENABLED=true`
+- The protected workflow is additive and must not replace local `./deploy.sh` unless explicitly promoted later
+- NYC remains a deploy target, never an authoring source
+
+### Dormant / reference lanes
+
+- `perps`
+- `forecast`
+- `mes_archived`
+- `stocks`
+
+These may remain visible in archival, research, or engineering contexts, but they are not allowed to define live spot readiness or live spot health.
+
+## Spot Truth-Lane Contract
+
+`runtime/spot_position_truth.py` is the canonical truth service for live spot exposure.
+
+Broker truth decides:
+- whether a spot holding exists
+- current quantity
+- current deployed notional
+- current broker cash
+
+Database truth enriches:
+- lineage
+- setup family
+- setup score
+- route
+- stop / target profile
+- learning linkage
+
+Every live spot symbol must classify to exactly one status:
+- `matched_bot_position`
+- `external_manual`
+- `needs_bot_repair`
+- `unclassified`
+- `db_only_stale`
+- `qty_mismatch`
+- `metadata_missing`
+
+Current seeded `external_manual` holdings:
+- `BTC`
+- `ETH` (covers broker-normalized staked ETH exposure)
+- `LTC`
+- `SOL`
+- `XRP`
+- `ADA`
+- `MANA`
+- `CLOV`
+- `STETH`
+
+Rules for `external_manual` holdings:
+- always visible
+- never auto-closed
+- never adopted as bot-managed inventory
+- do NOT block same-symbol bot entries — `_count_open_spot_positions` checks only `open_positions WHERE strategy LIKE 'spot_%'` (bot-managed rows), not broker balance (which would include manual holdings and produce false blocks)
+
+## Tiny-Live Spot Governance
+
+The live spot lane is intentionally harsh by default.
+
+- Allowed regimes: `TREND`, `NEUTRAL`
+- Blocked regime: `CHOP`
+- Hard quarantine: `pullback_reclaim`
+- Allowed setup families for evaluation:
+  - `impulse_continuation`
+  - `compression_breakout`
+  - `trend_resume_after_shakeout`
+  - `compression_expansion_retest`
+- Route: `maker_first` only
+- `taker_fallback`: disabled by default
+- Structural confirm minimums:
+  - `TREND >= 2`
+  - `NEUTRAL >= 3`
+- Final score floors:
+  - `TREND >= 58`
+  - `NEUTRAL >= 60`
+- Path efficiency minimum: `0.20`
+- Frame floors:
+  - `TREND`: `5m >= 52`, `30m >= 55`
+  - `NEUTRAL`: `5m >= 55`, `30m >= 58`
+
+Exit profile contract:
+- stop widening: forbidden
+- stopless entry: forbidden
+- `TREND` target profile: `precision`
+- `NEUTRAL` target profile: `micro`
+- faster stagnation / thesis invalidation is preferred over wider patience
+
+## TradingView Contract
+
+TradingView is **monitor-only** for the active live lane.
+
+Allowed:
+- webhook ingestion
+- payload normalization
+- storage in `tv_signals`
+- freshness / malformed-payload monitoring
+- operator visibility
+
+Not allowed:
+- candidate injection
+- direct entry trigger
+- score boost
+- veto of otherwise valid spot entries
+- stop logic influence
+
+Binding higher-timeframe context comes from the bot’s own internal stack:
+- `SuperTrend`
+- `Ichimoku`
+- `KST`
+- `MACD`
+- structural confirms
+- `5m / 30m / 4h / 1d` internal state
+
+## Readiness State Machine
+
+Canonical readiness states:
+- `NOT_READY`
+- `READY_FOR_TINY_LIVE`
+- `TINY_LIVE`
+- `DEGRADED`
+- `HALTED`
+
+Readiness promotion is controlled by runtime truth, not documentation.
+
+Live launch must fail if any of these are true:
+- broker spot snapshot unavailable
+- `unclassified` holding exists
+- `needs_bot_repair` holding exists
+- unresolved `qty_mismatch`
+- unresolved `metadata_missing`
+- spot truth blockers present
+- spot learning freshness broken
+- stop / scanner / governance blockers active
+
+## Hard Safety Principles
+
+- no broad rewrite
+- no new signal bloat
+- no fake readiness claims
+- no fake “learning is healthy” language
+- no live spot persistence from paper-style order artifacts
+- no raw `python3 main.py --mode live`
+- no live launch outside `scripts/go_live.py`
+- no automatic resume after `HALTED`
+- no hiding live holdings because the DB is confused
+
+## Key Files For The Active Lane
+
+| File | Role |
+|---|---|
+| `runtime/spot_position_truth.py` | canonical broker-first spot truth |
+| `spot_engine.py` | spot execution lifecycle, stop/target persistence, close reconciliation |
+| `runtime/spot_strategy.py` | setup / regime / score / route governance |
+| `scheduler/v10_runner.py` | scan loop, admission path, runtime lane state |
+| `execution/coinbase_spot_broker.py` | broker snapshot, spot orders, spot balances — raises on network error (no silent zeros) |
+| `runtime/crypto_tradeability.py` | tradeability gates: position count (DB-only, bot-managed), deployed USD, dual exposure |
+| `monitoring/health_check.py` | live health assertions for the spot lane |
+| `runtime/spot_kill_switch.py` | lane-specific hard halt logic |
+| `learning_loop.py` | close-to-snapshot path |
+| `learning/post_trade_analyzer.py` | spot-native attribution semantics |
+| `learning/entry_priors.py` | spot priors / target semantics |
+| `learning/spot_edge_calibrator.py` | spot edge condition derivation |
+| `dashboard/app.py` | single-page operator dashboard (no tabs, bot-reasoning-first, v18.15+) |
+| `dashboard/data/bot_state.py` | symbol grid, decision log, bot pulse — primary dashboard data layer |
+| `scripts/go_live.py` | controlled tiny-live launcher |
+| `scripts/go_paper.py` | controlled return to paper |
+| `scripts/check_readiness.py` | operator readiness snapshot |
+| `scripts/live_runtime_audit.py` | operator runtime truth audit |
+
+## Support-Surface Truth
+
+- `AGENTS.md` is canonical.
+- `CLAUDE.md` is the concise Claude-facing companion.
+- `.claude/commands/*` must follow the spot truth-lane contract.
+- `.claude/agents/*` must not describe the old perp-first or multi-agent-debate system as current truth.
+- `claude/skills/*` must read `AGENTS.md` first and use `CLAUDE.md` as a companion only.
+
+## Archived Notes
+
+Legacy “open questions” content from older architectures is archived at:
+- `brain/01_current_system/archive/Open Questions - legacy through 2026-04-30.md`
+
+If you need history, use git and archived notes. Do not restore old operator assumptions into current live surfaces.
+
+## Operator Commands
+
+```bash
+python3 main.py --mode paper
+python3 scripts/go_live.py
+python3 scripts/go_paper.py
+python3 scripts/check_readiness.py
+python3 scripts/live_runtime_audit.py
+python3 scripts/go_live_audit.py
+python3 scripts/net_truth_audit.py
+python3 -m pytest
+streamlit run dashboard/app.py --server.runOnSave true
+```
+
+## Change Discipline
+
+When behavior changes:
+- update `AGENTS.md`
+- update `CLAUDE.md` if Claude workflow guidance changed
+- append `CHANGELOG.md`
+- prefer targeted proof tests in `tests/proof/`
+```
+
+### FILE: runtime/spot_strategy.py ###
+```
+"""
+runtime/spot_strategy.py — symbol-specific live policy for crypto spot scalps.
+
+This module keeps the spot strategy auditable:
+- a finite setup library
+- symbol preferences instead of hard-coded setup lockouts
+- dynamic opportunistic allowance when derivative evidence is unusually strong
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+import system_state
+
+logger = logging.getLogger(__name__)
+
+KNOWN_SETUP_FAMILIES: tuple[str, ...] = (
+    "impulse_continuation",
+    "pullback_reclaim",
+    "compression_breakout",
+    "trend_resume_after_shakeout",
+    "compression_expansion_retest",
+)
+
+_SETUP_LIBRARY: dict[str, dict[str, float | str]] = {
+    "impulse_continuation": {
+        "min_score": 0.62,
+        "preferred_floor_delta": -0.5,
+        "opportunistic_floor_delta": 0.5,
+        "wildcard_floor_delta": 1.5,
+        "group": "momentum",
+    },
+    "pullback_reclaim": {
+        "min_score": 0.58,
+        "preferred_floor_delta": -0.5,
+        "opportunistic_floor_delta": 0.0,
+        "wildcard_floor_delta": 1.0,
+        "group": "reclaim",
+    },
+    "compression_breakout": {
+        "min_score": 0.62,
+        "preferred_floor_delta": -0.25,
+        "opportunistic_floor_delta": 0.5,
+        "wildcard_floor_delta": 1.5,
+        "group": "breakout",
+    },
+    "trend_resume_after_shakeout": {
+        "min_score": 0.60,
+        "preferred_floor_delta": -0.5,
+        "opportunistic_floor_delta": 0.0,
+        "wildcard_floor_delta": 1.0,
+        "group": "resume",
+    },
+    "compression_expansion_retest": {
+        "min_score": 0.64,
+        "preferred_floor_delta": -0.25,
+        "opportunistic_floor_delta": 0.5,
+        "wildcard_floor_delta": 1.5,
+        "group": "breakout",
+    },
+}
+
+
+def _clean_symbol(symbol: str) -> str:
+    clean = str(symbol or "").upper().replace("/", "-")
+    for suffix in ("-USDC", "-USDT", "-USD", "USDC", "USDT", "USD"):
+        if clean.endswith(suffix):
+            clean = clean[: -len(suffix)]
+            break
+    return clean.replace("-", "")
+
+
+def _tupled(values: Any, *, upper: bool = True) -> tuple[str, ...]:
+    if values is None:
+        return tuple()
+    if isinstance(values, str):
+        items = [v.strip() for v in values.split(",") if v.strip()]
+    else:
+        items = [str(v).strip() for v in values if str(v).strip()]
+    return tuple(v.upper() if upper else v for v in items)
+
+
+def _setup_value(policy: dict[str, Any], setup_family: str, key: str) -> float:
+    setup_cfg = (policy.get("setup_overrides") or {}).get(setup_family, {})
+    base = _SETUP_LIBRARY.get(setup_family, {})
+    return float(setup_cfg.get(key, base.get(key, 0.0)))
+
+
+def _load_db_conditions(symbol: str) -> tuple[dict[str, Any], ...] | None:
+    """
+    Load active derived conditions from spot_edge_conditions DB table.
+    Returns None if table doesn't exist or no active rows for symbol.
+    Returns empty tuple () if the calibrator has run but derived zero conditions
+    (meaning the bot should trade freely — all conditions are good).
+    """
+    import json as _json
+
+    try:
+        import sqlite3 as _sq
+
+        try:
+            import logging_db.trade_logger as _tl
+
+            _db = str(_tl.DB_PATH)
+        except Exception:
+            import os as _os
+
+            _db = _os.path.join(_os.path.dirname(__file__), "../logs/trades.db")
+
+        conn = _sq.connect(_db)
+        conn.row_factory = _sq.Row
+        # Check if calibrator has ever run for this symbol (any row, active or not)
+        ever_calibrated = conn.execute(
+            "SELECT COUNT(*) FROM spot_edge_conditions WHERE symbol=?", (symbol,)
+        ).fetchone()[0]
+        if ever_calibrated == 0:
+            conn.close()
+            return (
+                None  # Never calibrated — use config conditions (now empty = open gate)
+            )
+        rows = conn.execute(
+            "SELECT field, operator, value, reason FROM spot_edge_conditions "
+            "WHERE symbol=? AND active=1",
+            (symbol,),
+        ).fetchall()
+        conn.close()
+        conditions = []
+        for r in rows:
+            try:
+                val = _json.loads(r["value"])
+            except Exception:
+                val = r["value"]
+            conditions.append(
+                {
+                    "field": r["field"],
+                    "operator": r["operator"],
+                    "value": val,
+                    "reason": r["reason"],
+                }
+            )
+        return tuple(conditions)
+    except Exception:
+        return None
+
+
+def _edge_conditions(override: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    raw = override.get("edge_conditions") or ()
+    conditions: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        field = str(item.get("field") or "").strip()
+        op = str(item.get("operator") or item.get("op") or "gte").strip().lower()
+        if not field:
+            continue
+        conditions.append(
+            {
+                "field": field,
+                "operator": op,
+                "value": item.get("value"),
+                "reason": str(item.get("reason") or "").strip(),
+            }
+        )
+    return tuple(conditions)
+
+
+def _required_setup_families(policy: dict[str, Any]) -> tuple[str, ...]:
+    required: list[str] = []
+    for cond in policy.get("edge_conditions") or ():
+        if (
+            str(cond.get("field") or "") == "setup_family"
+            and str(cond.get("operator") or "") == "eq"
+            and str(cond.get("value") or "") in KNOWN_SETUP_FAMILIES
+        ):
+            required.append(str(cond.get("value")))
+    return tuple(required)
+
+
+def _taker_score_surcharge(symbol: str, execution_route: str) -> float:
+    route = str(execution_route or "").strip().lower()
+    if route not in {"taker_fallback", "taker_market"}:
+        return 0.0
+    clean = _clean_symbol(symbol)
+    if clean in {"SOL", "XRP", "DOGE"}:
+        return 4.0
+    return 3.0
+
+
+def _synthetic_score_surcharge(synthetic_candidate: bool) -> float:
+    return 2.0 if synthetic_candidate else 0.0
+
+
+def _resolved_exit_profile(profile: str, regime: str) -> str:
+    import config as _cfg
+
+    regime_key = str(regime or "NEUTRAL").upper()
+    return str(
+        getattr(_cfg, "SPOT_TINY_LIVE_EXIT_PROFILE_BY_REGIME", {}).get(regime_key)
+        or profile
+        or ""
+    ).strip().lower()
+
+
+def _exit_targets(
+    profile: str, regime: str, policy: dict[str, Any]
+) -> tuple[float, float]:
+    import config as _cfg
+
+    profile_map = getattr(_cfg, "SPOT_EXIT_PROFILE_TARGETS", {})
+    regime_key = str(regime or "NEUTRAL").upper()
+    chosen = _resolved_exit_profile(profile, regime)
+    targets = profile_map.get(chosen, {})
+    if regime_key in targets:
+        target_r, trail_r = targets[regime_key]
+        return float(target_r), float(trail_r)
+    target_r = float(
+        policy["target_r_by_regime"].get(
+            regime_key, policy["target_r_by_regime"]["NEUTRAL"]
+        )
+    )
+    trail_r = float(
+        policy["trail_arm_r_by_regime"].get(
+            regime_key,
+            policy["trail_arm_r_by_regime"]["NEUTRAL"],
+        )
+    )
+    return target_r, trail_r
+
+
+def _edge_state_value(spot_state: dict[str, Any], field: str) -> Any:
+    frames = (spot_state or {}).get("frames") or {}
+    s5 = frames.get("5m") or {}
+    s30 = frames.get("30m") or {}
+    mapping = {
+        "regime": str(spot_state.get("regime") or "").upper(),
+        "setup_family": str(spot_state.get("setup_family") or ""),
+        "setup_score": float(spot_state.get("setup_score") or 0.0),
+        "structure": float(s5.get("structure_component") or 0.0),
+        "vol_quality": float(s30.get("volatility_quality") or 0.0),
+        "a5": float(s5.get("a") or 0.0),
+        "v30": float(s30.get("v") or 0.0),
+        "mom_impulse": float(s5.get("momentum_impulse") or 0.0),
+        "participation": float(s5.get("participation_component") or 0.0),
+        "path_eff": float(s5.get("path_efficiency") or 0.0),
+        "confirm_count": int(spot_state.get("structural_confirm_count") or 0),
+        "frame_5m": float(s5.get("frame_score") or 0.0),
+        "frame_30m": float(s30.get("frame_score") or 0.0),
+    }
+    return mapping.get(field)
+
+
+def _tv_context_policy() -> dict[str, Any]:
+    import config as _cfg
+
+    return {
+        "enabled": bool(getattr(_cfg, "TV_SIGNALS_ENABLED", False)),
+        "profile_name": str(getattr(_cfg, "TV_SIGNAL_PROFILE_NAME", "") or "").strip(),
+        "mode": str(getattr(_cfg, "TV_SIGNAL_MODE", "context_filter") or "")
+        .strip()
+        .lower(),
+        "boost": float(getattr(_cfg, "TV_SIGNAL_BOOST_CONVICTION", 0) or 0.0),
+        "max_age_seconds": float(
+            getattr(_cfg, "TV_SIGNAL_MAX_AGE_SECONDS", 300) or 300.0
+        ),
+        "timeframe_min": int(getattr(_cfg, "TV_HTF_TIMEFRAME_MINUTES", 240) or 240),
+        "block_short": bool(getattr(_cfg, "TV_BLOCK_ON_HTF_SHORT", True)),
+        "block_close": bool(getattr(_cfg, "TV_BLOCK_ON_HTF_CLOSE", True)),
+    }
+
+
+def tv_context_score_adjustment(
+    symbol: str,
+    direction: str = "LONG",
+    tv_context: dict[str, Any] | None = None,
+) -> tuple[float, str]:
+    policy = _tv_context_policy()
+    if not policy["enabled"] or not isinstance(tv_context, dict):
+        return 0.0, ""
+    if policy["mode"] == "monitor_only":
+        return 0.0, ""
+
+    clean = _clean_symbol(symbol)
+    payload_symbol = _clean_symbol(str(tv_context.get("symbol") or clean))
+    if payload_symbol and payload_symbol != clean:
+        return 0.0, ""
+
+    profile_name = str(tv_context.get("profile_name") or "").strip()
+    if (
+        policy["profile_name"]
+        and profile_name
+        and profile_name != policy["profile_name"]
+    ):
+        return 0.0, ""
+
+    try:
+        tf_min = int(float(tv_context.get("tf_min") or 0))
+    except Exception:
+        tf_min = 0
+    if tf_min and tf_min < int(policy["timeframe_min"]):
+        return 0.0, ""
+
+    try:
+        age_seconds = float(tv_context.get("age_seconds") or 0.0)
+    except Exception:
+        age_seconds = 0.0
+    if age_seconds and age_seconds > float(policy["max_age_seconds"]):
+        return 0.0, ""
+
+    htf_bias = str(
+        tv_context.get("htf_bias") or tv_context.get("direction") or ""
+    ).upper()
+    normalized_direction = str(direction or "LONG").upper()
+    if htf_bias == "SHORT" and policy["block_short"] and normalized_direction == "LONG":
+        return 0.0, "tv_htf_short_bias_block"
+    if htf_bias == "CLOSE" and policy["block_close"] and normalized_direction == "LONG":
+        return 0.0, "tv_htf_close_bias_block"
+    if htf_bias == normalized_direction:
+        return float(policy["boost"]), ""
+    return 0.0, ""
+
+
+def _edge_condition_matches(
+    spot_state: dict[str, Any], condition: dict[str, Any]
+) -> bool:
+    actual = _edge_state_value(spot_state, str(condition.get("field") or ""))
+    op = str(condition.get("operator") or "gte").lower()
+    expected = condition.get("value")
+    if actual is None:
+        return False
+    if op == "eq":
+        return str(actual) == str(expected)
+    if op == "gte":
+        return float(actual) >= float(expected)
+    if op == "gt":
+        return float(actual) > float(expected)
+    if op == "lte":
+        return float(actual) <= float(expected)
+    if op == "lt":
+        return float(actual) < float(expected)
+    if op == "in":
+        return str(actual) in {str(v) for v in expected}
+    return False
+
+
+def _default_edge_reason(condition: dict[str, Any]) -> str:
+    field = str(condition.get("field") or "")
+    return {
+        "setup_family": "edge_setup_family_mismatch",
+        "setup_score": "edge_setup_score_too_low",
+        "structure": "edge_structure_component_too_low",
+        "vol_quality": "edge_volatility_quality_too_low",
+        "a5": "edge_acceleration_too_low",
+        "v30": "edge_30m_velocity_too_low",
+        "mom_impulse": "edge_momentum_impulse_too_low",
+        "participation": "edge_participation_too_low",
+        "path_eff": "edge_path_efficiency_too_low",
+        "confirm_count": "edge_confirm_count_too_low",
+        "frame_5m": "edge_frame_score_5m_too_low",
+        "frame_30m": "edge_frame_score_30m_too_low",
+        "regime": "edge_regime_mismatch",
+    }.get(field, "edge_condition_failed")
+
+
+def _edge_condition_label(condition: dict[str, Any]) -> str:
+    field = str(condition.get("field") or "")
+    value = condition.get("value")
+    field_labels = {
+        "setup_family": "setup",
+        "setup_score": "setup score",
+        "structure": "5m structure",
+        "vol_quality": "30m vol quality",
+        "a5": "5m accel",
+        "v30": "30m velocity",
+        "mom_impulse": "5m momentum impulse",
+        "participation": "5m participation",
+        "path_eff": "5m path efficiency",
+        "confirm_count": "confirm count",
+        "frame_5m": "5m frame",
+        "frame_30m": "30m frame",
+        "regime": "regime",
+    }
+    op = str(condition.get("operator") or "gte")
+    op_label = {
+        "eq": "=",
+        "gte": ">=",
+        "gt": ">",
+        "lte": "<=",
+        "lt": "<",
+        "in": "in",
+    }.get(op, op)
+    if isinstance(value, float):
+        value_text = f"{value:.4f}".rstrip("0").rstrip(".")
+    else:
+        value_text = str(value)
+    return f"{field_labels.get(field, field)} {op_label} {value_text}"
+
+
+def known_setup_families() -> tuple[str, ...]:
+    return KNOWN_SETUP_FAMILIES
+
+
+def get_spot_strategy(symbol: str) -> dict[str, Any]:
+    import config as _cfg
+
+    clean = _clean_symbol(symbol)
+    override = dict(getattr(_cfg, "SPOT_SYMBOL_STRATEGY_OVERRIDES", {}).get(clean, {}))
+    edge_conditions = _edge_conditions(override)
+    edge_conditions = _load_db_conditions(clean) or edge_conditions
+    allowed_regimes = _tupled(getattr(_cfg, "SPOT_ALLOWED_REGIMES", {"TREND", "NEUTRAL"}))
+    preferred_setups = _tupled(override.get("preferred_setups", ()), upper=False)
+    allowed_setups = tuple(
+        str(s).strip().lower()
+        for s in getattr(_cfg, "SPOT_ALLOWED_SETUP_FAMILIES_TINY_LIVE", KNOWN_SETUP_FAMILIES)
+        if str(s).strip().lower() in KNOWN_SETUP_FAMILIES
+    ) or KNOWN_SETUP_FAMILIES
+    score_floors = {
+        "TREND": float(
+            getattr(_cfg, "SPOT_TINY_LIVE_SCORE_FLOORS", {"TREND": 58.0})["TREND"]
+        ),
+        "NEUTRAL": float(
+            getattr(_cfg, "SPOT_TINY_LIVE_SCORE_FLOORS", {"NEUTRAL": 60.0})["NEUTRAL"]
+        ),
+        "CHOP": float(
+            getattr(_cfg, "SPOT_TINY_LIVE_SCORE_FLOORS", {"CHOP": 99.0})["CHOP"]
+        ),
+    }
+    score_weights = getattr(_cfg, "SPOT_TINY_LIVE_SCORE_WEIGHTS", {})
+    target_r_by_regime = override.get(
+        "target_r_by_regime",
+        getattr(
+            _cfg,
+            "SPOT_TARGET_R_BY_REGIME",
+            {"TREND": 0.85, "NEUTRAL": 0.65, "CHOP": 0.50},
+        ),
+    )
+    trail_arm_r_by_regime = override.get(
+        "trail_arm_r_by_regime",
+        getattr(
+            _cfg,
+            "SPOT_TRAIL_ARM_R_BY_REGIME",
+            {"TREND": 0.55, "NEUTRAL": 0.40, "CHOP": 0.30},
+        ),
+    )
+    policy = {
+        "symbol": clean,
+        "enabled": bool(
+            override.get(
+                "enabled",
+                clean
+                in {
+                    s.upper()
+                    for s in getattr(
+                        _cfg,
+                        "SPOT_STRATEGY_SYMBOLS",
+                        ["BTC", "ETH", "SOL", "XRP", "LTC", "DOGE", "ADA", "LINK"],
+                    )
+                },
+            )
+        ),
+        "allowed_regimes": allowed_regimes,
+        "allowed_setups": tuple(s for s in allowed_setups if s in KNOWN_SETUP_FAMILIES),
+        "preferred_setups": tuple(
+            s for s in preferred_setups if s in KNOWN_SETUP_FAMILIES and s in allowed_setups
+        ),
+        "required_setup_families": tuple(
+            s for s in _required_setup_families({"edge_conditions": edge_conditions})
+        ),
+        "edge_profile": str(override.get("edge_profile") or "").strip().lower(),
+        "edge_conditions": edge_conditions,
+        "edge_metrics": dict(override.get("edge_metrics") or {}),
+        "opportunistic_setup_score": float(
+            override.get("opportunistic_setup_score", 0.74)
+        ),
+        "wildcard_setup_score": float(override.get("wildcard_setup_score", 0.84)),
+        "score_floors": score_floors,
+        "score_weights": {
+            "TREND": {
+                "composite": float(
+                    score_weights.get("TREND", {}).get("composite", 0.70)
+                ),
+                "derivative": float(
+                    score_weights.get("TREND", {}).get("derivative", 0.30)
+                ),
+            },
+            "NEUTRAL": {
+                "composite": float(
+                    score_weights.get("NEUTRAL", {}).get("composite", 0.90)
+                ),
+                "derivative": float(
+                    score_weights.get("NEUTRAL", {}).get("derivative", 0.10)
+                ),
+            },
+            "CHOP": {
+                "composite": float(
+                    score_weights.get("CHOP", {}).get("composite", 0.90)
+                ),
+                "derivative": float(
+                    score_weights.get("CHOP", {}).get("derivative", 0.10)
+                ),
+            },
+        },
+        "min_confirm_count": int(
+            getattr(_cfg, "SPOT_TINY_LIVE_MIN_CONFIRMS", {"TREND": 2})["TREND"]
+        ),
+        "min_5m_frame": float(
+            getattr(_cfg, "SPOT_TINY_LIVE_MIN_5M_FRAME", {"TREND": 52.0})["TREND"]
+        ),
+        "min_30m_frame": float(
+            getattr(_cfg, "SPOT_TINY_LIVE_MIN_30M_FRAME", {"TREND": 55.0})["TREND"]
+        ),
+        "min_momentum_impulse": float(
+            getattr(
+                _cfg, "SPOT_TINY_LIVE_MIN_MOMENTUM_IMPULSE", {"TREND": 0.000001}
+            )["TREND"]
+        ),
+        "min_structure_component": float(
+            getattr(
+                _cfg, "SPOT_TINY_LIVE_MIN_STRUCTURE_COMPONENT", {"TREND": 0.000001}
+            )["TREND"]
+        ),
+        "min_path_efficiency": float(
+            getattr(_cfg, "SPOT_MIN_PATH_EFFICIENCY", 0.20)
+        ),
+        "min_participation_component": float(
+            getattr(
+                _cfg,
+                "SPOT_TINY_LIVE_MIN_PARTICIPATION_COMPONENT",
+                {"TREND": -999.0},
+            )["TREND"]
+        ),
+        "min_volatility_quality": float(override.get("min_volatility_quality", -1.0)),
+        "target_r_by_regime": {
+            "TREND": float(
+                target_r_by_regime.get(
+                    "TREND",
+                    getattr(_cfg, "SPOT_TARGET_R_BY_REGIME", {"TREND": 0.85})["TREND"],
+                )
+            ),
+            "NEUTRAL": float(
+                target_r_by_regime.get(
+                    "NEUTRAL",
+                    getattr(_cfg, "SPOT_TARGET_R_BY_REGIME", {"NEUTRAL": 0.65})[
+                        "NEUTRAL"
+                    ],
+                )
+            ),
+            "CHOP": float(
+                target_r_by_regime.get(
+                    "CHOP",
+                    getattr(_cfg, "SPOT_TARGET_R_BY_REGIME", {"CHOP": 0.50})["CHOP"],
+                )
+            ),
+        },
+        "trail_arm_r_by_regime": {
+            "TREND": float(
+                trail_arm_r_by_regime.get(
+                    "TREND",
+                    getattr(_cfg, "SPOT_TRAIL_ARM_R_BY_REGIME", {"TREND": 0.55})[
+                        "TREND"
+                    ],
+                )
+            ),
+            "NEUTRAL": float(
+                trail_arm_r_by_regime.get(
+                    "NEUTRAL",
+                    getattr(_cfg, "SPOT_TRAIL_ARM_R_BY_REGIME", {"NEUTRAL": 0.40})[
+                        "NEUTRAL"
+                    ],
+                )
+            ),
+            "CHOP": float(
+                trail_arm_r_by_regime.get(
+                    "CHOP",
+                    getattr(_cfg, "SPOT_TRAIL_ARM_R_BY_REGIME", {"CHOP": 0.30})["CHOP"],
+                )
+            ),
+        },
+        "setup_overrides": dict(override.get("setup_overrides", {})),
+    }
+    return policy
+
+
+def strategy_spot_symbols() -> list[str]:
+    import config as _cfg
+
+    enabled = []
+    for symbol in getattr(
+        _cfg,
+        "SPOT_SYMBOLS",
+        ["BTC", "ETH", "SOL", "XRP", "LTC", "DOGE", "ADA", "LINK"],
+    ):
+        if get_spot_strategy(symbol)["enabled"]:
+            enabled.append(_clean_symbol(symbol))
+    return enabled
+
+
+def setup_policy_for_symbol(
+    symbol: str, setup_family: str, setup_score: float
+) -> dict[str, Any]:
+    policy = get_spot_strategy(symbol)
+    family = str(setup_family or "")
+    score = float(setup_score or 0.0)
+    if family not in KNOWN_SETUP_FAMILIES:
+        return {
+            "family": family,
+            "setup_score": score,
+            "preference": "unknown",
+            "allowed": False,
+            "reason": "unknown_setup_family",
+        }
+    required = set(policy.get("required_setup_families") or ())
+    if required and family not in required:
+        edge_reason = ""
+        for cond in policy.get("edge_conditions") or ():
+            if str(cond.get("field") or "") == "setup_family":
+                edge_reason = str(cond.get("reason") or "")
+                break
+        return {
+            "family": family,
+            "setup_score": score,
+            "preference": "disallowed",
+            "allowed": False,
+            "reason": edge_reason or "edge_setup_family_mismatch",
+        }
+    if family not in set(policy["allowed_setups"]):
+        return {
+            "family": family,
+            "setup_score": score,
+            "preference": "disallowed",
+            "allowed": False,
+            "reason": "setup_family_not_allowed",
+        }
+    if family in required or family in set(policy["preferred_setups"]):
+        return {
+            "family": family,
+            "setup_score": score,
+            "preference": "preferred",
+            "allowed": True,
+            "reason": "",
+        }
+    return {
+        "family": family,
+        "setup_score": score,
+        "preference": "opportunistic",
+        "allowed": True,
+        "reason": "",
+    }
+
+
+def setup_preference_for_symbol(symbol: str, setup_family: str) -> str:
+    policy = get_spot_strategy(symbol)
+    family = str(setup_family or "")
+    if family not in KNOWN_SETUP_FAMILIES:
+        return "unknown"
+    if family not in set(policy["allowed_setups"]):
+        return "disallowed"
+    if family in set(policy["preferred_setups"]):
+        return "preferred"
+    return "opportunistic"
+
+
+def edge_policy_for_symbol(symbol: str) -> dict[str, Any]:
+    policy = get_spot_strategy(symbol)
+    conditions = tuple(policy.get("edge_conditions") or ())
+    return {
+        "symbol": policy["symbol"],
+        "profile": str(policy.get("edge_profile") or "balanced"),
+        "conditions": conditions,
+        "conditions_summary": " + ".join(
+            _edge_condition_label(cond) for cond in conditions
+        ),
+        "metrics": dict(policy.get("edge_metrics") or {}),
+    }
+
+
+def score_floor_for_symbol(
+    symbol: str,
+    regime: str,
+    *,
+    structural_confirm_count: int = 0,
+    setup_family: str = "",
+    setup_score: float = 0.0,
+    execution_route: str = "",
+    synthetic_candidate: bool = False,
+) -> float:
+    regime_key = str(regime or "NEUTRAL").upper()
+    import config as _cfg
+
+    floors = getattr(
+        _cfg,
+        "SPOT_TINY_LIVE_SCORE_FLOORS",
+        {"TREND": 58.0, "NEUTRAL": 60.0, "CHOP": 99.0},
+    )
+    base = float(floors.get(regime_key, floors["NEUTRAL"]))
+    return max(35.0, min(base, 99.0))
+
+
+def final_score_for_symbol(
+    symbol: str,
+    existing_composite: float,
+    derivative_score: float,
+    regime: str,
+    *,
+    direction: str = "LONG",
+    tv_context: dict[str, Any] | None = None,
+) -> float:
+    policy = get_spot_strategy(symbol)
+    weights = policy["score_weights"].get(
+        str(regime or "NEUTRAL").upper(), policy["score_weights"]["NEUTRAL"]
+    )
+    base = round(
+        float(existing_composite) * float(weights["composite"])
+        + float(derivative_score) * float(weights["derivative"]),
+        1,
+    )
+    boost, _ = tv_context_score_adjustment(
+        symbol,
+        direction=direction,
+        tv_context=tv_context,
+    )
+    return round(base + boost, 1)
+
+
+def target_r_for_symbol(symbol: str, regime: str) -> float:
+    policy = get_spot_strategy(symbol)
+    target_r, _ = _exit_targets(str(policy.get("edge_profile") or ""), regime, policy)
+    return float(target_r)
+
+
+def trail_arm_r_for_symbol(symbol: str, regime: str) -> float:
+    policy = get_spot_strategy(symbol)
+    _, trail_r = _exit_targets(str(policy.get("edge_profile") or ""), regime, policy)
+    return float(trail_r)
+
+
+def exit_profile_for_symbol(symbol: str, regime: str) -> str:
+    policy = get_spot_strategy(symbol)
+    return _resolved_exit_profile(str(policy.get("edge_profile") or ""), regime)
+
+
+def spot_quality_block_reason(
+    symbol: str,
+    spot_state: dict[str, Any] | None,
+    *,
+    final_spot_score: float | None = None,
+    execution_route: str = "",
+    synthetic_candidate: bool = False,
+    tv_context: dict[str, Any] | None = None,
+) -> tuple[str, float]:
+    policy = get_spot_strategy(symbol)
+    clean = _clean_symbol(symbol)
+    if not policy["enabled"]:
+        return "spot_strategy_symbol_disabled", 0.0
+    if not spot_state:
+        return "spot_state_unavailable", 0.0
+
+    regime = str(spot_state.get("regime") or "NEUTRAL").upper()
+    setup_family = str(spot_state.get("setup_family") or "")
+    setup_score = float(spot_state.get("setup_score") or 0.0)
+    confirm_count = int(spot_state.get("structural_confirm_count") or 0)
+    
+    # Push to system state
+    system_state.state.update_strategy(
+        active_symbol=clean,
+        signal=setup_family,
+        obi=float((spot_state.get("frames") or {}).get("5m", {}).get("obi") or 0.0),
+        microprice=float(spot_state.get("microprice") or 0.0),
+        mid_price=float(spot_state.get("mid_price") or 0.0)
+    )
+    system_state.state.update_prometheus()
+
+    floor = score_floor_for_symbol(
+        clean,
+        regime,
+        structural_confirm_count=confirm_count,
+        setup_family=setup_family,
+        setup_score=setup_score,
+        execution_route=execution_route,
+        synthetic_candidate=synthetic_candidate,
+    )
+    frames = spot_state.get("frames") or {}
+    s5 = frames.get("5m") or {}
+    s30 = frames.get("30m") or {}
+
+    if policy["allowed_regimes"] and regime not in set(policy["allowed_regimes"]):
+        return f"spot_regime_not_allowed:{regime}", floor
+    if regime == "CHOP":
+        return "spot_regime_not_allowed:CHOP", floor
+
+    import config as _qs_cfg
+
+    setup_policy = setup_policy_for_symbol(clean, setup_family, setup_score)
+    if not setup_policy["allowed"]:
+        return str(setup_policy["reason"] or "setup_family_not_allowed"), floor
+
+    _, tv_block = tv_context_score_adjustment(
+        clean,
+        direction="LONG",
+        tv_context=tv_context,
+    )
+    if tv_block:
+        return tv_block, floor
+
+    for condition in policy.get("edge_conditions") or ():
+        if not _edge_condition_matches(spot_state, condition):
+            return str(
+                condition.get("reason") or _default_edge_reason(condition)
+            ), floor
+
+    if final_spot_score is not None and float(final_spot_score) < float(floor):
+        return "below_regime_floor", floor
+    regime_min_confirms = int(
+        getattr(_qs_cfg, "SPOT_TINY_LIVE_MIN_CONFIRMS", {"TREND": 2, "NEUTRAL": 3})[
+            regime
+        ]
+    )
+    if confirm_count < regime_min_confirms:
+        return "structural_confirm_count_too_low", floor
+    min_5m_frame = float(
+        getattr(_qs_cfg, "SPOT_TINY_LIVE_MIN_5M_FRAME", {"TREND": 52.0, "NEUTRAL": 55.0})[
+            regime
+        ]
+    )
+    if float(s5.get("frame_score") or 0.0) < min_5m_frame:
+        return "frame_score_5m_too_low", floor
+    min_30m_frame = float(
+        getattr(_qs_cfg, "SPOT_TINY_LIVE_MIN_30M_FRAME", {"TREND": 55.0, "NEUTRAL": 58.0})[
+            regime
+        ]
+    )
+    if float(s30.get("frame_score") or 0.0) < min_30m_frame:
+        return "frame_score_30m_too_low", floor
+    min_momentum = float(
+        getattr(
+            _qs_cfg,
+            "SPOT_TINY_LIVE_MIN_MOMENTUM_IMPULSE",
+            {"TREND": 0.000001, "NEUTRAL": 0.000001},
+        )[regime]
+    )
+    if float(s5.get("momentum_impulse") or 0.0) < min_momentum:
+        return "momentum_impulse_too_low", floor
+    min_structure = float(
+        getattr(
+            _qs_cfg,
+            "SPOT_TINY_LIVE_MIN_STRUCTURE_COMPONENT",
+            {"TREND": 0.000001, "NEUTRAL": 0.0},
+        )[regime]
+    )
+    if float(s5.get("structure_component") or 0.0) < min_structure:
+        return "structure_component_too_low", floor
+    if float(s5.get("path_efficiency") or 0.0) < float(policy["min_path_efficiency"]):
+        return "path_efficiency_too_low", floor
+    min_participation = float(
+        getattr(
+            _qs_cfg,
+            "SPOT_TINY_LIVE_MIN_PARTICIPATION_COMPONENT",
+            {"TREND": -999.0, "NEUTRAL": 0.000001},
+        )[regime]
+    )
+    if float(s5.get("participation_component") or 0.0) < min_participation:
+        return "participation_component_too_low", floor
+    if float(s30.get("volatility_quality") or 0.0) < float(
+        policy["min_volatility_quality"]
+    ):
+        return "volatility_quality_too_low", floor
+    return "", floor
+```
+
+### FILE: spot_engine.py ###
+```
+"""
+spot_engine.py — Coinbase spot execution engine for the supported spot universe.
+
+Manages one long-only spot position per symbol with restart-safe persistence.
+"""
+
+from __future__ import annotations
+
+import datetime
+import json
+import logging
+import os
+import sqlite3
+import time
+from typing import Dict, List, Optional
+
+from config import (
+    SPOT_ALLOWED_REGIMES,
+    SPOT_EOD_FLATTEN_ENABLED,
+    SPOT_EOD_CLOSE_TIME,
+    SPOT_LANE_ACTIVE,
+    SPOT_MAKER_POLL_SECONDS,
+    SPOT_MIN_ORDER_USD,
+    SPOT_MIN_PATH_EFFICIENCY,
+    SPOT_SCALP_SYMBOL_CONFIG,
+    SPOT_SYMBOLS,
+    SPOT_THESIS_MIN_HOLD_MINS,
+    SPOT_THESIS_MIN_SCORE,
+    SPOT_TARGET_R_BY_REGIME,
+    SPOT_TOTAL_ALLOC_CAP_PCT,
+    SPOT_TRAIL_ARM_R_BY_REGIME,
+)
+from runtime.spot_execution_policy import (
+    limit_buy_price,
+    limit_sell_price,
+    maker_poll_count,
+)
+from runtime.spot_momentum import build_spot_state
+from runtime.spot_regime import score_floor_for_regime
+from runtime.spot_strategy import (
+    edge_policy_for_symbol,
+    exit_profile_for_symbol,
+    get_spot_strategy,
+    score_floor_for_symbol,
+    setup_policy_for_symbol,
+    spot_quality_block_reason,
+    target_r_for_symbol,
+    trail_arm_r_for_symbol,
+)
+from runtime.spot_position_truth import get_spot_position_truth, get_spot_symbol_truth
+
+from functools import wraps
+
+def safety_gated(func):
+    """
+    Decorator to block functions from executing live broker actions 
+    if config.PAPER_TRADING is True.
+    """
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        # Try to find 'paper' argument in kwargs or args
+        is_paper = kwargs.get("paper", True)
+        # If it was an index-based arg, we'd need more complex logic, 
+        # but in this repo we prefer explicit kwargs for paper/live gates.
+        
+        from config import PAPER_TRADING
+        if not is_paper and PAPER_TRADING:
+            logger.warning(
+                f"SAFETY BLOCK: Function '{func.__name__}' attempted LIVE action "
+                "while config.PAPER_TRADING is True. Blocking call."
+            )
+            return None
+        return func(*args, **kwargs)
+    return wrapper
+
+logger = logging.getLogger(__name__)
+
+try:
+    from execution.coinbase_spot_broker import CoinbaseSpotBroker, get_spot_broker
+    import system_state
+    _BROKER_OK = True
+except Exception:
+    _BROKER_OK = False
+    CoinbaseSpotBroker = None  # type: ignore[assignment]
+
+
+def _load_config() -> None:
+    """Backward-compatible config refresh for proof tests and runtime callers."""
+    import config as _cfg
+
+    globals()["SPOT_EOD_FLATTEN_ENABLED"] = getattr(
+        _cfg, "SPOT_EOD_FLATTEN_ENABLED", SPOT_EOD_FLATTEN_ENABLED
+    )
+    globals()["SPOT_EOD_CLOSE_TIME"] = getattr(
+        _cfg, "SPOT_EOD_CLOSE_TIME", SPOT_EOD_CLOSE_TIME
+    )
+    globals()["SPOT_LANE_ACTIVE"] = getattr(_cfg, "SPOT_LANE_ACTIVE", SPOT_LANE_ACTIVE)
+    globals()["SPOT_MAKER_POLL_SECONDS"] = getattr(
+        _cfg, "SPOT_MAKER_POLL_SECONDS", SPOT_MAKER_POLL_SECONDS
+    )
+    globals()["SPOT_MIN_ORDER_USD"] = getattr(
+        _cfg, "SPOT_MIN_ORDER_USD", SPOT_MIN_ORDER_USD
+    )
+    globals()["SPOT_SCALP_SYMBOL_CONFIG"] = getattr(
+        _cfg, "SPOT_SCALP_SYMBOL_CONFIG", SPOT_SCALP_SYMBOL_CONFIG
+    )
+    globals()["SPOT_SYMBOLS"] = getattr(_cfg, "SPOT_SYMBOLS", SPOT_SYMBOLS)
+    globals()["SPOT_ALLOWED_REGIMES"] = getattr(
+        _cfg, "SPOT_ALLOWED_REGIMES", SPOT_ALLOWED_REGIMES
+    )
+    globals()["SPOT_MIN_PATH_EFFICIENCY"] = getattr(
+        _cfg, "SPOT_MIN_PATH_EFFICIENCY", SPOT_MIN_PATH_EFFICIENCY
+    )
+    globals()["SPOT_THESIS_MIN_HOLD_MINS"] = getattr(
+        _cfg, "SPOT_THESIS_MIN_HOLD_MINS", SPOT_THESIS_MIN_HOLD_MINS
+    )
+    globals()["SPOT_THESIS_MIN_SCORE"] = getattr(
+        _cfg, "SPOT_THESIS_MIN_SCORE", SPOT_THESIS_MIN_SCORE
+    )
+    globals()["SPOT_TARGET_R_BY_REGIME"] = getattr(
+        _cfg, "SPOT_TARGET_R_BY_REGIME", SPOT_TARGET_R_BY_REGIME
+    )
+    globals()["SPOT_TOTAL_ALLOC_CAP_PCT"] = getattr(
+        _cfg, "SPOT_TOTAL_ALLOC_CAP_PCT", SPOT_TOTAL_ALLOC_CAP_PCT
+    )
+    globals()["SPOT_TRAIL_ARM_R_BY_REGIME"] = getattr(
+        _cfg, "SPOT_TRAIL_ARM_R_BY_REGIME", SPOT_TRAIL_ARM_R_BY_REGIME
+    )
+
+
+def _get_db_path() -> str:
+    try:
+        from config import DB_PATH
+
+        return DB_PATH
+    except Exception:
+        return os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "logs",
+            "trades.db",
+        )
+
+
+@safety_gated
+def _get_broker(paper: bool) -> Optional["CoinbaseSpotBroker"]:
+    if not _BROKER_OK:
+        system_state.state.update_exchange(connected=False)
+        return None
+    try:
+        broker = get_spot_broker()
+        broker._paper = bool(paper)
+        if not broker.is_connected():
+            broker.connect()
+        
+        # Update system state
+        system_state.state.update_exchange(connected=True)
+        try:
+            bal = broker.get_spot_balance()
+            if bal:
+                system_state.state.update_exchange(buying_power=float(bal.get("usd_available") or 0.0))
+        except Exception:
+            pass
+        
+        system_state.state.update_prometheus()
+            
+        return broker
+    except Exception as e:
+        logger.error(f"[spot_engine] broker init error: {e}")
+        system_state.state.update_exchange(connected=False)
+        return None
+
+
+def _load_spot_positions_from_db(paper: bool = True) -> List[Dict]:
+    try:
+        from logging_db.trade_logger import load_open_positions
+
+        rows = load_open_positions(paper=paper)
+        return [r for r in rows if str(r.get("strategy", "")).startswith("spot_")]
+    except Exception as e:
+        logger.debug(f"[spot_engine] load_spot_positions error: {e}")
+        return []
+
+
+def _current_spot_deployed_usd(paper: bool = True) -> float:
+    if not paper:
+        # Live: broker cash balance is the binding constraint in v10_runner (usd_available*0.95).
+        # Returning 0 here avoids stale DB positions inflating the deployed total.
+        return 0.0
+    try:
+        return sum(
+            abs(float(p.get("qty") or 0.0)) * float(p.get("entry") or 0.0)
+            for p in _load_spot_positions_from_db(paper=paper)
+        )
+    except Exception:
+        return 0.0
+
+
+def _symbol_cfg(symbol: str) -> dict:
+    clean = _clean_symbol(symbol)
+    return dict(SPOT_SCALP_SYMBOL_CONFIG.get(clean, {}))
+
+
+def _clean_symbol(symbol: str) -> str:
+    clean = str(symbol or "").upper().replace("/", "-")
+    for suffix in ("-USDC", "-USDT", "-USD", "USDC", "USDT", "USD"):
+        if clean.endswith(suffix):
+            clean = clean[: -len(suffix)]
+            break
+    return clean.replace("-", "")
+
+
+def _position_strategy(symbol: str) -> str:
+    return f"spot_{_clean_symbol(symbol).lower()}"
+
+
+def get_spot_positions(paper: bool = True) -> List[Dict]:
+    return _load_spot_positions_from_db(paper=paper)
+
+
+def _sync_position_high(
+    symbol: str, strategy: str, paper: bool, high_price: float
+) -> None:
+    try:
+        con = sqlite3.connect(_get_db_path(), timeout=5)
+        con.execute(
+            "UPDATE open_positions SET high_since_entry=? WHERE symbol=? AND strategy=? AND paper=?",
+            (high_price, _clean_symbol(symbol), strategy, 1 if paper else 0),
+        )
+        con.commit()
+        con.close()
+    except Exception as e:
+        logger.debug(f"[spot_engine] high sync error {symbol}: {e}")
+
+
+def _sync_position_exit_reason(
+    symbol: str, strategy: str, paper: bool, exit_reason: str
+) -> None:
+    try:
+        con = sqlite3.connect(_get_db_path(), timeout=5)
+        con.execute(
+            "UPDATE open_positions SET exit_reason=? WHERE symbol=? AND strategy=? AND paper=?",
+            (exit_reason, _clean_symbol(symbol), strategy, 1 if paper else 0),
+        )
+        con.commit()
+        con.close()
+    except Exception as e:
+        logger.debug(f"[spot_engine] exit_reason sync error {symbol}: {e}")
+
+
+def _persist_position_from_row(row: dict, *, qty: float | None = None) -> None:
+    from logging_db.trade_logger import persist_position
+
+    persist_position(
+        symbol=str(row.get("symbol") or ""),
+        strategy=str(
+            row.get("strategy") or _position_strategy(row.get("symbol") or "")
+        ),
+        qty=float(qty if qty is not None else row.get("qty") or 0.0),
+        entry=float(row.get("entry") or 0.0),
+        stop=float(row.get("stop") or 0.0),
+        target=float(row.get("target") or 0.0),
+        high_since_entry=float(row.get("high_since_entry") or row.get("entry") or 0.0),
+        ts_entry=str(row.get("ts_entry") or datetime.datetime.utcnow().isoformat()),
+        paper=bool(row.get("paper")),
+        direction=str(row.get("direction") or "LONG"),
+        entry_reason=str(row.get("entry_reason") or ""),
+        low_since_entry=float(row.get("low_since_entry") or row.get("entry") or 0.0),
+        atr_at_entry=float(row.get("atr_at_entry") or 0.0),
+        composite_score=float(row.get("composite_score") or 0.0),
+        trailing_active=bool(row.get("trailing_active")),
+        trailing_stop_price=float(row.get("trailing_stop_price") or 0.0),
+        scale_33_done=bool(row.get("scale_33_done")),
+        scale_66_done=bool(row.get("scale_66_done")),
+        leverage=int(row.get("leverage") or 1),
+        spot_regime=str(row.get("spot_regime") or ""),
+        setup_family=str(row.get("setup_family") or ""),
+        setup_score=float(row.get("setup_score") or 0.0),
+        setup_preference=str(row.get("setup_preference") or ""),
+        tf_5m_state=str(row.get("tf_5m_state") or ""),
+        tf_30m_state=str(row.get("tf_30m_state") or ""),
+        tf_4h_state=str(row.get("tf_4h_state") or ""),
+        tf_1d_state=str(row.get("tf_1d_state") or ""),
+        structural_confirms=str(row.get("structural_confirms") or ""),
+        execution_route=str(row.get("execution_route") or ""),
+        cooldown_until=str(row.get("cooldown_until") or ""),
+        microstructure_veto=str(row.get("microstructure_veto") or ""),
+        stop_model_version=str(row.get("stop_model_version") or ""),
+        target_model_version=str(row.get("target_model_version") or ""),
+        target_r=float(row.get("target_r") or 0.0),
+        trail_arm_r=float(row.get("trail_arm_r") or 0.0),
+        risk_dollars=float(row.get("risk_dollars") or 0.0),
+        entry_fee_usd=float(row.get("entry_fee_usd") or 0.0),
+        exit_reason=str(row.get("exit_reason") or ""),
+        entry_trade_id=int(row.get("entry_trade_id") or 0),
+        entry_order_id=str(row.get("entry_order_id") or ""),
+        entry_feature_snapshot_id=int(row.get("entry_feature_snapshot_id") or 0),
+        tv_profile_name=str(row.get("tv_profile_name") or ""),
+        tv_signal_bias=str(row.get("tv_signal_bias") or ""),
+        tv_signal_ts=str(row.get("tv_signal_ts") or ""),
+        tv_signal_age_sec=float(row.get("tv_signal_age_sec") or 0.0),
+        tv_indicator_name=str(row.get("tv_indicator_name") or ""),
+        tv_signal_strength=str(row.get("tv_signal_strength") or ""),
+        candidate_id=int(row.get("candidate_id") or 0),
+        candidate_scan_id=str(row.get("candidate_scan_id") or ""),
+        raw_scanner_symbol=str(row.get("raw_scanner_symbol") or ""),
+        base_asset=str(row.get("base_asset") or ""),
+        tv_veto_state=str(row.get("tv_veto_state") or ""),
+    )
+
+
+def _state_payload(spot_state: dict | None) -> dict:
+    if not spot_state:
+        return {
+            "spot_regime": "",
+            "setup_family": "",
+            "setup_score": 0.0,
+            "setup_preference": "",
+            "tf_5m_state": "",
+            "tf_30m_state": "",
+            "tf_4h_state": "",
+            "tf_1d_state": "",
+            "structural_confirms": "",
+        }
+    return {
+        "spot_regime": spot_state.get("regime", ""),
+        "setup_family": spot_state.get("setup_family", ""),
+        "setup_score": float(spot_state.get("setup_score") or 0.0),
+        "setup_preference": str(
+            setup_policy_for_symbol(
+                spot_state.get("symbol", ""),
+                spot_state.get("setup_family", ""),
+                float(spot_state.get("setup_score") or 0.0),
+            ).get("preference")
+            or ""
+        ),
+        "tf_5m_state": spot_state.get("tf_5m_state", ""),
+        "tf_30m_state": spot_state.get("tf_30m_state", ""),
+        "tf_4h_state": spot_state.get("tf_4h_state", ""),
+        "tf_1d_state": spot_state.get("tf_1d_state", ""),
+        "structural_confirms": spot_state.get("structural_confirms", ""),
+    }
+
+
+def _tv_payload(tv_context: dict | None) -> dict:
+    if not isinstance(tv_context, dict):
+        return {
+            "tv_profile_name": "",
+            "tv_signal_bias": "",
+            "tv_signal_ts": "",
+            "tv_signal_age_sec": 0.0,
+            "tv_indicator_name": "",
+            "tv_signal_strength": "",
+            "tv_signal_active": False,
+        }
+    bias = str(tv_context.get("htf_bias") or tv_context.get("direction") or "").upper()
+    profile = str(tv_context.get("profile_name") or "").strip()
+    return {
+        "tv_profile_name": profile,
+        "tv_signal_bias": bias,
+        "tv_signal_ts": str(tv_context.get("ts") or "").strip(),
+        "tv_signal_age_sec": float(tv_context.get("age_seconds") or 0.0),
+        "tv_indicator_name": str(
+            tv_context.get("indicator_name") or tv_context.get("indicator") or ""
+        ).strip(),
+        "tv_signal_strength": str(tv_context.get("strength") or "").strip(),
+        "tv_signal_active": bool(profile and bias == "LONG"),
+    }
+
+
+def _spot_entry_features(
+    symbol: str,
+    *,
+    composite_score: float,
+    final_spot_score: float,
+    spot_state: dict | None,
+    execution_route: str,
+    edge_profile: str,
+    target_profile: str,
+    tv_context: dict | None,
+    candidate_id: int = 0,
+    candidate_scan_id: str = "",
+    raw_scanner_symbol: str = "",
+    base_asset: str = "",
+    tv_veto_state: str = "",
+) -> dict:
+    state = spot_state or {}
+    frames = state.get("frames") or {}
+    s5 = frames.get("5m") or {}
+    s30 = frames.get("30m") or {}
+    confirms = {
+        token.strip().lower()
+        for token in str(state.get("structural_confirms") or "").split(",")
+        if token.strip()
+    }
+    tv_payload = _tv_payload(tv_context)
+    return {
+        "symbol": _clean_symbol(symbol),
+        "regime": str(state.get("regime") or "UNKNOWN"),
+        "spot_regime": str(state.get("regime") or "UNKNOWN"),
+        "setup_family": str(state.get("setup_family") or ""),
+        "setup_score": float(state.get("setup_score") or 0.0),
+        "composite_score": float(composite_score or 0.0),
+        "conviction_score": float(final_spot_score or 0.0),
+        "entry_thesis_score": float(final_spot_score or 0.0),
+        "final_spot_score": float(final_spot_score or 0.0),
+        "derivative_score": float(state.get("derivative_score") or 0.0),
+        "structural_confirm_count": int(state.get("structural_confirm_count") or 0),
+        "execution_route": str(execution_route or ""),
+        "edge_profile": str(edge_profile or ""),
+        "target_profile": str(target_profile or ""),
+        "path_efficiency": float(s5.get("path_efficiency") or 0.0),
+        "momentum_impulse": float(s5.get("momentum_impulse") or 0.0),
+        "structure_component": float(s5.get("structure_component") or 0.0),
+        "participation_component": float(s5.get("participation_component") or 0.0),
+        "a5": float(s5.get("a") or 0.0),
+        "v30": float(s30.get("v") or 0.0),
+        "frame_score_5m": float(s5.get("frame_score") or 0.0),
+        "frame_score_30m": float(s30.get("frame_score") or 0.0),
+        "volatility_quality": float(s30.get("volatility_quality") or 0.0),
+        "price_above_vwap": bool(s5.get("price_above_vwap")),
+        "compression_release": str(state.get("setup_family") or "").startswith(
+            "compression"
+        ),
+        "supertrend_bullish": "supertrend" in confirms,
+        "cloud_bullish": ("cloud" in confirms) or ("ichimoku" in confirms),
+        "wae_bullish": "wae" in confirms,
+        "wt_oversold_cross": ("wt" in confirms) or ("wavetrend" in confirms),
+        "kst_bullish": "kst" in confirms,
+        "candidate_id": int(candidate_id or 0),
+        "scan_id": str(candidate_scan_id or ""),
+        "raw_scanner_symbol": str(raw_scanner_symbol or ""),
+        "base_asset": str(base_asset or _clean_symbol(symbol)),
+        "executed_symbol": _clean_symbol(symbol),
+        "route_type": str(execution_route or ""),
+        "tv_veto_state": str(tv_veto_state or ""),
+        "tv_signal_active": bool(tv_payload["tv_signal_active"]),
+        "tv_profile_name": tv_payload["tv_profile_name"],
+        "tv_htf_bias": tv_payload["tv_signal_bias"],
+        "tv_signal_age_sec": float(tv_payload["tv_signal_age_sec"] or 0.0),
+    }
+
+
+def _load_entry_feature_snapshot(position: dict) -> dict:
+    snapshot_id = int(position.get("entry_feature_snapshot_id") or 0)
+    trade_id = int(position.get("entry_trade_id") or 0)
+    if snapshot_id <= 0 and trade_id <= 0:
+        return {}
+    try:
+        con = sqlite3.connect(_get_db_path(), timeout=5)
+        cur = con.cursor()
+        if snapshot_id > 0:
+            cur.execute(
+                "SELECT features_json FROM trade_features WHERE id=? LIMIT 1",
+                (snapshot_id,),
+            )
+        else:
+            cur.execute(
+                "SELECT features_json FROM trade_features WHERE trade_id=? ORDER BY id DESC LIMIT 1",
+                (trade_id,),
+            )
+        row = cur.fetchone()
+        con.close()
+        if not row or not row[0]:
+            return {}
+        data = json.loads(row[0])
+        return data if isinstance(data, dict) else {}
+    except Exception as e:
+        logger.debug(f"[spot_engine] feature snapshot load error: {e}")
+        return {}
+
+
+def _resolve_spot_state(symbol: str, *, allow_stale: bool) -> dict | None:
+    try:
+        return build_spot_state(symbol, allow_stale=allow_stale)
+    except TypeError:
+        return build_spot_state(symbol)
+
+
+def _entry_floor(regime: str) -> float:
+    return score_floor_for_regime(regime)
+
+
+def _target_r(regime: str) -> float:
+    return float(
+        SPOT_TARGET_R_BY_REGIME.get(
+            regime, SPOT_TARGET_R_BY_REGIME.get("NEUTRAL", 0.65)
+        )
+    )
+
+
+def _trail_arm_r(regime: str) -> float:
+    return float(
+        SPOT_TRAIL_ARM_R_BY_REGIME.get(
+            regime,
+            SPOT_TRAIL_ARM_R_BY_REGIME.get("NEUTRAL", 0.40),
+        )
+    )
+
+
+def _compute_stop_pct(
+    symbol: str, spot_state: dict | None, atr_at_entry: float = 0.0
+) -> float:
+    cfg = _symbol_cfg(symbol)
+    floor = float(cfg.get("stop_floor_pct", 0.01))
+    cap = float(cfg.get("stop_cap_pct", 0.02))
+    symbol_k = float(cfg.get("symbol_k", 1.1))
+    frames = (spot_state or {}).get("frames", {})
+    s5 = frames.get("5m", {}) if isinstance(frames, dict) else {}
+    atr_pct = float(s5.get("atr_pct") or 0.0)
+    if atr_pct <= 0 and atr_at_entry > 0:
+        price = float(s5.get("price") or 0.0)
+        atr_pct = (atr_at_entry / price) if price > 0 else 0.0
+    penalty = 0.0
+    if (spot_state or {}).get("regime") == "CHOP":
+        penalty += 0.10
+    rv_ratio = float((spot_state or {}).get("rv_ratio") or 1.0)
+    if rv_ratio > 1.30:
+        penalty += min(0.20, (rv_ratio - 1.30) * 0.25)
+    if abs(float(s5.get("a") or 0.0)) < 0.05 and abs(float(s5.get("v") or 0.0)) < 0.10:
+        penalty += 0.05
+    base_vol_stop = max(atr_pct * symbol_k, floor)
+    raw_stop = max(floor, min(base_vol_stop * (1.0 + penalty), cap))
+    # Apply evidence-derived stop tighten multipliers (config SPOT_STOP_TIGHTEN_*)
+    import config as _sc
+
+    _regime = str((spot_state or {}).get("regime") or "NEUTRAL").upper()
+    _sf = str((spot_state or {}).get("setup_family") or "")
+    _tighten = 1.0
+    if _regime == "NEUTRAL":
+        _tighten = min(_tighten, float(getattr(_sc, "SPOT_STOP_TIGHTEN_NEUTRAL", 0.92)))
+    elif _regime == "CHOP":
+        _tighten = min(_tighten, float(getattr(_sc, "SPOT_STOP_TIGHTEN_CHOP", 0.88)))
+    if _sf == "pullback_reclaim":
+        _tighten = min(
+            _tighten, float(getattr(_sc, "SPOT_STOP_TIGHTEN_PULLBACK", 0.90))
+        )
+    return max(floor, raw_stop * _tighten)
+
+
+def _execution_micro_ok(symbol: str, top: dict) -> tuple[bool, str]:
+    cfg = _symbol_cfg(symbol)
+    spread_cap = float(cfg.get("spread_cap_pct", 0.0025))
+    depth_min = float(cfg.get("depth_min_usd", 5000))
+    spread_pct = float(top.get("spread_pct") or 0.0)
+    depth = float(top.get("top_depth_usd") or 0.0)
+    if spread_pct > spread_cap:
+        return False, "spread_cap_exceeded"
+    if depth > 0 and depth < depth_min:
+        return False, "depth_below_minimum"
+    return True, "none"
+
+
+def _maker_first_buy(
+    broker: "CoinbaseSpotBroker",
+    symbol: str,
+    size_usd: float,
+    *,
+    final_spot_score: float | None = None,
+    spot_state: dict | None = None,
+) -> tuple[Optional[dict], str, str]:
+    top = broker.get_spot_top_of_book(symbol)
+    ok, veto = _execution_micro_ok(symbol, top)
+    if not ok:
+        return None, "skipped_microstructure", veto
+
+    bid = float(top.get("best_bid") or 0.0)
+    ask = float(top.get("best_ask") or 0.0)
+    limit_px = limit_buy_price(bid, ask)
+    order = broker.place_limit_buy_spot(symbol, size_usd, limit_px, post_only=True)
+    if not order:
+        return None, "maker_first_failed", "limit_order_rejected"
+
+    polls = maker_poll_count()
+    for _ in range(polls):
+        time.sleep(max(1, SPOT_MAKER_POLL_SECONDS))
+        status = broker.get_spot_order_status(
+            order["order_id"], fallback_symbol=_clean_symbol(symbol)
+        )
+        completion = float(status.get("completion_pct") or 0.0)
+        if completion >= 80.0 or str(status.get("status", "")).upper() == "FILLED":
+            status["execution_route"] = "maker_first"
+            return status, "maker_first", "none"
+
+    broker.cancel_spot_order(order["order_id"])
+    # Taker fallback gate: disabled when SPOT_TAKER_FALLBACK_ENABLED=false (default).
+    # Evidence: 113 taker trades in failure window, 0% WR, avg -$1.16, higher fee burn.
+    import config as _tfc
+
+    if not getattr(_tfc, "SPOT_TAKER_FALLBACK_ENABLED", False):
+        return None, "taker_fallback_disabled", "maker_unfilled_no_taker"
+    if final_spot_score is not None:
+        regime = str((spot_state or {}).get("regime") or "NEUTRAL").upper()
+        taker_floor = score_floor_for_symbol(
+            symbol,
+            regime,
+            structural_confirm_count=int(
+                (spot_state or {}).get("structural_confirm_count") or 0
+            ),
+            setup_family=str((spot_state or {}).get("setup_family") or ""),
+            setup_score=float((spot_state or {}).get("setup_score") or 0.0),
+            execution_route="taker_fallback",
+        )
+        if float(final_spot_score) < float(taker_floor):
+            return None, "skipped_taker_score", "taker_score_below_threshold"
+    taker = broker.buy_spot(symbol, size_usd)
+    if taker:
+        taker["execution_route"] = "taker_fallback"
+        return taker, "taker_fallback", "none"
+    return None, "taker_fallback_failed", "unfilled_after_maker"
+
+
+def _maker_first_sell(
+    broker: "CoinbaseSpotBroker", symbol: str, size_units: float
+) -> tuple[Optional[dict], str, str]:
+    top = broker.get_spot_top_of_book(symbol)
+    ok, veto = _execution_micro_ok(symbol, top)
+    if not ok:
+        return None, "skipped_microstructure", veto
+
+    bid = float(top.get("best_bid") or 0.0)
+    ask = float(top.get("best_ask") or 0.0)
+    limit_px = limit_sell_price(bid, ask)
+    order = broker.place_limit_sell_spot(symbol, size_units, limit_px, post_only=True)
+    if not order:
+        return None, "maker_first_failed", "limit_order_rejected"
+
+    polls = maker_poll_count()
+    for _ in range(polls):
+        time.sleep(max(1, SPOT_MAKER_POLL_SECONDS))
+        status = broker.get_spot_order_status(
+            order["order_id"], fallback_symbol=_clean_symbol(symbol)
+        )
+        completion = float(status.get("completion_pct") or 0.0)
+        if completion >= 80.0 or str(status.get("status", "")).upper() == "FILLED":
+            status["execution_route"] = "maker_first"
+            return status, "maker_first", "none"
+
+    broker.cancel_spot_order(order["order_id"])
+    import config as _tfc_sell
+
+    if not getattr(_tfc_sell, "SPOT_TAKER_FALLBACK_ENABLED", False):
+        return None, "taker_fallback_disabled", "maker_unfilled_no_taker"
+    taker = broker.sell_spot(symbol, size_units)
+    if taker:
+        taker["execution_route"] = "taker_fallback"
+        return taker, "taker_fallback", "none"
+    return None, "taker_fallback_failed", "unfilled_after_maker"
+
+
+def _is_paper_like_live_order(order: dict | None, paper: bool) -> bool:
+    """Fail closed if a live lane receives a paper-style execution artifact."""
+    if paper or not order:
+        return False
+    if bool(order.get("paper")):
+        return True
+    order_id = str(order.get("order_id") or "").strip().upper()
+    return order_id.startswith("PAPER_") or order_id.startswith("SPOT_PAPER_")
+
+
+@safety_gated
+def open_spot(
+    symbol: str,
+    size_usd: float,
+    paper: bool = True,
+    composite_score: float = 0.0,
+    atr_at_entry: float = 0.0,
+    spot_state: dict | None = None,
+    final_spot_score: float | None = None,
+    risk_dollars: float = 0.0,
+    cooldown_until: str = "",
+    tv_context: dict | None = None,
+    candidate_id: int = 0,
+    candidate_scan_id: str = "",
+    raw_scanner_symbol: str = "",
+    base_asset: str = "",
+) -> Optional[Dict]:
+    clean = _clean_symbol(symbol)
+    if not SPOT_LANE_ACTIVE:
+        logger.info(f"[spot_engine] {clean} blocked — spot_lane_disabled")
+        return None
+    if clean not in SPOT_SYMBOLS:
+        logger.warning(f"[spot_engine] {clean} blocked — spot_symbol_not_allowed")
+        return None
+    if not get_spot_strategy(clean)["enabled"]:
+        logger.warning(f"[spot_engine] {clean} blocked — spot_strategy_symbol_disabled")
+        return None
+    truth_row = get_spot_symbol_truth(clean, paper=paper)
+    if truth_row:
+        truth_status = str(truth_row.get("position_truth_status") or "")
+        if truth_status == "external_manual":
+            logger.warning(
+                f"[spot_engine] {clean} blocked — external_manual_holding_present"
+            )
+            return None
+        if truth_status in {
+            "matched_bot_position",
+            "unclassified",
+            "needs_bot_repair",
+            "qty_mismatch",
+            "metadata_missing",
+            "db_only_stale",
+        }:
+            logger.warning(f"[spot_engine] {clean} blocked — spot_truth_{truth_status}")
+            return None
+    if any(
+        str(p.get("symbol", "")).upper() == clean
+        for p in _load_spot_positions_from_db(paper=paper)
+    ):
+        logger.warning(f"[spot_engine] {clean} blocked — spot_position_already_open")
+        return None
+    if size_usd < SPOT_MIN_ORDER_USD:
+        logger.warning(f"[spot_engine] {clean} blocked — spot_size_below_minimum")
+        return None
+
+    broker = _get_broker(paper)
+    if broker is None:
+        logger.error(f"[spot_engine] {clean} — broker unavailable")
+        return None
+
+    try:
+        bal = broker.get_spot_balance() or {}
+        usd_available = float(bal.get("usd_available") or 0.0)
+        deployed = float(_current_spot_deployed_usd(paper=paper))
+        total_spot_equity = max(usd_available + deployed, deployed)
+        projected = deployed + float(size_usd)
+        if total_spot_equity > 0 and (projected / total_spot_equity) > float(
+            SPOT_TOTAL_ALLOC_CAP_PCT
+        ):
+            logger.info(f"[spot_engine] {clean} blocked — spot_deployment_cap_exceeded")
+            return None
+    except Exception:
+        pass
+
+    if spot_state is None:
+        try:
+            spot_state = _resolve_spot_state(clean, allow_stale=False)
+        except Exception as e:
+            logger.warning(f"[spot_engine] {clean} spot_state unavailable: {e}")
+            spot_state = None
+
+    regime = str((spot_state or {}).get("regime") or "NEUTRAL")
+    stop_pct = _compute_stop_pct(clean, spot_state, atr_at_entry=atr_at_entry)
+    target_r = target_r_for_symbol(clean, regime)
+    trail_arm_r = trail_arm_r_for_symbol(clean, regime)
+    edge_policy = edge_policy_for_symbol(clean)
+    edge_profile = str(edge_policy.get("profile") or "balanced")
+    target_profile = str(
+        exit_profile_for_symbol(clean, regime) or edge_profile or "balanced"
+    )
+    score_used = float(
+        final_spot_score if final_spot_score is not None else composite_score
+    )
+    block_reason, score_floor = spot_quality_block_reason(
+        clean,
+        spot_state,
+        final_spot_score=score_used,
+        execution_route="maker_first" if not paper else "paper_market",
+        tv_context=tv_context,
+    )
+    if block_reason:
+        logger.info(f"[spot_engine] {clean} blocked — {block_reason}")
+        return None
+
+    order = None
+    execution_route = "paper_market"
+    micro_veto = "none"
+    t0 = time.time()
+    if paper:
+        order = broker.buy_spot(clean, size_usd)
+        execution_route = (
+            str(order.get("execution_route") or "paper_market")
+            if order
+            else "paper_market"
+        )
+    else:
+        order, execution_route, micro_veto = _maker_first_buy(
+            broker,
+            clean,
+            size_usd,
+            final_spot_score=score_used,
+            spot_state=spot_state,
+        )
+        if execution_route == "skipped_microstructure":
+            logger.info(f"[spot_engine] {clean} blocked — microstructure {micro_veto}")
+            return None
+        if execution_route == "skipped_taker_score":
+            logger.info(f"[spot_engine] {clean} blocked — {micro_veto}")
+            return None
+    
+    latency = time.time() - t0
+    if not order:
+        logger.error(f"[spot_engine] {clean} buy failed")
+        return None
+    
+    # Push to Prometheus
+    try:
+        from monitoring import metrics
+        metrics.TRADES_COUNTER.inc()
+        metrics.EXECUTION_LATENCY_HISTOGRAM.observe(latency)
+    except Exception:
+        pass
+    if _is_paper_like_live_order(order, paper=paper):
+        detail = {
+            "symbol": clean,
+            "paper_flag": bool(order.get("paper")),
+            "order_id": str(order.get("order_id") or ""),
+            "execution_route": execution_route,
+        }
+        logger.error(
+            f"[spot_engine] {clean} blocked — mixed_mode_paper_like_live_order {detail}"
+        )
+        try:
+            from runtime.spot_kill_switch import trigger_spot_halt
+
+            trigger_spot_halt("ks_spot_mixed_mode_order_artifact", detail)
+        except Exception:
+            pass
+        return None
+
+    price = float(
+        order.get("average_filled_price") or broker.get_mark_price(clean) or 0.0
+    )
+    qty = float(order.get("filled_size") or 0.0)
+    if qty <= 0 and price > 0:
+        qty = size_usd / price
+    fee_usd = float(order.get("fee_usd") or 0.0)
+    stop_price = round(price * (1.0 - stop_pct), 8) if price > 0 else 0.0
+    target_price = round(price * (1.0 + stop_pct * target_r), 8) if price > 0 else 0.0
+
+    from logging_db.trade_logger import log_trade, log_trade_features, persist_position
+
+    state_payload = _state_payload(spot_state)
+    tv_payload = _tv_payload(tv_context)
+    entry_trade_id = log_trade(
+        strategy=_position_strategy(clean),
+        broker="coinbase_spot",
+        symbol=clean,
+        action="BUY",
+        order_type="LIMIT" if execution_route == "maker_first" else "MARKET",
+        qty=qty,
+        price=price,
+        fee_usd=fee_usd,
+        pnl_usd=0.0,
+        paper=paper,
+        notes=(
+            f"spot_buy route={execution_route} stop={stop_price:.8g} "
+            f"target={target_price:.8g} stop_pct={stop_pct:.4%} "
+            f"final_spot_score={score_used:.1f} edge_profile={edge_profile} "
+            f"target_profile={target_profile}"
+        ),
+    )
+    entry_features = _spot_entry_features(
+        clean,
+        composite_score=composite_score,
+        final_spot_score=score_used,
+        spot_state=spot_state,
+        execution_route=execution_route,
+        edge_profile=edge_profile,
+        target_profile=target_profile,
+        tv_context=tv_context,
+        candidate_id=int(candidate_id or 0),
+        candidate_scan_id=str(candidate_scan_id or ""),
+        raw_scanner_symbol=str(raw_scanner_symbol or ""),
+        base_asset=str(base_asset or clean),
+        tv_veto_state=str(block_reason or ""),
+    )
+    entry_feature_snapshot_id = log_trade_features(
+        entry_trade_id,
+        clean,
+        "LONG",
+        entry_features,
+    )
+    persist_position(
+        symbol=clean,
+        strategy=_position_strategy(clean),
+        qty=qty,
+        entry=price,
+        stop=stop_price,
+        target=target_price,
+        high_since_entry=price,
+        ts_entry=datetime.datetime.now().isoformat(),
+        paper=paper,
+        direction="LONG",
+        entry_reason="spot_scalp_entry",
+        atr_at_entry=atr_at_entry,
+        composite_score=composite_score,
+        leverage=1,
+        spot_regime=regime,
+        setup_family=(spot_state or {}).get("setup_family", ""),
+        setup_score=state_payload["setup_score"],
+        setup_preference=state_payload["setup_preference"],
+        tf_5m_state=state_payload["tf_5m_state"],
+        tf_30m_state=state_payload["tf_30m_state"],
+        tf_4h_state=state_payload["tf_4h_state"],
+        tf_1d_state=state_payload["tf_1d_state"],
+        structural_confirms=state_payload["structural_confirms"],
+        execution_route=execution_route,
+        cooldown_until=cooldown_until,
+        microstructure_veto=micro_veto,
+        stop_model_version="spot_scalp_v1",
+        target_model_version=f"spot_scalp_{target_profile}_v1",
+        target_r=target_r,
+        trail_arm_r=trail_arm_r,
+        risk_dollars=risk_dollars,
+        entry_fee_usd=fee_usd,
+        exit_reason="",
+        entry_trade_id=entry_trade_id,
+        entry_order_id=str(order.get("order_id") or ""),
+        entry_feature_snapshot_id=entry_feature_snapshot_id,
+        tv_profile_name=tv_payload["tv_profile_name"],
+        tv_signal_bias=tv_payload["tv_signal_bias"],
+        tv_signal_ts=tv_payload["tv_signal_ts"],
+        tv_signal_age_sec=tv_payload["tv_signal_age_sec"],
+        tv_indicator_name=tv_payload["tv_indicator_name"],
+        tv_signal_strength=tv_payload["tv_signal_strength"],
+        candidate_id=int(candidate_id or 0),
+        candidate_scan_id=str(candidate_scan_id or ""),
+        raw_scanner_symbol=str(raw_scanner_symbol or ""),
+        base_asset=str(base_asset or clean),
+        tv_veto_state=str(block_reason or ""),
+    )
+    return {
+        "symbol": clean,
+        "strategy": _position_strategy(clean),
+        "qty": qty,
+        "entry": price,
+        "stop_price": stop_price,
+        "target_price": target_price,
+        "size_usd": size_usd,
+        "risk_dollars": risk_dollars,
+        "stop_pct": stop_pct,
+        "target_r": target_r,
+        "trail_arm_r": trail_arm_r,
+        "setup_family": state_payload["setup_family"],
+        "setup_score": state_payload["setup_score"],
+        "setup_preference": state_payload["setup_preference"],
+        "target_profile": target_profile,
+        "order_id": order.get("order_id", ""),
+        "fee_usd": fee_usd,
+        "execution_route": execution_route,
+        "candidate_id": int(candidate_id or 0),
+        "scan_id": str(candidate_scan_id or ""),
+        "paper": paper,
+    }
+
+
+@safety_gated
+def close_spot(
+    symbol: str,
+    paper: bool = True,
+    exit_reason: str = "manual_exit",
+) -> Optional[Dict]:
+    clean = _clean_symbol(symbol)
+    pos = next(
+        (
+            p
+            for p in _load_spot_positions_from_db(paper=paper)
+            if str(p.get("symbol", "")).upper() == clean
+        ),
+        None,
+    )
+    if not pos:
+        logger.warning(f"[spot_engine] close_spot {clean}: no open position found")
+        return None
+
+    qty = float(pos.get("qty") or 0.0)
+    entry_price = float(pos.get("entry") or 0.0)
+    strategy = str(pos.get("strategy") or _position_strategy(clean))
+    if qty <= 0:
+        return None
+    broker = _get_broker(paper)
+    if broker is None:
+        return None
+
+    # Reconcile qty against actual broker balance — prevents INSUFFICIENT_FUND loop
+    # when DB qty drifts above actual holdings (e.g. partial fill not fully recorded).
+    if not paper:
+        try:
+            holdings = broker.sync_live_holdings() or []
+            actual_qty = next(
+                (
+                    float(h.get("qty") or 0)
+                    for h in holdings
+                    if str(h.get("symbol", "")).upper() == clean
+                ),
+                None,
+            )
+            if actual_qty is not None and actual_qty < qty:
+                logger.warning(
+                    f"[spot_engine] close_spot {clean}: DB qty={qty:.5f} > broker qty={actual_qty:.5f}"
+                    f" — selling actual qty to avoid INSUFFICIENT_FUND"
+                )
+                qty = actual_qty
+        except Exception:
+            pass
+    if qty <= 0:
+        logger.warning(
+            f"[spot_engine] close_spot {clean}: qty=0 after broker reconciliation, skipping"
+        )
+        return None
+
+    order = None
+    execution_route = "paper_market"
+    micro_veto = "none"
+    t0 = time.time()
+    if paper:
+        order = broker.sell_spot(clean, qty)
+        execution_route = (
+            str(order.get("execution_route") or "paper_market")
+            if order
+            else "paper_market"
+        )
+    else:
+        order, execution_route, micro_veto = _maker_first_sell(broker, clean, qty)
+        if execution_route == "skipped_microstructure":
+            order = broker.sell_spot(clean, qty)
+            execution_route = "taker_fallback"
+    
+    latency = time.time() - t0
+    if not order:
+        logger.error(f"[spot_engine] close_spot {clean}: sell failed")
+        return None
+    
+    # Push to Prometheus
+    try:
+        from monitoring import metrics
+        metrics.TRADES_COUNTER.inc()
+        metrics.EXECUTION_LATENCY_HISTOGRAM.observe(latency)
+    except Exception:
+        pass
+
+    exit_price = float(
+        order.get("average_filled_price") or broker.get_mark_price(clean) or entry_price
+    )
+    filled_qty = float(order.get("filled_size") or qty)
+    fee_usd = float(order.get("fee_usd") or 0.0)
+    pnl_usd = (
+        (exit_price - entry_price) * filled_qty
+        - fee_usd
+        - float(pos.get("entry_fee_usd") or 0.0)
+    )
+
+    from logging_db.trade_logger import log_trade
+
+    entry_features = _load_entry_feature_snapshot(pos)
+    exit_state = None
+    try:
+        exit_state = _resolve_spot_state(clean, allow_stale=True)
+    except Exception:
+        exit_state = None
+
+    _sync_position_exit_reason(clean, strategy, paper, exit_reason)
+    close_trade_id = log_trade(
+        strategy=strategy,
+        broker="coinbase_spot",
+        symbol=clean,
+        action="SELL",
+        order_type="LIMIT" if execution_route == "maker_first" else "MARKET",
+        qty=filled_qty,
+        price=exit_price,
+        fee_usd=fee_usd,
+        pnl_usd=pnl_usd,
+        paper=paper,
+        won=1 if pnl_usd > 0 else 0,
+        notes=(
+            f"spot_sell exit_reason={exit_reason} route={execution_route} "
+            f"micro_veto={micro_veto} pnl={pnl_usd:.2f}"
+        ),
+    )
+    total_fee_usd = fee_usd + float(pos.get("entry_fee_usd") or 0.0)
+    learning_snapshot_written = False
+    attribution_written = False
+    if close_trade_id > 0:
+        trade_ref = f"spot:{int(pos.get('entry_trade_id') or 0)}:{close_trade_id}"
+        try:
+            import learning_loop as _ll
+
+            entry_features.setdefault("candidate_id", int(pos.get("candidate_id") or 0))
+            entry_features.setdefault(
+                "scan_id", str(pos.get("candidate_scan_id") or "")
+            )
+            entry_features.setdefault(
+                "raw_scanner_symbol", str(pos.get("raw_scanner_symbol") or clean)
+            )
+            entry_features.setdefault("base_asset", str(pos.get("base_asset") or clean))
+            entry_features.setdefault("executed_symbol", clean)
+            entry_features.setdefault(
+                "route_type", str(pos.get("execution_route") or execution_route or "")
+            )
+            entry_features.setdefault(
+                "tv_veto_state", str(pos.get("tv_veto_state") or "")
+            )
+            entry_features.setdefault(
+                "tv_profile_name", str(pos.get("tv_profile_name") or "")
+            )
+            entry_features.setdefault(
+                "tv_htf_bias", str(pos.get("tv_signal_bias") or "")
+            )
+            entry_features.setdefault(
+                "tv_signal_age_sec", float(pos.get("tv_signal_age_sec") or 0.0)
+            )
+            _ll.record_closed_trade(
+                trade_id=close_trade_id,
+                symbol=clean,
+                direction="LONG",
+                won=pnl_usd > 0,
+                pnl_usd=pnl_usd,
+                entry_price=entry_price,
+                exit_price=exit_price,
+                entry_score=float(entry_features.get("entry_thesis_score") or 0.0),
+                exit_score=float((exit_state or {}).get("derivative_score") or 0.0),
+                regime=str(
+                    entry_features.get("regime")
+                    or pos.get("spot_regime")
+                    or (exit_state or {}).get("regime")
+                    or "UNKNOWN"
+                ),
+                features=entry_features,
+                exit_reason=exit_reason,
+                trade_ref=trade_ref,
+            )
+        except Exception as e:
+            logger.debug(f"[spot_engine] learning_loop close error {clean}: {e}")
+        try:
+            from learning.post_trade_analyzer import analyze_closed_trade as _pta
+
+            _pta(
+                symbol=clean,
+                strategy=strategy,
+                entry_price=entry_price,
+                exit_price=exit_price,
+                qty=filled_qty,
+                fee_usd=total_fee_usd,
+                entry_ts=str(
+                    pos.get("ts_entry") or datetime.datetime.utcnow().isoformat()
+                ),
+                exit_ts=datetime.datetime.utcnow().isoformat(),
+                exit_reason=exit_reason,
+                market_data_at_entry=entry_features,
+                source="clean_paper_v10" if paper else "live_v10",
+                paper=paper,
+                trade_ref=trade_ref,
+                exit_type=exit_reason,
+                composite_score=float(entry_features.get("composite_score") or 0.0),
+                close_order_id=str(order.get("order_id") or ""),
+                entry_order_id=str(pos.get("entry_order_id") or ""),
+                feature_snapshot_id=int(pos.get("entry_feature_snapshot_id") or 0),
+            )
+        except Exception as e:
+            logger.debug(f"[spot_engine] post_trade_analyzer close error {clean}: {e}")
+        try:
+            con = sqlite3.connect(_get_db_path(), timeout=5)
+            learning_snapshot_written = bool(
+                con.execute(
+                    "SELECT 1 FROM ml_feature_snapshots WHERE trade_id=? LIMIT 1",
+                    (close_trade_id,),
+                ).fetchone()
+            )
+            attribution_written = bool(
+                con.execute(
+                    "SELECT 1 FROM trade_attribution WHERE trade_ref=? LIMIT 1",
+                    (trade_ref,),
+                ).fetchone()
+            )
+            con.close()
+        except Exception:
+            learning_snapshot_written = False
+            attribution_written = False
+
+    if (
+        not paper
+        and close_trade_id > 0
+        and (not learning_snapshot_written or not attribution_written)
+    ):
+        try:
+            from runtime.spot_kill_switch import trigger_spot_halt
+
+            reason = (
+                "spot_learning_snapshot_missing"
+                if not learning_snapshot_written
+                else "spot_trade_attribution_missing"
+            )
+            trigger_spot_halt(
+                reason,
+                {
+                    "symbol": clean,
+                    "trade_ref": trade_ref,
+                    "close_trade_id": close_trade_id,
+                    "snapshot_written": learning_snapshot_written,
+                    "attribution_written": attribution_written,
+                },
+            )
+        except Exception as e:
+            logger.warning(
+                f"[spot_engine] unable to trigger spot halt for {clean}: {e}"
+            )
+
+    if not paper:
+        try:
+            truth = get_spot_position_truth(paper=False)
+            residual = next(
+                (
+                    row
+                    for row in truth.get("all_live_holdings") or []
+                    if str(row.get("symbol") or "").upper() == clean
+                ),
+                None,
+            )
+        except Exception:
+            residual = None
+        if residual and float(residual.get("qty") or 0.0) > 1e-8:
+            updated_row = dict(pos)
+            updated_row["qty"] = float(residual.get("qty") or 0.0)
+            updated_row["entry"] = float(
+                residual.get("entry") or pos.get("entry") or entry_price
+            )
+            updated_row["paper"] = 0
+            updated_row["exit_reason"] = str(exit_reason or "")
+            _persist_position_from_row(updated_row, qty=updated_row["qty"])
+        else:
+            from logging_db.trade_logger import delete_position
+
+            delete_position(clean, strategy=strategy, paper=paper)
+    else:
+        from logging_db.trade_logger import delete_position
+
+        delete_position(clean, strategy=strategy, paper=paper)
+    return {
+        "symbol": clean,
+        "entry_price": entry_price,
+        "exit_price": exit_price,
+        "qty": filled_qty,
+        "pnl_usd": round(pnl_usd, 4),
+        "fee_usd": fee_usd,
+        "execution_route": execution_route,
+        "exit_reason": exit_reason,
+        "order_id": order.get("order_id", ""),
+        "paper": paper,
+    }
+
+
+def check_spot_stops(paper: bool = True) -> List[Dict]:
+    closed: List[Dict] = []
+    broker = _get_broker(paper)
+    if broker is None:
+        return closed
+    for pos in _load_spot_positions_from_db(paper=paper):
+        sym = str(pos.get("symbol") or "").upper()
+        stop_price = float(pos.get("stop") or 0.0)
+        if stop_price <= 0:
+            continue
+        current_price = float(broker.get_mark_price(sym) or 0.0)
+        if current_price > 0 and current_price <= stop_price:
+            result = close_spot(sym, paper=paper, exit_reason="hard_stop")
+            if result:
+                result["trigger"] = "hard_stop"
+                closed.append(result)
+    return closed
+
+
+def check_spot_trailing(paper: bool = True) -> List[Dict]:
+    closed: List[Dict] = []
+    broker = _get_broker(paper)
+    if broker is None:
+        return closed
+    for pos in _load_spot_positions_from_db(paper=paper):
+        sym = str(pos.get("symbol") or "").upper()
+        strategy = str(pos.get("strategy") or _position_strategy(sym))
+        entry = float(pos.get("entry") or 0.0)
+        stop = float(pos.get("stop") or 0.0)
+        high_since_entry = float(pos.get("high_since_entry") or entry)
+        target_r = float(
+            pos.get("target_r") or _target_r(str(pos.get("spot_regime") or "NEUTRAL"))
+        )
+        trail_arm_r = float(
+            pos.get("trail_arm_r")
+            or _trail_arm_r(str(pos.get("spot_regime") or "NEUTRAL"))
+        )
+        current_price = float(broker.get_mark_price(sym) or 0.0)
+        if current_price <= 0 or entry <= 0 or stop <= 0:
+            continue
+        if current_price > high_since_entry:
+            high_since_entry = current_price
+            _sync_position_high(sym, strategy, paper, high_since_entry)
+        risk_per_unit = entry - stop
+        if risk_per_unit <= 0:
+            continue
+        arm_price = entry + risk_per_unit * trail_arm_r
+        if high_since_entry < arm_price:
+            continue
+        trail_width = risk_per_unit * max(0.6, min(target_r, 1.0))
+        trail_stop = high_since_entry - trail_width
+        if current_price <= trail_stop and current_price > entry:
+            result = close_spot(sym, paper=paper, exit_reason="trailing_stop")
+            if result:
+                result["trigger"] = "trailing_stop"
+                closed.append(result)
+    return closed
+
+
+def check_spot_targets(paper: bool = True) -> List[Dict]:
+    closed: List[Dict] = []
+    broker = _get_broker(paper)
+    if broker is None:
+        return closed
+    for pos in _load_spot_positions_from_db(paper=paper):
+        sym = str(pos.get("symbol") or "").upper()
+        target = float(pos.get("target") or 0.0)
+        current_price = float(broker.get_mark_price(sym) or 0.0)
+        if target > 0 and current_price >= target:
+            result = close_spot(sym, paper=paper, exit_reason="target_hit")
+            if result:
+                result["trigger"] = "target_hit"
+                closed.append(result)
+    return closed
+
+
+def check_spot_stagnation_exits(paper: bool = True) -> List[Dict]:
+    closed: List[Dict] = []
+    broker = _get_broker(paper)
+    if broker is None:
+        return closed
+    for pos in _load_spot_positions_from_db(paper=paper):
+        sym = str(pos.get("symbol") or "").upper()
+        try:
+            spot_state = _resolve_spot_state(sym, allow_stale=True)
+        except Exception:
+            continue
+        entry = float(pos.get("entry") or 0.0)
+        stop = float(pos.get("stop") or 0.0)
+        current_price = float(broker.get_mark_price(sym) or 0.0)
+        ts_entry = str(pos.get("ts_entry") or "")
+        if not ts_entry or entry <= 0 or stop <= 0 or current_price <= 0:
+            continue
+        held_min = (
+            datetime.datetime.now() - datetime.datetime.fromisoformat(ts_entry)
+        ).total_seconds() / 60.0
+        expected_half_life = max(
+            6.0, min(45.0, float(spot_state.get("ou_halflife_minutes") or 15.0))
+        )
+        risk_per_unit = entry - stop
+        progress_r = (
+            ((current_price - entry) / risk_per_unit) if risk_per_unit > 0 else 0.0
+        )
+        s5 = spot_state["frames"]["5m"]
+        if (
+            held_min > expected_half_life
+            and progress_r < 0.25
+            and s5["v"] <= 0
+            and s5["a"] <= 0
+        ):
+            result = close_spot(sym, paper=paper, exit_reason="stagnation_exit")
+            if result:
+                result["trigger"] = "stagnation_exit"
+                closed.append(result)
+    return closed
+
+
+def check_spot_thesis_exits(paper: bool = True) -> List[Dict]:
+    closed: List[Dict] = []
+    for pos in _load_spot_positions_from_db(paper=paper):
+        sym = str(pos.get("symbol") or "").upper()
+        ts_entry = str(pos.get("ts_entry") or "")
+        if ts_entry:
+            try:
+                held_min = (
+                    datetime.datetime.now() - datetime.datetime.fromisoformat(ts_entry)
+                ).total_seconds() / 60.0
+                if held_min < float(SPOT_THESIS_MIN_HOLD_MINS):
+                    continue
+            except Exception:
+                pass
+        try:
+            spot_state = _resolve_spot_state(sym, allow_stale=True)
+        except Exception:
+            continue
+        if (
+            spot_state["derivative_score"] < SPOT_THESIS_MIN_SCORE
+            or spot_state["frames"]["5m"]["v"] <= 0
+        ):
+            result = close_spot(sym, paper=paper, exit_reason="thesis_decay")
+            if result:
+                result["trigger"] = "thesis_decay"
+                closed.append(result)
+    return closed
+
+
+def check_spot_eod_close(paper: bool = True) -> List[Dict]:
+    if not SPOT_EOD_FLATTEN_ENABLED:
+        return []
+    import pytz
+
+    et = pytz.timezone("America/New_York")
+    now_et = datetime.datetime.now(et)
+    if now_et.weekday() >= 5:
+        return []
+    try:
+        eod_h, eod_m = [int(x) for x in SPOT_EOD_CLOSE_TIME.split(":")]
+    except Exception:
+        eod_h, eod_m = 15, 45
+    if now_et.hour < eod_h or (now_et.hour == eod_h and now_et.minute < eod_m):
+        return []
+    closed: List[Dict] = []
+    for pos in _load_spot_positions_from_db(paper=paper):
+        result = close_spot(
+            str(pos.get("symbol") or ""), paper=paper, exit_reason="eod_close"
+        )
+        if result:
+            result["trigger"] = "eod_close"
+            closed.append(result)
+    return closed
+```
+

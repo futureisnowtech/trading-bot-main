@@ -8,6 +8,11 @@ from typing import Optional
 import system_state
 from runtime.runtime_state import get_lane_state, get_system_state
 
+try:
+    from config import CLAUDE_MODEL
+except ImportError:
+    CLAUDE_MODEL = "claude-3-5-sonnet-latest"
+
 logger = logging.getLogger(__name__)
 
 def get_repo_context() -> str:
@@ -70,7 +75,9 @@ def ask_ai(query: str) -> str:
     if not api_key:
         return "Error: ANTHROPIC_API_KEY is not set."
 
-    model = os.environ.get("CLAUDE_MODEL", "claude-3-5-sonnet-20240620")
+    model = os.environ.get("CLAUDE_MODEL") or CLAUDE_MODEL
+    if model == "claude-sonnet-4-6": # Handle placeholder in config.py
+        model = "claude-3-5-sonnet-latest"
     
     context = get_repo_context()
     
@@ -100,9 +107,14 @@ def ask_ai(query: str) -> str:
 
     try:
         response = requests.post(url, headers=headers, json=data, timeout=30)
-        response.raise_for_status()
+        if response.status_code != 200:
+            error_data = response.json()
+            msg = error_data.get("error", {}).get("message", "Unknown error")
+            logger.error(f"AI Backend Error ({response.status_code}): {msg}")
+            return f"AI Backend Error ({response.status_code}): {msg}"
+            
         result = response.json()
         return result["content"][0]["text"]
     except Exception as e:
-        logger.error(f"AI Agent error: {e}")
+        logger.error(f"AI Agent exception: {e}")
         return f"Error connecting to AI backend: {str(e)}"

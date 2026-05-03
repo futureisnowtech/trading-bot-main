@@ -347,7 +347,7 @@ async def _handle_ai_query(update: Update, query: str):
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await thinking_msg.edit_text(
-            response, reply_markup=reply_markup, parse_mode=ParseMode.HTML
+            escape(response), reply_markup=reply_markup, parse_mode=ParseMode.HTML
         )
     except Exception as e:
         logger.error(f"AI handler error: {e}")

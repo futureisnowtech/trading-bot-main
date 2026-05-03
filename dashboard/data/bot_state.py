@@ -205,7 +205,8 @@ def get_bot_pulse() -> dict[str, Any]:
     last_scan_ts = str(evt.get("ts") or "") if evt else ""
     last_scan_msg = str(evt.get("message") or "") if evt else ""
     health_msg = str(health.get("message") or "") if health else ""
-    healthy = "HEALTHY" in health_msg
+    health_upper = health_msg.upper()
+    healthy = "[HEALTHY]" in health_upper
 
     state = _q1(
         "SELECT process_mode, launch_readiness_state FROM system_runtime_state ORDER BY id DESC LIMIT 1"

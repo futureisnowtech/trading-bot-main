@@ -5,7 +5,31 @@ Never hardcode anything that belongs here.
 
 import os
 from datetime import time as dt_time
-from dotenv import load_dotenv
+
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    def load_dotenv(dotenv_path: str | None = None) -> bool:
+        """Minimal .env loader fallback for audit scripts on hosts without python-dotenv."""
+        path = dotenv_path or os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+        if not os.path.exists(path):
+            return False
+        with open(path, encoding="utf-8") as fh:
+            for raw in fh:
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key = key.strip()
+                value = value.strip()
+                if (
+                    len(value) >= 2
+                    and value[0] == value[-1]
+                    and value[0] in {"'", '"'}
+                ):
+                    value = value[1:-1]
+                os.environ.setdefault(key, value)
+        return True
 
 load_dotenv()
 

@@ -26,6 +26,7 @@ sys.path = [_REPO_ROOT] + [
 PASS = "✅"
 WARN = "⚠️ "
 FAIL = "❌"
+INFO = "ℹ️ "
 _errors = []
 _warnings = []
 
@@ -44,6 +45,10 @@ def fail(msg):
     _errors.append(msg)
 
 
+def info(msg):
+    print(f"  {INFO} {msg}")
+
+
 # ─────────────────────────────────────────────────────────────
 # 1. ENVIRONMENT / .env
 # ─────────────────────────────────────────────────────────────
@@ -57,38 +62,72 @@ try:
 except ImportError:
     fail("python-dotenv not installed — run: pip install python-dotenv")
 
-# v10: ANTHROPIC_API_KEY no longer required (AI debate engine removed in v10).
-# PAPER_TRADING and ACCOUNT_SIZE have safe defaults in config.py ("true" / 5000).
-# Hard-require only keys with no safe fallback.
-required_keys: list = []  # No hard-required env keys in v10+
+# v10+ environment truth:
+# - No env vars are globally hard-required for validator startability.
+# - Coinbase spot runtime uses CDP credentials when present; legacy
+#   COINBASE_API_KEY / COINBASE_API_SECRET are no longer the primary path.
+# - ACCOUNT_SIZE / PAPER_TRADING / pair lists have config defaults and should
+#   not warn when omitted from .env.
+required_keys: list = []
 
-optional_keys = [
-    "ACCOUNT_SIZE",  # default 5000 in config.py — warn if missing
-    "PAPER_TRADING",  # default True in config.py — warn if missing
-    "ANTHROPIC_API_KEY",  # not used by v10 signal engine; warn only
-    "BINANCE_API_KEY",
-    "BINANCE_API_SECRET",
-    "COINBASE_API_KEY",
-    "COINBASE_API_SECRET",
-    "TRADOVATE_USERNAME",
-    "TRADOVATE_PASSWORD",
-    "CRYPTO_PAIRS",
-    "PERP_PAIRS",
-]
+
+def _env_has(name: str) -> bool:
+    return bool(os.getenv(name, "").strip())
+
 
 for k in required_keys:
-    v = os.getenv(k, "")
-    if v:
+    if _env_has(k):
         ok(f"{k} set")
     else:
         fail(f"{k} missing from .env")
 
-for k in optional_keys:
-    v = os.getenv(k, "")
-    if v:
-        ok(f"{k} set")
-    else:
-        warn(f"{k} not set — related features will be disabled")
+if _env_has("ACCOUNT_SIZE"):
+    ok("ACCOUNT_SIZE set")
+else:
+    info("ACCOUNT_SIZE not set — using config default")
+
+if _env_has("PAPER_TRADING"):
+    ok("PAPER_TRADING set")
+else:
+    info("PAPER_TRADING not set — using config default")
+
+if _env_has("ANTHROPIC_API_KEY"):
+    ok("ANTHROPIC_API_KEY set")
+else:
+    info("ANTHROPIC_API_KEY not set — extended-thinking exits disabled")
+
+_coinbase_cdp_ready = _env_has("COINBASE_CDP_KEY_NAME") and _env_has(
+    "COINBASE_CDP_PRIVATE_KEY"
+)
+_coinbase_legacy_ready = _env_has("COINBASE_API_KEY") and _env_has(
+    "COINBASE_API_SECRET"
+)
+if _coinbase_cdp_ready:
+    ok("Coinbase CDP credentials set")
+elif _coinbase_legacy_ready:
+    info("Legacy Coinbase API credentials set — CDP credentials absent")
+else:
+    warn("No Coinbase credentials set — related features will be disabled")
+
+if _env_has("BINANCE_API_KEY") and _env_has("BINANCE_API_SECRET"):
+    ok("Binance credentials set")
+else:
+    info("Binance credentials not set — Binance-related features remain disabled")
+
+if _env_has("TRADOVATE_USERNAME") and _env_has("TRADOVATE_PASSWORD"):
+    ok("Tradovate credentials set")
+else:
+    info("Tradovate credentials not set — archived/dormant futures lane remains disabled")
+
+if _env_has("CRYPTO_PAIRS"):
+    ok("CRYPTO_PAIRS set")
+else:
+    info("CRYPTO_PAIRS not set — using config defaults")
+
+if _env_has("PERP_PAIRS"):
+    ok("PERP_PAIRS set")
+else:
+    info("PERP_PAIRS not set — using config defaults")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -288,18 +327,40 @@ print("\n─── ForecastEx lane ───────────────
 _fx_checks: list[dict] = []  # {name, status, detail}
 _fx_blocked = False
 _fx_action = False
+_fx_required = bool(getattr(globals().get("cfg"), "FORECAST_LANE_ACTIVE", False))
 
 
 def _fx(name: str, status: str, detail: str) -> None:
     """Record a ForecastEx check result and print it."""
     global _fx_blocked, _fx_action
-    icon = {"READY": PASS, "BLOCKED": FAIL, "ACTION NEEDED": WARN}.get(status, WARN)
-    print(f"  {icon} [{status:13s}] {name}: {detail}")
-    _fx_checks.append({"name": name, "status": status, "detail": detail})
-    if status == "BLOCKED":
+    effective_status = status
+    effective_detail = detail
+    if not _fx_required and name not in {"Forecast lane flag", "MES archived"}:
+        if status in {"BLOCKED", "ACTION NEEDED"}:
+            effective_status = "INFO"
+            effective_detail = f"optional/dormant lane — {detail}"
+    icon = {
+        "READY": PASS,
+        "BLOCKED": FAIL,
+        "ACTION NEEDED": WARN,
+        "INFO": INFO,
+    }.get(effective_status, WARN)
+    print(f"  {icon} [{effective_status:13s}] {name}: {effective_detail}")
+    _fx_checks.append(
+        {"name": name, "status": effective_status, "detail": effective_detail}
+    )
+    if effective_status == "BLOCKED":
         _fx_blocked = True
-    elif status == "ACTION NEEDED":
+    elif effective_status == "ACTION NEEDED":
         _fx_action = True
+
+
+if not _fx_required:
+    _fx(
+        "Forecast lane scope",
+        "READY",
+        "FORECAST_LANE_ACTIVE=False — ForecastEx checks are informational only for spot deployment truth",
+    )
 
 
 # 1. Forecast DB tables present

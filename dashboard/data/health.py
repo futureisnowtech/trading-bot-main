@@ -26,14 +26,17 @@ def get_health_status() -> dict:
         }
     msg = row.get("message", "")
     ts = row.get("ts", "")
-    m = re.search(r"(\d+)/(\d+)", msg)
+    m = re.search(r"checks=(\d+)\s+of\s+(\d+)", msg, re.IGNORECASE)
+    if not m:
+        m = re.search(r"(\d+)/(\d+)", msg)
     score = int(m.group(1)) if m else 0
-    total = int(m.group(2)) if m else 6
+    total = int(m.group(2)) if m else 7
     # Use bracket-enclosed match — "UNHEALTHY" contains "HEALTHY" as a substring
     # so a bare substring check would misread UNHEALTHY events as HEALTHY.
-    if "[HEALTHY]" in msg.upper():
+    msg_upper = msg.upper()
+    if "[HEALTHY]" in msg_upper:
         status = "HEALTHY"
-    elif "DEGRADED" in msg.upper():
+    elif "[DEGRADED]" in msg_upper or "DEGRADED" in msg_upper:
         status = "DEGRADED"
     else:
         status = "UNHEALTHY"

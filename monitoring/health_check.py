@@ -458,7 +458,6 @@ def run_health_check(force: bool = False) -> dict:
 
     passed = sum(1 for v in checks.values() if v["ok"])
     total = len(checks)
-    score = f"{passed}/{total}"
     status = (
         "HEALTHY"
         if passed == total
@@ -467,7 +466,7 @@ def run_health_check(force: bool = False) -> dict:
 
     # Summarise failures
     failures = [f"{k}: {v['detail']}" for k, v in checks.items() if not v["ok"]]
-    summary = f"Health {score} [{status}]"
+    summary = f"Health [{status}] checks={passed} of {total}"
     if failures:
         summary += " | FAIL: " + " | ".join(failures)
 

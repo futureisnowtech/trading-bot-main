@@ -50,7 +50,7 @@ def recreate_dashboard(prom_uid, loki_uid):
                     'type': 'timeseries',
                     'gridPos': {'h': 8, 'w': 12, 'x': 0, 'y': 0},
                     'datasource': {'type': 'prometheus', 'uid': prom_uid},
-                    'targets': [{'expr': 'algo_bot_obi_score{instance="algo-bot:8000"}', 'refId': 'A'}],
+                    'targets': [{'expr': 'algo_bot_obi_score{instance="algo-bot-live:8000"}', 'refId': 'A'}],
                     'fieldConfig': {
                         'defaults': {
                             'decimals': 2,
@@ -64,8 +64,8 @@ def recreate_dashboard(prom_uid, loki_uid):
                     'gridPos': {'h': 8, 'w': 12, 'x': 12, 'y': 0},
                     'datasource': {'type': 'prometheus', 'uid': prom_uid},
                     'targets': [
-                        {'expr': 'last_over_time(algo_bot_microprice_usd[2m])', 'refId': 'A', 'legendFormat': 'Micro'},
-                        {'expr': 'last_over_time(algo_bot_mid_price_usd[2m])', 'refId': 'B', 'legendFormat': 'Mid'}
+                        {'expr': 'last_over_time(algo_bot_microprice_usd{instance="algo-bot-live:8000"}[2m])', 'refId': 'A', 'legendFormat': 'Micro'},
+                        {'expr': 'last_over_time(algo_bot_mid_price_usd{instance="algo-bot-live:8000"}[2m])', 'refId': 'B', 'legendFormat': 'Mid'}
                     ],
                     'fieldConfig': {
                         'defaults': {

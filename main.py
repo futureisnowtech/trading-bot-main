@@ -314,7 +314,7 @@ def main():
     log_event(
         "INFO",
         "main",
-        f"Bot started — {'paper' if PAPER_TRADING else 'live'} mode v15.2",
+        f"Bot started — {'paper' if PAPER_TRADING else 'live'} mode {VERSION}",
     )
 
     # ── Forecast lane (optional daemon thread) ────────────────────────────────

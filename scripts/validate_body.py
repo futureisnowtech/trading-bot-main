@@ -850,10 +850,25 @@ try:
 
         with open(version_source) as f:
             for line in f:
-                if "Current Version:" in line:
-                    version = line.strip().split(":")[-1].strip()
-                    ok(f"System version: {version}")
-                    raise StopIteration
+                line_lower = line.lower()
+                if (
+                    "current version:" not in line_lower
+                    and "canonical version:" not in line_lower
+                ):
+                    continue
+
+                version = line.split(":", 1)[-1].strip()
+                if "`" in version:
+                    version_parts = version.split("`")
+                    if len(version_parts) >= 3 and version_parts[1].strip():
+                        version = version_parts[1].strip()
+                else:
+                    version = version.split()[0]
+
+                ok(
+                    f"System version: {version} ({os.path.basename(version_source)})"
+                )
+                raise StopIteration
 
     warn("No version source found (checked AGENTS.md, CLAUDE.md)")
 except StopIteration:

@@ -13,15 +13,9 @@
 **Logic**: Measures the price impact per unit of volume. High $\lambda$ indicates an illiquid market where even small trades move the price significantly.
 **Math**: OLS slope of $\Delta P$ (returns) against $S \cdot V$ (signed volume).
 $$ r_t = \lambda \cdot (Sign(r_t) \cdot V_t) + \epsilon $$
-**Implementation**:
-```python
-def _kyle_lambda_rolling(close: pd.Series, volume: pd.Series, window: int = 60) -> pd.Series:
-    direction = np.sign(close.diff())
-    signed_vol = direction * volume
-    delta_p = close.diff() / close.shift(1)
-    # ... OLS slope calculation ...
-    # Filter: R² >= 0.05 to ensure the slope isn't just noise.
-```
+**Refinement (External Validation)**: 
+- **Kalman Estimation**: Instead of static OLS windows, use a 1D Kalman Filter to track $\lambda$ as a time-varying state. This adapts to liquidity "holes" in real-time.
+- **Data Requirement**: Must use `aggressor_side` from WebSocket trades. Aggregating 1-min OHLCV without knowing the aggressor side is insufficient for high-conviction $\lambda$ modeling.
 
 ### 1.2 OBI / TFI Veto (Spoof Protection)
 **Logic**: Protects against "Quote Stuffing" where the order book looks bullish but actual market orders are bearish.
@@ -59,9 +53,10 @@ $$ \text{Skip if } \frac{ATR}{Price} < 0.004 \text{ (0.4\%)} $$
 **Math**: Based on the AR(1) process: $x_t = a + b \cdot x_{t-1} + \epsilon$.
 $$ \kappa = -\ln(b) $$
 $$ t_{1/2} = \frac{\ln(2)}{\kappa} $$
-**Constraint**: Entry allowed only if $t_{1/2} \in [3, 60]$ minutes.
-- $< 3 \text{ min}$: Price is just noise.
-- $> 60 \text{ min}$: Mean reversion is too slow for 1-min scalp windows.
+**Refinement (External Validation)**:
+- **ADF Pre-flight**: Before calculating $t_{1/2}$, perform an **Augmented Dickey-Fuller (ADF)** test.
+- **Constraint**: If $p$-value $> 0.05$ (Series is Trending/Non-Stationary), the OU model is mathematically invalid. Veto the mean-reversion setup.
+- **Entry Window**: Allowed only if $t_{1/2} \in [3, 60]$ minutes AND $p < 0.05$.
 
 ---
 
@@ -70,12 +65,13 @@ $$ t_{1/2} = \frac{\ln(2)}{\kappa} $$
 ### 3.1 Platt Scaling (Logistic Calibration)
 **Logic**: Converts raw model scores (0-100) into true statistical probabilities.
 **Math**: Fits a logistic regression on the log-odds of the model output.
-$$ P(y=1 | f) = \frac{1}{1 + \exp(A \cdot f + B)} $$
-where $f$ is the raw model score.
-**Metric**: **Brier Score** (Mean Squared Error of probabilities).
-$$ BS = \frac{1}{N} \sum_{t=1}^{N} (f_t - o_t)^2 $$
-- $BS < 0.20$: Calibrated.
-- $BS > 0.22$: Recalibrate trigger.
+**Pros**: Robust against overfitting on small/noisy crypto datasets.
+
+### 3.2 Beta Calibration (Advanced Alternative)
+**Logic**: A more flexible parametric model than Platt Scaling that handles skewed probability distributions.
+**Math**: 
+$$ P(y=1 | f) = \frac{1}{1 + \exp(a \cdot \ln(f) + b \cdot \ln(1-f) + c)} $$
+**Usage**: Implement as the "Tier 2" calibrator once symbol-specific trade history exceeds 100 rows.
 
 ---
 
@@ -100,9 +96,13 @@ $$ \text{Explosion} = UpperBB(20) - LowerBB(20) $$
 ### 5.2 Laguerre RSI (Zero-Lag)
 **Logic**: Uses a 4-tap filter to eliminate lag without adding noise.
 $$ L_0 = (1-\gamma)C + \gamma L_{0, t-1} $$
-$$ L_1 = -\gamma L_0 + L_{0, t-1} + \gamma L_{1, t-1} $$
-... and so on.
 **Threshold**: `LRSI < 0.15` is deeply oversold.
+
+### 5.3 Indicator Synergy (WAE + Squeeze)
+**Logic**: Backtests show WAE filters fakeouts, while Squeeze Momentum catches "God Candles."
+**Operational Modes**:
+- **Conservative (Default)**: Enter only when *both* WAE is exploding AND Squeeze is firing.
+- **Aggressive (Trending Only)**: Enter on WAE explosion if $ADX > 25$.
 
 ---
 
@@ -129,6 +129,7 @@ Add a `VetoEngine` that sits inside `spot_quality_block_reason`.
 def check_vetoes(symbol, data):
     if data['atr'] / data['price'] < 0.004: return "FEE_FLOOR_VETO"
     if data['obi'] > 0.20 and data['tfi'] < -0.10: return "SPOOF_VETO"
+    if data['is_mr_setup'] and data['adf_p_value'] > 0.05: return "NON_STATIONARY_VETO"
     return None
 ```
 

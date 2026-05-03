@@ -46,6 +46,7 @@ reference_repos/
 
 # ── Local generated version stamp (dashboard/local hook artifact) ────────────
 .version
+sop_state.generated.js
 
 # ── Local brain scratch / session notes that should stay off-branch ──────────
 brain/06_daily_summaries/2026-04-20.md

@@ -55,6 +55,7 @@ rsync -avz \
     --exclude 'logs' \
     --exclude '.pytest_cache' \
     --exclude '*.pyc' \
+    --exclude 'sop_state.generated.js' \
     . "${NYC_USER}@${NYC_IP}:${PROJECT_DIR}/"
 
 # ── Server-side: restart stack and provision ─────────────────────────────────
@@ -98,6 +99,9 @@ echo "  version.txt contents:"
 cat ${PROJECT_DIR}/version.txt
 
 REMOTE_EOF
+
+echo "Refreshing local SOP live snapshot..."
+python3 scripts/refresh_sop.py
 
 echo ""
 echo "Deployment complete."

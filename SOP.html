@@ -4,268 +4,421 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="refresh" content="30">
-<title>v10 Algo Trading — System SOP</title>
+<title>v18.16 Sovereign SOP</title>
 <style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{background:#08090e;color:#c8cce8;font-family:'SF Mono',monospace;font-size:13px;padding:20px}
-h1{color:#f5a623;font-size:20px;letter-spacing:2px;margin-bottom:4px}
-h2{color:#7b8ec8;font-size:11px;letter-spacing:3px;text-transform:uppercase;margin:20px 0 8px}
-.grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px}
-.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px}
-.card{background:#13141f;border:1px solid #252843;border-radius:6px;padding:14px}
-.card.warn{border-color:#f5a623}
-.card.ok{border-color:#10c98f}
-.card.err{border-color:#e74c3c}
-.label{font-size:9px;letter-spacing:2px;text-transform:uppercase;color:#5c6394;margin-bottom:4px}
-.val{font-size:22px;font-weight:700;color:#fff}
-.val.green{color:#10c98f}
-.val.red{color:#e74c3c}
-.val.amber{color:#f5a623}
-.pill{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;margin-right:4px}
-.pill.live{background:#10c98f22;color:#10c98f;border:1px solid #10c98f}
-.pill.dead{background:#e74c3c22;color:#e74c3c;border:1px solid #e74c3c}
-.pill.warn{background:#f5a62322;color:#f5a623;border:1px solid #f5a623}
-.pill.info{background:#7b8ec822;color:#7b8ec8;border:1px solid #7b8ec8}
-table{width:100%;border-collapse:collapse}
-th{font-size:9px;letter-spacing:2px;color:#5c6394;text-transform:uppercase;padding:4px 6px;border-bottom:1px solid #252843;text-align:left}
-td{padding:5px 6px;border-bottom:1px solid #1a1b2e;color:#c8cce8}
-td.sym{color:#f5a623;font-weight:700}
-td.long{color:#10c98f}
-td.short{color:#e74c3c}
-td.pass{color:#10c98f}
-td.fail{color:#e74c3c}
-.cmd{background:#0d0e18;border:1px solid #252843;border-radius:4px;padding:8px 12px;font-family:'SF Mono',monospace;font-size:12px;color:#a8b4e8;margin:4px 0}
-.ts{color:#5c6394;font-size:10px}
-.sep{border-top:1px solid #1e2038;margin:20px 0}
-.notif-row{padding:6px 0;border-bottom:1px solid #1a1b2e}
-.notif-title{color:#c8cce8;font-size:12px}
-.notif-cat{font-size:9px;letter-spacing:1px;text-transform:uppercase}
-.cat-SYSTEM{color:#9ca3af}.cat-KILL_SWITCH{color:#e74c3c}.cat-RBI{color:#a78bfa}
-.cat-RISK{color:#e74c3c}.cat-TRADE_OPEN{color:#10c98f}.cat-TRADE_CLOSE{color:#f5a623}
-.cat-ML{color:#38bdf8}.cat-SIGNAL{color:#7b8ec8}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: linear-gradient(180deg, #08111a 0%, #0f1724 100%);
+  color: #d7e1ee;
+  font-family: "SF Mono", "Menlo", "Monaco", monospace;
+  font-size: 14px;
+  line-height: 1.5;
+  padding: 24px;
+}
+h1 {
+  color: #f3c35a;
+  font-size: 28px;
+  letter-spacing: 1px;
+  margin-bottom: 6px;
+}
+h2 {
+  color: #8fb3d9;
+  font-size: 12px;
+  letter-spacing: 2px;
+  margin: 24px 0 10px;
+  text-transform: uppercase;
+}
+p { color: #bdd0e4; }
+a { color: #8fd3ff; }
+.subtitle { color: #7f93a9; font-size: 12px; }
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 14px;
+  margin-top: 12px;
+}
+.card {
+  background: rgba(15, 24, 38, 0.95);
+  border: 1px solid #243348;
+  border-radius: 10px;
+  padding: 16px;
+}
+.card.ok { border-color: #1ea672; }
+.card.warn { border-color: #d8a137; }
+.label {
+  color: #7f93a9;
+  font-size: 11px;
+  letter-spacing: 1.6px;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+}
+.value {
+  color: #f3f7fb;
+  font-size: 24px;
+  font-weight: 700;
+}
+.value.ok { color: #43d08a; }
+.value.warn { color: #f3c35a; }
+.value.info { color: #8fd3ff; }
+.small { color: #a9bfd5; font-size: 12px; margin-top: 8px; }
+.pill {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 3px 10px;
+  margin-right: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+}
+.pill.ok { background: rgba(30, 166, 114, 0.12); border: 1px solid #1ea672; color: #43d08a; }
+.pill.warn { background: rgba(216, 161, 55, 0.12); border: 1px solid #d8a137; color: #f3c35a; }
+.pill.info { background: rgba(94, 161, 227, 0.12); border: 1px solid #5ea1e3; color: #8fd3ff; }
+.pill.dead { background: rgba(205, 75, 75, 0.12); border: 1px solid #cd4b4b; color: #ff8c8c; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+}
+th {
+  color: #7f93a9;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding: 8px 6px;
+  text-align: left;
+  text-transform: uppercase;
+  border-bottom: 1px solid #243348;
+}
+td {
+  color: #d7e1ee;
+  padding: 8px 6px;
+  vertical-align: top;
+  border-bottom: 1px solid #182232;
+}
+.cmd {
+  background: #09111a;
+  border: 1px solid #243348;
+  border-radius: 8px;
+  color: #d8e3ef;
+  margin-top: 8px;
+  padding: 10px 12px;
+  white-space: pre-wrap;
+}
+ul {
+  margin: 8px 0 0 18px;
+  color: #bdd0e4;
+}
+li + li { margin-top: 6px; }
+.section-note {
+  color: #96abc0;
+  font-size: 12px;
+  margin-top: 6px;
+}
+.footer {
+  border-top: 1px solid #243348;
+  color: #7f93a9;
+  font-size: 12px;
+  margin-top: 26px;
+  padding-top: 14px;
+}
+.mono {
+  font-family: "SF Mono", "Menlo", "Monaco", monospace;
+  font-size: 12px;
+  word-break: break-word;
+}
 </style>
 </head>
 <body>
-<h1>⚙️ v10 ALGO TRADING — SYSTEM SOP</h1>
-<div class="ts" id="gentime">Auto-refreshes every 30s</div>
-
-<div id="live-state">Loading live state...</div>
-
-<div class="sep"></div>
-
-<!-- STATIC ARCHITECTURE REFERENCE -->
-<h2>Architecture</h2>
-<div class="grid2">
-  <div class="card">
-    <div class="label">Signal Engine</div>
-    <div style="color:#c8cce8;line-height:1.8;margin-top:6px">
-      Two-tower composite (0–100)<br>
-      • Tech score: CVD, MACD, RSI, VWAP, OB, funding, liq<br>
-      • ML score: XGBoost 60% + LightGBM 40%<br>
-      • Weights: 80/20 → 50/50 → 30/70 (by trade days)<br>
-      • Entry thresholds: TRENDING 62 · RANGING 68 · HIGH_VOL 72
-    </div>
-  </div>
-  <div class="card">
-    <div class="label">Exit Stack (6 Priorities)</div>
-    <div style="color:#c8cce8;line-height:1.8;margin-top:6px">
-      1. Trailing stop (activates after 1× ATR in-favor, trails 1.5×)<br>
-      2. Scale-out: 33% @ 2R, 33% @ 3.5R, trail rest<br>
-      3. Thesis score &lt; 45% of entry score → full close<br>
-      4. Hard stop (stop-market, never widened)<br>
-      5. Risk forced (margin / drawdown breach)<br>
-      6. Kill switch (balance &lt;75% / 5 errors / latency &gt;5s)
-    </div>
-  </div>
-</div>
-
-<div class="grid">
-  <div class="card">
-    <div class="label">Scanner</div>
-    <div style="color:#c8cce8;line-height:1.8;margin-top:6px">
-      Binance USDT perps (CoinGecko fallback)<br>
-      7-step filter · top 15 · every 5 min<br>
-      Vol &gt;$50M · spike ≥1.2 · ADX ≥22<br>
-      EV ≥$1.50 · spread &lt;0.1%
-    </div>
-  </div>
-  <div class="card">
-    <div class="label">Position Sizing</div>
-    <div style="color:#c8cce8;line-height:1.8;margin-top:6px">
-      Kelly 1/3 → 1/2 path<br>
-      2% risk per trade · $5K account<br>
-      Max 30% single · 80% total<br>
-      Leverage: 3x default · 10x max (strict gates)
-    </div>
-  </div>
-  <div class="card">
-    <div class="label">Learning Loop</div>
-    <div style="color:#c8cce8;line-height:1.8;margin-top:6px">
-      57 features snapshotted per close<br>
-      Retrain every 20 trades/slot<br>
-      RBI nightly @ 2am: 575 combos<br>
-      Brier calibration target &lt;0.22
-    </div>
-  </div>
-</div>
-
-<h2>Kill Switch Tripwires</h2>
-<div class="card" style="margin-bottom:16px">
-  <table>
-    <tr><th>Trigger</th><th>Threshold</th><th>Action</th></tr>
-    <tr><td>Account balance drop</td><td>Below $3,750 (75% of $5K)</td><td>Close ALL, halt entries</td></tr>
-    <tr><td>API errors</td><td>5 errors in 10 minutes</td><td>Halt entries</td></tr>
-    <tr><td>Latency</td><td>&gt;5 seconds</td><td>Halt entries</td></tr>
-    <tr><td>Daily loss</td><td>-5% = -$250</td><td>Halt new entries</td></tr>
-    <tr><td>Drawdown</td><td>15%</td><td>Close all, halt</td></tr>
-  </table>
-</div>
-
-<h2>Operations</h2>
-<div class="grid">
-  <div class="card">
-    <div class="label">Start / Stop</div>
-    <div class="cmd">python3 main.py</div>
-    <div class="cmd">pkill -f "python3 main.py"</div>
-    <div class="cmd" style="margin-top:8px">streamlit run dashboard/app.py<br>  --server.port 8501</div>
-  </div>
-  <div class="card">
-    <div class="label">Check System</div>
-    <div class="cmd">python3 scripts/check_v10_readiness.py</div>
-    <div class="cmd">python3 scripts/weekly_report.py</div>
-    <div class="cmd">tail -f logs/bot.log</div>
-  </div>
-  <div class="card">
-    <div class="label">Go-Live Criteria (all 6 must pass)</div>
-    <div style="color:#c8cce8;line-height:1.9;margin-top:6px;font-size:12px">
-      ✦ ML Brier score &lt; 0.22<br>
-      ✦ ≥1 RBI strategy graduated<br>
-      ✦ Zero kill switch triggers<br>
-      ✦ Cost/win &lt; 25%<br>
-      ✦ 1+ day paper trading<br>
-      ✦ Win rate ≥ 52% (v10 trades)
-    </div>
-  </div>
-</div>
-
-<h2>Branch Map</h2>
-<div class="card" style="margin-bottom:16px">
-  <table>
-    <tr><th>Branch</th><th>State</th><th>Purpose</th></tr>
-    <tr><td style="color:#f5a623">feature/v10-rebuild</td><td><span class="pill live">ACTIVE</span></td><td>v10 system — running now (this branch)</td></tr>
-    <tr><td style="color:#7b8ec8">feature/agent-overhaul</td><td><span class="pill warn">STANDBY</span></td><td>v9.5 — 3-agent debate + 4h exit (legacy)</td></tr>
-    <tr><td style="color:#5c6394">main</td><td><span class="pill info">MERGE TARGET</span></td><td>Merge v10 here after go-live criteria pass</td></tr>
-  </table>
-</div>
-
-<div class="sep"></div>
-<div class="ts">v10.0 · feature/v10-rebuild · Phases 1–15 complete · Paper mode</div>
+<h1>v18.16 Sovereign Operations SOP</h1>
+<div class="subtitle">Current operator reference for the live tiny-live Coinbase spot system on <code>feature/v10-rebuild</code>.</div>
+<div class="section-note">This file auto-refreshes every 30 seconds and reads its live snapshot from <code>sop_state.generated.js</code>, which is regenerated after deploys or by running <code>python3 scripts/refresh_sop.py</code>.</div>
 
 <script>
-// Pull live state from DB via a small Python subprocess isn't possible in static HTML.
-// Instead we embed the snapshot baked at generation time and show a refresh notice.
-const state = {"total_trades": 355, "wins": 76, "total_pnl": -255.1, "open_positions": [{"symbol": "DOT-USDC", "direction": "LONG", "entry": 1.265, "stop": 1.2396999999999998, "target": 1.3345749999999998, "ts": "2026-04-01T16:00:29.972863-04:00"}, {"symbol": "DAOUSDT", "direction": "LONG", "entry": 0.05863839015364647, "stop": 0.05775881430134177, "target": 0.06039754185825587, "ts": "2026-04-01T16:32:06.200024-04:00"}, {"symbol": "PIPPINUSDT", "direction": "LONG", "entry": 0.05828908085823059, "stop": 0.05741474464535713, "target": 0.06003775328397751, "ts": "2026-04-01T16:20:02.170032-04:00"}, {"symbol": "XNYUSDT", "direction": "SHORT", "entry": 0.00478077819570899, "stop": 0.004852489868644625, "target": 0.00463735484983772, "ts": "2026-04-01T16:45:10.292547-04:00"}, {"symbol": "CRTRUSDT", "direction": "LONG", "entry": 0.030348123982548714, "stop": 0.029892902122810483, "target": 0.031258567702025175, "ts": "2026-04-01T19:39:53.134326-04:00"}, {"symbol": "ONTUSDT", "direction": "SHORT", "entry": 0.11127736419439316, "stop": 0.11294652465730905, "target": 0.10793904326856137, "ts": "2026-04-01T19:41:36.326410-04:00"}, {"symbol": "FIDAUSDT", "direction": "LONG", "entry": 0.015604334883391857, "stop": 0.01537026986014098, "target": 0.01607246492989361, "ts": "2026-04-01T19:51:30.235267-04:00"}, {"symbol": "ADA-USDC", "direction": "LONG", "entry": 0.2479, "stop": 0.242942, "target": 0.2615345, "ts": "2026-04-01T19:47:49.560825-04:00"}, {"symbol": "ZENUSDT", "direction": "SHORT", "entry": 5.515534400939941, "stop": 5.59826741695404, "target": 5.350068368911743, "ts": "2026-04-01T16:19:58.437700-04:00"}, {"symbol": "PHAUSDT", "direction": "LONG", "entry": 0.03817731514573097, "stop": 0.037604655418545005, "target": 0.0393226346001029, "ts": "2026-04-01T19:52:07.395085-04:00"}, {"symbol": "BTC-USDC", "direction": "LONG", "entry": 68068.51, "stop": 67047.48234999999, "target": 71131.59294999999, "ts": "2026-04-01T19:58:19.306852-04:00"}], "rbi": {}, "notifications": [{"cat": "TRADE_CLOSE", "sev": "INFO", "title": "CLOSED LONG FIDAUSDT  P&L $+53.96 (+9.5%)", "ts": "1775147315.482083"}, {"cat": "TRADE_CLOSE", "sev": "INFO", "title": "CLOSED LONG CTSIUSDT  P&L $+76.80 (+16.2%)", "ts": "1775147280.55336"}, {"cat": "TRADE_OPEN", "sev": "INFO", "title": "LONG FIDAUSDT @ $0.02", "ts": "1775147277.953282"}, {"cat": "TRADE_OPEN", "sev": "INFO", "title": "LONG CTSIUSDT @ $0.04", "ts": "1775147276.511374"}, {"cat": "TRADE_OPEN", "sev": "INFO", "title": "LONG FETUSDT @ $0.23", "ts": "1775147255.471689"}, {"cat": "SYSTEM", "sev": "INFO", "title": "v10 System Started", "ts": "1775147210.299777"}, {"cat": "TRADE_CLOSE", "sev": "INFO", "title": "CLOSED LONG SHIBUSDT  P&L $+0.00 (+0.0%)", "ts": "1775146722.6024508"}, {"cat": "TRADE_CLOSE", "sev": "INFO", "title": "CLOSED LONG CTSIUSDT  P&L $+57.80 (+12.9%)", "ts": "1775146678.428546"}], "bot_running": true, "dash_running": true};
+window.__SOP_STATE__ = window.__SOP_STATE__ || {
+  generated_at_local: null,
+  canonical_version: "v18.16",
+  branch: "feature/v10-rebuild",
+  local_head_sha: null,
+  github_sha: null,
+  worktree_dirty: null,
+  deployed_sha: null,
+  deployed_at_utc: null,
+  dashboard_uid: "d9ecf89d-5e95-4e63-b0ae-f8008debbc0f",
+  prometheus_target: "algo-bot-live:8000",
+  docker_health: null,
+  runtime_mode: null,
+  launch_readiness: null,
+  live_posture_status: null,
+  live_posture_primary: null,
+  latest_health_level: null,
+  latest_health_message: null,
+  refresh_error: "No generated snapshot yet. Run python3 scripts/refresh_sop.py or deploy.sh."
+};
+</script>
+<script src="./sop_state.generated.js"></script>
 
-function fmt(ts) {
-  if (!ts) return '—';
-  try {
-    // Handle both unix float and ISO strings
-    const n = parseFloat(ts);
-    const d = n > 1e9 ? new Date(n * 1000) : new Date(ts);
-    return d.toLocaleTimeString('en-US', {hour:'2-digit',minute:'2-digit',timeZone:'America/New_York'}) + ' ET';
-  } catch(e) { return ts; }
+<h2>Live Snapshot</h2>
+<div id="live-snapshot" class="grid">
+  <div class="card warn">
+    <div class="label">Snapshot</div>
+    <div class="value warn">Pending</div>
+    <div class="small">Waiting for generated live state.</div>
+  </div>
+</div>
+<div id="live-provenance" class="card">
+  <div class="label">Live Provenance</div>
+  <div class="small">This section fills from the generated live-state sidecar.</div>
+</div>
+
+<h2>Current Truth</h2>
+<div class="grid">
+  <div class="card ok">
+    <div class="label">Canonical Version</div>
+    <div class="value ok">v18.16</div>
+    <div class="small">Represent this as the active version in current repo-facing and operator-facing surfaces.</div>
+  </div>
+  <div class="card ok">
+    <div class="label">Live Runtime</div>
+    <div class="value ok">Tiny Live</div>
+    <div class="small">System state currently reads <code>TINY_LIVE</code> with broker-first truth checks passing.</div>
+  </div>
+  <div class="card warn">
+    <div class="label">Live Posture</div>
+    <div class="value warn">AMBER</div>
+    <div class="small">Operate live, but keep sizing and rules constrained. Do not loosen thresholds or scale aggressively yet.</div>
+  </div>
+  <div class="card ok">
+    <div class="label">Dashboard UID</div>
+    <div class="value info" style="font-size:18px">d9ecf89d-5e95-4e63-b0ae-f8008debbc0f</div>
+    <div class="small">Grafana Watchtower identity pinned and preserved in provisioning.</div>
+  </div>
+</div>
+
+<h2>Source Of Truth</h2>
+<div class="card">
+  <table>
+    <tr><th>Priority</th><th>Location</th><th>Meaning</th></tr>
+    <tr><td>1</td><td><code>origin/feature/v10-rebuild</code></td><td>GitHub is the primary source of truth.</td></tr>
+    <tr><td>2</td><td><code>/Users/joshmacbookair2020/Projects/algo_trading_final</code></td><td>Mac Projects repo is the working tree and authoring copy.</td></tr>
+    <tr><td>3</td><td><code>root@64.225.20.38:2222:/root/bot</code></td><td>NYC server is the deploy target and runtime evidence source.</td></tr>
+    <tr><td>Ignore</td><td><code>/Users/joshmacbookair2020/Desktop/algo_trading_final</code></td><td>Deprecated copy. Do not use it for compare, deploy, or truth checks.</td></tr>
+  </table>
+</div>
+
+<h2>Operating Model</h2>
+<div class="grid">
+  <div class="card">
+    <div class="label">Execution Shape</div>
+    <ul>
+      <li>Coinbase spot lane is the active live lane.</li>
+      <li>Broker truth beats stale DB or UI assumptions.</li>
+      <li>Runtime mode truth beats raw env assumptions after startup.</li>
+      <li>Health, readiness, and runtime state must agree before calling the system aligned.</li>
+    </ul>
+  </div>
+  <div class="card">
+    <div class="label">Deploy Discipline</div>
+    <ul>
+      <li>Deploy only from a clean worktree.</li>
+      <li>Deploy only when local <code>HEAD</code> equals <code>origin/feature/v10-rebuild</code>.</li>
+      <li>Every deploy writes <code>/root/bot/version.txt</code> and <code>deploy_manifest.json</code>.</li>
+      <li>Post-deploy proof matters more than “deploy succeeded”.</li>
+    </ul>
+  </div>
+  <div class="card">
+    <div class="label">Live Caution</div>
+    <ul>
+      <li><code>AMBER</code> means live is allowed, not “full throttle”.</li>
+      <li>Keep size small and rules unchanged.</li>
+      <li>Do not promote confidence faster than evidence.</li>
+      <li>Prefer constrained live over premature scale-up.</li>
+    </ul>
+  </div>
+</div>
+
+<h2>Core Commands</h2>
+<div class="grid">
+  <div class="card">
+    <div class="label">Validation</div>
+    <div class="cmd">python3 scripts/validate.py</div>
+    <div class="cmd">python3 scripts/repo_truth_gate.py --strict</div>
+    <div class="cmd">pytest -q</div>
+  </div>
+  <div class="card">
+    <div class="label">Runtime Audits</div>
+    <div class="cmd">python3 scripts/live_runtime_audit.py</div>
+    <div class="cmd">python3 scripts/check_readiness.py</div>
+  </div>
+  <div class="card">
+    <div class="label">Deploy</div>
+    <div class="cmd">./deploy.sh</div>
+    <div class="section-note">This now refuses dirty worktrees, refuses SHA drift, and writes provenance markers on the server.</div>
+  </div>
+</div>
+
+<h2>Telegram Command Station</h2>
+<div class="card">
+  <p>Telegram is a real operator control surface now, but it is still a command bot, not an AI copilot. Commands are authenticated and mode-aware.</p>
+  <table>
+    <tr><th>Command</th><th>What It Does</th><th>Safety Notes</th></tr>
+    <tr><td><code>/status</code></td><td>Shows current runtime mode, exchange connectivity, buying power, OBI, signal, and active symbol.</td><td>Uses live runtime truth, not a naive static assumption.</td></tr>
+    <tr><td><code>/metrics</code></td><td>Shows CPU, RAM, and exchange latency.</td><td>Read-only.</td></tr>
+    <tr><td><code>/positions</code></td><td>Shows active spot positions scoped to the current runtime mode.</td><td>Paper mode reads paper positions. Live mode reads live positions.</td></tr>
+    <tr><td><code>/exposure</code></td><td>Shows total spot exposure for the current runtime mode.</td><td>Read-only.</td></tr>
+    <tr><td><code>/audit</code></td><td>Shows simple health summary from system state.</td><td>Read-only.</td></tr>
+    <tr><td><code>/report</code></td><td>Shows the day’s trade count, win rate, and net PnL.</td><td>Mode-labeled in the response.</td></tr>
+    <tr><td><code>/logs</code></td><td>Tails the recent bot log output.</td><td>Read-only.</td></tr>
+    <tr><td><code>/spread</code></td><td>Shows current microprice from system state.</td><td>Read-only.</td></tr>
+    <tr><td><code>/uptime</code></td><td>Shows system uptime.</td><td>Read-only.</td></tr>
+    <tr><td><code>/reboot</code></td><td>Exits the process so Docker restarts it.</td><td>Operationally disruptive. Use only intentionally.</td></tr>
+    <tr><td><code>/cancel_all</code></td><td>Cancels all live spot orders.</td><td>Only allowed when runtime mode is live and <code>TELEGRAM_ALLOW_LIVE_ACTIONS=true</code>. Hard-refuses in paper mode.</td></tr>
+  </table>
+  <div class="section-note">Important: Telegram destructive behavior is fail-closed. If runtime mode is paper, or if the live-action flag is absent, <code>/cancel_all</code> refuses to run.</div>
+</div>
+
+<h2>Telegram Safety Rules</h2>
+<div class="grid">
+  <div class="card warn">
+    <div class="label">Destructive Action Gate</div>
+    <ul>
+      <li>Runtime mode must be truly live.</li>
+      <li><code>TELEGRAM_ALLOW_LIVE_ACTIONS=true</code> must also be present.</li>
+      <li>If either condition fails, live-destructive Telegram actions must refuse.</li>
+    </ul>
+  </div>
+  <div class="card">
+    <div class="label">What Telegram Is Not</div>
+    <ul>
+      <li>Not a natural-language AI trading copilot yet.</li>
+      <li>Not a safe place to assume “paper” without checking runtime truth.</li>
+      <li>Not the source of truth for deployment or health by itself.</li>
+    </ul>
+  </div>
+  <div class="card">
+    <div class="label">What Telegram Is</div>
+    <ul>
+      <li>An authenticated command station.</li>
+      <li>A fast runtime visibility layer.</li>
+      <li>A guarded operator surface for basic actions and reporting.</li>
+    </ul>
+  </div>
+</div>
+
+<h2>Go / No-Go Read</h2>
+<div class="card">
+  <table>
+    <tr><th>Signal</th><th>Meaning</th><th>Operator Interpretation</th></tr>
+    <tr><td><span class="pill ok">GREEN</span></td><td>Truth surfaces aligned, health clean, no blocker drift.</td><td>Proceed normally.</td></tr>
+    <tr><td><span class="pill warn">AMBER</span></td><td>System is live and functioning, but evidence says stay constrained.</td><td>Keep size small, do not loosen risk posture.</td></tr>
+    <tr><td><span class="pill.dead">RED</span></td><td>Truth contradiction, broker issue, kill switch, or failed runtime proof.</td><td>Do not force through. Diagnose first.</td></tr>
+  </table>
+</div>
+
+<h2>Post-Deploy Proof Checklist</h2>
+<div class="card">
+  <ul>
+    <li><code>version.txt</code> on the server matches local and GitHub SHA.</li>
+    <li><code>deploy_manifest.json</code> has the same SHA, branch, and dashboard UID.</li>
+    <li><code>python3 scripts/live_runtime_audit.py</code> passes.</li>
+    <li><code>python3 scripts/check_readiness.py</code> reflects the correct runtime state.</li>
+    <li>Grafana still resolves Watchtower UID <code>d9ecf89d-5e95-4e63-b0ae-f8008debbc0f</code>.</li>
+    <li>Telegram command behavior matches runtime truth and safety gates.</li>
+  </ul>
+</div>
+
+<h2>Current Branching</h2>
+<div class="card">
+  <table>
+    <tr><th>Branch</th><th>Status</th><th>Purpose</th></tr>
+    <tr><td><code>feature/v10-rebuild</code></td><td><span class="pill ok">ACTIVE</span></td><td>Current live source branch.</td></tr>
+    <tr><td><code>main</code></td><td><span class="pill info">Base</span></td><td>Primary long-term merge target.</td></tr>
+    <tr><td><code>desktop</code> remote</td><td><span class="pill dead">Ignore</span></td><td>Stale local remote, not a source of truth.</td></tr>
+  </table>
+</div>
+
+<div class="footer" id="dynamic-footer">
+  v18.16 · branch <code>feature/v10-rebuild</code> · live posture <code>AMBER / constrained_live_only</code> · Telegram command surface truth-aligned
+</div>
+<script>
+function sopEscape(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
-function render() {
-  const s = state;
-  const wr = s.total_trades > 0 ? (s.wins / s.total_trades * 100).toFixed(1) : '0.0';
-  const wrClass = parseFloat(wr) >= 52 ? 'green' : (parseFloat(wr) >= 40 ? 'amber' : 'red');
-  const pnlClass = s.total_pnl >= 0 ? 'green' : 'red';
+function sopShortSha(value) {
+  if (!value) return "unknown";
+  return String(value).slice(0, 12);
+}
 
-  let posRows = '';
-  (s.open_positions || []).forEach(p => {
-    const pnlPct = p.entry > 0 ? ((p.target - p.entry) / p.entry * 100).toFixed(1) : '—';
-    posRows += `<tr>
-      <td class="sym">${p.symbol}</td>
-      <td class="${p.direction==='LONG'?'long':'short'}">${p.direction}</td>
-      <td>${parseFloat(p.entry).toPrecision(5)}</td>
-      <td style="color:#e74c3c">${parseFloat(p.stop).toPrecision(5)}</td>
-      <td style="color:#10c98f">${parseFloat(p.target).toPrecision(5)}</td>
-      <td class="ts">${fmt(p.ts)}</td>
-    </tr>`;
-  });
+function sopCardClass(status) {
+  const normalized = String(status || "").toUpperCase();
+  if (normalized === "GREEN" || normalized === "PASS" || normalized === "HEALTHY") return "ok";
+  if (normalized === "AMBER" || normalized === "WARN" || normalized === "WARNING") return "warn";
+  if (normalized === "RED" || normalized === "FAIL" || normalized === "ERROR") return "dead";
+  return "";
+}
 
-  let notifRows = '';
-  (s.notifications || []).forEach(n => {
-    notifRows += `<div class="notif-row">
-      <span class="notif-cat cat-${n.cat}">${n.cat}</span>
-      <span class="notif-title"> ${n.title}</span>
-      <span class="ts"> · ${fmt(n.ts)}</span>
-    </div>`;
-  });
+function renderSopState() {
+  const state = window.__SOP_STATE__ || {};
+  const snapshot = document.getElementById("live-snapshot");
+  const provenance = document.getElementById("live-provenance");
+  const footer = document.getElementById("dynamic-footer");
+  if (!snapshot || !provenance || !footer) return;
 
-  const rbi = s.rbi || {};
-  const rbiText = Object.keys(rbi).length
-    ? Object.entries(rbi).map(([k,v]) => `${k}: ${v}`).join(' · ')
-    : 'No incubations yet';
+  const posture = state.live_posture_status || "UNKNOWN";
+  const runtimeMode = (state.runtime_mode || "unknown").toUpperCase();
+  const readiness = state.launch_readiness || "unknown";
+  const dockerHealth = state.docker_health || "unknown";
+  const generatedAt = state.generated_at_local || "unknown";
+  const healthMessage = state.latest_health_message || "No health row captured.";
+  const refreshError = state.refresh_error;
 
-  document.getElementById('live-state').innerHTML = `
-    <h2>Live State <span class="ts">(snapshot baked at page load · auto-refreshes every 30s)</span></h2>
-    <div class="grid" style="margin-bottom:12px">
-      <div class="card ${s.bot_running?'ok':'err'}">
-        <div class="label">Bot</div>
-        <div class="val">${s.bot_running ? '🟢 RUNNING' : '🔴 STOPPED'}</div>
-        <div class="ts" style="margin-top:4px">main.py · v10_runner · paper mode</div>
-      </div>
-      <div class="card ${s.dash_running?'ok':'err'}">
-        <div class="label">Dashboard</div>
-        <div class="val">${s.dash_running ? '🟢 RUNNING' : '🔴 STOPPED'}</div>
-        <div class="ts" style="margin-top:4px">localhost:8501 · streamlit</div>
-      </div>
-      <div class="card">
-        <div class="label">Open Positions</div>
-        <div class="val ${(s.open_positions||[]).length > 0 ? 'amber' : ''}">${(s.open_positions||[]).length}</div>
-        <div class="ts" style="margin-top:4px">paper perps + spot</div>
-      </div>
+  snapshot.innerHTML = `
+    <div class="card ${sopCardClass(posture)}">
+      <div class="label">Live Posture</div>
+      <div class="value ${sopCardClass(posture)}">${sopEscape(posture)}</div>
+      <div class="small">${sopEscape(state.live_posture_primary || "No recommendation captured.")}</div>
     </div>
-
-    <div class="grid" style="margin-bottom:12px">
-      <div class="card">
-        <div class="label">Total Paper Trades</div>
-        <div class="val">${s.total_trades}</div>
-      </div>
-      <div class="card">
-        <div class="label">Win Rate (all-time paper)</div>
-        <div class="val ${wrClass}">${wr}%</div>
-        <div class="ts">Note: includes v9 seeded data. v10 WR tracked separately.</div>
-      </div>
-      <div class="card">
-        <div class="label">Total P&L (paper)</div>
-        <div class="val ${pnlClass}">$${s.total_pnl >= 0 ? '+' : ''}${s.total_pnl.toFixed(2)}</div>
-      </div>
+    <div class="card ${sopCardClass(dockerHealth)}">
+      <div class="label">Server Runtime</div>
+      <div class="value info" style="font-size:20px">${sopEscape(runtimeMode)}</div>
+      <div class="small">Readiness: <code>${sopEscape(readiness)}</code> · Docker: <code>${sopEscape(dockerHealth)}</code></div>
     </div>
-
-    <div class="grid2" style="margin-bottom:16px">
-      <div class="card">
-        <div class="label">Open Positions</div>
-        ${posRows ? `<table style="margin-top:6px">
-          <tr><th>Symbol</th><th>Dir</th><th>Entry</th><th>Stop</th><th>Target</th><th>Time</th></tr>
-          ${posRows}
-        </table>` : '<div style="color:#5c6394;padding:8px 0">No open positions</div>'}
-      </div>
-      <div class="card">
-        <div class="label">Recent Notifications</div>
-        <div style="margin-top:6px">${notifRows || '<div style="color:#5c6394">No notifications</div>'}</div>
-        <div style="margin-top:10px"><div class="label">RBI Incubation</div>
-        <div style="color:#a78bfa;margin-top:4px">${rbiText}</div></div>
-      </div>
+    <div class="card ok">
+      <div class="label">GitHub / Local SHA</div>
+      <div class="value info" style="font-size:18px">${sopEscape(sopShortSha(state.github_sha || state.local_head_sha))}</div>
+      <div class="small">Branch <code>${sopEscape(state.branch || "unknown")}</code> · local <code>${sopEscape(sopShortSha(state.local_head_sha))}</code></div>
+    </div>
+    <div class="card ok">
+      <div class="label">Deployed SHA</div>
+      <div class="value info" style="font-size:18px">${sopEscape(sopShortSha(state.deployed_sha))}</div>
+      <div class="small">Deployed at <code>${sopEscape(state.deployed_at_utc || "unknown")}</code></div>
     </div>
   `;
 
-  document.getElementById('gentime').textContent = 'Last updated: ' + new Date().toLocaleTimeString() + ' · Auto-refreshes every 30s';
+  provenance.innerHTML = `
+    <div class="label">Live Provenance</div>
+    <table>
+      <tr><th>Field</th><th>Value</th></tr>
+      <tr><td>Generated</td><td class="mono">${sopEscape(generatedAt)}</td></tr>
+      <tr><td>Canonical Version</td><td class="mono">${sopEscape(state.canonical_version || "unknown")}</td></tr>
+      <tr><td>Dashboard UID</td><td class="mono">${sopEscape(state.dashboard_uid || "unknown")}</td></tr>
+      <tr><td>Prometheus Target</td><td class="mono">${sopEscape(state.prometheus_target || "unknown")}</td></tr>
+      <tr><td>Latest Health</td><td class="mono">${sopEscape(healthMessage)}</td></tr>
+      <tr><td>Worktree</td><td class="mono">${state.worktree_dirty ? "DIRTY" : "CLEAN"}</td></tr>
+      <tr><td>Refresh Error</td><td class="mono">${sopEscape(refreshError || "none")}</td></tr>
+    </table>
+  `;
+
+  footer.innerHTML = `
+    ${sopEscape(state.canonical_version || "v18.16")} · branch <code>${sopEscape(state.branch || "feature/v10-rebuild")}</code> · live posture <code>${sopEscape(posture)} / ${sopEscape(state.live_posture_primary || "unknown")}</code> · deployed <code>${sopEscape(sopShortSha(state.deployed_sha))}</code> · runtime <code>${sopEscape(runtimeMode)}</code>
+  `;
 }
 
-render();
+renderSopState();
 </script>
 </body>
 </html>

@@ -9,9 +9,12 @@ from datetime import time as dt_time
 try:
     from dotenv import load_dotenv
 except ImportError:
+
     def load_dotenv(dotenv_path: str | None = None) -> bool:
         """Minimal .env loader fallback for audit scripts on hosts without python-dotenv."""
-        path = dotenv_path or os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+        path = dotenv_path or os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), ".env"
+        )
         if not os.path.exists(path):
             return False
         with open(path, encoding="utf-8") as fh:
@@ -22,14 +25,11 @@ except ImportError:
                 key, value = line.split("=", 1)
                 key = key.strip()
                 value = value.strip()
-                if (
-                    len(value) >= 2
-                    and value[0] == value[-1]
-                    and value[0] in {"'", '"'}
-                ):
+                if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
                     value = value[1:-1]
                 os.environ.setdefault(key, value)
         return True
+
 
 load_dotenv()
 
@@ -1029,7 +1029,7 @@ SPOT_TINY_LIVE_MAX_POSITION_USD: float = float(
 SPOT_TINY_LIVE_ALLOWED_ROUTE: str = (
     os.getenv("SPOT_TINY_LIVE_ALLOWED_ROUTE", "maker_only").strip().lower()
 )
-# Conviction floor for quarantined setup families. If a setup is quarantined, 
+# Conviction floor for quarantined setup families. If a setup is quarantined,
 # it must clear this higher score to be tradeable.
 SPOT_QUARANTINE_OVERRIDE_SCORE: float = float(
     os.getenv("SPOT_QUARANTINE_OVERRIDE_SCORE", "72.0")
@@ -1049,6 +1049,9 @@ SPOT_ALLOWED_SETUP_FAMILIES_TINY_LIVE: tuple[str, ...] = (
     "compression_breakout",
     "trend_resume_after_shakeout",
     "compression_expansion_retest",
+    "wae_momentum_explosion",
+    "breakout_volatility",
+    # pullback_reclaim intentionally excluded: 0% WR across 115 live trades (2026-04-22)
 )
 SPOT_DISABLED_SETUP_FAMILIES_TINY_LIVE: tuple[str, ...] = ("pullback_reclaim",)
 SPOT_TINY_LIVE_MIN_CONFIRMS: dict[str, int] = {"TREND": 2, "NEUTRAL": 3, "CHOP": 99}

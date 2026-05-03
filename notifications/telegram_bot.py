@@ -4,6 +4,7 @@ import os
 import psutil
 import time
 import subprocess
+from html import escape
 from functools import wraps
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters, CallbackQueryHandler
@@ -17,6 +18,19 @@ logger = logging.getLogger(__name__)
 
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 AUTHORIZED_USER_ID = int(os.environ.get("TELEGRAM_AUTHORIZED_USER_ID", "8224826883"))
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _effective_message(update: Update):
+    return getattr(update, "effective_message", None)
+
+
+async def _reply_text(update: Update, text: str, **kwargs):
+    message = _effective_message(update)
+    if message is None:
+        logger.warning("Telegram reply target missing for update type %s", type(update))
+        return None
+    return await message.reply_text(text, **kwargs)
 
 
 def _runtime_is_live() -> bool:
@@ -32,10 +46,9 @@ def _runtime_is_live() -> bool:
     """
     # 1. Try runtime DB (canonical)
     try:
-        import sqlite3, os as _os
+        import sqlite3
 
-        _root = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
-        _db = _os.path.join(_root, "logs", "trades.db")
+        _db = os.path.join(REPO_ROOT, "logs", "trades.db")
         with sqlite3.connect(_db, timeout=2) as c:
             row = c.execute(
                 "SELECT process_mode FROM system_runtime_state ORDER BY id DESC LIMIT 1"
@@ -83,9 +96,11 @@ def restricted_access(func):
     async def wrapper(
         update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs
     ):
-        if update.effective_user.id != AUTHORIZED_USER_ID:
-            logger.warning(f"Unauthorized access attempt by {update.effective_user.id}")
-            await update.message.reply_text("Access Denied.")
+        user = getattr(update, "effective_user", None)
+        user_id = getattr(user, "id", None)
+        if user_id != AUTHORIZED_USER_ID:
+            logger.warning(f"Unauthorized access attempt by {user_id}")
+            await _reply_text(update, "Access Denied.")
             return
         return await func(update, context, *args, **kwargs)
 
@@ -105,22 +120,22 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"CP: ${bp:,.2f} | OBI: {obi:+.2f}\n"
         f"Signal: {state['strategy']['current_signal']} ({state['strategy']['active_symbol']})"
     )
-    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+    await _reply_text(update, msg, parse_mode=ParseMode.HTML)
 
 
 @restricted_access
 async def logs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        log_path = os.path.join(os.getcwd(), "logs", "bot.log")
+        log_path = os.path.join(REPO_ROOT, "logs", "bot.log")
         if not os.path.exists(log_path):
-            await update.message.reply_text("Log file not found.")
+            await _reply_text(update, "Log file not found.")
             return
         output = subprocess.check_output(["tail", "-n", "15", log_path]).decode("utf-8")
-        await update.message.reply_text(
-            f"<code>{output}</code>", parse_mode=ParseMode.HTML
+        await _reply_text(
+            update, f"<code>{escape(output)}</code>", parse_mode=ParseMode.HTML
         )
     except Exception as e:
-        await update.message.reply_text(f"Error fetching logs: {e}")
+        await _reply_text(update, f"Error fetching logs: {e}")
 
 
 @restricted_access
@@ -132,7 +147,7 @@ async def metrics_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"RAM: {state['system']['ram_percent']:.1f}%\n"
         f"Latency: {state['exchange']['latency_ms']}ms"
     )
-    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+    await _reply_text(update, msg, parse_mode=ParseMode.HTML)
 
 
 @restricted_access
@@ -148,7 +163,8 @@ async def positions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     positions = get_spot_positions(paper=paper)
     if not positions:
-        await update.message.reply_text(
+        await _reply_text(
+            update,
             f"No active spot positions ({mode_label} mode)."
         )
         return
@@ -156,7 +172,7 @@ async def positions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = f"<b>Active Positions [{mode_label}]</b>\n"
     for p in positions:
         msg += f"- {p['symbol']}: {p['qty']:.4f} @ ${p['entry']:.2f}\n"
-    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+    await _reply_text(update, msg, parse_mode=ParseMode.HTML)
 
 
 @restricted_access
@@ -170,20 +186,24 @@ async def exposure_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     positions = get_spot_positions(paper=paper)
     total = sum(float(p.get("qty", 0)) * float(p.get("entry", 0)) for p in positions)
-    await update.message.reply_text(f"Total Exposure [{mode_label}]: ${total:,.2f}")
+    await _reply_text(update, f"Total Exposure [{mode_label}]: ${total:,.2f}")
 
 
 @restricted_access
 async def reboot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Rebooting system...")
+    await _reply_text(update, "Restarting bot process...")
     os._exit(0)  # Docker will restart
 
 
 @restricted_access
 async def spread_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     state = system_state.state.get_state()
+    obi = state["strategy"]["obi"]
     micro = state["strategy"]["microprice"]
-    await update.message.reply_text(f"Current Microprice: ${micro:,.2f}")
+    await _reply_text(
+        update,
+        f"Order-book imbalance: {obi:+.2f}\nMicroprice: ${micro:,.2f}",
+    )
 
 
 @restricted_access
@@ -200,11 +220,13 @@ async def audit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         issues.append("High CPU Usage")
 
     if not issues:
-        await update.message.reply_text(
+        await _reply_text(
+            update,
             f"Audit Passed [{mode_label}]: System integrity verified."
         )
     else:
-        await update.message.reply_text(
+        await _reply_text(
+            update,
             f"Audit Issues [{mode_label}]:\n- " + "\n- ".join(issues)
         )
 
@@ -224,14 +246,16 @@ async def cancel_all_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     is_live = _runtime_is_live()
 
     if not is_live:
-        await update.message.reply_text(
+        await _reply_text(
+            update,
             "cancel_all REFUSED: runtime mode is PAPER. "
             "Destructive actions are only permitted in live mode."
         )
         return
 
     if not _live_actions_allowed():
-        await update.message.reply_text(
+        await _reply_text(
+            update,
             "cancel_all REFUSED: TELEGRAM_ALLOW_LIVE_ACTIONS is not set to 'true'. "
             "Set this environment variable on the server to permit live destructive actions."
         )
@@ -241,11 +265,11 @@ async def cancel_all_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         broker = _get_broker(paper=False)
         if broker:
             broker.cancel_all_spot_orders()
-            await update.message.reply_text("All active spot orders cancelled [LIVE].")
+            await _reply_text(update, "All active spot orders cancelled [LIVE].")
         else:
-            await update.message.reply_text("Broker unavailable.")
+            await _reply_text(update, "Broker unavailable.")
     except Exception as e:
-        await update.message.reply_text(f"cancel_all error: {e}")
+        await _reply_text(update, f"cancel_all error: {e}")
 
 
 @restricted_access
@@ -272,9 +296,9 @@ async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Win Rate: {(wins / len(today_trades) * 100 if today_trades else 0):.1f}%\n"
             f"Net PnL: ${total_pnl:+.2f}"
         )
-        await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+        await _reply_text(update, msg, parse_mode=ParseMode.HTML)
     except Exception as e:
-        await update.message.reply_text(f"Error generating report: {e}")
+        await _reply_text(update, f"Error generating report: {e}")
 
 
 @restricted_access
@@ -282,14 +306,14 @@ async def uptime_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     state = system_state.state.get_state()
     upt = state["system"]["uptime_seconds"]
     h, m = divmod(upt // 60, 60)
-    await update.message.reply_text(f"System Uptime: {h}h {m}m")
+    await _reply_text(update, f"System Uptime: {h}h {m}m")
 
 
 @restricted_access
 async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = " ".join(context.args)
     if not query:
-        await update.message.reply_text("Please provide a question. Usage: /ask <question>")
+        await _reply_text(update, "Please provide a question. Usage: /ask <question>")
         return
     await _handle_ai_query(update, query)
 
@@ -302,7 +326,10 @@ async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def _handle_ai_query(update: Update, query: str):
-    thinking_msg = await update.message.reply_text("<i>Thinking...</i>", parse_mode=ParseMode.HTML)
+    thinking_msg = await _reply_text(update, "<i>Thinking...</i>", parse_mode=ParseMode.HTML)
+    if thinking_msg is None:
+        logger.error("AI handler cannot respond because no effective message target was found.")
+        return
     
     try:
         response = await asyncio.to_thread(ask_ai, query)
@@ -313,7 +340,7 @@ async def _handle_ai_query(update: Update, query: str):
                 InlineKeyboardButton("📉 Show OBI", callback_data="cmd_spread"),
             ],
             [
-                InlineKeyboardButton("🛠️ Fix Issue (Reboot)", callback_data="cmd_reboot"),
+                InlineKeyboardButton("🔄 Restart Bot", callback_data="cmd_reboot"),
             ],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -326,14 +353,20 @@ async def _handle_ai_query(update: Update, query: str):
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    if query is None:
+        logger.warning("Button handler invoked without a callback query.")
+        return
     await query.answer()
     
     if query.data == "cmd_logs":
-        await logs_command(query, context)
+        await logs_command(update, context)
     elif query.data == "cmd_spread":
-        await spread_command(query, context)
+        await spread_command(update, context)
     elif query.data == "cmd_reboot":
-        await reboot_command(query, context)
+        await reboot_command(update, context)
+    else:
+        logger.warning("Unknown Telegram callback action: %s", query.data)
+        await _reply_text(update, "Unknown action.")
 
 
 @restricted_access
@@ -401,7 +434,7 @@ async def everything_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         f"{perf_str}\n"
         f"════════════════════════"
     )
-    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+    await _reply_text(update, msg, parse_mode=ParseMode.HTML)
 
 
 async def run_bot():

@@ -2,6 +2,7 @@
 All notable changes to The King's Algo Trading System.
 ## 2026-05-03
 - v18.16 sovereign truth stabilization: fix DT-07 (account.py get_drawdown passes paper flag to get_live_account_size so drawdown denominator never leaks live account size into paper mode); telegram_bot.py full runtime gating (_runtime_is_live DB-first, /cancel_all requires BOTH live mode AND TELEGRAM_ALLOW_LIVE_ACTIONS=true, /positions and /exposure scoped to current runtime mode); main.py version string and banner updated to v18.16 / Coinbase spot scalp truth; provision_grafana_final.py dashboard UID pinned to d9ecf89d-5e95-4e63-b0ae-f8008debbc0f; deploy.sh dirty-worktree guard + SHA parity guard + version.txt + deploy_manifest.json provenance; DT-07 test isolation fix in test_dashboard_truth_contract.py; SHA 10b2cdb2eecc4573eab3965bf63143ddb327b94a deployed to NYC3.
+- ops: add protected GitHub deploy automation via `.github/workflows/deploy-nyc.yml` — manual approval through `nyc-production`, dormant-by-default auto-after-CI behind `NYC_AUTO_DEPLOY_ENABLED=true`, and proof/validate/truth-gate checks before any GitHub-driven NYC deploy.
 
 ## 2026-04-30
 - v18.16: classify broker-normalized staked ETH as durable `external_manual`, keep ADA as ignored manual dust while removing the stale mixed-mode `spot_ada` live open-position row, add a fail-closed live invariant that halts if a paper-style spot order artifact reaches `open_spot()`, and normalize runtime/readiness rows so spot audits reflect current truth instead of legacy `READY` / `OPERATIONAL` state.

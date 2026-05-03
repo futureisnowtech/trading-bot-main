@@ -9,6 +9,7 @@
 - Canonical version: `v18.16` (`2026-04-30`)
 - Canonical active lane: **Coinbase spot scalp**
 - Canonical launch path: `python3 scripts/go_live.py`
+- Canonical guarded deploy path: local `./deploy.sh`
 - Canonical memory order:
   1. `AGENTS.md`
   2. repo code and proof tests
@@ -66,6 +67,14 @@ They are preserved for research, later reactivation, or historical context. They
 - Direction: long-only
 - Focus: fewer, cleaner, fee-cleared spot scalps
 - Live mode target: `TINY_LIVE`
+
+### Protected deploy automation
+
+- GitHub deploy workflow: `.github/workflows/deploy-nyc.yml`
+- GitHub deploy environment: `nyc-production`
+- Auto-deploy after CI is opt-in only via repo variable `NYC_AUTO_DEPLOY_ENABLED=true`
+- The protected workflow is additive and must not replace local `./deploy.sh` unless explicitly promoted later
+- NYC remains a deploy target, never an authoring source
 
 ### Dormant / reference lanes
 

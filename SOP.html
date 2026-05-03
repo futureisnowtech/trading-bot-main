@@ -223,6 +223,7 @@ window.__SOP_STATE__ = window.__SOP_STATE__ || {
       <li>Deploy only when local <code>HEAD</code> equals <code>origin/feature/v10-rebuild</code>.</li>
       <li>Every deploy writes <code>/root/bot/version.txt</code> and <code>deploy_manifest.json</code>.</li>
       <li>Post-deploy proof matters more than “deploy succeeded”.</li>
+      <li>Protected GitHub deploy path exists via <code>.github/workflows/deploy-nyc.yml</code> with environment approval.</li>
     </ul>
   </div>
   <div class="card">
@@ -253,6 +254,11 @@ window.__SOP_STATE__ = window.__SOP_STATE__ || {
     <div class="label">Deploy</div>
     <div class="cmd">./deploy.sh</div>
     <div class="section-note">This now refuses dirty worktrees, refuses SHA drift, and writes provenance markers on the server.</div>
+  </div>
+  <div class="card">
+    <div class="label">Protected GitHub Deploy</div>
+    <div class="cmd">Actions → Protected NYC Deploy</div>
+    <div class="section-note">Auto-after-CI is disabled by default and only turns on when <code>NYC_AUTO_DEPLOY_ENABLED=true</code> plus <code>nyc-production</code> approval is configured.</div>
   </div>
 </div>
 

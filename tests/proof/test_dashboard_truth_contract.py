@@ -467,6 +467,10 @@ def test_dt07_get_account_includes_spot_unrealized(tmp_path, monkeypatch):
         )
 
     monkeypatch.setitem(sys.modules, "db", db_mock)
+    # Also clear the 'data' package so the re-import picks up the db_mock
+    # rather than the stale module-level _runtime_paper_flag cached by a
+    # previous test that imported data.account with the real db module.
+    monkeypatch.delitem(sys.modules, "data", raising=False)
     monkeypatch.delitem(sys.modules, "data.account", raising=False)
     monkeypatch.delitem(sys.modules, "data.positions", raising=False)
 

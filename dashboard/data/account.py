@@ -153,7 +153,10 @@ def get_drawdown(*, current_only: bool = False):
     try:
         from runtime.live_account import get_live_account_size
 
-        base = float(get_live_account_size())
+        # DT-07 fix: pass paper flag so drawdown denominator stays within the
+        # correct truth boundary and never leaks live account size into paper
+        # mode calculations (or vice-versa).
+        base = float(get_live_account_size(paper=bool(_runtime_paper_flag())))
     except Exception:
         try:
             from config import ACCOUNT_SIZE

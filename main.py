@@ -49,14 +49,16 @@ import csv, uuid, sqlite3
 from typing import Optional
 import logging_db.trade_logger  # noqa: F401 — pre-warm, prevents EDEADLK
 
+VERSION = "v18.16"
+
 BANNER = """
 ╔══════════════════════════════════════════════════════════════════╗
-║  ALGO TRADING SYSTEM  v14.0                                     ║
+║  ALGO TRADING SYSTEM  v18.16                                    ║
 ║                                                                  ║
-║  Scanner:    Kraken + Binance + Hyperliquid | 7-filter | top 50 ║
-║  Signals:    Two-tower (technical 0-100 + ML 0-100)             ║
-║  Exits:      7-priority stack (trailing / scale / thesis)       ║
-║  Learning:   57-feature snapshots | integrity tiers | retrain   ║
+║  Lane:       Coinbase spot scalp (tiny live)                    ║
+║  Route:      maker_first | CHOP blocked | pullback quarantined  ║
+║  Truth:      broker-first via runtime/spot_position_truth.py    ║
+║  Launch:     python3 scripts/go_live.py (only sanctioned path)  ║
 ╚══════════════════════════════════════════════════════════════════╝
 """
 
@@ -77,7 +79,10 @@ def main():
         os.environ["PAPER_TRADING"] = "true" if args.mode == "paper" else "false"
 
     import system_state
-    system_state.state.set_mode("PAPER" if os.environ.get("PAPER_TRADING", "true").lower() == "true" else "LIVE")
+
+    system_state.state.set_mode(
+        "PAPER" if os.environ.get("PAPER_TRADING", "true").lower() == "true" else "LIVE"
+    )
 
     from config import (
         PAPER_TRADING,
@@ -206,9 +211,7 @@ def main():
         readiness_state="LANE_NOT_STARTED"
         if not FORECAST_LANE_ACTIVE
         else "BROKER_DISCONNECTED",
-        blocked_reason=""
-        if FORECAST_LANE_ACTIVE
-        else "FORECAST_LANE_ACTIVE=false",
+        blocked_reason="" if FORECAST_LANE_ACTIVE else "FORECAST_LANE_ACTIVE=false",
         promotion_condition="Promote only after enrollment, tradable contracts, and stable heartbeat truth",
     )
     # mes archived lane
@@ -275,18 +278,27 @@ def main():
 
     # 📊 Start Prometheus Metrics Server
     from monitoring.metrics import start_metrics_server
+
     start_metrics_server(port=8000)
 
     # 🤖 Start Telegram Bot (Command Suite)
     from notifications.telegram_bot import start_bot_thread
+
     start_bot_thread()
 
     # 📡 Start Coinbase WebSocket Feed (Asynchronous Ticker Data + Circuit Breaker)
     from config import COINBASE_CDP_KEY_NAME, COINBASE_CDP_PRIVATE_KEY
+
     if COINBASE_CDP_KEY_NAME and COINBASE_CDP_PRIVATE_KEY:
         from data.coinbase_websocket import start_coinbase_feed
+
         # Nano Perp Products
-        products = ["BIP-20DEC30-CDE", "ETP-20DEC30-CDE", "SLP-20DEC30-CDE", "XPP-20DEC30-CDE"]
+        products = [
+            "BIP-20DEC30-CDE",
+            "ETP-20DEC30-CDE",
+            "SLP-20DEC30-CDE",
+            "XPP-20DEC30-CDE",
+        ]
         start_coinbase_feed(COINBASE_CDP_KEY_NAME, COINBASE_CDP_PRIVATE_KEY, products)
         print("   ✅ Coinbase WebSocket feed started\n")
 

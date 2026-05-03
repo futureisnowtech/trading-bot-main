@@ -56,3 +56,6 @@ audit_output/*/db_exports/
 
 # ── Local generated launchd artifacts ────────────────────────────────────────
 scripts/com.algotrading.king.live.plist
+
+# ── Archive/research reference docs (contain old Desktop paths) ────────────────
+RESEARCH_ARCHIVE_DATA_INVENTORY.md

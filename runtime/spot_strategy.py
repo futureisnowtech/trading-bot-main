@@ -15,12 +15,25 @@ import system_state
 
 logger = logging.getLogger(__name__)
 
+ACTIVE_UNIVERSE: tuple[str, ...] = (
+    "BTC",
+    "ETH",
+    "SOL",
+    "XRP",
+    "ADA",
+    "DOGE",
+    "LINK",
+    "LTC",
+)
+
 KNOWN_SETUP_FAMILIES: tuple[str, ...] = (
     "impulse_continuation",
     "pullback_reclaim",
     "compression_breakout",
     "trend_resume_after_shakeout",
     "compression_expansion_retest",
+    "wae_momentum_explosion",
+    "breakout_volatility",
 )
 
 _SETUP_LIBRARY: dict[str, dict[str, float | str]] = {
@@ -53,6 +66,20 @@ _SETUP_LIBRARY: dict[str, dict[str, float | str]] = {
         "group": "resume",
     },
     "compression_expansion_retest": {
+        "min_score": 0.64,
+        "preferred_floor_delta": -0.25,
+        "opportunistic_floor_delta": 0.5,
+        "wildcard_floor_delta": 1.5,
+        "group": "breakout",
+    },
+    "wae_momentum_explosion": {
+        "min_score": 0.64,
+        "preferred_floor_delta": -0.25,
+        "opportunistic_floor_delta": 0.5,
+        "wildcard_floor_delta": 1.5,
+        "group": "breakout",
+    },
+    "breakout_volatility": {
         "min_score": 0.64,
         "preferred_floor_delta": -0.25,
         "opportunistic_floor_delta": 0.5,
@@ -195,11 +222,15 @@ def _resolved_exit_profile(profile: str, regime: str) -> str:
     import config as _cfg
 
     regime_key = str(regime or "NEUTRAL").upper()
-    return str(
-        getattr(_cfg, "SPOT_TINY_LIVE_EXIT_PROFILE_BY_REGIME", {}).get(regime_key)
-        or profile
-        or ""
-    ).strip().lower()
+    return (
+        str(
+            getattr(_cfg, "SPOT_TINY_LIVE_EXIT_PROFILE_BY_REGIME", {}).get(regime_key)
+            or profile
+            or ""
+        )
+        .strip()
+        .lower()
+    )
 
 
 def _exit_targets(
@@ -407,13 +438,20 @@ def get_spot_strategy(symbol: str) -> dict[str, Any]:
     override = dict(getattr(_cfg, "SPOT_SYMBOL_STRATEGY_OVERRIDES", {}).get(clean, {}))
     edge_conditions = _edge_conditions(override)
     edge_conditions = _load_db_conditions(clean) or edge_conditions
-    allowed_regimes = _tupled(getattr(_cfg, "SPOT_ALLOWED_REGIMES", {"TREND", "NEUTRAL"}))
+    allowed_regimes = _tupled(
+        getattr(_cfg, "SPOT_ALLOWED_REGIMES", {"TREND", "NEUTRAL"})
+    )
     preferred_setups = _tupled(override.get("preferred_setups", ()), upper=False)
-    allowed_setups = tuple(
-        str(s).strip().lower()
-        for s in getattr(_cfg, "SPOT_ALLOWED_SETUP_FAMILIES_TINY_LIVE", KNOWN_SETUP_FAMILIES)
-        if str(s).strip().lower() in KNOWN_SETUP_FAMILIES
-    ) or KNOWN_SETUP_FAMILIES
+    allowed_setups = (
+        tuple(
+            str(s).strip().lower()
+            for s in getattr(
+                _cfg, "SPOT_ALLOWED_SETUP_FAMILIES_TINY_LIVE", KNOWN_SETUP_FAMILIES
+            )
+            if str(s).strip().lower() in KNOWN_SETUP_FAMILIES
+        )
+        or KNOWN_SETUP_FAMILIES
+    )
     score_floors = {
         "TREND": float(
             getattr(_cfg, "SPOT_TINY_LIVE_SCORE_FLOORS", {"TREND": 58.0})["TREND"]
@@ -461,7 +499,9 @@ def get_spot_strategy(symbol: str) -> dict[str, Any]:
         "allowed_regimes": allowed_regimes,
         "allowed_setups": tuple(s for s in allowed_setups if s in KNOWN_SETUP_FAMILIES),
         "preferred_setups": tuple(
-            s for s in preferred_setups if s in KNOWN_SETUP_FAMILIES and s in allowed_setups
+            s
+            for s in preferred_setups
+            if s in KNOWN_SETUP_FAMILIES and s in allowed_setups
         ),
         "required_setup_families": tuple(
             s for s in _required_setup_families({"edge_conditions": edge_conditions})
@@ -510,18 +550,16 @@ def get_spot_strategy(symbol: str) -> dict[str, Any]:
             getattr(_cfg, "SPOT_TINY_LIVE_MIN_30M_FRAME", {"TREND": 55.0})["TREND"]
         ),
         "min_momentum_impulse": float(
-            getattr(
-                _cfg, "SPOT_TINY_LIVE_MIN_MOMENTUM_IMPULSE", {"TREND": 0.000001}
-            )["TREND"]
+            getattr(_cfg, "SPOT_TINY_LIVE_MIN_MOMENTUM_IMPULSE", {"TREND": 0.000001})[
+                "TREND"
+            ]
         ),
         "min_structure_component": float(
             getattr(
                 _cfg, "SPOT_TINY_LIVE_MIN_STRUCTURE_COMPONENT", {"TREND": 0.000001}
             )["TREND"]
         ),
-        "min_path_efficiency": float(
-            getattr(_cfg, "SPOT_MIN_PATH_EFFICIENCY", 0.20)
-        ),
+        "min_path_efficiency": float(getattr(_cfg, "SPOT_MIN_PATH_EFFICIENCY", 0.20)),
         "min_participation_component": float(
             getattr(
                 _cfg,
@@ -759,14 +797,14 @@ def spot_quality_block_reason(
     setup_family = str(spot_state.get("setup_family") or "")
     setup_score = float(spot_state.get("setup_score") or 0.0)
     confirm_count = int(spot_state.get("structural_confirm_count") or 0)
-    
+
     # Push to system state
     system_state.state.update_strategy(
         active_symbol=clean,
         signal=setup_family,
         obi=float((spot_state.get("frames") or {}).get("5m", {}).get("obi") or 0.0),
         microprice=float(spot_state.get("microprice") or 0.0),
-        mid_price=float(spot_state.get("mid_price") or 0.0)
+        mid_price=float(spot_state.get("mid_price") or 0.0),
     )
     system_state.state.update_prometheus()
 
@@ -818,16 +856,16 @@ def spot_quality_block_reason(
     if confirm_count < regime_min_confirms:
         return "structural_confirm_count_too_low", floor
     min_5m_frame = float(
-        getattr(_qs_cfg, "SPOT_TINY_LIVE_MIN_5M_FRAME", {"TREND": 52.0, "NEUTRAL": 55.0})[
-            regime
-        ]
+        getattr(
+            _qs_cfg, "SPOT_TINY_LIVE_MIN_5M_FRAME", {"TREND": 52.0, "NEUTRAL": 55.0}
+        )[regime]
     )
     if float(s5.get("frame_score") or 0.0) < min_5m_frame:
         return "frame_score_5m_too_low", floor
     min_30m_frame = float(
-        getattr(_qs_cfg, "SPOT_TINY_LIVE_MIN_30M_FRAME", {"TREND": 55.0, "NEUTRAL": 58.0})[
-            regime
-        ]
+        getattr(
+            _qs_cfg, "SPOT_TINY_LIVE_MIN_30M_FRAME", {"TREND": 55.0, "NEUTRAL": 58.0}
+        )[regime]
     )
     if float(s30.get("frame_score") or 0.0) < min_30m_frame:
         return "frame_score_30m_too_low", floor
@@ -864,4 +902,57 @@ def spot_quality_block_reason(
         policy["min_volatility_quality"]
     ):
         return "volatility_quality_too_low", floor
+    # Hard vetoes from execution profile (ATR fee floor, extreme selling aggression)
+    _exec_mult, _exec_tag = calculate_execution_profile(symbol, spot_state)
+    if _exec_mult == 0.0:
+        return _exec_tag, floor
     return "", floor
+
+
+def calculate_execution_profile(
+    symbol: str,
+    spot_state: dict[str, Any] | None,
+) -> tuple[float, str]:
+    """
+    Compute position sizing multiplier based on microstructure conditions.
+    Returns (sizing_multiplier, status_tag).
+    Hard vetoes return 0.0 and a tag string.
+    Soft vetoes compound multiplicatively and return < 1.0.
+    Never raises — all exceptions are caught and fail open (return 1.0).
+    """
+    if not spot_state:
+        return 1.0, "NO_STATE"
+
+    frames = spot_state.get("frames") or {}
+    s5 = frames.get("5m") or {}
+
+    atr_pct = float(s5.get("atr_pct") or 0.0)
+    obi = float(s5.get("obi") or 0.0)
+    buy_ratio = float(s5.get("buy_volume_ratio") or 0.5)
+    tfi = 2.0 * buy_ratio - 1.0
+
+    # Hard Veto 1: ATR Fee Floor — atr_pct==0.0 means cold/missing data, fail open
+    if atr_pct > 0.0 and atr_pct < 0.004:
+        return 0.0, "FEE_FLOOR"
+
+    # Hard Veto 2: coordinated selling pressure
+    if obi < -0.35 and tfi < -0.20:
+        return 0.0, "EXTREME_SELL_PRESSURE"
+
+    multiplier = 1.0
+
+    # Soft Veto 1: Kyle's Lambda fragile market
+    try:
+        from data.edge_monitor import get_shadow_state
+
+        shadow = get_shadow_state(_clean_symbol(symbol))
+        if shadow.get("kyle_lambda_fragile"):
+            multiplier *= 0.7
+    except Exception:
+        pass
+
+    # Soft Veto 2: OBI/TFI divergence (bullish book, bearish tape)
+    if obi > 0.20 and tfi < -0.10:
+        multiplier *= 0.5
+
+    return round(multiplier, 3), "ACTIVE"

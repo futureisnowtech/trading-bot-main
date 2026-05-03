@@ -448,6 +448,19 @@ def record_trade_attribution(
     if integrity_tier in _BLOCKED_TIERS:
         return attr_id  # attribution recorded for audit, but weights NOT updated
 
+    # v18: Surprise Gate — skip weight updates when outcome matches calibrated expectation.
+    # Uninformative trades (low surprise) don't update weights; only genuine surprises do.
+    if ml_p_win > 0.0:
+        try:
+            from learning.calibration import get_calibrated_probability
+
+            calibrated_p = get_calibrated_probability(ml_p_win * 100, strategy)
+            surprise = abs((1.0 if won else 0.0) - calibrated_p)
+            if surprise <= 0.4:
+                return attr_id  # audit row written, signal weights frozen
+        except Exception:
+            pass  # calibration unavailable — fall through to normal update
+
     # Update signal_stats for every active signal
     active_signals = [k for k, v in signals.items() if v]
     for sig in active_signals:

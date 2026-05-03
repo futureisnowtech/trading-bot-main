@@ -51,19 +51,22 @@ from runtime.spot_position_truth import get_spot_position_truth, get_spot_symbol
 
 from functools import wraps
 
+
 def safety_gated(func):
     """
-    Decorator to block functions from executing live broker actions 
+    Decorator to block functions from executing live broker actions
     if config.PAPER_TRADING is True.
     """
+
     @wraps(func)
     def wrapper(*args, **kwargs):
         # Try to find 'paper' argument in kwargs or args
         is_paper = kwargs.get("paper", True)
-        # If it was an index-based arg, we'd need more complex logic, 
+        # If it was an index-based arg, we'd need more complex logic,
         # but in this repo we prefer explicit kwargs for paper/live gates.
-        
+
         from config import PAPER_TRADING
+
         if not is_paper and PAPER_TRADING:
             logger.warning(
                 f"SAFETY BLOCK: Function '{func.__name__}' attempted LIVE action "
@@ -71,13 +74,16 @@ def safety_gated(func):
             )
             return None
         return func(*args, **kwargs)
+
     return wrapper
+
 
 logger = logging.getLogger(__name__)
 
 try:
     from execution.coinbase_spot_broker import CoinbaseSpotBroker, get_spot_broker
     import system_state
+
     _BROKER_OK = True
 except Exception:
     _BROKER_OK = False
@@ -151,18 +157,20 @@ def _get_broker(paper: bool) -> Optional["CoinbaseSpotBroker"]:
         broker._paper = bool(paper)
         if not broker.is_connected():
             broker.connect()
-        
+
         # Update system state
         system_state.state.update_exchange(connected=True)
         try:
             bal = broker.get_spot_balance()
             if bal:
-                system_state.state.update_exchange(buying_power=float(bal.get("usd_available") or 0.0))
+                system_state.state.update_exchange(
+                    buying_power=float(bal.get("usd_available") or 0.0)
+                )
         except Exception:
             pass
-        
+
         system_state.state.update_prometheus()
-            
+
         return broker
     except Exception as e:
         logger.error(f"[spot_engine] broker init error: {e}")
@@ -761,6 +769,17 @@ def open_spot(
         logger.info(f"[spot_engine] {clean} blocked — {block_reason}")
         return None
 
+    # Apply execution multiplier (soft vetoes: Kyle's Lambda, OBI/TFI divergence)
+    from runtime.spot_strategy import calculate_execution_profile as _calc_exec_profile
+
+    _exec_mult, _exec_tag = _calc_exec_profile(clean, spot_state)
+    if _exec_mult < 1.0:
+        logger.info(
+            f"[spot_engine] {clean} exec_mult={_exec_mult:.2f} ({_exec_tag}) "
+            f"— size_usd reduced from ${size_usd:.2f} to ${size_usd * _exec_mult:.2f}"
+        )
+    size_usd = round(size_usd * _exec_mult, 2)
+
     order = None
     execution_route = "paper_market"
     micro_veto = "none"
@@ -786,15 +805,16 @@ def open_spot(
         if execution_route == "skipped_taker_score":
             logger.info(f"[spot_engine] {clean} blocked — {micro_veto}")
             return None
-    
+
     latency = time.time() - t0
     if not order:
         logger.error(f"[spot_engine] {clean} buy failed")
         return None
-    
+
     # Push to Prometheus
     try:
         from monitoring import metrics
+
         metrics.TRADES_COUNTER.inc()
         metrics.EXECUTION_LATENCY_HISTOGRAM.observe(latency)
     except Exception:
@@ -1015,15 +1035,16 @@ def close_spot(
         if execution_route == "skipped_microstructure":
             order = broker.sell_spot(clean, qty)
             execution_route = "taker_fallback"
-    
+
     latency = time.time() - t0
     if not order:
         logger.error(f"[spot_engine] close_spot {clean}: sell failed")
         return None
-    
+
     # Push to Prometheus
     try:
         from monitoring import metrics
+
         metrics.TRADES_COUNTER.inc()
         metrics.EXECUTION_LATENCY_HISTOGRAM.observe(latency)
     except Exception:
@@ -1225,6 +1246,12 @@ def close_spot(
         from logging_db.trade_logger import delete_position
 
         delete_position(clean, strategy=strategy, paper=paper)
+    try:
+        from data.edge_monitor import record_incubation_trade
+
+        record_incubation_trade("spot_scalp")
+    except Exception:
+        pass
     return {
         "symbol": clean,
         "entry_price": entry_price,

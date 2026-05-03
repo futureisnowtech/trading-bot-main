@@ -178,11 +178,29 @@ def _technical_long_score(f: Dict) -> Tuple[float, Dict]:
         score += 8
         components["cloud_bull"] = 8
 
-    # Waddah Attar Explosion bullish: +10 (bullish + exploding), +5 (bullish only)
-    if f.get("wae_bullish", 0) > 0 and f.get("wae_exploding", 0) > 0:
-        score += 10
-        components["wae_bull_exploding"] = 10
-    elif f.get("wae_bullish", 0) > 0:
+    # WAE + Squeeze Confluence (Manifest Section 5.1)
+    _wae_bullish = f.get("wae_bullish", 0) > 0
+    _wae_exploding = f.get("wae_exploding", 0) > 0
+    _squeeze_fired = f.get("squeeze_fired", 0) > 0
+    if _wae_bullish and _wae_exploding:
+        try:
+            from data.edge_monitor import is_wae_recovery_mode
+
+            _wae_recovery = is_wae_recovery_mode()
+        except Exception:
+            _wae_recovery = False
+        if _wae_recovery:
+            _adx_norm = float(f.get("regime_adx_normalized", 0.0))
+            if _adx_norm > 0.25:
+                score += 10
+                components["wae_bull_exploding_recovery"] = 10
+        elif _squeeze_fired:
+            score += 10
+            components["wae_bull_exploding"] = 10
+        else:
+            score += 3
+            components["wae_bull_no_squeeze"] = 3
+    elif _wae_bullish:
         score += 5
         components["wae_bull"] = 5
 
@@ -273,6 +291,19 @@ def _technical_long_score(f: Dict) -> Tuple[float, Dict]:
         score -= 15
         components["whale_dist"] = -15
 
+    # Kalman Deviation (Manifest Section 2.1, ADF-gated)
+    _kalman_dev = float(f.get("kalman_dev_pct", 0.0))
+    _adf_ok = bool(f.get("adf_stationary", True))
+    if _adf_ok and _kalman_dev <= -1.0:
+        score += 10
+        components["kalman_below_fair"] = 10
+
+    # OU Halflife (Manifest Section 2.2)
+    _ou_hl = float(f.get("ou_halflife_bars", 999.0))
+    if _adf_ok and 0.0 < _ou_hl < 20.0:
+        score += 5
+        components["ou_fast_reversion"] = 5
+
     return float(score), components
 
 
@@ -361,11 +392,29 @@ def _technical_short_score(f: Dict) -> Tuple[float, Dict]:
         score += 8
         components["cloud_bear"] = 8
 
-    # WAE bearish (trend_down > 0): +10 (+ exploding), +5 (bearish only)
-    if f.get("wae_bearish", 0) > 0 and f.get("wae_exploding", 0) > 0:
-        score += 10
-        components["wae_bear_exploding"] = 10
-    elif f.get("wae_bearish", 0) > 0:
+    # WAE + Squeeze Confluence (Manifest Section 5.1, short mirror)
+    _wae_bearish = f.get("wae_bearish", 0) > 0
+    _wae_exploding = f.get("wae_exploding", 0) > 0
+    _squeeze_fired = f.get("squeeze_fired", 0) > 0
+    if _wae_bearish and _wae_exploding:
+        try:
+            from data.edge_monitor import is_wae_recovery_mode
+
+            _wae_recovery = is_wae_recovery_mode()
+        except Exception:
+            _wae_recovery = False
+        if _wae_recovery:
+            _adx_norm = float(f.get("regime_adx_normalized", 0.0))
+            if _adx_norm > 0.25:
+                score += 10
+                components["wae_bear_exploding_recovery"] = 10
+        elif _squeeze_fired:
+            score += 10
+            components["wae_bear_exploding"] = 10
+        else:
+            score += 3
+            components["wae_bear_no_squeeze"] = 3
+    elif _wae_bearish:
         score += 5
         components["wae_bear"] = 5
 
@@ -445,6 +494,19 @@ def _technical_short_score(f: Dict) -> Tuple[float, Dict]:
     if fg < 0.15:
         score -= 10
         components["fg_extreme_fear"] = -10
+
+    # Kalman Deviation (Manifest Section 2.1, ADF-gated) — shorts: price above fair value
+    _kalman_dev = float(f.get("kalman_dev_pct", 0.0))
+    _adf_ok = bool(f.get("adf_stationary", True))
+    if _adf_ok and _kalman_dev >= 1.0:
+        score += 10
+        components["kalman_above_fair"] = 10
+
+    # OU Halflife (Manifest Section 2.2)
+    _ou_hl = float(f.get("ou_halflife_bars", 999.0))
+    if _adf_ok and 0.0 < _ou_hl < 20.0:
+        score += 5
+        components["ou_fast_reversion"] = 5
 
     return float(score), components
 

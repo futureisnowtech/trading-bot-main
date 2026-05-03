@@ -120,12 +120,11 @@ def market_data_to_signals(md: dict) -> dict[str, bool]:
         and _f("vol_buy_ratio", 0.5) > 0.6,
         # TV signal
         "tradingview_signal": _b("tv_signal") or _b("tv_signal_active"),
-        # ── Signals not computable from v10 features (no equivalent key) ─────
-        # These are left False rather than mapped to wrong proxies.
         # rv_expansion: rv_ratio not injected into v10 features path
-        # kalman_deviation: kalman_dev not injected
-        # ou_halflife: ou_halflife_minutes not injected
-        # kyle_lambda: kyle_lambda_pct not injected
+        # ── Shadow state signals (now injected by feature_builder) ───────────
+        "kalman_deviation": float(md.get("kalman_dev_pct", 0.0)) <= -1.0,
+        "ou_halflife": 0.0 < float(md.get("ou_halflife_bars", 999.0)) < 20.0,
+        "kyle_lambda": bool((md.get("kyle_lambda_fragile") or False)),
     }
 
 

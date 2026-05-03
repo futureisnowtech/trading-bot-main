@@ -1778,6 +1778,15 @@ def _attempt_entry(
             )
             if _reason:
                 logger.info(f"[v10] spot {_underlying} quality blocked: {_reason}")
+                # WAE Recovery Mode: track consecutive missed WAE setups
+                if _setup_family == "wae_momentum_explosion":
+                    try:
+                        from data.edge_monitor import increment_wae_missed
+
+                        _missed = increment_wae_missed()
+                        logger.debug(f"[v10] WAE missed counter: {_missed}")
+                    except Exception:
+                        pass
                 _journal_scan_candidate(
                     scan_id,
                     candidate,
@@ -1849,6 +1858,22 @@ def _attempt_entry(
                 _available_spot_usd * 0.95,
                 _liquidity_cap,
             )
+            # Apply execution multiplier for soft vetoes (Kyle's Lambda, OBI/TFI divergence)
+            from runtime.spot_strategy import (
+                calculate_execution_profile as _calc_exec_profile,
+            )
+
+            _exec_mult, _exec_tag = _calc_exec_profile(_underlying, _spot_state)
+            if _exec_mult < 1.0:
+                logger.info(
+                    f"[v10] {_underlying} exec_mult={_exec_mult:.2f} ({_exec_tag})"
+                )
+            _spot_size = round(_spot_size * _exec_mult, 2)
+            if _spot_size < 10.0:
+                logger.info(
+                    f"[v10] {_underlying} exec_mult reduced size below $10 minimum"
+                )
+                return "below_threshold"
             _cooldown_min = int(_cfg.get("cooldown_min", 15))
             _cooldown_until = (
                 datetime.utcnow() + timedelta(minutes=_cooldown_min)
@@ -2004,6 +2029,38 @@ def _attempt_entry(
                 net_win_usd=float(_econ.get("projected_net_win_usd") or 0),
                 econ_gate_class="approved",
             )
+            # RBIPMS Strategy Ladder — Probation check (Manifest Section 6.1)
+            try:
+                from data.edge_monitor import get_strategy_ladder_state
+
+                _ladder = get_strategy_ladder_state("spot_scalp", paper=_paper)
+                if _ladder["should_shadow"]:
+                    logger.info(
+                        f"[v10] {_underlying} PROBATION — candidate logged, "
+                        f"no order. shadow_n={_ladder['shadow_n']}"
+                    )
+                    _journal_scan_candidate(
+                        scan_id,
+                        candidate,
+                        "strategy_in_probation",
+                        regime=regime,
+                        technical_score=_tech_score,
+                        ml_score=_ml_score,
+                        composite_score=composite,
+                        entry_threshold=_score_floor,
+                        should_enter_signal=1,
+                        econ_approved=0,
+                        entry_block_reason="strategy_in_probation",
+                        setup_family=_setup_family,
+                        setup_score=_setup_score,
+                        spot_regime=_spot_regime,
+                        final_spot_score=_final_score,
+                        regime_floor=_score_floor,
+                    )
+                    return "below_threshold"
+            except Exception as _le:
+                logger.debug(f"[v10] ladder check error: {_le}")
+
             _sr = _spot_eng.open_spot(
                 _underlying,
                 _spot_size,
@@ -2025,6 +2082,14 @@ def _attempt_entry(
                     f"[v10] spot {_underlying} entered "
                     f"${_spot_size:.0f}: order={_sr.get('order_id', '?')}"
                 )
+                # Reset WAE missed counter on successful WAE entry
+                if _setup_family == "wae_momentum_explosion":
+                    try:
+                        from data.edge_monitor import reset_wae_missed
+
+                        reset_wae_missed()
+                    except Exception:
+                        pass
                 update_scan_candidate_result(
                     int(_admitted_candidate_id or 0),
                     decision="entered",
@@ -3541,6 +3606,34 @@ def run_forever():
         pass
 
     logger.info("[v10] All schedules wired. Running scan immediately...")
+
+    # Shadow state background loop — updates Kalman/OU/ADF/Kyle every 60s
+    def _shadow_state_thread():
+        import time as _time
+        from data.edge_monitor import update_shadow_state as _update_shadow
+        from runtime.spot_strategy import ACTIVE_UNIVERSE
+        import asyncio as _asyncio
+
+        while True:
+            for _sym in ACTIVE_UNIVERSE:
+                try:
+                    from data.historical_data import get_ohlcv
+
+                    _df = get_ohlcv(_sym, "1m", limit=100)
+                    if _df is not None and len(_df) >= 20:
+                        _prices = list(_df["close"].astype(float))
+                        _volumes = list(_df["volume"].astype(float))
+                        _asyncio.run(_update_shadow(_sym, _prices, _volumes))
+                except Exception as _e:
+                    logger.debug(f"[shadow_loop] {_sym} error: {_e}")
+            _time.sleep(60)
+
+    import threading as _shadow_thr
+
+    _shadow_thr.Thread(
+        target=_shadow_state_thread, daemon=True, name="ShadowStateLoop"
+    ).start()
+    logger.info("[v10] Shadow state loop started (60s cadence).")
 
     # Run immediately on startup (don't wait 5 minutes for first scan)
     scan_and_trade(spot_only=True)

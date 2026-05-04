@@ -229,6 +229,8 @@ def _store_cache(strategy: str, result: dict) -> None:
 # ══════════════════════════════════════════════════════════════════════════════
 
 _SHADOW_STATE: dict = {}
+_KYLE_LAMBDA_HISTORY: dict[str, list[float]] = {}
+_KYLE_LAMBDA_MAX_HISTORY = 1440  # 24h at 1-bar-per-minute cadence
 
 
 def get_shadow_state(symbol: str) -> dict:
@@ -262,35 +264,23 @@ def _compute_kalman(prices: list) -> tuple:
     return round(x, 6), round(dev_pct, 4)
 
 
-def _compute_kyle_lambda(prices: list, volumes: list) -> tuple:
+def _compute_kyle_lambda(prices: list, volumes: list) -> float:
     """
-    OLS estimate of Kyle's Lambda (price impact per unit signed volume).
-    Returns (lambda_estimate: float, is_fragile: bool).
-    is_fragile=True when current lambda > rolling_mean + 2*rolling_std.
+    OLS estimate of Kyle's Lambda (price impact per unit signed sqrt-volume).
+    Returns lambda_estimate: float. Fragility detection moved to update_shadow_state
+    using the persistent 24h rolling history in _KYLE_LAMBDA_HISTORY.
+    Sqrt-volume normalization reduces heteroscedasticity from large sweeps.
     """
     import numpy as _np
 
     if len(prices) < 10:
-        return 0.0, False
+        return 0.0
     p = _np.array(prices, dtype=float)
     v = _np.array(volumes, dtype=float)
     dp = _np.diff(p)
-    sv = _np.sign(dp) * v[1:]
+    sv = _np.sign(dp) * _np.sqrt(_np.abs(v[1:]))
     denom = float(sv @ sv)
-    lam = float((sv @ dp) / denom) if denom != 0.0 else 0.0
-    lams = []
-    step = max(5, len(dp) // 10)
-    for i in range(0, len(dp) - step, step):
-        d_i, s_i = dp[i : i + step], sv[i : i + step]
-        dd = float(s_i @ s_i)
-        if dd != 0.0:
-            lams.append(float((s_i @ d_i) / dd))
-    if len(lams) < 3:
-        return lam, False
-    mean_l = float(_np.mean(lams))
-    std_l = float(_np.std(lams))
-    fragile = std_l > 0.0 and lam > mean_l + 2.0 * std_l
-    return lam, bool(fragile)
+    return float((sv @ dp) / denom) if denom != 0.0 else 0.0
 
 
 def _compute_adf_stat(prices: list) -> tuple:
@@ -342,6 +332,34 @@ def _compute_ou_halflife(prices: list) -> float:
     return round(float(hl), 2)
 
 
+def _compute_ou_transition_prob(
+    current_price: float,
+    target_price: float,
+    mu: float,
+    ou_halflife_bars: float,
+    price_std: float,
+) -> float:
+    """
+    P(X_T >= target | X_0 = current_price) under an Ornstein-Uhlenbeck process.
+
+    Uses the analytically tractable Gaussian transition density — the closed-form
+    solution to the Chapman-Kolmogorov equation for OU kernels. No Monte Carlo needed.
+
+    Returns 0.5 (fail-open) when inputs are degenerate.
+    """
+    from math import erf as _erf, exp as _exp, log as _log, sqrt as _sqrt
+
+    if ou_halflife_bars <= 0 or price_std <= 0 or current_price <= 0:
+        return 0.5
+    theta = _log(2.0) / ou_halflife_bars  # mean-reversion speed
+    T = ou_halflife_bars  # horizon = one halflife
+    exp_decay = _exp(-theta * T)  # = 0.5 by definition at T == halflife
+    cond_mean = mu + (current_price - mu) * exp_decay
+    cond_var = max((price_std**2) / (2.0 * theta) * (1.0 - exp_decay**2), 1e-12)
+    z = (target_price - cond_mean) / _sqrt(cond_var)
+    return float(0.5 * (1.0 - _erf(z / _sqrt(2.0))))  # P(X_T >= target)
+
+
 async def update_shadow_state(
     symbol: str,
     prices: list,
@@ -354,10 +372,36 @@ async def update_shadow_state(
     """
     if len(prices) < 20 or len(volumes) < 20:
         return
+    import numpy as _np
+
     fair_value, dev_pct = _compute_kalman(prices)
-    kyle_lam, is_fragile = _compute_kyle_lambda(prices, volumes)
+
+    # Kyle's Lambda — sqrt-volume OLS; fragility via 24h rolling history
+    kyle_lam = _compute_kyle_lambda(prices, volumes)
+    hist = _KYLE_LAMBDA_HISTORY.setdefault(symbol, [])
+    hist.append(kyle_lam)
+    if len(hist) > _KYLE_LAMBDA_MAX_HISTORY:
+        hist.pop(0)
+    if len(hist) >= 10:
+        arr = _np.array(hist, dtype=float)
+        is_fragile = bool(kyle_lam > arr.mean() + 2.0 * arr.std())
+    else:
+        is_fragile = False
+
     adf_stat, is_stationary = _compute_adf_stat(prices)
     ou_hl = _compute_ou_halflife(prices)
+
+    # OU transition probability — P(price reaches 0.3% scalp target within one halflife)
+    price_std = float(_np.std(prices[-60:]) if len(prices) >= 60 else _np.std(prices))
+    scalp_target = float(prices[-1]) * 1.003
+    ou_prob = _compute_ou_transition_prob(
+        current_price=float(prices[-1]),
+        target_price=scalp_target,
+        mu=fair_value,
+        ou_halflife_bars=ou_hl,
+        price_std=price_std,
+    )
+
     _SHADOW_STATE[symbol] = {
         "kalman_fair_value": fair_value,
         "kalman_dev_pct": dev_pct,
@@ -366,6 +410,7 @@ async def update_shadow_state(
         "adf_stat": adf_stat,
         "adf_stationary": is_stationary,
         "ou_halflife_bars": ou_hl,
+        "ou_transition_prob": round(ou_prob, 4),
         "computed_at": __import__("datetime").datetime.utcnow().isoformat(),
     }
 

@@ -147,6 +147,14 @@ PRIOR_N = 20
 # Min fires before we start shifting away from prior
 MIN_FIRES_TO_LEARN = 10
 
+# ── Regime blend gradient state ───────────────────────────────────────────────
+# EMA of per-regime composite vs. derivative prediction errors. Updated only on
+# high-surprise trades (|outcome - calibrated_p| > 0.4). Decays to zero when
+# no surprises occur, so config weights remain authoritative between events.
+_REGIME_WEIGHT_EMA: dict[str, dict[str, float]] = {}
+_WEIGHT_ETA = 0.05  # learning rate applied when reading blend adjustment
+_WEIGHT_EMA_ALPHA = 0.1  # EMA smoothing factor per surprise event
+
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
 
@@ -458,6 +466,8 @@ def record_trade_attribution(
             surprise = abs((1.0 if won else 0.0) - calibrated_p)
             if surprise <= 0.4:
                 return attr_id  # audit row written, signal weights frozen
+            # High-surprise: gradient step on composite vs. derivative blend
+            _gradient_update_blend(regime, won, ml_p_win)
         except Exception:
             pass  # calibration unavailable — fall through to normal update
 
@@ -470,6 +480,38 @@ def record_trade_attribution(
         )  # regime-agnostic row
 
     return attr_id
+
+
+def _gradient_update_blend(regime: str, won: bool, ml_p_win: float) -> None:
+    """
+    EMA gradient step on composite vs. derivative blend weights.
+    Called only on high-surprise trades (|outcome - calibrated_p| > 0.4).
+    Positive error (won > ML predicted) → composite/technical was more right.
+    Negative error → derivative/ML was more right.
+    """
+    error = (1.0 if won else 0.0) - (ml_p_win if ml_p_win > 0 else 0.5)
+    key = str(regime).upper()
+    state = _REGIME_WEIGHT_EMA.setdefault(key, {"composite": 0.0, "derivative": 0.0})
+    a = _WEIGHT_EMA_ALPHA
+    state["composite"] = (1 - a) * state["composite"] + a * error
+    state["derivative"] = (1 - a) * state["derivative"] + a * (-error)
+
+
+def get_regime_blend_adjustment(regime: str) -> dict[str, float]:
+    """
+    Returns small weight deltas (±10% max) to add to composite/derivative blend
+    for the given regime. Driven by recent high-surprise trade gradient history.
+    Callers must clamp final weights to [0.05, 0.95] to prevent degenerate blends.
+    """
+    state = _REGIME_WEIGHT_EMA.get(str(regime).upper(), {})
+    return {
+        "composite_delta": max(
+            -0.10, min(0.10, state.get("composite", 0.0) * _WEIGHT_ETA)
+        ),
+        "derivative_delta": max(
+            -0.10, min(0.10, state.get("derivative", 0.0) * _WEIGHT_ETA)
+        ),
+    }
 
 
 def _update_signal_stat(

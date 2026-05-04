@@ -616,6 +616,7 @@ def get_spot_strategy(symbol: str) -> dict[str, Any]:
         },
         "setup_overrides": dict(override.get("setup_overrides", {})),
     }
+
     return policy
 
 
@@ -909,15 +910,22 @@ def spot_quality_block_reason(
     return "", floor
 
 
+def _sigmoid_sizing(z: float) -> float:
+    import numpy as _np
+
+    return float(1.0 / (1.0 + _np.exp(-z)))
+
+
 def calculate_execution_profile(
     symbol: str,
     spot_state: dict[str, Any] | None,
+    composite_score: float | None = None,
 ) -> tuple[float, str]:
     """
     Compute position sizing multiplier based on microstructure conditions.
     Returns (sizing_multiplier, status_tag).
     Hard vetoes return 0.0 and a tag string.
-    Soft vetoes compound multiplicatively and return < 1.0.
+    Soft conditions feed a continuous sigmoid z-score returning (0.3, 1.0].
     Never raises — all exceptions are caught and fail open (return 1.0).
     """
     if not spot_state:
@@ -939,20 +947,30 @@ def calculate_execution_profile(
     if obi < -0.35 and tfi < -0.20:
         return 0.0, "EXTREME_SELL_PRESSURE"
 
-    multiplier = 1.0
-
-    # Soft Veto 1: Kyle's Lambda fragile market
+    # Continuous z-score: z=0 → sigmoid=0.5 → multiplier=1.0 (neutral, no penalty).
+    # Adverse signals push z negative → multiplier smoothly toward 0.3 floor.
+    z = 0.0
     try:
         from data.edge_monitor import get_shadow_state
 
         shadow = get_shadow_state(_clean_symbol(symbol))
         if shadow.get("kyle_lambda_fragile"):
-            multiplier *= 0.7
+            z -= 1.0
+        ou_prob = float(shadow.get("ou_transition_prob", 0.5))
+        if ou_prob < 0.5:
+            z -= (0.5 - ou_prob) * 4.0
     except Exception:
         pass
 
-    # Soft Veto 2: OBI/TFI divergence (bullish book, bearish tape)
-    if obi > 0.20 and tfi < -0.10:
-        multiplier *= 0.5
+    # OBI/TFI divergence penalty — continuous rather than binary gate
+    z -= max(0.0, obi - 0.20) * 3.0
+    z -= max(0.0, -tfi - 0.10) * 3.0
+
+    # Optional composite score boost (centered at 50, 25-pt scale)
+    if composite_score is not None:
+        z += (float(composite_score) - 50.0) / 25.0
+
+    # Sigmoid maps z=0 → multiplier=1.0; z→-∞ → 0.3 floor; z→+∞ → 1.0 cap
+    multiplier = max(0.3, min(1.0, 0.3 + 1.4 * _sigmoid_sizing(z)))
 
     return round(multiplier, 3), "ACTIVE"

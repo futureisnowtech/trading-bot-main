@@ -26,7 +26,6 @@ If this file ever conflicts with `AGENTS.md`, `AGENTS.md` wins.
 - `runtime/spot_position_truth.py` is the first-class truth layer for open exposure.
 - `TradingView` is `monitor_only` for live spot.
 - `CHOP` is blocked for the live spot lane.
-- `pullback_reclaim` is quarantined for tiny live.
 - `maker_first` is the only default live route.
 - Dormant lanes remain in-repo but are not authoritative for live spot readiness or health.
 

@@ -102,14 +102,13 @@ def test_ssp03_build_spot_state_can_fall_back_to_stale_cache(monkeypatch):
 
 def test_ssp04_quality_gate_open_before_calibration():
     """
-    pullback_reclaim is a hard tiny-live quarantine and impulse_continuation
-    should still avoid quarantine semantics even if another quality gate later
-    blocks the candidate.
+    pullback_reclaim quarantine has been lifted. Both pullback_reclaim and
+    impulse_continuation must pass through when structural gates are satisfied.
+    Neither should ever return a 'quarantined' reason.
     """
-    from unittest.mock import patch
-
     from runtime.spot_strategy import spot_quality_block_reason
 
+    # Frames that satisfy all NEUTRAL structural minimums
     _frames = {
         "5m": {
             "v": 0.2,
@@ -120,32 +119,34 @@ def test_ssp04_quality_gate_open_before_calibration():
             "path_efficiency": 0.4,
             "participation_component": 0.1,
         },
-        "30m": {"v": 0.1, "frame_score": 57.0, "volatility_quality": 0.0},
+        "30m": {"v": 0.1, "frame_score": 60.0, "volatility_quality": 0.0},
     }
 
-    # pullback_reclaim remains hard quarantined in tiny-live mode
+    # pullback_reclaim in NEUTRAL with all gates satisfied — must pass
     pr_state = {
         "symbol": "BTC",
         "regime": "NEUTRAL",
         "setup_family": "pullback_reclaim",
         "setup_score": 0.92,
-        "structural_confirm_count": 2,
+        "structural_confirm_count": 3,  # NEUTRAL min=3
         "frames": _frames,
     }
-    with patch("config.SPOT_PULLBACK_RECLAIM_NEUTRAL_BLOCKED", True):
-        reason, _ = spot_quality_block_reason("BTC", pr_state, final_spot_score=65.0)
-    assert reason == "setup_family_not_allowed", (
-        f"pullback_reclaim must be quarantined in tiny live; got: {repr(reason)}"
+    reason, _ = spot_quality_block_reason("BTC", pr_state, final_spot_score=65.0)
+    assert reason == "", (
+        f"pullback_reclaim must be allowed after quarantine lift; got: {repr(reason)}"
     )
 
-    # impulse_continuation in NEUTRAL must always have open gate (no edge blocks)
+    # impulse_continuation in NEUTRAL must also never hit quarantine semantics
     ic_state = {
         "symbol": "BTC",
         "regime": "NEUTRAL",
         "setup_family": "impulse_continuation",
         "setup_score": 0.92,
         "structural_confirm_count": 2,
-        "frames": _frames,
+        "frames": {
+            "5m": _frames["5m"],
+            "30m": {"v": 0.1, "frame_score": 57.0, "volatility_quality": 0.0},
+        },
     }
     ic_reason, _ = spot_quality_block_reason("BTC", ic_state, final_spot_score=65.0)
     assert "quarantined" not in ic_reason, (

@@ -487,8 +487,27 @@ def classify_setup_candidates(
         }
     )
 
-    # pullback_reclaim excluded: 0% WR across 115 live trades (2026-04-22), evidence-quarantined.
-    # Removed from candidate pool so it never wins and blocks the scan via setup_family_not_allowed.
+    reclaim_score = max(
+        0.0,
+        min(
+            1.0,
+            0.18 * max(float(s30.get("frame_score") or 0.0) - 50.0, 0.0) / 20.0
+            + 0.16 * max(float(s4.get("frame_score") or 0.0) - 50.0, 0.0) / 20.0
+            + 0.14 * max(float(s5.get("structure_component") or 0.0), 0.0)
+            + 0.12 * max(float(s5.get("path_efficiency") or 0.0), 0.0)
+            + 0.10 * max(float(s30.get("path_efficiency") or 0.0), 0.0)
+            + 0.08 * max(float(s5["z"]), 0.0)
+            + (0.10 if regime != "CHOP" else 0.0)
+            + (0.12 if bool(s5.get("price_above_vwap")) else 0.0),
+        ),
+    )
+    candidates.append(
+        {
+            "family": "pullback_reclaim",
+            "score": round(reclaim_score, 4),
+            "reason": "trend context plus reclaim of structure / VWAP",
+        }
+    )
 
     compression_score = max(
         0.0,

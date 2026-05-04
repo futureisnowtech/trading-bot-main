@@ -1046,14 +1046,14 @@ SPOT_EXTERNAL_MANUAL_HOLDINGS: list[str] = [
 ]
 SPOT_ALLOWED_SETUP_FAMILIES_TINY_LIVE: tuple[str, ...] = (
     "impulse_continuation",
+    "pullback_reclaim",
     "compression_breakout",
     "trend_resume_after_shakeout",
     "compression_expansion_retest",
     "wae_momentum_explosion",
     "breakout_volatility",
-    # pullback_reclaim intentionally excluded: 0% WR across 115 live trades (2026-04-22)
 )
-SPOT_DISABLED_SETUP_FAMILIES_TINY_LIVE: tuple[str, ...] = ("pullback_reclaim",)
+SPOT_DISABLED_SETUP_FAMILIES_TINY_LIVE: tuple[str, ...] = ()
 SPOT_TINY_LIVE_MIN_CONFIRMS: dict[str, int] = {"TREND": 2, "NEUTRAL": 3, "CHOP": 99}
 SPOT_TINY_LIVE_MIN_5M_FRAME: dict[str, float] = {
     "TREND": 52.0,
@@ -1110,15 +1110,6 @@ SPOT_STOP_TIGHTEN_LOW_SETUP: float = float(
 SPOT_STOP_TIGHTEN_WEAK_HTF: float = float(
     os.getenv("SPOT_STOP_TIGHTEN_WEAK_HTF", "0.95")
 )
-# Evidence-based setup quarantine (derived from 140-trade live failure window 2026-04-22):
-# pullback_reclaim NEUTRAL: n=115, 0% WR, avg -$1.28 — quarantined
-# pullback_reclaim CHOP:    n=22,  0% WR, avg -$0.70 — quarantined (insufficient sample for positive case)
-SPOT_PULLBACK_RECLAIM_NEUTRAL_BLOCKED: bool = os.getenv(
-    "SPOT_PULLBACK_RECLAIM_NEUTRAL_BLOCKED", "true"
-).strip().lower() in ("true", "1", "yes")
-SPOT_PULLBACK_RECLAIM_CHOP_BLOCKED: bool = os.getenv(
-    "SPOT_PULLBACK_RECLAIM_CHOP_BLOCKED", "true"
-).strip().lower() in ("true", "1", "yes")
 # Taker fallback disabled: all 113 taker trades in failure window were losers ($-131, 0% WR).
 # Maker-only policy: if maker order does not fill within SPOT_MAKER_WAIT_SECONDS, cancel and skip.
 SPOT_TAKER_FALLBACK_ENABLED: bool = os.getenv(

@@ -62,34 +62,31 @@ def _spot_state(regime: str, setup_family: str, setup_score: float = 0.5) -> dic
     }
 
 
-# ── SG-01 through SG-06: quarantine gate ─────────────────────────────────────
+# ── SG-01 through SG-06: setup family and regime gates ───────────────────────
 
 
-def test_sg01_pullback_reclaim_neutral_quarantined():
+def test_sg01_pullback_reclaim_neutral_allowed():
     from runtime.spot_strategy import spot_quality_block_reason
 
-    with patch("config.SPOT_PULLBACK_RECLAIM_NEUTRAL_BLOCKED", True):
-        reason, _ = spot_quality_block_reason(
-            "BTC",
-            _spot_state("NEUTRAL", "pullback_reclaim"),
-            final_spot_score=60.0,
-        )
-    assert reason == "setup_family_not_allowed", reason
+    state = _spot_state("NEUTRAL", "pullback_reclaim", setup_score=0.8)
+    state["structural_confirm_count"] = 3  # NEUTRAL min=3
+    state["frames"]["30m"]["frame_score"] = 60.0  # NEUTRAL min=58.0
+    reason, _ = spot_quality_block_reason("BTC", state, final_spot_score=65.0)
+    assert reason == "", f"pullback_reclaim NEUTRAL unexpectedly blocked: {reason}"
 
 
 def test_sg02_pullback_reclaim_chop_quarantined():
     from runtime.spot_strategy import spot_quality_block_reason
 
-    with patch("config.SPOT_PULLBACK_RECLAIM_CHOP_BLOCKED", True):
-        reason, _ = spot_quality_block_reason(
-            "ETH",
-            _spot_state("CHOP", "pullback_reclaim"),
-            final_spot_score=60.0,
-        )
+    reason, _ = spot_quality_block_reason(
+        "ETH",
+        _spot_state("CHOP", "pullback_reclaim"),
+        final_spot_score=60.0,
+    )
     assert reason == "spot_regime_not_allowed:CHOP", reason
 
 
-def test_sg03_pullback_reclaim_trend_quarantined():
+def test_sg03_pullback_reclaim_trend_allowed():
     from runtime.spot_strategy import spot_quality_block_reason
 
     reason, _ = spot_quality_block_reason(
@@ -97,13 +94,12 @@ def test_sg03_pullback_reclaim_trend_quarantined():
         _spot_state("TREND", "pullback_reclaim", setup_score=0.8),
         final_spot_score=70.0,
     )
-    assert reason == "setup_family_not_allowed", reason
+    assert reason == "", f"pullback_reclaim TREND unexpectedly blocked: {reason}"
 
 
 def test_sg04_impulse_continuation_neutral_not_quarantined():
     from runtime.spot_strategy import spot_quality_block_reason
 
-    # impulse_continuation in NEUTRAL must not be caught by the pullback gate
     reason, _ = spot_quality_block_reason(
         "BTC",
         _spot_state("NEUTRAL", "impulse_continuation", setup_score=0.8),
@@ -112,27 +108,14 @@ def test_sg04_impulse_continuation_neutral_not_quarantined():
     assert "quarantined" not in reason, f"Unexpected quarantine: {reason}"
 
 
-def test_sg05_flag_false_unblocks_neutral():
+def test_sg06_chop_blocks_pullback_reclaim():
     from runtime.spot_strategy import spot_quality_block_reason
 
-    with patch("config.SPOT_PULLBACK_RECLAIM_NEUTRAL_BLOCKED", False):
-        reason, _ = spot_quality_block_reason(
-            "BTC",
-            _spot_state("NEUTRAL", "pullback_reclaim", setup_score=0.9),
-            final_spot_score=71.0,
-        )
-    assert reason == "setup_family_not_allowed", reason
-
-
-def test_sg06_flag_false_unblocks_chop():
-    from runtime.spot_strategy import spot_quality_block_reason
-
-    with patch("config.SPOT_PULLBACK_RECLAIM_CHOP_BLOCKED", False):
-        reason, _ = spot_quality_block_reason(
-            "ETH",
-            _spot_state("CHOP", "pullback_reclaim", setup_score=0.9),
-            final_spot_score=71.0,
-        )
+    reason, _ = spot_quality_block_reason(
+        "ETH",
+        _spot_state("CHOP", "pullback_reclaim", setup_score=0.9),
+        final_spot_score=71.0,
+    )
     assert reason == "spot_regime_not_allowed:CHOP", reason
 
 

@@ -135,12 +135,14 @@ The live spot lane is intentionally harsh by default.
 
 - Allowed regimes: `TREND`, `NEUTRAL`
 - Blocked regime: `CHOP`
-- Hard quarantine: `pullback_reclaim`
 - Allowed setup families for evaluation:
   - `impulse_continuation`
+  - `pullback_reclaim`
   - `compression_breakout`
   - `trend_resume_after_shakeout`
   - `compression_expansion_retest`
+  - `wae_momentum_explosion`
+  - `breakout_volatility`
 - Route: `maker_first` only
 - `taker_fallback`: disabled by default
 - Structural confirm minimums:

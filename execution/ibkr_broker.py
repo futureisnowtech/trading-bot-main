@@ -36,6 +36,12 @@ import uuid
 import threading
 import asyncio
 import time
+import logging
+from typing import Optional
+from datetime import datetime
+import pytz
+
+logger = logging.getLogger(__name__)
 
 # eventkit (ib_insync dep) calls asyncio.get_event_loop() at import time.
 # Python 3.10+ no longer auto-creates a loop — set one on the main thread.
@@ -43,9 +49,6 @@ try:
     asyncio.get_event_loop()
 except RuntimeError:
     asyncio.set_event_loop(asyncio.new_event_loop())
-from typing import Optional
-from datetime import datetime
-import pytz
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import PAPER_TRADING, MARKET_TIMEZONE, FUTURES_NUM_CONTRACTS
@@ -156,18 +159,18 @@ class IBKRBroker:
                     if self._ib.managedAccounts()
                     else "unknown"
                 )
-                print(
+                logger.info(
                     f"[IBKRBroker] Connected to TWS ({mode}) account={acct} port={IBKR_PORT} ✅"
                 )
                 log_event("INFO", "IBKRBroker", f"Connected ({mode}) account={acct}")
                 self._sync_positions()
             else:
-                print("[IBKRBroker] ⚠️ Could not connect to TWS — is it running?")
+                logger.info("[IBKRBroker] ⚠️ Could not connect to TWS — is it running?")
             return self._connected
         except Exception as e:
-            print(f"API connection failed: {e}\nMake sure API port on TWS/IBG is open")
-            print(f"[IBKRBroker] Connection error: {e}")
-            print(
+            logger.info(f"API connection failed: {e}\nMake sure API port on TWS/IBG is open")
+            logger.info(f"[IBKRBroker] Connection error: {e}")
+            logger.info(
                 "[IBKRBroker] ⚠️ TWS not reachable — make sure TWS is open and API is enabled"
             )
             log_event("ERROR", "IBKRBroker", f"Connection failed: {e}")
@@ -198,7 +201,7 @@ class IBKRBroker:
                         "side": side,
                         "order_id": "SYNCED",
                     }
-                    print(
+                    logger.info(
                         f"[IBKRBroker] Synced existing {side} {abs(pos.position)} MES position"
                     )
         except Exception as e:
@@ -357,7 +360,7 @@ class IBKRBroker:
                     if trades
                     else f"IBKR_{uuid.uuid4().hex[:8]}"
                 )
-                print(
+                logger.info(
                     f"[IBKRBroker] BUY {num_contracts} MES @ ~{current_price:.2f} "
                     f"| SL={stop_price} TP={target_price}"
                 )
@@ -366,7 +369,7 @@ class IBKRBroker:
                 return None  # order was rejected — do not log a fake position
         else:
             order_id = f"IBKR_OFFLINE_{uuid.uuid4().hex[:8]}"
-            print(
+            logger.info(
                 f"[IBKRBroker] ⚠️ Not connected — paper-logging BUY {num_contracts} "
                 f"MES @ {current_price:.2f}"
             )
@@ -431,13 +434,13 @@ class IBKRBroker:
         if self.is_connected():
             try:
                 self._run(self._place_market_async("SELL", qty), timeout=10)
-                print(
+                logger.info(
                     f"[IBKRBroker] SELL {qty} MES @ {exit_price:.2f} | P&L: ${pnl:+.2f}"
                 )
             except Exception as e:
                 log_event("ERROR", "IBKRBroker", f"sell_mes error: {e}")
         else:
-            print(
+            logger.info(
                 f"[IBKRBroker] ⚠️ Not connected — paper-logging SELL MES @ {exit_price:.2f}"
             )
 
@@ -507,7 +510,7 @@ class IBKRBroker:
                     if trades
                     else f"IBKR_{uuid.uuid4().hex[:8]}"
                 )
-                print(
+                logger.info(
                     f"[IBKRBroker] SHORT {num_contracts} MES @ ~{current_price:.2f} "
                     f"| SL={stop_price} TP={target_price}"
                 )
@@ -516,7 +519,7 @@ class IBKRBroker:
                 return None  # order was rejected — do not log a fake position
         else:
             order_id = f"IBKR_OFFLINE_{uuid.uuid4().hex[:8]}"
-            print(
+            logger.info(
                 f"[IBKRBroker] ⚠️ Not connected — paper-logging SHORT {num_contracts} "
                 f"MES @ {current_price:.2f}"
             )
@@ -581,13 +584,13 @@ class IBKRBroker:
         if self.is_connected():
             try:
                 self._run(self._place_market_async("BUY", qty), timeout=10)
-                print(
+                logger.info(
                     f"[IBKRBroker] COVER {qty} MES @ {exit_price:.2f} | P&L: ${pnl:+.2f}"
                 )
             except Exception as e:
                 log_event("ERROR", "IBKRBroker", f"cover_mes error: {e}")
         else:
-            print(
+            logger.info(
                 f"[IBKRBroker] ⚠️ Not connected — paper-logging COVER MES @ {exit_price:.2f}"
             )
 

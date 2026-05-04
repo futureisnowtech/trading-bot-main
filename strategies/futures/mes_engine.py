@@ -32,12 +32,15 @@ Pre-market accumulation signal (proxy — no L2 data):
 """
 import os
 import sys
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, time as dtime
 from typing import Optional
 
 import pandas as pd
 import pytz
+
+logger = logging.getLogger(__name__)
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -154,8 +157,8 @@ class MESEngine:
         """Called by scheduler at 9:35 ET with the first 5-min candle H/L."""
         self._opening_range = {'high': high, 'low': low, 'set': True}
         self._breakout_state = {}   # reset any stale breakout state
-        print(f"[mes_engine] Opening range set: [{low:.2f} – {high:.2f}] "
-              f"(range={high-low:.2f} pts)")
+        logger.info(f"[mes_engine] Opening range set: [{low:.2f} – {high:.2f}] "
+                    f"(range={high-low:.2f} pts)")
 
     def set_htf_bias(self, bias: str, strength: float) -> None:
         """Called by premarket routine with 30-min HTF bias."""
@@ -167,9 +170,9 @@ class MESEngine:
         self._trades_today += 1
         if self._daily_pnl_pts >= _DAILY_GOAL_PTS:
             self._goal_hit = True
-            print(f"[mes_engine] 🎯 Daily goal reached ({self._daily_pnl_pts:.1f} pts) — standing down")
+            logger.info(f"[mes_engine] 🎯 Daily goal reached ({self._daily_pnl_pts:.1f} pts) — standing down")
         elif self._daily_pnl_pts <= -_DAILY_STOP_PTS:
-            print(f"[mes_engine] 🛑 Daily stop hit ({self._daily_pnl_pts:.1f} pts) — standing down")
+            logger.info(f"[mes_engine] 🛑 Daily stop hit ({self._daily_pnl_pts:.1f} pts) — standing down")
 
     def reset_daily(self) -> None:
         """Called at premarket each day to reset all daily state."""
@@ -180,7 +183,7 @@ class MESEngine:
         self._breakout_state = {}
         self._vix = None
         self._premarket_bias = 'NEUTRAL'
-        print("[mes_engine] Daily state reset")
+        logger.info("[mes_engine] Daily state reset")
 
     def update_premarket_bias(self, df_premarket: pd.DataFrame) -> str:
         """
@@ -203,8 +206,8 @@ class MESEngine:
             else:
                 bias = 'NEUTRAL'
             self._premarket_bias = bias
-            print(f"[mes_engine] Pre-market accumulation signal: {bias} "
-                  f"(bull_bars={bull_bars}, bear_bars={bear_bars})")
+            logger.info(f"[mes_engine] Pre-market accumulation signal: {bias} "
+                        f"(bull_bars={bull_bars}, bear_bars={bear_bars})")
             return bias
         except Exception:
             return 'NEUTRAL'

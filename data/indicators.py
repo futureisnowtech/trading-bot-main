@@ -5,15 +5,18 @@ All strategy files import from here — one source of truth.
 """
 import pandas as pd
 import numpy as np
+import logging
 from typing import Optional
 import pytz
+
+logger = logging.getLogger(__name__)
 
 try:
     import pandas_ta as ta
     PANDAS_TA = True
 except ImportError:
     PANDAS_TA = False
-    print("[indicators] pandas-ta not found, using fallback calculations")
+    logger.warning("[indicators] pandas-ta not found, using fallback calculations")
 
 
 def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
@@ -170,7 +173,7 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
         rv_long = np.sqrt((r**2).rolling(240).sum())
         df['rv_ratio'] = (df['rv_15'] / rv_long.clip(lower=1e-10)).clip(0.1, 5.0)
     except Exception as e:
-        print(f"[indicators] rv_ratio failed: {e}")
+        logger.error(f"[indicators] rv_ratio failed: {e}")
 
     # ─── 2b. Ornstein-Uhlenbeck Half-Life (ou_halflife_minutes) ───────────────
     # Mean-reversion speed: t½ = ln(2)/κ from AR(1) on de-trended log price.
@@ -202,14 +205,14 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
         df['ou_zscore'] = ou_zscore.clip(-4.0, 4.0)
         df['ou_halflife_minutes'] = ou_hl
     except Exception as e:
-        print(f"[indicators] ou_halflife failed: {e}")
+        logger.error(f"[indicators] ou_halflife failed: {e}")
 
     # ─── 3. Anchored VWAP — UTC daily anchor (avwap_utc, avwap_dev) ──────────
     try:
         df['avwap_utc'] = _avwap_utc(df)
         df['avwap_dev'] = (df['close'] - df['avwap_utc']) / df['avwap_utc']
     except Exception as e:
-        print(f"[indicators] avwap_utc failed: {e}")
+        logger.error(f"[indicators] avwap_utc failed: {e}")
 
     # ─── 4. AR(1) Return Autocorrelation (autocorr_ret) ──────────────────────
     # > +0.15: momentum persistence (trend is sticky).
@@ -222,7 +225,7 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
             lambda x: pd.Series(x).autocorr(lag=1), raw=False
         )
     except Exception as e:
-        print(f"[indicators] autocorr_ret failed: {e}")
+        logger.error(f"[indicators] autocorr_ret failed: {e}")
         df['autocorr_ret'] = 0.0
 
     # ─── 5. Amihud Illiquidity Ratio (amihud_illiq, amihud_pct) ──────────────
@@ -236,7 +239,7 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
             lambda x: float(pd.Series(x).rank(pct=True).iloc[-1] * 100), raw=False
         )
     except Exception as e:
-        print(f"[indicators] amihud failed: {e}")
+        logger.error(f"[indicators] amihud failed: {e}")
 
     # ─── 6. Kyle's Lambda (kyle_lambda, kyle_lambda_pct) ─────────────────────
     try:
@@ -245,7 +248,7 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
             lambda x: float(pd.Series(x).rank(pct=True).iloc[-1] * 100), raw=False
         )
     except Exception as e:
-        print(f"[indicators] kyle_lambda failed: {e}")
+        logger.error(f"[indicators] kyle_lambda failed: {e}")
 
     # ─── 7. Bollinger-Keltner Squeeze (squeeze_on, squeeze_fired, squeeze_bars)
     try:
@@ -287,14 +290,14 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
             df['squeeze_fired'].values, squeeze_dir_arr, 0
         ).astype(int)
     except Exception as e:
-        print(f"[indicators] squeeze failed: {e}")
+        logger.error(f"[indicators] squeeze failed: {e}")
 
     # ─── 8. Kalman Filter Price Estimate (kalman_price, kalman_dev) ───────────
     try:
         df['kalman_price'] = _kalman_filter(df['close'])
         df['kalman_dev'] = (df['close'] - df['kalman_price']) / df['kalman_price'].clip(lower=0.001)
     except Exception as e:
-        print(f"[indicators] kalman failed: {e}")
+        logger.error(f"[indicators] kalman failed: {e}")
 
     # ─── 9. Session activity flag (session_active) ────────────────────────────
     # Marks bars inside 08:00-11:00 ET (high-volume crypto session) and
@@ -312,7 +315,7 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
         except Exception:
             df['session_active'] = True  # fallback: always active
     except Exception as e:
-        print(f"[indicators] session_active failed: {e}")
+        logger.error(f"[indicators] session_active failed: {e}")
         df['session_active'] = True
 
     # ─── 10. SuperTrend (ATR 10, mult 3.0) ───────────────────────────────────
@@ -339,7 +342,7 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
             df['supertrend_dir'] = _st_dir
             df['supertrend_bullish'] = _st_dir == 1
     except Exception as e:
-        print(f"[indicators] supertrend failed: {e}")
+        logger.error(f"[indicators] supertrend failed: {e}")
         df['supertrend_bullish'] = False
 
     # SuperTrend cross detection: fires only on the bar where direction flips.
@@ -379,7 +382,7 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
         df['tk_cross_up']   = (_tenkan > _kijun) & (_tenkan.shift(1) <= _kijun.shift(1))
         df['tk_cross_down'] = (_tenkan < _kijun) & (_tenkan.shift(1) >= _kijun.shift(1))
     except Exception as e:
-        print(f"[indicators] ichimoku failed: {e}")
+        logger.error(f"[indicators] ichimoku failed: {e}")
         df['cloud_bullish']   = False
         df['cloud_bearish']   = False
         df['cloud_cross_up']  = False
@@ -408,7 +411,7 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
         df['wae_bullish']   = (_trend_up > _trend_dn) & (_trend_up > 0)
         df['wae_exploding'] = (_trend_up > _explosion) | (_trend_dn > _explosion)
     except Exception as e:
-        print(f"[indicators] wae failed: {e}")
+        logger.error(f"[indicators] wae failed: {e}")
         df['wae_bullish']   = False
         df['wae_trend_down'] = False
         df['wae_exploding'] = False
@@ -435,7 +438,7 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
                                   (df['fisher'].shift(1).fillna(0) >= df['fisher_signal'].shift(1).fillna(0)) & \
                                   (df['fisher'] > 0)
     except Exception as e:
-        print(f"[indicators] fisher failed: {e}")
+        logger.error(f"[indicators] fisher failed: {e}")
         df['fisher'] = 0.0
         df['fisher_cross_up'] = False
         df['fisher_cross_down'] = False
@@ -463,7 +466,7 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
         df['chop_trending'] = df['chop'] < 38.2  # strongly trending
         df['chop_ranging']  = df['chop'] > 61.8  # high chop
     except Exception as e:
-        print(f"[indicators] chop failed: {e}")
+        logger.error(f"[indicators] chop failed: {e}")
         df['chop'] = 50.0
         df['chop_trending'] = False
         df['chop_ranging'] = False
@@ -489,7 +492,7 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
         df['wt_oversold_cross'] = _wt_cross_up & (_wt_prev1 < -53)
         df['wt_overbought']     = df['wt1'] > 53
     except Exception as e:
-        print(f"[indicators] wavetrend failed: {e}")
+        logger.error(f"[indicators] wavetrend failed: {e}")
         df['wt1'] = 0.0
         df['wt_oversold_cross'] = False
         df['wt_overbought'] = False
@@ -518,7 +521,7 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
         _lrsi = np.where(_tot > 1e-10, _cu / _tot, 0.5)
         df['lrsi'] = pd.Series(_lrsi, index=df.index)
     except Exception as e:
-        print(f"[indicators] lrsi failed: {e}")
+        logger.error(f"[indicators] lrsi failed: {e}")
         df['lrsi'] = 0.5
 
     # ─── 17. Stochastic RSI (40-45% WR in trending regimes) ──────────────────
@@ -547,7 +550,7 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
             (df['stochrsi_k'] > 70) & (df['stochrsi_d'] > 70)
         )
     except Exception as e:
-        print(f"[indicators] stochrsi failed: {e}")
+        logger.error(f"[indicators] stochrsi failed: {e}")
         df['stochrsi_k'] = 50.0
         df['stochrsi_d'] = 50.0
         df['stochrsi_cross_up']   = False
@@ -569,7 +572,7 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
         # Bearish divergence: CVD falling while price flat/rising over last 10 bars
         df['cvd_bear_div'] = (_cvd_roc < 0) & (_price_roc >= -0.001)
     except Exception as e:
-        print(f"[indicators] cvd failed: {e}")
+        logger.error(f"[indicators] cvd failed: {e}")
         df['cvd']          = 0.0
         df['cvd_bull_div'] = False
         df['cvd_bear_div'] = False
@@ -592,7 +595,7 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
             # Price touching upper band = potential reversion sell / exit
             df['vwap_upper_touch'] = df['close'] >= df['vwap_upper2']
     except Exception as e:
-        print(f"[indicators] vwap_bands failed: {e}")
+        logger.error(f"[indicators] vwap_bands failed: {e}")
         df['vwap_lower_touch'] = False
         df['vwap_upper_touch'] = False
 
@@ -609,7 +612,7 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
         df['ema_death_cross']  = (df['ema9'] < df['ema21']) & (_ema9_prev >= _ema21_prev)
         df['ema9_above_21']    = df['ema9'] > df['ema21']  # persistent state flag
     except Exception as e:
-        print(f"[indicators] ema_cross failed: {e}")
+        logger.error(f"[indicators] ema_cross failed: {e}")
         df['ema_golden_cross'] = False
         df['ema_death_cross']  = False
         df['ema9_above_21']    = False

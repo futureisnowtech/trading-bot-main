@@ -424,9 +424,6 @@ def get_engine_signal(symbol: str, btc_change_pct: float = None) -> dict:
                        fired_signals, blocked_reason (if HOLD/blocked).
     """
     try:
-        import sys, os
-
-        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         from data.coinbase_feed import get_candles
         from data.indicators import add_all_indicators
         from strategies.crypto.crypto_engine import (
@@ -501,9 +498,6 @@ def get_sizing_breakdown(
                        and human-readable label for each factor.
     """
     try:
-        import sys, os
-
-        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         from risk.unified_sizer import get_sizing_breakdown as _breakdown
         from config import CRYPTO_POSITION_SIZE_USD, PAPER_TRADING
 
@@ -535,9 +529,6 @@ def get_edge_status(market: str = "crypto") -> dict:
                        consecutive_low_windows, consecutive_high_windows, label.
     """
     try:
-        import sys, os
-
-        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         from risk.edge_monitor import (
             get_edge_score,
             get_edge_size_factor,
@@ -590,9 +581,6 @@ def get_mes_signal() -> dict:
     daily P&L progress, VIX regime, HTF bias.
     """
     try:
-        import sys, os
-
-        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         from data.market_data import get_bars
         from data.indicators import add_all_indicators
         from strategies.futures.mes_engine import get_engine
@@ -636,18 +624,15 @@ def get_mes_position() -> dict:
     from current ES=F price vs entry price.
     """
     try:
-        import sys, os
-
-        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         from risk.risk_manager import get_risk_manager
-        from execution.tradovate_broker import get_tradovate_broker, MES_POINT_VALUE
+        from execution.ibkr_broker import get_ibkr_broker, MES_POINT_VALUE
 
         rm = get_risk_manager()
         pos = rm.get_position("futures_scalper", "MES")
         if not pos:
             return {"open_position": False}
 
-        tb = get_tradovate_broker()
+        tb = get_ibkr_broker()
         current_price = tb._get_real_es_price()
 
         entry = pos.get("entry", current_price)
@@ -685,11 +670,8 @@ def get_mes_daily_stats() -> dict:
     engine is standing down for any reason.
     """
     try:
-        import sys, os
-
-        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         from strategies.futures.mes_engine import get_engine
-        from execution.tradovate_broker import MES_POINT_VALUE
+        from execution.ibkr_broker import MES_POINT_VALUE
 
         engine = get_engine()
         pnl_pts = engine.daily_pnl_pts

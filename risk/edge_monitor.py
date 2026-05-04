@@ -27,9 +27,12 @@ Market mapping from strategy name:
 import os
 import sys
 import math
+import logging
 import sqlite3
 from datetime import datetime
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import DB_PATH, PAPER_TRADING
@@ -282,4 +285,4 @@ def _fire_notification(market: str, message: str, level: str = 'INFO') -> None:
         from logging_db.trade_logger import log_event
         log_event(level, 'edge_monitor', message)
     except Exception:
-        print(f"[edge_monitor] {level}: {message}")
+        logger.error(f"[edge_monitor] {level}: {message}")

@@ -13,9 +13,12 @@ Positions persisted to SQLite on every write. System restart never loses positio
 import os
 import sys
 import threading
+import logging
 from datetime import datetime
 from typing import Optional
 import pytz
+
+logger = logging.getLogger(__name__)
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import ACCOUNT_SIZE, MARKET_TIMEZONE, PAPER_TRADING, MAX_DEPLOYED_PCT
@@ -81,7 +84,7 @@ class RiskManager:
                 if already_closed:
                     delete_position(sym, strat, PAPER_TRADING)
                     cleaned += 1
-                    print(f"[RiskManager] Cleaned orphaned position: {sym} ({strat})")
+                    logger.info(f"[RiskManager] Cleaned orphaned position: {sym} ({strat})")
                     continue
 
                 p = {
@@ -102,10 +105,10 @@ class RiskManager:
                 restored += 1
 
             if restored or cleaned:
-                print(f"[RiskManager] Restored {restored} open positions"
+                logger.info(f"[RiskManager] Restored {restored} open positions"
                       + (f", cleaned {cleaned} orphaned" if cleaned else ""))
         except Exception as e:
-            print(f"[RiskManager] Position restore error: {e}")
+            logger.error(f"[RiskManager] Position restore error: {e}")
 
     def _restore_halt_state(self) -> None:
         """Re-apply today's halt on startup if condition still holds."""
@@ -132,9 +135,9 @@ class RiskManager:
             if row and not resume_row:
                 self._halted = True
                 self._halt_reason = row[0]
-                print(f"[RiskManager] Restored halt state: {self._halt_reason}")
+                logger.info(f"[RiskManager] Restored halt state: {self._halt_reason}")
         except Exception as e:
-            print(f"[RiskManager] Halt restore error: {e}")
+            logger.error(f"[RiskManager] Halt restore error: {e}")
 
     # ── Entry checks ──────────────────────────────────────────────────────────
 
@@ -366,7 +369,7 @@ class RiskManager:
         self._halted = True
         self._halt_reason = reason
         log_event('HALT', 'RiskManager', reason)
-        print(f"\n🚨 RISK MANAGER HALT: {reason}\n")
+        logger.warning(f"RISK MANAGER HALT: {reason}")
         # Telegram removed in v10 — halt is logged to DB via log_event above.
         # notification_engine picks it up for the dashboard.
         try:

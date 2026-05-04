@@ -29,7 +29,26 @@ def get_repo_context() -> str:
     except Exception as e:
         context.append(f"Error reading AGENTS.md: {e}")
 
-    # 1b. Execution Math — continuous stochastic models (spot_strategy + edge_monitor)
+    # 1b. Live regime policy — score floors, allowed regimes, weights (ground truth from runtime)
+    try:
+        from runtime.spot_strategy import get_spot_strategy
+
+        policy_summary = {}
+        for sym in ["BTC", "ETH", "SOL", "XRP"]:
+            p = get_spot_strategy(sym)
+            policy_summary[sym] = {
+                "allowed_regimes": list(p["allowed_regimes"]),
+                "score_floors": p["score_floors"],
+                "score_weights": p["score_weights"],
+            }
+        context.append(
+            "### Live Regime Policy (runtime/spot_strategy.get_spot_strategy)\n"
+            + json.dumps(policy_summary, indent=2)
+        )
+    except Exception as e:
+        context.append(f"Error reading live regime policy: {e}")
+
+    # 1c. Execution Math — continuous stochastic models (spot_strategy + edge_monitor)
     try:
         with open("runtime/spot_strategy.py", "r") as f:
             src = f.read()

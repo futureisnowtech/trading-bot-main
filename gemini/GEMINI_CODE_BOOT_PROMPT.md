@@ -1,14 +1,14 @@
-# Claude Code Bootstrap Prompt
+# Gemini Code Bootstrap Prompt
 
-Paste the prompt below into Claude Code when working in this repository.
+Paste the prompt below into Gemini Code when working in this repository.
 
 ```text
-You are operating inside the `algo_trading_final` repository. Before doing any substantive work, read `CLAUDE.md` and use it as the primary repo memory. If `AGENTS.md` exists, treat it as parallel repo truth for cross-checking current state.
+You are operating inside the `algo_trading_final` repository. Before doing any substantive work, read `GEMINI.md` and use it as the primary repo memory. If `AGENTS.md` exists, treat it as parallel repo truth for cross-checking current state.
 
 This repo is a fully autonomous AI trading system with strict safety and truth rules. Follow these rules on every task:
 
 1. Respect repo truth.
-- `CLAUDE.md` and `AGENTS.md` are the system memory.
+- `GEMINI.md` and `AGENTS.md` are the system memory.
 - If code behavior changes, update the relevant memory file(s) and append to `CHANGELOG.md`.
 - Do not invent architecture or claim behavior without reading the source.
 
@@ -18,7 +18,7 @@ This repo is a fully autonomous AI trading system with strict safety and truth r
 - Do not modify a `DO NOT TOUCH` file unless it is clearly required and you can justify it from evidence.
 
 3. Use the repo-local skills.
-- Skill library: `claude/skills/`
+- Skill library: `gemini/skills/`
 - Match the task to the closest skill before acting.
 - If multiple skills apply, use the smallest set that covers the task.
 - Current skills:
@@ -59,20 +59,20 @@ This repo is a fully autonomous AI trading system with strict safety and truth r
 - Avoid fluff.
 
 Task routing:
-- If the user asks for a bugfix or patch, use `claude/skills/paper-trading-hotfix.md`.
-- If the user asks why a trade, entry, exit, or loss happened, use `claude/skills/trade-forensics.md`.
-- If the user asks whether a change is verified or safe, use `claude/skills/proof-first-validation.md`.
-- If the user reports dashboard inconsistency, wrong metrics, missing counts, or widget failures, use `claude/skills/dashboard-debug.md`.
-- If the task touches attribution, trade_features, ML snapshots, contaminated data, integrity exclusions, or Bayesian learning stats, use `claude/skills/learning-integrity-audit.md`.
-- If the user asks whether the system is ready, healthy, stable, or close to go-live, use `claude/skills/release-readiness-check.md`.
+- If the user asks for a bugfix or patch, use `gemini/skills/paper-trading-hotfix.md`.
+- If the user asks why a trade, entry, exit, or loss happened, use `gemini/skills/trade-forensics.md`.
+- If the user asks whether a change is verified or safe, use `gemini/skills/proof-first-validation.md`.
+- If the user reports dashboard inconsistency, wrong metrics, missing counts, or widget failures, use `gemini/skills/dashboard-debug.md`.
+- If the task touches attribution, trade_features, ML snapshots, contaminated data, integrity exclusions, or Bayesian learning stats, use `gemini/skills/learning-integrity-audit.md`.
+- If the user asks whether the system is ready, healthy, stable, or close to go-live, use `gemini/skills/release-readiness-check.md`.
 
 Default operating sequence:
-1. Read `CLAUDE.md`.
-2. Read the most relevant skill file(s) in `claude/skills/`.
+1. Read `GEMINI.md`.
+2. Read the most relevant skill file(s) in `gemini/skills/`.
 3. Inspect the relevant code and evidence.
 4. Make the smallest correct change or answer.
 5. Verify truthfully.
-6. Update `CLAUDE.md` / `AGENTS.md` if system behavior changed.
+6. Update `GEMINI.md` / `AGENTS.md` if system behavior changed.
 7. Append `CHANGELOG.md`.
 
 When answering, use this structure unless the task is trivial:

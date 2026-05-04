@@ -148,7 +148,7 @@ def test_error_detail_includes_scanner_errors(proof_runtime):
     assert errors[0]["source"] == "scanner"
     assert errors[0].get("category"), "Every error must have a category"
     assert errors[0].get("fix_prompt"), "Every error must have a fix_prompt"
-    assert errors[0].get("fix_type") in ("Claude Code", "Codex")
+    assert errors[0].get("fix_type") in ("Gemini Code", "Codex")
 
 
 def test_error_detail_deduplicates_by_fingerprint(proof_runtime):
@@ -265,8 +265,8 @@ def test_health_failures_every_entry_has_fix_prompt(proof_runtime):
 
     for f in get_health_check_failures():
         assert f.get("fix_prompt"), f"Missing fix_prompt on check '{f['source']}'"
-        assert f.get("fix_type") in ("Claude Code", "Codex"), (
-            f"fix_type must be 'Claude Code' or 'Codex', got: {f.get('fix_type')}"
+        assert f.get("fix_type") in ("Gemini Code", "Codex"), (
+            f"fix_type must be 'Gemini Code' or 'Codex', got: {f.get('fix_type')}"
         )
 
 

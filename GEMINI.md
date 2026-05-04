@@ -1,6 +1,6 @@
-# CLAUDE.md — Claude Code Companion
+# GEMINI.md — Gemini CLI Companion
 
-This file is a concise companion for Claude-facing workflows.
+This file is a concise companion for Gemini-facing workflows.
 
 ## Read Order
 
@@ -20,7 +20,7 @@ If this file ever conflicts with `AGENTS.md`, `AGENTS.md` wins.
 - Canonical live-launch path: `python3 scripts/go_live.py`
 - Canonical return-to-paper path: `python3 scripts/go_paper.py`
 
-## What Claude Should Assume
+## What Gemini Should Assume
 
 - Broker truth is canonical for live spot holdings.
 - `runtime/spot_position_truth.py` is the first-class truth layer for open exposure.
@@ -29,7 +29,7 @@ If this file ever conflicts with `AGENTS.md`, `AGENTS.md` wins.
 - `maker_first` is the only default live route.
 - Dormant lanes remain in-repo but are not authoritative for live spot readiness or health.
 
-## What Claude Should Not Assume
+## What Gemini Should Not Assume
 
 - Do not assume old `7/7 readiness` language is still valid.
 - Do not assume older multi-lane control surfaces reflect current truth.
@@ -60,7 +60,7 @@ If this file ever conflicts with `AGENTS.md`, `AGENTS.md` wins.
 
 ## Support-Surface Rule
 
-When editing Claude helper surfaces:
+When editing Gemini helper surfaces:
 - point them at `AGENTS.md` first
 - keep them aligned to the spot truth-lane contract
 - prefer concise operator truth over historical detail

@@ -4,7 +4,7 @@ Use this skill when the user asks why a trade happened, why it lost, why it exit
 
 ## Read First
 1. `AGENTS.md`
-2. `CLAUDE.md`
+2. `GEMINI.md`
 3. likely trade-path modules
 4. relevant DB tables and event logs
 

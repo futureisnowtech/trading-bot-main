@@ -8,7 +8,7 @@ All notable changes to The King's Algo Trading System.
 - v18.16: classify broker-normalized staked ETH as durable `external_manual`, keep ADA as ignored manual dust while removing the stale mixed-mode `spot_ada` live open-position row, add a fail-closed live invariant that halts if a paper-style spot order artifact reaches `open_spot()`, and normalize runtime/readiness rows so spot audits reflect current truth instead of legacy `READY` / `OPERATIONAL` state.
 
 ## 2026-04-30
-- v18.15: align support surfaces to the Coinbase spot truth-lane contract — make `AGENTS.md` the canonical repo memory, shrink `CLAUDE.md` into a companion file, rewrite active brain notes around broker-canonical spot truth / tiny-live / TradingView `monitor_only`, archive legacy open questions, rewrite Claude command-agent-skill surfaces for the spot truth-lane, replace old readiness scripts with spot runtime audits, and expand hook reminders/tests around controlled launch and runtime-truth files.
+- v18.15: align support surfaces to the Coinbase spot truth-lane contract — make `AGENTS.md` the canonical repo memory, shrink `GEMINI.md` into a companion file, rewrite active brain notes around broker-canonical spot truth / tiny-live / TradingView `monitor_only`, archive legacy open questions, rewrite Gemini command-agent-skill surfaces for the spot truth-lane, replace old readiness scripts with spot runtime audits, and expand hook reminders/tests around controlled launch and runtime-truth files.
 
 ## 2026-04-30
 - v18.14: implement the Coinbase spot truth-lane refactor and tiny-live readiness hardening — add `runtime/spot_position_truth.py` plus `spot_holding_classifications`, make broker spot holdings canonical for dashboard/runtime/readiness counts, hide dormant lanes from live control surfaces, move TradingView to `monitor_only`, tighten live spot governance (`CHOP` blocked, `pullback_reclaim` quarantined, maker-only, precision/micro exit profiles, harsher score/frame/confirm floors), harden spot close reconciliation so residual live inventory is re-persisted instead of silently deleted, switch `go_live.py` to spot-broker + truth-blocker preflight, update spot health/kill-switch checks to be lane-specific, and add proof coverage for broker-truth rendering, external/manual blocking, residual-close persistence, truth-gated health, and truth-gated launch.
@@ -70,7 +70,7 @@ All notable changes to The King's Algo Trading System.
 - feat(spot): strip hardcoded edge_conditions, add self-calibrating spot_edge_calibrator
 
 ## 2026-04-27
-- fix(audit): close 2026-04-26 self-audit work queue — JWT fix for product_book 401 (maker orders now receive real bid/ask), candidate labeler emits system_events, trade_blocked_reason populated from decision fallback (42% unknown → labeled), log rotation script, CLAUDE.md EV tier + SPOT_TARGET_R drift corrected
+- fix(audit): close 2026-04-26 self-audit work queue — JWT fix for product_book 401 (maker orders now receive real bid/ask), candidate labeler emits system_events, trade_blocked_reason populated from decision fallback (42% unknown → labeled), log rotation script, GEMINI.md EV tier + SPOT_TARGET_R drift corrected
 
 ## 2026-04-26
 - fix(spot_engine): reconcile broker qty before sell to prevent INSUFFICIENT_FUND loop — when DB qty > actual Coinbase balance, close_spot now fetches live holdings and uses min(db_qty, actual_qty). Stopped a 39h/5803-error XRP exit loop. Also auto-remediated 10 stale brain AUTO-ALERTs from 2026-03-25 through 2026-04-25.
@@ -238,10 +238,10 @@ All notable changes to The King's Algo Trading System.
 - fix(go_live): add ROOT to sys.path before coinbase_broker import; live trading started 2026-04-15
 
 ## 2026-04-15
-- feat(launch): add controlled live launch workflow — mode-aware boot.py, go_live.py/go_paper.py transitions, hook allowlist for sanctioned mode changes, docs/tests updated so Claude can use a single safe live path
+- feat(launch): add controlled live launch workflow — mode-aware boot.py, go_live.py/go_paper.py transitions, hook allowlist for sanctioned mode changes, docs/tests updated so Gemini can use a single safe live path
 
 ## 2026-04-15
-- chore(docs): update CLAUDE.md + CHANGELOG for v15.5 dashboard error fixes
+- chore(docs): update GEMINI.md + CHANGELOG for v15.5 dashboard error fixes
 
 ## 2026-04-15
 - fix(health,stagnant): fix 3 root causes — schedule isolation for forecast daemon, error rate filter in dashboard, live peak_price in stagnant check
@@ -256,7 +256,7 @@ All notable changes to The King's Algo Trading System.
 - chore(repo): stop tracking generated .version file so post-commit dashboard stamp no longer leaves the repo dirty after every commit
 
 ## 2026-04-15
-- fix(truth): close final truth-closure gaps — tilde Desktop pattern + .md scan in truth gate; pre-commit hardened with repo_truth_gate.py --fast; post_cmd_logger env-override + CLAUDE_PROJECT_DIR; settings.json CLAUDE_PROJECT_DIR hook paths; stale 7497 eliminated from CLAUDE.md/AGENTS.md/dashboard fallback; 6 new proof tests (237 total)
+- fix(truth): close final truth-closure gaps — tilde Desktop pattern + .md scan in truth gate; pre-commit hardened with repo_truth_gate.py --fast; post_cmd_logger env-override + CLAUDE_PROJECT_DIR; settings.json CLAUDE_PROJECT_DIR hook paths; stale 7497 eliminated from GEMINI.md/AGENTS.md/dashboard fallback; 6 new proof tests (237 total)
 
 ## 2026-04-15
 - fix(truth): eliminate Desktop-path coupling in hooks/scripts/CI — repo_truth_gate.py, 18-file path fix, BLOCK 1b live-start policy, 231 proof tests
@@ -265,7 +265,7 @@ All notable changes to The King's Algo Trading System.
 - fix(runtime): heartbeat wiring, active_lanes population, audit improvements
 
 ## 2026-04-15
-- feat(runtime): v15.2 expanded proof tests, CLAUDE.md/AGENTS.md updated to v15.2
+- feat(runtime): v15.2 expanded proof tests, GEMINI.md/AGENTS.md updated to v15.2
 
 ## 2026-04-15
 - feat(runtime): v15.2 runtime truth layer, lane registry, incident model, allocator scaffold
@@ -334,7 +334,7 @@ All notable changes to The King's Algo Trading System.
 - v13.7: autonomous journaling operationalization — 15m labeling, exception-only notifications, funnel analytics, retention pruning, dashboard health panel, CI fix, proof suite 25/25 green
 
 ## 2026-04-13
-- feat(dashboard): error breakdown panel with classified fix prompts — dashboard/data/health.py adds get_recent_errors_detail() (groups errors by source+fingerprint, classifies into 8 categories, assigns Claude Code vs Codex fix prompt per group); status_hero.py renders expandable error panel below status banner showing category, source badge, fix-type badge, message excerpt, and copyable fix prompt via st.code()
+- feat(dashboard): error breakdown panel with classified fix prompts — dashboard/data/health.py adds get_recent_errors_detail() (groups errors by source+fingerprint, classifies into 8 categories, assigns Gemini Code vs Codex fix prompt per group); status_hero.py renders expandable error panel below status banner showing category, source badge, fix-type badge, message excerpt, and copyable fix prompt via st.code()
 
 ## 2026-04-13
 - feat(learning): candidate journaling + automated outcome labeling (v13.6) — scan_candidates table, candidate_outcomes table, background labeler, nightly audit
@@ -464,7 +464,7 @@ Phase 4 — Widget architecture: 14 widget files under dashboard/widgets/ — ea
 - fix(dashboard): open positions — live prices via Kraken+HL, unrealized P&L, color-coded rows; fix balance NULL-source filter; fix Styler .hide() crash
 
 ## 2026-04-04
-- chore: full pre-live cleanup — delete legacy/, purge stale DB, remove dead telegram/bybit/webull code, update CLAUDE.md
+- chore: full pre-live cleanup — delete legacy/, purge stale DB, remove dead telegram/bybit/webull code, update GEMINI.md
 
 ## 2026-04-04
 - fix(perps_engine): restore positions from SQLite on startup; fix(v10_runner): 2-hr cooldown after close prevents thesis-exit churn; SQLite guard on entry prevents post-restart double-entry
@@ -530,7 +530,7 @@ Phase 4 — Widget architecture: 14 widget files under dashboard/widgets/ — ea
 - feat(ml): activate 57-feature ML tower — trade_features table stores full feature snapshots per entry; walk_forward_trainer joins snapshots for real 57-col training; perps_engine threads trade_id back to v10_runner; proxy fallback preserved until MIN_TRADES snapshots accumulate
 
 ## 2026-04-03
-- refactor(cleanup): v10.1 repo cleanup — move v9 files to legacy/, fix stale telegram imports, rewrite CLAUDE.md to v10 truth
+- refactor(cleanup): v10.1 repo cleanup — move v9 files to legacy/, fix stale telegram imports, rewrite GEMINI.md to v10 truth
 
 ## 2026-04-03
 - fix(CRITICAL wae-churn): add 10-minute minimum hold before thesis invalidation can fire — wae_explosion was entering and exiting within 30 seconds every 5-min cycle (~20x on PF_TAOUSD today) because WAE bullish flag is a single-bar event that goes false on the next bar; position_manager now skips thesis check until entry_ts + 600s
@@ -550,7 +550,7 @@ Phase 4 — Widget architecture: 14 widget files under dashboard/widgets/ — ea
 - **fix(scanner)**: complete rewrite to Kraken Futures public REST API — removes Bybit V5 (geo-blocked for US residents). Replaces with `futures.kraken.com` public endpoints: `/derivatives/api/v3/tickers` for universe (21 liquid PF_ perps), `/api/charts/v1/trade/{symbol}/{interval}` for OHLCV, `/derivatives/api/v3/orderbook` for depth. No API key required. All endpoints verified working from US IP. BTC symbol is `PF_XBTUSD`. Round-trip fee updated to 0.13% (Kraken taker). Uses stdlib `urllib` only.
 - **delete(bybit_broker)**: `execution/bybit_broker.py` removed — Bybit not viable for US users.
 - **fix(main.py)**: banner updated — "Bybit USDT perps" → "Kraken Futures perps".
-- **fix(CLAUDE.md)**: data source updated — Bybit V5 REST → Kraken Futures public REST.
+- **fix(GEMINI.md)**: data source updated — Bybit V5 REST → Kraken Futures public REST.
 
 ## 2026-04-02 — LIVE-READINESS OVERHAUL (full audit + implementation)
 
@@ -746,15 +746,15 @@ Phase 4 — Widget architecture: 14 widget files under dashboard/widgets/ — ea
   - `risk/drawdown_controller.py`: daily loss gate + fee drag gate
   - `risk/risk_limits.py`: market hours, position limits, deployment cap, crypto fee gate; RiskCheckResult moved here
   - `risk/var_calculator.py`: historical simulation VaR (95/99% confidence) — new capability
-- **MCP server** (`mcp_server/server.py`): 15 FastMCP tools expose full bot state to Claude Code
+- **MCP server** (`mcp_server/server.py`): 15 FastMCP tools expose full bot state to Gemini Code
   - Tools: positions, trades, signals, agent accuracy, ML signal, price history, macro, scan, debate, backtest, readiness, notifications
   - Start: `python3 mcp_server/server.py`
-- **Claude Code agents** (`.claude/agents/`): portfolio_manager, trade_strategist, devil_advocate, system_engineer
-- **Claude Code commands** (`.claude/commands/`): /health, /audit, /deploy, /optimize, /build-strategy
+- **Gemini Code agents** (`.gemini/agents/`): portfolio_manager, trade_strategist, devil_advocate, system_engineer
+- **Gemini Code commands** (`.gemini/commands/`): /health, /audit, /deploy, /optimize, /build-strategy
 - **Test suite** (`tests/`): test_indicators.py, test_risk_manager.py, test_broker_paper.py (~25 tests total)
 - **GitHub**: Repository futureisnowtech/trading-bot-main live; SSH push configured; pre-commit validation hook active
 - **Dead code removed**: webull_broker.py deleted; bybit_broker.py deleted; scripts/generate_system_html.py removed
-- **CLAUDE.md**: Updated to v9.0 with project structure, GitHub section, Sprint 1 changes
+- **GEMINI.md**: Updated to v9.0 with project structure, GitHub section, Sprint 1 changes
 
 ## 2026-03-26
 - v8.1: auto_env_updater.py — automatic ML threshold + position size progression via launchd every 6h
@@ -990,7 +990,7 @@ The math signal scoring now feeds the AI as rich context rather than deciding fo
 - Added `scripts/com.algotrading.readiness.plist` — runs readiness check at 7:00 AM daily
 - Added `scripts/install_services.sh` — one-command launchd setup
 - Added `scripts/log_change.sh` — helper to prepend entries to this file
-- Updated `CLAUDE.md` to document all new infrastructure
+- Updated `GEMINI.md` to document all new infrastructure
 - Updated `.gitignore` to exclude backup dirs and service logs
 
 ---
@@ -1008,7 +1008,7 @@ The math signal scoring now feeds the AI as rich context rather than deciding fo
 ---
 
 _To add an entry: `bash scripts/log_change.sh "Description of change"`_
-_Claude should update this file (and CLAUDE.md) whenever project files are modified._
+_Gemini should update this file (and GEMINI.md) whenever project files are modified._
 ## 2026-04-21 (v17.2) — Spot Session Pivot + SOL/XRP Expansion
 - **config.py**: expanded `SPOT_SYMBOLS` default to `BTC,ETH,SOL,XRP`; added weekday/session entry controls (`SPOT_WEEKDAYS_ONLY`, `SPOT_ENTRY_START_TIME`, `SPOT_ENTRY_END_TIME`), config-backed thesis hold/score knobs, and moved default spot target to `2.0R` for faster intraday capital recycling.
 - **runtime/spot_session.py** (NEW): canonical ET session gate for autonomous spot entries so the lane trades like a real weekday intraday strategy instead of a 24/7 swing lane with only EOD flatten.

@@ -4,13 +4,13 @@ Use this skill for the default bugfix workflow, especially when the task touches
 
 ## Read First
 1. `AGENTS.md`
-2. `CLAUDE.md`
+2. `GEMINI.md`
 3. directly affected modules
 4. relevant `tests/proof/`
 
 ## Rules
 - Prefer the actual active spot path over dormant/reference code.
 - Update `AGENTS.md` when runtime truth changes.
-- Update `CLAUDE.md` when Claude-facing workflow truth changes.
+- Update `GEMINI.md` when Gemini-facing workflow truth changes.
 - Never contaminate the runtime DB during testing.
 

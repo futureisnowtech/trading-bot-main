@@ -275,7 +275,7 @@ references/            ← methodology docs, backtesting standards
    adopt given our CLAUDE.md already does this manually.
 
 **Specific things to copy/adapt:**
-- `~/reference_repos/cbt-framework/commands/` → create `.claude/commands/` in our project with `backtest.md`, `deploy.md`, `audit.md` etc.
+- `~/reference_repos/cbt-framework/commands/` → create `.gemini/commands/` in our project with `backtest.md`, `deploy.md`, `audit.md` etc.
 - `~/reference_repos/cbt-framework/templates/` → reference for Bybit deployment template
 - Session handoff pattern → extend `brain/` directory with structured handoff files
 
@@ -728,7 +728,7 @@ This repo was listed as a reference. Re-run analysis when SSH access is restored
 
 **Action:** Build `mcp_server/server.py` using FastMCP. Start with 15 tools covering our
 existing capabilities (get_positions, get_trades, run_backtest, get_signal_stats, etc.).
-Add `.claude/commands/` directory for reproducible workflows.
+Add `.gemini/commands/` directory for reproducible workflows.
 
 ---
 
@@ -779,7 +779,7 @@ Add `.claude/commands/` directory for reproducible workflows.
 
 ## Priority Order for Adoption
 
-1. **MCP server** (`trading_skills` FastMCP pattern) — enables Claude Code control
+1. **MCP server** (`trading_skills` FastMCP pattern) — enables Gemini control
 2. **Lane 3 connector** (Polymarket bot connectors) — new revenue source, zero conflict with existing system
 3. **Risk decomposition** (algorithmic-trading-bot `src/risk/`) — fixes our monolith
 4. **Options layer** (claude-trading-skills + trading_skills) — unblocks Lane 1

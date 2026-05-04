@@ -1,7 +1,7 @@
 # HISTORICAL REFERENCE — v10.0 Architecture Design Doc
 
 > **This document captures the v10.0 initial design (2026-04-01).**
-> The current live system is **v15.2** (2026-04-15). See CLAUDE.md for current truth.
+> The current live system is **v15.2** (2026-04-15). See GEMINI.md for current truth.
 >
 > Key things that changed since this doc was written:
 > - Live execution venue: was Binance USDM → now **Coinbase US CFTC nano perp futures** (`coinbase_broker.py`)

@@ -422,7 +422,7 @@ def _bottom_bar(d: dict) -> list:
     parts = [
         f"{DIM}{ts}{RST}",
         f"equity_momentum + crypto_macd_consensus",
-        f"Claude API: ${cost:.4f}/mo",
+        f"Gemini API: ${cost:.4f}/mo",
         f"EQ scan: {EQUITY_SCAN_INTERVAL_SECONDS}s  CR scan: {CRYPTO_SCAN_INTERVAL_SECONDS}s",
         f"{DIM}Press Ctrl+C to stop{RST}",
     ]

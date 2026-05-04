@@ -1,9 +1,9 @@
 #!/bin/bash
 # ─────────────────────────────────────────────────────────────────────────────
 # stop_auto_commit.sh  —  LAYER D: Guarded Auto-Commit
-# Stop hook  |  always exits 0 (never prevents Claude from stopping)
+# Stop hook  |  always exits 0 (never prevents Gemini from stopping)
 # ─────────────────────────────────────────────────────────────────────────────
-# Runs when Claude finishes a response. Guards:
+# Runs when Gemini finishes a response. Guards:
 #   1. Nothing to commit → skip silently
 #   2. Dangerous files (credentials, DBs, logs, plists) detected → warn, skip
 #   3. Syntax errors in changed .py files → warn, skip
@@ -11,7 +11,7 @@
 #   5. Safe → auto-commit + push to current branch (never main/master)
 #
 # Does NOT commit:
-#   .env, *.db, *.db-shm, *.db-wal, logs/, *.plist, .claude/logs/
+#   .env, *.db, *.db-shm, *.db-wal, logs/, *.plist, .gemini/logs/
 # ─────────────────────────────────────────────────────────────────────────────
 
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
@@ -42,7 +42,7 @@ fi
 # ── DANGEROUS FILE SCAN ──────────────────────────────────────────────────────
 DANGEROUS_FOUND=0
 for f in $CHANGED_ALL $UNTRACKED; do
-    if echo "$f" | grep -qE '\.env$|\.db$|\.db-shm$|\.db-wal$|^logs/|\.plist$|\.claude/logs/'; then
+    if echo "$f" | grep -qE '\.env$|\.db$|\.db-shm$|\.db-wal$|^logs/|\.plist$|\.gemini/logs/'; then
         echo "[auto-commit] SKIP: dangerous file detected: $f" >&2
         DANGEROUS_FOUND=1
     fi
@@ -87,7 +87,7 @@ for f in $CHANGED_ALL $UNTRACKED; do
     # Skip empty entries
     [ -z "$f" ] && continue
     # Skip dangerous patterns
-    echo "$f" | grep -qE '\.env$|\.db$|\.db-shm$|\.db-wal$|^logs/|\.plist$|\.claude/logs/' && continue
+    echo "$f" | grep -qE '\.env$|\.db$|\.db-shm$|\.db-wal$|^logs/|\.plist$|\.gemini/logs/' && continue
     # Skip if file doesn't exist
     [ -f "$f" ] || continue
     SAFE_FILES="$SAFE_FILES $f"
@@ -100,7 +100,7 @@ fi
 
 # ── DETERMINE COMMIT AREAS ────────────────────────────────────────────────────
 AREAS=$(echo "$SAFE_FILES" | tr ' ' '\n' | \
-    grep -oE '(hooks|scanner|signal_engine|position_manager|risk|ml|learning|dashboard|tests|scripts|indicators|execution|notifications|\.claude|CHANGELOG|CLAUDE)' | \
+    grep -oE '(hooks|scanner|signal_engine|position_manager|risk|ml|learning|dashboard|tests|scripts|indicators|execution|notifications|\.gemini|CHANGELOG|GEMINI)' | \
     sort -u | tr '\n' ',' | sed 's/,$//')
 [ -z "$AREAS" ] && AREAS="misc"
 
@@ -113,11 +113,11 @@ if [ -z "$STAGED" ]; then
     exit 0
 fi
 
-COMMIT_MSG="auto($AREAS): $(date '+%Y-%m-%d %H:%M') — Claude Code session
+COMMIT_MSG="auto($AREAS): $(date '+%Y-%m-%d %H:%M') — Gemini Code session
 
 Files: $(echo "$STAGED" | tr '\n' ' ' | sed 's/ $//')
 
-Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
+Co-Authored-By: Gemini <noreply@google.com>"
 
 git commit -m "$COMMIT_MSG" 2>&1 | tail -2 >&2
 

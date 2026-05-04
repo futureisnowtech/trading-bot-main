@@ -94,7 +94,7 @@ Max additional conviction from Tier 2b: **72 pts**
 
 | Param | Value |
 |-------|-------|
-| CLAUDE_MODEL | claude-sonnet-4-6 |
+| GEMINI_MODEL | claude-sonnet-4-6 |
 | DEBATE_MAX_TOKENS | 700 |
 | EXIT_REVIEW_MAX_TOKENS | 1500 |
 | MODERATOR_MAX_TOKENS | 900 |

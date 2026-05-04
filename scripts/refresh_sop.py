@@ -50,7 +50,7 @@ def _extract_version() -> str:
         re.compile(r"Canonical version:\s*(v[0-9]+(?:\.[0-9]+)+)"),
         re.compile(r"Current version:\s*(v[0-9]+(?:\.[0-9]+)+)"),
     )
-    for candidate in (ROOT / "AGENTS.md", ROOT / "CLAUDE.md"):
+    for candidate in (ROOT / "AGENTS.md", ROOT / "GEMINI.md"):
         try:
             text = candidate.read_text(encoding="utf-8")
         except OSError:

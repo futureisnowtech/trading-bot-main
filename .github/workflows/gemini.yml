@@ -1,16 +1,16 @@
-name: Claude Code
+name: Gemini Code
 
-# Trigger when someone comments "/claude <task>" on an issue or PR.
-# Claude will run in the repo context, apply the task, and reply with results.
+# Trigger when someone comments "/gemini <task>" on an issue or PR.
+# Gemini will run in the repo context, apply the task, and reply with results.
 #
 # Required secrets (set in repo Settings → Secrets → Actions):
 #   ANTHROPIC_API_KEY — your Anthropic API key
 #
 # Usage:
 #   On any issue or PR, post a comment:
-#     /claude explain why the economics gate veto rate is high
-#     /claude run the proof suite and report failures
-#     /claude update the CHANGELOG for the last commit
+#     /gemini explain why the economics gate veto rate is high
+#     /gemini run the proof suite and report failures
+#     /gemini update the CHANGELOG for the last commit
 
 on:
   issue_comment:
@@ -20,13 +20,13 @@ on:
 
 jobs:
   claude:
-    # Only run when the comment starts with /claude and the actor has write access
+    # Only run when the comment starts with /gemini and the actor has write access
     if: |
       (github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment') &&
-      startsWith(github.event.comment.body, '/claude')
+      startsWith(github.event.comment.body, '/gemini')
     runs-on: ubuntu-latest
     permissions:
-      contents: read        # read repo only — Claude uses read-only tools
+      contents: read        # read repo only — Gemini uses read-only tools
       pull-requests: write  # post comments on PRs
       issues: write         # post comments on issues
 
@@ -36,12 +36,12 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Run Claude Code
+      - name: Run Gemini Code
         uses: anthropics/claude-code-action@beta
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          # Strip the "/claude " prefix so Claude receives just the task
+          # Strip the "/gemini " prefix so Gemini receives just the task
           prompt: ${{ github.event.comment.body }}
           # Only allow read-only operations (no auto-push) via this trigger.
-          # Claude will post its answer as a comment, not commit code.
+          # Gemini will post its answer as a comment, not commit code.
           allowed_tools: "Bash(git log:*),Bash(git diff:*),Bash(git status:*),Bash(python3:*),Bash(pytest:*),Read,Glob,Grep"

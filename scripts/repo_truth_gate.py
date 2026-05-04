@@ -57,7 +57,7 @@ SKIP_FILES: set[str] = {
 
 # Active file extensions to scan
 # .md is included to catch Desktop references in instruction surfaces
-# (.claude/commands/, .claude/agents/, AGENTS.md, CLAUDE.md)
+# (.gemini/commands/, .gemini/agents/, AGENTS.md, GEMINI.md)
 ACTIVE_EXTS: set[str] = {".py", ".sh", ".json", ".yml", ".yaml", ".md"}
 
 # ── CI config requirements ────────────────────────────────────────────────────
@@ -117,8 +117,8 @@ def _should_scan(path: Path) -> bool:
         rel_parts = path.relative_to(_ROOT).parts
     except ValueError:
         return False
-    # Skip hidden claude logs subdir specifically
-    if ".claude" in rel_parts and "logs" in rel_parts:
+    # Skip hidden gemini logs subdir specifically
+    if ".gemini" in rel_parts and "logs" in rel_parts:
         return False
     if set(rel_parts) & SKIP_DIRS:
         return False
@@ -153,7 +153,7 @@ def check_desktop_paths(files: list[Path]) -> list[str]:
 def check_hook_dynamic_root(files: list[Path]) -> list[str]:
     """Fail if any hook script uses a hardcoded absolute REPO_ROOT/REPO var."""
     failures: list[str] = []
-    hooks_dir = _ROOT / ".claude" / "hooks"
+    hooks_dir = _ROOT / ".gemini" / "hooks"
     for path in files:
         try:
             in_hooks = hooks_dir in path.parents or path.parent == hooks_dir

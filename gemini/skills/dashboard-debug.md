@@ -4,7 +4,7 @@ Use this skill for Streamlit dashboard bugs, confusing metrics, missing counts, 
 
 ## Read First
 1. `AGENTS.md`
-2. `CLAUDE.md`
+2. `GEMINI.md`
 3. `dashboard/app.py`
 4. relevant `dashboard/data/*`
 5. relevant widget modules

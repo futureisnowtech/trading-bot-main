@@ -14,7 +14,7 @@
 #   Non-core files — format + full ruff check output
 #
 # Skips: protected paths (.env, *.db, logs/, .git/) — defence-in-depth guard
-# Never blocks. Output is informational to Claude.
+# Never blocks. Output is informational to Gemini.
 # ─────────────────────────────────────────────────────────────────────────────
 
 INPUT=$(cat)
@@ -34,7 +34,7 @@ fi
 
 # ── GUARD: skip protected/runtime paths (defence-in-depth) ─────────────────
 # pre_edit_protector.sh already blocks writes to these, but guard here too.
-if echo "$FILE" | grep -qE '\.env$|\.db$|/logs/|/\.git/|\.plist$|\.claude/logs/'; then
+if echo "$FILE" | grep -qE '\.env$|\.db$|/logs/|/\.git/|\.plist$|\.gemini/logs/'; then
     exit 0
 fi
 

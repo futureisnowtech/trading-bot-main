@@ -3,7 +3,7 @@
 # pre_bash_blocker.sh  —  LAYER A: Dangerous Command Blocker + PR Gate
 # PreToolUse/Bash  |  exit 2 = block, exit 0 = allow
 # ─────────────────────────────────────────────────────────────────────────────
-# Reads Claude Code hook JSON from stdin. Extracts the bash command and
+# Reads Gemini Code hook JSON from stdin. Extracts the bash command and
 # checks it against a deny-list of patterns that are dangerous in a
 # live-capable quantitative trading repo.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -24,7 +24,7 @@ fi
 
 # ════════════════════════════════════════════════════════════════════════════
 # ALLOW: CONTROLLED MODE-TRANSITION SCRIPTS
-# Claude may use ONLY these exact repo-local wrappers for mode changes.
+# Gemini may use ONLY these exact repo-local wrappers for mode changes.
 # They embed the policy checks and avoid ad hoc live-start commands.
 # ════════════════════════════════════════════════════════════════════════════
 if echo "$CMD" | grep -qE '^[[:space:]]*python3([[:space:]]+-B)?[[:space:]]+(.*/)?scripts/go_(live|paper)\.py[[:space:]]*$'; then
@@ -32,7 +32,7 @@ if echo "$CMD" | grep -qE '^[[:space:]]*python3([[:space:]]+-B)?[[:space:]]+(.*/
 fi
 
 # ════════════════════════════════════════════════════════════════════════════
-# BLOCK 1: LIVE TRADING — never run live mode from Claude
+# BLOCK 1: LIVE TRADING — never run live mode from Gemini
 # ════════════════════════════════════════════════════════════════════════════
 if echo "$CMD" | grep -qE -- '--mode live'; then
     echo "BLOCKED [LIVE-RISK]: '--mode live' detected." >&2
@@ -44,7 +44,7 @@ fi
 # ════════════════════════════════════════════════════════════════════════════
 # BLOCK 1b: IMPLICIT LIVE START — stdin-pipe bypass of --mode live
 # Blocks "echo 'I UNDERSTAND' | python3 main.py" which implicitly starts
-# live trading when PAPER_TRADING=false is in .env. Claude must never
+# live trading when PAPER_TRADING=false is in .env. Gemini must never
 # initiate a live-start regardless of how it's invoked.
 # Live trading must be started by the owner directly in a terminal.
 # ════════════════════════════════════════════════════════════════════════════

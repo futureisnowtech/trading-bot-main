@@ -4,7 +4,7 @@ Use this skill whenever a task involves verification, testing, safety claims, or
 
 ## Read First
 1. `AGENTS.md`
-2. `CLAUDE.md`
+2. `GEMINI.md`
 3. touched files
 4. relevant `tests/proof/`
 

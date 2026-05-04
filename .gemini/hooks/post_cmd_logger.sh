@@ -3,8 +3,8 @@
 # post_cmd_logger.sh  —  LAYER C: Bash Command Logger
 # PostToolUse/Bash  |  always exits 0 (never blocks)
 # ─────────────────────────────────────────────────────────────────────────────
-# Appends a timestamped record of every Bash command Claude runs to
-# .claude/logs/commands.log — gitignored, so never committed.
+# Appends a timestamped record of every Bash command Gemini runs to
+# .gemini/logs/commands.log — gitignored, so never committed.
 # ─────────────────────────────────────────────────────────────────────────────
 
 INPUT=$(cat)
@@ -24,17 +24,17 @@ if [ -z "$CMD" ]; then
 fi
 
 # POST_CMD_LOG_OVERRIDE: env var for test harness isolation — lets test_hooks.sh
-# redirect output to a tmp path without depending on .claude/logs/ existence.
+# redirect output to a tmp path without depending on .gemini/logs/ existence.
 if [ -n "$POST_CMD_LOG_OVERRIDE" ]; then
     LOG_FILE="$POST_CMD_LOG_OVERRIDE"
     LOG_DIR="$(dirname "$LOG_FILE")"
 else
-    # Prefer $CLAUDE_PROJECT_DIR (set by Claude Code for project hooks) for a
+    # Prefer $GEMINI_PROJECT_DIR (set by Gemini Code for project hooks) for a
     # stable absolute path, then fall back to script-relative resolution.
-    if [ -n "$CLAUDE_PROJECT_DIR" ]; then
-        LOG_DIR="$CLAUDE_PROJECT_DIR/.claude/logs"
+    if [ -n "$GEMINI_PROJECT_DIR" ]; then
+        LOG_DIR="$GEMINI_PROJECT_DIR/.gemini/logs"
     else
-        LOG_DIR="$(cd "$(dirname "$0")/../.." && pwd)/.claude/logs"
+        LOG_DIR="$(cd "$(dirname "$0")/../.." && pwd)/.gemini/logs"
     fi
     LOG_FILE="$LOG_DIR/commands.log"
 fi

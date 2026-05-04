@@ -32,23 +32,23 @@ copy or adapt, implementation effort, and priority.
 
 | # | Capability | My Version (v8.0) | Best Reference | Source Repo | Files to Copy / Adapt | Effort | Priority |
 |---|-----------|-------------------|---------------|-------------|----------------------|--------|---------|
-| 1 | **MCP Server** | MISSING — zero MCP tools, no programmatic Claude control | `mcp_server/server.py` FastMCP pattern: 23 tools in ~200 lines; `@mcp.tool()` decorator pattern | `trading_skills` (primary); `Claude_Prophet` (40-tool full example) | `~/reference_repos/trading_skills/mcp_server/server.py` → `mcp_server/server.py`; `~/reference_repos/Claude_Prophet/mcp-server.js` as tool-catalog reference | M | **P0** |
+| 1 | **MCP Server** | MISSING — zero MCP tools, no programmatic Gemini control | `mcp_server/server.py` FastMCP pattern: 23 tools in ~200 lines; `@mcp.tool()` decorator pattern | `trading_skills` (primary); `Gemini_Prophet` (40-tool full example) | `~/reference_repos/trading_skills/mcp_server/server.py` → `mcp_server/server.py`; `~/reference_repos/Gemini_Prophet/mcp-server.js` as tool-catalog reference | M | **P0** |
 | 2 | **Multi-agent debate** | 3-agent debate (Bardock/Vegeta/Krillin), 2/3 BUY = BUY. Quality 8/10. | LangGraph state-machine orchestration with bullish/bearish adversary role | `TradingAgents` | `~/reference_repos/TradingAgents/tradingagents/graph/trading_graph.py` for async graph migration reference | L | P2 |
 | 3 | **Risk management** | Monolithic `risk_manager.py` (527 lines, 1 class, 8 domains). No VaR. No drawdown heat. | 5-file decomposition: `risk_engine.py` + `stop_loss_manager.py` + `drawdown_controller.py` + `position_sizer.py` + `correlation_manager.py` | `algorithmic-trading-bot` (primary); `Fully-Autonomous-Polymarket` `policy/` (15-point pipeline) | `~/reference_repos/algorithmic-trading-bot/src/risk/` → `risk/` directory (5 files); `~/reference_repos/Fully-Autonomous-Polymarket-AI-Trading-Bot/src/policy/risk_limits.py` pattern | M | **P0** |
 | 4 | **Order execution — equity** | `alpaca_broker.py` (353 lines): paper + live equity. No options. Quality 7/10. | Options chain + execution extension; `broker/` pattern from IBKR integration | `trading_skills` | `~/reference_repos/trading_skills/src/trading_skills/broker/` for extension pattern | M | P1 |
-| 5 | **Options trading** | MISSING — no options chain model, no Greeks, no strategy selection, no execution | Full options layer: chain fetch, Greeks, 17 strategies, PMCC scanner, spread analysis, execution via Alpaca options API | `claude-trading-skills` (strategy advisor); `trading_skills` (spreads + PMCC scanner); `Claude_Prophet` (options.go interface spec) | `~/reference_repos/claude-trading-skills/skills/options-strategy-advisor/` → `strategies/ai_agents/options_analyst.py`; `~/reference_repos/trading_skills/src/trading_skills/spreads.py` → `strategies/options_spreads.py`; `~/reference_repos/trading_skills/src/trading_skills/scanner_pmcc.py` → `data/options_screener.py` | L | P1 |
+| 5 | **Options trading** | MISSING — no options chain model, no Greeks, no strategy selection, no execution | Full options layer: chain fetch, Greeks, 17 strategies, PMCC scanner, spread analysis, execution via Alpaca options API | `claude-trading-skills` (strategy advisor); `trading_skills` (spreads + PMCC scanner); `Gemini_Prophet` (options.go interface spec) | `~/reference_repos/claude-trading-skills/skills/options-strategy-advisor/` → `strategies/ai_agents/options_analyst.py`; `~/reference_repos/trading_skills/src/trading_skills/spreads.py` → `strategies/options_spreads.py`; `~/reference_repos/trading_skills/src/trading_skills/scanner_pmcc.py` → `data/options_screener.py` | L | P1 |
 | 6 | **Prediction markets** | MISSING — zero Polymarket/Kalshi code anywhere | Complete Polymarket + Kalshi connector + multi-LLM ensemble + calibration + whale tracking + 15-point risk | `Fully-Autonomous-Polymarket` (critical); `CloddsBot` (multi-market abstraction) | `~/reference_repos/Fully-Autonomous-Polymarket-AI-Trading-Bot/src/connectors/` → `data/polymarket_feed.py` + `execution/polymarket_broker.py`; `src/forecast/` → `strategies/ai_agents/ensemble_forecaster.py` + `learning/forecast_calibrator.py`; `src/analytics/wallet_scanner.py` → `data/whale_tracker.py` | L | P1 |
-| 7 | **Vector memory** | LanceDB + sentence-transformers (~2GB). Demoted to supplemental in v5.0. Quality 4/10. | SQLite 384-dim embedding columns alongside trade metadata — zero extra deps | `Claude_Prophet` | `~/reference_repos/Claude_Prophet/database/storage.go` trade_embeddings table pattern → replace `memory/trade_memory.py` | S | P2 |
-| 8 | **ML / AI layer** | LightGBM gate (19 signal features), Bayesian weights, meta-learner. Quality 7/10. Single LLM (Claude only). | Multi-LLM ensemble (Claude 35% + GPT-4o 40% + Gemini 25%) with per-model Brier score reweighting; offline/online ML split | `Fully-Autonomous-Polymarket` (multi-LLM); `algorithmic-trading-bot` (XGBoost+LSTM+CNN ensemble); `intelligent-trading-bot` (offline/online split) | `~/reference_repos/Fully-Autonomous-Polymarket-AI-Trading-Bot/src/forecast/ensemble.py` → `strategies/ai_agents/ensemble_forecaster.py`; `~/reference_repos/algorithmic-trading-bot/src/models/ensemble/` → upgrade `learning/ml_signal.py` | L | P2 |
-| 9 | **Backtesting** | Walk-forward 2-fold, price archive, strategy validator, OOS spec. Quality 7/10. | Walk-forward + optimization sweep + slash-command workflow | `cbt-framework` | `~/reference_repos/cbt-framework/commands/cbt-optimize.md` → `.claude/commands/optimize.md` | S | P2 |
+| 7 | **Vector memory** | LanceDB + sentence-transformers (~2GB). Demoted to supplemental in v5.0. Quality 4/10. | SQLite 384-dim embedding columns alongside trade metadata — zero extra deps | `Gemini_Prophet` | `~/reference_repos/Gemini_Prophet/database/storage.go` trade_embeddings table pattern → replace `memory/trade_memory.py` | S | P2 |
+| 8 | **ML / AI layer** | LightGBM gate (19 signal features), Bayesian weights, meta-learner. Quality 7/10. Single LLM (Gemini only). | Multi-LLM ensemble (Gemini 60% + GPT-4o 40%) with per-model Brier score reweighting; offline/online ML split | `Fully-Autonomous-Polymarket` (multi-LLM); `algorithmic-trading-bot` (XGBoost+LSTM+CNN ensemble); `intelligent-trading-bot` (offline/online split) | `~/reference_repos/Fully-Autonomous-Polymarket-AI-Trading-Bot/src/forecast/ensemble.py` → `strategies/ai_agents/ensemble_forecaster.py`; `~/reference_repos/algorithmic-trading-bot/src/models/ensemble/` → upgrade `learning/ml_signal.py` | L | P2 |
+| 9 | **Backtesting** | Walk-forward 2-fold, price archive, strategy validator, OOS spec. Quality 7/10. | Walk-forward + optimization sweep + slash-command workflow | `cbt-framework` | `~/reference_repos/cbt-framework/commands/cbt-optimize.md` → `.gemini/commands/optimize.md` | S | P2 |
 | 10 | **Data feeds** | Coinbase WebSocket (solid), yfinance (rate-limited), CryptoPanic (crypto only), Coinglass. No equity L2. | Data vendor abstraction layer — swap providers at config level | `TradingAgents` | `~/reference_repos/TradingAgents/tradingagents/default_config.py` data vendor pattern → extend `config.py` | S | P2 |
 | 11 | **Sentiment** | CryptoPanic (crypto only, -1 to +1). No Reddit. No equity news NLP. No earnings. | Reddit + news dual sentiment pipeline; earnings-call NLP | `algorithmic-trading-bot` | `~/reference_repos/algorithmic-trading-bot/src/sentiment/` → `data/equity_sentiment.py` | M | P1 |
 | 12 | **Notifications** | SQLite system_events table + dashboard panel. Gmail SMTP (slow/unreliable). Misnamed as telegram_alert.py. | Telegram Bot API + Discord webhook + Slack; structlog + Sentry observability | `Fully-Autonomous-Polymarket` `src/observability/` | `~/reference_repos/Fully-Autonomous-Polymarket-AI-Trading-Bot/src/observability/` pattern → replace `alerts/telegram_alert.py` | S | P1 |
 | 13 | **CI/CD** | MISSING — zero tests, no GitHub Actions, no linting, no type checking | GitHub Actions: lint (ruff) + type check (mypy) + test (pytest) on every push | N/A — build from scratch using GHA standard patterns | New: `.github/workflows/ci.yml`; `tests/` directory | M | P1 |
 | 14 | **Crypto futures execution** | `bybit_broker.py` (519 lines, testnet only, pybit v5). Quality 6/10. | CCXT exchange abstraction — one interface, any exchange | `freqtrade` (CCXT usage pattern); `cbt-framework` (Bybit deployment template) | `~/reference_repos/cbt-framework/templates/` Bybit template for deployment; CCXT library directly | M | P1 |
 | 15 | **Forecast calibration** | MISSING — AI confidence scores are uncalibrated numbers. "0.8 confidence" has unknown real win rate. | Platt scaling + historical calibration; ensemble spread penalty; auto-retrains after 30 resolved markets | `Fully-Autonomous-Polymarket` | `~/reference_repos/Fully-Autonomous-Polymarket-AI-Trading-Bot/src/forecast/calibrator.py` → `learning/forecast_calibrator.py` | M | P1 |
-| 16 | **Agent role definitions** | No `.claude/agents/` directory. No standardized agent specs. | `.claude/agents/` YAML definitions; CEO/Strategy/Consultant/Engineer pattern | `Claude_Prophet` | `~/reference_repos/Claude_Prophet/.claude/agents/` → `.claude/agents/` with our agent roles | S | P1 |
-| 17 | **Session context / slash commands** | Manual `brain/` markdown notes. No slash commands. | `.claude/commands/` markdown workflow files; session state YAML persistence | `cbt-framework` | `~/reference_repos/cbt-framework/commands/` → `.claude/commands/` (backtest.md, deploy.md, audit.md, health.md) | S | P2 |
+| 16 | **Agent role definitions** | No `.gemini/agents/` directory. No standardized agent specs. | `.gemini/agents/` YAML definitions; CEO/Strategy/Consultant/Engineer pattern | `Gemini_Prophet` | `~/reference_repos/Gemini_Prophet/.gemini/agents/` → `.gemini/agents/` with our agent roles | S | P1 |
+| 17 | **Session context / slash commands** | Manual `brain/` markdown notes. No slash commands. | `.gemini/commands/` markdown workflow files; session state YAML persistence | `cbt-framework` | `~/reference_repos/cbt-framework/commands/` → `.gemini/commands/` (backtest.md, deploy.md, audit.md, health.md) | S | P2 |
 | 18 | **VaR / portfolio risk** | MISSING — no VaR, no correlation-aware sizing, no drawdown heat system | VaR at 95%/99%; drawdown heat (5 levels: normal → half-size → quarter → pause → halt) | `CloddsBot` | `~/reference_repos/CloddsBot/src/risk/var.ts` → translate to `risk/var_calculator.py`; `src/risk/circuit-breaker.ts` → harden circuit breaker | M | P1 |
 
 ---
@@ -61,11 +61,11 @@ Files to delete from the current project, with justification and replacement.
 |------|-----------|-----------|-----------------|
 | `execution/webull_broker.py` (16 lines) | Dead proxy stub — silently re-exports `AlpacaBroker`. Webull API is 403-blocked. | Misleading: any code importing `WebullBroker` silently gets Alpaca instead. Creates confusion in code reviews, debugging, and agent reasoning. No Webull functionality has worked since v3.7. | Nothing. `AlpacaBroker` is the equity broker. Any import of `WebullBroker` should be updated to `AlpacaBroker` directly. |
 | `webull>=0.3.15` in `requirements.txt` | Package that installs cleanly but all API calls return 403. | Zero functionality. Installs dead weight. Adds to environment setup time. | Remove the line. No replacement needed. |
-| `memory/trade_memory.py` (204 lines) — **conditional** | LanceDB + sentence-transformers vector store. Demoted to "supplemental" in v5.0. | `sentence-transformers` downloads ~2GB of model weights. LanceDB is a heavyweight database engine. The ROI is ~0: the system already has Bayesian weights + meta-learner + ML signal. Replace with SQLite embedding columns (384-dim float arrays) per the Claude_Prophet pattern — same semantic search, zero added deps. | New `memory/trade_memory.py` rewritten to use SQLite `trade_embeddings` table (base64-encoded 384-dim vectors using `numpy` + `struct` — already in our stack). |
+| `memory/trade_memory.py` (204 lines) — **conditional** | LanceDB + sentence-transformers vector store. Demoted to "supplemental" in v5.0. | `sentence-transformers` downloads ~2GB of model weights. LanceDB is a heavyweight database engine. The ROI is ~0: the system already has Bayesian weights + meta-learner + ML signal. Replace with SQLite embedding columns (384-dim float arrays) per the Gemini_Prophet pattern — same semantic search, zero added deps. | New `memory/trade_memory.py` rewritten to use SQLite `trade_embeddings` table (base64-encoded 384-dim vectors using `numpy` + `struct` — already in our stack). |
 | `lancedb>=0.6.0` in `requirements.txt` | LanceDB dependency | Removed with trade_memory.py replacement | Remove line |
 | `sentence-transformers>=2.7.0` in `requirements.txt` | 2GB model downloader | Removed with trade_memory.py replacement | Remove line; lightweight embedding can use `numpy` dot-product search on stored vectors |
 | `dashboard/terminal.py` (498 lines) — **conditional** | Alternate non-Streamlit terminal display. Duplicates logic from `dashboard/app.py`. | Maintenance burden: any dashboard change must be made twice. Usage is near-zero since the Streamlit dashboard is the default. | Delete and accept that the Streamlit dashboard is the single display. If terminal display is desired, add a `--no-dashboard` flag to `main.py` that logs to stdout. |
-| `scripts/generate_system_html.py` (1,001 lines) | 1,001-line script generating a static HTML overview page | Extreme complexity relative to value. Requires updating every time the system structure changes. A static page is always stale. | The Streamlit dashboard + CLAUDE.md serve the same purpose. Delete. |
+| `scripts/generate_system_html.py` (1,001 lines) | 1,001-line script generating a static HTML overview page | Extreme complexity relative to value. Requires updating every time the system structure changes. A static page is always stale. | The Streamlit dashboard + GEMINI.md serve the same purpose. Delete. |
 
 **Summary of removals:** 2 files deleted outright (webull_broker.py, generate_system_html.py), 1 file replaced/rewritten (trade_memory.py), 1 file conditionally deleted (terminal.py), 3 requirements.txt lines removed (webull, lancedb, sentence-transformers).
 
@@ -85,7 +85,7 @@ Files that survive the overhaul unchanged or nearly unchanged.
 | `learning/post_trade_analyzer.py` (265 lines) | 7/10 | Called on every trade close. Structured lesson generation. Wires into both `signal_stats` and `agent_stats`. | Upgrade prompts using `claude-trading-skills/skills/trader-memory-core/` patterns for richer lessons. |
 | `learning/ml_signal.py` (267 lines) | 6/10 | LightGBM gate with sklearn fallback. 19 signal features. Retrains every 50 closes. Clean interface: `get_ml_signal(market_data) -> (p_win, label)`. | Upgrade ensemble (XGBoost + LSTM + CNN) in Sprint 5. The interface stays identical. |
 | `learning/dynamic_weights.py` (188 lines) | 6/10 | 5-min cache, meta-learner delta layer on top of Bayesian weights. Invalidates on trade close. Clean architecture. | No changes needed until Lane 3 adds a new regime type. |
-| `learning/meta_learner.py` (369 lines) | 5/10 | Fires after every 10 trade closes. Claude analyzes last 100 trades. Meta-learning layer catches systematic biases Bayesian priors miss. | No changes. |
+| `learning/meta_learner.py` (369 lines) | 5/10 | Fires after every 10 trade closes. Gemini analyzes last 100 trades. Meta-learning layer catches systematic biases Bayesian priors miss. | No changes. |
 | `strategies/ai_agents/analyst_agents.py` (269 lines) | 7/10 | Clean v8.0 design. 3 non-overlapping domains. Well-named (Bardock/Vegeta/Krillin). The domain separation pattern is the right one. | Add Lane 1 options analyst agent (Bulma: options economics). Add Lane 3 prediction analyst agent. Keep existing 3 for Lane 2. |
 | `strategies/ai_agents/debate_engine.py` (239 lines) | 6/10 | 2/3 BUY = BUY logic is clean. Separates quick and full debate paths. | Parameterize the agent list so Lane 1 and Lane 3 can use different agent sets without forking the engine. |
 | `strategies/ai_agents/exit_review.py` (310 lines) | 7/10 | Extended thinking exits. Tudor Jones / Soros / Simons. Asymmetric design (any one EXIT = exit) is intentional and correct. Tax-aware notes injected. | Lane 3 exit review: different agents appropriate for binary outcome resolution (exits are market-settlement not price-based). Add optional override for Lane 3. |
@@ -117,20 +117,20 @@ Files from reference repos to bring directly into the project.
 - Target: `mcp_server/server.py`
 - Adaptation needed: Replace the 23 trading_skills tools with our own tool set (15 tools at minimum: `get_positions`, `get_open_trades`, `get_signal_stats`, `get_agent_accuracy`, `run_backtest`, `get_price_history`, `get_debate_result`, `place_paper_trade`, `close_position`, `get_daily_summary`, `get_readiness_score`, `get_ml_signal`, `scan_crypto_pairs`, `get_macro_context`, `get_notifications`). Keep the `@mcp.tool()` decorator pattern and FastMCP initialization verbatim.
 - Dependencies: `pip install mcp` + `pip install fastmcp`. Add both to `requirements.txt`.
-- Priority: **P0** — unblocks all Claude Code programmatic control
+- Priority: **P0** — unblocks all Gemini Code programmatic control
 
-**2. Claude Agent Role Definitions**
-- Source: `~/reference_repos/Claude_Prophet/.claude/agents/` (4 agent definitions: CEO, Strategy, Consultant, Engineer)
-- Target: `.claude/agents/` (create directory)
+**2. Gemini Agent Role Definitions**
+- Source: `~/reference_repos/Gemini_Prophet/.gemini/agents/` (4 agent definitions: CEO, Strategy, Consultant, Engineer)
+- Target: `.gemini/agents/` (create directory)
 - Adaptation needed: Rename CEO → `portfolio_manager.md` (portfolio risk, halt decisions), Strategy → `trade_strategist.md` (setup evaluation, signal review), Consultant → `devil_advocate.md` (adversarial review), Engineer → `system_engineer.md` (code changes, bot debugging). Update each agent's domain description to reference our system's actual capabilities. Keep the YAML frontmatter format.
-- Dependencies: None — purely markdown files consumed by Claude Code
+- Dependencies: None — purely markdown files consumed by Gemini Code
 - Priority: P1
 
 **3. Slash-Command Workflows**
 - Source: `~/reference_repos/cbt-framework/commands/` (21 slash commands)
-- Target: `.claude/commands/` (create directory)
+- Target: `.gemini/commands/` (create directory)
 - Adaptation needed: Extract 5 commands relevant to our system: `cbt-build.md` → `build-strategy.md`, `cbt-optimize.md` → `optimize.md`, `cbt-live.md` → `deploy.md`, plus create new `audit.md` (run PROJECT_AUDIT-style analysis) and `health.md` (run scripts/health_check.py and report). Replace cbt-specific references with our file paths.
-- Dependencies: `.claude/agents/` must exist first
+- Dependencies: `.gemini/agents/` must exist first
 - Priority: P1
 
 ---
@@ -154,9 +154,9 @@ Files from reference repos to bring directly into the project.
 **6. Multi-LLM Ensemble Forecaster**
 - Source: `~/reference_repos/Fully-Autonomous-Polymarket-AI-Trading-Bot/src/forecast/ensemble.py`
 - Target: `strategies/ai_agents/ensemble_forecaster.py`
-- Adaptation needed: Replace GPT-4o 40% / Claude 35% / Gemini 25% hardcoded weights with config-driven weights (`ENSEMBLE_CLAUDE_WEIGHT`, `ENSEMBLE_GPT_WEIGHT`, `ENSEMBLE_GEMINI_WEIGHT` in `config.py`). Replace Brier score history with our `agent_stats` SQLite table. Replace Flask response objects with our `Signal` dataclass. Use our `debate_engine.py` async pattern for the parallel LLM calls.
+- Adaptation needed: Replace GPT-4o 40% / Gemini 60% hardcoded weights with config-driven weights (`ENSEMBLE_GEMINI_WEIGHT`, `ENSEMBLE_GPT_WEIGHT` in `config.py`). Replace Brier score history with our `agent_stats` SQLite table. Replace Flask response objects with our `Signal` dataclass. Use our `debate_engine.py` async pattern for the parallel LLM calls.
 - Dependencies: `openai` package (GPT-4o); `google-generativeai` package (Gemini); add both to `requirements.txt`; API keys in `.env`
-- Priority: P1 (for Lane 3); P2 (for Lanes 1/2 — they work today with Claude alone)
+- Priority: P1 (for Lane 3); P2 (for Lanes 1/2 — they work today with Gemini alone)
 
 **7. Forecast Calibrator (Platt Scaling)**
 - Source: `~/reference_repos/Fully-Autonomous-Polymarket-AI-Trading-Bot/src/forecast/calibrator.py`
@@ -279,15 +279,15 @@ Components that must be built from scratch, combining patterns from multiple ref
 - Priority: P1
 
 **4. Options Chain Data Model**
-- What it does: Python dataclasses for the full options domain: `OptionsChain`, `OptionsContract`, `Greeks` (delta, gamma, theta, vega, rho), `SpreadAnalysis`, `PMCCOpportunity`. Bridges Alpaca's options API response format to our indicator + agent pipeline. The Go interface from Claude_Prophet (`interfaces/options.go`) is the specification; this is the Python implementation.
-- Reference repos: `Claude_Prophet` `interfaces/options.go` as specification; `trading_skills` `src/trading_skills/greeks.py` for Greeks calculation
+- What it does: Python dataclasses for the full options domain: `OptionsChain`, `OptionsContract`, `Greeks` (delta, gamma, theta, vega, rho), `SpreadAnalysis`, `PMCCOpportunity`. Bridges Alpaca's options API response format to our indicator + agent pipeline. The Go interface from Gemini_Prophet (`interfaces/options.go`) is the specification; this is the Python implementation.
+- Reference repos: `Gemini_Prophet` `interfaces/options.go` as specification; `trading_skills` `src/trading_skills/greeks.py` for Greeks calculation
 - Target file: `data/options_chain.py`
 - Estimated size: 250–350 lines
 - Priority: P1
 
 **5. Alpaca Options Execution Extension**
 - What it does: Extends existing `execution/alpaca_broker.py` with options-specific methods: `get_options_chain(symbol, expiry_range) -> OptionsChain`, `place_options_order(contract, side, qty) -> OrderResult`, `get_options_position(contract_id) -> Position`, `calculate_buying_power_reduction(contract) -> float`. Alpaca's options API is documented at `alpaca.markets/docs/api-references/trading-api/options/`.
-- Reference repos: `trading_skills` `src/trading_skills/broker/` for IBKR interface pattern (adapt to Alpaca); `Claude_Prophet` `services/alpaca_options_data.go` for data model
+- Reference repos: `trading_skills` `src/trading_skills/broker/` for IBKR interface pattern (adapt to Alpaca); `Gemini_Prophet` `services/alpaca_options_data.go` for data model
 - Target file: Extends `execution/alpaca_broker.py` (add ~200 lines to existing file)
 - Estimated size: 200–250 new lines
 - Priority: P1
@@ -336,9 +336,9 @@ Ranked by impact. Each pattern is assessed on value vs implementation cost.
 ---
 
 ### Pattern 1: MCP Server (FastMCP Python)
-**Source:** `trading_skills` FastMCP pattern; `Claude_Prophet` tool catalog for completeness
+**Source:** `trading_skills` FastMCP pattern; `Gemini_Prophet` tool catalog for completeness
 
-**Why adopt:** This is the most critical missing architectural piece. Without MCP, every interaction between Claude Code and the trading system is unstructured text. With MCP, Claude Code can call `get_positions()`, `run_backtest(symbol='BTC-USD', period='30d')`, `place_paper_trade(symbol='ETH-USD', size=250)` as first-class tool calls — with input validation, structured outputs, and audit trails. The overhaul adds three new lanes, all of which require Claude to orchestrate complex multi-step workflows. MCP makes those workflows reliable and repeatable.
+**Why adopt:** This is the most critical missing architectural piece. Without MCP, every interaction between Gemini Code and the trading system is unstructured text. With MCP, Gemini Code can call `get_positions()`, `run_backtest(symbol='BTC-USD', period='30d')`, `place_paper_trade(symbol='ETH-USD', size=250)` as first-class tool calls — with input validation, structured outputs, and audit trails. The overhaul adds three new lanes, all of which require Gemini to orchestrate complex multi-step workflows. MCP makes those workflows reliable and repeatable.
 
 **Implementation:** `from mcp.server.fastmcp import FastMCP` + `@mcp.tool()` decorator. Start with 15 tools wrapping existing functions. Add a tool per new capability as lanes come online.
 
@@ -346,21 +346,21 @@ Ranked by impact. Each pattern is assessed on value vs implementation cost.
 
 ---
 
-### Pattern 2: Multi-LLM Ensemble (Polymarket bot — Claude + GPT + Gemini)
+### Pattern 2: Multi-LLM Ensemble (Polymarket bot — Gemini + GPT)
 **Source:** `Fully-Autonomous-Polymarket` `src/forecast/ensemble.py`
 
-**Why adopt:** Currently all AI analysis uses only Claude (Anthropic). Single-provider dependency means: (1) Anthropic API outage = all three lanes halt, (2) model-specific biases go uncorrected (no adversarial cross-check), (3) no calibration feedback distinguishes which provider is more accurate on which market type. The ensemble pattern (parallel async calls, weighted by per-model Brier score) addresses all three. Adaptive weighting means the system discovers that Claude is more accurate on crypto debates while GPT is more accurate on macro prediction markets.
+**Why adopt:** Currently all AI analysis uses only Gemini (Anthropic). Single-provider dependency means: (1) Anthropic API outage = all three lanes halt, (2) model-specific biases go uncorrected (no adversarial cross-check), (3) no calibration feedback distinguishes which provider is more accurate on which market type. The ensemble pattern (parallel async calls, weighted by per-model Brier score) addresses all three. Adaptive weighting means the system discovers that Gemini is more accurate on crypto debates while GPT is more accurate on macro prediction markets.
 
 **Implementation:** `asyncio.gather()` for parallel LLM calls. Trimmed mean aggregation. Per-model score tracking in `agent_stats` table. Requires adding `OPENAI_API_KEY` and `GOOGLE_API_KEY` to `.env`.
 
-**Effort vs value:** Large effort (1–2 weeks), high strategic value. Build in Sprint 5 (after lanes are functional with Claude alone).
+**Effort vs value:** Large effort (1–2 weeks), high strategic value. Build in Sprint 5 (after lanes are functional with Gemini alone).
 
 ---
 
 ### Pattern 3: Async Task Graph (replace sequential while-True loop)
 **Source:** `TradingAgents` LangGraph state machine; asyncio patterns from multiple repos
 
-**Why adopt:** `job_runner.py` is 1,812 lines scanning sequentially. With 3 lanes + 20 crypto pairs + 5 equity + options screen + 2 prediction platforms, sequential scanning means a 60-second Claude API call for BTC blocks all other symbols. Async architecture: each lane runs as a separate coroutine, each symbol scan is a task, shared state via SQLite (already WAL-safe). Total scan cycle time drops from minutes to seconds.
+**Why adopt:** `job_runner.py` is 1,812 lines scanning sequentially. With 3 lanes + 20 crypto pairs + 5 equity + options screen + 2 prediction platforms, sequential scanning means a 60-second Gemini API call for BTC blocks all other symbols. Async architecture: each lane runs as a separate coroutine, each symbol scan is a task, shared state via SQLite (already WAL-safe). Total scan cycle time drops from minutes to seconds.
 
 **Implementation:** Python `asyncio` + `concurrent.futures.ThreadPoolExecutor` for broker I/O. NOT LangGraph yet (too large a migration for Sprint 1). Gradual: extract each lane into its own `async def run_lane_X()` and run them concurrently in `main.py`.
 
@@ -369,9 +369,9 @@ Ranked by impact. Each pattern is assessed on value vs implementation cost.
 ---
 
 ### Pattern 4: SQLite Embeddings (replace LanceDB)
-**Source:** `Claude_Prophet` `database/storage.go` trade_embeddings table
+**Source:** `Gemini_Prophet` `database/storage.go` trade_embeddings table
 
-**Why adopt:** LanceDB + sentence-transformers adds ~2GB of dependencies for the vector memory that was demoted to "supplemental" in v5.0. The Claude_Prophet pattern stores 384-dim float vectors as BLOB columns in the existing trades.db — same semantic similarity search, zero new packages. The vectors can be generated using a lightweight local method (numpy random projection for approximate search, or a 50MB embedding model via `fastembed` instead of the 2GB sentence-transformers).
+**Why adopt:** LanceDB + sentence-transformers adds ~2GB of dependencies for the vector memory that was demoted to "supplemental" in v5.0. The Gemini_Prophet pattern stores 384-dim float vectors as BLOB columns in the existing trades.db — same semantic similarity search, zero new packages. The vectors can be generated using a lightweight local method (numpy random projection for approximate search, or a 50MB embedding model via `fastembed` instead of the 2GB sentence-transformers).
 
 **Implementation:** Add `trade_embeddings` table to trades.db schema. Replace `lancedb.connect()` calls in `trade_memory.py` with SQLite BLOB storage. For query: load vectors into numpy array, compute cosine similarity with query vector, return top-k.
 
@@ -379,12 +379,12 @@ Ranked by impact. Each pattern is assessed on value vs implementation cost.
 
 ---
 
-### Pattern 5: Agent Role Definitions (.claude/agents/)
-**Source:** `Claude_Prophet` `.claude/agents/` (4 agent definitions)
+### Pattern 5: Agent Role Definitions (.gemini/agents/)
+**Source:** `Gemini_Prophet` `.gemini/agents/` (4 agent definitions)
 
-**Why adopt:** Currently Claude Code has no structured understanding of which agent to use for which task. Creating named agent definitions (portfolio_manager.md, trade_strategist.md, devil_advocate.md, system_engineer.md) gives every Claude Code session a consistent starting context. The portfolio manager agent, for example, always considers halt conditions and risk budgets before any trade action. The devil's advocate agent always challenges entry theses. These roles complement our existing debate engine by providing meta-level orchestration.
+**Why adopt:** Currently Gemini Code has no structured understanding of which agent to use for which task. Creating named agent definitions (portfolio_manager.md, trade_strategist.md, devil_advocate.md, system_engineer.md) gives every Gemini Code session a consistent starting context. The portfolio manager agent, for example, always considers halt conditions and risk budgets before any trade action. The devil's advocate agent always challenges entry theses. These roles complement our existing debate engine by providing meta-level orchestration.
 
-**Implementation:** Create `.claude/agents/` directory. Write 4 markdown files with YAML frontmatter following Claude_Prophet's format. No code changes required.
+**Implementation:** Create `.gemini/agents/` directory. Write 4 markdown files with YAML frontmatter following Gemini_Prophet's format. No code changes required.
 
 **Effort vs value:** Small effort (1 day), high value for operational reliability.
 
@@ -438,12 +438,12 @@ Each sprint has a clear definition of done. Sprints are approximately 1–2 week
 | `tests/test_indicators.py` | Standard pytest; `intelligent-trading-bot/tests/` structure |
 | `tests/test_risk_engine.py` | Standard pytest |
 | `tests/test_broker_paper.py` | Standard pytest |
-| `.claude/agents/portfolio_manager.md` | `Claude_Prophet/.claude/agents/` |
-| `.claude/agents/trade_strategist.md` | `Claude_Prophet/.claude/agents/` |
-| `.claude/agents/devil_advocate.md` | `Claude_Prophet/.claude/agents/` |
-| `.claude/agents/system_engineer.md` | `Claude_Prophet/.claude/agents/` |
-| `.claude/commands/audit.md` | `cbt-framework/commands/` |
-| `.claude/commands/health.md` | `cbt-framework/commands/` |
+| `.gemini/agents/portfolio_manager.md` | `Gemini_Prophet/.gemini/agents/` |
+| `.gemini/agents/trade_strategist.md` | `Gemini_Prophet/.gemini/agents/` |
+| `.gemini/agents/devil_advocate.md` | `Gemini_Prophet/.gemini/agents/` |
+| `.gemini/agents/system_engineer.md` | `Gemini_Prophet/.gemini/agents/` |
+| `.gemini/commands/audit.md` | `cbt-framework/commands/` |
+| `.gemini/commands/health.md` | `cbt-framework/commands/` |
 
 **Files to MODIFY:**
 | File | Change |
@@ -469,7 +469,7 @@ Each sprint has a clear definition of done. Sprints are approximately 1–2 week
 - [x] `webull_broker.py` deleted; `bybit_broker.py` deleted ✅ 2026-03-26
 - [x] `risk_manager.py` decomposed into 5 modules; public API unchanged ✅ 2026-03-26
 - [ ] Telegram alert sends a test message (Gmail SMTP still in place; Telegram migration = Sprint 2)
-- [x] `.claude/agents/` directory exists with 4 agent definitions ✅ 2026-03-26
+- [x] `.gemini/agents/` directory exists with 4 agent definitions ✅ 2026-03-26
 - [x] `scheduler/job_runner.py` reduced to 258 lines (was 1,812) ✅ 2026-03-26
 - [x] GitHub repo live: futureisnowtech/trading-bot-main, branch feature/agent-overhaul ✅ 2026-03-26
 
@@ -494,7 +494,7 @@ Each sprint has a clear definition of done. Sprints are approximately 1–2 week
 | `learning/forecast_calibrator.py` | Polymarket bot `forecast/calibrator.py` (Platt scaling) |
 | `alerts/alert_dispatcher.py` | Polymarket bot `observability/alerts.py` for multi-channel pattern |
 | `.github/workflows/ci.yml` | Standard GitHub Actions; `algorithmic-trading-bot` for reference |
-| `.claude/commands/deploy.md` | `cbt-framework/commands/cbt-live.md` |
+| `.gemini/commands/deploy.md` | `cbt-framework/commands/cbt-live.md` |
 
 **Files to MODIFY:**
 | File | Change |
@@ -502,7 +502,7 @@ Each sprint has a clear definition of done. Sprints are approximately 1–2 week
 | `scheduler/job_runner.py` | Add `run_prediction_market_scan()` function called from main loop |
 | `logging_db/trade_logger.py` | Add `lane` column to `trades` table via ALTER TABLE migration |
 | `risk/risk_engine.py` | Add Lane 3 routing: prediction markets use different position limits |
-| `config.py` | Add `LANE3_*` constants: `POLYMARKET_PAPER=true`, `KALSHI_PAPER=true`, `POLYMARKET_API_KEY=`, `KALSHI_API_KEY=`, `ENSEMBLE_CLAUDE_WEIGHT=0.35`, `ENSEMBLE_GPT_WEIGHT=0.40`, `ENSEMBLE_GEMINI_WEIGHT=0.25`, `PM_MIN_VOLUME_USD=10000`, `PM_MAX_POSITION_USD=25`, `PM_MIN_EDGE_PCT=3.0` |
+| `config.py` | Add `LANE3_*` constants: `POLYMARKET_PAPER=true`, `KALSHI_PAPER=true`, `POLYMARKET_API_KEY=`, `KALSHI_API_KEY=`, `ENSEMBLE_GEMINI_WEIGHT=0.60`, `ENSEMBLE_GPT_WEIGHT=0.40`, `PM_MIN_VOLUME_USD=10000`, `PM_MAX_POSITION_USD=25`, `PM_MIN_EDGE_PCT=3.0` |
 | `.env.example` | Add `POLYMARKET_PRIVATE_KEY=`, `KALSHI_API_KEY=`, `KALSHI_API_SECRET=`, `OPENAI_API_KEY=`, `GOOGLE_API_KEY=` |
 | `scripts/test_brokers.py` | Add Polymarket and Kalshi paper mode tests |
 | `dashboard/app.py` | Add Lane 3 panel to THE KING view: open predictions, recent resolutions, calibration score |
@@ -515,7 +515,7 @@ Each sprint has a clear definition of done. Sprints are approximately 1–2 week
 - [ ] `learning/forecast_calibrator.py` stores calibration curve to SQLite
 - [ ] Dashboard shows Lane 3 panel with open predictions
 - [ ] GitHub Actions CI passes on push to main
-- [ ] Multi-LLM ensemble returns result (even if only Claude is active initially)
+- [ ] Multi-LLM ensemble returns result (even if only Gemini is active initially)
 
 ---
 
@@ -526,12 +526,12 @@ Each sprint has a clear definition of done. Sprints are approximately 1–2 week
 **Files to CREATE:**
 | File | Draws from |
 |------|-----------|
-| `data/options_chain.py` | `Claude_Prophet` `interfaces/options.go` (Python dataclass translation) |
+| `data/options_chain.py` | `Gemini_Prophet` `interfaces/options.go` (Python dataclass translation) |
 | `strategies/options_spreads.py` | `trading_skills` `spreads.py` + Black-Scholes math |
 | `data/options_screener.py` | `trading_skills` `scanner_pmcc.py` |
 | `strategies/ai_agents/options_analyst.py` | `claude-trading-skills` `skills/options-strategy-advisor/` |
 | `data/equity_sentiment.py` | `algorithmic-trading-bot` `src/sentiment/` |
-| `.claude/commands/options-scan.md` | `cbt-framework` slash-command format |
+| `.gemini/commands/options-scan.md` | `cbt-framework` slash-command format |
 | `tests/test_options_spreads.py` | Standard pytest — verify Black-Scholes math |
 
 **Files to MODIFY:**
@@ -606,7 +606,7 @@ Each sprint has a clear definition of done. Sprints are approximately 1–2 week
 | File | Change |
 |------|--------|
 | `learning/ml_signal.py` | Replace with thin shim calling `ml_predictor.py`. Remove inline retraining. |
-| `strategies/ai_agents/ensemble_forecaster.py` | Add GPT-4o and Gemini providers alongside Claude. Enable adaptive weighting from Brier scores. |
+| `strategies/ai_agents/ensemble_forecaster.py` | Add GPT-4o and Gemini providers alongside Gemini. Enable adaptive weighting from Brier scores. |
 | `learning/forecast_calibrator.py` | Wire per-agent calibration curves into debate prompt injection. |
 | `logging_db/trade_logger.py` | Split into `logging_db/schema.py` + `logging_db/writer.py` + `logging_db/reader.py`. Reduce single-file complexity. |
 | `dashboard/app.py` | Add calibration curve chart. Add multi-LLM provider accuracy comparison panel. |
@@ -616,11 +616,11 @@ Each sprint has a clear definition of done. Sprints are approximately 1–2 week
 **Definition of Done:**
 - [ ] `ml_trainer.py` trains model as a background process, saves `logs/ml_model.pkl`
 - [ ] `ml_predictor.py` loads `ml_model.pkl` at startup and predicts in <10ms
-- [ ] Multi-LLM ensemble running with at least 2 of 3 providers (Claude + GPT minimum)
+- [ ] Multi-LLM ensemble running with at least 2 of 3 providers (Gemini + GPT minimum)
 - [ ] `learning/forecast_calibrator.py` shows nonzero calibration data after 30 closed trades
 - [ ] Cross-market arbitrage scanner runs once per 15-minute cycle
 - [ ] `logging_db/` split into 3 files; all tests pass
-- [ ] Dashboard shows Brier score comparison: Claude vs GPT vs Gemini accuracy by lane
+- [ ] Dashboard shows Brier score comparison: Gemini vs GPT vs Gemini accuracy by lane
 
 ---
 
@@ -827,7 +827,7 @@ This script verifies:
 
 ```
 Sprint 1 (Foundation)
-├── MCP server           ← enables all Claude Code control
+├── MCP server           ← enables all Gemini Code control
 ├── Risk decomposition   ← enables Lane 3 routing (different limits per lane)
 ├── Test suite           ← enables confident refactoring in Sprints 2-5
 └── Dead code removal    ← simplifies codebase before expansion
@@ -835,7 +835,7 @@ Sprint 1 (Foundation)
 Sprint 2 (Lane 3)        depends on: Sprint 1 (risk decomposition, MCP)
 ├── Polymarket connector
 ├── Kalshi connector
-├── Multi-LLM ensemble (Claude only initially)
+├── Multi-LLM ensemble (Gemini only initially)
 └── Forecast calibration
 
 Sprint 3 (Lane 1 Options) depends on: Sprint 1 (MCP, risk decomp)

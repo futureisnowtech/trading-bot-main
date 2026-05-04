@@ -1,6 +1,6 @@
 #!/bin/bash
 # reload_on_change.sh
-# Called by Claude Code PostToolUse hook after every Edit/Write on .py files.
+# Called by Gemini Code PostToolUse hook after every Edit/Write on .py files.
 #
 # Three-layer safety system:
 #   1. DEBOUNCE — only the last edit in a rapid batch triggers a restart (8s window)
@@ -89,5 +89,5 @@ echo "$TRIGGER_ID" > "$SENTINEL"
     echo "$(date +%H:%M:%S): Bot restarted" >> "$LOG"
 ) &
 
-# Exit immediately — background job handles everything, Claude isn't blocked
+# Exit immediately — background job handles everything, Gemini isn't blocked
 exit 0

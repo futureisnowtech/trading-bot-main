@@ -4,7 +4,7 @@ Use this skill for anything involving attribution correctness, feature snapshots
 
 ## Read First
 1. `AGENTS.md`
-2. `CLAUDE.md`
+2. `GEMINI.md`
 3. `learning_loop.py`
 4. `learning/post_trade_analyzer.py`
 5. `learning/entry_priors.py`

@@ -3,7 +3,7 @@
 # pre_edit_protector.sh  —  LAYER A: Protected File / State Blocker
 # PreToolUse/Edit|Write  |  exit 2 = block, exit 0 = allow
 # ─────────────────────────────────────────────────────────────────────────────
-# Prevents Claude from editing runtime state, credentials, git internals,
+# Prevents Gemini from editing runtime state, credentials, git internals,
 # launchd service plists, and runtime log artifacts.
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -26,7 +26,7 @@ fi
 # ════════════════════════════════════════════════════════════════════════════
 if echo "$FILE" | grep -qE '(^|/)\.env($|\.)|(^|/)\.env\.[a-z]|\.pem$|\.key$|\.p12$|\.pfx$|credentials\.json$|api_keys\.|secrets\.'; then
     echo "BLOCKED [CREDENTIALS]: $FILE is a secrets/credentials file." >&2
-    echo "Never edit credentials via Claude. Modify .env manually in your terminal." >&2
+    echo "Never edit credentials via Gemini. Modify .env manually in your terminal." >&2
     exit 2
 fi
 
@@ -67,9 +67,9 @@ if echo "$FILE" | grep -qE '/logs/.*\.(log|csv)$'; then
 fi
 
 # ════════════════════════════════════════════════════════════════════════════
-# BLOCK 6: CLAUDE COMMAND LOG — hook observability log
+# BLOCK 6: GEMINI COMMAND LOG — hook observability log
 # ════════════════════════════════════════════════════════════════════════════
-if echo "$FILE" | grep -qE '\.claude/logs/commands\.log$'; then
+if echo "$FILE" | grep -qE '\.gemini/logs/commands\.log$'; then
     echo "BLOCKED [META]: commands.log is the hook observability log. Do not edit it." >&2
     exit 2
 fi

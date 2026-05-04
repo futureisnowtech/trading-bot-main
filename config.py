@@ -705,10 +705,10 @@ CRYPTOPANIC_API_KEY: str = os.getenv(
 REDDIT_CLIENT_ID: str = os.getenv("REDDIT_CLIENT_ID", "")
 REDDIT_CLIENT_SECRET: str = os.getenv("REDDIT_CLIENT_SECRET", "")
 REDDIT_USER_AGENT: str = os.getenv("REDDIT_USER_AGENT", "AlgoTradingBot/1.0")
-CLAUDE_MODEL: str = "claude-sonnet-4-6"  # Always latest
-CLAUDE_MODEL_EXTENDED: str = "claude-sonnet-4-6"  # For exit extended thinking
-CLAUDE_DEBATE_MODEL: str = os.getenv(
-    "CLAUDE_DEBATE_MODEL", "claude-haiku-4-5-20251001"
+GEMINI_MODEL: str = "gemini-2.0-flash"  # Always latest
+GEMINI_MODEL_EXTENDED: str = "gemini-2.0-flash-thinking-exp"  # For exit extended thinking
+GEMINI_DEBATE_MODEL: str = os.getenv(
+    "GEMINI_DEBATE_MODEL", "gemini-1.5-flash"
 )  # Debate agents (cheap)
 DEBATE_MAX_TOKENS: int = 700  # Raised from 300 — agents need room to reason deeply
 EXIT_REVIEW_MAX_TOKENS: int = (
@@ -1182,15 +1182,15 @@ LANE3_SCAN_INTERVAL_SECONDS: int = int(
 
 # Multi-LLM ensemble weights (must sum to 1.0)
 # Weights are adapted by pm_calibrator.py based on per-model Brier scores
-ENSEMBLE_CLAUDE_WEIGHT: float = float(
-    os.getenv("ENSEMBLE_CLAUDE_WEIGHT", "1.0")
-)  # start Claude-only
+ENSEMBLE_GEMINI_WEIGHT: float = float(
+    os.getenv("ENSEMBLE_GEMINI_WEIGHT", "1.0")
+)  # Gemini CLI is canonical
 ENSEMBLE_GPT_WEIGHT: float = float(
     os.getenv("ENSEMBLE_GPT_WEIGHT", "0.0")
 )  # add when OPENAI_API_KEY set
-ENSEMBLE_GEMINI_WEIGHT: float = float(
-    os.getenv("ENSEMBLE_GEMINI_WEIGHT", "0.0")
-)  # add when GOOGLE_API_KEY set
+ENSEMBLE_SONNET_WEIGHT: float = float(
+    os.getenv("ENSEMBLE_SONNET_WEIGHT", "0.0")
+)  # Optional Gemini legacy model weight
 PM_ENSEMBLE_MIN_MODELS: int = int(
     os.getenv("PM_ENSEMBLE_MIN_MODELS", "1")
 )  # min models needed for forecast

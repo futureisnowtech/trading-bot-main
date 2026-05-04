@@ -13,10 +13,10 @@ Invariants:
 9.  reload_on_change.sh uses dynamic root
 10. repo_truth_gate.py rejects tilde-form ~/Desktop path
 11. repo_truth_gate.py ACTIVE_EXTS includes .md (covers markdown instruction surfaces)
-12. .claude/commands/self-audit.md has no Desktop path
+12. .gemini/commands/self-audit.md has no Desktop path
 13. scripts/iphone.sh has no Desktop path (tilde or absolute)
 14. install_hooks.sh pre-commit includes repo_truth_gate.py --fast
-15. settings.json hook commands use $CLAUDE_PROJECT_DIR-rooted paths
+15. settings.json hook commands use $GEMINI_PROJECT_DIR-rooted paths
 16. .version is treated as a generated local artifact, not tracked source
 17. pre_bash_blocker.sh allows the controlled go_live.py launcher
 18. pre_bash_blocker.sh allows the controlled go_paper.py launcher
@@ -33,7 +33,7 @@ from pathlib import Path
 import pytest
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
-_HOOKS_DIR = _ROOT / ".claude" / "hooks"
+_HOOKS_DIR = _ROOT / ".gemini" / "hooks"
 _SCRIPTS_DIR = _ROOT / "scripts"
 
 # Note: split segment to avoid triggering the truth gate regex on this test file.
@@ -91,7 +91,7 @@ def test_no_hardcoded_repo_root_in_hooks():
 
 
 def test_no_desktop_paths_in_hooks():
-    """No .claude/hooks/*.sh file may contain the Desktop repo path."""
+    """No .gemini/hooks/*.sh file may contain the Desktop repo path."""
     failures = []
     for path in _hook_scripts():
         if _DESKTOP_PATTERN.search(_read(path)):
@@ -217,8 +217,8 @@ def test_pre_bash_blocker_blocks_implicit_live_start():
 
 def test_settings_json_reload_hook_no_desktop_path():
     """settings.json must not contain a Desktop path in the reload hook command."""
-    settings = _ROOT / ".claude" / "settings.json"
-    assert settings.exists(), ".claude/settings.json not found"
+    settings = _ROOT / ".gemini" / "settings.json"
+    assert settings.exists(), ".gemini/settings.json not found"
     text = _read(settings)
     assert not _DESKTOP_PATTERN.search(text), (
         "settings.json still contains a Desktop path hardcode"
@@ -308,7 +308,7 @@ def test_repo_truth_gate_active_exts_includes_md():
     text = _read(gate)
     assert '".md"' in text or "'.md'" in text, (
         "repo_truth_gate.py ACTIVE_EXTS does not include .md — "
-        "markdown instruction surfaces (.claude/commands/, AGENTS.md, CLAUDE.md) "
+        "markdown instruction surfaces (.gemini/commands/, AGENTS.md, GEMINI.md) "
         "will not be scanned for Desktop path references"
     )
 
@@ -318,8 +318,8 @@ def test_repo_truth_gate_active_exts_includes_md():
 
 def test_self_audit_md_no_desktop_path():
     """self-audit.md must not contain a Desktop repo path."""
-    cmd_file = _ROOT / ".claude" / "commands" / "self-audit.md"
-    assert cmd_file.exists(), ".claude/commands/self-audit.md not found"
+    cmd_file = _ROOT / ".gemini" / "commands" / "self-audit.md"
+    assert cmd_file.exists(), ".gemini/commands/self-audit.md not found"
     text = _read(cmd_file)
     assert not _DESKTOP_PATTERN.search(text), (
         "self-audit.md still contains an absolute Desktop path hardcode"
@@ -366,13 +366,13 @@ def test_install_hooks_pre_commit_includes_truth_gate():
     )
 
 
-# ── Test 15: settings.json hook commands use $CLAUDE_PROJECT_DIR ─────────────
+# ── Test 15: settings.json hook commands use $GEMINI_PROJECT_DIR ─────────────
 
 
 def test_settings_json_uses_claude_project_dir():
-    """settings.json hook commands must use $CLAUDE_PROJECT_DIR for robust absolute paths."""
-    settings = _ROOT / ".claude" / "settings.json"
-    assert settings.exists(), ".claude/settings.json not found"
+    """settings.json hook commands must use $GEMINI_PROJECT_DIR for robust absolute paths."""
+    settings = _ROOT / ".gemini" / "settings.json"
+    assert settings.exists(), ".gemini/settings.json not found"
     data = json.loads(_read(settings))
 
     # Collect all hook commands
@@ -387,9 +387,9 @@ def test_settings_json_uses_claude_project_dir():
     assert hook_commands, "settings.json has no hook commands"
 
     for cmd in hook_commands:
-        assert "$CLAUDE_PROJECT_DIR" in cmd, (
-            f"settings.json hook command does not use $CLAUDE_PROJECT_DIR: {cmd!r}\n"
-            "All hook commands must use $CLAUDE_PROJECT_DIR/... for robust path resolution"
+        assert "$GEMINI_PROJECT_DIR" in cmd, (
+            f"settings.json hook command does not use $GEMINI_PROJECT_DIR: {cmd!r}\n"
+            "All hook commands must use $GEMINI_PROJECT_DIR/... for robust path resolution"
         )
 
 

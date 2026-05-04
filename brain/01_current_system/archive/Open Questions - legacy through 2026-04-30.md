@@ -21,7 +21,7 @@ The content below is copied from the prior active file without reinterpretation.
 > ## HISTORICAL SECTION BELOW
 > Questions dated 2026-03-25 reference the v4.3 architecture (Coinbase Advanced Trade,
 > Bybit perps, Tradovate MES, 5-agent debate). That system no longer exists.
-> The current live system is **v15.2** (2026-04-15). See CLAUDE.md for current truth.
+> The current live system is **v15.2** (2026-04-15). See GEMINI.md for current truth.
 > Historical questions are preserved for audit trail only.
 
 ---

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
 mcp_server/server.py — The King's MCP Server
-Exposes the trading system as 21 callable tools for Claude Code.
+Exposes the trading system as 21 callable tools for Gemini CLI.
 
 Run: python3 mcp_server/server.py
-Add to Claude Code settings: { "mcpServers": { "trading-bot": { "command": "python3", "args": ["<project_root>/mcp_server/server.py"] } } }
+Add to Gemini CLI settings: { "mcpServers": { "trading-bot": { "command": "python3", "args": ["<project_root>/mcp_server/server.py"] } } }
 
 Pattern: trading_skills/mcp_server/server.py (FastMCP @mcp.tool() decorators)
-Tool catalog reference: Claude_Prophet/mcp-server.js (40-tool complete example)
+Tool catalog reference: Gemini_Prophet/mcp-server.js (40-tool complete example)
 """
 
 import os

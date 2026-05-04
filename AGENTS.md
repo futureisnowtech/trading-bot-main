@@ -14,7 +14,7 @@
   1. `AGENTS.md`
   2. repo code and proof tests
   3. `brain/01_current_system/*`
-  4. `CLAUDE.md` as a concise companion, not the primary source of truth
+  4. `GEMINI.md` as a concise companion, not the primary source of truth
 
 ## Strategic Brain
 
@@ -248,10 +248,10 @@ Live launch must fail if any of these are true:
 ## Support-Surface Truth
 
 - `AGENTS.md` is canonical.
-- `CLAUDE.md` is the concise Claude-facing companion.
-- `.claude/commands/*` must follow the spot truth-lane contract.
-- `.claude/agents/*` must not describe the old perp-first or multi-agent-debate system as current truth.
-- `claude/skills/*` must read `AGENTS.md` first and use `CLAUDE.md` as a companion only.
+- `GEMINI.md` is the concise Gemini-facing companion.
+- `.gemini/commands/*` must follow the spot truth-lane contract.
+- `.gemini/agents/*` must not describe the old perp-first or multi-agent-debate system as current truth.
+- `gemini/skills/*` must read `AGENTS.md` first and use `GEMINI.md` as a companion only.
 
 ## Archived Notes
 
@@ -278,6 +278,6 @@ streamlit run dashboard/app.py --server.runOnSave true
 
 When behavior changes:
 - update `AGENTS.md`
-- update `CLAUDE.md` if Claude workflow guidance changed
+- update `GEMINI.md` if Gemini workflow guidance changed
 - append `CHANGELOG.md`
 - prefer targeted proof tests in `tests/proof/`

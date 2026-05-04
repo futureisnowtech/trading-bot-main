@@ -7,7 +7,7 @@
 # Navigation inside screen:
 #   Ctrl+A, 1  →  LOGS   (live bot log feed)
 #   Ctrl+A, 2  →  DB     (sqlite3 — query trades)
-#   Ctrl+A, 3  →  CLAUDE (Claude Code in project dir)
+#   Ctrl+A, 3  →  GEMINI (Gemini Code in project dir)
 #   Ctrl+A, d  →  detach (session stays alive, reconnect anytime)
 
 SESSION="trading"
@@ -44,12 +44,12 @@ screen -S "$SESSION" -X screen -t DB bash -c "
   sqlite3 $DB
 "
 
-# Window 3: CLAUDE — Claude Code in project dir
-screen -S "$SESSION" -X screen -t CLAUDE bash -c "
-  echo '=== CLAUDE CODE ===';
+# Window 3: GEMINI — Gemini Code in project dir
+screen -S "$SESSION" -X screen -t GEMINI bash -c "
+  echo '=== GEMINI CODE ===';
   cd $DIR;
   echo 'Project: algo_trading_final';
-  echo 'Run: claude';
+  echo 'Run: gemini';
   echo '';
   exec \$SHELL
 "

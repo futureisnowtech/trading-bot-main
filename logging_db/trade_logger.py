@@ -1938,7 +1938,7 @@ def get_todays_pnl(paper=True) -> float:
 
 
 def get_todays_fees(paper=True) -> float:
-    """Returns total cost today: trading fees + Claude API costs."""
+    """Returns total cost today: trading fees + Gemini API costs."""
     today = datetime.now(pytz.timezone(MARKET_TIMEZONE)).strftime("%Y-%m-%d")
     conn = _conn()
     cur = conn.cursor()
@@ -1971,7 +1971,7 @@ def get_todays_trade_fees(paper=True) -> float:
 
 
 def get_todays_api_cost() -> float:
-    """Claude API cost today only."""
+    """Gemini API cost today only."""
     today = datetime.now(pytz.timezone(MARKET_TIMEZONE)).strftime("%Y-%m-%d")
     conn = _conn()
     cur = conn.cursor()
@@ -2730,7 +2730,7 @@ def get_intelligence_log(limit: int = 30) -> dict:
         conn = _conn()
         cur = conn.cursor()
 
-        # Meta-analysis runs (what Claude learned from recent trades)
+        # Meta-analysis runs (what Gemini learned from recent trades)
         try:
             cur.execute(
                 """

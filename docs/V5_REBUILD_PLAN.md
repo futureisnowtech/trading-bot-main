@@ -96,7 +96,7 @@ At 1,000 embeddings of dimension 384:
 - LanceDB: ~5–20ms — also fast, but with 150MB of overhead
 - ChromaDB: ~2–10ms, 80MB overhead
 
-LanceDB + sentence-transformers adds ~230MB to the install and is the most common install error in your CLAUDE.md ("LanceDB import error"). The benefit at current scale is zero.
+LanceDB + sentence-transformers adds ~230MB to the install and is the most common install error in your GEMINI.md ("LanceDB import error"). The benefit at current scale is zero.
 
 **Recommendation**: Replace `memory/trade_memory.py` with NumPy cosine similarity on embeddings stored as SQLite BLOBs. Same semantic search, zero new dependencies. Migrate to ChromaDB when you hit 50K+ trades.
 
@@ -113,8 +113,8 @@ Full detail in `docs/PROJECT_AUDIT.md`. Key findings:
 - ✅ Binance broker replacing Bybit (`execution/binance_broker.py`)
 - ✅ job_runner decomposed into 6 files (1,888 lines total)
 - ✅ MCP server (`mcp_server/server.py`, 349 lines, 15 tools)
-- ✅ Claude Code agents (`.claude/agents/`)
-- ✅ 5 slash commands (`.claude/commands/`)
+- ✅ Gemini Code agents (`.gemini/agents/`)
+- ✅ 5 slash commands (`.gemini/commands/`)
 - ✅ 3 test files (~25 tests)
 - ✅ GitHub live with SSH push
 
@@ -403,7 +403,7 @@ Readiness check runs daily at 4:15pm ET. Report goes to dashboard Notifications 
 - ✅ Binance broker
 - ✅ job_runner decomposition (6 files)
 - ✅ MCP server (15 tools)
-- ✅ Claude Code agents + slash commands
+- ✅ Gemini Code agents + slash commands
 - ✅ Tests (3 files, ~25 tests)
 
 ### Sprint 2 — The Math Engine (Phase 4) — ~3 days

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-scripts/go_live.py — controlled live launch path for Claude/Codex.
+scripts/go_live.py — controlled live launch path for Gemini/Codex.
 
 This is the only sanctioned automated transition into live mode.
 It performs a narrow preflight, stops the paper launchd bot, starts the live

@@ -41,7 +41,7 @@ and the system can learn over time.
 - [[01_current_system/Current Active Logic.md]] — current active spot truth-lane state
 - [[10_decisions/Decision Log.md]] — why key changes were made
 - AGENTS.md (repo root) — canonical source of truth
-- CLAUDE.md (repo root) — concise Claude-facing companion
+- GEMINI.md (repo root) — concise Gemini-facing companion
 
 ---
 

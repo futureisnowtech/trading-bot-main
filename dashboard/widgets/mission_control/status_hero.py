@@ -113,7 +113,7 @@ def render_status_hero():
             for err in _all_issues:
                 _is_live = err.get("live", False)
                 badge_color = (
-                    "#7c3aed" if err["fix_type"] == "Claude Code" else "#0ea5e9"
+                    "#7c3aed" if err["fix_type"] == "Gemini Code" else "#0ea5e9"
                 )
                 fix_label = err["fix_type"].upper()
                 count_str = f"×{err['count']}" if err["count"] > 1 else ""

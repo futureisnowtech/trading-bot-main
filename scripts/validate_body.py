@@ -902,7 +902,7 @@ try:
     repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     version_sources = [
         os.path.join(repo_root, "AGENTS.md"),
-        os.path.join(repo_root, "CLAUDE.md"),
+        os.path.join(repo_root, "GEMINI.md"),
     ]
 
     for version_source in version_sources:
@@ -931,7 +931,7 @@ try:
                 )
                 raise StopIteration
 
-    warn("No version source found (checked AGENTS.md, CLAUDE.md)")
+    warn("No version source found (checked AGENTS.md, GEMINI.md)")
 except StopIteration:
     pass
 except Exception as e:

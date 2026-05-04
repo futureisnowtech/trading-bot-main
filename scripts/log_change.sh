@@ -1,7 +1,7 @@
 #!/bin/bash
 # log_change.sh — Append an entry to CHANGELOG.md.
 # Usage: bash scripts/log_change.sh "Brief description of what changed"
-# Called by Claude (or you) after any modification to the project.
+# Called by Gemini (or you) after any modification to the project.
 
 PROJ="$(cd "$(dirname "$0")/.." && pwd)"
 CHANGELOG="$PROJ/CHANGELOG.md"

@@ -101,7 +101,7 @@ def _fingerprint_msg(msg: str) -> str:
 def _classify_error(source: str, message: str) -> dict:
     """
     Return {category, fix_type, fix_prompt} for a given error.
-    fix_type is either 'Claude Code' (deep code changes) or 'Codex' (verification/proof).
+    fix_type is either 'Gemini Code' (deep code changes) or 'Codex' (verification/proof).
     """
     s, m = source.lower(), message.lower()
 
@@ -110,7 +110,7 @@ def _classify_error(source: str, message: str) -> dict:
         if "stagnant" in m:
             return {
                 "category": "Dead-Money Position",
-                "fix_type": "Claude Code",
+                "fix_type": "Gemini Code",
                 "fix_prompt": (
                     "The dead-money exit (priority 7, scheduler/v10_runner.py ~line 1544) "
                     "fires when: held >24h AND price drift <0.5×ATR_at_entry AND no trailing AND no scale-out.\n"
@@ -123,7 +123,7 @@ def _classify_error(source: str, message: str) -> dict:
         if "heartbeat" in m or "liveness" in m:
             return {
                 "category": "Scan Heartbeat Missing",
-                "fix_type": "Claude Code",
+                "fix_type": "Gemini Code",
                 "fix_prompt": (
                     "The scan loop is not writing heartbeats on schedule. "
                     "1) Verify config.py: CRYPTO_SCAN_INTERVAL_SECONDS = 300 (not 15). "
@@ -161,7 +161,7 @@ def _classify_error(source: str, message: str) -> dict:
         if "error rate" in m or "errors in last" in m:
             return {
                 "category": "High Error Rate (10+/hr)",
-                "fix_type": "Claude Code",
+                "fix_type": "Gemini Code",
                 "fix_prompt": (
                     "Query which sources are throwing errors:\n"
                     "python3 -c \"import sqlite3; c=sqlite3.connect('logs/trades.db'); "
@@ -175,7 +175,7 @@ def _classify_error(source: str, message: str) -> dict:
         if "halted" in m:
             return {
                 "category": "Risk Manager Halted",
-                "fix_type": "Claude Code",
+                "fix_type": "Gemini Code",
                 "fix_prompt": (
                     'python3 -c "from risk.risk_manager import get_risk_manager; '
                     "rm=get_risk_manager(); "
@@ -205,7 +205,7 @@ def _classify_error(source: str, message: str) -> dict:
             _ibkr_port = int(_os2.environ.get("IBKR_PORT", "7496"))
         return {
             "category": "IBKR / TWS Disconnected",
-            "fix_type": "Claude Code",
+            "fix_type": "Gemini Code",
             "fix_prompt": (
                 "1. Confirm TWS is open and the API is enabled:\n"
                 "   TWS → Edit → Global Configuration → API → Settings\n"
@@ -234,7 +234,7 @@ def _classify_error(source: str, message: str) -> dict:
         ):
             return {
                 "category": "Exchange API Error",
-                "fix_type": "Claude Code",
+                "fix_type": "Gemini Code",
                 "fix_prompt": (
                     "scanner.py failed to fetch from an exchange endpoint. "
                     "Check: curl -s 'https://futures.kraken.com/derivatives/api/v3/tickers' | head -c 200\n"
@@ -267,7 +267,7 @@ def _classify_error(source: str, message: str) -> dict:
     if any(kw in s for kw in ("risk", "kill_switch", "drawdown", "risk_manager")):
         return {
             "category": "Risk / Kill Switch",
-            "fix_type": "Claude Code",
+            "fix_type": "Gemini Code",
             "fix_prompt": (
                 'python3 -c "from kill_switch import check_balance; print(check_balance())"\n'
                 'python3 -c "from risk.risk_manager import get_risk_manager; '
@@ -282,7 +282,7 @@ def _classify_error(source: str, message: str) -> dict:
     if any(kw in s for kw in ("broker", "execution", "perp", "perps_engine", "ibkr")):
         return {
             "category": "Execution / Broker",
-            "fix_type": "Claude Code",
+            "fix_type": "Gemini Code",
             "fix_prompt": (
                 'python3 -c "from execution.binance_broker import BinanceBroker; '
                 "b=BinanceBroker(); print('paper:', b.paper)\"\n"
@@ -295,7 +295,7 @@ def _classify_error(source: str, message: str) -> dict:
     # ── Default / unknown ─────────────────────────────────────────────────────
     return {
         "category": "System Error",
-        "fix_type": "Claude Code",
+        "fix_type": "Gemini Code",
         "fix_prompt": (
             f"Error from source='{source}'. Find where it's logged:\n"
             f"grep -rn 'source=\"{source}\"\\|source=\\'{source}\\'' "

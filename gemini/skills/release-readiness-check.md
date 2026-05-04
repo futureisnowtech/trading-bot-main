@@ -4,7 +4,7 @@ Use this skill when the user wants a grounded answer to whether the **active spo
 
 ## Read First
 1. `AGENTS.md`
-2. `CLAUDE.md`
+2. `GEMINI.md`
 3. `scripts/check_readiness.py`
 4. `scripts/live_runtime_audit.py`
 5. `scripts/go_live_audit.py`

@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash $CLAUDE_PROJECT_DIR/.claude/hooks/pre_bash_blocker.sh",
+            "command": "bash $GEMINI_PROJECT_DIR/.gemini/hooks/pre_bash_blocker.sh",
             "timeout": 60,
             "statusMessage": "Safety check..."
           }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash $CLAUDE_PROJECT_DIR/.claude/hooks/pre_edit_protector.sh",
+            "command": "bash $GEMINI_PROJECT_DIR/.gemini/hooks/pre_edit_protector.sh",
             "timeout": 10,
             "statusMessage": "Checking protected files..."
           }
@@ -30,12 +30,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash $CLAUDE_PROJECT_DIR/.claude/hooks/post_cmd_logger.sh",
+            "command": "bash $GEMINI_PROJECT_DIR/.gemini/hooks/post_cmd_logger.sh",
             "timeout": 5
           },
           {
             "type": "command",
-            "command": "bash $CLAUDE_PROJECT_DIR/.claude/hooks/post_deploy_check.sh",
+            "command": "bash $GEMINI_PROJECT_DIR/.gemini/hooks/post_deploy_check.sh",
             "timeout": 10,
             "statusMessage": "Verifying deployment..."
           }
@@ -46,19 +46,19 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash $CLAUDE_PROJECT_DIR/.claude/hooks/post_py_linter.sh",
+            "command": "bash $GEMINI_PROJECT_DIR/.gemini/hooks/post_py_linter.sh",
             "timeout": 30,
             "statusMessage": "Linting..."
           },
           {
             "type": "command",
-            "command": "bash $CLAUDE_PROJECT_DIR/.claude/hooks/post_test_runner.sh",
+            "command": "bash $GEMINI_PROJECT_DIR/.gemini/hooks/post_test_runner.sh",
             "timeout": 90,
             "statusMessage": "Running targeted tests..."
           },
           {
             "type": "command",
-            "command": "bash $CLAUDE_PROJECT_DIR/scripts/reload_on_change.sh",
+            "command": "bash $GEMINI_PROJECT_DIR/scripts/reload_on_change.sh",
             "timeout": 15,
             "statusMessage": "Scheduling bot reload..."
           }
@@ -70,7 +70,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash $CLAUDE_PROJECT_DIR/.claude/hooks/stop_auto_commit.sh",
+            "command": "bash $GEMINI_PROJECT_DIR/.gemini/hooks/stop_auto_commit.sh",
             "timeout": 90,
             "statusMessage": "Committing changes..."
           }

@@ -1,19 +1,58 @@
 import os
 import logging
-import requests
 import json
 import sqlite3
 import traceback
-from typing import Optional
+from typing import Optional, List, Dict
 import system_state
 from runtime.runtime_state import get_lane_state, get_system_state
 
 try:
-    from config import CLAUDE_MODEL
+    import google.generativeai as genai
+    HAS_GEMINI_SDK = True
 except ImportError:
-    CLAUDE_MODEL = "claude-3-5-sonnet-latest"
+    HAS_GEMINI_SDK = False
+
+try:
+    from config import GEMINI_MODEL
+except ImportError:
+    GEMINI_MODEL = "gemini-2.0-flash"
 
 logger = logging.getLogger(__name__)
+
+
+def execute_sql(query: str) -> str:
+    """
+    Safe, read-only SQL execution for the AI agent.
+    Targets logs/trades.db (open_positions, spot_edge_conditions, etc).
+    """
+    q_upper = query.strip().upper()
+    if not q_upper.startswith("SELECT"):
+        return "Error: Only SELECT queries are allowed."
+
+    forbidden = ["DROP", "DELETE", "UPDATE", "INSERT", "ALTER", "CREATE", "REPLACE"]
+    if any(cmd in q_upper for cmd in forbidden):
+        return "Error: Data modification or structural changes are strictly forbidden."
+
+    try:
+        db_path = os.path.join(os.getcwd(), "logs", "trades.db")
+        with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            # Execute with a 5-second timeout to prevent long-running queries
+            conn.execute("PRAGMA query_only = ON")
+            rows = conn.execute(query).fetchall()
+            if not rows:
+                return "Query executed successfully. Result: No rows returned."
+            
+            # Limit results to prevent context overflow (max 50 rows)
+            data = [dict(r) for r in rows[:50]]
+            res = json.dumps(data, indent=2)
+            if len(rows) > 50:
+                res += f"\n... (truncated {len(rows)-50} more rows)"
+            return res
+    except Exception as e:
+        logger.error(f"AI SQL Error: {e}")
+        return f"Database Error: {str(e)}"
 
 
 def get_repo_context() -> str:
@@ -52,7 +91,6 @@ def get_repo_context() -> str:
     try:
         with open("runtime/spot_strategy.py", "r") as f:
             src = f.read()
-        # Extract just the execution profile section to stay within token budget
         marker = "def _sigmoid_sizing"
         idx = src.find(marker)
         snippet = src[idx : idx + 3000] if idx != -1 else src[-3000:]
@@ -105,43 +143,32 @@ def get_repo_context() -> str:
     except Exception as e:
         context.append(f"Error reading logs: {e}")
 
-    # 5. Recent System Events (Database)
-    try:
-        db_path = os.path.join(os.getcwd(), "logs", "trades.db")
-        with sqlite3.connect(db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                "SELECT ts, level, message FROM system_events ORDER BY ts DESC LIMIT 5"
-            ).fetchall()
-            events = [dict(r) for r in rows]
-            context.append("### Recent System Events\n" + json.dumps(events, indent=2))
-    except Exception as e:
-        context.append(f"Error reading system events: {e}")
-
     return "\n\n".join(context)
 
 
 def ask_ai(query: str) -> str:
     """
-    Analyze the user query using Claude with repo-wide context.
+    Analyze the user query using Gemini with repo-wide context and DB tool access.
     """
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    api_key = os.environ.get("GOOGLE_API_KEY")
     if not api_key:
-        return "Error: ANTHROPIC_API_KEY is not set."
+        return "Error: GOOGLE_API_KEY is not set."
 
-    model = os.environ.get("CLAUDE_MODEL") or CLAUDE_MODEL
-    # In May 2026, the 'legacy' 3.5 names might be 404ing.
-    # We will trust the canonical 'config.py' which specifies 'claude-sonnet-4-6'.
+    if not HAS_GEMINI_SDK:
+        return "Error: google-generativeai package not installed."
+
+    genai.configure(api_key=api_key)
+    model_name = os.environ.get("GEMINI_MODEL") or GEMINI_MODEL
 
     context = get_repo_context()
 
-    prompt = (
-        "You are Gemini CLI, an AI agent inside a sophisticated algo-trading system.\n"
+    system_instruction = (
+        "You are Gemini CLI, the canonical AI operator for this algo-trading system.\n"
         "Your goal is to provide deep repo-intelligence based on live data.\n\n"
         "### ENHANCED MEMORY PROTOCOL: EXECUTION TRUTH ###\n"
         "When reasoning about live spot readiness, execution profiles, or regime constraints, "
         "`AGENTS.md` acts as the governance layer, but it does NOT contain the mathematical truth.\n"
-        "To understand the actual execution logic, use the following read order:\n"
+        "To understand the actual execution logic, you MUST execute the following read order:\n"
         "1. Read `AGENTS.md` for the current live lane architecture and hard constraints.\n"
         "2. Explicitly load and parse `runtime/spot_strategy.py`.\n"
         "3. Analyze `calculate_execution_profile()` to understand the active continuous z-score "
@@ -150,35 +177,25 @@ def ask_ai(query: str) -> str:
         "4. Check `data/edge_monitor.py` for the shadow state variables feeding those models.\n"
         "Never claim the system is unaware of a logic upgrade without first verifying the "
         "continuous execution math inside `runtime/spot_strategy.py`.\n\n"
-        f"### CONTEXT ###\n{context}\n\n"
-        f"### USER QUERY ###\n{query}\n\n"
-        "Analyze the context and answer the query. Be professional, concise, and senior.\n"
-        "If suggesting actions, adhere to the 'Spot Truth-Lane Contract'."
+        "### TOOLS ###\n"
+        "You have access to the `execute_sql` tool. Use it to query `logs/trades.db` for "
+        "live exposure (open_positions table) and active mathematical constraints (spot_edge_conditions).\n\n"
+        f"### CONTEXT ###\n{context}"
     )
 
-    url = "https://api.anthropic.com/v1/messages"
-    headers = {
-        "x-api-key": api_key,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-    }
-
-    data = {
-        "model": model,
-        "max_tokens": 1000,
-        "messages": [{"role": "user", "content": prompt}],
-    }
-
     try:
-        response = requests.post(url, headers=headers, json=data, timeout=30)
-        if response.status_code != 200:
-            error_data = response.json()
-            msg = error_data.get("error", {}).get("message", "Unknown error")
-            logger.error(f"AI Backend Error ({response.status_code}): {msg}")
-            return f"AI Backend Error ({response.status_code}): {msg}"
+        # Define the tool
+        # In the google-generativeai SDK, tools are passed to the GenerativeModel
+        model = genai.GenerativeModel(
+            model_name=model_name,
+            system_instruction=system_instruction,
+            tools=[execute_sql]
+        )
 
-        result = response.json()
-        return result["content"][0]["text"]
+        chat = model.start_chat(enable_automatic_function_calling=True)
+        response = chat.send_message(query)
+        
+        return response.text
     except Exception as e:
-        logger.error(f"AI Agent exception: {e}")
-        return f"Error connecting to AI backend: {str(e)}"
+        logger.error(f"Gemini Agent exception: {e}")
+        return f"Error connecting to Gemini backend: {str(e)}"

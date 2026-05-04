@@ -10,7 +10,7 @@ Checks:
   2. Candidate journaling health (scan_candidates populated / labeled)
   3. Candidate funnel analytics (entered vs vetoed vs blocked, top veto reasons)
   4. Outcome labeling lag / backlog
-  5. Repo truth drift (CLAUDE.md version vs runtime version)
+  5. Repo truth drift (GEMINI.md version vs runtime version)
   6. Learning layer health (signal_stats Bayesian weight changes)
   7. Retention (table sizes, prune old rows)
 
@@ -411,22 +411,22 @@ def _check_candidate_funnel() -> dict:
 def _check_repo_drift() -> dict:
     result: dict[str, Any] = {
         "status": "unknown",
-        "claude_md_version": None,
+        "gemini_md_version": None,
         "detail": "",
     }
     try:
-        claude_md = ROOT / "CLAUDE.md"
-        if not claude_md.exists():
+        gemini_md = ROOT / "GEMINI.md"
+        if not gemini_md.exists():
             result["status"] = "warn"
-            result["detail"] = "CLAUDE.md not found"
+            result["detail"] = "GEMINI.md not found"
             return result
 
-        text = claude_md.read_text(encoding="utf-8")
+        text = gemini_md.read_text(encoding="utf-8")
         m = re.search(r"Current Version:\s*(v[\d.]+)", text)
         version = m.group(1) if m else "unknown"
-        result["claude_md_version"] = version
+        result["gemini_md_version"] = version
         result["status"] = "pass"
-        result["detail"] = f"CLAUDE.md version: {version}"
+        result["detail"] = f"GEMINI.md version: {version}"
     except Exception as e:
         result["status"] = "error"
         result["detail"] = str(e)[:200]

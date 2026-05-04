@@ -13,7 +13,7 @@ algo_trading_final/                                     (project root)
 ├── setup.py                                             103 lines
 ├── run_backtest.py                                      139 lines
 ├── requirements.txt                                      ~45 lines
-├── CLAUDE.md                                          ~500 lines
+├── GEMINI.md                                          ~500 lines
 ├── CHANGELOG.md                                         varies
 │
 ├── alerts/
@@ -167,11 +167,11 @@ TOTAL (Python files only): ~24,796 lines across 67 .py files
 
 | File | Purpose | Quality | Reusability | Notes |
 |------|---------|---------|-------------|-------|
-| `learning/ai_prescreener.py` (175) | Batch Claude Haiku score for all crypto pairs | 7 | 5 | Good cost-saving gate. Fail-open on API error. |
+| `learning/ai_prescreener.py` (175) | Batch Gemini Haiku score for all crypto pairs | 7 | 5 | Good cost-saving gate. Fail-open on API error. |
 | `learning/dynamic_weights.py` (188) | Live conviction weights with Bayesian + meta-learner | 7 | 6 | 5-min cache, invalidates on close. Clean interface. |
 | `learning/intelligence_bridge.py` (256) | Backtest → signal_stats pipeline | 7 | 6 | Closes backtest-to-live gap. Good architecture. |
 | `learning/live_backtest_validator.py` (186) | Background 30d rolling backtest every 4h | 6 | 4 | Good concept. Zero extra API calls. Results injected into debate. |
-| `learning/meta_learner.py` (369) | Claude analyzes last 100 trades, recommends signal weight deltas | 7 | 5 | Fires after every 10 trade closes. Meta-learning layer on top of Bayesian. |
+| `learning/meta_learner.py` (369) | Gemini analyzes last 100 trades, recommends signal weight deltas | 7 | 5 | Fires after every 10 trade closes. Meta-learning layer on top of Bayesian. |
 | `learning/ml_signal.py` (267) | LightGBM gate: P(win) from 90d rolling trade_attribution | 7 | 6 | Retrains every 50 closes. 19 signal features. Sklearn fallback. Clean. |
 | `learning/post_trade_analyzer.py` (265) | Why-this-trade-worked/failed engine | 7 | 7 | Called on every close. Structured lesson generation. |
 | `learning/signal_performance.py` (567) | Bayesian signal stats: 4 tables | 8 | 8 | Core of the learning system. Prior → posterior formula solid. |
@@ -278,7 +278,7 @@ TOTAL (Python files only): ~24,796 lines across 67 .py files
 ### AI / ML
 | Package | Purpose |
 |---------|---------|
-| anthropic (implicit) | Claude API — 3 debate agents + exits |
+| anthropic (implicit) | Gemini API — 3 debate agents + exits |
 | LightGBM / sklearn | ML signal gate |
 | lancedb ≥0.6.0 | Vector memory (supplemental) |
 | sentence-transformers ≥2.7.0 | Text embeddings for LanceDB |
@@ -333,10 +333,10 @@ This section is brutally honest. It is organized from most critical to least.
 ### CRITICAL (blocks the overhaul)
 
 **GAP 1: No MCP server**
-The most impactful missing piece. Zero MCP tools means Claude Code cannot call
+The most impactful missing piece. Zero MCP tools means Gemini CLI cannot call
 trading functions. Every interaction is text-based and unreliable. The overhaul
 adds Lane 1 (Alpaca options), Lane 2 (Bybit), and Lane 3 (Polymarket/Kalshi) —
-all of which require Claude to call tools programmatically. Without an MCP server,
+all of which require Gemini to call tools programmatically. Without an MCP server,
 the overhaul cannot function as designed. Fix first.
 
 **GAP 2: job_runner.py is a 1,812-line god object**
@@ -363,7 +363,7 @@ simulated. Testnet prices do not match mainnet prices during volatile periods.
 **GAP 5: Tradovate is fully simulated, not a real broker**
 Tradovate requires a paid subscription for API access — there is no free demo tier.
 The current implementation uses yfinance for pricing and simulates fills. The system
-CLAUDE.md says "futures live trading" but no real futures trades are being executed.
+GEMINI.md says "futures live trading" but no real futures trades are being executed.
 Either accept this is simulation-only or replace with a broker that has a real demo
 API (e.g., Interactive Brokers paper via ibkr-web-api).
 
@@ -394,7 +394,7 @@ Critical gaps:
   substantial damage is done
 
 **GAP 9: Single-LLM architecture**
-All AI analysis uses only Claude (Anthropic). If the Anthropic API has an outage,
+All AI analysis uses only Gemini (Anthropic). If the Anthropic API has an outage,
 all three lanes stop functioning. The Polymarket bot reference shows how to run
 GPT-4o + Claude + Gemini in parallel for robustness and ensemble quality.
 Multi-LLM also reduces model-specific biases in debate results.
@@ -409,7 +409,7 @@ Currently confidence scores are uncalibrated numbers.
 **GAP 11: Sequential, blocking I/O architecture**
 `job_runner.py` scans symbols sequentially: while scanning BTC, ETH waits.
 With 20 crypto pairs + 5 equity + futures + perp, one slow API call can delay
-the entire scan cycle. All broker calls, indicator calculations, and Claude API
+the entire scan cycle. All broker calls, indicator calculations, and Gemini API
 calls are synchronous and blocking. A modern async architecture (asyncio +
 concurrent.futures) would scan all symbols simultaneously.
 
@@ -426,7 +426,7 @@ currently kills the bot silently.
 
 **GAP 13: Python 3.14 is macOS-specific and cutting-edge**
 Python 3.14 is the latest release (2025). Many trading packages target 3.9-3.12.
-The EDEADLK bug mentioned in CLAUDE.md is a Python 3.14 .pyc file lock issue on
+The EDEADLK bug mentioned in GEMINI.md is a Python 3.14 .pyc file lock issue on
 macOS. Deploying to Linux VPS (the standard for always-on trading) requires testing
 on a different Python version. The lock-in to one machine running macOS is fragile.
 
@@ -477,7 +477,7 @@ YAML/JSON state file alongside the markdown would enable programmatic access.
 
 **GAP 21: Tradovate quarterly contract symbol requires manual update**
 `MES_SYMBOL` in `tradovate_broker.py` must be manually updated each quarter
-(MESM6 → MESU6 → MESZ6 → MESH7). There is a reminder in CLAUDE.md but
+(MESM6 → MESU6 → MESZ6 → MESH7). There is a reminder in GEMINI.md but
 no automation. Forgetting this rollover would cause silent simulation failures.
 
 ---

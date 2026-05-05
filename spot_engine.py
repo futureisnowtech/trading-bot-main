@@ -565,7 +565,15 @@ def _maker_first_buy(
     *,
     final_spot_score: float | None = None,
     spot_state: dict | None = None,
+    target_route: str = "maker_first",
 ) -> tuple[Optional[dict], str, str]:
+    if target_route == "taker":
+        order = broker.buy_spot(symbol, size_usd)
+        if order:
+            order["execution_route"] = "taker"
+            return order, "taker", "none"
+        return None, "taker_failed", "market_order_rejected"
+
     top = broker.get_spot_top_of_book(symbol)
     ok, veto = _execution_micro_ok(symbol, top)
     if not ok:
@@ -758,11 +766,20 @@ def open_spot(
     score_used = float(
         final_spot_score if final_spot_score is not None else composite_score
     )
+    # v18.16: Dynamic Taker Routing for TREND breakouts with high structural conviction
+    target_route = "maker_first" if not paper else "paper_market"
+    if (
+        not paper
+        and regime == "TREND"
+        and int(spot_state.get("structural_confirm_count") or 0) >= 3
+    ):
+        target_route = "taker"
+
     block_reason, score_floor = spot_quality_block_reason(
         clean,
         spot_state,
         final_spot_score=score_used,
-        execution_route="maker_first" if not paper else "paper_market",
+        execution_route=target_route,
         tv_context=tv_context,
     )
     if block_reason:
@@ -798,6 +815,7 @@ def open_spot(
             size_usd,
             final_spot_score=score_used,
             spot_state=spot_state,
+            target_route=target_route,
         )
         if execution_route == "skipped_microstructure":
             logger.info(f"[spot_engine] {clean} blocked — microstructure {micro_veto}")
@@ -1054,6 +1072,16 @@ def close_spot(
         order.get("average_filled_price") or broker.get_mark_price(clean) or entry_price
     )
     filled_qty = float(order.get("filled_size") or qty)
+
+    # v18.16: Force DB to zero immediately after fill to prevent ghost positions
+    if not paper:
+        try:
+            con = sqlite3.connect(_get_db_path(), timeout=5)
+            con.execute("UPDATE open_positions SET qty = 0 WHERE symbol = ?", (clean,))
+            con.commit()
+            con.close()
+        except Exception as _e:
+            logger.debug(f"[spot_engine] ghost-kill failed for {clean}: {_e}")
     fee_usd = float(order.get("fee_usd") or 0.0)
     pnl_usd = (
         (exit_price - entry_price) * filled_qty

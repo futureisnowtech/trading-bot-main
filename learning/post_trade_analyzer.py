@@ -408,45 +408,6 @@ def analyze_closed_trade(
         f"net ${net_pnl:+.2f} | {exit_reason[:60]}"
     )
 
-    # ── Tax lot tracking ───────────────────────────────────────────────────────
-    try:
-        from learning.tax_tracker import record_tax_lot
-
-        # Map strategy name to asset class for tax treatment
-        asset_class_map = {
-            "crypto": "crypto",
-            "crypto_macd": "crypto",
-            "mean_reversion": "crypto",
-            "equity": "equity",
-            "equity_momentum": "equity",
-            "futures": "futures",
-            "futures_scalper": "futures",
-            "perp": "perp",
-        }
-        strat_lower = strategy.lower()
-        if "perp" in strat_lower:
-            asset_class = "perp"
-        elif "futures" in strat_lower:
-            asset_class = "futures"
-        elif "equity" in strat_lower:
-            asset_class = "equity"
-        else:
-            asset_class = asset_class_map.get(strat_lower.split("_")[0], "crypto")
-        record_tax_lot(
-            symbol=symbol,
-            strategy=strategy,
-            asset_class=asset_class,
-            entry_ts=entry_ts,
-            exit_ts=exit_ts or datetime.now(timezone.utc).isoformat(),
-            entry_price=entry_price,
-            exit_price=exit_price,
-            qty=qty,
-            fees_usd=fee_usd,
-            paper=paper,
-        )
-    except ModuleNotFoundError:
-        pass
-    except Exception as _te:
-        print(f"[tax_tracker] record error: {_te}")
+    # v18.16: Tax tracker excised
 
     return result

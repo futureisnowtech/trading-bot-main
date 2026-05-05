@@ -544,19 +544,23 @@ from telegram import Bot as LegacyBot
 
 
 def send_message(text: str):
-    try:
-        bot = LegacyBot(token=TOKEN)
-        chunks = chunk_message(text)
-        for chunk in chunks:
-            asyncio.run(
-                bot.send_message(
-                    chat_id=str(AUTHORIZED_USER_ID),
-                    text=chunk,
-                    parse_mode=ParseMode.HTML,
+    def _fire_and_forget():
+        try:
+            bot = LegacyBot(token=TOKEN)
+            chunks = chunk_message(text)
+            for chunk in chunks:
+                asyncio.run(
+                    bot.send_message(
+                        chat_id=str(AUTHORIZED_USER_ID),
+                        text=chunk,
+                        parse_mode=ParseMode.HTML,
+                    )
                 )
-            )
-    except Exception as e:
-        logger.error(f"Legacy send error: {e}")
+        except Exception as e:
+            logger.error(f"Legacy send error: {e}")
+
+    import threading
+    threading.Thread(target=_fire_and_forget, daemon=True).start()
 
 
 def send_liftoff():

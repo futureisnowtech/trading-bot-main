@@ -941,7 +941,7 @@ SCANNER_PARALLEL_WORKERS: int = int(os.getenv("SCANNER_PARALLEL_WORKERS", "8"))
 # ════════════════════════════════════════════════════════════════════
 # TRADINGVIEW WEBHOOK INTEGRATION
 # ════════════════════════════════════════════════════════════════════
-TV_SIGNALS_ENABLED: bool = os.getenv("TV_SIGNALS_ENABLED", "true").lower() == "true"
+TV_SIGNALS_ENABLED: bool = False
 TV_WEBHOOK_PORT: int = int(os.getenv("TV_WEBHOOK_PORT", "8765"))
 TV_WEBHOOK_SECRET: str = os.getenv("TV_WEBHOOK_SECRET", "")
 TV_SIGNAL_PROFILE_NAME: str = os.getenv(

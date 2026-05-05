@@ -418,6 +418,7 @@ def _store_cache(strategy: str, result: dict) -> None:
 # ══════════════════════════════════════════════════════════════════════════════
 
 _SHADOW_STATE: dict = {}
+_ADF_EMA_STATE: Dict[str, float] = {}
 _KYLE_LAMBDA_HISTORY: dict[str, list[float]] = {}
 _KYLE_LAMBDA_MAX_HISTORY = 1440  # 24h at 1-bar-per-minute cadence
 
@@ -577,7 +578,18 @@ async def update_shadow_state(
     else:
         is_fragile = False
 
-    adf_stat, is_stationary = _compute_adf_stat(prices)
+    adf_stat, _ = _compute_adf_stat(prices)
+    
+    # v18.16: Rolling ADF EMA (span=5) to prevent stationarity flicker
+    # alpha = 2/(span+1) = 2/6 = 0.3333
+    alpha = 0.3333
+    last_ema = _ADF_EMA_STATE.get(symbol, adf_stat)
+    ema_adf = (alpha * adf_stat) + ((1.0 - alpha) * last_ema)
+    _ADF_EMA_STATE[symbol] = ema_adf
+    
+    # Stationarity threshold: -2.86 (MacKinnon 5% critical value)
+    is_stationary = bool(ema_adf < -2.86)
+    
     ou_hl = _compute_ou_halflife(prices)
 
     # OU transition probability — P(price reaches 0.3% scalp target within one halflife)
@@ -596,7 +608,7 @@ async def update_shadow_state(
         "kalman_dev_pct": dev_pct,
         "kyle_lambda": round(kyle_lam, 8),
         "kyle_lambda_fragile": is_fragile,
-        "adf_stat": adf_stat,
+        "adf_stat": round(ema_adf, 4),
         "adf_stationary": is_stationary,
         "ou_halflife_bars": ou_hl,
         "ou_transition_prob": round(ou_prob, 4),

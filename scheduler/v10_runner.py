@@ -762,14 +762,8 @@ def _scan_and_trade_inner(spot_only: bool = False):
     _write_crypto_lane_runtime(open_pos)
 
     # TradingView is now an HTF context layer, not a synthetic candidate source.
-    tv_signals = _get_fresh_tv_signals()
-    tv_context_by_underlying = _tv_context_map(tv_signals)
-    for underlying, tv in tv_context_by_underlying.items():
-        logger.info(
-            f"[v10] TV HTF context: {underlying} bias={tv.get('htf_bias') or tv.get('direction')} "
-            f"profile={tv.get('profile_name') or tv.get('indicator_name') or 'tv'} "
-            f"age={float(tv.get('age_seconds') or 0.0):.0f}s"
-        )
+    # v18.16: TV excision — HTF context now exclusively derived from internal stack
+    tv_context_by_underlying = {}
 
     # Run scanner
     if scanner is None:

@@ -127,6 +127,7 @@ Current seeded `external_manual` holdings:
 - `STETH`
 
 Rules for `external_manual` holdings:
+- Manual seed holdings (external_manual) DO NOT quarantine a symbol. The bot may execute same-symbol live trades alongside manual bags.
 - always visible
 - never auto-closed
 - never adopted as bot-managed inventory

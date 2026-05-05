@@ -420,13 +420,9 @@ def build_signal_intelligence_section(attribution_rows, signal_leaderboard, agen
 
 
 def _get_tax_snapshot() -> str:
-    """Pull YTD tax summary from tax_tracker. Silent on error."""
-    try:
-        sys.path.insert(0, str(PROJECT_DIR))
-        from learning.tax_tracker import format_tax_summary_for_brain
-        return format_tax_summary_for_brain()
-    except Exception as e:
-        return f"*Tax snapshot unavailable: {e}*"
+    """Pull YTD tax summary. Silent on error."""
+    # v18.16: Tax tracker excised
+    return "*Tax snapshot disabled: module retired.*"
 
 
 def write_daily_summary(day: date, ta, sa, da, events, open_positions,

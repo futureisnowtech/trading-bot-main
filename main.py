@@ -65,7 +65,7 @@ BANNER = """
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--mode", choices=["paper", "live"], default=None)
+    # v18.16: Bot is LIVE only. --mode argument retired.
     p.add_argument("--equity-only", action="store_true")
     p.add_argument("--crypto-only", action="store_true")
     p.add_argument("--no-alerts", action="store_true")
@@ -75,14 +75,13 @@ def parse_args():
 def main():
     print(BANNER)
     args = parse_args()
-    if args.mode:
-        os.environ["PAPER_TRADING"] = "true" if args.mode == "paper" else "false"
+    
+    # v18.16: Hardcode LIVE mode.
+    os.environ["PAPER_TRADING"] = "false"
 
     import system_state
 
-    system_state.state.set_mode(
-        "PAPER" if os.environ.get("PAPER_TRADING", "true").lower() == "true" else "LIVE"
-    )
+    system_state.state.set_mode("LIVE")
 
     from config import (
         PAPER_TRADING,

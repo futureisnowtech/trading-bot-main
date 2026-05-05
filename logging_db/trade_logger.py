@@ -36,7 +36,7 @@ def init_db() -> None:
 
     cur.execute("""CREATE TABLE IF NOT EXISTS trades (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        ts TEXT NOT NULL, strategy TEXT NOT NULL, broker TEXT NOT NULL,
+        ts REAL NOT NULL, strategy TEXT NOT NULL, broker TEXT NOT NULL,
         symbol TEXT NOT NULL, action TEXT NOT NULL, order_type TEXT NOT NULL,
         qty REAL NOT NULL, price REAL NOT NULL, value_usd REAL NOT NULL,
         fee_usd REAL DEFAULT 0, pnl_usd REAL DEFAULT 0,
@@ -104,7 +104,7 @@ def init_db() -> None:
         "ALTER TABLE candidate_outcomes ADD COLUMN price_15m REAL DEFAULT 0",
         "ALTER TABLE candidate_outcomes ADD COLUMN ret_15m_pct REAL DEFAULT 0",
         # v13.7: funding rate at scan time for gate-quality analytics
-        "ALTER TABLE scan_candidates ADD COLUMN funding_rate REAL DEFAULT 0",
+        "ALTER TABLE scan_candidates ADD COLUMN funding_rate REAL DEFAULT NULL",
         # v16: scanner EV calibration — theoretical vs capped effective position
         "ALTER TABLE scan_candidates ADD COLUMN scanner_theoretical_position_usd REAL",
         "ALTER TABLE scan_candidates ADD COLUMN scanner_effective_position_usd REAL",
@@ -176,14 +176,14 @@ def init_db() -> None:
 
     cur.execute("""CREATE TABLE IF NOT EXISTS signals (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        ts TEXT NOT NULL, strategy TEXT NOT NULL, symbol TEXT NOT NULL,
+        ts REAL NOT NULL, strategy TEXT NOT NULL, symbol TEXT NOT NULL,
         signal TEXT NOT NULL, confidence REAL NOT NULL,
         reason TEXT, acted_on INTEGER DEFAULT 0, price REAL
     )""")
 
     cur.execute("""CREATE TABLE IF NOT EXISTS debate_results (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        ts TEXT NOT NULL, symbol TEXT NOT NULL,
+        ts REAL NOT NULL, symbol TEXT NOT NULL,
         buy_votes INTEGER, hold_votes INTEGER, sell_votes INTEGER,
         final_signal TEXT, confidence REAL,
         reasoning TEXT, bull_case TEXT, bear_case TEXT, key_risk TEXT,
@@ -192,13 +192,13 @@ def init_db() -> None:
 
     cur.execute("""CREATE TABLE IF NOT EXISTS system_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        ts TEXT NOT NULL, level TEXT NOT NULL,
+        ts REAL NOT NULL, level TEXT NOT NULL,
         source TEXT NOT NULL, message TEXT NOT NULL
     )""")
 
     cur.execute("""CREATE TABLE IF NOT EXISTS tv_signals (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        ts TEXT NOT NULL,
+        ts REAL NOT NULL,
         symbol TEXT NOT NULL,
         action_raw TEXT NOT NULL,
         direction TEXT NOT NULL,
@@ -225,14 +225,14 @@ def init_db() -> None:
 
     cur.execute("""CREATE TABLE IF NOT EXISTS api_costs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        ts TEXT NOT NULL, call_type TEXT NOT NULL,
+        ts REAL NOT NULL, call_type TEXT NOT NULL,
         input_tokens INTEGER DEFAULT 0, output_tokens INTEGER DEFAULT 0,
         cost_usd REAL DEFAULT 0, symbol TEXT
     )""")
 
     cur.execute("""CREATE TABLE IF NOT EXISTS edge_snapshots (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        ts TEXT NOT NULL,
+        ts REAL NOT NULL,
         market TEXT NOT NULL,
         symbol TEXT NOT NULL,
         v_score REAL,
@@ -264,7 +264,7 @@ def init_db() -> None:
     cur.execute("""CREATE TABLE IF NOT EXISTS scan_candidates (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         scan_id TEXT,
-        ts TEXT NOT NULL,
+        ts REAL NOT NULL,
         symbol TEXT NOT NULL,
         exchange TEXT,
         base_asset TEXT,
@@ -410,7 +410,7 @@ def init_db() -> None:
     cur.execute("""CREATE TABLE IF NOT EXISTS scan_funnels (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         scan_id TEXT,
-        ts TEXT NOT NULL,
+        ts REAL NOT NULL,
         scanner_candidates_total INTEGER DEFAULT 0,
         dual_exposure_block INTEGER DEFAULT 0,
         cooldown_block INTEGER DEFAULT 0,

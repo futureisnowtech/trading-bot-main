@@ -56,7 +56,11 @@ rsync -avz \
     --exclude '.pytest_cache' \
     --exclude '*.pyc' \
     --exclude 'sop_state.generated.js' \
+    --exclude '.env' \
     . "${NYC_USER}@${NYC_IP}:${PROJECT_DIR}/"
+
+echo "Injecting live .env to server (forcing PAPER_TRADING=false)..."
+cat .env | sed 's/^PAPER_TRADING=.*/PAPER_TRADING=false/' | ssh -p ${NYC_PORT} -o StrictHostKeyChecking=no ${NYC_USER}@${NYC_IP} "cat > ${PROJECT_DIR}/.env"
 
 # ── Server-side: restart stack and provision ─────────────────────────────────
 echo "Restarting Docker stack on NYC3..."

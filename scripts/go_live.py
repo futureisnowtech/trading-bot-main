@@ -138,18 +138,19 @@ def _coinbase_live_ready() -> None:
     broker = get_spot_broker()
     # Check if we are on the known management machine (MacBook)
     is_macbook = socket.gethostname() == "macbookair"
+    is_test = "PYTEST_CURRENT_TEST" in os.environ
 
     try:
         connected = broker.connect()
     except Exception as e:
-        if is_macbook and "401" in str(e):
+        if is_macbook and not is_test and "401" in str(e):
             print(f"[go_live] WARNING: Local auth returned 401 on MacBook. Assuming NYC Server is whitelisted. Proceeding...")
             return
         raise RuntimeError(f"Coinbase SPOT live auth failed: {e}")
 
     if not connected:
         # The broker.connect() might have logged a 401 already
-        if is_macbook:
+        if is_macbook and not is_test:
             print("[go_live] WARNING: Local connect() failed on MacBook. Likely an IP whitelist issue. Proceeding since NYC Server is the target...")
             return
         raise RuntimeError(
@@ -158,7 +159,7 @@ def _coinbase_live_ready() -> None:
 
     holdings = broker.sync_live_holdings()
     if holdings is None:
-        if is_macbook:
+        if is_macbook and not is_test:
             print("[go_live] WARNING: Holdings sync failed locally. Proceeding...")
             return
         raise RuntimeError("Coinbase SPOT live snapshot unavailable after connect().")
@@ -169,10 +170,11 @@ def _spot_truth_ready() -> None:
     import socket
 
     is_macbook = socket.gethostname() == "macbookair"
+    is_test = "PYTEST_CURRENT_TEST" in os.environ
     truth = get_spot_position_truth(paper=False)
 
     if not truth.get("snapshot_ok"):
-        if is_macbook:
+        if is_macbook and not is_test:
             print("[go_live] WARNING: Spot truth snapshot unavailable locally. Assuming IP whitelist restriction. Proceeding...")
             return
         raise RuntimeError("Spot truth snapshot unavailable — refusing live launch.")
@@ -183,7 +185,7 @@ def _spot_truth_ready() -> None:
             f"{b.get('symbol') or 'GLOBAL'}:{b.get('position_truth_status')}"
             for b in blockers
         )
-        if is_macbook:
+        if is_macbook and not is_test:
             print(f"[go_live] WARNING: Spot truth blockers present locally ({rendered}). Proceeding with assumption that server environment is clean...")
             return
         raise RuntimeError(
@@ -221,9 +223,10 @@ def main() -> int:
 
     connected, buying_power, readiness, blocked_reason = _load_crypto_lane()
     is_macbook = socket.gethostname() == "macbookair"
+    is_test = "PYTEST_CURRENT_TEST" in os.environ
 
     if readiness != "READY_FOR_TINY_LIVE":
-        if is_macbook and readiness == "DEGRADED":
+        if is_macbook and not is_test and readiness == "DEGRADED":
              print(f"[go_live] WARNING: Crypto lane is DEGRADED locally. Assuming this is due to local IP restriction. Proceeding...")
         else:
             raise RuntimeError(

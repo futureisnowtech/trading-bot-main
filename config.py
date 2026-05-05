@@ -707,24 +707,6 @@ REDDIT_CLIENT_SECRET: str = os.getenv("REDDIT_CLIENT_SECRET", "")
 REDDIT_USER_AGENT: str = os.getenv("REDDIT_USER_AGENT", "AlgoTradingBot/1.0")
 GEMINI_MODEL: str = "gemini-2.5-flash"  # Latest stable for this key
 GEMINI_MODEL_EXTENDED: str = "gemini-2.5-pro"  # For exit extended thinking
-GEMINI_DEBATE_MODEL: str = os.getenv(
-    "GEMINI_DEBATE_MODEL", "gemini-1.5-flash"
-)  # Debate agents (cheap)
-DEBATE_MAX_TOKENS: int = 700  # Raised from 300 — agents need room to reason deeply
-EXIT_REVIEW_MAX_TOKENS: int = (
-    1500  # Raised from 800 — exit reasoning is the most critical decision
-)
-MODERATOR_MAX_TOKENS: int = 900  # CIO synthesis
-# 3-agent debate — same agents for quick and full (no distinction needed)
-# funding_regime: macro + funding rate (crypto-native edge)
-# momentum_structure: ADX + squeeze + WAE + WaveTrend + MACD
-# risk_economics: fee math + ATR + volume + time-of-day gate
-QUICK_DEBATE_AGENTS: list = ["funding_regime", "momentum_structure", "risk_economics"]
-FULL_DEBATE_AGENTS: list = ["funding_regime", "momentum_structure", "risk_economics"]
-MES_DEBATE_AGENTS: list = ["mes_momentum_risk", "mes_quant", "mes_market_structure"]
-FULL_DEBATE_MIN_AGREEMENT: float = (
-    0.20 if PAPER_TRADING else 0.60
-)  # paper: any 1/3 agent BUY = BUY
 
 # ML signal gate — skip debate if P(win) below threshold
 # Calibrated to seeded data baseline (~9% WR from math-only backtest).

@@ -466,7 +466,7 @@ def run_health_check(force: bool = False) -> dict:
 
     # Summarise failures
     failures = [f"{k}: {v['detail']}" for k, v in checks.items() if not v["ok"]]
-    summary = f"Health [{status}] checks={passed} of {total}"
+    summary = f"System {status} | truth-lane={passed}/{total}"
     if failures:
         summary += " | FAIL: " + " | ".join(failures)
 

@@ -1,5 +1,5 @@
 # LLM Context Snapshot
-# Generated: 2026-05-05 01:14:19 UTC
+# Generated: 2026-05-05 17:11:13 UTC
 
 ### FILE: GEMINI.md ###
 ```
@@ -23,7 +23,6 @@ If this file ever conflicts with `AGENTS.md`, `AGENTS.md` wins.
 - Authoritative live lane: **Coinbase spot scalp**
 - Launch target: **tiny live only**
 - Canonical live-launch path: `python3 scripts/go_live.py`
-- Canonical return-to-paper path: `python3 scripts/go_paper.py`
 
 ## What Gemini Should Assume
 
@@ -99,6 +98,7 @@ When editing Gemini helper surfaces:
 - Active operator notes:
   - `brain/01_current_system/Current Active Logic.md`
   - `brain/01_current_system/Known Constraints.md`
+  - **Research Finding (2026-05-04):** V14 Archival Vaccination profiles recommend tightening ADF threshold to -3.10 and adding minimum ADX floors to block 'Workhorse' leakage.
 - Strategy / governance references:
   - `SCANNER_PRECISION_REPORT.md`
   - `STOP_MATRIX.md`
@@ -111,8 +111,10 @@ When editing Gemini helper surfaces:
 
 This repository still contains multiple strategy lanes and historical infrastructure, but operationally it is governed as:
 
-- **Authoritative live lane:** Coinbase spot scalp
-- **Current live decision standard:** truth-first, fee-aware, route-aware, evidence-gated
+- **Authoritative live lane:** Coinbase spot scalp (Two-Tower: Technical + Local ML)
+- **Legacy AI:** **RETIRED**. The multi-agent debate ensemble (Goku, analyst agents, consensus-voting) has been removed to reduce latency and cost.
+- **Active AI:** **Gemini Studio** (CLI intelligence/DB queries) and **Anthropic Sonnet** (Optional exit thesis sanity checks).
+- **Current live decision standard:** truth-first, fee-aware, route-aware, evidence-gated.
 - **Current launch target:** tiny live only
 - **Current dashboard / readiness authority:** the spot truth-lane contract
 
@@ -200,6 +202,7 @@ Current seeded `external_manual` holdings:
 - `STETH`
 
 Rules for `external_manual` holdings:
+- Manual seed holdings (external_manual) DO NOT quarantine a symbol. The bot may execute same-symbol live trades alongside manual bags.
 - always visible
 - never auto-closed
 - never adopted as bot-managed inventory
@@ -222,15 +225,15 @@ The live spot lane is intentionally harsh by default.
 - Route: `maker_first` only
 - `taker_fallback`: disabled by default
 - Structural confirm minimums:
-  - `TREND >= 2`
-  - `NEUTRAL >= 3`
+  - `TREND >= 1`
+  - `NEUTRAL >= 1`
 - Final score floors:
-  - `TREND >= 58`
-  - `NEUTRAL >= 60`
+  - `TREND >= 52`
+  - `NEUTRAL >= 52`
 - Path efficiency minimum: `0.20`
 - Frame floors:
-  - `TREND`: `5m >= 52`, `30m >= 55`
-  - `NEUTRAL`: `5m >= 55`, `30m >= 58`
+  - `TREND`: `5m >= 48`, `30m >= 50`
+  - `NEUTRAL`: `5m >= 50`, `30m >= 52`
 
 Exit profile contract:
 - stop widening: forbidden
@@ -341,7 +344,6 @@ If you need history, use git and archived notes. Do not restore old operator ass
 ```bash
 python3 main.py --mode paper
 python3 scripts/go_live.py
-python3 scripts/go_paper.py
 python3 scripts/check_readiness.py
 python3 scripts/live_runtime_audit.py
 python3 scripts/go_live_audit.py
@@ -3230,6 +3232,146 @@ What was directly confirmed (trades executed, DB rows present):
 **System version**: v9.0
 **Mode**: Mixed
 **Generated**: 2026-05-01 21:47:05 (auto)
+
+---
+
+## SUMMARY
+
+| Metric | Value |
+|--------|-------|
+| Total trade actions | 0 |
+| Completed trades (closes) | 0 |
+| Wins | 0 |
+| Losses | 0 |
+| Win rate | N/A |
+| Gross P&L | $+0.00 |
+| Total fees | $0.00 |
+| Net P&L (after fees) | $+0.00 |
+| Signals generated | 0 |
+| Signals acted on | 0 |
+| No debates run | |
+
+---
+
+## CONFIRMED TODAY
+
+What was directly confirmed (trades executed, DB rows present):
+
+- Trades logged: 0
+- LIVE trades included
+- Database queried successfully: YES
+
+---
+
+## REGIME
+
+- Dominant regime: Unknown (no debate data)
+- Notable events: see below
+- Fear & Greed: (check Alternative.me — not auto-logged)
+- SPY direction: (check manually if needed)
+
+---
+
+## BY STRATEGY
+
+  - No trades
+
+---
+
+## BY SYMBOL (top 5 by P&L impact)
+
+  - No closed trades
+
+---
+
+## BEST / WORST TRADE
+
+- Best:  None
+- Worst: None
+
+---
+
+## OPEN POSITIONS AT END OF DAY
+
+  - SOL (v10_perp) | entry $150.0000 | stop $145.0000 | target $160.0000
+
+---
+
+## SYSTEM EVENTS (latest 10)
+
+  - No notable events
+
+---
+
+## FEE ANALYSIS
+
+- Total fees: $0.00
+- Fee drag: 0.0% of $500 account
+- Daily limit ($50 = 10%): YES
+
+---
+
+## SYSTEM ALERTS
+
+- No alerts triggered today
+
+---
+
+## SETUPS THAT MADE MONEY AFTER FEES
+
+- None confirmed today
+
+---
+
+## SETUPS THAT LOST AFTER FEES
+
+- None confirmed today
+
+---
+
+## WHAT TO KEEP / CHANGE / TEST / STOP
+
+**Keep / Change / Test / Stop**: No attribution data yet for today.
+
+*Signals will populate after trades close and are attributed.*
+
+**Signal Leaderboard** (cumulative Bayesian pts, ≥3 fires):
+| Signal | Regime | Fires | Win% | Avg P&L | Bayes Pts |
+|--------|--------|-------|------|---------|-----------|
+| williams_r | ranging | 7 | 0% | $-0.871 | 20.0 |
+| williams_r | any | 7 | 0% | $-0.871 | 20.0 |
+| avwap_deviation | ranging | 5 | 0% | $-1.224 | 10.0 |
+| avwap_deviation | any | 5 | 0% | $-1.224 | 10.0 |
+| kst_cross_long | ranging | 3 | 0% | $-0.376 | 10.0 |
+| kst_cross_long | any | 3 | 0% | $-0.376 | 10.0 |
+| supertrend_bullish | ranging | 18 | 33% | $+0.187 | 8.2 |
+| supertrend_bullish | any | 18 | 33% | $+0.187 | 8.2 |
+| lrsi_oversold | ranging | 4 | 25% | $-1.204 | 8.0 |
+| lrsi_oversold | any | 4 | 25% | $-1.204 | 8.0 |
+
+---
+
+## TAX SNAPSHOT (YTD)
+
+*Tax snapshot unavailable: No module named 'learning.tax_tracker'*
+
+---
+
+## LINKS
+
+- Parameter set: [[03_parameter_sets/Param Set - v4.3 Active.md]]
+- Open Questions: [[01_current_system/Open Questions.md]]
+```
+
+#### File: brain/06_daily_summaries/2026-05-04.md ####
+```
+# 2026-05-04
+
+#daily-summary
+
+**System version**: v9.0
+**Mode**: Mixed
+**Generated**: 2026-05-04 21:49:34 (auto)
 
 ---
 
@@ -8012,6 +8154,21 @@ def spot_quality_block_reason(
         microprice=float(spot_state.get("microprice") or 0.0),
         mid_price=float(spot_state.get("mid_price") or 0.0),
     )
+    
+    # ── Push Stochastic Vitals ────────────────────────────────────────────────
+    try:
+        from data.edge_monitor import get_shadow_state
+        shadow = get_shadow_state(clean)
+        system_state.state.update_stochastic(clean, {
+            "kalman_dev": shadow.get("kalman_dev", 0.0),
+            "kyle_lambda_fragile": shadow.get("kyle_lambda_fragile", False),
+            "ou_prob": shadow.get("ou_transition_prob", 0.5),
+            "multiplier": 1.0, 
+            "status": "READY"
+        })
+    except Exception:
+        pass
+        
     system_state.state.update_prometheus()
 
     floor = score_floor_for_symbol(
@@ -8110,6 +8267,15 @@ def spot_quality_block_reason(
         return "volatility_quality_too_low", floor
     # Hard vetoes from execution profile (ATR fee floor, extreme selling aggression)
     _exec_mult, _exec_tag = calculate_execution_profile(symbol, spot_state)
+    
+    # Update system state with final multiplier and tag
+    try:
+        current_stoch = system_state.state.get_state()["strategy"].get("stochastic", {}).get(clean, {})
+        current_stoch.update({"multiplier": _exec_mult, "status": _exec_tag})
+        system_state.state.update_stochastic(clean, current_stoch)
+    except Exception:
+        pass
+
     if _exec_mult == 0.0:
         return _exec_tag, floor
     return "", floor
@@ -8225,6 +8391,18 @@ _cache: Dict[str, dict] = {}
 _PROJ_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _DB_PATH = os.path.join(_PROJ_ROOT, "logs", "trades.db")
 
+from config import PAPER_TRADING
+
+# ─── Market-level Constants (Ported from risk/edge_monitor.py) ───────────────
+WINDOW = 20               # rolling trade window
+EDGE_LOW_THRESHOLD  = 0.30  # below this = degraded edge
+EDGE_HIGH_THRESHOLD = 0.70  # above this = strong edge
+CONSECUTIVE_TRIGGER = 2   # windows in a row before auto-action fires
+
+# ─── Consecutive window counters (in-memory, resets on restart) ──────────────
+_consecutive_low:  Dict[str, int] = {}   # market → int (consecutive low-edge windows)
+_consecutive_high: Dict[str, int] = {}   # market → int (consecutive high-edge windows)
+
 
 def _conn():
     if not os.path.exists(_DB_PATH):
@@ -8232,6 +8410,183 @@ def _conn():
     c = sqlite3.connect(_DB_PATH)
     c.row_factory = sqlite3.Row
     return c
+
+
+# ─── Market-level Helpers ────────────────────────────────────────────────────
+
+def strategy_to_market(strategy: str) -> str:
+    """Map a strategy name string to a market label."""
+    s = strategy.lower()
+    if 'poly' in s:
+        return 'polymarket'
+    if 'futures' in s or 'mes' in s or 'scalp' in s:
+        return 'mes'
+    return 'crypto'   # default
+
+
+def _get_market_trades(market: str, window: int, paper: bool) -> list:
+    """Return the most recent `window` completed trades for `market`."""
+    try:
+        conn = _conn()
+        if not conn: return []
+        
+        if market == 'polymarket':
+            rows = conn.execute(
+                "SELECT pnl_usd, value_usd, fee_usd FROM trades "
+                "WHERE paper=? AND strategy LIKE '%poly%' AND pnl_usd != 0 "
+                "ORDER BY ts DESC LIMIT ?",
+                (1 if paper else 0, window),
+            ).fetchall()
+        elif market == 'mes':
+            rows = conn.execute(
+                "SELECT pnl_usd, value_usd, fee_usd FROM trades "
+                "WHERE paper=? AND (strategy LIKE '%futures%' OR strategy LIKE '%mes%') "
+                "AND pnl_usd != 0 ORDER BY ts DESC LIMIT ?",
+                (1 if paper else 0, window),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT pnl_usd, value_usd, fee_usd FROM trades "
+                "WHERE paper=? AND strategy NOT LIKE '%poly%' "
+                "AND strategy NOT LIKE '%futures%' AND strategy NOT LIKE '%mes%' "
+                "AND pnl_usd != 0 ORDER BY ts DESC LIMIT ?",
+                (1 if paper else 0, window),
+            ).fetchall()
+
+        conn.close()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
+def _clamp(value: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, value))
+
+
+def _compute_market_edge_score_metrics(trades: list) -> dict:
+    """Compute market-level edge metrics from a list of trade dicts."""
+    n = len(trades)
+    if n == 0:
+        return {'win_rate': 0.0, 'profit_factor': 0.0, 'sharpe': 0.0,
+                'edge_score': 0.0, 'n_trades': 0}
+
+    import math
+    pnls = [float(t.get('pnl_usd', 0.0)) for t in trades]
+    wins  = [p for p in pnls if p > 0]
+    losses = [p for p in pnls if p < 0]
+
+    win_rate = len(wins) / n
+    gross_profit = sum(wins)
+    gross_loss   = abs(sum(losses)) if losses else 0.0
+    profit_factor = gross_profit / max(gross_loss, 1e-10)
+
+    if n < 2:
+        sharpe = 0.0
+    else:
+        mean_pnl = sum(pnls) / n
+        import numpy as np
+        std_pnl  = float(np.std(pnls)) if n > 1 else 1e-10
+        sharpe   = mean_pnl / std_pnl if std_pnl > 0 else 0.0
+
+    # Normalise each component to [0, 1]
+    norm_wr     = _clamp((win_rate - 0.30) / (0.70 - 0.30), 0.0, 1.0)
+    norm_pf     = _clamp((profit_factor - 0.80) / (2.00 - 0.80), 0.0, 1.0)
+    norm_sharpe = _clamp((sharpe - (-1.0)) / (2.0 - (-1.0)), 0.0, 1.0)
+
+    edge_score = 0.40 * norm_wr + 0.35 * norm_pf + 0.25 * norm_sharpe
+
+    return {
+        'win_rate':      round(win_rate, 4),
+        'profit_factor': round(profit_factor, 4),
+        'sharpe':        round(sharpe, 4),
+        'edge_score':    round(_clamp(edge_score, 0.0, 1.0), 4),
+        'n_trades':      n,
+    }
+
+
+def get_market_edge_score(
+    market: str = 'crypto',
+    window: int = WINDOW,
+    paper: bool = None,
+) -> dict:
+    """Compute the rolling market-level edge score."""
+    if paper is None:
+        paper = PAPER_TRADING
+
+    trades = _get_market_trades(market, window, paper)
+    metrics = _compute_market_edge_score_metrics(trades)
+
+    metrics['sufficient'] = metrics['n_trades'] >= window
+    metrics['market']     = market
+
+    return metrics
+
+
+def check_market_edge_actions(
+    market: str = 'crypto',
+    paper: bool = None,
+) -> str | None:
+    """Evaluate current market edge and fire auto-actions if thresholds are breached."""
+    if paper is None:
+        paper = PAPER_TRADING
+
+    metrics = get_market_edge_score(market=market, paper=paper)
+    if metrics['n_trades'] < WINDOW // 2:
+        return None
+
+    score = metrics['edge_score']
+    action_taken = None
+
+    if score < EDGE_LOW_THRESHOLD:
+        _consecutive_low[market]  = _consecutive_low.get(market, 0) + 1
+        _consecutive_high[market] = 0
+        if _consecutive_low[market] >= CONSECUTIVE_TRIGGER:
+            _fire_notification(
+                market,
+                f"[EdgeMonitor] {market.upper()} edge degraded: "
+                f"score={score:.2f} (WR={metrics['win_rate']:.0%} "
+                f"PF={metrics['profit_factor']:.2f}) — position size REDUCED 50%",
+                level='WARNING',
+            )
+            action_taken = 'size_down'
+    elif score > EDGE_HIGH_THRESHOLD:
+        _consecutive_high[market]  = _consecutive_high.get(market, 0) + 1
+        _consecutive_low[market]   = 0
+        if _consecutive_high[market] >= CONSECUTIVE_TRIGGER:
+            _fire_notification(
+                market,
+                f"[EdgeMonitor] {market.upper()} edge strong: "
+                f"score={score:.2f} — position size allowed toward Kelly max",
+                level='INFO',
+            )
+            action_taken = 'size_up'
+    else:
+        _consecutive_low[market]  = 0
+        _consecutive_high[market] = 0
+
+    return action_taken
+
+
+def get_market_edge_size_factor(
+    market: str = 'crypto',
+    paper: bool = None,
+) -> float:
+    """Return the size factor from current market-level edge state."""
+    if paper is None:
+        paper = PAPER_TRADING
+    consecutive_low = _consecutive_low.get(market, 0)
+    if consecutive_low >= CONSECUTIVE_TRIGGER:
+        return 0.50
+    return 1.00
+
+
+def _fire_notification(market: str, message: str, level: str = 'INFO') -> None:
+    try:
+        from logging_db.trade_logger import log_event
+        log_event(level, 'edge_monitor', message)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).error(f"[edge_monitor] {level}: {message}")
 
 
 def get_edge_state(strategy: str, paper: bool = True) -> dict:
@@ -8414,6 +8769,7 @@ def _store_cache(strategy: str, result: dict) -> None:
 # ══════════════════════════════════════════════════════════════════════════════
 
 _SHADOW_STATE: dict = {}
+_ADF_EMA_STATE: Dict[str, float] = {}
 _KYLE_LAMBDA_HISTORY: dict[str, list[float]] = {}
 _KYLE_LAMBDA_MAX_HISTORY = 1440  # 24h at 1-bar-per-minute cadence
 
@@ -8573,7 +8929,18 @@ async def update_shadow_state(
     else:
         is_fragile = False
 
-    adf_stat, is_stationary = _compute_adf_stat(prices)
+    adf_stat, _ = _compute_adf_stat(prices)
+    
+    # v18.16: Rolling ADF EMA (span=5) to prevent stationarity flicker
+    # alpha = 2/(span+1) = 2/6 = 0.3333
+    alpha = 0.3333
+    last_ema = _ADF_EMA_STATE.get(symbol, adf_stat)
+    ema_adf = (alpha * adf_stat) + ((1.0 - alpha) * last_ema)
+    _ADF_EMA_STATE[symbol] = ema_adf
+    
+    # Stationarity threshold: -2.86 (MacKinnon 5% critical value)
+    is_stationary = bool(ema_adf < -2.86)
+    
     ou_hl = _compute_ou_halflife(prices)
 
     # OU transition probability — P(price reaches 0.3% scalp target within one halflife)
@@ -8592,7 +8959,7 @@ async def update_shadow_state(
         "kalman_dev_pct": dev_pct,
         "kyle_lambda": round(kyle_lam, 8),
         "kyle_lambda_fragile": is_fragile,
-        "adf_stat": adf_stat,
+        "adf_stat": round(ema_adf, 4),
         "adf_stationary": is_stationary,
         "ou_halflife_bars": ou_hl,
         "ou_transition_prob": round(ou_prob, 4),
@@ -8802,6 +9169,35 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def _effective_message(update: Update):
     return getattr(update, "effective_message", None)
+
+
+def chunk_message(text: str, limit: int = 4000) -> list[str]:
+    """
+    Split a string into chunks that fit within Telegram's 4096 character limit.
+    Attempts to split on newlines first, then spaces.
+    """
+    if len(text) <= limit:
+        return [text]
+
+    chunks = []
+    while text:
+        if len(text) <= limit:
+            chunks.append(text)
+            break
+
+        # Try splitting at the last newline before the limit
+        split_pos = text.rfind("\n", 0, limit)
+        if split_pos == -1:
+            # Fallback to the last space
+            split_pos = text.rfind(" ", 0, limit)
+
+        if split_pos == -1:
+            # Absolute fallback: hard cut at the limit
+            split_pos = limit
+
+        chunks.append(text[:split_pos].strip())
+        text = text[split_pos:].strip()
+    return chunks
 
 
 async def _reply_text(update: Update, text: str, **kwargs):
@@ -9106,6 +9502,7 @@ async def _handle_ai_query(update: Update, query: str):
 
     try:
         response = await asyncio.to_thread(ask_ai, query)
+        chunks = chunk_message(escape(response))
 
         keyboard = [
             [
@@ -9118,9 +9515,23 @@ async def _handle_ai_query(update: Update, query: str):
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
+        # Edit thinking message with first chunk
         await thinking_msg.edit_text(
-            escape(response), reply_markup=reply_markup, parse_mode=ParseMode.HTML
+            chunks[0],
+            reply_markup=reply_markup if len(chunks) == 1 else None,
+            parse_mode=ParseMode.HTML,
         )
+
+        # Send remaining chunks as new messages
+        for i, chunk in enumerate(chunks[1:], 1):
+            is_last = i == len(chunks) - 1
+            await _reply_text(
+                update,
+                chunk,
+                reply_markup=reply_markup if is_last else None,
+                parse_mode=ParseMode.HTML,
+            )
+
     except Exception as e:
         logger.error(f"AI handler error: {e}")
         await thinking_msg.edit_text(f"Error: {str(e)}")
@@ -9272,15 +9683,23 @@ from telegram import Bot as LegacyBot
 
 
 def send_message(text: str):
-    try:
-        bot = LegacyBot(token=TOKEN)
-        asyncio.run(
-            bot.send_message(
-                chat_id=str(AUTHORIZED_USER_ID), text=text, parse_mode=ParseMode.HTML
-            )
-        )
-    except Exception as e:
-        logger.error(f"Legacy send error: {e}")
+    def _fire_and_forget():
+        try:
+            bot = LegacyBot(token=TOKEN)
+            chunks = chunk_message(text)
+            for chunk in chunks:
+                asyncio.run(
+                    bot.send_message(
+                        chat_id=str(AUTHORIZED_USER_ID),
+                        text=chunk,
+                        parse_mode=ParseMode.HTML,
+                    )
+                )
+        except Exception as e:
+            logger.error(f"Legacy send error: {e}")
+
+    import threading
+    threading.Thread(target=_fire_and_forget, daemon=True).start()
 
 
 def send_liftoff():
@@ -9309,7 +9728,7 @@ except ImportError:
 try:
     from config import GEMINI_MODEL
 except ImportError:
-    GEMINI_MODEL = "gemini-2.0-flash"
+    GEMINI_MODEL = "gemini-2.5-flash"
 
 logger = logging.getLogger(__name__)
 
@@ -9452,6 +9871,8 @@ def ask_ai(query: str) -> str:
 
     genai.configure(api_key=api_key)
     model_name = os.environ.get("GEMINI_MODEL") or GEMINI_MODEL
+    if not model_name.startswith("models/"):
+        model_name = f"models/{model_name}"
 
     context = get_repo_context()
 
@@ -9467,9 +9888,11 @@ def ask_ai(query: str) -> str:
         "3. Analyze `calculate_execution_profile()` to understand the active continuous z-score "
         "mechanics, specifically looking for stochastic calculus gates (e.g., Ornstein-Uhlenbeck "
         "transition probabilities and Kyle's Lambda fragility).\n"
-        "4. Check `data/edge_monitor.py` for the shadow state variables feeding those models.\n"
+        "4. **Live Stochastic Vitals**: The actual live values for these stochastic gates are pushed "
+        "every cycle into `system_state` (Live Vitals). Look for `strategy.stochastic` in the JSON context "
+        "to see the current Kalman deviation, Kyle's Lambda fragility, and OU probabilities per symbol.\n"
         "Never claim the system is unaware of a logic upgrade without first verifying the "
-        "continuous execution math inside `runtime/spot_strategy.py`.\n\n"
+        "continuous execution math inside `runtime/spot_strategy.py` and checking the live vitals.\n\n"
         "### TOOLS ###\n"
         "You have access to the `execute_sql` tool. Use it to query `logs/trades.db` for "
         "live exposure (open_positions table) and active mathematical constraints (spot_edge_conditions).\n\n"
@@ -10522,7 +10945,15 @@ def _maker_first_buy(
     *,
     final_spot_score: float | None = None,
     spot_state: dict | None = None,
+    target_route: str = "maker_first",
 ) -> tuple[Optional[dict], str, str]:
+    if target_route == "taker":
+        order = broker.buy_spot(symbol, size_usd)
+        if order:
+            order["execution_route"] = "taker"
+            return order, "taker", "none"
+        return None, "taker_failed", "market_order_rejected"
+
     top = broker.get_spot_top_of_book(symbol)
     ok, veto = _execution_micro_ok(symbol, top)
     if not ok:
@@ -10715,11 +11146,20 @@ def open_spot(
     score_used = float(
         final_spot_score if final_spot_score is not None else composite_score
     )
+    # v18.16: Dynamic Taker Routing for TREND breakouts with high structural conviction
+    target_route = "maker_first" if not paper else "paper_market"
+    if (
+        not paper
+        and regime == "TREND"
+        and int(spot_state.get("structural_confirm_count") or 0) >= 3
+    ):
+        target_route = "taker"
+
     block_reason, score_floor = spot_quality_block_reason(
         clean,
         spot_state,
         final_spot_score=score_used,
-        execution_route="maker_first" if not paper else "paper_market",
+        execution_route=target_route,
         tv_context=tv_context,
     )
     if block_reason:
@@ -10755,6 +11195,7 @@ def open_spot(
             size_usd,
             final_spot_score=score_used,
             spot_state=spot_state,
+            target_route=target_route,
         )
         if execution_route == "skipped_microstructure":
             logger.info(f"[spot_engine] {clean} blocked — microstructure {micro_veto}")
@@ -11011,6 +11452,16 @@ def close_spot(
         order.get("average_filled_price") or broker.get_mark_price(clean) or entry_price
     )
     filled_qty = float(order.get("filled_size") or qty)
+
+    # v18.16: Force DB to zero immediately after fill to prevent ghost positions
+    if not paper:
+        try:
+            con = sqlite3.connect(_get_db_path(), timeout=5)
+            con.execute("UPDATE open_positions SET qty = 0 WHERE symbol = ?", (clean,))
+            con.commit()
+            con.close()
+        except Exception as _e:
+            logger.debug(f"[spot_engine] ghost-kill failed for {clean}: {_e}")
     fee_usd = float(order.get("fee_usd") or 0.0)
     pnl_usd = (
         (exit_price - entry_price) * filled_qty
@@ -12036,16 +12487,16 @@ CREATE TABLE spot_holding_classifications (
 ```
 #### Recent System Events ####
 ```
-2026-05-04T20:58:31.547843-04:00|health_check|WARNING|Health [DEGRADED] checks=6 of 7 | FAIL: spot_truth: spot broker snapshot unavailable
-2026-05-04T20:58:29.137011-04:00|heartbeat|INFO|scan ok: 6 candidates → 0 entries
-2026-05-04T20:55:05.364041-04:00|health_check|WARNING|Health [DEGRADED] checks=6 of 7 | FAIL: spot_truth: spot broker snapshot unavailable
-2026-05-04T20:55:02.477542-04:00|heartbeat|INFO|scan ok: 6 candidates → 0 entries
-2026-05-04T20:49:46.673886-04:00|health_check|WARNING|Health [DEGRADED] checks=6 of 7 | FAIL: spot_truth: spot broker snapshot unavailable
-2026-05-04T20:49:44.286108-04:00|heartbeat|INFO|scan ok: 6 candidates → 0 entries
-2026-05-04T20:47:17.753771-04:00|heartbeat|INFO|scan ok: 6 candidates → 0 entries
-2026-05-04T20:46:10.150297-04:00|health_check|WARNING|Health [DEGRADED] checks=6 of 7 | FAIL: spot_truth: spot broker snapshot unavailable
-2026-05-04T20:46:07.542356-04:00|heartbeat|INFO|scan ok: 6 candidates → 0 entries
-2026-05-04T20:43:41.559411-04:00|health_check|WARNING|Health [DEGRADED] checks=6 of 7 | FAIL: spot_truth: spot broker snapshot unavailable
+2026-05-05T05:43:19.177969+00:00|PositionReconciler|INFO|Reconciliation complete: no repairs needed
+2026-05-05T04:54:36.642431+00:00|PositionReconciler|INFO|Reconciliation complete: no repairs needed
+2026-05-05T04:44:27.866703+00:00|PositionReconciler|INFO|Reconciliation complete: no repairs needed
+2026-05-05T04:43:37.798438+00:00|PositionReconciler|INFO|Reconciliation complete: no repairs needed | spot_truth=GLOBAL:broker_snapshot_unavailable
+2026-05-05T02:16:03.262119-04:00|heartbeat|INFO|scan ok: 5 candidates → 0 entries
+2026-05-05T02:14:58.459476-04:00|health_check|INFO|Health [HEALTHY] checks=7 of 7
+2026-05-05T02:14:56.906500-04:00|heartbeat|INFO|scan ok: 5 candidates → 0 entries
+2026-05-05T02:10:39.800071-04:00|heartbeat|INFO|scan ok: 4 candidates → 0 entries
+2026-05-05T02:09:35.332434-04:00|health_check|INFO|Health [HEALTHY] checks=7 of 7
+2026-05-05T02:09:33.965812-04:00|heartbeat|INFO|scan ok: 4 candidates → 0 entries
 ```
 
 ### PERIPHERAL ASSETS ###
@@ -12094,7 +12545,6 @@ monitoring/
 notifications/
 notifications.py
 pair_intelligence.py
-perps_engine.py
 PHILOSOPHICAL SUPPLEMENT.pdf
 position_manager.py
 PROFIT_GOVERNANCE.md
@@ -12184,41 +12634,13 @@ verification/
 
 ### LOG ANALYTICS: ERROR FINGERPRINTS (Last 1000 Lines) ###
 ```
-   1 21:14:19,024 scheduler.v10_runner ERROR
-   1 21:14:13,980 scheduler.v10_runner ERROR
-   1 21:14:12,017 telegram.ext.Updater ERROR
-   1 21:14:08,928 scheduler.v10_runner ERROR
-   1 21:14:03,850 scheduler.v10_runner ERROR
-   1 21:13:58,837 scheduler.v10_runner ERROR
-   1 21:13:53,793 scheduler.v10_runner ERROR
-   1 21:13:48,746 scheduler.v10_runner ERROR
-   1 21:13:43,670 scheduler.v10_runner ERROR
-   1 21:13:41,936 telegram.ext.Updater ERROR
-   1 21:13:38,652 scheduler.v10_runner ERROR
-   1 21:13:33,577 scheduler.v10_runner ERROR
-   1 21:13:28,508 scheduler.v10_runner ERROR
-   1 21:13:23,470 scheduler.v10_runner ERROR
-   1 21:13:18,393 scheduler.v10_runner ERROR
-   1 21:13:13,315 scheduler.v10_runner ERROR
-   1 21:13:11,769 telegram.ext.Updater ERROR
-   1 21:13:08,140 scheduler.v10_runner ERROR
-   1 21:13:02,440 scheduler.v10_runner ERROR
-   1 21:12:57,389 scheduler.v10_runner ERROR
-   1 21:12:52,325 scheduler.v10_runner ERROR
-   1 21:12:47,250 scheduler.v10_runner ERROR
-   1 21:12:42,183 scheduler.v10_runner ERROR
-   1 21:12:41,360 telegram.ext.Updater ERROR
-   1 21:12:37,112 scheduler.v10_runner ERROR
-   1 21:12:32,036 scheduler.v10_runner ERROR
-   1 21:12:26,958 scheduler.v10_runner ERROR
-   1 21:12:21,880 scheduler.v10_runner ERROR
-   1 21:12:16,819 scheduler.v10_runner ERROR
-   1 21:12:11,757 scheduler.v10_runner ERROR
-   1 21:12:11,317 telegram.ext.Updater ERROR
-   1 21:12:06,681 scheduler.v10_runner ERROR
-   1 21:12:01,600 scheduler.v10_runner ERROR
-   1 21:11:56,515 scheduler.v10_runner ERROR
-   1 21:11:51,441 scheduler.v10_runner ERROR
-   1 21:11:46,364 scheduler.v10_runner ERROR
+   1 02:16:53,215 telegram.ext.Updater ERROR
+   1 02:16:18,712 telegram.ext.Updater ERROR
+   1 02:15:44,005 telegram.ext.Updater ERROR
+   1 02:15:09,450 telegram.ext.Updater ERROR
+   1 02:14:34,883 telegram.ext.Updater ERROR
+   1 02:14:04,852 telegram.ext.Updater ERROR
+   1 02:13:34,827 telegram.ext.Updater ERROR
+   1 02:13:04,809 telegram.ext.Updater ERROR
 ```
 

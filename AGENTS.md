@@ -6,7 +6,7 @@
 ## Canonical Truth
 
 - Repo root: `/Users/joshmacbookair2020/Projects/algo_trading_final`
-- Canonical version: `v18.16` (`2026-04-30`)
+- Canonical version: `v18.17` (`2026-05-05`)
 - Canonical active lane: **Coinbase spot scalp**
 - Canonical launch path: `python3 scripts/go_live.py`
 - Canonical guarded deploy path: local `./deploy.sh`
@@ -269,7 +269,6 @@ If you need history, use git and archived notes. Do not restore old operator ass
 ```bash
 python3 main.py --mode paper
 python3 scripts/go_live.py
-python3 scripts/go_paper.py
 python3 scripts/check_readiness.py
 python3 scripts/live_runtime_audit.py
 python3 scripts/go_live_audit.py

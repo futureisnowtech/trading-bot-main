@@ -222,13 +222,6 @@ try:
     else:
         ok(f"SQUEEZE_MIN_BARS={cfg.SQUEEZE_MIN_BARS} (≥20 per deep research)")
 
-    # Agent agreement
-    n_agents = len(cfg.FULL_DEBATE_AGENTS)
-    min_agree = int(cfg.FULL_DEBATE_MIN_AGREEMENT * n_agents)
-    ok(
-        f"Full debate: {n_agents} agents, min agreement: {min_agree} (config={cfg.FULL_DEBATE_MIN_AGREEMENT:.0%})"
-    )
-
     ok("Config loaded and consistent")
 except Exception as e:
     fail(f"Config failed to load: {e}")

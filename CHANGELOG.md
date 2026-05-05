@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 
+## 2026-05-05
+- v18.17 completion: finalized surgical removal of retired lanes and legacy AI configuration; deleted `perps_engine.py`, `scripts/go_paper.py`, and `scripts/tradingview_webhook.py`; updated `main.py` to support `--mode` for boot compatibility and refreshed WebSocket feed to spot-native symbols; aligned `AGENTS.md` and `GEMINI.md` to the new authoritative spot-lane architecture; updated `monitoring/health_check.py` to follow the truth-lane status contract.
+
 ## 2026-05-04
 - v18.17 housekeeping: surgical removal of legacy AI components (Goku, multi-LLM ensemble weights, and unused provider keys); updated `.env.example` to reflect current v18 architecture (Gemini for CLI/Repo-Intelligence, Anthropic for optional AI-Exits); cleaned up `config.py` to remove dormant ensemble logic and weight schedules; resolved CLI startup warnings by fixing `.gemini/settings.json` hook event names and removing unsupported `color` keys from agent definitions.
 - research: completed V14 Archival Vaccination discovery analysis (253 failures profiled); generational benchmarking confirms v18 leakage of historical Workhorse failures; simulated ADF tightening recommends shift from -2.86 to -3.10; full report generated in `reports/V14_VACCINATION_REPORT.md`.

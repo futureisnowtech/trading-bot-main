@@ -49,11 +49,11 @@ import csv, uuid, sqlite3
 from typing import Optional
 import logging_db.trade_logger  # noqa: F401 — pre-warm, prevents EDEADLK
 
-VERSION = "v18.16"
+VERSION = "v18.17"
 
 BANNER = """
 ╔══════════════════════════════════════════════════════════════════╗
-║  ALGO TRADING SYSTEM  v18.16                                    ║
+║  ALGO TRADING SYSTEM  v18.17                                    ║
 ║                                                                  ║
 ║  Lane:       Coinbase spot scalp (tiny live)                    ║
 ║  Route:      maker_first | CHOP blocked | pullback quarantined  ║
@@ -65,7 +65,8 @@ BANNER = """
 
 def parse_args():
     p = argparse.ArgumentParser()
-    # v18.16: Bot is LIVE only. --mode argument retired.
+    # v18.17: Support --mode for boot.py compatibility; default to env or paper.
+    p.add_argument("--mode", choices=["paper", "live"], help="Force trading mode")
     p.add_argument("--equity-only", action="store_true")
     p.add_argument("--crypto-only", action="store_true")
     p.add_argument("--no-alerts", action="store_true")
@@ -75,13 +76,12 @@ def parse_args():
 def main():
     print(BANNER)
     args = parse_args()
-    
-    # v18.16: Hardcode LIVE mode.
-    os.environ["PAPER_TRADING"] = "false"
 
     import system_state
 
-    system_state.state.set_mode("LIVE")
+    # Priority: 1. CLI flag, 2. Env var, 3. Default paper
+    if args.mode:
+        os.environ["PAPER_TRADING"] = "false" if args.mode == "live" else "true"
 
     from config import (
         PAPER_TRADING,
@@ -98,9 +98,9 @@ def main():
         FORECAST_MANUAL_ENABLED,
         FUTURES_DASHBOARD_VISIBLE,
         STOCKS_DASHBOARD_VISIBLE,
-        STOCKS_AUTONOMOUS_ENABLED,
-        STOCKS_MANUAL_ENABLED,
     )
+
+    system_state.state.set_mode("LIVE" if not PAPER_TRADING else "PAPER")
 
     tz = pytz.timezone(MARKET_TIMEZONE)
     mode = "📄 PAPER" if PAPER_TRADING else "💰 LIVE"
@@ -296,16 +296,12 @@ def main():
 
     if COINBASE_CDP_KEY_NAME and COINBASE_CDP_PRIVATE_KEY:
         from data.coinbase_websocket import start_coinbase_feed
+        from config import SPOT_SYMBOLS
 
-        # Nano Perp Products
-        products = [
-            "BIP-20DEC30-CDE",
-            "ETP-20DEC30-CDE",
-            "SLP-20DEC30-CDE",
-            "XPP-20DEC30-CDE",
-        ]
+        # Coinbase spot products: base-USD (reconciles with execution/coinbase_spot_broker.py)
+        products = [f"{s}-USD" for s in SPOT_SYMBOLS]
         start_coinbase_feed(COINBASE_CDP_KEY_NAME, COINBASE_CDP_PRIVATE_KEY, products)
-        print("   ✅ Coinbase WebSocket feed started\n")
+        print(f"   ✅ Coinbase WebSocket feed started for {len(products)} spot pairs\n")
 
     print("   ✅ Runtime state tables ready\n")
 

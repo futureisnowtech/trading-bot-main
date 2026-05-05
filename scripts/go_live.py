@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import signal
+import socket
 import sqlite3
 import subprocess
 import sys

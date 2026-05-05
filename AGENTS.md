@@ -23,6 +23,7 @@
 - Active operator notes:
   - `brain/01_current_system/Current Active Logic.md`
   - `brain/01_current_system/Known Constraints.md`
+  - **Research Finding (2026-05-04):** V14 Archival Vaccination profiles recommend tightening ADF threshold to -3.10 and adding minimum ADX floors to block 'Workhorse' leakage.
 - Strategy / governance references:
   - `SCANNER_PRECISION_REPORT.md`
   - `STOP_MATRIX.md`

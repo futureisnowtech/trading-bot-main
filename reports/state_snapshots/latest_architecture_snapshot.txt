@@ -1,5 +1,5 @@
 # LLM Context Snapshot
-# Generated: 2026-05-04 19:43:58 UTC
+# Generated: 2026-05-05 01:14:19 UTC
 
 ### FILE: GEMINI.md ###
 ```
@@ -12024,5 +12024,201 @@ CREATE TABLE spot_holding_classifications (
         note TEXT DEFAULT '',
         updated_at TEXT NOT NULL
     );
+```
+
+### SYSTEM PULSE: LIVE DATA ###
+#### Active Exposure ####
+```
+```
+#### 24h Performance (Live) ####
+```
+0|
+```
+#### Recent System Events ####
+```
+2026-05-04T20:58:31.547843-04:00|health_check|WARNING|Health [DEGRADED] checks=6 of 7 | FAIL: spot_truth: spot broker snapshot unavailable
+2026-05-04T20:58:29.137011-04:00|heartbeat|INFO|scan ok: 6 candidates → 0 entries
+2026-05-04T20:55:05.364041-04:00|health_check|WARNING|Health [DEGRADED] checks=6 of 7 | FAIL: spot_truth: spot broker snapshot unavailable
+2026-05-04T20:55:02.477542-04:00|heartbeat|INFO|scan ok: 6 candidates → 0 entries
+2026-05-04T20:49:46.673886-04:00|health_check|WARNING|Health [DEGRADED] checks=6 of 7 | FAIL: spot_truth: spot broker snapshot unavailable
+2026-05-04T20:49:44.286108-04:00|heartbeat|INFO|scan ok: 6 candidates → 0 entries
+2026-05-04T20:47:17.753771-04:00|heartbeat|INFO|scan ok: 6 candidates → 0 entries
+2026-05-04T20:46:10.150297-04:00|health_check|WARNING|Health [DEGRADED] checks=6 of 7 | FAIL: spot_truth: spot broker snapshot unavailable
+2026-05-04T20:46:07.542356-04:00|heartbeat|INFO|scan ok: 6 candidates → 0 entries
+2026-05-04T20:43:41.559411-04:00|health_check|WARNING|Health [DEGRADED] checks=6 of 7 | FAIL: spot_truth: spot broker snapshot unavailable
+```
+
+### PERIPHERAL ASSETS ###
+#### Project Structure (Root) ####
+```
+__init__.py
+__pycache__/
+AGENTS.md
+alerts/
+algo_bot.tar.gz
+audit_output/
+audit_results/
+backtesting/
+brain/
+brain_constitution.md
+brain_execution_os.md
+CHANGELOG.md
+config/
+config.py
+dashboard/
+data/
+deep-research-report.md
+deploy.sh*
+DEPLOYMENT_STATE_MACHINE.md
+docker-compose.yml
+Dockerfile
+docs/
+execution/
+forecast/
+gemini/
+GEMINI.md
+hedge_engine.py
+indicators/
+kill_switch.py
+learning/
+learning_loop.py
+logging_db/
+logs/
+main.py
+MATRIX_DECISION_UNIVERSE.md
+mcp_server/
+memory/
+MIGRATION_MANIFEST_V14_TO_V18.md
+ml/
+monitoring/
+notifications/
+notifications.py
+pair_intelligence.py
+perps_engine.py
+PHILOSOPHICAL SUPPLEMENT.pdf
+position_manager.py
+PROFIT_GOVERNANCE.md
+provision_grafana_final.py
+pytest.ini
+rbi/
+reports/
+requirements-dev.txt
+requirements-runtime.txt
+requirements.txt
+RESEARCH_ARCHIVE_DATA_INVENTORY.md
+risk/
+risk_engine.py
+run_backtest.py
+runtime/
+RUNTIME_INVARIANTS.md
+SCANNER_PRECISION_REPORT.md
+scanner.py
+scheduler/
+scripts/
+setup_droplet.sh
+setup.py
+signal_engine.py
+sop_state.generated.js
+SOP.html
+spot_engine.py
+STOP_MATRIX.md
+strategies/
+system_state.py
+tests/
+trading_bot.db
+verification/
+```
+#### Archive Manifest (algo_bot.tar.gz) ####
+```
+./
+./forecast/
+./brain_constitution.md
+./pair_intelligence.py
+./logging_db/
+./scanner.py
+./backtesting/
+./.DS_Store
+./config.py
+./memory/
+./pytest.ini
+./STOP_MATRIX.md
+./requirements.txt
+./.pytest_cache/
+./spot_engine.py
+./CHANGELOG.md
+./PHILOSOPHICAL SUPPLEMENT.pdf
+./config/
+./Dockerfile
+./.ruff_cache/
+./strategies/
+./learning/
+./indicators/
+./claude/
+./signal_engine.py
+./runtime/
+./tests/
+./scheduler/
+./.claude/
+./__init__.py
+./risk_engine.py
+./rbi/
+./docs/
+./RUNTIME_INVARIANTS.md
+./setup_droplet.sh
+./requirements-runtime.txt
+./kill_switch.py
+./alerts/
+./dashboard/
+./verification/
+./position_manager.py
+./setup.py
+./learning_loop.py
+./requirements-dev.txt
+./.gitignore
+./ml/
+./MATRIX_DECISION_UNIVERSE.md
+./execution/
+./SOP.html
+./scripts/
+```
+
+### LOG ANALYTICS: ERROR FINGERPRINTS (Last 1000 Lines) ###
+```
+   1 21:14:19,024 scheduler.v10_runner ERROR
+   1 21:14:13,980 scheduler.v10_runner ERROR
+   1 21:14:12,017 telegram.ext.Updater ERROR
+   1 21:14:08,928 scheduler.v10_runner ERROR
+   1 21:14:03,850 scheduler.v10_runner ERROR
+   1 21:13:58,837 scheduler.v10_runner ERROR
+   1 21:13:53,793 scheduler.v10_runner ERROR
+   1 21:13:48,746 scheduler.v10_runner ERROR
+   1 21:13:43,670 scheduler.v10_runner ERROR
+   1 21:13:41,936 telegram.ext.Updater ERROR
+   1 21:13:38,652 scheduler.v10_runner ERROR
+   1 21:13:33,577 scheduler.v10_runner ERROR
+   1 21:13:28,508 scheduler.v10_runner ERROR
+   1 21:13:23,470 scheduler.v10_runner ERROR
+   1 21:13:18,393 scheduler.v10_runner ERROR
+   1 21:13:13,315 scheduler.v10_runner ERROR
+   1 21:13:11,769 telegram.ext.Updater ERROR
+   1 21:13:08,140 scheduler.v10_runner ERROR
+   1 21:13:02,440 scheduler.v10_runner ERROR
+   1 21:12:57,389 scheduler.v10_runner ERROR
+   1 21:12:52,325 scheduler.v10_runner ERROR
+   1 21:12:47,250 scheduler.v10_runner ERROR
+   1 21:12:42,183 scheduler.v10_runner ERROR
+   1 21:12:41,360 telegram.ext.Updater ERROR
+   1 21:12:37,112 scheduler.v10_runner ERROR
+   1 21:12:32,036 scheduler.v10_runner ERROR
+   1 21:12:26,958 scheduler.v10_runner ERROR
+   1 21:12:21,880 scheduler.v10_runner ERROR
+   1 21:12:16,819 scheduler.v10_runner ERROR
+   1 21:12:11,757 scheduler.v10_runner ERROR
+   1 21:12:11,317 telegram.ext.Updater ERROR
+   1 21:12:06,681 scheduler.v10_runner ERROR
+   1 21:12:01,600 scheduler.v10_runner ERROR
+   1 21:11:56,515 scheduler.v10_runner ERROR
+   1 21:11:51,441 scheduler.v10_runner ERROR
+   1 21:11:46,364 scheduler.v10_runner ERROR
 ```
 

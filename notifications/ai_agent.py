@@ -16,7 +16,7 @@ except ImportError:
 try:
     from config import GEMINI_MODEL
 except ImportError:
-    GEMINI_MODEL = "gemini-1.5-flash"
+    GEMINI_MODEL = "gemini-2.5-flash"
 
 logger = logging.getLogger(__name__)
 
@@ -159,6 +159,8 @@ def ask_ai(query: str) -> str:
 
     genai.configure(api_key=api_key)
     model_name = os.environ.get("GEMINI_MODEL") or GEMINI_MODEL
+    if not model_name.startswith("models/"):
+        model_name = f"models/{model_name}"
 
     context = get_repo_context()
 

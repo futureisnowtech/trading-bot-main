@@ -32,6 +32,35 @@ def _effective_message(update: Update):
     return getattr(update, "effective_message", None)
 
 
+def chunk_message(text: str, limit: int = 4000) -> list[str]:
+    """
+    Split a string into chunks that fit within Telegram's 4096 character limit.
+    Attempts to split on newlines first, then spaces.
+    """
+    if len(text) <= limit:
+        return [text]
+
+    chunks = []
+    while text:
+        if len(text) <= limit:
+            chunks.append(text)
+            break
+
+        # Try splitting at the last newline before the limit
+        split_pos = text.rfind("\n", 0, limit)
+        if split_pos == -1:
+            # Fallback to the last space
+            split_pos = text.rfind(" ", 0, limit)
+
+        if split_pos == -1:
+            # Absolute fallback: hard cut at the limit
+            split_pos = limit
+
+        chunks.append(text[:split_pos].strip())
+        text = text[split_pos:].strip()
+    return chunks
+
+
 async def _reply_text(update: Update, text: str, **kwargs):
     message = _effective_message(update)
     if message is None:
@@ -334,6 +363,7 @@ async def _handle_ai_query(update: Update, query: str):
 
     try:
         response = await asyncio.to_thread(ask_ai, query)
+        chunks = chunk_message(escape(response))
 
         keyboard = [
             [
@@ -346,9 +376,23 @@ async def _handle_ai_query(update: Update, query: str):
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
+        # Edit thinking message with first chunk
         await thinking_msg.edit_text(
-            escape(response), reply_markup=reply_markup, parse_mode=ParseMode.HTML
+            chunks[0],
+            reply_markup=reply_markup if len(chunks) == 1 else None,
+            parse_mode=ParseMode.HTML,
         )
+
+        # Send remaining chunks as new messages
+        for i, chunk in enumerate(chunks[1:], 1):
+            is_last = i == len(chunks) - 1
+            await _reply_text(
+                update,
+                chunk,
+                reply_markup=reply_markup if is_last else None,
+                parse_mode=ParseMode.HTML,
+            )
+
     except Exception as e:
         logger.error(f"AI handler error: {e}")
         await thinking_msg.edit_text(f"Error: {str(e)}")
@@ -502,11 +546,15 @@ from telegram import Bot as LegacyBot
 def send_message(text: str):
     try:
         bot = LegacyBot(token=TOKEN)
-        asyncio.run(
-            bot.send_message(
-                chat_id=str(AUTHORIZED_USER_ID), text=text, parse_mode=ParseMode.HTML
+        chunks = chunk_message(text)
+        for chunk in chunks:
+            asyncio.run(
+                bot.send_message(
+                    chat_id=str(AUTHORIZED_USER_ID),
+                    text=chunk,
+                    parse_mode=ParseMode.HTML,
+                )
             )
-        )
     except Exception as e:
         logger.error(f"Legacy send error: {e}")
 

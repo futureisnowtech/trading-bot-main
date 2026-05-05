@@ -40,6 +40,18 @@ _cache: Dict[str, dict] = {}
 _PROJ_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _DB_PATH = os.path.join(_PROJ_ROOT, "logs", "trades.db")
 
+from config import PAPER_TRADING
+
+# ─── Market-level Constants (Ported from risk/edge_monitor.py) ───────────────
+WINDOW = 20               # rolling trade window
+EDGE_LOW_THRESHOLD  = 0.30  # below this = degraded edge
+EDGE_HIGH_THRESHOLD = 0.70  # above this = strong edge
+CONSECUTIVE_TRIGGER = 2   # windows in a row before auto-action fires
+
+# ─── Consecutive window counters (in-memory, resets on restart) ──────────────
+_consecutive_low:  Dict[str, int] = {}   # market → int (consecutive low-edge windows)
+_consecutive_high: Dict[str, int] = {}   # market → int (consecutive high-edge windows)
+
 
 def _conn():
     if not os.path.exists(_DB_PATH):
@@ -47,6 +59,183 @@ def _conn():
     c = sqlite3.connect(_DB_PATH)
     c.row_factory = sqlite3.Row
     return c
+
+
+# ─── Market-level Helpers ────────────────────────────────────────────────────
+
+def strategy_to_market(strategy: str) -> str:
+    """Map a strategy name string to a market label."""
+    s = strategy.lower()
+    if 'poly' in s:
+        return 'polymarket'
+    if 'futures' in s or 'mes' in s or 'scalp' in s:
+        return 'mes'
+    return 'crypto'   # default
+
+
+def _get_market_trades(market: str, window: int, paper: bool) -> list:
+    """Return the most recent `window` completed trades for `market`."""
+    try:
+        conn = _conn()
+        if not conn: return []
+        
+        if market == 'polymarket':
+            rows = conn.execute(
+                "SELECT pnl_usd, value_usd, fee_usd FROM trades "
+                "WHERE paper=? AND strategy LIKE '%poly%' AND pnl_usd != 0 "
+                "ORDER BY ts DESC LIMIT ?",
+                (1 if paper else 0, window),
+            ).fetchall()
+        elif market == 'mes':
+            rows = conn.execute(
+                "SELECT pnl_usd, value_usd, fee_usd FROM trades "
+                "WHERE paper=? AND (strategy LIKE '%futures%' OR strategy LIKE '%mes%') "
+                "AND pnl_usd != 0 ORDER BY ts DESC LIMIT ?",
+                (1 if paper else 0, window),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT pnl_usd, value_usd, fee_usd FROM trades "
+                "WHERE paper=? AND strategy NOT LIKE '%poly%' "
+                "AND strategy NOT LIKE '%futures%' AND strategy NOT LIKE '%mes%' "
+                "AND pnl_usd != 0 ORDER BY ts DESC LIMIT ?",
+                (1 if paper else 0, window),
+            ).fetchall()
+
+        conn.close()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
+def _clamp(value: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, value))
+
+
+def _compute_market_edge_score_metrics(trades: list) -> dict:
+    """Compute market-level edge metrics from a list of trade dicts."""
+    n = len(trades)
+    if n == 0:
+        return {'win_rate': 0.0, 'profit_factor': 0.0, 'sharpe': 0.0,
+                'edge_score': 0.0, 'n_trades': 0}
+
+    import math
+    pnls = [float(t.get('pnl_usd', 0.0)) for t in trades]
+    wins  = [p for p in pnls if p > 0]
+    losses = [p for p in pnls if p < 0]
+
+    win_rate = len(wins) / n
+    gross_profit = sum(wins)
+    gross_loss   = abs(sum(losses)) if losses else 0.0
+    profit_factor = gross_profit / max(gross_loss, 1e-10)
+
+    if n < 2:
+        sharpe = 0.0
+    else:
+        mean_pnl = sum(pnls) / n
+        import numpy as np
+        std_pnl  = float(np.std(pnls)) if n > 1 else 1e-10
+        sharpe   = mean_pnl / std_pnl if std_pnl > 0 else 0.0
+
+    # Normalise each component to [0, 1]
+    norm_wr     = _clamp((win_rate - 0.30) / (0.70 - 0.30), 0.0, 1.0)
+    norm_pf     = _clamp((profit_factor - 0.80) / (2.00 - 0.80), 0.0, 1.0)
+    norm_sharpe = _clamp((sharpe - (-1.0)) / (2.0 - (-1.0)), 0.0, 1.0)
+
+    edge_score = 0.40 * norm_wr + 0.35 * norm_pf + 0.25 * norm_sharpe
+
+    return {
+        'win_rate':      round(win_rate, 4),
+        'profit_factor': round(profit_factor, 4),
+        'sharpe':        round(sharpe, 4),
+        'edge_score':    round(_clamp(edge_score, 0.0, 1.0), 4),
+        'n_trades':      n,
+    }
+
+
+def get_market_edge_score(
+    market: str = 'crypto',
+    window: int = WINDOW,
+    paper: bool = None,
+) -> dict:
+    """Compute the rolling market-level edge score."""
+    if paper is None:
+        paper = PAPER_TRADING
+
+    trades = _get_market_trades(market, window, paper)
+    metrics = _compute_market_edge_score_metrics(trades)
+
+    metrics['sufficient'] = metrics['n_trades'] >= window
+    metrics['market']     = market
+
+    return metrics
+
+
+def check_market_edge_actions(
+    market: str = 'crypto',
+    paper: bool = None,
+) -> str | None:
+    """Evaluate current market edge and fire auto-actions if thresholds are breached."""
+    if paper is None:
+        paper = PAPER_TRADING
+
+    metrics = get_market_edge_score(market=market, paper=paper)
+    if metrics['n_trades'] < WINDOW // 2:
+        return None
+
+    score = metrics['edge_score']
+    action_taken = None
+
+    if score < EDGE_LOW_THRESHOLD:
+        _consecutive_low[market]  = _consecutive_low.get(market, 0) + 1
+        _consecutive_high[market] = 0
+        if _consecutive_low[market] >= CONSECUTIVE_TRIGGER:
+            _fire_notification(
+                market,
+                f"[EdgeMonitor] {market.upper()} edge degraded: "
+                f"score={score:.2f} (WR={metrics['win_rate']:.0%} "
+                f"PF={metrics['profit_factor']:.2f}) — position size REDUCED 50%",
+                level='WARNING',
+            )
+            action_taken = 'size_down'
+    elif score > EDGE_HIGH_THRESHOLD:
+        _consecutive_high[market]  = _consecutive_high.get(market, 0) + 1
+        _consecutive_low[market]   = 0
+        if _consecutive_high[market] >= CONSECUTIVE_TRIGGER:
+            _fire_notification(
+                market,
+                f"[EdgeMonitor] {market.upper()} edge strong: "
+                f"score={score:.2f} — position size allowed toward Kelly max",
+                level='INFO',
+            )
+            action_taken = 'size_up'
+    else:
+        _consecutive_low[market]  = 0
+        _consecutive_high[market] = 0
+
+    return action_taken
+
+
+def get_market_edge_size_factor(
+    market: str = 'crypto',
+    paper: bool = None,
+) -> float:
+    """Return the size factor from current market-level edge state."""
+    if paper is None:
+        paper = PAPER_TRADING
+    consecutive_low = _consecutive_low.get(market, 0)
+    if consecutive_low >= CONSECUTIVE_TRIGGER:
+        return 0.50
+    return 1.00
+
+
+def _fire_notification(market: str, message: str, level: str = 'INFO') -> None:
+    try:
+        from logging_db.trade_logger import log_event
+        log_event(level, 'edge_monitor', message)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).error(f"[edge_monitor] {level}: {message}")
 
 
 def get_edge_state(strategy: str, paper: bool = True) -> dict:

@@ -35,8 +35,10 @@
 
 This repository still contains multiple strategy lanes and historical infrastructure, but operationally it is governed as:
 
-- **Authoritative live lane:** Coinbase spot scalp
-- **Current live decision standard:** truth-first, fee-aware, route-aware, evidence-gated
+- **Authoritative live lane:** Coinbase spot scalp (Two-Tower: Technical + Local ML)
+- **Legacy AI:** **RETIRED**. The multi-agent debate ensemble (Goku, analyst agents, consensus-voting) has been removed to reduce latency and cost.
+- **Active AI:** **Gemini Studio** (CLI intelligence/DB queries) and **Anthropic Sonnet** (Optional exit thesis sanity checks).
+- **Current live decision standard:** truth-first, fee-aware, route-aware, evidence-gated.
 - **Current launch target:** tiny live only
 - **Current dashboard / readiness authority:** the spot truth-lane contract
 
@@ -146,15 +148,15 @@ The live spot lane is intentionally harsh by default.
 - Route: `maker_first` only
 - `taker_fallback`: disabled by default
 - Structural confirm minimums:
-  - `TREND >= 2`
-  - `NEUTRAL >= 3`
+  - `TREND >= 1`
+  - `NEUTRAL >= 1`
 - Final score floors:
-  - `TREND >= 58`
-  - `NEUTRAL >= 60`
+  - `TREND >= 52`
+  - `NEUTRAL >= 52`
 - Path efficiency minimum: `0.20`
 - Frame floors:
-  - `TREND`: `5m >= 52`, `30m >= 55`
-  - `NEUTRAL`: `5m >= 55`, `30m >= 58`
+  - `TREND`: `5m >= 48`, `30m >= 50`
+  - `NEUTRAL`: `5m >= 50`, `30m >= 52`
 
 Exit profile contract:
 - stop widening: forbidden

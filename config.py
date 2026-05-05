@@ -1054,35 +1054,35 @@ SPOT_ALLOWED_SETUP_FAMILIES_TINY_LIVE: tuple[str, ...] = (
     "breakout_volatility",
 )
 SPOT_DISABLED_SETUP_FAMILIES_TINY_LIVE: tuple[str, ...] = ()
-SPOT_TINY_LIVE_MIN_CONFIRMS: dict[str, int] = {"TREND": 2, "NEUTRAL": 3, "CHOP": 99}
+SPOT_TINY_LIVE_MIN_CONFIRMS: dict[str, int] = {"TREND": 1, "NEUTRAL": 1, "CHOP": 99}
 SPOT_TINY_LIVE_MIN_5M_FRAME: dict[str, float] = {
-    "TREND": 52.0,
-    "NEUTRAL": 55.0,
+    "TREND": 48.0,
+    "NEUTRAL": 50.0,
     "CHOP": 99.0,
 }
 SPOT_TINY_LIVE_MIN_30M_FRAME: dict[str, float] = {
-    "TREND": 55.0,
-    "NEUTRAL": 58.0,
+    "TREND": 50.0,
+    "NEUTRAL": 52.0,
     "CHOP": 99.0,
 }
 SPOT_TINY_LIVE_MIN_STRUCTURE_COMPONENT: dict[str, float] = {
-    "TREND": 0.000001,
-    "NEUTRAL": 0.0,
+    "TREND": -1.0,
+    "NEUTRAL": -1.0,
     "CHOP": 999.0,
 }
 SPOT_TINY_LIVE_MIN_PARTICIPATION_COMPONENT: dict[str, float] = {
     "TREND": -999.0,
-    "NEUTRAL": 0.000001,
+    "NEUTRAL": -1.0,
     "CHOP": 999.0,
 }
 SPOT_TINY_LIVE_MIN_MOMENTUM_IMPULSE: dict[str, float] = {
-    "TREND": 0.000001,
-    "NEUTRAL": 0.000001,
+    "TREND": -1.0,
+    "NEUTRAL": -1.0,
     "CHOP": 999.0,
 }
 SPOT_TINY_LIVE_SCORE_FLOORS: dict[str, float] = {
-    "TREND": 58.0,
-    "NEUTRAL": 57.0,
+    "TREND": 52.0,
+    "NEUTRAL": 52.0,
     "CHOP": 99.0,
 }
 SPOT_TINY_LIVE_SCORE_WEIGHTS: dict[str, dict[str, float]] = {
@@ -1180,28 +1180,18 @@ LANE3_SCAN_INTERVAL_SECONDS: int = int(
     os.getenv("LANE3_SCAN_INTERVAL_SECONDS", "900")
 )  # 15 min
 
-# Multi-LLM ensemble weights (must sum to 1.0)
-# Weights are adapted by pm_calibrator.py based on per-model Brier scores
-ENSEMBLE_GEMINI_WEIGHT: float = float(
-    os.getenv("ENSEMBLE_GEMINI_WEIGHT", "1.0")
-)  # Gemini CLI is canonical
-ENSEMBLE_GPT_WEIGHT: float = float(
-    os.getenv("ENSEMBLE_GPT_WEIGHT", "0.0")
-)  # add when OPENAI_API_KEY set
-ENSEMBLE_SONNET_WEIGHT: float = float(
-    os.getenv("ENSEMBLE_SONNET_WEIGHT", "0.0")
-)  # Optional Gemini legacy model weight
-PM_ENSEMBLE_MIN_MODELS: int = int(
-    os.getenv("PM_ENSEMBLE_MIN_MODELS", "1")
-)  # min models needed for forecast
-PM_LLM_TEMPERATURE: float = float(
-    os.getenv("PM_LLM_TEMPERATURE", "0.3")
-)  # lower = more deterministic
-PM_LLM_MAX_TOKENS: int = int(os.getenv("PM_LLM_MAX_TOKENS", "600"))
-
-# Optional additional LLM providers (add keys to enable)
-OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+# ════════════════════════════════════════════════════════════════════
+# AI & INTELLIGENCE
+# ════════════════════════════════════════════════════════════════════
+# Core API Keys
 GOOGLE_API_KEY: str = os.getenv("GOOGLE_API_KEY", "")
+ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
+OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+
+# AI Exit Settings
+PM_LLM_TEMPERATURE: float = float(os.getenv("PM_LLM_TEMPERATURE", "0.3"))
+PM_LLM_MAX_TOKENS: int = int(os.getenv("PM_LLM_MAX_TOKENS", "600"))
+GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
 
 # ════════════════════════════════════════════════════════════════════
 # DATABASE & LOGGING

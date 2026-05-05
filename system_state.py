@@ -32,6 +32,7 @@ class SystemState:
                 "microprice": 0.0,
                 "mid_price": 0.0,
                 "active_positions": [],
+                "stochastic": {},  # symbol -> {kalman_dev, kyle_lambda_fragile, ou_prob, multiplier}
             },
             "system": {
                 "cpu_percent": 0.0,
@@ -66,6 +67,13 @@ class SystemState:
                 self.state["strategy"]["mid_price"] = mid_price
             if positions is not None:
                 self.state["strategy"]["active_positions"] = positions
+
+    def update_stochastic(self, symbol: str, data: Dict[str, Any]):
+        """Update advanced calculus vitals for a symbol."""
+        with self.lock:
+            if "stochastic" not in self.state["strategy"]:
+                self.state["strategy"]["stochastic"] = {}
+            self.state["strategy"]["stochastic"][symbol.upper()] = data
 
     def update_prometheus(self):
         """Push internal state to Prometheus gauges."""

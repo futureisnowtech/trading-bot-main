@@ -189,12 +189,9 @@ def run_replay(pair: str, df: 'pd.DataFrame', use_ai: bool,
 
     engine = None
     if use_ai and ANTHROPIC_API_KEY:
-        try:
-            from strategies.ai_agents.debate_engine import run_quick_debate
-            from strategies.ai_agents.risk_synthesizer import synthesize_final_decision
-            engine = {'quick': run_quick_debate, 'synthesize': synthesize_final_decision}
-        except Exception as e:
-            print(f"  [AI] debate engine unavailable: {e}")
+        # Note: Legacy debate panels (Goku, analyst_agents) are removed in v18.
+        # AI Studio (Gemini) and Anthropic (Exits) are the only active AI paths.
+        pass
 
     df = df.copy()
     df.columns = [c.lower() for c in df.columns]

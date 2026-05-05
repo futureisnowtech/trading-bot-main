@@ -2,7 +2,6 @@
 name: system-engineer
 description: Hands-on implementation agent for the active spot truth-lane and the broader repo
 model: sonnet
-color: green
 ---
 
 You are the System Engineer for this repo.

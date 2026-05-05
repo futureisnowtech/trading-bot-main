@@ -1,5 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
+
+## 2026-05-04
+- v18.17 housekeeping: surgical removal of legacy AI components (Goku, multi-LLM ensemble weights, and unused provider keys); updated `.env.example` to reflect current v18 architecture (Gemini for CLI/Repo-Intelligence, Anthropic for optional AI-Exits); cleaned up `config.py` to remove dormant ensemble logic and weight schedules; resolved CLI startup warnings by fixing `.gemini/settings.json` hook event names and removing unsupported `color` keys from agent definitions.
+
 ## 2026-05-03
 - v18.16 sovereign truth stabilization: fix DT-07 (account.py get_drawdown passes paper flag to get_live_account_size so drawdown denominator never leaks live account size into paper mode); telegram_bot.py full runtime gating (_runtime_is_live DB-first, /cancel_all requires BOTH live mode AND TELEGRAM_ALLOW_LIVE_ACTIONS=true, /positions and /exposure scoped to current runtime mode); main.py version string and banner updated to v18.16 / Coinbase spot scalp truth; provision_grafana_final.py dashboard UID pinned to d9ecf89d-5e95-4e63-b0ae-f8008debbc0f; deploy.sh dirty-worktree guard + SHA parity guard + version.txt + deploy_manifest.json provenance; DT-07 test isolation fix in test_dashboard_truth_contract.py; SHA 10b2cdb2eecc4573eab3965bf63143ddb327b94a deployed to NYC3.
 - ops: add protected GitHub deploy automation via `.github/workflows/deploy-nyc.yml` — manual approval through `nyc-production`, dormant-by-default auto-after-CI behind `NYC_AUTO_DEPLOY_ENABLED=true`, and proof/validate/truth-gate checks before any GitHub-driven NYC deploy.

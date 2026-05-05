@@ -163,14 +163,14 @@ class TestEdgeMonitor(unittest.TestCase):
     # ── _compute_edge_score ───────────────────────────────────────────────────
 
     def test_empty_trades_returns_zero(self):
-        from risk.edge_monitor import _compute_edge_score
+        from data.edge_monitor import _compute_market_edge_score_metrics as _compute_edge_score
         result = _compute_edge_score([])
         self.assertEqual(result['edge_score'], 0.0)
         self.assertEqual(result['n_trades'], 0)
 
     def test_all_winning_trades(self):
         """All wins: WR=1.0, PF=inf→capped, Sharpe high → edge_score near 1.0"""
-        from risk.edge_monitor import _compute_edge_score
+        from data.edge_monitor import _compute_market_edge_score_metrics as _compute_edge_score
         trades = self._make_trades([10.0] * 20)
         result = _compute_edge_score(trades)
         self.assertEqual(result['win_rate'], 1.0)
@@ -179,7 +179,7 @@ class TestEdgeMonitor(unittest.TestCase):
 
     def test_all_losing_trades(self):
         """All losses: WR=0, PF=0, edge_score near 0."""
-        from risk.edge_monitor import _compute_edge_score
+        from data.edge_monitor import _compute_market_edge_score_metrics as _compute_edge_score
         trades = self._make_trades([-5.0] * 20)
         result = _compute_edge_score(trades)
         self.assertEqual(result['win_rate'], 0.0)
@@ -188,7 +188,7 @@ class TestEdgeMonitor(unittest.TestCase):
 
     def test_fifty_fifty_win_rate(self):
         """50% win rate near the normalisation midpoint."""
-        from risk.edge_monitor import _compute_edge_score
+        from data.edge_monitor import _compute_market_edge_score_metrics as _compute_edge_score
         # 10 wins of $5, 10 losses of $5 → WR=0.5, PF=1.0
         trades = self._make_trades([5.0, -5.0] * 10)
         result = _compute_edge_score(trades)
@@ -200,7 +200,7 @@ class TestEdgeMonitor(unittest.TestCase):
 
     def test_edge_score_clamped_0_1(self):
         """edge_score is always in [0, 1]."""
-        from risk.edge_monitor import _compute_edge_score
+        from data.edge_monitor import _compute_market_edge_score_metrics as _compute_edge_score
 
         for pnls in [
             [100.0] * 20,          # extreme wins
@@ -214,7 +214,7 @@ class TestEdgeMonitor(unittest.TestCase):
 
     def test_profit_factor_asymmetry(self):
         """High winners / small losses → PF > 2 → edge_score near 1."""
-        from risk.edge_monitor import _compute_edge_score
+        from data.edge_monitor import _compute_market_edge_score_metrics as _compute_edge_score
         # 5 big wins, 15 small losses: PF should be high enough for decent edge
         trades = self._make_trades([50.0] * 5 + [-1.0] * 15)
         result = _compute_edge_score(trades)
@@ -223,7 +223,7 @@ class TestEdgeMonitor(unittest.TestCase):
     # ── strategy_to_market ───────────────────────────────────────────────────
 
     def test_strategy_to_market_mapping(self):
-        from risk.edge_monitor import strategy_to_market
+        from data.edge_monitor import strategy_to_market
 
         self.assertEqual(strategy_to_market('crypto_ai'),        'crypto')
         self.assertEqual(strategy_to_market('crypto_macd'),      'crypto')
@@ -237,14 +237,14 @@ class TestEdgeMonitor(unittest.TestCase):
 
     def test_no_consecutive_low_returns_1(self):
         """Without triggering consecutive low windows, factor = 1.0."""
-        from risk.edge_monitor import get_edge_size_factor, _consecutive_low
+        from data.edge_monitor import get_market_edge_size_factor as get_edge_size_factor, _consecutive_low
         _consecutive_low.clear()
         self.assertEqual(get_edge_size_factor('crypto'), 1.0)
 
     def test_consecutive_low_triggers_50pct(self):
         """Two consecutive low windows → factor = 0.50."""
-        from risk.edge_monitor import (
-            get_edge_size_factor, _consecutive_low, CONSECUTIVE_TRIGGER
+        from data.edge_monitor import (
+            get_market_edge_size_factor as get_edge_size_factor, _consecutive_low, CONSECUTIVE_TRIGGER
         )
         _consecutive_low['crypto'] = CONSECUTIVE_TRIGGER
         self.assertEqual(get_edge_size_factor('crypto'), 0.50)
@@ -261,8 +261,8 @@ class TestUnifiedSizer(unittest.TestCase):
         """Return a dict of patch targets → return values for a standard scenario."""
         return {
             'risk.volatility_regime.get_volatility_regime': {'v_score': v, 'data_ok': True},
-            'risk.edge_monitor.get_edge_score': {'edge_score': e_edge, 'n_trades': 25, 'sufficient': True},
-            'risk.edge_monitor.get_edge_size_factor': 1.0,
+            'data.edge_monitor.get_market_edge_score': {'edge_score': e_edge, 'n_trades': 25, 'sufficient': True},
+            'data.edge_monitor.get_market_edge_size_factor': 1.0,
             'risk.drawdown_controller.get_heat_level': {'size_factor': d, 'level': 0, 'label': 'NORMAL', 'daily_pnl': 0, 'pct_drawn': 0},
             'risk.position_sizer.size_from_kelly': k,
         }
@@ -301,9 +301,9 @@ class TestUnifiedSizer(unittest.TestCase):
              patch('risk.unified_sizer._get_time_of_day_multiplier', return_value=1.0), \
              patch('risk.volatility_regime.get_volatility_regime',
                    return_value={'v_score': 0.75, 'data_ok': True}), \
-             patch('risk.edge_monitor.get_edge_score',
+             patch('data.edge_monitor.get_market_edge_score',
                    return_value={'edge_score': 0.5, 'n_trades': 25, 'sufficient': True}), \
-             patch('risk.edge_monitor.get_edge_size_factor', return_value=1.0), \
+             patch('data.edge_monitor.get_market_edge_size_factor', return_value=1.0), \
              patch('risk.drawdown_controller.get_heat_level',
                    return_value={'size_factor': 1.0, 'level': 0, 'label': 'NORMAL', 'daily_pnl': 0, 'pct_drawn': 0}), \
              patch('risk.position_sizer.size_from_kelly', return_value=1.0):
@@ -337,9 +337,9 @@ class TestUnifiedSizer(unittest.TestCase):
              patch('risk.unified_sizer._get_time_of_day_multiplier', return_value=0.5), \
              patch('risk.volatility_regime.get_volatility_regime',
                    return_value={'v_score': 0.20, 'data_ok': True}), \
-             patch('risk.edge_monitor.get_edge_score',
+             patch('data.edge_monitor.get_market_edge_score',
                    return_value={'edge_score': 0.0, 'n_trades': 25, 'sufficient': True}), \
-             patch('risk.edge_monitor.get_edge_size_factor', return_value=0.5), \
+             patch('data.edge_monitor.get_market_edge_size_factor', return_value=0.5), \
              patch('risk.drawdown_controller.get_heat_level',
                    return_value={'size_factor': 0.25, 'level': 3, 'label': 'DANGER', 'daily_pnl': -15, 'pct_drawn': 0.035}), \
              patch('risk.position_sizer.size_from_kelly', return_value=0.5):
@@ -358,9 +358,9 @@ class TestUnifiedSizer(unittest.TestCase):
              patch('risk.unified_sizer._get_time_of_day_multiplier', return_value=1.5), \
              patch('risk.volatility_regime.get_volatility_regime',
                    return_value={'v_score': 1.0, 'data_ok': True}), \
-             patch('risk.edge_monitor.get_edge_score',
+             patch('data.edge_monitor.get_market_edge_score',
                    return_value={'edge_score': 1.0, 'n_trades': 50, 'sufficient': True}), \
-             patch('risk.edge_monitor.get_edge_size_factor', return_value=1.0), \
+             patch('data.edge_monitor.get_market_edge_size_factor', return_value=1.0), \
              patch('risk.drawdown_controller.get_heat_level',
                    return_value={'size_factor': 1.0, 'level': 0, 'label': 'NORMAL', 'daily_pnl': 0, 'pct_drawn': 0}), \
              patch('risk.position_sizer.size_from_kelly', return_value=1.5):

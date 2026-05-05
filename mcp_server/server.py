@@ -529,10 +529,10 @@ def get_edge_status(market: str = "crypto") -> dict:
                        consecutive_low_windows, consecutive_high_windows, label.
     """
     try:
-        from risk.edge_monitor import (
-            get_edge_score,
-            get_edge_size_factor,
-            check_edge_actions,
+        from data.edge_monitor import (
+            get_market_edge_score as get_edge_score,
+            get_market_edge_size_factor as get_edge_size_factor,
+            check_market_edge_actions as check_edge_actions,
         )
         from config import PAPER_TRADING
 

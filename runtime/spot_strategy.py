@@ -807,6 +807,21 @@ def spot_quality_block_reason(
         microprice=float(spot_state.get("microprice") or 0.0),
         mid_price=float(spot_state.get("mid_price") or 0.0),
     )
+    
+    # ── Push Stochastic Vitals ────────────────────────────────────────────────
+    try:
+        from data.edge_monitor import get_shadow_state
+        shadow = get_shadow_state(clean)
+        system_state.state.update_stochastic(clean, {
+            "kalman_dev": shadow.get("kalman_dev", 0.0),
+            "kyle_lambda_fragile": shadow.get("kyle_lambda_fragile", False),
+            "ou_prob": shadow.get("ou_transition_prob", 0.5),
+            "multiplier": 1.0, 
+            "status": "READY"
+        })
+    except Exception:
+        pass
+        
     system_state.state.update_prometheus()
 
     floor = score_floor_for_symbol(
@@ -905,6 +920,15 @@ def spot_quality_block_reason(
         return "volatility_quality_too_low", floor
     # Hard vetoes from execution profile (ATR fee floor, extreme selling aggression)
     _exec_mult, _exec_tag = calculate_execution_profile(symbol, spot_state)
+    
+    # Update system state with final multiplier and tag
+    try:
+        current_stoch = system_state.state.get_state()["strategy"].get("stochastic", {}).get(clean, {})
+        current_stoch.update({"multiplier": _exec_mult, "status": _exec_tag})
+        system_state.state.update_stochastic(clean, current_stoch)
+    except Exception:
+        pass
+
     if _exec_mult == 0.0:
         return _exec_tag, floor
     return "", floor

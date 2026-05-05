@@ -1,6 +1,6 @@
 {
   "hooks": {
-    "PreToolUse": [
+    "BeforeTool": [
       {
         "matcher": "Bash",
         "hooks": [
@@ -24,7 +24,7 @@
         ]
       }
     ],
-    "PostToolUse": [
+    "AfterTool": [
       {
         "matcher": "Bash",
         "hooks": [
@@ -65,7 +65,7 @@
         ]
       }
     ],
-    "Stop": [
+    "SessionEnd": [
       {
         "hooks": [
           {

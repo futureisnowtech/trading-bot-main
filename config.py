@@ -705,8 +705,8 @@ CRYPTOPANIC_API_KEY: str = os.getenv(
 REDDIT_CLIENT_ID: str = os.getenv("REDDIT_CLIENT_ID", "")
 REDDIT_CLIENT_SECRET: str = os.getenv("REDDIT_CLIENT_SECRET", "")
 REDDIT_USER_AGENT: str = os.getenv("REDDIT_USER_AGENT", "AlgoTradingBot/1.0")
-GEMINI_MODEL: str = "gemini-2.0-flash"  # Always latest
-GEMINI_MODEL_EXTENDED: str = "gemini-2.0-flash-thinking-exp"  # For exit extended thinking
+GEMINI_MODEL: str = "gemini-1.5-flash"  # Always stable
+GEMINI_MODEL_EXTENDED: str = "gemini-1.5-pro"  # For exit extended thinking
 GEMINI_DEBATE_MODEL: str = os.getenv(
     "GEMINI_DEBATE_MODEL", "gemini-1.5-flash"
 )  # Debate agents (cheap)
@@ -1191,7 +1191,7 @@ OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
 # AI Exit Settings
 PM_LLM_TEMPERATURE: float = float(os.getenv("PM_LLM_TEMPERATURE", "0.3"))
 PM_LLM_MAX_TOKENS: int = int(os.getenv("PM_LLM_MAX_TOKENS", "600"))
-GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
 
 # ════════════════════════════════════════════════════════════════════
 # DATABASE & LOGGING

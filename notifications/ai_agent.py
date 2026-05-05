@@ -16,7 +16,7 @@ except ImportError:
 try:
     from config import GEMINI_MODEL
 except ImportError:
-    GEMINI_MODEL = "gemini-2.0-flash"
+    GEMINI_MODEL = "gemini-1.5-flash"
 
 logger = logging.getLogger(__name__)
 

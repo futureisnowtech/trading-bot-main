@@ -94,10 +94,16 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
         df['adx'] = 25.0  # Default assumption if can't calculate
 
     # ─── EMAs ─────────────────────────────────────────────────────────────────
-    df['ema200'] = df['close'].ewm(span=200, adjust=False).mean()
-    df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
-    df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
-    df['ema9'] = df['close'].ewm(span=9, adjust=False).mean()
+    # v18.17: Batch EMA columns to eliminate DataFrame fragmentation warning
+    df = pd.concat([
+        df,
+        pd.DataFrame({
+            'ema200': df['close'].ewm(span=200, adjust=False).mean(),
+            'ema50':  df['close'].ewm(span=50,  adjust=False).mean(),
+            'ema20':  df['close'].ewm(span=20,  adjust=False).mean(),
+            'ema9':   df['close'].ewm(span=9,   adjust=False).mean(),
+        }, index=df.index)
+    ], axis=1)
 
     # ─── KST oscillator (Know Sure Thing — for equity momentum) ───────────────
     if PANDAS_TA:
@@ -405,11 +411,17 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
         _trend_dn   = (_t2 - _t1).clip(lower=0).where(_t1 < 0,  0)
         _bb_std20   = df['close'].rolling(20).std().fillna(0)
         _explosion  = 4 * _bb_std20   # BB upper-lower width (2σ each side)
-        df['wae_trend_up']  = _trend_up
-        df['wae_trend_down'] = _trend_dn
-        df['wae_explosion'] = _explosion
-        df['wae_bullish']   = (_trend_up > _trend_dn) & (_trend_up > 0)
-        df['wae_exploding'] = (_trend_up > _explosion) | (_trend_dn > _explosion)
+        # v18.17: Batch WAE columns to eliminate DataFrame fragmentation warning
+        df = pd.concat([
+            df,
+            pd.DataFrame({
+                'wae_trend_up':   _trend_up,
+                'wae_trend_down': _trend_dn,
+                'wae_explosion':  _explosion,
+                'wae_bullish':    (_trend_up > _trend_dn) & (_trend_up > 0),
+                'wae_exploding':  (_trend_up > _explosion) | (_trend_dn > _explosion),
+            }, index=df.index)
+        ], axis=1)
     except Exception as e:
         logger.error(f"[indicators] wae failed: {e}")
         df['wae_bullish']   = False
@@ -608,9 +620,15 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
         df['ema21'] = df['close'].ewm(span=21, adjust=False).mean()
         _ema9_prev  = df['ema9'].shift(1).fillna(df['ema9'])
         _ema21_prev = df['ema21'].shift(1).fillna(df['ema21'])
-        df['ema_golden_cross'] = (df['ema9'] > df['ema21']) & (_ema9_prev <= _ema21_prev)
-        df['ema_death_cross']  = (df['ema9'] < df['ema21']) & (_ema9_prev >= _ema21_prev)
-        df['ema9_above_21']    = df['ema9'] > df['ema21']  # persistent state flag
+        # v18.17: Batch EMA cross columns to eliminate DataFrame fragmentation warning
+        df = pd.concat([
+            df,
+            pd.DataFrame({
+                'ema_golden_cross': (df['ema9'] > df['ema21']) & (_ema9_prev <= _ema21_prev),
+                'ema_death_cross':  (df['ema9'] < df['ema21']) & (_ema9_prev >= _ema21_prev),
+                'ema9_above_21':    df['ema9'] > df['ema21'],
+            }, index=df.index)
+        ], axis=1)
     except Exception as e:
         logger.error(f"[indicators] ema_cross failed: {e}")
         df['ema_golden_cross'] = False

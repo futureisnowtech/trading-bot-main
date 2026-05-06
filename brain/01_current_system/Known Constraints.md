@@ -34,7 +34,7 @@
 | Item | TREND | NEUTRAL |
 |---|---:|---:|
 | Structural confirms | 2 | 3 |
-| Final score floor | 58 | 60 |
+| Final score floor | 52 | 52 |
 | 5m frame floor | 52 | 55 |
 | 30m frame floor | 55 | 58 |
 | Path efficiency | 0.20 | 0.20 |

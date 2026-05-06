@@ -199,6 +199,28 @@ def ask_ai(query: str) -> str:
         chat = model.start_chat(enable_automatic_function_calling=True)
         response = chat.send_message(query)
         
+        # Capture token telemetry for daily burn report (Task 12)
+        try:
+            import sqlite3 as _sq
+            import time as _time
+            from config import DB_PATH as _DB_PATH
+
+            _prompt_tokens = int(
+                getattr(getattr(response, "usage_metadata", None), "prompt_token_count", 0) or 0
+            )
+            _completion_tokens = int(
+                getattr(getattr(response, "usage_metadata", None), "candidates_token_count", 0) or 0
+            )
+            if _prompt_tokens > 0 or _completion_tokens > 0:
+                with _sq.connect(_DB_PATH) as _tconn:
+                    _tconn.execute(
+                        "INSERT INTO api_telemetry (ts, module, prompt_tokens, completion_tokens) "
+                        "VALUES (?, ?, ?, ?)",
+                        (_time.time(), "telegram_ask", _prompt_tokens, _completion_tokens),
+                    )
+        except Exception as _tel_e:
+            logger.debug(f"[ai_agent] telemetry capture failed: {_tel_e}")
+
         return response.text
     except Exception as e:
         logger.error(f"Gemini Agent exception: {e}")

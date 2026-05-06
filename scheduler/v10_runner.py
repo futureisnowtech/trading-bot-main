@@ -3575,6 +3575,55 @@ def run_forever():
 
     schedule.every().day.at("03:00").do(_nightly_recon_job)
 
+    # Daily token burn report — surfaces which modules consume the Gemini API budget
+    def _send_daily_token_burn_report():
+        """
+        Query api_telemetry for last 24h token usage grouped by module.
+        Format and send a burn report via Telegram (Task 13).
+        """
+        try:
+            import sqlite3 as _sq
+            import time as _time
+            from config import DB_PATH as _DB_PATH
+            from notifications.telegram_bot import send_message as _tg
+
+            _cutoff = _time.time() - 86400  # last 24 hours
+
+            with _sq.connect(_DB_PATH) as _conn:
+                rows = _conn.execute(
+                    "SELECT module, SUM(prompt_tokens) as p, SUM(completion_tokens) as c "
+                    "FROM api_telemetry WHERE ts >= ? GROUP BY module ORDER BY (p+c) DESC",
+                    (_cutoff,),
+                ).fetchall()
+
+            if not rows:
+                logger.debug("[v10] No API telemetry data for burn report (last 24h).")
+                return
+
+            total_tokens = sum(int(r[1] or 0) + int(r[2] or 0) for r in rows)
+            heaviest = rows[0]  # already sorted descending
+            heaviest_name = str(heaviest[0])
+            heaviest_total = int(heaviest[1] or 0) + int(heaviest[2] or 0)
+
+            lines = ["📊 <b>Daily Token Burn Report</b> (last 24h)"]
+            lines.append(f"Total Tokens: <b>{total_tokens:,}</b>")
+            lines.append(f"Heaviest Consumer: <b>{heaviest_name}</b> with <b>{heaviest_total:,}</b> tokens")
+            lines.append("")
+            lines.append("<b>Per-module breakdown:</b>")
+            for r in rows:
+                mod = str(r[0])
+                p = int(r[1] or 0)
+                c = int(r[2] or 0)
+                lines.append(f"  • {mod}: {p:,} prompt + {c:,} completion = {p+c:,}")
+
+            _tg("\n".join(lines))
+            logger.info(f"[v10] Daily token burn report sent. Total tokens: {total_tokens:,}")
+
+        except Exception as _e:
+            logger.warning(f"[v10] Token burn report failed: {_e}")
+
+    schedule.every().day.at("08:00").do(_send_daily_token_burn_report)  # 8am ET local
+
     # Periodic system + crypto lane heartbeat (every 1 minute)
     def _write_heartbeat():
         try:

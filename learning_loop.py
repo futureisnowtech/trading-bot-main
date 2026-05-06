@@ -331,6 +331,47 @@ def record_closed_trade(
     if incubation_id is not None:
         _forward_to_rbi(incubation_id, won, pnl_usd)
 
+    # 5. Online Learner — Surprise-Only Bayesian update (Manifest Section 4.1)
+    # NOTE: This block accesses private members (_learner._model, _learner.n_updates)
+    # of OnlineLearner. This is intentional — OnlineLearner lives in this codebase, we
+    # control the contract, and the alternative (back-calculating predicted_prob from
+    # get_adjustment's clipped output) is fragile. Do not "fix" by switching to public API.
+    try:
+        from ml.online_learner import record_outcome as _ol_record, get_learner as _get_learner
+        from ml.feature_builder import to_array as _to_array
+
+        if features:
+            _feat_arr = _to_array(features)
+            _symbol = str(features.get("base_asset") or features.get("symbol") or symbol or "")
+            _outcome = 1.0 if won else 0.0
+
+            # Get the current predicted probability to measure surprise
+            _learner = _get_learner(direction, _symbol)
+            if _learner._model is not None and _learner.n_updates >= 5:
+                try:
+                    _predicted_prob = float(
+                        _learner._model.predict_proba(_feat_arr.reshape(1, -1))[0, 1]
+                    )
+                except Exception:
+                    _predicted_prob = 0.5
+            else:
+                _predicted_prob = 0.5
+
+            _surprise = abs(_outcome - _predicted_prob)
+            if _surprise > 0.4:
+                _ol_record(_feat_arr, bool(won), direction, _symbol)
+                logger.debug(
+                    f"[learning] Online learner updated: {_symbol} {direction} "
+                    f"won={won} surprise={_surprise:.2f} predicted={_predicted_prob:.2f}"
+                )
+            else:
+                logger.debug(
+                    f"[learning] Online learner skipped (no surprise): {_symbol} {direction} "
+                    f"won={won} surprise={_surprise:.2f} — outcome within expectation"
+                )
+    except Exception as _ol_e:
+        logger.debug(f"[learning] Online learner update skipped: {_ol_e}")
+
 
 def check_retrain_queue() -> List[Tuple[str, str]]:
     """

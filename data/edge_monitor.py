@@ -587,8 +587,8 @@ async def update_shadow_state(
     ema_adf = (alpha * adf_stat) + ((1.0 - alpha) * last_ema)
     _ADF_EMA_STATE[symbol] = ema_adf
     
-    # Stationarity threshold: -2.86 (MacKinnon 5% critical value)
-    is_stationary = bool(ema_adf < -2.86)
+    # Stationarity threshold: -3.10 (MacKinnon 5% critical value)
+    is_stationary = bool(ema_adf < -3.10)
     
     ou_hl = _compute_ou_halflife(prices)
 

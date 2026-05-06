@@ -54,6 +54,7 @@ SEV_CRITICAL = 'CRITICAL'
 
 _MAX_NOTIFICATIONS = 500
 _PRUNE_TO          = 450  # keep this many after pruning
+_TABLE_INITIALIZED: bool = False
 
 
 # ── Data model ────────────────────────────────────────────────────────────────
@@ -99,6 +100,9 @@ def _conn():
 
 def _ensure_table():
     """Ensure notifications table exists and has all v10 columns (idempotent)."""
+    global _TABLE_INITIALIZED
+    if _TABLE_INITIALIZED:
+        return
     try:
         conn = _conn()
         # Create table if it doesn't exist (matches Phase 1 migration schema)
@@ -122,16 +126,14 @@ def _ensure_table():
                 conn.execute(col_sql)
             except Exception:
                 pass  # column already exists
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_notif_ts ON notifications(ts DESC)"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_notif_cat ON notifications(category)"
-        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_notif_ts ON notifications(ts DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_notif_cat ON notifications(category)")
         conn.commit()
         conn.close()
+        _TABLE_INITIALIZED = True
     except Exception as e:
         logger.debug(f'[notif] table init error: {e}')
+
 
 
 def _prune(conn):

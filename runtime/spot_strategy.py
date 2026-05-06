@@ -813,7 +813,7 @@ def spot_quality_block_reason(
         from data.edge_monitor import get_shadow_state
         shadow = get_shadow_state(clean)
         system_state.state.update_stochastic(clean, {
-            "kalman_dev": shadow.get("kalman_dev", 0.0),
+            "kalman_dev": shadow.get("kalman_dev_pct", 0.0),
             "kyle_lambda_fragile": shadow.get("kyle_lambda_fragile", False),
             "ou_prob": shadow.get("ou_transition_prob", 0.5),
             "multiplier": 1.0, 

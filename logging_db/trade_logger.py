@@ -168,6 +168,7 @@ def init_db() -> None:
         "ALTER TABLE open_positions ADD COLUMN raw_scanner_symbol TEXT DEFAULT ''",
         "ALTER TABLE open_positions ADD COLUMN base_asset TEXT DEFAULT ''",
         "ALTER TABLE open_positions ADD COLUMN tv_veto_state TEXT DEFAULT ''",
+        "CREATE TABLE IF NOT EXISTS api_telemetry (id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL NOT NULL, module TEXT NOT NULL, prompt_tokens INTEGER DEFAULT 0, completion_tokens INTEGER DEFAULT 0)",
     ]:
         try:
             cur.execute(migration)
@@ -228,6 +229,14 @@ def init_db() -> None:
         ts REAL NOT NULL, call_type TEXT NOT NULL,
         input_tokens INTEGER DEFAULT 0, output_tokens INTEGER DEFAULT 0,
         cost_usd REAL DEFAULT 0, symbol TEXT
+    )""")
+
+    cur.execute("""CREATE TABLE IF NOT EXISTS api_telemetry (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts REAL NOT NULL,
+        module TEXT NOT NULL,
+        prompt_tokens INTEGER DEFAULT 0,
+        completion_tokens INTEGER DEFAULT 0
     )""")
 
     cur.execute("""CREATE TABLE IF NOT EXISTS edge_snapshots (

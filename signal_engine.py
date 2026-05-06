@@ -27,6 +27,7 @@ Entry thresholds (regime-adjusted):
 import logging
 import time
 import math
+import numpy as np
 from typing import Dict, Optional, Tuple
 
 import numpy as np
@@ -639,6 +640,22 @@ def score(
     if live_trade_days is None:
         live_trade_days = _live_trade_days()
     ml_score = _get_ml_score(features, direction, regime, model_store)
+
+    # Online Learner modulation — adds ±0.15 adjustment based on recent trade outcomes
+    try:
+        from ml.online_learner import get_online_adjustment
+        from ml.feature_builder import to_array as _to_array
+        _feat_arr = _to_array(features)
+        _symbol_hint = str(
+            features.get("symbol")
+            or features.get("base_asset")
+            or features.get("executed_symbol")
+            or ""
+        ).strip()
+        _online_adj = get_online_adjustment(_feat_arr, direction, _symbol_hint)
+        ml_score = float(np.clip(ml_score + _online_adj * 100.0, 0.0, 100.0))
+    except Exception:
+        pass  # fail open — never block a trade due to online learner errors
 
     # Composite
     tech_w, ml_w = _composite_weights(live_trade_days)

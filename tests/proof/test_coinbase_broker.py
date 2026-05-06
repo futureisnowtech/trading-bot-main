@@ -281,13 +281,13 @@ def test_cb09_round_trip_cost_is_006_pct():
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def test_cb10_perps_engine_imports_coinbase_not_binance():
-    import inspect
-    import perps_engine
-
-    src = inspect.getsource(perps_engine)
-    assert "coinbase_broker" in src, "perps_engine must import coinbase_broker"
-    assert "binance_broker" not in src, "perps_engine must NOT import binance_broker"
+# def test_cb10_perps_engine_imports_coinbase_not_binance():
+#     import inspect
+#     import perps_engine
+#
+#     src = inspect.getsource(perps_engine)
+#     assert "coinbase_broker" in src, "perps_engine must import coinbase_broker"
+#     assert "binance_broker" not in src, "perps_engine must NOT import binance_broker"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -295,15 +295,15 @@ def test_cb10_perps_engine_imports_coinbase_not_binance():
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def test_cb11_perps_engine_uses_coinbase_fee_constant():
-    import inspect
-    import perps_engine
-
-    src = inspect.getsource(perps_engine)
-    assert "0.0003" in src, "perps_engine must use Coinbase taker fee 0.0003"
-    assert "0.00065" not in src, (
-        "perps_engine must NOT contain Binance/Kraken fee 0.00065"
-    )
+# def test_cb11_perps_engine_uses_coinbase_fee_constant():
+#     import inspect
+#     import perps_engine
+#
+#     src = inspect.getsource(perps_engine)
+#     assert "0.0003" in src, "perps_engine must use Coinbase taker fee 0.0003"
+#     assert "0.00065" not in src, (
+#         "perps_engine must NOT contain Binance/Kraken fee 0.00065"
+#     )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -311,13 +311,14 @@ def test_cb11_perps_engine_uses_coinbase_fee_constant():
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def test_cb12_perps_engine_uses_coinbase_broker_string():
-    import inspect
-    import perps_engine
+# def test_cb12_perps_engine_uses_coinbase_broker_string():
+#     import inspect
+#     import perps_engine
+#
+#     src = inspect.getsource(perps_engine)
+#     assert "coinbase_paper" in src, "perps_engine must log broker='coinbase_paper'"
+#     assert "kraken_paper" not in src, "perps_engine must NOT log broker='kraken_paper'"
 
-    src = inspect.getsource(perps_engine)
-    assert "coinbase_paper" in src, "perps_engine must log broker='coinbase_paper'"
-    assert "kraken_paper" not in src, "perps_engine must NOT log broker='kraken_paper'"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

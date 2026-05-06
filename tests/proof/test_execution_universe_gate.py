@@ -243,14 +243,14 @@ def test_manual_scan_requests_core_only_scan_and_fails_closed():
     assert '"execute": False' in src, "manual scan policy lookup must fail closed"
 
 
-def test_v10_runner_uses_tradingview_as_htf_context_not_synthetic_candidates():
+def test_v10_runner_excision_of_tradingview_as_htf_context():
     runner_path = os.path.join(_ROOT, "scheduler", "v10_runner.py")
     src = open(runner_path).read()
-    assert "_tv_context_map(tv_signals)" in src, (
-        "v10_runner must normalize fresh TradingView rows into an HTF context map"
+    assert "tv_context_by_underlying = {}" in src, (
+        "v10_runner must explicitly excise TradingView context (v18.16)"
     )
-    assert "TV HTF context" in src, (
-        "v10_runner should log TradingView as HTF context instead of treating it as a synthetic entry source"
+    assert "TV excision" in src, (
+        "v10_runner should document the TradingView excision in comments"
     )
     assert "tv_candidates" not in src, (
         "TradingView alerts should no longer be promoted into synthetic trade candidates"

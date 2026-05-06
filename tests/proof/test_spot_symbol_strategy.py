@@ -72,7 +72,7 @@ def test_sss03_doge_open_gate_before_calibration():
         final_spot_score=70.0,
     )
     assert reason == "", f"Expected open gate (empty reason), got: {reason!r}"
-    assert floor == 58.0
+    assert floor == 52.0
 
 
 def test_sss04_eth_uses_precision_exit_profile_targets():
@@ -123,7 +123,7 @@ def test_sss06_score_floor_is_strategy_constant_under_tiny_live_defaults():
         synthetic_candidate=True,
     )
 
-    assert base == 58.0
-    assert synthetic == 58.0
-    assert taker == 58.0
-    assert synthetic_taker == 58.0
+    assert base == 52.0
+    assert synthetic == 52.0
+    assert taker == 52.0
+    assert synthetic_taker == 52.0

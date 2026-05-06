@@ -431,6 +431,30 @@ def known_setup_families() -> tuple[str, ...]:
     return KNOWN_SETUP_FAMILIES
 
 
+def _normalize_regime(raw_regime: str) -> str:
+    """
+    Map classifier labels (TRENDING_UP/DOWN, RANGING, UNKNOWN) to the governance 
+    keyspace ({TREND, NEUTRAL, CHOP}).
+
+    Conservative mapping:
+      - TRENDING_UP, TRENDING_DOWN -> TREND (directional momentum)
+      - RANGING -> NEUTRAL (side-of-fair-value scalp)
+      - UNKNOWN, blank, anything else -> NEUTRAL (safest default)
+      
+    NOTE: RANGING does NOT map to CHOP. CHOP is reserved as a manual override
+    regime with a hard score-floor lockout. No classifier output should produce 
+    CHOP today; if you need to disable trading, do it via kill_switch instead.
+    """
+    r = (raw_regime or "").strip().upper()
+    if r in ("TRENDING_UP", "TRENDING_DOWN", "TREND"):
+        return "TREND"
+    if r == "RANGING":
+        return "NEUTRAL"
+    if r in ("TREND", "NEUTRAL", "CHOP"):
+        return r  # already in governance keyspace, pass through
+    return "NEUTRAL"  # UNKNOWN, blank, or unrecognized
+
+
 def get_spot_strategy(symbol: str) -> dict[str, Any]:
     import config as _cfg
 
@@ -794,7 +818,7 @@ def spot_quality_block_reason(
     if not spot_state:
         return "spot_state_unavailable", 0.0
 
-    regime = str(spot_state.get("regime") or "NEUTRAL").upper()
+    regime = _normalize_regime(str(spot_state.get("regime") or "NEUTRAL"))
     setup_family = str(spot_state.get("setup_family") or "")
     setup_score = float(spot_state.get("setup_score") or 0.0)
     confirm_count = int(spot_state.get("structural_confirm_count") or 0)

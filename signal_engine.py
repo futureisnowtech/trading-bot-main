@@ -30,7 +30,7 @@ import math
 import numpy as np
 from typing import Dict, Optional, Tuple
 
-import numpy as np
+from ml.online_learner import get_online_adjustment
 
 logger = logging.getLogger(__name__)
 
@@ -546,6 +546,21 @@ def _get_ml_score(
         )
         if raw_score is None:
             return 50.0
+
+        # v18.17: Apply online adjustment (modulation)
+        try:
+            from ml.feature_builder import FEATURE_NAMES
+
+            X_raw = np.array(
+                [float(features.get(name, 0.0)) for name in FEATURE_NAMES],
+                dtype=np.float32,
+            )
+            adj = get_online_adjustment(X_raw, direction, symbol=symbol_hint)
+            # adj is +/- 0.15 (prob space), map to +/- 15 points
+            raw_score = float(np.clip(raw_score + (adj * 100.0), 0, 100))
+        except Exception as _e:
+            logger.debug(f"[signal_engine] online adjustment error: {_e}")
+
         mult = _REGIME_ML_MULT.get(regime, {}).get(direction, 1.0)
         return float(np.clip(raw_score * mult, 0, 100))
     except Exception as e:

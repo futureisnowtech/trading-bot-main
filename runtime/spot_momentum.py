@@ -299,11 +299,38 @@ def _timeframe_state_from_enriched_df(df: pd.DataFrame) -> dict[str, Any]:
         "supertrend": 1 if bool(_bool_series(df, "supertrend_bullish").iloc[-1]) else 0,
     }
 
+    # v18.17: Kaufman Efficiency Ratio (ER) for dynamic regime
+    # ER = abs(net_change) / sum(abs(tick_changes)) over N=10 periods
+    _n_er = 10
+    if len(close) >= _n_er + 1:
+        net_change = abs(float(close.iloc[-1]) - float(close.iloc[-_n_er - 1]))
+        abs_diffs = close.diff().abs().iloc[-_n_er:]
+        tick_changes_sum = float(abs_diffs.sum())
+        er = net_change / tick_changes_sum if tick_changes_sum > 0 else 0.0
+    else:
+        er = 0.0
+
+    # v18.17: OBI calculation from orderbook
+    obi = 0.0
+    try:
+        from execution.coinbase_spot_broker import get_spot_broker
+        broker = get_spot_broker()
+        top = broker.get_spot_top_of_book(df.attrs.get("symbol", "BTC-USDC"))
+        bid_sz = float(top.get("best_bid_size") or 0.0)
+        ask_sz = float(top.get("best_ask_size") or 0.0)
+        if bid_sz + ask_sz > 0:
+            obi = (bid_sz - ask_sz) / (bid_sz + ask_sz)
+    except Exception:
+        pass
+
     return {
         "z": z,
         "v": v,
         "a": a,
         "j": j,
+        "er": float(er),
+        "adx": float(adx.iloc[-1] or 0.0),
+        "obi": float(obi),
         "frame_score": frame_score,
         "rv_ratio": float(rv_ratio.iloc[-1] or 1.0),
         "ou_halflife_minutes": float(ou_halflife.iloc[-1] or 15.0),
@@ -376,10 +403,34 @@ def _build_spot_state_fresh(symbol: str) -> dict[str, Any]:
     )
     setup_family = str(best_setup.get("family") or "compression_breakout")
     setup_score = float(best_setup.get("score") or 0.0)
+    # v18.17: Mid-price and Microprice for Prometheus observability
+    mid_price = 0.0
+    microprice = 0.0
+    try:
+        from execution.coinbase_spot_broker import get_spot_broker
+
+        broker = get_spot_broker()
+        top = broker.get_spot_top_of_book(symbol)
+        bid = float(top.get("best_bid") or 0.0)
+        ask = float(top.get("best_ask") or 0.0)
+        bid_sz = float(top.get("best_bid_size") or 0.0)
+        ask_sz = float(top.get("best_ask_size") or 0.0)
+        if bid > 0 and ask > 0:
+            mid_price = (bid + ask) / 2.0
+            if bid_sz + ask_sz > 0:
+                microprice = (bid * ask_sz + ask * bid_sz) / (bid_sz + ask_sz)
+            else:
+                microprice = mid_price
+    except Exception:
+        mid_price = float(close.iloc[-1])
+        microprice = mid_price
+
     return {
         "symbol": symbol,
         "frames": states,
         "regime": regime,
+        "mid_price": round(mid_price, 8),
+        "microprice": round(microprice, 8),
         "derivative_score": round(float(derivative_score), 2),
         "structural_confirm_count": int(confirm_count),
         "setup_family": setup_family,

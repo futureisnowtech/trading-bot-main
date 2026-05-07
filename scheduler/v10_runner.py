@@ -1571,25 +1571,66 @@ def _attempt_entry(
     except Exception as _eu_err:
         logger.debug(f"[v10] execution universe check error {symbol}: {_eu_err}")
 
-    # ── Step 5c: Tradeability gate + spot/perp routing (v16.14) ─────────────────
-    # Single call to get_crypto_tradeability() replaces: autonomous-eligibility
-    # gate, spot-lane parallel entry, and contract-min policy check.
-    # Paper mode: symbol/direction rules enforced; balance/count checks skipped.
+    # ── Step 5c: DAG Reducer + Tradeability Gate (v18.17) ────────────────────
     try:
         from runtime.crypto_tradeability import (
             get_crypto_tradeability as _get_tradeable,
         )
+        from runtime.spot_momentum import build_spot_state as _bs, SpotStateUnavailable
+        import spot_engine as _spot_eng
 
-        _underlying_for_trade = _get_underlying(symbol)
+        _underlying = _get_underlying(symbol)
+        
+        # Gather Momentum State
+        try:
+            _spot_state_payload = _bs(_underlying, allow_stale=True)
+        except Exception:
+            _spot_state_payload = {}
+
+        # Calculate base_alloc_usd for the dynamic risk governor
+        # (Inverse volatility scaling will be applied inside tradeability)
+        _base_alloc_usd = 0.0
+        try:
+            _stop_pct = _spot_eng._compute_stop_pct(
+                _underlying, _spot_state_payload, atr_at_entry=atr_7
+            )
+            from config import SPOT_SCALP_SYMBOL_CONFIG
+            from runtime.live_account import get_live_account_size
+
+            _cfg = SPOT_SCALP_SYMBOL_CONFIG.get(_underlying, {})
+            _risk_fraction = float(_cfg.get("risk_fraction", 0.0015))
+            _account_equity = float(get_live_account_size(paper=_paper))
+            _risk_dollars = _account_equity * _risk_fraction
+            _base_alloc_usd = _risk_dollars / max(_stop_pct, 1e-6)
+        except Exception:
+            _base_alloc_usd = 0.0
+
+        # Build unified DAG State
+        dag_state = {
+            "RootTruth": {
+                "account_equity": balance,
+                "deployed_usd": deployed_usd,
+            },
+            "TelemetryFrame": features,
+            "RegimeState": {
+                "er": _spot_state_payload.get("er", 0.0),
+                "adx": _spot_state_payload.get("adx", 0.0),
+                "regime": regime,
+            },
+            "MomentumState": _spot_state_payload,
+            "base_alloc_usd": _base_alloc_usd,
+        }
+
         _trade = _get_tradeable(
             symbol,
             direction,
             candidate,
             live=not _paper,
             manual=False,
+            dag_state=dag_state,
         )
     except Exception as _trade_err:
-        logger.debug(f"[v10] tradeability check error: {_trade_err}")
+        logger.debug(f"[v10] DAG/tradeability error: {_trade_err}")
         _trade = {
             "status": "blocked",
             "blocked_reason": "execution_policy_unavailable",
@@ -1822,6 +1863,10 @@ def _attempt_entry(
             _account_equity = float(get_live_account_size(paper=_paper))
             _risk_dollars = _account_equity * _risk_fraction
             _size_raw = _risk_dollars / max(_stop_pct, 1e-6)
+
+            # v18.17: Use dynamic risk governor output from DAG Reducer
+            _spot_size = float(_trade.get("dynamic_alloc_usd") or _size_raw)
+
             _total_spot_cap = _account_equity * float(SPOT_TOTAL_ALLOC_CAP_PCT)
             _symbol_cap = _account_equity * _alloc_cap_pct
             _spot_deployed = _spot_eng._current_spot_deployed_usd(paper=_paper)
@@ -1845,8 +1890,10 @@ def _attempt_entry(
             _liquidity_cap = (
                 max(float(_top.get("top_depth_usd") or 0.0) * 0.10, 0.0) or _symbol_cap
             )
+
+            # Final safety clamps (liquidity and available balance)
             _spot_size = min(
-                _size_raw,
+                _spot_size,
                 _symbol_cap,
                 max(0.0, _total_spot_cap - _spot_deployed),
                 _available_spot_usd * 0.95,

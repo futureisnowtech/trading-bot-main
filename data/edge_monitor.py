@@ -23,6 +23,7 @@ Cached 5 minutes per strategy to avoid hammering the DB each scan cycle.
 
 import os
 import sqlite3
+import collections
 from datetime import datetime
 from typing import Dict, Tuple
 
@@ -420,16 +421,20 @@ def _store_cache(strategy: str, result: dict) -> None:
 _SHADOW_STATE: dict = {}
 _ADF_EMA_STATE: Dict[str, float] = {}
 _KYLE_LAMBDA_HISTORY: dict[str, list[float]] = {}
+_OU_PROB_HISTORY: dict[str, collections.deque] = {}
 _KYLE_LAMBDA_MAX_HISTORY = 1440  # 24h at 1-bar-per-minute cadence
 
 
 def get_shadow_state(symbol: str) -> dict:
     """
     Return last-known-good shadow state for symbol.
-    Returns {} when cold (first ~60s after startup).
+    Returns {"stochastic_state": "COLD"} when cold (first ~60s after startup).
     All callers must treat missing keys as fail-open defaults.
     """
-    return _SHADOW_STATE.get(symbol, {})
+    res = _SHADOW_STATE.get(symbol, {})
+    if not res:
+        return {"stochastic_state": "COLD"}
+    return res
 
 
 def _compute_kalman(prices: list) -> tuple:
@@ -603,6 +608,16 @@ async def update_shadow_state(
         price_std=price_std,
     )
 
+    # v18.17: Stochastic variance check (detect frozen math)
+    ou_hist = _OU_PROB_HISTORY.setdefault(symbol, collections.deque(maxlen=10))
+    ou_hist.append(ou_prob)
+    if len(ou_hist) < 10:
+        stochastic_state = "COLD"
+    else:
+        mean = sum(ou_hist) / 10.0
+        var = sum((x - mean) ** 2 for x in ou_hist) / 10.0
+        stochastic_state = "FROZEN" if var == 0.0 else "ACTIVE"
+
     _SHADOW_STATE[symbol] = {
         "kalman_fair_value": fair_value,
         "kalman_dev_pct": dev_pct,
@@ -612,6 +627,7 @@ async def update_shadow_state(
         "adf_stationary": is_stationary,
         "ou_halflife_bars": ou_hl,
         "ou_transition_prob": round(ou_prob, 4),
+        "stochastic_state": stochastic_state,
         "computed_at": __import__("datetime").datetime.utcnow().isoformat(),
     }
 

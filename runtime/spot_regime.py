@@ -8,15 +8,12 @@ from config import SPOT_REGIME_SCORE_FLOORS
 
 
 def classify_spot_regime(state_30m: dict, state_4h: dict) -> str:
-    score_30m = float(state_30m.get("frame_score") or 0.0)
-    score_4h = float(state_4h.get("frame_score") or 0.0)
-    z_30m = float(state_30m.get("z") or 0.0)
-    v_30m = float(state_30m.get("v") or 0.0)
-    rv_ratio = float(state_30m.get("rv_ratio") or state_4h.get("rv_ratio") or 1.0)
+    er = float(state_30m.get("er") or 0.0)
+    adx = float(state_30m.get("adx") or 0.0)
 
-    if score_4h >= 56.0 and score_30m >= 53.0 and v_30m > 0 and z_30m >= 0.10:
+    if er > 0.6 and adx > 25.0:
         return "TREND"
-    if abs(z_30m) < 0.12 or (rv_ratio > 1.35 and abs(v_30m) < 0.08):
+    if er < 0.3 and adx < 20.0:
         return "CHOP"
     return "NEUTRAL"
 

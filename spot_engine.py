@@ -703,11 +703,6 @@ def open_spot(
     truth_row = get_spot_symbol_truth(clean, paper=paper)
     if truth_row:
         truth_status = str(truth_row.get("position_truth_status") or "")
-        if truth_status == "external_manual":
-            logger.warning(
-                f"[spot_engine] {clean} blocked — external_manual_holding_present"
-            )
-            return None
         if truth_status in {
             "matched_bot_position",
             "unclassified",

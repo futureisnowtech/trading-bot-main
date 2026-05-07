@@ -119,9 +119,10 @@ def _executable_result(
     auto_executable: int = 1,
     manual_executable: int = 1,
     source_reason: str = "trusted_source",
+    dag_state: dict | None = None,
 ) -> dict:
     """Build a fully populated executable tradeability dict."""
-    return {
+    res = {
         "symbol": symbol,
         "underlying": underlying,
         "lane": lane,
@@ -134,6 +135,31 @@ def _executable_result(
         "source_reason": source_reason,
         "display_label": "SPOT EXECUTABLE" if lane == "spot" else "PERP EXECUTABLE",
     }
+
+    # v18.17: Dynamic risk governor — scale allocated_usd inversely to ER
+    if lane == "spot" and dag_state:
+        try:
+            from config import SPOT_MIN_ORDER_USD, SPOT_TOTAL_ALLOC_CAP_PCT
+
+            # ER from RegimeState payload
+            er = float(dag_state.get("RegimeState", {}).get("er", 0.0))
+            # base_alloc derived from account risk policy in v10_runner
+            base_alloc = float(dag_state.get("base_alloc_usd", 0.0))
+
+            if base_alloc > 0:
+                dynamic_alloc = base_alloc * (1.0 - er)
+                # Clamp between floor and global ceiling
+                equity = float(
+                    dag_state.get("RootTruth", {}).get("account_equity", 1000.0)
+                )
+                ceiling = equity * float(SPOT_TOTAL_ALLOC_CAP_PCT)
+                floor = float(SPOT_MIN_ORDER_USD)
+
+                res["dynamic_alloc_usd"] = round(max(floor, min(dynamic_alloc, ceiling)), 2)
+        except Exception as _e:
+            logger.debug(f"[tradeability] dynamic risk governor error: {_e}")
+
+    return res
 
 
 # ── Symbol normalisation ──────────────────────────────────────────────────────
@@ -285,6 +311,7 @@ def get_crypto_tradeability(
     *,
     live: bool,
     manual: bool,
+    dag_state: dict | None = None,
 ) -> dict:
     """
     Determine whether symbol+direction is executable and via which lane.
@@ -296,17 +323,19 @@ def get_crypto_tradeability(
     candidate : optional scanner candidate dict (for future price/size checks)
     live      : True = live mode, False = paper
     manual    : True = human initiated (relaxes some autonomous-only gates)
+    dag_state : unified DAG state payload (v18.17)
 
     Returns
     -------
     dict with exactly these keys:
         symbol, underlying, lane, recommended_lane, status,
         auto_executable, manual_executable, blocked_reason,
-        size_block_reason, source_reason, display_label
+        size_block_reason, source_reason, display_label,
+        dynamic_alloc_usd (optional)
     """
     try:
         return _evaluate_tradeability(
-            symbol, direction, candidate, live=live, manual=manual
+            symbol, direction, candidate, live=live, manual=manual, dag_state=dag_state
         )
     except Exception as e:
         logger.error(f"[tradeability] unhandled exception for {symbol}: {e}")
@@ -320,6 +349,7 @@ def _evaluate_tradeability(
     *,
     live: bool,
     manual: bool,
+    dag_state: dict | None = None,
 ) -> dict:
     """Inner implementation — all exceptions caught by caller."""
     paper_int = 0 if live else 1
@@ -414,6 +444,7 @@ def _evaluate_tradeability(
             recommended_lane=recommended_lane,
             auto_executable=auto_ex,
             manual_executable=1,
+            dag_state=dag_state,
         )
 
     if perp_blocked_reason == "none":
@@ -426,6 +457,7 @@ def _evaluate_tradeability(
             recommended_lane=recommended_lane,
             auto_executable=auto_ex,
             manual_executable=1,
+            dag_state=dag_state,
         )
 
     # ── 8. Both blocked — report the most specific reason ────────────────────

@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 AUTHORIZED_USER_ID = int(os.environ.get("TELEGRAM_AUTHORIZED_USER_ID", "8224826883"))
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_BOT_STARTED: bool = False
 
 
 def _effective_message(update: Update):
@@ -522,6 +523,12 @@ async def run_bot():
 
 
 def start_bot_thread():
+    global _BOT_STARTED
+    if _BOT_STARTED:
+        logger.warning("[telegram] start_bot_thread() called again — already running, skipping.")
+        return None
+    _BOT_STARTED = True
+
     def _run():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)

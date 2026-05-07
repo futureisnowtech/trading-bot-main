@@ -16,12 +16,11 @@ NYC_IP="64.225.20.38"
 NYC_PORT="2222"
 NYC_USER="root"
 PROJECT_DIR="/root/bot"
-BRANCH="feature/v10-rebuild"
 DASHBOARD_UID="d9ecf89d-5e95-4e63-b0ae-f8008debbc0f"
 PROMETHEUS_TARGET="algo-bot-live:8000"
 SSH_CMD="ssh -p ${NYC_PORT} -o StrictHostKeyChecking=no"
+BRANCH=$(git branch --show-current)
 
-# ── Guard 1: dirty worktree check ─────────────────────────────────────────────
 echo "Checking worktree cleanliness..."
 if ! git diff --quiet || ! git diff --cached --quiet; then
     echo "ERROR: Worktree is dirty. Commit or stash all changes before deploying."

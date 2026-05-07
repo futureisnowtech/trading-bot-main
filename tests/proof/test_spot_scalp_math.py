@@ -23,9 +23,19 @@ def test_ssm01b_final_spot_score_neutral_leans_on_composite():
 def test_ssm02_regime_classifier_trend():
     from runtime.spot_regime import classify_spot_regime
 
-    state_30m = {"frame_score": 56.0, "v": 0.12, "z": 0.25, "rv_ratio": 1.0}
-    state_4h = {"frame_score": 60.0, "v": 0.05}
+    # TREND: ER > 0.6 and ADX > 25.0
+    state_30m = {"er": 0.75, "adx": 30.0}
+    state_4h = {}
     assert classify_spot_regime(state_30m, state_4h) == "TREND"
+
+
+def test_ssm02b_regime_classifier_chop():
+    from runtime.spot_regime import classify_spot_regime
+
+    # CHOP: ER < 0.3 and ADX < 20.0
+    state_30m = {"er": 0.15, "adx": 15.0}
+    state_4h = {}
+    assert classify_spot_regime(state_30m, state_4h) == "CHOP"
 
 
 def test_ssm03_setup_family_impulse_continuation():
@@ -83,5 +93,7 @@ def test_ssm05_timeframe_state_reports_impulse_and_path_metrics():
     assert "momentum_impulse" in state
     assert "accel_impulse" in state
     assert "path_efficiency" in state
+    assert "er" in state
+    assert "adx" in state
     assert "j" in state
     assert 0.0 <= state["frame_score"] <= 100.0

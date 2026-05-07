@@ -998,17 +998,32 @@ def calculate_execution_profile(
     # Continuous z-score: z=0 → sigmoid=0.5 → multiplier=1.0 (neutral, no penalty).
     # Adverse signals push z negative → multiplier smoothly toward 0.3 floor.
     z = 0.0
+    status_tag = "ACTIVE"
     try:
         from data.edge_monitor import get_shadow_state
 
         shadow = get_shadow_state(_clean_symbol(symbol))
-        if shadow.get("kyle_lambda_fragile"):
-            z -= 1.0
-        ou_prob = float(shadow.get("ou_transition_prob", 0.5))
-        if ou_prob < 0.5:
-            z -= (0.5 - ou_prob) * 4.0
+        
+        # Warmup Detection: If shadow is empty or vitals are at exact fallback constants
+        # (indicates data pipeline is cold or math is degenerate/non-stationary)
+        is_warmup = not shadow or (
+            shadow.get("ou_transition_prob") == 0.5 and 
+            not shadow.get("kyle_lambda_fragile") and 
+            shadow.get("kyle_lambda", 0.0) == 0.0
+        )
+        
+        if is_warmup:
+            z -= 0.75  # Cautious penalty for unverified/cold stochastic state
+            status_tag = "WARMUP_PENALTY"
+        else:
+            if shadow.get("kyle_lambda_fragile"):
+                z -= 1.0
+            ou_prob = float(shadow.get("ou_transition_prob", 0.5))
+            if ou_prob < 0.5:
+                z -= (0.5 - ou_prob) * 4.0
     except Exception:
-        pass
+        z -= 0.5  # Fail cautious on import/lookup error
+        status_tag = "LOOKUP_ERROR"
 
     # OBI/TFI divergence penalty — continuous rather than binary gate
     z -= max(0.0, obi - 0.20) * 3.0

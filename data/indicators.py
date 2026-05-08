@@ -91,7 +91,7 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
         if adx is not None and not adx.empty:
             df['adx'] = adx.iloc[:, 0]
     else:
-        df['adx'] = 25.0  # Default assumption if can't calculate
+        df['adx'] = _adx_fallback(df['high'], df['low'], df['close'], length=14)
 
     # ─── EMAs ─────────────────────────────────────────────────────────────────
     # v18.17: Batch EMA columns to eliminate DataFrame fragmentation warning
@@ -952,6 +952,33 @@ def _rsi_fallback(series: pd.Series, period: int = 14) -> pd.Series:
     loss = (-delta.clip(upper=0)).rolling(period).mean()
     rs = gain / loss.replace(0, np.nan)
     return 100 - (100 / (1 + rs))
+
+
+def _adx_fallback(high: pd.Series, low: pd.Series, close: pd.Series, length: int = 14) -> pd.Series:
+    """
+    Manual ADX fallback (Wilder's smoothing).
+    """
+    try:
+        tr1 = high - low
+        tr2 = (high - close.shift(1)).abs()
+        tr3 = (low - close.shift(1)).abs()
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+
+        up_move = high - high.shift(1)
+        down_move = low.shift(1) - low
+
+        plus_dm = pd.Series(np.where((up_move > down_move) & (up_move > 0), up_move, 0.0), index=high.index)
+        minus_dm = pd.Series(np.where((down_move > up_move) & (down_move > 0), down_move, 0.0), index=high.index)
+
+        tr_roll = tr.ewm(alpha=1/length, adjust=False).mean()
+        plus_di = 100 * (plus_dm.ewm(alpha=1/length, adjust=False).mean() / tr_roll)
+        minus_di = 100 * (minus_dm.ewm(alpha=1/length, adjust=False).mean() / tr_roll)
+
+        dx = 100 * ((plus_di - minus_di).abs() / (plus_di + minus_di + 1e-10))
+        adx = dx.ewm(alpha=1/length, adjust=False).mean()
+        return adx
+    except Exception:
+        return pd.Series([25.0] * len(close), index=close.index)
 
 
 def _vwap_fallback(df: pd.DataFrame) -> pd.Series:

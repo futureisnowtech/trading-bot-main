@@ -557,7 +557,7 @@ def _get_ml_score(
             )
             adj = get_online_adjustment(X_raw, direction, symbol=symbol_hint)
             # adj is +/- 0.15 (prob space), map to +/- 15 points
-            raw_score = float(np.clip(raw_score + (adj * 100.0), 0, 100))
+            raw_score = float(np.clip(raw_score + (adj * 15.0), 0, 100))
         except Exception as _e:
             logger.debug(f"[signal_engine] online adjustment error: {_e}")
 

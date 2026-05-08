@@ -1036,15 +1036,15 @@ SPOT_ALLOWED_SETUP_FAMILIES_TINY_LIVE: tuple[str, ...] = (
     "breakout_volatility",
 )
 SPOT_DISABLED_SETUP_FAMILIES_TINY_LIVE: tuple[str, ...] = ()
-SPOT_TINY_LIVE_MIN_CONFIRMS: dict[str, int] = {"TREND": 1, "NEUTRAL": 1, "CHOP": 99}
+SPOT_TINY_LIVE_MIN_CONFIRMS: dict[str, int] = {"TREND": 0, "NEUTRAL": 0, "CHOP": 99}
 SPOT_TINY_LIVE_MIN_5M_FRAME: dict[str, float] = {
-    "TREND": 48.0,
-    "NEUTRAL": 50.0,
+    "TREND": 40.0,
+    "NEUTRAL": 40.0,
     "CHOP": 99.0,
 }
 SPOT_TINY_LIVE_MIN_30M_FRAME: dict[str, float] = {
-    "TREND": 50.0,
-    "NEUTRAL": 52.0,
+    "TREND": 40.0,
+    "NEUTRAL": 40.0,
     "CHOP": 99.0,
 }
 SPOT_TINY_LIVE_MIN_STRUCTURE_COMPONENT: dict[str, float] = {

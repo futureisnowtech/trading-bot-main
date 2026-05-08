@@ -866,7 +866,7 @@ def spot_quality_block_reason(
     if final_spot_score is not None and float(final_spot_score) < float(floor):
         return "below_regime_floor", floor
     regime_min_confirms = int(
-        getattr(_qs_cfg, "SPOT_TINY_LIVE_MIN_CONFIRMS", {"TREND": 2, "NEUTRAL": 3})[
+        getattr(_qs_cfg, "SPOT_TINY_LIVE_MIN_CONFIRMS", {"TREND": 0, "NEUTRAL": 0})[
             regime
         ]
     )
@@ -874,14 +874,14 @@ def spot_quality_block_reason(
         return "structural_confirm_count_too_low", floor
     min_5m_frame = float(
         getattr(
-            _qs_cfg, "SPOT_TINY_LIVE_MIN_5M_FRAME", {"TREND": 52.0, "NEUTRAL": 55.0}
+            _qs_cfg, "SPOT_TINY_LIVE_MIN_5M_FRAME", {"TREND": 40.0, "NEUTRAL": 40.0}
         )[regime]
     )
     if float(s5.get("frame_score") or 0.0) < min_5m_frame:
         return "frame_score_5m_too_low", floor
     min_30m_frame = float(
         getattr(
-            _qs_cfg, "SPOT_TINY_LIVE_MIN_30M_FRAME", {"TREND": 55.0, "NEUTRAL": 58.0}
+            _qs_cfg, "SPOT_TINY_LIVE_MIN_30M_FRAME", {"TREND": 40.0, "NEUTRAL": 40.0}
         )[regime]
     )
     if float(s30.get("frame_score") or 0.0) < min_30m_frame:

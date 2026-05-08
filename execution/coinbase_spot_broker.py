@@ -642,7 +642,6 @@ class CoinbaseSpotBroker:
             self._holdings[clean] = {"qty": new_qty, "avg_entry": new_avg}
             return result
 
-        # Live path — use quote_size (USD amount) for market order
         body = {
             "client_order_id": str(uuid.uuid4()),
             "product_id": spec["product_id"],
@@ -654,8 +653,13 @@ class CoinbaseSpotBroker:
         try:
             resp = self._request("POST", "/api/v3/brokerage/orders", body)
             order = resp.get("success_response") or resp.get("order") or {}
+            
+            # v18.17: More detailed error handling for better diagnosis
             if not order:
-                raise RuntimeError(f"spot_broker_ack_missing: {resp}")
+                error_response = resp.get("error_response") or resp
+                logger.error(f"[spot] buy_spot REJECTED {clean}: {error_response}")
+                return None
+
             real_id = order.get("order_id", body["client_order_id"])
             logger.info(f"[spot] LIVE BUY {clean}: ${size_usd:.2f} order_id={real_id}")
             status = self.get_spot_order_status(real_id, fallback_symbol=clean)

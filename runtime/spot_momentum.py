@@ -315,7 +315,7 @@ def _timeframe_state_from_enriched_df(df: pd.DataFrame) -> dict[str, Any]:
     try:
         from execution.coinbase_spot_broker import get_spot_broker
         broker = get_spot_broker()
-        top = broker.get_spot_top_of_book(df.attrs.get("symbol", "BTC-USDC"))
+        top = broker.get_spot_top_of_book(df.attrs.get("symbol", "BTC-USD"))
         bid_sz = float(top.get("best_bid_size") or 0.0)
         ask_sz = float(top.get("best_ask_size") or 0.0)
         if bid_sz + ask_sz > 0:

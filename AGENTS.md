@@ -150,15 +150,15 @@ The live spot lane is intentionally harsh by default.
 - Route: `maker_first` only
 - `taker_fallback`: disabled by default
 - Structural confirm minimums:
-  - `TREND >= 1`
-  - `NEUTRAL >= 1`
+  - `TREND >= 0`
+  - `NEUTRAL >= 0`
 - Final score floors:
-  - `TREND >= 52`
-  - `NEUTRAL >= 52`
+  - `TREND >= 48`
+  - `NEUTRAL >= 48`
 - Path efficiency minimum: `0.20`
 - Frame floors:
-  - `TREND`: `5m >= 48`, `30m >= 50`
-  - `NEUTRAL`: `5m >= 50`, `30m >= 52`
+  - `TREND`: `5m >= 40`, `30m >= 40`
+  - `NEUTRAL`: `5m >= 40`, `30m >= 40`
 
 Exit profile contract:
 - stop widening: forbidden

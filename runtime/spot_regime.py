@@ -44,4 +44,5 @@ def score_floor_for_regime(
         base -= 1.0
     if regime == "CHOP" and setup_family == "compression_breakout":
         base += 1.0
-    return max(54.0, min(base, 70.0))
+    # v18.17: Allow lower bound to drop to 40.0 instead of 54.0 so the 48.0 regime floor is respected
+    return max(40.0, min(base, 70.0))

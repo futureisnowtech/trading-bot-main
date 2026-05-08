@@ -965,7 +965,7 @@ def calculate_execution_profile(
     tfi = 2.0 * buy_ratio - 1.0
 
     # Hard Veto 1: ATR Fee Floor — atr_pct==0.0 means cold/missing data, fail open
-    if atr_pct > 0.0 and atr_pct < 0.004:
+    if atr_pct > 0.0 and atr_pct < 0.0015:
         return 0.0, "FEE_FLOOR"
 
     # Hard Veto 2: coordinated selling pressure

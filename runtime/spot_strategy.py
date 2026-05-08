@@ -997,7 +997,12 @@ def calculate_execution_profile(
                 z -= 1.0
             ou_prob = float(shadow.get("ou_transition_prob", 0.5))
             if ou_prob < 0.5:
-                z -= (0.5 - ou_prob) * 4.0
+                # v18.17: Relax OU mean-reversion penalty if market is trending (high ER)
+                er = float(spot_state.get("er") or 0.0)
+                if er > 0.5:
+                    z -= (0.5 - ou_prob) * 1.5  # trending: expansion is good
+                else:
+                    z -= (0.5 - ou_prob) * 4.0  # ranging: expansion is noise
     except Exception:
         z -= 0.5  # Fail cautious on import/lookup error
         status_tag = "LOOKUP_ERROR"
@@ -1013,4 +1018,4 @@ def calculate_execution_profile(
     # Sigmoid maps z=0 → multiplier=1.0; z→-∞ → 0.3 floor; z→+∞ → 1.0 cap
     multiplier = max(0.3, min(1.0, 0.3 + 1.4 * _sigmoid_sizing(z)))
 
-    return round(multiplier, 3), "ACTIVE"
+    return round(multiplier, 3), status_tag

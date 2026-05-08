@@ -752,6 +752,36 @@ def _scan_and_trade_inner(spot_only: bool = False):
     # Account balance for scanner and sizing
     balance = _get_account_balance()
 
+    # v18.17: Centralised observability push (every cycle for all 8 coins)
+    try:
+        from runtime.spot_strategy import ACTIVE_UNIVERSE, calculate_execution_profile
+        from runtime.spot_momentum import build_spot_state
+        from data.edge_monitor import get_shadow_state
+        import system_state
+
+        for _sym in ACTIVE_UNIVERSE:
+            try:
+                # Build momentum state (cached if fresh)
+                _sstate = build_spot_state(_sym, allow_stale=True)
+                _shadow = get_shadow_state(_sym)
+                _mult, _tag = calculate_execution_profile(_sym, _sstate)
+                
+                # Push vitals to system_state for Telegram bot
+                system_state.state.update_stochastic(_sym, {
+                    "kalman_dev": float(_shadow.get("kalman_dev_pct", 0.0)),
+                    "kyle_lambda_fragile": bool(_shadow.get("kyle_lambda_fragile", False)),
+                    "ou_prob": float(_shadow.get("ou_transition_prob", 0.5)),
+                    "multiplier": round(float(_mult), 2),
+                    "status": str(_tag), # ACTIVE, COLD, FROZEN, FEE_FLOOR etc
+                    "er": round(float(_sstate.get("er", 0.0)), 4),
+                    "adx": round(float(_sstate.get("adx", 0.0)), 2),
+                })
+            except Exception as _sym_err:
+                logger.debug(f"[v10] observability scan error {_sym}: {_sym_err}")
+        system_state.state.update_prometheus()
+    except Exception as _obs_err:
+        logger.debug(f"[v10] global observability push error: {_obs_err}")
+
     # Get current open positions
     open_pos: Dict = {}
     if perps is not None:
@@ -1621,34 +1651,7 @@ def _attempt_entry(
             "base_alloc_usd": _base_alloc_usd,
         }
 
-        # v18.17: Centralised system_state update (observability for all scanned symbols)
-        try:
-            import system_state
-            from data.edge_monitor import get_shadow_state
-            from runtime.spot_strategy import calculate_execution_profile
-
-            _shadow = get_shadow_state(_underlying)
-            _mult, _ = calculate_execution_profile(_underlying, _spot_state_payload)
-
-            system_state.state.update_strategy(
-                active_symbol=_underlying,
-                signal=str(_spot_state_payload.get("setup_family", "NONE")),
-                obi=float(_spot_state_payload.get("obi", 0.0)),
-                microprice=float(_spot_state_payload.get("microprice", 0.0)),
-                mid_price=float(_spot_state_payload.get("mid_price", 0.0)),
-            )
-            system_state.state.update_stochastic(_underlying, {
-                "kalman_dev": float(_shadow.get("kalman_dev_pct", 0.0)),
-                "kyle_lambda_fragile": bool(_shadow.get("kyle_lambda_fragile", False)),
-                "ou_prob": float(_shadow.get("ou_transition_prob", 0.5)),
-                "multiplier": round(float(_mult), 2),
-                "status": str(_shadow.get("stochastic_state", "READY")),
-                "er": round(float(_spot_state_payload.get("er", 0.0)), 4),
-                "adx": round(float(_spot_state_payload.get("adx", 0.0)), 2),
-            })
-            system_state.state.update_prometheus()
-        except Exception as _obs_err:
-            logger.debug(f"[v10] observability push error {_underlying}: {_obs_err}")
+        # v18.17: Centralised system_state update moved to top of scanner loop
 
         _trade = _get_tradeable(
             symbol,

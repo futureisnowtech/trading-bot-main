@@ -1638,11 +1638,11 @@ def _attempt_entry(
                 mid_price=float(_spot_state_payload.get("mid_price", 0.0)),
             )
             system_state.state.update_stochastic(_underlying, {
-                "kalman_dev": _shadow.get("kalman_dev_pct", 0.0),
-                "kyle_lambda_fragile": _shadow.get("kyle_lambda_fragile", False),
-                "ou_prob": _shadow.get("ou_transition_prob", 0.5),
-                "multiplier": round(_mult, 2),
-                "status": _shadow.get("stochastic_state", "READY"),
+                "kalman_dev": float(_shadow.get("kalman_dev_pct", 0.0)),
+                "kyle_lambda_fragile": bool(_shadow.get("kyle_lambda_fragile", False)),
+                "ou_prob": float(_shadow.get("ou_transition_prob", 0.5)),
+                "multiplier": round(float(_mult), 2),
+                "status": str(_shadow.get("stochastic_state", "READY")),
                 "er": round(float(_spot_state_payload.get("er", 0.0)), 4),
                 "adx": round(float(_spot_state_payload.get("adx", 0.0)), 2),
             })
@@ -3736,9 +3736,9 @@ def run_forever():
         while True:
             for _sym in ACTIVE_UNIVERSE:
                 try:
-                    from data.historical_data import get_ohlcv
+                    from data.historical_data import get_candles
 
-                    _df = get_ohlcv(_sym, "1m", limit=100)
+                    _df = get_candles(_sym, "1m", limit=100)
                     if _df is not None and len(_df) >= 20:
                         _prices = list(_df["close"].astype(float))
                         _volumes = list(_df["volume"].astype(float))

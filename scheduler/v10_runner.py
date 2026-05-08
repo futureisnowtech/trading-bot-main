@@ -1621,6 +1621,35 @@ def _attempt_entry(
             "base_alloc_usd": _base_alloc_usd,
         }
 
+        # v18.17: Centralised system_state update (observability for all scanned symbols)
+        try:
+            import system_state
+            from data.edge_monitor import get_shadow_state
+            from runtime.spot_strategy import calculate_execution_profile
+
+            _shadow = get_shadow_state(_underlying)
+            _mult, _ = calculate_execution_profile(_underlying, _spot_state_payload)
+
+            system_state.state.update_strategy(
+                active_symbol=_underlying,
+                signal=str(_spot_state_payload.get("setup_family", "NONE")),
+                obi=float(_spot_state_payload.get("obi", 0.0)),
+                microprice=float(_spot_state_payload.get("microprice", 0.0)),
+                mid_price=float(_spot_state_payload.get("mid_price", 0.0)),
+            )
+            system_state.state.update_stochastic(_underlying, {
+                "kalman_dev": _shadow.get("kalman_dev_pct", 0.0),
+                "kyle_lambda_fragile": _shadow.get("kyle_lambda_fragile", False),
+                "ou_prob": _shadow.get("ou_transition_prob", 0.5),
+                "multiplier": round(_mult, 2),
+                "status": _shadow.get("stochastic_state", "READY"),
+                "er": round(float(_spot_state_payload.get("er", 0.0)), 4),
+                "adx": round(float(_spot_state_payload.get("adx", 0.0)), 2),
+            })
+            system_state.state.update_prometheus()
+        except Exception as _obs_err:
+            logger.debug(f"[v10] observability push error {_underlying}: {_obs_err}")
+
         _trade = _get_tradeable(
             symbol,
             direction,

@@ -31,9 +31,8 @@ class SystemState:
                 "obi": 0.0,
                 "microprice": 0.0,
                 "mid_price": 0.0,
-                "kaufman_er": 0.0,
                 "active_positions": [],
-                "stochastic": {},  # symbol -> {kalman_dev, kyle_lambda_fragile, ou_prob, multiplier}
+                "stochastic": {},  # symbol -> {kalman_dev, kyle_lambda_fragile, ou_prob, multiplier, er, adx}
             },
             "system": {
                 "cpu_percent": 0.0,
@@ -54,7 +53,7 @@ class SystemState:
             if buying_power is not None:
                 self.state["exchange"]["buying_power"] = buying_power
 
-    def update_strategy(self, active_symbol: str = None, signal: str = None, obi: float = None, microprice: float = None, mid_price: float = None, kaufman_er: float = None, positions: List[Dict] = None):
+    def update_strategy(self, active_symbol: str = None, signal: str = None, obi: float = None, microprice: float = None, mid_price: float = None, positions: List[Dict] = None):
         with self.lock:
             if active_symbol is not None:
                 self.state["strategy"]["active_symbol"] = active_symbol
@@ -66,8 +65,6 @@ class SystemState:
                 self.state["strategy"]["microprice"] = microprice
             if mid_price is not None:
                 self.state["strategy"]["mid_price"] = mid_price
-            if kaufman_er is not None:
-                self.state["strategy"]["kaufman_er"] = kaufman_er
             if positions is not None:
                 self.state["strategy"]["active_positions"] = positions
 

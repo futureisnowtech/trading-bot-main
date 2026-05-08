@@ -830,18 +830,23 @@ def spot_quality_block_reason(
         obi=float((spot_state.get("frames") or {}).get("5m", {}).get("obi") or 0.0),
         microprice=float(spot_state.get("microprice") or 0.0),
         mid_price=float(spot_state.get("mid_price") or 0.0),
+        kaufman_er=float(spot_state.get("er") or 0.0),
     )
     
     # ── Push Stochastic Vitals ────────────────────────────────────────────────
     try:
         from data.edge_monitor import get_shadow_state
         shadow = get_shadow_state(clean)
+        
+        # Calculate real multiplier (mirroring calculate_execution_profile logic)
+        mult, _ = calculate_execution_profile(clean, spot_state)
+        
         system_state.state.update_stochastic(clean, {
             "kalman_dev": shadow.get("kalman_dev_pct", 0.0),
             "kyle_lambda_fragile": shadow.get("kyle_lambda_fragile", False),
             "ou_prob": shadow.get("ou_transition_prob", 0.5),
-            "multiplier": 1.0, 
-            "status": "READY"
+            "multiplier": round(mult, 2), 
+            "status": shadow.get("stochastic_state", "READY")
         })
     except Exception:
         pass

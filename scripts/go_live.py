@@ -63,8 +63,8 @@ def _boot_processes() -> list[int]:
         except ValueError:
             continue
         command = parts[1] if len(parts) > 1 else ""
-        if "--mode live" in command:
-            live.append(pid)
+        # v18.17: Detect any boot.py in this repo as a candidate
+        live.append(pid)
     return live
 
 

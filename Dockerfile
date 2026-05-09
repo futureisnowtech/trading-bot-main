@@ -26,4 +26,4 @@ RUN mkdir -p logs
 ENV ALGO_LIVE_CONFIRM="I UNDERSTAND"
 
 # Entrypoint to run the bot in live mode
-CMD ["python3", "scripts/boot.py", "--mode", "live", "--confirm-live"]
+CMD ["python3", "scripts/boot.py"]

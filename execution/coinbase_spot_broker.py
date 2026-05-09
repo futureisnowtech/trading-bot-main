@@ -142,16 +142,14 @@ class CoinbaseSpotBroker:
         if not _JWT_OK:
             raise RuntimeError("PyJWT / cryptography required for live spot mode")
         now = int(time.time())
-        # CDP JWT URI claim must be PATH-only — strip query string if present.
-        # product_book is a GET with ?product_id=&limit= which uniquely triggers 401
-        # when query params are included in the URI claim.
-        path_only = path.split("?")[0]
+        # v18.17: URI claim MUST include query parameters for CDP Advanced Trade.
+        # Strict character-for-character matching is required by Coinbase.
         payload = {
             "sub": self._key_name,
             "iss": "cdp",
             "nbf": now,
             "exp": now + 120,
-            "uri": f"{method} api.coinbase.com{path_only}",
+            "uri": f"{method} api.coinbase.com{path}",
         }
         headers = {
             "kid": self._key_name,

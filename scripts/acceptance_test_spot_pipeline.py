@@ -238,7 +238,8 @@ def verify_open_db(snap: dict, open_result: dict) -> dict:
 
     # trades table
     buy_row = conn.execute(
-        "SELECT * FROM trades WHERE id > ? AND symbol='BTC' AND action='BUY' AND strategy='spot_btc' AND (snap["max_trade_id"],),
+        "SELECT * FROM trades WHERE id > ? AND symbol='BTC' AND action='BUY' AND strategy='spot_btc' AND paper=0",
+        (snap["max_trade_id"],),
     ).fetchone()
     if not buy_row:
         conn.close()

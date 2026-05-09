@@ -41,7 +41,8 @@ def reconcile_position_flags(db_path: str = DB_PATH) -> list:
             # Fetch all open positions
             positions = c.execute(
                 "SELECT symbol, qty, ts_entry, scale_33_done, scale_66_done "
-                "FROM open_positions WHERE ).fetchall()
+                "FROM open_positions WHERE paper=0"
+            ).fetchall()
 
             if not positions:
                 return []
@@ -80,7 +81,8 @@ def reconcile_position_flags(db_path: str = DB_PATH) -> list:
                     # Any partial close → set scale_33_done
                     if not scale_33:
                         c.execute(
-                            "UPDATE open_positions SET scale_33_done=1 WHERE symbol=? AND (symbol,),
+                            "UPDATE open_positions SET scale_33_done=1 WHERE symbol=? AND paper=0""",
+                            (symbol,),
                         )
                         flags_set.append("scale_33_done")
 
@@ -91,7 +93,8 @@ def reconcile_position_flags(db_path: str = DB_PATH) -> list:
                         and not scale_66
                     ):
                         c.execute(
-                            "UPDATE open_positions SET scale_66_done=1 WHERE symbol=? AND (symbol,),
+                            "UPDATE open_positions SET scale_66_done=1 WHERE symbol=? AND paper=0",
+                            (symbol,),
                         )
                         flags_set.append("scale_66_done")
 

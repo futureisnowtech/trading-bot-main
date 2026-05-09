@@ -107,13 +107,13 @@ def check_duplicate_closes(conn, days):
 def check_orphaned_open_positions(conn):
     """Positions in open_positions that already have a close trade."""
     cur = conn.cursor()
-    cur.execute("SELECT * FROM open_positions WHERE (PAPER,))
+    cur.execute("SELECT * FROM open_positions WHERE paper=0")
     positions = cur.fetchall()
     orphans = []
     for p in positions:
         cur.execute(
-            "SELECT id, ts FROM trades WHERE symbol=? AND strategy=? AND ,
-            (p["symbol"], p["strategy"], PAPER, p["ts_entry"]),
+            "SELECT id, ts FROM trades WHERE symbol=? AND strategy=? AND paper=0 AND action IN ('SELL','CLOSE')",
+            (p["symbol"], p["strategy"]),
         )
         row = cur.fetchone()
         if row:

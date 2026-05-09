@@ -497,7 +497,8 @@ def render_performance_lab():
         )
 
         try:
-            from db import _q, LAUNCH_DATEimport pandas as pd
+            from db import _q, LAUNCH_DATE
+            import pandas as pd
 
             paper = False
             trades = _q(

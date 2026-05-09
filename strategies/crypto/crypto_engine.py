@@ -26,12 +26,9 @@ import pytz
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from config import (
-    MARKET_TIMEZONE,
+from config import (MARKET_TIMEZONE,
     FUNDING_OVERHEATED_PCT,
-    ATR_FEE_FLOOR_PCT,
-    False,
-)
+    ATR_FEE_FLOOR_PCT)
 
 # ── Thresholds ────────────────────────────────────────────────────────────────
 

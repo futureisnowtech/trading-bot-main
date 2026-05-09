@@ -196,7 +196,7 @@ def _sync_position_high(
     try:
         con = sqlite3.connect(_get_db_path(), timeout=5)
         con.execute(
-            "UPDATE open_positions SET high_since_entry=? WHERE symbol=? AND strategy=? AND paper=0",
+            "UPDATE open_positions SET high_since_entry=? WHERE symbol=? AND strategy=? AND paper=0""",
             (high_price, _clean_symbol(symbol), strategy),
         )
         con.commit()
@@ -652,7 +652,7 @@ def _reconcile_qty(symbol: str, issue: dict) -> None:
     live_qty = float(issue.get("qty", 0.0))
     try:
         con = sqlite3.connect(_get_db_path(), timeout=5)
-        con.execute("UPDATE open_positions SET qty=? WHERE symbol=? AND paper=0", (live_qty, clean))
+        con.execute("UPDATE open_positions SET qty=? WHERE symbol=? AND paper=0""", (live_qty, clean))
         con.commit()
         con.close()
         logger.info(f"[spot_engine] Reconciled {clean} DB qty to broker truth: {live_qty}")

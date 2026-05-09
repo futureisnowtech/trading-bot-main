@@ -1872,7 +1872,7 @@ def persist_position(
 def delete_position(symbol, strategy) -> None:
     conn = _conn()
     conn.cursor().execute(
-        "DELETE FROM open_positions WHERE symbol=? AND strategy=? AND paper=0",
+        "DELETE FROM open_positions WHERE symbol=? AND strategy=? AND paper=0""",
         (symbol, strategy),
     )
     conn.commit()
@@ -1944,7 +1944,7 @@ def get_todays_fees() -> float:
     conn = _conn()
     cur = conn.cursor()
     cur.execute(
-        "SELECT COALESCE(SUM(fee_usd),0) FROM trades WHERE ts LIKE ? AND paper=0", (f"{today}%",)
+        "SELECT COALESCE(SUM(fee_usd),0) FROM trades WHERE ts LIKE ? AND paper=0""", (f"{today}%",)
     )
     trade_fees = float(cur.fetchone()[0])
     cur.execute(
@@ -1962,7 +1962,7 @@ def get_todays_trade_fees() -> float:
     conn = _conn()
     cur = conn.cursor()
     cur.execute(
-        "SELECT COALESCE(SUM(fee_usd),0) FROM trades WHERE ts LIKE ? AND paper=0", (f"{today}%",)
+        "SELECT COALESCE(SUM(fee_usd),0) FROM trades WHERE ts LIKE ? AND paper=0""", (f"{today}%",)
     )
     val = cur.fetchone()[0]
     conn.close()
@@ -2194,7 +2194,7 @@ def get_today_stats() -> dict:
     row = cur.fetchone()
     # Fees across ALL trades today (BUY + SELL both charged fees)
     cur.execute(
-        "SELECT COALESCE(SUM(fee_usd), 0) FROM trades WHERE ts LIKE ? AND paper=0", (f"{today}%",)
+        "SELECT COALESCE(SUM(fee_usd), 0) FROM trades WHERE ts LIKE ? AND paper=0""", (f"{today}%",)
     )
     fees = float(cur.fetchone()[0])
     conn.close()

@@ -503,7 +503,8 @@ def render_engineering_console():
                 st.caption(f"Alert feed unavailable: {e}")
 
             try:
-                from db import _qrows = _q(
+                from db import _q
+                rows = _q(
                     """SELECT ts, source, level, message
                        FROM system_events
                        ORDER BY ts DESC

@@ -13,11 +13,22 @@ import sqlite3
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-        "INSERT INTO trades (symbol, action, qty, price, pnl_usd, fee_usd, order_id, notes, paper) VALUES (?,?,?,?,?,?,?,?,0)"
-        "FROM trades WHERE symbol='MES' AND ts >= ? ORDER BY rowid ASC",
+from config import DB_PATH, FUTURES_NUM_CONTRACTS
+
+SEP = "=" * 60
+
+
+def _get_trades_db(after_ts: str) -> list:
+    """Fetch MES trades from DB written after after_ts."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        "SELECT ts, action, qty, price, pnl_usd, fee_usd, order_id, notes "
+        "FROM trades WHERE symbol='MES' AND ts >= ? AND paper=0 ORDER BY rowid ASC",
         (after_ts,),
     ).fetchall()
     conn.close()
+    return [dict(r) for r in rows]
     return [dict(r) for r in rows]
 
 

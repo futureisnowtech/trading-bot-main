@@ -699,7 +699,8 @@ def render_crypto_page():
             _root = _os.path.join(_os.path.dirname(__file__), "../../..")
             if _root not in _sys.path:
                 _sys.path.insert(0, _root)
-            from dashboard.db import_paper_mode = False
+            from dashboard.db import get_effective_launch_date
+            _paper_mode = False
         except Exception:
             pass
 

@@ -201,7 +201,8 @@ def _count_open_spot_positions(underlying: str) -> int:
         with sqlite3.connect(_db_path(), timeout=3, check_same_thread=False) as conn:
             row = conn.execute(
                 "SELECT COUNT(*) FROM open_positions "
-                "WHERE strategy LIKE 'spot_%' AND symbol=? AND (underlying,),
+                "WHERE strategy LIKE 'spot_%' AND symbol=? AND paper=0""",
+                (underlying,),
             ).fetchone()
             return int(row[0]) if row else 0
     except Exception:
@@ -227,7 +228,8 @@ def _get_open_perp_directions(underlying: str) -> list[str]:
         with sqlite3.connect(_db_path(), timeout=3, check_same_thread=False) as conn:
             rows = conn.execute(
                 "SELECT COALESCE(direction,'LONG') FROM open_positions "
-                "WHERE symbol=? AND strategy NOT LIKE 'spot_%' AND (underlying,),
+                "WHERE symbol=? AND strategy NOT LIKE 'spot_%' AND paper=0""",
+                (underlying,),
             ).fetchall()
             return [r[0] for r in rows]
     except Exception:

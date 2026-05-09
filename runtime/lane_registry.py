@@ -46,9 +46,7 @@ class LaneRegistry:
 
     def _register_defaults(self) -> None:
         """Pre-register all known lanes based on current config."""
-        from config import (
-            False,
-            COINBASE_CDP_KEY_NAME,
+        from config import (COINBASE_CDP_KEY_NAME,
             FUTURES_LANE_ACTIVE,
             FORECAST_LANE_ACTIVE,
             STOCKS_LANE_ACTIVE,

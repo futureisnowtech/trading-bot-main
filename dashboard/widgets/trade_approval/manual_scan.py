@@ -62,18 +62,8 @@ def _get_tier_info(sym: str) -> dict:
 
 
 def _runtime_live_flag() -> bool:
-    try:
-        from db import get_effective_launch_date
-_rflag = lambda: False
-
-        return not bool(_rflag())
-    except Exception:
-        try:
-            
-
-            return not bool(False)
-        except Exception:
-            return False
+    """v18.17: System is strictly LIVE."""
+    return True
 
 
 def _blocked_tradeability(sym: str, reason: str) -> dict:
@@ -505,6 +495,7 @@ def render_manual_scan():
             ml_score=composite,
             composite_score=composite,
             deployed_usd=deployed,
+            paper=exec_paper,
         )
         pos_usd = sizing["position_usd"]
         leverage = sizing["leverage"]
@@ -601,8 +592,7 @@ def render_manual_scan():
         ):
             # Resolve mode + balance once
             try:
-                from db import get_effective_launch_date
-_rflag = lambda: False
+                from db import _runtime_paper_flag as _rflag
 
                 _exec_paper = bool(_rflag())
             except Exception:
@@ -611,7 +601,7 @@ _rflag = lambda: False
 
                     _exec_paper = bool(False)
                 except Exception:
-                    _exec_paper = False
+                    _exec_paper = True
 
             if not _exec_paper:
                 try:
@@ -664,14 +654,13 @@ _rflag = lambda: False
     # ── PHASE 2: Confirmation panel ───────────────────────────────────────────
     # Always re-read runtime paper flag — never trust stale session-state preview
     try:
-        from db import get_effective_launch_date
-_rflag = lambda: False_p2
+        from db import _runtime_paper_flag as _rflag_p2
 
         _exec_paper = bool(_rflag_p2())
     except Exception:
         _exec_paper = previews[0].get("exec_paper", True)
     _acct_balance = previews[0].get("acct_balance", 5000.0)
-    mode_label = "LIVE" if _exec_paper else "LIVE"
+    mode_label = "PAPER" if _exec_paper else "LIVE"
     mode_color = "orange" if _exec_paper else "red"
 
     st.markdown(f"### Order Review — :{mode_color}[{mode_label} MODE]")
@@ -773,19 +762,8 @@ _rflag = lambda: False_p2
     with ca:
         if st.button("Confirm & Execute", type="primary", key="ms_confirm_btn"):
             # ── PHASE 3: Execute confirmed orders ─────────────────────────────
-            # Re-read paper flag fresh at execute time — never trust stale preview cache
-            try:
-                from db import get_effective_launch_date
-_rflag = lambda: False_exec
-
-                _exec_paper = bool(_rflag_exec())
-            except Exception:
-                try:
-                     import config as _PT
-
-                    _exec_paper = bool(_PT)
-                except Exception:
-                    _exec_paper = False
+            # v18.17: System is strictly LIVE
+            _exec_paper = False
             try:
                 _hd_spec = _ilu.spec_from_file_location(
                     "_root_data_historical_data",
@@ -891,7 +869,7 @@ _rflag = lambda: False_exec
                         target_p = round(price + target_dist, 6)
                         try:
                             pos = _se_exec.open_spot(
-                                exec_sym, pos_usd
+                                exec_sym, pos_usd, paper=_exec_paper
                             )
                         except Exception as _spot_exc:
                             results.append(
@@ -922,7 +900,7 @@ _rflag = lambda: False_exec
                                     dirn,
                                     False,
                                     f"spot None (lane={_lane_on}, sym_ok={exec_sym in _syms}, "
-                                    f"size=${pos_usd:.0f}>=${_min_sz:.0f})",
+                                    f"size=${pos_usd:.0f}>=${_min_sz:.0f}, paper={_exec_paper})",
                                 )
                             )
                     else:
@@ -941,6 +919,7 @@ _rflag = lambda: False_exec
                                 atr_at_entry=atr_7,
                                 regime="UNKNOWN",
                                 entry_setup=f"manual_{setup}",
+                                paper=_exec_paper,
                             )
                         else:
                             stop_p = round(price + stop_dist, 6)
@@ -956,6 +935,7 @@ _rflag = lambda: False_exec
                                 atr_at_entry=atr_7,
                                 regime="UNKNOWN",
                                 entry_setup=f"manual_{setup}",
+                                paper=_exec_paper,
                             )
 
                         if pos:
@@ -1151,8 +1131,7 @@ def render_spot_section():
 
     # Paper flag
     try:
-        from db import get_effective_launch_date
-_rflag = lambda: False
+        from db import _runtime_paper_flag as _rflag
 
         _exec_paper = bool(_rflag())
     except Exception:
@@ -1161,9 +1140,9 @@ _rflag = lambda: False
 
             _exec_paper = bool(False)
         except Exception:
-            _exec_paper = False
+            _exec_paper = True
 
-    mode_label = "LIVE" if _exec_paper else "LIVE"
+    mode_label = "PAPER" if _exec_paper else "LIVE"
 
     st.caption(
         "The bot scans the full 8-symbol spot scalp universe continuously and enters "
@@ -1354,7 +1333,7 @@ _rflag = lambda: False
                 f"Sell all {sym} now", key=f"spot_sell_{sym}", type="secondary"
             ):
                 try:
-                    result = _se.close_spot(sym)
+                    result = _se.close_spot(sym, paper=_exec_paper)
                     if result:
                         pnl = result.get("pnl_usd", 0.0)
                         st.session_state["spot_manual_message"] = {
@@ -1432,6 +1411,7 @@ _rflag = lambda: False
                         pos_result = _se.open_spot(
                             sym,
                             size_input,
+                            paper=_exec_paper,
                             composite_score=float(scan.get("score") or 0.0),
                             spot_state=_spot_state,
                             final_spot_score=float(score or 0.0),

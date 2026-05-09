@@ -6,7 +6,8 @@ Refresh: 30s
 import streamlit as st
 
 import ui
-from db import _q1, get_effective_launch_datefrom data.performance import get_performance_stats, get_signal_bayesian_stats
+from db import _q1, get_effective_launch_date
+from data.performance import get_performance_stats, get_signal_bayesian_stats
 
 
 @st.fragment(run_every=30)

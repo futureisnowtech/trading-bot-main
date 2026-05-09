@@ -72,7 +72,7 @@ class RiskManager:
                     conn = _sq.connect(_DB_PATH)
                     cur  = conn.cursor()
                     cur.execute(
-                        "SELECT id FROM trades WHERE symbol=? AND strategy=? AND ts=? AND paper=0",
+                        "SELECT id FROM trades WHERE symbol=? AND strategy=? AND ts=? AND paper=0""",
                         (sym, strat, ts_e)
                     )
                     already_closed = cur.fetchone() is not None

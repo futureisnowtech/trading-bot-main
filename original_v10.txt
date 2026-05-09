@@ -1,0 +1,551 @@
+            trade_blocked_reason=_block_reason,
+            trade_size_block_reason=_trade.get("size_block_reason", ""),
+            trade_source_reason=_trade.get("source_reason", ""),
+            manual_executable=int(_trade.get("manual_executable", 0)),
+            auto_executable=int(_trade.get("auto_executable", 0)),
+        )
+        return _journal_decision
+
+    # Route spot lane if tradeability says so
+    _routed_lane = _trade.get("lane", "perp")
+    if _routed_lane == "spot":
+    # KS10 / KS8 — check loss-cluster kill switch before attempting spot entry
+    try:
+        from runtime.spot_kill_switch import check_spot_kill_switch as _ks_check
+
+        _ks_halt, _ks_reason = _ks_check()
+        if _ks_halt:
+            logger.warning(
+                f"[v10] spot {symbol} blocked by kill switch: {_ks_reason}"
+            )
+            _journal_scan_candidate(
+                scan_id,
+                candidate,
+                "execution_failed",
+                regime=regime,
+                technical_score=_tech_score,
+                ml_score=_ml_score,
+                composite_score=composite,
+                entry_threshold=_score_floor,
+                should_enter_signal=1,
+                econ_approved=0,
+                entry_block_reason=_ks_reason,
+            )
+            return "execution_failed"
+    except Exception as _ks_exc:
+        logger.debug(f"[v10] kill switch check error: {_ks_exc}")
+    try:
+        import spot_engine as _spot_eng
+        from config import (
+            SPOT_SCALP_SYMBOL_CONFIG,
+            SPOT_TOTAL_ALLOC_CAP_PCT,
+        )
+        from logging_db.trade_logger import update_scan_candidate_result
+        from risk.spot_economics_gate import check_spot_economics as _spot_econ
+        from runtime.spot_momentum import (
+            SpotStateUnavailable,
+            build_spot_state,
+            final_spot_score as _final_spot_score,
+        )
+        from runtime.spot_strategy import (
+            setup_policy_for_symbol as _setup_policy_for_symbol,
+            spot_quality_block_reason as _spot_quality_block_reason,
+            strategy_spot_symbols as _strategy_spot_symbols,
+        )
+        from runtime.live_account import get_live_account_size
+
+        _underlying = _trade.get("underlying", _get_underlying(symbol))
+        _tv_context = (tv_context_by_underlying or {}).get(str(_underlying).upper())
+        _strategy_symbols = {str(s).upper() for s in _strategy_spot_symbols()}
+        if _underlying not in _strategy_symbols:
+            _reason = "spot_strategy_symbol_disabled"
+            logger.info(f"[v10] spot {_underlying} blocked: {_reason}")
+            _journal_scan_candidate(
+                scan_id,
+                candidate,
+                "research_only_block",
+                regime=regime,
+                technical_score=_tech_score,
+                ml_score=_ml_score,
+                composite_score=composite,
+                entry_threshold=0.0,
+                should_enter_signal=1,
+                econ_approved=0,
+                entry_block_reason=_reason,
+                recommended_lane=_trade.get("recommended_lane", ""),
+                tradeability_status=_trade.get("status", "executable"),
+                trade_blocked_reason=_reason,
+                trade_size_block_reason="",
+                trade_source_reason="trusted_source",
+                manual_executable=int(_trade.get("manual_executable", 0)),
+                auto_executable=int(_trade.get("auto_executable", 0)),
+            )
+            return "research_only_block"
+        try:
+            _spot_state = build_spot_state(_underlying, allow_stale=False)
+        except SpotStateUnavailable as _state_err:
+            _reason = f"spot_state_unavailable: {_state_err}"
+            logger.info(f"[v10] spot {_underlying} data blocked: {_reason}")
+            _journal_scan_candidate(
+                scan_id,
+                candidate,
+                "data_unavailable",
+                regime=regime,
+                technical_score=_tech_score,
+                ml_score=_ml_score,
+                composite_score=composite,
+                entry_threshold=0.0,
+                should_enter_signal=1,
+                econ_approved=0,
+                entry_block_reason=_reason,
+                recommended_lane=_trade.get("recommended_lane", ""),
+                tradeability_status=_trade.get("status", "executable"),
+                trade_blocked_reason="spot_data_unavailable",
+                trade_size_block_reason="",
+                trade_source_reason="trusted_source",
+                manual_executable=int(_trade.get("manual_executable", 0)),
+                auto_executable=int(_trade.get("auto_executable", 0)),
+                execution_route="",
+                microstructure_veto="",
+            )
+            return "data_unavailable"
+        _spot_regime = _spot_state.get("regime", "NEUTRAL")
+        _setup_family = str(_spot_state.get("setup_family") or "")
+        _setup_score = float(_spot_state.get("setup_score") or 0.0)
+        _setup_policy = _setup_policy_for_symbol(
+            _underlying,
+            _setup_family,
+            _setup_score,
+        )
+        _setup_preference = str(_setup_policy.get("preference") or "")
+        _final_score = _final_spot_score(
+            composite,
+            _spot_state["derivative_score"],
+            regime=_spot_regime,
+            symbol=_underlying,
+            direction="LONG",
+            tv_context=_tv_context,
+        )
+        _reason, _score_floor = _spot_quality_block_reason(
+            _underlying,
+            _spot_state,
+            final_spot_score=_final_score,
+            synthetic_candidate=bool(candidate.get("spot_only_synthetic")),
+            execution_route="maker_first",
+            tv_context=_tv_context,
+        )
+        if _reason:
+            logger.info(f"[v10] spot {_underlying} quality blocked: {_reason}")
+            # WAE Recovery Mode: track consecutive missed WAE setups
+            if _setup_family == "wae_momentum_explosion":
+                try:
+                    from data.edge_monitor import increment_wae_missed
+
+                    _missed = increment_wae_missed()
+                    logger.debug(f"[v10] WAE missed counter: {_missed}")
+                except Exception:
+                    pass
+            _journal_scan_candidate(
+                scan_id,
+                candidate,
+                _reason,
+                regime=regime,
+                technical_score=_tech_score,
+                ml_score=_ml_score,
+                composite_score=composite,
+                entry_threshold=_score_floor,
+                should_enter_signal=1,
+                econ_approved=0,
+                entry_block_reason=_reason,
+                recommended_lane=_trade.get("recommended_lane", ""),
+                tradeability_status=_trade.get("status", "executable"),
+                trade_blocked_reason=_reason,
+                trade_size_block_reason="",
+                trade_source_reason="trusted_source",
+                manual_executable=int(_trade.get("manual_executable", 0)),
+                auto_executable=int(_trade.get("auto_executable", 0)),
+                spot_regime=_spot_regime,
+                setup_family=_setup_family,
+                setup_score=_setup_score,
+                setup_preference=_setup_preference,
+                tf_5m_state=_spot_state.get("tf_5m_state", ""),
+                tf_30m_state=_spot_state.get("tf_30m_state", ""),
+                tf_4h_state=_spot_state.get("tf_4h_state", ""),
+                tf_1d_state=_spot_state.get("tf_1d_state", ""),
+                structural_confirms=_spot_state.get("structural_confirms", ""),
+                final_spot_score=_final_score,
+                regime_floor=_score_floor,
+            )
+            return "below_threshold"
+        _cfg = SPOT_SCALP_SYMBOL_CONFIG.get(_underlying, {})
+        _stop_pct = _spot_eng._compute_stop_pct(
+            _underlying, _spot_state, atr_at_entry=atr_7
+        )
+        _risk_fraction = float(_cfg.get("risk_fraction", 0.0015))
+        _alloc_cap_pct = float(_cfg.get("allocation_cap_pct", 0.05))
+        _account_equity = float(get_live_account_size())
+        _risk_dollars = _account_equity * _risk_fraction
+        _size_raw = _risk_dollars / max(_stop_pct, 1e-6)
+
+        # v18.17: Use dynamic risk governor output from DAG Reducer
+        _spot_size = float(_trade.get("dynamic_alloc_usd") or _size_raw)
+
+        _total_spot_cap = _account_equity * float(SPOT_TOTAL_ALLOC_CAP_PCT)
+        _symbol_cap = _account_equity * _alloc_cap_pct
+        _spot_deployed = _spot_eng._current_spot_deployed_usd()
+        _top = _spot_eng._get_broker().get_spot_top_of_book(_underlying)
+        _spread_for_gate = float(
+            _top.get("spread_pct") or candidate.get("spread_pct", 0.0) or 0.0
+        )
+        _depth_for_gate = float(
+            _top.get("top_depth_usd")
+            or min(
+                float(candidate.get("bid_depth_usd", 0.0) or 0.0),
+                float(candidate.get("ask_depth_usd", 0.0) or 0.0),
+            )
+            or 0.0
+        )
+        _available_spot_usd = float(
+            _spot_eng._get_broker()
+            .get_spot_balance()
+            .get("usd_available", 0.0)
+        )
+        _liquidity_cap = (
+            max(float(_top.get("top_depth_usd") or 0.0) * 0.10, 0.0) or _symbol_cap
+        )
+
+        # Final safety clamps (liquidity and available balance)
+        _spot_size = min(
+            _spot_size,
+            _symbol_cap,
+            max(0.0, _total_spot_cap - _spot_deployed),
+            _available_spot_usd * 0.95,
+            _liquidity_cap,
+        )
+        # Apply execution multiplier for soft vetoes (Kyle's Lambda, OBI/TFI divergence)
+        from runtime.spot_strategy import (
+            calculate_execution_profile as _calc_exec_profile,
+        )
+
+        _exec_mult, _exec_tag = _calc_exec_profile(_underlying, _spot_state)
+        if _exec_mult < 1.0:
+            logger.info(
+                f"[v10] {_underlying} exec_mult={_exec_mult:.2f} ({_exec_tag})"
+            )
+        _spot_size = round(_spot_size * _exec_mult, 2)
+        if _spot_size < 10.0:
+            logger.info(
+                f"[v10] {_underlying} exec_mult reduced size below $10 minimum"
+            )
+            return "below_threshold"
+        _cooldown_min = int(_cfg.get("cooldown_min", 15))
+        _cooldown_until = (
+            datetime.utcnow() + timedelta(minutes=_cooldown_min)
+        ).isoformat()
+        if _final_score < _score_floor:
+            logger.info(
+                f"[v10] spot {_underlying} score blocked: "
+                f"final_spot_score={_final_score:.1f} floor={_score_floor:.1f}"
+            )
+            _journal_scan_candidate(
+                scan_id,
+                candidate,
+                "below_regime_floor",
+                regime=regime,
+                technical_score=_tech_score,
+                ml_score=_ml_score,
+                composite_score=composite,
+                entry_threshold=_score_floor,
+                should_enter_signal=1,
+                econ_approved=0,
+                entry_block_reason=(
+                    f"final_spot_score {_final_score:.1f} < regime floor {_score_floor:.1f}"
+                ),
+                recommended_lane=_trade.get("recommended_lane", ""),
+                tradeability_status=_trade.get("status", "executable"),
+                trade_blocked_reason="below_regime_floor",
+                trade_size_block_reason="",
+                trade_source_reason="trusted_source",
+                manual_executable=int(_trade.get("manual_executable", 0)),
+                auto_executable=int(_trade.get("auto_executable", 0)),
+                spot_regime=_spot_regime,
+                setup_family=_setup_family,
+                setup_score=_setup_score,
+                setup_preference=_setup_preference,
+                tf_5m_state=_spot_state.get("tf_5m_state", ""),
+                tf_30m_state=_spot_state.get("tf_30m_state", ""),
+                tf_4h_state=_spot_state.get("tf_4h_state", ""),
+                tf_1d_state=_spot_state.get("tf_1d_state", ""),
+                structural_confirms=_spot_state.get("structural_confirms", ""),
+                execution_route="",
+                cooldown_until="",
+                microstructure_veto=_spot_state.get("data_warning", ""),
+                final_spot_score=_final_score,
+                regime_floor=_score_floor,
+            )
+            return "below_regime_floor"
+        _econ = _spot_econ(
+            symbol=_underlying,
+            size_usd=_spot_size,
+            final_spot_score=_final_score,
+            stop_pct=_stop_pct,
+            target_r=_spot_eng._target_r(_spot_regime),
+            spread_pct=_spread_for_gate,
+            bid_depth_usd=_depth_for_gate,
+            ask_depth_usd=_depth_for_gate,
+            regime=_spot_regime,
+            execution_route_guess="maker_first",
+            structural_confirm_count=int(
+                _spot_state.get("structural_confirm_count") or 0
+            ),
+            setup_family=_setup_family,
+            setup_score=_setup_score,
+        )
+        if not _econ["approved"]:
+            logger.info(
+                f"[v10] spot {_underlying} {_econ.get('gate_class', 'econ')} blocked: {_econ['reason']}"
+            )
+            _journal_scan_candidate(
+                scan_id,
+                candidate,
+                "econ_veto",
+                regime=regime,
+                technical_score=_tech_score,
+                ml_score=_ml_score,
+                composite_score=composite,
+                entry_threshold=_score_floor,
+                should_enter_signal=1,
+                econ_approved=0,
+                entry_block_reason=_econ["reason"],
+                recommended_lane=_trade.get("recommended_lane", ""),
+                tradeability_status=_trade.get("status", "executable"),
+                trade_blocked_reason=_econ["reason"],
+                trade_size_block_reason="",
+                trade_source_reason="trusted_source",
+                manual_executable=int(_trade.get("manual_executable", 0)),
+                auto_executable=int(_trade.get("auto_executable", 0)),
+                spot_regime=_spot_regime,
+                setup_family=_setup_family,
+                setup_score=_setup_score,
+                setup_preference=_setup_preference,
+                tf_5m_state=_spot_state.get("tf_5m_state", ""),
+                tf_30m_state=_spot_state.get("tf_30m_state", ""),
+                tf_4h_state=_spot_state.get("tf_4h_state", ""),
+                tf_1d_state=_spot_state.get("tf_1d_state", ""),
+                structural_confirms=_spot_state.get("structural_confirms", ""),
+                execution_route="",
+                cooldown_until="",
+                microstructure_veto=(
+                    _econ["reason"]
+                    if _econ.get("gate_class") == "microstructure"
+                    else ""
+                ),
+                final_spot_score=_final_score,
+                regime_floor=float(_econ.get("score_floor") or _score_floor),
+                actual_stop_pct=_stop_pct,
+                actual_target_pct=_stop_pct * _spot_eng._target_r(_spot_regime),
+                net_rr=float(_econ.get("net_target_pct", 0) / _econ["net_stop_pct"])
+                if _econ.get("net_stop_pct")
+                else None,
+                net_win_usd=float(_econ.get("projected_net_win_usd") or 0),
+                econ_gate_class=str(_econ.get("gate_class") or "economics"),
+            )
+            return "econ_veto"
+        _admitted_candidate_id = _journal_scan_candidate(
+            scan_id,
+            candidate,
+            "admitted",
+            regime=regime,
+            technical_score=_tech_score,
+            ml_score=_ml_score,
+            composite_score=composite,
+            entry_threshold=float(_econ.get("score_floor") or _score_floor),
+            should_enter_signal=1,
+            econ_approved=1,
+            entry_block_reason="",
+            recommended_lane=_trade.get("recommended_lane", ""),
+            tradeability_status=_trade.get("status", "executable"),
+            trade_blocked_reason="",
+            trade_size_block_reason=_trade.get("size_block_reason", "none"),
+            trade_source_reason=_trade.get("source_reason", "trusted_source"),
+            manual_executable=int(_trade.get("manual_executable", 0)),
+            auto_executable=int(_trade.get("auto_executable", 0)),
+            spot_regime=_spot_regime,
+            setup_family=_setup_family,
+            setup_score=_setup_score,
+            setup_preference=_setup_preference,
+            tf_5m_state=_spot_state.get("tf_5m_state", ""),
+            tf_30m_state=_spot_state.get("tf_30m_state", ""),
+            tf_4h_state=_spot_state.get("tf_4h_state", ""),
+            tf_1d_state=_spot_state.get("tf_1d_state", ""),
+            structural_confirms=_spot_state.get("structural_confirms", ""),
+            execution_route="maker_first",
+            cooldown_until=_cooldown_until,
+            microstructure_veto="",
+            final_spot_score=_final_score,
+            regime_floor=float(_econ.get("score_floor") or _score_floor),
+            actual_stop_pct=_stop_pct,
+            actual_target_pct=_stop_pct * _spot_eng._target_r(_spot_regime),
+            net_rr=float(_econ.get("net_target_pct", 0) / _econ["net_stop_pct"])
+            if _econ.get("net_stop_pct")
+            else None,
+            net_win_usd=float(_econ.get("projected_net_win_usd") or 0),
+            econ_gate_class="approved",
+        )
+        # RBIPMS Strategy Ladder — Probation check (Manifest Section 6.1)
+        try:
+            from data.edge_monitor import get_strategy_ladder_state
+
+            _ladder = get_strategy_ladder_state("spot_scalp")
+            if _ladder["should_shadow"]:
+                logger.info(
+                    f"[v10] {_underlying} PROBATION — candidate logged, "
+                    f"no order. shadow_n={_ladder['shadow_n']}"
+                )
+                _journal_scan_candidate(
+                    scan_id,
+                    candidate,
+                    "strategy_in_probation",
+                    regime=regime,
+                    technical_score=_tech_score,
+                    ml_score=_ml_score,
+                    composite_score=composite,
+                    entry_threshold=_score_floor,
+                    should_enter_signal=1,
+                    econ_approved=0,
+                    entry_block_reason="strategy_in_probation",
+                    setup_family=_setup_family,
+                    setup_score=_setup_score,
+                    spot_regime=_spot_regime,
+                    final_spot_score=_final_score,
+                    regime_floor=_score_floor,
+                )
+                return "below_threshold"
+        except Exception as _le:
+            logger.debug(f"[v10] ladder check error: {_le}")
+
+        _sr = _spot_eng.open_spot(
+            _underlying,
+            _spot_size,
+            composite_score=composite,
+            atr_at_entry=atr_7,
+            spot_state=_spot_state,
+            final_spot_score=_final_score,
+            risk_dollars=_risk_dollars,
+            cooldown_until=_cooldown_until,
+            tv_context=_tv_context,
+            candidate_id=_admitted_candidate_id,
+            candidate_scan_id=scan_id,
+            raw_scanner_symbol=str(candidate.get("symbol") or _underlying),
+            base_asset=str(candidate.get("base_asset") or _underlying),
+        )
+
+            if _sr and not _sr.get("blocked"):
+                logger.info(
+                    f"[v10] spot {_underlying} entered "
+                    f"${_spot_size:.0f}: order={_sr.get('order_id', '?')}"
+                )
+                # Reset WAE missed counter on successful WAE entry
+                if _setup_family == "wae_momentum_explosion":
+                    try:
+                        from data.edge_monitor import reset_wae_missed
+
+                        reset_wae_missed()
+                    except Exception:
+                        pass
+                update_scan_candidate_result(
+                    int(_admitted_candidate_id or 0),
+                    decision="entered",
+                    execution_route=_sr.get("execution_route", ""),
+                    cooldown_until=_cooldown_until,
+                    microstructure_veto="",
+                    final_spot_score=_final_score,
+                    regime_floor=_score_floor,
+                    actual_stop_pct=_stop_pct,
+                    actual_target_pct=_stop_pct * _spot_eng._target_r(_spot_regime),
+                    net_rr=float(_econ.get("net_target_pct", 0) / _econ["net_stop_pct"])
+                    if _econ.get("net_stop_pct")
+                    else None,
+                    net_win_usd=float(_econ.get("projected_net_win_usd") or 0),
+                    econ_gate_class="approved",
+                    size_usd=float(_spot_size or 0.0),
+                )
+                return "entered"
+            else:
+                _spot_reason = "spot_entry_failed"
+                logger.debug(
+                    f"[v10] spot {_trade.get('underlying')} blocked by engine: "
+                    f"{_sr.get('blocked') if _sr else 'None returned'}"
+                )
+                logger.info(
+                    f"[v10] spot {_trade.get('underlying')} failed — staying in spot lane"
+                )
+                update_scan_candidate_result(
+                    int(_admitted_candidate_id or 0),
+                    decision="execution_failed",
+                    entry_block_reason=_spot_reason,
+                    trade_blocked_reason=_spot_reason,
+                    execution_route=_sr.get("execution_route", "") if _sr else "",
+                    cooldown_until=_cooldown_until,
+                    final_spot_score=_final_score,
+                    regime_floor=_score_floor,
+                )
+                return "execution_failed"
+        except Exception as _spot_err:
+            logger.debug(f"[v10] spot entry error: {_spot_err}")
+            logger.info(
+                f"[v10] spot {_trade.get('underlying')} exception — staying in spot lane"
+            )
+            _is_data_issue = "insufficient" in str(_spot_err).lower()
+            _journal_scan_candidate(
+                scan_id,
+                candidate,
+                "data_unavailable" if _is_data_issue else "execution_failed",
+                regime=regime,
+                technical_score=_tech_score,
+                ml_score=_ml_score,
+                composite_score=composite,
+                entry_threshold=50.0,
+                should_enter_signal=1,
+                econ_approved=1,
+                entry_block_reason=f"spot_entry_exception: {_spot_err}",
+                recommended_lane=_trade.get("recommended_lane", ""),
+                tradeability_status=_trade.get("status", "executable"),
+                trade_blocked_reason="spot_data_unavailable"
+                if _is_data_issue
+                else "spot_entry_exception",
+                trade_size_block_reason=_trade.get("size_block_reason", "none"),
+                trade_source_reason=_trade.get("source_reason", "trusted_source"),
+                manual_executable=int(_trade.get("manual_executable", 0)),
+                auto_executable=int(_trade.get("auto_executable", 0)),
+            )
+            return "data_unavailable" if _is_data_issue else "execution_failed"
+
+    setup_str = (
+        primary_setup["label"] if primary_setup else f"composite={composite:.1f}"
+    )
+    logger.info(
+        f"[v10] {symbol} {direction} ENTRY SIGNAL: "
+        f"{setup_str} composite={composite:.1f} tier={tier} regime={regime}"
+    )
+
+    # Compute position size
+    if pm is None:
+        logger.warning(f"[v10] {symbol} — position_manager is None, skip")
+        _journal_scan_candidate(
+            scan_id,
+            candidate,
+            "data_unavailable",
+            entry_block_reason="position_manager is None",
+            **_route_hint,
+        )
+        return "data_unavailable"
+
+    regime_mult = _REGIME_SIZE_MULT.get(regime, 0.90)
+    ml_score = result.get("ml_score", 50.0)
+
+    # Pull live values from feature vector rather than hardcoding neutral defaults
+    vol_regime_raw = features.get("regime_vol_mult", 1.0)
+    # Map to int tier: <0.8→expanding(3), 0.8-1.1→normal(2), >1.1→compressing(1)
+    if vol_regime_raw < 0.85:
+        vol_regime_int = 3

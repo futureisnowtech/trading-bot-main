@@ -37,16 +37,13 @@ from logging_db.trade_logger import log_event
 # ── Config ────────────────────────────────────────────────────────────────────
 
 try:
-    from config import (
-        False,
-        STOCKS_LANE_ACTIVE,
+    from config import (STOCKS_LANE_ACTIVE,
         STOCK_UNIVERSE,
         STOCKS_MAX_POSITIONS,
         STOCKS_RISK_PCT,
         STOCKS_MAX_POSITION_PCT,
     )
 except ImportError:
-    False = True
     STOCKS_LANE_ACTIVE = False
     STOCK_UNIVERSE = [
         "AMD",

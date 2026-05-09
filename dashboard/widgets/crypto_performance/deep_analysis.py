@@ -186,9 +186,7 @@ def render_deep_analysis():
             "TRENDING = clear direction, RANGING = choppy, HIGH_VOL = volatile"
         )
         _eff_date = get_effective_launch_date()
-        from db importas _rtpf
-
-        _paper = _rtpf()
+        _paper = False
         regime_data = _q(
             """
             SELECT regime,
@@ -197,9 +195,8 @@ def render_deep_analysis():
                 ROUND(100.0 * SUM(CASE WHEN won=1 THEN 1 ELSE 0 END) / COUNT(*), 1) AS wr_pct,
                 ROUND(AVG(pnl_usd), 2) AS avg_pnl,
                 ROUND(SUM(pnl_usd), 2) AS total_pnl
-            FROM trade_attribution
-            WHERE COALESCE(created_at, entry_ts, '') >= ? AND ,
-            (_eff_date, _paper),
+            FROM trade_attribution WHERE COALESCE(created_at, entry_ts, '') >= ? AND paper=0""",
+            (_eff_date,),
         )
         if regime_data:
             st.dataframe(
@@ -267,8 +264,8 @@ def render_deep_analysis():
             """
             SELECT symbol, direction, ROUND(mae_pct*100,3) AS mae_pct, ROUND(mfe_pct*100,3) AS mfe_pct,
                    exit_type, hold_minutes, is_fee_trap, won
-            FROM trade_attribution WHERE COALESCE(created_at, entry_ts, '') >= ? AND ,
-            (_eff_date, _paper),
+            FROM trade_attribution WHERE COALESCE(created_at, entry_ts, '') >= ? AND paper=0""",
+            (_eff_date,),
         )
         if attr:
             st.caption("Last 30 trade attributions")

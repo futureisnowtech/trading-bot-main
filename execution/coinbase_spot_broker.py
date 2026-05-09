@@ -139,11 +139,13 @@ class CoinbaseSpotBroker:
     # ── Auth ─────────────────────────────────────────────────────────────────
 
     def _make_jwt(self, method: str, path: str) -> str:
+        """Generate a short-lived CDP JWT for a single request (ES256 / ECDSA P-256)."""
         if not _JWT_OK:
             raise RuntimeError("PyJWT / cryptography required for live spot mode")
+        
         now = int(time.time())
-        # v18.17: URI claim MUST include query parameters for CDP Advanced Trade.
-        # Strict character-for-character matching is required by Coinbase.
+        # v18.17 Expert Fix: URI claim MUST include full path and query parameters.
+        # iss must be 'cdp'. typ header should be 'JWT'.
         payload = {
             "sub": self._key_name,
             "iss": "cdp",
@@ -154,6 +156,7 @@ class CoinbaseSpotBroker:
         headers = {
             "kid": self._key_name,
             "nonce": secrets.token_hex(16),
+            "typ": "JWT",
         }
         return _pyjwt.encode(
             payload,
@@ -163,14 +166,20 @@ class CoinbaseSpotBroker:
         )
 
     def _request(self, method: str, path: str, body: Optional[dict] = None) -> dict:
+        """Sign and send a Coinbase Advanced Trade API request."""
         if not _REQUESTS_OK:
             raise RuntimeError("requests library required for live spot mode")
-        token = self._make_jwt(method.upper(), path)
+        
+        method = method.upper()
+        token = self._make_jwt(method, path)
         url = f"{_API_BASE}{path}"
+        
         headers = {
             "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
         }
+        if method != "GET":
+            headers["Content-Type"] = "application/json"
+            
         resp = _requests.request(method, url, headers=headers, json=body, timeout=10)
         if not resp.ok:
             raise RuntimeError(
@@ -181,16 +190,19 @@ class CoinbaseSpotBroker:
     # ── Symbol helpers ────────────────────────────────────────────────────────
 
     def _spec(self, symbol: str) -> dict:
-        s = symbol.upper().replace("USDT", "").replace("USD", "").replace("-USD", "")
+        """Return product spec or raise CoinbaseSpotSymbolError (fail-closed)."""
+        # Improved cleaning: strip everything after hyphen and common suffixes
+        s = symbol.upper().split("-")[0].replace("USDT", "").replace("USD", "")
         if s not in SPOT_PRODUCT_SPECS:
             raise CoinbaseSpotSymbolError(
-                f"[spot] '{symbol}' is not in the allowed spot set "
+                f"[spot] '{symbol}' (cleaned: '{s}') is not in the allowed spot set "
                 f"(supported: {sorted(SPOT_SUPPORTED_SYMBOLS)})."
             )
         return SPOT_PRODUCT_SPECS[s]
 
     def _clean_symbol(self, symbol: str) -> str:
-        return symbol.upper().replace("USDT", "").replace("USD", "").replace("-USD", "")
+        """Standardize symbol to base asset only."""
+        return symbol.upper().split("-")[0].replace("USDT", "").replace("USD", "")
 
     # ── Connection ────────────────────────────────────────────────────────────
 

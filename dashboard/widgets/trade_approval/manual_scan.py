@@ -93,7 +93,6 @@ def _manual_tradeability(candidate: dict) -> dict:
             sym,
             dirn,
             candidate,
-            live=_runtime_live_flag(),
             manual=True,
         )
     except Exception:

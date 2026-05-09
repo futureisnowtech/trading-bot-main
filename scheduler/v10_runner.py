@@ -1657,7 +1657,6 @@ def _attempt_entry(
             symbol,
             direction,
             candidate,
-            live=True,
             manual=False,
             dag_state=dag_state,
         )

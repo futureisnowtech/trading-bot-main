@@ -144,14 +144,13 @@ class CoinbaseSpotBroker:
             raise RuntimeError("PyJWT / cryptography required for live spot mode")
         
         now = int(time.time())
-        # v18.17 Expert Fix: URI claim MUST include full path and query parameters.
-        # iss must be 'cdp'. typ header should be 'JWT'.
+        # v18.17 Definitive Fix: Official SDK strips query parameters from URI claim.
+        path_only = path.split("?")[0]
         payload = {
             "sub": self._key_name,
             "iss": "cdp",
-            "nbf": now,
             "exp": now + 120,
-            "uri": f"{method} api.coinbase.com{path}",
+            "uri": f"{method} api.coinbase.com{path_only}",
         }
         headers = {
             "kid": self._key_name,
@@ -313,6 +312,10 @@ class CoinbaseSpotBroker:
                 return float(trades[0].get("price", 0))
         except Exception as e:
             logger.debug(f"[spot] get_mark_price error {symbol}: {e}")
+        
+        # Hardened: no paper fallback in live mode
+        if not self._paper:
+            return 0.0
         return self._fallback_price(clean)
 
     _PAPER_PRICE_FALLBACKS: dict[str, float] = {

@@ -321,29 +321,6 @@ def get_spot_position_truth(
     if broker_holdings is None:
         broker_holdings, broker_cash_usd = _get_live_broker_snapshot()
     snapshot_ok = broker_holdings is not None
-    if broker_holdings is None:
-        return {
-            "snapshot_ok": False,
-            "broker_cash_usd": broker_cash_usd,
-            "all_live_holdings": [],
-            "bot_managed_positions": [],
-            "issues": [
-                {
-                    "symbol": "",
-                    "position_truth_status": "broker_snapshot_unavailable",
-                    "truth_blocking": True,
-                }
-            ],
-            "blocking_issues": [
-                {
-                    "symbol": "",
-                    "position_truth_status": "broker_snapshot_unavailable",
-                    "truth_blocking": True,
-                }
-            ],
-            "positions_open": 0,
-            "deployment_notional": 0.0,
-        }
 
     live_by_symbol = {
         _clean_symbol(row.get("symbol")): dict(row)
@@ -374,6 +351,16 @@ def get_spot_position_truth(
         for row in (merged_live + stale_db_rows)
         if row.get("position_truth_status") != "matched_bot_position"
     ]
+
+    if not snapshot_ok:
+        issues.insert(
+            0,
+            {
+                "symbol": "",
+                "position_truth_status": "broker_snapshot_unavailable",
+                "truth_blocking": True,
+            },
+        )
 
     # v18.17: Auto-purge stale DB-only positions that are blocking the lane
     auto_purge_rows = [row for row in issues if row.get("auto_purge")]

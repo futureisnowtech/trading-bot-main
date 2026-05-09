@@ -196,7 +196,8 @@ def _sync_position_high(
     try:
         con = sqlite3.connect(_get_db_path(), timeout=5)
         con.execute(
-        con.execute("UPDATE open_positions SET high_since_entry=? WHERE symbol=? AND strategy=? AND paper=0", (high_price, _clean_symbol(symbol), strategy))
+            "UPDATE open_positions SET high_since_entry=? WHERE symbol=? AND strategy=? AND paper=0",
+            (high_price, _clean_symbol(symbol), strategy),
         )
         con.commit()
         con.close()
@@ -210,7 +211,8 @@ def _sync_position_exit_reason(
     try:
         con = sqlite3.connect(_get_db_path(), timeout=5)
         con.execute(
-        con.execute("UPDATE open_positions SET exit_reason=? WHERE symbol=? AND strategy=? AND paper=0", (exit_reason, _clean_symbol(symbol), strategy))
+            "UPDATE open_positions SET exit_reason=? WHERE symbol=? AND strategy=? AND paper=0",
+            (exit_reason, _clean_symbol(symbol), strategy),
         )
         con.commit()
         con.close()
@@ -678,10 +680,10 @@ def open_spot(
         logger.info(f"[spot_engine] {clean} blocked — spot_lane_disabled")
         return None
     if clean not in SPOT_SYMBOLS:
-        logger.info(f"[spot_engine] {clean} blocked — spot_symbol_not_allowed")
+        logger.warning(f"[spot_engine] {clean} blocked — spot_symbol_not_allowed")
         return None
     if not get_spot_strategy(clean)["enabled"]:
-        logger.info(f"[spot_engine] {clean} blocked — spot_strategy_symbol_disabled")
+        logger.warning(f"[spot_engine] {clean} blocked — spot_strategy_symbol_disabled")
         return None
 
     # v18.17: Force fresh truth reconciliation before entry
@@ -711,7 +713,7 @@ def open_spot(
             "metadata_missing",
             "db_only_stale",
         }:
-            logger.info(f"[spot_engine] {clean} blocked — spot_truth_{truth_status}")
+            logger.warning(f"[spot_engine] {clean} blocked — spot_truth_{truth_status}")
             return None
     if any(
         str(p.get("symbol", "")).upper() == clean

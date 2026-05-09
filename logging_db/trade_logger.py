@@ -1872,7 +1872,8 @@ def persist_position(
 def delete_position(symbol, strategy) -> None:
     conn = _conn()
     conn.cursor().execute(
-        "DELETE FROM open_positions WHERE symbol=? AND strategy=? AND paper=0"
+        "DELETE FROM open_positions WHERE symbol=? AND strategy=? AND paper=0",
+        (symbol, strategy),
     )
     conn.commit()
     conn.close()

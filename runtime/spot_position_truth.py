@@ -244,7 +244,7 @@ def _merged_live_row(
             tolerance = max(1e-8, abs(live_qty) * 0.01)
             if abs(db_qty - live_qty) <= tolerance:
                 status = "matched_bot_position"
-                logger.info(
+                logger.warning(
                     f"[spot_truth] Allowing metadata_missing for {symbol} as matched_bot_position due to quantity match."
                 )
             else:

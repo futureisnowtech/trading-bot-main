@@ -30,8 +30,10 @@ ALERT_NAMESPACES = [
     "spot_kill_switch",
 ]
 
-ALERT_LEVELS = {"ERROR", "CRITICAL"}
-WARNING_ALERT_NAMESPACES = ["scheduler", "runtime.spot_kill_switch"] # Only alert on these at WARNING level
+ALERT_LEVELS = {"WARNING", "ERROR", "CRITICAL"}
+
+RATE_LIMIT_SECONDS = 60
+
 
 class LogAlertWatchdog:
     def __init__(self):
@@ -40,14 +42,8 @@ class LogAlertWatchdog:
 
     def _should_alert(self, namespace: str, level: str) -> bool:
         """Return True if the rate limit allows an alert for this namespace."""
-        # v18.17: Only alert on WARNING for high-priority namespaces.
-        # Everything else requires ERROR or CRITICAL.
-        if level == "WARNING" and namespace not in WARNING_ALERT_NAMESPACES:
+        if level not in ALERT_LEVELS:
             return False
-        
-        if level not in ALERT_LEVELS and level != "WARNING":
-            return False
-        
         now = time.monotonic()
         last = self.last_alert_times.get(namespace, 0.0)
         if now - last >= RATE_LIMIT_SECONDS:

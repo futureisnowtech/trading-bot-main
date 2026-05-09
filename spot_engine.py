@@ -678,10 +678,10 @@ def open_spot(
         logger.info(f"[spot_engine] {clean} blocked — spot_lane_disabled")
         return None
     if clean not in SPOT_SYMBOLS:
-        logger.warning(f"[spot_engine] {clean} blocked — spot_symbol_not_allowed")
+        logger.info(f"[spot_engine] {clean} blocked — spot_symbol_not_allowed")
         return None
     if not get_spot_strategy(clean)["enabled"]:
-        logger.warning(f"[spot_engine] {clean} blocked — spot_strategy_symbol_disabled")
+        logger.info(f"[spot_engine] {clean} blocked — spot_strategy_symbol_disabled")
         return None
 
     # v18.17: Force fresh truth reconciliation before entry
@@ -711,7 +711,7 @@ def open_spot(
             "metadata_missing",
             "db_only_stale",
         }:
-            logger.warning(f"[spot_engine] {clean} blocked — spot_truth_{truth_status}")
+            logger.info(f"[spot_engine] {clean} blocked — spot_truth_{truth_status}")
             return None
     if any(
         str(p.get("symbol", "")).upper() == clean

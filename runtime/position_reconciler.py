@@ -16,6 +16,7 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 
+from config import DB_PATH
 from runtime.spot_position_truth import get_spot_position_truth
 
 

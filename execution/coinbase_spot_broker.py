@@ -53,14 +53,14 @@ except ImportError:
 
 # ── Allowed spot symbols (lowercase base asset → Coinbase product_id) ─────────
 SPOT_PRODUCT_SPECS: dict[str, dict] = {
-    "BTC": {"product_id": "BTC-USD", "min_order_usd": 1.0},
-    "ETH": {"product_id": "ETH-USD", "min_order_usd": 1.0},
-    "SOL": {"product_id": "SOL-USD", "min_order_usd": 1.0},
-    "XRP": {"product_id": "XRP-USD", "min_order_usd": 1.0},
-    "LTC": {"product_id": "LTC-USD", "min_order_usd": 1.0},
-    "DOGE": {"product_id": "DOGE-USD", "min_order_usd": 1.0},
-    "ADA": {"product_id": "ADA-USD", "min_order_usd": 1.0},
-    "LINK": {"product_id": "LINK-USD", "min_order_usd": 1.0},
+    "BTC": {"product_id": "BTC-USD", "min_order_usd": 1.0, "base_min_size": 0.00001},
+    "ETH": {"product_id": "ETH-USD", "min_order_usd": 1.0, "base_min_size": 0.0001},
+    "SOL": {"product_id": "SOL-USD", "min_order_usd": 1.0, "base_min_size": 0.01},
+    "XRP": {"product_id": "XRP-USD", "min_order_usd": 1.0, "base_min_size": 1.0},
+    "LTC": {"product_id": "LTC-USD", "min_order_usd": 1.0, "base_min_size": 0.01},
+    "DOGE": {"product_id": "DOGE-USD", "min_order_usd": 1.0, "base_min_size": 1.0},
+    "ADA": {"product_id": "ADA-USD", "min_order_usd": 1.0, "base_min_size": 1.0},
+    "LINK": {"product_id": "LINK-USD", "min_order_usd": 1.0, "base_min_size": 0.1},
 }
 
 SPOT_SUPPORTED_SYMBOLS = set(SPOT_PRODUCT_SPECS.keys())
@@ -492,7 +492,13 @@ class CoinbaseSpotBroker:
             logger.warning(str(e))
             return None
         clean = self._clean_symbol(symbol)
+        base_min = spec.get("base_min_size", 0.0)
         qty = size_usd / limit_price if limit_price > 0 else 0.0
+        
+        if qty > 0 and qty < base_min:
+            logger.info(f"[spot] place_limit_buy_spot {clean}: raising qty {qty:.8f} to base_min {base_min}")
+            qty = base_min
+
         if qty <= 0:
             return None
         if self._paper:
@@ -547,6 +553,11 @@ class CoinbaseSpotBroker:
             logger.warning(str(e))
             return None
         clean = self._clean_symbol(symbol)
+        base_min = spec.get("base_min_size", 0.0)
+        if size_units > 0 and size_units < base_min:
+            logger.info(f"[spot] place_limit_sell_spot {clean}: raising size {size_units:.8f} to base_min {base_min}")
+            size_units = base_min
+
         if size_units <= 0 or limit_price <= 0:
             return None
         if self._paper:
@@ -610,6 +621,26 @@ class CoinbaseSpotBroker:
         if price <= 0:
             logger.warning(f"[spot] buy_spot {symbol}: cannot get price")
             return None
+
+        # v18.17: Ensure we clear the exchange minimum lot size
+        base_min = spec.get("base_min_size", 0.0)
+        min_usd_for_base = base_min * price
+        
+        # Use the larger of: 
+        # 1. requested size_usd
+        # 2. USD needed for 1.1x min_lot_size (safety margin)
+        # 3. broker-spec min_order_usd
+        # 4. global config SPOT_MIN_ORDER_USD
+        try:
+            from config import SPOT_MIN_ORDER_USD as global_min
+        except ImportError:
+            global_min = 10.0
+
+        floor_usd = max(min_usd_for_base * 1.1, spec.get("min_order_usd", 1.0), global_min)
+        
+        if size_usd < floor_usd:
+            logger.info(f"[spot] buy_spot {clean}: raising size ${size_usd:.2f} to floor ${floor_usd:.2f} (price={price:.4f})")
+            size_usd = floor_usd
 
         qty = size_usd / price
         order_id = f"spot_paper_{clean}_{int(time.time())}" if self._paper else None
@@ -706,6 +737,11 @@ class CoinbaseSpotBroker:
             return None
 
         clean = self._clean_symbol(symbol)
+        base_min = spec.get("base_min_size", 0.0)
+        if size_units > 0 and size_units < base_min:
+            logger.info(f"[spot] sell_spot {clean}: raising size {size_units:.8f} to base_min {base_min}")
+            size_units = base_min
+
         price = self.get_mark_price(symbol)
         if price <= 0:
             logger.warning(f"[spot] sell_spot {symbol}: cannot get price")

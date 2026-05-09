@@ -138,7 +138,7 @@ def _coinbase_live_ready() -> None:
 
     broker = get_spot_broker()
     # Check if we are on the known management machine (MacBook)
-    is_macbook = socket.gethostname() == "macbookair"
+    is_macbook = socket.gethostname().lower().startswith("macbookair")
     is_test = "PYTEST_CURRENT_TEST" in os.environ
 
     try:
@@ -170,7 +170,7 @@ def _spot_truth_ready() -> None:
     from runtime.spot_position_truth import get_spot_position_truth
     import socket
 
-    is_macbook = socket.gethostname() == "macbookair"
+    is_macbook = socket.gethostname().lower().startswith("macbookair")
     is_test = "PYTEST_CURRENT_TEST" in os.environ
     truth = get_spot_position_truth(paper=False)
 
@@ -223,7 +223,7 @@ def main() -> int:
     _forecast_status()
 
     connected, buying_power, readiness, blocked_reason = _load_crypto_lane()
-    is_macbook = socket.gethostname() == "macbookair"
+    is_macbook = socket.gethostname().lower().startswith("macbookair")
     is_test = "PYTEST_CURRENT_TEST" in os.environ
 
     if readiness != "READY_FOR_TINY_LIVE":

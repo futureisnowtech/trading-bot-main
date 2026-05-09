@@ -821,7 +821,7 @@ def open_spot(
 
     latency = time.time() - t0
     if not order:
-        logger.error(f"[spot_engine] {clean} buy failed")
+        logger.error(f"[spot_engine] {clean} buy failed: route={execution_route} veto={micro_veto}")
         return None
 
     # Push to Prometheus
@@ -1051,7 +1051,7 @@ def close_spot(
 
     latency = time.time() - t0
     if not order:
-        logger.error(f"[spot_engine] close_spot {clean}: sell failed")
+        logger.error(f"[spot_engine] close_spot {clean}: sell failed: route={execution_route} veto={micro_veto}")
         return None
 
     # Push to Prometheus

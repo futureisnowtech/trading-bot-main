@@ -179,7 +179,9 @@ class CoinbaseSpotBroker:
         if method != "GET":
             headers["Content-Type"] = "application/json"
             
+        logger.info(f"[spot] Deep Trace Request: {method} {url} body={body}")
         resp = _requests.request(method, url, headers=headers, json=body, timeout=10)
+        logger.info(f"[spot] Deep Trace Response: {resp.status_code} {resp.text[:500]}")
         if not resp.ok:
             raise RuntimeError(
                 f"Coinbase Spot API {method} {path} → {resp.status_code}: {resp.text[:400]}"

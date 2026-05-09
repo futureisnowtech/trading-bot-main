@@ -821,20 +821,21 @@ class CoinbaseSpotBroker:
                 else:
                     self._holdings[clean]["qty"] = new_qty
             return result
-# v18.17: Use precision rounding for market sell
-qty_str = self._round_base(symbol, size_units)
+        try:
+            # v18.17: Use precision rounding for market sell
+            qty_str = self._round_base(symbol, size_units)
 
-# Live path — base_size (units)
-body = {
-    "client_order_id": str(uuid.uuid4()),
-    "product_id": spec["product_id"],
-    "side": "SELL",
-    "order_configuration": {
-        "market_market_ioc": {
-            "base_size": qty_str,
-        }
-    },
-}
+            # Live path — base_size (units)
+            body = {
+                "client_order_id": str(uuid.uuid4()),
+                "product_id": spec["product_id"],
+                "side": "SELL",
+                "order_configuration": {
+                    "market_market_ioc": {
+                        "base_size": qty_str,
+                    }
+                },
+            }
             resp = self._request("POST", "/api/v3/brokerage/orders", body)
             order = resp.get("success_response") or resp.get("order") or {}
             if not order:

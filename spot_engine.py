@@ -80,10 +80,10 @@ def safety_gated(func):
 
 logger = logging.getLogger(__name__)
 
+import system_state
+
 try:
     from execution.coinbase_spot_broker import CoinbaseSpotBroker, get_spot_broker
-    import system_state
-
     _BROKER_OK = True
 except Exception:
     _BROKER_OK = False

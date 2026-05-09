@@ -83,7 +83,6 @@ def test_log_scan_candidate_persists_row(proof_runtime, monkeypatch):
         leverage=3,
         entry_block_reason="economics: ev_below_floor",
         decision="econ_veto",
-        paper=True,
         source="clean_paper_v10",
     )
 

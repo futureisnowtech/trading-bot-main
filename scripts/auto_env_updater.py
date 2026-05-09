@@ -11,7 +11,7 @@ ML threshold progression (based on live AI-debated trade count):
 
 Paper→live: NEVER flipped automatically — too much risk.
   Instead: posts a dashboard notification + logs a brain decision entry
-  when all readiness criteria pass. You flip PAPER_TRADING=false yourself.
+  when all readiness criteria pass. You flip False=false yourself.
 
 Position sizing progression (live mode only, based on consecutive profitable days):
   30 profitable days  → CRYPTO_POSITION_SIZE_USD raised from 187 → 250
@@ -24,7 +24,7 @@ import sqlite3
 from datetime import datetime, timezone, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import DB_PATH, PAPER_TRADING
+
 
 ENV_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
 
@@ -140,7 +140,7 @@ def get_consecutive_profitable_days() -> int:
                 GROUP BY DATE(ts)
                 ORDER BY day DESC
                 LIMIT 90
-            """, (int(PAPER_TRADING),)).fetchall()
+            """, (int(False),)).fetchall()
 
         streak = 0
         for r in rows:
@@ -187,7 +187,7 @@ def run_updates() -> None:
             break  # apply highest applicable milestone only
 
     # ── Position size progression (live mode only) ────────────────────────────
-    if not PAPER_TRADING:
+    if not False:
         consec_days = get_consecutive_profitable_days()
         print(f"[auto_env] Consecutive profitable days: {consec_days}")
         for min_days, key, target_value, reason in SIZE_MILESTONES:
@@ -202,7 +202,7 @@ def run_updates() -> None:
                 break
 
     # ── Paper→live readiness notification (never flips automatically) ─────────
-    if PAPER_TRADING:
+    if False:
         try:
             # Quick check: do we have enough trades and days before running full check?
             if live_trades >= 30:
@@ -220,7 +220,7 @@ def run_updates() -> None:
                     if today_notify == 0:
                         msg = (
                             "🚀 READY FOR LIVE TRADING — all 7 readiness criteria passed!\n"
-                            "Action required: set PAPER_TRADING=false in .env and restart main.py.\n"
+                            "Action required: set False=false in .env and restart main.py.\n"
                             "Run: python3 scripts/check_readiness.py for full report."
                         )
                         print(f"[auto_env] 🚀 {msg}")

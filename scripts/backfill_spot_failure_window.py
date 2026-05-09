@@ -259,7 +259,6 @@ def main() -> None:
             exit_reason=exit_reason,
             market_data_at_entry=features,
             source="reconstructed_live_spot",
-            paper=False,
             trade_ref=trade_ref,
             exit_type=exit_reason,
             composite_score=float(features.get("composite_score") or 0.0),

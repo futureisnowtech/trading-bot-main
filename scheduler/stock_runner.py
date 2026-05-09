@@ -38,7 +38,7 @@ from logging_db.trade_logger import log_event
 
 try:
     from config import (
-        PAPER_TRADING,
+        False,
         STOCKS_LANE_ACTIVE,
         STOCK_UNIVERSE,
         STOCKS_MAX_POSITIONS,
@@ -46,7 +46,7 @@ try:
         STOCKS_MAX_POSITION_PCT,
     )
 except ImportError:
-    PAPER_TRADING = True
+    False = True
     STOCKS_LANE_ACTIVE = False
     STOCK_UNIVERSE = [
         "AMD",

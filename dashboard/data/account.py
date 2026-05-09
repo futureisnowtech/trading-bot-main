@@ -9,7 +9,6 @@ import db as _db
 _q = _db._q
 _q1 = _db._q1
 LAUNCH_DATE = _db.LAUNCH_DATE
-_runtime_paper_flag = _db._runtime_paper_flag
 get_current_strategy_start_date = getattr(
     _db,
     "get_current_strategy_start_date",
@@ -41,12 +40,10 @@ def _spot_unrealized_pnl() -> float:
 
 
 def get_account():
-    paper_flag = _runtime_paper_flag()
-    paper = bool(paper_flag)
     try:
         from runtime.live_account import get_live_account_size
 
-        base = float(get_live_account_size(paper=paper))
+        base = float(get_live_account_size())
     except Exception:
         try:
             from config import ACCOUNT_SIZE
@@ -56,9 +53,9 @@ def get_account():
             base = 5000.0
     r = _q1(
         """SELECT SUM(pnl_usd) - SUM(COALESCE(fee_usd,0)) AS net_pnl FROM trades
-           WHERE ts >= ? AND paper=?
+           WHERE ts >= ? AND paper=0
              AND (source IS NULL OR source NOT IN ('backtest','pre_v10_contaminated','bybit_paper','paper_v10'))""",
-        (LAUNCH_DATE, paper_flag),
+        (LAUNCH_DATE,),
     )
     realized = r.get("net_pnl") or 0.0
     unrealized = 0.0
@@ -82,11 +79,7 @@ def get_account():
     except Exception:
         pass
     spot_unrealized = _spot_unrealized_pnl()
-    return base + realized + unrealized + spot_unrealized, paper, base
-
-
-def _paper_flag() -> int:
-    return _runtime_paper_flag()
+    return base + realized + unrealized + spot_unrealized, False, base
 
 
 def _metrics_start(*, current_only: bool = False) -> str:
@@ -101,10 +94,10 @@ def get_today_pnl():
     today = datetime.now().strftime("%Y-%m-%d")
     r = _q1(
         """SELECT SUM(pnl_usd) v FROM trades
-           WHERE ts >= ? AND paper=? AND broker NOT LIKE '%bybit%' AND pnl_usd != 0
+           WHERE ts >= ? AND paper=0 AND broker NOT LIKE '%bybit%' AND pnl_usd != 0
              AND (source IS NULL OR source NOT IN ('backtest','pre_v10_contaminated','bybit_paper','paper_v10'))
              AND (notes IS NULL OR notes NOT LIKE '%force_test_close%')""",
-        (today, _paper_flag()),
+        (today,),
     )
     return r.get("v") or 0.0
 
@@ -113,12 +106,12 @@ def get_equity_curve(*, current_only: bool = False):
     return _q(
         """SELECT ts, SUM(pnl_usd) OVER (ORDER BY ts) AS cum_pnl
            FROM trades
-           WHERE ts >= ? AND paper=? AND broker NOT LIKE '%bybit%'
+           WHERE ts >= ? AND paper=0 AND broker NOT LIKE '%bybit%'
              AND pnl_usd != 0
              AND (source IS NULL OR source NOT IN ('backtest','pre_v10_contaminated','bybit_paper','paper_v10'))
              AND (notes IS NULL OR notes NOT LIKE '%force_test_close%')
            ORDER BY ts""",
-        (_metrics_start(current_only=current_only), _paper_flag()),
+        (_metrics_start(current_only=current_only),),
     )
 
 
@@ -153,10 +146,7 @@ def get_drawdown(*, current_only: bool = False):
     try:
         from runtime.live_account import get_live_account_size
 
-        # DT-07 fix: pass paper flag so drawdown denominator stays within the
-        # correct truth boundary and never leaks live account size into paper
-        # mode calculations (or vice-versa).
-        base = float(get_live_account_size(paper=bool(_runtime_paper_flag())))
+        base = float(get_live_account_size())
     except Exception:
         try:
             from config import ACCOUNT_SIZE
@@ -176,10 +166,10 @@ def get_trade_log(limit=50, *, current_only: bool = False):
     return _q(
         """SELECT ts, symbol, action, qty, price, pnl_usd, fee_usd, notes
            FROM trades
-           WHERE ts >= ? AND paper=? AND broker NOT LIKE '%bybit%'
+           WHERE ts >= ? AND paper=0 AND broker NOT LIKE '%bybit%'
              AND pnl_usd != 0
              AND (source IS NULL OR source NOT IN ('backtest','pre_v10_contaminated','bybit_paper','paper_v10'))
              AND (notes IS NULL OR notes NOT LIKE '%force_test_close%')
            ORDER BY ts DESC LIMIT ?""",
-        (_metrics_start(current_only=current_only), _paper_flag(), limit),
+        (_metrics_start(current_only=current_only), limit),
     )

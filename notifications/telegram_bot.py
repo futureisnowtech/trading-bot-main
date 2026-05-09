@@ -77,7 +77,7 @@ def _runtime_is_live() -> bool:
     Primary source: system_runtime_state DB table (written by main.py on startup
     and updated by go_live.py / go_paper.py transitions).
     Fallback: system_state.state in-process mode field.
-    Fallback: config.PAPER_TRADING (config-file truth, least authoritative).
+    Fallback: config.False (config-file truth, least authoritative).
 
     Returns False (paper) in all ambiguous cases — fail-safe.
     """
@@ -107,9 +107,9 @@ def _runtime_is_live() -> bool:
         pass
     # 3. Config fallback (least authoritative — may be stale)
     try:
-        from config import PAPER_TRADING
+        
 
-        return not PAPER_TRADING
+        return not False
     except Exception:
         pass
     return False  # fail-safe: assume paper
@@ -198,7 +198,7 @@ async def positions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     paper = not is_live
     mode_label = "LIVE" if is_live else "PAPER"
 
-    positions = get_spot_positions(paper=paper)
+    positions = get_spot_positions()
     if not positions:
         await _reply_text(update, f"No active spot positions ({mode_label} mode).")
         return
@@ -218,7 +218,7 @@ async def exposure_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     paper = not is_live
     mode_label = "LIVE" if is_live else "PAPER"
 
-    positions = get_spot_positions(paper=paper)
+    positions = get_spot_positions()
     total = sum(float(p.get("qty", 0)) * float(p.get("entry", 0)) for p in positions)
     await _reply_text(update, f"Total Exposure [{mode_label}]: ${total:,.2f}")
 
@@ -294,7 +294,7 @@ async def cancel_all_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     try:
-        broker = _get_broker(paper=False)
+        broker = _get_broker()
         if broker:
             broker.cancel_all_spot_orders()
             await _reply_text(update, "All active spot orders cancelled [LIVE].")
@@ -312,7 +312,7 @@ async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mode_label = "LIVE" if is_live else "PAPER"
     paper = not is_live
     try:
-        today_trades = get_todays_trades(paper=paper)
+        today_trades = get_todays_trades()
         today = time.strftime("%Y-%m-%d")
         wins = len([t for t in today_trades if float(t.get("pnl_usd", 0)) > 0])
         total_pnl = sum(float(t.get("pnl_usd", 0)) for t in today_trades)
@@ -443,7 +443,7 @@ async def everything_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     audit_str = "PASSED" if not issues else f"ISSUES: {', '.join(issues)}"
 
     # 2. Portfolio & Risk
-    positions = get_spot_positions(paper=paper)
+    positions = get_spot_positions()
     total_exposure = sum(
         float(p.get("qty", 0)) * float(p.get("entry", 0)) for p in positions
     )
@@ -457,7 +457,7 @@ async def everything_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     # 3. Daily Performance
     try:
-        today_trades = get_todays_trades(paper=paper)
+        today_trades = get_todays_trades()
         wins = len([t for t in today_trades if float(t.get("pnl_usd", 0)) > 0])
         total_pnl = sum(float(t.get("pnl_usd", 0)) for t in today_trades)
         perf_str = f"PnL: ${total_pnl:+.2f} | WR: {(wins / len(today_trades) * 100 if today_trades else 0):.1f}% ({len(today_trades)} trd)"

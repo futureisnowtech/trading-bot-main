@@ -26,7 +26,6 @@ def test_stl01_truth_service_hides_db_only_stale_from_live_open_counts(proof_run
         target=2050.0,
         high_since_entry=2000.0,
         ts_entry=datetime.now().isoformat(),
-        paper=False,
         direction="LONG",
         leverage=1,
         spot_regime="TREND",
@@ -39,7 +38,6 @@ def test_stl01_truth_service_hides_db_only_stale_from_live_open_counts(proof_run
     )
 
     truth = get_spot_position_truth(
-        paper=False,
         broker_holdings=[],
         db_path=str(proof_runtime.db_path),
     )
@@ -57,7 +55,6 @@ def test_stl02_truth_service_marks_seeded_manual_holdings_visible(proof_runtime)
     from runtime.spot_position_truth import get_spot_position_truth
 
     truth = get_spot_position_truth(
-        paper=False,
         broker_holdings=[
             {
                 "symbol": "ETH",
@@ -90,7 +87,7 @@ def test_stl03_open_spot_allows_external_manual_same_symbol(monkeypatch):
     monkeypatch.setattr(
         spot_engine,
         "get_spot_symbol_truth",
-        lambda symbol, paper=True: {"position_truth_status": "external_manual"},
+        lambda symbol: {"position_truth_status": "external_manual"},
     )
     # Mock subsequent blocks so we can see it passed the external_manual gate
     monkeypatch.setattr(
@@ -99,7 +96,7 @@ def test_stl03_open_spot_allows_external_manual_same_symbol(monkeypatch):
         lambda *args, **kwargs: ("mock_blocked_after_manual_gate", 0.0),
     )
 
-    result = spot_engine.open_spot("BTC", 50.0, paper=False, final_spot_score=72.0)
+    result = spot_engine.open_spot("BTC", 50.0, final_spot_score=72.0)
     # It should NOT be None from the manual block, but proceed to next gates
     assert result is None
     # Verify it reached our mock block instead of the original manual block
@@ -114,7 +111,7 @@ def test_stl03b_open_spot_halts_on_paper_like_live_order(monkeypatch):
     monkeypatch.setattr(config, "SPOT_LANE_ACTIVE", True, raising=False)
     monkeypatch.setattr(config, "SPOT_SYMBOLS", ["BTC", "ETH", "SOL", "XRP"], raising=False)
     monkeypatch.setattr(config, "SPOT_MIN_ORDER_USD", 10.0, raising=False)
-    monkeypatch.setattr(config, "PAPER_TRADING", False, raising=False)
+    monkeypatch.setattr(config, "False", False, raising=False)
     spot_engine._load_config()
 
     class _Broker:
@@ -126,7 +123,7 @@ def test_stl03b_open_spot_halts_on_paper_like_live_order(monkeypatch):
 
     halted = {}
 
-    monkeypatch.setattr(spot_engine, "get_spot_symbol_truth", lambda symbol, paper=True: None)
+    monkeypatch.setattr(spot_engine, "get_spot_symbol_truth", lambda symbol: None)
     monkeypatch.setattr(spot_engine, "_load_spot_positions_from_db", lambda paper=False: [])
     monkeypatch.setattr(spot_engine, "_get_broker", lambda paper: _Broker())
     monkeypatch.setattr(spot_engine, "_resolve_spot_state", lambda symbol, allow_stale=False: {
@@ -165,7 +162,7 @@ def test_stl03b_open_spot_halts_on_paper_like_live_order(monkeypatch):
         lambda reason, detail=None: halted.setdefault("payload", (reason, detail)) or True,
     )
 
-    result = spot_engine.open_spot("BTC", 50.0, paper=False, final_spot_score=72.0)
+    result = spot_engine.open_spot("BTC", 50.0, final_spot_score=72.0)
     assert result is None
     assert halted["payload"][0] == "ks_spot_mixed_mode_order_artifact"
     assert halted["payload"][1]["order_id"] == "spot_paper_BTC_123"
@@ -187,7 +184,6 @@ def test_stl04_close_spot_live_residual_repersists_position(
         target=2050.0,
         high_since_entry=2002.0,
         ts_entry=datetime.now().isoformat(),
-        paper=False,
         direction="LONG",
         leverage=1,
         spot_regime="TREND",
@@ -225,9 +221,9 @@ def test_stl04_close_spot_live_residual_repersists_position(
     )
     monkeypatch.setattr(ks, "trigger_spot_halt", lambda reason, detail=None: True)
     import config
-    monkeypatch.setattr(config, "PAPER_TRADING", False)
+    monkeypatch.setattr(config, "False", False)
 
-    closed = spot_engine.close_spot("ETH", paper=False, exit_reason="thesis_decay")
+    closed = spot_engine.close_spot("ETH", exit_reason="thesis_decay")
     assert closed is not None
 
     with sqlite3.connect(str(proof_runtime.db_path)) as conn:
@@ -295,7 +291,7 @@ def test_stl06_spot_kill_switch_halts_on_truth_blocker(
         },
     )
 
-    halt, reason = ks.check_spot_kill_switch(paper=False)
+    halt, reason = ks.check_spot_kill_switch()
     assert halt is True
     assert reason == "ks_spot_truth_blocker"
 

@@ -227,7 +227,7 @@ def render_status_hero():
             if source == "live_tws":
                 return "<span style='color:#4ade80;font-size:0.72em;font-weight:700;'>● LIVE TWS</span>"
             if source == "paper_computed":
-                return "<span style='color:#60a5fa;font-size:0.72em;font-weight:700;'>● PAPER</span>"
+                return "<span style='color:#60a5fa;font-size:0.72em;font-weight:700;'>● LIVE</span>"
             if source == "disabled":
                 return "<span style='color:#475569;font-size:0.72em;'>DISABLED</span>"
             return "<span style='color:#f87171;font-size:0.72em;'>● UNAVAILABLE</span>"

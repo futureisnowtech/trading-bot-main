@@ -33,7 +33,7 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import (
-    PAPER_TRADING, MARKET_TIMEZONE,
+    MARKET_TIMEZONE,
     BINANCE_API_KEY, BINANCE_API_SECRET, BINANCE_TESTNET,
     PERP_MAX_LEVERAGE, PERP_POSITION_SIZE_USD,
     BINANCE_TAKER_FEE_PCT, BINANCE_MAKER_FEE_PCT,
@@ -79,14 +79,11 @@ class BinanceBroker:
     def connect(self) -> bool:
         if not BINANCE_AVAILABLE:
             print("[BinanceBroker] python-binance not installed — run: pip install python-binance")
-            print("[BinanceBroker] Falling back to simulated paper mode")
-            self._connected = True
-            return True
+            return False
 
         if not BINANCE_API_KEY or not BINANCE_API_SECRET:
-            print("[BinanceBroker] API credentials not set — simulated paper mode")
-            self._connected = True
-            return True
+            print("[BinanceBroker] API credentials not set")
+            return False
 
         try:
             if BINANCE_TESTNET:
@@ -114,9 +111,7 @@ class BinanceBroker:
 
         except Exception as e:
             print(f"[BinanceBroker] Connection error: {e}")
-            print("[BinanceBroker] Falling back to simulated paper mode")
-            self._connected = True
-            return True
+            return False
 
     def is_connected(self) -> bool:
         return self._connected
@@ -133,9 +128,8 @@ class BinanceBroker:
         strategy: str = 'crypto_perp',
     ) -> Optional[dict]:
         """Open a leveraged LONG position on a USD-M perp."""
-        if PAPER_TRADING or not self._client:
-            return self._paper_open(symbol, 'LONG', size_usd, leverage,
-                                    stop_pct, take_profit_pct, strategy)
+        if not self._client:
+            return None
         try:
             price = self._get_mark_price(symbol)
             if not price:
@@ -174,7 +168,7 @@ class BinanceBroker:
             log_trade(
                 strategy=strategy, broker='binance',
                 symbol=symbol, action='BUY', order_type='LIMIT',
-                qty=qty, price=fill_price, fee_usd=fee, paper=False,
+                qty=qty, price=fill_price, fee_usd=fee,
                 order_id=str(order_id),
                 notes=f"LONG lev={leverage}x SL={stop:.4f} TP={target:.4f}"
             )
@@ -198,9 +192,8 @@ class BinanceBroker:
         strategy: str = 'crypto_perp',
     ) -> Optional[dict]:
         """Open a leveraged SHORT position on a USD-M perp."""
-        if PAPER_TRADING or not self._client:
-            return self._paper_open(symbol, 'SHORT', size_usd, leverage,
-                                    stop_pct, take_profit_pct, strategy)
+        if not self._client:
+            return None
         try:
             price = self._get_mark_price(symbol)
             if not price:
@@ -237,7 +230,7 @@ class BinanceBroker:
             log_trade(
                 strategy=strategy, broker='binance',
                 symbol=symbol, action='SELL', order_type='LIMIT',
-                qty=qty, price=fill_price, fee_usd=fee, paper=False,
+                qty=qty, price=fill_price, fee_usd=fee,
                 order_id=str(order_id),
                 notes=f"SHORT lev={leverage}x SL={stop:.4f} TP={target:.4f}"
             )
@@ -265,21 +258,10 @@ class BinanceBroker:
         """
         pos = self._open_positions.get(symbol)
         if not pos:
-            if PAPER_TRADING and pos_fallback:
-                # Bot restarted: broker lost in-memory state. Reconstruct from risk manager pos.
-                from config import PERP_MAX_LEVERAGE as _LEV
-                self._open_positions[symbol] = {
-                    'entry':    pos_fallback['entry'],
-                    'side':     pos_fallback.get('direction', 'LONG'),
-                    'qty':      pos_fallback.get('qty', 0),
-                    'leverage': _LEV,
-                    'size_usd': pos_fallback.get('qty', 0) * pos_fallback['entry'],
-                }
-            else:
-                return None
+            return None
 
-        if PAPER_TRADING or not self._client:
-            return self._paper_close(symbol, strategy, reason)
+        if not self._client:
+            return None
 
         try:
             # Cancel all open conditional orders for this symbol first
@@ -309,8 +291,7 @@ class BinanceBroker:
             log_trade(
                 strategy=strategy, broker='binance',
                 symbol=symbol, action=close_side, order_type='MARKET',
-                qty=pos['qty'], price=exit_price, fee_usd=fee, pnl_usd=pnl,
-                paper=False, notes=f"reason={reason}"
+                qty=pos['qty'], price=exit_price, fee_usd=fee, pnl_usd=pnl, notes=f"reason={reason}"
             )
             alert_trade_closed(strategy, symbol, pos['side'],
                                pos['qty'], pos['entry'], exit_price, pnl, reason)
@@ -562,82 +543,6 @@ class BinanceBroker:
             )
         except Exception as e:
             print(f"[BinanceBroker] set_take_profit {symbol}: {e}")
-
-    # ─── Paper trading ────────────────────────────────────────────────────────
-
-    def _paper_open(self, symbol, side, size_usd, leverage,
-                    stop_pct, take_profit_pct, strategy) -> dict:
-        price = self._get_mark_price(symbol) or 0
-        if not price:
-            print(f"[PAPER PERP] No price for {symbol} — paper trade skipped")
-            return {}
-
-        qty = round(size_usd / price, 6)
-        if side == 'LONG':
-            stop = price * (1 - stop_pct)
-            target = price * (1 + take_profit_pct)
-        else:
-            stop = price * (1 + stop_pct)
-            target = price * (1 - take_profit_pct)
-
-        fee = size_usd * BINANCE_TAKER_FEE_PCT
-        order_id = f'PAPER_{uuid.uuid4().hex[:8]}'
-
-        self._open_positions[symbol] = {
-            'side': side, 'qty': qty, 'entry': price,
-            'stop': stop, 'target': target,
-            'leverage': leverage, 'size_usd': size_usd,
-            'order_id': order_id,
-        }
-
-        action = 'BUY' if side == 'LONG' else 'SELL'
-        log_trade(
-            strategy=strategy, broker='binance_paper',
-            symbol=symbol, action=action, order_type='MARKET',
-            qty=qty, price=price, fee_usd=fee, paper=True,
-            order_id=order_id,
-            notes=f"{side} lev={leverage}x SL={stop:.4f} TP={target:.4f} notional=${size_usd:.0f}"
-        )
-
-        emoji = '🟢' if side == 'LONG' else '🔴'
-        print(f"[PAPER PERP] {emoji} {side} {qty:.4f} {symbol} @ {price:.4f} "
-              f"lev={leverage}x | SL={stop:.4f} TP={target:.4f}")
-        alert_trade_opened(strategy, symbol, action, qty, price, stop, target)
-        return {'paper': True, 'price': price, 'qty': qty}
-
-    def _paper_close(self, symbol, strategy, reason) -> dict:
-        pos = self._open_positions.pop(symbol, {})
-        if not pos:
-            return {}
-
-        entry = pos['entry']
-        exit_price = self._get_mark_price(symbol) or entry
-        side = pos.get('side', 'LONG')
-        qty = pos.get('qty', 0)
-        leverage = pos.get('leverage', 1)
-        size_usd = pos.get('size_usd', qty * entry)
-
-        if side == 'LONG':
-            pnl = (exit_price - entry) * qty * leverage
-        else:
-            pnl = (entry - exit_price) * qty * leverage
-
-        fee = size_usd * BINANCE_TAKER_FEE_PCT
-        close_action = 'SELL' if side == 'LONG' else 'BUY'
-
-        log_trade(
-            strategy=strategy, broker='binance_paper',
-            symbol=symbol, action=close_action, order_type='MARKET',
-            qty=qty, price=exit_price, fee_usd=fee, pnl_usd=pnl,
-            paper=True, order_id=f'PAPER_{uuid.uuid4().hex[:8]}',
-            notes=f"reason={reason}"
-        )
-
-        emoji = '🟢' if pnl >= 0 else '🔴'
-        print(f"[PAPER PERP] {emoji} CLOSE {side} {symbol} @ {exit_price:.4f} | P&L: ${pnl:+.2f} | {reason}")
-        alert_trade_closed(strategy, symbol, close_action, qty, entry, exit_price, pnl, reason)
-        return {'paper': True, 'pnl': pnl}
-
 
 # ─── Singleton ────────────────────────────────────────────────────────────────
 _binance_broker: Optional[BinanceBroker] = None

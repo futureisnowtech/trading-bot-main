@@ -79,7 +79,6 @@ def test_sli01_spot_close_persists_learning_and_tv_lineage(proof_runtime, monkey
     result = spot_engine.open_spot(
         "ETH",
         100.0,
-        paper=True,
         composite_score=70.0,
         final_spot_score=72.0,
         tv_context={
@@ -110,7 +109,7 @@ def test_sli01_spot_close_persists_learning_and_tv_lineage(proof_runtime, monkey
     assert row[2] == "algobot_htf_v2"
     assert row[3] == "LONG"
 
-    closed = spot_engine.close_spot("ETH", paper=True, exit_reason="target_hit")
+    closed = spot_engine.close_spot("ETH", exit_reason="target_hit")
     assert closed is not None
 
     with sqlite3.connect(str(proof_runtime.db_path)) as conn:

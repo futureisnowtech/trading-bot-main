@@ -16,9 +16,8 @@ _DASHBOARD_DIR = os.path.dirname(_DASH_DIR)
 if _DASHBOARD_DIR not in sys.path:
     sys.path.insert(0, _DASHBOARD_DIR)
 
-from db import _q, _q1, _runtime_paper_flag
-
-_TS_NORM = "datetime(replace(substr(ts,1,19),'T',' '))"
+from db import _q, _q1
+TS_NORM = "datetime(replace(substr(ts,1,19),'T',' '))"
 
 
 def _cutoff(hours: int) -> str:
@@ -46,9 +45,7 @@ def get_stock_header() -> dict:
 
     # Runtime mode
     try:
-        from db import _runtime_paper_flag
-
-        result["mode_label"] = "PAPER" if _runtime_paper_flag() else "LIVE"
+        result["mode_label"] = "PAPER" if False else "LIVE"
     except Exception:
         pass
 
@@ -58,7 +55,7 @@ def get_stock_header() -> dict:
         "WHERE lane_id='stocks' ORDER BY id DESC LIMIT 1"
     )
     result["connected"] = bool(lane.get("connected"))
-    live_mode = not bool(_runtime_paper_flag())
+    live_mode = not bool(False)
 
     # PDT count (day trades open+close same day in last 7 days)
     pdt_rows = _q(
@@ -127,13 +124,13 @@ def get_stock_positions() -> list[dict]:
     live_positions = _get_live_stock_positions()
     if live_positions is not None:
         return _merge_live_stock_rows(live_positions, rows or [])
-    if not _runtime_paper_flag():
+    if not False:
         return []
     return rows or []
 
 
 def _get_live_stock_positions() -> dict | None:
-    if _runtime_paper_flag():
+    if False:
         return None
     try:
         from execution.ibkr_stock_broker import get_dashboard_stock_broker

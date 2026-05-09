@@ -17,7 +17,6 @@ import pytz
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import (
-    PAPER_TRADING,
     ACCOUNT_SIZE,
     MARKET_TIMEZONE,
     MAX_DAILY_LOSS_PCT,
@@ -139,33 +138,32 @@ def _load_data() -> dict:
     risk = rm.status_report()
     pos = rm.get_all_positions()
 
-    at = get_all_time_stats(paper=PAPER_TRADING)
-    td = get_today_stats(paper=PAPER_TRADING)
+    at = get_all_time_stats()
+    td = get_today_stats()
     try:
         from runtime.live_account import get_live_account_size
 
-        _base = float(get_live_account_size(paper=PAPER_TRADING))
+        _base = float(get_live_account_size())
     except Exception:
         _base = float(ACCOUNT_SIZE)
     real_balance = _base + at.get("total_pnl", 0)
 
     return {
-        "paper": PAPER_TRADING,
         "balance": real_balance,
-        "pnl_today": get_todays_pnl(paper=PAPER_TRADING),
-        "fees_today": get_todays_fees(paper=PAPER_TRADING),
+        "pnl_today": get_todays_pnl(),
+        "fees_today": get_todays_fees(),
         "halted": risk.get("halted", False),
         "halt_reason": risk.get("halt_reason", ""),
         "deployed_usd": risk.get("deployed_usd", 0),
         "eq_positions": pos.get("equity", {}),
         "cr_positions": pos.get("crypto", {}),
-        "eq_trades_today": get_daily_trade_count("equity_momentum", PAPER_TRADING),
+        "eq_trades_today": get_daily_trade_count("equity_momentum"),
         "cr_trades_today": get_daily_trade_count(
-            "crypto_macd_consensus", PAPER_TRADING
+            "crypto_macd_consensus"
         ),
         "all_time": at,
         "today": td,
-        "recent_trades": get_recent_trades(limit=5, paper=PAPER_TRADING),
+        "recent_trades": get_recent_trades(limit=5),
         "signals": get_todays_signals()[:5],
         "last_debate": (get_recent_debates(limit=1) or [None])[0],
         "events": get_recent_events(limit=6),
@@ -178,7 +176,7 @@ def _load_data() -> dict:
 
 
 def _top_bar(d: dict) -> list:
-    mode = f"{GOLD}👑 PAPER{RST}" if d["paper"] else f"{YLW}💰 LIVE{RST}"
+    mode = f"{YLW}💰 LIVE{RST}"
     bal = f"{BOLD}${d['balance']:,.2f}{RST}"
     at = d["all_time"]
     pnl_c = GRN if d["pnl_today"] >= 0 else RED

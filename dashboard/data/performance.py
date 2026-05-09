@@ -8,17 +8,11 @@ import db as _db
 
 _q = _db._q
 _q1 = _db._q1
-LAUNCH_DATE = _db.LAUNCH_DATE
-_runtime_paper_flag = _db._runtime_paper_flag
-get_current_strategy_start_date = getattr(
+LAUNCH_DATE = _db.LAUNCH_DATE= _db.get_current_strategy_start_date = getattr(
     _db,
     "get_current_strategy_start_date",
     lambda normalized=True: LAUNCH_DATE if normalized else LAUNCH_DATE,
 )
-
-
-def _paper_flag() -> int:
-    return _runtime_paper_flag()
 
 
 def _metrics_start(*, current_only: bool = False) -> str:
@@ -42,10 +36,10 @@ def get_performance_stats(*, current_only: bool = False):
             AVG(CASE WHEN won=1 THEN pnl_usd - fee_usd END)  AS avg_win,
             AVG(CASE WHEN won=0 THEN ABS(pnl_usd - fee_usd) END) AS avg_loss
         FROM trades
-        WHERE ts >= ? AND paper=? AND broker NOT LIKE '%bybit%'
+        WHERE ts >= ? AND paper=0 AND broker NOT LIKE '%bybit%'
           AND (source IS NULL OR source NOT IN ('backtest','pre_v10_contaminated','bybit_paper'))
           AND (notes IS NULL OR notes NOT LIKE '%force_test_close%')""",
-        (_metrics_start(current_only=current_only), _paper_flag()),
+        (_metrics_start(current_only=current_only),),
     )
     closes = r.get("closes") or 0
     wins = r.get("wins") or 0
@@ -84,10 +78,10 @@ def get_rolling_pf(days=7, *, current_only: bool = False):
             COUNT(CASE WHEN won IS NOT NULL THEN 1 END) AS closes,
             SUM(CASE WHEN won=1 THEN 1 ELSE 0 END) AS wins
         FROM trades
-        WHERE ts >= ? AND paper=? AND broker NOT LIKE '%bybit%'
+        WHERE ts >= ? AND paper=0 AND broker NOT LIKE '%bybit%'
           AND (source IS NULL OR source NOT IN ('backtest','pre_v10_contaminated','bybit_paper'))
           AND (notes IS NULL OR notes NOT LIKE '%force_test_close%')""",
-        (cutoff, _paper_flag()),
+        (cutoff,),
     )
     gw = r.get("gw") or 0.0
     gl = r.get("gl") or 0.0
@@ -111,12 +105,12 @@ def get_per_symbol_stats(*, current_only: bool = False):
             ROUND(MAX(pnl_usd), 2) AS best,
             ROUND(MIN(pnl_usd), 2) AS worst
         FROM trades
-        WHERE ts >= ? AND paper=? AND broker NOT LIKE '%bybit%'
+        WHERE ts >= ? AND paper=0 AND broker NOT LIKE '%bybit%'
           AND pnl_usd != 0
           AND (source IS NULL OR source NOT IN ('backtest','pre_v10_contaminated','bybit_paper'))
           AND (notes IS NULL OR notes NOT LIKE '%force_test_close%')
         GROUP BY symbol ORDER BY total_pnl DESC""",
-        (_metrics_start(current_only=current_only), _paper_flag()),
+        (_metrics_start(current_only=current_only),),
     )
 
 

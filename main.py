@@ -1,7 +1,7 @@
 """
 main.py — Entry point for the Algo Trading System.
 Usage:
-  python main.py              # Full system (reads PAPER_TRADING from .env)
+  python main.py              # Full system (reads False from .env)
   python main.py --mode paper # Force paper trading
   python main.py --mode live  # Force live (requires typed confirmation)
   python main.py --crypto-only
@@ -65,8 +65,7 @@ BANNER = """
 
 def parse_args():
     p = argparse.ArgumentParser()
-    # v18.17: Support --mode for boot.py compatibility; default to env or paper.
-    p.add_argument("--mode", choices=["paper", "live"], help="Force trading mode")
+    # v18.17: System is strictly LIVE. --mode removed.
     p.add_argument("--equity-only", action="store_true")
     p.add_argument("--crypto-only", action="store_true")
     p.add_argument("--no-alerts", action="store_true")
@@ -79,12 +78,7 @@ def main():
 
     import system_state
 
-    # Priority: 1. CLI flag, 2. Env var, 3. Default paper
-    if args.mode:
-        os.environ["PAPER_TRADING"] = "false" if args.mode == "live" else "true"
-
     from config import (
-        PAPER_TRADING,
         ACCOUNT_SIZE,
         MARKET_TIMEZONE,
         ANTHROPIC_API_KEY,
@@ -102,14 +96,14 @@ def main():
         STOCKS_DASHBOARD_VISIBLE,
     )
 
-    system_state.state.set_mode("LIVE" if not PAPER_TRADING else "PAPER")
+    system_state.state.set_mode("LIVE")
 
     tz = pytz.timezone(MARKET_TIMEZONE)
-    mode = "📄 PAPER" if PAPER_TRADING else "💰 LIVE"
+    mode = "💰 LIVE"
     try:
         from runtime.live_account import get_live_account_size
 
-        account_display = float(get_live_account_size(paper=PAPER_TRADING))
+        account_display = float(get_live_account_size())
     except Exception:
         account_display = float(ACCOUNT_SIZE)
 
@@ -117,7 +111,7 @@ def main():
     assert 0 < MAX_RISK_PER_TRADE_PCT <= 0.10, (
         f"MAX_RISK_PER_TRADE_PCT={MAX_RISK_PER_TRADE_PCT} out of safe range (0–10%)"
     )
-    _daily_loss_cap = 1.00 if PAPER_TRADING else 0.15  # paper: no learning-halt cap
+    _daily_loss_cap = 0.15  # live: 15% safety cap for accidental loss
     assert 0 < MAX_DAILY_LOSS_PCT <= _daily_loss_cap, (
         f"MAX_DAILY_LOSS_PCT={MAX_DAILY_LOSS_PCT} out of safe range"
     )
@@ -132,19 +126,18 @@ def main():
     )
     print(f"  Time:       {datetime.now(tz).strftime('%Y-%m-%d %H:%M:%S ET')}\n")
 
-    if not PAPER_TRADING:
-        print("=" * 60)
-        print("  ⚠️  LIVE TRADING — Real money will be deployed")
-        print(f"  Account: ${account_display}")
-        print("=" * 60)
-        auto_confirm = os.environ.get("ALGO_LIVE_CONFIRM", "").strip()
-        if auto_confirm == "I UNDERSTAND":
-            print("  Live launch confirmation received from controlled launcher.\n")
-        else:
-            resp = input("\n  Type 'I UNDERSTAND' to confirm: ").strip()
-            if resp != "I UNDERSTAND":
-                print("Cancelled.")
-                sys.exit(0)
+    print("=" * 60)
+    print("  ⚠️  LIVE TRADING — Real money will be deployed")
+    print(f"  Account: ${account_display}")
+    print("=" * 60)
+    auto_confirm = os.environ.get("ALGO_LIVE_CONFIRM", "").strip()
+    if auto_confirm == "I UNDERSTAND":
+        print("  Live launch confirmation received from controlled launcher.\n")
+    else:
+        resp = input("\n  Type 'I UNDERSTAND' to confirm: ").strip()
+        if resp != "I UNDERSTAND":
+            print("Cancelled.")
+            sys.exit(0)
 
     print("📦 Initializing database...")
     from logging_db.trade_logger import init_db, log_event
@@ -166,7 +159,7 @@ def main():
     init_runtime_tables(_db_path)
     init_incident_table(_db_path)
 
-    _rt_mode = "live" if not PAPER_TRADING else "paper"
+    _rt_mode = "live" if not False else "paper"
     upsert_system_state(
         db_path=_db_path,
         process_mode=_rt_mode,
@@ -317,7 +310,7 @@ def main():
     log_event(
         "INFO",
         "main",
-        f"Bot started — {'paper' if PAPER_TRADING else 'live'} mode {VERSION}",
+        f"Bot started — {'paper' if False else 'live'} mode {VERSION}",
     )
 
     # ── Forecast lane (optional daemon thread) ────────────────────────────────

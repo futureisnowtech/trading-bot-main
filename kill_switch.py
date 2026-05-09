@@ -6,11 +6,10 @@ Tripwires (any one triggers full halt):
   2. 5+ API errors in 10 minutes
   3. Latency > 5 seconds (measured from order send to fill ack)
 
-Balance kill-threshold policy (operator-approved 2026-04-15):
-  PAPER mode : balance < 75% of initial balance (ACCOUNT_SIZE)
-  LIVE mode  : balance < 50% of live_baseline
-               live_baseline = first valid live balance seen at runtime
-               (~$1,966 live funded account → threshold ~$983)
+Balance kill-threshold policy:
+  balance < 50% of live_baseline
+  live_baseline = first valid live balance seen at runtime
+  (~$1,966 live funded account → threshold ~$983)
 
 On trigger:
   - Sets _halted = True (blocks all new entries in perps_engine / signal_engine)
@@ -44,12 +43,10 @@ _API_ERROR_THRESHOLD = 5  # 5 errors in window
 _last_latency_ms: float = 0.0
 _LATENCY_THRESHOLD_S = 5.0  # 5 seconds
 
-# Balance thresholds — operator-approved live policy (2026-04-15)
-_LIVE_KILL_PCT = 0.50  # live: 50% of live_baseline (loose, protects funded account)
-_PAPER_KILL_PCT = 0.75  # paper: 75% of initial balance (unchanged)
+# Balance thresholds — 50% of live_baseline
+_LIVE_KILL_PCT = 0.50
 
 # Live baseline — set on first valid live check_balance call.
-# Prevents false triggers from the stale ACCOUNT_SIZE config value.
 _live_baseline: float = 0.0
 
 
@@ -85,8 +82,7 @@ def _trigger(reason: str, balance: float = 0.0):
 
     _now_iso = datetime.now(timezone.utc).isoformat()
 
-    # Log to kill_switch_log (schema: id TEXT PK, ts TEXT, reason TEXT, balance REAL,
-    # peak_balance REAL, positions_closed INT, resumed_at TEXT, trigger_type TEXT)
+    # Log to kill_switch_log
     try:
         from logging_db.trade_logger import get_logger
 
@@ -103,8 +99,7 @@ def _trigger(reason: str, balance: float = 0.0):
     except Exception as e:
         logger.debug(f"[kill_switch] DB log error: {e}")
 
-    # Also write to system_events so dashboard can see the trigger without
-    # needing to query kill_switch_log separately.
+    # Also write to system_events
     try:
         from logging_db.trade_logger import log_event
 
@@ -131,8 +126,6 @@ def set_live_baseline(amount: float) -> None:
     """
     Explicitly set the live funded account baseline.
     Call once at live startup with the actual Coinbase balance.
-    If not called, the baseline is set automatically on the first valid
-    check_balance(paper=False) call with current_balance > 50.
     """
     global _live_baseline
     with _lock:
@@ -142,17 +135,14 @@ def set_live_baseline(amount: float) -> None:
 
 
 def check_balance(
-    current_balance: float, initial_balance: float | None = None, paper: bool = True
+    current_balance: float, initial_balance: float | None = None
 ):
     """
     Check if balance has fallen below kill threshold.
     Call this on every P&L update.
 
-    Kill-threshold policy (operator-approved 2026-04-15):
-      paper=True  → threshold = initial_balance * 0.75
-      paper=False → threshold = live_baseline * 0.50
-                    live_baseline set on first valid call (auto-established from
-                    first broker-reported balance; ~$1,966 → threshold ~$983)
+    Kill-threshold policy:
+      threshold = live_baseline * 0.50
     """
     global _live_baseline
 
@@ -160,27 +150,24 @@ def check_balance(
         try:
             from runtime.live_account import get_live_account_size
 
-            initial_balance = float(get_live_account_size(paper=paper))
+            initial_balance = float(get_live_account_size())
         except Exception:
             initial_balance = 5000.0
 
     if is_halted():
         return
 
-    if paper:
-        threshold = initial_balance * _PAPER_KILL_PCT
-        baseline_desc = f"75% of initial ${initial_balance:.0f}"
-    else:
-        # Live mode: establish baseline from first valid balance if not yet set
-        with _lock:
-            if _live_baseline <= 0.0 and current_balance > 50.0:
-                _live_baseline = current_balance
-                logger.info(
-                    f"[kill_switch] live_baseline auto-set to ${_live_baseline:.2f}"
-                )
-            baseline = _live_baseline if _live_baseline > 0.0 else float(initial_balance)
-        threshold = baseline * _LIVE_KILL_PCT
-        baseline_desc = f"50% of live baseline ${baseline:.2f}"
+    # Establish baseline from first valid balance if not yet set
+    with _lock:
+        if _live_baseline <= 0.0 and current_balance > 50.0:
+            _live_baseline = current_balance
+            logger.info(
+                f"[kill_switch] live_baseline auto-set to ${_live_baseline:.2f}"
+            )
+        baseline = _live_baseline if _live_baseline > 0.0 else float(initial_balance)
+    
+    threshold = baseline * _LIVE_KILL_PCT
+    baseline_desc = f"50% of live baseline ${baseline:.2f}"
 
     if current_balance > 0 and current_balance < threshold:
         _trigger(
@@ -193,7 +180,6 @@ def check_balance(
 def record_api_error(error_msg: str = ""):
     """
     Record an API error. Triggers halt if 5+ errors in 10 minutes.
-    Call from perps_engine / binance_broker on any OrderRejected / timeout.
     """
     # 📊 Metrics
     try:
@@ -218,7 +204,6 @@ def record_api_error(error_msg: str = ""):
 def record_latency(latency_seconds: float):
     """
     Record order latency. Triggers halt if > 5 seconds.
-    Call after each order fill ack with (ack_ts - send_ts).
     """
     global _last_latency_ms
     _last_latency_ms = latency_seconds * 1000
@@ -264,8 +249,6 @@ def resume(reason: str = "manual"):
         from logging_db.trade_logger import get_logger
 
         db = get_logger()
-        # Schema: id TEXT PK, ts TEXT, reason TEXT, balance REAL, peak_balance REAL,
-        #         positions_closed INT, resumed_at TEXT, trigger_type TEXT
         db.conn.execute(
             """
             UPDATE kill_switch_log SET resumed_at=?

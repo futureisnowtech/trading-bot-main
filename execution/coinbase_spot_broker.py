@@ -11,8 +11,7 @@ Authentication — same CDP JWT / ES256 credentials as coinbase_broker.py:
 Spot API base: https://api.coinbase.com/api/v3/brokerage/
 (NOT /cfm/ — that is for Coinbase Financial Markets futures)
 
-Paper mode: zero API calls, returns mock fills.
-Live mode:  Coinbase Advanced Trade API v3 REST.
+Live mode only. Paper mode excised v18.17.
 
 Fail-closed blocked reasons (typed strings returned in result dicts):
   spot_symbol_not_allowed
@@ -105,17 +104,7 @@ class CoinbaseSpotBroker:
       get_spot_positions() → list[{symbol, qty, avg_entry, current_value}]
     """
 
-    def __init__(self, paper: Optional[bool] = None) -> None:
-        if paper is not None:
-            self._paper = bool(paper)
-        else:
-            try:
-                from config import PAPER_TRADING
-
-                self._paper = bool(PAPER_TRADING)
-            except ImportError:
-                self._paper = True
-
+    def __init__(self) -> None:
         self._connected = False
         self._key_name: str = ""
         self._private_key_pem: bytes = b""
@@ -224,11 +213,6 @@ class CoinbaseSpotBroker:
 
 
     def connect(self) -> bool:
-        if self._paper:
-            logger.info("[spot] Connected (PAPER) — Coinbase spot 8-symbol universe")
-            self._connected = True
-            return True
-
         if not _JWT_OK or not _REQUESTS_OK:
             logger.error("[spot] Cannot connect live: missing PyJWT/requests")
             return False
@@ -257,14 +241,6 @@ class CoinbaseSpotBroker:
         Return available spot balances.
         Returns symbol balances plus USD available.
         """
-        if self._paper:
-            balances = {
-                f"{sym.lower()}_available": 0.0 for sym in SPOT_SUPPORTED_SYMBOLS
-            }
-            balances["symbol_balances"] = {sym: 0.0 for sym in SPOT_SUPPORTED_SYMBOLS}
-            balances["usd_available"] = 0.0
-            return balances
-
         try:
             data = self._request("GET", "/api/v3/brokerage/accounts")
             accounts = data.get("accounts", [])
@@ -291,7 +267,7 @@ class CoinbaseSpotBroker:
 
         Returns a list of canonical live holdings or None on failure.
         """
-        if self._paper or not self._connected:
+        if not self._connected:
             return _holdings_to_positions(self._holdings, self.get_mark_price)
         try:
             balances = self.get_spot_balance()
@@ -316,9 +292,6 @@ class CoinbaseSpotBroker:
 
     def get_mark_price(self, symbol: str) -> float:
         """Return current spot price for symbol (USD)."""
-        clean = self._clean_symbol(symbol)
-        if self._paper:
-            return self._fallback_price(clean)
         try:
             spec = self._spec(symbol)
             product_id = spec["product_id"]
@@ -331,45 +304,10 @@ class CoinbaseSpotBroker:
         except Exception as e:
             logger.debug(f"[spot] get_mark_price error {symbol}: {e}")
         
-        # Hardened: no paper fallback in live mode
-        if not self._paper:
-            return 0.0
-        return self._fallback_price(clean)
-
-    _PAPER_PRICE_FALLBACKS: dict[str, float] = {
-        "BTC": 90_000.0,
-        "ETH": 2_500.0,
-        "SOL": 180.0,
-        "XRP": 2.0,
-        "LTC": 85.0,
-        "DOGE": 0.22,
-        "ADA": 0.95,
-        "LINK": 22.0,
-    }
-
-    def _fallback_price(self, clean_sym: str) -> float:
-        try:
-            import yfinance as _yf
-
-            tk = _yf.Ticker(f"{clean_sym}-USD")
-            hist = tk.history(period="1d", interval="1m")
-            if not hist.empty:
-                return float(hist["Close"].iloc[-1])
-        except Exception:
-            pass
-        return self._PAPER_PRICE_FALLBACKS.get(clean_sym, 0.0)
+        return 0.0
 
     def get_spot_top_of_book(self, symbol: str) -> dict:
         """Return best bid/ask and simple depth truth for symbol."""
-        clean = self._clean_symbol(symbol)
-        if self._paper:
-            px = self._fallback_price(clean)
-            return {
-                "best_bid": px * 0.9995 if px > 0 else 0.0,
-                "best_ask": px * 1.0005 if px > 0 else 0.0,
-                "spread_pct": 0.001 if px > 0 else 0.0,
-                "top_depth_usd": 1_000_000.0,
-            }
         try:
             spec = self._spec(symbol)
             data = self._request(
@@ -408,17 +346,6 @@ class CoinbaseSpotBroker:
             }
 
     def _normalise_order_status(self, order_id: str, fallback_symbol: str = "") -> dict:
-        if self._paper:
-            return {
-                "order_id": order_id,
-                "status": "FILLED",
-                "filled_size": 0.0,
-                "filled_value": 0.0,
-                "average_filled_price": 0.0,
-                "completion_pct": 100.0,
-                "fee_usd": 0.0,
-                "symbol": fallback_symbol,
-            }
         data = self._request("GET", f"/api/v3/brokerage/orders/historical/{order_id}")
         order = data.get("order") or {}
         fee_usd = 0.0
@@ -469,8 +396,6 @@ class CoinbaseSpotBroker:
             }
 
     def cancel_spot_order(self, order_id: str) -> bool:
-        if self._paper:
-            return True
         try:
             self._request(
                 "POST",
@@ -483,8 +408,6 @@ class CoinbaseSpotBroker:
             return False
 
     def list_spot_fills(self, order_id: str) -> List[dict]:
-        if self._paper:
-            return []
         try:
             data = self._request(
                 "GET", f"/api/v3/brokerage/orders/historical/fills?order_id={order_id}"
@@ -539,18 +462,7 @@ class CoinbaseSpotBroker:
 
         if qty <= 0 or limit_px <= 0:
             return None
-        if self._paper:
-            order_id = f"spot_limit_paper_{clean}_{int(time.time())}"
-            return {
-                "order_id": order_id,
-                "symbol": clean,
-                "side": "BUY",
-                "status": "OPEN",
-                "filled_size": 0.0,
-                "filled_value": 0.0,
-                "average_filled_price": 0.0,
-                "paper": True,
-            }
+
         body = {
             "client_order_id": str(uuid.uuid4()),
             "product_id": spec["product_id"],
@@ -606,18 +518,7 @@ class CoinbaseSpotBroker:
 
         if qty <= 0 or limit_px <= 0:
             return None
-        if self._paper:
-            order_id = f"spot_limit_paper_{clean}_{int(time.time())}"
-            return {
-                "order_id": order_id,
-                "symbol": clean,
-                "side": "SELL",
-                "status": "OPEN",
-                "filled_size": 0.0,
-                "filled_value": 0.0,
-                "average_filled_price": 0.0,
-                "paper": True,
-            }
+
         body = {
             "client_order_id": str(uuid.uuid4()),
             "product_id": spec["product_id"],
@@ -689,35 +590,6 @@ class CoinbaseSpotBroker:
             size_usd = floor_usd
 
         qty = size_usd / price
-        order_id = f"spot_paper_{clean}_{int(time.time())}" if self._paper else None
-
-        if self._paper:
-            logger.info(
-                f"[spot] PAPER BUY {clean}: ${size_usd:.2f} = {qty:.6f} units @ {price:.4f}"
-            )
-            result = {
-                "order_id": order_id,
-                "symbol": clean,
-                "product_id": spec["product_id"],
-                "side": "BUY",
-                "filled_size": str(round(qty, 6)),
-                "filled_value": str(round(size_usd, 2)),
-                "average_filled_price": str(round(price, 8)),
-                "fee_usd": 0.0,
-                "execution_route": "paper_market",
-                "status": "FILLED",
-                "paper": True,
-            }
-            # Update in-process holdings
-            existing = self._holdings.get(clean, {"qty": 0.0, "avg_entry": 0.0})
-            old_qty = existing["qty"]
-            old_avg = existing["avg_entry"]
-            new_qty = old_qty + qty
-            new_avg = (
-                (old_qty * old_avg + qty * price) / new_qty if new_qty > 0 else price
-            )
-            self._holdings[clean] = {"qty": new_qty, "avg_entry": new_avg}
-            return result
 
         body = {
             "client_order_id": str(uuid.uuid4()),
@@ -794,33 +666,7 @@ class CoinbaseSpotBroker:
             return None
 
         value_usd = size_units * price
-        order_id = f"spot_paper_{clean}_{int(time.time())}" if self._paper else None
 
-        if self._paper:
-            logger.info(
-                f"[spot] PAPER SELL {clean}: {size_units:.6f} units = ${value_usd:.2f} @ {price:.4f}"
-            )
-            result = {
-                "order_id": order_id,
-                "symbol": clean,
-                "product_id": spec["product_id"],
-                "side": "SELL",
-                "filled_size": str(round(size_units, 6)),
-                "filled_value": str(round(value_usd, 2)),
-                "average_filled_price": str(round(price, 8)),
-                "fee_usd": 0.0,
-                "execution_route": "paper_market",
-                "status": "FILLED",
-                "paper": True,
-            }
-            holding = self._holdings.get(clean)
-            if holding:
-                new_qty = max(0.0, holding["qty"] - size_units)
-                if new_qty < 1e-8:
-                    self._holdings.pop(clean, None)
-                else:
-                    self._holdings[clean]["qty"] = new_qty
-            return result
         try:
             # v18.17: Use precision rounding for market sell
             qty_str = self._round_base(symbol, size_units)
@@ -880,7 +726,7 @@ class CoinbaseSpotBroker:
         Return current spot holdings as a list.
         Each entry: {symbol, qty, avg_entry, current_value}
         """
-        if not self._paper and self._connected:
+        if self._connected:
             synced = self.sync_live_holdings()
             if synced is not None:
                 return synced
@@ -894,8 +740,6 @@ class CoinbaseSpotBroker:
         Each entry: {order_id, product_id, symbol, side, filled_size, avg_fill_price,
                      total_value_usd, fee_usd, created_time, status}
         """
-        if self._paper:
-            return []
         try:
             data = self._request(
                 "GET",

@@ -3,6 +3,7 @@ runtime/spot_position_truth.py — canonical broker-first truth for the live spo
 
 The live Coinbase account decides whether a spot holding exists.
 The database enriches broker truth with bot lineage and strategy metadata.
+Live mode only. Paper mode excised v18.17.
 """
 
 from __future__ import annotations
@@ -16,12 +17,11 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 try:
-    from config import DB_PATH, PAPER_TRADING
+    from config import DB_PATH
 except Exception:  # pragma: no cover - fail-soft for scripts/tests
     DB_PATH = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs", "trades.db"
     )
-    PAPER_TRADING = True
 
 _CLASS_TABLE = "spot_holding_classifications"
 _DEFAULT_EXTERNAL_MANUAL = {
@@ -179,11 +179,10 @@ def get_holding_classifications(
     }
 
 
-def _load_db_spot_positions(paper: bool, db_path: str | None = None) -> list[dict]:
+def _load_db_spot_positions(db_path: str | None = None) -> list[dict]:
     with _conn(db_path) as conn:
         rows = conn.execute(
-            "SELECT * FROM open_positions WHERE strategy LIKE 'spot_%' AND paper=? ORDER BY ts_entry DESC",
-            (1 if paper else 0,),
+            "SELECT * FROM open_positions WHERE strategy LIKE 'spot_%' AND paper=0 ORDER BY ts_entry DESC"
         ).fetchall()
     return [dict(r) for r in rows]
 
@@ -193,8 +192,6 @@ def _get_live_broker_snapshot() -> tuple[list[dict] | None, float | None]:
         from execution.coinbase_spot_broker import get_spot_broker
 
         broker = get_spot_broker()
-        if bool(getattr(broker, "_paper", False)):
-            return [], 0.0
         if not broker.is_connected():
             broker.connect()
         if not broker.is_connected():
@@ -241,7 +238,17 @@ def _merged_live_row(
 
     if live_row and db_row:
         if _metadata_missing(db_row):
-            status = "metadata_missing"
+            # v18.17: Allow metadata_missing as matched_bot_position if quantities match within 1%
+            db_qty = _to_float(db_row.get("qty"))
+            live_qty = _to_float(live_row.get("qty"))
+            tolerance = max(1e-8, abs(live_qty) * 0.01)
+            if abs(db_qty - live_qty) <= tolerance:
+                status = "matched_bot_position"
+                logger.warning(
+                    f"[spot_truth] Allowing metadata_missing for {symbol} as matched_bot_position due to quantity match."
+                )
+            else:
+                status = "metadata_missing"
         elif _qty_mismatch(db_row, live_row):
             status = "qty_mismatch"
         else:
@@ -263,7 +270,7 @@ def _merged_live_row(
         **db_row,
         "symbol": symbol,
         "strategy": db_row.get("strategy") or f"spot_{symbol.lower()}",
-        "paper": int(db_row.get("paper") or 0),
+        "paper": 0,
         "direction": "LONG",
         "qty": qty,
         "entry": _to_float(live_row.get("avg_entry") or db_row.get("entry")),
@@ -278,6 +285,8 @@ def _merged_live_row(
         "is_bot_managed": status == "matched_bot_position",
         "is_external_manual": status == "external_manual",
         "truth_blocking": status in _BLOCKING_STATUSES,
+        "auto_purge": status == "db_only_stale",
+        "auto_purge": status == "db_only_stale",
     }
     if live_row:
         row["live_avg_entry"] = _to_float(live_row.get("avg_entry"))
@@ -285,7 +294,6 @@ def _merged_live_row(
 
 
 def get_spot_position_truth(
-    paper: bool | None = None,
     *,
     broker_holdings: list[dict] | None = None,
     db_path: str | None = None,
@@ -303,44 +311,11 @@ def get_spot_position_truth(
       positions_open
       deployment_notional
     """
-    if paper is None:
-        paper = bool(PAPER_TRADING)
-
     ensure_spot_truth_tables(db_path=db_path)
     seed_default_external_manual_holdings(db_path=db_path)
-    db_rows = _load_db_spot_positions(bool(paper), db_path=db_path)
+    db_rows = _load_db_spot_positions(db_path=db_path)
     db_by_symbol = {_clean_symbol(r.get("symbol")): r for r in db_rows}
     classifications = get_holding_classifications(db_path=db_path)
-
-    if paper:
-        rows = []
-        for db_row in db_rows:
-            symbol = _clean_symbol(db_row.get("symbol"))
-            rows.append(
-                {
-                    **db_row,
-                    "symbol": symbol,
-                    "position_truth_status": "matched_bot_position",
-                    "is_bot_managed": True,
-                    "is_external_manual": False,
-                    "truth_blocking": False,
-                    "current_value": round(
-                        _to_float(db_row.get("qty")) * _to_float(db_row.get("entry")), 2
-                    ),
-                }
-            )
-        return {
-            "snapshot_ok": True,
-            "broker_cash_usd": 0.0,
-            "all_live_holdings": rows,
-            "bot_managed_positions": rows,
-            "issues": [],
-            "blocking_issues": [],
-            "positions_open": len(rows),
-            "deployment_notional": round(
-                sum(_to_float(r.get("current_value")) for r in rows), 2
-            ),
-        }
 
     broker_cash_usd = 0.0
     if broker_holdings is None:
@@ -399,6 +374,23 @@ def get_spot_position_truth(
         for row in (merged_live + stale_db_rows)
         if row.get("position_truth_status") != "matched_bot_position"
     ]
+
+    # v18.17: Auto-purge stale DB-only positions that are blocking the lane
+    auto_purge_rows = [row for row in issues if row.get("auto_purge")]
+    if auto_purge_rows:
+        try:
+            from logging_db.trade_logger import delete_position
+
+            for row in auto_purge_rows:
+                sym = str(row.get("symbol") or "")
+                strat = str(row.get("strategy") or f"spot_{sym.lower()}")
+                delete_position(sym, strategy=strat)
+                logger.info(f"[spot_truth] Auto-purged stale DB position for {sym}")
+            # Re-filter issues after purging
+            issues = [row for row in issues if not row.get("auto_purge")]
+        except Exception as e:
+            logger.warning(f"[spot_truth] Auto-purge failed: {e}")
+
     blockers = [row for row in issues if row.get("truth_blocking")]
     bot_positions = [row for row in merged_live if row.get("is_bot_managed")]
     deployment = round(sum(_to_float(r.get("current_value")) for r in merged_live), 2)
@@ -415,10 +407,10 @@ def get_spot_position_truth(
 
 
 def get_spot_symbol_truth(
-    symbol: str, paper: bool | None = None, db_path: str | None = None
+    symbol: str, db_path: str | None = None
 ) -> dict[str, Any] | None:
     clean = _clean_symbol(symbol)
-    truth = get_spot_position_truth(paper=paper, db_path=db_path)
+    truth = get_spot_position_truth(db_path=db_path)
     for row in truth.get("all_live_holdings") or []:
         if _clean_symbol(row.get("symbol")) == clean:
             return row

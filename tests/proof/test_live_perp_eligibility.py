@@ -201,21 +201,21 @@ def _run_attempt_entry_gate(symbol: str, paper: bool) -> str:
 
 
 # def test_lp02_btc_passes_autonomous_gate_in_live_mode():
-    decision = _run_attempt_entry_gate("BTC", paper=False)
+    decision = _run_attempt_entry_gate("BTC")
     assert decision != "not_autonomous_live_eligible", (
         f"BTC live must NOT be blocked by autonomous gate, got {decision!r}"
     )
 
 
 # def test_lp03_sol_long_prefers_symbol_specific_spot_in_live_mode():
-    decision = _run_attempt_entry_gate("SOL", paper=False)
+    decision = _run_attempt_entry_gate("SOL")
     assert decision != "not_autonomous_live_eligible", (
         f"SOL live long should route through its own spot strategy, got {decision!r}"
     )
 
 
 # def test_lp04_xrp_long_prefers_symbol_specific_spot_in_live_mode():
-    decision = _run_attempt_entry_gate("XRP", paper=False)
+    decision = _run_attempt_entry_gate("XRP")
     assert decision != "not_autonomous_live_eligible", (
         f"XRP live long should route through its own spot strategy, got {decision!r}"
     )
@@ -224,7 +224,7 @@ def _run_attempt_entry_gate(symbol: str, paper: bool) -> str:
 # def test_lp05_eth_passes_autonomous_gate_in_live_mode():
     """ETH must NOT be blocked by the autonomous gate (it may hit sizing_zero or
     data_unavailable further on — but it must not return not_autonomous_live_eligible)."""
-    decision = _run_attempt_entry_gate("ETH", paper=False)
+    decision = _run_attempt_entry_gate("ETH")
     assert decision != "not_autonomous_live_eligible", (
         f"ETH must not be blocked by autonomous gate, got {decision!r}"
     )
@@ -274,7 +274,6 @@ def _run_attempt_entry_gate(symbol: str, paper: bool) -> str:
             stop_price=89000.0,
             take_profit_price=93000.0,
             leverage=3,
-            paper=False,
         )
         assert result is None, (
             "open_long must return None when 3 live positions exist (max_live_perps=3)"
@@ -325,7 +324,6 @@ def _run_attempt_entry_gate(symbol: str, paper: bool) -> str:
             stop_price=91000.0,
             take_profit_price=87000.0,
             leverage=3,
-            paper=False,
         )
         assert result is None, (
             "open_short must return None when 3 live positions exist (max_live_perps=3)"
@@ -359,8 +357,7 @@ def _run_attempt_entry_gate(symbol: str, paper: bool) -> str:
             entry_price=150.0,
             stop_price=145.0,
             take_profit_price=160.0,
-            leverage=3,
-            paper=True,  # paper mode — gate must be skipped
+            leverage=3,  # paper mode — gate must be skipped
         )
         # Result can be a dict (success) or None only if broker unavailable — not the gate
         # The gate returns None immediately with a specific warning.
@@ -368,7 +365,7 @@ def _run_attempt_entry_gate(symbol: str, paper: bool) -> str:
         # (unless broker is completely broken, which would be a different failure).
         # We verify the gate didn't fire by checking the module's in-process dict.
         # If the gate had fired, the function returns before touching _open_positions.
-        # Since paper=True, _open_positions["SOL"] should be set on success.
+        # Since _open_positions["SOL"] should be set on success.
         # Accept None only if broker import failed, not due to gate.
         pass  # gate correctness established by LP-06/07 — paper path skips the guard
     finally:
@@ -384,7 +381,7 @@ def _run_attempt_entry_gate(symbol: str, paper: bool) -> str:
     """Broker blocks any open for symbol X if X already has a position (any direction)."""
     from execution.coinbase_broker import CoinbaseBroker
 
-    broker = CoinbaseBroker(paper=True)
+    broker = CoinbaseBroker()
     broker._paper = True
     broker._connected = True
     broker._fallback_price = lambda sym: 2500.0

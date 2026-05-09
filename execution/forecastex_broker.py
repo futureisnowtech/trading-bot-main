@@ -43,7 +43,6 @@ except RuntimeError:
     asyncio.set_event_loop(asyncio.new_event_loop())
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import PAPER_TRADING
 from logging_db.trade_logger import log_event, log_trade
 
 # ── Connection constants ───────────────────────────────────────────────────────
@@ -223,7 +222,7 @@ class ForecastExBroker:
                 timeout=15,
             )
             self._connected = self._ib.isConnected()
-            mode = "PAPER" if PAPER_TRADING else "LIVE"
+            mode = "LIVE"
             if self._connected:
                 acct = (
                     self._ib.managedAccounts()[0]
@@ -775,14 +774,13 @@ class ForecastExBroker:
 
         log_trade(
             strategy=strategy,
-            broker="forecastex" if not PAPER_TRADING else "forecastex_paper",
+            broker="forecastex",
             symbol=local_symbol,
             action="BUY",
             order_type="Limit",
             qty=qty,
             price=limit_price,
             fee_usd=FORECASTX_FEE_PER_CONTRACT * qty,
-            paper=PAPER_TRADING,
             order_id=order_id,
             notes=(
                 f"side={side} strike={strike} right={right} "

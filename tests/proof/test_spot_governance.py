@@ -287,7 +287,7 @@ def test_sg12_kill_switch_consecutive_losses_fires():
             return_value={"snapshot_ok": True, "blocking_issues": []},
         ),
     ):
-        halt, reason = _ks.check_spot_kill_switch(paper=False)
+        halt, reason = _ks.check_spot_kill_switch()
     assert halt is True, f"Expected halt, got reason={reason}"
     assert "ks10a" in reason, reason
 
@@ -307,5 +307,5 @@ def test_sg13_kill_switch_does_not_fire_below_threshold():
             return_value={"snapshot_ok": True, "blocking_issues": []},
         ),
     ):
-        halt, reason = _ks.check_spot_kill_switch(paper=False)
+        halt, reason = _ks.check_spot_kill_switch()
     assert halt is False, f"Should not halt, got reason={reason}"

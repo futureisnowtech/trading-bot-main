@@ -13,17 +13,7 @@ import sqlite3
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config import DB_PATH, PAPER_TRADING, FUTURES_NUM_CONTRACTS
-
-SEP = "=" * 60
-
-
-def _get_trades_db(after_ts: str) -> list:
-    """Fetch MES trades from DB written after after_ts."""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    rows = conn.execute(
-        "SELECT ts, action, qty, price, pnl_usd, fee_usd, order_id, notes "
+        "INSERT INTO trades (symbol, action, qty, price, pnl_usd, fee_usd, order_id, notes, paper) VALUES (?,?,?,?,?,?,?,?,0)"
         "FROM trades WHERE symbol='MES' AND ts >= ? ORDER BY rowid ASC",
         (after_ts,),
     ).fetchall()
@@ -35,7 +25,7 @@ def main():
     print(SEP)
     print("  MES FUTURES FUNCTIONALITY AUDIT — 10 FORCED PAPER TRADES")
     print(SEP)
-    print(f"  Paper mode : {PAPER_TRADING}")
+    print(f"  Paper mode : {False}")
     print(f"  DB path    : {DB_PATH}")
     print()
 

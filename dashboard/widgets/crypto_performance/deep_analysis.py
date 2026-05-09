@@ -186,7 +186,7 @@ def render_deep_analysis():
             "TRENDING = clear direction, RANGING = choppy, HIGH_VOL = volatile"
         )
         _eff_date = get_effective_launch_date()
-        from db import _runtime_paper_flag as _rtpf
+        from db importas _rtpf
 
         _paper = _rtpf()
         regime_data = _q(
@@ -198,9 +198,7 @@ def render_deep_analysis():
                 ROUND(AVG(pnl_usd), 2) AS avg_pnl,
                 ROUND(SUM(pnl_usd), 2) AS total_pnl
             FROM trade_attribution
-            WHERE COALESCE(created_at, entry_ts, '') >= ? AND paper=?
-            GROUP BY regime ORDER BY total_pnl DESC
-        """,
+            WHERE COALESCE(created_at, entry_ts, '') >= ? AND ,
             (_eff_date, _paper),
         )
         if regime_data:
@@ -269,9 +267,7 @@ def render_deep_analysis():
             """
             SELECT symbol, direction, ROUND(mae_pct*100,3) AS mae_pct, ROUND(mfe_pct*100,3) AS mfe_pct,
                    exit_type, hold_minutes, is_fee_trap, won
-            FROM trade_attribution WHERE COALESCE(created_at, entry_ts, '') >= ? AND paper=?
-            ORDER BY entry_ts DESC LIMIT 30
-        """,
+            FROM trade_attribution WHERE COALESCE(created_at, entry_ts, '') >= ? AND ,
             (_eff_date, _paper),
         )
         if attr:
@@ -461,47 +457,7 @@ def render_deep_analysis():
         except Exception:
             c3.metric("Daily P&L", _fmt_pnl(today_pnl))
         try:
-            from db import _runtime_paper_flag
-
-            _is_paper = bool(_runtime_paper_flag())
+            _is_paper = bool(False)
         except Exception:
-            _is_paper = True
-        if _is_paper:
-            _ks_pct, _ks_label = 0.75, "75% of initial"
-        else:
-            _ks_pct, _ks_label = 0.50, "50% of live baseline"
-        c4.metric(
-            "Kill Switch",
-            f"~${base * _ks_pct:,.0f}",
-            delta=f"balance < {_ks_label} (${base:,.0f})",
-            delta_color="off",
-        )
-
-        rows = []
-        for p in open_p:
-            entry = float(p.get("entry") or 0)
-            stop = float(p.get("stop") or 0)
-            qty = float(p.get("qty") or 0)
-            direction = p.get("direction", "LONG")
-            now = live_prices.get(p.get("symbol", ""), entry) or entry
-            stop_dist = abs(entry - stop) / entry * 100 if entry else 0
-            if direction == "LONG":
-                unreal = (now - entry) * qty
-            else:
-                unreal = (entry - now) * qty
-            rows.append(
-                {
-                    "Symbol": p.get("symbol", ""),
-                    "Direction": direction,
-                    "Entry $": f"{entry:.5g}",
-                    "Now $": f"{now:.5g}" if now != entry else "–",
-                    "Unrealized": _fmt_pnl(unreal),
-                    "Stop $": f"{stop:.5g}",
-                    "Stop %": f"-{stop_dist:.2f}%",
-                    "Age": _time_ago(p.get("ts_entry", "")),
-                    "Setup": (p.get("entry_reason") or "")[:22],
-                }
-            )
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-    else:
-        st.info("No open positions.")
+            _is_paper = False
+        

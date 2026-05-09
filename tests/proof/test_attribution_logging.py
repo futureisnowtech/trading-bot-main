@@ -21,7 +21,6 @@ def test_trade_logger_persists_positions_and_trades(proof_runtime):
         price=100.0,
         fee_usd=0.25,
         pnl_usd=0.0,
-        paper=True,
         order_id="proof_buy",
         notes="entry",
     )
@@ -34,7 +33,6 @@ def test_trade_logger_persists_positions_and_trades(proof_runtime):
         target=106.0,
         high_since_entry=100.0,
         ts_entry="2026-04-10T09:30:00+00:00",
-        paper=True,
         direction="LONG",
         entry_reason="proof",
     )
@@ -48,7 +46,6 @@ def test_trade_logger_persists_positions_and_trades(proof_runtime):
         price=104.0,
         fee_usd=0.25,
         pnl_usd=4.0,
-        paper=True,
         order_id="proof_sell",
         notes="exit",
         won=1,
@@ -57,8 +54,8 @@ def test_trade_logger_persists_positions_and_trades(proof_runtime):
     )
 
     assert trade_id > 0
-    assert len(load_open_positions(paper=True)) == 1
-    assert get_todays_pnl(paper=True) == 4.0
+    assert len(load_open_positions()) == 1
+    assert get_todays_pnl() == 4.0
 
 
 def test_analyze_closed_trade_updates_attribution_and_signal_stats(proof_runtime):
@@ -85,7 +82,6 @@ def test_analyze_closed_trade_updates_attribution_and_signal_stats(proof_runtime
             "conviction_score": 72.0,
         },
         source="clean_paper_v10",  # trusted source — must reach Bayesian weights
-        paper=True,
         composite_score=72.0,
     )
 
@@ -133,7 +129,6 @@ def test_replay_source_blocked_from_signal_stats(proof_runtime):
             "primary_setup": "wae_explosion",
         },
         source="replay_harness",  # must be excluded — no live weight update
-        paper=True,
         composite_score=70.0,
     )
 

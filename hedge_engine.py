@@ -141,7 +141,6 @@ def rebalance(open_positions: Dict, account_balance: float,
                     composite_score=50.0,
                     regime='HEDGE',
                     testnet=False,
-                    paper=False,
                 )
             else:
                 pos = perps_engine.open_short(
@@ -152,7 +151,6 @@ def rebalance(open_positions: Dict, account_balance: float,
                     composite_score=50.0,
                     regime='HEDGE',
                     testnet=False,
-                    paper=False,
                 )
 
             with _lock:

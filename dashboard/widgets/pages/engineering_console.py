@@ -503,9 +503,7 @@ def render_engineering_console():
                 st.caption(f"Alert feed unavailable: {e}")
 
             try:
-                from db import _q, _runtime_paper_flag
-
-                rows = _q(
+                from db import _qrows = _q(
                     """SELECT ts, source, level, message
                        FROM system_events
                        ORDER BY ts DESC

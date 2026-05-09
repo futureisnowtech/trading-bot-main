@@ -87,63 +87,60 @@ def trigger_spot_halt(reason: str, detail: dict | None = None) -> bool:
         return False
 
 
-def check_spot_kill_switch(paper: bool) -> tuple[bool, str]:
+def check_spot_kill_switch() -> tuple[bool, str]:
     """
     Check all spot kill switches.  Returns (halt, reason).
     Writes structured halt event if any switch fires.
-    In paper mode checks run but do NOT set the live halt flag.
     """
     try:
         conn = _conn()
         try:
-            if not paper and _is_halted(conn):
+            if _is_halted(conn):
                 conn.close()
                 return True, "spot_kill_switch_already_active"
 
-            if not paper:
-                try:
-                    from runtime.spot_position_truth import get_spot_position_truth
+            try:
+                from runtime.spot_position_truth import get_spot_position_truth
 
-                    truth = get_spot_position_truth(paper=False)
-                    if not truth.get("snapshot_ok"):
-                        reason = "ks_spot_truth_snapshot_unavailable"
-                        _log_halt(conn, reason, {"trigger": reason})
-                        conn.close()
-                        return True, reason
-                    truth_blockers = truth.get("blocking_issues") or []
-                    if truth_blockers:
-                        reason = "ks_spot_truth_blocker"
-                        _log_halt(
-                            conn,
-                            reason,
-                            {
-                                "trigger": reason,
-                                "blockers": [
-                                    {
-                                        "symbol": str(b.get("symbol") or ""),
-                                        "status": str(
-                                            b.get("position_truth_status") or ""
-                                        ),
-                                    }
-                                    for b in truth_blockers
-                                ],
-                            },
-                        )
-                        conn.close()
-                        return True, reason
-                except Exception as exc:
-                    logger.warning("[spot_kill_switch] truth blocker check error: %s", exc)
+                truth = get_spot_position_truth()
+                if not truth.get("snapshot_ok"):
+                    reason = "ks_spot_truth_snapshot_unavailable"
+                    _log_halt(conn, reason, {"trigger": reason})
+                    conn.close()
+                    return True, reason
+                truth_blockers = truth.get("blocking_issues") or []
+                if truth_blockers:
+                    reason = "ks_spot_truth_blocker"
+                    _log_halt(
+                        conn,
+                        reason,
+                        {
+                            "trigger": reason,
+                            "blockers": [
+                                {
+                                    "symbol": str(b.get("symbol") or ""),
+                                    "status": str(
+                                        b.get("position_truth_status") or ""
+                                    ),
+                                }
+                                for b in truth_blockers
+                            ],
+                        },
+                    )
+                    conn.close()
+                    return True, reason
+            except Exception as exc:
+                logger.warning("[spot_kill_switch] truth blocker check error: %s", exc)
 
-            paper_int = 1 if paper else 0
             import config as _cfg
 
             # ── KS10a: 4 consecutive losing closed trades ─────────────────────
             consecutive_limit = int(getattr(_cfg, "SPOT_KS_CONSECUTIVE_LOSSES", 4))
             recent_rows = conn.execute(
                 """SELECT pnl_usd FROM trades
-                   WHERE strategy LIKE 'spot_%' AND action='SELL' AND paper=?
+                   WHERE strategy LIKE 'spot_%' AND action='SELL' AND paper=0
                    ORDER BY ts DESC LIMIT ?""",
-                (paper_int, consecutive_limit),
+                (consecutive_limit,),
             ).fetchall()
             if len(recent_rows) >= consecutive_limit and all(
                 float(r["pnl_usd"] or 0) < 0 for r in recent_rows
@@ -152,11 +149,9 @@ def check_spot_kill_switch(paper: bool) -> tuple[bool, str]:
                 detail = {
                     "trigger": reason,
                     "consecutive_losses": consecutive_limit,
-                    "paper": paper,
                     "pnl_last_n": [float(r["pnl_usd"] or 0) for r in recent_rows],
                 }
-                if not paper:
-                    _log_halt(conn, reason, detail)
+                _log_halt(conn, reason, detail)
                 conn.close()
                 return True, reason
 
@@ -173,9 +168,9 @@ def check_spot_kill_switch(paper: bool) -> tuple[bool, str]:
             daily_row = conn.execute(
                 """SELECT COALESCE(SUM(pnl_usd), 0) AS daily_pnl
                    FROM trades
-                   WHERE strategy LIKE 'spot_%' AND action='SELL' AND paper=?
+                   WHERE strategy LIKE 'spot_%' AND action='SELL' AND paper=0
                      AND datetime(replace(substr(ts,1,19),'T',' ')) >= datetime(?)""",
-                (paper_int, today_start.replace("T", " ")),
+                (today_start.replace("T", " "),),
             ).fetchone()
             daily_pnl = float(daily_row["daily_pnl"] or 0)
             if daily_pnl <= daily_threshold:
@@ -188,10 +183,8 @@ def check_spot_kill_switch(paper: bool) -> tuple[bool, str]:
                     "daily_pnl": round(daily_pnl, 4),
                     "threshold": round(daily_threshold, 4),
                     "account_size": account_size,
-                    "paper": paper,
                 }
-                if not paper:
-                    _log_halt(conn, reason, detail)
+                _log_halt(conn, reason, detail)
                 conn.close()
                 return True, reason
 

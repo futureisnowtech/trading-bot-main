@@ -95,8 +95,8 @@ def generate_war_room_report(paper: bool = False) -> str:
 def send_war_room_report():
     """Fetch and send the report via Telegram."""
     # Determine mode from env
-    from config import PAPER_TRADING
-    report = generate_war_room_report(paper=PAPER_TRADING)
+    
+    report = generate_war_room_report()
     
     try:
         from notifications.telegram_bot import send_message

@@ -66,7 +66,7 @@ except ImportError:
 # - No env vars are globally hard-required for validator startability.
 # - Coinbase spot runtime uses CDP credentials when present; legacy
 #   COINBASE_API_KEY / COINBASE_API_SECRET are no longer the primary path.
-# - ACCOUNT_SIZE / PAPER_TRADING / pair lists have config defaults and should
+# - ACCOUNT_SIZE / False / pair lists have config defaults and should
 #   not warn when omitted from .env.
 required_keys: list = []
 
@@ -86,10 +86,10 @@ if _env_has("ACCOUNT_SIZE"):
 else:
     info("ACCOUNT_SIZE not set — using config default")
 
-if _env_has("PAPER_TRADING"):
-    ok("PAPER_TRADING set")
+if _env_has("False"):
+    ok("False set")
 else:
-    info("PAPER_TRADING not set — using config default")
+    info("False not set — using config default")
 
 if _env_has("ANTHROPIC_API_KEY"):
     ok("ANTHROPIC_API_KEY set")
@@ -743,7 +743,7 @@ try:
     _live_allowed = (
         not _fx_blocked
         and not _fx_action
-        and os.getenv("PAPER_TRADING", "true").lower() != "true"
+        and os.getenv("False", "true").lower() != "true"
     )
     if _fx_blocked:
         _fx("Live test trades", "BLOCKED", "Blocked checks must be resolved first")
@@ -754,18 +754,18 @@ try:
             "Complete ACTION NEEDED steps then re-run validator",
         )
     else:
-        _is_paper = os.getenv("PAPER_TRADING", "true").lower() != "false"
+        _is_paper = os.getenv("False", "true").lower() != "false"
         if _is_paper:
             _fx(
                 "Live test trades",
                 "ACTION NEEDED",
-                "PAPER_TRADING=true — set PAPER_TRADING=false and confirm account balance",
+                "False=true — set False=false and confirm account balance",
             )
         else:
             _fx(
                 "Live test trades",
                 "READY",
-                "All checks green + PAPER_TRADING=false — tiny live trades ENABLED",
+                "All checks green + False=false — tiny live trades ENABLED",
             )
 except Exception as _e:
     _fx("Live test trades", "BLOCKED", f"Check error: {_e}")

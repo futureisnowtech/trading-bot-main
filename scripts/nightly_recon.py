@@ -15,17 +15,17 @@ if _ROOT not in sys.path:
 
 from runtime.spot_position_truth import get_spot_position_truth
 from logging_db.trade_logger import log_event
-from config import LIVE_TRADING
+
 
 def run_reconciliation():
     """Run reconciliation for live lane."""
-    if not LIVE_TRADING:
-        print("Reconciliation skipped: system is in PAPER_TRADING mode.")
+    if not True:
+        print("Reconciliation skipped: system is in False mode.")
         return
 
     print("Running nightly reconciliation...")
     try:
-        truth = get_spot_position_truth(paper=False)
+        truth = get_spot_position_truth()
         
         if not truth.get("snapshot_ok"):
             log_event("CRITICAL", "nightly_recon", "Broker snapshot failed during nightly recon.")

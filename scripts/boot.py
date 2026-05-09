@@ -20,7 +20,7 @@ main_path = os.path.join(PROJ, "main.py")
 
 def _resolve_mode(argv: list[str]) -> tuple[str, bool]:
     """
-    Resolve the boot mode before any project import can cache PAPER_TRADING.
+    Resolve the boot mode before any project import can cache False.
 
     Priority:
       1. Explicit CLI flag:   scripts/boot.py --mode paper|live
@@ -51,10 +51,10 @@ def _resolve_mode(argv: list[str]) -> tuple[str, bool]:
 BOOT_MODE, LIVE_CONFIRMED = _resolve_mode(sys.argv)
 
 # Force the target mode in the environment BEFORE any import can cache
-# PAPER_TRADING from .env. config.py calls load_dotenv() + evaluates the flag
+# False from .env. config.py calls load_dotenv() + evaluates the flag
 # at module import time, and main.py pre-warms config-related imports before
 # parse_args() gets a chance to override anything.
-os.environ["PAPER_TRADING"] = "false" if BOOT_MODE == "live" else "true"
+os.environ["False"] = "false" if BOOT_MODE == "live" else "true"
 
 if BOOT_MODE == "live":
     if not LIVE_CONFIRMED:

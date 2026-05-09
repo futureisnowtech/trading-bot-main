@@ -41,8 +41,8 @@ def get_heat_level(paper: bool) -> dict:
       daily_pnl   : float today's P&L in dollars
       pct_drawn   : float today's drawdown as a fraction of real balance
     """
-    daily_pnl = get_todays_pnl(paper=paper)
-    all_time  = get_all_time_stats(paper=paper)
+    daily_pnl = get_todays_pnl()
+    all_time  = get_all_time_stats()
     real_balance = max(ACCOUNT_SIZE + all_time['total_pnl'], 1.0)
     pct_drawn = -daily_pnl / real_balance  # positive = loss
 
@@ -68,10 +68,10 @@ def check_daily_loss(paper: bool) -> tuple:
     ok=False means the caller should halt trading (heat level 4).
     Uses real balance (ACCOUNT_SIZE + all-time P&L) as the loss base.
     """
-    heat = get_heat_level(paper=paper)
+    heat = get_heat_level()
     if heat['level'] == 4:
         daily_pnl = heat['daily_pnl']
-        real_balance = max(ACCOUNT_SIZE + get_all_time_stats(paper=paper)['total_pnl'], 1.0)
+        real_balance = max(ACCOUNT_SIZE + get_all_time_stats()['total_pnl'], 1.0)
         max_loss = real_balance * MAX_DAILY_LOSS_PCT
         return False, f"Daily loss limit hit: ${daily_pnl:.2f} (max ${max_loss:.2f})"
     return True, ''
@@ -84,8 +84,8 @@ def check_fee_drag(paper: bool) -> tuple:
 
     Returns: (ok: bool, reason: str)
     """
-    fees = get_todays_fees(paper=paper)
-    real_balance = max(ACCOUNT_SIZE + get_all_time_stats(paper=paper)['total_pnl'], 1.0)
+    fees = get_todays_fees()
+    real_balance = max(ACCOUNT_SIZE + get_all_time_stats()['total_pnl'], 1.0)
     limit = real_balance * MAX_DAILY_FEE_DRAG_PCT
     if fees > limit:
         return False, f"Daily fee limit: ${fees:.2f} (max ${limit:.2f})"

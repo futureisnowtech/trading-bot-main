@@ -6,8 +6,7 @@ Refresh: 30s
 import streamlit as st
 
 import ui
-from db import _q1, get_effective_launch_date, _runtime_paper_flag
-from data.performance import get_performance_stats, get_signal_bayesian_stats
+from db import _q1, get_effective_launch_datefrom data.performance import get_performance_stats, get_signal_bayesian_stats
 
 
 @st.fragment(run_every=30)
@@ -40,10 +39,9 @@ def render_decision_quality():
             COUNT(*) AS total
         FROM trade_attribution
         WHERE COALESCE(created_at, entry_ts, '') >= ?
-          AND paper=?
-          AND source NOT IN ('backtest','pre_v10_contaminated','bybit_paper','paper_v10')
+          AND ,'pre_v10_contaminated','bybit_paper','paper_v10')
         """,
-        (get_effective_launch_date(), _runtime_paper_flag()),
+        (get_effective_launch_date(), False),
     )
     attr_total = r.get("total") or 0
 

@@ -381,7 +381,6 @@ def replay_symbol(
                 exit_reason=exit_reason,
                 hold_minutes=hold_min,
                 source='replay',
-                paper=True,
                 trade_ref=f"replay_{symbol}_{strategy}_{entry_ts[:16]}",
                 lesson='',
             )

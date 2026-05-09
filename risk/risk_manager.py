@@ -21,7 +21,7 @@ import pytz
 logger = logging.getLogger(__name__)
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import ACCOUNT_SIZE, MARKET_TIMEZONE, PAPER_TRADING, MAX_DEPLOYED_PCT
+from config import ACCOUNT_SIZE, MARKET_TIMEZONE, MAX_DEPLOYED_PCT
 
 from logging_db.trade_logger import (
     log_event, persist_position, delete_position, load_open_positions,
@@ -61,7 +61,7 @@ class RiskManager:
             import sqlite3 as _sq
             from config import DB_PATH as _DB_PATH
 
-            positions = load_open_positions(paper=PAPER_TRADING)
+            positions = load_open_positions()
             restored = cleaned = 0
             for pos in positions:
                 sym   = pos['symbol']
@@ -72,9 +72,8 @@ class RiskManager:
                     conn = _sq.connect(_DB_PATH)
                     cur  = conn.cursor()
                     cur.execute(
-                        "SELECT id FROM trades WHERE symbol=? AND strategy=? AND paper=? "
-                        "AND pnl_usd != 0 AND ts > ? LIMIT 1",
-                        (sym, strat, int(PAPER_TRADING), ts_e)
+                        "SELECT id FROM trades WHERE symbol=? AND strategy=? AND ts=? AND paper=0",
+                        (sym, strat, ts_e)
                     )
                     already_closed = cur.fetchone() is not None
                     conn.close()
@@ -82,7 +81,7 @@ class RiskManager:
                     already_closed = False
 
                 if already_closed:
-                    delete_position(sym, strat, PAPER_TRADING)
+                    delete_position(sym, strat, False)
                     cleaned += 1
                     logger.info(f"[RiskManager] Cleaned orphaned position: {sym} ({strat})")
                     continue
@@ -153,7 +152,7 @@ class RiskManager:
             return RiskCheckResult(False, f"Confidence {confidence:.0%} < {min_conf:.0%} minimum")
 
         # Daily loss halt
-        ok, reason = check_daily_loss(paper=PAPER_TRADING)
+        ok, reason = check_daily_loss()
         if not ok:
             self.halt(reason)
             return RiskCheckResult(False, reason)
@@ -165,14 +164,14 @@ class RiskManager:
 
         # Fee drag (crypto only)
         if is_cr:
-            ok, reason = check_fee_drag(paper=PAPER_TRADING)
+            ok, reason = check_fee_drag()
             if not ok:
                 return RiskCheckResult(False, reason)
 
         # Position limits, correlation, daily trade count
         result = check_position_limits(
             strategy, symbol, side,
-            self._equity, self._crypto, self._perp, PAPER_TRADING
+            self._equity, self._crypto, self._perp, False
         )
         if not result:
             return result
@@ -193,7 +192,7 @@ class RiskManager:
         final_size = result.adjusted_size
 
         # Kelly sizing
-        final_size = size_from_kelly(strategy, symbol, final_size, confidence, PAPER_TRADING)
+        final_size = size_from_kelly(strategy, symbol, final_size, confidence, False)
         return RiskCheckResult(True, "All checks passed", adjusted_size=final_size)
 
     def pre_check_entry(self, strategy: str, symbol: str, side: str,
@@ -208,13 +207,13 @@ class RiskManager:
         if confidence < min_conf:
             return RiskCheckResult(False, f"Confidence {confidence:.0%} < {min_conf:.0%} minimum")
 
-        ok, reason = check_daily_loss(paper=PAPER_TRADING)
+        ok, reason = check_daily_loss()
         if not ok:
             self.halt(reason)
             return RiskCheckResult(False, reason)
 
         # Log heat level on every entry attempt (visible in scan feed)
-        heat = get_heat_level(paper=PAPER_TRADING)
+        heat = get_heat_level()
         if heat['level'] > 0:
             log_event('INFO', 'risk',
                       f"[Heat:{heat['label']}] day={heat['daily_pnl']:+.2f} "
@@ -225,13 +224,13 @@ class RiskManager:
             return result
 
         if is_cr:
-            ok, reason = check_fee_drag(paper=PAPER_TRADING)
+            ok, reason = check_fee_drag()
             if not ok:
                 return RiskCheckResult(False, reason)
 
         result = check_position_limits(
             strategy, symbol, side,
-            self._equity, self._crypto, self._perp, PAPER_TRADING
+            self._equity, self._crypto, self._perp, False
         )
         if not result:
             return result
@@ -292,7 +291,7 @@ class RiskManager:
             else:
                 self._crypto[symbol] = pos
             persist_position(symbol, strategy, qty, entry, stop, target, entry, ts,
-                             PAPER_TRADING, direction=direction, entry_reason=entry_reason,
+                             False, direction=direction, entry_reason=entry_reason,
                              low_since_entry=entry)
             return True
 
@@ -303,7 +302,7 @@ class RiskManager:
             pos = self._perp.pop(symbol, None)
         else:
             pos = self._crypto.pop(symbol, None)
-        delete_position(symbol, strategy, PAPER_TRADING)
+        delete_position(symbol, strategy, False)
         return pos
 
     def update_high(self, strategy, symbol, price) -> None:
@@ -323,7 +322,7 @@ class RiskManager:
                 persist_position(symbol, strategy,
                                  d[symbol]['qty'], d[symbol]['entry'],
                                  d[symbol]['stop'], d[symbol]['target'],
-                                 new_extreme, d[symbol]['ts_entry'], PAPER_TRADING,
+                                 new_extreme, d[symbol]['ts_entry'], False,
                                  direction=direction,
                                  entry_reason=d[symbol].get('entry_reason', ''),
                                  low_since_entry=d[symbol].get('low_since_entry'))
@@ -429,8 +428,8 @@ class RiskManager:
             'open_crypto': len(self._crypto),
             'open_perp': len(self._perp),
             'deployed_usd': self._get_deployed(),
-            'todays_pnl': get_todays_pnl(paper=PAPER_TRADING),
-            'todays_fees': get_todays_fees(paper=PAPER_TRADING),
+            'todays_pnl': get_todays_pnl(),
+            'todays_fees': get_todays_fees(),
         }
 
 

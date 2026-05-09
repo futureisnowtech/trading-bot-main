@@ -58,7 +58,7 @@ def main() -> int:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     sys_state = get_system_state()
     crypto = get_lane_state("crypto")
-    truth = get_spot_position_truth(paper=False)
+    truth = get_spot_position_truth()
     ks = kill_switch_status()
     audit = build_go_live_audit(default_db_path())
     health = _latest_health_row()

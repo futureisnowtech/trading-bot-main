@@ -497,19 +497,14 @@ def render_performance_lab():
         )
 
         try:
-            from db import _q, LAUNCH_DATE, _runtime_paper_flag
-            import pandas as pd
+            from db import _q, LAUNCH_DATEimport pandas as pd
 
-            paper = _runtime_paper_flag()
+            paper = False
             trades = _q(
                 """SELECT ts, symbol, action, qty, price, pnl_usd, fee_usd,
                           (pnl_usd - fee_usd) AS net_pnl, strategy, broker, notes
                    FROM trades
-                   WHERE ts >= ? AND paper=?
-                     AND won IS NOT NULL
-                     AND broker NOT LIKE '%bybit%'
-                     AND (source IS NULL OR source NOT IN
-                          ('backtest','pre_v10_contaminated','bybit_paper'))
+                   WHERE ts >= ? AND ,'pre_v10_contaminated','bybit_paper'))
                    ORDER BY ts DESC
                    LIMIT 200""",
                 (LAUNCH_DATE, paper),

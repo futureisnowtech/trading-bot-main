@@ -7,7 +7,7 @@ logging.basicConfig(level=logging.INFO)
 
 def test_connection():
     print("Initializing CoinbaseSpotBroker (LIVE)...")
-    broker = CoinbaseSpotBroker(paper=False)
+    broker = CoinbaseSpotBroker()
     
     print("Attempting to connect...")
     # The broker doesn't have an explicit connect() that returns success, 

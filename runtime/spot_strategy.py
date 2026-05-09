@@ -814,14 +814,34 @@ def spot_quality_block_reason(
     policy = get_spot_strategy(symbol)
     clean = _clean_symbol(symbol)
     if not policy["enabled"]:
+        try:
+            system_state.state.update_stochastic(clean, {"status": "VETO", "reason": "spot_strategy_symbol_disabled"})
+        except Exception:
+            pass
         return "spot_strategy_symbol_disabled", 0.0
     if not spot_state:
+        try:
+            system_state.state.update_stochastic(clean, {"status": "VETO", "reason": "spot_state_unavailable"})
+        except Exception:
+            pass
         return "spot_state_unavailable", 0.0
 
     regime = _normalize_regime(str(spot_state.get("regime") or "NEUTRAL"))
     setup_family = str(spot_state.get("setup_family") or "")
     setup_score = float(spot_state.get("setup_score") or 0.0)
     confirm_count = int(spot_state.get("structural_confirm_count") or 0)
+
+    # v18.17: Cold Data check
+    frames = spot_state.get("frames") or {}
+    s5 = frames.get("5m") or {}
+    s30 = frames.get("30m") or {}
+
+    if float(s5.get("atr_pct") or 0.0) == 0.0 or float(s5.get("v") or 0.0) == 0.0:
+        try:
+            system_state.state.update_stochastic(clean, {"status": "VETO", "reason": "DATA_COLD"})
+        except Exception:
+            pass
+        return "DATA_COLD", 0.0
 
     # Note: system_state updates moved to central DAG Reducer in v10_runner.py
 
@@ -839,15 +859,29 @@ def spot_quality_block_reason(
     s30 = frames.get("30m") or {}
 
     if policy["allowed_regimes"] and regime not in set(policy["allowed_regimes"]):
-        return f"spot_regime_not_allowed:{regime}", floor
+        reason = f"spot_regime_not_allowed:{regime}"
+        try:
+            system_state.state.update_stochastic(clean, {"status": "VETO", "reason": reason})
+        except Exception:
+            pass
+        return reason, floor
     if regime == "CHOP":
+        try:
+            system_state.state.update_stochastic(clean, {"status": "VETO", "reason": "spot_regime_not_allowed:CHOP"})
+        except Exception:
+            pass
         return "spot_regime_not_allowed:CHOP", floor
 
     import config as _qs_cfg
 
     setup_policy = setup_policy_for_symbol(clean, setup_family, setup_score)
     if not setup_policy["allowed"]:
-        return str(setup_policy["reason"] or "setup_family_not_allowed"), floor
+        reason = str(setup_policy["reason"] or "setup_family_not_allowed")
+        try:
+            system_state.state.update_stochastic(clean, {"status": "VETO", "reason": reason})
+        except Exception:
+            pass
+        return reason, floor
 
     _, tv_block = tv_context_score_adjustment(
         clean,
@@ -855,15 +889,26 @@ def spot_quality_block_reason(
         tv_context=tv_context,
     )
     if tv_block:
+        try:
+            system_state.state.update_stochastic(clean, {"status": "VETO", "reason": tv_block})
+        except Exception:
+            pass
         return tv_block, floor
 
     for condition in policy.get("edge_conditions") or ():
         if not _edge_condition_matches(spot_state, condition):
-            return str(
-                condition.get("reason") or _default_edge_reason(condition)
-            ), floor
+            reason = str(condition.get("reason") or _default_edge_reason(condition))
+            try:
+                system_state.state.update_stochastic(clean, {"status": "VETO", "reason": reason})
+            except Exception:
+                pass
+            return reason, floor
 
     if final_spot_score is not None and float(final_spot_score) < float(floor):
+        try:
+            system_state.state.update_stochastic(clean, {"status": "VETO", "reason": "below_regime_floor"})
+        except Exception:
+            pass
         return "below_regime_floor", floor
     regime_min_confirms = int(
         getattr(_qs_cfg, "SPOT_TINY_LIVE_MIN_CONFIRMS", {"TREND": 0, "NEUTRAL": 0})[
@@ -871,6 +916,10 @@ def spot_quality_block_reason(
         ]
     )
     if confirm_count < regime_min_confirms:
+        try:
+            system_state.state.update_stochastic(clean, {"status": "VETO", "reason": "structural_confirm_count_too_low"})
+        except Exception:
+            pass
         return "structural_confirm_count_too_low", floor
     min_5m_frame = float(
         getattr(
@@ -878,6 +927,10 @@ def spot_quality_block_reason(
         )[regime]
     )
     if float(s5.get("frame_score") or 0.0) < min_5m_frame:
+        try:
+            system_state.state.update_stochastic(clean, {"status": "VETO", "reason": "frame_score_5m_too_low"})
+        except Exception:
+            pass
         return "frame_score_5m_too_low", floor
     min_30m_frame = float(
         getattr(
@@ -885,6 +938,10 @@ def spot_quality_block_reason(
         )[regime]
     )
     if float(s30.get("frame_score") or 0.0) < min_30m_frame:
+        try:
+            system_state.state.update_stochastic(clean, {"status": "VETO", "reason": "frame_score_30m_too_low"})
+        except Exception:
+            pass
         return "frame_score_30m_too_low", floor
     min_momentum = float(
         getattr(
@@ -894,6 +951,10 @@ def spot_quality_block_reason(
         )[regime]
     )
     if float(s5.get("momentum_impulse") or 0.0) < min_momentum:
+        try:
+            system_state.state.update_stochastic(clean, {"status": "VETO", "reason": "momentum_impulse_too_low"})
+        except Exception:
+            pass
         return "momentum_impulse_too_low", floor
     min_structure = float(
         getattr(
@@ -903,8 +964,16 @@ def spot_quality_block_reason(
         )[regime]
     )
     if float(s5.get("structure_component") or 0.0) < min_structure:
+        try:
+            system_state.state.update_stochastic(clean, {"status": "VETO", "reason": "structure_component_too_low"})
+        except Exception:
+            pass
         return "structure_component_too_low", floor
     if float(s5.get("path_efficiency") or 0.0) < float(policy["min_path_efficiency"]):
+        try:
+            system_state.state.update_stochastic(clean, {"status": "VETO", "reason": "path_efficiency_too_low"})
+        except Exception:
+            pass
         return "path_efficiency_too_low", floor
     min_participation = float(
         getattr(
@@ -914,10 +983,18 @@ def spot_quality_block_reason(
         )[regime]
     )
     if float(s5.get("participation_component") or 0.0) < min_participation:
+        try:
+            system_state.state.update_stochastic(clean, {"status": "VETO", "reason": "participation_component_too_low"})
+        except Exception:
+            pass
         return "participation_component_too_low", floor
     if float(s30.get("volatility_quality") or 0.0) < float(
         policy["min_volatility_quality"]
     ):
+        try:
+            system_state.state.update_stochastic(clean, {"status": "VETO", "reason": "volatility_quality_too_low"})
+        except Exception:
+            pass
         return "volatility_quality_too_low", floor
     # Hard vetoes from execution profile (ATR fee floor, extreme selling aggression)
     _exec_mult, _exec_tag = calculate_execution_profile(symbol, spot_state)
@@ -925,13 +1002,22 @@ def spot_quality_block_reason(
     # Update system state with final multiplier and tag
     try:
         current_stoch = system_state.state.get_state()["strategy"].get("stochastic", {}).get(clean, {})
-        current_stoch.update({"multiplier": _exec_mult, "status": _exec_tag})
+        current_stoch.update({"multiplier": _exec_mult, "status": "VETO" if _exec_mult == 0.0 else "ACTIVE", "reason": _exec_tag if _exec_mult == 0.0 else ""})
         system_state.state.update_stochastic(clean, current_stoch)
     except Exception:
         pass
 
     if _exec_mult == 0.0:
         return _exec_tag, floor
+    
+    # Final check: if we reach here, we are OK
+    try:
+        current_stoch = system_state.state.get_state()["strategy"].get("stochastic", {}).get(clean, {})
+        current_stoch.update({"status": "ACTIVE", "reason": ""})
+        system_state.state.update_stochastic(clean, current_stoch)
+    except Exception:
+        pass
+    
     return "", floor
 
 

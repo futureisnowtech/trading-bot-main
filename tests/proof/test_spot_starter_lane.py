@@ -70,7 +70,7 @@ def _spot_state(symbol="ETH"):
 def test_sp01_paper_buy_returns_fill_no_api():
     from execution.coinbase_spot_broker import CoinbaseSpotBroker
 
-    broker = CoinbaseSpotBroker(paper=True)
+    broker = CoinbaseSpotBroker()
     broker.connect()
     assert broker.is_connected()
 
@@ -88,7 +88,7 @@ def test_sp01_paper_buy_returns_fill_no_api():
 def test_sp01_paper_sell_returns_fill_no_api():
     from execution.coinbase_spot_broker import CoinbaseSpotBroker
 
-    broker = CoinbaseSpotBroker(paper=True)
+    broker = CoinbaseSpotBroker()
     broker.connect()
     broker._fallback_price = lambda sym: 2500.0
 
@@ -130,13 +130,12 @@ def test_sp02_blocks_duplicate_position(proof_runtime, monkeypatch):
         target=0.0,
         high_since_entry=2500.0,
         ts_entry="2026-04-17T12:00:00",
-        paper=True,
         direction="LONG",
         leverage=1,
     )
 
     monkeypatch.setattr(spot_engine, "build_spot_state", lambda symbol: _spot_state(symbol))
-    result = spot_engine.open_spot("ETH", 50.0, paper=True, final_spot_score=72.0)
+    result = spot_engine.open_spot("ETH", 50.0, final_spot_score=72.0)
     assert result is None, "must block when position already open"
 
 
@@ -155,7 +154,7 @@ def test_sp03_blocks_deployment_cap(monkeypatch):
     spot_engine._load_config()
 
     # Mock broker returning $100 USD available — cap = $40
-    mock_broker = CoinbaseSpotBroker(paper=False)
+    mock_broker = CoinbaseSpotBroker()
     mock_broker._paper = False
     mock_broker._connected = True
     mock_broker.get_spot_balance = lambda: {
@@ -174,7 +173,7 @@ def test_sp03_blocks_deployment_cap(monkeypatch):
 
     # Request $50 which exceeds 50% of $100 = $50? no, set total alloc cap lower for this proof.
     monkeypatch.setattr(spot_engine, "SPOT_TOTAL_ALLOC_CAP_PCT", 0.40)
-    result = spot_engine.open_spot("ETH", 50.0, paper=False, final_spot_score=72.0)
+    result = spot_engine.open_spot("ETH", 50.0, final_spot_score=72.0)
     assert result is None, "must block when size_usd > deployment cap"
 
 
@@ -190,7 +189,7 @@ def test_sp04_blocks_unsupported_symbol(monkeypatch):
     monkeypatch.setattr(config, "SPOT_MIN_ORDER_USD", 10.0, raising=False)
     spot_engine._load_config()
 
-    result = spot_engine.open_spot("DOGE", 50.0, paper=True, final_spot_score=72.0)
+    result = spot_engine.open_spot("DOGE", 50.0, final_spot_score=72.0)
     assert result is None, "DOGE must be blocked — not in SPOT_SYMBOLS"
 
 
@@ -204,7 +203,7 @@ def test_sp05_blocks_lane_disabled(monkeypatch):
     monkeypatch.setattr(config, "SPOT_LANE_ACTIVE", False, raising=False)
     spot_engine._load_config()
 
-    result = spot_engine.open_spot("ETH", 50.0, paper=True, final_spot_score=72.0)
+    result = spot_engine.open_spot("ETH", 50.0, final_spot_score=72.0)
     assert result is None, "must block when SPOT_LANE_ACTIVE=False"
 
 
@@ -228,7 +227,7 @@ def test_sp06_writes_to_trades_table(proof_runtime, monkeypatch):
     )
 
     # Mock broker so no real API call
-    mock_broker = CoinbaseSpotBroker(paper=True)
+    mock_broker = CoinbaseSpotBroker()
     mock_broker._paper = True
     mock_broker._connected = True
     mock_broker._fallback_price = lambda sym: 2500.0
@@ -236,7 +235,7 @@ def test_sp06_writes_to_trades_table(proof_runtime, monkeypatch):
     monkeypatch.setattr(spot_engine, "_get_broker", lambda paper: mock_broker)
     monkeypatch.setattr(spot_engine, "build_spot_state", lambda symbol: _spot_state(symbol))
 
-    result = spot_engine.open_spot("ETH", 25.0, paper=True, final_spot_score=72.0)
+    result = spot_engine.open_spot("ETH", 25.0, final_spot_score=72.0)
     assert result is not None, "open_spot should succeed"
 
     # Verify trade written
@@ -276,7 +275,6 @@ def test_sp07_no_perp_contamination(proof_runtime, monkeypatch):
         target=2700.0,
         high_since_entry=2500.0,
         ts_entry="2026-04-17T12:00:00",
-        paper=True,
         direction="LONG",
         leverage=3,
     )
@@ -290,12 +288,11 @@ def test_sp07_no_perp_contamination(proof_runtime, monkeypatch):
         target=0.0,
         high_since_entry=90000.0,
         ts_entry="2026-04-17T12:00:00",
-        paper=True,
         direction="LONG",
         leverage=1,
     )
 
-    positions = spot_engine.get_spot_positions(paper=True)
+    positions = spot_engine.get_spot_positions()
     symbols = [p["symbol"] for p in positions]
 
     # ETH perp must not appear; BTC spot must appear

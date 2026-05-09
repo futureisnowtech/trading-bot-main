@@ -325,15 +325,11 @@ def get_smart_log_summary(n=200) -> dict:
         (cutoff_1h,),
     )
     veto_count_1h = rv.get("n") or 0
-    # Use runtime paper flag instead of hardcoded paper=1
-    from db import _runtime_paper_flag
-
-    _paper_flag = _runtime_paper_flag()
     re2 = _q1(
         "SELECT COUNT(*) AS n FROM trades "
         "WHERE datetime(replace(substr(ts,1,19),'T',' ')) >= ? "
-        "AND paper=? AND action IN ('BUY','SELL') AND pnl_usd=0",
-        (cutoff_1h, _paper_flag),
+        "AND paper=0 AND action IN ('BUY','SELL') AND pnl_usd=0",
+        (cutoff_1h,),
     )
     entry_count_1h = re2.get("n") or 0
     return {

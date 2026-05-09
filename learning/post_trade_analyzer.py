@@ -353,7 +353,6 @@ def analyze_closed_trade(
         exit_reason=exit_reason,
         hold_minutes=hold_minutes,
         source=source,
-        paper=paper,
         trade_ref=trade_ref,
         lesson=lesson,
         mae_pct=mae_pct,

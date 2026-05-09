@@ -126,7 +126,6 @@ def run_replay(
         edge_score=float(gate_dict.get("edge_score", 0.5)),
         cascade_risk_score=float(candidate.get("cascade_risk_score", 0.0)),
         deployed_usd=deployed_usd,
-        paper=True,
     )
     position_usd = float(size_dict.get("position_usd", 0.0))
 
@@ -189,7 +188,6 @@ def run_replay(
                 exit_reason=exit_reason,
                 hold_minutes=60.0,
                 source="replay_harness",
-                paper=True,
                 composite_score=float(score_dict.get("composite_score", 65.0)),
             )
             attribution_result = {"attr_id": attr_id}

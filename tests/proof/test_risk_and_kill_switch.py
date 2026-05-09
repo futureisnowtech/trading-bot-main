@@ -18,7 +18,7 @@ def test_risk_engine_updates_var_from_trade_history(proof_runtime):
         )
 
     risk_engine.reset_daily(5_000.0)
-    risk_engine.update_var_from_db(paper=True)
+    risk_engine.update_var_from_db()
     report = risk_engine.get_risk_report()
 
     assert report["var_95"] > 0
@@ -78,7 +78,7 @@ def test_live_kill_switch_uses_50_pct_of_live_baseline():
     import kill_switch
 
     kill_switch._live_baseline = 0.0  # reset so auto-set fires
-    kill_switch.check_balance(1_966.0, initial_balance=5_000.0, paper=False)
+    kill_switch.check_balance(1_966.0, initial_balance=5_000.0)
 
     # Baseline should be auto-set to first valid balance
     assert kill_switch._live_baseline == 1_966.0
@@ -103,7 +103,7 @@ def test_live_kill_switch_triggers_below_50pct_of_baseline(proof_runtime):
 
     kill_switch.set_live_baseline(1_966.0)
     # Balance at 40% of baseline → below threshold
-    kill_switch.check_balance(786.0, initial_balance=5_000.0, paper=False)
+    kill_switch.check_balance(786.0, initial_balance=5_000.0)
 
     assert kill_switch.is_halted() is True
     reason = kill_switch.get_halt_reason()
@@ -117,7 +117,7 @@ def test_live_halt_reason_reports_baseline_and_threshold(proof_runtime):
     import kill_switch
 
     kill_switch.set_live_baseline(2_000.0)
-    kill_switch.check_balance(900.0, paper=False)
+    kill_switch.check_balance(900.0)
 
     reason = kill_switch.get_halt_reason()
     # Must mention the live baseline concept
@@ -133,7 +133,7 @@ def test_paper_kill_switch_still_uses_75_pct(proof_runtime):
     import kill_switch
 
     # Paper account: balance at 60% of initial → below 75% → should trigger
-    kill_switch.check_balance(3_000.0, initial_balance=5_000.0, paper=True)
+    kill_switch.check_balance(3_000.0, initial_balance=5_000.0)
 
     assert kill_switch.is_halted() is True
     reason = kill_switch.get_halt_reason()
@@ -188,7 +188,7 @@ def test_live_kill_switch_db_log_uses_correct_schema(proof_runtime):
     import kill_switch
 
     kill_switch.set_live_baseline(1_000.0)
-    kill_switch.check_balance(400.0, paper=False)
+    kill_switch.check_balance(400.0)
 
     assert kill_switch.is_halted() is True
 

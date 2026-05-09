@@ -21,7 +21,7 @@ Leverage schedule:
   3. Thesis score — current_signal_score < entry_signal_score × regime_fraction → close all (TRENDING=0.30, RANGING=0.15, HIGH_VOL=0.35, UNKNOWN=0.25)
   4. Hard stop — stop-market on exchange, never widened
   5. Risk forced exit — margin breach / drawdown / correlation
-  6. Kill switch — paper: 75% of paper account; live: 50% of live baseline / API errors / latency
+  6. Kill switch — 50% of live baseline / API errors / latency
 """
 
 import logging
@@ -48,7 +48,7 @@ _KELLY_RAMP = [
 _lock = threading.RLock()
 
 
-def _get_kelly_fraction(account_balance: float, paper: bool = True) -> float:
+def _get_kelly_fraction(account_balance: float) -> float:
     """
     Compute Kelly fraction from closed trade history.
     Falls back to conservative 0.33 if insufficient data.
@@ -61,16 +61,15 @@ def _get_kelly_fraction(account_balance: float, paper: bool = True) -> float:
         # Query ALL closed trades (won IS NOT NULL) — captures both LONG exits
         # (action='SELL') and SHORT exits (action='BUY').
         # Excludes entry legs (won IS NULL), force_test_close test trades,
-        # and contaminated pre-v10 data so Kelly is computed on clean paper data only.
+        # and contaminated pre-v10 data so Kelly is computed on clean data only.
         rows = db.conn.execute(
             """
             SELECT pnl_usd, won FROM trades
-            WHERE paper=? AND won IS NOT NULL
+            WHERE paper=0 AND won IS NOT NULL
               AND source IN ('clean_paper_v10','live_v10')
               AND (notes IS NULL OR notes NOT LIKE '%force_test_close%')
             ORDER BY ts DESC LIMIT 200
-        """,
-            (1 if paper else 0,),
+        """
         ).fetchall()
 
         if len(rows) < 20:
@@ -141,7 +140,6 @@ def compute_position_size(
     edge_score: float = 0.5,
     cascade_risk_score: float = 0,
     deployed_usd: float = 0.0,
-    paper: bool = True,
 ) -> Dict:
     """
     Compute position size in USD and units.
@@ -159,7 +157,7 @@ def compute_position_size(
           'capped_by':       str (what constrained the size),
         }
     """
-    kelly_frac = _get_kelly_fraction(account_balance, paper)
+    kelly_frac = _get_kelly_fraction(account_balance)
 
     # Base dollar risk
     dollar_risk = account_balance * _RISK_PCT
@@ -362,25 +360,17 @@ def check_exits(
         )
 
     # ── Priority 5: Risk forced exit ──────────────────────────────────────
-    # Live and paper must use the same baseline policy as kill_switch.py.
+    # Live must use the same baseline policy as kill_switch.py.
     _kill_floor = 0.0
     _kill_desc = ""
     try:
-        is_paper = bool(position.get("paper", True))
-        if is_paper:
-            from runtime.live_account import get_live_account_size
+        import kill_switch as _ks
 
-            _paper_size = float(get_live_account_size(paper=True))
-            _kill_floor = _paper_size * 0.75
-            _kill_desc = f"75% of paper account ${_paper_size:.0f}"
-        else:
-            import kill_switch as _ks
-
-            _ks_status = _ks.get_status()
-            _kill_floor = float(_ks_status.get("live_threshold") or 0.0)
-            _baseline = float(_ks_status.get("live_baseline") or 0.0)
-            if _kill_floor > 0 and _baseline > 0:
-                _kill_desc = f"50% of live baseline ${_baseline:.2f}"
+        _ks_status = _ks.get_status()
+        _kill_floor = float(_ks_status.get("live_threshold") or 0.0)
+        _baseline = float(_ks_status.get("live_baseline") or 0.0)
+        if _kill_floor > 0 and _baseline > 0:
+            _kill_desc = f"50% of live baseline ${_baseline:.2f}"
     except Exception:
         _kill_floor = 0.0
         _kill_desc = ""

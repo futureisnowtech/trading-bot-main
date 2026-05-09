@@ -140,16 +140,7 @@ class CoinbaseBroker:
     """
 
     def __init__(self, paper: Optional[bool] = None) -> None:
-        if paper is not None:
-            self._paper = bool(paper)
-        else:
-            try:
-                from config import PAPER_TRADING
-
-                self._paper = bool(PAPER_TRADING)
-            except ImportError:
-                self._paper = True  # default safe
-
+        self._paper = False
         self._connected = False
         self._key_name: str = ""
         self._private_key_pem: bytes = b""
@@ -252,11 +243,6 @@ class CoinbaseBroker:
     # ── Connection ────────────────────────────────────────────────────────────
 
     def connect(self) -> bool:
-        if self._paper:
-            logger.info("[cb] Connected (PAPER) — Coinbase US nano perp futures")
-            self._connected = True
-            return True
-
         if not _JWT_OK or not _REQUESTS_OK:
             logger.error("[cb] Cannot connect live: missing PyJWT/requests")
             return False
@@ -306,8 +292,8 @@ class CoinbaseBroker:
     # ── Mark price ────────────────────────────────────────────────────────────
 
     def get_mark_price(self, symbol: str) -> float:
-        if self._paper or not self._connected:
-            return self._fallback_price(symbol)
+        if not self._connected:
+            return 0.0
         try:
             spec = self._spec(symbol)
             data = self._request(
@@ -318,45 +304,12 @@ class CoinbaseBroker:
                 return float(trades[0].get("price", 0))
         except Exception as e:
             logger.debug(f"[cb] get_mark_price error for {symbol}: {e}")
-        return self._fallback_price(symbol)
-
-    # Last-known prices for paper simulation when network is unavailable.
-    # These are reference values only — paper P&L uses the same price for open & close
-    # so the exact value doesn't affect correctness, only the notional sizing.
-    _PAPER_PRICE_FALLBACKS: dict[str, float] = {
-        "BTC": 90_000.0,
-        "ETH": 3_000.0,
-        "SOL": 150.0,
-        "XRP": 0.55,
-    }
-
-    def _fallback_price(self, symbol: str) -> float:
-        """Price for paper mode: yfinance first, then hardcoded reference fallback."""
-        clean = (
-            symbol.upper().replace("USDT", "").replace("USD", "").replace("-PERP", "")
-        )
-        if _YF_OK:
-            try:
-                tk = _yf.Ticker(f"{clean}-USD")
-                hist = tk.history(period="1d", interval="1m")
-                if not hist.empty:
-                    return float(hist["Close"].iloc[-1])
-            except Exception:
-                pass
-        # Hardcoded reference fallback — paper simulation only, never used in live mode
-        ref = self._PAPER_PRICE_FALLBACKS.get(clean, 0.0)
-        if ref > 0:
-            logger.debug(
-                f"[cb] using reference price for {clean} in paper mode: ${ref:,.2f}"
-            )
-        return ref
+        return 0.0
 
     # ── Balance ───────────────────────────────────────────────────────────────
 
     def get_wallet_balance(self) -> float:
-        """Return current account equity.  Paper = ACCOUNT_SIZE + realized P&L from DB."""
-        if self._paper:
-            return self._paper_equity()
+        """Return current account equity."""
         try:
             data = self._request("GET", "/api/v3/brokerage/cfm/balance_summary")
             val = (
@@ -373,40 +326,6 @@ class CoinbaseBroker:
         """Alias for get_wallet_balance — compatible with v10_runner._get_account_balance()."""
         return self.get_wallet_balance()
 
-    def _paper_equity(self) -> float:
-        """Compute paper account equity: ACCOUNT_SIZE + SUM(net pnl) from trades DB."""
-        try:
-            from config import ACCOUNT_SIZE
-
-            base = float(ACCOUNT_SIZE)
-        except Exception:
-            base = 5000.0
-        try:
-            import sqlite3
-            import os
-
-            db_path = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                "logs",
-                "trades.db",
-            )
-            if not os.path.exists(db_path):
-                return base
-            with sqlite3.connect(db_path, timeout=5) as conn:
-                conn.row_factory = sqlite3.Row
-                row = conn.execute(
-                    """SELECT COALESCE(SUM(pnl_usd) - SUM(COALESCE(fee_usd,0)), 0) AS net
-                       FROM trades
-                       WHERE paper=1
-                         AND (source IS NULL OR source NOT IN
-                              ('backtest','pre_v10_contaminated','bybit_paper','paper_v10'))"""
-                ).fetchone()
-                net = float(row["net"]) if row and row["net"] is not None else 0.0
-            return base + net
-        except Exception as e:
-            logger.debug(f"[cb] _paper_equity error: {e}")
-            return base
-
     # ── Funding rate (not applicable to dated contracts) ──────────────────────
 
     def get_funding_rate(self, symbol: str) -> float:
@@ -418,7 +337,7 @@ class CoinbaseBroker:
     # ── Positions ─────────────────────────────────────────────────────────────
 
     def get_position(self, symbol: str) -> Optional[dict]:
-        if not self._paper and self._connected:
+        if self._connected:
             try:
                 return self.get_all_positions().get(self._spec(symbol)["base"])
             except Exception:
@@ -426,7 +345,7 @@ class CoinbaseBroker:
         return self._open_positions.get(symbol)
 
     def sync_live_positions(self) -> Optional[dict]:
-        if self._paper or not self._connected:
+        if not self._connected:
             return dict(self._open_positions)
         try:
             data = self._request("GET", "/api/v3/brokerage/cfm/positions")
@@ -464,7 +383,7 @@ class CoinbaseBroker:
             return None
 
     def get_all_positions(self) -> dict:
-        if self._paper or not self._connected:
+        if not self._connected:
             return dict(self._open_positions)
         synced = self.sync_live_positions()
         if synced is not None:
@@ -507,32 +426,6 @@ class CoinbaseBroker:
                 f"{self._symbol_count[symbol]}/{_MAX_PER_SYMBOL} positions open."
             )
             return None
-
-        if self._paper:
-            qty = size_usd / price
-            order_id = f"cb_paper_{symbol}_{int(time.time())}"
-            logger.info(
-                f"[cb] PAPER LONG {symbol} ({spec['product_id']}): {qty:.6f} @ {price:.4f} lev={leverage}x"
-            )
-            order = {
-                "orderId": order_id,
-                "symbol": symbol,
-                "product_id": spec["product_id"],
-                "side": "BUY",
-                "avgPrice": str(price),
-                "origQty": str(round(qty, 6)),
-                "status": "FILLED",
-                "paper": True,
-                "venue": "coinbase",
-            }
-            self._open_positions[symbol] = {
-                "direction": "LONG",
-                "entry_price": price,
-                "qty": qty,
-                "symbol": symbol,
-            }
-            self._symbol_count[symbol] = self._symbol_count.get(symbol, 0) + 1
-            return order
 
         # Live path
         contracts = self._qty_to_contracts(spec, size_usd, price)
@@ -622,32 +515,6 @@ class CoinbaseBroker:
             )
             return None
 
-        if self._paper:
-            qty = size_usd / price
-            order_id = f"cb_paper_{symbol}_{int(time.time())}"
-            logger.info(
-                f"[cb] PAPER SHORT {symbol} ({spec['product_id']}): {qty:.6f} @ {price:.4f} lev={leverage}x"
-            )
-            order = {
-                "orderId": order_id,
-                "symbol": symbol,
-                "product_id": spec["product_id"],
-                "side": "SELL",
-                "avgPrice": str(price),
-                "origQty": str(round(qty, 6)),
-                "status": "FILLED",
-                "paper": True,
-                "venue": "coinbase",
-            }
-            self._open_positions[symbol] = {
-                "direction": "SHORT",
-                "entry_price": price,
-                "qty": qty,
-                "symbol": symbol,
-            }
-            self._symbol_count[symbol] = self._symbol_count.get(symbol, 0) + 1
-            return order
-
         # Live path
         contracts = self._qty_to_contracts(spec, size_usd, price)
         if contracts < 1:
@@ -722,39 +589,34 @@ class CoinbaseBroker:
         else:
             pnl_usd = (entry_price - exit_price) * qty
 
-        if not self._paper:
-            # Live: place opposing market order to close
-            try:
-                spec = self._spec(symbol)
-                contracts = pos.get(
-                    "contracts",
-                    self._qty_to_contracts(
-                        spec, pos.get("position_usd", 0), exit_price
-                    ),
-                )
-                if contracts < 1:
-                    contracts = 1
-                close_side = "SELL" if direction == "LONG" else "BUY"
-                body = {
-                    "client_order_id": str(uuid.uuid4()),
-                    "product_id": spec["product_id"],
-                    "side": close_side,
-                    "order_configuration": {
-                        "market_market_ioc": {"base_size": str(contracts)}
-                    },
-                    "margin_type": "ISOLATED",
-                }
-                self._request("POST", "/api/v3/brokerage/orders", body)
-                logger.info(
-                    f"[cb] LIVE CLOSE {symbol}: {contracts} contracts @ ~{exit_price:.4f} pnl=${pnl_usd:.2f}"
-                )
-            except Exception as e:
-                logger.error(f"[cb] close_position LIVE error {symbol}: {e}")
-                # Return a close result anyway so the bot can clean up state
-        else:
-            logger.info(
-                f"[cb] PAPER CLOSE {symbol}: pnl=${pnl_usd:.2f} reason={reason}"
+        # Live: place opposing market order to close
+        try:
+            spec = self._spec(symbol)
+            contracts = pos.get(
+                "contracts",
+                self._qty_to_contracts(
+                    spec, pos.get("position_usd", 0), exit_price
+                ),
             )
+            if contracts < 1:
+                contracts = 1
+            close_side = "SELL" if direction == "LONG" else "BUY"
+            body = {
+                "client_order_id": str(uuid.uuid4()),
+                "product_id": spec["product_id"],
+                "side": close_side,
+                "order_configuration": {
+                    "market_market_ioc": {"base_size": str(contracts)}
+                },
+                "margin_type": "ISOLATED",
+            }
+            self._request("POST", "/api/v3/brokerage/orders", body)
+            logger.info(
+                f"[cb] LIVE CLOSE {symbol}: {contracts} contracts @ ~{exit_price:.4f} pnl=${pnl_usd:.2f}"
+            )
+        except Exception as e:
+            logger.error(f"[cb] close_position LIVE error {symbol}: {e}")
+            # Return a close result anyway so the bot can clean up state
 
         self._open_positions.pop(symbol, None)
         self._symbol_count[symbol] = max(0, self._symbol_count.get(symbol, 0) - 1)
@@ -766,7 +628,7 @@ class CoinbaseBroker:
             "pnl_usd": round(pnl_usd, 4),
             "reason": reason,
             "venue": "coinbase",
-            "paper": self._paper,
+            "paper": False,
         }
 
 

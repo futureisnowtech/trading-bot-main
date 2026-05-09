@@ -412,7 +412,6 @@ def write_to_db(trades: list, params: dict, n_contracts: int = 2):
             qty=n_contracts,
             price=t["entry"],
             fee_usd=COMMISSION * n_contracts,
-            paper=True,
             order_id=f"BACKTEST_{t['date'].replace('-', '')}_{t['side'][:1]}",
             notes=(
                 f"OR={t['or_low']:.2f}-{t['or_high']:.2f} "
@@ -431,7 +430,6 @@ def write_to_db(trades: list, params: dict, n_contracts: int = 2):
             fee_usd=COMMISSION * n_contracts,
             pnl_usd=net_pnl,
             pnl_pct=net_pnl / (t["entry"] * n_contracts * POINT_VALUE),
-            paper=True,
             order_id=f"BACKTEST_{t['date'].replace('-', '')}_{t['side'][:1]}_X",
             notes=f"reason={t['exit_reason']} backtest",
             won=won,

@@ -148,7 +148,7 @@ def check_preflight() -> None:
     try:
         from execution.coinbase_spot_broker import CoinbaseSpotBroker
 
-        broker = CoinbaseSpotBroker(paper=False)
+        broker = CoinbaseSpotBroker()
         bal = broker.get_spot_balance() or {}
         usd = float(bal.get("usd_available") or 0)
         print(f"         Coinbase spot USD available: ${usd:.2f}")
@@ -194,13 +194,12 @@ def execute_open() -> dict:
     from spot_engine import open_spot
 
     print(
-        f"         Calling open_spot(BTC, ${SIZE_USD}, paper=False, spot_state=TREND/impulse_continuation)"
+        f"         Calling open_spot(BTC, ${SIZE_USD}, spot_state=TREND/impulse_continuation)"
     )
     start = time.time()
     result = open_spot(
         symbol=SYMBOL,
         size_usd=SIZE_USD,
-        paper=False,
         composite_score=78.0,
         final_spot_score=78.0,
         atr_at_entry=0.0,
@@ -239,8 +238,7 @@ def verify_open_db(snap: dict, open_result: dict) -> dict:
 
     # trades table
     buy_row = conn.execute(
-        "SELECT * FROM trades WHERE id > ? AND symbol='BTC' AND action='BUY' AND strategy='spot_btc' AND paper=0",
-        (snap["max_trade_id"],),
+        "SELECT * FROM trades WHERE id > ? AND symbol='BTC' AND action='BUY' AND strategy='spot_btc' AND (snap["max_trade_id"],),
     ).fetchone()
     if not buy_row:
         conn.close()
@@ -304,11 +302,10 @@ def execute_close() -> dict:
     print("         Waiting 2s before close to allow position to settle...")
     time.sleep(2)
 
-    print(f"         Calling close_spot(BTC, paper=False, exit_reason={EXIT_REASON!r})")
+    print(f"         Calling close_spot(BTC, exit_reason={EXIT_REASON!r})")
     start = time.time()
     result = close_spot(
         symbol=SYMBOL,
-        paper=False,
         exit_reason=EXIT_REASON,
     )
     elapsed = time.time() - start
@@ -426,7 +423,7 @@ def verify_kill_switch(snap: dict) -> None:
     from runtime.spot_kill_switch import check_spot_kill_switch, kill_switch_status
 
     # Should still fire KS10a because of pre-existing consecutive losses from before restart
-    halt, reason = check_spot_kill_switch(paper=False)
+    halt, reason = check_spot_kill_switch()
     print(f"         KS check: halt={halt}, reason={reason!r}")
     if halt:
         _pass(f"Kill switch correctly armed: {reason}")

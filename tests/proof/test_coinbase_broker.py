@@ -45,7 +45,7 @@ def broker():
     """CoinbaseBroker instance in paper mode — no API calls made."""
     from execution.coinbase_broker import CoinbaseBroker
 
-    return CoinbaseBroker(paper=True)
+    return CoinbaseBroker()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -164,7 +164,7 @@ def test_cb05_paper_open_short_returns_order_dict(broker):
 def test_cb06_paper_close_position_returns_pnl(broker):
     from execution.coinbase_broker import CoinbaseBroker
 
-    b = CoinbaseBroker(paper=True)
+    b = CoinbaseBroker()
     # Simulate a long position we know the details of
     pos = {
         "symbol": "BTC",
@@ -182,7 +182,7 @@ def test_cb06_paper_close_position_returns_pnl(broker):
 def test_cb06_paper_close_short_position(broker):
     from execution.coinbase_broker import CoinbaseBroker
 
-    b = CoinbaseBroker(paper=True)
+    b = CoinbaseBroker()
     pos = {
         "symbol": "ETH",
         "direction": "SHORT",
@@ -203,7 +203,7 @@ def test_cb07_duplicate_open_long_allowed_up_to_3():
     """Up to 3 same-direction entries per symbol allowed (scaling in); 4th is blocked."""
     from execution.coinbase_broker import CoinbaseBroker
 
-    b = CoinbaseBroker(paper=True)
+    b = CoinbaseBroker()
     first = b.open_long(symbol="XRP", size_usd=100.0, leverage=3)
     assert first is not None, "First open should succeed"
     second = b.open_long(symbol="XRP", size_usd=100.0, leverage=3)
@@ -220,7 +220,7 @@ def test_cb07_duplicate_open_short_allowed_up_to_3():
     """Up to 3 same-direction entries per symbol allowed; 4th is blocked."""
     from execution.coinbase_broker import CoinbaseBroker
 
-    b = CoinbaseBroker(paper=True)
+    b = CoinbaseBroker()
     first = b.open_short(symbol="BTC", size_usd=100.0, leverage=3)
     assert first is not None
     second = b.open_short(symbol="BTC", size_usd=100.0, leverage=3)
@@ -234,7 +234,7 @@ def test_cb07_duplicate_open_short_allowed_up_to_3():
 def test_cb07_close_then_reopen_allowed():
     from execution.coinbase_broker import CoinbaseBroker
 
-    b = CoinbaseBroker(paper=True)
+    b = CoinbaseBroker()
     b.open_long(symbol="SOL", size_usd=100.0, leverage=3)
     pos = {"symbol": "SOL", "direction": "LONG", "entry_price": 150.0, "qty": 5.0}
     b.close_position("SOL", pos_fallback=pos)
@@ -425,7 +425,7 @@ def test_cb18_funding_rate_is_zero_for_dated_contracts(broker):
 def test_cb19_qty_to_contracts_floors_btc():
     from execution.coinbase_broker import CoinbaseBroker, PRODUCT_SPECS
 
-    b = CoinbaseBroker(paper=True)
+    b = CoinbaseBroker()
     spec = PRODUCT_SPECS["BTC"]
     # 1 BIP = 0.01 BTC. At $90,000, 1 contract = $900 notional.
     # $500 at price $90,000 → floor(500/900) = 0 contracts
@@ -441,7 +441,7 @@ def test_cb19_qty_to_contracts_floors_btc():
 def test_cb19_qty_to_contracts_floors_eth():
     from execution.coinbase_broker import CoinbaseBroker, PRODUCT_SPECS
 
-    b = CoinbaseBroker(paper=True)
+    b = CoinbaseBroker()
     spec = PRODUCT_SPECS["ETH"]
     # 1 ETP = 0.1 ETH. At $3,000, 1 contract = $300 notional.
     # $150 → 0 contracts
@@ -464,7 +464,7 @@ def test_cb20_paper_mode_works_without_cdp_credentials(monkeypatch):
     monkeypatch.setenv("COINBASE_CDP_KEY_NAME", "")
     monkeypatch.setenv("COINBASE_CDP_PRIVATE_KEY", "")
 
-    b = CoinbaseBroker(paper=True)
+    b = CoinbaseBroker()
     result = b.open_long(symbol="BTC", size_usd=500.0, leverage=3)
     # Paper mode: should succeed (simulation) even with no creds
     # Note: paper trades with size_usd < 1 contract notional return None gracefully

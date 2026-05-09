@@ -88,9 +88,7 @@ def get_crypto_header() -> dict:
 
     # Runtime mode
     try:
-        from db import _runtime_paper_flag
-
-        result["mode_label"] = "PAPER" if _runtime_paper_flag() else "LIVE"
+        result["mode_label"] = "PAPER" if False else "LIVE"
     except Exception:
         pass
 

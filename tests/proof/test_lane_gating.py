@@ -264,7 +264,7 @@ def test_dead_money_exempt_with_partial_close(proof_runtime, monkeypatch):
     import config
     import monitoring.health_check as hc
 
-    monkeypatch.setattr(config, "PAPER_TRADING", True, raising=False)
+    monkeypatch.setattr(config, "False", True, raising=False)
     monkeypatch.setattr(hc, "DB_PATH", str(proof_runtime.db_path), raising=False)
 
     # Insert an open position (stale — > 48h old)
@@ -293,7 +293,6 @@ def test_dead_money_exempt_with_partial_close(proof_runtime, monkeypatch):
         action="SELL",
         broker="coinbase_paper",
         notes="scale_out partial 33%",
-        paper=1,
     )
 
     # Now the partial_close_syms set should contain AAVEUSDT

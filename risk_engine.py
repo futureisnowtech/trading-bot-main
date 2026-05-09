@@ -128,10 +128,9 @@ def update_balances(
         except ImportError:
             pass
 
-    # Kill switch check is handled by v10_runner.kill_switch_monitor() which
-    # passes the correct paper/live flag.  Do NOT call it here — peak_balance
-    # starts at the hardcoded 10 000 default and has no mode awareness, which
-    # caused false live-mode triggers (1966 < 0.75*10000 = 7500).
+    # Kill switch check is handled by v10_runner.kill_switch_monitor().
+    # peak_balance starts at the hardcoded 10 000 default and has no mode awareness,
+    # which caused false live-mode triggers (1966 < 0.75*10000 = 7500).
 
 
 def reset_daily(balance: float):
@@ -167,7 +166,7 @@ def compute_var_cvar(
     return round(float(var), 2), round(float(cvar), 2)
 
 
-def update_var_from_db(paper: bool = True):
+def update_var_from_db():
     """Compute VaR/CVaR from trade history. Call periodically."""
     try:
         from logging_db.trade_logger import get_logger
@@ -176,10 +175,9 @@ def update_var_from_db(paper: bool = True):
         rows = db.conn.execute(
             """
             SELECT pnl_usd FROM trades
-            WHERE paper=? AND action='SELL'
+            WHERE paper=0 AND action='SELL'
             ORDER BY ts DESC LIMIT 200
-        """,
-            (1 if paper else 0,),
+        """
         ).fetchall()
 
         if len(rows) < 10:
@@ -307,7 +305,7 @@ def can_open_new_position() -> Tuple[bool, str]:
     if margin >= _MARGIN_NO_NEW:
         return False, f"Margin utilization {margin:.0%} >= {_MARGIN_NO_NEW:.0%}"
 
-    # Max deployed — 95% in paper/perps-focused mode
+    # Max deployed — 95%
     if deployed >= balance * 0.95:
         return False, f"Deployed ${deployed:.0f} >= 95% of balance ${balance:.0f}"
 

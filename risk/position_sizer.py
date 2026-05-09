@@ -13,11 +13,10 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from logging_db.trade_logger import get_kelly_stats, log_event
-from config import PAPER_TRADING
 
 
 def size_from_kelly(strategy: str, symbol: str, base_size: float,
-                    confidence: float, paper: bool) -> float:
+                    confidence: float, paper: bool = False) -> float:
     """
     Apply heat-adjusted Kelly sizing to base_size.
 
@@ -25,7 +24,7 @@ def size_from_kelly(strategy: str, symbol: str, base_size: float,
     """
     # ── Step 1: Heat level scaling ────────────────────────────────────────────
     from risk.drawdown_controller import get_heat_level
-    heat = get_heat_level(paper=paper)
+    heat = get_heat_level()
     heat_factor = heat['size_factor']
 
     if heat['level'] > 0:
@@ -39,20 +38,18 @@ def size_from_kelly(strategy: str, symbol: str, base_size: float,
         return 0.0
 
     # ── Step 2 + 3: Losing streak clamp + Kelly ───────────────────────────────
-    # Paper mode: never clamp on losing streaks — every trade is a learning event.
     # Live mode: 5-loss streak → 50% size to protect capital.
-    kelly = get_kelly_stats(strategy=strategy, paper=paper, window=50)
+    kelly = get_kelly_stats(strategy=strategy, window=50)
 
     losing_streak = False
-    if not PAPER_TRADING:
-        try:
-            recent = get_kelly_stats(strategy=strategy, paper=paper, window=5)
-            if recent['n_trades'] >= 5 and recent['win_rate'] == 0.0:
-                losing_streak = True
-                log_event('INFO', 'risk',
-                          f"[Kelly] {strategy}/{symbol}: 5-trade losing streak — clamping to 50%")
-        except Exception:
-            pass
+    try:
+        recent = get_kelly_stats(strategy=strategy, window=5)
+        if recent['n_trades'] >= 5 and recent['win_rate'] == 0.0:
+            losing_streak = True
+            log_event('INFO', 'risk',
+                      f"[Kelly] {strategy}/{symbol}: 5-trade losing streak — clamping to 50%")
+    except Exception:
+        pass
 
     if losing_streak:
         kelly_factor = 0.50

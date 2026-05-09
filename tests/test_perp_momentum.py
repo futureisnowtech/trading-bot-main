@@ -128,9 +128,9 @@ class TestPerpMomentumPath:
         ADX >= 12, funding ok — even without a new price high.
         """
         from strategies.crypto_perp_strategy import get_perp_signal, _BREAKOUT_BARS
-        from config import PAPER_TRADING
+        
 
-        if not PAPER_TRADING:
+        if not False:
             pytest.skip("Momentum path only active in paper mode")
 
         n = _BREAKOUT_BARS + 10
@@ -172,9 +172,9 @@ class TestPerpMomentumPath:
     def test_short_momentum_fires_in_paper(self):
         """SHORT momentum: MACD hist negative and diving, RSI in [28,50], funding >= min."""
         from strategies.crypto_perp_strategy import get_perp_signal, _BREAKOUT_BARS
-        from config import PAPER_TRADING
+        
 
-        if not PAPER_TRADING:
+        if not False:
             pytest.skip("Momentum path only active in paper mode")
 
         n = _BREAKOUT_BARS + 10
@@ -210,9 +210,9 @@ class TestPerpMomentumPath:
     def test_momentum_long_blocked_when_rsi_too_high(self):
         """Momentum LONG must NOT fire if RSI > 72 (overbought — not the right entry band)."""
         from strategies.crypto_perp_strategy import get_perp_signal, _BREAKOUT_BARS
-        from config import PAPER_TRADING
+        
 
-        if not PAPER_TRADING:
+        if not False:
             pytest.skip("Momentum path only active in paper mode")
 
         n = _BREAKOUT_BARS + 10
@@ -247,9 +247,9 @@ class TestPerpMomentumPath:
     def test_momentum_not_active_when_adx_too_low(self):
         """Momentum path must not fire when ADX < 12 (no trend — random noise)."""
         from strategies.crypto_perp_strategy import get_perp_signal, _BREAKOUT_BARS
-        from config import PAPER_TRADING
+        
 
-        if not PAPER_TRADING:
+        if not False:
             pytest.skip("Momentum path only active in paper mode")
 
         n = _BREAKOUT_BARS + 10
@@ -283,9 +283,9 @@ class TestPerpMomentumPath:
     def test_confidence_cap_at_75pct(self):
         """Momentum path confidence must never exceed 0.75."""
         from strategies.crypto_perp_strategy import get_perp_signal, _BREAKOUT_BARS
-        from config import PAPER_TRADING
+        
 
-        if not PAPER_TRADING:
+        if not False:
             pytest.skip("Momentum path only active in paper mode")
 
         n = _BREAKOUT_BARS + 10

@@ -63,14 +63,15 @@ def _get_tier_info(sym: str) -> dict:
 
 def _runtime_live_flag() -> bool:
     try:
-        from db import _runtime_paper_flag as _rflag
+        from db import get_effective_launch_date
+_rflag = lambda: False
 
         return not bool(_rflag())
     except Exception:
         try:
-            from config import PAPER_TRADING
+            
 
-            return not bool(PAPER_TRADING)
+            return not bool(False)
         except Exception:
             return False
 
@@ -504,7 +505,6 @@ def render_manual_scan():
             ml_score=composite,
             composite_score=composite,
             deployed_usd=deployed,
-            paper=exec_paper,
         )
         pos_usd = sizing["position_usd"]
         leverage = sizing["leverage"]
@@ -601,16 +601,17 @@ def render_manual_scan():
         ):
             # Resolve mode + balance once
             try:
-                from db import _runtime_paper_flag as _rflag
+                from db import get_effective_launch_date
+_rflag = lambda: False
 
                 _exec_paper = bool(_rflag())
             except Exception:
                 try:
-                    from config import PAPER_TRADING
+                    
 
-                    _exec_paper = bool(PAPER_TRADING)
+                    _exec_paper = bool(False)
                 except Exception:
-                    _exec_paper = True
+                    _exec_paper = False
 
             if not _exec_paper:
                 try:
@@ -663,13 +664,14 @@ def render_manual_scan():
     # ── PHASE 2: Confirmation panel ───────────────────────────────────────────
     # Always re-read runtime paper flag — never trust stale session-state preview
     try:
-        from db import _runtime_paper_flag as _rflag_p2
+        from db import get_effective_launch_date
+_rflag = lambda: False_p2
 
         _exec_paper = bool(_rflag_p2())
     except Exception:
         _exec_paper = previews[0].get("exec_paper", True)
     _acct_balance = previews[0].get("acct_balance", 5000.0)
-    mode_label = "PAPER" if _exec_paper else "LIVE"
+    mode_label = "LIVE" if _exec_paper else "LIVE"
     mode_color = "orange" if _exec_paper else "red"
 
     st.markdown(f"### Order Review — :{mode_color}[{mode_label} MODE]")
@@ -773,16 +775,17 @@ def render_manual_scan():
             # ── PHASE 3: Execute confirmed orders ─────────────────────────────
             # Re-read paper flag fresh at execute time — never trust stale preview cache
             try:
-                from db import _runtime_paper_flag as _rflag_exec
+                from db import get_effective_launch_date
+_rflag = lambda: False_exec
 
                 _exec_paper = bool(_rflag_exec())
             except Exception:
                 try:
-                    from config import PAPER_TRADING as _PT
+                     import config as _PT
 
                     _exec_paper = bool(_PT)
                 except Exception:
-                    _exec_paper = True
+                    _exec_paper = False
             try:
                 _hd_spec = _ilu.spec_from_file_location(
                     "_root_data_historical_data",
@@ -888,7 +891,7 @@ def render_manual_scan():
                         target_p = round(price + target_dist, 6)
                         try:
                             pos = _se_exec.open_spot(
-                                exec_sym, pos_usd, paper=_exec_paper
+                                exec_sym, pos_usd
                             )
                         except Exception as _spot_exc:
                             results.append(
@@ -919,7 +922,7 @@ def render_manual_scan():
                                     dirn,
                                     False,
                                     f"spot None (lane={_lane_on}, sym_ok={exec_sym in _syms}, "
-                                    f"size=${pos_usd:.0f}>=${_min_sz:.0f}, paper={_exec_paper})",
+                                    f"size=${pos_usd:.0f}>=${_min_sz:.0f})",
                                 )
                             )
                     else:
@@ -938,7 +941,6 @@ def render_manual_scan():
                                 atr_at_entry=atr_7,
                                 regime="UNKNOWN",
                                 entry_setup=f"manual_{setup}",
-                                paper=_exec_paper,
                             )
                         else:
                             stop_p = round(price + stop_dist, 6)
@@ -954,7 +956,6 @@ def render_manual_scan():
                                 atr_at_entry=atr_7,
                                 regime="UNKNOWN",
                                 entry_setup=f"manual_{setup}",
-                                paper=_exec_paper,
                             )
 
                         if pos:
@@ -1150,18 +1151,19 @@ def render_spot_section():
 
     # Paper flag
     try:
-        from db import _runtime_paper_flag as _rflag
+        from db import get_effective_launch_date
+_rflag = lambda: False
 
         _exec_paper = bool(_rflag())
     except Exception:
         try:
-            from config import PAPER_TRADING
+            
 
-            _exec_paper = bool(PAPER_TRADING)
+            _exec_paper = bool(False)
         except Exception:
-            _exec_paper = True
+            _exec_paper = False
 
-    mode_label = "PAPER" if _exec_paper else "LIVE"
+    mode_label = "LIVE" if _exec_paper else "LIVE"
 
     st.caption(
         "The bot scans the full 8-symbol spot scalp universe continuously and enters "
@@ -1352,7 +1354,7 @@ def render_spot_section():
                 f"Sell all {sym} now", key=f"spot_sell_{sym}", type="secondary"
             ):
                 try:
-                    result = _se.close_spot(sym, paper=_exec_paper)
+                    result = _se.close_spot(sym)
                     if result:
                         pnl = result.get("pnl_usd", 0.0)
                         st.session_state["spot_manual_message"] = {
@@ -1430,7 +1432,6 @@ def render_spot_section():
                         pos_result = _se.open_spot(
                             sym,
                             size_input,
-                            paper=_exec_paper,
                             composite_score=float(scan.get("score") or 0.0),
                             spot_state=_spot_state,
                             final_spot_score=float(score or 0.0),

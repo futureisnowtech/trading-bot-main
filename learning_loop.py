@@ -605,7 +605,7 @@ def maybe_trigger_retrains(paper: bool = True) -> List[str]:
         try:
             from ml.walk_forward_trainer import train_walk_forward
             logger.info(f'[learning] triggering retrain: {pair_key}/{direction}')
-            result = train_walk_forward(pair_key, direction, paper=paper, optimize=False)
+            result = train_walk_forward(pair_key, direction, optimize=False)
             mark_retrain_done(pair_key, direction)
             if result.get('passed'):
                 triggered.append(f'{pair_key}/{direction}')
@@ -636,7 +636,7 @@ def run_nightly_rbi(symbol: str = 'BTCUSDT', paper: bool = True) -> Dict:
         from rbi.research_loop import run_research
         from rbi.backtest_loop import run_all_pending
 
-        promoted = run_research(symbol, paper=paper)
+        promoted = run_research(symbol)
         results['promoted'] = len(promoted)
         logger.info(f'[learning/rbi] {symbol}: {len(promoted)} combos promoted')
 

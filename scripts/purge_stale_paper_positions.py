@@ -2,7 +2,7 @@
 One-time cleanup: remove stale paper=1 open_positions that are orphaned
 since the bot transitioned to live trading on 2026-04-15.
 These positions were never closed and no live monitoring is happening for them.
-Safe to delete: live mode queries filter paper=0, so they never show in live UI anyway.
+Safe to delete: live mode queries filter so they never show in live UI anyway.
 Run once: python3 scripts/purge_stale_paper_positions.py
 """
 

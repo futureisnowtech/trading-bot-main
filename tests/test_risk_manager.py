@@ -168,7 +168,7 @@ class TestDrawdownHeat:
              patch('risk.drawdown_controller.get_todays_fees', return_value=0.0), \
              patch('risk.drawdown_controller.get_all_time_stats',
                    return_value={'total_pnl': all_time_pnl}):
-            return get_heat_level(paper=True)
+            return get_heat_level()
 
     def test_normal_no_loss(self):
         heat = self._heat(0.0)

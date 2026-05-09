@@ -68,7 +68,7 @@ def main() -> int:
 
     sys_state = get_system_state()
     crypto = get_lane_state("crypto")
-    truth = get_spot_position_truth(paper=False)
+    truth = get_spot_position_truth()
     ks = kill_switch_status()
     health = _latest_health()
 

@@ -256,8 +256,8 @@ def test_position_reconciler_repairs_flags(proof_runtime, monkeypatch):
 
     db = str(proof_runtime.db_path)
     monkeypatch.setattr(pr, "DB_PATH", db, raising=False)
-    monkeypatch.setattr(pr, "PAPER_TRADING", True, raising=False)
-    monkeypatch.setattr(config, "PAPER_TRADING", True, raising=False)
+    monkeypatch.setattr(pr, "False", True, raising=False)
+    monkeypatch.setattr(config, "False", True, raising=False)
 
     _init_open_positions_table(proof_runtime.db_path)
 
@@ -368,7 +368,7 @@ def test_lane_registry_mes_disabled_by_default(monkeypatch):
     import config
 
     monkeypatch.setattr(config, "FUTURES_LANE_ACTIVE", False, raising=False)
-    monkeypatch.setattr(config, "PAPER_TRADING", True, raising=False)
+    monkeypatch.setattr(config, "False", True, raising=False)
     monkeypatch.setattr(config, "FORECAST_LANE_ACTIVE", False, raising=False)
     monkeypatch.setattr(config, "STOCKS_LANE_ACTIVE", False, raising=False)
     monkeypatch.setattr(config, "COINBASE_CDP_KEY_NAME", "", raising=False)
@@ -392,7 +392,7 @@ def test_lane_registry_mes_disabled_by_default(monkeypatch):
     assert "stocks" not in active_ids, (
         f"stocks should not be active when STOCKS_LANE_ACTIVE=False, got: {active_ids}"
     )
-    # crypto should be active (PAPER_TRADING=True)
+    # crypto should be active (False=True)
     assert "crypto" in active_ids, "crypto should be active in paper mode"
 
 

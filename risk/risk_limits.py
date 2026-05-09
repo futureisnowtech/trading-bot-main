@@ -112,7 +112,7 @@ def check_position_limits(strategy: str, symbol: str, side: str,
                         )
 
     # Daily trade count cap
-    count = get_daily_trade_count(strategy, paper=paper)
+    count = get_daily_trade_count(strategy)
     max_t = MAX_TRADES_PER_DAY_EQUITY if is_eq else MAX_TRADES_PER_DAY_CRYPTO
     if count >= max_t:
         return RiskCheckResult(False, f"Max {max_t} trades/day reached ({strategy})")

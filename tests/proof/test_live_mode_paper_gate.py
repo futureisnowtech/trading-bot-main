@@ -3,7 +3,7 @@ tests/proof/test_live_mode_paper_gate.py
 
 Invariant proof tests for the live-mode / paper-gate bug class.
 
-Root cause: dashboard used hardcoded paper=1 SQL and config.PAPER_TRADING
+Root cause: dashboard used hardcoded paper=1 SQL and config.False
 instead of reading system_runtime_state.process_mode (the runtime source
 of truth). This allowed paper-era open positions and P&L to bleed into the
 live dashboard even after go_live.py completed.
@@ -34,22 +34,22 @@ def test_runtime_paper_flag_live_db_overrides_paper_config(proof_runtime, monkey
     THE KEY INVARIANT.
 
     If system_runtime_state says 'live', _runtime_paper_flag() must return 0
-    even if config.PAPER_TRADING is True (stale config from a previous restart).
+    even if config.False is True (stale config from a previous restart).
 
     This is the exact scenario after go_live.py: the .env is updated but the
-    dashboard process may have cached config.PAPER_TRADING=True at import time.
+    dashboard process may have cached config.False=True at import time.
     The runtime DB must win.
     """
     import config
 
-    monkeypatch.setattr(config, "PAPER_TRADING", True, raising=False)
+    monkeypatch.setattr(config, "False", True, raising=False)
     upsert_runtime_state(proof_runtime.db_path, process_mode="live")
 
     from db import _runtime_paper_flag
 
     assert _runtime_paper_flag() == 0, (
         "_runtime_paper_flag() must return 0 when DB says 'live', "
-        "regardless of config.PAPER_TRADING value"
+        "regardless of config.False value"
     )
 
 
@@ -71,14 +71,14 @@ def test_runtime_paper_flag_falls_back_to_config_when_no_db_row(
 ):
     """
     When system_runtime_state has no rows (fresh DB, table may not exist),
-    _runtime_paper_flag() must fall back to config.PAPER_TRADING.
-    The conftest patches config.PAPER_TRADING=True so fallback returns 1.
+    _runtime_paper_flag() must fall back to config.False.
+    The conftest patches config.False=True so fallback returns 1.
     """
     # Do NOT call upsert_runtime_state — leave table absent
     from db import _runtime_paper_flag
 
     assert _runtime_paper_flag() == 1, (
-        "With no runtime state row and config.PAPER_TRADING=True (patched by fixture), "
+        "With no runtime state row and config.False=True (patched by fixture), "
         "flag must be 1 (paper)"
     )
 
@@ -94,9 +94,9 @@ def test_paper_open_positions_not_shown_in_live_dashboard(proof_runtime, monkeyp
     the paper trading phase.  With runtime=live, get_open_positions() must
     return an empty list so they do not appear in the live dashboard.
     """
-    insert_open_position(proof_runtime.db_path, symbol="BTCUSDT", paper=1)
+    insert_open_position(proof_runtime.db_path, symbol="BTCUSDT")
     insert_open_position(
-        proof_runtime.db_path, symbol="ETHUSDT", strategy="crypto_perp2", paper=1
+        proof_runtime.db_path, symbol="ETHUSDT", strategy="crypto_perp2"
     )
     upsert_runtime_state(proof_runtime.db_path, process_mode="live")
 
@@ -117,7 +117,7 @@ def test_live_open_positions_appear_in_live_dashboard(proof_runtime, monkeypatch
     confirms it. DB metadata may enrich the row, but the exchange snapshot is
     the gating truth.
     """
-    insert_open_position(proof_runtime.db_path, symbol="BTCUSDT", paper=0)
+    insert_open_position(proof_runtime.db_path, symbol="BTCUSDT")
     upsert_runtime_state(proof_runtime.db_path, process_mode="live")
 
     monkeypatch.delitem(sys.modules, "data.positions", raising=False)
@@ -148,9 +148,9 @@ def test_live_open_positions_appear_in_live_dashboard(proof_runtime, monkeypatch
 
 def test_paper_positions_still_shown_in_paper_dashboard(proof_runtime):
     """
-    In paper mode, paper=1 positions must still appear (regression guard).
+    In paper mode positions must still appear (regression guard).
     """
-    insert_open_position(proof_runtime.db_path, symbol="XRPUSDT", paper=1)
+    insert_open_position(proof_runtime.db_path, symbol="XRPUSDT")
     upsert_runtime_state(proof_runtime.db_path, process_mode="paper")
 
     from data.positions import get_open_positions
@@ -186,7 +186,7 @@ def test_spot_dashboard_uses_live_broker_truth_even_when_runtime_is_paper(
     monkeypatch.setattr(
         spt,
         "get_spot_position_truth",
-        lambda paper=False, broker_holdings=None, db_path=None: {
+        lambda broker_holdings=None, db_path=None: {
             "all_live_holdings": [
                 {
                     "symbol": "ETH",
@@ -216,7 +216,7 @@ def test_live_perp_positions_fail_closed_when_broker_snapshot_unavailable(
     broker snapshot is unavailable. Unknown is safer than phantom.
     """
     insert_open_position(
-        proof_runtime.db_path, symbol="SOL", strategy="v10_perp", paper=0
+        proof_runtime.db_path, symbol="SOL", strategy="v10_perp"
     )
     upsert_runtime_state(proof_runtime.db_path, process_mode="live")
 
@@ -240,7 +240,7 @@ def test_live_perp_positions_fail_closed_when_broker_snapshot_unavailable(
 def test_live_account_unrealized_pnl_excludes_paper_positions(proof_runtime):
     """
     get_account() computes unrealized PnL from get_open_positions().
-    With runtime=live, paper=1 positions must not contribute to unrealized PnL
+    With runtime=live positions must not contribute to unrealized PnL
     even if they exist in the DB.
 
     This is the exact mixing bug: live realized=0, paper unrealized=+$500 →
@@ -250,7 +250,6 @@ def test_live_account_unrealized_pnl_excludes_paper_positions(proof_runtime):
     insert_open_position(
         proof_runtime.db_path,
         symbol="BTCUSDT",
-        paper=1,
         entry=10000.0,  # would show big gain at any real price
         qty=1.0,
     )
@@ -277,7 +276,6 @@ def test_live_performance_stats_exclude_paper_trades(proof_runtime):
         proof_runtime.db_path,
         pnl_usd=100.0,
         won=1,
-        paper=1,
         source="clean_paper_v10",
     )
     upsert_runtime_state(proof_runtime.db_path, process_mode="live")
@@ -299,7 +297,6 @@ def test_live_performance_stats_include_live_trades(proof_runtime):
         proof_runtime.db_path,
         pnl_usd=50.0,
         won=1,
-        paper=0,
         source="live_v10",
     )
     upsert_runtime_state(proof_runtime.db_path, process_mode="live")
@@ -315,7 +312,7 @@ def test_live_trade_log_excludes_paper_trades(proof_runtime):
     """
     get_trade_log() must not include paper=1 rows in live mode.
     """
-    insert_trade(proof_runtime.db_path, pnl_usd=25.0, won=1, paper=1)
+    insert_trade(proof_runtime.db_path, pnl_usd=25.0, won=1)
     upsert_runtime_state(proof_runtime.db_path, process_mode="live")
 
     from data.account import get_trade_log

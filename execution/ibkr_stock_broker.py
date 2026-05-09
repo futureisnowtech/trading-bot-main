@@ -32,7 +32,6 @@ except RuntimeError:
     asyncio.set_event_loop(asyncio.new_event_loop())
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import PAPER_TRADING
 from logging_db.trade_logger import (
     log_trade,
     log_event,
@@ -113,7 +112,6 @@ class IBKRStockBroker:
                 timeout=15,
             )
             self._connected = self._ib.isConnected()
-            mode = "PAPER" if PAPER_TRADING else "LIVE"
             if self._connected:
                 acct = (
                     self._ib.managedAccounts()[0]
@@ -121,11 +119,11 @@ class IBKRStockBroker:
                     else "unknown"
                 )
                 print(
-                    f"[IBKRStockBroker] Connected to TWS ({mode}) account={acct} "
+                    f"[IBKRStockBroker] Connected to TWS (LIVE) account={acct} "
                     f"port={IBKR_PORT} clientId={self._client_id}"
                 )
                 log_event(
-                    "INFO", "IBKRStockBroker", f"Connected ({mode}) account={acct}"
+                    "INFO", "IBKRStockBroker", f"Connected (LIVE) account={acct}"
                 )
                 self._sync_positions()
             else:
@@ -352,60 +350,6 @@ class IBKRStockBroker:
             )
             return None
 
-        # Paper mode mock fill
-        if PAPER_TRADING:
-            price = self.get_price(symbol) or stop_price * 1.02
-            order_id = f"PAPER_STOCK_{uuid.uuid4().hex[:8]}"
-            with self._lock:
-                self._open_positions[symbol] = {
-                    "qty": qty,
-                    "entry": price,
-                    "stop": stop_price,
-                    "target": target_price,
-                    "side": "LONG",
-                    "order_id": order_id,
-                }
-            try:
-                log_trade(
-                    strategy=strategy,
-                    broker="ibkr_stocks",
-                    symbol=symbol,
-                    action="BUY",
-                    order_type="Bracket",
-                    qty=qty,
-                    price=price,
-                    fee_usd=0.0,
-                    pnl_usd=0.0,
-                    paper=True,
-                    order_id=order_id,
-                    notes=f"stop={stop_price} target={target_price} mode=paper",
-                )
-            except Exception as e:
-                log_event(
-                    "WARN", "IBKRStockBroker", f"log_trade error (paper buy): {e}"
-                )
-            try:
-                persist_position(
-                    symbol=symbol,
-                    strategy=strategy,
-                    qty=qty,
-                    entry=price,
-                    stop=stop_price,
-                    target=target_price,
-                    high_since_entry=price,
-                    ts_entry=datetime.utcnow().isoformat(),
-                    paper=True,
-                    direction="LONG",
-                    entry_reason=f"ibkr_stocks_paper order={order_id}",
-                )
-            except Exception as e:
-                log_event(
-                    "WARN",
-                    "IBKRStockBroker",
-                    f"persist_position error (paper buy): {e}",
-                )
-            return {"order_id": order_id, "price": price, "qty": qty}
-
         # Live mode
         if not self.is_connected():
             log_event(
@@ -465,7 +409,6 @@ class IBKRStockBroker:
                 price=limit_price,
                 fee_usd=0.0,
                 pnl_usd=0.0,
-                paper=False,
                 order_id=order_id,
                 notes=f"stop={stop_price} target={target_price}",
             )
@@ -482,7 +425,6 @@ class IBKRStockBroker:
                 target=target_price,
                 high_since_entry=limit_price,
                 ts_entry=datetime.utcnow().isoformat(),
-                paper=False,
                 direction="LONG",
                 entry_reason=f"ibkr_stocks order={order_id}",
             )
@@ -522,42 +464,6 @@ class IBKRStockBroker:
             pos = self._open_positions.get(symbol)
 
         entry_price = float(pos.get("entry", 0)) if pos else 0.0
-
-        # Paper mode mock fill
-        if PAPER_TRADING:
-            exit_price = self.get_price(symbol) or entry_price
-            pnl = (exit_price - entry_price) * qty if entry_price else 0.0
-            order_id = f"PAPER_STOCK_SELL_{uuid.uuid4().hex[:8]}"
-            try:
-                log_trade(
-                    strategy=strategy,
-                    broker="ibkr_stocks",
-                    symbol=symbol,
-                    action="SELL",
-                    order_type="Market",
-                    qty=qty,
-                    price=exit_price,
-                    fee_usd=0.0,
-                    pnl_usd=pnl,
-                    paper=True,
-                    order_id=order_id,
-                    notes=f"reason={reason} mode=paper",
-                )
-            except Exception as e:
-                log_event(
-                    "WARN", "IBKRStockBroker", f"log_trade error (paper sell): {e}"
-                )
-            with self._lock:
-                self._open_positions.pop(symbol, None)
-            try:
-                delete_position(symbol, strategy, paper=True)
-            except Exception as e:
-                log_event(
-                    "WARN",
-                    "IBKRStockBroker",
-                    f"delete_position error (paper sell): {e}",
-                )
-            return {"exit_price": exit_price, "pnl": pnl}
 
         # Live mode
         if not self.is_connected():
@@ -621,7 +527,6 @@ class IBKRStockBroker:
                 price=exit_price,
                 fee_usd=0.0,
                 pnl_usd=pnl,
-                paper=False,
                 order_id=order_id,
                 notes=f"reason={reason}",
             )
@@ -631,7 +536,7 @@ class IBKRStockBroker:
         with self._lock:
             self._open_positions.pop(symbol, None)
         try:
-            delete_position(symbol, strategy, paper=False)
+            delete_position(symbol, strategy)
         except Exception as e:
             log_event(
                 "WARN", "IBKRStockBroker", f"delete_position error (live sell): {e}"

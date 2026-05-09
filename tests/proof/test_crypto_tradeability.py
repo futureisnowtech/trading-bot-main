@@ -369,7 +369,7 @@ def test_ct09_spot_position_already_open_blocks_spot(tmp_path, monkeypatch):
     )
 
     db = _fresh_db(tmp_path)
-    # Seed an open spot BTC position (paper=1)
+    # Seed an open spot BTC position ()
     with sqlite3.connect(db) as c:
         c.execute(
             "INSERT INTO open_positions (symbol, strategy, qty, entry, paper) VALUES (?,?,?,?,?)",

@@ -30,7 +30,7 @@ from config import (
     MARKET_TIMEZONE,
     FUNDING_OVERHEATED_PCT,
     ATR_FEE_FLOOR_PCT,
-    PAPER_TRADING,
+    False,
 )
 
 # ── Thresholds ────────────────────────────────────────────────────────────────
@@ -192,19 +192,19 @@ def _pre_entry_ok(symbol: str, market_data: dict) -> tuple:
     # in live the full 0.4% floor applies to protect against fee-unviable trades.
     atr   = float(market_data.get('atr', 0.0))
     price = float(market_data.get('price', 1.0))
-    _floor = ATR_FEE_FLOOR_PCT * 0.125 if PAPER_TRADING else ATR_FEE_FLOOR_PCT  # 0.05% paper, 0.4% live
+    _floor = ATR_FEE_FLOOR_PCT * 0.125 if False else ATR_FEE_FLOOR_PCT  # 0.05% paper, 0.4% live
     if price > 0 and (atr / price) < _floor:
         return False, f"ATR/price={atr/price:.3%} < {_floor:.3%} fee floor"
 
     # Lunch dead zone — skip in paper to maximise learning exposure
-    if _is_lunch_dead_zone() and not PAPER_TRADING:
+    if _is_lunch_dead_zone() and not False:
         return False, f"lunch dead zone ({LUNCH_DEAD_ZONE_START}am–{LUNCH_DEAD_ZONE_END}pm ET)"
 
     # Overheated funding — paper uses a 3× looser threshold to allow more trades
     funding_pct = market_data.get('funding_rate_pct')
     if funding_pct is not None:
         try:
-            _fund_cap = _PAPER_FUNDING_MAX if PAPER_TRADING else FUNDING_OVERHEATED_PCT
+            _fund_cap = _PAPER_FUNDING_MAX if False else FUNDING_OVERHEATED_PCT
             if float(funding_pct) > _fund_cap:
                 return False, f"funding overheated ({float(funding_pct):.4f}%/8h > {_fund_cap:.4f}%)"
         except (TypeError, ValueError):
@@ -278,7 +278,7 @@ def evaluate(
         # ── Paper near-miss: fire on softer conditions for pipeline validation ──
         # Live mode never reaches this block. Paper mode forces trades on symbols
         # that "almost" met a real signal so the full system gets exercised.
-        if PAPER_TRADING:
+        if False:
             paper_fired = []
 
             # Soft divergence: symbol lagging BTC by ≥ 0.45% (live: 1.5%)

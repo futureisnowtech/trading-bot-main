@@ -36,8 +36,7 @@ load_dotenv()
 # ════════════════════════════════════════════════════════════════════
 # SYSTEM MODE
 # ════════════════════════════════════════════════════════════════════
-PAPER_TRADING: bool = os.getenv("PAPER_TRADING", "true").lower() == "true"
-LIVE_TRADING: bool = not PAPER_TRADING
+# Removed False / True logic — system is strictly LIVE.
 
 # Session start: all performance stats (win rate, P&L, trade counts) are
 # measured from this date forward. Old trades are kept in DB for ML training
@@ -598,18 +597,16 @@ SPOT_SCALP_SYMBOL_CONFIG: dict[str, dict[str, float | int]] = {
 # ════════════════════════════════════════════════════════════════════
 MAX_RISK_PER_TRADE_PCT: float = 0.01  # 1% of account per trade
 
-# Daily loss halt: paper = 20% (don't halt learning), live = 4%
-MAX_DAILY_LOSS_PCT: float = 0.20 if PAPER_TRADING else 0.04
+# Daily loss halt: live = 4%
+MAX_DAILY_LOSS_PCT: float = 0.04
 
-# Max open positions: paper = wide open for learning, live = conservative
-MAX_POSITIONS_EQUITY: int = 10 if PAPER_TRADING else 3
-MAX_POSITIONS_CRYPTO: int = (
-    20 if PAPER_TRADING else 5
-)  # all 20 pairs can run simultaneously
+# Max open positions: conservative live limits
+MAX_POSITIONS_EQUITY: int = 3
+MAX_POSITIONS_CRYPTO: int = 5
 
-# Daily trade caps: paper = uncapped, live = PDT compliance
-MAX_TRADES_PER_DAY_EQUITY: int = 999 if PAPER_TRADING else 3
-MAX_TRADES_PER_DAY_CRYPTO: int = 999  # Effectively unlimited in both modes
+# Daily trade caps: PDT compliance for equity; crypto effectively unlimited
+MAX_TRADES_PER_DAY_EQUITY: int = 3
+MAX_TRADES_PER_DAY_CRYPTO: int = 999
 
 CRYPTO_MIN_PROFIT_FEE_MULTIPLE: float = (
     1.0  # Take-profit must clear 1.0x round-trip fees
@@ -642,18 +639,14 @@ COINBASE_TAKER_FEE_PCT: float = 0.0003  # 0.03% taker — Coinbase perp futures
 COINBASE_MAKER_FEE_PCT: float = (
     0.0000  # 0.00% maker — Coinbase perp futures (promotional)
 )
-MAX_DAILY_FEE_DRAG_PCT: float = (
-    0.50 if PAPER_TRADING else 0.10
-)  # paper: fees never halt learning; live: 10% cap
+MAX_DAILY_FEE_DRAG_PCT: float = 0.10  # live: 10% cap
 MARKET_BREADTH_MIN_SPY_PCT: float = (
     -2.0
 )  # Block equity longs if SPY down more than this
 BACKTEST_SLIPPAGE_PCT: float = float(
     os.getenv("BACKTEST_SLIPPAGE_PCT", "0.001")
 )  # 0.1% per leg slippage added to commission
-MAX_STRATEGY_LOSS_STREAK: int = (
-    99 if PAPER_TRADING else 4
-)  # paper: never pause on streak; live: 4-loss circuit breaker
+MAX_STRATEGY_LOSS_STREAK: int = 4  # live: 4-loss circuit breaker
 EQUITY_MAX_HOLD_HOURS: float = (
     6.0  # Close equity position if flat after this many hours
 )
@@ -807,7 +800,7 @@ STOCKS_MAX_POSITION_PCT: float = float(os.getenv("STOCKS_MAX_POSITION_PCT", "0.1
 
 # ── IBKR connection (shared across MES and ForecastEx lanes) ─────────────────
 IBKR_HOST: str = os.getenv("IBKR_HOST", "127.0.0.1")
-IBKR_PORT: int = int(os.getenv("IBKR_PORT", "7497"))  # 7497=paper, 7496=live
+IBKR_PORT = 7496  # 7497=paper, 7496=live
 
 # ── Binance USD-M perpetual futures (replaced Bybit, Sprint 1 overhaul) ──────
 BINANCE_API_KEY: str = os.getenv("BINANCE_API_KEY", "")

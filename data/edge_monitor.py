@@ -31,8 +31,8 @@ _WINDOW_SIZE = (
     30  # trades per evaluation window (was 20 — too small, one bad run distorted PF)
 )
 _BAD_THRESHOLD = 0.45  # PF < 1.45 = degraded window
-_BLOCK_THRESHOLD = 0.10  # PF < 1.10 = block entries (was 0.30/PF1.30 — too strict at small sample sizes)
-_MIN_TRADES_TO_GATE = 20  # require at least this many trades before gating (was 10)
+_BLOCK_THRESHOLD = 0.10  # PF < 1.10 = block entries
+_MIN_TRADES_TO_GATE = 20  # require at least this many trades before gating
 _CACHE_MINUTES = 5
 
 _cache: Dict[str, dict] = {}
@@ -40,8 +40,6 @@ _cache: Dict[str, dict] = {}
 # Resolve DB path from config without circular import risk
 _PROJ_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _DB_PATH = os.path.join(_PROJ_ROOT, "logs", "trades.db")
-
-from config import PAPER_TRADING
 
 # ─── Market-level Constants (Ported from risk/edge_monitor.py) ───────────────
 WINDOW = 20               # rolling trade window
@@ -74,7 +72,7 @@ def strategy_to_market(strategy: str) -> str:
     return 'crypto'   # default
 
 
-def _get_market_trades(market: str, window: int, paper: bool) -> list:
+def _get_market_trades(market: str, window: int, paper: bool = False) -> list:
     """Return the most recent `window` completed trades for `market`."""
     try:
         conn = _conn()
@@ -83,24 +81,24 @@ def _get_market_trades(market: str, window: int, paper: bool) -> list:
         if market == 'polymarket':
             rows = conn.execute(
                 "SELECT pnl_usd, value_usd, fee_usd FROM trades "
-                "WHERE paper=? AND strategy LIKE '%poly%' AND pnl_usd != 0 "
+                "WHERE paper=0 AND strategy LIKE '%poly%' AND pnl_usd != 0 "
                 "ORDER BY ts DESC LIMIT ?",
-                (1 if paper else 0, window),
+                (window,),
             ).fetchall()
         elif market == 'mes':
             rows = conn.execute(
                 "SELECT pnl_usd, value_usd, fee_usd FROM trades "
-                "WHERE paper=? AND (strategy LIKE '%futures%' OR strategy LIKE '%mes%') "
+                "WHERE paper=0 AND (strategy LIKE '%futures%' OR strategy LIKE '%mes%') "
                 "AND pnl_usd != 0 ORDER BY ts DESC LIMIT ?",
-                (1 if paper else 0, window),
+                (window,),
             ).fetchall()
         else:
             rows = conn.execute(
                 "SELECT pnl_usd, value_usd, fee_usd FROM trades "
-                "WHERE paper=? AND strategy NOT LIKE '%poly%' "
+                "WHERE paper=0 AND strategy NOT LIKE '%poly%' "
                 "AND strategy NOT LIKE '%futures%' AND strategy NOT LIKE '%mes%' "
                 "AND pnl_usd != 0 ORDER BY ts DESC LIMIT ?",
-                (1 if paper else 0, window),
+                (window,),
             ).fetchall()
 
         conn.close()
@@ -157,12 +155,9 @@ def _compute_market_edge_score_metrics(trades: list) -> dict:
 def get_market_edge_score(
     market: str = 'crypto',
     window: int = WINDOW,
-    paper: bool = None,
+    paper: bool = False,
 ) -> dict:
     """Compute the rolling market-level edge score."""
-    if paper is None:
-        paper = PAPER_TRADING
-
     trades = _get_market_trades(market, window, paper)
     metrics = _compute_market_edge_score_metrics(trades)
 
@@ -174,13 +169,10 @@ def get_market_edge_score(
 
 def check_market_edge_actions(
     market: str = 'crypto',
-    paper: bool = None,
+    paper: bool = False,
 ) -> str | None:
     """Evaluate current market edge and fire auto-actions if thresholds are breached."""
-    if paper is None:
-        paper = PAPER_TRADING
-
-    metrics = get_market_edge_score(market=market, paper=paper)
+    metrics = get_market_edge_score(market=market)
     if metrics['n_trades'] < WINDOW // 2:
         return None
 
@@ -219,11 +211,9 @@ def check_market_edge_actions(
 
 def get_market_edge_size_factor(
     market: str = 'crypto',
-    paper: bool = None,
+    paper: bool = False,
 ) -> float:
     """Return the size factor from current market-level edge state."""
-    if paper is None:
-        paper = PAPER_TRADING
     consecutive_low = _consecutive_low.get(market, 0)
     if consecutive_low >= CONSECUTIVE_TRIGGER:
         return 0.50
@@ -239,7 +229,7 @@ def _fire_notification(market: str, message: str, level: str = 'INFO') -> None:
         logging.getLogger(__name__).error(f"[edge_monitor] {level}: {message}")
 
 
-def get_edge_state(strategy: str, paper: bool = True) -> dict:
+def get_edge_state(strategy: str, paper: bool = False) -> dict:
     """
     Compute rolling edge state for a strategy.
 
@@ -267,11 +257,11 @@ def get_edge_state(strategy: str, paper: bool = True) -> dict:
         cur.execute(
             """
             SELECT pnl_usd FROM trades
-            WHERE strategy=? AND paper=? AND pnl_usd != 0
+            WHERE strategy=? AND paper=0 AND pnl_usd != 0
             ORDER BY ts DESC
             LIMIT ?
         """,
-            (strategy, int(paper), _WINDOW_SIZE * 2),
+            (strategy, _WINDOW_SIZE * 2),
         )
         rows = [r["pnl_usd"] for r in cur.fetchall()]
         conn.close()
@@ -329,14 +319,11 @@ def get_edge_state(strategy: str, paper: bool = True) -> dict:
 
 
 def is_in_stop_cooldown(
-    strategy: str, symbol: str, paper: bool = True
+    strategy: str, symbol: str, paper: bool = False
 ) -> Tuple[bool, str]:
     """
     Check if a full-stop-loss hit has occurred in the last 30 minutes for this symbol.
     Called before any new entry — prevents re-entering a symbol immediately after a stop.
-
-    Philosophical basis (§6): "After any trade that hits its full stop loss,
-    no new entries for 30 minutes in that market."
     """
     conn = _conn()
     if conn is None:
@@ -346,13 +333,13 @@ def is_in_stop_cooldown(
         cur.execute(
             """
             SELECT ts FROM trades
-            WHERE strategy=? AND symbol=? AND paper=?
+            WHERE strategy=? AND symbol=? AND paper=0
               AND pnl_usd < 0
               AND (LOWER(notes) LIKE '%stop%' OR LOWER(notes) LIKE '%hard stop%')
               AND ts >= datetime('now', '-30 minutes')
             ORDER BY ts DESC LIMIT 1
         """,
-            (strategy, symbol, int(paper)),
+            (strategy, symbol),
         )
         row = cur.fetchone()
         conn.close()
@@ -413,226 +400,7 @@ def _store_cache(strategy: str, result: dict) -> None:
     _cache[strategy] = entry
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Shadow State — Kalman / Kyle's Lambda / ADF / OU Halflife
-# Manifest Sections 1.1, 2.1, 2.2
-# ══════════════════════════════════════════════════════════════════════════════
-
-_SHADOW_STATE: dict = {}
-_ADF_EMA_STATE: Dict[str, float] = {}
-_KYLE_LAMBDA_HISTORY: dict[str, list[float]] = {}
-_OU_PROB_HISTORY: dict[str, collections.deque] = {}
-_KYLE_LAMBDA_MAX_HISTORY = 1440  # 24h at 1-bar-per-minute cadence
-
-
-def get_shadow_state(symbol: str) -> dict:
-    """
-    Return last-known-good shadow state for symbol.
-    Returns {"stochastic_state": "COLD"} when cold (first ~60s after startup).
-    All callers must treat missing keys as fail-open defaults.
-    """
-    res = _SHADOW_STATE.get(symbol, {})
-    if not res:
-        return {"stochastic_state": "COLD"}
-    return res
-
-
-def _compute_kalman(prices: list) -> tuple:
-    """
-    1D Kalman filter over a price series.
-    Returns (fair_value: float, dev_pct: float).
-    dev_pct = (last_price - fair_value) / fair_value * 100
-    Process noise Q=0.001, measurement noise R=0.01 (conservative).
-    """
-    import numpy as _np
-
-    Q, R = 0.001, 0.01
-    x = float(prices[0])
-    P = 1.0
-    for obs in prices[1:]:
-        P += Q
-        K = P / (P + R)
-        x += K * (float(obs) - x)
-        P = (1.0 - K) * P
-    last = float(prices[-1])
-    dev_pct = (last - x) / x * 100.0 if x != 0.0 else 0.0
-    return round(x, 6), round(dev_pct, 4)
-
-
-def _compute_kyle_lambda(prices: list, volumes: list) -> float:
-    """
-    OLS estimate of Kyle's Lambda (price impact per unit signed sqrt-volume).
-    Returns lambda_estimate: float. Fragility detection moved to update_shadow_state
-    using the persistent 24h rolling history in _KYLE_LAMBDA_HISTORY.
-    Sqrt-volume normalization reduces heteroscedasticity from large sweeps.
-    """
-    import numpy as _np
-
-    if len(prices) < 10:
-        return 0.0
-    p = _np.array(prices, dtype=float)
-    v = _np.array(volumes, dtype=float)
-    dp = _np.diff(p)
-    sv = _np.sign(dp) * _np.sqrt(_np.abs(v[1:]))
-    denom = float(sv @ sv)
-    return float((sv @ dp) / denom) if denom != 0.0 else 0.0
-
-
-def _compute_adf_stat(prices: list) -> tuple:
-    """
-    Lightweight ADF test (numpy-only, no statsmodels).
-    Critical value: -2.86 (MacKinnon 5%, n~100, constant only).
-    Returns (adf_statistic: float, is_stationary: bool).
-    Fails open (returns is_stationary=True) on numerical error.
-    """
-    import numpy as _np
-
-    y = _np.array(prices, dtype=float)
-    dy = _np.diff(y)
-    y_lag = y[:-1]
-    X = _np.column_stack([_np.ones(len(y_lag)), y_lag])
-    try:
-        coeffs, _, _, _ = _np.linalg.lstsq(X, dy, rcond=None)
-    except _np.linalg.LinAlgError:
-        return 0.0, True
-    beta = float(coeffs[1])
-    resid = dy - X @ coeffs
-    n = len(resid)
-    s2 = float(_np.sum(resid**2) / max(n - 2, 1))
-    ss_lag = float(y_lag @ y_lag) - len(y_lag) * float(_np.mean(y_lag)) ** 2
-    se = float(_np.sqrt(s2 / max(ss_lag, 1e-12)))
-    adf_stat = beta / se if se > 0.0 else 0.0
-    return round(adf_stat, 4), bool(adf_stat < -2.86)
-
-
-def _compute_ou_halflife(prices: list) -> float:
-    """
-    Ornstein-Uhlenbeck halflife via AR(1) regression.
-    halflife = -ln(2) / ln(|phi|). Returns 999.0 when non-stationary.
-    """
-    import numpy as _np
-
-    y = _np.array(prices, dtype=float)
-    y_lag = y[:-1]
-    y_now = y[1:]
-    X = _np.column_stack([_np.ones(len(y_lag)), y_lag])
-    try:
-        coeffs, _, _, _ = _np.linalg.lstsq(X, y_now, rcond=None)
-    except _np.linalg.LinAlgError:
-        return 999.0
-    phi = float(coeffs[1])
-    if abs(phi) >= 1.0:
-        return 999.0
-    hl = -_np.log(2.0) / _np.log(abs(phi))
-    return round(float(hl), 2)
-
-
-def _compute_ou_transition_prob(
-    current_price: float,
-    target_price: float,
-    mu: float,
-    ou_halflife_bars: float,
-    price_std: float,
-) -> float:
-    """
-    P(X_T >= target | X_0 = current_price) under an Ornstein-Uhlenbeck process.
-
-    Uses the analytically tractable Gaussian transition density — the closed-form
-    solution to the Chapman-Kolmogorov equation for OU kernels. No Monte Carlo needed.
-
-    Returns 0.5 (fail-open) when inputs are degenerate.
-    """
-    from math import erf as _erf, exp as _exp, log as _log, sqrt as _sqrt
-
-    if ou_halflife_bars <= 0 or price_std <= 0 or current_price <= 0:
-        return 0.5
-    theta = _log(2.0) / ou_halflife_bars  # mean-reversion speed
-    T = ou_halflife_bars  # horizon = one halflife
-    exp_decay = _exp(-theta * T)  # = 0.5 by definition at T == halflife
-    cond_mean = mu + (current_price - mu) * exp_decay
-    cond_var = max((price_std**2) / (2.0 * theta) * (1.0 - exp_decay**2), 1e-12)
-    z = (target_price - cond_mean) / _sqrt(cond_var)
-    return float(0.5 * (1.0 - _erf(z / _sqrt(2.0))))  # P(X_T >= target)
-
-
-async def update_shadow_state(
-    symbol: str,
-    prices: list,
-    volumes: list,
-) -> None:
-    """
-    Compute and cache all shadow state metrics for one symbol.
-    Call every 60 seconds per symbol from the async runner loop.
-    Requires at least 20 price/volume bars. Silently returns if fewer.
-    """
-    if len(prices) < 20 or len(volumes) < 20:
-        return
-    import numpy as _np
-
-    fair_value, dev_pct = _compute_kalman(prices)
-
-    # Kyle's Lambda — sqrt-volume OLS; fragility via 24h rolling history
-    kyle_lam = _compute_kyle_lambda(prices, volumes)
-    hist = _KYLE_LAMBDA_HISTORY.setdefault(symbol, [])
-    hist.append(kyle_lam)
-    if len(hist) > _KYLE_LAMBDA_MAX_HISTORY:
-        hist.pop(0)
-    if len(hist) >= 10:
-        arr = _np.array(hist, dtype=float)
-        is_fragile = bool(kyle_lam > arr.mean() + 2.0 * arr.std())
-    else:
-        is_fragile = False
-
-    adf_stat, _ = _compute_adf_stat(prices)
-    
-    # v18.16: Rolling ADF EMA (span=5) to prevent stationarity flicker
-    # alpha = 2/(span+1) = 2/6 = 0.3333
-    alpha = 0.3333
-    last_ema = _ADF_EMA_STATE.get(symbol, adf_stat)
-    ema_adf = (alpha * adf_stat) + ((1.0 - alpha) * last_ema)
-    _ADF_EMA_STATE[symbol] = ema_adf
-    
-    # Stationarity threshold: -3.10 (MacKinnon 5% critical value)
-    is_stationary = bool(ema_adf < -3.10)
-    
-    ou_hl = _compute_ou_halflife(prices)
-
-    # OU transition probability — P(price reaches 0.3% scalp target within one halflife)
-    price_std = float(_np.std(prices[-60:]) if len(prices) >= 60 else _np.std(prices))
-    scalp_target = float(prices[-1]) * 1.003
-    ou_prob = _compute_ou_transition_prob(
-        current_price=float(prices[-1]),
-        target_price=scalp_target,
-        mu=fair_value,
-        ou_halflife_bars=ou_hl,
-        price_std=price_std,
-    )
-
-    # v18.17: Stochastic variance check (detect frozen math)
-    ou_hist = _OU_PROB_HISTORY.setdefault(symbol, collections.deque(maxlen=10))
-    ou_hist.append(ou_prob)
-    if len(ou_hist) < 10:
-        stochastic_state = "COLD"
-    else:
-        mean = sum(ou_hist) / 10.0
-        var = sum((x - mean) ** 2 for x in ou_hist) / 10.0
-        stochastic_state = "FROZEN" if var == 0.0 else "ACTIVE"
-
-    _SHADOW_STATE[symbol] = {
-        "kalman_fair_value": fair_value,
-        "kalman_dev_pct": dev_pct,
-        "kyle_lambda": round(kyle_lam, 8),
-        "kyle_lambda_fragile": is_fragile,
-        "adf_stat": round(ema_adf, 4),
-        "adf_stationary": is_stationary,
-        "ou_halflife_bars": ou_hl,
-        "ou_transition_prob": round(ou_prob, 4),
-        "stochastic_state": stochastic_state,
-        "computed_at": __import__("datetime").datetime.utcnow().isoformat(),
-    }
-
-
-# ── WAE Missed Winner Tracking (Manifest Section 5.1) ────────────────────────
+# ── WAE Missed Winner Tracking ───────────────────────────────────────────────
 
 _WAE_MISSED_COUNTER: dict = {}
 _WAE_RECOVERY_THRESHOLD = 3
@@ -655,7 +423,7 @@ def is_wae_recovery_mode(strategy: str = "spot_scalp") -> bool:
     return _WAE_MISSED_COUNTER.get(strategy, 0) > _WAE_RECOVERY_THRESHOLD
 
 
-# ── Strategy Ladder — Automated Probation (Manifest Section 6.1) ─────────────
+# ── Strategy Ladder — Automated Probation ────────────────────────────────────
 
 import os as _os
 import sqlite3 as _sqlite3
@@ -683,7 +451,7 @@ def _ladder_conn():
 
 def get_strategy_ladder_state(
     strategy: str,
-    paper: bool = True,
+    paper: bool = False,
 ) -> dict:
     """
     Compute and return the current RBIPMS ladder state for a strategy.
@@ -719,11 +487,11 @@ def get_strategy_ladder_state(
             SELECT COUNT(*) as n,
                    SUM(CASE WHEN won=1 THEN 1 ELSE 0 END) as wins
             FROM trades
-            WHERE strategy=? AND paper=?
+            WHERE strategy=? AND paper=0
               AND ts >= datetime('now', '-14 days')
               AND won IS NOT NULL
             """,
-            (strategy, int(paper)),
+            (strategy,),
         ).fetchone()
         conn.close()
     except Exception:

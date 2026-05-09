@@ -284,7 +284,7 @@ class TestUnifiedSizer(unittest.TestCase):
                    return_value={'size_factor': 1.0, 'level': 0, 'label': 'NORMAL', 'daily_pnl': 0, 'pct_drawn': 0}), \
              patch('risk.position_sizer.size_from_kelly', return_value=1.0):
 
-            result = get_position_size('crypto_ai', 'BTC-USDC', base, 0.6, paper=True)
+            result = get_position_size('crypto_ai', 'BTC-USDC', base, 0.6)
 
         # V and E not applied → result close to base (D=1, T=1, K scale=1/1=1)
         self.assertAlmostEqual(result, base, delta=10)
@@ -308,7 +308,7 @@ class TestUnifiedSizer(unittest.TestCase):
                    return_value={'size_factor': 1.0, 'level': 0, 'label': 'NORMAL', 'daily_pnl': 0, 'pct_drawn': 0}), \
              patch('risk.position_sizer.size_from_kelly', return_value=1.0):
 
-            result = get_position_size('crypto_ai', 'BTC-USDC', base, 0.6, paper=True)
+            result = get_position_size('crypto_ai', 'BTC-USDC', base, 0.6)
 
         # V=0.75, E=0.50+0.5=1.0, D=1.0, T=1.0, K=1.0/1.0=1.0, M=1.0
         expected = base * 0.75 * 1.0 * 1.0 * 1.0 * 1.0 * 1.0
@@ -323,7 +323,7 @@ class TestUnifiedSizer(unittest.TestCase):
              patch('risk.drawdown_controller.get_heat_level',
                    return_value={'size_factor': 0.0, 'level': 4, 'label': 'HALT', 'daily_pnl': -100, 'pct_drawn': 0.04}):
 
-            result = get_position_size('crypto_ai', 'BTC-USDC', 250.0, 0.7, paper=True)
+            result = get_position_size('crypto_ai', 'BTC-USDC', 250.0, 0.7)
 
         self.assertEqual(result, 0.0)
 
@@ -344,7 +344,7 @@ class TestUnifiedSizer(unittest.TestCase):
                    return_value={'size_factor': 0.25, 'level': 3, 'label': 'DANGER', 'daily_pnl': -15, 'pct_drawn': 0.035}), \
              patch('risk.position_sizer.size_from_kelly', return_value=0.5):
 
-            result = get_position_size('crypto_ai', 'BTC-USDC', base, 0.3, paper=True)
+            result = get_position_size('crypto_ai', 'BTC-USDC', base, 0.3)
 
         self.assertGreaterEqual(result, MIN_POSITION_USD)
 
@@ -365,14 +365,14 @@ class TestUnifiedSizer(unittest.TestCase):
                    return_value={'size_factor': 1.0, 'level': 0, 'label': 'NORMAL', 'daily_pnl': 0, 'pct_drawn': 0}), \
              patch('risk.position_sizer.size_from_kelly', return_value=1.5):
 
-            result = get_position_size('crypto_ai', 'BTC-USDC', base, 1.0, paper=True)
+            result = get_position_size('crypto_ai', 'BTC-USDC', base, 1.0)
 
         self.assertLessEqual(result, base * MAX_POSITION_SCALE)
 
     def test_zero_base_size_returns_zero(self):
         """base_size=0 returns 0 immediately without any DB calls."""
         from risk.unified_sizer import get_position_size
-        result = get_position_size('crypto_ai', 'BTC-USDC', 0.0, 0.7, paper=True)
+        result = get_position_size('crypto_ai', 'BTC-USDC', 0.0, 0.7)
         self.assertEqual(result, 0.0)
 
     def test_dead_zone_time_of_day(self):
@@ -430,7 +430,7 @@ class TestUnifiedSizer(unittest.TestCase):
                    return_value={'size_factor': 1.0, 'level': 0, 'label': 'NORMAL', 'daily_pnl': 0, 'pct_drawn': 0}), \
              patch('risk.position_sizer.size_from_kelly', return_value=1.0):
 
-            result = get_sizing_breakdown('crypto_ai', 'BTC-USDC', 100.0, 0.6, paper=True)
+            result = get_sizing_breakdown('crypto_ai', 'BTC-USDC', 100.0, 0.6)
 
         required_keys = {'base_size', 'v', 'e', 'd', 't', 'k', 'm',
                          'final_size', 'adaptive', 'trade_count', 'market'}

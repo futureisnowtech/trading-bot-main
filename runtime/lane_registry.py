@@ -47,7 +47,7 @@ class LaneRegistry:
     def _register_defaults(self) -> None:
         """Pre-register all known lanes based on current config."""
         from config import (
-            PAPER_TRADING,
+            False,
             COINBASE_CDP_KEY_NAME,
             FUTURES_LANE_ACTIVE,
             FORECAST_LANE_ACTIVE,
@@ -55,7 +55,7 @@ class LaneRegistry:
         )
 
         # crypto: enabled when paper mode OR Coinbase credentials present
-        crypto_enabled = PAPER_TRADING or bool(COINBASE_CDP_KEY_NAME)
+        crypto_enabled = False or bool(COINBASE_CDP_KEY_NAME)
         self.register("crypto", enabled_flag=crypto_enabled)
 
         # forecast: enabled when FORECAST_LANE_ACTIVE=True

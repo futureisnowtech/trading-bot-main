@@ -137,7 +137,7 @@ def test_sdt01_target_hit_closes_position(proof_runtime, monkeypatch):
     _seed_spot_position(str(proof_runtime.db_path), target=2036.0)
     monkeypatch.setattr(spot_engine, "_get_broker", lambda paper: _paper_broker(2040.0))
 
-    closed = spot_engine.check_spot_targets(paper=True)
+    closed = spot_engine.check_spot_targets()
     assert len(closed) == 1
     assert closed[0]["trigger"] == "target_hit"
     assert closed[0]["exit_reason"] == "target_hit"
@@ -149,7 +149,7 @@ def test_sdt02_below_target_no_close(proof_runtime, monkeypatch):
     _seed_spot_position(str(proof_runtime.db_path), target=2036.0)
     monkeypatch.setattr(spot_engine, "_get_broker", lambda paper: _paper_broker(2020.0))
 
-    assert spot_engine.check_spot_targets(paper=True) == []
+    assert spot_engine.check_spot_targets() == []
 
 
 def test_sdt03_eod_flatten_disabled_by_default(proof_runtime, monkeypatch):
@@ -157,7 +157,7 @@ def test_sdt03_eod_flatten_disabled_by_default(proof_runtime, monkeypatch):
 
     _seed_spot_position(str(proof_runtime.db_path))
     monkeypatch.setattr(spot_engine, "SPOT_EOD_FLATTEN_ENABLED", False)
-    assert spot_engine.check_spot_eod_close(paper=True) == []
+    assert spot_engine.check_spot_eod_close() == []
 
 
 def test_sdt04_eod_close_at_time_when_enabled(proof_runtime, monkeypatch):
@@ -174,7 +174,7 @@ def test_sdt04_eod_close_at_time_when_enabled(proof_runtime, monkeypatch):
     with patch("spot_engine.datetime") as mock_dt:
         mock_dt.datetime.now.return_value = fake_now
         mock_dt.datetime.fromisoformat = datetime.fromisoformat
-        closed = spot_engine.check_spot_eod_close(paper=True)
+        closed = spot_engine.check_spot_eod_close()
 
     assert len(closed) == 1
     assert closed[0]["trigger"] == "eod_close"
@@ -193,7 +193,6 @@ def test_sdt05_open_spot_persists_scalp_target_metadata(proof_runtime, monkeypat
     result = spot_engine.open_spot(
         "ETH",
         100.0,
-        paper=True,
         composite_score=70.0,
         final_spot_score=72.0,
     )
@@ -237,7 +236,7 @@ def test_sdt06_stagnation_exit_closes_dead_trade(proof_runtime, monkeypatch):
         lambda symbol: _trend_state(symbol, derivative_score=55.0, five_v=-0.10, five_a=-0.06),
     )
 
-    closed = spot_engine.check_spot_stagnation_exits(paper=True)
+    closed = spot_engine.check_spot_stagnation_exits()
     assert len(closed) == 1
     assert closed[0]["trigger"] == "stagnation_exit"
 
@@ -254,7 +253,7 @@ def test_sdt07_thesis_decay_respects_min_hold_gate(proof_runtime, monkeypatch):
         lambda symbol: _trend_state(symbol, derivative_score=20.0, five_v=-0.10, five_a=-0.05),
     )
 
-    assert spot_engine.check_spot_thesis_exits(paper=True) == []
+    assert spot_engine.check_spot_thesis_exits() == []
 
 
 def test_sdt08_thesis_decay_closes_after_hold_gate(proof_runtime, monkeypatch):
@@ -270,7 +269,7 @@ def test_sdt08_thesis_decay_closes_after_hold_gate(proof_runtime, monkeypatch):
         lambda symbol: _trend_state(symbol, derivative_score=20.0, five_v=-0.10, five_a=-0.05),
     )
 
-    closed = spot_engine.check_spot_thesis_exits(paper=True)
+    closed = spot_engine.check_spot_thesis_exits()
     assert len(closed) == 1
     assert closed[0]["trigger"] == "thesis_decay"
 
@@ -326,7 +325,6 @@ def test_sdt09_taker_fallback_requires_higher_score(proof_runtime, monkeypatch):
     result = spot_engine.open_spot(
         "BTC",
         100.0,
-        paper=False,
         composite_score=50.0,
         final_spot_score=51.0,
         spot_state=_trend_state("BTC"),

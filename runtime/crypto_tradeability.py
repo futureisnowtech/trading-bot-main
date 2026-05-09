@@ -190,7 +190,7 @@ def _normalise_underlying(symbol: str) -> str:
 # ── DB helpers ───────────────────────────────────────────────────────────────
 
 
-def _count_open_spot_positions(underlying: str, paper_int: int) -> int:
+def _count_open_spot_positions(underlying: str) -> int:
     """
     DB is authoritative for bot-managed spot positions (strategy LIKE 'spot_%').
     Manual Coinbase holdings never appear in open_positions, so broker balance
@@ -201,80 +201,64 @@ def _count_open_spot_positions(underlying: str, paper_int: int) -> int:
         with sqlite3.connect(_db_path(), timeout=3, check_same_thread=False) as conn:
             row = conn.execute(
                 "SELECT COUNT(*) FROM open_positions "
-                "WHERE strategy LIKE 'spot_%' AND symbol=? AND paper=?",
-                (underlying, paper_int),
+                "WHERE strategy LIKE 'spot_%' AND symbol=? AND (underlying,),
             ).fetchone()
             return int(row[0]) if row else 0
     except Exception:
         return 0
 
 
-def _count_open_perp_positions(paper_int: int) -> int:
+def _count_open_perp_positions() -> int:
     """Perp lane is dormant — DB is acceptable (no live perp broker active)."""
     try:
         with sqlite3.connect(_db_path(), timeout=3, check_same_thread=False) as conn:
             row = conn.execute(
                 "SELECT COUNT(*) FROM open_positions "
-                "WHERE strategy NOT LIKE 'spot_%' AND paper=?",
-                (paper_int,),
+                "WHERE strategy NOT LIKE 'spot_%' AND paper=0"
             ).fetchone()
             return int(row[0]) if row else 0
     except Exception:
         return 0
 
 
-def _get_open_perp_directions(underlying: str, paper_int: int) -> list[str]:
+def _get_open_perp_directions(underlying: str) -> list[str]:
     """Perp lane is dormant — DB is acceptable."""
     try:
         with sqlite3.connect(_db_path(), timeout=3, check_same_thread=False) as conn:
             rows = conn.execute(
                 "SELECT COALESCE(direction,'LONG') FROM open_positions "
-                "WHERE symbol=? AND strategy NOT LIKE 'spot_%' AND paper=?",
-                (underlying, paper_int),
+                "WHERE symbol=? AND strategy NOT LIKE 'spot_%' AND (underlying,),
             ).fetchall()
             return [r[0] for r in rows]
     except Exception:
         return []
 
 
-def _get_spot_deployed_usd(paper_int: int) -> float:
+def _get_spot_deployed_usd() -> float:
     """
     Live mode: compute deployed USD from broker symbol balances.
     Deployment cap enforcement is secondary — v10_runner enforces usd_available*0.95
     as the hard cap. Return 0.0 on broker failure (fail open, let runner cap apply).
-    Paper mode: DB is acceptable.
     """
-    if paper_int == 0:
-        try:
-            from execution.coinbase_spot_broker import get_spot_broker
-
-            bal = get_spot_broker().get_spot_balance()
-            # usd_available = cash; total_value ≈ usd_available + deployed_crypto
-            # We don't have prices here, so return 0 — runner's usd_available cap is the real gate
-            _ = float(bal.get("usd_available", 0) or 0)  # verify broker reachable
-            return 0.0  # let v10_runner's usd_available*0.95 be the binding constraint
-        except Exception:
-            return 0.0  # fail open — runner cap will still apply
     try:
-        with sqlite3.connect(_db_path(), timeout=3, check_same_thread=False) as conn:
-            row = conn.execute(
-                "SELECT COALESCE(SUM(qty * entry), 0.0) FROM open_positions "
-                "WHERE strategy LIKE 'spot_%' AND paper=?",
-                (paper_int,),
-            ).fetchone()
-            return float(row[0]) if row else 0.0
+        from execution.coinbase_spot_broker import get_spot_broker
+
+        bal = get_spot_broker().get_spot_balance()
+        # usd_available = cash; total_value ≈ usd_available + deployed_crypto
+        # We don't have prices here, so return 0 — runner's usd_available cap is the real gate
+        _ = float(bal.get("usd_available", 0) or 0)  # verify broker reachable
+        return 0.0  # let v10_runner's usd_available*0.95 be the binding constraint
     except Exception:
-        return 0.0
+        return 0.0  # fail open — runner cap will still apply
 
 
-def _get_perp_deployed_usd(paper_int: int) -> float:
+def _get_perp_deployed_usd() -> float:
     """Perp lane is dormant — DB is acceptable."""
     try:
         with sqlite3.connect(_db_path(), timeout=3, check_same_thread=False) as conn:
             row = conn.execute(
                 "SELECT COALESCE(SUM(qty * entry), 0.0) FROM open_positions "
-                "WHERE strategy NOT LIKE 'spot_%' AND paper=?",
-                (paper_int,),
+                "WHERE strategy NOT LIKE 'spot_%' AND paper=0"
             ).fetchone()
             return float(row[0]) if row else 0.0
     except Exception:
@@ -309,7 +293,6 @@ def get_crypto_tradeability(
     direction: str,
     candidate: dict | None = None,
     *,
-    live: bool,
     manual: bool,
     dag_state: dict | None = None,
 ) -> dict:
@@ -321,7 +304,6 @@ def get_crypto_tradeability(
     symbol    : raw scanner symbol (e.g. "PF_ETHUSD", "ETHUSDT", "ETH")
     direction : "LONG" or "SHORT"
     candidate : optional scanner candidate dict (for future price/size checks)
-    live      : True = live mode, False = paper
     manual    : True = human initiated (relaxes some autonomous-only gates)
     dag_state : unified DAG state payload (v18.17)
 
@@ -335,7 +317,7 @@ def get_crypto_tradeability(
     """
     try:
         return _evaluate_tradeability(
-            symbol, direction, candidate, live=live, manual=manual, dag_state=dag_state
+            symbol, direction, candidate, manual=manual, dag_state=dag_state
         )
     except Exception as e:
         logger.error(f"[tradeability] unhandled exception for {symbol}: {e}")
@@ -347,12 +329,10 @@ def _evaluate_tradeability(
     direction: str,
     candidate: dict | None,
     *,
-    live: bool,
     manual: bool,
     dag_state: dict | None = None,
 ) -> dict:
     """Inner implementation — all exceptions caught by caller."""
-    paper_int = 0 if live else 1
     direction = direction.upper().strip()
 
     # ── 1. Normalise symbol ───────────────────────────────────────────────────
@@ -414,8 +394,6 @@ def _evaluate_tradeability(
         spot_max_pct=spot_max_pct,
         spot_min_usd=spot_min_usd,
         spot_symbols=spot_route_symbols,
-        live=live,
-        paper_int=paper_int,
         manual=manual,
     )
 
@@ -427,8 +405,6 @@ def _evaluate_tradeability(
         perp_supported=perp_supported,
         core_underlyings=core_underlyings,
         auto_perp_syms=auto_perp_syms,
-        live=live,
-        paper_int=paper_int,
         manual=manual,
         candidate=candidate,
     )
@@ -436,7 +412,7 @@ def _evaluate_tradeability(
     # ── 7. Route: prefer spot (for eligible symbols), fall back to perp ───────
     if spot_eligible_symbol and spot_blocked_reason == "none":
         # Spot is available
-        auto_ex = 1 if (not live or underlying in auto_spot_syms) else 0
+        auto_ex = 1 if underlying in auto_spot_syms else 0
         return _executable_result(
             symbol,
             underlying,
@@ -449,7 +425,7 @@ def _evaluate_tradeability(
 
     if perp_blocked_reason == "none":
         # Perp is available (either spot wasn't eligible, or spot was blocked)
-        auto_ex = 1 if (not live or underlying in auto_perp_syms) else 0
+        auto_ex = 1 if underlying in auto_perp_syms else 0
         return _executable_result(
             symbol,
             underlying,
@@ -500,13 +476,10 @@ def _check_spot_eligibility(
     spot_max_pct: float,
     spot_min_usd: float,
     spot_symbols: set[str],
-    live: bool,
-    paper_int: int,
     manual: bool,
 ) -> str:
     """
     Return "none" if spot is eligible, else one of the spot_* blocked reason strings.
-    Paper mode: skip balance/deployment checks (symbol/direction routing still enforced).
     """
     # Symbol gate
     if underlying not in spot_symbols:
@@ -520,15 +493,11 @@ def _check_spot_eligibility(
     if not spot_active:
         return "spot_lane_disabled"
 
-    # Duplicate position gate (paper and live)
-    if _count_open_spot_positions(underlying, paper_int) > 0:
+    # Duplicate position gate
+    if _count_open_spot_positions(underlying) > 0:
         return "spot_position_already_open"
-    if _get_open_perp_directions(underlying, paper_int):
+    if _get_open_perp_directions(underlying):
         return "underlying_exposure_already_open"
-
-    # Paper mode: skip balance/deployment checks
-    if not live:
-        return "none"
 
     # Live: balance and deployment checks
     usd_avail, ok = _get_spot_balance_usd()
@@ -540,7 +509,7 @@ def _check_spot_eligibility(
         return "spot_min_order_not_met"
 
     # Deployment cap
-    deployed = _get_spot_deployed_usd(paper_int)
+    deployed = _get_spot_deployed_usd()
     cap = usd_avail * spot_max_pct
     if deployed >= cap and cap > 0:
         return "spot_deployment_cap_exceeded"
@@ -556,39 +525,32 @@ def _check_perp_eligibility(
     perp_supported: bool,
     core_underlyings: set,
     auto_perp_syms: list,
-    live: bool,
-    paper_int: int,
     manual: bool,
     candidate: dict | None,
 ) -> str:
     """
     Return "none" if perp is eligible, else one of the perp_* blocked reason strings.
-    Paper mode: skip live-count, balance, and contract-min checks.
     """
     # Broker support gate
     if not perp_supported:
         return "perp_symbol_not_supported"
 
     # Autonomous eligibility gate (live + not manual only)
-    if live and not manual:
+    if not manual:
         if underlying not in auto_perp_syms:
             return "perp_not_autonomous_eligible"
 
-    # Paper mode: no further checks
-    if not live:
-        return "none"
-
-    if _count_open_spot_positions(underlying, paper_int) > 0:
+    if _count_open_spot_positions(underlying) > 0:
         return "underlying_exposure_already_open"
 
     # Opposite-side block (live perp only) — same direction is allowed (pyramiding)
-    open_directions = _get_open_perp_directions(underlying, paper_int)
+    open_directions = _get_open_perp_directions(underlying)
     for d in open_directions:
         if d.upper() != direction.upper():
             return "perp_opposite_side_block"
 
     # Live perp count gate
-    live_count = _count_open_perp_positions(0)  # live paper_int=0
+    live_count = _count_open_perp_positions()
     max_live_perps = 3
     try:
         import perps_engine as _pe
@@ -628,7 +590,7 @@ def _check_perp_eligibility(
 
     # Deployment cap (live)
     try:
-        _deployed = _get_perp_deployed_usd(0)  # live positions
+        _deployed = _get_perp_deployed_usd()
         from execution.coinbase_broker import get_coinbase_broker
 
         _broker = get_coinbase_broker()
@@ -650,8 +612,6 @@ def get_recommended_crypto_lane(
     symbol: str,
     direction: str,
     candidate: dict | None = None,
-    *,
-    live: bool,
 ) -> str:
     """
     Return recommended lane string: "spot" | "perp" | "blocked".
@@ -684,6 +644,7 @@ def get_recommended_crypto_lane(
         )
     except Exception:
         return "blocked"
+
 
 
 def _policy_recommended_lane(

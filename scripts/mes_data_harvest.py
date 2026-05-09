@@ -19,7 +19,7 @@ import threading
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config import DB_PATH, PAPER_TRADING
+
 from logging_db.trade_logger import log_trade, log_event
 
 # ── Broker setup (client ID 3 so it coexists with running bot on ID 2) ───────
@@ -223,7 +223,6 @@ def _log(pos: dict, exit_price: float, reason: str) -> float:
         qty=QTY,
         price=entry,
         fee_usd=IBKR_COMMISSION,
-        paper=True,
         order_id=str(pos["order_id"]),
         notes=f"harvest SL={pos['stop']} TP={pos['target']}",
     )
@@ -238,7 +237,6 @@ def _log(pos: dict, exit_price: float, reason: str) -> float:
         price=exit_price,
         fee_usd=IBKR_COMMISSION,
         pnl_usd=pnl,
-        paper=True,
         order_id=f"IBKR_{uuid.uuid4().hex[:8]}",
         notes=f"reason={reason}",
     )

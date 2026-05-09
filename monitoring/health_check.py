@@ -23,10 +23,7 @@ from datetime import datetime, timezone
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config import (
-    DB_PATH,
-    PAPER_TRADING,
-    FLAT_POSITION_THRESHOLD_PCT,
+,
     CRYPTO_SCAN_INTERVAL_SECONDS,
 )
 from logging_db.trade_logger import log_event
@@ -102,8 +99,7 @@ def _check_stagnant_positions() -> dict:
                 rows = c.execute(
                     "SELECT symbol, entry, high_since_entry, trailing_active, "
                     "scale_33_done, scale_66_done, ts_entry "
-                    "FROM open_positions WHERE paper=?",
-                    (1 if PAPER_TRADING else 0,),
+                    "FROM open_positions WHERE (0,)
                 ).fetchall()
                 for r in rows:
                     _db_state[r["symbol"]] = {
@@ -123,9 +119,9 @@ def _check_stagnant_positions() -> dict:
             with _conn() as c:
                 rows = c.execute(
                     "SELECT DISTINCT symbol FROM trades "
-                    "WHERE paper=? AND (action IN ('SELL','CLOSE') OR notes LIKE '%scale_out%' OR notes LIKE '%partial%') "
+                    "WHERE ,'CLOSE') OR notes LIKE '%scale_out%' OR notes LIKE '%partial%') "
                     "AND broker LIKE '%coinbase%'",
-                    (1 if PAPER_TRADING else 0,),
+                    (0,)
                 ).fetchall()
                 for r in rows:
                     _partial_close_syms.add(r["symbol"])
@@ -302,7 +298,7 @@ def _check_spot_truth() -> dict:
     try:
         from runtime.spot_position_truth import get_spot_position_truth
 
-        truth = get_spot_position_truth(paper=bool(PAPER_TRADING))
+        truth = get_spot_position_truth())
         if not truth.get("snapshot_ok"):
             return {"ok": False, "detail": "spot broker snapshot unavailable"}
         blockers = truth.get("blocking_issues") or []
@@ -328,9 +324,8 @@ def _check_spot_learning_truth() -> dict:
     try:
         conn = _conn()
         recent_trades = conn.execute(
-            "SELECT COUNT(*) FROM trades WHERE strategy LIKE 'spot_%' AND paper=? AND pnl_usd != 0 "
-            "AND ts >= datetime('now', '-24 hours')",
-            (1 if PAPER_TRADING else 0,),
+            "SELECT COUNT(*) FROM trades WHERE strategy LIKE 'spot_%' AND , '-24 hours')",
+            (0,)
         ).fetchone()[0]
 
         if recent_trades == 0:
@@ -351,10 +346,9 @@ def _check_spot_learning_truth() -> dict:
             FROM ml_feature_snapshots m
             JOIN trades t ON t.id = m.trade_id
             WHERE t.strategy LIKE 'spot_%'
-              AND t.paper=?
-              AND datetime(replace(substr(t.ts,1,19),'T',' ')) >= datetime('now', '-24 hours')
+              AND t.,1,19),'T',' ')) >= datetime('now', '-24 hours')
             """,
-            (1 if PAPER_TRADING else 0,),
+            (0,)
         ).fetchone()[0]
         conn.close()
 

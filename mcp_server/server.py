@@ -68,10 +68,8 @@ def get_open_trades(lane: str = "all") -> list:
     Args:
         lane: Filter by lane — 'crypto', 'equity', 'futures', 'perp', or 'all'
     """
-    from config import PAPER_TRADING
-
     logger = _get_logger()
-    positions = logger.load_open_positions(paper=PAPER_TRADING)
+    positions = logger.load_open_positions()
     if lane == "all":
         return positions
     return [p for p in positions if p.get("strategy", "").startswith(lane.rstrip("s"))]
@@ -84,15 +82,13 @@ def get_recent_trades(limit: int = 20) -> list:
     Args:
         limit: Number of trades to return (default 20, max 200)
     """
-    from config import PAPER_TRADING
-
     logger = _get_logger()
-    return logger.get_recent_trades(limit=min(limit, 200), paper=PAPER_TRADING)
+    return logger.get_recent_trades(limit=min(limit, 200))
 
 
 @mcp.tool()
 def close_position(symbol: str, strategy: str, reason: str = "manual_close") -> dict:
-    """Close an open position immediately (paper mode only — live requires confirmation).
+    """Close an open position immediately.
 
     Args:
         symbol: Trading symbol (e.g., BTC-USDC, AAPL)
@@ -101,13 +97,6 @@ def close_position(symbol: str, strategy: str, reason: str = "manual_close") -> 
 
     Returns: {"success": bool, "message": str}
     """
-    from config import PAPER_TRADING
-
-    if not PAPER_TRADING:
-        return {
-            "success": False,
-            "message": "Live mode: use the dashboard or confirm manually.",
-        }
     rm = _get_risk_manager()
     pos = rm.get_position(strategy, symbol)
     if not pos:
@@ -261,8 +250,6 @@ def scan_crypto_pairs(pairs: str = "") -> list:
 
     Returns: List of recent scan events with signal, conviction, and debate result.
     """
-    from config import PAPER_TRADING
-
     logger = _get_logger()
     entries = logger.get_scan_feed(limit=50)
     if pairs:
@@ -339,14 +326,12 @@ def get_daily_summary() -> dict:
 
     Returns: {pnl_net, pnl_gross, fees, trades_today, wins, losses, win_rate, halted}
     """
-    from config import PAPER_TRADING
-
     logger = _get_logger()
-    today_stats = logger.get_today_stats(paper=PAPER_TRADING)
-    all_stats = logger.get_all_time_stats(paper=PAPER_TRADING)
+    today_stats = logger.get_today_stats()
+    all_stats = logger.get_all_time_stats()
     rm = _get_risk_manager()
-    fees = logger.get_todays_fees(paper=PAPER_TRADING)
-    gross = logger.get_todays_pnl(paper=PAPER_TRADING)
+    fees = logger.get_todays_fees()
+    gross = logger.get_todays_pnl()
     return {
         "pnl_net": round(gross - fees, 4),
         "pnl_gross": round(gross, 4),
@@ -360,7 +345,6 @@ def get_daily_summary() -> dict:
         ),
         "all_time_win_rate": round(all_stats.get("win_rate", 0), 4),
         "halted": rm.is_halted,
-        "paper_mode": PAPER_TRADING,
     }
 
 
@@ -499,7 +483,7 @@ def get_sizing_breakdown(
     """
     try:
         from risk.unified_sizer import get_sizing_breakdown as _breakdown
-        from config import CRYPTO_POSITION_SIZE_USD, PAPER_TRADING
+        from config import CRYPTO_POSITION_SIZE_USD
 
         size = float(base_size) if base_size is not None else CRYPTO_POSITION_SIZE_USD
         result = _breakdown(
@@ -507,7 +491,6 @@ def get_sizing_breakdown(
             symbol=symbol,
             base_size=size,
             confidence=float(confidence),
-            paper=PAPER_TRADING,
         )
         return result
     except Exception as e:
@@ -534,12 +517,11 @@ def get_edge_status(market: str = "crypto") -> dict:
             get_market_edge_size_factor as get_edge_size_factor,
             check_market_edge_actions as check_edge_actions,
         )
-        from config import PAPER_TRADING
 
         market = market.lower()
-        edge_data = get_edge_score(market=market, paper=PAPER_TRADING)
-        size_factor = get_edge_size_factor(market=market, paper=PAPER_TRADING)
-        actions = check_edge_actions(market=market, paper=PAPER_TRADING)
+        edge_data = get_edge_score(market=market)
+        size_factor = get_edge_size_factor(market=market)
+        actions = check_edge_actions(market=market)
 
         score = edge_data.get("edge_score", 0.0)
         if score >= 0.70:

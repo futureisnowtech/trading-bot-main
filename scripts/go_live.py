@@ -27,7 +27,6 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 PYTHON = "/Library/Frameworks/Python.framework/Versions/3.14/bin/python3"
-PAPER_PLIST = Path.home() / "Library" / "LaunchAgents" / "com.algotrading.king.plist"
 LIVE_PLIST_SRC = ROOT / "scripts" / "com.algotrading.king.live.plist"
 LIVE_PLIST = (
     Path.home() / "Library" / "LaunchAgents" / "com.algotrading.king.live.plist"
@@ -48,10 +47,9 @@ def _run(cmd: list[str], *, check: bool = False) -> subprocess.CompletedProcess[
     )
 
 
-def _boot_processes() -> tuple[list[int], list[int]]:
-    """Return (paper_pids, live_pids) for boot.py processes in this repo."""
+def _boot_processes() -> list[int]:
+    """Return live_pids for boot.py processes in this repo."""
     out = _run(["ps", "-ax", "-o", "pid=", "-o", "command="]).stdout.splitlines()
-    paper: list[int] = []
     live: list[int] = []
     marker = str(ROOT / "scripts" / "boot.py")
     for line in out:
@@ -67,9 +65,7 @@ def _boot_processes() -> tuple[list[int], list[int]]:
         command = parts[1] if len(parts) > 1 else ""
         if "--mode live" in command:
             live.append(pid)
-        else:
-            paper.append(pid)
-    return paper, live
+    return live
 
 
 def _terminate(pids: list[int], label: str) -> None:
@@ -172,7 +168,7 @@ def _spot_truth_ready() -> None:
 
     is_macbook = socket.gethostname().lower().startswith("macbookair")
     is_test = "PYTEST_CURRENT_TEST" in os.environ
-    truth = get_spot_position_truth(paper=False)
+    truth = get_spot_position_truth()
 
     if not truth.get("snapshot_ok"):
         if is_macbook and not is_test:
@@ -239,21 +235,13 @@ def main() -> int:
         f"connected={connected} buying_power=${buying_power:,.2f} readiness={readiness}"
     )
 
-    paper_pids, live_pids = _boot_processes()
+    live_pids = _boot_processes()
     if live_pids:
         raise RuntimeError(
             f"Live bot already appears to be running: {', '.join(str(p) for p in live_pids)}"
         )
 
-    paper_was_stopped = False
     try:
-        if PAPER_PLIST.exists():
-            print(f"[go_live] Unloading paper launchd service: {PAPER_PLIST}")
-            _run(["launchctl", "unload", str(PAPER_PLIST)])
-
-        _terminate(paper_pids, "paper boot process(es)")
-        paper_was_stopped = True
-
         # Install live plist if not already in LaunchAgents
         if not LIVE_PLIST.exists():
             if not LIVE_PLIST_SRC.exists():
@@ -330,19 +318,8 @@ def main() -> int:
             f"Check {LIVE_LOG}"
         )
     except Exception:
-        # On failure: stop the live service and restore paper
+        # On failure: stop the live service
         _run(["launchctl", "unload", str(LIVE_PLIST)])
-        if paper_was_stopped and PAPER_PLIST.exists():
-            print("[go_live] Restoring paper launchd bot after failed live launch...")
-            _run(["launchctl", "load", str(PAPER_PLIST)])
-            _run(
-                [
-                    "launchctl",
-                    "kickstart",
-                    "-k",
-                    f"gui/{os.getuid()}/com.algotrading.king",
-                ]
-            )
         raise
 
 

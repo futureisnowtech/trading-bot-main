@@ -80,7 +80,6 @@ def _write_candidate(
         leverage=1,
         entry_block_reason="",
         decision=decision,
-        paper=True,
         source="test",
         actual_stop_pct=actual_stop_pct,
         actual_target_pct=actual_target_pct,

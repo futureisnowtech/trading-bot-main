@@ -7,9 +7,7 @@ from datetime import datetime, timedelta
 import db as _db
 
 _q = _db._q
-_q1 = _db._q1
-_runtime_paper_flag = _db._runtime_paper_flag
-clamp_metrics_cutoff = getattr(_db, "clamp_metrics_cutoff", lambda s: s)
+_q1 = _db._q1= _db.clamp_metrics_cutoff = getattr(_db, "clamp_metrics_cutoff", lambda s: s)
 get_current_strategy_start_date = getattr(
     _db,
     "get_current_strategy_start_date",
@@ -29,7 +27,6 @@ def _cutoff_7d() -> str:
 
 def get_execution_stats() -> dict:
     """MAE/MFE efficiency, fee trap rate, hold duration from trade_attribution."""
-    paper_flag = _runtime_paper_flag()
     r = _q1(
         f"""
         SELECT
@@ -41,11 +38,11 @@ def get_execution_stats() -> dict:
             AVG(CASE WHEN won=0 THEN hold_minutes END) AS avg_hold_loss,
             AVG(CASE WHEN won=1 AND mfe_pct > 0 THEN pnl_pct / mfe_pct END) AS exit_eff
         FROM trade_attribution
-        WHERE paper = ?
+        WHERE paper = 0
           AND source NOT IN ('backtest','pre_v10_contaminated','bybit_paper','paper_v10')
           AND datetime(replace(substr(COALESCE(created_at, entry_ts, ''),1,19),'T',' ')) >= datetime(?)
     """,
-        (paper_flag, get_current_strategy_start_date(normalized=True)),
+        (get_current_strategy_start_date(normalized=True),),
     )
     total = r.get("total") or 0
     avg_mae = r.get("avg_mae") or 0.0
@@ -78,17 +75,16 @@ def get_failure_counts() -> list:
     rather than raw row counts.
     """
     cutoff_7d = _cutoff_7d()
-    paper_flag = _runtime_paper_flag()
     failures = []
 
     # ── Fee Trap ──────────────────────────────────────────────────────────────
     r = _q1(
         f"""SELECT COUNT(*) AS n, MAX(entry_ts) AS last FROM trade_attribution
            WHERE is_fee_trap=1
-             AND paper=?
+             AND paper=0
              AND {_TS_NORM.replace("ts", "entry_ts")} >= ?
              AND source NOT IN ('backtest','pre_v10_contaminated','bybit_paper','paper_v10')""",
-        (paper_flag, cutoff_7d),
+        (cutoff_7d,),
     )
     failures.append(
         {
@@ -104,10 +100,10 @@ def get_failure_counts() -> list:
     r = _q1(
         f"""SELECT COUNT(*) AS n, MAX(entry_ts) AS last FROM trade_attribution
            WHERE exit_type='stop_hit' AND COALESCE(hold_minutes,999) < 30
-             AND paper=?
+             AND paper=0
              AND {_TS_NORM.replace("ts", "entry_ts")} >= ?
              AND source NOT IN ('backtest','pre_v10_contaminated','bybit_paper','paper_v10')""",
-        (paper_flag, cutoff_7d),
+        (cutoff_7d,),
     )
     failures.append(
         {

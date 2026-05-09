@@ -15,7 +15,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from config import DB_PATH, PAPER_TRADING
+
 from runtime.spot_position_truth import get_spot_position_truth
 
 
@@ -35,16 +35,13 @@ def reconcile_position_flags(db_path: str = DB_PATH) -> list:
       {symbol, flags_set, partial_close_count, closed_qty, original_qty}
     """
     repairs = []
-    paper_val = 1 if PAPER_TRADING else 0
 
     try:
         with _conn(db_path) as c:
             # Fetch all open positions
             positions = c.execute(
                 "SELECT symbol, qty, ts_entry, scale_33_done, scale_66_done "
-                "FROM open_positions WHERE paper=?",
-                (paper_val,),
-            ).fetchall()
+                "FROM open_positions WHERE ).fetchall()
 
             if not positions:
                 return []
@@ -63,7 +60,7 @@ def reconcile_position_flags(db_path: str = DB_PATH) -> list:
                     """
                     SELECT COUNT(*) as cnt, COALESCE(SUM(qty), 0) as closed_qty
                     FROM trades
-                    WHERE symbol=? AND ts>=? AND paper=?
+                    WHERE symbol=? AND ts>=? AND paper=0
                       AND broker LIKE '%coinbase%'
                       AND (
                           action IN ('SELL', 'CLOSE')
@@ -71,7 +68,7 @@ def reconcile_position_flags(db_path: str = DB_PATH) -> list:
                           OR notes LIKE '%partial%'
                       )
                     """,
-                    (symbol, ts_entry, paper_val),
+                    (symbol, ts_entry),
                 ).fetchone()
 
                 partial_count = result["cnt"] or 0
@@ -83,8 +80,7 @@ def reconcile_position_flags(db_path: str = DB_PATH) -> list:
                     # Any partial close → set scale_33_done
                     if not scale_33:
                         c.execute(
-                            "UPDATE open_positions SET scale_33_done=1 WHERE symbol=? AND paper=?",
-                            (symbol, paper_val),
+                            "UPDATE open_positions SET scale_33_done=1 WHERE symbol=? AND (symbol,),
                         )
                         flags_set.append("scale_33_done")
 
@@ -95,10 +91,10 @@ def reconcile_position_flags(db_path: str = DB_PATH) -> list:
                         and not scale_66
                     ):
                         c.execute(
-                            "UPDATE open_positions SET scale_66_done=1 WHERE symbol=? AND paper=?",
-                            (symbol, paper_val),
+                            "UPDATE open_positions SET scale_66_done=1 WHERE symbol=? AND (symbol,),
                         )
                         flags_set.append("scale_66_done")
+
 
                 if flags_set:
                     repair = {
@@ -135,7 +131,7 @@ def run_reconciliation(db_path: str = DB_PATH) -> None:
     """
     try:
         repairs = reconcile_position_flags(db_path=db_path)
-        spot_truth = get_spot_position_truth(paper=bool(PAPER_TRADING), db_path=db_path)
+        spot_truth = get_spot_position_truth(db_path=db_path)
         truth_issues = spot_truth.get("issues") or []
         now_iso = datetime.now(timezone.utc).isoformat()
         if repairs:

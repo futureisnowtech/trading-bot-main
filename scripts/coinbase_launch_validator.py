@@ -98,7 +98,7 @@ try:
 
     # Verify fail-closed on unsupported symbol
     try:
-        broker = CoinbaseBroker(paper=True)
+        broker = CoinbaseBroker()
         broker._resolve_symbol("DOGE")
         _blocked(
             "Unsupported symbol DOGE did NOT raise CoinbaseSymbolError — fail-open!"
@@ -151,8 +151,8 @@ else:
 # ── 5. Paper mode broker init (no live API calls) ────────────────────────────
 print("\n[5] Paper mode broker initialization")
 try:
-    b = CoinbaseBroker(paper=True)
-    _ready("CoinbaseBroker(paper=True) initializes without error")
+    b = CoinbaseBroker()
+    _ready("CoinbaseBroker() initializes without error")
     # Exercise a paper long
     result = b.open_long(symbol="BTC", size_usd=100.0, leverage=3)
     if result and result.get("paper"):
@@ -183,7 +183,7 @@ except Exception as e:
 print("\n[6] CDP JWT generation (live creds check)")
 if key_name and private_key:
     try:
-        b_live = CoinbaseBroker(paper=False)
+        b_live = CoinbaseBroker()
         tok = b_live._make_jwt("GET", "/api/v3/brokerage/accounts")
         if tok and len(tok) > 20:
             _ready("CDP JWT generated successfully (ES256)")

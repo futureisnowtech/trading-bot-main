@@ -17,7 +17,7 @@ def test_scc01_ml_retrain_check_waits_for_time_and_trade_threshold(monkeypatch):
         def __init__(self):
             self.called = False
 
-        def maybe_trigger_retrains(self, paper=True):
+        def maybe_trigger_retrains(self):
             self.called = True
             return ["BTC/LONG"]
 
@@ -41,7 +41,7 @@ def test_scc02_rbi_waits_for_enough_new_learning_snapshots(monkeypatch):
         def __init__(self):
             self.called = False
 
-        def run_nightly_rbi(self, symbol="BTCUSDT", paper=True):
+        def run_nightly_rbi(self, symbol="BTCUSDT"):
             self.called = True
             return {"promoted": 0, "passed": 0}
 

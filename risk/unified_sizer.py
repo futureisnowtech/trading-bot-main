@@ -22,7 +22,7 @@ from typing import Optional
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config import ACCOUNT_SIZE, PAPER_TRADING
+
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 BASE_RISK_PCT: float = 0.015        # risk 1.5% of account per trade
@@ -72,7 +72,7 @@ def compute_size(
     # Drawdown halt check — if heat controller says stop, return 0
     try:
         from risk.drawdown_controller import get_heat_level
-        heat_data = get_heat_level(paper=paper)
+        heat_data = get_heat_level()
         if heat_data.get('size_factor', 1.0) == 0.0:
             return _zero_result(stop_dist_pct, quality_mult)
     except Exception:
@@ -131,7 +131,7 @@ def get_position_size(
     regime: str = '',
 ) -> float:
     if paper is None:
-        paper = PAPER_TRADING
+        paper = False
     if base_size <= 0:
         return 0.0
     # Map confidence → quality tier
@@ -144,8 +144,7 @@ def get_position_size(
     result = compute_size(
         account_balance=ACCOUNT_SIZE,
         stop_dist_pct=0.015,   # default 1.5% stop
-        quality_tier=tier,
-        paper=paper if paper is not None else PAPER_TRADING,
+        quality_tier=tier if paper is not None else False,
     )
     # Scale result to caller's requested base_size
     scale = base_size / ACCOUNT_SIZE if ACCOUNT_SIZE > 0 else 1.0

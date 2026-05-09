@@ -51,7 +51,7 @@ except RuntimeError:
     asyncio.set_event_loop(asyncio.new_event_loop())
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import PAPER_TRADING, MARKET_TIMEZONE, FUTURES_NUM_CONTRACTS
+from config import MARKET_TIMEZONE, FUTURES_NUM_CONTRACTS
 from logging_db.trade_logger import log_trade, log_event
 
 try:
@@ -152,7 +152,6 @@ class IBKRBroker:
                 timeout=15,
             )
             self._connected = self._ib.isConnected()
-            mode = "PAPER" if PAPER_TRADING else "LIVE"
             if self._connected:
                 acct = (
                     self._ib.managedAccounts()[0]
@@ -160,9 +159,9 @@ class IBKRBroker:
                     else "unknown"
                 )
                 logger.info(
-                    f"[IBKRBroker] Connected to TWS ({mode}) account={acct} port={IBKR_PORT} ✅"
+                    f"[IBKRBroker] Connected to TWS (LIVE) account={acct} port={IBKR_PORT} ✅"
                 )
-                log_event("INFO", "IBKRBroker", f"Connected ({mode}) account={acct}")
+                log_event("INFO", "IBKRBroker", f"Connected (LIVE) account={acct}")
                 self._sync_positions()
             else:
                 logger.info("[IBKRBroker] ⚠️ Could not connect to TWS — is it running?")
@@ -368,11 +367,10 @@ class IBKRBroker:
                 log_event("ERROR", "IBKRBroker", f"buy_mes order error: {e}")
                 return None  # order was rejected — do not log a fake position
         else:
-            order_id = f"IBKR_OFFLINE_{uuid.uuid4().hex[:8]}"
             logger.info(
-                f"[IBKRBroker] ⚠️ Not connected — paper-logging BUY {num_contracts} "
-                f"MES @ {current_price:.2f}"
+                f"[IBKRBroker] ⚠️ Not connected — cannot BUY {num_contracts} MES"
             )
+            return None
 
         with self._lock:
             self._open_positions["MES"] = {
@@ -387,14 +385,13 @@ class IBKRBroker:
         try:
             log_trade(
                 strategy=strategy,
-                broker="ibkr" if not PAPER_TRADING else "ibkr_paper",
+                broker="ibkr",
                 symbol="MES",
                 action="BUY",
                 order_type=order_type,
                 qty=num_contracts,
                 price=current_price,
                 fee_usd=commission,
-                paper=PAPER_TRADING,
                 order_id=order_id,
                 notes=f"SL={stop_price} TP={target_price} reason={reason}",
             )
@@ -439,17 +436,19 @@ class IBKRBroker:
                 )
             except Exception as e:
                 log_event("ERROR", "IBKRBroker", f"sell_mes error: {e}")
+                return None
         else:
             logger.info(
-                f"[IBKRBroker] ⚠️ Not connected — paper-logging SELL MES @ {exit_price:.2f}"
+                f"[IBKRBroker] ⚠️ Not connected — cannot SELL MES @ {exit_price:.2f}"
             )
+            return None
 
         with self._lock:
             self._open_positions.pop("MES", None)
 
         log_trade(
             strategy=strategy,
-            broker="ibkr" if not PAPER_TRADING else "ibkr_paper",
+            broker="ibkr",
             symbol="MES",
             action="SELL",
             order_type="Market",
@@ -457,7 +456,6 @@ class IBKRBroker:
             price=exit_price,
             fee_usd=IBKR_COMMISSION * qty,
             pnl_usd=pnl,
-            paper=PAPER_TRADING,
             order_id=f"IBKR_{uuid.uuid4().hex[:8]}",
             notes=f"reason={reason}",
         )
@@ -518,11 +516,10 @@ class IBKRBroker:
                 log_event("ERROR", "IBKRBroker", f"short_mes order error: {e}")
                 return None  # order was rejected — do not log a fake position
         else:
-            order_id = f"IBKR_OFFLINE_{uuid.uuid4().hex[:8]}"
             logger.info(
-                f"[IBKRBroker] ⚠️ Not connected — paper-logging SHORT {num_contracts} "
-                f"MES @ {current_price:.2f}"
+                f"[IBKRBroker] ⚠️ Not connected — cannot SHORT {num_contracts} MES"
             )
+            return None
 
         with self._lock:
             self._open_positions["MES"] = {
@@ -537,14 +534,13 @@ class IBKRBroker:
         try:
             log_trade(
                 strategy=strategy,
-                broker="ibkr" if not PAPER_TRADING else "ibkr_paper",
+                broker="ibkr",
                 symbol="MES",
                 action="SHORT",
                 order_type=order_type,
                 qty=num_contracts,
                 price=current_price,
                 fee_usd=commission,
-                paper=PAPER_TRADING,
                 order_id=order_id,
                 notes=f"SL={stop_price} TP={target_price} reason={reason}",
             )
@@ -589,17 +585,19 @@ class IBKRBroker:
                 )
             except Exception as e:
                 log_event("ERROR", "IBKRBroker", f"cover_mes error: {e}")
+                return None
         else:
             logger.info(
-                f"[IBKRBroker] ⚠️ Not connected — paper-logging COVER MES @ {exit_price:.2f}"
+                f"[IBKRBroker] ⚠️ Not connected — cannot COVER MES @ {exit_price:.2f}"
             )
+            return None
 
         with self._lock:
             self._open_positions.pop("MES", None)
 
         log_trade(
             strategy=strategy,
-            broker="ibkr" if not PAPER_TRADING else "ibkr_paper",
+            broker="ibkr",
             symbol="MES",
             action="COVER",
             order_type="Market",
@@ -607,7 +605,6 @@ class IBKRBroker:
             price=exit_price,
             fee_usd=IBKR_COMMISSION * qty,
             pnl_usd=pnl,
-            paper=PAPER_TRADING,
             order_id=f"IBKR_{uuid.uuid4().hex[:8]}",
             notes=f"reason={reason}",
         )

@@ -155,7 +155,6 @@ def main():
                     take_profit_price=target_price, leverage=3,
                     composite_score=composite, atr_at_entry=atr_7,
                     regime=regime, entry_setup=f'force_test_{setup}',
-                    paper=True,
                 )
             else:
                 pos = perps.open_short(
@@ -164,7 +163,6 @@ def main():
                     take_profit_price=target_price, leverage=3,
                     composite_score=composite, atr_at_entry=atr_7,
                     regime=regime, entry_setup=f'force_test_{setup}',
-                    paper=True,
                 )
         except Exception as e:
             logger.error(f'  ENTRY ERROR: {e}')
@@ -183,7 +181,7 @@ def main():
 
         try:
             perps.update_position_price(symbol, exit_sim)
-            result = perps.close_position(symbol, reason='force_test_close', paper=True)
+            result = perps.close_position(symbol, reason='force_test_close')
             pnl = result.get('pnl_usd', 0) if result else 0
             logger.info(f'  ✓ CLOSED @ {exit_sim:.6g}  pnl=${pnl:+.2f}')
         except Exception as e:

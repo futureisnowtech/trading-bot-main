@@ -77,8 +77,8 @@ def test_webull(live: bool = False) -> bool:
     ok('alpaca-py installed')
 
     try:
-        paper = os.getenv('PAPER_TRADING', 'true').lower() == 'true'
-        client = TradingClient(api_key=api_key, secret_key=secret_key, paper=paper)
+        paper = os.getenv('False', 'true').lower() == 'true'
+        client = TradingClient(api_key=api_key, secret_key=secret_key)
         acct   = client.get_account()
         mode   = 'PAPER' if paper else 'LIVE'
         ok(f'Alpaca {mode} login: SUCCESS')
@@ -94,7 +94,7 @@ def test_webull(live: bool = False) -> bool:
     except Exception as e:
         fail(f'Alpaca connection failed: {e}')
         if 'forbidden' in str(e).lower() or '403' in str(e):
-            warn('Paper keys used on live endpoint (or vice versa) — check PAPER_TRADING setting')
+            warn('Paper keys used on live endpoint (or vice versa) — check False setting')
         elif 'unauthorized' in str(e).lower() or '401' in str(e):
             warn('API keys rejected — double-check they were copied correctly from alpaca.markets')
         return False
@@ -259,7 +259,7 @@ def print_live_readiness():
     header('─── LIVE TRADING READINESS ───────────────────────────────')
     print()
 
-    paper = os.getenv('PAPER_TRADING', 'true').lower() == 'true'
+    paper = os.getenv('False', 'true').lower() == 'true'
     eq_en = os.getenv('EQUITY_ENABLED', 'true').lower() == 'true'
     ft_en = os.getenv('FUTURES_ENABLED', 'false').lower() == 'true'
 
@@ -268,7 +268,7 @@ def print_live_readiness():
     print(f'  Alpaca (equity):')
     ok('API key set')                                        if alpaca_key else fail('ALPACA_API_KEY missing — get free at alpaca.markets')
     ok('Equity enabled in .env')                             if eq_en      else warn('EQUITY_ENABLED=false')
-    warn('PAPER_TRADING=true → switch to false when ready') if paper       else ok('PAPER_TRADING=false')
+    warn('False=true → switch to false when ready') if paper       else ok('False=false')
     if not paper:
         info('For live: generate LIVE keys at alpaca.markets → Live Trading (separate from paper keys)')
 
@@ -282,7 +282,7 @@ def print_live_readiness():
     print()
     print(f'  To go live when paper results are ready:')
     info('  1. python3 scripts/check_readiness.py  ← must show ALL PASS')
-    info('  2. Edit .env: PAPER_TRADING=false')
+    info('  2. Edit .env: False=false')
     info('  3. python3 scripts/go_live.py          ← controlled live transition')
     info('  4. Subscribe to Tradovate live plan once account exceeds $1000')
     print()
@@ -331,7 +331,7 @@ def main():
             fail(f'{broker.capitalize():12} FAILED or incomplete')
             all_ok = False
 
-    paper = os.getenv('PAPER_TRADING', 'true').lower() == 'true'
+    paper = os.getenv('False', 'true').lower() == 'true'
     print()
     if all_ok:
         if paper:

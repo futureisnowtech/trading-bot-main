@@ -30,9 +30,9 @@ import sys, os, re, stat, argparse, sqlite3, glob
 from datetime import datetime, timezone
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import DB_PATH, PAPER_TRADING
 
-PAPER = int(PAPER_TRADING)
+
+PAPER = int(False)
 PROJECT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ENV_PATH = os.path.join(PROJECT, ".env")
 LOG_PATH = os.path.join(PROJECT, "logs", "service", "bot.log")
@@ -83,10 +83,8 @@ def check_duplicate_closes(conn, days):
         FROM trades a
         JOIN trades b ON a.symbol=b.symbol AND a.strategy=b.strategy
             AND a.action=b.action AND ABS(a.qty-b.qty)<0.000001
-            AND a.paper=b.paper AND b.id > a.id
-            AND (julianday(b.ts) - julianday(a.ts)) * 86400 < 90
-        WHERE a.paper=? AND a.pnl_usd != 0
-          AND a.ts >= datetime('now', '-{days} days')
+            AND a.) - julianday(a.ts)) * 86400 < 90
+        WHERE a., '-{days} days')
         ORDER BY a.ts DESC
     """,
         (PAPER,),
@@ -109,13 +107,12 @@ def check_duplicate_closes(conn, days):
 def check_orphaned_open_positions(conn):
     """Positions in open_positions that already have a close trade."""
     cur = conn.cursor()
-    cur.execute("SELECT * FROM open_positions WHERE paper=?", (PAPER,))
+    cur.execute("SELECT * FROM open_positions WHERE (PAPER,))
     positions = cur.fetchall()
     orphans = []
     for p in positions:
         cur.execute(
-            "SELECT id, ts FROM trades WHERE symbol=? AND strategy=? AND paper=? "
-            "AND pnl_usd != 0 AND ts > ? LIMIT 1",
+            "SELECT id, ts FROM trades WHERE symbol=? AND strategy=? AND ,
             (p["symbol"], p["strategy"], PAPER, p["ts_entry"]),
         )
         row = cur.fetchone()
@@ -143,10 +140,8 @@ def check_duplicate_buys(conn, days):
         SELECT a.id, a.ts, a.symbol, a.strategy, a.qty
         FROM trades a
         JOIN trades b ON a.symbol=b.symbol AND a.strategy=b.strategy
-            AND a.action=b.action AND a.paper=b.paper AND b.id > a.id
-            AND (julianday(b.ts) - julianday(a.ts)) * 86400 < 60
-        WHERE a.action='BUY' AND a.paper=?
-          AND a.ts >= datetime('now', '-{days} days')
+            AND a.action=b.action AND a.) - julianday(a.ts)) * 86400 < 60
+        WHERE a.action='BUY' AND a., '-{days} days')
         ORDER BY a.ts DESC
     """,
         (PAPER,),
@@ -176,7 +171,7 @@ def check_pnl_reconciliation(conn, days):
             COUNT(CASE WHEN pnl_usd != 0 THEN 1 END) as closed_trades,
             COUNT(*) as total_rows
         FROM trades
-        WHERE paper=? AND ts >= datetime('now', '-{days} days')
+        WHERE , '-{days} days')
     """,
         (PAPER,),
     )
@@ -202,8 +197,7 @@ def check_outlier_trades(conn, days):
         f"""
         SELECT id, ts, symbol, strategy, pnl_usd, qty, price
         FROM trades
-        WHERE paper=? AND pnl_usd != 0
-          AND ts >= datetime('now', '-{days} days')
+        WHERE , '-{days} days')
         ORDER BY ABS(pnl_usd) DESC
         LIMIT 10
     """,
@@ -235,7 +229,7 @@ def check_id_ordering(conn, days):
     cur.execute(
         f"""
         SELECT id, ts FROM trades
-        WHERE paper=? AND ts >= datetime('now', '-{days} days')
+        WHERE , '-{days} days')
         ORDER BY id ASC
     """,
         (PAPER,),
@@ -266,7 +260,7 @@ def check_unknown_strategies(conn, days):
         f"""
         SELECT DISTINCT strategy, COUNT(*) as cnt
         FROM trades
-        WHERE paper=? AND ts >= datetime('now', '-{days} days')
+        WHERE , '-{days} days')
         GROUP BY strategy
     """,
         (PAPER,),
@@ -509,8 +503,7 @@ def check_off_hours_trades(conn, days):
         f"""
         SELECT id, ts, symbol, strategy, action, pnl_usd
         FROM trades
-        WHERE paper=?
-          AND ts >= datetime('now', '-{days} days')
+        WHERE , '-{days} days')
           AND (
               -- UTC 06:00-08:59 ≈ ET 02:00-04:59 (summer offset -4)
               (strftime('%H', ts) >= '06' AND strftime('%H', ts) < '09')
@@ -699,7 +692,7 @@ def main():
         sys.exit(1)
 
     conn = _conn()
-    mode = "PAPER" if PAPER_TRADING else "LIVE"
+    mode = "PAPER" if False else "LIVE"
 
     print(f"\n{'═' * 55}")
     print(f"  HEALTH CHECK + SECURITY AUDIT  |  {mode}  |  last {args.days}d")

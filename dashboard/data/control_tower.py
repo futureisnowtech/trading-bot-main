@@ -136,9 +136,7 @@ def get_control_tower_snapshot(hours: int = 24) -> dict:
 
     # ── Runtime mode ───────────────────────────────────────────────────────────
     try:
-        from db import _runtime_paper_flag
-
-        result["runtime_mode"] = "PAPER" if _runtime_paper_flag() else "LIVE"
+        result["runtime_mode"] = "PAPER" if False else "LIVE"
     except Exception:
         result["runtime_mode"] = "UNKNOWN"
 

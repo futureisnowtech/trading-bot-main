@@ -25,8 +25,8 @@ def test_live_account_size_prefers_runtime_balance_over_config(proof_runtime, mo
         account_size_live=1966.0,
     )
 
-    assert la.get_live_account_size(paper=False) == 1966.0
-    assert la.get_live_account_size(paper=False) != float(config.ACCOUNT_SIZE)
+    assert la.get_live_account_size() == 1966.0
+    assert la.get_live_account_size() != float(config.ACCOUNT_SIZE)
 
 
 def test_live_account_size_falls_back_to_config_in_paper_mode(proof_runtime, monkeypatch):
@@ -45,7 +45,7 @@ def test_live_account_size_falls_back_to_config_in_paper_mode(proof_runtime, mon
         account_size_live=1966.0,
     )
 
-    assert la.get_live_account_size(paper=True) == 5000.0
+    assert la.get_live_account_size() == 5000.0
 
 
 def test_runtime_tables_include_account_size_live(proof_runtime):

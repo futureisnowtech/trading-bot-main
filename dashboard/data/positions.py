@@ -10,25 +10,18 @@ import db as _db
 
 _q = _db._q
 _q1 = _db._q1
-_runtime_paper_flag = _db._runtime_paper_flag
 
 
 def _db_open_positions():
     return _q(
-        "SELECT * FROM open_positions WHERE paper=? ORDER BY ts_entry DESC",
-        (_runtime_paper_flag(),),
+        "SELECT * FROM open_positions WHERE paper=0 ORDER BY ts_entry DESC"
     )
 
 
 def _db_perp_positions():
     return _q(
-        "SELECT * FROM open_positions WHERE strategy NOT LIKE 'spot_%' AND paper=? ORDER BY ts_entry DESC",
-        (_runtime_paper_flag(),),
+        "SELECT * FROM open_positions WHERE strategy NOT LIKE 'spot_%' AND paper=0 ORDER BY ts_entry DESC"
     )
-
-
-def _runtime_live_mode() -> bool:
-    return _runtime_paper_flag() == 0
 
 
 def _runtime_perp_truth() -> tuple[int, float]:
@@ -63,8 +56,7 @@ def get_spot_positions_dashboard():
     because the DB is missing lineage.
     """
     db_rows = _q(
-        "SELECT * FROM open_positions WHERE strategy LIKE 'spot_%' AND paper=? ORDER BY ts_entry DESC",
-        (_runtime_paper_flag(),),
+        "SELECT * FROM open_positions WHERE strategy LIKE 'spot_%' AND paper=0 ORDER BY ts_entry DESC"
     )
     live_positions = _get_live_coinbase_spot_positions()
     if live_positions is not None:
@@ -72,7 +64,6 @@ def get_spot_positions_dashboard():
             from runtime.spot_position_truth import get_spot_position_truth
 
             truth = get_spot_position_truth(
-                paper=False,
                 broker_holdings=live_positions,
                 db_path=getattr(_db, "DB_PATH", None),
             )
@@ -91,16 +82,12 @@ def _ts_sort_key(row: dict) -> datetime:
 
 
 def _get_live_coinbase_perp_positions() -> dict | None:
-    if _runtime_paper_flag():
-        return None
     if not _crypto_live_snapshot_enabled():
         return None
     try:
         from execution.coinbase_broker import get_coinbase_broker
 
         broker = get_coinbase_broker()
-        if bool(getattr(broker, "_paper", False)):
-            return None
         if not broker.is_connected():
             broker.connect()
         if not broker.is_connected():
@@ -114,7 +101,7 @@ def _get_live_coinbase_spot_positions() -> list[dict] | None:
     try:
         from execution.coinbase_spot_broker import CoinbaseSpotBroker
 
-        broker = CoinbaseSpotBroker(paper=False)
+        broker = CoinbaseSpotBroker()
         if not broker.is_connected():
             broker.connect()
         if not broker.is_connected():
@@ -194,43 +181,20 @@ def get_perp_positions():
     """
     Open perp-only positions.
 
-    Live mode: Coinbase CFM API is canonical — only DB metadata borrowed for
+    Coinbase CFM API is canonical — only DB metadata borrowed for
     matching rows. DB stale rows invisible (no position on exchange → not shown).
     If the live perp snapshot is unavailable, fail closed to [] instead of
     falling back to DB rows.
-
-    Paper mode: DB is primary, but reconciled against lane_runtime_state truth.
-    If the bot reports 0 positions/deployed with a fresh heartbeat, any DB rows
-    are stale (delete_position failed or bot restarted mid-close) and suppressed.
     """
     db_rows = _db_perp_positions()
     live_positions = _get_live_coinbase_perp_positions()
     if live_positions is not None:
         return _merge_live_perp_rows(live_positions, db_rows)
-    if _runtime_live_mode():
-        return []
-
-    # Paper mode: reconcile against runtime truth before returning DB rows
-    if _runtime_paper_flag() and db_rows:
-        rt_count, rt_deployed = _runtime_perp_truth()
-        if rt_count == 0 and rt_deployed == 0.0:
-            # Bot says no open perp positions — DB rows are stale, suppress them
-            return []
-
-    return db_rows
+    return []
 
 
 def get_open_positions():
-    """All open positions for current mode (perp + spot)."""
-    if _runtime_paper_flag():
-        perps = get_perp_positions()
-        spots = _q(
-            "SELECT * FROM open_positions WHERE strategy LIKE 'spot_%' AND paper=? ORDER BY ts_entry DESC",
-            (1,),
-        )
-        combined = perps + spots
-        combined.sort(key=_ts_sort_key, reverse=True)
-        return combined
+    """All open positions (perp + spot)."""
     combined = get_perp_positions() + get_spot_positions_dashboard()
     combined.sort(key=_ts_sort_key, reverse=True)
     return combined

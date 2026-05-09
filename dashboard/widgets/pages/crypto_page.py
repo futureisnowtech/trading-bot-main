@@ -699,14 +699,11 @@ def render_crypto_page():
             _root = _os.path.join(_os.path.dirname(__file__), "../../..")
             if _root not in _sys.path:
                 _sys.path.insert(0, _root)
-            from dashboard.db import _runtime_paper_flag
-
-            _paper_mode = _runtime_paper_flag()
+            from dashboard.db import_paper_mode = False
         except Exception:
             pass
 
-        if _paper_mode:
-            st.info("Running in PAPER mode — no real Coinbase orders to show.")
+        
         else:
             _limit = st.slider(
                 "Orders to fetch", min_value=10, max_value=200, value=50, step=10

@@ -52,15 +52,16 @@ except ImportError:
     logger.warning("[spot] requests not installed — live mode disabled")
 
 # ── Allowed spot symbols (lowercase base asset → Coinbase product_id) ─────────
+# v18.17: Precision specs (base_precision = size decimals, quote_precision = price decimals)
 SPOT_PRODUCT_SPECS: dict[str, dict] = {
-    "BTC": {"product_id": "BTC-USD", "min_order_usd": 1.0, "base_min_size": 0.00001},
-    "ETH": {"product_id": "ETH-USD", "min_order_usd": 1.0, "base_min_size": 0.0001},
-    "SOL": {"product_id": "SOL-USD", "min_order_usd": 1.0, "base_min_size": 0.01},
-    "XRP": {"product_id": "XRP-USD", "min_order_usd": 1.0, "base_min_size": 1.0},
-    "LTC": {"product_id": "LTC-USD", "min_order_usd": 1.0, "base_min_size": 0.01},
-    "DOGE": {"product_id": "DOGE-USD", "min_order_usd": 1.0, "base_min_size": 1.0},
-    "ADA": {"product_id": "ADA-USD", "min_order_usd": 1.0, "base_min_size": 1.0},
-    "LINK": {"product_id": "LINK-USD", "min_order_usd": 1.0, "base_min_size": 0.1},
+    "BTC": {"product_id": "BTC-USD", "min_order_usd": 1.0, "base_min_size": 0.00001, "base_precision": 8, "quote_precision": 2},
+    "ETH": {"product_id": "ETH-USD", "min_order_usd": 1.0, "base_min_size": 0.0001, "base_precision": 8, "quote_precision": 2},
+    "SOL": {"product_id": "SOL-USD", "min_order_usd": 1.0, "base_min_size": 0.01, "base_precision": 2, "quote_precision": 2},
+    "XRP": {"product_id": "XRP-USD", "min_order_usd": 1.0, "base_min_size": 1.0, "base_precision": 0, "quote_precision": 4},
+    "LTC": {"product_id": "LTC-USD", "min_order_usd": 1.0, "base_min_size": 0.01, "base_precision": 8, "quote_precision": 2},
+    "DOGE": {"product_id": "DOGE-USD", "min_order_usd": 1.0, "base_min_size": 1.0, "base_precision": 0, "quote_precision": 5},
+    "ADA": {"product_id": "ADA-USD", "min_order_usd": 1.0, "base_min_size": 1.0, "base_precision": 1, "quote_precision": 4},
+    "LINK": {"product_id": "LINK-USD", "min_order_usd": 1.0, "base_min_size": 0.1, "base_precision": 2, "quote_precision": 3},
 }
 
 SPOT_SUPPORTED_SYMBOLS = set(SPOT_PRODUCT_SPECS.keys())
@@ -127,7 +128,7 @@ class CoinbaseSpotBroker:
 
             self._key_name = str(COINBASE_CDP_KEY_NAME or "")
             raw = str(COINBASE_CDP_PRIVATE_KEY or "")
-            self._private_key_pem = raw.replace("\\n", "\n").encode()
+            self._private_key_pem = raw.replace("\\n", "\n").encode() if raw else b""
         except ImportError:
             pass
 
@@ -205,7 +206,22 @@ class CoinbaseSpotBroker:
         """Standardize symbol to base asset only."""
         return symbol.upper().split("-")[0].replace("USDT", "").replace("USD", "")
 
+    def _round_base(self, symbol: str, qty: float) -> str:
+        """Round quantity to base_precision and return as string."""
+        spec = self._spec(symbol)
+        prec = spec.get("base_precision", 8)
+        if prec <= 0:
+            return str(int(qty))
+        return f"{float(qty):.{prec}f}"
+
+    def _round_quote(self, symbol: str, price: float) -> str:
+        """Round price to quote_precision and return as string."""
+        spec = self._spec(symbol)
+        prec = spec.get("quote_precision", 2)
+        return f"{float(price):.{prec}f}"
+
     # ── Connection ────────────────────────────────────────────────────────────
+
 
     def connect(self) -> bool:
         if self._paper:
@@ -507,14 +523,21 @@ class CoinbaseSpotBroker:
             logger.warning(str(e))
             return None
         clean = self._clean_symbol(symbol)
-        base_min = spec.get("base_min_size", 0.0)
-        qty = size_usd / limit_price if limit_price > 0 else 0.0
         
-        if qty > 0 and qty < base_min:
-            logger.info(f"[spot] place_limit_buy_spot {clean}: raising qty {qty:.8f} to base_min {base_min}")
-            qty = base_min
+        # v18.17: Precision rounding for both size and price
+        raw_qty = size_usd / limit_price if limit_price > 0 else 0.0
+        qty_str = self._round_base(symbol, raw_qty)
+        qty = float(qty_str)
+        limit_px_str = self._round_quote(symbol, limit_price)
+        limit_px = float(limit_px_str)
 
-        if qty <= 0:
+        base_min = spec.get("base_min_size", 0.0)
+        if qty > 0 and qty < base_min:
+            logger.info(f"[spot] place_limit_buy_spot {clean}: raising qty {qty} to base_min {base_min}")
+            qty = base_min
+            qty_str = self._round_base(symbol, qty)
+
+        if qty <= 0 or limit_px <= 0:
             return None
         if self._paper:
             order_id = f"spot_limit_paper_{clean}_{int(time.time())}"
@@ -534,8 +557,8 @@ class CoinbaseSpotBroker:
             "side": "BUY",
             "order_configuration": {
                 "limit_limit_gtc": {
-                    "base_size": str(round(qty, 8)),
-                    "limit_price": str(round(limit_price, 8)),
+                    "base_size": qty_str,
+                    "limit_price": limit_px_str,
                     "post_only": bool(post_only),
                     "rfq_disabled": True,
                 }
@@ -568,12 +591,20 @@ class CoinbaseSpotBroker:
             logger.warning(str(e))
             return None
         clean = self._clean_symbol(symbol)
-        base_min = spec.get("base_min_size", 0.0)
-        if size_units > 0 and size_units < base_min:
-            logger.info(f"[spot] place_limit_sell_spot {clean}: raising size {size_units:.8f} to base_min {base_min}")
-            size_units = base_min
+        
+        # v18.17: Precision rounding for both size and price
+        qty_str = self._round_base(symbol, size_units)
+        qty = float(qty_str)
+        limit_px_str = self._round_quote(symbol, limit_price)
+        limit_px = float(limit_px_str)
 
-        if size_units <= 0 or limit_price <= 0:
+        base_min = spec.get("base_min_size", 0.0)
+        if qty > 0 and qty < base_min:
+            logger.info(f"[spot] place_limit_sell_spot {clean}: raising size {qty} to base_min {base_min}")
+            qty = base_min
+            qty_str = self._round_base(symbol, qty)
+
+        if qty <= 0 or limit_px <= 0:
             return None
         if self._paper:
             order_id = f"spot_limit_paper_{clean}_{int(time.time())}"
@@ -593,8 +624,8 @@ class CoinbaseSpotBroker:
             "side": "SELL",
             "order_configuration": {
                 "limit_limit_gtc": {
-                    "base_size": str(round(size_units, 8)),
-                    "limit_price": str(round(limit_price, 8)),
+                    "base_size": qty_str,
+                    "limit_price": limit_px_str,
                     "post_only": bool(post_only),
                     "rfq_disabled": True,
                 }
@@ -790,17 +821,20 @@ class CoinbaseSpotBroker:
                 else:
                     self._holdings[clean]["qty"] = new_qty
             return result
+# v18.17: Use precision rounding for market sell
+qty_str = self._round_base(symbol, size_units)
 
-        # Live path — base_size (units)
-        body = {
-            "client_order_id": str(uuid.uuid4()),
-            "product_id": spec["product_id"],
-            "side": "SELL",
-            "order_configuration": {
-                "market_market_ioc": {"base_size": str(round(size_units, 6))}
-            },
+# Live path — base_size (units)
+body = {
+    "client_order_id": str(uuid.uuid4()),
+    "product_id": spec["product_id"],
+    "side": "SELL",
+    "order_configuration": {
+        "market_market_ioc": {
+            "base_size": qty_str,
         }
-        try:
+    },
+}
             resp = self._request("POST", "/api/v3/brokerage/orders", body)
             order = resp.get("success_response") or resp.get("order") or {}
             if not order:

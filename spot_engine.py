@@ -1025,21 +1025,30 @@ def close_spot(
 
     latency = time.time() - t0
     if not order:
-        logger.error(f"[spot_engine] close_spot {clean}: sell failed: route={execution_route} veto={micro_veto}")
-        
-        # v18.17: Recovery logic for persistent rejections (e.g. limit_order_rejected)
-        # If we failed to even place the order, check if it's because the balance is actually 0.
+        logger.warning(f"[spot_engine] close_spot {clean}: maker_first failed ({micro_veto}). Attempting TAKER fallback...")
+        # v18.17: Ironclad Loop Breaker
+        # If maker fails, we MUST try a market order to clear the position and stop the Telegram spam.
         try:
             bal = broker.get_spot_balance()
             actual_qty = float(bal.get("symbol_balances", {}).get(clean, 0.0))
-            if actual_qty <= 0:
-                logger.warning(f"[spot_engine] close_spot {clean}: final balance check is 0 after rejection. Auto-purging DB.")
+            if actual_qty > 0:
+                order = broker.sell_spot(clean, actual_qty)
+                if order:
+                    logger.info(f"[spot_engine] close_spot {clean}: Taker fallback success. Loop broken.")
+                    # Fall through to the P&L calculation and DB deletion logic below
+                else:
+                    logger.error(f"[spot_engine] close_spot {clean}: FATAL - Taker fallback failed. Clearing DB to stop loop.")
+                    from logging_db.trade_logger import delete_position
+                    delete_position(clean, strategy=strategy)
+                    return None
+            else:
+                logger.warning(f"[spot_engine] close_spot {clean}: Broker balance is 0. Purging DB ghost.")
                 from logging_db.trade_logger import delete_position
                 delete_position(clean, strategy=strategy)
-        except Exception:
-            pass
-
-        return None
+                return None
+        except Exception as _re:
+            logger.error(f"[spot_engine] close_spot {clean}: critical recovery failure: {_re}")
+            return None
 
     # Push to Prometheus
     try:

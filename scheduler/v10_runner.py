@@ -2506,7 +2506,6 @@ def exit_monitor():
 def spot_exit_monitor():
     """Fast software-stop loop for the crypto spot scalp lane."""
     try:
-        from config import PAPER_TRADING as _paper_flag
         from spot_engine import (
             check_spot_eod_close,
             check_spot_stagnation_exits,
@@ -2516,12 +2515,12 @@ def spot_exit_monitor():
             check_spot_trailing,
         )
 
-        check_spot_stops(paper=False_flag)
-        check_spot_trailing(paper=False_flag)
-        check_spot_targets(paper=False_flag)
-        check_spot_stagnation_exits(paper=False_flag)
-        check_spot_thesis_exits(paper=False_flag)
-        check_spot_eod_close(paper=False_flag)
+        check_spot_stops()
+        check_spot_trailing()
+        check_spot_targets()
+        check_spot_stagnation_exits()
+        check_spot_thesis_exits()
+        check_spot_eod_close()
     except Exception as e:
         logger.error(
             f"[v10] spot_exit_monitor fatal: {e}\n{traceback.format_exc()[:1000]}"

@@ -489,6 +489,26 @@ async def run_bot():
     """Start the Telegram bot manually to avoid loop conflicts."""
     if not TOKEN:
         raise RuntimeError("TELEGRAM_BOT_TOKEN environment variable is not set")
+
+    # v18.17: Sovereign Polling Guard
+    # Only allow polling if the hostname matches the authorized production machine.
+    import socket
+    import config as _cfg
+
+    current_host = socket.gethostname()
+    target_host = getattr(_cfg, "TELEGRAM_POLLING_HOSTNAME", "algo-bot-live")
+
+    if current_host != target_host:
+        logger.warning(
+            f"[telegram] Sovereign Polling Guard: hostname mismatch ('{current_host}' != '{target_host}'). "
+            "Disabling polling (Command Mode) to prevent conflict with Production. "
+            "Send-only mode is still active."
+        )
+        # Block until the bot is stopped (no polling started)
+        stop_event = asyncio.Event()
+        await stop_event.wait()
+        return
+
     try:
         app = ApplicationBuilder().token(TOKEN).build()
 

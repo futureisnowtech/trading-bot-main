@@ -1101,8 +1101,9 @@ SPOT_KS_ROLLING_LOSSES_10: int = int(
 # displayed on the dashboard Notifications panel.
 # TELEGRAM_* kept here for config compatibility but have no effect.
 # ════════════════════════════════════════════════════════════════════
-TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")  # unused in v10
-TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID", "")  # unused in v10
+TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID", "")
+TELEGRAM_POLLING_HOSTNAME: str = os.getenv("TELEGRAM_POLLING_HOSTNAME", "algo-bot-live")
 
 # ════════════════════════════════════════════════════════════════════
 # LANE 3 — PREDICTION MARKETS (Polymarket + Kalshi)

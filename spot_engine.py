@@ -704,7 +704,7 @@ def open_spot(
             _reconcile_qty(clean, truth_row)
             # Re-fetch after reconciliation
             truth_row = get_spot_symbol_truth(clean)
-            truth_status = str(truth_row.get("position_truth_status") or "")
+            truth_status = str((truth_row or {}).get("position_truth_status") or "")
 
         if truth_status in {
             "matched_bot_position",

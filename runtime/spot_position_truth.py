@@ -34,6 +34,7 @@ _DEFAULT_EXTERNAL_MANUAL = {
     "MANA",
     "CLOV",
     "STETH",
+    "LINK",
 }
 _BLOCKING_STATUSES = {
     "unclassified",
@@ -377,6 +378,45 @@ def get_spot_position_truth(
             issues = [row for row in issues if not row.get("auto_purge")]
         except Exception as e:
             logger.warning(f"[spot_truth] Auto-purge failed: {e}")
+
+    # v18.17: Auto-reconcile qty_mismatch and metadata_missing
+    # Curing quantity mismatch often resolves metadata_missing on the next cycle
+    healing_rows = [
+        row
+        for row in issues
+        if row.get("position_truth_status") in ("qty_mismatch", "metadata_missing")
+    ]
+    if healing_rows:
+        try:
+            import sqlite3
+
+            with _conn(db_path) as conn:
+                for row in healing_rows:
+                    sym = _clean_symbol(row.get("symbol"))
+                    live_qty = _to_float(row.get("qty"))
+                    if live_qty > 0:
+                        conn.execute(
+                            "UPDATE open_positions SET qty=? WHERE symbol=? AND paper=0",
+                            (live_qty, sym),
+                        )
+                        logger.info(
+                            f"[spot_truth] Auto-reconciled DB qty for {sym} to {live_qty}"
+                        )
+                conn.commit()
+            # Mark as fixed in the current truth object
+            for row in healing_rows:
+                if _to_float(row.get("qty")) > 0:
+                    row["position_truth_status"] = "matched_bot_position"
+                    row["truth_blocking"] = False
+            # Refresh issues list
+            issues = [
+                row
+                for row in (merged_live + stale_db_rows)
+                if row.get("position_truth_status") != "matched_bot_position"
+                and not row.get("auto_purge")
+            ]
+        except Exception as e:
+            logger.warning(f"[spot_truth] Auto-reconcile failed: {e}")
 
     blockers = [row for row in issues if row.get("truth_blocking")]
     bot_positions = [row for row in merged_live if row.get("is_bot_managed")]

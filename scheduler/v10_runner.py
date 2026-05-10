@@ -1895,7 +1895,7 @@ def _attempt_entry(
 
             _total_spot_cap = _account_equity * float(SPOT_TOTAL_ALLOC_CAP_PCT)
             _symbol_cap = _account_equity * _alloc_cap_pct
-            _spot_deployed = _spot_eng._current_spot_deployed_usd(paper=False)
+            _spot_deployed = _spot_eng._current_spot_deployed_usd()
             _top = _spot_eng._get_broker(_paper).get_spot_top_of_book(_underlying)
             _spread_for_gate = float(
                 _top.get("spread_pct") or candidate.get("spread_pct", 0.0) or 0.0

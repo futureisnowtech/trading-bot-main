@@ -34,7 +34,6 @@ logger = logging.getLogger(__name__)
 
 _scan_lock = threading.RLock()  # prevent parallel scan_and_trade runs
 _initial_balance: float = 0.0  # set at startup from config
-_paper: bool = False  # v18.17: system is strictly LIVE
 
 # Regime multipliers for position sizing (applied on top of compute_position_size)
 _REGIME_SIZE_MULT = {
@@ -215,7 +214,7 @@ def _journal_scan_candidate(
                 entry_block_reason=entry_block_reason,
                 decision=decision,
                 paper=False,
-                source="clean_paper_v10" if _paper else "live_v10",
+                source="live_v10",
                 scanner_theoretical_position_usd=theor_pos,
                 scanner_effective_position_usd=eff_pos,
                 recommended_lane=recommended_lane,
@@ -526,19 +525,12 @@ def _get_spot_runtime_truth() -> tuple[int, float]:
     """
     Return (open_count, deployed_usd) for the spot lane.
 
-    Live mode prefers broker-truth holdings; paper mode falls back to persisted
-    spot positions.
+    Live mode prefers broker-truth holdings.
     """
     try:
         from runtime.spot_position_truth import get_spot_position_truth
 
-        if _paper:
-            truth = get_spot_position_truth(paper=True)
-            return int(truth.get("positions_open") or 0), float(
-                truth.get("deployment_notional") or 0.0
-            )
-
-        truth = get_spot_position_truth(paper=False)
+        truth = get_spot_position_truth()
         return int(truth.get("positions_open") or 0), float(
             truth.get("deployment_notional") or 0.0
         )
@@ -548,7 +540,7 @@ def _get_spot_runtime_truth() -> tuple[int, float]:
 
 def _persist_live_account_size(balance: float) -> None:
     """Persist the real live funded account size once it is known."""
-    if _paper or balance <= 0:
+    if balance <= 0:
         return
     try:
         from runtime.runtime_state import upsert_system_state
@@ -566,9 +558,10 @@ def _write_crypto_lane_runtime(open_positions: Optional[Dict] = None) -> None:
         import config as _cfg
 
         perps = _import_perps_engine()
+        # v18.17: Perps still uses testnet flag for now (archived lane)
         broker = perps._get_broker(testnet=True) if perps is not None else None
         connected = bool(broker and broker.is_connected())
-        if broker is not None and not connected and not _paper:
+        if broker is not None and not connected:
             try:
                 connected = bool(broker.connect())
             except Exception:
@@ -585,7 +578,7 @@ def _write_crypto_lane_runtime(open_positions: Optional[Dict] = None) -> None:
         _persist_live_account_size(buying_power)
         perp_deployed_usd = float(_get_deployed_usd(open_positions))
         perp_positions_open = len(open_positions)
-        spot_truth = get_spot_position_truth(paper=False)
+        spot_truth = get_spot_position_truth()
         spot_positions_open = int(spot_truth.get("positions_open") or 0)
         spot_deployed_usd = float(spot_truth.get("deployment_notional") or 0.0)
         deployed_usd = perp_deployed_usd + spot_deployed_usd
@@ -602,7 +595,7 @@ def _write_crypto_lane_runtime(open_positions: Optional[Dict] = None) -> None:
         tradable = 1
 
         truth_blockers = spot_truth.get("blocking_issues") or []
-        if not bool(spot_truth.get("snapshot_ok", True)) and not _paper:
+        if not bool(spot_truth.get("snapshot_ok", True)):
             health = "WARN"
             readiness = "DEGRADED"
             launch_state = "DEGRADED"
@@ -611,7 +604,7 @@ def _write_crypto_lane_runtime(open_positions: Optional[Dict] = None) -> None:
             tradable = 0
         elif truth_blockers:
             health = "WARN"
-            readiness = "DEGRADED" if not _paper else "NOT_READY"
+            readiness = "DEGRADED"
             launch_state = readiness
             blocked_symbols = ",".join(
                 sorted(
@@ -629,7 +622,7 @@ def _write_crypto_lane_runtime(open_positions: Optional[Dict] = None) -> None:
                 else "resolve_spot_truth_blockers"
             )
             tradable = 0
-        elif not connected and not _paper:
+        elif not connected:
             health = "WARN"
             readiness = "NOT_READY"
             launch_state = "NOT_READY"
@@ -651,7 +644,7 @@ def _write_crypto_lane_runtime(open_positions: Optional[Dict] = None) -> None:
             action_needed = "review_kill_switch_trigger"
             tradable = 0
         elif bool(getattr(_cfg, "SPOT_TINY_LIVE_ENABLEMENT_CONFIRMED", False)):
-            readiness = "TINY_LIVE" if not _paper else "READY_FOR_TINY_LIVE"
+            readiness = "TINY_LIVE"
             launch_state = readiness
             tradable = 1
         else:
@@ -667,8 +660,8 @@ def _write_crypto_lane_runtime(open_positions: Optional[Dict] = None) -> None:
             enabled=1,
             active=1,
             configured=1,
-            mode="paper" if _paper else "live",
-            connected=int(connected or _paper),
+            mode="live",
+            connected=int(connected),
             tradable=int(tradable),
             health=health,
             blocked_reason=blocked_reason,
@@ -985,8 +978,8 @@ def _scan_and_trade_inner(spot_only: bool = False):
 
             _conn2 = _sq.connect(_DB_PATH)
             _open_rows = _conn2.execute(
-                "SELECT symbol FROM open_positions WHERE strategy=? AND paper=?",
-                ("v10_perp", int(_paper)),
+                "SELECT symbol FROM open_positions WHERE strategy=? AND paper=0",
+                ("v10_perp",),
             ).fetchall()
             _conn2.close()
             _open_underlyings = {_get_underlying(r[0]) for r in _open_rows}
@@ -1896,7 +1889,7 @@ def _attempt_entry(
             _total_spot_cap = _account_equity * float(SPOT_TOTAL_ALLOC_CAP_PCT)
             _symbol_cap = _account_equity * _alloc_cap_pct
             _spot_deployed = _spot_eng._current_spot_deployed_usd()
-            _top = _spot_eng._get_broker(_paper).get_spot_top_of_book(_underlying)
+            _top = _spot_eng._get_broker().get_spot_top_of_book(_underlying)
             _spread_for_gate = float(
                 _top.get("spread_pct") or candidate.get("spread_pct", 0.0) or 0.0
             )
@@ -1909,7 +1902,7 @@ def _attempt_entry(
                 or 0.0
             )
             _available_spot_usd = float(
-                _spot_eng._get_broker(_paper)
+                _spot_eng._get_broker()
                 .get_spot_balance()
                 .get("usd_available", 0.0)
             )
@@ -2129,9 +2122,7 @@ def _attempt_entry(
                 logger.debug(f"[v10] ladder check error: {_le}")
 
             _sr = _spot_eng.open_spot(
-                _underlying,
-                _spot_size,
-                paper=False,
+                _underlying, _spot_size,
                 composite_score=composite,
                 atr_at_entry=atr_7,
                 spot_state=_spot_state,
@@ -2847,7 +2838,7 @@ def _evaluate_position_exit(
                 exit_ts=_exit_ts_str,
                 exit_reason=exit_decision.exit_type,
                 market_data_at_entry=_md_for_pta,
-                source="clean_paper_v10" if _paper else "live_v10",
+                source="live_v10",
                 paper=False,
                 exit_type=exit_decision.exit_type,
                 composite_score=float(pos.get("entry_composite_score", 0.0)),
@@ -2868,7 +2859,7 @@ def _evaluate_position_exit(
                 str(close_result.get("order_id", "")).strip()
                 or f"close_{symbol}_{int(time.time())}"
             )
-            _src_tag = "clean_paper_v10" if _paper else "live_v10"
+            _src_tag = "live_v10"
 
             # Tier: quarantine impossible PnL; verify if attribution ran; else suspect
             _acct = float(get_live_account_size(paper=False))
@@ -3493,25 +3484,16 @@ def rbi_nightly():
 
 def _init_globals():
     """Set module-level globals from config at startup."""
-    global _initial_balance, _paper
+    global _initial_balance
     try:
-        from config import PAPER_TRADING
-
-        _paper = bool(PAPER_TRADING)
-        if _paper:
-            from runtime.live_account import get_live_account_size
-
-            _initial_balance = float(get_live_account_size(paper=True))
-        else:
-            _initial_balance = float(_get_account_balance())
-            _persist_live_account_size(_initial_balance)
+        _initial_balance = float(_get_account_balance())
+        _persist_live_account_size(_initial_balance)
     except Exception as e:
-        logger.warning(f"[v10] config read error: {e} — using defaults")
-        _paper = True
-        _initial_balance = 5000.0
+        logger.warning(f"[v10] balance resolution error: {e} — using defaults")
+        _initial_balance = 0.0
 
     logger.info(
-        f"[v10] mode={'PAPER' if _paper else 'LIVE'} "
+        f"[v10] mode=LIVE "
         f"initial_balance=${_initial_balance:.0f}"
     )
 
@@ -3524,7 +3506,7 @@ def _startup_notification():
             ne.notify_system(
                 title="v10 System Started",
                 detail=(
-                    f"mode={'PAPER' if _paper else 'LIVE'} "
+                    f"mode=LIVE "
                     f"balance=${_initial_balance:.0f}"
                 ),
             )

@@ -868,8 +868,7 @@ def render_manual_scan():
                         target_p = round(price + target_dist, 6)
                         try:
                             pos = _se_exec.open_spot(
-                                exec_sym, pos_usd, paper=_exec_paper
-                            )
+                                exec_sym, pos_usd)
                         except Exception as _spot_exc:
                             results.append(
                                 (sym, dirn, False, f"spot exception: {_spot_exc}")
@@ -1332,7 +1331,7 @@ def render_spot_section():
                 f"Sell all {sym} now", key=f"spot_sell_{sym}", type="secondary"
             ):
                 try:
-                    result = _se.close_spot(sym, paper=_exec_paper)
+                    result = _se.close_spot(sym)
                     if result:
                         pnl = result.get("pnl_usd", 0.0)
                         st.session_state["spot_manual_message"] = {
@@ -1408,9 +1407,7 @@ def render_spot_section():
                                 _spot_state = None
 
                         pos_result = _se.open_spot(
-                            sym,
-                            size_input,
-                            paper=_exec_paper,
+                            sym, size_input,
                             composite_score=float(scan.get("score") or 0.0),
                             spot_state=_spot_state,
                             final_spot_score=float(score or 0.0),

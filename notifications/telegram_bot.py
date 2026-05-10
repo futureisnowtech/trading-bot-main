@@ -135,6 +135,7 @@ def restricted_access(func):
     ):
         user = getattr(update, "effective_user", None)
         user_id = getattr(user, "id", None)
+        logger.debug(f"[telegram] Message from user_id={user_id} (authorized={AUTHORIZED_USER_ID})")
         if user_id != AUTHORIZED_USER_ID:
             logger.warning(f"Unauthorized access attempt by {user_id}")
             await _reply_text(update, "Access Denied.")

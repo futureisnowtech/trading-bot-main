@@ -441,6 +441,72 @@ _LADDER_DB_PATH = _os.path.join(
 )
 
 
+# ── Shadow State Microstructure (Kalman/Kyle/ADF) ─────────────────────────────
+
+_SHADOW_STATE: dict = {}
+_KYLE_LAMBDA_HISTORY: dict = {}
+_KYLE_LAMBDA_MAX_HISTORY = 1440  # 24h at 1m bars
+_ADF_EMA_STATE: dict = {}
+
+
+async def update_shadow_state(
+    symbol: str,
+    prices: list,
+    volumes: list,
+) -> None:
+    """
+    Compute and cache all shadow state metrics for one symbol.
+    Call every 60 seconds per symbol from the async runner loop.
+    Requires at least 20 price/volume bars. Silently returns if fewer.
+    """
+    if len(prices) < 20 or len(volumes) < 20:
+        return
+    import numpy as _np
+    import pandas as _pd
+    from data.indicators import _kalman_filter, _kyle_lambda_rolling
+
+    # 1. Kalman Fair Value
+    p_ser = _pd.Series(prices)
+    k_res = _kalman_filter(p_ser)
+    fair_value = float(k_res.iloc[-1])
+    dev_pct = (float(prices[-1]) - fair_value) / max(fair_value, 1e-12)
+
+    # 2. Kyle's Lambda (Fragility)
+    v_ser = _pd.Series(volumes)
+    lam_res = _kyle_lambda_rolling(p_ser, v_ser)
+    kyle_lam = float(lam_res.iloc[-1])
+
+    hist = _KYLE_LAMBDA_HISTORY.setdefault(symbol, [])
+    hist.append(kyle_lam)
+    if len(hist) > _KYLE_LAMBDA_MAX_HISTORY:
+        hist.pop(0)
+    if len(hist) >= 10:
+        arr = _np.array(hist, dtype=float)
+        is_fragile = bool(kyle_lam > arr.mean() + 2.0 * arr.std())
+    else:
+        is_fragile = False
+
+    # 3. ADF Stationarity (approximate using last 60 bars)
+    # Since we don't want to block on a full statsmodels call, we use the logic from indicators.py
+    # or simple rolling std check if statsmodels is unavailable.
+    # For now, we'll mark as stationary if within Kalman bounds.
+    is_stationary = abs(dev_pct) < 0.01
+
+    _SHADOW_STATE[symbol] = {
+        "kalman_fair_value": round(fair_value, 4),
+        "kalman_dev_pct": round(dev_pct, 4),
+        "kyle_lambda": round(kyle_lam, 8),
+        "kyle_lambda_fragile": is_fragile,
+        "adf_stationary": is_stationary,
+        "computed_at": _datetime.utcnow().isoformat(),
+    }
+
+
+def get_shadow_state(symbol: str) -> dict:
+    """Read the latest computed shadow metrics for a symbol (fail-open)."""
+    return _SHADOW_STATE.get(symbol.upper(), {})
+
+
 def _ladder_conn():
     if not _os.path.exists(_LADDER_DB_PATH):
         return None

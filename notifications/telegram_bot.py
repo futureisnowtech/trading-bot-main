@@ -515,6 +515,15 @@ async def run_bot():
     try:
         app = ApplicationBuilder().token(TOKEN).build()
 
+        # v18.17: Raw Update Logger (Diagnostic)
+        async def raw_logger(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            user = getattr(update, "effective_user", None)
+            user_id = getattr(user, "id", None)
+            text = getattr(update.message, "text", "[no text]") if update.message else "[no message]"
+            logger.info(f"[telegram] RAW UPDATE: user_id={user_id} text='{text}'")
+
+        app.add_handler(MessageHandler(filters.ALL, raw_logger), group=-1)
+
         app.add_handler(CommandHandler("status", status_command))
         app.add_handler(CommandHandler("logs", logs_command))
         app.add_handler(CommandHandler("metrics", metrics_command))
@@ -533,7 +542,7 @@ async def run_bot():
 
         await app.initialize()
         await app.start()
-        await app.updater.start_polling(drop_pending_updates=True)
+        await app.updater.start_polling(drop_pending_updates=False)
 
         logger.info("Telegram Bot (Command Suite) is now live and polling.")
 

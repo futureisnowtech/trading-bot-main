@@ -196,18 +196,26 @@ class CoinbaseSpotBroker:
         return symbol.upper().split("-")[0].replace("USDT", "").replace("USD", "")
 
     def _round_base(self, symbol: str, qty: float) -> str:
-        """Round quantity to base_precision and return as string."""
+        """Round quantity down to base_increment and return as string."""
         spec = self._spec(symbol)
+        increment = float(spec.get("base_increment", 1e-8))
+        # v18.17: Strict floor to prevent INVALID_SIZE_PRECISION
+        import math
+        rounded = math.floor(qty / increment + 1e-11) * increment
         prec = spec.get("base_precision", 8)
         if prec <= 0:
-            return str(int(qty))
-        return f"{float(qty):.{prec}f}"
+            return str(int(rounded))
+        # Ensure we don't return more decimals than allowed even after increment math
+        return f"{rounded:.{prec}f}".rstrip("0").rstrip(".") if "." in f"{rounded:.{prec}f}" else f"{rounded:.{prec}f}"
 
     def _round_quote(self, symbol: str, price: float) -> str:
-        """Round price to quote_precision and return as string."""
+        """Round price down to quote_increment and return as string."""
         spec = self._spec(symbol)
+        increment = float(spec.get("quote_increment", 0.01))
+        import math
+        rounded = math.floor(price / increment + 1e-11) * increment
         prec = spec.get("quote_precision", 2)
-        return f"{float(price):.{prec}f}"
+        return f"{rounded:.{prec}f}"
 
     # ── Connection ────────────────────────────────────────────────────────────
 

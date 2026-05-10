@@ -977,27 +977,20 @@ def close_spot(
     if broker is None:
         return None
 
-    # Reconcile qty against actual broker balance — prevents INSUFFICIENT_FUND loop
-    # when DB qty drifts above actual holdings (e.g. partial fill not fully recorded).
+    # v18.17: Authoritative Inventory Sync
+    # Query broker directly before sell to avoid INSUFFICIENT_FUND loops
     try:
-        holdings = broker.sync_live_holdings() or []
-        actual_qty = next(
-            (
-                float(h.get("qty") or 0)
-                for h in holdings
-                if str(h.get("symbol", "")).upper() == clean
-            ),
-            None,
-        )
-        if actual_qty is not None and actual_qty < qty:
+        bal = broker.get_spot_balance()
+        actual_qty = float(bal.get("symbol_balances", {}).get(clean, 0.0))
+        if actual_qty < qty:
             logger.warning(
-                f"[spot_engine] close_spot {clean}: DB qty={qty:.5f} > broker qty={actual_qty:.5f}"
-                f" — selling actual qty to avoid INSUFFICIENT_FUND"
+                f"[spot_engine] close_spot {clean}: DB qty={qty:.5f} > broker qty={actual_qty:.5f} "
+                "— selling actual qty to avoid INSUFFICIENT_FUND"
             )
             qty = actual_qty
-    except Exception:
-        pass
-    
+    except Exception as _e:
+        logger.debug(f"[spot_engine] broker balance sync failed for {clean}: {_e}")
+
     if qty <= 0:
         # v18.17: If actual_qty is 0, auto-purge the ghost DB position and return success
         try:
@@ -1033,6 +1026,19 @@ def close_spot(
     latency = time.time() - t0
     if not order:
         logger.error(f"[spot_engine] close_spot {clean}: sell failed: route={execution_route} veto={micro_veto}")
+        
+        # v18.17: Recovery logic for persistent rejections (e.g. limit_order_rejected)
+        # If we failed to even place the order, check if it's because the balance is actually 0.
+        try:
+            bal = broker.get_spot_balance()
+            actual_qty = float(bal.get("symbol_balances", {}).get(clean, 0.0))
+            if actual_qty <= 0:
+                logger.warning(f"[spot_engine] close_spot {clean}: final balance check is 0 after rejection. Auto-purging DB.")
+                from logging_db.trade_logger import delete_position
+                delete_position(clean, strategy=strategy)
+        except Exception:
+            pass
+
         return None
 
     # Push to Prometheus

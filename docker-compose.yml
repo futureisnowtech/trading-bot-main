@@ -2,6 +2,7 @@ services:
   algo-bot:
     build: .
     container_name: algo-bot-live
+    hostname: algo-bot-live
     restart: unless-stopped
     networks:
       - trading-network

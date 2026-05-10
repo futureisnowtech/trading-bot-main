@@ -509,6 +509,8 @@ async def run_bot():
         await stop_event.wait()
         return
 
+    logger.info(f"[telegram] Sovereign Polling Guard: hostname match ('{current_host}'). Command Mode AUTHORIZED.")
+
     try:
         app = ApplicationBuilder().token(TOKEN).build()
 

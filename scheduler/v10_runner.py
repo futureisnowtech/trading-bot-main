@@ -2172,7 +2172,7 @@ def _attempt_entry(
                 _decision = "execution_failed"
                 
                 # Check if it was a known soft-veto
-                _block_msg = str(_sr.get("blocked") or "None returned")
+                _block_msg = str((_sr.get("blocked") if _sr else "None returned") or "None returned")
                 if "skipped_microstructure" in _block_msg or "skipped_taker_score" in _block_msg:
                     _decision = "vetoed"
                     _spot_reason = "strategy_veto"

@@ -51,16 +51,16 @@ except ImportError:
     logger.warning("[spot] requests not installed — live mode disabled")
 
 # ── Allowed spot symbols (lowercase base asset → Coinbase product_id) ─────────
-# v18.17: Precision specs (base_precision = size decimals, quote_precision = price decimals)
+# v18.17: Authoritative increments (from Coinbase product API)
 SPOT_PRODUCT_SPECS: dict[str, dict] = {
-    "BTC": {"product_id": "BTC-USD", "min_order_usd": 1.0, "base_min_size": 0.00001, "base_precision": 8, "quote_precision": 2},
-    "ETH": {"product_id": "ETH-USD", "min_order_usd": 1.0, "base_min_size": 0.0001, "base_precision": 8, "quote_precision": 2},
-    "SOL": {"product_id": "SOL-USD", "min_order_usd": 1.0, "base_min_size": 0.01, "base_precision": 2, "quote_precision": 2},
-    "XRP": {"product_id": "XRP-USD", "min_order_usd": 1.0, "base_min_size": 1.0, "base_precision": 0, "quote_precision": 4},
-    "LTC": {"product_id": "LTC-USD", "min_order_usd": 1.0, "base_min_size": 0.01, "base_precision": 8, "quote_precision": 2},
-    "DOGE": {"product_id": "DOGE-USD", "min_order_usd": 1.0, "base_min_size": 1.0, "base_precision": 0, "quote_precision": 5},
-    "ADA": {"product_id": "ADA-USD", "min_order_usd": 1.0, "base_min_size": 1.0, "base_precision": 1, "quote_precision": 4},
-    "LINK": {"product_id": "LINK-USD", "min_order_usd": 1.0, "base_min_size": 0.1, "base_precision": 2, "quote_precision": 3},
+    "BTC": {"product_id": "BTC-USD", "base_increment": "0.00000001", "quote_increment": "0.01", "base_precision": 8, "quote_precision": 2},
+    "ETH": {"product_id": "ETH-USD", "base_increment": "0.00000001", "quote_increment": "0.01", "base_precision": 8, "quote_precision": 2},
+    "SOL": {"product_id": "SOL-USD", "base_increment": "0.01", "quote_increment": "0.01", "base_precision": 2, "quote_precision": 2},
+    "XRP": {"product_id": "XRP-USD", "base_increment": "0.000001", "quote_increment": "0.0001", "base_precision": 6, "quote_precision": 4},
+    "LTC": {"product_id": "LTC-USD", "base_increment": "0.00000001", "quote_increment": "0.01", "base_precision": 8, "quote_precision": 2},
+    "DOGE": {"product_id": "DOGE-USD", "base_increment": "0.1", "quote_increment": "0.00001", "base_precision": 1, "quote_precision": 5},
+    "ADA": {"product_id": "ADA-USD", "base_increment": "0.1", "quote_increment": "0.0001", "base_precision": 1, "quote_precision": 4},
+    "LINK": {"product_id": "LINK-USD", "base_increment": "0.001", "quote_increment": "0.001", "base_precision": 3, "quote_precision": 3},
 }
 
 SPOT_SUPPORTED_SYMBOLS = set(SPOT_PRODUCT_SPECS.keys())

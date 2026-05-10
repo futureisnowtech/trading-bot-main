@@ -2201,7 +2201,7 @@ def _attempt_entry(
                 )
                 return _decision
         except Exception as _spot_err:
-            logger.debug(f"[v10] spot entry error: {_spot_err}")
+            logger.error(f"[v10] spot entry error: {_spot_err}\n{traceback.format_exc()}")
             logger.info(
                 f"[v10] spot {_trade.get('underlying')} exception — staying in spot lane"
             )

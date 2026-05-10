@@ -861,13 +861,13 @@ def spot_quality_block_reason(
     if policy["allowed_regimes"] and regime not in set(policy["allowed_regimes"]):
         reason = f"spot_regime_not_allowed:{regime}"
         try:
-            system_state.state.update_stochastic(clean, {"status": "VETO", "reason": reason})
+            system_state.state.update_stochastic(clean, {"status": "STRATEGY_VETO", "reason": reason})
         except Exception:
             pass
         return reason, floor
     if regime == "CHOP":
         try:
-            system_state.state.update_stochastic(clean, {"status": "VETO", "reason": "spot_regime_not_allowed:CHOP"})
+            system_state.state.update_stochastic(clean, {"status": "STRATEGY_VETO", "reason": "spot_regime_not_allowed:CHOP"})
         except Exception:
             pass
         return "spot_regime_not_allowed:CHOP", floor
@@ -878,7 +878,7 @@ def spot_quality_block_reason(
     if not setup_policy["allowed"]:
         reason = str(setup_policy["reason"] or "setup_family_not_allowed")
         try:
-            system_state.state.update_stochastic(clean, {"status": "VETO", "reason": reason})
+            system_state.state.update_stochastic(clean, {"status": "STRATEGY_VETO", "reason": reason})
         except Exception:
             pass
         return reason, floor
@@ -890,7 +890,7 @@ def spot_quality_block_reason(
     )
     if tv_block:
         try:
-            system_state.state.update_stochastic(clean, {"status": "VETO", "reason": tv_block})
+            system_state.state.update_stochastic(clean, {"status": "STRATEGY_VETO", "reason": tv_block})
         except Exception:
             pass
         return tv_block, floor
@@ -899,14 +899,14 @@ def spot_quality_block_reason(
         if not _edge_condition_matches(spot_state, condition):
             reason = str(condition.get("reason") or _default_edge_reason(condition))
             try:
-                system_state.state.update_stochastic(clean, {"status": "VETO", "reason": reason})
+                system_state.state.update_stochastic(clean, {"status": "STRATEGY_VETO", "reason": reason})
             except Exception:
                 pass
             return reason, floor
 
     if final_spot_score is not None and float(final_spot_score) < float(floor):
         try:
-            system_state.state.update_stochastic(clean, {"status": "VETO", "reason": "below_regime_floor"})
+            system_state.state.update_stochastic(clean, {"status": "STRATEGY_VETO", "reason": "below_regime_floor"})
         except Exception:
             pass
         return "below_regime_floor", floor
@@ -917,7 +917,7 @@ def spot_quality_block_reason(
     )
     if confirm_count < regime_min_confirms:
         try:
-            system_state.state.update_stochastic(clean, {"status": "VETO", "reason": "structural_confirm_count_too_low"})
+            system_state.state.update_stochastic(clean, {"status": "STRATEGY_VETO", "reason": "structural_confirm_count_too_low"})
         except Exception:
             pass
         return "structural_confirm_count_too_low", floor
@@ -928,7 +928,7 @@ def spot_quality_block_reason(
     )
     if float(s5.get("frame_score") or 0.0) < min_5m_frame:
         try:
-            system_state.state.update_stochastic(clean, {"status": "VETO", "reason": "frame_score_5m_too_low"})
+            system_state.state.update_stochastic(clean, {"status": "STRATEGY_VETO", "reason": "frame_score_5m_too_low"})
         except Exception:
             pass
         return "frame_score_5m_too_low", floor
@@ -939,7 +939,7 @@ def spot_quality_block_reason(
     )
     if float(s30.get("frame_score") or 0.0) < min_30m_frame:
         try:
-            system_state.state.update_stochastic(clean, {"status": "VETO", "reason": "frame_score_30m_too_low"})
+            system_state.state.update_stochastic(clean, {"status": "STRATEGY_VETO", "reason": "frame_score_30m_too_low"})
         except Exception:
             pass
         return "frame_score_30m_too_low", floor
@@ -952,7 +952,7 @@ def spot_quality_block_reason(
     )
     if float(s5.get("momentum_impulse") or 0.0) < min_momentum:
         try:
-            system_state.state.update_stochastic(clean, {"status": "VETO", "reason": "momentum_impulse_too_low"})
+            system_state.state.update_stochastic(clean, {"status": "STRATEGY_VETO", "reason": "momentum_impulse_too_low"})
         except Exception:
             pass
         return "momentum_impulse_too_low", floor
@@ -965,13 +965,13 @@ def spot_quality_block_reason(
     )
     if float(s5.get("structure_component") or 0.0) < min_structure:
         try:
-            system_state.state.update_stochastic(clean, {"status": "VETO", "reason": "structure_component_too_low"})
+            system_state.state.update_stochastic(clean, {"status": "STRATEGY_VETO", "reason": "structure_component_too_low"})
         except Exception:
             pass
         return "structure_component_too_low", floor
     if float(s5.get("path_efficiency") or 0.0) < float(policy["min_path_efficiency"]):
         try:
-            system_state.state.update_stochastic(clean, {"status": "VETO", "reason": "path_efficiency_too_low"})
+            system_state.state.update_stochastic(clean, {"status": "STRATEGY_VETO", "reason": "path_efficiency_too_low"})
         except Exception:
             pass
         return "path_efficiency_too_low", floor
@@ -984,7 +984,7 @@ def spot_quality_block_reason(
     )
     if float(s5.get("participation_component") or 0.0) < min_participation:
         try:
-            system_state.state.update_stochastic(clean, {"status": "VETO", "reason": "participation_component_too_low"})
+            system_state.state.update_stochastic(clean, {"status": "STRATEGY_VETO", "reason": "participation_component_too_low"})
         except Exception:
             pass
         return "participation_component_too_low", floor
@@ -992,7 +992,7 @@ def spot_quality_block_reason(
         policy["min_volatility_quality"]
     ):
         try:
-            system_state.state.update_stochastic(clean, {"status": "VETO", "reason": "volatility_quality_too_low"})
+            system_state.state.update_stochastic(clean, {"status": "STRATEGY_VETO", "reason": "volatility_quality_too_low"})
         except Exception:
             pass
         return "volatility_quality_too_low", floor
@@ -1002,10 +1002,11 @@ def spot_quality_block_reason(
     # Update system state with final multiplier and tag
     try:
         current_stoch = system_state.state.get_state()["strategy"].get("stochastic", {}).get(clean, {})
-        current_stoch.update({"multiplier": _exec_mult, "status": "VETO" if _exec_mult == 0.0 else "ACTIVE", "reason": _exec_tag if _exec_mult == 0.0 else ""})
+        current_stoch.update({"multiplier": _exec_mult, "status": "STRATEGY_VETO" if _exec_mult == 0.0 else "ACTIVE", "reason": _exec_tag if _exec_mult == 0.0 else ""})
         system_state.state.update_stochastic(clean, current_stoch)
     except Exception:
         pass
+
 
     if _exec_mult == 0.0:
         return _exec_tag, floor

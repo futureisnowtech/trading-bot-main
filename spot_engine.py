@@ -810,9 +810,11 @@ def open_spot(
         logger.info(f"[spot_engine] {clean} blocked — {micro_veto}")
         return None
 
-    latency = time.time() - t0
     if not order:
-        logger.error(f"[spot_engine] {clean} buy failed: route={execution_route} veto={micro_veto}")
+        if execution_route in ("skipped_microstructure", "skipped_taker_score", "taker_fallback_disabled"):
+            logger.info(f"[spot_engine] {clean} buy skipped: route={execution_route} veto={micro_veto}")
+        else:
+            logger.error(f"[spot_engine] {clean} buy failed: route={execution_route} veto={micro_veto}")
         return None
 
     # Push to Prometheus

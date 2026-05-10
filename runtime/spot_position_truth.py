@@ -237,7 +237,10 @@ def _merged_live_row(
     classification_row = classification_row or {}
     classification = str(classification_row.get("classification") or "").strip()
 
-    if live_row and db_row:
+    # v18.17: Manual bypass — if a coin is marked as manual, it is NEVER a truth blocker
+    if classification == "external_manual":
+        status = "external_manual"
+    elif live_row and db_row:
         if _metadata_missing(db_row):
             # v18.17: Allow metadata_missing as matched_bot_position if quantities match within 1%
             db_qty = _to_float(db_row.get("qty"))
@@ -387,27 +390,30 @@ def get_spot_position_truth(
         if row.get("position_truth_status") in ("qty_mismatch", "metadata_missing")
     ]
     if healing_rows:
+        conn = None
         try:
             import sqlite3
 
-            with _conn(db_path) as conn:
-                for row in healing_rows:
-                    sym = _clean_symbol(row.get("symbol"))
-                    live_qty = _to_float(row.get("qty"))
-                    if live_qty > 0:
-                        conn.execute(
-                            "UPDATE open_positions SET qty=? WHERE symbol=? AND paper=0",
-                            (live_qty, sym),
-                        )
-                        logger.info(
-                            f"[spot_truth] Auto-reconciled DB qty for {sym} to {live_qty}"
-                        )
-                conn.commit()
+            conn = _conn(db_path)
+            for row in healing_rows:
+                sym = _clean_symbol(row.get("symbol"))
+                live_qty = _to_float(row.get("qty"))
+                if live_qty > 0:
+                    conn.execute(
+                        "UPDATE open_positions SET qty=? WHERE symbol=? AND paper=0",
+                        (live_qty, sym),
+                    )
+                    logger.info(
+                        f"[spot_truth] Auto-reconciled DB qty for {sym} to {live_qty}"
+                    )
+            conn.commit()
+
             # Mark as fixed in the current truth object
             for row in healing_rows:
                 if _to_float(row.get("qty")) > 0:
                     row["position_truth_status"] = "matched_bot_position"
                     row["truth_blocking"] = False
+
             # Refresh issues list
             issues = [
                 row
@@ -417,6 +423,9 @@ def get_spot_position_truth(
             ]
         except Exception as e:
             logger.warning(f"[spot_truth] Auto-reconcile failed: {e}")
+        finally:
+            if conn:
+                conn.close()
 
     blockers = [row for row in issues if row.get("truth_blocking")]
     bot_positions = [row for row in merged_live if row.get("is_bot_managed")]

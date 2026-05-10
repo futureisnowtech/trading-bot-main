@@ -1196,27 +1196,22 @@ def _attempt_entry(
         )
         return "data_unavailable"
 
-    # ── Price sanity: candle close must be within 5% of live mark price ───────
-    # v18.16: Validated via parallel pre-fetch block.
-    _PRICE_SANITY_PCT = 0.05  # 5% global fallback threshold
+    # ── Systemic Price Sanity Resolution ───────
+    # v18.17: Ironclad REST fallback for all sizing and scoring.
+    _DRIFT_THRESHOLD = 0.005  # 0.5% drift threshold
     try:
         _live = float(candidate.get("_live_price", 0.0))
         if _live > 0:
             _pct_off = abs(current_price - _live) / _live
-            if _pct_off > _PRICE_SANITY_PCT:
-                logger.warning(
-                    f"[v10] {symbol} — price sanity FAIL: candle ${current_price:.8g} "
-                    f"vs live ${_live:.8g} ({_pct_off:.1%} off) — SKIP (wrong data source)"
+            if _pct_off > _DRIFT_THRESHOLD:
+                logger.info(
+                    f"[v10] {symbol} — heartbeat sync: candle ${current_price:.8g} "
+                    f"drifted from live ${_live:.8g} ({_pct_off:.1%} off) — FORCING REST FALLBACK"
                 )
-                _journal_scan_candidate(
-                    scan_id,
-                    candidate,
-                    "data_unavailable",
-                    entry_block_reason=f"price sanity fail ({_pct_off:.1%} off live)",
-                    **_route_hint,
-                )
-                return "data_unavailable"
-            current_price = _live  # Use live mark price for execution accuracy
+            # Always align sizing and scoring logic to the authoritative REST Mark Price
+            current_price = _live
+            # Update the candle DataFrame so downstream features use the correct closing price
+            df.iloc[-1, df.columns.get_loc("close")] = _live
     except Exception as _pe:
         logger.debug(f"[v10] {symbol} price sanity check error: {_pe}")
 
@@ -2181,17 +2176,22 @@ def _attempt_entry(
                 )
                 return "entered"
             else:
+                # v18.17: Distinguish between strategy vetoes and systemic failures
                 _spot_reason = "spot_entry_failed"
-                logger.debug(
-                    f"[v10] spot {_trade.get('underlying')} blocked by engine: "
-                    f"{_sr.get('blocked') if _sr else 'None returned'}"
-                )
-                logger.info(
-                    f"[v10] spot {_trade.get('underlying')} failed — staying in spot lane"
-                )
+                _decision = "execution_failed"
+                
+                # Check if it was a known soft-veto
+                _block_msg = str(_sr.get("blocked") or "None returned")
+                if "skipped_microstructure" in _block_msg or "skipped_taker_score" in _block_msg:
+                    _decision = "vetoed"
+                    _spot_reason = "strategy_veto"
+                    logger.info(f"[v10] spot {_trade.get('underlying')} strategy veto: {_block_msg}")
+                else:
+                    logger.warning(f"[v10] spot {_trade.get('underlying')} execution failed: {_block_msg}")
+
                 update_scan_candidate_result(
                     int(_admitted_candidate_id or 0),
-                    decision="execution_failed",
+                    decision=_decision,
                     entry_block_reason=_spot_reason,
                     trade_blocked_reason=_spot_reason,
                     execution_route=_sr.get("execution_route", "") if _sr else "",
@@ -2199,7 +2199,7 @@ def _attempt_entry(
                     final_spot_score=_final_score,
                     regime_floor=_score_floor,
                 )
-                return "execution_failed"
+                return _decision
         except Exception as _spot_err:
             logger.debug(f"[v10] spot entry error: {_spot_err}")
             logger.info(

@@ -38,11 +38,9 @@ def score_floor_for_regime(
     base = float(
         SPOT_REGIME_SCORE_FLOORS.get(regime, SPOT_REGIME_SCORE_FLOORS["NEUTRAL"])
     )
-    if regime in {"TREND", "NEUTRAL"} and setup_family == "impulse_continuation":
+    if regime in {"TREND", "NEUTRAL", "CHOP"} and setup_family == "impulse_continuation":
         base -= 1.0
-    if regime != "CHOP" and structural_confirm_count >= 3:
+    if structural_confirm_count >= 3:
         base -= 1.0
-    if regime == "CHOP" and setup_family == "compression_breakout":
-        base += 1.0
     # v18.17: Allow lower bound to drop to 40.0 instead of 54.0 so the 48.0 regime floor is respected
     return max(40.0, min(base, 70.0))

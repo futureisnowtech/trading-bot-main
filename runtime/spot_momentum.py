@@ -551,7 +551,7 @@ def classify_setup_candidates(
             + 0.12 * max(float(s5.get("path_efficiency") or 0.0), 0.0)
             + 0.10 * max(float(s30.get("path_efficiency") or 0.0), 0.0)
             + 0.08 * max(float(s5["z"]), 0.0)
-            + (0.10 if regime != "CHOP" else 0.0)
+            + 0.10
             + (0.12 if bool(s5.get("price_above_vwap")) else 0.0),
         ),
     )
@@ -596,7 +596,7 @@ def classify_setup_candidates(
             + 0.10 * max(float(s5.get("path_efficiency") or 0.0), 0.0)
             + 0.10 * max(float(s30.get("path_efficiency") or 0.0), 0.0)
             + 0.10 * max(float(s5.get("participation_component") or 0.0), 0.0)
-            + (0.08 if regime != "CHOP" else 0.0),
+            + 0.08,
         ),
     )
     candidates.append(

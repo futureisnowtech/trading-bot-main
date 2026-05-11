@@ -166,11 +166,11 @@ SPOT_NEUTRAL_SCORE_WEIGHT_DERIVATIVE: float = float(
 SPOT_REGIME_SCORE_FLOORS: dict[str, float] = {
     "TREND": float(os.getenv("SPOT_TREND_SCORE_FLOOR", "55.0")),
     "NEUTRAL": float(os.getenv("SPOT_NEUTRAL_SCORE_FLOOR", "55.0")),
-    "CHOP": float(os.getenv("SPOT_CHOP_SCORE_FLOOR", "60.0")),
+    "CHOP": float(os.getenv("SPOT_CHOP_SCORE_FLOOR", "55.0")),
 }
 SPOT_ALLOWED_REGIMES: set[str] = {
     s.strip().upper()
-    for s in os.getenv("SPOT_ALLOWED_REGIMES", "TREND,NEUTRAL").split(",")
+    for s in os.getenv("SPOT_ALLOWED_REGIMES", "TREND,NEUTRAL,CHOP").split(",")
     if s.strip()
 }
 SPOT_MIN_PATH_EFFICIENCY: float = float(os.getenv("SPOT_MIN_PATH_EFFICIENCY", "0.20"))
@@ -1027,36 +1027,36 @@ SPOT_ALLOWED_SETUP_FAMILIES_TINY_LIVE: tuple[str, ...] = (
     "breakout_volatility",
 )
 SPOT_DISABLED_SETUP_FAMILIES_TINY_LIVE: tuple[str, ...] = ()
-SPOT_TINY_LIVE_MIN_CONFIRMS: dict[str, int] = {"TREND": 0, "NEUTRAL": 0, "CHOP": 99}
+SPOT_TINY_LIVE_MIN_CONFIRMS: dict[str, int] = {"TREND": 0, "NEUTRAL": 0, "CHOP": 0}
 SPOT_TINY_LIVE_MIN_5M_FRAME: dict[str, float] = {
     "TREND": 40.0,
     "NEUTRAL": 40.0,
-    "CHOP": 99.0,
+    "CHOP": 40.0,
 }
 SPOT_TINY_LIVE_MIN_30M_FRAME: dict[str, float] = {
     "TREND": 40.0,
     "NEUTRAL": 40.0,
-    "CHOP": 99.0,
+    "CHOP": 40.0,
 }
 SPOT_TINY_LIVE_MIN_STRUCTURE_COMPONENT: dict[str, float] = {
     "TREND": -1.0,
     "NEUTRAL": -1.0,
-    "CHOP": 999.0,
+    "CHOP": -1.0,
 }
 SPOT_TINY_LIVE_MIN_PARTICIPATION_COMPONENT: dict[str, float] = {
     "TREND": -999.0,
     "NEUTRAL": -1.0,
-    "CHOP": 999.0,
+    "CHOP": -1.0,
 }
 SPOT_TINY_LIVE_MIN_MOMENTUM_IMPULSE: dict[str, float] = {
     "TREND": -1.0,
     "NEUTRAL": -1.0,
-    "CHOP": 999.0,
+    "CHOP": -1.0,
 }
 SPOT_TINY_LIVE_SCORE_FLOORS: dict[str, float] = {
     "TREND": 52.0,
     "NEUTRAL": 52.0,
-    "CHOP": 99.0,
+    "CHOP": 52.0,
 }
 SPOT_TINY_LIVE_SCORE_WEIGHTS: dict[str, dict[str, float]] = {
     "TREND": {"composite": 1.0, "derivative": 0.0},
@@ -1066,7 +1066,7 @@ SPOT_TINY_LIVE_SCORE_WEIGHTS: dict[str, dict[str, float]] = {
 SPOT_TINY_LIVE_EXIT_PROFILE_BY_REGIME: dict[str, str] = {
     "TREND": "precision",
     "NEUTRAL": "micro",
-    "CHOP": "nano",
+    "CHOP": "micro",
 }
 SPOT_STOP_MATRIX_VERSION: str = os.getenv(
     "SPOT_STOP_MATRIX_VERSION", "spot_stop_matrix_2026_04_28_v1"

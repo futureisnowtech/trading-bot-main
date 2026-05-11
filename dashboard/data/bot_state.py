@@ -32,7 +32,7 @@ DECISION_LABELS: dict[str, tuple[str, str]] = {
     "sizing_zero": ("ALREADY HELD", "neutral"),
     "research_only_block": ("RESEARCH ONLY", "neutral"),
     "dual_exposure_block": ("DUAL EXPOSURE", "neutral"),
-    "chop_blocked": ("CHOP — BLOCKED", "neutral"),
+    "chop_blocked": ("CHOP — TRADEABLE", "neutral"),
     "pullback_reclaim_quarantined": ("QUARANTINED", "neutral"),
     "impulse_continuation_quarantined": ("QUARANTINED", "neutral"),
     "compression_breakout_quarantined": ("QUARANTINED", "neutral"),

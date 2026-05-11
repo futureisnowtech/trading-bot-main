@@ -137,8 +137,8 @@ Rules for `external_manual` holdings:
 
 The live spot lane is intentionally harsh by default.
 
-- Allowed regimes: `TREND`, `NEUTRAL`
-- Blocked regime: `CHOP`
+- Allowed regimes: `TREND`, `NEUTRAL`, `CHOP`
+- Tradeable regimes: `TREND`, `NEUTRAL`, `CHOP`
 - Allowed setup families for evaluation:
   - `impulse_continuation`
   - `pullback_reclaim`

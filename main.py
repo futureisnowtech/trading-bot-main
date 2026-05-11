@@ -56,7 +56,7 @@ BANNER = """
 ║  ALGO TRADING SYSTEM  v18.17                                    ║
 ║                                                                  ║
 ║  Lane:       Coinbase spot scalp (tiny live)                    ║
-║  Route:      maker_first | CHOP blocked | pullback quarantined  ║
+║  Route:      maker_first | CHOP enabled | pullback enabled      ║
 ║  Truth:      broker-first via runtime/spot_position_truth.py    ║
 ║  Launch:     python3 scripts/go_live.py (only sanctioned path)  ║
 ╚══════════════════════════════════════════════════════════════════╝

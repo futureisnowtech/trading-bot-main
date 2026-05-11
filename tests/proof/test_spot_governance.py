@@ -75,15 +75,15 @@ def test_sg01_pullback_reclaim_neutral_allowed():
     assert reason == "", f"pullback_reclaim NEUTRAL unexpectedly blocked: {reason}"
 
 
-def test_sg02_pullback_reclaim_chop_quarantined():
+def test_sg02_pullback_reclaim_chop_allowed():
     from runtime.spot_strategy import spot_quality_block_reason
 
     reason, _ = spot_quality_block_reason(
         "ETH",
-        _spot_state("CHOP", "pullback_reclaim"),
-        final_spot_score=60.0,
+        _spot_state("CHOP", "pullback_reclaim", setup_score=0.8),
+        final_spot_score=65.0,
     )
-    assert reason == "spot_regime_not_allowed:CHOP", reason
+    assert reason == "", f"pullback_reclaim CHOP unexpectedly blocked: {reason}"
 
 
 def test_sg03_pullback_reclaim_trend_allowed():
@@ -108,15 +108,15 @@ def test_sg04_impulse_continuation_neutral_not_quarantined():
     assert "quarantined" not in reason, f"Unexpected quarantine: {reason}"
 
 
-def test_sg06_chop_blocks_pullback_reclaim():
+def test_sg06_chop_allows_pullback_reclaim():
     from runtime.spot_strategy import spot_quality_block_reason
 
     reason, _ = spot_quality_block_reason(
         "ETH",
-        _spot_state("CHOP", "pullback_reclaim", setup_score=0.9),
+        _spot_state("CHOP", "pullback_reclaim", setup_score=0.8),
         final_spot_score=71.0,
     )
-    assert reason == "spot_regime_not_allowed:CHOP", reason
+    assert reason == ""
 
 
 # ── SG-07 through SG-09: stop tighten ────────────────────────────────────────

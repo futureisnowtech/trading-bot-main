@@ -441,9 +441,8 @@ def _normalize_regime(raw_regime: str) -> str:
       - RANGING -> NEUTRAL (side-of-fair-value scalp)
       - UNKNOWN, blank, anything else -> NEUTRAL (safest default)
       
-    NOTE: RANGING does NOT map to CHOP. CHOP is reserved as a manual override
-    regime with a hard score-floor lockout. No classifier output should produce 
-    CHOP today; if you need to disable trading, do it via kill_switch instead.
+    NOTE: RANGING does NOT map to CHOP. CHOP is a tradeable regime 
+    with its own risk/score floor profile.
     """
     r = (raw_regime or "").strip().upper()
     if r in ("TRENDING_UP", "TRENDING_DOWN", "TREND"):
@@ -463,7 +462,7 @@ def get_spot_strategy(symbol: str) -> dict[str, Any]:
     edge_conditions = _edge_conditions(override)
     edge_conditions = _load_db_conditions(clean) or edge_conditions
     allowed_regimes = _tupled(
-        getattr(_cfg, "SPOT_ALLOWED_REGIMES", {"TREND", "NEUTRAL"})
+        getattr(_cfg, "SPOT_ALLOWED_REGIMES", {"TREND", "NEUTRAL", "CHOP"})
     )
     preferred_setups = _tupled(override.get("preferred_setups", ()), upper=False)
     allowed_setups = (
@@ -484,7 +483,7 @@ def get_spot_strategy(symbol: str) -> dict[str, Any]:
             getattr(_cfg, "SPOT_TINY_LIVE_SCORE_FLOORS", {"NEUTRAL": 60.0})["NEUTRAL"]
         ),
         "CHOP": float(
-            getattr(_cfg, "SPOT_TINY_LIVE_SCORE_FLOORS", {"CHOP": 99.0})["CHOP"]
+            getattr(_cfg, "SPOT_TINY_LIVE_SCORE_FLOORS", {"CHOP": 60.0})["CHOP"]
         ),
     }
     score_weights = getattr(_cfg, "SPOT_TINY_LIVE_SCORE_WEIGHTS", {})
@@ -753,7 +752,7 @@ def score_floor_for_symbol(
     floors = getattr(
         _cfg,
         "SPOT_TINY_LIVE_SCORE_FLOORS",
-        {"TREND": 58.0, "NEUTRAL": 60.0, "CHOP": 99.0},
+        {"TREND": 58.0, "NEUTRAL": 60.0, "CHOP": 60.0},
     )
     base = float(floors.get(regime_key, floors["NEUTRAL"]))
     return max(35.0, min(base, 99.0))

@@ -26,10 +26,9 @@ except Exception:  # pragma: no cover - fail-soft for scripts/tests
 _CLASS_TABLE = "spot_holding_classifications"
 _DEFAULT_EXTERNAL_MANUAL = {
     "STETH",
+    "ETH",
 }
 _BLOCKING_STATUSES = {
-    "unclassified",
-    "needs_bot_repair",
     "qty_mismatch",
     "metadata_missing",
     "db_only_stale",

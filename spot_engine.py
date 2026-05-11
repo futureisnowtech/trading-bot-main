@@ -728,9 +728,6 @@ def open_spot(
 
         if truth_status in {
             "matched_bot_position",
-            "needs_bot_repair",
-            "metadata_missing",
-            "db_only_stale",
         }:
             # v18.17: Downgrade from warning to info to stop Telegram spam
             logger.info(f"[spot_engine] {clean} blocked — spot_truth_{truth_status}")

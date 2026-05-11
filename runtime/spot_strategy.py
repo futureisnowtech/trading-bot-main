@@ -865,12 +865,6 @@ def spot_quality_block_reason(
         except Exception:
             pass
         return reason, floor
-    if regime == "CHOP":
-        try:
-            system_state.state.update_stochastic(clean, {"status": "STRATEGY_VETO", "reason": "spot_regime_not_allowed:CHOP"})
-        except Exception:
-            pass
-        return "spot_regime_not_allowed:CHOP", floor
 
     import config as _qs_cfg
 

@@ -706,24 +706,44 @@ def open_spot(
             truth_row = get_spot_symbol_truth(clean)
             truth_status = str((truth_row or {}).get("position_truth_status") or "")
 
+        # v18.17: Auto-Adoption of Unclassified Assets
+        if truth_status == "unclassified":
+            logger.info(f"[spot_engine] {clean} was unclassified. Auto-adopting into DB.")
+            try:
+                import sqlite3
+                from config import DB_PATH
+                # truth_row has 'current_price' and 'qty'
+                entry_price = float(truth_row.get("current_price", 0.0))
+                if entry_price <= 0:
+                    entry_price = 1.0
+                qty = float(truth_row.get("qty", 0.0))
+                with sqlite3.connect(DB_PATH, timeout=5) as conn:
+                    conn.execute(
+                        "INSERT INTO open_positions (symbol, strategy, qty, entry, paper, direction, ts_entry) VALUES (?, ?, ?, ?, 0, 'LONG', ?)",
+                        (clean, f"spot_{clean.lower()}", qty, entry_price, datetime.datetime.utcnow().isoformat())
+                    )
+                truth_status = "matched_bot_position"
+            except Exception as e:
+                logger.debug(f"Failed to adopt {clean}: {e}")
+
         if truth_status in {
             "matched_bot_position",
-            "unclassified",
             "needs_bot_repair",
             "metadata_missing",
             "db_only_stale",
         }:
-            logger.warning(f"[spot_engine] {clean} blocked — spot_truth_{truth_status}")
-            return None
+            # v18.17: Downgrade from warning to info to stop Telegram spam
+            logger.info(f"[spot_engine] {clean} blocked — spot_truth_{truth_status}")
+            return {"blocked": f"spot_truth_{truth_status}"}
     if any(
         str(p.get("symbol", "")).upper() == clean
         for p in _load_spot_positions_from_db()
     ):
-        logger.warning(f"[spot_engine] {clean} blocked — spot_position_already_open")
-        return None
+        logger.info(f"[spot_engine] {clean} blocked — spot_position_already_open")
+        return {"blocked": "spot_position_already_open"}
     if size_usd < SPOT_MIN_ORDER_USD:
-        logger.warning(f"[spot_engine] {clean} blocked — spot_size_below_minimum")
-        return None
+        logger.info(f"[spot_engine] {clean} blocked — spot_size_below_minimum")
+        return {"blocked": "spot_size_below_minimum"}
 
     broker = _get_broker()
     if broker is None:

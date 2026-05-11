@@ -621,7 +621,7 @@ def _write_crypto_lane_runtime(open_positions: Optional[Dict] = None) -> None:
                 if blocked_symbols
                 else "resolve_spot_truth_blockers"
             )
-            tradable = 0
+            tradable = 1  # v18.17: DO NOT HALT ENTIRE LANE. Allow per-symbol rejection.
         elif not connected:
             health = "WARN"
             readiness = "NOT_READY"
@@ -2173,7 +2173,7 @@ def _attempt_entry(
                 
                 # Check if it was a known soft-veto
                 _block_msg = str((_sr.get("blocked") if _sr else "None returned") or "None returned")
-                if "skipped_microstructure" in _block_msg or "skipped_taker_score" in _block_msg:
+                if any(x in _block_msg for x in ["skipped_microstructure", "skipped_taker_score", "spot_truth_", "already_open", "below_minimum"]):
                     _decision = "vetoed"
                     _spot_reason = "strategy_veto"
                     logger.info(f"[v10] spot {_trade.get('underlying')} strategy veto: {_block_msg}")

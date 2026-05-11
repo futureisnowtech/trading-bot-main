@@ -26,7 +26,6 @@ except Exception:  # pragma: no cover - fail-soft for scripts/tests
 _CLASS_TABLE = "spot_holding_classifications"
 _DEFAULT_EXTERNAL_MANUAL = {
     "STETH",
-    "ETH",
 }
 _BLOCKING_STATUSES = {
     "qty_mismatch",

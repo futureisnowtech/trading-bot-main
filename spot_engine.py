@@ -153,10 +153,51 @@ def _get_broker() -> Optional["CoinbaseSpotBroker"]:
 def _load_spot_positions_from_db() -> List[Dict]:
     try:
         from logging_db.trade_logger import load_open_positions
+        from config import DB_PATH
+        import datetime
 
-        # Hardcoded paper=False (0)
+        # 1. Load existing DB positions
         rows = load_open_positions()
-        return [r for r in rows if str(r.get("strategy", "")).startswith("spot_")]
+        db_positions = [r for r in rows if str(r.get("strategy", "")).startswith("spot_")]
+        db_symbols = {str(p.get("symbol", "")).upper() for p in db_positions}
+
+        # 2. Check for unclassified broker holdings and auto-adopt
+        try:
+            truth = get_spot_position_truth()
+            unclassified = [
+                row for row in truth.get("issues", [])
+                if row.get("position_truth_status") == "unclassified"
+            ]
+            
+            if unclassified:
+                with sqlite3.connect(DB_PATH, timeout=5) as conn:
+                    for row in unclassified:
+                        clean = _clean_symbol(row.get("symbol"))
+                        if clean in db_symbols:
+                            continue
+                            
+                        logger.info(f"[spot_engine] Auto-adopting {clean} into DB from broker truth.")
+                        entry_price = float(row.get("current_price", 1.0))
+                        qty = float(row.get("qty", 0.0))
+                        
+                        conn.execute(
+                            "INSERT INTO open_positions (symbol, strategy, qty, entry, paper, direction, ts_entry) "
+                            "VALUES (?, ?, ?, ?, 0, 'LONG', ?)",
+                            (clean, f"spot_{clean.lower()}", qty, entry_price, datetime.datetime.utcnow().isoformat())
+                        )
+                        # Add to list for immediate return
+                        db_positions.append({
+                            "symbol": clean,
+                            "strategy": f"spot_{clean.lower()}",
+                            "qty": qty,
+                            "entry": entry_price,
+                            "paper": 0
+                        })
+                conn.commit()
+        except Exception as e:
+            logger.debug(f"[spot_engine] auto-adoption in loader failed: {e}")
+
+        return db_positions
     except Exception as e:
         logger.debug(f"[spot_engine] load_spot_positions error: {e}")
         return []
@@ -187,7 +228,16 @@ def _position_strategy(symbol: str) -> str:
 
 
 def get_spot_positions() -> List[Dict]:
-    return _load_spot_positions_from_db()
+    """
+    v18.17: Broker-first truth. Returns bot-managed positions 
+    reconciled against live Coinbase holdings.
+    """
+    try:
+        truth = get_spot_position_truth()
+        return truth.get("bot_managed_positions") or []
+    except Exception as e:
+        logger.debug(f"[spot_engine] get_spot_positions truth error: {e}")
+        return _load_spot_positions_from_db()
 
 
 def _sync_position_high(

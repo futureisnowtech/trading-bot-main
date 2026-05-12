@@ -46,6 +46,8 @@ def _spot_state(regime: str, setup_family: str, setup_score: float = 0.5) -> dic
         "setup_family": setup_family,
         "setup_score": setup_score,
         "structural_confirm_count": 2,
+        "vol_spike": 1.1,
+        "adx_15m": 25.0,
         "frames": {
             "5m": {
                 "frame_score": 55.0,
@@ -56,6 +58,8 @@ def _spot_state(regime: str, setup_family: str, setup_score: float = 0.5) -> dic
                 "atr_pct": 0.012,
                 "a": 0.1,
                 "v": 0.2,
+                "obi": 0.1,
+                "buy_volume_ratio": 0.55,
             },
             "30m": {"frame_score": 55.0, "volatility_quality": 0.4},
         },

@@ -7,7 +7,8 @@ from datetime import datetime, timedelta
 import db as _db
 
 _q = _db._q
-_q1 = _db._q1= _db.clamp_metrics_cutoff = getattr(_db, "clamp_metrics_cutoff", lambda s: s)
+_q1 = _db._q1
+clamp_metrics_cutoff = getattr(_db, "clamp_metrics_cutoff", lambda s: s)
 get_current_strategy_start_date = getattr(
     _db,
     "get_current_strategy_start_date",

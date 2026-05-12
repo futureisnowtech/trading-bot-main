@@ -53,6 +53,8 @@ def test_sss03_doge_open_gate_before_calibration():
             "5m": {
                 "v": 0.2,
                 "a": 0.1,
+                "atr_pct": 0.015,
+                "buy_volume_ratio": 0.55,
                 "frame_score": 64.0,
                 "momentum_impulse": 0.2,
                 "structure_component": 0.2,

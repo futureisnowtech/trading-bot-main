@@ -296,6 +296,8 @@ def get_crypto_tradeability(
     candidate: dict | None = None,
     *,
     manual: bool,
+    paper: bool = False,
+    live: bool = True,
     dag_state: dict | None = None,
 ) -> dict:
     """

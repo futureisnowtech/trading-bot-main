@@ -73,7 +73,7 @@ def test_sli01_spot_close_persists_learning_and_tv_lineage(proof_runtime, monkey
         ["BTC", "ETH", "SOL", "XRP", "LTC", "DOGE", "ADA", "LINK"],
     )
     monkeypatch.setattr(spot_engine, "SPOT_TOTAL_ALLOC_CAP_PCT", 0.95)
-    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper: _paper_broker(2000.0))
+    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper=False: _paper_broker(2000.0))
     monkeypatch.setattr(spot_engine, "build_spot_state", lambda symbol: _trend_state(symbol))
 
     result = spot_engine.open_spot(

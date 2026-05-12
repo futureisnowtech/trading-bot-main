@@ -121,7 +121,7 @@ def _get_db_path() -> str:
         )
 
 
-def _get_broker() -> Optional["CoinbaseSpotBroker"]:
+def _get_broker(paper: bool = False) -> Optional["CoinbaseSpotBroker"]:
     if not _BROKER_OK:
         system_state.state.update_exchange(connected=False)
         return None

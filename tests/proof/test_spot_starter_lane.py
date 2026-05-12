@@ -163,7 +163,7 @@ def test_sp03_blocks_deployment_cap(monkeypatch):
         "eth_available": 0.0,
     }
 
-    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper: mock_broker)
+    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper=False: mock_broker)
     # Ensure no existing positions in DB for this test
     monkeypatch.setattr(
         spot_engine, "_load_spot_positions_from_db", lambda paper=True: []
@@ -232,7 +232,7 @@ def test_sp06_writes_to_trades_table(proof_runtime, monkeypatch):
     mock_broker._connected = True
     mock_broker._fallback_price = lambda sym: 2500.0
 
-    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper: mock_broker)
+    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper=False: mock_broker)
     monkeypatch.setattr(spot_engine, "build_spot_state", lambda symbol: _spot_state(symbol))
 
     result = spot_engine.open_spot("ETH", 25.0, final_spot_score=72.0)

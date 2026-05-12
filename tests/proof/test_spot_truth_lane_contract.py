@@ -125,7 +125,7 @@ def test_stl03b_open_spot_halts_on_paper_like_live_order(monkeypatch):
 
     monkeypatch.setattr(spot_engine, "get_spot_symbol_truth", lambda symbol: None)
     monkeypatch.setattr(spot_engine, "_load_spot_positions_from_db", lambda paper=False: [])
-    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper: _Broker())
+    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper=False: _Broker())
     monkeypatch.setattr(spot_engine, "_resolve_spot_state", lambda symbol, allow_stale=False: {
         "regime": "TREND",
         "setup_family": "impulse_continuation",
@@ -209,7 +209,7 @@ def test_stl04_close_spot_live_residual_repersists_position(
     }
     broker.get_mark_price.return_value = 2010.0
 
-    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper: broker)
+    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper=False: broker)
     monkeypatch.setattr(
         spot_engine,
         "get_spot_position_truth",

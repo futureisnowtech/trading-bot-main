@@ -135,7 +135,7 @@ def test_sdt01_target_hit_closes_position(proof_runtime, monkeypatch):
     import spot_engine
 
     _seed_spot_position(str(proof_runtime.db_path), target=2036.0)
-    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper: _paper_broker(2040.0))
+    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper=False: _paper_broker(2040.0))
 
     closed = spot_engine.check_spot_targets()
     assert len(closed) == 1
@@ -147,7 +147,7 @@ def test_sdt02_below_target_no_close(proof_runtime, monkeypatch):
     import spot_engine
 
     _seed_spot_position(str(proof_runtime.db_path), target=2036.0)
-    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper: _paper_broker(2020.0))
+    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper=False: _paper_broker(2020.0))
 
     assert spot_engine.check_spot_targets() == []
 
@@ -167,7 +167,7 @@ def test_sdt04_eod_close_at_time_when_enabled(proof_runtime, monkeypatch):
     _seed_spot_position(str(proof_runtime.db_path))
     monkeypatch.setattr(spot_engine, "SPOT_EOD_FLATTEN_ENABLED", True)
     monkeypatch.setattr(spot_engine, "SPOT_EOD_CLOSE_TIME", "15:45")
-    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper: _paper_broker(2050.0))
+    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper=False: _paper_broker(2050.0))
 
     et = pytz.timezone("America/New_York")
     fake_now = et.localize(datetime(2026, 4, 20, 15, 46, 0))
@@ -186,7 +186,7 @@ def test_sdt05_open_spot_persists_scalp_target_metadata(proof_runtime, monkeypat
     monkeypatch.setattr(spot_engine, "SPOT_LANE_ACTIVE", True)
     monkeypatch.setattr(spot_engine, "SPOT_SYMBOLS", ["BTC", "ETH", "SOL", "XRP", "LTC", "DOGE", "ADA", "LINK"])
     monkeypatch.setattr(spot_engine, "SPOT_TOTAL_ALLOC_CAP_PCT", 0.95)
-    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper: _paper_broker(2000.0))
+    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper=False: _paper_broker(2000.0))
     monkeypatch.setattr(spot_engine, "_load_spot_positions_from_db", lambda paper=True: [])
     monkeypatch.setattr(spot_engine, "build_spot_state", lambda symbol: _trend_state(symbol))
 
@@ -229,7 +229,7 @@ def test_sdt06_stagnation_exit_closes_dead_trade(proof_runtime, monkeypatch):
         target=2036.0,
         ts_entry=old_ts,
     )
-    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper: _paper_broker(2003.0))
+    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper=False: _paper_broker(2003.0))
     monkeypatch.setattr(
         spot_engine,
         "build_spot_state",
@@ -262,7 +262,7 @@ def test_sdt08_thesis_decay_closes_after_hold_gate(proof_runtime, monkeypatch):
     old_ts = (datetime.now() - timedelta(minutes=20)).isoformat()
     _seed_spot_position(str(proof_runtime.db_path), ts_entry=old_ts)
     monkeypatch.setattr(spot_engine, "SPOT_THESIS_MIN_HOLD_MINS", 8.0)
-    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper: _paper_broker(1995.0))
+    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper=False: _paper_broker(1995.0))
     monkeypatch.setattr(
         spot_engine,
         "build_spot_state",
@@ -316,7 +316,7 @@ def test_sdt09_taker_fallback_requires_higher_score(proof_runtime, monkeypatch):
         ["BTC", "ETH", "SOL", "XRP", "LTC", "DOGE", "ADA", "LINK"],
     )
     monkeypatch.setattr(spot_engine, "SPOT_TOTAL_ALLOC_CAP_PCT", 0.95)
-    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper: _LiveBroker())
+    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper=False: _LiveBroker())
     monkeypatch.setattr(
         spot_engine, "_load_spot_positions_from_db", lambda paper=True: []
     )

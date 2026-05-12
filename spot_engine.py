@@ -126,7 +126,8 @@ def _get_broker(paper: bool = False) -> Optional["CoinbaseSpotBroker"]:
         system_state.state.update_exchange(connected=False)
         return None
     try:
-        broker = get_spot_broker()
+        from execution.coinbase_spot_broker import get_spot_broker
+        broker = get_spot_broker(paper=paper)
         if not broker.is_connected():
             broker.connect()
 

@@ -72,6 +72,38 @@ def clamp_metrics_cutoff(raw: str) -> str:
         return get_current_strategy_start_date(normalized=True)
 
 
+def _runtime_paper_flag() -> int:
+    """
+    Return 1 if current process_mode is 'paper', else 0 (live).
+    Authoritative source is the system_runtime_state table in the DB.
+    """
+    try:
+        row = _q1("SELECT process_mode FROM system_runtime_state ORDER BY id DESC LIMIT 1")
+        if row and row.get("process_mode") == "live":
+            return 0
+        if row and row.get("process_mode") == "paper":
+            return 1
+    except Exception:
+        pass
+    
+    # Fallback for tests mocking config.False
+    try:
+        import sys
+        _cfg = sys.modules.get("config")
+        if _cfg and getattr(_cfg, "False", False):
+            return 1
+        
+        # v10 legacy compatibility
+        import config
+        if getattr(config, "False", False):
+            return 1
+    except Exception:
+        pass
+
+    # v18.18 fallback: strictly live
+    return 0
+
+
 def _q(sql, params=()):
     try:
         with sqlite3.connect(DB_PATH, check_same_thread=False) as c:

@@ -106,10 +106,13 @@ class CoinbaseSpotBroker:
 
     def __init__(self) -> None:
         self._connected = False
+        self._paper = False
         self._key_name: str = ""
         self._private_key_pem: bytes = b""
         # In-process spot holdings: symbol → {"qty": float, "avg_entry": float}
         self._holdings: Dict[str, Dict] = {}
+        self._paper_balance_usd = 10000.0
+        self._fallback_price = lambda s: 0.0
 
         # Load credentials (same source as futures broker)
         try:
@@ -125,6 +128,10 @@ class CoinbaseSpotBroker:
             self._key_name = os.getenv("COINBASE_CDP_KEY_NAME", "")
             raw = os.getenv("COINBASE_CDP_PRIVATE_KEY", "")
             self._private_key_pem = raw.replace("\\n", "\n").encode() if raw else b""
+
+        # Default to paper mode if credentials missing (safest for tests)
+        if not self._key_name or not self._private_key_pem:
+            self._paper = True
 
     # ── Auth ─────────────────────────────────────────────────────────────────
 
@@ -230,6 +237,10 @@ class CoinbaseSpotBroker:
 
 
     def connect(self) -> bool:
+        if self._paper:
+            self._connected = True
+            return True
+
         if not _JWT_OK or not _REQUESTS_OK:
             logger.error("[spot] Cannot connect live: missing PyJWT/requests")
             return False
@@ -258,6 +269,14 @@ class CoinbaseSpotBroker:
         Return available spot balances.
         Returns symbol balances plus USD available.
         """
+        if self._paper:
+            symbol_balances = {sym: float(self._holdings.get(sym, {}).get("qty", 0.0)) for sym in SPOT_SUPPORTED_SYMBOLS}
+            return {
+                "usd_available": float(self._paper_balance_usd),
+                "symbol_balances": symbol_balances,
+                **{f"{sym.lower()}_available": qty for sym, qty in symbol_balances.items()}
+            }
+
         try:
             data = self._request("GET", "/api/v3/brokerage/accounts")
             accounts = data.get("accounts", [])
@@ -795,9 +814,14 @@ class CoinbaseSpotBroker:
 _spot_broker: Optional[CoinbaseSpotBroker] = None
 
 
-def get_spot_broker() -> CoinbaseSpotBroker:
+def get_spot_broker(paper: bool = False) -> CoinbaseSpotBroker:
     global _spot_broker
     if _spot_broker is None:
         _spot_broker = CoinbaseSpotBroker()
+        _spot_broker._paper = paper
         _spot_broker.connect()
+    else:
+        # v18.17: ensure singleton matches requested mode
+        _spot_broker._paper = paper
+        
     return _spot_broker

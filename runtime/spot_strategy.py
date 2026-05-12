@@ -475,34 +475,30 @@ def get_spot_strategy(symbol: str) -> dict[str, Any]:
         )
         or KNOWN_SETUP_FAMILIES
     )
+    floors = getattr(
+        _cfg,
+        "SPOT_TINY_LIVE_SCORE_FLOORS",
+        {"TREND": 58.0, "NEUTRAL": 60.0, "CHOP": 60.0},
+    )
     score_floors = {
-        "TREND": float(
-            getattr(_cfg, "SPOT_TINY_LIVE_SCORE_FLOORS", {"TREND": 58.0})["TREND"]
-        ),
-        "NEUTRAL": float(
-            getattr(_cfg, "SPOT_TINY_LIVE_SCORE_FLOORS", {"NEUTRAL": 60.0})["NEUTRAL"]
-        ),
-        "CHOP": float(
-            getattr(_cfg, "SPOT_TINY_LIVE_SCORE_FLOORS", {"CHOP": 60.0})["CHOP"]
-        ),
+        "TREND": float(floors.get("TREND", 58.0)),
+        "NEUTRAL": float(floors.get("NEUTRAL", 60.0)),
+        "CHOP": float(floors.get("CHOP", 60.0)),
     }
     score_weights = getattr(_cfg, "SPOT_TINY_LIVE_SCORE_WEIGHTS", {})
-    target_r_by_regime = override.get(
-        "target_r_by_regime",
-        getattr(
-            _cfg,
-            "SPOT_TARGET_R_BY_REGIME",
-            {"TREND": 0.85, "NEUTRAL": 0.65, "CHOP": 0.50},
-        ),
+    target_r_by_regime_cfg = getattr(
+        _cfg,
+        "SPOT_TARGET_R_BY_REGIME",
+        {"TREND": 0.85, "NEUTRAL": 0.65, "CHOP": 0.50},
     )
-    trail_arm_r_by_regime = override.get(
-        "trail_arm_r_by_regime",
-        getattr(
-            _cfg,
-            "SPOT_TRAIL_ARM_R_BY_REGIME",
-            {"TREND": 0.55, "NEUTRAL": 0.40, "CHOP": 0.30},
-        ),
+    target_r_by_regime = override.get("target_r_by_regime", target_r_by_regime_cfg)
+    
+    trail_arm_r_by_regime_cfg = getattr(
+        _cfg,
+        "SPOT_TRAIL_ARM_R_BY_REGIME",
+        {"TREND": 0.55, "NEUTRAL": 0.40, "CHOP": 0.30},
     )
+    trail_arm_r_by_regime = override.get("trail_arm_r_by_regime", trail_arm_r_by_regime_cfg)
     policy = {
         "symbol": clean,
         "enabled": bool(
@@ -564,78 +560,42 @@ def get_spot_strategy(symbol: str) -> dict[str, Any]:
             },
         },
         "min_confirm_count": int(
-            getattr(_cfg, "SPOT_TINY_LIVE_MIN_CONFIRMS", {"TREND": 2})["TREND"]
+            (getattr(_cfg, "SPOT_TINY_LIVE_MIN_CONFIRMS", None) or {}).get("TREND", 2)
         ),
         "min_5m_frame": float(
-            getattr(_cfg, "SPOT_TINY_LIVE_MIN_5M_FRAME", {"TREND": 52.0})["TREND"]
+            (getattr(_cfg, "SPOT_TINY_LIVE_MIN_5M_FRAME", None) or {}).get("TREND", 52.0)
         ),
         "min_30m_frame": float(
-            getattr(_cfg, "SPOT_TINY_LIVE_MIN_30M_FRAME", {"TREND": 55.0})["TREND"]
+            (getattr(_cfg, "SPOT_TINY_LIVE_MIN_30M_FRAME", None) or {}).get("TREND", 55.0)
         ),
         "min_momentum_impulse": float(
-            getattr(_cfg, "SPOT_TINY_LIVE_MIN_MOMENTUM_IMPULSE", {"TREND": 0.000001})[
-                "TREND"
-            ]
+            (getattr(_cfg, "SPOT_TINY_LIVE_MIN_MOMENTUM_IMPULSE", None) or {}).get(
+                "TREND", 0.000001
+            )
         ),
         "min_structure_component": float(
-            getattr(
-                _cfg, "SPOT_TINY_LIVE_MIN_STRUCTURE_COMPONENT", {"TREND": 0.000001}
-            )["TREND"]
+            (getattr(_cfg, "SPOT_TINY_LIVE_MIN_STRUCTURE_COMPONENT", None) or {}).get(
+                "TREND", 0.000001
+            )
         ),
         "min_path_efficiency": float(getattr(_cfg, "SPOT_MIN_PATH_EFFICIENCY", 0.20)),
         "min_participation_component": float(
-            getattr(
+            (getattr(
                 _cfg,
                 "SPOT_TINY_LIVE_MIN_PARTICIPATION_COMPONENT",
-                {"TREND": -999.0},
-            )["TREND"]
+                None,
+            ) or {}).get("TREND", -999.0)
         ),
         "min_volatility_quality": float(override.get("min_volatility_quality", -1.0)),
         "target_r_by_regime": {
-            "TREND": float(
-                target_r_by_regime.get(
-                    "TREND",
-                    getattr(_cfg, "SPOT_TARGET_R_BY_REGIME", {"TREND": 0.85})["TREND"],
-                )
-            ),
-            "NEUTRAL": float(
-                target_r_by_regime.get(
-                    "NEUTRAL",
-                    getattr(_cfg, "SPOT_TARGET_R_BY_REGIME", {"NEUTRAL": 0.65})[
-                        "NEUTRAL"
-                    ],
-                )
-            ),
-            "CHOP": float(
-                target_r_by_regime.get(
-                    "CHOP",
-                    getattr(_cfg, "SPOT_TARGET_R_BY_REGIME", {"CHOP": 0.50})["CHOP"],
-                )
-            ),
+            "TREND": float(target_r_by_regime.get("TREND", 0.85)),
+            "NEUTRAL": float(target_r_by_regime.get("NEUTRAL", 0.65)),
+            "CHOP": float(target_r_by_regime.get("CHOP", 0.50)),
         },
         "trail_arm_r_by_regime": {
-            "TREND": float(
-                trail_arm_r_by_regime.get(
-                    "TREND",
-                    getattr(_cfg, "SPOT_TRAIL_ARM_R_BY_REGIME", {"TREND": 0.55})[
-                        "TREND"
-                    ],
-                )
-            ),
-            "NEUTRAL": float(
-                trail_arm_r_by_regime.get(
-                    "NEUTRAL",
-                    getattr(_cfg, "SPOT_TRAIL_ARM_R_BY_REGIME", {"NEUTRAL": 0.40})[
-                        "NEUTRAL"
-                    ],
-                )
-            ),
-            "CHOP": float(
-                trail_arm_r_by_regime.get(
-                    "CHOP",
-                    getattr(_cfg, "SPOT_TRAIL_ARM_R_BY_REGIME", {"CHOP": 0.30})["CHOP"],
-                )
-            ),
+            "TREND": float(trail_arm_r_by_regime.get("TREND", 0.55)),
+            "NEUTRAL": float(trail_arm_r_by_regime.get("NEUTRAL", 0.40)),
+            "CHOP": float(trail_arm_r_by_regime.get("CHOP", 0.30)),
         },
         "setup_overrides": dict(override.get("setup_overrides", {})),
     }

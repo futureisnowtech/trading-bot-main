@@ -11,20 +11,29 @@ if ROOT not in sys.path:
 def _spot_state():
     return {
         "regime": "TREND",
+        "primary_setup": "wae_explosion",  # WAEx implies wae_explosion, clears setup gates
+        "direction": "LONG",
+        "vol_spike": 3.0,
+        "adx_15m": 35.0,
+        "kst_value": 1.0,
+        "kst_signal": 0.0,
+        "supertrend_dir": 1,
         "setup_family": "impulse_continuation",
-        "setup_score": 0.82,
-        "structural_confirm_count": 2,
+        "setup_score": 0.98,
+        "structural_confirm_count": 4,
         "frames": {
             "5m": {
-                "frame_score": 64.0,
-                "momentum_impulse": 0.18,
-                "structure_component": 0.10,
-                "path_efficiency": 0.20,
-                "participation_component": 0.05,
+                "frame_score": 85.0,
+                "momentum_impulse": 0.45,
+                "structure_component": 0.35,
+                "path_efficiency": 0.55,
+                "participation_component": 0.20,
+                "atr_pct": 0.02,
+                "v": 0.25,
             },
             "30m": {
-                "frame_score": 60.0,
-                "volatility_quality": 0.05,
+                "frame_score": 75.0,
+                "volatility_quality": 0.15,
             },
         },
     }

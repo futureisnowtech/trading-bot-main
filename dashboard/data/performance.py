@@ -8,7 +8,8 @@ import db as _db
 
 _q = _db._q
 _q1 = _db._q1
-LAUNCH_DATE = _db.LAUNCH_DATE= _db.get_current_strategy_start_date = getattr(
+LAUNCH_DATE = _db.LAUNCH_DATE
+get_current_strategy_start_date = getattr(
     _db,
     "get_current_strategy_start_date",
     lambda normalized=True: LAUNCH_DATE if normalized else LAUNCH_DATE,

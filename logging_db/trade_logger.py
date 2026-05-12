@@ -907,6 +907,7 @@ def log_scan_candidate(
     entry_block_reason: str,
     decision: str,
     source: str,
+    paper: int = 0,
     scanner_theoretical_position_usd: float | None = None,
     scanner_effective_position_usd: float | None = None,
     recommended_lane: str = "",
@@ -965,7 +966,7 @@ def log_scan_candidate(
                 tf_1d_state, structural_confirms, execution_route, cooldown_until,
                 microstructure_veto, final_spot_score, regime_floor,
                 actual_stop_pct, actual_target_pct, net_rr, net_win_usd, econ_gate_class
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 scan_id,
                 _ts(),
@@ -998,6 +999,7 @@ def log_scan_candidate(
                 int(leverage),
                 entry_block_reason,
                 decision,
+                int(paper),
                 source,
                 0,
                 scanner_theoretical_position_usd,
@@ -1034,7 +1036,9 @@ def log_scan_candidate(
         conn.commit()
         conn.close()
         return row_id
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).debug(f"[trade_logger] log_scan_candidate error: {e}")
         return 0
 
 

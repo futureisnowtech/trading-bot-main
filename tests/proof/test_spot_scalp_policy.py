@@ -110,9 +110,14 @@ def test_ssp04_quality_gate_open_before_calibration():
 
     # Frames that satisfy all NEUTRAL structural minimums
     _frames = {
+        "vol_spike": 2.5,
+        "adx_15m": 30.0,
+        "primary_setup": "wae_explosion",
+        "direction": "LONG",
         "5m": {
             "v": 0.2,
             "a": 0.1,
+            "atr_pct": 0.015,
             "frame_score": 58.0,
             "momentum_impulse": 0.3,
             "structure_component": 0.2,
@@ -127,10 +132,15 @@ def test_ssp04_quality_gate_open_before_calibration():
         "symbol": "BTC",
         "regime": "NEUTRAL",
         "setup_family": "pullback_reclaim",
+        "direction": "LONG",
+        "vol_spike": 2.5,
+        "adx_15m": 30.0,
+        "primary_setup": "wae_explosion",
         "setup_score": 0.92,
         "structural_confirm_count": 3,  # NEUTRAL min=3
         "frames": _frames,
     }
+
     reason, _ = spot_quality_block_reason("BTC", pr_state, final_spot_score=65.0)
     assert reason == "", (
         f"pullback_reclaim must be allowed after quarantine lift; got: {repr(reason)}"

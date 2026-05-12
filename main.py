@@ -49,11 +49,11 @@ import csv, uuid, sqlite3
 from typing import Optional
 import logging_db.trade_logger  # noqa: F401 — pre-warm, prevents EDEADLK
 
-VERSION = "v18.17"
+VERSION = "v18.18"
 
 BANNER = """
 ╔══════════════════════════════════════════════════════════════════╗
-║  ALGO TRADING SYSTEM  v18.17                                    ║
+║  ALGO TRADING SYSTEM  v18.18                                    ║
 ║                                                                  ║
 ║  Lane:       Coinbase spot scalp (tiny live)                    ║
 ║  Route:      maker_first | CHOP enabled | pullback enabled      ║

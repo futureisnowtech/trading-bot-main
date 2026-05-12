@@ -58,6 +58,20 @@ def _log_halt(conn: sqlite3.Connection, reason: str, detail: dict) -> None:
         conn.commit()
     except Exception:
         pass
+    
+    # ── Grafana IRM Integration ──────────────────────────────────────────────
+    try:
+        from monitoring.irm_reporter import create_irm_incident
+        create_irm_incident(
+            title=msg,
+            severity="critical",
+            description=f"Spot lane halted due to {reason}.",
+            labels=["lane:spot", f"reason:{reason}"],
+            extra_details=detail
+        )
+    except Exception as e:
+        logger.debug(f"[spot_kill_switch] irm report failed: {e}")
+
     logger.critical("[spot_kill_switch] HALT — %s | %s", reason, detail)
 
 

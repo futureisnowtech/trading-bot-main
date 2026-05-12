@@ -122,49 +122,10 @@ _SETUP_DESC = {
 
 
 def _win_prob(c: dict) -> float:
-    prob = 52.0
-    dirn = c.get("direction", "LONG")
-    vs = c.get("vol_spike", 1.0)
-    adx = c.get("adx_15m", 20.0)
-    setup = c.get("primary_setup", "")
-    vwap_d = abs(c.get("vwap_disp_pct", 0.0))
-    kst_v = c.get("kst_value", 0.0)
-    kst_s = c.get("kst_signal", 0.0)
-    st_dir = c.get("supertrend_dir", 0)
-    fund = abs(c.get("funding_rate", 0.0))
-    pm1h = c.get("price_move_1h_pct", 0.0)
-    if vs >= 3.0:
-        prob += 9
-    elif vs >= 2.0:
-        prob += 6
-    elif vs >= 1.5:
-        prob += 3
-    if "momentum" in setup and adx >= 25:
-        prob += 7
-    elif "ranging" in setup and adx < 20:
-        prob += 7
-    elif "kst" in setup and adx < 30:
-        prob += 4
-    else:
-        prob += 2
-    if (dirn == "LONG" and kst_v > kst_s) or (dirn == "SHORT" and kst_v < kst_s):
-        prob += 5
-    if (dirn == "LONG" and st_dir > 0) or (dirn == "SHORT" and st_dir < 0):
-        prob += 5
-    if "ranging" in setup:
-        if vwap_d >= 2.0:
-            prob += 5
-        elif vwap_d >= 1.0:
-            prob += 3
-    if fund > 0.002:
-        prob += 3
-    elif fund > 0.0005:
-        prob += 1
-    if dirn == "LONG" and pm1h > 0.3:
-        prob += 2
-    elif dirn == "SHORT" and pm1h < -0.3:
-        prob += 2
-    return min(round(prob, 1), 84.0)
+    from runtime.spot_probability import calculate_calibrated_win_prob
+    # Unified engine returns 0.0-1.0, UI expect 0-100
+    prob = calculate_calibrated_win_prob(c)
+    return round(prob * 100.0, 1)
 
 
 def _render_trade_details(c: dict, prob: float):

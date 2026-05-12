@@ -1,5 +1,34 @@
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $GEMINI_PROJECT_DIR/.gemini/hooks/session_start_intelligence.sh",
+            "timeout": 15,
+            "statusMessage": "Gathering RBI/ML intelligence..."
+          },
+          {
+            "type": "command",
+            "command": "bash $GEMINI_PROJECT_DIR/.gemini/hooks/session_start_execution_audit.sh",
+            "timeout": 15,
+            "statusMessage": "Auditing trade execution health..."
+          }
+        ]
+      }
+    ],
+    "BeforeAgent": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $GEMINI_PROJECT_DIR/.gemini/hooks/toggle_scalper_mode.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "BeforeTool": [
       {
         "matcher": "Bash",

@@ -1017,6 +1017,10 @@ The math signal scoring now feeds the AI as rich context rather than deciding fo
 
 _To add an entry: `bash scripts/log_change.sh "Description of change"`_
 _Gemini should update this file (and GEMINI.md) whenever project files are modified._
+
+## 2026-05-11 (v18.18) — Directional Rounding Fix
+- **execution/coinbase_spot_broker.py**: Implemented direction-aware price rounding (`_round_quote`) using `math.ceil` for SELL and `math.floor` for BUY. This prevents `post_only` rejections on tight-spread assets (DOGE, XRP, ADA) where generic floor-rounding would previously push limit sell prices into the bid.
+- **scripts/verify_rounding_fix.py** (NEW): Added a verification script to validate price rounding logic across different asset tick sizes and trade directions.
 ## 2026-04-21 (v17.2) — Spot Session Pivot + SOL/XRP Expansion
 - **config.py**: expanded `SPOT_SYMBOLS` default to `BTC,ETH,SOL,XRP`; added weekday/session entry controls (`SPOT_WEEKDAYS_ONLY`, `SPOT_ENTRY_START_TIME`, `SPOT_ENTRY_END_TIME`), config-backed thesis hold/score knobs, and moved default spot target to `2.0R` for faster intraday capital recycling.
 - **runtime/spot_session.py** (NEW): canonical ET session gate for autonomous spot entries so the lane trades like a real weekday intraday strategy instead of a 24/7 swing lane with only EOD flatten.

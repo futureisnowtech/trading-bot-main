@@ -38,6 +38,9 @@ load_dotenv()
 # ════════════════════════════════════════════════════════════════════
 # Removed False / True logic — system is strictly LIVE.
 
+# v18.18: Strategic Scalper Mode — bypass technical vetoes if win_prob > 60%
+STRATEGIC_SCALPER_MODE: bool = os.getenv("STRATEGIC_SCALPER_MODE", "true").lower() == "true"
+
 # Session start: all performance stats (win rate, P&L, trade counts) are
 # measured from this date forward. Old trades are kept in DB for ML training
 # but excluded from dashboard metrics and Kelly/sizing decisions.
@@ -889,10 +892,10 @@ WATCHDOG_INTERVAL_SECONDS: int = 900  # Alert if no scan in 15 min
 LABELER_INTERVAL_MINUTES: int = int(os.getenv("LABELER_INTERVAL_MINUTES", "60"))
 ML_RETRAIN_MIN_HOURS: int = int(os.getenv("ML_RETRAIN_MIN_HOURS", "24"))
 ML_RETRAIN_MIN_NEW_CLEAN_TRADES: int = int(
-    os.getenv("ML_RETRAIN_MIN_NEW_CLEAN_TRADES", "20")
+    os.getenv("ML_RETRAIN_MIN_NEW_CLEAN_TRADES", "5")
 )
 RBI_MIN_DAYS: int = int(os.getenv("RBI_MIN_DAYS", "7"))
-RBI_MIN_NEW_CLEAN_TRADES: int = int(os.getenv("RBI_MIN_NEW_CLEAN_TRADES", "20"))
+RBI_MIN_NEW_CLEAN_TRADES: int = int(os.getenv("RBI_MIN_NEW_CLEAN_TRADES", "5"))
 RBI_SCHEDULE_MODE: str = (
     os.getenv("RBI_SCHEDULE_MODE", "weekly_or_threshold").strip().lower()
 )
@@ -1162,6 +1165,14 @@ OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
 PM_LLM_TEMPERATURE: float = float(os.getenv("PM_LLM_TEMPERATURE", "0.3"))
 PM_LLM_MAX_TOKENS: int = int(os.getenv("PM_LLM_MAX_TOKENS", "600"))
 GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+
+# ════════════════════════════════════════════════════════════════════
+# MONITORING & INCIDENT MANAGEMENT (Grafana IRM)
+# ════════════════════════════════════════════════════════════════════
+GRAFANA_INCIDENT_ENABLED: bool = os.getenv("GRAFANA_INCIDENT_ENABLED", "false").lower() == "true"
+GRAFANA_URL: str = os.getenv("GRAFANA_URL", "").strip()
+GRAFANA_TOKEN: str = os.getenv("GRAFANA_TOKEN", "").strip()
+GRAFANA_SERVICE_ACCOUNT_ID: str = os.getenv("GRAFANA_SERVICE_ACCOUNT_ID", "").strip()
 
 # ════════════════════════════════════════════════════════════════════
 # DATABASE & LOGGING

@@ -6,7 +6,7 @@
 ## Canonical Truth
 
 - Repo root: `/Users/joshmacbookair2020/Projects/algo_trading_final`
-- Canonical version: `v18.17` (`2026-05-05`)
+- Canonical version: `v18.18` (`2026-05-11`)
 - Canonical active lane: **Coinbase spot scalp**
 - Canonical launch path: `python3 scripts/go_live.py`
 - Canonical guarded deploy path: local `./deploy.sh`
@@ -38,10 +38,20 @@ This repository still contains multiple strategy lanes and historical infrastruc
 
 - **Authoritative live lane:** Coinbase spot scalp (Two-Tower: Technical + Local ML)
 - **Legacy AI:** **RETIRED**. The multi-agent debate ensemble (Goku, analyst agents, consensus-voting) has been removed to reduce latency and cost.
-- **Active AI:** **Gemini Studio** (CLI intelligence/DB queries) and **Anthropic Sonnet** (Optional exit thesis sanity checks).
+- **Active AI:** **Gemini Studio** (CLI intelligence/DB queries), **Anthropic Sonnet** (Optional exit thesis sanity checks), and **Sovereign Mobile Gemini** (Telegram agent with code-editing tools).
 - **Current live decision standard:** truth-first, fee-aware, route-aware, evidence-gated.
 - **Current launch target:** tiny live only
 - **Current dashboard / readiness authority:** the spot truth-lane contract
+- **Incident Response:** Grafana IRM (pushed via `monitoring/irm_reporter.py`) with OnCall escalation.
+
+## Sovereign Mobile Operator
+The Telegram bot acts as a mobile terminal for the Gemini agent. It is authorized to:
+- Read and Edit codebase files (`read_file`, `replace_text`).
+- Query live exposure and trade history via SQL (`execute_sql`).
+- Execute safe diagnostic commands (`ls`, `git status`, `py_compile`).
+- View real-time logs and system vitals.
+
+Access is strictly restricted to the `AUTHORIZED_USER_ID`.
 
 The following systems remain in-repo but are **not authoritative** for live spot health, readiness, deployment counts, or operator truth:
 

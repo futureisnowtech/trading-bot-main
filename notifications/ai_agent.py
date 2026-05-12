@@ -6,6 +6,7 @@ import traceback
 from typing import Optional, List, Dict
 import system_state
 from runtime.runtime_state import get_lane_state, get_system_state
+from notifications.agent_tools import execute_sql, read_file, replace_text, run_safe_command
 
 try:
     import google.generativeai as genai
@@ -218,12 +219,14 @@ def ask_ai(query: str) -> str:
     )
 
     try:
-        # Define the tool
+        # Define the tools
         # In the google-generativeai SDK, tools are passed to the GenerativeModel
+        tools = [execute_sql, read_file, replace_text, run_safe_command]
+        
         model = genai.GenerativeModel(
             model_name=model_name,
             system_instruction=system_instruction,
-            tools=[execute_sql]
+            tools=tools
         )
 
         chat = model.start_chat(enable_automatic_function_calling=True)

@@ -888,129 +888,51 @@ def spot_quality_block_reason(
             pass
         return tv_block, floor
 
-    for condition in policy.get("edge_conditions") or ():
-        if not _edge_condition_matches(spot_state, condition):
-            reason = str(condition.get("reason") or _default_edge_reason(condition))
-            try:
-                system_state.state.update_stochastic(clean, {"status": "STRATEGY_VETO", "reason": reason})
-            except Exception:
-                pass
-            return reason, floor
+    # v18.18: Strategic Scalper Shift — Bypass technical vetoes if mode is active
+    if not getattr(_qs_cfg, "STRATEGIC_SCALPER_MODE", False):
+        for condition in policy.get("edge_conditions") or ():
+            if not _edge_condition_matches(spot_state, condition):
+                reason = str(condition.get("reason") or _default_edge_reason(condition))
+                try:
+                    system_state.state.update_stochastic(clean, {"status": "STRATEGY_VETO", "reason": reason})
+                except Exception:
+                    pass
+                return reason, floor
+    else:
+        logger.debug(f"[strategy] {clean} Strategic Scalper Mode active — bypassing technical vetoes.")
 
-    if final_spot_score is not None and float(final_spot_score) < float(floor):
+    # v18.18: Unified Probabilistic Gate (Strategic Scalper Shift)
+    from runtime.spot_probability import calculate_calibrated_win_prob, sizing_multiplier
+
+    win_prob = calculate_calibrated_win_prob(spot_state)
+    
+    # ── HARD VETOES (The only ones remaining) ────────────────────────────────
+    if win_prob < 0.55:
+        reason = f"PROB_TOO_LOW:{win_prob:.1%}"
         try:
-            system_state.state.update_stochastic(clean, {"status": "STRATEGY_VETO", "reason": "below_regime_floor"})
+            system_state.state.update_stochastic(clean, {"status": "STRATEGY_VETO", "reason": reason})
         except Exception:
             pass
-        return "below_regime_floor", floor
-    regime_min_confirms = int(
-        getattr(_qs_cfg, "SPOT_TINY_LIVE_MIN_CONFIRMS", {"TREND": 0, "NEUTRAL": 0})[
-            regime
-        ]
-    )
-    if confirm_count < regime_min_confirms:
-        try:
-            system_state.state.update_stochastic(clean, {"status": "STRATEGY_VETO", "reason": "structural_confirm_count_too_low"})
-        except Exception:
-            pass
-        return "structural_confirm_count_too_low", floor
-    min_5m_frame = float(
-        getattr(
-            _qs_cfg, "SPOT_TINY_LIVE_MIN_5M_FRAME", {"TREND": 40.0, "NEUTRAL": 40.0}
-        )[regime]
-    )
-    if float(s5.get("frame_score") or 0.0) < min_5m_frame:
-        try:
-            system_state.state.update_stochastic(clean, {"status": "STRATEGY_VETO", "reason": "frame_score_5m_too_low"})
-        except Exception:
-            pass
-        return "frame_score_5m_too_low", floor
-    min_30m_frame = float(
-        getattr(
-            _qs_cfg, "SPOT_TINY_LIVE_MIN_30M_FRAME", {"TREND": 40.0, "NEUTRAL": 40.0}
-        )[regime]
-    )
-    if float(s30.get("frame_score") or 0.0) < min_30m_frame:
-        try:
-            system_state.state.update_stochastic(clean, {"status": "STRATEGY_VETO", "reason": "frame_score_30m_too_low"})
-        except Exception:
-            pass
-        return "frame_score_30m_too_low", floor
-    min_momentum = float(
-        getattr(
-            _qs_cfg,
-            "SPOT_TINY_LIVE_MIN_MOMENTUM_IMPULSE",
-            {"TREND": 0.000001, "NEUTRAL": 0.000001},
-        )[regime]
-    )
-    if float(s5.get("momentum_impulse") or 0.0) < min_momentum:
-        try:
-            system_state.state.update_stochastic(clean, {"status": "STRATEGY_VETO", "reason": "momentum_impulse_too_low"})
-        except Exception:
-            pass
-        return "momentum_impulse_too_low", floor
-    min_structure = float(
-        getattr(
-            _qs_cfg,
-            "SPOT_TINY_LIVE_MIN_STRUCTURE_COMPONENT",
-            {"TREND": 0.000001, "NEUTRAL": 0.0},
-        )[regime]
-    )
-    if float(s5.get("structure_component") or 0.0) < min_structure:
-        try:
-            system_state.state.update_stochastic(clean, {"status": "STRATEGY_VETO", "reason": "structure_component_too_low"})
-        except Exception:
-            pass
-        return "structure_component_too_low", floor
-    if float(s5.get("path_efficiency") or 0.0) < float(policy["min_path_efficiency"]):
-        try:
-            system_state.state.update_stochastic(clean, {"status": "STRATEGY_VETO", "reason": "path_efficiency_too_low"})
-        except Exception:
-            pass
-        return "path_efficiency_too_low", floor
-    min_participation = float(
-        getattr(
-            _qs_cfg,
-            "SPOT_TINY_LIVE_MIN_PARTICIPATION_COMPONENT",
-            {"TREND": -999.0, "NEUTRAL": 0.000001},
-        )[regime]
-    )
-    if float(s5.get("participation_component") or 0.0) < min_participation:
-        try:
-            system_state.state.update_stochastic(clean, {"status": "STRATEGY_VETO", "reason": "participation_component_too_low"})
-        except Exception:
-            pass
-        return "participation_component_too_low", floor
-    if float(s30.get("volatility_quality") or 0.0) < float(
-        policy["min_volatility_quality"]
-    ):
-        try:
-            system_state.state.update_stochastic(clean, {"status": "STRATEGY_VETO", "reason": "volatility_quality_too_low"})
-        except Exception:
-            pass
-        return "volatility_quality_too_low", floor
+        return reason, floor
+
     # Hard vetoes from execution profile (ATR fee floor, extreme selling aggression)
-    _exec_mult, _exec_tag = calculate_execution_profile(symbol, spot_state)
+    _exec_mult, _exec_tag = calculate_execution_profile(symbol, spot_state, win_prob=win_prob)
     
     # Update system state with final multiplier and tag
     try:
         current_stoch = system_state.state.get_state()["strategy"].get("stochastic", {}).get(clean, {})
-        current_stoch.update({"multiplier": _exec_mult, "status": "STRATEGY_VETO" if _exec_mult == 0.0 else "ACTIVE", "reason": _exec_tag if _exec_mult == 0.0 else ""})
+        current_stoch.update({
+            "win_prob": win_prob,
+            "multiplier": _exec_mult, 
+            "status": "STRATEGY_VETO" if _exec_mult == 0.0 else "ACTIVE", 
+            "reason": _exec_tag if _exec_mult == 0.0 else ""
+        })
         system_state.state.update_stochastic(clean, current_stoch)
     except Exception:
         pass
-
 
     if _exec_mult == 0.0:
         return _exec_tag, floor
-    
-    # Final check: if we reach here, we are OK
-    try:
-        current_stoch = system_state.state.get_state()["strategy"].get("stochastic", {}).get(clean, {})
-        current_stoch.update({"status": "ACTIVE", "reason": ""})
-        system_state.state.update_stochastic(clean, current_stoch)
-    except Exception:
-        pass
     
     return "", floor
 
@@ -1025,78 +947,26 @@ def calculate_execution_profile(
     symbol: str,
     spot_state: dict[str, Any] | None,
     composite_score: float | None = None,
+    win_prob: float | None = None,
 ) -> tuple[float, str]:
     """
-    Compute position sizing multiplier based on microstructure conditions.
+    Compute position sizing multiplier based on continuous win probability.
     Returns (sizing_multiplier, status_tag).
-    Hard vetoes return 0.0 and a tag string.
-    Soft conditions feed a continuous sigmoid z-score returning (0.3, 1.0].
-    Never raises — all exceptions are caught and fail open (return 1.0).
     """
     if not spot_state:
         return 1.0, "NO_STATE"
 
-    frames = spot_state.get("frames") or {}
-    s5 = frames.get("5m") or {}
+    # Use centralized sizing logic
+    from runtime.spot_probability import sizing_multiplier
+    
+    # If win_prob wasn't passed, calculate it
+    if win_prob is None:
+        from runtime.spot_probability import calculate_calibrated_win_prob
+        win_prob = calculate_calibrated_win_prob(spot_state)
 
-    atr_pct = float(s5.get("atr_pct") or 0.0)
-    obi = float(s5.get("obi") or 0.0)
-    buy_ratio = float(s5.get("buy_volume_ratio") or 0.5)
-    tfi = 2.0 * buy_ratio - 1.0
+    multiplier = sizing_multiplier(win_prob)
+    
+    if multiplier == 0.0:
+        return 0.0, "PROB_THROTTLE"
 
-    # Hard Veto 1: ATR Fee Floor — atr_pct==0.0 means cold/missing data, fail open
-    # v18.17: Disabled fee floor entirely due to extreme low volatility environments
-    if atr_pct > 0.0 and atr_pct < 0.00001:
-        return 0.0, "FEE_FLOOR"
-
-    # Hard Veto 2: coordinated selling pressure
-    if obi < -0.35 and tfi < -0.20:
-        return 0.0, "EXTREME_SELL_PRESSURE"
-
-    # Continuous z-score: z=0 → sigmoid=0.5 → multiplier=1.0 (neutral, no penalty).
-    # Adverse signals push z negative → multiplier smoothly toward 0.3 floor.
-    z = 0.0
-    status_tag = "ACTIVE"
-    try:
-        from data.edge_monitor import get_shadow_state
-
-        shadow = get_shadow_state(_clean_symbol(symbol))
-        
-        # Warmup Detection: If shadow is empty or vitals are at exact fallback constants
-        # (indicates data pipeline is cold or math is degenerate/non-stationary)
-        is_warmup = not shadow or (
-            shadow.get("ou_transition_prob") == 0.5 and 
-            not shadow.get("kyle_lambda_fragile") and 
-            shadow.get("kyle_lambda", 0.0) == 0.0
-        )
-        
-        if is_warmup:
-            z -= 0.75  # Cautious penalty for unverified/cold stochastic state
-            status_tag = "WARMUP_PENALTY"
-        else:
-            if shadow.get("kyle_lambda_fragile"):
-                z -= 1.0
-            ou_prob = float(shadow.get("ou_transition_prob", 0.5))
-            if ou_prob < 0.5:
-                # v18.17: Relax OU mean-reversion penalty if market is trending (high ER)
-                er = float(spot_state.get("er") or 0.0)
-                if er > 0.5:
-                    z -= (0.5 - ou_prob) * 1.5  # trending: expansion is good
-                else:
-                    z -= (0.5 - ou_prob) * 4.0  # ranging: expansion is noise
-    except Exception:
-        z -= 0.5  # Fail cautious on import/lookup error
-        status_tag = "LOOKUP_ERROR"
-
-    # OBI/TFI divergence penalty — continuous rather than binary gate
-    z -= max(0.0, obi - 0.20) * 3.0
-    z -= max(0.0, -tfi - 0.10) * 3.0
-
-    # Optional composite score boost (centered at 50, 25-pt scale)
-    if composite_score is not None:
-        z += (float(composite_score) - 50.0) / 25.0
-
-    # Sigmoid maps z=0 → multiplier=1.0; z→-∞ → 0.3 floor; z→+∞ → 1.0 cap
-    multiplier = max(0.3, min(1.0, 0.3 + 1.4 * _sigmoid_sizing(z)))
-
-    return round(multiplier, 3), status_tag
+    return multiplier, "ACTIVE"

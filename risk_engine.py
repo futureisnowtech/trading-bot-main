@@ -119,6 +119,24 @@ def update_balances(
             _state.margin_utilization = margin_usd / current_balance
         _state.ts = time.time()
 
+        # ── Grafana IRM Soft-Halt Integration ────────────────────────────────
+        if _state.drawdown_pct >= 0.12:
+            try:
+                from monitoring.irm_reporter import create_irm_incident
+                create_irm_incident(
+                    title=f"RISK HALT: Drawdown hit {_state.drawdown_pct:.1%}",
+                    severity="high",
+                    description=f"Portfolio drawdown ({_state.drawdown_pct:.1%}) has reached the 12% new-entry halt threshold.",
+                    labels=["scope:portfolio", "type:drawdown_halt"],
+                    extra_details={
+                        "drawdown_pct": _state.drawdown_pct,
+                        "balance": current_balance,
+                        "peak": _state.peak_balance
+                    }
+                )
+            except Exception as e:
+                logger.debug(f"[risk_engine] irm report failed: {e}")
+
         # 📊 Metrics
         try:
             from monitoring.metrics import update_performance

@@ -214,12 +214,15 @@ class CoinbaseSpotBroker:
             return str(int(rounded))
         return f"{rounded:.{prec}f}"
 
-    def _round_quote(self, symbol: str, price: float) -> str:
-        """Round price down to quote_increment and return as string."""
+    def _round_quote(self, symbol: str, price: float, side: str = "BUY") -> str:
+        """Round price using directional logic (floor for BUY, ceil for SELL) to quote_increment."""
         spec = self._spec(symbol)
         increment = float(spec.get("quote_increment", 0.01))
         import math
-        rounded = math.floor(price / increment + 1e-11) * increment
+        if side.upper() == "SELL":
+            rounded = math.ceil(price / increment - 1e-11) * increment
+        else:
+            rounded = math.floor(price / increment + 1e-11) * increment
         prec = spec.get("quote_precision", 2)
         return f"{rounded:.{prec}f}"
 
@@ -465,7 +468,7 @@ class CoinbaseSpotBroker:
         raw_qty = size_usd / limit_price if limit_price > 0 else 0.0
         qty_str = self._round_base(symbol, raw_qty)
         qty = float(qty_str)
-        limit_px_str = self._round_quote(symbol, limit_price)
+        limit_px_str = self._round_quote(symbol, limit_price, side="BUY")
         limit_px = float(limit_px_str)
 
         base_min = spec.get("base_min_size", 0.0)
@@ -521,7 +524,7 @@ class CoinbaseSpotBroker:
         # v18.17: Precision rounding for both size and price
         qty_str = self._round_base(symbol, size_units)
         qty = float(qty_str)
-        limit_px_str = self._round_quote(symbol, limit_price)
+        limit_px_str = self._round_quote(symbol, limit_price, side="SELL")
         limit_px = float(limit_px_str)
 
         base_min = spec.get("base_min_size", 0.0)

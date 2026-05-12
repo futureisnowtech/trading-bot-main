@@ -21,6 +21,7 @@
 - **Strictly LIVE:** Paper mode is excised. `PAPER_TRADING` logic is dead code.
 - **Broker Canon:** Coinbase is the only source of truth for holdings.
 - **Self-Healing:** `runtime/spot_position_truth.py` is the primary repair layer.
+- **Incident Response:** `monitoring/irm_reporter.py` pushes critical halts to Grafana IRM.
 
 ## Default Workflow
 1. Read `AGENTS.md` and this protocol.

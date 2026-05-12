@@ -73,6 +73,19 @@ def _trigger(reason: str, balance: float = 0.0):
 
     logger.critical(f"[kill_switch] TRIGGERED: {reason}")
     
+    # ── Grafana IRM Integration ──────────────────────────────────────────────
+    try:
+        from monitoring.irm_reporter import create_irm_incident
+        create_irm_incident(
+            title=f"GLOBAL KILL SWITCH: {reason}",
+            severity="critical",
+            description=f"System-level halt triggered: {reason}",
+            labels=["scope:global", f"trigger:{reason.split()[0].lower()}"],
+            extra_details={"balance": balance, "timestamp": time.time()}
+        )
+    except Exception as e:
+        logger.debug(f"[kill_switch] irm report failed: {e}")
+
     # 📊 Metrics
     try:
         from monitoring.metrics import update_kill_switch

@@ -552,10 +552,14 @@ def _compute_stop_pct(
         _tighten = min(_tighten, float(getattr(_sc, "SPOT_STOP_TIGHTEN_NEUTRAL", 0.92)))
     elif _regime == "CHOP":
         _tighten = min(_tighten, float(getattr(_sc, "SPOT_STOP_TIGHTEN_CHOP", 0.88)))
-    if _sf == "pullback_reclaim":
-        _tighten = min(
-            _tighten, float(getattr(_sc, "SPOT_STOP_TIGHTEN_PULLBACK", 0.90))
-        )
+    # v18.18: Continuous Probabilistic Stop Tightening (Strategic Scalper Shift)
+    from runtime.spot_probability import calculate_calibrated_win_prob
+    _win_prob = calculate_calibrated_win_prob(spot_state) if spot_state else 0.70
+    
+    # Linear ratio: 85% prob -> 1.0x (normal); 55% prob -> 0.5x (micro leash)
+    _prob_tighten = max(0.5, min(1.0, 0.5 + (_win_prob - 0.55) / 0.30))
+    _tighten = min(_tighten, _prob_tighten)
+
     return max(floor, raw_stop * _tighten)
 
 

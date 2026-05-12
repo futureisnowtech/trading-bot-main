@@ -1874,9 +1874,19 @@ def _attempt_entry(
                 )
                 return "below_threshold"
             _cfg = SPOT_SCALP_SYMBOL_CONFIG.get(_underlying, {})
+            
+            # v18.18: Unified Probability calculus
+            from runtime.spot_probability import calculate_calibrated_win_prob, dynamic_stop_multiplier
+            _win_prob = calculate_calibrated_win_prob(_spot_state)
+
             _stop_pct = _spot_eng._compute_stop_pct(
                 _underlying, _spot_state, atr_at_entry=atr_7
             )
+            
+            # Dynamic stop multiplier based on probability (default base=3.0)
+            _dyn_stop_mult = dynamic_stop_multiplier(_win_prob, base_stop=3.0)
+            _stop_pct = (_stop_pct / 3.0) * _dyn_stop_mult
+            
             _risk_fraction = float(_cfg.get("risk_fraction", 0.0015))
             _alloc_cap_pct = float(_cfg.get("allocation_cap_pct", 0.05))
             _account_equity = float(get_live_account_size(paper=False))

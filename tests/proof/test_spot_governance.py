@@ -48,6 +48,9 @@ def _spot_state(regime: str, setup_family: str, setup_score: float = 0.5) -> dic
         "structural_confirm_count": 2,
         "vol_spike": 1.1,
         "adx_15m": 25.0,
+        "kst_value": 1.0,
+        "kst_signal": 0.5,
+        "supertrend_dir": 1,
         "frames": {
             "5m": {
                 "frame_score": 55.0,

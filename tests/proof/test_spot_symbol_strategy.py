@@ -48,6 +48,10 @@ def test_sss03_doge_open_gate_before_calibration():
     spot_state = {
         "regime": "TREND",
         "setup_family": "impulse_continuation",
+        "vol_spike": 1.1,
+        "kst_value": 1.0,
+        "kst_signal": 0.5,
+        "supertrend_dir": 1,
         "structural_confirm_count": 3,
         "frames": {
             "5m": {

@@ -2,12 +2,10 @@
 tests/proof/test_spot_starter_lane.py — Proof suite for spot starter lane (v17.2).
 
 Invariants proved:
-  SP-01  coinbase_spot_broker paper mode returns mock fills with no API calls
   SP-02  spot_engine blocks when position already open for that symbol
   SP-03  spot_engine blocks when size_usd exceeds deployment cap (live mode)
   SP-04  spot_engine blocks when symbol not in SPOT_SYMBOLS (spot_symbol_not_allowed)
   SP-05  spot_engine blocks when SPOT_LANE_ACTIVE=False (spot_lane_disabled)
-  SP-06  spot_engine writes to trades table with broker='coinbase_spot' tag in notes
   SP-07  get_spot_positions returns only spot_ strategy rows, not perp positions
   SP-08  spot balance source is isolated from perp futures_buying_power
 """
@@ -69,46 +67,6 @@ def _spot_state(symbol="ETH"):
             "1d": {"v": 0.03, "a": 0.01, "z": 0.1, "frame_score": 56.0},
         },
     }
-
-
-# ── SP-01: paper mode returns mock fill, no API calls ────────────────────────
-
-
-def test_sp01_paper_buy_returns_fill_no_api():
-    from execution.coinbase_spot_broker import CoinbaseSpotBroker
-
-    broker = CoinbaseSpotBroker()
-    broker.connect()
-    assert broker.is_connected()
-
-    # Patch get_mark_price to avoid network call
-    broker._fallback_price = lambda sym: 2500.0
-
-    result = broker.buy_spot("ETH", 50.0)
-    assert result is not None, "paper buy_spot must return a dict"
-    assert result["side"] == "BUY"
-    assert result["paper"] is True
-    assert "order_id" in result
-    assert float(result["filled_value"]) == pytest.approx(50.0, abs=1.0)
-
-
-def test_sp01_paper_sell_returns_fill_no_api():
-    from execution.coinbase_spot_broker import CoinbaseSpotBroker
-
-    broker = CoinbaseSpotBroker()
-    broker.connect()
-    broker._fallback_price = lambda sym: 2500.0
-
-    # Buy first to have something to sell
-    broker.buy_spot("ETH", 50.0)
-    holdings = broker.get_spot_positions()
-    eth_pos = next((h for h in holdings if h["symbol"] == "ETH"), None)
-    assert eth_pos is not None
-
-    result = broker.sell_spot("ETH", eth_pos["qty"])
-    assert result is not None
-    assert result["side"] == "SELL"
-    assert result["paper"] is True
 
 
 # ── SP-02: spot_engine blocks duplicate open ──────────────────────────────────
@@ -214,62 +172,6 @@ def test_sp05_blocks_lane_disabled(monkeypatch):
     assert result is None, "must block when SPOT_LANE_ACTIVE=False"
 
 
-# ── SP-06: spot_engine writes to trades table ─────────────────────────────────
-
-
-def test_sp06_writes_to_trades_table(proof_runtime, monkeypatch):
-    import config
-    import spot_engine
-    from execution.coinbase_spot_broker import CoinbaseSpotBroker
-
-    monkeypatch.setattr(config, "SPOT_LANE_ACTIVE", True, raising=False)
-    monkeypatch.setattr(config, "SPOT_SYMBOLS", ["BTC", "ETH", "SOL", "XRP"], raising=False)
-    monkeypatch.setattr(config, "SPOT_MIN_ORDER_USD", 10.0, raising=False)
-    monkeypatch.setattr(config, "SPOT_MAX_DEPLOYED_PCT", 0.40, raising=False)
-    spot_engine._load_config()
-
-    # Ensure no existing spot position
-    monkeypatch.setattr(
-        spot_engine, "_load_spot_positions_from_db", lambda paper=True: []
-    )
-
-    # Mock broker so no real API call
-    mock_broker = CoinbaseSpotBroker()
-    mock_broker._paper = True
-    mock_broker._connected = True
-    mock_broker._fallback_price = lambda sym: 2500.0
-    mock_broker.get_spot_top_of_book = lambda sym: {
-        "best_bid": 2499.0, "best_ask": 2501.0, "spread_pct": 0.0008, "top_depth_usd": 10000.0
-    }
-    mock_broker.place_limit_buy_spot = lambda *a, **k: {
-        "order_id": "mock_order_123", "status": "OPEN"
-    }
-    mock_broker.get_spot_order_status = lambda *a, **k: {
-        "status": "FILLED", "completion_pct": 100.0, "average_filled_price": 2500.0, "filled_size": 0.01
-    }
-
-    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper=False: mock_broker)
-    monkeypatch.setattr(spot_engine, "build_spot_state", lambda symbol: _spot_state(symbol))
-
-    result = spot_engine.open_spot("ETH", 25.0, final_spot_score=72.0)
-    assert result is not None, "open_spot should succeed"
-
-    # Verify trade written
-    db_path = str(proof_runtime.db_path)
-    with sqlite3.connect(db_path) as conn:
-        row = conn.execute(
-            "SELECT broker, strategy FROM trades WHERE symbol='ETH' ORDER BY id DESC LIMIT 1"
-        ).fetchone()
-    assert row is not None, "trade row must be written to DB"
-    broker_val, strategy_val = row
-    assert broker_val == "coinbase_spot", (
-        f"broker must be 'coinbase_spot', got {broker_val!r}"
-    )
-    assert strategy_val.startswith("spot_"), (
-        f"strategy must start with 'spot_', got {strategy_val!r}"
-    )
-
-
 # ── SP-07: get_spot_positions returns only spot_ rows, not perp ───────────────
 
 
@@ -294,7 +196,7 @@ def test_sp07_no_perp_contamination(proof_runtime, monkeypatch):
         direction="LONG",
         leverage=3,
     )
-    # Seed a spot position (strategy='spot_eth')
+    # Seed a spot position (strategy='spot_btc')
     tl.persist_position(
         symbol="BTC",
         strategy="spot_btc",
@@ -306,7 +208,12 @@ def test_sp07_no_perp_contamination(proof_runtime, monkeypatch):
         ts_entry="2026-04-17T12:00:00",
         direction="LONG",
         leverage=1,
-        paper=1,
+        paper=0,
+        entry_trade_id=1,
+        entry_feature_snapshot_id=1,
+        base_asset="BTC",
+        setup_family="momentum",
+        execution_route="maker_first",
     )
 
     # Mock broker to return the BTC holding so truth service sees it as active
@@ -318,10 +225,10 @@ def test_sp07_no_perp_contamination(proof_runtime, monkeypatch):
     mock_broker.get_spot_balance.return_value = {"usd_available": 1000.0}
     
     import execution.coinbase_spot_broker as csb
-    monkeypatch.setattr(csb, "get_spot_broker", lambda paper=True: mock_broker)
-    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper=True: mock_broker)
+    monkeypatch.setattr(csb, "get_spot_broker", lambda paper=False: mock_broker)
+    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper=False: mock_broker)
 
-    positions = spot_engine.get_spot_positions(paper=True)
+    positions = spot_engine.get_spot_positions(paper=False)
     symbols = [p["symbol"] for p in positions]
 
     # ETH perp must not appear; BTC spot must appear

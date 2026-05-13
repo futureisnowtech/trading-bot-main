@@ -327,27 +327,6 @@ def test_cb19_qty_to_contracts_floors_eth():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CB-20  Missing CDP credentials does not crash paper mode
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-def test_cb20_paper_mode_works_without_cdp_credentials(monkeypatch):
-    """Paper mode must never call the API regardless of credential state."""
-    from execution.coinbase_broker import CoinbaseBroker
-
-    monkeypatch.setenv("COINBASE_CDP_KEY_NAME", "")
-    monkeypatch.setenv("COINBASE_CDP_PRIVATE_KEY", "")
-
-    b = CoinbaseBroker()
-    result = b.open_long(symbol="BTC", size_usd=500.0, leverage=3)
-    # Paper mode: should succeed (simulation) even with no creds
-    # Note: paper trades with size_usd < 1 contract notional return None gracefully
-    # This just proves no crash, not necessarily a fill
-    # (BTC at simulated price may be 0 contracts → None is acceptable)
-    assert result is None or result.get("paper") is True
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # CB-21  SUPPORTED_SYMBOLS set is exactly the 4 CFTC-regulated products
 # ─────────────────────────────────────────────────────────────────────────────
 

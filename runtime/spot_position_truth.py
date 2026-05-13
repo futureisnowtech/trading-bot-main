@@ -238,10 +238,7 @@ def _merged_live_row(
     classification_row = classification_row or {}
     classification = str(classification_row.get("classification") or "").strip()
 
-    # v18.17: Manual bypass — if a coin is marked as manual, it is NEVER a truth blocker
-    if classification == "external_manual":
-        status = "external_manual"
-    elif live_row and db_row:
+    if live_row and db_row:
         if _metadata_missing(db_row):
             # v18.17: Allow metadata_missing as matched_bot_position if quantities match within 1%
             db_qty = _to_float(db_row.get("qty"))
@@ -259,8 +256,10 @@ def _merged_live_row(
         else:
             status = "matched_bot_position"
     elif live_row:
+        # Exists on broker but NOT in bot DB -> External Manual or Unclassified
         status = classification or "unclassified"
     else:
+        # Exists in bot DB but NOT on broker -> Stale
         status = "db_only_stale"
 
     current_price = _to_float(
@@ -290,7 +289,6 @@ def _merged_live_row(
         "is_bot_managed": status == "matched_bot_position",
         "is_external_manual": status == "external_manual",
         "truth_blocking": status in _BLOCKING_STATUSES,
-        "auto_purge": status == "db_only_stale",
         "auto_purge": status == "db_only_stale",
     }
     if live_row:
@@ -356,11 +354,17 @@ def get_spot_position_truth(
         )
         for symbol in sorted(set(db_by_symbol) - set(live_by_symbol))
     ]
+    
+    logger.debug("[spot_truth] merged_live symbols: %s", [r['symbol'] for r in merged_live])
+    logger.debug("[spot_truth] stale_db_rows symbols: %s", [r['symbol'] for r in stale_db_rows])
+
     issues = [
         row
         for row in (merged_live + stale_db_rows)
         if row.get("position_truth_status") != "matched_bot_position"
     ]
+    
+    logger.debug("[spot_truth] initial issues: %s", [f"{r['symbol']}:{r['position_truth_status']}" for r in issues])
 
     if not snapshot_ok:
         issues.insert(
@@ -414,16 +418,17 @@ def get_spot_position_truth(
                     )
             conn.commit()
 
-            # Mark as fixed in the current truth object
+    # Mark as fixed in the current truth object
             for row in healing_rows:
                 if _to_float(row.get("qty")) > 0:
                     row["position_truth_status"] = "matched_bot_position"
                     row["truth_blocking"] = False
 
-            # Refresh issues list
+            # Refresh issues list: must exclude rows that were purged or healed
+            all_potential_issues = merged_live + stale_db_rows
             issues = [
                 row
-                for row in (merged_live + stale_db_rows)
+                for row in all_potential_issues
                 if row.get("position_truth_status") != "matched_bot_position"
                 and not row.get("auto_purge")
             ]

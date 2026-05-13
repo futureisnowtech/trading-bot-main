@@ -1015,7 +1015,17 @@ SPOT_QUARANTINE_OVERRIDE_SCORE: float = float(
 SPOT_TINY_LIVE_ENABLEMENT_CONFIRMED: bool = os.getenv(
     "SPOT_TINY_LIVE_ENABLEMENT_CONFIRMED", "false"
 ).strip().lower() in ("true", "1", "yes")
-SPOT_EXTERNAL_MANUAL_HOLDINGS: list[str] = ["STETH"]
+SPOT_EXTERNAL_MANUAL_HOLDINGS: list[str] = [
+    "BTC",
+    "ETH",
+    "LTC",
+    "SOL",
+    "XRP",
+    "ADA",
+    "MANA",
+    "CLOV",
+    "STETH",
+]
 SPOT_ALLOWED_SETUP_FAMILIES_TINY_LIVE: tuple[str, ...] = (
     "impulse_continuation",
     "pullback_reclaim",

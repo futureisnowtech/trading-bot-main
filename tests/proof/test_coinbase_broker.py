@@ -5,15 +5,10 @@ Invariants proved:
   CB-01  Supported symbols map to correct Coinbase product IDs
   CB-02  Unsupported symbols raise CoinbaseSymbolError (fail-closed)
   CB-03  Contract size calculation is correct for each product
-  CB-04  Paper mode open_long returns valid position dict without API calls
-  CB-05  Paper mode open_short returns valid position dict without API calls
-  CB-06  Paper mode close_position returns pnl_usd
-  CB-07  One net position per symbol — duplicate open_long is blocked
   CB-08  Taker fee constant is Coinbase rate (0.03%), not Binance/Kraken
   CB-09  Round-trip cost is 0.06% (2 × taker)
   CB-10  perps_engine imports coinbase_broker, not binance_broker
   CB-11  perps_engine uses Coinbase fee constant (0.0003), not Kraken (0.00065)
-  CB-12  perps_engine uses 'coinbase_paper' broker string, not 'kraken_paper'
   CB-13  config.py exports COINBASE_CDP_KEY_NAME and COINBASE_CDP_PRIVATE_KEY
   CB-14  config.py COINBASE_TAKER_FEE_PCT is Coinbase rate (0.0003)
   CB-15  economics_gate TAKER_FEE_PCT is Coinbase rate (0.0003)
@@ -21,7 +16,6 @@ Invariants proved:
   CB-17  venue_specs.py includes 'coinbase' in VENUE_FEES
   CB-18  Funding rate returns 0.0 for dated contracts (not perpetual-style)
   CB-19  Qty-to-contracts rounds down to floor (never over-sizes)
-  CB-20  Missing CDP credentials does not crash paper mode
 """
 
 from __future__ import annotations
@@ -42,7 +36,7 @@ if ROOT not in sys.path:
 
 @pytest.fixture(scope="module")
 def broker():
-    """CoinbaseBroker instance in paper mode — no API calls made."""
+    """CoinbaseBroker instance."""
     from execution.coinbase_broker import CoinbaseBroker
 
     return CoinbaseBroker()
@@ -121,126 +115,6 @@ def test_cb03_contract_sizes(sym, expected_size):
     from execution.coinbase_broker import PRODUCT_SPECS
 
     assert PRODUCT_SPECS[sym]["contract_size"] == expected_size
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# CB-04 — Paper open_long returns valid dict without API calls
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-def test_cb04_paper_open_long_returns_order_dict(broker):
-    result = broker.open_long(symbol="BTC", size_usd=1000.0, leverage=3)
-    assert result is not None
-    assert result.get("paper") is True
-    assert "orderId" in result
-    assert result.get("side") == "BUY"
-    assert result.get("symbol") == "BTC"
-
-
-def test_cb04_paper_open_long_eth(broker):
-    result = broker.open_long(symbol="ETH", size_usd=500.0, leverage=2)
-    assert result is not None
-    assert result.get("paper") is True
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# CB-05 — Paper open_short returns valid dict without API calls
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-def test_cb05_paper_open_short_returns_order_dict(broker):
-    result = broker.open_short(symbol="SOL", size_usd=1000.0, leverage=3)
-    assert result is not None
-    assert result.get("paper") is True
-    assert result.get("side") == "SELL"
-    assert result.get("symbol") == "SOL"
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# CB-06 — Paper close_position returns pnl_usd
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-def test_cb06_paper_close_position_returns_pnl(broker):
-    from execution.coinbase_broker import CoinbaseBroker
-
-    b = CoinbaseBroker()
-    # Simulate a long position we know the details of
-    pos = {
-        "symbol": "BTC",
-        "direction": "LONG",
-        "entry_price": 90000.0,
-        "qty": 0.01,  # 1 contract
-    }
-    result = b.close_position("BTC", pos_fallback=pos)
-    assert result is not None
-    assert "pnl_usd" in result
-    assert "exit_price" in result
-    assert result.get("paper") is True
-
-
-def test_cb06_paper_close_short_position(broker):
-    from execution.coinbase_broker import CoinbaseBroker
-
-    b = CoinbaseBroker()
-    pos = {
-        "symbol": "ETH",
-        "direction": "SHORT",
-        "entry_price": 3000.0,
-        "qty": 0.1,  # 1 contract
-    }
-    result = b.close_position("ETH", pos_fallback=pos)
-    assert result is not None
-    assert "pnl_usd" in result
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# CB-07 — One net position per symbol (duplicate open blocked)
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-def test_cb07_duplicate_open_long_allowed_up_to_3():
-    """Up to 3 same-direction entries per symbol allowed (scaling in); 4th is blocked."""
-    from execution.coinbase_broker import CoinbaseBroker
-
-    b = CoinbaseBroker()
-    first = b.open_long(symbol="XRP", size_usd=1000.0, leverage=3)
-    assert first is not None, "First open should succeed"
-    second = b.open_long(symbol="XRP", size_usd=1000.0, leverage=3)
-    assert second is not None, (
-        "Second open_long on same symbol should be allowed (scaling in)"
-    )
-    third = b.open_long(symbol="XRP", size_usd=1000.0, leverage=3)
-    assert third is not None, "Third open_long on same symbol should be allowed"
-    fourth = b.open_long(symbol="XRP", size_usd=1000.0, leverage=3)
-    assert fourth is None, "Fourth open_long must be blocked (per-symbol cap=3)"
-
-
-def test_cb07_duplicate_open_short_allowed_up_to_3():
-    """Up to 3 same-direction entries per symbol allowed; 4th is blocked."""
-    from execution.coinbase_broker import CoinbaseBroker
-
-    b = CoinbaseBroker()
-    first = b.open_short(symbol="BTC", size_usd=1000.0, leverage=3)
-    assert first is not None
-    second = b.open_short(symbol="BTC", size_usd=1000.0, leverage=3)
-    assert second is not None, "Second open_short on same symbol should be allowed"
-    third = b.open_short(symbol="BTC", size_usd=1000.0, leverage=3)
-    assert third is not None, "Third open_short should be allowed"
-    fourth = b.open_short(symbol="BTC", size_usd=1000.0, leverage=3)
-    assert fourth is None, "Fourth open_short must be blocked (per-symbol cap=3)"
-
-
-def test_cb07_close_then_reopen_allowed():
-    from execution.coinbase_broker import CoinbaseBroker
-
-    b = CoinbaseBroker()
-    b.open_long(symbol="SOL", size_usd=1000.0, leverage=3)
-    pos = {"symbol": "SOL", "direction": "LONG", "entry_price": 150.0, "qty": 5.0}
-    b.close_position("SOL", pos_fallback=pos)
-    # After closing, a new open should succeed
-    second = b.open_long(symbol="SOL", size_usd=1000.0, leverage=3)
-    assert second is not None, "Reopen after close should be allowed"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

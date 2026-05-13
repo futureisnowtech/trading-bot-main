@@ -88,13 +88,14 @@ def test_operator_panel_renders_all_tabs_with_widget_stubs(monkeypatch):
 
 def test_decision_quality_widget_renders_created_at_backed_summary(proof_runtime):
     insert_trade(
-        proof_runtime.db_path, ts="2026-04-10 09:35:00", pnl_usd=6.0, fee_usd=0.5, won=1
+        proof_runtime.db_path, ts="2026-05-10 09:35:00", pnl_usd=6.0, fee_usd=0.5, won=1, paper=0
     )
     insert_trade_attribution(
         proof_runtime.db_path,
-        created_at="2026-04-10T10:30:00+00:00",
+        created_at="2026-05-10T10:30:00+00:00",
         exit_type="target_hit",
         won=1,
+        paper=0,
     )
     insert_signal_stat(proof_runtime.db_path)
 

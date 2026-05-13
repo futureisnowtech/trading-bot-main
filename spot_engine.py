@@ -151,52 +151,53 @@ def _get_broker(paper: bool = False) -> Optional["CoinbaseSpotBroker"]:
         return None
 
 
-def _load_spot_positions_from_db() -> List[Dict]:
+def _load_spot_positions_from_db(paper: bool = False) -> List[Dict]:
     try:
         from logging_db.trade_logger import load_open_positions
         from config import DB_PATH
         import datetime
 
         # 1. Load existing DB positions
-        rows = load_open_positions()
+        rows = load_open_positions(paper=1 if paper else 0)
         db_positions = [r for r in rows if str(r.get("strategy", "")).startswith("spot_")]
         db_symbols = {str(p.get("symbol", "")).upper() for p in db_positions}
 
-        # 2. Check for unclassified broker holdings and auto-adopt
-        try:
-            truth = get_spot_position_truth()
-            unclassified = [
-                row for row in truth.get("issues", [])
-                if row.get("position_truth_status") == "unclassified"
-            ]
-            
-            if unclassified:
-                with sqlite3.connect(DB_PATH, timeout=5) as conn:
-                    for row in unclassified:
-                        clean = _clean_symbol(row.get("symbol"))
-                        if clean in db_symbols:
-                            continue
+        # 2. Check for unclassified broker holdings and auto-adopt (LIVE only)
+        if not paper:
+            try:
+                truth = get_spot_position_truth()
+                unclassified = [
+                    row for row in truth.get("issues", [])
+                    if row.get("position_truth_status") == "unclassified"
+                ]
+                
+                if unclassified:
+                    with sqlite3.connect(DB_PATH, timeout=5) as conn:
+                        for row in unclassified:
+                            clean = _clean_symbol(row.get("symbol"))
+                            if clean in db_symbols:
+                                continue
+                                
+                            logger.info(f"[spot_engine] Auto-adopting {clean} into DB from broker truth.")
+                            entry_price = float(row.get("current_price", 1.0))
+                            qty = float(row.get("qty", 0.0))
                             
-                        logger.info(f"[spot_engine] Auto-adopting {clean} into DB from broker truth.")
-                        entry_price = float(row.get("current_price", 1.0))
-                        qty = float(row.get("qty", 0.0))
-                        
-                        conn.execute(
-                            "INSERT INTO open_positions (symbol, strategy, qty, entry, paper, direction, ts_entry) "
-                            "VALUES (?, ?, ?, ?, 0, 'LONG', ?)",
-                            (clean, f"spot_{clean.lower()}", qty, entry_price, datetime.datetime.utcnow().isoformat())
-                        )
-                        # Add to list for immediate return
-                        db_positions.append({
-                            "symbol": clean,
-                            "strategy": f"spot_{clean.lower()}",
-                            "qty": qty,
-                            "entry": entry_price,
-                            "paper": 0
-                        })
-                conn.commit()
-        except Exception as e:
-            logger.debug(f"[spot_engine] auto-adoption in loader failed: {e}")
+                            conn.execute(
+                                "INSERT INTO open_positions (symbol, strategy, qty, entry, paper, direction, ts_entry) "
+                                "VALUES (?, ?, ?, ?, 0, 'LONG', ?)",
+                                (clean, f"spot_{clean.lower()}", qty, entry_price, datetime.datetime.utcnow().isoformat())
+                            )
+                            # Add to list for immediate return
+                            db_positions.append({
+                                "symbol": clean,
+                                "strategy": f"spot_{clean.lower()}",
+                                "qty": qty,
+                                "entry": entry_price,
+                                "paper": 0
+                            })
+                        conn.commit()
+            except Exception as e:
+                logger.debug(f"[spot_engine] auto-adoption in loader failed: {e}")
 
         return db_positions
     except Exception as e:
@@ -228,27 +229,28 @@ def _position_strategy(symbol: str) -> str:
     return f"spot_{_clean_symbol(symbol).lower()}"
 
 
-def get_spot_positions() -> List[Dict]:
+def get_spot_positions(paper: bool = False) -> List[Dict]:
     """
     v18.17: Broker-first truth. Returns bot-managed positions 
     reconciled against live Coinbase holdings.
     """
     try:
-        truth = get_spot_position_truth()
+        truth = get_spot_position_truth(paper=paper)
         return truth.get("bot_managed_positions") or []
     except Exception as e:
         logger.debug(f"[spot_engine] get_spot_positions truth error: {e}")
-        return _load_spot_positions_from_db()
+        return _load_spot_positions_from_db(paper=paper)
 
 
 def _sync_position_high(
-    symbol: str, strategy: str, high_price: float
+    symbol: str, strategy: str, high_price: float, paper: bool = False
 ) -> None:
     try:
+        paper_val = 1 if paper else 0
         con = sqlite3.connect(_get_db_path(), timeout=5)
         con.execute(
-            "UPDATE open_positions SET high_since_entry=? WHERE symbol=? AND strategy=? AND paper=0""",
-            (high_price, _clean_symbol(symbol), strategy),
+            "UPDATE open_positions SET high_since_entry=? WHERE symbol=? AND strategy=? AND paper=?",
+            (high_price, _clean_symbol(symbol), strategy, paper_val),
         )
         con.commit()
         con.close()
@@ -257,13 +259,14 @@ def _sync_position_high(
 
 
 def _sync_position_exit_reason(
-    symbol: str, strategy: str, exit_reason: str
+    symbol: str, strategy: str, exit_reason: str, paper: bool = False
 ) -> None:
     try:
+        paper_val = 1 if paper else 0
         con = sqlite3.connect(_get_db_path(), timeout=5)
         con.execute(
-            "UPDATE open_positions SET exit_reason=? WHERE symbol=? AND strategy=? AND paper=0",
-            (exit_reason, _clean_symbol(symbol), strategy),
+            "UPDATE open_positions SET exit_reason=? WHERE symbol=? AND strategy=? AND paper=?",
+            (exit_reason, _clean_symbol(symbol), strategy, paper_val),
         )
         con.commit()
         con.close()
@@ -285,6 +288,7 @@ def _persist_position_from_row(row: dict, *, qty: float | None = None) -> None:
         target=float(row.get("target") or 0.0),
         high_since_entry=float(row.get("high_since_entry") or row.get("entry") or 0.0),
         ts_entry=str(row.get("ts_entry") or datetime.datetime.utcnow().isoformat()),
+        paper=int(row.get("paper") or 0),
         direction=str(row.get("direction") or "LONG"),
         entry_reason=str(row.get("entry_reason") or ""),
         low_since_entry=float(row.get("low_since_entry") or row.get("entry") or 0.0),
@@ -715,9 +719,20 @@ def _reconcile_qty(symbol: str, issue: dict) -> None:
         logger.debug(f"[spot_engine] _reconcile_qty failed for {clean}: {e}")
 
 
+def _is_paper_like_live_order(order: dict | None, paper: bool) -> bool:
+    """Fail closed if a live lane receives a paper-style execution artifact."""
+    if paper or not order:
+        return False
+    if bool(order.get("paper")):
+        return True
+    order_id = str(order.get("order_id") or "").strip().upper()
+    return order_id.startswith("PAPER_") or order_id.startswith("SPOT_PAPER_")
+
+
 def open_spot(
     symbol: str,
     size_usd: float,
+    paper: bool = True,
     composite_score: float = 0.0,
     atr_at_entry: float = 0.0,
     spot_state: dict | None = None,
@@ -742,27 +757,17 @@ def open_spot(
         return None
 
     # v18.17: Force fresh truth reconciliation before entry
-    # Hardcoded paper=False (0)
-    truth = get_spot_position_truth()
-    truth_row = next(
-        (
-            row
-            for row in truth.get("all_live_holdings", [])
-            if _clean_symbol(row.get("symbol")) == clean
-        ),
-        None,
-    )
-
+    truth_row = get_spot_symbol_truth(clean, paper=paper)
     if truth_row:
         truth_status = str(truth_row.get("position_truth_status") or "")
-        if truth_status == "qty_mismatch":
+        if truth_status == "qty_mismatch" and not paper:
             _reconcile_qty(clean, truth_row)
             # Re-fetch after reconciliation
-            truth_row = get_spot_symbol_truth(clean)
+            truth_row = get_spot_symbol_truth(clean, paper=paper)
             truth_status = str((truth_row or {}).get("position_truth_status") or "")
 
-        # v18.17: Auto-Adoption of Unclassified Assets
-        if truth_status == "unclassified":
+        # v18.17: Auto-Adoption of Unclassified Assets (LIVE only)
+        if truth_status == "unclassified" and not paper:
             logger.info(f"[spot_engine] {clean} was unclassified. Auto-adopting into DB.")
             try:
                 import sqlite3
@@ -787,9 +792,10 @@ def open_spot(
             # v18.17: Downgrade from warning to info to stop Telegram spam
             logger.info(f"[spot_engine] {clean} blocked — spot_truth_{truth_status}")
             return {"blocked": f"spot_truth_{truth_status}"}
+
     if any(
         str(p.get("symbol", "")).upper() == clean
-        for p in _load_spot_positions_from_db()
+        for p in _load_spot_positions_from_db(paper=paper)
     ):
         logger.info(f"[spot_engine] {clean} blocked — spot_position_already_open")
         return {"blocked": "spot_position_already_open"}
@@ -797,7 +803,7 @@ def open_spot(
         logger.info(f"[spot_engine] {clean} blocked — spot_size_below_minimum")
         return {"blocked": "spot_size_below_minimum"}
 
-    broker = _get_broker()
+    broker = _get_broker(paper=paper)
     if broker is None:
         logger.error(f"[spot_engine] {clean} — broker unavailable")
         return None
@@ -848,7 +854,7 @@ def open_spot(
         tv_context=tv_context,
     )
     if block_reason:
-        logger.info(f"[spot_engine] {clean} blocked — {block_reason}")
+        logger.warning(f"[spot_engine] {clean} blocked — {block_reason}")
         return None
 
     # Apply execution multiplier (soft vetoes: Kyle's Lambda, OBI/TFI divergence)
@@ -887,6 +893,24 @@ def open_spot(
             logger.info(f"[spot_engine] {clean} buy skipped: route={execution_route} veto={micro_veto}")
         else:
             logger.error(f"[spot_engine] {clean} buy failed: route={execution_route} veto={micro_veto}")
+        return None
+
+    if _is_paper_like_live_order(order, paper=paper):
+        detail = {
+            "symbol": clean,
+            "paper_flag": bool(order.get("paper")),
+            "order_id": str(order.get("order_id") or ""),
+            "execution_route": execution_route,
+        }
+        logger.error(
+            f"[spot_engine] {clean} blocked — mixed_mode_paper_like_live_order {detail}"
+        )
+        try:
+            from runtime.spot_kill_switch import trigger_spot_halt
+
+            trigger_spot_halt("ks_spot_mixed_mode_order_artifact", detail)
+        except Exception:
+            pass
         return None
 
     # Push to Prometheus
@@ -928,6 +952,7 @@ def open_spot(
             f"final_spot_score={score_used:.1f} edge_profile={edge_profile} "
             f"target_profile={target_profile}"
         ),
+        paper=1 if paper else 0,
     )
     entry_features = _spot_entry_features(
         clean,
@@ -958,8 +983,10 @@ def open_spot(
         stop=stop_price,
         target=target_price,
         high_since_entry=price,
-        ts_entry=datetime.datetime.now().isoformat(),
+        ts_entry=datetime.datetime.utcnow().isoformat(),
+        paper=1 if paper else 0,
         direction="LONG",
+
         entry_reason="spot_scalp_entry",
         atr_at_entry=atr_at_entry,
         composite_score=composite_score,
@@ -1019,25 +1046,26 @@ def open_spot(
         "execution_route": execution_route,
         "candidate_id": int(candidate_id or 0),
         "scan_id": str(candidate_scan_id or ""),
-        "paper": False,
+        "paper": paper,
     }
 
 
 def close_spot(
     symbol: str,
     exit_reason: str = "manual_exit",
+    paper: bool = False,
 ) -> Optional[Dict]:
     clean = _clean_symbol(symbol)
     pos = next(
         (
             p
-            for p in _load_spot_positions_from_db()
+            for p in _load_spot_positions_from_db(paper=paper)
             if str(p.get("symbol", "")).upper() == clean
         ),
         None,
     )
     if not pos:
-        logger.warning(f"[spot_engine] close_spot {clean}: no open position found")
+        logger.warning(f"[spot_engine] close_spot {clean} (paper={paper}): no open position found")
         return None
 
     qty = float(pos.get("qty") or 0.0)
@@ -1045,7 +1073,7 @@ def close_spot(
     strategy = str(pos.get("strategy") or _position_strategy(clean))
     if qty <= 0:
         return None
-    broker = _get_broker()
+    broker = _get_broker(paper=paper)
     if broker is None:
         return None
 
@@ -1068,7 +1096,7 @@ def close_spot(
         try:
             from logging_db.trade_logger import delete_position
 
-            delete_position(clean, strategy=strategy)
+            delete_position(clean, strategy=strategy, paper=1 if paper else 0)
             logger.info(
                 f"[spot_engine] close_spot {clean}: broker actual_qty is 0, "
                 "auto-purging DB and returning success"
@@ -1111,12 +1139,12 @@ def close_spot(
                 else:
                     logger.error(f"[spot_engine] close_spot {clean}: FATAL - Taker fallback failed. Clearing DB to stop loop.")
                     from logging_db.trade_logger import delete_position
-                    delete_position(clean, strategy=strategy)
+                    delete_position(clean, strategy=strategy, paper=1 if paper else 0)
                     return None
             else:
                 logger.warning(f"[spot_engine] close_spot {clean}: Broker balance is 0. Purging DB ghost.")
                 from logging_db.trade_logger import delete_position
-                delete_position(clean, strategy=strategy)
+                delete_position(clean, strategy=strategy, paper=1 if paper else 0)
                 return None
         except Exception as _re:
             logger.error(f"[spot_engine] close_spot {clean}: critical recovery failure: {_re}")
@@ -1160,7 +1188,7 @@ def close_spot(
     except Exception:
         exit_state = None
 
-    _sync_position_exit_reason(clean, strategy, exit_reason)
+    _sync_position_exit_reason(clean, strategy, exit_reason, paper=paper)
     close_trade_id = log_trade(
         strategy=strategy,
         broker="coinbase_spot",
@@ -1176,6 +1204,7 @@ def close_spot(
             f"spot_sell exit_reason={exit_reason} route={execution_route} "
             f"micro_veto={micro_veto} pnl={pnl_usd:.2f}"
         ),
+        paper=1 if paper else 0,
     )
     total_fee_usd = fee_usd + float(pos.get("entry_fee_usd") or 0.0)
     learning_snapshot_written = False
@@ -1324,7 +1353,7 @@ def close_spot(
     else:
         from logging_db.trade_logger import delete_position
 
-        delete_position(clean, strategy=strategy)
+        delete_position(clean, strategy=strategy, paper=1 if paper else 0)
     
     try:
         from data.edge_monitor import record_incubation_trade
@@ -1346,31 +1375,31 @@ def close_spot(
     }
 
 
-def check_spot_stops() -> List[Dict]:
+def check_spot_stops(paper: bool = False) -> List[Dict]:
     closed: List[Dict] = []
-    broker = _get_broker()
+    broker = _get_broker(paper=paper)
     if broker is None:
         return closed
-    for pos in _load_spot_positions_from_db():
+    for pos in _load_spot_positions_from_db(paper=paper):
         sym = str(pos.get("symbol") or "").upper()
         stop_price = float(pos.get("stop") or 0.0)
         if stop_price <= 0:
             continue
         current_price = float(broker.get_mark_price(sym) or 0.0)
         if current_price > 0 and current_price <= stop_price:
-            result = close_spot(sym, exit_reason="hard_stop")
+            result = close_spot(sym, exit_reason="hard_stop", paper=paper)
             if result:
                 result["trigger"] = "hard_stop"
                 closed.append(result)
     return closed
 
 
-def check_spot_trailing() -> List[Dict]:
+def check_spot_trailing(paper: bool = False) -> List[Dict]:
     closed: List[Dict] = []
-    broker = _get_broker()
+    broker = _get_broker(paper=paper)
     if broker is None:
         return closed
-    for pos in _load_spot_positions_from_db():
+    for pos in _load_spot_positions_from_db(paper=paper):
         sym = str(pos.get("symbol") or "").upper()
         strategy = str(pos.get("strategy") or _position_strategy(sym))
         entry = float(pos.get("entry") or 0.0)
@@ -1388,7 +1417,7 @@ def check_spot_trailing() -> List[Dict]:
             continue
         if current_price > high_since_entry:
             high_since_entry = current_price
-            _sync_position_high(sym, strategy, high_since_entry)
+            _sync_position_high(sym, strategy, high_since_entry, paper=paper)
         risk_per_unit = entry - stop
         if risk_per_unit <= 0:
             continue
@@ -1398,36 +1427,36 @@ def check_spot_trailing() -> List[Dict]:
         trail_width = risk_per_unit * max(0.6, min(target_r, 1.0))
         trail_stop = high_since_entry - trail_width
         if current_price <= trail_stop and current_price > entry:
-            result = close_spot(sym, exit_reason="trailing_stop")
+            result = close_spot(sym, exit_reason="trailing_stop", paper=paper)
             if result:
                 result["trigger"] = "trailing_stop"
                 closed.append(result)
     return closed
 
 
-def check_spot_targets() -> List[Dict]:
+def check_spot_targets(paper: bool = False) -> List[Dict]:
     closed: List[Dict] = []
-    broker = _get_broker()
+    broker = _get_broker(paper=paper)
     if broker is None:
         return closed
-    for pos in _load_spot_positions_from_db():
+    for pos in _load_spot_positions_from_db(paper=paper):
         sym = str(pos.get("symbol") or "").upper()
         target = float(pos.get("target") or 0.0)
         current_price = float(broker.get_mark_price(sym) or 0.0)
         if target > 0 and current_price >= target:
-            result = close_spot(sym, exit_reason="target_hit")
+            result = close_spot(sym, exit_reason="target_hit", paper=paper)
             if result:
                 result["trigger"] = "target_hit"
                 closed.append(result)
     return closed
 
 
-def check_spot_stagnation_exits() -> List[Dict]:
+def check_spot_stagnation_exits(paper: bool = False) -> List[Dict]:
     closed: List[Dict] = []
-    broker = _get_broker()
+    broker = _get_broker(paper=paper)
     if broker is None:
         return closed
-    for pos in _load_spot_positions_from_db():
+    for pos in _load_spot_positions_from_db(paper=paper):
         sym = str(pos.get("symbol") or "").upper()
         try:
             spot_state = _resolve_spot_state(sym, allow_stale=True)
@@ -1456,16 +1485,16 @@ def check_spot_stagnation_exits() -> List[Dict]:
             and s5["v"] <= 0
             and s5["a"] <= 0
         ):
-            result = close_spot(sym, exit_reason="stagnation_exit")
+            result = close_spot(sym, exit_reason="stagnation_exit", paper=paper)
             if result:
                 result["trigger"] = "stagnation_exit"
                 closed.append(result)
     return closed
 
 
-def check_spot_thesis_exits() -> List[Dict]:
+def check_spot_thesis_exits(paper: bool = False) -> List[Dict]:
     closed: List[Dict] = []
-    for pos in _load_spot_positions_from_db():
+    for pos in _load_spot_positions_from_db(paper=paper):
         sym = str(pos.get("symbol") or "").upper()
         ts_entry = str(pos.get("ts_entry") or "")
         if ts_entry:
@@ -1485,14 +1514,14 @@ def check_spot_thesis_exits() -> List[Dict]:
             spot_state["derivative_score"] < SPOT_THESIS_MIN_SCORE
             or spot_state["frames"]["5m"]["v"] <= 0
         ):
-            result = close_spot(sym, exit_reason="thesis_decay")
+            result = close_spot(sym, exit_reason="thesis_decay", paper=paper)
             if result:
                 result["trigger"] = "thesis_decay"
                 closed.append(result)
     return closed
 
 
-def check_spot_eod_close() -> List[Dict]:
+def check_spot_eod_close(paper: bool = False) -> List[Dict]:
     if not SPOT_EOD_FLATTEN_ENABLED:
         return []
     import pytz
@@ -1508,9 +1537,9 @@ def check_spot_eod_close() -> List[Dict]:
     if now_et.hour < eod_h or (now_et.hour == eod_h and now_et.minute < eod_m):
         return []
     closed: List[Dict] = []
-    for pos in _load_spot_positions_from_db():
+    for pos in _load_spot_positions_from_db(paper=paper):
         result = close_spot(
-            str(pos.get("symbol") or ""), exit_reason="eod_close"
+            str(pos.get("symbol") or ""), exit_reason="eod_close", paper=paper
         )
         if result:
             result["trigger"] = "eod_close"

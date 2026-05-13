@@ -376,7 +376,7 @@ def test_ct09_spot_position_already_open_blocks_spot(tmp_path, monkeypatch):
             ("BTC", "spot_btc", 0.001, 85000.0, 1),
         )
 
-    result = ct.get_crypto_tradeability("BTC", "LONG", live=False, manual=False)
+    result = ct.get_crypto_tradeability("BTC", "LONG", live=False, manual=False, paper=True)
     # Spot is blocked (already open), should fall back to perp
     assert result["lane"] in ("perp", "blocked"), (
         f"Expected perp or blocked, got {result['lane']}"

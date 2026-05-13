@@ -39,7 +39,7 @@ def get_execution_stats() -> dict:
             AVG(CASE WHEN won=0 THEN hold_minutes END) AS avg_hold_loss,
             AVG(CASE WHEN won=1 AND mfe_pct > 0 THEN pnl_pct / mfe_pct END) AS exit_eff
         FROM trade_attribution
-        WHERE paper = 0
+        WHERE paper = {_db._runtime_paper_flag()}
           AND source NOT IN ('backtest','pre_v10_contaminated','bybit_paper','paper_v10')
           AND datetime(replace(substr(COALESCE(created_at, entry_ts, ''),1,19),'T',' ')) >= datetime(?)
     """,
@@ -82,7 +82,7 @@ def get_failure_counts() -> list:
     r = _q1(
         f"""SELECT COUNT(*) AS n, MAX(entry_ts) AS last FROM trade_attribution
            WHERE is_fee_trap=1
-             AND paper=0
+             AND paper={_db._runtime_paper_flag()}
              AND {_TS_NORM.replace("ts", "entry_ts")} >= ?
              AND source NOT IN ('backtest','pre_v10_contaminated','bybit_paper','paper_v10')""",
         (cutoff_7d,),
@@ -101,7 +101,7 @@ def get_failure_counts() -> list:
     r = _q1(
         f"""SELECT COUNT(*) AS n, MAX(entry_ts) AS last FROM trade_attribution
            WHERE exit_type='stop_hit' AND COALESCE(hold_minutes,999) < 30
-             AND paper=0
+             AND paper={_db._runtime_paper_flag()}
              AND {_TS_NORM.replace("ts", "entry_ts")} >= ?
              AND source NOT IN ('backtest','pre_v10_contaminated','bybit_paper','paper_v10')""",
         (cutoff_7d,),

@@ -1,0 +1,129 @@
+........................................................................ [ 13%]
+................................................F....................... [ 27%]
+........................................................................ [ 40%]
+........................................................................ [ 54%]
+........................................................................ [ 67%]
+........................................................................ [ 81%]
+......F..FFF.F..............F....................................FF..... [ 94%]
+..FF.F.....................                                              [100%]
+=================================== FAILURES ===================================
+________ test_decision_quality_widget_renders_created_at_backed_summary ________
+tests/proof/test_dashboard_harness.py:115: in test_decision_quality_widget_renders_created_at_backed_summary
+    assert any("Won (trade worked)" in value for value in rendered)
+E   assert False
+E    +  where False = any(<generator object test_decision_quality_widget_renders_created_at_backed_summary.<locals>.<genexpr> at 0x74acb4848fb0>)
+----------------------------- Captured stderr call -----------------------------
+2026-05-12 21:23:20.686 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+____________________ test_sdt01_target_hit_closes_position _____________________
+tests/proof/test_spot_day_trading.py:141: in test_sdt01_target_hit_closes_position
+    assert len(closed) == 1
+E   assert 0 == 1
+E    +  where 0 = len([])
+------------------------------ Captured log call -------------------------------
+WARNING  repo_indicators:indicators.py:19 [indicators] pandas-ta not found, using fallback calculations
+__________________ test_sdt04_eod_close_at_time_when_enabled ___________________
+tests/proof/test_spot_day_trading.py:179: in test_sdt04_eod_close_at_time_when_enabled
+    assert len(closed) == 1
+E   assert 0 == 1
+E    +  where 0 = len([])
+_____________ test_sdt05_open_spot_persists_scalp_target_metadata ______________
+tests/proof/test_spot_day_trading.py:199: in test_sdt05_open_spot_persists_scalp_target_metadata
+    assert result is not None
+E   assert None is not None
+_________________ test_sdt06_stagnation_exit_closes_dead_trade _________________
+tests/proof/test_spot_day_trading.py:240: in test_sdt06_stagnation_exit_closes_dead_trade
+    assert len(closed) == 1
+E   assert 0 == 1
+E    +  where 0 = len([])
+________________ test_sdt08_thesis_decay_closes_after_hold_gate ________________
+tests/proof/test_spot_day_trading.py:273: in test_sdt08_thesis_decay_closes_after_hold_gate
+    assert len(closed) == 1
+E   assert 0 == 1
+E    +  where 0 = len([])
+____________ test_sli01_spot_close_persists_learning_and_tv_lineage ____________
+tests/proof/test_spot_learning_ingestion.py:95: in test_sli01_spot_close_persists_learning_and_tv_lineage
+    assert result is not None
+E   assert None is not None
+_______________________ test_sp06_writes_to_trades_table _______________________
+tests/proof/test_spot_starter_lane.py:239: in test_sp06_writes_to_trades_table
+    assert result is not None, "open_spot should succeed"
+E   AssertionError: open_spot should succeed
+E   assert None is not None
+------------------------------ Captured log call -------------------------------
+WARNING  execution.coinbase_spot_broker:coinbase_spot_broker.py:304 [spot] get_spot_balance error: Unable to load PEM file. See https://cryptography.io/en/latest/faq/#why-can-t-i-import-my-pem-file for more details. MalformedFraming
+WARNING  execution.coinbase_spot_broker:coinbase_spot_broker.py:331 [spot] sync_live_holdings error: Unable to load PEM file. See https://cryptography.io/en/latest/faq/#why-can-t-i-import-my-pem-file for more details. MalformedFraming
+WARNING  execution.coinbase_spot_broker:coinbase_spot_broker.py:304 [spot] get_spot_balance error: Unable to load PEM file. See https://cryptography.io/en/latest/faq/#why-can-t-i-import-my-pem-file for more details. MalformedFraming
+_______________________ test_sp07_no_perp_contamination ________________________
+tests/proof/test_spot_starter_lane.py:300: in test_sp07_no_perp_contamination
+    assert "BTC" in symbols, "spot BTC must appear in spot positions"
+E   AssertionError: spot BTC must appear in spot positions
+E   assert 'BTC' in []
+------------------------------ Captured log call -------------------------------
+WARNING  execution.coinbase_spot_broker:coinbase_spot_broker.py:304 [spot] get_spot_balance error: Unable to load PEM file. See https://cryptography.io/en/latest/faq/#why-can-t-i-import-my-pem-file for more details. MalformedFraming
+WARNING  execution.coinbase_spot_broker:coinbase_spot_broker.py:331 [spot] sync_live_holdings error: Unable to load PEM file. See https://cryptography.io/en/latest/faq/#why-can-t-i-import-my-pem-file for more details. MalformedFraming
+WARNING  execution.coinbase_spot_broker:coinbase_spot_broker.py:304 [spot] get_spot_balance error: Unable to load PEM file. See https://cryptography.io/en/latest/faq/#why-can-t-i-import-my-pem-file for more details. MalformedFraming
+______ test_stl01_truth_service_hides_db_only_stale_from_live_open_counts ______
+tests/proof/test_spot_truth_lane_contract.py:47: in test_stl01_truth_service_hides_db_only_stale_from_live_open_counts
+    assert any(
+E   assert False
+E    +  where False = any(<generator object test_stl01_truth_service_hides_db_only_stale_from_live_open_counts.<locals>.<genexpr> at 0x74ac40dd05f0>)
+________ test_stl02_truth_service_marks_seeded_manual_holdings_visible _________
+tests/proof/test_spot_truth_lane_contract.py:73: in test_stl02_truth_service_marks_seeded_manual_holdings_visible
+    assert row["position_truth_status"] == "external_manual"
+E   AssertionError: assert 'unclassified' == 'external_manual'
+E     
+E     - external_manual
+E     + unclassified
+_____________ test_stl03b_open_spot_halts_on_paper_like_live_order _____________
+tests/proof/test_spot_truth_lane_contract.py:166: in test_stl03b_open_spot_halts_on_paper_like_live_order
+    assert result is None
+E   AssertionError: assert {'candidate_id': 0, 'entry': 85000.0, 'execution_route': 'maker_first', 'fee_usd': 0.0, ...} is None
+------------------------------ Captured log call -------------------------------
+WARNING  execution.coinbase_spot_broker:coinbase_spot_broker.py:304 [spot] get_spot_balance error: Unable to load PEM file. See https://cryptography.io/en/latest/faq/#why-can-t-i-import-my-pem-file for more details. MalformedFraming
+WARNING  execution.coinbase_spot_broker:coinbase_spot_broker.py:331 [spot] sync_live_holdings error: Unable to load PEM file. See https://cryptography.io/en/latest/faq/#why-can-t-i-import-my-pem-file for more details. MalformedFraming
+WARNING  execution.coinbase_spot_broker:coinbase_spot_broker.py:304 [spot] get_spot_balance error: Unable to load PEM file. See https://cryptography.io/en/latest/faq/#why-can-t-i-import-my-pem-file for more details. MalformedFraming
+=============================== warnings summary ===============================
+tests/proof/test_forecast_lane.py::test_discovery_rejects_non_economic_markets
+  /root/trading-bot-main/execution/forecastex_broker.py:41: DeprecationWarning: There is no current event loop
+    asyncio.get_event_loop()
+
+tests/proof/test_spot_scalp_math.py::test_ssm05_timeframe_state_reports_impulse_and_path_metrics
+tests/proof/test_spot_truth_lane_contract.py::test_stl03_open_spot_allows_external_manual_same_symbol
+tests/proof/test_spot_truth_lane_contract.py::test_stl03_open_spot_allows_external_manual_same_symbol
+tests/proof/test_spot_truth_lane_contract.py::test_stl03_open_spot_allows_external_manual_same_symbol
+tests/proof/test_spot_truth_lane_contract.py::test_stl03_open_spot_allows_external_manual_same_symbol
+  /root/trading-bot-main/data/indicators.py:277: Pandas4Warning: The copy keyword is deprecated and will be removed in a future version. Copy-on-Write is active in pandas since 3.0 which utilizes a lazy copy mechanism that defers copies until necessary. Use .copy() to make an eager copy if necessary.
+    _prev_squeeze = df['squeeze_on'].shift(1).infer_objects(copy=False).fillna(False).astype(bool)
+
+tests/proof/test_spot_scalp_math.py: 320 warnings
+tests/proof/test_spot_truth_lane_contract.py: 1544 warnings
+  /root/trading-bot-main/venv/lib/python3.12/site-packages/pandas/core/internals/blocks.py:347: DeprecationWarning: Bitwise inversion '~' on bool is deprecated. This returns the bitwise inversion of the underlying int object and is usually not what you expect from negating a bool. Use the 'not' operator for boolean negation or ~int(x) if you really want the bitwise inversion of the underlying int.
+    result = func(self.values, **kwargs)
+
+tests/proof/test_spot_scalp_math.py::test_ssm05_timeframe_state_reports_impulse_and_path_metrics
+tests/proof/test_spot_truth_lane_contract.py::test_stl03_open_spot_allows_external_manual_same_symbol
+tests/proof/test_spot_truth_lane_contract.py::test_stl03_open_spot_allows_external_manual_same_symbol
+tests/proof/test_spot_truth_lane_contract.py::test_stl03_open_spot_allows_external_manual_same_symbol
+tests/proof/test_spot_truth_lane_contract.py::test_stl03_open_spot_allows_external_manual_same_symbol
+  /root/trading-bot-main/data/indicators.py:533: RuntimeWarning: invalid value encountered in divide
+    _lrsi = np.where(_tot > 1e-10, _cu / _tot, 0.5)
+
+tests/proof/test_spot_truth_lane_contract.py::test_stl04_close_spot_live_residual_repersists_position
+  /root/trading-bot-main/spot_engine.py:1247: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    exit_ts=datetime.datetime.utcnow().isoformat(),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/proof/test_dashboard_harness.py::test_decision_quality_widget_renders_created_at_backed_summary
+FAILED tests/proof/test_spot_day_trading.py::test_sdt01_target_hit_closes_position
+FAILED tests/proof/test_spot_day_trading.py::test_sdt04_eod_close_at_time_when_enabled
+FAILED tests/proof/test_spot_day_trading.py::test_sdt05_open_spot_persists_scalp_target_metadata
+FAILED tests/proof/test_spot_day_trading.py::test_sdt06_stagnation_exit_closes_dead_trade
+FAILED tests/proof/test_spot_day_trading.py::test_sdt08_thesis_decay_closes_after_hold_gate
+FAILED tests/proof/test_spot_learning_ingestion.py::test_sli01_spot_close_persists_learning_and_tv_lineage
+FAILED tests/proof/test_spot_starter_lane.py::test_sp06_writes_to_trades_table
+FAILED tests/proof/test_spot_starter_lane.py::test_sp07_no_perp_contamination
+FAILED tests/proof/test_spot_truth_lane_contract.py::test_stl01_truth_service_hides_db_only_stale_from_live_open_counts
+FAILED tests/proof/test_spot_truth_lane_contract.py::test_stl02_truth_service_marks_seeded_manual_holdings_visible
+FAILED tests/proof/test_spot_truth_lane_contract.py::test_stl03b_open_spot_halts_on_paper_like_live_order
+12 failed, 519 passed, 1876 warnings in 250.89s (0:04:10)

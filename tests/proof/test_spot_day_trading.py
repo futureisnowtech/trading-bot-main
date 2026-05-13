@@ -85,6 +85,12 @@ def _trend_state(symbol="ETH", derivative_score=72.0, five_v=0.25, five_a=0.10):
         "tf_1d_state": "z=0.10|v=0.03|a=0.01|score=56.0",
         "ou_halflife_minutes": 10.0,
         "rv_ratio": 1.0,
+        "vol_spike": 2.5,
+        "adx_15m": 30.0,
+        "primary_setup": "momentum_breakout",
+        "kst_value": 5.0,
+        "kst_signal": 2.0,
+        "supertrend_dir": 1,
         "frames": {
             "5m": {
                 "v": five_v,
@@ -109,21 +115,44 @@ def _trend_state(symbol="ETH", derivative_score=72.0, five_v=0.25, five_a=0.10):
         },
     }
 
-
-def _paper_broker(mark_price=2000.0):
+def _paper_broker(mark_price=2000.0, qty=0.05):
     broker = MagicMock()
     broker.get_mark_price.return_value = mark_price
-    broker.get_spot_balance.return_value = {"usd_available": 1000.0}
+    broker.get_spot_balance.return_value = {
+        "usd_available": 2000.0,
+        "symbol_balances": {"ETH": qty, "BTC": 0.0},
+        "eth_available": qty,
+    }
+    broker.get_spot_positions.return_value = [
+        {"symbol": "ETH", "qty": qty, "avg_entry": 2000.0}
+    ]
+    broker.get_spot_top_of_book.return_value = {
+        "best_bid": mark_price - 1.0,
+        "best_ask": mark_price + 1.0,
+        "spread_pct": 0.0005,
+        "top_depth_usd": 10000.0,
+    }
+    broker.place_limit_buy_spot.return_value = {
+        "order_id": "buy_1",
+        "status": "OPEN",
+    }
+    broker.get_spot_order_status.return_value = {
+        "status": "FILLED",
+        "completion_pct": 100.0,
+        "filled_size": qty,
+        "average_filled_price": mark_price,
+        "fee_usd": 0.25,
+    }
     broker.buy_spot.return_value = {
         "order_id": "buy_1",
-        "filled_size": 0.05,
+        "filled_size": qty,
         "average_filled_price": mark_price,
         "fee_usd": 0.25,
         "execution_route": "paper_market",
     }
     broker.sell_spot.return_value = {
         "order_id": "sell_1",
-        "filled_size": 0.05,
+        "filled_size": qty,
         "average_filled_price": mark_price,
         "fee_usd": 0.25,
         "execution_route": "paper_market",
@@ -137,7 +166,7 @@ def test_sdt01_target_hit_closes_position(proof_runtime, monkeypatch):
     _seed_spot_position(str(proof_runtime.db_path), target=2036.0)
     monkeypatch.setattr(spot_engine, "_get_broker", lambda paper=False: _paper_broker(2040.0))
 
-    closed = spot_engine.check_spot_targets()
+    closed = spot_engine.check_spot_targets(paper=True)
     assert len(closed) == 1
     assert closed[0]["trigger"] == "target_hit"
     assert closed[0]["exit_reason"] == "target_hit"
@@ -149,7 +178,7 @@ def test_sdt02_below_target_no_close(proof_runtime, monkeypatch):
     _seed_spot_position(str(proof_runtime.db_path), target=2036.0)
     monkeypatch.setattr(spot_engine, "_get_broker", lambda paper=False: _paper_broker(2020.0))
 
-    assert spot_engine.check_spot_targets() == []
+    assert spot_engine.check_spot_targets(paper=True) == []
 
 
 def test_sdt03_eod_flatten_disabled_by_default(proof_runtime, monkeypatch):
@@ -157,7 +186,7 @@ def test_sdt03_eod_flatten_disabled_by_default(proof_runtime, monkeypatch):
 
     _seed_spot_position(str(proof_runtime.db_path))
     monkeypatch.setattr(spot_engine, "SPOT_EOD_FLATTEN_ENABLED", False)
-    assert spot_engine.check_spot_eod_close() == []
+    assert spot_engine.check_spot_eod_close(paper=True) == []
 
 
 def test_sdt04_eod_close_at_time_when_enabled(proof_runtime, monkeypatch):
@@ -174,7 +203,7 @@ def test_sdt04_eod_close_at_time_when_enabled(proof_runtime, monkeypatch):
     with patch("spot_engine.datetime") as mock_dt:
         mock_dt.datetime.now.return_value = fake_now
         mock_dt.datetime.fromisoformat = datetime.fromisoformat
-        closed = spot_engine.check_spot_eod_close()
+        closed = spot_engine.check_spot_eod_close(paper=True)
 
     assert len(closed) == 1
     assert closed[0]["trigger"] == "eod_close"
@@ -193,6 +222,7 @@ def test_sdt05_open_spot_persists_scalp_target_metadata(proof_runtime, monkeypat
     result = spot_engine.open_spot(
         "ETH",
         100.0,
+        paper=True,
         composite_score=70.0,
         final_spot_score=72.0,
     )
@@ -236,7 +266,7 @@ def test_sdt06_stagnation_exit_closes_dead_trade(proof_runtime, monkeypatch):
         lambda symbol: _trend_state(symbol, derivative_score=55.0, five_v=-0.10, five_a=-0.06),
     )
 
-    closed = spot_engine.check_spot_stagnation_exits()
+    closed = spot_engine.check_spot_stagnation_exits(paper=True)
     assert len(closed) == 1
     assert closed[0]["trigger"] == "stagnation_exit"
 
@@ -253,7 +283,7 @@ def test_sdt07_thesis_decay_respects_min_hold_gate(proof_runtime, monkeypatch):
         lambda symbol: _trend_state(symbol, derivative_score=20.0, five_v=-0.10, five_a=-0.05),
     )
 
-    assert spot_engine.check_spot_thesis_exits() == []
+    assert spot_engine.check_spot_thesis_exits(paper=True) == []
 
 
 def test_sdt08_thesis_decay_closes_after_hold_gate(proof_runtime, monkeypatch):
@@ -269,7 +299,7 @@ def test_sdt08_thesis_decay_closes_after_hold_gate(proof_runtime, monkeypatch):
         lambda symbol: _trend_state(symbol, derivative_score=20.0, five_v=-0.10, five_a=-0.05),
     )
 
-    closed = spot_engine.check_spot_thesis_exits()
+    closed = spot_engine.check_spot_thesis_exits(paper=True)
     assert len(closed) == 1
     assert closed[0]["trigger"] == "thesis_decay"
 

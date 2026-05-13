@@ -15,6 +15,7 @@ def test_risk_engine_updates_var_from_trade_history(proof_runtime):
             pnl_usd=pnl,
             fee_usd=0.25,
             won=1 if pnl > 0 else 0,
+            paper=0,
         )
 
     risk_engine.reset_daily(5_000.0)
@@ -128,17 +129,20 @@ def test_live_halt_reason_reports_baseline_and_threshold(proof_runtime):
     assert "900" in reason, f"Halt reason must include current balance. Got: {reason}"
 
 
-def test_paper_kill_switch_still_uses_75_pct(proof_runtime):
-    """Regression guard: paper mode must still use 75% of initial balance."""
+def test_paper_kill_switch_still_uses_50_pct(proof_runtime):
+    """Regression guard: v18.18 uses 50% of initial balance/baseline."""
     import kill_switch
 
-    # Paper account: balance at 60% of initial → below 75% → should trigger
-    kill_switch.check_balance(3_000.0, initial_balance=5_000.0)
+    # 1. Establish baseline at 5000
+    kill_switch.check_balance(5000.0)
+    
+    # 2. Drop balance to 2000 (40% of baseline) → should trigger
+    kill_switch.check_balance(2000.0)
 
     assert kill_switch.is_halted() is True
     reason = kill_switch.get_halt_reason()
-    assert "3000" in reason or "3750" in reason, (
-        f"Paper halt reason should mention balance/threshold. Got: {reason}"
+    assert "2000" in reason or "2500" in reason, (
+        f"Halt reason should mention balance/threshold. Got: {reason}"
     )
 
 

@@ -18,6 +18,7 @@ import os
 import sys
 import sqlite3
 import pytest
+from unittest.mock import MagicMock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if ROOT not in sys.path:
@@ -39,6 +40,12 @@ def _spot_state(symbol="ETH"):
         "tf_1d_state": "z=0.1|v=0.03|a=0.01|score=56",
         "ou_halflife_minutes": 10.0,
         "rv_ratio": 1.0,
+        "vol_spike": 2.5,
+        "adx_15m": 30.0,
+        "primary_setup": "momentum_breakout",
+        "kst_value": 5.0,
+        "kst_signal": 2.0,
+        "supertrend_dir": 1,
         "frames": {
             "5m": {
                 "v": 0.2,
@@ -231,6 +238,15 @@ def test_sp06_writes_to_trades_table(proof_runtime, monkeypatch):
     mock_broker._paper = True
     mock_broker._connected = True
     mock_broker._fallback_price = lambda sym: 2500.0
+    mock_broker.get_spot_top_of_book = lambda sym: {
+        "best_bid": 2499.0, "best_ask": 2501.0, "spread_pct": 0.0008, "top_depth_usd": 10000.0
+    }
+    mock_broker.place_limit_buy_spot = lambda *a, **k: {
+        "order_id": "mock_order_123", "status": "OPEN"
+    }
+    mock_broker.get_spot_order_status = lambda *a, **k: {
+        "status": "FILLED", "completion_pct": 100.0, "average_filled_price": 2500.0, "filled_size": 0.01
+    }
 
     monkeypatch.setattr(spot_engine, "_get_broker", lambda paper=False: mock_broker)
     monkeypatch.setattr(spot_engine, "build_spot_state", lambda symbol: _spot_state(symbol))
@@ -290,9 +306,22 @@ def test_sp07_no_perp_contamination(proof_runtime, monkeypatch):
         ts_entry="2026-04-17T12:00:00",
         direction="LONG",
         leverage=1,
+        paper=1,
     )
 
-    positions = spot_engine.get_spot_positions()
+    # Mock broker to return the BTC holding so truth service sees it as active
+    mock_broker = MagicMock()
+    mock_broker.is_connected.return_value = True
+    mock_broker.sync_live_holdings.return_value = [
+        {"symbol": "BTC", "qty": 0.001, "avg_entry": 90000.0, "current_value": 90.0}
+    ]
+    mock_broker.get_spot_balance.return_value = {"usd_available": 1000.0}
+    
+    import execution.coinbase_spot_broker as csb
+    monkeypatch.setattr(csb, "get_spot_broker", lambda paper=True: mock_broker)
+    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper=True: mock_broker)
+
+    positions = spot_engine.get_spot_positions(paper=True)
     symbols = [p["symbol"] for p in positions]
 
     # ETH perp must not appear; BTC spot must appear

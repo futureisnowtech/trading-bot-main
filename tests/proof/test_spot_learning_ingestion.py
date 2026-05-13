@@ -18,6 +18,9 @@ def _trend_state(symbol="ETH", derivative_score=72.0):
         "setup_score": 0.84,
         "structural_confirm_count": 2,
         "structural_confirms": "supertrend,kst",
+        "vol_spike": 2.5,
+        "adx_15m": 30.0,
+        "primary_setup": "momentum_breakout",
         "tf_5m_state": "score=71.0",
         "tf_30m_state": "score=65.0",
         "tf_4h_state": "score=60.0",
@@ -27,6 +30,7 @@ def _trend_state(symbol="ETH", derivative_score=72.0):
                 "frame_score": 71.0,
                 "price": 2000.0,
                 "atr_pct": 0.006,
+                "v": 0.5,
                 "path_efficiency": 0.22,
                 "momentum_impulse": 0.20,
                 "structure_component": 0.10,
@@ -45,7 +49,28 @@ def _paper_broker(mark_price=2000.0):
 
     broker = MagicMock()
     broker.get_mark_price.return_value = mark_price
-    broker.get_spot_balance.return_value = {"usd_available": 1000.0}
+    broker.get_spot_balance.return_value = {
+        "usd_available": 1000.0,
+        "symbol_balances": {"ETH": 0.05, "BTC": 0.0},
+        "eth_available": 0.05,
+    }
+    broker.get_spot_top_of_book.return_value = {
+        "best_bid": mark_price - 1.0,
+        "best_ask": mark_price + 1.0,
+        "spread_pct": 0.0005,
+        "top_depth_usd": 10000.0,
+    }
+    broker.place_limit_buy_spot.return_value = {
+        "order_id": "buy_1",
+        "status": "OPEN",
+    }
+    broker.get_spot_order_status.return_value = {
+        "status": "FILLED",
+        "completion_pct": 100.0,
+        "filled_size": 0.05,
+        "average_filled_price": mark_price,
+        "fee_usd": 0.25,
+    }
     broker.buy_spot.return_value = {
         "order_id": "buy_1",
         "filled_size": 0.05,
@@ -109,9 +134,8 @@ def test_sli01_spot_close_persists_learning_and_tv_lineage(proof_runtime, monkey
     assert row[2] == "algobot_htf_v2"
     assert row[3] == "LONG"
 
-    closed = spot_engine.close_spot("ETH", exit_reason="target_hit")
+    closed = spot_engine.close_spot("ETH", exit_reason="target_hit", paper=True)
     assert closed is not None
-
     with sqlite3.connect(str(proof_runtime.db_path)) as conn:
         mlfs = conn.execute("SELECT COUNT(*) FROM ml_feature_snapshots").fetchone()[0]
         attr = conn.execute("SELECT COUNT(*) FROM trade_attribution").fetchone()[0]

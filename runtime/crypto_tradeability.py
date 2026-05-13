@@ -518,9 +518,9 @@ def _check_spot_eligibility(
         return "spot_lane_disabled"
 
     # Duplicate position gate
-    if _count_open_spot_positions(underlying) > 0:
+    if _count_open_spot_positions(underlying, paper=paper) > 0:
         return "spot_position_already_open"
-    if _get_open_perp_directions(underlying):
+    if _get_open_perp_directions(underlying, paper=paper):
         return "underlying_exposure_already_open"
 
     # ── Test/Paper mode bypass ────────────────────────────────────────────────

@@ -298,6 +298,7 @@ def test_live_performance_stats_include_live_trades(proof_runtime):
         pnl_usd=50.0,
         won=1,
         source="live_v10",
+        paper=0,
     )
     upsert_runtime_state(proof_runtime.db_path, process_mode="live")
 

@@ -40,7 +40,8 @@ def render_decision_quality():
             COUNT(*) AS total
         FROM trade_attribution
         WHERE COALESCE(created_at, entry_ts, '') >= ?
-          AND ,'pre_v10_contaminated','bybit_paper','paper_v10')
+          AND paper = ?
+          AND source NOT IN ('pre_v10_contaminated','bybit_paper','paper_v10')
         """,
         (get_effective_launch_date(), False),
     )

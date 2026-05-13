@@ -271,7 +271,7 @@ def test_position_reconciler_repairs_flags(proof_runtime, monkeypatch):
                 (symbol, strategy, qty, entry, stop, target, high_since_entry,
                  ts_entry, paper, trailing_active, scale_33_done, scale_66_done)
             VALUES ('BTCUSDT', 'crypto_perp', 1.0, 50000.0, 48000.0, 55000.0,
-                    50500.0, ?, 1, 0, 0, 0)
+                    50500.0, ?, 0, 0, 0, 0)
             """,
             (entry_ts,),
         )
@@ -286,7 +286,7 @@ def test_position_reconciler_repairs_flags(proof_runtime, monkeypatch):
             VALUES
                 ('2026-04-15T10:30:00+00:00', 'crypto_perp', 'coinbase_paper',
                  'BTCUSDT', 'SELL', 'MARKET', 0.33, 51000.0, 16830.0, 5.05,
-                 330.0, 1, 'proof_partial_close', 'scale_out partial 33%', 1,
+                 330.0, 0, 'proof_partial_close', 'scale_out partial 33%', 1,
                  'clean_paper_v10', 0.02)
             """,
         )
@@ -301,7 +301,7 @@ def test_position_reconciler_repairs_flags(proof_runtime, monkeypatch):
     # Verify DB was actually updated
     with sqlite3.connect(proof_runtime.db_path) as c:
         row = c.execute(
-            "SELECT scale_33_done FROM open_positions WHERE symbol='BTCUSDT' AND paper=1"
+            "SELECT scale_33_done FROM open_positions WHERE symbol='BTCUSDT' AND paper=0"
         ).fetchone()
     assert row is not None
     assert row[0] == 1, f"scale_33_done not set to 1, got {row[0]}"
@@ -363,9 +363,13 @@ def test_allocator_scaffold():
 
 # ── Test 13: LaneRegistry mes_archived disabled by default ───────────────────
 
-def test_lane_registry_mes_disabled_by_default(monkeypatch):
+def test_lane_registry_mes_disabled_by_default(monkeypatch, proof_runtime):
     """LaneRegistry has mes_archived not in get_active_lane_ids() when FUTURES_LANE_ACTIVE=False."""
     import config
+    from tests.proof.support import upsert_runtime_state
+
+    # v18.18: LaneRegistry checks DB for paper mode
+    upsert_runtime_state(proof_runtime.db_path, process_mode="paper")
 
     monkeypatch.setattr(config, "FUTURES_LANE_ACTIVE", False, raising=False)
     monkeypatch.setattr(config, "False", True, raising=False)

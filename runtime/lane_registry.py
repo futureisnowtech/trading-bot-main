@@ -53,7 +53,19 @@ class LaneRegistry:
         )
 
         # crypto: enabled when paper mode OR Coinbase credentials present
-        crypto_enabled = False or bool(COINBASE_CDP_KEY_NAME)
+        # v18.18: Use process_mode from system_runtime_state if available
+        paper_active = False
+        try:
+            import sqlite3
+            from config import DB_PATH
+            with sqlite3.connect(DB_PATH, timeout=1) as conn:
+                row = conn.execute("SELECT process_mode FROM system_runtime_state LIMIT 1").fetchone()
+                if row and row[0] == 'paper':
+                    paper_active = True
+        except Exception:
+            pass
+
+        crypto_enabled = paper_active or bool(COINBASE_CDP_KEY_NAME)
         self.register("crypto", enabled_flag=crypto_enabled)
 
         # forecast: enabled when FORECAST_LANE_ACTIVE=True

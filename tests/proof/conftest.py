@@ -73,6 +73,7 @@ def proof_runtime(tmp_path, monkeypatch) -> ProofRuntime:
     import dashboard.db as dashboard_db
     import db as dashboard_db_shim
     import learning.signal_performance as signal_performance
+    import learning_loop
     import logging_db.trade_logger as trade_logger
     import monitoring.health_check as health_check
     import runtime.spot_kill_switch as spot_kill_switch
@@ -102,6 +103,7 @@ def proof_runtime(tmp_path, monkeypatch) -> ProofRuntime:
 
     trade_logger.init_db()
     signal_performance.init_learning_tables()
+    learning_loop._ensure_tables()
     _reset_risk_engine()
     _reset_kill_switch()
 

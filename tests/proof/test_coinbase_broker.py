@@ -129,7 +129,7 @@ def test_cb03_contract_sizes(sym, expected_size):
 
 
 def test_cb04_paper_open_long_returns_order_dict(broker):
-    result = broker.open_long(symbol="BTC", size_usd=500.0, leverage=3)
+    result = broker.open_long(symbol="BTC", size_usd=1000.0, leverage=3)
     assert result is not None
     assert result.get("paper") is True
     assert "orderId" in result
@@ -138,7 +138,7 @@ def test_cb04_paper_open_long_returns_order_dict(broker):
 
 
 def test_cb04_paper_open_long_eth(broker):
-    result = broker.open_long(symbol="ETH", size_usd=200.0, leverage=2)
+    result = broker.open_long(symbol="ETH", size_usd=500.0, leverage=2)
     assert result is not None
     assert result.get("paper") is True
 
@@ -149,7 +149,7 @@ def test_cb04_paper_open_long_eth(broker):
 
 
 def test_cb05_paper_open_short_returns_order_dict(broker):
-    result = broker.open_short(symbol="SOL", size_usd=100.0, leverage=3)
+    result = broker.open_short(symbol="SOL", size_usd=1000.0, leverage=3)
     assert result is not None
     assert result.get("paper") is True
     assert result.get("side") == "SELL"
@@ -204,15 +204,15 @@ def test_cb07_duplicate_open_long_allowed_up_to_3():
     from execution.coinbase_broker import CoinbaseBroker
 
     b = CoinbaseBroker()
-    first = b.open_long(symbol="XRP", size_usd=100.0, leverage=3)
+    first = b.open_long(symbol="XRP", size_usd=1000.0, leverage=3)
     assert first is not None, "First open should succeed"
-    second = b.open_long(symbol="XRP", size_usd=100.0, leverage=3)
+    second = b.open_long(symbol="XRP", size_usd=1000.0, leverage=3)
     assert second is not None, (
         "Second open_long on same symbol should be allowed (scaling in)"
     )
-    third = b.open_long(symbol="XRP", size_usd=100.0, leverage=3)
+    third = b.open_long(symbol="XRP", size_usd=1000.0, leverage=3)
     assert third is not None, "Third open_long on same symbol should be allowed"
-    fourth = b.open_long(symbol="XRP", size_usd=100.0, leverage=3)
+    fourth = b.open_long(symbol="XRP", size_usd=1000.0, leverage=3)
     assert fourth is None, "Fourth open_long must be blocked (per-symbol cap=3)"
 
 
@@ -221,13 +221,13 @@ def test_cb07_duplicate_open_short_allowed_up_to_3():
     from execution.coinbase_broker import CoinbaseBroker
 
     b = CoinbaseBroker()
-    first = b.open_short(symbol="BTC", size_usd=100.0, leverage=3)
+    first = b.open_short(symbol="BTC", size_usd=1000.0, leverage=3)
     assert first is not None
-    second = b.open_short(symbol="BTC", size_usd=100.0, leverage=3)
+    second = b.open_short(symbol="BTC", size_usd=1000.0, leverage=3)
     assert second is not None, "Second open_short on same symbol should be allowed"
-    third = b.open_short(symbol="BTC", size_usd=100.0, leverage=3)
+    third = b.open_short(symbol="BTC", size_usd=1000.0, leverage=3)
     assert third is not None, "Third open_short should be allowed"
-    fourth = b.open_short(symbol="BTC", size_usd=100.0, leverage=3)
+    fourth = b.open_short(symbol="BTC", size_usd=1000.0, leverage=3)
     assert fourth is None, "Fourth open_short must be blocked (per-symbol cap=3)"
 
 
@@ -235,11 +235,11 @@ def test_cb07_close_then_reopen_allowed():
     from execution.coinbase_broker import CoinbaseBroker
 
     b = CoinbaseBroker()
-    b.open_long(symbol="SOL", size_usd=100.0, leverage=3)
+    b.open_long(symbol="SOL", size_usd=1000.0, leverage=3)
     pos = {"symbol": "SOL", "direction": "LONG", "entry_price": 150.0, "qty": 5.0}
     b.close_position("SOL", pos_fallback=pos)
     # After closing, a new open should succeed
-    second = b.open_long(symbol="SOL", size_usd=100.0, leverage=3)
+    second = b.open_long(symbol="SOL", size_usd=1000.0, leverage=3)
     assert second is not None, "Reopen after close should be allowed"
 
 

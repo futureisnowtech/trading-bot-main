@@ -169,19 +169,21 @@ def get_holding_classifications(
     }
 
 
-def _load_db_spot_positions(db_path: str | None = None) -> list[dict]:
+def _load_db_spot_positions(db_path: str | None = None, paper: bool = False) -> list[dict]:
+    paper_val = 1 if paper else 0
     with _conn(db_path) as conn:
         rows = conn.execute(
-            "SELECT * FROM open_positions WHERE strategy LIKE 'spot_%' AND paper=0 ORDER BY ts_entry DESC"
+            "SELECT * FROM open_positions WHERE strategy LIKE 'spot_%' AND paper=? ORDER BY ts_entry DESC",
+            (paper_val,),
         ).fetchall()
     return [dict(r) for r in rows]
 
 
-def _get_live_broker_snapshot() -> tuple[list[dict] | None, float | None]:
+def _get_live_broker_snapshot(paper: bool = False) -> tuple[list[dict] | None, float | None]:
     try:
         from execution.coinbase_spot_broker import get_spot_broker
 
-        broker = get_spot_broker()
+        broker = get_spot_broker(paper=paper)
         if not broker.is_connected():
             broker.connect()
         if not broker.is_connected():
@@ -190,7 +192,7 @@ def _get_live_broker_snapshot() -> tuple[list[dict] | None, float | None]:
         balances = broker.get_spot_balance() or {}
         return holdings, _to_float(balances.get("usd_available"), 0.0)
     except Exception as exc:
-        logger.debug("[spot_truth] broker snapshot error: %s", exc)
+        logger.debug("[spot_truth] broker snapshot error (paper=%s): %s", paper, exc)
         return None, None
 
 
@@ -219,8 +221,10 @@ def _merged_live_row(
     symbol: str,
     live_row: dict | None,
     db_row: dict | None,
-    classification_row: dict[str, Any] | None,
+    classification_row: dict | None,
+    paper: bool = False,
 ) -> dict:
+
     live_row = live_row or {}
     db_row = db_row or {}
     classification_row = classification_row or {}
@@ -263,7 +267,7 @@ def _merged_live_row(
         **db_row,
         "symbol": symbol,
         "strategy": db_row.get("strategy") or f"spot_{symbol.lower()}",
-        "paper": 0,
+        "paper": 1 if paper else 0,
         "direction": "LONG",
         "qty": qty,
         "entry": _to_float(live_row.get("avg_entry") or db_row.get("entry")),
@@ -288,6 +292,7 @@ def _merged_live_row(
 
 def get_spot_position_truth(
     *,
+    paper: bool = False,
     broker_holdings: list[dict] | None = None,
     db_path: str | None = None,
 ) -> dict[str, Any]:
@@ -306,13 +311,15 @@ def get_spot_position_truth(
     """
     ensure_spot_truth_tables(db_path=db_path)
     seed_default_external_manual_holdings(db_path=db_path)
-    db_rows = _load_db_spot_positions(db_path=db_path)
+    db_rows = _load_db_spot_positions(db_path=db_path, paper=paper)
     db_by_symbol = {_clean_symbol(r.get("symbol")): r for r in db_rows}
+
     classifications = get_holding_classifications(db_path=db_path)
 
     broker_cash_usd = 0.0
     if broker_holdings is None:
-        broker_holdings, broker_cash_usd = _get_live_broker_snapshot()
+        broker_holdings, broker_cash_usd = _get_live_broker_snapshot(paper=paper)
+
     snapshot_ok = broker_holdings is not None
 
     live_by_symbol = {
@@ -327,6 +334,7 @@ def get_spot_position_truth(
             live_by_symbol.get(symbol),
             db_by_symbol.get(symbol),
             classifications.get(symbol),
+            paper=paper,
         )
         for symbol in live_symbols
     ]
@@ -336,6 +344,7 @@ def get_spot_position_truth(
             None,
             db_by_symbol.get(symbol),
             classifications.get(symbol),
+            paper=paper,
         )
         for symbol in sorted(set(db_by_symbol) - set(live_by_symbol))
     ]
@@ -432,10 +441,10 @@ def get_spot_position_truth(
 
 
 def get_spot_symbol_truth(
-    symbol: str, db_path: str | None = None
+    symbol: str, db_path: str | None = None, paper: bool = False
 ) -> dict[str, Any] | None:
     clean = _clean_symbol(symbol)
-    truth = get_spot_position_truth(db_path=db_path)
+    truth = get_spot_position_truth(db_path=db_path, paper=paper)
     for row in truth.get("all_live_holdings") or []:
         if _clean_symbol(row.get("symbol")) == clean:
             return row

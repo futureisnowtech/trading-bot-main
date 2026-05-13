@@ -636,6 +636,7 @@ def log_trade(
     won=None,
     source=None,
     pnl_pct=0.0,
+    paper: int = 0,
 ) -> int:
     """
     Log a trade to the SQLite trades table.
@@ -653,7 +654,7 @@ def log_trade(
     if won is None and pnl_usd != 0:
         won = 1 if pnl_usd > 0 else 0
     if source is None:
-        source = "live_v10"
+        source = "live_v10" if paper == 0 else "paper_v10"
     conn = _conn()
     cur = conn.cursor()
 
@@ -664,12 +665,12 @@ def log_trade(
         cur.execute(
             """
             SELECT id FROM trades
-            WHERE symbol=? AND strategy=? AND action=? AND paper=0
+            WHERE symbol=? AND strategy=? AND action=? AND paper=?
               AND ABS(qty - ?) < 0.000001
               AND ts >= datetime('now', '-90 seconds')
             LIMIT 1
         """,
-            (symbol, strategy, action, qty),
+            (symbol, strategy, action, paper, qty),
         )
         if cur.fetchone():
             conn.close()
@@ -679,7 +680,7 @@ def log_trade(
         """INSERT INTO trades
         (ts,strategy,broker,symbol,action,order_type,qty,price,value_usd,
          fee_usd,pnl_usd,paper,order_id,notes,won,source,pnl_pct)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,?)""",
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             ts,
             strategy,
@@ -692,7 +693,8 @@ def log_trade(
             value_usd,
             fee_usd,
             pnl_usd,
-            order_id or f"LIVE_{uuid.uuid4().hex[:8]}",
+            paper,
+            order_id or (f"LIVE_{uuid.uuid4().hex[:8]}" if paper == 0 else f"PAPER_{uuid.uuid4().hex[:8]}"),
             notes,
             won,
             source,
@@ -1794,6 +1796,7 @@ def persist_position(
     raw_scanner_symbol="",
     base_asset="",
     tv_veto_state="",
+    paper=0,
 ) -> None:
     """Write open position to DB so restarts can recover it (including exit state)."""
     _low = low_since_entry if low_since_entry is not None else entry
@@ -1807,7 +1810,7 @@ def persist_position(
         high_since_entry,
         _low,
         ts_entry,
-        0,  # paper=0
+        paper,
         direction,
         entry_reason or "",
         float(atr_at_entry),
@@ -1873,20 +1876,21 @@ def persist_position(
     conn.close()
 
 
-def delete_position(symbol, strategy) -> None:
+def delete_position(symbol, strategy, paper: int = 0) -> None:
     conn = _conn()
-    conn.cursor().execute(
-        "DELETE FROM open_positions WHERE symbol=? AND strategy=? AND paper=0""",
-        (symbol, strategy),
+    conn.execute(
+        "DELETE FROM open_positions WHERE symbol=? AND strategy=? AND paper=?",
+        (symbol, strategy, paper),
     )
     conn.commit()
     conn.close()
 
 
-def load_open_positions() -> list:
+
+def load_open_positions(paper: int = 0) -> list:
     conn = _conn()
     cur = conn.cursor()
-    cur.execute("SELECT * FROM open_positions WHERE paper=0")
+    cur.execute("SELECT * FROM open_positions WHERE paper=?", (paper,))
     rows = [dict(r) for r in cur.fetchall()]
     conn.close()
     return rows

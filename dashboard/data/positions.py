@@ -13,14 +13,16 @@ _q1 = _db._q1
 
 
 def _db_open_positions():
+    p = _db._runtime_paper_flag()
     return _q(
-        "SELECT * FROM open_positions WHERE paper=0 ORDER BY ts_entry DESC"
+        f"SELECT * FROM open_positions WHERE paper={p} ORDER BY ts_entry DESC"
     )
 
 
 def _db_perp_positions():
+    p = _db._runtime_paper_flag()
     return _q(
-        "SELECT * FROM open_positions WHERE strategy NOT LIKE 'spot_%' AND paper=0 ORDER BY ts_entry DESC"
+        f"SELECT * FROM open_positions WHERE strategy NOT LIKE 'spot_%' AND paper={p} ORDER BY ts_entry DESC"
     )
 
 
@@ -56,7 +58,7 @@ def get_spot_positions_dashboard():
     because the DB is missing lineage.
     """
     db_rows = _q(
-        "SELECT * FROM open_positions WHERE strategy LIKE 'spot_%' AND paper=0 ORDER BY ts_entry DESC"
+        f"SELECT * FROM open_positions WHERE strategy LIKE 'spot_%' AND paper={_db._runtime_paper_flag()} ORDER BY ts_entry DESC"
     )
     live_positions = _get_live_coinbase_spot_positions()
     if live_positions is not None:
@@ -67,9 +69,21 @@ def get_spot_positions_dashboard():
                 broker_holdings=live_positions,
                 db_path=getattr(_db, "DB_PATH", None),
             )
-            return list(truth.get("all_live_holdings") or [])
+            all_live = list(truth.get("all_live_holdings") or [])
+            
+            # v18.18: Paper mode fallback — if broker snapshot succeeded but returned nothing,
+            # and we are in paper mode, show DB rows to allow testing.
+            if not all_live and _db._runtime_paper_flag() == 1:
+                return db_rows
+                
+            return all_live
         except Exception:
             return _merge_live_spot_rows(live_positions, db_rows)
+    
+    # v18.18: Paper mode fallback — if live snapshot failed, show DB truth
+    if _db._runtime_paper_flag() == 1:
+        return db_rows
+        
     return []
 
 
@@ -129,7 +143,7 @@ def _merge_live_perp_rows(live_positions: dict, db_rows: list[dict]) -> list[dic
                 **db_row,
                 "symbol": symbol,
                 "strategy": db_row.get("strategy") or "v10_perp",
-                "paper": 0,
+                "paper": _db._runtime_paper_flag(),
                 "direction": live.get("direction") or db_row.get("direction") or "LONG",
                 "qty": float(live.get("qty") or db_row.get("qty") or 0.0),
                 "entry": float(live.get("entry_price") or db_row.get("entry") or 0.0),
@@ -157,7 +171,7 @@ def _merge_live_spot_rows(
                 **(db_row or {}),
                 "symbol": symbol,
                 "strategy": (db_row or {}).get("strategy") or f"spot_{symbol.lower()}",
-                "paper": 0,
+                "paper": _db._runtime_paper_flag(),
                 "direction": "LONG",
                 "qty": float(live.get("qty") or (db_row or {}).get("qty") or 0.0),
                 "entry": float(
@@ -184,12 +198,17 @@ def get_perp_positions():
     Coinbase CFM API is canonical — only DB metadata borrowed for
     matching rows. DB stale rows invisible (no position on exchange → not shown).
     If the live perp snapshot is unavailable, fail closed to [] instead of
-    falling back to DB rows.
+    falling back to DB rows (EXCEPT in paper mode where DB is canonical).
     """
     db_rows = _db_perp_positions()
     live_positions = _get_live_coinbase_perp_positions()
     if live_positions is not None:
         return _merge_live_perp_rows(live_positions, db_rows)
+    
+    # v18.18: Paper mode fallback — if live snapshot disabled, show DB-only truth
+    if _db._runtime_paper_flag() == 1:
+        return db_rows
+        
     return []
 
 

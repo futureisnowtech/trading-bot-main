@@ -213,6 +213,11 @@ def get_ibkr_balance() -> dict:
     }
 
 
+import db as _db
+
+_DB_PATH = getattr(_db, "DB_PATH", "logs/trades.db")
+
+
 # ── Spot balance (v16.11) ─────────────────────────────────────────────────────
 
 
@@ -247,6 +252,29 @@ def get_spot_balance_summary() -> dict:
             "spot_equity": 0.0,
             "source": "disabled",
         }
+
+    # v18.18: Paper mode — use DB-backed holdings and placeholders
+    if _db._runtime_paper_flag() == 1:
+        try:
+            with sqlite3.connect(_DB_PATH, timeout=3, check_same_thread=False) as _c:
+                rows = _c.execute(
+                    "SELECT symbol, SUM(qty * entry) as held_usd FROM open_positions "
+                    "WHERE strategy LIKE 'spot_%' AND paper=1 GROUP BY symbol"
+                ).fetchall()
+            held = {str(r[0]).upper(): float(r[1] or 0.0) for r in rows}
+            total_held = sum(held.values())
+            return {
+                "usd_available": 10000.0,
+                "btc_held_usd": round(held.get("BTC", 0.0), 2),
+                "eth_held_usd": round(held.get("ETH", 0.0), 2),
+                "sol_held_usd": round(held.get("SOL", 0.0), 2),
+                "xrp_held_usd": round(held.get("XRP", 0.0), 2),
+                "held_usd_by_symbol": held,
+                "spot_equity": round(10000.0 + total_held, 2),
+                "source": "paper_db",
+            }
+        except Exception:
+            pass
 
     # Live mode — call spot broker
     try:

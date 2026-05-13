@@ -449,6 +449,83 @@ _KYLE_LAMBDA_MAX_HISTORY = 1440  # 24h at 1m bars
 _ADF_EMA_STATE: dict = {}
 
 
+def _compute_adf_stat(prices: list) -> tuple:
+    """
+    Lightweight ADF test (numpy-only, no statsmodels).
+    Critical value: -2.86 (MacKinnon 5%, n~100, constant only).
+    Returns (adf_statistic: float, is_stationary: bool).
+    Fails open (returns is_stationary=True) on numerical error.
+    """
+    import numpy as _np
+
+    y = _np.array(prices, dtype=float)
+    dy = _np.diff(y)
+    y_lag = y[:-1]
+    X = _np.column_stack([_np.ones(len(y_lag)), y_lag])
+    try:
+        coeffs, _, _, _ = _np.linalg.lstsq(X, dy, rcond=None)
+    except _np.linalg.LinAlgError:
+        return 0.0, True
+    beta = float(coeffs[1])
+    resid = dy - X @ coeffs
+    n = len(resid)
+    s2 = float(_np.sum(resid**2) / max(n - 2, 1))
+    ss_lag = float(y_lag @ y_lag) - len(y_lag) * float(_np.mean(y_lag)) ** 2
+    se = float(_np.sqrt(s2 / max(ss_lag, 1e-12)))
+    adf_stat = beta / se if se > 0.0 else 0.0
+    return round(adf_stat, 4), bool(adf_stat < -2.86)
+
+
+def _compute_ou_halflife(prices: list) -> float:
+    """
+    Ornstein-Uhlenbeck halflife via AR(1) regression.
+    halflife = -ln(2) / ln(|phi|). Returns 999.0 when non-stationary.
+    """
+    import numpy as _np
+
+    y = _np.array(prices, dtype=float)
+    y_lag = y[:-1]
+    y_now = y[1:]
+    X = _np.column_stack([_np.ones(len(y_lag)), y_lag])
+    try:
+        coeffs, _, _, _ = _np.linalg.lstsq(X, y_now, rcond=None)
+    except _np.linalg.LinAlgError:
+        return 999.0
+    phi = float(coeffs[1])
+    if abs(phi) >= 1.0:
+        return 999.0
+    hl = -_np.log(2.0) / _np.log(abs(phi))
+    return round(float(hl), 2)
+
+
+def _compute_ou_transition_prob(
+    current_price: float,
+    target_price: float,
+    mu: float,
+    ou_halflife_bars: float,
+    price_std: float,
+) -> float:
+    """
+    P(X_T >= target | X_0 = current_price) under an Ornstein-Uhlenbeck process.
+
+    Uses the analytically tractable Gaussian transition density — the closed-form
+    solution to the Chapman-Kolmogorov equation for OU kernels. No Monte Carlo needed.
+
+    Returns 0.5 (fail-open) when inputs are degenerate.
+    """
+    from math import erf as _erf, exp as _exp, log as _log, sqrt as _sqrt
+
+    if ou_halflife_bars <= 0 or price_std <= 0 or current_price <= 0:
+        return 0.5
+    theta = _log(2.0) / ou_halflife_bars  # mean-reversion speed
+    T = ou_halflife_bars  # horizon = one halflife
+    exp_decay = _exp(-theta * T)  # = 0.5 by definition at T == halflife
+    cond_mean = mu + (current_price - mu) * exp_decay
+    cond_var = max((price_std**2) / (2.0 * theta) * (1.0 - exp_decay**2), 1e-12)
+    z = (target_price - cond_mean) / _sqrt(cond_var)
+    return float(0.5 * (1.0 - _erf(z / _sqrt(2.0))))  # P(X_T >= target)
+
+
 async def update_shadow_state(
     symbol: str,
     prices: list,
@@ -487,17 +564,41 @@ async def update_shadow_state(
         is_fragile = False
 
     # 3. ADF Stationarity (approximate using last 60 bars)
-    # Since we don't want to block on a full statsmodels call, we use the logic from indicators.py
-    # or simple rolling std check if statsmodels is unavailable.
-    # For now, we'll mark as stationary if within Kalman bounds.
-    is_stationary = abs(dev_pct) < 0.01
+    adf_stat, _ = _compute_adf_stat(prices)
+
+    # v18.16: Rolling ADF EMA (span=5) to prevent stationarity flicker
+    # alpha = 2/(span+1) = 2/6 = 0.3333
+    alpha = 0.3333
+    last_ema = _ADF_EMA_STATE.get(symbol, adf_stat)
+    ema_adf = (alpha * adf_stat) + ((1.0 - alpha) * last_ema)
+    _ADF_EMA_STATE[symbol] = ema_adf
+
+    # Stationarity threshold: -2.86 (MacKinnon 5% critical value)
+    is_stationary = bool(ema_adf < -2.86)
+
+    # 4. OU Half-Life & Transition Prob
+    ou_hl = _compute_ou_halflife(prices)
+
+    # OU transition probability — P(price reaches 0.3% scalp target within one halflife)
+    price_std = float(_np.std(prices[-60:]) if len(prices) >= 60 else _np.std(prices))
+    scalp_target = float(prices[-1]) * 1.003
+    ou_prob = _compute_ou_transition_prob(
+        current_price=float(prices[-1]),
+        target_price=scalp_target,
+        mu=fair_value,
+        ou_halflife_bars=ou_hl,
+        price_std=price_std,
+    )
 
     _SHADOW_STATE[symbol] = {
         "kalman_fair_value": round(fair_value, 4),
         "kalman_dev_pct": round(dev_pct, 4),
         "kyle_lambda": round(kyle_lam, 8),
         "kyle_lambda_fragile": is_fragile,
+        "adf_stat": round(ema_adf, 4),
         "adf_stationary": is_stationary,
+        "ou_halflife_bars": ou_hl,
+        "ou_transition_prob": round(ou_prob, 4),
         "computed_at": _datetime.utcnow().isoformat(),
     }
 

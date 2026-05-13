@@ -478,12 +478,12 @@ def get_spot_strategy(symbol: str) -> dict[str, Any]:
     floors = getattr(
         _cfg,
         "SPOT_TINY_LIVE_SCORE_FLOORS",
-        {"TREND": 58.0, "NEUTRAL": 60.0, "CHOP": 60.0},
+        {"TREND": 52.0, "NEUTRAL": 52.0, "CHOP": 52.0},
     )
     score_floors = {
-        "TREND": float(floors.get("TREND", 58.0)),
-        "NEUTRAL": float(floors.get("NEUTRAL", 60.0)),
-        "CHOP": float(floors.get("CHOP", 60.0)),
+        "TREND": float(floors.get("TREND", 52.0)),
+        "NEUTRAL": float(floors.get("NEUTRAL", 52.0)),
+        "CHOP": float(floors.get("CHOP", 52.0)),
     }
     score_weights = getattr(_cfg, "SPOT_TINY_LIVE_SCORE_WEIGHTS", {})
     target_r_by_regime_cfg = getattr(

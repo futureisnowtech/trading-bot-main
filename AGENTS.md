@@ -287,6 +287,30 @@ python3 -m pytest
 streamlit run dashboard/app.py --server.runOnSave true
 ```
 
+## sell_blocked Recovery (v18.19)
+
+When a spot symbol fails three consecutive sell attempts with the same broker
+error code (e.g. `INSUFFICIENT_FUND`), `spot_engine.close_spot` flags the
+position with `sell_blocked=1` and emits one Telegram alert. The DB row is
+retained — the bot will neither retry the sell nor enter the symbol again until
+the flag is cleared manually.
+
+To recover after resolving the underlying issue on Coinbase (close the locked
+limit order, transfer funds, etc.):
+
+```sql
+-- replace SOL with the halted symbol
+UPDATE open_positions
+SET sell_blocked = 0,
+    sell_failure_count = 0,
+    sell_blocked_reason = ''
+WHERE symbol = 'SOL';
+```
+
+Diagnostic context is captured at `logger.warning` level on each failure under
+`[spot_engine] sell_failure <SYMBOL>` — grep `logs/bot.log` for the broker
+balance snapshot and DB row state that triggered the halt.
+
 ## Change Discipline
 
 When behavior changes:

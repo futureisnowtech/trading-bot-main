@@ -171,6 +171,22 @@ SPOT_REGIME_SCORE_FLOORS: dict[str, float] = {
     "NEUTRAL": float(os.getenv("SPOT_NEUTRAL_SCORE_FLOOR", "52.0")),
     "CHOP": float(os.getenv("SPOT_CHOP_SCORE_FLOOR", "60.0")),
 }
+# v18.19: exit-side score floors (5pt hysteresis below entry floors) — positions
+# survive a brief score dip without flipping out.
+SPOT_REGIME_SCORE_EXIT_FLOORS: dict[str, float] = {
+    "TREND": float(os.getenv("SPOT_TREND_SCORE_EXIT_FLOOR", "47.0")),
+    "NEUTRAL": float(os.getenv("SPOT_NEUTRAL_SCORE_EXIT_FLOOR", "47.0")),
+    "CHOP": float(os.getenv("SPOT_CHOP_SCORE_EXIT_FLOOR", "55.0")),
+}
+SPOT_THESIS_MIN_SCORE_EXIT: float = float(os.getenv("SPOT_THESIS_MIN_SCORE_EXIT", "47.0"))
+# v18.19: ER/ADX thresholds (was hardcoded 0.3/0.6 + 20/25 in runtime/spot_regime.py).
+# CHOP_EXIT < CHOP creates a 10pt hysteresis band so NEUTRAL doesn't flip to CHOP
+# on every wiggle.
+SPOT_REGIME_ER_TREND: float = float(os.getenv("SPOT_REGIME_ER_TREND", "0.60"))
+SPOT_REGIME_ER_CHOP: float = float(os.getenv("SPOT_REGIME_ER_CHOP", "0.40"))
+SPOT_REGIME_ER_CHOP_EXIT: float = float(os.getenv("SPOT_REGIME_ER_CHOP_EXIT", "0.30"))
+SPOT_REGIME_ADX_TREND: float = float(os.getenv("SPOT_REGIME_ADX_TREND", "25.0"))
+SPOT_REGIME_ADX_CHOP: float = float(os.getenv("SPOT_REGIME_ADX_CHOP", "20.0"))
 SPOT_ALLOWED_REGIMES: set[str] = {
     s.strip().upper()
     for s in os.getenv("SPOT_ALLOWED_REGIMES", "TREND,NEUTRAL,CHOP").split(",")

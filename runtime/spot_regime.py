@@ -4,18 +4,59 @@ runtime/spot_regime.py — lightweight production regime classifier for spot sca
 
 from __future__ import annotations
 
-from config import SPOT_REGIME_SCORE_FLOORS
+from config import (
+    SPOT_REGIME_ADX_CHOP,
+    SPOT_REGIME_ADX_TREND,
+    SPOT_REGIME_ER_CHOP,
+    SPOT_REGIME_ER_CHOP_EXIT,
+    SPOT_REGIME_ER_TREND,
+    SPOT_REGIME_SCORE_FLOORS,
+)
 
 
-def classify_spot_regime(state_30m: dict, state_4h: dict) -> str:
+def classify_spot_regime(
+    state_30m: dict,
+    state_4h: dict,
+    symbol: str | None = None,
+) -> str:
+    """v18.19: sticky NEUTRAL↔CHOP transition + env-configurable thresholds.
+
+    When ``symbol`` is provided, the prior persisted regime is consulted so the
+    NEUTRAL→CHOP boundary uses a wider exit cutoff (10pt hysteresis band).
+    State is loaded from / persisted to ``spot_regime_state`` (table created in
+    ``logging_db.trade_logger.init_db``).
+    """
     er = float(state_30m.get("er") or 0.0)
     adx = float(state_30m.get("adx") or 0.0)
 
-    if er > 0.6 and adx > 25.0:
-        return "TREND"
-    if er < 0.3 and adx < 20.0:
-        return "CHOP"
-    return "NEUTRAL"
+    prior: str | None = None
+    if symbol:
+        try:
+            from logging_db.trade_logger import load_spot_regime_state
+
+            prior = load_spot_regime_state(symbol)
+        except Exception:
+            prior = None
+
+    if er > SPOT_REGIME_ER_TREND and adx > SPOT_REGIME_ADX_TREND:
+        regime = "TREND"
+    else:
+        chop_cutoff = (
+            SPOT_REGIME_ER_CHOP_EXIT if prior == "NEUTRAL" else SPOT_REGIME_ER_CHOP
+        )
+        if er < chop_cutoff and adx < SPOT_REGIME_ADX_CHOP:
+            regime = "CHOP"
+        else:
+            regime = "NEUTRAL"
+
+    if symbol and regime != prior:
+        try:
+            from logging_db.trade_logger import save_spot_regime_state
+
+            save_spot_regime_state(symbol, regime)
+        except Exception:
+            pass
+    return regime
 
 
 def score_floor_for_regime(

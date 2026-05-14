@@ -151,7 +151,17 @@ def _get_broker(paper: bool = False) -> Optional["CoinbaseSpotBroker"]:
         return None
 
 
-def _load_spot_positions_from_db(paper: bool = False) -> List[Dict]:
+def _load_spot_positions_from_db(
+    paper: bool = False, bot_managed_only: bool = False
+) -> List[Dict]:
+    """Load spot positions from open_positions.
+
+    v18.19: when ``bot_managed_only=True``, exclude rows classified as
+    ``external_manual`` AND rows with ``sell_blocked=1``. Use this for exit-check
+    callers so the bot doesn't keep trying to sell user-managed coins or halted
+    symbols. Entry/scan callers leave it False (the default) and continue to see
+    the full picture.
+    """
     try:
         from logging_db.trade_logger import load_open_positions
         from config import DB_PATH
@@ -170,18 +180,18 @@ def _load_spot_positions_from_db(paper: bool = False) -> List[Dict]:
                     row for row in truth.get("issues", [])
                     if row.get("position_truth_status") == "unclassified"
                 ]
-                
+
                 if unclassified:
                     with sqlite3.connect(DB_PATH, timeout=5) as conn:
                         for row in unclassified:
                             clean = _clean_symbol(row.get("symbol"))
                             if clean in db_symbols:
                                 continue
-                                
+
                             logger.info(f"[spot_engine] Auto-adopting {clean} into DB from broker truth.")
                             entry_price = float(row.get("current_price", 1.0))
                             qty = float(row.get("qty", 0.0))
-                            
+
                             conn.execute(
                                 "INSERT INTO open_positions (symbol, strategy, qty, entry, paper, direction, ts_entry) "
                                 "VALUES (?, ?, ?, ?, 0, 'LONG', ?)",
@@ -198,6 +208,29 @@ def _load_spot_positions_from_db(paper: bool = False) -> List[Dict]:
                         conn.commit()
             except Exception as e:
                 logger.debug(f"[spot_engine] auto-adoption in loader failed: {e}")
+
+        if bot_managed_only:
+            external = set()
+            try:
+                from runtime.spot_position_truth import get_holding_classifications
+
+                classifications = get_holding_classifications()
+                external = {
+                    sym
+                    for sym, info in classifications.items()
+                    if str(info.get("classification") or "").lower() == "external_manual"
+                }
+            except Exception as e:
+                logger.debug(f"[spot_engine] classification fetch failed: {e}")
+            filtered: List[Dict] = []
+            for pos in db_positions:
+                sym = str(pos.get("symbol") or "").upper()
+                if sym in external:
+                    continue
+                if int(pos.get("sell_blocked") or 0) == 1:
+                    continue
+                filtered.append(pos)
+            return filtered
 
         return db_positions
     except Exception as e:
@@ -930,7 +963,16 @@ def open_spot(
         qty = size_usd / price
     fee_usd = float(order.get("fee_usd") or 0.0)
     stop_price = round(price * (1.0 - stop_pct), 8) if price > 0 else 0.0
-    target_price = round(price * (1.0 + stop_pct * target_r), 8) if price > 0 else 0.0
+    # v18.19: inflate target by round-trip fee so "target_hit" produces a net-positive
+    # P&L (was pure gross — XRP scalps "won" $0.10 but paid $0.30 in fees).
+    from risk.spot_economics_gate import SPOT_MAKER_FEE_PCT, SPOT_TAKER_FEE_PCT
+
+    round_trip_cost_pct = SPOT_MAKER_FEE_PCT + SPOT_TAKER_FEE_PCT
+    target_price = (
+        round(price * (1.0 + stop_pct * target_r + round_trip_cost_pct), 8)
+        if price > 0
+        else 0.0
+    )
 
     from logging_db.trade_logger import log_trade, log_trade_features, persist_position
 
@@ -1025,6 +1067,37 @@ def open_spot(
         base_asset=str(base_asset or clean),
         tv_veto_state=str(block_reason or ""),
     )
+
+    # v18.19: open-side Prometheus emissions for Grafana dashboard.
+    try:
+        from monitoring import metrics
+
+        # Per-asset entry price + zero starting unrealized PnL.
+        metrics.OPEN_POS_ENTRY_GAUGE.labels(asset=clean).set(price)
+        metrics.OPEN_POS_PNL_GAUGE.labels(asset=clean).set(0.0)
+        # Session trade counter (resets midnight UTC).
+        try:
+            _stc = float(metrics.SESSION_TRADES_GAUGE._value.get())  # type: ignore[attr-defined]
+        except Exception:
+            _stc = 0.0
+        metrics.SESSION_TRADES_GAUGE.set(_stc + 1.0)
+        # Open-trades gauge — recompute from DB for safety.
+        try:
+            from logging_db.trade_logger import load_open_positions
+
+            _open = [
+                r for r in load_open_positions(paper=0)
+                if str(r.get("strategy", "")).startswith("spot_")
+                and float(r.get("qty") or 0.0) > 0
+            ]
+            metrics.OPEN_TRADES_GAUGE.set(len(_open))
+        except Exception:
+            pass
+        # Cumulative fees on entry side too.
+        metrics.FEES_PAID_COUNTER.inc(max(0.0, fee_usd))
+    except Exception as _e:
+        logger.debug(f"[spot_engine] open-side metrics emit failed: {_e}")
+
     return {
         "symbol": clean,
         "strategy": _position_strategy(clean),
@@ -1126,8 +1199,10 @@ def close_spot(
     latency = time.time() - t0
     if not order:
         logger.warning(f"[spot_engine] close_spot {clean}: maker_first failed ({micro_veto}). Attempting TAKER fallback...")
-        # v18.17: Ironclad Loop Breaker
-        # If maker fails, we MUST try a market order to clear the position and stop the Telegram spam.
+        # v18.17: Ironclad Loop Breaker — try market order to clear the position.
+        # v18.19: on persistent failure, halt the symbol via sell_blocked flag
+        # instead of auto-purging. Diagnostic log captures broker hold field for
+        # Layer B root-cause analysis (SOL ghost).
         try:
             bal = broker.get_spot_balance()
             actual_qty = float(bal.get("symbol_balances", {}).get(clean, 0.0))
@@ -1135,11 +1210,21 @@ def close_spot(
                 order = broker.sell_spot(clean, actual_qty)
                 if order:
                     logger.info(f"[spot_engine] close_spot {clean}: Taker fallback success. Loop broken.")
-                    # Fall through to the P&L calculation and DB deletion logic below
+                    # Clear failure count on success; fall through to P&L + DB logic.
+                    try:
+                        from logging_db.trade_logger import clear_sell_failure
+
+                        clear_sell_failure(clean, strategy, paper=1 if paper else 0)
+                    except Exception:
+                        pass
                 else:
-                    logger.error(f"[spot_engine] close_spot {clean}: FATAL - Taker fallback failed. Clearing DB to stop loop.")
-                    from logging_db.trade_logger import delete_position
-                    delete_position(clean, strategy=strategy, paper=1 if paper else 0)
+                    # v18.19 Layer C: increment failure count, halt at 3.
+                    error_code = _extract_broker_error_code(order, broker, clean)
+                    failure_count = _record_sell_failure(
+                        clean, strategy, error_code, bal, pos, paper=paper
+                    )
+                    if failure_count >= 3:
+                        _emit_sell_blocked_alert(clean, error_code, failure_count)
                     return None
             else:
                 logger.warning(f"[spot_engine] close_spot {clean}: Broker balance is 0. Purging DB ghost.")
@@ -1361,6 +1446,52 @@ def close_spot(
         record_incubation_trade("spot_scalp")
     except Exception:
         pass
+
+    # v18.19: stamp last_exit_ts so the entry-side cooldown gate can enforce
+    # the per-symbol cooldown_min window from SPOT_SCALP_SYMBOL_CONFIG.
+    try:
+        from logging_db.trade_logger import save_spot_cooldown_state
+
+        save_spot_cooldown_state(clean)
+    except Exception as _e:
+        logger.debug(f"[spot_engine] cooldown stamp failed for {clean}: {_e}")
+
+    # v18.19: drop per-asset Prometheus labels so the open-position gauges
+    # don't keep emitting stale series for a closed symbol.
+    try:
+        from monitoring import metrics
+
+        metrics.drop_open_position_labels(clean)
+        # session-level counters/gauges
+        won = 1 if pnl_usd > 0 else 0
+        if won:
+            metrics.TRADES_WON_COUNTER.inc()
+        else:
+            metrics.TRADES_LOST_COUNTER.inc()
+        # FEES_PAID is round-trip (entry + exit). Counter is monotonic.
+        metrics.FEES_PAID_COUNTER.inc(max(0.0, fee_usd + float(pos.get("entry_fee_usd") or 0.0)))
+        # PNL_NET is session-resetting; we add this trade's contribution.
+        current_pnl = 0.0
+        try:
+            current_pnl = float(metrics.PNL_NET_GAUGE._value.get())  # type: ignore[attr-defined]
+        except Exception:
+            current_pnl = 0.0
+        metrics.PNL_NET_GAUGE.set(current_pnl + float(pnl_usd))
+        # Open-trades gauge — recompute from DB to avoid drift.
+        try:
+            from logging_db.trade_logger import load_open_positions
+
+            _open = [
+                r for r in load_open_positions(paper=0)
+                if str(r.get("strategy", "")).startswith("spot_")
+                and float(r.get("qty") or 0.0) > 0
+            ]
+            metrics.OPEN_TRADES_GAUGE.set(len(_open))
+        except Exception:
+            pass
+    except Exception as _e:
+        logger.debug(f"[spot_engine] close-side metrics emit failed: {_e}")
+
     return {
         "symbol": clean,
         "entry_price": entry_price,
@@ -1375,12 +1506,188 @@ def close_spot(
     }
 
 
+def check_spot_entry_cooldown(symbol: str) -> tuple[bool, str]:
+    """v18.19: enforce SPOT_SCALP_SYMBOL_CONFIG[symbol]['cooldown_min'] between
+    a close and the next entry. Reads ``spot_cooldown_state.last_exit_ts``.
+
+    Returns ``(ready, reason)``. ``ready=False`` means the entry should be
+    blocked with the existing "quality blocked" log filter (Grafana looks for
+    that string).
+    """
+    if not symbol:
+        return True, "no_symbol"
+    sym = _clean_symbol(symbol)
+    try:
+        from logging_db.trade_logger import load_spot_cooldown_state
+
+        last_ts = load_spot_cooldown_state(sym)
+    except Exception:
+        last_ts = None
+    if last_ts is None:
+        return True, "no_prior_exit"
+    cooldown_min = float(
+        (SPOT_SCALP_SYMBOL_CONFIG.get(sym, {}) or {}).get("cooldown_min", 10)
+    )
+    cooldown_sec = cooldown_min * 60.0
+    elapsed = time.time() - float(last_ts)
+    if elapsed < cooldown_sec:
+        remaining = int(cooldown_sec - elapsed)
+        return False, f"cooldown_active remaining={remaining}s"
+    return True, "ready"
+
+
+def check_spot_sell_blocked(symbol: str) -> tuple[bool, str]:
+    """v18.19: block new entries for symbols whose previous close failed three
+    times in a row (sell_blocked=1). Human must reconcile and clear the flag.
+    """
+    if not symbol:
+        return True, "no_symbol"
+    sym = _clean_symbol(symbol)
+    try:
+        from logging_db.trade_logger import load_open_positions
+
+        for row in load_open_positions(paper=0):
+            if (
+                str(row.get("symbol", "")).upper() == sym
+                and int(row.get("sell_blocked") or 0) == 1
+            ):
+                return False, f"sell_blocked={row.get('sell_blocked_reason') or 'unknown'}"
+    except Exception:
+        pass
+    return True, "ok"
+
+
+def _extract_broker_error_code(
+    order: Optional[Dict], broker, symbol: str
+) -> str:
+    """v18.19: pull the broker rejection error code if available."""
+    try:
+        if order is None:
+            return "no_response"
+        return str(
+            order.get("error_code")
+            or order.get("failure_reason")
+            or order.get("error")
+            or "unknown"
+        )
+    except Exception:
+        return "unknown"
+
+
+def _record_sell_failure(
+    symbol: str,
+    strategy: str,
+    error_code: str,
+    bal: Dict,
+    pos: Dict,
+    paper: bool = False,
+) -> int:
+    """v18.19 Layer C: increment sell_failure_count; emit diagnostic for Layer B."""
+    try:
+        from logging_db.trade_logger import increment_sell_failure, mark_sell_blocked
+
+        count = increment_sell_failure(symbol, strategy, paper=1 if paper else 0)
+    except Exception as _e:
+        logger.debug(f"[spot_engine] increment_sell_failure failed: {_e}")
+        count = 0
+    # Layer B diagnostic: dump the broker balance dict and DB position row so
+    # the next SOL incident captures Coinbase's held/available split.
+    try:
+        diag = {
+            "symbol": symbol,
+            "error_code": error_code,
+            "failure_count": count,
+            "broker_balance": {
+                k: v for k, v in (bal or {}).items()
+                if "available" in str(k) or "balance" in str(k) or k == "symbol_balances"
+            },
+            "db_qty": float(pos.get("qty") or 0.0),
+            "db_entry": float(pos.get("entry") or 0.0),
+        }
+        logger.warning(
+            f"[spot_engine] sell_failure {symbol}: count={count} "
+            f"error={error_code} diagnostic={diag}"
+        )
+    except Exception as _e:
+        logger.debug(f"[spot_engine] sell_failure diagnostic emit failed: {_e}")
+    if count >= 3:
+        try:
+            from logging_db.trade_logger import mark_sell_blocked
+
+            mark_sell_blocked(symbol, strategy, error_code, paper=1 if paper else 0)
+        except Exception as _e:
+            logger.debug(f"[spot_engine] mark_sell_blocked failed: {_e}")
+    return count
+
+
+def _emit_sell_blocked_alert(symbol: str, error_code: str, count: int) -> None:
+    """v18.19: one Telegram alert when a symbol is halted. Keep it idempotent —
+    mark_sell_blocked makes the flag sticky so we don't realert on retries."""
+    msg = (
+        f"[spot] {symbol} halted after {count} sell failures "
+        f"(error={error_code}). DB row retained. Manual reconciliation "
+        f"required: check Coinbase for locked balance or open limit order."
+    )
+    logger.error(msg)
+    try:
+        from notifications.telegram_bot import send_message
+
+        send_message(msg)
+    except Exception as _e:
+        logger.debug(f"[spot_engine] telegram alert failed: {_e}")
+
+
+def _economics_gate_exit(
+    symbol: str, pos: Dict, current_price: float, exit_type: str
+) -> bool:
+    """v18.19: discretionary-exit fee gate.
+
+    Returns True if the exit may proceed (net P&L clears fees by at least
+    SPOT_EXIT_MIN_NET_USD). On block: emits a "economics blocked" log line for
+    the Loki filter and increments SPOT_EXIT_FEE_BLOCKED. Force-mandated exits
+    (hard_stop, target_hit, eod_close) do not call this helper.
+    """
+    try:
+        from risk.spot_economics_gate import economics_ok_to_exit
+
+        qty = float(pos.get("qty") or 0.0)
+        entry_price = float(pos.get("entry") or 0.0)
+        entry_fee_usd = float(pos.get("entry_fee_usd") or 0.0)
+        execution_route = str(pos.get("execution_route") or "maker_first")
+        route_guess = "maker" if execution_route == "maker_first" else "taker"
+        ok, reason = economics_ok_to_exit(
+            symbol=symbol,
+            entry_price=entry_price,
+            current_price=current_price,
+            qty=qty,
+            entry_fee_usd=entry_fee_usd,
+            execution_route_guess=route_guess,
+        )
+        if not ok:
+            logger.info(
+                f"[spot_engine] economics blocked symbol={symbol} "
+                f"exit_type={exit_type} {reason}"
+            )
+            try:
+                from monitoring import metrics
+
+                metrics.SPOT_EXIT_FEE_BLOCKED.labels(
+                    symbol=symbol, exit_type=exit_type
+                ).inc()
+            except Exception:
+                pass
+        return ok
+    except Exception as e:
+        logger.debug(f"[spot_engine] economics gate error {symbol}: {e}")
+        return True  # fail-open: don't strand a position because gate broke
+
+
 def check_spot_stops(paper: bool = False) -> List[Dict]:
     closed: List[Dict] = []
     broker = _get_broker(paper=paper)
     if broker is None:
         return closed
-    for pos in _load_spot_positions_from_db(paper=paper):
+    for pos in _load_spot_positions_from_db(paper=paper, bot_managed_only=True):
         sym = str(pos.get("symbol") or "").upper()
         stop_price = float(pos.get("stop") or 0.0)
         if stop_price <= 0:
@@ -1399,7 +1706,7 @@ def check_spot_trailing(paper: bool = False) -> List[Dict]:
     broker = _get_broker(paper=paper)
     if broker is None:
         return closed
-    for pos in _load_spot_positions_from_db(paper=paper):
+    for pos in _load_spot_positions_from_db(paper=paper, bot_managed_only=True):
         sym = str(pos.get("symbol") or "").upper()
         strategy = str(pos.get("strategy") or _position_strategy(sym))
         entry = float(pos.get("entry") or 0.0)
@@ -1427,6 +1734,8 @@ def check_spot_trailing(paper: bool = False) -> List[Dict]:
         trail_width = risk_per_unit * max(0.6, min(target_r, 1.0))
         trail_stop = high_since_entry - trail_width
         if current_price <= trail_stop and current_price > entry:
+            if not _economics_gate_exit(sym, pos, current_price, "trailing_stop"):
+                continue
             result = close_spot(sym, exit_reason="trailing_stop", paper=paper)
             if result:
                 result["trigger"] = "trailing_stop"
@@ -1439,7 +1748,7 @@ def check_spot_targets(paper: bool = False) -> List[Dict]:
     broker = _get_broker(paper=paper)
     if broker is None:
         return closed
-    for pos in _load_spot_positions_from_db(paper=paper):
+    for pos in _load_spot_positions_from_db(paper=paper, bot_managed_only=True):
         sym = str(pos.get("symbol") or "").upper()
         target = float(pos.get("target") or 0.0)
         current_price = float(broker.get_mark_price(sym) or 0.0)
@@ -1456,7 +1765,7 @@ def check_spot_stagnation_exits(paper: bool = False) -> List[Dict]:
     broker = _get_broker(paper=paper)
     if broker is None:
         return closed
-    for pos in _load_spot_positions_from_db(paper=paper):
+    for pos in _load_spot_positions_from_db(paper=paper, bot_managed_only=True):
         sym = str(pos.get("symbol") or "").upper()
         try:
             spot_state = _resolve_spot_state(sym, allow_stale=True)
@@ -1485,6 +1794,8 @@ def check_spot_stagnation_exits(paper: bool = False) -> List[Dict]:
             and s5["v"] <= 0
             and s5["a"] <= 0
         ):
+            if not _economics_gate_exit(sym, pos, current_price, "stagnation_exit"):
+                continue
             result = close_spot(sym, exit_reason="stagnation_exit", paper=paper)
             if result:
                 result["trigger"] = "stagnation_exit"
@@ -1494,7 +1805,7 @@ def check_spot_stagnation_exits(paper: bool = False) -> List[Dict]:
 
 def check_spot_thesis_exits(paper: bool = False) -> List[Dict]:
     closed: List[Dict] = []
-    for pos in _load_spot_positions_from_db(paper=paper):
+    for pos in _load_spot_positions_from_db(paper=paper, bot_managed_only=True):
         sym = str(pos.get("symbol") or "").upper()
         ts_entry = str(pos.get("ts_entry") or "")
         if ts_entry:
@@ -1510,10 +1821,23 @@ def check_spot_thesis_exits(paper: bool = False) -> List[Dict]:
             spot_state = _resolve_spot_state(sym, allow_stale=True)
         except Exception:
             continue
+        # v18.19: use SPOT_THESIS_MIN_SCORE_EXIT (default 47, 5pt below entry
+        # floor) so a brief score dip near 52 doesn't trigger thesis_decay.
+        from config import SPOT_THESIS_MIN_SCORE_EXIT
+
         if (
-            spot_state["derivative_score"] < SPOT_THESIS_MIN_SCORE
+            spot_state["derivative_score"] < SPOT_THESIS_MIN_SCORE_EXIT
             or spot_state["frames"]["5m"]["v"] <= 0
         ):
+            try:
+                from execution.coinbase_spot_broker import get_spot_broker
+
+                _broker = get_spot_broker(paper=paper)
+                _mark = float(_broker.get_mark_price(sym) or 0.0) if _broker else 0.0
+            except Exception:
+                _mark = 0.0
+            if _mark > 0 and not _economics_gate_exit(sym, pos, _mark, "thesis_decay"):
+                continue
             result = close_spot(sym, exit_reason="thesis_decay", paper=paper)
             if result:
                 result["trigger"] = "thesis_decay"
@@ -1537,7 +1861,7 @@ def check_spot_eod_close(paper: bool = False) -> List[Dict]:
     if now_et.hour < eod_h or (now_et.hour == eod_h and now_et.minute < eod_m):
         return []
     closed: List[Dict] = []
-    for pos in _load_spot_positions_from_db(paper=paper):
+    for pos in _load_spot_positions_from_db(paper=paper, bot_managed_only=True):
         result = close_spot(
             str(pos.get("symbol") or ""), exit_reason="eod_close", paper=paper
         )

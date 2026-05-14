@@ -384,7 +384,7 @@ def _build_spot_state_fresh(symbol: str) -> dict[str, Any]:
             raise SpotStateUnavailable(f"insufficient {tf} candles for {symbol}")
         states[tf] = _timeframe_state(df)
 
-    regime = classify_spot_regime(states["30m"], states["4h"])
+    regime = classify_spot_regime(states["30m"], states["4h"], symbol=symbol)
     derivative_score = (
         0.40 * states["5m"]["frame_score"]
         + 0.30 * states["30m"]["frame_score"]
@@ -425,13 +425,30 @@ def _build_spot_state_fresh(symbol: str) -> dict[str, Any]:
         mid_price = float(close.iloc[-1])
         microprice = mid_price
 
+    # v18.19: publish per-symbol OBI to Prometheus every scan cycle. Was always
+    # 0.00 because system_state.update_strategy(obi=...) was defined but never
+    # called from anywhere. Set both the labeled gauge (for per-asset Grafana
+    # panels) and the unlabeled gauge (last-seen, kept for backward compat).
+    _scan_obi = float(states["5m"]["obi"])
+    try:
+        from monitoring import metrics
+
+        metrics.OBI_SYMBOL_GAUGE.labels(symbol=symbol).set(_scan_obi)
+        metrics.OBI_GAUGE.set(_scan_obi)
+        if mid_price > 0:
+            metrics.MID_PRICE_GAUGE.set(float(mid_price))
+        if microprice > 0:
+            metrics.MICROPRICE_GAUGE.set(float(microprice))
+    except Exception:
+        pass
+
     return {
         "symbol": symbol,
         "frames": states,
         "regime": regime,
         "er": float(states["30m"]["er"]),
         "adx": float(states["30m"]["adx"]),
-        "obi": float(states["5m"]["obi"]),
+        "obi": _scan_obi,
         "mid_price": round(mid_price, 8),
         "microprice": round(microprice, 8),
         "derivative_score": round(float(derivative_score), 2),

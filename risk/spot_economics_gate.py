@@ -149,3 +149,48 @@ def check_spot_economics(
         "projected_net_win_usd": projected_net_win_usd,
         "total_cost_pct": total_cost_pct,
     }
+
+
+# v18.19: exit-side economics gate. Discretionary exits (trailing_stop,
+# stagnation_exit, thesis_decay) must clear net fees before firing. Hard stops,
+# fee-inflated targets, and EOD flatten bypass this via mandatory=True.
+SPOT_EXIT_MIN_NET_USD: float = float(os.getenv("SPOT_EXIT_MIN_NET_USD", "0.05"))
+
+
+def economics_ok_to_exit(
+    symbol: str,
+    entry_price: float,
+    current_price: float,
+    qty: float,
+    entry_fee_usd: float = 0.0,
+    execution_route_guess: str = "taker",
+    min_net_usd: float | None = None,
+    mandatory: bool = False,
+) -> tuple[bool, str]:
+    """Return (allow_exit, reason).
+
+    The point of this gate is to block "pyrrhic winners" — trades where the
+    price moved in our favor (gross > 0) but not enough to clear fees. Without
+    this, the bot logs a "win" while net P&L is negative.
+
+    Allow:
+      * mandatory=True (hard stops, fee-inflated targets, EOD flatten)
+      * gross_usd <= 0 (genuine loser — discipline > economics; free the capital)
+      * net_usd >= min_net_usd (clean winner)
+
+    Block only when gross_usd > 0 AND net_usd < min_net_usd (the pyrrhic case).
+    """
+    if mandatory:
+        return True, "mandatory"
+    if entry_price <= 0 or current_price <= 0 or qty <= 0:
+        return True, "skip_invalid_inputs"
+    fee_pct = SPOT_MAKER_FEE_PCT if execution_route_guess == "maker" else SPOT_TAKER_FEE_PCT
+    exit_fee_usd = current_price * qty * fee_pct
+    gross_usd = (current_price - entry_price) * qty
+    net_usd = gross_usd - float(entry_fee_usd or 0.0) - exit_fee_usd
+    threshold = SPOT_EXIT_MIN_NET_USD if min_net_usd is None else float(min_net_usd)
+    if gross_usd <= 0:
+        return True, f"genuine_loser gross={gross_usd:.4f}"
+    if net_usd >= threshold:
+        return True, f"net_ok={net_usd:.4f}"
+    return False, f"pyrrhic_winner gross={gross_usd:.4f} net={net_usd:.4f}"

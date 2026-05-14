@@ -168,6 +168,12 @@ def init_db() -> None:
         "ALTER TABLE open_positions ADD COLUMN raw_scanner_symbol TEXT DEFAULT ''",
         "ALTER TABLE open_positions ADD COLUMN base_asset TEXT DEFAULT ''",
         "ALTER TABLE open_positions ADD COLUMN tv_veto_state TEXT DEFAULT ''",
+        # v18.19: sell-failure halt (SOL ghost cure Layer C). After 3 consecutive
+        # broker rejections with the same error code, sell_blocked=1 stops the
+        # retry loop and requires human reconciliation.
+        "ALTER TABLE open_positions ADD COLUMN sell_failure_count INTEGER DEFAULT 0",
+        "ALTER TABLE open_positions ADD COLUMN sell_blocked INTEGER DEFAULT 0",
+        "ALTER TABLE open_positions ADD COLUMN sell_blocked_reason TEXT DEFAULT ''",
         "CREATE TABLE IF NOT EXISTS api_telemetry (id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL NOT NULL, module TEXT NOT NULL, prompt_tokens INTEGER DEFAULT 0, completion_tokens INTEGER DEFAULT 0)",
     ]:
         try:
@@ -222,6 +228,21 @@ def init_db() -> None:
         classification TEXT NOT NULL,
         note TEXT DEFAULT '',
         updated_at TEXT NOT NULL
+    )""")
+
+    # v18.19: sticky regime state — survives bot restart. classify_spot_regime
+    # reads prior regime here to apply the NEUTRAL→CHOP hysteresis band.
+    cur.execute("""CREATE TABLE IF NOT EXISTS spot_regime_state (
+        symbol TEXT PRIMARY KEY,
+        last_regime TEXT NOT NULL,
+        ts INTEGER NOT NULL
+    )""")
+
+    # v18.19: per-symbol cooldown timestamps. check_spot_entry_cooldown reads
+    # last_exit_ts to enforce SPOT_SCALP_SYMBOL_CONFIG[symbol]['cooldown_min'].
+    cur.execute("""CREATE TABLE IF NOT EXISTS spot_cooldown_state (
+        symbol TEXT PRIMARY KEY,
+        last_exit_ts INTEGER NOT NULL
     )""")
 
     cur.execute("""CREATE TABLE IF NOT EXISTS api_costs (
@@ -1885,6 +1906,135 @@ def delete_position(symbol, strategy, paper: int = 0) -> None:
     conn.commit()
     conn.close()
 
+
+# ─── v18.19 sticky regime state ─────────────────────────────────────────────
+
+
+def load_spot_regime_state(symbol: str) -> Optional[str]:
+    """Return last persisted regime for symbol, or None if no prior entry."""
+    if not symbol:
+        return None
+    sym = str(symbol).upper()
+    try:
+        conn = _conn()
+        cur = conn.execute(
+            "SELECT last_regime FROM spot_regime_state WHERE symbol=?", (sym,)
+        )
+        row = cur.fetchone()
+        conn.close()
+        return str(row["last_regime"]) if row else None
+    except Exception:
+        return None
+
+
+def save_spot_regime_state(symbol: str, regime: str) -> None:
+    if not symbol or not regime:
+        return
+    sym = str(symbol).upper()
+    try:
+        conn = _conn()
+        conn.execute(
+            "INSERT INTO spot_regime_state(symbol,last_regime,ts) VALUES(?,?,?) "
+            "ON CONFLICT(symbol) DO UPDATE SET last_regime=excluded.last_regime, ts=excluded.ts",
+            (sym, str(regime).upper(), int(time.time())),
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+# ─── v18.19 per-symbol cooldown state ───────────────────────────────────────
+
+
+def load_spot_cooldown_state(symbol: str) -> Optional[int]:
+    """Return last_exit_ts (unix seconds) for symbol, or None."""
+    if not symbol:
+        return None
+    sym = str(symbol).upper()
+    try:
+        conn = _conn()
+        cur = conn.execute(
+            "SELECT last_exit_ts FROM spot_cooldown_state WHERE symbol=?", (sym,)
+        )
+        row = cur.fetchone()
+        conn.close()
+        return int(row["last_exit_ts"]) if row else None
+    except Exception:
+        return None
+
+
+def save_spot_cooldown_state(symbol: str, last_exit_ts: Optional[int] = None) -> None:
+    if not symbol:
+        return
+    sym = str(symbol).upper()
+    ts = int(last_exit_ts if last_exit_ts is not None else time.time())
+    try:
+        conn = _conn()
+        conn.execute(
+            "INSERT INTO spot_cooldown_state(symbol,last_exit_ts) VALUES(?,?) "
+            "ON CONFLICT(symbol) DO UPDATE SET last_exit_ts=excluded.last_exit_ts",
+            (sym, ts),
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+# ─── v18.19 sell-failure halt helpers ────────────────────────────────────────
+
+
+def increment_sell_failure(symbol: str, strategy: str, paper: int = 0) -> int:
+    """Bump sell_failure_count for the row; return the new value."""
+    sym = str(symbol).upper()
+    try:
+        conn = _conn()
+        conn.execute(
+            "UPDATE open_positions SET sell_failure_count = COALESCE(sell_failure_count,0) + 1 "
+            "WHERE symbol=? AND strategy=? AND paper=?",
+            (sym, strategy, paper),
+        )
+        conn.commit()
+        cur = conn.execute(
+            "SELECT sell_failure_count FROM open_positions WHERE symbol=? AND strategy=? AND paper=?",
+            (sym, strategy, paper),
+        )
+        row = cur.fetchone()
+        conn.close()
+        return int(row["sell_failure_count"]) if row else 0
+    except Exception:
+        return 0
+
+
+def mark_sell_blocked(symbol: str, strategy: str, reason: str, paper: int = 0) -> None:
+    sym = str(symbol).upper()
+    try:
+        conn = _conn()
+        conn.execute(
+            "UPDATE open_positions SET sell_blocked=1, sell_blocked_reason=? "
+            "WHERE symbol=? AND strategy=? AND paper=?",
+            (str(reason or ""), sym, strategy, paper),
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+def clear_sell_failure(symbol: str, strategy: str, paper: int = 0) -> None:
+    sym = str(symbol).upper()
+    try:
+        conn = _conn()
+        conn.execute(
+            "UPDATE open_positions SET sell_failure_count=0, sell_blocked=0, sell_blocked_reason='' "
+            "WHERE symbol=? AND strategy=? AND paper=?",
+            (sym, strategy, paper),
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
 
 
 def load_open_positions(paper: int = 0) -> list:

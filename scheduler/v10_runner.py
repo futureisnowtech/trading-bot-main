@@ -1822,6 +1822,27 @@ def _attempt_entry(
                 direction="LONG",
                 tv_context=_tv_context,
             )
+            # v18.19: enforce per-symbol cooldown + sell_blocked halt BEFORE the
+            # standard quality gate so they short-circuit cleanly with the same
+            # "quality blocked" Loki filter Grafana looks for.
+            try:
+                from spot_engine import check_spot_entry_cooldown, check_spot_sell_blocked
+
+                _cooldown_ok, _cooldown_reason = check_spot_entry_cooldown(_underlying)
+                _sell_ok, _sell_reason = check_spot_sell_blocked(_underlying)
+                _v1819_block_reason = ""
+                if not _sell_ok:
+                    _v1819_block_reason = _sell_reason
+                elif not _cooldown_ok:
+                    _v1819_block_reason = _cooldown_reason
+                if _v1819_block_reason:
+                    logger.info(
+                        f"[v10] spot {_underlying} quality blocked: {_v1819_block_reason}"
+                    )
+                    return "below_threshold"
+            except Exception as _v1819_e:
+                logger.debug(f"[v10] v18.19 entry gate error {_underlying}: {_v1819_e}")
+
             _reason, _score_floor = _spot_quality_block_reason(
                 _underlying,
                 _spot_state,
@@ -3704,6 +3725,76 @@ def run_forever():
             pass
 
     schedule.every(1).minutes.do(_write_heartbeat)
+
+    # v18.19: per-asset unrealized PnL + entry-price gauges. Iterates every open
+    # bot-managed spot position each minute, queries broker mark price, and
+    # publishes algo_bot_open_position_pnl_usd{asset=...} and
+    # algo_bot_open_position_entry_price{asset=...}. drop_open_position_labels()
+    # in close_spot drops stale series when a position closes.
+    def _update_open_position_gauges():
+        try:
+            from logging_db.trade_logger import load_open_positions
+            from execution.coinbase_spot_broker import get_spot_broker
+            from monitoring import metrics
+
+            broker = None
+            try:
+                broker = get_spot_broker(paper=False)
+                if broker and not broker.is_connected():
+                    broker.connect()
+            except Exception:
+                broker = None
+
+            for row in load_open_positions(paper=0):
+                if not str(row.get("strategy", "")).startswith("spot_"):
+                    continue
+                qty = float(row.get("qty") or 0.0)
+                entry = float(row.get("entry") or 0.0)
+                if qty <= 0 or entry <= 0:
+                    continue
+                sym = str(row.get("symbol") or "").upper()
+                if not sym:
+                    continue
+                metrics.OPEN_POS_ENTRY_GAUGE.labels(asset=sym).set(entry)
+                mark = 0.0
+                if broker is not None:
+                    try:
+                        mark = float(broker.get_mark_price(sym) or 0.0)
+                    except Exception:
+                        mark = 0.0
+                if mark > 0:
+                    entry_fee = float(row.get("entry_fee_usd") or 0.0)
+                    unrealized = (mark - entry) * qty - entry_fee
+                    metrics.OPEN_POS_PNL_GAUGE.labels(asset=sym).set(unrealized)
+        except Exception as _e:
+            logger.debug(f"[v10] open-position gauge update failed: {_e}")
+
+    schedule.every(1).minutes.do(_update_open_position_gauges)
+
+    # v18.19: midnight-UTC session reset. Resets risk_engine.daily_start_balance
+    # so the session-based drawdown formula (peak-based → daily-anchored) has a
+    # fresh denominator, and zeros the session-bucketed Prometheus gauges
+    # (PNL_NET, SESSION_TRADES). Monotonic counters stay monotonic — Grafana
+    # uses increase()[24h] for "today" views.
+    def _session_reset_job():
+        try:
+            from monitoring import metrics
+            from risk_engine import update_balances
+            import risk_engine as _re
+
+            current_balance = float(_re._state.account_balance or 0.0)
+            _re.reset_daily(current_balance)
+            metrics.reset_session_metrics()
+            # Force drawdown denominator to refresh by calling update_balances
+            # with the same balance — peak unchanged, daily_start now == current.
+            update_balances(current_balance)
+            logger.info(
+                f"[v10] session reset (midnight UTC) — daily_start_balance={current_balance:.2f}"
+            )
+        except Exception as _se:
+            logger.warning(f"[v10] session reset failed: {_se}")
+
+    schedule.every().day.at("00:00", "UTC").do(_session_reset_job)
 
     if FUTURES_LANE_ACTIVE:
         schedule.every(2).minutes.do(mes_futures_scan)

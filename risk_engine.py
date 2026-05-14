@@ -103,10 +103,15 @@ def update_balances(
         _state.peak_balance = max(_state.peak_balance, current_balance)
         _state.total_deployed_usd = deployed_usd
 
-        if _state.peak_balance > 0:
-            _state.drawdown_pct = (
-                _state.peak_balance - current_balance
-            ) / _state.peak_balance
+        # v18.19: drawdown_pct is now session-based (resets midnight UTC via
+        # reset_daily). Was peak-based, which never reset and didn't match the
+        # Grafana spec. Clipped at 0 so an up-day shows 0% rather than negative.
+        if _state.daily_start_balance > 0:
+            _state.drawdown_pct = max(
+                0.0,
+                (_state.daily_start_balance - current_balance)
+                / _state.daily_start_balance,
+            )
 
         if _state.daily_start_balance > 0:
             _state.daily_loss_pct = max(

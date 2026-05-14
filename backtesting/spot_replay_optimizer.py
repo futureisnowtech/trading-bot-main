@@ -1243,6 +1243,8 @@ class SpotReplayOptimizer:
             s4 = timeframe_state_from_history(f4.iloc[max(0, idx4 - 120) : idx4 + 1], enriched=True)
             s1 = timeframe_state_from_history(f1.iloc[max(0, idx1 - 120) : idx1 + 1], enriched=True)
             states = {"5m": s5, "30m": s30, "4h": s4, "1d": s1}
+            # v18.19: leave stateless in backtest — passing symbol would pollute
+            # the live spot_regime_state table on each historical tick.
             regime = classify_spot_regime(s30, s4)
             setup_candidates = classify_setup_candidates(states, regime)
             setup_family = str(setup_candidates[0]["family"]) if setup_candidates else classify_setup_family(states, regime)

@@ -249,6 +249,10 @@ def test_sdt05_open_spot_persists_scalp_target_metadata(proof_runtime, monkeypat
 
 
 def test_sdt06_stagnation_exit_closes_dead_trade(proof_runtime, monkeypatch):
+    """v18.19 update: stagnation_exit fires for genuine losers (gross < 0) so
+    capital gets freed. Pyrrhic winners (gross > 0 but net < 0) are now blocked
+    by the economics gate so the bot doesn't pay Coinbase to crystallize a
+    fee-disguised loss. Use a below-entry price to test the kept behavior."""
     import spot_engine
 
     old_ts = (datetime.now() - timedelta(minutes=40)).isoformat()
@@ -259,7 +263,7 @@ def test_sdt06_stagnation_exit_closes_dead_trade(proof_runtime, monkeypatch):
         target=2036.0,
         ts_entry=old_ts,
     )
-    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper=False: _paper_broker(2003.0))
+    monkeypatch.setattr(spot_engine, "_get_broker", lambda paper=False: _paper_broker(1992.0))
     monkeypatch.setattr(
         spot_engine,
         "build_spot_state",

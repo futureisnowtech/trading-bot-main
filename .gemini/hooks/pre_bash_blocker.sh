@@ -9,7 +9,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 INPUT=$(cat)
-CMD=$(echo "$INPUT" | python3 -c "
+CMD=$(printf "%s" "$INPUT" | python3 -c "
 import sys, json
 try:
     d = json.load(sys.stdin)

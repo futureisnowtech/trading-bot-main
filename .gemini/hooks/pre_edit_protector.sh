@@ -8,7 +8,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 INPUT=$(cat)
-FILE=$(echo "$INPUT" | python3 -c "
+FILE=$(printf "%s" "$INPUT" | python3 -c "
 import sys, json
 try:
     d = json.load(sys.stdin)

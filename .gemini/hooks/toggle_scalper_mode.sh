@@ -5,7 +5,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 INPUT=$(cat -)
-QUERY=$(echo "$INPUT" | python3 -c "
+QUERY=$(printf "%s" "$INPUT" | python3 -c "
 import sys, json
 try:
     d = json.load(sys.stdin)
@@ -27,9 +27,9 @@ if [[ "$QUERY" == "!scalper_on" ]]; then
     if grep -q "STRATEGIC_SCALPER_MODE" "$ENV_FILE"; then
         sed "s/STRATEGIC_SCALPER_MODE=.*/STRATEGIC_SCALPER_MODE=true/" "$ENV_FILE" > "$ENV_FILE.tmp" && mv "$ENV_FILE.tmp" "$ENV_FILE"
     else
-        echo "STRATEGIC_SCALPER_MODE=true" >> "$ENV_FILE"
+        printf "STRATEGIC_SCALPER_MODE=true\n" >> "$ENV_FILE"
     fi
-    echo "{\"response\": \"🚀 **STRATEGIC SCALPER MODE ENABLED**. Legacy technical vetoes are now bypassed. Bot will execute on all +60% win-probability signals with dynamic sizing and tightened stops.\"}"
+    printf "{\"response\": \"🚀 **STRATEGIC SCALPER MODE ENABLED**. Legacy technical vetoes are now bypassed. Bot will execute on all +60%% win-probability signals with dynamic sizing and tightened stops.\"}\n"
     exit 0
 fi
 
@@ -38,12 +38,12 @@ if [[ "$QUERY" == "!scalper_off" ]]; then
     if grep -q "STRATEGIC_SCALPER_MODE" "$ENV_FILE"; then
         sed "s/STRATEGIC_SCALPER_MODE=.*/STRATEGIC_SCALPER_MODE=false/" "$ENV_FILE" > "$ENV_FILE.tmp" && mv "$ENV_FILE.tmp" "$ENV_FILE"
     else
-        echo "STRATEGIC_SCALPER_MODE=false" >> "$ENV_FILE"
+        printf "STRATEGIC_SCALPER_MODE=false\n" >> "$ENV_FILE"
     fi
-    echo "{\"response\": \"🛡️ **DEFENSIVE MODE RESTORED**. Legacy technical vetoes (Confirms, Frames, Path Efficiency) are now active. Trade frequency will decrease.\"}"
+    printf "{\"response\": \"🛡️ **DEFENSIVE MODE RESTORED**. Legacy technical vetoes (Confirms, Frames, Path Efficiency) are now active. Trade frequency will decrease.\"}\n"
     exit 0
 fi
 
 # Pass through for all other queries
-echo "$INPUT"
+printf "%s\n" "$INPUT"
 exit 0

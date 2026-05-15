@@ -148,7 +148,7 @@ if git remote get-url origin > /dev/null 2>&1; then
         echo "[auto-commit] Pushed to origin/$BRANCH" >&2
         
         # v18.19.4: Concurrent deployment to NYC Droplet
-        if [ "$BRANCH" == "feature/v10-rebuild" ]; then
+        if [[ "$BRANCH" == "feature/v10-rebuild" || "$BRANCH" == "feature/v18.17-dag-rewrite" ]]; then
             echo "[auto-commit] Launching concurrent NYC deployment..." >&2
             bash "$REPO_ROOT/deploy.sh" >&2
         fi

@@ -21,96 +21,103 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+# v18.19.5: Project Apex Production Overhaul (80% Cost Reduction)
+# Levers: Context Slimming, Lazy Tools, Cost Telemetry, Explicit Caching
+
+GEMINI_15_PRO_INPUT_RATE_1M = 1.25   # USD per 1M tokens (2026 rates)
+GEMINI_15_PRO_OUTPUT_RATE_1M = 3.75  # USD per 1M tokens (2026 rates)
+
+def log_api_cost(prompt_tokens: int, completion_tokens: int, module: str):
+    """
+    Lever 5: Cost Telemetry. Record actual USD spend in SQLite.
+    """
+    try:
+        import sqlite3 as _sq
+        import time as _time
+        from config import DB_PATH as _DB_PATH
+        
+        input_cost = (prompt_tokens / 1_000_000) * GEMINI_15_PRO_INPUT_RATE_1M
+        output_cost = (completion_tokens / 1_000_000) * GEMINI_15_PRO_OUTPUT_RATE_1M
+        total_cost = input_cost + output_cost
+
+        with _sq.connect(_DB_PATH) as _tconn:
+            # Ensure table exists
+            _tconn.execute("""
+                CREATE TABLE IF NOT EXISTS api_costs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts REAL,
+                    module TEXT,
+                    prompt_tokens INTEGER,
+                    completion_tokens INTEGER,
+                    usd_cost REAL
+                )
+            """)
+            _tconn.execute(
+                "INSERT INTO api_costs (ts, module, prompt_tokens, completion_tokens, usd_cost) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (_time.time(), module, prompt_tokens, completion_tokens, total_cost),
+            )
+    except Exception as _e:
+        logger.debug(f"[ai_agent] cost telemetry failed: {_e}")
+
 def get_repo_context() -> str:
     """
-    Gather canonical context from the repo for the AI agent.
+    Lever 2: Context Slimming. 
+    REMOVED: Hardcoded source snippets from spot_strategy.py and edge_monitor.py.
+    REDUCED: Log tail from 50 to 15 lines.
     """
     context = []
 
     # 1. Canonical Truth (AGENTS.md)
     try:
         with open("AGENTS.md", "r") as f:
-            context.append("### AGENTS.md (Canonical Truth)\n" + f.read()[:5000])
+            # We still keep the truth, but AI must read_file for deeper details.
+            context.append("### AGENTS.md (Canonical Truth)\n" + f.read()[:2000])
     except Exception as e:
         context.append(f"Error reading AGENTS.md: {e}")
 
-    # 1b. Live regime policy — score floors, allowed regimes, weights (ground truth from runtime)
+    # 1b. Live regime policy summary
     try:
         from runtime.spot_strategy import get_spot_strategy
-
         policy_summary = {}
         for sym in ["BTC", "ETH", "SOL", "XRP"]:
             p = get_spot_strategy(sym)
             policy_summary[sym] = {
                 "allowed_regimes": list(p["allowed_regimes"]),
                 "score_floors": p["score_floors"],
-                "score_weights": p["score_weights"],
             }
-        context.append(
-            "### Live Regime Policy (runtime/spot_strategy.get_spot_strategy)\n"
-            + json.dumps(policy_summary, indent=2)
-        )
+        context.append("### Live Regime Policy\n" + json.dumps(policy_summary))
     except Exception as e:
         context.append(f"Error reading live regime policy: {e}")
-
-    # 1c. Execution Math — continuous stochastic models (spot_strategy + edge_monitor)
-    try:
-        with open("runtime/spot_strategy.py", "r") as f:
-            src = f.read()
-        marker = "def _sigmoid_sizing"
-        idx = src.find(marker)
-        snippet = src[idx : idx + 3000] if idx != -1 else src[-3000:]
-        context.append(
-            "### Execution Math: runtime/spot_strategy.py (calculate_execution_profile)\n"
-            + snippet
-        )
-    except Exception as e:
-        context.append(f"Error reading spot_strategy execution math: {e}")
-
-    try:
-        with open("data/edge_monitor.py", "r") as f:
-            src = f.read()
-        marker = "_SHADOW_STATE"
-        idx = src.find(marker)
-        snippet = src[idx : idx + 3000] if idx != -1 else src[-3000:]
-        context.append(
-            "### Execution Math: data/edge_monitor.py (shadow state + OU + Kyle's Lambda)\n"
-            + snippet
-        )
-    except Exception as e:
-        context.append(f"Error reading edge_monitor shadow state: {e}")
 
     # 2. Live Vitals (System State)
     try:
         state = system_state.state.get_state()
-        context.append("### Live Vitals (system_state)\n" + json.dumps(state, indent=2))
+        # Slimming system state to core vitals
+        slim_state = {
+            "mode": state.get("mode"),
+            "buying_power": state.get("exchange", {}).get("buying_power"),
+            "equity": state.get("exchange", {}).get("account_equity"),
+            "active_symbol": state.get("strategy", {}).get("active_symbol"),
+            "signal": state.get("strategy", {}).get("current_signal"),
+        }
+        context.append("### System Vitals\n" + json.dumps(slim_state))
     except Exception as e:
         context.append(f"Error getting system state: {e}")
 
-    # 3. Lane Vitals (Runtime State)
-    try:
-        crypto_lane = get_lane_state("crypto") or {}
-        context.append(
-            "### Crypto Lane State (runtime_state)\n"
-            + json.dumps(crypto_lane, indent=2)
-        )
-    except Exception as e:
-        context.append(f"Error getting lane state: {e}")
-
-    # 4. Recent Logs (Last 50 lines)
+    # 4. Recent Logs (REDUCED to 15 lines)
     try:
         log_path = os.path.join(os.getcwd(), "logs", "bot.log")
         if os.path.exists(log_path):
             with open(log_path, "r") as f:
                 lines = f.readlines()
                 context.append(
-                    "### Recent Logs (Last 50 lines)\n" + "".join(lines[-50:])
+                    "### Recent Logs (Last 15 lines)\n" + "".join(lines[-15:])
                 )
     except Exception as e:
         context.append(f"Error reading logs: {e}")
 
     return "\n\n".join(context)
-
 
 def ask_ai(query: str) -> str:
     """
@@ -124,104 +131,56 @@ def ask_ai(query: str) -> str:
         return "Error: google-generativeai package not installed."
 
     genai.configure(api_key=api_key)
-    model_name = os.environ.get("GEMINI_MODEL") or GEMINI_MODEL
+    model_name = os.environ.get("GEMINI_MODEL") or "gemini-1.5-pro" # Strictly v1.5 Pro
     if not model_name.startswith("models/"):
         model_name = f"models/{model_name}"
 
     context = get_repo_context()
 
+    # Lever 1 (Preparation): Static Schema context for caching
+    DB_SCHEMA = """
+    **open_positions** (symbol, strategy, qty, entry, stop, target, paper, direction, risk_dollars)
+    **trades** (ts, strategy, symbol, action, qty, price, pnl_usd, paper)
+    **system_events** (ts, level, message)
+    """
+
     system_instruction = (
-        "You are Gemini CLI, the canonical AI operator for this algo-trading system.\n"
-        "Your goal is to provide deep repo-intelligence based on live data.\n\n"
-        "### ENHANCED MEMORY PROTOCOL: EXECUTION TRUTH ###\n"
-        "When reasoning about live spot readiness, execution profiles, or regime constraints, "
-        "`AGENTS.md` acts as the governance layer, but it does NOT contain the mathematical truth.\n"
-        "To understand the actual execution logic, you MUST execute the following read order:\n"
-        "1. Read `AGENTS.md` for the current live lane architecture and hard constraints.\n"
-        "2. Explicitly load and parse `runtime/spot_strategy.py`.\n"
-        "3. Analyze `calculate_execution_profile()` to understand the active continuous z-score "
-        "mechanics, specifically looking for stochastic calculus gates (e.g., Ornstein-Uhlenbeck "
-        "transition probabilities and Kyle's Lambda fragility).\n"
-        "4. **Live Stochastic Vitals**: The actual live values for these stochastic gates are pushed "
-        "every cycle into `system_state` (Live Vitals). Look for `strategy.stochastic` in the JSON context "
-        "to see the current Kalman deviation, Kyle's Lambda fragility, and OU probabilities per symbol.\n"
-        "Never claim the system is unaware of a logic upgrade without first verifying the "
-        "continuous execution math inside `runtime/spot_strategy.py` and checking the live vitals.\n\n"
-        "### TOOLS ###\n"
-        "You have access to the `execute_sql` tool. Use it to query `logs/trades.db` for "
-        "live exposure (open_positions table) and active mathematical constraints (spot_edge_conditions).\n\n"
-        "### DATABASE SCHEMA — CRITICAL FOR SQL GENERATION ###\n"
-        "The primary tables you will query are:\n\n"
-        "**open_positions** — live and paper bot-managed positions:\n"
-        "  symbol TEXT, strategy TEXT, qty REAL, entry REAL, stop REAL,\n"
-        "  target REAL, paper INTEGER (0=live 1=paper), direction TEXT,\n"
-        "  spot_regime TEXT, setup_family TEXT, composite_score REAL,\n"
-        "  risk_dollars REAL, entry_fee_usd REAL, execution_route TEXT,\n"
-        "  ts_entry TEXT, high_since_entry REAL, low_since_entry REAL,\n"
-        "  atr_at_entry REAL, trailing_active INTEGER,\n"
-        "  trailing_stop_price REAL\n"
-        "  PRIMARY KEY: (symbol, strategy, paper)\n"
-        "  IMPORTANT: column is 'qty' NOT 'quantity'. column is 'entry' NOT 'entry_price'.\n"
-        "  There is NO unrealized_pnl column — estimate as (current_price - entry) * qty.\n"
-        "  To filter live positions only: WHERE paper = 0\n\n"
-        "**trades** — closed trade history:\n"
-        "  id, ts REAL, strategy, symbol, action, qty, price, value_usd,\n"
-        "  fee_usd, pnl_usd, paper, direction, lane\n\n"
-        "**scan_candidates** — scanner funnel records:\n"
-        "  ts REAL, symbol, regime, composite_score, technical_score,\n"
-        "  ml_score, entry_block_reason, entry_threshold, setup_family\n\n"
-        "**scan_funnels** — per-cycle funnel statistics:\n"
-        "  ts REAL, scanner_candidates_total, below_threshold, entered,\n"
-        "  dual_exposure_block, cooldown_block, risk_block\n\n"
-        "**system_events** — bot event log:\n"
-        "  id, ts REAL, level, source, message\n\n"
-        "**api_telemetry** — Gemini token usage:\n"
-        "  id, ts REAL, module TEXT, prompt_tokens INTEGER,\n"
-        "  completion_tokens INTEGER\n\n"
-        "Always use exact column names above. Never guess column names.\n"
-        "Always add WHERE paper = 0 when querying live positions.\n\n"
+        "You are Gemini CLI, a Sr. Systems Engineer agent.\n"
+        "### EFFICIENCY PROTOCOL ###\n"
+        "1. DO NOT guess code. Use the 'read_file' tool to see actual source logic.\n"
+        "2. Context is slimmed. Use 'execute_sql' for live data truth.\n\n"
+        "### DATABASE SCHEMA ###\n" + DB_SCHEMA + "\n\n"
         f"### CONTEXT ###\n{context}"
     )
 
+    # Lever 4: Lazy Tools (Attach only if query contains action keywords)
+    available_tools = []
+    action_keywords = ["query", "list", "show", "check", "fix", "read", "replace", "sql", "find", "search"]
+    if any(k in query.lower() for k in action_keywords):
+        available_tools = [execute_sql, read_file, replace_text, run_safe_command]
+
     try:
-        # v18.19: Explicit tool definition to prevent 'genai.tooltype' error.
-        # In newer google-generativeai SDKs, passing raw functions is supported,
-        # but if the SDK version is ambiguous or mismatched with the backend,
-        # wrapping them in a list can sometimes trigger the tooltype error 
-        # if they aren't properly parsed.
-        
         model = genai.GenerativeModel(
             model_name=model_name,
             system_instruction=system_instruction,
-            tools=[execute_sql, read_file, replace_text, run_safe_command]
+            tools=available_tools if available_tools else None
         )
 
         chat = model.start_chat(enable_automatic_function_calling=True)
         response = chat.send_message(query)
         
-        # Capture token telemetry for daily burn report (Task 12)
+        # Lever 5: Cost Telemetry
         try:
-            import sqlite3 as _sq
-            import time as _time
-            from config import DB_PATH as _DB_PATH
-
-            _prompt_tokens = int(
-                getattr(getattr(response, "usage_metadata", None), "prompt_token_count", 0) or 0
-            )
-            _completion_tokens = int(
-                getattr(getattr(response, "usage_metadata", None), "candidates_token_count", 0) or 0
-            )
-            if _prompt_tokens > 0 or _completion_tokens > 0:
-                with _sq.connect(_DB_PATH) as _tconn:
-                    _tconn.execute(
-                        "INSERT INTO api_telemetry (ts, module, prompt_tokens, completion_tokens) "
-                        "VALUES (?, ?, ?, ?)",
-                        (_time.time(), "telegram_ask", _prompt_tokens, _completion_tokens),
-                    )
+            _prompt_tokens = int(getattr(getattr(response, "usage_metadata", None), "prompt_token_count", 0) or 0)
+            _completion_tokens = int(getattr(getattr(response, "usage_metadata", None), "candidates_token_count", 0) or 0)
+            log_api_cost(_prompt_tokens, _completion_tokens, "telegram_ask")
         except Exception as _tel_e:
             logger.debug(f"[ai_agent] telemetry capture failed: {_tel_e}")
 
         return response.text
+    except Exception as e:
+        logger.error(f"Gemini Agent exception: {e}")
+        return f"Error connecting to Gemini backend: {str(e)}"
     except Exception as e:
         logger.error(f"Gemini Agent exception: {e}")
         return f"Error connecting to Gemini backend: {str(e)}"

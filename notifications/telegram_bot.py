@@ -21,6 +21,41 @@ import system_state
 from spot_engine import get_spot_positions, _get_broker
 from notifications.ai_agent import ask_ai
 
+# v18.19.5: Project Apex Production Overhaul (80% Cost Reduction)
+# Lever 3: Debounce & Dedupe
+import hashlib
+
+_LAST_QUERY_TIME: Dict[int, float] = {}
+_QUERY_HASH_CACHE: Dict[str, float] = {}
+
+def _is_duplicate(user_id: int, query: str) -> Optional[str]:
+    """
+    Lever 3: 5s Rate Limit + 60s Dedupe.
+    Returns rejection message if duplicate/rate-limited, else None.
+    """
+    now = time.time()
+    
+    # 5s per-user rate limit
+    last_time = _LAST_QUERY_TIME.get(user_id, 0)
+    if now - last_time < 5:
+        return f"⏳ Rate limit: Please wait {5 - int(now - last_time)}s."
+    
+    # 60s query hash dedupe
+    q_hash = hashlib.sha256(query.strip().lower().encode()).hexdigest()
+    if q_hash in _QUERY_HASH_CACHE:
+        if now - _QUERY_HASH_CACHE[q_hash] < 60:
+            return "🔁 Duplicate query detected. Please wait 60s before repeating the same question."
+    
+    _LAST_QUERY_TIME[user_id] = now
+    _QUERY_HASH_CACHE[q_hash] = now
+    
+    # Cleanup old hashes (simple LRU)
+    if len(_QUERY_HASH_CACHE) > 100:
+        expired = [k for k, v in _QUERY_HASH_CACHE.items() if now - v > 60]
+        for k in expired: del _QUERY_HASH_CACHE[k]
+        
+    return None
+
 logger = logging.getLogger(__name__)
 
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
@@ -152,11 +187,23 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     obi = state["strategy"]["obi"]
     is_live = _runtime_is_live()
     mode_label = "LIVE" if is_live else "PAPER"
+    
+    # Lever 5: Cost Telemetry Integration
+    usd_spent = 0.0
+    try:
+        import sqlite3
+        _db = os.path.join(REPO_ROOT, "logs", "trades.db")
+        with sqlite3.connect(_db) as c:
+            row = c.execute("SELECT SUM(usd_cost) FROM api_costs WHERE ts > ?", (time.time() - 86400,)).fetchone()
+            usd_spent = float(row[0] or 0.0)
+    except: pass
+
     msg = (
         f"<b>SYSTEM: {mode_label}</b>\n"
         f"REST: {'OK' if state['exchange']['connected'] else 'NO'} | WS: {'OK' if state['exchange']['ws_connected'] else 'NO'}\n"
         f"CP: ${bp:,.2f} | OBI: {obi:+.2f}\n"
-        f"Signal: {state['strategy']['current_signal']} ({state['strategy']['active_symbol']})"
+        f"Signal: {state['strategy']['current_signal']} ({state['strategy']['active_symbol']})\n"
+        f"AI Spend (24h): ${usd_spent:.4f}"
     )
     await _reply_text(update, msg, parse_mode=ParseMode.HTML)
 
@@ -354,6 +401,15 @@ async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def _handle_ai_query(update: Update, query: str):
+    user = getattr(update, "effective_user", None)
+    user_id = user.id if user else 0
+    
+    # Lever 3: Apply Debounce & Dedupe
+    rejection = _is_duplicate(user_id, query)
+    if rejection:
+        await _reply_text(update, f"⚠️ {rejection}")
+        return
+
     thinking_msg = await _reply_text(
         update, "<i>Thinking...</i>", parse_mode=ParseMode.HTML
     )

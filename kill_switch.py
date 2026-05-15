@@ -163,9 +163,6 @@ def check_balance(
     """
     global _live_baseline
 
-    if not _EQUITY_TRIPWIRE_ENABLED:
-        return
-
     if initial_balance is None:
         try:
             from runtime.live_account import get_live_account_size
@@ -177,7 +174,9 @@ def check_balance(
     if is_halted():
         return
 
-    # Establish baseline from first valid balance if not yet set
+    # Establish baseline from first valid balance if not yet set.
+    # Baseline auto-set stays live even when the tripwire is disabled,
+    # so dashboards / get_status() keep reporting the running baseline.
     with _lock:
         if _live_baseline <= 0.0 and current_balance > 50.0:
             _live_baseline = current_balance
@@ -185,7 +184,10 @@ def check_balance(
                 f"[kill_switch] live_baseline auto-set to ${_live_baseline:.2f}"
             )
         baseline = _live_baseline if _live_baseline > 0.0 else float(initial_balance)
-    
+
+    if not _EQUITY_TRIPWIRE_ENABLED:
+        return
+
     threshold = baseline * _LIVE_KILL_PCT
     baseline_desc = f"50% of live baseline ${baseline:.2f}"
 

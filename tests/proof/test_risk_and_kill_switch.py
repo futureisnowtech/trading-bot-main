@@ -98,10 +98,12 @@ def test_live_baseline_1966_gives_threshold_983():
     assert abs(status["live_threshold"] - 983.0) < 0.01
 
 
-def test_live_kill_switch_triggers_below_50pct_of_baseline(proof_runtime):
-    """Balance below 50% of live baseline must trigger the kill switch."""
+def test_live_kill_switch_triggers_below_50pct_of_baseline(proof_runtime, monkeypatch):
+    """Balance below 50% of live baseline must trigger the kill switch.
+    v18.19.2: equity tripwire is opt-in; enable via env-equivalent module attr."""
     import kill_switch
 
+    monkeypatch.setattr(kill_switch, "_EQUITY_TRIPWIRE_ENABLED", True)
     kill_switch.set_live_baseline(1_966.0)
     # Balance at 40% of baseline → below threshold
     kill_switch.check_balance(786.0, initial_balance=5_000.0)
@@ -113,10 +115,12 @@ def test_live_kill_switch_triggers_below_50pct_of_baseline(proof_runtime):
     ), f"Halt reason must report baseline and threshold. Got: {reason}"
 
 
-def test_live_halt_reason_reports_baseline_and_threshold(proof_runtime):
-    """Halt reason string must include the computed threshold and baseline."""
+def test_live_halt_reason_reports_baseline_and_threshold(proof_runtime, monkeypatch):
+    """Halt reason string must include the computed threshold and baseline.
+    v18.19.2: equity tripwire is opt-in; enable via env-equivalent module attr."""
     import kill_switch
 
+    monkeypatch.setattr(kill_switch, "_EQUITY_TRIPWIRE_ENABLED", True)
     kill_switch.set_live_baseline(2_000.0)
     kill_switch.check_balance(900.0)
 
@@ -129,13 +133,15 @@ def test_live_halt_reason_reports_baseline_and_threshold(proof_runtime):
     assert "900" in reason, f"Halt reason must include current balance. Got: {reason}"
 
 
-def test_paper_kill_switch_still_uses_50_pct(proof_runtime):
-    """Regression guard: v18.18 uses 50% of initial balance/baseline."""
+def test_paper_kill_switch_still_uses_50_pct(proof_runtime, monkeypatch):
+    """Regression guard: v18.18 uses 50% of initial balance/baseline.
+    v18.19.2: equity tripwire is opt-in; enable via env-equivalent module attr."""
     import kill_switch
 
+    monkeypatch.setattr(kill_switch, "_EQUITY_TRIPWIRE_ENABLED", True)
     # 1. Establish baseline at 5000
     kill_switch.check_balance(5000.0)
-    
+
     # 2. Drop balance to 2000 (40% of baseline) → should trigger
     kill_switch.check_balance(2000.0)
 
@@ -184,13 +190,15 @@ def test_live_position_manager_does_not_use_account_size_kill_floor(monkeypatch)
     )
 
 
-def test_live_kill_switch_db_log_uses_correct_schema(proof_runtime):
+def test_live_kill_switch_db_log_uses_correct_schema(proof_runtime, monkeypatch):
     """
     After the schema-mismatch fix, triggering the kill switch must write a row
     to kill_switch_log using the actual column names (balance, not balance_at_trigger).
+    v18.19.2: equity tripwire is opt-in; enable via env-equivalent module attr.
     """
     import kill_switch
 
+    monkeypatch.setattr(kill_switch, "_EQUITY_TRIPWIRE_ENABLED", True)
     kill_switch.set_live_baseline(1_000.0)
     kill_switch.check_balance(400.0)
 

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="refresh" content="30">
-<title>v18.16 Sovereign SOP</title>
+<title>v18.30 Sovereign SOP</title>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
@@ -129,15 +129,15 @@ li + li { margin-top: 6px; }
 </style>
 </head>
 <body>
-<h1>v18.16 Sovereign Operations SOP</h1>
-<div class="subtitle">Current operator reference for the live tiny-live Coinbase spot system on <code>feature/v10-rebuild</code>.</div>
+<h1>v18.30 Sovereign Operations SOP</h1>
+<div class="subtitle">Current operator reference for the live **Sovereign Machine** on <code>release/v18.30</code>.</div>
 <div class="section-note">This file auto-refreshes every 30 seconds and reads its live snapshot from <code>sop_state.generated.js</code>, which is regenerated after deploys or by running <code>python3 scripts/refresh_sop.py</code>.</div>
 
 <script>
 window.__SOP_STATE__ = window.__SOP_STATE__ || {
   generated_at_local: null,
-  canonical_version: "v18.16",
-  branch: "feature/v10-rebuild",
+  canonical_version: "v18.30",
+  branch: "release/v18.30",
   local_head_sha: null,
   github_sha: null,
   worktree_dirty: null,
@@ -174,13 +174,13 @@ window.__SOP_STATE__ = window.__SOP_STATE__ || {
 <div class="grid">
   <div class="card ok">
     <div class="label">Canonical Version</div>
-    <div class="value ok">v18.16</div>
-    <div class="small">Represent this as the active version in current repo-facing and operator-facing surfaces.</div>
+    <div class="value ok">v18.30</div>
+    <div class="small">Recursive Evolution: Self-Vaccinating Sovereign DAG.</div>
   </div>
   <div class="card ok">
     <div class="label">Live Runtime</div>
-    <div class="value ok">Tiny Live</div>
-    <div class="small">System state currently reads <code>TINY_LIVE</code> with broker-first truth checks passing.</div>
+    <div class="value ok">Sovereign Live</div>
+    <div class="small">System state currently reads <code>LIVE</code> with expectancy-driven gates active.</div>
   </div>
   <div class="card warn">
     <div class="label">Live Posture</div>
@@ -198,7 +198,7 @@ window.__SOP_STATE__ = window.__SOP_STATE__ || {
 <div class="card">
   <table>
     <tr><th>Priority</th><th>Location</th><th>Meaning</th></tr>
-    <tr><td>1</td><td><code>origin/feature/v10-rebuild</code></td><td>GitHub is the primary source of truth.</td></tr>
+    <tr><td>1</td><td><code>origin/release/v18.30</code></td><td>GitHub is the primary source of truth.</td></tr>
     <tr><td>2</td><td><code>/Users/joshmacbookair2020/Projects/algo_trading_final</code></td><td>Mac Projects repo is the working tree and authoring copy.</td></tr>
     <tr><td>3</td><td><code>root@64.225.20.38:2222:/root/bot</code></td><td>NYC server is the deploy target and runtime evidence source.</td></tr>
     <tr><td>Ignore</td><td><code>/Users/joshmacbookair2020/Desktop/algo_trading_final</code></td><td>Deprecated copy. Do not use it for compare, deploy, or truth checks.</td></tr>
@@ -208,19 +208,19 @@ window.__SOP_STATE__ = window.__SOP_STATE__ || {
 <h2>Operating Model</h2>
 <div class="grid">
   <div class="card">
-    <div class="label">Execution Shape</div>
+    <div class="label">Expectancy Shape</div>
     <ul>
-      <li>Coinbase spot lane is the active live lane.</li>
-      <li>Broker truth beats stale DB or UI assumptions.</li>
-      <li>Runtime mode truth beats raw env assumptions after startup.</li>
-      <li>Health, readiness, and runtime state must agree before calling the system aligned.</li>
+      <li>Coinbase spot lane is the primary extractive lane.</li>
+      <li>Expectancy math beats hardcoded thresholds (<code>Alpha > 2x Friction</code>).</li>
+      <li>Autonomous vaccination (Online Learner) audits fee leaks.</li>
+      <li>Rational Silence is a valid and profitable regime (CHOP).</li>
     </ul>
   </div>
   <div class="card">
     <div class="label">Deploy Discipline</div>
     <ul>
       <li>Deploy only from a clean worktree.</li>
-      <li>Deploy only when local <code>HEAD</code> equals <code>origin/feature/v10-rebuild</code>.</li>
+      <li>Deploy only when local <code>HEAD</code> equals <code>origin/release/v18.30</code>.</li>
       <li>Every deploy writes <code>/root/bot/version.txt</code> and <code>deploy_manifest.json</code>.</li>
       <li>Post-deploy proof matters more than “deploy succeeded”.</li>
       <li>Protected GitHub deploy path exists via <code>.github/workflows/deploy-nyc.yml</code> with environment approval.</li>
@@ -267,6 +267,8 @@ window.__SOP_STATE__ = window.__SOP_STATE__ || {
   <p>Telegram is a real operator control surface now, but it is still a command bot, not an AI copilot. Commands are authenticated and mode-aware.</p>
   <table>
     <tr><th>Command</th><th>What It Does</th><th>Safety Notes</th></tr>
+    <tr><td><code>/ask [query]</code></td><td>Natural language copilot. Queries codebase, DB, and logs to provide deep architectural or trade analysis.</td><td>Uses 80% cached context (v18.30 efficiency).</td></tr>
+    <tr><td><code>!scalper_on/off</code></td><td>Interceptive chat hook to toggle Strategic Scalper mode (bypasses vetoes for +60% WR signals).</td><td>Updates <code>.env</code> and reloads bot via hook.</td></tr>
     <tr><td><code>/status</code></td><td>Shows current runtime mode, exchange connectivity, buying power, OBI, signal, and active symbol.</td><td>Uses live runtime truth, not a naive static assumption.</td></tr>
     <tr><td><code>/metrics</code></td><td>Shows CPU, RAM, and exchange latency.</td><td>Read-only.</td></tr>
     <tr><td><code>/positions</code></td><td>Shows active spot positions scoped to the current runtime mode.</td><td>Paper mode reads paper positions. Live mode reads live positions.</td></tr>
@@ -336,14 +338,14 @@ window.__SOP_STATE__ = window.__SOP_STATE__ || {
 <div class="card">
   <table>
     <tr><th>Branch</th><th>Status</th><th>Purpose</th></tr>
-    <tr><td><code>feature/v10-rebuild</code></td><td><span class="pill ok">ACTIVE</span></td><td>Current live source branch.</td></tr>
+    <tr><td><code>release/v18.30</code></td><td><span class="pill ok">ACTIVE</span></td><td>Current live production branch (Recursive Evolution).</td></tr>
     <tr><td><code>main</code></td><td><span class="pill info">Base</span></td><td>Primary long-term merge target.</td></tr>
-    <tr><td><code>desktop</code> remote</td><td><span class="pill dead">Ignore</span></td><td>Stale local remote, not a source of truth.</td></tr>
+    <tr><td><code>feature/v10-rebuild</code></td><td><span class="pill dead">Merged</span></td><td>Pre-v18.30 development branch.</td></tr>
   </table>
 </div>
 
 <div class="footer" id="dynamic-footer">
-  v18.16 · branch <code>feature/v10-rebuild</code> · live posture <code>AMBER / constrained_live_only</code> · Telegram command surface truth-aligned
+  v18.30 · branch <code>release/v18.30</code> · live posture <code>AMBER / Sovereign_Expectancy_Active</code> · Telegram AI-copilot enabled
 </div>
 <script>
 function sopEscape(value) {

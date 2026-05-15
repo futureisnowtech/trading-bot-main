@@ -67,6 +67,20 @@ SPOT_SUPPORTED_SYMBOLS = set(SPOT_PRODUCT_SPECS.keys())
 
 _API_BASE = "https://api.coinbase.com"
 
+# v18.19.4: Deep-trace request/response logging is opt-in. Default off because
+# each call serializes the full /accounts JSON (hundreds of lines) and the scan
+# loop fires it many times per second — CPU + log volume blow up otherwise.
+# Re-enable for debugging via env: COINBASE_DEEP_TRACE=true
+_DEEP_TRACE: bool = (
+    os.getenv("COINBASE_DEEP_TRACE", "false").strip().lower() == "true"
+)
+
+# v18.19.4: TTL cache for GET /accounts. crypto_tradeability calls
+# broker.get_spot_balance() once per scanned symbol — 8 calls per scan
+# pre-fix. Each scan finishes in <1s, so a 3s TTL collapses redundant
+# fetches within a scan into one round-trip without staling balance reads.
+_ACCOUNTS_CACHE_TTL_S: float = 3.0
+
 
 def _holdings_to_positions(holdings: Dict[str, Dict], price_getter) -> List[dict]:
     result = []
@@ -113,6 +127,9 @@ class CoinbaseSpotBroker:
         self._holdings: Dict[str, Dict] = {}
         self._paper_balance_usd = 10000.0
         self._fallback_price = lambda s: 0.0
+        # v18.19.4: cached /accounts snapshot — see get_spot_balance().
+        self._balance_cache: Optional[dict] = None
+        self._balance_cache_ts: float = 0.0
 
         # Load credentials (same source as futures broker)
         try:
@@ -183,10 +200,16 @@ class CoinbaseSpotBroker:
         if method != "GET":
             headers["Content-Type"] = "application/json"
             
-        logger.info(f"[spot] Deep Trace Request: {method} {url} body={body}")
+        if _DEEP_TRACE:
+            logger.info(f"[spot] Deep Trace Request: {method} {url} body={body}")
         resp = _requests.request(method, url, headers=headers, json=body, timeout=10)
-        logger.info(f"[spot] Deep Trace Response: {resp.status_code} {resp.text[:500]}")
+        if _DEEP_TRACE:
+            logger.info(f"[spot] Deep Trace Response: {resp.status_code} {resp.text[:500]}")
         if not resp.ok:
+            # Failure path always logs — we want the error in production logs.
+            logger.warning(
+                f"[spot] {method} {path} → {resp.status_code}: {resp.text[:200]}"
+            )
             raise RuntimeError(
                 f"Coinbase Spot API {method} {path} → {resp.status_code}: {resp.text[:400]}"
             )
@@ -289,6 +312,15 @@ class CoinbaseSpotBroker:
                 **{f"{sym.lower()}_available": qty for sym, qty in symbol_balances.items()}
             }
 
+        # v18.19.4: short TTL cache. crypto_tradeability hits this per-asset
+        # within a scan cycle (<1s); without caching we fire /accounts 8 times.
+        now = time.time()
+        if (
+            self._balance_cache is not None
+            and (now - self._balance_cache_ts) < _ACCOUNTS_CACHE_TTL_S
+        ):
+            return self._balance_cache
+
         try:
             data = self._request("GET", "/api/v3/brokerage/accounts")
             accounts = data.get("accounts", [])
@@ -304,6 +336,8 @@ class CoinbaseSpotBroker:
             result = {"usd_available": usd, "symbol_balances": symbol_balances}
             for sym, qty in symbol_balances.items():
                 result[f"{sym.lower()}_available"] = qty
+            self._balance_cache = result
+            self._balance_cache_ts = now
             return result
         except Exception as e:
             logger.warning(f"[spot] get_spot_balance error: {e}")

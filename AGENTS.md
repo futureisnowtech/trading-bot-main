@@ -6,7 +6,7 @@
 ## Canonical Truth
 
 - Repo root: `/Users/joshmacbookair2020/Projects/algo_trading_final`
-- Canonical version: `v18.19.3` (`2026-05-15`)
+- Canonical version: `v18.19.4` (`2026-05-15`)
 - Canonical active lane: **Coinbase spot scalp**
 - **Status:** **FULL LIVE RELEASE**. Tiny-Live safety gates removed.
 - **Critical Changes (v18.19):**
@@ -23,6 +23,9 @@
   - Retired global equity kill switch (`kill_switch.check_balance()`) — was redundant with spot KS10a (4 consecutive losses) and KS10b (-2% daily PnL, 3-of-10 rolling losses). Default disabled; re-enable via `EQUITY_KILL_SWITCH_ENABLED=true`. API-error storm (5+/10min) and order-latency (>5s) tripwires kept.
 - **Critical Changes (v18.19.3):**
   - Fix `algo_bot_cpu_percent` metric: now process-scoped (`psutil.Process().cpu_percent()`) instead of system-wide. The 1-vCPU droplet is shared with Loki and dockerd, so the system-wide reading was pinned at ~100% regardless of bot load. Normalized by CPU count so values stay 0-100. Grafana System Health panel now reflects the bot's actual CPU consumption.
+- **Critical Changes (v18.19.4):**
+  - `execution/coinbase_spot_broker.py`: gate the per-request "Deep Trace" logger.info calls behind `COINBASE_DEEP_TRACE` env var (default off). Failure responses still log a one-line warning. Was logging full /accounts JSON (hundreds of lines) on every call.
+  - Add 3-second TTL cache on `get_spot_balance()` so per-asset tradeability checks within a scan cycle reuse one /accounts snapshot instead of firing 8 HTTP round-trips. Cuts API volume by ~8x during scans.
 - Canonical launch path: `python3 scripts/go_live.py`
 - Canonical guarded deploy path: local `./deploy.sh`
 - Canonical memory order:

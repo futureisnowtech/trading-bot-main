@@ -6,7 +6,7 @@
 ## Canonical Truth
 
 - Repo root: `/Users/joshmacbookair2020/Projects/algo_trading_final`
-- Canonical version: `v18.19.2` (`2026-05-15`)
+- Canonical version: `v18.19.3` (`2026-05-15`)
 - Canonical active lane: **Coinbase spot scalp**
 - **Status:** **FULL LIVE RELEASE**. Tiny-Live safety gates removed.
 - **Critical Changes (v18.19):**
@@ -21,6 +21,8 @@
   - Reset spot kill switch to clear stale `HALTED` state from prior auth failures.
 - **Critical Changes (v18.19.2):**
   - Retired global equity kill switch (`kill_switch.check_balance()`) — was redundant with spot KS10a (4 consecutive losses) and KS10b (-2% daily PnL, 3-of-10 rolling losses). Default disabled; re-enable via `EQUITY_KILL_SWITCH_ENABLED=true`. API-error storm (5+/10min) and order-latency (>5s) tripwires kept.
+- **Critical Changes (v18.19.3):**
+  - Fix `algo_bot_cpu_percent` metric: now process-scoped (`psutil.Process().cpu_percent()`) instead of system-wide. The 1-vCPU droplet is shared with Loki and dockerd, so the system-wide reading was pinned at ~100% regardless of bot load. Normalized by CPU count so values stay 0-100. Grafana System Health panel now reflects the bot's actual CPU consumption.
 - Canonical launch path: `python3 scripts/go_live.py`
 - Canonical guarded deploy path: local `./deploy.sh`
 - Canonical memory order:

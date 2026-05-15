@@ -1,3 +1,4 @@
+import os
 import time
 import psutil
 import threading
@@ -17,6 +18,20 @@ class SystemState:
     def _initialize(self):
         self.start_time = time.time()
         self.last_metrics_refresh = 0
+        # v18.19.3: scope CPU metric to the bot process. The droplet has 1 vCPU
+        # shared with Loki/dockerd, so psutil.cpu_percent() (system-wide) was
+        # pinned near 100% regardless of bot load. Process().cpu_percent() answers
+        # the actually-useful question: "how hard is the bot working?"
+        self._proc = psutil.Process(os.getpid())
+        try:
+            self._cpu_count = max(1, psutil.cpu_count() or 1)
+        except Exception:
+            self._cpu_count = 1
+        # Seed cpu_percent so the first real call returns a delta, not 0.
+        try:
+            self._proc.cpu_percent(interval=None)
+        except Exception:
+            pass
         self.state = {
             "mode": "PAPER",  # PAPER or LIVE
             "exchange": {
@@ -108,7 +123,14 @@ class SystemState:
             if now - self.last_metrics_refresh < 5.0:
                 return
             self.last_metrics_refresh = now
-            self.state["system"]["cpu_percent"] = psutil.cpu_percent(interval=0.1)
+            # Process-scoped CPU, normalized to 0-100% on a per-CPU basis.
+            # On a 4-vCPU box, a thread maxing one core reads ~25%; on a 1-vCPU
+            # box it reads ~100%. Either way it tracks the BOT's load, not the host's.
+            try:
+                raw = self._proc.cpu_percent(interval=None)
+            except Exception:
+                raw = 0.0
+            self.state["system"]["cpu_percent"] = round(raw / self._cpu_count, 1)
             self.state["system"]["ram_percent"] = psutil.virtual_memory().percent
             self.state["system"]["uptime_seconds"] = int(now - self.start_time)
 

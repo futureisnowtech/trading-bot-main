@@ -643,17 +643,12 @@ def _write_crypto_lane_runtime(open_positions: Optional[Dict] = None) -> None:
             blocked_reason = "kill_switch_active"
             action_needed = "review_kill_switch_trigger"
             tradable = 0
-        elif bool(getattr(_cfg, "SPOT_TINY_LIVE_ENABLEMENT_CONFIRMED", False)):
-            readiness = "TINY_LIVE"
-            launch_state = readiness
-            tradable = 1
         else:
-            health = "WARN"
-            readiness = "NOT_READY"
-            launch_state = "NOT_READY"
-            blocked_reason = "tiny_live_enablement_not_confirmed"
-            action_needed = "complete_acceptance_tests_and_confirm_tiny_live"
-            tradable = 0
+            # v18.19: Consolidated Full Live mode. 
+            # Tiny-Live training wheels removed per operator directive.
+            readiness = "LIVE"
+            launch_state = "LIVE"
+            tradable = 1
 
         upsert_lane_state(
             "crypto",

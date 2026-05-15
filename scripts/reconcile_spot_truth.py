@@ -80,22 +80,22 @@ def main():
     repair = "--repair" in sys.argv
     
     # Check Live
-    live_truth = get_spot_position_truth()
-    print_truth_table(live_truth)
+    live_truth = get_spot_position_truth(paper=False)
+    print_truth_table(live_truth, paper=False)
     
     # Check Paper
-    paper_truth = get_spot_position_truth()
-    print_truth_table(paper_truth)
+    paper_truth = get_spot_position_truth(paper=True)
+    print_truth_table(paper_truth, paper=True)
 
     if repair:
         logger.info("\n--- REPAIR MODE ACTIVE ---")
-        repair_issues(live_truth)
-        repair_issues(paper_truth)
+        repair_issues(live_truth, paper=False)
+        repair_issues(paper_truth, paper=True)
         logger.info("\nRepairs complete. Re-running check...")
-        live_truth = get_spot_position_truth()
-        print_truth_table(live_truth)
-        paper_truth = get_spot_position_truth()
-        print_truth_table(paper_truth)
+        live_truth = get_spot_position_truth(paper=False)
+        print_truth_table(live_truth, paper=False)
+        paper_truth = get_spot_position_truth(paper=True)
+        print_truth_table(paper_truth, paper=True)
 
 if __name__ == "__main__":
     main()

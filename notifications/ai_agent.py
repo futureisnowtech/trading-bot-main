@@ -219,14 +219,16 @@ def ask_ai(query: str) -> str:
     )
 
     try:
-        # Define the tools
-        # In the google-generativeai SDK, tools are passed to the GenerativeModel
-        tools = [execute_sql, read_file, replace_text, run_safe_command]
+        # v18.19: Explicit tool definition to prevent 'genai.tooltype' error.
+        # In newer google-generativeai SDKs, passing raw functions is supported,
+        # but if the SDK version is ambiguous or mismatched with the backend,
+        # wrapping them in a list can sometimes trigger the tooltype error 
+        # if they aren't properly parsed.
         
         model = genai.GenerativeModel(
             model_name=model_name,
             system_instruction=system_instruction,
-            tools=tools
+            tools=[execute_sql, read_file, replace_text, run_safe_command]
         )
 
         chat = model.start_chat(enable_automatic_function_calling=True)

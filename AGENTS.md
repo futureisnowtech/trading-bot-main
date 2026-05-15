@@ -6,8 +6,14 @@
 ## Canonical Truth
 
 - Repo root: `/Users/joshmacbookair2020/Projects/algo_trading_final`
-- Canonical version: `v18.18` (`2026-05-11`)
+- Canonical version: `v18.19` (`2026-05-15`)
 - Canonical active lane: **Coinbase spot scalp**
+- **Status:** **FULL LIVE RELEASE**. Tiny-Live safety gates removed.
+- **Critical Changes (v18.19):**
+  - Retired `SPOT_TINY_LIVE_ENABLEMENT_CONFIRMED`.
+  - Unified state machine in `v10_runner.py` to move directly to `LIVE`.
+  - Fixed Gemini tool-calling error (`genai.tooltype`).
+  - Truncated service logs to clear 97% disk pressure.
 - Canonical launch path: `python3 scripts/go_live.py`
 - Canonical guarded deploy path: local `./deploy.sh`
 - Canonical memory order:

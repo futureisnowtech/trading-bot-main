@@ -1028,9 +1028,9 @@ SPOT_TINY_LIVE_ALLOWED_ROUTE: str = (
 SPOT_QUARANTINE_OVERRIDE_SCORE: float = float(
     os.getenv("SPOT_QUARANTINE_OVERRIDE_SCORE", "72.0")
 )
-SPOT_TINY_LIVE_ENABLEMENT_CONFIRMED: bool = os.getenv(
-    "SPOT_TINY_LIVE_ENABLEMENT_CONFIRMED", "false"
-).strip().lower() in ("true", "1", "yes")
+# v18.19 (Full Live Release): TINY_LIVE logic retired. 
+# Full autonomous execution enabled via SPOT_LANE_ACTIVE.
+SPOT_TINY_LIVE_ENABLEMENT_CONFIRMED: bool = True 
 SPOT_EXTERNAL_MANUAL_HOLDINGS: list[str] = [
     "BTC",
     "ETH",

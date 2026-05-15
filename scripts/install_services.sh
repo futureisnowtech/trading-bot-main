@@ -44,7 +44,17 @@ _generate_live_plist() {
         <string>--confirm-live</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>$PROJ</string>
+    <string>/Users/joshmacbookair2020/Projects/algo_trading_final</string>
+    <key>SoftResourceLimits</key>
+    <dict>
+        <key>numberOfFiles</key>
+        <integer>4096</integer>
+    </dict>
+    <key>HardResourceLimits</key>
+    <dict>
+        <key>numberOfFiles</key>
+        <integer>4096</integer>
+    </dict>
     <key>KeepAlive</key>
     <true/>
     <key>RunAtLoad</key>
@@ -65,6 +75,8 @@ _generate_live_plist() {
         <string>1</string>
         <key>TQDM_DISABLE</key>
         <string>1</string>
+        <key>TELEGRAM_FORCE_POLLING</key>
+        <string>false</string>
         <key>TOKENIZERS_PARALLELISM</key>
         <string>false</string>
     </dict>

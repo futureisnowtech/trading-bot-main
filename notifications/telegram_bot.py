@@ -16,7 +16,7 @@ from telegram.ext import (
     filters,
     CallbackQueryHandler,
 )
-from telegram.constants import ParseMode
+from telegram.constants import ParseMode, ChatAction
 
 import system_state
 from spot_engine import get_spot_positions, _get_broker
@@ -218,7 +218,7 @@ async def logs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         output = subprocess.check_output(["tail", "-n", "15", log_path]).decode("utf-8")
         await _reply_text(
-            update, f"<code>{escape(output)}</code>", parse_mode=ParseMode.HTML
+            update, f"<code>{escape(output, quote=False)}</code>", parse_mode=ParseMode.HTML
         )
     except Exception as e:
         await _reply_text(update, f"Error fetching logs: {e}")
@@ -411,6 +411,12 @@ async def _handle_ai_query(update: Update, query: str):
         await _reply_text(update, f"⚠️ {rejection}")
         return
 
+    # Native iOS "flicker": Send TYPING action
+    try:
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
+    except Exception:
+        pass
+
     thinking_msg = await _reply_text(
         update, "<i>Thinking...</i>", parse_mode=ParseMode.HTML
     )
@@ -420,9 +426,33 @@ async def _handle_ai_query(update: Update, query: str):
         )
         return
 
+    # v18.32: UI Animation Task (makes static text feel alive on iOS)
+    async def animate_thinking():
+        chars = [".", "..", "..."]
+        idx = 0
+        try:
+            while True:
+                await asyncio.sleep(1.5)
+                await thinking_msg.edit_text(
+                    f"<i>Thinking{chars[idx % 3]}</i>", parse_mode=ParseMode.HTML
+                )
+                idx += 1
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            pass
+
+    anim_task = asyncio.create_task(animate_thinking())
+
     try:
-        response = await asyncio.to_thread(ask_ai, query)
-        chunks = chunk_message(escape(response))
+        logger.info(f"[telegram] Starting AI query for user={user_id}: {query[:50]}...")
+        # v18.31: Enforce 100s timeout on thread pool task to prevent loop exhaustion
+        response = await asyncio.wait_for(asyncio.to_thread(ask_ai, query), timeout=100.0)
+        logger.info(f"[telegram] AI query complete for user={user_id}")
+
+        anim_task.cancel() # Stop animation
+
+        chunks = chunk_message(escape(response, quote=False))
 
         keyboard = [
             [
@@ -452,9 +482,18 @@ async def _handle_ai_query(update: Update, query: str):
                 parse_mode=ParseMode.HTML,
             )
 
+    except asyncio.TimeoutError:
+        anim_task.cancel()
+        logger.error(f"AI query timed out for user={user_id}")
+        await thinking_msg.edit_text("⏳ Request timed out (90s limit). Please try a shorter query.")
     except Exception as e:
+        anim_task.cancel()
         logger.error(f"AI handler error: {e}")
-        await thinking_msg.edit_text(f"Error: {str(e)}")
+        try:
+            # v18.31: Safer error display with escaping fix
+            await thinking_msg.edit_text(f"⚠️ Error: {escape(str(e), quote=False)}")
+        except Exception:
+            await thinking_msg.edit_text("⚠️ An internal error occurred while processing your request.")
 
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -555,19 +594,23 @@ async def run_bot():
 
     current_host = socket.gethostname()
     target_host = getattr(_cfg, "TELEGRAM_POLLING_HOSTNAME", "algo-bot-live")
+    force_polling = os.environ.get("TELEGRAM_FORCE_POLLING", "").lower() == "true"
 
-    if current_host != target_host:
+    if current_host != target_host and not force_polling:
         logger.warning(
             f"[telegram] Sovereign Polling Guard: hostname mismatch ('{current_host}' != '{target_host}'). "
             "Disabling polling (Command Mode) to prevent conflict with Production. "
-            "Send-only mode is still active."
+            "Send-only mode is still active. Use TELEGRAM_FORCE_POLLING=true to bypass."
         )
         # Block until the bot is stopped (no polling started)
         stop_event = asyncio.Event()
         await stop_event.wait()
         return
 
-    logger.info(f"[telegram] Sovereign Polling Guard: hostname match ('{current_host}'). Command Mode AUTHORIZED.")
+    if current_host == target_host:
+        logger.info(f"[telegram] Sovereign Polling Guard: hostname match ('{current_host}'). Command Mode AUTHORIZED.")
+    else:
+        logger.info(f"[telegram] Sovereign Polling Guard: hostname mismatch, but TELEGRAM_FORCE_POLLING=true. Command Mode FORCED.")
 
     try:
         app = ApplicationBuilder().token(TOKEN).build()

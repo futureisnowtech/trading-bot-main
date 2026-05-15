@@ -2298,7 +2298,6 @@ def _attempt_entry(
         edge_score=edge_score,
         cascade_risk_score=0,
         deployed_usd=deployed_usd,
-        paper=False,
     )
 
     size_usd = sizing["position_usd"] * regime_mult * size_mult

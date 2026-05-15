@@ -30,6 +30,7 @@ for i, arg in enumerate(sys.argv):
         _mode = sys.argv[i + 1].lower()
     if arg == "--confirm-live":
         _confirm = True
+        os.environ["ALGO_LIVE_CONFIRM"] = "I UNDERSTAND"
 
 if _mode == "live" and not _confirm and not os.environ.get("GITHUB_ACTIONS"):
     print("boot.py: refusing live launch without ALGO_LIVE_CONFIRM='I UNDERSTAND' or --confirm-live", file=sys.stderr)

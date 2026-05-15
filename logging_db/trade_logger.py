@@ -5,6 +5,7 @@ Positions are written to disk on every open/close so a restart never loses state
 """
 
 import sqlite3
+import logging
 import csv
 import os
 import time
@@ -18,14 +19,45 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import DB_PATH, CSV_LOG_DIR, MARKET_TIMEZONE
 
+logger = logging.getLogger(__name__)
+
+import threading
+
+# ── Global Connection & Lock (Fix for v18.32 Ghost Hangs) ────────────────────
+_DB_LOCK = threading.Lock()
+_DB_CONN = None
+_DB_CONN_PATH = None
 
 def _conn() -> sqlite3.Connection:
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    c = sqlite3.connect(DB_PATH, check_same_thread=False)
-    c.row_factory = sqlite3.Row
-    # WAL mode: writes survive crashes without corrupting existing data.
-    c.execute("PRAGMA journal_mode=WAL")
-    return c
+    """Singleton thread-safe connection to prevent [Errno 24] Too many open files."""
+    global _DB_CONN, _DB_CONN_PATH
+    with _DB_LOCK:
+        # If connection exists but path changed (common in tests), close and recreate
+        if _DB_CONN is not None and _DB_CONN_PATH != DB_PATH:
+            try:
+                _DB_CONN.close()
+            except Exception:
+                pass
+            _DB_CONN = None
+
+        if _DB_CONN is None:
+            os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+            _DB_CONN = sqlite3.connect(DB_PATH, check_same_thread=False)
+            _DB_CONN.row_factory = sqlite3.Row
+            _DB_CONN_PATH = DB_PATH
+            # WAL mode: writes survive crashes without corrupting existing data.
+            _DB_CONN.execute("PRAGMA journal_mode=WAL")
+        else:
+            try:
+                # Ping to check if connection is still alive
+                _DB_CONN.execute("SELECT 1")
+            except (sqlite3.ProgrammingError, sqlite3.OperationalError):
+                # Connection closed or stale, recreate
+                _DB_CONN = sqlite3.connect(DB_PATH, check_same_thread=False)
+                _DB_CONN.row_factory = sqlite3.Row
+                _DB_CONN_PATH = DB_PATH
+                _DB_CONN.execute("PRAGMA journal_mode=WAL")
+        return _DB_CONN
 
 
 def init_db() -> None:
@@ -552,7 +584,6 @@ def init_db() -> None:
         pass
 
     conn.commit()
-    conn.close()
 
 
 def _backfill_tradeability_truth(cur) -> None:
@@ -694,8 +725,7 @@ def log_trade(
             (symbol, strategy, action, paper, qty),
         )
         if cur.fetchone():
-            conn.close()
-            return -1  # silently skip duplicate
+                return -1  # silently skip duplicate
 
     cur.execute(
         """INSERT INTO trades
@@ -724,7 +754,6 @@ def log_trade(
     )
     trade_id = cur.lastrowid
     conn.commit()
-    conn.close()
     _csv_append(
         ts,
         strategy,
@@ -752,7 +781,6 @@ def log_signal(
         (_ts(), strategy, symbol, signal, confidence, reason, int(acted_on), price),
     )
     conn.commit()
-    conn.close()
 
 
 def log_debate(
@@ -796,7 +824,6 @@ def log_debate(
         ),
     )
     conn.commit()
-    conn.close()
 
 
 def log_event(level, source, message) -> None:
@@ -806,7 +833,6 @@ def log_event(level, source, message) -> None:
         (_ts(), level, source, message),
     )
     conn.commit()
-    conn.close()
 
 
 def log_api_cost(call_type, input_tokens, output_tokens, cost_usd, symbol="") -> None:
@@ -816,7 +842,6 @@ def log_api_cost(call_type, input_tokens, output_tokens, cost_usd, symbol="") ->
         (_ts(), call_type, input_tokens, output_tokens, cost_usd, symbol),
     )
     conn.commit()
-    conn.close()
 
 
 def log_edge_snapshot(
@@ -854,7 +879,6 @@ def log_edge_snapshot(
         ),
     )
     conn.commit()
-    conn.close()
 
 
 def log_trade_features(
@@ -889,7 +913,6 @@ def log_trade_features(
         )
         row_id = int(cur.lastrowid or 0)
         conn.commit()
-        conn.close()
         return row_id
     except Exception:
         return 0  # feature snapshot is best-effort; never block trade execution
@@ -1057,7 +1080,6 @@ def log_scan_candidate(
         )
         row_id = cur.lastrowid or 0
         conn.commit()
-        conn.close()
         return row_id
     except Exception as e:
         import logging
@@ -1119,7 +1141,6 @@ def update_scan_candidate_result(candidate_id: int, **updates) -> bool:
         )
         conn.commit()
         changed = cur.rowcount > 0
-        conn.close()
         return changed
     except Exception:
         return False
@@ -1184,7 +1205,6 @@ def log_scan_funnel(
         )
         conn.commit()
         row_id = cur.lastrowid or 0
-        conn.close()
         return row_id
     except Exception as e:
         logger.debug(f"[trade_logger] log_scan_funnel error: {e}")
@@ -1213,7 +1233,6 @@ def get_unlabeled_candidates(min_age_hours: float = 4.0, limit: int = 100) -> li
             (cutoff, limit),
         )
         rows = [dict(zip([c[0] for c in cur.description], r)) for r in cur.fetchall()]
-        conn.close()
         return rows
     except Exception:
         return []
@@ -1282,7 +1301,6 @@ def log_candidate_outcome(
         )
         cur.execute("UPDATE scan_candidates SET labeled=1 WHERE id=?", (candidate_id,))
         conn.commit()
-        conn.close()
     except Exception:
         pass  # best-effort; never block the labeler loop
 
@@ -1340,7 +1358,6 @@ def get_candidate_journal_stats(days: int = 7) -> dict:
         last_ts_row = cur.fetchone()
         last_ts = last_ts_row[0] if last_ts_row else None
 
-        conn.close()
         return {
             "total_candidates": total,
             "labeled": labeled,
@@ -1398,7 +1415,6 @@ def prune_old_candidates(
         result["remaining"] = (cur.fetchone() or [0])[0]
 
         conn.commit()
-        conn.close()
     except Exception:
         pass
     return result
@@ -1436,7 +1452,6 @@ def log_trade_integrity(
         )
         inserted = cur.rowcount > 0
         conn.commit()
-        conn.close()
         return inserted
     except Exception:
         return False
@@ -1457,7 +1472,6 @@ def get_integrity_tier(close_order_id: str) -> str:
             (close_order_id,),
         )
         row = cur.fetchone()
-        conn.close()
         return row[0] if row else "suspect"
     except Exception:
         return "suspect"
@@ -1487,7 +1501,6 @@ def get_integrity_summary() -> dict:
         total_closes = (cur.fetchone() or [0])[0]
         cur.execute("SELECT tier, COUNT(*) FROM trade_integrity GROUP BY tier")
         tier_counts = {r[0]: r[1] for r in cur.fetchall()}
-        conn.close()
         covered = sum(tier_counts.values())
         return {
             "verified": tier_counts.get("verified", 0),
@@ -1600,7 +1613,6 @@ def bulk_backfill_integrity() -> dict:
                 pass
 
         conn.commit()
-        conn.close()
     except Exception:
         pass
     return result
@@ -1659,7 +1671,6 @@ def log_exit_evaluation(
         )
         inserted = cur.rowcount > 0
         conn.commit()
-        conn.close()
         return inserted
     except Exception:
         return False
@@ -1692,7 +1703,6 @@ def get_exit_quality_summary(
             (cutoff,),
         )
         rows = cur.fetchall()
-        conn.close()
         if not rows:
             return defaults
         count = len(rows)
@@ -1744,7 +1754,6 @@ def upsert_challenger_state(
             (strategy, run_id, promotion_tier, criteria_met_json, notes, now),
         )
         conn.commit()
-        conn.close()
     except Exception:
         pass
 
@@ -1756,7 +1765,6 @@ def get_promotion_state() -> list:
         cur = conn.cursor()
         cur.execute("SELECT * FROM challenger_state ORDER BY created_at DESC LIMIT 50")
         rows = [dict(zip([c[0] for c in cur.description], r)) for r in cur.fetchall()]
-        conn.close()
         return rows
     except Exception:
         return []
@@ -1894,7 +1902,6 @@ def persist_position(
         values,
     )
     conn.commit()
-    conn.close()
 
 
 def delete_position(symbol, strategy, paper: int = 0) -> None:
@@ -1904,7 +1911,6 @@ def delete_position(symbol, strategy, paper: int = 0) -> None:
         (symbol, strategy, paper),
     )
     conn.commit()
-    conn.close()
 
 
 # ─── v18.19 sticky regime state ─────────────────────────────────────────────
@@ -1921,7 +1927,6 @@ def load_spot_regime_state(symbol: str) -> Optional[str]:
             "SELECT last_regime FROM spot_regime_state WHERE symbol=?", (sym,)
         )
         row = cur.fetchone()
-        conn.close()
         return str(row["last_regime"]) if row else None
     except Exception:
         return None
@@ -1939,7 +1944,6 @@ def save_spot_regime_state(symbol: str, regime: str) -> None:
             (sym, str(regime).upper(), int(time.time())),
         )
         conn.commit()
-        conn.close()
     except Exception:
         pass
 
@@ -1958,7 +1962,6 @@ def load_spot_cooldown_state(symbol: str) -> Optional[int]:
             "SELECT last_exit_ts FROM spot_cooldown_state WHERE symbol=?", (sym,)
         )
         row = cur.fetchone()
-        conn.close()
         return int(row["last_exit_ts"]) if row else None
     except Exception:
         return None
@@ -1977,7 +1980,6 @@ def save_spot_cooldown_state(symbol: str, last_exit_ts: Optional[int] = None) ->
             (sym, ts),
         )
         conn.commit()
-        conn.close()
     except Exception:
         pass
 
@@ -2001,7 +2003,6 @@ def increment_sell_failure(symbol: str, strategy: str, paper: int = 0) -> int:
             (sym, strategy, paper),
         )
         row = cur.fetchone()
-        conn.close()
         return int(row["sell_failure_count"]) if row else 0
     except Exception:
         return 0
@@ -2017,7 +2018,6 @@ def mark_sell_blocked(symbol: str, strategy: str, reason: str, paper: int = 0) -
             (str(reason or ""), sym, strategy, paper),
         )
         conn.commit()
-        conn.close()
     except Exception:
         pass
 
@@ -2032,7 +2032,6 @@ def clear_sell_failure(symbol: str, strategy: str, paper: int = 0) -> None:
             (sym, strategy, paper),
         )
         conn.commit()
-        conn.close()
     except Exception:
         pass
 
@@ -2457,7 +2456,6 @@ def get_recent_tv_signal(symbol: str, max_age_seconds: int = 300) -> dict | None
             "SELECT message, ts FROM system_events WHERE source='tradingview' ORDER BY ts DESC LIMIT 20"
         )
         rows = cur.fetchall()
-        conn.close()
         now = datetime.now(timezone.utc)
         for msg, ts_str in rows:
             try:
@@ -2540,7 +2538,6 @@ def log_tv_signal(
     )
     row_id = int(cur.lastrowid or 0)
     conn.commit()
-    conn.close()
     return row_id
 
 
@@ -2577,7 +2574,6 @@ def get_recent_tv_signals(
                 """
             )
         rows = cur.fetchall()
-        conn.close()
         now = datetime.now(timezone.utc)
         out: list[dict] = []
         for row in rows:
@@ -2774,7 +2770,6 @@ def get_trade_quality_stats(lookback: int = 20) -> dict:
             (lookback,),
         )
         rows = [dict(r) for r in cur.fetchall()]
-        conn.close()
     except Exception:
         return _defaults
 
@@ -2847,7 +2842,6 @@ def get_open_position_health() -> list:
             "FROM open_positions WHERE paper=0"
         )
         rows = cur.fetchall()
-        conn.close()
         result = []
         for r in rows:
             result.append(
@@ -2959,7 +2953,6 @@ def get_intelligence_log(limit: int = 30) -> dict:
         except Exception:
             signal_shifts = []
 
-        conn.close()
         return {
             "meta_analyses": meta_analyses,
             "recommendations": recommendations,

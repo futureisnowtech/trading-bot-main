@@ -4,26 +4,36 @@
 # BeforeAgent | Intercepts chat commands to toggle bot operational mode
 # ─────────────────────────────────────────────────────────────────────────────
 
+# LOG_FILE="/tmp/gemini_hook_debug.log"
+# printf "--- Hook Start ---\n" >> "$LOG_FILE"
+
 INPUT=$(cat -)
+# printf "INPUT: %s\n" "$INPUT" >> "$LOG_FILE"
+
+if [ -z "$INPUT" ]; then
+    # printf "Empty input, exiting\n" >> "$LOG_FILE"
+    exit 0
+fi
+
 QUERY=$(printf "%s" "$INPUT" | python3 -c "
 import sys, json
 try:
     d = json.load(sys.stdin)
-    print(d.get('query', '').strip())
-except Exception:
+    # Check common keys for user message
+    q = d.get('query') or d.get('prompt') or d.get('user_message') or ''
+    print(q.strip())
+except Exception as e:
+    # sys.stderr.write(f'JSON error: {e}\n')
     print('')
 " 2>/dev/null)
+
+# printf "QUERY: %s\n" "$QUERY" >> "$LOG_FILE"
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 ENV_FILE="$REPO_ROOT/.env"
 
-if [ ! -f "$ENV_FILE" ]; then
-    # Create .env if missing (rare, but defensive)
-    touch "$ENV_FILE"
-fi
-
 if [[ "$QUERY" == "!scalper_on" ]]; then
-    # Set STRATEGIC_SCALPER_MODE=true in .env
+    if [ ! -f "$ENV_FILE" ]; then touch "$ENV_FILE"; fi
     if grep -q "STRATEGIC_SCALPER_MODE" "$ENV_FILE"; then
         sed "s/STRATEGIC_SCALPER_MODE=.*/STRATEGIC_SCALPER_MODE=true/" "$ENV_FILE" > "$ENV_FILE.tmp" && mv "$ENV_FILE.tmp" "$ENV_FILE"
     else
@@ -34,7 +44,7 @@ if [[ "$QUERY" == "!scalper_on" ]]; then
 fi
 
 if [[ "$QUERY" == "!scalper_off" ]]; then
-    # Set STRATEGIC_SCALPER_MODE=false in .env
+    if [ ! -f "$ENV_FILE" ]; then touch "$ENV_FILE"; fi
     if grep -q "STRATEGIC_SCALPER_MODE" "$ENV_FILE"; then
         sed "s/STRATEGIC_SCALPER_MODE=.*/STRATEGIC_SCALPER_MODE=false/" "$ENV_FILE" > "$ENV_FILE.tmp" && mv "$ENV_FILE.tmp" "$ENV_FILE"
     else
@@ -44,6 +54,7 @@ if [[ "$QUERY" == "!scalper_off" ]]; then
     exit 0
 fi
 
-# Pass through for all other queries
-printf "%s\n" "$INPUT"
+# IMPORTANT: Always return the original payload if no intercept occurred.
+# Gemini CLI hooks MUST return valid JSON if they consume stdin.
+printf "%s" "$INPUT"
 exit 0

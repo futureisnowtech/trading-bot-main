@@ -18,6 +18,7 @@ except Exception:
 " 2>/dev/null)
 
 if [ -z "$FILE" ]; then
+    printf "%s" "$INPUT"
     exit 0
 fi
 
@@ -74,4 +75,5 @@ if echo "$FILE" | grep -qE '\.gemini/logs/commands\.log$'; then
     exit 2
 fi
 
+printf "%s" "$INPUT"
 exit 0

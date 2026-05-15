@@ -19,6 +19,7 @@ except Exception:
 " 2>/dev/null)
 
 if [ -z "$CMD" ]; then
+    printf "%s" "$INPUT"
     exit 0
 fi
 
@@ -28,6 +29,7 @@ fi
 # They embed the policy checks and avoid ad hoc live-start commands.
 # ════════════════════════════════════════════════════════════════════════════
 if echo "$CMD" | grep -qE '^[[:space:]]*python3([[:space:]]+-B)?[[:space:]]+(.*/)?scripts/go_(live|paper)\.py[[:space:]]*$'; then
+    printf "%s" "$INPUT"
     exit 0
 fi
 
@@ -197,8 +199,10 @@ if echo "$CMD" | grep -qE 'gh pr create'; then
         echo "$RESULT" >&2
         echo "Fix failing tests, then retry gh pr create." >&2
         exit 2
-    fi
-    echo "PR gate: smoke tests passed — allowing gh pr create." >&2
-fi
+        fi
+        echo "PR gate: smoke tests passed — allowing gh pr create." >&2
+        fi
 
-exit 0
+        printf "%s" "$INPUT"
+        exit 0
+

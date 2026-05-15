@@ -37,17 +37,20 @@ if [ -f "$LOG_PATH" ]; then
     fi
 fi
 
-if [ -z "$ERROR_REPORT" ]; then
+if [ -z "$ERROR_REPORT" ] || [ "$ERROR_REPORT" == "null" ]; then
     echo "{\"context\": \"\"}"
     exit 0
 fi
 
 # 3. Format mandatory directive
-MANDATORY_DIRECTIVE=$(printf "CRITICAL EXECUTION ERRORS DETECTED:\n%b\n\nMANDATORY DIRECTIVE: As a Lead Engineer, you MUST prioritize fixing these execution bugs. Analyze the tracebacks, identify the root cause in the code, and apply a permanent fix before performing any other tasks." "$ERROR_REPORT")
+MANDATORY_DIRECTIVE=$(printf "CRITICAL EXECUTION ERRORS DETECTED:\n%s\n\nMANDATORY DIRECTIVE: As a Lead Engineer, you MUST prioritize fixing these execution bugs. Analyze the tracebacks, identify the root cause in the code, and apply a permanent fix before performing any other tasks." "$ERROR_REPORT")
 
-# Return JSON
+# Return JSON with safe escaping
 echo "$MANDATORY_DIRECTIVE" | python3 -c "
 import sys, json
-text = sys.stdin.read()
-print(json.dumps({\"context\": text}))
+text = sys.stdin.read().strip()
+if not text:
+    print(json.dumps({\"context\": \"\"}))
+else:
+    print(json.dumps({\"context\": text}))
 "

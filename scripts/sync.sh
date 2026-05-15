@@ -35,7 +35,7 @@ echo "Pushing to GitHub..."
 git push origin "$BRANCH"
 
 # ── 4. Deploy to NYC Droplet ──────────────────────────────────────────────────
-if [[ "$BRANCH" == "feature/v10-rebuild" || "$BRANCH" == "feature/v18.17-dag-rewrite" ]]; then
+if [[ "$BRANCH" =~ ^(feature/|release/) ]]; then
     echo "Launching concurrent NYC deployment..."
     bash deploy.sh
 else

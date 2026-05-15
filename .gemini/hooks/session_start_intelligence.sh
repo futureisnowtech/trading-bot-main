@@ -19,11 +19,11 @@ try:
     conn = sqlite3.connect('$DB_PATH')
     conn.row_factory = sqlite3.Row
     cutoff = time.time() - 86400
-    rows = conn.execute('SELECT symbol, feature_combo, win_rate, profit_factor FROM rbi_research WHERE ts > ? AND status=\"promoted\" ORDER BY win_rate DESC LIMIT 3', (cutoff,)).fetchall()
+    rows = conn.execute('SELECT combination, win_rate, profit_factor FROM rbi_research WHERE ts > ? AND promoted=1 ORDER BY win_rate DESC LIMIT 3', (cutoff,)).fetchall()
     if rows:
         print('### RECENT RBI RESEARCH ###')
         for r in rows:
-            print(f'- {r[\"symbol\"]}: {r[\"feature_combo\"]} | WR: {r[\"win_rate\"]:.1%} | PF: {r[\"profit_factor\"]}')
+            print(f'- {r[\"combination\"]}: WR: {r[\"win_rate\"]:.1%} | PF: {r[\"profit_factor\"]}')
     else:
         print('No new RBI signals promoted in last 24h.')
     conn.close()

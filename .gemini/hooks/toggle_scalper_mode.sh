@@ -5,14 +5,27 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 INPUT=$(cat -)
-QUERY=$(echo "$INPUT" | python3 -c "import sys, json; print(json.load(sys.stdin).get('query', ''))")
+QUERY=$(echo "$INPUT" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    print(d.get('query', '').strip())
+except Exception:
+    print('')
+" 2>/dev/null)
+
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 ENV_FILE="$REPO_ROOT/.env"
+
+if [ ! -f "$ENV_FILE" ]; then
+    # Create .env if missing (rare, but defensive)
+    touch "$ENV_FILE"
+fi
 
 if [[ "$QUERY" == "!scalper_on" ]]; then
     # Set STRATEGIC_SCALPER_MODE=true in .env
     if grep -q "STRATEGIC_SCALPER_MODE" "$ENV_FILE"; then
-        sed -i '' 's/STRATEGIC_SCALPER_MODE=.*/STRATEGIC_SCALPER_MODE=true/' "$ENV_FILE"
+        sed "s/STRATEGIC_SCALPER_MODE=.*/STRATEGIC_SCALPER_MODE=true/" "$ENV_FILE" > "$ENV_FILE.tmp" && mv "$ENV_FILE.tmp" "$ENV_FILE"
     else
         echo "STRATEGIC_SCALPER_MODE=true" >> "$ENV_FILE"
     fi
@@ -23,7 +36,7 @@ fi
 if [[ "$QUERY" == "!scalper_off" ]]; then
     # Set STRATEGIC_SCALPER_MODE=false in .env
     if grep -q "STRATEGIC_SCALPER_MODE" "$ENV_FILE"; then
-        sed -i '' 's/STRATEGIC_SCALPER_MODE=.*/STRATEGIC_SCALPER_MODE=false/' "$ENV_FILE"
+        sed "s/STRATEGIC_SCALPER_MODE=.*/STRATEGIC_SCALPER_MODE=false/" "$ENV_FILE" > "$ENV_FILE.tmp" && mv "$ENV_FILE.tmp" "$ENV_FILE"
     else
         echo "STRATEGIC_SCALPER_MODE=false" >> "$ENV_FILE"
     fi

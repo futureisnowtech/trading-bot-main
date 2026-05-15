@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import sqlite3
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,14 @@ import pytest
 _ROOT = Path(__file__).resolve().parents[2]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
+
+
+def _recent_ts(offset_hours: float = 0) -> str:
+    """Fixture timestamp 5 days in the past, plus N hours.
+    Keeps fixtures inside the 30-day rolling cutoff in scripts/path_truth_audit._cutoff."""
+    return (
+        datetime.now(timezone.utc) - timedelta(days=5) + timedelta(hours=offset_hours)
+    ).strftime("%Y-%m-%dT%H:%M:%S")
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -113,7 +122,7 @@ def test_r_multiple_reach_keys_and_percentages(proof_runtime, monkeypatch):
         _insert_entered(
             conn,
             "rm1",
-            "2026-04-14T10:00:00",
+            _recent_ts(0),
             "BTCUSDT",
             "TRENDING_UP",
             "LONG",
@@ -128,7 +137,7 @@ def test_r_multiple_reach_keys_and_percentages(proof_runtime, monkeypatch):
         _insert_entered(
             conn,
             "rm2",
-            "2026-04-14T11:00:00",
+            _recent_ts(1),
             "ETHUSDT",
             "TRENDING_UP",
             "LONG",
@@ -143,7 +152,7 @@ def test_r_multiple_reach_keys_and_percentages(proof_runtime, monkeypatch):
         _insert_entered(
             conn,
             "rm3",
-            "2026-04-14T12:00:00",
+            _recent_ts(2),
             "SOLUSDT",
             "RANGING",
             "LONG",
@@ -158,7 +167,7 @@ def test_r_multiple_reach_keys_and_percentages(proof_runtime, monkeypatch):
         _insert_entered(
             conn,
             "rm4",
-            "2026-04-14T13:00:00",
+            _recent_ts(3),
             "XRPUSDT",
             "RANGING",
             "SHORT",
@@ -212,7 +221,7 @@ def test_timing_to_threshold_keys_and_n_reached(proof_runtime, monkeypatch):
         _insert_entered(
             conn,
             "tt1",
-            "2026-04-14T10:00:00",
+            _recent_ts(0),
             "BTCUSDT",
             "TRENDING_UP",
             "LONG",
@@ -229,7 +238,7 @@ def test_timing_to_threshold_keys_and_n_reached(proof_runtime, monkeypatch):
         _insert_entered(
             conn,
             "tt2",
-            "2026-04-14T11:00:00",
+            _recent_ts(1),
             "ETHUSDT",
             "TRENDING_UP",
             "LONG",
@@ -246,7 +255,7 @@ def test_timing_to_threshold_keys_and_n_reached(proof_runtime, monkeypatch):
         _insert_entered(
             conn,
             "tt3",
-            "2026-04-14T12:00:00",
+            _recent_ts(2),
             "SOLUSDT",
             "RANGING",
             "SHORT",
@@ -301,7 +310,7 @@ def test_timing_to_threshold_uses_timing_evaluated_denominator(proof_runtime, mo
         _insert_entered(
             conn,
             "te1",
-            "2026-04-14T10:00:00",
+            _recent_ts(0),
             "BTCUSDT",
             "TRENDING_UP",
             "LONG",
@@ -317,7 +326,7 @@ def test_timing_to_threshold_uses_timing_evaluated_denominator(proof_runtime, mo
         _insert_entered(
             conn,
             "te2",
-            "2026-04-14T11:00:00",
+            _recent_ts(1),
             "ETHUSDT",
             "TRENDING_UP",
             "LONG",
@@ -333,7 +342,7 @@ def test_timing_to_threshold_uses_timing_evaluated_denominator(proof_runtime, mo
         _insert_entered(
             conn,
             "te3",
-            "2026-04-14T12:00:00",
+            _recent_ts(2),
             "SOLUSDT",
             "RANGING",
             "LONG",
@@ -368,7 +377,7 @@ def test_path_by_group_returns_list_with_required_keys(proof_runtime, monkeypatc
             _insert_entered(
                 conn,
                 f"pg_{i}",
-                "2026-04-14T10:00:00",
+                _recent_ts(0),
                 f"BTCUSDT_{i}",
                 "TRENDING_UP",
                 "LONG",
@@ -426,7 +435,7 @@ def test_exit_quality_context_keys_and_path_labels(proof_runtime, monkeypatch):
                 """,
                 (
                     f"order_{i}",
-                    "2026-04-15T10:00:00",
+                    _recent_ts(24),
                     opp_loss,
                     overshoot,
                     mfe_exit,

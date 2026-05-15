@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -21,6 +22,14 @@ import pytest
 _ROOT = Path(__file__).resolve().parents[2]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
+
+
+def _recent_ts(offset_hours: float = 0) -> str:
+    """Fixture timestamp 5 days in the past, plus N hours.
+    Keeps fixtures inside the 30-day rolling cutoff in scripts/entry_truth_audit._cutoff."""
+    return (
+        datetime.now(timezone.utc) - timedelta(days=5) + timedelta(hours=offset_hours)
+    ).strftime("%Y-%m-%dT%H:%M:%S")
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -144,7 +153,7 @@ def test_funnel_summary_keys_and_conversion(proof_runtime, monkeypatch):
         # scanned=100, above=40, econ=30, ro_block=5, sizing=2, exec_fail=1, entered=22
         _insert_scan_funnel(
             conn,
-            "2026-04-15T10:00:00",
+            _recent_ts(24),
             100,
             40,
             30,
@@ -212,7 +221,7 @@ def test_scanner_ev_calibration_keys_and_cap_rate(proof_runtime, monkeypatch):
                 """,
                 (
                     f"ev_{i}",
-                    "2026-04-15T10:00:00",
+                    _recent_ts(24),
                     f"BTCUSDT_{i}",
                     "LONG",
                     "entered",
@@ -258,7 +267,7 @@ def test_source_quality_returns_list_with_required_keys(proof_runtime, monkeypat
         _insert_candidate_with_outcome(
             conn,
             "sq1",
-            "2026-04-14T10:00:00",
+            _recent_ts(0),
             "BTCUSDT",
             "entered",
             "clean_paper_v10",
@@ -275,7 +284,7 @@ def test_source_quality_returns_list_with_required_keys(proof_runtime, monkeypat
         _insert_candidate_with_outcome(
             conn,
             "sq2",
-            "2026-04-14T11:00:00",
+            _recent_ts(1),
             "ETHUSDT",
             "entered",
             "clean_paper_v10",
@@ -292,7 +301,7 @@ def test_source_quality_returns_list_with_required_keys(proof_runtime, monkeypat
         _insert_candidate_with_outcome(
             conn,
             "sq3",
-            "2026-04-14T12:00:00",
+            _recent_ts(2),
             "SOLUSDT",
             "entered",
             "clean_paper_v10",
@@ -336,7 +345,7 @@ def test_symbol_class_quality_separates_tiers(proof_runtime, monkeypatch):
             _insert_candidate_with_outcome(
                 conn,
                 f"core_{i}",
-                "2026-04-14T10:00:00",
+                _recent_ts(0),
                 "BTCUSDT",
                 "entered",
                 "clean_paper_v10",
@@ -355,7 +364,7 @@ def test_symbol_class_quality_separates_tiers(proof_runtime, monkeypatch):
             _insert_candidate_with_outcome(
                 conn,
                 f"ro_{i}",
-                "2026-04-14T11:00:00",
+                _recent_ts(1),
                 "PEPEUSDT",
                 "research_only_block",
                 "clean_paper_v10",
@@ -405,7 +414,7 @@ def test_integrity_snapshot_reads_actual_schema_and_duplicate_events(
             (trade_id, close_order_id, tier, reason, source_check, created_at, notes)
             VALUES (?,?,?,?,?,?,?)
             """,
-            (1, "close_1", "verified", "ok", "test", "2026-04-15T10:00:00", ""),
+            (1, "close_1", "verified", "ok", "test", _recent_ts(24), ""),
         )
         conn.execute(
             """
@@ -419,7 +428,7 @@ def test_integrity_snapshot_reads_actual_schema_and_duplicate_events(
                 "suspect",
                 "missing_lineage",
                 "test",
-                "2026-04-15T11:00:00",
+                _recent_ts(25),
                 "",
             ),
         )
@@ -429,7 +438,7 @@ def test_integrity_snapshot_reads_actual_schema_and_duplicate_events(
             VALUES (?,?,?,?)
             """,
             (
-                "2026-04-15T11:30:00",
+                _recent_ts(25.5),
                 "WARN",
                 "perps_engine",
                 "duplicate close suppressed for BTCUSDT",

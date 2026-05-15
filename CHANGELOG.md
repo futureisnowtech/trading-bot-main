@@ -1,6 +1,16 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 
+## 2026-05-15
+- v18.19.4: implemented deep-trace request/response logging gate via `COINBASE_DEEP_TRACE` to prevent log bloat; added 3-second TTL cache on `get_spot_balance()` in `execution/coinbase_spot_broker.py` to reduce redundant /accounts snapshot calls during per-asset tradeability checks.
+- v18.19.3: refactored `algo_bot_cpu_percent` metric in `system_state.py` to be process-scoped via `psutil.Process()`, resolving 100% CPU saturation false-positives on shared 1-vCPU droplets.
+- v18.19.2: retired global equity kill switch in `kill_switch.py` (redundant with spot-specific KS10a/KS10b); kept API-error storm and order-latency tripwires active.
+- v18.19.1: restored `nbf` (not before) claim in Coinbase spot broker JWT (fixing regression introduced in `e6fe462`); retired `SPOT_TINY_LIVE_ENABLEMENT_CONFIRMED` stubs; dedup'd `notifications/ai_agent.execute_sql` shadowing.
+
+## 2026-05-11
+- v18.19 (Full Live Release): unified state machine in `v10_runner.py` to move directly to LIVE; removed Tiny-Live safety gates and retired `SPOT_TINY_LIVE_ENABLEMENT_CONFIRMED` requirement; fixed Gemini tool-calling error (`genai.tooltype`) via explicit tool definition in `notifications/ai_agent.py`.
+- v18.18 (Directional Rounding Fix): implemented direction-aware price rounding (`_round_quote`) in `coinbase_spot_broker.py` to prevent `post_only` rejections on tight-spread assets (DOGE, XRP, ADA); added `scripts/verify_rounding_fix.py`.
+
 ## 2026-05-05
 - v18.17 completion: finalized surgical removal of retired lanes and legacy AI configuration; deleted `perps_engine.py`, `scripts/go_paper.py`, and `scripts/tradingview_webhook.py`; updated `main.py` to support `--mode` for boot compatibility and refreshed WebSocket feed to spot-native symbols; aligned `AGENTS.md` and `GEMINI.md` to the new authoritative spot-lane architecture; updated `monitoring/health_check.py` to follow the truth-lane status contract.
 
@@ -1017,17 +1027,3 @@ The math signal scoring now feeds the AI as rich context rather than deciding fo
 
 _To add an entry: `bash scripts/log_change.sh "Description of change"`_
 _Gemini should update this file (and GEMINI.md) whenever project files are modified._
-
-## 2026-05-11 (v18.18) — Directional Rounding Fix
-- **execution/coinbase_spot_broker.py**: Implemented direction-aware price rounding (`_round_quote`) using `math.ceil` for SELL and `math.floor` for BUY. This prevents `post_only` rejections on tight-spread assets (DOGE, XRP, ADA) where generic floor-rounding would previously push limit sell prices into the bid.
-- **scripts/verify_rounding_fix.py** (NEW): Added a verification script to validate price rounding logic across different asset tick sizes and trade directions.
-## 2026-04-21 (v17.2) — Spot Session Pivot + SOL/XRP Expansion
-- **config.py**: expanded `SPOT_SYMBOLS` default to `BTC,ETH,SOL,XRP`; added weekday/session entry controls (`SPOT_WEEKDAYS_ONLY`, `SPOT_ENTRY_START_TIME`, `SPOT_ENTRY_END_TIME`), config-backed thesis hold/score knobs, and moved default spot target to `2.0R` for faster intraday capital recycling.
-- **runtime/spot_session.py** (NEW): canonical ET session gate for autonomous spot entries so the lane trades like a real weekday intraday strategy instead of a 24/7 swing lane with only EOD flatten.
-- **execution/coinbase_spot_broker.py**: extended supported spot products to SOL-USD and XRP-USD, added generic symbol-balance reporting, and added paper fallback prices for SOL/XRP.
-- **spot_engine.py**: expanded configured spot universe, restored duplicate-position blocking, enforced live session gate and real remaining-cap checks, and aligned default intraday target math to `2R`.
-- **runtime/crypto_tradeability.py**: spot eligibility now follows configured `SPOT_SYMBOLS` (BTC/ETH/SOL/XRP by default), blocks entries outside the spot session, and blocks same-underlying cross-lane exposure with `underlying_exposure_already_open`.
-- **scheduler/v10_runner.py**: spot-routed longs now stay in the spot lane on failure instead of silently falling through to perp execution.
-- **dashboard/data/balance.py** + **dashboard/data/account.py** + **dashboard/data/crypto_dashboard.py**: dashboard now tracks dynamic spot holdings/equity across the full spot universe and includes spot unrealized P&L in headline account equity.
-- **dashboard/widgets/pages/crypto_page.py** + **dashboard/widgets/trade_approval/manual_scan.py**: crypto/operator surfaces now describe the widened spot universe, show spot cash/equity truth, stop hiding SOL/XRP from manual workflows, and run manual scan with the current account balance instead of a hardcoded `$5000`.
-- **tests/proof/**: updated shared tradeability, spot lane, spot day-trading, and dashboard truth proofs for the new session-gated multi-symbol spot model.

@@ -49,14 +49,15 @@ import csv, uuid, sqlite3
 from typing import Optional
 import logging_db.trade_logger  # noqa: F401 — pre-warm, prevents EDEADLK
 
-VERSION = "v18.19.4"
+VERSION = "v18.30"
 
 BANNER = """
 ╔══════════════════════════════════════════════════════════════════╗
-║  ALGO TRADING SYSTEM  v18.19.4                                    ║
+║  ALGO TRADING SYSTEM  v18.30                                      ║
+║  Recursive Evolution: Self-Vaccinating Sovereign DAG             ║
 ║                                                                  ║
-║  Lane:       Coinbase spot scalp (tiny live)                    ║
-║  Route:      maker_first | CHOP enabled | pullback enabled      ║
+║  Lane:       Coinbase spot scalp (FULL LIVE RELEASE)            ║
+║  Route:      maker_first | Expectancy-Driven Gates              ║
 ║  Truth:      broker-first via runtime/spot_position_truth.py    ║
 ║  Launch:     python3 scripts/go_live.py (only sanctioned path)  ║
 ╚══════════════════════════════════════════════════════════════════╝

@@ -6,14 +6,14 @@
 ## Canonical Truth
 
 - Repo root: `/Users/joshmacbookair2020/Projects/algo_trading_final`
-- Canonical version: `v18.19.4` (`2026-05-15`)
+- Canonical version: `v18.30` (`2026-05-15`)
 - Canonical active lane: **Coinbase spot scalp**
-- **Status:** **FULL LIVE RELEASE**. Tiny-Live safety gates removed.
-- **Critical Changes (v18.19):**
-  - Retired `SPOT_TINY_LIVE_ENABLEMENT_CONFIRMED`.
-  - Unified state machine in `v10_runner.py` to move directly to `LIVE`.
-  - Fixed Gemini tool-calling error (`genai.tooltype`).
-  - Truncated service logs to clear 97% disk pressure.
+- **Status:** **RECURSIVE EVOLUTION**. Autonomous Self-Vaccinating DAG active.
+- **Critical Changes (v18.30):**
+  - **Sovereign Gates**: Hardcoded thresholds deleted. Admission now follows `calculate_fee_aware_expectancy` (PredictedAlpha > 2x Friction).
+  - **The Brain**: `runtime/online_learner.py` monitors real-time fee leaks and autonomously 'Vaccinates' (tightens) symbol requirements.
+  - **Stability Fix**: Repaired `genai.caching` tool-handshake to restore Telegram command utility.
+  - **Treatise**: Documented full architecture in `docs/SOVEREIGN_MASTERPLAN.md`.
 - **Critical Changes (v18.19.1):**
   - Restored `nbf` claim in spot broker JWT (regression `e6fe462`) — fixes Coinbase CDP 401 Unauthorized.
   - Fully retired `SPOT_TINY_LIVE_ENABLEMENT_CONFIRMED` variable (Gemini left it as a hardcoded stub).

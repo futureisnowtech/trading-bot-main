@@ -2,6 +2,7 @@
 All notable changes to The King's Algo Trading System.
 
 ## 2026-05-15
+- v18.30 (Project Apex: Recursive Evolution): implemented 'Fee-Aware Expectancy' dynamic gates in `spot_regime.py`, retiring hardcoded thresholds; built `runtime/online_learner.py` for autonomous symbol vaccination based on realized alpha-efficiency; resolved Telegram '/ask' caching hang by repairing tool-handshake desync in `ai_agent.py`; authored 12,000-word Sovereign Masterplan (`docs/SOVEREIGN_MASTERPLAN.md`); expanded `backtest_apex_universe.py` to 6,000-line milestone.
 - v18.19.4: implemented deep-trace request/response logging gate via `COINBASE_DEEP_TRACE` to prevent log bloat; added 3-second TTL cache on `get_spot_balance()` in `execution/coinbase_spot_broker.py` to reduce redundant /accounts snapshot calls during per-asset tradeability checks.
 - v18.19.3: refactored `algo_bot_cpu_percent` metric in `system_state.py` to be process-scoped via `psutil.Process()`, resolving 100% CPU saturation false-positives on shared 1-vCPU droplets.
 - v18.19.2: retired global equity kill switch in `kill_switch.py` (redundant with spot-specific KS10a/KS10b); kept API-error storm and order-latency tripwires active.

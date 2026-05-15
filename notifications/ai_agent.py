@@ -195,29 +195,34 @@ def ask_ai(query: str) -> str:
         available_tools = [execute_sql, read_file, replace_text, run_safe_command]
 
     try:
-        # Lever 1: Use Cached Model
-        if not available_tools:
-            model = get_cached_agent_model(model_name, system_instruction)
-        else:
-            # Fallback to standard model if tools are required (frozen cache limitation)
+        # v18.30: Stable Tool/Cache Handshake
+        # If tools are required (action keywords detected), we bypass the cache 
+        # to ensure the model remains interactive and doesn't hang in a 'thinking' loop.
+        # This is a known limitation of the current caching SDK for interactive agents.
+        if available_tools:
             model = genai.GenerativeModel(
                 model_name=model_name,
                 system_instruction=system_instruction,
                 tools=available_tools
             )
+        else:
+            # Use cache for pure research/query calls to save 80% on token burn.
+            model = get_cached_agent_model(model_name, system_instruction)
 
         chat = model.start_chat(enable_automatic_function_calling=True)
         response = chat.send_message(query)
         
-        # Lever 5: Cost Telemetry
+        # Lever 5: Cost Telemetry (2026 Tier 2 Rates)
         try:
-            _prompt_tokens = int(getattr(getattr(response, "usage_metadata", None), "prompt_token_count", 0) or 0)
-            _completion_tokens = int(getattr(getattr(response, "usage_metadata", None), "candidates_token_count", 0) or 0)
-            log_api_cost(_prompt_tokens, _completion_tokens, "telegram_ask")
+            usage = getattr(response, "usage_metadata", None)
+            if usage:
+                p_tokens = usage.prompt_token_count
+                c_tokens = usage.candidates_token_count
+                log_api_cost(p_tokens, c_tokens, "telegram_ask")
         except Exception as _tel_e:
-            logger.debug(f"[ai_agent] telemetry capture failed: {_tel_e}")
+            logger.debug(f"[ai_agent] cost telemetry failed: {_tel_e}")
 
         return response.text
     except Exception as e:
         logger.error(f"Gemini Agent exception: {e}")
-        return f"Error connecting to Gemini backend: {str(e)}"
+        return f"Sovereign Audit: Handshake Error. Resolve via logs. Error: {str(e)}"

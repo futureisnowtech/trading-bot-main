@@ -4,6 +4,7 @@ import os
 import psutil
 import time
 import subprocess
+from typing import Dict, Optional
 from html import escape
 from functools import wraps
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup

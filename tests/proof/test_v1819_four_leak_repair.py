@@ -109,9 +109,10 @@ def test_regime_no_symbol_is_stateless(proof_runtime):
     """Without symbol, classify behaves like the old stateless version."""
     from runtime.spot_regime import classify_spot_regime
 
-    assert classify_spot_regime({"er": 0.75, "adx": 30.0}, {}) == "TREND"
-    assert classify_spot_regime({"er": 0.15, "adx": 15.0}, {}) == "CHOP"
-    assert classify_spot_regime({"er": 0.45, "adx": 22.0}, {}) == "NEUTRAL"
+    # v18.30: Volatility must be high enough to clear fee floor
+    assert classify_spot_regime({"er": 0.75, "adx": 30.0, "volatility": 0.08}, {}) == "TREND"
+    assert classify_spot_regime({"er": 0.15, "adx": 15.0, "volatility": 0.01}, {}) == "CHOP"
+    assert classify_spot_regime({"er": 0.45, "adx": 22.0, "volatility": 0.08}, {}) == "NEUTRAL"
 
 
 def test_regime_sticky_neutral_to_chop(proof_runtime):
@@ -121,9 +122,9 @@ def test_regime_sticky_neutral_to_chop(proof_runtime):
     from runtime.spot_regime import classify_spot_regime
 
     save_spot_regime_state("XYZ", "NEUTRAL")
-    assert classify_spot_regime({"er": 0.32, "adx": 18}, {}, symbol="XYZ") == "NEUTRAL"
+    assert classify_spot_regime({"er": 0.32, "adx": 18, "volatility": 0.12}, {}, symbol="XYZ") == "NEUTRAL"
     save_spot_regime_state("XYZ", "NEUTRAL")
-    assert classify_spot_regime({"er": 0.25, "adx": 18}, {}, symbol="XYZ") == "CHOP"
+    assert classify_spot_regime({"er": 0.25, "adx": 18, "volatility": 0.12}, {}, symbol="XYZ") == "CHOP"
 
 
 def test_regime_sticky_chop_to_neutral(proof_runtime):
@@ -133,9 +134,9 @@ def test_regime_sticky_chop_to_neutral(proof_runtime):
     from runtime.spot_regime import classify_spot_regime
 
     save_spot_regime_state("XYZ", "CHOP")
-    assert classify_spot_regime({"er": 0.32, "adx": 18}, {}, symbol="XYZ") == "CHOP"
+    assert classify_spot_regime({"er": 0.32, "adx": 18, "volatility": 0.12}, {}, symbol="XYZ") == "CHOP"
     save_spot_regime_state("XYZ", "CHOP")
-    assert classify_spot_regime({"er": 0.45, "adx": 22}, {}, symbol="XYZ") == "NEUTRAL"
+    assert classify_spot_regime({"er": 0.45, "adx": 22, "volatility": 0.12}, {}, symbol="XYZ") == "NEUTRAL"
 
 
 def test_regime_state_persists(proof_runtime):

@@ -145,6 +145,12 @@ SPOT_SCALP_SCAN_SECONDS: int = int(os.getenv("SPOT_SCALP_SCAN_SECONDS", "60"))
 SPOT_STATE_CACHE_SECONDS: int = int(os.getenv("SPOT_STATE_CACHE_SECONDS", "45"))
 SPOT_MAKER_WAIT_SECONDS: int = int(os.getenv("SPOT_MAKER_WAIT_SECONDS", "6"))
 SPOT_MAKER_POLL_SECONDS: int = int(os.getenv("SPOT_MAKER_POLL_SECONDS", "2"))
+
+# Coinbase Advanced Trade Taker Fees (Tier 1 baseline)
+# Maker: 0.40%, Taker: 0.60%. Used for fee-aware expectancy math.
+TAKER_FEE_PCT: float = 0.0060
+ROUND_TRIP_FEE: float = TAKER_FEE_PCT * 2
+
 SPOT_FRAME_SCORE_ANCHOR: float = float(os.getenv("SPOT_FRAME_SCORE_ANCHOR", "55.0"))
 SPOT_MOMENTUM_IMPULSE_WINDOW: int = int(os.getenv("SPOT_MOMENTUM_IMPULSE_WINDOW", "12"))
 SPOT_ACCEL_IMPULSE_WINDOW: int = int(os.getenv("SPOT_ACCEL_IMPULSE_WINDOW", "8"))

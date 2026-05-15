@@ -23,8 +23,8 @@ def test_ssm01b_final_spot_score_neutral_leans_on_composite():
 def test_ssm02_regime_classifier_trend():
     from runtime.spot_regime import classify_spot_regime
 
-    # TREND: ER > 0.6 and ADX > 25.0
-    state_30m = {"er": 0.75, "adx": 30.0}
+    # v18.30: TREND requires Expectancy > 2.5 (High Vol)
+    state_30m = {"er": 0.75, "adx": 30.0, "volatility": 0.06}
     state_4h = {}
     assert classify_spot_regime(state_30m, state_4h) == "TREND"
 
@@ -32,8 +32,8 @@ def test_ssm02_regime_classifier_trend():
 def test_ssm02b_regime_classifier_chop():
     from runtime.spot_regime import classify_spot_regime
 
-    # CHOP: ER < 0.3 and ADX < 20.0
-    state_30m = {"er": 0.15, "adx": 15.0}
+    # v18.30: CHOP if Expectancy < 2.0 (Low Vol)
+    state_30m = {"er": 0.75, "adx": 30.0, "volatility": 0.01}
     state_4h = {}
     assert classify_spot_regime(state_30m, state_4h) == "CHOP"
 

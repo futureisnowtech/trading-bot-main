@@ -6,7 +6,7 @@
 ## Canonical Truth
 
 - Repo root: `/Users/joshmacbookair2020/Projects/algo_trading_final`
-- Canonical version: `v18.19.1` (`2026-05-15`)
+- Canonical version: `v18.19.2` (`2026-05-15`)
 - Canonical active lane: **Coinbase spot scalp**
 - **Status:** **FULL LIVE RELEASE**. Tiny-Live safety gates removed.
 - **Critical Changes (v18.19):**
@@ -19,6 +19,8 @@
   - Fully retired `SPOT_TINY_LIVE_ENABLEMENT_CONFIRMED` variable (Gemini left it as a hardcoded stub).
   - Dedup'd `notifications/ai_agent.execute_sql` (local definition was shadowing the import from `agent_tools.py`).
   - Reset spot kill switch to clear stale `HALTED` state from prior auth failures.
+- **Critical Changes (v18.19.2):**
+  - Retired global equity kill switch (`kill_switch.check_balance()`) — was redundant with spot KS10a (4 consecutive losses) and KS10b (-2% daily PnL, 3-of-10 rolling losses). Default disabled; re-enable via `EQUITY_KILL_SWITCH_ENABLED=true`. API-error storm (5+/10min) and order-latency (>5s) tripwires kept.
 - Canonical launch path: `python3 scripts/go_live.py`
 - Canonical guarded deploy path: local `./deploy.sh`
 - Canonical memory order:

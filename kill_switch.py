@@ -2,14 +2,13 @@
 kill_switch.py — System-level trading halt with strict tripwires.
 
 Tripwires (any one triggers full halt):
-  1. Balance falls below kill threshold (see below)
-  2. 5+ API errors in 10 minutes
-  3. Latency > 5 seconds (measured from order send to fill ack)
-
-Balance kill-threshold policy:
-  balance < 50% of live_baseline
-  live_baseline = first valid live balance seen at runtime
-  (~$1,966 live funded account → threshold ~$983)
+  1. Balance falls below kill threshold — RETIRED in v18.19.2.
+     The equity floor is fully covered by spot KS10a (4 consecutive losses),
+     KS10b (-2% daily realized PnL), KS10b rolling (3 of last 10 losses).
+     Stacking a 50%-of-baseline gate on top caused premature halts after
+     normal drawdowns. Re-enable via env EQUITY_KILL_SWITCH_ENABLED=true.
+  2. 5+ API errors in 10 minutes — KEPT (different failure mode).
+  3. Latency > 5 seconds — KEPT (different failure mode).
 
 On trigger:
   - Sets _halted = True (blocks all new entries in perps_engine / signal_engine)
@@ -21,6 +20,7 @@ Resume: manual only via resume() call with reason.
 """
 
 import logging
+import os
 import time
 import threading
 from collections import deque
@@ -43,8 +43,11 @@ _API_ERROR_THRESHOLD = 5  # 5 errors in window
 _last_latency_ms: float = 0.0
 _LATENCY_THRESHOLD_S = 5.0  # 5 seconds
 
-# Balance thresholds — 50% of live_baseline
+# Balance thresholds — 50% of live_baseline. Disabled by default in v18.19.2.
 _LIVE_KILL_PCT = 0.50
+_EQUITY_TRIPWIRE_ENABLED: bool = (
+    os.getenv("EQUITY_KILL_SWITCH_ENABLED", "false").strip().lower() == "true"
+)
 
 # Live baseline — set on first valid live check_balance call.
 _live_baseline: float = 0.0
@@ -156,8 +159,12 @@ def check_balance(
 
     Kill-threshold policy:
       threshold = live_baseline * 0.50
+    Disabled by default in v18.19.2 — opt-in via EQUITY_KILL_SWITCH_ENABLED=true.
     """
     global _live_baseline
+
+    if not _EQUITY_TRIPWIRE_ENABLED:
+        return
 
     if initial_balance is None:
         try:

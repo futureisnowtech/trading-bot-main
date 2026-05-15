@@ -1,7 +1,6 @@
 import os
 import logging
 import json
-import sqlite3
 import traceback
 from typing import Optional, List, Dict
 import system_state
@@ -20,40 +19,6 @@ except ImportError:
     GEMINI_MODEL = "gemini-2.5-flash"
 
 logger = logging.getLogger(__name__)
-
-
-def execute_sql(query: str) -> str:
-    """
-    Safe, read-only SQL execution for the AI agent.
-    Targets logs/trades.db (open_positions, spot_edge_conditions, etc).
-    """
-    q_upper = query.strip().upper()
-    if not q_upper.startswith("SELECT"):
-        return "Error: Only SELECT queries are allowed."
-
-    forbidden = ["DROP", "DELETE", "UPDATE", "INSERT", "ALTER", "CREATE", "REPLACE"]
-    if any(cmd in q_upper for cmd in forbidden):
-        return "Error: Data modification or structural changes are strictly forbidden."
-
-    try:
-        db_path = os.path.join(os.getcwd(), "logs", "trades.db")
-        with sqlite3.connect(db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            # Execute with a 5-second timeout to prevent long-running queries
-            conn.execute("PRAGMA query_only = ON")
-            rows = conn.execute(query).fetchall()
-            if not rows:
-                return "Query executed successfully. Result: No rows returned."
-            
-            # Limit results to prevent context overflow (max 50 rows)
-            data = [dict(r) for r in rows[:50]]
-            res = json.dumps(data, indent=2)
-            if len(rows) > 50:
-                res += f"\n... (truncated {len(rows)-50} more rows)"
-            return res
-    except Exception as e:
-        logger.error(f"AI SQL Error: {e}")
-        return f"Database Error: {str(e)}"
 
 
 def get_repo_context() -> str:

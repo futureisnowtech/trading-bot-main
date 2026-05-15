@@ -145,10 +145,12 @@ class CoinbaseSpotBroker:
         
         now = int(time.time())
         # v18.17 Definitive Fix: Official SDK strips query parameters from URI claim.
+        # v18.19.1: Restored nbf claim — Coinbase CDP rejects JWTs without it (regression introduced by e6fe462).
         path_only = path.split("?")[0]
         payload = {
             "sub": self._key_name,
             "iss": "cdp",
+            "nbf": now,
             "exp": now + 120,
             "uri": f"{method} api.coinbase.com{path_only}",
         }

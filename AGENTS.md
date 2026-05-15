@@ -6,7 +6,7 @@
 ## Canonical Truth
 
 - Repo root: `/Users/joshmacbookair2020/Projects/algo_trading_final`
-- Canonical version: `v18.19` (`2026-05-15`)
+- Canonical version: `v18.19.1` (`2026-05-15`)
 - Canonical active lane: **Coinbase spot scalp**
 - **Status:** **FULL LIVE RELEASE**. Tiny-Live safety gates removed.
 - **Critical Changes (v18.19):**
@@ -14,6 +14,11 @@
   - Unified state machine in `v10_runner.py` to move directly to `LIVE`.
   - Fixed Gemini tool-calling error (`genai.tooltype`).
   - Truncated service logs to clear 97% disk pressure.
+- **Critical Changes (v18.19.1):**
+  - Restored `nbf` claim in spot broker JWT (regression `e6fe462`) — fixes Coinbase CDP 401 Unauthorized.
+  - Fully retired `SPOT_TINY_LIVE_ENABLEMENT_CONFIRMED` variable (Gemini left it as a hardcoded stub).
+  - Dedup'd `notifications/ai_agent.execute_sql` (local definition was shadowing the import from `agent_tools.py`).
+  - Reset spot kill switch to clear stale `HALTED` state from prior auth failures.
 - Canonical launch path: `python3 scripts/go_live.py`
 - Canonical guarded deploy path: local `./deploy.sh`
 - Canonical memory order:

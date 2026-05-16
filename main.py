@@ -128,20 +128,9 @@ def main():
     print(f"  Time:       {datetime.now(tz).strftime('%Y-%m-%d %H:%M:%S ET')}\n")
 
     print("=" * 60)
-    print("  ⚠️  LIVE TRADING — Real money will be deployed")
+    print("  💰 LIVE TRADING ARCHITECTURE ENFORCED")
     print(f"  Account: ${account_display}")
     print("=" * 60)
-    auto_confirm = os.environ.get("ALGO_LIVE_CONFIRM", "").strip()
-    if auto_confirm == "I UNDERSTAND":
-        print("  Live launch confirmation received from controlled launcher.\n")
-    elif not sys.stdin.isatty():
-        print("  Non-interactive environment detected. Refusing live launch without ALGO_LIVE_CONFIRM='I UNDERSTAND'.")
-        sys.exit(1)
-    else:
-        resp = input("\n  Type 'I UNDERSTAND' to confirm: ").strip()
-        if resp != "I UNDERSTAND":
-            print("Cancelled.")
-            sys.exit(0)
 
     print("📦 Initializing database...")
     from logging_db.trade_logger import init_db, log_event

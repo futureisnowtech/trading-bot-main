@@ -36,10 +36,11 @@ load_dotenv()
 # ════════════════════════════════════════════════════════════════════
 # SYSTEM MODE
 # ════════════════════════════════════════════════════════════════════
-# Removed False / True logic — system is strictly LIVE.
+# v18.32: Ripped out paper trading and scalper mode switches.
+# All systems are strictly LIVE.
 
-# v18.18: Strategic Scalper Mode — bypass technical vetoes if win_prob > 60%
-STRATEGIC_SCALPER_MODE: bool = os.getenv("STRATEGIC_SCALPER_MODE", "true").lower() == "true"
+PAPER_TRADING: bool = False
+STRATEGIC_SCALPER_MODE: bool = False
 
 # Session start: all performance stats (win rate, P&L, trade counts) are
 # measured from this date forward. Old trades are kept in DB for ML training

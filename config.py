@@ -181,9 +181,9 @@ SPOT_REGIME_SCORE_FLOORS: dict[str, float] = {
 # v18.19: exit-side score floors (5pt hysteresis below entry floors) — positions
 # survive a brief score dip without flipping out.
 SPOT_REGIME_SCORE_EXIT_FLOORS: dict[str, float] = {
-    "TREND": float(os.getenv("SPOT_TREND_SCORE_EXIT_FLOOR", "47.0")),
-    "NEUTRAL": float(os.getenv("SPOT_NEUTRAL_SCORE_EXIT_FLOOR", "47.0")),
-    "CHOP": float(os.getenv("SPOT_CHOP_SCORE_EXIT_FLOOR", "55.0")),
+    "TREND": float(os.getenv("SPOT_TREND_SCORE_EXIT_FLOOR", "46.0")),
+    "NEUTRAL": float(os.getenv("SPOT_NEUTRAL_SCORE_EXIT_FLOOR", "46.0")),
+    "CHOP": float(os.getenv("SPOT_CHOP_SCORE_EXIT_FLOOR", "46.0")),
 }
 SPOT_THESIS_MIN_SCORE_EXIT: float = float(os.getenv("SPOT_THESIS_MIN_SCORE_EXIT", "47.0"))
 # v18.19: ER/ADX thresholds (was hardcoded 0.3/0.6 + 20/25 in runtime/spot_regime.py).

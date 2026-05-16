@@ -403,7 +403,7 @@ class CoinbaseSpotBroker:
             spec = self._spec(symbol)
             data = self._request(
                 "GET",
-                f"/api/v3/brokerage/products/{spec['product_id']}/book?limit=5",
+                f"/api/v3/brokerage/product_book?product_id={spec['product_id']}&limit=5",
             )
             return {
                 "bid": float(data.get("pricebook", {}).get("bids", [{"price": "0"}])[0]["price"]),

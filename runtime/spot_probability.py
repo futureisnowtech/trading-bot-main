@@ -82,19 +82,19 @@ def calculate_calibrated_win_prob(c: dict) -> float:
 def sizing_multiplier(win_prob: float) -> float:
     """
     Continuous sigmoid sizing based on win probability.
-    - 50% Win Prob = 0.0x (Negative expectancy after fees)
-    - 60% Win Prob = 0.3x (Small experimental scalp)
-    - 75% Win Prob = 1.0x (Standard full position)
-    - 85% Win Prob = 1.25x (High conviction override)
+    - 55% Win Prob = ~0.26x ($13 size on $50 base)
+    - 65% Win Prob = ~0.62x ($31 size)
+    - 75% Win Prob = ~0.92x ($46 size)
+    - 85% Win Prob = ~1.10x ($55 size)
     """
     if win_prob < 0.55:
         return 0.0
     
-    # Sigmoid centered at 0.70
-    z = (win_prob - 0.70) * 15.0
+    # v18.33: Sigmoid centered at 0.65, slope 10.0 (Recalibrated for $10 exchange floor)
+    z = (win_prob - 0.65) * 10.0
     mult = 1.0 / (1.0 + np.exp(-z))
     
-    # Scale and clip
+    # Scale and clip (1.25x max override)
     final_mult = mult * 1.25
     return round(float(np.clip(final_mult, 0.0, 1.25)), 3)
 

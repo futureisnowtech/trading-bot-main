@@ -397,23 +397,6 @@ class CoinbaseSpotBroker:
             
         return 0.0
 
-    def get_spot_top_of_book(self, symbol: str) -> dict:
-        """Return best bid/ask and simple depth truth for symbol."""
-        try:
-            spec = self._spec(symbol)
-            data = self._request(
-                "GET",
-                f"/api/v3/brokerage/product_book?product_id={spec['product_id']}&limit=5",
-            )
-            return {
-                "bid": float(data.get("pricebook", {}).get("bids", [{"price": "0"}])[0]["price"]),
-                "ask": float(data.get("pricebook", {}).get("asks", [{"price": "0"}])[0]["price"]),
-                "ts": int(time.time() * 1000)
-            }
-        except Exception as e:
-            logger.debug(f"[spot] get_spot_top_of_book error {symbol}: {e}")
-            return {"bid": 0, "ask": 0, "ts": 0}
-
     def get_historical_candles(
         self, symbol: str, interval: str = "5m", limit: int = 200
     ) -> List[dict]:
@@ -487,6 +470,8 @@ class CoinbaseSpotBroker:
         except Exception as e:
             logger.debug(f"[spot] get_historical_candles error {symbol}: {e}")
             return []
+
+    def get_spot_top_of_book(self, symbol: str) -> dict:
         """Return best bid/ask and simple depth truth for symbol."""
         try:
             spec = self._spec(symbol)

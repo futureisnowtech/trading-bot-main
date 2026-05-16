@@ -139,7 +139,7 @@ def get_repo_context() -> str:
 _AGENT_CACHE_ID: Optional[str] = None
 _CACHE_EXPIRY: float = 0
 
-def get_cached_content_id(client: genai.Client, model_id: str, system_instruction: str) -> Optional[str]:
+def get_cached_content_id(client: "genai.Client", model_id: str, system_instruction: str) -> Optional[str]:
     """
     Lever 1: Explicit Caching using google-genai SDK.
     """

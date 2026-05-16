@@ -224,7 +224,7 @@ def _resolved_exit_profile(profile: str, regime: str) -> str:
     regime_key = str(regime or "NEUTRAL").upper()
     return (
         str(
-            getattr(_cfg, "SPOT_TINY_LIVE_EXIT_PROFILE_BY_REGIME", {}).get(regime_key)
+            getattr(_cfg, "SPOT_LIVE_EXIT_PROFILE_BY_REGIME", {}).get(regime_key)
             or profile
             or ""
         )
@@ -477,7 +477,7 @@ def get_spot_strategy(symbol: str) -> dict[str, Any]:
     )
     floors = getattr(
         _cfg,
-        "SPOT_TINY_LIVE_SCORE_FLOORS",
+        "SPOT_LIVE_SCORE_FLOORS",
         {"TREND": 52.0, "NEUTRAL": 52.0, "CHOP": 52.0},
     )
     score_floors = {
@@ -485,7 +485,7 @@ def get_spot_strategy(symbol: str) -> dict[str, Any]:
         "NEUTRAL": float(floors.get("NEUTRAL", 52.0)),
         "CHOP": float(floors.get("CHOP", 52.0)),
     }
-    score_weights = getattr(_cfg, "SPOT_TINY_LIVE_SCORE_WEIGHTS", {})
+    score_weights = getattr(_cfg, "SPOT_LIVE_SCORE_WEIGHTS", {})
     target_r_by_regime_cfg = getattr(
         _cfg,
         "SPOT_TARGET_R_BY_REGIME",
@@ -560,21 +560,21 @@ def get_spot_strategy(symbol: str) -> dict[str, Any]:
             },
         },
         "min_confirm_count": int(
-            (getattr(_cfg, "SPOT_TINY_LIVE_MIN_CONFIRMS", None) or {}).get("TREND", 2)
+            (getattr(_cfg, "SPOT_LIVE_MIN_CONFIRMS", None) or {}).get("TREND", 2)
         ),
         "min_5m_frame": float(
-            (getattr(_cfg, "SPOT_TINY_LIVE_MIN_5M_FRAME", None) or {}).get("TREND", 52.0)
+            (getattr(_cfg, "SPOT_LIVE_MIN_5M_FRAME", None) or {}).get("TREND", 52.0)
         ),
         "min_30m_frame": float(
-            (getattr(_cfg, "SPOT_TINY_LIVE_MIN_30M_FRAME", None) or {}).get("TREND", 55.0)
+            (getattr(_cfg, "SPOT_LIVE_MIN_30M_FRAME", None) or {}).get("TREND", 55.0)
         ),
         "min_momentum_impulse": float(
-            (getattr(_cfg, "SPOT_TINY_LIVE_MIN_MOMENTUM_IMPULSE", None) or {}).get(
+            (getattr(_cfg, "SPOT_LIVE_MIN_MOMENTUM_IMPULSE", None) or {}).get(
                 "TREND", 0.000001
             )
         ),
         "min_structure_component": float(
-            (getattr(_cfg, "SPOT_TINY_LIVE_MIN_STRUCTURE_COMPONENT", None) or {}).get(
+            (getattr(_cfg, "SPOT_LIVE_MIN_STRUCTURE_COMPONENT", None) or {}).get(
                 "TREND", 0.000001
             )
         ),
@@ -582,7 +582,7 @@ def get_spot_strategy(symbol: str) -> dict[str, Any]:
         "min_participation_component": float(
             (getattr(
                 _cfg,
-                "SPOT_TINY_LIVE_MIN_PARTICIPATION_COMPONENT",
+                "SPOT_LIVE_MIN_PARTICIPATION_COMPONENT",
                 None,
             ) or {}).get("TREND", -999.0)
         ),
@@ -711,7 +711,7 @@ def score_floor_for_symbol(
 
     floors = getattr(
         _cfg,
-        "SPOT_TINY_LIVE_SCORE_FLOORS",
+        "SPOT_LIVE_SCORE_FLOORS",
         {"TREND": 58.0, "NEUTRAL": 60.0, "CHOP": 60.0},
     )
     base = float(floors.get(regime_key, floors["NEUTRAL"]))

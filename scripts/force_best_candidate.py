@@ -62,7 +62,7 @@ def main():
     print(f"🏆 Best candidate: {symbol} (Composite Score: {score:.2f})")
     
     # 3. Decision & Sizing
-    size_usd = config.SPOT_TINY_LIVE_MAX_POSITION_USD
+    size_usd = config.SPOT_LIVE_MAX_POSITION_USD
     current_price = broker.get_mark_price(symbol)
     
     print(f"💰 Execution Plan: BUY ${size_usd:.2f} of {symbol} @ ~${current_price:.4f}")

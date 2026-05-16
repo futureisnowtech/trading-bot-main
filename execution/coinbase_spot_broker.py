@@ -403,6 +403,95 @@ class CoinbaseSpotBroker:
             spec = self._spec(symbol)
             data = self._request(
                 "GET",
+                f"/api/v3/brokerage/products/{spec['product_id']}/book?limit=5",
+            )
+            return {
+                "bid": float(data.get("pricebook", {}).get("bids", [{"price": "0"}])[0]["price"]),
+                "ask": float(data.get("pricebook", {}).get("asks", [{"price": "0"}])[0]["price"]),
+                "ts": int(time.time() * 1000)
+            }
+        except Exception as e:
+            logger.debug(f"[spot] get_spot_top_of_book error {symbol}: {e}")
+            return {"bid": 0, "ask": 0, "ts": 0}
+
+    def get_historical_candles(
+        self, symbol: str, interval: str = "5m", limit: int = 200
+    ) -> List[dict]:
+        """
+        Fetch OHLCV candles from Coinbase Advanced Trade API.
+        Intervals supported: 1m, 5m, 15m, 30m, 1h, 6h, 1d.
+        """
+        if not self._connected:
+            return []
+
+        # Coinbase uses seconds for granularity
+        _gran_map = {
+            "1m": 60,
+            "5m": 300,
+            "15m": 900,
+            "30m": 1800,
+            "1h": 3600,
+            "4h": 14400, # Not natively supported by ticker but available in candles API
+            "6h": 21600,
+            "1d": 86400,
+        }
+        granularity = _gran_map.get(interval, 300)
+
+        try:
+            spec = self._spec(symbol)
+            product_id = spec["product_id"]
+            
+            # Calculate start/end
+            now = int(time.time())
+            start = now - (limit * granularity)
+            
+            # Note: Coinbase API expects granularity as a string like 'FIVE_MINUTE' 
+            # for some versions, or seconds for others. We'll use the seconds-based 
+            # map if the above fails, but standard v3 uses string constants.
+            
+            _cb_gran = {
+                "1m": "ONE_MINUTE",
+                "5m": "FIVE_MINUTE",
+                "15m": "FIFTEEN_MINUTE",
+                "30m": "THIRTY_MINUTE",
+                "1h": "ONE_HOUR",
+                "6h": "SIX_HOUR",
+                "1d": "ONE_DAY",
+            }
+            # Fallback for 4h (Coinbase doesn't have it natively, so we fetch 1h and could resample, 
+            # but for now we'll just return what they have or use 6h)
+            cb_interval = _cb_gran.get(interval, "FIVE_MINUTE")
+            
+            data = self._request(
+                "GET", f"/api/v3/brokerage/products/{product_id}/candles?start={start}&end={now}&granularity={cb_interval}"
+            )
+            
+            candles = data.get("candles", [])
+            if not candles:
+                return []
+                
+            # Coinbase returns: [start, low, high, open, close, volume]
+            result = []
+            for c in candles:
+                result.append({
+                    "T": int(float(c.get("start", 0)) * 1000), # to ms
+                    "o": float(c.get("open", 0)),
+                    "h": float(c.get("high", 0)),
+                    "l": float(c.get("low", 0)),
+                    "c": float(c.get("close", 0)),
+                    "v": float(c.get("volume", 0))
+                })
+            # Coinbase returns candles in reverse chronological order
+            return sorted(result, key=lambda x: x["T"])
+            
+        except Exception as e:
+            logger.debug(f"[spot] get_historical_candles error {symbol}: {e}")
+            return []
+        """Return best bid/ask and simple depth truth for symbol."""
+        try:
+            spec = self._spec(symbol)
+            data = self._request(
+                "GET",
                 f"/api/v3/brokerage/product_book?product_id={spec['product_id']}&limit=5",
             )
             book = data.get("pricebook") or {}

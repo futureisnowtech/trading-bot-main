@@ -440,6 +440,37 @@ def get_candles(symbol: str, timeframe: str = "5m", limit: int = 200) -> pd.Data
         for sfx in _BINANCE_SUFFIXES
     )
 
+    # v18.32: Intercept Core Spot symbols for Coinbase Auth Fetch
+    from runtime.spot_strategy import ACTIVE_UNIVERSE
+    clean_sym = symbol.replace("USDT", "").replace("USDC", "").replace("-USD", "").upper()
+    
+    if clean_sym in ACTIVE_UNIVERSE and not symbol.startswith("PF_"):
+        try:
+            from execution.coinbase_spot_broker import get_spot_broker
+            broker = get_spot_broker()
+            if broker and broker.is_connected():
+                cb_data = broker.get_historical_candles(clean_sym, timeframe, limit)
+                if cb_data:
+                    # Coinbase data format conversion to internal standard
+                    rows = []
+                    for k in cb_data:
+                        rows.append({
+                            "timestamp": k["T"],
+                            "open": k["o"],
+                            "high": k["h"],
+                            "low": k["l"],
+                            "close": k["c"],
+                            "volume": k["v"]
+                        })
+                    df = pd.DataFrame(rows)
+                    df.index = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
+                    df = df[["open", "high", "low", "close", "volume"]].sort_index()
+                    if len(df) >= 5:
+                        logger.debug(f"[historical_data] COINBASE AUTH OK {clean_sym} {timeframe}")
+                        return df
+        except Exception as e:
+            logger.debug(f"[historical_data] Coinbase auth fetch fallback error: {e}")
+
     if not is_binance_fmt:
         # Short coin name (HEMI, LIT, SOL, HYPE, FARTCOIN …)
         # Hyperliquid FIRST — prevents yfinance returning stock/ETF prices

@@ -1021,14 +1021,14 @@ SPOT_GOV_MIN_FAST_FOLLOW_RATE: float = float(
 SPOT_GOV_MIN_PROFIT_FACTOR: float = float(
     os.getenv("SPOT_GOV_MIN_PROFIT_FACTOR", "1.00")
 )
-SPOT_TINY_LIVE_MAX_CONCURRENT: int = int(
-    os.getenv("SPOT_TINY_LIVE_MAX_CONCURRENT", "5")
+SPOT_LIVE_MAX_CONCURRENT: int = int(
+    os.getenv("SPOT_LIVE_MAX_CONCURRENT", "5")
 )
-SPOT_TINY_LIVE_MAX_POSITION_USD: float = float(
-    os.getenv("SPOT_TINY_LIVE_MAX_POSITION_USD", "50.0")
+SPOT_LIVE_MAX_POSITION_USD: float = float(
+    os.getenv("SPOT_LIVE_MAX_POSITION_USD", "50.0")
 )
-SPOT_TINY_LIVE_ALLOWED_ROUTE: str = (
-    os.getenv("SPOT_TINY_LIVE_ALLOWED_ROUTE", "maker_only").strip().lower()
+SPOT_LIVE_ALLOWED_ROUTE: str = (
+    os.getenv("SPOT_LIVE_ALLOWED_ROUTE", "maker_only").strip().lower()
 )
 # Conviction floor for quarantined setup families. If a setup is quarantined,
 # it must clear this higher score to be tradeable.
@@ -1056,43 +1056,43 @@ SPOT_ALLOWED_SETUP_FAMILIES_TINY_LIVE: tuple[str, ...] = (
     "breakout_volatility",
 )
 SPOT_DISABLED_SETUP_FAMILIES_TINY_LIVE: tuple[str, ...] = ()
-SPOT_TINY_LIVE_MIN_CONFIRMS: dict[str, int] = {"TREND": 0, "NEUTRAL": 0, "CHOP": 0}
-SPOT_TINY_LIVE_MIN_5M_FRAME: dict[str, float] = {
+SPOT_LIVE_MIN_CONFIRMS: dict[str, int] = {"TREND": 0, "NEUTRAL": 0, "CHOP": 0}
+SPOT_LIVE_MIN_5M_FRAME: dict[str, float] = {
     "TREND": 40.0,
     "NEUTRAL": 40.0,
     "CHOP": 40.0,
 }
-SPOT_TINY_LIVE_MIN_30M_FRAME: dict[str, float] = {
+SPOT_LIVE_MIN_30M_FRAME: dict[str, float] = {
     "TREND": 40.0,
     "NEUTRAL": 40.0,
     "CHOP": 40.0,
 }
-SPOT_TINY_LIVE_MIN_STRUCTURE_COMPONENT: dict[str, float] = {
+SPOT_LIVE_MIN_STRUCTURE_COMPONENT: dict[str, float] = {
     "TREND": -1.0,
     "NEUTRAL": -1.0,
     "CHOP": -1.0,
 }
-SPOT_TINY_LIVE_MIN_PARTICIPATION_COMPONENT: dict[str, float] = {
+SPOT_LIVE_MIN_PARTICIPATION_COMPONENT: dict[str, float] = {
     "TREND": -999.0,
     "NEUTRAL": -1.0,
     "CHOP": -1.0,
 }
-SPOT_TINY_LIVE_MIN_MOMENTUM_IMPULSE: dict[str, float] = {
+SPOT_LIVE_MIN_MOMENTUM_IMPULSE: dict[str, float] = {
     "TREND": -1.0,
     "NEUTRAL": -1.0,
     "CHOP": -1.0,
 }
-SPOT_TINY_LIVE_SCORE_FLOORS: dict[str, float] = {
+SPOT_LIVE_SCORE_FLOORS: dict[str, float] = {
     "TREND": 52.0,
     "NEUTRAL": 52.0,
     "CHOP": 52.0,
 }
-SPOT_TINY_LIVE_SCORE_WEIGHTS: dict[str, dict[str, float]] = {
+SPOT_LIVE_SCORE_WEIGHTS: dict[str, dict[str, float]] = {
     "TREND": {"composite": 1.0, "derivative": 0.0},
     "NEUTRAL": {"composite": 1.0, "derivative": 0.0},
     "CHOP": {"composite": 1.0, "derivative": 0.0},
 }
-SPOT_TINY_LIVE_EXIT_PROFILE_BY_REGIME: dict[str, str] = {
+SPOT_LIVE_EXIT_PROFILE_BY_REGIME: dict[str, str] = {
     "TREND": "precision",
     "NEUTRAL": "micro",
     "CHOP": "micro",

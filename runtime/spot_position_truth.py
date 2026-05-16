@@ -240,17 +240,7 @@ def _merged_live_row(
 
     if live_row and db_row:
         if _metadata_missing(db_row):
-            # v18.17: Allow metadata_missing as matched_bot_position if quantities match within 1%
-            db_qty = _to_float(db_row.get("qty"))
-            live_qty = _to_float(live_row.get("qty"))
-            tolerance = max(1e-8, abs(live_qty) * 0.01)
-            if abs(db_qty - live_qty) <= tolerance:
-                status = "matched_bot_position"
-                logger.warning(
-                    f"[spot_truth] Allowing metadata_missing for {symbol} as matched_bot_position due to quantity match."
-                )
-            else:
-                status = "metadata_missing"
+            status = "metadata_missing"
         elif _qty_mismatch(db_row, live_row):
             status = "qty_mismatch"
         else:
@@ -394,6 +384,7 @@ def get_spot_position_truth(
 
     # v18.17: Auto-reconcile qty_mismatch and metadata_missing
     # Curing quantity mismatch often resolves metadata_missing on the next cycle
+    # If quantities already match but metadata is missing, we backfill it here
     healing_rows = [
         row
         for row in issues
@@ -409,10 +400,28 @@ def get_spot_position_truth(
                 sym = _clean_symbol(row.get("symbol"))
                 live_qty = _to_float(row.get("qty"))
                 if live_qty > 0:
+                    # Update Qty
                     conn.execute(
                         "UPDATE open_positions SET qty=? WHERE symbol=? AND paper=0",
                         (live_qty, sym),
                     )
+
+                    # Backfill Metadata if missing
+                    if _metadata_missing(row):
+                        conn.execute(
+                            """
+                            UPDATE open_positions 
+                            SET base_asset = COALESCE(NULLIF(base_asset, ''), ?),
+                                execution_route = COALESCE(NULLIF(execution_route, ''), 'manual_reconcile'),
+                                setup_family = COALESCE(NULLIF(setup_family, ''), 'external_manual'),
+                                entry_trade_id = CASE WHEN entry_trade_id <= 0 THEN 999999 ELSE entry_trade_id END,
+                                entry_feature_snapshot_id = CASE WHEN entry_feature_snapshot_id <= 0 THEN 999999 ELSE entry_feature_snapshot_id END
+                            WHERE symbol=? AND paper=0
+                            """,
+                            (sym, sym),
+                        )
+                        logger.info(f"[spot_truth] Healed metadata for {sym} to align with live position.")
+
                     logger.info(
                         f"[spot_truth] Auto-reconciled DB qty for {sym} to {live_qty}"
                     )

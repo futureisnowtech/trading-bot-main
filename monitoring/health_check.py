@@ -327,8 +327,11 @@ def _check_spot_learning_truth() -> dict:
     try:
         conn = _conn()
         recent_trades = conn.execute(
-            "SELECT COUNT(*) FROM trades WHERE strategy LIKE 'spot_%' AND , '-24 hours')",
-            (0,)
+            """
+            SELECT COUNT(*) FROM trades 
+            WHERE strategy LIKE 'spot_%' 
+              AND datetime(replace(substr(ts,1,19),'T',' ')) >= datetime('now', '-24 hours')
+            """
         ).fetchone()[0]
 
         if recent_trades == 0:
@@ -349,9 +352,8 @@ def _check_spot_learning_truth() -> dict:
             FROM ml_feature_snapshots m
             JOIN trades t ON t.id = m.trade_id
             WHERE t.strategy LIKE 'spot_%'
-              AND t.,1,19),'T',' ')) >= datetime('now', '-24 hours')
-            """,
-            (0,)
+              AND datetime(replace(substr(t.ts,1,19),'T',' ')) >= datetime('now', '-24 hours')
+            """
         ).fetchone()[0]
         conn.close()
 

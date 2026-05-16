@@ -89,32 +89,41 @@ def main():
     # 5. Record to DB so bot manages the exit
     try:
         # Calculate stop/target for logger
-        # Using a default 1.5% / 4.5% logic as fallback
         stop_price = fill_price * (1 - config.SPOT_STOP_PCT)
         target_price = fill_price * (1 + (config.SPOT_STOP_PCT * config.SPOT_TARGET_R))
         
         trade_id = log_trade(
-            strategy="force_best_candidate",
+            strategy="spot_scalp", # Use standard strategy name so bot picks it up
+            broker="coinbase_spot",
             symbol=symbol,
             action="BUY",
             order_type="MARKET",
             qty=qty,
             price=fill_price,
             order_id=order_id,
-            paper=False,
-            status="OPEN",
-            reason=f"Forced entry via script (Score: {score:.1f})",
-            stop_price=stop_price,
-            target_price=target_price,
-            risk_dollars=size_usd * config.SPOT_STOP_PCT
+            paper=0,
+            notes=f"Forced entry via script (Score: {score:.1f})"
         )
+        
+        # Manually insert into open_positions because log_trade only logs to trades table
+        # We need it in open_positions for the bot to manage it.
+        import sqlite3
+        conn = sqlite3.connect(config.DB_PATH)
+        conn.execute("""
+            INSERT INTO open_positions 
+            (symbol, strategy, qty, entry, stop, target, paper, direction, ts_entry, lane, high_since_entry, low_since_entry) 
+            VALUES (?, ?, ?, ?, ?, ?, 0, 'LONG', ?, 'lane2', ?, ?)
+        """, (symbol, "spot_scalp", qty, fill_price, stop_price, target_price, datetime.now(timezone.utc).isoformat(), fill_price, fill_price))
+        conn.commit()
+        conn.close()
         
         # Snapshot features
         features = state.get("features", {})
-        log_trade_features(trade_id, symbol, "LONG", features)
+        if trade_id > 0:
+            log_trade_features(trade_id, symbol, "LONG", features)
         
-        log_event("INFO", f"Forced entry on {symbol} (trade_id={trade_id}) successful.")
-        print(f"\n📝 Logged to trades.db. Trade ID: {trade_id}")
+        log_event("INFO", "force_entry", f"Forced entry on {symbol} (trade_id={trade_id}) successful.")
+        print(f"\n📝 Logged to trades.db and open_positions. Trade ID: {trade_id}")
         print(f"🏁 NYC Bot will now manage this exit automatically.")
         
     except Exception as e:

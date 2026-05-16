@@ -28,8 +28,8 @@ All of the following must be true:
 - [ ] Kill switch loss-cluster fires correctly (SG-12, SG-13)
 - [ ] Backfill complete: failure window rows present in ml_feature_snapshots
 - [ ] STOP_MATRIX.md, SCANNER_PRECISION_REPORT.md, RUNTIME_INVARIANTS.md present
-- [ ] `SPOT_TINY_LIVE_MAX_CONCURRENT = 1` confirmed in config
-- [ ] `SPOT_TINY_LIVE_MAX_POSITION_USD = 50.0` confirmed in config
+- [ ] `SPOT_LIVE_MAX_CONCURRENT = 1` confirmed in config
+- [ ] `SPOT_LIVE_MAX_POSITION_USD = 50.0` confirmed in config
 - [ ] `SPOT_TAKER_FALLBACK_ENABLED = false` confirmed
 
 **Current verdict: READY_FOR_TINY_LIVE** — all items above completed as of 2026-04-28.
@@ -104,8 +104,8 @@ Remaining before production confidence (not blocking tiny live):
 
 | Parameter | Value | Config Key |
 |---|---|---|
-| Max concurrent positions | 1 | `SPOT_TINY_LIVE_MAX_CONCURRENT` |
-| Max position size | $50 | `SPOT_TINY_LIVE_MAX_POSITION_USD` |
-| Allowed route | maker_first only | `SPOT_TINY_LIVE_ALLOWED_ROUTE` |
+| Max concurrent positions | 1 | `SPOT_LIVE_MAX_CONCURRENT` |
+| Max position size | $50 | `SPOT_LIVE_MAX_POSITION_USD` |
+| Allowed route | maker_first only | `SPOT_LIVE_ALLOWED_ROUTE` |
 | Allowed setup families | impulse_continuation, compression_breakout, pullback_reclaim (TREND only) | governance quarantine |
 | Kill switches | KS10a, KS10b active | `runtime/spot_kill_switch.py` |

@@ -6,10 +6,10 @@ All notable changes to The King's Algo Trading System.
 - v18.19.4: implemented deep-trace request/response logging gate via `COINBASE_DEEP_TRACE` to prevent log bloat; added 3-second TTL cache on `get_spot_balance()` in `execution/coinbase_spot_broker.py` to reduce redundant /accounts snapshot calls during per-asset tradeability checks.
 - v18.19.3: refactored `algo_bot_cpu_percent` metric in `system_state.py` to be process-scoped via `psutil.Process()`, resolving 100% CPU saturation false-positives on shared 1-vCPU droplets.
 - v18.19.2: retired global equity kill switch in `kill_switch.py` (redundant with spot-specific KS10a/KS10b); kept API-error storm and order-latency tripwires active.
-- v18.19.1: restored `nbf` (not before) claim in Coinbase spot broker JWT (fixing regression introduced in `e6fe462`); retired `SPOT_TINY_LIVE_ENABLEMENT_CONFIRMED` stubs; dedup'd `notifications/ai_agent.execute_sql` shadowing.
+- v18.19.1: restored `nbf` (not before) claim in Coinbase spot broker JWT (fixing regression introduced in `e6fe462`); retired `SPOT_LIVE_ENABLEMENT_CONFIRMED` stubs; dedup'd `notifications/ai_agent.execute_sql` shadowing.
 
 ## 2026-05-11
-- v18.19 (Full Live Release): unified state machine in `v10_runner.py` to move directly to LIVE; removed Tiny-Live safety gates and retired `SPOT_TINY_LIVE_ENABLEMENT_CONFIRMED` requirement; fixed Gemini tool-calling error (`genai.tooltype`) via explicit tool definition in `notifications/ai_agent.py`.
+- v18.19 (Full Live Release): unified state machine in `v10_runner.py` to move directly to LIVE; removed Tiny-Live safety gates and retired `SPOT_LIVE_ENABLEMENT_CONFIRMED` requirement; fixed Gemini tool-calling error (`genai.tooltype`) via explicit tool definition in `notifications/ai_agent.py`.
 - v18.18 (Directional Rounding Fix): implemented direction-aware price rounding (`_round_quote`) in `coinbase_spot_broker.py` to prevent `post_only` rejections on tight-spread assets (DOGE, XRP, ADA); added `scripts/verify_rounding_fix.py`.
 
 ## 2026-05-05

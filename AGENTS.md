@@ -16,7 +16,7 @@
   - **Treatise**: Documented full architecture in `docs/SOVEREIGN_MASTERPLAN.md`.
 - **Critical Changes (v18.19.1):**
   - Restored `nbf` claim in spot broker JWT (regression `e6fe462`) — fixes Coinbase CDP 401 Unauthorized.
-  - Fully retired `SPOT_TINY_LIVE_ENABLEMENT_CONFIRMED` variable (Gemini left it as a hardcoded stub).
+  - Fully retired `SPOT_LIVE_ENABLEMENT_CONFIRMED` variable (Gemini left it as a hardcoded stub).
   - Dedup'd `notifications/ai_agent.execute_sql` (local definition was shadowing the import from `agent_tools.py`).
   - Reset spot kill switch to clear stale `HALTED` state from prior auth failures.
 - **Critical Changes (v18.19.2):**

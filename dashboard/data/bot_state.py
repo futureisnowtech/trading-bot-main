@@ -15,14 +15,14 @@ _q1 = _db._q1
 SPOT_SYMBOLS = ["BTC", "ETH", "SOL", "XRP", "LTC", "DOGE", "ADA", "LINK"]
 
 SCORE_FLOORS: dict[str, dict[str, float]] = {
-    "BTC": {"TREND": 51.0, "NEUTRAL": 51.0, "CHOP": 51.0},
-    "ETH": {"TREND": 51.0, "NEUTRAL": 51.0, "CHOP": 51.0},
-    "SOL": {"TREND": 51.0, "NEUTRAL": 51.0, "CHOP": 51.0},
-    "XRP": {"TREND": 51.0, "NEUTRAL": 51.0, "CHOP": 51.0},
-    "LTC": {"TREND": 51.0, "NEUTRAL": 51.0, "CHOP": 51.0},
-    "DOGE": {"TREND": 51.0, "NEUTRAL": 51.0, "CHOP": 51.0},
-    "ADA": {"TREND": 51.0, "NEUTRAL": 51.0, "CHOP": 51.0},
-    "LINK": {"TREND": 51.0, "NEUTRAL": 51.0, "CHOP": 51.0},
+    "BTC": {"TREND": 48.0, "NEUTRAL": 48.0, "CHOP": 48.0},
+    "ETH": {"TREND": 48.0, "NEUTRAL": 48.0, "CHOP": 48.0},
+    "SOL": {"TREND": 48.0, "NEUTRAL": 48.0, "CHOP": 48.0},
+    "XRP": {"TREND": 48.0, "NEUTRAL": 48.0, "CHOP": 48.0},
+    "LTC": {"TREND": 48.0, "NEUTRAL": 48.0, "CHOP": 48.0},
+    "DOGE": {"TREND": 48.0, "NEUTRAL": 48.0, "CHOP": 48.0},
+    "ADA": {"TREND": 48.0, "NEUTRAL": 48.0, "CHOP": 48.0},
+    "LINK": {"TREND": 48.0, "NEUTRAL": 48.0, "CHOP": 48.0},
 }
 
 DECISION_LABELS: dict[str, tuple[str, str]] = {
@@ -110,7 +110,7 @@ def get_symbol_grid() -> list[dict[str, Any]]:
         row = by_symbol.get(sym) or {}
         regime_raw = str(row.get("regime") or "")
         regime_label, regime_color = REGIME_META.get(regime_raw, ("—", "#484f58"))
-        floors = SCORE_FLOORS.get(sym, {"TREND": 51.0, "NEUTRAL": 51.0, "CHOP": 51.0})
+        floors = SCORE_FLOORS.get(sym, {"TREND": 48.0, "NEUTRAL": 48.0, "CHOP": 48.0})
         regime_key = (
             "CHOP"
             if "CHOP" in regime_raw

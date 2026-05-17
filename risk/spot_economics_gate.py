@@ -123,7 +123,7 @@ def check_spot_economics(
             "projected_net_win_usd": projected_net_win_usd,
             "total_cost_pct": total_cost_pct,
         }
-    if net_rr < 1.05:
+    if net_rr < 1.0:
         return {
             "approved": False,
             "reason": "net_rr_below_minimum",

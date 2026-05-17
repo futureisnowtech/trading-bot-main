@@ -18,17 +18,6 @@
         ]
       }
     ],
-    "BeforeAgent": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash $GEMINI_PROJECT_DIR/.gemini/hooks/toggle_scalper_mode.sh",
-            "timeout": 10
-          }
-        ]
-      }
-    ],
     "BeforeTool": [
       {
         "matcher": "Bash",

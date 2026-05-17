@@ -31,8 +31,9 @@ def check_spot_economics(
 ) -> dict:
     clean = symbol.upper()
     cfg = SPOT_SCALP_SYMBOL_CONFIG.get(clean, {})
-    spread_cap = float(cfg.get("spread_cap_pct", 0.0025))
-    depth_min = float(cfg.get("depth_min_usd", 5000))
+    # v18.34: Relaxed gates for higher trade frequency
+    spread_cap = float(cfg.get("spread_cap_pct", 0.004))
+    depth_min = float(cfg.get("depth_min_usd", 1000))
     fee_leg = SPOT_MAKER_FEE_PCT if execution_route_guess == "maker_first" else SPOT_TAKER_FEE_PCT
     total_fee_pct = fee_leg + SPOT_TAKER_FEE_PCT
     total_cost_pct = total_fee_pct + max(0.0, spread_pct / 2.0)
@@ -108,7 +109,7 @@ def check_spot_economics(
             "projected_net_win_usd": projected_net_win_usd,
             "total_cost_pct": total_cost_pct,
         }
-    if projected_net_win_usd < (2.0 * fee_usd):
+    if projected_net_win_usd <= (1.0 * fee_usd):
         return {
             "approved": False,
             "reason": "projected_net_win_too_small",
@@ -122,7 +123,7 @@ def check_spot_economics(
             "projected_net_win_usd": projected_net_win_usd,
             "total_cost_pct": total_cost_pct,
         }
-    if net_rr < 1.25:
+    if net_rr < 1.05:
         return {
             "approved": False,
             "reason": "net_rr_below_minimum",

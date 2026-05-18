@@ -39,7 +39,7 @@ LOG_PATH = os.path.join(PROJECT, "logs", "service", "bot.log")
 BACKUP_DIR = os.path.expanduser("~/.algo_backup")
 
 # Strategies the bot is authorised to create trades under.
-# Update this list when adding a new strategy.
+DB_PATH = os.path.join(PROJECT, "logs", "trades.db")# Update this list when adding a new strategy.
 KNOWN_STRATEGIES = {
     "crypto_ai_debate",
     "crypto_macd_consensus",

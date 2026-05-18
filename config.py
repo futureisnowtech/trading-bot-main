@@ -202,8 +202,8 @@ SPOT_ALLOWED_REGIMES: set[str] = {
 SPOT_MIN_PATH_EFFICIENCY: float = float(os.getenv("SPOT_MIN_PATH_EFFICIENCY", "0.20"))
 SPOT_TARGET_R_BY_REGIME: dict[str, float] = {
     "TREND": float(os.getenv("SPOT_TREND_TARGET_R", "4.0")),
-    "NEUTRAL": float(os.getenv("SPOT_NEUTRAL_TARGET_R", "3.0")),
-    "CHOP": float(os.getenv("SPOT_CHOP_TARGET_R", "3.0")),
+    "NEUTRAL": float(os.getenv("SPOT_NEUTRAL_TARGET_R", "4.0")),
+    "CHOP": float(os.getenv("SPOT_CHOP_TARGET_R", "4.0")),
 }
 SPOT_TRAIL_ARM_R_BY_REGIME: dict[str, float] = {
     "TREND": float(os.getenv("SPOT_TREND_TRAIL_ARM_R", "1.5")),
@@ -535,7 +535,7 @@ SPOT_REPLAY_OBJECTIVE: str = os.getenv(
 
 SPOT_SCALP_SYMBOL_CONFIG: dict[str, dict[str, float | int]] = {
     "BTC": {
-        "stop_floor_pct": 0.008,
+        "stop_floor_pct": 0.012,
         "stop_cap_pct": 0.012,
         "risk_fraction": 0.0030,
         "allocation_cap_pct": 0.20,
@@ -545,7 +545,7 @@ SPOT_SCALP_SYMBOL_CONFIG: dict[str, dict[str, float | int]] = {
         "symbol_k": 1.05,
     },
     "ETH": {
-        "stop_floor_pct": 0.010,
+        "stop_floor_pct": 0.012,
         "stop_cap_pct": 0.014,
         "risk_fraction": 0.0025,
         "allocation_cap_pct": 0.15,
@@ -555,7 +555,7 @@ SPOT_SCALP_SYMBOL_CONFIG: dict[str, dict[str, float | int]] = {
         "symbol_k": 1.10,
     },
     "SOL": {
-        "stop_floor_pct": 0.013,
+        "stop_floor_pct": 0.012,
         "stop_cap_pct": 0.018,
         "risk_fraction": 0.0018,
         "allocation_cap_pct": 0.07,
@@ -565,7 +565,7 @@ SPOT_SCALP_SYMBOL_CONFIG: dict[str, dict[str, float | int]] = {
         "symbol_k": 1.15,
     },
     "XRP": {
-        "stop_floor_pct": 0.014,
+        "stop_floor_pct": 0.012,
         "stop_cap_pct": 0.020,
         "risk_fraction": 0.0015,
         "allocation_cap_pct": 0.05,
@@ -575,7 +575,7 @@ SPOT_SCALP_SYMBOL_CONFIG: dict[str, dict[str, float | int]] = {
         "symbol_k": 1.18,
     },
     "LTC": {
-        "stop_floor_pct": 0.010,
+        "stop_floor_pct": 0.012,
         "stop_cap_pct": 0.015,
         "risk_fraction": 0.0018,
         "allocation_cap_pct": 0.08,
@@ -585,7 +585,7 @@ SPOT_SCALP_SYMBOL_CONFIG: dict[str, dict[str, float | int]] = {
         "symbol_k": 1.12,
     },
     "DOGE": {
-        "stop_floor_pct": 0.015,
+        "stop_floor_pct": 0.012,
         "stop_cap_pct": 0.022,
         "risk_fraction": 0.0015,
         "allocation_cap_pct": 0.05,
@@ -595,7 +595,7 @@ SPOT_SCALP_SYMBOL_CONFIG: dict[str, dict[str, float | int]] = {
         "symbol_k": 1.20,
     },
     "ADA": {
-        "stop_floor_pct": 0.013,
+        "stop_floor_pct": 0.012,
         "stop_cap_pct": 0.019,
         "risk_fraction": 0.0015,
         "allocation_cap_pct": 0.05,
@@ -605,7 +605,7 @@ SPOT_SCALP_SYMBOL_CONFIG: dict[str, dict[str, float | int]] = {
         "symbol_k": 1.16,
     },
     "LINK": {
-        "stop_floor_pct": 0.013,
+        "stop_floor_pct": 0.012,
         "stop_cap_pct": 0.019,
         "risk_fraction": 0.0018,
         "allocation_cap_pct": 0.07,

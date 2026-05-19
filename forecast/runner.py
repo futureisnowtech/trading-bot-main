@@ -187,6 +187,17 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
             )
 
             broker = _get_broker()
+            
+            # ADVERSARY FIX #7: Dynamic Bankroll Fetch
+            # Anchoring to startup balance throws off Kelly risk math.
+            if broker.is_connected():
+                try:
+                    live_balance = broker.get_account_balance()
+                    if live_balance > 0:
+                        bankroll = live_balance
+                except Exception as e:
+                    logger.warning(f"[ForecastRunner] Dynamic bankroll fetch failed: {e}. Using default {bankroll}")
+
             active = get_active_contracts()
             if not active:
                 return []

@@ -45,14 +45,13 @@ EXCLUDED_KEYWORDS: list[str] = [
     "politics",
     "entertainment",
     "celebrity",
-    "weather",
     "award",
     "election",
     "novelty",
 ]
 
 def _is_economic_market(ticker: str, title: str, category: str = "") -> bool:
-    """Return True if this market is in-scope for v1 economic-only trading."""
+    """Return True if this market is in-scope for economic and weather trading."""
     category_lower = category.lower()
     title_lower = title.lower()
     ticker_lower = ticker.lower()
@@ -62,14 +61,15 @@ def _is_economic_market(ticker: str, title: str, category: str = "") -> bool:
         if excl in category_lower or excl in title_lower:
             return False
 
-    # Must match at least one economic keyword
-    econ_keywords = [
+    # Allowed keywords for Economics and Weather
+    allowed_keywords = [
         "cpi", "inflation", "fed", "fomc", "rate", "rates", "payroll",
         "nonfarm", "unemployment", "gdp", "pce", "retail", "housing",
         "consumer", "ppi", "production", "jobs", "employment", "macro",
-        "economic", "economy", "debt", "budget"
+        "economic", "economy", "debt", "budget",
+        "temp", "temperature", "rain", "precip", "weather", "degree"
     ]
-    for kw in econ_keywords:
+    for kw in allowed_keywords:
         if kw in title_lower or kw in ticker_lower or kw in category_lower:
             return True
 

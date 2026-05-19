@@ -570,6 +570,21 @@ def evaluate_contract(
         float(no_quote.get("spread") or 0.0),
     )
 
+    # ADVERSARY FIX #5: Data Freshness SLA (Veto if > 120s old)
+    quote_ts_str = yes_quote.get("ts")
+    if quote_ts_str:
+        try:
+            quote_ts = datetime.fromisoformat(quote_ts_str.replace("Z", "+00:00"))
+            age_seconds = (datetime.now(timezone.utc) - quote_ts).total_seconds()
+            if age_seconds > 120:
+                logger.warning(
+                    f"evaluate_contract veto: stale_market_data ({age_seconds:.1f}s old) "
+                    f"for {contract.get('local_symbol')}"
+                )
+                return None
+        except Exception as e:
+            logger.warning(f"Error checking quote freshness for {contract.get('local_symbol')}: {e}")
+
     if not ask_yes or not ask_no:
         logger.debug(
             f"evaluate_contract: missing quotes for {contract.get('local_symbol')}"

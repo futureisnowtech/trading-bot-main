@@ -60,14 +60,17 @@ logger = logging.getLogger(__name__)
 EV_THRESHOLD: float = 0.02  # 2 cents per $1 contract = 2% edge
 
 # Overround hard cap — above this the house edge is too large
-MAX_OVERROUND: float = 0.25  # Ω_t ≤ 0.25
+MAX_OVERROUND: float = 0.15  # Tightened from 0.25 to 0.15 for Kalshi
 
 # Spread hard cap
 MAX_SPREAD_DOLLARS: float = 0.12  # $0.12 per contract
 
 # Time-to-resolution gates
 MIN_HOURS_TO_RES: float = 2.0  # must have ≥2h before resolution
-MAX_HOURS_TO_RES: float = 720.0  # must resolve within 30 days
+MAX_HOURS_TO_RES: float = 168.0  # must resolve within 7 days (reduced from 720h)
+
+# Longshot Bias Gate
+MIN_IMPLIED_PROB_FOR_YES: float = 0.10  # refuse to buy YES below 10% probability
 
 # Entropy saturation — don't trade near 0 or 1 (already resolved)
 MAX_ENTROPY_FOR_ENTRY: float = 0.67  # H(p) = 0.67 nat ≈ p in [0.09, 0.91]
@@ -322,7 +325,22 @@ def _economics_gate(
             ev_no,
         )
 
-    # 9. Concurrent position cap
+    # 9. Longshot Bias Gate: refuse to buy YES below the probability threshold
+    # Note: latest_prob is YES implied probability.
+    # If the strategy wants to buy YES but p < 0.10, we veto.
+    # (Checking here for EV passing YES but p too low)
+    if ev_yes >= EV_THRESHOLD and q_hat < MIN_IMPLIED_PROB_FOR_YES:
+        # If EV is only positive for YES, we veto. 
+        # If EV is positive for both, we might still allow NO if it's the better EV.
+        if ev_yes >= ev_no:
+            return (
+                False,
+                f"longshot_bias_gate (YES_p={q_hat:.3f} < {MIN_IMPLIED_PROB_FOR_YES})",
+                ev_yes,
+                ev_no,
+            )
+
+    # 10. Concurrent position cap
     if open_positions_count >= MAX_CONCURRENT_POSITIONS:
         return (
             False,
@@ -643,12 +661,17 @@ def evaluate_contract(
     # Correlation penalty
     corr_penalty = SAME_EVENT_PENALTY if same_event_open else 1.0
 
+    # Capital Lockup Penalty (Velocity scaling)
+    # Scale fraction down exponentially the further away the resolution is.
+    # Penalty = exp(-0.5 * (hours / 48)) -> ~0.6 at 48h, ~0.17 at 168h
+    time_penalty = np.exp(-0.5 * (hours_to_res / 48.0)) if hours_to_res > 0 else 1.0
+
     # Sizing
     fraction = fractional_kelly_fraction(
         q_side=q_side,
         p_cost=p_cost,
         lambda_=0.5,  # conservative: use half-Kelly
-        confidence_multiplier=adj_confidence,
+        confidence_multiplier=adj_confidence * time_penalty,
         correlation_penalty=corr_penalty,
         kelly_cap=KELLY_CAP,
     )

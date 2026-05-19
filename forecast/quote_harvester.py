@@ -222,19 +222,19 @@ class QuoteHarvester:
 
         total_quotes = 0
         for contract in contracts:
-            conid = contract.get("conid")
             contract_id = contract.get("id")
             local_symbol = contract.get("local_symbol", "")
             right = contract.get("right", "C")
             side = "YES" if right == "C" else "NO"
 
-            if not conid or not contract_id:
+            if not contract_id or not local_symbol:
                 continue
 
             # Fetch quote
             if self._broker and self._broker.is_connected():
                 try:
-                    q = self._broker.get_quote(int(conid), local_symbol)
+                    # Kalshi uses ticker (local_symbol), not conid
+                    q = self._broker.get_quote(local_symbol)
                 except Exception as e:
                     logger.debug(f"get_quote failed {local_symbol}: {e}")
                     continue
@@ -245,6 +245,9 @@ class QuoteHarvester:
             # Only persist if we got meaningful data
             if q.get("mid") is None:
                 continue
+
+            # Rate limiting: Kalshi V2 is sensitive to burst polling
+            time.sleep(0.05)
 
             ts = datetime.now(timezone.utc).isoformat()
             try:

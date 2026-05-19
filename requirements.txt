@@ -18,6 +18,7 @@ alpaca-py>=0.43.0
 coinbase-advanced-py>=1.7.0
 python-binance>=1.0.19
 ib_insync>=0.9.86
+kalshi-python-sync>=2.0.0
 mcp>=1.0.0
 fastmcp>=0.1.0
 

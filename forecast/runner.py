@@ -54,7 +54,7 @@ def _forecast_runtime_snapshot(*, connected: bool, contracts: int, stubs: int) -
             "tradable": 0,
             "health": "WARN",
             "blocked_reason": "broker_disconnected",
-            "action_needed": "connect_forecastex",
+            "action_needed": "connect_kalshi",
             "readiness_state": "BROKER_DISCONNECTED",
         }
     if contracts > 0:
@@ -72,7 +72,7 @@ def _forecast_runtime_snapshot(*, connected: bool, contracts: int, stubs: int) -
             "tradable": 0,
             "health": "WARN",
             "blocked_reason": "no_tradable_contracts_right_now",
-            "action_needed": "check_forecastex_enrollment",
+            "action_needed": "check_kalshi_permissions",
             "readiness_state": "NO_TRADABLE_CONTRACTS_RIGHT_NOW",
         }
     return {
@@ -86,9 +86,9 @@ def _forecast_runtime_snapshot(*, connected: bool, contracts: int, stubs: int) -
 
 
 def _get_broker():
-    from execution.forecastex_broker import get_forecastex_broker
+    from execution.kalshi_broker import get_kalshi_broker
 
-    return get_forecastex_broker()
+    return get_kalshi_broker()
 
 
 def _get_harvester():

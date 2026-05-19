@@ -1744,20 +1744,9 @@ def check_spot_trailing(paper: bool = False) -> List[Dict]:
 
 
 def check_spot_targets(paper: bool = False) -> List[Dict]:
-    closed: List[Dict] = []
-    broker = _get_broker(paper=paper)
-    if broker is None:
-        return closed
-    for pos in _load_spot_positions_from_db(paper=paper, bot_managed_only=True):
-        sym = str(pos.get("symbol") or "").upper()
-        target = float(pos.get("target") or 0.0)
-        current_price = float(broker.get_mark_price(sym) or 0.0)
-        if target > 0 and current_price >= target:
-            result = close_spot(sym, exit_reason="target_hit", paper=paper)
-            if result:
-                result["trigger"] = "target_hit"
-                closed.append(result)
-    return closed
+    # v18.35: Let Winners Ride — disabled hard target caps.
+    # We rely entirely on dynamic trailing stops now.
+    return []
 
 
 def check_spot_stagnation_exits(paper: bool = False) -> List[Dict]:

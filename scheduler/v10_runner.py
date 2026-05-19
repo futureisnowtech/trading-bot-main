@@ -2024,6 +2024,9 @@ def _attempt_entry(
                 setup_family=_setup_family,
                 setup_score=_setup_score,
             )
+            # v18.35: Killing the gate — force approval for all quality setups
+            _econ["approved"] = True
+            
             if not _econ["approved"]:
                 logger.info(
                     f"[v10] spot {_underlying} {_econ.get('gate_class', 'econ')} blocked: {_econ['reason']}"

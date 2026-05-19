@@ -359,3 +359,22 @@ def get_paired_quotes(
         "omega_t": omega_t,
         "g_t": g_t,
     }
+
+
+if __name__ == "__main__":
+    from execution.kalshi_broker import get_kalshi_broker
+
+    logging.basicConfig(level=logging.INFO, stream=sys.stdout)
+    logger.info("Starting QuoteHarvester in standalone daemon mode...")
+
+    broker = get_kalshi_broker()
+    if not broker.connect():
+        logger.error("Could not connect to broker. Exiting.")
+        sys.exit(1)
+
+    harvester = QuoteHarvester(broker=broker)
+    harvester.start()
+
+    # Keep main thread alive
+    while True:
+        time.sleep(1)

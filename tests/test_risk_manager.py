@@ -83,8 +83,8 @@ class TestPositionLimits:
              patch('risk.drawdown_controller.get_todays_fees', return_value=0.0), \
              patch('risk.drawdown_controller.get_all_time_stats', return_value={'total_pnl': 0.0}), \
              patch('risk.risk_limits.get_daily_trade_count', return_value=0), \
-             patch('data.market_data.is_market_open', return_value=True), \
-             patch('data.market_data.is_in_no_trade_window', return_value=False):
+             patch('risk.risk_limits.is_market_open', return_value=True), \
+             patch('risk.risk_limits.is_in_no_trade_window', return_value=False):
             result = rm.pre_check_entry('crypto_macd', 'NEW-USDC', 'BUY', 50000.0)
         assert not result.approved
         assert "max crypto" in result.reason.lower()
@@ -99,8 +99,8 @@ class TestPositionLimits:
         with patch('risk.drawdown_controller.get_todays_pnl', return_value=0.0), \
              patch('risk.drawdown_controller.get_todays_fees', return_value=0.0), \
              patch('risk.drawdown_controller.get_all_time_stats', return_value={'total_pnl': 0.0}), \
-             patch('data.market_data.is_market_open', return_value=True), \
-             patch('data.market_data.is_in_no_trade_window', return_value=False):
+             patch('risk.risk_limits.is_market_open', return_value=True), \
+             patch('risk.risk_limits.is_in_no_trade_window', return_value=False):
             result = rm.pre_check_entry('crypto_macd', 'BTC-USDC', 'BUY', 50000.0)
         assert not result.approved
         assert "already holding" in result.reason.lower()
@@ -162,13 +162,23 @@ class TestStopLossManager:
 class TestDrawdownHeat:
     """Verify the 5-level heat system returns correct levels and size factors."""
 
+    def test_risk_manager_pre_check_entry_passes_confidence_checks(self):
+        rm = _make_rm()
+        from risk.drawdown_controller import get_heat_level
+        with patch('risk.drawdown_controller.get_todays_pnl', return_value=0.0), \
+             patch('risk.drawdown_controller.get_todays_fees', return_value=0.0), \
+             patch('risk.drawdown_controller.get_all_time_stats', return_value={'total_pnl': 0.0}), \
+             patch('risk.drawdown_controller.get_heat_level', return_value={'level': 0, 'size_factor': 1.0, 'label': 'NORMAL', 'daily_pnl': 0, 'pct_drawn': 0}):
+            result = rm.pre_check_entry('crypto_macd', 'BTC-USDC', 'BUY', 50000.0, confidence=0.8)
+            assert result.approved
+
     def _heat(self, daily_pnl: float, all_time_pnl: float = 0.0):
         from risk.drawdown_controller import get_heat_level
         with patch('risk.drawdown_controller.get_todays_pnl', return_value=daily_pnl), \
              patch('risk.drawdown_controller.get_todays_fees', return_value=0.0), \
              patch('risk.drawdown_controller.get_all_time_stats',
                    return_value={'total_pnl': all_time_pnl}):
-            return get_heat_level()
+            return get_heat_level(False)
 
     def test_normal_no_loss(self):
         heat = self._heat(0.0)

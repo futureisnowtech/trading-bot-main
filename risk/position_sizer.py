@@ -24,7 +24,7 @@ def size_from_kelly(strategy: str, symbol: str, base_size: float,
     """
     # ── Step 1: Heat level scaling ────────────────────────────────────────────
     from risk.drawdown_controller import get_heat_level
-    heat = get_heat_level()
+    heat = get_heat_level(paper)
     heat_factor = heat['size_factor']
 
     if heat['level'] > 0:

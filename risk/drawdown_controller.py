@@ -68,7 +68,7 @@ def check_daily_loss(paper: bool) -> tuple:
     ok=False means the caller should halt trading (heat level 4).
     Uses real balance (ACCOUNT_SIZE + all-time P&L) as the loss base.
     """
-    heat = get_heat_level()
+    heat = get_heat_level(paper)
     if heat['level'] == 4:
         daily_pnl = heat['daily_pnl']
         real_balance = max(ACCOUNT_SIZE + get_all_time_stats()['total_pnl'], 1.0)

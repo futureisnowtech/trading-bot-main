@@ -152,7 +152,7 @@ class RiskManager:
             return RiskCheckResult(False, f"Confidence {confidence:.0%} < {min_conf:.0%} minimum")
 
         # Daily loss halt
-        ok, reason = check_daily_loss()
+        ok, reason = check_daily_loss(False)
         if not ok:
             self.halt(reason)
             return RiskCheckResult(False, reason)
@@ -164,7 +164,7 @@ class RiskManager:
 
         # Fee drag (crypto only)
         if is_cr:
-            ok, reason = check_fee_drag()
+            ok, reason = check_fee_drag(False)
             if not ok:
                 return RiskCheckResult(False, reason)
 
@@ -207,13 +207,13 @@ class RiskManager:
         if confidence < min_conf:
             return RiskCheckResult(False, f"Confidence {confidence:.0%} < {min_conf:.0%} minimum")
 
-        ok, reason = check_daily_loss()
+        ok, reason = check_daily_loss(False)
         if not ok:
             self.halt(reason)
             return RiskCheckResult(False, reason)
 
         # Log heat level on every entry attempt (visible in scan feed)
-        heat = get_heat_level()
+        heat = get_heat_level(False)
         if heat['level'] > 0:
             log_event('INFO', 'risk',
                       f"[Heat:{heat['label']}] day={heat['daily_pnl']:+.2f} "
@@ -224,7 +224,7 @@ class RiskManager:
             return result
 
         if is_cr:
-            ok, reason = check_fee_drag()
+            ok, reason = check_fee_drag(False)
             if not ok:
                 return RiskCheckResult(False, reason)
 

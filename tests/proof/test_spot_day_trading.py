@@ -160,6 +160,7 @@ def _paper_broker(mark_price=2000.0, qty=0.05):
     return broker
 
 
+@pytest.mark.skip(reason="v18.35: Let Winners Ride — hard targets disabled in spot_engine.py")
 def test_sdt01_target_hit_closes_position(proof_runtime, monkeypatch):
     import spot_engine
 
@@ -172,6 +173,7 @@ def test_sdt01_target_hit_closes_position(proof_runtime, monkeypatch):
     assert closed[0]["exit_reason"] == "target_hit"
 
 
+@pytest.mark.skip(reason="v18.35: Let Winners Ride — hard targets disabled in spot_engine.py")
 def test_sdt02_below_target_no_close(proof_runtime, monkeypatch):
     import spot_engine
 

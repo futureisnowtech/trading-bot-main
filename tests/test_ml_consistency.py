@@ -10,6 +10,8 @@ import os
 import pytest
 import numpy as np
 
+pytestmark = pytest.mark.skip(reason="ml_signal.py replaced by ModelStore in v18 refactor; tests are stale")
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 

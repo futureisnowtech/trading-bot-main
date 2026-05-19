@@ -72,7 +72,7 @@ def compute_size(
     # Drawdown halt check — if heat controller says stop, return 0
     try:
         from risk.drawdown_controller import get_heat_level
-        heat_data = get_heat_level()
+        heat_data = get_heat_level(paper)
         if heat_data.get('size_factor', 1.0) == 0.0:
             return _zero_result(stop_dist_pct, quality_mult)
     except Exception:
@@ -141,11 +141,15 @@ def get_position_size(
         tier = 'A'
     else:
         tier = 'B'
+    
+    # We use a hardcoded account size for the legacy shim
+    _acc_bal = 10000.0
     result = compute_size(
-        account_balance=ACCOUNT_SIZE,
+        account_balance=_acc_bal,
         stop_dist_pct=0.015,   # default 1.5% stop
-        quality_tier=tier if paper is not None else False,
+        quality_tier=tier,
+        paper=paper
     )
     # Scale result to caller's requested base_size
-    scale = base_size / ACCOUNT_SIZE if ACCOUNT_SIZE > 0 else 1.0
+    scale = base_size / _acc_bal if _acc_bal > 0 else 1.0
     return round(result['notional_usd'] * scale, 2)

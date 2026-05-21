@@ -100,6 +100,14 @@
         
         eventSource.onmessage = function(event) {
             const data = JSON.parse(event.data);
+            if (data.error) {
+                console.error("Stream error:", data.error);
+                return;
+            }
+
+            // Reset Status
+            document.getElementById('sys-status').innerText = 'OPERATIONAL';
+            document.getElementById('sys-status').className = 'stat-value ticker-green';
             
             // Update Header
             document.getElementById('sys-time').innerText = data.system.time;
@@ -112,11 +120,11 @@
             pnlEl.className = `stat-value ${pnl >= 0 ? 'ticker-green' : 'ticker-red'}`;
             
             const spotPosContainer = document.getElementById('spot-positions');
-            if (data.spot.positions.length > 0) {
+            if (data.spot.positions && data.spot.positions.length > 0) {
                 spotPosContainer.innerHTML = data.spot.positions.map(p => `
                     <div class="flex justify-between text-xs p-2 bg-black/30 rounded border border-gray-900">
                         <span class="font-bold text-blue-400">${p.symbol}</span>
-                        <span>${p.qty} @ $${p.entry_price.toFixed(2)}</span>
+                        <span>${p.qty.toFixed(4)} @ $${p.entry_price.toFixed(2)}</span>
                         <span class="font-bold ${p.unrealized_pnl >= 0 ? 'ticker-green' : 'ticker-red'}">
                             ${p.unrealized_pnl >= 0 ? '+' : ''}${p.unrealized_pnl.toFixed(2)}
                         </span>
@@ -128,19 +136,33 @@
             
             // Update Forecast
             document.getElementById('forecast-markets').innerText = data.forecast.active_markets;
+            const forecastPosContainer = document.getElementById('forecast-positions');
+            if (data.forecast.positions && data.forecast.positions.length > 0) {
+                forecastPosContainer.innerHTML = data.forecast.positions.map(p => `
+                    <div class="flex justify-between text-xs p-2 bg-black/30 rounded border border-gray-900">
+                        <span class="font-bold text-yellow-500">${p.local_symbol}</span>
+                        <span class="uppercase">${p.side}</span>
+                        <span>QTY: ${p.qty}</span>
+                    </div>
+                `).join('');
+            } else {
+                forecastPosContainer.innerHTML = '<p class="text-xs text-gray-600 italic">No active predictions</p>';
+            }
             
             // Update Feed
             const feed = document.getElementById('activity-feed');
-            if (data.recent_trades.length > 0) {
-                feed.innerHTML = data.recent_trades.map(t => `
+            if (data.recent_trades && data.recent_trades.length > 0) {
+                feed.innerHTML = data.recent_trades.map(t => {
+                    const timeStr = new Date(t.timestamp).toLocaleTimeString();
+                    return `
                     <div class="flex space-x-4 border-l-2 ${t.side === 'BUY' ? 'border-green-500' : 'border-red-500'} pl-2 mb-1">
-                        <span class="text-gray-500">[${t.timestamp.split(' ')[1]}]</span>
+                        <span class="text-gray-500">[${timeStr}]</span>
                         <span class="font-bold text-white w-20">${t.symbol}</span>
                         <span class="${t.side === 'BUY' ? 'ticker-green' : 'ticker-red'}">${t.side}</span>
                         <span>${t.qty} @ ${t.price.toFixed(4)}</span>
                         <span class="text-gray-500">${t.strategy}</span>
                     </div>
-                `).join('');
+                `;}).join('');
             }
         };
 

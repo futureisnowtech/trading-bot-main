@@ -48,19 +48,33 @@ async def get_db_snapshot():
         cursor.execute("SELECT * FROM open_positions WHERE qty > 0")
         spot_positions_raw = [dict(r) for r in cursor.fetchall()]
         
-        # Transform positions to include symbol and qty
         spot_positions = []
         for p in spot_positions_raw:
             spot_positions.append({
                 "symbol": p["symbol"],
                 "qty": p["qty"],
                 "entry_price": p["entry"],
-                "unrealized_pnl": 0.0 # Calculate if needed, but 0.0 is safe for now
+                "unrealized_pnl": 0.0
             })
         
         # Latest Forecast Stats
         cursor.execute("SELECT COUNT(*) as count FROM forecast_markets WHERE active = 1")
         forecast_count = cursor.fetchone()["count"]
+        
+        # Forecast Positions (Kalshi)
+        forecast_positions = []
+        try:
+            from execution.kalshi_broker import get_kalshi_broker
+            kb = get_kalshi_broker()
+            forecast_positions = kb.get_positions()
+        except Exception:
+            pass
+
+        # 24H PnL (from trades table)
+        # Note: SQLite date comparisons require the 'T' format or consistent strings
+        cursor.execute("SELECT SUM(pnl_usd) as pnl FROM trades WHERE ts > datetime('now', '-1 day')")
+        pnl_row = cursor.fetchone()
+        pnl_24h = float(pnl_row["pnl"] or 0.0)
         
         # Recent Trades (Last 10 from trades)
         cursor.execute("SELECT * FROM trades ORDER BY id DESC LIMIT 10")
@@ -82,12 +96,12 @@ async def get_db_snapshot():
         return {
             "spot": {
                 "equity": crypto_row["buying_power_usd"] + crypto_row["capital_deployed_usd"] if crypto_row else 0.0,
-                "pnl_24h": 0.0, # Placeholder unless we add PnL tracking table
+                "pnl_24h": pnl_24h,
                 "positions": spot_positions,
             },
             "forecast": {
                 "active_markets": forecast_count,
-                "positions": [],
+                "positions": forecast_positions,
             },
             "recent_trades": recent_trades,
             "system": {
@@ -104,11 +118,14 @@ async def get_state():
     return await get_db_snapshot()
 
 async def event_generator() -> AsyncGenerator[str, None]:
-    """SSE Generator for real-time updates."""
+    """SSE Generator with keep-alive and error safety."""
     while True:
-        data = await get_db_snapshot()
-        yield f"data: {json.dumps(data)}\n\n"
-        await asyncio.sleep(2) # 2-second heartbeat
+        try:
+            data = await get_db_snapshot()
+            yield f"data: {json.dumps(data)}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        await asyncio.sleep(2)
 
 @app.get("/api/stream")
 async def stream(request: Request):

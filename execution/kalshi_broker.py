@@ -1,22 +1,24 @@
 """
-execution/kalshi_broker.py — Kalshi prediction market execution.
+execution/kalshi_broker.py — Kalshi prediction market execution (Pure REST).
 
-Kalshi is a CFTC-regulated prediction market. This broker implements the 
-V2 API using the kalshi-python-sync SDK.
-
-Architecture:
-- Singleton pattern via get_kalshi_broker().
-- Synchronous implementation (forecast loop runs on its own background thread).
-- Maps Kalshi's 'yes'/'no' to the system's 'C'/'P' (Call/Put) right-side bias 
-  to maintain compatibility with the forecast_contracts database schema.
+This implementation bypasses the official SDK to avoid Pydantic validation
+and dependency issues. It uses manual RSA-PSS signing for all V2 API requests.
 """
 
 import logging
 import os
 import sys
 import uuid
+import base64
+import time
+import requests
+import json
 from datetime import datetime, timezone
 from typing import Optional, List, Dict
+
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives import serialization
 
 # Add root to path for logging_db
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -27,9 +29,7 @@ logger = logging.getLogger(__name__)
 # ── Credentials ───────────────────────────────────────────────────────────────
 KALSHI_API_KEY_ID = os.getenv("KALSHI_API_KEY_ID")
 KALSHI_PRIVATE_KEY_PATH = os.getenv("KALSHI_PRIVATE_KEY_PATH")
-
-# Kalshi zero-fee maker model, but we'll assume a small slippage/fee buffer for safety
-KALSHI_FEE_PER_CONTRACT = 0.0
+KALSHI_API_BASE = "https://external-api.kalshi.com"
 
 # Economic event categories to scan during discovery.
 ECONOMIC_CATEGORIES: list[str] = [
@@ -37,9 +37,13 @@ ECONOMIC_CATEGORIES: list[str] = [
     "Federal Reserve",
     "Financials",
     "Recession",
+    "Climate and Weather",
+    "Politics",
+    "Elections",
+    "Social",
 ]
 
-# Markets to EXCLUDE from v1
+# Markets to EXCLUDE
 EXCLUDED_KEYWORDS: list[str] = [
     "sports",
     "politics",
@@ -51,23 +55,29 @@ EXCLUDED_KEYWORDS: list[str] = [
 ]
 
 def _is_economic_market(ticker: str, title: str, category: str = "") -> bool:
-    """Return True if this market is in-scope for economic and weather trading."""
-    category_lower = category.lower()
+    """Helper to filter discovered Kalshi events to economic/weather scope only."""
+    if not title or not ticker:
+        return False
+    
     title_lower = title.lower()
     ticker_lower = ticker.lower()
+    category_lower = category.lower() if category else ""
 
-    # Hard exclusions
     for excl in EXCLUDED_KEYWORDS:
         if excl in category_lower or excl in title_lower:
             return False
 
-    # Allowed keywords for Economics and Weather
+    if any(c.lower() in category_lower for c in ECONOMIC_CATEGORIES):
+        return True
+
     allowed_keywords = [
         "cpi", "inflation", "fed", "fomc", "rate", "rates", "payroll",
         "nonfarm", "unemployment", "gdp", "pce", "retail", "housing",
         "consumer", "ppi", "production", "jobs", "employment", "macro",
-        "economic", "economy", "debt", "budget",
-        "temp", "temperature", "rain", "precip", "weather", "degree"
+        "economic", "economy", "debt", "budget", "target", "hike", "cut",
+        "growth", "index", "price", "prices", "survey", "manufacturing",
+        "temp", "temperature", "rain", "precip", "weather", "degree",
+        "hurricane", "storm", "snow", "oil", "gas", "energy", "yield"
     ]
     for kw in allowed_keywords:
         if kw in title_lower or kw in ticker_lower or kw in category_lower:
@@ -76,58 +86,33 @@ def _is_economic_market(ticker: str, title: str, category: str = "") -> bool:
     return False
 
 class KalshiBroker:
-    """
-    Kalshi broker implementation for prediction market event contracts.
-
-    Manages discovery, quote fetching, order placement, and position tracking.
-    """
-
     def __init__(self) -> None:
-        self._client = None
         self._connected = False
         self._open_positions: dict[str, dict] = {}  # key = f"{ticker}_{right}"
+        self._private_key = None
         
-        # API classes
-        self._account_api = None
-        self._market_api = None
-        self._events_api = None
-        self._orders_api = None
-        self._portfolio_api = None
-
     def connect(self) -> bool:
-        """Connect to Kalshi using Key ID and Private Key Path."""
+        """Verify credentials and load private key for signing."""
         if not KALSHI_API_KEY_ID or not KALSHI_PRIVATE_KEY_PATH:
             log_event("ERROR", "KalshiBroker", "Missing KALSHI_API_KEY_ID or KALSHI_PRIVATE_KEY_PATH in .env")
             return False
 
         try:
-            from kalshi_python_sync import (
-                Configuration, KalshiClient, AccountApi, MarketApi, 
-                EventsApi, OrdersApi, PortfolioApi
+            with open(KALSHI_PRIVATE_KEY_PATH, 'r') as f:
+                key_pem = f.read()
+            
+            self._private_key = serialization.load_pem_private_key(
+                key_pem.encode(),
+                password=None
             )
             
-            # Read private key from path
-            with open(KALSHI_PRIVATE_KEY_PATH, 'r') as f:
-                private_key = f.read()
-
-            config = Configuration(host="https://external-api.kalshi.com/trade-api/v2")
-            config.api_key_id = KALSHI_API_KEY_ID
-            config.private_key_pem = private_key
-
-            self._client = KalshiClient(config)
-            
-            # Initialize API interfaces
-            self._account_api = AccountApi(self._client)
-            self._market_api = MarketApi(self._client)
-            self._events_api = EventsApi(self._client)
-            self._orders_api = OrdersApi(self._client)
-            self._portfolio_api = PortfolioApi(self._client)
-            
             # Verify connection by getting balance
-            self._portfolio_api.get_balance()
+            resp = self._request("GET", "/trade-api/v2/portfolio/balance")
+            if "error" in resp:
+                raise RuntimeError(f"Auth verification failed: {resp['error']}")
+                
             self._connected = True
-            
-            print("[KalshiBroker] Connected (LIVE) ✅")
+            print(f"[KalshiBroker] Connected (LIVE) ✅ | Balance: ${float(resp.get('balance_dollars', 0)):.2f}")
             log_event("INFO", "KalshiBroker", "Connected (LIVE)")
             
             self._sync_positions()
@@ -139,106 +124,113 @@ class KalshiBroker:
             return False
 
     def is_connected(self) -> bool:
-        return self._connected and self._client is not None
+        return self._connected and self._private_key is not None
+
+    def _request(self, method: str, path: str, params: dict = None, body: dict = None) -> dict:
+        """Execute signed Kalshi V2 request."""
+        try:
+            ts = str(int(time.time() * 1000))
+            body_str = json.dumps(body, separators=(',', ':')) if body else ""
+            
+            # Message to sign: timestamp + method + path + body
+            msg = f"{ts}{method}{path}{body_str}"
+            
+            signature = self._private_key.sign(
+                msg.encode(),
+                padding.PSS(
+                    mgf=padding.MGF1(hashes.SHA256()),
+                    salt_length=padding.PSS.MAX_LENGTH
+                ),
+                hashes.SHA256()
+            )
+            sig_b64 = base64.b64encode(signature).decode()
+            
+            headers = {
+                "KALSHI-ACCESS-KEY": KALSHI_API_KEY_ID,
+                "KALSHI-ACCESS-SIGNATURE": sig_b64,
+                "KALSHI-ACCESS-TIMESTAMP": ts,
+                "Content-Type": "application/json"
+            }
+            
+            url = f"{KALSHI_API_BASE}{path}"
+            if method == "GET":
+                resp = requests.get(url, headers=headers, params=params, timeout=10)
+            elif method == "POST":
+                resp = requests.post(url, headers=headers, data=body_str, timeout=10)
+            elif method == "DELETE":
+                resp = requests.delete(url, headers=headers, timeout=10)
+            else:
+                return {"error": "unsupported_method"}
+                
+            return resp.json()
+        except Exception as e:
+            return {"error": str(e)}
 
     def _sync_positions(self) -> None:
-        """Sync open positions from Kalshi into local state, including resting orders."""
+        """Sync open positions from Kalshi into local state."""
         if not self.is_connected():
             return
         try:
-            # 1. Sync actual filled positions
-            portfolio = self._portfolio_api.get_positions()
-            if hasattr(portfolio, 'market_positions'):
-                for pos in portfolio.market_positions:
-                    qty_fp = float(pos.position_fp) if pos.position_fp else 0.0
-                    if qty_fp != 0:
-                        ticker = pos.ticker
-                        side = "YES" if qty_fp > 0 else "NO"
-                        right = "C" if side == "YES" else "P"
-                        key = f"{ticker}_{right}"
-                        
-                        self._open_positions[key] = {
-                            "local_symbol": ticker,
-                            "right": right,
-                            "strike": 0.0,
-                            "last_trade_at": "",
-                            "conid": None,
-                            "qty": abs(int(qty_fp)),
-                            "entry_price": 0.0,
-                            "side": side,
-                            "order_id": "SYNCED",
-                            "entered_at": datetime.now(timezone.utc).isoformat(),
-                        }
-            
-            # 2. Sync resting orders (Exposure = Filled + Resting)
-            # This prevents the system from firing multiple orders for the same target
-            # if the previous limit order hasn't filled yet.
-            resting = self._orders_api.get_orders(status="resting")
-            if hasattr(resting, 'orders'):
-                for order in resting.orders:
-                    ticker = order.ticker
-                    side = "YES" if order.side == "yes" else "NO"
-                    right = "C" if side == "YES" else "P"
-                    key = f"{ticker}_{right}"
-                    qty = int(float(order.count_fp))
-                    
-                    if key in self._open_positions:
-                        self._open_positions[key]["qty"] += qty
-                    else:
-                        self._open_positions[key] = {
-                            "local_symbol": ticker,
-                            "right": right,
-                            "strike": 0.0,
-                            "last_trade_at": "",
-                            "conid": None,
-                            "qty": qty,
-                            "entry_price": float(order.yes_price_dollars) if side == "YES" else float(order.no_price_dollars),
-                            "side": side,
-                            "order_id": order.order_id,
-                            "entered_at": datetime.now(timezone.utc).isoformat(),
-                        }
-                    print(f"[KalshiBroker] Included RESTING {side} {qty} {ticker}")
-                    
-            for key, p in self._open_positions.items():
-                print(f"[KalshiBroker] Total Exposure {p['side']} {p['qty']} {p['local_symbol']}")
+            data = self._request("GET", "/trade-api/v2/portfolio/positions")
+            self._open_positions.clear()
+
+            positions = data.get("positions", [])
+            for p in positions:
+                qty = p.get("position", 0)
+                if qty == 0: continue
                 
+                ticker = p.get("market_ticker")
+                side = "YES" if qty > 0 else "NO"
+                right = "C" if side == "YES" else "P"
+                abs_qty = abs(qty)
+
+                key = f"{ticker}_{right}"
+                self._open_positions[key] = {
+                    "local_symbol": ticker,
+                    "right": right,
+                    "qty": abs_qty,
+                    "entry_price": 0.0,
+                    "side": side,
+                    "order_id": "EXISTING",
+                    "entered_at": datetime.now(timezone.utc).isoformat(),
+                }
         except Exception as e:
             log_event("WARN", "KalshiBroker", f"Position sync error: {e}")
 
-    def discover_markets(
-        self,
-        category_filter: Optional[str] = None,
-        underliers: Optional[list[str]] = None,
-    ) -> list[dict]:
+    def discover_markets(self) -> list[dict]:
         """Discover active Kalshi event contracts."""
         if not self.is_connected():
             return []
 
         results = []
         try:
-            events_resp = self._events_api.get_events(limit=100, status="open")
-            for event in events_resp.events:
-                if not _is_economic_market(event.event_ticker, event.title, event.category):
+            data = self._request("GET", "/trade-api/v2/events", params={"limit": 200, "status": "open"})
+            events = data.get("events", [])
+            
+            for event in events:
+                e_ticker = event.get("event_ticker")
+                if not _is_economic_market(e_ticker, event.get("title"), event.get("category")):
                     continue
                 
-                markets_resp = self._market_api.get_markets(event_ticker=event.event_ticker)
-                for m in markets_resp.markets:
-                    if m.status != "active":
-                        continue
+                m_data = self._request("GET", "/trade-api/v2/markets", params={"event_ticker": e_ticker})
+                markets = m_data.get("markets", [])
+                
+                for m in markets:
+                    if m.get("status") != "active": continue
                         
                     for side in ["YES", "NO"]:
                         right = "C" if side == "YES" else "P"
                         results.append({
-                            "underlier": event.event_ticker,
-                            "local_symbol": m.ticker,
+                            "underlier": e_ticker,
+                            "local_symbol": m.get("ticker"),
                             "conid": None,
                             "right": right,
                             "strike": 0.0,
-                            "last_trade_at": m.close_time.strftime("%Y%m%d %H:%M:%S") if hasattr(m, 'close_time') and m.close_time else "",
+                            "last_trade_at": m.get("close_time", ""),
                             "exchange": "KALSHI",
                             "currency": "USD",
-                            "long_name": m.title,
-                            "category": event.category,
+                            "long_name": m.get("title"),
+                            "category": event.get("category"),
                             "side": side,
                         })
         except Exception as e:
@@ -246,211 +238,116 @@ class KalshiBroker:
 
         return results
 
-    def get_quote(self, ticker: str, local_symbol: str = "") -> dict:
-        """Fetch bid/ask/mid for a Kalshi ticker."""
+    def get_quote(self, ticker: str) -> dict:
+        """Fetch bid/ask/mid using raw orderbook access."""
         if not self.is_connected():
-            return {
-                "local_symbol": ticker,
-                "bid": None, "ask": None, "mid": None, "spread": None,
-                "ts": datetime.now(timezone.utc).isoformat(),
-            }
+            return {"local_symbol": ticker, "bid": None, "ask": None, "ts": datetime.now(timezone.utc).isoformat()}
         
         try:
-            resp = self._market_api.get_market_orderbook(ticker)
-            orderbook = resp.orderbook_fp
+            data = self._request("GET", f"/trade-api/v2/markets/{ticker}/orderbook")
+            book = data.get("orderbook", {})
             
-            best_yes_bid = float(orderbook.yes_dollars[0][0]) if orderbook.yes_dollars else None
-            best_no_bid = float(orderbook.no_dollars[0][0]) if orderbook.no_dollars else None
+            yes_levels = book.get("yes", [])
+            no_levels = book.get("no", [])
             
-            bid = best_yes_bid
-            ask = (1.0 - best_no_bid) if best_no_bid is not None else None
+            # Yes Bid: The highest price someone is willing to pay for YES
+            # No Bid: The highest price someone is willing to pay for NO
+            # Ask for YES = 1.0 - (No Bid)
+            yes_bid = float(yes_levels[0][0]) / 100.0 if yes_levels else None
+            no_bid = float(no_levels[0][0]) / 100.0 if no_levels else None
+            yes_ask = (1.0 - no_bid) if no_bid is not None else None
             
-            mid = round((bid + ask) / 2.0, 4) if bid and ask else bid or ask
-            spread = round(ask - bid, 4) if bid and ask else None
+            mid = round((yes_bid + yes_ask) / 2.0, 4) if yes_bid and yes_ask else yes_bid or yes_ask
+            spread = round(yes_ask - yes_bid, 4) if yes_bid and yes_ask else None
 
             return {
                 "local_symbol": ticker,
-                "bid": bid,
-                "ask": ask,
+                "bid": yes_bid,
+                "ask": yes_ask,
                 "mid": mid,
                 "spread": spread,
                 "implied_prob": mid,
                 "ts": datetime.now(timezone.utc).isoformat(),
             }
         except Exception as e:
-            log_event("WARN", "KalshiBroker", f"get_quote error for {ticker}: {e}")
             return {"local_symbol": ticker, "bid": None, "ask": None, "ts": datetime.now(timezone.utc).isoformat()}
 
     def get_quotes_batch(self, contracts: list[dict]) -> list[dict]:
-        quotes = []
-        for c in contracts:
-            q = self.get_quote(c["local_symbol"])
-            q["right"] = c.get("right", "")
-            q["strike"] = c.get("strike", 0.0)
-            quotes.append(q)
-        return quotes
+        return [self.get_quote(c["local_symbol"]) for c in contracts]
 
-    def place_buy_order(
-        self,
-        contract_dict: dict,
-        qty: int,
-        limit_price: float,
-        reason: str = "signal",
-        strategy: str = "forecast_event",
-    ) -> dict:
-        """Place a limit buy order on Kalshi."""
-        from kalshi_python_sync import CreateOrderRequest
-        
-        ticker = contract_dict["local_symbol"]
-        right = contract_dict["right"]
-        side = "YES" if right == "C" else "NO"
-        kalshi_side = "yes" if side == "YES" else "no"
-
+    def place_buy_order(self, contract_dict: dict, qty: int, limit_price: float, **kwargs) -> dict:
+        """Place a limit buy order."""
         if not self.is_connected():
-            order_id = f"KS_PAPER_{uuid.uuid4().hex[:8]}"
-            print(f"[KalshiBroker] ⚠️ Paper-logging BUY {qty} {ticker} ({side}) @ {limit_price:.4f}")
-        else:
-            try:
-                # Use CreateOrderRequest (V1/V2 hybrid supported by SDK)
-                req = CreateOrderRequest(
-                    ticker=ticker,
-                    action="buy",
-                    side=kalshi_side,
-                    count_fp=f"{float(qty):.2f}",
-                    yes_price_dollars=f"{limit_price:.2f}" if kalshi_side == "yes" else None,
-                    no_price_dollars=f"{limit_price:.2f}" if kalshi_side == "no" else None,
-                    client_order_id=str(uuid.uuid4()),
-                    time_in_force="good_till_canceled"
-                )
-                order_resp = self._orders_api.create_order(req)
-                order_id = order_resp.order_id
-                print(f"[KalshiBroker] BUY {qty} {ticker} ({side}) @ {limit_price:.4f} | ID={order_id}")
-            except Exception as e:
-                log_event("ERROR", "KalshiBroker", f"place_buy_order error: {e}")
-                order_id = f"KS_ERR_{uuid.uuid4().hex[:8]}"
+            return {"order_id": f"KS_PAPER_{uuid.uuid4().hex[:8]}", "price": limit_price, "qty": qty}
 
-        # Update local position
-        key = f"{ticker}_{right}"
-        existing = self._open_positions.get(key, {})
-        self._open_positions[key] = {
-            "local_symbol": ticker,
-            "right": right,
-            "qty": existing.get("qty", 0) + qty,
-            "entry_price": limit_price,
-            "side": side,
-            "order_id": order_id,
-            "entered_at": datetime.now(timezone.utc).isoformat(),
-        }
-
-        log_trade(
-            strategy=strategy, broker="kalshi", symbol=ticker, action="BUY",
-            order_type="Limit", qty=qty, price=limit_price,
-            fee_usd=0, order_id=order_id, notes=f"side={side} reason={reason}"
-        )
-        return {"order_id": order_id, "price": limit_price, "side": side, "qty": qty}
-
-    def flatten_position(
-        self,
-        local_symbol: str,
-        right: str,
-        qty: int,
-        strategy: str = "forecast_event",
-        reason: str = "exit",
-    ) -> dict:
-        """Flatten by selling the position with adversarial safeguards."""
-        from kalshi_python_sync import CreateOrderRequest
+        ticker = contract_dict["local_symbol"]
+        side = "yes" if contract_dict["right"] == "C" else "no"
+        limit_cents = int(round(limit_price * 100))
         
-        side = "YES" if right == "C" else "NO"
-        kalshi_side = "yes" if side == "YES" else "no"
+        body = {
+            "ticker": ticker,
+            "action": "buy",
+            "side": side,
+            "count": int(qty),
+            "type": "limit",
+            "yes_price": limit_cents if side == "yes" else None,
+            "no_price": limit_cents if side == "no" else None,
+            "client_order_id": str(uuid.uuid4()),
+        }
+        
+        resp = self._request("POST", "/trade-api/v2/portfolio/orders", body=body)
+        order_id = resp.get("order_id", "ERR")
+        
+        if order_id != "ERR":
+            print(f"[KalshiBroker] BUY {qty} {ticker} ({side.upper()}) @ {limit_price:.4f} | ID={order_id}")
+            key = f"{ticker}_{contract_dict['right']}"
+            self._open_positions[key] = {"qty": qty, "side": side.upper(), "local_symbol": ticker}
+
+        return {"order_id": order_id, "price": limit_price, "qty": qty}
+
+    def flatten_position(self, local_symbol: str, right: str, qty: int, **kwargs) -> dict:
+        """Exit a position by selling."""
+        if not self.is_connected(): return {"order_id": "PAPER_EXIT"}
+        
+        side = "yes" if right == "C" else "no"
         key = f"{local_symbol}_{right}"
         
-        pos = self._open_positions.get(key)
-        if not pos:
-            return {"error": "no_open_position"}
-
-        flatten_qty = min(qty, pos.get("qty", 0))
+        quote = self.get_quote(local_symbol)
+        # To sell YES, we hit the YES bid.
+        # To sell NO, we hit the NO bid (which is 1 - yes_ask).
+        if side == "yes":
+            price = max(0.01, (quote.get("bid") or 0.01) - 0.01)
+        else:
+            no_bid = (1.0 - quote.get("ask")) if quote.get("ask") else 0.01
+            price = max(0.01, no_bid - 0.01)
+            
+        limit_cents = int(round(price * 100))
         
-        if self.is_connected():
-            try:
-                # ADVERSARY FIX #4: Cancel any resting BUY orders before selling
-                # This prevents being trapped in a "buy back" loop during exit.
-                resting = self._orders_api.get_orders(status="resting", ticker=local_symbol)
-                if hasattr(resting, "orders"):
-                    for o in resting.orders:
-                        if o.action == "buy":
-                            logger.info(f"[KalshiBroker] Canceling resting BUY order {o.order_id} before exit")
-                            self._orders_api.cancel_order(order_id=o.order_id)
-
-                # ADVERSARY FIX #2: Dynamic Slippage Control
-                # Instead of hardcoded 0.01, we query the book and cross the spread by max $0.02.
-                quote = self.get_quote(local_symbol)
-                bid = quote.get("bid") # This is best YES bid
-                ask = quote.get("ask") # This is (1 - best NO bid)
-                
-                if kalshi_side == "yes":
-                    # Selling YES: We hit the best YES bid
-                    # Slippage allowance: $0.02
-                    limit_price = max(0.01, (bid - 0.02)) if bid is not None else 0.01
-                    yes_price = f"{limit_price:.2f}"
-                    no_price = "0.01"
-                else:
-                    # Selling NO: We hit the best NO bid (which is 1 - ask)
-                    no_bid = (1.0 - ask) if ask is not None else None
-                    limit_price = max(0.01, (no_bid - 0.02)) if no_bid is not None else 0.01
-                    no_price = f"{limit_price:.2f}"
-                    yes_price = "0.01"
-
-                req = CreateOrderRequest(
-                    ticker=local_symbol,
-                    action="sell",
-                    side=kalshi_side,
-                    count_fp=f"{float(flatten_qty):.2f}",
-                    yes_price_dollars=yes_price,
-                    no_price_dollars=no_price,
-                    client_order_id=str(uuid.uuid4()),
-                    time_in_force="immediate_or_cancel"
-                )
-                order_resp = self._orders_api.create_order(req)
-                order_id = order_resp.order_id
-            except Exception as e:
-                # ADVERSARY FIX #6: Post-Resolution API Spam Loop
-                # If market is closed (HTTP 400), forcefully clear local position state.
-                err_str = str(e).lower()
-                if "market is not active" in err_str or "market closed" in err_str or "400" in err_str:
-                    logger.warning(f"[KalshiBroker] Market {local_symbol} resolved/closed. Clearing local state.")
-                    self._open_positions.pop(key, None)
-                    return {"order_id": "RESOLVED", "price": 0, "side": side, "qty": flatten_qty}
-                
-                log_event("ERROR", "KalshiBroker", f"flatten_position error: {e}")
-                order_id = "ERR"
-        else:
-            order_id = "PAPER_EXIT"
-
-        remaining = pos.get("qty", 0) - flatten_qty
-        if remaining <= 0:
-            self._open_positions.pop(key, None)
-        else:
-            self._open_positions[key]["qty"] = remaining
-
-        return {"order_id": order_id, "flattened_qty": flatten_qty}
+        body = {
+            "ticker": local_symbol,
+            "action": "sell",
+            "side": side,
+            "count": int(qty),
+            "type": "limit",
+            "yes_price": limit_cents if side == "yes" else None,
+            "no_price": limit_cents if side == "no" else None,
+            "client_order_id": str(uuid.uuid4()),
+        }
+        
+        resp = self._request("POST", "/trade-api/v2/portfolio/orders", body=body)
+        self._open_positions.pop(key, None)
+        return {"order_id": resp.get("order_id", "ERR"), "flattened_qty": qty}
 
     def get_positions(self) -> list[dict]:
         return list(self._open_positions.values())
 
     def get_account_balance(self) -> float:
-        if not self.is_connected():
-            return 0.0
-        try:
-            resp = self._portfolio_api.get_balance()
-            return float(resp.balance) / 100.0
-        except Exception:
-            return 0.0
+        resp = self._request("GET", "/trade-api/v2/portfolio/balance")
+        return float(resp.get("balance_dollars", 0))
 
     def disconnect(self) -> None:
         self._connected = False
-        self._client = None
 
-# ── Singleton ──────────────────────────────────────────────────────────────────
 _kalshi_broker: Optional[KalshiBroker] = None
 
 def get_kalshi_broker() -> KalshiBroker:

@@ -1,52 +1,30 @@
 """
-forecast/discovery.py — ForecastEx market and contract discovery.
+forecast/discovery.py — Discovery and persistence for prediction markets.
 
-Pulls active economic event contracts from IBKR/FORECASTX and persists
-them to forecast_markets + forecast_contracts tables.  Runs every 30
-minutes from forecast/runner.py.
-
-v1 scope: economic markets only (Fed/rates, CPI, employment, payrolls).
-Non-economic markets are ignored — fail-closed on discovery, never on
-execution.
-
-Discovery ranking (when more contracts than needed are available):
-  1. spread quality (lower is better)
-  2. overround Ω_t (lower is better)
-  3. quote stability (lower spread variance is better)
-  4. time-to-resolution suitability (neither too soon nor too far)
-  5. event-class preference (macro tier 1: FOMC/CPI/NFP before others)
-
-All results written to DB immediately.  Callers query DB for active
-contracts — no in-memory contract list is maintained here.
+Responsible for:
+1. Fetching active contracts from brokers (IBKR, Kalshi).
+2. Filtering to economic/weather scope only.
+3. Scoring and ranking contracts by suitability.
+4. Persisting/updating forecast_markets and forecast_contracts tables.
 """
 
 import logging
-import os
-import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Optional
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _ROOT not in sys.path:
-    sys.path.insert(0, _ROOT)
-
 from forecast.db import (
-    get_active_contracts,
-    get_bars,
-    upsert_contract,
     upsert_market,
+    upsert_contract,
+    get_active_contracts,
 )
 
 logger = logging.getLogger(__name__)
 
-# ── Tier-1 macro events that get discovery priority ────────────────────────────
+# Tier-1 keywords that boost the score of an event
 TIER1_KEYWORDS: list[str] = [
-    "fomc",
     "fed",
-    "cpi",
-    "nonfarm",
-    "payroll",
-    "nfp",
+    "fomc",
+    "rate",
     "unemployment",
     "pce",
     "gdp",
@@ -54,7 +32,7 @@ TIER1_KEYWORDS: list[str] = [
 
 # Resolution window: only trade events resolving within this window
 MIN_HOURS_TO_RESOLUTION: float = 2.0  # too close = insufficient time for entry
-MAX_DAYS_TO_RESOLUTION: float = 90.0  # too far = too much uncertainty
+MAX_DAYS_TO_RESOLUTION: float = 1000.0  # too far = too much uncertainty
 
 # Min quote quality to be considered tradeable
 MAX_ACCEPTABLE_OVERROUND: float = 0.30  # Ω_t ≤ 0.30 (30%)
@@ -66,9 +44,14 @@ def _hours_to_resolution(last_trade_at: str) -> Optional[float]:
     if not last_trade_at:
         return None
     try:
-        # TWS returns YYYYMMDD or YYYYMMDD HH:MM:SS
-        fmt = "%Y%m%d %H:%M:%S" if " " in last_trade_at else "%Y%m%d"
-        expiry_dt = datetime.strptime(last_trade_at, fmt).replace(tzinfo=timezone.utc)
+        if "T" in last_trade_at and "Z" in last_trade_at:
+            # ISO format: 2030-01-04T13:25:00Z
+            expiry_dt = datetime.fromisoformat(last_trade_at.replace("Z", "+00:00"))
+        else:
+            # TWS returns YYYYMMDD or YYYYMMDD HH:MM:SS
+            fmt = "%Y%m%d %H:%M:%S" if " " in last_trade_at else "%Y%m%d"
+            expiry_dt = datetime.strptime(last_trade_at, fmt).replace(tzinfo=timezone.utc)
+            
         delta = (expiry_dt - datetime.now(timezone.utc)).total_seconds() / 3600.0
         return delta
     except Exception:
@@ -96,8 +79,7 @@ def _rank_contracts(contracts: list[dict]) -> list[dict]:
     Contracts that fail hard quality gates are filtered out entirely.
     """
     ranked = []
-    now = datetime.now(timezone.utc)
-
+    
     for c in contracts:
         hours = _hours_to_resolution(c.get("last_trade_at", ""))
         if hours is None:
@@ -128,17 +110,10 @@ def run_discovery(
     """
     Main discovery entry point.  Called by forecast/runner.py every 30 min.
 
-    1. Get active contracts from IBKR via ForecastExBroker.discover_markets()
-    2. Filter to economic scope only
+    1. Get active contracts from brokers (IBKR, Kalshi).
+    2. Filter to economic/weather scope only.
     3. Persist to forecast_markets + forecast_contracts tables (idempotent)
     4. Return summary dict
-
-    If broker is None or disconnected, falls back to DB-only (returns
-    whatever is already persisted) — never crashes the caller.
-
-    Returns:
-        {found: int, persisted: int, skipped_scope: int, skipped_expired: int,
-         active_in_db: int, errors: list[str]}
     """
     result: dict = {
         "found": 0,
@@ -164,47 +139,17 @@ def run_discovery(
     ranked = _rank_contracts(raw_contracts)
     result["skipped_expired"] = result["found"] - len(ranked)
 
-    # Also process stub-only results (IND visible, OPT unavailable) — they skip ranking
-    stubs = [c for c in raw_contracts if c.get("stub_only")]
-    stubs_persisted = 0
-    for stub in stubs:
-        sym = stub.get("underlier", "")
-        name = stub.get("long_name", "") or sym
-        try:
-            upsert_market(
-                market_symbol=sym,
-                market_name=name,
-                exchange="FORECASTX",
-                category_path=stub.get("category", ""),
-                underlier_symbol=sym,
-                underlier_conid=stub.get("und_conid"),
-                db_path=db_path,
-            )
-            stubs_persisted += 1
-            from logging_db.trade_logger import log_event as _log_event
-
-            _log_event(
-                "INFO",
-                "ForecastDiscovery",
-                f"Underlier {sym} visible but no OPT contracts — enrollment may be pending",
-            )
-        except Exception as e:
-            logger.warning(f"upsert_market (stub) failed for {sym}: {e}")
-    result["stubs_persisted"] = stubs_persisted
-
     for c in ranked:
-        # Skip stubs that ended up in ranked (shouldn't happen, but guard)
-        if c.get("stub_only"):
-            continue
         name = c.get("long_name", "") or c.get("underlier", "")
         symbol = c.get("underlier", "") or ""
+        exchange = c.get("exchange", "FORECASTX")
 
         # Persist market
         try:
             market_id = upsert_market(
                 market_symbol=symbol,
                 market_name=name,
-                exchange="FORECASTX",
+                exchange=exchange,
                 category_path=c.get("category", ""),
                 underlier_symbol=symbol,
                 underlier_conid=c.get("conid"),
@@ -224,7 +169,7 @@ def run_discovery(
                 right=c.get("right", "C"),
                 strike=float(c.get("strike") or 0.0),
                 currency="USD",
-                exchange="FORECASTX",
+                exchange=exchange,
                 last_trade_at=c.get("last_trade_at", ""),
                 resolution_at=c.get("last_trade_at", ""),
                 conid=c.get("conid"),
@@ -247,64 +192,3 @@ def run_discovery(
         f"active_in_db={result['active_in_db']} errors={len(result['errors'])}"
     )
     return result
-
-
-def get_tradeable_contracts(
-    db_path: Optional[str] = None,
-    broker=None,
-) -> list[dict]:
-    """
-    Return active contracts suitable for trading right now.
-
-    Applies:
-    - Resolution window filter (MIN_HOURS_TO_RESOLUTION to MAX_DAYS_TO_RESOLUTION)
-    - Ranks by Tier-1 score and time-suitability
-    - Optionally fetches live quotes for spread/overround filtering (if broker provided)
-
-    Returns ranked list of contract dicts ready for strategy_engine evaluation.
-    """
-    try:
-        raw = get_active_contracts(db_path=db_path)
-    except Exception:
-        return []
-
-    ranked = _rank_contracts(raw)
-
-    if not broker:
-        return ranked
-
-    # Enrich with live quote data for quality filtering
-    enriched = []
-    for c in ranked:
-        conid = c.get("conid")
-        if not conid:
-            enriched.append(c)
-            continue
-        try:
-            quote = broker.get_quote(int(conid), c.get("local_symbol", ""))
-            ask_yes = ask_no = None
-
-            if c.get("right") == "C":
-                ask_yes = quote.get("ask")
-            else:
-                ask_no = quote.get("ask")
-
-            if ask_yes and ask_no:
-                from forecast.primitives import overround as compute_overround
-
-                omega = compute_overround(ask_yes, ask_no)
-                if omega > MAX_ACCEPTABLE_OVERROUND:
-                    continue  # skip — house edge too high
-                spread = quote.get("spread") or 0.0
-                if spread > MAX_ACCEPTABLE_SPREAD:
-                    continue
-                c["_omega"] = omega
-                c["_spread"] = spread
-
-            c["_quote"] = quote
-        except Exception as e:
-            logger.debug(f"Quote enrichment failed for {c.get('local_symbol')}: {e}")
-
-        enriched.append(c)
-
-    return enriched

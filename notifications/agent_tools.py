@@ -68,10 +68,13 @@ def read_file(file_path: str, start_line: Optional[int] = None, end_line: Option
             e = end_line if end_line else len(lines)
             content = "".join(lines[s:e])
         else:
-            # Hard limit of 2000 lines for Telegram safety
-            content = "".join(lines[:2000])
-            if len(lines) > 2000:
-                content += "\n... (truncated, use line numbers to read more)"
+            # Smart limit: 10,000 lines for docs, 2,000 for code/logs
+            is_doc = file_path.endswith('.md') or file_path.endswith('.txt')
+            limit = 10000 if is_doc else 2000
+            
+            content = "".join(lines[:limit])
+            if len(lines) > limit:
+                content += f"\n... (truncated at {limit} lines for Telegram safety. Use start_line/end_line to read more.)"
         
         return content
     except Exception as e:

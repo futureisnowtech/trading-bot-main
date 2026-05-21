@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Algo Trading Operator Panel</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        body {
+            background-color: #05070a;
+            color: #d1d5db;
+            font-family: 'JetBrains+Mono', monospace;
+        }
+        .panel {
+            background-color: #0b0e14;
+            border: 1px solid #1f2937;
+        }
+        .stat-label { color: #9ca3af; font-size: 0.75rem; }
+        .stat-value { color: #f3f4f6; font-size: 1.25rem; font-weight: 600; }
+        .ticker-green { color: #10b981; }
+        .ticker-red { color: #ef4444; }
+    </style>
+</head>
+<body class="p-6">
+    <!-- Top Bar -->
+    <div class="flex justify-between items-center mb-6 panel p-4 rounded-lg">
+        <div>
+            <h1 class="text-xl font-bold tracking-tighter text-white">ALGO OPERATOR <span class="text-blue-500">v18.30</span></h1>
+            <p class="text-xs text-gray-500 uppercase tracking-widest mt-1">Dual-Engine Unified Control</p>
+        </div>
+        <div class="flex space-x-8 text-right">
+            <div>
+                <p class="stat-label">SYSTEM CLOCK</p>
+                <p id="sys-time" class="stat-value">00:00:00</p>
+            </div>
+            <div>
+                <p class="stat-label">STATUS</p>
+                <p id="sys-status" class="stat-value ticker-green">OPERATIONAL</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- Crypto Spot Panel -->
+        <div class="panel p-6 rounded-lg">
+            <h2 class="text-lg font-bold mb-4 border-b border-gray-800 pb-2 flex justify-between">
+                CRYPTO / SPOT SCALP
+                <span class="text-xs font-normal text-gray-500 uppercase self-center">Coinbase API</span>
+            </h2>
+            <div class="grid grid-cols-2 gap-4 mb-6">
+                <div>
+                    <p class="stat-label">TOTAL EQUITY</p>
+                    <p id="spot-equity" class="stat-value">$0.00</p>
+                </div>
+                <div>
+                    <p class="stat-label">24H PNL</p>
+                    <p id="spot-pnl" class="stat-value">$0.00</p>
+                </div>
+            </div>
+            <h3 class="text-xs font-bold text-gray-500 uppercase mb-2">Active Positions</h3>
+            <div id="spot-positions" class="space-y-2 max-h-48 overflow-y-auto">
+                <p class="text-xs text-gray-600 italic">No active positions</p>
+            </div>
+        </div>
+
+        <!-- Kalshi Forecast Panel -->
+        <div class="panel p-6 rounded-lg">
+            <h2 class="text-lg font-bold mb-4 border-b border-gray-800 pb-2 flex justify-between">
+                KALSHI / FORECAST
+                <span class="text-xs font-normal text-gray-500 uppercase self-center">Pure REST V2</span>
+            </h2>
+            <div class="grid grid-cols-2 gap-4 mb-6">
+                <div>
+                    <p class="stat-label">DISCOVERED MARKETS</p>
+                    <p id="forecast-markets" class="stat-value">0</p>
+                </div>
+                <div>
+                    <p class="stat-label">LANE UTILIZATION</p>
+                    <p id="forecast-util" class="stat-value">0%</p>
+                </div>
+            </div>
+            <h3 class="text-xs font-bold text-gray-500 uppercase mb-2">Active Predictions</h3>
+            <div id="forecast-positions" class="space-y-2 max-h-48 overflow-y-auto">
+                <p class="text-xs text-gray-600 italic">Discovery in progress...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recent Activity Feed -->
+    <div class="panel p-6 rounded-lg mt-6">
+        <h2 class="text-sm font-bold mb-4 text-gray-400 uppercase tracking-widest">Unified Execution Feed</h2>
+        <div id="activity-feed" class="text-xs space-y-1 font-mono max-h-64 overflow-y-auto">
+            <p class="text-gray-600">Waiting for data stream...</p>
+        </div>
+    </div>
+
+    <script>
+        const eventSource = new EventSource("/api/stream");
+        
+        eventSource.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            
+            // Update Header
+            document.getElementById('sys-time').innerText = data.system.time;
+            
+            // Update Spot
+            document.getElementById('spot-equity').innerText = `$${data.spot.equity.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
+            const pnl = data.spot.pnl_24h;
+            const pnlEl = document.getElementById('spot-pnl');
+            pnlEl.innerText = `${pnl >= 0 ? '+' : ''}$${pnl.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
+            pnlEl.className = `stat-value ${pnl >= 0 ? 'ticker-green' : 'ticker-red'}`;
+            
+            const spotPosContainer = document.getElementById('spot-positions');
+            if (data.spot.positions.length > 0) {
+                spotPosContainer.innerHTML = data.spot.positions.map(p => `
+                    <div class="flex justify-between text-xs p-2 bg-black/30 rounded border border-gray-900">
+                        <span class="font-bold text-blue-400">${p.symbol}</span>
+                        <span>${p.qty} @ $${p.entry_price.toFixed(2)}</span>
+                        <span class="font-bold ${p.unrealized_pnl >= 0 ? 'ticker-green' : 'ticker-red'}">
+                            ${p.unrealized_pnl >= 0 ? '+' : ''}${p.unrealized_pnl.toFixed(2)}
+                        </span>
+                    </div>
+                `).join('');
+            } else {
+                spotPosContainer.innerHTML = '<p class="text-xs text-gray-600 italic">No active spot positions</p>';
+            }
+            
+            // Update Forecast
+            document.getElementById('forecast-markets').innerText = data.forecast.active_markets;
+            
+            // Update Feed
+            const feed = document.getElementById('activity-feed');
+            if (data.recent_trades.length > 0) {
+                feed.innerHTML = data.recent_trades.map(t => `
+                    <div class="flex space-x-4 border-l-2 ${t.side === 'BUY' ? 'border-green-500' : 'border-red-500'} pl-2 mb-1">
+                        <span class="text-gray-500">[${t.timestamp.split(' ')[1]}]</span>
+                        <span class="font-bold text-white w-20">${t.symbol}</span>
+                        <span class="${t.side === 'BUY' ? 'ticker-green' : 'ticker-red'}">${t.side}</span>
+                        <span>${t.qty} @ ${t.price.toFixed(4)}</span>
+                        <span class="text-gray-500">${t.strategy}</span>
+                    </div>
+                `).join('');
+            }
+        };
+
+        eventSource.onerror = function() {
+            document.getElementById('sys-status').innerText = 'RECONNECTING';
+            document.getElementById('sys-status').className = 'stat-value ticker-red';
+        };
+    </script>
+</body>
+</html>

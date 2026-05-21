@@ -31,56 +31,89 @@ KALSHI_API_KEY_ID = os.getenv("KALSHI_API_KEY_ID")
 KALSHI_PRIVATE_KEY_PATH = os.getenv("KALSHI_PRIVATE_KEY_PATH")
 KALSHI_API_BASE = "https://external-api.kalshi.com"
 
-# Economic event categories to scan during discovery.
-ECONOMIC_CATEGORIES: list[str] = [
-    "Economics",
-    "Federal Reserve",
-    "Financials",
-    "Recession",
-    "Climate and Weather",
-    "Politics",
-    "Elections",
-    "Social",
+# ─── Kalshi Category & Keyword Dual-Gate ──────────────────────────────────────
+
+APPROVED_CATEGORIES: set[str] = {
+    "economics",
+    "federal reserve",
+    "financials",
+    "recession",
+    "climate and weather",
+    "politics",
+    "elections",
+    "social",
+}
+
+GLOBAL_EXCLUDES: list[str] = [
+    "sports", "entertainment", "celebrity", "award", "novelty",
+    "oscar", "grammy", "movie", "box office", "actor", "actress",
+    "tiktok", "youtube", "follower", "crypto", "bitcoin", "ethereum", 
+    "btc", "eth"
 ]
 
-# Markets to EXCLUDE
-EXCLUDED_KEYWORDS: list[str] = [
-    "sports",
-    "politics",
-    "entertainment",
-    "celebrity",
-    "award",
-    "election",
-    "novelty",
-]
+CATEGORY_REQUIRED_KEYWORDS: dict[str, list[str]] = {
+    "economics": [
+        "cpi", "inflation", "fed", "fomc", "rate", "payroll", "nonfarm",
+        "unemployment", "gdp", "pce", "retail", "housing", "consumer",
+        "ppi", "production", "jobs", "employment", "macro", "economy",
+        "debt", "budget", "target", "hike", "cut", "growth", "manufacturing"
+    ],
+    "federal reserve": [
+        "fed", "fomc", "rate", "hike", "cut", "target", "powell", "balance sheet"
+    ],
+    "financials": [
+        "yield", "treasury", "bond", "index", "price", "survey"
+    ],
+    "recession": [
+        "recession", "contraction", "gdp", "nber"
+    ],
+    "climate and weather": [
+        "temp", "temperature", "rain", "precip", "precipitation", "weather",
+        "degree", "hurricane", "storm", "snow", "landfall", "cat 5", "category 5"
+    ],
+    "politics": [
+        "president", "presidential", "senate", "house of representatives",
+        "congress", "supreme court", "mayor", "governor", "prime minister",
+        "cabinet", "policy", "bill", "legislation", "race", "seat"
+    ],
+    "elections": [
+        "election", "vote", "popular vote", "electoral college", "nominee",
+        "primary", "caucus", "senate", "house", "governor", "president", "race", "seat"
+    ],
+    "social": [
+        "population", "census", "demographic", "migration"
+    ]
+}
 
 def _is_economic_market(ticker: str, title: str, category: str = "") -> bool:
-    """Helper to filter discovered Kalshi events to economic/weather scope only."""
+    """
+    Expert Dual-Gate System for Kalshi Discovery.
+    1. Category must be whitelisted.
+    2. Must not contain global noise keywords (sports, crypto, celebrities).
+    3. Must contain at least one high-signal keyword mapped to its category.
+    """
     if not title or not ticker:
         return False
     
-    title_lower = title.lower()
-    ticker_lower = ticker.lower()
-    category_lower = category.lower() if category else ""
+    t_lower = f"{ticker} {title}".lower()
+    c_lower = category.lower() if category else ""
 
-    for excl in EXCLUDED_KEYWORDS:
-        if excl in category_lower or excl in title_lower:
+    # Gate 1: Category Whitelist
+    if c_lower not in APPROVED_CATEGORIES:
+        return False
+
+    # Gate 2: Global Noise Exclusions
+    for excl in GLOBAL_EXCLUDES:
+        if excl in t_lower or excl in c_lower:
             return False
 
-    if any(c.lower() in category_lower for c in ECONOMIC_CATEGORIES):
-        return True
+    # Gate 3: Category-Specific Signal Match
+    required_kws = CATEGORY_REQUIRED_KEYWORDS.get(c_lower, [])
+    if not required_kws:
+        return False
 
-    allowed_keywords = [
-        "cpi", "inflation", "fed", "fomc", "rate", "rates", "payroll",
-        "nonfarm", "unemployment", "gdp", "pce", "retail", "housing",
-        "consumer", "ppi", "production", "jobs", "employment", "macro",
-        "economic", "economy", "debt", "budget", "target", "hike", "cut",
-        "growth", "index", "price", "prices", "survey", "manufacturing",
-        "temp", "temperature", "rain", "precip", "weather", "degree",
-        "hurricane", "storm", "snow", "oil", "gas", "energy", "yield"
-    ]
-    for kw in allowed_keywords:
-        if kw in title_lower or kw in ticker_lower or kw in category_lower:
+    for kw in required_kws:
+        if kw in t_lower:
             return True
 
     return False

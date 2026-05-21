@@ -530,7 +530,8 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
         _cu = np.maximum(_L0 - _L1, 0) + np.maximum(_L1 - _L2, 0) + np.maximum(_L2 - _L3, 0)
         _cd = np.maximum(_L1 - _L0, 0) + np.maximum(_L2 - _L1, 0) + np.maximum(_L3 - _L2, 0)
         _tot = _cu + _cd
-        _lrsi = np.where(_tot > 1e-10, _cu / _tot, 0.5)
+        _safe_tot = np.where(_tot > 1e-10, _tot, 1.0)
+        _lrsi = np.where(_tot > 1e-10, _cu / _safe_tot, 0.5)
         df['lrsi'] = pd.Series(_lrsi, index=df.index)
     except Exception as e:
         logger.error(f"[indicators] lrsi failed: {e}")

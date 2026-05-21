@@ -3,6 +3,7 @@ import sys
 import asyncio
 import json
 import logging
+import time
 from datetime import datetime
 from typing import AsyncGenerator
 import sqlite3
@@ -32,9 +33,11 @@ app.add_middleware(
 
 # In-memory store for the latest state to avoid hitting DB too hard
 latest_state = {}
+_LAST_KALSHI_SYNC = 0
 
 async def get_db_snapshot():
     """Read latest stats from SQLite."""
+    global _LAST_KALSHI_SYNC
     try:
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
@@ -54,7 +57,11 @@ async def get_db_snapshot():
                 "symbol": p["symbol"],
                 "qty": p["qty"],
                 "entry_price": p["entry"],
-                "unrealized_pnl": 0.0
+                "stop": p.get("stop", 0.0),
+                "target": p.get("target", 0.0),
+                "unrealized_pnl": 0.0, # Calculation requires live price
+                "strategy": p.get("strategy", ""),
+                "reason": p.get("entry_reason", "")
             })
         
         # Latest Forecast Stats
@@ -66,18 +73,28 @@ async def get_db_snapshot():
         try:
             from execution.kalshi_broker import get_kalshi_broker
             kb = get_kalshi_broker()
+            
+            # Ensure connected
+            if not kb.is_connected():
+                kb.connect()
+            
+            # Sync once per minute
+            now = time.time()
+            if now - _LAST_KALSHI_SYNC > 60:
+                kb._sync_positions()
+                _LAST_KALSHI_SYNC = now
+                
             forecast_positions = kb.get_positions()
-        except Exception:
-            pass
+        except Exception as e:
+            logging.error(f"Kalshi Sync Error: {e}")
 
         # 24H PnL (from trades table)
-        # Note: SQLite date comparisons require the 'T' format or consistent strings
         cursor.execute("SELECT SUM(pnl_usd) as pnl FROM trades WHERE ts > datetime('now', '-1 day')")
         pnl_row = cursor.fetchone()
         pnl_24h = float(pnl_row["pnl"] or 0.0)
         
-        # Recent Trades (Last 10 from trades)
-        cursor.execute("SELECT * FROM trades ORDER BY id DESC LIMIT 10")
+        # Recent Trades (Last 15 from trades)
+        cursor.execute("SELECT * FROM trades ORDER BY id DESC LIMIT 15")
         recent_trades_raw = [dict(r) for r in cursor.fetchall()]
         
         recent_trades = []
@@ -88,7 +105,9 @@ async def get_db_snapshot():
                 "side": t["action"],
                 "price": t["price"],
                 "qty": t["qty"],
-                "strategy": t["strategy"]
+                "strategy": t["strategy"],
+                "pnl_usd": float(t.get("pnl_usd") or 0.0),
+                "won": t.get("won")
             })
         
         conn.close()
@@ -102,6 +121,7 @@ async def get_db_snapshot():
             "forecast": {
                 "active_markets": forecast_count,
                 "positions": forecast_positions,
+                "max_positions": 2
             },
             "recent_trades": recent_trades,
             "system": {

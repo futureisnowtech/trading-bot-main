@@ -104,3 +104,11 @@ Those can be added later, but keeping them out for now reduces risk.
 - keep using local `./deploy.sh` as the fallback
 - use the protected workflow once the environment and secret are configured
 - only enable `NYC_AUTO_DEPLOY_ENABLED=true` after you trust the approval-gated path
+
+## Emergency Rollback
+
+In the event of a catastrophic deployment failure (uncaught runtime exception, API handshake failure):
+1. Identify the last known-good SHA: `git log -n 5`
+2. Perform a hard checkout: `git checkout <sha>`
+3. Force a production sync: `./deploy.sh`
+4. Verify system recovery on the Unified Terminal.

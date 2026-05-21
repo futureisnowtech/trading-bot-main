@@ -149,5 +149,22 @@ The machine is now autonomous. The strategy is now proven. The path to $1,000,00
 v18.30: THE SOVEREIGN MACHINE HAS ASCENDED.
 
 ================================================================================
+CHAPTER 9: THE MACRO BRIDGE (KALSHI INTEGRATION)
+================================================================================
+
+9.1 THE DUAL-LANE POSTURE
+Project Apex v18.32 formally inducts the 'Macro Bridge.' We recognize that while Crypto Spot provides high-velocity alpha, it is subject to continuous price curves. Kalshi represents a 'Binary Event Horizon.'
+
+9.2 THE PHYSICS OF BINARY RISK
+Unlike Crypto, where an ATR stop-loss limits downside to <0.5% of equity, a Kalshi contract is a $1.00 or $0.00 outcome. We have abandoned Fractional Kelly for the Forecast lane. 
+
+The Sovereign Mandate for Kalshi:
+- **Absolute Risk Sizing**: Every position is sized so that a total loss ($0.00 resolution) never exceeds 1.5% of total account equity.
+- **Taker Friction Buffer**: We calculate EV using the 'Ask' (worst-case fill) plus a conservative 2-cent/contract fee buffer. Theoretical mid-point EV is a lie; we only trade Realized Net EV.
+
+9.3 MACRO-CORRELATION AWARENESS
+Political and Economic events are not 'Uncorrelated' to Crypto. We treat 'Fed Rate' and 'Election' markets as positively correlated to Crypto-Long posture. The Risk Engine now partitions capital to ensure Kalshi never cannibalizes the liquidity required for high-frequency Spot execution.
+
+================================================================================
 END OF MASTERPLAN
 ================================================================================

@@ -8,9 +8,10 @@
 > - 47 ML features → **57 features** (11 groups)
 > - 6-priority exit stack → **7-priority** (dead-money exit added v18.16)
 > - 5-tab dashboard → **6 tabs** (FORECAST TRADING added v15.0; ARCHIVED FUTURES (MES) renamed)
-> - ForecastEx lane added (v15.0): IBKR ForecastEx event contracts
-> - Runtime truth layer added (v15.2): `system_runtime_state`, `lane_runtime_state`, incidents
-> - MES/IBKR futures: DORMANT (`FUTURES_LANE_ACTIVE=false`)
+- **Kalshi Forecast lane (v18.32)**: Pure REST V2 implementation for event contracts.
+- Runtime truth layer added (v15.2): `system_runtime_state`, `lane_runtime_state`, incidents
+- MES/IBKR futures: DORMANT (`FUTURES_LANE_ACTIVE=false`)
+
 > - Notifications: SQLite only (no Telegram — this was already the design)
 >
 > Do not use the exchange decision, risk limits, or feature counts in this doc as current values.

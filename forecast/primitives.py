@@ -207,23 +207,57 @@ def compute_ev(
     q_hat: float,
     ask_yes: float,
     ask_no: float,
-    fee_unit: float = 0.0,
+    fee_buffer: float = 0.02,
 ) -> tuple[float, float]:
     """
-    EV_yes = q_hat - ask_yes - fee_unit
-    EV_no  = (1 - q_hat) - ask_no - fee_unit
+    Sovereign Net EV (v18.32): Evaluates against the Ask (worst-case fill)
+    and injects a conservative friction buffer.
 
-    Returns (ev_yes, ev_no).  Positive = edge exists on that side.
-    ForecastEx has zero commission, so fee_unit defaults to 0.
+    EV_yes = q_hat - ask_yes - fee_buffer
+    EV_no  = (1 - q_hat) - ask_no - fee_buffer
+
+    Returns (ev_yes, ev_no).
     """
-    ev_yes = q_hat - ask_yes - fee_unit
-    ev_no = (1.0 - q_hat) - ask_no - fee_unit
+    ev_yes = q_hat - ask_yes - fee_buffer
+    ev_no = (1.0 - q_hat) - ask_no - fee_buffer
     return ev_yes, ev_no
 
 
 # ---------------------------------------------------------------------------
 # Sizing
 # ---------------------------------------------------------------------------
+
+
+def kalshi_absolute_sizing(
+    ask_price: float,
+    bankroll: float,
+    max_risk_pct: float = 0.015,
+    max_deploy_pct: float = 0.05,
+) -> tuple[int, float]:
+    """
+    Binary Risk Sizing (v18.32): Sizes by Absolute Loss to Zero.
+    
+    Ensures:
+    1. Total loss if contract -> $0.00 is capped at max_risk_pct of bankroll.
+    2. Total capital locked in one event is capped at max_deploy_pct of bankroll.
+    
+    Returns: (n_contracts, total_cost_usd)
+    """
+    if ask_price <= 0 or bankroll <= 0:
+        return 0, 0.0
+
+    max_loss_usd = bankroll * max_risk_pct
+    max_deploy_usd = bankroll * max_deploy_pct
+
+    # qty_by_risk = max_loss_usd / cost_per_loss_unit
+    # In Kalshi, cost_per_loss_unit is exactly the ask_price.
+    qty_by_risk = int(max_loss_usd / ask_price)
+
+    # qty_by_capital = max_deploy_usd / ask_price
+    qty_by_capital = int(max_deploy_usd / ask_price)
+
+    final_qty = max(0, min(qty_by_risk, qty_by_capital))
+    return final_qty, final_qty * ask_price
 
 
 def fractional_kelly_fraction(

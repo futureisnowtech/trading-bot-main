@@ -7,7 +7,7 @@
 
 - Repo root: `/Users/joshmacbookair2020/Projects/algo_trading_final`
 - Canonical version: `v18.30` (`2026-05-15`)
-- Canonical active lane: **Coinbase spot scalp**
+- Canonical active lane: **Dual-Lane**: Coinbase Spot Scalp (Primary) + Kalshi Macro Forecast (Secondary)
 - **Status:** **RECURSIVE EVOLUTION**. Autonomous Self-Vaccinating DAG active.
 - **Critical Changes (v18.30):**
   - **Sovereign Gates**: Hardcoded thresholds deleted. Admission now follows `calculate_fee_aware_expectancy` (PredictedAlpha > 2x Friction).

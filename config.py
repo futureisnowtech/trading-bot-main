@@ -1197,6 +1197,22 @@ PM_LLM_MAX_TOKENS: int = int(os.getenv("PM_LLM_MAX_TOKENS", "600"))
 GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
 # ════════════════════════════════════════════════════════════════════
+# KALSHI RISK & CAPITAL PARTITIONING (v18.32)
+# ════════════════════════════════════════════════════════════════════
+# Hard cap for Kalshi lane portfolio utilization (0.25 = 25%)
+# This ensures Crypto Spot Scalp always has 75% liquidity headroom.
+KALSHI_MAX_DEPLOYED_PCT: float = 0.25
+
+# Absolute risk per Kalshi event (0.015 = 1.5% of total account equity)
+# Binary outcome protection: total loss to $0.00 is capped.
+KALSHI_MAX_RISK_PER_EVENT_PCT: float = 0.015
+
+# EV Friction Buffer: 2 cents per contract ($0.02)
+# Accounts for taker fees and spread crossing.
+KALSHI_FEE_BUFFER: float = 0.02
+
+
+# ════════════════════════════════════════════════════════════════════
 # MONITORING & INCIDENT MANAGEMENT (Grafana IRM)
 # ════════════════════════════════════════════════════════════════════
 GRAFANA_INCIDENT_ENABLED: bool = os.getenv("GRAFANA_INCIDENT_ENABLED", "false").lower() == "true"

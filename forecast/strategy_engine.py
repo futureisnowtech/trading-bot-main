@@ -29,6 +29,12 @@ if _ROOT not in sys.path:
 
 import numpy as np
 
+from config import (
+    DB_PATH,
+    KALSHI_FEE_BUFFER,
+    KALSHI_MAX_DEPLOYED_PCT,
+    KALSHI_MAX_RISK_PER_EVENT_PCT,
+)
 from forecast.primitives import (
     DEFAULT_ALPHA,
     DEFAULT_BETA,
@@ -43,7 +49,7 @@ from forecast.primitives import (
     compute_q_hat,
     contracts_from_fraction,
     entropy,
-    fractional_kelly_fraction,
+    kalshi_absolute_sizing,
     log_odds,
     log_odds_vol,
     overround,
@@ -246,6 +252,7 @@ def _economics_gate(
     spread: float,
     hours_to_resolution: float,
     open_positions_count: int = 0,
+    deployed_pct: float = 0.0,
     same_event_open: bool = False,
 ) -> tuple[bool, str, float, float]:
     """
@@ -253,6 +260,15 @@ def _economics_gate(
 
     Returns: (approved, veto_reason, ev_yes, ev_no)
     """
+    # 0. Capital Partition (Sovereign Mandate v18.32)
+    if deployed_pct >= KALSHI_MAX_DEPLOYED_PCT:
+        return (
+            False,
+            f"capital_partition_full ({deployed_pct:.1%} >= {KALSHI_MAX_DEPLOYED_PCT:.1%})",
+            0.0,
+            0.0,
+        )
+
     # 1. Minimum hours to resolution
     if hours_to_resolution < MIN_HOURS_TO_RES:
         return (
@@ -312,8 +328,8 @@ def _economics_gate(
             0.0,
         )
 
-    # 7. Compute EV for both sides
-    ev_yes, ev_no = compute_ev(q_hat, ask_yes, ask_no, fee_unit=0.0)
+    # 7. Compute EV for both sides (using taker friction buffer)
+    ev_yes, ev_no = compute_ev(q_hat, ask_yes, ask_no, fee_buffer=KALSHI_FEE_BUFFER)
 
     # 8. Neither side has positive EV
     best_ev = max(ev_yes, ev_no)
@@ -638,6 +654,7 @@ def evaluate_contract(
         spread=spread,
         hours_to_resolution=hours_to_res,
         open_positions_count=open_positions_count,
+        deployed_pct=deployed_pct,
         same_event_open=same_event_open,
     )
 
@@ -681,27 +698,19 @@ def evaluate_contract(
     # Penalty = exp(-0.5 * (hours / 48)) -> ~0.6 at 48h, ~0.17 at 168h
     time_penalty = np.exp(-0.5 * (hours_to_res / 48.0)) if hours_to_res > 0 else 1.0
 
-    # Sizing
-    fraction = fractional_kelly_fraction(
-        q_side=q_side,
-        p_cost=p_cost,
-        lambda_=0.5,  # conservative: use half-Kelly
-        confidence_multiplier=adj_confidence * time_penalty,
-        correlation_penalty=corr_penalty,
-        kelly_cap=KELLY_CAP,
-    )
-    n_contracts = (
-        contracts_from_fraction(
-            fraction=fraction,
+    # Sizing (v18.32 Sovereign Mandate: Absolute Loss to Zero)
+    if approved:
+        n_contracts, total_cost = kalshi_absolute_sizing(
+            ask_price=p_cost,
             bankroll=bankroll,
-            p_cost=p_cost,
-            per_event_cap_pct=MAX_RISK_PER_EVENT_PCT,
-            deployed_pct=deployed_pct,
-            max_deployed_pct=MAX_DEPLOYED_PCT,
+            max_risk_pct=KALSHI_MAX_RISK_PER_EVENT_PCT * adj_confidence * corr_penalty * time_penalty,
+            max_deploy_pct=0.05, # Individual event capital limit
         )
-        if approved
-        else 0
-    )
+    else:
+        n_contracts, total_cost = 0, 0.0
+
+    # Actual deployed fraction for logging
+    actual_fraction = total_cost / bankroll if bankroll > 0 else 0.0
 
     return StrategyResult(
         strategy_family=best_family,
@@ -714,7 +723,7 @@ def evaluate_contract(
         uncertainty_penalty=uncertainty_penalty,
         econ_approved=approved,
         veto_reason=veto_reason,
-        position_fraction=fraction,
+        position_fraction=actual_fraction,
         position_contracts=n_contracts,
         top_factors=best_factors,
         x_t=x_t,

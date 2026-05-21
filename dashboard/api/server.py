@@ -40,33 +40,54 @@ async def get_db_snapshot():
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
-        # Latest Spot Stats
-        cursor.execute("SELECT * FROM spot_balance_history ORDER BY timestamp DESC LIMIT 1")
-        balance_row = cursor.fetchone()
+        # Latest Spot Stats (from lane_runtime_state)
+        cursor.execute("SELECT * FROM lane_runtime_state WHERE lane_id='crypto'")
+        crypto_row = cursor.fetchone()
         
-        # Active Spot Positions
-        cursor.execute("SELECT * FROM spot_positions WHERE qty > 0")
-        spot_positions = [dict(r) for r in cursor.fetchall()]
+        # Active Spot Positions (from open_positions)
+        cursor.execute("SELECT * FROM open_positions WHERE qty > 0")
+        spot_positions_raw = [dict(r) for r in cursor.fetchall()]
+        
+        # Transform positions to include symbol and qty
+        spot_positions = []
+        for p in spot_positions_raw:
+            spot_positions.append({
+                "symbol": p["symbol"],
+                "qty": p["qty"],
+                "entry_price": p["entry"],
+                "unrealized_pnl": 0.0 # Calculate if needed, but 0.0 is safe for now
+            })
         
         # Latest Forecast Stats
-        cursor.execute("SELECT * FROM forecast_markets WHERE active = 1")
-        forecast_count = len(cursor.fetchall())
+        cursor.execute("SELECT COUNT(*) as count FROM forecast_markets WHERE active = 1")
+        forecast_count = cursor.fetchone()["count"]
         
-        # Recent Trades (Last 10)
-        cursor.execute("SELECT * FROM trade_log ORDER BY id DESC LIMIT 10")
-        recent_trades = [dict(r) for r in cursor.fetchall()]
+        # Recent Trades (Last 10 from trades)
+        cursor.execute("SELECT * FROM trades ORDER BY id DESC LIMIT 10")
+        recent_trades_raw = [dict(r) for r in cursor.fetchall()]
+        
+        recent_trades = []
+        for t in recent_trades_raw:
+            recent_trades.append({
+                "timestamp": t["ts"],
+                "symbol": t["symbol"],
+                "side": t["action"],
+                "price": t["price"],
+                "qty": t["qty"],
+                "strategy": t["strategy"]
+            })
         
         conn.close()
         
         return {
             "spot": {
-                "equity": balance_row["equity"] if balance_row else 0.0,
-                "pnl_24h": balance_row["pnl_24h"] if balance_row else 0.0,
+                "equity": crypto_row["buying_power_usd"] + crypto_row["capital_deployed_usd"] if crypto_row else 0.0,
+                "pnl_24h": 0.0, # Placeholder unless we add PnL tracking table
                 "positions": spot_positions,
             },
             "forecast": {
                 "active_markets": forecast_count,
-                "positions": [], # Placeholder for actual forecast positions integration
+                "positions": [],
             },
             "recent_trades": recent_trades,
             "system": {

@@ -29,294 +29,264 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-_lock = threading.RLock()
-_halted: bool = False
-_halt_reason: str = ""
-_halt_ts: float = 0.0
+class KillSwitch:
+    """System-level trading halt manager."""
 
-# API error tracking: timestamp deque
-_api_errors: deque = deque(maxlen=100)
-_API_ERROR_WINDOW = 600  # 10 minutes
-_API_ERROR_THRESHOLD = 5  # 5 errors in window
+    def __init__(self, lane_id: str = "global"):
+        self.lane_id = lane_id
+        self.lock = threading.RLock()
+        self.halted = False
+        self.halt_reason = ""
+        self.halt_ts = 0.0
+        self.api_errors = deque(maxlen=100)
+        self.last_latency_ms = 0.0
+        self.live_baseline = 0.0
+        logger.info(f"[kill_switch] Initialized lane '{lane_id}'")
 
-# Latency tracking
-_last_latency_ms: float = 0.0
-_LATENCY_THRESHOLD_S = 5.0  # 5 seconds
+    def is_halted(self) -> bool:
+        with self.lock:
+            return self.halted
 
-# Balance thresholds — 50% of live_baseline. Disabled by default in v18.19.2.
-_LIVE_KILL_PCT = 0.50
-_EQUITY_TRIPWIRE_ENABLED: bool = (
-    os.getenv("EQUITY_KILL_SWITCH_ENABLED", "false").strip().lower() == "true"
-)
+    def get_halt_reason(self) -> str:
+        with self.lock:
+            return self.halt_reason
 
-# Live baseline — set on first valid live check_balance call.
-_live_baseline: float = 0.0
+    def _trigger(self, reason: str, balance: float = 0.0):
+        """Internal: activate kill switch."""
+        with self.lock:
+            if self.halted:
+                return  # already halted
+            self.halted = True
+            self.halt_reason = reason
+            self.halt_ts = time.time()
 
-
-def is_halted() -> bool:
-    with _lock:
-        return _halted
-
-
-def get_halt_reason() -> str:
-    with _lock:
-        return _halt_reason
-
-
-def _trigger(reason: str, balance: float = 0.0):
-    """Internal: activate kill switch."""
-    global _halted, _halt_reason, _halt_ts
-
-    with _lock:
-        if _halted:
-            return  # already halted
-        _halted = True
-        _halt_reason = reason
-        _halt_ts = time.time()
-
-    logger.critical(f"[kill_switch] TRIGGERED: {reason}")
-    
-    # ── Grafana IRM Integration ──────────────────────────────────────────────
-    try:
-        from monitoring.irm_reporter import create_irm_incident
-        create_irm_incident(
-            title=f"GLOBAL KILL SWITCH: {reason}",
-            severity="critical",
-            description=f"System-level halt triggered: {reason}",
-            labels=["scope:global", f"trigger:{reason.split()[0].lower()}"],
-            extra_details={"balance": balance, "timestamp": time.time()}
-        )
-    except Exception as e:
-        logger.debug(f"[kill_switch] irm report failed: {e}")
-
-    # 📊 Metrics
-    try:
-        from monitoring.metrics import update_kill_switch
-        update_kill_switch(True)
-    except ImportError:
-        pass
-
-    _now_iso = datetime.now(timezone.utc).isoformat()
-
-    # Log to kill_switch_log
-    try:
-        from logging_db.trade_logger import get_logger
-
-        db = get_logger()
-        db.conn.execute(
-            """
-            INSERT OR IGNORE INTO kill_switch_log
-            (id, ts, reason, balance, trigger_type)
-            VALUES (?, ?, ?, ?, 'trigger')
-            """,
-            (f"{time.time():.3f}", _now_iso, reason, balance),
-        )
-        db.conn.commit()
-    except Exception as e:
-        logger.debug(f"[kill_switch] DB log error: {e}")
-
-    # Also write to system_events
-    try:
-        from logging_db.trade_logger import log_event
-
-        log_event("CRITICAL", "kill_switch", f"TRIGGERED: {reason}")
-    except Exception:
-        pass
-
-    # Notification
-    try:
-        from notifications.notification_engine import notify, Category, Severity
-
-        notify(
-            category=Category.RISK,
-            severity=Severity.CRITICAL,
-            title="KILL SWITCH TRIGGERED",
-            message=reason,
-            data={"balance": balance, "ts": time.time()},
-        )
-    except Exception:
-        pass
-
-
-def set_live_baseline(amount: float) -> None:
-    """
-    Explicitly set the live funded account baseline.
-    Call once at live startup with the actual Coinbase balance.
-    """
-    global _live_baseline
-    with _lock:
-        if amount > 0:
-            _live_baseline = float(amount)
-            logger.info(f"[kill_switch] live_baseline set to ${_live_baseline:.2f}")
-
-
-def check_balance(
-    current_balance: float, initial_balance: float | None = None
-):
-    """
-    Check if balance has fallen below kill threshold.
-    Call this on every P&L update.
-
-    Kill-threshold policy:
-      threshold = live_baseline * 0.50
-    Disabled by default in v18.19.2 — opt-in via EQUITY_KILL_SWITCH_ENABLED=true.
-    """
-    global _live_baseline
-
-    if initial_balance is None:
+        logger.critical(f"[kill_switch] [{self.lane_id.upper()}] TRIGGERED: {reason}")
+        
+        # ── Grafana IRM Integration ──────────────────────────────────────────────
         try:
-            from runtime.live_account import get_live_account_size
-
-            initial_balance = float(get_live_account_size())
-        except Exception:
-            initial_balance = 5000.0
-
-    if is_halted():
-        return
-
-    # Establish baseline from first valid balance if not yet set.
-    # Baseline auto-set stays live even when the tripwire is disabled,
-    # so dashboards / get_status() keep reporting the running baseline.
-    with _lock:
-        if _live_baseline <= 0.0 and current_balance > 50.0:
-            _live_baseline = current_balance
-            logger.info(
-                f"[kill_switch] live_baseline auto-set to ${_live_baseline:.2f}"
+            from monitoring.irm_reporter import create_irm_incident
+            create_irm_incident(
+                title=f"KILL SWITCH [{self.lane_id.upper()}]: {reason}",
+                severity="critical",
+                description=f"Halt triggered for lane '{self.lane_id}': {reason}",
+                labels=[f"scope:{self.lane_id}", f"trigger:{reason.split()[0].lower()}"],
+                extra_details={"balance": balance, "timestamp": time.time()}
             )
-        baseline = _live_baseline if _live_baseline > 0.0 else float(initial_balance)
+        except Exception as e:
+            logger.debug(f"[kill_switch] irm report failed: {e}")
 
-    if not _EQUITY_TRIPWIRE_ENABLED:
-        return
+        # 📊 Metrics
+        try:
+            from monitoring.metrics import update_kill_switch
+            update_kill_switch(True)
+        except ImportError:
+            pass
 
-    threshold = baseline * _LIVE_KILL_PCT
-    baseline_desc = f"50% of live baseline ${baseline:.2f}"
+        _now_iso = datetime.now(timezone.utc).isoformat()
 
-    if current_balance > 0 and current_balance < threshold:
-        _trigger(
-            f"Balance ${current_balance:.2f} below kill threshold ${threshold:.2f} "
-            f"({baseline_desc})",
-            balance=current_balance,
-        )
+        # Log to kill_switch_log
+        try:
+            from logging_db.trade_logger import get_logger
+            db = get_logger()
+            db.conn.execute(
+                """
+                INSERT OR IGNORE INTO kill_switch_log
+                (id, ts, reason, balance, trigger_type, lane)
+                VALUES (?, ?, ?, ?, 'trigger', ?)
+                """,
+                (f"{time.time():.3f}", _now_iso, reason, balance, self.lane_id),
+            )
+            db.conn.commit()
+        except Exception as e:
+            logger.debug(f"[kill_switch] DB log error: {e}")
 
+        # Also write to system_events
+        try:
+            from logging_db.trade_logger import log_event
+            log_event("CRITICAL", f"kill_switch_{self.lane_id}", f"TRIGGERED: {reason}")
+        except Exception:
+            pass
 
-def record_api_error(error_msg: str = ""):
-    """
-    Record an API error. Triggers halt if 5+ errors in 10 minutes.
-    """
-    # 📊 Metrics
-    try:
-        from monitoring.metrics import increment_api_errors
-        increment_api_errors()
-    except ImportError:
-        pass
+        # Notification
+        try:
+            from notifications.notification_engine import notify, Category, Severity
+            notify(
+                category=Category.RISK,
+                severity=Severity.CRITICAL,
+                title=f"KILL SWITCH [{self.lane_id.upper()}]",
+                message=reason,
+                data={"balance": balance, "ts": time.time(), "lane": self.lane_id},
+            )
+        except Exception:
+            pass
 
-    now = time.time()
-    with _lock:
-        _api_errors.append(now)
-        # Count errors in window
-        cutoff = now - _API_ERROR_WINDOW
-        recent_errors = sum(1 for ts in _api_errors if ts >= cutoff)
+    def set_live_baseline(self, amount: float) -> None:
+        """Explicitly set the live funded account baseline."""
+        with self.lock:
+            if amount > 0:
+                self.live_baseline = float(amount)
+                logger.info(f"[kill_switch] [{self.lane_id}] live_baseline set to ${self.live_baseline:.2f}")
 
-    if recent_errors >= _API_ERROR_THRESHOLD:
-        _trigger(
-            f"{recent_errors} API errors in {_API_ERROR_WINDOW // 60} minutes: {error_msg}",
-        )
+    def check_balance(self, current_balance: float, initial_balance: float | None = None):
+        """Check if balance has fallen below kill threshold."""
+        if initial_balance is None:
+            try:
+                from runtime.live_account import get_live_account_size
+                initial_balance = float(get_live_account_size())
+            except Exception:
+                initial_balance = 5000.0
 
-
-def record_latency(latency_seconds: float):
-    """
-    Record order latency. Triggers halt if > 5 seconds.
-    """
-    global _last_latency_ms
-    _last_latency_ms = latency_seconds * 1000
-
-    # 📊 Metrics
-    try:
-        from monitoring.metrics import update_latency
-        update_latency(_last_latency_ms)
-    except ImportError:
-        pass
-
-    if latency_seconds > _LATENCY_THRESHOLD_S:
-        _trigger(
-            f"Order latency {latency_seconds:.1f}s exceeds {_LATENCY_THRESHOLD_S}s threshold",
-        )
-
-
-def resume(reason: str = "manual"):
-    """
-    Resume trading after a kill switch halt.
-    Should only be called manually after investigating the trigger.
-    """
-    global _halted, _halt_reason, _halt_ts
-
-    with _lock:
-        if not _halted:
-            logger.info("[kill_switch] System not halted — nothing to resume")
+        if self.is_halted():
             return
 
-        logger.warning(f"[kill_switch] RESUMED by: {reason}")
-        _halted = False
-        _halt_reason = ""
-        _halt_ts = 0.0
+        with self.lock:
+            if self.live_baseline <= 0.0 and current_balance > 50.0:
+                self.live_baseline = current_balance
+                logger.info(f"[kill_switch] [{self.lane_id}] live_baseline auto-set to ${self.live_baseline:.2f}")
+            baseline = self.live_baseline if self.live_baseline > 0.0 else float(initial_balance)
 
-    # 📊 Metrics
-    try:
-        from monitoring.metrics import update_kill_switch
-        update_kill_switch(False)
-    except ImportError:
-        pass
+        if not _EQUITY_TRIPWIRE_ENABLED:
+            return
 
-    try:
-        from logging_db.trade_logger import get_logger
+        threshold = baseline * _LIVE_KILL_PCT
+        baseline_desc = f"50% of live baseline ${baseline:.2f}"
 
-        db = get_logger()
-        db.conn.execute(
-            """
-            UPDATE kill_switch_log SET resumed_at=?
-            WHERE trigger_type='trigger' AND resumed_at IS NULL
-            """,
-            (datetime.now(timezone.utc).isoformat(),),
-        )
-        db.conn.commit()
-    except Exception:
-        pass
+        if current_balance > 0 and current_balance < threshold:
+            self._trigger(
+                f"Balance ${current_balance:.2f} below kill threshold ${threshold:.2f} ({baseline_desc})",
+                balance=current_balance,
+            )
 
-    try:
-        from logging_db.trade_logger import log_event
+    def record_api_error(self, error_msg: str = ""):
+        """Record an API error. Triggers halt if 5+ errors in 10 minutes."""
+        try:
+            from monitoring.metrics import increment_api_errors
+            increment_api_errors()
+        except ImportError:
+            pass
 
-        log_event("INFO", "kill_switch", f"RESUMED: {reason}")
-    except Exception:
-        pass
+        now = time.time()
+        with self.lock:
+            self.api_errors.append(now)
+            cutoff = now - _API_ERROR_WINDOW
+            recent_errors = sum(1 for ts in self.api_errors if ts >= cutoff)
 
-    try:
-        from notifications.notification_engine import notify, Category, Severity
+        if recent_errors >= _API_ERROR_THRESHOLD:
+            self._trigger(f"{recent_errors} API errors in {_API_ERROR_WINDOW // 60} minutes: {error_msg}")
 
-        notify(
-            category=Category.RISK,
-            severity=Severity.WARNING,
-            title="Kill Switch Resumed",
-            message=f"Trading resumed: {reason}",
-        )
-    except Exception:
-        pass
+    def record_latency(self, latency_seconds: float):
+        """Record order latency. Triggers halt if > 5 seconds."""
+        with self.lock:
+            self.last_latency_ms = latency_seconds * 1000
 
+        try:
+            from monitoring.metrics import update_latency
+            update_latency(self.last_latency_ms)
+        except ImportError:
+            pass
+
+        if latency_seconds > _LATENCY_THRESHOLD_S:
+            self._trigger(f"Order latency {latency_seconds:.1f}s exceeds {_LATENCY_THRESHOLD_S}s threshold")
+
+    def resume(self, reason: str = "manual"):
+        """Resume trading after a kill switch halt."""
+        with self.lock:
+            if not self.halted:
+                logger.info(f"[kill_switch] [{self.lane_id}] not halted — nothing to resume")
+                return
+
+            logger.warning(f"[kill_switch] [{self.lane_id}] RESUMED by: {reason}")
+            self.halted = False
+            self.halt_reason = ""
+            self.halt_ts = 0.0
+
+        try:
+            from monitoring.metrics import update_kill_switch
+            update_kill_switch(False)
+        except ImportError:
+            pass
+
+        try:
+            from logging_db.trade_logger import get_logger
+            db = get_logger()
+            db.conn.execute(
+                """
+                UPDATE kill_switch_log SET resumed_at=?
+                WHERE trigger_type='trigger' AND resumed_at IS NULL AND lane=?
+                """,
+                (datetime.now(timezone.utc).isoformat(), self.lane_id),
+            )
+            db.conn.commit()
+        except Exception:
+            pass
+
+        try:
+            from logging_db.trade_logger import log_event
+            log_event("INFO", f"kill_switch_{self.lane_id}", f"RESUMED: {reason}")
+        except Exception:
+            pass
+
+        try:
+            from notifications.notification_engine import notify, Category, Severity
+            notify(
+                category=Category.RISK,
+                severity=Severity.WARNING,
+                title=f"Kill Switch Resumed [{self.lane_id.upper()}]",
+                message=f"Trading resumed: {reason}",
+            )
+        except Exception:
+            pass
+
+    def get_status(self) -> dict:
+        """Return kill switch status dict."""
+        with self.lock:
+            now = time.time()
+            cutoff = now - _API_ERROR_WINDOW
+            recent_errors = sum(1 for ts in self.api_errors if ts >= cutoff)
+            return {
+                "halted": self.halted,
+                "halt_reason": self.halt_reason,
+                "halt_ts": self.halt_ts,
+                "halted_for_s": round(now - self.halt_ts, 0) if self.halt_ts > 0 else 0,
+                "api_errors_10m": recent_errors,
+                "last_latency_ms": round(self.last_latency_ms, 1),
+                "live_baseline": self.live_baseline,
+                "live_threshold": round(self.live_baseline * _LIVE_KILL_PCT, 2) if self.live_baseline > 0 else 0.0,
+                "lane": self.lane_id
+            }
+
+# ── Multi-Instance Manager ───────────────────────────────────────────────────
+
+_switches: Dict[str, KillSwitch] = {}
+
+def get_switch(lane_id: str = "global") -> KillSwitch:
+    """Singleton getter for lane-specific kill switches."""
+    if lane_id not in _switches:
+        _switches[lane_id] = KillSwitch(lane_id)
+    return _switches[lane_id]
+
+# ── Module-level Proxy Functions (Backward Compatibility) ─────────────────────
+
+def is_halted() -> bool:
+    return get_switch().is_halted()
+
+def get_halt_reason() -> str:
+    return get_switch().get_halt_reason()
+
+def set_live_baseline(amount: float) -> None:
+    get_switch().set_live_baseline(amount)
+
+def check_balance(current_balance: float, initial_balance: float | None = None):
+    get_switch().check_balance(current_balance, initial_balance)
+
+def record_api_error(error_msg: str = ""):
+    get_switch().record_api_error(error_msg)
+
+def record_latency(latency_seconds: float):
+    get_switch().record_latency(latency_seconds)
+
+def resume(reason: str = "manual"):
+    get_switch().resume(reason)
 
 def get_status() -> dict:
-    """Return kill switch status dict for dashboard."""
-    with _lock:
-        now = time.time()
-        cutoff = now - _API_ERROR_WINDOW
-        recent_errors = sum(1 for ts in _api_errors if ts >= cutoff)
-        return {
-            "halted": _halted,
-            "halt_reason": _halt_reason,
-            "halt_ts": _halt_ts,
-            "halted_for_s": round(now - _halt_ts, 0) if _halt_ts > 0 else 0,
-            "api_errors_10m": recent_errors,
-            "last_latency_ms": round(_last_latency_ms, 1),
-            "live_baseline": _live_baseline,
-            "live_threshold": round(_live_baseline * _LIVE_KILL_PCT, 2)
-            if _live_baseline > 0
-            else 0.0,
-        }
+    return get_switch().get_status()

@@ -1,8 +1,8 @@
 services:
-  algo-bot:
+  algo-bot-spot:
     build: .
-    container_name: algo-bot-live
-    hostname: algo-bot-live
+    container_name: algo-bot-spot
+    hostname: algo-bot-spot
     restart: unless-stopped
     networks:
       - trading-network
@@ -12,6 +12,7 @@ services:
       - .env
     volumes:
       - ./logs:/app/logs
+    command: ["python3", "spot_main.py"]
     logging:
       driver: "json-file"
       options:
@@ -19,6 +20,31 @@ services:
         max-file: "3"
     healthcheck:
       test: ["CMD-SHELL", "sqlite3 /app/logs/trades.db \"SELECT connected FROM lane_runtime_state WHERE lane_id='crypto'\" | grep 1 || exit 1"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+
+  algo-bot-forecast:
+    build: .
+    container_name: algo-bot-forecast
+    hostname: algo-bot-forecast
+    restart: unless-stopped
+    networks:
+      - trading-network
+    ports:
+      - "8001:8001"
+    env_file:
+      - .env
+    volumes:
+      - ./logs:/app/logs
+    command: ["python3", "forecast_main.py"]
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "sqlite3 /app/logs/trades.db \"SELECT connected FROM lane_runtime_state WHERE lane_id='forecast'\" | grep 1 || exit 1"]
       interval: 1m
       timeout: 10s
       retries: 3
@@ -96,7 +122,8 @@ services:
       - ./logs:/app/logs
     command: ["python3", "-m", "uvicorn", "dashboard.api.server:app", "--host", "0.0.0.0", "--port", "8080"]
     depends_on:
-      - algo-bot
+      - algo-bot-spot
+      - algo-bot-forecast
 
 networks:
   trading-network:

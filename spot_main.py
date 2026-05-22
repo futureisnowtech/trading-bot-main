@@ -306,102 +306,15 @@ def main():
         f"Bot started — {'paper' if False else 'live'} mode {VERSION}",
     )
 
-    # ── Forecast lane (optional daemon thread) ────────────────────────────────
-    if FORECAST_LANE_ACTIVE:
+    # ── Crypto Spot Execution ────────────────────────────────────────────────
+    upsert_lane_state(
+        "crypto",
+        db_path=_db_path,
+        active=1,
+        readiness_state="STARTING",
+    )
 
-        def _forecast_daemon():
-            """Run forecast lane in its own schedule instance (thread-safe)."""
-            import schedule as _sched_lib
-
-            _s = (
-                _sched_lib.Scheduler()
-            )  # isolated instance — never touches the global default used by v10_runner
-            from forecast.db import init_forecast_db
-            from forecast.runner import (
-                run_discovery_cycle,
-                run_strategy_cycle,
-                run_position_monitor,
-                _get_broker,
-                _get_harvester,
-            )
-
-            try:
-                init_forecast_db()
-                broker = _get_broker()
-                _connected = broker.connect()
-                if not _connected:
-                    time.sleep(4)
-                    _connected = broker.is_connected()
-                try:
-                    from runtime.runtime_state import upsert_lane_state as _uls
-
-                    _uls(
-                        "forecast",
-                        db_path=_db_path,
-                        connected=int(_connected),
-                        readiness_state="BROKER_DISCONNECTED"
-                        if not _connected
-                        else "NO_UNDERLIERS",
-                    )
-                except Exception:
-                    pass
-                harvester = _get_harvester()
-                harvester.start()
-                run_discovery_cycle()
-                _s.every(30).minutes.do(run_discovery_cycle)
-                _s.every(5).minutes.do(lambda: run_strategy_cycle(100.0))
-                _s.every(30).seconds.do(run_position_monitor)
-                log_event(
-                    "INFO",
-                    "ForecastRunner",
-                    "Forecast lane started — FORECAST_LANE_ACTIVE=true",
-                )
-                while True:
-                    _s.run_pending()
-                    time.sleep(1)
-            except Exception as _fe:
-                log_event("ERROR", "ForecastRunner", f"Forecast lane crashed: {_fe}")
-
-        _ft = threading.Thread(
-            target=_forecast_daemon, daemon=True, name="ForecastLane"
-        )
-        _ft.start()
-        upsert_lane_state(
-            "forecast",
-            db_path=_db_path,
-            active=1,
-            readiness_state="BROKER_DISCONNECTED",
-        )
-        log_event(
-            "INFO",
-            "ForecastRunner",
-            "Forecast lane started (FORECAST_LANE_ACTIVE=true)",
-        )
-        print("   ForecastEx lane started (FORECAST_LANE_ACTIVE=true)")
-
-    # ── Stocks lane (optional daemon thread) ──────────────────────────────────
-    if STOCKS_LANE_ACTIVE and STOCKS_AUTONOMOUS_ENABLED:
-
-        def _stocks_daemon():
-            """Run stock lane in its own schedule instance (thread-safe)."""
-            from scheduler.stock_runner import run_forever as _stocks_run_forever
-
-            try:
-                _stocks_run_forever()
-            except Exception as _se:
-                log_event("ERROR", "StockRunner", f"Stocks lane crashed: {_se}")
-
-        _st = threading.Thread(target=_stocks_daemon, daemon=True, name="StocksLane")
-        _st.start()
-        upsert_lane_state(
-            "stocks", db_path=_db_path, active=1, readiness_state="STARTING"
-        )
-        log_event(
-            "INFO", "StockRunner", "Stocks lane started (STOCKS_LANE_ACTIVE=true)"
-        )
-        print("   Stocks lane started (STOCKS_LANE_ACTIVE=true)")
-
-    # Populate active_lanes now that all lane startup is done
+    # Populate active_lanes
     upsert_system_state(
         db_path=_db_path,
         active_lanes=json.dumps(["crypto"]),
@@ -409,14 +322,15 @@ def main():
     )
 
     print("=" * 60)
-    print("  Scheduler starting. System is live.")
-    print("  Dashboard: streamlit run dashboard/app.py --server.runOnSave true")
+    print("  SPOT SCHEDULER STARTING. System is live.")
     print("  Database:  logs/trades.db")
+    print("  Metrics:   Port 8000")
     print("  Stop:      Ctrl+C")
     print("=" * 60 + "\n")
 
     from scheduler.v10_runner import run_forever
 
+    # v18.33: Run Spot scheduler
     run_forever()
 
 

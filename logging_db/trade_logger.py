@@ -29,10 +29,9 @@ _DB_CONN = None
 _DB_CONN_PATH = None
 
 def _conn() -> sqlite3.Connection:
-    """Singleton thread-safe connection to prevent [Errno 24] Too many open files."""
+    """Singleton thread-safe connection with multi-process hardening."""
     global _DB_CONN, _DB_CONN_PATH
     with _DB_LOCK:
-        # If connection exists but path changed (common in tests), close and recreate
         if _DB_CONN is not None and _DB_CONN_PATH != DB_PATH:
             try:
                 _DB_CONN.close()
@@ -42,18 +41,18 @@ def _conn() -> sqlite3.Connection:
 
         if _DB_CONN is None:
             os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-            _DB_CONN = sqlite3.connect(DB_PATH, check_same_thread=False)
+            # v18.33: Increase timeout to 30s to handle multi-process write contention.
+            _DB_CONN = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30.0)
             _DB_CONN.row_factory = sqlite3.Row
             _DB_CONN_PATH = DB_PATH
-            # WAL mode: writes survive crashes without corrupting existing data.
+            # WAL mode: enables concurrent readers and prevents database image malformed errors.
             _DB_CONN.execute("PRAGMA journal_mode=WAL")
+            _DB_CONN.execute("PRAGMA synchronous=NORMAL")
         else:
             try:
-                # Ping to check if connection is still alive
                 _DB_CONN.execute("SELECT 1")
             except (sqlite3.ProgrammingError, sqlite3.OperationalError):
-                # Connection closed or stale, recreate
-                _DB_CONN = sqlite3.connect(DB_PATH, check_same_thread=False)
+                _DB_CONN = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30.0)
                 _DB_CONN.row_factory = sqlite3.Row
                 _DB_CONN_PATH = DB_PATH
                 _DB_CONN.execute("PRAGMA journal_mode=WAL")
@@ -429,8 +428,14 @@ def init_db() -> None:
         peak_balance    REAL,
         positions_closed INTEGER,
         resumed_at      TEXT,
-        trigger_type    TEXT DEFAULT 'trigger'
+        trigger_type    TEXT DEFAULT 'trigger',
+        lane            TEXT DEFAULT 'global'
     )""")
+
+    try:
+        cur.execute("ALTER TABLE kill_switch_log ADD COLUMN lane TEXT DEFAULT 'global'")
+    except sqlite3.OperationalError:
+        pass # Already exists
 
     # v14.0: Trade integrity — durable trust tier for every close-side trade.
     # Tier: 'verified' | 'suspect' | 'quarantined' | 'excluded'

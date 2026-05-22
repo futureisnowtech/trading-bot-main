@@ -6,7 +6,7 @@
 ## Canonical Truth
 
 - Repo root: `/Users/joshmacbookair2020/Projects/algo_trading_final`
-- Canonical version: `v18.30` (`2026-05-15`)
+- Canonical version: `v18.33.AGGRESSOR` (`2026-05-22`)
 - Canonical active lane: **Dual-Lane**: Coinbase Spot Scalp (Primary) + Kalshi Macro Forecast (Secondary)
 - **Status:** **RECURSIVE EVOLUTION**. Autonomous Self-Vaccinating DAG active.
 - **Critical Changes (v18.30):**

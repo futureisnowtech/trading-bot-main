@@ -407,6 +407,45 @@ def run_position_monitor() -> None:
         pass
 
 
+def _send_daily_token_burn_report():
+    """Forensic report for daily LLM token consumption."""
+    try:
+        import sqlite3 as _sq
+        import time as _time
+        from config import DB_PATH as _DB_PATH
+        from notifications.telegram_bot import send_message as _tg
+        
+        _cutoff = _time.time() - 86400
+        with _sq.connect(_DB_PATH, timeout=30.0) as _conn:
+            _conn.row_factory = _sq.Row
+            rows = _conn.execute(
+                """SELECT module, SUM(prompt_tokens) as p, SUM(completion_tokens) as c 
+                   FROM api_telemetry WHERE ts >= ? 
+                   GROUP BY module ORDER BY (p+c) DESC""", 
+                (_cutoff,)
+            ).fetchall()
+
+            if not rows:
+                return
+
+            total_tokens = sum(int(r["p"] or 0) + int(r["c"] or 0) for r in rows)
+            heaviest = rows[0]
+            
+            lines = [
+                '📊 <b>Daily Token Burn Report</b> (Last 24h)',
+                f'Total Tokens Burned: <b>{total_tokens:,}</b>',
+                f'Heaviest Consumer: <b>{str(heaviest["module"])}</b> with <b>{int(heaviest["p"] or 0) + int(heaviest["c"] or 0):,}</b> tokens',
+                '\n<b>Per-Module Breakdown:</b>'
+            ]
+            for r in rows:
+                p, c = int(r["p"] or 0), int(r["c"] or 0)
+                lines.append(f' • {str(r["module"])}: {p:,} prompt + {c:,} completion = {p+c:,}')
+            
+            _tg('\n'.join(lines))
+    except Exception as _report_err:
+        logger.warning(f"[ForecastRunner] Token report fail: {_report_err}")
+
+
 # ── Startup / teardown ─────────────────────────────────────────────────────────
 
 
@@ -482,6 +521,7 @@ def start_forecast_lane(bankroll: float = 100.0) -> None:
     schedule.every(5).minutes.do(run_discovery_cycle)
     schedule.every(5).minutes.do(lambda: run_strategy_cycle(bankroll))
     schedule.every(30).seconds.do(run_position_monitor)
+    schedule.every().day.at("08:00").do(_send_daily_token_burn_report)
 
     logger.info(
         f"[ForecastRunner] Lane started | bankroll=${bankroll:.0f} "

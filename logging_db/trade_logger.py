@@ -494,6 +494,15 @@ def init_db() -> None:
         final_entryable_total INTEGER DEFAULT 0
     )""")
 
+    # v18.34: Token telemetry — raw input/completion counts per module.
+    cur.execute("""CREATE TABLE IF NOT EXISTS api_telemetry (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts REAL NOT NULL,
+        module TEXT NOT NULL,
+        prompt_tokens INTEGER DEFAULT 0,
+        completion_tokens INTEGER DEFAULT 0
+    )""")
+
     # v14.0: Challenger state — promotion/demotion tracking for backtested strategies.
     cur.execute("""CREATE TABLE IF NOT EXISTS challenger_state (
         id               INTEGER PRIMARY KEY AUTOINCREMENT,

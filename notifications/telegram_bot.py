@@ -660,12 +660,16 @@ async def run_bot():
     import config as _cfg
 
     current_host = socket.gethostname()
-    target_host = getattr(_cfg, "TELEGRAM_POLLING_HOSTNAME", "algo-bot-live")
+    target_hosts = ["algo-bot-live", "algo-bot-spot"]
+    target_host_cfg = getattr(_cfg, "TELEGRAM_POLLING_HOSTNAME", None)
+    if target_host_cfg:
+        target_hosts.append(target_host_cfg)
+    
     force_polling = os.environ.get("TELEGRAM_FORCE_POLLING", "").lower() == "true"
 
-    if current_host != target_host and not force_polling:
+    if current_host not in target_hosts and not force_polling:
         logger.warning(
-            f"[telegram] Sovereign Polling Guard: hostname mismatch ('{current_host}' != '{target_host}'). "
+            f"[telegram] Sovereign Polling Guard: hostname mismatch ('{current_host}' not in {target_hosts}). "
             "Disabling polling (Command Mode) to prevent conflict with Production. "
             "Send-only mode is still active. Use TELEGRAM_FORCE_POLLING=true to bypass."
         )

@@ -264,7 +264,7 @@ def _economics_gate(
     if deployed_pct >= KALSHI_MAX_DEPLOYED_PCT:
         return (
             False,
-            f"capital_partition_full ({deployed_pct:.1%} >= {KALSHI_MAX_DEPLOYED_PCT:.1%})",
+            "MAX_CAPITAL_EXCEEDED",
             0.0,
             0.0,
         )
@@ -273,7 +273,7 @@ def _economics_gate(
     if hours_to_resolution < MIN_HOURS_TO_RES:
         return (
             False,
-            f"too_close_to_resolution ({hours_to_resolution:.1f}h < {MIN_HOURS_TO_RES}h)",
+            "RESOLUTION_HORIZON_TOO_SHORT",
             0.0,
             0.0,
         )
@@ -336,7 +336,7 @@ def _economics_gate(
     if best_ev < EV_THRESHOLD:
         return (
             False,
-            f"insufficient_ev (best EV={best_ev:.4f} < {EV_THRESHOLD})",
+            "LOW_PROBABILITY_EDGE",
             ev_yes,
             ev_no,
         )
@@ -690,8 +690,10 @@ def evaluate_contract(
     uncertainty_penalty = min(0.40, sigma_t * 0.30 + max(0.0, h_t - 0.60) * 0.20)
     adj_confidence = max(0.0, best_confidence - uncertainty_penalty)
 
-    # Correlation penalty
-    corr_penalty = SAME_EVENT_PENALTY if same_event_open else 1.0
+    # v18.34: Forensic Veto for Hedge Spaghetti
+    if same_event_open:
+        logger.info(f"Forensic Veto: SAME_EVENT_HEDGE_SPAGHETTI for {contract.get('local_symbol')}")
+        return None
 
     # Capital Lockup Penalty (Velocity scaling)
     # Scale fraction down exponentially the further away the resolution is.

@@ -244,7 +244,24 @@ def ask_ai(query: str) -> str:
         chat = client.chats.create(model=model_id, config=config_dict)
         response = chat.send_message(query)
         
-        # Cost Telemetry
+        # Forensic Telemetry Interceptor (v18.34)
+        try:
+            import sqlite3 as _sq
+            from config import DB_PATH as _DB_PATH
+            _usage = getattr(response, "usage_metadata", None)
+            _p_tok = int(getattr(_usage, "prompt_token_count", 0) or 0)
+            _c_tok = int(getattr(_usage, "candidates_token_count", 0) or 0)
+            
+            if _p_tok > 0 or _c_tok > 0:
+                with _sq.connect(_DB_PATH, timeout=30.0) as _tconn:
+                    _tconn.execute(
+                        "INSERT INTO api_telemetry (ts, module, prompt_tokens, completion_tokens) VALUES (?, ?, ?, ?)",
+                        (time.time(), "telegram_ask", _p_tok, _c_tok)
+                    )
+        except Exception as _tel_err:
+            logger.debug(f"[ai_agent] Telemetry capture failure: {_tel_err}")
+
+        # Legacy Cost Telemetry
         try:
             usage = response.usage_metadata
             if usage:

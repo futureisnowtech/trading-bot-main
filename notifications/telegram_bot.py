@@ -678,10 +678,10 @@ async def run_bot():
         await stop_event.wait()
         return
 
-    if current_host == target_host:
+    if current_host in target_hosts:
         logger.info(f"[telegram] Sovereign Polling Guard: hostname match ('{current_host}'). Command Mode AUTHORIZED.")
     else:
-        logger.info(f"[telegram] Sovereign Polling Guard: hostname mismatch, but TELEGRAM_FORCE_POLLING=true. Command Mode FORCED.")
+        logger.info(f"[telegram] Sovereign Polling Guard: hostname mismatch ({target_hosts}), but TELEGRAM_FORCE_POLLING=true. Command Mode FORCED.")
 
     try:
         app = ApplicationBuilder().token(TOKEN).build()

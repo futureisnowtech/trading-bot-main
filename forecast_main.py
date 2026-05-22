@@ -1,6 +1,6 @@
 """
 forecast_main.py — Isolated orchestrator for the Kalshi Forecast lane.
-v18.33.AGGRESSOR: Sovereign Separation Phase
+v18.34.FORENSIC: Sovereign Separation Phase
 """
 
 import sys, os, time, traceback, logging, threading, json

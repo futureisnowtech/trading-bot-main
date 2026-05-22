@@ -334,7 +334,12 @@ class KalshiBroker:
         if order_id != "ERR":
             print(f"[KalshiBroker] BUY {qty} {ticker} ({side.upper()}) @ {limit_price:.4f} | ID={order_id}")
             key = f"{ticker}_{contract_dict['right']}"
-            self._open_positions[key] = {"qty": qty, "side": side.upper(), "local_symbol": ticker}
+            self._open_positions[key] = {
+                "qty": qty,
+                "side": side.upper(),
+                "local_symbol": ticker,
+                "entry_price": limit_price,
+            }
 
         return {"order_id": order_id, "price": limit_price, "qty": qty}
 
@@ -368,8 +373,19 @@ class KalshiBroker:
         }
         
         resp = self._request("POST", "/trade-api/v2/portfolio/orders", body=body)
-        self._open_positions.pop(key, None)
-        return {"order_id": resp.get("order_id", "ERR"), "flattened_qty": qty}
+        
+        # Calculate PnL
+        pos_info = self._open_positions.pop(key, {})
+        entry_price = pos_info.get("entry_price", 0.0)
+        pnl_usd = (price - entry_price) * qty if entry_price > 0 else 0.0
+
+        return {
+            "order_id": resp.get("order_id", "ERR"),
+            "flattened_qty": qty,
+            "exit_price": price,
+            "entry_price": entry_price,
+            "pnl_usd": pnl_usd,
+        }
 
     def get_positions(self) -> list[dict]:
         return list(self._open_positions.values())

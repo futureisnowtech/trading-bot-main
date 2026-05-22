@@ -70,14 +70,15 @@ async def get_db_snapshot():
         try:
             cursor.execute("SELECT * FROM open_positions WHERE qty > 0")
             for p in cursor.fetchall():
+                p_dict = dict(p)
                 spot_positions.append({
-                    "symbol": p["symbol"],
-                    "qty": p["qty"],
-                    "entry_price": p["entry"],
-                    "stop": p.get("stop", 0.0),
-                    "target": p.get("target", 0.0),
-                    "strategy": p.get("strategy", ""),
-                    "reason": p.get("entry_reason", "")
+                    "symbol": p_dict["symbol"],
+                    "qty": p_dict["qty"],
+                    "entry_price": p_dict["entry"],
+                    "stop": p_dict.get("stop", 0.0),
+                    "target": p_dict.get("target", 0.0),
+                    "strategy": p_dict.get("strategy", ""),
+                    "reason": p_dict.get("entry_reason", "")
                 })
         except sqlite3.OperationalError: pass
         
@@ -151,7 +152,8 @@ async def get_db_snapshot():
         # Calculate Equity safely
         equity = 0.0
         if crypto_row:
-            equity = (crypto_row.get("buying_power_usd", 0.0) or 0.0) + (crypto_row.get("capital_deployed_usd", 0.0) or 0.0)
+            cr = dict(crypto_row)
+            equity = (cr.get("buying_power_usd", 0.0) or 0.0) + (cr.get("capital_deployed_usd", 0.0) or 0.0)
 
         return {
             "spot": {

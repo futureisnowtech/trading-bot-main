@@ -297,6 +297,24 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                         reason=f"{result.strategy_family}_ev={result.ev:.4f}",
                         strategy=f"forecast_{result.strategy_family}",
                     )
+                    
+                    # Notify via Telegram/DB
+                    if entry_result.get("order_id") != "ERR":
+                        try:
+                            from notifications.notification_engine import notify_trade_open
+                            notify_trade_open(
+                                symbol=contract.get("local_symbol", ""),
+                                direction=result.side.upper(),
+                                size_usd=result.position_contracts * ask_price,
+                                entry_price=ask_price,
+                                score=result.ev,
+                                top_3=result.top_factors or [],
+                                features={},
+                                regime="KALSHI",
+                            )
+                        except Exception as _ne_err:
+                            logger.error(f"[ForecastRunner] Notification error: {_ne_err}")
+
                     entries.append(
                         {
                             "contract": contract,
@@ -385,13 +403,38 @@ def run_position_monitor() -> None:
 
             if resolved:
                 try:
-                    broker.flatten_position(
+                    flatten_res = broker.flatten_position(
                         local_symbol=local_symbol,
                         right=right,
                         qty=qty,
                         strategy="forecast_monitor",
                         reason="resolved_or_expired",
                     )
+                    
+                    # Notify via Telegram/DB
+                    if flatten_res.get("order_id") != "ERR":
+                        try:
+                            from notifications.notification_engine import notify_trade_close
+                            pnl_usd = flatten_res.get("pnl_usd", 0.0)
+                            entry_price = flatten_res.get("entry_price", 0.0)
+                            
+                            # Simple pnl_pct calculation
+                            pnl_pct = (pnl_usd / (entry_price * qty)) if (entry_price > 0 and qty > 0) else 0.0
+                            
+                            notify_trade_close(
+                                symbol=local_symbol,
+                                direction="YES" if right == "C" else "NO",
+                                pnl_usd=pnl_usd,
+                                pnl_pct=pnl_pct,
+                                exit_type="resolved_or_expired",
+                                top_3=[],
+                                features={},
+                                regime="KALSHI",
+                                score=0.0
+                            )
+                        except Exception as _ne_err:
+                            logger.error(f"[ForecastRunner] Notification error: {_ne_err}")
+                            
                 except Exception as e:
                     logger.error(f"[ForecastRunner] Flatten failed {local_symbol}: {e}")
 

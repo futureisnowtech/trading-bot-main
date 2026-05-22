@@ -292,7 +292,7 @@ def get_forecast_pnl_summary() -> dict:
                 for r in rows
                 if r["pnl_usd"] is not None and (r["ts"] or "")[:10] == today_str
             ]
-            wins = sum(1 for r in rows if r.get("won") == 1)
+            wins = sum(1 for r in rows if dict(r).get("won") == 1)
             result["total_trades"] = len(pnls)
             result["wins"] = wins
             result["win_rate"] = wins / len(pnls) if pnls else 0.0

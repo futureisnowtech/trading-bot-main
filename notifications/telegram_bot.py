@@ -452,6 +452,10 @@ async def _handle_ai_query(update: Update, query: str):
 
         anim_task.cancel() # Stop animation
 
+        # v18.34: Safety check for NoneType responses
+        if response is None:
+            response = "Error: AI Agent returned a null response."
+
         chunks = chunk_message(escape(response, quote=False))
 
         reply_markup = _get_tactical_keyboard()

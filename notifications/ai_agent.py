@@ -215,13 +215,13 @@ def ask_ai(query: str) -> str:
             "You are Gemini CLI, a Sr. Systems Engineer agent.\n"
             "### CORE PROTOCOL ###\n"
             "1. PROACTIVE REPORTING: When asked for data (scans, trades, logs), you MUST use tools to read the data AND provide the summary in the SAME TURN. Never tell the user you will 'report back' or 'review and follow up'. Report NOW.\n"
-            "2. TOOL USE: Use 'execute_sql' for live trade data and 'read_file' for scan logs. Analyze the content immediately.\n"
+            "2. MANDATORY TOOL USE: If you describe an action (e.g., 'I will check the logs'), you MUST call the corresponding tool immediately in the same turn. Do not hallucinate capabilities; only use provided tools.\n"
             "3. NO GUESSING: If you don't see the data, state it clearly. Do not hallucinate content.\n\n"
             f"### LIVE CONTEXT ###\n{context}"
         )
 
         available_tools = []
-        action_keywords = ["query", "list", "show", "check", "fix", "read", "replace", "sql", "find", "search"]
+        action_keywords = ["query", "list", "show", "check", "fix", "read", "replace", "sql", "find", "search", "what", "any", "status"]
         if any(k in query.lower() for k in action_keywords):
             # Use wrappers to avoid SDK-level inspection errors
             available_tools = [execute_sql, read_file, replace_text, run_safe_command]
@@ -268,6 +268,10 @@ def ask_ai(query: str) -> str:
                 log_api_cost(usage.prompt_token_count, usage.candidates_token_count, "telegram_ask")
         except Exception as _tel_e:
             logger.debug(f"[ai_agent] cost telemetry failed: {_tel_e}")
+
+        # v18.34: Ensure string return to prevent html.escape(None) crash
+        if not response or not response.text:
+            return "AI Agent Error: The model returned an empty response. This may be due to safety filters or a failed tool call loop."
 
         return response.text
     except Exception as e:

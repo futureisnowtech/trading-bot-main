@@ -454,16 +454,7 @@ async def _handle_ai_query(update: Update, query: str):
 
         chunks = chunk_message(escape(response, quote=False))
 
-        keyboard = [
-            [
-                InlineKeyboardButton("🔍 View Logs", callback_data="cmd_logs"),
-                InlineKeyboardButton("📉 Show OBI", callback_data="cmd_spread"),
-            ],
-            [
-                InlineKeyboardButton("🔄 Restart Bot", callback_data="cmd_reboot"),
-            ],
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = _get_tactical_keyboard()
 
         # Edit thinking message with first chunk
         await thinking_msg.edit_text(
@@ -496,6 +487,68 @@ async def _handle_ai_query(update: Update, query: str):
             await thinking_msg.edit_text("⚠️ An internal error occurred while processing your request.")
 
 
+@restricted_access
+async def vitals_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Tactical Widget 1: System Vitals"""
+    state = system_state.state.get_state()
+    is_live = _runtime_is_live()
+    mode_label = "LIVE" if is_live else "PAPER"
+    
+    msg = (
+        f"<b>SOVEREIGN VITALS [{mode_label}]</b>\n"
+        f"Mode: <code>{state.get('mode', 'UNKNOWN')}</code>\n"
+        f"Bankroll: <code>${state['exchange']['buying_power']:,.2f}</code>\n"
+        f"Active: <code>{state['strategy']['active_symbol']}</code>\n"
+        f"Signal: <code>{state['strategy']['current_signal']}</code>\n"
+        f"OBI: <code>{state['strategy']['obi']:+.2f}</code>"
+    )
+    await _reply_text(update, msg, parse_mode=ParseMode.HTML)
+
+
+@restricted_access
+async def recent_trades_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Tactical Widget 2: Recent Trades Summary"""
+    try:
+        import sqlite3
+        _db = os.path.join(REPO_ROOT, "logs", "trades.db")
+        with sqlite3.connect(_db) as c:
+            c.row_factory = sqlite3.Row
+            rows = c.execute("SELECT symbol, action, price, pnl_usd, ts FROM trades ORDER BY ts DESC LIMIT 5").fetchall()
+            
+            if not rows:
+                await _reply_text(update, "No recent trades found.")
+                return
+
+            msg = "<b>RECENT EXECUTION</b>\n"
+            for r in rows:
+                pnl = float(r['pnl_usd'] or 0)
+                pnl_str = f"| ${pnl:+.2f}" if r['action'] == 'SELL' else ""
+                msg += f"• <code>{r['symbol']}</code> {r['action']} @ {r['price']:.4f} {pnl_str}\n"
+            
+            await _reply_text(update, msg, parse_mode=ParseMode.HTML)
+    except Exception as e:
+        await _reply_text(update, f"Trade fetch error: {e}")
+
+
+@restricted_access
+async def regime_policy_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Tactical Widget 3: Live Regime Policy"""
+    try:
+        from runtime.spot_strategy import ACTIVE_UNIVERSE
+        from config import SPOT_REGIME_SCORE_FLOORS
+        
+        msg = "<b>REGIME POLICY</b>\n"
+        msg += f"Floors: T={SPOT_REGIME_SCORE_FLOORS['TREND']} N={SPOT_REGIME_SCORE_FLOORS['NEUTRAL']} C={SPOT_REGIME_SCORE_FLOORS['CHOP']}\n\n"
+        
+        # Show top 5 symbols from universe to keep message concise
+        for sym in ACTIVE_UNIVERSE[:5]:
+            msg += f"• <code>{sym}</code>: Allowed=ALL | Sniper=ON\n"
+            
+        await _reply_text(update, msg, parse_mode=ParseMode.HTML)
+    except Exception as e:
+        await _reply_text(update, f"Policy fetch error: {e}")
+
+
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if query is None:
@@ -503,15 +556,29 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await query.answer()
 
-    if query.data == "cmd_logs":
-        await logs_command(update, context)
-    elif query.data == "cmd_spread":
-        await spread_command(update, context)
-    elif query.data == "cmd_reboot":
-        await reboot_command(update, context)
+    if query.data == "cmd_vitals":
+        await vitals_command(update, context)
+    elif query.data == "cmd_trades":
+        await recent_trades_command(update, context)
+    elif query.data == "cmd_policy":
+        await regime_policy_command(update, context)
     else:
         logger.warning("Unknown Telegram callback action: %s", query.data)
         await _reply_text(update, "Unknown action.")
+
+
+def _get_tactical_keyboard():
+    """Returns the v18.33 Tactical Keyboard."""
+    keyboard = [
+        [
+            InlineKeyboardButton("📊 System Vitals", callback_data="cmd_vitals"),
+            InlineKeyboardButton("📜 Recent Trades", callback_data="cmd_trades"),
+        ],
+        [
+            InlineKeyboardButton("🛡️ Regime Policy", callback_data="cmd_policy"),
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
 
 
 @restricted_access

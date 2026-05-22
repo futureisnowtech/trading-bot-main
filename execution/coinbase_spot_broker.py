@@ -136,14 +136,14 @@ class CoinbaseSpotBroker:
             from config import COINBASE_CDP_KEY_NAME, COINBASE_CDP_PRIVATE_KEY
 
             self._key_name = str(COINBASE_CDP_KEY_NAME or "")
-            raw = str(COINBASE_CDP_PRIVATE_KEY or "")
+            raw = str(COINBASE_CDP_PRIVATE_KEY or "").strip("\"'")
             self._private_key_pem = raw.replace("\\n", "\n").encode() if raw else b""
         except ImportError:
             pass
 
         if not self._key_name or not self._private_key_pem:
             self._key_name = os.getenv("COINBASE_CDP_KEY_NAME", "")
-            raw = os.getenv("COINBASE_CDP_PRIVATE_KEY", "")
+            raw = os.getenv("COINBASE_CDP_PRIVATE_KEY", "").strip("\"'")
             self._private_key_pem = raw.replace("\\n", "\n").encode() if raw else b""
 
         # Default to paper mode if credentials missing (safest for tests)

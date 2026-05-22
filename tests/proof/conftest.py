@@ -51,13 +51,14 @@ def _reset_risk_engine() -> None:
 def _reset_kill_switch() -> None:
     import kill_switch
 
-    with kill_switch._lock:
-        kill_switch._halted = False
-        kill_switch._halt_reason = ""
-        kill_switch._halt_ts = 0.0
-        kill_switch._live_baseline = 0.0
-        kill_switch._api_errors.clear()
-        kill_switch._last_latency_ms = 0.0
+    ks = kill_switch.get_switch()
+    with ks.lock:
+        ks.halted = False
+        ks.halt_reason = ""
+        ks.halt_ts = 0.0
+        ks.live_baseline = 0.0
+        ks.api_errors.clear()
+        ks.last_latency_ms = 0.0
 
 
 @pytest.fixture

@@ -393,7 +393,7 @@ def get_notifications(limit: int = 20) -> list:
 
 
 @mcp.tool()
-def get_engine_signal(symbol: str, btc_change_pct: float = None) -> dict:
+async def get_engine_signal(symbol: str, btc_change_pct: float = None) -> dict:
     """Evaluate the 4-signal crypto engine for a symbol right now.
 
     Runs cascade → divergence → OBI → MACD hierarchy and returns
@@ -426,7 +426,18 @@ def get_engine_signal(symbol: str, btc_change_pct: float = None) -> dict:
         price = float(df_ind.iloc[-1]["close"])
         market_data = _build_market_data(symbol, price, df_ind)
 
-        # Enrich funding rate
+        # v18.34: Global Microstructure (Fast Path)
+        try:
+            from data.indicators import fetch_global_microstructure
+            global_micro = await fetch_global_microstructure(symbol)
+            if global_micro.get("source") != "none":
+                # Convert decimal to pct if needed, assuming CCXT returns decimal (e.g. 0.0001)
+                # CASCADE_FUNDING_PCT is 0.03 (3 basis points). 
+                market_data["global_funding_rate"] = global_micro["funding_rate"] * 100
+        except Exception as _e:
+            logger.debug(f"[mcp] global micro fetch failed: {_e}")
+
+        # Enrich funding rate (legacy local path)
         try:
             macro = get_macro_snapshot(symbols_of_interest=[symbol])
             fr = macro.get("funding_rates", {}).get(symbol, {})

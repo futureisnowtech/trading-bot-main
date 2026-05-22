@@ -238,6 +238,14 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
             ) -> dict:
                 return get_paired_quotes(market_id, strike, last_trade_at)
 
+            # v18.34: Dual-Path Macro Context Injection
+            macro_ctx = {}
+            try:
+                from forecast.strategy_engine import _get_macro_context
+                macro_ctx = _get_macro_context()
+            except Exception:
+                pass
+
             candidates = evaluate_all_contracts(
                 active_contracts=active,
                 get_bars_fn=_get_bars_fn,
@@ -246,6 +254,7 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                 deployed_pct=deployed_pct,
                 open_positions_count=open_count,
                 open_event_families=open_event_families,
+                macro_context=macro_ctx,
             )
 
             for candidate in candidates:

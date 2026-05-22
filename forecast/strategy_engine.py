@@ -104,6 +104,21 @@ MAX_DEPLOYED_PCT: float = 0.35
 MAX_RISK_PER_EVENT_PCT: float = 0.10
 MAX_CONCURRENT_POSITIONS: int = 2
 
+MACRO_CACHE_FILE = "logs/cached_macro_regime.json"
+
+
+def _get_macro_context() -> dict:
+    """Read v18.34 macro cache."""
+    try:
+        import json
+
+        if os.path.exists(MACRO_CACHE_FILE):
+            with open(MACRO_CACHE_FILE, "r") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
 
 @dataclass
 class StrategyResult:
@@ -607,6 +622,15 @@ def evaluate_contract(
         )
         return None
 
+    # v18.34: Macro Context Risk Gate
+    macro = _get_macro_context()
+    risk_score = float(macro.get("risk_score", 0))
+    if risk_score >= 8:
+        logger.info(
+            f"Sovereign Veto: MACRO_RISK_OVERLOAD (score={risk_score}) for {contract.get('local_symbol')}"
+        )
+        return None
+
     last_trade_at = contract.get("last_trade_at", "")
     hours_to_res = _hours_to_resolution(last_trade_at)
 
@@ -750,16 +774,16 @@ def evaluate_all_contracts(
     deployed_pct: float = 0.0,
     open_positions_count: int = 0,
     open_event_families: Optional[set] = None,
+    macro_context: Optional[dict] = None,
 ) -> list[dict]:
     """
     Evaluate all active contracts and return ranked list of approved entries.
-
-    Returns list of dicts:
-      {contract, result: StrategyResult, rank_score}
-
-    Sorted by EV × confidence (descending).
+    v18.34: Now anchored in real-time TradFi reality via macro_context.
     """
     approved_entries = []
+    
+    if macro_context:
+        logger.info(f"[strategy_engine] Anchoring evaluation in Macro Context (Risk={macro_context.get('risk_score')})")
 
     # Group contracts by market for YES/NO pairing
     market_contracts: dict[int, list[dict]] = {}

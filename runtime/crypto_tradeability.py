@@ -364,6 +364,7 @@ def _evaluate_tradeability(
             SPOT_SYMBOLS,
             SPOT_MAX_DEPLOYED_PCT,
             SPOT_MIN_ORDER_USD,
+            SPOT_MAX_POSITIONS_PER_SYMBOL,
             AUTONOMOUS_LIVE_PERP_SYMBOLS,
             CORE_EXECUTION_UNDERLYINGS,
         )
@@ -377,6 +378,7 @@ def _evaluate_tradeability(
         core_underlyings = {s.upper() for s in CORE_EXECUTION_UNDERLYINGS}
         spot_max_pct = float(SPOT_MAX_DEPLOYED_PCT)
         spot_min_usd = float(SPOT_MIN_ORDER_USD)
+        spot_max_pos = int(SPOT_MAX_POSITIONS_PER_SYMBOL)
     except Exception as e:
         logger.error(f"[tradeability] config import failed: {e}")
         return _blocked_result(symbol, underlying, "execution_policy_unavailable")
@@ -411,6 +413,7 @@ def _evaluate_tradeability(
         spot_active=spot_active,
         spot_max_pct=spot_max_pct,
         spot_min_usd=spot_min_usd,
+        spot_max_pos=spot_max_pos,
         spot_symbols=spot_route_symbols,
         manual=manual,
         paper=paper,
@@ -497,6 +500,7 @@ def _check_spot_eligibility(
     spot_active: bool,
     spot_max_pct: float,
     spot_min_usd: float,
+    spot_max_pos: int,
     spot_symbols: set[str],
     manual: bool,
     paper: bool = False,
@@ -518,7 +522,7 @@ def _check_spot_eligibility(
         return "spot_lane_disabled"
 
     # Duplicate position gate
-    if _count_open_spot_positions(underlying, paper=paper) > 0:
+    if _count_open_spot_positions(underlying, paper=paper) >= spot_max_pos:
         return "spot_position_already_open"
     if _get_open_perp_directions(underlying, paper=paper):
         return "underlying_exposure_already_open"

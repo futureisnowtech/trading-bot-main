@@ -3,6 +3,10 @@
     "trading-bot": {
       "command": "python3",
       "args": ["/Users/joshmacbookair2020/Projects/algo_trading_final/mcp_server/server.py"]
+    },
+    "yfinance": {
+      "command": "python3",
+      "args": ["-m", "yfinance_mcp"]
     }
   }
 }

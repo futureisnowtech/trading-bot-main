@@ -87,10 +87,14 @@ def _detect_cascade(market_data: dict) -> bool:
     """
     Liquidation cascade: funding rate crowded AND OI is dropping.
     Meaning: longs are over-leveraged AND positions are being closed (forced).
-    The resulting price move is often sharp and one-directional — ride it.
+    v18.34: Now favors global Binance/Bybit data for higher fidelity.
     """
-    funding_pct = market_data.get('funding_rate_pct')
-    oi_change   = market_data.get('oi_change_pct')
+    # Prefer global funding data if available
+    funding_pct = market_data.get('global_funding_rate')
+    if funding_pct is None:
+        funding_pct = market_data.get('funding_rate_pct')
+        
+    oi_change = market_data.get('oi_change_pct')
 
     if funding_pct is None or oi_change is None:
         return False

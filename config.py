@@ -117,6 +117,7 @@ SPOT_STRATEGY_SYMBOLS: list = [
     if s.strip()
 ]
 SPOT_MAX_DEPLOYED_PCT: float = float(os.getenv("SPOT_MAX_DEPLOYED_PCT", "0.50"))
+SPOT_MAX_POSITIONS_PER_SYMBOL: int = int(os.getenv("SPOT_MAX_POSITIONS_PER_SYMBOL", "3"))
 SPOT_MIN_ORDER_USD: float = float(os.getenv("SPOT_MIN_ORDER_USD", "25.0"))
 SPOT_WEEKDAYS_ONLY: bool = os.getenv("SPOT_WEEKDAYS_ONLY", "false").lower() == "true"
 SPOT_ENTRY_START_TIME: str = os.getenv("SPOT_ENTRY_START_TIME", "00:00")

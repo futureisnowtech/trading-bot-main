@@ -1060,3 +1060,39 @@ def opening_range(df_5min: pd.DataFrame, market_open_idx: int = 0) -> dict:
         'low': candle['low'],
         'range': candle['high'] - candle['low']
     }
+
+
+async def fetch_global_microstructure(symbol: str) -> dict:
+    """
+    v18.34: Fast-Path Global Microstructure (Binance/Bybit).
+    Fetches global Open Interest and Funding Rates via CCXT.
+    Returns: {'funding_rate': float, 'open_interest': float, 'source': str}
+    """
+    import asyncio
+    import ccxt.async_support as ccxt
+    
+    # Normalize symbol for global perpetuals (e.g. BTC-USD -> BTC/USDT:USDT)
+    base = symbol.split('-')[0] if '-' in symbol else symbol
+    target = f"{base}/USDT:USDT"
+    
+    data = {"funding_rate": 0.0, "open_interest": 0.0, "source": "none"}
+    
+    try:
+        exchange = ccxt.binance({'options': {'defaultType': 'future'}})
+        # Strict 3s timeout as per Ceiling Protocol
+        res = await asyncio.wait_for(exchange.fetch_funding_rate(target), timeout=3.0)
+        await exchange.close()
+        
+        if res:
+            data["funding_rate"] = float(res.get('fundingRate', 0.0))
+            data["source"] = "binance"
+            
+        # Optional: fetch OI if needed for cascade
+        # exchange = ccxt.binance()
+        # oi_res = await asyncio.wait_for(exchange.fetch_open_interest(target), timeout=3.0)
+        # data["open_interest"] = float(oi_res.get('baseVolume', 0.0))
+        
+    except Exception as e:
+        logger.debug(f"[indicators] global micro fetch failed for {symbol}: {e}")
+        
+    return data

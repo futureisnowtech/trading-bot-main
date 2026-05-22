@@ -202,7 +202,19 @@
         
         eventSource.onmessage = function(event) {
             const data = JSON.parse(event.data);
-            if (data.error) return;
+            
+            // Handle backend errors
+            if (data.error) {
+                console.error("Dashboard backend error:", data.error);
+                const eventLog = document.getElementById('event-log');
+                eventLog.innerHTML = `
+                    <div class="flex space-x-2 border-b border-red-900 py-1">
+                        <span class="text-red-500 font-bold">[BACKEND ERROR]</span>
+                        <span class="text-gray-400 truncate">${data.error}</span>
+                    </div>
+                ` + eventLog.innerHTML;
+                return;
+            }
 
             // Header & Status
             document.getElementById('sys-time').innerText = data.system.time;

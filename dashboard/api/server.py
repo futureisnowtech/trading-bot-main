@@ -38,96 +38,124 @@ latest_state = {}
 _LAST_KALSHI_SYNC = 0
 
 async def get_db_snapshot():
-    """Read latest stats from SQLite and System Vitals."""
+    """Read latest stats from SQLite and System Vitals with high-fidelity error handling."""
     global _LAST_KALSHI_SYNC
     try:
-        conn = sqlite3.connect(DB_PATH)
+        # v18.34: Harden connection for multi-process isolation
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
         # 1. System Vitals (psutil)
+        # Note: calling twice with interval=0.1 to ensure non-zero CPU readings
+        cpu = psutil.cpu_percent()
+        if cpu == 0.0: cpu = psutil.cpu_percent(interval=0.1)
+        
         vitals = {
-            "cpu": psutil.cpu_percent(),
+            "cpu": cpu,
             "ram": psutil.virtual_memory().percent,
             "disk": psutil.disk_usage('/').percent,
             "load_avg": os.getloadavg() if hasattr(os, 'getloadavg') else [0,0,0]
         }
 
         # 2. Latest Spot Stats
-        cursor.execute("SELECT * FROM lane_runtime_state WHERE lane_id='crypto'")
-        crypto_row = cursor.fetchone()
+        crypto_row = None
+        try:
+            cursor.execute("SELECT * FROM lane_runtime_state WHERE lane_id='crypto'")
+            crypto_row = cursor.fetchone()
+        except sqlite3.OperationalError: pass # Table missing
         
         # 3. Active Spot Positions
-        cursor.execute("SELECT * FROM open_positions WHERE qty > 0")
-        spot_positions_raw = [dict(r) for r in cursor.fetchall()]
-        
         spot_positions = []
-        for p in spot_positions_raw:
-            spot_positions.append({
-                "symbol": p["symbol"],
-                "qty": p["qty"],
-                "entry_price": p["entry"],
-                "stop": p.get("stop", 0.0),
-                "target": p.get("target", 0.0),
-                "strategy": p.get("strategy", ""),
-                "reason": p.get("entry_reason", "")
-            })
+        try:
+            cursor.execute("SELECT * FROM open_positions WHERE qty > 0")
+            for p in cursor.fetchall():
+                spot_positions.append({
+                    "symbol": p["symbol"],
+                    "qty": p["qty"],
+                    "entry_price": p["entry"],
+                    "stop": p.get("stop", 0.0),
+                    "target": p.get("target", 0.0),
+                    "strategy": p.get("strategy", ""),
+                    "reason": p.get("entry_reason", "")
+                })
+        except sqlite3.OperationalError: pass
         
         # 4. Learner State (Vaccinations)
-        cursor.execute("SELECT * FROM learner_state")
-        learner_rows = [dict(r) for r in cursor.fetchall()]
-        vaccinations = [{"symbol": r["symbol"], "score": r["score"]} for r in learner_rows if r["vaccinated"]]
+        vaccinations = []
+        try:
+            cursor.execute("SELECT * FROM learner_state")
+            for r in cursor.fetchall():
+                if r["vaccinated"]:
+                    vaccinations.append({"symbol": r["symbol"], "score": r["score"]})
+        except sqlite3.OperationalError: pass
 
         # 5. Latest Forecast Stats
-        cursor.execute("SELECT COUNT(*) as count FROM forecast_markets WHERE active = 1")
-        forecast_count = cursor.fetchone()["count"]
+        forecast_count = 0
+        try:
+            cursor.execute("SELECT COUNT(*) as count FROM forecast_markets WHERE active = 1")
+            row = cursor.fetchone()
+            if row: forecast_count = row["count"]
+        except sqlite3.OperationalError: pass
         
         # 6. Forecast Positions (Kalshi)
         forecast_positions = []
         try:
             from execution.kalshi_broker import get_kalshi_broker
             kb = get_kalshi_broker()
-            if not kb.is_connected(): kb.connect()
-            
-            now = time.time()
-            if now - _LAST_KALSHI_SYNC > 60:
-                kb._sync_positions()
-                _LAST_KALSHI_SYNC = now
-            forecast_positions = kb.get_positions()
+            if kb and kb.is_connected():
+                now = time.time()
+                if now - _LAST_KALSHI_SYNC > 60:
+                    kb._sync_positions()
+                    _LAST_KALSHI_SYNC = now
+                forecast_positions = kb.get_positions()
         except: pass
 
         # 7. 24H PnL
-        cursor.execute("SELECT SUM(pnl_usd) as pnl FROM trades WHERE ts > datetime('now', '-1 day')")
-        pnl_row = cursor.fetchone()
-        pnl_24h = float(pnl_row["pnl"] or 0.0)
+        pnl_24h = 0.0
+        try:
+            cursor.execute("SELECT SUM(pnl_usd) as pnl FROM trades WHERE ts > datetime('now', '-1 day')")
+            pnl_row = cursor.fetchone()
+            if pnl_row: pnl_24h = float(pnl_row["pnl"] or 0.0)
+        except sqlite3.OperationalError: pass
         
-        # 8. Recent Trades + Metadata (v18.33: Join with edge_snapshots if possible)
-        # We'll fetch notes from trades which often contains the final decision string
-        cursor.execute("SELECT * FROM trades ORDER BY id DESC LIMIT 20")
+        # 8. Recent Trades + Metadata
         recent_trades = []
-        for t in cursor.fetchall():
-            row = dict(t)
-            recent_trades.append({
-                "timestamp": row["ts"],
-                "symbol": row["symbol"],
-                "side": row["action"],
-                "price": row["price"],
-                "qty": row["qty"],
-                "strategy": row["strategy"],
-                "pnl_usd": float(row.get("pnl_usd") or 0.0),
-                "won": row.get("won"),
-                "notes": row.get("notes", "") # Contains RBI/ML metadata
-            })
+        try:
+            cursor.execute("SELECT * FROM trades ORDER BY id DESC LIMIT 20")
+            for t in cursor.fetchall():
+                row = dict(t)
+                recent_trades.append({
+                    "timestamp": row["ts"],
+                    "symbol": row["symbol"],
+                    "side": row["action"],
+                    "price": row["price"],
+                    "qty": row["qty"],
+                    "strategy": row["strategy"],
+                    "pnl_usd": float(row.get("pnl_usd") or 0.0),
+                    "won": row.get("won"),
+                    "notes": row.get("notes", "")
+                })
+        except sqlite3.OperationalError: pass
         
         # 9. System Events
-        cursor.execute("SELECT * FROM system_events ORDER BY ts DESC LIMIT 10")
-        events = [{"ts": r["ts"], "level": r["level"], "source": r["source"], "message": r["message"]} for r in cursor.fetchall()]
+        events = []
+        try:
+            cursor.execute("SELECT * FROM system_events ORDER BY ts DESC LIMIT 10")
+            for r in cursor.fetchall():
+                events.append({"ts": r["ts"], "level": r["level"], "source": r["source"], "message": r["message"]})
+        except sqlite3.OperationalError: pass
 
         conn.close()
         
+        # Calculate Equity safely
+        equity = 0.0
+        if crypto_row:
+            equity = (crypto_row.get("buying_power_usd", 0.0) or 0.0) + (crypto_row.get("capital_deployed_usd", 0.0) or 0.0)
+
         return {
             "spot": {
-                "equity": crypto_row["buying_power_usd"] + crypto_row["capital_deployed_usd"] if crypto_row else 0.0,
+                "equity": equity,
                 "pnl_24h": pnl_24h,
                 "positions": spot_positions,
                 "vaccinations": vaccinations

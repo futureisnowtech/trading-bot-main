@@ -31,23 +31,33 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+import psutil
+
 # In-memory store for the latest state to avoid hitting DB too hard
 latest_state = {}
 _LAST_KALSHI_SYNC = 0
 
 async def get_db_snapshot():
-    """Read latest stats from SQLite."""
+    """Read latest stats from SQLite and System Vitals."""
     global _LAST_KALSHI_SYNC
     try:
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
-        # Latest Spot Stats (from lane_runtime_state)
+        # 1. System Vitals (psutil)
+        vitals = {
+            "cpu": psutil.cpu_percent(),
+            "ram": psutil.virtual_memory().percent,
+            "disk": psutil.disk_usage('/').percent,
+            "load_avg": os.getloadavg() if hasattr(os, 'getloadavg') else [0,0,0]
+        }
+
+        # 2. Latest Spot Stats
         cursor.execute("SELECT * FROM lane_runtime_state WHERE lane_id='crypto'")
         crypto_row = cursor.fetchone()
         
-        # Active Spot Positions (from open_positions)
+        # 3. Active Spot Positions
         cursor.execute("SELECT * FROM open_positions WHERE qty > 0")
         spot_positions_raw = [dict(r) for r in cursor.fetchall()]
         
@@ -59,57 +69,60 @@ async def get_db_snapshot():
                 "entry_price": p["entry"],
                 "stop": p.get("stop", 0.0),
                 "target": p.get("target", 0.0),
-                "unrealized_pnl": 0.0, # Calculation requires live price
                 "strategy": p.get("strategy", ""),
                 "reason": p.get("entry_reason", "")
             })
         
-        # Latest Forecast Stats
+        # 4. Learner State (Vaccinations)
+        cursor.execute("SELECT * FROM learner_state")
+        learner_rows = [dict(r) for r in cursor.fetchall()]
+        vaccinations = [{"symbol": r["symbol"], "score": r["score"]} for r in learner_rows if r["vaccinated"]]
+
+        # 5. Latest Forecast Stats
         cursor.execute("SELECT COUNT(*) as count FROM forecast_markets WHERE active = 1")
         forecast_count = cursor.fetchone()["count"]
         
-        # Forecast Positions (Kalshi)
+        # 6. Forecast Positions (Kalshi)
         forecast_positions = []
         try:
             from execution.kalshi_broker import get_kalshi_broker
             kb = get_kalshi_broker()
+            if not kb.is_connected(): kb.connect()
             
-            # Ensure connected
-            if not kb.is_connected():
-                kb.connect()
-            
-            # Sync once per minute
             now = time.time()
             if now - _LAST_KALSHI_SYNC > 60:
                 kb._sync_positions()
                 _LAST_KALSHI_SYNC = now
-                
             forecast_positions = kb.get_positions()
-        except Exception as e:
-            logging.error(f"Kalshi Sync Error: {e}")
+        except: pass
 
-        # 24H PnL (from trades table)
+        # 7. 24H PnL
         cursor.execute("SELECT SUM(pnl_usd) as pnl FROM trades WHERE ts > datetime('now', '-1 day')")
         pnl_row = cursor.fetchone()
         pnl_24h = float(pnl_row["pnl"] or 0.0)
         
-        # Recent Trades (Last 15 from trades)
-        cursor.execute("SELECT * FROM trades ORDER BY id DESC LIMIT 15")
-        recent_trades_raw = [dict(r) for r in cursor.fetchall()]
-        
+        # 8. Recent Trades + Metadata (v18.33: Join with edge_snapshots if possible)
+        # We'll fetch notes from trades which often contains the final decision string
+        cursor.execute("SELECT * FROM trades ORDER BY id DESC LIMIT 20")
         recent_trades = []
-        for t in recent_trades_raw:
+        for t in cursor.fetchall():
+            row = dict(t)
             recent_trades.append({
-                "timestamp": t["ts"],
-                "symbol": t["symbol"],
-                "side": t["action"],
-                "price": t["price"],
-                "qty": t["qty"],
-                "strategy": t["strategy"],
-                "pnl_usd": float(t.get("pnl_usd") or 0.0),
-                "won": t.get("won")
+                "timestamp": row["ts"],
+                "symbol": row["symbol"],
+                "side": row["action"],
+                "price": row["price"],
+                "qty": row["qty"],
+                "strategy": row["strategy"],
+                "pnl_usd": float(row.get("pnl_usd") or 0.0),
+                "won": row.get("won"),
+                "notes": row.get("notes", "") # Contains RBI/ML metadata
             })
         
+        # 9. System Events
+        cursor.execute("SELECT * FROM system_events ORDER BY ts DESC LIMIT 10")
+        events = [{"ts": r["ts"], "level": r["level"], "source": r["source"], "message": r["message"]} for r in cursor.fetchall()]
+
         conn.close()
         
         return {
@@ -117,16 +130,20 @@ async def get_db_snapshot():
                 "equity": crypto_row["buying_power_usd"] + crypto_row["capital_deployed_usd"] if crypto_row else 0.0,
                 "pnl_24h": pnl_24h,
                 "positions": spot_positions,
+                "vaccinations": vaccinations
             },
             "forecast": {
                 "active_markets": forecast_count,
                 "positions": forecast_positions,
-                "max_positions": 2
+                "max_positions": 10
             },
             "recent_trades": recent_trades,
+            "events": events,
+            "vitals": vitals,
             "system": {
                 "time": datetime.now().strftime("%H:%M:%S"),
-                "status": "OPERATIONAL"
+                "status": "OPERATIONAL",
+                "uptime": psutil.boot_time()
             }
         }
     except Exception as e:

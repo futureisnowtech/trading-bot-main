@@ -96,35 +96,55 @@ def find_matching_trade_close(
     debate_ts: datetime,
 ) -> bool | None:
     """
-    Find the first trade close (pnl_usd != 0) for `symbol` with ts > debate_ts
-    and ts <= debate_ts + MATCH_WINDOW_HOURS.
-
-    Returns:
-        True  — trade found and won (pnl_usd > 0)
-        False — trade found and lost (pnl_usd <= 0)
-        None  — no matching trade close found within window
+    v18.34: Join on entry_ts (trade birth) instead of exit_ts.
+    Finds the trade attribution record where entry_ts is within 5 minutes of the debate.
     """
-    window_end = debate_ts + timedelta(hours=MATCH_WINDOW_HOURS)
-
-    # SQLite stores ts as ISO strings; we compare lexicographically which works
-    # for ISO 8601 timestamps that share the same timezone offset format.
-    # To be safe we fetch candidates and filter in Python.
-    rows = conn.execute(
+    # trade_attribution stores entry_ts as REAL (unix timestamp)
+    target_ts = debate_ts.timestamp()
+    
+    # Check trade_attribution first (reconstructed or live)
+    row = conn.execute(
         """
-        SELECT ts, pnl_usd FROM trades
+        SELECT won FROM trade_attribution
         WHERE symbol = ?
-          AND pnl_usd != 0
-        ORDER BY ts ASC
+          AND ABS(entry_ts - ?) < 300
+        LIMIT 1
         """,
-        (symbol,),
-    ).fetchall()
+        (symbol, target_ts),
+    ).fetchone()
 
-    for row in rows:
-        trade_ts = parse_ts(row["ts"])
-        if trade_ts is None:
-            continue
-        if trade_ts > debate_ts and trade_ts <= window_end:
-            return row["pnl_usd"] > 0
+    if row is not None:
+        return bool(row["won"])
+
+    # Fallback to trades table (look for entry BUY near debate)
+    # Then find the first exit for that symbol after that entry
+    row = conn.execute(
+        """
+        SELECT id, ts FROM trades
+        WHERE symbol = ?
+          AND action = 'BUY'
+          AND ABS(ts - ?) < 300
+        LIMIT 1
+        """,
+        (symbol, target_ts),
+    ).fetchone()
+
+    if row is not None:
+        entry_ts = row["ts"]
+        # Find subsequent exit
+        exit_row = conn.execute(
+            """
+            SELECT won FROM trades
+            WHERE symbol = ?
+              AND ts > ?
+              AND pnl_usd != 0
+            ORDER BY ts ASC
+            LIMIT 1
+            """,
+            (symbol, entry_ts),
+        ).fetchone()
+        if exit_row is not None:
+            return bool(exit_row["won"])
 
     return None
 

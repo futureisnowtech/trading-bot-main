@@ -2378,6 +2378,8 @@ def _attempt_entry(
     # Normalize symbol to base asset before broker call (PF_ETHUSD→ETH, ETHUSDT→ETH).
     # Coinbase broker requires bare underlying names; raw scanner symbols cause CoinbaseSymbolError.
     _exec_symbol = _get_underlying(symbol)
+    if _exec_symbol:
+        _exec_symbol = _exec_symbol.replace("PF_", "").replace("USD", "")
 
     if direction == "LONG":
         pos = perps.open_long(
@@ -3490,6 +3492,17 @@ def rbi_nightly():
             return
         logger.info("[v10] rbi_nightly: starting BTCUSDT RBI pipeline")
         results = ll.run_nightly_rbi(symbol="BTCUSDT", paper=False)
+        
+        # v18.34: Nightly Online Learner Maintenance
+        try:
+            from ml.online_learner import get_learner
+            for d in ["LONG", "SHORT"]:
+                # Trigger internal expiry/save cycle for generic models
+                l = get_learner(direction=d)
+                logger.info(f"[v10] Nightly maintenance: {l.key} updates={l.n_updates}")
+        except Exception as _ole:
+            logger.debug(f"[v10] Online learner maintenance error: {_ole}")
+
         _last_rbi_run_ts = now
         _last_rbi_snapshot_count = current_count
         logger.info(f"[v10] rbi_nightly done: {results}")

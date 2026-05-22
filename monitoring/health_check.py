@@ -330,19 +330,21 @@ def _check_spot_learning_truth() -> dict:
             """
             SELECT COUNT(*) FROM trades 
             WHERE strategy LIKE 'spot_%' 
+              AND paper = 0
               AND datetime(replace(substr(ts,1,19),'T',' ')) >= datetime('now', '-24 hours')
             """
         ).fetchone()[0]
 
         if recent_trades == 0:
             conn.close()
-            return {"ok": True, "detail": "No recent closed spot trades to verify"}
+            return {"ok": True, "detail": "No recent closed live spot trades to verify"}
 
         attributed = conn.execute(
             """
             SELECT COUNT(*)
             FROM trade_attribution ta
             WHERE ta.strategy LIKE 'spot_%'
+              AND ta.paper = 0
               AND datetime(replace(substr(ta.created_at,1,19),'T',' ')) >= datetime('now', '-24 hours')
             """
         ).fetchone()[0]
@@ -352,6 +354,7 @@ def _check_spot_learning_truth() -> dict:
             FROM ml_feature_snapshots m
             JOIN trades t ON t.id = m.trade_id
             WHERE t.strategy LIKE 'spot_%'
+              AND t.paper = 0
               AND datetime(replace(substr(t.ts,1,19),'T',' ')) >= datetime('now', '-24 hours')
             """
         ).fetchone()[0]

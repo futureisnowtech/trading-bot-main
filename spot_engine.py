@@ -650,25 +650,37 @@ def _maker_first_buy(
 
     bid = float(top.get("best_bid") or 0.0)
     ask = float(top.get("best_ask") or 0.0)
-    limit_px = limit_buy_price(bid, ask)
-    order = broker.place_limit_buy_spot(symbol, size_usd, limit_px, post_only=True)
-    if not order:
-        return None, "maker_first_failed", "limit_order_rejected"
+    current_limit = limit_buy_price(bid, ask)
 
-    polls = maker_poll_count()
-    for _ in range(polls):
-        time.sleep(max(1, SPOT_MAKER_POLL_SECONDS))
-        status = broker.get_spot_order_status(
-            order["order_id"], fallback_symbol=_clean_symbol(symbol)
-        )
-        completion = float(status.get("completion_pct") or 0.0)
-        if completion >= 80.0 or str(status.get("status", "")).upper() == "FILLED":
-            status["execution_route"] = "maker_first"
-            return status, "maker_first", "none"
+    # RC9: Intelligent Maker Chase
+    # Instead of one attempt, try 3 times, each time chasing 1 tick closer to mid.
+    for chase_step in range(3):
+        order = broker.place_limit_buy_spot(symbol, size_usd, current_limit, post_only=True)
+        if not order:
+            logger.debug(f"[spot_engine] {symbol} Maker placement rejected at {current_limit}")
+            return None, "maker_first_failed", "limit_order_rejected"
 
-    broker.cancel_spot_order(order["order_id"])
+        # Poll for a shorter duration per step (2s)
+        for _ in range(2):
+            time.sleep(1)
+            status = broker.get_spot_order_status(
+                order["order_id"], fallback_symbol=_clean_symbol(symbol)
+            )
+            completion = float(status.get("completion_pct") or 0.0)
+            if completion >= 80.0 or str(status.get("status", "")).upper() == "FILLED":
+                status["execution_route"] = "maker_first"
+                return status, "maker_first", "none"
+
+        # If not filled, cancel and increment price
+        broker.cancel_spot_order(order["order_id"])
+        
+        # Chase logic: Move 0.05% closer to ask (slippage bound)
+        chase_adj = current_limit * 0.0005
+        current_limit += chase_adj
+        logger.info(f"[spot_engine] Chasing {symbol} maker: {current_limit - chase_adj:.4f} -> {current_limit:.4f} (step {chase_step+1})")
+
     logger.info(
-        f"[spot_engine] Maker order {order['order_id']} failed to fully fill (completion={completion}%)"
+        f"[spot_engine] Maker order for {symbol} failed after 3 chase steps"
     )
     # Taker fallback gate: disabled when SPOT_TAKER_FALLBACK_ENABLED=false (default).
     # Evidence: 113 taker trades in failure window, 0% WR, avg -$1.16, higher fee burn.
@@ -707,25 +719,37 @@ def _maker_first_sell(
 
     bid = float(top.get("best_bid") or 0.0)
     ask = float(top.get("best_ask") or 0.0)
-    limit_px = limit_sell_price(bid, ask)
-    order = broker.place_limit_sell_spot(symbol, size_units, limit_px, post_only=True)
-    if not order:
-        return None, "maker_first_failed", "limit_order_rejected"
+    current_limit = limit_sell_price(bid, ask)
 
-    polls = maker_poll_count()
-    for _ in range(polls):
-        time.sleep(max(1, SPOT_MAKER_POLL_SECONDS))
-        status = broker.get_spot_order_status(
-            order["order_id"], fallback_symbol=_clean_symbol(symbol)
-        )
-        completion = float(status.get("completion_pct") or 0.0)
-        if completion >= 80.0 or str(status.get("status", "")).upper() == "FILLED":
-            status["execution_route"] = "maker_first"
-            return status, "maker_first", "none"
+    # RC9: Intelligent Maker Chase
+    # Instead of one attempt, try 3 times, each time chasing 1 tick closer to mid.
+    for chase_step in range(3):
+        order = broker.place_limit_sell_spot(symbol, size_units, current_limit, post_only=True)
+        if not order:
+            logger.debug(f"[spot_engine] {symbol} Maker sell placement rejected at {current_limit}")
+            return None, "maker_first_failed", "limit_order_rejected"
 
-    broker.cancel_spot_order(order["order_id"])
+        # Poll for a shorter duration per step (2s)
+        for _ in range(2):
+            time.sleep(1)
+            status = broker.get_spot_order_status(
+                order["order_id"], fallback_symbol=_clean_symbol(symbol)
+            )
+            completion = float(status.get("completion_pct") or 0.0)
+            if completion >= 80.0 or str(status.get("status", "")).upper() == "FILLED":
+                status["execution_route"] = "maker_first"
+                return status, "maker_first", "none"
+
+        # If not filled, cancel and decrement price
+        broker.cancel_spot_order(order["order_id"])
+        
+        # Chase logic: Move 0.05% closer to bid (slippage bound)
+        chase_adj = current_limit * 0.0005
+        current_limit -= chase_adj
+        logger.info(f"[spot_engine] Chasing {symbol} maker sell: {current_limit + chase_adj:.4f} -> {current_limit:.4f} (step {chase_step+1})")
+
     logger.info(
-        f"[spot_engine] Maker sell order {order['order_id']} failed to fully fill (completion={completion}%)"
+        f"[spot_engine] Maker sell order for {symbol} failed after 3 chase steps"
     )
     import config as _tfc_sell
 
@@ -1345,32 +1369,51 @@ def close_spot(
             )
         except Exception as e:
             logger.debug(f"[spot_engine] learning_loop close error {clean}: {e}")
-        try:
-            from learning.post_trade_analyzer import analyze_closed_trade as _pta
 
-            _pta(
-                symbol=clean,
-                strategy=strategy,
-                entry_price=entry_price,
-                exit_price=exit_price,
-                qty=filled_qty,
-                fee_usd=total_fee_usd,
-                entry_ts=str(
-                    pos.get("ts_entry") or datetime.datetime.utcnow().isoformat()
-                ),
-                exit_ts=datetime.datetime.utcnow().isoformat(),
-                exit_reason=exit_reason,
-                market_data_at_entry=entry_features,
-                source="live_v10",
-                trade_ref=trade_ref,
-                exit_type=exit_reason,
-                composite_score=float(entry_features.get("composite_score") or 0.0),
-                close_order_id=str(order.get("order_id") or ""),
-                entry_order_id=str(pos.get("entry_order_id") or ""),
-                feature_snapshot_id=int(pos.get("entry_feature_snapshot_id") or 0),
+        # RC1 & RC6: Fixed attribution amnesia and activated online learner
+        from learning.post_trade_analyzer import analyze_closed_trade as _pta
+        from ml.online_learner import record_outcome as _online_update
+
+        _pta(
+            symbol=clean,
+            strategy=strategy,
+            entry_price=entry_price,
+            exit_price=exit_price,
+            qty=filled_qty,
+            fee_usd=total_fee_usd,
+            entry_ts=str(
+                pos.get("ts_entry") or datetime.datetime.utcnow().isoformat()
+            ),
+            exit_ts=datetime.datetime.utcnow().isoformat(),
+            exit_reason=exit_reason,
+            market_data_at_entry=entry_features,
+            source="live_v10",
+            trade_ref=trade_ref,
+            exit_type=exit_reason,
+            composite_score=float(entry_features.get("composite_score") or 0.0),
+            close_order_id=str(order.get("order_id") or ""),
+            entry_order_id=str(pos.get("entry_order_id") or ""),
+            feature_snapshot_id=int(pos.get("entry_feature_snapshot_id") or 0),
+        )
+
+        try:
+            from ml.feature_builder import FEATURE_NAMES
+            import numpy as np
+            # Extract features in the correct order for the online learner
+            X_raw = np.array(
+                [float(entry_features.get(name, 0.0)) for name in FEATURE_NAMES],
+                dtype=np.float32,
             )
-        except Exception as e:
-            logger.debug(f"[spot_engine] post_trade_analyzer close error {clean}: {e}")
+            _online_update(
+                features=X_raw,
+                won=pnl_usd > 0,
+                direction="LONG",
+                symbol=clean
+            )
+            logger.info(f"[spot_engine] Online learner updated for {clean}")
+        except Exception as _ole:
+            logger.debug(f"[spot_engine] Online learner update failed: {_ole}")
+
         try:
             con = sqlite3.connect(_get_db_path(), timeout=5)
             learning_snapshot_written = bool(

@@ -85,7 +85,7 @@ _SETUP_PRIORITY = [
     "supertrend",
     "kst_cross",
     "momentum",
-    "ranging_mr",
+    "pullback_reclaim",
     "funding_collect",
 ]
 
@@ -803,9 +803,9 @@ def _evaluate_one_symbol(c: Dict) -> List[Dict]:
         # D. Ranging / mean-reversion (ADX confirms ranging regime)
         if adx < _MAX_ADX_RANGING and abs(vwap_disp) >= _MIN_VWAP_DISP_PCT:
             if vwap_disp < 0:  # price below VWAP → oversold → LONG reversion
-                fired["LONG"].add("ranging_mr")
+                fired["LONG"].add("pullback_reclaim")
             elif vwap_disp > 0:  # price above VWAP → overbought → SHORT reversion
-                fired["SHORT"].add("ranging_mr")
+                fired["SHORT"].add("pullback_reclaim")
 
         # E. Funding collection (size conservatively; collect by holding)
         if abs(fund_8h) >= _MIN_FUNDING_COLLECT:

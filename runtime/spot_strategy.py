@@ -45,7 +45,7 @@ _SETUP_LIBRARY: dict[str, dict[str, float | str]] = {
         "group": "momentum",
     },
     "pullback_reclaim": {
-        "min_score": 0.58,
+        "min_score": 0.65,
         "preferred_floor_delta": -0.5,
         "opportunistic_floor_delta": 0.0,
         "wildcard_floor_delta": 1.0,

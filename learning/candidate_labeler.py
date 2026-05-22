@@ -169,7 +169,9 @@ def _compute_path_timing(
 
         _stop_pct = float(stop_pct) if stop_pct and stop_pct > 0 else 3.0
         target_05r = _stop_pct * 0.5
-        target_1r = _stop_pct * 1.0
+        # v18.34: Realign target_1r to empirical scalp target (1.5% - 2.0%)
+        # Previously tied to theoretical 3R (4.5%), creating a mismatch with bot behavior.
+        target_1r = 2.0
         target_2r = _stop_pct * 2.0
 
         highs = list(df_15m["high"].values)

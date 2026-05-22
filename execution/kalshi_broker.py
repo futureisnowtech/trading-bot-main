@@ -387,6 +387,10 @@ class KalshiBroker:
             "pnl_usd": pnl_usd,
         }
 
+    def get_position(self, local_symbol: str, right: str) -> Optional[dict]:
+        key = f"{local_symbol}_{right}"
+        return self._open_positions.get(key)
+
     def get_positions(self) -> list[dict]:
         return list(self._open_positions.values())
 

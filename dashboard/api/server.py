@@ -174,7 +174,8 @@ async def stream(request: Request):
 @app.get("/", response_class=HTMLResponse)
 async def get_dashboard():
     with open(os.path.join(_API_DIR, "..", "web", "index.html"), "r") as f:
-        return f.read()
+        html = f.read()
+    return HTMLResponse(content=html, headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
 # Setup static mount if directories exist
 static_path = os.path.join(_API_DIR, "..", "web")

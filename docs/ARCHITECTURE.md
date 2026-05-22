@@ -10,9 +10,12 @@
 > - 5-tab dashboard → **6 tabs** (FORECAST TRADING added v15.0; ARCHIVED FUTURES (MES) renamed)
 - **Kalshi Forecast lane (v18.32)**: Pure REST V2 implementation for event contracts.
 - Runtime truth layer added (v15.2): `system_runtime_state`, `lane_runtime_state`, incidents
+- **Autonomous Audit Layer (v18.32)**: `learner_state` table for tracking 'The Brain's' vaccinations.
 - MES/IBKR futures: DORMANT (`FUTURES_LANE_ACTIVE=false`)
 
 > - Notifications: SQLite only (no Telegram — this was already the design)
+> - **Telegram Security (v18.32)**: Read-only SQL (`SELECT` only), exact-match file edits, 5s rate limiting.
+> - **Infrastructure Resilience**: Daily SQLite `.backup` via `scripts/backup_db.sh`. 30-day retention.
 >
 > Do not use the exchange decision, risk limits, or feature counts in this doc as current values.
 

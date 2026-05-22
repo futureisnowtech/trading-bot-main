@@ -148,15 +148,15 @@ The machine is now autonomous. The strategy is now proven. The path to $1,000,00
 
 v18.30: THE SOVEREIGN MACHINE HAS ASCENDED.
 
-================================================================================
+=================================================================
 CHAPTER 9: THE MACRO BRIDGE (KALSHI INTEGRATION)
-================================================================================
+=================================================================
 
 9.1 THE DUAL-LANE POSTURE
 Project Apex v18.32 formally inducts the 'Macro Bridge.' We recognize that while Crypto Spot provides high-velocity alpha, it is subject to continuous price curves. Kalshi represents a 'Binary Event Horizon.'
 
 9.2 THE PHYSICS OF BINARY RISK
-Unlike Crypto, where an ATR stop-loss limits downside to <0.5% of equity, a Kalshi contract is a $1.00 or $0.00 outcome. We have abandoned Fractional Kelly for the Forecast lane. 
+Unlike Crypto, where an ATR stop-loss limits downside to <0.5% of equity, a Kalshi contract is a $1.00 or $0.00 outcome. We have abandoned Fractional Kelly for the Forecast lane.
 
 The Sovereign Mandate for Kalshi:
 - **Absolute Risk Sizing**: Every position is sized so that a total loss ($0.00 resolution) never exceeds 1.5% of total account equity.
@@ -165,6 +165,27 @@ The Sovereign Mandate for Kalshi:
 9.3 MACRO-CORRELATION AWARENESS
 Political and Economic events are not 'Uncorrelated' to Crypto. We treat 'Fed Rate' and 'Election' markets as positively correlated to Crypto-Long posture. The Risk Engine now partitions capital to ensure Kalshi never cannibalizes the liquidity required for high-frequency Spot execution.
 
-================================================================================
+=================================================================
+CHAPTER 10: TRANSPARENCY & RESILIENCE (v18.32)
+=================================================================
+
+10.1 AUDITABILITY OF THE BRAIN
+Autonomous 'Vaccinations' by `runtime/online_learner.py` are permanent system events.
+- **Traceability**: Every vaccination event is logged to the `system_events` table and persisted in `learner_state`.
+- **Inquiry**: Operators can audit vaccinations via the Telegram Agent using `SELECT * FROM learner_state;` or via the Unified Terminal.
+- **Manual Override**: To 'Cure' (revert) an autonomous vaccination, the operator must manually delete the row from `learner_state` via a SQL command.
+
+10.2 SECURITY OF THE MOBILE SOVEREIGN
+The Telegram Agent operates under a 'Zero-Trust' model.
+- **Authorization**: Hard-bound to `TELEGRAM_AUTHORIZED_USER_ID`. All other IDs are ignored at the gateway.
+- **SQL Guardrails**: The Agent is restricted to `SELECT` queries only. Data modification (DROP, DELETE, UPDATE) is hard-blocked at the tool layer.
+- **File System Guardrails**: Code edits require an exact string match. The Agent cannot overwrite files without existing context, preventing blind injections.
+
+10.3 DISASTER RECOVERY & CONTINUITY
+- **Database Resilience**: `scripts/backup_db.sh` performs a daily SQLite `.backup` (safe for live DBs) and prunes backups older than 30 days to `~/.algo_backup/db`.
+- **Deployment Rollback**: If a deployment fails, the operator must check `git log` for the last known-good SHA and run `./deploy.sh` after a hard checkout. Provenance is tracked via `version.txt` and `deploy_manifest.json` on the server.
+- **Single Point of Failure**: The system is designed for a single-vCPU environment. High availability is achieved via the `HALTED` state logic: if the bot dies, the positions are 'parked' on the exchange. Upon restart, `runtime/spot_position_truth.py` reconciles the delta.
+
+=================================================================
 END OF MASTERPLAN
-================================================================================
+=================================================================

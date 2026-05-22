@@ -1,6 +1,8 @@
 # ── Credentials (NEVER commit) ───────────────────────────────────────────────
 .env
 did.bin
+kalshi_private_key*.pem
+key.der
 
 # ── Runtime data (logs, databases, vector store) ─────────────────────────────
 logs/

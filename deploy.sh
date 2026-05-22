@@ -17,7 +17,7 @@ NYC_PORT="2222"
 NYC_USER="root"
 PROJECT_DIR="/root/bot"
 DASHBOARD_UID="d9ecf89d-5e95-4e63-b0ae-f8008debbc0f"
-PROMETHEUS_TARGET="algo-bot-live:8000"
+PROMETHEUS_TARGET="algo-bot-spot:8000"
 SSH_CMD="ssh -p ${NYC_PORT} -o StrictHostKeyChecking=no"
 BRANCH=$(git branch --show-current)
 
@@ -71,11 +71,12 @@ echo "  Hot-reloading Docker stack..."
 docker compose up -d --build --remove-orphans
 
 echo "  Waiting for health check..."
-sleep 12
-docker ps | grep algo-bot-live
+sleep 15
+docker ps | grep algo-bot-spot
+docker ps | grep algo-bot-forecast
 
 echo "  Finalizing Grafana provisioning..."
-docker exec algo-bot-live python3 provision_grafana_final.py
+docker exec algo-bot-spot python3 provision_grafana_final.py
 
 echo "  Writing provenance markers..."
 cat > ${PROJECT_DIR}/version.txt << VTXT

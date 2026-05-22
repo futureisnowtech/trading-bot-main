@@ -6,9 +6,13 @@
 ## Canonical Truth
 
 - Repo root: `/Users/joshmacbookair2020/Projects/algo_trading_final`
-- Canonical version: `v18.33.AGGRESSOR` (`2026-05-22`)
+- Canonical version: `v18.34.FORENSIC` (`2026-05-22`)
 - Canonical active lane: **Dual-Lane**: Coinbase Spot Scalp (Primary) + Kalshi Macro Forecast (Secondary)
 - **Status:** **RECURSIVE EVOLUTION**. Autonomous Self-Vaccinating DAG active.
+- **Critical Changes (v18.34):**
+  - **Forensic Milestone**: Restored Telegram responsiveness and implemented high-fidelity token telemetry.
+  - **Sovereign Separation**: Physically isolated Crypto and Forecast lanes into independent processes/containers.
+  - **Truth Harmonization**: Formally promoted Kalshi Forecast to Authoritative Live status.
 - **Critical Changes (v18.30):**
   - **Sovereign Gates**: Hardcoded thresholds deleted. Admission now follows `calculate_fee_aware_expectancy` (PredictedAlpha > 2x Friction).
   - **The Brain**: `runtime/online_learner.py` monitors real-time fee leaks and autonomously 'Vaccinates' (tightens) symbol requirements.
@@ -54,7 +58,9 @@
 
 This repository still contains multiple strategy lanes and historical infrastructure, but operationally it is governed as:
 
-- **Authoritative live lane:** Coinbase spot scalp (Two-Tower: Technical + Local ML)
+- **Authoritative live lanes:** 
+  - **Coinbase spot scalp** (Primary: Two-Tower Technical + Local ML)
+  - **Kalshi Macro Forecast** (Secondary: Unshackled Binary Event Bridge)
 - **Legacy AI:** **RETIRED**. The multi-agent debate ensemble (Goku, analyst agents, consensus-voting) has been removed to reduce latency and cost.
 - **Active AI:** **Gemini Studio** (CLI intelligence/DB queries), **Anthropic Sonnet** (Optional exit thesis sanity checks), and **Sovereign Mobile Gemini** (Telegram agent with code-editing tools).
 - **Current live decision standard:** truth-first, fee-aware, route-aware, evidence-gated.
@@ -74,7 +80,6 @@ Access is strictly restricted to the `AUTHORIZED_USER_ID`.
 The following systems remain in-repo but are **not authoritative** for live spot health, readiness, deployment counts, or operator truth:
 
 - Coinbase nano perp futures
-- ForecastEx
 - MES archived futures
 - stocks lane
 - older multi-lane regime language
@@ -92,12 +97,17 @@ They are preserved for research, later reactivation, or historical context. They
 
 ## Current Operational Contract
 
-### Active lane
+### Active lanes
 
-- Venue: Coinbase spot
-- Direction: long-only
-- Focus: fewer, cleaner, fee-cleared spot scalps
-- Live mode target: `TINY_LIVE`
+- **Venue: Coinbase spot**
+  - Direction: long-only
+  - Focus: fewer, cleaner, fee-cleared spot scalps
+  - Live mode target: `TINY_LIVE`
+
+- **Venue: Kalshi**
+  - Direction: Binary (YES/NO)
+  - Focus: High-velocity macro events
+  - Risk: 1.5% Absolute Equity Protection (v18.34)
 
 ### Protected deploy automation
 
@@ -110,7 +120,6 @@ They are preserved for research, later reactivation, or historical context. They
 ### Dormant / reference lanes
 
 - `perps`
-- `forecast`
 - `mes_archived`
 - `stocks`
 

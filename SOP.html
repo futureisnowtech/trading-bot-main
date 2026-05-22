@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="refresh" content="30">
-<title>v18.33.AGGRESSOR Sovereign SOP</title>
+<title>v18.34.FORENSIC Sovereign SOP</title>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
@@ -129,15 +129,15 @@ li + li { margin-top: 6px; }
 </style>
 </head>
 <body>
-<h1>v18.33.AGGRESSOR Sovereign Operations SOP</h1>
-<div class="subtitle">Current operator reference for the live **Sovereign Machine** on <code>release/v18.33.AGGRESSOR</code>.</div>
+<h1>v18.34.FORENSIC Sovereign Operations SOP</h1>
+<div class="subtitle">Current operator reference for the live **Sovereign Machine** on <code>release/v18.34.FORENSIC</code>.</div>
 <div class="section-note">This file auto-refreshes every 30 seconds and reads its live snapshot from <code>sop_state.generated.js</code>, which is regenerated after deploys or by running <code>python3 scripts/refresh_sop.py</code>.</div>
 
 <script>
 window.__SOP_STATE__ = window.__SOP_STATE__ || {
   generated_at_local: null,
-  canonical_version: "v18.33.AGGRESSOR",
-  branch: "release/v18.33.AGGRESSOR",
+  canonical_version: "v18.34.FORENSIC",
+  branch: "release/v18.34.FORENSIC",
   local_head_sha: null,
   github_sha: null,
   worktree_dirty: null,
@@ -174,7 +174,7 @@ window.__SOP_STATE__ = window.__SOP_STATE__ || {
 <div class="grid">
   <div class="card ok">
     <div class="label">Canonical Version</div>
-    <div class="value ok">v18.33.AGGRESSOR</div>
+    <div class="value ok">v18.34.FORENSIC</div>
     <div class="small">Recursive Evolution: Self-Vaccinating Sovereign DAG.</div>
   </div>
   <div class="card ok">
@@ -198,7 +198,7 @@ window.__SOP_STATE__ = window.__SOP_STATE__ || {
 <div class="card">
   <table>
     <tr><th>Priority</th><th>Location</th><th>Meaning</th></tr>
-    <tr><td>1</td><td><code>origin/release/v18.33.AGGRESSOR</code></td><td>GitHub is the primary source of truth.</td></tr>
+    <tr><td>1</td><td><code>origin/release/v18.34.FORENSIC</code></td><td>GitHub is the primary source of truth.</td></tr>
     <tr><td>2</td><td><code>/Users/joshmacbookair2020/Projects/algo_trading_final</code></td><td>Mac Projects repo is the working tree and authoring copy.</td></tr>
     <tr><td>3</td><td><code>root@64.225.20.38:2222:/root/bot</code></td><td>NYC server is the deploy target and runtime evidence source.</td></tr>
     <tr><td>Ignore</td><td><code>/Users/joshmacbookair2020/Desktop/algo_trading_final</code></td><td>Deprecated copy. Do not use it for compare, deploy, or truth checks.</td></tr>
@@ -220,7 +220,7 @@ window.__SOP_STATE__ = window.__SOP_STATE__ || {
     <div class="label">Deploy Discipline</div>
     <ul>
       <li>Deploy only from a clean worktree.</li>
-      <li>Deploy only when local <code>HEAD</code> equals <code>origin/release/v18.33.AGGRESSOR</code>.</li>
+      <li>Deploy only when local <code>HEAD</code> equals <code>origin/release/v18.34.FORENSIC</code>.</li>
       <li>Every deploy writes <code>/root/bot/version.txt</code> and <code>deploy_manifest.json</code>.</li>
       <li>Post-deploy proof matters more than “deploy succeeded”.</li>
       <li>Protected GitHub deploy path exists via <code>.github/workflows/deploy-nyc.yml</code> with environment approval.</li>
@@ -267,7 +267,7 @@ window.__SOP_STATE__ = window.__SOP_STATE__ || {
   <p>Telegram is a real operator control surface now, but it is still a command bot, not an AI copilot. Commands are authenticated and mode-aware.</p>
   <table>
     <tr><th>Command</th><th>What It Does</th><th>Safety Notes</th></tr>
-    <tr><td><code>/ask [query]</code></td><td>Natural language copilot. Queries codebase, DB, and logs to provide deep architectural or trade analysis.</td><td>Uses 80% cached context (v18.33.AGGRESSOR efficiency).</td></tr>
+    <tr><td><code>/ask [query]</code></td><td>Natural language copilot. Queries codebase, DB, and logs to provide deep architectural or trade analysis.</td><td>Uses 80% cached context (v18.34.FORENSIC efficiency).</td></tr>
     <tr><td><code>!scalper_on/off</code></td><td>Interceptive chat hook to toggle Strategic Scalper mode (bypasses vetoes for +60% WR signals).</td><td>Updates <code>.env</code> and reloads bot via hook.</td></tr>
     <tr><td><code>/status</code></td><td>Shows current runtime mode, exchange connectivity, buying power, OBI, signal, and active symbol.</td><td>Uses live runtime truth, not a naive static assumption.</td></tr>
     <tr><td><code>/metrics</code></td><td>Shows CPU, RAM, and exchange latency.</td><td>Read-only.</td></tr>
@@ -338,14 +338,14 @@ window.__SOP_STATE__ = window.__SOP_STATE__ || {
 <div class="card">
   <table>
     <tr><th>Branch</th><th>Status</th><th>Purpose</th></tr>
-    <tr><td><code>release/v18.33.AGGRESSOR</code></td><td><span class="pill ok">ACTIVE</span></td><td>Current live production branch (Recursive Evolution).</td></tr>
+    <tr><td><code>release/v18.34.FORENSIC</code></td><td><span class="pill ok">ACTIVE</span></td><td>Current live production branch (Recursive Evolution).</td></tr>
     <tr><td><code>main</code></td><td><span class="pill info">Base</span></td><td>Primary long-term merge target.</td></tr>
-    <tr><td><code>feature/v10-rebuild</code></td><td><span class="pill dead">Merged</span></td><td>Pre-v18.33.AGGRESSOR development branch.</td></tr>
+    <tr><td><code>feature/v10-rebuild</code></td><td><span class="pill dead">Merged</span></td><td>Pre-v18.34.FORENSIC development branch.</td></tr>
   </table>
 </div>
 
 <div class="footer" id="dynamic-footer">
-  v18.33.AGGRESSOR · branch <code>release/v18.33.AGGRESSOR</code> · live posture <code>AMBER / Sovereign_Expectancy_Active</code> · Telegram AI-copilot enabled
+  v18.34.FORENSIC · branch <code>release/v18.34.FORENSIC</code> · live posture <code>AMBER / Sovereign_Expectancy_Active</code> · Telegram AI-copilot enabled
 </div>
 <script>
 function sopEscape(value) {

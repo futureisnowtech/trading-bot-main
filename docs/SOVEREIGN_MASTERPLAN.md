@@ -186,5 +186,18 @@ The Telegram Agent operates under a 'Zero-Trust' model.
 - **Single Point of Failure**: The system is designed for a single-vCPU environment. High availability is achieved via the `HALTED` state logic: if the bot dies, the positions are 'parked' on the exchange. Upon restart, `runtime/spot_position_truth.py` reconciles the delta.
 
 =================================================================
+CHAPTER 11: THE FORENSIC MILESTONE (v18.34)
+=================================================================
+
+11.1 THE OBSERVER EFFECT
+Project Apex v18.34 recognizes that an autonomous system is only as Sovereign as its audit trail. We have transitioned from 'Implicit Trust' to 'Forensic Verification.' 
+
+11.2 HIGH-FIDELITY TELEMETRY
+The induction of the `api_telemetry` table marks the start of the 'Black Box' era. We now track raw token consumption at the module level, allowing the Risk Engine to evaluate the efficiency of the AI's 'Volume of Reasoning' against realized alpha.
+
+11.3 CANONICAL HARMONIZATION
+v18.34 formally inducts the 'Dual-Lane Authoritative' posture. We have physically separated the neural pathways (processes) and synchronized our internal manifests. The Forecast lane is no longer a 'Dormant Reference'; it is an equal-status extractor of digital capital.
+
+=================================================================
 END OF MASTERPLAN
 =================================================================

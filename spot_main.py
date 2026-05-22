@@ -49,12 +49,12 @@ import csv, uuid, sqlite3
 from typing import Optional
 import logging_db.trade_logger  # noqa: F401 — pre-warm, prevents EDEADLK
 
-VERSION = "v18.33.AGGRESSOR"
+VERSION = "v18.34.FORENSIC"
 
 BANNER = """
 ╔══════════════════════════════════════════════════════════════════╗
-║  ALGO TRADING SYSTEM  v18.33.AGGRESSOR                           ║
-║  Unshackled Dual-Lane: Opportunity Aggression Enabled            ║
+║  ALGO TRADING SYSTEM  v18.34.FORENSIC                            ║
+║  Unshackled Dual-Lane: Forensic Traceability Enabled             ║
 ║                                                                  ║
 ║  Lane:       Coinbase spot scalp (FULL LIVE RELEASE)            ║
 ║  Route:      maker_first | Expectancy-Driven Gates              ║

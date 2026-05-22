@@ -1,17 +1,17 @@
 # HISTORICAL REFERENCE — v10.0 Architecture Design Doc
 
 > **This document captures the v10.0 initial design (2026-04-01).**
-> The current live system is **v15.2** (2026-04-15). See GEMINI.md for current truth.
+> The current live system is **v18.34.FORENSIC** (2026-05-22). See AGENTS.md for current truth.
 >
 > Key things that changed since this doc was written:
-> - Live execution venue: was Binance USDM → now **Coinbase US CFTC nano perp futures** (`coinbase_broker.py`)
+> - Live execution venue: was Binance USDM → now **Coinbase Spot** + **Kalshi Macro**
 > - 47 ML features → **57 features** (11 groups)
 > - 6-priority exit stack → **7-priority** (dead-money exit added v18.16)
-> - 5-tab dashboard → **6 tabs** (FORECAST TRADING added v15.0; ARCHIVED FUTURES (MES) renamed)
+> - **Dual-Lane: Process Isolation (v18.34)**: Isolated Docker containers for Spot and Forecast.
 - **Kalshi Forecast lane (v18.33)**: Unshackled REST V2 implementation. Zero friction buffers.
 - Runtime truth layer added (v15.2): `system_runtime_state`, `lane_runtime_state`, incidents
 - **Autonomous Audit Layer (v18.32)**: `learner_state` table for tracking 'The Brain's' vaccinations.
-- **Capital Logic (v18.33)**: Independent lane liquidity. 100% utilization authorized for both Spot and Forecast.
+- **Forensic Telemetry (v18.34)**: High-fidelity token tracking for AI Agent audits.
 
 > - Notifications: SQLite only (no Telegram — this was already the design)
 > - **Telegram Security (v18.32)**: Read-only SQL (`SELECT` only), exact-match file edits, 5s rate limiting.

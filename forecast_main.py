@@ -28,12 +28,12 @@ def _setup_logging():
 
 _setup_logging()
 
-VERSION = "v18.33.AGGRESSOR"
+VERSION = "v18.34.FORENSIC"
 
 BANNER = f"""
 ╔══════════════════════════════════════════════════════════════════╗
-║  FORECAST SCHEDULER  {VERSION}                           ║
-║  Isolated Kalshi Macro Bridge: Opportunity Aggression            ║
+║  FORECAST SCHEDULER  {VERSION}                            ║
+║  Isolated Kalshi Macro Bridge: Forensic Traceability             ║
 ╚══════════════════════════════════════════════════════════════════╝
 """
 

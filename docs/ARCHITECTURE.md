@@ -8,10 +8,10 @@
 > - 47 ML features → **57 features** (11 groups)
 > - 6-priority exit stack → **7-priority** (dead-money exit added v18.16)
 > - 5-tab dashboard → **6 tabs** (FORECAST TRADING added v15.0; ARCHIVED FUTURES (MES) renamed)
-- **Kalshi Forecast lane (v18.32)**: Pure REST V2 implementation for event contracts.
+- **Kalshi Forecast lane (v18.33)**: Unshackled REST V2 implementation. Zero friction buffers.
 - Runtime truth layer added (v15.2): `system_runtime_state`, `lane_runtime_state`, incidents
 - **Autonomous Audit Layer (v18.32)**: `learner_state` table for tracking 'The Brain's' vaccinations.
-- MES/IBKR futures: DORMANT (`FUTURES_LANE_ACTIVE=false`)
+- **Capital Logic (v18.33)**: Independent lane liquidity. 100% utilization authorized for both Spot and Forecast.
 
 > - Notifications: SQLite only (no Telegram — this was already the design)
 > - **Telegram Security (v18.32)**: Read-only SQL (`SELECT` only), exact-match file edits, 5s rate limiting.

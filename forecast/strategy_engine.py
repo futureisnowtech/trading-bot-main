@@ -71,9 +71,9 @@ MAX_OVERROUND: float = 0.15  # Tightened from 0.25 to 0.15 for Kalshi
 # Spread hard cap
 MAX_SPREAD_DOLLARS: float = 0.12  # $0.12 per contract
 
-# Time-to-resolution gates
-MIN_HOURS_TO_RES: float = 2.0  # must have ≥2h before resolution
-MAX_HOURS_TO_RES: float = 168.0  # must resolve within 7 days (reduced from 720h)
+# Time-to-resolution gates (Disabled v18.33 Pivot)
+MIN_HOURS_TO_RES: float = 0.0
+MAX_HOURS_TO_RES: float = 8760.0 # 1 year
 
 # Longshot Bias Gate
 MIN_IMPLIED_PROB_FOR_YES: float = 0.10  # refuse to buy YES below 10% probability
@@ -698,13 +698,13 @@ def evaluate_contract(
     # Penalty = exp(-0.5 * (hours / 48)) -> ~0.6 at 48h, ~0.17 at 168h
     time_penalty = np.exp(-0.5 * (hours_to_res / 48.0)) if hours_to_res > 0 else 1.0
 
-    # Sizing (v18.32 Sovereign Mandate: Absolute Loss to Zero)
+    # Sizing (v18.33 Unshackled Pivot: Full Risk Allocation)
     if approved:
         n_contracts, total_cost = kalshi_absolute_sizing(
             ask_price=p_cost,
             bankroll=bankroll,
-            max_risk_pct=KALSHI_MAX_RISK_PER_EVENT_PCT * adj_confidence * corr_penalty * time_penalty,
-            max_deploy_pct=0.05, # Individual event capital limit
+            max_risk_pct=KALSHI_MAX_RISK_PER_EVENT_PCT,
+            max_deploy_pct=0.10, # Individual event capital limit (increased to 10%)
         )
     else:
         n_contracts, total_cost = 0, 0.0

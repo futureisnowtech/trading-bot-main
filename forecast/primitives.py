@@ -207,7 +207,7 @@ def compute_ev(
     q_hat: float,
     ask_yes: float,
     ask_no: float,
-    fee_buffer: float = 0.02,
+    fee_buffer: float = 0.0,
 ) -> tuple[float, float]:
     """
     Sovereign Net EV (v18.32): Evaluates against the Ask (worst-case fill)

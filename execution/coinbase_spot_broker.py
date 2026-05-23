@@ -30,6 +30,12 @@ import time
 import uuid
 from typing import Dict, List, Optional
 
+from config import (
+    COINBASE_CDP_KEY_NAME,
+    COINBASE_CDP_PRIVATE_KEY,
+    SHADOW_EXECUTION,
+)
+
 logger = logging.getLogger(__name__)
 
 # ── Dependency checks ─────────────────────────────────────────────────────────
@@ -130,18 +136,9 @@ class CoinbaseSpotBroker:
         self._balance_cache_ts: float = 0.0
 
         # Load credentials (same source as futures broker)
-        try:
-            from config import (
-    COINBASE_CDP_KEY_NAME,
-    COINBASE_CDP_PRIVATE_KEY,
-    SHADOW_EXECUTION,
-)
-
-            self._key_name = str(COINBASE_CDP_KEY_NAME or "")
-            raw = str(COINBASE_CDP_PRIVATE_KEY or "").strip("\"'")
-            self._private_key_pem = raw.replace("\\n", "\n").encode() if raw else b""
-        except ImportError:
-            pass
+        self._key_name = str(COINBASE_CDP_KEY_NAME or "")
+        raw = str(COINBASE_CDP_PRIVATE_KEY or "").strip("\"'")
+        self._private_key_pem = raw.replace("\\n", "\n").encode() if raw else b""
 
         if not self._key_name or not self._private_key_pem:
             self._key_name = os.getenv("COINBASE_CDP_KEY_NAME", "")

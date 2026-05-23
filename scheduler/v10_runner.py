@@ -3892,5 +3892,3 @@ def run_forever():
                 f"[v10] Scheduler loop error: {e}\n{traceback.format_exc()[:800]}"
             )
             time.sleep(5)  # brief back-off before resuming
-          )
-            time.sleep(5)  # brief back-off before resuming

@@ -155,6 +155,36 @@ async def get_db_snapshot():
                 events.append({"ts": r["ts"], "level": r["level"], "source": r["source"], "message": r["message"]})
         except sqlite3.OperationalError: pass
 
+        # 10. Live Hunt (Scan Candidates)
+        live_hunt = []
+        try:
+            cursor.execute("SELECT symbol, direction, final_spot_score, entry_block_reason as reason, ts FROM scan_candidates ORDER BY ts DESC LIMIT 5")
+            for r in cursor.fetchall():
+                live_hunt.append({
+                    "symbol": r["symbol"],
+                    "direction": r["direction"],
+                    "score": round(float(r["final_spot_score"] or 0.0), 1),
+                    "reason": r["reason"] or "Passed Score",
+                    "ts": r["ts"]
+                })
+        except sqlite3.OperationalError: pass
+
+        # 11. Intelligence Summary (Layman Insights)
+        summary = "Bot is operational and scanning for opportunities."
+        if pnl_24h > 0:
+            summary = f"System is performing well today with a net profit of ${pnl_24h:,.2f}."
+        elif pnl_24h < 0:
+            summary = f"System is navigating a challenging market (Daily P&L: -${abs(pnl_24h):,.2f}). Guardrails are active."
+            
+        if spot_positions:
+            symbols = ", ".join([p["symbol"] for p in spot_positions])
+            summary += f" Currently managing active spot positions in {symbols}."
+        else:
+            summary += " Currently in 'Watch' mode, waiting for high-conviction entry vectors."
+            
+        if forecast_count > 0:
+            summary += f" Forecast lane is monitoring {forecast_count} prediction markets for macro edge."
+
         conn.close()
         
         # Calculate Equity safely
@@ -175,6 +205,8 @@ async def get_db_snapshot():
                 "positions": forecast_positions,
                 "max_positions": 10
             },
+            "live_hunt": live_hunt,
+            "intelligence_summary": summary,
             "recent_trades": recent_trades,
             "events": events,
             "vitals": vitals,

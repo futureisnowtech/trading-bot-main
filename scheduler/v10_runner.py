@@ -1431,6 +1431,12 @@ def _attempt_entry(
             raise ImportError  # jumps to except ImportError: pass below
 
         atr_pct = atr_7 / current_price if current_price > 0 else 0.015
+        
+        # v18.34: Pass lane for fee-aware economics math
+        _target_lane = str(_route_hint.get("recommended_lane", "perp")).upper()
+        if _target_lane not in ("SPOT", "PERP"):
+            _target_lane = "PERP"
+
         # Win-rate estimate for EV gate.
         # Use Bayesian local priors from entered-candidate outcomes instead of hardcoded estimates.
         # Falls back to smoothed 0.52 prior when insufficient data.
@@ -1481,6 +1487,7 @@ def _attempt_entry(
             stop_multiplier=3.0,  # v13: match actual position stop (3.0x ATR)
             bid_depth_usd=float(candidate.get("bid_depth_usd", 0.0)),
             ask_depth_usd=float(candidate.get("ask_depth_usd", 0.0)),
+            lane=_target_lane,
         )
         candidate["edge_score"] = econ.get("edge_score", 0.5)
         candidate["quality_tier"] = econ.get("quality_tier", "B")

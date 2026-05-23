@@ -26,9 +26,17 @@ async def build_macro_context():
     )
     
     try:
-        # The ask_ai wrapper uses google-genai and is authorized to use tools.
-        # If the mcpServers are configured in .mcp.json, the agent can call them.
-        res_text = ask_ai(prompt)
+        # v18.34: Implementation of Phase 3 Hardening
+        # Standardize on a max 30s timeout for the Macro AI context builder.
+        # Note: ask_ai currently lacks a timeout param, so we wrap it in asyncio loop 
+        # executor or similar if needed, but since it's an external library call,
+        # we'll use concurrent.futures if necessary. For now, we'll wrap the logic.
+        
+        loop = asyncio.get_event_loop()
+        res_text = await asyncio.wait_for(
+            loop.run_in_executor(None, ask_ai, prompt), 
+            timeout=30.0
+        )
         
         # Extract JSON (strip potential markdown blocks)
         res_text = res_text.replace("```json", "").replace("```", "").strip()

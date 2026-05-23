@@ -45,35 +45,11 @@ ROUND_TRIP_COST = TAKER_FEE_PCT * 2  # entry taker + exit taker = 0.060%
 # ── Baseline win-rate assumption (conservative; calibrate as live data grows) ─
 _BASELINE_WIN_RATE = 0.52  # 52% — used for EV calculation
 
-# ── Veto thresholds ───────────────────────────────────────────────────────────
-_MIN_STOP_DIST_PCT = (
-    0.002  # ATR too small → fees consume stop distance (lowered from 0.4%)
-)
-_MAX_STOP_DIST_PCT = 0.05  # ATR too large → stop is a prayer
-_MAX_FEE_TO_WIN_PCT = 0.35  # fees must not eat > 35% of gross target
-_MIN_NET_RR = 1.2  # net R:R (after fees) must be ≥ 1.2
-_MIN_VOLUME_USD = 2_500_000  # $2.5M — aligned with scanner floor (v13.2)
-_MAX_SPREAD_PCT_GATE = 0.0025  # 25 bps — defense-in-depth spread ceiling
-_MIN_NEAR_DEPTH_USD = 1_000.0  # $1K each side — minimum near-touch OB depth
-
-# ── Quality tier thresholds ───────────────────────────────────────────────────
-# Restored to original pre-v13 values. The v13 doubling was overly conservative
-# and was vetoing trades with real edge. Minimal sizing enforces capital discipline.
-_TIER_APLUS_EV = 0.008  # 0.8% net EV → A+
-_TIER_A_EV = 0.004  # 0.4% net EV → A
-_TIER_B_EV = (
-    0.0005  # 0.05% net EV → B (lowered from 0.15% to allow marginal-positive trades)
-)
-
-# ── Edge score normaliser (EV % that maps to 1.0 on edge_score) ───────────────
-_EDGE_SCORE_CAP_EV = 0.015  # 1.5% EV → edge_score = 1.0
-
-# ── Size multipliers per tier ─────────────────────────────────────────────────
-TIER_MULTIPLIERS = {
-    "A+": 1.35,
-    "A": 1.00,
-    "B": 0.75,
-    "VETO": 0.00,
+# ── Lane-Specific Fee Defaults ───────────────────────────────────────────────
+# Coinbase Nano Perps: 0.03% | Coinbase Spot (Advanced): 0.60%
+_FEE_MAP = {
+    "PERP": 0.0003,
+    "SPOT": 0.0060,
 }
 
 
@@ -90,61 +66,34 @@ def check(
     base_risk_pct: float = 0.015,
     is_ranging: bool = False,
     win_rate_estimate: float = 0.0,  # 0.0 = use default 0.52 baseline
-    stop_multiplier: float = 1.5,  # v18.16: matches actual position stop (default 3.0 in v10_runner)
-    bid_depth_usd: float = 0.0,  # near-touch bid-side OB depth in USD (0 = skip depth gate)
-    ask_depth_usd: float = 0.0,  # near-touch ask-side OB depth in USD (0 = skip depth gate)
+    stop_multiplier: float = 1.5,  # v18.16: matches actual position stop
+    bid_depth_usd: float = 0.0,
+    ask_depth_usd: float = 0.0,
+    lane: str = "PERP", # v18.34: Allow passing lane for fee-aware math
 ) -> dict:
     """
     Hard pre-trade economics veto gate.
-
-    Parameters
-    ----------
-    symbol          : Instrument symbol (e.g. 'BTCUSDT') — used only for logging.
-    direction       : 'LONG' or 'SHORT'.
-    current_price   : Latest mark or last price.
-    atr_pct         : ATR expressed as a fraction of price (e.g. 0.015 = 1.5%).
-    funding_rate    : 8-hour funding rate as a signed decimal (e.g. 0.0003 = 0.03%).
-                      Positive = longs pay shorts.
-    spread_pct      : Bid-ask spread as a fraction of price (e.g. 0.0005 = 0.05%).
-    volume_24h_usd  : 24-hour traded volume in USD.
-    leverage        : Integer leverage applied to the position (default 3).
-    account_balance : Current account equity in USD (used for context/logging only).
-    base_risk_pct   : Fraction of account at risk per trade (used for context only).
-    is_ranging      : When True (CHOP > 61.8), tighter EV floor and R:R minimum
-                      are applied — flat markets have smaller expected moves relative
-                      to fees, so the standard floor would be too permissive.
-
-    Returns
-    -------
-    dict with keys:
-        approved        : bool
-        quality_tier    : 'A+' | 'A' | 'B' | 'VETO'
-        ev_pct          : float  — net expected value as % of notional
-        roi_on_margin   : float  — ev_pct * leverage
-        fee_drag_pct    : float  — round-trip fees as % of notional
-        funding_cost_pct: float  — estimated funding cost for expected hold period
-        reject_reason   : str    — empty string if approved
-        edge_score      : float  — 0.0-1.0 normalised score for position sizer
+    v18.34: Now fee-aware across Spot and Perp lanes.
     """
     # ── Guard: basic sanity on inputs ─────────────────────────────────────────
     if current_price <= 0 or atr_pct <= 0:
         return _veto("invalid price or ATR", 0.0, 0.0, 0.0)
+
+    # Resolve fees based on lane
+    taker_fee_pct = _FEE_MAP.get(lane.upper(), _FEE_MAP["PERP"])
+    round_trip_cost = taker_fee_pct * 2.0
 
     direction = direction.upper()
     if direction not in ("LONG", "SHORT"):
         return _veto(f"unknown direction: {direction}", 0.0, 0.0, 0.0)
 
     # ── Step 1: Distance calculations ─────────────────────────────────────────
-    # v13: use actual stop multiplier passed from v10_runner (3.0x ATR) instead of
-    # hardcoded 1.5. Previously gate computed EV with half the actual stop distance,
-    # making fee drag look 2x worse relative to the target than it actually is.
-    # Both maintain 2:1 gross R:R (target = 2 * stop), so relative math is preserved.
-    stop_dist_pct = atr_pct * stop_multiplier  # actual stop distance
-    target_dist_pct = atr_pct * stop_multiplier * 2.0  # 2:1 gross R:R target
+    stop_dist_pct = atr_pct * stop_multiplier
+    target_dist_pct = atr_pct * stop_multiplier * 2.0
 
     # ── Step 2: Fee drag ──────────────────────────────────────────────────────
     # Round-trip taker cost + half of spread paid twice (entry + exit)
-    fee_drag_pct = ROUND_TRIP_COST + abs(spread_pct)
+    fee_drag_pct = round_trip_cost + abs(spread_pct)
 
     # ── Step 3: Funding cost for estimated hold period ────────────────────────
     # Assume ~12h average hold = 1.5 × 8h funding cycles.

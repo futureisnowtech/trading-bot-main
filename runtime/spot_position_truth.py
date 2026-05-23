@@ -25,15 +25,9 @@ except Exception:  # pragma: no cover - fail-soft for scripts/tests
 
 _CLASS_TABLE = "spot_holding_classifications"
 _DEFAULT_EXTERNAL_MANUAL = {
-    "BTC",
-    "ETH",
-    "LTC",
-    "SOL",
-    "XRP",
-    "ADA",
-    "MANA",
-    "CLOV",
-    "STETH",
+    "CBETH",  # Coinbase Wrapped Staked ETH
+    "ETH2",   # Legacy Coinbase Staked ETH ticker
+    "STETH",  # Lido Staked ETH
 }
 _BLOCKING_STATUSES = {
     "qty_mismatch",

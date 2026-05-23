@@ -21,6 +21,7 @@ from config import (
     SPOT_EOD_CLOSE_TIME,
     SPOT_LANE_ACTIVE,
     SPOT_MAKER_POLL_SECONDS,
+    SPOT_MAX_POSITIONS_PER_SYMBOL,
     SPOT_MIN_ORDER_USD,
     SPOT_MIN_PATH_EFFICIENCY,
     SPOT_SCALP_SYMBOL_CONFIG,
@@ -77,6 +78,9 @@ def _load_config() -> None:
     globals()["SPOT_LANE_ACTIVE"] = getattr(_cfg, "SPOT_LANE_ACTIVE", SPOT_LANE_ACTIVE)
     globals()["SPOT_MAKER_POLL_SECONDS"] = getattr(
         _cfg, "SPOT_MAKER_POLL_SECONDS", SPOT_MAKER_POLL_SECONDS
+    )
+    globals()["SPOT_MAX_POSITIONS_PER_SYMBOL"] = getattr(
+        _cfg, "SPOT_MAX_POSITIONS_PER_SYMBOL", SPOT_MAX_POSITIONS_PER_SYMBOL
     )
     globals()["SPOT_MIN_ORDER_USD"] = getattr(
         _cfg, "SPOT_MIN_ORDER_USD", SPOT_MIN_ORDER_USD
@@ -858,16 +862,19 @@ def open_spot(
         if truth_status in {
             "matched_bot_position",
         }:
-            # v18.17: Downgrade from warning to info to stop Telegram spam
-            logger.info(f"[spot_engine] {clean} blocked — spot_truth_{truth_status}")
-            return {"blocked": f"spot_truth_{truth_status}"}
+            # v18.35: Unshackled Multi-Trade. matched_bot_position is no longer a block.
+            pass
 
-    if any(
-        str(p.get("symbol", "")).upper() == clean
-        for p in _load_spot_positions_from_db(paper=paper)
-    ):
-        logger.info(f"[spot_engine] {clean} blocked — spot_position_already_open")
-        return {"blocked": "spot_position_already_open"}
+    open_positions_for_symbol = [
+        p for p in _load_spot_positions_from_db(paper=paper)
+        if str(p.get("symbol", "")).upper() == clean
+    ]
+    if len(open_positions_for_symbol) >= SPOT_MAX_POSITIONS_PER_SYMBOL:
+        logger.warning(
+            f"[spot_engine] {clean} blocked — max_positions_reached "
+            f"({len(open_positions_for_symbol)} >= {SPOT_MAX_POSITIONS_PER_SYMBOL})"
+        )
+        return {"blocked": "spot_max_positions_reached"}
     if size_usd < SPOT_MIN_ORDER_USD:
         logger.warning(
             f"[spot_engine] {clean} blocked — spot_size_below_minimum (${size_usd:.2f} < ${SPOT_MIN_ORDER_USD:.2f})"

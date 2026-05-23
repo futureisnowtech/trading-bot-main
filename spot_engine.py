@@ -728,14 +728,14 @@ def _maker_first_sell(
     current_limit = limit_sell_price(bid, ask)
 
     # RC9: Intelligent Maker Chase
-    # Instead of one attempt, try 3 times, each time chasing 1 tick closer to mid.
-    for chase_step in range(3):
+    # More aggressive chasing: 5 steps, 2s wait per step, moving closer to mid/bid each time.
+    for chase_step in range(5):
         order = broker.place_limit_sell_spot(symbol, size_units, current_limit, post_only=True)
         if not order:
             logger.debug(f"[spot_engine] {symbol} Maker sell placement rejected at {current_limit}")
             return None, "maker_first_failed", "limit_order_rejected"
 
-        # Poll for a shorter duration per step (2s)
+        # Poll for 2s per step
         for _ in range(2):
             time.sleep(1)
             status = broker.get_spot_order_status(
@@ -746,16 +746,22 @@ def _maker_first_sell(
                 status["execution_route"] = "maker_first"
                 return status, "maker_first", "none"
 
-        # If not filled, cancel and decrement price
+        # Unfilled after 2s? Cancel and move closer.
         broker.cancel_spot_order(order["order_id"])
         
-        # Chase logic: Move 0.05% closer to bid (slippage bound)
-        chase_adj = current_limit * 0.0005
-        current_limit -= chase_adj
-        logger.info(f"[spot_engine] Chasing {symbol} maker sell: {current_limit + chase_adj:.4f} -> {current_limit:.4f} (step {chase_step+1})")
+        # Calculate next price: Move 20% of spread deeper per step
+        top = broker.get_spot_top_of_book(symbol)
+        bid = float(top.get("best_bid") or 0.0)
+        ask = float(top.get("best_ask") or 0.0)
+        if ask > 0 and ask > bid:
+            current_limit = ask - (ask - bid) * 0.2 * (chase_step + 1)
+        else:
+            current_limit *= 0.9998 # tiny emergency nudge
+            
+        logger.info(f"[spot_engine] Chasing {symbol} maker sell: {current_limit + (current_limit*0.0002):.4f} -> {current_limit:.4f} (step {chase_step+1})")
 
     logger.info(
-        f"[spot_engine] Maker sell order for {symbol} failed after 3 chase steps"
+        f"[spot_engine] Maker sell order for {symbol} failed after 5 chase steps"
     )
     import config as _tfc_sell
 

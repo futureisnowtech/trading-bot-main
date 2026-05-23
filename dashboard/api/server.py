@@ -102,14 +102,22 @@ async def get_db_snapshot():
         # 6. Forecast Positions (Kalshi)
         forecast_positions = []
         try:
-            from execution.kalshi_broker import get_kalshi_broker
-            kb = get_kalshi_broker()
-            if kb and kb.is_connected():
+            from config import KALSHI_ENABLED
+            if KALSHI_ENABLED:
+                from execution.kalshi_broker import get_kalshi_broker
+                kb = get_kalshi_broker()
                 now = time.time()
-                if now - _LAST_KALSHI_SYNC > 60:
-                    kb._sync_positions()
-                    _LAST_KALSHI_SYNC = now
-                forecast_positions = kb.get_positions()
+                
+                if not kb.is_connected():
+                    if now - getattr(kb, "_last_connect_attempt", 0) > 60:
+                        kb._last_connect_attempt = now
+                        kb.connect()
+                
+                if kb.is_connected():
+                    if now - _LAST_KALSHI_SYNC > 60:
+                        kb._sync_positions()
+                        _LAST_KALSHI_SYNC = now
+                    forecast_positions = kb.get_positions()
         except: pass
 
         # 7. 24H PnL

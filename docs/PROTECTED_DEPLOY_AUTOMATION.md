@@ -23,7 +23,7 @@ The new workflow is intentionally conservative.
 - It is **additive**, not a replacement for local deploys.
 - It runs the proof suite, `validate.py`, and `repo_truth_gate.py --strict` before deploy.
 - It deploys only the exact authored Git SHA checked out by GitHub Actions.
-- It verifies `/root/bot/version.txt` after deploy.
+- It verifies `/home/algo-runner/bot/version.txt` after deploy.
 - It waits for `algo-bot-live` to become `healthy`.
 
 ## Important Default

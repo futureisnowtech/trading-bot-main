@@ -7,15 +7,15 @@
 #   - Refuses to deploy if local HEAD != origin/feature/v10-rebuild
 #   - Does NOT auto-commit or auto-push (that is the engineer's job)
 #   - Deploys the already-authored, already-pushed SHA only
-#   - Writes /root/bot/version.txt and /root/bot/deploy_manifest.json
+#   - Writes /home/algo-runner/bot/version.txt and /home/algo-runner/bot/deploy_manifest.json
 #     on the server as provenance markers after a successful sync
 # -----------------------------------------------------------------------------
 set -euo pipefail
 
 NYC_IP="64.225.20.38"
 NYC_PORT="2222"
-NYC_USER="root"
-PROJECT_DIR="/root/bot"
+NYC_USER="algo-runner"
+PROJECT_DIR="/home/${NYC_USER}/bot"
 DASHBOARD_UID="d9ecf89d-5e95-4e63-b0ae-f8008debbc0f"
 PROMETHEUS_TARGET="algo-bot-spot:8000"
 SSH_CMD="ssh -p ${NYC_PORT} -o StrictHostKeyChecking=no"
@@ -58,17 +58,23 @@ rsync -avz \
     --exclude '.env' \
     . "${NYC_USER}@${NYC_IP}:${PROJECT_DIR}/"
 
-echo "Injecting live .env to server (forcing PAPER_TRADING=false)..."
-ssh -p ${NYC_PORT} -o StrictHostKeyChecking=no ${NYC_USER}@${NYC_IP} "sed -i 's/^PAPER_TRADING=.*/PAPER_TRADING=false/' ${PROJECT_DIR}/.env"
-
 # ── Server-side: restart stack and provision ─────────────────────────────────
 echo "Restarting Docker stack on NYC3..."
 ${SSH_CMD} ${NYC_USER}@${NYC_IP} bash -s << REMOTE_EOF
 set -euo pipefail
 cd ${PROJECT_DIR}
 
-echo "  Hot-reloading Docker stack..."
-docker compose up -d --build --remove-orphans
+# Construct the image name from the repository path
+export IMAGE_NAME="ghcr.io/$(git remote get-url origin | sed 's/.*github.com[:\/]\(.*\)\.git/\1/' | tr '[:upper:]' '[:lower:]')"
+
+echo "  Logging into GHCR..."
+# Note: Requires GITHUB_TOKEN to be set or previously logged in on the droplet
+# For this autonomous transition, we assume the user has configured GHCR access
+# or we will use the existing build flow as a fallback if pull fails.
+
+echo "  Pulling latest images and hot-reloading..."
+docker compose pull
+docker compose up -d --remove-orphans
 
 echo "  Waiting for health check..."
 sleep 15

@@ -45,12 +45,10 @@ jobs:
       - name: Create test .env
         run: |
           cat > .env << 'EOF'
-          PAPER_TRADING=true
           ANTHROPIC_API_KEY=test_key_ci
           ACCOUNT_SIZE=5000
           BINANCE_API_KEY=test_key_ci
           BINANCE_API_SECRET=test_secret_ci
-          BINANCE_TESTNET=true
           PERP_PAIRS=BTCUSDT,ETHUSDT
           FUTURES_LANE_ACTIVE=false
           FORECAST_LANE_ACTIVE=false

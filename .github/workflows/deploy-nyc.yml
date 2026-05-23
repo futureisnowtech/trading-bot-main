@@ -85,12 +85,10 @@ jobs:
       - name: Create test .env for validation
         run: |
           cat > .env << 'EOF'
-          PAPER_TRADING=true
           ANTHROPIC_API_KEY=test_key_ci
           ACCOUNT_SIZE=5000
           BINANCE_API_KEY=test_key_ci
           BINANCE_API_SECRET=test_secret_ci
-          BINANCE_TESTNET=true
           PERP_PAIRS=BTCUSDT,ETHUSDT
           FUTURES_LANE_ACTIVE=false
           FORECAST_LANE_ACTIVE=false
@@ -108,6 +106,22 @@ jobs:
         run: |
           python scripts/repo_truth_gate.py --strict
 
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ github.sha }}
+
       - name: Load production SSH key
         uses: webfactory/ssh-agent@v0.9.0
         with:
@@ -120,7 +134,7 @@ jobs:
 
       - name: Preflight remote reachability
         run: |
-          ssh -o BatchMode=yes -p 2222 root@64.225.20.38 'echo NYC preflight OK'
+          ssh -o BatchMode=yes -p 2222 algo-runner@64.225.20.38 'echo NYC preflight OK'
 
       - name: Deploy exact authored SHA
         run: |
@@ -130,12 +144,12 @@ jobs:
       - name: Verify deployed SHA and health
         run: |
           EXPECTED_SHA="$(git rev-parse HEAD)"
-          REMOTE_SHA="$(ssh -o BatchMode=yes -p 2222 root@64.225.20.38 "awk -F= '/^sha=/{print \$2}' /root/bot/version.txt")"
+          REMOTE_SHA="$(ssh -o BatchMode=yes -p 2222 algo-runner@64.225.20.38 "awk -F= '/^sha=/{print \$2}' /home/algo-runner/bot/version.txt")"
           if [ "$REMOTE_SHA" != "$EXPECTED_SHA" ]; then
             echo "Remote SHA mismatch: expected $EXPECTED_SHA got $REMOTE_SHA"
             exit 1
           fi
-          ssh -o BatchMode=yes -p 2222 root@64.225.20.38 '
+          ssh -o BatchMode=yes -p 2222 algo-runner@64.225.20.38 '
             for _ in $(seq 1 24); do
               status=$(docker inspect -f "{{.State.Health.Status}}" algo-bot-live 2>/dev/null || echo unknown)
               if [ "$status" = "healthy" ]; then

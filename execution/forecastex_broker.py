@@ -47,7 +47,7 @@ from logging_db.trade_logger import log_event, log_trade
 
 # ── Connection constants ───────────────────────────────────────────────────────
 IBKR_HOST = os.getenv("IBKR_HOST", "127.0.0.1")
-IBKR_PORT = int(os.getenv("IBKR_PORT", "7497"))  # 7497=paper, 7496=live
+IBKR_PORT = int(os.getenv("IBKR_PORT", "7496"))  # 7497=paper, 7496=live
 FORECASTX_CLIENT_ID = int(
     os.getenv("FORECASTX_CLIENT_ID", "3")
 )  # avoids collision with MES (ID 2)
@@ -734,27 +734,23 @@ class ForecastExBroker:
         if qty <= 0:
             raise ValueError(f"qty must be positive for ForecastEx buy (got {qty})")
 
-        if self.is_connected():
-            try:
-                order_id = self._run(
-                    self._place_limit_buy_async(
-                        conid, local_symbol, right, strike, last_trade, qty, limit_price
-                    ),
-                    timeout=15,
-                )
-                print(
-                    f"[ForecastExBroker] BUY {qty} {local_symbol} ({side}) "
-                    f"@ {limit_price:.4f} | reason={reason}"
-                )
-            except Exception as e:
-                log_event("ERROR", "ForecastExBroker", f"place_buy_order error: {e}")
-                order_id = f"FX_ERR_{uuid.uuid4().hex[:8]}"
-        else:
-            order_id = f"FX_PAPER_{uuid.uuid4().hex[:8]}"
-            print(
-                f"[ForecastExBroker] ⚠️ Not connected — paper-logging BUY {qty} "
-                f"{local_symbol} ({side}) @ {limit_price:.4f}"
+        if not self.is_connected():
+            raise RuntimeError("[ForecastExBroker] Not connected to IBKR — blocking trade")
+
+        try:
+            order_id = self._run(
+                self._place_limit_buy_async(
+                    conid, local_symbol, right, strike, last_trade, qty, limit_price
+                ),
+                timeout=15,
             )
+            print(
+                f"[ForecastExBroker] BUY {qty} {local_symbol} ({side}) "
+                f"@ {limit_price:.4f} | reason={reason}"
+            )
+        except Exception as e:
+            log_event("ERROR", "ForecastExBroker", f"place_buy_order error: {e}")
+            order_id = f"FX_ERR_{uuid.uuid4().hex[:8]}"
 
         position_key = f"{local_symbol}_{right}"
         with self._lock:

@@ -61,7 +61,7 @@ except Exception:
 
 # TWS connection settings
 IBKR_HOST = os.getenv("IBKR_HOST", "127.0.0.1")
-IBKR_PORT = int(os.getenv("IBKR_PORT", "7497"))  # 7497=paper TWS, 7496=live TWS
+IBKR_PORT = int(os.getenv("IBKR_PORT", "7496"))  # 7497=paper TWS, 7496=live TWS
 IBKR_CLIENT_ID = int(os.getenv("IBKR_CLIENT_ID", "2"))
 
 # MES contract — update expiry each quarter

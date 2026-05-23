@@ -500,7 +500,7 @@ def _get_account_balance() -> float:
     perps = _import_perps_engine()
     if perps is not None:
         try:
-            broker = perps._get_broker(testnet=True)
+            broker = perps._get_broker(testnet=False)
             if broker is not None:
                 bal = broker.get_account_balance()
                 if bal and bal > 0:
@@ -558,8 +558,7 @@ def _write_crypto_lane_runtime(open_positions: Optional[Dict] = None) -> None:
         import config as _cfg
 
         perps = _import_perps_engine()
-        # v18.17: Perps still uses testnet flag for now (archived lane)
-        broker = perps._get_broker(testnet=True) if perps is not None else None
+        broker = perps._get_broker(testnet=False) if perps is not None else None
         connected = bool(broker and broker.is_connected())
         if broker is not None and not connected:
             try:
@@ -3892,4 +3891,6 @@ def run_forever():
             logger.error(
                 f"[v10] Scheduler loop error: {e}\n{traceback.format_exc()[:800]}"
             )
+            time.sleep(5)  # brief back-off before resuming
+          )
             time.sleep(5)  # brief back-off before resuming

@@ -9,11 +9,9 @@ API library: python-binance >= 1.0.19   pip install python-binance
 To configure:
   1. Create API key at binance.com → Profile → API Management
      Permissions: Enable Futures
-  2. For testnet: testnet.binancefuture.com (separate API keys)
-  3. Add to .env:
+  2. Add to .env:
        BINANCE_API_KEY=...
        BINANCE_API_SECRET=...
-       BINANCE_TESTNET=true   (change to false for live)
 
 Symbol format: AVAXUSDT, BTCUSDT (no hyphen — same as previous Bybit format)
 Leverage: Set per-symbol before placing order (isolated margin mode).
@@ -34,9 +32,10 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import (
     MARKET_TIMEZONE,
-    BINANCE_API_KEY, BINANCE_API_SECRET, BINANCE_TESTNET,
+    BINANCE_API_KEY, BINANCE_API_SECRET,
     PERP_MAX_LEVERAGE, PERP_POSITION_SIZE_USD,
     BINANCE_TAKER_FEE_PCT, BINANCE_MAKER_FEE_PCT,
+    SHADOW_EXECUTION,
 )
 from logging_db.trade_logger import log_trade, log_event
 
@@ -86,24 +85,16 @@ class BinanceBroker:
             return False
 
         try:
-            if BINANCE_TESTNET:
-                self._client = BinanceClient(
-                    api_key=BINANCE_API_KEY,
-                    api_secret=BINANCE_API_SECRET,
-                    testnet=True,
-                )
-                self._client.FUTURES_URL = 'https://testnet.binancefuture.com/fapi'
-            else:
-                self._client = BinanceClient(
-                    api_key=BINANCE_API_KEY,
-                    api_secret=BINANCE_API_SECRET,
-                )
+            self._client = BinanceClient(
+                api_key=BINANCE_API_KEY,
+                api_secret=BINANCE_API_SECRET,
+            )
 
             # Verify: get futures account balance
             balance = self._client.futures_account_balance()
             usdt = next((b for b in balance if b['asset'] == 'USDT'), None)
             self._connected = True
-            mode = 'TESTNET' if BINANCE_TESTNET else 'LIVE'
+            mode = 'LIVE'
             bal_str = f"${float(usdt['balance']):.2f}" if usdt else "unknown"
             print(f"[BinanceBroker] Connected to Binance Futures {mode} ✅  USDT balance: {bal_str}")
             log_event('INFO', 'BinanceBroker', f'Connected ({mode}) balance={bal_str}')
@@ -130,6 +121,12 @@ class BinanceBroker:
         """Open a leveraged LONG position on a USD-M perp."""
         if not self._client:
             return None
+
+        # v18.34: Shadow Mode
+        if SHADOW_EXECUTION:
+            print(f"[BinanceBroker] SHADOW MODE: Blocked BUY {symbol} size_usd={size_usd}")
+            return {"orderId": f"shadow_{uuid.uuid4().hex[:8]}", "symbol": symbol, "status": "FILLED"}
+
         try:
             price = self._get_mark_price(symbol)
             if not price:
@@ -194,6 +191,12 @@ class BinanceBroker:
         """Open a leveraged SHORT position on a USD-M perp."""
         if not self._client:
             return None
+
+        # v18.34: Shadow Mode
+        if SHADOW_EXECUTION:
+            print(f"[BinanceBroker] SHADOW MODE: Blocked SELL {symbol} size_usd={size_usd}")
+            return {"orderId": f"shadow_{uuid.uuid4().hex[:8]}", "symbol": symbol, "status": "FILLED"}
+
         try:
             price = self._get_mark_price(symbol)
             if not price:
@@ -262,6 +265,11 @@ class BinanceBroker:
 
         if not self._client:
             return None
+
+        # v18.34: Shadow Mode
+        if SHADOW_EXECUTION:
+            print(f"[BinanceBroker] SHADOW MODE: Blocked CLOSE {symbol}")
+            return {"symbol": symbol, "status": "CLOSED"}
 
         try:
             # Cancel all open conditional orders for this symbol first

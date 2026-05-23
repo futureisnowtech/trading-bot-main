@@ -1,5 +1,6 @@
 services:
   algo-bot-spot:
+    image: ${IMAGE_NAME:-algo-trading-bot}:latest
     build: .
     container_name: algo-bot-spot
     hostname: algo-bot-spot
@@ -25,6 +26,7 @@ services:
       retries: 3
 
   algo-bot-forecast:
+    image: ${IMAGE_NAME:-algo-trading-bot}:latest
     build: .
     container_name: algo-bot-forecast
     hostname: algo-bot-forecast
@@ -108,7 +110,23 @@ services:
       - prometheus
       - loki
 
+  postgres:
+    image: postgres:15
+    container_name: algo-db
+    restart: unless-stopped
+    networks:
+      - trading-network
+    environment:
+      - POSTGRES_USER=${DB_USER:-algo_master}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-algo_pass_99}
+      - POSTGRES_DB=${DB_NAME:-algo_trading}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
   dashboard:
+    image: ${IMAGE_NAME:-algo-trading-bot}:latest
     build: .
     container_name: algo-dashboard
     restart: unless-stopped
@@ -133,3 +151,4 @@ networks:
 volumes:
   prometheus_data:
   grafana_data:
+  postgres_data:

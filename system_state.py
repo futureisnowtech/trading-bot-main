@@ -33,7 +33,7 @@ class SystemState:
         except Exception:
             pass
         self.state = {
-            "mode": "PAPER",  # PAPER or LIVE
+            "mode": "LIVE",
             "exchange": {
                 "connected": False,
                 "ws_connected": False,
@@ -112,10 +112,6 @@ class SystemState:
                 metrics.RAM_PERCENT_GAUGE.set(s["system"]["ram_percent"])
         except Exception as e:
             pass
-
-    def set_mode(self, mode: str):
-        with self.lock:
-            self.state["mode"] = mode.upper()
 
     def refresh_system_metrics(self):
         now = time.time()

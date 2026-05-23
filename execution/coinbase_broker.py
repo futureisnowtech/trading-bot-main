@@ -20,7 +20,6 @@ Fee model (Advanced Trade API direct):
   Taker: 0.03%  |  Maker: 0.00%
   Verify current promotional status at help.coinbase.com/en/derivatives.
 
-Paper mode: full simulation, zero API calls.
 Live mode:  Coinbase Advanced Trade API v3 REST (api.coinbase.com/api/v3/brokerage).
 
 Fail-closed: any symbol not in the supported set → CoinbaseSymbolError (no trade).
@@ -103,6 +102,13 @@ PRODUCT_ID_TO_SYMBOL = {
 COINBASE_TAKER_FEE = 0.0003
 COINBASE_MAKER_FEE = 0.0000
 
+import sys
+import os
+
+# v18.34: Dynamic path resolution for standalone execution
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from config import SHADOW_EXECUTION
+
 _API_BASE = "https://api.coinbase.com"
 _MAX_LEVERAGE = 10
 
@@ -112,25 +118,17 @@ class CoinbaseSymbolError(ValueError):
 
 
 class CoinbaseBroker:
-    def __init__(self, paper: Optional[bool] = None) -> None:
-        # v18.18: If credentials missing, default to paper for safety in tests
+    def __init__(self) -> None:
         self._key_name = os.getenv("COINBASE_CDP_KEY_NAME", "")
         raw = os.getenv("COINBASE_CDP_PRIVATE_KEY", "")
         self._private_key_pem = raw.replace("\\n", "\n").encode() if raw else b""
         
-        if paper is not None:
-            self._paper = paper
-        else:
-            self._paper = not (self._key_name and self._private_key_pem)
-
         self._connected = False
         self._open_positions: Dict[str, Dict] = {}
         self._symbol_count: Dict[str, int] = {}
         self._session = None
 
     def _make_jwt(self, method: str, path: str) -> str:
-        if self._paper:
-            return "paper_jwt"
         if not _JWT_OK:
             raise RuntimeError("PyJWT / cryptography required for live mode")
         now = int(time.time())
@@ -153,10 +151,19 @@ class CoinbaseBroker:
         )
 
     def _request(self, method: str, path: str, body: Optional[dict] = None) -> dict:
-        if self._paper:
-            return {}
         if not _REQUESTS_OK:
             raise RuntimeError("requests library required for live mode")
+        
+        # v18.34: Shadow Execution Guard
+        if SHADOW_EXECUTION and method.upper() == "POST" and "orders" in path:
+            print(f"[cb] SHADOW MODE: Blocked {method} {path} body={body}")
+            # Return a fake success structure so the rest of the logic can be verified
+            return {
+                "success": True, 
+                "success_response": {"order_id": f"shadow_{uuid.uuid4().hex[:8]}"},
+                "order": {"order_id": f"shadow_{uuid.uuid4().hex[:8]}", "status": "FILLED"}
+            }
+
         token = self._make_jwt(method.upper(), path)
         url = f"{_API_BASE}{path}"
         headers = {
@@ -183,9 +190,6 @@ class CoinbaseBroker:
         return int(base_qty / spec["contract_size"])
 
     def connect(self) -> bool:
-        if self._paper:
-            self._connected = True
-            return True
         if not self._key_name or not self._private_key_pem:
             return False
         try:
@@ -207,12 +211,8 @@ class CoinbaseBroker:
             raise ValueError("[cb] Only ISOLATED supported")
 
     def get_mark_price(self, symbol: str) -> float:
-        if not self._connected and not self._paper: 
+        if not self._connected: 
             return 0.0
-            
-        if self._paper and (not self._key_name or not self._private_key_pem):
-            s = str(symbol).upper().replace("USDT", "").replace("USD", "").replace("-PERP", "")
-            return {"BTC": 90000.0, "ETH": 2500.0, "SOL": 150.0, "XRP": 0.5}.get(s, 100.0)
             
         try:
             spec = self._spec(symbol)
@@ -221,10 +221,9 @@ class CoinbaseBroker:
             if trades: return float(trades[0].get("price", 0))
         except Exception:
             pass
-        return 100.0 if self._paper else 0.0
+        return 0.0
 
     def get_wallet_balance(self) -> float:
-        if self._paper: return 10000.0
         try:
             data = self._request("GET", "/api/v3/brokerage/cfm/balance_summary")
             return float(data.get("balance_summary", {}).get("futures_buying_power", {}).get("value", "0"))
@@ -241,7 +240,6 @@ class CoinbaseBroker:
         return self.get_all_positions().get(symbol)
 
     def sync_live_positions(self) -> Optional[dict]:
-        if self._paper: return dict(self._open_positions)
         if not self._connected: return dict(self._open_positions)
         try:
             data = self._request("GET", "/api/v3/brokerage/cfm/positions")
@@ -270,7 +268,7 @@ class CoinbaseBroker:
             return None
 
     def get_all_positions(self) -> dict:
-        if self._paper or not self._connected: return dict(self._open_positions)
+        if not self._connected: return dict(self._open_positions)
         synced = self.sync_live_positions()
         return synced if synced is not None else dict(self._open_positions)
 
@@ -291,17 +289,6 @@ class CoinbaseBroker:
         if contracts < 1: return None
 
         self._symbol_count[f"{symbol}_LONG"] = current_count + 1
-
-        if self._paper:
-            res = {
-                "orderId": f"paper_{uuid.uuid4().hex[:8]}", "symbol": symbol, "side": "BUY",
-                "contracts": contracts, "avgPrice": str(price), "status": "FILLED", "paper": True, "venue": "coinbase"
-            }
-            self._open_positions[symbol] = {
-                "symbol": symbol, "direction": "LONG", "entry_price": price, 
-                "qty": contracts * spec["contract_size"], "contracts": contracts, "paper": True
-            }
-            return res
 
         body = {
             "client_order_id": str(uuid.uuid4()), "product_id": spec["product_id"], "side": "BUY",
@@ -342,17 +329,6 @@ class CoinbaseBroker:
 
         self._symbol_count[f"{symbol}_SHORT"] = current_count + 1
 
-        if self._paper:
-            res = {
-                "orderId": f"paper_{uuid.uuid4().hex[:8]}", "symbol": symbol, "side": "SELL",
-                "contracts": contracts, "avgPrice": str(price), "status": "FILLED", "paper": True, "venue": "coinbase"
-            }
-            self._open_positions[symbol] = {
-                "symbol": symbol, "direction": "SHORT", "entry_price": price, 
-                "qty": contracts * spec["contract_size"], "contracts": contracts, "paper": True
-            }
-            return res
-
         body = {
             "client_order_id": str(uuid.uuid4()), "product_id": spec["product_id"], "side": "SELL",
             "order_configuration": {"market_market_ioc": {"base_size": str(contracts)}},
@@ -385,10 +361,6 @@ class CoinbaseBroker:
         exit_price = self.get_mark_price(symbol)
         if exit_price <= 0: exit_price = entry_price
         pnl = (exit_price - entry_price) * qty if direction == "LONG" else (entry_price - exit_price) * qty
-
-        if self._paper:
-            self._open_positions.pop(symbol, None)
-            return {"symbol": symbol, "exit_price": exit_price, "pnl_usd": round(pnl, 4), "reason": reason, "paper": True, "venue": "coinbase"}
 
         try:
             spec = self._spec(symbol)

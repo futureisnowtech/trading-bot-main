@@ -38,9 +38,7 @@ load_dotenv()
 # ════════════════════════════════════════════════════════════════════
 # v18.32: Ripped out paper trading and scalper mode switches.
 # All systems are strictly LIVE.
-
-PAPER_TRADING: bool = False
-STRATEGIC_SCALPER_MODE: bool = False
+SHADOW_EXECUTION: bool = os.getenv("SHADOW_EXECUTION", "false").lower() == "true"
 
 # Session start: all performance stats (win rate, P&L, trade counts) are
 # measured from this date forward. Old trades are kept in DB for ML training
@@ -832,7 +830,6 @@ IBKR_PORT = 7496  # 7497=paper, 7496=live
 # ── Binance USD-M perpetual futures (replaced Bybit, Sprint 1 overhaul) ──────
 BINANCE_API_KEY: str = os.getenv("BINANCE_API_KEY", "")
 BINANCE_API_SECRET: str = os.getenv("BINANCE_API_SECRET", "")
-BINANCE_TESTNET: bool = os.getenv("BINANCE_TESTNET", "true").lower() == "true"
 PERP_PAIRS: list = os.getenv("PERP_PAIRS", "BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT").split(",")
 PERP_POSITION_SIZE_USD: float = float(
     os.getenv("PERP_POSITION_SIZE_USD", "50")
@@ -1143,8 +1140,6 @@ TELEGRAM_POLLING_HOSTNAME: str = os.getenv("TELEGRAM_POLLING_HOSTNAME", "algo-bo
 LANE3_ENABLED: bool = os.getenv("LANE3_ENABLED", "false").lower() == "true"
 POLYMARKET_ENABLED: bool = os.getenv("POLYMARKET_ENABLED", "false").lower() == "true"
 KALSHI_ENABLED: bool = os.getenv("KALSHI_ENABLED", "false").lower() == "true"
-POLYMARKET_PAPER: bool = os.getenv("POLYMARKET_PAPER", "true").lower() == "true"
-KALSHI_PAPER: bool = os.getenv("KALSHI_PAPER", "true").lower() == "true"
 
 # Polymarket (Polygon CLOB — requires crypto wallet for live trading)
 POLYMARKET_PRIVATE_KEY: str = os.getenv("POLYMARKET_PRIVATE_KEY", "")
@@ -1222,6 +1217,13 @@ GRAFANA_SERVICE_ACCOUNT_ID: str = os.getenv("GRAFANA_SERVICE_ACCOUNT_ID", "").st
 # ════════════════════════════════════════════════════════════════════
 # DATABASE & LOGGING
 # ════════════════════════════════════════════════════════════════════
+DB_USER: str = os.getenv("DB_USER", "algo_master")
+DB_PASSWORD: str = os.getenv("DB_PASSWORD", "algo_pass_99")
+DB_HOST: str = os.getenv("DB_HOST", "algo-db")
+DB_PORT: str = os.getenv("DB_PORT", "5432")
+DB_NAME: str = os.getenv("DB_NAME", "algo_trading")
+DB_USE_POSTGRES: bool = os.getenv("DB_USE_POSTGRES", "false").lower() == "true"
+
 _ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH: str = os.path.join(_ROOT_DIR, "logs", "trades.db")
 LANCEDB_PATH: str = os.path.join(_ROOT_DIR, "logs", "memory")

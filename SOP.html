@@ -200,7 +200,7 @@ window.__SOP_STATE__ = window.__SOP_STATE__ || {
     <tr><th>Priority</th><th>Location</th><th>Meaning</th></tr>
     <tr><td>1</td><td><code>origin/release/v18.34.FORENSIC</code></td><td>GitHub is the primary source of truth.</td></tr>
     <tr><td>2</td><td><code>/Users/joshmacbookair2020/Projects/algo_trading_final</code></td><td>Mac Projects repo is the working tree and authoring copy.</td></tr>
-    <tr><td>3</td><td><code>root@64.225.20.38:2222:/root/bot</code></td><td>NYC server is the deploy target and runtime evidence source.</td></tr>
+    <tr><td>3</td><td><code>algo-runner@64.225.20.38:2222:/home/algo-runner/bot</code></td><td>NYC server is the deploy target and runtime evidence source.</td></tr>
     <tr><td>Ignore</td><td><code>/Users/joshmacbookair2020/Desktop/algo_trading_final</code></td><td>Deprecated copy. Do not use it for compare, deploy, or truth checks.</td></tr>
   </table>
 </div>
@@ -221,7 +221,7 @@ window.__SOP_STATE__ = window.__SOP_STATE__ || {
     <ul>
       <li>Deploy only from a clean worktree.</li>
       <li>Deploy only when local <code>HEAD</code> equals <code>origin/release/v18.34.FORENSIC</code>.</li>
-      <li>Every deploy writes <code>/root/bot/version.txt</code> and <code>deploy_manifest.json</code>.</li>
+      <li>Every deploy writes <code>/home/algo-runner/bot/version.txt</code> and <code>deploy_manifest.json</code>.</li>
       <li>Post-deploy proof matters more than “deploy succeeded”.</li>
       <li>Protected GitHub deploy path exists via <code>.github/workflows/deploy-nyc.yml</code> with environment approval.</li>
     </ul>

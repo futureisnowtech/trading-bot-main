@@ -22,6 +22,7 @@ from cryptography.hazmat.primitives import serialization
 
 # Add root to path for logging_db
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from config import SHADOW_EXECUTION
 from logging_db.trade_logger import log_event, log_trade
 
 logger = logging.getLogger(__name__)
@@ -161,6 +162,12 @@ class KalshiBroker:
 
     def _request(self, method: str, path: str, params: dict = None, body: dict = None) -> dict:
         """Execute signed Kalshi V2 request."""
+        
+        # v18.34: Shadow Mode
+        if SHADOW_EXECUTION and method.upper() == "POST" and "orders" in path:
+            print(f"[Kalshi] SHADOW MODE: Blocked {method} {path} body={body}")
+            return {"order_id": f"shadow_{uuid.uuid4().hex[:8]}"}
+
         try:
             ts = str(int(time.time() * 1000))
             body_str = json.dumps(body, separators=(',', ':')) if body else ""
@@ -313,7 +320,7 @@ class KalshiBroker:
     def place_buy_order(self, contract_dict: dict, qty: int, limit_price: float, **kwargs) -> dict:
         """Place a limit buy order."""
         if not self.is_connected():
-            return {"order_id": f"KS_PAPER_{uuid.uuid4().hex[:8]}", "price": limit_price, "qty": qty}
+            raise RuntimeError("[KalshiBroker] Not connected to Kalshi — blocking trade")
 
         ticker = contract_dict["local_symbol"]
         side = "yes" if contract_dict["right"] == "C" else "no"
@@ -362,7 +369,8 @@ class KalshiBroker:
 
     def flatten_position(self, local_symbol: str, right: str, qty: int, **kwargs) -> dict:
         """Exit a position by selling."""
-        if not self.is_connected(): return {"order_id": "PAPER_EXIT"}
+        if not self.is_connected():
+            raise RuntimeError("[KalshiBroker] Not connected to Kalshi — blocking exit")
         
         side = "yes" if right == "C" else "no"
         key = f"{local_symbol}_{right}"

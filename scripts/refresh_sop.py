@@ -21,9 +21,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 OUTFILE = ROOT / "sop_state.generated.js"
 BRANCH = "feature/v10-rebuild"
-REMOTE_HOST = "root@64.225.20.38"
+REMOTE_HOST = "algo-runner@64.225.20.38"
 REMOTE_PORT = "2222"
-REMOTE_DIR = "/root/bot"
+REMOTE_DIR = "/home/algo-runner/bot"
 FALLBACK_UID = "d9ecf89d-5e95-4e63-b0ae-f8008debbc0f"
 FALLBACK_PROM_TARGET = "algo-bot-live:8000"
 
@@ -80,7 +80,7 @@ def _worktree_dirty() -> bool:
 
 
 def _remote_snapshot() -> tuple[dict, str | None]:
-    remote_python = """cd /root/bot && python3 - <<'PY'
+    remote_python = """cd /home/algo-runner/bot && python3 - <<'PY'
 import json
 import os
 import sqlite3

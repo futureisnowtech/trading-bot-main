@@ -118,14 +118,12 @@ class CoinbaseSpotBroker:
       get_spot_positions() → list[{symbol, qty, avg_entry, current_value}]
     """
 
-    def __init__(self, paper: Optional[bool] = None) -> None:
+    def __init__(self) -> None:
         self._connected = False
-        self._paper = paper if paper is not None else False
         self._key_name: str = ""
         self._private_key_pem: bytes = b""
         # In-process spot holdings: symbol → {"qty": float, "avg_entry": float}
         self._holdings: Dict[str, Dict] = {}
-        self._paper_balance_usd = 10000.0
         self._fallback_price = lambda s: 0.0
         # v18.19.4: cached /accounts snapshot — see get_spot_balance().
         self._balance_cache: Optional[dict] = None
@@ -133,7 +131,11 @@ class CoinbaseSpotBroker:
 
         # Load credentials (same source as futures broker)
         try:
-            from config import COINBASE_CDP_KEY_NAME, COINBASE_CDP_PRIVATE_KEY
+            from config import (
+    COINBASE_CDP_KEY_NAME,
+    COINBASE_CDP_PRIVATE_KEY,
+    SHADOW_EXECUTION,
+)
 
             self._key_name = str(COINBASE_CDP_KEY_NAME or "")
             raw = str(COINBASE_CDP_PRIVATE_KEY or "").strip("\"'")
@@ -146,17 +148,10 @@ class CoinbaseSpotBroker:
             raw = os.getenv("COINBASE_CDP_PRIVATE_KEY", "").strip("\"'")
             self._private_key_pem = raw.replace("\\n", "\n").encode() if raw else b""
 
-        # Default to paper mode if credentials missing (safest for tests)
-        if paper is None and (not self._key_name or not self._private_key_pem):
-            self._paper = True
-
     # ── Auth ─────────────────────────────────────────────────────────────────
 
     def _make_jwt(self, method: str, path: str) -> str:
         """Generate a short-lived CDP JWT for a single request (ES256 / ECDSA P-256)."""
-        if self._paper:
-            return "paper_jwt"
-        
         if not _JWT_OK:
             raise RuntimeError("PyJWT / cryptography required for live spot mode")
         
@@ -185,12 +180,21 @@ class CoinbaseSpotBroker:
 
     def _request(self, method: str, path: str, body: Optional[dict] = None) -> dict:
         """Sign and send a Coinbase Advanced Trade API request."""
-        if self._paper:
-            return {}
         if not _REQUESTS_OK:
             raise RuntimeError("requests library required for live spot mode")
         
         method = method.upper()
+
+        # v18.34: Shadow Execution Guard
+        if SHADOW_EXECUTION and method == "POST" and "orders" in path:
+            logger.info(f"[spot] SHADOW MODE: Blocked {method} {path} body={body}")
+            # Return a fake success structure
+            return {
+                "success": True, 
+                "success_response": {"order_id": f"shadow_{uuid.uuid4().hex[:8]}"},
+                "order": {"order_id": f"shadow_{uuid.uuid4().hex[:8]}", "status": "FILLED"}
+            }
+
         token = self._make_jwt(method, path)
         url = f"{_API_BASE}{path}"
         
@@ -267,21 +271,13 @@ class CoinbaseSpotBroker:
 
 
     def connect(self) -> bool:
-        if self._paper:
-            self._connected = True
-            return True
-
         if not _JWT_OK or not _REQUESTS_OK:
             logger.error("[spot] Cannot connect live: missing PyJWT/requests")
             return False
         
-        # v18.18: Self-healing fallback — if live requested but credentials invalid, 
-        # pivot to paper mode instead of failing closed, preventing test crashes.
         if not self._key_name or not self._private_key_pem or b"BEGIN" not in self._private_key_pem:
-            logger.warning("[spot] CDP credentials missing or invalid. Falling back to paper mode.")
-            self._paper = True
-            self._connected = True
-            return True
+            logger.warning("[spot] CDP credentials missing or invalid.")
+            return False
 
         try:
             # Verify auth with a lightweight accounts call
@@ -304,14 +300,6 @@ class CoinbaseSpotBroker:
         Return available spot balances.
         Returns symbol balances plus USD available.
         """
-        if self._paper:
-            symbol_balances = {sym: float(self._holdings.get(sym, {}).get("qty", 0.0)) for sym in SPOT_SUPPORTED_SYMBOLS}
-            return {
-                "usd_available": float(self._paper_balance_usd),
-                "symbol_balances": symbol_balances,
-                **{f"{sym.lower()}_available": qty for sym, qty in symbol_balances.items()}
-            }
-
         # v18.19.4: short TTL cache. crypto_tradeability hits this per-asset
         # within a scan cycle (<1s); without caching we fire /accounts 8 times.
         now = time.time()
@@ -374,12 +362,6 @@ class CoinbaseSpotBroker:
 
     def get_mark_price(self, symbol: str) -> float:
         """Return current spot price for symbol (USD)."""
-        if self._paper and (not self._key_name or not self._private_key_pem):
-            # Return a semi-realistic price for majors to keep tests happy
-            s = self._clean_symbol(symbol).upper()
-            defaults = {"BTC": 90000.0, "ETH": 2500.0, "SOL": 150.0, "XRP": 0.5}
-            return defaults.get(s, 100.0)
-
         try:
             spec = self._spec(symbol)
             product_id = spec["product_id"]
@@ -392,9 +374,6 @@ class CoinbaseSpotBroker:
         except Exception as e:
             logger.debug(f"[spot] get_mark_price error {symbol}: {e}")
 
-        if self._paper:
-            return 100.0 # final paper fallback
-            
         return 0.0
 
     def get_historical_candles(
@@ -756,31 +735,6 @@ class CoinbaseSpotBroker:
 
         qty = size_usd / price
 
-        if self._paper:
-            real_id = f"paper_{uuid.uuid4().hex[:8]}"
-            result = {
-                "order_id": real_id,
-                "symbol": clean,
-                "product_id": spec["product_id"],
-                "side": "BUY",
-                "filled_size": str(round(qty, 8)),
-                "filled_value": str(round(size_usd, 2)),
-                "average_filled_price": str(round(price, 8)),
-                "fee_usd": size_usd * 0.001,  # 0.1% paper fee
-                "execution_route": "paper_market",
-                "status": "FILLED",
-                "paper": True,
-            }
-            existing = self._holdings.get(clean, {"qty": 0.0, "avg_entry": 0.0})
-            old_qty = existing["qty"]
-            old_avg = existing["avg_entry"]
-            new_qty = old_qty + qty
-            new_avg = (
-                (old_qty * old_avg + qty * price) / new_qty if new_qty > 0 else price
-            )
-            self._holdings[clean] = {"qty": new_qty, "avg_entry": new_avg}
-            return result
-
         body = {
             "client_order_id": str(uuid.uuid4()),
             "product_id": spec["product_id"],
@@ -854,30 +808,6 @@ class CoinbaseSpotBroker:
         if price <= 0:
             logger.warning(f"[spot] sell_spot {symbol}: cannot get price")
             return None
-
-        if self._paper:
-            real_id = f"paper_{uuid.uuid4().hex[:8]}"
-            result = {
-                "order_id": real_id,
-                "symbol": clean,
-                "product_id": spec["product_id"],
-                "side": "SELL",
-                "filled_size": str(round(size_units, 8)),
-                "filled_value": str(round(size_units * price, 2)),
-                "average_filled_price": str(round(price, 8)),
-                "fee_usd": (size_units * price) * 0.001,
-                "execution_route": "paper_market",
-                "status": "FILLED",
-                "paper": True,
-            }
-            existing = self._holdings.get(clean, {"qty": 0.0, "avg_entry": 0.0})
-            old_qty = existing["qty"]
-            new_qty = max(0.0, old_qty - size_units)
-            if new_qty == 0:
-                self._holdings.pop(clean, None)
-            else:
-                self._holdings[clean]["qty"] = new_qty
-            return result
 
         value_usd = size_units * price
 
@@ -992,16 +922,12 @@ class CoinbaseSpotBroker:
 _spot_broker: Optional[CoinbaseSpotBroker] = None
 
 
-def get_spot_broker(paper: Optional[bool] = None) -> CoinbaseSpotBroker:
+def get_spot_broker() -> CoinbaseSpotBroker:
     global _spot_broker
     if _spot_broker is None:
-        _spot_broker = CoinbaseSpotBroker(paper=paper)
+        _spot_broker = CoinbaseSpotBroker()
         if not _spot_broker.is_connected():
             _spot_broker.connect()
-    else:
-        # v18.17: ensure singleton matches requested mode if specified
-        if paper is not None:
-            _spot_broker._paper = paper
 
     return _spot_broker
 

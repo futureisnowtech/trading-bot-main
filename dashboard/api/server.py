@@ -65,7 +65,7 @@ async def get_db_snapshot():
             crypto_row = cursor.fetchone()
         except sqlite3.OperationalError: pass # Table missing
         
-        # 3. Active Spot Positions (with Live PnL)
+        # 3. Active Spot Positions (with Live PnL & SRE X-Ray)
         spot_positions = []
         try:
             from execution.coinbase_spot_broker import get_spot_broker
@@ -76,6 +76,7 @@ async def get_db_snapshot():
                 sym = p_dict["symbol"]
                 entry = p_dict["entry"]
                 qty = p_dict["qty"]
+                stop = p_dict.get("stop", 0.0)
                 
                 # Fetch live price for PnL
                 try:
@@ -85,6 +86,21 @@ async def get_db_snapshot():
                     current_price = entry
                 
                 live_pnl = (current_price - entry) * qty if current_price > 0 else 0.0
+                risk_usd = (entry - stop) * qty if stop > 0 else 0.0
+
+                # SRE X-Ray: Hold Conviction
+                conviction_score = 50.0
+                hold_rationale = "Neutral technical structure."
+                try:
+                    cursor.execute("SELECT final_spot_score FROM scan_candidates WHERE symbol=? ORDER BY ts DESC LIMIT 1", (sym,))
+                    score_row = cursor.fetchone()
+                    if score_row:
+                        conviction_score = float(score_row[0] or 50.0)
+                        if conviction_score > 60: hold_rationale = "Strong trend structure. High hold conviction."
+                        elif conviction_score > 52: hold_rationale = "Momentum positive. Trend intact."
+                        elif conviction_score < 48: hold_rationale = "Momentum decaying. Near thesis_decay threshold."
+                        else: hold_rationale = "Consolidating. Monitoring for trend resumption."
+                except: pass
 
                 spot_positions.append({
                     "symbol": sym,
@@ -92,13 +108,16 @@ async def get_db_snapshot():
                     "entry_price": entry,
                     "current_price": current_price,
                     "live_pnl": live_pnl,
-                    "stop": p_dict.get("stop", 0.0),
+                    "risk_usd": risk_usd,
+                    "conviction_score": conviction_score,
+                    "hold_rationale": hold_rationale,
+                    "stop": stop,
                     "target": p_dict.get("target", 0.0),
                     "strategy": p_dict.get("strategy", ""),
                     "reason": p_dict.get("entry_reason", "")
                 })
         except Exception as e: 
-            logging.debug(f"Spot PnL error: {e}")
+            logging.debug(f"Spot PnL/X-Ray error: {e}")
         
         # 4. Learner State (Vaccinations)
         vaccinations = []
@@ -165,19 +184,29 @@ async def get_db_snapshot():
                 })
         except sqlite3.OperationalError: pass
         
-        # 9. System Events & Forecast Evaluations
+        # 9. System Events & Forecast Evaluations & Health Audit
         events = []
         forecast_evaluations = []
+        error_count = 0
         try:
-            cursor.execute("SELECT * FROM system_events ORDER BY ts DESC LIMIT 20")
-            for r in cursor.fetchall():
+            cursor.execute("SELECT * FROM system_events ORDER BY ts DESC LIMIT 100")
+            rows = cursor.fetchall()
+            for r in rows:
                 msg = r["message"]
-                evt = {"ts": r["ts"], "level": r["level"], "source": r["source"], "message": msg}
-                events.append(evt)
+                level = r["level"]
+                evt = {"ts": r["ts"], "level": level, "source": r["source"], "message": msg}
+                if len(events) < 20: events.append(evt)
+                
+                if level in ("ERROR", "FATAL"):
+                    error_count += 1
+                
                 # RC: Capture Forecast evaluations specifically for X-Ray
                 if r["source"] == "ForecastRunner" and ("VETO" in msg or "Entry" in msg):
                     forecast_evaluations.append(evt)
         except sqlite3.OperationalError: pass
+
+        # SRE: Data Integrity Score
+        integrity_score = max(0, 100 - (error_count * 5))
 
         # 10. Live Hunt (Scan Candidates)
         live_hunt = []
@@ -247,6 +276,26 @@ async def get_db_snapshot():
                 })
         except sqlite3.OperationalError: pass
 
+        # 13. Strategy Edge Heatmap
+        edge_heatmap = []
+        try:
+            cursor.execute("""
+                SELECT strategy, SUM(pnl_usd) as pnl, COUNT(*) as trades, 
+                       SUM(CASE WHEN won=1 THEN 1 ELSE 0 END) as wins
+                FROM trades 
+                WHERE ts > datetime('now', '-7 days')
+                GROUP BY strategy
+            """)
+            for r in cursor.fetchall():
+                trades = r["trades"]
+                wins = r["wins"]
+                edge_heatmap.append({
+                    "strategy": r["strategy"],
+                    "pnl": round(float(r["pnl"] or 0.0), 2),
+                    "win_rate": round((wins / trades) * 100, 1) if trades > 0 else 0.0
+                })
+        except sqlite3.OperationalError: pass
+
         conn.close()
         
         # Calculate Equity safely
@@ -275,6 +324,10 @@ async def get_db_snapshot():
             "recent_trades": recent_trades,
             "events": events,
             "vitals": vitals,
+            "sre": {
+                "integrity_score": integrity_score,
+                "edge_heatmap": edge_heatmap
+            },
             "system": {
                 "time": datetime.now().strftime("%H:%M:%S"),
                 "status": "OPERATIONAL",

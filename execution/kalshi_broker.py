@@ -288,7 +288,7 @@ class KalshiBroker:
             # Ask for YES = 1.0 - (No Bid)
             yes_bid = float(yes_levels[0][0]) / 100.0 if yes_levels else None
             no_bid = float(no_levels[0][0]) / 100.0 if no_levels else None
-            yes_ask = (1.0 - no_bid) if no_bid is not None else None
+            yes_ask = round(1.0 - no_bid, 4) if no_bid is not None else None
             
             mid = round((yes_bid + yes_ask) / 2.0, 4) if yes_bid and yes_ask else yes_bid or yes_ask
             spread = round(yes_ask - yes_bid, 4) if yes_bid and yes_ask else None
@@ -303,6 +303,8 @@ class KalshiBroker:
                 "ts": datetime.now(timezone.utc).isoformat(),
             }
         except Exception as e:
+            # RC: Un-silence the error for X-Ray observability
+            logger.error(f"[KalshiBroker] get_quote error for {ticker}: {e}")
             return {"local_symbol": ticker, "bid": None, "ask": None, "ts": datetime.now(timezone.utc).isoformat()}
 
     def get_quotes_batch(self, contracts: list[dict]) -> list[dict]:

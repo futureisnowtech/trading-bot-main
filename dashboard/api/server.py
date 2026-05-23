@@ -65,22 +65,40 @@ async def get_db_snapshot():
             crypto_row = cursor.fetchone()
         except sqlite3.OperationalError: pass # Table missing
         
-        # 3. Active Spot Positions
+        # 3. Active Spot Positions (with Live PnL)
         spot_positions = []
         try:
+            from execution.coinbase_spot_broker import get_spot_broker
+            spot_broker = get_spot_broker()
             cursor.execute("SELECT * FROM open_positions WHERE qty > 0")
             for p in cursor.fetchall():
                 p_dict = dict(p)
+                sym = p_dict["symbol"]
+                entry = p_dict["entry"]
+                qty = p_dict["qty"]
+                
+                # Fetch live price for PnL
+                try:
+                    top = spot_broker.get_spot_top_of_book(sym)
+                    current_price = float(top.get("best_bid") or entry)
+                except:
+                    current_price = entry
+                
+                live_pnl = (current_price - entry) * qty if current_price > 0 else 0.0
+
                 spot_positions.append({
-                    "symbol": p_dict["symbol"],
-                    "qty": p_dict["qty"],
-                    "entry_price": p_dict["entry"],
+                    "symbol": sym,
+                    "qty": qty,
+                    "entry_price": entry,
+                    "current_price": current_price,
+                    "live_pnl": live_pnl,
                     "stop": p_dict.get("stop", 0.0),
                     "target": p_dict.get("target", 0.0),
                     "strategy": p_dict.get("strategy", ""),
                     "reason": p_dict.get("entry_reason", "")
                 })
-        except sqlite3.OperationalError: pass
+        except Exception as e: 
+            logging.debug(f"Spot PnL error: {e}")
         
         # 4. Learner State (Vaccinations)
         vaccinations = []
@@ -147,12 +165,18 @@ async def get_db_snapshot():
                 })
         except sqlite3.OperationalError: pass
         
-        # 9. System Events
+        # 9. System Events & Forecast Evaluations
         events = []
+        forecast_evaluations = []
         try:
-            cursor.execute("SELECT * FROM system_events ORDER BY ts DESC LIMIT 10")
+            cursor.execute("SELECT * FROM system_events ORDER BY ts DESC LIMIT 20")
             for r in cursor.fetchall():
-                events.append({"ts": r["ts"], "level": r["level"], "source": r["source"], "message": r["message"]})
+                msg = r["message"]
+                evt = {"ts": r["ts"], "level": r["level"], "source": r["source"], "message": msg}
+                events.append(evt)
+                # RC: Capture Forecast evaluations specifically for X-Ray
+                if r["source"] == "ForecastRunner" and ("VETO" in msg or "Entry" in msg):
+                    forecast_evaluations.append(evt)
         except sqlite3.OperationalError: pass
 
         # 10. Live Hunt (Scan Candidates)
@@ -205,14 +229,15 @@ async def get_db_snapshot():
         macro_radar = []
         try:
             # Join contracts and quotes to get real-time implied probability
+            # Deduplicate by ensuring fc.right='C' (YES)
             cursor.execute("""
                 SELECT fm.market_name, fc.local_symbol, fc.strike, 
                        (SELECT implied_prob FROM forecast_quotes fq WHERE fq.contract_id = fc.id ORDER BY ts DESC LIMIT 1) as prob
                 FROM forecast_contracts fc
                 JOIN forecast_markets fm ON fm.id = fc.market_id
-                WHERE fc.active = 1
+                WHERE fc.active = 1 AND fc.right = 'C'
                 ORDER BY fc.last_seen_at DESC
-                LIMIT 5
+                LIMIT 10
             """)
             for r in cursor.fetchall():
                 macro_radar.append({
@@ -242,7 +267,8 @@ async def get_db_snapshot():
                 "active_markets": forecast_count,
                 "positions": forecast_positions,
                 "max_positions": 10,
-                "radar": macro_radar
+                "radar": macro_radar,
+                "evaluations": forecast_evaluations
             },
             "live_hunt": live_hunt,
             "intelligence_summary": summary,

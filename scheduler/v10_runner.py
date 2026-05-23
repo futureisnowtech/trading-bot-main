@@ -934,7 +934,12 @@ def _scan_and_trade_inner(spot_only: bool = False):
     _f_entered = 0
 
     for candidate in candidates:
-        symbol = candidate.get("symbol", "")
+        # RC12: Pre-emptive symbol normalization for clean logs and execution
+        raw_sym = candidate.get("symbol", "")
+        symbol = str(raw_sym).upper().replace("PF_", "").replace("USD", "").replace("USDT", "").replace("-PERP", "")
+        candidate["symbol"] = symbol
+        candidate["raw_scanner_symbol"] = raw_sym
+        
         direction = candidate.get("direction", "LONG")
         _route_hint = _tradeability_hint(
             symbol,

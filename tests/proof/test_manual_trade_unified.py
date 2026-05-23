@@ -155,7 +155,7 @@ def test_mt03_spot_executable_result_has_correct_structure():
 
         try:
             config.SPOT_LANE_ACTIVE = True
-            config.SPOT_MAX_DEPLOYED_PCT = 0.40
+            config.SPOT_MAX_DEPLOYED_PCT = 1.0
             config.SPOT_MIN_ORDER_USD = 10.0
             config.AUTONOMOUS_LIVE_PERP_SYMBOLS = ["BTC", "ETH", "SOL", "XRP"]
             config.CORE_EXECUTION_UNDERLYINGS = {"BTC", "ETH", "SOL", "XRP"}
@@ -201,7 +201,7 @@ def test_mt04_perp_executable_result_has_correct_structure():
         try:
             config.SPOT_LANE_ACTIVE = True
             config.SPOT_SYMBOLS = ["BTC", "ETH", "SOL", "XRP"]
-            config.SPOT_MAX_DEPLOYED_PCT = 0.40
+            config.SPOT_MAX_DEPLOYED_PCT = 1.0
             config.SPOT_MIN_ORDER_USD = 10.0
             config.AUTONOMOUS_LIVE_PERP_SYMBOLS = ["BTC", "ETH", "SOL", "XRP"]
             config.CORE_EXECUTION_UNDERLYINGS = {"BTC", "ETH", "SOL", "XRP"}

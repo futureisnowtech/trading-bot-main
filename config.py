@@ -51,8 +51,8 @@ TRADE_SESSION_START: str = os.getenv("TRADE_SESSION_START", "2026-03-28")
 # ACCOUNT
 # ════════════════════════════════════════════════════════════════════
 ACCOUNT_SIZE: float = float(os.getenv("ACCOUNT_SIZE", "5000"))
-MAX_DEPLOYED_PCT: float = 0.90
-CASH_RESERVE_PCT: float = 0.10
+MAX_DEPLOYED_PCT: float = 1.0
+CASH_RESERVE_PCT: float = 0.0
 
 # ════════════════════════════════════════════════════════════════════
 # SYMBOL SUPPRESSION (v18.16 — forensic audit 2026-04-08)
@@ -114,7 +114,7 @@ SPOT_STRATEGY_SYMBOLS: list = [
     ).split(",")
     if s.strip()
 ]
-SPOT_MAX_DEPLOYED_PCT: float = float(os.getenv("SPOT_MAX_DEPLOYED_PCT", "0.50"))
+SPOT_MAX_DEPLOYED_PCT: float = float(os.getenv("SPOT_MAX_DEPLOYED_PCT", "1.0"))
 SPOT_MAX_POSITIONS_PER_SYMBOL: int = int(os.getenv("SPOT_MAX_POSITIONS_PER_SYMBOL", "3"))
 SPOT_MIN_ORDER_USD: float = float(os.getenv("SPOT_MIN_ORDER_USD", "25.0"))
 SPOT_WEEKDAYS_ONLY: bool = os.getenv("SPOT_WEEKDAYS_ONLY", "false").lower() == "true"
@@ -139,7 +139,7 @@ SPOT_SESSION_MIN_EDGE_MULT: float = float(
 SPOT_OFFSESSION_MIN_EDGE_MULT: float = float(
     os.getenv("SPOT_OFFSESSION_MIN_EDGE_MULT", "2.0")
 )
-SPOT_TOTAL_ALLOC_CAP_PCT: float = float(os.getenv("SPOT_TOTAL_ALLOC_CAP_PCT", "0.50"))
+SPOT_TOTAL_ALLOC_CAP_PCT: float = float(os.getenv("SPOT_TOTAL_ALLOC_CAP_PCT", "1.0"))
 SPOT_EXIT_POLL_SECONDS: int = int(os.getenv("SPOT_EXIT_POLL_SECONDS", "5"))
 SPOT_SCALP_SCAN_SECONDS: int = int(os.getenv("SPOT_SCALP_SCAN_SECONDS", "60"))
 SPOT_STATE_CACHE_SECONDS: int = int(os.getenv("SPOT_STATE_CACHE_SECONDS", "45"))
@@ -1197,6 +1197,12 @@ GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 # ════════════════════════════════════════════════════════════════════
 # Unrestricted Portfolio Utilization (v18.33 Pivot)
 KALSHI_MAX_DEPLOYED_PCT: float = 1.0
+
+# Max concurrent binary events (unshackled from legacy 2)
+KALSHI_MAX_CONCURRENT_POSITIONS: int = 15
+
+# Kelly criterion hard cap (per position)
+KALSHI_KELLY_CAP: float = 0.10
 
 # Absolute risk per Kalshi event (0.015 = 1.5% of total account equity)
 # Binary outcome protection: total loss to $0.00 is capped.

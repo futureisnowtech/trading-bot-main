@@ -207,8 +207,8 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
             open_count = len(open_positions)
 
             if open_count >= MAX_CONCURRENT_POSITIONS:
-                logger.debug(
-                    "[ForecastRunner] Max concurrent positions reached — skip eval"
+                logger.warning(
+                    f"[ForecastRunner] Max concurrent positions reached ({open_count}/{MAX_CONCURRENT_POSITIONS}) — skip eval"
                 )
                 return []
 
@@ -220,8 +220,8 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
             deployed_pct = min(1.0, deployed_value / max(bankroll, 1.0))
 
             if deployed_pct >= MAX_DEPLOYED_PCT:
-                logger.debug(
-                    f"[ForecastRunner] Deployed cap hit ({deployed_pct:.1%}) — skip eval"
+                logger.warning(
+                    f"[ForecastRunner] Deployed cap hit ({deployed_pct:.1%}/{MAX_DEPLOYED_PCT:.1%}) — skip eval"
                 )
                 return []
 
@@ -259,12 +259,16 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
 
             for candidate in candidates:
                 result = candidate["result"]
+                contract = candidate["contract"]
+                local_sym = contract.get("local_symbol", "")
 
                 # Only enter if econ approved AND contracts > 0
                 if not result.econ_approved or result.position_contracts <= 0:
+                    if result.veto_reason and "concurrent_cap" in result.veto_reason:
+                        logger.warning(f"[ForecastRunner] {local_sym} vetoed: {result.veto_reason}")
+                    else:
+                        logger.debug(f"[ForecastRunner] {local_sym} not approved: {result.veto_reason or 'sizing_zero'}")
                     continue
-
-                contract = candidate["contract"]
 
                 # Hard duplicate guard: no same-contract double-down
                 key = f"{contract.get('local_symbol')}_{contract.get('right')}"

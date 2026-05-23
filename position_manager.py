@@ -30,12 +30,13 @@ import threading
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
+from config import MAX_DEPLOYED_PCT
 
 logger = logging.getLogger(__name__)
 
 _RISK_PCT = 0.02  # 2% account risk per trade
 _MAX_SINGLE_POSITION_PCT = 0.05  # 5% of account per position (scales with balance)
-_MAX_DEPLOYED_PCT = 0.30  # 30% max total deployment
+_MAX_DEPLOYED_PCT = MAX_DEPLOYED_PCT  # Mapped to Sovereign config
 _MIN_NOTIONAL = 10.0  # $10 minimum
 
 # Kelly ramp thresholds

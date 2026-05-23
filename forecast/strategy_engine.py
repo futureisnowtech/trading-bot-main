@@ -32,6 +32,8 @@ import numpy as np
 from config import (
     DB_PATH,
     KALSHI_FEE_BUFFER,
+    KALSHI_KELLY_CAP,
+    KALSHI_MAX_CONCURRENT_POSITIONS,
     KALSHI_MAX_DEPLOYED_PCT,
     KALSHI_MAX_RISK_PER_EVENT_PCT,
 )
@@ -98,11 +100,11 @@ SAME_EVENT_PENALTY: float = 0.50  # halve Kelly fraction if same event family op
 # Late-repricing: look back this many hours for movement
 LATE_REPRICING_LOOKBACK_HOURS: float = 24.0
 
-# Sizing parameters
-KELLY_CAP: float = 0.10
-MAX_DEPLOYED_PCT: float = 0.35
-MAX_RISK_PER_EVENT_PCT: float = 0.10
-MAX_CONCURRENT_POSITIONS: int = 2
+# Sizing parameters (mapped to Sovereign config v18.33)
+KELLY_CAP: float = KALSHI_KELLY_CAP
+MAX_DEPLOYED_PCT: float = KALSHI_MAX_DEPLOYED_PCT
+MAX_RISK_PER_EVENT_PCT: float = KALSHI_MAX_RISK_PER_EVENT_PCT
+MAX_CONCURRENT_POSITIONS: int = KALSHI_MAX_CONCURRENT_POSITIONS
 
 MACRO_CACHE_FILE = "logs/cached_macro_regime.json"
 

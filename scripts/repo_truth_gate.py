@@ -82,6 +82,19 @@ POLICY_SKIP_FILES: set[str] = {
     "test_hooks.sh",  # the test harness must prove the block works
 }
 
+# ── Risk Constant Audit: Prevents hardcoded throttles outside config.py ───────
+# These patterns catch attempts to hardcode risk limits (MAX_POSITIONS, MAX_DEPLOYED)
+# in strategy or execution files. They must live in config.py only.
+RISK_CONSTANT_PATTERNS: list[tuple[str, str]] = [
+    (r"MAX_CONCURRENT_POSITIONS\s*[:=]\s*\d+", "Hardcoded MAX_CONCURRENT_POSITIONS"),
+    (r"MAX_DEPLOYED_PCT\s*[:=]\s*0\.\d+", "Hardcoded MAX_DEPLOYED_PCT"),
+    (r"MAX_RISK_PER_EVENT_PCT\s*[:=]\s*0\.\d+", "Hardcoded MAX_RISK_PER_EVENT_PCT"),
+    (r"KELLY_CAP\s*[:=]\s*0\.\d+", "Hardcoded KELLY_CAP"),
+]
+
+# Files allowed to define risk constants (only config.py)
+RISK_ALLOW_FILES: set[str] = {"config.py"}
+
 
 # ── File collection ───────────────────────────────────────────────────────────
 
@@ -205,6 +218,26 @@ def check_live_start_policy(files: list[Path]) -> list[str]:
     return failures
 
 
+def check_risk_constants(files: list[Path]) -> list[str]:
+    """Fail if any file other than config.py defines risk-limit constants."""
+    failures: list[str] = []
+    for path in files:
+        if not _should_scan(path):
+            continue
+        if path.name in RISK_ALLOW_FILES:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+        for pattern, label in RISK_CONSTANT_PATTERNS:
+            matches = re.findall(pattern, text)
+            if matches:
+                rel = path.relative_to(_ROOT)
+                failures.append(f"  {rel}: {label} — must be moved to config.py")
+    return failures
+
+
 def check_ci_config() -> list[str]:
     """Fail if CI config is missing required steps."""
     failures: list[str] = []
@@ -283,6 +316,17 @@ def main() -> int:
         all_failures.extend(policy_fails)
     else:
         print("  PASS: No live-start policy bypasses in hooks/scripts")
+
+    # ── Risk constant audit ────────────────────────────────────────────────
+    print("\n── Risk constant audit ───────────────────────────────")
+    risk_fails = check_risk_constants(files)
+    if risk_fails:
+        print(f"  FAIL: {len(risk_fails)} risk-limit hardcode(s) found:")
+        for f in risk_fails:
+            print(f)
+        all_failures.extend(risk_fails)
+    else:
+        print("  PASS: All risk limits correctly mapped to config.py")
 
     # ── Strict-only: CI config ─────────────────────────────────────────────
     if args.strict:

@@ -869,7 +869,9 @@ def open_spot(
         logger.info(f"[spot_engine] {clean} blocked — spot_position_already_open")
         return {"blocked": "spot_position_already_open"}
     if size_usd < SPOT_MIN_ORDER_USD:
-        logger.info(f"[spot_engine] {clean} blocked — spot_size_below_minimum")
+        logger.warning(
+            f"[spot_engine] {clean} blocked — spot_size_below_minimum (${size_usd:.2f} < ${SPOT_MIN_ORDER_USD:.2f})"
+        )
         return {"blocked": "spot_size_below_minimum"}
 
     broker = _get_broker()
@@ -886,8 +888,11 @@ def open_spot(
         if total_spot_equity > 0 and (projected / total_spot_equity) > float(
             SPOT_TOTAL_ALLOC_CAP_PCT
         ):
-            logger.info(f"[spot_engine] {clean} blocked — spot_deployment_cap_exceeded")
-            return None
+            logger.warning(
+                f"[spot_engine] {clean} blocked — spot_deployment_cap_exceeded "
+                f"({projected / total_spot_equity:.1%} > {SPOT_TOTAL_ALLOC_CAP_PCT:.1%})"
+            )
+            return {"blocked": "spot_deployment_cap_exceeded"}
     except Exception:
         pass
 

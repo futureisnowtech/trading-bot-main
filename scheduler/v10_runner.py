@@ -3765,7 +3765,7 @@ def run_forever():
 
             broker = None
             try:
-                broker = get_spot_broker(paper=False)
+                broker = get_spot_broker()
                 if broker and not broker.is_connected():
                     broker.connect()
             except Exception:

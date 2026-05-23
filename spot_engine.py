@@ -127,7 +127,7 @@ def _get_broker(paper: bool = False) -> Optional["CoinbaseSpotBroker"]:
         return None
     try:
         from execution.coinbase_spot_broker import get_spot_broker
-        broker = get_spot_broker(paper=paper)
+        broker = get_spot_broker()
         if not broker.is_connected():
             broker.connect()
 
@@ -872,7 +872,7 @@ def open_spot(
         logger.info(f"[spot_engine] {clean} blocked — spot_size_below_minimum")
         return {"blocked": "spot_size_below_minimum"}
 
-    broker = _get_broker(paper=paper)
+    broker = _get_broker()
     if broker is None:
         logger.error(f"[spot_engine] {clean} — broker unavailable")
         return None
@@ -1182,7 +1182,7 @@ def close_spot(
     strategy = str(pos.get("strategy") or _position_strategy(clean))
     if qty <= 0:
         return None
-    broker = _get_broker(paper=paper)
+    broker = _get_broker()
     if broker is None:
         return None
 
@@ -1739,7 +1739,7 @@ def _economics_gate_exit(
 
 def check_spot_stops(paper: bool = False) -> List[Dict]:
     closed: List[Dict] = []
-    broker = _get_broker(paper=paper)
+    broker = _get_broker()
     if broker is None:
         return closed
     for pos in _load_spot_positions_from_db(paper=paper, bot_managed_only=True):
@@ -1758,7 +1758,7 @@ def check_spot_stops(paper: bool = False) -> List[Dict]:
 
 def check_spot_trailing(paper: bool = False) -> List[Dict]:
     closed: List[Dict] = []
-    broker = _get_broker(paper=paper)
+    broker = _get_broker()
     if broker is None:
         return closed
     for pos in _load_spot_positions_from_db(paper=paper, bot_managed_only=True):
@@ -1806,7 +1806,7 @@ def check_spot_targets(paper: bool = False) -> List[Dict]:
 
 def check_spot_stagnation_exits(paper: bool = False) -> List[Dict]:
     closed: List[Dict] = []
-    broker = _get_broker(paper=paper)
+    broker = _get_broker()
     if broker is None:
         return closed
     for pos in _load_spot_positions_from_db(paper=paper, bot_managed_only=True):
@@ -1876,7 +1876,7 @@ def check_spot_thesis_exits(paper: bool = False) -> List[Dict]:
             try:
                 from execution.coinbase_spot_broker import get_spot_broker
 
-                _broker = get_spot_broker(paper=paper)
+                _broker = get_spot_broker()
                 _mark = float(_broker.get_mark_price(sym) or 0.0) if _broker else 0.0
             except Exception:
                 _mark = 0.0

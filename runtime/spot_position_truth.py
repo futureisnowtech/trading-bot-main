@@ -190,8 +190,8 @@ def _load_db_spot_positions(db_path: str | None = None, paper: bool = False) -> 
 def _get_live_broker_snapshot(paper: bool = False) -> tuple[list[dict] | None, float | None]:
     try:
         from execution.coinbase_spot_broker import get_spot_broker
+        broker = get_spot_broker()
 
-        broker = get_spot_broker(paper=paper)
         if not broker.is_connected():
             broker.connect()
         if not broker.is_connected():

@@ -15,6 +15,7 @@
             --neon-green: #10b981;
             --neon-red: #ef4444;
             --neon-purple: #a855f7;
+            --neon-yellow: #f59e0b;
         }
         body {
             background-color: var(--bg);
@@ -40,6 +41,7 @@
         .neon-text-green { text-shadow: 0 0 15px rgba(16, 185, 129, 0.4); color: #34d399; }
         .neon-text-red { text-shadow: 0 0 15px rgba(239, 68, 68, 0.4); color: #f87171; }
         .neon-text-purple { text-shadow: 0 0 15px rgba(168, 85, 247, 0.4); color: #c084fc; }
+        .neon-text-yellow { text-shadow: 0 0 15px rgba(245, 158, 11, 0.4); color: #fbbf24; }
         
         .pulse-blue { animation: pulse-blue 2s infinite; }
         @keyframes pulse-blue {
@@ -75,7 +77,7 @@
             <div>
                 <h1 class="text-3xl font-extrabold tracking-tight text-white flex items-center">
                     SOVEREIGN <span class="neon-text-blue ml-3">COMMAND</span>
-                    <span class="bg-blue-500/10 text-blue-400 text-[10px] px-2 py-0.5 rounded-full border border-blue-500/30 ml-4 font-mono tracking-widest uppercase">v18.34.LIVE</span>
+                    <span class="bg-blue-500/10 text-blue-400 text-[10px] px-2 py-0.5 rounded-full border border-blue-500/30 ml-4 font-mono tracking-widest uppercase">v18.34.XRAY</span>
                 </h1>
                 <div class="flex items-center space-x-3 text-xs uppercase tracking-widest font-bold mt-1">
                     <span id="sys-status" class="neon-text-green flex items-center">
@@ -83,7 +85,7 @@
                         Neural Net Active
                     </span>
                     <span class="text-gray-600">/</span>
-                    <span class="text-gray-400">Droplet NYC3</span>
+                    <span class="text-yellow-500 uppercase">Weather: <span id="market-regime">NEUTRAL</span></span>
                 </div>
             </div>
         </div>
@@ -143,16 +145,15 @@
                 </div>
             </div>
 
-            <!-- Real-time Event Stream -->
-            <div class="glass-panel flex flex-col h-[500px]">
-                <div class="p-6 border-b border-gray-800 flex justify-between items-center">
-                    <h3 class="text-sm font-black text-gray-400 uppercase tracking-widest flex items-center">
-                        <span class="w-1.5 h-4 bg-red-500 mr-3 rounded-full"></span>
-                        Incident Log
-                    </h3>
-                </div>
-                <div id="event-log" class="flex-1 overflow-y-auto p-4 space-y-3 font-mono text-[11px] scroll-hide">
-                    <p class="text-gray-600 italic text-center mt-10">Listening for telemetry...</p>
+            <!-- Macro Forecast X-Ray: Radar -->
+            <div class="glass-panel p-6 space-y-4 border-t-4 border-t-purple-500">
+                <h3 class="text-sm font-black text-gray-400 uppercase tracking-widest flex justify-between items-center">
+                    <span>Macro Radar</span>
+                    <span class="text-[10px] bg-purple-500/10 text-purple-400 px-2 py-0.5 rounded italic">X-Ray Window</span>
+                </h3>
+                <div id="macro-radar" class="space-y-4">
+                    <!-- Dynamic Radar Results -->
+                    <p class="text-xs text-gray-600 italic">Polling prediction markets...</p>
                 </div>
             </div>
         </aside>
@@ -193,36 +194,36 @@
                 <div class="flex justify-between items-center">
                     <h3 class="text-sm font-black text-gray-400 uppercase tracking-widest flex items-center">
                         <span class="w-1.5 h-4 bg-purple-500 mr-3 rounded-full"></span>
-                        Macro Forecast Lane
+                        Forecast Portfolio
                     </h3>
                     <div class="flex space-x-6 text-right">
                         <div class="px-3 py-1 bg-purple-500/10 rounded-lg border border-purple-500/20">
-                            <span class="text-[10px] text-purple-400 font-black mr-2 uppercase">Markets</span>
+                            <span class="text-[10px] text-purple-400 font-black mr-2 uppercase">Tracking</span>
                             <span id="forecast-count" class="text-lg font-black text-white tabular-nums">0</span>
                         </div>
                         <div class="px-3 py-1 bg-purple-500/10 rounded-lg border border-purple-500/20">
-                            <span class="text-[10px] text-purple-400 font-black mr-2 uppercase">Utilization</span>
+                            <span class="text-[10px] text-purple-400 font-black mr-2 uppercase">Risk</span>
                             <span id="forecast-util" class="text-lg font-black text-white tabular-nums">0%</span>
                         </div>
                     </div>
                 </div>
                 <div id="forecast-positions" class="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <!-- Forecast items -->
-                    <div class="col-span-2 py-12 text-center">
-                        <p class="text-lg font-medium text-slate-500 italic">No active macro bets. Monitoring global events.</p>
+                    <div class="col-span-2 py-8 text-center bg-purple-950/10 border border-dashed border-purple-500/20 rounded-xl">
+                        <p class="text-sm font-bold text-purple-400/50 uppercase tracking-widest italic">Monitoring Global Event Horizon</p>
                     </div>
                 </div>
             </div>
         </section>
 
-        <!-- Right Wing: Live Hunt & Memory -->
+        <!-- Right Wing: Live Hunt & History -->
         <aside class="col-span-12 xl:col-span-3 space-y-6">
             
-            <!-- THE LIVE HUNT (New!) -->
+            <!-- THE LIVE HUNT (X-Ray!) -->
             <div class="glass-panel p-6 space-y-4 border-t-4 border-t-yellow-500">
                 <h3 class="text-sm font-black text-gray-400 uppercase tracking-widest flex justify-between items-center">
-                    <span>Live Hunt</span>
-                    <span class="text-[10px] bg-yellow-500/10 text-yellow-500 px-2 py-0.5 rounded italic">Real-time Scanner</span>
+                    <span>Hunt X-Ray</span>
+                    <span class="text-[10px] bg-yellow-500/10 text-yellow-500 px-2 py-0.5 rounded italic">Neural Scanner</span>
                 </h3>
                 <div id="live-hunt" class="space-y-4">
                     <!-- Dynamic Scan Results -->
@@ -231,7 +232,7 @@
             </div>
 
             <!-- Execution History -->
-            <div class="glass-panel flex flex-col h-[600px]">
+            <div class="glass-panel flex flex-col h-[500px]">
                 <div class="p-6 border-b border-gray-800">
                     <h3 class="text-sm font-black text-gray-400 uppercase tracking-widest">Recent Activity</h3>
                 </div>
@@ -262,9 +263,12 @@
                 return;
             }
 
-            // Core Vitals
+            // Header & Status
             document.getElementById('sys-time').innerText = data.system.time;
             document.getElementById('sys-uptime').innerText = formatUptime(data.system.uptime);
+            document.getElementById('market-regime').innerText = data.spot.regime;
+            
+            // Core Vitals
             document.getElementById('v-cpu').innerText = `${Math.round(data.vitals.cpu)}%`;
             document.getElementById('f-cpu').style.width = `${data.vitals.cpu}%`;
             document.getElementById('v-ram').innerText = `${Math.round(data.vitals.ram)}%`;
@@ -290,7 +294,7 @@
                                 <p class="text-[10px] text-blue-400 font-bold uppercase mt-1">${p.strategy}</p>
                             </div>
                             <div class="px-2 py-1 bg-blue-500/10 rounded text-[9px] font-bold text-blue-300 border border-blue-500/20 uppercase tracking-tighter">
-                                Active Engagement
+                                Active engagement
                             </div>
                         </div>
                         <div class="grid grid-cols-2 gap-4">
@@ -316,8 +320,8 @@
             } else {
                 spotPosContainer.innerHTML = `
                     <div class="col-span-2 py-16 text-center stat-card shimmer border-dashed">
-                        <p class="text-lg font-bold text-slate-500">Universe Scanned. Waiting for conviction...</p>
-                        <p class="text-xs text-slate-600 mt-1 uppercase tracking-widest font-bold">Scanning 8 Spot Pairs on Coinbase</p>
+                        <p class="text-lg font-bold text-slate-500 italic">Scanning Universe. Waiting for conviction...</p>
+                        <p class="text-xs text-slate-600 mt-2 uppercase tracking-widest font-black">Coinbase 8-Pair Spot Engine</p>
                     </div>
                 `;
             }
@@ -330,42 +334,52 @@
             const forecastPosContainer = document.getElementById('forecast-positions');
             if (data.forecast.positions && data.forecast.positions.length > 0) {
                 forecastPosContainer.innerHTML = data.forecast.positions.map(p => `
-                    <div class="p-4 bg-purple-900/10 border border-purple-500/20 rounded-xl flex justify-between items-center">
+                    <div class="p-4 bg-purple-900/10 border border-purple-500/20 rounded-xl flex justify-between items-center shadow-lg">
                         <div>
                             <p class="text-lg font-black text-purple-300 leading-none">${p.local_symbol}</p>
                             <p class="text-[9px] text-slate-500 font-bold uppercase mt-1">Binary Event Contract</p>
                         </div>
                         <div class="text-right">
                             <p class="text-2xl font-black ${p.side === 'YES' ? 'text-green-500' : 'text-red-500'}">${p.side}</p>
-                            <p class="text-[10px] font-bold text-slate-400">QTY: ${p.qty}</p>
+                            <p class="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">QTY: ${p.qty}</p>
                         </div>
                     </div>
                 `).join('');
             } else {
                 forecastPosContainer.innerHTML = `
                     <div class="col-span-2 py-8 text-center bg-purple-950/10 border border-dashed border-purple-500/20 rounded-xl">
-                        <p class="text-sm font-bold text-purple-400/50 uppercase tracking-widest">Global Events Monitoring Active</p>
+                        <p class="text-sm font-black text-purple-400/50 uppercase tracking-[0.2em]">Global Events Monitoring Active</p>
                     </div>
                 `;
             }
 
-            // LIVE HUNT
+            // MACRO RADAR (X-RAY)
+            const radarContainer = document.getElementById('macro-radar');
+            if (data.forecast.radar && data.forecast.radar.length > 0) {
+                radarContainer.innerHTML = data.forecast.radar.map(r => `
+                    <div class="p-3 bg-purple-900/5 border border-purple-800/30 rounded-lg">
+                        <div class="flex justify-between items-start mb-2">
+                            <p class="text-[11px] font-bold text-slate-300 leading-tight">${r.event}</p>
+                            <span class="text-[10px] font-black text-purple-500 ml-2 tabular-nums">${r.probability}%</span>
+                        </div>
+                        <div class="gauge-bar h-1.5"><div class="gauge-fill" style="width: ${r.probability}%; background: var(--neon-purple)"></div></div>
+                    </div>
+                `).join('');
+            }
+
+            // LIVE HUNT X-RAY
             const huntContainer = document.getElementById('live-hunt');
             if (data.live_hunt && data.live_hunt.length > 0) {
                 huntContainer.innerHTML = data.live_hunt.map(h => `
-                    <div class="flex justify-between items-center p-3 bg-slate-900/50 border border-slate-800 rounded-lg">
-                        <div class="flex items-center space-x-3">
-                            <div class="w-8 h-8 rounded bg-yellow-500/10 border border-yellow-500/30 flex items-center justify-center font-black text-[10px] text-yellow-500">
-                                ${h.symbol[0]}
-                            </div>
-                            <div>
-                                <p class="text-sm font-black text-white leading-none">${h.symbol}</p>
-                                <p class="text-[9px] text-yellow-500/60 font-bold uppercase">${h.direction}</p>
-                            </div>
+                    <div class="flex flex-col p-4 bg-slate-900/50 border border-slate-800 rounded-xl shadow-lg border-l-2 ${h.reason === 'Passed Score' ? 'border-l-green-500' : 'border-l-red-900'}">
+                        <div class="flex justify-between items-center mb-1">
+                            <p class="text-lg font-black text-white leading-none">${h.symbol}</p>
+                            <p class="text-sm font-black text-slate-400 tabular-nums">Score: ${h.score}</p>
                         </div>
-                        <div class="text-right">
-                            <p class="text-lg font-black text-slate-300 tabular-nums">${h.score}</p>
-                            <p class="text-[8px] text-slate-600 font-bold uppercase truncate max-w-[100px]">${h.reason}</p>
+                        <p class="text-[10px] text-yellow-500/80 font-black uppercase mb-3 tracking-widest">${h.direction} ATTEMPT</p>
+                        <div class="p-2 bg-black/40 rounded border border-slate-800">
+                             <p class="text-[10px] text-slate-500 font-bold uppercase mb-1">Engine Decision:</p>
+                             <p class="text-[11px] font-medium text-slate-300 leading-tight">${h.reason_layman}</p>
                         </div>
                     </div>
                 `).join('');
@@ -377,12 +391,12 @@
                 auditFeed.innerHTML = data.recent_trades.map(t => {
                     const pnlColor = t.pnl_usd >= 0 ? 'text-green-400' : 'text-red-400';
                     return `
-                    <div class="p-4 bg-slate-800/20 border border-slate-800/50 rounded-xl hover:bg-slate-800/40 transition-all">
+                    <div class="p-4 bg-slate-800/20 border border-slate-800/50 rounded-xl hover:bg-slate-800/40 transition-all shadow-sm">
                         <div class="flex justify-between items-start">
                             <p class="text-base font-black text-white">${t.symbol}</p>
                             <p class="text-sm font-black ${pnlColor}">${t.pnl_usd !== 0 ? (t.pnl_usd >= 0 ? '+' : '') + t.pnl_usd.toFixed(2) : '-'}</p>
                         </div>
-                        <div class="flex justify-between items-end mt-2">
+                        <div class="flex justify-between items-end mt-3">
                             <p class="text-[10px] font-bold text-slate-500 uppercase">${t.side} ${t.qty} @ ${t.price.toFixed(4)}</p>
                             <p class="text-[9px] font-mono text-slate-600">${new Date(t.timestamp).toLocaleTimeString()}</p>
                         </div>
@@ -396,11 +410,11 @@
                 eventLog.innerHTML = data.events.map(e => {
                     const levelClass = e.level === 'WARN' ? 'text-yellow-500' : (e.level === 'ERROR' ? 'text-red-500' : 'text-slate-500');
                     return `
-                        <div class="flex space-x-3 border-b border-slate-800/50 py-2 group">
-                            <span class="text-slate-700 font-bold tabular-nums">${new Date(e.ts * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                        <div class="flex space-x-3 border-b border-slate-800/50 py-3 group">
+                            <span class="text-slate-700 font-black tabular-nums text-[10px]">${new Date(e.ts * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
                             <div class="flex-1">
-                                <span class="${levelClass} font-black text-[9px] uppercase mr-2">[${e.level}]</span>
-                                <span class="text-slate-400 leading-tight">${e.message}</span>
+                                <span class="${levelClass} font-black text-[9px] uppercase mr-2 tracking-tighter">[${e.level}]</span>
+                                <span class="text-slate-400 leading-tight font-medium">${e.message}</span>
                             </div>
                         </div>
                     `;

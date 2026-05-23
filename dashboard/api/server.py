@@ -157,20 +157,39 @@ async def get_db_snapshot():
 
         # 10. Live Hunt (Scan Candidates)
         live_hunt = []
+        reason_map = {
+            "strategy_veto": "Market structure too weak for current regime",
+            "spot_size_below_minimum": "Account balance too low for minimum order after risk scaling",
+            "below_regime_floor": "Signal strength did not meet strict regime requirements",
+            "spread_cap_exceeded": "Market spread too wide (liquidity protection active)",
+            "depth_below_minimum": "Insufficient order book depth for safe entry",
+            "spot_balance_unavailable": "API authentication failure (CDP Key Error)",
+            "cooldown_active": "Resting symbol to prevent over-trading",
+            "Passed Score": "Setup validated. Entering execution pipeline."
+        }
         try:
             cursor.execute("SELECT symbol, direction, final_spot_score, entry_block_reason as reason, ts FROM scan_candidates ORDER BY ts DESC LIMIT 5")
             for r in cursor.fetchall():
+                raw_reason = r["reason"] or "Passed Score"
                 live_hunt.append({
                     "symbol": r["symbol"],
                     "direction": r["direction"],
                     "score": round(float(r["final_spot_score"] or 0.0), 1),
-                    "reason": r["reason"] or "Passed Score",
+                    "reason": raw_reason,
+                    "reason_layman": reason_map.get(raw_reason, raw_reason),
                     "ts": r["ts"]
                 })
         except sqlite3.OperationalError: pass
 
-        # 11. Intelligence Summary (Layman Insights)
-        summary = "Bot is operational and scanning for opportunities."
+        # 11. Intelligence Summary & Market Weather
+        regime = "NEUTRAL"
+        try:
+            cursor.execute("SELECT last_regime FROM spot_regime_state ORDER BY ts DESC LIMIT 1")
+            row = cursor.fetchone()
+            if row: regime = row["last_regime"]
+        except sqlite3.OperationalError: pass
+
+        summary = f"Bot is operational. Market weather is currently {regime}."
         if pnl_24h > 0:
             summary = f"System is performing well today with a net profit of ${pnl_24h:,.2f}."
         elif pnl_24h < 0:
@@ -181,9 +200,27 @@ async def get_db_snapshot():
             summary += f" Currently managing active spot positions in {symbols}."
         else:
             summary += " Currently in 'Watch' mode, waiting for high-conviction entry vectors."
-            
-        if forecast_count > 0:
-            summary += f" Forecast lane is monitoring {forecast_count} prediction markets for macro edge."
+
+        # 12. Macro Radar (X-Ray into monitored events)
+        macro_radar = []
+        try:
+            # Join contracts and quotes to get real-time implied probability
+            cursor.execute("""
+                SELECT fm.market_name, fc.local_symbol, fc.strike, 
+                       (SELECT implied_prob FROM forecast_quotes fq WHERE fq.contract_id = fc.id ORDER BY ts DESC LIMIT 1) as prob
+                FROM forecast_contracts fc
+                JOIN forecast_markets fm ON fm.id = fc.market_id
+                WHERE fc.active = 1
+                ORDER BY fc.last_seen_at DESC
+                LIMIT 5
+            """)
+            for r in cursor.fetchall():
+                macro_radar.append({
+                    "event": r["market_name"],
+                    "symbol": r["local_symbol"],
+                    "probability": round(float(r["prob"] or 0.5) * 100, 1)
+                })
+        except sqlite3.OperationalError: pass
 
         conn.close()
         
@@ -198,12 +235,14 @@ async def get_db_snapshot():
                 "equity": equity,
                 "pnl_24h": pnl_24h,
                 "positions": spot_positions,
-                "vaccinations": vaccinations
+                "vaccinations": vaccinations,
+                "regime": regime
             },
             "forecast": {
                 "active_markets": forecast_count,
                 "positions": forecast_positions,
-                "max_positions": 10
+                "max_positions": 10,
+                "radar": macro_radar
             },
             "live_hunt": live_hunt,
             "intelligence_summary": summary,

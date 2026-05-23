@@ -222,9 +222,30 @@
             </div>
         </section>
 
-        <!-- Right Wing: Hunting & Structural Faults -->
+        <!-- Right Wing: Oracle AI & Structural Faults -->
         <aside class="col-span-12 xl:col-span-3 space-y-6">
             
+            <!-- THE ORACLE CHOP (NEW!) -->
+            <div class="glass-panel flex flex-col h-[400px] border-t-4 border-t-blue-500">
+                <div class="p-6 border-b border-gray-800 flex justify-between items-center">
+                    <h3 class="text-sm font-black text-gray-400 uppercase tracking-widest flex items-center">
+                        <span class="w-1.5 h-4 bg-blue-500 mr-3 rounded-full pulse-blue"></span>
+                        Sovereign Oracle
+                    </h3>
+                    <span class="text-[10px] bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded italic">Gemini-1.5-Flash</span>
+                </div>
+                <div id="oracle-chat" class="flex-1 overflow-y-auto p-4 space-y-4 font-sans text-xs scroll-hide bg-slate-950/30">
+                    <div class="text-slate-500 italic text-center mt-10">Ask me anything about the system state...</div>
+                </div>
+                <div class="p-4 border-t border-gray-800 bg-slate-900/50">
+                    <div class="flex space-x-2">
+                        <input type="text" id="oracle-input" placeholder="Query Oracle..." 
+                               class="flex-1 bg-black/40 border border-slate-700 rounded-lg px-3 py-2 text-white text-xs focus:outline-none focus:border-blue-500 transition-all">
+                        <button id="oracle-send" class="bg-blue-600 hover:bg-blue-500 text-white font-black px-4 py-2 rounded-lg text-[10px] uppercase transition-all">Send</button>
+                    </div>
+                </div>
+            </div>
+
             <!-- THE HUNT X-RAY -->
             <div class="glass-panel p-6 space-y-4 border-t-4 border-t-yellow-500">
                 <h3 class="text-sm font-black text-gray-400 uppercase tracking-widest flex justify-between items-center">
@@ -236,8 +257,8 @@
                 </div>
             </div>
 
-            <!-- Incident Log (Structural Error Stream) -->
-            <div class="glass-panel flex flex-col h-[500px] border-l-4 border-l-red-500">
+            <!-- Incident Log -->
+            <div class="glass-panel flex flex-col h-[400px] border-l-4 border-l-red-500">
                 <div class="p-6 border-b border-gray-800 flex justify-between items-center">
                     <h3 class="text-sm font-black text-gray-400 uppercase tracking-widest">Incident Stream</h3>
                 </div>
@@ -357,7 +378,10 @@
             const evalContainer = document.getElementById('forecast-evals');
             if (data.forecast.evaluations && data.forecast.evaluations.length > 0) {
                 evalContainer.innerHTML = data.forecast.evaluations.map(e => `
-                    <div class="py-1 border-b border-purple-900/20"><p class="text-slate-300 leading-tight">${e.message.replace('[ForecastRunner] ', '')}</p></div>
+                    <div class="py-1 border-b border-purple-900/20 group">
+                        <span class="text-[8px] text-slate-500">${new Date(e.ts * 1000).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
+                        <p class="text-slate-300 leading-tight">${e.message.replace('[ForecastRunner] ', '')}</p>
+                    </div>
                 `).join('');
             }
 
@@ -388,6 +412,55 @@
                 }).join('');
             }
         };
+
+        // Oracle Chat Logic
+        const oracleInput = document.getElementById('oracle-input');
+        const oracleSend = document.getElementById('oracle-send');
+        const oracleChat = document.getElementById('oracle-chat');
+
+        async function askOracle() {
+            const query = oracleInput.value.trim();
+            if (!query) return;
+
+            // Add user message
+            const userMsg = document.createElement('div');
+            userMsg.className = 'text-blue-400 text-right font-medium italic';
+            userMsg.innerText = `> ${query}`;
+            oracleChat.appendChild(userMsg);
+            oracleInput.value = '';
+            oracleChat.scrollTop = oracleChat.scrollHeight;
+
+            // Add loading indicator
+            const loading = document.createElement('div');
+            loading.className = 'text-slate-500 animate-pulse';
+            loading.innerText = 'Oracle is analyzing forensic telemetry...';
+            oracleChat.appendChild(loading);
+
+            try {
+                const resp = await fetch('/api/oracle', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ question: query })
+                });
+                const data = await resp.json();
+                oracleChat.removeChild(loading);
+
+                const oracleMsg = document.createElement('div');
+                oracleMsg.className = 'text-slate-200 leading-relaxed bg-blue-900/10 p-3 rounded-lg border border-blue-500/20';
+                oracleMsg.innerText = data.answer;
+                oracleChat.appendChild(oracleMsg);
+                oracleChat.scrollTop = oracleChat.scrollHeight;
+            } catch (err) {
+                oracleChat.removeChild(loading);
+                const errMsg = document.createElement('div');
+                errMsg.className = 'text-red-500';
+                errMsg.innerText = `Oracle Error: ${err}`;
+                oracleChat.appendChild(errMsg);
+            }
+        }
+
+        oracleSend.onclick = askOracle;
+        oracleInput.onkeypress = (e) => { if (e.key === 'Enter') askOracle(); };
 
         eventSource.onerror = function() {
             document.getElementById('sys-status').innerText = 'ENCRYPTED DISCONNECT';

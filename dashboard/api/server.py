@@ -342,6 +342,41 @@ async def get_db_snapshot():
 async def get_state():
     return await get_db_snapshot()
 
+@app.post("/api/oracle")
+async def ask_oracle(request: Request):
+    """Bridge to Gemini for deep forensic analysis of the live system snapshot."""
+    try:
+        from config import GOOGLE_API_KEY
+        if not GOOGLE_API_KEY:
+            return {"answer": "Oracle Error: GOOGLE_API_KEY not configured in .env"}
+
+        import google.generativeai as genai
+        genai.configure(api_key=GOOGLE_API_KEY)
+        model = genai.GenerativeModel('gemini-1.5-flash')
+
+        body = await request.json()
+        user_query = body.get("question", "Summarize current system state.")
+        
+        # 1. Get full live context
+        snapshot = await get_db_snapshot()
+        
+        # 2. Build Forensic Prompt
+        system_prompt = (
+            "You are the Sovereign Oracle, an elite SRE and Quantitative Trading Architect. "
+            "You have full visibility into the bot's internal pipes. "
+            "Analyze the following JSON snapshot and answer the user's question with expert, "
+            "insightful, yet layman-friendly terms. Identify risks, explain rejections, and "
+            "summarize PnL performance proactively.\n\n"
+            f"LIVE SNAPSHOT: {json.dumps(snapshot)}\n\n"
+            f"USER QUESTION: {user_query}"
+        )
+
+        response = await asyncio.to_thread(model.generate_content, system_prompt)
+        return {"answer": response.text}
+    except Exception as e:
+        logging.error(f"Oracle Error: {e}")
+        return {"answer": f"Oracle Error: {str(e)}"}
+
 async def event_generator() -> AsyncGenerator[str, None]:
     """SSE Generator with keep-alive and error safety."""
     while True:

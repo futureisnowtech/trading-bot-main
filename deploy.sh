@@ -46,6 +46,8 @@ echo "  OK: local HEAD == origin/${BRANCH} == ${LOCAL_SHA}"
 DEPLOY_UTC=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 # ── Sync code to server ───────────────────────────────────────────────────────
+LOCAL_IMAGE_NAME="ghcr.io/$(git remote get-url origin | sed 's/.*github.com[:\/]\(.*\)\.git/\1/' | tr '[:upper:]' '[:lower:]')"
+
 echo "Syncing code to NYC3 via rsync (SHA: ${LOCAL_SHA})..."
 rsync -avz \
     -e "ssh -p ${NYC_PORT} -o StrictHostKeyChecking=no" \
@@ -64,16 +66,15 @@ ${SSH_CMD} ${NYC_USER}@${NYC_IP} bash -s << REMOTE_EOF
 set -euo pipefail
 cd ${PROJECT_DIR}
 
-# Construct the image name from the repository path
-export IMAGE_NAME="ghcr.io/$(git remote get-url origin | sed 's/.*github.com[:\/]\(.*\)\.git/\1/' | tr '[:upper:]' '[:lower:]')"
+export IMAGE_NAME="${LOCAL_IMAGE_NAME}"
 
-echo "  Logging into GHCR..."
-# Note: Requires GITHUB_TOKEN to be set or previously logged in on the droplet
-# For this autonomous transition, we assume the user has configured GHCR access
-# or we will use the existing build flow as a fallback if pull fails.
+echo "  Attempting to pull latest images from GHCR..."
+if ! docker compose pull; then
+    echo "  WARNING: GHCR pull failed (denied or not found). Falling back to local build..."
+    docker compose build
+fi
 
-echo "  Pulling latest images and hot-reloading..."
-docker compose pull
+echo "  Hot-reloading services..."
 docker compose up -d --remove-orphans
 
 echo "  Waiting for health check..."

@@ -57,6 +57,14 @@ class SystemState:
         }
         self.lock = threading.Lock()
 
+    def set_mode(self, mode: str):
+        """Mandatory LIVE enforcement. All modes other than LIVE are deprecated."""
+        with self.lock:
+            self.state["mode"] = "LIVE"
+            if mode.upper() != "LIVE":
+                # Log to stdout since we don't have a logger initialized here usually
+                print(f"WARN: Attempted to set mode to {mode}. Overridden to LIVE (Non-negotiable).")
+
     def update_exchange(self, connected: bool = None, ws_connected: bool = None, latency: int = None, buying_power: float = None):
         with self.lock:
             if connected is not None:

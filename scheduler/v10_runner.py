@@ -1139,6 +1139,11 @@ def _attempt_entry(
     tv_context_by_underlying: dict = None,
 ):
     """Try to enter a position for one candidate. All exceptions propagate to caller."""
+    # RC12: Comprehensive Symbol Normalization
+    # Kraken/Synthetic candidates often arrive as 'PF_SOLUSD'. 
+    # Execution venues (Coinbase/IBKR) require 'SOL'.
+    symbol = str(symbol).upper().replace("PF_", "").replace("USD", "").replace("USDT", "").replace("-PERP", "")
+    
     _route_hint = _tradeability_hint(
         symbol,
         direction,

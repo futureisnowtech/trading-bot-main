@@ -102,8 +102,8 @@ async def get_db_snapshot():
         # 6. Forecast Positions (Kalshi)
         forecast_positions = []
         try:
-            from config import KALSHI_ENABLED
-            if KALSHI_ENABLED:
+            from config import FORECAST_LANE_ACTIVE, KALSHI_ENABLED
+            if FORECAST_LANE_ACTIVE or KALSHI_ENABLED:
                 from execution.kalshi_broker import get_kalshi_broker
                 kb = get_kalshi_broker()
                 now = time.time()

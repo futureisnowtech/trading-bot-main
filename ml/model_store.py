@@ -46,6 +46,14 @@ _PAIR_MAP = {
     "XRPUSDT": "XRP",
     "XRP-USD": "XRP",
     "XRP-USDC": "XRP",
+    "LTC": "LTC",
+    "LTC-USD": "LTC",
+    "DOGE": "DOGE",
+    "DOGE-USD": "DOGE",
+    "ADA": "ADA",
+    "ADA-USD": "ADA",
+    "LINK": "LINK",
+    "LINK-USD": "LINK",
 }
 
 # Cache: pair_direction → (xgb_model, lgbm_model, pnl_scale)

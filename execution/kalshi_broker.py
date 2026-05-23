@@ -340,6 +340,21 @@ class KalshiBroker:
                 "local_symbol": ticker,
                 "entry_price": limit_price,
             }
+            # log_trade for database persistence
+            try:
+                log_trade(
+                    strategy=kwargs.get("strategy", "forecast_unknown"),
+                    broker="kalshi",
+                    symbol=ticker,
+                    action="BUY",
+                    order_type="Limit",
+                    qty=qty,
+                    price=limit_price,
+                    order_id=order_id,
+                    notes=kwargs.get("reason", ""),
+                )
+            except Exception as e:
+                logger.error(f"[KalshiBroker] log_trade error: {e}")
 
         return {"order_id": order_id, "price": limit_price, "qty": qty}
 
@@ -373,14 +388,33 @@ class KalshiBroker:
         }
         
         resp = self._request("POST", "/trade-api/v2/portfolio/orders", body=body)
+        order_id = resp.get("order_id", "ERR")
         
         # Calculate PnL
         pos_info = self._open_positions.pop(key, {})
         entry_price = pos_info.get("entry_price", 0.0)
         pnl_usd = (price - entry_price) * qty if entry_price > 0 else 0.0
 
+        if order_id != "ERR":
+            try:
+                log_trade(
+                    strategy=kwargs.get("strategy", "forecast_exit"),
+                    broker="kalshi",
+                    symbol=local_symbol,
+                    action="SELL",
+                    order_type="Limit",
+                    qty=qty,
+                    price=price,
+                    pnl_usd=pnl_usd,
+                    order_id=order_id,
+                    notes=kwargs.get("reason", "exit"),
+                    won=(pnl_usd > 0)
+                )
+            except Exception as e:
+                logger.error(f"[KalshiBroker] log_trade exit error: {e}")
+
         return {
-            "order_id": resp.get("order_id", "ERR"),
+            "order_id": order_id,
             "flattened_qty": qty,
             "exit_price": price,
             "entry_price": entry_price,

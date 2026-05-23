@@ -202,7 +202,7 @@ def get_forecast_health() -> dict:
 def get_forecast_positions() -> list[dict]:
     """
     Return open ForecastEx trades (entries without a matching exit).
-    Queries the trades table where broker LIKE 'forecastex%' and pnl_usd=0.
+    Queries the trades table where broker LIKE 'forecastex%' or 'kalshi%' and pnl_usd=0.
     """
     try:
         today = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
@@ -210,7 +210,7 @@ def get_forecast_positions() -> list[dict]:
             rows = c.execute(
                 """SELECT ts, symbol, action, qty, price, fee_usd, notes, order_id
                    FROM trades
-                   WHERE broker LIKE 'forecastex%'
+                   WHERE (broker LIKE 'forecastex%' OR broker LIKE 'kalshi%')
                      AND action = 'BUY'
                      AND ts >= ?
                    ORDER BY ts DESC""",
@@ -246,7 +246,7 @@ def get_forecast_trades(limit: int = 50) -> list[dict]:
                 """SELECT ts, symbol, action, qty, price, pnl_usd, fee_usd,
                           notes, order_id, paper
                    FROM trades
-                   WHERE broker LIKE 'forecastex%'
+                   WHERE (broker LIKE 'forecastex%' OR broker LIKE 'kalshi%')
                    ORDER BY ts DESC
                    LIMIT ?""",
                 (limit,),
@@ -280,7 +280,7 @@ def get_forecast_pnl_summary() -> dict:
             rows = c.execute(
                 """SELECT pnl_usd, won, ts
                    FROM trades
-                   WHERE broker LIKE 'forecastex%'
+                   WHERE (broker LIKE 'forecastex%' OR broker LIKE 'kalshi%')
                      AND pnl_usd != 0
                    ORDER BY ts DESC"""
             ).fetchall()

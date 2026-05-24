@@ -357,7 +357,7 @@ async def ask_oracle(request: Request):
 
         import google.generativeai as genai
         genai.configure(api_key=GOOGLE_API_KEY)
-        model = genai.GenerativeModel('gemini-1.5-flash-latest')
+        model = genai.GenerativeModel('gemini-2.5-flash')
 
         body = await request.json()
         user_query = body.get("question", "Summarize current system state.")

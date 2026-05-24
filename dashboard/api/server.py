@@ -201,7 +201,8 @@ async def get_db_snapshot():
                     error_count += 1
                 
                 # RC: Capture Forecast evaluations specifically for X-Ray
-                if r["source"] == "ForecastRunner" and ("VETO" in msg or "Entry" in msg):
+                msg_lower = msg.lower()
+                if r["source"] == "ForecastRunner" and ("veto" in msg_lower or "entry" in msg_lower):
                     forecast_evaluations.append(evt)
         except sqlite3.OperationalError: pass
 

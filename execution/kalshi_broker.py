@@ -311,7 +311,9 @@ class KalshiBroker:
             }
         except Exception as e:
             # RC: Un-silence the error for X-Ray observability
-            logger.error(f"[KalshiBroker] get_quote error for {ticker}: {e}")
+            msg = f"[KalshiBroker] get_quote error for {ticker}: {e}"
+            logger.error(msg)
+            log_event("ERROR", "KalshiBroker", msg)
             return {"local_symbol": ticker, "bid": None, "ask": None, "ts": datetime.now(timezone.utc).isoformat()}
 
     def get_quotes_batch(self, contracts: list[dict]) -> list[dict]:

@@ -46,6 +46,7 @@ from forecast.db import (
     prune_old_quotes,
     upsert_bar,
 )
+from logging_db.trade_logger import log_event
 
 logger = logging.getLogger(__name__)
 
@@ -273,9 +274,11 @@ class QuoteHarvester:
             _build_all_bars(contract_id, db_path=self._db_path)
 
         if total_quotes > 0:
-            logger.debug(
-                f"[QuoteHarvester] Persisted {total_quotes} quotes across {len(contracts)} contracts"
-            )
+            msg = f"[QuoteHarvester] Persisted {total_quotes} quotes across {len(contracts)} contracts"
+            logger.debug(msg)
+            # Use log_event for critical cycles so user knows it's alive
+            if total_quotes % 50 == 0:
+                log_event("INFO", "QuoteHarvester", msg)
 
 
 def build_bars_now(contract_id: int, db_path: Optional[str] = None) -> dict:

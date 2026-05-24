@@ -238,17 +238,36 @@ class KalshiBroker:
             log_event("WARN", "KalshiBroker", f"Position sync error: {e}")
 
     def discover_markets(self) -> list[dict]:
-        """Discover active Kalshi event contracts."""
+        """
+        Discover active Kalshi event contracts.
+        v18.36: Skips KX tickers and paginates for depth.
+        """
         if not self.is_connected():
             return []
 
         results = []
         try:
-            data = self._request("GET", "/trade-api/v2/events", params={"limit": 200, "status": "open"})
-            events = data.get("events", [])
+            # ── Pagination Loop (v18.36) ──────────────────────────────────────
+            # Fetch up to 1000 events to ensure we get past the long-dated KX flood.
+            events = []
+            cursor = ""
+            for _ in range(5):  # 5 pages of 200 = 1000 events
+                data = self._request("GET", "/trade-api/v2/events", params={"limit": 200, "status": "open", "cursor": cursor})
+                page_events = data.get("events", [])
+                if not page_events: break
+                events.extend(page_events)
+                cursor = data.get("cursor", "")
+                if not cursor: break
             
             for event in events:
                 e_ticker = event.get("event_ticker")
+                
+                # ── ForecastEx Filter (v18.36) ──────────────────────────────────
+                # Kalshi lists ForecastEx (KX) markets which have no orderbook depth
+                # in the Kalshi V2 API. Skip them to avoid poll noise.
+                if e_ticker.startswith("KX"):
+                    continue
+
                 if not _is_economic_market(e_ticker, event.get("title"), event.get("category")):
                     continue
                 

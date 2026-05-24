@@ -1034,14 +1034,8 @@ SPOT_QUARANTINE_OVERRIDE_SCORE: float = float(
     os.getenv("SPOT_QUARANTINE_OVERRIDE_SCORE", "72.0")
 )
 SPOT_EXTERNAL_MANUAL_HOLDINGS: list[str] = [
-    "BTC",
-    "ETH",
-    "LTC",
-    "SOL",
-    "XRP",
-    "ADA",
-    "MANA",
-    "CLOV",
+    "CBETH",
+    "ETH2",
     "STETH",
 ]
 SPOT_ALLOWED_SETUP_FAMILIES_TINY_LIVE: tuple[str, ...] = (

@@ -222,6 +222,7 @@ class QuoteHarvester:
             return
 
         total_quotes = 0
+        skipped_no_depth = 0
         for contract in contracts:
             contract_id = contract.get("id")
             local_symbol = contract.get("local_symbol", "")
@@ -245,6 +246,7 @@ class QuoteHarvester:
 
             # Only persist if we got meaningful data
             if q.get("mid") is None:
+                skipped_no_depth += 1
                 continue
 
             # Rate limiting: Kalshi V2 is sensitive to burst polling
@@ -273,12 +275,10 @@ class QuoteHarvester:
             # Build bars after each quote insertion
             _build_all_bars(contract_id, db_path=self._db_path)
 
-        if total_quotes > 0:
-            msg = f"[QuoteHarvester] Persisted {total_quotes} quotes across {len(contracts)} contracts"
-            logger.debug(msg)
-            # Use log_event for critical cycles so user knows it's alive
-            if total_quotes % 50 == 0:
-                log_event("INFO", "QuoteHarvester", msg)
+        # Log cycle summary to dashboard
+        msg = f"[QuoteHarvester] Cycle complete: {total_quotes} saved, {skipped_no_depth} skipped (no depth) across {len(contracts)} active contracts"
+        logger.debug(msg)
+        log_event("INFO", "QuoteHarvester", msg)
 
 
 def build_bars_now(contract_id: int, db_path: Optional[str] = None) -> dict:

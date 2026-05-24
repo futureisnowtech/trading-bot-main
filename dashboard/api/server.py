@@ -272,7 +272,8 @@ async def get_db_snapshot():
             for r in cursor.fetchall():
                 prob_val = r["prob"]
                 if prob_val is None:
-                    prob_val = 0.5
+                    # v18.34: Explicit 0.0 if missing, rather than misleading 50%
+                    prob_val = 0.0
                 macro_radar.append({
                     "event": r["market_name"],
                     "symbol": r["local_symbol"],

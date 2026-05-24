@@ -37,6 +37,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
+from logging_db.trade_logger import log_event
 logger = logging.getLogger(__name__)
 
 # ── Lazy imports (avoid heavy deps at module load time) ────────────────────────
@@ -264,10 +265,14 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
 
                 # Only enter if econ approved AND contracts > 0
                 if not result.econ_approved or result.position_contracts <= 0:
+                    veto_msg = f"[ForecastRunner] {local_sym} vetoed: {result.veto_reason or 'sizing_zero'}"
                     if result.veto_reason and "concurrent_cap" in result.veto_reason:
-                        logger.warning(f"[ForecastRunner] {local_sym} vetoed: {result.veto_reason}")
+                        logger.warning(veto_msg)
+                        log_event("INFO", "ForecastRunner", veto_msg)
                     else:
-                        logger.debug(f"[ForecastRunner] {local_sym} not approved: {result.veto_reason or 'sizing_zero'}")
+                        logger.debug(veto_msg)
+                        # Still log to DB for X-Ray observability
+                        log_event("INFO", "ForecastRunner", veto_msg)
                     continue
 
                 # Hard duplicate guard: no same-contract double-down
@@ -313,6 +318,8 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                     
                     # Notify via Telegram/DB
                     if entry_result.get("order_id") != "ERR":
+                        entry_msg = f"[ForecastRunner] Entry: {contract.get('local_symbol')} {result.side.upper()} @ {ask_price} (ev={result.ev:.4f})"
+                        log_event("INFO", "ForecastRunner", entry_msg)
                         try:
                             from notifications.notification_engine import notify_trade_open
                             notify_trade_open(

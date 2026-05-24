@@ -269,10 +269,13 @@ async def get_db_snapshot():
                 LIMIT 10
             """)
             for r in cursor.fetchall():
+                prob_val = r["prob"]
+                if prob_val is None:
+                    prob_val = 0.5
                 macro_radar.append({
                     "event": r["market_name"],
                     "symbol": r["local_symbol"],
-                    "probability": round(float(r["prob"] or 0.5) * 100, 1)
+                    "probability": round(float(prob_val) * 100, 1)
                 })
         except sqlite3.OperationalError: pass
 

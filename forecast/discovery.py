@@ -17,6 +17,7 @@ from forecast.db import (
     upsert_contract,
     get_active_contracts,
 )
+from logging_db.trade_logger import log_event
 
 logger = logging.getLogger(__name__)
 
@@ -187,8 +188,10 @@ def run_discovery(
     except Exception:
         pass
 
-    logger.info(
+    msg = (
         f"[Discovery] found={result['found']} persisted={result['persisted']} "
         f"active_in_db={result['active_in_db']} errors={len(result['errors'])}"
     )
+    logger.info(msg)
+    log_event("INFO", "Discovery", msg)
     return result

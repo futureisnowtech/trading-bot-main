@@ -257,6 +257,19 @@ class KalshiBroker:
                 
                 for m in markets:
                     if m.get("status") != "active": continue
+                    
+                    # ── Hard Liquidity Gate (v18.35) ────────────────────────────────
+                    # Skip dormant markets with zero activity to avoid dead polling
+                    oi = int(m.get("open_interest", 0))
+                    vol = int(m.get("volume", 0))
+                    liq = int(m.get("liquidity", 0))
+                    
+                    if oi == 0 and vol == 0:
+                        continue # No trades, no interest
+                        
+                    if liq < 100: # Less than $1.00 of liquidity (cents based?)
+                        # Kalshi liq is often in cents, 100 = $1.00
+                        continue
                         
                     for side in ["YES", "NO"]:
                         right = "C" if side == "YES" else "P"

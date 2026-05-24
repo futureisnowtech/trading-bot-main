@@ -197,9 +197,15 @@ def _load_spot_positions_from_db(
                             qty = float(row.get("qty", 0.0))
 
                             conn.execute(
-                                "INSERT INTO open_positions (symbol, strategy, qty, entry, paper, direction, ts_entry) "
-                                "VALUES (?, ?, ?, ?, 0, 'LONG', ?)",
-                                (clean, f"spot_{clean.lower()}", qty, entry_price, datetime.datetime.utcnow().isoformat())
+                                """
+                                INSERT INTO open_positions (
+                                    symbol, strategy, qty, entry, paper, direction, ts_entry,
+                                    stop, target, high_since_entry,
+                                    entry_trade_id, entry_feature_snapshot_id, base_asset,
+                                    setup_family, execution_route
+                                ) VALUES (?, ?, ?, ?, 0, 'LONG', ?, 0, 0, ?, 1, 1, ?, 'auto_adopted', 'manual')
+                                """,
+                                (clean, f"spot_{clean.lower()}", qty, entry_price, datetime.datetime.utcnow().isoformat(), entry_price, clean)
                             )
                             # Add to list for immediate return
                             db_positions.append({

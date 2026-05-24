@@ -57,6 +57,7 @@ def main():
     _s = _sched_lib.Scheduler()
     
     from forecast.db import init_forecast_db
+    from data.kalshi_weather_monitor import start_weather_monitor
     from forecast.runner import (
         run_discovery_cycle,
         run_strategy_cycle,
@@ -67,6 +68,9 @@ def main():
 
     try:
         init_forecast_db()
+        # v18.35: Start Weather Ensemble Pipeline
+        start_weather_monitor()
+        
         broker = _get_broker()
         _connected = broker.connect()
         

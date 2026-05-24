@@ -258,6 +258,13 @@ def main():
     # Run position reconciliation
     run_reconciliation(_db_path)
 
+    # v18.35: Autonomous Self-Healing (Force repair of orphan positions on boot)
+    try:
+        from scripts.heal_orphan_positions import heal
+        heal()
+    except Exception as e:
+        logger.error(f"Autonomous healing failed: {e}")
+
     # Write startup heartbeat immediately so last_global_heartbeat_at is never blank
     from runtime.runtime_state import write_system_heartbeat
 

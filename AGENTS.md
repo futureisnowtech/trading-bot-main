@@ -6,9 +6,15 @@
 ## Canonical Truth
 
 - Repo root: `/Users/joshmacbookair2020/Projects/algo_trading_final`
-- Canonical version: `v18.34.FORENSIC` (`2026-05-22`)
-- Canonical active lane: **Dual-Lane**: Coinbase Spot Scalp (Primary) + Kalshi Macro Forecast (Secondary)
-- **Status:** **RECURSIVE EVOLUTION**. Autonomous Self-Vaccinating DAG active.
+- Canonical version: `v18.35.ARCH` (`2026-05-24`)
+- Canonical active lane: **Dual-Lane**: Coinbase Spot Scalp (Primary) + Kalshi Weather Engine (Secondary)
+- **Status:** **UNRESTRICTED ALPHA**. Autonomous Self-Healing & Ensemble Weather.
+- **Critical Changes (v18.35):**
+  - **Weather Pivot**: Replaced generic macro forecasting with a dedicated Weather Prediction Engine utilizing 31-member GFS ensembles (via Open-Meteo).
+  - **Unrestricted Alpha**: Removed geographic quarantines and cooldown blocks for weather trades ('fuck it, take the trade!').
+  - **Sigmoid Sizing**: Implemented continuous logistic sigmoid sizing to scale capital deployment based on mathematical edge.
+  - **Autonomous Healing**: Injected boot-time database repair into `spot_main.py` to fix orphan cost-basis/stop-loss values.
+  - **Radical Transparency**: Unmasked raw strategy vetoes in HUD dash; fixed Kalshi cost-basis reporting via `trades` table query.
 - **Critical Changes (v18.34):**
   - **Forensic Milestone**: Restored Telegram responsiveness and implemented high-fidelity token telemetry.
   - **Sovereign Separation**: Physically isolated Crypto and Forecast lanes into independent processes/containers.

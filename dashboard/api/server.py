@@ -157,18 +157,16 @@ async def get_db_snapshot():
                     
                     raw_positions = kb.get_positions()
                     for p in raw_positions:
-                        # Enrich with DB metadata if available
+                        # v18.35: Enrich with trade history for Kalshi cost basis
                         try:
-                            # Search by local_symbol and right
-                            right = 'C' if p['side'] == 'YES' else 'P'
                             cursor.execute(
-                                "SELECT entry, stop, ts_entry FROM open_positions WHERE symbol=? AND strategy LIKE 'forecast_%' ORDER BY ts_entry DESC LIMIT 1",
+                                "SELECT price as entry, ts as ts_entry FROM trades WHERE symbol=? AND action='BUY' AND broker='kalshi' ORDER BY ts DESC LIMIT 1",
                                 (p['local_symbol'],)
                             )
                             db_row = cursor.fetchone()
                             if db_row:
                                 p['entry_price'] = float(db_row['entry'] or p['entry_price'])
-                                p['stop'] = float(db_row['stop'] or 0.0)
+                                p['stop'] = 0.0  # Max risk is premium
                                 p['ts_entry'] = db_row['ts_entry']
                         except: pass
                     forecast_positions = raw_positions
@@ -243,12 +241,19 @@ async def get_db_snapshot():
             cursor.execute("SELECT symbol, direction, final_spot_score, entry_block_reason as reason, ts FROM scan_candidates ORDER BY ts DESC LIMIT 5")
             for r in cursor.fetchall():
                 raw_reason = r["reason"] or "Passed Score"
+                # v18.35: Radical Transparency — unmask strategy_veto
+                reason_layman = reason_map.get(raw_reason, raw_reason)
+                if raw_reason == "strategy_veto":
+                    # If it's a generic strategy veto, try to find a more specific 
+                    # sub-reason from recent system events or just show raw_reason
+                    reason_layman = raw_reason
+                
                 live_hunt.append({
                     "symbol": r["symbol"],
                     "direction": r["direction"],
                     "score": round(float(r["final_spot_score"] or 0.0), 1),
                     "reason": raw_reason,
-                    "reason_layman": reason_map.get(raw_reason, raw_reason),
+                    "reason_layman": reason_layman,
                     "ts": r["ts"]
                 })
         except sqlite3.OperationalError: pass

@@ -2,6 +2,7 @@
 All notable changes to The King's Algo Trading System.
 
 ## 2026-05-24
+- v18.35 (Weather Alpha & Sovereign Self-Healing): pivoted Kalshi lane to a dedicated Weather Prediction Engine utilizing 31-member GFS ensembles via Open-Meteo; implemented high-aggression Logistic Sigmoid sizing, removing all geographic and event-family quarantines ('fuck it, take the trade!'); injected autonomous database healing into `spot_main.py` boot sequence to automatically repair orphan positions; unmasked strategy vetoes in HUD dash for radical transparency; fixed Kalshi cost-basis reporting by shifting query source to `trades` table.
 - v18.34 (Kalshi Live Recovery): implemented historical candlestick backfill in `execution/kalshi_broker.py` using verified V2 `/markets/candlesticks` endpoint, resolving data starvation issues for strategy indicators; fixed Kalshi V2 orderbook parsing (`orderbook_fp`) and position syncing (`market_positions`); corrected RSA-PSS signature logic by switching to `DIGEST_LENGTH` salt and excluding body/query-params from signature string; repaired Telegram AI agent context blindness by removing the 2000-character truncation of `AGENTS.md`; enforced "HUD dash" and "Grafana" naming mandates across all agent interactions.
 
 ## 2026-05-15

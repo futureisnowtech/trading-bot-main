@@ -75,6 +75,11 @@ The Telegram bot acts as a mobile terminal for the Gemini agent. It is authorize
 - Execute safe diagnostic commands (`ls`, `git status`, `py_compile`).
 - View real-time logs and system vitals.
 
+**Operational Mandates for AI Agent:**
+- **Dashboard Truth:** Strictly refer to the operator dashboard as the **HUD dash**. Do NOT mention "Streamlit" to the user; it is an implementation detail and confusing.
+- **Monitoring Truth:** The primary metrics and alerting surface is **Grafana** (Grafana IRM for incidents).
+- **Lane Awareness:** You are a Dual-Lane agent. You MUST be fully aware of both the **Coinbase Spot Scalp** and **Kalshi Macro Forecast** lanes at all times. Use `execute_sql` to check `forecast_markets` and `forecast_quotes` if the user asks about Kalshi status.
+
 Access is strictly restricted to the `AUTHORIZED_USER_ID`.
 
 The following systems remain in-repo but are **not authoritative** for live spot health, readiness, deployment counts, or operator truth:
@@ -279,8 +284,8 @@ Live launch must fail if any of these are true:
 | `learning/post_trade_analyzer.py` | spot-native attribution semantics |
 | `learning/entry_priors.py` | spot priors / target semantics |
 | `learning/spot_edge_calibrator.py` | spot edge condition derivation |
-| `dashboard/app.py` | single-page operator dashboard (no tabs, bot-reasoning-first, v18.15+) |
-| `dashboard/data/bot_state.py` | symbol grid, decision log, bot pulse — primary dashboard data layer |
+| `dashboard/app.py` | authoritative **HUD dash** (no tabs, bot-reasoning-first, v18.15+) |
+| `dashboard/data/bot_state.py` | symbol grid, decision log, bot pulse — primary HUD data layer |
 | `scripts/go_live.py` | controlled tiny-live launcher |
 | `scripts/go_paper.py` | controlled return to paper |
 | `scripts/check_readiness.py` | operator readiness snapshot |

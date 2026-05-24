@@ -76,7 +76,7 @@ def get_repo_context() -> str:
     # 1. Canonical Truth (AGENTS.md)
     try:
         with open("AGENTS.md", "r") as f:
-            context.append("### AGENTS.md (Canonical Truth)\n" + f.read()[:2000])
+            context.append("### AGENTS.md (Canonical Truth)\n" + f.read())
     except Exception as e:
         context.append(f"Error reading AGENTS.md: {e}")
 

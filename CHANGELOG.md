@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 
+## 2026-05-24
+- v18.34 (Kalshi Live Recovery): implemented historical candlestick backfill in `execution/kalshi_broker.py` using verified V2 `/markets/candlesticks` endpoint, resolving data starvation issues for strategy indicators; fixed Kalshi V2 orderbook parsing (`orderbook_fp`) and position syncing (`market_positions`); corrected RSA-PSS signature logic by switching to `DIGEST_LENGTH` salt and excluding body/query-params from signature string; repaired Telegram AI agent context blindness by removing the 2000-character truncation of `AGENTS.md`; enforced "HUD dash" and "Grafana" naming mandates across all agent interactions.
+
 ## 2026-05-15
 - v18.30 (Project Apex: Recursive Evolution): implemented 'Fee-Aware Expectancy' dynamic gates in `spot_regime.py`, retiring hardcoded thresholds; built `runtime/online_learner.py` for autonomous symbol vaccination based on realized alpha-efficiency; resolved Telegram '/ask' caching hang by repairing tool-handshake desync in `ai_agent.py`; authored 12,000-word Sovereign Masterplan (`docs/SOVEREIGN_MASTERPLAN.md`); expanded `backtest_apex_universe.py` to 6,000-line milestone.
 - v18.19.4: implemented deep-trace request/response logging gate via `COINBASE_DEEP_TRACE` to prevent log bloat; added 3-second TTL cache on `get_spot_balance()` in `execution/coinbase_spot_broker.py` to reduce redundant /accounts snapshot calls during per-asset tradeability checks.

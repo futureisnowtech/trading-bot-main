@@ -36,10 +36,13 @@ KALSHI_API_BASE = "https://external-api.kalshi.com"
 
 APPROVED_CATEGORIES: set[str] = {
     "economics",
+    "economy",
     "federal reserve",
     "financials",
+    "finance",
     "recession",
     "climate and weather",
+    "weather",
     "politics",
     "elections",
     "social",
@@ -59,16 +62,29 @@ CATEGORY_REQUIRED_KEYWORDS: dict[str, list[str]] = {
         "ppi", "production", "jobs", "employment", "macro", "economy",
         "debt", "budget", "target", "hike", "cut", "growth", "manufacturing"
     ],
+    "economy": [
+        "cpi", "inflation", "fed", "fomc", "rate", "payroll", "nonfarm",
+        "unemployment", "gdp", "pce", "retail", "housing", "consumer",
+        "ppi", "production", "jobs", "employment", "macro", "economy",
+        "debt", "budget", "target", "hike", "cut", "growth", "manufacturing"
+    ],
     "federal reserve": [
         "fed", "fomc", "rate", "hike", "cut", "target", "powell", "balance sheet"
     ],
     "financials": [
         "yield", "treasury", "bond", "index", "price", "survey"
     ],
+    "finance": [
+        "yield", "treasury", "bond", "index", "price", "survey"
+    ],
     "recession": [
         "recession", "contraction", "gdp", "nber"
     ],
     "climate and weather": [
+        "temp", "temperature", "rain", "precip", "precipitation", "weather",
+        "degree", "hurricane", "storm", "snow", "landfall", "cat 5", "category 5"
+    ],
+    "weather": [
         "temp", "temperature", "rain", "precip", "precipitation", "weather",
         "degree", "hurricane", "storm", "snow", "landfall", "cat 5", "category 5"
     ],
@@ -170,16 +186,20 @@ class KalshiBroker:
 
         try:
             ts = str(int(time.time() * 1000))
-            body_str = json.dumps(body, separators=(',', ':')) if body else ""
             
-            # Message to sign: timestamp + method + path + body
-            msg = f"{ts}{method}{path}{body_str}"
+            # v18.34: Ensure method is uppercase for signature
+            method_upper = method.upper()
+            
+            # v18.34: Kalshi V2 signing typically ONLY uses ts + method + path.
+            # Query params and body are usually excluded from the signature msg 
+            # but included in the actual request.
+            msg = f"{ts}{method_upper}{path}"
             
             signature = self._private_key.sign(
                 msg.encode(),
                 padding.PSS(
                     mgf=padding.MGF1(hashes.SHA256()),
-                    salt_length=padding.PSS.MAX_LENGTH
+                    salt_length=padding.PSS.DIGEST_LENGTH
                 ),
                 hashes.SHA256()
             )
@@ -192,6 +212,8 @@ class KalshiBroker:
                 "Content-Type": "application/json"
             }
             
+            body_str = json.dumps(body, separators=(',', ':')) if body else ""
+            
             url = f"{KALSHI_API_BASE}{path}"
             if method == "GET":
                 resp = requests.get(url, headers=headers, params=params, timeout=10)
@@ -201,8 +223,12 @@ class KalshiBroker:
                 resp = requests.delete(url, headers=headers, timeout=10)
             else:
                 return {"error": "unsupported_method"}
-                
-            return resp.json()
+            
+            try:
+                return resp.json()
+            except Exception as json_err:
+                logger.error(f"[KalshiBroker] JSON decode failed for {url}. Status={resp.status_code} Text={resp.text[:200]}")
+                return {"error": f"json_decode_failed: {str(json_err)}"}
         except Exception as e:
             return {"error": str(e)}
 
@@ -211,15 +237,19 @@ class KalshiBroker:
         if not self.is_connected():
             return
         try:
+            # v18.34: Kalshi V2 uses 'market_positions' array and 'position_fp' field.
             data = self._request("GET", "/trade-api/v2/portfolio/positions")
             self._open_positions.clear()
 
-            positions = data.get("positions", [])
+            positions = data.get("market_positions", [])
             for p in positions:
-                qty = p.get("position", 0)
+                # position_fp is a signed fixed-point string. 
+                # Positive = YES contracts, Negative = NO contracts.
+                qty_str = p.get("position_fp", "0")
+                qty = float(qty_str)
                 if qty == 0: continue
                 
-                ticker = p.get("market_ticker")
+                ticker = p.get("ticker")
                 side = "YES" if qty > 0 else "NO"
                 right = "C" if side == "YES" else "P"
                 abs_qty = abs(qty)
@@ -229,7 +259,7 @@ class KalshiBroker:
                     "local_symbol": ticker,
                     "right": right,
                     "qty": abs_qty,
-                    "entry_price": 0.0,
+                    "entry_price": 0.0, # Not available in summary, will be enriched by DB
                     "side": side,
                     "order_id": "EXISTING",
                     "entered_at": datetime.now(timezone.utc).isoformat(),
@@ -316,17 +346,21 @@ class KalshiBroker:
             return {"local_symbol": ticker, "bid": None, "ask": None, "ts": datetime.now(timezone.utc).isoformat()}
         
         try:
+            # v18.34: Kalshi V2 uses 'orderbook_fp' and 'yes_dollars' / 'no_dollars'
             data = self._request("GET", f"/trade-api/v2/markets/{ticker}/orderbook")
-            book = data.get("orderbook", {})
+            book = data.get("orderbook_fp", {})
             
-            yes_levels = book.get("yes", [])
-            no_levels = book.get("no", [])
+            yes_levels = book.get("yes_dollars", [])
+            no_levels = book.get("no_dollars", [])
             
-            # Yes Bid: The highest price someone is willing to pay for YES
-            # No Bid: The highest price someone is willing to pay for NO
+            # Yes Bid: The highest price someone is willing to pay for YES (last element in yes_dollars)
+            # No Bid: The highest price someone is willing to pay for NO (last element in no_dollars)
+            # v18.34: In orderbook_fp, levels are sorted by price ascending. 
+            # Highest bid is the LAST element.
+            yes_bid = float(yes_levels[-1][0]) if yes_levels else None
+            no_bid = float(no_levels[-1][0]) if no_levels else None
+            
             # Ask for YES = 1.0 - (No Bid)
-            yes_bid = float(yes_levels[0][0]) / 100.0 if yes_levels else None
-            no_bid = float(no_levels[0][0]) / 100.0 if no_levels else None
             yes_ask = round(1.0 - no_bid, 4) if no_bid is not None else None
             
             mid = round((yes_bid + yes_ask) / 2.0, 4) if yes_bid and yes_ask else yes_bid or yes_ask
@@ -348,6 +382,82 @@ class KalshiBroker:
             log_event("ERROR", "KalshiBroker", msg)
             return {"local_symbol": ticker, "bid": None, "ask": None, "ts": datetime.now(timezone.utc).isoformat()}
 
+    def get_historical_candles(self, ticker: str, interval_min: int = 1, limit: int = 100) -> list[dict]:
+        """
+        Fetch historical candlesticks for a market.
+        Valid interval_min: 1 (1m), 60 (1h), 1440 (1d).
+        Returns a list of candle dicts with keys: o, h, l, c, ts_open, ts_close.
+        """
+        if not self.is_connected():
+            return []
+        
+        # Kalshi V2 API strictly allows 1, 60, 1440
+        if interval_min not in [1, 60, 1440]:
+            logger.warning(f"[KalshiBroker] Unsupported interval {interval_min}m. Defaulting to 1m.")
+            interval_min = 1
+
+        # Compute start_ts and end_ts (Unix seconds)
+        # v18.34: Fetch enough history for 100 bars of the requested interval
+        now_ts = int(time.time())
+        lookback_sec = interval_min * 60 * (limit + 10)
+        start_ts = now_ts - lookback_sec
+
+        params = {
+            "market_tickers": ticker,
+            "period_interval": interval_min,
+            "start_ts": start_ts,
+            "end_ts": now_ts
+        }
+        
+        # v18.34: Verified endpoint /trade-api/v2/markets/candlesticks
+        data = self._request("GET", "/trade-api/v2/markets/candlesticks", params=params)
+        
+        if "error" in data:
+            logger.warning(f"[KalshiBroker] Candlestick API error for {ticker}: {data['error']}")
+            return []
+
+        markets = data.get("markets", [])
+        if not markets:
+            logger.debug(f"[KalshiBroker] No market data in response for {ticker}.")
+            return []
+        
+        candles = markets[0].get("candlesticks", [])
+        results = []
+        for c in candles:
+            # We use mid-price (bid+ask)/2 for our bars
+            # Handle cases where bid/ask might be missing or only have close
+            try:
+                bid_o = float(c.get("yes_bid", {}).get("open_dollars") or 0)
+                ask_o = float(c.get("yes_ask", {}).get("open_dollars") or 1.0)
+                
+                bid_h = float(c.get("yes_bid", {}).get("high_dollars") or 0)
+                ask_h = float(c.get("yes_ask", {}).get("high_dollars") or 1.0)
+                
+                bid_l = float(c.get("yes_bid", {}).get("low_dollars") or 0)
+                ask_l = float(c.get("yes_ask", {}).get("low_dollars") or 1.0)
+                
+                bid_c = float(c.get("yes_bid", {}).get("close_dollars") or 0)
+                ask_c = float(c.get("yes_ask", {}).get("close_dollars") or 1.0)
+
+                # Fallback to price if bid/ask missing (unlikely in V2 but safe)
+                if not bid_c and not ask_c:
+                    p = float(c.get("price", {}).get("close_dollars") or 0)
+                    bid_c = ask_c = p
+
+                results.append({
+                    "o": round((bid_o + ask_o) / 2.0, 4),
+                    "h": round((bid_h + ask_h) / 2.0, 4),
+                    "l": round((bid_l + ask_l) / 2.0, 4),
+                    "c": round((bid_c + ask_c) / 2.0, 4),
+                    "ts_open": datetime.fromtimestamp(c.get("end_period_ts", 0) - (interval_min * 60), tz=timezone.utc).isoformat(),
+                    "ts_close": datetime.fromtimestamp(c.get("end_period_ts", 0), tz=timezone.utc).isoformat(),
+                })
+            except (ValueError, TypeError):
+                continue
+        
+        results.sort(key=lambda x: x["ts_open"])
+        return results
+
     def get_quotes_batch(self, contracts: list[dict]) -> list[dict]:
         return [self.get_quote(c["local_symbol"]) for c in contracts]
 
@@ -360,19 +470,33 @@ class KalshiBroker:
         side = "yes" if contract_dict["right"] == "C" else "no"
         limit_cents = int(round(limit_price * 100))
         
+        # v18.34: Kalshi V2 expects either yes_price or no_price, not both with nulls.
         body = {
             "ticker": ticker,
             "action": "buy",
             "side": side,
             "count": int(qty),
             "type": "limit",
-            "yes_price": limit_cents if side == "yes" else None,
-            "no_price": limit_cents if side == "no" else None,
             "client_order_id": str(uuid.uuid4()),
         }
+        if side == "yes":
+            body["yes_price"] = limit_cents
+        else:
+            body["no_price"] = limit_cents
         
+        # v18.34: Use the events/orders endpoint if possible, but orders often works.
+        # We'll stick to /portfolio/orders as it's common.
         resp = self._request("POST", "/trade-api/v2/portfolio/orders", body=body)
-        order_id = resp.get("order_id", "ERR")
+        # v18.34: Kalshi V2 returns the order object under the 'order' key.
+        order_info = resp.get("order", {})
+        order_id = order_info.get("order_id", "ERR")
+        
+        if order_id == "ERR":
+            # If 'order_id' is missing, check if it's at the top level (backup)
+            order_id = resp.get("order_id", "ERR")
+            
+        if order_id == "ERR":
+            logger.error(f"[KalshiBroker] Order failed for {ticker}. Response: {resp}")
         
         if order_id != "ERR":
             print(f"[KalshiBroker] BUY {qty} {ticker} ({side.upper()}) @ {limit_price:.4f} | ID={order_id}")

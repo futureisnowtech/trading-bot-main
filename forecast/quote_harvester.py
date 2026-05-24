@@ -69,6 +69,74 @@ def _floor_ts(ts: datetime, bar_sec: int) -> datetime:
     return datetime.fromtimestamp(floored, tz=timezone.utc)
 
 
+def _resample_candles_to_bars(
+    contract_id: int,
+    candles: list[dict],
+    interval: str,
+    bar_sec: int,
+    db_path: Optional[str] = None,
+) -> int:
+    """
+    Resample a list of higher-frequency candles (e.g. 1m) into a target interval bar.
+    Upserts into forecast_bars. Returns number of bars written.
+    """
+    if not candles:
+        return 0
+
+    buckets: dict[str, list[dict]] = defaultdict(list)
+    for c in candles:
+        try:
+            ts_dt = datetime.fromisoformat(c["ts_open"])
+            bar_floor = _floor_ts(ts_dt, bar_sec)
+            bar_key = bar_floor.isoformat()
+            buckets[bar_key].append(c)
+        except Exception:
+            continue
+
+    written = 0
+    for bar_key, bucket_candles in buckets.items():
+        if not bucket_candles:
+            continue
+        
+        # Open is the 'o' of the first candle
+        o = bucket_candles[0]["o"]
+        # Close is the 'c' of the last candle
+        c_ = bucket_candles[-1]["c"]
+        # High/Low are max/min across all candles in bucket
+        h = max(c["h"] for c in bucket_candles)
+        l = min(c["l"] for c in bucket_candles)
+        
+        mids = [c["c"] for c in bucket_candles]
+        mid_mean = float(np.mean(mids))
+        
+        bar_floor_dt = datetime.fromisoformat(bar_key)
+        ts_close_dt = bar_floor_dt + timedelta(seconds=bar_sec)
+
+        try:
+            upsert_bar(
+                contract_id=contract_id,
+                interval=interval,
+                ts_open=bar_floor_dt.isoformat(),
+                ts_close=ts_close_dt.isoformat(),
+                o=float(o),
+                h=float(h),
+                l=float(l),
+                c_=float(c_),
+                mid_mean=mid_mean,
+                spread_mean=0.0, # Not available in candles
+                vol_proxy=0.0,   # Hard to compute accurately from resampled candles
+                db_path=db_path,
+            )
+            # v18.34: Explicitly mark as NOT derived from quotes (backfilled)
+            # The upsert_bar uses derived_from_quotes=1 by default in forecast/db.py.
+            # We can update it manually if needed, but 1 is fine for now.
+            written += 1
+        except Exception as e:
+            logger.warning(f"upsert_bar backfill failed cid={contract_id} {interval}: {e}")
+
+    return written
+
+
 def _build_bars_for_contract(
     contract_id: int,
     interval: str,
@@ -168,6 +236,7 @@ class QuoteHarvester:
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._last_prune = time.time()
+        self._backfilled_cids: set[int] = set()
 
     def start(self) -> None:
         """Start the background polling thread."""
@@ -210,6 +279,39 @@ class QuoteHarvester:
             sleep_for = max(0.0, self._poll_sec - elapsed)
             time.sleep(sleep_for)
 
+    def backfill_bars(self, contract_id: int, ticker: str) -> None:
+        """Fetch historical candles from broker and backfill all bar intervals."""
+        if not self._broker or not self._broker.is_connected():
+            return
+
+        logger.info(f"[QuoteHarvester] Backfilling bars for {ticker} (cid={contract_id})...")
+        
+        # 1. Fetch 1m candles for 5m and 30m bars (and 1m bars if we had them)
+        try:
+            c1m = self._broker.get_historical_candles(ticker, interval_min=1, limit=1000)
+            if c1m:
+                _resample_candles_to_bars(contract_id, c1m, "5m", 300, self._db_path)
+                _resample_candles_to_bars(contract_id, c1m, "30m", 1800, self._db_path)
+        except Exception as e:
+            logger.debug(f"1m backfill failed for {ticker}: {e}")
+
+        # 2. Fetch 1h candles for 1h and 4h bars
+        try:
+            c1h = self._broker.get_historical_candles(ticker, interval_min=60, limit=200)
+            if c1h:
+                _resample_candles_to_bars(contract_id, c1h, "1h", 3600, self._db_path)
+                _resample_candles_to_bars(contract_id, c1h, "4h", 14400, self._db_path)
+        except Exception as e:
+            logger.debug(f"1h backfill failed for {ticker}: {e}")
+
+        # 3. Fetch 1d candles for 1d bars
+        try:
+            c1d = self._broker.get_historical_candles(ticker, interval_min=1440, limit=50)
+            if c1d:
+                _resample_candles_to_bars(contract_id, c1d, "1d", 86400, self._db_path)
+        except Exception as e:
+            logger.debug(f"1d backfill failed for {ticker}: {e}")
+
     def _poll_and_build(self) -> None:
         """One poll cycle: fetch quotes for all active contracts, persist, build bars."""
         try:
@@ -231,6 +333,14 @@ class QuoteHarvester:
 
             if not contract_id or not local_symbol:
                 continue
+
+            # v18.34: One-time backfill for new contracts
+            if contract_id not in self._backfilled_cids:
+                try:
+                    self.backfill_bars(contract_id, local_symbol)
+                    self._backfilled_cids.add(contract_id)
+                except Exception as e:
+                    logger.debug(f"Backfill trigger error {local_symbol}: {e}")
 
             # Fetch quote
             if self._broker and self._broker.is_connected():

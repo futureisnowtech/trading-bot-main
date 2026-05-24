@@ -272,12 +272,12 @@ async def get_db_snapshot():
             for r in cursor.fetchall():
                 prob_val = r["prob"]
                 if prob_val is None:
-                    # v18.34: Explicit 0.0 if missing, rather than misleading 50%
-                    prob_val = 0.0
+                    # v18.34: -1.0 for missing, rather than misleading 0%
+                    prob_val = -1.0
                 macro_radar.append({
                     "event": r["market_name"],
                     "symbol": r["local_symbol"],
-                    "probability": round(float(prob_val) * 100, 1)
+                    "probability": round(float(prob_val) * 100, 1) if prob_val >= 0 else -1.0
                 })
         except sqlite3.OperationalError: pass
 

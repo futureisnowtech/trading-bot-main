@@ -366,12 +366,22 @@
             // Macro Radar
             const radarContainer = document.getElementById('macro-radar');
             if (data.forecast.radar && data.forecast.radar.length > 0) {
-                radarContainer.innerHTML = data.forecast.radar.map(r => `
-                    <div class="p-3 bg-purple-900/5 border border-purple-800/30 rounded-lg">
-                        <div class="flex justify-between items-start mb-2"><p class="text-[11px] font-bold text-slate-300 leading-tight">${r.event}</p><span class="text-[10px] font-black text-purple-500 ml-2">${r.probability}%</span></div>
-                        <div class="gauge-bar h-1"><div class="gauge-fill bg-purple-500" style="width: ${r.probability}%"></div></div>
-                    </div>
-                `).join('');
+                radarContainer.innerHTML = data.forecast.radar.map(r => {
+                    if (r.probability < 0) {
+                        return `
+                            <div class="p-3 bg-purple-900/5 border border-purple-800/30 rounded-lg">
+                                <div class="flex justify-between items-start mb-2"><p class="text-[11px] font-bold text-slate-300 leading-tight">${r.event}</p><span class="text-[10px] font-bold text-slate-500 italic ml-2">Awaiting Liquidity</span></div>
+                                <div class="gauge-bar h-1"><div class="gauge-fill bg-slate-800" style="width: 0%"></div></div>
+                            </div>
+                        `;
+                    }
+                    return `
+                        <div class="p-3 bg-purple-900/5 border border-purple-800/30 rounded-lg">
+                            <div class="flex justify-between items-start mb-2"><p class="text-[11px] font-bold text-slate-300 leading-tight">${r.event}</p><span class="text-[10px] font-black text-purple-500 ml-2">${r.probability}%</span></div>
+                            <div class="gauge-bar h-1"><div class="gauge-fill bg-purple-500" style="width: ${r.probability}%"></div></div>
+                        </div>
+                    `;
+                }).join('');
             }
 
             // Macro Evaluations

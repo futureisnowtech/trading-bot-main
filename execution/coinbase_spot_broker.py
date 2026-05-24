@@ -487,6 +487,19 @@ class CoinbaseSpotBroker:
             }
 
     def _normalise_order_status(self, order_id: str, fallback_symbol: str = "") -> dict:
+        # v18.34: Shadow Execution Intercept
+        if order_id.startswith("shadow_"):
+            return {
+                "order_id": order_id,
+                "status": "FILLED",
+                "filled_size": 0.0, # Forces spot_engine to recalculate based on live price
+                "filled_value": 0.0,
+                "average_filled_price": 0.0,
+                "completion_pct": 100.0,
+                "fee_usd": 0.0,
+                "symbol": fallback_symbol
+            }
+
         data = self._request("GET", f"/api/v3/brokerage/orders/historical/{order_id}")
         order = data.get("order") or {}
         fee_usd = 0.0

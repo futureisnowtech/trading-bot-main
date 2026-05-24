@@ -27,6 +27,7 @@ from runtime.execution_universe import (
     get_execution_policy as _get_execution_policy,
     get_underlying as _get_underlying,
 )
+from logging_db.trade_logger import _conn as _db_conn
 
 logger = logging.getLogger(__name__)
 
@@ -334,14 +335,11 @@ def _tv_context_map(signals: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
 
 def _learning_snapshot_count() -> int:
     try:
-        import sqlite3
-        from config import DB_PATH
-
-        conn = sqlite3.connect(DB_PATH)
+        conn = _db_conn()
         row = conn.execute("SELECT COUNT(*) FROM ml_feature_snapshots").fetchone()
-        conn.close()
         return int((row or [0])[0] or 0)
     except Exception:
+        logger.exception("Sovereign Failure in _learning_snapshot_count")
         return 0
 
 
@@ -972,15 +970,11 @@ def _scan_and_trade_inner(spot_only: bool = False):
 
         # SQLite check — match by exact symbol OR same underlying across all open positions
         try:
-            import sqlite3 as _sq
-            from config import DB_PATH as _DB_PATH
-
-            _conn2 = _sq.connect(_DB_PATH)
+            _conn2 = _db_conn()
             _open_rows = _conn2.execute(
                 "SELECT symbol FROM open_positions WHERE strategy=? AND paper=0",
                 ("v10_perp",),
             ).fetchall()
-            _conn2.close()
             _open_underlyings = {_get_underlying(r[0]) for r in _open_rows}
             _open_symbols_db = {r[0] for r in _open_rows}
             if symbol in _open_symbols_db:
@@ -1472,8 +1466,8 @@ def _attempt_entry(
                 f"[v10] {symbol} WR prior: {_wr_est:.3f} "
                 f"(bucket={_prior['bucket_used']} n={_prior['sample_n']})"
             )
-        except Exception as _wr_err:
-            logger.debug(f"[v10] WR prior fallback: {_wr_err}")
+        except Exception:
+            logger.exception(f"[v10] WR prior fallback for {symbol}")
             _wr_est = (
                 0.54
                 if tier == 1
@@ -2304,6 +2298,15 @@ def _attempt_entry(
     # edge_score sourced from economics gate result (passed via candidate dict)
     edge_score = float(candidate.get("edge_score", 0.5))
 
+    # v18.35: Aggregate existing exposure for this specific symbol
+    from logging_db.trade_logger import load_open_positions
+    open_pos = load_open_positions(paper=0)
+    symbol_deployed_usd = sum(
+        float(p.get("qty") or 0.0) * float(p.get("entry") or 0.0)
+        for p in open_pos
+        if str(p.get("symbol") or "").upper() == str(symbol).upper()
+    )
+
     sizing = pm.compute_position_size(
         account_balance=balance,
         current_price=current_price,
@@ -2317,6 +2320,7 @@ def _attempt_entry(
         edge_score=edge_score,
         cascade_risk_score=0,
         deployed_usd=deployed_usd,
+        symbol_deployed_usd=symbol_deployed_usd,
     )
 
     size_usd = sizing["position_usd"] * regime_mult * size_mult
@@ -3698,19 +3702,17 @@ def run_forever():
         Format and send a burn report via Telegram (Task 13).
         """
         try:
-            import sqlite3 as _sq
             import time as _time
-            from config import DB_PATH as _DB_PATH
             from notifications.telegram_bot import send_message as _tg
 
             _cutoff = _time.time() - 86400  # last 24 hours
 
-            with _sq.connect(_DB_PATH) as _conn:
-                rows = _conn.execute(
-                    "SELECT module, SUM(prompt_tokens) as p, SUM(completion_tokens) as c "
-                    "FROM api_telemetry WHERE ts >= ? GROUP BY module ORDER BY (p+c) DESC",
-                    (_cutoff,),
-                ).fetchall()
+            _conn = _db_conn()
+            rows = _conn.execute(
+                "SELECT module, SUM(prompt_tokens) as p, SUM(completion_tokens) as c "
+                "FROM api_telemetry WHERE ts >= ? GROUP BY module ORDER BY (p+c) DESC",
+                (_cutoff,),
+            ).fetchall()
 
             if not rows:
                 logger.debug("[v10] No API telemetry data for burn report (last 24h).")

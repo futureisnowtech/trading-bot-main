@@ -127,7 +127,6 @@ def _get_leverage(
     # Default
     return 3
 
-
 def compute_position_size(
     account_balance: float,
     current_price: float,
@@ -141,6 +140,7 @@ def compute_position_size(
     edge_score: float = 0.5,
     cascade_risk_score: float = 0,
     deployed_usd: float = 0.0,
+    symbol_deployed_usd: float = 0.0,
 ) -> Dict:
     """
     Compute position size in USD and units.
@@ -207,9 +207,13 @@ def compute_position_size(
 
     # Single position cap: 12% of account, scales with balance
     _max_single = account_balance * _MAX_SINGLE_POSITION_PCT
-    if position_usd > _max_single:
-        position_usd = _max_single
-        capped_by = "max_single_position"
+    
+    # v18.35: Multi-Trade Awareness. Cap against remaining symbol capacity.
+    remaining_symbol_capacity = max(0.0, _max_single - symbol_deployed_usd)
+    
+    if position_usd > remaining_symbol_capacity:
+        position_usd = remaining_symbol_capacity
+        capped_by = "max_single_position_symbol_cap"
 
     # Total deployment cap: 95% of account
     remaining_capacity = account_balance * _MAX_DEPLOYED_PCT - deployed_usd

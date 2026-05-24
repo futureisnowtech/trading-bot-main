@@ -614,7 +614,22 @@ def evaluate_contract(
                     f"evaluate_contract veto: stale_market_data ({age_seconds:.1f}s old) "
                     f"for {contract.get('local_symbol')}"
                 )
-                return None
+                return StrategyResult(
+                    strategy_family="vetoed",
+                    side="NONE",
+                    q_hat=0.0,
+                    ev=0.0,
+                    ev_yes=0.0,
+                    ev_no=0.0,
+                    confidence=0.0,
+                    uncertainty_penalty=0.0,
+                    econ_approved=False,
+                    veto_reason="stale_market_data",
+                    position_fraction=0.0,
+                    position_contracts=0,
+                    top_factors=[],
+                    hours_to_resolution=_hours_to_resolution(contract.get("last_trade_at", ""))
+                )
         except Exception as e:
             logger.warning(f"Error checking quote freshness for {contract.get('local_symbol')}: {e}")
 
@@ -622,7 +637,22 @@ def evaluate_contract(
         logger.debug(
             f"evaluate_contract: missing quotes for {contract.get('local_symbol')}"
         )
-        return None
+        return StrategyResult(
+            strategy_family="vetoed",
+            side="NONE",
+            q_hat=0.0,
+            ev=0.0,
+            ev_yes=0.0,
+            ev_no=0.0,
+            confidence=0.0,
+            uncertainty_penalty=0.0,
+            econ_approved=False,
+            veto_reason="missing_quotes",
+            position_fraction=0.0,
+            position_contracts=0,
+            top_factors=[],
+            hours_to_resolution=_hours_to_resolution(contract.get("last_trade_at", ""))
+        )
 
     # v18.34: Macro Context Risk Gate
     macro = _get_macro_context()
@@ -631,7 +661,22 @@ def evaluate_contract(
         logger.info(
             f"Sovereign Veto: MACRO_RISK_OVERLOAD (score={risk_score}) for {contract.get('local_symbol')}"
         )
-        return None
+        return StrategyResult(
+            strategy_family="vetoed",
+            side="NONE",
+            q_hat=0.0,
+            ev=0.0,
+            ev_yes=0.0,
+            ev_no=0.0,
+            confidence=0.0,
+            uncertainty_penalty=0.0,
+            econ_approved=False,
+            veto_reason="macro_risk_overload",
+            position_fraction=0.0,
+            position_contracts=0,
+            top_factors=[],
+            hours_to_resolution=_hours_to_resolution(contract.get("last_trade_at", ""))
+        )
 
     last_trade_at = contract.get("last_trade_at", "")
     hours_to_res = _hours_to_resolution(last_trade_at)
@@ -641,11 +686,24 @@ def evaluate_contract(
         feats = _compute_features(
             bars_5m, bars_30m, bars_1h, bars_4h, ask_yes, ask_no, mid_yes, mid_no
         )
-    except Exception as e:
-        logger.warning(
-            f"Feature computation failed for {contract.get('local_symbol')}: {e}"
+    except Exception:
+        logger.exception(f"Feature computation failed for {contract.get('local_symbol')}")
+        return StrategyResult(
+            strategy_family="vetoed",
+            side="NONE",
+            q_hat=0.0,
+            ev=0.0,
+            ev_yes=0.0,
+            ev_no=0.0,
+            confidence=0.0,
+            uncertainty_penalty=0.0,
+            econ_approved=False,
+            veto_reason="feature_computation_failed",
+            position_fraction=0.0,
+            position_contracts=0,
+            top_factors=[],
+            hours_to_resolution=hours_to_res
         )
-        return None
 
     x_t = feats["x_t"]
     v_1h = feats["v_1h"]
@@ -700,8 +758,23 @@ def evaluate_contract(
             logger.debug(f"Strategy {name} error: {e}")
 
     if not strategy_candidates:
-        # No strategy signal — log and return None (not even an econ-veto entry)
-        return None
+        # No strategy signal
+        return StrategyResult(
+            strategy_family="vetoed",
+            side="NONE",
+            q_hat=q_hat,
+            ev=0.0,
+            ev_yes=ev_yes,
+            ev_no=ev_no,
+            confidence=0.0,
+            uncertainty_penalty=0.0,
+            econ_approved=False,
+            veto_reason="no_strategy_signal",
+            position_fraction=0.0,
+            position_contracts=0,
+            top_factors=[],
+            hours_to_resolution=hours_to_res
+        )
 
     # Pick highest-confidence strategy
     strategy_candidates.sort(key=lambda x: x[2], reverse=True)
@@ -719,7 +792,22 @@ def evaluate_contract(
     # v18.34: Forensic Veto for Hedge Spaghetti
     if same_event_open:
         logger.info(f"Forensic Veto: SAME_EVENT_HEDGE_SPAGHETTI for {contract.get('local_symbol')}")
-        return None
+        return StrategyResult(
+            strategy_family="vetoed",
+            side="NONE",
+            q_hat=0.0,
+            ev=0.0,
+            ev_yes=0.0,
+            ev_no=0.0,
+            confidence=0.0,
+            uncertainty_penalty=0.0,
+            econ_approved=False,
+            veto_reason="same_event_hedge_spaghetti",
+            position_fraction=0.0,
+            position_contracts=0,
+            top_factors=[],
+            hours_to_resolution=hours_to_res
+        )
 
     # Capital Lockup Penalty (Velocity scaling)
     # Scale fraction down exponentially the further away the resolution is.
@@ -775,13 +863,20 @@ def evaluate_all_contracts(
     bankroll: float = 100.0,
     deployed_pct: float = 0.0,
     open_positions_count: int = 0,
-    open_event_families: Optional[set] = None,
+    open_event_families: Optional[dict] = None,
     macro_context: Optional[dict] = None,
 ) -> list[dict]:
     """
     Evaluate all active contracts and return ranked list of approved entries.
     v18.34: Now anchored in real-time TradFi reality via macro_context.
+    v18.35: Implements tick-aware concurrency capping for event families.
     """
+    if open_event_families is None:
+        open_event_families = {}
+    
+    # Local frequency map to track evaluations in the SAME tick
+    current_tick_counts = open_event_families.copy()
+
     approved_entries = []
     
     if macro_context:
@@ -838,31 +933,41 @@ def evaluate_all_contracts(
             except Exception:
                 continue
 
-            # Check same-event exposure
-            mkt_name = yc.get("market_name", "").lower()
-            same_evt = False
-            if open_event_families:
-                for fam in open_event_families:
-                    if fam.lower() in mkt_name:
-                        same_evt = True
-                        break
+            # Check same-event exposure (v18.35: Count-based capping)
+            ticker = yc.get("local_symbol", "")
+            family = ticker.split("_")[0]
+            count = current_tick_counts.get(family, 0)
 
-            result = evaluate_contract(
-                contract=yc,
-                bars_5m=bars_5m,
-                bars_30m=bars_30m,
-                bars_1h=bars_1h,
-                bars_4h=bars_4h,
-                yes_quote=yes_quote,
-                no_quote=no_quote,
-                bankroll=bankroll,
-                deployed_pct=deployed_pct,
-                open_positions_count=open_positions_count,
-                same_event_open=same_evt,
-            )
+            if count >= KALSHI_SAME_EVENT_FAMILY_CAP:
+                # Veto immediately if family cap reached
+                result = StrategyResult(
+                    strategy_family="vetoed", side="NONE", q_hat=0.0, ev=0.0, ev_yes=0.0, ev_no=0.0,
+                    confidence=0.0, uncertainty_penalty=0.0, econ_approved=False,
+                    veto_reason="same_event_family_cap_reached", position_fraction=0.0,
+                    position_contracts=0, top_factors=[], 
+                    hours_to_resolution=hours_to_res
+                )
+            else:
+                result = evaluate_contract(
+                    contract=yc,
+                    bars_5m=bars_5m,
+                    bars_30m=bars_30m,
+                    bars_1h=bars_1h,
+                    bars_4h=bars_4h,
+                    yes_quote=yes_quote,
+                    no_quote=no_quote,
+                    bankroll=bankroll,
+                    deployed_pct=deployed_pct,
+                    open_positions_count=open_positions_count,
+                    same_event_open=(count > 0),
+                )
 
             if result is None:
                 continue
+
+            # Update count for the rest of the tick if approved
+            if result.econ_approved and result.position_contracts > 0:
+                current_tick_counts[family] = count + 1
 
             rank_score = result.ev * result.confidence if result.econ_approved else 0.0
             approved_entries.append(

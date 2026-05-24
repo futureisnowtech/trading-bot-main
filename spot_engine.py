@@ -50,6 +50,7 @@ from runtime.spot_strategy import (
     trail_arm_r_for_symbol,
 )
 from runtime.spot_position_truth import get_spot_position_truth, get_spot_symbol_truth
+from logging_db.trade_logger import _conn as _db_conn
 
 from functools import wraps
 
@@ -144,7 +145,7 @@ def _get_broker(paper: bool = False) -> Optional["CoinbaseSpotBroker"]:
                     buying_power=float(bal.get("usd_available") or 0.0)
                 )
         except Exception:
-            pass
+            logger.exception("Sovereign Failure in core lifecycle")
 
         system_state.state.update_prometheus()
 
@@ -186,15 +187,19 @@ def _load_spot_positions_from_db(
                 ]
 
                 if unclassified:
-                    with sqlite3.connect(DB_PATH, timeout=5) as conn:
+                    with _db_conn() as conn:
                         for row in unclassified:
                             clean = _clean_symbol(row.get("symbol"))
                             if clean in db_symbols:
                                 continue
 
                             logger.info(f"[spot_engine] Auto-adopting {clean} into DB from broker truth.")
-                            entry_price = float(row.get("current_price", 1.0))
+                            entry_price = max(float(row.get("current_price", 1.0)), 1.0)
                             qty = float(row.get("qty", 0.0))
+                            
+                            # v18.35: Assign default risk parameters for manual adoptions
+                            default_stop = round(entry_price * 0.85, 8)
+                            default_target = round(entry_price * 1.20, 8)
 
                             conn.execute(
                                 """
@@ -203,9 +208,9 @@ def _load_spot_positions_from_db(
                                     stop, target, high_since_entry,
                                     entry_trade_id, entry_feature_snapshot_id, base_asset,
                                     setup_family, execution_route
-                                ) VALUES (?, ?, ?, ?, 0, 'LONG', ?, 0, 0, ?, 1, 1, ?, 'auto_adopted', 'manual')
+                                ) VALUES (?, ?, ?, ?, 0, 'LONG', ?, ?, ?, ?, 1, 1, ?, 'auto_adopted', 'manual')
                                 """,
-                                (clean, f"spot_{clean.lower()}", qty, entry_price, datetime.datetime.utcnow().isoformat(), entry_price, clean)
+                                (clean, f"spot_{clean.lower()}", qty, entry_price, datetime.datetime.utcnow().isoformat(), default_stop, default_target, entry_price, clean)
                             )
                             # Add to list for immediate return
                             db_positions.append({
@@ -290,7 +295,7 @@ def _sync_position_high(
 ) -> None:
     try:
         paper_val = 1 if paper else 0
-        con = sqlite3.connect(_get_db_path(), timeout=5)
+        con = _db_conn()
         con.execute(
             "UPDATE open_positions SET high_since_entry=? WHERE symbol=? AND strategy=? AND paper=?",
             (high_price, _clean_symbol(symbol), strategy, paper_val),
@@ -306,7 +311,7 @@ def _sync_position_exit_reason(
 ) -> None:
     try:
         paper_val = 1 if paper else 0
-        con = sqlite3.connect(_get_db_path(), timeout=5)
+        con = _db_conn()
         con.execute(
             "UPDATE open_positions SET exit_reason=? WHERE symbol=? AND strategy=? AND paper=?",
             (exit_reason, _clean_symbol(symbol), strategy, paper_val),
@@ -516,7 +521,7 @@ def _load_entry_feature_snapshot(position: dict) -> dict:
     if snapshot_id <= 0 and trade_id <= 0:
         return {}
     try:
-        con = sqlite3.connect(_get_db_path(), timeout=5)
+        con = _db_conn()
         cur = con.cursor()
         if snapshot_id > 0:
             cur.execute(
@@ -624,7 +629,7 @@ def _execution_micro_ok(symbol: str, top: dict) -> tuple[bool, str]:
             import system_state
             system_state.state.update_stochastic(clean, {"status": "VETO", "reason": reason})
         except Exception:
-            pass
+            logger.exception("Sovereign Failure in core lifecycle")
         return False, reason
     if depth > 0 and depth < depth_min:
         reason = "depth_below_minimum"
@@ -632,7 +637,7 @@ def _execution_micro_ok(symbol: str, top: dict) -> tuple[bool, str]:
             import system_state
             system_state.state.update_stochastic(clean, {"status": "VETO", "reason": reason})
         except Exception:
-            pass
+            logger.exception("Sovereign Failure in core lifecycle")
         return False, reason
     return True, "none"
 
@@ -789,7 +794,7 @@ def _reconcile_qty(symbol: str, issue: dict) -> None:
     clean = _clean_symbol(symbol)
     live_qty = float(issue.get("qty", 0.0))
     try:
-        con = sqlite3.connect(_get_db_path(), timeout=5)
+        con = _db_conn()
         con.execute("UPDATE open_positions SET qty=? WHERE symbol=? AND paper=0""", (live_qty, clean))
         con.commit()
         con.close()
@@ -849,21 +854,29 @@ def open_spot(
         if truth_status == "unclassified" and not paper:
             logger.info(f"[spot_engine] {clean} was unclassified. Auto-adopting into DB.")
             try:
-                import sqlite3
-                from config import DB_PATH
                 # truth_row has 'current_price' and 'qty'
-                entry_price = float(truth_row.get("current_price", 0.0))
-                if entry_price <= 0:
-                    entry_price = 1.0
+                entry_price = max(float(truth_row.get("current_price", 1.0)), 1.0)
                 qty = float(truth_row.get("qty", 0.0))
-                with sqlite3.connect(DB_PATH, timeout=5) as conn:
+                
+                # v18.35: Assign default risk parameters for manual adoptions
+                default_stop = round(entry_price * 0.85, 8)
+                default_target = round(entry_price * 1.20, 8)
+
+                with _db_conn() as conn:
                     conn.execute(
-                        "INSERT INTO open_positions (symbol, strategy, qty, entry, paper, direction, ts_entry) VALUES (?, ?, ?, ?, 0, 'LONG', ?)",
-                        (clean, f"spot_{clean.lower()}", qty, entry_price, datetime.datetime.utcnow().isoformat())
+                        """
+                        INSERT INTO open_positions (
+                            symbol, strategy, qty, entry, paper, direction, ts_entry,
+                            stop, target, high_since_entry,
+                            entry_trade_id, entry_feature_snapshot_id, base_asset,
+                            setup_family, execution_route
+                        ) VALUES (?, ?, ?, ?, 0, 'LONG', ?, ?, ?, ?, 1, 1, ?, 'auto_adopted', 'manual')
+                        """,
+                        (clean, f"spot_{clean.lower()}", qty, entry_price, datetime.datetime.utcnow().isoformat(), default_stop, default_target, entry_price, clean)
                     )
                 truth_status = "matched_bot_position"
-            except Exception as e:
-                logger.debug(f"Failed to adopt {clean}: {e}")
+            except Exception:
+                logger.exception(f"Failed to adopt {clean}")
 
         if truth_status in {
             "matched_bot_position",
@@ -997,7 +1010,7 @@ def open_spot(
 
             trigger_spot_halt("ks_spot_mixed_mode_order_artifact", detail)
         except Exception:
-            pass
+            logger.exception("Sovereign Failure in core lifecycle")
         return None
 
     # Push to Prometheus
@@ -1146,7 +1159,7 @@ def open_spot(
             ]
             metrics.OPEN_TRADES_GAUGE.set(len(_open))
         except Exception:
-            pass
+            logger.exception("Sovereign Failure in core lifecycle")
         # Cumulative fees on entry side too.
         metrics.FEES_PAID_COUNTER.inc(max(0.0, fee_usd))
     except Exception as _e:
@@ -1305,7 +1318,7 @@ def close_spot(
 
     # v18.16: Force DB to zero immediately after fill to prevent ghost positions
     try:
-        con = sqlite3.connect(_get_db_path(), timeout=5)
+        con = _db_conn()
         con.execute("UPDATE open_positions SET qty = 0 WHERE symbol = ?", (clean,))
         con.commit()
         con.close()
@@ -1445,7 +1458,7 @@ def close_spot(
             logger.error(f"[spot_engine] Online learner update failed: {_ole}")
 
         try:
-            con = sqlite3.connect(_get_db_path(), timeout=5)
+            con = _db_conn()
             learning_snapshot_written = bool(
                 con.execute(
                     "SELECT 1 FROM ml_feature_snapshots WHERE trade_id=? LIMIT 1",
@@ -1561,7 +1574,7 @@ def close_spot(
             ]
             metrics.OPEN_TRADES_GAUGE.set(len(_open))
         except Exception:
-            pass
+            logger.exception("Sovereign Failure in core lifecycle")
     except Exception as _e:
         logger.debug(f"[spot_engine] close-side metrics emit failed: {_e}")
 

@@ -1195,6 +1195,9 @@ KALSHI_MAX_DEPLOYED_PCT: float = 1.0
 # Max concurrent binary events (unshackled from legacy 2)
 KALSHI_MAX_CONCURRENT_POSITIONS: int = 15
 
+# Max positions per single event underlier (e.g., GOP-WIN)
+KALSHI_SAME_EVENT_FAMILY_CAP: int = int(os.getenv("KALSHI_SAME_EVENT_FAMILY_CAP", "2"))
+
 # Kelly criterion hard cap (per position)
 KALSHI_KELLY_CAP: float = 0.10
 

@@ -13,6 +13,7 @@ import os
 import sqlite3
 from datetime import datetime, timezone
 from typing import Any
+from logging_db.trade_logger import _conn as _db_conn
 
 logger = logging.getLogger(__name__)
 
@@ -53,15 +54,12 @@ def _resolve_db_path(db_path: str | None = None) -> str:
 
 
 def _conn(db_path: str | None = None) -> sqlite3.Connection:
-    db_path = _resolve_db_path(db_path)
-    c = sqlite3.connect(db_path, check_same_thread=False, timeout=10)
-    c.row_factory = sqlite3.Row
-    c.execute("PRAGMA journal_mode=WAL")
-    return c
+    # Use the hardened, WAL-enabled singleton connection
+    return _db_conn()
 
 
 def _clean_symbol(symbol: str) -> str:
-    clean = str(symbol or "").upper().replace("/", "-")
+    clean = str(symbol or "").strip().upper().replace("/", "-")
     for suffix in ("-USDC", "-USDT", "-USD", "USDC", "USDT", "USD"):
         if clean.endswith(suffix):
             clean = clean[: -len(suffix)]

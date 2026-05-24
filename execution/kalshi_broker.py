@@ -261,19 +261,16 @@ class KalshiBroker:
                     # ── Hard Liquidity Gate (v18.35) ────────────────────────────────
                     # Skip dormant markets with zero activity to avoid dead polling
                     try:
-                        oi = float(m.get("open_interest_fp", 0.0) or 0.0)
-                        vol = float(m.get("volume_fp", 0.0) or 0.0)
-                        liq = float(m.get("liquidity_dollars", 0.0) or 0.0)
-                        
-                        if oi <= 0.0 and vol <= 0.0:
-                            continue # No trades, no interest
-                            
-                        # Ensure some minimal orderbook presence or historical interest
-                        if liq <= 0.0 and vol < 100.0:
-                            continue
+                        vol_raw = m.get("volume_fp")
+                        liq_raw = m.get("liquidity_dollars")
+
+                        # v18.35: Only skip if Kalshi EXPLICITLY reports 0 for both.
+                        # If keys are missing (None), allow discovery to proceed.
+                        if vol_raw is not None and liq_raw is not None:
+                            if float(vol_raw or 0) <= 0.0 and float(liq_raw or 0) <= 0.0:
+                                continue 
                     except (ValueError, TypeError):
                         continue
-                        
                     for side in ["YES", "NO"]:
                         right = "C" if side == "YES" else "P"
                         results.append({

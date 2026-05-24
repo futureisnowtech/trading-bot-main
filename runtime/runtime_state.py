@@ -15,6 +15,7 @@ import json
 import sqlite3
 from datetime import datetime, timezone
 from typing import Any, Optional
+from logging_db.trade_logger import _conn as _db_conn
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
@@ -73,10 +74,8 @@ CREATE TABLE IF NOT EXISTS lane_runtime_state (
 
 
 def _conn(db_path: str = DB_PATH) -> sqlite3.Connection:
-    c = sqlite3.connect(db_path, check_same_thread=False, timeout=10)
-    c.row_factory = sqlite3.Row
-    c.execute("PRAGMA journal_mode=WAL")
-    return c
+    # Use the hardened, WAL-enabled singleton connection
+    return _db_conn()
 
 
 def _now_iso() -> str:

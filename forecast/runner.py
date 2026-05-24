@@ -227,9 +227,11 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                 return []
 
             # Open event families (to detect same-event exposure)
-            open_event_families: set = {
-                p.get("local_symbol", "").split("_")[0] for p in open_positions
-            }
+            from collections import defaultdict
+            open_event_families_counts = defaultdict(int)
+            for p in open_positions:
+                family = p.get("local_symbol", "").split("_")[0]
+                open_event_families_counts[family] += 1
 
             def _get_bars_fn(contract_id: int, interval: str) -> list[dict]:
                 return get_bars(contract_id, interval, limit=200)
@@ -254,7 +256,7 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                 bankroll=bankroll,
                 deployed_pct=deployed_pct,
                 open_positions_count=open_count,
-                open_event_families=open_event_families,
+                open_event_families=open_event_families_counts,
                 macro_context=macro_ctx,
             )
 

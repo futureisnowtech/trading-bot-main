@@ -291,25 +291,95 @@ async def spread_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @restricted_access
 async def audit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    state = system_state.state.get_state()
-    is_live = _runtime_is_live()
-    mode_label = "LIVE" if is_live else "PAPER"
-    issues = []
-    if not state["exchange"]["connected"]:
-        issues.append("REST Disconnected")
-    if not state["exchange"]["ws_connected"]:
-        issues.append("WS Disconnected")
-    if state["system"]["cpu_percent"] > 90:
-        issues.append("High CPU Usage")
-
-    if not issues:
-        await _reply_text(
-            update, f"Audit Passed [{mode_label}]: System integrity verified."
+    import requests
+    
+    msg = "<b>SOVEREIGN SRE COMMAND AUDIT (v18.35.ARCH)</b>\n\n"
+    raw_text = "" # For AI analysis
+    
+    try:
+        # Try docker network hostname first, then localhost fallback
+        try:
+            resp = requests.get("http://algo-dashboard:8080/api/state", timeout=3)
+        except requests.exceptions.RequestException:
+            resp = requests.get("http://127.0.0.1:8080/api/state", timeout=3)
+            
+        data = resp.json()
+        if "error" in data:
+            raise RuntimeError(data["error"])
+        
+        # System & Vitals
+        sys_info = data.get("system", {})
+        vitals = data.get("vitals", {})
+        sre = data.get("sre", {})
+        
+        line = f"🖥 <b>Status:</b> {sys_info.get('status', 'UNKNOWN')}\n"
+        msg += line; raw_text += line
+        line = f"🛡 <b>Data Integrity:</b> {sre.get('integrity_score', 0)}%\n"
+        msg += line; raw_text += line
+        line = f"⚙️ <b>Droplet Load:</b> CPU {vitals.get('cpu', 0):.0f}% | RAM {vitals.get('ram', 0):.0f}%\n\n"
+        msg += line; raw_text += line
+        
+        # Crypto Lane
+        spot = data.get("spot", {})
+        pnl = spot.get("pnl_24h", 0)
+        pnl_icon = "🟢" if pnl >= 0 else "🔴"
+        
+        line = f"⚡️ <b>CRYPTO SPOT (Regime: {spot.get('regime', 'UNKNOWN')})</b>\n"
+        msg += line; raw_text += line
+        line = f"   Equity: ${spot.get('equity', 0):,.2f} | 24H: {pnl_icon} ${pnl:,.2f}\n"
+        msg += line; raw_text += line
+        
+        positions = spot.get("positions", [])
+        if positions:
+            for p in positions:
+                live_pnl = p.get('live_pnl', 0)
+                icon = "🟢" if live_pnl >= 0 else "🔴"
+                line = f"   - {p['symbol']}: {icon} ${live_pnl:,.2f} | Entry: ${p['entry_price']:,.2f}\n"
+                msg += line; raw_text += line
+        else:
+            line = "   - No active positions (Scanning)\n"
+            msg += line; raw_text += line
+            
+        msg += "\n"; raw_text += "\n"
+        
+        # Forecast Lane
+        forecast = data.get("forecast", {})
+        f_pos = forecast.get("positions", [])
+        
+        line = f"🌪 <b>WEATHER ENGINE (Markets: {forecast.get('active_markets', 0)})</b>\n"
+        msg += line; raw_text += line
+        if f_pos:
+            for p in f_pos:
+                line = f"   - {p.get('local_symbol')}: {p.get('qty')} {p.get('side')} | Cost: ${p.get('entry_price', 0):.4f}\n"
+                msg += line; raw_text += line
+        else:
+            line = "   - No active weather positions (Monitoring)\n"
+            msg += line; raw_text += line
+            
+        # RC: AI Oracle Strategic Analysis (v18.35)
+        msg += "\n🔮 <b>ORACLE STRATEGIC ANALYSIS:</b>\n"
+        await update.message.reply_chat_action(ChatAction.TYPING)
+        
+        prompt = (
+            "You are the Sovereign SRE Oracle. Analyze this system audit snapshot. "
+            "Identify any strategic gaps, systemic errors, or risk anomalies. "
+            "Suggest immediate actionable fixes or pivots. Be direct and ruthless.\n\n"
+            f"### AUDIT SNAPSHOT ###\n{raw_text}"
         )
-    else:
-        await _reply_text(
-            update, f"Audit Issues [{mode_label}]:\n- " + "\n- ".join(issues)
-        )
+        
+        try:
+            analysis = await asyncio.wait_for(
+                asyncio.to_thread(ask_ai, prompt), 
+                timeout=60.0
+            )
+            msg += f"<i>{escape(analysis, quote=False)}</i>"
+        except Exception as ai_err:
+            msg += f"<i>Oracle analysis failed: {ai_err}</i>"
+            
+    except Exception as e:
+        msg += f"⚠️ <b>WARNING:</b> Failed to reach SRE Dashboard API.\nError: <code>{e}</code>\n"
+        
+    await _reply_text(update, msg, parse_mode=ParseMode.HTML)
 
 
 @restricted_access

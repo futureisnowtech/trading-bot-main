@@ -260,15 +260,18 @@ class KalshiBroker:
                     
                     # ── Hard Liquidity Gate (v18.35) ────────────────────────────────
                     # Skip dormant markets with zero activity to avoid dead polling
-                    oi = int(m.get("open_interest", 0))
-                    vol = int(m.get("volume", 0))
-                    liq = int(m.get("liquidity", 0))
-                    
-                    if oi == 0 and vol == 0:
-                        continue # No trades, no interest
+                    try:
+                        oi = float(m.get("open_interest_fp", 0.0) or 0.0)
+                        vol = float(m.get("volume_fp", 0.0) or 0.0)
+                        liq = float(m.get("liquidity_dollars", 0.0) or 0.0)
                         
-                    if liq < 100: # Less than $1.00 of liquidity (cents based?)
-                        # Kalshi liq is often in cents, 100 = $1.00
+                        if oi <= 0.0 and vol <= 0.0:
+                            continue # No trades, no interest
+                            
+                        # Ensure some minimal orderbook presence or historical interest
+                        if liq <= 0.0 and vol < 100.0:
+                            continue
+                    except (ValueError, TypeError):
                         continue
                         
                     for side in ["YES", "NO"]:

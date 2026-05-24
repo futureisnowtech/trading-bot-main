@@ -154,8 +154,26 @@ async def get_db_snapshot():
                     if now - _LAST_KALSHI_SYNC > 60:
                         kb._sync_positions()
                         _LAST_KALSHI_SYNC = now
-                    forecast_positions = kb.get_positions()
-        except: pass
+                    
+                    raw_positions = kb.get_positions()
+                    for p in raw_positions:
+                        # Enrich with DB metadata if available
+                        try:
+                            # Search by local_symbol and right
+                            right = 'C' if p['side'] == 'YES' else 'P'
+                            cursor.execute(
+                                "SELECT entry, stop, ts_entry FROM open_positions WHERE symbol=? AND strategy LIKE 'forecast_%' ORDER BY ts_entry DESC LIMIT 1",
+                                (p['local_symbol'],)
+                            )
+                            db_row = cursor.fetchone()
+                            if db_row:
+                                p['entry_price'] = float(db_row['entry'] or p['entry_price'])
+                                p['stop'] = float(db_row['stop'] or 0.0)
+                                p['ts_entry'] = db_row['ts_entry']
+                        except: pass
+                    forecast_positions = raw_positions
+        except Exception as e:
+            logging.error(f"Kalshi Sync Error: {e}")
 
         # 7. 24H PnL
         pnl_24h = 0.0

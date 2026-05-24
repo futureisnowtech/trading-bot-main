@@ -53,6 +53,13 @@
             background-size: 200% 100%;
             animation: shimmer 2s infinite;
         }
+
+        .box-glow-blue { box-shadow: 0 0 20px rgba(59, 130, 246, 0.15); }
+        .box-glow-purple { box-shadow: 0 0 20px rgba(168, 85, 247, 0.15); }
+        .box-glow-green { box-shadow: 0 0 20px rgba(16, 185, 129, 0.15); }
+        
+        .neon-border-blue { border-color: rgba(59, 130, 246, 0.5); }
+        .neon-border-purple { border-color: rgba(168, 85, 247, 0.5); }
     </style>
 </head>
 <body class="p-6 space-y-6">
@@ -65,7 +72,7 @@
             <div>
                 <h1 class="text-3xl font-extrabold tracking-tight text-white flex items-center">
                     SOVEREIGN <span class="neon-text-blue ml-3">SRE COMMAND</span>
-                    <span class="bg-blue-500/10 text-blue-400 text-[10px] px-2 py-0.5 rounded-full border border-blue-500/30 ml-4 font-mono tracking-widest uppercase">v18.34.SRE</span>
+                    <span class="bg-blue-500/10 text-blue-400 text-[10px] px-2 py-0.5 rounded-full border border-blue-500/30 ml-4 font-mono tracking-widest uppercase">v18.34.UX</span>
                 </h1>
                 <div class="flex items-center space-x-4 text-xs uppercase tracking-widest font-bold mt-1">
                     <span id="sys-status" class="neon-text-green flex items-center">
@@ -148,6 +155,22 @@
                         <div class="flex justify-between mb-2"><span class="text-[10px] font-bold text-gray-500 uppercase">Memory Banks</span><span id="v-ram" class="text-sm font-black text-white">0%</span></div>
                         <div class="gauge-bar"><div id="f-ram" class="gauge-fill bg-purple-500" style="width: 0%"></div></div>
                     </div>
+                </div>
+            </div>
+
+            <!-- MCP Tactical Tools -->
+            <div class="glass-panel p-6 space-y-4 border-t-4 border-t-cyan-500">
+                <h3 class="text-sm font-black text-gray-400 uppercase tracking-widest flex justify-between items-center">
+                    <span>Tactical Tools (MCP)</span>
+                    <span class="text-[10px] bg-cyan-500/10 text-cyan-400 px-2 py-0.5 rounded italic">Active</span>
+                </h3>
+                <div id="mcp-tools" class="grid grid-cols-2 gap-2">
+                    <div class="p-2 bg-cyan-900/10 border border-cyan-800/30 rounded text-[9px] font-bold text-cyan-500 uppercase flex items-center justify-center">Risk Engine</div>
+                    <div class="p-2 bg-cyan-900/10 border border-cyan-800/30 rounded text-[9px] font-bold text-cyan-500 uppercase flex items-center justify-center">SRE Oracle</div>
+                    <div class="p-2 bg-cyan-900/10 border border-cyan-800/30 rounded text-[9px] font-bold text-cyan-500 uppercase flex items-center justify-center">Spot Truth</div>
+                    <div class="p-2 bg-cyan-900/10 border border-cyan-800/30 rounded text-[9px] font-bold text-cyan-500 uppercase flex items-center justify-center">Kalshi V2</div>
+                    <div class="p-2 bg-cyan-900/10 border border-cyan-800/30 rounded text-[9px] font-bold text-cyan-500 uppercase flex items-center justify-center">Loki Logs</div>
+                    <div class="p-2 bg-cyan-900/10 border border-cyan-800/30 rounded text-[9px] font-bold text-cyan-500 uppercase flex items-center justify-center">Grafana IRM</div>
                 </div>
             </div>
 
@@ -363,6 +386,43 @@
                 spotPosContainer.innerHTML = `<div class="col-span-2 py-16 text-center stat-card shimmer border-dashed"><p class="text-lg font-bold text-slate-500 italic">Universe Scanned. Waiting for high-conviction setup...</p></div>`;
             }
 
+            // Forecast Macro Engagement
+            const forecastPosContainer = document.getElementById('forecast-positions');
+            if (data.forecast.positions && data.forecast.positions.length > 0) {
+                forecastPosContainer.innerHTML = data.forecast.positions.map(p => {
+                    // Calculate PnL: Kalshi contracts are binary 0-1. Current mid is prob.
+                    // If YES, value = mid. If NO, value = 1.0 - mid.
+                    const current_val = p.side === 'YES' ? p.entry_price : (1.0 - p.entry_price); // Placeholder logic
+                    // Better: use implied probability from radar if available, or just mid
+                    const pnl = (p.entry_price > 0) ? 0.0 : 0.0; // PnL calculation is complex without live price here
+                    
+                    return `
+                    <div class="p-4 bg-purple-900/10 rounded-xl border border-purple-500/20 border-l-4 border-l-purple-500 shadow-lg">
+                        <div class="flex justify-between items-start mb-3">
+                            <div>
+                                <p class="text-lg font-black text-white leading-none">${p.local_symbol}</p>
+                                <p class="text-[10px] text-purple-400 font-bold uppercase mt-1 tracking-widest">${p.side} CONTRACTS</p>
+                            </div>
+                            <div class="text-right">
+                                <p class="text-[10px] text-slate-500 font-bold uppercase mb-0.5">Qty</p>
+                                <p class="text-sm font-black text-white">${p.qty}</p>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4 pt-3 border-t border-purple-500/10">
+                            <div>
+                                <p class="text-[9px] text-slate-500 font-black uppercase">Cost Basis</p>
+                                <p class="text-xs font-black text-slate-300">$${p.entry_price.toFixed(4)}</p>
+                            </div>
+                            <div class="text-right">
+                                <p class="text-[9px] text-slate-500 font-black uppercase">Risk (Stop)</p>
+                                <p class="text-xs font-black text-red-400">$${(p.stop || 0).toFixed(4)}</p>
+                            </div>
+                        </div>
+                    </div>
+                `;}).join('');
+            } else {
+                forecastPosContainer.innerHTML = `<div class="col-span-2 py-8 text-center bg-purple-950/10 border border-dashed border-purple-500/20 rounded-xl"><p class="text-sm font-black text-purple-400/50 uppercase tracking-[0.2em] italic">Monitoring Global Event Horizon</p></div>`;
+            }
             // Macro Radar
             const radarContainer = document.getElementById('macro-radar');
             if (data.forecast.radar && data.forecast.radar.length > 0) {

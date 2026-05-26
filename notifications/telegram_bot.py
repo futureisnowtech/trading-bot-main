@@ -765,8 +765,10 @@ async def run_bot():
         async def raw_logger(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user = getattr(update, "effective_user", None)
             user_id = getattr(user, "id", None)
-            text = getattr(update.message, "text", "[no text]") if update.message else "[no message]"
-            logger.info(f"[telegram] RAW UPDATE: user_id={user_id} text='{text}'")
+            raw_text = getattr(update.message, "text", "[no text]") if update.message else "[no message]"
+            # Sanitization: Strip or replace newlines to prevent log_alerter echo loops
+            sanitized_text = raw_text.replace("\n", " ").replace("\r", " ")
+            logger.info(f"[telegram] RAW UPDATE: user_id={user_id} text='{sanitized_text}'")
 
         app.add_handler(MessageHandler(filters.ALL, raw_logger), group=-1)
 

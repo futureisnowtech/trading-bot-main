@@ -144,8 +144,8 @@ def _get_broker(paper: bool = False) -> Optional["CoinbaseSpotBroker"]:
                 system_state.state.update_exchange(
                     buying_power=float(bal.get("usd_available") or 0.0)
                 )
-        except Exception:
-            logger.exception("Sovereign Failure in core lifecycle")
+        except Exception as e:
+            logger.warning(f"Non-critical background state telemetry error: {e}")
 
         system_state.state.update_prometheus()
 
@@ -628,16 +628,16 @@ def _execution_micro_ok(symbol: str, top: dict) -> tuple[bool, str]:
         try:
             import system_state
             system_state.state.update_stochastic(clean, {"status": "VETO", "reason": reason})
-        except Exception:
-            logger.exception("Sovereign Failure in core lifecycle")
+        except Exception as e:
+            logger.warning(f"Non-critical background state telemetry error: {e}")
         return False, reason
     if depth > 0 and depth < depth_min:
         reason = "depth_below_minimum"
         try:
             import system_state
             system_state.state.update_stochastic(clean, {"status": "VETO", "reason": reason})
-        except Exception:
-            logger.exception("Sovereign Failure in core lifecycle")
+        except Exception as e:
+            logger.warning(f"Non-critical background state telemetry error: {e}")
         return False, reason
     return True, "none"
 
@@ -1009,8 +1009,8 @@ def open_spot(
             from runtime.spot_kill_switch import trigger_spot_halt
 
             trigger_spot_halt("ks_spot_mixed_mode_order_artifact", detail)
-        except Exception:
-            logger.exception("Sovereign Failure in core lifecycle")
+        except Exception as e:
+            logger.warning(f"Non-critical background state telemetry error: {e}")
         return None
 
     # Push to Prometheus
@@ -1158,8 +1158,8 @@ def open_spot(
                 and float(r.get("qty") or 0.0) > 0
             ]
             metrics.OPEN_TRADES_GAUGE.set(len(_open))
-        except Exception:
-            logger.exception("Sovereign Failure in core lifecycle")
+        except Exception as e:
+            logger.warning(f"Non-critical background state telemetry error: {e}")
         # Cumulative fees on entry side too.
         metrics.FEES_PAID_COUNTER.inc(max(0.0, fee_usd))
     except Exception as _e:
@@ -1573,8 +1573,8 @@ def close_spot(
                 and float(r.get("qty") or 0.0) > 0
             ]
             metrics.OPEN_TRADES_GAUGE.set(len(_open))
-        except Exception:
-            logger.exception("Sovereign Failure in core lifecycle")
+        except Exception as e:
+            logger.warning(f"Non-critical background state telemetry error: {e}")
     except Exception as _e:
         logger.debug(f"[spot_engine] close-side metrics emit failed: {_e}")
 

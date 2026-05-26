@@ -338,8 +338,8 @@ def _learning_snapshot_count() -> int:
         conn = _db_conn()
         row = conn.execute("SELECT COUNT(*) FROM ml_feature_snapshots").fetchone()
         return int((row or [0])[0] or 0)
-    except Exception:
-        logger.exception("Sovereign Failure in _learning_snapshot_count")
+    except Exception as e:
+        logger.warning(f"Non-critical background state telemetry error: {e}")
         return 0
 
 

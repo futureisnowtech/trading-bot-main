@@ -116,7 +116,7 @@ SPOT_STRATEGY_SYMBOLS: list = [
 ]
 SPOT_MAX_DEPLOYED_PCT: float = float(os.getenv("SPOT_MAX_DEPLOYED_PCT", "1.0"))
 SPOT_MAX_POSITIONS_PER_SYMBOL: int = int(os.getenv("SPOT_MAX_POSITIONS_PER_SYMBOL", "3"))
-SPOT_MIN_ORDER_USD: float = float(os.getenv("SPOT_MIN_ORDER_USD", "25.0"))
+SPOT_MIN_ORDER_USD: float = float(os.getenv("SPOT_MIN_ORDER_USD", "5.0"))
 SPOT_WEEKDAYS_ONLY: bool = os.getenv("SPOT_WEEKDAYS_ONLY", "false").lower() == "true"
 SPOT_ENTRY_START_TIME: str = os.getenv("SPOT_ENTRY_START_TIME", "00:00")
 SPOT_ENTRY_END_TIME: str = os.getenv("SPOT_ENTRY_END_TIME", "23:59")
@@ -173,15 +173,15 @@ SPOT_NEUTRAL_SCORE_WEIGHT_DERIVATIVE: float = float(
     os.getenv("SPOT_NEUTRAL_SCORE_WEIGHT_DERIVATIVE", "0.10")
 )
 SPOT_REGIME_SCORE_FLOORS: dict[str, float] = {
-    "TREND": float(os.getenv("SPOT_TREND_SCORE_FLOOR", "48.0")),
-    "NEUTRAL": float(os.getenv("SPOT_NEUTRAL_SCORE_FLOOR", "48.0")),
+    "TREND": float(os.getenv("SPOT_TREND_SCORE_FLOOR", "40.0")),
+    "NEUTRAL": float(os.getenv("SPOT_NEUTRAL_SCORE_FLOOR", "40.0")),
     "CHOP": float(os.getenv("SPOT_CHOP_SCORE_FLOOR", "48.0")),
 }
 # v18.19: exit-side score floors (5pt hysteresis below entry floors) — positions
 # survive a brief score dip without flipping out.
 SPOT_REGIME_SCORE_EXIT_FLOORS: dict[str, float] = {
-    "TREND": float(os.getenv("SPOT_TREND_SCORE_EXIT_FLOOR", "43.0")),
-    "NEUTRAL": float(os.getenv("SPOT_NEUTRAL_SCORE_EXIT_FLOOR", "43.0")),
+    "TREND": float(os.getenv("SPOT_TREND_SCORE_EXIT_FLOOR", "35.0")),
+    "NEUTRAL": float(os.getenv("SPOT_NEUTRAL_SCORE_EXIT_FLOOR", "35.0")),
     "CHOP": float(os.getenv("SPOT_CHOP_SCORE_EXIT_FLOOR", "43.0")),
 }
 SPOT_THESIS_MIN_SCORE_EXIT: float = float(os.getenv("SPOT_THESIS_MIN_SCORE_EXIT", "47.0"))

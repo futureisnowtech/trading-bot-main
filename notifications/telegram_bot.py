@@ -433,14 +433,24 @@ async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         today_trades = get_todays_trades()
         today = time.strftime("%Y-%m-%d")
-        wins = len([t for t in today_trades if float(t.get("pnl_usd", 0)) > 0])
-        total_pnl = sum(float(t.get("pnl_usd", 0)) for t in today_trades)
+        
+        # v18.35: Net PnL after Coinbase Taker Fee (0.60% per leg)
+        net_pnl_list = []
+        for t in today_trades:
+            pnl = float(t.get("pnl_usd", 0))
+            if pnl == 0: continue
+            val = float(t.get("value_usd", 0))
+            fee_est = val * 0.012
+            net_pnl_list.append(pnl - fee_est)
+
+        wins = len([p for p in net_pnl_list if p > 0])
+        total_pnl = sum(net_pnl_list)
 
         msg = (
             f"<b>Daily Report ({today}) [{mode_label}]</b>\n"
-            f"Trades: {len(today_trades)}\n"
-            f"Win Rate: {(wins / len(today_trades) * 100 if today_trades else 0):.1f}%\n"
-            f"Net PnL: ${total_pnl:+.2f}"
+            f"Trades: {len(net_pnl_list)}\n"
+            f"Win Rate: {(wins / len(net_pnl_list) * 100 if net_pnl_list else 0):.1f}%\n"
+            f"Net PnL: ${total_pnl:+.2f} (inc. fees)"
         )
         await _reply_text(update, msg, parse_mode=ParseMode.HTML)
     except Exception as e:
@@ -697,9 +707,18 @@ async def everything_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     # 3. Daily Performance
     try:
         today_trades = get_todays_trades()
-        wins = len([t for t in today_trades if float(t.get("pnl_usd", 0)) > 0])
-        total_pnl = sum(float(t.get("pnl_usd", 0)) for t in today_trades)
-        perf_str = f"PnL: ${total_pnl:+.2f} | WR: {(wins / len(today_trades) * 100 if today_trades else 0):.1f}% ({len(today_trades)} trd)"
+        # v18.35: Net PnL after Coinbase Taker Fee (0.60% per leg)
+        net_pnl_list = []
+        for t in today_trades:
+            pnl = float(t.get("pnl_usd", 0))
+            if pnl == 0: continue
+            val = float(t.get("value_usd", 0))
+            fee_est = val * 0.012
+            net_pnl_list.append(pnl - fee_est)
+
+        wins = len([p for p in net_pnl_list if p > 0])
+        total_pnl = sum(net_pnl_list)
+        perf_str = f"PnL: ${total_pnl:+.2f} | WR: {(wins / len(net_pnl_list) * 100 if net_pnl_list else 0):.1f}% ({len(net_pnl_list)} trd)"
     except:
         perf_str = "PnL: Error fetching"
 

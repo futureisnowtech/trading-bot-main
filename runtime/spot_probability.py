@@ -90,8 +90,8 @@ def sizing_multiplier(win_prob: float) -> float:
     if win_prob < 0.55:
         return 0.0
     
-    # v18.33: Sigmoid centered at 0.65, slope 10.0 (Recalibrated for $10 exchange floor)
-    z = (win_prob - 0.65) * 10.0
+    # v18.35: Sigmoid centered at 0.55, slope 6.0 (Flattened for volume on small accounts)
+    z = (win_prob - 0.55) * 6.0
     mult = 1.0 / (1.0 + np.exp(-z))
     
     # Scale and clip (1.25x max override)

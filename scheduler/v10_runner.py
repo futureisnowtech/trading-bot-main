@@ -1965,11 +1965,18 @@ def _attempt_entry(
                     f"[v10] {_underlying} exec_mult={_exec_mult:.2f} ({_exec_tag})"
                 )
             _spot_size = round(_spot_size * _exec_mult, 2)
-            if _spot_size < 10.0:
-                logger.info(
-                    f"[v10] {_underlying} exec_mult reduced size below $10 minimum"
-                )
-                return "below_threshold"
+            from config import SPOT_MIN_ORDER_USD
+            if _spot_size < SPOT_MIN_ORDER_USD:
+                # v18.35: Floor-aware scaling for small accounts. 
+                # If we have a decent multiplier (>= 0.5), we "bump" to the minimum floor.
+                if _exec_mult >= 0.5:
+                    _spot_size = SPOT_MIN_ORDER_USD
+                    logger.info(f"[v10] {_underlying} bumped size to minimum floor ${SPOT_MIN_ORDER_USD}")
+                else:
+                    logger.info(
+                        f"[v10] {_underlying} exec_mult {_exec_mult:.2f} too low to bump, skip"
+                    )
+                    return "below_threshold"
             _cooldown_min = int(_cfg.get("cooldown_min", 15))
             _cooldown_until = (
                 datetime.utcnow() + timedelta(minutes=_cooldown_min)
@@ -2337,7 +2344,8 @@ def _attempt_entry(
     # Contract-min and autonomous-eligibility checks are now handled upstream
     # by get_crypto_tradeability() in Step 5c (v16.14).  Any sizing that reaches
     # here has already passed those gates; only the $10 floor remains.
-    if size_usd < 10.0:
+    from config import SPOT_MIN_ORDER_USD
+    if size_usd < SPOT_MIN_ORDER_USD:
         logger.debug(f"[v10] {symbol} size ${size_usd:.2f} too small, skip")
         _journal_scan_candidate(
             scan_id,
@@ -2354,7 +2362,7 @@ def _attempt_entry(
             edge_score=float(candidate.get("edge_score", 0.5)),
             size_usd=size_usd,
             leverage=sizing.get("leverage", 3),
-            entry_block_reason=f"size ${size_usd:.2f} < $10 minimum",
+            entry_block_reason=f"size ${size_usd:.2f} < ${SPOT_MIN_ORDER_USD} minimum",
             recommended_lane=_trade.get("recommended_lane", ""),
             tradeability_status=_trade.get("status", "executable"),
             trade_blocked_reason="",

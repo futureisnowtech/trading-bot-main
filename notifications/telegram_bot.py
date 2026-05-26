@@ -372,7 +372,7 @@ async def audit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 asyncio.to_thread(ask_ai, prompt), 
                 timeout=60.0
             )
-            msg += f"<i>{escape(analysis, quote=False)}</i>"
+            msg += f"<i>{escape(analysis or 'AI returned no content.', quote=False)}</i>"
         except Exception as ai_err:
             msg += f"<i>Oracle analysis failed: {ai_err}</i>"
             
@@ -461,17 +461,17 @@ async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not query:
         await _reply_text(update, "Please provide a question. Usage: /ask <question>")
         return
-    await _handle_ai_query(update, query)
+    await _handle_ai_query(update, context, query)
 
 
 @restricted_access
 async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
-    await _handle_ai_query(update, update.message.text)
+    await _handle_ai_query(update, context, update.message.text)
 
 
-async def _handle_ai_query(update: Update, query: str):
+async def _handle_ai_query(update: Update, context: ContextTypes.DEFAULT_TYPE, query: str):
     user = getattr(update, "effective_user", None)
     user_id = user.id if user else 0
     
@@ -526,7 +526,7 @@ async def _handle_ai_query(update: Update, query: str):
         if response is None:
             response = "Error: AI Agent returned a null response."
 
-        chunks = chunk_message(escape(response, quote=False))
+        chunks = chunk_message(escape(response or "Error: AI returned no content.", quote=False))
 
         reply_markup = _get_tactical_keyboard()
 
@@ -556,9 +556,10 @@ async def _handle_ai_query(update: Update, query: str):
         logger.error(f"AI handler error: {e}")
         try:
             # v18.31: Safer error display with escaping fix
-            await thinking_msg.edit_text(f"⚠️ Error: {escape(str(e), quote=False)}")
+            await thinking_msg.edit_text(f"⚠️ Error: {escape(str(e) or 'Unknown Error', quote=False)}")
         except Exception:
             await thinking_msg.edit_text("⚠️ An internal error occurred while processing your request.")
+
 
 
 @restricted_access

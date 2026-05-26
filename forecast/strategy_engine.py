@@ -586,31 +586,73 @@ def calculate_continuous_sizing(market_price: float, ensemble_prob: float, capit
     qty = int(allocated_capital / market_price) if market_price > 0 else 0
     return qty
 
+import re
+
+def _parse_weather_threshold(ticker: str) -> Optional[float]:
+    """
+    Extract temperature threshold from Kalshi ticker.
+    Examples:
+      KXHIGHNY-26MAY26-T85 -> 85.0
+      KXHIGHCHI-26MAY26-T90.5 -> 90.5
+      KXHIGHLAX-26MAY26-T72 -> 72.0
+    """
+    # Look for -T followed by numbers (optional decimal) at the end or before a suffix
+    match = re.search(r'-T(-?\d+\.?\d*)', ticker)
+    if match:
+        try:
+            return float(match.group(1))
+        except ValueError:
+            return None
+    return None
+
 def _strategy_weather(ticker: str, ask_yes: float, ask_no: float) -> tuple[bool, str, float, list[str]]:
-    """Weather Ensemble Edge Strategy."""
+    """
+    Weather Ensemble Edge Strategy (v18.35).
+    Calculates P(High >= Threshold) from 31-member GFS ensemble.
+    """
     w_data = get_weather_data(ticker)
-    if not w_data:
+    if not w_data or "members" not in w_data:
         return False, "", 0.0, ["no_weather_ensemble_data"]
     
-    members = w_data["members"]
-    # We need to extract the threshold from the ticker (e.g. 'KXHIGHNY-26MAY26-T85')
-    # This is a bit complex parsing, but let's assume we can get it.
-    # For now, let's look at the mean vs market.
-    # If mean > threshold, ensemble_prob is fraction of members > threshold.
+    threshold = _parse_weather_threshold(ticker)
+    if threshold is None:
+        return False, "", 0.0, [f"unparseable_ticker_threshold: {ticker}"]
     
-    # Placeholder: if ticker format is understood, calculate real prob.
-    # Otherwise, use a dummy edge for now to prove pipeline.
-    ensemble_prob = 0.65 # Mock for now
+    members = w_data["members"]
+    if not members:
+        return False, "", 0.0, ["empty_ensemble_members"]
+
+    # Kalshi HIGH markets: "Will the high be >= Threshold?"
+    # We count how many ensemble members are >= threshold
+    success_count = sum(1 for m in members if m >= threshold)
+    ensemble_prob = success_count / len(members)
+    
+    # Add a small uncertainty buffer (if ensemble is 100% or 0%, cap at 0.97/0.03)
+    ensemble_prob = max(0.03, min(0.97, ensemble_prob))
     
     edge_yes = ensemble_prob - ask_yes
     edge_no = (1.0 - ensemble_prob) - ask_no
     
+    # v18.35: Edge threshold of 8% for weather (high conviction requirement)
     if edge_yes > 0.08:
-        return True, "YES", edge_yes, [f"weather_edge_yes={edge_yes:.1%}"]
-    if edge_no > 0.08:
-        return True, "NO", edge_no, [f"weather_edge_no={edge_no:.1%}"]
+        factors = [
+            f"ensemble_p={ensemble_prob:.1%}",
+            f"threshold={threshold}F",
+            f"edge={edge_yes:.1%}",
+            f"mean={w_data.get('mean', 0):.1f}F"
+        ]
+        return True, "YES", ensemble_prob, factors
         
-    return False, "", 0.0, ["insufficient_weather_edge"]
+    if edge_no > 0.08:
+        factors = [
+            f"ensemble_p={ensemble_prob:.1%}",
+            f"threshold={threshold}F",
+            f"edge={edge_no:.1%}",
+            f"mean={w_data.get('mean', 0):.1f}F"
+        ]
+        return True, "NO", ensemble_prob, factors
+        
+    return False, "", 0.0, [f"insufficient_weather_edge (p={ensemble_prob:.2f})"]
 
 def evaluate_contract(
     contract: dict,

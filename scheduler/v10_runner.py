@@ -3887,12 +3887,81 @@ def run_forever():
 
     logger.info("[v10] Main loop running. Press Ctrl+C to stop.")
     from system_state import state
+    from runtime.runtime_state import upsert_lane_state
+    import json
+    
+    _last_cache_ts = 0
+
+    def _cache_spot_state():
+        """v19.1: Caches rich broker-first spot state for the HUD dashboard."""
+        try:
+            from runtime.spot_position_truth import get_spot_position_truth
+            from execution.coinbase_spot_broker import get_spot_broker
+            
+            broker = get_spot_broker()
+            truth = get_spot_position_truth()
+            holdings = truth.get("all_live_holdings") or []
+            
+            enriched = []
+            total_equity = 0.0
+            
+            for p in holdings:
+                sym = p["symbol"]
+                qty = float(p.get("qty") or 0.0)
+                entry = float(p.get("entry") or 0.0)
+                mark = broker.get_mark_price(sym) or entry
+                
+                total_equity += (qty * mark)
+                
+                # Layman Logic
+                pnl = (mark - entry) * qty if entry > 0 else 0.0
+                potential = (float(p.get("target") or 0.0) - entry) * qty if p.get("target") else 0.0
+                risk = (entry - float(p.get("stop") or 0.0)) * qty if p.get("stop") else 0.0
+                
+                trend = "CHOP"
+                if mark > entry * 1.005: trend = "UP"
+                elif mark < entry * 0.995: trend = "DOWN"
+                
+                # SRE X-Ray: Sentiment
+                sentiment = "Neutral"
+                score = float(p.get("setup_score") or 50.0)
+                if pnl > 0 and score > 55: sentiment = "Strong Hold"
+                elif pnl < 0 and score > 60: sentiment = "Accumulating"
+                elif pnl < 0 and score < 45: sentiment = "Caution/Weakening"
+                
+                enriched.append({
+                    **p,
+                    "current_price": round(mark, 4),
+                    "live_pnl": round(pnl, 2),
+                    "potential_usd": round(potential, 2),
+                    "risk_usd": round(risk, 2),
+                    "trend": trend,
+                    "sentiment": sentiment,
+                    "updated_at": datetime.now(timezone.utc).isoformat()
+                })
+                
+            snapshot = {
+                "positions": enriched,
+                "equity": round(total_equity, 2),
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+            
+            upsert_lane_state("spot", snapshot_json=json.dumps(snapshot))
+        except Exception as e:
+            logger.debug(f"[v10] Cache spot state error: {e}")
 
     while True:
         try:
             schedule.run_pending()
             # 💓 Periodic Metric Heartbeat
             state.update_prometheus()
+            
+            # 🚀 v19.1: Cache rich state for HUD (every 15s)
+            now = time.time()
+            if now - _last_cache_ts >= 15:
+                _cache_spot_state()
+                _last_cache_ts = now
+                
             time.sleep(1)
         except KeyboardInterrupt:
             logger.info("[v10] Shutdown requested via KeyboardInterrupt")

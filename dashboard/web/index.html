@@ -3,18 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SOVEREIGN SRE COMMAND</title>
+    <title>SOVEREIGN v19.1 | COMMAND HUD</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
     <style>
         :root {
             --bg: #020617;
-            --panel: rgba(15, 23, 42, 0.8);
+            --panel: rgba(15, 23, 42, 0.85);
             --border: rgba(30, 41, 59, 0.6);
             --neon-blue: #3b82f6;
             --neon-green: #10b981;
             --neon-red: #ef4444;
-            --neon-purple: #a855f7;
             --neon-yellow: #f59e0b;
         }
         body {
@@ -26,515 +25,271 @@
         }
         .glass-panel {
             background: var(--panel);
-            backdrop-filter: blur(16px);
+            backdrop-filter: blur(24px);
             border: 1px solid var(--border);
-            border-radius: 1rem;
-            box-shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.5);
+            border-radius: 1.25rem;
+            box-shadow: 0 20px 50px -12px rgba(0, 0, 0, 0.5);
         }
         .neon-text-blue { text-shadow: 0 0 15px rgba(59, 130, 246, 0.5); color: #60a5fa; }
         .neon-text-green { text-shadow: 0 0 15px rgba(16, 185, 129, 0.5); color: #34d399; }
         .neon-text-red { text-shadow: 0 0 15px rgba(239, 68, 68, 0.5); color: #f87171; }
         
-        .pulse-blue { animation: pulse-blue 2s infinite; }
-        @keyframes pulse-blue {
-            0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.2); }
-            70% { box-shadow: 0 0 0 10px rgba(59, 130, 246, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+        .pulse-green { animation: pulse-green 3s infinite; }
+        @keyframes pulse-green {
+            0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.2); }
+            70% { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
         }
-
-        .scroll-hide::-webkit-scrollbar { width: 4px; }
-        .scroll-hide::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
 
         .gauge-bar { height: 8px; background: #1e293b; border-radius: 4px; overflow: hidden; position: relative; }
-        .gauge-fill { position: absolute; top: 0; left: 0; bottom: 0; transition: width 0.5s ease-in-out; }
+        .gauge-fill { position: absolute; top: 0; left: 0; bottom: 0; transition: width 1s ease-in-out; }
         
-        .shimmer {
-            background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.05) 50%, rgba(255,255,255,0) 100%);
-            background-size: 200% 100%;
-            animation: shimmer 2s infinite;
-        }
-
-        .box-glow-blue { box-shadow: 0 0 20px rgba(59, 130, 246, 0.15); }
-        .box-glow-purple { box-shadow: 0 0 20px rgba(168, 85, 247, 0.15); }
-        .box-glow-green { box-shadow: 0 0 20px rgba(16, 185, 129, 0.15); }
-        
-        .neon-border-blue { border-color: rgba(59, 130, 246, 0.5); }
-        .neon-border-purple { border-color: rgba(168, 85, 247, 0.5); }
+        .scroll-hide::-webkit-scrollbar { width: 4px; }
+        .scroll-hide::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
     </style>
 </head>
-<body class="p-6 space-y-6">
-    <!-- SRE Header: Tactical Command -->
-    <header class="glass-panel p-6 flex justify-between items-center border-l-4 border-l-blue-500">
-        <div class="flex items-center space-x-8">
-            <div class="w-16 h-16 rounded-2xl bg-blue-600/10 border border-blue-500/40 flex items-center justify-center pulse-blue">
-                <span class="text-blue-500 font-black text-3xl italic">S</span>
+<body class="p-4 md:p-8 space-y-6">
+
+    <!-- Header: Global Status -->
+    <header class="glass-panel p-6 flex flex-col md:flex-row justify-between items-center border-l-4 border-l-green-500">
+        <div class="flex items-center space-x-6">
+            <div class="w-14 h-14 rounded-2xl bg-green-500/10 border border-green-500/30 flex items-center justify-center pulse-green">
+                <span class="text-green-500 font-black text-2xl italic">V</span>
             </div>
             <div>
-                <h1 class="text-3xl font-extrabold tracking-tight text-white flex items-center">
-                    SOVEREIGN <span class="neon-text-blue ml-3">SRE COMMAND</span>
-                    <span class="bg-blue-500/10 text-blue-400 text-[10px] px-2 py-0.5 rounded-full border border-blue-500/30 ml-4 font-mono tracking-widest uppercase">v18.34.UX</span>
+                <h1 class="text-2xl font-black tracking-tight text-white flex items-center">
+                    SOVEREIGN <span class="neon-text-blue ml-2">v19.1 COMMAND HUD</span>
                 </h1>
-                <div class="flex items-center space-x-4 text-xs uppercase tracking-widest font-bold mt-1">
-                    <span id="sys-status" class="neon-text-green flex items-center">
-                        <span class="w-2 h-2 rounded-full bg-green-500 mr-2 animate-pulse"></span>
-                        Neural Net Active
-                    </span>
-                    <span class="text-gray-600">/</span>
-                    <span class="text-yellow-500">Weather: <span id="market-regime">NEUTRAL</span></span>
-                    <span class="text-gray-600">/</span>
-                    <span class="text-blue-400">Integrity: <span id="integrity-score">100%</span></span>
+                <div class="flex items-center space-x-4 text-[10px] uppercase tracking-widest font-bold mt-1 text-slate-500">
+                    <span id="sys-status" class="text-green-400">● Live Execution</span>
+                    <span>/</span>
+                    <span>Regime: <span id="market-regime" class="text-yellow-500">NEUTRAL</span></span>
+                    <span>/</span>
+                    <span>Load: <span id="v-cpu" class="text-blue-400">0%</span></span>
                 </div>
             </div>
         </div>
-        <div class="hidden md:flex space-x-12 items-center">
-            <div class="text-right">
-                <p class="text-xs text-gray-500 font-bold uppercase tracking-tighter">System Clock</p>
-                <p id="sys-time" class="text-3xl font-black text-white tabular-nums tracking-tight">00:00:00</p>
+        <div class="flex space-x-12 mt-4 md:mt-0">
+            <div class="text-center md:text-right">
+                <p class="text-[10px] text-slate-500 font-black uppercase tracking-widest">Total Equity</p>
+                <p id="total-equity" class="text-3xl font-black text-white tabular-nums">$0.00</p>
             </div>
-            <div class="text-right">
-                <p class="text-xs text-gray-500 font-bold uppercase tracking-tighter">Live Engagement</p>
-                <p id="sys-uptime" class="text-3xl font-black text-blue-400 tracking-tight">0h 0m</p>
+            <div class="text-center md:text-right">
+                <p class="text-[10px] text-slate-500 font-black uppercase tracking-widest">24H Trend</p>
+                <p id="day-pnl" class="text-3xl font-black text-green-400 tabular-nums">+$0.00</p>
             </div>
         </div>
     </header>
 
-    <!-- SRE Intelligence & Pipeline Integrity -->
-    <section class="grid grid-cols-12 gap-6">
-        <div class="col-span-12 lg:col-span-9 glass-panel p-6 bg-gradient-to-r from-blue-900/10 to-transparent border-l-4 border-l-green-500">
-            <div class="flex items-start space-x-6">
-                <div class="mt-1">
-                    <svg class="w-8 h-8 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path></svg>
-                </div>
-                <div>
-                    <h2 class="text-sm font-black text-gray-400 uppercase tracking-widest mb-1">Command Summary</h2>
-                    <p id="intel-summary" class="text-xl font-medium text-slate-100 leading-relaxed italic">
-                        Processing forensic telemetry...
-                    </p>
-                </div>
-            </div>
-        </div>
-        <div class="col-span-12 lg:col-span-3 glass-panel p-6 border-l-4 border-l-yellow-500">
-            <h2 class="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] mb-3">System Health</h2>
-            <div class="flex justify-between items-end mb-2">
-                <span class="text-xs font-bold text-slate-400">Data Integrity</span>
-                <span id="v-integrity" class="text-xl font-black text-white tabular-nums">100%</span>
-            </div>
-            <div class="gauge-bar"><div id="f-integrity" class="gauge-fill bg-green-500" style="width: 100%"></div></div>
-        </div>
-    </section>
-
-    <!-- Main Grid -->
-    <main class="grid grid-cols-12 gap-6">
+    <div class="grid grid-cols-12 gap-6">
         
-        <!-- Left Wing: Operational Performance -->
-        <aside class="col-span-12 xl:col-span-3 space-y-6">
+        <!-- Left Column: Primary Trades & Logic -->
+        <main class="col-span-12 xl:col-span-8 space-y-6">
             
-            <!-- Strategy Edge Heatmap -->
-            <div class="glass-panel p-6 space-y-6">
-                <h3 class="text-sm font-black text-gray-400 uppercase tracking-widest flex items-center">
-                    <span class="w-1.5 h-4 bg-yellow-500 mr-3 rounded-full"></span>
-                    Strategy Heatmap (7D)
-                </h3>
-                <div id="strategy-heatmap" class="space-y-3">
-                    <p class="text-xs text-slate-600 italic">Analyzing trade history...</p>
-                </div>
+            <!-- Intelligence Summary -->
+            <div class="glass-panel p-5 bg-blue-500/5 border-blue-500/20">
+                <p id="intel-summary" class="text-sm font-medium text-blue-200 leading-relaxed italic">
+                    Initializing sovereign intelligence layer...
+                </p>
             </div>
 
-            <!-- Resource Vitals -->
-            <div class="glass-panel p-6 space-y-6">
-                <h3 class="text-sm font-black text-gray-400 uppercase tracking-widest flex items-center">
-                    <span class="w-1.5 h-4 bg-blue-500 mr-3 rounded-full"></span>
-                    Droplet Load
-                </h3>
-                <div class="space-y-4">
-                    <div>
-                        <div class="flex justify-between mb-2"><span class="text-[10px] font-bold text-gray-500 uppercase">Core Logic</span><span id="v-cpu" class="text-sm font-black text-white">0%</span></div>
-                        <div class="gauge-bar"><div id="f-cpu" class="gauge-fill bg-blue-500" style="width: 0%"></div></div>
-                    </div>
-                    <div>
-                        <div class="flex justify-between mb-2"><span class="text-[10px] font-bold text-gray-500 uppercase">Memory Banks</span><span id="v-ram" class="text-sm font-black text-white">0%</span></div>
-                        <div class="gauge-bar"><div id="f-ram" class="gauge-fill bg-purple-500" style="width: 0%"></div></div>
-                    </div>
+            <!-- Spot Portfolio -->
+            <section class="space-y-4">
+                <h2 class="text-xs font-black text-slate-500 uppercase tracking-[0.3em] flex items-center">
+                    <span class="w-1.5 h-3 bg-blue-500 mr-3 rounded-full"></span>
+                    Coinbase Spot Scalp Engagement
+                </h2>
+                <div id="spot-list" class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <!-- Positions will be injected here -->
                 </div>
-            </div>
+            </section>
 
-            <!-- MCP Tactical Tools -->
-            <div class="glass-panel p-6 space-y-4 border-t-4 border-t-cyan-500">
-                <h3 class="text-sm font-black text-gray-400 uppercase tracking-widest flex justify-between items-center">
-                    <span>Tactical Tools (MCP)</span>
-                    <span class="text-[10px] bg-cyan-500/10 text-cyan-400 px-2 py-0.5 rounded italic">Active</span>
-                </h3>
-                <div id="mcp-tools" class="grid grid-cols-2 gap-2">
-                    <div class="p-2 bg-cyan-900/10 border border-cyan-800/30 rounded text-[9px] font-bold text-cyan-500 uppercase flex items-center justify-center">Risk Engine</div>
-                    <div class="p-2 bg-cyan-900/10 border border-cyan-800/30 rounded text-[9px] font-bold text-cyan-500 uppercase flex items-center justify-center">SRE Oracle</div>
-                    <div class="p-2 bg-cyan-900/10 border border-cyan-800/30 rounded text-[9px] font-bold text-cyan-500 uppercase flex items-center justify-center">Spot Truth</div>
-                    <div class="p-2 bg-cyan-900/10 border border-cyan-800/30 rounded text-[9px] font-bold text-cyan-500 uppercase flex items-center justify-center">Kalshi V2</div>
-                    <div class="p-2 bg-cyan-900/10 border border-cyan-800/30 rounded text-[9px] font-bold text-cyan-500 uppercase flex items-center justify-center">Loki Logs</div>
-                    <div class="p-2 bg-cyan-900/10 border border-cyan-800/30 rounded text-[9px] font-bold text-cyan-500 uppercase flex items-center justify-center">Grafana IRM</div>
+            <!-- Forecast Portfolio -->
+            <section class="space-y-4">
+                <h2 class="text-xs font-black text-slate-500 uppercase tracking-[0.3em] flex items-center">
+                    <span class="w-1.5 h-3 bg-purple-500 mr-3 rounded-full"></span>
+                    Macro Forecast Event Horizon
+                </h2>
+                <div id="forecast-list" class="grid grid-cols-1 gap-4">
+                    <!-- Forecasts will be injected here -->
                 </div>
-            </div>
+            </section>
 
-            <!-- Macro Forecast Radar -->
-            <div class="glass-panel p-6 space-y-4 border-t-4 border-t-purple-500">
-                <h3 class="text-sm font-black text-gray-400 uppercase tracking-widest flex justify-between items-center">
-                    <span>Macro Radar</span>
-                    <span class="text-[10px] bg-purple-500/10 text-purple-400 px-2 py-0.5 rounded italic">X-Ray</span>
-                </h3>
-                <div id="macro-radar" class="space-y-3">
-                    <p class="text-xs text-gray-600 italic">Scanning global event horizon...</p>
-                </div>
-            </div>
-        </aside>
+        </main>
 
-        <!-- Center: Engagement & Portfolios -->
-        <section class="col-span-12 xl:col-span-6 space-y-6">
+        <!-- Right Column: System Logs & Health -->
+        <aside class="col-span-12 xl:col-span-4 space-y-6">
             
-            <!-- Crypto Spot Engagement -->
-            <div class="glass-panel p-6 space-y-6">
-                <div class="flex justify-between items-center">
-                    <h3 class="text-sm font-black text-gray-400 uppercase tracking-widest flex items-center">
-                        <span class="w-1.5 h-4 bg-green-500 mr-3 rounded-full"></span>
-                        Crypto Engagement
-                    </h3>
-                    <div class="flex space-x-8 text-right">
-                        <div>
-                            <p class="text-[10px] text-gray-500 font-bold uppercase">Equity</p>
-                            <p id="spot-equity" class="text-2xl font-black text-white">$0.00</p>
-                        </div>
-                        <div>
-                            <p class="text-[10px] text-gray-500 font-bold uppercase">24H Trend</p>
-                            <p id="spot-pnl" class="text-2xl font-black neon-text-green">+$0.00</p>
-                        </div>
+            <!-- System Vitals -->
+            <div class="glass-panel p-6 space-y-4 border-t-4 border-t-blue-600">
+                <h3 class="text-xs font-black text-slate-400 uppercase tracking-widest">Droplet Engine Health</h3>
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="p-4 bg-black/30 rounded-xl border border-slate-800">
+                        <p class="text-[10px] text-slate-500 font-bold uppercase mb-2 text-center">Memory</p>
+                        <p id="v-ram" class="text-2xl font-black text-white text-center">0%</p>
+                        <div class="gauge-bar mt-2"><div id="f-ram" class="gauge-fill bg-blue-500" style="width: 0%"></div></div>
                     </div>
-                </div>
-                
-                <div id="spot-positions" class="grid grid-cols-1 md:grid-cols-2 gap-6 max-h-[500px] overflow-y-auto pr-2 scroll-hide">
-                    <div class="col-span-2 py-20 text-center flex flex-col items-center">
-                        <div class="w-12 h-12 border-4 border-gray-800 border-t-blue-500 rounded-full animate-spin mb-4"></div>
-                        <p class="text-lg font-bold text-gray-500">Scanning Universe...</p>
+                    <div class="p-4 bg-black/30 rounded-xl border border-slate-800">
+                        <p class="text-[10px] text-slate-500 font-bold uppercase mb-2 text-center">Disk</p>
+                        <p id="v-disk" class="text-2xl font-black text-white text-center">0%</p>
+                        <div class="gauge-bar mt-2"><div id="f-disk" class="gauge-fill bg-slate-600" style="width: 0%"></div></div>
                     </div>
                 </div>
             </div>
 
-            <!-- Forecast Macro Engagement -->
-            <div class="glass-panel p-6 space-y-6 border-l-4 border-l-purple-500">
-                <div class="flex justify-between items-center">
-                    <h3 class="text-sm font-black text-gray-400 uppercase tracking-widest flex items-center">
-                        <span class="w-1.5 h-4 bg-purple-500 mr-3 rounded-full"></span>
-                        Macro Forecast Portfolio
-                    </h3>
-                    <div class="flex space-x-6 text-right">
-                        <div class="px-3 py-1 bg-purple-500/10 rounded-lg border border-purple-500/20">
-                            <span class="text-[10px] text-purple-400 font-black mr-2 uppercase">Markets</span>
-                            <span id="forecast-count" class="text-lg font-black text-white tabular-nums">0</span>
-                        </div>
-                    </div>
-                </div>
-                <div id="forecast-positions" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div class="col-span-2 py-8 text-center bg-purple-950/10 border border-dashed border-purple-500/20 rounded-xl">
-                        <p class="text-sm font-black text-purple-400/50 uppercase tracking-[0.2em] italic">Monitoring Global Event Horizon</p>
-                    </div>
-                </div>
-                <!-- NEW: Forecast Evaluator (X-Ray) -->
-                <div class="bg-black/20 rounded-xl border border-slate-800 p-4">
-                    <h4 class="text-[10px] font-black text-purple-400/60 uppercase tracking-widest mb-3">Live Macro Evaluator (Veto Logs)</h4>
-                    <div id="forecast-evals" class="space-y-2 font-mono text-[10px] max-h-[150px] overflow-y-auto scroll-hide">
-                        <p class="text-slate-600 italic">No recent evaluations...</p>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- Right Wing: Oracle AI & Structural Faults -->
-        <aside class="col-span-12 xl:col-span-3 space-y-6">
-            
-            <!-- THE ORACLE CHOP (NEW!) -->
-            <div class="glass-panel flex flex-col h-[400px] border-t-4 border-t-blue-500">
-                <div class="p-6 border-b border-gray-800 flex justify-between items-center">
-                    <h3 class="text-sm font-black text-gray-400 uppercase tracking-widest flex items-center">
-                        <span class="w-1.5 h-4 bg-blue-500 mr-3 rounded-full pulse-blue"></span>
-                        Sovereign Oracle
-                    </h3>
-                    <span class="text-[10px] bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded italic">Gemini-1.5-Flash</span>
-                </div>
-                <div id="oracle-chat" class="flex-1 overflow-y-auto p-4 space-y-4 font-sans text-xs scroll-hide bg-slate-950/30">
-                    <div class="text-slate-500 italic text-center mt-10">Ask me anything about the system state...</div>
-                </div>
-                <div class="p-4 border-t border-gray-800 bg-slate-900/50">
-                    <div class="flex space-x-2">
-                        <input type="text" id="oracle-input" placeholder="Query Oracle..." 
-                               class="flex-1 bg-black/40 border border-slate-700 rounded-lg px-3 py-2 text-white text-xs focus:outline-none focus:border-blue-500 transition-all">
-                        <button id="oracle-send" class="bg-blue-600 hover:bg-blue-500 text-white font-black px-4 py-2 rounded-lg text-[10px] uppercase transition-all">Send</button>
-                    </div>
-                </div>
-            </div>
-
-            <!-- THE HUNT X-RAY -->
+            <!-- The Hunt X-Ray -->
             <div class="glass-panel p-6 space-y-4 border-t-4 border-t-yellow-500">
-                <h3 class="text-sm font-black text-gray-400 uppercase tracking-widest flex justify-between items-center">
-                    <span>Hunt X-Ray</span>
-                    <span class="text-[10px] bg-yellow-500/10 text-yellow-500 px-2 py-0.5 rounded italic">Scanning</span>
+                <h3 class="text-xs font-black text-slate-400 uppercase tracking-widest flex justify-between">
+                    <span>Live Hunt X-Ray</span>
+                    <span class="text-yellow-500 italic animate-pulse">Scanning Universe</span>
                 </h3>
-                <div id="live-hunt" class="space-y-4">
-                    <p class="text-xs text-gray-600 italic">Waiting for scan data...</p>
+                <div id="hunt-list" class="space-y-3">
+                    <!-- Hunt data -->
                 </div>
             </div>
 
             <!-- Incident Log -->
-            <div class="glass-panel flex flex-col h-[400px] border-l-4 border-l-red-500">
-                <div class="p-6 border-b border-gray-800 flex justify-between items-center">
-                    <h3 class="text-sm font-black text-gray-400 uppercase tracking-widest">Incident Stream</h3>
-                </div>
-                <div id="event-log" class="flex-1 overflow-y-auto p-4 space-y-3 font-mono text-[11px] scroll-hide">
-                    <p class="text-gray-600 italic text-center mt-10">System healthy.</p>
+            <div class="glass-panel p-6 h-[400px] flex flex-col border-l-4 border-l-red-600">
+                <h3 class="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">Tactical Incident Stream</h3>
+                <div id="log-list" class="flex-1 overflow-y-auto space-y-3 font-mono text-[10px] scroll-hide">
+                    <!-- Logs -->
                 </div>
             </div>
+
         </aside>
-    </main>
+    </div>
 
     <script>
-        function formatUptime(seconds) {
-            const boot = new Date(seconds * 1000);
-            const now = new Date();
-            const diff = Math.floor((now - boot) / 1000);
-            const h = Math.floor(diff / 3600);
-            const m = Math.floor((diff % 3600) / 60);
-            return `${h}h ${m}m`;
-        }
-
         const eventSource = new EventSource("/api/stream");
         
         eventSource.onmessage = function(event) {
             const data = JSON.parse(event.data);
             if (data.error) return;
 
-            // Header
-            document.getElementById('sys-time').innerText = data.system.time;
-            document.getElementById('sys-uptime').innerText = formatUptime(data.system.uptime);
+            // Global State
             document.getElementById('market-regime').innerText = data.spot.regime;
-            document.getElementById('integrity-score').innerText = `${data.sre.integrity_score}%`;
-            document.getElementById('v-integrity').innerText = `${data.sre.integrity_score}%`;
-            document.getElementById('f-integrity').style.width = `${data.sre.integrity_score}%`;
-            document.getElementById('f-integrity').className = `gauge-fill ${data.sre.integrity_score < 90 ? 'bg-red-500' : 'bg-green-500'}`;
-
-            // Droplet Load
             document.getElementById('v-cpu').innerText = `${Math.round(data.vitals.cpu)}%`;
-            document.getElementById('f-cpu').style.width = `${data.vitals.cpu}%`;
-            document.getElementById('v-ram').innerText = `${Math.round(data.vitals.ram)}%`;
-            document.getElementById('f-ram').style.width = `${data.vitals.ram}%`;
-
-            // Summary
+            document.getElementById('total-equity').innerText = `$${data.spot.equity.toLocaleString()}`;
+            const pnl = data.spot.pnl_24h;
+            document.getElementById('day-pnl').innerText = `${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`;
+            document.getElementById('day-pnl').className = `text-3xl font-black tabular-nums ${pnl >= 0 ? 'text-green-400' : 'text-red-400'}`;
             document.getElementById('intel-summary').innerText = data.intelligence_summary;
 
-            // Edge Heatmap
-            const heatmapContainer = document.getElementById('strategy-heatmap');
-            if (data.sre.edge_heatmap && data.sre.edge_heatmap.length > 0) {
-                heatmapContainer.innerHTML = data.sre.edge_heatmap.map(s => {
-                    const statusColor = s.win_rate >= 50 ? 'bg-green-500/10 border-green-500/30' : 'bg-red-500/10 border-red-500/30';
-                    const textColor = s.win_rate >= 50 ? 'text-green-400' : 'text-red-400';
-                    return `
-                        <div class="p-3 border rounded-lg flex justify-between items-center ${statusColor}">
-                            <div>
-                                <p class="text-[10px] font-black text-white leading-none">${s.strategy}</p>
-                                <p class="text-[9px] font-bold text-slate-500 mt-1 uppercase">${s.win_rate}% Win Rate</p>
-                            </div>
-                            <span class="${textColor} font-black text-sm">$${s.pnl}</span>
-                        </div>
-                    `;
-                }).join('');
-            }
+            // Vitals
+            document.getElementById('v-ram').innerText = `${Math.round(data.vitals.ram)}%`;
+            document.getElementById('f-ram').style.width = `${data.vitals.ram}%`;
+            document.getElementById('v-disk').innerText = `${Math.round(data.vitals.disk)}%`;
+            document.getElementById('f-disk').style.width = `${data.vitals.disk}%`;
 
-            // Spot Positions X-Ray
-            const spotPosContainer = document.getElementById('spot-positions');
-            if (data.spot.positions && data.spot.positions.length > 0) {
-                spotPosContainer.innerHTML = data.spot.positions.map(p => {
-                    const pnlColor = p.live_pnl >= 0 ? 'text-green-400' : 'text-red-400';
-                    const convColor = p.conviction_score > 60 ? 'bg-green-500' : (p.conviction_score > 52 ? 'bg-blue-500' : 'bg-yellow-500');
+            // Spot Positions
+            const spotList = document.getElementById('spot-list');
+            if (data.spot.positions.length > 0) {
+                spotList.innerHTML = data.spot.positions.map(p => {
+                    const trendIcon = p.trend === 'UP' ? '↑' : (p.trend === 'DOWN' ? '↓' : '↔');
+                    const trendColor = p.trend === 'UP' ? 'text-green-400' : (p.trend === 'DOWN' ? 'text-red-400' : 'text-slate-500');
                     return `
-                    <div class="p-6 bg-slate-800/50 rounded-2xl border border-slate-700 shadow-2xl border-l-4 border-l-blue-500">
-                        <div class="flex justify-between items-start mb-6">
-                            <div>
-                                <p class="text-3xl font-black text-white leading-none">${p.symbol}</p>
-                                <p class="text-xs text-blue-400 font-bold uppercase mt-2 tracking-widest">${p.strategy}</p>
-                            </div>
-                            <div class="text-right">
-                                <p class="text-xs text-slate-500 font-bold uppercase mb-1">Live Net P/L</p>
-                                <p class="text-2xl font-black ${pnlColor} tabular-nums">${p.live_pnl >= 0 ? '+' : ''}$${p.live_pnl.toFixed(2)}</p>
-                            </div>
-                        </div>
-
-                        <div class="space-y-4 mb-6">
-                            <div class="p-3 bg-black/40 rounded-xl border border-slate-700/50">
-                                <div class="flex justify-between mb-2">
-                                    <span class="text-[10px] font-black text-slate-400 uppercase tracking-tighter">Thesis Health X-Ray</span>
-                                    <span class="text-[10px] font-black text-white">${p.conviction_score.toFixed(1)}</span>
+                        <div class="glass-panel p-5 space-y-4 border-l-4 border-l-blue-500 bg-slate-900/40">
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <p class="text-2xl font-black text-white leading-none">${p.symbol}</p>
+                                    <p class="text-[10px] text-blue-400 font-bold uppercase mt-1 tracking-widest">${p.strategy}</p>
                                 </div>
-                                <div class="gauge-bar h-2 mb-2"><div class="gauge-fill ${convColor}" style="width: ${p.conviction_score}%"></div></div>
-                                <p class="text-[11px] font-medium text-slate-200 leading-tight italic">"${p.hold_rationale}"</p>
+                                <div class="text-right">
+                                    <p class="text-[10px] text-slate-500 font-bold uppercase">Net P/L</p>
+                                    <p class="text-xl font-black ${p.live_pnl >= 0 ? 'text-green-400' : 'text-red-400'}">
+                                        ${p.live_pnl >= 0 ? '+' : ''}$${p.live_pnl.toFixed(2)}
+                                    </p>
+                                </div>
                             </div>
-                        </div>
-
-                        <div class="grid grid-cols-2 gap-y-4 gap-x-8 pt-4 border-t border-slate-700/50">
-                            <div><p class="text-[10px] text-slate-500 font-black uppercase">Entry</p><p class="text-base font-black text-white">$${p.entry_price.toLocaleString()}</p></div>
-                            <div class="text-right"><p class="text-[10px] text-red-900 font-black uppercase tracking-widest">Max Dollar Risk</p><p class="text-base font-black text-red-500">-$${Math.abs(p.risk_usd).toFixed(2)}</p></div>
-                            <div><p class="text-[10px] text-slate-500 font-black uppercase">Position Size</p><p class="text-sm font-bold text-slate-300">${p.qty.toFixed(4)} Units</p></div>
-                            <div class="text-right"><p class="text-[10px] text-green-900 font-black uppercase">Target</p><p class="text-sm font-bold text-green-500">$${p.target.toLocaleString()}</p></div>
-                        </div>
-                    </div>
-                `;}).join('');
-            } else {
-                spotPosContainer.innerHTML = `<div class="col-span-2 py-16 text-center stat-card shimmer border-dashed"><p class="text-lg font-bold text-slate-500 italic">Universe Scanned. Waiting for high-conviction setup...</p></div>`;
-            }
-
-            // Forecast Macro Engagement
-            const forecastPosContainer = document.getElementById('forecast-positions');
-            if (data.forecast.positions && data.forecast.positions.length > 0) {
-                forecastPosContainer.innerHTML = data.forecast.positions.map(p => {
-                    // Calculate PnL: Kalshi contracts are binary 0-1. Current mid is prob.
-                    // If YES, value = mid. If NO, value = 1.0 - mid.
-                    const current_val = p.side === 'YES' ? p.entry_price : (1.0 - p.entry_price); // Placeholder logic
-                    // Better: use implied probability from radar if available, or just mid
-                    const pnl = (p.entry_price > 0) ? 0.0 : 0.0; // PnL calculation is complex without live price here
-                    
-                    return `
-                    <div class="p-4 bg-purple-900/10 rounded-xl border border-purple-500/20 border-l-4 border-l-purple-500 shadow-lg">
-                        <div class="flex justify-between items-start mb-3">
-                            <div>
-                                <p class="text-lg font-black text-white leading-none">${p.local_symbol}</p>
-                                <p class="text-[10px] text-purple-400 font-bold uppercase mt-1 tracking-widest">${p.side} CONTRACTS</p>
+                            <div class="p-3 bg-black/40 rounded-xl flex justify-between items-center">
+                                <div class="flex items-center">
+                                    <span class="text-xl mr-3 ${trendColor}">${trendIcon}</span>
+                                    <div>
+                                        <p class="text-[10px] text-slate-500 font-black uppercase leading-none">Market Sentiment</p>
+                                        <p class="text-xs font-bold text-white mt-1 uppercase">${p.sentiment}</p>
+                                    </div>
+                                </div>
+                                <div class="text-right">
+                                    <p class="text-[9px] text-slate-500 font-black uppercase">Current Price</p>
+                                    <p class="text-sm font-bold text-blue-300">$${p.current_price.toLocaleString()}</p>
+                                </div>
                             </div>
-                            <div class="text-right">
-                                <p class="text-[10px] text-slate-500 font-bold uppercase mb-0.5">Qty</p>
-                                <p class="text-sm font-black text-white">${p.qty}</p>
+                            <div class="grid grid-cols-2 gap-4 text-center">
+                                <div class="p-2 bg-green-500/5 rounded-lg border border-green-500/10">
+                                    <p class="text-[9px] text-slate-500 font-black uppercase">Potential Gain</p>
+                                    <p class="text-xs font-bold text-green-400">+$${p.potential_usd.toFixed(2)}</p>
+                                </div>
+                                <div class="p-2 bg-red-500/5 rounded-lg border border-red-500/10">
+                                    <p class="text-[9px] text-slate-500 font-black uppercase">Active Risk</p>
+                                    <p class="text-xs font-bold text-red-500">-$${Math.abs(p.risk_usd).toFixed(2)}</p>
+                                </div>
                             </div>
-                        </div>
-                        <div class="grid grid-cols-2 gap-4 pt-3 border-t border-purple-500/10">
-                            <div>
-                                <p class="text-[9px] text-slate-500 font-black uppercase">Cost Basis</p>
-                                <p class="text-xs font-black text-slate-300">$${p.entry_price.toFixed(4)}</p>
-                            </div>
-                            <div class="text-right">
-                                <p class="text-[9px] text-slate-500 font-black uppercase">Risk (Stop)</p>
-                                <p class="text-xs font-black text-red-400">$${(p.stop || 0).toFixed(4)}</p>
-                            </div>
-                        </div>
-                    </div>
-                `;}).join('');
-            } else {
-                forecastPosContainer.innerHTML = `<div class="col-span-2 py-8 text-center bg-purple-950/10 border border-dashed border-purple-500/20 rounded-xl"><p class="text-sm font-black text-purple-400/50 uppercase tracking-[0.2em] italic">Monitoring Global Event Horizon</p></div>`;
-            }
-            // Macro Radar
-            const radarContainer = document.getElementById('macro-radar');
-            if (data.forecast.radar && data.forecast.radar.length > 0) {
-                radarContainer.innerHTML = data.forecast.radar.map(r => {
-                    if (r.probability < 0) {
-                        return `
-                            <div class="p-3 bg-purple-900/5 border border-purple-800/30 rounded-lg">
-                                <div class="flex justify-between items-start mb-2"><p class="text-[11px] font-bold text-slate-300 leading-tight">${r.event}</p><span class="text-[10px] font-bold text-slate-500 italic ml-2">Awaiting Liquidity</span></div>
-                                <div class="gauge-bar h-1"><div class="gauge-fill bg-slate-800" style="width: 0%"></div></div>
-                            </div>
-                        `;
-                    }
-                    return `
-                        <div class="p-3 bg-purple-900/5 border border-purple-800/30 rounded-lg">
-                            <div class="flex justify-between items-start mb-2"><p class="text-[11px] font-bold text-slate-300 leading-tight">${r.event}</p><span class="text-[10px] font-black text-purple-500 ml-2">${r.probability}%</span></div>
-                            <div class="gauge-bar h-1"><div class="gauge-fill bg-purple-500" style="width: ${r.probability}%"></div></div>
                         </div>
                     `;
                 }).join('');
+            } else {
+                spotList.innerHTML = `<div class="col-span-2 py-10 text-center glass-panel border-dashed opacity-50"><p class="text-sm font-bold text-slate-500 uppercase tracking-widest">Awaiting Entry Signal</p></div>`;
             }
 
-            // Macro Evaluations
-            const evalContainer = document.getElementById('forecast-evals');
-            if (data.forecast.evaluations && data.forecast.evaluations.length > 0) {
-                evalContainer.innerHTML = data.forecast.evaluations.map(e => `
-                    <div class="py-1 border-b border-purple-900/20 group">
-                        <span class="text-[8px] text-slate-500">${new Date(e.ts * 1000).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
-                        <p class="text-slate-300 leading-tight">${e.message.replace('[ForecastRunner] ', '')}</p>
+            // Forecast Positions
+            const forecastList = document.getElementById('forecast-list');
+            if (data.forecast.positions.length > 0) {
+                forecastList.innerHTML = data.forecast.positions.map(p => `
+                    <div class="glass-panel p-5 border-l-4 border-l-purple-500 bg-purple-900/5">
+                        <div class="flex justify-between items-start mb-4">
+                            <div class="flex-1 pr-4">
+                                <p class="text-sm font-bold text-white leading-snug">${p.title}</p>
+                                <p class="text-[10px] text-purple-400 font-bold uppercase mt-1 tracking-widest">${p.symbol}</p>
+                            </div>
+                            <div class="text-right">
+                                <p class="text-[10px] text-slate-500 font-bold uppercase leading-none">Position P/L</p>
+                                <p class="text-lg font-black ${p.pnl >= 0 ? 'text-green-400' : 'text-red-400'}">
+                                    ${p.pnl >= 0 ? '+' : ''}$${p.pnl.toFixed(2)}
+                                </p>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-4 gap-4 items-center">
+                            <div><p class="text-[9px] text-slate-500 font-black uppercase leading-none">Prob.</p><p class="text-sm font-black text-white">${Math.round(p.mark * 100)}%</p></div>
+                            <div><p class="text-[9px] text-slate-500 font-black uppercase leading-none">Expires</p><p class="text-sm font-black text-blue-400">${p.countdown}</p></div>
+                            <div><p class="text-[9px] text-slate-500 font-black uppercase leading-none">Max Win</p><p class="text-sm font-black text-green-500">+$${p.potential.toFixed(2)}</p></div>
+                            <div class="text-right"><span class="text-[10px] px-2 py-1 bg-slate-800 rounded font-black text-slate-300 uppercase">${p.sentiment}</span></div>
+                        </div>
                     </div>
                 `).join('');
+            } else {
+                forecastList.innerHTML = `<div class="py-10 text-center glass-panel border-dashed opacity-50"><p class="text-sm font-bold text-slate-500 uppercase tracking-widest">Monitoring Macro Events</p></div>`;
             }
 
             // Live Hunt
-            const huntContainer = document.getElementById('live-hunt');
-            if (data.live_hunt && data.live_hunt.length > 0) {
-                huntContainer.innerHTML = data.live_hunt.map(h => `
-                    <div class="flex flex-col p-4 bg-slate-900/50 border border-slate-800 rounded-xl border-l-2 ${h.reason === 'Passed Score' ? 'border-l-green-500' : 'border-l-red-900'}">
-                        <div class="flex justify-between items-center mb-1"><p class="text-lg font-black text-white">${h.symbol}</p><p class="text-sm font-black text-slate-400">${h.score}</p></div>
-                        <div class="p-2 bg-black/40 rounded border border-slate-800 mt-2"><p class="text-[10px] text-slate-500 font-bold uppercase mb-1">X-Ray Decision:</p><p class="text-[11px] font-medium text-slate-300 leading-tight">${h.reason_layman}</p></div>
+            const huntList = document.getElementById('hunt-list');
+            if (data.live_hunt.length > 0) {
+                huntList.innerHTML = data.live_hunt.map(h => `
+                    <div class="flex justify-between items-center p-2 rounded-lg bg-black/20 border border-slate-800">
+                        <div>
+                            <span class="text-xs font-black text-white mr-2">${h.symbol}</span>
+                            <span class="text-[9px] font-bold text-slate-500 uppercase">${h.direction}</span>
+                        </div>
+                        <div class="text-right">
+                            <p class="text-[9px] font-bold text-blue-400 uppercase leading-none">${h.score.toFixed(1)} Score</p>
+                            <p class="text-[8px] text-slate-600 mt-1">${h.reason.substring(0, 25)}</p>
+                        </div>
                     </div>
                 `).join('');
             }
 
-            // P/L & Equity
-            document.getElementById('spot-equity').innerText = `$${data.spot.equity.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
-            const spnl = data.spot.pnl_24h;
-            document.getElementById('spot-pnl').innerText = `${spnl >= 0 ? '+' : ''}$${spnl.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
-            document.getElementById('spot-pnl').className = `text-2xl font-black ${spnl >= 0 ? 'neon-text-green' : 'neon-text-red'}`;
-            document.getElementById('forecast-count').innerText = data.forecast.active_markets;
-
-            // Incident Log
-            const eventLog = document.getElementById('event-log');
-            if (data.events && data.events.length > 0) {
-                eventLog.innerHTML = data.events.map(e => {
-                    const levelClass = e.level === 'WARN' ? 'text-yellow-500' : (e.level === 'ERROR' ? 'text-red-500' : 'text-slate-500');
-                    return `<div class="flex space-x-3 border-b border-slate-800/50 py-3"><div class="flex-1"><span class="${levelClass} font-black text-[9px] uppercase mr-2">[${e.level}]</span><span class="text-slate-400 leading-tight">${e.message}</span></div></div>`;
+            // Logs
+            const logList = document.getElementById('log-list');
+            if (data.events.length > 0) {
+                logList.innerHTML = data.events.map(e => {
+                    const color = e.level === 'ERROR' ? 'text-red-400' : (e.level === 'WARNING' ? 'text-yellow-500' : 'text-slate-400');
+                    return `<div class="mb-1"><span class="text-slate-600 mr-2">[${e.ts.split(' ')[1]}]</span><span class="${color}">${e.message}</span></div>`;
                 }).join('');
             }
         };
 
-        // Oracle Chat Logic
-        const oracleInput = document.getElementById('oracle-input');
-        const oracleSend = document.getElementById('oracle-send');
-        const oracleChat = document.getElementById('oracle-chat');
-
-        async function askOracle() {
-            const query = oracleInput.value.trim();
-            if (!query) return;
-
-            // Add user message
-            const userMsg = document.createElement('div');
-            userMsg.className = 'text-blue-400 text-right font-medium italic';
-            userMsg.innerText = `> ${query}`;
-            oracleChat.appendChild(userMsg);
-            oracleInput.value = '';
-            oracleChat.scrollTop = oracleChat.scrollHeight;
-
-            // Add loading indicator
-            const loading = document.createElement('div');
-            loading.className = 'text-slate-500 animate-pulse';
-            loading.innerText = 'Oracle is analyzing forensic telemetry...';
-            oracleChat.appendChild(loading);
-
-            try {
-                const resp = await fetch('/api/oracle', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ question: query })
-                });
-                const data = await resp.json();
-                oracleChat.removeChild(loading);
-
-                const oracleMsg = document.createElement('div');
-                oracleMsg.className = 'text-slate-200 leading-relaxed bg-blue-900/10 p-3 rounded-lg border border-blue-500/20';
-                oracleMsg.innerText = data.answer;
-                oracleChat.appendChild(oracleMsg);
-                oracleChat.scrollTop = oracleChat.scrollHeight;
-            } catch (err) {
-                oracleChat.removeChild(loading);
-                const errMsg = document.createElement('div');
-                errMsg.className = 'text-red-500';
-                errMsg.innerText = `Oracle Error: ${err}`;
-                oracleChat.appendChild(errMsg);
-            }
-        }
-
-        oracleSend.onclick = askOracle;
-        oracleInput.onkeypress = (e) => { if (e.key === 'Enter') askOracle(); };
-
         eventSource.onerror = function() {
-            document.getElementById('sys-status').innerText = 'ENCRYPTED DISCONNECT';
-            document.getElementById('sys-status').className = 'neon-text-red';
+            document.getElementById('sys-status').innerText = '● Connection Offline';
+            document.getElementById('sys-status').className = 'text-red-500';
         };
     </script>
 </body>

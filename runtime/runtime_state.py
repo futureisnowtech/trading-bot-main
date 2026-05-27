@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS lane_runtime_state (
     issue_count          INTEGER DEFAULT 0,
     readiness_state      TEXT DEFAULT 'UNKNOWN',
     promotion_condition  TEXT DEFAULT '',
+    snapshot_json        TEXT,
     updated_at           TEXT
 )
 """
@@ -114,6 +115,8 @@ def init_runtime_tables(db_path: str = DB_PATH) -> None:
             c.execute("ALTER TABLE lane_runtime_state ADD COLUMN manual_allowed INTEGER DEFAULT 0")
         if "promotion_condition" not in _lane_cols:
             c.execute("ALTER TABLE lane_runtime_state ADD COLUMN promotion_condition TEXT DEFAULT ''")
+        if "snapshot_json" not in _lane_cols:
+            c.execute("ALTER TABLE lane_runtime_state ADD COLUMN snapshot_json TEXT")
 
 
 # ── System-level state ────────────────────────────────────────────────────────

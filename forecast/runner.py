@@ -511,6 +511,99 @@ def _send_daily_token_burn_report():
         logger.warning(f"[ForecastRunner] Token report fail: {_report_err}")
 
 
+def _cache_forecast_state():
+    """v19.1: Caches rich broker-first forecast state for the HUD dashboard."""
+    try:
+        from runtime.runtime_state import upsert_lane_state
+        from logging_db.trade_logger import _conn
+        import json
+
+        broker = _get_broker()
+        if not broker.is_connected(): return
+        
+        positions = broker.get_positions()
+        enriched = []
+        total_pnl = 0.0
+        
+        conn = _conn()
+        cursor = conn.cursor()
+        
+        for p in positions:
+            ticker = p.get('local_symbol')
+            qty = float(p.get('qty', 0))
+            
+            # Fetch Live Mid-Price
+            current_px = 0.0
+            try:
+                quote = broker.get_quote(ticker)
+                bid = float(quote.get('bid', 0) or 0)
+                ask = float(quote.get('ask', 0) or 0)
+                current_px = (bid + ask) / 2.0 if (bid > 0 and ask > 0) else (bid or ask or 0)
+            except: pass
+            
+            # Fetch Cost Basis
+            entry_px = float(p.get('entry_price') or 0.0)
+            event_title = ticker
+            resolution_at = "Unknown"
+            
+            try:
+                cursor.execute(
+                    "SELECT price, ts FROM trades WHERE symbol=? AND action='BUY' AND broker='kalshi' ORDER BY ts DESC LIMIT 1",
+                    (ticker,)
+                )
+                db_row = cursor.fetchone()
+                if db_row:
+                    entry_px = float(db_row[0])
+                
+                cursor.execute(
+                    "SELECT m.market_name, c.resolution_at FROM forecast_contracts c JOIN forecast_markets m ON c.market_id = m.id WHERE c.local_symbol = ? LIMIT 1",
+                    (ticker,)
+                )
+                meta = cursor.fetchone()
+                if meta:
+                    event_title = meta[0]
+                    resolution_at = meta[1]
+            except: pass
+            
+            # Math
+            mult = 1 if p.get('side') == 'YES' else -1
+            pnl = (current_px - entry_px) * qty * mult
+            potential = (1.0 - entry_px) * qty
+            
+            # Time Countdown
+            countdown = "N/A"
+            if resolution_at != "Unknown":
+                try:
+                    expiry = datetime.fromisoformat(resolution_at.replace('Z', '+00:00'))
+                    delta = expiry - datetime.now(timezone.utc)
+                    if delta.days > 0: countdown = f"{delta.days}d left"
+                    else: countdown = f"{int(delta.seconds // 3600)}h left"
+                except: pass
+
+            enriched.append({
+                "symbol": ticker,
+                "title": event_title,
+                "qty": qty,
+                "entry": round(entry_px, 4),
+                "mark": round(current_px, 4),
+                "pnl": round(pnl, 2),
+                "potential": round(potential, 2),
+                "countdown": countdown,
+                "sentiment": "Healthy" if pnl > -0.01 else "Under Pressure"
+            })
+            total_pnl += pnl
+            
+        snapshot = {
+            "positions": enriched,
+            "total_pnl": round(total_pnl, 2),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        
+        upsert_lane_state("forecast", snapshot_json=json.dumps(snapshot))
+    except Exception as e:
+        logger.debug(f"[ForecastRunner] Cache state error: {e}")
+
+
 # ── Startup / teardown ─────────────────────────────────────────────────────────
 
 
@@ -586,6 +679,7 @@ def start_forecast_lane(bankroll: float = 100.0) -> None:
     schedule.every(5).minutes.do(run_discovery_cycle)
     schedule.every(5).minutes.do(lambda: run_strategy_cycle(bankroll))
     schedule.every(30).seconds.do(run_position_monitor)
+    schedule.every(30).seconds.do(_cache_forecast_state)
     schedule.every().day.at("08:00").do(_send_daily_token_burn_report)
 
     logger.info(

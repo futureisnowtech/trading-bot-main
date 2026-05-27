@@ -1,216 +1,77 @@
 """
-dashboard/data/positions.py — Open positions and live price fetching.
+dashboard/data/positions.py — Ledgerless Truth Layer (v19.1.ARCH)
+Strictly broker-first projection. The 'open_positions' ledger is retired.
 """
 
 from datetime import datetime
-import json
-import urllib.request
-
+import logging
 import db as _db
 
-_q = _db._q
-_q1 = _db._q1
-
-
-def _db_open_positions():
-    p = _db._runtime_paper_flag()
-    return _q(
-        f"SELECT * FROM open_positions WHERE paper={p} ORDER BY ts_entry DESC"
-    )
-
-
-def _db_perp_positions():
-    p = _db._runtime_paper_flag()
-    return _q(
-        f"SELECT * FROM open_positions WHERE strategy NOT LIKE 'spot_%' AND paper={p} ORDER BY ts_entry DESC"
-    )
-
-
-def _runtime_perp_truth() -> tuple[int, float]:
-    """Return (positions_open, capital_deployed_usd) from lane_runtime_state crypto row."""
-    row = _q1(
-        "SELECT positions_open, capital_deployed_usd, updated_at "
-        "FROM lane_runtime_state WHERE lane_id='crypto' ORDER BY id DESC LIMIT 1"
-    )
-    if not row:
-        return -1, -1.0  # unknown — don't suppress
-    # Only trust if the heartbeat is fresh (< 3 minutes old)
-    updated_at = str(row.get("updated_at") or "")
-    try:
-        from datetime import timezone
-
-        ts = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
-        age_s = (datetime.now(timezone.utc) - ts).total_seconds()
-        if age_s > 180:
-            return -1, -1.0  # stale runtime — don't suppress
-    except Exception:
-        return -1, -1.0
-    return int(row.get("positions_open") or 0), float(
-        row.get("capital_deployed_usd") or 0.0
-    )
-
-
-def get_spot_positions_dashboard():
-    """
-    Open spot-only positions (strategy LIKE 'spot_%').
-
-    Live mode must be broker-truth first and must never hide real holdings just
-    because the DB is missing lineage.
-    """
-    db_rows = _q(
-        f"SELECT * FROM open_positions WHERE strategy LIKE 'spot_%' AND paper={_db._runtime_paper_flag()} ORDER BY ts_entry DESC"
-    )
-    live_positions = _get_live_coinbase_spot_positions()
-    if live_positions is not None:
-        try:
-            from runtime.spot_position_truth import get_spot_position_truth
-
-            truth = get_spot_position_truth(
-                broker_holdings=live_positions,
-                db_path=getattr(_db, "DB_PATH", None),
-            )
-            all_live = list(truth.get("all_live_holdings") or [])
-            
-            # v18.18: Paper mode fallback — if broker snapshot succeeded but returned nothing,
-            # and we are in paper mode, show DB rows to allow testing.
-            if not all_live and _db._runtime_paper_flag() == 1:
-                return db_rows
-                
-            return all_live
-        except Exception:
-            return _merge_live_spot_rows(live_positions, db_rows)
-    
-    # v18.18: Paper mode fallback — if live snapshot failed, show DB truth
-    if _db._runtime_paper_flag() == 1:
-        return db_rows
-        
-    return []
-
+logger = logging.getLogger(__name__)
 
 def _ts_sort_key(row: dict) -> datetime:
-    raw = str(row.get("ts_entry") or "")
+    raw = str(row.get("ts_entry") or row.get("timestamp") or "")
     try:
         return datetime.fromisoformat(raw.replace("Z", "+00:00"))
     except Exception:
         return datetime.min
 
+def get_spot_positions_dashboard():
+    """
+    v19.1: Ledgerless Spot Truth.
+    Rely entirely on the broker-truth projection (runtime/spot_position_truth.py).
+    """
+    try:
+        from runtime.spot_position_truth import get_spot_position_truth
+        truth = get_spot_position_truth()
+        return list(truth.get("all_live_holdings") or [])
+    except Exception as e:
+        logger.error(f"[dashboard] Failed to fetch ledgerless spot truth: {e}")
+        return []
 
-def _get_live_coinbase_perp_positions() -> dict | None:
-    if not _crypto_live_snapshot_enabled():
-        return None
+def get_perp_positions():
+    """
+    v19.1: Ledgerless Perp Truth.
+    Coinbase CFM API is canonical. Metadata borrowed from DB via broker sync.
+    """
     try:
         from execution.coinbase_broker import get_coinbase_broker
-
         broker = get_coinbase_broker()
         if not broker.is_connected():
             broker.connect()
         if not broker.is_connected():
-            return None
-        return broker.sync_live_positions()
-    except Exception:
-        return None
-
-
-def _get_live_coinbase_spot_positions() -> list[dict] | None:
-    try:
-        from execution.coinbase_spot_broker import CoinbaseSpotBroker
-
-        broker = CoinbaseSpotBroker()
-        if not broker.is_connected():
-            broker.connect()
-        if not broker.is_connected():
-            return None
-        return broker.sync_live_holdings()
-    except Exception:
-        return None
-
-
-def _crypto_live_snapshot_enabled() -> bool:
-    row = _q1(
-        "SELECT connected, mode FROM lane_runtime_state "
-        "WHERE lane_id='crypto' ORDER BY id DESC LIMIT 1"
-    )
-    return bool(row.get("connected")) and str(row.get("mode") or "").lower() == "live"
-
-
-def _merge_live_perp_rows(live_positions: dict, db_rows: list[dict]) -> list[dict]:
-    db_by_symbol = {str(row.get("symbol") or "").upper(): row for row in db_rows}
-    merged: list[dict] = []
-    for symbol, live in live_positions.items():
-        db_row = dict(db_by_symbol.get(symbol, {}))
-        merged.append(
-            {
+            return []
+        
+        live_positions = broker.sync_live_positions()
+        if not live_positions:
+            return []
+            
+        # Enrich with DB metadata for dashboard rendering
+        # (This is still broker-first because we iterate over live_positions)
+        db_rows = _db._q("SELECT * FROM open_positions WHERE strategy NOT LIKE 'spot_%' AND paper=0")
+        db_by_symbol = {str(row.get("symbol") or "").upper(): row for row in db_rows}
+        
+        merged = []
+        for symbol, live in live_positions.items():
+            db_row = dict(db_by_symbol.get(symbol, {}))
+            merged.append({
                 **db_row,
                 "symbol": symbol,
                 "strategy": db_row.get("strategy") or "v10_perp",
-                "paper": _db._runtime_paper_flag(),
+                "paper": 0,
                 "direction": live.get("direction") or db_row.get("direction") or "LONG",
-                "qty": float(live.get("qty") or db_row.get("qty") or 0.0),
+                "qty": float(live.get("qty") or 0.0),
                 "entry": float(live.get("entry_price") or db_row.get("entry") or 0.0),
                 "contracts": float(live.get("contracts") or 0.0),
                 "current_price": float(live.get("current_price") or 0.0),
                 "unrealized_pnl": float(live.get("unrealized_pnl") or 0.0),
-                "venue": live.get("venue") or "coinbase",
-            }
-        )
-    merged.sort(key=_ts_sort_key, reverse=True)
-    return merged
-
-
-def _merge_live_spot_rows(
-    live_positions: list[dict], db_rows: list[dict]
-) -> list[dict]:
-    # Legacy fail-soft path. The live truth service should normally own this merge.
-    db_by_symbol = {str(row.get("symbol") or "").upper(): row for row in db_rows}
-    merged: list[dict] = []
-    for live in live_positions:
-        symbol = str(live.get("symbol") or "").upper()
-        db_row = db_by_symbol.get(symbol)
-        merged.append(
-            {
-                **(db_row or {}),
-                "symbol": symbol,
-                "strategy": (db_row or {}).get("strategy") or f"spot_{symbol.lower()}",
-                "paper": _db._runtime_paper_flag(),
-                "direction": "LONG",
-                "qty": float(live.get("qty") or (db_row or {}).get("qty") or 0.0),
-                "entry": float(
-                    live.get("avg_entry") or (db_row or {}).get("entry") or 0.0
-                ),
-                "current_value": float(live.get("current_value") or 0.0),
-                "venue": "coinbase_spot",
-                "position_truth_status": (
-                    "matched_bot_position" if db_row else "unclassified"
-                ),
-                "is_bot_managed": bool(db_row),
-                "is_external_manual": False,
-                "truth_blocking": not bool(db_row),
-            }
-        )
-    merged.sort(key=_ts_sort_key, reverse=True)
-    return merged
-
-
-def get_perp_positions():
-    """
-    Open perp-only positions.
-
-    Coinbase CFM API is canonical — only DB metadata borrowed for
-    matching rows. DB stale rows invisible (no position on exchange → not shown).
-    If the live perp snapshot is unavailable, fail closed to [] instead of
-    falling back to DB rows (EXCEPT in paper mode where DB is canonical).
-    """
-    db_rows = _db_perp_positions()
-    live_positions = _get_live_coinbase_perp_positions()
-    if live_positions is not None:
-        return _merge_live_perp_rows(live_positions, db_rows)
-    
-    # v18.18: Paper mode fallback — if live snapshot disabled, show DB-only truth
-    if _db._runtime_paper_flag() == 1:
-        return db_rows
-        
-    return []
-
+                "venue": "coinbase",
+            })
+        merged.sort(key=_ts_sort_key, reverse=True)
+        return merged
+    except Exception as e:
+        logger.error(f"[dashboard] Failed to fetch perp truth: {e}")
+        return []
 
 def get_open_positions():
     """All open positions (perp + spot)."""
@@ -218,35 +79,22 @@ def get_open_positions():
     combined.sort(key=_ts_sort_key, reverse=True)
     return combined
 
-
 def get_crypto_deployed_snapshot() -> dict:
     """
     Canonical crypto deployment truth for dashboard surfaces.
-
-    Uses the same live/broker-first readers as the rest of the dashboard so spot
-    holdings are not lost behind perp-only runtime counters.
+    Uses the same ledgerless readers.
     """
     perp_positions = get_perp_positions()
     spot_positions = get_spot_positions_dashboard()
 
-    perp_deployed_usd = 0.0
-    for p in perp_positions:
-        try:
-            perp_deployed_usd += abs(float(p.get("qty") or 0.0)) * float(
-                p.get("current_price") or p.get("entry") or 0.0
-            )
-        except Exception:
-            pass
-
-    spot_deployed_usd = 0.0
-    for p in spot_positions:
-        try:
-            spot_deployed_usd += float(p.get("current_value") or 0.0) or (
-                abs(float(p.get("qty") or 0.0))
-                * float(p.get("current_price") or p.get("entry") or 0.0)
-            )
-        except Exception:
-            pass
+    perp_deployed_usd = sum(
+        abs(float(p.get("qty") or 0.0)) * float(p.get("current_price") or p.get("entry") or 0.0)
+        for p in perp_positions
+    )
+    spot_deployed_usd = sum(
+        float(p.get("current_value") or 0.0) or (abs(float(p.get("qty") or 0.0)) * float(p.get("current_price") or p.get("entry") or 0.0))
+        for p in spot_positions
+    )
 
     return {
         "perp_positions": perp_positions,
@@ -257,11 +105,13 @@ def get_crypto_deployed_snapshot() -> dict:
         "open_count": len(perp_positions) + len(spot_positions),
     }
 
-
 def get_live_prices(symbols: list) -> dict:
+    """Mock/Fallback price fetcher for dashboard indicators."""
+    # Logic remains similar but simplified
+    import json
+    import urllib.request
     prices = {}
-    if not symbols:
-        return prices
+    if not symbols: return prices
     try:
         url = "https://futures.kraken.com/derivatives/api/v3/tickers"
         with urllib.request.urlopen(url, timeout=4) as resp:
@@ -269,25 +119,6 @@ def get_live_prices(symbols: list) -> dict:
         for t in data.get("tickers", []):
             sym = t.get("symbol", "")
             price = t.get("markPrice") or t.get("last") or 0
-            if sym and price:
-                prices[sym] = float(price)
-    except Exception:
-        pass
-    missing = [s for s in symbols if s not in prices]
-    if missing:
-        try:
-            req_data = json.dumps({"type": "allMids"}).encode()
-            req = urllib.request.Request(
-                "https://api.hyperliquid.xyz/info",
-                data=req_data,
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            with urllib.request.urlopen(req, timeout=4) as resp:
-                mids = json.loads(resp.read())
-            for sym in missing:
-                if sym in mids:
-                    prices[sym] = float(mids[sym])
-        except Exception:
-            pass
+            if sym and price: prices[sym] = float(price)
+    except: pass
     return prices

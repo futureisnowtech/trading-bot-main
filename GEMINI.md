@@ -17,10 +17,10 @@
 9. **Exhaustive Compilation Audit:** After any multi-file change, run `python3 -m py_compile` on the ENTIRE repository.
 10. **Live Truth Verification:** For production systems, you are not done until you have verified the live logs of the running container.
 
-## Current Repo Truth
+## Current Repo Truth (v19.1.ARCH)
 - **Strictly LIVE:** Paper mode is excised. `PAPER_TRADING` logic is dead code.
 - **Broker Canon:** Coinbase is the only source of truth for holdings.
-- **Self-Healing:** `runtime/spot_position_truth.py` is the primary repair layer.
+- **Ledgerless**: The `open_positions` table is no longer the authoritative ledger. Truth is projected from broker state via `runtime/spot_position_truth.py`.
 - **Incident Response:** `monitoring/irm_reporter.py` pushes critical halts to Grafana IRM.
 
 ## Default Workflow
@@ -32,9 +32,8 @@
 6. Verify on the NYC droplet logs.
 
 ## High-Value Entry Points
-- `runtime/spot_position_truth.py`
-- `spot_engine.py`
-- `scheduler/v10_runner.py`
-- `scripts/reconcile_spot_truth.py` (Repair Tool)
-- `scripts/go_live.py` (Production Boot)
-
+- `main.py` (Unified Entry Point)
+- `runtime/spot_position_truth.py` (Truth Service)
+- `spot_engine.py` (Execution Lifecycle)
+- `scheduler/v10_runner.py` (Primary Scan Loop)
+- `dashboard/api/server.py` (HUD API)

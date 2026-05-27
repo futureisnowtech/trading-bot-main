@@ -26,6 +26,7 @@ ALERT_NAMESPACES = [
     "spot_engine",
     "scheduler",
     "runtime.spot_position_truth",
+    "runtime.spot_position_repair",
     "runtime.spot_kill_switch",
     "spot_kill_switch",
 ]

@@ -68,40 +68,24 @@ async def get_db_snapshot():
         # 3. Active Spot Positions (with Live PnL & SRE X-Ray)
         spot_positions = []
         try:
-            from execution.coinbase_spot_broker import get_spot_broker
-            spot_broker = get_spot_broker()
-            cursor.execute("SELECT * FROM open_positions WHERE qty > 0")
-            for p in cursor.fetchall():
-                p_dict = dict(p)
-                sym = p_dict["symbol"]
-                entry = p_dict["entry"]
-                qty = p_dict["qty"]
-                stop = p_dict.get("stop", 0.0)
-                
-                # Fetch live price for PnL
-                try:
-                    top = spot_broker.get_spot_top_of_book(sym)
-                    current_price = float(top.get("best_bid") or entry)
-                except:
-                    current_price = entry
+            from runtime.spot_position_truth import get_spot_position_truth
+            truth = get_spot_position_truth()
+            all_holdings = truth.get("all_live_holdings") or []
+            
+            for p in all_holdings:
+                sym = p["symbol"]
+                entry = float(p.get("entry") or 0.0)
+                qty = float(p.get("qty") or 0.0)
+                current_price = float(p.get("current_price") or entry)
+                stop = float(p.get("stop") or 0.0)
                 
                 live_pnl = (current_price - entry) * qty if current_price > 0 else 0.0
                 risk_usd = (entry - stop) * qty if stop > 0 else 0.0
 
                 # SRE X-Ray: Hold Conviction
-                conviction_score = 50.0
-                hold_rationale = "Neutral technical structure."
-                try:
-                    cursor.execute("SELECT final_spot_score FROM scan_candidates WHERE symbol=? ORDER BY ts DESC LIMIT 1", (sym,))
-                    score_row = cursor.fetchone()
-                    if score_row:
-                        conviction_score = float(score_row[0] or 50.0)
-                        if conviction_score > 60: hold_rationale = "Strong trend structure. High hold conviction."
-                        elif conviction_score > 52: hold_rationale = "Momentum positive. Trend intact."
-                        elif conviction_score < 48: hold_rationale = "Momentum decaying. Near thesis_decay threshold."
-                        else: hold_rationale = "Consolidating. Monitoring for trend resumption."
-                except: pass
-
+                conviction_score = float(p.get("setup_score") or 50.0)
+                hold_rationale = p.get("classification_note") or "Neutral technical structure."
+                
                 spot_positions.append({
                     "symbol": sym,
                     "qty": qty,
@@ -112,12 +96,13 @@ async def get_db_snapshot():
                     "conviction_score": conviction_score,
                     "hold_rationale": hold_rationale,
                     "stop": stop,
-                    "target": p_dict.get("target", 0.0),
-                    "strategy": p_dict.get("strategy", ""),
-                    "reason": p_dict.get("entry_reason", "")
+                    "target": float(p.get("target") or 0.0),
+                    "strategy": p.get("strategy", ""),
+                    "reason": p.get("entry_reason", ""),
+                    "status": p.get("position_truth_status", "unknown")
                 })
         except Exception as e: 
-            logging.debug(f"Spot PnL/X-Ray error: {e}")
+            logging.debug(f"Spot Ledgerless Truth error: {e}")
         
         # 4. Learner State (Vaccinations)
         vaccinations = []

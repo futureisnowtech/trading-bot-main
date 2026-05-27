@@ -1233,6 +1233,11 @@ def _attempt_entry(
         )
         return "data_unavailable"
 
+    _score_floor = 50.0  # v19.1.1: Default floor to prevent NameError in early exits
+    _tech_score = 50.0
+    _ml_score = 50.0
+    composite = 50.0
+    
     # ── Systemic Price Sanity Resolution ───────
     # v18.17: Ironclad REST fallback for all sizing and scoring.
     _DRIFT_THRESHOLD = 0.005  # 0.5% drift threshold
@@ -1404,8 +1409,6 @@ def _attempt_entry(
     # Lowered from 50 → 45 to allow borderline-agreement setups through.
     _TIER1_COMPOSITE_FLOOR = 25.0
 
-    _tech_score = float(result.get("technical_score", 0.0))
-    _ml_score = float(result.get("ml_score", 50.0))
     _route_hint = _tradeability_hint(
         symbol,
         direction,
@@ -3939,7 +3942,7 @@ def run_forever():
     _last_cache_ts = 0
 
     def _cache_spot_state():
-        """v19.1: Caches rich broker-first spot state for the HUD dashboard."""
+        """v19.1.1: Caches rich broker-first spot state for the HUD dashboard."""
         try:
             from execution.coinbase_spot_broker import get_spot_broker
             from runtime.spot_classification import get_classifications, is_external_manual
@@ -3948,19 +3951,23 @@ def run_forever():
             holdings = broker.sync_live_holdings() or []
             classifications = get_classifications()
             
+            # v19.1.1: Fetch actual USD balance to include in equity
+            spot_bal = broker.get_spot_balance() or {}
+            usd_cash = float(spot_bal.get("usd_available") or 0.0)
+            
             enriched = []
-            total_equity = 0.0
+            total_equity = usd_cash
             
             for p in holdings:
                 sym = p["symbol"]
-                if is_external_manual(sym, classifications):
-                    continue
-                    
+                is_manual = is_external_manual(sym, classifications)
+                
                 qty = float(p.get("qty") or 0.0)
                 entry = float(p.get("avg_entry") or 0.0)
                 mark = broker.get_mark_price(sym) or entry
                 
-                total_equity += (qty * mark)
+                val = (qty * mark)
+                total_equity += val
                 
                 # Layman Logic
                 pnl = (mark - entry) * qty if entry > 0 else 0.0
@@ -3984,6 +3991,7 @@ def run_forever():
                     "trend": trend,
                     "sentiment": sentiment,
                     "strategy": f"spot_{sym.lower()}",
+                    "managed": not is_manual,
                     "updated_at": datetime.now(timezone.utc).isoformat()
                 })
                 

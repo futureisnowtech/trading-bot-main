@@ -49,17 +49,17 @@ import csv, uuid, sqlite3
 from typing import Optional
 import logging_db.trade_logger  # noqa: F401 — pre-warm, prevents EDEADLK
 
-VERSION = "v18.34.FORENSIC"
+VERSION = "v19.1.ARCH"
 
 BANNER = """
 ╔══════════════════════════════════════════════════════════════════╗
-║  ALGO TRADING SYSTEM  v18.34.FORENSIC                            ║
-║  Unshackled Dual-Lane: Forensic Traceability Enabled             ║
+║  ALGO TRADING SYSTEM  v19.1.ARCH (LEDGERLESS)                    ║
+║  Ledgerless Sovereign: Broker-First Truth Projection             ║
 ║                                                                  ║
 ║  Lane:       Coinbase spot scalp (FULL LIVE RELEASE)            ║
-║  Route:      maker_first | Expectancy-Driven Gates              ║
+║  Route:      maker_first | Fee-Aware Expectancy Gates           ║
 ║  Truth:      broker-first via runtime/spot_position_truth.py    ║
-║  Launch:     python3 scripts/go_live.py (only sanctioned path)  ║
+║  Launch:     python3 main.py (Unified Entry Point)              ║
 ╚══════════════════════════════════════════════════════════════════╝
 """
 

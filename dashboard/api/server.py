@@ -166,14 +166,22 @@ async def get_db_snapshot():
 
                         # v18.35: Enrich with trade history for Kalshi cost basis
                         try:
+                            # Broaden query to match any strategy for this ticker
                             cursor.execute(
                                 "SELECT price as entry, ts as ts_entry FROM trades WHERE symbol=? AND action='BUY' AND broker='kalshi' ORDER BY ts DESC LIMIT 1",
                                 (ticker,)
                             )
                             db_row = cursor.fetchone()
+                            if not db_row:
+                                # Fallback to open_positions if no trade history found
+                                cursor.execute(
+                                    "SELECT entry, ts_entry FROM open_positions WHERE symbol=? ORDER BY ts_entry DESC LIMIT 1",
+                                    (ticker,)
+                                )
+                                db_row = cursor.fetchone()
+
                             if db_row:
-                                p['entry_price'] = float(db_row['entry'] or p['entry_price'])
-                                p['stop'] = 0.0  # Max risk is premium
+                                p['entry_price'] = float(db_row['entry'] or 0.0)
                                 p['ts_entry'] = db_row['ts_entry']
                         except: pass
 

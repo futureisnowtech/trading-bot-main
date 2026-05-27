@@ -1,0 +1,64 @@
+# ── Credentials (NEVER commit) ───────────────────────────────────────────────
+.env
+did.bin
+kalshi_private_key*.pem
+key.der
+
+# ── Runtime data (logs, databases, vector store) ─────────────────────────────
+logs/
+*.db
+*.db-shm
+*.db-wal
+
+# ── Backups (stored outside repo in ~/.algo_backup) ──────────────────────────
+.algo_backup/
+
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pkl
+.Python
+venv/
+.venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# ── macOS ────────────────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# ── Broker session files ──────────────────────────────────────────────────────
+.webull/
+
+# ── Reference repos (cloned for analysis, never committed) ───────────────────
+reference_repos/
+
+# ── Editor ───────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── Claude Code hook logs (observability, not source) ─────────────────────────
+.claude/logs/
+
+# ── Local generated version stamp (dashboard/local hook artifact) ────────────
+.version
+sop_state.generated.js
+
+# ── Local brain scratch / session notes that should stay off-branch ──────────
+brain/06_daily_summaries/2026-04-20.md
+
+# ── Audit exports / generated DB dumps ───────────────────────────────────────
+audit_output/*/db_exports/
+
+# ── Local generated launchd artifacts ────────────────────────────────────────
+scripts/com.algotrading.king.live.plist
+
+# ── Archive/research reference docs (contain old Desktop paths) ────────────────
+RESEARCH_ARCHIVE_DATA_INVENTORY.md

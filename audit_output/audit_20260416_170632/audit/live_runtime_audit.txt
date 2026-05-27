@@ -1,0 +1,59 @@
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  LIVE RUNTIME AUDIT — v15.2
+  2026-04-16 17:06:32 UTC
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+── System State ──────────────────────────────────────
+  ✅ Process alive: mode=live, status=OK
+  ✅ Startup time: 2026-04-16T06:43:42.239060+00:00
+  ✅ Launch readiness: READY
+  ✅ Last heartbeat: 2026-04-16T17:05:49.344162+00:00
+
+── Lane States ───────────────────────────────────────
+  ✅ Lane [crypto]: active=True, health=OK, readiness=OPERATIONAL, hb=2026-04-16T17:05:50.748082+00:00
+  ✅ Lane [forecast]: active=True, health=UNKNOWN, readiness=NO_UNDERLIERS
+  ✅ Lane [mes_archived] DORMANT: enabled=False, readiness=DORMANT
+
+── Incidents ─────────────────────────────────────────
+  ✅ Incidents: 0 open incidents
+
+── Coinbase Auth ─────────────────────────────────────
+  ✅ Coinbase credentials: CDP key present: organizations/c6198fc1-5a46-4caf-9761-63...
+  ✅ Coinbase LIVE auth: connected, buying_power=$1965.91
+
+── IBKR Port ─────────────────────────────────────────
+  ✅ IBKR TWS port 7496: open — ForecastEx can connect
+
+── MES Dormant Check ─────────────────────────────────
+  ✅ MES dormant: FUTURES_LANE_ACTIVE=False — MES fully archived (expected)
+
+── Heartbeat Age ─────────────────────────────────────
+  ✅ System heartbeat: 0.7m ago
+
+── Forecast DB ───────────────────────────────────────
+  ✅ Forecast DB: markets=6 (stubs=6), contracts=0, quotes=0, bars_5m=0
+       CPIY: conid=712856682, name='US Consumer Price Index Yearly', first_seen=2026-04-15T17:07
+       CPIC: conid=727520252, name='US Core CPI', first_seen=2026-04-15T17:07
+       DISSN: conid=806285268, name='Number of Dissenting FOMC Members', first_seen=2026-04-15T17:07
+       DISSA: conid=804725704, name='Any FOMC Members Dissent', first_seen=2026-04-15T17:07
+       GDP: conid=573031111, name='US Gross Domestic Product', first_seen=2026-04-15T17:07
+       CPI: conid=573031126, name='US Consumer Price Index', first_seen=2026-04-15T19:06
+
+── Forecast Readiness ────────────────────────────────
+  ⚠️  Forecast readiness: NO_TRADABLE_CONTRACTS_RIGHT_NOW | underliers=6, stubs_unavail=6
+       ✅ DB tables: All 5 forecast tables present
+       ✅ Lane running: Forecast lane active (runtime state=active, heartbeat 48249s ago)
+       ✅ Underliers visible: 6 underlier(s) visible in DB
+       ⚠️  OPT contracts: 6 underlier(s) confirmed but 0 tradable OPT contracts — no active event period and/or ForecastEx enrollment/permissions limitation
+       ⚠️  Enrollment status: 6 underlier(s): IND visible but OPT unavailable — check IBKR portal ForecastEx enrollment
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ⚠️  OVERALL: NOT_READY — 0 failures, 1 warning(s) require review
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+
+── STDERR ──
+/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/site-packages/requests/__init__.py:113: RequestsDependencyWarning: urllib3 (2.6.3) or chardet (7.2.0)/charset_normalizer (3.4.6) doesn't match a supported version!
+  warnings.warn(

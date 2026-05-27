@@ -1,0 +1,78 @@
+{
+  "id": 1547965072891904,
+  "panels": [
+    {
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "expr": "algo_bot_strategy_drift",
+          "refId": "A"
+        }
+      ],
+      "title": "OBI Sniper",
+      "type": "timeseries"
+    },
+    {
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "targets": [
+        {
+          "expr": "algo_bot_equity_usd",
+          "refId": "A"
+        }
+      ],
+      "title": "Price Vitals",
+      "type": "timeseries"
+    },
+    {
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 8
+      },
+      "targets": [
+        {
+          "expr": "process_cpu_seconds_total",
+          "refId": "A"
+        }
+      ],
+      "title": "System Health: CPU",
+      "type": "gauge"
+    },
+    {
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 6,
+        "y": 8
+      },
+      "targets": [
+        {
+          "expr": "process_resident_memory_bytes",
+          "refId": "A"
+        }
+      ],
+      "title": "System Health: RAM",
+      "type": "gauge"
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": [
+    "sniper",
+    "v10"
+  ],
+  "timezone": "browser",
+  "title": "Sniper Dashboard v10",
+  "uid": "85e5a876-cddd-4476-a3a9-4dc7afb6a141",
+  "version": 1
+}

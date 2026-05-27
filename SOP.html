@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="30">
+<title>v18.34.FORENSIC Sovereign SOP</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: linear-gradient(180deg, #08111a 0%, #0f1724 100%);
+  color: #d7e1ee;
+  font-family: "SF Mono", "Menlo", "Monaco", monospace;
+  font-size: 14px;
+  line-height: 1.5;
+  padding: 24px;
+}
+h1 {
+  color: #f3c35a;
+  font-size: 28px;
+  letter-spacing: 1px;
+  margin-bottom: 6px;
+}
+h2 {
+  color: #8fb3d9;
+  font-size: 12px;
+  letter-spacing: 2px;
+  margin: 24px 0 10px;
+  text-transform: uppercase;
+}
+p { color: #bdd0e4; }
+a { color: #8fd3ff; }
+.subtitle { color: #7f93a9; font-size: 12px; }
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 14px;
+  margin-top: 12px;
+}
+.card {
+  background: rgba(15, 24, 38, 0.95);
+  border: 1px solid #243348;
+  border-radius: 10px;
+  padding: 16px;
+}
+.card.ok { border-color: #1ea672; }
+.card.warn { border-color: #d8a137; }
+.label {
+  color: #7f93a9;
+  font-size: 11px;
+  letter-spacing: 1.6px;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+}
+.value {
+  color: #f3f7fb;
+  font-size: 24px;
+  font-weight: 700;
+}
+.value.ok { color: #43d08a; }
+.value.warn { color: #f3c35a; }
+.value.info { color: #8fd3ff; }
+.small { color: #a9bfd5; font-size: 12px; margin-top: 8px; }
+.pill {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 3px 10px;
+  margin-right: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+}
+.pill.ok { background: rgba(30, 166, 114, 0.12); border: 1px solid #1ea672; color: #43d08a; }
+.pill.warn { background: rgba(216, 161, 55, 0.12); border: 1px solid #d8a137; color: #f3c35a; }
+.pill.info { background: rgba(94, 161, 227, 0.12); border: 1px solid #5ea1e3; color: #8fd3ff; }
+.pill.dead { background: rgba(205, 75, 75, 0.12); border: 1px solid #cd4b4b; color: #ff8c8c; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+}
+th {
+  color: #7f93a9;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding: 8px 6px;
+  text-align: left;
+  text-transform: uppercase;
+  border-bottom: 1px solid #243348;
+}
+td {
+  color: #d7e1ee;
+  padding: 8px 6px;
+  vertical-align: top;
+  border-bottom: 1px solid #182232;
+}
+.cmd {
+  background: #09111a;
+  border: 1px solid #243348;
+  border-radius: 8px;
+  color: #d8e3ef;
+  margin-top: 8px;
+  padding: 10px 12px;
+  white-space: pre-wrap;
+}
+ul {
+  margin: 8px 0 0 18px;
+  color: #bdd0e4;
+}
+li + li { margin-top: 6px; }
+.section-note {
+  color: #96abc0;
+  font-size: 12px;
+  margin-top: 6px;
+}
+.footer {
+  border-top: 1px solid #243348;
+  color: #7f93a9;
+  font-size: 12px;
+  margin-top: 26px;
+  padding-top: 14px;
+}
+.mono {
+  font-family: "SF Mono", "Menlo", "Monaco", monospace;
+  font-size: 12px;
+  word-break: break-word;
+}
+</style>
+</head>
+<body>
+<h1>v18.34.FORENSIC Sovereign Operations SOP</h1>
+<div class="subtitle">Current operator reference for the live **Sovereign Machine** on <code>release/v18.34.FORENSIC</code>.</div>
+<div class="section-note">This file auto-refreshes every 30 seconds and reads its live snapshot from <code>sop_state.generated.js</code>, which is regenerated after deploys or by running <code>python3 scripts/refresh_sop.py</code>.</div>
+
+<script>
+window.__SOP_STATE__ = window.__SOP_STATE__ || {
+  generated_at_local: null,
+  canonical_version: "v18.34.FORENSIC",
+  branch: "release/v18.34.FORENSIC",
+  local_head_sha: null,
+  github_sha: null,
+  worktree_dirty: null,
+  deployed_sha: null,
+  deployed_at_utc: null,
+  dashboard_uid: "d9ecf89d-5e95-4e63-b0ae-f8008debbc0f",
+  prometheus_target: "algo-bot-live:8000",
+  docker_health: null,
+  runtime_mode: null,
+  launch_readiness: null,
+  live_posture_status: null,
+  live_posture_primary: null,
+  latest_health_level: null,
+  latest_health_message: null,
+  refresh_error: "No generated snapshot yet. Run python3 scripts/refresh_sop.py or deploy.sh."
+};
+</script>
+<script src="./sop_state.generated.js"></script>
+
+<h2>Live Snapshot</h2>
+<div id="live-snapshot" class="grid">
+  <div class="card warn">
+    <div class="label">Snapshot</div>
+    <div class="value warn">Pending</div>
+    <div class="small">Waiting for generated live state.</div>
+  </div>
+</div>
+<div id="live-provenance" class="card">
+  <div class="label">Live Provenance</div>
+  <div class="small">This section fills from the generated live-state sidecar.</div>
+</div>
+
+<h2>Current Truth</h2>
+<div class="grid">
+  <div class="card ok">
+    <div class="label">Canonical Version</div>
+    <div class="value ok">v18.34.FORENSIC</div>
+    <div class="small">Recursive Evolution: Self-Vaccinating Sovereign DAG.</div>
+  </div>
+  <div class="card ok">
+    <div class="label">Live Runtime</div>
+    <div class="value ok">Sovereign Live</div>
+    <div class="small">System state currently reads <code>LIVE</code> with expectancy-driven gates active.</div>
+  </div>
+  <div class="card warn">
+    <div class="label">Live Posture</div>
+    <div class="value warn">AMBER</div>
+    <div class="small">Operate live, but keep sizing and rules constrained. Do not loosen thresholds or scale aggressively yet.</div>
+  </div>
+  <div class="card ok">
+    <div class="label">Dashboard UID</div>
+    <div class="value info" style="font-size:18px">d9ecf89d-5e95-4e63-b0ae-f8008debbc0f</div>
+    <div class="small">Grafana Watchtower identity pinned and preserved in provisioning.</div>
+  </div>
+</div>
+
+<h2>Source Of Truth</h2>
+<div class="card">
+  <table>
+    <tr><th>Priority</th><th>Location</th><th>Meaning</th></tr>
+    <tr><td>1</td><td><code>origin/release/v18.34.FORENSIC</code></td><td>GitHub is the primary source of truth.</td></tr>
+    <tr><td>2</td><td><code>/Users/joshmacbookair2020/Projects/algo_trading_final</code></td><td>Mac Projects repo is the working tree and authoring copy.</td></tr>
+    <tr><td>3</td><td><code>algo-runner@64.225.20.38:2222:/home/algo-runner/bot</code></td><td>NYC server is the deploy target and runtime evidence source.</td></tr>
+    <tr><td>Ignore</td><td><code>/Users/joshmacbookair2020/Desktop/algo_trading_final</code></td><td>Deprecated copy. Do not use it for compare, deploy, or truth checks.</td></tr>
+  </table>
+</div>
+
+<h2>Operating Model</h2>
+<div class="grid">
+  <div class="card">
+    <div class="label">Expectancy Shape</div>
+    <ul>
+      <li>Coinbase spot lane is the primary extractive lane.</li>
+      <li>Expectancy math beats hardcoded thresholds (<code>Alpha > 2x Friction</code>).</li>
+      <li>Autonomous vaccination (Online Learner) audits fee leaks.</li>
+      <li>Rational Silence is a valid and profitable regime (CHOP).</li>
+    </ul>
+  </div>
+  <div class="card">
+    <div class="label">Deploy Discipline</div>
+    <ul>
+      <li>Deploy only from a clean worktree.</li>
+      <li>Deploy only when local <code>HEAD</code> equals <code>origin/release/v18.34.FORENSIC</code>.</li>
+      <li>Every deploy writes <code>/home/algo-runner/bot/version.txt</code> and <code>deploy_manifest.json</code>.</li>
+      <li>Post-deploy proof matters more than “deploy succeeded”.</li>
+      <li>Protected GitHub deploy path exists via <code>.github/workflows/deploy-nyc.yml</code> with environment approval.</li>
+    </ul>
+  </div>
+  <div class="card">
+    <div class="label">Live Caution</div>
+    <ul>
+      <li><code>AMBER</code> means live is allowed, not “full throttle”.</li>
+      <li>Keep size small and rules unchanged.</li>
+      <li>Do not promote confidence faster than evidence.</li>
+      <li>Prefer constrained live over premature scale-up.</li>
+    </ul>
+  </div>
+</div>
+
+<h2>Core Commands</h2>
+<div class="grid">
+  <div class="card">
+    <div class="label">Validation</div>
+    <div class="cmd">python3 scripts/validate.py</div>
+    <div class="cmd">python3 scripts/repo_truth_gate.py --strict</div>
+    <div class="cmd">pytest -q</div>
+  </div>
+  <div class="card">
+    <div class="label">Runtime Audits</div>
+    <div class="cmd">python3 scripts/live_runtime_audit.py</div>
+    <div class="cmd">python3 scripts/check_readiness.py</div>
+  </div>
+  <div class="card">
+    <div class="label">Deploy</div>
+    <div class="cmd">./deploy.sh</div>
+    <div class="section-note">This now refuses dirty worktrees, refuses SHA drift, and writes provenance markers on the server.</div>
+  </div>
+  <div class="card">
+    <div class="label">Protected GitHub Deploy</div>
+    <div class="cmd">Actions → Protected NYC Deploy</div>
+    <div class="section-note">Auto-after-CI is disabled by default and only turns on when <code>NYC_AUTO_DEPLOY_ENABLED=true</code> plus <code>nyc-production</code> approval is configured.</div>
+  </div>
+</div>
+
+<h2>Telegram Command Station</h2>
+<div class="card">
+  <p>Telegram is a real operator control surface now, but it is still a command bot, not an AI copilot. Commands are authenticated and mode-aware.</p>
+  <table>
+    <tr><th>Command</th><th>What It Does</th><th>Safety Notes</th></tr>
+    <tr><td><code>/ask [query]</code></td><td>Natural language copilot. Queries codebase, DB, and logs to provide deep architectural or trade analysis.</td><td>Uses 80% cached context (v18.34.FORENSIC efficiency).</td></tr>
+    <tr><td><code>!scalper_on/off</code></td><td>Interceptive chat hook to toggle Strategic Scalper mode (bypasses vetoes for +60% WR signals).</td><td>Updates <code>.env</code> and reloads bot via hook.</td></tr>
+    <tr><td><code>/status</code></td><td>Shows current runtime mode, exchange connectivity, buying power, OBI, signal, and active symbol.</td><td>Uses live runtime truth, not a naive static assumption.</td></tr>
+    <tr><td><code>/metrics</code></td><td>Shows CPU, RAM, and exchange latency.</td><td>Read-only.</td></tr>
+    <tr><td><code>/positions</code></td><td>Shows active spot positions scoped to the current runtime mode.</td><td>Paper mode reads paper positions. Live mode reads live positions.</td></tr>
+    <tr><td><code>/exposure</code></td><td>Shows total spot exposure for the current runtime mode.</td><td>Read-only.</td></tr>
+    <tr><td><code>/audit</code></td><td>Shows simple health summary from system state.</td><td>Read-only.</td></tr>
+    <tr><td><code>/report</code></td><td>Shows the day’s trade count, win rate, and net PnL.</td><td>Mode-labeled in the response.</td></tr>
+    <tr><td><code>/logs</code></td><td>Tails the recent bot log output.</td><td>Read-only.</td></tr>
+    <tr><td><code>/spread</code></td><td>Shows current microprice from system state.</td><td>Read-only.</td></tr>
+    <tr><td><code>/uptime</code></td><td>Shows system uptime.</td><td>Read-only.</td></tr>
+    <tr><td><code>/reboot</code></td><td>Exits the process so Docker restarts it.</td><td>Operationally disruptive. Use only intentionally.</td></tr>
+    <tr><td><code>/cancel_all</code></td><td>Cancels all live spot orders.</td><td>Only allowed when runtime mode is live and <code>TELEGRAM_ALLOW_LIVE_ACTIONS=true</code>. Hard-refuses in paper mode.</td></tr>
+  </table>
+  <div class="section-note">Important: Telegram destructive behavior is fail-closed. If runtime mode is paper, or if the live-action flag is absent, <code>/cancel_all</code> refuses to run.</div>
+</div>
+
+<h2>Telegram Safety Rules</h2>
+<div class="grid">
+  <div class="card warn">
+    <div class="label">Destructive Action Gate</div>
+    <ul>
+      <li>Runtime mode must be truly live.</li>
+      <li><code>TELEGRAM_ALLOW_LIVE_ACTIONS=true</code> must also be present.</li>
+      <li>If either condition fails, live-destructive Telegram actions must refuse.</li>
+    </ul>
+  </div>
+  <div class="card">
+    <div class="label">What Telegram Is Not</div>
+    <ul>
+      <li>Not a natural-language AI trading copilot yet.</li>
+      <li>Not a safe place to assume “paper” without checking runtime truth.</li>
+      <li>Not the source of truth for deployment or health by itself.</li>
+    </ul>
+  </div>
+  <div class="card">
+    <div class="label">What Telegram Is</div>
+    <ul>
+      <li>An authenticated command station.</li>
+      <li>A fast runtime visibility layer.</li>
+      <li>A guarded operator surface for basic actions and reporting.</li>
+    </ul>
+  </div>
+</div>
+
+<h2>Go / No-Go Read</h2>
+<div class="card">
+  <table>
+    <tr><th>Signal</th><th>Meaning</th><th>Operator Interpretation</th></tr>
+    <tr><td><span class="pill ok">GREEN</span></td><td>Truth surfaces aligned, health clean, no blocker drift.</td><td>Proceed normally.</td></tr>
+    <tr><td><span class="pill warn">AMBER</span></td><td>System is live and functioning, but evidence says stay constrained.</td><td>Keep size small, do not loosen risk posture.</td></tr>
+    <tr><td><span class="pill.dead">RED</span></td><td>Truth contradiction, broker issue, kill switch, or failed runtime proof.</td><td>Do not force through. Diagnose first.</td></tr>
+  </table>
+</div>
+
+<h2>Post-Deploy Proof Checklist</h2>
+<div class="card">
+  <ul>
+    <li><code>version.txt</code> on the server matches local and GitHub SHA.</li>
+    <li><code>deploy_manifest.json</code> has the same SHA, branch, and dashboard UID.</li>
+    <li><code>python3 scripts/live_runtime_audit.py</code> passes.</li>
+    <li><code>python3 scripts/check_readiness.py</code> reflects the correct runtime state.</li>
+    <li>Grafana still resolves Watchtower UID <code>d9ecf89d-5e95-4e63-b0ae-f8008debbc0f</code>.</li>
+    <li>Telegram command behavior matches runtime truth and safety gates.</li>
+  </ul>
+</div>
+
+<h2>Current Branching</h2>
+<div class="card">
+  <table>
+    <tr><th>Branch</th><th>Status</th><th>Purpose</th></tr>
+    <tr><td><code>release/v18.34.FORENSIC</code></td><td><span class="pill ok">ACTIVE</span></td><td>Current live production branch (Recursive Evolution).</td></tr>
+    <tr><td><code>main</code></td><td><span class="pill info">Base</span></td><td>Primary long-term merge target.</td></tr>
+    <tr><td><code>feature/v10-rebuild</code></td><td><span class="pill dead">Merged</span></td><td>Pre-v18.34.FORENSIC development branch.</td></tr>
+  </table>
+</div>
+
+<div class="footer" id="dynamic-footer">
+  v18.34.FORENSIC · branch <code>release/v18.34.FORENSIC</code> · live posture <code>AMBER / Sovereign_Expectancy_Active</code> · Telegram AI-copilot enabled
+</div>
+<script>
+function sopEscape(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function sopShortSha(value) {
+  if (!value) return "unknown";
+  return String(value).slice(0, 12);
+}
+
+function sopCardClass(status) {
+  const normalized = String(status || "").toUpperCase();
+  if (normalized === "GREEN" || normalized === "PASS" || normalized === "HEALTHY") return "ok";
+  if (normalized === "AMBER" || normalized === "WARN" || normalized === "WARNING") return "warn";
+  if (normalized === "RED" || normalized === "FAIL" || normalized === "ERROR") return "dead";
+  return "";
+}
+
+function renderSopState() {
+  const state = window.__SOP_STATE__ || {};
+  const snapshot = document.getElementById("live-snapshot");
+  const provenance = document.getElementById("live-provenance");
+  const footer = document.getElementById("dynamic-footer");
+  if (!snapshot || !provenance || !footer) return;
+
+  const posture = state.live_posture_status || "UNKNOWN";
+  const runtimeMode = (state.runtime_mode || "unknown").toUpperCase();
+  const readiness = state.launch_readiness || "unknown";
+  const dockerHealth = state.docker_health || "unknown";
+  const generatedAt = state.generated_at_local || "unknown";
+  const healthMessage = state.latest_health_message || "No health row captured.";
+  const refreshError = state.refresh_error;
+
+  snapshot.innerHTML = `
+    <div class="card ${sopCardClass(posture)}">
+      <div class="label">Live Posture</div>
+      <div class="value ${sopCardClass(posture)}">${sopEscape(posture)}</div>
+      <div class="small">${sopEscape(state.live_posture_primary || "No recommendation captured.")}</div>
+    </div>
+    <div class="card ${sopCardClass(dockerHealth)}">
+      <div class="label">Server Runtime</div>
+      <div class="value info" style="font-size:20px">${sopEscape(runtimeMode)}</div>
+      <div class="small">Readiness: <code>${sopEscape(readiness)}</code> · Docker: <code>${sopEscape(dockerHealth)}</code></div>
+    </div>
+    <div class="card ok">
+      <div class="label">GitHub / Local SHA</div>
+      <div class="value info" style="font-size:18px">${sopEscape(sopShortSha(state.github_sha || state.local_head_sha))}</div>
+      <div class="small">Branch <code>${sopEscape(state.branch || "unknown")}</code> · local <code>${sopEscape(sopShortSha(state.local_head_sha))}</code></div>
+    </div>
+    <div class="card ok">
+      <div class="label">Deployed SHA</div>
+      <div class="value info" style="font-size:18px">${sopEscape(sopShortSha(state.deployed_sha))}</div>
+      <div class="small">Deployed at <code>${sopEscape(state.deployed_at_utc || "unknown")}</code></div>
+    </div>
+  `;
+
+  provenance.innerHTML = `
+    <div class="label">Live Provenance</div>
+    <table>
+      <tr><th>Field</th><th>Value</th></tr>
+      <tr><td>Generated</td><td class="mono">${sopEscape(generatedAt)}</td></tr>
+      <tr><td>Canonical Version</td><td class="mono">${sopEscape(state.canonical_version || "unknown")}</td></tr>
+      <tr><td>Dashboard UID</td><td class="mono">${sopEscape(state.dashboard_uid || "unknown")}</td></tr>
+      <tr><td>Prometheus Target</td><td class="mono">${sopEscape(state.prometheus_target || "unknown")}</td></tr>
+      <tr><td>Latest Health</td><td class="mono">${sopEscape(healthMessage)}</td></tr>
+      <tr><td>Worktree</td><td class="mono">${state.worktree_dirty ? "DIRTY" : "CLEAN"}</td></tr>
+      <tr><td>Refresh Error</td><td class="mono">${sopEscape(refreshError || "none")}</td></tr>
+    </table>
+  `;
+
+  footer.innerHTML = `
+    ${sopEscape(state.canonical_version || "v18.16")} · branch <code>${sopEscape(state.branch || "feature/v10-rebuild")}</code> · live posture <code>${sopEscape(posture)} / ${sopEscape(state.live_posture_primary || "unknown")}</code> · deployed <code>${sopEscape(sopShortSha(state.deployed_sha))}</code> · runtime <code>${sopEscape(runtimeMode)}</code>
+  `;
+}
+
+renderSopState();
+</script>
+</body>
+</html>

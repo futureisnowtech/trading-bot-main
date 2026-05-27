@@ -1,0 +1,48 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  # 1. THE AUTOMATED TESTING PHASE
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+          
+      - name: Run Proof Suite (Pytest)
+        run: pytest tests/
+
+  # 2. THE MANUAL APPROVAL & DEPLOY PHASE
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    environment: production  # This triggers your manual approval button
+    
+    steps:
+      - name: Execute Deployment via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USERNAME }}
+          key: ${{ secrets.PROD_SSH_KEY }}
+          script: |
+            cd /root/trading-bot-main
+            git pull origin main
+            if [ -f venv/bin/activate ]; then source venv/bin/activate; fi
+            if [ -f requirements-runtime.txt ]; then pip install -r requirements-runtime.txt; fi
+            # Add your restart command here, e.g.:
+            # systemctl restart bot

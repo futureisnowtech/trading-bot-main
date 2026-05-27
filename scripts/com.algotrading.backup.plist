@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.algotrading.backup.plist
+  Runs backup_db.sh and backup_credentials.sh every day at 2:00 AM.
+
+  INSTALL:
+    cp scripts/com.algotrading.backup.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.algotrading.backup.plist
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.algotrading.backup</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>-c</string>
+        <string>
+            /Users/joshmacbookair2020/Projects/algo_trading_final/scripts/backup_db.sh &amp;&amp;
+            /Users/joshmacbookair2020/Projects/algo_trading_final/scripts/backup_credentials.sh
+        </string>
+    </array>
+
+    <!-- Run daily at 2:00 AM -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>2</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/joshmacbookair2020/Projects/algo_trading_final/logs/service/backup.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/joshmacbookair2020/Projects/algo_trading_final/logs/service/backup_error.log</string>
+</dict>
+</plist>

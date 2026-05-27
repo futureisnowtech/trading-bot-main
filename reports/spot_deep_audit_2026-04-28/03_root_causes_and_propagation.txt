@@ -1,0 +1,255 @@
+Root Causes And Propagation
+
+This file enumerates the major root causes behind current spot underperformance and shows how each one propagates through the codebase and operational workflows.
+
+RC1. Spot closes do not enter the learning loop
+
+Root cause
+- spot_engine.close_spot() logs and deletes positions, but does not call:
+  - learning_loop.record_closed_trade()
+  - learning.post_trade_analyzer.analyze_closed_trade()
+
+Evidence
+- recent spot attribution rows after 2026-04-22T21:36:39Z: 0
+- all spot attribution rows: 0
+- recent spot ML snapshots after cutoff: 0
+
+Propagation
+- no recent spot feature snapshots
+- no recent spot trade attribution
+- no spot Bayesian updates
+- no spot retrain queue growth from recent closes
+- no spot RBI incubation feedback
+- dashboard learning surfaces overstate health by looking at older/global data
+
+Why it matters
+- the system cannot adapt from the exact live failure streak that should be teaching it the most
+
+RC2. Spot edge calibration is structurally incapable of reconstructing many real spot trades
+
+Root cause
+- calibrator joins scan_candidates to SELL trade timestamps, not entry timestamps
+- join also requires exact symbol equality
+
+Evidence
+- calibrator-style match rate over real live spot sells: 48.9%
+- ETH: 1 match out of 19 sells
+- LTC: 0 matches out of 4 sells
+- spot_edge_conditions rows: 0
+
+Propagation
+- derived conditions never populate
+- runtime/spot_strategy.py falls back to config/open-gate policy
+- the supposedly adaptive spot-edge layer stays inert
+
+Why it matters
+- the bot keeps trading generic permissive config rather than empirically derived edge rules
+
+RC3. Candidate priors are learning the wrong target for the live spot lane
+
+Root cause
+- entry priors define a win as:
+  - hit_1r = 1
+  - and hit_stop = 0
+- the live spot lane behaves more like:
+  - get in quickly
+  - capture fast follow-through
+  - exit on thesis decay if momentum stalls
+
+Evidence
+- recent entered spot candidate outcomes:
+  - hit_0.5R at a decent rate in some names
+  - almost never hit 1R
+  - frequent stop / decay behavior
+- recent closes overwhelmingly end by thesis_decay
+
+Propagation
+- economics gate uses win-rate priors from a target that is not aligned with the live scalp objective
+- priors can look mathematically solid while still being strategically off-target
+
+Why it matters
+- the lane can admit trades that look acceptable under a 1R-based prior, but are bad for a fast fee-sensitive scalp
+
+RC4. Setup language mismatch between priors and the spot engine
+
+Root cause
+- entry priors bucket by scanner primary_setup
+- live spot lane gates by spot setup_family and setup_score
+
+Evidence
+- recent entered mappings:
+  - ranging_mr -> pullback_reclaim
+  - momentum -> pullback_reclaim
+  - kst_cross -> pullback_reclaim
+
+Propagation
+- learning buckets and execution buckets do not describe the same trade idea
+- even good prior data may not refine the actual spot gate that fired
+
+Why it matters
+- it weakens every attempt at feedback-driven refinement
+
+RC5. Live ML inference is stale and generic
+
+Root cause
+- model files are stale
+- signal_engine does not pass symbol into ModelStore inference
+
+Evidence
+- latest model artifacts dated 2026-04-13
+- _get_ml_score() calls predict_ml_score(features, direction) without symbol
+
+Propagation
+- ML score is not truly symbol-aware at inference
+- recent spot damage does not reshape live ML behavior
+
+Why it matters
+- the lane looks ML-assisted, but that assistance is stale and generic
+
+RC6. Online learner exists but is unused
+
+Root cause
+- ml/online_learner.py is not called anywhere
+
+Propagation
+- there is no between-retrain adaptation
+- the system cannot quickly learn "stop doing this exact thing" after a losing streak
+
+Why it matters
+- this is one reason the bot kept repeating similar weak trades
+
+RC7. The gate philosophy is too permissive for the actual fee burden
+
+Root cause
+- most quality gates are off
+- setup_score is not a hard edge gate
+- recent live floors were lowered materially
+
+Evidence
+- entered spot setup_family:
+  - 142/143 = pullback_reclaim
+- entered setup_preference:
+  - 142/143 = opportunistic
+- avg setup_score:
+  - 0.2766 for pullback_reclaim
+- current open positions still have setup_score as low as 0.1516
+
+Propagation
+- advanced spot math becomes advisory rather than decisive
+- the entry layer admits a large number of mediocre opportunities
+- exits are forced into cleanup mode
+
+Why it matters
+- this is the most direct reason volume rose while edge fell
+
+RC8. The system is mostly trading NEUTRAL pullback setups, not strong burst setups
+
+Root cause
+- live entries are dominated by pullback_reclaim in NEUTRAL
+
+Evidence
+- recent spot regimes:
+  - NEUTRAL 117
+  - CHOP 24
+  - TREND 2
+
+Propagation
+- the lane is not primarily harvesting obvious burst continuation
+- it is mostly trying to reclaim into weak/neutral context
+
+Why it matters
+- this conflicts with the intended "get in, go up, get out" philosophy
+
+RC9. The gross edge is too small to survive Coinbase spot fees
+
+Root cause
+- recent trades barely make money even before fees
+
+Evidence
+- avg gross pnl before fees: -0.0490
+- avg net pnl after fees: -1.7760
+- avg round-trip fee: 1.1349
+- gross positive rate: 42.45%
+- net positive rate: 0.00%
+
+Propagation
+- even when direction is somewhat right, the fee load dominates
+- route improvements alone cannot rescue the lane unless the pre-fee move quality improves too
+
+Why it matters
+- the system currently does not have enough pre-fee edge
+
+RC10. The economics gate checks target positivity, not empirical expected value
+
+Root cause
+- spot economics gate approves when:
+  - theoretical net target is positive
+  - projected net win is bigger than fees
+- it does not use empirical fast-follow-through probability directly
+
+Evidence
+- recent entered candidates were often approved with:
+  - positive projected net win
+  - but realized average gross pnl still near zero or negative
+
+Propagation
+- trades can pass economics as "possible winners" even when their actual short-horizon expectancy is poor
+
+Why it matters
+- the gate is mathematically coherent but strategically incomplete
+
+RC11. Monitoring hides some of the failure state
+
+Root cause
+- nightly audit passes some broken checks
+- attribution coverage and learning health are using mismatched scopes
+
+Evidence
+- ml_retrain_queue check uses a nonexistent status column
+- latest audits report learning_health pass despite zero recent spot learning
+- attribution coverage shows absurd percentages
+
+Propagation
+- operator trust is damaged
+- critical learning failures are easier to miss
+
+Why it matters
+- systems engineering failure can prolong trading failure
+
+RC12. Synthetic / PF_-translated spot lineage adds avoidable complexity
+
+Root cause
+- spot entries often originate under PF_ symbols and scanner exchange contexts
+
+Evidence
+- SOL: 22/33 entered spot candidates were PF_
+- ETH: 18/20 entered spot candidates were PF_
+
+Propagation
+- symbol normalization becomes fragile
+- calibrator lineage becomes harder
+- priors and outcomes are recorded in a scanner language different from executed spot holdings
+
+Why it matters
+- this is not the biggest loss driver by itself, but it amplifies learning and lineage fragility
+
+Bottom-line cause tree
+
+Primary causes
+- broken spot learning ingestion
+- non-operational spot calibration
+- wrong target for candidate priors
+- permissive entry philosophy
+- insufficient pre-fee edge
+
+Secondary causes
+- stale generic ML inference
+- unused online learner
+- monitoring blind spots
+- symbol and setup-language mismatches
+
+Net effect
+- more trades
+- mostly mediocre opportunistic pullback entries
+- little true recent adaptation
+- fees converting weak gross edge into universal net losses

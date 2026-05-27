@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.algotrading.autoenv.plist
+  Runs auto_env_updater.py every 6 hours.
+  Automatically updates ML_SIGNAL_MIN_PROB and CRYPTO_POSITION_SIZE_USD
+  when trade count / streak milestones are hit.
+
+  INSTALL (run once):
+    cp scripts/com.algotrading.autoenv.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.algotrading.autoenv.plist
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.algotrading.autoenv</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Library/Frameworks/Python.framework/Versions/3.14/bin/python3</string>
+        <string>/Users/joshmacbookair2020/Projects/algo_trading_final/scripts/auto_env_updater.py</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/joshmacbookair2020/Projects/algo_trading_final</string>
+
+    <!-- Run every 6 hours: 12am, 6am, 12pm, 6pm -->
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict><key>Hour</key><integer>0</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Hour</key><integer>6</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Hour</key><integer>12</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Hour</key><integer>18</integer><key>Minute</key><integer>0</integer></dict>
+    </array>
+
+    <key>StandardOutPath</key>
+    <string>/Users/joshmacbookair2020/Projects/algo_trading_final/logs/service/autoenv.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/joshmacbookair2020/Projects/algo_trading_final/logs/service/autoenv_error.log</string>
+</dict>
+</plist>

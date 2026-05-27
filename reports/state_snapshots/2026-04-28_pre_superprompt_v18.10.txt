@@ -1,0 +1,46 @@
+Pre-superprompt archive snapshot
+================================
+
+Date:
+- 2026-04-28
+
+Canonical repo:
+- /Users/joshmacbookair2020/Projects/algo_trading_final
+
+Branch:
+- feature/v10-rebuild
+
+Version:
+- v18.10
+
+Baseline commit before upcoming overhaul:
+- a54b7db1d7c68b8c82525e45d2778e7679f4faed
+- feat: rewire and harden tradingview htf context flow
+
+State summary:
+- Git worktree clean at snapshot time
+- Commit pushed to origin/feature/v10-rebuild
+- TradingView webhook service verified on Projects repo path
+- Bad TV secret rejected with HTTP 403
+- Good TV secret accepted with HTTP 200 and persisted to tv_signals
+- Bot intentionally left OFF after prior operator request
+
+Verification completed on this baseline:
+- Focused TradingView / scheduler / spot-learning proofs passed
+- Full proof suite passed: 521 passed
+- scripts/validate.py passed
+
+Important live-operational notes:
+- The TradingView secret is kept only in local .env and is not committed
+- The active TradingView architecture is HTF context filtering, not synthetic candidate injection
+- Recommended HTF profile remains algobot_htf_v2 on 4H with:
+  - SuperTrend 3 / 10
+  - WaveTrend 10 / 21
+  - WT OB/OS = +/-58
+  - Min ATR% = 0.5
+  - Max ATR% = 8
+
+Suggested restore anchors:
+- Branch head: feature/v10-rebuild
+- Exact commit: a54b7db1d7c68b8c82525e45d2778e7679f4faed
+- Archive tag to be created for this snapshot

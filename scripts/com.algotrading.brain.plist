@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.algotrading.brain.plist
+  Generates a daily brain summary at 9:47 PM every night.
+
+  INSTALL:
+    cp scripts/com.algotrading.brain.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.algotrading.brain.plist
+
+  UNINSTALL:
+    launchctl unload ~/Library/LaunchAgents/com.algotrading.brain.plist
+    rm ~/Library/LaunchAgents/com.algotrading.brain.plist
+
+  OUTPUT:
+    brain/06_daily_summaries/YYYY-MM-DD.md  — written/overwritten nightly
+    brain/01_current_system/Open Questions.md  — appended if alerts fire
+    logs/service/brain.log / brain_error.log
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.algotrading.brain</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Library/Frameworks/Python.framework/Versions/3.14/bin/python3</string>
+        <string>/Users/joshmacbookair2020/Projects/algo_trading_final/scripts/generate_daily_summary.py</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/joshmacbookair2020/Projects/algo_trading_final</string>
+
+    <!-- Run at 9:47 PM every day -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>21</integer>
+        <key>Minute</key>
+        <integer>47</integer>
+    </dict>
+
+    <!-- Capture logs -->
+    <key>StandardOutPath</key>
+    <string>/Users/joshmacbookair2020/Projects/algo_trading_final/logs/service/brain.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/joshmacbookair2020/Projects/algo_trading_final/logs/service/brain_error.log</string>
+
+    <!-- Environment -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/Library/Frameworks/Python.framework/Versions/3.14/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>PYTHONDONTWRITEBYTECODE</key>
+        <string>1</string>
+        <key>TQDM_DISABLE</key>
+        <string>1</string>
+        <key>TOKENIZERS_PARALLELISM</key>
+        <string>false</string>
+    </dict>
+</dict>
+</plist>

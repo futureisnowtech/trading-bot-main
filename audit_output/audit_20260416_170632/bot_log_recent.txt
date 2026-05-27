@@ -1,0 +1,500 @@
+2026-04-16 12:35:52,956 scheduler.v10_runner INFO [v10] ONDO SHORT score=51.4 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 12:35:53,176 scheduler.v10_runner WARNING [v10] ZEC — price sanity FAIL: candle $354.02 vs live $335.72 (5.5% off) — SKIP (wrong data source)
+2026-04-16 12:35:53,397 scheduler.v10_runner WARNING [v10] TRUMP — price sanity FAIL: candle $2.8092 vs live $2.98675 (5.9% off) — SKIP (wrong data source)
+2026-04-16 12:35:54,170 scheduler.v10_runner INFO [v10] ZRO LONG score=54.1 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 12:35:55,496 scheduler.v10_runner INFO [v10] ZRO SHORT score=52.2 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 12:35:56,624 scheduler.v10_runner WARNING [v10] NEAR — price sanity FAIL: candle $50.859901 vs live $1.3918 (3554.3% off) — SKIP (wrong data source)
+2026-04-16 12:35:57,762 scheduler.v10_runner INFO [v10] PF_AVAXUSD SHORT score=45.0 < 58, no primary setup — skip
+2026-04-16 12:35:58,472 scheduler.v10_runner INFO [v10] AVAX LONG score=52.0 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 12:35:59,223 scheduler.v10_runner INFO [v10] LINK SHORT score=45.9 < 58, no primary setup — skip
+2026-04-16 12:36:02,588 scheduler.v10_runner INFO [v10] PF_ETHUSD SHORT score=50.1 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 12:36:05,227 scheduler.v10_runner INFO [v10] PF_XBTUSD LONG score=50.3 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 12:36:05,228 scheduler.v10_runner INFO [v10] funnel: 45 candidates → dual=0 cooldown=0 risk=0 data_unavail=18 below_thresh=21 econ_veto=0 research_only=0 sizing_zero=0 exec_fail=0 entered=0
+2026-04-16 12:36:12,709 data.historical_data WARNING [historical_data] Failed to fetch BNB 1h
+2026-04-16 12:36:12,751 data.historical_data WARNING [historical_data] All sources failed for BNB 1h
+2026-04-16 12:36:15,236 data.historical_data WARNING [historical_data] Failed to fetch BNB 1h
+2026-04-16 12:36:15,271 data.historical_data WARNING [historical_data] All sources failed for BNB 1h
+2026-04-16 12:36:15,369 learning.candidate_labeler INFO [labeler] labeled 48/50 candidates (skipped=2 errors=0)
+2026-04-16 12:41:05,976 scanner INFO [scanner] Starting multi-exchange scan (Kraken + Binance + Hyperliquid)...
+2026-04-16 12:41:06,362 scanner INFO [scanner] Binance tickers unavailable (geo-block or down) — Kraken only
+2026-04-16 12:41:07,091 scanner INFO [scanner] Step 1 (vol>$2500K): 338 kraken + 0 binance → 14 candidates (14 kraken, 0 binance)
+2026-04-16 12:41:07,091 scanner INFO [scanner] Hyperliquid: 46 eligible → 46 added to universe
+2026-04-16 12:41:10,366 scanner INFO [scanner] Step 2 (multi-setup): 60 → 64 (13 kraken, 0 binance, 51 hyperliquid) setups={'momentum': 55, 'kst_cross': 3, 'ranging_mr': 18, 'funding_collect': 1}
+2026-04-16 12:41:11,392 scanner INFO [scanner] Step 3 (liquidity): 64 → 56
+2026-04-16 12:41:11,393 scanner INFO [scanner] Step 4 (EV≥$0.25): 56 → 53
+2026-04-16 12:41:11,394 scanner INFO [scanner] Step 6 (regime=UNKNOWN): 53 → 53
+2026-04-16 12:41:11,394 scanner INFO [scanner] Complete: 44 candidates in 5.4s
+2026-04-16 12:41:11,394 scanner INFO [scanner] → BIO SHORT [momentum] spike=0.66 adx=21 ev=$3.01 funding=-4.1241% (hyperliquid)
+2026-04-16 12:41:11,394 scanner INFO [scanner] → BLUR LONG [funding_collect,momentum] spike=1.54 adx=22 ev=$1.53 funding=-17.2115% (hyperliquid)
+2026-04-16 12:41:11,394 scanner INFO [scanner] → FARTCOIN LONG [momentum] spike=0.48 adx=17 ev=$1.26 funding=1.8533% (hyperliquid)
+2026-04-16 12:41:11,394 scanner INFO [scanner] → FARTCOIN SHORT [ranging_mr] spike=0.48 adx=17 ev=$1.26 funding=1.8533% (hyperliquid)
+2026-04-16 12:41:11,395 scanner INFO [scanner] → LDO SHORT [momentum] spike=1.31 adx=21 ev=$1.07 funding=1.3688% (hyperliquid)
+2026-04-16 12:41:11,395 scanner INFO [scanner] → WIF SHORT [momentum] spike=0.44 adx=29 ev=$1.06 funding=1.3688% (hyperliquid)
+2026-04-16 12:41:11,395 scanner INFO [scanner] → PENGU LONG [momentum] spike=0.56 adx=23 ev=$0.97 funding=1.3688% (hyperliquid)
+2026-04-16 12:41:11,395 scanner INFO [scanner] → SPX LONG [momentum] spike=4.02 adx=22 ev=$0.96 funding=1.3688% (hyperliquid)
+2026-04-16 12:41:11,395 scanner INFO [scanner] → XPL SHORT [ranging_mr] spike=1.05 adx=12 ev=$0.95 funding=1.3688% (hyperliquid)
+2026-04-16 12:41:11,395 scanner INFO [scanner] → ARB SHORT [momentum] spike=1.53 adx=25 ev=$0.95 funding=-3.2904% (hyperliquid)
+2026-04-16 12:41:11,395 scanner INFO [scanner] → APT SHORT [momentum] spike=1.06 adx=29 ev=$0.95 funding=0.7388% (hyperliquid)
+2026-04-16 12:41:11,396 scanner INFO [scanner] → ENA SHORT [momentum] spike=0.36 adx=26 ev=$0.93 funding=1.3688% (hyperliquid)
+2026-04-16 12:41:11,396 scanner INFO [scanner] → MON LONG [ranging_mr] spike=0.26 adx=18 ev=$0.88 funding=1.3688% (hyperliquid)
+2026-04-16 12:41:11,396 scanner INFO [scanner] → MON SHORT [momentum] spike=0.26 adx=18 ev=$0.88 funding=1.3688% (hyperliquid)
+2026-04-16 12:41:11,396 scanner INFO [scanner] → PF_PEPEUSD LONG [momentum] spike=1.66 adx=23 ev=$0.85 funding=-0.0000% (kraken)
+2026-04-16 12:41:11,396 scanner INFO [scanner] → DOT SHORT [momentum] spike=0.20 adx=41 ev=$0.80 funding=1.3688% (hyperliquid)
+2026-04-16 12:41:11,396 scanner INFO [scanner] → WLD SHORT [momentum,ranging_mr] spike=0.82 adx=19 ev=$0.76 funding=1.3688% (hyperliquid)
+2026-04-16 12:41:11,396 scanner INFO [scanner] → LIT LONG [ranging_mr] spike=0.89 adx=19 ev=$0.71 funding=1.3688% (hyperliquid)
+2026-04-16 12:41:11,397 scanner INFO [scanner] → LIT SHORT [momentum] spike=0.89 adx=19 ev=$0.71 funding=1.3688% (hyperliquid)
+2026-04-16 12:41:11,397 scanner INFO [scanner] → AAVE SHORT [momentum] spike=0.15 adx=23 ev=$0.69 funding=1.3688% (hyperliquid)
+2026-04-16 12:41:11,397 scanner INFO [scanner] → PUMP LONG [kst_cross] spike=1.49 adx=20 ev=$0.68 funding=1.3688% (hyperliquid)
+2026-04-16 12:41:11,397 scanner INFO [scanner] → PUMP SHORT [momentum] spike=1.49 adx=20 ev=$0.68 funding=1.3688% (hyperliquid)
+2026-04-16 12:41:11,397 scanner INFO [scanner] → UNI SHORT [momentum] spike=0.61 adx=25 ev=$0.65 funding=1.3688% (hyperliquid)
+2026-04-16 12:41:11,398 scanner INFO [scanner] → PF_TAOUSD SHORT [momentum] spike=0.51 adx=23 ev=$0.62 funding=-0.0686% (kraken)
+2026-04-16 12:41:11,398 scanner INFO [scanner] → PF_SUIUSD SHORT [momentum,ranging_mr] spike=0.48 adx=18 ev=$0.62 funding=-0.0008% (kraken)
+2026-04-16 12:41:11,398 scanner INFO [scanner] → TAO LONG [ranging_mr] spike=0.12 adx=19 ev=$0.62 funding=1.3688% (hyperliquid)
+2026-04-16 12:41:11,398 scanner INFO [scanner] → ONDO SHORT [momentum,ranging_mr] spike=0.20 adx=18 ev=$0.60 funding=1.3688% (hyperliquid)
+2026-04-16 12:41:11,398 scanner INFO [scanner] → MORPHO SHORT [momentum] spike=0.97 adx=26 ev=$0.59 funding=1.3688% (hyperliquid)
+2026-04-16 12:41:11,398 scanner INFO [scanner] → CRV SHORT [momentum,ranging_mr] spike=2.46 adx=19 ev=$0.59 funding=1.3688% (hyperliquid)
+2026-04-16 12:41:11,399 scanner INFO [scanner] → ZEC SHORT [momentum] spike=1.40 adx=25 ev=$0.58 funding=1.3688% (hyperliquid)
+2026-04-16 12:41:11,399 scanner INFO [scanner] → TRUMP LONG [momentum] spike=2.25 adx=22 ev=$0.58 funding=1.3688% (hyperliquid)
+2026-04-16 12:41:11,399 scanner INFO [scanner] → ZRO SHORT [momentum] spike=0.76 adx=16 ev=$0.54 funding=1.3688% (hyperliquid)
+2026-04-16 12:41:11,399 scanner INFO [scanner] → ZRO LONG [kst_cross] spike=0.76 adx=16 ev=$0.54 funding=1.3688% (hyperliquid)
+2026-04-16 12:41:11,399 scanner INFO [scanner] → PF_ADAUSD SHORT [momentum,ranging_mr] spike=1.25 adx=20 ev=$0.53 funding=0.0000% (kraken)
+2026-04-16 12:41:11,399 scanner INFO [scanner] → DOGE LONG [momentum] spike=0.64 adx=21 ev=$0.52 funding=1.3688% (hyperliquid)
+2026-04-16 12:41:11,400 scanner INFO [scanner] → NEAR SHORT [momentum] spike=3.16 adx=24 ev=$0.52 funding=1.3688% (hyperliquid)
+2026-04-16 12:41:11,400 scanner INFO [scanner] → PF_AVAXUSD SHORT [momentum,ranging_mr] spike=0.42 adx=18 ev=$0.49 funding=-0.0020% (kraken)
+2026-04-16 12:41:11,400 scanner INFO [scanner] → LINK SHORT [momentum,ranging_mr] spike=1.55 adx=19 ev=$0.44 funding=1.3688% (hyperliquid)
+2026-04-16 12:41:11,400 scanner INFO [scanner] → XRP SHORT [momentum] spike=0.91 adx=20 ev=$0.44 funding=1.3688% (hyperliquid)
+2026-04-16 12:41:11,400 scanner INFO [scanner] → PF_SOLUSD SHORT [momentum] spike=0.58 adx=22 ev=$0.42 funding=0.2697% (kraken)
+2026-04-16 12:41:11,400 scanner INFO [scanner] → PF_ETHUSD SHORT [momentum] spike=1.21 adx=22 ev=$0.38 funding=-1.4458% (kraken)
+2026-04-16 12:41:11,401 scanner INFO [scanner] → HYPE SHORT [momentum] spike=0.44 adx=24 ev=$0.38 funding=0.1710% (hyperliquid)
+2026-04-16 12:41:11,401 scanner INFO [scanner] → TON SHORT [momentum] spike=2.50 adx=25 ev=$0.31 funding=1.3688% (hyperliquid)
+2026-04-16 12:41:11,401 scanner INFO [scanner] → PF_XBTUSD SHORT [momentum] spike=0.71 adx=19 ev=$0.26 funding=2.1637% (kraken)
+2026-04-16 12:41:11,403 scheduler.v10_runner INFO [v10] scan: 44 candidates (tv=0 scanner=44), balance=$1966 deployed=$0
+2026-04-16 12:41:12,071 scheduler.v10_runner WARNING [v10] BIO — price sanity FAIL: candle $0.02455 vs live $0.036087 (32.0% off) — SKIP (wrong data source)
+2026-04-16 12:41:12,912 scheduler.v10_runner INFO [v10] BLUR LONG score=49.2 < 58, no primary setup — skip
+2026-04-16 12:41:13,136 scheduler.v10_runner WARNING [v10] FARTCOIN — price sanity FAIL: candle $0.19281 vs live $0.21621 (10.8% off) — SKIP (wrong data source)
+2026-04-16 12:41:13,366 scheduler.v10_runner WARNING [v10] FARTCOIN — price sanity FAIL: candle $0.19281 vs live $0.21621 (10.8% off) — SKIP (wrong data source)
+2026-04-16 12:41:13,602 scheduler.v10_runner WARNING [v10] LDO — price sanity FAIL: candle $0.37784 vs live $0.40591 (6.9% off) — SKIP (wrong data source)
+2026-04-16 12:41:14,462 scheduler.v10_runner INFO [v10] WIF SHORT score=47.2 < 58, no primary setup — skip
+2026-04-16 12:41:14,687 scheduler.v10_runner WARNING [v10] PENGU — price sanity FAIL: candle $0.007119 vs live $0.007616 (6.5% off) — SKIP (wrong data source)
+2026-04-16 12:41:14,922 scheduler.v10_runner WARNING [v10] SPX — price sanity FAIL: candle $0.32058 vs live $0.3454 (7.2% off) — SKIP (wrong data source)
+2026-04-16 12:41:15,163 scheduler.v10_runner WARNING [v10] XPL — price sanity FAIL: candle $0.13001 vs live $0.137345 (5.3% off) — SKIP (wrong data source)
+2026-04-16 12:41:15,990 scheduler.v10_runner INFO [v10] ARB SHORT score=45.9 < 58, no primary setup — skip
+2026-04-16 12:41:16,293 scheduler.v10_runner WARNING [v10] APT — price sanity FAIL: candle $0.9313 vs live $0.981 (5.1% off) — SKIP (wrong data source)
+2026-04-16 12:41:16,971 scheduler.v10_runner WARNING [v10] ENA — price sanity FAIL: candle $0.099846 vs live $0.10619 (6.0% off) — SKIP (wrong data source)
+2026-04-16 12:41:17,221 scheduler.v10_runner WARNING [v10] DOT — price sanity FAIL: candle $1.1669 vs live $1.29945 (10.2% off) — SKIP (wrong data source)
+2026-04-16 12:41:17,462 scheduler.v10_runner WARNING [v10] WLD — price sanity FAIL: candle $0.29806 vs live $0.31833 (6.4% off) — SKIP (wrong data source)
+2026-04-16 12:41:17,696 scheduler.v10_runner WARNING [v10] LIT — price sanity FAIL: candle $79.629997 vs live $1.04605 (7512.4% off) — SKIP (wrong data source)
+2026-04-16 12:41:17,941 scheduler.v10_runner WARNING [v10] LIT — price sanity FAIL: candle $79.629997 vs live $1.04605 (7512.4% off) — SKIP (wrong data source)
+2026-04-16 12:41:18,736 scheduler.v10_runner INFO [v10] AAVE SHORT score=49.7 < 58, no primary setup — skip
+2026-04-16 12:41:18,958 scheduler.v10_runner WARNING [v10] PUMP — price sanity FAIL: candle $14.505 vs live $0.001947 (744892.3% off) — SKIP (wrong data source)
+2026-04-16 12:41:19,193 scheduler.v10_runner WARNING [v10] PUMP — price sanity FAIL: candle $14.505 vs live $0.001947 (744892.3% off) — SKIP (wrong data source)
+2026-04-16 12:41:19,432 scheduler.v10_runner WARNING [v10] UNI — price sanity FAIL: candle $3.1537 vs live $3.35385 (6.0% off) — SKIP (wrong data source)
+2026-04-16 12:41:20,514 scheduler.v10_runner INFO [v10] PF_SUIUSD SHORT score=46.5 < 58, no primary setup — skip
+2026-04-16 12:41:21,223 scheduler.v10_runner INFO [v10] TAO LONG score=50.9 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 12:41:21,907 scheduler.v10_runner INFO [v10] ONDO SHORT score=51.4 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 12:41:22,591 scheduler.v10_runner INFO [v10] MORPHO SHORT score=50.0 < 58, no primary setup — skip
+2026-04-16 12:41:23,405 scheduler.v10_runner INFO [v10] CRV SHORT score=46.9 < 58, no primary setup — skip
+2026-04-16 12:41:23,623 scheduler.v10_runner WARNING [v10] ZEC — price sanity FAIL: candle $354.02 vs live $336.285 (5.3% off) — SKIP (wrong data source)
+2026-04-16 12:41:23,847 scheduler.v10_runner WARNING [v10] TRUMP — price sanity FAIL: candle $2.8092 vs live $3.0007 (6.4% off) — SKIP (wrong data source)
+2026-04-16 12:41:24,777 scheduler.v10_runner INFO [v10] ZRO SHORT score=52.2 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 12:41:25,442 scheduler.v10_runner INFO [v10] ZRO LONG score=54.1 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 12:41:26,093 scheduler.v10_runner INFO [v10] DOGE LONG score=51.8 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 12:41:26,318 scheduler.v10_runner WARNING [v10] NEAR — price sanity FAIL: candle $50.859901 vs live $1.39565 (3544.2% off) — SKIP (wrong data source)
+2026-04-16 12:41:27,382 scheduler.v10_runner INFO [v10] PF_AVAXUSD SHORT score=45.9 < 58, no primary setup — skip
+2026-04-16 12:41:28,656 scheduler.v10_runner INFO [v10] LINK SHORT score=47.6 < 58, no primary setup — skip
+2026-04-16 12:41:31,609 scheduler.v10_runner INFO [v10] PF_ETHUSD SHORT score=48.5 < 58, no primary setup — skip
+2026-04-16 12:41:32,611 scheduler.v10_runner INFO [v10] TON SHORT score=45.4 < 58, no primary setup — skip
+2026-04-16 12:41:33,627 scheduler.v10_runner INFO [v10] funnel: 44 candidates → dual=0 cooldown=0 risk=0 data_unavail=19 below_thresh=19 econ_veto=0 research_only=0 sizing_zero=0 exec_fail=0 entered=0
+2026-04-16 12:46:34,750 scanner INFO [scanner] Starting multi-exchange scan (Kraken + Binance + Hyperliquid)...
+2026-04-16 12:46:35,259 scanner INFO [scanner] Binance tickers unavailable (geo-block or down) — Kraken only
+2026-04-16 12:46:35,857 scanner INFO [scanner] Step 1 (vol>$2500K): 338 kraken + 0 binance → 14 candidates (14 kraken, 0 binance)
+2026-04-16 12:46:35,858 scanner INFO [scanner] Hyperliquid: 46 eligible → 46 added to universe
+2026-04-16 12:46:37,041 scanner INFO [scanner] Step 2 (multi-setup): 60 → 63 (14 kraken, 0 binance, 49 hyperliquid) setups={'momentum': 57, 'kst_cross': 3, 'ranging_mr': 13, 'funding_collect': 1}
+2026-04-16 12:46:38,115 scanner INFO [scanner] Step 3 (liquidity): 63 → 56
+2026-04-16 12:46:38,117 scanner INFO [scanner] Step 4 (EV≥$0.25): 56 → 52
+2026-04-16 12:46:38,117 scanner INFO [scanner] Step 6 (regime=UNKNOWN): 52 → 52
+2026-04-16 12:46:38,117 scanner INFO [scanner] Complete: 44 candidates in 3.4s
+2026-04-16 12:46:38,117 scanner INFO [scanner] → ORDI SHORT [momentum] spike=2.18 adx=59 ev=$5.76 funding=-0.7443% (hyperliquid)
+2026-04-16 12:46:38,118 scanner INFO [scanner] → BIO SHORT [momentum] spike=0.77 adx=21 ev=$3.01 funding=-3.6947% (hyperliquid)
+2026-04-16 12:46:38,118 scanner INFO [scanner] → BLUR LONG [funding_collect,momentum] spike=2.46 adx=22 ev=$1.52 funding=-16.9727% (hyperliquid)
+2026-04-16 12:46:38,118 scanner INFO [scanner] → FARTCOIN SHORT [momentum] spike=0.27 adx=17 ev=$1.31 funding=1.3688% (hyperliquid)
+2026-04-16 12:46:38,118 scanner INFO [scanner] → LDO SHORT [momentum] spike=1.62 adx=21 ev=$1.09 funding=1.3688% (hyperliquid)
+2026-04-16 12:46:38,118 scanner INFO [scanner] → WIF SHORT [momentum] spike=0.29 adx=29 ev=$1.07 funding=1.3688% (hyperliquid)
+2026-04-16 12:46:38,118 scanner INFO [scanner] → XPL SHORT [ranging_mr] spike=1.17 adx=13 ev=$0.99 funding=1.3688% (hyperliquid)
+2026-04-16 12:46:38,119 scanner INFO [scanner] → PENGU SHORT [momentum] spike=0.61 adx=23 ev=$0.99 funding=1.3688% (hyperliquid)
+2026-04-16 12:46:38,119 scanner INFO [scanner] → SPX LONG [momentum] spike=4.03 adx=22 ev=$0.97 funding=1.3688% (hyperliquid)
+2026-04-16 12:46:38,119 scanner INFO [scanner] → ARB SHORT [momentum] spike=1.70 adx=26 ev=$0.95 funding=-3.8043% (hyperliquid)
+2026-04-16 12:46:38,120 scanner INFO [scanner] → APT SHORT [momentum] spike=2.13 adx=29 ev=$0.95 funding=0.0369% (hyperliquid)
+2026-04-16 12:46:38,120 scanner INFO [scanner] → MON LONG [ranging_mr] spike=1.24 adx=20 ev=$0.89 funding=1.3688% (hyperliquid)
+2026-04-16 12:46:38,120 scanner INFO [scanner] → MON SHORT [momentum] spike=1.24 adx=20 ev=$0.89 funding=1.3688% (hyperliquid)
+2026-04-16 12:46:38,120 scanner INFO [scanner] → ENA SHORT [momentum] spike=0.06 adx=27 ev=$0.89 funding=1.3688% (hyperliquid)
+2026-04-16 12:46:38,120 scanner INFO [scanner] → LIT SHORT [momentum] spike=2.05 adx=20 ev=$0.78 funding=1.3688% (hyperliquid)
+2026-04-16 12:46:38,121 scanner INFO [scanner] → WLD SHORT [momentum,ranging_mr] spike=0.88 adx=20 ev=$0.77 funding=1.3688% (hyperliquid)
+2026-04-16 12:46:38,121 scanner INFO [scanner] → DOT SHORT [momentum] spike=0.03 adx=41 ev=$0.76 funding=1.3688% (hyperliquid)
+2026-04-16 12:46:38,121 scanner INFO [scanner] → PUMP LONG [kst_cross] spike=1.49 adx=20 ev=$0.69 funding=1.3688% (hyperliquid)
+2026-04-16 12:46:38,121 scanner INFO [scanner] → PUMP SHORT [momentum] spike=1.49 adx=20 ev=$0.69 funding=1.3688% (hyperliquid)
+2026-04-16 12:46:38,121 scanner INFO [scanner] → INJ LONG [ranging_mr] spike=0.01 adx=20 ev=$0.67 funding=0.9240% (hyperliquid)
+2026-04-16 12:46:38,121 scanner INFO [scanner] → INJ SHORT [momentum] spike=0.01 adx=20 ev=$0.67 funding=0.9240% (hyperliquid)
+2026-04-16 12:46:38,122 scanner INFO [scanner] → AAVE SHORT [momentum] spike=0.02 adx=23 ev=$0.66 funding=1.3688% (hyperliquid)
+2026-04-16 12:46:38,122 scanner INFO [scanner] → UNI SHORT [momentum] spike=0.67 adx=26 ev=$0.65 funding=1.3688% (hyperliquid)
+2026-04-16 12:46:38,122 scanner INFO [scanner] → PF_SUIUSD SHORT [momentum,ranging_mr] spike=0.58 adx=18 ev=$0.63 funding=-0.0008% (kraken)
+2026-04-16 12:46:38,122 scanner INFO [scanner] → PF_TAOUSD SHORT [momentum] spike=0.23 adx=23 ev=$0.60 funding=-0.0686% (kraken)
+2026-04-16 12:46:38,122 scanner INFO [scanner] → TAO LONG [ranging_mr] spike=0.27 adx=20 ev=$0.60 funding=1.3688% (hyperliquid)
+2026-04-16 12:46:38,122 scanner INFO [scanner] → CRV SHORT [momentum,ranging_mr] spike=2.55 adx=20 ev=$0.60 funding=1.3688% (hyperliquid)
+2026-04-16 12:46:38,122 scanner INFO [scanner] → MORPHO SHORT [momentum] spike=1.02 adx=25 ev=$0.59 funding=1.3688% (hyperliquid)
+2026-04-16 12:46:38,123 scanner INFO [scanner] → ZEC SHORT [momentum] spike=0.26 adx=25 ev=$0.58 funding=1.3688% (hyperliquid)
+2026-04-16 12:46:38,123 scanner INFO [scanner] → TRUMP LONG [momentum] spike=2.33 adx=22 ev=$0.58 funding=1.3688% (hyperliquid)
+2026-04-16 12:46:38,123 scanner INFO [scanner] → ONDO SHORT [momentum,ranging_mr] spike=0.06 adx=17 ev=$0.57 funding=1.3688% (hyperliquid)
+2026-04-16 12:46:38,123 scanner INFO [scanner] → ZRO LONG [kst_cross] spike=0.89 adx=16 ev=$0.54 funding=1.3688% (hyperliquid)
+2026-04-16 12:46:38,123 scanner INFO [scanner] → ZRO SHORT [momentum] spike=0.89 adx=16 ev=$0.54 funding=1.3688% (hyperliquid)
+2026-04-16 12:46:38,123 scanner INFO [scanner] → PF_ADAUSD SHORT [momentum] spike=1.30 adx=21 ev=$0.53 funding=0.0000% (kraken)
+2026-04-16 12:46:38,123 scanner INFO [scanner] → NEAR SHORT [momentum] spike=3.19 adx=25 ev=$0.52 funding=1.3688% (hyperliquid)
+2026-04-16 12:46:38,123 scanner INFO [scanner] → DOGE SHORT [momentum] spike=0.25 adx=21 ev=$0.50 funding=1.3688% (hyperliquid)
+2026-04-16 12:46:38,124 scanner INFO [scanner] → PF_AVAXUSD SHORT [momentum] spike=0.05 adx=17 ev=$0.49 funding=-0.0020% (kraken)
+2026-04-16 12:46:38,124 scanner INFO [scanner] → LINK SHORT [momentum,ranging_mr] spike=2.01 adx=20 ev=$0.44 funding=1.3688% (hyperliquid)
+2026-04-16 12:46:38,124 scanner INFO [scanner] → XRP SHORT [momentum] spike=0.36 adx=20 ev=$0.42 funding=1.3688% (hyperliquid)
+2026-04-16 12:46:38,124 scanner INFO [scanner] → PF_SOLUSD SHORT [momentum] spike=0.34 adx=22 ev=$0.40 funding=0.2697% (kraken)
+2026-04-16 12:46:38,124 scanner INFO [scanner] → HYPE SHORT [momentum] spike=0.65 adx=25 ev=$0.38 funding=0.3767% (hyperliquid)
+2026-04-16 12:46:38,124 scanner INFO [scanner] → PF_ETHUSD SHORT [momentum] spike=1.24 adx=22 ev=$0.38 funding=-1.4458% (kraken)
+2026-04-16 12:46:38,124 scanner INFO [scanner] → TON SHORT [momentum] spike=4.17 adx=25 ev=$0.33 funding=1.3688% (hyperliquid)
+2026-04-16 12:46:38,124 scanner INFO [scanner] → PF_XBTUSD SHORT [momentum] spike=0.72 adx=19 ev=$0.26 funding=2.1637% (kraken)
+2026-04-16 12:46:38,126 scheduler.v10_runner INFO [v10] scan: 44 candidates (tv=0 scanner=44), balance=$1966 deployed=$0
+2026-04-16 12:46:38,498 scheduler.v10_runner WARNING [v10] ORDI — price sanity FAIL: candle $4.2023 vs live $8.5172 (50.7% off) — SKIP (wrong data source)
+2026-04-16 12:46:39,319 scheduler.v10_runner WARNING [v10] BIO — price sanity FAIL: candle $0.02455 vs live $0.036162 (32.1% off) — SKIP (wrong data source)
+2026-04-16 12:46:40,285 scheduler.v10_runner INFO [v10] BLUR LONG score=49.2 < 58, no primary setup — skip
+2026-04-16 12:46:40,547 scheduler.v10_runner WARNING [v10] FARTCOIN — price sanity FAIL: candle $0.19281 vs live $0.21218 (9.1% off) — SKIP (wrong data source)
+2026-04-16 12:46:40,770 scheduler.v10_runner WARNING [v10] LDO — price sanity FAIL: candle $0.37784 vs live $0.40417 (6.5% off) — SKIP (wrong data source)
+2026-04-16 12:46:41,641 scheduler.v10_runner INFO [v10] WIF SHORT score=46.6 < 58, no primary setup — skip
+2026-04-16 12:46:42,295 scheduler.v10_runner INFO [v10] XPL SHORT score=45.7 < 58, no primary setup — skip
+2026-04-16 12:46:42,766 scheduler.v10_runner WARNING [v10] PENGU — price sanity FAIL: candle $0.007119 vs live $0.007516 (5.3% off) — SKIP (wrong data source)
+2026-04-16 12:46:43,009 scheduler.v10_runner WARNING [v10] SPX — price sanity FAIL: candle $0.32058 vs live $0.34338 (6.6% off) — SKIP (wrong data source)
+2026-04-16 12:46:43,886 scheduler.v10_runner INFO [v10] ARB SHORT score=45.9 < 58, no primary setup — skip
+2026-04-16 12:46:44,112 scheduler.v10_runner WARNING [v10] APT — price sanity FAIL: candle $0.9313 vs live $0.9828 (5.2% off) — SKIP (wrong data source)
+2026-04-16 12:46:44,337 scheduler.v10_runner WARNING [v10] ENA — price sanity FAIL: candle $0.099846 vs live $0.1057 (5.5% off) — SKIP (wrong data source)
+2026-04-16 12:46:44,594 scheduler.v10_runner WARNING [v10] LIT — price sanity FAIL: candle $79.629997 vs live $1.0384 (7568.5% off) — SKIP (wrong data source)
+2026-04-16 12:46:44,836 scheduler.v10_runner WARNING [v10] WLD — price sanity FAIL: candle $0.29806 vs live $0.31768 (6.2% off) — SKIP (wrong data source)
+2026-04-16 12:46:45,083 scheduler.v10_runner WARNING [v10] DOT — price sanity FAIL: candle $1.1669 vs live $1.29545 (9.9% off) — SKIP (wrong data source)
+2026-04-16 12:46:45,402 scheduler.v10_runner WARNING [v10] PUMP — price sanity FAIL: candle $14.505 vs live $0.001936 (749125.2% off) — SKIP (wrong data source)
+2026-04-16 12:46:45,743 scheduler.v10_runner WARNING [v10] PUMP — price sanity FAIL: candle $14.505 vs live $0.001936 (749125.2% off) — SKIP (wrong data source)
+2026-04-16 12:46:46,619 scheduler.v10_runner INFO [v10] INJ LONG score=49.6 < 58, no primary setup — skip
+2026-04-16 12:46:47,238 scheduler.v10_runner INFO [v10] INJ SHORT score=52.8 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 12:46:47,911 scheduler.v10_runner INFO [v10] AAVE SHORT score=49.7 < 58, no primary setup — skip
+2026-04-16 12:46:48,147 scheduler.v10_runner WARNING [v10] UNI — price sanity FAIL: candle $3.1537 vs live $3.34595 (5.7% off) — SKIP (wrong data source)
+2026-04-16 12:46:49,198 scheduler.v10_runner INFO [v10] PF_SUIUSD SHORT score=46.5 < 58, no primary setup — skip
+2026-04-16 12:46:49,888 scheduler.v10_runner INFO [v10] TAO LONG score=50.9 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 12:46:50,705 scheduler.v10_runner INFO [v10] CRV SHORT score=46.9 < 58, no primary setup — skip
+2026-04-16 12:46:51,542 scheduler.v10_runner INFO [v10] MORPHO SHORT score=50.0 < 58, no primary setup — skip
+2026-04-16 12:46:51,770 scheduler.v10_runner WARNING [v10] ZEC — price sanity FAIL: candle $354.02 vs live $334.045 (6.0% off) — SKIP (wrong data source)
+2026-04-16 12:46:51,994 scheduler.v10_runner WARNING [v10] TRUMP — price sanity FAIL: candle $2.8092 vs live $2.989 (6.0% off) — SKIP (wrong data source)
+2026-04-16 12:46:52,800 scheduler.v10_runner INFO [v10] ONDO SHORT score=51.4 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 12:46:53,540 scheduler.v10_runner INFO [v10] ZRO LONG score=54.1 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 12:46:54,887 scheduler.v10_runner INFO [v10] ZRO SHORT score=52.2 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 12:46:55,165 scheduler.v10_runner WARNING [v10] NEAR — price sanity FAIL: candle $50.859901 vs live $1.39475 (3546.5% off) — SKIP (wrong data source)
+2026-04-16 12:46:56,977 scheduler.v10_runner INFO [v10] PF_AVAXUSD SHORT score=44.9 < 58, no primary setup — skip
+2026-04-16 12:46:57,809 scheduler.v10_runner INFO [v10] LINK SHORT score=47.6 < 58, no primary setup — skip
+2026-04-16 12:47:01,214 scheduler.v10_runner INFO [v10] PF_ETHUSD SHORT score=49.5 < 58, no primary setup — skip
+2026-04-16 12:47:02,016 scheduler.v10_runner INFO [v10] TON SHORT score=45.4 < 58, no primary setup — skip
+2026-04-16 12:47:03,020 scheduler.v10_runner INFO [v10] funnel: 44 candidates → dual=0 cooldown=0 risk=0 data_unavail=17 below_thresh=22 econ_veto=0 research_only=0 sizing_zero=0 exec_fail=0 entered=0
+2026-04-16 12:49:28,407 forecast.discovery INFO [Discovery] found=0 persisted=0 active_in_db=0 errors=0
+2026-04-16 12:49:28,410 forecast.runner INFO [ForecastRunner] Discovery: found=0 persisted=0 stubs=0 active=0
+2026-04-16 12:50:45,215 forecast.quote_harvester INFO [QuoteHarvester] Pruned 0 quotes, 0 bars
+2026-04-16 12:51:12,541 data.historical_data WARNING [historical_data] Failed to fetch BNB 1h
+2026-04-16 12:51:12,582 data.historical_data WARNING [historical_data] All sources failed for BNB 1h
+2026-04-16 12:51:14,895 data.historical_data WARNING [historical_data] Failed to fetch BNB 1h
+2026-04-16 12:51:14,933 data.historical_data WARNING [historical_data] All sources failed for BNB 1h
+2026-04-16 12:51:15,291 data.historical_data WARNING [historical_data] Failed to fetch BNB 1h
+2026-04-16 12:51:15,334 data.historical_data WARNING [historical_data] All sources failed for BNB 1h
+2026-04-16 12:51:15,397 learning.candidate_labeler INFO [labeler] labeled 47/50 candidates (skipped=3 errors=0)
+2026-04-16 12:52:04,034 scanner INFO [scanner] Starting multi-exchange scan (Kraken + Binance + Hyperliquid)...
+2026-04-16 12:52:04,594 scanner INFO [scanner] Binance tickers unavailable (geo-block or down) — Kraken only
+2026-04-16 12:52:05,181 scanner INFO [scanner] Step 1 (vol>$2500K): 338 kraken + 0 binance → 14 candidates (14 kraken, 0 binance)
+2026-04-16 12:52:05,181 scanner INFO [scanner] Hyperliquid: 46 eligible → 46 added to universe
+2026-04-16 12:52:07,332 scanner INFO [scanner] Step 2 (multi-setup): 60 → 66 (14 kraken, 0 binance, 52 hyperliquid) setups={'momentum': 56, 'ranging_mr': 18, 'kst_cross': 1, 'funding_collect': 1}
+2026-04-16 12:52:08,452 scanner INFO [scanner] Step 3 (liquidity): 66 → 59
+2026-04-16 12:52:08,453 scanner INFO [scanner] Step 4 (EV≥$0.25): 59 → 55
+2026-04-16 12:52:08,453 scanner INFO [scanner] Step 6 (regime=UNKNOWN): 55 → 55
+2026-04-16 12:52:08,453 scanner INFO [scanner] Complete: 45 candidates in 4.4s
+2026-04-16 12:52:08,453 scanner INFO [scanner] → ORDI SHORT [momentum] spike=1.10 adx=58 ev=$6.34 funding=-0.8275% (hyperliquid)
+2026-04-16 12:52:08,453 scanner INFO [scanner] → BIO LONG [ranging_mr] spike=0.11 adx=20 ev=$2.88 funding=-3.1203% (hyperliquid)
+2026-04-16 12:52:08,453 scanner INFO [scanner] → BIO SHORT [kst_cross,momentum] spike=0.11 adx=20 ev=$2.88 funding=-3.1203% (hyperliquid)
+2026-04-16 12:52:08,453 scanner INFO [scanner] → FARTCOIN SHORT [momentum] spike=0.96 adx=17 ev=$1.31 funding=1.3688% (hyperliquid)
+2026-04-16 12:52:08,453 scanner INFO [scanner] → FARTCOIN LONG [ranging_mr] spike=0.96 adx=17 ev=$1.31 funding=1.3688% (hyperliquid)
+2026-04-16 12:52:08,453 scanner INFO [scanner] → WIF SHORT [momentum] spike=0.45 adx=28 ev=$1.10 funding=1.3688% (hyperliquid)
+2026-04-16 12:52:08,453 scanner INFO [scanner] → LDO SHORT [momentum] spike=1.62 adx=21 ev=$1.09 funding=1.3688% (hyperliquid)
+2026-04-16 12:52:08,454 scanner INFO [scanner] → XPL SHORT [ranging_mr] spike=1.17 adx=13 ev=$0.99 funding=1.3688% (hyperliquid)
+2026-04-16 12:52:08,454 scanner INFO [scanner] → PENGU SHORT [momentum] spike=0.19 adx=23 ev=$0.97 funding=1.3688% (hyperliquid)
+2026-04-16 12:52:08,454 scanner INFO [scanner] → SPX LONG [momentum] spike=4.03 adx=22 ev=$0.97 funding=1.3688% (hyperliquid)
+2026-04-16 12:52:08,454 scanner INFO [scanner] → ARB SHORT [momentum] spike=1.70 adx=26 ev=$0.96 funding=-3.9842% (hyperliquid)
+2026-04-16 12:52:08,454 scanner INFO [scanner] → APT SHORT [momentum] spike=0.29 adx=29 ev=$0.92 funding=-0.4005% (hyperliquid)
+2026-04-16 12:52:08,454 scanner INFO [scanner] → MON SHORT [momentum] spike=3.13 adx=20 ev=$0.91 funding=1.3688% (hyperliquid)
+2026-04-16 12:52:08,454 scanner INFO [scanner] → MON LONG [ranging_mr] spike=3.13 adx=20 ev=$0.91 funding=1.3688% (hyperliquid)
+2026-04-16 12:52:08,454 scanner INFO [scanner] → ENA SHORT [momentum] spike=0.19 adx=27 ev=$0.90 funding=1.3688% (hyperliquid)
+2026-04-16 12:52:08,454 scanner INFO [scanner] → PF_PEPEUSD LONG [momentum] spike=0.27 adx=23 ev=$0.83 funding=-0.0000% (kraken)
+2026-04-16 12:52:08,454 scanner INFO [scanner] → LIT SHORT [momentum] spike=2.05 adx=20 ev=$0.78 funding=1.3688% (hyperliquid)
+2026-04-16 12:52:08,454 scanner INFO [scanner] → DOT SHORT [momentum] spike=0.11 adx=41 ev=$0.78 funding=1.3688% (hyperliquid)
+2026-04-16 12:52:08,454 scanner INFO [scanner] → WLD SHORT [momentum,ranging_mr] spike=0.27 adx=19 ev=$0.75 funding=1.3688% (hyperliquid)
+2026-04-16 12:52:08,454 scanner INFO [scanner] → AAVE SHORT [momentum] spike=0.13 adx=23 ev=$0.67 funding=1.3688% (hyperliquid)
+2026-04-16 12:52:08,454 scanner INFO [scanner] → PUMP LONG [ranging_mr] spike=0.83 adx=19 ev=$0.66 funding=1.3688% (hyperliquid)
+2026-04-16 12:52:08,454 scanner INFO [scanner] → PUMP SHORT [momentum] spike=0.83 adx=19 ev=$0.66 funding=1.3688% (hyperliquid)
+2026-04-16 12:52:08,454 scanner INFO [scanner] → UNI SHORT [momentum] spike=0.08 adx=25 ev=$0.62 funding=1.3688% (hyperliquid)
+2026-04-16 12:52:08,454 scanner INFO [scanner] → PF_SUIUSD SHORT [momentum,ranging_mr] spike=0.21 adx=18 ev=$0.60 funding=-0.0008% (kraken)
+2026-04-16 12:52:08,454 scanner INFO [scanner] → PF_TAOUSD SHORT [momentum] spike=0.31 adx=23 ev=$0.60 funding=-0.0686% (kraken)
+2026-04-16 12:52:08,454 scanner INFO [scanner] → TAO LONG [ranging_mr] spike=0.64 adx=20 ev=$0.60 funding=1.3688% (hyperliquid)
+2026-04-16 12:52:08,454 scanner INFO [scanner] → PF_ZECUSD SHORT [momentum] spike=1.75 adx=24 ev=$0.58 funding=-0.3900% (kraken)
+2026-04-16 12:52:08,454 scanner INFO [scanner] → TRUMP LONG [momentum] spike=0.49 adx=23 ev=$0.57 funding=1.3688% (hyperliquid)
+2026-04-16 12:52:08,454 scanner INFO [scanner] → ONDO SHORT [momentum,ranging_mr] spike=0.18 adx=17 ev=$0.57 funding=1.3688% (hyperliquid)
+2026-04-16 12:52:08,454 scanner INFO [scanner] → MORPHO SHORT [momentum] spike=0.26 adx=23 ev=$0.56 funding=1.3688% (hyperliquid)
+2026-04-16 12:52:08,454 scanner INFO [scanner] → CRV SHORT [momentum,ranging_mr] spike=0.45 adx=18 ev=$0.56 funding=1.3688% (hyperliquid)
+2026-04-16 12:52:08,454 scanner INFO [scanner] → ZRO LONG [ranging_mr] spike=0.14 adx=15 ev=$0.52 funding=1.3688% (hyperliquid)
+2026-04-16 12:52:08,454 scanner INFO [scanner] → ZRO SHORT [momentum] spike=0.14 adx=15 ev=$0.52 funding=1.3688% (hyperliquid)
+2026-04-16 12:52:08,454 scanner INFO [scanner] → PF_ADAUSD SHORT [momentum] spike=0.37 adx=20 ev=$0.50 funding=0.0000% (kraken)
+2026-04-16 12:52:08,454 scanner INFO [scanner] → DOGE SHORT [momentum] spike=0.68 adx=21 ev=$0.50 funding=1.3688% (hyperliquid)
+2026-04-16 12:52:08,454 scanner INFO [scanner] → NEAR SHORT [momentum] spike=0.32 adx=23 ev=$0.50 funding=1.3688% (hyperliquid)
+2026-04-16 12:52:08,454 scanner INFO [scanner] → PF_AVAXUSD SHORT [momentum,ranging_mr] spike=0.28 adx=17 ev=$0.49 funding=-0.0020% (kraken)
+2026-04-16 12:52:08,455 scanner INFO [scanner] → PF_XRPUSD SHORT [momentum] spike=0.14 adx=22 ev=$0.47 funding=-0.0003% (kraken)
+2026-04-16 12:52:08,455 scanner INFO [scanner] → LINK SHORT [momentum,ranging_mr] spike=2.01 adx=20 ev=$0.44 funding=1.3688% (hyperliquid)
+2026-04-16 12:52:08,455 scanner INFO [scanner] → PF_SOLUSD SHORT [momentum] spike=0.53 adx=21 ev=$0.41 funding=0.2697% (kraken)
+2026-04-16 12:52:08,455 scanner INFO [scanner] → HYPE SHORT [momentum] spike=2.15 adx=25 ev=$0.39 funding=0.3100% (hyperliquid)
+2026-04-16 12:52:08,455 scanner INFO [scanner] → PF_ETHUSD SHORT [momentum] spike=0.45 adx=22 ev=$0.36 funding=-1.4458% (kraken)
+2026-04-16 12:52:08,455 scanner INFO [scanner] → TON SHORT [momentum] spike=4.17 adx=25 ev=$0.33 funding=1.3688% (hyperliquid)
+2026-04-16 12:52:08,455 scanner INFO [scanner] → WLFI SHORT [momentum,ranging_mr] spike=1.91 adx=16 ev=$0.31 funding=0.1275% (hyperliquid)
+2026-04-16 12:52:08,455 scanner INFO [scanner] → PF_XBTUSD SHORT [momentum] spike=0.72 adx=19 ev=$0.26 funding=2.1637% (kraken)
+2026-04-16 12:52:08,456 scheduler.v10_runner INFO [v10] scan: 45 candidates (tv=0 scanner=45), balance=$1966 deployed=$0
+2026-04-16 12:52:08,729 scheduler.v10_runner WARNING [v10] ORDI — price sanity FAIL: candle $4.2023 vs live $7.8902 (46.7% off) — SKIP (wrong data source)
+2026-04-16 12:52:08,971 scheduler.v10_runner WARNING [v10] BIO — price sanity FAIL: candle $0.02455 vs live $0.036109 (32.0% off) — SKIP (wrong data source)
+2026-04-16 12:52:09,233 scheduler.v10_runner WARNING [v10] BIO — price sanity FAIL: candle $0.02455 vs live $0.036109 (32.0% off) — SKIP (wrong data source)
+2026-04-16 12:52:09,822 scheduler.v10_runner WARNING [v10] FARTCOIN — price sanity FAIL: candle $0.19281 vs live $0.21215 (9.1% off) — SKIP (wrong data source)
+2026-04-16 12:52:10,054 scheduler.v10_runner WARNING [v10] FARTCOIN — price sanity FAIL: candle $0.19281 vs live $0.21215 (9.1% off) — SKIP (wrong data source)
+2026-04-16 12:52:10,963 scheduler.v10_runner INFO [v10] WIF SHORT score=47.2 < 58, no primary setup — skip
+2026-04-16 12:52:11,204 scheduler.v10_runner WARNING [v10] LDO — price sanity FAIL: candle $0.37784 vs live $0.40372 (6.4% off) — SKIP (wrong data source)
+2026-04-16 12:52:12,698 scheduler.v10_runner INFO [v10] XPL SHORT score=45.7 < 58, no primary setup — skip
+2026-04-16 12:52:13,529 scheduler.v10_runner INFO [v10] PENGU SHORT score=46.5 < 58, no primary setup — skip
+2026-04-16 12:52:13,755 scheduler.v10_runner WARNING [v10] SPX — price sanity FAIL: candle $0.32058 vs live $0.3415 (6.1% off) — SKIP (wrong data source)
+2026-04-16 12:52:14,952 scheduler.v10_runner INFO [v10] ARB SHORT score=45.9 < 58, no primary setup — skip
+2026-04-16 12:52:16,083 scheduler.v10_runner INFO [v10] APT SHORT score=49.1 < 58, no primary setup — skip
+2026-04-16 12:52:16,882 scheduler.v10_runner WARNING [v10] ENA — price sanity FAIL: candle $0.099846 vs live $0.105545 (5.4% off) — SKIP (wrong data source)
+2026-04-16 12:52:17,422 scheduler.v10_runner WARNING [v10] LIT — price sanity FAIL: candle $79.629997 vs live $1.03705 (7578.5% off) — SKIP (wrong data source)
+2026-04-16 12:52:17,683 scheduler.v10_runner WARNING [v10] DOT — price sanity FAIL: candle $1.1669 vs live $1.2994 (10.2% off) — SKIP (wrong data source)
+2026-04-16 12:52:17,926 scheduler.v10_runner WARNING [v10] WLD — price sanity FAIL: candle $0.29806 vs live $0.31586 (5.6% off) — SKIP (wrong data source)
+2026-04-16 12:52:19,388 scheduler.v10_runner INFO [v10] AAVE SHORT score=49.7 < 58, no primary setup — skip
+2026-04-16 12:52:19,664 scheduler.v10_runner WARNING [v10] PUMP — price sanity FAIL: candle $14.505 vs live $0.001935 (749512.4% off) — SKIP (wrong data source)
+2026-04-16 12:52:19,898 scheduler.v10_runner WARNING [v10] PUMP — price sanity FAIL: candle $14.505 vs live $0.001935 (749512.4% off) — SKIP (wrong data source)
+2026-04-16 12:52:20,123 scheduler.v10_runner WARNING [v10] UNI — price sanity FAIL: candle $3.1537 vs live $3.342 (5.6% off) — SKIP (wrong data source)
+2026-04-16 12:52:21,626 scheduler.v10_runner INFO [v10] PF_SUIUSD SHORT score=45.5 < 58, no primary setup — skip
+2026-04-16 12:52:22,447 scheduler.v10_runner INFO [v10] TAO LONG score=50.9 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 12:52:23,353 scheduler.v10_runner INFO [v10] PF_ZECUSD SHORT TIER 1 — KST Bearish Cross + Trend Confirm (composite=51.4 used for sizing only)
+2026-04-16 12:52:23,539 scheduler.v10_runner INFO [v10] PF_ZECUSD SHORT ECONOMICS VETO (Tier1): stop distance 5.56% > 5.0% ceiling — ATR too large (ev=2.616% fees=0.102%)
+2026-04-16 12:52:23,841 scheduler.v10_runner WARNING [v10] TRUMP — price sanity FAIL: candle $2.8092 vs live $2.98535 (5.9% off) — SKIP (wrong data source)
+2026-04-16 12:52:24,628 scheduler.v10_runner INFO [v10] ONDO SHORT score=51.4 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 12:52:25,451 scheduler.v10_runner INFO [v10] MORPHO SHORT score=50.1 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 12:52:27,687 scheduler.v10_runner INFO [v10] ZRO LONG score=54.1 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 12:52:28,461 scheduler.v10_runner INFO [v10] ZRO SHORT score=51.6 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 12:52:29,430 scheduler.v10_runner WARNING [v10] NEAR — price sanity FAIL: candle $50.859901 vs live $1.394 (3548.5% off) — SKIP (wrong data source)
+2026-04-16 12:52:30,440 scheduler.v10_runner INFO [v10] PF_AVAXUSD SHORT score=44.9 < 58, no primary setup — skip
+2026-04-16 12:52:31,459 scheduler.v10_runner INFO [v10] PF_XRPUSD SHORT score=49.7 < 58, no primary setup — skip
+2026-04-16 12:52:32,715 scheduler.v10_runner INFO [v10] LINK SHORT score=47.6 < 58, no primary setup — skip
+2026-04-16 12:52:35,815 scheduler.v10_runner INFO [v10] TON SHORT score=45.4 < 58, no primary setup — skip
+2026-04-16 12:52:37,789 scheduler.v10_runner INFO [v10] funnel: 45 candidates → dual=0 cooldown=0 risk=0 data_unavail=16 below_thresh=22 econ_veto=1 research_only=0 sizing_zero=0 exec_fail=0 entered=0
+2026-04-16 12:57:38,410 scanner INFO [scanner] Starting multi-exchange scan (Kraken + Binance + Hyperliquid)...
+2026-04-16 12:57:38,832 scanner INFO [scanner] Binance tickers unavailable (geo-block or down) — Kraken only
+2026-04-16 12:57:39,395 scanner INFO [scanner] Step 1 (vol>$2500K): 338 kraken + 0 binance → 14 candidates (14 kraken, 0 binance)
+2026-04-16 12:57:39,395 scanner INFO [scanner] Hyperliquid: 46 eligible → 46 added to universe
+2026-04-16 12:57:40,747 scanner INFO [scanner] Step 2 (multi-setup): 60 → 68 (15 kraken, 0 binance, 53 hyperliquid) setups={'momentum': 57, 'ranging_mr': 21, 'kst_cross': 2, 'supertrend': 2, 'funding_collect': 1}
+2026-04-16 12:57:42,215 scanner INFO [scanner] Step 3 (liquidity): 68 → 64
+2026-04-16 12:57:42,325 scanner INFO [scanner] Step 4 (EV≥$0.25): 64 → 61
+2026-04-16 12:57:42,326 scanner INFO [scanner] Step 6 (regime=UNKNOWN): 61 → 61
+2026-04-16 12:57:42,326 scanner INFO [scanner] Complete: 50 candidates in 3.9s
+2026-04-16 12:57:42,326 scanner INFO [scanner] → ORDI SHORT [momentum] spike=1.74 adx=57 ev=$6.23 funding=-0.1919% (hyperliquid)
+2026-04-16 12:57:42,327 scanner INFO [scanner] → BIO SHORT [kst_cross,momentum,supertrend] spike=0.21 adx=20 ev=$2.90 funding=-2.8313% (hyperliquid)
+2026-04-16 12:57:42,327 scanner INFO [scanner] → BIO LONG [ranging_mr] spike=0.21 adx=20 ev=$2.90 funding=-2.8313% (hyperliquid)
+2026-04-16 12:57:42,327 scanner INFO [scanner] → BLUR LONG [funding_collect] spike=0.43 adx=24 ev=$1.54 funding=-13.9953% (hyperliquid)
+2026-04-16 12:57:42,327 scanner INFO [scanner] → BLUR SHORT [momentum] spike=0.43 adx=24 ev=$1.54 funding=-13.9953% (hyperliquid)
+2026-04-16 12:57:42,327 scanner INFO [scanner] → FARTCOIN LONG [ranging_mr] spike=1.64 adx=17 ev=$1.38 funding=1.3688% (hyperliquid)
+2026-04-16 12:57:42,327 scanner INFO [scanner] → FARTCOIN SHORT [momentum] spike=1.64 adx=17 ev=$1.38 funding=1.3688% (hyperliquid)
+2026-04-16 12:57:42,328 scanner INFO [scanner] → WIF SHORT [momentum] spike=0.53 adx=28 ev=$1.15 funding=1.3688% (hyperliquid)
+2026-04-16 12:57:42,328 scanner INFO [scanner] → LDO SHORT [momentum,ranging_mr,supertrend] spike=1.01 adx=20 ev=$1.08 funding=1.3688% (hyperliquid)
+2026-04-16 12:57:42,328 scanner INFO [scanner] → PENGU SHORT [momentum] spike=0.36 adx=22 ev=$1.02 funding=1.3688% (hyperliquid)
+2026-04-16 12:57:42,328 scanner INFO [scanner] → SPX LONG [kst_cross,momentum] spike=1.24 adx=21 ev=$1.01 funding=1.3688% (hyperliquid)
+2026-04-16 12:57:42,328 scanner INFO [scanner] → XPL SHORT [ranging_mr] spike=0.63 adx=13 ev=$0.99 funding=1.3688% (hyperliquid)
+2026-04-16 12:57:42,329 scanner INFO [scanner] → MON SHORT [momentum] spike=4.55 adx=20 ev=$0.96 funding=1.3688% (hyperliquid)
+2026-04-16 12:57:42,329 scanner INFO [scanner] → ARB SHORT [momentum] spike=0.29 adx=24 ev=$0.95 funding=-4.0073% (hyperliquid)
+2026-04-16 12:57:42,329 scanner INFO [scanner] → APT SHORT [momentum] spike=1.39 adx=29 ev=$0.94 funding=-0.9108% (hyperliquid)
+2026-04-16 12:57:42,329 scanner INFO [scanner] → ENA SHORT [momentum] spike=0.47 adx=26 ev=$0.93 funding=1.3688% (hyperliquid)
+2026-04-16 12:57:42,329 scanner INFO [scanner] → PF_PEPEUSD LONG [momentum] spike=0.83 adx=22 ev=$0.89 funding=-0.0000% (kraken)
+2026-04-16 12:57:42,329 scanner INFO [scanner] → WLD SHORT [momentum,ranging_mr] spike=1.07 adx=18 ev=$0.81 funding=1.3688% (hyperliquid)
+2026-04-16 12:57:42,329 scanner INFO [scanner] → LIT SHORT [momentum] spike=0.22 adx=21 ev=$0.78 funding=1.3688% (hyperliquid)
+2026-04-16 12:57:42,329 scanner INFO [scanner] → DOT SHORT [momentum] spike=0.13 adx=41 ev=$0.78 funding=1.3688% (hyperliquid)
+2026-04-16 12:57:42,330 scanner INFO [scanner] → AAVE SHORT [momentum] spike=0.38 adx=22 ev=$0.72 funding=1.3688% (hyperliquid)
+2026-04-16 12:57:42,330 scanner INFO [scanner] → PUMP LONG [ranging_mr] spike=1.40 adx=20 ev=$0.70 funding=1.3688% (hyperliquid)
+2026-04-16 12:57:42,330 scanner INFO [scanner] → PUMP SHORT [momentum] spike=1.40 adx=20 ev=$0.70 funding=1.3688% (hyperliquid)
+2026-04-16 12:57:42,330 scanner INFO [scanner] → INJ LONG [ranging_mr] spike=0.18 adx=19 ev=$0.70 funding=0.0772% (hyperliquid)
+2026-04-16 12:57:42,330 scanner INFO [scanner] → INJ SHORT [momentum] spike=0.18 adx=19 ev=$0.70 funding=0.0772% (hyperliquid)
+2026-04-16 12:57:42,331 scanner INFO [scanner] → VVV SHORT [momentum] spike=1.82 adx=29 ev=$0.65 funding=1.3688% (hyperliquid)
+2026-04-16 12:57:42,331 scanner INFO [scanner] → UNI SHORT [momentum] spike=0.12 adx=25 ev=$0.64 funding=1.3688% (hyperliquid)
+2026-04-16 12:57:42,335 scanner INFO [scanner] → PF_SUIUSD SHORT [momentum] spike=0.72 adx=17 ev=$0.63 funding=-0.0008% (kraken)
+2026-04-16 12:57:42,336 scanner INFO [scanner] → PF_TAOUSD SHORT [momentum] spike=0.82 adx=24 ev=$0.62 funding=-0.0686% (kraken)
+2026-04-16 12:57:42,336 scanner INFO [scanner] → TAO LONG [ranging_mr] spike=0.87 adx=20 ev=$0.61 funding=1.2100% (hyperliquid)
+2026-04-16 12:57:42,336 scanner INFO [scanner] → TRUMP SHORT [momentum] spike=0.92 adx=22 ev=$0.60 funding=1.3688% (hyperliquid)
+2026-04-16 12:57:42,338 scanner INFO [scanner] → ONDO SHORT [momentum,ranging_mr] spike=0.24 adx=17 ev=$0.60 funding=1.3688% (hyperliquid)
+2026-04-16 12:57:42,339 scanner INFO [scanner] → CRV SHORT [momentum,ranging_mr] spike=0.83 adx=18 ev=$0.59 funding=1.3688% (hyperliquid)
+2026-04-16 12:57:42,339 scanner INFO [scanner] → ZEC SHORT [momentum] spike=0.96 adx=25 ev=$0.58 funding=1.3688% (hyperliquid)
+2026-04-16 12:57:42,339 scanner INFO [scanner] → MORPHO SHORT [momentum] spike=0.36 adx=23 ev=$0.57 funding=1.3688% (hyperliquid)
+2026-04-16 12:57:42,339 scanner INFO [scanner] → PF_ADAUSD SHORT [momentum,ranging_mr] spike=0.60 adx=20 ev=$0.54 funding=0.0000% (kraken)
+2026-04-16 12:57:42,339 scanner INFO [scanner] → ZRO LONG [ranging_mr] spike=0.30 adx=15 ev=$0.54 funding=1.3688% (hyperliquid)
+2026-04-16 12:57:42,339 scanner INFO [scanner] → ZRO SHORT [momentum] spike=0.30 adx=15 ev=$0.54 funding=1.3688% (hyperliquid)
+2026-04-16 12:57:42,339 scanner INFO [scanner] → DOGE SHORT [momentum,ranging_mr] spike=1.42 adx=20 ev=$0.53 funding=1.3688% (hyperliquid)
+2026-04-16 12:57:42,339 scanner INFO [scanner] → NEAR SHORT [momentum] spike=0.95 adx=24 ev=$0.52 funding=1.3688% (hyperliquid)
+2026-04-16 12:57:42,339 scanner INFO [scanner] → PF_AVAXUSD SHORT [momentum] spike=0.45 adx=18 ev=$0.51 funding=-0.0020% (kraken)
+2026-04-16 12:57:42,339 scanner INFO [scanner] → AVAX LONG [ranging_mr] spike=0.42 adx=18 ev=$0.50 funding=1.3688% (hyperliquid)
+2026-04-16 12:57:42,339 scanner INFO [scanner] → LINK SHORT [momentum,ranging_mr] spike=0.51 adx=18 ev=$0.45 funding=1.3688% (hyperliquid)
+2026-04-16 12:57:42,339 scanner INFO [scanner] → PF_SOLUSD SHORT [momentum] spike=1.21 adx=20 ev=$0.44 funding=0.2697% (kraken)
+2026-04-16 12:57:42,340 scanner INFO [scanner] → XRP SHORT [momentum,ranging_mr] spike=0.92 adx=20 ev=$0.44 funding=1.3688% (hyperliquid)
+2026-04-16 12:57:42,340 scanner INFO [scanner] → HYPE SHORT [momentum] spike=2.66 adx=25 ev=$0.41 funding=0.1677% (hyperliquid)
+2026-04-16 12:57:42,340 scanner INFO [scanner] → PF_ETHUSD SHORT [momentum] spike=0.81 adx=22 ev=$0.38 funding=-1.4458% (kraken)
+2026-04-16 12:57:42,340 scanner INFO [scanner] → TON SHORT [momentum] spike=0.42 adx=23 ev=$0.33 funding=1.3688% (hyperliquid)
+2026-04-16 12:57:42,340 scanner INFO [scanner] → WLFI SHORT [momentum] spike=2.28 adx=16 ev=$0.33 funding=0.2931% (hyperliquid)
+2026-04-16 12:57:42,341 scanner INFO [scanner] → PF_XBTUSD LONG [ranging_mr] spike=0.58 adx=19 ev=$0.26 funding=2.1637% (kraken)
+2026-04-16 12:57:42,354 scheduler.v10_runner INFO [v10] scan: 50 candidates (tv=0 scanner=50), balance=$1966 deployed=$0
+2026-04-16 12:57:42,803 scheduler.v10_runner WARNING [v10] ORDI — price sanity FAIL: candle $4.2023 vs live $8.1955 (48.7% off) — SKIP (wrong data source)
+2026-04-16 12:57:43,089 scheduler.v10_runner WARNING [v10] BIO — price sanity FAIL: candle $0.02455 vs live $0.035998 (31.8% off) — SKIP (wrong data source)
+2026-04-16 12:57:44,729 scheduler.v10_runner WARNING [v10] BIO — price sanity FAIL: candle $0.02455 vs live $0.035998 (31.8% off) — SKIP (wrong data source)
+2026-04-16 12:57:46,005 scheduler.v10_runner INFO [v10] BLUR LONG score=47.8 < 58, no primary setup — skip
+2026-04-16 12:57:46,688 scheduler.v10_runner INFO [v10] BLUR SHORT score=51.0 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 12:57:46,912 scheduler.v10_runner WARNING [v10] FARTCOIN — price sanity FAIL: candle $0.19281 vs live $0.21175 (8.9% off) — SKIP (wrong data source)
+2026-04-16 12:57:47,166 scheduler.v10_runner WARNING [v10] FARTCOIN — price sanity FAIL: candle $0.19281 vs live $0.21175 (8.9% off) — SKIP (wrong data source)
+2026-04-16 12:57:47,950 scheduler.v10_runner INFO [v10] WIF SHORT score=47.2 < 58, no primary setup — skip
+2026-04-16 12:57:48,367 scheduler.v10_runner WARNING [v10] LDO — price sanity FAIL: candle $0.37784 vs live $0.40177 (6.0% off) — SKIP (wrong data source)
+2026-04-16 12:57:48,596 scheduler.v10_runner WARNING [v10] PENGU — price sanity FAIL: candle $0.007119 vs live $0.007503 (5.1% off) — SKIP (wrong data source)
+2026-04-16 12:57:48,828 scheduler.v10_runner WARNING [v10] SPX — price sanity FAIL: candle $0.32058 vs live $0.34255 (6.4% off) — SKIP (wrong data source)
+2026-04-16 12:57:49,664 scheduler.v10_runner INFO [v10] XPL SHORT score=45.9 < 58, no primary setup — skip
+2026-04-16 12:57:51,103 scheduler.v10_runner INFO [v10] ARB SHORT score=44.1 < 58, no primary setup — skip
+2026-04-16 12:57:51,323 scheduler.v10_runner WARNING [v10] APT — price sanity FAIL: candle $0.9313 vs live $0.983 (5.3% off) — SKIP (wrong data source)
+2026-04-16 12:57:51,567 scheduler.v10_runner WARNING [v10] ENA — price sanity FAIL: candle $0.099846 vs live $0.105655 (5.5% off) — SKIP (wrong data source)
+2026-04-16 12:57:51,800 scheduler.v10_runner WARNING [v10] WLD — price sanity FAIL: candle $0.29806 vs live $0.31465 (5.3% off) — SKIP (wrong data source)
+2026-04-16 12:57:52,027 scheduler.v10_runner WARNING [v10] LIT — price sanity FAIL: candle $79.629997 vs live $1.03385 (7602.3% off) — SKIP (wrong data source)
+2026-04-16 12:57:52,256 scheduler.v10_runner WARNING [v10] DOT — price sanity FAIL: candle $1.1669 vs live $1.2978 (10.1% off) — SKIP (wrong data source)
+2026-04-16 12:57:52,992 scheduler.v10_runner INFO [v10] AAVE SHORT score=49.8 < 58, no primary setup — skip
+2026-04-16 12:57:53,238 scheduler.v10_runner WARNING [v10] PUMP — price sanity FAIL: candle $14.505 vs live $0.001931 (751065.2% off) — SKIP (wrong data source)
+2026-04-16 12:57:53,569 scheduler.v10_runner WARNING [v10] PUMP — price sanity FAIL: candle $14.505 vs live $0.001931 (751065.2% off) — SKIP (wrong data source)
+2026-04-16 12:57:54,380 scheduler.v10_runner INFO [v10] INJ LONG score=48.9 < 58, no primary setup — skip
+2026-04-16 12:57:55,066 scheduler.v10_runner INFO [v10] INJ SHORT score=52.7 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 12:57:55,289 scheduler.v10_runner WARNING [v10] VVV — price sanity FAIL: candle $8.8647 vs live $8.436 (5.1% off) — SKIP (wrong data source)
+2026-04-16 12:57:55,573 scheduler.v10_runner WARNING [v10] UNI — price sanity FAIL: candle $3.1537 vs live $3.34295 (5.7% off) — SKIP (wrong data source)
+2026-04-16 12:57:56,607 scheduler.v10_runner INFO [v10] PF_SUIUSD SHORT score=46.0 < 58, no primary setup — skip
+2026-04-16 12:57:57,308 scheduler.v10_runner INFO [v10] TAO LONG score=50.9 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 12:57:57,539 scheduler.v10_runner WARNING [v10] TRUMP — price sanity FAIL: candle $2.8092 vs live $2.979 (5.7% off) — SKIP (wrong data source)
+2026-04-16 12:57:58,358 scheduler.v10_runner INFO [v10] ONDO SHORT score=51.4 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 12:57:59,101 scheduler.v10_runner INFO [v10] CRV SHORT score=44.1 < 58, no primary setup — skip
+2026-04-16 12:57:59,353 scheduler.v10_runner WARNING [v10] ZEC — price sanity FAIL: candle $354.02 vs live $335.04 (5.7% off) — SKIP (wrong data source)
+2026-04-16 12:58:00,194 scheduler.v10_runner INFO [v10] MORPHO SHORT score=50.1 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 12:58:01,114 scheduler.v10_runner INFO [v10] ZRO LONG score=54.1 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 12:58:01,813 scheduler.v10_runner INFO [v10] ZRO SHORT score=51.6 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 12:58:02,948 scheduler.v10_runner WARNING [v10] NEAR — price sanity FAIL: candle $50.859901 vs live $1.39295 (3551.2% off) — SKIP (wrong data source)
+2026-04-16 12:58:04,000 scheduler.v10_runner INFO [v10] PF_AVAXUSD SHORT score=45.9 < 58, no primary setup — skip
+2026-04-16 12:58:04,737 scheduler.v10_runner INFO [v10] AVAX LONG score=52.2 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 12:58:05,546 scheduler.v10_runner INFO [v10] LINK SHORT score=45.9 < 58, no primary setup — skip
+2026-04-16 12:58:10,065 scheduler.v10_runner INFO [v10] PF_ETHUSD SHORT score=46.7 < 58, no primary setup — skip
+2026-04-16 12:58:12,546 scheduler.v10_runner INFO [v10] PF_XBTUSD LONG score=57.1 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 12:58:12,548 scheduler.v10_runner INFO [v10] funnel: 50 candidates → dual=0 cooldown=0 risk=0 data_unavail=20 below_thresh=25 econ_veto=0 research_only=0 sizing_zero=0 exec_fail=0 entered=0
+2026-04-16 13:03:13,048 scanner INFO [scanner] Starting multi-exchange scan (Kraken + Binance + Hyperliquid)...
+2026-04-16 13:03:13,482 scanner INFO [scanner] Binance tickers unavailable (geo-block or down) — Kraken only
+2026-04-16 13:03:14,059 scanner INFO [scanner] Step 1 (vol>$2500K): 338 kraken + 0 binance → 14 candidates (14 kraken, 0 binance)
+2026-04-16 13:03:14,060 scanner INFO [scanner] Hyperliquid: 46 eligible → 46 added to universe
+2026-04-16 13:03:15,292 scanner INFO [scanner] Step 2 (multi-setup): 60 → 67 (15 kraken, 0 binance, 52 hyperliquid) setups={'momentum': 57, 'ranging_mr': 22, 'kst_cross': 3}
+2026-04-16 13:03:16,920 scanner INFO [scanner] Step 3 (liquidity): 67 → 59
+2026-04-16 13:03:16,921 scanner INFO [scanner] Step 4 (EV≥$0.25): 59 → 53
+2026-04-16 13:03:16,921 scanner INFO [scanner] Step 6 (regime=UNKNOWN): 53 → 53
+2026-04-16 13:03:16,921 scanner INFO [scanner] Complete: 47 candidates in 3.9s
+2026-04-16 13:03:16,921 scanner INFO [scanner] → BIO SHORT [momentum] spike=0.14 adx=19 ev=$2.75 funding=0.6170% (hyperliquid)
+2026-04-16 13:03:16,921 scanner INFO [scanner] → BIO LONG [ranging_mr] spike=0.14 adx=19 ev=$2.75 funding=0.6170% (hyperliquid)
+2026-04-16 13:03:16,921 scanner INFO [scanner] → BLUR SHORT [momentum] spike=0.16 adx=26 ev=$1.46 funding=-0.1440% (hyperliquid)
+2026-04-16 13:03:16,921 scanner INFO [scanner] → FARTCOIN LONG [ranging_mr] spike=1.68 adx=18 ev=$1.38 funding=1.3688% (hyperliquid)
+2026-04-16 13:03:16,921 scanner INFO [scanner] → FARTCOIN SHORT [momentum] spike=1.68 adx=18 ev=$1.38 funding=1.3688% (hyperliquid)
+2026-04-16 13:03:16,921 scanner INFO [scanner] → WIF SHORT [momentum] spike=0.54 adx=28 ev=$1.15 funding=1.3688% (hyperliquid)
+2026-04-16 13:03:16,921 scanner INFO [scanner] → LDO SHORT [momentum,ranging_mr] spike=0.13 adx=19 ev=$1.03 funding=1.3688% (hyperliquid)
+2026-04-16 13:03:16,921 scanner INFO [scanner] → PENGU SHORT [momentum] spike=0.58 adx=22 ev=$1.02 funding=1.3688% (hyperliquid)
+2026-04-16 13:03:16,922 scanner INFO [scanner] → SPX LONG [kst_cross,momentum] spike=1.34 adx=22 ev=$1.01 funding=1.3688% (hyperliquid)
+2026-04-16 13:03:16,922 scanner INFO [scanner] → XPL SHORT [ranging_mr] spike=0.63 adx=14 ev=$0.99 funding=1.3688% (hyperliquid)
+2026-04-16 13:03:16,922 scanner INFO [scanner] → MON SHORT [momentum] spike=4.97 adx=20 ev=$0.97 funding=-8.8190% (hyperliquid)
+2026-04-16 13:03:16,922 scanner INFO [scanner] → ARB SHORT [momentum] spike=0.31 adx=24 ev=$0.94 funding=-4.4611% (hyperliquid)
+2026-04-16 13:03:16,922 scanner INFO [scanner] → ENA SHORT [momentum] spike=0.48 adx=26 ev=$0.93 funding=1.3688% (hyperliquid)
+2026-04-16 13:03:16,922 scanner INFO [scanner] → APT LONG [momentum] spike=0.14 adx=29 ev=$0.90 funding=-3.0980% (hyperliquid)
+2026-04-16 13:03:16,922 scanner INFO [scanner] → PF_PEPEUSD SHORT [momentum] spike=0.13 adx=22 ev=$0.85 funding=-0.0000% (kraken)
+2026-04-16 13:03:16,922 scanner INFO [scanner] → LIT SHORT [momentum] spike=0.03 adx=23 ev=$0.77 funding=1.3688% (hyperliquid)
+2026-04-16 13:03:16,922 scanner INFO [scanner] → WLD SHORT [momentum,ranging_mr] spike=0.17 adx=17 ev=$0.76 funding=1.3688% (hyperliquid)
+2026-04-16 13:03:16,922 scanner INFO [scanner] → DOT SHORT [kst_cross,momentum] spike=0.13 adx=39 ev=$0.75 funding=1.3688% (hyperliquid)
+2026-04-16 13:03:16,922 scanner INFO [scanner] → AAVE SHORT [momentum] spike=0.41 adx=23 ev=$0.71 funding=1.3688% (hyperliquid)
+2026-04-16 13:03:16,922 scanner INFO [scanner] → PUMP SHORT [momentum] spike=1.40 adx=20 ev=$0.70 funding=1.3688% (hyperliquid)
+2026-04-16 13:03:16,922 scanner INFO [scanner] → PUMP LONG [ranging_mr] spike=1.40 adx=20 ev=$0.70 funding=1.3688% (hyperliquid)
+2026-04-16 13:03:16,922 scanner INFO [scanner] → INJ LONG [ranging_mr] spike=0.06 adx=18 ev=$0.65 funding=-0.7573% (hyperliquid)
+2026-04-16 13:03:16,922 scanner INFO [scanner] → INJ SHORT [momentum] spike=0.06 adx=18 ev=$0.65 funding=-0.7573% (hyperliquid)
+2026-04-16 13:03:16,922 scanner INFO [scanner] → PF_SUIUSD SHORT [momentum] spike=0.74 adx=17 ev=$0.63 funding=0.0007% (kraken)
+2026-04-16 13:03:16,922 scanner INFO [scanner] → PF_TAOUSD SHORT [momentum] spike=0.94 adx=23 ev=$0.62 funding=-0.4490% (kraken)
+2026-04-16 13:03:16,922 scanner INFO [scanner] → UNI SHORT [momentum] spike=0.02 adx=25 ev=$0.60 funding=1.3688% (hyperliquid)
+2026-04-16 13:03:16,922 scanner INFO [scanner] → CRV SHORT [momentum,ranging_mr] spike=0.86 adx=18 ev=$0.60 funding=1.3688% (hyperliquid)
+2026-04-16 13:03:16,922 scanner INFO [scanner] → ZEC SHORT [momentum] spike=1.05 adx=25 ev=$0.58 funding=1.3688% (hyperliquid)
+2026-04-16 13:03:16,922 scanner INFO [scanner] → TAO SHORT [kst_cross,momentum] spike=0.10 adx=20 ev=$0.58 funding=-4.2970% (hyperliquid)
+2026-04-16 13:03:16,922 scanner INFO [scanner] → ONDO SHORT [momentum,ranging_mr] spike=0.03 adx=16 ev=$0.57 funding=1.3688% (hyperliquid)
+2026-04-16 13:03:16,922 scanner INFO [scanner] → TRUMP SHORT [momentum] spike=4.09 adx=22 ev=$0.57 funding=-1.7833% (hyperliquid)
+2026-04-16 13:03:16,923 scanner INFO [scanner] → ZRO SHORT [momentum] spike=2.64 adx=16 ev=$0.54 funding=1.3688% (hyperliquid)
+2026-04-16 13:03:16,923 scanner INFO [scanner] → ZRO LONG [ranging_mr] spike=2.64 adx=16 ev=$0.54 funding=1.3688% (hyperliquid)
+2026-04-16 13:03:16,923 scanner INFO [scanner] → MORPHO SHORT [momentum] spike=0.09 adx=21 ev=$0.53 funding=1.3688% (hyperliquid)
+2026-04-16 13:03:16,923 scanner INFO [scanner] → NEAR SHORT [momentum] spike=0.96 adx=24 ev=$0.52 funding=1.3688% (hyperliquid)
+2026-04-16 13:03:16,923 scanner INFO [scanner] → DOGE SHORT [momentum] spike=0.74 adx=19 ev=$0.51 funding=1.3688% (hyperliquid)
+2026-04-16 13:03:16,923 scanner INFO [scanner] → ADA SHORT [momentum,ranging_mr] spike=0.17 adx=19 ev=$0.48 funding=1.3688% (hyperliquid)
+2026-04-16 13:03:16,923 scanner INFO [scanner] → PF_AVAXUSD SHORT [momentum] spike=0.05 adx=17 ev=$0.47 funding=0.0022% (kraken)
+2026-04-16 13:03:16,923 scanner INFO [scanner] → AVAX LONG [ranging_mr] spike=0.05 adx=17 ev=$0.47 funding=1.3688% (hyperliquid)
+2026-04-16 13:03:16,923 scanner INFO [scanner] → PF_LINKUSD SHORT [momentum,ranging_mr] spike=0.93 adx=19 ev=$0.43 funding=0.0083% (kraken)
+2026-04-16 13:03:16,923 scanner INFO [scanner] → XRP SHORT [momentum,ranging_mr] spike=0.52 adx=19 ev=$0.42 funding=1.3688% (hyperliquid)
+2026-04-16 13:03:16,923 scanner INFO [scanner] → PF_SOLUSD SHORT [momentum,ranging_mr] spike=0.18 adx=19 ev=$0.41 funding=0.1338% (kraken)
+2026-04-16 13:03:16,923 scanner INFO [scanner] → HYPE SHORT [momentum] spike=2.75 adx=26 ev=$0.40 funding=0.8892% (hyperliquid)
+2026-04-16 13:03:16,923 scanner INFO [scanner] → PF_ETHUSD SHORT [momentum] spike=0.85 adx=22 ev=$0.38 funding=-1.5273% (kraken)
+2026-04-16 13:03:16,923 scanner INFO [scanner] → TON SHORT [momentum] spike=0.43 adx=23 ev=$0.33 funding=1.3688% (hyperliquid)
+2026-04-16 13:03:16,923 scanner INFO [scanner] → PF_XBTUSD LONG [ranging_mr] spike=0.63 adx=19 ev=$0.26 funding=1.0422% (kraken)
+2026-04-16 13:03:16,923 scanner INFO [scanner] → PF_XBTUSD SHORT [momentum] spike=0.63 adx=19 ev=$0.26 funding=1.0422% (kraken)
+2026-04-16 13:03:16,929 scheduler.v10_runner INFO [v10] scan: 47 candidates (tv=0 scanner=47), balance=$1966 deployed=$0
+2026-04-16 13:03:17,250 scheduler.v10_runner WARNING [v10] BIO — price sanity FAIL: candle $0.02455 vs live $0.036324 (32.4% off) — SKIP (wrong data source)
+2026-04-16 13:03:17,481 scheduler.v10_runner WARNING [v10] BIO — price sanity FAIL: candle $0.02455 vs live $0.036324 (32.4% off) — SKIP (wrong data source)
+2026-04-16 13:03:18,335 scheduler.v10_runner INFO [v10] BLUR SHORT score=50.6 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 13:03:18,569 scheduler.v10_runner WARNING [v10] FARTCOIN — price sanity FAIL: candle $0.19281 vs live $0.21148 (8.8% off) — SKIP (wrong data source)
+2026-04-16 13:03:18,800 scheduler.v10_runner WARNING [v10] FARTCOIN — price sanity FAIL: candle $0.19281 vs live $0.21148 (8.8% off) — SKIP (wrong data source)
+2026-04-16 13:03:19,597 scheduler.v10_runner INFO [v10] WIF SHORT score=47.2 < 58, no primary setup — skip
+2026-04-16 13:03:19,828 scheduler.v10_runner WARNING [v10] LDO — price sanity FAIL: candle $0.37784 vs live $0.40441 (6.6% off) — SKIP (wrong data source)
+2026-04-16 13:03:20,054 scheduler.v10_runner WARNING [v10] PENGU — price sanity FAIL: candle $0.007119 vs live $0.007513 (5.2% off) — SKIP (wrong data source)
+2026-04-16 13:03:20,294 scheduler.v10_runner WARNING [v10] SPX — price sanity FAIL: candle $0.32058 vs live $0.34174 (6.2% off) — SKIP (wrong data source)
+2026-04-16 13:03:21,012 scheduler.v10_runner INFO [v10] XPL SHORT score=45.9 < 58, no primary setup — skip
+2026-04-16 13:03:22,193 scheduler.v10_runner INFO [v10] ARB SHORT score=44.1 < 58, no primary setup — skip
+2026-04-16 13:03:22,486 scheduler.v10_runner WARNING [v10] ENA — price sanity FAIL: candle $0.099846 vs live $0.10548 (5.3% off) — SKIP (wrong data source)
+2026-04-16 13:03:22,711 scheduler.v10_runner WARNING [v10] APT — price sanity FAIL: candle $0.9313 vs live $0.9845 (5.4% off) — SKIP (wrong data source)
+2026-04-16 13:03:23,043 scheduler.v10_runner WARNING [v10] LIT — price sanity FAIL: candle $79.629997 vs live $1.02495 (7669.2% off) — SKIP (wrong data source)
+2026-04-16 13:03:23,524 scheduler.v10_runner WARNING [v10] WLD — price sanity FAIL: candle $0.29806 vs live $0.31433 (5.2% off) — SKIP (wrong data source)
+2026-04-16 13:03:23,809 scheduler.v10_runner WARNING [v10] DOT — price sanity FAIL: candle $1.1669 vs live $1.2895 (9.5% off) — SKIP (wrong data source)
+2026-04-16 13:03:24,689 scheduler.v10_runner INFO [v10] AAVE SHORT score=49.9 < 58, no primary setup — skip
+2026-04-16 13:03:24,916 scheduler.v10_runner WARNING [v10] PUMP — price sanity FAIL: candle $14.505 vs live $0.00193 (751454.4% off) — SKIP (wrong data source)
+2026-04-16 13:03:25,139 scheduler.v10_runner WARNING [v10] PUMP — price sanity FAIL: candle $14.505 vs live $0.00193 (751454.4% off) — SKIP (wrong data source)
+2026-04-16 13:03:25,936 scheduler.v10_runner INFO [v10] INJ LONG score=48.9 < 58, no primary setup — skip
+2026-04-16 13:03:26,653 scheduler.v10_runner INFO [v10] INJ SHORT score=53.0 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 13:03:28,779 scheduler.v10_runner WARNING [v10] UNI — price sanity FAIL: candle $3.1537 vs live $3.3397 (5.6% off) — SKIP (wrong data source)
+2026-04-16 13:03:29,570 scheduler.v10_runner INFO [v10] CRV SHORT score=44.1 < 58, no primary setup — skip
+2026-04-16 13:03:29,840 scheduler.v10_runner WARNING [v10] ZEC — price sanity FAIL: candle $354.02 vs live $335.365 (5.6% off) — SKIP (wrong data source)
+2026-04-16 13:03:31,287 scheduler.v10_runner INFO [v10] ONDO SHORT score=51.4 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 13:03:31,530 scheduler.v10_runner WARNING [v10] TRUMP — price sanity FAIL: candle $2.8092 vs live $2.97655 (5.6% off) — SKIP (wrong data source)
+2026-04-16 13:03:32,324 scheduler.v10_runner INFO [v10] ZRO SHORT score=55.4 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 13:03:32,948 scheduler.v10_runner INFO [v10] ZRO LONG score=55.6 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 13:03:33,620 scheduler.v10_runner INFO [v10] MORPHO SHORT score=50.1 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 13:03:33,847 scheduler.v10_runner WARNING [v10] NEAR — price sanity FAIL: candle $50.859901 vs live $1.38985 (3559.4% off) — SKIP (wrong data source)
+2026-04-16 13:03:36,650 scheduler.v10_runner INFO [v10] PF_AVAXUSD SHORT score=46.2 < 58, no primary setup — skip
+2026-04-16 13:03:37,368 scheduler.v10_runner INFO [v10] AVAX LONG score=52.6 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 13:03:40,167 scheduler.v10_runner INFO [v10] PF_SOLUSD SHORT score=45.0 < 58, no primary setup — skip
+2026-04-16 13:03:41,267 scheduler.v10_runner INFO [v10] PF_ETHUSD SHORT score=51.6 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 13:03:43,490 scheduler.v10_runner INFO [v10] PF_XBTUSD LONG score=51.5 in 50-57 dead zone — no edge, skip (threshold=58)
+2026-04-16 13:03:44,332 scheduler.v10_runner INFO [v10] funnel: 47 candidates → dual=0 cooldown=0 risk=0 data_unavail=18 below_thresh=25 econ_veto=0 research_only=0 sizing_zero=0 exec_fail=0 entered=0
+2026-04-16 13:06:11,229 data.historical_data WARNING [historical_data] Failed to fetch BNB 1h
+2026-04-16 13:06:11,289 data.historical_data WARNING [historical_data] All sources failed for BNB 1h
+2026-04-16 13:06:11,580 data.historical_data WARNING [historical_data] Failed to fetch BNB 1h
+2026-04-16 13:06:11,613 data.historical_data WARNING [historical_data] All sources failed for BNB 1h
+2026-04-16 13:06:14,544 data.historical_data WARNING [historical_data] Failed to fetch BNB 1h
+2026-04-16 13:06:14,579 data.historical_data WARNING [historical_data] All sources failed for BNB 1h
+2026-04-16 13:06:14,843 data.historical_data WARNING [historical_data] Failed to fetch BNB 1h
+2026-04-16 13:06:14,881 data.historical_data WARNING [historical_data] All sources failed for BNB 1h
+2026-04-16 13:06:14,988 learning.candidate_labeler INFO [labeler] labeled 46/50 candidates (skipped=4 errors=0)

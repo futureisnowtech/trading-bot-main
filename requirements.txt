@@ -1,0 +1,65 @@
+# ─── Core ─────────────────────────────────────────────────────────────────────
+python-dotenv>=1.0.0
+pandas>=2.0.0
+numpy>=1.24.0
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+pytz>=2024.1
+
+# ─── Market Data & Indicators ─────────────────────────────────────────────────
+yfinance>=0.2.36
+# pandas-ta requires Python >=3.12 — install manually after upgrading Python:
+# pip install pandas-ta==0.4.67b0
+# pandas-ta==0.4.67b0
+
+# ─── Broker APIs ──────────────────────────────────────────────────────────────
+alpaca-py>=0.43.0
+coinbase-advanced-py>=1.7.0
+python-binance>=1.0.19
+ib_insync>=0.9.86
+ccxt>=4.2.0
+kalshi-python-sync>=2.0.0
+mcp>=1.0.0
+fastmcp>=0.1.0
+
+# ─── Backtesting ──────────────────────────────────────────────────────────────
+backtesting>=0.3.3
+
+# ─── ML / Learning ────────────────────────────────────────────────────────────
+scikit-learn>=1.4.0
+lightgbm>=4.3.0
+xgboost>=2.0.0
+pandas-ta==0.4.67b0
+
+# ─── Dashboard ────────────────────────────────────────────────────────────────
+streamlit>=1.32.0
+plotly>=5.18.0
+
+# ─── Alerts ───────────────────────────────────────────────────────────────────
+python-telegram-bot>=20.7
+
+# ─── Scheduling ───────────────────────────────────────────────────────────────
+schedule>=1.2.1
+APScheduler>=3.10.4
+
+# ─── Utilities ────────────────────────────────────────────────────────────────
+PyJWT>=2.8.0
+cryptography>=42.0.0
+prometheus_client>=0.20.0
+praw>=7.7.0           # Reddit sentiment (optional — graceful fallback if not installed)
+tabulate>=0.9.0
+colorama>=0.4.6
+loguru>=0.7.2
+psutil>=5.9.0
+psycopg2-binary>=2.9.9
+
+# ─── Testing / CI ─────────────────────────────────────────────────────────────
+pytest>=8.0.0
+pytest-cov>=5.0.0
+ruff>=0.4.0
+
+# ─── Optional: Multi-LLM ensemble (ensemble_forecaster.py / Lane 3) ──────────
+# Install whichever providers you have API keys for — system works Gemini-only without them.
+# openai>=1.14.0              # enable GPT-4o: set OPENAI_API_KEY in .env
+google-generativeai>=0.5.0  # enable Gemini: set GOOGLE_API_KEY in .env

@@ -1,0 +1,59 @@
+
+═══════════════════════════════════════════════════════
+  HEALTH CHECK + SECURITY AUDIT  |  LIVE  |  last 30d
+═══════════════════════════════════════════════════════
+
+───────────────────────────────────────────────────────
+  TRADE INTEGRITY
+───────────────────────────────────────────────────────
+✅  No duplicate close events
+✅  No orphaned open positions
+✅  No duplicate buy entries
+
+📊  P&L RECONCILIATION (last 30 days):
+   Gross P&L:      $-0.0609
+   Total fees:     $0.9188
+   Net P&L:        $-0.9797
+   Closed trades:  1  (0W / 1L, 0.0% WR)
+   Total DB rows:  7
+✅  No outlier trades (avg |P&L| = $0.0609, top = $0.0609)
+✅  Trade IDs and timestamps are monotonically ordered
+
+🚨  UNKNOWN STRATEGIES (1) — not in approved list:
+   'v10_perp'  (7 trade(s))
+   → Add to KNOWN_STRATEGIES if legitimate, investigate if not
+
+───────────────────────────────────────────────────────
+  SECURITY AUDIT
+───────────────────────────────────────────────────────
+
+🚨  INSECURE PERMISSIONS on .env:
+   Current mode: 644  (world-readable)
+   Contains:     API keys / secrets
+   Fix:          chmod 600 /Users/joshmacbookair2020/Projects/algo_trading_final/.env
+
+🚨  INSECURE PERMISSIONS on logs/trades.db:
+   Current mode: 644  (world-readable)
+   Contains:     trade history
+   Fix:          chmod 640 logs/trades.db
+
+🚨  INSECURE PERMISSIONS on ../../.algo_backup/credentials/.env.2026-04-16_020006:
+   Current mode: 644  (world-readable)
+   Contains:     credential backup
+   Fix:          chmod 600 /Users/joshmacbookair2020/.algo_backup/credentials/.env.2026-04-16_020006
+✅  No hard-coded credentials detected in source files
+✅  No negative row IDs
+✅  No negative fee entries
+✅  All trade prices are positive
+✅  All trade P&L values within account size ($5000.0)
+✅  No trades logged during the 2-5am ET dead zone
+
+⚠️  LOG ANOMALIES (last 2000 lines):
+   ⚠️  EXCEPTION FLOOD       × 134
+       Type 'I UNDERSTAND' to confirm: Traceback (most recent call last):
+✅  Credential backup exists (.env.2026-04-16_020006, 0.5d old, 1 version(s))
+
+═══════════════════════════════════════════════════════
+🚨 CRITICAL: 5 problem(s) — review above
+═══════════════════════════════════════════════════════
+

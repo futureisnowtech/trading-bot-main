@@ -1,0 +1,35 @@
+
+============================================================
+  PATH TRUTH AUDIT  (last 30 days)
+============================================================
+
+── 1. R-Multiple Reach (n=35 labeled entered) ────────────
+   Hit 0.5R:   68.6%
+   Hit 1R:     48.6%
+   Hit 2R:     17.1%
+   Hit Stop:   54.3%
+   Avg peak R (4h): 1.542R
+   Avg MFE: 1.059%  Avg MAE: -0.748%
+
+── 2. Timing to Threshold (n=35 total labeled, 6 timing-evaluated) ─────────────
+   0.5R : reached=5 (83.3%)  median=15m  mean=42m
+   1R   : reached=4 (66.7%)  median=15m  mean=49m
+   2R   : reached=3 (50.0%)  median=15m  mean=15m
+   Note: NULL timing = threshold not reached within available bars. reach_pct uses only rows where path timing was actually evaluated.
+
+── 3. Path by Group (regime × direction) ─────────────────────────
+   Regime           Dir       n   1R%   2R%  AvgPeakR   Avg→1R
+   ---------------- ------  ---   ---   --- --------- --------
+   RANGING          LONG     28 50.0% 17.9%    0.849R     60m
+   RANGING          SHORT     7 42.9% 14.3%    5.012R     15m
+
+── 4. Exit Quality Context (n=10 closes) ──────────────────
+   Avg opp loss:    0.012%
+   Avg stop overshoot: 0.000%
+   Avg MFE at exit: 0.011%
+   High opp loss (>1%): 0
+   High overshoot (>0.5%): 0
+   Path labels:
+     loser               : 6
+     winner              : 4
+

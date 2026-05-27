@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main, feature/v10-rebuild, feature/agent-overhaul]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  proof:
+    name: Proof suite (Python 3.12)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4.2.2
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5.4.0
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install \
+            pytest pytest-cov ruff \
+            python-dotenv pandas numpy pytz requests \
+            yfinance schedule psutil \
+            "pandas-ta>=0.3.14b0"
+          # Broker SDKs (paper mode — no real API calls in tests)
+          pip install \
+            "python-binance>=1.0.19"
+          # ML
+          pip install scikit-learn lightgbm xgboost
+          # Dashboard testing
+          pip install "streamlit>=1.35"
+
+      - name: Create test .env
+        run: |
+          cat > .env << 'EOF'
+          ANTHROPIC_API_KEY=test_key_ci
+          ACCOUNT_SIZE=5000
+          BINANCE_API_KEY=test_key_ci
+          BINANCE_API_SECRET=test_secret_ci
+          PERP_PAIRS=BTCUSDT,ETHUSDT
+          FUTURES_LANE_ACTIVE=false
+          FORECAST_LANE_ACTIVE=false
+          EOF
+
+      - name: Lint with ruff (non-blocking)
+        run: |
+          ruff check . \
+            --exclude=".git,__pycache__,logs,reference_repos,brain,docs" \
+            --ignore=E501,E402,F401,F811,W503 \
+            --select=E,F,W \
+            || true
+
+      - name: Check environment
+        run: |
+          python -c "import sys; print(sys.version)"
+          python -c "import pandas_ta; v = getattr(pandas_ta, '__version__', None) or getattr(pandas_ta, 'version', 'unknown'); print('pandas_ta:', v)" || true
+          python -c "import streamlit; print('streamlit:', streamlit.__version__)" || true
+          python -c "import sklearn; print('sklearn:', sklearn.__version__)" || true
+
+      - name: Run proof suite
+        run: |
+          python -m pytest tests/proof/ \
+            --tb=long \
+            --no-header \
+            -v
+
+      - name: Validate config (non-blocking)
+        run: |
+          python scripts/validate.py || true
+
+      - name: Repo truth gate (strict)
+        run: |
+          python scripts/repo_truth_gate.py --strict

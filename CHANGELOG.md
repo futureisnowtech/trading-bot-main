@@ -1,0 +1,1037 @@
+# CHANGELOG
+All notable changes to The King's Algo Trading System.
+
+## 2026-05-27
+- v19.1.ARCH (Ledgerless Sovereign — Broker-Direct Truth Alignment): Retired the `open_positions` table as an authoritative ledger. Excised `runtime/spot_position_truth.py` and implemented direct, low-latency truth projection from `execution/coinbase_spot_broker.py`. Purged 15+ defunct legacy scripts (e.g., `nightly_recon.py`, `diagnose_drift.py`, `check_readiness.py`) to prevent usage of "dangerous artifacts" in the Ledgerless model. Enriched the `v10_runner.py` dashboard snapshot with `trend`, `sentiment`, and `live_pnl` fields for the Command HUD. Implemented `runtime/spot_classification.py` for lightweight symbol-specific metadata management. Refactored `spot_engine.py` and `dashboard/data/` to be strictly broker-first.
+
+## 2026-05-24
+- v18.35 (Weather Alpha & Sovereign Self-Healing): pivoted Kalshi lane to a dedicated Weather Prediction Engine utilizing 31-member GFS ensembles via Open-Meteo; implemented high-aggression Logistic Sigmoid sizing, removing all geographic and event-family quarantines ('fuck it, take the trade!'); injected autonomous database healing into `spot_main.py` boot sequence to automatically repair orphan positions; unmasked strategy vetoes in HUD dash for radical transparency; fixed Kalshi cost-basis reporting by shifting query source to `trades` table.
+- v18.34 (Kalshi Live Recovery): implemented historical candlestick backfill in `execution/kalshi_broker.py` using verified V2 `/markets/candlesticks` endpoint, resolving data starvation issues for strategy indicators; fixed Kalshi V2 orderbook parsing (`orderbook_fp`) and position syncing (`market_positions`); corrected RSA-PSS signature logic by switching to `DIGEST_LENGTH` salt and excluding body/query-params from signature string; repaired Telegram AI agent context blindness by removing the 2000-character truncation of `AGENTS.md`; enforced "HUD dash" and "Grafana" naming mandates across all agent interactions.
+
+## 2026-05-15
+- v18.30 (Project Apex: Recursive Evolution): implemented 'Fee-Aware Expectancy' dynamic gates in `spot_regime.py`, retiring hardcoded thresholds; built `runtime/online_learner.py` for autonomous symbol vaccination based on realized alpha-efficiency; resolved Telegram '/ask' caching hang by repairing tool-handshake desync in `ai_agent.py`; authored 12,000-word Sovereign Masterplan (`docs/SOVEREIGN_MASTERPLAN.md`); expanded `backtest_apex_universe.py` to 6,000-line milestone.
+- v18.19.4: implemented deep-trace request/response logging gate via `COINBASE_DEEP_TRACE` to prevent log bloat; added 3-second TTL cache on `get_spot_balance()` in `execution/coinbase_spot_broker.py` to reduce redundant /accounts snapshot calls during per-asset tradeability checks.
+- v18.19.3: refactored `algo_bot_cpu_percent` metric in `system_state.py` to be process-scoped via `psutil.Process()`, resolving 100% CPU saturation false-positives on shared 1-vCPU droplets.
+- v18.19.2: retired global equity kill switch in `kill_switch.py` (redundant with spot-specific KS10a/KS10b); kept API-error storm and order-latency tripwires active.
+- v18.19.1: restored `nbf` (not before) claim in Coinbase spot broker JWT (fixing regression introduced in `e6fe462`); retired `SPOT_LIVE_ENABLEMENT_CONFIRMED` stubs; dedup'd `notifications/ai_agent.execute_sql` shadowing.
+
+## 2026-05-11
+- v18.19 (Full Live Release): unified state machine in `v10_runner.py` to move directly to LIVE; removed Tiny-Live safety gates and retired `SPOT_LIVE_ENABLEMENT_CONFIRMED` requirement; fixed Gemini tool-calling error (`genai.tooltype`) via explicit tool definition in `notifications/ai_agent.py`.
+- v18.18 (Directional Rounding Fix): implemented direction-aware price rounding (`_round_quote`) in `coinbase_spot_broker.py` to prevent `post_only` rejections on tight-spread assets (DOGE, XRP, ADA); added `scripts/verify_rounding_fix.py`.
+
+## 2026-05-05
+- v18.17 completion: finalized surgical removal of retired lanes and legacy AI configuration; deleted `perps_engine.py`, `scripts/go_paper.py`, and `scripts/tradingview_webhook.py`; updated `main.py` to support `--mode` for boot compatibility and refreshed WebSocket feed to spot-native symbols; aligned `AGENTS.md` and `GEMINI.md` to the new authoritative spot-lane architecture; updated `monitoring/health_check.py` to follow the truth-lane status contract.
+
+## 2026-05-04
+- v18.17 housekeeping: surgical removal of legacy AI components (Goku, multi-LLM ensemble weights, and unused provider keys); updated `.env.example` to reflect current v18 architecture (Gemini for CLI/Repo-Intelligence, Anthropic for optional AI-Exits); cleaned up `config.py` to remove dormant ensemble logic and weight schedules; resolved CLI startup warnings by fixing `.gemini/settings.json` hook event names and removing unsupported `color` keys from agent definitions.
+- research: completed V14 Archival Vaccination discovery analysis (253 failures profiled); generational benchmarking confirms v18 leakage of historical Workhorse failures; simulated ADF tightening recommends shift from -2.86 to -3.10; full report generated in `reports/V14_VACCINATION_REPORT.md`.
+
+## 2026-05-03
+- v18.16 sovereign truth stabilization: fix DT-07 (account.py get_drawdown passes paper flag to get_live_account_size so drawdown denominator never leaks live account size into paper mode); telegram_bot.py full runtime gating (_runtime_is_live DB-first, /cancel_all requires BOTH live mode AND TELEGRAM_ALLOW_LIVE_ACTIONS=true, /positions and /exposure scoped to current runtime mode); main.py version string and banner updated to v18.16 / Coinbase spot scalp truth; provision_grafana_final.py dashboard UID pinned to d9ecf89d-5e95-4e63-b0ae-f8008debbc0f; deploy.sh dirty-worktree guard + SHA parity guard + version.txt + deploy_manifest.json provenance; DT-07 test isolation fix in test_dashboard_truth_contract.py; SHA 10b2cdb2eecc4573eab3965bf63143ddb327b94a deployed to NYC3.
+- ops: add protected GitHub deploy automation via `.github/workflows/deploy-nyc.yml` — manual approval through `nyc-production`, dormant-by-default auto-after-CI behind `NYC_AUTO_DEPLOY_ENABLED=true`, and proof/validate/truth-gate checks before any GitHub-driven NYC deploy.
+
+## 2026-04-30
+- v18.16: classify broker-normalized staked ETH as durable `external_manual`, keep ADA as ignored manual dust while removing the stale mixed-mode `spot_ada` live open-position row, add a fail-closed live invariant that halts if a paper-style spot order artifact reaches `open_spot()`, and normalize runtime/readiness rows so spot audits reflect current truth instead of legacy `READY` / `OPERATIONAL` state.
+
+## 2026-04-30
+- v18.15: align support surfaces to the Coinbase spot truth-lane contract — make `AGENTS.md` the canonical repo memory, shrink `GEMINI.md` into a companion file, rewrite active brain notes around broker-canonical spot truth / tiny-live / TradingView `monitor_only`, archive legacy open questions, rewrite Gemini command-agent-skill surfaces for the spot truth-lane, replace old readiness scripts with spot runtime audits, and expand hook reminders/tests around controlled launch and runtime-truth files.
+
+## 2026-04-30
+- v18.14: implement the Coinbase spot truth-lane refactor and tiny-live readiness hardening — add `runtime/spot_position_truth.py` plus `spot_holding_classifications`, make broker spot holdings canonical for dashboard/runtime/readiness counts, hide dormant lanes from live control surfaces, move TradingView to `monitor_only`, tighten live spot governance (`CHOP` blocked, `pullback_reclaim` quarantined, maker-only, precision/micro exit profiles, harsher score/frame/confirm floors), harden spot close reconciliation so residual live inventory is re-persisted instead of silently deleted, switch `go_live.py` to spot-broker + truth-blocker preflight, update spot health/kill-switch checks to be lane-specific, and add proof coverage for broker-truth rendering, external/manual blocking, residual-close persistence, truth-gated health, and truth-gated launch.
+
+## 2026-04-28
+- v18.13: remove default quarantines, reset kill switch, delete stale spot positions
+
+## 2026-04-28
+- v18.12: kill switch schema fix + live BTC round-trip acceptance test — all learning pipeline checks pass
+
+## 2026-04-28
+- v18.11 spot governance: pullback_reclaim NEUTRAL/CHOP quarantine, taker disabled, stop tighten, KS10 kill switch, 14 new proof tests, 7 governance docs
+
+## 2026-04-28
+- ops: add pre-superprompt state snapshot manifest for v18.10 baseline archive
+
+## 2026-04-28
+- v18.10: harden TradingView webhook to explicitly load the Projects-repo .env, verify live secret auth end-to-end, and remove stale +20 candidate-injection references from docs and operator surfaces
+
+## 2026-04-28
+- v18.9: rewire TradingView into HTF context mode, repair spot learning ingestion on closes, throttle labeler/retrain/RBI/audit cadences, reduce scanner defaults to 20/8, add dashboard start/stop scripts, split runtime/dev requirements, and make brain launchd helper optional by default
+
+## 2026-04-28
+- Added deep spot-system audit reports covering live strategy, real learning/ML/RBI status, root causes, and recent trade metrics.
+
+## 2026-04-28
+- housekeeping: remove duplicate generated brain alert and ignore local live launchd plist artifact so machine-specific service files stop appearing as repo dirt
+
+## 2026-04-28
+- v18.8: lightly retighten live spot entry policy with higher per-coin floors, a 30m frame minimum, and route-aware synthetic/taker score surcharges while keeping the gate stack intentionally minimal
+
+## 2026-04-28
+- v18.10: all 8 spot symbols trading — ADA/DOGE entered, LTC/LINK blocked only by deployment cap (correct). Full pipeline fixed: synthetic inject → tier → skip perp econ + research_only gates → spot_economics_gate → execution
+
+## 2026-04-28
+- fix(v18.8): aggressive gate loosening + LTC/DOGE/ADA/LINK synthetic candidate injection
+
+- SPOT_TARGET_R_BY_REGIME: TREND=4.0, NEUTRAL=3.0, CHOP=3.0 (from 2.0/1.5/1.2) — clears projected_net_win_too_small for BTC/ETH at 1% round-trip spot fees
+- SPOT_REGIME_SCORE_FLOORS: TREND=24.0, NEUTRAL=24.0, CHOP=28.0 (halved from 48/48/56)
+- All 8 symbol score_floors halved (TREND/NEUTRAL: ~24-25, CHOP: 25)
+- min_confirm_count=0 for all 8 symbols (removes structural_confirm_count_too_low block)
+- depth_min_usd=0 for all 8 SPOT_SCALP_SYMBOL_CONFIG entries (disables depth gate; real depth from live API)
+- spot_strategy.py score_floor_for_symbol hard minimum: 45.0→35.0
+- economics_gate.py _MIN_NEAR_DEPTH_USD: 5000→1000
+- v10_runner.py spot_only path: inject synthetic LONG candidates for LTC/DOGE/ADA/LINK (not in CORE_EXECUTION_UNDERLYINGS, never appear from perp scanner)
+- 3 proof tests updated to match new intentional gate thresholds
+- Disk cleanup: truncated manual_live_bot.log (167MB→0) and bot.log
+
+## 2026-04-27
+- fix(config): expand perp universe BTC/ETH/SOL/XRP all autonomous; fix target_r (TREND=2.0/NEUTRAL=1.5/CHOP=1.2 — old values created negative R:R after fees); lower depth_min_usd across all 8 spot symbols
+
+## 2026-04-27
+- fix(spot): Coinbase limit order 400 fix — remove quote_size from limit_limit_gtc (protobuf oneof conflict was silently failing all XRP/SOL spot limit buys)
+
+## 2026-04-27
+- fix(trading): unblock auto entries — lower econ gate floors, relax spot derivative check, fix max_single scope bug
+
+## 2026-04-27
+- feat(spot): strip hardcoded edge_conditions, add self-calibrating spot_edge_calibrator
+
+## 2026-04-27
+- fix(audit): close 2026-04-26 self-audit work queue — JWT fix for product_book 401 (maker orders now receive real bid/ask), candidate labeler emits system_events, trade_blocked_reason populated from decision fallback (42% unknown → labeled), log rotation script, GEMINI.md EV tier + SPOT_TARGET_R drift corrected
+
+## 2026-04-26
+- fix(spot_engine): reconcile broker qty before sell to prevent INSUFFICIENT_FUND loop — when DB qty > actual Coinbase balance, close_spot now fetches live holdings and uses min(db_qty, actual_qty). Stopped a 39h/5803-error XRP exit loop. Also auto-remediated 10 stale brain AUTO-ALERTs from 2026-03-25 through 2026-04-25.
+
+## 2026-04-26
+- v18.7: explicitly label live Coinbase holdings as COINBASE SPOT / LIVE SPOT in open-position cards so real spot holdings cannot be mistaken for phantom perp positions
+
+## 2026-04-25
+- v18.6: fail-close live dashboard positions to broker truth so stale DB perp/spot rows never appear when live snapshots are unavailable; add proofs for unavailable-snapshot phantom-position bug class
+
+## 2026-04-25
+- v18.5 simplify Control Tower to current-rollout operator truth, add current_only performance/account readers anchored to strategy epoch, and stop open-position cards from faking live spot P&L when entry metadata is missing
+
+## 2026-04-25
+- v18.4 dashboard truth pass: clamp current crypto/control/execution metrics to strategy epoch and unify spot+perp deployed capital across runtime, overview, and scanner surfaces
+
+## 2026-04-25
+- fix(stocks-dashboard): stop IBKRStockBroker reconnect spam — 175 errors/hr eliminated
+
+## 2026-04-24
+- fix(manual-scan): spot trades no longer blocked by perp contract min; scan goes straight to execute
+
+## 2026-04-25
+- feat(v18.3): translate the replay-discovered 8-coin spot edge board into live policy by storing exact per-coin edge conditions and replay metrics in `config.py`, teaching `runtime/spot_strategy.py` to evaluate those conditions directly and derive exit targets from replay edge profiles, wiring `spot_engine.py` to persist replay-derived target model versions, and updating the manual spot panel plus CRYPTO candidate cards to show the same replay edge profile/filter/metric truth the live spot lane now uses
+- feat(v18.2): add a per-coin strategy-surgery optimizer to `backtesting/spot_replay_optimizer.py` that performs local coordinate-search on each symbol’s replay surface, emits baseline-vs-optimized scorecards and parameter deltas, compares all improvements against a shared symbol baseline, and caps tiny-sample PF blowups so one-trade mirages do not dominate the research result
+- feat(v18.1): upgrade `backtesting/spot_replay_optimizer.py` with an expectancy-first strategy extractor that builds per-symbol research frontiers from replay trials, interpolates local/family strategy centroids, penalizes zero-trade and too-thin candidates so inactive policies cannot rank above tradable ones, and writes auditable strategy-extraction artifacts; add proof coverage for the new utility/viability behavior in `tests/proof/test_spot_replay_optimizer.py`
+
+## 2026-04-24
+- feat(v18.0): shift the 8-symbol spot lane to a setup-first dynamic policy — add finite setup library + symbol preferences + opportunistic/wildcard setup allowances in `runtime/spot_strategy.py`; align quality/economics floors on setup evidence; persist `setup_score` + `setup_preference` to `scan_candidates`/`open_positions`; and update manual spot + CRYPTO dashboard surfaces to render the same stored setup truth the live runner uses
+- feat(v17.9): replace the one-size-fits-all spot scalp policy with symbol-specific live strategies for BTC/ETH/SOL/XRP/LTC/DOGE/ADA/LINK via new `runtime/spot_strategy.py`; wire symbol policy overrides through spot scoring, quality gates, routing, exits, and spot economics; and extend the spot replay optimizer to fit and emit recommended per-symbol live policies
+
+## 2026-04-23
+- feat(v17.8): replay-fit the live spot scalp lane to the first truthful >52% bounded result by narrowing autonomous spot to BTC/LINK, lowering TREND/NEUTRAL spot floors to 58, requiring `5m` path_efficiency >= 0.20, switching spot exits to a tighter micro target/trail profile, and extending the spot replay optimizer surface to search richer derivative/quality filters
+
+## 2026-04-23
+- feat(v17.7): deepen spot derivative math with jerk, path integrals, participation/volatility quality, and WAE/squeeze/ADX/dollar-volume inputs; add research-grade `backtesting/spot_replay_optimizer.py` that backfills deep spot `5m` history, resamples `30m/4h/1d`, and ranks spot scalp parameter surfaces from real candles
+
+## 2026-04-23
+- fix(spot-scalp): raise frame score neutral anchor from 50 to 55
+
+## 2026-04-23
+- fix(v17.6): bias NEUTRAL spot final-score blending to 0.90 composite / 0.10 derivative so mixed-regime crypto spot scalps lean more on the broader trade-quality stack while TREND/CHOP keep the original 0.60 / 0.40 blend
+
+## 2026-04-23
+- fix(v17.5): warm and cache the 8-symbol spot scalp state, separate spot quality-floor blocks from real economics/microstructure vetoes, persist/display final_spot_score + regime_floor truth, recalibrate spot regime floors for live candidate distributions, and align CRYPTO/manual diagnostics with the real live blocker categories
+
+## 2026-04-22
+- feat(v17.4): implement 8-symbol 24/7 crypto spot scalp lane with derivative/regime logic, risk-from-stop sizing, maker-first spot routing, restart-safe scalp state, broker-truth crypto dashboard/manual alignment, and new spot scalp proofs
+
+## 2026-04-22
+- fix(dashboard): make live spot crypto and live stocks fail closed to broker/account truth; Coinbase spot holdings are canonical, and stocks use a dedicated read-only IBKR dashboard client instead of stale open_positions rows
+
+## 2026-04-22
+- fix(dashboard): live perp positions now use Coinbase /cfm/positions as canonical truth so stale closed perps in open_positions no longer render as active
+
+## 2026-04-21
+- Hotfix: stocks dormant-ready mode no longer starts the runner unless STOCKS_AUTONOMOUS_ENABLED=true; runtime state now reports standby/dormant-ready instead of active side-lane drift
+
+## 2026-04-21
+- Implemented crypto-first lane governance: 7-tab dashboard shell (CONTROL TOWER/CRYPTO/STOCKS/FORECAST/FUTURES/PERFORMANCE LAB/ENGINEERING CONSOLE), lane_role/autonomy/manual metadata in lane_runtime_state, stocks restored to lane registry, and readiness-first stocks/futures/forecast operator surfaces with updated proofs/validator
+
+## 2026-04-21
+- Adopted crypto-first evolution plan artifact with lane-role governance, 7-page dashboard target, and promotion-ready side-lane strategy
+
+## 2026-04-20
+- feat(spot): day-trading exits — target hit (3R) + EOD flatten (15:45 ET) + both BTC/ETH fully wired
+
+## 2026-04-20
+- feat(v17.2): add US equity swing-trading lane — ibkr_stock_broker, stock_runner, stocks dashboard, STOCKS tab
+
+## 2026-04-20
+- fix(MES): set tif=GTC + outsideRth=True on bracket orders for 24/7 extended-hours trading
+
+## 2026-04-20
+- feat(MES): remove session time gates — 24/7 scanning with rolling range lock; promote MES to first-class dashboard tab
+
+## 2026-04-20
+- fix(MES): use lastTradeDateOrContractMonth for contract lookup; add reqMarketDataType(3) for delayed data; fix forecast discovery interval 30min→5min
+
+## 2026-04-19
+- feat: remove spot_position_already_open and same-direction perp block — allow adding to positions
+
+## 2026-04-19
+- feat(dashboard): premium UI redesign — all 5 tabs with design system, subtabs, and candidate cards
+
+## 2026-04-19
+- v17.1a: split validator into stable wrapper + `scripts/validate_body.py` implementation so proof/runtime validation can use one canonical body while the public `python3 scripts/validate.py` entrypoint remains available; updated forecast proof expectations accordingly
+
+## 2026-04-19
+- v17.1 stabilization baseline: added `runtime/live_account.py` plus `system_runtime_state.account_size_live` so live denominators stop routing through stale `ACCOUNT_SIZE`; `scheduler/v10_runner.py` now persists real crypto lane runtime truth (connected/tradable/positions/deployed/buying_power), `main.py` seeds crypto as `STARTING`, `position_manager.py` aligns live risk-forced exits with the kill-switch baseline, `data/historical_data.py` fixes bare-BTC routing to avoid stock/ETF collisions, `scripts/go_live.py` now waits for connected crypto lane + non-zero buying power, and missing `learning.tax_tracker` noise is suppressed
+
+## 2026-04-19
+- v17.0 gap-closure: window selector fully wired, 8-stage lifecycle funnel, spot/perp deployed_pct, Auto-only filter + size/source diagnostics, test isolation fixed via conftest, AGENTS.md version aligned, 441 proof tests
+
+## 2026-04-19
+- v17.0: dashboard control-tower architecture — 5 tabs (CONTROL TOWER/CRYPTO/FORECAST/PERFORMANCE LAB/ENGINEERING CONSOLE), new page composition layer, control_tower/crypto_dashboard/engineering_console data orchestrators, archived MES moved to Engineering Console, 23 new proof tests (431 total)
+
+## 2026-04-19
+- v16.16: master trading control, DB-first scanner/control truth, shared manual tradeability, paper spot balance truth, dashboard DB alias unification, forecast heartbeat freshness/runtime truth, 408 proof tests
+
+## 2026-04-19
+- feat(tradeability): shared crypto tradeability engine — spot/perp/blocked routing unified for manual + autonomous paths
+
+## 2026-04-18
+- v16.14c: fix scan liveness false alarm — health_check._check_scan_liveness() now uses lane_runtime_state.last_heartbeat_at as primary (updated every 1m regardless of candidate count); v10_runner._scan_and_trade_inner() now writes heartbeat before 0-candidate early return so system_events stays current during quiet markets
+
+## 2026-04-18
+- v16.14b: fix get_last_scan_age() using stale log when all scans return 0 candidates — now uses min(heartbeat_age, log_age) so heartbeat (updated every minute) wins over stale log-based age
+
+## 2026-04-18
+- v16.14: dashboard live-mode data isolation — LIVE_START_DATE/get_effective_launch_date in db.py; paper filter added to decision_quality/deep_analysis trade_attribution queries (was leaking 18K paper rows into live view); balance.py _unrealized_pnl hardcoded paper=1 fixed; stale 8 paper open_positions purged from DB
+
+## 2026-04-17
+- v16.13: expand live universe to all 4 symbols, activate spot lane, remove cooldowns, loosen gates
+
+## 2026-04-17
+- feat(v16.12): expand ForecastEx KNOWN_FORECASTX_CONIDS (PREMP/UNR/RGDP/PCEY/FEDRO/FEDRC), correct ECONOMIC_UNDERLIERS short symbols, add OPT right-fallback + stub-on-empty in _discover_async, add refresh_known_underliers() method
+
+## 2026-04-17
+- feat(v16.11): spot starter lane (BTC/ETH spot) + live perp safety (autonomous gate + one-live-perp-at-a-time + not_autonomous_live_eligible for BTC/SOL/XRP), 346 proof tests
+
+## 2026-04-16
+- feat(v16.9): remove dead-money exit; tighten manual trade size cap to 3%
+
+## 2026-04-16
+- fix(v16.8): audit cleanup — permissions, KNOWN_STRATEGIES, phantom positions
+
+## 2026-04-16
+- fix(v16.7): block duplicate/opposing live trades and cap per-trade size
+
+## 2026-04-16
+- fix(v16.6): balance uses futures_buying_power not total_usd_balance
+
+## 2026-04-16
+- fix(v16.5): manual scan end-to-end — min contract size, real balance, exec_sym candles, persistent results, live tested ETH LONG
+
+## 2026-04-16
+- fix(v16.4): manual scan live-mode paper flag, symbol normalization, Coinbase balance total_usd_balance string-zero bug
+
+## 2026-04-16
+- v16.3: align live crypto universe to actual Coinbase-supported BTC/ETH/SOL/XRP set, filter unsupported TradingView live candidates, tighten default crypto/perp pairs, update proofs/docs
+
+## 2026-04-16
+- v16.2: core-only scanner alignment, manual-scan fail-closed policy, timestamp-anchored path timing, truthful audit denominators, expected_profit journaling fallback, 325 proof tests
+
+## 2026-04-16
+- v16.1 cleanup: fixed entry_truth_audit integrity schema query, aligned symbol-class audit to execution-universe underlyings, corrected version truth/docs, removed utcnow() deprecations
+
+## 2026-04-16
+- v16: truth/instrumentation tranche — scanner EV cap, exact scan_funnels, Bayesian entry priors, path timing, entry/path audit scripts, 318 proof tests
+
+## 2026-04-15
+- v15.9: forecast truth-layer + trade approval import fix: manual_scan execute-trade crash fixed (importlib.util replaces ambiguous from data.historical_data); forecast health/readiness uses lane_runtime_state primary; validate.py forecast check uses runtime state + normalized ts fallback; forecast dashboard upgraded to operational-funnel + zero-state handling; 276 proof tests
+
+## 2026-04-15
+- v15.8: kill switch live-mode fix (50% live baseline, remove risk_engine false-trigger, schema fix), ISO timestamp T-separator fix across dashboard queries, economics veto operator-precedence fix, execution error dedup, unified dashboard mode via _runtime_paper_flag(), heartbeat age uses lane_runtime_state primary, epoch timestamps display in alert feed; 260 proof tests (0 failures)
+
+## 2026-04-15
+- fix(dashboard): v15.7 live-mode paper gate — _runtime_paper_flag() in db.py; positions/account/performance/balance all read DB runtime truth; 10 new proof tests; 253 total
+
+## 2026-04-15
+- fix(dashboard): performance.py paper=1 hardcode replaced with _paper_flag(); balance.py /futures/ → /cfm/ API path; conftest isolates PAPER_TRADING from live .env
+
+## 2026-04-15
+- fix(go_live): add ROOT to sys.path before coinbase_broker import; live trading started 2026-04-15
+
+## 2026-04-15
+- feat(launch): add controlled live launch workflow — mode-aware boot.py, go_live.py/go_paper.py transitions, hook allowlist for sanctioned mode changes, docs/tests updated so Gemini can use a single safe live path
+
+## 2026-04-15
+- chore(docs): update GEMINI.md + CHANGELOG for v15.5 dashboard error fixes
+
+## 2026-04-15
+- fix(health,stagnant): fix 3 root causes — schedule isolation for forecast daemon, error rate filter in dashboard, live peak_price in stagnant check
+
+## 2026-04-15
+- fix(boot): set PAPER_TRADING=true in env before exec to prevent EOFError when .env has PAPER_TRADING=false
+
+## 2026-04-15
+- fix(health): _check_error_rate() filters archived-lane (IBKRBroker) noise when FUTURES_LANE_ACTIVE=false; 2 new proof tests (240 total)
+
+## 2026-04-15
+- chore(repo): stop tracking generated .version file so post-commit dashboard stamp no longer leaves the repo dirty after every commit
+
+## 2026-04-15
+- fix(truth): close final truth-closure gaps — tilde Desktop pattern + .md scan in truth gate; pre-commit hardened with repo_truth_gate.py --fast; post_cmd_logger env-override + CLAUDE_PROJECT_DIR; settings.json CLAUDE_PROJECT_DIR hook paths; stale 7497 eliminated from GEMINI.md/AGENTS.md/dashboard fallback; 6 new proof tests (237 total)
+
+## 2026-04-15
+- fix(truth): eliminate Desktop-path coupling in hooks/scripts/CI — repo_truth_gate.py, 18-file path fix, BLOCK 1b live-start policy, 231 proof tests
+
+## 2026-04-15
+- fix(runtime): heartbeat wiring, active_lanes population, audit improvements
+
+## 2026-04-15
+- feat(runtime): v15.2 expanded proof tests, GEMINI.md/AGENTS.md updated to v15.2
+
+## 2026-04-15
+- feat(runtime): v15.2 runtime truth layer, lane registry, incident model, allocator scaffold
+
+## 2026-04-15
+- v15.1: lane gating hardened (FUTURES_LANE_ACTIVE/FORECAST_LANE_ACTIVE), forecast readiness state machine, discovery stubs, Mission Control dedup+noise filter, activity feed DB-first truth, dead-money partial-close exempt, IBKR_PORT in config, 205 proof tests
+
+## 2026-04-15
+- fix(coinbase): use /cfm/ endpoint path for CFTC nano futures balance — /futures/ returns 401
+
+## 2026-04-15
+- fix(forecast): correct FORECASTX discovery symbols (IND not OPT, IBKR short codes not FRED codes); two-pass IND→OPT discovery; IBKR_PORT 7497→7496 in .env; paper acct ForecastEx enrollment blocker documented
+
+## 2026-04-15
+- feat(forecast): ForecastEx event-contract lane v15.0 — forecastex_broker (IBKR clientId=3, SecType=OPT), 5 DB tables (forecast_markets/contracts/quotes/bars/resolutions), log-odds probability engine, 3 strategy families (continuation/mean_reversion/late_repricing), 10-check economics gate, fractional Kelly sizing (cap=0.10), dashboard FORECAST TRADING tab, MES archived, 37 new proof tests (195 total, 0 failures)
+
+## 2026-04-15
+- v14.1: Coinbase US crypto lane migration — coinbase_broker.py (CDP JWT/ES256, BIP/ETP/SLP/XPP), 0.03% taker fee, fail-closed CoinbaseSymbolError, launch validator, 42 proof tests (158 total, 0 failures)
+
+## 2026-04-15
+- fix(dashboard): 7 data correctness fixes — ML snapshot table, source filtering, config-driven values, v14 banner
+
+## 2026-04-14
+- chore: import claude/ skills dir from Desktop session + update .version to v14+playbook
+
+## 2026-04-14
+- feat(playbook): Forever Playbook v1 — market-type router, symbol governance, funding doctrine, audit scripts, proof suite
+
+## 2026-04-14
+- fix(services): fix Desktop paths in all 6 source plists; make install_services.sh sed substitution portable (Projects path instead of Desktop)
+
+## 2026-04-14
+- fix(services): install_services.sh now self-locates PROJ and substitutes paths in plists at install time — was hardcoded to Desktop checkout
+
+## 2026-04-14
+- feat(audit): add trust-aware net truth and go-live audit CLIs with proof tests; reconcile AGENTS.md to v14.0 launch branch state
+
+## 2026-04-14
+- v14.0: integrity tiers + exit quality wired into close path; integrity proof tests (10 new); config/ package shim; signal_performance v14 columns; replay-source Bayesian gate test
+
+## 2026-04-14
+- fix(futures): full MES launch-readiness audit — 6 bugs fixed: (1) contract spec Error 200: switched from lastTradeDateOrContractMonth to localSymbol='MESM26'+multiplier='5'; (2) entry key mismatch: v10_runner read 'entry_price' but broker stores 'entry'; (3) SHORT position never closing correctly: is_long=qty>0 always True (qty always positive), fixed to use pos.get('side'); (4) EOD close same pos['qty']>0 bug; (5) daily loss limit hardcoded  vs config  (5pts x 2 x ); (6) health_check: added _check_ibkr_connection() as 7th check; FUTURES_ENABLED=true in .env; dashboard health.py total fallback 6->7, IBKR fix-prompt added to _classify_error
+
+## 2026-04-14
+- fix(ibkr_broker): set event loop on background thread — Python 3.10+ no longer auto-sets asyncio event loop per thread, causing connectAsync to fail with 'no current event loop in thread ibkr-event-loop'; fixed by wrapping run_forever in a _start_loop closure that calls asyncio.set_event_loop(loop) first
+
+## 2026-04-14
+- v13.8.1: fix health_check stagnant false positives — ghost positions + managed positions now excluded via DB ground-truth lookup
+
+## 2026-04-13
+- test(proof): add tests/proof/test_dashboard_data.py — 16 invariant proofs for dashboard/data/health.py: error_rate source exclusion, error_detail deduplication and source exclusion, health_failures live-state parsing, banner no_errors consistency. Catches the class of bug where partial changes to one function miss related functions.
+
+## 2026-04-13
+- fix(dashboard): get_health_status() was misreading UNHEALTHY events as HEALTHY — 'HEALTHY' in 'UNHEALTHY'.upper() is True; fixed by checking for '[HEALTHY]' (bracket-enclosed). This caused get_health_check_failures() to always return [] for UNHEALTHY events. Bug caught by new proof tests in test_dashboard_data.py.
+
+## 2026-04-13
+- fix(dashboard): error panel now shows live health state not stale DB history — get_health_check_failures() parses current health_check event (always fresh); get_recent_errors_detail() excludes health_check source; removed re-check button (redundant with 10s auto-refresh); added live timestamp + LIVE badge on current-state issues + green all-clear banner when issues resolve mid-hour; updated stagnant fix prompt to reference dead_money_exit
+
+## 2026-04-13
+- feat(dashboard): add Re-check now button to error details expander — clicking forces immediate fragment re-run to pull fresh error data without waiting for 10s auto-refresh
+
+## 2026-04-13
+- feat(exits): replace time-based stagnant exit with data-driven dead-money check — priority 7 now fires when held >24h AND price drift <0.5×ATR_at_entry (market proved no edge), with 96h hard backstop; exit_type changed from stagnant_exit to dead_money_exit; log line includes drift ratio, entry, current price, and ATR for diagnostics
+
+## 2026-04-13
+- v13.7: autonomous journaling operationalization — 15m labeling, exception-only notifications, funnel analytics, retention pruning, dashboard health panel, CI fix, proof suite 25/25 green
+
+## 2026-04-13
+- feat(dashboard): error breakdown panel with classified fix prompts — dashboard/data/health.py adds get_recent_errors_detail() (groups errors by source+fingerprint, classifies into 8 categories, assigns Gemini Code vs Codex fix prompt per group); status_hero.py renders expandable error panel below status banner showing category, source badge, fix-type badge, message excerpt, and copyable fix prompt via st.code()
+
+## 2026-04-13
+- feat(learning): candidate journaling + automated outcome labeling (v13.6) — scan_candidates table, candidate_outcomes table, background labeler, nightly audit
+
+## 2026-04-13
+- fix(v13.5): scan_liveness false positive fixed (CRYPTO_SCAN_INTERVAL 15→300), stagnant exit added (priority-7, >72h no-trail no-scale closes position), health_check dedup (identical failure keys suppressed for 1h)
+
+## 2026-04-13
+- feat(exits): conviction-adaptive exit stack — regime-aware trailing, real-R scale-out, signal-health compression (v13.5)
+
+## 2026-04-13
+- feat(dashboard): UX overhaul — plain-English status hero, progressive disclosure, report card, activity feed translation
+
+## 2026-04-10
+- fix(validate): treat optional import runtime failures as warnings so pre-flight validation completes on Python 3.14
+
+## 2026-04-10
+- chore(truth): align validator/version sources with current repo truth and proof harness docs
+
+## 2026-04-10
+- feat(proof): add proof-first pytest/CI/replay harness, align dashboard attribution queries with live schema, and harden logger/kill-switch/risk startup state
+
+## 2026-04-08
+- feat(dashboard): v14 widget architecture — split monolithic app.py into dashboard/data/ (8 data modules) + dashboard/widgets/ (14 widget modules across 5 tabs: MISSION CONTROL, CRYPTO PERFORMANCE, TRADE APPROVAL, S&P 500 FUTURES, SYSTEM SETTINGS)
+
+## 2026-04-08
+- fix(ibkr): eliminate FD leak — use get_ibkr_broker() singleton in MES cycle (was creating new IBKRBroker() each cycle, leaking event loop threads + sockets); add cleanup in connect() before reassigning IB object; remove disconnect() from finally block (singleton must stay connected across cycles)
+
+## 2026-04-08
+- feat(dashboard): full widget-architecture overhaul — 4-phase refactor
+
+Phase 1 — UX wins: renamed tabs (MISSION CONTROL / CRYPTO PERFORMANCE / TRADE APPROVAL / S&P 500 FUTURES / SYSTEM SETTINGS), added per-tab captions in plain English, asset banner on Mission Control clarifying crypto-only scope, blue MES callout on Futures tab
+
+Phase 2 — Clarity layer: new .badge-crypto and .badge-futures CSS classes, _asset_badge() helper applied to every crypto render function and the futures widget, 'What is this?' expanders in deep analysis for Signal Attribution and Failure Mode Analysis sections
+
+Phase 3 — Data layer: extracted all DB/log functions from app.py into dashboard/db.py, dashboard/formatters.py, and 8 files under dashboard/data/ (account, performance, positions, health, scanner_data, execution, notifications, futures)
+
+Phase 4 — Widget architecture: 14 widget files under dashboard/widgets/ — each widget is one public render_*() with its own docstring (Question / Tab / Refresh / Asset class). app.py reduced from 2606 lines to ~120 lines (thin orchestrator only)
+
+## 2026-04-08
+- feat(dashboard): wire tooltips — add tooltips.py (28 plain-English metric definitions) and wire help= into all st.metric() calls across DEEP ANALYSIS, FUTURES, and OPERATOR tabs
+
+## 2026-04-08
+- feat(v13.4): forensic audit fixes — symbol suppression (6 losers), Bayesian taxonomy rewrite (v9→v10 signals), composite_score logging, dynamic_weights key fix, REZ phantom purge script, BANNER update
+
+## 2026-04-08
+- fix(ibkr): set main-thread event loop before ib_insync import — eventkit calls asyncio.get_event_loop() at import time; Python 3.10+ no longer auto-creates one
+
+## 2026-04-08
+- fix(ibkr): replace dead asyncio.run() pattern with persistent event loop thread — orders now reach TWS instead of silently failing with IBKR_ERR_ IDs; _place_bracket_async and _place_market_async use qualifyContractsAsync on the live loop; _place_market_async cancels open bracket children before market exit
+
+## 2026-04-06
+- fix(health_check): replace stale learning.ml_signal import with ModelStore check; fix scanner.py comment drift (M → .5M); commit historical_data.py try/except guard for cache unavailability
+
+## 2026-04-06
+- v13.3: ML PnL regression, regime-conditional thesis exits, dashboard April 2 date filters
+
+## 2026-04-06
+- feat(gate): v13.2 execution-quality gates — spread/depth/cost-aware EV floor, vol floor aligned $3M→$2.5M, price sanity 20%→5%, 3-strike veto suppression, scanner unit comment, TV signal spread default, price_archive.db rebuild
+
+## 2026-04-06
+- feat(hooks): add ruff format to post_py_linter.sh — auto-formats all .py files on Edit/Write, format-only on core trading files, no behavior-changing fixes
+
+## 2026-04-06
+- feat(claude): self-audit command, runtime_skeptic agent, 2 new bash blocker guards (SIGKILL, price_archive destruction), 30/30 hook tests passing
+
+## 2026-04-06
+- fix(scanner/runner/perps/pm): 5 audit fixes — scanner vol floor K→.5M, econ veto log cooldown 30min, per-scan funnel summary, duplicate close idempotency guard, hard stop micro-price precision :.4f→:.8g
+
+## 2026-04-05
+- hook-stack: install 6-hook LAYER A/B/C/D safety system — dangerous command blocker, protected-file blocker, py linter, targeted test runner, command logger, guarded auto-commit; 28/28 tests pass
+
+## 2026-04-05
+- fix(unified_sizer): added VETO:0.00 to _QUALITY_MULT + early-exit guard so VETO tier always returns 0 notional
+
+## 2026-04-05
+- fix(db): tagged 4 oversized pre-cap losers (TRUMP/STABLE/XMR/PF_AVAXUSD ~$500 notional) as source=pre_v10_contaminated — excluded from PF/WR calculations
+
+## 2026-04-05
+- fix(perps_engine): close trade notes now include score/tier/setup/regime for learning loop attribution
+
+## 2026-04-05
+- fix(position_manager): ATR-proportional min hold for shorts (atr_pct×720000s, 2h-12h clamp); triple trailing stop 1.5×ATR→4.5×ATR (all 6 sites: check_exits LONG/SHORT, update_trailing_stop LONG/SHORT, activate_trailing LONG/SHORT)
+
+## 2026-04-05 — v13 Strategy Optimization
+- strategy(v13): economics gate now receives actual 3.0x ATR stop_multiplier from v10_runner (was hardcoded 1.5x — fee drag was computed against half the real stop, making EV 2x too pessimistic)
+- strategy(v13): EV tier thresholds doubled to match 3.0x ATR distances — A+(1.6%), A(0.8%), B(0.3%), edge_score cap(3.0%) — same real selectivity as v10 but correctly calibrated
+- strategy(v13): WAE explosion long/short now requires both fast AND slow MACD histogram to agree — eliminates false Tier 1 fires on fading momentum (8% WR on 37 stale trades)
+- strategy(v13): Tier 1 composite floor added (50.0) — named setups with ultra-low composite are now blocked at the entry gate
+- strategy(v13): Tier 2 entry threshold raised from 50 → 58 — scores 50-57 showed negative edge across 88 paper trades
+- strategy(v13): win_rate_estimate passed to economics gate uses 0.54 for Tier 1 and scales 0.50-0.60 for Tier 2 based on composite (was hardcoded 0.52 flat)
+
+## 2026-04-04
+- audit(v10.1): 4 verified bug fixes — Kelly query now covers SHORT exits + contamination filter, live_trade_days ISO date parse fixed, exit price sanity guard added (prevents yfinance ETF contamination at close), position_manager docstring updated to 0.25 thesis threshold. DB: REZ phantom -$2.5M close purged, REZ chain tagged contaminated. Behavioral freeze: all thresholds/exits/sizing unchanged.
+
+## 2026-04-04
+- fix(critical): position state persistence, hedge btc_price, health_check wired, Run Scan Now button, DB schema v10.2
+
+## 2026-04-04
+- fix: widen hard stops 3×ATR, loosen thesis exit, dual-exposure QA guard, exclude force_test_close from all stats
+
+## 2026-04-04
+- fix(runner): price sanity guard on all bot entries — candle vs live mark price must be within 20% or entry is skipped
+
+## 2026-04-04
+- fix(dashboard): redesign status bar — 6 clear columns, no duplicate scan info, equity delta shortened, deployed capital shown
+
+## 2026-04-04
+- fix(dashboard): balance now shows true equity including unrealized P&L from open positions
+
+## 2026-04-04
+- fix(historical_data): route short coin names to Hyperliquid FIRST — prevents yfinance stock-ticker conflicts (LIT ETF, HEMI, REZ, ALT etc.); cache HL data in SQLite
+
+## 2026-04-04
+- fix(dashboard): manual trades use live price when candle is wrong (yfinance stock-ticker conflict); no more hard rejects for HL symbols
+
+## 2026-04-04
+- fix(dashboard): tighten price sanity check to 10% (was 20%)
+
+## 2026-04-04
+- fix(dashboard): price sanity check on manual trades — rejects if candle price >20% off live Kraken/HL price
+
+## 2026-04-04
+- fix(db): purge 4 phantom positions with bad entry prices (ARB 317x, PUMP 8348x, REZ 24879x, SUI 149x off real price)
+
+## 2026-04-04
+- fix(dashboard): open positions — live prices via Kraken+HL, unrealized P&L, color-coded rows; fix balance NULL-source filter; fix Styler .hide() crash
+
+## 2026-04-04
+- chore: full pre-live cleanup — delete legacy/, purge stale DB, remove dead telegram/bybit/webull code, update GEMINI.md
+
+## 2026-04-04
+- fix(perps_engine): restore positions from SQLite on startup; fix(v10_runner): 2-hr cooldown after close prevents thesis-exit churn; SQLite guard on entry prevents post-restart double-entry
+
+## 2026-04-03
+- fix(sizing): apply Kelly to position_usd;  hard cap per position; real deployed_usd passed to manual trades; min notional 
+
+## 2026-04-03
+- fix(dashboard): manual execute now uses compute_position_size() — Kelly, ML score, vol regime, 20% cap, leverage schedule; shows lev and kelly in result
+
+## 2026-04-03
+- fix(dashboard): balance/winrate/PF now accurate — net fees subtracted, won field used for closes, PF uses net-of-fee PnL
+
+## 2026-04-03
+- fix(dashboard): status bar accuracy — Balance shows actual PnL+base, scan age human-readable, profit factor in Win Rate delta, today P&L source-filtered
+
+## 2026-04-03
+- fix(perps_engine): open_long/short now call persist_position(); close_position calls delete_position() — open positions finally visible in dashboard
+
+## 2026-04-03
+- fix(dashboard): get_last_scan_age() reads log backwards without line cap — fixes false STALE when 1000+ noisy lines follow the scan entry
+
+## 2026-04-03
+- feat(dashboard): manual scan redesign — win probability bar + full ℹ detail card per candidate (breakdown table, EV math, raw indicators)
+
+## 2026-04-03
+- feat(dashboard): Run Scan button + manual trade approval — force=True on scan(), render_manual_scan() with data_editor checkboxes
+
+## 2026-04-03
+- feat(scripts): add force_10_trades.py — test harness that runs full entry→score→execute→close pipeline with threshold=38, verified 10/10 trades completed
+
+## 2026-04-03
+- fix(historical_data): add Hyperliquid fallback in get_candles() — HL symbols (HYPE, ETHFI, TON, MORPHO, etc.) were returning 0 bars; now tried after Binance+yfinance fail via _fetch_hyperliquid() POST to candleSnapshot API
+
+## 2026-04-03
+- feat(dashboard): add FUTURES tab — st.tabs([CRYPTO PERPS, FUTURES(MES)]); futures tab shows market hours, OR range, daily P&L, position state, today's trades, strategy playbook, config expander; runner writes mes_state to system_events each cycle
+
+## 2026-04-03
+- fix(ibkr_broker): rename num_contracts→qty, add stop_price/target_price absolute-price params to buy_mes/short_mes; fixes parameter mismatch with v10_runner calling convention
+
+## 2026-04-03
+- feat(futures): VWAP Mean Reversion strategy for MES — 1-min yfinance bars, session VWAP + RSI(14) + ATR(14); entry >2σ from VWAP with RSI confirmation; 1 contract, stop 1.5 ATR, target VWAP; runs 10:00-14:30 ET alongside ORB
+
+## 2026-04-03
+- feat(scanner): add Hyperliquid perps exchange — 80+ markets, no geo-block, POST-based API (_post helper, _hl_meta_and_ctxs, _hl_klines, _hl_ob), integrated into 7-step pipeline alongside Kraken
+
+## 2026-04-03
+- fix(scanner): ADX recurrence bug — formula was adding full raw DX[i] (Wilder TR-smoothing style) instead of DX[i]/period; all markets showed ADX ≈ 100, blocking ranging_mr setup; fix: use EMA-style ADX[i] = ADX[i-1]*(1-1/n) + DX[i]/n
+
+## 2026-04-03
+- feat(scanner): Kraken+Binance dual-exchange, 5 sub-filters (momentum/kst_cross/supertrend/ranging_mr/funding_collect), up to 50 candidates, $500K vol floor, $5K OB floor, parallel ThreadPoolExecutor, scan_setups[] tracking per candidate
+
+## 2026-04-03
+- refactor(dashboard): one page, no tabs, no custom HTML cards — st.metric/dataframe/line_chart only; minimal CSS (hide chrome only); all 8 sections scroll vertically; data layer unchanged
+
+## 2026-04-03
+- feat(signals): wire SuperTrend/KST/Ichimoku as Tier 1 entries; add cross detections in indicators.py; inject 8 cross features in v10_runner; 6 new Tier 1 setups in signal_engine; TV webhook launchd plist + install_services wired; remove LeBron/Goku theme strings from main.py + config.py
+
+## 2026-04-03
+- feat(dashboard): complete ground-up rebuild — 5 tabs (WAR ROOM/PERFORMANCE/SIGNAL BRAIN/SCANNER/SYSTEM), all data read from live DB + bot.log + config imports; Bayesian signal stats table, real 37-condition technical tower, Tier1/Tier2 setups from signal_engine, scanner pipeline steps, economics gate + sizer + exit stack from live constants
+
+## 2026-04-03
+- feat(ml): activate 57-feature ML tower — trade_features table stores full feature snapshots per entry; walk_forward_trainer joins snapshots for real 57-col training; perps_engine threads trade_id back to v10_runner; proxy fallback preserved until MIN_TRADES snapshots accumulate
+
+## 2026-04-03
+- refactor(cleanup): v10.1 repo cleanup — move v9 files to legacy/, fix stale telegram imports, rewrite GEMINI.md to v10 truth
+
+## 2026-04-03
+- fix(CRITICAL wae-churn): add 10-minute minimum hold before thesis invalidation can fire — wae_explosion was entering and exiting within 30 seconds every 5-min cycle (~20x on PF_TAOUSD today) because WAE bullish flag is a single-bar event that goes false on the next bar; position_manager now skips thesis check until entry_ts + 600s
+- feat(kst): wire KST oscillator into live scoring path — kst_bullish (KST > signal line) +8 pts long, kst_bearish (KST < signal line) +8 pts short; injected via add_all_indicators in _attempt_entry
+- fix(dashboard): add get_scanner_status() function — scanner tab was crashing with NameError on every render cycle, poisoning the debug tab too
+
+## 2026-04-02
+- feat(flat-market): 3 strategic fixes for ranging/flat conditions — (1) signal_engine.py: added ranging_mr_long/ranging_mr_short Tier 1 setups (CHOP>61.8 + VWAP dist <-0.15% + LRSI<0.25); all momentum setups (wt_reversal, squeeze_breakout, wae_explosion) gated with chop_ranging==0 so they suppress in flat markets; (2) v10_runner.py: chop_ranging, squeeze_fired, squeeze_direction injected into features dict; economics gate called with is_ranging=bool(chop_ranging>0); (3) economics_gate.py: Bybit fees (0.055%) → Kraken taker (0.065%), ROUND_TRIP=0.130%; added is_ranging param — when True EV floor tightens 0.15%→0.25% and R:R floor 1.2→1.5 (flat markets have smaller expected moves relative to fees)
+- fix(v10 live): signal thresholds lowered to 47 for OHLCV-only operation — first paper trade entered (PF_TAOUSD LONG $850 @ $300.42 composite=54.7)
+- refactor(entry-path): tier 1 setup triggers replace score gate as primary entry mechanism — score is now sizing-only; economics gate moved after scoring; thesis exit is now condition-based (setup invalidated) for tier 1, score-comparison fallback for tier 2; 4 long + 4 short primary setups defined in signal_engine.py (wt_reversal, squeeze_breakout, wae_explosion, tv_confirmed); entry_setup stored on position for exit tracking; tier 1 full size, tier 2 0.75x
+- feat(signal-engine): wire v4.3 indicators + TradingView into live v10 scoring path — SuperTrend (+12), Ichimoku cloud (+8), WAE bullish+exploding (+10/+5), Ehlers Fisher cross (+8), Choppiness trending (+5), WaveTrend oversold cross (+12), Laguerre RSI oversold (+8/+4), TV signal confirmation (+20); bearish mirrors added to short scorer; all injected into features dict after build_features() in _attempt_entry()
+- fix(live-path audit): 4 targeted fixes — (1) scanner.py step4: reject candidates with <15 bars or EV calc exception instead of auto-approving with fake expected_profit; (2) signal_engine.py: raise thresholds 47→50 (47 was below the meaningful signal floor; 50 requires majority OHLCV alignment); (3) ml/walk_forward_trainer.py: add AND t.paper=0 to training filter — previously could include paper trades if source was mistagged; (4) v10_runner.py: document model_store=None intentional until 50+ live trades accumulated
+
+
+## 2026-04-02 — BYBIT REMOVAL / KRAKEN FUTURES MIGRATION
+
+- **fix(scanner)**: complete rewrite to Kraken Futures public REST API — removes Bybit V5 (geo-blocked for US residents). Replaces with `futures.kraken.com` public endpoints: `/derivatives/api/v3/tickers` for universe (21 liquid PF_ perps), `/api/charts/v1/trade/{symbol}/{interval}` for OHLCV, `/derivatives/api/v3/orderbook` for depth. No API key required. All endpoints verified working from US IP. BTC symbol is `PF_XBTUSD`. Round-trip fee updated to 0.13% (Kraken taker). Uses stdlib `urllib` only.
+- **delete(bybit_broker)**: `execution/bybit_broker.py` removed — Bybit not viable for US users.
+- **fix(main.py)**: banner updated — "Bybit USDT perps" → "Kraken Futures perps".
+- **fix(GEMINI.md)**: data source updated — Bybit V5 REST → Kraken Futures public REST.
+
+## 2026-04-02 — LIVE-READINESS OVERHAUL (full audit + implementation)
+
+### P0 — Live-blocking fixes
+
+- **fix(signal_engine)**: remove paper mode -20pt threshold reduction — `signal_engine.py` now uses identical thresholds in paper and live (TRENDING=62, RANGING=68, HIGH_VOL=72). Prior paper trades at threshold 42-52 were invalid; all such data tagged contaminated in DB.
+- **fix(scanner)**: complete rewrite to Bybit V5 REST API — removes Binance fapi (geo-blocked US) and CoinGecko fallback (synthetic fake perp tickers with fabricated OHLCV). `_fetch_tickers()` and `_fetch_klines()` now use `api.bybit.com/v5/market/`; no yfinance fallback; instruments-info validation set (24h cache) rejects non-existent symbols; OB depth check changed fail-closed (candidate rejected if OB unavailable, not silently passed); fee+funding modeled in EV; `_MIN_EXPECTED_PROFIT` restored to $3.00; `_TOP_N` restored to 15.
+- **feat(bybit_broker)**: new `execution/bybit_broker.py` — pybit v5 unified account, USDT perpetual, isolated margin, server-side SL/TP, paper mode via SQLite, `get_bybit_broker()` singleton. No Telegram imports.
+- **feat(economics_gate)**: new `risk/economics_gate.py` — pre-trade EV veto gate. Models Bybit taker fees (0.055%×2), spread, funding carry (1.5 settlement periods). Outputs quality tier (A+/A/B/VETO), ev_pct, roi_on_margin, edge_score. Wired into `_attempt_entry()` in v10_runner before feature building. Rejection logged to dashboard with reason.
+- **fix(ml_training)**: `ml/walk_forward_trainer.py` — removed `paper=?` filter; replaced with `source NOT IN ('backtest', 'pre_v10_contaminated')` — model now trains on clean architecture-consistent data regardless of paper/live mode.
+- **fix(ml_tagging)**: `learning/post_trade_analyzer.py` — default `source` changed from `'live'` to `'paper'`; live trades must explicitly pass `source='live_v10'`. Prevents paper trades under relaxed thresholds contaminating future ML training.
+- **fix(v10_runner hardcodes)**: `scheduler/v10_runner.py` — replaced `vol_regime=2`, `fg_current=50.0`, `edge_score=0.5` hardcodes with values extracted from feature vector (`regime_vol_mult`, `regime_fg_current`) and economics gate result.
+
+### P1 — Data pipeline and architecture
+
+- **feat(tv_ingestion)**: `scheduler/v10_runner.py` — TradingView signals now read from `system_events WHERE source='tradingview'` (max 5 min old) at the top of every scan cycle. TV candidates prepend scanner candidates with priority. Deduplication via bounded key set.
+- **fix(ibkr_broker)**: `execution/ibkr_broker.py` — removed dead `from alerts.telegram_alert import ...`; replaced with `notifications.notification_engine` wrapped in try/except.
+- **refactor(unified_sizer)**: replaced 6-factor chain (V×E×D×T×K×M) with clean 3-factor formula: `notional = (account × 1.5% × quality_mult) / stop_dist_pct`, capped by portfolio heat and 25% single-position hard cap. Legacy `get_position_size()` shim preserved.
+- **feat(readiness_panel)**: `dashboard/app.py` — added READINESS TRACKER expander in SYSTEM tab. Shows 7 clean-trade metrics (WR, PF, worst day, days running, veto rate, kill triggers). Informational only — no gating logic.
+- **fix(main_banner)**: updated banner to show "Bybit USDT perps" instead of "Binance USDT perps".
+
+### Repo cleanup
+
+- Deleted dead execution files: `tradovate_broker.py`, `coinbase_broker.py`, `binance_spot_broker.py`
+- Deleted removed ai_agents remnants: `analyst_agents.py`, `debate_engine.py`, `exit_review.py`, `risk_synthesizer.py`
+- Deleted Lane 3 prediction market files: `polymarket_broker.py`, `kalshi_broker.py`, `polymarket_feed.py`, `kalshi_feed.py`, `lane3_scanner.py`, `prediction_arb.py`, `pm_calibrator.py`, `tax_tracker.py`
+- Archived v9 schedulers (not deleted — audit trail preserved): `v9_crypto_scanner.py.archived`, `v9_perp_scanner.py.archived`, `v9_exit_monitor.py.archived`
+
+### DB migration
+
+- `scripts/migrate_clean_start.py` — run once to tag all existing trade_attribution rows as `pre_v10_contaminated`. Executed: 18,403 rows tagged (18,172 backtest + 231 paper). ML training now starts from zero clean trades; model falls back to 100% technical weighting until clean data accumulates.
+
+### Go-live readiness (per owner preference — tracking only, not gates)
+
+- Paper and live now use identical signal thresholds — paper data is valid for assessing live performance
+- ML training data is clean from this point forward
+- Universe is validated against Bybit instruments (no synthetic tickers)
+- Pre-trade economics gate enforces fee/funding viability before any execution
+- Owner retains full go-live authority — readiness metrics are displayed in dashboard, never enforced by code
+
+## 2026-04-02
+
+## 2026-04-02
+- feat: add risk/economics_gate.py (pre-trade EV veto) + execution/bybit_broker.py (pybit v5 perp broker)
+
+## 2026-04-02
+- fix(scanner): replace Binance fapi + CoinGecko with Bybit V5 REST — no geo-block, no fake tickers; instruments-info validation set (24h cache); OB fail-closed (reject on missing data); fee+funding EV model; _MIN_EXPECTED_PROFIT restored to $3.00; _TOP_N restored to 15; no yfinance fallback
+
+## 2026-04-02
+- fix(ibkr_broker): replace dead telegram_alert import with notification_engine; wire TradingView signals into v10_runner scan_and_trade as priority candidates
+
+## 2026-04-02
+- v10: perp-first tuning — 15 max positions, 95% deployed, no correlation penalty, top-20 scanner
+
+## 2026-04-02
+- v10: scanner yfinance fallback + paper trading fixes (US geo-block workaround)
+
+## 2026-04-01
+- v10 live: scheduler wired, 1-day paper requirement, system ready to run
+
+## 2026-04-01
+- v10 Phases 12-15: learning loop, notification engine, backtest validation, readiness checker — build complete on feature/v10-rebuild
+
+## 2026-04-01
+- v10 Phase 2: data pipeline — realtime_feeds.py (WebSocket), historical_data.py (OHLCV cache), sentiment_data.py (F&G + Deribit + onchain)
+
+## 2026-04-01
+- v10 Phase 1: architecture doc, DB migration (9 new tables), removed 10 deprecated files (agents, telegram, super_score, meta_learner)
+
+## 2026-04-01
+- v9.4: learning loop end-to-end fix — engine signals (cascade/divergence/obi/vwap_reclaim/near_miss) now stored on position at entry and injected into attribution at exit; meta-learner DB-backed counter; perp 4h winner rule; near-miss paper signals; 6-min forced-trade timer; FUTURES_ENABLED=false
+
+## 2026-04-01
+- Perp exits: let winners run past 4h (>0.5% PnL = skip close, 8h hard max); fixes avg win  vs avg loss  imbalance causing PF 0.66
+
+## 2026-04-01
+- Fix learning loop holes: perp exits now build real market_data; crypto exit candle threshold 20→5; meta-learner counter DB-backed (survives restarts); ML pkl force-retrained (was 40h stale)
+
+## 2026-04-01
+- Paper forced-trade timer: one entry every 6 min if no organic trade and slots open
+
+## 2026-04-01
+- Fix divergence: compute per-symbol change_pct (was always 0, breaking all divergence signals)
+
+## 2026-04-01
+- Paper near-miss signals: relaxed thresholds in paper mode to force pipeline trades; heatmap fix: get_scan_feed now returns structured fields
+
+## 2026-03-30
+- v9.3: perp watchdog + traceback logging + risk reduction (post 2026-03-30 audit)
+
+## 2026-03-30
+- v9.2: perp exit restart fix + ML data fix + agent_votes format + dashboard overhaul + buy_limit qty fix
+
+## 2026-03-30
+- Dashboard: fix comp_positions To Stop / To Target showing entry-based distances instead of live current-price distances; now correctly shows how far current price is from stop and target
+## 2026-03-30
+- Dashboard: fix NameError TEXT1 (undefined color constant in comp_positions); fix float(None) on low_since_entry in comp_trade_quality; both caused all non-overview tabs to render blank
+- Dashboard: Edge Monitor clarity — fix STATUS_CLR mismatch (OK/BLOCKED now colored correctly vs gray); remove fake win_rate_20 row; NO DATA label when window=0; bar normalized to STRONG threshold; PF shown prominently; "X/30 (building)" trades counter; LIVE READY badge on STRONG
+## 2026-03-30
+- v9.1: scan speed overhaul — parallel inter-symbol debates (ThreadPoolExecutor fan-out in crypto_scanner.py Phase 2), MTF candle cache (240s TTL, eliminates redundant Coinbase REST calls), scan interval halved 30s→15s in config.py
+- v9.1: MTF granularity bug fix — _get_5m_candles was passing integer 300 instead of 'FIVE_MINUTE' string; Coinbase silently rejected all 5-min bar requests; all MTF confluence was always absent
+- v9.1: low_since_entry persistence fix — persist_position() now saves low_since_entry to DB; load path uses explicit None check; register_position + update_high pass low_since_entry through; fixes perp TypeError '<' not supported between float and NoneType permanently
+- v9.1: should_exit None guards — stop_price/target_price/high_since_entry all guarded against None before comparison in stop_loss_manager.py
+- v9.1: dead pair cleanup — removed 7 zero-volume/delisted pairs (LTC, NEAR, APT, OP, ARB, SUI, PEPE, MATIC) from CRYPTO_PAIRS; replaced with ATOM, LDO, FIL, AAVE, ICP, SNX, COMP (all liquid on Coinbase USDC)
+- v9.1: ML gate log fix — crypto_scanner now shows correct < vs >= and "paper bypass (would BLOCK live)" vs "gate passed"
+
+## 2026-03-29
+- 9-feature build: cumulative delta, Deribit IV skew, on-chain whale, derivatives momentum scanner (Lane 4), MTF alignment, partial profit taking (50% at 50% target), tighter trailing stop (2%, activates at 40% target), time-of-day ML features, regime-aware position sizing (R factor)
+
+## 2026-03-28
+- Dashboard v12.0: tabbed layout — 6 tabs (Overview/Crypto Spot/Perp/Predictions/Intelligence/System), new comp_crypto_tab and comp_perp_tab functions
+
+## 2026-03-28
+- Sprint 5: ml_trainer.py offline trainer, ml_signal.py background retrain, prediction_arb.py, CI branch fix
+
+## 2026-03-28
+- Task 1: run_parallel_scan() in job_runner.py — crypto/perp/lane3 now run in parallel ThreadPoolExecutor (3 workers, 5-min timeout each); separate schedule lines for perp/lane3 removed. Task 2: scripts/promote_perp_live.py — 8-check paper-to-live checklist for Binance perp (API keys, testnet conn, trade count, win rate, risk limits, halt state, fee viability, manual confirm)
+
+## 2026-03-28
+- Add market_sentiment.py: Reddit + options market signals (P/C ratio, IV rank, term structure) as sentiment layer; wired into market_context.get_context_for_debate() and _helpers._build_market_data()
+
+## 2026-03-28
+- Wire super_score through full trading pipeline: signal_performance, post_trade_analyzer, risk_manager, crypto_scanner (pre+post-debate compute, abort<40, size multiplier), exit_monitor (decay exit + attribution)
+
+## 2026-03-28
+- Dashboard: add TRADE QUALITY section — entry timing, exit efficiency, thesis hit rate, super score avg, exit mix, open position health cards
+
+## 2026-03-28
+- Add learning/super_score.py (0-100 unified composite) + trade_logger get_trade_quality_stats / get_open_position_health + super_score DB migration
+
+## 2026-03-28
+- Binance spot broker: replace Coinbase execution with Binance spot (4x cheaper fees: 0.10% vs 0.40%)
+
+## 2026-03-28
+- Switch debate agents (Bardock/Vegeta/Krillin) from Sonnet to Haiku via CLAUDE_DEBATE_MODEL; exit review (Tudor Jones/Soros/Simons) stays on Sonnet
+
+## 2026-03-28
+- generate_daily_summary: add fee-ratio alert (>2x) and backtest-vs-live WR divergence alert (>10pp) to daily markdown summaries
+
+## 2026-03-28
+- Add backtesting/full_pipeline_backtest.py: full-pipeline backtest mirroring production 4-signal gate + ML gate with real fees and slippage
+
+## 2026-03-28
+- Add data/liquidation_feed.py (Binance L/S ratio, 10-min cache, fail-open) + inject liq_signal/liq_avoid_long/liq_long_ratio into _build_market_data() in scheduler/_helpers.py
+
+## 2026-03-28
+- Add scripts/inspect_ml_model.py + wire feature importances into learning/ml_signal.py
+
+## 2026-03-28
+- Slippage: wire BACKTEST_SLIPPAGE_PCT from .env into config.py (0.001 default) and as default for all 7 public slippage= params in backtest_engine.py
+
+## 2026-03-28
+- Add scripts/backfill_agent_stats.py: reconstructs agent_stats from debate_results x trades join
+
+## 2026-03-28
+- Sprint 2: Lane 3 Prediction Markets — Polymarket + Kalshi + ensemble forecaster + calibrator + whale tracker + Telegram alerts + dashboard panel
+
+## 2026-03-27
+- Strategy expansion: VWAP reclaim (signal 5), fade-the-rally SHORT, range scalper, wire Kyle Lambda + Amihud — from 4 strategies to 7, fix MR independence bug
+
+## 2026-03-27
+- Philosophical reoptimizations: edge monitor, options flow, Landry bar count, stop cooldown
+
+## 2026-03-27
+- Sprint 8: Validation — all 3 markets import clean, 66 tests passing, go-live criteria updated to 8-criterion Phase-9 spec
+
+## 2026-03-27
+- Sprint 2: unified math framework — volatility_regime.py, edge_monitor.py, unified_sizer.py (V×E×D×T×K×M formula), 5-min candles, 29 tests
+
+## 2026-03-26
+- v9.1 — CI/CD + heat system + calibrator + BB bug fix + MACD exit removal
+
+## 2026-03-26
+- Remove MACD SELL as exit trigger — was cutting winners at avg $0.27 (57 orphan exits identified via SQL audit). All exits now owned by monitor_exits_with_ai.
+
+
+## 2026-03-26 (v9.0 — Sprint 1 Foundation)
+- **job_runner.py decomposed**: 1,812-line god object → 6 focused modules (86% reduction)
+  - `scheduler/_helpers.py` (273L): shared state, optional-import flags, 3 helper fns, strategy singletons
+  - `scheduler/exit_monitor.py` (329L): AI exits, hard-stop/time/stagnant exits, post-trade attribution, EOD close
+  - `scheduler/equity_scanner.py` (227L): Clenow ranking, Minervini, AI debate, F&G/IV sizing
+  - `scheduler/crypto_scanner.py` (641L): 8-signal gate, ML gate, microstructure veto, 3-agent debate, MR path
+  - `scheduler/perp_scanner.py` (153L): Binance perp entry/exit, 4h flat exit
+  - `scheduler/job_runner.py` (258L): thin orchestrator — re-exports sub-modules, futures/watchdog/premarket/schedules
+- **Bybit → Binance migration**: `execution/binance_broker.py` (NEW, 320L) replaces deleted bybit_broker.py
+  - `python-binance` library, STOP_MARKET/TAKE_PROFIT_MARKET server-side SL/TP, ISOLATED margin
+  - `BINANCE_TESTNET=true` in .env — fill keys at testnet.binancefuture.com to activate
+  - Fees: 0.040% taker (cheaper than Bybit's 0.055%)
+  - `get_bybit_broker` alias preserved; config.py/validate.py/.env all updated
+- **Risk decomposition**: 527-line risk_manager.py → thin orchestrator + 5 modules
+  - `risk/position_sizer.py`: 25%-fractional Kelly, 5-loss clamp, floor/cap
+  - `risk/stop_loss_manager.py`: calc_stop_loss, calc_take_profit, should_exit (hard/trailing/TP)
+  - `risk/drawdown_controller.py`: daily loss gate + fee drag gate
+  - `risk/risk_limits.py`: market hours, position limits, deployment cap, crypto fee gate; RiskCheckResult moved here
+  - `risk/var_calculator.py`: historical simulation VaR (95/99% confidence) — new capability
+- **MCP server** (`mcp_server/server.py`): 15 FastMCP tools expose full bot state to Gemini Code
+  - Tools: positions, trades, signals, agent accuracy, ML signal, price history, macro, scan, debate, backtest, readiness, notifications
+  - Start: `python3 mcp_server/server.py`
+- **Gemini Code agents** (`.gemini/agents/`): portfolio_manager, trade_strategist, devil_advocate, system_engineer
+- **Gemini Code commands** (`.gemini/commands/`): /health, /audit, /deploy, /optimize, /build-strategy
+- **Test suite** (`tests/`): test_indicators.py, test_risk_manager.py, test_broker_paper.py (~25 tests total)
+- **GitHub**: Repository futureisnowtech/trading-bot-main live; SSH push configured; pre-commit validation hook active
+- **Dead code removed**: webull_broker.py deleted; bybit_broker.py deleted; scripts/generate_system_html.py removed
+- **GEMINI.md**: Updated to v9.0 with project structure, GitHub section, Sprint 1 changes
+
+## 2026-03-26
+- v8.1: auto_env_updater.py — automatic ML threshold + position size progression via launchd every 6h
+
+## 2026-03-26
+- v8.0 fixes: walk-forward wired into run_backtest.py, ML schema fixed for trade_attribution, ML threshold calibrated to 0.08 for seeded data
+
+## 2026-03-26
+- v8.0: 3-agent debate (11→3 API calls), ML signal layer (LightGBM), walk-forward OOS, funding rate wired, cooldown removed
+
+## 2026-03-26
+- v7.1: RBIPMS framework — RBI audit + walk-forward standards + incubation playbook + strategy lifecycle docs
+
+## 2026-03-25
+- v7.0: AI-first pipeline — prescreener + meta-learner + live backtest validator
+
+## 2026-03-25 — v6.0: AI-First Rework — Conviction Score Becomes Context, Not Gate
+
+**Core architectural change:**
+The hard conviction floor (30pts) that blocked the AI debate has been removed.
+The math signal scoring now feeds the AI as rich context rather than deciding for it.
+
+- **scheduler/job_runner.py**: Conviction gate removed. New gate: any signal fires + macro not blocked + ATR fee floor passes. `should_block_trade()` now called pre-debate as the real macro/news gate (RISK_OFF, HIGH news risk, VIX extreme fear). `active_signals` list built per symbol (canonical DB names) and added to `market_data`. Session bias + multiplier injected as readable text into debate context (not a numeric floor).
+- **learning/signal_performance.py**: Added `get_active_signal_stats_brief(active_signals, regime)` — returns compact Bayesian win-rate table for fired signals, injected into every agent prompt. Added `get_agent_self_accuracy(agent_name, regime)` — returns per-agent historical accuracy one-liner for their own prompt.
+- **strategies/ai_agents/analyst_agents.py**: Conviction score, active signal list, Bayesian signal win-rate table, and per-agent historical accuracy now injected into every agent user prompt. Each agent sees: "CONVICTION SCORE: X/100", which signals fired, how those signals have historically performed, and their own past accuracy.
+- **strategies/ai_agents/debate_engine.py**: Conviction score + active signals summary added to moderator synthesis prompt.
+- **TODO.md**: Created — tracks manual tasks, in-progress AI-first work, and future improvement ideas.
+
+## 2026-03-25 — v5.3: AI Session Analyst + Session-aware Routing + Full Wiring
+- **strategies/ai_agents/session_analyst.py** (NEW): AI Session Analyst — fires at Asia (8pm ET), London (3am ET), NY (8:30am ET) opens. Reads news+macro+signal leaderboard. Outputs: session_bias (STRONGLY_BULLISH→STRONGLY_BEARISH), conviction_threshold_multiplier (0.7–1.5×), signal_weight_overrides, strategies_to_favor, avoid_flags, session_notes. Stores to SQLite session_contexts table + 4h memory cache. Bounded multipliers prevent AI from silencing all signals or going wild.
+- **scheduler/job_runner.py** (MODIFIED):
+  - London window OPENED: dead zone reduced from 2-5am → 2-3am ET. London session (3am-8am ET) now fully active as HIGH quality breakout window.
+  - Session analyst integration: conviction threshold = base × session_cv_multiplier. BULLISH session lowers bar, RISK_OFF raises it. Session bias logged on every skip.
+  - Macro+news context wired into every crypto debate: `get_context_for_debate()` + `format_session_context_for_debate()` injected as `context` arg to `run_debate()`. Every agent now sees macro regime, VIX, news sentiment, funding rates before deciding.
+  - Session open triggers added to setup_schedules(): ASIA 8pm ET, LONDON 3am ET, NY 8:30am ET
+  - `run_session_open_analysis()` function added
+- **strategies/ai_agents/exit_review.py** (MODIFIED): Tax-aware exit review — `get_tax_aware_exit_note()` injected into every exit agent prompt. Tudor Jones, Soros, and Simons now explicitly see whether gains are short-term, long-term, or Section 1256 before recommending hold/exit. Added `entry_ts` and `asset_class` parameters.
+
+## 2026-03-25 — v5.2: Goku + Data Feed Layer + Tax Tracking
+- **data/news_feed.py** (NEW): Crypto news sentiment — CryptoPanic API primary, CoinDesk RSS fallback; bearish/bullish/risk keyword scoring; sentiment_score -1.0 to +1.0; 10-min cache; format_news_for_debate() injects into agent prompts
+- **data/macro_feed.py** (NEW): Cross-asset macro context — yfinance (DXY, SPY, GLD, VIX, TLT, BTC), Coinglass public funding rates; macro_score -5 to +5; RISK_ON/NEUTRAL/RISK_OFF regime; 15-min cache; format_macro_for_debate() injects into agent prompts
+- **data/market_context.py** (NEW): Unified context assembler — session detection (ASIA/LONDON/NY_OPEN/PREMARKET/etc.); no_trade_flags (dead zone, HIGH news risk, RISK_OFF, VIX fear, overheated longs); conviction_hints (tailwinds); get_context_for_debate() for debate enrichment; should_block_trade() for pre-debate gate
+- **learning/tax_tracker.py** (NEW): Tax lot tracking — SQLite tax_lots table; Section 1256 detection (MES/futures: 60% LTCG + 40% ST = ~17% blended); short/long-term classification; YTD summary by treatment; estimated liability; harvesting opportunity detection; get_tax_aware_exit_note() injected into exit review; format_tax_summary_for_brain() for daily notes
+- **strategies/ai_agents/analyst_agents.py** (MODIFIED): Added 'goku' to AGENTS dict — Jim Simons / Paul Tudor Jones / Soros, DBZ: Goku (Ultra Instinct); added run_goku() function — 9th agent, runs LAST, sees all other votes + moderator synthesis, absolute veto (-100) and boost (+25) capability, 1200 token limit, no cache (unique context every call)
+- **strategies/ai_agents/debate_engine.py** (MODIFIED): Goku integration — imports GOKU_ENABLED; DebateResult gains goku_verdict/goku_conviction_adjustment/goku_reasoning/goku_insight fields; run_debate() calls run_goku() after moderator when signal=BUY; VETO kills trade + updates reasoning; BOOST raises confidence by +0.15 capped at 0.95; goku verdict shown in __repr__
+- **learning/post_trade_analyzer.py** (MODIFIED): Tax lot recording wired into analyze_closed_trade() — calls record_tax_lot() after every close with asset_class mapped from strategy name
+- **scripts/generate_daily_summary.py** (MODIFIED): Added TAX SNAPSHOT section — calls format_tax_summary_for_brain() for YTD tax breakdown in every daily brain note; added _get_tax_snapshot() helper
+- **config.py** (MODIFIED): Added CRYPTOPANIC_API_KEY, GOKU_ENABLED
+- **.env.example** (MODIFIED): Added CRYPTOPANIC_API_KEY and GOKU_ENABLED placeholders
+
+## 2026-03-25 — v5.0 True Brain: Self-Improving Intelligence Layer
+- **learning/signal_performance.py** (NEW): Bayesian attribution engine — 4 new SQLite tables (trade_attribution, signal_stats, agent_stats, backtest_results); PRIOR_N=20 phantom trades; 19 signal priors; posterior_wr blend; bayesian_pts = prior_pts × (posterior_wr / prior_p) capped 2.5×; MIN_FIRES_TO_LEARN=10
+- **learning/post_trade_analyzer.py** (NEW): Why-this-trade-worked/failed engine; extracts canonical signal names from market_data; generates structured lessons (confluence patterns, fee cannibalization, regime mismatch); called on every trade close
+- **learning/dynamic_weights.py** (NEW): Live conviction weights; 5-min TTL cache; invalidate_cache() after every close; get_conviction_score() replaces hardcoded tier blocks; get_weights_snapshot() for dashboard
+- **learning/intelligence_bridge.py** (NEW): Backtest trade attribution → same signal_stats table as live (source='backtest'); archive_backtest_result() with MD5 param hash; get_best_backtest() for drift detection
+- **data/price_archive.py** (NEW): SQLite candle flywheel at logs/price_archive.db; upsert_candles() + get_candles() + has_data() with 70% coverage threshold; every live fetch auto-archives; backtests read here first (zero re-fetch)
+- **backtesting/strategy_validator.py** (NEW): ValidationResult dataclass; gate checks: win_rate≥45%, Sharpe≥0.5, max_dd≤20%, min_trades≥20, avg_pnl>0; archives to backtest_results; check_live_vs_backtest_drift() for divergence detection
+- **backtesting/backtest_engine.py** (MODIFIED): fetch_data() checks price_archive first; run_with_intelligence() full pipeline: run→extract_trades→validate→archive→return; _extract_trades_from_stats() helper
+- **scheduler/job_runner.py** (MODIFIED): Dynamic conviction weights replace all hardcoded tier blocks; analyze_closed_trade() + invalidate_cache() wired into LONG and SHORT crypto exits, equity exits; candle archiving after every fetch; agent accuracy context injected into debate prompts
+- **scripts/seed_intelligence.py** (NEW): One-time Bayesian prior seeding from 90-day backtest data; loops top 8 pairs; runs run_with_intelligence() + upsert_candles(); prints signal leaderboard with Bayesian vs prior pts
+- **scripts/generate_daily_summary.py** (UPDATED): Signal attribution auto-populates "What to Keep/Change/Test/Stop" section; queries trade_attribution, signal_stats, agent_stats; real signal leaderboard table in every daily note
+- **Bug fix**: SHORT branch of _execute_crypto_exit was missing analyze_closed_trade() call — fixed
+
+## 2026-03-25
+- Add generate_daily_summary.py + launchd brain service — auto-writes brain/06_daily_summaries/ at 9:47pm nightly
+
+## 2026-03-25
+- Brain architecture — /brain/ directory + 9 intelligence layer notes (constitution-governed)
+
+## 2026-03-25
+- v4.3 — 7 new indicators: SuperTrend, Ichimoku cloud, WAE, Fisher Transform, CHOP, WaveTrend, Laguerre RSI
+
+## 2026-03-24
+- v4.2 — TradingView Pro webhook integration
+
+## 2026-03-24
+- v3.9: Advanced math overhaul — 8-signal pre-filter, ATR fee-floor guard, full conviction scoring for Hurst/Kalman/squeeze/RV/AVWAP
+
+
+---
+
+## 2026-03-23 (v3.4 patch 4) — Dashboard System Health Overhaul
+- **dashboard/app.py config imports**: Added MAX_DAILY_LOSS_PCT, MAX_DAILY_FEE_DRAG_PCT,
+  MAX_STRATEGY_LOSS_STREAK, CRYPTO_MIN_ADX to top-level imports so panels never hardcode them.
+- **_panel_risk() → _panel_system_health()**: Complete rewrite. Now shows:
+  - Bot alive indicator: 🟢 LIVE (Ns ago) / 🟡 STARTING / 🔴 STALE / 🔴 HALTED with reason.
+    Uses rm.watchdog_ok(120s) — flags if no scan completed in 2× the scan interval.
+  - Daily loss bar: live % vs MAX_DAILY_LOSS_PCT halt threshold, shows $ amounts too.
+  - Equity/crypto trade bars: use MAX_TRADES_PER_DAY_EQUITY/CRYPTO from config (was hardcoded
+    3/10 — crypto limit was wrong, config has 100).
+  - Fee drag bar: fees today as % of real balance vs MAX_DAILY_FEE_DRAG_PCT halt threshold.
+    Turns red when ≥80% of limit.
+  - Circuit breaker progress: MACD and MeanRev consecutive loss streak vs MAX_STRATEGY_LOSS_STREAK.
+    Color-coded: orange at 50%, red at 75%.
+  - API cost: monthly total + daily average estimate.
+  - Broker status: live Coinbase connection check + PAPER/LIVE mode label.
+- **Scan feed "waiting" message**: Now pulls CRYPTO_SCAN_INTERVAL_SECONDS and
+  EQUITY_SCAN_INTERVAL_SECONDS from config instead of hardcoding "60s".
+
+## 2026-03-23 (v3.4 patch 3) — Deep Audit Fixes Round 2
+- **regime_detector.py**: Added `intraday` parameter. SPY daily threshold bb_width>8% was never
+  triggered on crypto 5-min candles (normal bb_width 0.3–1.0%). New intraday thresholds:
+  volatile when bb_width>1.2%. Crypto scan now calls `detect_regime(df=df_ind, intraday=True)`.
+- **risk_manager.py trailing stop**: Entry buffer before trailing activates changed from 3% to
+  0.5% for crypto (strategy names containing 'crypto' or 'mean_reversion'). Kept 2% for equity.
+  Old 3% buffer meant trailing never kicked in on normal crypto moves. On a +1% spike that
+  reverses, we now trail from the high instead of watching it give back all gains.
+- **job_runner.py indicator pre-filter**: Removed RSI from pre-filter. crypto_macd.py explicitly
+  documents "Adding RSI as entry filter DESTROYS edge." Pre-filter now gates only on MACD signal
+  or unusual volume spike — consistent with the strategy's documented philosophy.
+- **coinbase_broker.py buy_limit (live mode)**: Added order status verification — waits 1.5s then
+  checks Coinbase for fill status. Cancelled/failed orders no longer register phantom positions.
+  Partial fills (< 90% filled) are tracked at actual filled size rather than requested size.
+- **exit_review.py**: Reduced API timeout per agent 45s→15s. With 3 agents per position and
+  multiple open positions, the old timeout could block the scan loop for 2+ minutes. 15s is still
+  generous for API response and matches scan interval scale.
+
+## 2026-03-23 (v3.4 patch 2) — Deep Audit Fixes (MACD params, mean-reversion fee math, mins_in fallback)
+- **config.py MACD parameters**: Corrected to match backtested values — MACD1 12/26/9→3/15/3,
+  MACD2 5/13/3→4/16/3, MACD3 8/21/5→6/20/5. Running wrong params meant the documented Z-score
+  70.81 backtest edge was NOT being applied. This is the most impactful fix in the whole audit.
+- **crypto_mean_reversion.py fee math fix**: Stop widened 1.5%→2.0%. Min R:R raised 1.5x→2.5x.
+  Added hard minimum reward distance: target must be ≥4% above entry (not just a R:R ratio).
+  Fallback TP raised 2.5%→5.5%. Old config needed 90% WR to break even (unachievable).
+  New config needs 42% WR (achievable). Strategy will fire much less often but only when viable.
+- **job_runner.py mins_in fallback**: Changed from 30→0 on parse failure. Default of 30 could
+  trigger time-based exits on brand-new positions with malformed timestamps. Default 0 = safe
+  (blocks time exits, assumes just entered).
+
+## 2026-03-23 (v3.4 patch 1) — Fix $0.00 P&L Churn Trades
+- **config.py**: Added `CRYPTO_MIN_HOLD_MINUTES = 3` — minimum candles before any strategy SELL fires
+- **job_runner.py `run_crypto_scan()`**: Strategy SELL check now gated by `CRYPTO_MIN_HOLD_MINUTES`.
+  If position is < 3 minutes old, SELL signal is logged but suppressed — prevents same-candle entry+exit
+  at identical price (P&L = $0.00, fee still charged = net loss on every churn trade).
+- **job_runner.py `_execute_crypto_exit()`**: Added near-zero P&L warning — logs WARNING to DB when
+  `abs(pnl) < estimated_round_trip_fee * 0.5` so churn trades are visible even if they slip through.
+- **Root cause**: MACD `_check_exits()` fires SELL when `m1_hist < 0` or `price < vwap * 0.997`.
+  These conditions can be true on the same candle as entry if MACD turns negative mid-candle.
+  Hard stops in `should_exit()` (price hits stop_loss/take_profit levels) are unaffected — they
+  still fire immediately regardless of hold time (those are real price levels, not timing artifacts).
+
+## 2026-03-23 (v3.4) — Mean-Reversion Strategy for Ranging Markets
+- strategies/crypto_mean_reversion.py: New strategy — RSI<33 + near lower BB + ADX<22
+  in ranging/volatile regimes. Target = mid BB. Stop = 1.5%. Min R:R 1.5x. Conf 0.45–0.75.
+- config.py: Added MEAN_REVERSION_ENABLED, MEAN_REVERSION_RSI_ENTRY, MEAN_REVERSION_ADX_MAX
+- job_runner.py: run_crypto_scan() now runs mean-reversion path after existing debate path
+  when regime is ranging or volatile
+
+---
+
+## 2026-03-23 (v3.3 patch 7) — Notifications Overhaul + Image Overlap Fixes
+- **dashboard/app.py `_panel_notifications()`**: Complete rewrite — plain English one-liners ("Closed ETH-USDC → +$2.34 (target reached)"), relative time ("5m ago"), max 6 items, filters out signal spam and system startup noise, shows only trades/halts/summaries. Full history still stored in DB.
+- **dashboard/app.py King header**: Removed `position:absolute` court SVG background that was bleeding into content. Header now shows LeBron during market hours, dunk GIFs before/after — never both stacked in the same column.
+- **dashboard/app.py King win flash**: Only fires when a trade is <20 minutes old (not just whenever P&L > 0). Big win vs regular win show different animations — never both at once. Removed separate stat-icon row above metrics that created extra height.
+- **dashboard/app.py Saiyan layout**: Removed separate `aura_l`/`aura_r` columns (were 0.6 ratio, caused overflow at 150px width). Aura GIFs now live inside character columns at 60px, constrained to column width. Character SVGs reduced 150→130px to fit cleanly.
+- **dashboard/app.py Saiyan animations**: Win/buy text animations gated — shows at most one, only when a win trade is <10 min old or there's an active buy signal. Multiple situational animations no longer all fire simultaneously.
+
+## 2026-03-23 (v3.3 patch 6) — BRON_DBZ_IMAGES Full Integration
+- **dashboard/app.py**: Integrated local BRON_DBZ_IMAGES asset pack (304 files) across all 4 views. Added `_b64img()`, `_local_img()`, `_local_anim()`, `_saiyan_form()`, `_aura_gif()` helpers + asset dir constants.
+- **THE KING**: Header flanked by `dunk_gold_23.gif` + `dunk_celebrate_gold.gif`. Basketball stat icons (ppg/ast/reb/fgpct/blk) above metrics. Win flash shows `dunk_celebrate_gold.gif`. Big win (>$10) fires `power_text_dunk.html`. Every win triggers `power_text_win.html`. Halt shows defense SVG. Court SVG background in header.
+- **SAIYAN MODE**: Full transformation system — Kakarot+Prince SVGs auto-upgrade (base→SSJ1→SSJ2→Blue→God→Ultra→Mastered) based on P&L and win rate. Transform GIFs fire on form change. Lightning frame around power level. `power_level_9001.gif` when power > 9000. `power_level_max.gif` > 50000. Looping aura GIFs. Dragon Ball orbs (1–7) earned by trade milestones with gold glow. Ki blast icons next to metrics. Power aura decoratives. Kamehameha GIF in battle log header. Final Flash for strong SELLs. Spirit bomb on halt. Situational HTML animations (powerup/ki charge/kamehameha) based on live state. Energy waves on positions.
+- **RING CEREMONY**: Dunk GIFs flanking header. `dunk_celebrate_gold.gif` inside each earned ring card. `power_text_dunk.html` banner on earned rings. `bouncing_basketball.html` idle animation in empty state.
+- **FILM ROOM**: Basketball stat icons (20px, 55% opacity) above metrics. Court SVG (40px, 40% opacity) in header.
+
+## 2026-03-23 (v3.3 patch 5) — Dashboard Theme Separation
+- **dashboard/app.py**: LeBron (👑) now strictly THE KING view only — `render_chat_column` is now theme-aware with separate icons per view (👑 King, 🐉 Saiyan, 📊 Film Room, 🏆 Ring). Chat headers renamed per view too.
+- **dashboard/app.py**: Saiyan mode massively expanded — 9 DBZ characters now rendered (Goku, Vegeta, Gohan, Piccolo, Broly, Trunks, Krillin, Frieza, Cell). All characters use GIF URLs with emoji fallback. Added rotating DBZ quotes (Goku/Vegeta). Second image row for Z-Fighters. SSJ transformation indicator based on P&L. Removed duplicate image strip.
+- **dashboard/app.py**: Film Room is now pure analytics — removed DBZ alias comment, no crown icons, no Saiyan language. Vegeta emoji changed from '👑' to '🔥' so the crown is exclusively LeBron.
+
+## 2026-03-23 (v3.3 patch 4) — Rapid Validation + Turbo Paper Mode
+- **scripts/rapid_validate.py**: New historical replay validator — fetches 14 days of real Coinbase 5-min candles, simulates full trade lifecycle (stop/target/time-exit), reports Sharpe/drawdown/win-rate/per-pair breakdown. CLI: `--no-ai`, `--days N`, `--pairs`, `--verbose`.
+- **scripts/check_readiness.py**: Added `--fast-track` flag — lowers criteria to 2 days / 10 trades / 45% win rate after historical validation passes. Checks for `logs/validation_report.txt` PASS. Fixed trade count to use `pnl_usd != 0` (counts SHORT exits too).
+- **`.env`**: `CRYPTO_SCAN_INTERVAL_SECONDS` 60→15 — turbo paper mode scans 4x faster to accumulate trade history quickly.
+
+## 2026-03-23 (v3.3 patch 3) — Deep Bug Sweep Round 2
+- **debate_engine.py**: Fixed regime override bug — `run_debate()` was calling `detect_regime()` (SPY-based) and overwriting the per-asset regime that job_runner already detected from the asset's own candles. Now respects pre-computed regime when present.
+- **trade_logger.py**: Added `entry_reason` column to `open_positions` table (with safe migration for existing DBs). Updated `persist_position()` to accept and store it.
+- **risk_manager.py**: `_restore_positions()` now loads `entry_reason` from DB. `update_high()` now passes `entry_reason` to `persist_position()` so it's never cleared on trailing stop updates.
+- **job_runner.py**: `_execute_equity_exit()` and `_execute_crypto_exit()` now accept optional `market_data` param — real RSI/MACD/ADX/vol/regime passed to `store_trade_experience()` instead of hardcoded zeros. Memory store quality vastly improved.
+- **job_runner.py**: Crypto exit monitor refactored — fetches indicators once upfront (shared by stop-loss check, time exit, AI review, and memory store). Eliminates duplicate API calls.
+- **main.py**: Updated banner version v3.0→v3.3. Added startup sanity-check assertions for risk config values.
+
+## 2026-03-23 (v3.3 patch 2) — Bug Sweep
+- **indicators.py**: Added `ema200` calculation (was missing — Minervini 200d MA check and agent context was always seeing `None`)
+- **market_data.py**: Guarded `screen_watchlist()` against undefined `EQUITY_WATCHLIST` — returns `[]` cleanly (auto_screener handles discovery anyway)
+- **job_runner.py**: Fixed timezone arithmetic bug in both equity and crypto exit paths — `entry_dt.replace(tzinfo=tz if not entry_dt.tzinfo else None)` was backwards; fixed to `entry_dt if entry_dt.tzinfo else entry_dt.replace(tzinfo=tz)`. Was causing wrong `mins_in` values and misfiring time-based exits
+- **job_runner.py**: Fixed `entry_reason` storage — was mutating a copy of the position dict (did nothing); now passed directly to `register_position()` for both equity and crypto/SHORT paths
+- **risk_manager.py**: `check_entry` and `pre_check_entry` confidence floors aligned with aggressive mode — was hardcoded 0.40 for all; now 0.30 crypto / 0.35 equity matching risk_synthesizer
+- **risk_manager.py**: `register_position()` now accepts and stores `entry_reason` in position dict — exit review AI gets full context on why we entered
+- **risk_manager.py**: Correlation groups expanded to cover all 20 crypto pairs — BTC/UTXO cluster, ETH ecosystem + L2 DeFi, Alt-L1 cluster, Meme cluster, XRP standalone
+- **coinbase_broker.py**: Added zero-size guard on `buy_limit` (prevents silent order rejection on tiny positions)
+- **coinbase_broker.py**: `sell_market` now logs trade with taker fee (was silently dropping trade logs on emergency exits); added `_paper_sell_market()` with correct taker fee accounting
+
+## 2026-03-23 (v3.3 patch) — Expanded Crypto Universe + Cost Filter
+- **`.env`**: Expanded `CRYPTO_PAIRS` from 8 to 20 — added DOT, LTC, BCH, UNI, NEAR, APT, OP, ARB, SUI, PEPE, WIF, INJ (all USDC pairs on Coinbase Advanced Trade)
+- **`job_runner.py`**: Added indicator pre-filter before AI debate call — only debates when MACD histogram is positive OR RSI is emerging (25–55) with volume spike ≥1.3x; avoids burning API budget on dead markets with 20 pairs scanning 24/7
+
+## 2026-03-23 (v3.3) — Aggressive Mode Unlock
+- **config.py**: `MAX_POSITIONS_CRYPTO` 3→5, `MAX_POSITIONS_EQUITY` 2→3, `MAX_STRATEGY_LOSS_STREAK` 5→8, `CRYPTO_MIN_ADX` 15→10
+- **risk_synthesizer.py**: min confidence crypto 40%→30%, equity 45%→35%; vote agreement 50%→37.5%; position size cap 20%→35% of account (both LONG and SHORT paths)
+- **job_runner.py**: ranging regime gate 55%→40% (AI + MACD paths); Minervini filter advisory only (no longer hard-blocks equity); earnings gate 3 days→1 day; F&G scale-down threshold 80→90 with reduced penalty 25%→10%; IV rank threshold 80→90 with reduced penalty 20%→10%; COT filter advisory only (no longer hard-blocks futures longs)
+
+## 2026-03-22 (v3.2)
+- **Stats accuracy, terminal dashboard, paper trading parity**
+- Fixed `get_all_time_stats()` and `get_win_rate()`: changed `WHERE action='SELL'` to `WHERE pnl_usd != 0` so SHORT exits (logged as `action='BUY'`) are counted correctly
+- Added `get_today_stats()` — single authoritative source for today's closed-trade W/L/win-rate/fees/net P&L
+- Fixed account balance display in dashboard and risk manager to use `ACCOUNT_SIZE + all_time_pnl` (was hardcoded $500)
+- Fixed daily loss limit in `risk_manager.py` to use real balance
+- Fixed SHORT exit path in `job_runner.py` to call `alert_trade_closed`
+- Created `dashboard/terminal.py` — full 220-column terminal dashboard with ANSI colors and box-drawing characters; renders positions, stats (today + all-time), recent trades, signals, last AI debate, system events
+- Fixed terminal dashboard: `_split_open()` replaces `_top()` for correct `├` continuation line
+- Fixed terminal dashboard: `_ts()` helper extracts clean HH:MM:SS from ISO timestamps; all panel functions updated to use it
+- Fixed terminal dashboard closing line to use clean `├──┴──┤` instead of replace hack
+- Integrated terminal dashboard into `job_runner.py` run loop (renders every 5 seconds)
+
+## 2026-03-22 (patch)
+- **Notifications reworked: email removed, dashboard panel added**
+- `alerts/telegram_alert.py` rewritten — all notifications now write to `system_events` table (`source='notify'`) instead of sending email
+- Added `get_recent_notifications()` to `trade_logger.py`
+- Added Notifications panel to THE KING dashboard view (left column, below Today's Trades)
+- Removed email config (`EMAIL_FROM`, `EMAIL_TO`, `EMAIL_APP_PASSWORD`) from `config.py` and `.env.example`
+
+## 2026-03-22
+- **Resilience & ops infrastructure added (v3.1)**
+- Added git version control with initial commit (`.gitignore` updated)
+- Added SQLite WAL mode for crash-safe database writes (`logging_db/trade_logger.py`)
+- Added `scripts/start_bot.sh` — launchd wrapper, always starts in paper mode
+- Added `scripts/com.algotrading.king.plist` — auto-restart on crash and Mac reboot
+- Added `scripts/backup_db.sh` — daily SQLite + CSV backup to `~/.algo_backup/db/`, 30-day retention
+- Added `scripts/com.algotrading.backup.plist` — schedules backup at 2:00 AM daily
+- Added `scripts/backup_credentials.sh` — backs up `.env` to `~/.algo_backup/credentials/`, 10-version rotation
+- Added `scripts/check_readiness.py` — evaluates 7 criteria for paper → live transition, sends email alert when all pass
+- Added `scripts/com.algotrading.readiness.plist` — runs readiness check at 7:00 AM daily
+- Added `scripts/install_services.sh` — one-command launchd setup
+- Added `scripts/log_change.sh` — helper to prepend entries to this file
+- Updated `GEMINI.md` to document all new infrastructure
+- Updated `.gitignore` to exclude backup dirs and service logs
+
+---
+
+## 2026-03-22 (v3.0 baseline — initial commit)
+- v3.0: Extended thinking exits, LanceDB vector memory, regime detection
+- Prompt caching on all 8 AI agent system prompts (80% cost reduction)
+- Structured outputs (guaranteed valid JSON, zero parse failures)
+- 4-view Streamlit dashboard: TheKing / Saiyan / FilmRoom / RingCeremony
+- Position persistence (SQLite open_positions, restart-safe)
+- Watchdog alert if no scan completes in 15 minutes
+- Auto debate depth tuning based on account size and win rate
+- Full auto-screener: Finviz unusual volume + Yahoo gainers + SEC EDGAR filings
+
+---
+
+_To add an entry: `bash scripts/log_change.sh "Description of change"`_
+_Gemini should update this file (and GEMINI.md) whenever project files are modified._

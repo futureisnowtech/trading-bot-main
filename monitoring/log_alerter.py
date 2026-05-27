@@ -74,6 +74,18 @@ class LogAlertWatchdog:
             return None
         return (namespace, level)
 
+    def _add_insight(self, line: str) -> str:
+        """Translates terse system errors into human-readable strategic insights."""
+        if "limit_order_rejected" in line:
+            return "\n💡 <b>Insight:</b> Order canceled to protect capital. We use Maker-Only orders to avoid the 0.60% Taker fee. The price moved too fast, so the exchange safely rejected it rather than overcharging us."
+        if "taker_fallback_disabled" in line:
+            return "\n💡 <b>Insight:</b> Trade skipped. The Maker order didn't fill, and our strict Maker-Only policy blocked the Taker fallback to prevent unnecessary fee drag."
+        if "Non-critical background state telemetry error" in line:
+            return "\n💡 <b>Insight:</b> A background telemetry or API call timed out. The system safely caught it. No action needed."
+        if "mixed_mode_paper_like_live_order" in line:
+            return "\n💡 <b>Insight:</b> A catastrophic structural error was prevented. The bot caught a Paper order trying to execute in a Live lane and halted the system."
+        return ""
+
     def tail_forever(self):
         """Main loop: open log file, seek to end, then read new lines continuously."""
         while True:
@@ -107,10 +119,11 @@ class LogAlertWatchdog:
                         if self._should_alert(namespace, level):
                             try:
                                 from notifications.telegram_bot import send_message
-
+                                
+                                insight = self._add_insight(line)
                                 msg = (
                                     f"<b>[{level}] {namespace}</b>\n"
-                                    f"<code>{line.strip()}</code>"
+                                    f"<code>{line.strip()}</code>{insight}"
                                 )
                                 send_message(msg)
                             except Exception as send_exc:

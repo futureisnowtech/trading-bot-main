@@ -155,10 +155,11 @@ async def get_db_snapshot():
                         current_price = 0.0
                         try:
                             quote = kb.get_quote(ticker)
-                            # Normalise to 0-100 scale for YES side
-                            yes_bid = quote.get('yes_bid', 0)
-                            yes_ask = quote.get('yes_ask', 0)
-                            current_price = (yes_bid + yes_ask) / 2.0 if (yes_bid > 0 and yes_ask > 0) else (yes_bid or yes_ask or 0)
+                            # Kalshi V2 returns 'bid' and 'ask' (in dollars 0.0-1.0)
+                            bid = float(quote.get('bid', 0))
+                            ask = float(quote.get('ask', 0))
+                            # Convert to 0-100 scale for PnL consistency
+                            current_price = ((bid + ask) / 2.0 if (bid > 0 and ask > 0) else (bid or ask or 0)) * 100.0
                         except: pass
                         
                         p['current_price'] = float(current_price)

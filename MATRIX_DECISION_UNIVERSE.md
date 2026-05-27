@@ -1,7 +1,7 @@
 # MATRIX_DECISION_UNIVERSE.md
 # Spot Scalp Lane — Operator Decision Universe
-# Version: 2026-04-28
-# Evidence base: 140 live trades, 2026-04-22 – 2026-04-28
+# Version: 2026-05-27
+# Evidence base: 140 live trades, 2026-04-22 – 2026-04-28 (Audit pending)
 
 ---
 
@@ -118,10 +118,11 @@ TradingView is a context filter, not an entry trigger:
 
 ## Conditions for Automated Tiny Live Operation
 
-All are met as of 2026-04-28:
+All are met as of 2026-05-27:
 - Proof suite: 535 pass / 0 fail
 - Learning truth layer repaired
 - Quarantines wired
 - Taker disabled
 - Kill switch armed (KS10)
-- Max 1 concurrent position, max $50 per trade
+- Max 1 concurrent position per symbol, max 3 total
+- Floor-aware scaling active: $5.0 minimum order size.

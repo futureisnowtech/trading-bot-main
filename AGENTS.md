@@ -6,13 +6,16 @@
 ## Canonical Truth
 
 - Repo root: `/Users/joshmacbookair2020/Projects/algo_trading_final`
-- Canonical version: `v18.35.ARCH` (`2026-05-24`)
+- Canonical version: `v18.35.ARCH` (`2026-05-27`)
 - Canonical active lane: **Dual-Lane**: Coinbase Spot Scalp (Primary) + Kalshi Weather Engine (Secondary)
 - **Status:** **UNRESTRICTED ALPHA**. Autonomous Self-Healing & Ensemble Weather.
 - **Critical Changes (v18.35):**
+  - **Strategic Optimization**: Reduced `SPOT_MIN_ORDER_USD` to $5.0. Lowered regime floors to 40.0 (entry) and 35.0 (exit) to unlock volume on small accounts.
+  - **Floor-Aware Scaling**: Implemented logic in `v10_runner.py` to "bump" high-quality setups to the $5.0 minimum instead of skipping them.
+  - **Enriched Alerts**: Updated `log_alerter.py` with an **Insight Layer** that translates terse Python errors (like `limit_order_rejected`) into strategic human-readable explanations in Telegram.
   - **Weather Pivot**: Replaced generic macro forecasting with a dedicated Weather Prediction Engine utilizing 31-member GFS ensembles (via Open-Meteo).
   - **Unrestricted Alpha**: Removed geographic quarantines and cooldown blocks for weather trades ('fuck it, take the trade!').
-  - **Sigmoid Sizing**: Implemented continuous logistic sigmoid sizing to scale capital deployment based on mathematical edge.
+  - **Sigmoid Sizing**: Implemented continuous logistic sigmoid sizing (centered at 0.55, slope 6.0) to scale capital based on mathematical edge.
   - **Autonomous Healing**: Injected boot-time database repair into `spot_main.py` to fix orphan cost-basis/stop-loss values.
   - **Radical Transparency**: Unmasked raw strategy vetoes in HUD dash; fixed Kalshi cost-basis reporting via `trades` table query.
 - **Critical Changes (v18.34):**
@@ -68,35 +71,35 @@ This repository still contains multiple strategy lanes and historical infrastruc
   - **Coinbase spot scalp** (Primary: Two-Tower Technical + Local ML)
   - **Kalshi Macro Forecast** (Secondary: Unshackled Binary Event Bridge)
 - **Legacy AI:** **RETIRED**. The multi-agent debate ensemble (Goku, analyst agents, consensus-voting) has been removed to reduce latency and cost.
-- **Active AI:** **Gemini Studio** (CLI intelligence/DB queries), **Anthropic Sonnet** (Optional exit thesis sanity checks), and **Sovereign Mobile Gemini** (Telegram agent with code-editing tools).
+- **Active AI:** **Gemini Studio** (CLI intelligence/DB queries) and **Sovereign Mobile Gemini** (Telegram agent with code-editing tools).
 - **Current live decision standard:** truth-first, fee-aware, route-aware, evidence-gated.
 - **Current launch target:** tiny live only
-- **Current dashboard / readiness authority:** the spot truth-lane contract
+- **Current dashboard / readiness authority:** the spot truth-lane contract (HUD Dashboard)
 - **Incident Response:** Grafana IRM (pushed via `monitoring/irm_reporter.py`) with OnCall escalation.
 
 ## Sovereign Mobile Operator
 The Telegram bot acts as a mobile terminal for the Gemini agent. It is authorized to:
-- Read and Edit codebase files (`read_file`, `replace_text`).
+- Read and Edit codebase files (`read_file`, `replace`).
 - Query live exposure and trade history via SQL (`execute_sql`).
 - Execute safe diagnostic commands (`ls`, `git status`, `py_compile`).
 - View real-time logs and system vitals.
 
 **Operational Mandates for AI Agent:**
-- **Dashboard Truth:** Strictly refer to the operator dashboard as the **HUD dash**. Do NOT mention "Streamlit" to the user; it is an implementation detail and confusing.
+- **Dashboard Truth:** Strictly refer to the operator dashboard as the **HUD dash**.
 - **Monitoring Truth:** The primary metrics and alerting surface is **Grafana** (Grafana IRM for incidents).
 - **Lane Awareness:** You are a Dual-Lane agent. You MUST be fully aware of both the **Coinbase Spot Scalp** and **Kalshi Macro Forecast** lanes at all times. Use `execute_sql` to check `forecast_markets` and `forecast_quotes` if the user asks about Kalshi status.
 
 Access is strictly restricted to the `AUTHORIZED_USER_ID`.
 
-The following systems remain in-repo but are **not authoritative** for live spot health, readiness, deployment counts, or operator truth:
+## Purged Systems (v18.35)
+The following systems have been **purged** from the codebase to reduce technical debt:
+- Coinbase nano perp futures (`execution/coinbase_broker.py`, `strategies/crypto/`)
+- Binance perpetuals (`execution/binance_broker.py`)
+- IBKR / MES archived futures (`execution/ibkr_broker.py`, `strategies/futures/`)
+- ForecastEx archived lane (`execution/forecastex_broker.py`)
+- Legacy Streamlit dashboard (`dashboard/app.py` replaced by HUD API/Web)
 
-- Coinbase nano perp futures
-- MES archived futures
-- stocks lane
-- older multi-lane regime language
-- legacy readiness scripts based on generic paper metrics alone
-
-They are preserved for research, later reactivation, or historical context. They must not be allowed to override the spot lane’s broker-first truth.
+These are no longer authoritative and must not be mentioned as current truth.
 
 ## Owner Profile
 
@@ -200,13 +203,13 @@ The live spot lane is intentionally harsh by default.
 - Structural confirm minimums:
   - `TREND >= 0`
   - `NEUTRAL >= 0`
-- Final score floors:
-  - `TREND >= 48`
-  - `NEUTRAL >= 48`
+- Final score floors (v18.35):
+  - `TREND >= 40`
+  - `NEUTRAL >= 40`
 - Path efficiency minimum: `0.20`
-- Frame floors:
-  - `TREND`: `5m >= 40`, `30m >= 40`
-  - `NEUTRAL`: `5m >= 40`, `30m >= 40`
+- Frame floors (v18.35):
+  - `TREND`: `5m >= 35`, `30m >= 35`
+  - `NEUTRAL`: `5m >= 35`, `30m >= 35`
 
 Exit profile contract:
 - stop widening: forbidden
@@ -322,7 +325,6 @@ python3 scripts/live_runtime_audit.py
 python3 scripts/go_live_audit.py
 python3 scripts/net_truth_audit.py
 python3 -m pytest
-streamlit run dashboard/app.py --server.runOnSave true
 ```
 
 ## sell_blocked Recovery (v18.19)

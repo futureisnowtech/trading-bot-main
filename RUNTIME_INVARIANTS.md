@@ -1,6 +1,6 @@
 # RUNTIME_INVARIANTS.md
 # Spot Scalp Lane — Runtime Invariants
-# Version: 2026-04-28
+# Version: 2026-05-27
 
 ---
 
@@ -22,7 +22,7 @@
 | RI-12 | ML inference uses symbol-aware model key (pair-specific model if available, GENERIC fallback) | Generic model gives stale inference for all symbols | `model_store._get_pair_key()` strips suffix and maps to pair; `signal_engine._get_ml_score()` passes symbol hint | Stale generic ML for all symbols |
 | RI-13 | Calibrator lineage joins on `ml_feature_snapshots.trade_id` (not fuzzy timestamp) | Timestamp join caused wrong cluster attribution | `spot_edge_calibrator._fetch_closed_spot_trades()` joins via trade_id | Wrong calibration clusters |
 | RI-14 | TradingView is context-only (no synthetic candidate injection, no direct conviction override) | TV was a known failure mode — raw +20 scoring is absent | `signal_engine.py` TV contribution is bounded; `TV_PROMOTE_SYNTHETIC_CANDIDATES=false` | TV becomes entry trigger |
-| RI-15 | Config controls runtime behavior; no hidden hardcoded constants override config values | Prevents silent config drift | SPOT_* values in `config.py` are the single source; spot_engine.py reads config at runtime | Config changes have no effect |
+| RI-15 | Config controls runtime behavior; no hidden hardcoded constants override config values | Prevents silent config drift | SPOT_* values in `config.py` are the single source (e.g. SPOT_MIN_ORDER_USD=$5.0); spot_engine.py reads config at runtime | Config changes have no effect |
 
 ---
 

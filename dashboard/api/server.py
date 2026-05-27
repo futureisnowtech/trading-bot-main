@@ -156,17 +156,21 @@ async def get_db_snapshot():
                         try:
                             quote = kb.get_quote(ticker)
                             # Kalshi V2 returns 'bid' and 'ask' (in dollars 0.0-1.0)
-                            bid = float(quote.get('bid', 0))
-                            ask = float(quote.get('ask', 0))
-                            # Convert to 0-100 scale for PnL consistency
-                            current_price = ((bid + ask) / 2.0 if (bid > 0 and ask > 0) else (bid or ask or 0)) * 100.0
+                            bid = float(quote.get('bid', 0) or 0)
+                            ask = float(quote.get('ask', 0) or 0)
+                            # Keep strictly in dollars (e.g. 0.15) for math parity with DB
+                            current_price = ((bid + ask) / 2.0 if (bid > 0 and ask > 0) else (bid or ask or 0))
                         except: pass
                         
                         p['current_price'] = float(current_price)
 
-                        # v18.35: Enrich with trade history for Kalshi cost basis
+                        # v18.35: Enrich with trade history, title, and expiration
+                        p['event_title'] = ticker
+                        p['expiration_at'] = "Unknown"
+                        p['potential_pnl'] = 0.0
+                        
                         try:
-                            # Broaden query to match any strategy for this ticker
+                            # 1. Get Cost Basis
                             cursor.execute(
                                 "SELECT price as entry, ts as ts_entry FROM trades WHERE symbol=? AND action='BUY' AND broker='kalshi' ORDER BY ts DESC LIMIT 1",
                                 (ticker,)
@@ -183,14 +187,33 @@ async def get_db_snapshot():
                             if db_row:
                                 p['entry_price'] = float(db_row['entry'] or 0.0)
                                 p['ts_entry'] = db_row['ts_entry']
+                            
+                            # 2. Get Market Metadata (Title & Expiration)
+                            cursor.execute(
+                                """SELECT m.market_name, c.resolution_at 
+                                   FROM forecast_contracts c 
+                                   JOIN forecast_markets m ON c.market_id = m.id 
+                                   WHERE c.local_symbol = ? LIMIT 1""",
+                                (ticker,)
+                            )
+                            meta_row = cursor.fetchone()
+                            if meta_row:
+                                p['event_title'] = meta_row['market_name']
+                                p['expiration_at'] = meta_row['resolution_at']
+                                
                         except: pass
 
-                        # Calculate Live PnL (Kalshi prices are in cents 0-100)
+                        # Calculate Live PnL (Prices are strictly in dollars, e.g. 0.15)
                         if p['entry_price'] > 0 and p['current_price'] > 0:
                             mult = 1 if p.get('side') == 'YES' else -1
-                            p['live_pnl'] = (p['current_price'] - p['entry_price']) * p['qty'] * mult / 100.0
+                            # Max payout is $1.00 per contract for YES
+                            max_value = 1.0
+                            
+                            p['live_pnl'] = (p['current_price'] - p['entry_price']) * p['qty'] * mult
+                            p['potential_pnl'] = (max_value - p['entry_price']) * p['qty']
                         else:
                             p['live_pnl'] = 0.0
+                            p['potential_pnl'] = 0.0
                     forecast_positions = raw_positions
         except Exception as e:
             logging.error(f"Kalshi Sync Error: {e}")

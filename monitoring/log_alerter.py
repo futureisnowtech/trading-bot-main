@@ -62,6 +62,13 @@ class LogAlertWatchdog:
         line = line.rstrip()
         if not line:
             return None
+
+        # SILENCE FILTER: Do not spam Telegram for expected 401/Auth failures 
+        # that are already being logged for the operator to see locally.
+        silence_strings = ["401: Unauthorized", "Connection failed: Coinbase Spot API"]
+        if any(s in line for s in silence_strings):
+            return None
+
         parts = line.split()
         # Minimum: date time namespace level message...
         # parts[0] = date, parts[1] = time, parts[2] = namespace, parts[3] = level

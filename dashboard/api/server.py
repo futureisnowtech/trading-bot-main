@@ -69,6 +69,9 @@ async def get_db_snapshot():
         spot_positions = []
         try:
             from runtime.spot_position_truth import get_spot_position_truth
+            from execution.coinbase_spot_broker import get_spot_broker
+            
+            spot_broker = get_spot_broker()
             truth = get_spot_position_truth()
             all_holdings = truth.get("all_live_holdings") or []
             
@@ -76,11 +79,13 @@ async def get_db_snapshot():
                 sym = p["symbol"]
                 entry = float(p.get("entry") or 0.0)
                 qty = float(p.get("qty") or 0.0)
-                current_price = float(p.get("current_price") or entry)
+                
+                # REPAIR: Fetch live mark price directly for dashboard absolute truth
+                current_price = float(spot_broker.get_mark_price(sym) or entry)
                 stop = float(p.get("stop") or 0.0)
                 
-                live_pnl = (current_price - entry) * qty if current_price > 0 else 0.0
-                risk_usd = (entry - stop) * qty if stop > 0 else 0.0
+                live_pnl = (current_price - entry) * qty if (current_price > 0 and entry > 0) else 0.0
+                risk_usd = (entry - stop) * qty if (stop > 0 and entry > 0) else 0.0
 
                 # SRE X-Ray: Hold Conviction
                 conviction_score = float(p.get("setup_score") or 50.0)
@@ -142,6 +147,10 @@ async def get_db_snapshot():
                     
                     raw_positions = kb.get_positions()
                     for p in raw_positions:
+                        # Enforce PnL math
+                        p['entry_price'] = float(p.get('entry_price') or 0.0)
+                        p['current_price'] = float(kb.get_market_price(p['local_symbol']) or 0.0)
+
                         # v18.35: Enrich with trade history for Kalshi cost basis
                         try:
                             cursor.execute(
@@ -154,6 +163,13 @@ async def get_db_snapshot():
                                 p['stop'] = 0.0  # Max risk is premium
                                 p['ts_entry'] = db_row['ts_entry']
                         except: pass
+
+                        # Calculate Live PnL
+                        if p['entry_price'] > 0 and p['current_price'] > 0:
+                            mult = 1 if p.get('side') == 'YES' else -1
+                            p['live_pnl'] = (p['current_price'] - p['entry_price']) * p['qty'] * mult
+                        else:
+                            p['live_pnl'] = 0.0
                     forecast_positions = raw_positions
         except Exception as e:
             logging.error(f"Kalshi Sync Error: {e}")

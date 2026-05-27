@@ -10,7 +10,7 @@
 - Canonical active lane: **Dual-Lane**: Coinbase Spot Scalp (Primary) + Kalshi Weather Engine (Secondary)
 - **Status:** **LEDGERLESS SOVEREIGN**. Autonomous Self-Healing & Broker-First Truth.
 - **Critical Changes (v19.1):**
-  - **Ledgerless Architecture**: Retired the `open_positions` table as an authoritative ledger. The system now projects truth directly from broker holdings via `runtime/spot_position_truth.py`.
+  - **Ledgerless Architecture**: Retired the `open_positions` table as an authoritative ledger. The system now projects truth directly from broker holdings via `execution/coinbase_spot_broker.py`.
   - **Unified Entry Point**: Consolidated all launch paths into a single `main.py`. Legacy scripts (`go_live.py`, `check_readiness.py`, etc.) have been purged.
   - **Hardened Data Layer**: Rewrote the `dashboard/data/` layer to be strictly broker-first, eliminating staleness and reconciliation drift.
   - **Paper Excision**: Fully removed all paper-trading logic and stubs. The system is strictly live-only.

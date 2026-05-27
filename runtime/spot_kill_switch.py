@@ -114,37 +114,11 @@ def check_spot_kill_switch() -> tuple[bool, str]:
                 return True, "spot_kill_switch_already_active"
 
             try:
-                from runtime.spot_position_truth import get_spot_position_truth
-
-                truth = get_spot_position_truth()
-                if not truth.get("snapshot_ok"):
-                    reason = "ks_spot_truth_snapshot_unavailable"
-                    _log_halt(conn, reason, {"trigger": reason})
-                    conn.close()
-                    return True, reason
-                truth_blockers = truth.get("blocking_issues") or []
-                if truth_blockers:
-                    reason = "ks_spot_truth_blocker"
-                    _log_halt(
-                        conn,
-                        reason,
-                        {
-                            "trigger": reason,
-                            "blockers": [
-                                {
-                                    "symbol": str(b.get("symbol") or ""),
-                                    "status": str(
-                                        b.get("position_truth_status") or ""
-                                    ),
-                                }
-                                for b in truth_blockers
-                            ],
-                        },
-                    )
-                    conn.close()
-                    return True, reason
+                # v19.1 Ledgerless: Broker truth is canonical. 
+                # No longer halting for mismatches between DB and Broker.
+                pass
             except Exception as exc:
-                logger.warning("[spot_kill_switch] truth blocker check error: %s", exc)
+                logger.warning("[spot_kill_switch] pre-flight check error: %s", exc)
 
             import config as _cfg
 

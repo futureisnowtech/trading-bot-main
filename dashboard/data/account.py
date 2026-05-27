@@ -5,7 +5,8 @@ Strictly broker-first. PnL derived from (Live Balance - Seed Capital).
 
 from datetime import datetime
 import db as _db
-from data.balance import get_coinbase_balance, get_spot_balance_summary
+from execution.coinbase_broker import get_coinbase_broker
+from execution.coinbase_spot_broker import get_spot_broker
 
 _q = _db._q
 _q1 = _db._q1
@@ -25,11 +26,23 @@ def get_account():
     except Exception:
         base = 5000.0
 
-    perp = get_coinbase_balance()
-    spot = get_spot_balance_summary()
+    perp_bal = 0.0
+    try:
+        p_broker = get_coinbase_broker()
+        perp_bal = float(p_broker.get_account_balance() or 0.0)
+    except: pass
+
+    spot_equity = 0.0
+    try:
+        s_broker = get_spot_broker()
+        holdings = s_broker.sync_live_holdings() or []
+        spot_equity = sum(float(h.get("current_value") or 0.0) for h in holdings)
+        bal = s_broker.get_spot_balance() or {}
+        spot_equity += float(bal.get("usd_available") or 0.0)
+    except: pass
     
     # Total combined equity across both Coinbase lanes
-    equity = perp["balance"] + spot["spot_equity"]
+    equity = perp_bal + spot_equity
     net_pnl = equity - base
     
     return equity, False, base

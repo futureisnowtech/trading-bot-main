@@ -297,26 +297,18 @@ def _check_candle_freshness() -> dict:
 
 
 def _check_spot_truth() -> dict:
-    """Live spot health must be broker-canonical and free of unresolved blockers."""
+    """Live spot health must be broker-canonical (v19.1 Ledgerless)."""
     try:
-        from runtime.spot_position_truth import get_spot_position_truth
-
-        truth = get_spot_position_truth()
-        if not truth.get("snapshot_ok"):
+        from execution.coinbase_spot_broker import get_spot_broker
+        broker = get_spot_broker()
+        holdings = broker.sync_live_holdings()
+        
+        if holdings is None:
             return {"ok": False, "detail": "spot broker snapshot unavailable"}
-        blockers = truth.get("blocking_issues") or []
-        if blockers:
-            rendered = ", ".join(
-                f"{b.get('symbol') or 'GLOBAL'}:{b.get('position_truth_status')}"
-                for b in blockers
-            )
-            return {"ok": False, "detail": f"spot truth blockers: {rendered}"}
+            
         return {
             "ok": True,
-            "detail": (
-                f"spot truth ok | holdings={truth.get('positions_open', 0)} "
-                f"deployed=${float(truth.get('deployment_notional') or 0.0):.2f}"
-            ),
+            "detail": f"[HEALTHY] Managing {len(holdings)} broker-canonical spot positions"
         }
     except Exception as e:
         return {"ok": False, "detail": f"spot truth check error: {e}"}

@@ -20,7 +20,7 @@
 ## Current Repo Truth (v19.1.ARCH)
 - **Strictly LIVE:** Paper mode is excised. `PAPER_TRADING` logic is dead code.
 - **Broker Canon:** Coinbase is the only source of truth for holdings.
-- **Ledgerless**: The `open_positions` table is no longer the authoritative ledger. Truth is projected from broker state via `runtime/spot_position_truth.py`.
+- **Ledgerless**: The `open_positions` table is no longer the authoritative ledger. Truth is projected directly from broker state via `execution/coinbase_spot_broker.py`.
 - **Incident Response:** `monitoring/irm_reporter.py` pushes critical halts to Grafana IRM.
 
 ## Default Workflow

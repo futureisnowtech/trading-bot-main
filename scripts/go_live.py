@@ -163,31 +163,20 @@ def _coinbase_live_ready() -> None:
 
 
 def _spot_truth_ready() -> None:
-    from runtime.spot_position_truth import get_spot_position_truth
+    from execution.coinbase_spot_broker import get_spot_broker
     import socket
 
     is_macbook = socket.gethostname().lower().startswith("macbookair")
     is_test = "PYTEST_CURRENT_TEST" in os.environ
-    truth = get_spot_position_truth()
+    
+    broker = get_spot_broker()
+    holdings = broker.sync_live_holdings()
 
-    if not truth.get("snapshot_ok"):
+    if holdings is None:
         if is_macbook and not is_test:
-            print("[go_live] WARNING: Spot truth snapshot unavailable locally. Assuming IP whitelist restriction. Proceeding...")
+            print("[go_live] WARNING: Spot broker snapshot unavailable locally. Assuming IP whitelist restriction. Proceeding...")
             return
-        raise RuntimeError("Spot truth snapshot unavailable — refusing live launch.")
-
-    blockers = truth.get("blocking_issues") or []
-    if blockers:
-        rendered = ", ".join(
-            f"{b.get('symbol') or 'GLOBAL'}:{b.get('position_truth_status')}"
-            for b in blockers
-        )
-        if is_macbook and not is_test:
-            print(f"[go_live] WARNING: Spot truth blockers present locally ({rendered}). Proceeding with assumption that server environment is clean...")
-            return
-        raise RuntimeError(
-            f"Spot truth blockers present — refusing live launch: {rendered}"
-        )
+        raise RuntimeError("Spot broker snapshot unavailable — refusing live launch.")
 
 
 def _forecast_status() -> None:

@@ -17,8 +17,6 @@ if _ROOT not in sys.path:
 
 
 from config import DB_PATH
-from runtime.spot_position_truth import get_spot_position_truth
-
 
 def _conn(db_path: str = DB_PATH) -> sqlite3.Connection:
     c = sqlite3.connect(db_path, check_same_thread=False, timeout=10)
@@ -135,19 +133,19 @@ def run_reconciliation(db_path: str = DB_PATH) -> None:
     """
     try:
         repairs = reconcile_position_flags(db_path=db_path)
-        spot_truth = get_spot_position_truth(db_path=db_path)
-        truth_issues = spot_truth.get("issues") or []
+
+        # v19.1 Ledgerless: Use broker-direct check for log enrichment
+        holdings_count = 0
+        try:
+            from execution.coinbase_spot_broker import get_spot_broker
+            broker = get_spot_broker()
+            holdings = broker.sync_live_holdings()
+            if holdings is not None:
+                holdings_count = len(holdings)
+        except: pass
+
         now_iso = datetime.now(timezone.utc).isoformat()
-        if repairs:
-            msg = f"Reconciliation complete: {len(repairs)} position(s) repaired"
-        else:
-            msg = "Reconciliation complete: no repairs needed"
-        if truth_issues:
-            issue_summary = ", ".join(
-                f"{i.get('symbol') or 'GLOBAL'}:{i.get('position_truth_status')}"
-                for i in truth_issues
-            )
-            msg += f" | spot_truth={issue_summary}"
+        msg = f"Reconciliation complete: {len(repairs)} flag(s) repaired | broker_holdings={holdings_count}"
 
         try:
             with _conn(db_path) as c:

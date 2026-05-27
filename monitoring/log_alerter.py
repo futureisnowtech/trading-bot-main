@@ -25,7 +25,8 @@ LOG_PATH = os.path.join(
 ALERT_NAMESPACES = [
     "spot_engine",
     "scheduler",
-    "runtime.spot_position_truth",
+    "execution.coinbase_spot_broker",
+    "runtime.spot_classification",
     "runtime.spot_position_repair",
     "runtime.spot_kill_switch",
     "spot_kill_switch",

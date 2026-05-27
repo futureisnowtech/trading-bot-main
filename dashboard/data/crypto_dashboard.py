@@ -94,53 +94,28 @@ def get_crypto_header() -> dict:
 
     # Balance / buying power
     try:
-        from data.balance import get_coinbase_balance
-
-        bal = get_coinbase_balance()
-        result["buying_power"] = float(bal.get("balance") or 0.0)
+        from execution.coinbase_broker import get_coinbase_broker
+        p_broker = get_coinbase_broker()
+        result["buying_power"] = float(p_broker.get_account_balance() or 0.0)
     except Exception:
         pass
 
     # ── Deployment percentages (spot and perp, computed separately) ───────────
-    # spot_deployed_pct = spot notional / spot_usd_available (from spot balance truth)
-    # perp_deployed_pct = perp notional / total account equity
     try:
-        from data.positions import get_spot_positions_dashboard, get_perp_positions
-
-        spot_positions = get_spot_positions_dashboard()
-        perp_positions = get_perp_positions()
-        result["open_count"] = len(spot_positions) + len(perp_positions)
-        spot_notional = sum(
-            float(p.get("current_value") or 0.0)
-            or abs(float(p.get("qty") or 0))
-            * float(p.get("current_price") or p.get("entry") or 0)
-            for p in spot_positions
-        )
-        try:
-            from data.balance import get_spot_balance_summary
-
-            spot_bal = get_spot_balance_summary()
-            result["spot_cash_available"] = float(spot_bal.get("usd_available") or 0.0)
-            result["spot_equity"] = float(spot_bal.get("spot_equity") or 0.0)
-            # usd_available is how much USD remains for spot; add back notional to get total spot USD
-            spot_total = float(spot_bal.get("spot_equity") or 0) or (
-                float(spot_bal.get("usd_available") or 0) + spot_notional
-            )
-            result["spot_deployed_pct"] = (
-                round(spot_notional / spot_total * 100, 1) if spot_total > 0 else 0.0
-            )
-        except Exception:
-            result["spot_deployed_pct"] = 0.0
-
-        perp_notional = sum(
-            abs(float(p.get("qty") or 0))
-            * float(p.get("current_price") or p.get("entry") or 0)
-            for p in perp_positions
-        )
-        # Use buying_power already fetched as the perp account base
-        perp_base = result["buying_power"]
-        result["perp_deployed_pct"] = (
-            round(perp_notional / perp_base * 100, 1) if perp_base > 0 else 0.0
+        from execution.coinbase_spot_broker import get_spot_broker
+        s_broker = get_spot_broker()
+        spot_holdings = s_broker.sync_live_holdings() or []
+        
+        result["open_count"] = len(spot_holdings) # Just spot for now in this header
+        spot_notional = sum(float(h.get("current_value") or 0.0) for h in spot_holdings)
+        
+        spot_bal = s_broker.get_spot_balance() or {}
+        result["spot_cash_available"] = float(spot_bal.get("usd_available") or 0.0)
+        result["spot_equity"] = spot_notional + result["spot_cash_available"]
+        
+        spot_total = result["spot_equity"]
+        result["spot_deployed_pct"] = (
+            round(spot_notional / spot_total * 100, 1) if spot_total > 0 else 0.0
         )
     except Exception:
         pass  # defaults already 0.0

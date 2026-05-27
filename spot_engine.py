@@ -49,7 +49,7 @@ from runtime.spot_strategy import (
     target_r_for_symbol,
     trail_arm_r_for_symbol,
 )
-from runtime.spot_position_truth import get_spot_position_truth, get_spot_symbol_truth
+from runtime.spot_classification import get_classifications, is_external_manual
 from logging_db.trade_logger import _conn as _db_conn
 
 from functools import wraps
@@ -180,23 +180,26 @@ def _load_spot_positions_from_db(
         # 2. Check for unclassified broker holdings and auto-adopt (LIVE only)
         if not paper:
             try:
-                truth = get_spot_position_truth()
-                unclassified = [
-                    row for row in truth.get("issues", [])
-                    if row.get("position_truth_status") == "unclassified"
-                ]
+                broker = _get_broker(paper=False)
+                if broker:
+                    holdings = broker.sync_live_holdings() or []
+                    classifications = get_classifications()
 
-                if unclassified:
-                    with _db_conn() as conn:
-                        for row in unclassified:
-                            clean = _clean_symbol(row.get("symbol"))
-                            if clean in db_symbols:
-                                continue
+                    # Filter out what's already in DB
+                    for h in holdings:
+                        clean = _clean_symbol(h.get("symbol"))
+                        if clean in db_symbols:
+                            continue
 
+                        # Skip if explicitly marked as external_manual
+                        if is_external_manual(clean, classifications):
+                            continue
+
+                        with _db_conn() as conn:
                             logger.info(f"[spot_engine] Auto-adopting {clean} into DB from broker truth.")
-                            entry_price = max(float(row.get("current_price", 1.0)), 1.0)
-                            qty = float(row.get("qty", 0.0))
-                            
+                            entry_price = max(float(h.get("avg_entry") or h.get("current_price") or 1.0), 1.0)
+                            qty = float(h.get("qty", 0.0))
+
                             # v18.35: Assign default risk parameters for manual adoptions
                             default_stop = round(entry_price * 0.85, 8)
                             default_target = round(entry_price * 1.20, 8)
@@ -220,38 +223,30 @@ def _load_spot_positions_from_db(
                                 "entry": entry_price,
                                 "paper": 0
                             })
-                        conn.commit()
+                            conn.commit()
             except Exception as e:
                 logger.debug(f"[spot_engine] auto-adoption in loader failed: {e}")
 
         if bot_managed_only:
-            external = set()
             try:
-                from runtime.spot_position_truth import get_holding_classifications
-
-                classifications = get_holding_classifications()
-                external = {
-                    sym
-                    for sym, info in classifications.items()
-                    if str(info.get("classification") or "").lower() == "external_manual"
-                }
+                classifications = get_classifications()
+                filtered: List[Dict] = []
+                for pos in db_positions:
+                    sym = str(pos.get("symbol") or "").upper()
+                    if is_external_manual(sym, classifications):
+                        continue
+                    if int(pos.get("sell_blocked") or 0) == 1:
+                        continue
+                    filtered.append(pos)
+                return filtered
             except Exception as e:
-                logger.debug(f"[spot_engine] classification fetch failed: {e}")
-            filtered: List[Dict] = []
-            for pos in db_positions:
-                sym = str(pos.get("symbol") or "").upper()
-                if sym in external:
-                    continue
-                if int(pos.get("sell_blocked") or 0) == 1:
-                    continue
-                filtered.append(pos)
-            return filtered
+                logger.debug(f"[spot_engine] classification filter failed: {e}")
+                return db_positions
 
         return db_positions
     except Exception as e:
         logger.debug(f"[spot_engine] load_spot_positions error: {e}")
         return []
-
 
 def _current_spot_deployed_usd() -> float:
     # Live: broker cash balance is the binding constraint in v10_runner (usd_available*0.95).
@@ -279,16 +274,10 @@ def _position_strategy(symbol: str) -> str:
 
 def get_spot_positions(paper: bool = False) -> List[Dict]:
     """
-    v18.17: Broker-first truth. Returns bot-managed positions 
+    v19.1: Broker-direct truth. Returns bot-managed positions
     reconciled against live Coinbase holdings.
     """
-    try:
-        truth = get_spot_position_truth(paper=paper)
-        return truth.get("bot_managed_positions") or []
-    except Exception as e:
-        logger.debug(f"[spot_engine] get_spot_positions truth error: {e}")
-        return _load_spot_positions_from_db(paper=paper)
-
+    return _load_spot_positions_from_db(paper=paper, bot_managed_only=True)
 
 def _sync_position_high(
     symbol: str, strategy: str, high_price: float, paper: bool = False
@@ -1501,11 +1490,12 @@ def close_spot(
             )
 
     try:
-        truth = get_spot_position_truth()
+        broker = _get_broker(paper=False)
+        holdings = broker.sync_live_holdings() if broker else []
         residual = next(
             (
                 row
-                for row in truth.get("all_live_holdings") or []
+                for row in holdings or []
                 if str(row.get("symbol") or "").upper() == clean
             ),
             None,

@@ -58,7 +58,7 @@ BANNER = """
 ║                                                                  ║
 ║  Lane:       Coinbase spot scalp (FULL LIVE RELEASE)            ║
 ║  Route:      maker_first | Expectancy-Driven Gates              ║
-║  Truth:      broker-first via runtime/spot_position_truth.py    ║
+║  Truth:      broker-direct (Ledgerless v19.1)            ║
 ║  Launch:     python3 scripts/go_live.py (only sanctioned path)  ║
 ╚══════════════════════════════════════════════════════════════════╝
 """

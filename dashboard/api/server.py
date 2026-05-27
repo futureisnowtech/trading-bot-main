@@ -60,7 +60,7 @@ async def get_db_snapshot():
                 if not s_json: continue
                 
                 parsed = json.loads(s_json)
-                if lid == "spot": spot_data = parsed
+                if lid in ("spot", "crypto"): spot_data = parsed
                 elif lid == "forecast": forecast_data = parsed
         except Exception as e:
             logging.debug(f"Snapshot read error: {e}")

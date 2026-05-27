@@ -97,9 +97,9 @@ async def get_db_snapshot():
             cursor.execute("SELECT ts, level, source, message FROM system_events ORDER BY ts DESC LIMIT 20")
             for r in cursor.fetchall():
                 row = dict(r)
-                # Normalize space to T for HUD frontend rigid splitter
-                if row.get("ts") and " " in row["ts"]:
-                    row["ts"] = row["ts"].replace(" ", "T")
+                # v19.1.2: HUD frontend split(' ')[1] REQUIRES a space. DO NOT USE 'T'.
+                if row.get("ts") and "T" in row["ts"]:
+                    row["ts"] = row["ts"].replace("T", " ")
                 events.append(row)
         except: pass
 
@@ -109,8 +109,8 @@ async def get_db_snapshot():
             cursor.execute("SELECT symbol, direction, final_spot_score, entry_block_reason as reason, ts FROM scan_candidates ORDER BY ts DESC LIMIT 5")
             for r in cursor.fetchall():
                 ts_val = r["ts"]
-                if ts_val and " " in ts_val:
-                    ts_val = ts_val.replace(" ", "T")
+                if ts_val and "T" in ts_val:
+                    ts_val = ts_val.replace("T", " ")
                     
                 live_hunt.append({
                     "symbol": r["symbol"],

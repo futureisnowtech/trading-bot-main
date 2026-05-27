@@ -1233,10 +1233,11 @@ def _attempt_entry(
         )
         return "data_unavailable"
 
-    _score_floor = 50.0  # v19.1.1: Default floor to prevent NameError in early exits
+    _score_floor = 50.0  # v19.1.2: Early initialization safety
     _tech_score = 50.0
     _ml_score = 50.0
     composite = 50.0
+    _trade = {} # v19.1.2: Prevent NameError in exception handlers
     
     # ── Systemic Price Sanity Resolution ───────
     # v18.17: Ironclad REST fallback for all sizing and scoring.

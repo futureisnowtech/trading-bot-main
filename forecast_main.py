@@ -28,11 +28,11 @@ def _setup_logging():
 
 _setup_logging()
 
-VERSION = "v18.34.FORENSIC"
+VERSION = "v19.1.ARCH"
 
 BANNER = f"""
 ╔══════════════════════════════════════════════════════════════════╗
-║  FORECAST SCHEDULER  {VERSION}                            ║
+║  FORECAST SCHEDULER  {VERSION} (SOVEREIGN)                 ║
 ║  Isolated Kalshi Macro Bridge: Forensic Traceability             ║
 ╚══════════════════════════════════════════════════════════════════╝
 """

@@ -62,6 +62,7 @@ def main():
         run_discovery_cycle,
         run_strategy_cycle,
         run_position_monitor,
+        _cache_forecast_state,
         _get_broker,
         _get_harvester,
     )
@@ -87,11 +88,13 @@ def main():
         
         # Initial run
         run_discovery_cycle()
+        _cache_forecast_state()
         
         # Schedule
         _s.every(30).minutes.do(run_discovery_cycle)
         _s.every(5).minutes.do(lambda: run_strategy_cycle(100.0))
         _s.every(30).seconds.do(run_position_monitor)
+        _s.every(30).seconds.do(_cache_forecast_state)
         
         log_event("INFO", "ForecastMain", f"Forecast lane started on port 8001")
         print("   ForecastEx lane active. Monitoring Port 8001.")

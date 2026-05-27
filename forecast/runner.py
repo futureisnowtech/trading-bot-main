@@ -176,6 +176,7 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
 
     Returns list of entry results (empty if nothing qualified).
     """
+    from config import KALSHI_SAME_EVENT_FAMILY_CAP
     with _eval_lock:
         entries = []
         try:
@@ -517,6 +518,7 @@ def _cache_forecast_state():
         from runtime.runtime_state import upsert_lane_state
         from logging_db.trade_logger import _conn
         import json
+        import traceback
 
         broker = _get_broker()
         if not broker.is_connected(): return
@@ -542,7 +544,8 @@ def _cache_forecast_state():
             except: pass
             
             # Fetch Cost Basis
-            entry_px = float(p.get('entry_price') or 0.0)
+            # v19.1.3: Use broker-reported avg_entry as primary truth if trade table is empty
+            entry_px = float(p.get('avg_entry') or 0.0)
             event_title = ticker
             resolution_at = "Unknown"
             
@@ -570,6 +573,11 @@ def _cache_forecast_state():
             pnl = (current_px - entry_px) * qty * mult
             potential = (1.0 - entry_px) * qty
             
+            # v19.1.3: Absolute P&L protection
+            if entry_px <= 0:
+                pnl = 0.0
+                potential = (1.0 - current_px) * qty if current_px > 0 else 0.0
+            
             # Time Countdown
             countdown = "N/A"
             if resolution_at != "Unknown":
@@ -593,15 +601,24 @@ def _cache_forecast_state():
             })
             total_pnl += pnl
             
+        # v19.1.3: Fetch live Kalshi balance for HUD capital separation
+        kalshi_equity = 0.0
+        try:
+            kalshi_equity = float(broker.get_account_balance() or 0.0)
+        except Exception as e:
+            logger.debug(f"[ForecastRunner] Failed to fetch Kalshi balance: {e}")
+
         snapshot = {
             "positions": enriched,
             "total_pnl": round(total_pnl, 2),
+            "equity": round(kalshi_equity, 2),
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
         
         upsert_lane_state("forecast", snapshot_json=json.dumps(snapshot))
     except Exception as e:
-        logger.debug(f"[ForecastRunner] Cache state error: {e}")
+        logger.error(f"[ForecastRunner] Cache state error: {e}")
+        logger.error(traceback.format_exc())
 
 
 # ── Startup / teardown ─────────────────────────────────────────────────────────

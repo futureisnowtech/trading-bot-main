@@ -55,10 +55,8 @@ def heal():
         
         # 2. Get current price
         try:
-            # We assume symbols in DB are clean (e.g. 'BTC')
-            # get_quote expects the full ticker (e.g. 'BTC-USDC')
-            quote = broker.get_quote(f"{symbol}-USDC")
-            current_price = float(quote.get('mid') or quote.get('bid') or 0.0)
+            # v19.1.3: Use get_mark_price instead of get_quote
+            current_price = broker.get_mark_price(symbol)
             
             if current_price <= 0:
                 logger.warning(f"Could not get valid price for {symbol}, skipping.")

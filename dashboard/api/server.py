@@ -140,7 +140,8 @@ async def get_db_snapshot():
             },
             "forecast": {
                 "positions": forecast_data.get("positions", []),
-                "total_pnl": forecast_data.get("total_pnl", 0.0)
+                "total_pnl": forecast_data.get("total_pnl", 0.0),
+                "equity": forecast_data.get("equity", 0.0)
             },
             "intelligence_summary": summary,
             "events": events,

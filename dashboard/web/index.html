@@ -69,12 +69,16 @@
                 </div>
             </div>
         </div>
-        <div class="flex space-x-12 mt-4 md:mt-0">
+        <div class="flex space-x-8 md:space-x-12 mt-4 md:mt-0">
             <div class="text-center md:text-right">
-                <p class="text-[10px] text-slate-500 font-black uppercase tracking-widest">Total Equity</p>
-                <p id="total-equity" class="text-3xl font-black text-white tabular-nums">$0.00</p>
+                <p class="text-[10px] text-blue-400 font-black uppercase tracking-widest">Crypto Equity</p>
+                <p id="crypto-equity" class="text-3xl font-black text-white tabular-nums">$0.00</p>
             </div>
-            <div class="text-center md:text-right">
+            <div class="text-center md:text-right border-l border-slate-800 pl-8 md:pl-12">
+                <p class="text-[10px] text-purple-400 font-black uppercase tracking-widest">Kalshi Equity</p>
+                <p id="kalshi-equity" class="text-3xl font-black text-white tabular-nums">$0.00</p>
+            </div>
+            <div class="text-center md:text-right border-l border-slate-800 pl-8 md:pl-12">
                 <p class="text-[10px] text-slate-500 font-black uppercase tracking-widest">24H Trend</p>
                 <p id="day-pnl" class="text-3xl font-black text-green-400 tabular-nums">+$0.00</p>
             </div>
@@ -169,7 +173,9 @@
             // Global State
             document.getElementById('market-regime').innerText = data.spot.regime;
             document.getElementById('v-cpu').innerText = `${Math.round(data.vitals.cpu)}%`;
-            document.getElementById('total-equity').innerText = `$${data.spot.equity.toLocaleString()}`;
+            document.getElementById('crypto-equity').innerText = `$${data.spot.equity.toLocaleString()}`;
+            document.getElementById('kalshi-equity').innerText = `$${(data.forecast.equity || 0).toLocaleString()}`;
+            
             const pnl = data.spot.pnl_24h;
             document.getElementById('day-pnl').innerText = `${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`;
             document.getElementById('day-pnl').className = `text-3xl font-black tabular-nums ${pnl >= 0 ? 'text-green-400' : 'text-red-400'}`;

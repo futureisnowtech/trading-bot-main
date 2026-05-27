@@ -706,8 +706,7 @@ def _write_crypto_lane_runtime(open_positions: Optional[Dict] = None) -> None:
             positions_open=positions_open,
             capital_deployed_usd=round(deployed_usd, 2),
             buying_power_usd=round(buying_power, 2),
-            readiness_state=readiness,
-            snapshot_json=json.dumps(snapshot)
+            readiness_state=readiness
         )
         upsert_system_state(
             launch_readiness_state=launch_state,
@@ -3945,6 +3944,7 @@ def run_forever():
     def _cache_spot_state():
         """v19.1.3: Caches rich broker-first spot state for the HUD dashboard."""
         try:
+            logger.info("[v10] Starting spot state cache cycle...")
             from execution.coinbase_spot_broker import get_spot_broker
             from runtime.spot_classification import get_classifications, is_external_manual
             
@@ -4009,7 +4009,11 @@ def run_forever():
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }
             
-            upsert_lane_state("crypto", snapshot_json=json.dumps(snapshot))
+            upsert_lane_state(
+                "crypto",
+                snapshot_json=json.dumps(snapshot),
+                readiness_state="OK"
+            )
         except Exception as e:
             logger.debug(f"[v10] Cache spot state error: {e}")
 

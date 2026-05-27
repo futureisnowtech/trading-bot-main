@@ -149,13 +149,25 @@ async def get_db_snapshot():
                     for p in raw_positions:
                         # Enforce PnL math
                         p['entry_price'] = float(p.get('entry_price') or 0.0)
-                        p['current_price'] = float(kb.get_market_price(p['local_symbol']) or 0.0)
+                        
+                        # REPAIR: Use get_quote to fetch live mid-price for Kalshi
+                        ticker = p.get('local_symbol')
+                        current_price = 0.0
+                        try:
+                            quote = kb.get_quote(ticker)
+                            # Normalise to 0-100 scale for YES side
+                            yes_bid = quote.get('yes_bid', 0)
+                            yes_ask = quote.get('yes_ask', 0)
+                            current_price = (yes_bid + yes_ask) / 2.0 if (yes_bid > 0 and yes_ask > 0) else (yes_bid or yes_ask or 0)
+                        except: pass
+                        
+                        p['current_price'] = float(current_price)
 
                         # v18.35: Enrich with trade history for Kalshi cost basis
                         try:
                             cursor.execute(
                                 "SELECT price as entry, ts as ts_entry FROM trades WHERE symbol=? AND action='BUY' AND broker='kalshi' ORDER BY ts DESC LIMIT 1",
-                                (p['local_symbol'],)
+                                (ticker,)
                             )
                             db_row = cursor.fetchone()
                             if db_row:
@@ -164,10 +176,10 @@ async def get_db_snapshot():
                                 p['ts_entry'] = db_row['ts_entry']
                         except: pass
 
-                        # Calculate Live PnL
+                        # Calculate Live PnL (Kalshi prices are in cents 0-100)
                         if p['entry_price'] > 0 and p['current_price'] > 0:
                             mult = 1 if p.get('side') == 'YES' else -1
-                            p['live_pnl'] = (p['current_price'] - p['entry_price']) * p['qty'] * mult
+                            p['live_pnl'] = (p['current_price'] - p['entry_price']) * p['qty'] * mult / 100.0
                         else:
                             p['live_pnl'] = 0.0
                     forecast_positions = raw_positions

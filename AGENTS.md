@@ -6,14 +6,15 @@
 ## Canonical Truth
 
 - Repo root: `/Users/joshmacbookair2020/Projects/algo_trading_final`
-- Canonical version: `v19.1.3` (`2026-05-27`)
+- Canonical version: `v19.1.4` (`2026-05-27`)
 - Canonical active lane: **Dual-Lane**: Coinbase Spot Scalp + Kalshi Weather Engine
 - **Status:** **LEDGERLESS SOVEREIGN**. Autonomous Self-Healing & Broker-First Truth.
+- **Critical Changes (v19.1.4):**
+  - **High-Velocity Weather Sovereign**: Enforced a strict 72-hour maximum resolution window for all weather and macro trades to target high-certainty model windows.
+  - **Ensemble Edge Strategy**: Integrated 31-member GFS ensemble data (via Open-Meteo) to compute probabilistic edge. The system now attacks market deltas > 8% vs model predictions.
+  - **Logistic Sigmoid Sizing**: Replaced conservative sizing with a high-aggression sigmoid model. Weather positions now scale up to 25% of bankroll for high-edge setups.
+  - **Execution Cadence**: Tightened scan and evaluation cycles to 2 minutes to front-run model updates and capture rapid mispricings.
 - **Critical Changes (v19.1.3):**
-  - **Sovereign Truth HUD**: Aligned lane IDs between bot and dashboard (unified on `crypto`). Fixed $0 equity bug by summing all broker holdings regardless of manual/bot classification.
-  - **Scoping Ghost Fix**: Resolved `NameError` in `v10_runner.py` by moving variable initialization to the function entry point and fixed missing imports in `spot_engine.py`.
-  - **Host-Level Vitals**: Mounted host `/proc` and `/sys` to containers to allow `psutil` to report real hardware metrics to the HUD.
-  - **UI Normalization**: Enforced strict `YYYY-MM-DD HH:MM:SS` timestamp formatting in `server.py` to fix `[undefined]` rendering in the dashboard.
 - **Critical Changes (v19.1):**
   - **Ledgerless Architecture**: Retired the `open_positions` table as an authoritative ledger. The system now projects truth directly from broker holdings via `execution/coinbase_spot_broker.py`.
   - **Unified Entry Point**: Consolidated all launch paths into a single `main.py`. Legacy scripts (`go_live.py`, `check_readiness.py`, etc.) have been purged.

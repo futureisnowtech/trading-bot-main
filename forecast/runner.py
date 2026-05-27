@@ -694,7 +694,7 @@ def start_forecast_lane(bankroll: float = 100.0) -> None:
 
     # Register scheduler jobs
     schedule.every(5).minutes.do(run_discovery_cycle)
-    schedule.every(5).minutes.do(lambda: run_strategy_cycle(bankroll))
+    schedule.every(2).minutes.do(lambda: run_strategy_cycle(bankroll)) # v19.1.4: High-Velocity Weather Pivot
     schedule.every(30).seconds.do(run_position_monitor)
     schedule.every(30).seconds.do(_cache_forecast_state)
     schedule.every().day.at("08:00").do(_send_daily_token_burn_report)

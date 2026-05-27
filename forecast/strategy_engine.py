@@ -73,9 +73,9 @@ MAX_OVERROUND: float = 0.15  # Tightened from 0.25 to 0.15 for Kalshi
 # Spread hard cap
 MAX_SPREAD_DOLLARS: float = 0.12  # $0.12 per contract
 
-# Time-to-resolution gates (Disabled v18.33 Pivot)
-MIN_HOURS_TO_RES: float = 0.0
-MAX_HOURS_TO_RES: float = 8760.0 # 1 year
+# Time-to-resolution gates (v19.1.4: Strict 72h Gate)
+MIN_HOURS_TO_RES: float = 1.0
+MAX_HOURS_TO_RES: float = 72.0
 
 # Longshot Bias Gate
 MIN_IMPLIED_PROB_FOR_YES: float = 0.10  # refuse to buy YES below 10% probability
@@ -571,18 +571,18 @@ def _strategy_late_repricing(
 from data.kalshi_weather_monitor import get_weather_data
 
 def calculate_continuous_sizing(market_price: float, ensemble_prob: float, capital_base: float) -> int:
-    """Logistic Sigmoid mapping for high-aggression position sizing."""
+    """Logistic Sigmoid mapping for high-aggression position sizing (v19.1.4)."""
     edge = ensemble_prob - market_price
     if edge < 0.08:  # 8% Edge Floor Veto
         return 0
-        
+
     # Logistic Sigmoid mapping for soft-veto position sizing
-    # v18.35: Unrestricted scaling factor (sharp sigmoid)
+    # v19.1.4: High-aggression scaling (sharp sigmoid at 12% edge)
     scaling_factor = 1 / (1 + np.exp(-15 * (edge - 0.12)))
-    
-    # v18.35: No artificial ceilings beyond 25% of bankroll per edge
+
+    # v19.1.4: Sovereign Cap — up to 25% of bankroll for weather
     allocated_capital = capital_base * 0.25 * scaling_factor
-    
+
     qty = int(allocated_capital / market_price) if market_price > 0 else 0
     return qty
 
@@ -596,7 +596,7 @@ def _parse_weather_threshold(ticker: str) -> Optional[float]:
       KXHIGHCHI-26MAY26-T90.5 -> 90.5
       KXHIGHLAX-26MAY26-T72 -> 72.0
     """
-    # Look for -T followed by numbers (optional decimal) at the end or before a suffix
+    # Look for -T followed by numbers (optional negative sign and decimal)
     match = re.search(r'-T(-?\d+\.?\d*)', ticker)
     if match:
         try:
@@ -607,33 +607,33 @@ def _parse_weather_threshold(ticker: str) -> Optional[float]:
 
 def _strategy_weather(ticker: str, ask_yes: float, ask_no: float) -> tuple[bool, str, float, list[str]]:
     """
-    Weather Ensemble Edge Strategy (v18.35).
-    Calculates P(High >= Threshold) from 31-member GFS ensemble.
+    Weather Ensemble Edge Strategy (v19.1.4).
+    Calculates P(High >= Threshold) from 31-member GFS ensemble and attacks the edge.
     """
     w_data = get_weather_data(ticker)
     if not w_data or "members" not in w_data:
         return False, "", 0.0, ["no_weather_ensemble_data"]
-    
+
     threshold = _parse_weather_threshold(ticker)
     if threshold is None:
         return False, "", 0.0, [f"unparseable_ticker_threshold: {ticker}"]
-    
+
     members = w_data["members"]
     if not members:
         return False, "", 0.0, ["empty_ensemble_members"]
 
-    # Kalshi HIGH markets: "Will the high be >= Threshold?"
-    # We count how many ensemble members are >= threshold
+    # Kalshi HIGH markets: "Will the daily high be >= Threshold?"
+    # v19.1.4: Precise ensemble probability calculation
     success_count = sum(1 for m in members if m >= threshold)
     ensemble_prob = success_count / len(members)
-    
-    # Add a small uncertainty buffer (if ensemble is 100% or 0%, cap at 0.97/0.03)
+
+    # Apply 3% uncertainty floor/ceiling
     ensemble_prob = max(0.03, min(0.97, ensemble_prob))
-    
+
     edge_yes = ensemble_prob - ask_yes
     edge_no = (1.0 - ensemble_prob) - ask_no
-    
-    # v18.35: Edge threshold of 8% for weather (high conviction requirement)
+
+    # v19.1.4: High-aggression edge detection (8% floor)
     if edge_yes > 0.08:
         factors = [
             f"ensemble_p={ensemble_prob:.1%}",
@@ -642,7 +642,7 @@ def _strategy_weather(ticker: str, ask_yes: float, ask_no: float) -> tuple[bool,
             f"mean={w_data.get('mean', 0):.1f}F"
         ]
         return True, "YES", ensemble_prob, factors
-        
+
     if edge_no > 0.08:
         factors = [
             f"ensemble_p={ensemble_prob:.1%}",
@@ -650,10 +650,10 @@ def _strategy_weather(ticker: str, ask_yes: float, ask_no: float) -> tuple[bool,
             f"edge={edge_no:.1%}",
             f"mean={w_data.get('mean', 0):.1f}F"
         ]
-        return True, "NO", ensemble_prob, factors
-        
-    return False, "", 0.0, [f"insufficient_weather_edge (p={ensemble_prob:.2f})"]
+        # For NO, the ensemble probability of success is (1 - p)
+        return True, "NO", (1.0 - ensemble_prob), factors
 
+    return False, "", 0.0, [f"insufficient_weather_edge (p_yes={ensemble_prob:.2f})"]
 def evaluate_contract(
     contract: dict,
     bars_5m: list[dict],

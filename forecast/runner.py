@@ -40,6 +40,12 @@ if _ROOT not in sys.path:
 from logging_db.trade_logger import log_event
 logger = logging.getLogger(__name__)
 
+# v19.1.5: Ensure core risk caps are available at module level for forced cycles
+try:
+    from config import KALSHI_SAME_EVENT_FAMILY_CAP
+except ImportError:
+    KALSHI_SAME_EVENT_FAMILY_CAP = 2
+
 # ── Lazy imports (avoid heavy deps at module load time) ────────────────────────
 _broker = None
 _harvester = None
@@ -171,7 +177,6 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
 
     Returns list of entry results (empty if nothing qualified).
     """
-    from config import KALSHI_SAME_EVENT_FAMILY_CAP
     with _eval_lock:
         entries = []
         try:

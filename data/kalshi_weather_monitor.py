@@ -33,69 +33,86 @@ async def fetch_open_meteo_ensemble(ticker: str, lat: float, lon: float) -> Dict
     Fetch 31-member GFS ensemble for a specific coordinate.
     Includes cloud_cover for TCDC overrides and 26h window for NWS settlement.
     """
-    try:
-        # v18.35: Query Open-Meteo's free ensemble API
-        url = "https://ensemble-api.open-meteo.com/v1/ensemble"
-        params = {
-            "latitude": lat,
-            "longitude": lon,
-            "hourly": "temperature_2m,cloud_cover",
-            "models": "gfs_seamless",
-            "timezone": "auto"
-        }
-        
-        loop = asyncio.get_event_loop()
-        resp = await loop.run_in_executor(None, lambda: requests.get(url, params=params, timeout=10))
-        
-        if resp.status_code != 200:
-            logger.error(f"Open-Meteo error {resp.status_code} for {ticker}")
-            return {}
-
-        data = resp.json()
-        hourly = data.get("hourly", {})
-        
-        # Guardrail 2: The Midnight Boundary Isolation Loop
-        # Read up to 26 hours to prevent missing late-night warm air transport
-        # that triggers an official NWS settlement high after midnight.
-        window_size = 26 
-        
-        members = []
-        cloud_members = []
-        
-        for i in range(31):
-            temp_key = f"temperature_2m_member{i:02d}"
-            cloud_key = f"cloud_cover_member{i:02d}"
+    # v19.1.5: Exponential Backoff for 429 Resilience
+    for attempt in range(3):
+        try:
+            url = "https://ensemble-api.open-meteo.com/v1/ensemble"
+            params = {
+                "latitude": lat,
+                "longitude": lon,
+                "hourly": "temperature_2m,cloud_cover",
+                "models": "gfs_seamless",
+                "timezone": "auto"
+            }
             
-            if temp_key in hourly:
-                temps_c = hourly[temp_key][:window_size]
-                if temps_c:
-                    max_f = (max(temps_c) * 9/5) + 32
-                    members.append(max_f)
+            loop = asyncio.get_event_loop()
+            resp = await loop.run_in_executor(None, lambda: requests.get(url, params=params, timeout=10))
             
-            if cloud_key in hourly:
-                # Guardrail 1: The Convective Cloud Cover Override (The "Sun Spike")
-                # Focus on peak heating hours (11:00 AM to 4:00 PM local time)
-                # Typically indices 11-16 in a local-aligned 00:00 start
-                clouds = hourly[cloud_key][11:17]
-                if clouds:
-                    cloud_members.append(float(np.mean(clouds)))
-        
-        if not members:
-            return {}
+            if resp.status_code == 429:
+                wait = (2 ** attempt) * 5
+                logger.warning(f"Open-Meteo 429 (Rate Limit). Retrying in {wait}s...")
+                await asyncio.sleep(wait)
+                continue
 
-        # Calculate peak TCDC (Total Cloud Cover) across all members for peak hours
-        peak_tcdc = float(np.mean(cloud_members)) if cloud_members else 0.0
+            if resp.status_code != 200:
+                logger.error(f"Open-Meteo error {resp.status_code} for {ticker}")
+                return {}
 
-        return {
-            "members": members,
-            "mean": float(np.mean(members)),
-            "std": float(np.std(members)),
-            "peak_tcdc": peak_tcdc,
-            "timestamp": time.time()
-        }
-    except Exception as e:
-        logger.error(f"Weather fetch failed for {ticker}: {e}")
-        return {}
+            data = resp.json()
+            hourly = data.get("hourly", {})
+            
+            # Guardrail 2: The Midnight Boundary Isolation Loop
+            window_size = 26 
+            
+            members = []
+            cloud_members = []
+            
+            for i in range(31):
+                temp_key = f"temperature_2m_member{i:02d}"
+                cloud_key = f"cloud_cover_member{i:02d}"
+                
+                if temp_key in hourly:
+                    temps_c = hourly[temp_key][:window_size]
+                    if temps_c:
+                        max_f = (max(temps_c) * 9/5) + 32
+                        members.append(max_f)
+                
+                if cloud_key in hourly:
+                    # Guardrail 1: The Convective Cloud Cover Override (The "Sun Spike")
+                    clouds = hourly[cloud_key][11:17]
+                    if clouds:
+                        cloud_members.append(float(np.mean(clouds)))
+            
+            if not members:
+                return {}
+
+            peak_tcdc = float(np.mean(cloud_members)) if cloud_members else 0.0
+
+            return {
+                "members": members,
+                "mean": float(np.mean(members)),
+                "std": float(np.std(members)),
+                "peak_tcdc": peak_tcdc,
+                "timestamp": time.time()
+            }
+        except Exception as e:
+            logger.error(f"Weather fetch failed for {ticker}: {e}")
+            await asyncio.sleep(2)
+            
+    return {}
+
+def inject_weather_ensemble(ticker_prefix: str, members: list[float], tcdc: float = 0.0):
+    """v19.1.5: Force-inject an ensemble for live verification/testing."""
+    global _WEATHER_SHADOW_STATE
+    _WEATHER_SHADOW_STATE[ticker_prefix] = {
+        "members": members,
+        "mean": float(np.mean(members)),
+        "std": float(np.std(members)),
+        "peak_tcdc": tcdc,
+        "timestamp": time.time()
+    }
+    logger.info(f"VERIFICATION: Injected weather ensemble for {ticker_prefix}")
+
 
 async def update_weather_shadow_state():
     """Background loop polling weather data every 60 seconds."""

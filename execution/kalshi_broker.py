@@ -550,7 +550,11 @@ class KalshiBroker:
                 body["no_price"] = limit_cents
         
         resp = self._request("POST", "/trade-api/v2/portfolio/orders", body=body)
-        order_id = resp.get("order_id", "ERR")
+        order_info = resp.get("order", {})
+        order_id = order_info.get("order_id", "ERR")
+        
+        if order_id == "ERR":
+            order_id = resp.get("order_id", "ERR")
         
         pos_info = self._open_positions.pop(key, {})
         entry_price = pos_info.get("entry_price", 0.0)

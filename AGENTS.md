@@ -10,10 +10,11 @@
 - Canonical active lane: **Dual-Lane**: Coinbase Spot Scalp + Kalshi Weather Engine
 - **Status:** **LEDGERLESS SOVEREIGN**. Autonomous Self-Healing & Broker-First Truth.
 - **Critical Changes (v19.1.4):**
-  - **High-Velocity Weather Sovereign**: Enforced a strict 72-hour maximum resolution window for all weather and macro trades to target high-certainty model windows.
-  - **Ensemble Edge Strategy**: Integrated 31-member GFS ensemble data (via Open-Meteo) to compute probabilistic edge. The system now attacks market deltas > 8% vs model predictions.
-  - **Logistic Sigmoid Sizing**: Replaced conservative sizing with a high-aggression sigmoid model. Weather positions now scale up to 25% of bankroll for high-edge setups.
-  - **Execution Cadence**: Tightened scan and evaluation cycles to 2 minutes to front-run model updates and capture rapid mispricings.
+  - **Unified Sovereign Registry**: Centralized system versioning in `VERSION.py` and modernized the Telegram SRE audit layer. The Telegram bot now acts as a thin client for the Dashboard API, eliminating "0% Integrity" hallucinations.
+  - **Self-Healing Reconciliation**: Implemented an autonomous 'Janitor' in the broker layer to intercept Coinbase 404s. Orphan orders are now silently purged from the local database, treating desync as a routine maintenance event rather than a critical failure.
+  - **High-Velocity Weather Sovereign**: Enforced a strict 72-hour maximum resolution window and integrated 31-member GFS ensembles for edge detection (8% floor).
+  - **Weather Pulse Restoration**: Fixed a visibility bug where `active_markets` were not being reported to the HUD, restoring full transparency to the weather operation.
+  - **Logistic Sigmoid Sizing**: Replaced conservative sizing with a high-aggression sigmoid model (25% bankroll cap).
 - **Critical Changes (v19.1.3):**
 - **Critical Changes (v19.1):**
   - **Ledgerless Architecture**: Retired the `open_positions` table as an authoritative ledger. The system now projects truth directly from broker holdings via `execution/coinbase_spot_broker.py`.

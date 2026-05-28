@@ -47,43 +47,36 @@ _discovery_lock = threading.Lock()
 _eval_lock = threading.Lock()
 
 
-def _forecast_runtime_snapshot(*, connected: bool, contracts: int, stubs: int) -> dict:
+def _forecast_runtime_snapshot(*, connected: bool, contracts: int, stubs: int, active_markets: int = 0) -> dict:
     """Canonical runtime-state mapping for the forecast lane."""
+    res = {
+        "connected": 1 if connected else 0,
+        "tradable": 1 if contracts > 0 else 0,
+        "active_markets": active_markets,
+        "health": "OK" if connected else "WARN",
+        "blocked_reason": "" if connected else "broker_disconnected",
+        "action_needed": "" if connected else "connect_kalshi",
+        "readiness_state": "OPERATIONAL" if connected else "BROKER_DISCONNECTED",
+    }
     if not connected:
-        return {
-            "connected": 0,
-            "tradable": 0,
-            "health": "WARN",
-            "blocked_reason": "broker_disconnected",
-            "action_needed": "connect_kalshi",
-            "readiness_state": "BROKER_DISCONNECTED",
-        }
-    if contracts > 0:
-        return {
-            "connected": 1,
-            "tradable": 1,
-            "health": "OK",
-            "blocked_reason": "",
-            "action_needed": "",
-            "readiness_state": "NO_QUOTES",
-        }
-    if stubs > 0:
-        return {
-            "connected": 1,
+        return res
+    if contracts == 0 and stubs > 0:
+        res.update({
             "tradable": 0,
             "health": "WARN",
             "blocked_reason": "no_tradable_contracts_right_now",
             "action_needed": "check_kalshi_permissions",
-            "readiness_state": "NO_TRADABLE_CONTRACTS_RIGHT_NOW",
-        }
-    return {
-        "connected": 1,
-        "tradable": 0,
-        "health": "WARN",
-        "blocked_reason": "no_underliers",
-        "action_needed": "check_discovery",
-        "readiness_state": "NO_UNDERLIERS",
-    }
+            "readiness_state": "NO_TRADABLE_CONTRACTS",
+        })
+    elif contracts == 0 and stubs == 0:
+        res.update({
+            "tradable": 0,
+            "health": "WARN",
+            "blocked_reason": "no_underliers",
+            "action_needed": "check_discovery",
+            "readiness_state": "NO_UNDERLIERS",
+        })
+    return res
 
 
 def _get_broker():
@@ -119,11 +112,12 @@ def run_discovery_cycle() -> dict:
             result = run_discovery(broker=broker)
             stubs = result.get("stubs_persisted", 0)
             contracts = result.get("persisted", 0)
+            active_in_db = result.get("active_in_db", 0)
             logger.info(
                 f"[ForecastRunner] Discovery: found={result['found']} "
                 f"persisted={contracts} "
                 f"stubs={stubs} "
-                f"active={result['active_in_db']}"
+                f"active={active_in_db}"
             )
             # Update lane readiness_state to reflect post-discovery truth.
             try:
@@ -134,6 +128,7 @@ def run_discovery_cycle() -> dict:
                     connected=_connected,
                     contracts=contracts,
                     stubs=stubs,
+                    active_markets=active_in_db
                 )
                 _uls(
                     "forecast",

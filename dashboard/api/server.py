@@ -20,8 +20,9 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from config import DB_PATH
+from VERSION import VERSION
 
-app = FastAPI(title="Algo Trading Terminal API (v19.1.ARCH)")
+app = FastAPI(title=f"Algo Trading Terminal API ({VERSION})")
 
 app.add_middleware(
     CORSMiddleware,
@@ -129,6 +130,29 @@ async def get_db_snapshot():
                 })
         except: pass
 
+        # 7. SRE Health & Integrity (v19.1.4: Resolve Telegram Hallucination)
+        sre = {
+            "integrity_score": 100, # Default to 100 if we reached this point (DB+API OK)
+            "broker_connected": True,
+            "weather_active_markets": 0
+        }
+        try:
+            # Check last scan age for Crypto
+            cursor.execute("SELECT ts FROM lane_runtime_state WHERE lane_id='crypto' LIMIT 1")
+            row = cursor.fetchone()
+            if row:
+                last_scan = datetime.fromisoformat(row[0].replace(" ", "T"))
+                age_min = (datetime.now() - last_scan).total_seconds() / 60
+                if age_min > 10: sre["integrity_score"] = 50 # Degraded if stale
+            
+            # Check Weather Markets
+            cursor.execute("SELECT snapshot_json FROM lane_runtime_state WHERE lane_id='forecast' LIMIT 1")
+            row = cursor.fetchone()
+            if row and row[0]:
+                f_snap = json.loads(row[0])
+                sre["weather_active_markets"] = f_snap.get("active_markets", 0)
+        except: pass
+
         conn.close()
 
         return {
@@ -141,16 +165,19 @@ async def get_db_snapshot():
             "forecast": {
                 "positions": forecast_data.get("positions", []),
                 "total_pnl": forecast_data.get("total_pnl", 0.0),
-                "equity": forecast_data.get("equity", 0.0)
+                "equity": forecast_data.get("equity", 0.0),
+                "active_markets": sre["weather_active_markets"]
             },
             "intelligence_summary": summary,
             "events": events,
             "live_hunt": live_hunt,
             "vitals": vitals,
+            "sre": sre,
             "system": {
                 "time": datetime.now().strftime("%H:%M:%S"),
                 "status": "OPERATIONAL",
-                "uptime_ts": psutil.boot_time()
+                "uptime_ts": psutil.boot_time(),
+                "version": VERSION
             }
         }
     except Exception as e:

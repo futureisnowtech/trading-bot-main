@@ -293,7 +293,9 @@ async def spread_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def audit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     import requests
     
-    msg = "<b>SOVEREIGN SRE COMMAND AUDIT (v18.35.ARCH)</b>\n\n"
+    # v19.1.4: Dynamic versioning from VERSION.py
+    from VERSION import VERSION
+    msg = f"<b>SOVEREIGN SRE COMMAND AUDIT ({VERSION})</b>\n\n"
     raw_text = "" # For AI analysis
     
     try:
@@ -312,6 +314,12 @@ async def audit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         vitals = data.get("vitals", {})
         sre = data.get("sre", {})
         
+        # v19.1.4: Version Desync Detection
+        api_ver = sys_info.get('version', 'UNKNOWN')
+        if api_ver != VERSION:
+            line = f"⚠️ <b>VERSION DESYNC:</b> Bot={VERSION} | API={api_ver}\n"
+            msg += line; raw_text += line
+
         line = f"🖥 <b>Status:</b> {sys_info.get('status', 'UNKNOWN')}\n"
         msg += line; raw_text += line
         line = f"🛡 <b>Data Integrity:</b> {sre.get('integrity_score', 0)}%\n"
@@ -342,28 +350,30 @@ async def audit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
         msg += "\n"; raw_text += "\n"
         
-        # Forecast Lane
+        # Forecast Lane (v19.1.4: Restored active markets visibility)
         forecast = data.get("forecast", {})
         f_pos = forecast.get("positions", [])
+        active_markets = forecast.get("active_markets", 0)
         
-        line = f"🌪 <b>WEATHER ENGINE (Markets: {forecast.get('active_markets', 0)})</b>\n"
+        line = f"🌪 <b>WEATHER ENGINE (Markets: {active_markets})</b>\n"
         msg += line; raw_text += line
         if f_pos:
             for p in f_pos:
-                line = f"   - {p.get('local_symbol')}: {p.get('qty')} {p.get('side')} | Cost: ${p.get('entry_price', 0):.4f}\n"
+                line = f"   - {p.get('symbol')}: {p.get('qty')} {p.get('side')} | Cost: ${p.get('entry', 0):.4f}\n"
                 msg += line; raw_text += line
         else:
             line = "   - No active weather positions (Monitoring)\n"
             msg += line; raw_text += line
             
-        # RC: AI Oracle Strategic Analysis (v18.35)
+        # RC: AI Oracle Strategic Analysis (v19.1.4: Refined prompt)
         msg += "\n🔮 <b>ORACLE STRATEGIC ANALYSIS:</b>\n"
         await update.message.reply_chat_action(ChatAction.TYPING)
         
         prompt = (
             "You are the Sovereign SRE Oracle. Analyze this system audit snapshot. "
             "Identify any strategic gaps, systemic errors, or risk anomalies. "
-            "Suggest immediate actionable fixes or pivots. Be direct and ruthless.\n\n"
+            "Suggest immediate actionable fixes or pivots. Be direct and ruthless. "
+            "Ignore minor data integrity issues unless integrity is below 50%.\n\n"
             f"### AUDIT SNAPSHOT ###\n{raw_text}"
         )
         

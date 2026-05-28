@@ -501,8 +501,16 @@ class CoinbaseSpotBroker:
                 "symbol": fallback_symbol
             }
 
-        data = self._request("GET", f"/api/v3/brokerage/orders/historical/{order_id}")
-        order = data.get("order") or {}
+        try:
+            data = self._request("GET", f"/api/v3/brokerage/orders/historical/{order_id}")
+            order = data.get("order") or {}
+        except Exception as e:
+            if "404" in str(e):
+                logger.info(f"[spot] Order {order_id} not found on Coinbase (404). Triggering self-healing purge.")
+                # Return a special status that spot_engine.py can use to purge the local record
+                return {"order_id": order_id, "status": "PURGE_GHOST_ORDER", "symbol": fallback_symbol}
+            raise e
+
         fee_usd = 0.0
         fills = self.list_spot_fills(order_id)
         if fills:

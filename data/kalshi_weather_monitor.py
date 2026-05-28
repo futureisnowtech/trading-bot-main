@@ -29,19 +29,21 @@ STATIONS = {
 }
 
 async def fetch_open_meteo_ensemble(ticker: str, lat: float, lon: float) -> Dict[str, Any]:
-    """Fetch 31-member GFS ensemble for a specific coordinate."""
+    """
+    Fetch 31-member GFS ensemble for a specific coordinate.
+    Includes cloud_cover for TCDC overrides and 26h window for NWS settlement.
+    """
     try:
         # v18.35: Query Open-Meteo's free ensemble API
         url = "https://ensemble-api.open-meteo.com/v1/ensemble"
         params = {
             "latitude": lat,
             "longitude": lon,
-            "hourly": "temperature_2m",
+            "hourly": "temperature_2m,cloud_cover",
             "models": "gfs_seamless",
             "timezone": "auto"
         }
         
-        # Using requests in a thread to keep it simple, or we could use httpx
         loop = asyncio.get_event_loop()
         resp = await loop.run_in_executor(None, lambda: requests.get(url, params=params, timeout=10))
         
@@ -52,28 +54,43 @@ async def fetch_open_meteo_ensemble(ticker: str, lat: float, lon: float) -> Dict
         data = resp.json()
         hourly = data.get("hourly", {})
         
-        # Open-Meteo returns 'temperature_2m_member00' ... 'temperature_2m_member30'
-        # We want the max temperature for 'today' (next 24h)
-        # Note: NWS/Kalshi use standard Fahrenheit, Open-Meteo defaults to Celsius?
-        # Let's ensure Fahrenheit.
-        # Actually, let's just get the ensemble members.
+        # Guardrail 2: The Midnight Boundary Isolation Loop
+        # Read up to 26 hours to prevent missing late-night warm air transport
+        # that triggers an official NWS settlement high after midnight.
+        window_size = 26 
+        
         members = []
+        cloud_members = []
+        
         for i in range(31):
-            key = f"temperature_2m_member{i:02d}"
-            if key in hourly:
-                # Find max in the first 24 hours
-                temps_c = hourly[key][:24]
+            temp_key = f"temperature_2m_member{i:02d}"
+            cloud_key = f"cloud_cover_member{i:02d}"
+            
+            if temp_key in hourly:
+                temps_c = hourly[temp_key][:window_size]
                 if temps_c:
                     max_f = (max(temps_c) * 9/5) + 32
                     members.append(max_f)
+            
+            if cloud_key in hourly:
+                # Guardrail 1: The Convective Cloud Cover Override (The "Sun Spike")
+                # Focus on peak heating hours (11:00 AM to 4:00 PM local time)
+                # Typically indices 11-16 in a local-aligned 00:00 start
+                clouds = hourly[cloud_key][11:17]
+                if clouds:
+                    cloud_members.append(float(np.mean(clouds)))
         
         if not members:
             return {}
+
+        # Calculate peak TCDC (Total Cloud Cover) across all members for peak hours
+        peak_tcdc = float(np.mean(cloud_members)) if cloud_members else 0.0
 
         return {
             "members": members,
             "mean": float(np.mean(members)),
             "std": float(np.std(members)),
+            "peak_tcdc": peak_tcdc,
             "timestamp": time.time()
         }
     except Exception as e:

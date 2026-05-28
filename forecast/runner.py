@@ -300,6 +300,10 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                 # For now, execute directly (validator is called by launch script)
 
                 try:
+                    # Guardrail 3: Taker-Override Friction Controls
+                    # If edge >= 22% and is_short_term, use market order.
+                    order_type = "market" if result.is_taker_override else "limit"
+                    
                     entry_result = broker.place_buy_order(
                         contract_dict={
                             "conid": contract.get("conid", 0),
@@ -310,7 +314,8 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                         },
                         qty=result.position_contracts,
                         limit_price=ask_price,
-                        reason=f"{result.strategy_family}_ev={result.ev:.4f}",
+                        type=order_type,
+                        reason=f"{result.strategy_family}_ev={result.ev:.4f}_taker={result.is_taker_override}",
                         strategy=f"forecast_{result.strategy_family}",
                     )
                     

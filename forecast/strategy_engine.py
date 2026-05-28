@@ -151,6 +151,7 @@ class StrategyResult:
     ask_yes: float = 0.0
     ask_no: float = 0.0
     hours_to_resolution: float = 0.0
+    is_taker_override: bool = False
 
 
 def _extract_log_odds_series(bars: list[dict]) -> list[float]:
@@ -605,27 +606,36 @@ def _parse_weather_threshold(ticker: str) -> Optional[float]:
             return None
     return None
 
-def _strategy_weather(ticker: str, ask_yes: float, ask_no: float) -> tuple[bool, str, float, list[str]]:
+def _strategy_weather(ticker: str, ask_yes: float, ask_no: float, hours_to_res: float) -> tuple[bool, str, float, list[str], bool]:
     """
-    Weather Ensemble Edge Strategy (v19.1.4).
-    Calculates P(High >= Threshold) from 31-member GFS ensemble and attacks the edge.
+    Boundary Pinning & METAR Discrepancies Strategy (v19.1.5).
+    Treats weather as an asymmetric information decay problem in the <48h window.
     """
+    # Alpha Filter: 48-Hour Asymmetric Information Decay Window
+    # Target window is strictly bounded between 1.5 and 48 hours.
+    is_short_term = 1.5 <= hours_to_res <= 48.0
+
     w_data = get_weather_data(ticker)
     if not w_data or "members" not in w_data:
-        return False, "", 0.0, ["no_weather_ensemble_data"]
+        return False, "", 0.0, ["no_weather_ensemble_data"], False
 
     threshold = _parse_weather_threshold(ticker)
     if threshold is None:
-        return False, "", 0.0, [f"unparseable_ticker_threshold: {ticker}"]
+        return False, "", 0.0, [f"unparseable_ticker_threshold: {ticker}"], False
 
     members = w_data["members"]
     if not members:
-        return False, "", 0.0, ["empty_ensemble_members"]
+        return False, "", 0.0, ["empty_ensemble_members"], False
 
-    # Kalshi HIGH markets: "Will the daily high be >= Threshold?"
-    # v19.1.4: Precise ensemble probability calculation
+    # v19.1.5: Boundary Pinning calculation
+    # P(High >= Threshold) from 31-member GFS ensemble
     success_count = sum(1 for m in members if m >= threshold)
     ensemble_prob = success_count / len(members)
+
+    # v19.1.5: Dynamic SD Shrinkage (Decay Capture)
+    # If standard deviation is very low, the boundary pin is stronger.
+    sd = w_data.get("std", 5.0)
+    pin_strength = max(0.0, 1.0 - (sd / 5.0)) if is_short_term else 0.0
 
     # Apply 3% uncertainty floor/ceiling
     ensemble_prob = max(0.03, min(0.97, ensemble_prob))
@@ -633,28 +643,40 @@ def _strategy_weather(ticker: str, ask_yes: float, ask_no: float) -> tuple[bool,
     edge_yes = ensemble_prob - ask_yes
     edge_no = (1.0 - ensemble_prob) - ask_no
 
-    # v19.1.4: High-aggression edge detection (8% floor)
+    # Guardrail 1: The Convective Cloud Cover Override (The "Sun Spike")
+    # If peak TCDC > 65%, veto YES contracts due to unexpected ground cooling.
+    peak_tcdc = w_data.get("peak_tcdc", 0.0)
+    cloud_veto = peak_tcdc > 65.0
+
+    # v19.1.5: High-aggression edge detection (8% floor)
+    # Guardrail 3: Taker-Override (Edge >= 22%)
     if edge_yes > 0.08:
+        if cloud_veto:
+            return False, "", 0.0, [f"cloud_cover_veto (TCDC={peak_tcdc:.1f}%)"], False
+
+        is_taker = edge_yes >= 0.22 and is_short_term
         factors = [
             f"ensemble_p={ensemble_prob:.1%}",
-            f"threshold={threshold}F",
             f"edge={edge_yes:.1%}",
-            f"mean={w_data.get('mean', 0):.1f}F"
+            f"pin_strength={pin_strength:.2f}",
+            f"TCDC={peak_tcdc:.1f}%"
         ]
-        return True, "YES", ensemble_prob, factors
+        return True, "YES", ensemble_prob, factors, is_taker
 
     if edge_no > 0.08:
+        is_taker = edge_no >= 0.22 and is_short_term
         factors = [
             f"ensemble_p={ensemble_prob:.1%}",
-            f"threshold={threshold}F",
             f"edge={edge_no:.1%}",
-            f"mean={w_data.get('mean', 0):.1f}F"
+            f"pin_strength={pin_strength:.2f}"
         ]
-        # For NO, the ensemble probability of success is (1 - p)
-        return True, "NO", (1.0 - ensemble_prob), factors
+        return True, "NO", (1.0 - ensemble_prob), factors, is_taker
 
-    return False, "", 0.0, [f"insufficient_weather_edge (p_yes={ensemble_prob:.2f})"]
+    return False, "", 0.0, [f"insufficient_weather_edge (p_yes={ensemble_prob:.2f})"], False
+
+
 def evaluate_contract(
+
     contract: dict,
     bars_5m: list[dict],
     bars_30m: list[dict],
@@ -829,13 +851,13 @@ def evaluate_contract(
     )
 
     # Evaluate all strategy families
-    strategy_candidates: list[tuple[str, str, float, list[str]]] = []
+    strategy_candidates: list[tuple[str, str, float, list[str], bool]] = []
 
     # v18.35: Weather Strategy (Ensemble-driven)
     ticker = contract.get("local_symbol", "")
-    w_passes, w_side, w_conf, w_factors = _strategy_weather(ticker, ask_yes, ask_no)
+    w_passes, w_side, w_conf, w_factors, w_is_taker = _strategy_weather(ticker, ask_yes, ask_no, hours_to_res)
     if w_passes:
-        strategy_candidates.append(("weather_ensemble", w_side, w_conf, w_factors))
+        strategy_candidates.append(("weather_ensemble", w_side, w_conf, w_factors, w_is_taker))
 
     for name, fn in [
         ("continuation", _strategy_continuation),
@@ -845,7 +867,7 @@ def evaluate_contract(
         try:
             passes, side, confidence, factors = fn(feats, hours_to_res)
             if passes:
-                strategy_candidates.append((name, side, confidence, factors))
+                strategy_candidates.append((name, side, confidence, factors, False))
         except Exception as e:
             logger.debug(f"Strategy {name} error: {e}")
 
@@ -865,12 +887,13 @@ def evaluate_contract(
             position_fraction=0.0,
             position_contracts=0,
             top_factors=[],
-            hours_to_resolution=hours_to_res
+            hours_to_resolution=hours_to_res,
+            is_taker_override=False
         )
 
     # Pick highest-confidence strategy
     strategy_candidates.sort(key=lambda x: x[2], reverse=True)
-    best_family, best_side, best_confidence, best_factors = strategy_candidates[0]
+    best_family, best_side, best_confidence, best_factors, best_is_taker = strategy_candidates[0]
 
     # Determine EV for chosen side
     ev_chosen = ev_yes if best_side == "YES" else ev_no
@@ -939,6 +962,7 @@ def evaluate_contract(
         ask_yes=ask_yes,
         ask_no=ask_no,
         hours_to_resolution=hours_to_res,
+        is_taker_override=best_is_taker,
     )
 
 

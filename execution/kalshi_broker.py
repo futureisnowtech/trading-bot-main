@@ -456,13 +456,13 @@ class KalshiBroker:
         return [self.get_quote(c["local_symbol"]) for c in contracts]
 
     def place_buy_order(self, contract_dict: dict, qty: int, limit_price: float, **kwargs) -> dict:
-        """Place a limit buy order."""
+        """Place a buy order (limit or market)."""
         if not self.is_connected():
             raise RuntimeError("[KalshiBroker] Not connected to Kalshi — blocking trade")
 
         ticker = contract_dict["local_symbol"]
         side = "yes" if contract_dict["right"] == "C" else "no"
-        limit_cents = int(round(limit_price * 100))
+        order_type = kwargs.get("type", "limit").lower()
         
         # v18.34: Kalshi V2 expects either yes_price or no_price, not both with nulls.
         body = {
@@ -470,30 +470,29 @@ class KalshiBroker:
             "action": "buy",
             "side": side,
             "count": int(qty),
-            "type": "limit",
+            "type": order_type,
             "client_order_id": str(uuid.uuid4()),
         }
-        if side == "yes":
-            body["yes_price"] = limit_cents
-        else:
-            body["no_price"] = limit_cents
+
+        if order_type == "limit":
+            limit_cents = int(round(limit_price * 100))
+            if side == "yes":
+                body["yes_price"] = limit_cents
+            else:
+                body["no_price"] = limit_cents
         
-        # v18.34: Use the events/orders endpoint if possible, but orders often works.
-        # We'll stick to /portfolio/orders as it's common.
         resp = self._request("POST", "/trade-api/v2/portfolio/orders", body=body)
-        # v18.34: Kalshi V2 returns the order object under the 'order' key.
         order_info = resp.get("order", {})
         order_id = order_info.get("order_id", "ERR")
         
         if order_id == "ERR":
-            # If 'order_id' is missing, check if it's at the top level (backup)
             order_id = resp.get("order_id", "ERR")
             
         if order_id == "ERR":
-            logger.error(f"[KalshiBroker] Order failed for {ticker}. Response: {resp}")
+            logger.error(f"[KalshiBroker] {order_type.upper()} buy failed for {ticker}. Response: {resp}")
         
         if order_id != "ERR":
-            print(f"[KalshiBroker] BUY {qty} {ticker} ({side.upper()}) @ {limit_price:.4f} | ID={order_id}")
+            print(f"[KalshiBroker] BUY {qty} {ticker} ({side.upper()}) @ {limit_price:.4f} [{order_type.upper()}] | ID={order_id}")
             key = f"{ticker}_{contract_dict['right']}"
             self._open_positions[key] = {
                 "qty": qty,
@@ -501,14 +500,13 @@ class KalshiBroker:
                 "local_symbol": ticker,
                 "entry_price": limit_price,
             }
-            # log_trade for database persistence
             try:
                 log_trade(
                     strategy=kwargs.get("strategy", "forecast_unknown"),
                     broker="kalshi",
                     symbol=ticker,
                     action="BUY",
-                    order_type="Limit",
+                    order_type=order_type.capitalize(),
                     qty=qty,
                     price=limit_price,
                     order_id=order_id,
@@ -520,39 +518,40 @@ class KalshiBroker:
         return {"order_id": order_id, "price": limit_price, "qty": qty}
 
     def flatten_position(self, local_symbol: str, right: str, qty: int, **kwargs) -> dict:
-        """Exit a position by selling."""
+        """Exit a position by selling (limit or market)."""
         if not self.is_connected():
             raise RuntimeError("[KalshiBroker] Not connected to Kalshi — blocking exit")
         
         side = "yes" if right == "C" else "no"
         key = f"{local_symbol}_{right}"
+        order_type = kwargs.get("type", "limit").lower()
         
         quote = self.get_quote(local_symbol)
-        # To sell YES, we hit the YES bid.
-        # To sell NO, we hit the NO bid (which is 1 - yes_ask).
         if side == "yes":
             price = max(0.01, (quote.get("bid") or 0.01) - 0.01)
         else:
             no_bid = (1.0 - quote.get("ask")) if quote.get("ask") else 0.01
             price = max(0.01, no_bid - 0.01)
             
-        limit_cents = int(round(price * 100))
-        
         body = {
             "ticker": local_symbol,
             "action": "sell",
             "side": side,
             "count": int(qty),
-            "type": "limit",
-            "yes_price": limit_cents if side == "yes" else None,
-            "no_price": limit_cents if side == "no" else None,
+            "type": order_type,
             "client_order_id": str(uuid.uuid4()),
         }
+
+        if order_type == "limit":
+            limit_cents = int(round(price * 100))
+            if side == "yes":
+                body["yes_price"] = limit_cents
+            else:
+                body["no_price"] = limit_cents
         
         resp = self._request("POST", "/trade-api/v2/portfolio/orders", body=body)
         order_id = resp.get("order_id", "ERR")
         
-        # Calculate PnL
         pos_info = self._open_positions.pop(key, {})
         entry_price = pos_info.get("entry_price", 0.0)
         pnl_usd = (price - entry_price) * qty if entry_price > 0 else 0.0
@@ -564,7 +563,7 @@ class KalshiBroker:
                     broker="kalshi",
                     symbol=local_symbol,
                     action="SELL",
-                    order_type="Limit",
+                    order_type=order_type.capitalize(),
                     qty=qty,
                     price=price,
                     pnl_usd=pnl_usd,

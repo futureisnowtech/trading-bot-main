@@ -35,8 +35,6 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from logging_db.trade_logger import (
     log_trade,
     log_event,
-    persist_position,
-    delete_position,
 )
 
 try:
@@ -415,24 +413,6 @@ class IBKRStockBroker:
         except Exception as e:
             log_event("WARN", "IBKRStockBroker", f"log_trade error (live buy): {e}")
 
-        try:
-            persist_position(
-                symbol=symbol,
-                strategy=strategy,
-                qty=qty,
-                entry=limit_price,
-                stop=stop_price,
-                target=target_price,
-                high_since_entry=limit_price,
-                ts_entry=datetime.utcnow().isoformat(),
-                direction="LONG",
-                entry_reason=f"ibkr_stocks order={order_id}",
-            )
-        except Exception as e:
-            log_event(
-                "WARN", "IBKRStockBroker", f"persist_position error (live buy): {e}"
-            )
-
         log_event(
             "INFO",
             "IBKRStockBroker",
@@ -535,12 +515,6 @@ class IBKRStockBroker:
 
         with self._lock:
             self._open_positions.pop(symbol, None)
-        try:
-            delete_position(symbol, strategy)
-        except Exception as e:
-            log_event(
-                "WARN", "IBKRStockBroker", f"delete_position error (live sell): {e}"
-            )
 
         log_event(
             "INFO",

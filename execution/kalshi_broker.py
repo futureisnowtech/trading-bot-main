@@ -292,12 +292,6 @@ class KalshiBroker:
             for event in events:
                 e_ticker = event.get("event_ticker")
                 
-                # ── ForecastEx Filter (v18.36) ──────────────────────────────────
-                # Kalshi lists ForecastEx (KX) markets which have no orderbook depth
-                # in the Kalshi V2 API. Skip them to avoid poll noise.
-                if e_ticker.startswith("KX"):
-                    continue
-
                 if not _is_economic_market(e_ticker, event.get("title"), event.get("category")):
                     continue
                 

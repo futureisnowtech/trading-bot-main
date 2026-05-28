@@ -3,61 +3,6 @@ from __future__ import annotations
 import sqlite3
 
 
-def test_trade_logger_persists_positions_and_trades(proof_runtime):
-    from logging_db.trade_logger import (
-        get_todays_pnl,
-        load_open_positions,
-        log_trade,
-        persist_position,
-    )
-
-    trade_id = log_trade(
-        strategy="crypto_perp",
-        broker="binance",
-        symbol="BTCUSDT",
-        action="BUY",
-        order_type="LIMIT",
-        qty=1.0,
-        price=100.0,
-        fee_usd=0.25,
-        pnl_usd=0.0,
-        order_id="proof_buy",
-        notes="entry",
-    )
-    persist_position(
-        symbol="BTCUSDT",
-        strategy="crypto_perp",
-        qty=1.0,
-        entry=100.0,
-        stop=97.0,
-        target=106.0,
-        high_since_entry=100.0,
-        ts_entry="2026-04-10T09:30:00+00:00",
-        direction="LONG",
-        entry_reason="proof",
-    )
-    log_trade(
-        strategy="crypto_perp",
-        broker="binance",
-        symbol="BTCUSDT",
-        action="SELL",
-        order_type="MARKET",
-        qty=1.0,
-        price=104.0,
-        fee_usd=0.25,
-        pnl_usd=4.0,
-        order_id="proof_sell",
-        notes="exit",
-        won=1,
-        source="clean_paper_v10",
-        pnl_pct=0.04,
-    )
-
-    assert trade_id > 0
-    assert len(load_open_positions()) == 1
-    assert get_todays_pnl() == 4.0
-
-
 def test_analyze_closed_trade_updates_attribution_and_signal_stats(proof_runtime):
     """
     v14.0: source must be a trusted live/paper source for Bayesian signal_stats

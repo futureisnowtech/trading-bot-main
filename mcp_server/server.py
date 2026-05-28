@@ -349,32 +349,6 @@ def get_daily_summary() -> dict:
 
 
 @mcp.tool()
-def get_readiness_score() -> dict:
-    """Check paper→live readiness. Returns score and which criteria are passing/failing.
-
-    Returns: {ready: bool, score: int/7, criteria: list of {name, passing, value}}
-    """
-    try:
-        import subprocess
-
-        result = subprocess.run(
-            ["python3", "scripts/check_readiness.py", "--json"],
-            capture_output=True,
-            text=True,
-            cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        )
-        import json
-
-        return (
-            json.loads(result.stdout)
-            if result.stdout
-            else {"error": "No output from readiness check"}
-        )
-    except Exception as e:
-        return {"error": str(e), "hint": "Run: python3 scripts/check_readiness.py"}
-
-
-@mcp.tool()
 def get_notifications(limit: int = 20) -> list:
     """Get recent system notifications — trades, halts, signals, errors.
 

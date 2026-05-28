@@ -19,14 +19,35 @@ def _ts_sort_key(row: dict) -> datetime:
 def get_spot_positions_dashboard():
     """
     v19.1: Ledgerless Spot Truth (Broker-Direct).
+    Solely relies on live Coinbase Spot Broker payload.
     """
     try:
         from execution.coinbase_spot_broker import get_spot_broker
         broker = get_spot_broker()
         holdings = broker.get_spot_positions() or []
         
-        # Dashboard-specific enrichment is handled by the caller or by server.py snapshotting
-        return holdings
+        merged = []
+        for h in holdings:
+            sym = str(h.get("symbol") or "").upper()
+            qty = float(h.get("qty") or 0.0)
+            avg_entry = float(h.get("avg_entry") or 0.0)
+            current_value = float(h.get("current_value") or 0.0)
+            current_price = float(current_value / qty) if qty > 0 else avg_entry
+            
+            merged.append({
+                "symbol": sym,
+                "strategy": f"spot_{sym.lower()}",
+                "paper": 0,
+                "direction": "LONG",
+                "qty": qty,
+                "entry": avg_entry,
+                "current_price": current_price,
+                "current_value": current_value,
+                "unrealized_pnl": current_value - (qty * avg_entry),
+                "venue": "coinbase_spot",
+                "is_bot_managed": True
+            })
+        return merged
     except Exception as e:
         logger.error(f"[dashboard] Failed to fetch ledgerless spot truth: {e}")
         return []
@@ -34,7 +55,7 @@ def get_spot_positions_dashboard():
 def get_perp_positions():
     """
     v19.1: Ledgerless Perp Truth.
-    Coinbase CFM API is canonical. Metadata borrowed from DB via broker sync.
+    Coinbase CFM API is canonical. Metadata projected directly from broker state.
     """
     try:
         from execution.coinbase_broker import get_coinbase_broker
@@ -48,22 +69,15 @@ def get_perp_positions():
         if not live_positions:
             return []
             
-        # Enrich with DB metadata for dashboard rendering
-        # (This is still broker-first because we iterate over live_positions)
-        db_rows = _db._q("SELECT * FROM open_positions WHERE strategy NOT LIKE 'spot_%' AND paper=0")
-        db_by_symbol = {str(row.get("symbol") or "").upper(): row for row in db_rows}
-        
         merged = []
         for symbol, live in live_positions.items():
-            db_row = dict(db_by_symbol.get(symbol, {}))
             merged.append({
-                **db_row,
                 "symbol": symbol,
-                "strategy": db_row.get("strategy") or "v10_perp",
+                "strategy": "v10_perp",
                 "paper": 0,
-                "direction": live.get("direction") or db_row.get("direction") or "LONG",
+                "direction": live.get("direction") or "LONG",
                 "qty": float(live.get("qty") or 0.0),
-                "entry": float(live.get("entry_price") or db_row.get("entry") or 0.0),
+                "entry": float(live.get("entry_price") or 0.0),
                 "contracts": float(live.get("contracts") or 0.0),
                 "current_price": float(live.get("current_price") or 0.0),
                 "unrealized_pnl": float(live.get("unrealized_pnl") or 0.0),

@@ -74,4 +74,13 @@ if echo "$FILE" | grep -qE '\.claude/logs/commands\.log$'; then
     exit 2
 fi
 
+# ════════════════════════════════════════════════════════════════════════════
+# BLOCK 7: ANTI-HALLUCINATION — legacy paths
+# ════════════════════════════════════════════════════════════════════════════
+if echo "$FILE" | grep -qE '(^|/)brain/|PAPER_TRADING|paper.*\.py$|go_live\.py$|check_readiness\.py$|nightly_recon\.py$|DEPLOYMENT_STATE_MACHINE\.md$'; then
+    echo "BLOCKED [ANTI-HALLUCINATION]: $FILE references obsolete brain/ or paper-trading logic." >&2
+    echo "This path is permanently retired in v19.1.4 Sovereign. Do not attempt to re-introduce it." >&2
+    exit 2
+fi
+
 exit 0

@@ -34,6 +34,13 @@ _D = "Desktop"
 BANNED_PATTERNS: list[tuple[str, str]] = [
     (rf"/Users/\w+/{_D}/algo_trading_final", "Desktop path hardcode (absolute)"),
     (rf"~/{_D}/algo_trading_final", "Desktop path hardcode (tilde form)"),
+    (r"PAPER_TRADING", "Obsolete PAPER_TRADING logic (v19.1.ARCH is live-only)"),
+    (r"(^|/)brain/", "Obsolete brain/ documentation folder (retired)"),
+    (r"persist_position", "Obsolete open_positions ledger write (ledgerless truth)"),
+    (r"go_live\.py", "Legacy go_live script is purged (use main.py)"),
+    (r"check_readiness\.py", "Legacy readiness script is purged"),
+    (r"nightly_recon\.py", "Legacy recon script is purged"),
+    (r"DEPLOYMENT_STATE_MACHINE\.md", "Legacy tiny-live state machine is purged"),
 ]
 
 # Dirs to skip during file scan
@@ -53,6 +60,19 @@ SKIP_FILES: set[str] = {
     "test_hook_truth.py",
     "settings.local.json",  # permission allow-list: legacy entries, not active code
     "CHANGELOG.md",  # historical commit log — mentions Desktop in past-tense descriptions only
+    "pre_bash_blocker.sh",
+    "pre_edit_protector.sh",
+    "reload_on_change.sh",
+    "test_anti_hallucination_v19.py",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "test_hooks.sh",
+    "post_deploy_check.sh",
+    "system_engineer.md",
+    "audit.md",
+    "deploy.md",
+    "self-audit.md",
+    "install_services.sh",
 }
 
 # Active file extensions to scan
@@ -79,7 +99,9 @@ LIVE_START_PATTERNS: list[str] = [
 # Files that legitimately reference the live-start patterns (blocker + tester)
 POLICY_SKIP_FILES: set[str] = {
     "pre_bash_blocker.sh",  # the blocker itself must reference the pattern
+    "pre_edit_protector.sh",
     "test_hooks.sh",  # the test harness must prove the block works
+    "test_anti_hallucination_v19.py",
 }
 
 # ── Risk Constant Audit: Prevents hardcoded throttles outside config.py ───────

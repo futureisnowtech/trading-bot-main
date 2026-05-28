@@ -35,16 +35,7 @@
 - **Canonical memory order:**
   1. `AGENTS.md`
   2. repo code and proof tests
-  3. `brain/01_current_system/*`
-  4. `GEMINI.md` as a concise companion, not the primary source of truth
-
-## Strategic Brain
-
-- Hub: `brain/README.md`
-- Governed by: `brain_constitution.md` + `brain_execution_os.md`
-- Active operator notes:
-  - `brain/01_current_system/Current Active Logic.md`
-  - `brain/01_current_system/Known Constraints.md`
+  3. `GEMINI.md` as a concise companion, not the primary source of truth
 
 ## What This System Is Now
 
@@ -52,7 +43,7 @@ This repository still contains multiple strategy lanes and historical infrastruc
 
 - **Authoritative live lanes:** 
   - **Coinbase spot scalp** (Two-Tower Technical + Local ML)
-  - **Kalshi Macro Forecast** (Unshackled Binary Event Bridge)
+  - **Kalshi Weather Engine** (31-member GFS Ensembles)
 - **Active AI:** **Gemini Studio** (CLI intelligence/DB queries) and **Sovereign Mobile Gemini** (Telegram agent).
 - **Current live decision standard:** ledgerless, broker-first, fee-aware, route-aware, evidence-gated.
 - **Current launch target:** live-only
@@ -69,19 +60,20 @@ The Telegram bot acts as a mobile terminal for the Gemini agent. It is authorize
 **Operational Mandates for AI Agent:**
 - **Dashboard Truth:** Strictly refer to the operator dashboard as the **HUD dash**.
 - **Monitoring Truth:** The primary metrics and alerting surface is **Grafana** (Grafana IRM for incidents).
-- **Lane Awareness:** You are a Dual-Lane agent (Coinbase Spot + Kalshi Forecast).
+- **Lane Awareness:** You are a Dual-Lane agent (Coinbase Spot + Kalshi Weather).
 
-## Purged Systems (v19.1)
+## Purged Systems (v19.1.4)
 The following systems have been **purged** from the codebase:
-- Legacy audit/truth scripts in `scripts/`
-- Paper trading logic and `--mode` flags
-- IBKR / MES archived futures (dormant)
-- ForecastEx archived lane (dormant)
-- Legacy Streamlit dashboard (`dashboard/app.py`)
+- Legacy scripts: `go_live.py`, `check_readiness.py`, `nightly_recon.py`, `diagnose_drift.py`, `coinbase_launch_validator.py`, `ironclad_acceptance_test.py`, `acceptance_test_spot_pipeline.py`, `promote_perp_live.py`, `migrate_v10.py`, `migrate_clean_start.py`, `funding_carry_audit.py`, `purge_phantom_trades.py`.
+- Obsolte docs: `brain/` directory, `brain_constitution.md`, `brain_execution_os.md`, `DEPLOYMENT_STATE_MACHINE.md`, `SOP.html`, `refresh_sop.py`.
+- Paper trading logic and `--mode` flags.
+- IBKR / MES archived futures (dormant).
+- ForecastEx archived lane (dormant).
+- Legacy Streamlit dashboard (`dashboard/app.py`).
 
 ## Spot Truth-Lane Contract
 
-`runtime/spot_position_truth.py` is the canonical truth service for live spot exposure.
+v19.1.ARCH excised `runtime/spot_position_truth.py`. Truth is now projected **directly from broker holdings** via `execution/coinbase_spot_broker.py`.
 
 Broker truth decides:
 - whether a spot holding exists
@@ -98,6 +90,7 @@ Database truth enriches:
 
 ## Hard Safety Principles
 
+- no brain/ or docs/ reliance (AGENTS.md is the only repo memory)
 - no broad rewrite
 - no new signal bloat
 - no fake readiness claims
@@ -110,14 +103,14 @@ Database truth enriches:
 
 | File | Role |
 |---|---|
-| `runtime/spot_position_truth.py` | canonical broker-first spot truth |
+| `execution/coinbase_spot_broker.py` | canonical broker-first spot truth |
 | `spot_engine.py` | spot execution lifecycle, stop/target persistence |
 | `runtime/spot_strategy.py` | setup / regime / score / route governance |
 | `scheduler/v10_runner.py` | scan loop, admission path, runtime lane state |
-| `execution/coinbase_spot_broker.py` | broker snapshot, spot orders, spot balances |
 | `main.py` | unified system entry point |
 | `dashboard/api/server.py` | authoritative **HUD dash** API (Ledgerless v19.1) |
 | `monitoring/log_alerter.py` | Telegram alert watchdog with Insight Layer |
+| `execution/kalshi_broker.py` | weather lane execution |
 
 ## Operator Commands
 

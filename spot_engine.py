@@ -283,94 +283,13 @@ def get_spot_positions(paper: bool = False) -> List[Dict]:
 def _sync_position_high(
     symbol: str, strategy: str, high_price: float, paper: bool = False
 ) -> None:
-    try:
-        paper_val = 1 if paper else 0
-        con = _db_conn()
-        con.execute(
-            "UPDATE open_positions SET high_since_entry=? WHERE symbol=? AND strategy=? AND paper=?",
-            (high_price, _clean_symbol(symbol), strategy, paper_val),
-        )
-        con.commit()
-        con.close()
-    except Exception as e:
-        logger.debug(f"[spot_engine] high sync error {symbol}: {e}")
+    pass
 
 
 def _sync_position_exit_reason(
     symbol: str, strategy: str, exit_reason: str, paper: bool = False
 ) -> None:
-    try:
-        paper_val = 1 if paper else 0
-        con = _db_conn()
-        con.execute(
-            "UPDATE open_positions SET exit_reason=? WHERE symbol=? AND strategy=? AND paper=?",
-            (exit_reason, _clean_symbol(symbol), strategy, paper_val),
-        )
-        con.commit()
-        con.close()
-    except Exception as e:
-        logger.debug(f"[spot_engine] exit_reason sync error {symbol}: {e}")
-
-
-def _persist_position_from_row(row: dict, *, qty: float | None = None) -> None:
-    from logging_db.trade_logger import persist_position
-
-    persist_position(
-        symbol=str(row.get("symbol") or ""),
-        strategy=str(
-            row.get("strategy") or _position_strategy(row.get("symbol") or "")
-        ),
-        qty=float(qty if qty is not None else row.get("qty") or 0.0),
-        entry=float(row.get("entry") or 0.0),
-        stop=float(row.get("stop") or 0.0),
-        target=float(row.get("target") or 0.0),
-        high_since_entry=float(row.get("high_since_entry") or row.get("entry") or 0.0),
-        ts_entry=str(row.get("ts_entry") or datetime.datetime.utcnow().isoformat()),
-        paper=int(row.get("paper") or 0),
-        direction=str(row.get("direction") or "LONG"),
-        entry_reason=str(row.get("entry_reason") or ""),
-        low_since_entry=float(row.get("low_since_entry") or row.get("entry") or 0.0),
-        atr_at_entry=float(row.get("atr_at_entry") or 0.0),
-        composite_score=float(row.get("composite_score") or 0.0),
-        trailing_active=bool(row.get("trailing_active")),
-        trailing_stop_price=float(row.get("trailing_stop_price") or 0.0),
-        scale_33_done=bool(row.get("scale_33_done")),
-        scale_66_done=bool(row.get("scale_66_done")),
-        leverage=int(row.get("leverage") or 1),
-        spot_regime=str(row.get("spot_regime") or ""),
-        setup_family=str(row.get("setup_family") or ""),
-        setup_score=float(row.get("setup_score") or 0.0),
-        setup_preference=str(row.get("setup_preference") or ""),
-        tf_5m_state=str(row.get("tf_5m_state") or ""),
-        tf_30m_state=str(row.get("tf_30m_state") or ""),
-        tf_4h_state=str(row.get("tf_4h_state") or ""),
-        tf_1d_state=str(row.get("tf_1d_state") or ""),
-        structural_confirms=str(row.get("structural_confirms") or ""),
-        execution_route=str(row.get("execution_route") or ""),
-        cooldown_until=str(row.get("cooldown_until") or ""),
-        microstructure_veto=str(row.get("microstructure_veto") or ""),
-        stop_model_version=str(row.get("stop_model_version") or ""),
-        target_model_version=str(row.get("target_model_version") or ""),
-        target_r=float(row.get("target_r") or 0.0),
-        trail_arm_r=float(row.get("trail_arm_r") or 0.0),
-        risk_dollars=float(row.get("risk_dollars") or 0.0),
-        entry_fee_usd=float(row.get("entry_fee_usd") or 0.0),
-        exit_reason=str(row.get("exit_reason") or ""),
-        entry_trade_id=int(row.get("entry_trade_id") or 0),
-        entry_order_id=str(row.get("entry_order_id") or ""),
-        entry_feature_snapshot_id=int(row.get("entry_feature_snapshot_id") or 0),
-        tv_profile_name=str(row.get("tv_profile_name") or ""),
-        tv_signal_bias=str(row.get("tv_signal_bias") or ""),
-        tv_signal_ts=str(row.get("tv_signal_ts") or ""),
-        tv_signal_age_sec=float(row.get("tv_signal_age_sec") or 0.0),
-        tv_indicator_name=str(row.get("tv_indicator_name") or ""),
-        tv_signal_strength=str(row.get("tv_signal_strength") or ""),
-        candidate_id=int(row.get("candidate_id") or 0),
-        candidate_scan_id=str(row.get("candidate_scan_id") or ""),
-        raw_scanner_symbol=str(row.get("raw_scanner_symbol") or ""),
-        base_asset=str(row.get("base_asset") or ""),
-        tv_veto_state=str(row.get("tv_veto_state") or ""),
-    )
+    pass
 
 
 def _state_payload(spot_state: dict | None) -> dict:
@@ -671,6 +590,10 @@ def _maker_first_buy(
             status = broker.get_spot_order_status(
                 order["order_id"], fallback_symbol=_clean_symbol(symbol)
             )
+            if status.get("status") == "PURGE_GHOST_ORDER":
+                logger.warning(f"[spot_engine] {symbol} Order {order['order_id']} is a ghost. Purging from chase loop.")
+                return None, "maker_first_failed", "ghost_order_purged"
+
             completion = float(status.get("completion_pct") or 0.0)
             if completion >= 80.0 or str(status.get("status", "")).upper() == "FILLED":
                 status["execution_route"] = "maker_first"
@@ -746,6 +669,10 @@ def _maker_first_sell(
             status = broker.get_spot_order_status(
                 order["order_id"], fallback_symbol=_clean_symbol(symbol)
             )
+            if status.get("status") == "PURGE_GHOST_ORDER":
+                logger.warning(f"[spot_engine] {symbol} Order {order['order_id']} is a ghost. Purging from chase loop.")
+                return None, "maker_first_failed", "ghost_order_purged"
+
             completion = float(status.get("completion_pct") or 0.0)
             if completion >= 80.0 or str(status.get("status", "")).upper() == "FILLED":
                 status["execution_route"] = "maker_first"
@@ -1031,7 +958,7 @@ def open_spot(
         else 0.0
     )
 
-    from logging_db.trade_logger import log_trade, log_trade_features, persist_position
+    from logging_db.trade_logger import log_trade, log_trade_features
 
     state_payload = _state_payload(spot_state)
     tv_payload = _tv_payload(tv_context)
@@ -1074,57 +1001,6 @@ def open_spot(
         "LONG",
         entry_features,
     )
-    persist_position(
-        symbol=clean,
-        strategy=_position_strategy(clean),
-        qty=qty,
-        entry=price,
-        stop=stop_price,
-        target=target_price,
-        high_since_entry=price,
-        ts_entry=datetime.datetime.utcnow().isoformat(),
-        paper=1 if paper else 0,
-        direction="LONG",
-
-        entry_reason="spot_scalp_entry",
-        atr_at_entry=atr_at_entry,
-        composite_score=composite_score,
-        leverage=1,
-        spot_regime=regime,
-        setup_family=(spot_state or {}).get("setup_family", ""),
-        setup_score=state_payload["setup_score"],
-        setup_preference=state_payload["setup_preference"],
-        tf_5m_state=state_payload["tf_5m_state"],
-        tf_30m_state=state_payload["tf_30m_state"],
-        tf_4h_state=state_payload["tf_4h_state"],
-        tf_1d_state=state_payload["tf_1d_state"],
-        structural_confirms=state_payload["structural_confirms"],
-        execution_route=execution_route,
-        cooldown_until=cooldown_until,
-        microstructure_veto=micro_veto,
-        stop_model_version="spot_scalp_v1",
-        target_model_version=f"spot_scalp_{target_profile}_v1",
-        target_r=target_r,
-        trail_arm_r=trail_arm_r,
-        risk_dollars=risk_dollars,
-        entry_fee_usd=fee_usd,
-        exit_reason="",
-        entry_trade_id=entry_trade_id,
-        entry_order_id=str(order.get("order_id") or ""),
-        entry_feature_snapshot_id=entry_feature_snapshot_id,
-        tv_profile_name=tv_payload["tv_profile_name"],
-        tv_signal_bias=tv_payload["tv_signal_bias"],
-        tv_signal_ts=tv_payload["tv_signal_ts"],
-        tv_signal_age_sec=tv_payload["tv_signal_age_sec"],
-        tv_indicator_name=tv_payload["tv_indicator_name"],
-        tv_signal_strength=tv_payload["tv_signal_strength"],
-        candidate_id=int(candidate_id or 0),
-        candidate_scan_id=str(candidate_scan_id or ""),
-        raw_scanner_symbol=str(raw_scanner_symbol or ""),
-        base_asset=str(base_asset or clean),
-        tv_veto_state=str(block_reason or ""),
-    )
-
     # v18.19: open-side Prometheus emissions for Grafana dashboard.
     try:
         from monitoring import metrics
@@ -1138,16 +1014,12 @@ def open_spot(
         except Exception:
             _stc = 0.0
         metrics.SESSION_TRADES_GAUGE.set(_stc + 1.0)
-        # Open-trades gauge — recompute from DB for safety.
+        # Open-trades gauge — rely on broker truth instead.
         try:
-            from logging_db.trade_logger import load_open_positions
-
-            _open = [
-                r for r in load_open_positions(paper=0)
-                if str(r.get("strategy", "")).startswith("spot_")
-                and float(r.get("qty") or 0.0) > 0
-            ]
-            metrics.OPEN_TRADES_GAUGE.set(len(_open))
+            from execution.coinbase_spot_broker import get_spot_broker
+            broker = get_spot_broker()
+            holdings = broker.get_spot_positions() or []
+            metrics.OPEN_TRADES_GAUGE.set(len(holdings))
         except Exception as e:
             logger.warning(f"Non-critical background state telemetry error: {e}")
         # Cumulative fees on entry side too.
@@ -1511,15 +1383,11 @@ def close_spot(
         )
         updated_row["paper"] = 0
         updated_row["exit_reason"] = str(exit_reason or "")
-        _persist_position_from_row(updated_row, qty=updated_row["qty"])
     else:
-        from logging_db.trade_logger import delete_position
+        pass
 
-        delete_position(clean, strategy=strategy, paper=1 if paper else 0)
-    
     try:
         from data.edge_monitor import record_incubation_trade
-
         record_incubation_trade("spot_scalp")
     except Exception:
         pass

@@ -236,7 +236,7 @@ def _positions_panel(d: dict, n_rows: int) -> list:
             f"{dir_c}{direction}{RST}"
         )
     if not rows:
-        rows = [f" {DIM}No open positions — patience pays 👑{RST}"]
+        rows = [f" {DIM}No open positions — patience pays{RST}"]
     for r in rows[: n_rows - 1]:
         lines.append(r)
     # Pad to n_rows

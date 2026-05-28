@@ -24,7 +24,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import ACCOUNT_SIZE, MARKET_TIMEZONE, MAX_DEPLOYED_PCT
 
 from logging_db.trade_logger import (
-    log_event, persist_position, delete_position, load_open_positions,
+    log_event,
     get_todays_pnl, get_todays_fees,
 )
 from risk.position_sizer import size_from_kelly
@@ -45,69 +45,36 @@ class RiskManager:
         self._perp:   dict = {}
         self._last_scan_ts: float = 0.0
         self._position_lock = threading.RLock()  # prevents duplicate entries from parallel scanners
-        self._restore_positions()
+        self._sync_positions_from_broker()
         self._restore_halt_state()
 
     # ── Startup state restoration ─────────────────────────────────────────────
 
-    def _restore_positions(self) -> None:
-        """Restore open positions from SQLite on startup.
-
-        Validates each against the trades table: if a close event already exists
-        after ts_entry the bot was killed between log_trade and delete_position —
-        clean up the orphan rather than restoring it.
-        """
+    def _sync_positions_from_broker(self) -> None:
+        """v19.1: Project truth directly from Coinbase spot broker."""
         try:
-            import sqlite3 as _sq
-            from config import DB_PATH as _DB_PATH
-
-            positions = load_open_positions()
-            restored = cleaned = 0
-            for pos in positions:
-                sym   = pos['symbol']
-                strat = pos['strategy']
-                ts_e  = pos.get('ts_entry', '1970-01-01')
-
-                try:
-                    conn = _sq.connect(_DB_PATH)
-                    cur  = conn.cursor()
-                    cur.execute(
-                        "SELECT id FROM trades WHERE symbol=? AND strategy=? AND ts=? AND paper=0""",
-                        (sym, strat, ts_e)
-                    )
-                    already_closed = cur.fetchone() is not None
-                    conn.close()
-                except Exception:
-                    already_closed = False
-
-                if already_closed:
-                    delete_position(sym, strat, False)
-                    cleaned += 1
-                    logger.info(f"[RiskManager] Cleaned orphaned position: {sym} ({strat})")
-                    continue
-
-                p = {
-                    'qty': pos['qty'], 'entry': pos['entry'],
-                    'stop': pos['stop'], 'target': pos['target'],
-                    'high_since_entry': pos['high_since_entry'],
-                    'low_since_entry': pos['low_since_entry'] if pos.get('low_since_entry') is not None else pos['entry'],
-                    'ts_entry': ts_e,
-                    'direction': pos.get('direction', 'LONG'),
-                    'entry_reason': pos.get('entry_reason', ''),
-                }
-                if 'equity' in strat or 'futures' in strat:
-                    self._equity[sym] = p
-                elif 'perp' in strat:
-                    self._perp[sym] = p
-                else:
-                    self._crypto[sym] = p
-                restored += 1
-
-            if restored or cleaned:
-                logger.info(f"[RiskManager] Restored {restored} open positions"
-                      + (f", cleaned {cleaned} orphaned" if cleaned else ""))
+            from execution.coinbase_spot_broker import get_spot_broker
+            broker = get_spot_broker()
+            holdings = broker.get_spot_positions() or []
+            
+            with self._position_lock:
+                self._crypto = {}
+                for h in holdings:
+                    sym = str(h.get('symbol', '')).upper()
+                    if not sym: continue
+                    self._crypto[sym] = {
+                        'qty': float(h.get('qty', 0.0)),
+                        'entry': float(h.get('avg_entry') or 0.0),
+                        'stop': 0.0,
+                        'target': 0.0,
+                        'direction': 'LONG',
+                        'ts_entry': datetime.now(pytz.timezone(MARKET_TIMEZONE)).isoformat(),
+                        'high_since_entry': float(h.get('avg_entry') or 0.0),
+                    }
+                if self._crypto:
+                    logger.info(f"[RiskManager] Synced {len(self._crypto)} spot positions from broker")
         except Exception as e:
-            logger.error(f"[RiskManager] Position restore error: {e}")
+            logger.error(f"[RiskManager] Failed to sync positions from broker: {e}")
 
     def _restore_halt_state(self) -> None:
         """Re-apply today's halt on startup if condition still holds."""
@@ -290,9 +257,6 @@ class RiskManager:
                 self._perp[symbol] = pos
             else:
                 self._crypto[symbol] = pos
-            persist_position(symbol, strategy, qty, entry, stop, target, entry, ts,
-                             False, direction=direction, entry_reason=entry_reason,
-                             low_since_entry=entry)
             return True
 
     def close_position(self, strategy, symbol, exit_reason: str = '') -> Optional[dict]:
@@ -302,7 +266,6 @@ class RiskManager:
             pos = self._perp.pop(symbol, None)
         else:
             pos = self._crypto.pop(symbol, None)
-        delete_position(symbol, strategy, False)
         return pos
 
     def update_high(self, strategy, symbol, price) -> None:
@@ -318,14 +281,6 @@ class RiskManager:
             old_extreme = _he if _he is not None else price  # explicit None-guard (.get default ignored for NULL SQLite values)
             new_extreme = max(old_extreme, price) if direction == 'LONG' else min(old_extreme, price)
             d[symbol]['high_since_entry'] = new_extreme
-            if new_extreme != old_extreme:
-                persist_position(symbol, strategy,
-                                 d[symbol]['qty'], d[symbol]['entry'],
-                                 d[symbol]['stop'], d[symbol]['target'],
-                                 new_extreme, d[symbol]['ts_entry'], False,
-                                 direction=direction,
-                                 entry_reason=d[symbol].get('entry_reason', ''),
-                                 low_since_entry=d[symbol].get('low_since_entry'))
 
     def update_low(self, strategy, symbol, price) -> None:
         """Track max adverse excursion (lowest price seen for LONG, highest for SHORT)."""

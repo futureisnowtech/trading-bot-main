@@ -208,10 +208,13 @@ class CoinbaseSpotBroker:
         if _DEEP_TRACE:
             logger.info(f"[spot] Deep Trace Response: {resp.status_code} {resp.text[:500]}")
         if not resp.ok:
-            # Failure path always logs — we want the error in production logs.
-            logger.warning(
-                f"[spot] {method} {path} → {resp.status_code}: {resp.text[:200]}"
-            )
+            # v19.1.5: Do not log 404s for historical orders as warnings to prevent Telegram spam
+            is_404_order = resp.status_code == 404 and "orders/historical" in path
+            if not is_404_order:
+                # Failure path always logs — we want the error in production logs.
+                logger.warning(
+                    f"[spot] {method} {path} → {resp.status_code}: {resp.text[:200]}"
+                )
             raise RuntimeError(
                 f"Coinbase Spot API {method} {path} → {resp.status_code}: {resp.text[:400]}"
             )

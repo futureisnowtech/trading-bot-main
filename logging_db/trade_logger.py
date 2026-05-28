@@ -74,42 +74,10 @@ def init_db() -> None:
         paper INTEGER NOT NULL, order_id TEXT, notes TEXT
     )""")
 
-    cur.execute("""CREATE TABLE IF NOT EXISTS open_positions (
-        symbol TEXT NOT NULL, strategy TEXT NOT NULL,
-        qty REAL NOT NULL, entry REAL NOT NULL,
-        stop REAL NOT NULL, target REAL NOT NULL,
-        high_since_entry REAL NOT NULL, ts_entry TEXT NOT NULL,
-        paper INTEGER NOT NULL, direction TEXT DEFAULT 'LONG',
-        entry_reason TEXT DEFAULT '',
-        spot_regime TEXT DEFAULT '',
-        setup_family TEXT DEFAULT '',
-        setup_score REAL DEFAULT 0,
-        setup_preference TEXT DEFAULT '',
-        tf_5m_state TEXT DEFAULT '',
-        tf_30m_state TEXT DEFAULT '',
-        tf_4h_state TEXT DEFAULT '',
-        tf_1d_state TEXT DEFAULT '',
-        structural_confirms TEXT DEFAULT '',
-        execution_route TEXT DEFAULT '',
-        cooldown_until TEXT DEFAULT '',
-        microstructure_veto TEXT DEFAULT '',
-        stop_model_version TEXT DEFAULT '',
-        target_model_version TEXT DEFAULT '',
-        target_r REAL DEFAULT 0,
-        trail_arm_r REAL DEFAULT 0,
-        risk_dollars REAL DEFAULT 0,
-        entry_fee_usd REAL DEFAULT 0,
-        exit_reason TEXT DEFAULT '',
-        PRIMARY KEY (symbol, strategy, paper)
-    )""")
     for migration in [
-        "ALTER TABLE open_positions ADD COLUMN direction TEXT DEFAULT 'LONG'",
-        "ALTER TABLE open_positions ADD COLUMN entry_reason TEXT DEFAULT ''",
         # v9.0 Sprint 2: lane tag for 3-lane architecture (lane1=stocks, lane2=crypto, lane3=prediction)
         "ALTER TABLE trades ADD COLUMN lane TEXT DEFAULT 'lane2'",
-        "ALTER TABLE open_positions ADD COLUMN lane TEXT DEFAULT 'lane2'",
         # v9.1 audit builds: MAE/MFE tracking, exit classification, ML gate visibility
-        "ALTER TABLE open_positions ADD COLUMN low_since_entry REAL",
         "ALTER TABLE trade_attribution ADD COLUMN mae_pct REAL DEFAULT 0",
         "ALTER TABLE trade_attribution ADD COLUMN mfe_pct REAL DEFAULT 0",
         "ALTER TABLE trade_attribution ADD COLUMN exit_type TEXT DEFAULT 'unknown'",
@@ -122,15 +90,6 @@ def init_db() -> None:
         "ALTER TABLE trades ADD COLUMN won INTEGER DEFAULT NULL",
         "ALTER TABLE trades ADD COLUMN source TEXT DEFAULT 'paper'",
         "ALTER TABLE trades ADD COLUMN pnl_pct REAL DEFAULT 0",
-        # v10.2: position state persistence — survive restarts without losing exit logic state.
-        # These are required to correctly restore trailing stops and scale-out flags.
-        "ALTER TABLE open_positions ADD COLUMN atr_at_entry REAL DEFAULT 0",
-        "ALTER TABLE open_positions ADD COLUMN composite_score REAL DEFAULT 0",
-        "ALTER TABLE open_positions ADD COLUMN trailing_active INTEGER DEFAULT 0",
-        "ALTER TABLE open_positions ADD COLUMN trailing_stop_price REAL DEFAULT 0",
-        "ALTER TABLE open_positions ADD COLUMN scale_33_done INTEGER DEFAULT 0",
-        "ALTER TABLE open_positions ADD COLUMN scale_66_done INTEGER DEFAULT 0",
-        "ALTER TABLE open_positions ADD COLUMN leverage INTEGER DEFAULT 3",
         # v13.7: 15-minute forward outcome fields for candidate_outcomes
         "ALTER TABLE candidate_outcomes ADD COLUMN price_15m REAL DEFAULT 0",
         "ALTER TABLE candidate_outcomes ADD COLUMN ret_15m_pct REAL DEFAULT 0",
@@ -166,45 +125,6 @@ def init_db() -> None:
         "ALTER TABLE scan_candidates ADD COLUMN net_rr REAL DEFAULT NULL",
         "ALTER TABLE scan_candidates ADD COLUMN net_win_usd REAL DEFAULT NULL",
         "ALTER TABLE scan_candidates ADD COLUMN econ_gate_class TEXT DEFAULT ''",
-        "ALTER TABLE open_positions ADD COLUMN spot_regime TEXT DEFAULT ''",
-        "ALTER TABLE open_positions ADD COLUMN setup_family TEXT DEFAULT ''",
-        "ALTER TABLE open_positions ADD COLUMN setup_score REAL DEFAULT 0",
-        "ALTER TABLE open_positions ADD COLUMN setup_preference TEXT DEFAULT ''",
-        "ALTER TABLE open_positions ADD COLUMN tf_5m_state TEXT DEFAULT ''",
-        "ALTER TABLE open_positions ADD COLUMN tf_30m_state TEXT DEFAULT ''",
-        "ALTER TABLE open_positions ADD COLUMN tf_4h_state TEXT DEFAULT ''",
-        "ALTER TABLE open_positions ADD COLUMN tf_1d_state TEXT DEFAULT ''",
-        "ALTER TABLE open_positions ADD COLUMN structural_confirms TEXT DEFAULT ''",
-        "ALTER TABLE open_positions ADD COLUMN execution_route TEXT DEFAULT ''",
-        "ALTER TABLE open_positions ADD COLUMN cooldown_until TEXT DEFAULT ''",
-        "ALTER TABLE open_positions ADD COLUMN microstructure_veto TEXT DEFAULT ''",
-        "ALTER TABLE open_positions ADD COLUMN stop_model_version TEXT DEFAULT ''",
-        "ALTER TABLE open_positions ADD COLUMN target_model_version TEXT DEFAULT ''",
-        "ALTER TABLE open_positions ADD COLUMN target_r REAL DEFAULT 0",
-        "ALTER TABLE open_positions ADD COLUMN trail_arm_r REAL DEFAULT 0",
-        "ALTER TABLE open_positions ADD COLUMN risk_dollars REAL DEFAULT 0",
-        "ALTER TABLE open_positions ADD COLUMN entry_fee_usd REAL DEFAULT 0",
-        "ALTER TABLE open_positions ADD COLUMN exit_reason TEXT DEFAULT ''",
-        "ALTER TABLE open_positions ADD COLUMN entry_trade_id INTEGER DEFAULT 0",
-        "ALTER TABLE open_positions ADD COLUMN entry_order_id TEXT DEFAULT ''",
-        "ALTER TABLE open_positions ADD COLUMN entry_feature_snapshot_id INTEGER DEFAULT 0",
-        "ALTER TABLE open_positions ADD COLUMN tv_profile_name TEXT DEFAULT ''",
-        "ALTER TABLE open_positions ADD COLUMN tv_signal_bias TEXT DEFAULT ''",
-        "ALTER TABLE open_positions ADD COLUMN tv_signal_ts TEXT DEFAULT ''",
-        "ALTER TABLE open_positions ADD COLUMN tv_signal_age_sec REAL DEFAULT 0",
-        "ALTER TABLE open_positions ADD COLUMN tv_indicator_name TEXT DEFAULT ''",
-        "ALTER TABLE open_positions ADD COLUMN tv_signal_strength TEXT DEFAULT ''",
-        "ALTER TABLE open_positions ADD COLUMN candidate_id INTEGER DEFAULT 0",
-        "ALTER TABLE open_positions ADD COLUMN candidate_scan_id TEXT DEFAULT ''",
-        "ALTER TABLE open_positions ADD COLUMN raw_scanner_symbol TEXT DEFAULT ''",
-        "ALTER TABLE open_positions ADD COLUMN base_asset TEXT DEFAULT ''",
-        "ALTER TABLE open_positions ADD COLUMN tv_veto_state TEXT DEFAULT ''",
-        # v18.19: sell-failure halt (SOL ghost cure Layer C). After 3 consecutive
-        # broker rejections with the same error code, sell_blocked=1 stops the
-        # retry loop and requires human reconciliation.
-        "ALTER TABLE open_positions ADD COLUMN sell_failure_count INTEGER DEFAULT 0",
-        "ALTER TABLE open_positions ADD COLUMN sell_blocked INTEGER DEFAULT 0",
-        "ALTER TABLE open_positions ADD COLUMN sell_blocked_reason TEXT DEFAULT ''",
         "CREATE TABLE IF NOT EXISTS api_telemetry (id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL NOT NULL, module TEXT NOT NULL, prompt_tokens INTEGER DEFAULT 0, completion_tokens INTEGER DEFAULT 0)",
     ]:
         try:
@@ -1782,149 +1702,6 @@ def get_promotion_state() -> list:
         return rows
     except Exception:
         return []
-
-
-# ─── Position persistence ─────────────────────────────────────────────────────
-
-
-def persist_position(
-    symbol,
-    strategy,
-    qty,
-    entry,
-    stop,
-    target,
-    high_since_entry,
-    ts_entry,
-    direction="LONG",
-    entry_reason="",
-    low_since_entry=None,
-    atr_at_entry=0.0,
-    composite_score=0.0,
-    trailing_active=False,
-    trailing_stop_price=0.0,
-    scale_33_done=False,
-    scale_66_done=False,
-    leverage=3,
-    spot_regime="",
-    setup_family="",
-    setup_score=0.0,
-    setup_preference="",
-    tf_5m_state="",
-    tf_30m_state="",
-    tf_4h_state="",
-    tf_1d_state="",
-    structural_confirms="",
-    execution_route="",
-    cooldown_until="",
-    microstructure_veto="",
-    stop_model_version="",
-    target_model_version="",
-    target_r=0.0,
-    trail_arm_r=0.0,
-    risk_dollars=0.0,
-    entry_fee_usd=0.0,
-    exit_reason="",
-    entry_trade_id=0,
-    entry_order_id="",
-    entry_feature_snapshot_id=0,
-    tv_profile_name="",
-    tv_signal_bias="",
-    tv_signal_ts="",
-    tv_signal_age_sec=0.0,
-    tv_indicator_name="",
-    tv_signal_strength="",
-    candidate_id=0,
-    candidate_scan_id="",
-    raw_scanner_symbol="",
-    base_asset="",
-    tv_veto_state="",
-    paper=0,
-) -> None:
-    """Write open position to DB so restarts can recover it (including exit state)."""
-    _low = low_since_entry if low_since_entry is not None else entry
-    values = (
-        symbol,
-        strategy,
-        qty,
-        entry,
-        stop,
-        target,
-        high_since_entry,
-        _low,
-        ts_entry,
-        paper,
-        direction,
-        entry_reason or "",
-        float(atr_at_entry),
-        float(composite_score),
-        int(trailing_active),
-        float(trailing_stop_price),
-        int(scale_33_done),
-        int(scale_66_done),
-        int(leverage),
-        str(spot_regime or ""),
-        str(setup_family or ""),
-        float(setup_score or 0.0),
-        str(setup_preference or ""),
-        str(tf_5m_state or ""),
-        str(tf_30m_state or ""),
-        str(tf_4h_state or ""),
-        str(tf_1d_state or ""),
-        str(structural_confirms or ""),
-        str(execution_route or ""),
-        str(cooldown_until or ""),
-        str(microstructure_veto or ""),
-        str(stop_model_version or ""),
-        str(target_model_version or ""),
-        float(target_r or 0.0),
-        float(trail_arm_r or 0.0),
-        float(risk_dollars or 0.0),
-        float(entry_fee_usd or 0.0),
-        str(exit_reason or ""),
-        int(entry_trade_id or 0),
-        str(entry_order_id or ""),
-        int(entry_feature_snapshot_id or 0),
-        str(tv_profile_name or ""),
-        str(tv_signal_bias or ""),
-        str(tv_signal_ts or ""),
-        float(tv_signal_age_sec or 0.0),
-        str(tv_indicator_name or ""),
-        str(tv_signal_strength or ""),
-        int(candidate_id or 0),
-        str(candidate_scan_id or ""),
-        str(raw_scanner_symbol or ""),
-        str(base_asset or ""),
-        str(tv_veto_state or ""),
-    )
-    conn = _conn()
-    placeholders = ",".join(["?"] * len(values))
-    conn.cursor().execute(
-        f"""INSERT OR REPLACE INTO open_positions
-        (symbol,strategy,qty,entry,stop,target,high_since_entry,low_since_entry,ts_entry,paper,
-         direction,entry_reason,atr_at_entry,composite_score,
-         trailing_active,trailing_stop_price,scale_33_done,scale_66_done,leverage,
-         spot_regime,setup_family,setup_score,setup_preference,
-         tf_5m_state,tf_30m_state,tf_4h_state,tf_1d_state,
-         structural_confirms,execution_route,cooldown_until,microstructure_veto,
-         stop_model_version,target_model_version,target_r,trail_arm_r,risk_dollars,
-         entry_fee_usd,exit_reason,entry_trade_id,entry_order_id,entry_feature_snapshot_id,
-         tv_profile_name,tv_signal_bias,tv_signal_ts,tv_signal_age_sec,
-         tv_indicator_name,tv_signal_strength,candidate_id,candidate_scan_id,
-         raw_scanner_symbol,base_asset,tv_veto_state)
-        VALUES ({placeholders})""",
-        values,
-    )
-    conn.commit()
-
-
-def delete_position(symbol, strategy, paper: int = 0) -> None:
-    conn = _conn()
-    conn.execute(
-        "DELETE FROM open_positions WHERE symbol=? AND strategy=? AND paper=?",
-        (symbol, strategy, paper),
-    )
-    conn.commit()
 
 
 # ─── v18.19 sticky regime state ─────────────────────────────────────────────

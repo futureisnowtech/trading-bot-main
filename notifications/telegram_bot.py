@@ -110,8 +110,7 @@ def _runtime_is_live() -> bool:
     """
     Return True only when the system is confirmed to be running in live mode.
 
-    Primary source: system_runtime_state DB table (written by main.py on startup
-    and updated by go_live.py / go_paper.py transitions).
+    Primary source: system_runtime_state DB table (written by main.py on startup).
     Fallback: system_state.state in-process mode field.
     Fallback: config.False (config-file truth, least authoritative).
 

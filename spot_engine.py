@@ -50,7 +50,6 @@ from runtime.spot_strategy import (
     trail_arm_r_for_symbol,
 )
 from runtime.spot_classification import get_classifications, is_external_manual
-from runtime.spot_position_truth import get_spot_symbol_truth
 from logging_db.trade_logger import _conn as _db_conn
 
 from functools import wraps
@@ -160,16 +159,12 @@ def _get_broker(paper: bool = False) -> Optional["CoinbaseSpotBroker"]:
 def _load_spot_positions_from_db(
     paper: bool = False, bot_managed_only: bool = False
 ) -> List[Dict]:
-    """Load spot positions from open_positions.
-
-    v18.19: when ``bot_managed_only=True``, exclude rows classified as
-    ``external_manual`` AND rows with ``sell_blocked=1``. Use this for exit-check
-    callers so the bot doesn't keep trying to sell user-managed coins or halted
-    symbols. Entry/scan callers leave it False (the default) and continue to see
-    the full picture.
+    """
+    v19.1: Ledgerless reconciliation.
+    Reconciles open_positions against authoritative broker truth.
     """
     try:
-        from logging_db.trade_logger import load_open_positions
+        from logging_db.trade_logger import load_open_positions, delete_position
         from config import DB_PATH
         import datetime
 
@@ -178,45 +173,58 @@ def _load_spot_positions_from_db(
         db_positions = [r for r in rows if str(r.get("strategy", "")).startswith("spot_")]
         db_symbols = {str(p.get("symbol", "")).upper() for p in db_positions}
 
-        # 2. Check for unclassified broker holdings and auto-adopt (LIVE only)
+        # 2. Reconcile against broker truth (LIVE only)
         if not paper:
             try:
                 broker = _get_broker(paper=False)
                 if broker:
                     holdings = broker.sync_live_holdings() or []
                     classifications = get_classifications()
+                    live_symbols = {str(h.get("symbol")).upper() for h in holdings}
+                    live_map = {str(h.get("symbol")).upper(): h for h in holdings}
 
-                    # Filter out what's already in DB
+                    # A. Check for ghost positions in DB (DB has it, Broker doesn't)
+                    for pos in db_positions:
+                        sym = str(pos.get("symbol", "")).upper()
+                        if sym not in live_symbols:
+                            logger.info(f"[spot_engine] Purging ghost DB position for {sym} (not in broker)")
+                            delete_position(sym, strategy=pos.get("strategy"), paper=0)
+                            db_symbols.discard(sym)
+                    
+                    # Re-filter db_positions after potential purge
+                    db_positions = [p for p in db_positions if str(p.get("symbol")).upper() in live_symbols]
+
+                    # B. Check for unclassified broker holdings and auto-adopt
                     for h in holdings:
                         clean = _clean_symbol(h.get("symbol"))
-                        if clean in db_symbols:
-                            continue
+                        qty = float(h.get("qty", 0.0))
+                        
+                        if clean not in db_symbols:
+                            # Skip if explicitly marked as external_manual
+                            if is_external_manual(clean, classifications):
+                                continue
 
-                        # Skip if explicitly marked as external_manual
-                        if is_external_manual(clean, classifications):
-                            continue
+                            with _db_conn() as conn:
+                                logger.info(f"[spot_engine] Auto-adopting {clean} into DB from broker truth.")
+                                entry_price = max(float(h.get("avg_entry") or h.get("current_price") or 1.0), 1.0)
+                                
+                                # Assign default risk parameters for manual adoptions
+                                default_stop = round(entry_price * 0.85, 8)
+                                default_target = round(entry_price * 1.20, 8)
 
-                        with _db_conn() as conn:
-                            logger.info(f"[spot_engine] Auto-adopting {clean} into DB from broker truth.")
-                            entry_price = max(float(h.get("avg_entry") or h.get("current_price") or 1.0), 1.0)
-                            qty = float(h.get("qty", 0.0))
-
-                            # v18.35: Assign default risk parameters for manual adoptions
-                            default_stop = round(entry_price * 0.85, 8)
-                            default_target = round(entry_price * 1.20, 8)
-
-                            conn.execute(
-                                """
-                                INSERT INTO open_positions (
-                                    symbol, strategy, qty, entry, paper, direction, ts_entry,
-                                    stop, target, high_since_entry,
-                                    entry_trade_id, entry_feature_snapshot_id, base_asset,
-                                    setup_family, execution_route
-                                ) VALUES (?, ?, ?, ?, 0, 'LONG', ?, ?, ?, ?, 1, 1, ?, 'auto_adopted', 'manual')
-                                """,
-                                (clean, f"spot_{clean.lower()}", qty, entry_price, datetime.datetime.utcnow().isoformat(), default_stop, default_target, entry_price, clean)
-                            )
-                            # Add to list for immediate return
+                                conn.execute(
+                                    """
+                                    INSERT INTO open_positions (
+                                        symbol, strategy, qty, entry, paper, direction, ts_entry,
+                                        stop, target, high_since_entry,
+                                        entry_trade_id, entry_feature_snapshot_id, base_asset,
+                                        setup_family, execution_route
+                                    ) VALUES (?, ?, ?, ?, 0, 'LONG', ?, ?, ?, ?, 1, 1, ?, 'auto_adopted', 'manual')
+                                    """,
+                                    (clean, f"spot_{clean.lower()}", qty, entry_price, datetime.datetime.utcnow().isoformat(), default_stop, default_target, entry_price, clean)
+                                )
+                                conn.commit()
+                            
                             db_positions.append({
                                 "symbol": clean,
                                 "strategy": f"spot_{clean.lower()}",
@@ -224,9 +232,28 @@ def _load_spot_positions_from_db(
                                 "entry": entry_price,
                                 "paper": 0
                             })
-                            conn.commit()
+                            db_symbols.add(clean)
+                        else:
+                            # C. Quantity reconciliation for existing positions
+                            live_qty = float(h.get("qty", 0.0))
+                            db_qty = 0.0
+                            for p in db_positions:
+                                if str(p.get("symbol")).upper() == clean:
+                                    db_qty = float(p.get("qty") or 0.0)
+                                    break
+                            
+                            if abs(live_qty - db_qty) > 1e-8:
+                                logger.info(f"[spot_engine] Reconciling {clean} qty: DB={db_qty} -> Broker={live_qty}")
+                                with _db_conn() as conn:
+                                    conn.execute("UPDATE open_positions SET qty=? WHERE symbol=? AND paper=0", (live_qty, clean))
+                                    conn.commit()
+                                # Update local list
+                                for p in db_positions:
+                                    if str(p.get("symbol")).upper() == clean:
+                                        p["qty"] = live_qty
+                                        break
             except Exception as e:
-                logger.debug(f"[spot_engine] auto-adoption in loader failed: {e}")
+                logger.debug(f"[spot_engine] ledgerless reconciliation failed: {e}")
 
         if bot_managed_only:
             try:
@@ -283,13 +310,29 @@ def get_spot_positions(paper: bool = False) -> List[Dict]:
 def _sync_position_high(
     symbol: str, strategy: str, high_price: float, paper: bool = False
 ) -> None:
-    pass
+    try:
+        with _db_conn() as conn:
+            conn.execute(
+                "UPDATE open_positions SET high_since_entry=? WHERE symbol=? AND strategy=? AND paper=?",
+                (high_price, _clean_symbol(symbol), strategy, 1 if paper else 0),
+            )
+            conn.commit()
+    except Exception as e:
+        logger.debug(f"[spot_engine] high sync error {symbol}: {e}")
 
 
 def _sync_position_exit_reason(
     symbol: str, strategy: str, exit_reason: str, paper: bool = False
 ) -> None:
-    pass
+    try:
+        with _db_conn() as conn:
+            conn.execute(
+                "UPDATE open_positions SET exit_reason=? WHERE symbol=? AND strategy=? AND paper=?",
+                (exit_reason, _clean_symbol(symbol), strategy, 1 if paper else 0),
+            )
+            conn.commit()
+    except Exception as e:
+        logger.debug(f"[spot_engine] exit_reason sync error {symbol}: {e}")
 
 
 def _state_payload(spot_state: dict | None) -> dict:
@@ -706,20 +749,6 @@ def _maker_first_sell(
     return None, "taker_fallback_failed", "unfilled_after_maker"
 
 
-def _reconcile_qty(symbol: str, issue: dict) -> None:
-    """v18.17: Force DB quantity to match canonical broker truth."""
-    clean = _clean_symbol(symbol)
-    live_qty = float(issue.get("qty", 0.0))
-    try:
-        con = _db_conn()
-        con.execute("UPDATE open_positions SET qty=? WHERE symbol=? AND paper=0""", (live_qty, clean))
-        con.commit()
-        con.close()
-        logger.info(f"[spot_engine] Reconciled {clean} DB qty to broker truth: {live_qty}")
-    except Exception as e:
-        logger.debug(f"[spot_engine] _reconcile_qty failed for {clean}: {e}")
-
-
 def _is_paper_like_live_order(order: dict | None, paper: bool) -> bool:
     """Fail closed if a live lane receives a paper-style execution artifact."""
     if paper or not order:
@@ -756,50 +785,6 @@ def open_spot(
     if not get_spot_strategy(clean)["enabled"]:
         logger.warning(f"[spot_engine] {clean} blocked — spot_strategy_symbol_disabled")
         return None
-
-    # v18.17: Force fresh truth reconciliation before entry
-    truth_row = get_spot_symbol_truth(clean, paper=paper)
-    if truth_row:
-        truth_status = str(truth_row.get("position_truth_status") or "")
-        if truth_status == "qty_mismatch" and not paper:
-            _reconcile_qty(clean, truth_row)
-            # Re-fetch after reconciliation
-            truth_row = get_spot_symbol_truth(clean, paper=paper)
-            truth_status = str((truth_row or {}).get("position_truth_status") or "")
-
-        # v18.17: Auto-Adoption of Unclassified Assets (LIVE only)
-        if truth_status == "unclassified" and not paper:
-            logger.info(f"[spot_engine] {clean} was unclassified. Auto-adopting into DB.")
-            try:
-                # truth_row has 'current_price' and 'qty'
-                entry_price = max(float(truth_row.get("current_price", 1.0)), 1.0)
-                qty = float(truth_row.get("qty", 0.0))
-                
-                # v18.35: Assign default risk parameters for manual adoptions
-                default_stop = round(entry_price * 0.85, 8)
-                default_target = round(entry_price * 1.20, 8)
-
-                with _db_conn() as conn:
-                    conn.execute(
-                        """
-                        INSERT INTO open_positions (
-                            symbol, strategy, qty, entry, paper, direction, ts_entry,
-                            stop, target, high_since_entry,
-                            entry_trade_id, entry_feature_snapshot_id, base_asset,
-                            setup_family, execution_route
-                        ) VALUES (?, ?, ?, ?, 0, 'LONG', ?, ?, ?, ?, 1, 1, ?, 'auto_adopted', 'manual')
-                        """,
-                        (clean, f"spot_{clean.lower()}", qty, entry_price, datetime.datetime.utcnow().isoformat(), default_stop, default_target, entry_price, clean)
-                    )
-                truth_status = "matched_bot_position"
-            except Exception:
-                logger.exception(f"Failed to adopt {clean}")
-
-        if truth_status in {
-            "matched_bot_position",
-        }:
-            # v18.35: Unshackled Multi-Trade. matched_bot_position is no longer a block.
-            pass
 
     open_positions_for_symbol = [
         p for p in _load_spot_positions_from_db(paper=paper)

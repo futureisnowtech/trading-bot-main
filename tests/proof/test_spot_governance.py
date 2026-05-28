@@ -289,10 +289,6 @@ def test_sg12_kill_switch_consecutive_losses_fires():
         patch("config.SPOT_KS_CONSECUTIVE_LOSSES", 4),
         patch("config.SPOT_KS_DAILY_LOSS_PCT", 0.99),  # daily threshold disabled
         patch("config.ACCOUNT_SIZE", 5000),
-        patch(
-            "runtime.spot_position_truth.get_spot_position_truth",
-            return_value={"snapshot_ok": True, "blocking_issues": []},
-        ),
     ):
         halt, reason = _ks.check_spot_kill_switch()
     assert halt is True, f"Expected halt, got reason={reason}"
@@ -309,10 +305,6 @@ def test_sg13_kill_switch_does_not_fire_below_threshold():
         patch("config.SPOT_KS_CONSECUTIVE_LOSSES", 4),
         patch("config.SPOT_KS_DAILY_LOSS_PCT", 0.99),
         patch("config.ACCOUNT_SIZE", 5000),
-        patch(
-            "runtime.spot_position_truth.get_spot_position_truth",
-            return_value={"snapshot_ok": True, "blocking_issues": []},
-        ),
     ):
         halt, reason = _ks.check_spot_kill_switch()
     assert halt is False, f"Should not halt, got reason={reason}"

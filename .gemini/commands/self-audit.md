@@ -28,7 +28,7 @@ git diff --name-only
 
 Flag immediately if touched files include:
 - `spot_engine.py`
-- `runtime/spot_position_truth.py`
+- Broker holdings (Ledgerless v19.1)
 - `runtime/spot_strategy.py`
 - `scheduler/v10_runner.py`
 - `monitoring/health_check.py`
@@ -45,15 +45,18 @@ python3 scripts/live_runtime_audit.py
 
 If `--docs-only`, you may stop here after confirming support surfaces remain aligned.
 
-## Phase 3 — Spot truth evidence
+### Spot truth snapshot
 
 ```bash
 python3 -c "
-from runtime.spot_position_truth import get_spot_position_truth
+from execution.coinbase_spot_broker import get_spot_broker
 import json
-print(json.dumps(get_spot_position_truth(paper=False), indent=2, default=str))
+b = get_spot_broker()
+b.connect()
+print(json.dumps(b.sync_live_holdings(), indent=2, default=str))
 "
 ```
+
 
 Ask:
 - are broker-held positions visible?

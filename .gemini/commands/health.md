@@ -13,7 +13,7 @@ Run a quick health check for the **active Coinbase spot truth-lane**.
 
 1. `AGENTS.md`
 2. `scripts/live_runtime_audit.py`
-3. `runtime/spot_position_truth.py`
+3. Broker holdings (Ledgerless v19.1)
 
 ## Process
 
@@ -28,9 +28,11 @@ python3 -c "from runtime.runtime_state import get_system_state; print(get_system
 
 ```bash
 python3 -c "
-from runtime.spot_position_truth import get_spot_position_truth
+from execution.coinbase_spot_broker import get_spot_broker
 import json
-print(json.dumps(get_spot_position_truth(paper=False), indent=2, default=str))
+b = get_spot_broker()
+b.connect()
+print(json.dumps(b.sync_live_holdings(), indent=2, default=str))
 "
 ```
 

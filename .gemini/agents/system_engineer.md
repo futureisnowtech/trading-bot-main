@@ -19,7 +19,7 @@ You are the System Engineer for this repo.
 - Python: `/Library/Frameworks/Python.framework/Versions/3.14/bin/python3`
 - Canonical active lane: Coinbase spot scalp
 - Canonical live-launch script: `scripts/go_live.py`
-- Canonical truth service: `runtime/spot_position_truth.py`
+- Canonical truth service: Broker-direct (Ledgerless v19.1)
 
 ## Engineering Standards
 

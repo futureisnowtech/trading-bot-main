@@ -16,7 +16,7 @@ cd "$REPO_ROOT" || exit 0
 HOT_FILES=(
     "config.py"
     "scheduler/v10_runner.py"
-    "runtime/spot_position_truth.py"
+    "execution/coinbase_spot_broker.py"
     "runtime/spot_strategy.py"
     "runtime/spot_momentum.py"
     "runtime/spot_regime.py"

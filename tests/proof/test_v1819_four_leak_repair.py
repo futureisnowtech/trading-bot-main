@@ -160,7 +160,7 @@ def test_bot_managed_only_excludes_external_manual(proof_runtime):
     bot_managed_only=True, even if there's a DB row for it."""
     import sqlite3
 
-    from runtime.spot_position_truth import set_holding_classification
+    from runtime.spot_classification import set_classification
     from spot_engine import _load_spot_positions_from_db
 
     with sqlite3.connect(str(proof_runtime.db_path)) as conn:
@@ -171,7 +171,7 @@ def test_bot_managed_only_excludes_external_manual(proof_runtime):
         )
         conn.commit()
 
-    set_holding_classification("SOL", "external_manual", note="user-managed")
+    set_classification("SOL", "external_manual", note="user-managed")
 
     all_rows = _load_spot_positions_from_db(paper=False, bot_managed_only=False)
     bot_rows = _load_spot_positions_from_db(paper=False, bot_managed_only=True)

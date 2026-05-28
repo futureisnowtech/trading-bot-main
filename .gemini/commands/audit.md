@@ -38,9 +38,11 @@ python3 scripts/go_live_audit.py
 
 ```bash
 python3 -c "
-from runtime.spot_position_truth import get_spot_position_truth
+from execution.coinbase_spot_broker import get_spot_broker
 import json
-print(json.dumps(get_spot_position_truth(paper=False), indent=2, default=str))
+b = get_spot_broker()
+b.connect()
+print(json.dumps(b.sync_live_holdings(), indent=2, default=str))
 "
 ```
 

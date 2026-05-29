@@ -207,7 +207,7 @@ class QuoteHarvester:
         One poll cycle: fetch quotes for all active contracts in parallel.
         """
         from concurrent.futures import ThreadPoolExecutor, as_completed
-        logger.info(f"[QuoteHarvester] Starting poll cycle...")
+        logger.info(f"[QuoteHarvester] Starting parallel poll cycle...")
         
         try:
             contracts = get_active_contracts(db_path=self._db_path)
@@ -218,55 +218,62 @@ class QuoteHarvester:
         if not contracts:
             return
 
-        def _harvest_one(contract):
+        def _fetch_one(contract):
+            local_symbol = contract.get("local_symbol", "")
+            if self._broker and self._broker.is_connected():
+                try:
+                    q = self._broker.get_quote(local_symbol)
+                    return {"contract": contract, "quote": q}
+                except:
+                    return None
+            return None
+
+        # v19.1.6: Parallel acquisition (No DB writes here!)
+        fetched_results = []
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            futures = [executor.submit(_fetch_one, c) for c in contracts]
+            for future in as_completed(futures):
+                res = future.result()
+                if res: fetched_results.append(res)
+
+        # ── Sequential DB Persistence (Main thread only to avoid locking) ───
+        total_quotes = 0
+        skipped_no_depth = 0
+        
+        for item in fetched_results:
+            contract = item["contract"]
+            q = item["quote"]
             contract_id = contract.get("id")
             local_symbol = contract.get("local_symbol", "")
             right = contract.get("right", "C")
             side = "YES" if right == "C" else "NO"
 
-            if not contract_id or not local_symbol:
-                return None
-
-            # ── 1. Live Quote Acquisition (Priority) ─────────────────────────
-            q = None
-            if self._broker and self._broker.is_connected():
+            if q and q.get("mid") is not None:
                 try:
-                    q = self._broker.get_quote(local_symbol)
-                    if q.get("mid") is not None:
-                        ts = datetime.now(timezone.utc).isoformat()
-                        insert_quote(
-                            contract_id=contract_id,
-                            ts=ts,
-                            bid=q.get("bid"),
-                            ask=q.get("ask"),
-                            bid_size=q.get("bid_size"),
-                            ask_size=q.get("ask_size"),
-                            mid=q.get("mid"),
-                            spread=q.get("spread"),
-                            implied_prob=q.get("implied_prob"),
-                            side=side,
-                            db_path=self._db_path,
-                        )
-                        _build_all_bars(contract_id, db_path=self._db_path)
-                        return True
+                    ts = datetime.now(timezone.utc).isoformat()
+                    insert_quote(
+                        contract_id=contract_id,
+                        ts=ts,
+                        bid=q.get("bid"),
+                        ask=q.get("ask"),
+                        bid_size=q.get("bid_size"),
+                        ask_size=q.get("ask_size"),
+                        mid=q.get("mid"),
+                        spread=q.get("spread"),
+                        implied_prob=q.get("implied_prob"),
+                        side=side,
+                        db_path=self._db_path,
+                    )
+                    _build_all_bars(contract_id, db_path=self._db_path)
+                    total_quotes += 1
                 except Exception as e:
-                    logger.debug(f"harvest error {local_symbol}: {e}")
-            return False
-
-        total_quotes = 0
-        skipped_no_depth = 0
-        
-        # v19.1.6: Parallel poll — NO LOCKS allowed here.
-        with ThreadPoolExecutor(max_workers=8) as executor:
-            futures = [executor.submit(_harvest_one, c) for c in contracts]
-            for future in as_completed(futures):
-                res = future.result()
-                if res is True: total_quotes += 1
-                else: skipped_no_depth += 1
+                    logger.debug(f"persist error {local_symbol}: {e}")
+            else:
+                skipped_no_depth += 1
 
         # Log cycle summary
         msg = f"[QuoteHarvester] Cycle complete: {total_quotes} saved, {skipped_no_depth} skipped across {len(contracts)} contracts"
-        logger.debug(msg)
+        logger.info(msg)
         log_event("INFO", "QuoteHarvester", msg)
 
     def _trigger_background_backfill(self, contract_id, symbol):

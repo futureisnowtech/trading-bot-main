@@ -127,9 +127,8 @@ def _resample_candles_to_bars(
                 vol_proxy=0.0,   # Hard to compute accurately from resampled candles
                 db_path=db_path,
             )
-            # v18.34: Explicitly mark as NOT derived from quotes (backfilled)
-            # The upsert_bar uses derived_from_quotes=1 by default in forecast/db.py.
-            # We can update it manually if needed, but 1 is fine for now.
+            # v19.1.6: Add yield to prevent CPU/DB starvation
+            time.sleep(0.01)
             written += 1
         except Exception as e:
             logger.warning(f"upsert_bar backfill failed cid={contract_id} {interval}: {e}")

@@ -628,22 +628,28 @@ def _maker_first_buy(
             return None, "maker_first_failed", "limit_order_rejected"
 
         # Poll for 2s per step
+        ghost_detected = False
         for _ in range(2):
             time.sleep(1)
             status = broker.get_spot_order_status(
                 order["order_id"], fallback_symbol=_clean_symbol(symbol)
             )
             if status.get("status") == "PURGE_GHOST_ORDER":
-                logger.warning(f"[spot_engine] {symbol} Order {order['order_id']} is a ghost. Purging from chase loop.")
-                return None, "maker_first_failed", "ghost_order_purged"
+                logger.info(f"[spot_engine] {symbol} Order {order['order_id']} was rejected/ghosted by exchange (normal for post_only).")
+                ghost_detected = True
+                break
 
             completion = float(status.get("completion_pct") or 0.0)
             if completion >= 80.0 or str(status.get("status", "")).upper() == "FILLED":
                 status["execution_route"] = "maker_first"
                 return status, "maker_first", "none"
 
-        # Unfilled after 2s? Cancel and move closer.
-        broker.cancel_spot_order(order["order_id"])
+        if ghost_detected:
+            # Move to next chase step immediately
+            pass
+        else:
+            # Unfilled after 2s? Cancel and move closer.
+            broker.cancel_spot_order(order["order_id"])
         
         # Calculate next price: Move 20% of spread deeper per step
         top = broker.get_spot_top_of_book(symbol)
@@ -707,22 +713,28 @@ def _maker_first_sell(
             return None, "maker_first_failed", "limit_order_rejected"
 
         # Poll for 2s per step
+        ghost_detected = False
         for _ in range(2):
             time.sleep(1)
             status = broker.get_spot_order_status(
                 order["order_id"], fallback_symbol=_clean_symbol(symbol)
             )
             if status.get("status") == "PURGE_GHOST_ORDER":
-                logger.warning(f"[spot_engine] {symbol} Order {order['order_id']} is a ghost. Purging from chase loop.")
-                return None, "maker_first_failed", "ghost_order_purged"
+                logger.info(f"[spot_engine] {symbol} Order {order['order_id']} was rejected/ghosted by exchange (normal for post_only).")
+                ghost_detected = True
+                break
 
             completion = float(status.get("completion_pct") or 0.0)
             if completion >= 80.0 or str(status.get("status", "")).upper() == "FILLED":
                 status["execution_route"] = "maker_first"
                 return status, "maker_first", "none"
 
-        # Unfilled after 2s? Cancel and move closer.
-        broker.cancel_spot_order(order["order_id"])
+        if ghost_detected:
+            # Move to next chase step immediately
+            pass
+        else:
+            # Unfilled after 2s? Cancel and move closer.
+            broker.cancel_spot_order(order["order_id"])
         
         # Calculate next price: Move 20% of spread deeper per step
         top = broker.get_spot_top_of_book(symbol)

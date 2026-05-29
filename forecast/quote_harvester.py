@@ -336,15 +336,9 @@ class QuoteHarvester:
             if not contract_id or not local_symbol:
                 return None
 
-            # v18.34: One-time backfill for new contracts
-            if contract_id not in self._backfilled_cids:
-                try:
-                    self.backfill_bars(contract_id, local_symbol)
-                    self._backfilled_cids.add(contract_id)
-                except Exception as e:
-                    logger.debug(f"Backfill trigger error {local_symbol}: {e}")
-
-            # Fetch quote
+            # ── 1. Live Quote Acquisition (Priority) ─────────────────────────
+            # Fetch and persist the quote first to clear the staleness gate
+            q = None
             if self._broker and self._broker.is_connected():
                 try:
                     q = self._broker.get_quote(local_symbol)
@@ -363,13 +357,27 @@ class QuoteHarvester:
                             side=side,
                             db_path=self._db_path,
                         )
-                        _build_all_bars(contract_id, db_path=self._db_path)
-                        return True
-                    return False
                 except Exception as e:
                     logger.debug(f"harvest error {local_symbol}: {e}")
-                    return None
-            return None
+
+            # ── 2. Background Backfill ──────────────────────────────────────
+            # Only backfill if not already done in this session
+            if contract_id not in self._backfilled_cids:
+                try:
+                    # RC: Heavy network ops, but inside the thread worker
+                    self.backfill_bars(contract_id, local_symbol)
+                    self._backfilled_cids.add(contract_id)
+                except Exception as e:
+                    logger.debug(f"Backfill trigger error {local_symbol}: {e}")
+
+            # ── 3. Bar Generation ────────────────────────────────────────────
+            if q and q.get("mid") is not None:
+                try:
+                    _build_all_bars(contract_id, db_path=self._db_path)
+                    return True
+                except:
+                    pass
+            return False if q and q.get("mid") is None else None
 
         total_quotes = 0
         skipped_no_depth = 0

@@ -312,12 +312,12 @@ def get_paired_quotes(market_id: int, strike: float, last_trade_at: str, db_path
     # Simple fallback: find latest for this strike
     with sqlite3.connect(db_path or DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
-        res = conn.execute(\"\"\"
+        res = conn.execute("""
             SELECT q.* FROM forecast_quotes q
             JOIN forecast_contracts c ON q.contract_id = c.id
             WHERE c.market_id = ? AND c.strike = ? AND c.last_trade_at = ?
             ORDER BY q.ts DESC LIMIT 2
-        \"\"\", (market_id, strike, last_trade_at)).fetchall()
+        """, (market_id, strike, last_trade_at)).fetchall()
 
         for r in res:
             if r['side'] == 'YES': pair['yes_quote'] = dict(r)

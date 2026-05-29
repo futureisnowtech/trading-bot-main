@@ -36,6 +36,7 @@ from config import (
     KALSHI_MAX_CONCURRENT_POSITIONS,
     KALSHI_MAX_DEPLOYED_PCT,
     KALSHI_MAX_RISK_PER_EVENT_PCT,
+    KALSHI_SAME_EVENT_FAMILY_CAP,
 )
 from forecast.primitives import (
     DEFAULT_ALPHA,

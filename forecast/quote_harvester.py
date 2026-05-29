@@ -312,7 +312,12 @@ class QuoteHarvester:
             logger.debug(f"1d backfill failed for {ticker}: {e}")
 
     def _poll_and_build(self) -> None:
-        """One poll cycle: fetch quotes for all active contracts, persist, build bars."""
+        """
+        One poll cycle: fetch quotes for all active contracts in parallel, 
+        persist, and build bars.
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        
         try:
             contracts = get_active_contracts(db_path=self._db_path)
         except Exception as e:
@@ -322,16 +327,14 @@ class QuoteHarvester:
         if not contracts:
             return
 
-        total_quotes = 0
-        skipped_no_depth = 0
-        for contract in contracts:
+        def _harvest_one(contract):
             contract_id = contract.get("id")
             local_symbol = contract.get("local_symbol", "")
             right = contract.get("right", "C")
             side = "YES" if right == "C" else "NO"
 
             if not contract_id or not local_symbol:
-                continue
+                return None
 
             # v18.34: One-time backfill for new contracts
             if contract_id not in self._backfilled_cids:
@@ -344,45 +347,41 @@ class QuoteHarvester:
             # Fetch quote
             if self._broker and self._broker.is_connected():
                 try:
-                    # Kalshi uses ticker (local_symbol), not conid
                     q = self._broker.get_quote(local_symbol)
+                    if q.get("mid") is not None:
+                        ts = datetime.now(timezone.utc).isoformat()
+                        insert_quote(
+                            contract_id=contract_id,
+                            ts=ts,
+                            bid=q.get("bid"),
+                            ask=q.get("ask"),
+                            bid_size=q.get("bid_size"),
+                            ask_size=q.get("ask_size"),
+                            mid=q.get("mid"),
+                            spread=q.get("spread"),
+                            implied_prob=q.get("implied_prob"),
+                            side=side,
+                            db_path=self._db_path,
+                        )
+                        _build_all_bars(contract_id, db_path=self._db_path)
+                        return True
+                    return False
                 except Exception as e:
-                    logger.debug(f"get_quote failed {local_symbol}: {e}")
-                    continue
-            else:
-                # No broker — skip (we never synthesise or fabricate quotes)
-                continue
+                    logger.debug(f"harvest error {local_symbol}: {e}")
+                    return None
+            return None
 
-            # Only persist if we got meaningful data
-            if q.get("mid") is None:
-                skipped_no_depth += 1
-                continue
-
-            # Rate limiting: Kalshi V2 is sensitive to burst polling
-            time.sleep(0.05)
-
-            ts = datetime.now(timezone.utc).isoformat()
-            try:
-                insert_quote(
-                    contract_id=contract_id,
-                    ts=ts,
-                    bid=q.get("bid"),
-                    ask=q.get("ask"),
-                    bid_size=q.get("bid_size"),
-                    ask_size=q.get("ask_size"),
-                    mid=q.get("mid"),
-                    spread=q.get("spread"),
-                    implied_prob=q.get("implied_prob"),
-                    side=side,
-                    db_path=self._db_path,
-                )
-                total_quotes += 1
-            except Exception as e:
-                logger.warning(f"insert_quote failed {local_symbol}: {e}")
-                continue
-
-            # Build bars after each quote insertion
-            _build_all_bars(contract_id, db_path=self._db_path)
+        total_quotes = 0
+        skipped_no_depth = 0
+        
+        # v19.1.6: Parallel poll to ensure freshness SLA (<120s)
+        # 10 workers for 55 contracts ~ 6 batches.
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            futures = [executor.submit(_harvest_one, c) for c in contracts]
+            for future in as_completed(futures):
+                res = future.result()
+                if res is True: total_quotes += 1
+                elif res is False: skipped_no_depth += 1
 
         # Log cycle summary to dashboard
         msg = f"[QuoteHarvester] Cycle complete: {total_quotes} saved, {skipped_no_depth} skipped (no depth) across {len(contracts)} active contracts"

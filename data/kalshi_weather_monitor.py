@@ -28,11 +28,23 @@ STATIONS = {
     "KXHIGHDEN": {"lat": 39.74, "lon": -104.99, "name": "Denver"},
 }
 
+# ── Cache ───────────────────────────────────────────────────────────────────
+_COORDINATE_CACHE: Dict[str, Dict[str, Any]] = {}
+CACHE_EXPIRY_SEC = 3600  # 1 hour
+
 async def fetch_open_meteo_ensemble(ticker: str, lat: float, lon: float) -> Dict[str, Any]:
     """
     Fetch 31-member GFS ensemble for a specific coordinate.
     Includes cloud_cover for TCDC overrides and 26h window for NWS settlement.
     """
+    # v19.1.6: Coordinate-based caching to avoid hammering API
+    cache_key = f"{lat:.2f}_{lon:.2f}"
+    now = time.time()
+    if cache_key in _COORDINATE_CACHE:
+        cached = _COORDINATE_CACHE[cache_key]
+        if now - cached["timestamp"] < CACHE_EXPIRY_SEC:
+            return cached
+
     # v19.1.5: Exponential Backoff for 429 Resilience
     for attempt in range(3):
         try:
@@ -49,7 +61,7 @@ async def fetch_open_meteo_ensemble(ticker: str, lat: float, lon: float) -> Dict
             resp = await loop.run_in_executor(None, lambda: requests.get(url, params=params, timeout=10))
             
             if resp.status_code == 429:
-                wait = (2 ** attempt) * 5
+                wait = (2 ** attempt) * 10 # v19.1.6: More aggressive backoff
                 logger.warning(f"Open-Meteo 429 (Rate Limit). Retrying in {wait}s...")
                 await asyncio.sleep(wait)
                 continue
@@ -88,16 +100,18 @@ async def fetch_open_meteo_ensemble(ticker: str, lat: float, lon: float) -> Dict
 
             peak_tcdc = float(np.mean(cloud_members)) if cloud_members else 0.0
 
-            return {
+            result = {
                 "members": members,
                 "mean": float(np.mean(members)),
                 "std": float(np.std(members)),
                 "peak_tcdc": peak_tcdc,
-                "timestamp": time.time()
+                "timestamp": now
             }
+            _COORDINATE_CACHE[cache_key] = result
+            return result
         except Exception as e:
             logger.error(f"Weather fetch failed for {ticker}: {e}")
-            await asyncio.sleep(2)
+            await asyncio.sleep(5) # v19.1.6: Longer sleep on error
             
     return {}
 
@@ -134,7 +148,7 @@ async def update_weather_shadow_state():
         except Exception as e:
             logger.error(f"Weather pipeline sync failure: {e}")
         
-        await asyncio.sleep(60)
+        await asyncio.sleep(900)
 
 def get_weather_data(ticker_prefix: str) -> Dict[str, Any]:
     """Retrieve cached weather data for a ticker prefix (e.g. 'KXHIGHNY')."""

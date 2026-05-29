@@ -236,6 +236,9 @@ class QuoteHarvester:
         self._thread: Optional[threading.Thread] = None
         self._last_prune = time.time()
         self._backfilled_cids: set[int] = set()
+        # v19.1.6: Throttling backfills to 1 every 10s
+        self._backfill_lock = threading.Lock()
+        self._last_backfill_ts = 0.0
 
     def start(self) -> None:
         """Start the background polling thread."""
@@ -363,12 +366,20 @@ class QuoteHarvester:
             # ── 2. Background Backfill ──────────────────────────────────────
             # Only backfill if not already done in this session
             if contract_id not in self._backfilled_cids:
-                try:
-                    # RC: Heavy network ops, but inside the thread worker
-                    self.backfill_bars(contract_id, local_symbol)
-                    self._backfilled_cids.add(contract_id)
-                except Exception as e:
-                    logger.debug(f"Backfill trigger error {local_symbol}: {e}")
+                # v19.1.6: Sequential backfill with 10s throttle
+                with self._backfill_lock:
+                    now = time.time()
+                    elapsed = now - self._last_backfill_ts
+                    if elapsed < 10.0:
+                        time.sleep(10.0 - elapsed)
+                    
+                    try:
+                        # RC: Heavy network ops, but inside the thread worker
+                        self.backfill_bars(contract_id, local_symbol)
+                        self._backfilled_cids.add(contract_id)
+                        self._last_backfill_ts = time.time()
+                    except Exception as e:
+                        logger.debug(f"Backfill trigger error {local_symbol}: {e}")
 
             # ── 3. Bar Generation ────────────────────────────────────────────
             if q and q.get("mid") is not None:

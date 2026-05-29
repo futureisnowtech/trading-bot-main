@@ -684,17 +684,25 @@ def start_forecast_lane(bankroll: float = 100.0) -> None:
     # Register scheduler jobs
     # v19.1.6: Run heavy/blocking jobs in background threads to avoid loop starvation
     logger.info("[ForecastRunner] Registering scheduler jobs...")
-    schedule.every(5).minutes.do(
-        lambda: threading.Thread(target=run_discovery_cycle, daemon=True).start()
-    )
-    schedule.every(2).minutes.do(
-        lambda: run_strategy_cycle(bankroll)
-    )
+    
+    # Discovery loop (Background)
+    def _bg_discovery(): threading.Thread(target=run_discovery_cycle, daemon=True).start()
+    schedule.every(5).minutes.do(_bg_discovery)
+    
+    # Strategy cycle (Main thread is fine now that harvester is decoupled)
+    schedule.every(2).minutes.do(run_strategy_cycle, bankroll=bankroll)
+    
+    # Monitor and Cache (Background)
     schedule.every(30).seconds.do(run_position_monitor)
-    schedule.every(30).seconds.do(
-        lambda: threading.Thread(target=_cache_forecast_state, daemon=True).start()
-    )
+    
+    def _bg_cache(): threading.Thread(target=_cache_forecast_state, daemon=True).start()
+    schedule.every(30).seconds.do(_bg_cache)
+    
     schedule.every().day.at("08:00").do(_send_daily_token_burn_report)
+
+    # Manual trigger on startup
+    logger.info("[ForecastRunner] Triggering initial strategy cycle...")
+    threading.Thread(target=run_strategy_cycle, args=(bankroll,), daemon=True).start()
 
     logger.info(
         f"[ForecastRunner] Lane fully operational | bankroll=${bankroll:.0f} "

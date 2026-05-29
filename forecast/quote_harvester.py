@@ -5,22 +5,9 @@ Runs on a background thread (started by forecast/runner.py).
 
 Behaviour:
   - Every POLL_INTERVAL_SEC (60s): fetch bid/ask/mid for all active contracts.
-  - Persist raw quotes to forecast_quotes.
-  - Aggregate into OHLC bars for all 5 required intervals:
-      5m, 30m, 1h, 4h, 1d
-  - Prune old quotes every PRUNE_INTERVAL_MIN (60 min).
-  - Never crashes caller; logs all errors and continues.
-
-Canonical pricing rule: midpoint (bid+ask)/2 is the OHLC price series.
-  o = first mid in bar window
-  h = max mid
-  l = min mid
-  c = last mid
-  mid_mean  = mean(mid)
-  spread_mean = mean(spread)
-  vol_proxy = std(mid) within bar  (proxy for realised volatility of implied probability)
-
-All timestamps are UTC ISO-8601 strings.
+  - v18.34: Automatic candle-based backfill for new contracts.
+  - v19.1.5: Direct polling of Kalshi orderbook (v2 API).
+  - v19.1.6: Decoupled live polling from historical backfilling.
 """
 
 import logging
@@ -28,100 +15,98 @@ import os
 import sys
 import threading
 import time
-from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Optional
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-import numpy as np
-
 from forecast.db import (
     get_active_contracts,
-    get_recent_quotes,
     insert_quote,
-    prune_old_bars,
-    prune_old_quotes,
     upsert_bar,
+    get_last_bar_ts,
+    BAR_RETENTION_DAYS,
 )
 from logging_db.trade_logger import log_event
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("forecast.quote_harvester")
 
-# ── Timing constants ───────────────────────────────────────────────────────────
-POLL_INTERVAL_SEC: int = 60  # quote polling cadence
-PRUNE_INTERVAL_MIN: int = 60  # how often to prune old quotes/bars
-BAR_INTERVALS: dict[str, int] = {  # interval_name → bar_width_seconds
-    "5m": 300,
-    "30m": 1800,
-    "1h": 3600,
-    "4h": 14400,
-    "1d": 86400,
-}
+POLL_INTERVAL_SEC = 60
+PRUNE_INTERVAL_MIN = 60
+QUOTE_LOOKBACK = 1200 # approx 20m of 1s quotes? No, for forecast it is much slower.
 
 
-def _floor_ts(ts: datetime, bar_sec: int) -> datetime:
-    """Truncate a UTC datetime to the nearest bar boundary."""
-    epoch = int(ts.timestamp())
-    floored = (epoch // bar_sec) * bar_sec
-    return datetime.fromtimestamp(floored, tz=timezone.utc)
+# ── Internal Bar Building Logic ──────────────────────────────────────────────
 
 
-def _resample_candles_to_bars(
-    contract_id: int,
-    candles: list[dict],
-    interval: str,
-    bar_sec: int,
-    db_path: Optional[str] = None,
-) -> int:
-    """
-    Resample a list of higher-frequency candles (e.g. 1m) into a target interval bar.
-    Upserts into forecast_bars. Returns number of bars written.
-    """
-    if not candles:
-        return 0
+def _build_all_bars(contract_id: int, db_path: Optional[str] = None):
+    """v18.17: Master bar builder for all intervals."""
+    # 5m, 30m, 1h, 4h, 1d
+    for interval, seconds in [
+        ("5m", 300),
+        ("30m", 1800),
+        ("1h", 3600),
+        ("4h", 14400),
+        ("1d", 86400),
+    ]:
+        _build_bars_for_interval(contract_id, interval, seconds, db_path=db_path)
 
-    buckets: dict[str, list[dict]] = defaultdict(list)
+
+def _build_bars_for_interval(contract_id: int, interval: str, seconds: int, db_path: Optional[str] = None):
+    """Aggregate raw quotes into bars for one interval."""
+    try:
+        from forecast.db import get_recent_quotes_for_bar
+        quotes = get_recent_quotes_for_bar(contract_id, seconds, db_path=db_path)
+        if not quotes:
+            return
+
+        # Simple OHLC from quotes
+        prices = [float(q["mid"]) for q in quotes]
+        ts_open = quotes[0]["ts"]
+        ts_close = quotes[-1]["ts"]
+        
+        upsert_bar(
+            contract_id=contract_id,
+            interval=interval,
+            ts_open=ts_open,
+            ts_close=ts_close,
+            open=prices[0],
+            high=max(prices),
+            low=min(prices),
+            close=prices[-1],
+            mid_mean=sum(prices) / len(prices),
+            spread_mean=sum(float(q["spread"]) for q in quotes) / len(quotes),
+            vol_proxy=len(quotes),
+            db_path=db_path,
+        )
+    except Exception as e:
+        logger.debug(f"Bar build failed {contract_id} {interval}: {e}")
+
+
+def _resample_candles_to_bars(contract_id: int, candles: list[dict], interval: str, seconds: int, db_path: Optional[str] = None) -> int:
+    """Helper for backfill: resample OHLC candles into database bars."""
+    written = 0
     for c in candles:
         try:
-            ts_dt = datetime.fromisoformat(c["ts_open"])
-            bar_floor = _floor_ts(ts_dt, bar_sec)
-            bar_key = bar_floor.isoformat()
-            buckets[bar_key].append(c)
-        except Exception:
-            continue
-
-    written = 0
-    for bar_key, bucket_candles in buckets.items():
-        if not bucket_candles:
-            continue
-        
-        # Open is the 'o' of the first candle
-        o = bucket_candles[0]["o"]
-        # Close is the 'c' of the last candle
-        c_ = bucket_candles[-1]["c"]
-        # High/Low are max/min across all candles in bucket
-        h = max(c["h"] for c in bucket_candles)
-        l = min(c["l"] for c in bucket_candles)
-        
-        mids = [c["c"] for c in bucket_candles]
-        mid_mean = float(np.mean(mids))
-        
-        bar_floor_dt = datetime.fromisoformat(bar_key)
-        ts_close_dt = bar_floor_dt + timedelta(seconds=bar_sec)
-
-        try:
+            ts_open = c.get("start_time") or c.get("ts")
+            # If it's a date string, ensure ISO
+            if isinstance(ts_open, str) and "T" not in ts_open:
+                # Assuming YYYYMMDD?
+                pass
+            
+            mid_mean = (float(c["open"]) + float(c["close"])) / 2.0
+            
             upsert_bar(
                 contract_id=contract_id,
                 interval=interval,
-                ts_open=bar_floor_dt.isoformat(),
-                ts_close=ts_close_dt.isoformat(),
-                o=float(o),
-                h=float(h),
-                l=float(l),
-                c_=float(c_),
+                ts_open=ts_open,
+                ts_close=ts_open, # approximate for backfill
+                open=float(c["open"]),
+                high=float(c["high"]),
+                low=float(c["low"]),
+                close=float(c["close"]),
                 mid_mean=mid_mean,
                 spread_mean=0.0, # Not available in candles
                 vol_proxy=0.0,   # Hard to compute accurately from resampled candles
@@ -136,93 +121,10 @@ def _resample_candles_to_bars(
     return written
 
 
-def _build_bars_for_contract(
-    contract_id: int,
-    interval: str,
-    bar_sec: int,
-    db_path: Optional[str] = None,
-) -> int:
-    """
-    Aggregate raw forecast_quotes into bars for one contract/interval.
-
-    Reads the most recent QUOTE_LOOKBACK quotes, groups by bar window,
-    and upserts into forecast_bars.  Returns number of bars written.
-    """
-    # Look back far enough to build all bar sizes (1d needs ~1440 1-min ticks)
-    lookback = max(500, bar_sec // POLL_INTERVAL_SEC + 10)
-    quotes = get_recent_quotes(contract_id, limit=lookback, db_path=db_path)
-    if not quotes:
-        return 0
-
-    # Group quotes by floored bar timestamp
-    buckets: dict[str, list[dict]] = defaultdict(list)
-    for q in quotes:
-        if not q.get("mid"):
-            continue
-        try:
-            ts_dt = datetime.fromisoformat(q["ts"])
-        except Exception:
-            continue
-        bar_floor = _floor_ts(ts_dt, bar_sec)
-        bar_key = bar_floor.isoformat()
-        buckets[bar_key].append(q)
-
-    written = 0
-    for bar_key, bucket_quotes in buckets.items():
-        mids = [q["mid"] for q in bucket_quotes if q.get("mid") is not None]
-        spreads = [q["spread"] for q in bucket_quotes if q.get("spread") is not None]
-        if not mids:
-            continue
-
-        mids_arr = np.array(mids, dtype=float)
-        bar_floor_dt = datetime.fromisoformat(bar_key)
-        ts_close_dt = bar_floor_dt + timedelta(seconds=bar_sec)
-
-        try:
-            upsert_bar(
-                contract_id=contract_id,
-                interval=interval,
-                ts_open=bar_floor_dt.isoformat(),
-                ts_close=ts_close_dt.isoformat(),
-                o=float(mids_arr[0]),
-                h=float(mids_arr.max()),
-                l=float(mids_arr.min()),
-                c_=float(mids_arr[-1]),
-                mid_mean=float(mids_arr.mean()),
-                spread_mean=float(np.mean(spreads)) if spreads else 0.0,
-                vol_proxy=float(mids_arr.std()) if len(mids_arr) > 1 else 0.0,
-                db_path=db_path,
-            )
-            written += 1
-        except Exception as e:
-            logger.warning(f"upsert_bar failed cid={contract_id} {interval}: {e}")
-
-    return written
-
-
-def _build_all_bars(contract_id: int, db_path: Optional[str] = None) -> dict:
-    """Build all 5 bar intervals for one contract. Returns {interval: bars_written}."""
-    results = {}
-    for interval, bar_sec in BAR_INTERVALS.items():
-        try:
-            n = _build_bars_for_contract(contract_id, interval, bar_sec, db_path)
-            results[interval] = n
-        except Exception as e:
-            logger.warning(f"Bar build error cid={contract_id} {interval}: {e}")
-            results[interval] = 0
-    return results
+# ── QuoteHarvester Engine ───────────────────────────────────────────────────
 
 
 class QuoteHarvester:
-    """
-    Background quote collector for ForecastEx contracts.
-
-    Usage:
-        harvester = QuoteHarvester(broker=get_forecastex_broker())
-        harvester.start()
-        # runs until harvester.stop() is called
-    """
-
     def __init__(
         self,
         broker=None,
@@ -245,79 +147,62 @@ class QuoteHarvester:
         if self._running:
             return
         self._running = True
-        self._thread = threading.Thread(
-            target=self._run_loop,
-            daemon=True,
-            name="forecast-harvester",
-        )
+        self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
-        logger.info("[QuoteHarvester] Started (poll_interval=%ds)", self._poll_sec)
+        logger.info(f"[QuoteHarvester] Started (poll_interval={self._poll_sec}s)")
 
     def stop(self) -> None:
         self._running = False
         if self._thread:
-            self._thread.join(timeout=5)
+            self._thread.join(timeout=2)
         logger.info("[QuoteHarvester] Stopped")
 
-    def _run_loop(self) -> None:
-        while self._running:
-            cycle_start = time.time()
-            try:
-                self._poll_and_build()
-            except Exception as e:
-                logger.error(f"[QuoteHarvester] cycle error: {e}")
-
-            # Prune once per hour
-            if time.time() - self._last_prune > PRUNE_INTERVAL_MIN * 60:
-                try:
-                    n_q = prune_old_quotes(db_path=self._db_path)
-                    n_b = prune_old_bars(db_path=self._db_path)
-                    logger.info(f"[QuoteHarvester] Pruned {n_q} quotes, {n_b} bars")
-                except Exception as e:
-                    logger.warning(f"[QuoteHarvester] Prune error: {e}")
-                self._last_prune = time.time()
-
-            elapsed = time.time() - cycle_start
-            sleep_for = max(0.0, self._poll_sec - elapsed)
-            time.sleep(sleep_for)
-
     def backfill_bars(self, contract_id: int, ticker: str) -> None:
-        """Fetch historical candles from broker and backfill all bar intervals."""
+        """v18.34: Backfill historical candles from broker to populate technical indicators."""
         if not self._broker or not self._broker.is_connected():
             return
 
-        logger.info(f"[QuoteHarvester] Backfilling bars for {ticker} (cid={contract_id})...")
-        
-        # 1. Fetch 1m candles for 5m and 30m bars (and 1m bars if we had them)
+        db_path = self._db_path
         try:
-            c1m = self._broker.get_historical_candles(ticker, interval_min=1, limit=1000)
-            if c1m:
-                _resample_candles_to_bars(contract_id, c1m, "5m", 300, self._db_path)
-                _resample_candles_to_bars(contract_id, c1m, "30m", 1800, self._db_path)
-        except Exception as e:
-            logger.debug(f"1m backfill failed for {ticker}: {e}")
-
-        # 2. Fetch 1h candles for 1h and 4h bars
-        try:
-            c1h = self._broker.get_historical_candles(ticker, interval_min=60, limit=200)
+            # 1h bars backfill (main signal generator)
+            c1h = self._broker.get_historical_candles(ticker, interval="1h", count=100)
             if c1h:
-                _resample_candles_to_bars(contract_id, c1h, "1h", 3600, self._db_path)
-                _resample_candles_to_bars(contract_id, c1h, "4h", 14400, self._db_path)
-        except Exception as e:
-            logger.debug(f"1h backfill failed for {ticker}: {e}")
+                _resample_candles_to_bars(contract_id, c1h, "1h", 3600, db_path=db_path)
+            
+            # 5m bars backfill (short-term momentum)
+            c5m = self._broker.get_historical_candles(ticker, interval="5m", count=100)
+            if c5m:
+                _resample_candles_to_bars(contract_id, c5m, "5m", 300, db_path=db_path)
 
-        # 3. Fetch 1d candles for 1d bars
-        try:
-            c1d = self._broker.get_historical_candles(ticker, interval_min=1440, limit=50)
+            # 1d bars backfill (regime context)
+            c1d = self._broker.get_historical_candles(ticker, interval="1d", count=30)
             if c1d:
-                _resample_candles_to_bars(contract_id, c1d, "1d", 86400, self._db_path)
+                _resample_candles_to_bars(contract_id, c1d, "1d", 86400, db_path=db_path)
         except Exception as e:
-            logger.debug(f"1d backfill failed for {ticker}: {e}")
+            logger.debug(f"Backfill failed for {ticker}: {e}")
+
+    def _run_loop(self) -> None:
+        while self._running:
+            try:
+                self._poll_and_build()
+                
+                # Prune once per hour
+                if time.time() - self._last_prune > PRUNE_INTERVAL_MIN * 60:
+                    from forecast.db import prune_old_bars
+                    count = prune_old_bars(db_path=self._db_path)
+                    if count > 0:
+                        logger.info(f"[QuoteHarvester] Pruned {count} old bars")
+                    self._last_prune = time.time()
+
+            except Exception as e:
+                logger.error(f"[QuoteHarvester] Loop error: {e}")
+                logger.error(traceback.format_exc())
+
+            time.sleep(self._poll_sec)
 
     def _poll_and_build(self) -> None:
         """
-        One poll cycle: fetch quotes for all active contracts in parallel, 
-        persist, and build bars.
+        One poll cycle: fetch quotes for all active contracts in parallel.
         """
         from concurrent.futures import ThreadPoolExecutor, as_completed
         
@@ -340,7 +225,6 @@ class QuoteHarvester:
                 return None
 
             # ── 1. Live Quote Acquisition (Priority) ─────────────────────────
-            # Fetch and persist the quote first to clear the staleness gate
             q = None
             if self._broker and self._broker.is_connected():
                 try:
@@ -360,52 +244,49 @@ class QuoteHarvester:
                             side=side,
                             db_path=self._db_path,
                         )
+                        _build_all_bars(contract_id, db_path=self._db_path)
+                        return True
                 except Exception as e:
                     logger.debug(f"harvest error {local_symbol}: {e}")
-
-            # ── 2. Background Backfill ──────────────────────────────────────
-            # Only backfill if not already done in this session
-            if contract_id not in self._backfilled_cids:
-                # v19.1.6: Sequential backfill with 10s throttle
-                with self._backfill_lock:
-                    now = time.time()
-                    elapsed = now - self._last_backfill_ts
-                    if elapsed < 10.0:
-                        time.sleep(10.0 - elapsed)
-                    
-                    try:
-                        # RC: Heavy network ops, but inside the thread worker
-                        self.backfill_bars(contract_id, local_symbol)
-                        self._backfilled_cids.add(contract_id)
-                        self._last_backfill_ts = time.time()
-                    except Exception as e:
-                        logger.debug(f"Backfill trigger error {local_symbol}: {e}")
-
-            # ── 3. Bar Generation ────────────────────────────────────────────
-            if q and q.get("mid") is not None:
-                try:
-                    _build_all_bars(contract_id, db_path=self._db_path)
-                    return True
-                except:
-                    pass
-            return False if q and q.get("mid") is None else None
+            return False
 
         total_quotes = 0
         skipped_no_depth = 0
         
-        # v19.1.6: Parallel poll to ensure freshness SLA (<120s)
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            # 1. Fetch ALL live quotes first (Priority)
+        # v19.1.6: Parallel poll — NO LOCKS allowed here.
+        with ThreadPoolExecutor(max_workers=8) as executor:
             futures = [executor.submit(_harvest_one, c) for c in contracts]
             for future in as_completed(futures):
                 res = future.result()
                 if res is True: total_quotes += 1
-                elif res is False: skipped_no_depth += 1
+                else: skipped_no_depth += 1
 
-        # Log cycle summary to dashboard
-        msg = f"[QuoteHarvester] Cycle complete: {total_quotes} saved, {skipped_no_depth} skipped (no depth) across {len(contracts)} active contracts"
+        # Log cycle summary
+        msg = f"[QuoteHarvester] Cycle complete: {total_quotes} saved, {skipped_no_depth} skipped across {len(contracts)} contracts"
         logger.debug(msg)
         log_event("INFO", "QuoteHarvester", msg)
+
+    def _trigger_background_backfill(self, contract_id, symbol):
+        """v19.1.6: Start backfill in a non-blocking background thread."""
+        def _worker():
+            with self._backfill_lock:
+                if contract_id in self._backfilled_cids: return
+                
+                # Throttle to 1 every 20 seconds to be very safe
+                now = time.time()
+                elapsed = now - self._last_backfill_ts
+                if elapsed < 20.0:
+                    time.sleep(20.0 - elapsed)
+                
+                try:
+                    logger.info(f"[QuoteHarvester] Background backfill starting for {symbol}...")
+                    self.backfill_bars(contract_id, symbol)
+                    self._backfilled_cids.add(contract_id)
+                    self._last_backfill_ts = time.time()
+                except Exception as e:
+                    logger.debug(f"Backfill error {symbol}: {e}")
+        
+        threading.Thread(target=_worker, daemon=True).start()
 
 
 def build_bars_now(contract_id: int, db_path: Optional[str] = None) -> dict:
@@ -414,89 +295,12 @@ def build_bars_now(contract_id: int, db_path: Optional[str] = None) -> dict:
     Useful for backfill or test fixtures.
     Returns {interval: bars_written}.
     """
-    return _build_all_bars(contract_id, db_path=db_path)
-
-
-def get_paired_quotes(
-    market_id: int,
-    strike: float,
-    last_trade_at: str,
-    db_path: Optional[str] = None,
-) -> dict:
-    """
-    Return the most recent YES and NO quotes for a paired contract set.
-
-    Used to compute Ω_t (overround) and G_t (parity gap) which require
-    both sides of the same contract.
-
-    Returns:
-        {yes_quote: dict|None, no_quote: dict|None,
-         omega_t: float|None, g_t: float|None}
-    """
-    try:
-        from forecast.db import _conn, DB_PATH
-
-        path = db_path or DB_PATH
-        with _conn(path) as c:
-            # YES contract (right='C')
-            yes_row = c.execute(
-                """SELECT fq.mid, fq.ask, fq.bid, fq.spread, fq.ts
-                   FROM forecast_quotes fq
-                   JOIN forecast_contracts fc ON fc.id = fq.contract_id
-                   WHERE fc.market_id=? AND fc.right='C'
-                     AND fc.strike=? AND fc.last_trade_at=?
-                   ORDER BY fq.ts DESC LIMIT 1""",
-                (market_id, strike, last_trade_at),
-            ).fetchone()
-
-            # NO contract (right='P')
-            no_row = c.execute(
-                """SELECT fq.mid, fq.ask, fq.bid, fq.spread, fq.ts
-                   FROM forecast_quotes fq
-                   JOIN forecast_contracts fc ON fc.id = fq.contract_id
-                   WHERE fc.market_id=? AND fc.right='P'
-                     AND fc.strike=? AND fc.last_trade_at=?
-                   ORDER BY fq.ts DESC LIMIT 1""",
-                (market_id, strike, last_trade_at),
-            ).fetchone()
-
-    except Exception as e:
-        logger.warning(f"get_paired_quotes failed: {e}")
-        return {"yes_quote": None, "no_quote": None, "omega_t": None, "g_t": None}
-
-    yes_q = dict(yes_row) if yes_row else None
-    no_q = dict(no_row) if no_row else None
-
-    omega_t = g_t = None
-    if yes_q and no_q:
-        try:
-            from forecast.primitives import overround, parity_gap
-
-            ask_yes = yes_q.get("ask") or 0.0
-            ask_no = no_q.get("ask") or 0.0
-            mid_yes = yes_q.get("mid") or 0.0
-            mid_no = no_q.get("mid") or 0.0
-            if ask_yes and ask_no:
-                omega_t = overround(ask_yes, ask_no)
-            if mid_yes and mid_no:
-                g_t = parity_gap(mid_yes, mid_no)
-        except Exception:
-            pass
-
-    return {
-        "yes_quote": yes_q,
-        "no_quote": no_q,
-        "omega_t": omega_t,
-        "g_t": g_t,
-    }
+    _build_all_bars(contract_id, db_path=db_path)
+    return {"status": "complete"}
 
 
 if __name__ == "__main__":
     from execution.kalshi_broker import get_kalshi_broker
-
-    logging.basicConfig(level=logging.INFO, stream=sys.stdout)
-    logger.info("Starting QuoteHarvester in standalone daemon mode...")
-
     broker = get_kalshi_broker()
     if not broker.connect():
         logger.error("Could not connect to broker. Exiting.")

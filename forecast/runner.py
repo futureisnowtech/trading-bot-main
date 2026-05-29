@@ -178,6 +178,7 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
     Returns list of entry results (empty if nothing qualified).
     """
     with _eval_lock:
+        logger.info(f"[ForecastRunner] Starting strategy cycle (bankroll=${bankroll:.2f})...")
         entries = []
         try:
             from forecast.db import get_active_contracts, get_bars, get_recent_quotes
@@ -699,13 +700,20 @@ def start_forecast_lane(bankroll: float = 100.0) -> None:
     harvester.start()
 
     # Initial discovery
-    run_discovery_cycle()
+    threading.Thread(target=run_discovery_cycle, daemon=True).start()
 
     # Register scheduler jobs
-    schedule.every(5).minutes.do(run_discovery_cycle)
-    schedule.every(2).minutes.do(lambda: run_strategy_cycle(bankroll)) # v19.1.4: High-Velocity Weather Pivot
+    # v19.1.5: Run heavy/blocking jobs in background threads to avoid loop starvation
+    schedule.every(5).minutes.do(
+        lambda: threading.Thread(target=run_discovery_cycle, daemon=True).start()
+    )
+    schedule.every(2).minutes.do(
+        lambda: run_strategy_cycle(bankroll)
+    )
     schedule.every(30).seconds.do(run_position_monitor)
-    schedule.every(30).seconds.do(_cache_forecast_state)
+    schedule.every(30).seconds.do(
+        lambda: threading.Thread(target=_cache_forecast_state, daemon=True).start()
+    )
     schedule.every().day.at("08:00").do(_send_daily_token_burn_report)
 
     logger.info(

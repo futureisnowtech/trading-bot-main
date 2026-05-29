@@ -129,8 +129,8 @@ async def update_weather_shadow_state():
             
             if new_state:
                 _WEATHER_SHADOW_STATE.update(new_state)
-                # RC: Log for observability
-                logger.debug(f"Weather state synced: {list(new_state.keys())}")
+                # RC: Log for observability (v19.1.5: Bumped to INFO)
+                logger.info(f"Weather state synced: {list(new_state.keys())}")
         except Exception as e:
             logger.error(f"Weather pipeline sync failure: {e}")
         

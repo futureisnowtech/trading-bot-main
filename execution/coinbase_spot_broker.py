@@ -231,7 +231,29 @@ class CoinbaseSpotBroker:
                 f"[spot] '{symbol}' (cleaned: '{s}') is not in the allowed spot set "
                 f"(supported: {sorted(SPOT_SUPPORTED_SYMBOLS)})."
             )
-        return SPOT_PRODUCT_SPECS[s]
+        
+        spec = SPOT_PRODUCT_SPECS[s].copy()
+        
+        # v19.1.6: Dynamic Product ID selection (USD vs USDC)
+        # Prefer the currency with the highest balance to avoid INSUFFICIENT_FUND
+        try:
+            bal = self.get_spot_balance()
+            usd = bal.get("usd_pure", 0.0)
+            usdc = bal.get("usdc_pure", 0.0)
+            
+            # Default is usually -USD, but if USDC balance is significantly higher, pivot
+            if usdc > (usd + 1.0): # 1.0 buffer to avoid flip-flopping on small trades
+                spec["product_id"] = f"{s}-USDC"
+                spec["quote_currency"] = "USDC"
+            else:
+                spec["product_id"] = f"{s}-USD"
+                spec["quote_currency"] = "USD"
+        except Exception:
+            # Fallback to standard -USD
+            spec["product_id"] = f"{s}-USD"
+            spec["quote_currency"] = "USD"
+
+        return spec
 
     def _clean_symbol(self, symbol: str) -> str:
         """Standardize symbol to base asset only."""
@@ -300,9 +322,8 @@ class CoinbaseSpotBroker:
         """
         Return available spot balances.
         Returns symbol balances plus USD available.
+        v19.1.6: Reports both pure USD and combined USD+USDC for strategy engine.
         """
-        # v18.19.4: short TTL cache. crypto_tradeability hits this per-asset
-        # within a scan cycle (<1s); without caching we fire /accounts 8 times.
         now = time.time()
         if (
             self._balance_cache is not None
@@ -314,15 +335,24 @@ class CoinbaseSpotBroker:
             data = self._request("GET", "/api/v3/brokerage/accounts")
             accounts = data.get("accounts", [])
             symbol_balances = {sym: 0.0 for sym in SPOT_SUPPORTED_SYMBOLS}
-            usd = 0.0
+            usd_pure = 0.0
+            usdc_pure = 0.0
             for acct in accounts:
                 currency = acct.get("currency", "")
                 avail = float(acct.get("available_balance", {}).get("value", 0) or 0)
                 if currency in symbol_balances:
                     symbol_balances[currency] = avail
-                elif currency in ("USD", "USDC"):
-                    usd += avail
-            result = {"usd_available": usd, "symbol_balances": symbol_balances}
+                elif currency == "USD":
+                    usd_pure = avail
+                elif currency == "USDC":
+                    usdc_pure = avail
+
+            result = {
+                "usd_available": usd_pure + usdc_pure,
+                "usd_pure": usd_pure,
+                "usdc_pure": usdc_pure,
+                "symbol_balances": symbol_balances,
+            }
             for sym, qty in symbol_balances.items():
                 result[f"{sym.lower()}_available"] = qty
             self._balance_cache = result

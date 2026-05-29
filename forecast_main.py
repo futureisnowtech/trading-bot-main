@@ -1,11 +1,10 @@
 """
 forecast_main.py — Isolated orchestrator for the Kalshi Forecast lane.
-v18.34.FORENSIC: Sovereign Separation Phase
+v19.1.6: Refactored to use Sovereign start_forecast_lane for optimized execution.
 """
 
-import sys, os, time, traceback, logging, threading, json
+import sys, os, time, traceback, logging, threading
 from datetime import datetime
-import pytz
 
 # Ensure project root is on sys.path
 _MAIN_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -28,7 +27,7 @@ def _setup_logging():
 
 _setup_logging()
 
-VERSION = "v19.1.ARCH"
+VERSION = "v19.1.6"
 
 BANNER = f"""
 ╔══════════════════════════════════════════════════════════════════╗
@@ -40,80 +39,39 @@ BANNER = f"""
 def main():
     print(BANNER)
     import system_state
-    from config import MARKET_TIMEZONE, ACCOUNT_SIZE, DB_PATH
+    from config import ACCOUNT_SIZE
     
-    _db_path = DB_PATH
     system_state.state.set_mode("LIVE")
     
     # 📊 Metrics (Port 8001 for Forecast Isolation)
     from monitoring.metrics import start_metrics_server
     start_metrics_server(port=8001)
 
-    from logging_db.trade_logger import log_event
-    from runtime.runtime_state import upsert_lane_state
-
-    # ── Forecast Execution Loop ──────────────────────────────────────────────
-    import schedule as _sched_lib
-    _s = _sched_lib.Scheduler()
-    
-    from forecast.db import init_forecast_db
+    # v19.1.6: Start Weather Ensemble Pipeline
     from data.kalshi_weather_monitor import start_weather_monitor
-    from forecast.runner import (
-        run_discovery_cycle,
-        run_strategy_cycle,
-        run_position_monitor,
-        _cache_forecast_state,
-        _get_broker,
-        _get_harvester,
-    )
+    start_weather_monitor()
+
+    # v19.1.6: Use optimized Sovereign runner
+    from forecast.runner import start_forecast_lane
+    import schedule
+
+    # We don't block here; start_forecast_lane registers jobs in the default 'schedule' instance
+    start_forecast_lane(bankroll=float(ACCOUNT_SIZE))
+    
+    print("   ForecastEx lane active. Monitoring Port 8001.")
 
     try:
-        init_forecast_db()
-        # v18.35: Start Weather Ensemble Pipeline
-        start_weather_monitor()
-        
-        broker = _get_broker()
-        _connected = broker.connect()
-        
-        upsert_lane_state(
-            "forecast",
-            db_path=_db_path,
-            connected=int(_connected),
-            active=1,
-            readiness_state="BROKER_DISCONNECTED" if not _connected else "OK",
-        )
-
-        harvester = _get_harvester()
-        harvester.start()
-        
-        # Initial run
-        run_discovery_cycle()
-        _cache_forecast_state()
-        
-        # Schedule
-        _s.every(30).minutes.do(run_discovery_cycle)
-        _s.every(5).minutes.do(lambda: run_strategy_cycle(100.0))
-        _s.every(30).seconds.do(run_position_monitor)
-        _s.every(30).seconds.do(_cache_forecast_state)
-        
-        log_event("INFO", "ForecastMain", f"Forecast lane started on port 8001")
-        print("   ForecastEx lane active. Monitoring Port 8001.")
-
         while True:
-            _s.run_pending()
+            schedule.run_pending()
             time.sleep(1)
-            
-    except Exception as e:
-        log_event("ERROR", "ForecastMain", f"Forecast lane crashed: {e}")
-        traceback.print_exc()
-
-if __name__ == "__main__":
-    try:
-        main()
     except KeyboardInterrupt:
         print("\nShutdown complete.")
         sys.exit(0)
     except Exception as e:
-        print(f"\n💥 Fatal error: {e}")
+        from logging_db.trade_logger import log_event
+        log_event("ERROR", "ForecastMain", f"Forecast lane crashed: {e}")
         traceback.print_exc()
         sys.exit(1)
+
+if __name__ == "__main__":
+    main()

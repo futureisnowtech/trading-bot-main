@@ -6,16 +6,16 @@
 ## Canonical Truth
 
 - Repo root: `/Users/joshmacbookair2020/Projects/algo_trading_final`
-- Canonical version: `v19.1.4` (`2026-05-27`)
-- Canonical active lane: **Dual-Lane**: Coinbase Spot Scalp + Kalshi Weather Engine
+- Canonical version: `v19.1.6` (`2026-05-29`)
+- Canonical active lane: **Dual-Lane**: Coinbase Spot Scalp + Kalshi Weather Expansion
 - **Status:** **LEDGERLESS SOVEREIGN**. Autonomous Self-Healing & Broker-First Truth.
+- **Critical Changes (v19.1.6):**
+  - **High-Velocity Weather Expansion**: Horizontally expanded the weather lane to 15+ US cities (Austin, Phoenix, Seattle, etc.) covering both HIGH and LOW temperature series.
+  - **Derivative Alpha Integration**: Introduced a new strategy for Precipitation (`KXRAIN...`) markets utilizing GFS ensemble probabilities.
+  - **The Expiration Guillotine**: Enforced a ruthless 72-hour maximum resolution window (`MAX_DAYS_TO_RESOLUTION = 3.0`) for all Forecast markets to eliminate slow-moving political/macro noise and prioritize daily cash flow.
+  - **Parallelized Harvester**: Optimized the QuoteHarvester with a throttled ThreadPoolExecutor (4 workers) to ensure 100+ contracts are polled within the 120s freshness window without CPU starvation.
+  - **Aggressive Weather Caching**: Implemented a 6-hour coordinate-based cache for Open-Meteo ensemble data to eliminate 429 rate limit death spirals.
 - **Critical Changes (v19.1.4):**
-  - **Unified Sovereign Registry**: Centralized system versioning in `VERSION.py` and modernized the Telegram SRE audit layer. The Telegram bot now acts as a thin client for the Dashboard API, eliminating "0% Integrity" hallucinations.
-  - **Self-Healing Reconciliation**: Implemented an autonomous 'Janitor' in the broker layer to intercept Coinbase 404s. Orphan orders are now silently purged from the local database, treating desync as a routine maintenance event rather than a critical failure.
-  - **High-Velocity Weather Sovereign**: Enforced a strict 72-hour maximum resolution window and integrated 31-member GFS ensembles for edge detection (8% floor).
-  - **Weather Pulse Restoration**: Fixed a visibility bug where `active_markets` were not being reported to the HUD, restoring full transparency to the weather operation.
-  - **Logistic Sigmoid Sizing**: Replaced conservative sizing with a high-aggression sigmoid model (25% bankroll cap).
-- **Critical Changes (v19.1.3):**
 - **Critical Changes (v19.1):**
   - **Ledgerless Architecture**: Retired the `open_positions` table as an authoritative ledger. The system now projects truth directly from broker holdings via `execution/coinbase_spot_broker.py`.
   - **Unified Entry Point**: Consolidated all launch paths into a single `main.py`. Legacy scripts (`go_live.py`, `check_readiness.py`, etc.) have been purged.

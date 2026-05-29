@@ -279,13 +279,14 @@ class KalshiBroker:
         results = []
         try:
             # ── Precision Targeting: Weather Series ────────────────────────────
-            # v19.1.5: Explicitly query our 5 weather station series first
+            # v19.1.6: Explicitly query all series for our 15+ expanded stations
             from data.kalshi_weather_monitor import STATIONS
             
             weather_events = []
-            for station_id in STATIONS:
-                data = self._request("GET", "/trade-api/v2/events", params={"series_ticker": station_id, "status": "open"})
-                weather_events.extend(data.get("events", []))
+            for loc in STATIONS.values():
+                for series_id in loc.get("series", []):
+                    data = self._request("GET", "/trade-api/v2/events", params={"series_ticker": series_id, "status": "open"})
+                    weather_events.extend(data.get("events", []))
             
             # ── Generic Discovery Loop (v18.36 Expanded) ──────────────────────
             # Fetch up to 2000 events to catch macro/politics shifts.

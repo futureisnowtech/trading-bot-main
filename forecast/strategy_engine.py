@@ -609,33 +609,46 @@ def _parse_weather_threshold(ticker: str) -> Optional[float]:
 
 def _strategy_weather(ticker: str, ask_yes: float, ask_no: float, hours_to_res: float) -> tuple[bool, str, float, list[str], bool]:
     """
-    Boundary Pinning & METAR Discrepancies Strategy (v19.1.5).
+    Boundary Pinning & METAR Discrepancies Strategy (v19.1.6).
     Treats weather as an asymmetric information decay problem in the <48h window.
+    Expanded to support High Temp, Low Temp, and Precipitation.
     """
     # Alpha Filter: 48-Hour Asymmetric Information Decay Window
-    # Target window is strictly bounded between 1.5 and 48 hours.
     is_short_term = 1.5 <= hours_to_res <= 48.0
 
     w_data = get_weather_data(ticker)
-    if not w_data or "members" not in w_data:
+    if not w_data:
         return False, "", 0.0, ["no_weather_ensemble_data"], False
 
     threshold = _parse_weather_threshold(ticker)
     if threshold is None:
         return False, "", 0.0, [f"unparseable_ticker_threshold: {ticker}"], False
 
-    members = w_data["members"]
+    # v19.1.6: Dynamic member selection based on contract type
+    if "HIGH" in ticker:
+        members = w_data.get("members_high", [])
+        sd = w_data.get("std_high", 5.0)
+        mode = "HIGH"
+    elif "LOW" in ticker:
+        members = w_data.get("members_low", [])
+        sd = w_data.get("std_low", 5.0)
+        mode = "LOW"
+    elif "RAIN" in ticker or "PRECIP" in ticker:
+        members = w_data.get("members_precip", [])
+        sd = 0.1 # Default low SD for precip
+        mode = "RAIN"
+    else:
+        return False, "", 0.0, ["unknown_weather_type"], False
+
     if not members:
         return False, "", 0.0, ["empty_ensemble_members"], False
 
-    # v19.1.5: Boundary Pinning calculation
-    # P(High >= Threshold) from 31-member GFS ensemble
+    # v19.1.6: Boundary Pinning calculation
+    # P(Condition >= Threshold) from 31-member GFS ensemble
     success_count = sum(1 for m in members if m >= threshold)
     ensemble_prob = success_count / len(members)
 
     # v19.1.5: Dynamic SD Shrinkage (Decay Capture)
-    # If standard deviation is very low, the boundary pin is stronger.
-    sd = w_data.get("std", 5.0)
     pin_strength = max(0.0, 1.0 - (sd / 5.0)) if is_short_term else 0.0
 
     # Apply 3% uncertainty floor/ceiling
@@ -645,9 +658,9 @@ def _strategy_weather(ticker: str, ask_yes: float, ask_no: float, hours_to_res: 
     edge_no = (1.0 - ensemble_prob) - ask_no
 
     # Guardrail 1: The Convective Cloud Cover Override (The "Sun Spike")
-    # If peak TCDC > 65%, veto YES contracts due to unexpected ground cooling.
+    # Only applies to HIGH temp YES contracts.
     peak_tcdc = w_data.get("peak_tcdc", 0.0)
-    cloud_veto = peak_tcdc > 65.0
+    cloud_veto = (mode == "HIGH") and (peak_tcdc > 65.0)
 
     # v19.1.5: High-aggression edge detection (8% floor)
     # Guardrail 3: Taker-Override (Edge >= 22%)
@@ -660,7 +673,8 @@ def _strategy_weather(ticker: str, ask_yes: float, ask_no: float, hours_to_res: 
             f"ensemble_p={ensemble_prob:.1%}",
             f"edge={edge_yes:.1%}",
             f"pin_strength={pin_strength:.2f}",
-            f"TCDC={peak_tcdc:.1f}%"
+            f"TCDC={peak_tcdc:.1f}%",
+            f"type={mode}"
         ]
         return True, "YES", ensemble_prob, factors, is_taker
 
@@ -669,12 +683,12 @@ def _strategy_weather(ticker: str, ask_yes: float, ask_no: float, hours_to_res: 
         factors = [
             f"ensemble_p={ensemble_prob:.1%}",
             f"edge={edge_no:.1%}",
-            f"pin_strength={pin_strength:.2f}"
+            f"pin_strength={pin_strength:.2f}",
+            f"type={mode}"
         ]
         return True, "NO", (1.0 - ensemble_prob), factors, is_taker
 
     return False, "", 0.0, [f"insufficient_weather_edge (p_yes={ensemble_prob:.2f})"], False
-
 
 def evaluate_contract(
 

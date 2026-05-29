@@ -156,6 +156,20 @@ async def update_weather_shadow_state():
     
     while True:
         try:
+            # v19.1.6: Jumpstart mechanism to bypass IP bans
+            import os, json
+            jumpstart_path = "/app/logs/weather_jumpstart.json"
+            if os.path.exists(jumpstart_path):
+                try:
+                    with open(jumpstart_path, 'r') as f:
+                        data = json.load(f)
+                    if data:
+                        _WEATHER_SHADOW_STATE.update(data)
+                        logger.info(f"Sovereign Jumpstart: Injected weather for {list(data.keys())}")
+                    os.remove(jumpstart_path)
+                except Exception as je:
+                    logger.error(f"Jumpstart failed: {je}")
+
             new_state = {}
             # v19.1.6: Staggered fetch to avoid 429 detection
             city_keys = list(STATIONS.keys())

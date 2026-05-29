@@ -270,29 +270,50 @@ class KalshiBroker:
     def discover_markets(self) -> list[dict]:
         """
         Discover active Kalshi event contracts.
-        v18.36: Skips KX tickers and paginates for depth.
+        v19.1.5: Implements Precision Lane Targeting for Weather.
+        Increases pagination and targets specific series to avoid discovery blindness.
         """
         if not self.is_connected():
             return []
 
         results = []
         try:
-            # ── Pagination Loop (v18.36) ──────────────────────────────────────
-            # Fetch up to 1000 events to ensure we get past the long-dated KX flood.
-            events = []
+            # ── Precision Targeting: Weather Series ────────────────────────────
+            # v19.1.5: Explicitly query our 5 weather station series first
+            from data.kalshi_weather_monitor import STATIONS
+            
+            weather_events = []
+            for station_id in STATIONS:
+                data = self._request("GET", "/trade-api/v2/events", params={"series_ticker": station_id, "status": "open"})
+                weather_events.extend(data.get("events", []))
+            
+            # ── Generic Discovery Loop (v18.36 Expanded) ──────────────────────
+            # Fetch up to 2000 events to catch macro/politics shifts.
+            generic_events = []
             cursor = ""
-            for _ in range(5):  # 5 pages of 200 = 1000 events
+            for _ in range(10):  # 10 pages of 200 = 2000 events
                 data = self._request("GET", "/trade-api/v2/events", params={"limit": 200, "status": "open", "cursor": cursor})
                 page_events = data.get("events", [])
                 if not page_events: break
-                events.extend(page_events)
+                generic_events.extend(page_events)
                 cursor = data.get("cursor", "")
                 if not cursor: break
             
-            for event in events:
+            # Combine, ensuring unique events by ticker
+            seen_tickers = set()
+            all_events = []
+            for e in (weather_events + generic_events):
+                ticker = e.get("event_ticker")
+                if ticker not in seen_tickers:
+                    all_events.append(e)
+                    seen_tickers.add(ticker)
+
+            for event in all_events:
                 e_ticker = event.get("event_ticker")
+                category = event.get("category", "")
+                is_weather = "weather" in category.lower()
                 
-                if not _is_economic_market(e_ticker, event.get("title"), event.get("category")):
+                if not _is_economic_market(e_ticker, event.get("title"), category):
                     continue
                 
                 m_data = self._request("GET", "/trade-api/v2/markets", params={"event_ticker": e_ticker})
@@ -302,18 +323,18 @@ class KalshiBroker:
                     if m.get("status") != "active": continue
                     
                     # ── Hard Liquidity Gate (v18.35) ────────────────────────────────
-                    # Skip dormant markets with zero activity to avoid dead polling
-                    try:
-                        vol_raw = m.get("volume_fp")
-                        liq_raw = m.get("liquidity_dollars")
+                    # Skip dormant markets with zero activity to avoid dead polling.
+                    # v19.1.5: Bypass for weather alpha — we want to be first in.
+                    if not is_weather:
+                        try:
+                            vol_raw = m.get("volume_fp")
+                            liq_raw = m.get("liquidity_dollars")
+                            if vol_raw is not None and liq_raw is not None:
+                                if float(vol_raw or 0) <= 0.0 and float(liq_raw or 0) <= 0.0:
+                                    continue 
+                        except (ValueError, TypeError):
+                            continue
 
-                        # v18.35: Only skip if Kalshi EXPLICITLY reports 0 for both.
-                        # If keys are missing (None), allow discovery to proceed.
-                        if vol_raw is not None and liq_raw is not None:
-                            if float(vol_raw or 0) <= 0.0 and float(liq_raw or 0) <= 0.0:
-                                continue 
-                    except (ValueError, TypeError):
-                        continue
                     for side in ["YES", "NO"]:
                         right = "C" if side == "YES" else "P"
                         results.append({
@@ -326,7 +347,7 @@ class KalshiBroker:
                             "exchange": "KALSHI",
                             "currency": "USD",
                             "long_name": m.get("title"),
-                            "category": event.get("category"),
+                            "category": category,
                             "side": side,
                         })
         except Exception as e:

@@ -207,6 +207,7 @@ class QuoteHarvester:
         One poll cycle: fetch quotes for all active contracts in parallel.
         """
         from concurrent.futures import ThreadPoolExecutor, as_completed
+        logger.info(f"[QuoteHarvester] Starting poll cycle...")
         
         try:
             contracts = get_active_contracts(db_path=self._db_path)

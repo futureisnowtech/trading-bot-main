@@ -30,6 +30,7 @@ import os
 import sys
 import threading
 import time
+import traceback
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -203,6 +204,7 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
 
             active = get_active_contracts()
             if not active:
+                logger.info("[ForecastRunner] No active contracts in DB — skip eval")
                 return []
 
             # Current position state
@@ -262,6 +264,9 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                 macro_context=macro_ctx,
             )
 
+            if not candidates:
+                logger.info("[ForecastRunner] No trade candidates qualified in this cycle.")
+
             for candidate in candidates:
                 result = candidate["result"]
                 contract = candidate["contract"]
@@ -300,10 +305,6 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                 ask_price = result.ask_yes if result.side == "YES" else result.ask_no
                 if not ask_price or ask_price <= 0:
                     continue
-
-                # --- LIVE TEST TRADE RULE ---
-                # Only place if readiness validator says GREEN (checked in validate.py)
-                # For now, execute directly (validator is called by launch script)
 
                 try:
                     # Guardrail 3: Taker-Override Friction Controls
@@ -374,13 +375,6 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
 def run_position_monitor() -> None:
     """
     30-sec cycle: check open positions, flatten resolved contracts.
-
-    Resolution check:
-    - If contract has passed its last_trade_at, it has resolved.
-    - If we have a matching row in forecast_resolutions, we know the outcome.
-    - In either case, flatten by buying the opposite side (or mark as resolved).
-
-    Also logs any positions held beyond 96h (dead-money backstop for event lane).
     """
     try:
         broker = _get_broker()
@@ -404,22 +398,31 @@ def run_position_monitor() -> None:
             resolved = False
             if last_trade:
                 try:
-                    fmt = "%Y%m%d %H:%M:%S" if " " in last_trade else "%Y%m%d"
-                    expiry = datetime.strptime(last_trade, fmt).replace(
-                        tzinfo=timezone.utc
-                    )
+                    # v19.1.6: Support ISO format and standard format
+                    from dateutil.parser import parse as date_parse
+                    expiry = date_parse(last_trade)
+                    if expiry.tzinfo is None:
+                        expiry = expiry.replace(tzinfo=timezone.utc)
                     if now >= expiry:
                         resolved = True
                         logger.info(
                             f"[ForecastRunner] Contract expired: {local_symbol} — flattening"
                         )
                 except Exception:
-                    pass
+                    # Fallback to standard formats
+                    try:
+                        fmt = "%Y%m%d %H:%M:%S" if " " in last_trade else "%Y%m%d"
+                        expiry = datetime.strptime(last_trade, fmt).replace(
+                            tzinfo=timezone.utc
+                        )
+                        if now >= expiry:
+                            resolved = True
+                    except: pass
 
             # Dead-money backstop: > 96h open
             if not resolved and entered_at:
                 try:
-                    entered = datetime.fromisoformat(entered_at)
+                    entered = datetime.fromisoformat(entered_at.replace("Z", "+00:00"))
                     hours_open = (now - entered).total_seconds() / 3600.0
                     if hours_open > 96:
                         resolved = True
@@ -446,8 +449,6 @@ def run_position_monitor() -> None:
                             from notifications.notification_engine import notify_trade_close
                             pnl_usd = flatten_res.get("pnl_usd", 0.0)
                             entry_price = flatten_res.get("entry_price", 0.0)
-                            
-                            # Simple pnl_pct calculation
                             pnl_pct = (pnl_usd / (entry_price * qty)) if (entry_price > 0 and qty > 0) else 0.0
                             
                             notify_trade_close(
@@ -470,10 +471,9 @@ def run_position_monitor() -> None:
     except Exception as e:
         logger.error(f"[ForecastRunner] Position monitor error: {e}")
 
-    # Heartbeat — run_position_monitor is the most frequent forecast loop (30s)
+    # Heartbeat
     try:
         from runtime.runtime_state import mark_lane_heartbeat
-
         mark_lane_heartbeat("forecast")
     except Exception:
         pass
@@ -519,13 +519,12 @@ def _send_daily_token_burn_report():
 
 
 def _cache_forecast_state():
-    """v19.1.5: Caches rich broker-first forecast state for the HUD dashboard."""
+    """v19.1.6: Caches rich broker-first forecast state for the HUD dashboard."""
     try:
-        logger.info("[ForecastRunner] Starting forecast state cache cycle (v19.1.5)...")
+        logger.info("[ForecastRunner] Starting forecast state cache cycle (v19.1.6)...")
         from runtime.runtime_state import upsert_lane_state
         from logging_db.trade_logger import _conn
         import json
-        import traceback
 
         broker = _get_broker()
         if not broker.is_connected(): return
@@ -541,7 +540,6 @@ def _cache_forecast_state():
             ticker = p.get('local_symbol')
             qty = float(p.get('qty', 0))
             
-            # Fetch Live Mid-Price
             current_px = 0.0
             try:
                 quote = broker.get_quote(ticker)
@@ -550,8 +548,6 @@ def _cache_forecast_state():
                 current_px = (bid + ask) / 2.0 if (bid > 0 and ask > 0) else (bid or ask or 0)
             except: pass
             
-            # Fetch Cost Basis
-            # v19.1.3: Use broker-reported avg_entry as primary truth if trade table is empty
             entry_px = float(p.get('avg_entry') or 0.0)
             entered_at = "Unknown"
             event_title = ticker
@@ -577,21 +573,21 @@ def _cache_forecast_state():
                     resolution_at = meta[1]
             except: pass
             
-            # Math
             mult = 1 if p.get('side') == 'YES' else -1
             pnl = (current_px - entry_px) * qty * mult
             potential = (1.0 - entry_px) * qty
             
-            # v19.1.3: Absolute P&L protection
             if entry_px <= 0:
                 pnl = 0.0
                 potential = (1.0 - current_px) * qty if current_px > 0 else 0.0
             
-            # Time Countdown
             countdown = "N/A"
             if resolution_at != "Unknown":
                 try:
-                    expiry = datetime.fromisoformat(resolution_at.replace('Z', '+00:00'))
+                    from dateutil.parser import parse as date_parse
+                    expiry = date_parse(resolution_at)
+                    if expiry.tzinfo is None:
+                        expiry = expiry.replace(tzinfo=timezone.utc)
                     delta = expiry - datetime.now(timezone.utc)
                     if delta.days > 0: countdown = f"{delta.days}d left"
                     else: countdown = f"{int(delta.seconds // 3600)}h left"
@@ -611,7 +607,6 @@ def _cache_forecast_state():
             })
             total_pnl += pnl
             
-        # v19.1.3: Fetch live Kalshi balance for HUD capital separation
         kalshi_equity = 0.0
         try:
             kalshi_equity = float(broker.get_account_balance() or 0.0)
@@ -628,54 +623,34 @@ def _cache_forecast_state():
         upsert_lane_state("forecast", snapshot_json=json.dumps(snapshot))
     except Exception as e:
         logger.error(f"[ForecastRunner] Cache state error: {e}")
-        logger.error(traceback.format_exc())
-
-
-# ── Startup / teardown ─────────────────────────────────────────────────────────
 
 
 def start_forecast_lane(bankroll: float = 100.0) -> None:
-    """
-    Start all forecast lane loops using schedule.
-
-    Call this from main.py or a dedicated forecast launcher.
-    Blocks until the caller's scheduler loop runs (schedule.run_pending()).
-
-    Loops registered:
-      every 30 min  → run_discovery_cycle()
-      every 60 sec  → harvester runs internally
-      every 5 min   → run_strategy_cycle(bankroll)
-      every 30 sec  → run_position_monitor()
-    """
+    """Initialize and start the forecast lane loops."""
     import schedule
 
+    logger.info("[ForecastRunner] Starting lane...")
     try:
         from forecast.db import init_forecast_db
-
+        logger.info("[ForecastRunner] Initializing DB...")
         init_forecast_db()
-        logger.info("[ForecastRunner] DB initialised")
+        logger.info("[ForecastRunner] DB initialized ✅")
     except Exception as e:
         logger.error(f"[ForecastRunner] DB init failed: {e}")
         return
 
-    # Connect broker — ib_insync connect() is async; the return value from the
-    # synchronous wrapper may be False even though the connection completes moments
-    # later.  Re-check is_connected() after a short grace period.
     broker = _get_broker()
+    logger.info("[ForecastRunner] Connecting to broker...")
     connected = broker.connect()
     if not connected:
-        # Give the async connection up to 4s to complete before giving up.
         time.sleep(4)
         connected = broker.is_connected()
-    if not connected:
-        logger.warning(
-            "[ForecastRunner] ForecastEx broker not connected — "
-            "running in paper/offline mode (no live orders)"
-        )
+    
+    logger.info(f"[ForecastRunner] Broker connected: {connected} ✅")
 
     try:
         from runtime.runtime_state import upsert_lane_state
-
+        logger.info("[ForecastRunner] Updating lane state...")
         _snapshot = _forecast_runtime_snapshot(
             connected=bool(connected),
             contracts=0,
@@ -692,18 +667,23 @@ def start_forecast_lane(bankroll: float = 100.0) -> None:
             action_needed=_snapshot["action_needed"],
             readiness_state=_snapshot["readiness_state"],
         )
-    except Exception:
-        pass
+        logger.info("[ForecastRunner] Lane state updated ✅")
+    except Exception as e:
+        logger.error(f"[ForecastRunner] Lane state update failed: {e}")
 
     # Start quote harvester
+    logger.info("[ForecastRunner] Starting QuoteHarvester...")
     harvester = _get_harvester()
     harvester.start()
+    logger.info("[ForecastRunner] QuoteHarvester started ✅")
 
     # Initial discovery
+    logger.info("[ForecastRunner] Starting initial discovery thread...")
     threading.Thread(target=run_discovery_cycle, daemon=True).start()
 
     # Register scheduler jobs
-    # v19.1.5: Run heavy/blocking jobs in background threads to avoid loop starvation
+    # v19.1.6: Run heavy/blocking jobs in background threads to avoid loop starvation
+    logger.info("[ForecastRunner] Registering scheduler jobs...")
     schedule.every(5).minutes.do(
         lambda: threading.Thread(target=run_discovery_cycle, daemon=True).start()
     )
@@ -717,8 +697,8 @@ def start_forecast_lane(bankroll: float = 100.0) -> None:
     schedule.every().day.at("08:00").do(_send_daily_token_burn_report)
 
     logger.info(
-        f"[ForecastRunner] Lane started | bankroll=${bankroll:.0f} "
-        f"| connected={connected}"
+        f"[ForecastRunner] Lane fully operational | bankroll=${bankroll:.0f} "
+        f"| connected={connected} ✅"
     )
 
 
@@ -740,7 +720,7 @@ if __name__ == "__main__":
         handlers=[
             logging.StreamHandler(),
             logging.FileHandler(
-                os.path.join(_ROOT, "logs", "forecastex.log"), encoding="utf-8"
+                os.path.join(_ROOT, "logs", "forecast.log"), encoding="utf-8"
             ),
         ],
     )

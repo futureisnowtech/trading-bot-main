@@ -24,7 +24,7 @@ DB_PATH: str = _CFG_DB_PATH
 
 def _conn(db_path: str | None = None) -> sqlite3.Connection:
     path = db_path or DB_PATH
-    c = sqlite3.connect(path, timeout=10)
+    c = sqlite3.connect(path, timeout=30)
     c.row_factory = sqlite3.Row
     c.execute("PRAGMA journal_mode=WAL")
     c.execute("PRAGMA foreign_keys=ON")

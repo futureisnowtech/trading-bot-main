@@ -393,9 +393,9 @@ class QuoteHarvester:
         total_quotes = 0
         skipped_no_depth = 0
         
-        # v19.1.6: Parallel poll with conservative worker count to avoid CPU starvation
-        # 4 workers is enough for 55 contracts without pegging the CPU.
+        # v19.1.6: Parallel poll to ensure freshness SLA (<120s)
         with ThreadPoolExecutor(max_workers=4) as executor:
+            # 1. Fetch ALL live quotes first (Priority)
             futures = [executor.submit(_harvest_one, c) for c in contracts]
             for future in as_completed(futures):
                 res = future.result()

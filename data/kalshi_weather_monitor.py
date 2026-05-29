@@ -157,16 +157,23 @@ async def update_weather_shadow_state():
     while True:
         try:
             new_state = {}
-            for city_key, loc in STATIONS.items():
+            # v19.1.6: Staggered fetch to avoid 429 detection
+            city_keys = list(STATIONS.keys())
+            import random
+            random.shuffle(city_keys)
+            
+            for city_key in city_keys:
+                loc = STATIONS[city_key]
                 result = await fetch_open_meteo_ensemble(city_key, loc["lat"], loc["lon"])
                 if result:
-                    # Map the result to all series relevant to this city
                     for s_ticker in loc.get("series", []):
                         new_state[s_ticker] = result
+                
+                # Jittered delay between cities (10-15s)
+                await asyncio.sleep(random.uniform(10, 15))
             
             if new_state:
                 _WEATHER_SHADOW_STATE.update(new_state)
-                # RC: Log for observability (v19.1.5: Bumped to INFO)
                 logger.info(f"Weather state synced: {list(new_state.keys())}")
         except Exception as e:
             logger.error(f"Weather pipeline sync failure: {e}")

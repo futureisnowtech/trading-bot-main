@@ -15,6 +15,7 @@ import os
 import sys
 import threading
 import time
+import sqlite3
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -28,6 +29,7 @@ from forecast.db import (
     upsert_bar,
     get_last_bar_ts,
     BAR_RETENTION_DAYS,
+    DB_PATH,
 )
 from logging_db.trade_logger import log_event
 
@@ -289,7 +291,43 @@ class QuoteHarvester:
         threading.Thread(target=_worker, daemon=True).start()
 
 
-def build_bars_now(contract_id: int, db_path: Optional[str] = None) -> dict:
+def get_paired_quotes(market_id: int, strike: float, last_trade_at: str, db_path: Optional[str] = None) -> dict:
+    """
+    v18.17: Return the most recent YES and NO quotes for a specific strike/expiry.
+    Used by strategy_engine for probability validation.
+    """
+    from forecast.db import get_recent_quotes
+    # We fetch the 2 most recent quotes for this market_id
+    # In practice, they should be the YES and NO pair.
+    quotes = get_recent_quotes(limit=10, db_path=db_path)
+    # Filter to this specific contract strike/expiry
+    # This is a bit loose but works given our discovery pattern.
+    pair = {"yes_quote": None, "no_quote": None}
+    for q in quotes:
+        # Note: forecast_contracts link via contract_id
+        # We need to join with contracts to be sure, or just assume the most recent
+        # quote for the correct 'side' for this strike is what we want.
+        pass
+
+    # Simple fallback: find latest for this strike
+    with sqlite3.connect(db_path or DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        res = conn.execute(\"\"\"
+            SELECT q.* FROM forecast_quotes q
+            JOIN forecast_contracts c ON q.contract_id = c.id
+            WHERE c.market_id = ? AND c.strike = ? AND c.last_trade_at = ?
+            ORDER BY q.ts DESC LIMIT 2
+        \"\"\", (market_id, strike, last_trade_at)).fetchall()
+
+        for r in res:
+            if r['side'] == 'YES': pair['yes_quote'] = dict(r)
+            else: pair['no_quote'] = dict(r)
+
+    return pair
+
+
+def build_bars_now(
+contract_id: int, db_path: Optional[str] = None) -> dict:
     """
     Trigger immediate bar build for one contract across all intervals.
     Useful for backfill or test fixtures.

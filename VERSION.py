@@ -1,2 +1,2 @@
 # VERSION.py — Sovereign Identity Anchor
-VERSION = "v19.1.4"
+VERSION = "v19.1.5"

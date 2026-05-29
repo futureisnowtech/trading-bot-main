@@ -518,8 +518,9 @@ def _send_daily_token_burn_report():
 
 
 def _cache_forecast_state():
-    """v19.1: Caches rich broker-first forecast state for the HUD dashboard."""
+    """v19.1.5: Caches rich broker-first forecast state for the HUD dashboard."""
     try:
+        logger.info("[ForecastRunner] Starting forecast state cache cycle (v19.1.5)...")
         from runtime.runtime_state import upsert_lane_state
         from logging_db.trade_logger import _conn
         import json

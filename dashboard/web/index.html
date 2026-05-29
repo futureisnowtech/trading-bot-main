@@ -193,12 +193,23 @@
                 spotList.innerHTML = data.spot.positions.map(p => {
                     const trendIcon = p.trend === 'UP' ? '↑' : (p.trend === 'DOWN' ? '↓' : '↔');
                     const trendColor = p.trend === 'UP' ? 'text-green-400' : (p.trend === 'DOWN' ? 'text-red-400' : 'text-slate-500');
+                    
+                    // Format Entry Time
+                    let entryDisplay = 'N/A';
+                    if (p.entered_at) {
+                        try {
+                            const d = new Date(p.entered_at);
+                            entryDisplay = d.toLocaleString([], {month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'});
+                        } catch(e) { entryDisplay = p.entered_at.split('T')[0]; }
+                    }
+
                     return `
                         <div class="glass-panel p-5 space-y-4 border-l-4 border-l-blue-500 bg-slate-900/40">
                             <div class="flex justify-between items-start">
                                 <div>
                                     <p class="text-2xl font-black text-white leading-none">${p.symbol}</p>
                                     <p class="text-[10px] text-blue-400 font-bold uppercase mt-1 tracking-widest">${p.strategy}</p>
+                                    <p class="text-[9px] text-slate-500 font-medium mt-1">Entered: ${entryDisplay}</p>
                                 </div>
                                 <div class="text-right">
                                     <p class="text-[10px] text-slate-500 font-bold uppercase">Net P/L</p>
@@ -240,12 +251,25 @@
             // Forecast Positions
             const forecastList = document.getElementById('forecast-list');
             if (data.forecast.positions.length > 0) {
-                forecastList.innerHTML = data.forecast.positions.map(p => `
+                forecastList.innerHTML = data.forecast.positions.map(p => {
+                    // Format Entry Time
+                    let entryDisplay = 'N/A';
+                    if (p.entered_at && p.entered_at !== 'Unknown') {
+                        try {
+                            const d = new Date(p.entered_at);
+                            entryDisplay = d.toLocaleString([], {month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'});
+                        } catch(e) { entryDisplay = p.entered_at; }
+                    }
+                    
+                    return `
                     <div class="glass-panel p-5 border-l-4 border-l-purple-500 bg-purple-900/5">
                         <div class="flex justify-between items-start mb-4">
                             <div class="flex-1 pr-4">
                                 <p class="text-sm font-bold text-white leading-snug">${p.title}</p>
-                                <p class="text-[10px] text-purple-400 font-bold uppercase mt-1 tracking-widest">${p.symbol}</p>
+                                <div class="flex items-center space-x-3 mt-1">
+                                    <p class="text-[10px] text-purple-400 font-bold uppercase tracking-widest">${p.symbol}</p>
+                                    <p class="text-[9px] text-slate-500 font-medium">Entered: ${entryDisplay}</p>
+                                </div>
                             </div>
                             <div class="text-right">
                                 <p class="text-[10px] text-slate-500 font-bold uppercase leading-none">Position P/L</p>
@@ -261,7 +285,7 @@
                             <div class="text-right"><span class="text-[10px] px-2 py-1 bg-slate-800 rounded font-black text-slate-300 uppercase">${p.sentiment}</span></div>
                         </div>
                     </div>
-                `).join('');
+                `;}).join('');
             } else {
                 forecastList.innerHTML = `<div class="py-10 text-center glass-panel border-dashed opacity-50"><p class="text-sm font-bold text-slate-500 uppercase tracking-widest">Monitoring Macro Events</p></div>`;
             }

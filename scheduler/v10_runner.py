@@ -3916,14 +3916,16 @@ def run_forever():
     _last_cache_ts = 0
 
     def _cache_spot_state():
-        """v19.1.3: Caches rich broker-first spot state for the HUD dashboard."""
+        """v19.1.5: Caches rich broker-first spot state for the HUD dashboard."""
         try:
             logger.info("[v10] Starting spot state cache cycle...")
             from execution.coinbase_spot_broker import get_spot_broker
             from runtime.spot_classification import get_classifications, is_external_manual
+            from spot_engine import _load_spot_positions_from_db
             
             broker = get_spot_broker()
-            holdings = broker.sync_live_holdings() or []
+            # v19.1.5: Use reconciliation-aware loader for rich metadata (ts_entry)
+            holdings = _load_spot_positions_from_db(paper=False)
             classifications = get_classifications()
             
             # v19.1.3: Total Equity = Live USD Cash + All Crypto Assets
@@ -3938,7 +3940,8 @@ def run_forever():
                 is_manual = is_external_manual(sym, classifications)
                 
                 qty = float(p.get("qty") or 0.0)
-                entry = float(p.get("avg_entry") or 0.0)
+                # For spot, entry is in the 'entry' field of db row
+                entry = float(p.get("entry") or 0.0)
                 
                 # v19.1.3: Use mark price if available, fallback to entry, fallback to 0.0
                 mark = broker.get_mark_price(sym)
@@ -3972,8 +3975,9 @@ def run_forever():
                     "risk_usd": round(pnl * 0.5, 2) if pnl < 0 else 0.0,
                     "trend": trend,
                     "sentiment": sentiment,
-                    "strategy": f"spot_{sym.lower()}",
+                    "strategy": p.get("strategy") or f"spot_{sym.lower()}",
                     "managed": not is_manual,
+                    "entered_at": p.get("ts_entry"),
                     "updated_at": datetime.now(timezone.utc).isoformat()
                 })
                 

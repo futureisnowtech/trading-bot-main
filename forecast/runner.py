@@ -551,6 +551,7 @@ def _cache_forecast_state():
             # Fetch Cost Basis
             # v19.1.3: Use broker-reported avg_entry as primary truth if trade table is empty
             entry_px = float(p.get('avg_entry') or 0.0)
+            entered_at = "Unknown"
             event_title = ticker
             resolution_at = "Unknown"
             
@@ -562,6 +563,7 @@ def _cache_forecast_state():
                 db_row = cursor.fetchone()
                 if db_row:
                     entry_px = float(db_row[0])
+                    entered_at = str(db_row[1])
                 
                 cursor.execute(
                     "SELECT m.market_name, c.resolution_at FROM forecast_contracts c JOIN forecast_markets m ON c.market_id = m.id WHERE c.local_symbol = ? LIMIT 1",
@@ -602,6 +604,7 @@ def _cache_forecast_state():
                 "pnl": round(pnl, 2),
                 "potential": round(potential, 2),
                 "countdown": countdown,
+                "entered_at": entered_at,
                 "sentiment": "Healthy" if pnl > -0.01 else "Under Pressure"
             })
             total_pnl += pnl

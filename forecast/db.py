@@ -391,6 +391,16 @@ def get_recent_quotes(
         return [dict(r) for r in reversed(rows)]
 
 
+def get_last_bar_ts(contract_id: int, interval: str, db_path: str | None = None) -> str | None:
+    """Return the ts_open of the most recent bar for a contract/interval."""
+    with _conn(db_path) as c:
+        row = c.execute(
+            "SELECT ts_open FROM forecast_bars WHERE contract_id=? AND interval=? ORDER BY ts_open DESC LIMIT 1",
+            (contract_id, interval),
+        ).fetchone()
+        return row[0] if row else None
+
+
 def get_bars(
     contract_id: int,
     interval: str,

@@ -941,10 +941,20 @@ def evaluate_contract(
     strategy_candidates.sort(key=lambda x: x[2], reverse=True)
     best_family, best_side, best_confidence, best_factors, best_is_taker = strategy_candidates[0]
 
-    # Determine EV for chosen side
-    ev_chosen = ev_yes if best_side == "YES" else ev_no
-    p_cost = ask_yes if best_side == "YES" else ask_no
-    q_side = q_hat if best_side == "YES" else (1.0 - q_hat)
+    # v19.1.6: Sovereign Weather Override
+    # Weather alpha is probabilistic arbitrage, NOT technical price action.
+    # If weather passes, we override technical economics vetoes.
+    if best_family == "weather_ensemble":
+        approved = True
+        veto_reason = ""
+        # Recalculate EV based on ensemble probability, not q_hat
+        p_cost = ask_yes if best_side == "YES" else ask_no
+        q_ensemble = best_confidence if best_side == "YES" else (1.0 - best_confidence)
+        ev_chosen = q_ensemble - p_cost
+    else:
+        # Determine EV for chosen side (Technical)
+        ev_chosen = ev_yes if best_side == "YES" else ev_no
+        p_cost = ask_yes if best_side == "YES" else ask_no
 
     # Uncertainty penalty from sigma and entropy
     uncertainty_penalty = min(0.40, sigma_t * 0.30 + max(0.0, h_t - 0.60) * 0.20)

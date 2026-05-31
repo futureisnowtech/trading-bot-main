@@ -751,12 +751,18 @@ def evaluate_contract(
     )
 
     # ADVERSARY FIX #5: Data Freshness SLA (Veto if > 120s old)
+    # v19.1.6: 300s buffer for weather markets to handle harvester congestion
     quote_ts_str = yes_quote.get("ts")
     if quote_ts_str:
         try:
             quote_ts = datetime.fromisoformat(quote_ts_str.replace("Z", "+00:00"))
             age_seconds = (datetime.now(timezone.utc) - quote_ts).total_seconds()
-            if age_seconds > 120:
+            
+            # Weather alpha is slow moving; allow up to 300s. Others stay at 120s.
+            is_weather = "KXHIGH" in str(contract.get("local_symbol")) or "KXLOW" in str(contract.get("local_symbol"))
+            limit = 300 if is_weather else 120
+            
+            if age_seconds > limit:
                 logger.warning(
                     f"evaluate_contract veto: stale_market_data ({age_seconds:.1f}s old) "
                     f"for {contract.get('local_symbol')}"

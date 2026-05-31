@@ -246,20 +246,37 @@ class QuoteHarvester:
             contract_id = contract.get("id")
             local_symbol = contract.get("local_symbol", "")
             right = contract.get("right", "C")
-            side = "YES" if right == "C" else "NO"
+            
+            # v19.1.6: Directional Price Inversion
+            # Kalshi get_quote returns YES prices. 
+            # For NO contracts, we must invert.
+            if right == "P": # NO contract
+                side = "NO"
+                raw_bid = float(q.get("bid") or 0.0)
+                raw_ask = float(q.get("ask") or 1.0)
+                bid = 1.0 - raw_ask if raw_ask > 0 else 0.0
+                ask = 1.0 - raw_bid if raw_bid > 0 else 1.0
+                mid = (bid + ask) / 2.0
+                spread = ask - bid
+            else:
+                side = "YES"
+                bid = q.get("bid")
+                ask = q.get("ask")
+                mid = q.get("mid")
+                spread = q.get("spread")
 
-            if q and q.get("mid") is not None:
+            if mid is not None:
                 try:
                     ts = datetime.now(timezone.utc).isoformat()
                     insert_quote(
                         contract_id=contract_id,
                         ts=ts,
-                        bid=q.get("bid"),
-                        ask=q.get("ask"),
+                        bid=bid,
+                        ask=ask,
                         bid_size=q.get("bid_size"),
                         ask_size=q.get("ask_size"),
-                        mid=q.get("mid"),
-                        spread=q.get("spread"),
+                        mid=mid,
+                        spread=spread,
                         implied_prob=q.get("implied_prob"),
                         side=side,
                         db_path=self._db_path,

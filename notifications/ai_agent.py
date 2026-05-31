@@ -208,7 +208,7 @@ def ask_ai(query: str) -> str:
 
     try:
         client = genai.Client(api_key=api_key)
-        model_id = os.environ.get("GEMINI_MODEL") or "gemini-2.5-flash"
+        model_id = os.environ.get("GEMINI_MODEL") or "gemini-1.5-flash"
         
         context = get_repo_context()
         system_instruction = (
@@ -293,7 +293,7 @@ def generate_sovereign_briefing(payload: dict) -> str:
 
     try:
         client = genai.Client(api_key=api_key)
-        model_id = os.environ.get("GEMINI_MODEL") or "gemini-2.0-flash"
+        model_id = os.environ.get("GEMINI_MODEL") or "gemini-1.5-flash"
         
         system_instruction = (
             "You are the Lead SRE and Sr. Quant for a Sovereign trading system.\n"

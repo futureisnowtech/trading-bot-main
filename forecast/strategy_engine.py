@@ -594,17 +594,35 @@ def _parse_weather_threshold(ticker: str) -> Optional[float]:
     """
     Extract temperature threshold from Kalshi ticker.
     Examples:
-      KXHIGHNY-26MAY26-T85 -> 85.0
+      KXHIGHNY-26MAY26-T85 -> 85.0 (Greater than)
       KXHIGHCHI-26MAY26-T90.5 -> 90.5
-      KXHIGHLAX-26MAY26-T72 -> 72.0
+      KXHIGHLAX-26MAY26-L70 -> 70.0 (Less than - rare but supported)
+      KXHIGHNY-26MAY29-B82.5 -> 82.5 (Between range - use lower bound)
     """
-    # Look for -T followed by numbers (optional negative sign and decimal)
+    # 1. Greater Than (-T)
     match = re.search(r'-T(-?\d+\.?\d*)', ticker)
     if match:
         try:
             return float(match.group(1))
         except ValueError:
-            return None
+            pass
+
+    # 2. Between (-B)
+    match = re.search(r'-B(-?\d+\.?\d*)', ticker)
+    if match:
+        try:
+            return float(match.group(1))
+        except ValueError:
+            pass
+
+    # 3. Less Than (-L)
+    match = re.search(r'-L(-?\d+\.?\d*)', ticker)
+    if match:
+        try:
+            return float(match.group(1))
+        except ValueError:
+            pass
+            
     return None
 
 def _strategy_weather(ticker: str, ask_yes: float, ask_no: float, hours_to_res: float) -> tuple[bool, str, float, list[str], bool]:

@@ -336,6 +336,18 @@ class KalshiBroker:
                         except (ValueError, TypeError):
                             continue
 
+                    # ── v19.1.6: Dynamic Strike Extraction ──────────────────────
+                    # Extract strike from ticker (e.g., -T82, -B80.5)
+                    strike = 0.0
+                    if is_weather:
+                        import re
+                        match = re.search(r'-[TBL](-?\d+\.?\d*)$', m.get("ticker", ""))
+                        if match:
+                            try:
+                                strike = float(match.group(1))
+                            except ValueError:
+                                pass
+
                     for side in ["YES", "NO"]:
                         right = "C" if side == "YES" else "P"
                         results.append({
@@ -343,7 +355,7 @@ class KalshiBroker:
                             "local_symbol": m.get("ticker"),
                             "conid": None,
                             "right": right,
-                            "strike": 0.0,
+                            "strike": strike,
                             "last_trade_at": m.get("close_time", ""),
                             "exchange": "KALSHI",
                             "currency": "USD",

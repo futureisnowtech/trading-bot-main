@@ -58,7 +58,10 @@ async def fetch_open_meteo_ensemble(city_key: str, lat: float, lon: float) -> Di
 
     # v19.1.6: Immediate failure on 429 to avoid retry loops
     try:
-        url = "https://ensemble-api.open-meteo.com/v1/ensemble"
+        import os
+        api_key = os.getenv("OPEN_METEO_API_KEY")
+        url = "https://customer-api.open-meteo.com/v1/ensemble" if api_key else "https://ensemble-api.open-meteo.com/v1/ensemble"
+        
         params = {
             "latitude": lat,
             "longitude": lon,
@@ -66,6 +69,8 @@ async def fetch_open_meteo_ensemble(city_key: str, lat: float, lon: float) -> Di
             "models": "gfs_seamless",
             "timezone": "auto"
         }
+        if api_key:
+            params["apikey"] = api_key
         
         loop = asyncio.get_event_loop()
         resp = await loop.run_in_executor(None, lambda: requests.get(url, params=params, timeout=10))
@@ -192,14 +197,17 @@ async def update_weather_shadow_state():
         except Exception as e:
             logger.error(f"Weather pipeline sync failure: {e}")
         
-        await asyncio.sleep(900)
+        # v19.1.6: Synchronize with meteorological updates (3 hours)
+        # GFS updates every 6h; polling every 15m was wasteful and caused 429s.
+        await asyncio.sleep(10800)
 
 def get_weather_data(ticker_prefix: str) -> Dict[str, Any]:
     """Retrieve cached weather data for a ticker prefix (e.g. 'KXHIGHNY')."""
     # v19.1.6: Direct lookup now that shadow state is keyed by series ticker
     data = _WEATHER_SHADOW_STATE.get(ticker_prefix)
     if data:
-        if time.time() - data["timestamp"] > 3600:
+        # v19.1.6: Increase cache expiry to 6h to match polling cadence
+        if time.time() - data["timestamp"] > 21600:
             return {}
         return data
     
@@ -208,7 +216,8 @@ def get_weather_data(ticker_prefix: str) -> Dict[str, Any]:
         for s in series_list:
             if ticker_prefix.startswith(s):
                 data = _WEATHER_SHADOW_STATE.get(s)
-                if data and time.time() - data["timestamp"] <= 3600:
+                # v19.1.6: Increase cache expiry to 6h
+                if data and time.time() - data["timestamp"] <= 21600:
                     return data
     return {}
 

@@ -1075,17 +1075,21 @@ def evaluate_all_contracts(
             if not yes_quote or not no_quote:
                 continue
 
-            # Fetch bars for YES contract (bars are stored by contract_id)
+            # Fetch bars (Optional for weather, required for others)
+            bars_5m, bars_30m, bars_1h, bars_4h = [], [], [], []
             yes_id = yc.get("id") or yc.get("contract_id")
-            if not yes_id:
-                continue
-
-            try:
-                bars_5m = get_bars_fn(yes_id, "5m")
-                bars_30m = get_bars_fn(yes_id, "30m")
-                bars_1h = get_bars_fn(yes_id, "1h")
-                bars_4h = get_bars_fn(yes_id, "4h")
-            except Exception:
+            if yes_id:
+                try:
+                    bars_5m = get_bars_fn(yes_id, "5m")
+                    bars_30m = get_bars_fn(yes_id, "30m")
+                    bars_1h = get_bars_fn(yes_id, "1h")
+                    bars_4h = get_bars_fn(yes_id, "4h")
+                except Exception:
+                    pass
+            
+            # v19.1.6: Only weather strategies are unblocked if bars are missing.
+            is_weather = "KXHIGH" in ticker or "KXLOW" in ticker or "KXRAIN" in ticker
+            if not is_weather and not bars_5m:
                 continue
 
             # Check same-event exposure (v18.35: Count-based capping)

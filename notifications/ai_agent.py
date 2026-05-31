@@ -277,3 +277,52 @@ def ask_ai(query: str) -> str:
     except Exception as e:
         logger.error(f"Gemini Agent exception: {e}")
         return f"Sovereign Audit: Handshake Error. Resolve via logs. Error: {str(e)}"
+
+def generate_sovereign_briefing(payload: dict) -> str:
+    """
+    v19.1.9: Catalyst - Analyst-in-the-Loop Expert Synthesis.
+    Bypasses conversational context for token-efficient expert reporting.
+    """
+    api_key = os.environ.get("GOOGLE_API_KEY")
+    if not api_key:
+        return "Error: GOOGLE_API_KEY is not set."
+    
+    if not HAS_GENAI_SDK:
+        # Fallback if SDK missing
+        return "Sovereign Briefing: [Deterministic Only] Payload generated but AI synthesis unavailable."
+
+    try:
+        client = genai.Client(api_key=api_key)
+        model_id = os.environ.get("GEMINI_MODEL") or "gemini-2.0-flash"
+        
+        system_instruction = (
+            "You are the Lead SRE and Sr. Quant for a Sovereign trading system.\n"
+            "Analyze the provided system state JSON payload.\n"
+            "MANDATE: Give me a 3-bullet systematic health report and a 3-bullet trading/alpha analysis.\n"
+            "TONE: Professional, ruthless, evidence-based. No fluff.\n"
+            "FORMAT: Output in Telegram-friendly Markdown (use bolding for emphasis)."
+        )
+        
+        prompt = f"Analyze this system state payload and provide your briefing:\n\n{json.dumps(payload, indent=2)}"
+        
+        response = client.models.generate_content(
+            model=model_id,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                temperature=0.2, # Low temperature for analytical consistency
+            )
+        )
+        
+        # Telemetry
+        try:
+            usage = response.usage_metadata
+            if usage:
+                log_api_cost(usage.prompt_token_count, usage.candidates_token_count, "sovereign_briefing")
+        except:
+            pass
+
+        return response.text if response and response.text else "Briefing analysis returned empty."
+    except Exception as e:
+        logger.error(f"Sovereign briefing synthesis failure: {e}")
+        return f"Briefing Error: {str(e)}"

@@ -3867,6 +3867,13 @@ def run_forever():
     except ImportError:
         pass
 
+    # v19.1.9: Catalyst - Every 6 hours, push an Analyst Briefing (SRE + Trading)
+    try:
+        from notifications.reports import send_sovereign_briefing
+        schedule.every(6).hours.do(send_sovereign_briefing)
+    except ImportError:
+        pass
+
     logger.info("[v10] All schedules wired. Running scan immediately...")
 
     # Shadow state background loop — updates Kalman/OU/ADF/Kyle every 60s

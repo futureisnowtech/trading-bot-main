@@ -103,3 +103,116 @@ def send_war_room_report():
         send_message(report)
     except Exception as e:
         logger.error(f"Failed to send War Room report: {e}")
+
+def generate_sovereign_payload() -> dict:
+    """
+    v19.1.9: Deterministic state aggregation for AI analysis.
+    Zero-cost SQL and memory queries only.
+    """
+    db_path = _get_db_path()
+    payload = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "crypto_lane": {},
+        "weather_lane": {},
+        "sre_health": {}
+    }
+
+    # 1. Crypto Lane State (Broker-First Truth)
+    try:
+        from execution.coinbase_spot_broker import get_coinbase_broker
+        cb = get_coinbase_broker()
+        if cb.connect():
+            holdings = cb.get_holdings()
+            balance = cb.get_balance()
+            equity = cb.get_total_equity()
+            deployed = equity - balance
+            payload["crypto_lane"] = {
+                "status": "OPERATIONAL",
+                "equity_usd": round(equity, 2),
+                "deployed_usd": round(deployed, 2),
+                "exposure_pct": round((deployed / equity * 100), 1) if equity > 0 else 0,
+                "holdings_count": len(holdings)
+            }
+    except Exception as e:
+        payload["crypto_lane"]["error"] = str(e)
+
+    # 2. Weather Lane State
+    try:
+        conn = sqlite3.connect(db_path)
+        active_weather = conn.execute("SELECT COUNT(*) FROM forecast_contracts WHERE active=1").fetchone()[0]
+        recent_fills = conn.execute("SELECT COUNT(*) FROM forecast_positions").fetchone()[0]
+        
+        # Check shadow state for edge visibility
+        from data.kalshi_weather_monitor import _WEATHER_SHADOW_STATE
+        edges_visible = len(_WEATHER_SHADOW_STATE)
+        
+        payload["weather_lane"] = {
+            "status": "OPERATIONAL",
+            "active_markets": active_weather,
+            "total_positions": recent_fills,
+            "weather_edge_visibility": edges_visible
+        }
+        conn.close()
+    except Exception as e:
+        payload["weather_lane"]["error"] = str(e)
+
+    # 3. SRE Health
+    try:
+        from runtime.runtime_state import get_system_state
+        sys_state = get_system_state(db_path)
+        
+        # Count critical events in last 6h
+        conn = sqlite3.connect(db_path)
+        six_h_ago = (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat()
+        critical_count = conn.execute(
+            "SELECT COUNT(*) FROM system_events WHERE level IN ('CRITICAL', 'ERROR') AND ts >= ?", 
+            (six_h_ago,)
+        ).fetchone()[0]
+        conn.close()
+
+        payload["sre_health"] = {
+            "integrity_score": sys_state.get("integrity_score", 100),
+            "global_status": sys_state.get("global_status", "OK"),
+            "critical_events_6h": critical_count
+        }
+    except Exception:
+        payload["sre_health"]["status"] = "UNKNOWN"
+
+    return payload
+
+def send_sovereign_briefing():
+    """
+    Trigger the Analyst-in-the-Loop pipeline:
+    Gather -> Synthesize -> Deliver.
+    """
+    logger.info("[Reports] Executing Sovereign Briefing cycle...")
+    
+    # 1. Deterministic Gathering
+    payload = generate_sovereign_payload()
+    
+    # 2. Expert Synthesis (LLM Analyst)
+    try:
+        from notifications.ai_agent import generate_sovereign_briefing
+        analysis = generate_sovereign_briefing(payload)
+    except Exception as e:
+        analysis = f"⚠️ Analysis Engine Error: {e}"
+
+    # 3. Format Final Message
+    # Combine expert bullets with raw numeric footer
+    stats_footer = (
+        f"\n---\n"
+        f"📍 <b>Live Metrics</b>\n"
+        f"Crypto Exp: {payload.get('crypto_lane', {}).get('exposure_pct', 0)}%\n"
+        f"Weather Targets: {payload.get('weather_lane', {}).get('active_markets', 0)}\n"
+        f"SRE Integrity: {payload.get('sre_health', {}).get('integrity_score', 0)}%"
+    )
+    
+    final_message = f"🛡️ <b>SOVEREIGN ANALYST BRIEFING</b>\n\n{analysis}\n{stats_footer}"
+    
+    # 4. Deliver
+    try:
+        from notifications.telegram_bot import send_message
+        send_message(final_message)
+        logger.info("[Reports] Sovereign Briefing delivered ✅")
+    except Exception as e:
+        logger.error(f"Failed to deliver Sovereign Briefing: {e}")

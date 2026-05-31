@@ -465,6 +465,17 @@ async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await _reply_text(update, f"Error generating report: {e}")
 
+@restricted_access
+async def briefing_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """v19.1.9: Catalyst - Pull expert Analyst Briefing on demand."""
+    await _reply_text(update, "📡 <b>Gathering Sovereign Intelligence...</b>", parse_mode=ParseMode.HTML)
+    try:
+        from notifications.reports import send_sovereign_briefing
+        import threading
+        threading.Thread(target=send_sovereign_briefing, daemon=True).start()
+    except Exception as e:
+        await _reply_text(update, f"Briefing trigger failed: {e}")
+
 
 @restricted_access
 async def uptime_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -810,6 +821,7 @@ async def run_bot():
         app.add_handler(CommandHandler("audit", audit_command))
         app.add_handler(CommandHandler("cancel_all", cancel_all_command))
         app.add_handler(CommandHandler("report", report_command))
+        app.add_handler(CommandHandler("briefing", briefing_command))
         app.add_handler(CommandHandler("uptime", uptime_command))
         app.add_handler(CommandHandler("everything", everything_command))
         app.add_handler(CommandHandler("ask", ask_command))

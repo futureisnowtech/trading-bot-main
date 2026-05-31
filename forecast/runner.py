@@ -699,6 +699,10 @@ def start_forecast_lane(bankroll: float = 100.0) -> None:
     schedule.every(30).seconds.do(_bg_cache)
     
     schedule.every().day.at("08:00").do(_send_daily_token_burn_report)
+    
+    # v19.1.9: Catalyst - Every 6 hours, push an Analyst Briefing (SRE + Trading)
+    from notifications.reports import send_sovereign_briefing
+    schedule.every(6).hours.do(send_sovereign_briefing)
 
     # Manual trigger on startup
     logger.info("[ForecastRunner] Triggering initial strategy cycle...")

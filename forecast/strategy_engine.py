@@ -618,6 +618,9 @@ def _strategy_weather(ticker: str, ask_yes: float, ask_no: float, hours_to_res: 
 
     w_data = get_weather_data(ticker)
     if not w_data:
+        # Trace log for audit
+        if "HIGH" in ticker or "LOW" in ticker:
+            logger.info(f"TRACE: No weather data for {ticker}")
         return False, "", 0.0, ["no_weather_ensemble_data"], False
 
     threshold = _parse_weather_threshold(ticker)
@@ -656,6 +659,9 @@ def _strategy_weather(ticker: str, ask_yes: float, ask_no: float, hours_to_res: 
 
     edge_yes = ensemble_prob - ask_yes
     edge_no = (1.0 - ensemble_prob) - ask_no
+    
+    # Forensic Audit Log
+    logger.info(f"TRACE: {ticker} | p={ensemble_prob:.1%} Ask_Y={ask_yes:.2f} Edge_Y={edge_yes:.1%} Edge_N={edge_no:.1%}")
 
     # Guardrail 1: The Convective Cloud Cover Override (The "Sun Spike")
     # Only applies to HIGH temp YES contracts.

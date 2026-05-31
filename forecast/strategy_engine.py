@@ -1048,6 +1048,7 @@ def evaluate_all_contracts(
         no_contracts = [c for c in contracts if c.get("right") == "P"]
 
         for yc in yes_contracts:
+            ticker = yc.get("local_symbol", "")
             # Find matching NO contract (same strike + expiry)
             nc = next(
                 (

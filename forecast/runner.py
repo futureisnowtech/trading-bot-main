@@ -345,6 +345,18 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                     if entry_result.get("order_id") != "ERR":
                         entry_msg = f"[ForecastRunner] Entry: {contract.get('local_symbol')} {result.side.upper()} @ {ask_price} (ev={result.ev:.4f})"
                         log_event("INFO", "ForecastRunner", entry_msg)
+                        
+                        try:
+                            from forecast.db import insert_forecast_position
+                            insert_forecast_position(
+                                ticker=contract.get("local_symbol", ""),
+                                qty=result.position_contracts,
+                                entry_price=ask_price,
+                                side=result.side.upper()
+                            )
+                        except Exception as _db_err:
+                            logger.error(f"[ForecastRunner] DB insertion error: {_db_err}")
+
                         try:
                             from notifications.notification_engine import notify_trade_open
                             notify_trade_open(

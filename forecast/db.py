@@ -125,6 +125,20 @@ CREATE TABLE IF NOT EXISTS forecast_resolutions (
 );
 """
 
+_DDL_FORECAST_POSITIONS = """
+CREATE TABLE IF NOT EXISTS forecast_positions (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticker       TEXT    NOT NULL UNIQUE,
+    qty          REAL    NOT NULL,
+    entry_price  REAL    NOT NULL,
+    side         TEXT    NOT NULL CHECK(side IN ('YES', 'NO')),
+    active       INTEGER NOT NULL DEFAULT 1,
+    opened_at    TEXT    NOT NULL,
+    closed_at    TEXT,
+    exit_type    TEXT
+);
+"""
+
 # Pruning: keep quotes no older than this many days to bound table growth
 QUOTE_RETENTION_DAYS: int = 14
 # Keep bars longer — they're aggregated and small
@@ -132,7 +146,7 @@ BAR_RETENTION_DAYS: int = 90
 
 
 def init_forecast_db(db_path: str | None = None) -> None:
-    """Create all 5 forecast tables (idempotent). Call once at startup."""
+    """Create all 6 forecast tables (idempotent). Call once at startup."""
     with _conn(db_path) as c:
         # Execute each DDL block; the INDEX statements are separate from CREATE TABLE
         for ddl_block in [
@@ -141,11 +155,61 @@ def init_forecast_db(db_path: str | None = None) -> None:
             _DDL_FORECAST_QUOTES,
             _DDL_FORECAST_BARS,
             _DDL_FORECAST_RESOLUTIONS,
+            _DDL_FORECAST_POSITIONS,
         ]:
             for stmt in ddl_block.strip().split(";"):
                 stmt = stmt.strip()
                 if stmt:
                     c.execute(stmt)
+        c.commit()
+
+
+# ---------------------------------------------------------------------------
+# Position helpers (v19.1.10 Sovereign Recon)
+# ---------------------------------------------------------------------------
+
+
+def insert_forecast_position(
+    ticker: str,
+    qty: float,
+    entry_price: float,
+    side: str,
+    db_path: str | None = None,
+) -> None:
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).isoformat()
+    with _conn(db_path) as c:
+        c.execute(
+            """INSERT OR REPLACE INTO forecast_positions
+               (ticker, qty, entry_price, side, active, opened_at)
+               VALUES (?, ?, ?, ?, 1, ?)""",
+            (ticker, qty, entry_price, side, now),
+        )
+        c.commit()
+
+
+def get_open_forecast_positions(db_path: str | None = None) -> list[dict]:
+    with _conn(db_path) as c:
+        rows = c.execute(
+            "SELECT * FROM forecast_positions WHERE active=1"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def mark_forecast_position_closed(
+    ticker: str, exit_type: str = "resolved", db_path: str | None = None
+) -> None:
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).isoformat()
+    with _conn(db_path) as c:
+        c.execute(
+            """UPDATE forecast_positions
+               SET active=0, closed_at=?, exit_type=?
+               WHERE ticker=? AND active=1""",
+            (now, exit_type, ticker),
+        )
         c.commit()
 
 

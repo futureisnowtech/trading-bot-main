@@ -168,9 +168,9 @@ async def fetch_open_meteo_ensemble(city_key: str, lat: float, lon: float) -> Di
                     "members_low": members_low,
                     "members_precip": members_precip,
                     "mean_high": float(np.mean(members_high)),
-                    "std_high": float(np.std(members_high)),
+                    "sigma_high": float(np.std(members_high)), # Sigma Lever
                     "mean_low": float(np.mean(members_low)),
-                    "std_low": float(np.std(members_low)),
+                    "sigma_low": float(np.std(members_low)), # Sigma Lever
                     "peak_tcdc": float(np.mean(cloud_members)) if cloud_members else 0.0,
                     "timestamp": time.time()
                 }

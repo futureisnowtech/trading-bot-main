@@ -591,6 +591,14 @@ def run_position_monitor() -> None:
                                          logger.info(f"[Sovereign Precinct] PRECISION LOCK: {local_symbol} at {bid_price:.2f} (0.2F from limit).")
                                          resolved = True
 
+                                # v19.1.11: Midnight Spike Guard
+                                # If late evening (8 PM+) and HRRR predicts a spoiler max/min
+                                if not resolved and local_hour >= 20 and bid_price >= 0.90:
+                                    if hrrr_high is not None:
+                                        # HIGH YES Spike: HRRR predicts spike above bracket or drop below
+                                        if is_high and (hrrr_high > limit_upper + 0.1 or hrrr_high < limit_lower - 0.2):
+                                            logger.warning(f"[Sovereign Precinct] SPIKE GUARD: {local_symbol} dumping {bid_price:.2f} due to HRRR spoiler {hrrr_high}F.")
+                                            resolved = True
                             # 3. TREND DIVERGENCE / SALVAGE (Capital Salvage)
                             # If HRRR (3km resolution) is predicting a result that makes winning impossible
                             if not resolved and hrrr_high is not None:

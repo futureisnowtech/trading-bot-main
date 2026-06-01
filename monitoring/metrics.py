@@ -65,6 +65,7 @@ STRATEGY_DRIFT_GAUGE = Gauge('algo_bot_strategy_drift', 'Difference between sign
 WEATHER_ENSEMBLE_PROB_GAUGE = Gauge('algo_bot_weather_ensemble_prob', 'Ensemble probability per ticker', ['ticker'])
 WEATHER_METAR_DIFF_GAUGE = Gauge('algo_bot_weather_metar_diff', 'METAR ground truth diff from threshold', ['ticker'])
 WEATHER_HRRR_DIFF_GAUGE = Gauge('algo_bot_weather_hrrr_diff', 'HRRR intraday diff from threshold', ['ticker'])
+WEATHER_SIGMA_GAUGE = Gauge('algo_bot_weather_sigma', 'Ensemble standard deviation (Sigma)', ['ticker'])
 
 def start_metrics_server(port=8000):
     """Start the Prometheus metrics HTTP server."""

@@ -6,9 +6,15 @@
 ## Canonical Truth
 
 - Repo root: `/Users/joshmacbookair2020/Projects/algo_trading_final`
-- Canonical version: `v19.1.10` (`2026-06-01`)
+- Canonical version: `v19.1.11` (`2026-06-01`)
 - Canonical active lane: **Dual-Lane**: Coinbase Spot Scalp + Kalshi Weather Expansion
 - **Status:** **LEDGERLESS SOVEREIGN**. Autonomous Self-Healing & Broker-First Truth.
+- **Critical Changes (v19.1.11):**
+  - **Institutional Alpha Levers**: Finalized the Sovereign Weather Engine with advanced quant-desk tactics:
+    - **The Sigma Lever**: Implemented dynamic position sizing based on ensemble standard deviation (Sigma). Stable models (low Sigma) trigger larger bets, while chaotic spreads trigger size reduction.
+    - **Fee-Alpha Floor**: Added an automated veto for contracts priced below $0.15 unless the mathematical edge exceeds 40%, preventing fee erosion.
+    - **Midnight Spike Guard**: Hardened the exit engine with an 8 PM local trigger that dumps 90c+ "locked" contracts if high-res HRRR models predict a late-night spoiler event.
+  - **Enhanced Sovereign Intelligence**: Exposed Sigma and Volatility multipliers in the HUD dashboard for full transparency into the bot's sizing decisions.
 - **Critical Changes (v19.1.10):**
   - **Sovereign Weather Alpha Blueprint**: Transformed the weather lane from a "Hammer" to a "Scalpel" by integrating a 3-phase execution engine:
     - **ECMWF Consensus (Phase 1)**: Integrated 51-member ECMWF ensembles alongside GFS (60/40 weighted blend) for high-conviction entries.

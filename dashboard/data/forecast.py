@@ -384,23 +384,30 @@ def get_sovereign_weather_insights(ticker: str) -> dict:
                 prob_gfs = sum(1 for m in members_gfs if m <= threshold) / len(members_gfs)
         
         prob_ec = None
-        if members_ec and threshold is not None:
+        if prob_ec and threshold is not None:
             if "HIGH" in ticker:
                 prob_ec = sum(1 for m in members_ec if m >= threshold) / len(members_ec)
             else:
                 prob_ec = sum(1 for m in members_ec if m <= threshold) / len(members_ec)
+
+        # v19.1.11: Sigma Lever Insights
+        sigma = w_data.get("sigma_high" if "HIGH" in ticker else "sigma_low", 0.0)
+        sigma_mult = max(0.3, min(1.3, 1.5 - (sigma / 4.0)))
 
         return {
             "ticker": ticker,
             "threshold": threshold,
             "prob_gfs": prob_gfs,
             "prob_ecmwf": prob_ec,
+            "sigma": sigma,
+            "sigma_mult": sigma_mult,
             "metar_temp": intraday.get("metar_temp"),
             "hrrr_high": intraday.get("hrrr_high"),
             "hrrr_trend": intraday.get("hrrr_trend"),
             "peak_tcdc": w_data.get("peak_tcdc"),
             "timestamp": w_data.get("timestamp")
         }
+
     except Exception:
         return {}
 

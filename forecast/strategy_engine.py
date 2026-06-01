@@ -704,8 +704,24 @@ def _strategy_weather(ticker: str, ask_yes: float, ask_no: float, hours_to_res: 
     edge_yes = ensemble_prob - ask_yes
     edge_no = (1.0 - ensemble_prob) - ask_no
     
+    # v19.1.11: The Sigma Lever (Volatility Sizing)
+    # High sigma (spread) in members = uncertainty.
+    sigma = w_data.get("sigma_high" if mode == "HIGH" else "sigma_low", 2.0)
+    # sigma_mult: 1.0 at 2.0F sigma, 1.25 at 1.0F sigma, 0.5 at 4.0F sigma
+    sigma_mult = max(0.3, min(1.3, 1.5 - (sigma / 4.0)))
+    
+    # v19.1.11: Fee-Alpha Floor
+    # Buying contracts below 15c is almost always a losing game due to fees
+    # unless the edge is massive (>40%).
+    fee_floor_veto = False
+    if ask_yes < 0.15 and edge_yes < 0.40: fee_floor_veto = True
+    if ask_no < 0.15 and edge_no < 0.40: fee_floor_veto = True
+    
     # Forensic Audit Log
-    logger.info(f"TRACE: {ticker} | p={ensemble_prob:.1%} Ask_Y={ask_yes:.2f} Edge_Y={edge_yes:.1%} Edge_N={edge_no:.1%}")
+    logger.info(f"TRACE: {ticker} | p={ensemble_prob:.1%} Edge_Y={edge_yes:.1%} Sigma={sigma:.1f}F s_mult={sigma_mult:.2f}")
+
+    if fee_floor_veto:
+        return False, "", 0.0, ["fee_alpha_floor_veto (<15c w/o 40% edge)"], False
 
     # Guardrail 1: The "Sun Spike" Veto
     peak_tcdc = w_data.get("peak_tcdc", 0.0)
@@ -725,19 +741,21 @@ def _strategy_weather(ticker: str, ask_yes: float, ask_no: float, hours_to_res: 
             f"ensemble_p={ensemble_prob:.1%}",
             f"edge={edge_yes:.1%}",
             f"conv_mult={convergence_multiplier:.1f}x",
+            f"sigma_mult={sigma_mult:.2f}x",
             f"TCDC={peak_tcdc:.1f}%"
         ]
-        # Multiply final ensemble_prob for ranking/sizing
-        return True, "YES", ensemble_prob * convergence_multiplier, factors, is_taker
+        # v19.1.11: Multiply final ensemble_prob for ranking/sizing
+        return True, "YES", ensemble_prob * convergence_multiplier * sigma_mult, factors, is_taker
 
     if edge_no > 0.08:
         is_taker = edge_no >= 0.22 and is_short_term
         factors = [
             f"ensemble_p={ensemble_prob:.1%}",
             f"edge={edge_no:.1%}",
-            f"conv_mult={convergence_multiplier:.1f}x"
+            f"conv_mult={convergence_multiplier:.1f}x",
+            f"sigma_mult={sigma_mult:.2f}x"
         ]
-        return True, "NO", (1.0 - ensemble_prob) * convergence_multiplier, factors, is_taker
+        return True, "NO", (1.0 - ensemble_prob) * convergence_multiplier * sigma_mult, factors, is_taker
 
     return False, "", 0.0, ["insufficient_edge"], False
 

@@ -305,9 +305,13 @@ def render_forecast_trading():
                         # Consensus
                         p_gfs = insights.get("prob_gfs")
                         p_ec = insights.get("prob_ecmwf")
+                        sigma = insights.get("sigma", 0.0)
+                        s_mult = insights.get("sigma_mult", 1.0)
+                        
                         c1.markdown("**Consensus**")
                         c1.markdown(f"GFS: `{p_gfs:.1%}`" if p_gfs is not None else "GFS: `—`")
                         c1.markdown(f"ECMWF: `{p_ec:.1%}`" if p_ec is not None else "ECMWF: `—`")
+                        c1.markdown(f"Sigma: `{sigma:.1f}F` ({s_mult:.2f}x)")
                         
                         # Ground Truth (METAR)
                         temp = insights.get("metar_temp")

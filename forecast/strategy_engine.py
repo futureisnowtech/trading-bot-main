@@ -707,6 +707,14 @@ def _strategy_weather(ticker: str, ask_yes: float, ask_no: float, hours_to_res: 
     # v19.1.11: The Sigma Lever (Volatility Sizing)
     # High sigma (spread) in members = uncertainty.
     sigma = w_data.get("sigma_high" if mode == "HIGH" else "sigma_low", 2.0)
+
+    # v19.1.11: Sovereign Instrumentation
+    try:
+        from monitoring import metrics
+        metrics.WEATHER_SIGMA_GAUGE.labels(ticker=ticker).set(sigma)
+    except Exception:
+        pass
+
     # sigma_mult: 1.0 at 2.0F sigma, 1.25 at 1.0F sigma, 0.5 at 4.0F sigma
     sigma_mult = max(0.3, min(1.3, 1.5 - (sigma / 4.0)))
     
@@ -719,7 +727,6 @@ def _strategy_weather(ticker: str, ask_yes: float, ask_no: float, hours_to_res: 
     
     # Forensic Audit Log
     logger.info(f"TRACE: {ticker} | p={ensemble_prob:.1%} Edge_Y={edge_yes:.1%} Sigma={sigma:.1f}F s_mult={sigma_mult:.2f}")
-
     if fee_floor_veto:
         return False, "", 0.0, ["fee_alpha_floor_veto (<15c w/o 40% edge)"], False
 

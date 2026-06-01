@@ -433,7 +433,7 @@ def run_position_monitor() -> None:
             if not qty: continue
             
             # If not in DB, adopt it
-            if not any(dp["ticker"] == ticker for db_pos in db_positions):
+            if not any(db_pos["ticker"] == ticker for db_pos in db_positions):
                 logger.info(f"[Sovereign Recon] Auto-adopting manual trade for {ticker} (qty={qty})")
                 insert_forecast_position(
                     ticker=ticker,
@@ -581,7 +581,8 @@ def run_position_monitor() -> None:
                                     in_zone = metar_temp >= limit_lower and metar_temp <= (limit_upper + 0.5)
 
                                 # v19.1.10: Precision Lock (Front-run the whole degree)
-                                if in_zone and local_hour >= 16:
+                                # v19.1.11: Restricted to HIGH markets; LOW markets resolve at night.
+                                if is_high and in_zone and local_hour >= 16:
                                     # High probability of 'locked' result
                                     # If within 0.2F of limit and trend is flat/reversing, take 94c+
                                     if bid_price >= 0.94:

@@ -190,23 +190,35 @@ def _normalise_underlying(symbol: str) -> str:
 # ── DB helpers ───────────────────────────────────────────────────────────────
 
 
-def _count_open_spot_positions(underlying: str, paper: bool = False) -> int:
+def _count_open_spot_positions(
+    underlying: str, paper: bool = False, open_spot_pos: list[dict] | None = None
+) -> int:
     """
-    DB is authoritative for bot-managed spot positions (strategy LIKE 'spot_%').
-    Manual Coinbase holdings never appear in open_positions, so broker balance
-    must NOT be used here — it would count the user's non-bot holdings as blocks.
-    Fail-open (return 0) on DB error so a transient lock never prevents entry.
+    v19.1 Ledgerless: Truth is projected from broker holdings.
+    If open_spot_pos is provided (from dag_state), use it to avoid redundant API calls.
+    Otherwise, fetch directly from the broker.
     """
     try:
-        paper_val = 1 if paper else 0
-        with sqlite3.connect(_db_path(), timeout=3, check_same_thread=False) as conn:
-            row = conn.execute(
-                "SELECT COUNT(*) FROM open_positions "
-                "WHERE strategy LIKE 'spot_%' AND symbol=? AND paper=?",
-                (underlying, paper_val),
-            ).fetchone()
-            return int(row[0]) if row else 0
-    except Exception:
+        # Use pre-fetched list if available
+        if open_spot_pos is not None:
+            return sum(
+                1
+                for p in open_spot_pos
+                if _normalise_underlying(p.get("symbol", "")) == underlying
+            )
+
+        # Fallback: direct broker fetch (rare path, e.g. manual CLI check)
+        from execution.coinbase_spot_broker import get_spot_broker
+
+        broker = get_spot_broker()
+        holdings = broker.get_spot_positions() or []
+        return sum(
+            1
+            for h in holdings
+            if _normalise_underlying(h.get("symbol", "")) == underlying
+        )
+    except Exception as e:
+        logger.debug(f"[tradeability] spot position count error: {e}")
         return 0
 
 
@@ -240,22 +252,24 @@ def _get_open_perp_directions(underlying: str, paper: bool = False) -> list[str]
         return []
 
 
-def _get_spot_deployed_usd() -> float:
+def _get_spot_deployed_usd(open_spot_pos: list[dict] | None = None) -> float:
     """
-    Live mode: compute deployed USD from broker symbol balances.
-    Deployment cap enforcement is secondary — v10_runner enforces usd_available*0.95
-    as the hard cap. Return 0.0 on broker failure (fail open, let runner cap apply).
+    v19.1 Ledgerless: Compute deployed USD from broker holdings.
     """
     try:
+        # Use pre-fetched list if available
+        if open_spot_pos is not None:
+            return sum(float(p.get("current_value") or 0.0) for p in open_spot_pos)
+
+        # Fallback: direct broker fetch
         from execution.coinbase_spot_broker import get_spot_broker
 
-        bal = get_spot_broker().get_spot_balance()
-        # usd_available = cash; total_value ≈ usd_available + deployed_crypto
-        # We don't have prices here, so return 0 — runner's usd_available cap is the real gate
-        _ = float(bal.get("usd_available", 0) or 0)  # verify broker reachable
-        return 0.0  # let v10_runner's usd_available*0.95 be the binding constraint
-    except Exception:
-        return 0.0  # fail open — runner cap will still apply
+        broker = get_spot_broker()
+        holdings = broker.get_spot_positions() or []
+        return sum(float(h.get("current_value") or 0.0) for h in holdings)
+    except Exception as e:
+        logger.debug(f"[tradeability] spot deployed USD error: {e}")
+        return 0.0
 
 
 def _get_perp_deployed_usd() -> float:
@@ -418,6 +432,7 @@ def _evaluate_tradeability(
         manual=manual,
         paper=paper,
         live=live,
+        dag_state=dag_state,
     )
 
     # ── 6. Evaluate PERP lane ─────────────────────────────────────────────────
@@ -505,10 +520,16 @@ def _check_spot_eligibility(
     manual: bool,
     paper: bool = False,
     live: bool = True,
+    dag_state: dict | None = None,
 ) -> str:
     """
     Return "none" if spot is eligible, else one of the spot_* blocked reason strings.
     """
+    # ── 0. Extract pre-fetched truth from DAG ────────────────────────────────
+    open_spot_pos = None
+    if dag_state:
+        open_spot_pos = dag_state.get("RootTruth", {}).get("open_spot_positions")
+
     # Symbol gate
     if underlying not in spot_symbols:
         return "spot_symbol_not_allowed"
@@ -522,7 +543,7 @@ def _check_spot_eligibility(
         return "spot_lane_disabled"
 
     # Duplicate position gate
-    if _count_open_spot_positions(underlying, paper=paper) >= spot_max_pos:
+    if _count_open_spot_positions(underlying, paper=paper, open_spot_pos=open_spot_pos) >= spot_max_pos:
         return "spot_position_already_open"
     if _get_open_perp_directions(underlying, paper=paper):
         return "underlying_exposure_already_open"
@@ -541,7 +562,7 @@ def _check_spot_eligibility(
         return "spot_min_order_not_met"
 
     # Deployment cap
-    deployed = _get_spot_deployed_usd()
+    deployed = _get_spot_deployed_usd(open_spot_pos=open_spot_pos)
     cap = usd_avail * spot_max_pct
     if deployed >= cap and cap > 0:
         return "spot_deployment_cap_exceeded"

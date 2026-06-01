@@ -812,12 +812,21 @@ def _scan_and_trade_inner(spot_only: bool = False):
     except Exception as _obs_err:
         logger.debug(f"[v10] global observability push error: {_obs_err}")
 
-    # Get current open positions
+    # Get current open positions (Perp + Spot)
     open_pos: Dict = {}
     if perps is not None:
         open_pos = perps.get_open_positions()
 
+    # v19.1: Ledgerless Spot Truth (Broker-Direct)
+    open_spot_pos: List[Dict] = []
+    try:
+        import spot_engine as _spot_eng
+        open_spot_pos = _spot_eng.get_spot_positions(paper=paper)
+    except Exception as _spot_err:
+        logger.debug(f"[v10] spot position sync error: {_spot_err}")
+
     open_symbols = list(open_pos.keys())
+    # deployed_usd is sum of perps; spot deployed value is tracked separately in dag_state
     deployed_usd = _get_deployed_usd(open_pos)
     _write_crypto_lane_runtime(open_pos)
 
@@ -1682,6 +1691,7 @@ def _attempt_entry(
             "RootTruth": {
                 "account_equity": balance,
                 "deployed_usd": deployed_usd,
+                "open_spot_positions": open_spot_pos,
             },
             "TelemetryFrame": features,
             "RegimeState": {

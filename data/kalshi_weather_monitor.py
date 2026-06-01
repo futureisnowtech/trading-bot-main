@@ -11,7 +11,7 @@ import logging
 import time
 import requests
 import numpy as np
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 logger = logging.getLogger("weather_monitor")
 

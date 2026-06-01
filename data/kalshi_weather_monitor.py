@@ -20,24 +20,73 @@ logger = logging.getLogger("weather_monitor")
 _WEATHER_SHADOW_STATE: Dict[str, Any] = {}
 
 # Kalshi Station Mappings (Lat/Lon)
-# Expanded v19.1.6 to cover horizontal expansion cities
+# Refined v19.1.10: Official ASOS Settlement Stations
 STATIONS = {
-    "NY": {"lat": 40.71, "lon": -74.01, "name": "New York", "series": ["KXHIGHNY", "KXLOWNY", "KXRAINNY"]},
-    "CHI": {"lat": 41.88, "lon": -87.63, "name": "Chicago", "series": ["KXHIGHCHI", "KXLOWCHI", "KXRAINCHI"]},
-    "MIA": {"lat": 25.76, "lon": -80.19, "name": "Miami", "series": ["KXHIGHMIA", "KXLOWMIA", "KXRAINMIA"]},
-    "LAX": {"lat": 34.05, "lon": -118.24, "name": "Los Angeles", "series": ["KXHIGHLAX", "KXLOWLAX", "KXRAINLAX"]},
-    "DEN": {"lat": 39.74, "lon": -104.99, "name": "Denver", "series": ["KXHIGHDEN", "KXLOWDEN", "KXRAINDEN"]},
-    "AUS": {"lat": 30.27, "lon": -97.74, "name": "Austin", "series": ["KXHIGHAUS", "KXLOWAUS", "KXRAINAUS"]},
-    "PHX": {"lat": 33.45, "lon": -112.07, "name": "Phoenix", "series": ["KXHIGHTPHX", "KXLOWTPHX"]},
-    "SEA": {"lat": 47.61, "lon": -122.33, "name": "Seattle", "series": ["KXHIGHSEA", "KXLOWSEA", "KXRAINSEA"]},
-    "DAL": {"lat": 32.78, "lon": -96.80, "name": "Dallas", "series": ["KXHIGHDAL", "KXLOWDAL"]},
-    "ATL": {"lat": 33.75, "lon": -84.39, "name": "Atlanta", "series": ["KXHIGHTATL", "KXLOWTATL"]},
-    "HOU": {"lat": 29.76, "lon": -95.37, "name": "Houston", "series": ["KXHIGHTHOU", "KXLOWTHOU"]},
-    "BOS": {"lat": 42.36, "lon": -71.06, "name": "Boston", "series": ["KXHIGHBOS", "KXLOWBOS"]},
-    "DC": {"lat": 38.91, "lon": -77.04, "name": "Washington DC", "series": ["KXHIGHDC", "KXLOWDC", "KXRAINDC"]},
-    "SF": {"lat": 37.77, "lon": -122.42, "name": "San Francisco", "series": ["KXHIGHSF", "KXLOWSF", "KXRAINSF"]},
-    "LV": {"lat": 36.17, "lon": -115.14, "name": "Las Vegas", "series": ["KXHIGHTLV", "KXLOWTLV"]},
+    "NY": {"lat": 40.78, "lon": -73.97, "icao": "KNYC", "name": "New York (Central Park)", "tz": "America/New_York", "series": ["KXHIGHNY", "KXLOWNY", "KXRAINNY"]},
+    "CHI": {"lat": 41.78, "lon": -87.75, "icao": "KMDW", "name": "Chicago (Midway)", "tz": "America/Chicago", "series": ["KXHIGHCHI", "KXLOWCHI", "KXRAINCHI"]},
+    "MIA": {"lat": 25.79, "lon": -80.29, "icao": "KMIA", "name": "Miami International", "tz": "America/New_York", "series": ["KXHIGHMIA", "KXLOWMIA", "KXRAINMIA"]},
+    "LAX": {"lat": 33.94, "lon": -118.41, "icao": "KLAX", "name": "Los Angeles Intl", "tz": "America/Los_Angeles", "series": ["KXHIGHLAX", "KXLOWLAX", "KXRAINLAX"]},
+    "DEN": {"lat": 39.86, "lon": -104.67, "icao": "KDEN", "name": "Denver International", "tz": "America/Denver", "series": ["KXHIGHDEN", "KXLOWDEN", "KXRAINDEN"]},
+    "AUS": {"lat": 30.20, "lon": -97.67, "icao": "KAUS", "name": "Austin-Bergstrom", "tz": "America/Chicago", "series": ["KXHIGHAUS", "KXLOWAUS", "KXRAINAUS"]},
+    "PHX": {"lat": 33.43, "lon": -112.01, "icao": "KPHX", "name": "Phoenix Sky Harbor", "tz": "America/Phoenix", "series": ["KXHIGHTPHX", "KXLOWTPHX"]},
+    "SEA": {"lat": 47.45, "lon": -122.31, "icao": "KSEA", "name": "Seattle-Tacoma", "tz": "America/Los_Angeles", "series": ["KXHIGHSEA", "KXLOWSEA", "KXRAINSEA"]},
+    "DAL": {"lat": 32.90, "lon": -97.04, "icao": "KDFW", "name": "Dallas/Fort Worth", "tz": "America/Chicago", "series": ["KXHIGHDAL", "KXLOWDAL"]},
+    "ATL": {"lat": 33.64, "lon": -84.43, "icao": "KATL", "name": "Hartsfield-Jackson", "tz": "America/New_York", "series": ["KXHIGHTATL", "KXLOWTATL"]},
+    "HOU": {"lat": 29.65, "lon": -95.28, "icao": "KHOU", "name": "Houston Hobby", "tz": "America/Chicago", "series": ["KXHIGHTHOU", "KXLOWTHOU"]},
+    "BOS": {"lat": 42.36, "lon": -71.01, "icao": "KBOS", "name": "Boston Logan", "tz": "America/New_York", "series": ["KXHIGHBOS", "KXLOWBOS"]},
+    "DC": {"lat": 38.85, "lon": -77.04, "icao": "KDCA", "name": "Reagan National", "tz": "America/New_York", "series": ["KXHIGHDC", "KXLOWDC", "KXRAINDC"]},
+    "SF": {"lat": 37.62, "lon": -122.37, "icao": "KSFO", "name": "San Francisco Intl", "tz": "America/Los_Angeles", "series": ["KXHIGHSF", "KXLOWSF", "KXRAINSF"]},
+    "LV": {"lat": 36.08, "lon": -115.15, "icao": "KLAS", "name": "Las Vegas (Harry Reid)", "tz": "America/Los_Angeles", "series": ["KXHIGHTLV", "KXLOWTLV"]},
 }
+
+# ── Intraday Ground Truth ───────────────────────────────────────────────────
+
+def _parse_t_group(metar_raw: str) -> Optional[float]:
+    """Parse the T-group from METAR remarks for 0.1C precision."""
+    import re
+    # Pattern: T followed by 8 digits. First 4 are temp, last 4 are dew point.
+    # T snnn snnn where s is sign (0=pos, 1=neg) and nnn is tenths of Celsius.
+    match = re.search(r' T([01])(\d{3})', metar_raw)
+    if match:
+        sign = 1 if match.group(1) == '0' else -1
+        val = int(match.group(2)) / 10.0
+        temp_c = sign * val
+        temp_f = (temp_c * 9/5) + 32
+        return round(temp_f, 2)
+    return None
+
+async def fetch_metar_observation(icao: str) -> Dict[str, Any]:
+    """Fetch real-time METAR ground truth from NOAA ADDS."""
+    url = f"https://aviationweather.gov/cgi-bin/data/metar.php?ids={icao}&format=raw"
+    try:
+        loop = asyncio.get_event_loop()
+        resp = await loop.run_in_executor(None, lambda: requests.get(url, timeout=10))
+        if resp.status_code == 200 and resp.text:
+            raw = resp.text.strip()
+            # Basic temp parsing as fallback
+            # (e.g. 15/M02)
+            import re
+            temp_match = re.search(r' (M?\d{2})/(M?\d{2}) ', raw)
+            temp_f = None
+            if temp_match:
+                tc_raw = temp_match.group(1).replace('M', '-')
+                temp_c = float(tc_raw)
+                temp_f = round((temp_c * 9/5) + 32, 1)
+            
+            # High-precision T-group override
+            t_group_f = _parse_t_group(raw)
+            if t_group_f is not None:
+                temp_f = t_group_f
+
+            return {
+                "icao": icao,
+                "temp_f": temp_f,
+                "raw": raw,
+                "timestamp": time.time()
+            }
+    except Exception as e:
+        logger.debug(f"METAR fetch failed for {icao}: {e}")
+    return {}
 
 # ── Cache ───────────────────────────────────────────────────────────────────
 _COORDINATE_CACHE: Dict[str, Dict[str, Any]] = {}
@@ -154,52 +203,94 @@ def inject_weather_ensemble(ticker_prefix: str, members: list[float], tcdc: floa
     logger.info(f"VERIFICATION: Injected weather ensemble for {ticker_prefix}")
 
 
+async def fetch_hrrr_forecast(city_key: str, lat: float, lon: float) -> Dict[str, Any]:
+    """Fetch hourly HRRR 3km high-resolution forecast for intraday shifts."""
+    url = "https://api.open-meteo.com/v1/forecast"
+    params = {
+        "latitude": lat,
+        "longitude": lon,
+        "hourly": "temperature_2m,cloud_cover,precipitation",
+        "models": "ncep_hrrr_conus",
+        "timezone": "auto",
+        "forecast_days": 1
+    }
+    try:
+        loop = asyncio.get_event_loop()
+        resp = await loop.run_in_executor(None, lambda: requests.get(url, params=params, timeout=10))
+        if resp.status_code == 200:
+            data = resp.json()
+            hourly = data.get("hourly", {})
+            if "temperature_2m" in hourly:
+                temps_f = [(tc * 9/5) + 32 for tc in hourly["temperature_2m"][:12]] # Next 12h
+                return {
+                    "hrrr_high": max(temps_f),
+                    "hrrr_trend": "rising" if temps_f[-1] > temps_f[0] else "falling",
+                    "hrrr_timestamp": time.time()
+                }
+    except Exception as e:
+        logger.debug(f"HRRR fetch failed for {city_key}: {e}")
+    return {}
+
 async def update_weather_shadow_state():
-    """Background loop polling weather data every 15 minutes."""
+    """Background loop polling weather data (Ensembles + Intraday METAR/HRRR)."""
     global _WEATHER_SHADOW_STATE
     logger.info("Weather shadow state pipeline active.")
     
-    while True:
-        try:
-            # v19.1.6: Jumpstart mechanism to bypass IP bans
-            import os, json
-            jumpstart_path = "/app/logs/weather_jumpstart.json"
-            if os.path.exists(jumpstart_path):
-                try:
-                    with open(jumpstart_path, 'r') as f:
-                        data = json.load(f)
-                    if data:
-                        _WEATHER_SHADOW_STATE.update(data)
-                        logger.info(f"Sovereign Jumpstart: Injected weather for {list(data.keys())}")
-                    os.remove(jumpstart_path)
-                except Exception as je:
-                    logger.error(f"Jumpstart failed: {je}")
-
-            new_state = {}
-            # v19.1.6: Staggered fetch to avoid 429 detection
-            city_keys = list(STATIONS.keys())
-            import random
-            random.shuffle(city_keys)
-            
-            for city_key in city_keys:
-                loc = STATIONS[city_key]
-                result = await fetch_open_meteo_ensemble(city_key, loc["lat"], loc["lon"])
-                if result:
-                    for s_ticker in loc.get("series", []):
-                        new_state[s_ticker] = result
+    # ── Cycle 1: Heavy Ensemble Loop (3 Hours) ─────────────────────────────
+    async def run_ensemble_sync():
+        while True:
+            try:
+                new_state = {}
+                import random
+                city_keys = list(STATIONS.keys())
+                random.shuffle(city_keys)
                 
-                # Jittered delay between cities (10-15s)
-                await asyncio.sleep(random.uniform(10, 15))
-            
-            if new_state:
-                _WEATHER_SHADOW_STATE.update(new_state)
-                logger.info(f"Weather state synced: {list(new_state.keys())}")
-        except Exception as e:
-            logger.error(f"Weather pipeline sync failure: {e}")
-        
-        # v19.1.6: Synchronize with meteorological updates (3 hours)
-        # GFS updates every 6h; polling every 15m was wasteful and caused 429s.
-        await asyncio.sleep(10800)
+                for city_key in city_keys:
+                    loc = STATIONS[city_key]
+                    result = await fetch_open_meteo_ensemble(city_key, loc["lat"], loc["lon"])
+                    if result:
+                        for s_ticker in loc.get("series", []):
+                            # Initialize or preserve intraday data
+                            existing = _WEATHER_SHADOW_STATE.get(s_ticker, {})
+                            result["intraday"] = existing.get("intraday", {})
+                            new_state[s_ticker] = result
+                    await asyncio.sleep(random.uniform(2, 5))
+                
+                if new_state:
+                    _WEATHER_SHADOW_STATE.update(new_state)
+                    logger.info(f"Weather Ensemble synced: {len(new_state)} series")
+            except Exception as e:
+                logger.error(f"Ensemble sync failure: {e}")
+            await asyncio.sleep(10800)
+
+    # ── Cycle 2: Fast Intraday Precinct (15 Minutes) ───────────────────────
+    async def run_intraday_sync():
+        while True:
+            try:
+                # v19.1.10: Precision Ground Truth (METAR + HRRR)
+                for city_key, loc in STATIONS.items():
+                    metar = await fetch_metar_observation(loc["icao"])
+                    hrrr = await fetch_hrrr_forecast(city_key, loc["lat"], loc["lon"])
+                    
+                    intraday_payload = {
+                        "metar_temp": metar.get("temp_f"),
+                        "metar_raw": metar.get("raw"),
+                        "hrrr_high": hrrr.get("hrrr_high"),
+                        "hrrr_trend": hrrr.get("hrrr_trend"),
+                        "ts": time.time()
+                    }
+                    
+                    for s_ticker in loc.get("series", []):
+                        if s_ticker in _WEATHER_SHADOW_STATE:
+                            _WEATHER_SHADOW_STATE[s_ticker]["intraday"] = intraday_payload
+                
+                logger.info("Weather Intraday Precinct synced (METAR/HRRR).")
+            except Exception as e:
+                logger.error(f"Intraday sync failure: {e}")
+            await asyncio.sleep(900)
+
+    # Launch concurrent loops
+    await asyncio.gather(run_ensemble_sync(), run_intraday_sync())
 
 def get_weather_data(ticker_prefix: str) -> Dict[str, Any]:
     """Retrieve cached weather data for a ticker prefix (e.g. 'KXHIGHNY')."""

@@ -490,6 +490,72 @@ def run_position_monitor() -> None:
                         elif model_p < 0.50 and model_p > 0:
                             logger.warning(f"[Sovereign Exit] SL Triggered: {local_symbol} model_p={model_p:.2f} < 0.50")
                             resolved = True
+                        
+                        # ── v19.1.10: Intraday Precinct (METAR/HRRR) ─────────
+                        intraday = w_data.get("intraday", {})
+                        metar_temp = intraday.get("metar_temp")
+                        hrrr_high = intraday.get("hrrr_high")
+                        
+                        if metar_temp is not None:
+                            # 1. BUST EXIT (Salvage Capital)
+                            # If METAR ground truth is already past our bracket limit (+ buffer)
+                            # For HIGH YES: if current temp > bracket_max + 0.5
+                            # For LOW YES: if current temp < bracket_min - 0.5
+                            # We'll use the 'threshold' as the anchor.
+                            # Note: -B72.5 means 72-73 range. Max is 73.
+                            is_high = "HIGH" in local_symbol
+                            is_between = "-B" in local_symbol
+                            
+                            limit_upper = threshold + 0.5 if is_between else threshold
+                            limit_lower = threshold - 0.5 if is_between else threshold
+                            
+                            # HIGH YES Bust: It got too hot.
+                            if is_high and metar_temp > (limit_upper + 0.5):
+                                logger.warning(f"[Sovereign Precinct] BUST EXIT: {local_symbol} temp {metar_temp}F > limit {limit_upper}F. Salvaging capital.")
+                                resolved = True
+                            
+                            # LOW YES Bust: It stayed too warm.
+                            elif not is_high and "LOW" in local_symbol and metar_temp < (limit_lower - 0.5):
+                                logger.warning(f"[Sovereign Precinct] BUST EXIT: {local_symbol} temp {metar_temp}F < limit {limit_lower}F. Salvaging capital.")
+                                resolved = True
+
+                            # 2. LOCK EXIT (Early Profit Capture)
+                            # If we are in the winning zone and heating time is depleted.
+                            import pytz
+                            from data.kalshi_weather_monitor import STATIONS
+                            
+                            city_match = None
+                            for k, v in STATIONS.items():
+                                if any(local_symbol.startswith(s) for s in v.get("series", [])):
+                                    city_match = k
+                                    break
+
+                            if city_match:
+                                loc_data = STATIONS[city_match]
+                                tz = pytz.timezone(loc_data.get("tz", "UTC"))
+                                local_now = datetime.now(tz)
+                                local_hour = local_now.hour
+                                
+                                # If after 4 PM local and currently within limits
+                                in_zone = False
+                                if is_high:
+                                    in_zone = metar_temp <= limit_upper and metar_temp >= (limit_lower - 0.5)
+                                else:
+                                    in_zone = metar_temp >= limit_lower and metar_temp <= (limit_upper + 0.5)
+
+                                if in_zone and local_hour >= 16:
+                                    # High probability of 'locked' result
+                                    if bid_price >= 0.94:
+                                        logger.info(f"[Sovereign Precinct] LOCK EXIT: {local_symbol} at {bid_price:.2f} (After 4PM local, in zone).")
+                                        resolved = True
+
+                            # 3. TREND DIVERGENCE (Salvage)
+                            # If HRRR (3km resolution) is predicting a high significantly below our bracket
+                            if not resolved and hrrr_high is not None:
+                                if is_high and hrrr_high < (limit_lower - 1.5):
+                                    logger.warning(f"[Sovereign Precinct] TREND EXIT: {local_symbol} HRRR predicts {hrrr_high}F vs bracket start {limit_lower}F. Cutting loss.")
+                                    resolved = True
+
             except Exception as e:
                 logger.debug(f"Exit Protocol check failed for {local_symbol}: {e}")
 

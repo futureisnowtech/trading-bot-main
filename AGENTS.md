@@ -6,9 +6,17 @@
 ## Canonical Truth
 
 - Repo root: `/Users/joshmacbookair2020/Projects/algo_trading_final`
-- Canonical version: `v19.1.6` (`2026-05-29`)
+- Canonical version: `v19.1.10` (`2026-06-01`)
 - Canonical active lane: **Dual-Lane**: Coinbase Spot Scalp + Kalshi Weather Expansion
 - **Status:** **LEDGERLESS SOVEREIGN**. Autonomous Self-Healing & Broker-First Truth.
+- **Critical Changes (v19.1.10):**
+  - **Sovereign Weather Alpha Blueprint**: Transformed the weather lane from a "Hammer" to a "Scalpel" by integrating a 3-phase execution engine:
+    - **ECMWF Consensus (Phase 1)**: Integrated 51-member ECMWF ensembles alongside GFS (60/40 weighted blend) for high-conviction entries.
+    - **HRRR Intraday Pivot (Phase 2)**: Leveraged 3km High-Resolution Rapid Refresh (HRRR) models for intraday risk assessment and "Salvage Exits" when global models diverge.
+    - **METAR Precision Ground Truth (Phase 3)**: Implemented real-time METAR airport observation polling with 0.1°C T-group parsing for "Bust Exits" and "Precision Locks."
+  - **Sovereign Instrumentation**: Added dedicated Prometheus gauges for ensemble probability, METAR discrepancies, and HRRR trends to ensure 100% observability of the weather alpha.
+  - **HUD Dashboard Enrichment**: Upgraded the Forecast dashboard with a "Sovereign Intelligence" section, exposing the raw model data for all open positions.
+  - **Sovereign Recon (v19.1.10)**: Implemented self-healing broker reconciliation in the position monitor, allowing the bot to "adopt" manual trades or clean up DB drift automatically.
 - **Critical Changes (v19.1.6):**
   - **High-Velocity Weather Expansion**: Horizontally expanded the weather lane to 15+ US cities (Austin, Phoenix, Seattle, etc.) covering both HIGH and LOW temperature series.
   - **Derivative Alpha Integration**: Introduced a new strategy for Precipitation (`KXRAIN...`) markets utilizing GFS ensemble probabilities.

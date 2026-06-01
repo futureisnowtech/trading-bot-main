@@ -61,6 +61,11 @@ API_ERRORS_COUNTER = Counter('algo_bot_api_errors_total', 'Total API errors reco
 # Strategy Metrics
 STRATEGY_DRIFT_GAUGE = Gauge('algo_bot_strategy_drift', 'Difference between signal and execution price')
 
+# v19.1.10: Sovereign Weather Alpha Metrics
+WEATHER_ENSEMBLE_PROB_GAUGE = Gauge('algo_bot_weather_ensemble_prob', 'Ensemble probability per ticker', ['ticker'])
+WEATHER_METAR_DIFF_GAUGE = Gauge('algo_bot_weather_metar_diff', 'METAR ground truth diff from threshold', ['ticker'])
+WEATHER_HRRR_DIFF_GAUGE = Gauge('algo_bot_weather_hrrr_diff', 'HRRR intraday diff from threshold', ['ticker'])
+
 def start_metrics_server(port=8000):
     """Start the Prometheus metrics HTTP server."""
     try:

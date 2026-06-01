@@ -146,11 +146,23 @@ def generate_sovereign_payload() -> dict:
         from data.kalshi_weather_monitor import _WEATHER_SHADOW_STATE
         edges_visible = len(_WEATHER_SHADOW_STATE)
         
+        # v19.1.10: Sovereign Intelligence Enrichment
+        sovereign_insights = []
+        try:
+            from forecast.db import get_open_forecast_positions
+            open_w_pos = get_open_forecast_positions(db_path=db_path)
+            from dashboard.data.forecast import get_sovereign_weather_insights
+            for op in open_w_pos:
+                ins = get_sovereign_weather_insights(op["ticker"])
+                if ins: sovereign_insights.append(ins)
+        except Exception: pass
+
         payload["weather_lane"] = {
             "status": "OPERATIONAL",
             "active_markets": active_weather,
             "total_positions": recent_fills,
-            "weather_edge_visibility": edges_visible
+            "weather_edge_visibility": edges_visible,
+            "sovereign_insights": sovereign_insights
         }
         conn.close()
     except Exception as e:

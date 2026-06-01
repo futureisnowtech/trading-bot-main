@@ -289,6 +289,45 @@ def render_forecast_trading():
     else:
         st.caption("No open positions.")
 
+    # ── 4b. SOVEREIGN INTELLIGENCE ─────────────────────────────────────────────
+    if positions:
+        st.markdown('<p class="panel-title">Sovereign Intelligence</p>', unsafe_allow_html=True)
+        from dashboard.data.forecast import get_sovereign_weather_insights
+        
+        for pos in positions:
+            ticker = pos.get("symbol", "")
+            if "KXHIGH" in ticker or "KXLOW" in ticker:
+                insights = get_sovereign_weather_insights(ticker)
+                if insights:
+                    with st.expander(f"Insights: {ticker}", expanded=True):
+                        c1, c2, c3 = st.columns(3)
+                        
+                        # Consensus
+                        p_gfs = insights.get("prob_gfs")
+                        p_ec = insights.get("prob_ecmwf")
+                        c1.markdown("**Consensus**")
+                        c1.markdown(f"GFS: `{p_gfs:.1%}`" if p_gfs is not None else "GFS: `—`")
+                        c1.markdown(f"ECMWF: `{p_ec:.1%}`" if p_ec is not None else "ECMWF: `—`")
+                        
+                        # Ground Truth (METAR)
+                        temp = insights.get("metar_temp")
+                        thresh = insights.get("threshold")
+                        c2.markdown("**Ground Truth**")
+                        if temp is not None and thresh is not None:
+                            diff = temp - thresh
+                            color = "red" if abs(diff) < 1.0 else "green"
+                            c2.markdown(f"METAR: `{temp:.1f}F`")
+                            c2.markdown(f"Diff: <span style='color:{color}'>{diff:+.1f}F</span>", unsafe_allow_html=True)
+                        else:
+                            c2.markdown("METAR: `pending`")
+                        
+                        # Intraday Risk (HRRR)
+                        hrrr = insights.get("hrrr_high")
+                        trend = insights.get("hrrr_trend")
+                        c3.markdown("**Intraday Risk**")
+                        c3.markdown(f"HRRR: `{hrrr:.1f}F`" if hrrr else "HRRR: `pending`")
+                        c3.markdown(f"Trend: `{trend}`" if trend else "Trend: `—`")
+
     # ── 5. DEPLOYED CAPITAL ────────────────────────────────────────────────────
     if positions:
         try:

@@ -264,6 +264,21 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                 macro_context=macro_ctx,
             )
 
+            # v19.1.10: Sovereign Instrumentation (Discovery Layer)
+            try:
+                from monitoring import metrics
+                for cand in candidates:
+                    res = cand["result"]
+                    sym = cand["contract"].get("local_symbol", "UNKNOWN")
+                    # Ensemble prob is stored in confidence for weather family
+                    if res.strategy_family == "weather_ensemble":
+                        # We use the raw confidence before convergence multiplier for prob
+                        # Actually confidence = ensemble_prob * conv_mult
+                        # Let's just push the confidence as it represents the 'calibrated prob'
+                        metrics.WEATHER_ENSEMBLE_PROB_GAUGE.labels(ticker=sym).set(res.confidence)
+            except Exception as _m_err:
+                logger.debug(f"Metrics update failed: {_m_err}")
+
             if not candidates:
                 logger.info("[ForecastRunner] No trade candidates qualified in this cycle.")
 
@@ -495,6 +510,16 @@ def run_position_monitor() -> None:
                         intraday = w_data.get("intraday", {})
                         metar_temp = intraday.get("metar_temp")
                         hrrr_high = intraday.get("hrrr_high")
+                        
+                        # v19.1.10: Sovereign Instrumentation (Intraday Layer)
+                        try:
+                            from monitoring import metrics
+                            if metar_temp is not None:
+                                metrics.WEATHER_METAR_DIFF_GAUGE.labels(ticker=local_symbol).set(metar_temp - threshold)
+                            if hrrr_high is not None:
+                                metrics.WEATHER_HRRR_DIFF_GAUGE.labels(ticker=local_symbol).set(hrrr_high - threshold)
+                        except Exception as _m_err:
+                            logger.debug(f"Metrics update failed: {_m_err}")
                         
                         if metar_temp is not None:
                             # 1. BUST EXIT (Salvage Capital)

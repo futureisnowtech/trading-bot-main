@@ -351,6 +351,60 @@ def get_active_markets_summary() -> list[dict]:
         return []
 
 
+# ── Sovereign Weather Alpha ──────────────────────────────────────────────────
+
+
+def get_sovereign_weather_insights(ticker: str) -> dict:
+    """
+    v19.1.10: Extract high-fidelity weather insights (ECMWF, HRRR, METAR)
+    from the in-memory shadow state for the dashboard.
+    """
+    try:
+        from data.kalshi_weather_monitor import get_weather_data
+        from forecast.strategy_engine import _parse_weather_threshold
+        
+        prefix = ticker.split('-')[0]
+        w_data = get_weather_data(prefix)
+        if not w_data:
+            return {}
+            
+        threshold = _parse_weather_threshold(ticker)
+        intraday = w_data.get("intraday", {})
+        
+        # Calculate prob if possible
+        members_gfs = w_data.get("members_high" if "HIGH" in ticker else "members_low", [])
+        ecmwf = w_data.get("ecmwf", {})
+        members_ec = ecmwf.get("members_high" if "HIGH" in ticker else "members_low", []) if ecmwf else []
+        
+        prob_gfs = None
+        if members_gfs and threshold is not None:
+            if "HIGH" in ticker:
+                prob_gfs = sum(1 for m in members_gfs if m >= threshold) / len(members_gfs)
+            else:
+                prob_gfs = sum(1 for m in members_gfs if m <= threshold) / len(members_gfs)
+        
+        prob_ec = None
+        if members_ec and threshold is not None:
+            if "HIGH" in ticker:
+                prob_ec = sum(1 for m in members_ec if m >= threshold) / len(members_ec)
+            else:
+                prob_ec = sum(1 for m in members_ec if m <= threshold) / len(members_ec)
+
+        return {
+            "ticker": ticker,
+            "threshold": threshold,
+            "prob_gfs": prob_gfs,
+            "prob_ecmwf": prob_ec,
+            "metar_temp": intraday.get("metar_temp"),
+            "hrrr_high": intraday.get("hrrr_high"),
+            "hrrr_trend": intraday.get("hrrr_trend"),
+            "peak_tcdc": w_data.get("peak_tcdc"),
+            "timestamp": w_data.get("timestamp")
+        }
+    except Exception:
+        return {}
+
+
 # ── Readiness status ───────────────────────────────────────────────────────────
 
 # Readiness state machine constants

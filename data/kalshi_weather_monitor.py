@@ -94,10 +94,10 @@ CACHE_EXPIRY_SEC = 21600  # 6 hours (weather ensembles are slow-moving)
 
 async def fetch_open_meteo_ensemble(city_key: str, lat: float, lon: float) -> Dict[str, Any]:
     """
-    Fetch 31-member GFS ensemble for a specific coordinate.
+    v19.1.10: Sovereign Multi-Model Ingestion (GFS + ECMWF).
     Includes cloud_cover for TCDC overrides, max/min temps, and precip.
     """
-    # v19.1.6: Coordinate-based caching to avoid hammering API
+    # v19.1.6: Coordinate-based caching
     cache_key = f"{lat:.2f}_{lon:.2f}"
     now = time.time()
     if cache_key in _COORDINATE_CACHE:
@@ -105,90 +105,87 @@ async def fetch_open_meteo_ensemble(city_key: str, lat: float, lon: float) -> Di
         if now - cached["timestamp"] < CACHE_EXPIRY_SEC:
             return cached
 
-    # v19.1.6: Immediate failure on 429 to avoid retry loops
-    try:
-        import os
-        api_key = os.getenv("OPEN_METEO_API_KEY")
-        url = "https://customer-api.open-meteo.com/v1/ensemble" if api_key else "https://ensemble-api.open-meteo.com/v1/ensemble"
-        
+    import os
+    api_key = os.getenv("OPEN_METEO_API_KEY")
+    base_url = "https://customer-api.open-meteo.com/v1/ensemble" if api_key else "https://ensemble-api.open-meteo.com/v1/ensemble"
+    
+    # GFS = 31 members, ECMWF = 51 members
+    models = ["gfs_seamless", "ecmwf_ifs025"]
+    results = {}
+    
+    for model in models:
         params = {
             "latitude": lat,
             "longitude": lon,
             "hourly": "temperature_2m,cloud_cover,precipitation",
-            "models": "gfs_seamless",
+            "models": model,
             "timezone": "auto"
         }
-        if api_key:
-            params["apikey"] = api_key
+        if api_key: params["apikey"] = api_key
         
-        loop = asyncio.get_event_loop()
-        resp = await loop.run_in_executor(None, lambda: requests.get(url, params=params, timeout=10))
-        
-        if resp.status_code == 429:
-            logger.warning(f"Open-Meteo 429 (Rate Limit) for {city_key}. Aborting cycle to cool down.")
-            return {}
-
-        if resp.status_code != 200:
-            logger.error(f"Open-Meteo error {resp.status_code} for {city_key}")
-            return {}
-
-        data = resp.json()
-        hourly = data.get("hourly", {})
-        
-        # Guardrail 2: The Midnight Boundary Isolation Loop
-        window_size = 26 
-        
-        members_high = []
-        members_low = []
-        members_precip = []
-        cloud_members = []
-        
-        for i in range(31):
-            temp_key = f"temperature_2m_member{i:02d}"
-            cloud_key = f"cloud_cover_member{i:02d}"
-            precip_key = f"precipitation_member{i:02d}"
+        try:
+            loop = asyncio.get_event_loop()
+            resp = await loop.run_in_executor(None, lambda: requests.get(base_url, params=params, timeout=15))
             
-            if temp_key in hourly:
-                temps_c = hourly[temp_key][:window_size]
-                if temps_c:
-                    temps_f = [(tc * 9/5) + 32 for tc in temps_c]
-                    members_high.append(float(max(temps_f)))
-                    members_low.append(float(min(temps_f)))
+            if resp.status_code == 429:
+                logger.warning(f"Open-Meteo 429 (Rate Limit) for {city_key} [{model}]")
+                continue
+
+            if resp.status_code != 200: continue
+
+            data = resp.json()
+            hourly = data.get("hourly", {})
+            if not hourly: continue
+
+            window_size = 26 
+            members_high, members_low, members_precip, cloud_members = [], [], [], []
+            max_members = 51 if "ecmwf" in model else 31
             
-            if precip_key in hourly:
-                precip_mm = hourly[precip_key][:window_size]
-                if precip_mm:
-                    # Convert mm to inches
-                    total_precip_in = sum(precip_mm) * 0.0393701
-                    members_precip.append(float(total_precip_in))
+            for i in range(max_members):
+                temp_key = f"temperature_2m_member{i:02d}"
+                cloud_key = f"cloud_cover_member{i:02d}"
+                precip_key = f"precipitation_member{i:02d}"
                 
-            if cloud_key in hourly:
-                # Guardrail 1: The Convective Cloud Cover Override (The "Sun Spike")
-                clouds = hourly[cloud_key][11:17]
-                if clouds:
-                    cloud_members.append(float(np.mean(clouds)))
-        
-        if not members_high:
-            return {}
+                if temp_key in hourly:
+                    temps_c = hourly[temp_key][:window_size]
+                    if temps_c:
+                        temps_f = [(tc * 9/5) + 32 for tc in temps_c]
+                        members_high.append(max(temps_f))
+                        members_low.append(min(temps_f))
+                
+                if precip_key in hourly:
+                    p_mm = hourly[precip_key][:window_size]
+                    if p_mm: members_precip.append(sum(p_mm) * 0.03937)
 
-        peak_tcdc = float(np.mean(cloud_members)) if cloud_members else 0.0
+                if cloud_key in hourly:
+                    c_vals = hourly[cloud_key][11:17] # Peak heating 11 AM - 4 PM
+                    if c_vals: cloud_members.append(np.mean(c_vals))
 
-        result = {
-            "members_high": members_high,
-            "members_low": members_low,
-            "members_precip": members_precip,
-            "mean_high": float(np.mean(members_high)),
-            "std_high": float(np.std(members_high)),
-            "mean_low": float(np.mean(members_low)),
-            "std_low": float(np.std(members_low)),
-            "peak_tcdc": peak_tcdc,
-            "timestamp": now
-        }
-        _COORDINATE_CACHE[cache_key] = result
-        return result
-    except Exception as e:
-        logger.error(f"Weather fetch failed for {city_key}: {e}")
-        return {}
+            if members_high:
+                m_type = "gfs" if "gfs" in model else "ecmwf"
+                results[m_type] = {
+                    "members_high": members_high,
+                    "members_low": members_low,
+                    "members_precip": members_precip,
+                    "mean_high": float(np.mean(members_high)),
+                    "std_high": float(np.std(members_high)),
+                    "mean_low": float(np.mean(members_low)),
+                    "std_low": float(np.std(members_low)),
+                    "peak_tcdc": float(np.mean(cloud_members)) if cloud_members else 0.0,
+                    "timestamp": time.time()
+                }
+        except Exception as e:
+            logger.debug(f"Fetch failed for {city_key} {model}: {e}")
+
+    if not results: return {}
+    
+    # Unified City Record
+    final_record = results.get("gfs", list(results.values())[0]).copy()
+    final_record["ecmwf"] = results.get("ecmwf")
+    
+    # Update cache
+    _COORDINATE_CACHE[cache_key] = final_record
+    return final_record
 
 def inject_weather_ensemble(ticker_prefix: str, members: list[float], tcdc: float = 0.0):
     """v19.1.5: Force-inject an ensemble for live verification/testing."""

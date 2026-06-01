@@ -123,6 +123,23 @@ def _get_macro_context() -> dict:
     return {}
 
 
+# v19.1.10: Sovereign Regional Risk Engine
+# Group cities into hubs to manage regional weather system covariance.
+CLIMATE_HUBS = {
+    "NORTHEAST": ["NY", "BOS", "DC", "PHL"],
+    "SOUTH": ["MIA", "ATL", "HOU", "AUS", "DAL", "SAT", "OKC", "MSY"],
+    "MIDWEST": ["CHI", "MSP", "DEN"],
+    "WEST": ["LAX", "SFO", "SEA", "PHX", "LV"],
+}
+HUB_CAP_USD = 40.0  # Max exposure per regional weather system
+
+def _get_city_hub(ticker: str) -> str:
+    """Identify which climate hub a ticker belongs to."""
+    for hub, cities in CLIMATE_HUBS.items():
+        if any(city in ticker for city in cities): 
+            return hub
+    return "UNKNOWN"
+
 @dataclass
 class StrategyResult:
     """Full output of strategy evaluation for one contract."""
@@ -627,16 +644,16 @@ def _parse_weather_threshold(ticker: str) -> Optional[float]:
 
 def _strategy_weather(ticker: str, ask_yes: float, ask_no: float, hours_to_res: float) -> tuple[bool, str, float, list[str], bool]:
     """
-    Boundary Pinning & METAR Discrepancies Strategy (v19.1.6).
-    Treats weather as an asymmetric information decay problem in the <48h window.
-    Expanded to support High Temp, Low Temp, and Precipitation.
+    v19.1.10: Sovereign Alpha Blueprint.
+    1. Multi-Model Convergence (GFS + ECMWF)
+    2. Precision Bracket Pinning
+    3. Regional Hub Gating
     """
     # Alpha Filter: 48-Hour Asymmetric Information Decay Window
     is_short_term = 1.5 <= hours_to_res <= 48.0
 
     w_data = get_weather_data(ticker)
     if not w_data:
-        # Trace log for audit
         if "HIGH" in ticker or "LOW" in ticker:
             logger.info(f"TRACE: No weather data for {ticker}")
         return False, "", 0.0, ["no_weather_ensemble_data"], False
@@ -645,56 +662,58 @@ def _strategy_weather(ticker: str, ask_yes: float, ask_no: float, hours_to_res: 
     if threshold is None:
         return False, "", 0.0, [f"unparseable_ticker_threshold: {ticker}"], False
 
-    # v19.1.6: Dynamic member selection based on contract type
-    if "HIGH" in ticker:
-        members = w_data.get("members_high", [])
-        sd = w_data.get("std_high", 5.0)
-        mode = "HIGH"
-    elif "LOW" in ticker:
-        members = w_data.get("members_low", [])
-        sd = w_data.get("std_low", 5.0)
-        mode = "LOW"
-    elif "RAIN" in ticker or "PRECIP" in ticker:
-        members = w_data.get("members_precip", [])
-        sd = 0.1 # Default low SD for precip
-        mode = "RAIN"
+    mode = "HIGH" if "HIGH" in ticker else "LOW" if "LOW" in ticker else "RAIN"
+    
+    # ── Phase 1: GFS Analysis (Primary Trigger) ─────────────────────────────
+    members_gfs = w_data.get("members_high" if mode == "HIGH" else "members_low", [])
+    if not members_gfs: return False, "", 0.0, ["missing_gfs_members"], False
+    
+    success_count_gfs = sum(1 for m in members_gfs if (m >= threshold if mode == "HIGH" else m <= threshold))
+    prob_gfs = success_count_gfs / len(members_gfs)
+    
+    # ── Phase 2: ECMWF Analysis (Convergence Anchor) ────────────────────────
+    ecmwf_data = w_data.get("ecmwf")
+    prob_ecmwf = None
+    convergence_multiplier = 1.0
+    
+    if ecmwf_data:
+        members_ec = ecmwf_data.get("members_high" if mode == "HIGH" else "members_low", [])
+        if members_ec:
+            success_count_ec = sum(1 for m in members_ec if (m >= threshold if mode == "HIGH" else m <= threshold))
+            prob_ecmwf = success_count_ec / len(members_ec)
+            
+            # Convergence Logic:
+            # If both models agree (>70%), increase conviction.
+            # If they strongly disagree (>40% gap), veto.
+            gap = abs(prob_gfs - prob_ecmwf)
+            if prob_gfs > 0.7 and prob_ecmwf > 0.7:
+                convergence_multiplier = 1.5
+                logger.info(f"Sovereign Convergence: {ticker} GFS={prob_gfs:.1%} EC={prob_ecmwf:.1%} -> 1.5x Conviction")
+            elif gap > 0.4:
+                logger.warning(f"Sovereign Divergence: {ticker} GFS={prob_gfs:.1%} EC={prob_ecmwf:.1%} -> VETO")
+                return False, "", 0.0, ["model_divergence_veto"], False
+
+    # ── Final Probability & Edge ────────────────────────────────────────────
+    # Weighted ensemble (60% GFS / 40% ECMWF if available)
+    if prob_ecmwf is not None:
+        ensemble_prob = (prob_gfs * 0.6) + (prob_ecmwf * 0.4)
     else:
-        return False, "", 0.0, ["unknown_weather_type"], False
+        ensemble_prob = prob_gfs
 
-    if not members:
-        return False, "", 0.0, ["empty_ensemble_members"], False
-
-    # v19.1.6: Boundary Pinning calculation
-    # P(Condition >= Threshold) from 31-member GFS ensemble
-    success_count = sum(1 for m in members if m >= threshold)
-    ensemble_prob = success_count / len(members)
-
-    # v19.1.5: Dynamic SD Shrinkage (Decay Capture)
-    pin_strength = max(0.0, 1.0 - (sd / 5.0)) if is_short_term else 0.0
-
-    # Apply 3% uncertainty floor/ceiling
     ensemble_prob = max(0.03, min(0.97, ensemble_prob))
-
     edge_yes = ensemble_prob - ask_yes
     edge_no = (1.0 - ensemble_prob) - ask_no
     
     # Forensic Audit Log
     logger.info(f"TRACE: {ticker} | p={ensemble_prob:.1%} Ask_Y={ask_yes:.2f} Edge_Y={edge_yes:.1%} Edge_N={edge_no:.1%}")
 
-    # Guardrail 1: The Convective Cloud Cover Override (The "Sun Spike")
-    # Only applies to HIGH temp YES contracts.
+    # Guardrail 1: The "Sun Spike" Veto
     peak_tcdc = w_data.get("peak_tcdc", 0.0)
     cloud_veto = (mode == "HIGH") and (peak_tcdc > 65.0)
 
-    # v19.1.5: High-aggression edge detection (8% floor)
-    # Guardrail 3: Taker-Override (Edge >= 22%)
-    # v19.1.9: Narrow Bin Veto (The "Precision Trap")
-    # If the bin is <= 1.1 degrees wide, the risk of NWS sensor error/rounding
-    # is too high for a standard 8% edge. We require 25% edge for these traps.
+    # v19.1.9: Narrow Bin Veto
     if "-B" in ticker:
-        # Most -B tickers are in the format KX...-B80.5 (representing 80 to 81)
-        # We'll treat all -B as narrow for safety if they are temperature.
-        if (mode == "HIGH" or mode == "LOW") and edge_yes < 0.25:
+        if mode != "RAIN" and edge_yes < 0.25:
              return False, "", 0.0, [f"narrow_bin_trap_edge_too_low ({edge_yes:.2f})"], False
 
     if edge_yes > 0.08:
@@ -705,23 +724,22 @@ def _strategy_weather(ticker: str, ask_yes: float, ask_no: float, hours_to_res: 
         factors = [
             f"ensemble_p={ensemble_prob:.1%}",
             f"edge={edge_yes:.1%}",
-            f"pin_strength={pin_strength:.2f}",
-            f"TCDC={peak_tcdc:.1f}%",
-            f"type={mode}"
+            f"conv_mult={convergence_multiplier:.1f}x",
+            f"TCDC={peak_tcdc:.1f}%"
         ]
-        return True, "YES", ensemble_prob, factors, is_taker
+        # Multiply final ensemble_prob for ranking/sizing
+        return True, "YES", ensemble_prob * convergence_multiplier, factors, is_taker
 
     if edge_no > 0.08:
         is_taker = edge_no >= 0.22 and is_short_term
         factors = [
             f"ensemble_p={ensemble_prob:.1%}",
             f"edge={edge_no:.1%}",
-            f"pin_strength={pin_strength:.2f}",
-            f"type={mode}"
+            f"conv_mult={convergence_multiplier:.1f}x"
         ]
-        return True, "NO", (1.0 - ensemble_prob), factors, is_taker
+        return True, "NO", (1.0 - ensemble_prob) * convergence_multiplier, factors, is_taker
 
-    return False, "", 0.0, [f"insufficient_weather_edge (p_yes={ensemble_prob:.2f})"], False
+    return False, "", 0.0, ["insufficient_edge"], False
 
 def evaluate_contract(
 
@@ -1051,6 +1069,13 @@ def evaluate_all_contracts(
     
     # Local frequency map to track evaluations in the SAME tick
     current_tick_counts = open_event_families.copy()
+    
+    # v19.1.10: Regional Hub Exposure Tracking
+    hub_exposure = {} # {HUB: current_usd}
+    
+    # Initial load of open hub exposure (approximate based on ticker)
+    # Note: In a true state-full system, we'd query existing positions.
+    # For now, we'll track within the tick.
 
     approved_entries = []
     
@@ -1084,6 +1109,14 @@ def evaluate_all_contracts(
 
             strike = yc.get("strike", 0.0)
             last_trade = yc.get("last_trade_at", "")
+            
+            # v19.1.10: Calculate hours_to_res before evaluation
+            hours_to_res = 0.0
+            if last_trade:
+                try:
+                    expiry = datetime.fromisoformat(last_trade.replace("Z", "+00:00"))
+                    hours_to_res = (expiry - datetime.now(timezone.utc)).total_seconds() / 3600.0
+                except: pass
 
             # Fetch quotes for both sides
             try:
@@ -1113,12 +1146,20 @@ def evaluate_all_contracts(
             if not is_weather and not bars_5m:
                 continue
 
-            # Check same-event exposure (v18.35: Count-based capping)
+            # Check hub exposure (v19.1.10)
             ticker = yc.get("local_symbol", "")
-            family = ticker.split("_")[0]
-            count = current_tick_counts.get(family, 0)
-
-            if count >= KALSHI_SAME_EVENT_FAMILY_CAP:
+            hub = _get_city_hub(ticker)
+            current_hub_usd = hub_exposure.get(hub, 0.0)
+            
+            if hub != "UNKNOWN" and current_hub_usd >= HUB_CAP_USD:
+                result = StrategyResult(
+                    strategy_family="vetoed", side="NONE", q_hat=0.0, ev=0.0, ev_yes=0.0, ev_no=0.0,
+                    confidence=0.0, uncertainty_penalty=0.0, econ_approved=False,
+                    veto_reason="hub_exposure_cap_reached", position_fraction=0.0,
+                    position_contracts=0, top_factors=[], 
+                    hours_to_resolution=hours_to_res
+                )
+            elif count >= KALSHI_SAME_EVENT_FAMILY_CAP:
                 # Veto immediately if family cap reached
                 result = StrategyResult(
                     strategy_family="vetoed", side="NONE", q_hat=0.0, ev=0.0, ev_yes=0.0, ev_no=0.0,
@@ -1148,6 +1189,7 @@ def evaluate_all_contracts(
             # Update count for the rest of the tick if approved
             if result.econ_approved and result.position_contracts > 0:
                 current_tick_counts[family] = count + 1
+                hub_exposure[hub] = current_hub_usd + (result.position_contracts * (yes_quote.get("ask") or 0.50))
 
             rank_score = result.ev * result.confidence if result.econ_approved else 0.0
             approved_entries.append(

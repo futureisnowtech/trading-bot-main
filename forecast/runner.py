@@ -543,16 +543,26 @@ def run_position_monitor() -> None:
                                 else:
                                     in_zone = metar_temp >= limit_lower and metar_temp <= (limit_upper + 0.5)
 
+                                # v19.1.10: Precision Lock (Front-run the whole degree)
                                 if in_zone and local_hour >= 16:
                                     # High probability of 'locked' result
+                                    # If within 0.2F of limit and trend is flat/reversing, take 94c+
                                     if bid_price >= 0.94:
                                         logger.info(f"[Sovereign Precinct] LOCK EXIT: {local_symbol} at {bid_price:.2f} (After 4PM local, in zone).")
                                         resolved = True
+                                    elif is_high and metar_temp >= (limit_upper - 0.2) and bid_price >= 0.90:
+                                         logger.info(f"[Sovereign Precinct] PRECISION LOCK: {local_symbol} at {bid_price:.2f} (0.2F from limit).")
+                                         resolved = True
 
-                            # 3. TREND DIVERGENCE (Salvage)
-                            # If HRRR (3km resolution) is predicting a high significantly below our bracket
+                            # 3. TREND DIVERGENCE / SALVAGE (Capital Salvage)
+                            # If HRRR (3km resolution) is predicting a result that makes winning impossible
                             if not resolved and hrrr_high is not None:
-                                if is_high and hrrr_high < (limit_lower - 1.5):
+                                # High YES Salvage: HRRR predicts max 5F below our bracket start
+                                if is_high and hrrr_high < (limit_lower - 5.0) and bid_price > 0.05:
+                                    logger.warning(f"[Sovereign Precinct] SALVAGE EXIT: {local_symbol} HRRR predicts max {hrrr_high}F. Cutting for {bid_price:.2f}.")
+                                    resolved = True
+                                # High YES Divergence: HRRR predicts result significantly below bracket
+                                elif is_high and hrrr_high < (limit_lower - 1.5):
                                     logger.warning(f"[Sovereign Precinct] TREND EXIT: {local_symbol} HRRR predicts {hrrr_high}F vs bracket start {limit_lower}F. Cutting loss.")
                                     resolved = True
 

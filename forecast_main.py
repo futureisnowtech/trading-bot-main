@@ -1,6 +1,6 @@
 """
 forecast_main.py — Isolated orchestrator for the Kalshi Forecast lane.
-v19.1.10: Sovereign Weather Alpha (ECMWF, HRRR, METAR).
+v19.1.11: Institutional Alpha Levers (Sigma, Fee Floor, Spike Guard).
 """
 
 import sys, os, time, traceback, logging, threading
@@ -27,7 +27,7 @@ def _setup_logging():
 
 _setup_logging()
 
-VERSION = "v19.1.10"
+VERSION = "v19.1.11"
 
 BANNER = f"""
 ╔══════════════════════════════════════════════════════════════════╗

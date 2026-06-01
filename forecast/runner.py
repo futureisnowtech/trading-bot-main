@@ -419,6 +419,44 @@ def run_position_monitor() -> None:
                             resolved = True
                     except: pass
 
+            # v19.1.9: Sovereign Exit Protocol (Profit Protection)
+            try:
+                q = broker.get_quote(local_symbol)
+                if q and q.get("bid"):
+                    bid_price = float(q["bid"])
+
+                    # 1. Take Profit: Narrow Bin (Double-sided risk)
+                    # We assume narrow if strike looks like a mid-range or 'between'
+                    # For now, we'll use a conservative 85c trigger for all weather
+                    is_weather = "KXHIGH" in local_symbol or "KXLOW" in local_symbol
+
+                    if is_weather:
+                        from forecast.strategy_engine import _parse_weather_threshold
+                        from data.kalshi_weather_monitor import get_weather_data
+
+                        # Get current model probability
+                        w_data = get_weather_data(local_symbol.split('-')[0])
+                        threshold = _parse_weather_threshold(local_symbol)
+                        model_p = 0.0
+                        if w_data and threshold is not None:
+                            members = w_data.get("members_high" if "HIGH" in local_symbol else "members_low", [])
+                            if members:
+                                model_p = sum(1 for m in members if m >= threshold) / len(members)
+
+                        # RULE 1: Narrow Bin Take-Profit (85c)
+                        # If market prices us at 85% and it's a weather bin, take the money.
+                        if bid_price >= 0.85:
+                            logger.info(f"[Sovereign Exit] TP Triggered: {local_symbol} at {bid_price:.2f} (85c Floor)")
+                            resolved = True
+
+                        # RULE 2: Model Invalidation (Stop-Loss)
+                        # If our own model prob drops below 50%, the thesis is dead.
+                        elif model_p < 0.50 and model_p > 0:
+                            logger.warning(f"[Sovereign Exit] SL Triggered: {local_symbol} model_p={model_p:.2f} < 0.50")
+                            resolved = True
+            except Exception as e:
+                logger.debug(f"Exit Protocol check failed for {local_symbol}: {e}")
+
             # Dead-money backstop: > 96h open
             if not resolved and entered_at:
                 try:
@@ -434,6 +472,7 @@ def run_position_monitor() -> None:
                     pass
 
             if resolved:
+
                 try:
                     flatten_res = broker.flatten_position(
                         local_symbol=local_symbol,

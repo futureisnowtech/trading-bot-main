@@ -688,6 +688,15 @@ def _strategy_weather(ticker: str, ask_yes: float, ask_no: float, hours_to_res: 
 
     # v19.1.5: High-aggression edge detection (8% floor)
     # Guardrail 3: Taker-Override (Edge >= 22%)
+    # v19.1.9: Narrow Bin Veto (The "Precision Trap")
+    # If the bin is <= 1.1 degrees wide, the risk of NWS sensor error/rounding
+    # is too high for a standard 8% edge. We require 25% edge for these traps.
+    if "-B" in ticker:
+        # Most -B tickers are in the format KX...-B80.5 (representing 80 to 81)
+        # We'll treat all -B as narrow for safety if they are temperature.
+        if (mode == "HIGH" or mode == "LOW") and edge_yes < 0.25:
+             return False, "", 0.0, [f"narrow_bin_trap_edge_too_low ({edge_yes:.2f})"], False
+
     if edge_yes > 0.08:
         if cloud_veto:
             return False, "", 0.0, [f"cloud_cover_veto (TCDC={peak_tcdc:.1f}%)"], False

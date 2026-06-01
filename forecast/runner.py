@@ -375,16 +375,52 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
 def run_position_monitor() -> None:
     """
     30-sec cycle: check open positions, flatten resolved contracts.
+    v19.1.10: Self-healing Broker Reconciliation.
     """
     try:
         broker = _get_broker()
         if not broker.is_connected():
             return
 
-        positions = broker.get_positions()
-        now = datetime.now(timezone.utc)
+        # 1. Pull Current Broker Reality
+        broker_positions = broker.get_positions()
+        broker_tickers = {p["local_symbol"] for p in broker_positions if p.get("qty", 0) > 0}
+        
+        # 2. Pull Local DB Expectation
+        db_path = os.path.join(_ROOT, "logs", "trades.db")
+        from forecast.db import get_open_forecast_positions, mark_forecast_position_closed
+        db_positions = get_open_forecast_positions(db_path=db_path)
 
-        for pos in positions:
+        # ── v19.1.10: Manual Exit Detection ──────────────────────────────────
+        for db_pos in db_positions:
+            ticker = db_pos["ticker"]
+            if ticker not in broker_tickers:
+                logger.info(f"[Sovereign Recon] Manual exit detected for {ticker}. Cleaning up DB.")
+                mark_forecast_position_closed(ticker, exit_type="manual_exit", db_path=db_path)
+
+        # ── v19.1.10: Manual Entry Adoption ──────────────────────────────────
+        from forecast.db import insert_forecast_position
+        for broker_pos in broker_positions:
+            ticker = broker_pos["local_symbol"]
+            qty = broker_pos.get("qty", 0)
+            if not qty: continue
+            
+            # If not in DB, adopt it
+            if not any(dp["ticker"] == ticker for db_pos in db_positions):
+                logger.info(f"[Sovereign Recon] Auto-adopting manual trade for {ticker} (qty={qty})")
+                insert_forecast_position(
+                    ticker=ticker,
+                    qty=qty,
+                    entry_price=broker_pos.get("entry_price") or broker_pos.get("mid") or 0.50,
+                    side=broker_pos.get("side", "YES"),
+                    db_path=db_path
+                )
+                # RC: Re-fetch or add to local list to prevent duplicate logic below
+                db_positions.append({"ticker": ticker})
+
+        # ── v19.1.10: Standard Flattening / Exit Protocol ───────────────────
+        now = datetime.now(timezone.utc)
+        for pos in broker_positions:
             local_symbol = pos.get("local_symbol", "")
             right = pos.get("right", "C")
             qty = pos.get("qty", 0)

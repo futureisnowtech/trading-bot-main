@@ -1,6 +1,6 @@
 """
 forecast_main.py — Isolated orchestrator for the Kalshi Forecast lane.
-v19.1.6: Refactored to use Sovereign start_forecast_lane for optimized execution.
+v19.1.10: Sovereign Weather Alpha (ECMWF, HRRR, METAR).
 """
 
 import sys, os, time, traceback, logging, threading
@@ -27,7 +27,7 @@ def _setup_logging():
 
 _setup_logging()
 
-VERSION = "v19.1.6"
+VERSION = "v19.1.10"
 
 BANNER = f"""
 ╔══════════════════════════════════════════════════════════════════╗

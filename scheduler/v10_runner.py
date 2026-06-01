@@ -1713,7 +1713,8 @@ def _attempt_entry(
             dag_state=dag_state,
         )
     except Exception as _trade_err:
-        logger.debug(f"[v10] DAG/tradeability error: {_trade_err}")
+        import traceback
+        logger.error(f"[v10] DAG/tradeability error: {_trade_err}\n{traceback.format_exc()}")
         _trade = {
             "status": "blocked",
             "blocked_reason": "execution_policy_unavailable",

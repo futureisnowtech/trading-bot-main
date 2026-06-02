@@ -619,7 +619,7 @@ def _strategy_late_repricing(
 
 from data.kalshi_weather_monitor import get_weather_data
 
-def calculate_continuous_sizing(market_price: float, ensemble_prob: float, capital_base: float, multiplier: float = 1.0) -> int:
+def calculate_continuous_sizing(market_price: float, ensemble_prob: float, capital_base: float, multiplier: float = 1.0, cap_pct: float = 0.10) -> int:
     """Logistic Sigmoid mapping for high-aggression position sizing (v19.1.4)."""
     # Ensure prob is clipped
     ensemble_prob = max(0.01, min(0.99, ensemble_prob))
@@ -631,9 +631,10 @@ def calculate_continuous_sizing(market_price: float, ensemble_prob: float, capit
     # v19.1.4: High-aggression scaling (sharp sigmoid at 12% edge)
     scaling_factor = 1 / (1 + np.exp(-15 * (edge - 0.12)))
 
-    # v19.1.12: Tightened Sovereign Cap — 10% of bankroll for weather
+    # v19.1.12: Tightened Sovereign Cap — default 10% of bankroll for weather
+    # v19.6: Dynamic Cap — 10%, 15%, or 20% based on Conviction Tier
     # Multiplier (Convergence/Sigma) applied to final allocated capital
-    allocated_capital = capital_base * 0.10 * scaling_factor * multiplier
+    allocated_capital = capital_base * cap_pct * scaling_factor * multiplier
 
     qty = int(allocated_capital / market_price) if market_price > 0 else 0
     return qty
@@ -809,9 +810,24 @@ def _strategy_weather(ticker: str, ask_yes: float, ask_no: float, hours_to_res: 
             f"sigma_mult={sigma_mult:.2f}x",
             f"TCDC={peak_tcdc:.1f}%"
         ]
+        # v19.6: Sovereign Escalation — Tier Identification
+        conv_tier = 3
+        sizing_cap = 0.10
+        
+        # TIER 1: AMAZING (Grand Slam)
+        if ensemble_prob > 0.92 and sigma < 1.0:
+            conv_tier = 1
+            sizing_cap = 0.20
+        # TIER 2: HIGH
+        elif ensemble_prob > 0.85 and sigma < 1.5:
+            conv_tier = 2
+            sizing_cap = 0.15
+            
+        factors.append(f"tier={conv_tier}")
+        
         # v19.1.12: Return raw ensemble_prob + sizing_multiplier separately
         sizing_multiplier = convergence_multiplier * sigma_mult
-        return True, "YES", ensemble_prob, factors, is_taker, sizing_multiplier
+        return True, "YES", ensemble_prob, factors, is_taker, sizing_multiplier, conv_tier, sizing_cap
 
     if edge_no > 0.08:
         is_taker = edge_no >= 0.22 and is_short_term
@@ -821,10 +837,23 @@ def _strategy_weather(ticker: str, ask_yes: float, ask_no: float, hours_to_res: 
             f"conv_mult={convergence_multiplier:.1f}x",
             f"sigma_mult={sigma_mult:.2f}x"
         ]
+        # v19.6: Sovereign Escalation — Tier Identification (NO Side)
+        conv_tier = 3
+        sizing_cap = 0.10
+        no_prob = 1.0 - ensemble_prob
+        if no_prob > 0.92 and sigma < 1.0:
+            conv_tier = 1
+            sizing_cap = 0.20
+        elif no_prob > 0.85 and sigma < 1.5:
+            conv_tier = 2
+            sizing_cap = 0.15
+            
+        factors.append(f"tier={conv_tier}")
+        
         sizing_multiplier = convergence_multiplier * sigma_mult
-        return True, "NO", (1.0 - ensemble_prob), factors, is_taker, sizing_multiplier
+        return True, "NO", no_prob, factors, is_taker, sizing_multiplier, conv_tier, sizing_cap
 
-    return False, "", 0.0, ["insufficient_edge"], False, 1.0
+    return False, "", 0.0, ["insufficient_edge"], False, 1.0, 3, 0.10
 
 def evaluate_contract(
     contract: dict,
@@ -1028,14 +1057,15 @@ def evaluate_contract(
     )
 
     # Evaluate all strategy families
-    strategy_candidates: list[tuple[str, str, float, list[str], bool, float]] = []
+    # v19.6: tuple = (passes, side, ensemble_prob, factors, is_taker, multiplier, tier, sizing_cap)
+    strategy_candidates: list[tuple[str, str, float, list[str], bool, float, int, float]] = []
 
     # v18.35: Weather Strategy (Ensemble-driven)
     ticker = contract.get("local_symbol", "")
     w_res = _strategy_weather(ticker, ask_yes, ask_no, hours_to_res)
     if w_res[0]: # w_passes
-        # w_res = (passes, side, ensemble_prob, factors, is_taker, multiplier)
-        strategy_candidates.append(("weather_ensemble", w_res[1], w_res[2], w_res[3], w_res[4], w_res[5]))
+        # w_res = (passes, side, ensemble_prob, factors, is_taker, multiplier, tier, sizing_cap)
+        strategy_candidates.append(("weather_ensemble", w_res[1], w_res[2], w_res[3], w_res[4], w_res[5], w_res[6], w_res[7]))
 
     for name, fn in [
         ("continuation", _strategy_continuation),
@@ -1045,7 +1075,7 @@ def evaluate_contract(
         try:
             passes, side, confidence, factors = fn(feats, hours_to_res)
             if passes:
-                strategy_candidates.append((name, side, confidence, factors, False, 1.0))
+                strategy_candidates.append((name, side, confidence, factors, False, 1.0, 3, 0.10))
         except Exception as e:
             logger.debug(f"Strategy {name} error: {e}")
 
@@ -1071,7 +1101,22 @@ def evaluate_contract(
 
     # Pick highest-confidence strategy
     strategy_candidates.sort(key=lambda x: x[2], reverse=True)
-    best_family, best_side, best_confidence, best_factors, best_is_taker, best_multiplier = strategy_candidates[0]
+    best_family, best_side, best_confidence, best_factors, best_is_taker, best_multiplier, best_tier, best_sizing_cap = strategy_candidates[0]
+
+    # v19.6: Sovereign Conviction — Tiered Resolution Windows
+    # T3: 72h max | T2: 120h (5d) max | T1: 168h (7d) max
+    res_limit = 72.0
+    if best_tier == 1: res_limit = 168.0
+    elif best_tier == 2: res_limit = 120.0
+    
+    if hours_to_res > res_limit:
+        return StrategyResult(
+            strategy_family="vetoed", side="NONE", q_hat=q_hat, ev=0.0, ev_yes=0.0, ev_no=0.0,
+            confidence=0.0, uncertainty_penalty=0.0, econ_approved=False,
+            veto_reason=f"conviction_time_veto (Tier {best_tier} requires < {res_limit:.0f}h, got {hours_to_res:.1f}h)",
+            position_fraction=0.0, position_contracts=0, top_factors=best_factors,
+            hours_to_resolution=hours_to_res, is_taker_override=False
+        )
 
     # v19.1.6: Sovereign Weather Override
     # Weather alpha is probabilistic arbitrage, NOT technical price action.
@@ -1109,7 +1154,8 @@ def evaluate_contract(
                 market_price=p_cost,
                 ensemble_prob=best_confidence,
                 capital_base=bankroll,
-                multiplier=best_multiplier
+                multiplier=best_multiplier,
+                cap_pct=best_sizing_cap
             )
             # v19.5: Institutional Quantity Cap (Prevent Penny Spree)
             if n_contracts > KALSHI_MAX_QTY_PER_POSITION:

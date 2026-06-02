@@ -33,7 +33,7 @@ TIER1_KEYWORDS: list[str] = [
 
 # Resolution window: only trade events resolving within this window
 MIN_HOURS_TO_RESOLUTION: float = 2.0  # too close = insufficient time for entry
-MAX_DAYS_TO_RESOLUTION: float = 3.0  # v19.1.4: Strict 72h gate for weather/macro velocity
+MAX_DAYS_TO_RESOLUTION: float = 7.0  # v19.6: Extended to capture long-range Grand Slams
 
 # Min quote quality to be considered tradeable
 MAX_ACCEPTABLE_OVERROUND: float = 0.30  # Ω_t ≤ 0.30 (30%)

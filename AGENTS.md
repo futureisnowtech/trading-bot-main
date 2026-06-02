@@ -6,9 +6,15 @@
 ## Canonical Truth
 
 - Repo root: `/Users/joshmacbookair2020/Projects/algo_trading_final`
-- Canonical version: `v19.5.2` (`2026-06-02`)
-- Canonical active lane: **Dual-Lane**: Coinbase Spot Scalp + Kalshi Weather Sovereign Survival
-- **Status:** **SOVEREIGN SURVIVAL**. Resolved Salvage Deadlock & Buffer Tuning.
+- Canonical version: `v19.6.0` (`2026-06-02`)
+- Canonical active lane: **Dual-Lane**: Coinbase Spot Scalp + Kalshi Weather Sovereign Conviction
+- **Status:** **SOVEREIGN CONVICTION**. Tiered Alpha & Extended Horizon.
+- **Critical Changes (v19.6.0):**
+  - **Sovereign Conviction Engine**: Implemented a tiered trade authorization system. The bot now authorises longer resolution windows and larger positions based on model conviction.
+    - **Tier 1 (AMAZING)**: >92% Prob + <1.0F Sigma. Authorises 20% sizing and 7-day (168h) resolution windows.
+    - **Tier 2 (HIGH)**: >85% Prob + <1.5F Sigma. Authorises 15% sizing and 5-day (120h) resolution windows.
+    - **Tier 3 (STANDARD)**: Standard rules. 10% sizing and 3-day (72h) resolution window.
+  - **Extended Discovery**: Increased the resolution window from 3 to 7 days to capture "Grand Slam" weather patterns before the market fully prices them.
 - **Critical Changes (v19.5.2):**
   - **Salvage Unblocking**: Refactored `forecast/runner.py` to move Sovereign Salvage and Take-Profit triggers BEFORE the capital guard. This prevents the bot from "freezing" when fully deployed, allowing it to free up capital by purging toxic trades.
   - **Buffer Tuning**: Relaxed the Oxygen Buffer from 20% to 10% (MAX_DEPLOYED_PCT = 0.90) per user request, increasing trading capacity for smaller balances.

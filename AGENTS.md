@@ -12,6 +12,7 @@
 - **Critical Changes (v19.1.12):**
   - **Sovereign Sizing (v2)**: Hard-tightened Kalshi weather exposure to a 10% bankroll cap per position. Decoupled conviction multipliers (Convergence/Sigma) from probability space, applying them as linear scalers to final USD size to prevent "suicide sizing."
   - **Opportunistic Swaps**: Replaced the hard 15-position concurrency gate with a dynamic "Swap Alpha" layer. The bot now evaluates new trades continuously and will automatically flatten its weakest existing bet if a new candidate offers >10% EV improvement (Swap Alpha > 0.10).
+  - **Sovereign Mobile HUD**: Rearchitected the Telegram bot into a stateful, interactive terminal. Added the `/hud` command for real-time mobile insights into Kalshi portfolio state, regional hub exposure, and "Sovereign Philosophy" deep-dives.
   - **Strict Hub Gating**: Hardened regional weather hub enforcement with a strictly enforced $40.0 USD cap per hub, preventing over-concentration in specific city clusters.
 - **Critical Changes (v19.1.11):**
   - **Institutional Alpha Levers**: Finalized the Sovereign Weather Engine with advanced quant-desk tactics:

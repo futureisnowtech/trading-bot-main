@@ -1,0 +1,202 @@
+"""
+notifications/sovereign_mobile_hud.py — Sovereign Mobile HUD Brain.
+
+Architectural Mandate:
+1. Provide high-fidelity, interactive system insights on Telegram.
+2. Focus on Kalshi Weather Alpha and Sovereign Philosophy (Sigma, Hubs, Swaps).
+3. Act as a stateful "Sovereign Oracle" interface.
+"""
+
+import os
+import time
+import logging
+import sqlite3
+from datetime import datetime, timezone
+from typing import Dict, List, Any, Optional
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+from config import DB_PATH, REPO_ROOT
+from VERSION import VERSION
+
+logger = logging.getLogger(__name__)
+
+# ── Sovereign UI Themes ────────────────────────────────────────────────────────
+
+THEME_HEADER = "═══ SOVEREIGN HUD v{} ═══"
+ICON_LIVE = "🟢 LIVE"
+ICON_PAPER = "⚪️ PAPER"
+ICON_KALSHI = "🌪"
+ICON_CRYPTO = "⚡️"
+ICON_RISK = "🛡"
+
+# ── Formatting Helpers ─────────────────────────────────────────────────────────
+
+def format_currency(val: float) -> str:
+    return f"${val:,.2f}"
+
+def format_pnl(val: float) -> str:
+    icon = "🟩" if val >= 0 else "🟥"
+    return f"{icon} {val:+.2f}"
+
+# ── Core Data Fetchers ────────────────────────────────────────────────────────
+
+def get_system_vitals() -> Dict[str, Any]:
+    """Fetch system-wide vitals from DB and process state."""
+    vitals = {
+        "version": VERSION,
+        "mode": "UNKNOWN",
+        "cpu": 0.0,
+        "ram": 0.0,
+        "uptime": "0h 0m",
+        "integrity": 100,
+        "api_spend_24h": 0.0
+    }
+    
+    try:
+        import psutil
+        vitals["cpu"] = psutil.cpu_percent()
+        vitals["ram"] = psutil.virtual_memory().percent
+        
+        # Mode from DB
+        with sqlite3.connect(DB_PATH) as conn:
+            row = conn.execute("SELECT process_mode, startup_ts FROM system_runtime_state ORDER BY id DESC LIMIT 1").fetchone()
+            if row:
+                vitals["mode"] = row[0].upper()
+                upt = time.time() - float(row[1] or time.time())
+                h, m = divmod(upt // 60, 60)
+                vitals["uptime"] = f"{int(h)}h {int(m)}m"
+                
+            # AI Spend
+            spend = conn.execute("SELECT SUM(usd_cost) FROM api_costs WHERE ts > ?", (time.time() - 86400,)).fetchone()
+            vitals["api_spend_24h"] = float(spend[0] or 0.0)
+            
+    except Exception as e:
+        logger.error(f"[mobile_hud] Vitals fetch error: {e}")
+        
+    return vitals
+
+def get_kalshi_state() -> Dict[str, Any]:
+    """Fetch Kalshi-specific portfolio state."""
+    state = {
+        "balance": 0.0,
+        "positions": [],
+        "hubs": {},
+        "active_markets": 0
+    }
+    
+    try:
+        from execution.kalshi_broker import get_kalshi_broker
+        broker = get_kalshi_broker()
+        if broker.is_connected():
+            state["balance"] = broker.get_account_balance()
+            state["positions"] = broker.get_positions()
+            
+        # Hub exposure logic
+        from forecast.strategy_engine import _get_city_hub
+        for p in state["positions"]:
+            hub = _get_city_hub(p.get("local_symbol", ""))
+            cost = p.get("qty", 0) * p.get("entry_price", 0)
+            state["hubs"][hub] = state["hubs"].get(hub, 0.0) + cost
+            
+    except Exception as e:
+        logger.error(f"[mobile_hud] Kalshi state error: {e}")
+        
+    return state
+
+# ── Message Generators ─────────────────────────────────────────────────────────
+
+def build_main_menu_msg() -> str:
+    v = get_system_vitals()
+    k = get_kalshi_state()
+    
+    mode_icon = ICON_LIVE if v["mode"] == "LIVE" else ICON_PAPER
+    
+    msg = [
+        THEME_HEADER.format(VERSION),
+        f"Status: {mode_icon} | Up: {v['uptime']}",
+        f"SRE Integrity: {v['integrity']}%",
+        "",
+        f"<b>{ICON_KALSHI} KALSHI WEATHER</b>",
+        f"Balance: {format_currency(k['balance'])}",
+        f"Positions: {len(k['positions'])}/15",
+        f"Active Hubs: {len(k['hubs'])}",
+        "",
+        "<i>Tap a module below for deep-dive analysis.</i>"
+    ]
+    return "\n".join(msg)
+
+def get_main_menu_keyboard() -> InlineKeyboardMarkup:
+    keyboard = [
+        [
+            InlineKeyboardButton(f"{ICON_KALSHI} Kalshi Deep-Dive", callback_data="hud_kalshi_main"),
+            InlineKeyboardButton(f"{ICON_CRYPTO} Crypto Lane", callback_data="hud_crypto_main"),
+        ],
+        [
+            InlineKeyboardButton(f"{ICON_RISK} Sovereign Philosophy", callback_data="hud_philosophy"),
+            InlineKeyboardButton("🔄 Refresh", callback_data="hud_main_refresh"),
+        ],
+        [
+            InlineKeyboardButton("📊 System Vitals", callback_data="hud_vitals"),
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+def build_kalshi_deep_dive_msg() -> str:
+    k = get_kalshi_state()
+    
+    msg = [
+        f"<b>{ICON_KALSHI} KALSHI SOVEREIGN INTEL</b>",
+        f"Equity: {format_currency(k['balance'])}",
+        "",
+        "<b>Current Positions:</b>"
+    ]
+    
+    if not k["positions"]:
+        msg.append("  - <i>Scanning for high-alpha entries...</i>")
+    else:
+        for p in k["positions"][:8]: # Limit to avoid massive messages
+            sym = p.get("local_symbol", "")
+            qty = p.get("qty", 0)
+            side = p.get("side", "YES")
+            cost = p.get("entry_price", 0.0)
+            # v19.1.12: Philosophical context placeholder
+            msg.append(f"• <code>{sym}</code> {side} x{qty} @ {cost:.3f}")
+            
+    msg.append("")
+    msg.append("<b>Hub Exposure:</b>")
+    for hub, exposure in k.get("hubs", {}).items():
+        if hub == "UNKNOWN": continue
+        warning = "⚠️" if exposure > 30 else ""
+        msg.append(f"  - {hub}: {format_currency(exposure)} {warning}")
+        
+    return "\n".join(msg)
+
+def get_kalshi_menu_keyboard() -> InlineKeyboardMarkup:
+    keyboard = [
+        [
+            InlineKeyboardButton("🔍 Scan Candidates", callback_data="hud_kalshi_scan"),
+            InlineKeyboardButton("📉 Worst EV (Swap)", callback_data="hud_kalshi_worst"),
+        ],
+        [
+            InlineKeyboardButton("⬅️ Back to HUD", callback_data="hud_main_menu"),
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+def build_philosophy_msg() -> str:
+    msg = [
+        "<b>📜 SOVEREIGN TRADING PHILOSOPHY</b>",
+        "",
+        "<b>1. The Sigma Lever (Volatility)</b>",
+        "We treat model disagreement (Sigma) as a risk vector. Chaotic ensembles trigger automatic position size reduction.",
+        "",
+        "<b>2. Opportunistic Swaps</b>",
+        "Capital is finite. We ruthlessly flatten sub-par positions if a new candidate offers >10% improvement in EV.",
+        "",
+        "<b>3. Hub Gating</b>",
+        "Regional weather systems are correlated. We cap exposure per hub at $40 to prevent 'black swan' city-cluster washouts.",
+        "",
+        "<b>4. METAR Ground Truth</b>",
+        "We exit early if airport sensors (METAR) diverge from the 3km HRRR models before resolution."
+    ]
+    return "\n".join(msg)

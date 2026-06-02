@@ -21,6 +21,7 @@ from telegram.constants import ParseMode, ChatAction
 import system_state
 from spot_engine import get_spot_positions, _get_broker
 from notifications.ai_agent import ask_ai
+from notifications import sovereign_mobile_hud as hud
 
 # v18.19.5: Project Apex Production Overhaul (80% Cost Reduction)
 # Lever 3: Debounce & Dedupe
@@ -206,6 +207,14 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"AI Spend (24h): ${usd_spent:.4f}"
     )
     await _reply_text(update, msg, parse_mode=ParseMode.HTML)
+
+
+@restricted_access
+async def hud_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """The Sovereign Mobile HUD Entry Point."""
+    msg = hud.build_main_menu_msg()
+    reply_markup = hud.get_main_menu_keyboard()
+    await _reply_text(update, msg, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
 
 @restricted_access
@@ -661,7 +670,32 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await query.answer()
 
-    if query.data == "cmd_vitals":
+    # v19.1.12: Sovereign HUD Callback Routing
+    if query.data == "hud_main_menu":
+        await query.edit_message_text(
+            hud.build_main_menu_msg(),
+            reply_markup=hud.get_main_menu_keyboard(),
+            parse_mode=ParseMode.HTML
+        )
+    elif query.data == "hud_kalshi_main":
+        await query.edit_message_text(
+            hud.build_kalshi_deep_dive_msg(),
+            reply_markup=hud.get_kalshi_menu_keyboard(),
+            parse_mode=ParseMode.HTML
+        )
+    elif query.data == "hud_philosophy":
+        await query.edit_message_text(
+            hud.build_philosophy_msg(),
+            reply_markup=hud.get_kalshi_menu_keyboard(), # Reuse back button
+            parse_mode=ParseMode.HTML
+        )
+    elif query.data == "hud_main_refresh":
+        await query.edit_message_text(
+            hud.build_main_menu_msg(),
+            reply_markup=hud.get_main_menu_keyboard(),
+            parse_mode=ParseMode.HTML
+        )
+    elif query.data == "cmd_vitals":
         await vitals_command(update, context)
     elif query.data == "cmd_trades":
         await recent_trades_command(update, context)
@@ -812,6 +846,7 @@ async def run_bot():
         app.add_handler(MessageHandler(filters.ALL, raw_logger), group=-1)
 
         app.add_handler(CommandHandler("status", status_command))
+        app.add_handler(CommandHandler("hud", hud_command))
         app.add_handler(CommandHandler("logs", logs_command))
         app.add_handler(CommandHandler("metrics", metrics_command))
         app.add_handler(CommandHandler("positions", positions_command))

@@ -727,8 +727,8 @@ CRYPTOPANIC_API_KEY: str = os.getenv(
 REDDIT_CLIENT_ID: str = os.getenv("REDDIT_CLIENT_ID", "")
 REDDIT_CLIENT_SECRET: str = os.getenv("REDDIT_CLIENT_SECRET", "")
 REDDIT_USER_AGENT: str = os.getenv("REDDIT_USER_AGENT", "AlgoTradingBot/1.0")
-GEMINI_MODEL: str = "gemini-2.5-flash"  # Latest stable for this key
-GEMINI_MODEL_EXTENDED: str = "gemini-2.5-pro"  # For exit extended thinking
+GEMINI_MODEL: str = "gemini-3.5-flash"  # v19.4.1: Standard for June 2026
+GEMINI_MODEL_EXTENDED: str = "gemini-3.5-pro"  # Frontier Reasoning
 
 # ML signal gate — skip debate if P(win) below threshold
 # Calibrated to seeded data baseline (~9% WR from math-only backtest).

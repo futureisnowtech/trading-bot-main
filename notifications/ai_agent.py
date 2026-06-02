@@ -27,8 +27,9 @@ logger = logging.getLogger(__name__)
 # v18.30: Sovereign SDK Overhaul (Legacy SDK Excised)
 # Levers: google-genai (2026 Standard), Context Slimming, Cost Telemetry
 
-GEMINI_25_FLASH_INPUT_RATE_1M = 0.10   # USD per 1M tokens (2026 rates)
-GEMINI_25_FLASH_OUTPUT_RATE_1M = 0.30  # USD per 1M tokens (2026 rates)
+# v19.4.1: Gemini 3.5 Flash Institutional Rates
+GEMINI_35_FLASH_INPUT_RATE_1M = 0.05   # USD per 1M tokens
+GEMINI_35_FLASH_OUTPUT_RATE_1M = 0.15  # USD per 1M tokens
 
 def log_api_cost(prompt_tokens: int, completion_tokens: int, module: str):
     """
@@ -38,8 +39,8 @@ def log_api_cost(prompt_tokens: int, completion_tokens: int, module: str):
         import sqlite3 as _sq
         from config import DB_PATH as _DB_PATH
         
-        input_cost = (prompt_tokens / 1_000_000) * GEMINI_25_FLASH_INPUT_RATE_1M
-        output_cost = (completion_tokens / 1_000_000) * GEMINI_25_FLASH_OUTPUT_RATE_1M
+        input_cost = (prompt_tokens / 1_000_000) * GEMINI_35_FLASH_INPUT_RATE_1M
+        output_cost = (completion_tokens / 1_000_000) * GEMINI_35_FLASH_OUTPUT_RATE_1M
         total_cost = input_cost + output_cost
 
         with _sq.connect(_DB_PATH) as _tconn:
@@ -208,7 +209,9 @@ def ask_ai(query: str) -> str:
 
     try:
         client = genai.Client(api_key=api_key)
-        model_id = os.environ.get("GEMINI_MODEL") or "models/gemini-flash-latest"
+        # v19.4.1: Correctly use configured model with proper fallback
+        _m_name = os.environ.get("GEMINI_MODEL") or GEMINI_MODEL
+        model_id = f"models/{_m_name}" if not _m_name.startswith("models/") else _m_name
         
         context = get_repo_context()
         system_instruction = (
@@ -228,6 +231,13 @@ def ask_ai(query: str) -> str:
 
         config_dict = {
             'system_instruction': system_instruction,
+            'safety_settings': [
+                {'category': 'HARM_CATEGORY_HARASSMENT', 'threshold': 'BLOCK_NONE'},
+                {'category': 'HARM_CATEGORY_HATE_SPEECH', 'threshold': 'BLOCK_NONE'},
+                {'category': 'HARM_CATEGORY_SEXUALLY_EXPLICIT', 'threshold': 'BLOCK_NONE'},
+                {'category': 'HARM_CATEGORY_DANGEROUS_CONTENT', 'threshold': 'BLOCK_NONE'},
+                {'category': 'HARM_CATEGORY_CIVIC_INTEGRITY', 'threshold': 'BLOCK_NONE'},
+            ]
         }
 
         if available_tools:
@@ -293,7 +303,9 @@ def generate_sovereign_briefing(payload: dict) -> str:
 
     try:
         client = genai.Client(api_key=api_key)
-        model_id = os.environ.get("GEMINI_MODEL") or "models/gemini-flash-latest"
+        # v19.4.1: Correctly use configured model
+        _m_name = os.environ.get("GEMINI_MODEL") or GEMINI_MODEL
+        model_id = f"models/{_m_name}" if not _m_name.startswith("models/") else _m_name
         
         system_instruction = (
             "You are the Lead SRE and Sr. Quant for a Sovereign trading system.\n"
@@ -311,6 +323,13 @@ def generate_sovereign_briefing(payload: dict) -> str:
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
                 temperature=0.2, # Low temperature for analytical consistency
+                safety_settings=[
+                    {'category': 'HARM_CATEGORY_HARASSMENT', 'threshold': 'BLOCK_NONE'},
+                    {'category': 'HARM_CATEGORY_HATE_SPEECH', 'threshold': 'BLOCK_NONE'},
+                    {'category': 'HARM_CATEGORY_SEXUALLY_EXPLICIT', 'threshold': 'BLOCK_NONE'},
+                    {'category': 'HARM_CATEGORY_DANGEROUS_CONTENT', 'threshold': 'BLOCK_NONE'},
+                    {'category': 'HARM_CATEGORY_CIVIC_INTEGRITY', 'threshold': 'BLOCK_NONE'},
+                ]
             )
         )
         

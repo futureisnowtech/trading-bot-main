@@ -37,6 +37,23 @@ STATIONS = {
     "DC": {"lat": 38.85, "lon": -77.04, "icao": "KDCA", "name": "Reagan National", "tz": "America/New_York", "series": ["KXHIGHDC", "KXLOWDC", "KXRAINDC"]},
     "SF": {"lat": 37.62, "lon": -122.37, "icao": "KSFO", "name": "San Francisco Intl", "tz": "America/Los_Angeles", "series": ["KXHIGHSF", "KXLOWSF", "KXRAINSF"]},
     "LV": {"lat": 36.08, "lon": -115.15, "icao": "KLAS", "name": "Las Vegas (Harry Reid)", "tz": "America/Los_Angeles", "series": ["KXHIGHTLV", "KXLOWTLV"]},
+    # v19.3: Institutional Expansion Universe
+    "MSP": {"lat": 44.88, "lon": -93.22, "icao": "KMSP", "name": "Minneapolis-St. Paul", "tz": "America/Chicago", "series": ["KXHIGHMSP", "KXLOWMSP"]},
+    "DET": {"lat": 42.21, "lon": -83.35, "icao": "KDTW", "name": "Detroit Metro", "tz": "America/New_York", "series": ["KXHIGHDET", "KXLOWDET"]},
+    "SLC": {"lat": 40.79, "lon": -111.97, "icao": "KSLC", "name": "Salt Lake City Intl", "tz": "America/Denver", "series": ["KXHIGHSLC", "KXLOWSLC"]},
+    "OKC": {"lat": 35.39, "lon": -97.60, "icao": "KOKC", "name": "Oklahoma City", "tz": "America/Chicago", "series": ["KXHIGHOKC", "KXLOWOKC"]},
+    "PHL": {"lat": 39.87, "lon": -75.24, "icao": "KPHL", "name": "Philadelphia Intl", "tz": "America/New_York", "series": ["KXHIGHPHL", "KXLOWPHL", "KXRAINPHL"]},
+    "MCI": {"lat": 39.30, "lon": -94.71, "icao": "KMCI", "name": "Kansas City Intl", "tz": "America/Chicago", "series": ["KXHIGHMCI", "KXLOWMCI"]},
+    "ABQ": {"lat": 35.04, "lon": -106.61, "icao": "KABQ", "name": "Albuquerque Intl", "tz": "America/Denver", "series": ["KXHIGHABQ", "KXLOWABQ"]},
+    "MSY": {"lat": 29.99, "lon": -90.26, "icao": "KMSY", "name": "New Orleans (Armstrong)", "tz": "America/Chicago", "series": ["KXHIGHMSY", "KXLOWMSY"]},
+    "PDX": {"lat": 45.59, "lon": -122.60, "icao": "KPDX", "name": "Portland Intl", "tz": "America/Los_Angeles", "series": ["KXHIGHPDX", "KXLOWPDX"]},
+    "MKE": {"lat": 42.95, "lon": -87.90, "icao": "KMKE", "name": "Milwaukee (Mitchell)", "tz": "America/Chicago", "series": ["KXHIGHMKE", "KXLOWMKE"]},
+    "MCO": {"lat": 28.43, "lon": -81.33, "icao": "KMCO", "name": "Orlando Intl", "tz": "America/New_York", "series": ["KXHIGHMCO", "KXLOWMCO", "KXRAINMCO"]},
+    "STL": {"lat": 38.75, "lon": -90.37, "icao": "KSTL", "name": "St. Louis (Lambert)", "tz": "America/Chicago", "series": ["KXHIGHSTL", "KXLOWSTL"]},
+    "RDU": {"lat": 35.88, "lon": -78.79, "icao": "KRDU", "name": "Raleigh-Durham", "tz": "America/New_York", "series": ["KXHIGHRDU", "KXLOWRDU"]},
+    "CLT": {"lat": 35.21, "lon": -80.94, "icao": "KCLT", "name": "Charlotte-Douglas", "tz": "America/New_York", "series": ["KXHIGHCLT", "KXLOWCLT"]},
+    "OMA": {"lat": 41.30, "lon": -95.89, "icao": "KOMA", "name": "Omaha (Eppley Airfield)", "tz": "America/Chicago", "series": ["KXHIGHOMA", "KXLOWOMA"]},
+    "CHS": {"lat": 32.89, "lon": -80.04, "icao": "KCHS", "name": "Charleston (SC)", "tz": "America/New_York", "series": ["KXHIGHCHS", "KXLOWCHS"]},
 }
 
 # ── Intraday Ground Truth ───────────────────────────────────────────────────

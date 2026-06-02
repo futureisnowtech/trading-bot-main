@@ -2,6 +2,7 @@
 All notable changes to The King's Algo Trading System.
 
 ## 2026-06-02
+- v19.3.0 (Sovereign Expansion): Doubled the weather trading universe to 31 US cities, including Charleston, SC (KCHS). Rearchitected city-level risk gating into 7 "Sovereign Regional Hubs" (MIDWEST, NORTHEAST, SOUTH, FLORIDA, GULF, MOUNTAIN, WEST) with a strictly enforced $60 USD regional exposure cap to prevent portfolio concentration in correlated weather systems.
 - v19.2.0 (Sovereign Institutional Upgrade): Major weather lane overhaul. Integrated Grand Ensemble v19.2 (GFS + ECMWF + AI GraphCast) via Open-Meteo, expanding to 113+ members with a 40/30/30 weighted blend. Deployed "Strike Consistency" logic to prevent contradictory bets. Implemented "Sovereign Salvage" (aggressive <15% prob purge) and "Institutional Take-Profit" (70% lock-in) to maximize capital efficiency and rotation.
 - v19.1.12 (Sovereign Optimization): Implemented "Opportunistic Swaps" in the Kalshi weather lane, replacing the hard 15-position concurrency gate with a dynamic "Swap Alpha" layer (>10% EV improvement threshold). Deployed "Sovereign Sizing v2," tightening weather exposure to a 10% bankroll cap and decoupling conviction multipliers from probability space. Enforced strict $40 USD regional hub caps in `strategy_engine.py`. Rearchitected the Telegram bot into a "Sovereign Mobile HUD" with stateful interactive menus and philosophy deep-dives. Resolved a critical `NameError` in `v10_runner.py` for the `open_spot_pos` variable.
 

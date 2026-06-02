@@ -123,22 +123,32 @@ def _get_macro_context() -> dict:
     return {}
 
 
-# v19.1.10: Sovereign Regional Risk Engine
+# v19.3: Sovereign Regional Risk Engine
 # Group cities into hubs to manage regional weather system covariance.
-CLIMATE_HUBS = {
-    "NORTHEAST": ["NY", "BOS", "DC", "PHL"],
-    "SOUTH": ["MIA", "ATL", "HOU", "AUS", "DAL", "SAT", "OKC", "MSY"],
-    "MIDWEST": ["CHI", "MSP", "DEN"],
-    "WEST": ["LAX", "SFO", "SEA", "PHX", "LV"],
+# 31-City Sovereign Universe
+REGIONAL_HUBS = {
+    "MIDWEST": ["CHI", "MSP", "MKE", "OMA", "STL", "DET", "MCI", "OKC"],
+    "NORTHEAST": ["NYC", "NY", "BOS", "PHL", "DC"],
+    "SOUTH": ["ATL", "CLT", "RDU", "BNA", "CHS"],
+    "FLORIDA": ["MIA", "MCO"],
+    "GULF": ["HOU", "AUS", "DAL", "SAT", "MSY"],
+    "MOUNTAIN": ["DEN", "SLC", "ABQ"],
+    "WEST": ["LAX", "SFO", "SF", "PHX", "SEA", "PDX", "LV"],
 }
-HUB_CAP_USD = 40.0  # Max exposure per regional weather system
+HUB_CAP_USD = 60.0  # Max exposure per regional weather system (v19.3)
+
 
 def _get_city_hub(ticker: str) -> str:
-    """Identify which climate hub a ticker belongs to."""
-    for hub, cities in CLIMATE_HUBS.items():
-        if any(city in ticker for city in cities): 
+    """
+    v19.3: Sovereign Regional Hub Routing.
+    Maps 31 cities to meteorologically correlated macro-regions.
+    """
+    t = ticker.upper()
+    for hub, cities in REGIONAL_HUBS.items():
+        if any(city in t for city in cities):
             return hub
     return "UNKNOWN"
+
 
 @dataclass
 class StrategyResult:

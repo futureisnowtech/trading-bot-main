@@ -589,8 +589,10 @@ def _strategy_late_repricing(
 
 from data.kalshi_weather_monitor import get_weather_data
 
-def calculate_continuous_sizing(market_price: float, ensemble_prob: float, capital_base: float) -> int:
+def calculate_continuous_sizing(market_price: float, ensemble_prob: float, capital_base: float, multiplier: float = 1.0) -> int:
     """Logistic Sigmoid mapping for high-aggression position sizing (v19.1.4)."""
+    # Ensure prob is clipped
+    ensemble_prob = max(0.01, min(0.99, ensemble_prob))
     edge = ensemble_prob - market_price
     if edge < 0.08:  # 8% Edge Floor Veto
         return 0
@@ -599,8 +601,9 @@ def calculate_continuous_sizing(market_price: float, ensemble_prob: float, capit
     # v19.1.4: High-aggression scaling (sharp sigmoid at 12% edge)
     scaling_factor = 1 / (1 + np.exp(-15 * (edge - 0.12)))
 
-    # v19.1.4: Sovereign Cap — up to 25% of bankroll for weather
-    allocated_capital = capital_base * 0.25 * scaling_factor
+    # v19.1.12: Tightened Sovereign Cap — 10% of bankroll for weather
+    # Multiplier (Convergence/Sigma) applied to final allocated capital
+    allocated_capital = capital_base * 0.10 * scaling_factor * multiplier
 
     qty = int(allocated_capital / market_price) if market_price > 0 else 0
     return qty
@@ -751,8 +754,9 @@ def _strategy_weather(ticker: str, ask_yes: float, ask_no: float, hours_to_res: 
             f"sigma_mult={sigma_mult:.2f}x",
             f"TCDC={peak_tcdc:.1f}%"
         ]
-        # v19.1.11: Multiply final ensemble_prob for ranking/sizing
-        return True, "YES", ensemble_prob * convergence_multiplier * sigma_mult, factors, is_taker
+        # v19.1.12: Return raw ensemble_prob + sizing_multiplier separately
+        sizing_multiplier = convergence_multiplier * sigma_mult
+        return True, "YES", ensemble_prob, factors, is_taker, sizing_multiplier
 
     if edge_no > 0.08:
         is_taker = edge_no >= 0.22 and is_short_term
@@ -762,9 +766,10 @@ def _strategy_weather(ticker: str, ask_yes: float, ask_no: float, hours_to_res: 
             f"conv_mult={convergence_multiplier:.1f}x",
             f"sigma_mult={sigma_mult:.2f}x"
         ]
-        return True, "NO", (1.0 - ensemble_prob) * convergence_multiplier * sigma_mult, factors, is_taker
+        sizing_multiplier = convergence_multiplier * sigma_mult
+        return True, "NO", (1.0 - ensemble_prob), factors, is_taker, sizing_multiplier
 
-    return False, "", 0.0, ["insufficient_edge"], False
+    return False, "", 0.0, ["insufficient_edge"], False, 1.0
 
 def evaluate_contract(
 
@@ -949,13 +954,14 @@ def evaluate_contract(
     )
 
     # Evaluate all strategy families
-    strategy_candidates: list[tuple[str, str, float, list[str], bool]] = []
+    strategy_candidates: list[tuple[str, str, float, list[str], bool, float]] = []
 
     # v18.35: Weather Strategy (Ensemble-driven)
     ticker = contract.get("local_symbol", "")
-    w_passes, w_side, w_conf, w_factors, w_is_taker = _strategy_weather(ticker, ask_yes, ask_no, hours_to_res)
-    if w_passes:
-        strategy_candidates.append(("weather_ensemble", w_side, w_conf, w_factors, w_is_taker))
+    w_res = _strategy_weather(ticker, ask_yes, ask_no, hours_to_res)
+    if w_res[0]: # w_passes
+        # w_res = (passes, side, ensemble_prob, factors, is_taker, multiplier)
+        strategy_candidates.append(("weather_ensemble", w_res[1], w_res[2], w_res[3], w_res[4], w_res[5]))
 
     for name, fn in [
         ("continuation", _strategy_continuation),
@@ -965,7 +971,7 @@ def evaluate_contract(
         try:
             passes, side, confidence, factors = fn(feats, hours_to_res)
             if passes:
-                strategy_candidates.append((name, side, confidence, factors, False))
+                strategy_candidates.append((name, side, confidence, factors, False, 1.0))
         except Exception as e:
             logger.debug(f"Strategy {name} error: {e}")
 
@@ -991,7 +997,7 @@ def evaluate_contract(
 
     # Pick highest-confidence strategy
     strategy_candidates.sort(key=lambda x: x[2], reverse=True)
-    best_family, best_side, best_confidence, best_factors, best_is_taker = strategy_candidates[0]
+    best_family, best_side, best_confidence, best_factors, best_is_taker, best_multiplier = strategy_candidates[0]
 
     # v19.1.6: Sovereign Weather Override
     # Weather alpha is probabilistic arbitrage, NOT technical price action.
@@ -1001,8 +1007,8 @@ def evaluate_contract(
         veto_reason = ""
         # Recalculate EV based on ensemble probability, not q_hat
         p_cost = ask_yes if best_side == "YES" else ask_no
-        q_ensemble = best_confidence if best_side == "YES" else (1.0 - best_confidence)
-        ev_chosen = q_ensemble - p_cost
+        # best_confidence is now raw ensemble_prob
+        ev_chosen = best_confidence - p_cost
     else:
         # Determine EV for chosen side (Technical)
         ev_chosen = ev_yes if best_side == "YES" else ev_no
@@ -1025,11 +1031,11 @@ def evaluate_contract(
     if approved:
         if best_family == "weather_ensemble":
             # Use continuous sizing for weather
-            # We use the confidence value as the ensemble probability for the formula
             n_contracts = calculate_continuous_sizing(
                 market_price=p_cost,
-                ensemble_prob=best_confidence, # In weather strategy, conf = ensemble_prob
-                capital_base=bankroll
+                ensemble_prob=best_confidence,
+                capital_base=bankroll,
+                multiplier=best_multiplier
             )
             total_cost = n_contracts * p_cost
         else:
@@ -1173,7 +1179,10 @@ def evaluate_all_contracts(
 
             # Check hub exposure (v19.1.10)
             ticker = yc.get("local_symbol", "")
+            family = ticker.split("-")[0]
             hub = _get_city_hub(ticker)
+            
+            count = current_tick_counts.get(family, 0)
             current_hub_usd = hub_exposure.get(hub, 0.0)
             
             if hub != "UNKNOWN" and current_hub_usd >= HUB_CAP_USD:

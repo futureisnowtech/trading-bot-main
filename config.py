@@ -1193,8 +1193,8 @@ GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 # ════════════════════════════════════════════════════════════════════
 # KALSHI RISK & CAPITAL PARTITIONING (v19.5 Sovereign Survival)
 # ════════════════════════════════════════════════════════════════════
-# Oxygen Buffer: Always keep 20% cash reserve (v19.5)
-KALSHI_MAX_DEPLOYED_PCT: float = 0.80
+# Oxygen Buffer: Always keep 10% cash reserve (v19.5.2)
+KALSHI_MAX_DEPLOYED_PCT: float = 0.90
 
 # Max concurrent binary events
 KALSHI_MAX_CONCURRENT_POSITIONS: int = 15

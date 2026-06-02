@@ -6,12 +6,13 @@
 ## Canonical Truth
 
 - Repo root: `/Users/joshmacbookair2020/Projects/algo_trading_final`
-- Canonical version: `v19.5.1` (`2026-06-02`)
+- Canonical version: `v19.5.2` (`2026-06-02`)
 - Canonical active lane: **Dual-Lane**: Coinbase Spot Scalp + Kalshi Weather Sovereign Survival
-- **Status:** **SOVEREIGN SURVIVAL**. Fixed Strategy NameError.
+- **Status:** **SOVEREIGN SURVIVAL**. Resolved Salvage Deadlock & Buffer Tuning.
+- **Critical Changes (v19.5.2):**
+  - **Salvage Unblocking**: Refactored `forecast/runner.py` to move Sovereign Salvage and Take-Profit triggers BEFORE the capital guard. This prevents the bot from "freezing" when fully deployed, allowing it to free up capital by purging toxic trades.
+  - **Buffer Tuning**: Relaxed the Oxygen Buffer from 20% to 10% (MAX_DEPLOYED_PCT = 0.90) per user request, increasing trading capacity for smaller balances.
 - **Critical Changes (v19.5.1):**
-  - **Emergency Fix**: Resolved `NameError: name 'time' is not defined` in `forecast/strategy_engine.py` that was blocking all weather evaluations.
-- **Critical Changes (v19.5.0):**
   - **The Junk Veto ($0.15 Floor)**: Strictly forbidden to buy weather contracts priced below $0.15, eliminating "Penny Longshot" gambling.
   - **Sovereign Chaos Veto (Sigma > 3.0)**: Automatically rejects trades if model disagreement (Sigma) exceeds 3.0F, ensuring entries are grounded in stable atmospheric regimes.
   - **Fee-Aware Intelligence**: Implemented "Net EV" logic that subtracts the $0.07 Kalshi fee before calculating edge. Vetoes trades where fees consume >30% of projected gain.

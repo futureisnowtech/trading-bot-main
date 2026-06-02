@@ -2,6 +2,7 @@
 All notable changes to The King's Algo Trading System.
 
 ## 2026-06-02
+- v19.5.2 (Sovereign Liquidity Fix): Resolved a logic deadlock in `forecast/runner.py` where the capital guard was blocking the "Sovereign Salvage" loop from purging toxic trades. Refactored the strategy cycle to ensure salvage and take-profit triggers execute BEFORE the deployment cap is checked. Relaxed the Oxygen Buffer from 20% to 10% (MAX_DEPLOYED_PCT = 0.90) to increase trading frequency for mid-sized balances.
 - v19.5.1 (Emergency Fix): Resolved critical `NameError: name 'time' is not defined` in `forecast/strategy_engine.py` that was blocking all Kalshi weather trading post-v19.5.0 deployment. Restored strategy engine operational integrity.
 - v19.5.0 (Sovereign Survival Upgrade): Implemented exhaustive precision risk hardening following the June 1st drawdown audit. Added a strict $0.15 minimum price floor ("Junk Veto") and a 3.0F Sigma chaos veto to eliminate lottery-ticket gambling. Deployed fee-aware "Net EV" logic (deducting $0.07/contract) and a 30% fee-drag veto. Hardened boundary controls with a 200-contract quantity cap and a 20% spread-to-price ratio gate. Instituted a mandatory 20% "Oxygen Buffer" (cash reserve) to ensure capital availability for high-alpha trades.
 - v19.4.1 (AI Handshake Fix): Upgraded AI agent to Gemini 3.5 series (June 2026 GA models). Fixed model selection bug and implemented safety settings override (BLOCK_NONE) to resolve "empty response" errors on Telegram. Aligned docker-compose health checks with operational lane IDs.

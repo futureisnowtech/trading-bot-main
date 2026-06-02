@@ -222,6 +222,51 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
             )
             deployed_pct = min(1.0, deployed_value / max(bankroll, 1.0))
 
+            # v19.5.2: Sovereign Salvage & Take-Profit (Unblocked)
+            # We run these BEFORE the capital guard so we can free up capital.
+            if open_positions:
+                from data.kalshi_weather_monitor import get_weather_data
+                from forecast.strategy_engine import _parse_weather_threshold
+                
+                for pos in open_positions:
+                    ticker = pos.get("local_symbol", "")
+                    side = pos.get("side", "YES").upper()
+                    w_data = get_weather_data(ticker)
+                    
+                    # 1. Sovereign Salvage (Dead-Trade Purge)
+                    if w_data:
+                        threshold = _parse_weather_threshold(ticker)
+                        if threshold is not None:
+                            mode = "HIGH" if "HIGH" in ticker else "LOW" if "LOW" in ticker else "RAIN"
+                            members = w_data.get("members_high" if mode == "HIGH" else "members_low", [])
+                            if members:
+                                success_count = sum(1 for m in members if (m >= threshold if mode == "HIGH" else m <= threshold))
+                                live_prob = success_count / len(members)
+                                if side == "NO": live_prob = 1.0 - live_prob
+                                
+                                if live_prob < 0.15:
+                                    logger.warning(f"[SovereignSalvage] PURGING toxic position {ticker} (p={live_prob:.1%})")
+                                    broker.flatten_position(ticker, side[0], pos.get("qty", 0))
+                                    log_event("INFO", "ForecastRunner", f"Salvage: Purged {ticker} at {live_prob:.1%}")
+                                    # Reset flags to allow eval to proceed in this tick
+                                    is_at_cap = False
+                                    deployed_pct = 0.0 
+                                    break 
+
+                    # 2. Institutional Take-Profit (70% Lock-in)
+                    entry_price = float(pos.get("entry_price") or 0.50)
+                    current_price = float(pos.get("market_price") or entry_price)
+                    max_gain = 1.0 - entry_price
+                    target_gain = max_gain * 0.70
+                    
+                    if (current_price - entry_price) >= target_gain:
+                        logger.info(f"[SovereignHUD] TAKE-PROFIT: Locking in 70% gain for {ticker} (Price={current_price:.2f})")
+                        broker.flatten_position(ticker, side[0], pos.get("qty", 0))
+                        log_event("INFO", "ForecastRunner", f"TakeProfit: Locked {ticker} at {current_price:.2f}")
+                        is_at_cap = False
+                        deployed_pct = 0.0
+                        break
+
             if deployed_pct >= MAX_DEPLOYED_PCT:
                 logger.warning(
                     f"[ForecastRunner] Deployed cap hit ({deployed_pct:.1%}/{MAX_DEPLOYED_PCT:.1%}) — skip eval"
@@ -262,51 +307,6 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                 macro_context=macro_ctx,
                 open_positions=open_positions,
             )
-
-            # v19.2: Sovereign Salvage (Aggressive Dead-Trade Purge)
-            # If at cap, identify positions with < 15% win probability and purge them
-            # to make room for the candidates we just found.
-            if is_at_cap and candidates:
-                from data.kalshi_weather_monitor import get_weather_data
-                from forecast.strategy_engine import _parse_weather_threshold
-                
-                for pos in open_positions:
-                    ticker = pos.get("local_symbol", "")
-                    side = pos.get("side", "YES").upper()
-                    w_data = get_weather_data(ticker)
-                    if not w_data: continue
-                    
-                    threshold = _parse_weather_threshold(ticker)
-                    if threshold is None: continue
-                    
-                    mode = "HIGH" if "HIGH" in ticker else "LOW" if "LOW" in ticker else "RAIN"
-                    members = w_data.get("members_high" if mode == "HIGH" else "members_low", [])
-                    if not members: continue
-                    
-                    success_count = sum(1 for m in members if (m >= threshold if mode == "HIGH" else m <= threshold))
-                    live_prob = success_count / len(members)
-                    if side == "NO": live_prob = 1.0 - live_prob
-                    
-                    # SALVAGE TRIGGER: < 15% live prob
-                    if live_prob < 0.15:
-                        logger.warning(f"[SovereignSalvage] PURGING toxic position {ticker} (p={live_prob:.1%}) to free slot.")
-                        broker.flatten_position(ticker, side[0], pos.get("qty", 0))
-                        log_event("INFO", "ForecastRunner", f"Salvage: Purged {ticker} at {live_prob:.1%}")
-                        is_at_cap = False # Slot freed
-                        break # Only one purge per cycle for safety
-                    
-                    # v19.2: Institutional Take-Profit (70% Lock-in)
-                    entry_price = float(pos.get("entry_price") or 0.50)
-                    current_price = float(pos.get("market_price") or entry_price)
-                    max_gain = 1.0 - entry_price
-                    target_gain = max_gain * 0.70
-                    
-                    if (current_price - entry_price) >= target_gain:
-                        logger.info(f"[SovereignHUD] TAKE-PROFIT: Locking in 70% gain for {ticker} (Price={current_price:.2f})")
-                        broker.flatten_position(ticker, side[0], pos.get("qty", 0))
-                        log_event("INFO", "ForecastRunner", f"TakeProfit: Locked {ticker} at {current_price:.2f}")
-                        is_at_cap = False
-                        break
 
             # v19.1.10: Sovereign Instrumentation (Discovery Layer)
             try:

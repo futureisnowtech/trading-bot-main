@@ -6,9 +6,15 @@
 ## Canonical Truth
 
 - Repo root: `/Users/joshmacbookair2020/Projects/algo_trading_final`
-- Canonical version: `v19.4.0` (`2026-06-02`)
-- Canonical active lane: **Dual-Lane**: Coinbase Spot Scalp + Kalshi Weather Sovereign Balance
-- **Status:** **SOVEREIGN BALANCE**. Dynamic Risk Scaling & Automated Maintenance.
+- Canonical version: `v19.5.0` (`2026-06-02`)
+- Canonical active lane: **Dual-Lane**: Coinbase Spot Scalp + Kalshi Weather Sovereign Survival
+- **Status:** **SOVEREIGN SURVIVAL**. Precision Risk Hardening & Fee Awareness.
+- **Critical Changes (v19.5.0):**
+  - **The Junk Veto ($0.15 Floor)**: Strictly forbidden to buy weather contracts priced below $0.15, eliminating "Penny Longshot" gambling.
+  - **Sovereign Chaos Veto (Sigma > 3.0)**: Automatically rejects trades if model disagreement (Sigma) exceeds 3.0F, ensuring entries are grounded in stable atmospheric regimes.
+  - **Fee-Aware Intelligence**: Implemented "Net EV" logic that subtracts the $0.07 Kalshi fee before calculating edge. Vetoes trades where fees consume >30% of projected gain.
+  - **Boundary Controls**: Implemented a 200-contract global quantity cap and a 20% spread-to-price ratio gate to prevent oversized entries and illiquidity traps.
+  - **Oxygen Buffer**: Reduced max capital deployment to 80% of balance, ensuring a 20% mandatory cash reserve for high-alpha opportunities.
 - **Critical Changes (v19.4.0):**
   - **Dynamic Hub Scaling**: Replaced dollar-based hub caps with a balance-aware logic (Cap = 20% of Equity). This addresses the "Concentration Paradox" as the system scales to 31 cities.
   - **Logical Exclusivity (One-Strike Rule)**: Hardened `check_strike_consistency` to strictly allow only one active strike per city per side (YES/NO), preventing redundant "Bracket Overlap" risk.

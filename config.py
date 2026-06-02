@@ -1191,18 +1191,27 @@ PM_LLM_MAX_TOKENS: int = int(os.getenv("PM_LLM_MAX_TOKENS", "600"))
 GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
 # ════════════════════════════════════════════════════════════════════
-# KALSHI RISK & CAPITAL PARTITIONING (v18.33)
+# KALSHI RISK & CAPITAL PARTITIONING (v19.5 Sovereign Survival)
 # ════════════════════════════════════════════════════════════════════
-# Unrestricted Portfolio Utilization (v18.33 Pivot)
-KALSHI_MAX_DEPLOYED_PCT: float = 1.0
+# Oxygen Buffer: Always keep 20% cash reserve (v19.5)
+KALSHI_MAX_DEPLOYED_PCT: float = 0.80
 
-# Max concurrent binary events (unshackled from legacy 2)
+# Max concurrent binary events
 KALSHI_MAX_CONCURRENT_POSITIONS: int = 15
 
 # Max positions per single event underlier (e.g., GOP-WIN)
 KALSHI_SAME_EVENT_FAMILY_CAP: int = int(os.getenv("KALSHI_SAME_EVENT_FAMILY_CAP", "2"))
 
-# Kelly criterion hard cap (per position)
+# Sizing Limits (v19.5 Boundary Controls)
+KALSHI_MAX_QTY_PER_POSITION: int = 200
+KALSHI_MIN_PRICE: float = 0.15
+KALSHI_MAX_SIGMA: float = 3.0
+KALSHI_MAX_SPREAD_RATIO: float = 0.20
+KALSHI_DATA_FRESHNESS_MINUTES: int = 180
+
+# EV & Fees (v19.5 Fee-Aware Intelligence)
+KALSHI_FEE_PER_CONTRACT: float = 0.07  # Standard Kalshi fee
+KALSHI_MAX_FEE_DRAG_PCT: float = 0.30  # Veto if fees eat > 30% of profit
 KALSHI_KELLY_CAP: float = 0.10
 
 # Absolute risk per Kalshi event (0.015 = 1.5% of total account equity)

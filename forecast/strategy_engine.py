@@ -37,6 +37,13 @@ from config import (
     KALSHI_MAX_DEPLOYED_PCT,
     KALSHI_MAX_RISK_PER_EVENT_PCT,
     KALSHI_SAME_EVENT_FAMILY_CAP,
+    KALSHI_MIN_PRICE,
+    KALSHI_MAX_SIGMA,
+    KALSHI_MAX_QTY_PER_POSITION,
+    KALSHI_MAX_SPREAD_RATIO,
+    KALSHI_DATA_FRESHNESS_MINUTES,
+    KALSHI_FEE_PER_CONTRACT,
+    KALSHI_MAX_FEE_DRAG_PCT,
 )
 from forecast.primitives import (
     DEFAULT_ALPHA,
@@ -345,6 +352,13 @@ def _economics_gate(
     if spread > MAX_SPREAD_DOLLARS:
         return False, f"spread_too_wide ({spread:.3f} > {MAX_SPREAD_DOLLARS})", 0.0, 0.0
 
+    # v19.5: Spread-to-Price Ratio Gate (Liquidity Veto)
+    avg_price = (ask_yes + ask_no) / 2.0
+    if avg_price > 0:
+        spread_ratio = spread / avg_price
+        if spread_ratio > KALSHI_MAX_SPREAD_RATIO:
+            return False, f"spread_ratio_veto ({spread_ratio:.1%} > {KALSHI_MAX_SPREAD_RATIO:.0%})", 0.0, 0.0
+
     # 4. Entropy gates: don't trade near certainty
     if h_t < MIN_ENTROPY_FOR_ENTRY:
         return (
@@ -375,17 +389,31 @@ def _economics_gate(
         )
 
     # 7. Compute EV for both sides (using taker friction buffer)
-    ev_yes, ev_no = compute_ev(q_hat, ask_yes, ask_no, fee_buffer=KALSHI_FEE_BUFFER)
+    ev_yes_raw, ev_no_raw = compute_ev(q_hat, ask_yes, ask_no, fee_buffer=KALSHI_FEE_BUFFER)
+
+    # v19.5: Institutional Fee-Aware EV (Net of $0.07)
+    # Expected Profit = (Edge * $1.00) - Fee
+    # We only care if Net EV is still > threshold and fees aren't dominant.
+    ev_yes = ev_yes_raw - KALSHI_FEE_PER_CONTRACT
+    ev_no = ev_no_raw - KALSHI_FEE_PER_CONTRACT
 
     # 8. Neither side has positive EV
     best_ev = max(ev_yes, ev_no)
     if best_ev < EV_THRESHOLD:
         return (
             False,
-            "LOW_PROBABILITY_EDGE",
+            f"LOW_PROBABILITY_EDGE (Net_EV={best_ev:.4f})",
             ev_yes,
             ev_no,
         )
+
+    # v19.5: Fee Drag Veto
+    # If fees consume > 30% of gross gain, veto.
+    potential_gain = (1.0 - ask_yes) if ev_yes >= ev_no else (1.0 - ask_no)
+    if potential_gain > 0:
+        drag = KALSHI_FEE_PER_CONTRACT / potential_gain
+        if drag > KALSHI_MAX_FEE_DRAG_PCT:
+            return False, f"fee_drag_veto (drag={drag:.1%} > {KALSHI_MAX_FEE_DRAG_PCT:.0%})", ev_yes, ev_no
 
     # 9. Longshot Bias Gate: refuse to buy YES below the probability threshold
     # Note: latest_prob is YES implied probability.
@@ -741,20 +769,23 @@ def _strategy_weather(ticker: str, ask_yes: float, ask_no: float, hours_to_res: 
     except Exception:
         pass
 
+    # v19.5: Sovereign Survival — Hard Sigma Veto
+    if sigma > KALSHI_MAX_SIGMA:
+        logger.warning(f"Sovereign Chaos Veto: {ticker} Sigma={sigma:.1f}F > {KALSHI_MAX_SIGMA}")
+        return False, "", 0.0, [f"chaos_veto (sigma={sigma:.1f} > {KALSHI_MAX_SIGMA})"], False, 1.0
+
     # sigma_mult: 1.0 at 2.0F sigma, 1.25 at 1.0F sigma, 0.5 at 4.0F sigma
     sigma_mult = max(0.3, min(1.3, 1.5 - (sigma / 4.0)))
     
-    # v19.1.11: Fee-Alpha Floor
-    # Buying contracts below 15c is almost always a losing game due to fees
-    # unless the edge is massive (>40%).
-    fee_floor_veto = False
-    if ask_yes < 0.15 and edge_yes < 0.40: fee_floor_veto = True
-    if ask_no < 0.15 and edge_no < 0.40: fee_floor_veto = True
-    
+    # v19.5: Sovereign Survival — Institutional Price Floor ($0.15)
+    # Never trade penny longshots.
+    if ask_yes < KALSHI_MIN_PRICE and edge_yes > 0:
+        return False, "", 0.0, [f"penny_veto (ask={ask_yes:.2f} < {KALSHI_MIN_PRICE})"], False, 1.0
+    if ask_no < KALSHI_MIN_PRICE and edge_no > 0:
+        return False, "", 0.0, [f"penny_veto (ask={ask_no:.2f} < {KALSHI_MIN_PRICE})"], False, 1.0
+
     # Forensic Audit Log
     logger.info(f"TRACE: {ticker} | p={ensemble_prob:.1%} Edge_Y={edge_yes:.1%} Sigma={sigma:.1f}F s_mult={sigma_mult:.2f}")
-    if fee_floor_veto:
-        return False, "", 0.0, ["fee_alpha_floor_veto (<15c w/o 40% edge)"], False
 
     # Guardrail 1: The "Sun Spike" Veto
     peak_tcdc = w_data.get("peak_tcdc", 0.0)
@@ -795,7 +826,6 @@ def _strategy_weather(ticker: str, ask_yes: float, ask_no: float, hours_to_res: 
     return False, "", 0.0, ["insufficient_edge"], False, 1.0
 
 def evaluate_contract(
-
     contract: dict,
     bars_5m: list[dict],
     bars_30m: list[dict],
@@ -811,16 +841,36 @@ def evaluate_contract(
     """
     Evaluate all strategy families for a contract and return the best
     StrategyResult, or None if no strategy passes + economics gate.
-
-    Args:
-        contract: from forecast_contracts table (has local_symbol, right, strike, etc.)
-        bars_*: OHLC bar lists, most-recent last
-        yes_quote / no_quote: most recent bid/ask/mid dicts
-        bankroll: current account equity in USD
-        deployed_pct: fraction of bankroll already in open positions
-        open_positions_count: number of currently open positions
-        same_event_open: True if an open position is in the same event family
     """
+    ticker = contract.get("local_symbol", "")
+    
+    # v19.5: Sovereign Survival — Data Freshness Veto
+    # Ensure ensemble data isn't stale before evaluating.
+    from data.kalshi_weather_monitor import get_weather_data
+    w_data = get_weather_data(ticker)
+    if w_data:
+        data_ts = w_data.get("timestamp", 0)
+        age_m = (time.time() - data_ts) / 60.0
+        if age_m > KALSHI_DATA_FRESHNESS_MINUTES:
+             return StrategyResult(
+                strategy_family="vetoed", side="NONE", q_hat=0.0, ev=0.0, ev_yes=0.0, ev_no=0.0,
+                confidence=0.0, uncertainty_penalty=0.0, econ_approved=False,
+                veto_reason=f"stale_ensemble_data ({age_m:.0f}m old)", position_fraction=0.0,
+                position_contracts=0, top_factors=[], 
+                hours_to_resolution=_hours_to_resolution(contract.get("last_trade_at", ""))
+            )
+    else:
+        # Weather alpha requires data; veto if missing
+        is_weather = "KXHIGH" in ticker or "KXLOW" in ticker or "KXRAIN" in ticker
+        if is_weather:
+            return StrategyResult(
+                strategy_family="vetoed", side="NONE", q_hat=0.0, ev=0.0, ev_yes=0.0, ev_no=0.0,
+                confidence=0.0, uncertainty_penalty=0.0, econ_approved=False,
+                veto_reason="missing_weather_data", position_fraction=0.0,
+                position_contracts=0, top_factors=[], 
+                hours_to_resolution=_hours_to_resolution(contract.get("last_trade_at", ""))
+            )
+
     ask_yes = float(yes_quote.get("ask") or 0.0)
     ask_no = float(no_quote.get("ask") or 0.0)
     mid_yes = float(yes_quote.get("mid") or 0.0)
@@ -1060,6 +1110,11 @@ def evaluate_contract(
                 capital_base=bankroll,
                 multiplier=best_multiplier
             )
+            # v19.5: Institutional Quantity Cap (Prevent Penny Spree)
+            if n_contracts > KALSHI_MAX_QTY_PER_POSITION:
+                logger.info(f"Sovereign Survival: Capping {ticker} qty {n_contracts} -> {KALSHI_MAX_QTY_PER_POSITION}")
+                n_contracts = KALSHI_MAX_QTY_PER_POSITION
+
             total_cost = n_contracts * p_cost
         else:
             n_contracts, total_cost = kalshi_absolute_sizing(

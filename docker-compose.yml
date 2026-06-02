@@ -22,7 +22,7 @@ services:
         max-size: "50m"
         max-file: "3"
     healthcheck:
-      test: ["CMD-SHELL", "sqlite3 /app/logs/trades.db \"SELECT connected FROM lane_runtime_state WHERE lane_id='crypto'\" | grep 1 || exit 1"]
+      test: ["CMD-SHELL", "sqlite3 /app/logs/trades.db \"SELECT connected FROM lane_runtime_state WHERE id=97543\" | grep 1 || exit 1"]
       interval: 1m
       timeout: 10s
       retries: 3

@@ -19,6 +19,7 @@ Output for each candidate:
 import logging
 import os
 import sys
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional

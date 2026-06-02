@@ -6,9 +6,11 @@
 ## Canonical Truth
 
 - Repo root: `/Users/joshmacbookair2020/Projects/algo_trading_final`
-- Canonical version: `v19.5.0` (`2026-06-02`)
+- Canonical version: `v19.5.1` (`2026-06-02`)
 - Canonical active lane: **Dual-Lane**: Coinbase Spot Scalp + Kalshi Weather Sovereign Survival
-- **Status:** **SOVEREIGN SURVIVAL**. Precision Risk Hardening & Fee Awareness.
+- **Status:** **SOVEREIGN SURVIVAL**. Fixed Strategy NameError.
+- **Critical Changes (v19.5.1):**
+  - **Emergency Fix**: Resolved `NameError: name 'time' is not defined` in `forecast/strategy_engine.py` that was blocking all weather evaluations.
 - **Critical Changes (v19.5.0):**
   - **The Junk Veto ($0.15 Floor)**: Strictly forbidden to buy weather contracts priced below $0.15, eliminating "Penny Longshot" gambling.
   - **Sovereign Chaos Veto (Sigma > 3.0)**: Automatically rejects trades if model disagreement (Sigma) exceeds 3.0F, ensuring entries are grounded in stable atmospheric regimes.

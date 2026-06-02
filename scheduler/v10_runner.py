@@ -1660,6 +1660,10 @@ def _attempt_entry(
         from runtime.spot_momentum import build_spot_state as _bs, SpotStateUnavailable
         import spot_engine as _spot_eng
 
+        _open_spot_pos_raw = _spot_eng.get_spot_positions(paper=False)
+        open_spot_pos = {p["symbol"]: p for p in _open_spot_pos_raw}
+
+
         _underlying = _get_underlying(symbol)
         
         # Gather Momentum State

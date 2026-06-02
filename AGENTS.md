@@ -6,9 +6,14 @@
 ## Canonical Truth
 
 - Repo root: `/Users/joshmacbookair2020/Projects/algo_trading_final`
-- Canonical version: `v19.7.0` (`2026-06-02`)
-- Canonical active lane: **Dual-Lane**: Coinbase Spot Scalp + Kalshi Weather Sovereign Precision
-- **Status:** **SOVEREIGN PRECISION**. Market Truth Veto & Forced Salvage.
+- Canonical version: `v19.8.0` (`2026-06-02`)
+- Canonical active lane: **Dual-Lane**: Coinbase Spot Scalp + Kalshi Weather Sovereign Guru
+- **Status:** **SOVEREIGN GURU**. Polymath Integrity & Settlement Watermarking.
+- **Critical Changes (v19.8.0):**
+  - **Precision Epsilon**: Implemented a 0.05°F success-count buffer in the ensemble engine to resolve floating-point conversion noise (e.g. 84.99F vs 85F).
+  - **AI Bayesian Weighting**: Refactored GraphCast AI as a Sigma Scaler. AI now confirms physical atmospheric stability rather than distorting the probability blend.
+  - **Settlement Watermarking**: Implemented `daily_max` and `daily_min` tracking in the METAR engine. BUST exits now use the peak/trough for the entire day, preventing false safe-readings after a temperature reversal.
+  - **Liquidity-Aware Salvage**: Hardened the broker to skip market-sell orders if the current Bid is below $0.01, preventing useless fee-drag on illiquid positions.
 - **Critical Changes (v19.7.0):**
   - **Horizon Pullback**: Enforced a strict 48-hour resolution window for all trades (rolling back the 7-day experiment). This eliminates long-range atmospheric chaos and focuses capital on imminent "Sure Thing" events.
   - **Market Truth Veto**: Implemented a 30% cap on Model-Market Divergence. If our ensemble disagrees with the market price by >30%, the bot assumes model error/staleness and vetos the trade.

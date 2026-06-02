@@ -297,15 +297,35 @@ async def update_weather_shadow_state():
 
     # ── Cycle 2: Fast Intraday Precinct (15 Minutes) ───────────────────────
     async def run_intraday_sync():
+        # v19.8: Day-High/Low Watermarks
+        # Key: (city_key, YYYY-MM-DD) -> float
+        watermarks = {}
+        
         while True:
             try:
                 # v19.1.10: Precision Ground Truth (METAR + HRRR)
+                from datetime import datetime
+                today_str = datetime.now().strftime("%Y-%m-%d")
+                
                 for city_key, loc in STATIONS.items():
                     metar = await fetch_metar_observation(loc["icao"])
                     hrrr = await fetch_hrrr_forecast(city_key, loc["lat"], loc["lon"])
                     
+                    cur_temp = metar.get("temp_f")
+                    
+                    # Update Watermarks
+                    if cur_temp is not None:
+                        # Max
+                        max_key = (city_key, today_str, "max")
+                        watermarks[max_key] = max(cur_temp, watermarks.get(max_key, cur_temp))
+                        # Min
+                        min_key = (city_key, today_str, "min")
+                        watermarks[min_key] = min(cur_temp, watermarks.get(min_key, cur_temp))
+
                     intraday_payload = {
-                        "metar_temp": metar.get("temp_f"),
+                        "metar_temp": cur_temp,
+                        "daily_max": watermarks.get((city_key, today_str, "max")),
+                        "daily_min": watermarks.get((city_key, today_str, "min")),
                         "metar_raw": metar.get("raw"),
                         "hrrr_high": hrrr.get("hrrr_high"),
                         "hrrr_trend": hrrr.get("hrrr_trend"),
@@ -316,7 +336,7 @@ async def update_weather_shadow_state():
                         if s_ticker in _WEATHER_SHADOW_STATE:
                             _WEATHER_SHADOW_STATE[s_ticker]["intraday"] = intraday_payload
                 
-                logger.info("Weather Intraday Precinct synced (METAR/HRRR).")
+                logger.info("Weather Intraday Precinct synced (METAR/HRRR/Watermarks).")
             except Exception as e:
                 logger.error(f"Intraday sync failure: {e}")
             await asyncio.sleep(900)

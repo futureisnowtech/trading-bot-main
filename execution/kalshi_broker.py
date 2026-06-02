@@ -564,6 +564,15 @@ class KalshiBroker:
         key = f"{local_symbol}_{right}"
         
         # v19.7: Forced Market Execution for Salvage/TP
+        # v19.8: Liquidity Floor. Skip if Bid is literally zero.
+        quote = self.get_quote(local_symbol)
+        bid_price = float(quote.get("bid") or 0.0)
+        
+        if bid_price < 0.01:
+            logger.warning(f"[KalshiBroker] Zero liquidity detected for {local_symbol} (Bid=${bid_price}). Discarding position without API call.")
+            self._open_positions.pop(key, {}) # Still remove from local cache
+            return {"order_id": "DISCARDED", "exit_price": 0.0, "pnl_usd": 0.0}
+
         body = {
             "ticker": local_symbol,
             "action": "sell",

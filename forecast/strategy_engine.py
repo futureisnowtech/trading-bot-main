@@ -716,9 +716,16 @@ def _strategy_weather(ticker: str, ask_yes: float, ask_no: float, hours_to_res: 
     
     # ── Phase 1: GFS Analysis (Primary Trigger) ─────────────────────────────
     members_gfs = w_data.get("members_high" if mode == "HIGH" else "members_low", [])
-    if not members_gfs: return False, "", 0.0, ["missing_gfs_members"], False
+    if not members_gfs: return False, "", 0.0, ["missing_gfs_members"], False, 1.0, 3, 0.10
     
-    success_count_gfs = sum(1 for m in members_gfs if (m >= threshold if mode == "HIGH" else m <= threshold))
+    # v19.8: Precision Epsilon (0.05F) to account for float noise in conversion
+    def _count_success(m_list, thresh, is_high_mode):
+        if is_high_mode:
+            return sum(1 for m in m_list if m >= (thresh - 0.05))
+        else:
+            return sum(1 for m in m_list if m <= (thresh + 0.05))
+
+    success_count_gfs = _count_success(members_gfs, threshold, mode == "HIGH")
     prob_gfs = success_count_gfs / len(members_gfs)
     
     # ── Phase 2: ECMWF Analysis (Convergence Anchor) ────────────────────────
@@ -728,57 +735,55 @@ def _strategy_weather(ticker: str, ask_yes: float, ask_no: float, hours_to_res: 
     if ecmwf_data:
         members_ec = ecmwf_data.get("members_high" if mode == "HIGH" else "members_low", [])
         if members_ec:
-            success_count_ec = sum(1 for m in members_ec if (m >= threshold if mode == "HIGH" else m <= threshold))
+            success_count_ec = _count_success(members_ec, threshold, mode == "HIGH")
             prob_ecmwf = success_count_ec / len(members_ec)
 
-    # ── Phase 3: AI/GraphCast Analysis (Precision Anchor) ──────────────────
+    # ── Phase 3: AI/GraphCast Analysis (Sovereign Sigma Scaler) ────────────
+    # v19.8: Move AI from Prob Blend to Sigma Scaler (Bayesian Confirmer)
     aigefs_data = w_data.get("aigefs")
-    prob_aigefs = None
+    ai_multiplier = 1.0
     if aigefs_data:
         members_ai = aigefs_data.get("members_high" if mode == "HIGH" else "members_low", [])
         if members_ai:
-            # Deterministic AI model returns 1 member (0 or 1 prob)
-            success_count_ai = sum(1 for m in members_ai if (m >= threshold if mode == "HIGH" else m <= threshold))
-            prob_aigefs = success_count_ai / len(members_ai)
+            ai_val = members_ai[0] # Deterministic
+            # If AI value is on the wrong side of our bet, increase Sigma (uncertainty)
+            # If AI is on our side, tighten Sigma (conviction)
+            ensemble_mean = float(np.mean(members_gfs + (members_ec if prob_ecmwf else [])))
+            ai_divergence = abs(ai_val - ensemble_mean)
+            
+            # Scale uncertainty based on AI disagreement
+            if ai_divergence > 1.5: # 1.5F disagreement is significant
+                ai_multiplier = 1.3 # Increase Sigma/Chaos
+            elif ai_divergence < 0.5:
+                ai_multiplier = 0.8 # Compress Sigma/Conviction
 
-    # ── Final Probability & Edge (v19.2 Institutional Blend) ────────────────
-    # Blend: 40% GFS | 30% ECMWF | 30% AI-GraphCast
-    
-    # Start with GFS
-    total_weight = 0.4
-    ensemble_prob = prob_gfs * 0.4
-    
+    # ── Final Probability & Edge (v19.8 Refined Blend) ────────────────────
+    # Blend: 60% GFS | 40% ECMWF (Pure Physics Blend)
     if prob_ecmwf is not None:
-        ensemble_prob += prob_ecmwf * 0.3
-        total_weight += 0.3
+        ensemble_prob = (prob_gfs * 0.6) + (prob_ecmwf * 0.4)
+    else:
+        ensemble_prob = prob_gfs
         
-    if prob_aigefs is not None:
-        ensemble_prob += prob_aigefs * 0.3
-        total_weight += 0.3
-        
-    # Re-normalize if some models missing
-    ensemble_prob = ensemble_prob / total_weight
-    
     convergence_multiplier = 1.0
-    if prob_ecmwf is not None and prob_aigefs is not None:
-        # High Conviction: All 3 agree (>70%)
-        if prob_gfs > 0.7 and prob_ecmwf > 0.7 and prob_aigefs > 0.7:
-            convergence_multiplier = 1.6 # Upgraded from 1.5
-            logger.info(f"Sovereign Grand Convergence: {ticker} GFS={prob_gfs:.1%} EC={prob_ecmwf:.1%} AI={prob_aigefs:.1%} -> 1.6x")
-        # Veto if catastrophic divergence (>50% gap between any two)
-        gap_1 = abs(prob_gfs - prob_ecmwf)
-        gap_2 = abs(prob_gfs - (prob_aigefs if prob_aigefs is not None else prob_gfs))
-        if gap_1 > 0.5 or gap_2 > 0.5:
-             logger.warning(f"Sovereign Divergence: {ticker} GFS={prob_gfs:.1%} EC={prob_ecmwf:.1%} AI={prob_aigefs:.1%} -> VETO")
-             return False, "", 0.0, ["model_catastrophic_divergence"], False, 1.0
+    if prob_ecmwf is not None:
+        # High Conviction: GFS & EC agree (>75%)
+        if prob_gfs > 0.75 and prob_ecmwf > 0.75:
+            convergence_multiplier = 1.6
+            logger.info(f"Sovereign Convergence: {ticker} GFS={prob_gfs:.1%} EC={prob_ecmwf:.1%} -> 1.6x")
+        # Veto if catastrophic divergence (>50% gap)
+        gap = abs(prob_gfs - prob_ecmwf)
+        if gap > 0.5:
+             logger.warning(f"Sovereign Divergence Veto: {ticker} GFS={prob_gfs:.1%} EC={prob_ecmwf:.1%} -> VETO")
+             return False, "", 0.0, ["model_catastrophic_divergence"], False, 1.0, 3, 0.10
 
     ensemble_prob = max(0.03, min(0.97, ensemble_prob))
     edge_yes = ensemble_prob - ask_yes
     edge_no = (1.0 - ensemble_prob) - ask_no
     
     # v19.1.11: The Sigma Lever (Volatility Sizing)
-    # High sigma (spread) in members = uncertainty.
-    sigma = w_data.get("sigma_high" if mode == "HIGH" else "sigma_low", 2.0)
+    # v19.8: AI Multiplier now inflates/deflates Sigma directly
+    sigma_raw = w_data.get("sigma_high" if mode == "HIGH" else "sigma_low", 2.0)
+    sigma = sigma_raw * ai_multiplier
 
     # v19.1.11: Sovereign Instrumentation
     try:

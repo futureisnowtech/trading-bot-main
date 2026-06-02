@@ -594,27 +594,27 @@ def run_position_monitor() -> None:
                         except Exception as _m_err:
                             logger.debug(f"Metrics update failed: {_m_err}")
                         
-                        if metar_temp is not None:
+                        # v19.8: Use Daily Watermarks for settlement-aware exits
+                        daily_max = intraday.get("daily_max", metar_temp)
+                        daily_min = intraday.get("daily_min", metar_temp)
+                        
+                        if daily_max is not None or daily_min is not None:
                             # 1. BUST EXIT (Salvage Capital)
-                            # If METAR ground truth is already past our bracket limit (+ buffer)
-                            # For HIGH YES: if current temp > bracket_max + 0.5
-                            # For LOW YES: if current temp < bracket_min - 0.5
-                            # We'll use the 'threshold' as the anchor.
-                            # Note: -B72.5 means 72-73 range. Max is 73.
+                            # If the daily high/low has already breached our strike
                             is_high = "HIGH" in local_symbol
                             is_between = "-B" in local_symbol
                             
                             limit_upper = threshold + 0.5 if is_between else threshold
                             limit_lower = threshold - 0.5 if is_between else threshold
                             
-                            # HIGH YES Bust: It got too hot.
-                            if is_high and metar_temp > (limit_upper + 0.5):
-                                logger.warning(f"[Sovereign Precinct] BUST EXIT: {local_symbol} temp {metar_temp}F > limit {limit_upper}F. Salvaging capital.")
+                            # HIGH YES Bust: The record high for today is already above our limit.
+                            if is_high and daily_max > (limit_upper + 0.5):
+                                logger.warning(f"[Sovereign Precinct] BUST EXIT: {local_symbol} Day-High {daily_max}F > limit {limit_upper}F. Salvaging capital.")
                                 resolved = True
                             
-                            # LOW YES Bust: It stayed too warm.
-                            elif not is_high and "LOW" in local_symbol and metar_temp < (limit_lower - 0.5):
-                                logger.warning(f"[Sovereign Precinct] BUST EXIT: {local_symbol} temp {metar_temp}F < limit {limit_lower}F. Salvaging capital.")
+                            # LOW YES Bust: The record low for today is already below our limit.
+                            elif not is_high and "LOW" in local_symbol and daily_min < (limit_lower - 0.5):
+                                logger.warning(f"[Sovereign Precinct] BUST EXIT: {local_symbol} Day-Low {daily_min}F < limit {limit_lower}F. Salvaging capital.")
                                 resolved = True
 
                             # 2. LOCK EXIT (Early Profit Capture)

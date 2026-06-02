@@ -1,10 +1,10 @@
 #!/bin/bash
 # -----------------------------------------------------------------------------
-# deploy.sh — Truthful NYC3 deployment script for feature/v10-rebuild
+# deploy.sh — Truthful NYC3 deployment script for current branch
 #
 # Safety invariants:
 #   - Refuses to deploy from a dirty worktree (uncommitted changes)
-#   - Refuses to deploy if local HEAD != origin/feature/v10-rebuild
+#   - Refuses to deploy if local HEAD != origin/<current-branch>
 #   - Does NOT auto-commit or auto-push (that is the engineer's job)
 #   - Deploys the already-authored, already-pushed SHA only
 #   - Writes /home/algo-runner/bot/version.txt and /home/algo-runner/bot/deploy_manifest.json

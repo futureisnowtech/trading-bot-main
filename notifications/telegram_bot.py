@@ -19,6 +19,7 @@ from telegram.ext import (
 from telegram.constants import ParseMode, ChatAction
 
 import system_state
+from config import REPO_ROOT
 from spot_engine import get_spot_positions, _get_broker
 from notifications.ai_agent import ask_ai
 from notifications import sovereign_mobile_hud as hud
@@ -62,7 +63,6 @@ logger = logging.getLogger(__name__)
 
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 AUTHORIZED_USER_ID = int(os.environ.get("TELEGRAM_AUTHORIZED_USER_ID", "8224826883"))
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _BOT_STARTED: bool = False
 
 

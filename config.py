@@ -33,6 +33,10 @@ except ImportError:
 
 load_dotenv()
 
+# v19.1.12: Canonical Repository Root
+_ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = _ROOT_DIR
+
 # ════════════════════════════════════════════════════════════════════
 # SYSTEM MODE
 # ════════════════════════════════════════════════════════════════════

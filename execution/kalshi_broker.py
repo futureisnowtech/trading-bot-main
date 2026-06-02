@@ -552,70 +552,71 @@ class KalshiBroker:
         return {"order_id": order_id, "price": limit_price, "qty": qty}
 
     def flatten_position(self, local_symbol: str, right: str, qty: int, **kwargs) -> dict:
-        """Exit a position by selling (limit or market)."""
+        """
+        Exit a position immediately. 
+        v19.7: Uses MARKET order for guaranteed immediate exit and clears cache 
+        regardless of API success to prevent logic deadlocks.
+        """
         if not self.is_connected():
             raise RuntimeError("[KalshiBroker] Not connected to Kalshi — blocking exit")
         
         side = "yes" if right == "C" else "no"
         key = f"{local_symbol}_{right}"
-        order_type = kwargs.get("type", "limit").lower()
         
-        quote = self.get_quote(local_symbol)
-        if side == "yes":
-            price = max(0.01, (quote.get("bid") or 0.01) - 0.01)
-        else:
-            no_bid = (1.0 - quote.get("ask")) if quote.get("ask") else 0.01
-            price = max(0.01, no_bid - 0.01)
-            
+        # v19.7: Forced Market Execution for Salvage/TP
         body = {
             "ticker": local_symbol,
             "action": "sell",
             "side": side,
             "count": int(qty),
-            "type": order_type,
+            "type": "market",
             "client_order_id": str(uuid.uuid4()),
         }
-
-        if order_type == "limit":
-            limit_cents = int(round(price * 100))
-            if side == "yes":
-                body["yes_price"] = limit_cents
-            else:
-                body["no_price"] = limit_cents
         
-        resp = self._request("POST", "/trade-api/v2/portfolio/orders", body=body)
-        order_info = resp.get("order", {})
-        order_id = order_info.get("order_id", "ERR")
-        
-        if order_id == "ERR":
-            order_id = resp.get("order_id", "ERR")
-        
+        # Pre-emptively clear from cache to prevent loop deadlock
         pos_info = self._open_positions.pop(key, {})
-        entry_price = pos_info.get("entry_price", 0.0)
-        pnl_usd = (price - entry_price) * qty if entry_price > 0 else 0.0
+        entry_price = float(pos_info.get("entry_price") or 0.50)
 
-        if order_id != "ERR":
+        try:
+            resp = self._request("POST", "/trade-api/v2/portfolio/orders", body=body)
+            order_info = resp.get("order", {})
+            order_id = order_info.get("order_id") or resp.get("order_id", "ERR")
+            exit_price = float(order_info.get("price", 0) / 100.0) if order_info.get("price") else 0.0
+            
+            if order_id == "ERR":
+                logger.error(f"[KalshiBroker] Market sell failed for {local_symbol}: {resp}")
+            else:
+                logger.info(f"[KalshiBroker] FLATTENED {qty} {local_symbol} via MARKET ID={order_id}")
+                
+            pnl_usd = (exit_price - entry_price) * qty if exit_price > 0 else 0.0
+            
             try:
                 log_trade(
                     strategy=kwargs.get("strategy", "forecast_exit"),
                     broker="kalshi",
                     symbol=local_symbol,
                     action="SELL",
-                    order_type=order_type.capitalize(),
+                    order_type="Market",
                     qty=qty,
-                    price=price,
+                    price=exit_price,
                     pnl_usd=pnl_usd,
                     order_id=order_id,
-                    notes=kwargs.get("reason", "exit"),
+                    notes=kwargs.get("reason", "salvage_exit"),
                     won=(pnl_usd > 0)
                 )
             except Exception as e:
                 logger.error(f"[KalshiBroker] log_trade exit error: {e}")
 
+        except Exception as e:
+            logger.error(f"[KalshiBroker] Fatal exception during flatten: {e}")
+            order_id = "FATAL"
+            exit_price = 0.0
+            pnl_usd = 0.0
+
         return {
             "order_id": order_id,
             "flattened_qty": qty,
-            "exit_price": price,
+            "exit_price": exit_price,
             "entry_price": entry_price,
             "pnl_usd": pnl_usd,
         }

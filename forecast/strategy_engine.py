@@ -82,9 +82,14 @@ MAX_OVERROUND: float = 0.15  # Tightened from 0.25 to 0.15 for Kalshi
 # Spread hard cap
 MAX_SPREAD_DOLLARS: float = 0.12  # $0.12 per contract
 
-# Time-to-resolution gates (v19.1.4: Strict 72h Gate)
+# Time-to-resolution gates (v19.7: Horizon Pullback to 48h)
 MIN_HOURS_TO_RES: float = 1.0
-MAX_HOURS_TO_RES: float = 72.0
+MAX_HOURS_TO_RES: float = 48.0
+
+# v19.7: Sovereign Precision Calibration
+# Raising the bar for Alpha to ensure Win-Rate Restoration.
+EV_THRESHOLD: float = 0.20  # Swing only at Grand Slams (20% Edge floor)
+MAX_MODEL_MARKET_DIVERGENCE: float = 0.30  # Market Truth Veto (30% cap)
 
 # Longshot Bias Gate
 MIN_IMPLIED_PROB_FOR_YES: float = 0.10  # refuse to buy YES below 10% probability
@@ -360,6 +365,17 @@ def _economics_gate(
         if spread_ratio > KALSHI_MAX_SPREAD_RATIO:
             return False, f"spread_ratio_veto ({spread_ratio:.1%} > {KALSHI_MAX_SPREAD_RATIO:.0%})", 0.0, 0.0
 
+    # v19.7: Market Truth Veto (Model-Market Divergence)
+    # If the gap between our model and market is too wide (>30%), our model is likely wrong.
+    divergence = abs(q_hat - ask_yes)
+    if divergence > MAX_MODEL_MARKET_DIVERGENCE:
+        return (
+            False,
+            f"market_truth_veto (Divergence={divergence:.1%} > {MAX_MODEL_MARKET_DIVERGENCE:.0%})",
+            0.0,
+            0.0,
+        )
+
     # 4. Entropy gates: don't trade near certainty
     if h_t < MIN_ENTROPY_FOR_ENTRY:
         return (
@@ -403,7 +419,7 @@ def _economics_gate(
     if best_ev < EV_THRESHOLD:
         return (
             False,
-            f"LOW_PROBABILITY_EDGE (Net_EV={best_ev:.4f})",
+            f"LOW_CONVICTION_ALPHA (Net_EV={best_ev:.4f} < {EV_THRESHOLD})",
             ev_yes,
             ev_no,
         )

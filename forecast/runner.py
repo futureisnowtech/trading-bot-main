@@ -956,6 +956,19 @@ def start_forecast_lane(bankroll: float = 100.0) -> None:
     def _bg_cache(): threading.Thread(target=_cache_forecast_state, daemon=True).start()
     schedule.every(30).seconds.do(_bg_cache)
     
+    # v19.4 Sovereign Balance: Bound maintenance
+    def prune_forensic_data():
+        """Clean up old quotes and bars to maintain dashboard performance."""
+        from forecast.db import prune_old_quotes, prune_old_bars
+        try:
+            q_del = prune_old_quotes()
+            b_del = prune_old_bars()
+            logger.info(f"[ForensicPurge] Bound maintenance complete. Deleted {q_del} quotes, {b_del} bars.")
+        except Exception as e:
+            logger.error(f"[ForensicPurge] Cleanup error: {e}")
+
+    schedule.every(6).hours.do(prune_forensic_data)
+    
     schedule.every().day.at("08:00").do(_send_daily_token_burn_report)
     
     # v19.1.9: Catalyst - Every 6 hours, push an Analyst Briefing (SRE + Trading)

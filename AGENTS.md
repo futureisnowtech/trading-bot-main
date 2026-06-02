@@ -6,9 +6,13 @@
 ## Canonical Truth
 
 - Repo root: `/Users/joshmacbookair2020/Projects/algo_trading_final`
-- Canonical version: `v19.3.0` (`2026-06-02`)
-- Canonical active lane: **Dual-Lane**: Coinbase Spot Scalp + Kalshi Weather Sovereign Expansion
-- **Status:** **SOVEREIGN EXPANSION**. 31-City Grand Ensemble.
+- Canonical version: `v19.4.0` (`2026-06-02`)
+- Canonical active lane: **Dual-Lane**: Coinbase Spot Scalp + Kalshi Weather Sovereign Balance
+- **Status:** **SOVEREIGN BALANCE**. Dynamic Risk Scaling & Automated Maintenance.
+- **Critical Changes (v19.4.0):**
+  - **Dynamic Hub Scaling**: Replaced dollar-based hub caps with a balance-aware logic (Cap = 20% of Equity). This addresses the "Concentration Paradox" as the system scales to 31 cities.
+  - **Logical Exclusivity (One-Strike Rule)**: Hardened `check_strike_consistency` to strictly allow only one active strike per city per side (YES/NO), preventing redundant "Bracket Overlap" risk.
+  - **Forensic DB Pruning**: Implemented a 6-hour automated maintenance task in `forecast/runner.py`. Tightened retention to 7 days for quotes and 30 days for bars to preserve HUD dashboard performance.
 - **Critical Changes (v19.3.0):**
   - **Sovereign Expansion**: Doubled the weather trading universe to 31 US cities, including Charleston, SC (KCHS), providing a massive increase in alpha surface area.
   - **Regional Hub Rebalancing**: Rearchitected city-level gating into 7 "Sovereign Regional Hubs" (MIDWEST, NORTHEAST, SOUTH, FLORIDA, GULF, MOUNTAIN, WEST) with a strictly enforced $60 USD cap per hub to prevent correlation washouts.

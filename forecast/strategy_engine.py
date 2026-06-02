@@ -135,7 +135,7 @@ REGIONAL_HUBS = {
     "MOUNTAIN": ["DEN", "SLC", "ABQ"],
     "WEST": ["LAX", "SFO", "SF", "PHX", "SEA", "PDX", "LV"],
 }
-HUB_CAP_USD = 60.0  # Max exposure per regional weather system (v19.3)
+# v19.4: HUB_CAP is now a percentage of balance (20%) calculated in-loop.
 
 
 def _get_city_hub(ticker: str) -> str:
@@ -1105,34 +1105,24 @@ def evaluate_contract(
 
 def check_strike_consistency(ticker: str, side: str, open_positions: list[dict]) -> tuple[bool, str]:
     """
-    Institutional Logic Gate: Ensure new trade doesn't logically conflict 
-    with existing positions for the same event family.
-    
-    Example: If we have YES on KXHIGHNY-T85, we cannot take YES on KXHIGHNY-B80.
+    v19.4 Sovereign Balance: Institutional Logical Exclusivity.
+    Ensures only ONE active strike per city per side (YES/NO).
     """
     family = ticker.split("-")[0]
-    threshold = _parse_weather_threshold(ticker)
-    if threshold is None: return True, ""
     
     for p in open_positions:
         p_ticker = p.get("local_symbol", "")
         if family not in p_ticker: continue
         
         p_side = p.get("side", "").upper()
-        p_threshold = _parse_weather_threshold(p_ticker)
-        if p_threshold is None: continue
         
-        # 1. Same-Side Directional Conflict
+        # 1. Mutual Exclusivity: Veto if we already have a position on this SIDE for this city
         if side == "YES" and p_side == "YES":
-            # If current is >85, and new is <80, conflict
-            if "HIGH" in family:
-                if "-T" in ticker and "-B" in p_ticker:
-                    if threshold > p_threshold: continue # >85 and <90 is fine
-                # Simplest: if we have a YES, we only allow more YES in the same 'zone'
-                # For now, veto if threshold gap is too large (>5 deg)
-                if abs(threshold - p_threshold) > 5.0:
-                    return False, f"logical_conflict: already have YES on {p_ticker}"
-                    
+            return False, f"bracket_overlap_veto: already have YES on {p_ticker}"
+        
+        if side == "NO" and p_side == "NO":
+            return False, f"bracket_overlap_veto: already have NO on {p_ticker}"
+
         # 2. Opposite Side Conflict (Hedge Guard)
         if side == "NO" and p_side == "YES" and ticker == p_ticker:
             return False, "hedge_guard: cannot bet NO on existing YES strike"
@@ -1248,6 +1238,9 @@ def evaluate_all_contracts(
             count = current_tick_counts.get(family, 0)
             current_hub_usd = hub_exposure.get(hub, 0.0)
             
+            # v19.4 Sovereign Balance: Dynamic Hub Scaling (20% of Equity)
+            current_hub_cap = max(20.0, bankroll * 0.20)
+            
             # v19.2: Logic consistency gate
             is_consistent, conflict_reason = check_strike_consistency(ticker, "YES", open_positions)
 
@@ -1259,11 +1252,12 @@ def evaluate_all_contracts(
                     position_contracts=0, top_factors=[], 
                     hours_to_resolution=hours_to_res
                 )
-            elif hub != "UNKNOWN" and current_hub_usd >= HUB_CAP_USD:
+            elif hub != "UNKNOWN" and current_hub_usd >= current_hub_cap:
                 result = StrategyResult(
                     strategy_family="vetoed", side="NONE", q_hat=0.0, ev=0.0, ev_yes=0.0, ev_no=0.0,
                     confidence=0.0, uncertainty_penalty=0.0, econ_approved=False,
-                    veto_reason="hub_exposure_cap_reached", position_fraction=0.0,
+                    veto_reason=f"hub_exposure_cap_reached ({current_hub_usd:.1f}/{current_hub_cap:.1f})", 
+                    position_fraction=0.0,
                     position_contracts=0, top_factors=[], 
                     hours_to_resolution=hours_to_res
                 )

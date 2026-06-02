@@ -139,10 +139,9 @@ CREATE TABLE IF NOT EXISTS forecast_positions (
 );
 """
 
-# Pruning: keep quotes no older than this many days to bound table growth
-QUOTE_RETENTION_DAYS: int = 14
-# Keep bars longer — they're aggregated and small
-BAR_RETENTION_DAYS: int = 90
+# v19.4 Sovereign Balance: Tighten retention for 31-city scale
+QUOTE_RETENTION_DAYS: int = 7
+BAR_RETENTION_DAYS: int = 30
 
 
 def init_forecast_db(db_path: str | None = None) -> None:

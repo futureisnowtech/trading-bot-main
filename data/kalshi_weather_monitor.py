@@ -109,8 +109,10 @@ async def fetch_open_meteo_ensemble(city_key: str, lat: float, lon: float) -> Di
     api_key = os.getenv("OPEN_METEO_API_KEY")
     base_url = "https://customer-api.open-meteo.com/v1/ensemble" if api_key else "https://ensemble-api.open-meteo.com/v1/ensemble"
     
-    # GFS = 31 members, ECMWF = 51 members
-    models = ["gfs_seamless", "ecmwf_ifs025"]
+    # v19.2: Sovereign Grand Ensemble (Institutional Blend)
+    # GFS = 31, ECMWF = 51, GRAPHCAST (AI) = 1
+    # Note: GraphCast is deterministic but highly accurate in the 24-48h window.
+    models = ["gfs_seamless", "ecmwf_ifs025", "gfs_graphcast025"]
     results = {}
     
     for model in models:
@@ -139,12 +141,21 @@ async def fetch_open_meteo_ensemble(city_key: str, lat: float, lon: float) -> Di
 
             window_size = 26 
             members_high, members_low, members_precip, cloud_members = [], [], [], []
-            max_members = 51 if "ecmwf" in model else 31
+            
+            # Model member counts
+            if "ecmwf" in model: max_members = 51
+            elif "graphcast" in model: max_members = 1 # Deterministic AI model
+            else: max_members = 31
             
             for i in range(max_members):
-                temp_key = f"temperature_2m_member{i:02d}"
-                cloud_key = f"cloud_cover_member{i:02d}"
-                precip_key = f"precipitation_member{i:02d}"
+                # For GraphCast, key is just temperature_2m
+                if "graphcast" in model:
+                    temp_key = "temperature_2m"
+                else:
+                    temp_key = f"temperature_2m_member{i:02d}"
+                    
+                cloud_key = f"cloud_cover_member{i:02d}" if "graphcast" not in model else "cloud_cover"
+                precip_key = f"precipitation_member{i:02d}" if "graphcast" not in model else "precipitation"
                 
                 if temp_key in hourly:
                     temps_c = hourly[temp_key][:window_size]
@@ -155,22 +166,28 @@ async def fetch_open_meteo_ensemble(city_key: str, lat: float, lon: float) -> Di
                 
                 if precip_key in hourly:
                     p_mm = hourly[precip_key][:window_size]
-                    if p_mm: members_precip.append(sum(p_mm) * 0.03937)
+                    if p_mm: 
+                        val = sum(p_mm) * 0.03937
+                        members_precip.append(val)
 
                 if cloud_key in hourly:
                     c_vals = hourly[cloud_key][11:17] # Peak heating 11 AM - 4 PM
                     if c_vals: cloud_members.append(np.mean(c_vals))
 
             if members_high:
-                m_type = "gfs" if "gfs" in model else "ecmwf"
+                if "gfs_seamless" in model: m_type = "gfs"
+                elif "ecmwf" in model: m_type = "ecmwf"
+                elif "graphcast" in model: m_type = "aigefs"
+                else: m_type = "other"
+                
                 results[m_type] = {
                     "members_high": members_high,
                     "members_low": members_low,
                     "members_precip": members_precip,
                     "mean_high": float(np.mean(members_high)),
-                    "sigma_high": float(np.std(members_high)), # Sigma Lever
+                    "sigma_high": float(np.std(members_high)) if len(members_high) > 1 else 0.5,
                     "mean_low": float(np.mean(members_low)),
-                    "sigma_low": float(np.std(members_low)), # Sigma Lever
+                    "sigma_low": float(np.std(members_low)) if len(members_low) > 1 else 0.5,
                     "peak_tcdc": float(np.mean(cloud_members)) if cloud_members else 0.0,
                     "timestamp": time.time()
                 }
@@ -182,6 +199,7 @@ async def fetch_open_meteo_ensemble(city_key: str, lat: float, lon: float) -> Di
     # Unified City Record
     final_record = results.get("gfs", list(results.values())[0]).copy()
     final_record["ecmwf"] = results.get("ecmwf")
+    final_record["aigefs"] = results.get("aigefs")
     
     # Update cache
     _COORDINATE_CACHE[cache_key] = final_record

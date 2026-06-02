@@ -668,31 +668,53 @@ def _strategy_weather(ticker: str, ask_yes: float, ask_no: float, hours_to_res: 
     # ── Phase 2: ECMWF Analysis (Convergence Anchor) ────────────────────────
     ecmwf_data = w_data.get("ecmwf")
     prob_ecmwf = None
-    convergence_multiplier = 1.0
     
     if ecmwf_data:
         members_ec = ecmwf_data.get("members_high" if mode == "HIGH" else "members_low", [])
         if members_ec:
             success_count_ec = sum(1 for m in members_ec if (m >= threshold if mode == "HIGH" else m <= threshold))
             prob_ecmwf = success_count_ec / len(members_ec)
-            
-            # Convergence Logic:
-            # If both models agree (>70%), increase conviction.
-            # If they strongly disagree (>40% gap), veto.
-            gap = abs(prob_gfs - prob_ecmwf)
-            if prob_gfs > 0.7 and prob_ecmwf > 0.7:
-                convergence_multiplier = 1.5
-                logger.info(f"Sovereign Convergence: {ticker} GFS={prob_gfs:.1%} EC={prob_ecmwf:.1%} -> 1.5x Conviction")
-            elif gap > 0.4:
-                logger.warning(f"Sovereign Divergence: {ticker} GFS={prob_gfs:.1%} EC={prob_ecmwf:.1%} -> VETO")
-                return False, "", 0.0, ["model_divergence_veto"], False
 
-    # ── Final Probability & Edge ────────────────────────────────────────────
-    # Weighted ensemble (60% GFS / 40% ECMWF if available)
+    # ── Phase 3: AI/GraphCast Analysis (Precision Anchor) ──────────────────
+    aigefs_data = w_data.get("aigefs")
+    prob_aigefs = None
+    if aigefs_data:
+        members_ai = aigefs_data.get("members_high" if mode == "HIGH" else "members_low", [])
+        if members_ai:
+            # Deterministic AI model returns 1 member (0 or 1 prob)
+            success_count_ai = sum(1 for m in members_ai if (m >= threshold if mode == "HIGH" else m <= threshold))
+            prob_aigefs = success_count_ai / len(members_ai)
+
+    # ── Final Probability & Edge (v19.2 Institutional Blend) ────────────────
+    # Blend: 40% GFS | 30% ECMWF | 30% AI-GraphCast
+    
+    # Start with GFS
+    total_weight = 0.4
+    ensemble_prob = prob_gfs * 0.4
+    
     if prob_ecmwf is not None:
-        ensemble_prob = (prob_gfs * 0.6) + (prob_ecmwf * 0.4)
-    else:
-        ensemble_prob = prob_gfs
+        ensemble_prob += prob_ecmwf * 0.3
+        total_weight += 0.3
+        
+    if prob_aigefs is not None:
+        ensemble_prob += prob_aigefs * 0.3
+        total_weight += 0.3
+        
+    # Re-normalize if some models missing
+    ensemble_prob = ensemble_prob / total_weight
+    
+    convergence_multiplier = 1.0
+    if prob_ecmwf is not None and prob_aigefs is not None:
+        # High Conviction: All 3 agree (>70%)
+        if prob_gfs > 0.7 and prob_ecmwf > 0.7 and prob_aigefs > 0.7:
+            convergence_multiplier = 1.6 # Upgraded from 1.5
+            logger.info(f"Sovereign Grand Convergence: {ticker} GFS={prob_gfs:.1%} EC={prob_ecmwf:.1%} AI={prob_aigefs:.1%} -> 1.6x")
+        # Veto if catastrophic divergence (>50% gap between any two)
+        gap_1 = abs(prob_gfs - prob_ecmwf)
+        gap_2 = abs(prob_gfs - (prob_aigefs if prob_aigefs is not None else prob_gfs))
+        if gap_1 > 0.5 or gap_2 > 0.5:
+             logger.warning(f"Sovereign Divergence: {ticker} GFS={prob_gfs:.1%} EC={prob_ecmwf:.1%} AI={prob_aigefs:.1%} -> VETO")
+             return False, "", 0.0, ["model_catastrophic_divergence"], False, 1.0
 
     ensemble_prob = max(0.03, min(0.97, ensemble_prob))
     edge_yes = ensemble_prob - ask_yes
@@ -1071,6 +1093,42 @@ def evaluate_contract(
     )
 
 
+def check_strike_consistency(ticker: str, side: str, open_positions: list[dict]) -> tuple[bool, str]:
+    """
+    Institutional Logic Gate: Ensure new trade doesn't logically conflict 
+    with existing positions for the same event family.
+    
+    Example: If we have YES on KXHIGHNY-T85, we cannot take YES on KXHIGHNY-B80.
+    """
+    family = ticker.split("-")[0]
+    threshold = _parse_weather_threshold(ticker)
+    if threshold is None: return True, ""
+    
+    for p in open_positions:
+        p_ticker = p.get("local_symbol", "")
+        if family not in p_ticker: continue
+        
+        p_side = p.get("side", "").upper()
+        p_threshold = _parse_weather_threshold(p_ticker)
+        if p_threshold is None: continue
+        
+        # 1. Same-Side Directional Conflict
+        if side == "YES" and p_side == "YES":
+            # If current is >85, and new is <80, conflict
+            if "HIGH" in family:
+                if "-T" in ticker and "-B" in p_ticker:
+                    if threshold > p_threshold: continue # >85 and <90 is fine
+                # Simplest: if we have a YES, we only allow more YES in the same 'zone'
+                # For now, veto if threshold gap is too large (>5 deg)
+                if abs(threshold - p_threshold) > 5.0:
+                    return False, f"logical_conflict: already have YES on {p_ticker}"
+                    
+        # 2. Opposite Side Conflict (Hedge Guard)
+        if side == "NO" and p_side == "YES" and ticker == p_ticker:
+            return False, "hedge_guard: cannot bet NO on existing YES strike"
+
+    return True, ""
+
 def evaluate_all_contracts(
     active_contracts: list[dict],
     get_bars_fn,  # callable(contract_id, interval) -> list[dict]
@@ -1080,14 +1138,18 @@ def evaluate_all_contracts(
     open_positions_count: int = 0,
     open_event_families: Optional[dict] = None,
     macro_context: Optional[dict] = None,
+    open_positions: Optional[list[dict]] = None,
 ) -> list[dict]:
     """
     Evaluate all active contracts and return ranked list of approved entries.
     v18.34: Now anchored in real-time TradFi reality via macro_context.
     v18.35: Implements tick-aware concurrency capping for event families.
+    v19.2: Implements strike consistency logic.
     """
     if open_event_families is None:
         open_event_families = {}
+    if open_positions is None:
+        open_positions = []
     
     # Local frequency map to track evaluations in the SAME tick
     current_tick_counts = open_event_families.copy()
@@ -1176,7 +1238,18 @@ def evaluate_all_contracts(
             count = current_tick_counts.get(family, 0)
             current_hub_usd = hub_exposure.get(hub, 0.0)
             
-            if hub != "UNKNOWN" and current_hub_usd >= HUB_CAP_USD:
+            # v19.2: Logic consistency gate
+            is_consistent, conflict_reason = check_strike_consistency(ticker, "YES", open_positions)
+
+            if not is_consistent:
+                result = StrategyResult(
+                    strategy_family="vetoed", side="NONE", q_hat=0.0, ev=0.0, ev_yes=0.0, ev_no=0.0,
+                    confidence=0.0, uncertainty_penalty=0.0, econ_approved=False,
+                    veto_reason=conflict_reason, position_fraction=0.0,
+                    position_contracts=0, top_factors=[], 
+                    hours_to_resolution=hours_to_res
+                )
+            elif hub != "UNKNOWN" and current_hub_usd >= HUB_CAP_USD:
                 result = StrategyResult(
                     strategy_family="vetoed", side="NONE", q_hat=0.0, ev=0.0, ev_yes=0.0, ev_no=0.0,
                     confidence=0.0, uncertainty_penalty=0.0, econ_approved=False,

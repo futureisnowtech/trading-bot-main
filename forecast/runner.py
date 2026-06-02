@@ -210,12 +210,10 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
             # Current position state
             open_positions = broker.get_positions() if broker.is_connected() else []
             open_count = len(open_positions)
-
-            if open_count >= MAX_CONCURRENT_POSITIONS:
-                logger.warning(
-                    f"[ForecastRunner] Max concurrent positions reached ({open_count}/{MAX_CONCURRENT_POSITIONS}) — skip eval"
-                )
-                return []
+            
+            # v19.1.12: Opportunistic Swap Evaluation
+            # We allow evaluation even at cap to see if better plays exist.
+            is_at_cap = open_count >= MAX_CONCURRENT_POSITIONS
 
             # Deployed capital fraction
             deployed_value = sum(
@@ -290,14 +288,31 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                 # Only enter if econ approved AND contracts > 0
                 if not result.econ_approved or result.position_contracts <= 0:
                     veto_msg = f"[ForecastRunner] {local_sym} vetoed: {result.veto_reason or 'sizing_zero'}"
-                    if result.veto_reason and "concurrent_cap" in result.veto_reason:
-                        logger.warning(veto_msg)
-                        log_event("INFO", "ForecastRunner", veto_msg)
-                    else:
-                        logger.debug(veto_msg)
-                        # Still log to DB for X-Ray observability
-                        log_event("INFO", "ForecastRunner", veto_msg)
+                    logger.debug(veto_msg)
+                    # Still log to DB for X-Ray observability
+                    log_event("INFO", "ForecastRunner", veto_msg)
                     continue
+
+                # v19.1.12: Concurrency & Swap Logic
+                if is_at_cap:
+                    # Identify worst open position by EV
+                    # For simplicity in v1, we compare Candidate EV vs 0.0 
+                    # unless we can fetch the 'live EV' of open positions.
+                    # SWAP RULE: Candidate EV must be > 0.15 to justify a swap churn.
+                    if result.ev < 0.15:
+                        logger.warning(f"[ForecastRunner] {local_sym} (ev={result.ev:.4f}) skipped: at cap and EV < 0.15 swap floor.")
+                        continue
+                    
+                    # Logic: Flatten the absolute WORST open position
+                    # We sort open positions by their 'stale' entry EV or just pick one.
+                    # Best approach: find the one with the lowest current EV if possible.
+                    # For this MVP: Flatten the oldest position to make room for high-alpha new play.
+                    worst_pos = open_positions[0] # Simplest: FIFO churn
+                    worst_sym = worst_pos.get("local_symbol", "UNKNOWN")
+                    
+                    logger.info(f"[ForecastRunner] SWAP TRIGGERED: Flattening {worst_sym} to make room for {local_sym} (ev={result.ev:.4f})")
+                    broker.flatten_position(worst_sym, worst_pos.get("side", "YES")[0], worst_pos.get("qty", 0))
+                    log_event("INFO", "ForecastRunner", f"Swap: Flattened {worst_sym} for {local_sym}")
 
                 # Hard duplicate guard: no same-contract double-down
                 key = f"{contract.get('local_symbol')}_{contract.get('right')}"

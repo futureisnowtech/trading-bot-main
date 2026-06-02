@@ -6,9 +6,13 @@
 ## Canonical Truth
 
 - Repo root: `/Users/joshmacbookair2020/Projects/algo_trading_final`
-- Canonical version: `v19.1.11` (`2026-06-01`)
+- Canonical version: `v19.1.12` (`2026-06-02`)
 - Canonical active lane: **Dual-Lane**: Coinbase Spot Scalp + Kalshi Weather Expansion
 - **Status:** **LEDGERLESS SOVEREIGN**. Autonomous Self-Healing & Broker-First Truth.
+- **Critical Changes (v19.1.12):**
+  - **Sovereign Sizing (v2)**: Hard-tightened Kalshi weather exposure to a 10% bankroll cap per position. Decoupled conviction multipliers (Convergence/Sigma) from probability space, applying them as linear scalers to final USD size to prevent "suicide sizing."
+  - **Opportunistic Swaps**: Replaced the hard 15-position concurrency gate with a dynamic "Swap Alpha" layer. The bot now evaluates new trades continuously and will automatically flatten its weakest existing bet if a new candidate offers >10% EV improvement (Swap Alpha > 0.10).
+  - **Strict Hub Gating**: Hardened regional weather hub enforcement with a strictly enforced $40.0 USD cap per hub, preventing over-concentration in specific city clusters.
 - **Critical Changes (v19.1.11):**
   - **Institutional Alpha Levers**: Finalized the Sovereign Weather Engine with advanced quant-desk tactics:
     - **The Sigma Lever**: Implemented dynamic position sizing based on ensemble standard deviation (Sigma). Stable models (low Sigma) trigger larger bets, while chaotic spreads trigger size reduction.

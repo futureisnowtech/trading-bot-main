@@ -392,15 +392,6 @@ def _economics_gate(
                 ev_no,
             )
 
-    # 10. Concurrent position cap
-    if open_positions_count >= MAX_CONCURRENT_POSITIONS:
-        return (
-            False,
-            f"concurrent_cap_reached ({open_positions_count}/{MAX_CONCURRENT_POSITIONS})",
-            ev_yes,
-            ev_no,
-        )
-
     # 10. Duplicate exposure penalty doesn't veto but is noted in sizing
     return True, "", ev_yes, ev_no
 

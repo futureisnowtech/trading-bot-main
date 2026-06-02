@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 
+## 2026-06-02
+- v19.1.12 (Sovereign Optimization): Implemented "Opportunistic Swaps" in the Kalshi weather lane, replacing the hard 15-position concurrency gate with a dynamic "Swap Alpha" layer (>10% EV improvement threshold). Deployed "Sovereign Sizing v2," tightening weather exposure to a 10% bankroll cap and decoupling conviction multipliers from probability space. Enforced strict $40 USD regional hub caps in `strategy_engine.py`. Resolved a critical `NameError` in `v10_runner.py` for the `open_spot_pos` variable.
+
 ## 2026-06-01
 - v19.1.11 (Institutional Alpha Levers): Finalized the Sovereign Weather Engine with quant-desk tactics. Implemented "The Sigma Lever" for dynamic volatility-based sizing. Added "Fee-Alpha Floor" to veto low-edge/low-price traps (<15c). Hardened risk management with the "Midnight Spike Guard" (8 PM local exit for spoiler events). Exposed Sigma metrics to Prometheus and the HUD dashboard.
 - v19.1.10 (Sovereign Weather Alpha - Full Alignment): Synchronized the codebase with the high-fidelity weather "Scalpel" blueprint. Integrated 51-member ECMWF ensembles alongside GFS (60/40 weighted blend) for high-conviction entries. Leveraged 3km HRRR models for intraday risk assessment and "Salvage Exits." Implemented real-time METAR airport observation polling with 0.1°C T-group parsing for "Bust Exits" and "Precision Locks." Added dedicated Prometheus gauges (`algo_bot_weather_*`) for total ensemble observability. Upgraded the HUD Dashboard with a "Sovereign Intelligence" expander for real-time model insights. Implemented "Sovereign Recon" in the position monitor for autonomous broker-DB truth synchronization.

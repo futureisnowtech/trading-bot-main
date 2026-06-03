@@ -10,6 +10,7 @@
 - Canonical active lane: **Kalshi Weather Prediction Engine** (Sovereign Precipitation)
 - **Status:** **SOVEREIGN WEATHER**. Hardened Risk & Precipitation Alpha.
 - **Critical Changes (v19.1.KALSHI):**
+  - **$10 Hard Ceiling**: Implemented a non-negotiable $10.00 USD cap per position to prevent over-allocation on high-balance accounts.
   - **Hard Architectural Isolation**: Excised all Coinbase Crypto Spot Scalp logic. The repository is now a dedicated, hardened environment for Kalshi Prediction Markets.
   - **Unified Entry Point**: Consolidated all launch paths into a single `main.py` focusing strictly on weather.
   - **Sovereign SRE Oracle**: Upgraded the Telegram AI agent to `gemini-2.0-flash` with direct technical execution mandates (Action-First).

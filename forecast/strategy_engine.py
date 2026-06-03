@@ -652,6 +652,11 @@ def calculate_continuous_sizing(market_price: float, ensemble_prob: float, capit
     # Multiplier (Convergence/Sigma) applied to final allocated capital
     allocated_capital = capital_base * cap_pct * scaling_factor * multiplier
 
+    # v19.9.1: Hard Sizing Ceiling
+    from config import KALSHI_MAX_USD_PER_POSITION
+    if allocated_capital > KALSHI_MAX_USD_PER_POSITION:
+        allocated_capital = KALSHI_MAX_USD_PER_POSITION
+
     qty = int(allocated_capital / market_price) if market_price > 0 else 0
     return qty
 

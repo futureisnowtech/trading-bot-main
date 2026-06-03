@@ -88,8 +88,8 @@ MAX_HOURS_TO_RES: float = 48.0
 
 # v19.7: Sovereign Precision Calibration
 # Raising the bar for Alpha to ensure Win-Rate Restoration.
-EV_THRESHOLD: float = 0.20  # Swing only at Grand Slams (20% Edge floor)
-MAX_MODEL_MARKET_DIVERGENCE: float = 0.30  # Market Truth Veto (30% cap)
+EV_THRESHOLD: float = 0.30  # v19.9: Elite Grand Slams only (30% Edge floor)
+MAX_MODEL_MARKET_DIVERGENCE: float = 0.20  # v19.9: Market Truth Veto (20% cap)
 
 # Longshot Bias Gate
 MIN_IMPLIED_PROB_FOR_YES: float = 0.10  # refuse to buy YES below 10% probability
@@ -706,26 +706,36 @@ def _strategy_weather(ticker: str, ask_yes: float, ask_no: float, hours_to_res: 
     if not w_data:
         if "HIGH" in ticker or "LOW" in ticker:
             logger.info(f"TRACE: No weather data for {ticker}")
-        return False, "", 0.0, ["no_weather_ensemble_data"], False
+        return False, "", 0.0, ["no_weather_ensemble_data"], False, 1.0, 3, 0.05
 
     threshold = _parse_weather_threshold(ticker)
     if threshold is None:
-        return False, "", 0.0, [f"unparseable_ticker_threshold: {ticker}"], False
+        return False, "", 0.0, [f"unparseable_ticker_threshold: {ticker}"], False, 1.0, 3, 0.05
 
-    mode = "HIGH" if "HIGH" in ticker else "LOW" if "LOW" in ticker else "RAIN"
+    mode = "HIGH" if "HIGH" in ticker else "LOW" if "LOW" in ticker else "RAIN" if "RAIN" in ticker else "SNOW" if "SNOW" in ticker else "WIND" if "WIND" in ticker else "TEMP"
     
     # ── Phase 1: GFS Analysis (Primary Trigger) ─────────────────────────────
-    members_gfs = w_data.get("members_high" if mode == "HIGH" else "members_low", [])
-    if not members_gfs: return False, "", 0.0, ["missing_gfs_members"], False, 1.0, 3, 0.10
+    # v19.9: Route to precip/wind data if ticker type matches
+    if mode in ["RAIN", "SNOW", "WIND"]:
+        members_gfs = w_data.get("members_precip" if mode != "WIND" else "members_wind", [])
+    else:
+        members_gfs = w_data.get("members_high" if mode == "HIGH" else "members_low", [])
+    if not members_gfs: return False, "", 0.0, ["missing_gfs_members"], False, 1.0, 3, 0.05
     
     # v19.8: Precision Epsilon (0.05F) to account for float noise in conversion
-    def _count_success(m_list, thresh, is_high_mode):
-        if is_high_mode:
+    def _count_success(m_list, thresh, mode_type):
+        if mode_type == "HIGH":
             return sum(1 for m in m_list if m >= (thresh - 0.05))
-        else:
+        elif mode_type == "LOW":
             return sum(1 for m in m_list if m <= (thresh + 0.05))
+        elif mode_type in ["RAIN", "SNOW"]:
+            # Rain/Snow usually "Will there be > X inches"
+            return sum(1 for m in m_list if m > thresh)
+        else:
+            # Default to "greater than" for wind/temp-at-hour
+            return sum(1 for m in m_list if m >= thresh)
 
-    success_count_gfs = _count_success(members_gfs, threshold, mode == "HIGH")
+    success_count_gfs = _count_success(members_gfs, threshold, mode)
     prob_gfs = success_count_gfs / len(members_gfs)
     
     # ── Phase 2: ECMWF Analysis (Convergence Anchor) ────────────────────────
@@ -733,9 +743,13 @@ def _strategy_weather(ticker: str, ask_yes: float, ask_no: float, hours_to_res: 
     prob_ecmwf = None
     
     if ecmwf_data:
-        members_ec = ecmwf_data.get("members_high" if mode == "HIGH" else "members_low", [])
+        if mode in ["RAIN", "SNOW", "WIND"]:
+            members_ec = ecmwf_data.get("members_precip" if mode != "WIND" else "members_wind", [])
+        else:
+            members_ec = ecmwf_data.get("members_high" if mode == "HIGH" else "members_low", [])
+            
         if members_ec:
-            success_count_ec = _count_success(members_ec, threshold, mode == "HIGH")
+            success_count_ec = _count_success(members_ec, threshold, mode)
             prob_ecmwf = success_count_ec / len(members_ec)
 
     # ── Phase 3: AI/GraphCast Analysis (Sovereign Sigma Scaler) ────────────
@@ -743,7 +757,11 @@ def _strategy_weather(ticker: str, ask_yes: float, ask_no: float, hours_to_res: 
     aigefs_data = w_data.get("aigefs")
     ai_multiplier = 1.0
     if aigefs_data:
-        members_ai = aigefs_data.get("members_high" if mode == "HIGH" else "members_low", [])
+        if mode in ["RAIN", "SNOW", "WIND"]:
+            members_ai = aigefs_data.get("members_precip" if mode != "WIND" else "members_wind", [])
+        else:
+            members_ai = aigefs_data.get("members_high" if mode == "HIGH" else "members_low", [])
+            
         if members_ai:
             ai_val = members_ai[0] # Deterministic
             # If AI value is on the wrong side of our bet, increase Sigma (uncertainty)
@@ -752,9 +770,11 @@ def _strategy_weather(ticker: str, ask_yes: float, ask_no: float, hours_to_res: 
             ai_divergence = abs(ai_val - ensemble_mean)
             
             # Scale uncertainty based on AI disagreement
-            if ai_divergence > 1.5: # 1.5F disagreement is significant
+            # v19.9: Precip divergence threshold is smaller (0.1 in)
+            disagree_thresh = 1.5 if mode not in ["RAIN", "SNOW"] else 0.1
+            if ai_divergence > disagree_thresh:
                 ai_multiplier = 1.3 # Increase Sigma/Chaos
-            elif ai_divergence < 0.5:
+            elif ai_divergence < (disagree_thresh / 3.0):
                 ai_multiplier = 0.8 # Compress Sigma/Conviction
 
     # ── Final Probability & Edge (v19.8 Refined Blend) ────────────────────
@@ -774,7 +794,7 @@ def _strategy_weather(ticker: str, ask_yes: float, ask_no: float, hours_to_res: 
         gap = abs(prob_gfs - prob_ecmwf)
         if gap > 0.5:
              logger.warning(f"Sovereign Divergence Veto: {ticker} GFS={prob_gfs:.1%} EC={prob_ecmwf:.1%} -> VETO")
-             return False, "", 0.0, ["model_catastrophic_divergence"], False, 1.0, 3, 0.10
+             return False, "", 0.0, ["model_catastrophic_divergence"], False, 1.0, 3, 0.05
 
     ensemble_prob = max(0.03, min(0.97, ensemble_prob))
     edge_yes = ensemble_prob - ask_yes
@@ -821,7 +841,7 @@ def _strategy_weather(ticker: str, ask_yes: float, ask_no: float, hours_to_res: 
 
     if edge_yes > 0.08:
         if cloud_veto:
-            return False, "", 0.0, [f"cloud_cover_veto (TCDC={peak_tcdc:.1f}%)"], False
+            return False, "", 0.0, [f"cloud_cover_veto (TCDC={peak_tcdc:.1f}%)"], False, 1.0, 3, 0.05
 
         is_taker = edge_yes >= 0.22 and is_short_term
         factors = [
@@ -832,17 +852,18 @@ def _strategy_weather(ticker: str, ask_yes: float, ask_no: float, hours_to_res: 
             f"TCDC={peak_tcdc:.1f}%"
         ]
         # v19.6: Sovereign Escalation — Tier Identification
+        # v19.9: 50% Sizing Cut (10% / 7.5% / 5%)
         conv_tier = 3
-        sizing_cap = 0.10
+        sizing_cap = 0.05
         
         # TIER 1: AMAZING (Grand Slam)
         if ensemble_prob > 0.92 and sigma < 1.0:
             conv_tier = 1
-            sizing_cap = 0.20
+            sizing_cap = 0.10
         # TIER 2: HIGH
         elif ensemble_prob > 0.85 and sigma < 1.5:
             conv_tier = 2
-            sizing_cap = 0.15
+            sizing_cap = 0.075
             
         factors.append(f"tier={conv_tier}")
         
@@ -859,22 +880,23 @@ def _strategy_weather(ticker: str, ask_yes: float, ask_no: float, hours_to_res: 
             f"sigma_mult={sigma_mult:.2f}x"
         ]
         # v19.6: Sovereign Escalation — Tier Identification (NO Side)
+        # v19.9: 50% Sizing Cut
         conv_tier = 3
-        sizing_cap = 0.10
+        sizing_cap = 0.05
         no_prob = 1.0 - ensemble_prob
         if no_prob > 0.92 and sigma < 1.0:
             conv_tier = 1
-            sizing_cap = 0.20
+            sizing_cap = 0.10
         elif no_prob > 0.85 and sigma < 1.5:
             conv_tier = 2
-            sizing_cap = 0.15
+            sizing_cap = 0.075
             
         factors.append(f"tier={conv_tier}")
         
         sizing_multiplier = convergence_multiplier * sigma_mult
         return True, "NO", no_prob, factors, is_taker, sizing_multiplier, conv_tier, sizing_cap
 
-    return False, "", 0.0, ["insufficient_edge"], False, 1.0, 3, 0.10
+    return False, "", 0.0, ["insufficient_edge"], False, 1.0, 3, 0.05
 
 def evaluate_contract(
     contract: dict,
@@ -1096,7 +1118,7 @@ def evaluate_contract(
         try:
             passes, side, confidence, factors = fn(feats, hours_to_res)
             if passes:
-                strategy_candidates.append((name, side, confidence, factors, False, 1.0, 3, 0.10))
+                strategy_candidates.append((name, side, confidence, factors, False, 1.0, 3, 0.05))
         except Exception as e:
             logger.debug(f"Strategy {name} error: {e}")
 

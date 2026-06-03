@@ -6,9 +6,15 @@
 ## Canonical Truth
 
 - Repo root: `/Users/joshmacbookair2020/Projects/algo_trading_final`
-- Canonical version: `v19.8.1` (`2026-06-03`)
-- Canonical active lane: **Dual-Lane**: Coinbase Spot Scalp + Kalshi Weather Sovereign Guru
-- **Status:** **SOVEREIGN GURU**. Fixed Market Order Execution.
+- Canonical version: `v19.9.0` (`2026-06-03`)
+- Canonical active lane: **Dual-Lane**: Coinbase Spot Scalp + Kalshi Weather Sovereign Precipitation
+- **Status:** **SOVEREIGN PRECIPITATION**. Hardened Risk & Precipitation Alpha.
+- **Critical Changes (v19.9.0):**
+  - **Sovereign Precipitation**: Unlocked `KXRAIN`, `KXSNOW`, and `KXWIND` markets by routing the ensemble engine to `members_precip` data streams.
+  - **Hardened Risk Calibration**:
+    - **50% Sizing Cut**: Reduced all conviction tier caps by 50% (Tier 1 @ 10%, Tier 2 @ 7.5%, Tier 3 @ 5%) to maximize capital efficiency for the account reload.
+    - **Market Truth Cap**: Tightened Model-Market Divergence veto from 30% to 20% to detect model staleness/error earlier.
+    - **Elite Alpha Floor**: Increased the `EV_THRESHOLD` from 20% to 30% (Net of fees), forcing the bot to only swing at the highest-conviction "Grand Slam" trades.
 - **Critical Changes (v19.8.1):**
   - **Market Execution Fix**: Resolved a failure in Kalshi V2 where market sell orders were rejected for lacking a price field. Implemented a $0.01 floor to satisfy API validation.
 - **Critical Changes (v19.8.0):**

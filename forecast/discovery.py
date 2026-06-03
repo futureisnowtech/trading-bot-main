@@ -29,6 +29,10 @@ TIER1_KEYWORDS: list[str] = [
     "unemployment",
     "pce",
     "gdp",
+    "rain",
+    "snow",
+    "wind",
+    "temperature",
 ]
 
 # Resolution window: only trade events resolving within this window

@@ -2,6 +2,7 @@
 All notable changes to The King's Algo Trading System.
 
 ## 2026-06-03
+- v19.9.0 (Sovereign Precipitation): Unlocked precipitation (`KXRAIN`, `KXSNOW`) and wind markets by integrating `members_precip` data streams into the strategy engine. Hardened institutional risk parameters: reduced all tiered sizing caps by 50% (Tier 1 now 10%), tightened Market-Truth divergence cap to 20%, and raised the high-alpha floor to 30% Net-EV. Elevated weather markets to Tier 1 in the discovery engine.
 - v19.8.1 (Execution Fix): Resolved a critical failure in `execution/kalshi_broker.py` where market sell orders (for Salvage and Take-Profit) were rejected by the Kalshi V2 API for missing a price field. Implemented a $0.01 floor to satisfy API validation while ensuring immediate market execution.
 
 ## 2026-06-02

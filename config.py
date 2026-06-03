@@ -81,7 +81,7 @@ FORECAST_DASHBOARD_VISIBLE: bool = (
     os.getenv("FORECAST_DASHBOARD_VISIBLE", "true").lower() == "true"
 )
 FORECAST_AUTONOMOUS_ENABLED: bool = (
-    os.getenv("FORECAST_AUTONOMOUS_ENABLED", "true").lower() == "true"
+    os.getenv("FORECAST_AUTONOMOUS_ENABLED", "false").lower() == "true"
 )
 FORECAST_MANUAL_ENABLED: bool = (
     os.getenv("FORECAST_MANUAL_ENABLED", "true").lower() == "true"

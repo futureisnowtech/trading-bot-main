@@ -11,11 +11,8 @@ EQUITY_GAUGE = Gauge('algo_bot_equity_usd', 'Total account equity in USD')
 TOTAL_EQUITY_GAUGE = Gauge('algo_bot_total_equity_usd', 'Total account equity in USD (v2)')
 BUYING_POWER_GAUGE = Gauge('algo_bot_buying_power_usd', 'Available buying power in USD')
 
-# Kalshi Weather Metrics
+# SRE FIX: Pure Weather Metrics Exporter
 KALSHI_WEATHER_EDGE_RATIO_GAUGE = Gauge('kalshi_weather_edge_ratio', 'Edge ratio for active weather markets', ['ticker'])
-KALSHI_API_ERRORS_TOTAL = Counter('kalshi_api_errors_total', 'Total Kalshi API errors recorded')
-
-# v19.1.10: Sovereign Weather Alpha Metrics
 WEATHER_ENSEMBLE_PROB_GAUGE = Gauge('algo_bot_weather_ensemble_prob', 'Ensemble probability per ticker', ['ticker'])
 WEATHER_METAR_DIFF_GAUGE = Gauge('algo_bot_weather_metar_diff', 'METAR ground truth diff from threshold', ['ticker'])
 WEATHER_HRRR_DIFF_GAUGE = Gauge('algo_bot_weather_hrrr_diff', 'HRRR intraday diff from threshold', ['ticker'])
@@ -23,8 +20,6 @@ WEATHER_SIGMA_GAUGE = Gauge('algo_bot_weather_sigma', 'Ensemble standard deviati
 
 # v18.19: trade economics
 OPEN_TRADES_GAUGE = Gauge('algo_bot_open_trades', 'Currently open bot-managed positions')
-OPEN_POS_PNL_GAUGE = Gauge('algo_bot_open_position_pnl_usd', 'Unrealized PnL per open position', ['asset'])
-OPEN_POS_ENTRY_GAUGE = Gauge('algo_bot_open_position_entry_price', 'Entry price per open position', ['asset'])
 TRADES_WON_COUNTER = Counter('algo_bot_trades_won_total', 'Profitable closes')
 TRADES_LOST_COUNTER = Counter('algo_bot_trades_lost_total', 'Losing closes')
 SESSION_TRADES_GAUGE = Gauge('algo_bot_session_trade_count', 'Trades executed today (resets midnight UTC)')

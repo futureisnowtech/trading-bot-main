@@ -39,4 +39,14 @@ def init_db():
                 ts TEXT
             )
         """)
+        # SRE FIX: Weather-Native Schema Enforcement
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS forecast_positions (
+                ticker TEXT PRIMARY KEY,
+                qty INTEGER,            -- Kalshi operates in whole contracts
+                entry REAL,             -- Replaces 'entry_price'
+                side TEXT,
+                unrealized_pnl REAL
+            )
+        """)
         conn.commit()

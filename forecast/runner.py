@@ -693,13 +693,23 @@ def run_position_monitor() -> None:
             if resolved:
 
                 try:
-                    flatten_res = broker.flatten_position(
-                        local_symbol=local_symbol,
-                        right=right,
-                        qty=qty,
-                        strategy="forecast_monitor",
-                        reason="resolved_or_expired",
-                    )
+                    # SRE FIX: Dynamic Liquidity-Checked Limit Orders
+                    quote = broker.get_quote(local_symbol)
+                    current_bid = float(quote.get('bid', 0))
+                    current_bid_vol = int(quote.get('bid_vol', 0))
+                    
+                    if current_bid > 0.01 and current_bid_vol >= qty:
+                        flatten_res = broker.place_sell_order(
+                            contract_dict={"local_symbol": local_symbol},
+                            qty=qty,
+                            limit_price=current_bid,
+                            type="limit",
+                            side="yes" if right == "C" else "no",
+                            reason="sovereign_exit_limit"
+                        )
+                    else:
+                        logger.warning(f"Exit skipped for {local_symbol}: Insufficient bid liquidity ({current_bid_vol} @ {current_bid})")
+                        continue # Skip notification if no order sent
                     
                     # Notify via Telegram/DB
                     if flatten_res.get("order_id") != "ERR":

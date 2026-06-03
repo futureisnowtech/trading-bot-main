@@ -200,15 +200,22 @@ async def metrics_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @restricted_access
 async def positions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show open forecast positions."""
-    positions = get_open_forecast_positions()
-    if not positions:
-        await _reply_text(update, "No active forecast positions.")
-        return
+    # SRE FIX: DB mapping alignment
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute("SELECT ticker, qty, entry, side FROM forecast_positions WHERE qty > 0").fetchall()
+            
+        if not rows:
+            await _reply_text(update, "No active forecast positions.")
+            return
 
-    msg = "<b>Active Forecast Positions</b>\n"
-    for p in positions:
-        msg += f"- {p['ticker']}: {p['qty']} {p['side']} @ ${p['entry_price']:.3f}\n"
-    await _reply_text(update, msg, parse_mode=ParseMode.HTML)
+        msg = "<b>Active Forecast Positions</b>\n"
+        for r in rows:
+            msg += f"🎫 {r['ticker']} | {r['qty']} @ ${r['entry']:.2f}\n"
+        await _reply_text(update, msg, parse_mode=ParseMode.HTML)
+    except Exception as e:
+        await _reply_text(update, f"Error fetching positions: {e}")
 
 
 @restricted_access
@@ -410,7 +417,10 @@ async def run_bot():
 
 def start_bot_thread():
     global _BOT_STARTED
-    if _BOT_STARTED: return None
+    # SRE FIX: Prevent thread collision
+    if _BOT_STARTED:
+        logger.warning("Telegram thread already running. Blocking duplicate execution.")
+        return None
     _BOT_STARTED = True
 
     def _run():

@@ -127,3 +127,7 @@ DB_PATH: str = os.path.join(_ROOT_DIR, "logs", "trades.db")
 CSV_LOG_DIR: str = os.path.join(_ROOT_DIR, "logs", "csv")
 LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
 MARKET_TIMEZONE: str = "America/New_York"
+
+# ── Kalshi Sovereign Limits ──
+KALSHI_MAX_USD_PER_POSITION: float = 10.0  # Non-negotiable
+KALSHI_FEE_PER_CONTRACT: float = 0.07      # Base transaction fee

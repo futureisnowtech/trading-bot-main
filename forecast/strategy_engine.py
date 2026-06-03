@@ -652,10 +652,15 @@ def calculate_continuous_sizing(market_price: float, ensemble_prob: float, capit
     # Multiplier (Convergence/Sigma) applied to final allocated capital
     allocated_capital = capital_base * cap_pct * scaling_factor * multiplier
 
-    # v19.9.1: Hard Sizing Ceiling
-    from config import KALSHI_MAX_USD_PER_POSITION
-    if allocated_capital > KALSHI_MAX_USD_PER_POSITION:
-        allocated_capital = KALSHI_MAX_USD_PER_POSITION
+    # SRE FIX: Eliminate Sizing Drift and hard-lock the $10 ceiling
+    try:
+        from config import KALSHI_MAX_USD_PER_POSITION
+        ceiling = float(KALSHI_MAX_USD_PER_POSITION)
+    except ImportError:
+        ceiling = 10.0  # Failsafe: Hard Sovereign Mandate
+        
+    if allocated_capital > ceiling:
+        allocated_capital = ceiling
 
     qty = int(allocated_capital / market_price) if market_price > 0 else 0
     return qty
@@ -1170,12 +1175,18 @@ def evaluate_contract(
     # Weather alpha is probabilistic arbitrage, NOT technical price action.
     # If weather passes, we override technical economics vetoes.
     if best_family == "weather_ensemble":
-        approved = True
-        veto_reason = ""
-        # Recalculate EV based on ensemble probability, not q_hat
         p_cost = ask_yes if best_side == "YES" else ask_no
-        # best_confidence is now raw ensemble_prob
-        ev_chosen = best_confidence - p_cost
+        
+        # SRE FIX: Enforce Fee Deductions on Weather Markets
+        from config import KALSHI_FEE_PER_CONTRACT
+        ev_chosen = best_confidence - p_cost - KALSHI_FEE_PER_CONTRACT
+        
+        if ev_chosen < EV_THRESHOLD:
+            approved = False
+            veto_reason = f"fee_adjusted_ev_too_low ({ev_chosen:.4f} < {EV_THRESHOLD})"
+        else:
+            approved = True
+            veto_reason = ""
     else:
         # Determine EV for chosen side (Technical)
         ev_chosen = ev_yes if best_side == "YES" else ev_no
@@ -1305,7 +1316,15 @@ def evaluate_all_contracts(
     current_tick_counts = open_event_families.copy()
     
     # v19.1.10: Regional Hub Exposure Tracking
-    hub_exposure = {} # {HUB: current_usd}
+    hub_exposure = {} 
+    # SRE FIX: True Real-Time Exposure Calculation
+    for pos in open_positions:
+        p_ticker = pos.get("local_symbol", "")
+        p_hub = _get_city_hub(p_ticker)
+        # SRE FIX: Standardize on 'entry' column if present, else fallback to 'entry_price'
+        e_price = float(pos.get("entry") or pos.get("entry_price") or 0)
+        pos_usd = float(pos.get("qty", 0)) * e_price
+        hub_exposure[p_hub] = hub_exposure.get(p_hub, 0.0) + pos_usd
     
     # Initial load of open hub exposure (approximate based on ticker)
     # Note: In a true state-full system, we'd query existing positions.

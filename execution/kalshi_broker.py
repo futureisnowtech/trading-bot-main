@@ -209,9 +209,14 @@ class KalshiBroker:
                     seen_tickers.add(ticker)
 
             for event in all_events:
-                e_ticker = event.get("event_ticker")
+                # SRE FIX: HARD WEATHER GATE (Sovereign Mandate Enforcement)
+                e_ticker = event.get("event_ticker", "")
                 category = event.get("category", "")
                 
+                if "Weather" not in category and not e_ticker.startswith("KX"):
+                    logger.debug(f"Rejecting non-weather market: {e_ticker}")
+                    continue  # Skips political/economic bloat instantly
+
                 if not _is_weather_market(e_ticker, event.get("title"), category):
                     continue
                 
@@ -263,16 +268,23 @@ class KalshiBroker:
             no_levels = book.get("no_dollars", [])
             
             yes_bid = float(yes_levels[-1][0]) if yes_levels else None
-            no_bid = float(no_levels[-1][0]) if no_levels else None
-            yes_ask = round(1.0 - no_bid, 4) if no_bid is not None else None
+            yes_bid_vol = int(yes_levels[-1][1]) if yes_levels else 0
             
+            no_bid = float(no_levels[-1][0]) if no_levels else None
+            no_bid_vol = int(no_levels[-1][1]) if no_levels else 0
+            
+            yes_ask = round(1.0 - no_bid, 4) if no_bid is not None else None
+            yes_ask_vol = no_bid_vol
+
             mid = round((yes_bid + yes_ask) / 2.0, 4) if yes_bid and yes_ask else yes_bid or yes_ask
             spread = round(yes_ask - yes_bid, 4) if yes_bid and yes_ask else None
 
             return {
                 "local_symbol": ticker,
                 "bid": yes_bid,
+                "bid_vol": yes_bid_vol,
                 "ask": yes_ask,
+                "ask_vol": yes_ask_vol,
                 "mid": mid,
                 "spread": spread,
                 "implied_prob": mid,
@@ -368,19 +380,20 @@ class KalshiBroker:
         
         resp = self._request("POST", "/trade-api/v2/portfolio/orders", body=body)
         order_info = resp.get("order", {})
-        order_id = order_info.get("order_id", "ERR")
+        status = order_info.get("status")
         
-        if order_id == "ERR":
-            order_id = resp.get("order_id", "ERR")
+        # SRE FIX: Await legitimate fills. No more $0.00 ghost trades.
+        if status == "executed":
+            fill_price = float(order_info.get("average_price", 0.0)) / 100.0
+            order_id = order_info.get("order_id", "ERR")
             
-        if order_id != "ERR":
-            print(f"[KalshiBroker] BUY {qty} {ticker} ({side.upper()}) @ {limit_price:.4f} | ID={order_id}")
+            print(f"[KalshiBroker] BUY {qty} {ticker} ({side.upper()}) @ {fill_price:.4f} | ID={order_id}")
             key = f"{ticker}_{contract_dict['right']}"
             self._open_positions[key] = {
                 "qty": qty,
                 "side": side.upper(),
                 "local_symbol": ticker,
-                "entry_price": limit_price,
+                "entry": fill_price,
             }
             try:
                 log_trade(
@@ -390,14 +403,82 @@ class KalshiBroker:
                     action="BUY",
                     order_type=order_type.capitalize(),
                     qty=qty,
-                    price=limit_price,
+                    price=fill_price,
                     order_id=order_id,
                     notes=kwargs.get("reason", ""),
                 )
             except Exception as e:
                 logger.error(f"[KalshiBroker] log_trade error: {e}")
+            return {"order_id": order_id, "price": fill_price, "qty": qty}
+            
+        elif status in ["resting", "pending"]:
+            logger.info(f"Order resting, not updating positions table yet. ID: {order_info.get('order_id')}")
+            return {"order_id": order_info.get("order_id"), "status": status}
+        else:
+            logger.error(f"Order failed or rejected: {resp}")
+            return {"order_id": "ERR", "status": status}
 
-        return {"order_id": order_id, "price": limit_price, "qty": qty}
+    def place_sell_order(self, contract_dict: dict, qty: int, limit_price: float, **kwargs) -> dict:
+        """SRE FIX: Dedicated Sell Order Handler for Limit Exits."""
+        if not self.is_connected():
+            raise RuntimeError("[KalshiBroker] Not connected to Kalshi")
+
+        ticker = contract_dict["local_symbol"]
+        # In Kalshi, selling a YES is action=sell side=yes (if you held YES)
+        # OR buying a NO. The runner seems to use flatten_position for exits.
+        # But if the runner calls place_sell_order, we need to know the 'side' held.
+        # Assume we held YES for now as it's the primary weather bet.
+        side = kwargs.get("side", "yes").lower() 
+        order_type = kwargs.get("type", "limit").lower()
+
+        body = {
+            "ticker": ticker,
+            "action": "sell",
+            "side": side,
+            "count": int(qty),
+            "type": order_type,
+            "client_order_id": str(uuid.uuid4()),
+        }
+
+        if order_type == "limit":
+            limit_cents = int(round(limit_price * 100))
+            if side == "yes": body["yes_price"] = limit_cents
+            else: body["no_price"] = limit_cents
+
+        resp = self._request("POST", "/trade-api/v2/portfolio/orders", body=body)
+        order_info = resp.get("order", {})
+        status = order_info.get("status")
+
+        if status == "executed":
+            exit_price = float(order_info.get("average_price", 0.0)) / 100.0
+            order_id = order_info.get("order_id", "ERR")
+            print(f"[KalshiBroker] SELL {qty} {ticker} @ {exit_price:.4f} | ID={order_id}")
+            
+            # PnL Calc
+            key_yes = f"{ticker}_C"; key_no = f"{ticker}_P"
+            pos_info = self._open_positions.pop(key_yes, {}) or self._open_positions.pop(key_no, {})
+            entry_price = float(pos_info.get("entry") or 0.50)
+            pnl_usd = (exit_price - entry_price) * qty
+            
+            try:
+                log_trade(
+                    strategy=kwargs.get("strategy", "forecast_exit"),
+                    broker="kalshi",
+                    symbol=ticker,
+                    action="SELL",
+                    order_type=order_type.capitalize(),
+                    qty=qty,
+                    price=exit_price,
+                    pnl_usd=pnl_usd,
+                    order_id=order_id,
+                    notes=kwargs.get("reason", ""),
+                    won=(pnl_usd > 0)
+                )
+            except Exception as e:
+                logger.error(f"[KalshiBroker] log_trade exit error: {e}")
+            return {"order_id": order_id, "exit_price": exit_price, "pnl_usd": pnl_usd}
+        
+        return {"order_id": order_info.get("order_id", "ERR"), "status": status}
 
     def flatten_position(self, local_symbol: str, right: str, qty: int, **kwargs) -> dict:
         if not self.is_connected():

@@ -258,8 +258,8 @@ def kalshi_absolute_sizing(
 
     # v19.9.1: Hard USD Ceiling
     try:
-        from config import KALSHI_MAX_USD_PER_POSITION
-        qty_by_hard_cap = int(KALSHI_MAX_USD_PER_POSITION / ask_price)
+        from config import KALSHI_TIER_3_MAX_USD
+        qty_by_hard_cap = int(KALSHI_TIER_3_MAX_USD / ask_price)
     except:
         qty_by_hard_cap = 999999
 

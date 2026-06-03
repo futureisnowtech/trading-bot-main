@@ -635,7 +635,7 @@ def _strategy_late_repricing(
 
 from data.kalshi_weather_monitor import get_weather_data
 
-def calculate_continuous_sizing(market_price: float, ensemble_prob: float, capital_base: float, multiplier: float = 1.0, cap_pct: float = 0.10) -> int:
+def calculate_continuous_sizing(market_price: float, ensemble_prob: float, capital_base: float, multiplier: float = 1.0, cap_pct: float = 0.10, conv_tier: int = 3) -> int:
     """Logistic Sigmoid mapping for high-aggression position sizing (v19.1.4)."""
     # Ensure prob is clipped
     ensemble_prob = max(0.01, min(0.99, ensemble_prob))
@@ -652,12 +652,17 @@ def calculate_continuous_sizing(market_price: float, ensemble_prob: float, capit
     # Multiplier (Convergence/Sigma) applied to final allocated capital
     allocated_capital = capital_base * cap_pct * scaling_factor * multiplier
 
-    # SRE FIX: Eliminate Sizing Drift and hard-lock the $10 ceiling
+    # SRE FIX: Tiered Fractional Kelly Sizing (v19.9.2)
     try:
-        from config import KALSHI_MAX_USD_PER_POSITION
-        ceiling = float(KALSHI_MAX_USD_PER_POSITION)
+        from config import KALSHI_TIER_1_MAX_USD, KALSHI_TIER_2_MAX_USD, KALSHI_TIER_3_MAX_USD
+        if conv_tier == 1:
+            ceiling = float(KALSHI_TIER_1_MAX_USD)
+        elif conv_tier == 2:
+            ceiling = float(KALSHI_TIER_2_MAX_USD)
+        else:
+            ceiling = float(KALSHI_TIER_3_MAX_USD)
     except ImportError:
-        ceiling = 10.0  # Failsafe: Hard Sovereign Mandate
+        ceiling = 15.0  # Failsafe Standard Limit
         
     if allocated_capital > ceiling:
         allocated_capital = ceiling
@@ -1214,7 +1219,8 @@ def evaluate_contract(
                 ensemble_prob=best_confidence,
                 capital_base=bankroll,
                 multiplier=best_multiplier,
-                cap_pct=best_sizing_cap
+                cap_pct=best_sizing_cap,
+                conv_tier=best_tier
             )
             # v19.5: Institutional Quantity Cap (Prevent Penny Spree)
             if n_contracts > KALSHI_MAX_QTY_PER_POSITION:

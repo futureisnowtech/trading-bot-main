@@ -22,7 +22,7 @@ if _ROOT not in sys.path:
 from config import DB_PATH
 from VERSION import VERSION
 
-app = FastAPI(title=f"Algo Trading Terminal API ({VERSION})")
+app = FastAPI(title=f"Kalshi Weather Engine API ({VERSION})")
 
 app.add_middleware(
     CORSMiddleware,
@@ -35,13 +35,13 @@ app.add_middleware(
 import psutil
 
 async def get_db_snapshot():
-    """v19.1: Absolute Read-Only Cache Snapshot. Eliminates network calls from HUD."""
+    """v19.1.KALSHI: Pure Kalshi Weather API Snapshot."""
     try:
         conn = sqlite3.connect(DB_PATH, timeout=10.0)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
-        # 1. System Vitals (Local Machine)
+        # 1. System Vitals
         vitals = {
             "cpu": psutil.cpu_percent(),
             "ram": psutil.virtual_memory().percent,
@@ -49,24 +49,18 @@ async def get_db_snapshot():
             "load_avg": os.getloadavg() if hasattr(os, 'getloadavg') else [0,0,0]
         }
 
-        # 2. Read Bot-Cached Snapshots (The Load Reducer)
-        spot_data = {"positions": [], "equity": 0.0}
-        forecast_data = {"positions": [], "total_pnl": 0.0}
+        # 2. Forecast Data
+        forecast_data = {"positions": [], "total_pnl": 0.0, "equity": 0.0, "active_markets": 0}
         
         try:
-            cursor.execute("SELECT lane_id, snapshot_json, readiness_state FROM lane_runtime_state")
-            for row in cursor.fetchall():
-                lid = row["lane_id"]
-                s_json = row["snapshot_json"]
-                if not s_json: continue
-                
-                parsed = json.loads(s_json)
-                if lid in ("spot", "crypto"): spot_data = parsed
-                elif lid == "forecast": forecast_data = parsed
+            cursor.execute("SELECT snapshot_json FROM lane_runtime_state WHERE lane_id='forecast'")
+            row = cursor.fetchone()
+            if row and row["snapshot_json"]:
+                forecast_data = json.loads(row["snapshot_json"])
         except Exception as e:
             logging.debug(f"Snapshot read error: {e}")
 
-        # 3. 24H PnL Aggregation
+        # 3. 24H PnL
         pnl_24h = 0.0
         try:
             cursor.execute("SELECT SUM(pnl_usd) as pnl FROM trades WHERE ts > datetime('now', '-1 day')")
@@ -74,25 +68,16 @@ async def get_db_snapshot():
             if row: pnl_24h = float(row["pnl"] or 0.0)
         except: pass
         
-        # 4. Intelligence Summary
-        regime = "NEUTRAL"
-        try:
-            cursor.execute("SELECT last_regime FROM spot_regime_state ORDER BY ts DESC LIMIT 1")
-            row = cursor.fetchone()
-            if row: regime = row["last_regime"]
-        except: pass
-
-        summary = f"Bot is operational. Market weather is currently {regime}."
+        summary = "Kalshi Weather Engine is operational."
         if pnl_24h > 0:
             summary = f"System is performing well today (+${pnl_24h:,.2f})."
         elif pnl_24h < 0:
             summary = f"Navigating a challenging market today (-${abs(pnl_24h):,.2f})."
             
-        if spot_data.get("positions"):
-            symbols = ", ".join([p["symbol"] for p in spot_data["positions"]])
-            summary += f" Managing {len(spot_data['positions'])} trades: {symbols}."
+        if forecast_data.get("positions"):
+            summary += f" Managing {len(forecast_data['positions'])} active weather contracts."
 
-        # 5. Recent System Events
+        # 4. Recent System Events
         events = []
         try:
             cursor.execute("SELECT ts, level, source, message FROM system_events ORDER BY ts DESC LIMIT 20")
@@ -100,7 +85,6 @@ async def get_db_snapshot():
                 row = dict(r)
                 if row.get("ts"):
                     try:
-                        # Normalize to space-separated format for HUD
                         ts_obj = datetime.fromisoformat(row["ts"].replace(" ", "T"))
                         row["ts"] = ts_obj.strftime("%Y-%m-%d %H:%M:%S")
                     except:
@@ -108,69 +92,19 @@ async def get_db_snapshot():
                 events.append(row)
         except: pass
 
-        # 6. Live Hunt (Candidates)
-        live_hunt = []
-        try:
-            cursor.execute("SELECT symbol, direction, final_spot_score, entry_block_reason as reason, ts FROM scan_candidates ORDER BY ts DESC LIMIT 5")
-            for r in cursor.fetchall():
-                ts_val = r["ts"]
-                if ts_val:
-                    try:
-                        ts_obj = datetime.fromisoformat(ts_val.replace(" ", "T"))
-                        ts_val = ts_obj.strftime("%Y-%m-%d %H:%M:%S")
-                    except:
-                        ts_val = str(ts_val).replace("T", " ")
-                    
-                live_hunt.append({
-                    "symbol": r["symbol"],
-                    "direction": r["direction"],
-                    "score": round(float(r["final_spot_score"] or 0.0), 1),
-                    "reason": r["reason"] or "Passed Score",
-                    "ts": ts_val
-                })
-        except: pass
-
-        # 7. SRE Health & Integrity (v19.1.4: Resolve Telegram Hallucination)
+        # 5. SRE Health
         sre = {
-            "integrity_score": 100, # Default to 100 if we reached this point (DB+API OK)
+            "integrity_score": 100,
             "broker_connected": True,
-            "weather_active_markets": 0
+            "weather_active_markets": forecast_data.get("active_markets", 0)
         }
-        try:
-            # Check last scan age for Crypto
-            cursor.execute("SELECT ts FROM lane_runtime_state WHERE lane_id='crypto' LIMIT 1")
-            row = cursor.fetchone()
-            if row:
-                last_scan = datetime.fromisoformat(row[0].replace(" ", "T"))
-                age_min = (datetime.now() - last_scan).total_seconds() / 60
-                if age_min > 10: sre["integrity_score"] = 50 # Degraded if stale
-            
-            # Check Weather Markets
-            cursor.execute("SELECT snapshot_json FROM lane_runtime_state WHERE lane_id='forecast' LIMIT 1")
-            row = cursor.fetchone()
-            if row and row[0]:
-                f_snap = json.loads(row[0])
-                sre["weather_active_markets"] = f_snap.get("active_markets", 0)
-        except: pass
 
         conn.close()
 
         return {
-            "spot": {
-                "equity": spot_data.get("equity", 0.0),
-                "pnl_24h": pnl_24h,
-                "positions": spot_data.get("positions", []),
-                "regime": regime
-            },
-            "forecast": {
-                "positions": forecast_data.get("positions", []),
-                "total_pnl": forecast_data.get("total_pnl", 0.0),
-                "equity": forecast_data.get("equity", 0.0),
-                "active_markets": sre["weather_active_markets"]
-            },
+            "forecast": forecast_data,
             "intelligence_summary": summary,
             "events": events,
-            "live_hunt": live_hunt,
             "vitals": vitals,
             "sre": sre,
             "system": {
@@ -195,7 +129,7 @@ async def event_generator() -> AsyncGenerator[str, None]:
             yield f"data: {json.dumps(data)}\n\n"
         except Exception as e:
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
-        await asyncio.sleep(5) # Throttle to 5s for ultra-low load
+        await asyncio.sleep(5)
 
 @app.get("/api/stream")
 async def stream(request: Request):

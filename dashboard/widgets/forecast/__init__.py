@@ -1,1 +1,0 @@
-# forecast dashboard widgets package

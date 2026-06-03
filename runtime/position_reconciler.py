@@ -1,8 +1,5 @@
 """
-runtime/position_reconciler.py — Reconciles open_positions against trades ledger.
-
-Run at startup and periodically. Fixes scale_33_done/scale_66_done flags
-when trade ledger shows partial closes that positions table missed.
+runtime/position_reconciler.py — Reconciles open_positions for Kalshi Weather Engine.
 """
 
 import os
@@ -25,127 +22,23 @@ def _conn(db_path: str = DB_PATH) -> sqlite3.Connection:
     return c
 
 
-def reconcile_position_flags(db_path: str = DB_PATH) -> list:
-    """
-    For each open position, check the trades ledger for partial closes
-    since ts_entry and repair scale_33_done / scale_66_done flags.
-
-    Returns list of repair dicts:
-      {symbol, flags_set, partial_close_count, closed_qty, original_qty}
-    """
-    repairs = []
-
-    try:
-        with _conn(db_path) as c:
-            # Fetch all open positions
-            positions = c.execute(
-                "SELECT symbol, qty, ts_entry, scale_33_done, scale_66_done "
-                "FROM open_positions WHERE paper=0"
-            ).fetchall()
-
-            if not positions:
-                return []
-
-            now_iso = datetime.now(timezone.utc).isoformat()
-
-            for pos in positions:
-                symbol = pos["symbol"]
-                original_qty = pos["qty"] or 0
-                ts_entry = pos["ts_entry"] or "1970-01-01T00:00:00"
-                scale_33 = bool(pos["scale_33_done"])
-                scale_66 = bool(pos["scale_66_done"])
-
-                # Count partial closes in trades table since entry
-                result = c.execute(
-                    """
-                    SELECT COUNT(*) as cnt, COALESCE(SUM(qty), 0) as closed_qty
-                    FROM trades
-                    WHERE symbol=? AND ts>=? AND paper=0
-                      AND broker LIKE '%coinbase%'
-                      AND (
-                          action IN ('SELL', 'CLOSE')
-                          OR notes LIKE '%scale_out%'
-                          OR notes LIKE '%partial%'
-                      )
-                    """,
-                    (symbol, ts_entry),
-                ).fetchone()
-
-                partial_count = result["cnt"] or 0
-                closed_qty = result["closed_qty"] or 0.0
-
-                flags_set = []
-
-                if partial_count > 0:
-                    # Any partial close → set scale_33_done
-                    if not scale_33:
-                        c.execute(
-                            "UPDATE open_positions SET scale_33_done=1 WHERE symbol=? AND paper=0""",
-                            (symbol,),
-                        )
-                        flags_set.append("scale_33_done")
-
-                    # If closed_qty >= 50% of original → set scale_66_done
-                    if (
-                        original_qty > 0
-                        and closed_qty >= 0.50 * original_qty
-                        and not scale_66
-                    ):
-                        c.execute(
-                            "UPDATE open_positions SET scale_66_done=1 WHERE symbol=? AND paper=0",
-                            (symbol,),
-                        )
-                        flags_set.append("scale_66_done")
-
-
-                if flags_set:
-                    repair = {
-                        "symbol": symbol,
-                        "flags_set": flags_set,
-                        "partial_close_count": partial_count,
-                        "closed_qty": closed_qty,
-                        "original_qty": original_qty,
-                    }
-                    repairs.append(repair)
-
-                    # Log to system_events
-                    msg = f"Repaired {symbol}: set {', '.join(flags_set)} (partial_closes={partial_count}, closed_qty={closed_qty:.4f})"
-                    try:
-                        c.execute(
-                            "INSERT INTO system_events (ts, level, source, message) VALUES (?, 'INFO', 'PositionReconciler', ?)",
-                            (now_iso, msg),
-                        )
-                    except Exception:
-                        pass
-
-    except Exception as e:
-        # Don't crash startup — log to stderr and return empty
-        import logging
-        logging.getLogger(__name__).warning("PositionReconciler: %s", e)
-
-    return repairs
-
-
 def run_reconciliation(db_path: str = DB_PATH) -> None:
     """
-    Run reconcile_position_flags and log a summary to system_events.
+    Run reconciliation against Kalshi broker.
     Safe to call at startup — never raises.
     """
     try:
-        repairs = reconcile_position_flags(db_path=db_path)
-
-        # v19.1 Ledgerless: Use broker-direct check for log enrichment
         holdings_count = 0
         try:
-            from execution.coinbase_spot_broker import get_spot_broker
-            broker = get_spot_broker()
-            holdings = broker.sync_live_holdings()
-            if holdings is not None:
+            from execution.kalshi_broker import get_kalshi_broker
+            broker = get_kalshi_broker()
+            if broker.connect():
+                holdings = broker.get_positions()
                 holdings_count = len(holdings)
-        except: pass
+        except Exception: pass
 
         now_iso = datetime.now(timezone.utc).isoformat()
-        msg = f"Reconciliation complete: {len(repairs)} flag(s) repaired | broker_holdings={holdings_count}"
+        msg = f"Reconciliation complete: Kalshi holdings={holdings_count}"
 
         try:
             with _conn(db_path) as c:

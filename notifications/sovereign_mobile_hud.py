@@ -26,7 +26,6 @@ THEME_HEADER = "═══ SOVEREIGN HUD v{} ═══"
 ICON_LIVE = "🟢 LIVE"
 ICON_PAPER = "⚪️ PAPER"
 ICON_KALSHI = "🌪"
-ICON_CRYPTO = "⚡️"
 ICON_RISK = "🛡"
 
 # ── Formatting Helpers ─────────────────────────────────────────────────────────
@@ -44,7 +43,7 @@ def get_system_vitals() -> Dict[str, Any]:
     """Fetch system-wide vitals from DB and process state."""
     vitals = {
         "version": VERSION,
-        "mode": "UNKNOWN",
+        "mode": "LIVE",
         "cpu": 0.0,
         "ram": 0.0,
         "uptime": "0h 0m",
@@ -59,10 +58,9 @@ def get_system_vitals() -> Dict[str, Any]:
         
         # Mode from DB
         with sqlite3.connect(DB_PATH) as conn:
-            row = conn.execute("SELECT process_mode, startup_ts FROM system_runtime_state ORDER BY id DESC LIMIT 1").fetchone()
+            row = conn.execute("SELECT startup_ts FROM system_runtime_state ORDER BY id DESC LIMIT 1").fetchone()
             if row:
-                vitals["mode"] = row[0].upper()
-                upt = time.time() - float(row[1] or time.time())
+                upt = time.time() - float(row[0] or time.time())
                 h, m = divmod(upt // 60, 60)
                 vitals["uptime"] = f"{int(h)}h {int(m)}m"
                 
@@ -87,16 +85,21 @@ def get_kalshi_state() -> Dict[str, Any]:
     try:
         from execution.kalshi_broker import get_kalshi_broker
         broker = get_kalshi_broker()
-        if broker.is_connected():
-            state["balance"] = broker.get_account_balance()
-            state["positions"] = broker.get_positions()
+        state["balance"] = broker.get_account_balance()
+        
+        from forecast.db import get_open_forecast_positions
+        state["positions"] = get_open_forecast_positions()
             
         # Hub exposure logic
         from forecast.strategy_engine import _get_city_hub
         for p in state["positions"]:
-            hub = _get_city_hub(p.get("local_symbol", ""))
+            hub = _get_city_hub(p.get("ticker", ""))
             cost = p.get("qty", 0) * p.get("entry_price", 0)
             state["hubs"][hub] = state["hubs"].get(hub, 0.0) + cost
+            
+        with sqlite3.connect(DB_PATH) as conn:
+            row = conn.execute("SELECT COUNT(*) FROM forecast_markets WHERE active=1").fetchone()
+            state["active_markets"] = row[0] if row else 0
             
     except Exception as e:
         logger.error(f"[mobile_hud] Kalshi state error: {e}")
@@ -109,11 +112,9 @@ def build_main_menu_msg() -> str:
     v = get_system_vitals()
     k = get_kalshi_state()
     
-    mode_icon = ICON_LIVE if v["mode"] == "LIVE" else ICON_PAPER
-    
     msg = [
         THEME_HEADER.format(VERSION),
-        f"Status: {mode_icon} | Up: {v['uptime']}",
+        f"Status: {ICON_LIVE} | Up: {v['uptime']}",
         f"SRE Integrity: {v['integrity']}%",
         "",
         f"<b>{ICON_KALSHI} KALSHI WEATHER</b>",
@@ -129,14 +130,10 @@ def get_main_menu_keyboard() -> InlineKeyboardMarkup:
     keyboard = [
         [
             InlineKeyboardButton(f"{ICON_KALSHI} Kalshi Deep-Dive", callback_data="hud_kalshi_main"),
-            InlineKeyboardButton(f"{ICON_CRYPTO} Crypto Lane", callback_data="hud_crypto_main"),
         ],
         [
             InlineKeyboardButton(f"{ICON_RISK} Sovereign Philosophy", callback_data="hud_philosophy"),
             InlineKeyboardButton("🔄 Refresh", callback_data="hud_main_refresh"),
-        ],
-        [
-            InlineKeyboardButton("📊 System Vitals", callback_data="hud_vitals"),
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -155,11 +152,10 @@ def build_kalshi_deep_dive_msg() -> str:
         msg.append("  - <i>Scanning for high-alpha entries...</i>")
     else:
         for p in k["positions"][:8]: # Limit to avoid massive messages
-            sym = p.get("local_symbol", "")
+            sym = p.get("ticker", "")
             qty = p.get("qty", 0)
             side = p.get("side", "YES")
             cost = p.get("entry_price", 0.0)
-            # v19.1.12: Philosophical context placeholder
             msg.append(f"• <code>{sym}</code> {side} x{qty} @ {cost:.3f}")
             
     msg.append("")
@@ -173,10 +169,6 @@ def build_kalshi_deep_dive_msg() -> str:
 
 def get_kalshi_menu_keyboard() -> InlineKeyboardMarkup:
     keyboard = [
-        [
-            InlineKeyboardButton("🔍 Scan Candidates", callback_data="hud_kalshi_scan"),
-            InlineKeyboardButton("📉 Worst EV (Swap)", callback_data="hud_kalshi_worst"),
-        ],
         [
             InlineKeyboardButton("⬅️ Back to HUD", callback_data="hud_main_menu"),
         ]

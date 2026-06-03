@@ -12,14 +12,14 @@ import subprocess
 import logging
 import json
 import sqlite3
-from typing import Optional
+from typing import Optional, List
 
 logger = logging.getLogger(__name__)
 
 def execute_sql(query: str) -> str:
     """
     Safe, read-only SQL execution for the AI agent.
-    Targets logs/trades.db (open_positions, spot_edge_conditions, etc).
+    Targets logs/trades.db. Available tables: forecast_positions, trades, system_events, api_costs, forecast_markets.
     """
     q_upper = query.strip().upper()
     if not q_upper.startswith("SELECT"):
@@ -33,13 +33,11 @@ def execute_sql(query: str) -> str:
         db_path = os.path.join(os.getcwd(), "logs", "trades.db")
         with sqlite3.connect(db_path) as conn:
             conn.row_factory = sqlite3.Row
-            # Execute with a 5-second timeout to prevent long-running queries
             conn.execute("PRAGMA query_only = ON")
             rows = conn.execute(query).fetchall()
             if not rows:
                 return "Query executed successfully. Result: No rows returned."
             
-            # Limit results to prevent context overflow (max 50 rows)
             data = [dict(r) for r in rows[:50]]
             res = json.dumps(data, indent=2)
             if len(rows) > 50:
@@ -50,9 +48,8 @@ def execute_sql(query: str) -> str:
         return f"Database Error: {str(e)}"
 
 def read_file(file_path: str, start_line: Optional[int] = None, end_line: Optional[int] = None) -> str:
-    """Reads a file from the repository. Use start_line and end_line for large files."""
+    """Reads a file from the repository. Use start_line and end_line for large files (e.g., logs)."""
     try:
-        # Prevent reading sensitive files or escaping repo root
         abs_path = os.path.abspath(file_path)
         if not abs_path.startswith(os.getcwd()):
             return "Error: Access denied. Cannot read files outside of the repository root."
@@ -68,20 +65,36 @@ def read_file(file_path: str, start_line: Optional[int] = None, end_line: Option
             e = end_line if end_line else len(lines)
             content = "".join(lines[s:e])
         else:
-            # Smart limit: 10,000 lines for docs, 2,000 for code/logs
             is_doc = file_path.endswith('.md') or file_path.endswith('.txt')
             limit = 10000 if is_doc else 2000
             
             content = "".join(lines[:limit])
             if len(lines) > limit:
-                content += f"\n... (truncated at {limit} lines for Telegram safety. Use start_line/end_line to read more.)"
+                content += f"\n... (truncated at {limit} lines. Use start_line/end_line to read more.)"
         
         return content
     except Exception as e:
         return f"Error reading file: {str(e)}"
 
+def list_files(dir_path: str = ".") -> str:
+    """Lists files in a directory to help explore the codebase."""
+    try:
+        abs_path = os.path.abspath(dir_path)
+        if not abs_path.startswith(os.getcwd()):
+            return "Error: Access denied."
+        
+        items = os.listdir(abs_path)
+        res = []
+        for item in sorted(items):
+            full = os.path.join(abs_path, item)
+            suffix = "/" if os.path.isdir(full) else ""
+            res.append(f"{item}{suffix}")
+        return "\n".join(res)
+    except Exception as e:
+        return f"Error listing files: {str(e)}"
+
 def replace_text(file_path: str, old_string: str, new_string: str) -> str:
-    """Surgically replaces text in a file. Requires exact string match for safety."""
+    """Surgically replaces text in a file. Requires exact string match. USE SPARINGLY."""
     try:
         abs_path = os.path.abspath(file_path)
         if not abs_path.startswith(os.getcwd()):
@@ -91,13 +104,12 @@ def replace_text(file_path: str, old_string: str, new_string: str) -> str:
             content = f.read()
 
         if old_string not in content:
-            return "Error: The exact string to replace was not found in the file."
+            return "Error: Exact match not found."
 
         if content.count(old_string) > 1:
-            return "Error: Multiple occurrences found. Provide more context to make the replacement unique."
+            return "Error: Multiple occurrences. Provide more context."
 
         new_content = content.replace(old_string, new_string)
-        
         with open(abs_path, 'w', encoding='utf-8') as f:
             f.write(new_content)
 
@@ -106,21 +118,15 @@ def replace_text(file_path: str, old_string: str, new_string: str) -> str:
         return f"Error updating file: {str(e)}"
 
 def run_safe_command(command: str) -> str:
-    """Runs restricted shell commands (ls, grep, py_compile, git status)."""
-    # Whitelist of allowed base commands
-    allowed_bases = ["ls", "grep", "python3 -m py_compile", "git status", "git diff", "find"]
-    
-    cmd_base = command.split()[0]
+    """Runs restricted shell commands (grep, py_compile, git status, git diff)."""
+    allowed_bases = ["grep", "python3 -m py_compile", "git status", "git diff", "find"]
     is_allowed = any(command.startswith(base) for base in allowed_bases)
     
     if not is_allowed:
-        return f"Error: Command '{cmd_base}' is not in the safety whitelist."
+        return "Error: Command not in whitelist."
 
     try:
-        # Run with a 10s timeout
-        result = subprocess.check_output(command, shell=True, stderr=subprocess.STDOUT, timeout=10).decode()
-        return result if result else "Command executed successfully (no output)."
-    except subprocess.CalledProcessError as e:
-        return f"Command failed with output:\n{e.output.decode()}"
+        result = subprocess.check_output(command, shell=True, stderr=subprocess.STDOUT, timeout=15).decode()
+        return result if result else "Success (no output)."
     except Exception as e:
-        return f"Error executing command: {str(e)}"
+        return f"Error: {str(e)}"

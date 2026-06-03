@@ -23,13 +23,9 @@ LOG_PATH = os.path.join(
 )
 
 ALERT_NAMESPACES = [
-    "spot_engine",
-    "scheduler",
-    "execution.coinbase_spot_broker",
-    "runtime.spot_classification",
-    "runtime.spot_position_repair",
-    "runtime.spot_kill_switch",
-    "spot_kill_switch",
+    "forecast",
+    "execution.kalshi_broker",
+    "main",
 ]
 
 ALERT_LEVELS = {"WARNING", "ERROR", "CRITICAL"}

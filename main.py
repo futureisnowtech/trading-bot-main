@@ -1,11 +1,7 @@
 """
-main.py — Entry point for the Algo Trading System.
+main.py — Entry point for the Kalshi Weather Prediction Engine.
 Usage:
-  python main.py              # Full system (reads False from .env)
-  python main.py --mode paper # Force paper trading
-  python main.py --mode live  # Force live (requires typed confirmation)
-  python main.py --crypto-only
-  python main.py --equity-only
+  python main.py
 """
 
 import sys, os, argparse, time, traceback, logging, threading, json
@@ -35,30 +31,24 @@ def _setup_logging():
     # Silence noisy third-party loggers
     for noisy in ("urllib3", "requests", "peewee", "schedule"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
-    logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 
 
 _setup_logging()
 
-# Pre-import stdlib modules and the core DB module at module level.
-# Python 3.14 on macOS deadlocks (EDEADLK) when importing these lazily
-# inside a function in a launchd daemon context. Pre-loading them here
-# (in the "safe" startup context) puts them in sys.modules so the lazy
-# imports inside main() become zero-cost cache hits.
 import csv, uuid, sqlite3
 from typing import Optional
-import logging_db.trade_logger  # noqa: F401 — pre-warm, prevents EDEADLK
+import logging_db.trade_logger  # noqa: F401
 
-VERSION = "v19.1.ARCH"
+VERSION = "v19.1.KALSHI"
 
 BANNER = """
 ╔══════════════════════════════════════════════════════════════════╗
-║  ALGO TRADING SYSTEM  v19.1.ARCH (LEDGERLESS)                    ║
-║  Ledgerless Sovereign: Broker-First Truth Projection             ║
+║  KALSHI WEATHER ENGINE  v19.1.KALSHI (Sovereign)                ║
+║  Hard Architectural Isolation: Pure Prediction Markets           ║
 ║                                                                  ║
-║  Lane:       Coinbase spot scalp (FULL LIVE RELEASE)            ║
-║  Route:      maker_first | Fee-Aware Expectancy Gates           ║
-║  Truth:      broker-direct (Ledgerless v19.1)            ║
+║  Lane:       Kalshi Weather (31-member GFS Ensemble)            ║
+║  Route:      maker_only | EV-Aware Expectancy Gates             ║
+║  Truth:      broker-direct (Ledgerless v19.1)                    ║
 ║  Launch:     python3 main.py (Unified Entry Point)              ║
 ╚══════════════════════════════════════════════════════════════════╝
 """
@@ -66,9 +56,6 @@ BANNER = """
 
 def parse_args():
     p = argparse.ArgumentParser()
-    # v18.17: System is strictly LIVE. --mode removed.
-    p.add_argument("--equity-only", action="store_true")
-    p.add_argument("--crypto-only", action="store_true")
     p.add_argument("--no-alerts", action="store_true")
     return p.parse_args()
 
@@ -83,42 +70,16 @@ def main():
         ACCOUNT_SIZE,
         MARKET_TIMEZONE,
         ANTHROPIC_API_KEY,
-        MAX_RISK_PER_TRADE_PCT,
-        MAX_DAILY_LOSS_PCT,
-        MAX_DEPLOYED_PCT,
         FORECAST_LANE_ACTIVE,
-        STOCKS_LANE_ACTIVE,
-        STOCKS_AUTONOMOUS_ENABLED,
-        STOCKS_MANUAL_ENABLED,
-        FORECAST_DASHBOARD_VISIBLE,
         FORECAST_AUTONOMOUS_ENABLED,
         FORECAST_MANUAL_ENABLED,
-        FUTURES_DASHBOARD_VISIBLE,
-        STOCKS_DASHBOARD_VISIBLE,
     )
 
     system_state.state.set_mode("LIVE")
 
     tz = pytz.timezone(MARKET_TIMEZONE)
     mode = "💰 LIVE"
-    try:
-        from runtime.live_account import get_live_account_size
-
-        account_display = float(get_live_account_size())
-    except Exception:
-        account_display = float(ACCOUNT_SIZE)
-
-    # Sanity-check hardcoded risk values — catch accidental misconfiguration
-    assert 0 < MAX_RISK_PER_TRADE_PCT <= 0.10, (
-        f"MAX_RISK_PER_TRADE_PCT={MAX_RISK_PER_TRADE_PCT} out of safe range (0–10%)"
-    )
-    _daily_loss_cap = 0.15  # live: 15% safety cap for accidental loss
-    assert 0 < MAX_DAILY_LOSS_PCT <= _daily_loss_cap, (
-        f"MAX_DAILY_LOSS_PCT={MAX_DAILY_LOSS_PCT} out of safe range"
-    )
-    assert 0 < MAX_DEPLOYED_PCT <= 1.00, (
-        f"MAX_DEPLOYED_PCT={MAX_DEPLOYED_PCT} out of safe range (0–100%)"
-    )
+    account_display = float(ACCOUNT_SIZE)
 
     print(f"  Mode:       {mode} TRADING")
     print(f"  Account:    ${account_display}")
@@ -128,7 +89,7 @@ def main():
     print(f"  Time:       {datetime.now(tz).strftime('%Y-%m-%d %H:%M:%S ET')}\n")
 
     print("=" * 60)
-    print("  💰 LIVE TRADING ARCHITECTURE ENFORCED")
+    print("  💰 KALSHI WEATHER ARCHITECTURE ENFORCED")
     print(f"  Account: ${account_display}")
     print("=" * 60)
 
@@ -145,14 +106,12 @@ def main():
         upsert_lane_state,
     )
     from runtime.incident_tracker import init_incident_table
-    from runtime.position_reconciler import run_reconciliation
-    from config import FUTURES_LANE_ACTIVE as _FLA
 
     _db_path = os.path.join(_MAIN_ROOT, "logs", "trades.db")
     init_runtime_tables(_db_path)
     init_incident_table(_db_path)
 
-    _rt_mode = "live" if not False else "paper"
+    _rt_mode = "live"
     upsert_system_state(
         db_path=_db_path,
         process_mode=_rt_mode,
@@ -160,28 +119,9 @@ def main():
         process_alive=1,
         global_status="OK",
         launch_readiness_state="NOT_READY",
-        active_lanes="[]",
+        active_lanes="['forecast']",
     )
-    # crypto lane — always active
-    upsert_lane_state(
-        "crypto",
-        db_path=_db_path,
-        lane_role="sovereign",
-        enabled=1,
-        active=1,
-        configured=1,
-        dashboard_visible=1,
-        autonomous_enabled=1,
-        manual_allowed=1,
-        mode=_rt_mode,
-        health="UNKNOWN",
-        connected=0,
-        tradable=0,
-        capital_deployed_usd=0.0,
-        buying_power_usd=0.0,
-        readiness_state="STARTING",
-        promotion_condition="Sovereign live lane — keep crypto active and truth-aligned",
-    )
+
     # forecast lane
     upsert_lane_state(
         "forecast",
@@ -190,7 +130,7 @@ def main():
         enabled=int(FORECAST_LANE_ACTIVE),
         active=int(FORECAST_LANE_ACTIVE),
         configured=1,
-        dashboard_visible=0,
+        dashboard_visible=1,
         autonomous_enabled=int(FORECAST_AUTONOMOUS_ENABLED and FORECAST_LANE_ACTIVE),
         manual_allowed=int(FORECAST_MANUAL_ENABLED),
         mode=_rt_mode if FORECAST_LANE_ACTIVE else "disabled",
@@ -199,225 +139,80 @@ def main():
         if not FORECAST_LANE_ACTIVE
         else "BROKER_DISCONNECTED",
         blocked_reason="" if FORECAST_LANE_ACTIVE else "FORECAST_LANE_ACTIVE=false",
-        promotion_condition="Sovereign live lane — promote only after enrollment, tradable contracts, and stable heartbeat truth",
-    )
-    # mes archived lane
-    upsert_lane_state(
-        "mes_archived",
-        db_path=_db_path,
-        lane_role="archived",
-        enabled=int(_FLA),
-        active=0,
-        configured=int(_FLA),
-        dashboard_visible=0,
-        autonomous_enabled=0,
-        manual_allowed=0,
-        mode="archived",
-        health="OK",
-        readiness_state="DORMANT",
-        blocked_reason="" if _FLA else "FUTURES_LANE_ACTIVE=false",
-        promotion_condition="Reactivate only after futures approval, lane validation, and FUTURES_LANE_ACTIVE=true",
+        promotion_condition="Sovereign live lane — Kalshi Weather Engine",
     )
 
-    # stocks lane
-    upsert_lane_state(
-        "stocks",
-        db_path=_db_path,
-        lane_role="dormant_ready",
-        enabled=int(STOCKS_LANE_ACTIVE),
-        active=int(STOCKS_LANE_ACTIVE and STOCKS_AUTONOMOUS_ENABLED),
-        configured=int(STOCKS_LANE_ACTIVE),
-        dashboard_visible=0,
-        autonomous_enabled=int(STOCKS_AUTONOMOUS_ENABLED and STOCKS_LANE_ACTIVE),
-        manual_allowed=int(STOCKS_MANUAL_ENABLED),
-        mode=(
-            _rt_mode
-            if STOCKS_LANE_ACTIVE and STOCKS_AUTONOMOUS_ENABLED
-            else "standby"
-            if STOCKS_DASHBOARD_VISIBLE
-            else "disabled"
-        ),
-        health="UNKNOWN",
-        readiness_state=(
-            "STARTING"
-            if STOCKS_LANE_ACTIVE and STOCKS_AUTONOMOUS_ENABLED
-            else "DORMANT_READY"
-            if STOCKS_DASHBOARD_VISIBLE
-            else "LANE_NOT_STARTED"
-        ),
-        blocked_reason=(
-            ""
-            if STOCKS_LANE_ACTIVE and STOCKS_AUTONOMOUS_ENABLED
-            else "STOCKS_AUTONOMOUS_ENABLED=false"
-            if STOCKS_DASHBOARD_VISIBLE
-            else "STOCKS_LANE_ACTIVE=false"
-        ),
-        promotion_condition="Promote only after equity edge and PDT-aware operating rules are proven",
-    )
-
-    # Run position reconciliation
-    run_reconciliation(_db_path)
-
-    # Write startup heartbeat immediately so last_global_heartbeat_at is never blank
+    # Write startup heartbeat
     from runtime.runtime_state import write_system_heartbeat
-
     write_system_heartbeat(_db_path)
 
     # 📊 Start Prometheus Metrics Server
     from monitoring.metrics import start_metrics_server
-
     start_metrics_server(port=8000)
 
     # 🤖 Start Telegram Bot (Command Suite)
     from notifications.telegram_bot import start_bot_thread
-    from monitoring.log_alerter import start_log_alerter
-
     start_bot_thread()
 
-    try:
-        start_log_alerter()
-    except Exception as _e:
-        logging.getLogger(__name__).warning(f"log_alerter start failed: {_e}")
-
-    # 📡 Start Coinbase WebSocket Feed (Asynchronous Ticker Data + Circuit Breaker)
-    from config import COINBASE_CDP_KEY_NAME, COINBASE_CDP_PRIVATE_KEY
-
-    if COINBASE_CDP_KEY_NAME and COINBASE_CDP_PRIVATE_KEY:
-        from data.coinbase_websocket import start_coinbase_feed
-        from config import SPOT_SYMBOLS
-
-        # Coinbase spot products: base-USD (reconciles with execution/coinbase_spot_broker.py)
-        products = [f"{s}-USD" for s in SPOT_SYMBOLS]
-        start_coinbase_feed(COINBASE_CDP_KEY_NAME, COINBASE_CDP_PRIVATE_KEY, products)
-        print(f"   ✅ Coinbase WebSocket feed started for {len(products)} spot pairs\n")
-
     print("   ✅ Runtime state tables ready\n")
-
-    from memory.trade_memory import get_memory_stats
-
-    mem = get_memory_stats()
-    print(
-        f"🧠 Trade memory: {mem.get('total', 0)} experiences | Win rate: {mem.get('win_rate', 0):.1%}\n"
-    )
 
     log_event(
         "INFO",
         "main",
-        f"Bot started — {'paper' if False else 'live'} mode {VERSION}",
+        f"Kalshi Weather Engine started — {VERSION}",
     )
 
-    # ── Forecast lane (optional daemon thread) ────────────────────────────────
+    # ── Forecast lane (Main Execution Loop) ──────────────────────────────────
     if FORECAST_LANE_ACTIVE:
+        import schedule as _sched_lib
+        from forecast.db import init_forecast_db
+        from forecast.runner import (
+            run_discovery_cycle,
+            run_strategy_cycle,
+            run_position_monitor,
+            _get_broker,
+            _get_harvester,
+        )
 
-        def _forecast_daemon():
-            """Run forecast lane in its own schedule instance (thread-safe)."""
-            import schedule as _sched_lib
-
-            _s = (
-                _sched_lib.Scheduler()
-            )  # isolated instance — never touches the global default used by v10_runner
-            from forecast.db import init_forecast_db
-            from forecast.runner import (
-                run_discovery_cycle,
-                run_strategy_cycle,
-                run_position_monitor,
-                _get_broker,
-                _get_harvester,
+        init_forecast_db()
+        broker = _get_broker()
+        connected = broker.connect()
+        
+        if connected:
+            upsert_lane_state(
+                "forecast",
+                db_path=_db_path,
+                connected=1,
+                readiness_state="READY",
             )
+        
+        harvester = _get_harvester()
+        harvester.start()
+        
+        # Initial cycles
+        run_discovery_cycle()
+        run_strategy_cycle(100.0)
+        run_position_monitor()
 
-            try:
-                init_forecast_db()
-                broker = _get_broker()
-                _connected = broker.connect()
-                if not _connected:
-                    time.sleep(4)
-                    _connected = broker.is_connected()
-                try:
-                    from runtime.runtime_state import upsert_lane_state as _uls
+        # Schedule
+        schedule = _sched_lib.Scheduler()
+        schedule.every(30).minutes.do(run_discovery_cycle)
+        schedule.every(5).minutes.do(lambda: run_strategy_cycle(100.0))
+        schedule.every(30).seconds.do(run_position_monitor)
 
-                    _uls(
-                        "forecast",
-                        db_path=_db_path,
-                        connected=int(_connected),
-                        readiness_state="BROKER_DISCONNECTED"
-                        if not _connected
-                        else "NO_UNDERLIERS",
-                    )
-                except Exception:
-                    pass
-                harvester = _get_harvester()
-                harvester.start()
-                run_discovery_cycle()
-                _s.every(30).minutes.do(run_discovery_cycle)
-                _s.every(5).minutes.do(lambda: run_strategy_cycle(100.0))
-                _s.every(30).seconds.do(run_position_monitor)
-                log_event(
-                    "INFO",
-                    "ForecastRunner",
-                    "Forecast lane started — FORECAST_LANE_ACTIVE=true",
-                )
-                while True:
-                    _s.run_pending()
-                    time.sleep(1)
-            except Exception as _fe:
-                log_event("ERROR", "ForecastRunner", f"Forecast lane crashed: {_fe}")
+        print("   ✅ Forecast lane cycles scheduled")
+        print("=" * 60)
+        print("  Kalshi Weather Engine is live.")
+        print("  Stop:      Ctrl+C")
+        print("=" * 60 + "\n")
 
-        _ft = threading.Thread(
-            target=_forecast_daemon, daemon=True, name="ForecastLane"
-        )
-        _ft.start()
-        upsert_lane_state(
-            "forecast",
-            db_path=_db_path,
-            active=1,
-            readiness_state="BROKER_DISCONNECTED",
-        )
-        log_event(
-            "INFO",
-            "ForecastRunner",
-            "Forecast lane started (FORECAST_LANE_ACTIVE=true)",
-        )
-        print("   ForecastEx lane started (FORECAST_LANE_ACTIVE=true)")
-
-    # ── Stocks lane (optional daemon thread) ──────────────────────────────────
-    if STOCKS_LANE_ACTIVE and STOCKS_AUTONOMOUS_ENABLED:
-
-        def _stocks_daemon():
-            """Run stock lane in its own schedule instance (thread-safe)."""
-            from scheduler.stock_runner import run_forever as _stocks_run_forever
-
-            try:
-                _stocks_run_forever()
-            except Exception as _se:
-                log_event("ERROR", "StockRunner", f"Stocks lane crashed: {_se}")
-
-        _st = threading.Thread(target=_stocks_daemon, daemon=True, name="StocksLane")
-        _st.start()
-        upsert_lane_state(
-            "stocks", db_path=_db_path, active=1, readiness_state="STARTING"
-        )
-        log_event(
-            "INFO", "StockRunner", "Stocks lane started (STOCKS_LANE_ACTIVE=true)"
-        )
-        print("   Stocks lane started (STOCKS_LANE_ACTIVE=true)")
-
-    # Populate active_lanes now that all lane startup is done
-    upsert_system_state(
-        db_path=_db_path,
-        active_lanes=json.dumps(["crypto"]),
-        launch_readiness_state="NOT_READY",
-    )
-
-    print("=" * 60)
-    print("  Scheduler starting. System is live.")
-    print("  Dashboard: streamlit run dashboard/app.py --server.runOnSave true")
-    print("  Database:  logs/trades.db")
-    print("  Stop:      Ctrl+C")
-    print("=" * 60 + "\n")
-
-    from scheduler.v10_runner import run_forever
-
-    run_forever()
+        while True:
+            schedule.run_pending()
+            time.sleep(1)
+    else:
+        print("⚠️ FORECAST_LANE_ACTIVE is false. System idling.")
+        while True:
+            time.sleep(60)
 
 
 if __name__ == "__main__":

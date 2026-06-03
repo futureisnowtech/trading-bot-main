@@ -32,82 +32,12 @@ KALSHI_API_KEY_ID = os.getenv("KALSHI_API_KEY_ID")
 KALSHI_PRIVATE_KEY_PATH = os.getenv("KALSHI_PRIVATE_KEY_PATH")
 KALSHI_API_BASE = "https://external-api.kalshi.com"
 
-# ─── Kalshi Category & Keyword Dual-Gate ──────────────────────────────────────
+# ─── Kalshi Weather Filter (Purified) ────────────────────────────────────────
 
-APPROVED_CATEGORIES: set[str] = {
-    "economics",
-    "economy",
-    "federal reserve",
-    "financials",
-    "finance",
-    "recession",
-    "climate and weather",
-    "weather",
-    "politics",
-    "elections",
-    "social",
-}
-
-GLOBAL_EXCLUDES: list[str] = [
-    "sports", "entertainment", "celebrity", "award", "novelty",
-    "oscar", "grammy", "movie", "box office", "actor", "actress",
-    "tiktok", "youtube", "follower", "crypto", "bitcoin", "ethereum", 
-    "btc", "eth"
-]
-
-CATEGORY_REQUIRED_KEYWORDS: dict[str, list[str]] = {
-    "economics": [
-        "cpi", "inflation", "fed", "fomc", "rate", "payroll", "nonfarm",
-        "unemployment", "gdp", "pce", "retail", "housing", "consumer",
-        "ppi", "production", "jobs", "employment", "macro", "economy",
-        "debt", "budget", "target", "hike", "cut", "growth", "manufacturing"
-    ],
-    "economy": [
-        "cpi", "inflation", "fed", "fomc", "rate", "payroll", "nonfarm",
-        "unemployment", "gdp", "pce", "retail", "housing", "consumer",
-        "ppi", "production", "jobs", "employment", "macro", "economy",
-        "debt", "budget", "target", "hike", "cut", "growth", "manufacturing"
-    ],
-    "federal reserve": [
-        "fed", "fomc", "rate", "hike", "cut", "target", "powell", "balance sheet"
-    ],
-    "financials": [
-        "yield", "treasury", "bond", "index", "price", "survey"
-    ],
-    "finance": [
-        "yield", "treasury", "bond", "index", "price", "survey"
-    ],
-    "recession": [
-        "recession", "contraction", "gdp", "nber"
-    ],
-    "climate and weather": [
-        "temp", "temperature", "rain", "precip", "precipitation", "weather",
-        "degree", "hurricane", "storm", "snow", "landfall", "cat 5", "category 5"
-    ],
-    "weather": [
-        "temp", "temperature", "rain", "precip", "precipitation", "weather",
-        "degree", "hurricane", "storm", "snow", "landfall", "cat 5", "category 5"
-    ],
-    "politics": [
-        "president", "presidential", "senate", "house of representatives",
-        "congress", "supreme court", "mayor", "governor", "prime minister",
-        "cabinet", "policy", "bill", "legislation", "race", "seat"
-    ],
-    "elections": [
-        "election", "vote", "popular vote", "electoral college", "nominee",
-        "primary", "caucus", "senate", "house", "governor", "president", "race", "seat"
-    ],
-    "social": [
-        "population", "census", "demographic", "migration"
-    ]
-}
-
-def _is_economic_market(ticker: str, title: str, category: str = "") -> bool:
+def _is_weather_market(ticker: str, title: str, category: str = "") -> bool:
     """
-    Expert Dual-Gate System for Kalshi Discovery.
-    1. Category must be whitelisted.
-    2. Must not contain global noise keywords (sports, crypto, celebrities).
-    3. Must contain at least one high-signal keyword mapped to its category.
+    Hardened Weather Filter.
+    Only allows markets that are explicitly weather-related.
     """
     if not title or not ticker:
         return False
@@ -115,23 +45,11 @@ def _is_economic_market(ticker: str, title: str, category: str = "") -> bool:
     t_lower = f"{ticker} {title}".lower()
     c_lower = category.lower() if category else ""
 
-    # Gate 1: Category Whitelist
-    if c_lower not in APPROVED_CATEGORIES:
-        return False
-
-    # Gate 2: Global Noise Exclusions
-    for excl in GLOBAL_EXCLUDES:
-        if excl in t_lower or excl in c_lower:
-            return False
-
-    # Gate 3: Category-Specific Signal Match
-    required_kws = CATEGORY_REQUIRED_KEYWORDS.get(c_lower, [])
-    if not required_kws:
-        return False
-
-    for kw in required_kws:
-        if kw in t_lower:
-            return True
+    # v19.1.KALSHI: Pure weather focus.
+    weather_keywords = ["temp", "temperature", "rain", "precip", "precipitation", "weather", "degree", "hurricane", "storm", "snow", "landfall", "cat 5", "category 5"]
+    
+    if "weather" in c_lower or any(kw in t_lower for kw in weather_keywords):
+        return True
 
     return False
 
@@ -179,20 +97,13 @@ class KalshiBroker:
     def _request(self, method: str, path: str, params: dict = None, body: dict = None) -> dict:
         """Execute signed Kalshi V2 request."""
         
-        # v18.34: Shadow Mode
         if SHADOW_EXECUTION and method.upper() == "POST" and "orders" in path:
             print(f"[Kalshi] SHADOW MODE: Blocked {method} {path} body={body}")
             return {"order_id": f"shadow_{uuid.uuid4().hex[:8]}"}
 
         try:
             ts = str(int(time.time() * 1000))
-            
-            # v18.34: Ensure method is uppercase for signature
             method_upper = method.upper()
-            
-            # v18.34: Kalshi V2 signing typically ONLY uses ts + method + path.
-            # Query params and body are usually excluded from the signature msg 
-            # but included in the actual request.
             msg = f"{ts}{method_upper}{path}"
             
             signature = self._private_key.sign(
@@ -237,14 +148,11 @@ class KalshiBroker:
         if not self.is_connected():
             return
         try:
-            # v18.34: Kalshi V2 uses 'market_positions' array and 'position_fp' field.
             data = self._request("GET", "/trade-api/v2/portfolio/positions")
             self._open_positions.clear()
 
             positions = data.get("market_positions", [])
             for p in positions:
-                # position_fp is a signed fixed-point string. 
-                # Positive = YES contracts, Negative = NO contracts.
                 qty_str = p.get("position_fp", "0")
                 qty = float(qty_str)
                 if qty == 0: continue
@@ -259,7 +167,7 @@ class KalshiBroker:
                     "local_symbol": ticker,
                     "right": right,
                     "qty": abs_qty,
-                    "entry_price": 0.0, # Not available in summary, will be enriched by DB
+                    "entry_price": 0.0,
                     "side": side,
                     "order_id": "EXISTING",
                     "entered_at": datetime.now(timezone.utc).isoformat(),
@@ -268,18 +176,12 @@ class KalshiBroker:
             log_event("WARN", "KalshiBroker", f"Position sync error: {e}")
 
     def discover_markets(self) -> list[dict]:
-        """
-        Discover active Kalshi event contracts.
-        v19.1.5: Implements Precision Lane Targeting for Weather.
-        Increases pagination and targets specific series to avoid discovery blindness.
-        """
+        """Discover active Kalshi weather contracts."""
         if not self.is_connected():
             return []
 
         results = []
         try:
-            # ── Precision Targeting: Weather Series ────────────────────────────
-            # v19.1.6: Explicitly query all series for our 15+ expanded stations
             from data.kalshi_weather_monitor import STATIONS
             
             weather_events = []
@@ -288,11 +190,9 @@ class KalshiBroker:
                     data = self._request("GET", "/trade-api/v2/events", params={"series_ticker": series_id, "status": "open"})
                     weather_events.extend(data.get("events", []))
             
-            # ── Generic Discovery Loop (v18.36 Expanded) ──────────────────────
-            # Fetch up to 2000 events to catch macro/politics shifts.
             generic_events = []
             cursor = ""
-            for _ in range(10):  # 10 pages of 200 = 2000 events
+            for _ in range(5):  # Fewer pages for purified focus
                 data = self._request("GET", "/trade-api/v2/events", params={"limit": 200, "status": "open", "cursor": cursor})
                 page_events = data.get("events", [])
                 if not page_events: break
@@ -300,7 +200,6 @@ class KalshiBroker:
                 cursor = data.get("cursor", "")
                 if not cursor: break
             
-            # Combine, ensuring unique events by ticker
             seen_tickers = set()
             all_events = []
             for e in (weather_events + generic_events):
@@ -312,9 +211,8 @@ class KalshiBroker:
             for event in all_events:
                 e_ticker = event.get("event_ticker")
                 category = event.get("category", "")
-                is_weather = "weather" in category.lower()
                 
-                if not _is_economic_market(e_ticker, event.get("title"), category):
+                if not _is_weather_market(e_ticker, event.get("title"), category):
                     continue
                 
                 m_data = self._request("GET", "/trade-api/v2/markets", params={"event_ticker": e_ticker})
@@ -323,30 +221,14 @@ class KalshiBroker:
                 for m in markets:
                     if m.get("status") != "active": continue
                     
-                    # ── Hard Liquidity Gate (v18.35) ────────────────────────────────
-                    # Skip dormant markets with zero activity to avoid dead polling.
-                    # v19.1.5: Bypass for weather alpha — we want to be first in.
-                    if not is_weather:
-                        try:
-                            vol_raw = m.get("volume_fp")
-                            liq_raw = m.get("liquidity_dollars")
-                            if vol_raw is not None and liq_raw is not None:
-                                if float(vol_raw or 0) <= 0.0 and float(liq_raw or 0) <= 0.0:
-                                    continue 
-                        except (ValueError, TypeError):
-                            continue
-
-                    # ── v19.1.6: Dynamic Strike Extraction ──────────────────────
-                    # Extract strike from ticker (e.g., -T82, -B80.5)
                     strike = 0.0
-                    if is_weather:
-                        import re
-                        match = re.search(r'-[TBL](-?\d+\.?\d*)$', m.get("ticker", ""))
-                        if match:
-                            try:
-                                strike = float(match.group(1))
-                            except ValueError:
-                                pass
+                    import re
+                    match = re.search(r'-[TBL](-?\d+\.?\d*)$', m.get("ticker", ""))
+                    if match:
+                        try:
+                            strike = float(match.group(1))
+                        except ValueError:
+                            pass
 
                     for side in ["YES", "NO"]:
                         right = "C" if side == "YES" else "P"
@@ -374,21 +256,14 @@ class KalshiBroker:
             return {"local_symbol": ticker, "bid": None, "ask": None, "ts": datetime.now(timezone.utc).isoformat()}
         
         try:
-            # v18.34: Kalshi V2 uses 'orderbook_fp' and 'yes_dollars' / 'no_dollars'
             data = self._request("GET", f"/trade-api/v2/markets/{ticker}/orderbook")
             book = data.get("orderbook_fp", {})
             
             yes_levels = book.get("yes_dollars", [])
             no_levels = book.get("no_dollars", [])
             
-            # Yes Bid: The highest price someone is willing to pay for YES (last element in yes_dollars)
-            # No Bid: The highest price someone is willing to pay for NO (last element in no_dollars)
-            # v18.34: In orderbook_fp, levels are sorted by price ascending. 
-            # Highest bid is the LAST element.
             yes_bid = float(yes_levels[-1][0]) if yes_levels else None
             no_bid = float(no_levels[-1][0]) if no_levels else None
-            
-            # Ask for YES = 1.0 - (No Bid)
             yes_ask = round(1.0 - no_bid, 4) if no_bid is not None else None
             
             mid = round((yes_bid + yes_ask) / 2.0, 4) if yes_bid and yes_ask else yes_bid or yes_ask
@@ -404,28 +279,16 @@ class KalshiBroker:
                 "ts": datetime.now(timezone.utc).isoformat(),
             }
         except Exception as e:
-            # RC: Un-silence the error for X-Ray observability
-            msg = f"[KalshiBroker] get_quote error for {ticker}: {e}"
-            logger.error(msg)
-            log_event("ERROR", "KalshiBroker", msg)
+            logger.error(f"[KalshiBroker] get_quote error for {ticker}: {e}")
             return {"local_symbol": ticker, "bid": None, "ask": None, "ts": datetime.now(timezone.utc).isoformat()}
 
     def get_historical_candles(self, ticker: str, interval_min: int = 1, limit: int = 100) -> list[dict]:
-        """
-        Fetch historical candlesticks for a market.
-        Valid interval_min: 1 (1m), 60 (1h), 1440 (1d).
-        Returns a list of candle dicts with keys: o, h, l, c, ts_open, ts_close.
-        """
         if not self.is_connected():
             return []
         
-        # Kalshi V2 API strictly allows 1, 60, 1440
         if interval_min not in [1, 60, 1440]:
-            logger.warning(f"[KalshiBroker] Unsupported interval {interval_min}m. Defaulting to 1m.")
             interval_min = 1
 
-        # Compute start_ts and end_ts (Unix seconds)
-        # v18.34: Fetch enough history for 100 bars of the requested interval
         now_ts = int(time.time())
         lookback_sec = interval_min * 60 * (limit + 10)
         start_ts = now_ts - lookback_sec
@@ -437,23 +300,18 @@ class KalshiBroker:
             "end_ts": now_ts
         }
         
-        # v18.34: Verified endpoint /trade-api/v2/markets/candlesticks
         data = self._request("GET", "/trade-api/v2/markets/candlesticks", params=params)
         
         if "error" in data:
-            logger.warning(f"[KalshiBroker] Candlestick API error for {ticker}: {data['error']}")
             return []
 
         markets = data.get("markets", [])
         if not markets:
-            logger.debug(f"[KalshiBroker] No market data in response for {ticker}.")
             return []
         
         candles = markets[0].get("candlesticks", [])
         results = []
         for c in candles:
-            # We use mid-price (bid+ask)/2 for our bars
-            # Handle cases where bid/ask might be missing or only have close
             try:
                 bid_o = float(c.get("yes_bid", {}).get("open_dollars") or 0)
                 ask_o = float(c.get("yes_ask", {}).get("open_dollars") or 1.0)
@@ -466,11 +324,6 @@ class KalshiBroker:
                 
                 bid_c = float(c.get("yes_bid", {}).get("close_dollars") or 0)
                 ask_c = float(c.get("yes_ask", {}).get("close_dollars") or 1.0)
-
-                # Fallback to price if bid/ask missing (unlikely in V2 but safe)
-                if not bid_c and not ask_c:
-                    p = float(c.get("price", {}).get("close_dollars") or 0)
-                    bid_c = ask_c = p
 
                 results.append({
                     "o": round((bid_o + ask_o) / 2.0, 4),
@@ -490,15 +343,13 @@ class KalshiBroker:
         return [self.get_quote(c["local_symbol"]) for c in contracts]
 
     def place_buy_order(self, contract_dict: dict, qty: int, limit_price: float, **kwargs) -> dict:
-        """Place a buy order (limit or market)."""
         if not self.is_connected():
-            raise RuntimeError("[KalshiBroker] Not connected to Kalshi — blocking trade")
+            raise RuntimeError("[KalshiBroker] Not connected to Kalshi")
 
         ticker = contract_dict["local_symbol"]
         side = "yes" if contract_dict["right"] == "C" else "no"
         order_type = kwargs.get("type", "limit").lower()
         
-        # v18.34: Kalshi V2 expects either yes_price or no_price, not both with nulls.
         body = {
             "ticker": ticker,
             "action": "buy",
@@ -522,11 +373,8 @@ class KalshiBroker:
         if order_id == "ERR":
             order_id = resp.get("order_id", "ERR")
             
-        if order_id == "ERR":
-            logger.error(f"[KalshiBroker] {order_type.upper()} buy failed for {ticker}. Response: {resp}")
-        
         if order_id != "ERR":
-            print(f"[KalshiBroker] BUY {qty} {ticker} ({side.upper()}) @ {limit_price:.4f} [{order_type.upper()}] | ID={order_id}")
+            print(f"[KalshiBroker] BUY {qty} {ticker} ({side.upper()}) @ {limit_price:.4f} | ID={order_id}")
             key = f"{ticker}_{contract_dict['right']}"
             self._open_positions[key] = {
                 "qty": qty,
@@ -536,7 +384,7 @@ class KalshiBroker:
             }
             try:
                 log_trade(
-                    strategy=kwargs.get("strategy", "forecast_unknown"),
+                    strategy=kwargs.get("strategy", "forecast_weather"),
                     broker="kalshi",
                     symbol=ticker,
                     action="BUY",
@@ -552,30 +400,19 @@ class KalshiBroker:
         return {"order_id": order_id, "price": limit_price, "qty": qty}
 
     def flatten_position(self, local_symbol: str, right: str, qty: int, **kwargs) -> dict:
-        """
-        Exit a position immediately. 
-        v19.7: Uses MARKET order for guaranteed immediate exit and clears cache 
-        regardless of API success to prevent logic deadlocks.
-        """
         if not self.is_connected():
-            raise RuntimeError("[KalshiBroker] Not connected to Kalshi — blocking exit")
+            raise RuntimeError("[KalshiBroker] Not connected to Kalshi")
         
         side = "yes" if right == "C" else "no"
         key = f"{local_symbol}_{right}"
         
-        # v19.7: Forced Market Execution for Salvage/TP
-        # v19.8: Liquidity Floor. Skip if Bid is literally zero.
         quote = self.get_quote(local_symbol)
         bid_price = float(quote.get("bid") or 0.0)
         
         if bid_price < 0.01:
-            logger.warning(f"[KalshiBroker] Zero liquidity detected for {local_symbol} (Bid=${bid_price}). Discarding position without API call.")
-            self._open_positions.pop(key, {}) # Still remove from local cache
+            self._open_positions.pop(key, {})
             return {"order_id": "DISCARDED", "exit_price": 0.0, "pnl_usd": 0.0}
 
-        # v19.8.1: Kalshi V2 requires a price field even for MARKET orders
-        # to define the 'worst case' acceptable price.
-        # For a SELL (flatten), we set a 1c floor.
         body = {
             "ticker": local_symbol,
             "action": "sell",
@@ -585,11 +422,10 @@ class KalshiBroker:
             "client_order_id": str(uuid.uuid4()),
         }
         if side == "yes":
-            body["yes_price"] = 1 # 1 cent floor
+            body["yes_price"] = 1
         else:
-            body["no_price"] = 1 # 1 cent floor
+            body["no_price"] = 1
         
-        # Pre-emptively clear from cache to prevent loop deadlock
         pos_info = self._open_positions.pop(key, {})
         entry_price = float(pos_info.get("entry_price") or 0.50)
 
@@ -599,11 +435,6 @@ class KalshiBroker:
             order_id = order_info.get("order_id") or resp.get("order_id", "ERR")
             exit_price = float(order_info.get("price", 0) / 100.0) if order_info.get("price") else 0.0
             
-            if order_id == "ERR":
-                logger.error(f"[KalshiBroker] Market sell failed for {local_symbol}: {resp}")
-            else:
-                logger.info(f"[KalshiBroker] FLATTENED {qty} {local_symbol} via MARKET ID={order_id}")
-                
             pnl_usd = (exit_price - entry_price) * qty if exit_price > 0 else 0.0
             
             try:

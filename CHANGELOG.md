@@ -1,6 +1,9 @@
 # CHANGELOG
 All notable changes to The King's Algo Trading System.
 
+## 2026-06-03
+- v19.8.1 (Execution Fix): Resolved a critical failure in `execution/kalshi_broker.py` where market sell orders (for Salvage and Take-Profit) were rejected by the Kalshi V2 API for missing a price field. Implemented a $0.01 floor to satisfy API validation while ensuring immediate market execution.
+
 ## 2026-06-02
 - v19.8.0 (Sovereign Guru): High-level mathematical and systematic hardening release ("Polymath Integrity"). Implemented a 0.05°F Precision Epsilon to success-count logic to resolve floating-point conversion noise. Refactored GraphCast AI as a Sigma Scaler to confirm atmospheric stability without probability distortion. Deployed "Settlement Watermarking" (daily_max/min tracking) to the METAR engine to prevent false BUST exits after temperature reversals. Hardened the salvage broker with a $0.01 liquidity floor for market orders to eliminate useless fee-drag.
 - v19.7.0 (Sovereign Precision): Emergency win-rate restoration release. Implemented a four-layer precision shield. 1) Horizon Pullback: Strictly capped all trades at 48h resolution to eliminate long-range noise. 2) Market Truth Veto: Added a 30% Model-Market Divergence cap to detect model error/staleness. 3) High-Alpha Floor: Raised the minimum Edge floor to 20% (Net of fees). 4) Hardened Salvage: Refactored broker to use Market Orders for all salvage/take-profit exits to ensure immediate capital rotation.

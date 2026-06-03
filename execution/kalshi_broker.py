@@ -573,6 +573,9 @@ class KalshiBroker:
             self._open_positions.pop(key, {}) # Still remove from local cache
             return {"order_id": "DISCARDED", "exit_price": 0.0, "pnl_usd": 0.0}
 
+        # v19.8.1: Kalshi V2 requires a price field even for MARKET orders
+        # to define the 'worst case' acceptable price.
+        # For a SELL (flatten), we set a 1c floor.
         body = {
             "ticker": local_symbol,
             "action": "sell",
@@ -581,6 +584,10 @@ class KalshiBroker:
             "type": "market",
             "client_order_id": str(uuid.uuid4()),
         }
+        if side == "yes":
+            body["yes_price"] = 1 # 1 cent floor
+        else:
+            body["no_price"] = 1 # 1 cent floor
         
         # Pre-emptively clear from cache to prevent loop deadlock
         pos_info = self._open_positions.pop(key, {})

@@ -6,9 +6,11 @@
 ## Canonical Truth
 
 - Repo root: `/Users/joshmacbookair2020/Projects/algo_trading_final`
-- Canonical version: `v19.8.0` (`2026-06-02`)
+- Canonical version: `v19.8.1` (`2026-06-03`)
 - Canonical active lane: **Dual-Lane**: Coinbase Spot Scalp + Kalshi Weather Sovereign Guru
-- **Status:** **SOVEREIGN GURU**. Polymath Integrity & Settlement Watermarking.
+- **Status:** **SOVEREIGN GURU**. Fixed Market Order Execution.
+- **Critical Changes (v19.8.1):**
+  - **Market Execution Fix**: Resolved a failure in Kalshi V2 where market sell orders were rejected for lacking a price field. Implemented a $0.01 floor to satisfy API validation.
 - **Critical Changes (v19.8.0):**
   - **Precision Epsilon**: Implemented a 0.05°F success-count buffer in the ensemble engine to resolve floating-point conversion noise (e.g. 84.99F vs 85F).
   - **AI Bayesian Weighting**: Refactored GraphCast AI as a Sigma Scaler. AI now confirms physical atmospheric stability rather than distorting the probability blend.

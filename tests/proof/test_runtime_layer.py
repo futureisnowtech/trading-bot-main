@@ -88,6 +88,21 @@ def test_upsert_lane_state_forecast_round_trips(proof_runtime, monkeypatch):
     assert lane["readiness_state"] == "OPERATIONAL"
 
 
+def test_upsert_lane_state_bootstraps_runtime_tables(proof_runtime, monkeypatch):
+    import runtime.runtime_state as rs
+
+    db = str(proof_runtime.db_path)
+    monkeypatch.setattr(rs, "DB_PATH", db, raising=False)
+    rs.upsert_lane_state("forecast", db_path=db, enabled=1, active=1)
+
+    with sqlite3.connect(proof_runtime.db_path) as conn:
+        row = conn.execute(
+            "SELECT lane_id, enabled, active FROM lane_runtime_state WHERE lane_id='forecast'"
+        ).fetchone()
+
+    assert row == ("forecast", 1, 1)
+
+
 def test_mark_lane_heartbeat_updates_timestamp(proof_runtime, monkeypatch):
     import runtime.runtime_state as rs
 

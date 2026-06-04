@@ -127,6 +127,7 @@ def upsert_system_state(db_path: str = DB_PATH, **kwargs) -> None:
     Any keyword argument that matches a column name will be set.
     updated_at is always set automatically.
     """
+    init_runtime_tables(db_path=db_path)
     kwargs["updated_at"] = _now_iso()
     kwargs["id"] = 1
 
@@ -170,6 +171,7 @@ def upsert_lane_state(lane_id: str, db_path: str = DB_PATH, **kwargs) -> None:
     Any keyword argument matching a column will be set.
     updated_at is always set automatically.
     """
+    init_runtime_tables(db_path=db_path)
     kwargs["updated_at"] = _now_iso()
     kwargs["lane_id"] = lane_id
 

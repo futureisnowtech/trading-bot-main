@@ -125,6 +125,9 @@ def run_safe_command(command: str) -> str:
     if not is_allowed:
         return "Error: Command not in whitelist."
 
+    if command.startswith("git ") and not os.path.isdir(os.path.join(os.getcwd(), ".git")):
+        return "Error: Git metadata is not deployed in this runtime; git commands are unavailable here."
+
     try:
         result = subprocess.check_output(command, shell=True, stderr=subprocess.STDOUT, timeout=15).decode()
         return result if result else "Success (no output)."

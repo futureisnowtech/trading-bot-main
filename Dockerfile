@@ -5,14 +5,6 @@ WORKDIR /app
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_ROOT_USER_ACTION=ignore
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    curl \
-    git \
-    sqlite3 \
-    && rm -rf /var/lib/apt/lists/*
-
 # Copy dependency files
 COPY requirements-runtime.txt .
 
@@ -28,5 +20,5 @@ RUN mkdir -p logs
 # Set environment variable for live confirmation
 ENV ALGO_LIVE_CONFIRM="I UNDERSTAND"
 
-# Entrypoint to run the bot in live mode
-CMD ["python3", "scripts/boot.py"]
+# Default to a valid single-pass execution entrypoint when the image is run directly.
+CMD ["python3", "sniper_cron.py"]

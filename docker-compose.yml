@@ -1,32 +1,4 @@
 services:
-  algo-bot-spot:
-    image: ${IMAGE_NAME:-algo-trading-bot}:latest
-    build: .
-    container_name: algo-bot-spot
-    hostname: algo-bot-spot
-    restart: unless-stopped
-    networks:
-      - trading-network
-    ports:
-      - "8000:8000"
-    env_file:
-      - .env
-    volumes:
-      - ./logs:/app/logs
-      - /proc:/host/proc:ro
-      - /sys:/host/sys:ro
-    command: ["python3", "spot_main.py"]
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "50m"
-        max-file: "3"
-    healthcheck:
-      test: ["CMD-SHELL", "sqlite3 /app/logs/trades.db \"SELECT connected FROM lane_runtime_state WHERE id=97543\" | grep 1 || exit 1"]
-      interval: 1m
-      timeout: 10s
-      retries: 3
-
   algo-bot-forecast:
     image: ${IMAGE_NAME:-algo-trading-bot}:latest
     build: .
@@ -36,22 +8,18 @@ services:
     networks:
       - trading-network
     ports:
+      - "8000:8000"
       - "8001:8001"
     env_file:
       - .env
     volumes:
       - ./logs:/app/logs
-    command: ["python3", "forecast_main.py"]
+    command: ["python3", "main.py"]
     logging:
       driver: "json-file"
       options:
         max-size: "50m"
         max-file: "3"
-    healthcheck:
-      test: ["CMD-SHELL", "sqlite3 /app/logs/trades.db \"SELECT connected FROM lane_runtime_state WHERE lane_id='forecast'\" | grep 1 || exit 1"]
-      interval: 1m
-      timeout: 10s
-      retries: 3
 
   prometheus:
     image: prom/prometheus:latest
@@ -145,7 +113,6 @@ services:
       - /sys:/host/sys:ro
     command: ["python3", "-m", "uvicorn", "dashboard.api.server:app", "--host", "0.0.0.0", "--port", "8080"]
     depends_on:
-      - algo-bot-spot
       - algo-bot-forecast
 
 networks:

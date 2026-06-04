@@ -194,3 +194,9 @@ def test_lane_economics_forecast_is_zero_cost():
     assert econ.taker_fee_pct == 0.0
     assert econ.min_viable_edge_pct == 0.0
     assert is_trade_viable("forecast", 0.0) is True
+
+
+def test_execution_engine_uses_long_lived_daemon():
+    compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    assert "execution_daemon.py" in compose
+    assert "while true; do python3 sniper_cron.py" not in compose

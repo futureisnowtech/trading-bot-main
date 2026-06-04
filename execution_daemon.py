@@ -1,0 +1,65 @@
+"""
+execution_daemon.py — Lean long-lived Kalshi execution daemon.
+"""
+
+import logging
+import os
+import sys
+import time
+
+from config import (
+    ACCOUNT_SIZE,
+    FORECAST_AUTONOMOUS_ENABLED,
+    FORECAST_LANE_ACTIVE,
+    KALSHI_ENABLED,
+)
+from data.kalshi_weather_monitor import start_weather_monitor
+from forecast.runner import run_execution_cycle
+
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(name)s %(levelname)s %(message)s",
+)
+
+logger = logging.getLogger("execution_daemon")
+
+
+def main() -> int:
+    if not KALSHI_ENABLED:
+        logger.warning("Kalshi trading disabled. Exiting cleanly.")
+        return 0
+
+    if not FORECAST_LANE_ACTIVE:
+        logger.warning("Forecast lane inactive. Exiting cleanly.")
+        return 0
+
+    if not FORECAST_AUTONOMOUS_ENABLED:
+        logger.warning("Autonomous forecast trading disabled. Exiting cleanly.")
+        return 0
+
+    sleep_seconds = max(1, int(float(os.getenv("SNIPER_SLEEP_SECONDS", "300"))))
+    bankroll = float(ACCOUNT_SIZE)
+
+    start_weather_monitor()
+    logger.info("Execution daemon online (sleep=%ss).", sleep_seconds)
+
+    try:
+        while True:
+            cycle_started = time.time()
+            try:
+                summary = run_execution_cycle(bankroll=bankroll)
+                logger.info("Execution cycle complete: %s", summary)
+            except Exception:
+                logger.exception("Execution cycle failed")
+
+            elapsed = time.time() - cycle_started
+            logger.info("Sleeping %ss before next cycle (elapsed=%.1fs).", sleep_seconds, elapsed)
+            time.sleep(sleep_seconds)
+    except KeyboardInterrupt:
+        logger.info("Execution daemon interrupted. Exiting cleanly.")
+        return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

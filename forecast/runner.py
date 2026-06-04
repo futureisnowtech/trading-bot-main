@@ -255,6 +255,25 @@ def run_execution_cycle(
 
     discovery = run_discovery_cycle()
 
+    weather_sync = {}
+    try:
+        from forecast.db import get_active_contracts
+        from data.kalshi_weather_monitor import ensure_weather_data
+
+        active_contracts = get_active_contracts(db_path=db_path)
+        weather_symbols = [
+            str(contract.get("local_symbol") or "")
+            for contract in active_contracts
+            if "KXHIGH" in str(contract.get("local_symbol") or "")
+            or "KXLOW" in str(contract.get("local_symbol") or "")
+            or "KXRAIN" in str(contract.get("local_symbol") or "")
+        ]
+        weather_sync = ensure_weather_data(weather_symbols)
+        if weather_sync.get("refreshed_series"):
+            logger.info("[ForecastRunner] Weather cold-start hydration: %s", weather_sync)
+    except Exception as exc:
+        logger.warning("[ForecastRunner] Weather hydration failed: %s", exc)
+
     if refresh_quotes:
         try:
             _refresh_quotes_once()
@@ -290,6 +309,7 @@ def run_execution_cycle(
     summary = {
         "broker_connected": connected,
         "discovery": discovery,
+        "weather_sync": weather_sync,
         "entries": len(entries),
         "resolution_sync": resolution_summary,
     }

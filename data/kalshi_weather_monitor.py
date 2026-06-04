@@ -8,16 +8,23 @@ live execution loop via a low-latency shadow state dictionary.
 
 import asyncio
 import logging
+import threading
 import time
-import requests
+from copy import deepcopy
+from typing import Any, Dict, Optional
+
 import numpy as np
-from typing import Dict, Any, Optional
+import requests
 
 logger = logging.getLogger("weather_monitor")
 
 # ── Shadow State ──────────────────────────────────────────────────────────────
 # O(1) read access for the strategy engine
 _WEATHER_SHADOW_STATE: Dict[str, Any] = {}
+WEATHER_STATE_TTL_SEC = 21600
+_STATE_LOCK = threading.Lock()
+_MONITOR_LOCK = threading.Lock()
+_MONITOR_THREAD: Optional[threading.Thread] = None
 
 # Kalshi Station Mappings (Lat/Lon)
 # Refined v19.1.10: Official ASOS Settlement Stations
@@ -54,6 +61,11 @@ STATIONS = {
     "CLT": {"lat": 35.21, "lon": -80.94, "icao": "KCLT", "name": "Charlotte-Douglas", "tz": "America/New_York", "series": ["KXHIGHCLT", "KXLOWCLT"]},
     "OMA": {"lat": 41.30, "lon": -95.89, "icao": "KOMA", "name": "Omaha (Eppley Airfield)", "tz": "America/Chicago", "series": ["KXHIGHOMA", "KXLOWOMA"]},
     "CHS": {"lat": 32.89, "lon": -80.04, "icao": "KCHS", "name": "Charleston (SC)", "tz": "America/New_York", "series": ["KXHIGHCHS", "KXLOWCHS"]},
+}
+_SERIES_TO_CITY = {
+    series: city_key
+    for city_key, loc in STATIONS.items()
+    for series in loc.get("series", [])
 }
 
 # ── Intraday Ground Truth ───────────────────────────────────────────────────
@@ -107,7 +119,33 @@ async def fetch_metar_observation(icao: str) -> Dict[str, Any]:
 
 # ── Cache ───────────────────────────────────────────────────────────────────
 _COORDINATE_CACHE: Dict[str, Dict[str, Any]] = {}
-CACHE_EXPIRY_SEC = 21600  # 6 hours (weather ensembles are slow-moving)
+CACHE_EXPIRY_SEC = WEATHER_STATE_TTL_SEC  # 6 hours (weather ensembles are slow-moving)
+
+
+def _resolve_weather_series(token: str) -> Optional[str]:
+    value = str(token or "").upper()
+    if not value:
+        return None
+    if value in _SERIES_TO_CITY:
+        return value
+    for series in _SERIES_TO_CITY:
+        if value.startswith(series):
+            return series
+    return None
+
+
+def _intraday_payload(city_key: str, metar: Dict[str, Any], hrrr: Dict[str, Any]) -> Dict[str, Any]:
+    cur_temp = metar.get("temp_f")
+    return {
+        "city_key": city_key,
+        "metar_temp": cur_temp,
+        "daily_max": cur_temp,
+        "daily_min": cur_temp,
+        "metar_raw": metar.get("raw"),
+        "hrrr_high": hrrr.get("hrrr_high"),
+        "hrrr_trend": hrrr.get("hrrr_trend"),
+        "ts": time.time(),
+    }
 
 async def fetch_open_meteo_ensemble(city_key: str, lat: float, lon: float) -> Dict[str, Any]:
     """
@@ -263,6 +301,121 @@ async def fetch_hrrr_forecast(city_key: str, lat: float, lon: float) -> Dict[str
         logger.debug(f"HRRR fetch failed for {city_key}: {e}")
     return {}
 
+
+async def hydrate_weather_shadow_state(
+    *,
+    series_filter: Optional[set[str]] = None,
+    include_intraday: bool = True,
+    concurrency: int = 4,
+) -> Dict[str, Any]:
+    """Refresh the weather shadow state once for selected series or the whole universe."""
+    if series_filter:
+        city_keys = sorted({_SERIES_TO_CITY[s] for s in series_filter if s in _SERIES_TO_CITY})
+    else:
+        city_keys = sorted(STATIONS.keys())
+
+    if not city_keys:
+        return {"requested_cities": 0, "updated_series": 0}
+
+    semaphore = asyncio.Semaphore(max(1, concurrency))
+
+    async def _hydrate_city(city_key: str) -> int:
+        loc = STATIONS[city_key]
+        async with semaphore:
+            ensemble = await fetch_open_meteo_ensemble(city_key, loc["lat"], loc["lon"])
+            if not ensemble:
+                return 0
+
+            intraday_payload = None
+            if include_intraday:
+                metar, hrrr = await asyncio.gather(
+                    fetch_metar_observation(loc["icao"]),
+                    fetch_hrrr_forecast(city_key, loc["lat"], loc["lon"]),
+                )
+                intraday_payload = _intraday_payload(city_key, metar, hrrr)
+
+            updated = 0
+            with _STATE_LOCK:
+                for s_ticker in loc.get("series", []):
+                    payload = deepcopy(ensemble)
+                    existing = _WEATHER_SHADOW_STATE.get(s_ticker, {})
+                    if intraday_payload:
+                        payload["intraday"] = intraday_payload
+                    else:
+                        payload["intraday"] = existing.get("intraday", {})
+                    _WEATHER_SHADOW_STATE[s_ticker] = payload
+                    updated += 1
+            return updated
+
+    results = await asyncio.gather(*(_hydrate_city(city_key) for city_key in city_keys), return_exceptions=True)
+
+    updated_series = 0
+    errors = 0
+    for result in results:
+        if isinstance(result, Exception):
+            errors += 1
+            logger.warning("Weather hydration task failed: %s", result)
+            continue
+        updated_series += int(result or 0)
+
+    summary = {
+        "requested_cities": len(city_keys),
+        "updated_series": updated_series,
+        "errors": errors,
+    }
+    logger.info("Weather one-shot hydration summary: %s", summary)
+    return summary
+
+
+def ensure_weather_data(
+    tickers_or_series: list[str],
+    *,
+    include_intraday: bool = True,
+    max_age_sec: int = WEATHER_STATE_TTL_SEC,
+) -> Dict[str, Any]:
+    """Backfill only the missing or stale weather series needed by the current cycle."""
+    needed_series = {
+        series
+        for token in tickers_or_series
+        for series in [_resolve_weather_series(token)]
+        if series is not None
+    }
+    if not needed_series:
+        return {"requested_series": 0, "refreshed_series": 0, "requested_cities": 0, "errors": 0}
+
+    stale_series = set()
+    now = time.time()
+    for series in needed_series:
+        data = _WEATHER_SHADOW_STATE.get(series)
+        if not data or now - float(data.get("timestamp") or 0) > max_age_sec:
+            stale_series.add(series)
+
+    if not stale_series:
+        return {
+            "requested_series": len(needed_series),
+            "refreshed_series": 0,
+            "requested_cities": 0,
+            "errors": 0,
+        }
+
+    summary = asyncio.run(
+        hydrate_weather_shadow_state(
+            series_filter=stale_series,
+            include_intraday=include_intraday,
+        )
+    )
+    refreshed_series = 0
+    refreshed_now = time.time()
+    for series in stale_series:
+        data = _WEATHER_SHADOW_STATE.get(series)
+        if data and refreshed_now - float(data.get("timestamp") or 0) <= max_age_sec:
+            refreshed_series += 1
+    return {
+        "requested_series": len(needed_series),
+        "refreshed_series": refreshed_series,
+        **summary,
+    }
+
 async def update_weather_shadow_state():
     """Background loop polling weather data (Ensembles + Intraday METAR/HRRR)."""
     global _WEATHER_SHADOW_STATE
@@ -282,14 +435,15 @@ async def update_weather_shadow_state():
                     result = await fetch_open_meteo_ensemble(city_key, loc["lat"], loc["lon"])
                     if result:
                         for s_ticker in loc.get("series", []):
-                            # Initialize or preserve intraday data
                             existing = _WEATHER_SHADOW_STATE.get(s_ticker, {})
-                            result["intraday"] = existing.get("intraday", {})
-                            new_state[s_ticker] = result
+                            payload = deepcopy(result)
+                            payload["intraday"] = existing.get("intraday", {})
+                            new_state[s_ticker] = payload
                     await asyncio.sleep(random.uniform(2, 5))
                 
                 if new_state:
-                    _WEATHER_SHADOW_STATE.update(new_state)
+                    with _STATE_LOCK:
+                        _WEATHER_SHADOW_STATE.update(new_state)
                     logger.info(f"Weather Ensemble synced: {len(new_state)} series")
             except Exception as e:
                 logger.error(f"Ensemble sync failure: {e}")
@@ -334,7 +488,8 @@ async def update_weather_shadow_state():
                     
                     for s_ticker in loc.get("series", []):
                         if s_ticker in _WEATHER_SHADOW_STATE:
-                            _WEATHER_SHADOW_STATE[s_ticker]["intraday"] = intraday_payload
+                            with _STATE_LOCK:
+                                _WEATHER_SHADOW_STATE[s_ticker]["intraday"] = intraday_payload
                 
                 logger.info("Weather Intraday Precinct synced (METAR/HRRR/Watermarks).")
             except Exception as e:
@@ -347,31 +502,36 @@ async def update_weather_shadow_state():
 def get_weather_data(ticker_prefix: str) -> Dict[str, Any]:
     """Retrieve cached weather data for a ticker prefix (e.g. 'KXHIGHNY')."""
     # v19.1.6: Direct lookup now that shadow state is keyed by series ticker
-    data = _WEATHER_SHADOW_STATE.get(ticker_prefix)
+    series = _resolve_weather_series(ticker_prefix) or ticker_prefix
+    data = _WEATHER_SHADOW_STATE.get(series)
     if data:
         # v19.1.6: Increase cache expiry to 6h to match polling cadence
-        if time.time() - data["timestamp"] > 21600:
+        if time.time() - data["timestamp"] > WEATHER_STATE_TTL_SEC:
             return {}
         return data
     
     # Fallback pattern matching
     for series_list in [loc.get("series", []) for loc in STATIONS.values()]:
         for s in series_list:
-            if ticker_prefix.startswith(s):
+            if str(ticker_prefix).upper().startswith(s):
                 data = _WEATHER_SHADOW_STATE.get(s)
                 # v19.1.6: Increase cache expiry to 6h
-                if data and time.time() - data["timestamp"] <= 21600:
+                if data and time.time() - data["timestamp"] <= WEATHER_STATE_TTL_SEC:
                     return data
     return {}
 
 def start_weather_monitor():
     """Start the weather daemon in a background thread."""
-    import threading
-    def _run():
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(update_weather_shadow_state())
-    
-    t = threading.Thread(target=_run, daemon=True)
-    t.start()
-    return t
+    global _MONITOR_THREAD
+    with _MONITOR_LOCK:
+        if _MONITOR_THREAD and _MONITOR_THREAD.is_alive():
+            return _MONITOR_THREAD
+
+        def _run():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(update_weather_shadow_state())
+
+        _MONITOR_THREAD = threading.Thread(target=_run, daemon=True, name="WeatherShadowMonitor")
+        _MONITOR_THREAD.start()
+        return _MONITOR_THREAD

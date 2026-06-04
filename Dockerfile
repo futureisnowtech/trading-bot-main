@@ -20,5 +20,5 @@ RUN mkdir -p logs
 # Set environment variable for live confirmation
 ENV ALGO_LIVE_CONFIRM="I UNDERSTAND"
 
-# Default to a valid single-pass execution entrypoint when the image is run directly.
-CMD ["python3", "sniper_cron.py"]
+# Default to the long-lived lean execution daemon when the image is run directly.
+CMD ["python3", "execution_daemon.py"]

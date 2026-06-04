@@ -106,3 +106,41 @@ def test_weather_override_can_clear_soft_low_conviction_gate(monkeypatch):
     assert result.strategy_family == "weather_ensemble"
     assert result.econ_approved is True
     assert result.veto_reason == ""
+
+
+def test_ensure_weather_data_backfills_missing_series(monkeypatch):
+    import data.kalshi_weather_monitor as wm
+
+    wm._WEATHER_SHADOW_STATE.clear()
+
+    async def fake_fetch_open_meteo_ensemble(city_key, lat, lon):
+        return {
+            "members_high": [76.0] * 31,
+            "members_low": [60.0] * 31,
+            "members_precip": [0.0] * 31,
+            "sigma_high": 0.8,
+            "sigma_low": 0.7,
+            "peak_tcdc": 5.0,
+            "timestamp": datetime.now(timezone.utc).timestamp(),
+            "ecmwf": {"members_high": [76.0] * 31},
+            "aigefs": {"members_high": [76.0]},
+        }
+
+    async def fake_fetch_metar_observation(icao):
+        return {"temp_f": 74.0, "raw": f"{icao} RAW"}
+
+    async def fake_fetch_hrrr_forecast(city_key, lat, lon):
+        return {"hrrr_high": 77.0, "hrrr_trend": "rising"}
+
+    monkeypatch.setattr(wm, "fetch_open_meteo_ensemble", fake_fetch_open_meteo_ensemble)
+    monkeypatch.setattr(wm, "fetch_metar_observation", fake_fetch_metar_observation)
+    monkeypatch.setattr(wm, "fetch_hrrr_forecast", fake_fetch_hrrr_forecast)
+
+    summary = wm.ensure_weather_data(["KXHIGHNY-30JUN26-T75"])
+
+    assert summary["requested_series"] == 1
+    assert summary["refreshed_series"] == 1
+    hydrated = wm.get_weather_data("KXHIGHNY-30JUN26-T75")
+    assert hydrated
+    assert hydrated["members_high"]
+    assert hydrated["intraday"]["metar_temp"] == 74.0

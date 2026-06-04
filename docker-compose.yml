@@ -10,9 +10,8 @@ services:
       - ./logs:/app/logs
       - ./kalshi_private_key.pem:/run/secrets/kalshi_private_key.pem:ro
     command:
-      - /bin/bash
-      - -lc
-      - while true; do python3 sniper_cron.py; sleep ${SNIPER_SLEEP_SECONDS:-300}; done
+      - python3
+      - execution_daemon.py
     logging:
       driver: json-file
       options:

@@ -1,6 +1,9 @@
 # CHANGELOG
 
 ## 2026-06-04
+- Replaced the production `execution-engine` shell loop with a real `execution_daemon.py` process so weather shadow state survives across trading cycles.
+- Added one-shot weather cold-start hydration in `forecast.runner.run_execution_cycle()` so a restart cannot fail closed on `missing_weather_data` before the monitor warms up.
+- Made `data/kalshi_weather_monitor.py` idempotent and concurrency-safe enough for live daemon startup, including targeted series refresh for active Kalshi weather contracts.
 - Split the active repository into a Kalshi-only execution tree and removed crypto, spot, stocks, futures, research, and legacy dashboard surfaces from the active path.
 - Preserved the lean live runtime centered on `sniper_cron.py`, `telegram_daemon.py`, `forecast.runner.run_execution_cycle()`, and `execution/kalshi_broker.py`.
 - Hardened weather imports so proof collection is not sensitive to `sys.path` collisions between top-level `data/` and dashboard helper packages.

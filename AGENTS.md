@@ -14,6 +14,7 @@ This repository is now the active Kalshi-only execution tree.
 
 ## Active Runtime
 
+- `execution_daemon.py` is the production long-lived execution process.
 - `sniper_cron.py` runs one Kalshi execution pass and exits.
 - `telegram_daemon.py` runs the Telegram operator/oracle process.
 - `forecast/runner.py` exposes `run_execution_cycle()` as the canonical single-pass entrypoint.
@@ -46,6 +47,7 @@ This repository is now the active Kalshi-only execution tree.
 | `data/kalshi_weather_monitor.py` | Ensemble + METAR shadow state |
 | `learning/weather_rbi.py` | Post-resolution Brier-based calibration |
 | `notifications/telegram_bot.py` | Operator interface |
+| `execution_daemon.py` | Long-lived lean execution daemon |
 | `sniper_cron.py` | Single-pass execution worker |
 | `telegram_daemon.py` | Standalone Telegram daemon |
 | `deploy.sh` | Canonical deploy entrypoint |
@@ -71,6 +73,7 @@ python3 -m pytest \
 
 ```bash
 python3 sniper_cron.py
+python3 execution_daemon.py
 python3 telegram_daemon.py
 python3 scripts/verify_kalshi_connection.py
 python3 scripts/validate.py

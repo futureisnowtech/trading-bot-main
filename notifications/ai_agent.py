@@ -5,6 +5,7 @@ import time
 from typing import Optional, List, Dict
 import system_state
 from notifications import agent_tools
+from config import GEMINI_MODEL
 
 try:
     from google import genai
@@ -13,10 +14,19 @@ try:
 except ImportError:
     HAS_GENAI_SDK = False
 
-# High-tier reasoning model for Telegram
-GEMINI_REASONING_MODEL = "gemini-2.0-flash"
+# Oracle model follows the repo-wide Gemini config by default.
+GEMINI_REASONING_MODEL = os.getenv("GEMINI_REASONING_MODEL", GEMINI_MODEL).strip() or GEMINI_MODEL
 
 logger = logging.getLogger(__name__)
+
+
+def get_reasoning_model_id() -> str:
+    model = (GEMINI_REASONING_MODEL or GEMINI_MODEL or "").strip()
+    if not model:
+        model = "gemini-2.5-flash"
+    if model.startswith("models/"):
+        return model
+    return f"models/{model}"
 
 def get_repo_context() -> str:
     """
@@ -72,7 +82,7 @@ def ask_ai(query: str) -> str:
 
     try:
         client = genai.Client(api_key=api_key)
-        model_id = f"models/{GEMINI_REASONING_MODEL}"
+        model_id = get_reasoning_model_id()
         
         context = get_repo_context()
         system_instruction = (

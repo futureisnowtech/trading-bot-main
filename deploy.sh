@@ -55,6 +55,14 @@ LOCAL_IMAGE_NAME="ghcr.io/$(git remote get-url origin | sed 's/.*github.com[:\/]
 
 TMP_EXPORT_DIR=$(mktemp -d "${TMPDIR:-/tmp}/kalshi-deploy.XXXXXX")
 
+echo "Pruning remote cache artifacts that can block sync..."
+${SSH_CMD} ${NYC_USER}@${NYC_IP} bash -s << REMOTE_PRUNE
+set -euo pipefail
+mkdir -p ${PROJECT_DIR}
+docker run --rm -v ${PROJECT_DIR}:/workspace alpine:3.20 sh -lc \
+  'find /workspace \( -name __pycache__ -o -name .pytest_cache \) -prune -exec rm -rf {} +; find /workspace -name "*.pyc" -delete'
+REMOTE_PRUNE
+
 echo "Exporting exact committed tree for SHA ${LOCAL_SHA}..."
 git archive --format=tar "${LOCAL_SHA}" | tar -xf - -C "${TMP_EXPORT_DIR}"
 echo "  OK: committed tree exported to ${TMP_EXPORT_DIR}"

@@ -89,7 +89,6 @@ set -euo pipefail
 cd ${PROJECT_DIR}
 
 export IMAGE_NAME="${LOCAL_IMAGE_NAME}"
-export COMPOSE_BAKE=false
 
 if [ ! -f .env ]; then
     echo "ERROR: ${PROJECT_DIR}/.env is missing on the droplet."
@@ -103,11 +102,11 @@ if [ ! -f kalshi_private_key.pem ]; then
     exit 1
 fi
 
-echo "  Building lean services from the exact committed tree..."
-docker compose build --pull
+echo "  Building lean runtime image from the exact committed tree..."
+docker build --pull -t "${LOCAL_IMAGE_NAME}:latest" .
 
 echo "  Hot-reloading services..."
-docker compose up -d --remove-orphans --force-recreate
+docker compose up -d --remove-orphans --force-recreate --no-build
 
 echo "  Waiting for containers..."
 sleep 10

@@ -102,8 +102,14 @@ if [ ! -f kalshi_private_key.pem ]; then
     exit 1
 fi
 
+if ! docker buildx version >/dev/null 2>&1; then
+    echo "ERROR: docker buildx is required on the droplet for clean image builds."
+    echo "       Install the buildx CLI plugin for user ${NYC_USER} before deploying."
+    exit 1
+fi
+
 echo "  Building lean runtime image from the exact committed tree..."
-docker build --pull -t "${LOCAL_IMAGE_NAME}:latest" .
+docker buildx build --pull --load --progress=plain -t "${LOCAL_IMAGE_NAME}:latest" .
 
 echo "  Hot-reloading services..."
 docker compose up -d --remove-orphans --force-recreate --no-build

@@ -62,7 +62,9 @@ echo "  OK: committed tree exported to ${TMP_EXPORT_DIR}"
 echo "Syncing exact committed tree to droplet (SHA: ${LOCAL_SHA})..."
 rsync -avz \
     --delete \
+    --force \
     -e "ssh -p ${NYC_PORT} -o StrictHostKeyChecking=no" \
+    --exclude '.git/' \
     --exclude '.env' \
     --exclude 'logs' \
     --exclude 'version.txt' \

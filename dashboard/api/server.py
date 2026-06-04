@@ -34,8 +34,16 @@ app.add_middleware(
 
 import psutil
 
+def _get_city_hub(ticker: str) -> str:
+    """Sovereign Regional Hub Mapping (Mirror of strategy_engine.py)"""
+    from forecast.strategy_engine import REGIONAL_HUBS
+    for hub, cities in REGIONAL_HUBS.items():
+        if any(city in ticker for city in cities):
+            return hub
+    return "UNKNOWN"
+
 async def get_db_snapshot():
-    """v19.1.KALSHI: Pure Kalshi Weather API Snapshot."""
+    """v19.1.KALSHI: Pure Kalshi Weather API Snapshot (Redesigned)."""
     try:
         conn = sqlite3.connect(DB_PATH, timeout=10.0)
         conn.row_factory = sqlite3.Row
@@ -46,21 +54,57 @@ async def get_db_snapshot():
             "cpu": psutil.cpu_percent(),
             "ram": psutil.virtual_memory().percent,
             "disk": psutil.disk_usage('/').percent,
-            "load_avg": os.getloadavg() if hasattr(os, 'getloadavg') else [0,0,0]
         }
 
         # 2. Forecast Data
-        forecast_data = {"positions": [], "total_pnl": 0.0, "equity": 0.0, "active_markets": 0}
+        forecast_data = {"positions": [], "total_pnl": 0.0, "balance": 0.0, "active_markets": 0, "hubs": {}}
         
         try:
+            # Positions and PNL
+            cursor.execute("SELECT ticker as symbol, qty, entry, side, unrealized_pnl as pnl FROM forecast_positions WHERE qty > 0")
+            positions = [dict(r) for r in cursor.fetchall()]
+            
+            # Fetch balance from lane_runtime_state snapshot or broker balance if possible
             cursor.execute("SELECT snapshot_json FROM lane_runtime_state WHERE lane_id='forecast'")
             row = cursor.fetchone()
             if row and row["snapshot_json"]:
-                forecast_data = json.loads(row["snapshot_json"])
-        except Exception as e:
-            logging.debug(f"Snapshot read error: {e}")
+                snap = json.loads(row["snapshot_json"])
+                forecast_data["balance"] = snap.get("balance", 0.0)
+                forecast_data["active_markets"] = snap.get("active_markets", 0)
 
-        # 3. 24H PnL
+            # Enrich positions with titles and calculate hubs
+            for p in positions:
+                # Add dummy title for now or fetch from forecast_markets
+                cursor.execute("SELECT market_name FROM forecast_markets WHERE market_symbol=?", (p["symbol"],))
+                m_row = cursor.fetchone()
+                p["title"] = m_row["market_name"] if m_row else "Weather Prediction"
+                p["mark"] = p["entry"] # Implied mark
+                p["potential"] = p["qty"] * (1.0 - p["entry"]) if p["side"] == "YES" else p["qty"] * p["entry"]
+                
+                # Hub Exposure
+                hub = _get_city_hub(p["symbol"])
+                exposure = float(p["qty"]) * float(p["entry"])
+                forecast_data["hubs"][hub] = forecast_data["hubs"].get(hub, 0.0) + exposure
+                forecast_data["total_pnl"] += float(p["pnl"] or 0.0)
+
+            forecast_data["positions"] = positions
+        except Exception as e:
+            logging.debug(f"Position snapshot error: {e}")
+
+        # 3. RBI Calibration
+        rbi_data = {"brier": 0.25, "win_rate": 0.0, "accuracy": 0.0}
+        try:
+            cursor.execute("SELECT brier_score, win_rate, ensemble_accuracy FROM weather_calibration ORDER BY ts DESC LIMIT 1")
+            r_row = cursor.fetchone()
+            if r_row:
+                rbi_data = {
+                    "brier": r_row["brier_score"],
+                    "win_rate": r_row["win_rate"],
+                    "accuracy": r_row["ensemble_accuracy"]
+                }
+        except: pass
+
+        # 4. Intelligence Summary
         pnl_24h = 0.0
         try:
             cursor.execute("SELECT SUM(pnl_usd) as pnl FROM trades WHERE ts > datetime('now', '-1 day')")
@@ -73,11 +117,11 @@ async def get_db_snapshot():
             summary = f"System is performing well today (+${pnl_24h:,.2f})."
         elif pnl_24h < 0:
             summary = f"Navigating a challenging market today (-${abs(pnl_24h):,.2f})."
-            
-        if forecast_data.get("positions"):
-            summary += f" Managing {len(forecast_data['positions'])} active weather contracts."
+        
+        if forecast_data["positions"]:
+            summary += f" Managing {len(forecast_data['positions'])} active regional weather hedges."
 
-        # 4. Recent System Events
+        # 5. Recent System Events
         events = []
         try:
             cursor.execute("SELECT ts, level, source, message FROM system_events ORDER BY ts DESC LIMIT 20")
@@ -92,25 +136,17 @@ async def get_db_snapshot():
                 events.append(row)
         except: pass
 
-        # 5. SRE Health
-        sre = {
-            "integrity_score": 100,
-            "broker_connected": True,
-            "weather_active_markets": forecast_data.get("active_markets", 0)
-        }
-
         conn.close()
 
         return {
             "forecast": forecast_data,
+            "rbi": rbi_data,
             "intelligence_summary": summary,
             "events": events,
             "vitals": vitals,
-            "sre": sre,
             "system": {
                 "time": datetime.now().strftime("%H:%M:%S"),
                 "status": "OPERATIONAL",
-                "uptime_ts": psutil.boot_time(),
                 "version": VERSION
             }
         }

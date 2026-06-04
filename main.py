@@ -199,6 +199,11 @@ def main():
         schedule.every(30).minutes.do(run_discovery_cycle)
         schedule.every(5).minutes.do(lambda: run_strategy_cycle(100.0))
         schedule.every(30).seconds.do(run_position_monitor)
+        
+        # v19.1.KALSHI: Weather RBI (Learning Loop)
+        from learning.weather_rbi import run_weather_rbi
+        schedule.every(12).hours.do(run_weather_rbi)
+        run_weather_rbi() # Initial run on boot
 
         print("   ✅ Forecast lane cycles scheduled")
         print("=" * 60)

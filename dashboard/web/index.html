@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SOVEREIGN v19.1 | COMMAND HUD</title>
+    <title>SOVEREIGN KALSHI | WEATHER CONTROL HUD</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
     <style>
@@ -15,6 +15,7 @@
             --neon-green: #10b981;
             --neon-red: #ef4444;
             --neon-yellow: #f59e0b;
+            --neon-purple: #a855f7;
         }
         body {
             background-color: var(--bg);
@@ -32,7 +33,7 @@
         }
         .neon-text-blue { text-shadow: 0 0 15px rgba(59, 130, 246, 0.5); color: #60a5fa; }
         .neon-text-green { text-shadow: 0 0 15px rgba(16, 185, 129, 0.5); color: #34d399; }
-        .neon-text-red { text-shadow: 0 0 15px rgba(239, 68, 68, 0.5); color: #f87171; }
+        .neon-text-purple { text-shadow: 0 0 15px rgba(168, 85, 247, 0.5); color: #c084fc; }
         
         .pulse-green { animation: pulse-green 3s infinite; }
         @keyframes pulse-green {
@@ -46,24 +47,29 @@
         
         .scroll-hide::-webkit-scrollbar { width: 4px; }
         .scroll-hide::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
+
+        .stat-card {
+            background: linear-gradient(145deg, rgba(30, 41, 59, 0.4), rgba(15, 23, 42, 0.4));
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
     </style>
 </head>
 <body class="p-4 md:p-8 space-y-6">
 
     <!-- Header: Global Status -->
-    <header class="glass-panel p-6 flex flex-col md:flex-row justify-between items-center border-l-4 border-l-green-500">
+    <header class="glass-panel p-6 flex flex-col md:flex-row justify-between items-center border-l-4 border-l-purple-500">
         <div class="flex items-center space-x-6">
-            <div class="w-14 h-14 rounded-2xl bg-green-500/10 border border-green-500/30 flex items-center justify-center pulse-green">
-                <span class="text-green-500 font-black text-2xl italic">V</span>
+            <div class="w-14 h-14 rounded-2xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center pulse-green">
+                <span class="text-purple-500 font-black text-2xl italic">W</span>
             </div>
             <div>
                 <h1 class="text-2xl font-black tracking-tight text-white flex items-center">
-                    SOVEREIGN <span class="neon-text-blue ml-2">v19.1 COMMAND HUD</span>
+                    SOVEREIGN <span class="neon-text-purple ml-2">KALSHI WEATHER HUD</span>
                 </h1>
                 <div class="flex items-center space-x-4 text-[10px] uppercase tracking-widest font-bold mt-1 text-slate-500">
-                    <span id="sys-status" class="text-green-400">● Live Execution</span>
+                    <span id="sys-status" class="text-green-400">● Operational</span>
                     <span>/</span>
-                    <span>Regime: <span id="market-regime" class="text-yellow-500">NEUTRAL</span></span>
+                    <span>Ensemble: <span class="text-blue-400">31-Member GFS</span></span>
                     <span>/</span>
                     <span>Load: <span id="v-cpu" class="text-blue-400">0%</span></span>
                 </div>
@@ -71,15 +77,15 @@
         </div>
         <div class="flex space-x-8 md:space-x-12 mt-4 md:mt-0">
             <div class="text-center md:text-right">
-                <p class="text-[10px] text-blue-400 font-black uppercase tracking-widest">Crypto Equity</p>
-                <p id="crypto-equity" class="text-3xl font-black text-white tabular-nums">$0.00</p>
+                <p class="text-[10px] text-purple-400 font-black uppercase tracking-widest">Kalshi Balance</p>
+                <p id="kalshi-balance" class="text-3xl font-black text-white tabular-nums">$0.00</p>
             </div>
             <div class="text-center md:text-right border-l border-slate-800 pl-8 md:pl-12">
-                <p class="text-[10px] text-purple-400 font-black uppercase tracking-widest">Kalshi Equity</p>
-                <p id="kalshi-equity" class="text-3xl font-black text-white tabular-nums">$0.00</p>
+                <p class="text-[10px] text-blue-400 font-black uppercase tracking-widest">Active Risk</p>
+                <p id="active-risk" class="text-3xl font-black text-white tabular-nums">$0.00</p>
             </div>
             <div class="text-center md:text-right border-l border-slate-800 pl-8 md:pl-12">
-                <p class="text-[10px] text-slate-500 font-black uppercase tracking-widest">24H Trend</p>
+                <p class="text-[10px] text-slate-500 font-black uppercase tracking-widest">24H Net P/L</p>
                 <p id="day-pnl" class="text-3xl font-black text-green-400 tabular-nums">+$0.00</p>
             </div>
         </div>
@@ -91,71 +97,73 @@
         <main class="col-span-12 xl:col-span-8 space-y-6">
             
             <!-- Intelligence Summary -->
-            <div class="glass-panel p-5 bg-blue-500/5 border-blue-500/20">
-                <p id="intel-summary" class="text-sm font-medium text-blue-200 leading-relaxed italic">
-                    Initializing sovereign intelligence layer...
+            <div class="glass-panel p-5 bg-purple-500/5 border-purple-500/20">
+                <div class="flex items-center space-x-2 mb-2">
+                    <span class="text-[10px] font-black text-purple-400 uppercase tracking-widest">Sovereign Oracle Briefing</span>
+                </div>
+                <p id="intel-summary" class="text-sm font-medium text-slate-300 leading-relaxed italic">
+                    Analyzing weather ensemble convergence and regional hub saturation...
                 </p>
             </div>
 
-            <!-- Spot Portfolio -->
-            <section class="space-y-4">
-                <h2 class="text-xs font-black text-slate-500 uppercase tracking-[0.3em] flex items-center">
-                    <span class="w-1.5 h-3 bg-blue-500 mr-3 rounded-full"></span>
-                    Coinbase Spot Scalp Engagement
-                </h2>
-                <div id="spot-list" class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                    <!-- Positions will be injected here -->
-                </div>
-            </section>
-
             <!-- Forecast Portfolio -->
             <section class="space-y-4">
-                <h2 class="text-xs font-black text-slate-500 uppercase tracking-[0.3em] flex items-center">
-                    <span class="w-1.5 h-3 bg-purple-500 mr-3 rounded-full"></span>
-                    Macro Forecast Event Horizon
-                </h2>
-                <div id="forecast-list" class="grid grid-cols-1 gap-4">
+                <div class="flex justify-between items-center px-2">
+                    <h2 class="text-xs font-black text-slate-500 uppercase tracking-[0.3em] flex items-center">
+                        <span class="w-1.5 h-3 bg-purple-500 mr-3 rounded-full"></span>
+                        Macro Forecast Event Horizon
+                    </h2>
+                    <span id="active-count" class="text-[10px] font-bold text-slate-500 uppercase">0 Positions</span>
+                </div>
+                <div id="forecast-list" class="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <!-- Forecasts will be injected here -->
                 </div>
             </section>
 
         </main>
 
-        <!-- Right Column: System Logs & Health -->
+        <!-- Right Column: System Logs & Calibration -->
         <aside class="col-span-12 xl:col-span-4 space-y-6">
             
-            <!-- System Vitals -->
-            <div class="glass-panel p-6 space-y-4 border-t-4 border-t-blue-600">
-                <h3 class="text-xs font-black text-slate-400 uppercase tracking-widest">Droplet Engine Health</h3>
-                <div class="grid grid-cols-2 gap-4">
-                    <div class="p-4 bg-black/30 rounded-xl border border-slate-800">
-                        <p class="text-[10px] text-slate-500 font-bold uppercase mb-2 text-center">Memory</p>
-                        <p id="v-ram" class="text-2xl font-black text-white text-center">0%</p>
-                        <div class="gauge-bar mt-2"><div id="f-ram" class="gauge-fill bg-blue-500" style="width: 0%"></div></div>
+            <!-- Model Calibration (RBI) -->
+            <div class="glass-panel p-6 space-y-4 border-t-4 border-t-blue-500">
+                <h3 class="text-xs font-black text-slate-400 uppercase tracking-widest flex justify-between">
+                    <span>Model Calibration (RBI)</span>
+                    <span class="text-blue-500 text-[10px]">Daily Learning Loop</span>
+                </h3>
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="stat-card p-3 rounded-xl border border-slate-800">
+                        <p class="text-[9px] text-slate-500 font-bold uppercase mb-1">Brier Score</p>
+                        <p id="brier-score" class="text-lg font-black text-white">0.0000</p>
+                        <p class="text-[8px] text-slate-600 mt-1">Lower is better</p>
                     </div>
-                    <div class="p-4 bg-black/30 rounded-xl border border-slate-800">
-                        <p class="text-[10px] text-slate-500 font-bold uppercase mb-2 text-center">Disk</p>
-                        <p id="v-disk" class="text-2xl font-black text-white text-center">0%</p>
-                        <div class="gauge-bar mt-2"><div id="f-disk" class="gauge-fill bg-slate-600" style="width: 0%"></div></div>
+                    <div class="stat-card p-3 rounded-xl border border-slate-800">
+                        <p class="text-[9px] text-slate-500 font-bold uppercase mb-1">Win Rate</p>
+                        <p id="win-rate" class="text-lg font-black text-green-400">0.0%</p>
+                        <p class="text-[8px] text-slate-600 mt-1">Resolved Trades</p>
                     </div>
+                </div>
+                <div class="p-3 bg-black/30 rounded-xl border border-slate-800">
+                    <div class="flex justify-between text-[10px] text-slate-500 font-bold uppercase mb-2">
+                        <span>Ensemble Accuracy</span>
+                        <span id="accuracy-pct">0%</span>
+                    </div>
+                    <div class="gauge-bar"><div id="accuracy-fill" class="gauge-fill bg-blue-500" style="width: 0%"></div></div>
                 </div>
             </div>
 
-            <!-- The Hunt X-Ray -->
+            <!-- Regional Hub Exposure -->
             <div class="glass-panel p-6 space-y-4 border-t-4 border-t-yellow-500">
-                <h3 class="text-xs font-black text-slate-400 uppercase tracking-widest flex justify-between">
-                    <span>Live Hunt X-Ray</span>
-                    <span class="text-yellow-500 italic animate-pulse">Scanning Universe</span>
-                </h3>
-                <div id="hunt-list" class="space-y-3">
-                    <!-- Hunt data -->
+                <h3 class="text-xs font-black text-slate-400 uppercase tracking-widest">Regional Hub Gating</h3>
+                <div id="hub-list" class="space-y-3">
+                    <!-- Hub data -->
                 </div>
             </div>
 
             <!-- Incident Log -->
-            <div class="glass-panel p-6 h-[400px] flex flex-col border-l-4 border-l-red-600">
-                <h3 class="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">Tactical Incident Stream</h3>
-                <div id="log-list" class="flex-1 overflow-y-auto space-y-3 font-mono text-[10px] scroll-hide">
+            <div class="glass-panel p-6 h-[350px] flex flex-col border-l-4 border-l-red-600">
+                <h3 class="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">SRE Incident Stream</h3>
+                <div id="log-list" class="flex-1 overflow-y-auto space-y-2 font-mono text-[10px] scroll-hide">
                     <!-- Logs -->
                 </div>
             </div>
@@ -171,154 +179,100 @@
             if (data.error) return;
 
             // Global State
-            document.getElementById('market-regime').innerText = data.spot.regime;
             document.getElementById('v-cpu').innerText = `${Math.round(data.vitals.cpu)}%`;
-            document.getElementById('crypto-equity').innerText = `$${data.spot.equity.toLocaleString()}`;
-            document.getElementById('kalshi-equity').innerText = `$${(data.forecast.equity || 0).toLocaleString()}`;
+            document.getElementById('kalshi-balance').innerText = `$${(data.forecast.balance || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}`;
             
-            const pnl = data.spot.pnl_24h;
+            const pnl = data.forecast.total_pnl || 0;
             document.getElementById('day-pnl').innerText = `${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`;
             document.getElementById('day-pnl').className = `text-3xl font-black tabular-nums ${pnl >= 0 ? 'text-green-400' : 'text-red-400'}`;
             document.getElementById('intel-summary').innerText = data.intelligence_summary;
 
-            // Vitals
-            document.getElementById('v-ram').innerText = `${Math.round(data.vitals.ram)}%`;
-            document.getElementById('f-ram').style.width = `${data.vitals.ram}%`;
-            document.getElementById('v-disk').innerText = `${Math.round(data.vitals.disk)}%`;
-            document.getElementById('f-disk').style.width = `${data.vitals.disk}%`;
-
-            // Spot Positions
-            const spotList = document.getElementById('spot-list');
-            if (data.spot.positions.length > 0) {
-                spotList.innerHTML = data.spot.positions.map(p => {
-                    const trendIcon = p.trend === 'UP' ? '↑' : (p.trend === 'DOWN' ? '↓' : '↔');
-                    const trendColor = p.trend === 'UP' ? 'text-green-400' : (p.trend === 'DOWN' ? 'text-red-400' : 'text-slate-500');
-                    
-                    // Format Entry Time
-                    let entryDisplay = 'N/A';
-                    if (p.entered_at) {
-                        try {
-                            const d = new Date(p.entered_at);
-                            entryDisplay = d.toLocaleString([], {month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'});
-                        } catch(e) { entryDisplay = p.entered_at.split('T')[0]; }
-                    }
-
-                    return `
-                        <div class="glass-panel p-5 space-y-4 border-l-4 border-l-blue-500 bg-slate-900/40">
-                            <div class="flex justify-between items-start">
-                                <div>
-                                    <p class="text-2xl font-black text-white leading-none">${p.symbol}</p>
-                                    <p class="text-[10px] text-blue-400 font-bold uppercase mt-1 tracking-widest">${p.strategy}</p>
-                                    <p class="text-[9px] text-slate-500 font-medium mt-1">Entered: ${entryDisplay}</p>
-                                </div>
-                                <div class="text-right">
-                                    <p class="text-[10px] text-slate-500 font-bold uppercase">Net P/L</p>
-                                    <p class="text-xl font-black ${p.live_pnl >= 0 ? 'text-green-400' : 'text-red-400'}">
-                                        ${p.live_pnl >= 0 ? '+' : ''}$${p.live_pnl.toFixed(2)}
-                                    </p>
-                                </div>
-                            </div>
-                            <div class="p-3 bg-black/40 rounded-xl flex justify-between items-center">
-                                <div class="flex items-center">
-                                    <span class="text-xl mr-3 ${trendColor}">${trendIcon}</span>
-                                    <div>
-                                        <p class="text-[10px] text-slate-500 font-black uppercase leading-none">Market Sentiment</p>
-                                        <p class="text-xs font-bold text-white mt-1 uppercase">${p.sentiment}</p>
-                                    </div>
-                                </div>
-                                <div class="text-right">
-                                    <p class="text-[9px] text-slate-500 font-black uppercase">Current Price</p>
-                                    <p class="text-sm font-bold text-blue-300">$${p.current_price.toLocaleString()}</p>
-                                </div>
-                            </div>
-                            <div class="grid grid-cols-2 gap-4 text-center">
-                                <div class="p-2 bg-green-500/5 rounded-lg border border-green-500/10">
-                                    <p class="text-[9px] text-slate-500 font-black uppercase">Potential Gain</p>
-                                    <p class="text-xs font-bold text-green-400">+$${p.potential_usd.toFixed(2)}</p>
-                                </div>
-                                <div class="p-2 bg-red-500/5 rounded-lg border border-red-500/10">
-                                    <p class="text-[9px] text-slate-500 font-black uppercase">Active Risk</p>
-                                    <p class="text-xs font-bold text-red-500">-$${Math.abs(p.risk_usd).toFixed(2)}</p>
-                                </div>
-                            </div>
-                        </div>
-                    `;
-                }).join('');
-            } else {
-                spotList.innerHTML = `<div class="col-span-2 py-10 text-center glass-panel border-dashed opacity-50"><p class="text-sm font-bold text-slate-500 uppercase tracking-widest">Awaiting Entry Signal</p></div>`;
-            }
+            // Calibration (RBI)
+            const rbi = data.rbi || { brier: 0.25, win_rate: 0, accuracy: 0 };
+            document.getElementById('brier-score').innerText = rbi.brier.toFixed(4);
+            document.getElementById('win-rate').innerText = `${(rbi.win_rate * 100).toFixed(1)}%`;
+            document.getElementById('accuracy-pct').innerText = `${Math.round(rbi.accuracy * 100)}%`;
+            document.getElementById('accuracy-fill').style.width = `${rbi.accuracy * 100}%`;
 
             // Forecast Positions
             const forecastList = document.getElementById('forecast-list');
-            if (data.forecast.positions.length > 0) {
-                forecastList.innerHTML = data.forecast.positions.map(p => {
-                    // Format Entry Time
-                    let entryDisplay = 'N/A';
-                    if (p.entered_at && p.entered_at !== 'Unknown') {
-                        try {
-                            const d = new Date(p.entered_at);
-                            entryDisplay = d.toLocaleString([], {month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'});
-                        } catch(e) { entryDisplay = p.entered_at; }
-                    }
-                    
+            const positions = data.forecast.positions || [];
+            document.getElementById('active-count').innerText = `${positions.length} Position${positions.length === 1 ? '' : 's'}`;
+            
+            let activeRiskTotal = 0;
+            if (positions.length > 0) {
+                forecastList.innerHTML = positions.map(p => {
+                    const cost = (p.qty || 0) * (p.entry || 0.50);
+                    activeRiskTotal += cost;
+
                     return `
-                    <div class="glass-panel p-5 border-l-4 border-l-purple-500 bg-purple-900/5">
+                    <div class="glass-panel p-5 border-l-4 border-l-purple-500 bg-purple-900/5 hover:bg-purple-900/10 transition-colors">
                         <div class="flex justify-between items-start mb-4">
                             <div class="flex-1 pr-4">
-                                <p class="text-sm font-bold text-white leading-snug">${p.title}</p>
-                                <div class="flex items-center space-x-3 mt-1">
-                                    <p class="text-[10px] text-purple-400 font-bold uppercase tracking-widest">${p.symbol}</p>
-                                    <p class="text-[9px] text-slate-500 font-medium">Entered: ${entryDisplay}</p>
-                                </div>
+                                <p class="text-[10px] text-purple-400 font-black uppercase tracking-[0.2em] mb-1">${p.symbol}</p>
+                                <p class="text-sm font-bold text-white leading-tight h-10 overflow-hidden">${p.title || 'Weather Prediction'}</p>
                             </div>
                             <div class="text-right">
-                                <p class="text-[10px] text-slate-500 font-bold uppercase leading-none">Position P/L</p>
+                                <p class="text-[9px] text-slate-500 font-bold uppercase leading-none mb-1">Unrealized</p>
                                 <p class="text-lg font-black ${p.pnl >= 0 ? 'text-green-400' : 'text-red-400'}">
                                     ${p.pnl >= 0 ? '+' : ''}$${p.pnl.toFixed(2)}
                                 </p>
                             </div>
                         </div>
-                        <div class="grid grid-cols-4 gap-4 items-center">
-                            <div><p class="text-[9px] text-slate-500 font-black uppercase leading-none">Prob.</p><p class="text-sm font-black text-white">${Math.round(p.mark * 100)}%</p></div>
-                            <div><p class="text-[9px] text-slate-500 font-black uppercase leading-none">Expires</p><p class="text-sm font-black text-blue-400">${p.countdown}</p></div>
-                            <div><p class="text-[9px] text-slate-500 font-black uppercase leading-none">Max Win</p><p class="text-sm font-black text-green-500">+$${p.potential.toFixed(2)}</p></div>
-                            <div class="text-right"><span class="text-[10px] px-2 py-1 bg-slate-800 rounded font-black text-slate-300 uppercase">${p.sentiment}</span></div>
+                        <div class="grid grid-cols-3 gap-2">
+                            <div class="stat-card p-2 rounded-lg text-center">
+                                <p class="text-[8px] text-slate-500 font-black uppercase">Contracts</p>
+                                <p class="text-xs font-black text-white">${p.qty}</p>
+                            </div>
+                            <div class="stat-card p-2 rounded-lg text-center">
+                                <p class="text-[8px] text-slate-500 font-black uppercase">Prob.</p>
+                                <p class="text-xs font-black text-blue-400">${Math.round(p.mark * 100)}%</p>
+                            </div>
+                            <div class="stat-card p-2 rounded-lg text-center">
+                                <p class="text-[8px] text-slate-500 font-black uppercase">Max Win</p>
+                                <p class="text-xs font-black text-green-500">+$${p.potential.toFixed(2)}</p>
+                            </div>
                         </div>
                     </div>
                 `;}).join('');
             } else {
-                forecastList.innerHTML = `<div class="py-10 text-center glass-panel border-dashed opacity-50"><p class="text-sm font-bold text-slate-500 uppercase tracking-widest">Monitoring Macro Events</p></div>`;
+                forecastList.innerHTML = `<div class="col-span-full py-12 text-center glass-panel border-dashed opacity-50"><p class="text-sm font-bold text-slate-500 uppercase tracking-widest italic">Awaiting GFS Ensemble Signals</p></div>`;
             }
+            document.getElementById('active-risk').innerText = `$${activeRiskTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
 
-            // Live Hunt
-            const huntList = document.getElementById('hunt-list');
-            if (data.live_hunt.length > 0) {
-                huntList.innerHTML = data.live_hunt.map(h => `
-                    <div class="flex justify-between items-center p-2 rounded-lg bg-black/20 border border-slate-800">
-                        <div>
-                            <span class="text-xs font-black text-white mr-2">${h.symbol}</span>
-                            <span class="text-[9px] font-bold text-slate-500 uppercase">${h.direction}</span>
+            // Hub Exposure
+            const hubList = document.getElementById('hub-list');
+            const hubs = data.forecast.hubs || {};
+            if (Object.keys(hubs).length > 0) {
+                hubList.innerHTML = Object.entries(hubs).map(([hub, exposure]) => {
+                    const pct = Math.min(100, (exposure / 40) * 100); // $40 cap from philosophy
+                    const color = pct > 80 ? 'bg-red-500' : (pct > 50 ? 'bg-yellow-500' : 'bg-green-500');
+                    return `
+                    <div class="space-y-1.5">
+                        <div class="flex justify-between text-[10px] font-bold uppercase">
+                            <span class="text-slate-300">${hub}</span>
+                            <span class="${pct > 80 ? 'text-red-400' : 'text-slate-500'}">$${exposure.toFixed(2)} / $40</span>
                         </div>
-                        <div class="text-right">
-                            <p class="text-[9px] font-bold text-blue-400 uppercase leading-none">${h.score.toFixed(1)} Score</p>
-                            <p class="text-[8px] text-slate-600 mt-1">${h.reason.substring(0, 25)}</p>
-                        </div>
+                        <div class="gauge-bar"><div class="gauge-fill ${color}" style="width: ${pct}%"></div></div>
                     </div>
-                `).join('');
+                `;}).join('');
+            } else {
+                hubList.innerHTML = `<p class="text-[10px] text-slate-600 italic text-center py-4">No active hub concentration</p>`;
             }
 
             // Logs
             const logList = document.getElementById('log-list');
-            if (data.events.length > 0) {
+            if (data.events && data.events.length > 0) {
                 logList.innerHTML = data.events.map(e => {
-                    const color = e.level === 'ERROR' ? 'text-red-400' : (e.level === 'WARNING' ? 'text-yellow-500' : 'text-slate-400');
-                    return `<div class="mb-1"><span class="text-slate-600 mr-2">[${e.ts.split(' ')[1]}]</span><span class="${color}">${e.message}</span></div>`;
+                    const color = e.level === 'ERROR' || e.level === 'CRITICAL' ? 'text-red-400' : (e.level === 'WARNING' ? 'text-yellow-500' : 'text-slate-400');
+                    const ts = e.ts ? e.ts.split(' ')[1] || e.ts : '00:00:00';
+                    return `<div class="flex items-start"><span class="text-slate-600 mr-2 shrink-0">[${ts}]</span><span class="${color} break-words">${e.message}</span></div>`;
                 }).join('');
             }
         };
 
         eventSource.onerror = function() {
-            document.getElementById('sys-status').innerText = '● Connection Offline';
+            document.getElementById('sys-status').innerText = '● HUB Disconnected';
             document.getElementById('sys-status').className = 'text-red-500';
         };
     </script>

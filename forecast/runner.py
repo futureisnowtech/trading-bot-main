@@ -349,6 +349,11 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
             )
 
             broker = _get_broker()
+            if broker.is_connected():
+                try:
+                    broker.sync_positions()
+                except Exception as exc:
+                    logger.warning("[ForecastRunner] Broker position sync failed before eval: %s", exc)
             
             # ADVERSARY FIX #7: Dynamic Bankroll Fetch
             # Anchoring to startup balance throws off Kelly risk math.
@@ -634,6 +639,12 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                             entry_result.get("status"),
                             entry_result.get("order_id"),
                         )
+                        if entry_result.get("status") == "too_many_requests":
+                            logger.warning(
+                                "[ForecastRunner] Kalshi rate limit hit after %s; halting new entries until next cycle.",
+                                contract.get("local_symbol"),
+                            )
+                            break
                 except Exception as e:
                     logger.error(
                         f"[ForecastRunner] Entry failed for {contract.get('local_symbol')}: {e}"
@@ -656,6 +667,11 @@ def run_position_monitor() -> None:
     try:
         broker = _get_broker()
         if not broker.is_connected():
+            return
+        try:
+            broker.sync_positions()
+        except Exception as exc:
+            logger.warning("[ForecastRunner] Broker position sync failed before monitor: %s", exc)
             return
 
         # 1. Pull Current Broker Reality

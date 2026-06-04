@@ -33,6 +33,11 @@ from logging_db.trade_logger import log_event, log_trade
 
 logger = logging.getLogger(__name__)
 
+_KALSHI_MIN_PRICE_CENTS = 1
+_KALSHI_MAX_PRICE_CENTS = 99
+_KALSHI_MARKETABLE_ENTRY_CENTS = 99
+_KALSHI_MARKETABLE_EXIT_CENTS = 1
+
 # ── Credentials ───────────────────────────────────────────────────────────────
 KALSHI_PRIVATE_KEY_PATH = os.getenv("KALSHI_PRIVATE_KEY_PATH", "").strip()
 KALSHI_API_BASE = "https://external-api.kalshi.com"
@@ -112,6 +117,35 @@ class KalshiBroker:
 
     def is_connected(self) -> bool:
         return self._connected and self._private_key is not None
+
+    def sync_positions(self) -> None:
+        """Refresh local position cache from broker reality."""
+        self._sync_positions()
+
+    def _normalize_price_cents(self, price: float) -> int:
+        cents = int(round(float(price) * 100))
+        return max(_KALSHI_MIN_PRICE_CENTS, min(_KALSHI_MAX_PRICE_CENTS, cents))
+
+    def _extract_error_code(self, resp: dict) -> str:
+        error = resp.get("error")
+        if isinstance(error, dict):
+            return str(error.get("code") or "error")
+        if error:
+            return str(error)
+        return ""
+
+    def _extract_average_fill_price(self, order_info: dict) -> float:
+        for key in ("average_price", "average_fill_price", "price"):
+            raw = order_info.get(key)
+            if raw in (None, ""):
+                continue
+            try:
+                if isinstance(raw, str) and "." in raw:
+                    return float(raw)
+                return float(raw) / 100.0
+            except (TypeError, ValueError):
+                continue
+        return 0.0
 
     def _request(self, method: str, path: str, params: dict = None, body: dict = None) -> dict:
         """Execute signed Kalshi V2 request."""
@@ -439,30 +473,45 @@ class KalshiBroker:
         ticker = contract_dict["local_symbol"]
         side = "yes" if contract_dict["right"] == "C" else "no"
         order_type = kwargs.get("type", "limit").lower()
+        limit_cents = self._normalize_price_cents(limit_price)
         
         body = {
             "ticker": ticker,
             "action": "buy",
             "side": side,
             "count": int(qty),
-            "type": order_type,
             "client_order_id": str(uuid.uuid4()),
         }
 
-        if order_type == "limit":
-            limit_cents = int(round(limit_price * 100))
+        if order_type == "market":
+            # Kalshi now only supports limit-style writes. Emulate market intent
+            # with a marketable limit plus a hard max-cost cap.
+            aggressive_cents = _KALSHI_MARKETABLE_ENTRY_CENTS
+            buy_cap_cents = min(_KALSHI_MAX_PRICE_CENTS, limit_cents + 1)
+            body["buy_max_cost"] = int(qty) * buy_cap_cents
+            body["time_in_force"] = "fill_or_kill"
+            if side == "yes":
+                body["yes_price"] = aggressive_cents
+            else:
+                body["no_price"] = aggressive_cents
+        else:
             if side == "yes":
                 body["yes_price"] = limit_cents
             else:
                 body["no_price"] = limit_cents
         
         resp = self._request("POST", "/trade-api/v2/portfolio/orders", body=body)
+        error_code = self._extract_error_code(resp)
+        if error_code:
+            logger.error(f"Order failed or rejected: {resp}")
+            return {"order_id": "ERR", "status": error_code, "error": resp.get("error")}
+
         order_info = resp.get("order", {})
         status = order_info.get("status")
         
         # SRE FIX: Await legitimate fills. No more $0.00 ghost trades.
         if status == "executed":
-            fill_price = float(order_info.get("average_price", 0.0)) / 100.0
+            fill_price = self._extract_average_fill_price(order_info)
             order_id = order_info.get("order_id", "ERR")
             
             print(f"[KalshiBroker] BUY {qty} {ticker} ({side.upper()}) @ {fill_price:.4f} | ID={order_id}")
@@ -527,21 +576,33 @@ class KalshiBroker:
             "action": "sell",
             "side": side,
             "count": int(qty),
-            "type": order_type,
             "client_order_id": str(uuid.uuid4()),
         }
 
-        if order_type == "limit":
-            limit_cents = int(round(limit_price * 100))
-            if side == "yes": body["yes_price"] = limit_cents
-            else: body["no_price"] = limit_cents
+        limit_cents = self._normalize_price_cents(limit_price)
+        if order_type == "market":
+            if side == "yes":
+                body["yes_price"] = _KALSHI_MARKETABLE_EXIT_CENTS
+            else:
+                body["no_price"] = _KALSHI_MARKETABLE_EXIT_CENTS
+            body["time_in_force"] = "fill_or_kill"
+        else:
+            if side == "yes":
+                body["yes_price"] = limit_cents
+            else:
+                body["no_price"] = limit_cents
 
         resp = self._request("POST", "/trade-api/v2/portfolio/orders", body=body)
+        error_code = self._extract_error_code(resp)
+        if error_code:
+            logger.error(f"Order failed or rejected: {resp}")
+            return {"order_id": "ERR", "status": error_code, "error": resp.get("error")}
+
         order_info = resp.get("order", {})
         status = order_info.get("status")
 
         if status == "executed":
-            exit_price = float(order_info.get("average_price", 0.0)) / 100.0
+            exit_price = self._extract_average_fill_price(order_info)
             order_id = order_info.get("order_id", "ERR")
             print(f"[KalshiBroker] SELL {qty} {ticker} @ {exit_price:.4f} | ID={order_id}")
             
@@ -609,29 +670,37 @@ class KalshiBroker:
             "action": "sell",
             "side": side,
             "count": int(qty),
-            "type": "market",
             "client_order_id": str(uuid.uuid4()),
+            "time_in_force": "fill_or_kill",
         }
         if side == "yes":
-            body["yes_price"] = 1
+            body["yes_price"] = _KALSHI_MARKETABLE_EXIT_CENTS
         else:
-            body["no_price"] = 1
+            body["no_price"] = _KALSHI_MARKETABLE_EXIT_CENTS
         
         pos_info = self._open_positions.get(key, {})
         entry_price = float(pos_info.get("entry_price") or pos_info.get("entry") or 0.50)
 
         try:
             resp = self._request("POST", "/trade-api/v2/portfolio/orders", body=body)
+            error_code = self._extract_error_code(resp)
+            if error_code:
+                logger.error(f"Order failed or rejected: {resp}")
+                return {
+                    "order_id": "ERR",
+                    "status": error_code,
+                    "flattened_qty": qty,
+                    "exit_price": 0.0,
+                    "entry_price": entry_price,
+                    "pnl_usd": 0.0,
+                }
+
             order_info = resp.get("order", {})
             order_id = order_info.get("order_id") or resp.get("order_id", "ERR")
             status = order_info.get("status")
 
             if status == "executed":
-                exit_price = (
-                    float(order_info.get("average_price", 0.0)) / 100.0
-                    if order_info.get("average_price") is not None
-                    else float(order_info.get("price", 0.0)) / 100.0
-                )
+                exit_price = self._extract_average_fill_price(order_info)
                 pnl_usd = (exit_price - entry_price) * qty if exit_price > 0 else 0.0
                 self._open_positions.pop(key, None)
 

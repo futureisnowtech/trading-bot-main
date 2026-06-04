@@ -1,6 +1,7 @@
 # CHANGELOG
 
 ## 2026-06-04
+- Fixed live Kalshi entry execution by converting taker-override "market" intents into legal marketable limit orders with hard `buy_max_cost` caps, surfacing broker rate-limit codes back to the runner, and syncing broker positions before strategy/monitor passes.
 - Fixed a live trade blocker in `forecast.strategy_engine._hours_to_resolution()`: ISO Kalshi expiry timestamps were being parsed as `0.0` hours remaining, falsely triggering `RESOLUTION_HORIZON_TOO_SHORT` on otherwise valid weather setups.
 - Fixed the Telegram Oracle Gemini handshake by removing the retired hardcoded `gemini-2.0-flash` model and routing Oracle requests through the repo-configured stable Gemini model.
 - Added `scripts/gate_audit.py` plus proof coverage so market-reality vetoes and shadow-passed entries can be audited in one command.

@@ -78,3 +78,41 @@ def test_broker_surfaces_rate_limit_status(monkeypatch):
     )
 
     assert result["status"] == "too_many_requests"
+
+
+def test_fill_price_falls_back_to_total_cost_per_share():
+    broker = _connected_broker()
+
+    fill_price = broker._extract_average_fill_price(
+        {
+            "fill_count_fp": "43.00",
+            "taker_fill_cost_dollars": "6.880000",
+        }
+    )
+
+    assert fill_price == 0.16
+
+
+def test_sync_positions_preserves_cost_basis(monkeypatch):
+    broker = _connected_broker()
+
+    monkeypatch.setattr(
+        broker,
+        "_request",
+        lambda method, path, params=None, body=None: {
+            "market_positions": [
+                {
+                    "ticker": "KXHIGHLAX-26JUN05-B69.5",
+                    "position_fp": "43.00",
+                    "total_traded_dollars": "6.880000",
+                }
+            ]
+        },
+    )
+
+    broker.sync_positions()
+    pos = broker.get_position("KXHIGHLAX-26JUN05-B69.5", "C")
+
+    assert pos is not None
+    assert pos["qty"] == 43.0
+    assert pos["entry_price"] == 0.16

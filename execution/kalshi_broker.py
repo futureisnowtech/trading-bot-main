@@ -145,7 +145,67 @@ class KalshiBroker:
                 return float(raw) / 100.0
             except (TypeError, ValueError):
                 continue
+        fill_count = self._extract_fill_count(order_info)
+        if fill_count > 0:
+            for key in ("taker_fill_cost_dollars", "maker_fill_cost_dollars"):
+                raw = order_info.get(key)
+                if raw in (None, ""):
+                    continue
+                try:
+                    total_cost = float(raw)
+                    if total_cost > 0:
+                        return total_cost / fill_count
+                except (TypeError, ValueError):
+                    continue
         return 0.0
+
+    def _extract_fill_count(self, order_info: dict) -> float:
+        for key in ("fill_count_fp", "fill_count"):
+            raw = order_info.get(key)
+            if raw in (None, ""):
+                continue
+            try:
+                return float(raw)
+            except (TypeError, ValueError):
+                continue
+        return 0.0
+
+    def _extract_total_fees(self, order_info: dict, qty: int) -> float:
+        total = 0.0
+        found = False
+        for key in ("taker_fees_dollars", "maker_fees_dollars"):
+            raw = order_info.get(key)
+            if raw in (None, ""):
+                continue
+            try:
+                total += float(raw)
+                found = True
+            except (TypeError, ValueError):
+                continue
+        if found:
+            return total
+
+        avg_fee = order_info.get("average_fee_paid")
+        fill_count = self._extract_fill_count(order_info) or float(qty)
+        if avg_fee not in (None, "") and fill_count > 0:
+            try:
+                return float(avg_fee) * fill_count
+            except (TypeError, ValueError):
+                pass
+        return KALSHI_FEE_PER_CONTRACT * qty
+
+    def _hydrate_order_details(self, order_info: dict) -> dict:
+        order_id = str(order_info.get("order_id") or "").strip()
+        if not order_id:
+            return order_info
+        try:
+            details = self._request("GET", f"/trade-api/v2/portfolio/orders/{order_id}")
+            hydrated = details.get("order", {})
+            if isinstance(hydrated, dict) and hydrated:
+                return hydrated
+        except Exception:
+            pass
+        return order_info
 
     def _request(self, method: str, path: str, params: dict = None, body: dict = None) -> dict:
         """Execute signed Kalshi V2 request."""
@@ -214,14 +274,16 @@ class KalshiBroker:
                 side = "YES" if qty > 0 else "NO"
                 right = "C" if side == "YES" else "P"
                 abs_qty = abs(qty)
+                total_traded = float(p.get("total_traded_dollars") or 0.0)
+                entry_price = (total_traded / abs_qty) if abs_qty > 0 and total_traded > 0 else 0.0
 
                 key = f"{ticker}_{right}"
                 self._open_positions[key] = {
                     "local_symbol": ticker,
                     "right": right,
                     "qty": abs_qty,
-                    "entry": 0.0,
-                    "entry_price": 0.0,
+                    "entry": entry_price,
+                    "entry_price": entry_price,
                     "side": side,
                     "forecast_yes_prob": None,
                     "order_id": "EXISTING",
@@ -511,8 +573,10 @@ class KalshiBroker:
         
         # SRE FIX: Await legitimate fills. No more $0.00 ghost trades.
         if status == "executed":
+            order_info = self._hydrate_order_details(order_info)
             fill_price = self._extract_average_fill_price(order_info)
             order_id = order_info.get("order_id", "ERR")
+            fee_usd = self._extract_total_fees(order_info, qty)
             
             print(f"[KalshiBroker] BUY {qty} {ticker} ({side.upper()}) @ {fill_price:.4f} | ID={order_id}")
             key = f"{ticker}_{contract_dict['right']}"
@@ -536,7 +600,7 @@ class KalshiBroker:
                     order_type=order_type.capitalize(),
                     qty=qty,
                     price=fill_price,
-                    fee_usd=KALSHI_FEE_PER_CONTRACT * qty,
+                    fee_usd=fee_usd,
                     order_id=order_id,
                     notes=kwargs.get("reason", ""),
                     contract_side=side.upper(),
@@ -602,8 +666,10 @@ class KalshiBroker:
         status = order_info.get("status")
 
         if status == "executed":
+            order_info = self._hydrate_order_details(order_info)
             exit_price = self._extract_average_fill_price(order_info)
             order_id = order_info.get("order_id", "ERR")
+            fee_usd = self._extract_total_fees(order_info, qty)
             print(f"[KalshiBroker] SELL {qty} {ticker} @ {exit_price:.4f} | ID={order_id}")
             
             # PnL Calc
@@ -621,7 +687,7 @@ class KalshiBroker:
                     order_type=order_type.capitalize(),
                     qty=qty,
                     price=exit_price,
-                    fee_usd=KALSHI_FEE_PER_CONTRACT * qty,
+                    fee_usd=fee_usd,
                     pnl_usd=pnl_usd,
                     order_id=order_id,
                     notes=kwargs.get("reason", ""),
@@ -700,7 +766,9 @@ class KalshiBroker:
             status = order_info.get("status")
 
             if status == "executed":
+                order_info = self._hydrate_order_details(order_info)
                 exit_price = self._extract_average_fill_price(order_info)
+                fee_usd = self._extract_total_fees(order_info, qty)
                 pnl_usd = (exit_price - entry_price) * qty if exit_price > 0 else 0.0
                 self._open_positions.pop(key, None)
 
@@ -713,7 +781,7 @@ class KalshiBroker:
                         order_type="Market",
                         qty=qty,
                         price=exit_price,
-                        fee_usd=KALSHI_FEE_PER_CONTRACT * qty,
+                        fee_usd=fee_usd,
                         pnl_usd=pnl_usd,
                         order_id=order_id,
                         notes=kwargs.get("reason", "salvage_exit"),

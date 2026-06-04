@@ -57,7 +57,7 @@ def get_system_vitals() -> Dict[str, Any]:
         vitals["ram"] = psutil.virtual_memory().percent
         
         # Mode from DB
-        with sqlite3.connect(DB_PATH) as conn:
+        with sqlite3.connect(DB_PATH, timeout=30.0) as conn:
             row = conn.execute("SELECT startup_ts FROM system_runtime_state ORDER BY id DESC LIMIT 1").fetchone()
             if row:
                 upt = time.time() - float(row[0] or time.time())
@@ -97,7 +97,7 @@ def get_kalshi_state() -> Dict[str, Any]:
             cost = p.get("qty", 0) * p.get("entry_price", 0)
             state["hubs"][hub] = state["hubs"].get(hub, 0.0) + cost
             
-        with sqlite3.connect(DB_PATH) as conn:
+        with sqlite3.connect(DB_PATH, timeout=30.0) as conn:
             row = conn.execute("SELECT COUNT(*) FROM forecast_markets WHERE active=1").fetchone()
             state["active_markets"] = row[0] if row else 0
             

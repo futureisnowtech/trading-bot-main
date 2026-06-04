@@ -85,6 +85,14 @@ def proof_runtime(tmp_path, monkeypatch) -> ProofRuntime:
     monkeypatch.setattr(config, "ACCOUNT_SIZE", 5_000.0, raising=False)
     monkeypatch.setattr(config, "False", True, raising=False)
 
+    existing_conn = getattr(trade_logger, "_DB_CONN", None)
+    if existing_conn is not None:
+        try:
+            existing_conn.close()
+        except Exception:
+            pass
+    monkeypatch.setattr(trade_logger, "_DB_CONN", None, raising=False)
+    monkeypatch.setattr(trade_logger, "_DB_CONN_PATH", None, raising=False)
     monkeypatch.setattr(trade_logger, "DB_PATH", str(db_path), raising=False)
     monkeypatch.setattr(trade_logger, "CSV_LOG_DIR", str(csv_dir), raising=False)
     monkeypatch.setattr(trade_logger, "_LOGGER_HANDLE", None, raising=False)
@@ -115,4 +123,12 @@ def proof_runtime(tmp_path, monkeypatch) -> ProofRuntime:
             handle.conn.close()
         except Exception:
             pass
+    db_conn = getattr(trade_logger, "_DB_CONN", None)
+    if db_conn is not None:
+        try:
+            db_conn.close()
+        except Exception:
+            pass
+    monkeypatch.setattr(trade_logger, "_DB_CONN", None, raising=False)
+    monkeypatch.setattr(trade_logger, "_DB_CONN_PATH", None, raising=False)
     monkeypatch.setattr(trade_logger, "_LOGGER_HANDLE", None, raising=False)

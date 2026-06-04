@@ -1,5 +1,5 @@
 """
-forecast/strategy_engine.py — ForecastEx strategy families + economics gate + sizing.
+forecast/strategy_engine.py — Kalshi weather strategy families + economics gate + sizing.
 
 Three strategy families (v1):
   continuation    — trend is likely to continue toward resolution
@@ -45,6 +45,7 @@ from config import (
     KALSHI_DATA_FRESHNESS_MINUTES,
     KALSHI_FEE_PER_CONTRACT,
     KALSHI_MAX_FEE_DRAG_PCT,
+    KALSHI_MAX_USD_PER_POSITION,
 )
 from forecast.primitives import (
     DEFAULT_ALPHA,
@@ -60,6 +61,7 @@ from forecast.primitives import (
     compute_q_hat,
     contracts_from_fraction,
     entropy,
+    fractional_kelly_fraction,
     kalshi_absolute_sizing,
     log_odds,
     log_odds_vol,
@@ -119,6 +121,23 @@ KELLY_CAP: float = KALSHI_KELLY_CAP
 MAX_DEPLOYED_PCT: float = KALSHI_MAX_DEPLOYED_PCT
 MAX_RISK_PER_EVENT_PCT: float = KALSHI_MAX_RISK_PER_EVENT_PCT
 MAX_CONCURRENT_POSITIONS: int = KALSHI_MAX_CONCURRENT_POSITIONS
+
+_HARD_ECON_VETO_PREFIXES: tuple[str, ...] = (
+    "MAX_CAPITAL_EXCEEDED",
+    "RESOLUTION_HORIZON_TOO_SHORT",
+    "too_far_from_resolution",
+    "concurrent_cap_reached",
+    "overround_too_high",
+    "spread_too_wide",
+    "spread_ratio_veto",
+    "market_truth_veto",
+    "market_near_certainty",
+    "entropy_too_high",
+    "sigma_too_high",
+    "parity_gap_too_large",
+    "fee_drag_veto",
+    "longshot_bias_gate",
+)
 
 MACRO_CACHE_FILE = "logs/cached_macro_regime.json"
 
@@ -341,6 +360,14 @@ def _economics_gate(
         return (
             False,
             f"too_far_from_resolution ({hours_to_resolution:.1f}h > {MAX_HOURS_TO_RES}h)",
+            0.0,
+            0.0,
+        )
+
+    if open_positions_count >= MAX_CONCURRENT_POSITIONS:
+        return (
+            False,
+            f"concurrent_cap_reached ({open_positions_count}/{MAX_CONCURRENT_POSITIONS})",
             0.0,
             0.0,
         )
@@ -603,7 +630,7 @@ def _strategy_late_repricing(
         return False, "", 0.0, [f"insufficient_4h_movement (v4h={v_4h:.3f})"]
 
     # Time window: specifically for late repricing (2h–72h window)
-    if hours_to_res > 72.0 or hours_to_res < MIN_HOURS_TO_RES:
+    if hours_to_res > 72.0 or hours_to_res < 2.0:
         return False, "", 0.0, [f"outside_late_repricing_window ({hours_to_res:.1f}h)"]
 
     # Parity distortion must be low
@@ -633,37 +660,41 @@ def _strategy_late_repricing(
 # ── Main entry point ───────────────────────────────────────────────────────────
 
 
-from data.kalshi_weather_monitor import get_weather_data
+def get_weather_data(ticker: str):
+    """Lazy import so proof collection is not sensitive to sys.path order."""
+    from data.kalshi_weather_monitor import get_weather_data as _get_weather_data
+
+    return _get_weather_data(ticker)
 
 def calculate_continuous_sizing(market_price: float, ensemble_prob: float, capital_base: float, multiplier: float = 1.0, cap_pct: float = 0.10, conv_tier: int = 3) -> int:
-    """Logistic Sigmoid mapping for high-aggression position sizing (v19.1.4)."""
-    # Ensure prob is clipped
+    """Fee-adjusted binary-market sizing with hard bankroll and USD caps."""
     ensemble_prob = max(0.01, min(0.99, ensemble_prob))
-    edge = ensemble_prob - market_price
-    if edge < 0.08:  # 8% Edge Floor Veto
+    market_price = max(0.01, min(0.99, market_price))
+    effective_cost = min(0.99, market_price + KALSHI_FEE_PER_CONTRACT)
+
+    if ensemble_prob <= effective_cost or capital_base <= 0:
         return 0
 
-    # Logistic Sigmoid mapping for soft-veto position sizing
-    # v19.1.4: High-aggression scaling (sharp sigmoid at 12% edge)
-    scaling_factor = 1 / (1 + np.exp(-15 * (edge - 0.12)))
+    fraction = fractional_kelly_fraction(
+        q_side=ensemble_prob,
+        p_cost=effective_cost,
+        confidence_multiplier=max(0.25, float(multiplier)),
+        kelly_cap=cap_pct,
+    )
+    qty = contracts_from_fraction(
+        fraction=fraction,
+        bankroll=capital_base,
+        p_cost=market_price,
+        per_event_cap_pct=cap_pct,
+        deployed_pct=0.0,
+        max_deployed_pct=1.0,
+        fee_per_contract=KALSHI_FEE_PER_CONTRACT,
+    )
+    total_cash_per_contract = market_price + KALSHI_FEE_PER_CONTRACT
+    if total_cash_per_contract > 0:
+        qty = min(qty, int(KALSHI_MAX_USD_PER_POSITION / total_cash_per_contract))
 
-    # v19.1.12: Tightened Sovereign Cap — default 10% of bankroll for weather
-    # v19.6: Dynamic Cap — 10%, 15%, or 20% based on Conviction Tier
-    # Multiplier (Convergence/Sigma) applied to final allocated capital
-    allocated_capital = capital_base * cap_pct * scaling_factor * multiplier
-
-    # SRE FIX: Hard-lock the sizing ceiling
-    try:
-        from config import KALSHI_MAX_USD_PER_POSITION
-        ceiling = float(KALSHI_MAX_USD_PER_POSITION)
-    except ImportError:
-        ceiling = 10.0
-        
-    if allocated_capital > ceiling:
-        allocated_capital = ceiling
-
-    qty = int(allocated_capital / market_price) if market_price > 0 else 0
-    return qty
+    return max(0, qty)
 
 import re
 
@@ -702,7 +733,9 @@ def _parse_weather_threshold(ticker: str) -> Optional[float]:
             
     return None
 
-def _strategy_weather(ticker: str, ask_yes: float, ask_no: float, hours_to_res: float) -> tuple[bool, str, float, list[str], bool]:
+def _strategy_weather_details(
+    ticker: str, ask_yes: float, ask_no: float, hours_to_res: float
+) -> tuple[bool, str, float, list[str], bool, float, int, float]:
     """
     v19.1.10: Sovereign Alpha Blueprint.
     1. Multi-Model Convergence (GFS + ECMWF)
@@ -776,7 +809,9 @@ def _strategy_weather(ticker: str, ask_yes: float, ask_no: float, hours_to_res: 
             ai_val = members_ai[0] # Deterministic
             # If AI value is on the wrong side of our bet, increase Sigma (uncertainty)
             # If AI is on our side, tighten Sigma (conviction)
-            ensemble_mean = float(np.mean(members_gfs + (members_ec if prob_ecmwf else [])))
+            ensemble_mean = float(
+                np.mean(members_gfs + (members_ec if prob_ecmwf is not None else []))
+            )
             ai_divergence = abs(ai_val - ensemble_mean)
             
             # Scale uncertainty based on AI disagreement
@@ -798,13 +833,15 @@ def _strategy_weather(ticker: str, ask_yes: float, ask_no: float, hours_to_res: 
     if prob_ecmwf is not None:
         # High Conviction: GFS & EC agree (>75%)
         if prob_gfs > 0.75 and prob_ecmwf > 0.75:
-            convergence_multiplier = 1.6
-            logger.info(f"Sovereign Convergence: {ticker} GFS={prob_gfs:.1%} EC={prob_ecmwf:.1%} -> 1.6x")
+            convergence_multiplier = 1.5
+            logger.info(
+                f"Sovereign Convergence: {ticker} GFS={prob_gfs:.1%} EC={prob_ecmwf:.1%} -> 1.5x"
+            )
         # Veto if catastrophic divergence (>50% gap)
         gap = abs(prob_gfs - prob_ecmwf)
         if gap > 0.5:
              logger.warning(f"Sovereign Divergence Veto: {ticker} GFS={prob_gfs:.1%} EC={prob_ecmwf:.1%} -> VETO")
-             return False, "", 0.0, ["model_catastrophic_divergence"], False, 1.0, 3, 0.05
+             return False, "", 0.0, ["model_divergence_veto"], False, 1.0, 3, 0.05
 
     ensemble_prob = max(0.03, min(0.97, ensemble_prob))
     edge_yes = ensemble_prob - ask_yes
@@ -825,7 +862,16 @@ def _strategy_weather(ticker: str, ask_yes: float, ask_no: float, hours_to_res: 
     # v19.5: Sovereign Survival — Hard Sigma Veto
     if sigma > KALSHI_MAX_SIGMA:
         logger.warning(f"Sovereign Chaos Veto: {ticker} Sigma={sigma:.1f}F > {KALSHI_MAX_SIGMA}")
-        return False, "", 0.0, [f"chaos_veto (sigma={sigma:.1f} > {KALSHI_MAX_SIGMA})"], False, 1.0
+        return (
+            False,
+            "",
+            0.0,
+            [f"chaos_veto (sigma={sigma:.1f} > {KALSHI_MAX_SIGMA})"],
+            False,
+            1.0,
+            3,
+            0.05,
+        )
 
     # sigma_mult: 1.0 at 2.0F sigma, 1.25 at 1.0F sigma, 0.5 at 4.0F sigma
     sigma_mult = max(0.3, min(1.3, 1.5 - (sigma / 4.0)))
@@ -833,9 +879,27 @@ def _strategy_weather(ticker: str, ask_yes: float, ask_no: float, hours_to_res: 
     # v19.5: Sovereign Survival — Institutional Price Floor ($0.15)
     # Never trade penny longshots.
     if ask_yes < KALSHI_MIN_PRICE and edge_yes > 0:
-        return False, "", 0.0, [f"penny_veto (ask={ask_yes:.2f} < {KALSHI_MIN_PRICE})"], False, 1.0
+        return (
+            False,
+            "",
+            0.0,
+            [f"penny_veto (ask={ask_yes:.2f} < {KALSHI_MIN_PRICE})"],
+            False,
+            1.0,
+            3,
+            0.05,
+        )
     if ask_no < KALSHI_MIN_PRICE and edge_no > 0:
-        return False, "", 0.0, [f"penny_veto (ask={ask_no:.2f} < {KALSHI_MIN_PRICE})"], False, 1.0
+        return (
+            False,
+            "",
+            0.0,
+            [f"penny_veto (ask={ask_no:.2f} < {KALSHI_MIN_PRICE})"],
+            False,
+            1.0,
+            3,
+            0.05,
+        )
 
     # Forensic Audit Log
     logger.info(f"TRACE: {ticker} | p={ensemble_prob:.1%} Edge_Y={edge_yes:.1%} Sigma={sigma:.1f}F s_mult={sigma_mult:.2f}")
@@ -847,7 +911,16 @@ def _strategy_weather(ticker: str, ask_yes: float, ask_no: float, hours_to_res: 
     # v19.1.9: Narrow Bin Veto
     if "-B" in ticker:
         if mode != "RAIN" and edge_yes < 0.25:
-             return False, "", 0.0, [f"narrow_bin_trap_edge_too_low ({edge_yes:.2f})"], False
+             return (
+                 False,
+                 "",
+                 0.0,
+                 [f"narrow_bin_trap_edge_too_low ({edge_yes:.2f})"],
+                 False,
+                 1.0,
+                 3,
+                 0.05,
+             )
 
     if edge_yes > 0.08:
         if cloud_veto:
@@ -908,6 +981,21 @@ def _strategy_weather(ticker: str, ask_yes: float, ask_no: float, hours_to_res: 
 
     return False, "", 0.0, ["insufficient_edge"], False, 1.0, 3, 0.05
 
+
+def _strategy_weather(
+    ticker: str, ask_yes: float, ask_no: float, hours_to_res: float
+) -> tuple[bool, str, float, list[str], bool]:
+    """
+    Legacy five-field wrapper kept for proof compatibility.
+
+    Runtime sizing and tier metadata now live in ``_strategy_weather_details``.
+    """
+    passes, side, ensemble_prob, factors, is_taker, sizing_multiplier, _tier, _cap = (
+        _strategy_weather_details(ticker, ask_yes, ask_no, hours_to_res)
+    )
+    legacy_confidence = ensemble_prob * sizing_multiplier if passes else 0.0
+    return passes, side, legacy_confidence, factors, is_taker
+
 def evaluate_contract(
     contract: dict,
     bars_5m: list[dict],
@@ -929,7 +1017,6 @@ def evaluate_contract(
     
     # v19.5: Sovereign Survival — Data Freshness Veto
     # Ensure ensemble data isn't stale before evaluating.
-    from data.kalshi_weather_monitor import get_weather_data
     w_data = get_weather_data(ticker)
     if w_data:
         data_ts = w_data.get("timestamp", 0)
@@ -971,8 +1058,7 @@ def evaluate_contract(
             quote_ts = datetime.fromisoformat(quote_ts_str.replace("Z", "+00:00"))
             age_seconds = (datetime.now(timezone.utc) - quote_ts).total_seconds()
             
-            # v19.1.6: Weather alpha is slow moving; allow up to 600s. 
-            # High-frequency crypto stays at 120s.
+            # Weather alpha is slow moving; allow a longer freshness window.
             is_weather = "KXHIGH" in str(contract.get("local_symbol")) or "KXLOW" in str(contract.get("local_symbol")) or "KXRAIN" in str(contract.get("local_symbol"))
             limit = 600 if is_weather else 120
             
@@ -1115,7 +1201,7 @@ def evaluate_contract(
 
     # v18.35: Weather Strategy (Ensemble-driven)
     ticker = contract.get("local_symbol", "")
-    w_res = _strategy_weather(ticker, ask_yes, ask_no, hours_to_res)
+    w_res = _strategy_weather_details(ticker, ask_yes, ask_no, hours_to_res)
     if w_res[0]: # w_passes
         # w_res = (passes, side, ensemble_prob, factors, is_taker, multiplier, tier, sizing_cap)
         strategy_candidates.append(("weather_ensemble", w_res[1], w_res[2], w_res[3], w_res[4], w_res[5], w_res[6], w_res[7]))
@@ -1176,13 +1262,15 @@ def evaluate_contract(
     # If weather passes, we override technical economics vetoes.
     if best_family == "weather_ensemble":
         p_cost = ask_yes if best_side == "YES" else ask_no
-        
-        # SRE FIX: Enforce Fee Deductions on Weather Markets
         ev_chosen = best_confidence - p_cost - KALSHI_FEE_PER_CONTRACT
-        
+        hard_econ_veto = any(
+            veto_reason.startswith(prefix) for prefix in _HARD_ECON_VETO_PREFIXES
+        )
         if ev_chosen < EV_THRESHOLD:
             approved = False
             veto_reason = f"fee_adjusted_ev_too_low ({ev_chosen:.4f} < {EV_THRESHOLD})"
+        elif hard_econ_veto:
+            approved = False
         else:
             approved = True
             veto_reason = ""
@@ -1228,6 +1316,8 @@ def evaluate_contract(
                 bankroll=bankroll,
                 max_risk_pct=KALSHI_MAX_RISK_PER_EVENT_PCT,
                 max_deploy_pct=0.10, # Individual event capital limit (increased to 10%)
+                fee_per_contract=KALSHI_FEE_PER_CONTRACT,
+                max_usd_cap=KALSHI_MAX_USD_PER_POSITION,
             )
     else:
         n_contracts, total_cost = 0, 0.0
@@ -1320,10 +1410,9 @@ def evaluate_all_contracts(
     for pos in open_positions:
         p_ticker = pos.get("local_symbol", "")
         p_hub = _get_city_hub(p_ticker) # Ensure _get_city_hub uses airport codes (e.g. 'ORD', 'JFK', 'DEN')
-        entry_price = float(pos.get("entry", 0))
-        side = str(pos.get("side", "YES")).upper()
-        # True capital at risk:
-        actual_capital_at_risk = entry_price if side == "YES" else (1.0 - entry_price)
+        entry_price = float(pos.get("entry_price") or pos.get("entry") or 0.0)
+        # For both YES and NO contracts, max loss is the premium paid plus fees.
+        actual_capital_at_risk = entry_price + KALSHI_FEE_PER_CONTRACT
         pos_usd = float(pos.get("qty", 0)) * actual_capital_at_risk
         hub_exposure[p_hub] = hub_exposure.get(p_hub, 0.0) + pos_usd
     
@@ -1461,7 +1550,13 @@ def evaluate_all_contracts(
             # Update count for the rest of the tick if approved
             if result.econ_approved and result.position_contracts > 0:
                 current_tick_counts[family] = count + 1
-                hub_exposure[hub] = current_hub_usd + (result.position_contracts * (yes_quote.get("ask") or 0.50))
+                risk_price = (
+                    yes_quote.get("ask") if result.side == "YES" else no_quote.get("ask")
+                ) or 0.50
+                hub_exposure[hub] = current_hub_usd + (
+                    result.position_contracts
+                    * (float(risk_price) + KALSHI_FEE_PER_CONTRACT)
+                )
 
             rank_score = result.ev * result.confidence if result.econ_approved else 0.0
             approved_entries.append(

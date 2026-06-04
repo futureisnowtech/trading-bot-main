@@ -1,0 +1,1 @@
+"""Forecast dashboard compatibility widgets."""

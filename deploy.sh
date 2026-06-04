@@ -1,14 +1,6 @@
 #!/bin/bash
 # -----------------------------------------------------------------------------
-# deploy.sh — Truthful NYC3 deployment script for current branch
-#
-# Safety invariants:
-#   - Refuses to deploy from a dirty worktree (uncommitted changes)
-#   - Refuses to deploy if local HEAD != origin/<current-branch>
-#   - Does NOT auto-commit or auto-push (that is the engineer's job)
-#   - Deploys the already-authored, already-pushed SHA only
-#   - Writes /home/algo-runner/bot/version.txt and /home/algo-runner/bot/deploy_manifest.json
-#     on the server as provenance markers after a successful sync
+# deploy.sh — deploy the current committed SHA to the lean Kalshi runtime
 # -----------------------------------------------------------------------------
 set -euo pipefail
 
@@ -16,20 +8,35 @@ NYC_IP="64.225.20.38"
 NYC_PORT="2222"
 NYC_USER="algo-runner"
 PROJECT_DIR="/home/${NYC_USER}/bot"
-DASHBOARD_UID="d9ecf89d-5e95-4e63-b0ae-f8008debbc0f"
-PROMETHEUS_TARGET="algo-bot-forecast:8000"
 SSH_CMD="ssh -p ${NYC_PORT} -o StrictHostKeyChecking=no"
-BRANCH=$(git branch --show-current)
+TMP_EXPORT_DIR=""
+
+cleanup() {
+    if [ -n "${TMP_EXPORT_DIR}" ] && [ -d "${TMP_EXPORT_DIR}" ]; then
+        rm -rf "${TMP_EXPORT_DIR}"
+    fi
+}
+trap cleanup EXIT
+
+BRANCH=$(git branch --show-current || true)
+if [ -z "${BRANCH}" ]; then
+    BRANCH=$(git for-each-ref --format='%(refname:short)' refs/remotes/origin --contains HEAD | sed 's#^origin/##' | grep -v '^HEAD$' | head -n 1 || true)
+fi
+if [ -z "${BRANCH}" ]; then
+    echo "ERROR: Unable to determine the origin branch for HEAD."
+    echo "       Check out a branch or set GITHUB_REF_NAME before deploying."
+    exit 1
+fi
 
 echo "Checking worktree cleanliness..."
-if ! git diff --quiet || ! git diff --cached --quiet; then
-    echo "ERROR: Worktree is dirty. Commit or stash all changes before deploying."
+if [ -n "$(git status --porcelain)" ]; then
+    echo "ERROR: Worktree is dirty or has untracked files. Deploy only from an exact committed state."
     echo "       Run: git status"
+    git status --short
     exit 1
 fi
 echo "  OK: worktree is clean."
 
-# ── Guard 2: local HEAD must match origin/feature/v10-rebuild ─────────────────
 echo "Fetching origin to verify SHA parity..."
 git fetch origin "${BRANCH}" 2>&1
 
@@ -44,24 +51,28 @@ fi
 echo "  OK: local HEAD == origin/${BRANCH} == ${LOCAL_SHA}"
 
 DEPLOY_UTC=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
-# ── Sync code to server ───────────────────────────────────────────────────────
 LOCAL_IMAGE_NAME="ghcr.io/$(git remote get-url origin | sed 's/.*github.com[:\/]\(.*\)\.git/\1/' | tr '[:upper:]' '[:lower:]')"
 
-echo "Syncing code to NYC3 via rsync (SHA: ${LOCAL_SHA})..."
+TMP_EXPORT_DIR=$(mktemp -d "${TMPDIR:-/tmp}/kalshi-deploy.XXXXXX")
+
+echo "Exporting exact committed tree for SHA ${LOCAL_SHA}..."
+git archive --format=tar "${LOCAL_SHA}" | tar -xf - -C "${TMP_EXPORT_DIR}"
+echo "  OK: committed tree exported to ${TMP_EXPORT_DIR}"
+
+echo "Syncing exact committed tree to droplet (SHA: ${LOCAL_SHA})..."
 rsync -avz \
+    --delete \
     -e "ssh -p ${NYC_PORT} -o StrictHostKeyChecking=no" \
-    --exclude '.git' \
-    --exclude '__pycache__' \
+    --exclude '.env' \
     --exclude 'logs' \
+    --exclude 'version.txt' \
+    --exclude 'deploy_manifest.json' \
+    --exclude '__pycache__' \
     --exclude '.pytest_cache' \
     --exclude '*.pyc' \
-    --exclude 'sop_state.generated.js' \
-    --exclude '.env' \
-    . "${NYC_USER}@${NYC_IP}:${PROJECT_DIR}/"
+    "${TMP_EXPORT_DIR}/" "${NYC_USER}@${NYC_IP}:${PROJECT_DIR}/"
 
-# ── Server-side: restart stack and provision ─────────────────────────────────
-echo "Restarting Docker stack on NYC3..."
+echo "Restarting lean Docker stack on droplet..."
 ${SSH_CMD} ${NYC_USER}@${NYC_IP} bash -s << REMOTE_EOF
 set -euo pipefail
 cd ${PROJECT_DIR}
@@ -70,19 +81,17 @@ export IMAGE_NAME="${LOCAL_IMAGE_NAME}"
 
 echo "  Attempting to pull latest images from GHCR..."
 if ! docker compose pull; then
-    echo "  WARNING: GHCR pull failed (denied or not found). Falling back to local build..."
+    echo "  WARNING: GHCR pull failed. Falling back to local build..."
     docker compose build
 fi
 
 echo "  Hot-reloading services..."
 docker compose up -d --remove-orphans
 
-echo "  Waiting for health check..."
+echo "  Waiting for containers..."
 sleep 15
-docker ps | grep algo-bot-forecast
-
-echo "  Finalizing Grafana provisioning..."
-docker exec algo-bot-forecast python3 provision_grafana_final.py
+docker ps | grep execution-engine
+docker ps | grep telegram-oracle
 
 echo "  Writing provenance markers..."
 cat > ${PROJECT_DIR}/version.txt << VTXT
@@ -92,13 +101,12 @@ deployed_at_utc=${DEPLOY_UTC}
 VTXT
 
 python3 - << PYEOF
-import json, datetime
+import json
 manifest = {
     "sha": "${LOCAL_SHA}",
     "branch": "${BRANCH}",
     "deployed_at_utc": "${DEPLOY_UTC}",
-    "dashboard_uid": "${DASHBOARD_UID}",
-    "prometheus_target": "${PROMETHEUS_TARGET}"
+    "services": ["execution-engine", "telegram-oracle"],
 }
 with open("${PROJECT_DIR}/deploy_manifest.json", "w") as f:
     json.dump(manifest, f, indent=2)
@@ -107,17 +115,7 @@ PYEOF
 
 echo "  version.txt contents:"
 cat ${PROJECT_DIR}/version.txt
-
 REMOTE_EOF
-
-echo "Refreshing local SOP live snapshot..."
-SOP_BRANCH="${BRANCH}" \
-SOP_DEPLOYED_SHA="${LOCAL_SHA}" \
-SOP_DEPLOYED_AT_UTC="${DEPLOY_UTC}" \
-SOP_DASHBOARD_UID="${DASHBOARD_UID}" \
-SOP_PROMETHEUS_TARGET="${PROMETHEUS_TARGET}" \
-SOP_DOCKER_HEALTH="healthy" \
-python3 scripts/refresh_sop.py
 
 echo ""
 echo "Deployment complete."

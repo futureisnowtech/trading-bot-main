@@ -5,6 +5,8 @@ import psutil
 import time
 import subprocess
 import sqlite3
+import requests
+import json
 from typing import Dict, Optional
 from html import escape
 from functools import wraps
@@ -20,10 +22,9 @@ from telegram.ext import (
 from telegram.constants import ParseMode, ChatAction
 
 import system_state
-from config import REPO_ROOT, DB_PATH
+from config import DB_PATH, REPO_ROOT, TELEGRAM_CHAT_ID
 from notifications.ai_agent import ask_ai
 from notifications import sovereign_mobile_hud as hud
-from forecast.db import get_open_forecast_positions
 
 # v18.19.5: Project Apex Production Overhaul (80% Cost Reduction)
 # Lever 3: Debounce & Dedupe
@@ -112,6 +113,135 @@ def _runtime_is_live() -> bool:
     return True
 
 
+def send_message(text: str, parse_mode: str = "HTML") -> bool:
+    """Synchronous Telegram send helper for runtime modules outside the bot loop."""
+    if not TOKEN or not TELEGRAM_CHAT_ID:
+        raise RuntimeError("Telegram send helper is not configured")
+
+    resp = requests.post(
+        f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+        json={
+            "chat_id": TELEGRAM_CHAT_ID,
+            "text": text,
+            "parse_mode": parse_mode,
+            "disable_web_page_preview": True,
+        },
+        timeout=10,
+    )
+    resp.raise_for_status()
+    payload = resp.json()
+    if not payload.get("ok"):
+        raise RuntimeError(f"Telegram API error: {payload}")
+    return True
+
+
+def _load_forecast_snapshot() -> dict:
+    try:
+        with sqlite3.connect(DB_PATH, timeout=30.0) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT snapshot_json FROM lane_runtime_state WHERE lane_id='forecast'"
+            ).fetchone()
+            if row and row["snapshot_json"]:
+                return json.loads(row["snapshot_json"])
+    except Exception as exc:
+        logger.debug("forecast snapshot load failed: %s", exc)
+    return {}
+
+
+def _build_local_audit_snapshot() -> tuple[str, str]:
+    """Build a dashboard-free audit snapshot directly from DB and process state."""
+    from runtime.incident_tracker import get_incident_summary
+
+    snapshot = _load_forecast_snapshot()
+    raw_lines: list[str] = []
+
+    with sqlite3.connect(DB_PATH, timeout=30.0) as conn:
+        conn.row_factory = sqlite3.Row
+
+        lane_row = conn.execute(
+            """
+            SELECT health, readiness_state, blocked_reason, connected
+            FROM lane_runtime_state
+            WHERE lane_id='forecast'
+            """
+        ).fetchone()
+        active_markets_row = conn.execute(
+            "SELECT COUNT(*) AS n FROM forecast_markets WHERE active=1"
+        ).fetchone()
+        open_positions = conn.execute(
+            """
+            SELECT ticker, qty, entry_price, side
+            FROM forecast_positions
+            WHERE active = 1 AND qty > 0
+            ORDER BY opened_at ASC
+            """
+        ).fetchall()
+        rbi_row = conn.execute(
+            """
+            SELECT brier_score, win_rate, ensemble_accuracy, sample_size
+            FROM weather_calibration
+            ORDER BY ts DESC
+            LIMIT 1
+            """
+        ).fetchone()
+
+    incidents = get_incident_summary(DB_PATH)
+    balance = float(snapshot.get("equity", 0.0) or 0.0)
+    health = lane_row["health"] if lane_row else "UNKNOWN"
+    readiness = lane_row["readiness_state"] if lane_row else "UNKNOWN"
+    blocked_reason = lane_row["blocked_reason"] if lane_row else ""
+    active_markets = int(active_markets_row["n"] or 0) if active_markets_row else 0
+
+    msg_lines = [
+        "<b>SOVEREIGN KALSHI AUDIT</b>",
+        f"Status: {health}",
+        f"Readiness: {readiness}",
+        f"Open Incidents: {incidents.get('total_open', 0)}",
+        f"CPU/RAM: {psutil.cpu_percent():.0f}% / {psutil.virtual_memory().percent:.0f}%",
+        "",
+        f"🌪 <b>WEATHER ENGINE</b> ({active_markets} active markets)",
+        f"Equity: ${balance:,.2f}",
+        f"Open Positions: {len(open_positions)}",
+    ]
+    raw_lines.extend(
+        [
+            f"Status: {health}",
+            f"Readiness: {readiness}",
+            f"Open Incidents: {incidents.get('total_open', 0)}",
+            f"Active Markets: {active_markets}",
+            f"Equity: ${balance:,.2f}",
+            f"Open Positions: {len(open_positions)}",
+        ]
+    )
+
+    if blocked_reason:
+        msg_lines.append(f"Blocked Reason: {blocked_reason}")
+        raw_lines.append(f"Blocked Reason: {blocked_reason}")
+
+    if open_positions:
+        for pos in open_positions[:8]:
+            line = (
+                f"• {pos['ticker']}: {pos['side']} x{pos['qty']} "
+                f"@ ${float(pos['entry_price'] or 0.0):.2f}"
+            )
+            msg_lines.append(line)
+            raw_lines.append(line)
+    else:
+        msg_lines.append("• No active weather positions.")
+        raw_lines.append("No active weather positions.")
+
+    if rbi_row:
+        brier = float(rbi_row["brier_score"] or 0.0)
+        win_rate = float(rbi_row["win_rate"] or 0.0)
+        sample_size = int(rbi_row["sample_size"] or 0)
+        line = f"RBI: Brier={brier:.4f} WR={win_rate:.2%} n={sample_size}"
+        msg_lines.extend(["", line])
+        raw_lines.append(line)
+
+    return "\n".join(msg_lines), "\n".join(raw_lines)
+
+
 def restricted_access(func):
     @wraps(func)
     async def wrapper(
@@ -141,7 +271,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         broker = get_kalshi_broker()
         balance = broker.get_account_balance()
         
-        with sqlite3.connect(DB_PATH) as conn:
+        with sqlite3.connect(DB_PATH, timeout=30.0) as conn:
             row = conn.execute("SELECT COUNT(*) FROM forecast_markets WHERE active=1").fetchone()
             active_markets = row[0] if row else 0
     except: pass
@@ -149,7 +279,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Lever 5: Cost Telemetry Integration
     usd_spent = 0.0
     try:
-        with sqlite3.connect(DB_PATH) as c:
+        with sqlite3.connect(DB_PATH, timeout=30.0) as c:
             row = c.execute("SELECT SUM(usd_cost) FROM api_costs WHERE ts > ?", (time.time() - 86400,)).fetchone()
             usd_spent = float(row[0] or 0.0)
     except: pass
@@ -200,11 +330,16 @@ async def metrics_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @restricted_access
 async def positions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show open forecast positions."""
-    # SRE FIX: DB mapping alignment
     try:
-        with sqlite3.connect(DB_PATH) as conn:
+        with sqlite3.connect(DB_PATH, timeout=30.0) as conn:
             conn.row_factory = sqlite3.Row
-            rows = conn.execute("SELECT ticker, qty, entry, unrealized_pnl FROM forecast_positions WHERE qty > 0").fetchall()
+            rows = conn.execute(
+                """
+                SELECT ticker, qty, entry_price, side
+                FROM forecast_positions
+                WHERE active = 1 AND qty > 0
+                """
+            ).fetchall()
             
         if not rows:
             await _reply_text(update, "No active forecast positions.")
@@ -212,7 +347,7 @@ async def positions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         msg = "<b>Active Forecast Positions</b>\n"
         for r in rows:
-            msg += f"🎫 {r['ticker']} | {r['qty']} @ ${r['entry']:.2f}\n"
+            msg += f"🎫 {r['ticker']} | {r['side']} x{r['qty']} @ ${r['entry_price']:.2f}\n"
         await _reply_text(update, msg, parse_mode=ParseMode.HTML)
     except Exception as e:
         await _reply_text(update, f"Error fetching positions: {e}")
@@ -226,49 +361,15 @@ async def reboot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @restricted_access
 async def audit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    import requests
-    
     from VERSION import VERSION
     msg = f"<b>SOVEREIGN KALSHI AUDIT ({VERSION})</b>\n\n"
-    raw_text = ""
-    
+
     try:
-        # Dashboard API check
-        try:
-            resp = requests.get("http://127.0.0.1:8080/api/state", timeout=3)
-        except requests.exceptions.RequestException:
-            resp = requests.get("http://algo-dashboard:8080/api/state", timeout=3)
-            
-        data = resp.json()
-        sys_info = data.get("system", {})
-        vitals = data.get("vitals", {})
-        sre = data.get("sre", {})
-        
-        line = f"🖥 <b>Status:</b> {sys_info.get('status', 'OK')}\n"
-        msg += line; raw_text += line
-        line = f"🛡 <b>Data Integrity:</b> {sre.get('integrity_score', 100)}%\n"
-        msg += line; raw_text += line
-        line = f"⚙️ <b>Load:</b> CPU {vitals.get('cpu', 0):.0f}% | RAM {vitals.get('ram', 0):.0f}%\n\n"
-        msg += line; raw_text += line
-        
-        # Forecast Lane
-        forecast = data.get("forecast", {})
-        f_pos = forecast.get("positions", [])
-        active_markets = forecast.get("active_markets", 0)
-        
-        line = f"🌪 <b>WEATHER ENGINE (Markets: {active_markets})</b>\n"
-        msg += line; raw_text += line
-        if f_pos:
-            for p in f_pos:
-                line = f"   - {p.get('symbol')}: {p.get('qty')} {p.get('side')} | Cost: ${p.get('entry', 0):.4f}\n"
-                msg += line; raw_text += line
-        else:
-            line = "   - No active weather positions (Monitoring)\n"
-            msg += line; raw_text += line
-            
-        # Oracle Analysis
+        snapshot_msg, raw_text = _build_local_audit_snapshot()
+        msg = snapshot_msg + "\n\n"
         msg += "\n🔮 <b>ORACLE STRATEGIC ANALYSIS:</b>\n"
-        await update.message.reply_chat_action(ChatAction.TYPING)
+        if update.message:
+            await update.message.reply_chat_action(ChatAction.TYPING)
         
         prompt = (
             "You are the Sovereign SRE Oracle for the Kalshi Weather Engine. "
@@ -283,7 +384,7 @@ async def audit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             msg += f"<i>Oracle analysis failed: {ai_err}</i>"
             
     except Exception as e:
-        msg += f"⚠️ <b>WARNING:</b> Failed to reach SRE Dashboard API.\n"
+        msg += f"⚠️ <b>WARNING:</b> Local audit snapshot failed: {e}\n"
         
     await _reply_text(update, msg, parse_mode=ParseMode.HTML)
 
@@ -294,7 +395,7 @@ async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     
     try:
-        with sqlite3.connect(DB_PATH) as conn:
+        with sqlite3.connect(DB_PATH, timeout=30.0) as conn:
             conn.row_factory = sqlite3.Row
             # Simplified report for forecast resolutions
             closed = conn.execute(

@@ -71,7 +71,9 @@ def init_db() -> None:
         symbol TEXT NOT NULL, action TEXT NOT NULL, order_type TEXT NOT NULL,
         qty REAL NOT NULL, price REAL NOT NULL, value_usd REAL NOT NULL,
         fee_usd REAL DEFAULT 0, pnl_usd REAL DEFAULT 0,
-        paper INTEGER NOT NULL, order_id TEXT, notes TEXT
+        paper INTEGER NOT NULL, order_id TEXT, notes TEXT,
+        contract_side TEXT DEFAULT NULL,
+        forecast_yes_prob REAL DEFAULT NULL
     )""")
 
     for migration in [
@@ -90,6 +92,8 @@ def init_db() -> None:
         "ALTER TABLE trades ADD COLUMN won INTEGER DEFAULT NULL",
         "ALTER TABLE trades ADD COLUMN source TEXT DEFAULT 'paper'",
         "ALTER TABLE trades ADD COLUMN pnl_pct REAL DEFAULT 0",
+        "ALTER TABLE trades ADD COLUMN contract_side TEXT DEFAULT NULL",
+        "ALTER TABLE trades ADD COLUMN forecast_yes_prob REAL DEFAULT NULL",
         # v13.7: 15-minute forward outcome fields for candidate_outcomes
         "ALTER TABLE candidate_outcomes ADD COLUMN price_15m REAL DEFAULT 0",
         "ALTER TABLE candidate_outcomes ADD COLUMN ret_15m_pct REAL DEFAULT 0",
@@ -622,6 +626,8 @@ def log_trade(
     won=None,
     source=None,
     pnl_pct=0.0,
+    contract_side=None,
+    forecast_yes_prob=None,
     paper: int = 0,
 ) -> int:
     """
@@ -664,8 +670,9 @@ def log_trade(
     cur.execute(
         """INSERT INTO trades
         (ts,strategy,broker,symbol,action,order_type,qty,price,value_usd,
-         fee_usd,pnl_usd,paper,order_id,notes,won,source,pnl_pct)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+         fee_usd,pnl_usd,paper,order_id,notes,won,source,pnl_pct,
+         contract_side,forecast_yes_prob)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             ts,
             strategy,
@@ -684,6 +691,8 @@ def log_trade(
             won,
             source,
             pnl_pct,
+            contract_side,
+            forecast_yes_prob,
         ),
     )
     trade_id = cur.lastrowid

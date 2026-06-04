@@ -1,5 +1,5 @@
 """
-forecast/quote_harvester.py — Real-time ForecastEx quote polling and bar building.
+forecast/quote_harvester.py — Real-time Kalshi quote polling and bar building.
 
 Runs on a background thread (started by forecast/runner.py).
 
@@ -16,6 +16,7 @@ import sys
 import threading
 import time
 import sqlite3
+import traceback
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -74,10 +75,10 @@ def _build_bars_for_interval(contract_id: int, interval: str, seconds: int, db_p
             interval=interval,
             ts_open=ts_open,
             ts_close=ts_close,
-            open=prices[0],
-            high=max(prices),
-            low=min(prices),
-            close=prices[-1],
+            o=prices[0],
+            h=max(prices),
+            l=min(prices),
+            c_=prices[-1],
             mid_mean=sum(prices) / len(prices),
             spread_mean=sum(float(q["spread"]) for q in quotes) / len(quotes),
             vol_proxy=len(quotes),
@@ -105,10 +106,10 @@ def _resample_candles_to_bars(contract_id: int, candles: list[dict], interval: s
                 interval=interval,
                 ts_open=ts_open,
                 ts_close=ts_open, # approximate for backfill
-                open=float(c["open"]),
-                high=float(c["high"]),
-                low=float(c["low"]),
-                close=float(c["close"]),
+                o=float(c["open"]),
+                h=float(c["high"]),
+                l=float(c["low"]),
+                c_=float(c["close"]),
                 mid_mean=mid_mean,
                 spread_mean=0.0, # Not available in candles
                 vol_proxy=0.0,   # Hard to compute accurately from resampled candles
@@ -158,6 +159,10 @@ class QuoteHarvester:
         if self._thread:
             self._thread.join(timeout=2)
         logger.info("[QuoteHarvester] Stopped")
+
+    def run_once(self) -> None:
+        """Execute a single poll/build cycle without starting the daemon thread."""
+        self._poll_and_build()
 
     def backfill_bars(self, contract_id: int, ticker: str) -> None:
         """v18.34: Backfill historical candles from broker to populate technical indicators."""
@@ -248,22 +253,23 @@ class QuoteHarvester:
             right = contract.get("right", "C")
             
             # v19.1.6: Directional Price Inversion
-            # Kalshi get_quote returns YES prices. 
-            # For NO contracts, we must invert.
+            # Kalshi get_quote exposes both YES and NO top-of-book fields.
             if right == "P": # NO contract
                 side = "NO"
-                raw_bid = float(q.get("bid") or 0.0)
-                raw_ask = float(q.get("ask") or 1.0)
-                bid = 1.0 - raw_ask if raw_ask > 0 else 0.0
-                ask = 1.0 - raw_bid if raw_bid > 0 else 1.0
-                mid = (bid + ask) / 2.0
-                spread = ask - bid
+                bid = q.get("no_bid")
+                ask = q.get("no_ask")
+                mid = q.get("no_mid")
+                spread = q.get("no_spread")
+                bid_size = q.get("no_bid_size") or q.get("no_bid_vol")
+                ask_size = q.get("no_ask_size") or q.get("no_ask_vol")
             else:
                 side = "YES"
                 bid = q.get("bid")
                 ask = q.get("ask")
                 mid = q.get("mid")
                 spread = q.get("spread")
+                bid_size = q.get("bid_size") or q.get("bid_vol")
+                ask_size = q.get("ask_size") or q.get("ask_vol")
 
             if mid is not None:
                 try:
@@ -273,11 +279,11 @@ class QuoteHarvester:
                         ts=ts,
                         bid=bid,
                         ask=ask,
-                        bid_size=q.get("bid_size"),
-                        ask_size=q.get("ask_size"),
+                        bid_size=bid_size,
+                        ask_size=ask_size,
                         mid=mid,
                         spread=spread,
-                        implied_prob=q.get("implied_prob"),
+                        implied_prob=mid,
                         side=side,
                         db_path=self._db_path,
                     )
@@ -337,6 +343,17 @@ def get_paired_quotes(market_id: int, strike: float, last_trade_at: str, db_path
             if r['side'] == 'YES': pair['yes_quote'] = dict(r)
             else: pair['no_quote'] = dict(r)
 
+    if pair["yes_quote"] and pair["no_quote"]:
+        yes_ask = float(pair["yes_quote"].get("ask") or 0.0)
+        no_ask = float(pair["no_quote"].get("ask") or 0.0)
+        yes_mid = float(pair["yes_quote"].get("mid") or 0.0)
+        no_mid = float(pair["no_quote"].get("mid") or 0.0)
+        pair["omega_t"] = yes_ask + no_ask - 1.0
+        pair["g_t"] = yes_mid + no_mid - 1.0
+    else:
+        pair["omega_t"] = None
+        pair["g_t"] = None
+
     return pair
 
 def build_bars_now(
@@ -346,8 +363,13 @@ contract_id: int, db_path: Optional[str] = None) -> dict:
     Useful for backfill or test fixtures.
     Returns {interval: bars_written}.
     """
+    from forecast.db import get_bars
+
     _build_all_bars(contract_id, db_path=db_path)
-    return {"status": "complete"}
+    return {
+        interval: len(get_bars(contract_id, interval, limit=1, db_path=db_path))
+        for interval in ("5m", "30m", "1h", "4h", "1d")
+    }
 
 
 if __name__ == "__main__":

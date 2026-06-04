@@ -2,10 +2,11 @@
 forecast/discovery.py — Discovery and persistence for prediction markets.
 
 Responsible for:
-1. Fetching active contracts from brokers (IBKR, Kalshi).
-2. Filtering to economic/weather scope only.
+1. Fetching active contracts from Kalshi.
+2. Filtering to weather scope only.
 3. Scoring and ranking contracts by suitability.
 4. Persisting/updating forecast_markets and forecast_contracts tables.
+5. Preserving market stubs even when contract details are incomplete.
 """
 
 import logging
@@ -13,6 +14,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from forecast.db import (
+    init_forecast_db,
     upsert_market,
     upsert_contract,
     get_active_contracts,
@@ -113,16 +115,17 @@ def run_discovery(
     db_path: Optional[str] = None,
 ) -> dict:
     """
-    Main discovery entry point.  Called by forecast/runner.py every 30 min.
+    Main discovery entry point. Called by forecast/runner.py every 30 min.
 
-    1. Get active contracts from brokers (IBKR, Kalshi).
-    2. Filter to economic/weather scope only.
+    1. Get active contracts from Kalshi.
+    2. Filter to weather scope only.
     3. Persist to forecast_markets + forecast_contracts tables (idempotent)
     4. Return summary dict
     """
     result: dict = {
         "found": 0,
         "persisted": 0,
+        "stubs_persisted": 0,
         "skipped_scope": 0,
         "skipped_expired": 0,
         "active_in_db": 0,
@@ -130,6 +133,7 @@ def run_discovery(
     }
 
     raw_contracts: list[dict] = []
+    init_forecast_db(db_path=db_path)
 
     if broker is not None:
         try:
@@ -140,14 +144,48 @@ def run_discovery(
             logger.warning(msg)
             result["errors"].append(msg)
 
+    stub_only: list[dict] = []
+    tradable_candidates: list[dict] = []
+    for contract in raw_contracts:
+        if contract.get("stub_only"):
+            stub_only.append(contract)
+            continue
+        if not contract.get("last_trade_at"):
+            stub_only.append(contract)
+            continue
+        tradable_candidates.append(contract)
+
+    for c in stub_only:
+        name = c.get("long_name", "") or c.get("market_name", "") or c.get("underlier", "")
+        symbol = c.get("underlier", "") or c.get("market_symbol", "") or c.get("local_symbol", "")
+        exchange = c.get("exchange", "KALSHI")
+        if not symbol:
+            result["skipped_scope"] += 1
+            continue
+        try:
+            upsert_market(
+                market_symbol=symbol,
+                market_name=name or symbol,
+                exchange=exchange,
+                category_path=c.get("category", ""),
+                underlier_symbol=symbol,
+                underlier_conid=c.get("und_conid") or c.get("conid"),
+                db_path=db_path,
+            )
+            result["stubs_persisted"] += 1
+        except Exception as e:
+            msg = f"upsert_market failed for stub {symbol}: {e}"
+            logger.warning(msg)
+            result["errors"].append(msg)
+
     # Rank and filter
-    ranked = _rank_contracts(raw_contracts)
-    result["skipped_expired"] = result["found"] - len(ranked)
+    ranked = _rank_contracts(tradable_candidates)
+    result["skipped_expired"] = len(tradable_candidates) - len(ranked)
 
     for c in ranked:
         name = c.get("long_name", "") or c.get("underlier", "")
         symbol = c.get("underlier", "") or ""
-        exchange = c.get("exchange", "FORECASTX")
+        exchange = c.get("exchange", "KALSHI")
 
         # Persist market
         try:
@@ -194,6 +232,7 @@ def run_discovery(
 
     msg = (
         f"[Discovery] found={result['found']} persisted={result['persisted']} "
+        f"stubs={result['stubs_persisted']} "
         f"active_in_db={result['active_in_db']} errors={len(result['errors'])}"
     )
     logger.info(msg)

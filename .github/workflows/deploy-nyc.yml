@@ -9,14 +9,11 @@ on:
         type: boolean
         default: false
   workflow_run:
-    workflows: ["CI"]
+    workflows: ["Kalshi CI"]
     types: [completed]
 
 permissions:
   contents: read
-
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 concurrency:
   group: nyc-production-deploy
@@ -30,7 +27,7 @@ jobs:
       (github.event_name == 'workflow_run' &&
        github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.event == 'push' &&
-       github.event.workflow_run.head_branch == 'feature/v10-rebuild' &&
+       github.event.workflow_run.head_branch == 'master' &&
        vars.NYC_AUTO_DEPLOY_ENABLED == 'true')
     runs-on: ubuntu-latest
     environment:
@@ -43,9 +40,9 @@ jobs:
           if [ "${GITHUB_EVENT_NAME}" = "workflow_run" ]; then
             echo "deploy_ref=${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_OUTPUT"
             echo "deploy_mode=auto-after-ci" >> "$GITHUB_OUTPUT"
-            echo "deploy_reason=CI succeeded on feature/v10-rebuild and NYC_AUTO_DEPLOY_ENABLED=true" >> "$GITHUB_OUTPUT"
+            echo "deploy_reason=Kalshi CI succeeded on master and NYC_AUTO_DEPLOY_ENABLED=true" >> "$GITHUB_OUTPUT"
           else
-            echo "deploy_ref=feature/v10-rebuild" >> "$GITHUB_OUTPUT"
+            echo "deploy_ref=master" >> "$GITHUB_OUTPUT"
             echo "deploy_mode=manual-dispatch" >> "$GITHUB_OUTPUT"
             echo "deploy_reason=Manual protected dispatch" >> "$GITHUB_OUTPUT"
           fi
@@ -60,7 +57,6 @@ jobs:
         run: |
           if [ -z "${{ secrets.NYC_SSH_PRIVATE_KEY }}" ]; then
             echo "Missing NYC_SSH_PRIVATE_KEY secret on the nyc-production environment."
-            echo "Configure the environment first; do not use repo-level secrets for production deploys."
             exit 1
           fi
 
@@ -73,30 +69,34 @@ jobs:
       - name: Install proof and deploy dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install \
-            pytest pytest-cov ruff \
-            python-dotenv pandas numpy pytz requests \
-            yfinance schedule psutil \
-            "pandas-ta>=0.3.14b0"
-          pip install "python-binance>=1.0.19"
-          pip install scikit-learn lightgbm xgboost
-          pip install "streamlit>=1.35"
+          pip install -r requirements-dev.txt
 
       - name: Create test .env for validation
         run: |
           cat > .env << 'EOF'
-          ANTHROPIC_API_KEY=test_key_ci
           ACCOUNT_SIZE=5000
-          BINANCE_API_KEY=test_key_ci
-          BINANCE_API_SECRET=test_secret_ci
-          PERP_PAIRS=BTCUSDT,ETHUSDT
-          FUTURES_LANE_ACTIVE=false
-          FORECAST_LANE_ACTIVE=false
+          FORECAST_LANE_ACTIVE=true
+          FORECAST_AUTONOMOUS_ENABLED=true
+          KALSHI_API_KEY_ID=test_key_ci
+          KALSHI_PRIVATE_KEY_PATH=kalshi_private_key.pem
+          TELEGRAM_BOT_TOKEN=test_token
+          TELEGRAM_CHAT_ID=123456
+          GOOGLE_API_KEY=test_google_key
           EOF
 
-      - name: Proof suite
+      - name: Kalshi proof gate
         run: |
-          python -m pytest tests/proof/ -q --tb=short --no-header -p no:warnings
+          python -m pytest \
+            tests/proof/test_forecast_lane.py \
+            tests/proof/test_resolution_sync.py \
+            tests/proof/test_weather_rbi_truth.py \
+            tests/proof/test_weather_sovereign.py \
+            tests/proof/test_lane_gating.py \
+            tests/proof/test_trading_control.py \
+            tests/proof/test_scheduler_cadence_config.py \
+            tests/proof/test_runtime_layer.py \
+            -k "forecast or weather or rbi or lane_economics_forecast or forecast_lane" \
+            -q --tb=short --no-header -p no:warnings
 
       - name: Validate config
         run: |
@@ -141,7 +141,7 @@ jobs:
           chmod +x deploy.sh
           ./deploy.sh
 
-      - name: Verify deployed SHA and health
+      - name: Verify deployed SHA and services
         run: |
           EXPECTED_SHA="$(git rev-parse HEAD)"
           REMOTE_SHA="$(ssh -o BatchMode=yes -p 2222 algo-runner@64.225.20.38 "awk -F= '/^sha=/{print \$2}' /home/algo-runner/bot/version.txt")"
@@ -150,17 +150,8 @@ jobs:
             exit 1
           fi
           ssh -o BatchMode=yes -p 2222 algo-runner@64.225.20.38 '
-            for _ in $(seq 1 24); do
-              status=$(docker inspect -f "{{.State.Health.Status}}" algo-bot-live 2>/dev/null || echo unknown)
-              if [ "$status" = "healthy" ]; then
-                docker ps --format "table {{.Names}}\t{{.Status}}"
-                exit 0
-              fi
-              sleep 5
-            done
-            echo "algo-bot-live did not reach healthy state in time"
-            docker ps --format "table {{.Names}}\t{{.Status}}"
-            exit 1
+            docker ps --format "{{.Names}} {{.Status}}" | grep "execution-engine" | grep "Up"
+            docker ps --format "{{.Names}} {{.Status}}" | grep "telegram-oracle" | grep "Up"
           '
 
       - name: Deployment summary

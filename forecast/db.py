@@ -1,5 +1,5 @@
 """
-forecast/db.py — SQLite schema for the ForecastEx lane.
+forecast/db.py — SQLite schema for the Kalshi forecast lane.
 
 All tables live in the existing logs/trades.db (WAL mode).
 Call init_forecast_db() once at startup (idempotent — uses CREATE TABLE IF NOT EXISTS).
@@ -27,6 +27,7 @@ def _conn(db_path: str | None = None) -> sqlite3.Connection:
     c = sqlite3.connect(path, timeout=30)
     c.row_factory = sqlite3.Row
     c.execute("PRAGMA journal_mode=WAL")
+    c.execute("PRAGMA busy_timeout=30000")
     c.execute("PRAGMA foreign_keys=ON")
     return c
 
@@ -40,7 +41,7 @@ CREATE TABLE IF NOT EXISTS forecast_markets (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     market_symbol    TEXT    NOT NULL UNIQUE,
     market_name      TEXT    NOT NULL,
-    exchange         TEXT    NOT NULL DEFAULT 'FORECASTX',
+    exchange         TEXT    NOT NULL DEFAULT 'KALSHI',
     category_path    TEXT,
     underlier_symbol TEXT,
     underlier_conid  INTEGER,
@@ -60,7 +61,7 @@ CREATE TABLE IF NOT EXISTS forecast_contracts (
     right           TEXT    NOT NULL CHECK(right IN ('C', 'P')),
     strike          REAL    NOT NULL,
     currency        TEXT    NOT NULL DEFAULT 'USD',
-    exchange        TEXT    NOT NULL DEFAULT 'FORECASTX',
+    exchange        TEXT    NOT NULL DEFAULT 'KALSHI',
     last_trade_at   TEXT,
     resolution_at   TEXT,
     payout_at       TEXT,
@@ -220,7 +221,7 @@ def mark_forecast_position_closed(
 def upsert_market(
     market_symbol: str,
     market_name: str,
-    exchange: str = "FORECASTX",
+    exchange: str = "KALSHI",
     category_path: str = "",
     underlier_symbol: str = "",
     underlier_conid: int | None = None,
@@ -269,7 +270,7 @@ def upsert_contract(
     right: str,
     strike: float,
     currency: str = "USD",
-    exchange: str = "FORECASTX",
+    exchange: str = "KALSHI",
     last_trade_at: str = "",
     resolution_at: str = "",
     payout_at: str = "",
@@ -397,7 +398,7 @@ def insert_resolution(
     resolved_at: str,
     payout_at: str = "",
     notes: str = "",
-    source: str = "forecastx",
+    source: str = "kalshi",
     db_path: str | None = None,
 ) -> None:
     with _conn(db_path) as c:
@@ -452,6 +453,40 @@ def get_recent_quotes(
             (contract_id, limit),
         ).fetchall()
         return [dict(r) for r in reversed(rows)]
+
+
+def get_recent_quotes_for_bar(
+    contract_id: int,
+    lookback_seconds: int,
+    db_path: str | None = None,
+) -> list[dict]:
+    """Return quotes within a rolling lookback anchored to the latest quote."""
+    from datetime import datetime, timedelta, timezone
+
+    rows = get_recent_quotes(contract_id, limit=5000, db_path=db_path)
+    if not rows:
+        return []
+
+    latest_ts = rows[-1]["ts"]
+    try:
+        latest_dt = datetime.fromisoformat(str(latest_ts).replace("Z", "+00:00"))
+        if latest_dt.tzinfo is None:
+            latest_dt = latest_dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        return rows
+
+    cutoff = latest_dt - timedelta(seconds=lookback_seconds)
+    filtered = []
+    for row in rows:
+        try:
+            row_dt = datetime.fromisoformat(str(row["ts"]).replace("Z", "+00:00"))
+            if row_dt.tzinfo is None:
+                row_dt = row_dt.replace(tzinfo=timezone.utc)
+            if row_dt >= cutoff:
+                filtered.append(row)
+        except Exception:
+            continue
+    return filtered
 
 
 def get_last_bar_ts(contract_id: int, interval: str, db_path: str | None = None) -> str | None:

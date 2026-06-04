@@ -22,7 +22,7 @@ from cryptography.hazmat.primitives import serialization
 
 # Add root to path for logging_db
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import SHADOW_EXECUTION
+from config import KALSHI_FEE_PER_CONTRACT, SHADOW_EXECUTION
 from logging_db.trade_logger import log_event, log_trade
 
 logger = logging.getLogger(__name__)
@@ -167,8 +167,10 @@ class KalshiBroker:
                     "local_symbol": ticker,
                     "right": right,
                     "qty": abs_qty,
+                    "entry": 0.0,
                     "entry_price": 0.0,
                     "side": side,
+                    "forecast_yes_prob": None,
                     "order_id": "EXISTING",
                     "entered_at": datetime.now(timezone.utc).isoformat(),
                 }
@@ -219,7 +221,9 @@ class KalshiBroker:
                 if not _is_weather_market(ticker, event.get("title"), cat):
                     continue
                 
-                m_data = self._request("GET", "/trade-api/v2/markets", params={"event_ticker": e_ticker})
+                m_data = self._request(
+                    "GET", "/trade-api/v2/markets", params={"event_ticker": ticker}
+                )
                 markets = m_data.get("markets", [])
                 
                 for m in markets:
@@ -237,7 +241,7 @@ class KalshiBroker:
                     for side in ["YES", "NO"]:
                         right = "C" if side == "YES" else "P"
                         results.append({
-                            "underlier": e_ticker,
+                            "underlier": ticker,
                             "local_symbol": m.get("ticker"),
                             "conid": None,
                             "right": right,
@@ -246,7 +250,7 @@ class KalshiBroker:
                             "exchange": "KALSHI",
                             "currency": "USD",
                             "long_name": m.get("title"),
-                            "category": category,
+                            "category": cat,
                             "side": side,
                         })
         except Exception as e:
@@ -257,7 +261,30 @@ class KalshiBroker:
     def get_quote(self, ticker: str) -> dict:
         """Fetch bid/ask/mid using raw orderbook access."""
         if not self.is_connected():
-            return {"local_symbol": ticker, "bid": None, "ask": None, "ts": datetime.now(timezone.utc).isoformat()}
+            return {
+                "local_symbol": ticker,
+                "bid": None,
+                "ask": None,
+                "bid_vol": 0.0,
+                "ask_vol": 0.0,
+                "bid_size": 0.0,
+                "ask_size": 0.0,
+                "yes_bid": None,
+                "yes_ask": None,
+                "yes_bid_vol": 0.0,
+                "yes_ask_vol": 0.0,
+                "yes_bid_size": 0.0,
+                "yes_ask_size": 0.0,
+                "no_bid": None,
+                "no_ask": None,
+                "no_bid_vol": 0.0,
+                "no_ask_vol": 0.0,
+                "no_bid_size": 0.0,
+                "no_ask_size": 0.0,
+                "mid": None,
+                "spread": None,
+                "ts": datetime.now(timezone.utc).isoformat(),
+            }
         
         try:
             data = self._request("GET", f"/trade-api/v2/markets/{ticker}/orderbook")
@@ -265,28 +292,61 @@ class KalshiBroker:
             
             yes_levels = book.get("yes_dollars", [])
             no_levels = book.get("no_dollars", [])
-            
-            yes_bid = float(yes_levels[-1][0]) if yes_levels else None
-            yes_bid_vol = int(yes_levels[-1][1]) if yes_levels else 0
-            
-            no_bid = float(no_levels[-1][0]) if no_levels else None
-            no_bid_vol = int(no_levels[-1][1]) if no_levels else 0
+
+            def _level_num(levels: list, idx: int, default: float | None = None) -> float | None:
+                if not levels:
+                    return default
+                try:
+                    return float(levels[-1][idx])
+                except (TypeError, ValueError, IndexError):
+                    return default
+
+            yes_bid = _level_num(yes_levels, 0)
+            yes_bid_vol = _level_num(yes_levels, 1, 0.0) or 0.0
+
+            no_bid = _level_num(no_levels, 0)
+            no_bid_vol = _level_num(no_levels, 1, 0.0) or 0.0
             
             yes_ask = round(1.0 - no_bid, 4) if no_bid is not None else None
             yes_ask_vol = no_bid_vol
+            no_ask = round(1.0 - yes_bid, 4) if yes_bid is not None else None
+            no_ask_vol = yes_bid_vol
 
-            mid = round((yes_bid + yes_ask) / 2.0, 4) if yes_bid and yes_ask else yes_bid or yes_ask
-            spread = round(yes_ask - yes_bid, 4) if yes_bid and yes_ask else None
+            def _mid_and_spread(bid: float | None, ask: float | None) -> tuple[float | None, float | None]:
+                if bid is not None and ask is not None:
+                    return round((bid + ask) / 2.0, 4), round(ask - bid, 4)
+                return (bid if bid is not None else ask), None
+
+            yes_mid, yes_spread = _mid_and_spread(yes_bid, yes_ask)
+            no_mid, no_spread = _mid_and_spread(no_bid, no_ask)
 
             return {
                 "local_symbol": ticker,
                 "bid": yes_bid,
                 "bid_vol": yes_bid_vol,
+                "bid_size": yes_bid_vol,
                 "ask": yes_ask,
                 "ask_vol": yes_ask_vol,
-                "mid": mid,
-                "spread": spread,
-                "implied_prob": mid,
+                "ask_size": yes_ask_vol,
+                "yes_bid": yes_bid,
+                "yes_ask": yes_ask,
+                "yes_bid_vol": yes_bid_vol,
+                "yes_ask_vol": yes_ask_vol,
+                "yes_bid_size": yes_bid_vol,
+                "yes_ask_size": yes_ask_vol,
+                "yes_mid": yes_mid,
+                "yes_spread": yes_spread,
+                "no_bid": no_bid,
+                "no_ask": no_ask,
+                "no_bid_vol": no_bid_vol,
+                "no_ask_vol": no_ask_vol,
+                "no_bid_size": no_bid_vol,
+                "no_ask_size": no_ask_vol,
+                "no_mid": no_mid,
+                "no_spread": no_spread,
+                "mid": yes_mid,
+                "spread": yes_spread,
+                "implied_prob": yes_mid,
                 "ts": datetime.now(timezone.utc).isoformat(),
             }
         except Exception as e:
@@ -392,7 +452,12 @@ class KalshiBroker:
                 "qty": qty,
                 "side": side.upper(),
                 "local_symbol": ticker,
+                "right": contract_dict["right"],
                 "entry": fill_price,
+                "entry_price": fill_price,
+                "forecast_yes_prob": kwargs.get("forecast_yes_prob"),
+                "last_trade_at": contract_dict.get("last_trade_at", ""),
+                "entered_at": datetime.now(timezone.utc).isoformat(),
             }
             try:
                 log_trade(
@@ -403,12 +468,20 @@ class KalshiBroker:
                     order_type=order_type.capitalize(),
                     qty=qty,
                     price=fill_price,
+                    fee_usd=KALSHI_FEE_PER_CONTRACT * qty,
                     order_id=order_id,
                     notes=kwargs.get("reason", ""),
+                    contract_side=side.upper(),
+                    forecast_yes_prob=kwargs.get("forecast_yes_prob"),
                 )
             except Exception as e:
                 logger.error(f"[KalshiBroker] log_trade error: {e}")
-            return {"order_id": order_id, "price": fill_price, "qty": qty}
+            return {
+                "order_id": order_id,
+                "status": status,
+                "price": fill_price,
+                "qty": qty,
+            }
             
         elif status in ["resting", "pending"]:
             logger.info(f"Order resting, not updating positions table yet. ID: {order_info.get('order_id')}")
@@ -456,7 +529,7 @@ class KalshiBroker:
             # PnL Calc
             key_yes = f"{ticker}_C"; key_no = f"{ticker}_P"
             pos_info = self._open_positions.pop(key_yes, {}) or self._open_positions.pop(key_no, {})
-            entry_price = float(pos_info.get("entry") or 0.50)
+            entry_price = float(pos_info.get("entry_price") or pos_info.get("entry") or 0.50)
             pnl_usd = (exit_price - entry_price) * qty
             
             try:
@@ -468,14 +541,23 @@ class KalshiBroker:
                     order_type=order_type.capitalize(),
                     qty=qty,
                     price=exit_price,
+                    fee_usd=KALSHI_FEE_PER_CONTRACT * qty,
                     pnl_usd=pnl_usd,
                     order_id=order_id,
                     notes=kwargs.get("reason", ""),
-                    won=(pnl_usd > 0)
+                    won=(pnl_usd > 0),
+                    contract_side=pos_info.get("side", side).upper(),
+                    forecast_yes_prob=pos_info.get("forecast_yes_prob"),
                 )
             except Exception as e:
                 logger.error(f"[KalshiBroker] log_trade exit error: {e}")
-            return {"order_id": order_id, "exit_price": exit_price, "pnl_usd": pnl_usd}
+            return {
+                "order_id": order_id,
+                "status": status,
+                "entry_price": entry_price,
+                "exit_price": exit_price,
+                "pnl_usd": pnl_usd,
+            }
         
         return {"order_id": order_info.get("order_id", "ERR"), "status": status}
 
@@ -487,11 +569,21 @@ class KalshiBroker:
         key = f"{local_symbol}_{right}"
         
         quote = self.get_quote(local_symbol)
-        bid_price = float(quote.get("bid") or 0.0)
+        bid_key = "yes_bid" if right == "C" else "no_bid"
+        bid_price = float(quote.get(bid_key) or 0.0)
         
         if bid_price < 0.01:
-            self._open_positions.pop(key, {})
-            return {"order_id": "DISCARDED", "exit_price": 0.0, "pnl_usd": 0.0}
+            return {
+                "order_id": "ERR",
+                "status": "no_bid_liquidity",
+                "exit_price": 0.0,
+                "entry_price": float(
+                    (self._open_positions.get(key) or {}).get("entry_price")
+                    or (self._open_positions.get(key) or {}).get("entry")
+                    or 0.50
+                ),
+                "pnl_usd": 0.0,
+            }
 
         body = {
             "ticker": local_symbol,
@@ -506,33 +598,46 @@ class KalshiBroker:
         else:
             body["no_price"] = 1
         
-        pos_info = self._open_positions.pop(key, {})
-        entry_price = float(pos_info.get("entry_price") or 0.50)
+        pos_info = self._open_positions.get(key, {})
+        entry_price = float(pos_info.get("entry_price") or pos_info.get("entry") or 0.50)
 
         try:
             resp = self._request("POST", "/trade-api/v2/portfolio/orders", body=body)
             order_info = resp.get("order", {})
             order_id = order_info.get("order_id") or resp.get("order_id", "ERR")
-            exit_price = float(order_info.get("price", 0) / 100.0) if order_info.get("price") else 0.0
-            
-            pnl_usd = (exit_price - entry_price) * qty if exit_price > 0 else 0.0
-            
-            try:
-                log_trade(
-                    strategy=kwargs.get("strategy", "forecast_exit"),
-                    broker="kalshi",
-                    symbol=local_symbol,
-                    action="SELL",
-                    order_type="Market",
-                    qty=qty,
-                    price=exit_price,
-                    pnl_usd=pnl_usd,
-                    order_id=order_id,
-                    notes=kwargs.get("reason", "salvage_exit"),
-                    won=(pnl_usd > 0)
+            status = order_info.get("status")
+
+            if status == "executed":
+                exit_price = (
+                    float(order_info.get("average_price", 0.0)) / 100.0
+                    if order_info.get("average_price") is not None
+                    else float(order_info.get("price", 0.0)) / 100.0
                 )
-            except Exception as e:
-                logger.error(f"[KalshiBroker] log_trade exit error: {e}")
+                pnl_usd = (exit_price - entry_price) * qty if exit_price > 0 else 0.0
+                self._open_positions.pop(key, None)
+
+                try:
+                    log_trade(
+                        strategy=kwargs.get("strategy", "forecast_exit"),
+                        broker="kalshi",
+                        symbol=local_symbol,
+                        action="SELL",
+                        order_type="Market",
+                        qty=qty,
+                        price=exit_price,
+                        fee_usd=KALSHI_FEE_PER_CONTRACT * qty,
+                        pnl_usd=pnl_usd,
+                        order_id=order_id,
+                        notes=kwargs.get("reason", "salvage_exit"),
+                        won=(pnl_usd > 0),
+                        contract_side=pos_info.get("side", side.upper()),
+                        forecast_yes_prob=pos_info.get("forecast_yes_prob"),
+                    )
+                except Exception as e:
+                    logger.error(f"[KalshiBroker] log_trade exit error: {e}")
+            else:
+                exit_price = 0.0
+                pnl_usd = 0.0
 
         except Exception as e:
             logger.error(f"[KalshiBroker] Fatal exception during flatten: {e}")
@@ -542,6 +647,7 @@ class KalshiBroker:
 
         return {
             "order_id": order_id,
+            "status": status if "status" in locals() else "error",
             "flattened_qty": qty,
             "exit_price": exit_price,
             "entry_price": entry_price,

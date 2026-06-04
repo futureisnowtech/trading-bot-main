@@ -71,8 +71,8 @@ GEMINI_MODEL_EXTENDED: str = "gemini-3.5-pro"  # Frontier Reasoning
 # ════════════════════════════════════════════════════════════════════
 # KALSHI (Weather Prediction Engine)
 # ════════════════════════════════════════════════════════════════════
-KALSHI_API_KEY: str = os.getenv("KALSHI_API_KEY", "")
-KALSHI_API_SECRET: str = os.getenv("KALSHI_API_SECRET", "")
+KALSHI_API_KEY_ID: str = os.getenv("KALSHI_API_KEY_ID", "").strip()
+KALSHI_PRIVATE_KEY_PATH: str = os.getenv("KALSHI_PRIVATE_KEY_PATH", "").strip()
 KALSHI_ENABLED: bool = os.getenv("KALSHI_ENABLED", "true").lower() == "true"
 FORECAST_LANE_ACTIVE: bool = (
     os.getenv("FORECAST_LANE_ACTIVE", "true").lower() == "true"

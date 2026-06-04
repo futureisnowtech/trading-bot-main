@@ -1,125 +1,35 @@
 services:
-  algo-bot-forecast:
+  execution-engine:
     image: ${IMAGE_NAME:-algo-trading-bot}:latest
     build: .
-    container_name: algo-bot-forecast
-    hostname: algo-bot-forecast
+    container_name: execution-engine
     restart: unless-stopped
-    networks:
-      - trading-network
-    ports:
-      - "8000:8000"
-      - "8001:8001"
     env_file:
       - .env
     volumes:
       - ./logs:/app/logs
-    command: ["python3", "main.py"]
+    command:
+      - /bin/bash
+      - -lc
+      - while true; do python3 sniper_cron.py; sleep ${SNIPER_SLEEP_SECONDS:-300}; done
     logging:
-      driver: "json-file"
+      driver: json-file
       options:
-        max-size: "50m"
+        max-size: 50m
         max-file: "3"
 
-  prometheus:
-    image: prom/prometheus:latest
-    container_name: prometheus
-    restart: unless-stopped
-    networks:
-      - trading-network
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
-      - prometheus_data:/prometheus
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
-      - '--web.console.templates=/usr/share/prometheus/consoles'
-      - '--web.enable-lifecycle'
-      - '--web.enable-admin-api'
-
-  loki:
-    image: grafana/loki:latest
-    container_name: loki
-    restart: unless-stopped
-    networks:
-      - trading-network
-    ports:
-      - "3100:3100"
-    volumes:
-      - ./monitoring/loki-config.yml:/etc/loki/local-config.yaml
-    command: -config.file=/etc/loki/local-config.yaml
-
-  promtail:
-    image: grafana/promtail:latest
-    container_name: promtail
-    restart: unless-stopped
-    networks:
-      - trading-network
-    volumes:
-      - ./logs:/app/logs
-      - ./monitoring/promtail-config.yml:/etc/promtail/config.yml
-    command: -config.file=/etc/promtail/config.yml
-
-  grafana:
-    image: grafana/grafana:latest
-    container_name: grafana
-    restart: unless-stopped
-    networks:
-      - trading-network
-    ports:
-      - "3000:3000"
-    environment:
-      - GF_INSTALL_PLUGINS=volkovlabs-echarts-panel
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
-    volumes:
-      - grafana_data:/var/lib/grafana
-    depends_on:
-      - prometheus
-      - loki
-
-  postgres:
-    image: postgres:15
-    container_name: algo-db
-    restart: unless-stopped
-    networks:
-      - trading-network
-    environment:
-      - POSTGRES_USER=${DB_USER:-algo_master}
-      - POSTGRES_PASSWORD=${DB_PASSWORD:-algo_pass_99}
-      - POSTGRES_DB=${DB_NAME:-algo_trading}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-
-  dashboard:
+  telegram-oracle:
     image: ${IMAGE_NAME:-algo-trading-bot}:latest
     build: .
-    container_name: algo-dashboard
+    container_name: telegram-oracle
     restart: unless-stopped
-    networks:
-      - trading-network
-    ports:
-      - "8080:8080"
     env_file:
       - .env
     volumes:
       - ./logs:/app/logs
-      - ./dashboard:/app/dashboard
-      - /proc:/host/proc:ro
-      - /sys:/host/sys:ro
-    command: ["python3", "-m", "uvicorn", "dashboard.api.server:app", "--host", "0.0.0.0", "--port", "8080"]
-    depends_on:
-      - algo-bot-forecast
-
-networks:
-  trading-network:
-    driver: bridge
-
-volumes:
-  prometheus_data:
-  grafana_data:
-  postgres_data:
+    command: ["python3", "telegram_daemon.py"]
+    logging:
+      driver: json-file
+      options:
+        max-size: 50m
+        max-file: "3"

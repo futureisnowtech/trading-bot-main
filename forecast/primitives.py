@@ -233,6 +233,8 @@ def kalshi_absolute_sizing(
     bankroll: float,
     max_risk_pct: float = 0.015,
     max_deploy_pct: float = 0.05,
+    fee_per_contract: float = 0.0,
+    max_usd_cap: float | None = None,
 ) -> tuple[int, float]:
     """
     Binary Risk Sizing (v18.32): Sizes by Absolute Loss to Zero.
@@ -248,23 +250,34 @@ def kalshi_absolute_sizing(
 
     max_loss_usd = bankroll * max_risk_pct
     max_deploy_usd = bankroll * max_deploy_pct
+    total_cash_per_contract = ask_price + max(0.0, fee_per_contract)
+    if total_cash_per_contract <= 0:
+        return 0, 0.0
 
     # qty_by_risk = max_loss_usd / cost_per_loss_unit
-    # In Kalshi, cost_per_loss_unit is exactly the ask_price.
-    qty_by_risk = int(max_loss_usd / ask_price)
+    # In Kalshi, max loss to zero includes the premium paid plus fixed fees.
+    qty_by_risk = int(max_loss_usd / total_cash_per_contract)
 
-    # qty_by_capital = max_deploy_usd / ask_price
-    qty_by_capital = int(max_deploy_usd / ask_price)
+    # qty_by_capital = max_deploy_usd / total_cash_per_contract
+    qty_by_capital = int(max_deploy_usd / total_cash_per_contract)
 
     # v19.9.1: Hard USD Ceiling
-    try:
-        from config import KALSHI_TIER_3_MAX_USD
-        qty_by_hard_cap = int(KALSHI_TIER_3_MAX_USD / ask_price)
-    except:
-        qty_by_hard_cap = 999999
+    if max_usd_cap is None:
+        try:
+            from config import KALSHI_MAX_USD_PER_POSITION
+
+            max_usd_cap = float(KALSHI_MAX_USD_PER_POSITION)
+        except Exception:
+            max_usd_cap = None
+
+    qty_by_hard_cap = (
+        int(max_usd_cap / total_cash_per_contract)
+        if max_usd_cap is not None and max_usd_cap > 0
+        else 999999
+    )
 
     final_qty = max(0, min(qty_by_risk, qty_by_capital, qty_by_hard_cap))
-    return final_qty, final_qty * ask_price
+    return final_qty, final_qty * total_cash_per_contract
 
 
 def fractional_kelly_fraction(
@@ -302,6 +315,7 @@ def contracts_from_fraction(
     per_event_cap_pct: float = 0.10,
     deployed_pct: float = 0.0,
     max_deployed_pct: float = 0.35,
+    fee_per_contract: float = 0.0,
 ) -> int:
     """Convert a Kelly fraction to whole-number contracts.
 
@@ -325,10 +339,9 @@ def contracts_from_fraction(
     if dollar_risk <= 0:
         return 0
 
-    # Each contract costs p_cost × 100 (ForecastEx contracts are $0–$1 per share,
-    # 100 shares per contract).  For tiny bankroll, allow fractional-share thinking
-    # but always round DOWN to whole contracts.
-    cost_per_contract = p_cost * 100.0
+    # Kalshi order counts are direct share counts. Each share costs the premium
+    # paid plus any fixed per-contract fee that is part of the real cash outlay.
+    cost_per_contract = p_cost + max(0.0, fee_per_contract)
     if cost_per_contract <= 0:
         return 0
 

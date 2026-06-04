@@ -1,18 +1,17 @@
 """
 learning/weather_rbi.py — Research, Backtest, Incubation Loop for Weather.
-v19.1.KALSHI: Probabilistic Calibration and Brier Score tracking.
+
+The weather learner only calibrates on labeled contract resolutions. It does
+not infer truth from realized PnL, because early exits can be profitable while
+the underlying event still resolves the other way.
 """
 
-import os
-import sqlite3
 import logging
-import json
-import time
-from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Any
+import sqlite3
+from datetime import datetime, timedelta, timezone
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(_ROOT, "logs", "trades.db")
+from config import DB_PATH
+from forecast.db import init_forecast_db
 
 logger = logging.getLogger(__name__)
 
@@ -27,82 +26,126 @@ CREATE TABLE IF NOT EXISTS weather_calibration (
 )
 """
 
-def init_rbi_db():
+
+def _parse_utc(value) -> datetime | None:
+    if not value:
+        return None
+
+    text = str(value).strip()
+    if not text:
+        return None
+
     try:
+        dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def init_rbi_db() -> None:
+    try:
+        init_forecast_db()
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(_DDL_CALIBRATION)
             conn.commit()
     except Exception as e:
         logger.error(f"[weather_rbi] DB Init error: {e}")
 
-def run_weather_rbi():
-    """Execute the daily calibration loop."""
+
+def run_weather_rbi() -> None:
+    """Execute the weather calibration loop using labeled contract outcomes only."""
     logger.info("[weather_rbi] Starting calibration cycle...")
     init_rbi_db()
-    
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+
     try:
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
-            
-            # Fetch resolved trades (last 7 days)
-            cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
-            trades = conn.execute(
-                "SELECT symbol, price, pnl_usd, qty, action FROM trades WHERE broker='kalshi' AND ts > ? AND action='SELL'", 
-                (cutoff,)
+
+            rows = conn.execute(
+                """
+                SELECT DISTINCT
+                    t.symbol,
+                    t.contract_side,
+                    t.forecast_yes_prob,
+                    t.pnl_usd,
+                    r.resolved_side,
+                    r.resolved_at
+                FROM trades t
+                JOIN forecast_contracts c
+                  ON c.local_symbol = t.symbol
+                JOIN forecast_resolutions r
+                  ON r.contract_id = c.id
+                WHERE t.broker = 'kalshi'
+                  AND t.action = 'SELL'
+                  AND t.contract_side IN ('YES', 'NO')
+                  AND t.forecast_yes_prob IS NOT NULL
+                  AND r.resolved_side IN ('YES', 'NO')
+                ORDER BY r.resolved_at DESC
+                """
             ).fetchall()
-            
-            if not trades:
-                logger.info("[weather_rbi] No resolved trades in period. Skipping.")
+
+            labeled = []
+            for row in rows:
+                resolved_at = _parse_utc(row["resolved_at"])
+                if resolved_at is None or resolved_at < cutoff:
+                    continue
+
+                contract_side = str(row["contract_side"]).upper()
+                yes_prob = max(0.0, min(1.0, float(row["forecast_yes_prob"])))
+                chosen_prob = yes_prob if contract_side == "YES" else (1.0 - yes_prob)
+                outcome = 1.0 if str(row["resolved_side"]).upper() == contract_side else 0.0
+
+                labeled.append(
+                    {
+                        "chosen_prob": chosen_prob,
+                        "outcome": outcome,
+                        "pnl_usd": float(row["pnl_usd"] or 0.0),
+                    }
+                )
+
+            if not labeled:
+                logger.info(
+                    "[weather_rbi] No labeled resolved weather samples found in the last 7 days. "
+                    "Skipping calibration."
+                )
                 return
 
-            brier_sum = 0.0
-            wins = 0
-            accuracy_sum = 0.0
-            
-            for t in trades:
-                # We need the entry price to know the 'forecast'
-                # Find the corresponding BUY trade
-                buy_trade = conn.execute(
-                    "SELECT price, side FROM trades WHERE symbol=? AND action='BUY' AND ts < ? ORDER BY ts DESC LIMIT 1",
-                    (t["symbol"], t["ts"] if "ts" in t.keys() else datetime.now().isoformat())
-                ).fetchone()
-                
-                if not buy_trade: continue
-                
-                f_t = float(buy_trade["price"])
-                side = str(buy_trade["side"]).upper()
-                implied_prob = f_t if side == "YES" else (1.0 - f_t)
-                o_t = 1.0 if float(t["pnl_usd"]) > 0 else 0.0
-                
-                brier_sum += (implied_prob - o_t) ** 2
-                wins += int(o_t)
-                
-                # Accuracy: how close was our probability to the outcome
-                accuracy_sum += (1.0 - abs(implied_prob - o_t))
+            brier_sum = sum((sample["chosen_prob"] - sample["outcome"]) ** 2 for sample in labeled)
+            wins = sum(int(sample["outcome"]) for sample in labeled)
+            accuracy_sum = sum(1.0 - abs(sample["chosen_prob"] - sample["outcome"]) for sample in labeled)
+            pnl_sum = sum(sample["pnl_usd"] for sample in labeled)
 
-            count = len(trades)
-            if count == 0: return
-
+            count = len(labeled)
             avg_brier = brier_sum / count
             win_rate = wins / count
             avg_accuracy = accuracy_sum / count
-            
-            # Edge Decay (Simplified: PNL per unit of risk)
-            edge_decay = sum(float(t["pnl_usd"]) for t in trades) / count
-            
+            edge_decay = pnl_sum / count
             now_ts = datetime.now(timezone.utc).isoformat()
-            
+
             conn.execute(
-                "INSERT OR REPLACE INTO weather_calibration (ts, brier_score, win_rate, ensemble_accuracy, sample_size, edge_decay) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (now_ts, avg_brier, win_rate, avg_accuracy, count, edge_decay)
+                """
+                INSERT OR REPLACE INTO weather_calibration
+                    (ts, brier_score, win_rate, ensemble_accuracy, sample_size, edge_decay)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (now_ts, avg_brier, win_rate, avg_accuracy, count, edge_decay),
             )
             conn.commit()
-            
-            logger.info(f"[weather_rbi] Calibration Complete. Brier: {avg_brier:.4f} | WR: {win_rate:.2%} | Accuracy: {avg_accuracy:.2%}")
+
+            logger.info(
+                "[weather_rbi] Calibration complete. "
+                f"Brier={avg_brier:.4f} WR={win_rate:.2%} Accuracy={avg_accuracy:.2%} "
+                f"Samples={count}"
+            )
 
     except Exception as e:
         logger.error(f"[weather_rbi] Cycle failed: {e}")
+
 
 if __name__ == "__main__":
     run_weather_rbi()

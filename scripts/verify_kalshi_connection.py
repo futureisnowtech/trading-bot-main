@@ -29,7 +29,7 @@ def main():
     balance = broker.get_account_balance()
     print(f"✅ SUCCESS: Account Balance = ${balance:.2f}")
 
-    print("\n[3/4] Testing market discovery (Economic categories)...")
+    print("\n[3/4] Testing market discovery (weather scope)...")
     markets = broker.discover_markets()
     if not markets:
         print("⚠️ WARN: No markets discovered. This might be normal if markets are closed, or discovery logic is too restrictive.")

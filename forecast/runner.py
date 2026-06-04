@@ -1,28 +1,14 @@
 """
-forecast/runner.py — ForecastEx lane scheduler loop.
+forecast/runner.py — Kalshi forecast cycle helpers.
 
-Loop cadences:
-  discovery      every 30 min  — refresh market/contract cache from IBKR
-  quote harvest  every 60 sec  — collect bid/ask/mid for all active contracts
-  strategy eval  every 5 min   — run strategy engine, submit approved entries
-  position mon   every 30 sec  — monitor open positions, flatten resolved ones
+Core cadences:
+  discovery      every 30 min  — refresh market/contract cache from Kalshi
+  quote harvest  every 60 sec  — collect bid/ask/mid for active contracts
+  strategy eval  every 5 min   — run the strategy engine and submit entries
+  position mon   every 30 sec  — monitor open positions and flatten resolved ones
 
-Architecture:
-  - All loops run on daemon threads via schedule library (same pattern as v10_runner).
-  - ForecastExBroker singleton (client ID 3) shared across all loops.
-  - QuoteHarvester starts its own background thread.
-  - Never touches crypto or MES lanes.
-  - Paper mode: all order logic executes exactly as live; zero API calls on
-    paper (forecastex_broker.is_connected() returns False when TWS not available,
-    and orders are logged with FX_PAPER_ prefix).
-
-Risk guardrails (hardcoded, no override):
-  - max concurrent positions: 2
-  - max deployed capital: 35% of account
-  - max risk per event: 10% of account
-  - no same-contract doubling down
-  - no same-event hedge spaghetti (two positions on same market forbidden)
-  - contracts_from_fraction() always returns 0 when caps are hit
+The lean runtime normally calls one-pass helpers from `sniper_cron.py`, while
+the underlying runner functions remain reusable for diagnostics and local loops.
 """
 
 import logging
@@ -101,12 +87,57 @@ def _get_harvester():
     return _harvester
 
 
+def _refresh_quotes_once() -> None:
+    """Populate fresh quote rows without starting the long-running harvester loop."""
+    harvester = _get_harvester()
+    broker = _get_broker()
+    if not broker.is_connected():
+        return
+    harvester.run_once()
+
+
+def _held_bid_fields(right: str) -> tuple[str, str]:
+    if right == "C":
+        return "yes_bid", "yes_bid_vol"
+    return "no_bid", "no_bid_vol"
+
+
+def _weather_contract_yes_probability(ticker: str, w_data: dict | None) -> float | None:
+    if not w_data:
+        return None
+
+    from forecast.strategy_engine import _parse_weather_threshold
+
+    threshold = _parse_weather_threshold(ticker)
+    if threshold is None:
+        return None
+
+    if "HIGH" in ticker:
+        members = w_data.get("members_high", [])
+        success_count = sum(1 for member in members if member >= (threshold - 0.05))
+    elif "LOW" in ticker:
+        members = w_data.get("members_low", [])
+        success_count = sum(1 for member in members if member <= (threshold + 0.05))
+    elif "RAIN" in ticker or "SNOW" in ticker:
+        members = w_data.get("members_precip", [])
+        success_count = sum(1 for member in members if member > threshold)
+    elif "WIND" in ticker:
+        members = w_data.get("members_wind", [])
+        success_count = sum(1 for member in members if member >= threshold)
+    else:
+        return None
+
+    if not members:
+        return None
+    return success_count / len(members)
+
+
 # ── Discovery loop ─────────────────────────────────────────────────────────────
 
 
 def run_discovery_cycle() -> dict:
     """
-    30-min cycle: refresh market/contract list from IBKR FORECASTX.
+    30-min cycle: refresh market/contract list from Kalshi.
     Idempotent — upserts only; never deletes.
     """
     with _discovery_lock:
@@ -169,6 +200,103 @@ def run_discovery_cycle() -> dict:
             return {"found": 0, "persisted": 0, "errors": [str(e)]}
 
 
+def run_execution_cycle(
+    bankroll: float = 100.0,
+    *,
+    refresh_quotes: bool = True,
+    sync_resolutions: bool = True,
+    run_rbi: bool = False,
+) -> dict:
+    """
+    Single-pass Lean execution cycle.
+
+    Order of operations:
+      1. Ensure DB + broker connectivity
+      2. Discovery once
+      3. Quote refresh once
+      4. Strategy evaluation once
+      5. Position monitor once
+      6. Resolution sync / cache refresh / optional RBI
+    """
+    from forecast.db import init_forecast_db
+    from config import FORECAST_LANE_ACTIVE, KALSHI_ENABLED
+
+    if not KALSHI_ENABLED:
+        logger.warning("[ForecastRunner] Kalshi lane disabled. Skipping execution cycle.")
+        return {
+            "broker_connected": False,
+            "discovery": {},
+            "entries": 0,
+            "resolution_sync": {},
+            "skipped_reason": "kalshi_disabled",
+        }
+
+    if not FORECAST_LANE_ACTIVE:
+        logger.warning("[ForecastRunner] Forecast lane inactive. Skipping execution cycle.")
+        return {
+            "broker_connected": False,
+            "discovery": {},
+            "entries": 0,
+            "resolution_sync": {},
+            "skipped_reason": "forecast_lane_inactive",
+        }
+
+    db_path = os.path.join(_ROOT, "logs", "trades.db")
+    init_forecast_db(db_path=db_path)
+
+    broker = _get_broker()
+    connected = broker.is_connected()
+    if not connected:
+        try:
+            connected = bool(broker.connect())
+        except Exception as exc:
+            logger.error("[ForecastRunner] Broker bootstrap failed: %s", exc)
+            connected = False
+
+    discovery = run_discovery_cycle()
+
+    if refresh_quotes:
+        try:
+            _refresh_quotes_once()
+        except Exception as exc:
+            logger.warning("[ForecastRunner] One-shot quote refresh failed: %s", exc)
+
+    entries = run_strategy_cycle(bankroll=bankroll)
+    run_position_monitor()
+
+    resolution_summary = {}
+    if sync_resolutions:
+        try:
+            from forecast.resolution_sync import sync_forecast_resolutions
+
+            resolution_summary = sync_forecast_resolutions(db_path=db_path)
+        except Exception as exc:
+            logger.warning("[ForecastRunner] Resolution sync failed: %s", exc)
+            resolution_summary = {"error": str(exc)}
+
+    try:
+        _cache_forecast_state()
+    except Exception as exc:
+        logger.warning("[ForecastRunner] Cache refresh failed: %s", exc)
+
+    if run_rbi:
+        try:
+            from learning.weather_rbi import run_weather_rbi
+
+            run_weather_rbi()
+        except Exception as exc:
+            logger.warning("[ForecastRunner] RBI cycle failed: %s", exc)
+
+    summary = {
+        "broker_connected": connected,
+        "discovery": discovery,
+        "entries": len(entries),
+        "resolution_sync": resolution_summary,
+    }
+    logger.info("[ForecastRunner] Single-pass execution summary: %s", summary)
+    return summary
+
+
 # ── Strategy evaluation loop ───────────────────────────────────────────────────
 
 
@@ -179,6 +307,16 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
     Returns list of entry results (empty if nothing qualified).
     """
     with _eval_lock:
+        from config import FORECAST_LANE_ACTIVE, KALSHI_ENABLED
+
+        if not KALSHI_ENABLED or not FORECAST_LANE_ACTIVE:
+            logger.warning(
+                "[ForecastRunner] Strategy cycle skipped: kalshi_enabled=%s forecast_lane_active=%s",
+                KALSHI_ENABLED,
+                FORECAST_LANE_ACTIVE,
+            )
+            return []
+
         logger.info(f"[ForecastRunner] Starting strategy cycle (bankroll=${bankroll:.2f})...")
         entries = []
         try:
@@ -217,7 +355,7 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
 
             # Deployed capital fraction
             deployed_value = sum(
-                (p.get("entry_price") or 0) * (p.get("qty") or 0) * 100
+                (p.get("entry_price") or 0) * (p.get("qty") or 0)
                 for p in open_positions
             )
             deployed_pct = min(1.0, deployed_value / max(bankroll, 1.0))
@@ -226,42 +364,50 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
             # We run these BEFORE the capital guard so we can free up capital.
             if open_positions:
                 from data.kalshi_weather_monitor import get_weather_data
-                from forecast.strategy_engine import _parse_weather_threshold
+                from forecast.db import mark_forecast_position_closed
                 
                 for pos in open_positions:
                     ticker = pos.get("local_symbol", "")
+                    right = pos.get("right", "C")
                     side = pos.get("side", "YES").upper()
                     w_data = get_weather_data(ticker)
+                    quote = broker.get_quote(ticker)
+                    bid_key, _bid_vol_key = _held_bid_fields(right)
+                    current_price = float(quote.get(bid_key) or pos.get("entry_price") or 0.50)
                     
                     # 1. Sovereign Salvage (Dead-Trade Purge)
-                    if w_data:
-                        threshold = _parse_weather_threshold(ticker)
-                        if threshold is not None:
-                            mode = "HIGH" if "HIGH" in ticker else "LOW" if "LOW" in ticker else "RAIN"
-                            members = w_data.get("members_high" if mode == "HIGH" else "members_low", [])
-                            if members:
-                                success_count = sum(1 for m in members if (m >= threshold if mode == "HIGH" else m <= threshold))
-                                live_prob = success_count / len(members)
-                                if side == "NO": live_prob = 1.0 - live_prob
-                                
-                                if live_prob < 0.15:
-                                    logger.warning(f"[SovereignSalvage] PURGING toxic position {ticker} (p={live_prob:.1%})")
-                                    broker.flatten_position(ticker, side[0], pos.get("qty", 0))
-                                    log_event("INFO", "ForecastRunner", f"Salvage: Purged {ticker} at {live_prob:.1%}")
-                                    # Reset flags to allow eval to proceed in this tick
-                                    is_at_cap = False
-                                    deployed_pct = 0.0 
-                                    break 
+                    model_yes = _weather_contract_yes_probability(ticker, w_data)
+                    if model_yes is not None:
+                        live_prob = model_yes if side == "YES" else (1.0 - model_yes)
+                        if live_prob < 0.15:
+                            logger.warning(f"[SovereignSalvage] PURGING toxic position {ticker} (p={live_prob:.1%})")
+                            flatten_res = broker.flatten_position(
+                                ticker,
+                                right,
+                                pos.get("qty", 0),
+                            )
+                            if flatten_res.get("status") == "executed":
+                                mark_forecast_position_closed(ticker, exit_type="salvage_exit")
+                            log_event("INFO", "ForecastRunner", f"Salvage: Purged {ticker} at {live_prob:.1%}")
+                            # Reset flags to allow eval to proceed in this tick
+                            is_at_cap = False
+                            deployed_pct = 0.0
+                            break
 
                     # 2. Institutional Take-Profit (70% Lock-in)
                     entry_price = float(pos.get("entry_price") or 0.50)
-                    current_price = float(pos.get("market_price") or entry_price)
                     max_gain = 1.0 - entry_price
                     target_gain = max_gain * 0.70
                     
                     if (current_price - entry_price) >= target_gain:
                         logger.info(f"[SovereignHUD] TAKE-PROFIT: Locking in 70% gain for {ticker} (Price={current_price:.2f})")
-                        broker.flatten_position(ticker, side[0], pos.get("qty", 0))
+                        flatten_res = broker.flatten_position(
+                            ticker,
+                            pos.get("right", "C"),
+                            pos.get("qty", 0),
+                        )
+                        if flatten_res.get("status") == "executed":
+                            mark_forecast_position_closed(ticker, exit_type="take_profit")
                         log_event("INFO", "ForecastRunner", f"TakeProfit: Locked {ticker} at {current_price:.2f}")
                         is_at_cap = False
                         deployed_pct = 0.0
@@ -277,7 +423,7 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
             from collections import defaultdict
             open_event_families_counts = defaultdict(int)
             for p in open_positions:
-                family = p.get("local_symbol", "").split("_")[0]
+                family = p.get("local_symbol", "").split("-")[0]
                 open_event_families_counts[family] += 1
 
             def _get_bars_fn(contract_id: int, interval: str) -> list[dict]:
@@ -358,7 +504,14 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                     worst_sym = worst_pos.get("local_symbol", "UNKNOWN")
                     
                     logger.info(f"[ForecastRunner] SWAP TRIGGERED: Flattening {worst_sym} to make room for {local_sym} (ev={result.ev:.4f})")
-                    broker.flatten_position(worst_sym, worst_pos.get("side", "YES")[0], worst_pos.get("qty", 0))
+                    flatten_res = broker.flatten_position(
+                        worst_sym,
+                        worst_pos.get("right", "C"),
+                        worst_pos.get("qty", 0),
+                    )
+                    if flatten_res.get("status") == "executed":
+                        from forecast.db import mark_forecast_position_closed
+                        mark_forecast_position_closed(worst_sym, exit_type="swap_exit")
                     log_event("INFO", "ForecastRunner", f"Swap: Flattened {worst_sym} for {local_sym}")
 
                 # Hard duplicate guard: no same-contract double-down
@@ -387,6 +540,12 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                     # Guardrail 3: Taker-Override Friction Controls
                     # If edge >= 22% and is_short_term, use market order.
                     order_type = "market" if result.is_taker_override else "limit"
+                    forecast_yes_prob = result.q_hat
+                    if result.strategy_family == "weather_ensemble":
+                        forecast_yes_prob = (
+                            result.confidence if result.side == "YES" else (1.0 - result.confidence)
+                        )
+                    forecast_yes_prob = max(0.0, min(1.0, float(forecast_yes_prob)))
                     
                     entry_result = broker.place_buy_order(
                         contract_dict={
@@ -401,10 +560,10 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                         type=order_type,
                         reason=f"{result.strategy_family}_ev={result.ev:.4f}_taker={result.is_taker_override}",
                         strategy=f"forecast_{result.strategy_family}",
+                        forecast_yes_prob=forecast_yes_prob,
                     )
                     
-                    # Notify via Telegram/DB
-                    if entry_result.get("order_id") != "ERR" and entry_result.get("status") != "resting":
+                    if entry_result.get("status") == "executed":
                         actual_price = entry_result.get("price") or ask_price
                         entry_msg = f"[ForecastRunner] Entry: {contract.get('local_symbol')} {result.side.upper()} @ {actual_price} (ev={result.ev:.4f})"
                         log_event("INFO", "ForecastRunner", entry_msg)
@@ -434,20 +593,27 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                             )
                         except Exception as _ne_err:
                             logger.error(f"[ForecastRunner] Notification error: {_ne_err}")
-
-                    entries.append(
-                        {
-                            "contract": contract,
-                            "result": result,
-                            "entry": entry_result,
-                        }
-                    )
-                    logger.info(
-                        f"[ForecastRunner] ENTERED {contract.get('local_symbol')} "
-                        f"{result.side} × {result.position_contracts} @ {ask_price:.4f} "
-                        f"| strategy={result.strategy_family} ev={result.ev:.4f} "
-                        f"q_hat={result.q_hat:.4f}"
-                    )
+                        entries.append(
+                            {
+                                "contract": contract,
+                                "result": result,
+                                "entry": entry_result,
+                            }
+                        )
+                        logger.info(
+                            f"[ForecastRunner] ENTERED {contract.get('local_symbol')} "
+                            f"{result.side} × {result.position_contracts} @ {actual_price:.4f} "
+                            f"| strategy={result.strategy_family} ev={result.ev:.4f} "
+                            f"q_hat={result.q_hat:.4f}"
+                        )
+                    else:
+                        logger.info(
+                            "[ForecastRunner] Entry not booked into local truth for %s "
+                            "(status=%s order_id=%s)",
+                            contract.get("local_symbol"),
+                            entry_result.get("status"),
+                            entry_result.get("order_id"),
+                        )
                 except Exception as e:
                     logger.error(
                         f"[ForecastRunner] Entry failed for {contract.get('local_symbol')}: {e}"
@@ -548,13 +714,17 @@ def run_position_monitor() -> None:
             # v19.1.9: Sovereign Exit Protocol (Profit Protection)
             try:
                 q = broker.get_quote(local_symbol)
-                if q and q.get("bid"):
-                    bid_price = float(q["bid"])
+                bid_key, bid_vol_key = _held_bid_fields(right)
+                if q and q.get(bid_key):
+                    bid_price = float(q[bid_key])
 
                     # 1. Take Profit: Narrow Bin (Double-sided risk)
                     # We assume narrow if strike looks like a mid-range or 'between'
                     # For now, we'll use a conservative 85c trigger for all weather
-                    is_weather = "KXHIGH" in local_symbol or "KXLOW" in local_symbol
+                    is_weather = any(
+                        token in local_symbol
+                        for token in ("KXHIGH", "KXLOW", "KXRAIN", "KXSNOW", "KXWIND")
+                    )
 
                     if is_weather:
                         from forecast.strategy_engine import _parse_weather_threshold
@@ -563,11 +733,22 @@ def run_position_monitor() -> None:
                         # Get current model probability
                         w_data = get_weather_data(local_symbol.split('-')[0])
                         threshold = _parse_weather_threshold(local_symbol)
-                        model_p = 0.0
-                        if w_data and threshold is not None:
-                            members = w_data.get("members_high" if "HIGH" in local_symbol else "members_low", [])
-                            if members:
-                                model_p = sum(1 for m in members if m >= threshold) / len(members)
+                        if not w_data or threshold is None:
+                            model_yes = 0.0
+                            held_model_p = 0.0
+                            intraday = {}
+                            metar_temp = None
+                            hrrr_high = None
+                            daily_max = None
+                            daily_min = None
+                        else:
+                            model_yes = _weather_contract_yes_probability(local_symbol, w_data) or 0.0
+                            held_model_p = model_yes if right == "C" else (1.0 - model_yes)
+                            intraday = w_data.get("intraday", {})
+                            metar_temp = intraday.get("metar_temp")
+                            hrrr_high = intraday.get("hrrr_high")
+                            daily_max = intraday.get("daily_max", metar_temp)
+                            daily_min = intraday.get("daily_min", metar_temp)
 
                         # RULE 1: Narrow Bin Take-Profit (85c)
                         # If market prices us at 85% and it's a weather bin, take the money.
@@ -577,30 +758,25 @@ def run_position_monitor() -> None:
 
                         # RULE 2: Model Invalidation (Stop-Loss)
                         # If our own model prob drops below 50%, the thesis is dead.
-                        elif model_p < 0.50 and model_p > 0:
-                            logger.warning(f"[Sovereign Exit] SL Triggered: {local_symbol} model_p={model_p:.2f} < 0.50")
+                        elif held_model_p < 0.50 and held_model_p > 0:
+                            logger.warning(
+                                f"[Sovereign Exit] SL Triggered: {local_symbol} "
+                                f"held_p={held_model_p:.2f} < 0.50"
+                            )
                             resolved = True
                         
                         # ── v19.1.10: Intraday Precinct (METAR/HRRR) ─────────
-                        intraday = w_data.get("intraday", {})
-                        metar_temp = intraday.get("metar_temp")
-                        hrrr_high = intraday.get("hrrr_high")
-                        
                         # v19.1.10: Sovereign Instrumentation (Intraday Layer)
                         try:
                             from monitoring import metrics
-                            if metar_temp is not None:
+                            if metar_temp is not None and threshold is not None:
                                 metrics.WEATHER_METAR_DIFF_GAUGE.labels(ticker=local_symbol).set(metar_temp - threshold)
-                            if hrrr_high is not None:
+                            if hrrr_high is not None and threshold is not None:
                                 metrics.WEATHER_HRRR_DIFF_GAUGE.labels(ticker=local_symbol).set(hrrr_high - threshold)
                         except Exception as _m_err:
                             logger.debug(f"Metrics update failed: {_m_err}")
                         
-                        # v19.8: Use Daily Watermarks for settlement-aware exits
-                        daily_max = intraday.get("daily_max", metar_temp)
-                        daily_min = intraday.get("daily_min", metar_temp)
-                        
-                        if daily_max is not None or daily_min is not None:
+                        if right == "C" and (daily_max is not None or daily_min is not None):
                             # 1. BUST EXIT (Salvage Capital)
                             # If the daily high/low has already breached our strike
                             is_high = "HIGH" in local_symbol
@@ -693,13 +869,13 @@ def run_position_monitor() -> None:
                     pass
 
             if resolved:
-
                 try:
                     # SRE FIX: Dynamic Liquidity-Checked Limit Orders
                     quote = broker.get_quote(local_symbol)
-                    current_bid = float(quote.get('bid', 0))
-                    current_bid_vol = int(quote.get('bid_vol', 0))
-                    
+                    bid_key, bid_vol_key = _held_bid_fields(right)
+                    current_bid = float(quote.get(bid_key, 0) or 0)
+                    current_bid_vol = int(quote.get(bid_vol_key, 0) or 0)
+
                     if current_bid > 0.01 and current_bid_vol >= qty:
                         flatten_res = broker.place_sell_order(
                             contract_dict={"local_symbol": local_symbol},
@@ -709,10 +885,43 @@ def run_position_monitor() -> None:
                             side="yes" if right == "C" else "no",
                             reason="sovereign_exit_limit"
                         )
+                        if flatten_res.get("status") != "executed":
+                            logger.warning(
+                                f"Limit exit for {local_symbol} did not execute "
+                                f"(status={flatten_res.get('status')}). Falling back to market."
+                            )
+                            flatten_res = broker.flatten_position(
+                                local_symbol,
+                                right,
+                                qty,
+                                reason="limit_unfilled_market_fallback",
+                            )
                     else:
-                        logger.warning(f"Exit skipped for {local_symbol}: Insufficient bid liquidity.")
-                        continue # Skip notification if no order sent
-                    
+                        logger.warning(
+                            f"Exit limit degraded for {local_symbol}: "
+                            f"bid={current_bid:.2f} bid_vol={current_bid_vol} qty={qty}. "
+                            "Falling back to market."
+                        )
+                        flatten_res = broker.flatten_position(
+                            local_symbol,
+                            right,
+                            qty,
+                            reason="illiquid_limit_market_fallback",
+                        )
+
+                    if flatten_res.get("status") != "executed":
+                        logger.warning(
+                            f"Exit still pending for {local_symbol}; leaving position open "
+                            f"(status={flatten_res.get('status')})."
+                        )
+                        continue
+
+                    mark_forecast_position_closed(
+                        local_symbol,
+                        exit_type="resolved_or_expired",
+                        db_path=db_path,
+                    )
+
                     # Notify via Telegram/DB
                     if flatten_res.get("order_id") != "ERR":
                         try:

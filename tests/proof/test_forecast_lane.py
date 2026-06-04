@@ -1,5 +1,5 @@
 """
-tests/proof/test_forecast_lane.py — Proof tests for the ForecastEx trading lane.
+tests/proof/test_forecast_lane.py — Proof tests for the Kalshi forecast trading lane.
 
 Coverage:
   1.  Schema: all 5 forecast tables created with correct columns + indexes
@@ -18,9 +18,9 @@ Coverage:
   14. Tiny-bankroll sizing: contracts_from_fraction respects all caps
   15. Novelty / non-economic markets fail-closed at discovery filter
   16. Dashboard forecast tab: render function importable + has correct name
-  17. Dashboard app.py: FORECAST TRADING tab and ARCHIVED FUTURES (MES) tab present
-  18. MES archival: FUTURES_LANE_ACTIVE is absent or False
-  19. Validator: ForecastEx section present in validate.py
+  17. Dashboard app.py: single-page compatibility stub remains importable
+  18. Active repo no longer carries the archived futures broker
+  19. Validator: Kalshi-only section present in validate.py
   20. Promotion compatibility: init_forecast_db does not drop existing tables
 """
 
@@ -586,7 +586,7 @@ def test_sizing_respects_per_event_cap():
     from forecast.primitives import contracts_from_fraction
 
     # fraction=0.10, bankroll=$100, per_event_cap=10% → max $10 at risk
-    # ask=0.10 → cost_per_contract = $10 → max 1 contract
+    # ask=0.10 and fee=0.07 → total cash per contract = $0.17 → max 58 shares
     n = contracts_from_fraction(
         fraction=0.10,
         bankroll=100.0,
@@ -594,8 +594,9 @@ def test_sizing_respects_per_event_cap():
         per_event_cap_pct=0.10,
         deployed_pct=0.0,
         max_deployed_pct=0.35,
+        fee_per_contract=0.07,
     )
-    assert n == 1, f"Expected 1 contract, got {n}"
+    assert n == 58, f"Expected 58 contracts, got {n}"
 
 
 def test_sizing_respects_deployment_cap():
@@ -610,6 +611,7 @@ def test_sizing_respects_deployment_cap():
         per_event_cap_pct=0.10,
         deployed_pct=0.35,
         max_deployed_pct=0.35,
+        fee_per_contract=0.07,
     )
     assert n == 0, f"Expected 0 contracts when deployed cap hit, got {n}"
 
@@ -631,30 +633,25 @@ def test_sizing_zero_when_no_edge():
     assert f == 0.0, f"Expected 0 when q < p_cost, got {f}"
 
 
-# ── 15. Non-economic markets fail-closed ──────────────────────────────────────
+# ── 15. Weather market filter fail-closed ─────────────────────────────────────
 
 
-def test_discovery_rejects_non_economic_markets():
-    """_is_economic_market must return False for sports, politics, entertainment."""
-    from execution.forecastex_broker import _is_economic_market
+def test_discovery_rejects_non_weather_markets():
+    """_is_weather_market must return False for non-weather subjects."""
+    from execution.kalshi_broker import _is_weather_market
 
-    assert not _is_economic_market("SUPERBOWL", "Super Bowl Winner 2026", "sports")
-    assert not _is_economic_market("ELECTION", "US Presidential Election", "politics")
-    assert not _is_economic_market("OSCARS", "Best Picture Oscar 2026", "entertainment")
+    assert not _is_weather_market("SUPERBOWL", "Super Bowl Winner 2026", "sports")
+    assert not _is_weather_market("ELECTION", "US Presidential Election", "politics")
+    assert not _is_weather_market("OSCARS", "Best Picture Oscar 2026", "entertainment")
 
 
-def test_discovery_accepts_economic_markets():
-    """_is_economic_market must return True for Fed, CPI, payroll, unemployment."""
-    from execution.forecastex_broker import _is_economic_market
+def test_discovery_accepts_weather_markets():
+    """_is_weather_market must return True for rain, temperature, and storm markets."""
+    from execution.kalshi_broker import _is_weather_market
 
-    assert _is_economic_market("CPI", "CPI YoY >= 3.0% for March", "economics")
-    assert _is_economic_market(
-        "FOMC", "Fed Funds Rate >= 5.25% after March meeting", ""
-    )
-    assert _is_economic_market(
-        "NFP", "Nonfarm Payrolls >= 200K for February", "employment"
-    )
-    assert _is_economic_market("UNRATE", "Unemployment Rate >= 4.0%", "macro")
+    assert _is_weather_market("KXRAINNY", "Will it rain in NYC?", "weather")
+    assert _is_weather_market("KXHIGHCHI", "Chicago temperature above 80?", "")
+    assert _is_weather_market("LANDFALL", "Will the storm make landfall?", "climate")
 
 
 # ── 16–17. Dashboard alignment ────────────────────────────────────────────────
@@ -677,41 +674,38 @@ def test_dashboard_app_tab_structure():
     assert "bot_state" in src, "single-page dashboard must import bot_state"
 
 
-# ── 18. MES archival ──────────────────────────────────────────────────────────
+# ── 18. Active-repo purity ────────────────────────────────────────────────────
 
 
 def test_mes_archival_lane_not_active():
-    """FUTURES_LANE_ACTIVE must be absent or False — MES is dormant."""
+    """FUTURES_LANE_ACTIVE must be absent or False in the active Kalshi repo."""
     import config
 
     active = getattr(config, "FUTURES_LANE_ACTIVE", False)
-    assert not active, (
-        "FUTURES_LANE_ACTIVE is True — set it to False to archive MES lane"
-    )
+    assert not active, "FUTURES_LANE_ACTIVE should remain disabled in the active repo"
 
 
-def test_mes_broker_code_preserved():
-    """execution/ibkr_broker.py must still exist (code preserved for reactivation)."""
+def test_legacy_futures_broker_removed_from_active_repo():
+    """execution/ibkr_broker.py should not remain in the active Kalshi repo."""
     broker_path = os.path.join(_ROOT, "execution", "ibkr_broker.py")
-    assert os.path.exists(broker_path), "ibkr_broker.py must not be deleted"
+    assert not os.path.exists(broker_path), "ibkr_broker.py should be archived out of the active repo"
 
 
 # ── 19. Validator ─────────────────────────────────────────────────────────────
 
 
-def test_validator_has_forecastex_section():
-    """Validator implementation must contain the ForecastEx lane section."""
+def test_validator_has_kalshi_section():
+    """Validator implementation must describe the Kalshi-only runtime checks."""
     wrapper_path = os.path.join(_ROOT, "scripts", "validate.py")
     body_path = os.path.join(_ROOT, "scripts", "validate_body.py")
     assert os.path.exists(wrapper_path), "validate.py not found"
     assert os.path.exists(body_path), "validate_body.py not found"
     src = open(body_path).read()
-    assert "ForecastEx lane" in src, "ForecastEx section missing from validate_body.py"
-    assert "READY" in src, "READY status string missing from validate_body.py"
-    assert "BLOCKED" in src, "BLOCKED status string missing from validate_body.py"
-    assert "ACTION NEEDED" in src, (
-        "ACTION NEEDED status string missing from validate_body.py"
-    )
+    assert "Kalshi-only preflight validator" in src
+    assert "--- Kalshi Lane ---" in src
+    assert "KALSHI_API_KEY_ID" in src
+    assert "FORECAST_AUTONOMOUS_ENABLED" in src
+    assert "SHADOW_EXECUTION" in src
 
 
 # ── 20. Promotion compatibility ───────────────────────────────────────────────

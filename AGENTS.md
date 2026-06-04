@@ -1,73 +1,77 @@
-# AGENTS.md — Algo Trading System Knowledge Base
-# Auto-loaded by Codex at the start of every session.
-# This file is the canonical repo memory.
-# When you change runtime truth, update this file and append CHANGELOG.md.
+# AGENTS.md — Kalshi Weather Engine Repo Memory
+
+This repository is now the active Kalshi-only execution tree.
 
 ## Canonical Truth
 
 - Repo root: `/Users/joshmacbookair2020/Projects/algo_trading_final`
-- Canonical version: `v19.1.KALSHI` (`2026-06-03`)
-- Canonical active lane: **Kalshi Weather Prediction Engine** (Sovereign Precipitation)
-- **Status:** **SOVEREIGN WEATHER**. Hardened Risk & Precipitation Alpha.
-- **Critical Changes (v19.1.KALSHI):**
-  - **$10 Hard Ceiling**: Implemented a non-negotiable $10.00 USD cap per position to prevent over-allocation on high-balance accounts.
-  - **Hard Architectural Isolation**: Excised all Coinbase Crypto Spot Scalp logic. The repository is now a dedicated, hardened environment for Kalshi Prediction Markets.
-  - **Unified Entry Point**: Consolidated all launch paths into a single `main.py` focusing strictly on weather.
-  - **Sovereign SRE Oracle**: Upgraded the Telegram AI agent to `gemini-2.0-flash` with direct technical execution mandates (Action-First).
+- Canonical lane: `forecast`
+- Runtime model: lean dual process
+- Trading mode: live-only Kalshi weather execution
+- Exposure truth: broker-first, ledgerless, fee-aware
+- Settlement truth: `forecast_resolutions`
+- Learning truth: Weather RBI calibrates only on resolved labels, never inferred PnL
 
-## What This System Is Now
+## Active Runtime
 
-The repository is operationally governed as:
+- `sniper_cron.py` runs one Kalshi execution pass and exits.
+- `telegram_daemon.py` runs the Telegram operator/oracle process.
+- `forecast/runner.py` exposes `run_execution_cycle()` as the canonical single-pass entrypoint.
+- `execution/kalshi_broker.py` is the only active broker adapter in the repo.
+- `docker-compose.yml` starts only `execution-engine` and `telegram-oracle`.
+- `deploy.sh` deploys the lean Kalshi stack to the droplet.
 
-- **Authoritative live lane:** **Kalshi Weather Engine** (31 US Cities, GFS/ECMWF/HRRR Ensembles).
-- **Active AI:** **Sovereign SRE Oracle** (Telegram agent) providing deep analysis and technical execution.
-- **Current live decision standard:** ledgerless, broker-first, fee-aware, ensemble-gated.
-- **Current launch target:** live-only.
-- **Current dashboard authority:** HUD Dashboard API (v19.1.KALSHI).
-- **Incident Response:** Grafana IRM with log-watchdog log-alerter.
+## Scope Boundary
 
-## Sovereign SRE Oracle (Telegram Agent)
-The Telegram bot acts as a mobile terminal for the SRE Oracle. It is authorized and mandated to:
-1. **Action First**: Call tools (`execute_sql`, `read_file`, `list_files`, `replace_text`, `run_safe_command`) immediately when asked questions.
-2. **Deep Reasoning**: UseSequencing tools to explore the codebase and verify system state.
-3. **Technical Execution**: Fix configuration errors or adjust trading parameters via `replace_text`.
-4. **Empirical Reporting**: Never speculate; only report what the data shows.
+- Active repo scope is Kalshi weather trading only.
+- Crypto, spot, stocks, futures, and legacy research surfaces are archived outside the active tree.
+- Do not reintroduce non-Kalshi brokers, execution lanes, or proof suites into this repo.
 
-## Purged Systems
-The following systems have been **removed or moved to backup**:
-- **Coinbase Crypto Spot Scalp**: All brokers, indicators, and ML engines moved to `~/Desktop/crypto_scalp_backup/`.
-- **v10 Crypto Runner**: Excised.
-- **MES/Futures**: Archived.
-- **Paper Trading**: Excised. Strictly live-only.
+## Safety Principles
 
-## Hard Safety Principles
-- `AGENTS.md` is the only authoritative repo memory.
-- No broad rewrites of core forecasting logic.
-- No automatic resume after `HALTED`.
-- Broker holdings are the only source of truth for exposure.
+- Broker holdings are the only source of truth for live exposure.
+- No automatic resume after a halt.
+- No inference-based learning labels.
+- No broad rewrites of weather execution logic without proof coverage.
 
-## Key Files (Kalshi Lane)
+## Key Files
 
 | File | Role |
 |---|---|
-| `main.py` | Unified system entry point |
-| `execution/kalshi_broker.py` | Canonical broker execution (Weather-Only) |
-| `forecast/runner.py` | Main execution loop (Discovery, Strategy, Monitor) |
-| `forecast/strategy_engine.py` | Weather Alpha / Sizing / Alpha Gating |
-| `notifications/telegram_bot.py` | Mobile HUD / Command Interface |
-| `notifications/ai_agent.py` | SRE Oracle Reasoning Brain |
-| `dashboard/api/server.py` | HUD Dashboard API |
-| `monitoring/metrics.py` | Prometheus instrumentation |
+| `config.py` | Canonical env/config surface |
+| `execution/kalshi_broker.py` | Signed REST execution + portfolio sync |
+| `forecast/runner.py` | Discovery, quote refresh, strategy eval, monitoring |
+| `forecast/strategy_engine.py` | Weather alpha, economics gate, sizing |
+| `forecast/resolution_sync.py` | Conservative weather settlement ingestion |
+| `data/kalshi_weather_monitor.py` | Ensemble + METAR shadow state |
+| `learning/weather_rbi.py` | Post-resolution Brier-based calibration |
+| `notifications/telegram_bot.py` | Operator interface |
+| `sniper_cron.py` | Single-pass execution worker |
+| `telegram_daemon.py` | Standalone Telegram daemon |
+| `deploy.sh` | Canonical deploy entrypoint |
+
+## Proof Gate
+
+Use the Kalshi proof bundle, not the archived full-suite gate:
+
+```bash
+python3 -m pytest \
+  tests/proof/test_forecast_lane.py \
+  tests/proof/test_resolution_sync.py \
+  tests/proof/test_weather_rbi_truth.py \
+  tests/proof/test_weather_sovereign.py \
+  tests/proof/test_lane_gating.py \
+  tests/proof/test_trading_control.py \
+  tests/proof/test_scheduler_cadence_config.py \
+  tests/proof/test_runtime_layer.py \
+  -k "forecast or weather or rbi or lane_economics_forecast or forecast_lane"
+```
 
 ## Operator Commands
 
 ```bash
-python3 main.py
-python3 -m pytest tests/proof/test_weather_sovereign.py
+python3 sniper_cron.py
+python3 telegram_daemon.py
+python3 scripts/verify_kalshi_connection.py
+python3 scripts/validate.py
 ```
-
-## Change Discipline
-When behavior changes:
-- Update `AGENTS.md`.
-- Update `GEMINI.md` if workflow guidance changed.
-- Prefer targeted proof tests in `tests/proof/`.

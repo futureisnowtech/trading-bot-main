@@ -1,5 +1,6 @@
 import sqlite3
 import logging
+import json
 from datetime import datetime, timezone, timedelta
 import os
 from typing import Dict, Optional
@@ -112,63 +113,70 @@ def generate_sovereign_payload() -> dict:
     db_path = _get_db_path()
     payload = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "crypto_lane": {},
         "weather_lane": {},
         "sre_health": {}
     }
 
-    # 1. Crypto Lane State (Broker-First Truth)
-    try:
-        from execution.coinbase_spot_broker import get_coinbase_broker
-        cb = get_coinbase_broker()
-        if cb.connect():
-            holdings = cb.get_holdings()
-            balance = cb.get_balance()
-            equity = cb.get_total_equity()
-            deployed = equity - balance
-            payload["crypto_lane"] = {
-                "status": "OPERATIONAL",
-                "equity_usd": round(equity, 2),
-                "deployed_usd": round(deployed, 2),
-                "exposure_pct": round((deployed / equity * 100), 1) if equity > 0 else 0,
-                "holdings_count": len(holdings)
-            }
-    except Exception as e:
-        payload["crypto_lane"]["error"] = str(e)
-
-    # 2. Weather Lane State
+    # 1. Weather Lane State
     try:
         conn = sqlite3.connect(db_path)
-        active_weather = conn.execute("SELECT COUNT(*) FROM forecast_contracts WHERE active=1").fetchone()[0]
-        recent_fills = conn.execute("SELECT COUNT(*) FROM forecast_positions").fetchone()[0]
-        
-        # Check shadow state for edge visibility
+        conn.row_factory = sqlite3.Row
+        active_weather = conn.execute(
+            "SELECT COUNT(*) FROM forecast_contracts WHERE active=1"
+        ).fetchone()[0]
+        open_positions = conn.execute(
+            "SELECT ticker, qty, entry_price, side FROM forecast_positions WHERE active=1"
+        ).fetchall()
+        recent_fills = len(open_positions)
+
+        lane_snapshot = {}
+        try:
+            lane_row = conn.execute(
+                "SELECT snapshot_json FROM lane_runtime_state WHERE lane_id='forecast'"
+            ).fetchone()
+            if lane_row and lane_row["snapshot_json"]:
+                lane_snapshot = json.loads(lane_row["snapshot_json"])
+        except Exception:
+            lane_snapshot = {}
+
         from data.kalshi_weather_monitor import _WEATHER_SHADOW_STATE
         edges_visible = len(_WEATHER_SHADOW_STATE)
-        
-        # v19.1.10: Sovereign Intelligence Enrichment
-        sovereign_insights = []
+
+        hub_exposure = {}
         try:
-            from forecast.db import get_open_forecast_positions
-            open_w_pos = get_open_forecast_positions(db_path=db_path)
-            from dashboard.data.forecast import get_sovereign_weather_insights
-            for op in open_w_pos:
-                ins = get_sovereign_weather_insights(op["ticker"])
-                if ins: sovereign_insights.append(ins)
-        except Exception: pass
+            from forecast.strategy_engine import _get_city_hub
+
+            for row in open_positions:
+                hub = _get_city_hub(row["ticker"])
+                exposure = float(row["qty"] or 0.0) * float(row["entry_price"] or 0.0)
+                hub_exposure[hub] = round(hub_exposure.get(hub, 0.0) + exposure, 2)
+        except Exception:
+            hub_exposure = {}
+
+        rbi_row = conn.execute(
+            """
+            SELECT brier_score, win_rate, ensemble_accuracy, sample_size
+            FROM weather_calibration
+            ORDER BY ts DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        rbi = dict(rbi_row) if rbi_row else {}
 
         payload["weather_lane"] = {
             "status": "OPERATIONAL",
             "active_markets": active_weather,
             "total_positions": recent_fills,
             "weather_edge_visibility": edges_visible,
-            "sovereign_insights": sovereign_insights
+            "equity_usd": lane_snapshot.get("equity", 0.0),
+            "hub_exposure": hub_exposure,
+            "rbi": rbi,
         }
         conn.close()
     except Exception as e:
         payload["weather_lane"]["error"] = str(e)
 
-    # 3. SRE Health
+    # 2. SRE Health
     try:
         from runtime.runtime_state import get_system_state
         sys_state = get_system_state(db_path)
@@ -204,8 +212,12 @@ def send_sovereign_briefing():
     
     # 2. Expert Synthesis (LLM Analyst)
     try:
-        from notifications.ai_agent import generate_sovereign_briefing
-        analysis = generate_sovereign_briefing(payload)
+        from notifications.ai_agent import ask_ai
+        analysis = ask_ai(
+            "Generate a concise Sovereign weather briefing from this payload. "
+            "Focus on live weather execution risk, deployment state, and any obvious anomalies.\n\n"
+            + json.dumps(payload, indent=2)
+        )
     except Exception as e:
         analysis = f"⚠️ Analysis Engine Error: {e}"
 
@@ -214,7 +226,7 @@ def send_sovereign_briefing():
     stats_footer = (
         f"\n---\n"
         f"📍 <b>Live Metrics</b>\n"
-        f"Crypto Exp: {payload.get('crypto_lane', {}).get('exposure_pct', 0)}%\n"
+        f"Weather Equity: ${payload.get('weather_lane', {}).get('equity_usd', 0):,.2f}\n"
         f"Weather Targets: {payload.get('weather_lane', {}).get('active_markets', 0)}\n"
         f"SRE Integrity: {payload.get('sre_health', {}).get('integrity_score', 0)}%"
     )

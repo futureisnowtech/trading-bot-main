@@ -6,7 +6,7 @@ import os
 import sqlite3
 from pathlib import Path
 
-from config import DB_PATH
+from config import DB_PATH, get_kalshi_private_key_path
 
 
 def _connect() -> sqlite3.Connection:
@@ -27,12 +27,12 @@ def _check_sqlite() -> dict:
 
 def _check_kalshi_credentials() -> dict:
     key_id = os.getenv("KALSHI_API_KEY_ID", "").strip()
-    key_path = os.getenv("KALSHI_PRIVATE_KEY_PATH", "").strip()
+    key_path = get_kalshi_private_key_path().strip()
     ok = bool(key_id and key_path)
     detail = "present"
     if not ok:
         detail = "missing key id or private key path"
-    elif not Path(key_path).expanduser().exists():
+    elif not Path(key_path).exists():
         ok = False
         detail = f"private key path missing: {key_path}"
     return {"name": "kalshi_credentials", "ok": ok, "detail": detail}

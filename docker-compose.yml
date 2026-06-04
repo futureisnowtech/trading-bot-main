@@ -8,6 +8,7 @@ services:
       - .env
     volumes:
       - ./logs:/app/logs
+      - ./kalshi_private_key.pem:/run/secrets/kalshi_private_key.pem:ro
     command:
       - /bin/bash
       - -lc
@@ -27,6 +28,7 @@ services:
       - .env
     volumes:
       - ./logs:/app/logs
+      - ./kalshi_private_key.pem:/run/secrets/kalshi_private_key.pem:ro
     command: ["python3", "telegram_daemon.py"]
     logging:
       driver: json-file

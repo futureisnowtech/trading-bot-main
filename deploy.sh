@@ -74,6 +74,7 @@ rsync -avz \
     -e "ssh -p ${NYC_PORT} -o StrictHostKeyChecking=no" \
     --exclude '.git/' \
     --exclude '.env' \
+    --exclude 'kalshi_private_key*.pem' \
     --exclude 'logs' \
     --exclude 'version.txt' \
     --exclude 'deploy_manifest.json' \
@@ -92,6 +93,12 @@ export IMAGE_NAME="${LOCAL_IMAGE_NAME}"
 if [ ! -f .env ]; then
     echo "ERROR: ${PROJECT_DIR}/.env is missing on the droplet."
     echo "       Restore the runtime env file before starting containers."
+    exit 1
+fi
+
+if [ ! -f kalshi_private_key.pem ]; then
+    echo "ERROR: ${PROJECT_DIR}/kalshi_private_key.pem is missing on the droplet."
+    echo "       Restore the Kalshi signing key before starting containers."
     exit 1
 fi
 

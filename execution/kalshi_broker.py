@@ -22,14 +22,19 @@ from cryptography.hazmat.primitives import serialization
 
 # Add root to path for logging_db
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import KALSHI_FEE_PER_CONTRACT, SHADOW_EXECUTION
+from config import (
+    KALSHI_API_KEY_ID,
+    KALSHI_FEE_PER_CONTRACT,
+    REPO_ROOT,
+    SHADOW_EXECUTION,
+    resolve_runtime_path,
+)
 from logging_db.trade_logger import log_event, log_trade
 
 logger = logging.getLogger(__name__)
 
 # ── Credentials ───────────────────────────────────────────────────────────────
-KALSHI_API_KEY_ID = os.getenv("KALSHI_API_KEY_ID")
-KALSHI_PRIVATE_KEY_PATH = os.getenv("KALSHI_PRIVATE_KEY_PATH")
+KALSHI_PRIVATE_KEY_PATH = os.getenv("KALSHI_PRIVATE_KEY_PATH", "").strip()
 KALSHI_API_BASE = "https://external-api.kalshi.com"
 
 # ─── Kalshi Weather Filter (Purified) ────────────────────────────────────────
@@ -61,12 +66,26 @@ class KalshiBroker:
         
     def connect(self) -> bool:
         """Verify credentials and load private key for signing."""
-        if not KALSHI_API_KEY_ID or not KALSHI_PRIVATE_KEY_PATH:
+        private_key_path = resolve_runtime_path(
+            KALSHI_PRIVATE_KEY_PATH,
+            "/run/secrets/kalshi_private_key.pem",
+            os.path.join(REPO_ROOT, "kalshi_private_key.pem"),
+        )
+
+        if not KALSHI_API_KEY_ID or not private_key_path:
             log_event("ERROR", "KalshiBroker", "Missing KALSHI_API_KEY_ID or KALSHI_PRIVATE_KEY_PATH in .env")
             return False
 
+        if not os.path.exists(private_key_path):
+            log_event(
+                "ERROR",
+                "KalshiBroker",
+                f"Kalshi private key not found at resolved path: {private_key_path}",
+            )
+            return False
+
         try:
-            with open(KALSHI_PRIVATE_KEY_PATH, 'r') as f:
+            with open(private_key_path, 'r') as f:
                 key_pem = f.read()
             
             self._private_key = serialization.load_pem_private_key(

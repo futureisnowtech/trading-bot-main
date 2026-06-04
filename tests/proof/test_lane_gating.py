@@ -82,6 +82,29 @@ def test_health_check_healthy_with_credentials_and_low_error_rate(
     assert checks["recent_errors"]["detail"] == "0 recent errors"
 
 
+def test_health_check_resolves_repo_secret_fallback(proof_runtime, monkeypatch):
+    import config as cfg
+    import monitoring.health_check as hc
+
+    repo_key = proof_runtime.db_path.parent / "kalshi_private_key.pem"
+    repo_key.write_text("test-key", encoding="utf-8")
+
+    monkeypatch.setenv("KALSHI_API_KEY_ID", "demo-key-id")
+    monkeypatch.setenv(
+        "KALSHI_PRIVATE_KEY_PATH",
+        "/missing/host/path/kalshi_private_key.pem",
+    )
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "telegram-token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "12345")
+    monkeypatch.setattr(cfg, "REPO_ROOT", str(proof_runtime.db_path.parent), raising=False)
+    monkeypatch.setattr(hc, "DB_PATH", str(proof_runtime.db_path), raising=False)
+
+    result = hc.run_health_check(force=True)
+    checks = {check["name"]: check for check in result["checks"]}
+
+    assert checks["kalshi_credentials"]["ok"] is True
+
+
 def test_error_rate_turns_degraded_when_recent_errors_spike(proof_runtime, monkeypatch):
     import monitoring.health_check as hc
 

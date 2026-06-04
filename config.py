@@ -5,6 +5,7 @@ Never hardcode anything that belongs here.
 
 import os
 from datetime import time as dt_time
+from pathlib import Path
 
 try:
     from dotenv import load_dotenv
@@ -36,6 +37,43 @@ load_dotenv()
 # v19.1.12: Canonical Repository Root
 _ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = _ROOT_DIR
+
+
+def resolve_runtime_path(raw_path: str, *fallbacks: str) -> str:
+    """Resolve a runtime path across host and container environments."""
+    raw_value = (raw_path or "").strip()
+    candidates: list[Path] = []
+
+    if raw_value:
+        expanded = Path(raw_value).expanduser()
+        candidates.append(expanded)
+        if expanded.is_absolute():
+            candidates.append(Path(REPO_ROOT) / expanded.name)
+        else:
+            candidates.append(Path(REPO_ROOT) / expanded)
+
+    for fallback in fallbacks:
+        if fallback:
+            candidates.append(Path(fallback).expanduser())
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        candidate_str = str(candidate)
+        if candidate_str in seen:
+            continue
+        seen.add(candidate_str)
+        if candidate.exists():
+            return candidate_str
+
+    return raw_value
+
+
+def get_kalshi_private_key_path() -> str:
+    return resolve_runtime_path(
+        os.getenv("KALSHI_PRIVATE_KEY_PATH", "").strip(),
+        "/run/secrets/kalshi_private_key.pem",
+        os.path.join(REPO_ROOT, "kalshi_private_key.pem"),
+    )
 
 # ════════════════════════════════════════════════════════════════════
 # SYSTEM MODE
@@ -72,7 +110,7 @@ GEMINI_MODEL_EXTENDED: str = "gemini-3.5-pro"  # Frontier Reasoning
 # KALSHI (Weather Prediction Engine)
 # ════════════════════════════════════════════════════════════════════
 KALSHI_API_KEY_ID: str = os.getenv("KALSHI_API_KEY_ID", "").strip()
-KALSHI_PRIVATE_KEY_PATH: str = os.getenv("KALSHI_PRIVATE_KEY_PATH", "").strip()
+KALSHI_PRIVATE_KEY_PATH: str = get_kalshi_private_key_path()
 KALSHI_ENABLED: bool = os.getenv("KALSHI_ENABLED", "true").lower() == "true"
 FORECAST_LANE_ACTIVE: bool = (
     os.getenv("FORECAST_LANE_ACTIVE", "true").lower() == "true"

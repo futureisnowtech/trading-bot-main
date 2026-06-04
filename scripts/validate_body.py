@@ -55,6 +55,8 @@ try:
 except ImportError:
     fail("python-dotenv not installed")
 
+import config as cfg
+
 required_env = [
     "KALSHI_API_KEY_ID",
     "KALSHI_PRIVATE_KEY_PATH",
@@ -69,10 +71,10 @@ for key in required_env:
     else:
         fail(f"{key} missing from .env")
 
-private_key_path = os.getenv("KALSHI_PRIVATE_KEY_PATH", "").strip()
+private_key_path = cfg.get_kalshi_private_key_path().strip()
 if private_key_path:
-    if Path(private_key_path).expanduser().exists():
-        ok("Kalshi private key path exists")
+    if Path(private_key_path).exists():
+        ok(f"Kalshi private key path exists ({private_key_path})")
     else:
         fail(f"KALSHI_PRIVATE_KEY_PATH does not exist: {private_key_path}")
 
@@ -84,8 +86,6 @@ else:
 
 print("\n--- Kalshi Lane ---")
 try:
-    import config as cfg
-
     if float(cfg.ACCOUNT_SIZE) <= 0:
         fail(f"ACCOUNT_SIZE must be positive, got {cfg.ACCOUNT_SIZE}")
     else:

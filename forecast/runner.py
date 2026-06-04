@@ -335,8 +335,9 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                 if not result.econ_approved or result.position_contracts <= 0:
                     veto_msg = f"[ForecastRunner] {local_sym} vetoed: {result.veto_reason or 'sizing_zero'}"
                     logger.debug(veto_msg)
-                    # Still log to DB for X-Ray observability
-                    log_event("INFO", "ForecastRunner", veto_msg)
+                    # SRE FIX: Upgrade to WARNING if it's an economic veto so incident tracker picks it up
+                    lvl = "WARNING" if not result.econ_approved else "INFO"
+                    log_event(lvl, "ForecastRunner", veto_msg)
                     continue
 
                 # v19.1.12: Concurrency & Swap Logic

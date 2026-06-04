@@ -405,7 +405,8 @@ async def run_bot():
 
         await app.initialize()
         await app.start()
-        await app.updater.start_polling()
+        # SRE FIX: drop_pending_updates helps resolve polling conflicts on rapid restart
+        await app.updater.start_polling(drop_pending_updates=True)
 
         logger.info("Kalshi Weather Bot is now live.")
         stop_event = asyncio.Event()

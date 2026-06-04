@@ -88,7 +88,7 @@ MAX_HOURS_TO_RES: float = 48.0
 
 # v19.7: Sovereign Precision Calibration
 # Raising the bar for Alpha to ensure Win-Rate Restoration.
-EV_THRESHOLD: float = 0.30  # v19.9: Elite Grand Slams only (30% Edge floor)
+EV_THRESHOLD: float = 0.05  # v19.9: Hardened 5% post-fee edge floor
 MAX_MODEL_MARKET_DIVERGENCE: float = 0.20  # v19.9: Market Truth Veto (20% cap)
 
 # Longshot Bias Gate

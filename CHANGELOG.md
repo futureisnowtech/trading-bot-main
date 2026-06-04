@@ -1,6 +1,7 @@
 # CHANGELOG
 
 ## 2026-06-04
+- Added `scripts/gate_audit.py` plus proof coverage so market-reality vetoes and shadow-passed entries can be audited in one command.
 - Replaced the production `execution-engine` shell loop with a real `execution_daemon.py` process so weather shadow state survives across trading cycles.
 - Added one-shot weather cold-start hydration in `forecast.runner.run_execution_cycle()` so a restart cannot fail closed on `missing_weather_data` before the monitor warms up.
 - Made `data/kalshi_weather_monitor.py` idempotent and concurrency-safe enough for live daemon startup, including targeted series refresh for active Kalshi weather contracts.

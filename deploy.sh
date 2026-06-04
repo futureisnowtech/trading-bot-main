@@ -70,7 +70,6 @@ echo "  OK: committed tree exported to ${TMP_EXPORT_DIR}"
 echo "Syncing exact committed tree to droplet (SHA: ${LOCAL_SHA})..."
 rsync -avz \
     --delete \
-    --delete-excluded \
     --force \
     -e "ssh -p ${NYC_PORT} -o StrictHostKeyChecking=no" \
     --exclude '.git/' \
@@ -89,6 +88,12 @@ set -euo pipefail
 cd ${PROJECT_DIR}
 
 export IMAGE_NAME="${LOCAL_IMAGE_NAME}"
+
+if [ ! -f .env ]; then
+    echo "ERROR: ${PROJECT_DIR}/.env is missing on the droplet."
+    echo "       Restore the runtime env file before starting containers."
+    exit 1
+fi
 
 echo "  Attempting to pull latest images from GHCR..."
 if ! docker compose pull; then

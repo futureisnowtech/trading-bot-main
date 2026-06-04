@@ -89,6 +89,7 @@ set -euo pipefail
 cd ${PROJECT_DIR}
 
 export IMAGE_NAME="${LOCAL_IMAGE_NAME}"
+export COMPOSE_BAKE=false
 
 if [ ! -f .env ]; then
     echo "ERROR: ${PROJECT_DIR}/.env is missing on the droplet."
@@ -102,19 +103,69 @@ if [ ! -f kalshi_private_key.pem ]; then
     exit 1
 fi
 
-echo "  Attempting to pull latest images from GHCR..."
-if ! docker compose pull; then
-    echo "  WARNING: GHCR pull failed. Falling back to local build..."
-    docker compose build
-fi
+echo "  Building lean services from the exact committed tree..."
+docker compose build --pull
 
 echo "  Hot-reloading services..."
-docker compose up -d --remove-orphans
+docker compose up -d --remove-orphans --force-recreate
 
 echo "  Waiting for containers..."
-sleep 15
+sleep 10
 docker ps | grep execution-engine
 docker ps | grep telegram-oracle
+
+echo "  Verifying forecast lane readiness..."
+VERIFY_OK=0
+for attempt in \$(seq 1 18); do
+    if STATE_JSON=\$(python3 - << 'PYEOF'
+import json
+import sqlite3
+import sys
+
+db_path = "/home/algo-runner/bot/logs/trades.db"
+try:
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute(
+        """
+        SELECT lane_id, connected, health, readiness_state, blocked_reason
+        FROM lane_runtime_state
+        WHERE lane_id='forecast'
+        """
+    ).fetchone()
+except Exception as exc:
+    print(f"sqlite_error:{exc}")
+    sys.exit(1)
+
+if row is None:
+    print("lane_state_missing")
+    sys.exit(1)
+
+payload = dict(row)
+print(json.dumps(payload))
+
+if int(payload.get("connected") or 0) != 1:
+    sys.exit(1)
+if payload.get("health") != "OK":
+    sys.exit(1)
+if payload.get("readiness_state") != "OPERATIONAL":
+    sys.exit(1)
+PYEOF
+    ); then
+        echo "  Forecast lane ready: \${STATE_JSON}"
+        VERIFY_OK=1
+        break
+    fi
+    echo "  Waiting for forecast lane readiness (\${attempt}/18)..."
+    sleep 5
+done
+
+if [ "\${VERIFY_OK}" -ne 1 ]; then
+    echo "ERROR: Forecast lane failed readiness verification."
+    echo "Recent execution-engine logs:"
+    docker logs --tail 120 execution-engine || true
+    exit 1
+fi
 
 echo "  Writing provenance markers..."
 cat > ${PROJECT_DIR}/version.txt << VTXT

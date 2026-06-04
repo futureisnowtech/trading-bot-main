@@ -63,20 +63,22 @@ def run_weather_rbi():
                 # We need the entry price to know the 'forecast'
                 # Find the corresponding BUY trade
                 buy_trade = conn.execute(
-                    "SELECT price FROM trades WHERE symbol=? AND action='BUY' AND ts < ? ORDER BY ts DESC LIMIT 1",
+                    "SELECT price, side FROM trades WHERE symbol=? AND action='BUY' AND ts < ? ORDER BY ts DESC LIMIT 1",
                     (t["symbol"], t["ts"] if "ts" in t.keys() else datetime.now().isoformat())
                 ).fetchone()
                 
                 if not buy_trade: continue
                 
-                f_t = float(buy_trade["price"]) # The forecast probability we paid
-                o_t = 1.0 if float(t["pnl_usd"]) > 0 else 0.0 # Outcome
+                f_t = float(buy_trade["price"])
+                side = str(buy_trade["side"]).upper()
+                implied_prob = f_t if side == "YES" else (1.0 - f_t)
+                o_t = 1.0 if float(t["pnl_usd"]) > 0 else 0.0
                 
-                brier_sum += (f_t - o_t) ** 2
+                brier_sum += (implied_prob - o_t) ** 2
                 wins += int(o_t)
                 
                 # Accuracy: how close was our probability to the outcome
-                accuracy_sum += (1.0 - abs(f_t - o_t))
+                accuracy_sum += (1.0 - abs(implied_prob - o_t))
 
             count = len(trades)
             if count == 0: return

@@ -210,14 +210,13 @@ class KalshiBroker:
 
             for event in all_events:
                 # SRE FIX: HARD WEATHER GATE (Sovereign Mandate Enforcement)
-                e_ticker = event.get("event_ticker", "")
-                category = event.get("category", "")
+                cat = event.get("category", "")
+                ticker = event.get("event_ticker", "")
                 
-                if "Weather" not in category and not e_ticker.startswith("KX"):
-                    logger.debug(f"Rejecting non-weather market: {e_ticker}")
-                    continue  # Skips political/economic bloat instantly
+                if "Weather" not in cat and not ticker.startswith("KX"):
+                    continue
 
-                if not _is_weather_market(e_ticker, event.get("title"), category):
+                if not _is_weather_market(ticker, event.get("title"), cat):
                     continue
                 
                 m_data = self._request("GET", "/trade-api/v2/markets", params={"event_ticker": e_ticker})

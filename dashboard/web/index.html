@@ -176,7 +176,11 @@
         
         eventSource.onmessage = function(event) {
             const data = JSON.parse(event.data);
-            if (data.error) return;
+            if (data.error) {
+                document.getElementById('sys-status').innerText = 'API ERROR';
+                document.getElementById('sys-status').className = 'text-red-600 animate-pulse';
+                return;
+            }
 
             // Global State
             document.getElementById('v-cpu').innerText = `${Math.round(data.vitals.cpu)}%`;
@@ -264,9 +268,12 @@
             const logList = document.getElementById('log-list');
             if (data.events && data.events.length > 0) {
                 logList.innerHTML = data.events.map(e => {
-                    const color = e.level === 'ERROR' || e.level === 'CRITICAL' ? 'text-red-400' : (e.level === 'WARNING' ? 'text-yellow-500' : 'text-slate-400');
+                    let color = 'text-slate-400';
+                    if (e.level === 'CRITICAL') color = 'bg-red-600 text-white font-bold animate-pulse px-2 rounded';
+                    else if (e.level === 'ERROR') color = 'text-red-400';
+                    else if (e.level === 'WARNING') color = 'text-yellow-500';
                     const ts = e.ts ? e.ts.split(' ')[1] || e.ts : '00:00:00';
-                    return `<div class="flex items-start"><span class="text-slate-600 mr-2 shrink-0">[${ts}]</span><span class="${color} break-words">${e.message}</span></div>`;
+                    return `<div class="flex items-start mb-1"><span class="text-slate-600 mr-2 shrink-0">[${ts}]</span><span class="${color} break-words">${e.message}</span></div>`;
                 }).join('');
             }
         };

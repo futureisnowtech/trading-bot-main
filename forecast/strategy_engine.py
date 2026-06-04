@@ -652,17 +652,12 @@ def calculate_continuous_sizing(market_price: float, ensemble_prob: float, capit
     # Multiplier (Convergence/Sigma) applied to final allocated capital
     allocated_capital = capital_base * cap_pct * scaling_factor * multiplier
 
-    # SRE FIX: Tiered Fractional Kelly Sizing (v19.9.2)
+    # SRE FIX: Hard-lock the sizing ceiling
     try:
-        from config import KALSHI_TIER_1_MAX_USD, KALSHI_TIER_2_MAX_USD, KALSHI_TIER_3_MAX_USD
-        if conv_tier == 1:
-            ceiling = float(KALSHI_TIER_1_MAX_USD)
-        elif conv_tier == 2:
-            ceiling = float(KALSHI_TIER_2_MAX_USD)
-        else:
-            ceiling = float(KALSHI_TIER_3_MAX_USD)
+        from config import KALSHI_MAX_USD_PER_POSITION
+        ceiling = float(KALSHI_MAX_USD_PER_POSITION)
     except ImportError:
-        ceiling = 15.0  # Failsafe Standard Limit
+        ceiling = 10.0
         
     if allocated_capital > ceiling:
         allocated_capital = ceiling
@@ -1183,7 +1178,6 @@ def evaluate_contract(
         p_cost = ask_yes if best_side == "YES" else ask_no
         
         # SRE FIX: Enforce Fee Deductions on Weather Markets
-        from config import KALSHI_FEE_PER_CONTRACT
         ev_chosen = best_confidence - p_cost - KALSHI_FEE_PER_CONTRACT
         
         if ev_chosen < EV_THRESHOLD:
@@ -1323,13 +1317,14 @@ def evaluate_all_contracts(
     
     # v19.1.10: Regional Hub Exposure Tracking
     hub_exposure = {} 
-    # SRE FIX: True Real-Time Exposure Calculation
     for pos in open_positions:
         p_ticker = pos.get("local_symbol", "")
-        p_hub = _get_city_hub(p_ticker)
-        # SRE FIX: Standardize on 'entry' column if present, else fallback to 'entry_price'
-        e_price = float(pos.get("entry") or pos.get("entry_price") or 0)
-        pos_usd = float(pos.get("qty", 0)) * e_price
+        p_hub = _get_city_hub(p_ticker) # Ensure _get_city_hub uses airport codes (e.g. 'ORD', 'JFK', 'DEN')
+        entry_price = float(pos.get("entry", 0))
+        side = str(pos.get("side", "YES")).upper()
+        # True capital at risk:
+        actual_capital_at_risk = entry_price if side == "YES" else (1.0 - entry_price)
+        pos_usd = float(pos.get("qty", 0)) * actual_capital_at_risk
         hub_exposure[p_hub] = hub_exposure.get(p_hub, 0.0) + pos_usd
     
     # Initial load of open hub exposure (approximate based on ticker)

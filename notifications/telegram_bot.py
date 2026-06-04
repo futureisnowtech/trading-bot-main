@@ -204,7 +204,7 @@ async def positions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
-            rows = conn.execute("SELECT ticker, qty, entry, side FROM forecast_positions WHERE qty > 0").fetchall()
+            rows = conn.execute("SELECT ticker, qty, entry, unrealized_pnl FROM forecast_positions WHERE qty > 0").fetchall()
             
         if not rows:
             await _reply_text(update, "No active forecast positions.")
@@ -418,9 +418,7 @@ async def run_bot():
 
 def start_bot_thread():
     global _BOT_STARTED
-    # SRE FIX: Prevent thread collision
     if _BOT_STARTED:
-        logger.warning("Telegram thread already running. Blocking duplicate execution.")
         return None
     _BOT_STARTED = True
 

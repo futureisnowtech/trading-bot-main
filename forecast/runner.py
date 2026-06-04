@@ -404,8 +404,9 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                     )
                     
                     # Notify via Telegram/DB
-                    if entry_result.get("order_id") != "ERR":
-                        entry_msg = f"[ForecastRunner] Entry: {contract.get('local_symbol')} {result.side.upper()} @ {ask_price} (ev={result.ev:.4f})"
+                    if entry_result.get("order_id") != "ERR" and entry_result.get("status") != "resting":
+                        actual_price = entry_result.get("price") or ask_price
+                        entry_msg = f"[ForecastRunner] Entry: {contract.get('local_symbol')} {result.side.upper()} @ {actual_price} (ev={result.ev:.4f})"
                         log_event("INFO", "ForecastRunner", entry_msg)
                         
                         try:
@@ -413,7 +414,7 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                             insert_forecast_position(
                                 ticker=contract.get("local_symbol", ""),
                                 qty=result.position_contracts,
-                                entry_price=ask_price,
+                                entry_price=actual_price,
                                 side=result.side.upper()
                             )
                         except Exception as _db_err:
@@ -424,8 +425,8 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                             notify_trade_open(
                                 symbol=contract.get("local_symbol", ""),
                                 direction=result.side.upper(),
-                                size_usd=result.position_contracts * ask_price,
-                                entry_price=ask_price,
+                                size_usd=result.position_contracts * actual_price,
+                                entry_price=actual_price,
                                 score=result.ev,
                                 top_3=result.top_factors or [],
                                 features={},
@@ -709,7 +710,7 @@ def run_position_monitor() -> None:
                             reason="sovereign_exit_limit"
                         )
                     else:
-                        logger.warning(f"Exit skipped for {local_symbol}: Insufficient bid liquidity ({current_bid_vol} @ {current_bid})")
+                        logger.warning(f"Exit skipped for {local_symbol}: Insufficient bid liquidity.")
                         continue # Skip notification if no order sent
                     
                     # Notify via Telegram/DB

@@ -237,8 +237,11 @@ def _hours_to_resolution(last_trade_at: str) -> float:
     if not last_trade_at:
         return 0.0
     try:
-        fmt = "%Y%m%d %H:%M:%S" if " " in last_trade_at else "%Y%m%d"
-        expiry_dt = datetime.strptime(last_trade_at, fmt).replace(tzinfo=timezone.utc)
+        if "T" in last_trade_at and ("Z" in last_trade_at or "+" in last_trade_at):
+            expiry_dt = datetime.fromisoformat(last_trade_at.replace("Z", "+00:00"))
+        else:
+            fmt = "%Y%m%d %H:%M:%S" if " " in last_trade_at else "%Y%m%d"
+            expiry_dt = datetime.strptime(last_trade_at, fmt).replace(tzinfo=timezone.utc)
         delta = (expiry_dt - datetime.now(timezone.utc)).total_seconds() / 3600.0
         return max(0.0, delta)
     except Exception:
@@ -1454,12 +1457,7 @@ def evaluate_all_contracts(
             last_trade = yc.get("last_trade_at", "")
             
             # v19.1.10: Calculate hours_to_res before evaluation
-            hours_to_res = 0.0
-            if last_trade:
-                try:
-                    expiry = datetime.fromisoformat(last_trade.replace("Z", "+00:00"))
-                    hours_to_res = (expiry - datetime.now(timezone.utc)).total_seconds() / 3600.0
-                except: pass
+            hours_to_res = _hours_to_resolution(last_trade)
 
             # Fetch quotes for both sides
             try:

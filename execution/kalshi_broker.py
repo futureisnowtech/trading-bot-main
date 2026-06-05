@@ -248,11 +248,42 @@ class KalshiBroker:
             else:
                 return {"error": "unsupported_method"}
             
+            payload = None
             try:
-                return resp.json()
+                payload = resp.json()
             except Exception as json_err:
+                if resp.status_code >= 400:
+                    logger.error(
+                        "[KalshiBroker] Non-JSON error for %s. Status=%s Text=%s",
+                        url,
+                        resp.status_code,
+                        resp.text[:200],
+                    )
+                    return {
+                        "error": {
+                            "code": "too_many_requests" if resp.status_code == 429 else f"http_{resp.status_code}",
+                            "message": resp.text[:200] or f"json_decode_failed: {json_err}",
+                            "http_status": resp.status_code,
+                        }
+                    }
                 logger.error(f"[KalshiBroker] JSON decode failed for {url}. Status={resp.status_code} Text={resp.text[:200]}")
                 return {"error": f"json_decode_failed: {str(json_err)}"}
+
+            if resp.status_code >= 400:
+                if isinstance(payload, dict) and payload.get("error"):
+                    error = payload["error"]
+                    if isinstance(error, dict):
+                        error.setdefault("http_status", resp.status_code)
+                    return payload
+                return {
+                    "error": {
+                        "code": "too_many_requests" if resp.status_code == 429 else f"http_{resp.status_code}",
+                        "message": resp.text[:200],
+                        "http_status": resp.status_code,
+                    }
+                }
+
+            return payload if isinstance(payload, dict) else {"error": "unexpected_response_shape"}
         except Exception as e:
             return {"error": str(e)}
 

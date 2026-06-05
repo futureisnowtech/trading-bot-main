@@ -102,6 +102,111 @@ def _held_bid_fields(right: str) -> tuple[str, str]:
     return "no_bid", "no_bid_vol"
 
 
+def _held_quote_fields(side: str) -> tuple[str, str]:
+    if str(side).upper() == "NO":
+        return "no_bid", "no_ask"
+    return "yes_bid", "yes_ask"
+
+
+def _held_mark_from_quote(position: dict, quote: dict) -> float:
+    side = str(position.get("side") or "YES").upper()
+    bid_key, ask_key = _held_quote_fields(side)
+    bid = float(quote.get(bid_key) or 0.0)
+    ask = float(quote.get(ask_key) or 0.0)
+    if bid > 0 and ask > 0:
+        return (bid + ask) / 2.0
+    return bid or ask or 0.0
+
+
+def _live_position_summary(positions: list[dict]) -> tuple[int, float]:
+    count = 0
+    deployed = 0.0
+    for position in positions or []:
+        qty = float(position.get("qty") or 0.0)
+        if qty <= 0:
+            continue
+        count += 1
+        deployed += qty * float(
+            position.get("entry_price")
+            or position.get("entry")
+            or position.get("avg_entry")
+            or 0.0
+        )
+    return count, round(deployed, 4)
+
+
+def _publish_forecast_lane_state(
+    *,
+    broker=None,
+    snapshot: dict | None = None,
+    connected: bool | None = None,
+    tradable: bool | None = None,
+    health: str | None = None,
+    blocked_reason: str | None = None,
+    action_needed: str | None = None,
+    readiness_state: str | None = None,
+) -> None:
+    import json
+
+    from config import FORECAST_AUTONOMOUS_ENABLED, FORECAST_LANE_ACTIVE, KALSHI_ENABLED
+    from runtime.runtime_state import upsert_lane_state
+
+    broker = broker or _get_broker()
+    if connected is None:
+        connected = bool(broker.is_connected())
+
+    positions: list[dict] = []
+    buying_power_usd = 0.0
+    if connected:
+        try:
+            positions = broker.get_positions()
+        except Exception:
+            positions = []
+        try:
+            buying_power_usd = float(broker.get_account_balance() or 0.0)
+        except Exception:
+            buying_power_usd = 0.0
+
+    positions_open, capital_deployed_usd = _live_position_summary(positions)
+    if snapshot and snapshot.get("equity") not in (None, ""):
+        buying_power_usd = float(snapshot.get("equity") or buying_power_usd)
+
+    if health is None:
+        health = "OK" if connected else "WARN"
+    if blocked_reason is None:
+        blocked_reason = "" if connected else "broker_disconnected"
+    if action_needed is None:
+        action_needed = "" if connected else "connect_kalshi"
+    if readiness_state is None:
+        readiness_state = "OPERATIONAL" if connected else "BROKER_DISCONNECTED"
+
+    payload = {
+        "enabled": 1 if KALSHI_ENABLED else 0,
+        "active": 1 if FORECAST_LANE_ACTIVE else 0,
+        "configured": 1,
+        "dashboard_visible": 1,
+        "autonomous_enabled": 1 if FORECAST_AUTONOMOUS_ENABLED else 0,
+        "manual_allowed": 1,
+        "mode": "autonomous" if FORECAST_AUTONOMOUS_ENABLED else "manual",
+        "connected": 1 if connected else 0,
+        "health": health,
+        "blocked_reason": blocked_reason,
+        "action_needed": action_needed,
+        "readiness_state": readiness_state,
+        "positions_open": positions_open,
+        "capital_deployed_usd": capital_deployed_usd,
+        "buying_power_usd": round(buying_power_usd, 2),
+    }
+    if tradable is not None:
+        payload["tradable"] = 1 if tradable else 0
+    if health == "OK":
+        payload["last_success_at"] = datetime.now(timezone.utc).isoformat()
+    if snapshot is not None:
+        payload["snapshot_json"] = json.dumps(snapshot)
+
+    upsert_lane_state("forecast", **payload)
+
+
 def _weather_contract_yes_probability(
     ticker: str,
     w_data: dict | None,
@@ -206,10 +311,7 @@ def run_discovery_cycle() -> dict:
                 f"stubs={stubs} "
                 f"active={active_in_db}"
             )
-            # Update lane readiness_state to reflect post-discovery truth.
             try:
-                from runtime.runtime_state import upsert_lane_state as _uls
-
                 _connected = bool(broker.is_connected())
                 _snapshot = _forecast_runtime_snapshot(
                     connected=_connected,
@@ -217,12 +319,10 @@ def run_discovery_cycle() -> dict:
                     stubs=stubs,
                     active_markets=active_in_db
                 )
-                _uls(
-                    "forecast",
-                    enabled=1,
-                    active=1,
-                    connected=_snapshot["connected"],
-                    tradable=_snapshot["tradable"],
+                _publish_forecast_lane_state(
+                    broker=broker,
+                    connected=bool(_snapshot["connected"]),
+                    tradable=bool(_snapshot["tradable"]),
                     health=_snapshot["health"],
                     blocked_reason=_snapshot["blocked_reason"],
                     action_needed=_snapshot["action_needed"],
@@ -234,12 +334,7 @@ def run_discovery_cycle() -> dict:
         except Exception as e:
             logger.error(f"[ForecastRunner] Discovery cycle error: {e}")
             try:
-                from runtime.runtime_state import upsert_lane_state as _uls
-
-                _uls(
-                    "forecast",
-                    enabled=1,
-                    active=1,
+                _publish_forecast_lane_state(
                     health="ERROR",
                     blocked_reason=str(e)[:160],
                     action_needed="inspect_forecast_runner",
@@ -272,6 +367,17 @@ def run_execution_cycle(
 
     if not KALSHI_ENABLED:
         logger.warning("[ForecastRunner] Kalshi lane disabled. Skipping execution cycle.")
+        try:
+            _publish_forecast_lane_state(
+                connected=False,
+                tradable=False,
+                health="WARN",
+                blocked_reason="kalshi_disabled",
+                action_needed="enable_kalshi",
+                readiness_state="DISABLED",
+            )
+        except Exception:
+            pass
         return {
             "broker_connected": False,
             "discovery": {},
@@ -282,6 +388,17 @@ def run_execution_cycle(
 
     if not FORECAST_LANE_ACTIVE:
         logger.warning("[ForecastRunner] Forecast lane inactive. Skipping execution cycle.")
+        try:
+            _publish_forecast_lane_state(
+                connected=False,
+                tradable=False,
+                health="WARN",
+                blocked_reason="forecast_lane_inactive",
+                action_needed="enable_forecast_lane",
+                readiness_state="INACTIVE",
+            )
+        except Exception:
+            pass
         return {
             "broker_connected": False,
             "discovery": {},
@@ -342,10 +459,22 @@ def run_execution_cycle(
             logger.warning("[ForecastRunner] Resolution sync failed: %s", exc)
             resolution_summary = {"error": str(exc)}
 
+    snapshot = {}
     try:
-        _cache_forecast_state()
+        snapshot = _cache_forecast_state() or {}
     except Exception as exc:
         logger.warning("[ForecastRunner] Cache refresh failed: %s", exc)
+        try:
+            _publish_forecast_lane_state(
+                broker=broker,
+                connected=connected,
+                health="WARN",
+                blocked_reason="cache_refresh_failed",
+                action_needed="inspect_forecast_state_cache",
+                readiness_state="DEGRADED",
+            )
+        except Exception:
+            pass
 
     if run_rbi:
         try:
@@ -361,6 +490,7 @@ def run_execution_cycle(
         "weather_sync": weather_sync,
         "entries": len(entries),
         "resolution_sync": resolution_summary,
+        "positions_open": len((snapshot or {}).get("positions", [])),
     }
     logger.info("[ForecastRunner] Single-pass execution summary: %s", summary)
     return summary
@@ -389,12 +519,17 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
         logger.info(f"[ForecastRunner] Starting strategy cycle (bankroll=${bankroll:.2f})...")
         entries = []
         try:
-            from forecast.db import get_active_contracts, get_bars, get_recent_quotes
+            from execution.kalshi_execution_controller import (
+                KalshiExecutionController,
+                TradeIntent,
+            )
+            from forecast.db import get_active_contracts, get_bars
+            from forecast.market_snapshot import build_market_snapshots
             from forecast.quote_harvester import get_paired_quotes
             from forecast.strategy_engine import (
                 MAX_CONCURRENT_POSITIONS,
                 MAX_DEPLOYED_PCT,
-                evaluate_all_contracts,
+                evaluate_market_snapshots,
             )
 
             broker = _get_broker()
@@ -517,6 +652,8 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                 )
                 return []
 
+            buying_power_usd = bankroll
+
             # Open event families (to detect same-event exposure)
             from collections import defaultdict
             open_event_families_counts = defaultdict(int)
@@ -540,10 +677,13 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
             except Exception:
                 pass
 
-            candidates = evaluate_all_contracts(
-                active_contracts=active,
+            snapshots = build_market_snapshots(
+                active,
                 get_bars_fn=_get_bars_fn,
                 get_quotes_fn=_get_quotes_fn,
+            )
+            candidates = evaluate_market_snapshots(
+                snapshots=snapshots,
                 bankroll=bankroll,
                 deployed_pct=deployed_pct,
                 open_positions_count=open_count,
@@ -551,6 +691,7 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                 macro_context=macro_ctx,
                 open_positions=open_positions,
             )
+            execution_controller = KalshiExecutionController(broker)
 
             # v19.1.10: Sovereign Instrumentation (Discovery Layer)
             try:
@@ -629,48 +770,55 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                     )
                     continue
 
-                # Determine limit price (cheapest qualifying contract heuristic)
-                ask_price = result.ask_yes if result.side == "YES" else result.ask_no
-                if not ask_price or ask_price <= 0:
-                    continue
-
                 try:
-                    # Guardrail 3: Taker-Override Friction Controls
-                    # If edge >= 22% and is_short_term, use market order.
-                    order_type = "market" if result.is_taker_override else "limit"
                     forecast_yes_prob = result.q_hat
                     if result.strategy_family == "weather_ensemble":
                         forecast_yes_prob = (
                             result.confidence if result.side == "YES" else (1.0 - result.confidence)
                         )
                     forecast_yes_prob = max(0.0, min(1.0, float(forecast_yes_prob)))
-                    
-                    entry_result = broker.place_buy_order(
-                        contract_dict={
-                            "conid": contract.get("conid", 0),
-                            "local_symbol": contract.get("local_symbol", ""),
-                            "right": contract.get("right", "C"),
-                            "strike": contract.get("strike", 0.0),
-                            "last_trade_at": contract.get("last_trade_at", ""),
-                        },
-                        qty=result.position_contracts,
-                        limit_price=ask_price,
-                        type=order_type,
-                        reason=f"{result.strategy_family}_ev={result.ev:.4f}_taker={result.is_taker_override}",
-                        strategy=f"forecast_{result.strategy_family}",
+
+                    trade_intent = TradeIntent(
+                        contract=contract,
+                        result=result,
+                        bankroll=bankroll,
+                        buying_power_usd=buying_power_usd,
+                        market_snapshot=candidate.get("snapshot"),
+                    )
+                    execution_plan = execution_controller.plan_entry(trade_intent)
+                    if execution_plan.status != "ready":
+                        logger.info(
+                            "[ForecastRunner] Entry plan blocked for %s (%s)",
+                            contract.get("local_symbol"),
+                            execution_plan.reason,
+                        )
+                        log_event(
+                            "WARNING",
+                            "ForecastRunner",
+                            f"[ForecastRunner] {contract.get('local_symbol')} execution_blocked: {execution_plan.reason}",
+                        )
+                        continue
+
+                    entry_result = execution_controller.execute_plan(
+                        execution_plan,
                         forecast_yes_prob=forecast_yes_prob,
                     )
                     
                     if entry_result.get("status") == "executed":
-                        actual_price = entry_result.get("price") or ask_price
-                        entry_msg = f"[ForecastRunner] Entry: {contract.get('local_symbol')} {result.side.upper()} @ {actual_price} (ev={result.ev:.4f})"
+                        actual_price = entry_result.get("price") or execution_plan.limit_price
+                        actual_qty = int(entry_result.get("qty") or execution_plan.executable_qty)
+                        entry_msg = (
+                            f"[ForecastRunner] Entry: {contract.get('local_symbol')} "
+                            f"{result.side.upper()} x{actual_qty} @ {actual_price} "
+                            f"(ev={result.ev:.4f})"
+                        )
                         log_event("INFO", "ForecastRunner", entry_msg)
                         
                         try:
                             from forecast.db import insert_forecast_position
                             insert_forecast_position(
                                 ticker=contract.get("local_symbol", ""),
-                                qty=result.position_contracts,
+                                qty=actual_qty,
                                 entry_price=actual_price,
                                 side=result.side.upper()
                             )
@@ -682,7 +830,7 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                             notify_trade_open(
                                 symbol=contract.get("local_symbol", ""),
                                 direction=result.side.upper(),
-                                size_usd=result.position_contracts * actual_price,
+                                size_usd=actual_qty * actual_price,
                                 entry_price=actual_price,
                                 score=result.ev,
                                 top_3=result.top_factors or [],
@@ -700,22 +848,34 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                         )
                         logger.info(
                             f"[ForecastRunner] ENTERED {contract.get('local_symbol')} "
-                            f"{result.side} × {result.position_contracts} @ {actual_price:.4f} "
+                            f"{result.side} x{actual_qty} @ {actual_price:.4f} "
                             f"| strategy={result.strategy_family} ev={result.ev:.4f} "
                             f"q_hat={result.q_hat:.4f}"
+                        )
+                        from config import KALSHI_FEE_PER_CONTRACT
+                        buying_power_usd = max(
+                            0.0,
+                            buying_power_usd
+                            - (actual_qty * (actual_price + float(KALSHI_FEE_PER_CONTRACT))),
                         )
                     else:
                         logger.info(
                             "[ForecastRunner] Entry not booked into local truth for %s "
-                            "(status=%s order_id=%s)",
+                            "(status=%s order_id=%s reason=%s)",
                             contract.get("local_symbol"),
                             entry_result.get("status"),
                             entry_result.get("order_id"),
+                            entry_result.get("execution_reason"),
                         )
                         if entry_result.get("status") == "too_many_requests":
                             logger.warning(
                                 "[ForecastRunner] Kalshi rate limit hit after %s; halting new entries until next cycle.",
                                 contract.get("local_symbol"),
+                            )
+                            break
+                        if entry_result.get("status") == "rate_limit_cooldown":
+                            logger.warning(
+                                "[ForecastRunner] Local rate-limit cooldown active; halting new entries until next cycle."
                             )
                             break
                 except Exception as e:
@@ -1198,12 +1358,20 @@ def _cache_forecast_state():
     """v19.1.6: Caches rich broker-first forecast state for the HUD dashboard."""
     try:
         logger.info("[ForecastRunner] Starting forecast state cache cycle (v19.1.6)...")
-        from runtime.runtime_state import upsert_lane_state
         from logging_db.trade_logger import _conn
-        import json
 
         broker = _get_broker()
-        if not broker.is_connected(): return
+        if not broker.is_connected():
+            _publish_forecast_lane_state(
+                broker=broker,
+                connected=False,
+                tradable=False,
+                health="WARN",
+                blocked_reason="broker_disconnected",
+                action_needed="connect_kalshi",
+                readiness_state="BROKER_DISCONNECTED",
+            )
+            return {}
 
         try:
             broker.sync_positions()
@@ -1220,16 +1388,21 @@ def _cache_forecast_state():
         for p in positions:
             ticker = p.get('local_symbol')
             qty = float(p.get('qty', 0))
+            side = str(p.get("side") or "YES").upper()
             
             current_px = 0.0
             try:
                 quote = broker.get_quote(ticker)
-                bid = float(quote.get('bid', 0) or 0)
-                ask = float(quote.get('ask', 0) or 0)
-                current_px = (bid + ask) / 2.0 if (bid > 0 and ask > 0) else (bid or ask or 0)
-            except: pass
+                current_px = _held_mark_from_quote(p, quote)
+            except Exception:
+                pass
             
-            entry_px = float(p.get('avg_entry') or 0.0)
+            entry_px = float(
+                p.get('entry_price')
+                or p.get('entry')
+                or p.get('avg_entry')
+                or 0.0
+            )
             entered_at = "Unknown"
             event_title = ticker
             resolution_at = "Unknown"
@@ -1257,11 +1430,11 @@ def _cache_forecast_state():
                 if meta:
                     event_title = meta[0]
                     resolution_at = meta[1]
-            except: pass
+            except Exception:
+                pass
             
-            mult = 1 if p.get('side') == 'YES' else -1
-            pnl = (current_px - entry_px) * qty * mult
-            potential = (1.0 - entry_px) * qty
+            pnl = (current_px - entry_px) * qty
+            potential = max(0.0, (1.0 - entry_px) * qty)
             
             if entry_px <= 0:
                 pnl = 0.0
@@ -1277,11 +1450,13 @@ def _cache_forecast_state():
                     delta = expiry - datetime.now(timezone.utc)
                     if delta.days > 0: countdown = f"{delta.days}d left"
                     else: countdown = f"{int(delta.seconds // 3600)}h left"
-                except: pass
+                except Exception:
+                    pass
 
             enriched.append({
                 "symbol": ticker,
                 "title": event_title,
+                "side": side,
                 "qty": qty,
                 "entry": round(entry_px, 4),
                 "mark": round(current_px, 4),
@@ -1289,7 +1464,7 @@ def _cache_forecast_state():
                 "potential": round(potential, 2),
                 "countdown": countdown,
                 "entered_at": entered_at,
-                "sentiment": "Healthy" if pnl > -0.01 else "Under Pressure"
+                "sentiment": "Healthy" if pnl >= 0 else "Under Pressure"
             })
             total_pnl += pnl
             
@@ -1305,10 +1480,20 @@ def _cache_forecast_state():
             "equity": round(kalshi_equity, 2),
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
-        
-        upsert_lane_state("forecast", snapshot_json=json.dumps(snapshot))
+
+        _publish_forecast_lane_state(
+            broker=broker,
+            snapshot=snapshot,
+            connected=True,
+            health="OK",
+            blocked_reason="",
+            action_needed="",
+            readiness_state="OPERATIONAL",
+        )
+        return snapshot
     except Exception as e:
         logger.error(f"[ForecastRunner] Cache state error: {e}")
+        return {}
 
 
 def start_forecast_lane(bankroll: float = 100.0) -> None:

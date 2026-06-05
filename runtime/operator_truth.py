@@ -244,12 +244,7 @@ def get_live_kalshi_status(
             active_markets = int((row["n"] if row else 0) or 0)
 
             lane_row = conn.execute(
-                """
-                SELECT lane_id, connected, tradable, health, readiness_state,
-                       blocked_reason, action_needed, snapshot_json, updated_at
-                FROM lane_runtime_state
-                WHERE lane_id='forecast'
-                """
+                "SELECT * FROM lane_runtime_state WHERE lane_id='forecast'"
             ).fetchone()
             if lane_row:
                 lane_state = dict(lane_row)

@@ -48,6 +48,7 @@ from config import (
     KALSHI_MAX_FEE_DRAG_PCT,
     KALSHI_MAX_USD_PER_POSITION,
 )
+from forecast.market_snapshot import MarketSnapshot, build_market_snapshots
 from forecast.primitives import (
     DEFAULT_ALPHA,
     DEFAULT_BETA,
@@ -1451,11 +1452,36 @@ def evaluate_all_contracts(
     macro_context: Optional[dict] = None,
     open_positions: Optional[list[dict]] = None,
 ) -> list[dict]:
+    snapshots = build_market_snapshots(
+        active_contracts,
+        get_bars_fn=get_bars_fn,
+        get_quotes_fn=get_quotes_fn,
+    )
+    return evaluate_market_snapshots(
+        snapshots=snapshots,
+        bankroll=bankroll,
+        deployed_pct=deployed_pct,
+        open_positions_count=open_positions_count,
+        open_event_families=open_event_families,
+        macro_context=macro_context,
+        open_positions=open_positions,
+    )
+
+
+def evaluate_market_snapshots(
+    snapshots: list[MarketSnapshot],
+    bankroll: float = 100.0,
+    deployed_pct: float = 0.0,
+    open_positions_count: int = 0,
+    open_event_families: Optional[dict] = None,
+    macro_context: Optional[dict] = None,
+    open_positions: Optional[list[dict]] = None,
+) -> list[dict]:
     """
-    Evaluate all active contracts and return ranked list of approved entries.
-    v18.34: Now anchored in real-time TradFi reality via macro_context.
-    v18.35: Implements tick-aware concurrency capping for event families.
-    v19.2: Implements strike consistency logic.
+    Evaluate canonical market snapshots and return ranked entry candidates.
+
+    Runtime should think in one market object, then route to YES/NO contract rows
+    only after side selection.
     """
     if open_event_families is None:
         open_event_families = {}
@@ -1485,147 +1511,120 @@ def evaluate_all_contracts(
     if macro_context:
         logger.info(f"[strategy_engine] Anchoring evaluation in Macro Context (Risk={macro_context.get('risk_score')})")
 
-    # Group contracts by market for YES/NO pairing
-    market_contracts: dict[int, list[dict]] = {}
-    for c in active_contracts:
-        mid = c.get("market_id") or c.get("id")
-        market_contracts.setdefault(mid, []).append(c)
+    for snapshot in snapshots:
+        yc = snapshot.yes_contract
+        nc = snapshot.no_contract
+        ticker = snapshot.ticker
+        hours_to_res = _hours_to_resolution(snapshot.last_trade_at)
 
-    for market_id, contracts in market_contracts.items():
-        yes_contracts = [c for c in contracts if c.get("right") == "C"]
-        no_contracts = [c for c in contracts if c.get("right") == "P"]
+        yes_quote = snapshot.yes_quote or {}
+        no_quote = snapshot.no_quote or {}
+        if not yes_quote or not no_quote:
+            continue
 
-        for yc in yes_contracts:
-            ticker = yc.get("local_symbol", "")
-            # Find matching NO contract (same strike + expiry)
-            nc = next(
-                (
-                    n
-                    for n in no_contracts
-                    if n.get("strike") == yc.get("strike")
-                    and n.get("last_trade_at") == yc.get("last_trade_at")
-                ),
-                None,
+        bars_5m = snapshot.bars_5m
+        bars_30m = snapshot.bars_30m
+        bars_1h = snapshot.bars_1h
+        bars_4h = snapshot.bars_4h
+
+        is_weather = "KXHIGH" in ticker or "KXLOW" in ticker or "KXRAIN" in ticker
+        if not is_weather and not bars_5m:
+            continue
+
+        family = snapshot.family
+        hub = _get_city_hub(ticker)
+
+        count = current_tick_counts.get(family, 0)
+        current_hub_usd = hub_exposure.get(hub, 0.0)
+        current_hub_cap = max(20.0, bankroll * 0.20)
+
+        if hub != "UNKNOWN" and current_hub_usd >= current_hub_cap:
+            result = StrategyResult(
+                strategy_family="vetoed",
+                side="NONE",
+                q_hat=0.0,
+                ev=0.0,
+                ev_yes=0.0,
+                ev_no=0.0,
+                confidence=0.0,
+                uncertainty_penalty=0.0,
+                econ_approved=False,
+                veto_reason=f"hub_exposure_cap_reached ({current_hub_usd:.1f}/{current_hub_cap:.1f})",
+                position_fraction=0.0,
+                position_contracts=0,
+                top_factors=[],
+                hours_to_resolution=hours_to_res,
             )
-            if not nc:
-                continue
-
-            strike = yc.get("strike", 0.0)
-            last_trade = yc.get("last_trade_at", "")
-            
-            # v19.1.10: Calculate hours_to_res before evaluation
-            hours_to_res = _hours_to_resolution(last_trade)
-
-            # Fetch quotes for both sides
-            try:
-                pair = get_quotes_fn(market_id, strike, last_trade)
-                yes_quote = pair.get("yes_quote") or {}
-                no_quote = pair.get("no_quote") or {}
-            except Exception:
-                continue
-
-            if not yes_quote or not no_quote:
-                continue
-
-            # Fetch bars (Optional for weather, required for others)
-            bars_5m, bars_30m, bars_1h, bars_4h = [], [], [], []
-            yes_id = yc.get("id") or yc.get("contract_id")
-            if yes_id:
-                try:
-                    bars_5m = get_bars_fn(yes_id, "5m")
-                    bars_30m = get_bars_fn(yes_id, "30m")
-                    bars_1h = get_bars_fn(yes_id, "1h")
-                    bars_4h = get_bars_fn(yes_id, "4h")
-                except Exception:
-                    pass
-            
-            # v19.1.6: Only weather strategies are unblocked if bars are missing.
-            is_weather = "KXHIGH" in ticker or "KXLOW" in ticker or "KXRAIN" in ticker
-            if not is_weather and not bars_5m:
-                continue
-
-            # Check hub exposure (v19.1.10)
-            ticker = yc.get("local_symbol", "")
-            family = ticker.split("-")[0]
-            hub = _get_city_hub(ticker)
-            
-            count = current_tick_counts.get(family, 0)
-            current_hub_usd = hub_exposure.get(hub, 0.0)
-            
-            # v19.4 Sovereign Balance: Dynamic Hub Scaling (20% of Equity)
-            current_hub_cap = max(20.0, bankroll * 0.20)
-            
-            if hub != "UNKNOWN" and current_hub_usd >= current_hub_cap:
-                result = StrategyResult(
-                    strategy_family="vetoed", side="NONE", q_hat=0.0, ev=0.0, ev_yes=0.0, ev_no=0.0,
-                    confidence=0.0, uncertainty_penalty=0.0, econ_approved=False,
-                    veto_reason=f"hub_exposure_cap_reached ({current_hub_usd:.1f}/{current_hub_cap:.1f})", 
-                    position_fraction=0.0,
-                    position_contracts=0, top_factors=[], 
-                    hours_to_resolution=hours_to_res
-                )
-            elif count >= KALSHI_SAME_EVENT_FAMILY_CAP:
-                # Veto immediately if family cap reached
-                result = StrategyResult(
-                    strategy_family="vetoed", side="NONE", q_hat=0.0, ev=0.0, ev_yes=0.0, ev_no=0.0,
-                    confidence=0.0, uncertainty_penalty=0.0, econ_approved=False,
-                    veto_reason="same_event_family_cap_reached", position_fraction=0.0,
-                    position_contracts=0, top_factors=[], 
-                    hours_to_resolution=hours_to_res
-                )
-            else:
-                result = evaluate_contract(
-                    contract=yc,
-                    bars_5m=bars_5m,
-                    bars_30m=bars_30m,
-                    bars_1h=bars_1h,
-                    bars_4h=bars_4h,
-                    yes_quote=yes_quote,
-                    no_quote=no_quote,
-                    bankroll=bankroll,
-                    deployed_pct=deployed_pct,
-                    open_positions_count=open_positions_count,
-                    same_event_open=(count > 0),
-                )
-
-            if result is None:
-                continue
-
-            if result.side in {"YES", "NO"}:
-                is_consistent, conflict_reason = check_strike_consistency(
-                    ticker,
-                    result.side,
-                    open_positions,
-                )
-                if not is_consistent:
-                    result.econ_approved = False
-                    result.veto_reason = conflict_reason
-                    result.position_fraction = 0.0
-                    result.position_contracts = 0
-
-            chosen_contract = yc
-            if result.side == "NO" and nc is not None:
-                chosen_contract = nc
-
-            # Update count for the rest of the tick if approved
-            if result.econ_approved and result.position_contracts > 0:
-                current_tick_counts[family] = count + 1
-                risk_price = (
-                    yes_quote.get("ask") if result.side == "YES" else no_quote.get("ask")
-                ) or 0.50
-                hub_exposure[hub] = current_hub_usd + (
-                    result.position_contracts
-                    * (float(risk_price) + KALSHI_FEE_PER_CONTRACT)
-                )
-
-            rank_score = result.ev * result.confidence if result.econ_approved else 0.0
-            approved_entries.append(
-                {
-                    "contract": chosen_contract,
-                    "result": result,
-                    "rank_score": rank_score,
-                }
+        elif count >= KALSHI_SAME_EVENT_FAMILY_CAP:
+            result = StrategyResult(
+                strategy_family="vetoed",
+                side="NONE",
+                q_hat=0.0,
+                ev=0.0,
+                ev_yes=0.0,
+                ev_no=0.0,
+                confidence=0.0,
+                uncertainty_penalty=0.0,
+                econ_approved=False,
+                veto_reason="same_event_family_cap_reached",
+                position_fraction=0.0,
+                position_contracts=0,
+                top_factors=[],
+                hours_to_resolution=hours_to_res,
             )
+        else:
+            result = evaluate_contract(
+                contract=yc,
+                bars_5m=bars_5m,
+                bars_30m=bars_30m,
+                bars_1h=bars_1h,
+                bars_4h=bars_4h,
+                yes_quote=yes_quote,
+                no_quote=no_quote,
+                bankroll=bankroll,
+                deployed_pct=deployed_pct,
+                open_positions_count=open_positions_count,
+                same_event_open=(count > 0),
+            )
+
+        if result is None:
+            continue
+
+        if result.side in {"YES", "NO"}:
+            is_consistent, conflict_reason = check_strike_consistency(
+                ticker,
+                result.side,
+                open_positions,
+            )
+            if not is_consistent:
+                result.econ_approved = False
+                result.veto_reason = conflict_reason
+                result.position_fraction = 0.0
+                result.position_contracts = 0
+
+        chosen_contract = yc
+        if result.side == "NO":
+            chosen_contract = nc
+
+        if result.econ_approved and result.position_contracts > 0:
+            current_tick_counts[family] = count + 1
+            risk_price = (
+                yes_quote.get("ask") if result.side == "YES" else no_quote.get("ask")
+            ) or 0.50
+            hub_exposure[hub] = current_hub_usd + (
+                result.position_contracts
+                * (float(risk_price) + KALSHI_FEE_PER_CONTRACT)
+            )
+
+        rank_score = result.ev * result.confidence if result.econ_approved else 0.0
+        approved_entries.append(
+            {
+                "contract": chosen_contract,
+                "result": result,
+                "rank_score": rank_score,
+                "snapshot": snapshot,
+            }
+        )
 
     approved_entries.sort(key=lambda x: x["rank_score"], reverse=True)
     return approved_entries

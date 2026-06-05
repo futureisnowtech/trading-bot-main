@@ -220,7 +220,7 @@ class QuoteHarvester:
 
     def _poll_and_build(self) -> None:
         """
-        One poll cycle: fetch quotes for all active contracts in parallel.
+        One poll cycle: fetch quotes for all active markets in parallel.
         """
         from concurrent.futures import ThreadPoolExecutor, as_completed
         logger.info(f"[QuoteHarvester] Starting parallel poll cycle...")
@@ -234,12 +234,22 @@ class QuoteHarvester:
         if not contracts:
             return
 
-        def _fetch_one(contract):
-            local_symbol = contract.get("local_symbol", "")
+        grouped_contracts: dict[tuple[str, float, str], list[dict]] = {}
+        for contract in contracts:
+            key = (
+                str(contract.get("local_symbol") or ""),
+                float(contract.get("strike") or 0.0),
+                str(contract.get("last_trade_at") or ""),
+            )
+            grouped_contracts.setdefault(key, []).append(contract)
+
+        def _fetch_one(contract_group):
+            sample = contract_group[0]
+            local_symbol = sample.get("local_symbol", "")
             if self._broker and self._broker.is_connected():
                 try:
                     q = self._broker.get_quote(local_symbol)
-                    return {"contract": contract, "quote": q}
+                    return {"contracts": contract_group, "quote": q}
                 except:
                     return None
             return None
@@ -247,7 +257,7 @@ class QuoteHarvester:
         # v19.1.6: Parallel acquisition (No DB writes here!)
         fetched_results = []
         with ThreadPoolExecutor(max_workers=10) as executor:
-            futures = [executor.submit(_fetch_one, c) for c in contracts]
+            futures = [executor.submit(_fetch_one, group) for group in grouped_contracts.values()]
             for future in as_completed(futures):
                 res = future.result()
                 if res: fetched_results.append(res)
@@ -257,56 +267,60 @@ class QuoteHarvester:
         skipped_no_depth = 0
         
         for item in fetched_results:
-            contract = item["contract"]
             q = item["quote"]
-            contract_id = contract.get("id")
-            local_symbol = contract.get("local_symbol", "")
-            right = contract.get("right", "C")
-            
-            # v19.1.6: Directional Price Inversion
-            # Kalshi get_quote exposes both YES and NO top-of-book fields.
-            if right == "P": # NO contract
-                side = "NO"
-                bid = q.get("no_bid")
-                ask = q.get("no_ask")
-                mid = q.get("no_mid")
-                spread = q.get("no_spread")
-                bid_size = q.get("no_bid_size") or q.get("no_bid_vol")
-                ask_size = q.get("no_ask_size") or q.get("no_ask_vol")
-            else:
-                side = "YES"
-                bid = q.get("bid")
-                ask = q.get("ask")
-                mid = q.get("mid")
-                spread = q.get("spread")
-                bid_size = q.get("bid_size") or q.get("bid_vol")
-                ask_size = q.get("ask_size") or q.get("ask_vol")
+            contract_group = item["contracts"]
 
-            if mid is not None:
-                try:
-                    ts = datetime.now(timezone.utc).isoformat()
-                    insert_quote(
-                        contract_id=contract_id,
-                        ts=ts,
-                        bid=bid,
-                        ask=ask,
-                        bid_size=bid_size,
-                        ask_size=ask_size,
-                        mid=mid,
-                        spread=spread,
-                        implied_prob=mid,
-                        side=side,
-                        db_path=self._db_path,
-                    )
-                    _build_all_bars(contract_id, db_path=self._db_path)
-                    total_quotes += 1
-                except Exception as e:
-                    logger.debug(f"persist error {local_symbol}: {e}")
-            else:
-                skipped_no_depth += 1
+            for contract in contract_group:
+                contract_id = contract.get("id")
+                local_symbol = contract.get("local_symbol", "")
+                right = contract.get("right", "C")
+
+                # Kalshi get_quote exposes both YES and NO top-of-book fields.
+                if right == "P":
+                    side = "NO"
+                    bid = q.get("no_bid")
+                    ask = q.get("no_ask")
+                    mid = q.get("no_mid")
+                    spread = q.get("no_spread")
+                    bid_size = q.get("no_bid_size") or q.get("no_bid_vol")
+                    ask_size = q.get("no_ask_size") or q.get("no_ask_vol")
+                else:
+                    side = "YES"
+                    bid = q.get("bid")
+                    ask = q.get("ask")
+                    mid = q.get("mid")
+                    spread = q.get("spread")
+                    bid_size = q.get("bid_size") or q.get("bid_vol")
+                    ask_size = q.get("ask_size") or q.get("ask_vol")
+
+                if mid is not None:
+                    try:
+                        ts = datetime.now(timezone.utc).isoformat()
+                        insert_quote(
+                            contract_id=contract_id,
+                            ts=ts,
+                            bid=bid,
+                            ask=ask,
+                            bid_size=bid_size,
+                            ask_size=ask_size,
+                            mid=mid,
+                            spread=spread,
+                            implied_prob=mid,
+                            side=side,
+                            db_path=self._db_path,
+                        )
+                        _build_all_bars(contract_id, db_path=self._db_path)
+                        total_quotes += 1
+                    except Exception as e:
+                        logger.debug(f"persist error {local_symbol}: {e}")
+                else:
+                    skipped_no_depth += 1
 
         # Log cycle summary
-        msg = f"[QuoteHarvester] Cycle complete: {total_quotes} saved, {skipped_no_depth} skipped across {len(contracts)} contracts"
+        msg = (
+            f"[QuoteHarvester] Cycle complete: {total_quotes} saved, "
+            f"{skipped_no_depth} skipped across {len(grouped_contracts)} markets / {len(contracts)} contract rows"
+        )
         logger.info(msg)
         log_event("INFO", "QuoteHarvester", msg)
 

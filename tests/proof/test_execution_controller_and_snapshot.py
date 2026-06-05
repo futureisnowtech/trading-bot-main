@@ -77,32 +77,21 @@ def test_execution_controller_caps_qty_to_visible_depth():
     assert plan.depth_capped is True
 
 
-def test_execution_controller_retries_smaller_after_depth_loss():
+def test_execution_controller_does_not_chase_after_depth_loss():
     from execution.kalshi_execution_controller import KalshiExecutionController, TradeIntent
 
     class BrokerStub:
         def __init__(self):
-            self.quote_calls = 0
             self.orders: list[tuple[int, float, str]] = []
 
         def get_quote(self, _ticker):
-            self.quote_calls += 1
-            if self.quote_calls == 1:
-                return {"yes_ask": 0.62, "yes_ask_size": 4}
-            return {"yes_ask": 0.62, "yes_ask_size": 2}
+            return {"yes_ask": 0.62, "yes_ask_size": 4}
 
         def place_buy_order(self, contract_dict, qty, limit_price, **kwargs):
             self.orders.append((qty, limit_price, kwargs.get("reason", "")))
-            if len(self.orders) == 1:
-                return {
-                    "order_id": "ERR",
-                    "status": "fill_or_kill_insufficient_resting_volume",
-                }
             return {
-                "order_id": "ORD-2",
-                "status": "executed",
-                "qty": qty,
-                "price": limit_price,
+                "order_id": "ERR",
+                "status": "fill_or_kill_insufficient_resting_volume",
             }
 
     result = SimpleNamespace(
@@ -129,10 +118,9 @@ def test_execution_controller_retries_smaller_after_depth_loss():
     execution = controller.execute_plan(plan, forecast_yes_prob=0.74)
 
     assert plan.executable_qty == 4
-    assert execution["status"] == "executed"
-    assert execution["qty"] == 2
-    assert execution["execution_reason"] == "retried_smaller_after_depth_loss"
-    assert len(broker.orders) == 2
+    assert execution["status"] == "fill_or_kill_insufficient_resting_volume"
+    assert execution["execution_reason"] == "depth_slipped_after_submission"
+    assert len(broker.orders) == 1
 
 
 def test_held_mark_from_quote_uses_no_side_prices():

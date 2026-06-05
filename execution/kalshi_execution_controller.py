@@ -197,41 +197,6 @@ class KalshiExecutionController:
         if now < self._next_order_at:
             time.sleep(self._next_order_at - now)
 
-    def _retry_after_depth_loss(self, plan: ExecutionPlan, forecast_yes_prob: float) -> dict:
-        refreshed_quote = self._broker.get_quote(plan.ticker) or {}
-        ask_price, visible_qty = self._visible_ask_depth(plan.right, refreshed_quote)
-        retry_qty = min(plan.executable_qty - 1, visible_qty)
-        if retry_qty <= 0 or ask_price <= 0:
-            return {
-                "order_id": "ERR",
-                "status": "fill_or_kill_insufficient_resting_volume",
-                "qty": 0,
-                "execution_reason": "depth_vanished_before_fill",
-            }
-
-        retry_result = self._broker.place_buy_order(
-            contract_dict={
-                "local_symbol": plan.ticker,
-                "right": plan.right,
-                "strike": plan.intent.contract.get("strike", 0.0),
-                "last_trade_at": plan.intent.contract.get("last_trade_at", ""),
-            },
-            qty=retry_qty,
-            limit_price=ask_price,
-            type=plan.order_type,
-            reason=f"{getattr(plan.intent.result, 'strategy_family', 'forecast')}_retry_depth",
-            strategy=f"forecast_{getattr(plan.intent.result, 'strategy_family', 'weather_ensemble')}",
-            forecast_yes_prob=forecast_yes_prob,
-        )
-        retry_result["qty"] = retry_result.get("qty") or retry_qty
-        retry_result["requested_qty"] = plan.requested_qty
-        retry_result["visible_qty"] = visible_qty
-        retry_result["affordable_qty"] = plan.affordable_qty
-        retry_result["depth_capped"] = True
-        retry_result["execution_reason"] = "retried_smaller_after_depth_loss"
-        retry_result["live_quote"] = refreshed_quote
-        return retry_result
-
     def execute_plan(self, plan: ExecutionPlan, *, forecast_yes_prob: float) -> dict:
         now = time.time()
         if now < self._rate_limited_until:
@@ -279,7 +244,12 @@ class KalshiExecutionController:
             self._rate_limited_until = time.time() + self._rate_limit_cooldown_sec
             return result
 
-        if status == "fill_or_kill_insufficient_resting_volume" and plan.executable_qty > 1:
-            return self._retry_after_depth_loss(plan, forecast_yes_prob)
+        if status == "fill_or_kill_insufficient_resting_volume":
+            # Do not chase the same market with a second immediate POST. In live
+            # Kalshi conditions that follow-up write is what most often converts
+            # a depth slip into a hard 429 throttle.
+            result["execution_reason"] = "depth_slipped_after_submission"
+            self._next_order_at = time.time() + max(self._min_order_interval_sec, 1.0)
+            return result
 
         return result

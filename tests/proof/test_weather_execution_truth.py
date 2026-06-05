@@ -440,6 +440,59 @@ def test_ensure_weather_data_backfills_missing_series(monkeypatch):
     assert hydrated["intraday"]["metar_temp"] == 74.0
 
 
+def test_active_weather_city_scope_tracks_live_contract_universe(monkeypatch):
+    import data.kalshi_weather_monitor as wm
+
+    wm._ACTIVE_CITY_SCOPE_CACHE["timestamp"] = 0.0
+    wm._ACTIVE_CITY_SCOPE_CACHE["city_keys"] = []
+
+    monkeypatch.setattr(
+        "forecast.db.get_active_contracts",
+        lambda: [
+            {"local_symbol": "KXHIGHNY-30JUN26-T75"},
+            {"local_symbol": "KXRAINLAX-30JUN26-T0.01"},
+            {"local_symbol": "KXLOWCHI-30JUN26-T62"},
+        ],
+    )
+
+    city_keys = wm._active_weather_city_keys()
+
+    assert city_keys == ["CHI", "LAX", "NY"]
+
+
+def test_open_meteo_429_cools_city_and_skips_repeat_fetch(monkeypatch):
+    import asyncio
+    import data.kalshi_weather_monitor as wm
+
+    class _Resp:
+        status_code = 429
+
+        def json(self):
+            return {}
+
+    calls = {"count": 0}
+
+    wm._COORDINATE_CACHE.clear()
+    wm._ENSEMBLE_FETCH_STATE.clear()
+
+    def fake_get(*args, **kwargs):
+        calls["count"] += 1
+        return _Resp()
+
+    monkeypatch.setattr(wm.requests, "get", fake_get)
+    monkeypatch.setattr(
+        "logging_db.trade_logger.log_event",
+        lambda *args, **kwargs: None,
+    )
+
+    first = asyncio.run(wm.fetch_open_meteo_ensemble("NY", 40.78, -73.97))
+    second = asyncio.run(wm.fetch_open_meteo_ensemble("NY", 40.78, -73.97))
+
+    assert first == {}
+    assert second == {}
+    assert calls["count"] == 1
+
+
 def test_contract_weather_projection_is_day_specific(monkeypatch):
     import data.kalshi_weather_monitor as wm
 

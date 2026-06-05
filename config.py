@@ -185,6 +185,15 @@ KALSHI_EXPENSIVE_YES_MIN_NET_EDGE: float = float(
 KALSHI_EXPENSIVE_YES_SIZE_MULTIPLIER: float = float(
     os.getenv("KALSHI_EXPENSIVE_YES_SIZE_MULTIPLIER", "0.75")
 )
+WEATHER_ACTIVE_CITY_REFRESH_SEC: int = int(
+    os.getenv("WEATHER_ACTIVE_CITY_REFRESH_SEC", "300")
+)
+WEATHER_ENSEMBLE_COOLDOWN_SEC: int = int(
+    os.getenv("WEATHER_ENSEMBLE_COOLDOWN_SEC", "1200")
+)
+WEATHER_ENSEMBLE_MODEL_PAUSE_SEC: float = float(
+    os.getenv("WEATHER_ENSEMBLE_MODEL_PAUSE_SEC", "0.75")
+)
 
 # ════════════════════════════════════════════════════════════════════
 # TELEGRAM (Mobile HUD)

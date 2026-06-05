@@ -29,12 +29,27 @@ WEATHER_STATE_TTL_SEC = 21600
 _STATE_LOCK = threading.Lock()
 _MONITOR_LOCK = threading.Lock()
 _MONITOR_THREAD: Optional[threading.Thread] = None
+_ACTIVE_CITY_SCOPE_LOCK = threading.Lock()
+_ENSEMBLE_FETCH_STATE_LOCK = threading.Lock()
 _WATERMARKS_FILE = ""
+_ACTIVE_CITY_SCOPE_CACHE: Dict[str, Any] = {"timestamp": 0.0, "city_keys": []}
+_ENSEMBLE_FETCH_STATE: Dict[str, Dict[str, Any]] = {}
+WEATHER_ACTIVE_CITY_REFRESH_SEC = 300
+WEATHER_ENSEMBLE_COOLDOWN_SEC = 1200
+WEATHER_ENSEMBLE_MODEL_PAUSE_SEC = 0.75
 
 try:
-    from config import DB_PATH as _DB_PATH
+    from config import (
+        DB_PATH as _DB_PATH,
+        WEATHER_ACTIVE_CITY_REFRESH_SEC as _CFG_ACTIVE_CITY_REFRESH_SEC,
+        WEATHER_ENSEMBLE_COOLDOWN_SEC as _CFG_ENSEMBLE_COOLDOWN_SEC,
+        WEATHER_ENSEMBLE_MODEL_PAUSE_SEC as _CFG_ENSEMBLE_MODEL_PAUSE_SEC,
+    )
 
     _WATERMARKS_FILE = os.path.join(os.path.dirname(_DB_PATH), "weather_watermarks.json")
+    WEATHER_ACTIVE_CITY_REFRESH_SEC = int(_CFG_ACTIVE_CITY_REFRESH_SEC)
+    WEATHER_ENSEMBLE_COOLDOWN_SEC = int(_CFG_ENSEMBLE_COOLDOWN_SEC)
+    WEATHER_ENSEMBLE_MODEL_PAUSE_SEC = float(_CFG_ENSEMBLE_MODEL_PAUSE_SEC)
 except Exception:
     _WATERMARKS_FILE = ""
 
@@ -132,6 +147,104 @@ async def fetch_metar_observation(icao: str) -> Dict[str, Any]:
 # ── Cache ───────────────────────────────────────────────────────────────────
 _COORDINATE_CACHE: Dict[str, Dict[str, Any]] = {}
 CACHE_EXPIRY_SEC = WEATHER_STATE_TTL_SEC  # 6 hours (weather ensembles are slow-moving)
+
+
+def _cached_ensemble_record(cache_key: str, *, max_age_sec: int = CACHE_EXPIRY_SEC) -> Dict[str, Any]:
+    cached = _COORDINATE_CACHE.get(cache_key)
+    if not cached:
+        return {}
+    ts = float(cached.get("timestamp") or 0.0)
+    if time.time() - ts > max_age_sec:
+        return {}
+    return cached
+
+
+def _claim_ensemble_fetch_slot(cache_key: str) -> str:
+    now = time.time()
+    with _ENSEMBLE_FETCH_STATE_LOCK:
+        state = _ENSEMBLE_FETCH_STATE.setdefault(cache_key, {})
+        cooldown_until = float(state.get("cooldown_until") or 0.0)
+        if cooldown_until > now:
+            return "cooldown"
+        if state.get("inflight"):
+            return "wait"
+        state["inflight"] = True
+        return "leader"
+
+
+def _release_ensemble_fetch_slot(cache_key: str) -> None:
+    with _ENSEMBLE_FETCH_STATE_LOCK:
+        state = _ENSEMBLE_FETCH_STATE.setdefault(cache_key, {})
+        state["inflight"] = False
+
+
+def _enter_ensemble_cooldown(cache_key: str, *, city_key: str, model: str) -> bool:
+    now = time.time()
+    with _ENSEMBLE_FETCH_STATE_LOCK:
+        state = _ENSEMBLE_FETCH_STATE.setdefault(cache_key, {})
+        prior = float(state.get("cooldown_until") or 0.0)
+        state["cooldown_until"] = now + max(60, WEATHER_ENSEMBLE_COOLDOWN_SEC)
+        state["last_429_city"] = city_key
+        state["last_429_model"] = model
+        return prior <= now
+
+
+async def _await_inflight_ensemble(cache_key: str) -> Dict[str, Any]:
+    deadline = time.time() + 20.0
+    while time.time() < deadline:
+        cached = _cached_ensemble_record(cache_key)
+        if cached:
+            return cached
+        with _ENSEMBLE_FETCH_STATE_LOCK:
+            inflight = bool(_ENSEMBLE_FETCH_STATE.get(cache_key, {}).get("inflight"))
+        if not inflight:
+            break
+        await asyncio.sleep(0.25)
+    return _cached_ensemble_record(cache_key)
+
+
+def _active_weather_city_keys() -> list[str]:
+    now = time.time()
+    with _ACTIVE_CITY_SCOPE_LOCK:
+        cached_ts = float(_ACTIVE_CITY_SCOPE_CACHE.get("timestamp") or 0.0)
+        cached_city_keys = list(_ACTIVE_CITY_SCOPE_CACHE.get("city_keys") or [])
+        if cached_city_keys and (now - cached_ts) <= WEATHER_ACTIVE_CITY_REFRESH_SEC:
+            return cached_city_keys
+
+    city_keys: list[str] = []
+
+    try:
+        from forecast.db import get_active_contracts
+
+        needed_series = {
+            _resolve_weather_series(contract.get("local_symbol") or "")
+            for contract in get_active_contracts()
+        }
+        city_keys = sorted(
+            {
+                _SERIES_TO_CITY[series]
+                for series in needed_series
+                if series is not None and series in _SERIES_TO_CITY
+            }
+        )
+    except Exception as exc:
+        logger.debug("Active weather scope lookup failed: %s", exc)
+
+    if not city_keys:
+        with _STATE_LOCK:
+            city_keys = sorted(
+                {
+                    _SERIES_TO_CITY[series]
+                    for series in _WEATHER_SHADOW_STATE
+                    if series in _SERIES_TO_CITY
+                }
+            )
+
+    with _ACTIVE_CITY_SCOPE_LOCK:
+        _ACTIVE_CITY_SCOPE_CACHE["timestamp"] = now
+        _ACTIVE_CITY_SCOPE_CACHE["city_keys"] = city_keys
+
+    return city_keys
 
 
 def _resolve_weather_series(token: str) -> Optional[str]:
@@ -347,11 +460,15 @@ async def fetch_open_meteo_ensemble(city_key: str, lat: float, lon: float) -> Di
     """
     # v19.1.6: Coordinate-based caching
     cache_key = f"{lat:.2f}_{lon:.2f}"
-    now = time.time()
-    if cache_key in _COORDINATE_CACHE:
-        cached = _COORDINATE_CACHE[cache_key]
-        if now - cached["timestamp"] < CACHE_EXPIRY_SEC:
-            return cached
+    cached = _cached_ensemble_record(cache_key)
+    if cached:
+        return cached
+
+    slot_status = _claim_ensemble_fetch_slot(cache_key)
+    if slot_status == "cooldown":
+        return {}
+    if slot_status == "wait":
+        return await _await_inflight_ensemble(cache_key)
 
     import os
     api_key = os.getenv("OPEN_METEO_API_KEY")
@@ -362,145 +479,188 @@ async def fetch_open_meteo_ensemble(city_key: str, lat: float, lon: float) -> Di
     # Note: GraphCast is deterministic but highly accurate in the 24-48h window.
     models = ["gfs_seamless", "ecmwf_ifs025", "gfs_graphcast025"]
     results = {}
-    
-    for model in models:
-        params = {
-            "latitude": lat,
-            "longitude": lon,
-            "hourly": "temperature_2m,cloud_cover,precipitation,shortwave_radiation",
-            "models": model,
-            "timezone": "auto",
-            "forecast_days": 8,
-        }
-        if api_key: params["apikey"] = api_key
-        
-        try:
-            loop = asyncio.get_event_loop()
-            resp = await loop.run_in_executor(None, lambda: requests.get(base_url, params=params, timeout=15))
-            
-            if resp.status_code == 429:
-                logger.warning(f"Open-Meteo 429 (Rate Limit) for {city_key} [{model}]")
-                try:
-                    from logging_db.trade_logger import log_event
 
-                    log_event(
-                        "WARNING",
-                        "WeatherMonitor",
-                        f"Open-Meteo 429 (Rate Limit) for {city_key} [{model}]",
-                    )
-                except Exception:
-                    pass
-                continue
+    try:
+        for idx, model in enumerate(models):
+            if idx and WEATHER_ENSEMBLE_MODEL_PAUSE_SEC > 0:
+                await asyncio.sleep(WEATHER_ENSEMBLE_MODEL_PAUSE_SEC)
 
-            if resp.status_code != 200: continue
+            params = {
+                "latitude": lat,
+                "longitude": lon,
+                "hourly": "temperature_2m,cloud_cover,precipitation,shortwave_radiation",
+                "models": model,
+                "timezone": "auto",
+                "forecast_days": 8,
+            }
+            if api_key:
+                params["apikey"] = api_key
 
-            data = resp.json()
-            hourly = data.get("hourly", {})
-            if not hourly: continue
-
-            window_size = 26
-            hourly_time = list(hourly.get("time", []))
-            members_high, members_low, members_precip, cloud_members = [], [], [], []
-            ssrd_members = []
-            hourly_members_temp_f = {}
-            hourly_members_precip_in = {}
-            hourly_members_cloud = {}
-            hourly_members_ssrd = {}
-            
-            # Model member counts
-            if "ecmwf" in model: max_members = 51
-            elif "graphcast" in model: max_members = 1 # Deterministic AI model
-            else: max_members = 31
-            
-            for i in range(max_members):
-                # For GraphCast, key is just temperature_2m
-                if "graphcast" in model:
-                    temp_key = "temperature_2m"
-                else:
-                    temp_key = f"temperature_2m_member{i:02d}"
-                    
-                cloud_key = f"cloud_cover_member{i:02d}" if "graphcast" not in model else "cloud_cover"
-                precip_key = f"precipitation_member{i:02d}" if "graphcast" not in model else "precipitation"
-                ssrd_key = (
-                    f"shortwave_radiation_member{i:02d}"
-                    if "graphcast" not in model
-                    else "shortwave_radiation"
+            try:
+                loop = asyncio.get_event_loop()
+                resp = await loop.run_in_executor(
+                    None,
+                    lambda: requests.get(base_url, params=params, timeout=15),
                 )
-                
-                if temp_key in hourly:
-                    all_temps_c = hourly[temp_key]
-                    temps_c = all_temps_c[:window_size]
-                    if temps_c:
-                        temps_f = [(tc * 9/5) + 32 for tc in temps_c]
-                        members_high.append(max(temps_f))
-                        members_low.append(min(temps_f))
-                    if all_temps_c:
-                        hourly_members_temp_f[f"member_{i:02d}"] = [
-                            (float(tc) * 9 / 5) + 32 for tc in all_temps_c
-                        ]
-                
-                if precip_key in hourly:
-                    all_precip_mm = hourly[precip_key]
-                    p_mm = all_precip_mm[:window_size]
-                    if p_mm:
-                        val = sum(p_mm) * 0.03937
-                        members_precip.append(val)
-                    if all_precip_mm:
-                        hourly_members_precip_in[f"member_{i:02d}"] = [
-                            float(mm) * 0.03937 for mm in all_precip_mm
-                        ]
 
-                if cloud_key in hourly:
-                    all_cloud = hourly[cloud_key]
-                    c_vals = all_cloud[11:17] # Peak heating 11 AM - 4 PM
-                    if c_vals: cloud_members.append(np.mean(c_vals))
-                    if all_cloud:
-                        hourly_members_cloud[f"member_{i:02d}"] = [float(val) for val in all_cloud]
+                if resp.status_code == 429:
+                    should_log = _enter_ensemble_cooldown(
+                        cache_key,
+                        city_key=city_key,
+                        model=model,
+                    )
+                    if should_log:
+                        logger.warning(
+                            "Open-Meteo 429 for %s [%s]; cooling city for %ss.",
+                            city_key,
+                            model,
+                            WEATHER_ENSEMBLE_COOLDOWN_SEC,
+                        )
+                        try:
+                            from logging_db.trade_logger import log_event
 
-                if ssrd_key in hourly:
-                    all_ssrd = hourly[ssrd_key]
-                    s_vals = all_ssrd[11:17]
-                    if s_vals:
-                        ssrd_members.append(float(np.mean(s_vals)))
-                    if all_ssrd:
-                        hourly_members_ssrd[f"member_{i:02d}"] = [float(val) for val in all_ssrd]
+                            log_event(
+                                "WARNING",
+                                "WeatherMonitor",
+                                (
+                                    f"Open-Meteo 429 (Rate Limit) for {city_key} [{model}] "
+                                    f"cooldown={WEATHER_ENSEMBLE_COOLDOWN_SEC}s"
+                                ),
+                            )
+                        except Exception:
+                            pass
+                    break
 
-            if members_high:
-                if "gfs_seamless" in model: m_type = "gfs"
-                elif "ecmwf" in model: m_type = "ecmwf"
-                elif "graphcast" in model: m_type = "aigefs"
-                else: m_type = "other"
-                
-                results[m_type] = {
-                    "members_high": members_high,
-                    "members_low": members_low,
-                    "members_precip": members_precip,
-                    "mean_high": float(np.mean(members_high)),
-                    "sigma_high": float(np.std(members_high)) if len(members_high) > 1 else 0.5,
-                    "mean_low": float(np.mean(members_low)),
-                    "sigma_low": float(np.std(members_low)) if len(members_low) > 1 else 0.5,
-                    "peak_tcdc": float(np.mean(cloud_members)) if cloud_members else 0.0,
-                    "peak_ssrd": float(np.mean(ssrd_members)) if ssrd_members else None,
-                    "timestamp": time.time(),
-                    "hourly_time": hourly_time,
-                    "hourly_members_temp_f": hourly_members_temp_f,
-                    "hourly_members_precip_in": hourly_members_precip_in,
-                    "hourly_members_cloud": hourly_members_cloud,
-                    "hourly_members_ssrd": hourly_members_ssrd,
-                }
-        except Exception as e:
-            logger.debug(f"Fetch failed for {city_key} {model}: {e}")
+                if resp.status_code != 200:
+                    continue
 
-    if not results: return {}
-    
-    # Unified City Record
-    final_record = results.get("gfs", list(results.values())[0]).copy()
-    final_record["ecmwf"] = results.get("ecmwf")
-    final_record["aigefs"] = results.get("aigefs")
-    
-    # Update cache
-    _COORDINATE_CACHE[cache_key] = final_record
-    return final_record
+                data = resp.json()
+                hourly = data.get("hourly", {})
+                if not hourly:
+                    continue
+
+                window_size = 26
+                hourly_time = list(hourly.get("time", []))
+                members_high, members_low, members_precip, cloud_members = [], [], [], []
+                ssrd_members = []
+                hourly_members_temp_f = {}
+                hourly_members_precip_in = {}
+                hourly_members_cloud = {}
+                hourly_members_ssrd = {}
+
+                # Model member counts
+                if "ecmwf" in model:
+                    max_members = 51
+                elif "graphcast" in model:
+                    max_members = 1  # Deterministic AI model
+                else:
+                    max_members = 31
+
+                for i in range(max_members):
+                    # For GraphCast, key is just temperature_2m
+                    if "graphcast" in model:
+                        temp_key = "temperature_2m"
+                    else:
+                        temp_key = f"temperature_2m_member{i:02d}"
+
+                    cloud_key = (
+                        f"cloud_cover_member{i:02d}" if "graphcast" not in model else "cloud_cover"
+                    )
+                    precip_key = (
+                        f"precipitation_member{i:02d}" if "graphcast" not in model else "precipitation"
+                    )
+                    ssrd_key = (
+                        f"shortwave_radiation_member{i:02d}"
+                        if "graphcast" not in model
+                        else "shortwave_radiation"
+                    )
+
+                    if temp_key in hourly:
+                        all_temps_c = hourly[temp_key]
+                        temps_c = all_temps_c[:window_size]
+                        if temps_c:
+                            temps_f = [(tc * 9 / 5) + 32 for tc in temps_c]
+                            members_high.append(max(temps_f))
+                            members_low.append(min(temps_f))
+                        if all_temps_c:
+                            hourly_members_temp_f[f"member_{i:02d}"] = [
+                                (float(tc) * 9 / 5) + 32 for tc in all_temps_c
+                            ]
+
+                    if precip_key in hourly:
+                        all_precip_mm = hourly[precip_key]
+                        p_mm = all_precip_mm[:window_size]
+                        if p_mm:
+                            val = sum(p_mm) * 0.03937
+                            members_precip.append(val)
+                        if all_precip_mm:
+                            hourly_members_precip_in[f"member_{i:02d}"] = [
+                                float(mm) * 0.03937 for mm in all_precip_mm
+                            ]
+
+                    if cloud_key in hourly:
+                        all_cloud = hourly[cloud_key]
+                        c_vals = all_cloud[11:17]  # Peak heating 11 AM - 4 PM
+                        if c_vals:
+                            cloud_members.append(np.mean(c_vals))
+                        if all_cloud:
+                            hourly_members_cloud[f"member_{i:02d}"] = [
+                                float(val) for val in all_cloud
+                            ]
+
+                    if ssrd_key in hourly:
+                        all_ssrd = hourly[ssrd_key]
+                        s_vals = all_ssrd[11:17]
+                        if s_vals:
+                            ssrd_members.append(float(np.mean(s_vals)))
+                        if all_ssrd:
+                            hourly_members_ssrd[f"member_{i:02d}"] = [
+                                float(val) for val in all_ssrd
+                            ]
+
+                if members_high:
+                    if "gfs_seamless" in model:
+                        m_type = "gfs"
+                    elif "ecmwf" in model:
+                        m_type = "ecmwf"
+                    elif "graphcast" in model:
+                        m_type = "aigefs"
+                    else:
+                        m_type = "other"
+
+                    results[m_type] = {
+                        "members_high": members_high,
+                        "members_low": members_low,
+                        "members_precip": members_precip,
+                        "mean_high": float(np.mean(members_high)),
+                        "sigma_high": float(np.std(members_high)) if len(members_high) > 1 else 0.5,
+                        "mean_low": float(np.mean(members_low)),
+                        "sigma_low": float(np.std(members_low)) if len(members_low) > 1 else 0.5,
+                        "peak_tcdc": float(np.mean(cloud_members)) if cloud_members else 0.0,
+                        "peak_ssrd": float(np.mean(ssrd_members)) if ssrd_members else None,
+                        "timestamp": time.time(),
+                        "hourly_time": hourly_time,
+                        "hourly_members_temp_f": hourly_members_temp_f,
+                        "hourly_members_precip_in": hourly_members_precip_in,
+                        "hourly_members_cloud": hourly_members_cloud,
+                        "hourly_members_ssrd": hourly_members_ssrd,
+                    }
+            except Exception as e:
+                logger.debug(f"Fetch failed for {city_key} {model}: {e}")
+
+        if not results:
+            return {}
+
+        # Unified City Record
+        final_record = results.get("gfs", list(results.values())[0]).copy()
+        final_record["ecmwf"] = results.get("ecmwf")
+        final_record["aigefs"] = results.get("aigefs")
+
+        # Update cache
+        _COORDINATE_CACHE[cache_key] = final_record
+        return final_record
+    finally:
+        _release_ensemble_fetch_slot(cache_key)
 
 def inject_weather_ensemble(ticker_prefix: str, members: list[float], tcdc: float = 0.0):
     """v19.1.5: Force-inject an ensemble for live verification/testing."""
@@ -678,7 +838,11 @@ async def update_weather_shadow_state():
             try:
                 new_state = {}
                 import random
-                city_keys = list(STATIONS.keys())
+                city_keys = _active_weather_city_keys()
+                if not city_keys:
+                    logger.info("Weather Ensemble sync skipped: no active weather cities.")
+                    await asyncio.sleep(900)
+                    continue
                 random.shuffle(city_keys)
                 
                 for city_key in city_keys:
@@ -695,7 +859,11 @@ async def update_weather_shadow_state():
                 if new_state:
                     with _STATE_LOCK:
                         _WEATHER_SHADOW_STATE.update(new_state)
-                    logger.info(f"Weather Ensemble synced: {len(new_state)} series")
+                    logger.info(
+                        "Weather Ensemble synced: %s series across %s active cities",
+                        len(new_state),
+                        len(city_keys),
+                    )
             except Exception as e:
                 logger.error(f"Ensemble sync failure: {e}")
             await asyncio.sleep(10800)
@@ -709,7 +877,14 @@ async def update_weather_shadow_state():
         while True:
             try:
                 # v19.1.10: Precision Ground Truth (METAR + HRRR)
-                for city_key, loc in STATIONS.items():
+                city_keys = _active_weather_city_keys()
+                if not city_keys:
+                    logger.info("Weather Intraday sync skipped: no active weather cities.")
+                    await asyncio.sleep(900)
+                    continue
+
+                for city_key in city_keys:
+                    loc = STATIONS[city_key]
                     metar = await fetch_metar_observation(loc["icao"])
                     hrrr = await fetch_hrrr_forecast(city_key, loc["lat"], loc["lon"])
                     intraday_payload = _intraday_payload(
@@ -725,7 +900,10 @@ async def update_weather_shadow_state():
                                 _WEATHER_SHADOW_STATE[s_ticker]["intraday"] = intraday_payload
                 _persist_watermarks(watermarks)
                 
-                logger.info("Weather Intraday Precinct synced (METAR/HRRR/Watermarks).")
+                logger.info(
+                    "Weather Intraday Precinct synced (METAR/HRRR/Watermarks) for %s active cities.",
+                    len(city_keys),
+                )
             except Exception as e:
                 logger.error(f"Intraday sync failure: {e}")
             await asyncio.sleep(900)

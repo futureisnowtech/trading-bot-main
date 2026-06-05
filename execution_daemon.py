@@ -45,7 +45,6 @@ def main() -> int:
     sleep_seconds = max(1, int(float(os.getenv("SNIPER_SLEEP_SECONDS", "300"))))
     bankroll = float(ACCOUNT_SIZE)
 
-    start_weather_monitor()
     try:
         run_reconciliation()
     except Exception:
@@ -55,6 +54,7 @@ def main() -> int:
     except Exception:
         logger.exception("Incident sync failed after startup reconciliation")
     logger.info("Execution daemon online (sleep=%ss).", sleep_seconds)
+    weather_monitor_started = False
 
     try:
         while True:
@@ -77,6 +77,10 @@ def main() -> int:
                 else:
                     summary = run_execution_cycle(bankroll=bankroll, run_rbi=True)
                     logger.info("Execution cycle complete: %s", summary)
+                    if not weather_monitor_started:
+                        start_weather_monitor()
+                        weather_monitor_started = True
+                        logger.info("Weather monitor started after initial on-demand hydration.")
                 try:
                     sync_incidents_and_notify()
                 except Exception:

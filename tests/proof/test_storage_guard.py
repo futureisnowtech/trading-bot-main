@@ -103,3 +103,43 @@ def test_sniper_cron_skips_cycle_on_low_disk(monkeypatch):
 
     assert sc.main() == 0
     assert called["cycle"] == 0
+
+
+def test_execution_daemon_starts_weather_monitor_after_first_cycle(monkeypatch):
+    import execution_daemon as ed
+
+    order: list[str] = []
+
+    monkeypatch.setattr(ed, "KALSHI_ENABLED", True, raising=False)
+    monkeypatch.setattr(ed, "FORECAST_LANE_ACTIVE", True, raising=False)
+    monkeypatch.setattr(ed, "FORECAST_AUTONOMOUS_ENABLED", True, raising=False)
+    monkeypatch.setattr(ed, "run_reconciliation", lambda: None, raising=False)
+    monkeypatch.setattr(ed, "sync_incidents_and_notify", lambda: None, raising=False)
+    monkeypatch.setattr(ed, "maintain_runtime_storage", lambda: None, raising=False)
+    monkeypatch.setattr(
+        ed,
+        "runtime_storage_status",
+        lambda: {
+            "ok": True,
+            "free_mb": 4096.0,
+            "threshold_mb": 2048.0,
+            "path": "/tmp/runtime",
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(
+        ed,
+        "run_execution_cycle",
+        lambda bankroll, run_rbi=True: order.append("cycle") or {"entries": 0},
+        raising=False,
+    )
+    monkeypatch.setattr(
+        ed,
+        "start_weather_monitor",
+        lambda: order.append("monitor"),
+        raising=False,
+    )
+    monkeypatch.setattr(ed.time, "sleep", lambda seconds: (_ for _ in ()).throw(KeyboardInterrupt()))
+
+    assert ed.main() == 0
+    assert order == ["cycle", "monitor"]

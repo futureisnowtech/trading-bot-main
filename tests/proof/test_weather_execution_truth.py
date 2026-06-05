@@ -466,6 +466,7 @@ def test_open_meteo_429_cools_city_and_skips_repeat_fetch(monkeypatch):
 
     class _Resp:
         status_code = 429
+        text = '{"reason":"Daily API request limit exceeded. Please try again tomorrow.","error":true}'
 
         def json(self):
             return {}
@@ -474,6 +475,8 @@ def test_open_meteo_429_cools_city_and_skips_repeat_fetch(monkeypatch):
 
     wm._COORDINATE_CACHE.clear()
     wm._ENSEMBLE_FETCH_STATE.clear()
+    wm._ENSEMBLE_GLOBAL_RATE_LIMIT["until"] = 0.0
+    wm._ENSEMBLE_GLOBAL_RATE_LIMIT["reason"] = ""
 
     def fake_get(*args, **kwargs):
         calls["count"] += 1
@@ -486,11 +489,12 @@ def test_open_meteo_429_cools_city_and_skips_repeat_fetch(monkeypatch):
     )
 
     first = asyncio.run(wm.fetch_open_meteo_ensemble("NY", 40.78, -73.97))
-    second = asyncio.run(wm.fetch_open_meteo_ensemble("NY", 40.78, -73.97))
+    second = asyncio.run(wm.fetch_open_meteo_ensemble("LAX", 33.94, -118.41))
 
     assert first == {}
     assert second == {}
     assert calls["count"] == 1
+    assert wm._global_ensemble_rate_limit_active() is True
 
 
 def test_contract_weather_projection_is_day_specific(monkeypatch):

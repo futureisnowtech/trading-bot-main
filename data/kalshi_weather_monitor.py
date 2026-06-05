@@ -13,7 +13,7 @@ import re
 import threading
 import time
 from copy import deepcopy
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any, Dict, Optional
 
 import numpy as np
@@ -31,9 +31,11 @@ _MONITOR_LOCK = threading.Lock()
 _MONITOR_THREAD: Optional[threading.Thread] = None
 _ACTIVE_CITY_SCOPE_LOCK = threading.Lock()
 _ENSEMBLE_FETCH_STATE_LOCK = threading.Lock()
+_ENSEMBLE_GLOBAL_RATE_LIMIT_LOCK = threading.Lock()
 _WATERMARKS_FILE = ""
 _ACTIVE_CITY_SCOPE_CACHE: Dict[str, Any] = {"timestamp": 0.0, "city_keys": []}
 _ENSEMBLE_FETCH_STATE: Dict[str, Dict[str, Any]] = {}
+_ENSEMBLE_GLOBAL_RATE_LIMIT: Dict[str, Any] = {"until": 0.0, "reason": "", "logged_at": 0.0}
 WEATHER_ACTIVE_CITY_REFRESH_SEC = 300
 WEATHER_ENSEMBLE_COOLDOWN_SEC = 1200
 WEATHER_ENSEMBLE_MODEL_PAUSE_SEC = 0.75
@@ -157,6 +159,25 @@ def _cached_ensemble_record(cache_key: str, *, max_age_sec: int = CACHE_EXPIRY_S
     if time.time() - ts > max_age_sec:
         return {}
     return cached
+
+
+def _global_ensemble_rate_limit_active() -> bool:
+    with _ENSEMBLE_GLOBAL_RATE_LIMIT_LOCK:
+        return float(_ENSEMBLE_GLOBAL_RATE_LIMIT.get("until") or 0.0) > time.time()
+
+
+def _activate_global_ensemble_rate_limit(*, reason: str) -> bool:
+    tomorrow_utc = (
+        datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+        + 86400
+    )
+    with _ENSEMBLE_GLOBAL_RATE_LIMIT_LOCK:
+        already_active = float(_ENSEMBLE_GLOBAL_RATE_LIMIT.get("until") or 0.0) > time.time()
+        _ENSEMBLE_GLOBAL_RATE_LIMIT["until"] = tomorrow_utc
+        _ENSEMBLE_GLOBAL_RATE_LIMIT["reason"] = reason
+        if not already_active:
+            _ENSEMBLE_GLOBAL_RATE_LIMIT["logged_at"] = time.time()
+        return not already_active
 
 
 def _claim_ensemble_fetch_slot(cache_key: str) -> str:
@@ -463,6 +484,8 @@ async def fetch_open_meteo_ensemble(city_key: str, lat: float, lon: float) -> Di
     cached = _cached_ensemble_record(cache_key)
     if cached:
         return cached
+    if _global_ensemble_rate_limit_active():
+        return {}
 
     slot_status = _claim_ensemble_fetch_slot(cache_key)
     if slot_status == "cooldown":
@@ -504,6 +527,23 @@ async def fetch_open_meteo_ensemble(city_key: str, lat: float, lon: float) -> Di
                 )
 
                 if resp.status_code == 429:
+                    response_text = (resp.text or "").strip()
+                    if "Daily API request limit exceeded" in response_text:
+                        if _activate_global_ensemble_rate_limit(reason=response_text):
+                            logger.warning(
+                                "Open-Meteo daily ensemble limit exhausted; pausing all ensemble fetches until tomorrow UTC."
+                            )
+                            try:
+                                from logging_db.trade_logger import log_event
+
+                                log_event(
+                                    "WARNING",
+                                    "WeatherMonitor",
+                                    "Open-Meteo daily ensemble limit exhausted; pausing all ensemble fetches until tomorrow UTC.",
+                                )
+                            except Exception:
+                                pass
+                        break
                     should_log = _enter_ensemble_cooldown(
                         cache_key,
                         city_key=city_key,
@@ -708,7 +748,7 @@ async def hydrate_weather_shadow_state(
     *,
     series_filter: Optional[set[str]] = None,
     include_intraday: bool = True,
-    concurrency: int = 4,
+    concurrency: int = 1,
 ) -> Dict[str, Any]:
     """Refresh the weather shadow state once for selected series or the whole universe."""
     watermarks = _load_watermarks() if include_intraday else None

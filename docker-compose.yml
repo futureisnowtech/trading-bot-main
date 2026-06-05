@@ -34,3 +34,31 @@ services:
       options:
         max-size: 50m
         max-file: "3"
+
+  kalshi-cockpit:
+    image: ${DASHBOARD_IMAGE_NAME:-algo-trading-bot-dashboard}:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+    container_name: kalshi-cockpit
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./logs:/app/logs
+      - ./kalshi_private_key.pem:/run/secrets/kalshi_private_key.pem:ro
+    ports:
+      - "8501:8501"
+    command:
+      - streamlit
+      - run
+      - dashboard/streamlit_app.py
+      - --server.port=8501
+      - --server.address=0.0.0.0
+      - --server.headless=true
+      - --browser.gatherUsageStats=false
+    logging:
+      driver: json-file
+      options:
+        max-size: 50m
+        max-file: "2"

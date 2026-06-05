@@ -51,7 +51,9 @@ fi
 echo "  OK: local HEAD == origin/${BRANCH} == ${LOCAL_SHA}"
 
 DEPLOY_UTC=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-LOCAL_IMAGE_NAME="ghcr.io/$(git remote get-url origin | sed 's/.*github.com[:\/]\(.*\)\.git/\1/' | tr '[:upper:]' '[:lower:]')"
+IMAGE_REPO="ghcr.io/$(git remote get-url origin | sed 's/.*github.com[:\/]\(.*\)\.git/\1/' | tr '[:upper:]' '[:lower:]')"
+LOCAL_IMAGE_NAME="${IMAGE_REPO}"
+LOCAL_DASHBOARD_IMAGE_NAME="${IMAGE_REPO}-dashboard"
 
 TMP_EXPORT_DIR=$(mktemp -d "${TMPDIR:-/tmp}/kalshi-deploy.XXXXXX")
 
@@ -89,6 +91,7 @@ set -euo pipefail
 cd ${PROJECT_DIR}
 
 export IMAGE_NAME="${LOCAL_IMAGE_NAME}"
+export DASHBOARD_IMAGE_NAME="${LOCAL_DASHBOARD_IMAGE_NAME}"
 
 if [ ! -f .env ]; then
     echo "ERROR: ${PROJECT_DIR}/.env is missing on the droplet."
@@ -111,6 +114,9 @@ fi
 echo "  Building lean runtime image from the exact committed tree..."
 docker buildx build --pull --load --progress=plain -t "${LOCAL_IMAGE_NAME}:latest" .
 
+echo "  Building cockpit image..."
+docker buildx build --pull --load --progress=plain -f Dockerfile.dashboard -t "${LOCAL_DASHBOARD_IMAGE_NAME}:latest" .
+
 echo "  Hot-reloading services..."
 docker compose up -d --remove-orphans --force-recreate --no-build
 
@@ -118,6 +124,7 @@ echo "  Waiting for containers..."
 sleep 10
 docker ps | grep execution-engine
 docker ps | grep telegram-oracle
+docker ps | grep kalshi-cockpit
 
 echo "  Verifying forecast lane readiness..."
 VERIFY_OK=0
@@ -172,6 +179,37 @@ if [ "\${VERIFY_OK}" -ne 1 ]; then
     exit 1
 fi
 
+echo "  Verifying cockpit HTTP readiness..."
+COCKPIT_OK=0
+for attempt in \$(seq 1 18); do
+    if python3 - << 'PYEOF'
+import urllib.request
+
+try:
+    with urllib.request.urlopen("http://127.0.0.1:8501/_stcore/health", timeout=5) as resp:
+        body = resp.read().decode("utf-8").strip()
+        if body == "ok":
+            raise SystemExit(0)
+except Exception:
+    pass
+raise SystemExit(1)
+PYEOF
+    then
+        echo "  Cockpit ready on http://64.225.20.38:8501"
+        COCKPIT_OK=1
+        break
+    fi
+    echo "  Waiting for cockpit readiness (\${attempt}/18)..."
+    sleep 5
+done
+
+if [ "\${COCKPIT_OK}" -ne 1 ]; then
+    echo "ERROR: Cockpit failed readiness verification."
+    echo "Recent kalshi-cockpit logs:"
+    docker logs --tail 120 kalshi-cockpit || true
+    exit 1
+fi
+
 echo "  Writing provenance markers..."
 cat > ${PROJECT_DIR}/version.txt << VTXT
 sha=${LOCAL_SHA}
@@ -185,7 +223,8 @@ manifest = {
     "sha": "${LOCAL_SHA}",
     "branch": "${BRANCH}",
     "deployed_at_utc": "${DEPLOY_UTC}",
-    "services": ["execution-engine", "telegram-oracle"],
+    "services": ["execution-engine", "telegram-oracle", "kalshi-cockpit"],
+    "cockpit_url": "http://64.225.20.38:8501",
 }
 with open("${PROJECT_DIR}/deploy_manifest.json", "w") as f:
     json.dump(manifest, f, indent=2)
@@ -202,3 +241,4 @@ echo "  SHA deployed : ${LOCAL_SHA}"
 echo "  Branch       : ${BRANCH}"
 echo "  Deploy UTC   : ${DEPLOY_UTC}"
 echo "  Server       : ${NYC_USER}@${NYC_IP}:${PROJECT_DIR}"
+echo "  Cockpit URL  : http://64.225.20.38:8501"

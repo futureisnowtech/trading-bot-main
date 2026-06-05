@@ -231,7 +231,7 @@ with open("${PROJECT_DIR}/deploy_manifest.json", "w") as f:
 print("  deploy_manifest.json written.")
 PYEOF
 
-docker exec kalshi-cockpit python3 - << PYEOF
+docker exec -i kalshi-cockpit python3 - << PYEOF
 import json
 from pathlib import Path
 

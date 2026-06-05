@@ -217,9 +217,6 @@ branch=${BRANCH}
 deployed_at_utc=${DEPLOY_UTC}
 VTXT
 
-mkdir -p ${PROJECT_DIR}/logs
-cp ${PROJECT_DIR}/version.txt ${PROJECT_DIR}/logs/version.txt
-
 python3 - << PYEOF
 import json
 manifest = {
@@ -231,9 +228,34 @@ manifest = {
 }
 with open("${PROJECT_DIR}/deploy_manifest.json", "w") as f:
     json.dump(manifest, f, indent=2)
-with open("${PROJECT_DIR}/logs/deploy_manifest.json", "w") as f:
-    json.dump(manifest, f, indent=2)
 print("  deploy_manifest.json written.")
+PYEOF
+
+docker exec kalshi-cockpit python3 - << PYEOF
+import json
+from pathlib import Path
+
+runtime_dir = Path("/app/logs")
+runtime_dir.mkdir(parents=True, exist_ok=True)
+
+(runtime_dir / "version.txt").write_text(
+    "sha=${LOCAL_SHA}\\nbranch=${BRANCH}\\ndeployed_at_utc=${DEPLOY_UTC}\\n",
+    encoding="utf-8",
+)
+(runtime_dir / "deploy_manifest.json").write_text(
+    json.dumps(
+        {
+            "sha": "${LOCAL_SHA}",
+            "branch": "${BRANCH}",
+            "deployed_at_utc": "${DEPLOY_UTC}",
+            "services": ["execution-engine", "telegram-oracle", "kalshi-cockpit"],
+            "cockpit_url": "http://64.225.20.38:8501",
+        },
+        indent=2,
+    ),
+    encoding="utf-8",
+)
+print("  cockpit provenance mirrored to /app/logs")
 PYEOF
 
 echo "  version.txt contents:"

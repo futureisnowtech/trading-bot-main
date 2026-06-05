@@ -16,7 +16,7 @@ from typing import Dict, List, Any, Optional
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from config import DB_PATH, REPO_ROOT
-from VERSION import VERSION
+from runtime.build_info import get_build_info
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +41,9 @@ def format_pnl(val: float) -> str:
 
 def get_system_vitals() -> Dict[str, Any]:
     """Fetch system-wide vitals from DB and process state."""
+    build = get_build_info()
     vitals = {
-        "version": VERSION,
+        "version": build["app_version"],
         "mode": "LIVE",
         "cpu": 0.0,
         "ram": 0.0,
@@ -113,7 +114,7 @@ def build_main_menu_msg() -> str:
     k = get_kalshi_state()
     
     msg = [
-        THEME_HEADER.format(VERSION),
+        THEME_HEADER.format(v["version"]),
         f"Status: {ICON_LIVE} | Up: {v['uptime']}",
         f"SRE Integrity: {v['integrity']}%",
         "",

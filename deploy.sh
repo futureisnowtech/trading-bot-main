@@ -51,6 +51,11 @@ fi
 echo "  OK: local HEAD == origin/${BRANCH} == ${LOCAL_SHA}"
 
 DEPLOY_UTC=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+APP_VERSION=$(python3 - <<'PYEOF'
+from VERSION import VERSION
+print(VERSION)
+PYEOF
+)
 IMAGE_REPO="ghcr.io/$(git remote get-url origin | sed 's/.*github.com[:\/]\(.*\)\.git/\1/' | tr '[:upper:]' '[:lower:]')"
 LOCAL_IMAGE_NAME="${IMAGE_REPO}"
 LOCAL_DASHBOARD_IMAGE_NAME="${IMAGE_REPO}-dashboard"
@@ -212,6 +217,7 @@ fi
 
 echo "  Writing provenance markers..."
 cat > ${PROJECT_DIR}/version.txt << VTXT
+app_version=${APP_VERSION}
 sha=${LOCAL_SHA}
 branch=${BRANCH}
 deployed_at_utc=${DEPLOY_UTC}
@@ -220,6 +226,7 @@ VTXT
 python3 - << PYEOF
 import json
 manifest = {
+    "app_version": "${APP_VERSION}",
     "sha": "${LOCAL_SHA}",
     "branch": "${BRANCH}",
     "deployed_at_utc": "${DEPLOY_UTC}",
@@ -239,12 +246,13 @@ runtime_dir = Path("/app/logs")
 runtime_dir.mkdir(parents=True, exist_ok=True)
 
 (runtime_dir / "version.txt").write_text(
-    "sha=${LOCAL_SHA}\\nbranch=${BRANCH}\\ndeployed_at_utc=${DEPLOY_UTC}\\n",
+    "app_version=${APP_VERSION}\\nsha=${LOCAL_SHA}\\nbranch=${BRANCH}\\ndeployed_at_utc=${DEPLOY_UTC}\\n",
     encoding="utf-8",
 )
 (runtime_dir / "deploy_manifest.json").write_text(
     json.dumps(
         {
+            "app_version": "${APP_VERSION}",
             "sha": "${LOCAL_SHA}",
             "branch": "${BRANCH}",
             "deployed_at_utc": "${DEPLOY_UTC}",

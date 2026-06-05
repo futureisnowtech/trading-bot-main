@@ -65,6 +65,16 @@ def test_build_regime_manifest_surfaces_live_constants():
     assert any("$40.00" in line for line in manifest["entry_gates"])
 
 
+def test_build_regime_manifest_uses_runtime_build_version(monkeypatch):
+    import dashboard.cockpit_data as cd
+
+    monkeypatch.setattr(cd, "get_build_info", lambda: {"app_version": "19.10.1"})
+
+    manifest = cd.build_regime_manifest(balance_usd=200.0)
+
+    assert manifest["version"] == "19.10.1"
+
+
 def test_build_trade_edge_rows_handles_yes_and_no_side_buys():
     from dashboard.cockpit_data import build_trade_edge_rows
 
@@ -129,7 +139,7 @@ def test_build_ai_insights_translates_runtime_into_plain_english():
 
 def test_load_deploy_metadata_prefers_runtime_dir(tmp_path, monkeypatch):
     import json
-    import dashboard.cockpit_data as cd
+    import runtime.build_info as bi
 
     runtime_dir = tmp_path / "runtime"
     root_dir = tmp_path / "root"
@@ -137,22 +147,66 @@ def test_load_deploy_metadata_prefers_runtime_dir(tmp_path, monkeypatch):
     root_dir.mkdir()
 
     (runtime_dir / "deploy_manifest.json").write_text(
-        json.dumps({"sha": "runtime-sha", "cockpit_url": "http://example"}),
+        json.dumps(
+            {
+                "app_version": "19.10.1",
+                "sha": "runtime-sha",
+                "cockpit_url": "http://example",
+            }
+        ),
         encoding="utf-8",
     )
     (runtime_dir / "version.txt").write_text(
-        "sha=runtime-sha\nbranch=master\ndeployed_at_utc=2026-06-05T00:00:00Z\n",
+        "app_version=19.10.1\nsha=runtime-sha\nbranch=master\ndeployed_at_utc=2026-06-05T00:00:00Z\n",
         encoding="utf-8",
     )
     (root_dir / "deploy_manifest.json").write_text(
-        json.dumps({"sha": "root-sha"}),
+        json.dumps({"app_version": "19.9.9", "sha": "root-sha"}),
         encoding="utf-8",
     )
 
-    monkeypatch.setattr(cd, "_RUNTIME_DIR", runtime_dir)
-    monkeypatch.setattr(cd, "_ROOT", root_dir)
+    monkeypatch.setattr(bi, "_RUNTIME_DIR", runtime_dir)
+    monkeypatch.setattr(bi, "_ROOT", root_dir)
 
-    payload = cd._load_deploy_metadata()
+    payload = bi.load_deploy_metadata()
+    build = bi.get_build_info()
 
+    assert payload["app_version"] == "19.10.1"
     assert payload["sha"] == "runtime-sha"
     assert payload["branch"] == "master"
+    assert build["version"] == "19.10.1"
+    assert build["short_sha"] == "runtime"
+
+
+def test_get_build_info_ignores_stale_local_metadata_when_git_sha_differs(monkeypatch):
+    import runtime.build_info as bi
+
+    monkeypatch.setattr(
+        bi,
+        "load_deploy_metadata",
+        lambda: {
+            "app_version": "19.9.9",
+            "sha": "olddeploysha",
+            "branch": "master",
+            "deployed_at_utc": "2026-06-01T00:00:00Z",
+            "cockpit_url": "http://stale.example",
+        },
+    )
+
+    def fake_git_value(*args: str) -> str:
+        if args == ("rev-parse", "HEAD"):
+            return "newgitsha1234567"
+        if args == ("branch", "--show-current"):
+            return "master"
+        return ""
+
+    monkeypatch.setattr(bi, "_read_git_value", fake_git_value)
+
+    build = bi.get_build_info()
+
+    assert build["version"] != "19.9.9"
+    assert build["sha"] == "newgitsha1234567"
+    assert build["short_sha"] == "newgits"
+    assert build["deployed_at_utc"] == ""
+    assert build["cockpit_url"] == ""
+    assert build["metadata_stale"] is True

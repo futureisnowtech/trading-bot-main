@@ -365,8 +365,10 @@ async def reboot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @restricted_access
 async def audit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    from VERSION import VERSION
-    msg = f"<b>SOVEREIGN KALSHI AUDIT ({VERSION})</b>\n\n"
+    from runtime.build_info import get_build_info
+
+    build = get_build_info()
+    msg = f"<b>SOVEREIGN KALSHI AUDIT ({build['app_version']})</b>\n\n"
 
     try:
         snapshot_msg, raw_text = _build_local_audit_snapshot()

@@ -8,10 +8,8 @@ import re
 import sqlite3
 from collections import defaultdict
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
-from VERSION import VERSION
 from config import (
     ACCOUNT_SIZE,
     BOT_LOG_PATH,
@@ -37,12 +35,9 @@ from config import (
 )
 from forecast.strategy_engine import EV_THRESHOLD, _get_city_hub, _get_macro_context
 from notifications.notification_engine import get_notifications
+from runtime.build_info import get_build_info
 from runtime.operator_truth import get_live_kalshi_status, get_recent_veto_summary
 from runtime.storage_guard import runtime_storage_status
-
-_ROOT = Path(__file__).resolve().parents[1]
-_RUNTIME_DIR = Path(DB_PATH).resolve().parent
-
 
 def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH, timeout=30.0)
@@ -107,40 +102,6 @@ def _file_size_mb(path: str) -> float:
         return round(os.path.getsize(path) / (1024 * 1024), 2)
     except OSError:
         return 0.0
-
-
-def _load_deploy_metadata() -> dict[str, Any]:
-    manifest_candidates = [
-        _RUNTIME_DIR / "deploy_manifest.json",
-        _ROOT / "deploy_manifest.json",
-    ]
-    version_candidates = [
-        _RUNTIME_DIR / "version.txt",
-        _ROOT / "version.txt",
-    ]
-    payload: dict[str, Any] = {}
-
-    for manifest_path in manifest_candidates:
-        if manifest_path.exists():
-            try:
-                payload.update(json.loads(manifest_path.read_text(encoding="utf-8")))
-                break
-            except Exception:
-                continue
-
-    for version_path in version_candidates:
-        if version_path.exists():
-            try:
-                for line in version_path.read_text(encoding="utf-8").splitlines():
-                    if "=" not in line:
-                        continue
-                    key, value = line.split("=", 1)
-                    payload.setdefault(key.strip(), value.strip())
-                break
-            except Exception:
-                continue
-
-    return payload
 
 
 def _load_contract_metadata(symbols: list[str]) -> dict[str, dict[str, Any]]:
@@ -350,8 +311,9 @@ def build_realized_pnl_curve(trades: list[dict[str, Any]]) -> list[dict[str, Any
 def build_regime_manifest(balance_usd: float | None = None) -> dict[str, Any]:
     balance = _coerce_float(balance_usd, ACCOUNT_SIZE)
     macro = _get_macro_context()
+    build = get_build_info()
     return {
-        "version": VERSION,
+        "version": build["app_version"],
         "reasoning_model": GEMINI_MODEL,
         "ensemble_blend": "60% GFS + 40% ECMWF; AI/GraphCast only widens or compresses sigma",
         "entry_math": [
@@ -717,6 +679,7 @@ def get_cockpit_payload(*, live_sync: bool = True) -> dict[str, Any]:
     recent_trades = _load_recent_trades(limit=25)
     recent_events = _load_recent_events(limit=25)
     regime = build_regime_manifest(truth.get("balance_usd"))
+    build = get_build_info()
     trade_edge_rows = build_trade_edge_rows(recent_trades)
     market_counts = _load_market_counts()
     recent_vetoes = get_recent_veto_summary()
@@ -744,7 +707,7 @@ def get_cockpit_payload(*, live_sync: bool = True) -> dict[str, Any]:
             "bot_log_mb": _file_size_mb(BOT_LOG_PATH),
             "forecast_log_mb": _file_size_mb(FORECAST_LOG_PATH),
         },
-        "deploy": _load_deploy_metadata(),
+        "deploy": build,
         "ai_insights": build_ai_insights(
             truth=truth,
             lane=lane,

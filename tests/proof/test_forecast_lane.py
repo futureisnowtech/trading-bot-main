@@ -30,6 +30,7 @@ import sqlite3
 import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -227,6 +228,71 @@ def test_upsert_contract_persists_contract_name(tmp_db):
     rows = get_active_contracts(db_path=tmp_db)
     row = next(r for r in rows if r["local_symbol"] == "KXHIGHLAX-26JUN05-B69.5")
     assert row["contract_name"] == "Will the high temp in LA be 69-70° on Jun 5, 2026?"
+
+
+def test_run_discovery_deactivates_missing_markets_and_contracts(tmp_db):
+    from forecast.db import get_active_contracts, upsert_contract, upsert_market
+    from forecast.discovery import run_discovery
+
+    old_market_id = upsert_market("KXHIGHOLD", "Old Legacy Weather", db_path=tmp_db)
+    upsert_contract(
+        market_id=old_market_id,
+        local_symbol="KXHIGHOLD-26JUN05-B75.5",
+        right="C",
+        strike=75.5,
+        last_trade_at=(datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y%m%d"),
+        db_path=tmp_db,
+    )
+
+    mock_broker = MagicMock()
+    mock_broker.discover_markets.return_value = [
+        {
+            "underlier": "KXHIGHNEW",
+            "event_title": "New Weather Market",
+            "local_symbol": "KXHIGHNEW-26JUN05-B80.5",
+            "conid": None,
+            "right": "C",
+            "strike": 80.5,
+            "last_trade_at": (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y%m%d"),
+            "exchange": "KALSHI",
+            "currency": "USD",
+            "contract_name": "Will the high temp hit 81F?",
+            "long_name": "Will the high temp hit 81F?",
+            "category": "Weather",
+            "side": "YES",
+        }
+    ]
+
+    result = run_discovery(broker=mock_broker, db_path=tmp_db)
+    rows = get_active_contracts(db_path=tmp_db)
+
+    assert result["deactivated_contracts"] >= 1
+    assert result["deactivated_markets"] >= 1
+    assert [row["local_symbol"] for row in rows] == ["KXHIGHNEW-26JUN05-B80.5"]
+
+
+def test_deactivate_expired_contracts_retires_past_due_rows(tmp_db):
+    from forecast.db import (
+        deactivate_expired_contracts,
+        get_active_contracts,
+        upsert_contract,
+        upsert_market,
+    )
+
+    market_id = upsert_market("KXHIGHPAST", "Past Due Market", db_path=tmp_db)
+    upsert_contract(
+        market_id=market_id,
+        local_symbol="KXHIGHPAST-26JUN04-B80.5",
+        right="C",
+        strike=80.5,
+        last_trade_at=(datetime.now(timezone.utc) - timedelta(hours=2)).strftime("%Y%m%d %H:%M:%S"),
+        db_path=tmp_db,
+    )
+
+    updated = deactivate_expired_contracts(db_path=tmp_db)
+
+    assert updated == 1
+    assert get_active_contracts(db_path=tmp_db) == []
 
 
 # ── 3. Quote insertion + retrieval ────────────────────────────────────────────

@@ -173,12 +173,74 @@ def get_recent_veto_summary(
     }
 
 
+def get_recent_execution_summary(
+    *, db_path: str = DB_PATH, lookback_hours: int = 6, limit: int = 200
+) -> dict:
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=max(1, int(lookback_hours)))).isoformat()
+    records: list[dict] = []
+
+    try:
+        with _connect_db(db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT ts, source, message
+                FROM system_events
+                WHERE source='ForecastRunner'
+                  AND level IN ('WARNING', 'ERROR')
+                  AND ts >= ?
+                  AND (
+                        message LIKE '% execution_result: %'
+                     OR message LIKE '% execution_blocked: %'
+                  )
+                ORDER BY ts DESC
+                LIMIT ?
+                """,
+                (cutoff, max(1, int(limit))),
+            ).fetchall()
+    except Exception as exc:
+        return {
+            "lookback_hours": lookback_hours,
+            "count": 0,
+            "top_outcomes": [],
+            "recent_records": [],
+            "error": str(exc),
+        }
+
+    outcomes = Counter()
+    for row in rows:
+        message = str(row["message"] or "")
+        if " execution_result: " in message:
+            _prefix, _sep, outcome = message.partition(" execution_result: ")
+        else:
+            _prefix, _sep, outcome = message.partition(" execution_blocked: ")
+        outcome = outcome.strip() or "unknown"
+        outcomes[outcome] += 1
+        records.append(
+            {
+                "ts": row["ts"],
+                "outcome": outcome,
+                "message": message,
+            }
+        )
+
+    return {
+        "lookback_hours": lookback_hours,
+        "count": len(records),
+        "top_outcomes": [
+            {"outcome": outcome, "count": count}
+            for outcome, count in outcomes.most_common(8)
+        ],
+        "recent_records": records[:12],
+    }
+
+
 def get_live_kalshi_status(
     *,
     db_path: str = DB_PATH,
     connect: bool = True,
     sync_broker: bool = True,
     include_recent_vetoes: bool = True,
+    include_recent_execution: bool = True,
 ) -> dict:
     """Return broker-first live truth for Telegram, HUD, and operator analysis."""
     from execution.kalshi_broker import get_kalshi_broker
@@ -272,4 +334,6 @@ def get_live_kalshi_status(
     }
     if include_recent_vetoes:
         payload["recent_vetoes"] = get_recent_veto_summary(db_path=db_path)
+    if include_recent_execution:
+        payload["recent_execution"] = get_recent_execution_summary(db_path=db_path)
     return payload

@@ -13,6 +13,7 @@ import logging
 import json
 import sqlite3
 import sys
+import shlex
 from typing import Optional, List
 
 from config import DB_PATH
@@ -140,6 +141,18 @@ def get_recent_veto_summary() -> str:
         logger.error("AI veto summary error: %s", e)
         return f"Error: {str(e)}"
 
+def get_recent_execution_summary() -> str:
+    """Return recent execution-blocked and post-submit execution outcomes."""
+    try:
+        from runtime.operator_truth import (
+            get_recent_execution_summary as _get_recent_execution_summary,
+        )
+
+        return json.dumps(_get_recent_execution_summary(), indent=2)
+    except Exception as e:
+        logger.error("AI execution summary error: %s", e)
+        return f"Error: {str(e)}"
+
 def run_kalshi_diagnostic() -> str:
     """Run the repo's live Kalshi connectivity diagnostic script."""
     script_path = os.path.join(os.getcwd(), "scripts", "verify_kalshi_connection.py")
@@ -180,10 +193,24 @@ def run_safe_command(command: str) -> str:
     """Runs restricted shell commands (grep, py_compile, git status, git diff)."""
     allowed_exact = {
         "python3 scripts/verify_kalshi_connection.py",
+        "python scripts/verify_kalshi_connection.py",
+        f"{sys.executable} scripts/verify_kalshi_connection.py",
         "python3 scripts/storage_audit.py",
+        "python scripts/storage_audit.py",
+        f"{sys.executable} scripts/storage_audit.py",
     }
     allowed_bases = ["grep", "python3 -m py_compile", "git status", "git diff", "find"]
     is_allowed = any(command.startswith(base) for base in allowed_bases)
+
+    try:
+        parts = shlex.split(command)
+    except Exception:
+        parts = []
+    if len(parts) == 2 and parts[0] in {"python", "python3", sys.executable}:
+        is_allowed = parts[1] in {
+            "scripts/verify_kalshi_connection.py",
+            "scripts/storage_audit.py",
+        }
 
     if command not in allowed_exact and not is_allowed:
         return "Error: Command not in whitelist."

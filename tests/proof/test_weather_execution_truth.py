@@ -119,6 +119,80 @@ def test_weather_override_can_clear_soft_low_conviction_gate(monkeypatch):
     assert result.veto_reason == ""
 
 
+def test_weather_pair_freshness_uses_staler_quote_leg(monkeypatch):
+    import forecast.strategy_engine as se
+
+    fresh_weather = {
+        "members_high": [80.0] * 31,
+        "ecmwf": {"members_high": [80.0] * 31},
+        "sigma_high": 0.8,
+        "peak_tcdc": 5.0,
+        "timestamp": datetime.now(timezone.utc).timestamp(),
+    }
+
+    monkeypatch.setattr(se, "get_weather_data", lambda ticker: fresh_weather)
+    monkeypatch.setattr(se, "get_contract_weather_data", lambda ticker, **kwargs: fresh_weather)
+
+    fresh_ts = datetime.now(timezone.utc).isoformat()
+    stale_ts = (datetime.now(timezone.utc) - timedelta(minutes=20)).isoformat()
+    result = se.evaluate_contract(
+        contract=_make_weather_contract(),
+        bars_5m=[],
+        bars_30m=[],
+        bars_1h=[],
+        bars_4h=[],
+        yes_quote=_quote(0.62, 0.02, fresh_ts),
+        no_quote=_quote(0.38, 0.02, stale_ts),
+        bankroll=100.0,
+    )
+
+    assert result is not None
+    assert result.econ_approved is False
+    assert result.veto_reason == "stale_market_data"
+
+
+def test_weather_one_sided_no_book_can_still_trade(monkeypatch):
+    import forecast.strategy_engine as se
+
+    cold_weather = {
+        "members_high": [60.0] * 31,
+        "ecmwf": {"members_high": [60.0] * 31},
+        "sigma_high": 0.8,
+        "peak_tcdc": 5.0,
+        "timestamp": datetime.now(timezone.utc).timestamp(),
+    }
+
+    monkeypatch.setattr(se, "get_weather_data", lambda ticker: cold_weather)
+    monkeypatch.setattr(se, "get_contract_weather_data", lambda ticker, **kwargs: cold_weather)
+
+    now_ts = datetime.now(timezone.utc).isoformat()
+    yes_quote = {
+        "bid": 0.18,
+        "ask": None,
+        "mid": 0.18,
+        "spread": None,
+        "implied_prob": 0.18,
+        "ts": now_ts,
+    }
+    no_quote = _quote(0.82, 0.02, now_ts)
+
+    result = se.evaluate_contract(
+        contract=_make_weather_contract(),
+        bars_5m=[],
+        bars_30m=[],
+        bars_1h=[],
+        bars_4h=[],
+        yes_quote=yes_quote,
+        no_quote=no_quote,
+        bankroll=100.0,
+    )
+
+    assert result is not None
+    assert result.strategy_family == "weather_ensemble"
+    assert result.side == "NO"
+    assert result.econ_approved is True
+
+
 def test_ensure_weather_data_backfills_missing_series(monkeypatch):
     import data.kalshi_weather_monitor as wm
 

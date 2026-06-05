@@ -88,6 +88,31 @@ def test_recent_veto_summary_aggregates_reason_counts(proof_runtime, monkeypatch
     assert summary["top_reasons"][0]["count"] == 2
 
 
+def test_recent_execution_summary_aggregates_execution_failures(proof_runtime, monkeypatch):
+    import runtime.operator_truth as ot
+
+    db = str(proof_runtime.db_path)
+    monkeypatch.setattr(ot, "DB_PATH", db, raising=False)
+
+    with sqlite3.connect(proof_runtime.db_path) as conn:
+        conn.execute(
+            "INSERT INTO system_events (ts, level, source, message) VALUES (?, 'WARNING', 'ForecastRunner', ?)",
+            ("2026-06-04T19:00:46+00:00", "[ForecastRunner] KXHIGHNY execution_result: fill_or_kill_insufficient_resting_volume (depth_slipped_after_submission)"),
+        )
+        conn.execute(
+            "INSERT INTO system_events (ts, level, source, message) VALUES (?, 'WARNING', 'ForecastRunner', ?)",
+            ("2026-06-04T19:01:46+00:00", "[ForecastRunner] KXLOWNY execution_blocked: market_notional_cap"),
+        )
+
+    summary = ot.get_recent_execution_summary(db_path=db, lookback_hours=50000)
+
+    assert summary["count"] == 2
+    assert summary["top_outcomes"][0]["outcome"] in {
+        "fill_or_kill_insufficient_resting_volume (depth_slipped_after_submission)",
+        "market_notional_cap",
+    }
+
+
 def test_agent_tools_live_truth_tool_returns_json(monkeypatch):
     import notifications.agent_tools as tools
 

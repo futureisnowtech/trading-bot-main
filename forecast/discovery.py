@@ -14,10 +14,12 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from forecast.db import (
+    deactivate_contracts_not_in_symbols,
+    deactivate_markets_not_in_symbols,
     init_forecast_db,
-    upsert_market,
-    upsert_contract,
     get_active_contracts,
+    upsert_contract,
+    upsert_market,
 )
 from logging_db.trade_logger import log_event
 
@@ -128,11 +130,16 @@ def run_discovery(
         "stubs_persisted": 0,
         "skipped_scope": 0,
         "skipped_expired": 0,
+        "deactivated_contracts": 0,
+        "deactivated_markets": 0,
         "active_in_db": 0,
+        "cleanup_skipped": False,
         "errors": [],
     }
 
     raw_contracts: list[dict] = []
+    seen_market_symbols: set[str] = set()
+    seen_contract_symbols: set[str] = set()
     init_forecast_db(db_path=db_path)
 
     if broker is not None:
@@ -162,6 +169,7 @@ def run_discovery(
         if not symbol:
             result["skipped_scope"] += 1
             continue
+        seen_market_symbols.add(symbol)
         try:
             upsert_market(
                 market_symbol=symbol,
@@ -187,6 +195,11 @@ def run_discovery(
         contract_name = c.get("contract_name", "") or c.get("long_name", "") or c.get("underlier", "")
         symbol = c.get("underlier", "") or ""
         exchange = c.get("exchange", "KALSHI")
+        local_symbol = c.get("local_symbol", symbol)
+        if symbol:
+            seen_market_symbols.add(symbol)
+        if local_symbol:
+            seen_contract_symbols.add(local_symbol)
 
         # Persist market
         try:
@@ -209,7 +222,7 @@ def run_discovery(
         try:
             upsert_contract(
                 market_id=market_id,
-                local_symbol=c.get("local_symbol", symbol),
+                local_symbol=local_symbol,
                 contract_name=contract_name,
                 right=c.get("right", "C"),
                 strike=float(c.get("strike") or 0.0),
@@ -226,6 +239,26 @@ def run_discovery(
             logger.warning(msg)
             result["errors"].append(msg)
 
+    # Active-universe cleanup: preserve history, but stop evaluating rows that are
+    # no longer present in the latest weather discovery pass.
+    if raw_contracts and seen_market_symbols:
+        try:
+            result["deactivated_markets"] = deactivate_markets_not_in_symbols(
+                sorted(seen_market_symbols),
+                db_path=db_path,
+            )
+            result["deactivated_contracts"] = deactivate_contracts_not_in_symbols(
+                sorted(seen_contract_symbols),
+                db_path=db_path,
+                deactivate_all_if_empty=True,
+            )
+        except Exception as e:
+            msg = f"discovery cleanup failed: {e}"
+            logger.warning(msg)
+            result["errors"].append(msg)
+    else:
+        result["cleanup_skipped"] = True
+
     # Count active in DB
     try:
         result["active_in_db"] = len(get_active_contracts(db_path=db_path))
@@ -235,6 +268,8 @@ def run_discovery(
     msg = (
         f"[Discovery] found={result['found']} persisted={result['persisted']} "
         f"stubs={result['stubs_persisted']} "
+        f"deactivated_contracts={result['deactivated_contracts']} "
+        f"deactivated_markets={result['deactivated_markets']} "
         f"active_in_db={result['active_in_db']} errors={len(result['errors'])}"
     )
     logger.info(msg)

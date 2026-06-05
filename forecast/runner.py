@@ -292,7 +292,7 @@ def _should_model_invalidation_exit(
 def run_discovery_cycle() -> dict:
     """
     30-min cycle: refresh market/contract list from Kalshi.
-    Idempotent — upserts only; never deletes.
+    Idempotent — upserts current weather scope and deactivates missing rows.
     """
     with _discovery_lock:
         try:
@@ -357,10 +357,11 @@ def run_execution_cycle(
     Order of operations:
       1. Ensure DB + broker connectivity
       2. Discovery once
-      3. Quote refresh once
-      4. Strategy evaluation once
-      5. Position monitor once
-      6. Resolution sync / cache refresh / optional RBI
+      3. Expire stale/resolved active rows
+      4. Quote refresh once
+      5. Strategy evaluation once
+      6. Position monitor once
+      7. Resolution sync / cache refresh / optional RBI
     """
     from forecast.db import init_forecast_db
     from config import DB_PATH, FORECAST_LANE_ACTIVE, KALSHI_ENABLED
@@ -420,6 +421,21 @@ def run_execution_cycle(
             connected = False
 
     discovery = run_discovery_cycle()
+    universe_cleanup = {}
+
+    try:
+        from forecast.db import deactivate_expired_contracts
+
+        expired = deactivate_expired_contracts(db_path=db_path)
+        universe_cleanup["expired_contracts"] = expired
+        if expired:
+            logger.info(
+                "[ForecastRunner] Deactivated %s expired/resolved contract row(s) before quote refresh.",
+                expired,
+            )
+    except Exception as exc:
+        logger.warning("[ForecastRunner] Active-universe cleanup failed: %s", exc)
+        universe_cleanup["error"] = str(exc)
 
     weather_sync = {}
     try:
@@ -487,6 +503,7 @@ def run_execution_cycle(
     summary = {
         "broker_connected": connected,
         "discovery": discovery,
+        "universe_cleanup": universe_cleanup,
         "weather_sync": weather_sync,
         "entries": len(entries),
         "resolution_sync": resolution_summary,
@@ -859,6 +876,14 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                             - (actual_qty * (actual_price + float(KALSHI_FEE_PER_CONTRACT))),
                         )
                     else:
+                        outcome_msg = (
+                            f"[ForecastRunner] {contract.get('local_symbol')} execution_result: "
+                            f"{entry_result.get('status') or 'unknown'}"
+                        )
+                        reason = str(entry_result.get("execution_reason") or "").strip()
+                        if reason:
+                            outcome_msg = f"{outcome_msg} ({reason})"
+                        log_event("WARNING", "ForecastRunner", outcome_msg)
                         logger.info(
                             "[ForecastRunner] Entry not booked into local truth for %s "
                             "(status=%s order_id=%s reason=%s)",

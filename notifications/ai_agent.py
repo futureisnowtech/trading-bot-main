@@ -73,6 +73,13 @@ def get_repo_context() -> str:
     except Exception:
         pass
 
+    # 5. Recent execution failures after approval
+    try:
+        execution_summary = json.loads(agent_tools.get_recent_execution_summary())
+        context.append("### RECENT EXECUTION SUMMARY\n" + json.dumps(execution_summary, indent=2))
+    except Exception:
+        pass
+
     return "\n\n".join(context)
 
 def execute_sql(query: str) -> str: return agent_tools.execute_sql(query)
@@ -82,6 +89,7 @@ def replace_text(file_path: str, old_string: str, new_string: str) -> str: retur
 def run_safe_command(command: str) -> str: return agent_tools.run_safe_command(command)
 def get_live_kalshi_status() -> str: return agent_tools.get_live_kalshi_status()
 def get_recent_veto_summary() -> str: return agent_tools.get_recent_veto_summary()
+def get_recent_execution_summary() -> str: return agent_tools.get_recent_execution_summary()
 def run_kalshi_diagnostic() -> str: return agent_tools.run_kalshi_diagnostic()
 def run_storage_audit() -> str: return agent_tools.run_storage_audit()
 
@@ -108,13 +116,15 @@ def ask_ai(query: str) -> str:
             "3. **MULTI-STEP REASONING**: Use your tools in sequence if needed. For example, list files -> read file -> analyze.\n"
             "4. **TECHNICAL PRECISION**: You are a Lead Architect. Be concise, direct, and technically accurate.\n"
             "5. **NO HALLUCINATIONS**: If a tool returns no data, state that clearly.\n"
-            "6. **TRUTH BUCKETS**: Separate verified facts, inferred causes, and unverified items in your answer.\n\n"
+            "6. **TRUTH BUCKETS**: Separate verified facts, inferred causes, and unverified items in your answer.\n"
+            "7. **DO NOT COLLAPSE DISTINCT FAILURE MODES**: Treat vetoes, execution blocks, and post-submit depth failures as separate categories.\n\n"
             f"### CONTEXTUAL TRUTH ###\n{context}"
         )
 
         tools = [
             get_live_kalshi_status,
             get_recent_veto_summary,
+            get_recent_execution_summary,
             run_kalshi_diagnostic,
             run_storage_audit,
             execute_sql,

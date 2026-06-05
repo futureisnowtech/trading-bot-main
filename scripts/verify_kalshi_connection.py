@@ -6,7 +6,7 @@ Follows Step 8 of the Ceiling Protocol: Diagnostic-First Verification.
 
 import os
 import sys
-from dotenv import load_dotenv
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
 # Ensure we can import from the project root
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -15,8 +15,6 @@ from execution.kalshi_broker import get_kalshi_broker
 
 def main():
     print("─── Kalshi Connection Diagnostic ───")
-    load_dotenv()
-
     broker = get_kalshi_broker()
     
     print("[1/4] Attempting connection...")
@@ -30,7 +28,16 @@ def main():
     print(f"✅ SUCCESS: Account Balance = ${balance:.2f}")
 
     print("\n[3/4] Testing market discovery (weather scope)...")
-    markets = broker.discover_markets()
+    try:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            markets = executor.submit(broker.discover_markets).result(timeout=25)
+    except TimeoutError:
+        print("⚠️ WARN: Market discovery timed out after 25s. Connectivity is live, but discovery is currently slow.")
+        markets = []
+    except Exception as exc:
+        print(f"⚠️ WARN: Market discovery failed: {exc}")
+        markets = []
+
     if not markets:
         print("⚠️ WARN: No markets discovered. This might be normal if markets are closed, or discovery logic is too restrictive.")
     else:

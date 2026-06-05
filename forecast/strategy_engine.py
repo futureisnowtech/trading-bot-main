@@ -323,6 +323,28 @@ def _compute_features(
     }
 
 
+def _max_quote_age_seconds(*quotes: dict) -> float | None:
+    """Return the oldest available quote age across the provided paired quotes."""
+    ages: list[float] = []
+    now_utc = datetime.now(timezone.utc)
+
+    for quote in quotes:
+        ts_value = str((quote or {}).get("ts") or "").strip()
+        if not ts_value:
+            continue
+        try:
+            quote_ts = datetime.fromisoformat(ts_value.replace("Z", "+00:00"))
+            if quote_ts.tzinfo is None:
+                quote_ts = quote_ts.replace(tzinfo=timezone.utc)
+            ages.append((now_utc - quote_ts).total_seconds())
+        except Exception:
+            continue
+
+    if not ages:
+        return None
+    return max(ages)
+
+
 # ── Economics gate ─────────────────────────────────────────────────────────────
 
 
@@ -345,6 +367,12 @@ def _economics_gate(
 
     Returns: (approved, veto_reason, ev_yes, ev_no)
     """
+    yes_available = ask_yes > 0.0
+    no_available = ask_no > 0.0
+
+    if not yes_available and not no_available:
+        return False, "missing_quotes", 0.0, 0.0
+
     # 0. Capital Partition (Sovereign Mandate v18.32)
     if deployed_pct >= KALSHI_MAX_DEPLOYED_PCT:
         return (
@@ -393,7 +421,8 @@ def _economics_gate(
         return False, f"spread_too_wide ({spread:.3f} > {MAX_SPREAD_DOLLARS})", 0.0, 0.0
 
     # v19.5: Spread-to-Price Ratio Gate (Liquidity Veto)
-    avg_price = (ask_yes + ask_no) / 2.0
+    available_prices = [price for price in (ask_yes, ask_no) if price > 0.0]
+    avg_price = sum(available_prices) / len(available_prices) if available_prices else 0.0
     if avg_price > 0:
         spread_ratio = spread / avg_price
         if spread_ratio > KALSHI_MAX_SPREAD_RATIO:
@@ -401,8 +430,9 @@ def _economics_gate(
 
     # v19.7: Market Truth Veto (Model-Market Divergence)
     # If the gap between our model and market is too wide (>30%), our model is likely wrong.
-    divergence = abs(q_hat - ask_yes)
-    if divergence > MAX_MODEL_MARKET_DIVERGENCE:
+    market_yes_ref = ask_yes if yes_available else (1.0 - ask_no if no_available else None)
+    divergence = abs(q_hat - market_yes_ref) if market_yes_ref is not None else 0.0
+    if market_yes_ref is not None and divergence > MAX_MODEL_MARKET_DIVERGENCE:
         return (
             False,
             f"market_truth_veto (Divergence={divergence:.1%} > {MAX_MODEL_MARKET_DIVERGENCE:.0%})",
@@ -439,17 +469,27 @@ def _economics_gate(
             0.0,
         )
 
-    # 7. Compute EV for both sides (using taker friction buffer)
-    ev_yes_raw, ev_no_raw = compute_ev(q_hat, ask_yes, ask_no, fee_buffer=KALSHI_FEE_BUFFER)
-
-    # v19.5: Institutional Fee-Aware EV (Net of $0.07)
-    # Expected Profit = (Edge * $1.00) - Fee
-    # We only care if Net EV is still > threshold and fees aren't dominant.
-    ev_yes = ev_yes_raw - KALSHI_FEE_PER_CONTRACT
-    ev_no = ev_no_raw - KALSHI_FEE_PER_CONTRACT
+    # 7. Compute EV only for executable sides (using taker friction buffer)
+    ev_yes = -1.0
+    ev_no = -1.0
+    if yes_available:
+        ev_yes = (
+            q_hat
+            - ask_yes
+            - KALSHI_FEE_BUFFER
+            - KALSHI_FEE_PER_CONTRACT
+        )
+    if no_available:
+        ev_no = (
+            (1.0 - q_hat)
+            - ask_no
+            - KALSHI_FEE_BUFFER
+            - KALSHI_FEE_PER_CONTRACT
+        )
 
     # 8. Neither side has positive EV
-    best_ev = max(ev_yes, ev_no)
+    available_evs = [ev for ev, available in ((ev_yes, yes_available), (ev_no, no_available)) if available]
+    best_ev = max(available_evs) if available_evs else -1.0
     if best_ev < EV_THRESHOLD:
         return (
             False,
@@ -460,7 +500,8 @@ def _economics_gate(
 
     # v19.5: Fee Drag Veto
     # If fees consume > 30% of gross gain, veto.
-    potential_gain = (1.0 - ask_yes) if ev_yes >= ev_no else (1.0 - ask_no)
+    best_side = "YES" if ev_yes >= ev_no else "NO"
+    potential_gain = (1.0 - ask_yes) if best_side == "YES" else (1.0 - ask_no)
     if potential_gain > 0:
         drag = KALSHI_FEE_PER_CONTRACT / potential_gain
         if drag > KALSHI_MAX_FEE_DRAG_PCT:
@@ -470,7 +511,7 @@ def _economics_gate(
     # Note: latest_prob is YES implied probability.
     # If the strategy wants to buy YES but p < 0.10, we veto.
     # (Checking here for EV passing YES but p too low)
-    if ev_yes >= EV_THRESHOLD and q_hat < MIN_IMPLIED_PROB_FOR_YES:
+    if yes_available and ev_yes >= EV_THRESHOLD and q_hat < MIN_IMPLIED_PROB_FOR_YES:
         # If EV is only positive for YES, we veto. 
         # If EV is positive for both, we might still allow NO if it's the better EV.
         if ev_yes >= ev_no:
@@ -884,8 +925,8 @@ def _strategy_weather_details(
              return False, "", 0.0, ["model_divergence_veto"], False, 1.0, 3, 0.05
 
     ensemble_prob = max(0.03, min(0.97, ensemble_prob))
-    edge_yes = ensemble_prob - ask_yes
-    edge_no = (1.0 - ensemble_prob) - ask_no
+    edge_yes = (ensemble_prob - ask_yes) if ask_yes > 0 else None
+    edge_no = ((1.0 - ensemble_prob) - ask_no) if ask_no > 0 else None
     
     # v19.1.11: The Sigma Lever (Volatility Sizing)
     # v19.8: AI Multiplier now inflates/deflates Sigma directly
@@ -918,7 +959,7 @@ def _strategy_weather_details(
     
     # v19.5: Sovereign Survival — Institutional Price Floor ($0.15)
     # Never trade penny longshots.
-    if ask_yes < KALSHI_MIN_PRICE and edge_yes > 0:
+    if ask_yes > 0 and edge_yes is not None and edge_yes > 0 and ask_yes < KALSHI_MIN_PRICE:
         return (
             False,
             "",
@@ -929,7 +970,7 @@ def _strategy_weather_details(
             3,
             0.05,
         )
-    if ask_no < KALSHI_MIN_PRICE and edge_no > 0:
+    if ask_no > 0 and edge_no is not None and edge_no > 0 and ask_no < KALSHI_MIN_PRICE:
         return (
             False,
             "",
@@ -942,7 +983,12 @@ def _strategy_weather_details(
         )
 
     # Forensic Audit Log
-    logger.info(f"TRACE: {ticker} | p={ensemble_prob:.1%} Edge_Y={edge_yes:.1%} Sigma={sigma:.1f}F s_mult={sigma_mult:.2f}")
+    edge_yes_display = f"{edge_yes:.1%}" if edge_yes is not None else "n/a"
+    edge_no_display = f"{edge_no:.1%}" if edge_no is not None else "n/a"
+    logger.info(
+        f"TRACE: {ticker} | p={ensemble_prob:.1%} Edge_Y={edge_yes_display} "
+        f"Edge_N={edge_no_display} Sigma={sigma:.1f}F s_mult={sigma_mult:.2f}"
+    )
 
     # Guardrail 1: The "Sun Spike" Veto
     peak_tcdc = w_data.get("peak_tcdc", 0.0)
@@ -962,7 +1008,7 @@ def _strategy_weather_details(
                  0.05,
              )
 
-    if edge_yes > 0.08:
+    if edge_yes is not None and edge_yes > 0.08:
         if cloud_veto:
             return False, "", 0.0, [f"cloud_cover_veto (TCDC={peak_tcdc:.1f}%)"], False, 1.0, 3, 0.05
 
@@ -994,7 +1040,7 @@ def _strategy_weather_details(
         sizing_multiplier = convergence_multiplier * sigma_mult
         return True, "YES", ensemble_prob, factors, is_taker, sizing_multiplier, conv_tier, sizing_cap
 
-    if edge_no > 0.08:
+    if edge_no is not None and edge_no > 0.08:
         is_taker = edge_no >= 0.22 and is_short_term
         factors = [
             f"ensemble_p={ensemble_prob:.1%}",
@@ -1102,43 +1148,41 @@ def evaluate_contract(
         float(no_quote.get("spread") or 0.0),
     )
 
-    # ADVERSARY FIX #5: Data Freshness SLA (Veto if > 120s old)
-    # v19.1.6: 600s buffer for weather markets to handle harvester congestion
-    quote_ts_str = yes_quote.get("ts")
-    if quote_ts_str:
-        try:
-            quote_ts = datetime.fromisoformat(quote_ts_str.replace("Z", "+00:00"))
-            age_seconds = (datetime.now(timezone.utc) - quote_ts).total_seconds()
-            
-            # Weather alpha is slow moving; allow a longer freshness window.
-            is_weather = "KXHIGH" in str(contract.get("local_symbol")) or "KXLOW" in str(contract.get("local_symbol")) or "KXRAIN" in str(contract.get("local_symbol"))
-            limit = 600 if is_weather else 120
-            
-            if age_seconds > limit:
-                logger.warning(
-                    f"evaluate_contract veto: stale_market_data ({age_seconds:.1f}s old) "
-                    f"for {contract.get('local_symbol')}"
-                )
-                return StrategyResult(
-                    strategy_family="vetoed",
-                    side="NONE",
-                    q_hat=0.0,
-                    ev=0.0,
-                    ev_yes=0.0,
-                    ev_no=0.0,
-                    confidence=0.0,
-                    uncertainty_penalty=0.0,
-                    econ_approved=False,
-                    veto_reason="stale_market_data",
-                    position_fraction=0.0,
-                    position_contracts=0,
-                    top_factors=[],
-                    hours_to_resolution=_hours_to_resolution(contract.get("last_trade_at", ""))
-                )
-        except Exception as e:
-            logger.warning(f"Error checking quote freshness for {contract.get('local_symbol')}: {e}")
+    # ADVERSARY FIX #5: Pair-aware quote freshness SLA.
+    # YES and NO quotes are harvested independently, so the older leg controls.
+    age_seconds = _max_quote_age_seconds(yes_quote, no_quote)
+    if age_seconds is not None:
+        # Weather alpha is slow moving; allow a longer freshness window.
+        is_weather = (
+            "KXHIGH" in str(contract.get("local_symbol"))
+            or "KXLOW" in str(contract.get("local_symbol"))
+            or "KXRAIN" in str(contract.get("local_symbol"))
+        )
+        limit = 600 if is_weather else 120
 
-    if not ask_yes or not ask_no:
+        if age_seconds > limit:
+            logger.warning(
+                f"evaluate_contract veto: stale_market_data ({age_seconds:.1f}s old) "
+                f"for {contract.get('local_symbol')}"
+            )
+            return StrategyResult(
+                strategy_family="vetoed",
+                side="NONE",
+                q_hat=0.0,
+                ev=0.0,
+                ev_yes=0.0,
+                ev_no=0.0,
+                confidence=0.0,
+                uncertainty_penalty=0.0,
+                econ_approved=False,
+                veto_reason="stale_market_data",
+                position_fraction=0.0,
+                position_contracts=0,
+                top_factors=[],
+                hours_to_resolution=_hours_to_resolution(contract.get("last_trade_at", ""))
+            )
+
+    if not ask_yes and not ask_no:
         logger.debug(
             f"evaluate_contract: missing quotes for {contract.get('local_symbol')}"
         )
@@ -1279,6 +1323,17 @@ def evaluate_contract(
         except Exception as e:
             logger.debug(f"Strategy {name} error: {e}")
 
+    tradable_sides = {
+        side
+        for side, ask in (("YES", ask_yes), ("NO", ask_no))
+        if ask > 0.0
+    }
+    original_candidate_count = len(strategy_candidates)
+    if tradable_sides:
+        strategy_candidates = [
+            candidate for candidate in strategy_candidates if candidate[1] in tradable_sides
+        ]
+
     if not strategy_candidates:
         # No strategy signal
         return StrategyResult(
@@ -1291,7 +1346,9 @@ def evaluate_contract(
             confidence=0.0,
             uncertainty_penalty=0.0,
             econ_approved=False,
-            veto_reason="no_strategy_signal",
+            veto_reason=(
+                "signal_side_unquotable" if original_candidate_count > 0 else "no_strategy_signal"
+            ),
             position_fraction=0.0,
             position_contracts=0,
             top_factors=[],
@@ -1302,6 +1359,24 @@ def evaluate_contract(
     # Pick highest-confidence strategy
     strategy_candidates.sort(key=lambda x: x[2], reverse=True)
     best_family, best_side, best_confidence, best_factors, best_is_taker, best_multiplier, best_tier, best_sizing_cap = strategy_candidates[0]
+    if (best_side == "YES" and ask_yes <= 0.0) or (best_side == "NO" and ask_no <= 0.0):
+        return StrategyResult(
+            strategy_family="vetoed",
+            side="NONE",
+            q_hat=q_hat,
+            ev=0.0,
+            ev_yes=ev_yes,
+            ev_no=ev_no,
+            confidence=0.0,
+            uncertainty_penalty=0.0,
+            econ_approved=False,
+            veto_reason=f"missing_quotes_{best_side.lower()}",
+            position_fraction=0.0,
+            position_contracts=0,
+            top_factors=best_factors,
+            hours_to_resolution=hours_to_res,
+            is_taker_override=False,
+        )
 
     # v19.6: Sovereign Conviction — Tiered Resolution Windows
     # T3: 72h max | T2: 120h (5d) max | T1: 168h (7d) max

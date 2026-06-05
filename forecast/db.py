@@ -5,9 +5,10 @@ All tables live in the existing logs/trades.db (WAL mode).
 Call init_forecast_db() once at startup (idempotent — uses CREATE TABLE IF NOT EXISTS).
 """
 
-import sqlite3
 import os
+import sqlite3
 import sys
+from datetime import datetime, timezone
 
 # Resolve DB path the same way truth_audit_lib does
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -30,6 +31,25 @@ def _conn(db_path: str | None = None) -> sqlite3.Connection:
     c.execute("PRAGMA busy_timeout=30000")
     c.execute("PRAGMA foreign_keys=ON")
     return c
+
+
+def _parse_contract_dt(raw_value: str | None) -> datetime | None:
+    """Parse Kalshi/IB-style contract timestamps into aware UTC datetimes."""
+    value = str(raw_value or "").strip()
+    if not value:
+        return None
+
+    try:
+        if "T" in value and ("Z" in value or "+" in value):
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        else:
+            fmt = "%Y%m%d %H:%M:%S" if " " in value else "%Y%m%d"
+            parsed = datetime.strptime(value, fmt).replace(tzinfo=timezone.utc)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -430,6 +450,121 @@ def upsert_contract(
         return cur.lastrowid
 
 
+def deactivate_markets_not_in_symbols(
+    market_symbols: list[str],
+    db_path: str | None = None,
+) -> int:
+    """
+    Mark markets inactive when they disappear from the latest discovery pass.
+    Historical rows are preserved; only the active flag changes.
+    """
+    cleaned = sorted({str(symbol).strip() for symbol in market_symbols if str(symbol).strip()})
+    with _conn(db_path) as c:
+        if not cleaned:
+            return 0
+        placeholders = ",".join("?" for _ in cleaned)
+        cur = c.execute(
+            f"""
+            UPDATE forecast_markets
+               SET active=0
+             WHERE active=1
+               AND market_symbol NOT IN ({placeholders})
+            """,
+            cleaned,
+        )
+        c.commit()
+        return cur.rowcount
+
+
+def deactivate_contracts_not_in_symbols(
+    local_symbols: list[str],
+    db_path: str | None = None,
+    *,
+    deactivate_all_if_empty: bool = False,
+) -> int:
+    """
+    Mark contracts inactive when they disappear from discovery.
+
+    When ``deactivate_all_if_empty`` is True, an empty symbol list is treated as
+    "no currently tradable contracts were discovered" rather than "skip cleanup".
+    """
+    cleaned = sorted({str(symbol).strip() for symbol in local_symbols if str(symbol).strip()})
+    with _conn(db_path) as c:
+        if not cleaned and not deactivate_all_if_empty:
+            return 0
+        if not cleaned:
+            cur = c.execute(
+                """
+                UPDATE forecast_contracts
+                   SET active=0
+                 WHERE active=1
+                """
+            )
+            c.commit()
+            return cur.rowcount
+
+        placeholders = ",".join("?" for _ in cleaned)
+        cur = c.execute(
+            f"""
+            UPDATE forecast_contracts
+               SET active=0
+             WHERE active=1
+               AND local_symbol NOT IN ({placeholders})
+            """,
+            cleaned,
+        )
+        c.commit()
+        return cur.rowcount
+
+
+def deactivate_expired_contracts(
+    db_path: str | None = None,
+    *,
+    as_of: datetime | None = None,
+) -> int:
+    """
+    Retire contracts that are already resolved or past their close/resolution time.
+    """
+    now_utc = (as_of or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    expired_ids: list[int] = []
+
+    with _conn(db_path) as c:
+        rows = c.execute(
+            """
+            SELECT id, resolution_at, last_trade_at
+            FROM forecast_contracts
+            WHERE active=1
+            """
+        ).fetchall()
+
+        for row in rows:
+            expiry_dt = _parse_contract_dt(row["resolution_at"]) or _parse_contract_dt(
+                row["last_trade_at"]
+            )
+            if expiry_dt and expiry_dt <= now_utc:
+                expired_ids.append(int(row["id"]))
+
+        updated = 0
+        if expired_ids:
+            c.executemany(
+                "UPDATE forecast_contracts SET active=0 WHERE id=?",
+                [(contract_id,) for contract_id in expired_ids],
+            )
+            updated += len(expired_ids)
+
+        resolved_cur = c.execute(
+            """
+            UPDATE forecast_contracts
+               SET active=0
+             WHERE active=1
+               AND id IN (SELECT contract_id FROM forecast_resolutions)
+            """
+        )
+        updated += max(0, int(resolved_cur.rowcount or 0))
+        c.commit()
+        return updated
+
+
 def insert_quote(
     contract_id: int,
     ts: str,
@@ -544,7 +679,8 @@ def get_active_contracts(db_path: str | None = None) -> list[dict]:
                       fm.market_symbol, fm.market_name, fm.category_path
                FROM forecast_contracts fc
                JOIN forecast_markets fm ON fm.id = fc.market_id
-               WHERE fc.active=1 AND fm.active=1
+               LEFT JOIN forecast_resolutions fr ON fr.contract_id = fc.id
+               WHERE fc.active=1 AND fm.active=1 AND fr.contract_id IS NULL
                ORDER BY fc.resolution_at ASC""",
         ).fetchall()
         return [dict(r) for r in rows]

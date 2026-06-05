@@ -8,6 +8,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -224,9 +225,199 @@ p, li, div, span, label {
   color: var(--text);
 }
 
+.label-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.tooltip-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.info-dot {
+  width: 1.05rem;
+  height: 1.05rem;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(111, 211, 255, 0.30);
+  background: rgba(111, 211, 255, 0.10);
+  color: var(--blue);
+  font-size: 0.72rem;
+  cursor: help;
+}
+
+.tooltip-bubble {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 10px);
+  transform: translateX(-50%);
+  width: min(280px, 70vw);
+  padding: 0.75rem 0.8rem;
+  border-radius: 14px;
+  border: 1px solid rgba(74, 242, 214, 0.18);
+  background: rgba(5, 10, 22, 0.98);
+  color: var(--text);
+  font-size: 0.76rem;
+  line-height: 1.45;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.32);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  z-index: 20;
+}
+
+.tooltip-wrap:hover .tooltip-bubble {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(-2px);
+}
+
+.stage-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.stage-card {
+  position: relative;
+  min-height: 198px;
+  border-radius: 22px;
+  padding: 1rem 1rem 0.95rem 1rem;
+  border: 1px solid rgba(74, 242, 214, 0.16);
+  background: linear-gradient(180deg, rgba(9, 17, 36, 0.96), rgba(5, 10, 22, 0.94));
+  overflow: hidden;
+}
+
+.stage-card:after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(74, 242, 214, 0.08), transparent 55%);
+  pointer-events: none;
+}
+
+.stage-no {
+  color: var(--cyan);
+  font-size: 0.75rem;
+  letter-spacing: 0.18em;
+}
+
+.stage-title {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-top: 0.55rem;
+  font-family: "Orbitron", sans-serif;
+  font-size: 1rem;
+}
+
+.stage-headline {
+  margin-top: 0.7rem;
+  font-size: 1.06rem;
+  color: var(--text);
+}
+
+.stage-detail {
+  margin-top: 0.7rem;
+  color: var(--muted);
+  font-size: 0.79rem;
+  line-height: 1.5;
+}
+
+.stage-pill {
+  margin-top: 0.9rem;
+  display: inline-flex;
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+  background: rgba(74, 242, 214, 0.10);
+  border: 1px solid rgba(74, 242, 214, 0.18);
+  color: var(--cyan);
+  font-size: 0.74rem;
+}
+
+.mini-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.mini-card {
+  border-radius: 18px;
+  padding: 0.85rem 0.9rem;
+  border: 1px solid rgba(111, 211, 255, 0.12);
+  background: rgba(9, 17, 36, 0.84);
+}
+
+.mini-label {
+  color: var(--muted);
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.mini-value {
+  margin-top: 0.35rem;
+  font-family: "Orbitron", sans-serif;
+  font-size: 1.18rem;
+  color: var(--blue);
+}
+
+.mini-detail {
+  margin-top: 0.2rem;
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.insight-shell {
+  border-radius: 20px;
+  padding: 0.95rem 1rem;
+  margin-bottom: 0.8rem;
+  border: 1px solid rgba(74, 242, 214, 0.12);
+  background: linear-gradient(180deg, rgba(11, 19, 41, 0.86), rgba(5, 10, 22, 0.92));
+}
+
+.insight-good { border-left: 4px solid var(--mint); }
+.insight-warn { border-left: 4px solid var(--amber); }
+.insight-info { border-left: 4px solid var(--blue); }
+.insight-bad { border-left: 4px solid var(--red); }
+
+.insight-title {
+  font-family: "Orbitron", sans-serif;
+  font-size: 0.98rem;
+}
+
+.insight-meta {
+  color: var(--muted);
+  font-size: 0.75rem;
+  margin-top: 0.18rem;
+}
+
+.insight-body {
+  color: var(--text);
+  font-size: 0.79rem;
+  line-height: 1.5;
+  margin-top: 0.55rem;
+}
+
+.toggle-shell {
+  border-radius: 18px;
+  padding: 0.9rem 1rem;
+  border: 1px solid rgba(74, 242, 214, 0.12);
+  background: rgba(8, 14, 31, 0.72);
+}
+
 @media (max-width: 1100px) {
   .metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .stage-grid, .mini-grid {
+    grid-template-columns: repeat(1, minmax(0, 1fr));
   }
 }
 </style>
@@ -260,12 +451,50 @@ def _load_payload(live_sync: bool) -> dict:
     return get_cockpit_payload(live_sync=live_sync)
 
 
-def _metric_card(label: str, value: str, subtitle: str, tone: str = "tone-cyan") -> str:
+def _render_html(block: str) -> None:
+    if hasattr(st, "html"):
+        st.html(block)
+    else:
+        st.markdown(block, unsafe_allow_html=True)
+
+
+def _tooltip_dot(text: str | None) -> str:
+    if not text:
+        return ""
+    return (
+        '<span class="tooltip-wrap">'
+        '<span class="info-dot">i</span>'
+        f'<span class="tooltip-bubble">{html.escape(text)}</span>'
+        "</span>"
+    )
+
+
+def _metric_card(
+    label: str,
+    value: str,
+    subtitle: str,
+    tone: str = "tone-cyan",
+    tooltip: str | None = None,
+) -> str:
     return f"""
     <div class="metric-card">
-      <div class="metric-label">{html.escape(label)}</div>
+      <div class="metric-label">
+        <span class="label-wrap">{html.escape(label)}{_tooltip_dot(tooltip)}</span>
+      </div>
       <div class="metric-value {tone}">{html.escape(value)}</div>
       <div class="metric-sub">{html.escape(subtitle)}</div>
+    </div>
+    """
+
+
+def _mini_card(label: str, value: str, detail: str, tooltip: str | None = None) -> str:
+    return f"""
+    <div class="mini-card">
+      <div class="mini-label">
+        <span class="label-wrap">{html.escape(label)}{_tooltip_dot(tooltip)}</span>
+      </div>
+      <div class="mini-value">{html.escape(value)}</div>
+      <div class="mini-detail">{html.escape(detail)}</div>
     </div>
     """
 
@@ -282,7 +511,101 @@ def _feed_card(title: str, meta: str, body: str, tone: str = "tone-cyan") -> str
     """
 
 
-st.markdown(_CSS, unsafe_allow_html=True)
+def _insight_card(title: str, meta: str, body: str, tone: str = "info") -> str:
+    tone_class = {
+        "good": "insight-good",
+        "warn": "insight-warn",
+        "bad": "insight-bad",
+    }.get(tone, "insight-info")
+    return f"""
+    <div class="insight-shell {tone_class}">
+      <div class="insight-title">{html.escape(title)}</div>
+      <div class="insight-meta">{html.escape(meta)}</div>
+      <div class="insight-body">{html.escape(body)}</div>
+    </div>
+    """
+
+
+def _funnel_stage_card(stage: dict) -> str:
+    return f"""
+    <div class="stage-card">
+      <div class="stage-no">{html.escape(str(stage.get('stage') or ''))}</div>
+      <div class="stage-title">
+        <span>{html.escape(str(stage.get('label') or ''))}</span>
+        {_tooltip_dot(str(stage.get('tooltip') or ''))}
+      </div>
+      <div class="stage-headline">{html.escape(str(stage.get('headline') or ''))}</div>
+      <div class="stage-detail">{html.escape(str(stage.get('detail') or ''))}</div>
+      <div class="stage-pill">{html.escape(str(stage.get('pill') or ''))}</div>
+    </div>
+    """
+
+
+def _render_trade_edge_chart(rows: list[dict]) -> None:
+    if not rows:
+        st.info("No recent BUY trades with stored model probabilities are available for edge visualization yet.")
+        return
+
+    edge_df = pd.DataFrame(rows)
+    symbol_order = edge_df["symbol"].drop_duplicates().tolist()
+    long_df = edge_df.melt(
+        id_vars=["symbol", "side", "strategy", "ts", "market_price_pct"],
+        value_vars=["model_confidence_pct", "edge_pct"],
+        var_name="metric",
+        value_name="percent",
+    )
+    long_df["metric_label"] = long_df["metric"].map(
+        {
+            "model_confidence_pct": "Model Confidence",
+            "edge_pct": "Model Edge",
+        }
+    )
+
+    chart = (
+        alt.Chart(long_df)
+        .mark_bar(cornerRadiusEnd=6, size=16)
+        .encode(
+            y=alt.Y("symbol:N", sort=symbol_order, title=None),
+            yOffset=alt.YOffset("metric_label:N"),
+            x=alt.X(
+                "percent:Q",
+                title="Percent",
+                scale=alt.Scale(domain=[0, 100]),
+                axis=alt.Axis(grid=True, tickCount=6),
+            ),
+            color=alt.Color(
+                "metric_label:N",
+                legend=alt.Legend(title=None, orient="top"),
+                scale=alt.Scale(
+                    domain=["Model Confidence", "Model Edge"],
+                    range=["#4af2d6", "#ffd166"],
+                ),
+            ),
+            tooltip=[
+                alt.Tooltip("symbol:N", title="Symbol"),
+                alt.Tooltip("side:N", title="Side"),
+                alt.Tooltip("strategy:N", title="Strategy"),
+                alt.Tooltip("ts:N", title="Logged At"),
+                alt.Tooltip("market_price_pct:Q", title="Paid Price %", format=".1f"),
+                alt.Tooltip("metric_label:N", title="Bar"),
+                alt.Tooltip("percent:Q", title="Percent", format=".1f"),
+            ],
+        )
+        .properties(height=max(220, len(symbol_order) * 58))
+        .configure_view(strokeOpacity=0)
+        .configure_axis(
+            labelColor="#eaf6ff",
+            titleColor="#91a3c2",
+            gridColor="rgba(145,163,194,0.18)",
+            domainColor="rgba(145,163,194,0.12)",
+            tickColor="rgba(145,163,194,0.12)",
+        )
+        .configure_legend(labelColor="#eaf6ff", titleColor="#91a3c2")
+    )
+    st.altair_chart(chart, use_container_width=True)
+
+
+_render_html(_CSS)
 
 with st.sidebar:
     st.markdown("## Cockpit Controls")
@@ -303,22 +626,26 @@ deploy = payload["deploy"]
 positions_live = payload["positions_live"]
 positions_db_only = payload["positions_db_only"]
 recent_trades = payload["recent_trades"]
+trade_edge_rows = payload["trade_edge_rows"]
 recent_events = payload["recent_events"]
 notifications = payload["notifications"]
 recent_vetoes = payload["recent_vetoes"]
 storage = payload["storage"]
 market_counts = payload["market_counts"]
 snapshot = payload.get("snapshot") or {}
+metric_explainers = payload["metric_explainers"]
+decision_funnel = payload["decision_funnel"]
+regime_cards = payload["regime_cards"]
+ai_insights = payload["ai_insights"]
 
 balance = float(truth.get("balance_usd") or 0.0)
 drift = truth.get("position_drift") or {}
 positions_count = len(positions_live)
 realized_curve = payload["realized_pnl_curve"]
 realized_pnl = realized_curve[-1]["cumulative_pnl"] if realized_curve else 0.0
-equity_snapshot = float(snapshot.get("equity") or balance or 0.0)
 hub_cap_now = max(20.0, balance * 0.20)
 
-st.markdown(
+_render_html(
     f"""
     <div class="hero">
       <div class="eyebrow">Sovereign Weather Engine</div>
@@ -338,11 +665,10 @@ st.markdown(
       </div>
     </div>
     """,
-    unsafe_allow_html=True,
 )
 
 if drift.get("has_drift"):
-    st.markdown(
+    _render_html(
         """
         <div class="banner">
           <strong>Truth drift detected.</strong> Broker reality and SQLite do not fully agree right now.
@@ -350,24 +676,26 @@ if drift.get("has_drift"):
           ledger, a manual broker action, or a runtime reconciliation lag.
         </div>
         """,
-        unsafe_allow_html=True,
     )
 
 st.markdown("### Live Core")
 metric_html = f"""
 <div class="metric-grid">
-  {_metric_card("Live Cash", _fmt_money(balance), "Broker-reported balance", "tone-mint")}
-  {_metric_card("Open Positions", str(positions_count), "Broker-truth live positions", "tone-cyan")}
-  {_metric_card("Active Markets", str(market_counts['active_markets']), f"{market_counts['active_contracts']} active contracts", "tone-blue")}
-  {_metric_card("Drift", "YES" if drift.get('has_drift') else "NO", f"{len(positions_db_only)} db-only remnants", "tone-bad" if drift.get('has_drift') else "tone-mint")}
-  {_metric_card("Realized P&L", _fmt_money(realized_pnl), "From Kalshi trade ledger", "tone-amber" if realized_pnl < 0 else "tone-mint")}
+  {_metric_card("Live Cash", _fmt_money(balance), "Broker-reported balance", "tone-mint", metric_explainers.get("Live Cash"))}
+  {_metric_card("Open Positions", str(positions_count), "Broker-truth live positions", "tone-cyan", metric_explainers.get("Open Positions"))}
+  {_metric_card("Active Markets", str(market_counts['active_markets']), f"{market_counts['active_contracts']} active contracts", "tone-blue", metric_explainers.get("Active Markets"))}
+  {_metric_card("Drift", "YES" if drift.get('has_drift') else "NO", f"{len(positions_db_only)} db-only remnants", "tone-bad" if drift.get('has_drift') else "tone-mint", metric_explainers.get("Drift"))}
+  {_metric_card("Realized P&L", _fmt_money(realized_pnl), "From Kalshi trade ledger", "tone-amber" if realized_pnl < 0 else "tone-mint", metric_explainers.get("Realized P&L"))}
 </div>
 """
-st.markdown(metric_html, unsafe_allow_html=True)
+_render_html(metric_html)
 
-col_left, col_right = st.columns([1.6, 1.0], gap="large")
+st.markdown("### Decision Funnel")
+_render_html('<div class="stage-grid">' + "".join(_funnel_stage_card(stage) for stage in decision_funnel) + "</div>")
 
-with col_left:
+top_left, top_right = st.columns([1.3, 1.0], gap="large")
+
+with top_left:
     st.markdown('<div class="section-title">Open Book</div>', unsafe_allow_html=True)
     with st.container(border=False):
         rows = positions_live or positions_db_only
@@ -412,32 +740,15 @@ with col_left:
     else:
         st.info("No realized Kalshi P&L history is available yet.")
 
-    st.markdown('<div class="section-title">Recent Trades</div>', unsafe_allow_html=True)
-    if recent_trades:
-        trades_df = pd.DataFrame(recent_trades)
-        trades_df["ts"] = trades_df["ts"].map(_fmt_dt)
-        st.dataframe(
-            trades_df[
-                [
-                    "ts",
-                    "symbol",
-                    "action",
-                    "qty",
-                    "price",
-                    "fee_usd",
-                    "pnl_usd",
-                    "strategy",
-                    "contract_side",
-                    "forecast_yes_prob",
-                ]
-            ],
-            width="stretch",
-            hide_index=True,
-        )
-    else:
-        st.info("No recent Kalshi trades found.")
+with top_right:
+    st.markdown('<div class="section-title">Risk Controls</div>', unsafe_allow_html=True)
+    _render_html(
+        '<div class="mini-grid">' + "".join(
+            _mini_card(card["label"], card["value"], card["detail"], card.get("tooltip"))
+            for card in regime_cards
+        ) + "</div>",
+    )
 
-with col_right:
     st.markdown('<div class="section-title">Risk Radar</div>', unsafe_allow_html=True)
     hub_df = pd.DataFrame(payload["hub_exposure"])
     if not hub_df.empty:
@@ -454,72 +765,48 @@ with col_right:
         st.success("No recent hard veto cluster in the current lookback window.")
 
     st.markdown('<div class="section-title">Runtime Integrity</div>', unsafe_allow_html=True)
-    integrity = pd.DataFrame(
-        [
-            {"metric": "disk_free_mb", "value": round(float(storage["free_mb"]), 1)},
-            {"metric": "disk_floor_mb", "value": round(float(storage["threshold_mb"]), 1)},
-            {"metric": "db_size_mb", "value": storage["db_mb"]},
-            {"metric": "bot_log_mb", "value": storage["bot_log_mb"]},
-            {"metric": "forecast_log_mb", "value": storage["forecast_log_mb"]},
-            {"metric": "quote_rows", "value": market_counts["quote_rows"]},
-            {"metric": "bar_rows", "value": market_counts["bar_rows"]},
-        ]
-    )
-    st.dataframe(integrity, width="stretch", hide_index=True)
-
-st.markdown("### Regime Stack")
-reg_left, reg_right = st.columns([1.2, 1.0], gap="large")
-
-with reg_left:
-    st.markdown(
-        """
-        <div class="panel">
-          <div class="section-title">Math Engine</div>
-          <div class="formula"><strong>Weather probability blend</strong><br>60% GFS + 40% ECMWF. AI/GraphCast does not directly set the forecast probability; it only widens or compresses sigma.</div>
-          <div class="formula"><strong>Net EV gate</strong><br>Chosen side must beat the post-fee edge floor after a fixed contract fee and taker friction buffer.</div>
-          <div class="formula"><strong>Sizing stack</strong><br>Fractional Kelly on fee-adjusted cost, then clipped by Kelly cap, event-risk cap, deployment cap, and hard USD cap.</div>
-          <div class="formula"><strong>Exit stack</strong><br>85c take-profit, held-model invalidation, time-decay redeploy, and liquidity-checked limit exits.</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
+    _render_html(
+        '<div class="mini-grid">'
+        + _mini_card("Disk Free", f"{round(float(storage['free_mb']), 0):,.0f} MB", "headroom before writes get risky")
+        + _mini_card("DB Size", f"{storage['db_mb']} MB", "local SQLite footprint")
+        + _mini_card("Quote Cache", f"{market_counts['quote_rows']:,}", "stored forecast quote rows")
+        + "</div>",
     )
 
-with reg_right:
-    st.markdown('<div class="section-title">Live Regime Constants</div>', unsafe_allow_html=True)
-    regime_rows = []
-    for bucket in ("entry_math", "entry_gates", "exit_stack"):
-        for item in regime[bucket]:
-            regime_rows.append({"bucket": bucket, "detail": item})
-    st.dataframe(pd.DataFrame(regime_rows), width="stretch", hide_index=True)
-    macro = regime.get("macro_context") or {}
-    if macro:
-        st.caption(
-            f"Macro: risk_score={macro.get('risk_score')} | spy_trend={macro.get('spy_trend')} | "
-            f"vix={macro.get('vix_regime')} | treasury={macro.get('treasury_yield')}"
+st.markdown("### Trade Edge Tracker")
+st.caption(
+    "Each bar compares what the model believed for the side it bought versus the market price it paid. "
+    "Hover any bar to inspect the trade in plain percentages."
+)
+_render_trade_edge_chart(trade_edge_rows)
+if trade_edge_rows:
+    edge_table = pd.DataFrame(trade_edge_rows)[
+        ["ts", "symbol", "side", "model_confidence_pct", "market_price_pct", "edge_pct", "strategy"]
+    ].rename(
+        columns={
+            "model_confidence_pct": "model_conf_%",
+            "market_price_pct": "paid_price_%",
+            "edge_pct": "edge_%",
+        }
+    )
+    st.dataframe(edge_table, width="stretch", hide_index=True)
+
+insight_left, insight_right = st.columns([1.25, 0.95], gap="large")
+
+with insight_left:
+    st.markdown("### AI Insights")
+    for insight in ai_insights:
+        _render_html(
+            _insight_card(
+                insight.get("title", "Insight"),
+                insight.get("meta", ""),
+                insight.get("body", ""),
+                tone=insight.get("tone", "info"),
+            )
         )
 
-st.markdown("### Event Tape")
-evt_left, evt_right = st.columns(2, gap="large")
-
-with evt_left:
-    st.markdown('<div class="section-title">System Events</div>', unsafe_allow_html=True)
-    if recent_events:
-        for event in recent_events[:12]:
-            tone = "tone-bad" if event.get("level") in {"ERROR", "CRITICAL"} else "tone-amber" if event.get("level") == "WARNING" else "tone-cyan"
-            st.markdown(
-                _feed_card(
-                    f"{event.get('source')} [{event.get('level')}]",
-                    _fmt_dt(event.get("ts")),
-                    str(event.get("message") or ""),
-                    tone=tone,
-                ),
-                unsafe_allow_html=True,
-            )
-    else:
-        st.info("No recent system events.")
-
-with evt_right:
-    st.markdown('<div class="section-title">Notification Feed</div>', unsafe_allow_html=True)
+with insight_right:
+    st.markdown("### Operator Alerts")
     if notifications:
         for event in notifications[:12]:
             tone = "tone-bad" if event.get("severity") == "CRITICAL" else "tone-amber" if event.get("severity") == "WARNING" else "tone-blue"
@@ -538,6 +825,65 @@ with evt_right:
             )
     else:
         st.info("No notification feed rows available.")
+
+st.markdown("### Event Tape")
+show_raw_events = st.toggle(
+    "Show Raw Event Tape",
+    value=False,
+    help="By default the cockpit translates telemetry into plain-English insights. Turn this on to inspect the underlying raw system events.",
+)
+if show_raw_events:
+    evt_left, evt_right = st.columns(2, gap="large")
+    with evt_left:
+        st.markdown('<div class="section-title">System Events</div>', unsafe_allow_html=True)
+        if recent_events:
+            for event in recent_events[:12]:
+                tone = "tone-bad" if event.get("level") in {"ERROR", "CRITICAL"} else "tone-amber" if event.get("level") == "WARNING" else "tone-cyan"
+                st.markdown(
+                    _feed_card(
+                        f"{event.get('source')} [{event.get('level')}]",
+                        _fmt_dt(event.get("ts")),
+                        str(event.get("message") or ""),
+                        tone=tone,
+                    ),
+                    unsafe_allow_html=True,
+                )
+        else:
+            st.info("No recent system events.")
+
+    with evt_right:
+        st.markdown('<div class="section-title">Recent Trade Rows</div>', unsafe_allow_html=True)
+        if recent_trades:
+            trades_df = pd.DataFrame(recent_trades)
+            trades_df["ts"] = trades_df["ts"].map(_fmt_dt)
+            st.dataframe(
+                trades_df[
+                    [
+                        "ts",
+                        "symbol",
+                        "action",
+                        "qty",
+                        "price",
+                        "fee_usd",
+                        "pnl_usd",
+                        "strategy",
+                        "contract_side",
+                        "forecast_yes_prob",
+                    ]
+                ],
+                width="stretch",
+                hide_index=True,
+            )
+        else:
+            st.info("No recent Kalshi trades found.")
+else:
+    _render_html(
+        """
+        <div class="toggle-shell">
+          Raw telemetry is hidden right now. The cockpit is showing translated insights by default so you can read what the system means, not just what it logged.
+        </div>
+        """
+    )
 
 st.divider()
 st.caption(

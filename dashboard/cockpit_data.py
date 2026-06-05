@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -378,8 +379,294 @@ def build_regime_manifest(balance_usd: float | None = None) -> dict[str, Any]:
     }
 
 
+def build_metric_explainers(balance_usd: float | None = None) -> dict[str, str]:
+    balance = _coerce_float(balance_usd, ACCOUNT_SIZE)
+    hub_cap = max(20.0, balance * 0.20)
+    return {
+        "Live Cash": "This is the cash Kalshi says is available right now. It is the real money the bot can still deploy without guessing from local records.",
+        "Open Positions": "These are live Kalshi positions the broker is actually carrying. It keeps us honest by showing what the exchange sees, not what we hoped happened.",
+        "Active Markets": "This is the weather market universe the engine can currently scan. A larger number means more opportunities, but the safety gates still decide whether any are worth trading.",
+        "Drift": "Drift means the broker and the local SQLite ledger disagree. This matters because we operate broker-first, so drift is a warning that the local story may be stale or incomplete.",
+        "Realized P&L": "This is closed-trade profit and loss already locked in. It excludes open-position swings so you can separate booked outcomes from temporary mark changes.",
+        "Data Ingestion": "The engine starts by blending the two main weather ensembles. That keeps us from overreacting to one model run and gives the bot a more stable starting forecast.",
+        "AI Volatility Adjustment": "GraphCast-style AI does not overrule the forecast direction. It only tells the bot whether confidence should be widened or tightened because the atmosphere looks more or less chaotic.",
+        "Safety Gates": "These filters stop trades that look good on paper but fail live economics. Fees, spreads, stale data, and model-vs-market disagreement can all kill a trade here.",
+        "Position Sizing": "Even when a trade passes, the bot still sizes it down through bankroll caps. This keeps one good-looking idea from becoming a dangerous oversized bet.",
+        "Net EV Gate": f"A trade must still clear at least {EV_THRESHOLD:.0%} edge after the ${KALSHI_FEE_PER_CONTRACT:.2f} fee and the taker friction buffer. This prevents the bot from buying tiny theoretical edges that disappear in real execution.",
+        "Fractional Kelly": f"Kelly sizing starts from the math edge, then only uses a fraction of the account. Here it is capped at {KALSHI_KELLY_CAP:.0%}, which keeps conviction from turning into overbetting.",
+        "Regional Hub Cap": f"No single weather region is allowed to dominate the book. Right now the live hub cap is {_coerce_float(hub_cap):.2f} dollars, which limits correlated storm or temperature risk.",
+        "Max Deployed Capital": f"The engine can only deploy up to {KALSHI_MAX_DEPLOYED_PCT:.0%} of the account at once. That leaves dry powder and prevents the bot from becoming fully invested in mediocre conditions.",
+        "Fee Buffer": f"The system assumes extra friction beyond the fixed ${KALSHI_FEE_PER_CONTRACT:.2f} contract fee. That buffer protects against thin books and keeps the entry math closer to what live fills actually cost.",
+        "Forecast Freshness": f"Weather data older than {KALSHI_DATA_FRESHNESS_MINUTES} minutes is treated as stale. This stops the engine from making decisions off an old atmosphere.",
+        "Recent Edge": "This compares the bot's side probability against the price it paid. A bigger gap means the model believed it was buying more outcome probability than the market was charging for.",
+        "Confidence": "Confidence is the bot's probability for the side it actually bought, after converting YES/NO correctly. It is the core number behind whether a trade looked cheap or expensive.",
+    }
+
+
+def build_decision_funnel(balance_usd: float | None = None) -> list[dict[str, Any]]:
+    explainers = build_metric_explainers(balance_usd)
+    hub_cap = max(20.0, _coerce_float(balance_usd, ACCOUNT_SIZE) * 0.20)
+    return [
+        {
+            "stage": "01",
+            "label": "Data Ingestion",
+            "headline": "60% GFS + 40% ECMWF",
+            "detail": "The engine fuses the two core ensemble families into one base weather probability before anything else happens.",
+            "pill": "Base forecast blend",
+            "tooltip": explainers["Data Ingestion"],
+        },
+        {
+            "stage": "02",
+            "label": "AI Volatility Adjustment",
+            "headline": "GraphCast Sigma Scaling",
+            "detail": "AI only adjusts how wide or tight uncertainty should be. It shapes confidence, not the raw weather direction.",
+            "pill": f"Freshness {KALSHI_DATA_FRESHNESS_MINUTES}m",
+            "tooltip": explainers["AI Volatility Adjustment"],
+        },
+        {
+            "stage": "03",
+            "label": "Safety Gates",
+            "headline": f"Net EV > {EV_THRESHOLD:.0%} After Fees",
+            "detail": "Trades get vetoed here if fee drag, spread, stale quotes, or model-vs-market divergence makes the edge unsafe.",
+            "pill": f"Fee ${KALSHI_FEE_PER_CONTRACT:.2f} + buffer ${KALSHI_FEE_BUFFER:.2f}",
+            "tooltip": explainers["Safety Gates"],
+        },
+        {
+            "stage": "04",
+            "label": "Position Sizing",
+            "headline": f"Kelly Cap {KALSHI_KELLY_CAP:.0%}",
+            "detail": "Approved trades are clipped again by Kelly, event risk, deployment limits, and regional hub exposure.",
+            "pill": f"Hub cap ${hub_cap:.2f}",
+            "tooltip": explainers["Position Sizing"],
+        },
+    ]
+
+
+def build_trade_edge_rows(trades: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for trade in trades or []:
+        if str(trade.get("action") or "").upper() != "BUY":
+            continue
+
+        forecast_yes_prob = trade.get("forecast_yes_prob")
+        if forecast_yes_prob in (None, ""):
+            continue
+
+        price = _coerce_float(trade.get("price"))
+        if price <= 0:
+            continue
+
+        side = str(trade.get("contract_side") or "YES").upper()
+        yes_prob = _coerce_float(forecast_yes_prob)
+        held_confidence = yes_prob if side == "YES" else (1.0 - yes_prob)
+        edge = held_confidence - price
+
+        rows.append(
+            {
+                "symbol": str(trade.get("symbol") or ""),
+                "side": side,
+                "strategy": str(trade.get("strategy") or ""),
+                "ts": _dt_text(trade.get("ts")),
+                "model_confidence_pct": round(held_confidence * 100.0, 1),
+                "market_price_pct": round(price * 100.0, 1),
+                "edge_pct": round(edge * 100.0, 1),
+                "edge_label": "Model Edge",
+            }
+        )
+
+    return rows
+
+
+def build_ai_insights(
+    *,
+    truth: dict[str, Any],
+    lane: dict[str, Any],
+    market_counts: dict[str, Any],
+    recent_events: list[dict[str, Any]],
+    recent_trades: list[dict[str, Any]],
+    recent_vetoes: dict[str, Any],
+) -> list[dict[str, str]]:
+    insights: list[dict[str, str]] = []
+
+    if truth.get("broker_connected") and str(lane.get("readiness_state") or "") == "OPERATIONAL":
+        insights.append(
+            {
+                "title": "Engine Live",
+                "tone": "good",
+                "meta": "Broker-first truth",
+                "body": "Kalshi is connected, the forecast lane is operational, and the cockpit is reading broker cash and positions directly from the live stack.",
+            }
+        )
+
+    for event in recent_events:
+        source = str(event.get("source") or "")
+        message = str(event.get("message") or "")
+        if source == "PositionReconciler":
+            match = re.search(
+                r"holdings=(?P<holdings>\d+).*adopted=(?P<adopted>\d+).*refreshed=(?P<refreshed>\d+).*closed=(?P<closed>\d+)",
+                message,
+            )
+            if match:
+                holdings = int(match.group("holdings"))
+                refreshed = int(match.group("refreshed"))
+                adopted = int(match.group("adopted"))
+                closed = int(match.group("closed"))
+                insights.append(
+                    {
+                        "title": "Ledger Reconciled",
+                        "tone": "good",
+                        "meta": "Broker vs SQLite",
+                        "body": f"The runtime checked {holdings} live broker holding(s), refreshed {refreshed} local row(s), adopted {adopted}, and closed {closed} stale remnants. That keeps local state aligned with Kalshi reality.",
+                    }
+                )
+                break
+
+    for event in recent_events:
+        message = str(event.get("message") or "")
+        if "found=" in message and "active_in_db=" in message:
+            match = re.search(
+                r"found=(?P<found>\d+).*persisted=(?P<persisted>\d+).*active_in_db=(?P<active>\d+)",
+                message,
+            )
+            if match:
+                found = int(match.group("found"))
+                persisted = int(match.group("persisted"))
+                active = int(match.group("active"))
+                live_markets = max(1, active // 2)
+                insights.append(
+                    {
+                        "title": "Universe Refreshed",
+                        "tone": "info",
+                        "meta": "Discovery sweep",
+                        "body": f"The engine discovered {found} raw venues, kept {persisted} weather contracts in focus, and is actively tracking {live_markets} live Kalshi markets ({active} side-specific contract rows).",
+                    }
+                )
+                break
+
+    latest_entry = next(
+        (
+            trade
+            for trade in recent_trades
+            if str(trade.get("action") or "").upper() == "BUY"
+            and str(trade.get("broker") or "kalshi").lower() == "kalshi"
+        ),
+        None,
+    )
+    if latest_entry:
+        side = str(latest_entry.get("contract_side") or "YES").upper()
+        prob = latest_entry.get("forecast_yes_prob")
+        price = _coerce_float(latest_entry.get("price"))
+        if prob not in (None, "") and price > 0:
+            held_conf = _coerce_float(prob) if side == "YES" else (1.0 - _coerce_float(prob))
+            edge = held_conf - price
+            insights.append(
+                {
+                    "title": "Fresh Edge Captured",
+                    "tone": "good",
+                    "meta": str(latest_entry.get("symbol") or ""),
+                    "body": f"The bot opened {side} because its side confidence was {held_conf:.1%} while the paid market price was {price:.1%}, leaving about {edge:.1%} modeled edge before exit risk.",
+                }
+            )
+        else:
+            insights.append(
+                {
+                    "title": "Fresh Entry Logged",
+                    "tone": "good",
+                    "meta": str(latest_entry.get("symbol") or ""),
+                    "body": "The engine found a live opportunity and booked a new Kalshi position after all safety gates and size caps cleared.",
+                }
+            )
+    elif recent_vetoes.get("count"):
+        top = (recent_vetoes.get("top_reasons") or [{}])[0]
+        insights.append(
+            {
+                "title": "Holding Cash On Purpose",
+                "tone": "warn",
+                "meta": "Safety gates active",
+                "body": f"No new trade was booked in the latest window because the safety stack kept vetoing candidates. The top blocker was '{top.get('reason', 'unknown')}' ({top.get('count', 0)} hits).",
+            }
+        )
+    else:
+        insights.append(
+            {
+                "title": "No Urgent Action",
+                "tone": "info",
+                "meta": "Calm state",
+                "body": "The engine is live, but nothing recent forced a trade or a risk intervention. Cash is being held until the model finds a cleaner edge.",
+            }
+        )
+
+    drift = truth.get("position_drift") or {}
+    if drift.get("has_drift"):
+        insights.append(
+            {
+                "title": "Truth Drift Alert",
+                "tone": "warn",
+                "meta": "Operator attention",
+                "body": "Broker positions and the local ledger do not perfectly match yet. The cockpit is showing both layers explicitly so you can spot whether the mismatch is stale bookkeeping or an external action.",
+            }
+        )
+
+    if not insights:
+        insights.append(
+            {
+                "title": "No Insight Available",
+                "tone": "info",
+                "meta": "Fallback",
+                "body": "The cockpit did not detect a strong recent narrative from the live telemetry, so it is defaulting to a neutral read-only state.",
+            }
+        )
+
+    return insights[:6]
+
+
+def build_regime_cards(balance_usd: float | None = None) -> list[dict[str, str]]:
+    balance = _coerce_float(balance_usd, ACCOUNT_SIZE)
+    hub_cap = max(20.0, balance * 0.20)
+    explainers = build_metric_explainers(balance_usd)
+    return [
+        {
+            "label": "Net EV Gate",
+            "value": f"{EV_THRESHOLD:.0%}",
+            "detail": "post-fee minimum edge",
+            "tooltip": explainers["Net EV Gate"],
+        },
+        {
+            "label": "Fractional Kelly",
+            "value": f"{KALSHI_KELLY_CAP:.0%}",
+            "detail": "maximum Kelly slice",
+            "tooltip": explainers["Fractional Kelly"],
+        },
+        {
+            "label": "Regional Hub Cap",
+            "value": f"${hub_cap:,.0f}",
+            "detail": "max correlated regional risk",
+            "tooltip": explainers["Regional Hub Cap"],
+        },
+        {
+            "label": "Max Deployed Capital",
+            "value": f"{KALSHI_MAX_DEPLOYED_PCT:.0%}",
+            "detail": "account-wide live exposure",
+            "tooltip": explainers["Max Deployed Capital"],
+        },
+        {
+            "label": "Fee Buffer",
+            "value": f"${KALSHI_FEE_BUFFER:.2f}",
+            "detail": "extra friction allowance",
+            "tooltip": explainers["Fee Buffer"],
+        },
+        {
+            "label": "Forecast Freshness",
+            "value": f"{KALSHI_DATA_FRESHNESS_MINUTES}m",
+            "detail": "max age before veto",
+            "tooltip": explainers["Forecast Freshness"],
+        },
+    ]
+
+
 def get_cockpit_payload(*, live_sync: bool = True) -> dict[str, Any]:
     truth = get_live_kalshi_status(connect=live_sync, sync_broker=live_sync)
+    lane = truth.get("forecast_lane") or {}
     symbols = sorted(
         {
             str(pos.get("ticker") or pos.get("local_symbol") or "")
@@ -429,6 +716,10 @@ def get_cockpit_payload(*, live_sync: bool = True) -> dict[str, Any]:
 
     recent_trades = _load_recent_trades(limit=25)
     recent_events = _load_recent_events(limit=25)
+    regime = build_regime_manifest(truth.get("balance_usd"))
+    trade_edge_rows = build_trade_edge_rows(recent_trades)
+    market_counts = _load_market_counts()
+    recent_vetoes = get_recent_veto_summary()
     storage = runtime_storage_status()
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -437,12 +728,16 @@ def get_cockpit_payload(*, live_sync: bool = True) -> dict[str, Any]:
         "positions_db_only": drift_rows,
         "hub_exposure": summarize_hub_exposure(live_rows or drift_rows),
         "recent_trades": recent_trades,
+        "trade_edge_rows": trade_edge_rows,
         "realized_pnl_curve": build_realized_pnl_curve(recent_trades),
         "recent_events": recent_events,
         "notifications": get_notifications(limit=12),
-        "recent_vetoes": get_recent_veto_summary(),
-        "regime": build_regime_manifest(truth.get("balance_usd")),
-        "market_counts": _load_market_counts(),
+        "recent_vetoes": recent_vetoes,
+        "regime": regime,
+        "regime_cards": build_regime_cards(truth.get("balance_usd")),
+        "metric_explainers": build_metric_explainers(truth.get("balance_usd")),
+        "decision_funnel": build_decision_funnel(truth.get("balance_usd")),
+        "market_counts": market_counts,
         "storage": {
             **storage,
             "db_mb": _file_size_mb(DB_PATH),
@@ -450,6 +745,14 @@ def get_cockpit_payload(*, live_sync: bool = True) -> dict[str, Any]:
             "forecast_log_mb": _file_size_mb(FORECAST_LOG_PATH),
         },
         "deploy": _load_deploy_metadata(),
+        "ai_insights": build_ai_insights(
+            truth=truth,
+            lane=lane,
+            market_counts=market_counts,
+            recent_events=recent_events,
+            recent_trades=recent_trades,
+            recent_vetoes=recent_vetoes,
+        ),
         "snapshot": _safe_json((truth.get("forecast_lane") or {}).get("snapshot_json"))
         or truth.get("forecast_snapshot")
         or {},

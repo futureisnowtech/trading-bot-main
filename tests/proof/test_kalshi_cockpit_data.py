@@ -65,6 +65,68 @@ def test_build_regime_manifest_surfaces_live_constants():
     assert any("$40.00" in line for line in manifest["entry_gates"])
 
 
+def test_build_trade_edge_rows_handles_yes_and_no_side_buys():
+    from dashboard.cockpit_data import build_trade_edge_rows
+
+    rows = build_trade_edge_rows(
+        [
+            {
+                "ts": "2026-06-05T03:00:00+00:00",
+                "symbol": "KXHIGHLAX-26JUN05-B69.5",
+                "action": "BUY",
+                "price": 0.16,
+                "contract_side": "YES",
+                "forecast_yes_prob": 0.97,
+                "strategy": "forecast_weather_ensemble",
+            },
+            {
+                "ts": "2026-06-05T02:00:00+00:00",
+                "symbol": "KXLOWTLV-26JUN05-T78",
+                "action": "BUY",
+                "price": 0.29,
+                "contract_side": "NO",
+                "forecast_yes_prob": 0.18,
+                "strategy": "forecast_weather_ensemble",
+            },
+        ]
+    )
+
+    assert rows[0]["model_confidence_pct"] == 97.0
+    assert rows[0]["edge_pct"] == 81.0
+    assert rows[1]["model_confidence_pct"] == 82.0
+    assert rows[1]["edge_pct"] == 53.0
+
+
+def test_build_ai_insights_translates_runtime_into_plain_english():
+    from dashboard.cockpit_data import build_ai_insights
+
+    insights = build_ai_insights(
+        truth={"broker_connected": True, "position_drift": {"has_drift": False}},
+        lane={"readiness_state": "OPERATIONAL"},
+        market_counts={"active_markets": 168},
+        recent_events=[
+            {
+                "source": "PositionReconciler",
+                "message": "Reconciliation complete: connected=True Kalshi holdings=1 adopted=0 refreshed=1 closed=0",
+            },
+            {
+                "source": "Discovery",
+                "message": "[Discovery] found=382 persisted=240 stubs=0 active_in_db=336 errors=0",
+            },
+        ],
+        recent_trades=[],
+        recent_vetoes={"count": 2, "top_reasons": [{"reason": "missing_quotes", "count": 2}]},
+    )
+
+    titles = [row["title"] for row in insights]
+    bodies = " ".join(row["body"] for row in insights)
+
+    assert "Engine Live" in titles
+    assert "Ledger Reconciled" in titles
+    assert "Universe Refreshed" in titles
+    assert "holding" in bodies.lower() or "veto" in bodies.lower()
+
+
 def test_load_deploy_metadata_prefers_runtime_dir(tmp_path, monkeypatch):
     import json
     import dashboard.cockpit_data as cd

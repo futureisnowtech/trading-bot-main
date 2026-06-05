@@ -15,6 +15,7 @@ from config import (
 )
 from data.kalshi_weather_monitor import start_weather_monitor
 from forecast.runner import run_execution_cycle
+from runtime.incident_tracker import sync_incidents_and_notify
 from runtime.position_reconciler import run_reconciliation
 from runtime.storage_maintenance import maintain_runtime_storage
 from runtime.storage_guard import runtime_storage_status
@@ -49,6 +50,10 @@ def main() -> int:
         run_reconciliation()
     except Exception:
         logger.exception("Position reconciliation failed at startup")
+    try:
+        sync_incidents_and_notify()
+    except Exception:
+        logger.exception("Incident sync failed after startup reconciliation")
     logger.info("Execution daemon online (sleep=%ss).", sleep_seconds)
 
     try:
@@ -72,6 +77,10 @@ def main() -> int:
                 else:
                     summary = run_execution_cycle(bankroll=bankroll, run_rbi=True)
                     logger.info("Execution cycle complete: %s", summary)
+                try:
+                    sync_incidents_and_notify()
+                except Exception:
+                    logger.exception("Incident sync failed after execution cycle")
             except Exception:
                 logger.exception("Execution cycle failed")
 

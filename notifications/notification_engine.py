@@ -152,6 +152,17 @@ def _prune(conn):
         pass
 
 
+def _should_dispatch_telegram(event: NotificationEvent) -> bool:
+    if event.severity == SEV_CRITICAL:
+        return True
+    if event.category in (CAT_TRADE_OPEN, CAT_TRADE_CLOSE):
+        return True
+    try:
+        return bool((event.data or {}).get("telegram"))
+    except Exception:
+        return False
+
+
 # ── Core write API ────────────────────────────────────────────────────────────
 
 def push(event: NotificationEvent) -> Optional[str]:
@@ -184,8 +195,9 @@ def push(event: NotificationEvent) -> Optional[str]:
         conn.close()
         logger.debug(f'[notif] {event.severity} {event.category}: {event.title}')
 
-        # Production integration: Send to Telegram if critical or trade event
-        if event.severity == SEV_CRITICAL or event.category in (CAT_TRADE_OPEN, CAT_TRADE_CLOSE):
+        # Production integration: criticals, trade events, and explicitly paged
+        # operator alerts are mirrored to Telegram.
+        if _should_dispatch_telegram(event):
             try:
                 from notifications.telegram_bot import send_message as tg_send
                 tg_text = f"<b>{event.title}</b>\n{event.message}"
@@ -250,14 +262,17 @@ def notify_signal(symbol: str, direction: str, score: float,
 
 
 def notify_risk(title: str, detail: str, severity: str = SEV_WARNING,
-                data: Optional[Dict] = None) -> None:
+                data: Optional[Dict] = None, telegram: bool = False) -> None:
     """Notify risk engine events (drawdown levels, margin warnings, correlation)."""
+    payload = dict(data or {})
+    if telegram:
+        payload["telegram"] = True
     push(NotificationEvent(
         category=CAT_RISK,
         severity=severity,
         title=title,
         message=detail,
-        data=data or {},
+        data=payload,
     ))
 
 
@@ -305,13 +320,19 @@ def notify_kill_switch(trigger_type: str, detail: str,
 
 
 def notify_system(title: str, detail: str,
-                  severity: str = SEV_INFO) -> None:
+                  severity: str = SEV_INFO,
+                  telegram: bool = False,
+                  data: Optional[Dict] = None) -> None:
     """Generic system event notification."""
+    payload = dict(data or {})
+    if telegram:
+        payload["telegram"] = True
     push(NotificationEvent(
         category=CAT_SYSTEM,
         severity=severity,
         title=title,
         message=detail,
+        data=payload,
     ))
 
 

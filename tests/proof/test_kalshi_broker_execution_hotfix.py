@@ -162,3 +162,50 @@ def test_executed_buy_logs_weather_observation_fields(monkeypatch):
     assert captured["model_prob_ecmwf"] == 0.79
     assert captured["weather_mode"] == "LOW"
     assert captured["forecast_hours_to_resolution"] == 21.5
+
+
+def test_partial_sell_preserves_remaining_position(monkeypatch):
+    broker = _connected_broker()
+    broker._open_positions["KXLOWTPHX-26JUN05-T80_C"] = {
+        "qty": 10,
+        "side": "YES",
+        "local_symbol": "KXLOWTPHX-26JUN05-T80",
+        "right": "C",
+        "entry": 0.40,
+        "entry_price": 0.40,
+        "forecast_yes_prob": 0.74,
+    }
+    captured = {}
+
+    monkeypatch.setattr(
+        broker,
+        "_request",
+        lambda *args, **kwargs: {"order": {"status": "executed", "order_id": "ORD-SELL"}},
+    )
+    monkeypatch.setattr(
+        broker,
+        "_hydrate_order_details",
+        lambda order: {
+            **order,
+            "fill_count_fp": "4.00",
+            "taker_fill_cost_dollars": "2.000000",
+        },
+    )
+    monkeypatch.setattr(broker, "_extract_total_fees", lambda *_args, **_kwargs: 0.28)
+    monkeypatch.setattr("execution.kalshi_broker.log_trade", lambda **kwargs: captured.update(kwargs))
+
+    result = broker.place_sell_order(
+        {"local_symbol": "KXLOWTPHX-26JUN05-T80"},
+        qty=4,
+        limit_price=0.50,
+        side="yes",
+        type="limit",
+    )
+
+    pos = broker.get_position("KXLOWTPHX-26JUN05-T80", "C")
+    assert result["status"] == "executed"
+    assert result["filled_qty"] == 4.0
+    assert result["remaining_position_qty"] == 6.0
+    assert pos is not None
+    assert pos["qty"] == 6.0
+    assert captured["qty"] == 4.0

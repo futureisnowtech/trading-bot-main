@@ -33,6 +33,9 @@ import numpy as np
 from config import (
     DB_PATH,
     MACRO_CACHE_FILE,
+    KALSHI_EXPENSIVE_YES_MIN_NET_EDGE,
+    KALSHI_EXPENSIVE_YES_SIZE_MULTIPLIER,
+    KALSHI_EXPENSIVE_YES_THRESHOLD,
     KALSHI_FEE_BUFFER,
     KALSHI_KELLY_CAP,
     KALSHI_MAX_CONCURRENT_POSITIONS,
@@ -1073,6 +1076,37 @@ def _strategy_weather_details(
 
     # sigma_mult: 1.0 at 2.0F sigma, 1.25 at 1.0F sigma, 0.5 at 4.0F sigma
     sigma_mult = max(0.3, min(1.3, 1.5 - (sigma / 4.0)))
+
+    premium_yes_threshold = float(KALSHI_EXPENSIVE_YES_THRESHOLD)
+    premium_yes_net_edge_floor = float(KALSHI_EXPENSIVE_YES_MIN_NET_EDGE)
+    premium_yes_size_multiplier = max(0.25, float(KALSHI_EXPENSIVE_YES_SIZE_MULTIPLIER))
+    net_edge_yes = (
+        ensemble_prob - ask_yes - KALSHI_FEE_BUFFER - KALSHI_FEE_PER_CONTRACT
+        if ask_yes > 0
+        else None
+    )
+
+    if (
+        ask_yes > 0
+        and edge_yes is not None
+        and edge_yes > 0
+        and ask_yes >= premium_yes_threshold
+        and net_edge_yes is not None
+        and net_edge_yes < premium_yes_net_edge_floor
+    ):
+        return (
+            False,
+            "",
+            0.0,
+            [
+                "expensive_yes_headroom_veto "
+                f"(ask={ask_yes:.2f} net_ev={net_edge_yes:.3f} < {premium_yes_net_edge_floor:.3f})"
+            ],
+            False,
+            1.0,
+            3,
+            0.05,
+        )
     
     # v19.5: Sovereign Survival — Institutional Price Floor ($0.15)
     # Never trade penny longshots.
@@ -1174,6 +1208,11 @@ def _strategy_weather_details(
 
         # v19.1.12: Return raw ensemble_prob + sizing_multiplier separately
         sizing_multiplier = convergence_multiplier * sigma_mult * divergence_size_multiplier
+        if ask_yes >= premium_yes_threshold:
+            sizing_multiplier *= premium_yes_size_multiplier
+            factors.append(
+                f"premium_yes_haircut={premium_yes_size_multiplier:.2f}x"
+            )
         return True, "YES", ensemble_prob, factors, is_taker, sizing_multiplier, conv_tier, sizing_cap
 
     if edge_no is not None and edge_no > 0.08:

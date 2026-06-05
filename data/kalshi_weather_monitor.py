@@ -380,6 +380,16 @@ async def fetch_open_meteo_ensemble(city_key: str, lat: float, lon: float) -> Di
             
             if resp.status_code == 429:
                 logger.warning(f"Open-Meteo 429 (Rate Limit) for {city_key} [{model}]")
+                try:
+                    from logging_db.trade_logger import log_event
+
+                    log_event(
+                        "WARNING",
+                        "WeatherMonitor",
+                        f"Open-Meteo 429 (Rate Limit) for {city_key} [{model}]",
+                    )
+                except Exception:
+                    pass
                 continue
 
             if resp.status_code != 200: continue

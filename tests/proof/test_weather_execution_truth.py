@@ -131,6 +131,7 @@ def test_weather_override_uses_same_fee_buffered_ev_floor(monkeypatch):
     }
 
     monkeypatch.setattr(se, "get_weather_data", lambda ticker: fresh_weather)
+    monkeypatch.setattr(se, "KALSHI_EXPENSIVE_YES_THRESHOLD", 0.95)
     monkeypatch.setattr(
         se,
         "get_contract_weather_data",
@@ -275,6 +276,37 @@ def test_weather_strategy_can_use_adaptive_model_weights(monkeypatch):
     assert result.strategy_family == "weather_ensemble"
     assert result.side == "NO"
     assert result.econ_approved is True
+
+
+def test_expensive_yes_weather_requires_extra_headroom(monkeypatch):
+    import forecast.strategy_engine as se
+
+    fresh_weather = {
+        "members_high": [80.0] * 31,
+        "ecmwf": {"members_high": [80.0] * 31},
+        "sigma_high": 0.8,
+        "peak_tcdc": 5.0,
+        "timestamp": datetime.now(timezone.utc).timestamp(),
+    }
+
+    monkeypatch.setattr(
+        se,
+        "get_contract_weather_data",
+        lambda ticker, **kwargs: fresh_weather,
+    )
+
+    passes, side, _prob, factors, _is_taker, _mult, _tier, _cap = se._strategy_weather_details(
+        "KXHIGHNY-30JUN26-T75",
+        ask_yes=0.81,
+        ask_no=0.19,
+        hours_to_res=24.0,
+        contract_name="Will the high temp in NY be >75° on Jun 30, 2026?",
+        strike=75.0,
+    )
+
+    assert passes is False
+    assert side == ""
+    assert any("expensive_yes_headroom_veto" in factor for factor in factors)
 
 
 def test_weather_divergence_is_softened_before_catastrophic_veto(monkeypatch):

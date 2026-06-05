@@ -161,6 +161,62 @@ def test_incident_ingest_non_forecast_sources_fall_back_to_system(proof_runtime,
     assert incidents[0]["lane_id"] == "system"
 
 
+def test_warn_level_incident_is_classified_as_warning(proof_runtime, monkeypatch):
+    import runtime.incident_tracker as it
+
+    db = str(proof_runtime.db_path)
+    monkeypatch.setattr(it, "DB_PATH", db, raising=False)
+    it.init_incident_table(db_path=db)
+
+    _insert_event_raw(
+        proof_runtime.db_path,
+        source="KalshiBroker",
+        message="Position sync error: timeout",
+        level="WARN",
+    )
+
+    it.ingest_system_events(lookback_minutes=120, db_path=db)
+    incidents = it.get_open_incidents(db_path=db)
+
+    assert incidents
+    assert incidents[0]["severity"] == "WARNING"
+
+
+def test_incident_sync_notifies_operator_for_rate_limit(proof_runtime, monkeypatch):
+    import runtime.incident_tracker as it
+
+    db = str(proof_runtime.db_path)
+    monkeypatch.setattr(it, "DB_PATH", db, raising=False)
+    it.init_incident_table(db_path=db)
+
+    _insert_event_raw(
+        proof_runtime.db_path,
+        source="ForecastRunner",
+        message="[ForecastRunner] KXHIGHNY execution_result: too_many_requests (local_rate_limit_cooldown)",
+        level="WARNING",
+    )
+
+    captured = {}
+
+    def fake_notify_system(title, detail, severity="INFO", telegram=False, data=None):
+        captured["title"] = title
+        captured["detail"] = detail
+        captured["severity"] = severity
+        captured["telegram"] = telegram
+        captured["data"] = data or {}
+
+    monkeypatch.setattr("notifications.notification_engine.notify_system", fake_notify_system)
+
+    result = it.sync_incidents_and_notify(lookback_minutes=120, db_path=db)
+    incidents = it.get_open_incidents(db_path=db)
+
+    assert result["alerted"] == 1
+    assert captured["telegram"] is True
+    assert captured["severity"] == "WARNING"
+    assert "too_many_requests" in captured["detail"]
+    assert incidents[0]["last_alerted_count"] >= 1
+
+
 def test_position_reconciliation_logs_completion_event(proof_runtime, monkeypatch):
     import runtime.position_reconciler as pr
 

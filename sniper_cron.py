@@ -12,6 +12,7 @@ from config import (
     KALSHI_ENABLED,
 )
 from forecast.runner import run_execution_cycle
+from runtime.incident_tracker import sync_incidents_and_notify
 from runtime.position_reconciler import run_reconciliation
 from runtime.storage_maintenance import maintain_runtime_storage
 from runtime.storage_guard import runtime_storage_status
@@ -40,6 +41,10 @@ def main() -> int:
         run_reconciliation()
     except Exception:
         logging.exception("Position reconciliation failed")
+    try:
+        sync_incidents_and_notify()
+    except Exception:
+        logging.exception("Incident sync failed after reconciliation")
 
     try:
         maintain_runtime_storage()
@@ -58,6 +63,10 @@ def main() -> int:
         return 0
 
     summary = run_execution_cycle(bankroll=float(ACCOUNT_SIZE), run_rbi=True)
+    try:
+        sync_incidents_and_notify()
+    except Exception:
+        logging.exception("Incident sync failed after sniper cycle")
     logging.info("Sniper cycle complete: %s", summary)
     return 0
 

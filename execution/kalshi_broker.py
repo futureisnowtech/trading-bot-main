@@ -207,6 +207,70 @@ class KalshiBroker:
             pass
         return order_info
 
+    def _apply_exit_fill(
+        self,
+        *,
+        ticker: str,
+        fallback_right: str,
+        requested_qty: int,
+        order_info: dict,
+        order_type: str,
+        default_side: str,
+        reason: str,
+        strategy: str,
+    ) -> dict:
+        key_yes = f"{ticker}_C"
+        key_no = f"{ticker}_P"
+        key = key_yes if key_yes in self._open_positions else key_no
+        if key not in self._open_positions:
+            key = f"{ticker}_{fallback_right}"
+
+        pos_info = self._open_positions.get(key, {})
+        held_qty = float(pos_info.get("qty") or 0.0)
+        fill_qty = self._extract_fill_count(order_info) or float(requested_qty)
+        fill_qty = max(0.0, min(fill_qty, held_qty or float(requested_qty)))
+        exit_price = self._extract_average_fill_price(order_info)
+        fee_usd = self._extract_total_fees(order_info, int(round(fill_qty or requested_qty)))
+        order_id = order_info.get("order_id", "ERR")
+        entry_price = float(pos_info.get("entry_price") or pos_info.get("entry") or 0.50)
+        pnl_usd = (exit_price - entry_price) * fill_qty if exit_price > 0 else 0.0
+        remaining_qty = max(0.0, held_qty - fill_qty)
+
+        if remaining_qty > 0 and key in self._open_positions:
+            self._open_positions[key]["qty"] = remaining_qty
+        else:
+            self._open_positions.pop(key, None)
+
+        try:
+            log_trade(
+                strategy=strategy,
+                broker="kalshi",
+                symbol=ticker,
+                action="SELL",
+                order_type=order_type,
+                qty=fill_qty,
+                price=exit_price,
+                fee_usd=fee_usd,
+                pnl_usd=pnl_usd,
+                order_id=order_id,
+                notes=reason,
+                won=(pnl_usd > 0),
+                contract_side=pos_info.get("side", default_side).upper(),
+                forecast_yes_prob=pos_info.get("forecast_yes_prob"),
+            )
+        except Exception as e:
+            logger.error(f"[KalshiBroker] log_trade exit error: {e}")
+
+        return {
+            "order_id": order_id,
+            "status": "executed",
+            "entry_price": entry_price,
+            "exit_price": exit_price,
+            "pnl_usd": pnl_usd,
+            "filled_qty": fill_qty,
+            "remaining_position_qty": remaining_qty,
+        }
+
     def _request(self, method: str, path: str, params: dict = None, body: dict = None) -> dict:
         """Execute signed Kalshi V2 request."""
         
@@ -253,6 +317,12 @@ class KalshiBroker:
                 payload = resp.json()
             except Exception as json_err:
                 if resp.status_code >= 400:
+                    level = "WARNING" if resp.status_code == 429 else "ERROR"
+                    log_event(
+                        level,
+                        "KalshiBroker",
+                        f"HTTP {resp.status_code} {path}: {resp.text[:160]}",
+                    )
                     logger.error(
                         "[KalshiBroker] Non-JSON error for %s. Status=%s Text=%s",
                         url,
@@ -270,6 +340,12 @@ class KalshiBroker:
                 return {"error": f"json_decode_failed: {str(json_err)}"}
 
             if resp.status_code >= 400:
+                level = "WARNING" if resp.status_code == 429 else "ERROR"
+                log_event(
+                    level,
+                    "KalshiBroker",
+                    f"HTTP {resp.status_code} {path}: {resp.text[:160]}",
+                )
                 if isinstance(payload, dict) and payload.get("error"):
                     error = payload["error"]
                     if isinstance(error, dict):
@@ -499,6 +575,7 @@ class KalshiBroker:
             }
         except Exception as e:
             logger.error(f"[KalshiBroker] get_quote error for {ticker}: {e}")
+            log_event("ERROR", "KalshiBroker", f"get_quote error for {ticker}: {e}")
             return {"local_symbol": ticker, "bid": None, "ask": None, "ts": datetime.now(timezone.utc).isoformat()}
 
     def get_historical_candles(self, ticker: str, interval_min: int = 1, limit: int = 100) -> list[dict]:
@@ -708,43 +785,21 @@ class KalshiBroker:
 
         if status == "executed":
             order_info = self._hydrate_order_details(order_info)
-            exit_price = self._extract_average_fill_price(order_info)
-            order_id = order_info.get("order_id", "ERR")
-            fee_usd = self._extract_total_fees(order_info, qty)
-            print(f"[KalshiBroker] SELL {qty} {ticker} @ {exit_price:.4f} | ID={order_id}")
-            
-            # PnL Calc
-            key_yes = f"{ticker}_C"; key_no = f"{ticker}_P"
-            pos_info = self._open_positions.pop(key_yes, {}) or self._open_positions.pop(key_no, {})
-            entry_price = float(pos_info.get("entry_price") or pos_info.get("entry") or 0.50)
-            pnl_usd = (exit_price - entry_price) * qty
-            
-            try:
-                log_trade(
-                    strategy=kwargs.get("strategy", "forecast_exit"),
-                    broker="kalshi",
-                    symbol=ticker,
-                    action="SELL",
-                    order_type=order_type.capitalize(),
-                    qty=qty,
-                    price=exit_price,
-                    fee_usd=fee_usd,
-                    pnl_usd=pnl_usd,
-                    order_id=order_id,
-                    notes=kwargs.get("reason", ""),
-                    won=(pnl_usd > 0),
-                    contract_side=pos_info.get("side", side).upper(),
-                    forecast_yes_prob=pos_info.get("forecast_yes_prob"),
-                )
-            except Exception as e:
-                logger.error(f"[KalshiBroker] log_trade exit error: {e}")
-            return {
-                "order_id": order_id,
-                "status": status,
-                "entry_price": entry_price,
-                "exit_price": exit_price,
-                "pnl_usd": pnl_usd,
-            }
+            result = self._apply_exit_fill(
+                ticker=ticker,
+                fallback_right="C" if side == "yes" else "P",
+                requested_qty=qty,
+                order_info=order_info,
+                order_type=order_type.capitalize(),
+                default_side=side,
+                reason=kwargs.get("reason", ""),
+                strategy=kwargs.get("strategy", "forecast_exit"),
+            )
+            print(
+                f"[KalshiBroker] SELL {result['filled_qty']:g} {ticker} "
+                f"@ {result['exit_price']:.4f} | ID={result['order_id']}"
+            )
+            return result
         
         return {"order_id": order_info.get("order_id", "ERR"), "status": status}
 
@@ -808,33 +863,25 @@ class KalshiBroker:
 
             if status == "executed":
                 order_info = self._hydrate_order_details(order_info)
-                exit_price = self._extract_average_fill_price(order_info)
-                fee_usd = self._extract_total_fees(order_info, qty)
-                pnl_usd = (exit_price - entry_price) * qty if exit_price > 0 else 0.0
-                self._open_positions.pop(key, None)
-
-                try:
-                    log_trade(
-                        strategy=kwargs.get("strategy", "forecast_exit"),
-                        broker="kalshi",
-                        symbol=local_symbol,
-                        action="SELL",
-                        order_type="Market",
-                        qty=qty,
-                        price=exit_price,
-                        fee_usd=fee_usd,
-                        pnl_usd=pnl_usd,
-                        order_id=order_id,
-                        notes=kwargs.get("reason", "salvage_exit"),
-                        won=(pnl_usd > 0),
-                        contract_side=pos_info.get("side", side.upper()),
-                        forecast_yes_prob=pos_info.get("forecast_yes_prob"),
-                    )
-                except Exception as e:
-                    logger.error(f"[KalshiBroker] log_trade exit error: {e}")
+                result = self._apply_exit_fill(
+                    ticker=local_symbol,
+                    fallback_right=right,
+                    requested_qty=qty,
+                    order_info=order_info,
+                    order_type="Market",
+                    default_side=side.upper(),
+                    reason=kwargs.get("reason", "salvage_exit"),
+                    strategy=kwargs.get("strategy", "forecast_exit"),
+                )
+                exit_price = result["exit_price"]
+                pnl_usd = result["pnl_usd"]
+                filled_qty = result["filled_qty"]
+                remaining_qty = result["remaining_position_qty"]
             else:
                 exit_price = 0.0
                 pnl_usd = 0.0
+                filled_qty = 0
+                remaining_qty = float(qty)
 
         except Exception as e:
             logger.error(f"[KalshiBroker] Fatal exception during flatten: {e}")
@@ -849,6 +896,8 @@ class KalshiBroker:
             "exit_price": exit_price,
             "entry_price": entry_price,
             "pnl_usd": pnl_usd,
+            "filled_qty": filled_qty if "filled_qty" in locals() else 0,
+            "remaining_position_qty": remaining_qty if "remaining_qty" in locals() else float(qty),
         }
 
     def get_position(self, local_symbol: str, right: str) -> Optional[dict]:

@@ -176,6 +176,15 @@ KALSHI_EXIT_TIME_DECAY_HOURS: float = float(
 KALSHI_EXIT_TIME_DECAY_BID_FLOOR: float = float(
     os.getenv("KALSHI_EXIT_TIME_DECAY_BID_FLOOR", "0.70")
 )
+KALSHI_EXPENSIVE_YES_THRESHOLD: float = float(
+    os.getenv("KALSHI_EXPENSIVE_YES_THRESHOLD", "0.70")
+)
+KALSHI_EXPENSIVE_YES_MIN_NET_EDGE: float = float(
+    os.getenv("KALSHI_EXPENSIVE_YES_MIN_NET_EDGE", "0.08")
+)
+KALSHI_EXPENSIVE_YES_SIZE_MULTIPLIER: float = float(
+    os.getenv("KALSHI_EXPENSIVE_YES_SIZE_MULTIPLIER", "0.75")
+)
 
 # ════════════════════════════════════════════════════════════════════
 # TELEGRAM (Mobile HUD)

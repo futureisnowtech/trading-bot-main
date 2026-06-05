@@ -418,6 +418,7 @@ def run_execution_cycle(
             connected = bool(broker.connect())
         except Exception as exc:
             logger.error("[ForecastRunner] Broker bootstrap failed: %s", exc)
+            log_event("ERROR", "ForecastRunner", f"Broker bootstrap failed: {exc}")
             connected = False
 
     discovery = run_discovery_cycle()
@@ -897,12 +898,39 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                             entry_result.get("execution_reason"),
                         )
                         if entry_result.get("status") == "too_many_requests":
+                            try:
+                                from notifications.notification_engine import notify_system
+
+                                notify_system(
+                                    title="Kalshi API rate limit hit",
+                                    detail=(
+                                        f"{contract.get('local_symbol')} blocked after "
+                                        f"{entry_result.get('status')} "
+                                        f"({entry_result.get('execution_reason')})"
+                                    ),
+                                    severity="WARNING",
+                                    telegram=True,
+                                    data={"ticker": contract.get("local_symbol", "")},
+                                )
+                            except Exception:
+                                logger.exception("Rate-limit notification failed")
                             logger.warning(
                                 "[ForecastRunner] Kalshi rate limit hit after %s; halting new entries until next cycle.",
                                 contract.get("local_symbol"),
                             )
                             break
                         if entry_result.get("status") == "rate_limit_cooldown":
+                            try:
+                                from notifications.notification_engine import notify_system
+
+                                notify_system(
+                                    title="Kalshi local cooldown active",
+                                    detail="Execution controller paused new entries after a recent rate-limit event.",
+                                    severity="WARNING",
+                                    telegram=True,
+                                )
+                            except Exception:
+                                logger.exception("Cooldown notification failed")
                             logger.warning(
                                 "[ForecastRunner] Local rate-limit cooldown active; halting new entries until next cycle."
                             )
@@ -946,6 +974,7 @@ def run_position_monitor() -> None:
         from forecast.db import (
             get_open_forecast_positions,
             reconcile_forecast_positions,
+            sync_open_forecast_position,
         )
 
         recon = reconcile_forecast_positions(broker_positions, db_path=db_path)
@@ -1262,10 +1291,12 @@ def run_position_monitor() -> None:
                     current_bid = float(quote.get(bid_key, 0) or 0)
                     current_bid_vol = int(quote.get(bid_vol_key, 0) or 0)
 
-                    if current_bid > 0.01 and current_bid_vol >= qty:
+                    executable_exit_qty = min(int(qty or 0), max(0, int(current_bid_vol or 0)))
+
+                    if current_bid > 0.01 and executable_exit_qty >= int(qty or 0):
                         flatten_res = broker.place_sell_order(
                             contract_dict={"local_symbol": local_symbol},
-                            qty=qty,
+                            qty=executable_exit_qty,
                             limit_price=current_bid,
                             type="limit",
                             side="yes" if right == "C" else "no",
@@ -1282,23 +1313,64 @@ def run_position_monitor() -> None:
                                 qty,
                                 reason="limit_unfilled_market_fallback",
                             )
+                    elif current_bid > 0.01 and executable_exit_qty > 0:
+                        logger.info(
+                            "Exit for %s is depth-capped: bid=%.2f visible=%s held=%s. "
+                            "Submitting partial limit exit.",
+                            local_symbol,
+                            current_bid,
+                            executable_exit_qty,
+                            qty,
+                        )
+                        flatten_res = broker.place_sell_order(
+                            contract_dict={"local_symbol": local_symbol},
+                            qty=executable_exit_qty,
+                            limit_price=current_bid,
+                            type="limit",
+                            side="yes" if right == "C" else "no",
+                            reason="partial_sovereign_exit_limit",
+                        )
                     else:
                         logger.warning(
                             f"Exit limit degraded for {local_symbol}: "
                             f"bid={current_bid:.2f} bid_vol={current_bid_vol} qty={qty}. "
-                            "Falling back to market."
+                            "Deferring exit until real liquidity returns."
                         )
-                        flatten_res = broker.flatten_position(
-                            local_symbol,
-                            right,
-                            qty,
-                            reason="illiquid_limit_market_fallback",
+                        log_event(
+                            "WARNING",
+                            "ForecastRunner",
+                            (
+                                f"[ForecastRunner] {local_symbol} illiquid_exit_deferred: "
+                                f"bid={current_bid:.2f} bid_vol={current_bid_vol} qty={qty}"
+                            ),
                         )
+                        continue
 
                     if flatten_res.get("status") != "executed":
                         logger.warning(
                             f"Exit still pending for {local_symbol}; leaving position open "
                             f"(status={flatten_res.get('status')})."
+                        )
+                        continue
+
+                    filled_qty = float(flatten_res.get("filled_qty") or qty or 0)
+                    remaining_qty = float(flatten_res.get("remaining_position_qty") or 0.0)
+
+                    if remaining_qty > 0:
+                        sync_open_forecast_position(
+                            ticker=local_symbol,
+                            qty=remaining_qty,
+                            entry_price=float(pos.get("entry_price") or pos.get("entry") or 0.0),
+                            side="YES" if right == "C" else "NO",
+                            db_path=db_path,
+                        )
+                        log_event(
+                            "INFO",
+                            "ForecastRunner",
+                            (
+                                f"[ForecastRunner] {local_symbol} partial_exit_filled: "
+                                f"filled={filled_qty:g} remaining={remaining_qty:g}"
+                            ),
                         )
                         continue
 
@@ -1314,7 +1386,11 @@ def run_position_monitor() -> None:
                             from notifications.notification_engine import notify_trade_close
                             pnl_usd = flatten_res.get("pnl_usd", 0.0)
                             entry_price = flatten_res.get("entry_price", 0.0)
-                            pnl_pct = (pnl_usd / (entry_price * qty)) if (entry_price > 0 and qty > 0) else 0.0
+                            pnl_pct = (
+                                pnl_usd / (entry_price * filled_qty)
+                                if (entry_price > 0 and filled_qty > 0)
+                                else 0.0
+                            )
                             
                             notify_trade_close(
                                 symbol=local_symbol,

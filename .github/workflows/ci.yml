@@ -15,10 +15,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v5
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5.4.0
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: "pip"
@@ -40,6 +40,8 @@ jobs:
           TELEGRAM_CHAT_ID=123456
           GOOGLE_API_KEY=test_google_key
           EOF
+          : > kalshi_private_key.pem
+          chmod 600 kalshi_private_key.pem
 
       - name: Lint with ruff (non-blocking)
         run: |

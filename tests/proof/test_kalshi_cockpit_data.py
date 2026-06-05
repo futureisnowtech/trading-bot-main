@@ -63,3 +63,34 @@ def test_build_regime_manifest_surfaces_live_constants():
     assert "60% GFS + 40% ECMWF" in manifest["ensemble_blend"]
     assert any("0.85" in line for line in manifest["exit_stack"])
     assert any("$40.00" in line for line in manifest["entry_gates"])
+
+
+def test_load_deploy_metadata_prefers_runtime_dir(tmp_path, monkeypatch):
+    import json
+    import dashboard.cockpit_data as cd
+
+    runtime_dir = tmp_path / "runtime"
+    root_dir = tmp_path / "root"
+    runtime_dir.mkdir()
+    root_dir.mkdir()
+
+    (runtime_dir / "deploy_manifest.json").write_text(
+        json.dumps({"sha": "runtime-sha", "cockpit_url": "http://example"}),
+        encoding="utf-8",
+    )
+    (runtime_dir / "version.txt").write_text(
+        "sha=runtime-sha\nbranch=master\ndeployed_at_utc=2026-06-05T00:00:00Z\n",
+        encoding="utf-8",
+    )
+    (root_dir / "deploy_manifest.json").write_text(
+        json.dumps({"sha": "root-sha"}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(cd, "_RUNTIME_DIR", runtime_dir)
+    monkeypatch.setattr(cd, "_ROOT", root_dir)
+
+    payload = cd._load_deploy_metadata()
+
+    assert payload["sha"] == "runtime-sha"
+    assert payload["branch"] == "master"

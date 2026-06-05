@@ -217,6 +217,9 @@ branch=${BRANCH}
 deployed_at_utc=${DEPLOY_UTC}
 VTXT
 
+mkdir -p ${PROJECT_DIR}/logs
+cp ${PROJECT_DIR}/version.txt ${PROJECT_DIR}/logs/version.txt
+
 python3 - << PYEOF
 import json
 manifest = {
@@ -227,6 +230,8 @@ manifest = {
     "cockpit_url": "http://64.225.20.38:8501",
 }
 with open("${PROJECT_DIR}/deploy_manifest.json", "w") as f:
+    json.dump(manifest, f, indent=2)
+with open("${PROJECT_DIR}/logs/deploy_manifest.json", "w") as f:
     json.dump(manifest, f, indent=2)
 print("  deploy_manifest.json written.")
 PYEOF

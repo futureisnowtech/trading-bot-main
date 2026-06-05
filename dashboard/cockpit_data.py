@@ -40,6 +40,7 @@ from runtime.operator_truth import get_live_kalshi_status, get_recent_veto_summa
 from runtime.storage_guard import runtime_storage_status
 
 _ROOT = Path(__file__).resolve().parents[1]
+_RUNTIME_DIR = Path(DB_PATH).resolve().parent
 
 
 def _connect() -> sqlite3.Connection:
@@ -108,25 +109,35 @@ def _file_size_mb(path: str) -> float:
 
 
 def _load_deploy_metadata() -> dict[str, Any]:
-    manifest_path = _ROOT / "deploy_manifest.json"
-    version_path = _ROOT / "version.txt"
+    manifest_candidates = [
+        _RUNTIME_DIR / "deploy_manifest.json",
+        _ROOT / "deploy_manifest.json",
+    ]
+    version_candidates = [
+        _RUNTIME_DIR / "version.txt",
+        _ROOT / "version.txt",
+    ]
     payload: dict[str, Any] = {}
 
-    if manifest_path.exists():
-        try:
-            payload.update(json.loads(manifest_path.read_text(encoding="utf-8")))
-        except Exception:
-            pass
+    for manifest_path in manifest_candidates:
+        if manifest_path.exists():
+            try:
+                payload.update(json.loads(manifest_path.read_text(encoding="utf-8")))
+                break
+            except Exception:
+                continue
 
-    if version_path.exists():
-        try:
-            for line in version_path.read_text(encoding="utf-8").splitlines():
-                if "=" not in line:
-                    continue
-                key, value = line.split("=", 1)
-                payload.setdefault(key.strip(), value.strip())
-        except Exception:
-            pass
+    for version_path in version_candidates:
+        if version_path.exists():
+            try:
+                for line in version_path.read_text(encoding="utf-8").splitlines():
+                    if "=" not in line:
+                        continue
+                    key, value = line.split("=", 1)
+                    payload.setdefault(key.strip(), value.strip())
+                break
+            except Exception:
+                continue
 
     return payload
 

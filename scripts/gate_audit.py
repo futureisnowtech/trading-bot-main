@@ -25,9 +25,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from config import DB_PATH
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
-DEFAULT_DB_PATH = REPO_ROOT / "logs" / "trades.db"
+DEFAULT_DB_PATH = Path(DB_PATH)
 
 VETO_RE = re.compile(r"\[ForecastRunner\]\s+(?P<ticker>\S+)\s+vetoed:\s+(?P<reason>.+)")
 SHADOW_RE = re.compile(r"SHADOW MODE: Blocked POST .* body=(?P<body>\{.*\})")

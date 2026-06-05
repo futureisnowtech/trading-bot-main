@@ -15,6 +15,7 @@ from config import (
 )
 from data.kalshi_weather_monitor import start_weather_monitor
 from forecast.runner import run_execution_cycle
+from runtime.storage_guard import runtime_storage_status
 
 
 logging.basicConfig(
@@ -48,8 +49,18 @@ def main() -> int:
         while True:
             cycle_started = time.time()
             try:
-                summary = run_execution_cycle(bankroll=bankroll)
-                logger.info("Execution cycle complete: %s", summary)
+                storage = runtime_storage_status()
+                if not storage["ok"]:
+                    logger.error(
+                        "Low disk headroom: %.0fMB free at %s (threshold=%.0fMB). "
+                        "Skipping execution cycle.",
+                        storage["free_mb"],
+                        storage["path"],
+                        storage["threshold_mb"],
+                    )
+                else:
+                    summary = run_execution_cycle(bankroll=bankroll)
+                    logger.info("Execution cycle complete: %s", summary)
             except Exception:
                 logger.exception("Execution cycle failed")
 

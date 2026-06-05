@@ -163,6 +163,7 @@ class QuoteHarvester:
     def run_once(self) -> None:
         """Execute a single poll/build cycle without starting the daemon thread."""
         self._poll_and_build()
+        self._maybe_prune_retention()
 
     def backfill_bars(self, contract_id: int, ticker: str) -> None:
         """v18.34: Backfill historical candles from broker to populate technical indicators."""
@@ -192,20 +193,30 @@ class QuoteHarvester:
         while self._running:
             try:
                 self._poll_and_build()
-                
-                # Prune once per hour
-                if time.time() - self._last_prune > PRUNE_INTERVAL_MIN * 60:
-                    from forecast.db import prune_old_bars
-                    count = prune_old_bars(db_path=self._db_path)
-                    if count > 0:
-                        logger.info(f"[QuoteHarvester] Pruned {count} old bars")
-                    self._last_prune = time.time()
+                self._maybe_prune_retention()
 
             except Exception as e:
                 logger.error(f"[QuoteHarvester] Loop error: {e}")
                 logger.error(traceback.format_exc())
 
             time.sleep(self._poll_sec)
+
+    def _maybe_prune_retention(self) -> None:
+        """Bound quote/bar growth in both threaded and one-shot lean modes."""
+        if time.time() - self._last_prune <= PRUNE_INTERVAL_MIN * 60:
+            return
+
+        from forecast.db import prune_old_bars, prune_old_quotes
+
+        deleted_quotes = prune_old_quotes(db_path=self._db_path)
+        deleted_bars = prune_old_bars(db_path=self._db_path)
+        if deleted_quotes or deleted_bars:
+            logger.info(
+                "[QuoteHarvester] Pruned %s old quotes and %s old bars",
+                deleted_quotes,
+                deleted_bars,
+            )
+        self._last_prune = time.time()
 
     def _poll_and_build(self) -> None:
         """

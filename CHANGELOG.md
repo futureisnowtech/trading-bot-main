@@ -1,6 +1,8 @@
 # CHANGELOG
 
 ## 2026-06-04
+- Made runtime state storage-safe on constrained machines by adding an env-driven runtime root (`ALGO_RUNTIME_DIR` / `DB_PATH` family), low-disk headroom checks for health/preflight and execution entrypoints, and path unification across runtime DB/log consumers.
+- Extended quote/bar retention pruning into the lean one-pass daemon path so `execution_daemon.py` no longer relies on the legacy scheduled loop to bound local SQLite growth.
 - Restored broker-truth cost basis handling for live Kalshi fills by hydrating executed orders for actual fill price and fees, and by deriving synced position entry prices from Kalshi `total_traded_dollars / position_fp`.
 - Fixed live Kalshi entry execution by converting taker-override "market" intents into legal marketable limit orders with hard `buy_max_cost` caps, surfacing broker rate-limit codes back to the runner, and syncing broker positions before strategy/monitor passes.
 - Fixed a live trade blocker in `forecast.strategy_engine._hours_to_resolution()`: ISO Kalshi expiry timestamps were being parsed as `0.0` hours remaining, falsely triggering `RESOLUTION_HORIZON_TOO_SHORT` on otherwise valid weather setups.

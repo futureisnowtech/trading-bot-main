@@ -8,8 +8,8 @@ import sys
 from datetime import datetime
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(_ROOT, "logs", "trades.db")
-LOG_PATH = os.path.join(_ROOT, "logs", "bot.log")
+from config import BOT_LOG_PATH as LOG_PATH
+from config import DB_PATH
 
 def get_conn() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)

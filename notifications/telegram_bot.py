@@ -22,7 +22,7 @@ from telegram.ext import (
 from telegram.constants import ParseMode, ChatAction
 
 import system_state
-from config import DB_PATH, REPO_ROOT, TELEGRAM_CHAT_ID
+from config import BOT_LOG_PATH, DB_PATH, REPO_ROOT, TELEGRAM_CHAT_ID
 from notifications.ai_agent import ask_ai
 from notifications import sovereign_mobile_hud as hud
 
@@ -304,7 +304,7 @@ async def hud_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @restricted_access
 async def logs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        log_path = os.path.join(REPO_ROOT, "logs", "bot.log")
+        log_path = BOT_LOG_PATH
         if not os.path.exists(log_path):
             await _reply_text(update, "Log file not found.")
             return

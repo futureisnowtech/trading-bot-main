@@ -219,7 +219,7 @@ def run_execution_cycle(
       6. Resolution sync / cache refresh / optional RBI
     """
     from forecast.db import init_forecast_db
-    from config import FORECAST_LANE_ACTIVE, KALSHI_ENABLED
+    from config import DB_PATH, FORECAST_LANE_ACTIVE, KALSHI_ENABLED
 
     if not KALSHI_ENABLED:
         logger.warning("[ForecastRunner] Kalshi lane disabled. Skipping execution cycle.")
@@ -241,7 +241,7 @@ def run_execution_cycle(
             "skipped_reason": "forecast_lane_inactive",
         }
 
-    db_path = os.path.join(_ROOT, "logs", "trades.db")
+    db_path = DB_PATH
     init_forecast_db(db_path=db_path)
 
     broker = _get_broker()
@@ -679,7 +679,9 @@ def run_position_monitor() -> None:
         broker_tickers = {p["local_symbol"] for p in broker_positions if p.get("qty", 0) > 0}
         
         # 2. Pull Local DB Expectation
-        db_path = os.path.join(_ROOT, "logs", "trades.db")
+        from config import DB_PATH
+
+        db_path = DB_PATH
         from forecast.db import get_open_forecast_positions, mark_forecast_position_closed
         db_positions = get_open_forecast_positions(db_path=db_path)
 
@@ -1253,15 +1255,14 @@ def stop_forecast_lane() -> None:
 
 if __name__ == "__main__":
     import schedule
+    from config import FORECAST_LOG_PATH
 
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
         handlers=[
             logging.StreamHandler(),
-            logging.FileHandler(
-                os.path.join(_ROOT, "logs", "forecast.log"), encoding="utf-8"
-            ),
+            logging.FileHandler(FORECAST_LOG_PATH, encoding="utf-8"),
         ],
     )
     start_forecast_lane(bankroll=100.0)

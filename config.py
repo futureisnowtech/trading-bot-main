@@ -39,6 +39,20 @@ _ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = _ROOT_DIR
 
 
+def _resolve_runtime_root() -> str:
+    raw_value = os.getenv("ALGO_RUNTIME_DIR", "").strip()
+    if not raw_value:
+        return os.path.join(REPO_ROOT, "logs")
+
+    path = Path(raw_value).expanduser()
+    if not path.is_absolute():
+        path = Path(REPO_ROOT) / path
+    return str(path)
+
+
+RUNTIME_ROOT: str = _resolve_runtime_root()
+
+
 def resolve_runtime_path(raw_path: str, *fallbacks: str) -> str:
     """Resolve a runtime path across host and container environments."""
     raw_value = (raw_path or "").strip()
@@ -74,6 +88,17 @@ def get_kalshi_private_key_path() -> str:
         "/run/secrets/kalshi_private_key.pem",
         os.path.join(REPO_ROOT, "kalshi_private_key.pem"),
     )
+
+
+def _resolve_runtime_child(env_key: str, default_name: str) -> str:
+    raw_value = os.getenv(env_key, "").strip()
+    if not raw_value:
+        return str(Path(RUNTIME_ROOT) / default_name)
+
+    path = Path(raw_value).expanduser()
+    if not path.is_absolute():
+        path = Path(RUNTIME_ROOT) / path
+    return str(path)
 
 # ════════════════════════════════════════════════════════════════════
 # SYSTEM MODE
@@ -161,8 +186,14 @@ UPTIME_PING_URL: str = os.getenv("UPTIME_PING_URL", "")
 # DATABASE & LOGGING
 # ════════════════════════════════════════════════════════════════════
 DB_USE_POSTGRES: bool = os.getenv("DB_USE_POSTGRES", "false").lower() == "true"
-DB_PATH: str = os.path.join(_ROOT_DIR, "logs", "trades.db")
-CSV_LOG_DIR: str = os.path.join(_ROOT_DIR, "logs", "csv")
+DB_PATH: str = _resolve_runtime_child("DB_PATH", "trades.db")
+CSV_LOG_DIR: str = _resolve_runtime_child("CSV_LOG_DIR", "csv")
+BOT_LOG_PATH: str = _resolve_runtime_child("BOT_LOG_PATH", "bot.log")
+FORECAST_LOG_PATH: str = _resolve_runtime_child("FORECAST_LOG_PATH", "forecast.log")
+MACRO_CACHE_FILE: str = _resolve_runtime_child(
+    "MACRO_CACHE_FILE", "cached_macro_regime.json"
+)
+MIN_FREE_DISK_MB: int = int(os.getenv("MIN_FREE_DISK_MB", "2048"))
 LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
 MARKET_TIMEZONE: str = "America/New_York"
 

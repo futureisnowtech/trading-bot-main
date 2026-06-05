@@ -56,6 +56,7 @@ except ImportError:
     fail("python-dotenv not installed")
 
 import config as cfg
+from runtime.storage_guard import runtime_storage_status
 
 required_env = [
     "KALSHI_API_KEY_ID",
@@ -178,12 +179,27 @@ for module, message in optional_imports:
 
 
 print("\n--- Filesystem ---")
-logs_dir = _REPO_ROOT / "logs"
+logs_dir = Path(cfg.DB_PATH).parent
 try:
-    logs_dir.mkdir(exist_ok=True)
-    ok(f"logs dir ready: {logs_dir}")
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    ok(f"runtime dir ready: {logs_dir}")
 except Exception as exc:
-    fail(f"Cannot create logs dir: {exc}")
+    fail(f"Cannot create runtime dir: {exc}")
+
+try:
+    storage = runtime_storage_status()
+    if storage["ok"]:
+        ok(
+            f"disk headroom healthy: {storage['free_mb']:.0f}MB free "
+            f"(threshold={storage['threshold_mb']:.0f}MB)"
+        )
+    else:
+        warn(
+            f"low disk headroom: {storage['free_mb']:.0f}MB free at {storage['path']} "
+            f"(threshold={storage['threshold_mb']:.0f}MB)"
+        )
+except Exception as exc:
+    warn(f"disk headroom check skipped: {exc}")
 
 verify_script = _REPO_ROOT / "scripts" / "verify_kalshi_connection.py"
 if verify_script.exists():

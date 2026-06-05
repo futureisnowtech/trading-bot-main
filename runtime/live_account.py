@@ -17,10 +17,7 @@ def _db_path() -> str:
     try:
         from config import DB_PATH
 
-        if os.path.isabs(DB_PATH):
-            return DB_PATH
-        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        return os.path.join(root, DB_PATH)
+        return DB_PATH
     except Exception:
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         return os.path.join(root, "logs", "trades.db")

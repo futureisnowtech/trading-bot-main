@@ -16,11 +16,11 @@ import threading
 import logging
 from typing import Optional
 
+from config import BOT_LOG_PATH
+
 logger = logging.getLogger(__name__)
 
-LOG_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs", "bot.log"
-)
+LOG_PATH = BOT_LOG_PATH
 
 ALERT_NAMESPACES = [
     "forecast",

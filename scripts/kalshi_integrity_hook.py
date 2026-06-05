@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 # Ensure we can import from the project root
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from config import DB_PATH
 from execution.kalshi_broker import get_kalshi_broker
 
 # Setup logging
@@ -69,7 +70,7 @@ def check_orderbook_sanity(broker):
 def check_data_freshness():
     logger.info("Pillar 3: Checking Data Pipeline Freshness...")
     try:
-        db_path = "logs/trades.db"
+        db_path = DB_PATH
         if not os.path.exists(db_path):
             logger.warning(f"  [WARN] Database {db_path} not found. Skipping freshness check.")
             return True

@@ -7,6 +7,7 @@ import sqlite3
 from pathlib import Path
 
 from config import DB_PATH, get_kalshi_private_key_path
+from runtime.storage_guard import runtime_storage_status
 
 
 def _connect() -> sqlite3.Connection:
@@ -23,6 +24,18 @@ def _check_sqlite() -> dict:
         return {"name": "sqlite", "ok": True, "detail": "reachable"}
     except Exception as exc:
         return {"name": "sqlite", "ok": False, "detail": str(exc)}
+
+
+def _check_disk_headroom() -> dict:
+    try:
+        status = runtime_storage_status(path=os.path.dirname(DB_PATH) or ".")
+        detail = (
+            f"{status['free_mb']:.0f}MB free at {status['path']} "
+            f"(threshold={status['threshold_mb']:.0f}MB)"
+        )
+        return {"name": "disk_headroom", "ok": status["ok"], "detail": detail}
+    except Exception as exc:
+        return {"name": "disk_headroom", "ok": False, "detail": str(exc)}
 
 
 def _check_kalshi_credentials() -> dict:
@@ -85,6 +98,7 @@ def _check_error_rate(lookback_minutes: int = 60, unhealthy_threshold: int = 10)
 
 def run_health_check(force: bool = False) -> dict:
     checks = [
+        _check_disk_headroom(),
         _check_sqlite(),
         _check_error_rate(),
         _check_kalshi_credentials(),

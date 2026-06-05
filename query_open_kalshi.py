@@ -1,8 +1,7 @@
 
 import sqlite3
-import os
 
-DB_PATH = "logs/trades.db"
+from config import DB_PATH
 
 def query_open_kalshi():
     conn = sqlite3.connect(DB_PATH)

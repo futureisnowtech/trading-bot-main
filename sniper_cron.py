@@ -12,6 +12,7 @@ from config import (
     KALSHI_ENABLED,
 )
 from forecast.runner import run_execution_cycle
+from runtime.storage_guard import runtime_storage_status
 
 
 logging.basicConfig(
@@ -31,6 +32,17 @@ def main() -> int:
 
     if not FORECAST_AUTONOMOUS_ENABLED:
         logging.warning("Autonomous forecast trading disabled. Exiting cleanly.")
+        return 0
+
+    storage = runtime_storage_status()
+    if not storage["ok"]:
+        logging.error(
+            "Low disk headroom: %.0fMB free at %s (threshold=%.0fMB). "
+            "Skipping sniper cycle.",
+            storage["free_mb"],
+            storage["path"],
+            storage["threshold_mb"],
+        )
         return 0
 
     summary = run_execution_cycle(bankroll=float(ACCOUNT_SIZE))

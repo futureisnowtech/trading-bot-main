@@ -122,14 +122,14 @@ docker ps | grep telegram-oracle
 echo "  Verifying forecast lane readiness..."
 VERIFY_OK=0
 for attempt in \$(seq 1 18); do
-    if STATE_JSON=\$(python3 - << 'PYEOF'
+if STATE_JSON=\$(python3 - << 'PYEOF'
 import json
 import sqlite3
 import sys
+from config import DB_PATH
 
-db_path = "/home/algo-runner/bot/logs/trades.db"
 try:
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     row = conn.execute(
         """

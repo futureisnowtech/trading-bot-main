@@ -14,12 +14,15 @@ import json
 import sqlite3
 from typing import Optional, List
 
+from config import DB_PATH
+
 logger = logging.getLogger(__name__)
 
 def execute_sql(query: str) -> str:
     """
     Safe, read-only SQL execution for the AI agent.
-    Targets logs/trades.db. Available tables: forecast_positions, trades, system_events, api_costs, forecast_markets.
+    Targets the active runtime DB. Available tables: forecast_positions, trades,
+    system_events, api_costs, forecast_markets.
     """
     q_upper = query.strip().upper()
     if not q_upper.startswith("SELECT"):
@@ -30,8 +33,7 @@ def execute_sql(query: str) -> str:
         return "Error: Data modification or structural changes are strictly forbidden."
 
     try:
-        db_path = os.path.join(os.getcwd(), "logs", "trades.db")
-        with sqlite3.connect(db_path) as conn:
+        with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             conn.execute("PRAGMA query_only = ON")
             rows = conn.execute(query).fetchall()

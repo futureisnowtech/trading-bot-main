@@ -32,6 +32,7 @@ import numpy as np
 
 from config import (
     DB_PATH,
+    MACRO_CACHE_FILE,
     KALSHI_FEE_BUFFER,
     KALSHI_KELLY_CAP,
     KALSHI_MAX_CONCURRENT_POSITIONS,
@@ -138,9 +139,6 @@ _HARD_ECON_VETO_PREFIXES: tuple[str, ...] = (
     "fee_drag_veto",
     "longshot_bias_gate",
 )
-
-MACRO_CACHE_FILE = "logs/cached_macro_regime.json"
-
 
 def _get_macro_context() -> dict:
     """Read v18.34 macro cache."""

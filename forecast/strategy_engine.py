@@ -71,6 +71,11 @@ from forecast.primitives import (
     velocity,
     z_score,
 )
+from forecast.weather_contracts import (
+    probability_from_members,
+    resolve_weather_contract,
+    weather_mode_for_ticker,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -735,7 +740,12 @@ def _parse_weather_threshold(ticker: str) -> Optional[float]:
     return None
 
 def _strategy_weather_details(
-    ticker: str, ask_yes: float, ask_no: float, hours_to_res: float
+    ticker: str,
+    ask_yes: float,
+    ask_no: float,
+    hours_to_res: float,
+    contract_name: str = "",
+    strike: float | None = None,
 ) -> tuple[bool, str, float, list[str], bool, float, int, float]:
     """
     v19.1.10: Sovereign Alpha Blueprint.
@@ -752,11 +762,26 @@ def _strategy_weather_details(
             logger.info(f"TRACE: No weather data for {ticker}")
         return False, "", 0.0, ["no_weather_ensemble_data"], False, 1.0, 3, 0.05
 
-    threshold = _parse_weather_threshold(ticker)
-    if threshold is None:
-        return False, "", 0.0, [f"unparseable_ticker_threshold: {ticker}"], False, 1.0, 3, 0.05
+    semantics = resolve_weather_contract(
+        ticker=ticker,
+        contract_name=contract_name,
+        strike=strike,
+    )
+    if semantics is None:
+        return False, "", 0.0, [f"unsupported_weather_contract: {ticker}"], False, 1.0, 3, 0.05
+    if semantics.ambiguous:
+        return (
+            False,
+            "",
+            0.0,
+            [f"ambiguous_weather_contract_semantics ({ticker})"],
+            False,
+            1.0,
+            3,
+            0.05,
+        )
 
-    mode = "HIGH" if "HIGH" in ticker else "LOW" if "LOW" in ticker else "RAIN" if "RAIN" in ticker else "SNOW" if "SNOW" in ticker else "WIND" if "WIND" in ticker else "TEMP"
+    mode = semantics.mode
     
     # ── Phase 1: GFS Analysis (Primary Trigger) ─────────────────────────────
     # v19.9: Route to precip/wind data if ticker type matches
@@ -765,22 +790,9 @@ def _strategy_weather_details(
     else:
         members_gfs = w_data.get("members_high" if mode == "HIGH" else "members_low", [])
     if not members_gfs: return False, "", 0.0, ["missing_gfs_members"], False, 1.0, 3, 0.05
-    
-    # v19.8: Precision Epsilon (0.05F) to account for float noise in conversion
-    def _count_success(m_list, thresh, mode_type):
-        if mode_type == "HIGH":
-            return sum(1 for m in m_list if m >= (thresh - 0.05))
-        elif mode_type == "LOW":
-            return sum(1 for m in m_list if m <= (thresh + 0.05))
-        elif mode_type in ["RAIN", "SNOW"]:
-            # Rain/Snow usually "Will there be > X inches"
-            return sum(1 for m in m_list if m > thresh)
-        else:
-            # Default to "greater than" for wind/temp-at-hour
-            return sum(1 for m in m_list if m >= thresh)
-
-    success_count_gfs = _count_success(members_gfs, threshold, mode)
-    prob_gfs = success_count_gfs / len(members_gfs)
+    prob_gfs = probability_from_members(members_gfs, semantics)
+    if prob_gfs is None:
+        return False, "", 0.0, ["missing_gfs_members"], False, 1.0, 3, 0.05
     
     # ── Phase 2: ECMWF Analysis (Convergence Anchor) ────────────────────────
     ecmwf_data = w_data.get("ecmwf")
@@ -793,8 +805,7 @@ def _strategy_weather_details(
             members_ec = ecmwf_data.get("members_high" if mode == "HIGH" else "members_low", [])
             
         if members_ec:
-            success_count_ec = _count_success(members_ec, threshold, mode)
-            prob_ecmwf = success_count_ec / len(members_ec)
+            prob_ecmwf = probability_from_members(members_ec, semantics)
 
     # ── Phase 3: AI/GraphCast Analysis (Sovereign Sigma Scaler) ────────────
     # v19.8: Move AI from Prob Blend to Sigma Scaler (Bayesian Confirmer)
@@ -910,13 +921,13 @@ def _strategy_weather_details(
     cloud_veto = (mode == "HIGH") and (peak_tcdc > 65.0)
 
     # v19.1.9: Narrow Bin Veto
-    if "-B" in ticker:
-        if mode != "RAIN" and edge_yes < 0.25:
+    if semantics.comparator == "between":
+        if mode != "RAIN" and max(edge_yes, edge_no) < 0.25:
              return (
                  False,
                  "",
                  0.0,
-                 [f"narrow_bin_trap_edge_too_low ({edge_yes:.2f})"],
+                 [f"narrow_bin_trap_edge_too_low ({max(edge_yes, edge_no):.2f})"],
                  False,
                  1.0,
                  3,
@@ -984,7 +995,12 @@ def _strategy_weather_details(
 
 
 def _strategy_weather(
-    ticker: str, ask_yes: float, ask_no: float, hours_to_res: float
+    ticker: str,
+    ask_yes: float,
+    ask_no: float,
+    hours_to_res: float,
+    contract_name: str = "",
+    strike: float | None = None,
 ) -> tuple[bool, str, float, list[str], bool]:
     """
     Legacy five-field wrapper kept for proof compatibility.
@@ -992,7 +1008,14 @@ def _strategy_weather(
     Runtime sizing and tier metadata now live in ``_strategy_weather_details``.
     """
     passes, side, ensemble_prob, factors, is_taker, sizing_multiplier, _tier, _cap = (
-        _strategy_weather_details(ticker, ask_yes, ask_no, hours_to_res)
+        _strategy_weather_details(
+            ticker,
+            ask_yes,
+            ask_no,
+            hours_to_res,
+            contract_name=contract_name,
+            strike=strike,
+        )
     )
     legacy_confidence = ensemble_prob * sizing_multiplier if passes else 0.0
     return passes, side, legacy_confidence, factors, is_taker
@@ -1202,7 +1225,14 @@ def evaluate_contract(
 
     # v18.35: Weather Strategy (Ensemble-driven)
     ticker = contract.get("local_symbol", "")
-    w_res = _strategy_weather_details(ticker, ask_yes, ask_no, hours_to_res)
+    w_res = _strategy_weather_details(
+        ticker,
+        ask_yes,
+        ask_no,
+        hours_to_res,
+        contract_name=str(contract.get("contract_name") or ""),
+        strike=float(contract.get("strike") or 0.0),
+    )
     if w_res[0]: # w_passes
         # w_res = (passes, side, ensemble_prob, factors, is_taker, multiplier, tier, sizing_cap)
         strategy_candidates.append(("weather_ensemble", w_res[1], w_res[2], w_res[3], w_res[4], w_res[5], w_res[6], w_res[7]))

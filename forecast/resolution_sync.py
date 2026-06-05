@@ -14,8 +14,8 @@ from datetime import datetime, timezone
 import pytz
 
 from config import DB_PATH
-from forecast.db import insert_resolution
-from forecast.strategy_engine import _parse_weather_threshold
+from forecast.db import init_forecast_db, insert_resolution
+from forecast.weather_contracts import resolve_weather_observation
 
 logger = logging.getLogger(__name__)
 
@@ -78,27 +78,17 @@ def determine_weather_resolution(
     ticker: str,
     observed_high: float | None,
     observed_low: float | None,
+    contract_name: str = "",
+    strike: float | None = None,
 ) -> tuple[str, float, str] | None:
     """Return (resolved_side, resolved_value, notes) for supported contracts."""
-    symbol = (ticker or "").upper()
-    if "-B" in symbol:
-        return None
-
-    threshold = _parse_weather_threshold(symbol)
-    if threshold is None:
-        return None
-
-    if "HIGH" in symbol and observed_high is not None:
-        side = "YES" if float(observed_high) >= threshold else "NO"
-        notes = f"daily_max={float(observed_high):.2f} threshold={threshold:.2f}"
-        return side, float(observed_high), notes
-
-    if "LOW" in symbol and observed_low is not None:
-        side = "YES" if float(observed_low) <= threshold else "NO"
-        notes = f"daily_min={float(observed_low):.2f} threshold={threshold:.2f}"
-        return side, float(observed_low), notes
-
-    return None
+    return resolve_weather_observation(
+        ticker=ticker,
+        observed_high=observed_high,
+        observed_low=observed_low,
+        contract_name=contract_name,
+        strike=strike,
+    )
 
 
 def sync_forecast_resolutions(
@@ -120,11 +110,17 @@ def sync_forecast_resolutions(
         "skipped_no_ground_truth": 0,
     }
 
+    init_forecast_db(db_path=db_path)
+
     with sqlite3.connect(db_path) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             """
-            SELECT c.id, c.local_symbol, COALESCE(c.resolution_at, c.last_trade_at) AS resolution_key
+            SELECT c.id,
+                   c.local_symbol,
+                   c.contract_name,
+                   c.strike,
+                   COALESCE(c.resolution_at, c.last_trade_at) AS resolution_key
             FROM forecast_contracts c
             LEFT JOIN forecast_resolutions r ON r.contract_id = c.id
             WHERE r.id IS NULL
@@ -150,6 +146,8 @@ def sync_forecast_resolutions(
             ticker=ticker,
             observed_high=intraday.get("daily_max"),
             observed_low=intraday.get("daily_min"),
+            contract_name=str(row["contract_name"] or ""),
+            strike=float(row["strike"]) if row["strike"] is not None else None,
         )
         if resolution is None:
             summary["skipped_unsupported"] += 1

@@ -209,6 +209,26 @@ def test_upsert_contract_idempotent(tmp_db):
     assert n == 1
 
 
+def test_upsert_contract_persists_contract_name(tmp_db):
+    from forecast.db import get_active_contracts, upsert_contract, upsert_market
+
+    mid = upsert_market("KXHIGHLAX-26JUN05", "LA High", db_path=tmp_db)
+    expiry = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y%m%d")
+    upsert_contract(
+        market_id=mid,
+        local_symbol="KXHIGHLAX-26JUN05-B69.5",
+        right="C",
+        strike=69.5,
+        contract_name="Will the high temp in LA be 69-70° on Jun 5, 2026?",
+        last_trade_at=expiry,
+        db_path=tmp_db,
+    )
+
+    rows = get_active_contracts(db_path=tmp_db)
+    row = next(r for r in rows if r["local_symbol"] == "KXHIGHLAX-26JUN05-B69.5")
+    assert row["contract_name"] == "Will the high temp in LA be 69-70° on Jun 5, 2026?"
+
+
 # ── 3. Quote insertion + retrieval ────────────────────────────────────────────
 
 

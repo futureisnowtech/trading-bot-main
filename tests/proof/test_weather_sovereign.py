@@ -9,6 +9,7 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from forecast.strategy_engine import _strategy_weather, _parse_weather_threshold
+from forecast.weather_contracts import resolve_weather_contract, yes_probability_from_weather_data
 from data.kalshi_weather_monitor import _parse_t_group
 
 class TestWeatherSovereign(unittest.TestCase):
@@ -34,14 +35,21 @@ class TestWeatherSovereign(unittest.TestCase):
         # 31 GFS members, 31 EC members for simplicity in mock
         # Success if >= 75.5
         mock_get_weather.return_value = {
-            "members_high": [76] * 31, # 100% GFS prob
+            "members_high": [76] * 31, # 100% GFS prob inside 75-76 band
             "ecmwf": {
-                "members_high": [77] * 31 # 100% EC prob
+                "members_high": [76] * 31 # 100% EC prob inside 75-76 band
             },
             "peak_tcdc": 10.0
         }
         
-        passes, side, conf, factors, is_taker = _strategy_weather(ticker, 0.50, 0.50, 24.0)
+        passes, side, conf, factors, is_taker = _strategy_weather(
+            ticker,
+            0.50,
+            0.50,
+            24.0,
+            contract_name="Will the high temp in NY be 75-76° on Jun 1, 2026?",
+            strike=75.5,
+        )
         
         self.assertTrue(passes)
         self.assertEqual(side, "YES")
@@ -55,17 +63,54 @@ class TestWeatherSovereign(unittest.TestCase):
         """Verify GFS + ECMWF divergence veto (gap > 40%)."""
         ticker = "KXHIGHNY-26JUN01-B75.5"
         mock_get_weather.return_value = {
-            "members_high": [80] * 31, # 100% GFS prob
+            "members_high": [76] * 31, # 100% GFS prob inside band
             "ecmwf": {
                 "members_high": [70] * 31 # 0% EC prob
             },
             "peak_tcdc": 10.0
         }
         
-        passes, side, conf, factors, is_taker = _strategy_weather(ticker, 0.50, 0.50, 24.0)
+        passes, side, conf, factors, is_taker = _strategy_weather(
+            ticker,
+            0.50,
+            0.50,
+            24.0,
+            contract_name="Will the high temp in NY be 75-76° on Jun 1, 2026?",
+            strike=75.5,
+        )
         
         self.assertFalse(passes)
         self.assertIn("model_divergence_veto", factors)
+
+    def test_bracket_contract_semantics_count_only_inside_bin(self):
+        semantics = resolve_weather_contract(
+            "KXHIGHLAX-26JUN05-B69.5",
+            contract_name="Will the high temp in LA be 69-70° on Jun 5, 2026?",
+            strike=69.5,
+        )
+        self.assertIsNotNone(semantics)
+        self.assertEqual(semantics.comparator, "between")
+        self.assertAlmostEqual(semantics.lower_bound, 68.5)
+        self.assertAlmostEqual(semantics.upper_bound, 70.5)
+
+        prob = yes_probability_from_weather_data(
+            "KXHIGHLAX-26JUN05-B69.5",
+            {
+                "members_high": [68.4, 68.9, 69.2, 70.4, 70.6],
+            },
+            contract_name="Will the high temp in LA be 69-70° on Jun 5, 2026?",
+            strike=69.5,
+        )
+        self.assertAlmostEqual(prob, 3 / 5)
+
+    def test_temperature_edge_contract_is_ambiguous_without_contract_title(self):
+        semantics = resolve_weather_contract(
+            "KXHIGHLAX-26JUN05-T76",
+            contract_name="",
+            strike=76.0,
+        )
+        self.assertIsNotNone(semantics)
+        self.assertTrue(semantics.ambiguous)
 
 if __name__ == "__main__":
     unittest.main()

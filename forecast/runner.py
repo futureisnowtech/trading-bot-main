@@ -102,34 +102,21 @@ def _held_bid_fields(right: str) -> tuple[str, str]:
     return "no_bid", "no_bid_vol"
 
 
-def _weather_contract_yes_probability(ticker: str, w_data: dict | None) -> float | None:
-    if not w_data:
-        return None
+def _weather_contract_yes_probability(
+    ticker: str,
+    w_data: dict | None,
+    *,
+    contract_name: str = "",
+    strike: float | None = None,
+) -> float | None:
+    from forecast.weather_contracts import yes_probability_from_weather_data
 
-    from forecast.strategy_engine import _parse_weather_threshold
-
-    threshold = _parse_weather_threshold(ticker)
-    if threshold is None:
-        return None
-
-    if "HIGH" in ticker:
-        members = w_data.get("members_high", [])
-        success_count = sum(1 for member in members if member >= (threshold - 0.05))
-    elif "LOW" in ticker:
-        members = w_data.get("members_low", [])
-        success_count = sum(1 for member in members if member <= (threshold + 0.05))
-    elif "RAIN" in ticker or "SNOW" in ticker:
-        members = w_data.get("members_precip", [])
-        success_count = sum(1 for member in members if member > threshold)
-    elif "WIND" in ticker:
-        members = w_data.get("members_wind", [])
-        success_count = sum(1 for member in members if member >= threshold)
-    else:
-        return None
-
-    if not members:
-        return None
-    return success_count / len(members)
+    return yes_probability_from_weather_data(
+        ticker=ticker,
+        w_data=w_data,
+        contract_name=contract_name,
+        strike=strike,
+    )
 
 
 # ── Discovery loop ─────────────────────────────────────────────────────────────
@@ -765,13 +752,30 @@ def run_position_monitor() -> None:
                     )
 
                     if is_weather:
-                        from forecast.strategy_engine import _parse_weather_threshold
+                        from forecast.db import get_contract_metadata
+                        from forecast.weather_contracts import resolve_weather_contract
                         from data.kalshi_weather_monitor import get_weather_data
+
+                        contract_meta = get_contract_metadata(local_symbol)
+                        contract_name = (
+                            str(contract_meta.get("contract_name") or "")
+                            if contract_meta
+                            else ""
+                        )
+                        strike = (
+                            float(contract_meta.get("strike") or 0.0)
+                            if contract_meta and contract_meta.get("strike") is not None
+                            else None
+                        )
+                        semantics = resolve_weather_contract(
+                            local_symbol,
+                            contract_name=contract_name,
+                            strike=strike,
+                        )
 
                         # Get current model probability
                         w_data = get_weather_data(local_symbol.split('-')[0])
-                        threshold = _parse_weather_threshold(local_symbol)
-                        if not w_data or threshold is None:
+                        if not w_data or semantics is None or semantics.ambiguous:
                             model_yes = 0.0
                             held_model_p = 0.0
                             intraday = {}
@@ -780,7 +784,15 @@ def run_position_monitor() -> None:
                             daily_max = None
                             daily_min = None
                         else:
-                            model_yes = _weather_contract_yes_probability(local_symbol, w_data) or 0.0
+                            model_yes = (
+                                _weather_contract_yes_probability(
+                                    local_symbol,
+                                    w_data,
+                                    contract_name=contract_name,
+                                    strike=strike,
+                                )
+                                or 0.0
+                            )
                             held_model_p = model_yes if right == "C" else (1.0 - model_yes)
                             intraday = w_data.get("intraday", {})
                             metar_temp = intraday.get("metar_temp")
@@ -807,29 +819,46 @@ def run_position_monitor() -> None:
                         # v19.1.10: Sovereign Instrumentation (Intraday Layer)
                         try:
                             from monitoring import metrics
-                            if metar_temp is not None and threshold is not None:
-                                metrics.WEATHER_METAR_DIFF_GAUGE.labels(ticker=local_symbol).set(metar_temp - threshold)
-                            if hrrr_high is not None and threshold is not None:
-                                metrics.WEATHER_HRRR_DIFF_GAUGE.labels(ticker=local_symbol).set(hrrr_high - threshold)
+                            diff_anchor = None
+                            if semantics is not None:
+                                if (
+                                    semantics.comparator == "between"
+                                    and semantics.lower_bound is not None
+                                    and semantics.upper_bound is not None
+                                ):
+                                    diff_anchor = (semantics.lower_bound + semantics.upper_bound) / 2.0
+                                elif semantics.threshold is not None:
+                                    diff_anchor = semantics.threshold
+                            if metar_temp is not None and diff_anchor is not None:
+                                metrics.WEATHER_METAR_DIFF_GAUGE.labels(ticker=local_symbol).set(metar_temp - diff_anchor)
+                            if hrrr_high is not None and diff_anchor is not None:
+                                metrics.WEATHER_HRRR_DIFF_GAUGE.labels(ticker=local_symbol).set(hrrr_high - diff_anchor)
                         except Exception as _m_err:
                             logger.debug(f"Metrics update failed: {_m_err}")
                         
-                        if right == "C" and (daily_max is not None or daily_min is not None):
+                        if (
+                            right == "C"
+                            and semantics is not None
+                            and not semantics.ambiguous
+                            and semantics.mode in {"HIGH", "LOW"}
+                            and semantics.comparator == "between"
+                            and semantics.lower_bound is not None
+                            and semantics.upper_bound is not None
+                            and (daily_max is not None or daily_min is not None)
+                        ):
                             # 1. BUST EXIT (Salvage Capital)
-                            # If the daily high/low has already breached our strike
-                            is_high = "HIGH" in local_symbol
-                            is_between = "-B" in local_symbol
+                            # If the daily high/low has already breached our bracket, the YES thesis is dead.
+                            is_high = semantics.mode == "HIGH"
+                            limit_lower = float(semantics.lower_bound)
+                            limit_upper = float(semantics.upper_bound)
                             
-                            limit_upper = threshold + 0.5 if is_between else threshold
-                            limit_lower = threshold - 0.5 if is_between else threshold
-                            
-                            # HIGH YES Bust: The record high for today is already above our limit.
-                            if is_high and daily_max > (limit_upper + 0.5):
+                            # HIGH YES Bust: The record high for today is already above our bracket ceiling.
+                            if is_high and daily_max >= limit_upper:
                                 logger.warning(f"[Sovereign Precinct] BUST EXIT: {local_symbol} Day-High {daily_max}F > limit {limit_upper}F. Salvaging capital.")
                                 resolved = True
                             
-                            # LOW YES Bust: The record low for today is already below our limit.
-                            elif not is_high and "LOW" in local_symbol and daily_min < (limit_lower - 0.5):
+                            # LOW YES Bust: The record low for today is already below our bracket floor.
+                            elif not is_high and daily_min < limit_lower:
                                 logger.warning(f"[Sovereign Precinct] BUST EXIT: {local_symbol} Day-Low {daily_min}F < limit {limit_lower}F. Salvaging capital.")
                                 resolved = True
 
@@ -853,9 +882,9 @@ def run_position_monitor() -> None:
                                 # If after 4 PM local and currently within limits
                                 in_zone = False
                                 if is_high:
-                                    in_zone = metar_temp <= limit_upper and metar_temp >= (limit_lower - 0.5)
+                                    in_zone = metar_temp is not None and limit_lower <= metar_temp < limit_upper
                                 else:
-                                    in_zone = metar_temp >= limit_lower and metar_temp <= (limit_upper + 0.5)
+                                    in_zone = metar_temp is not None and limit_lower <= metar_temp < limit_upper
 
                                 # v19.1.10: Precision Lock (Front-run the whole degree)
                                 # v19.1.11: Restricted to HIGH markets; LOW markets resolve at night.
@@ -865,7 +894,7 @@ def run_position_monitor() -> None:
                                     if bid_price >= 0.94:
                                         logger.info(f"[Sovereign Precinct] LOCK EXIT: {local_symbol} at {bid_price:.2f} (After 4PM local, in zone).")
                                         resolved = True
-                                    elif is_high and metar_temp >= (limit_upper - 0.2) and bid_price >= 0.90:
+                                    elif is_high and metar_temp is not None and metar_temp >= (limit_upper - 0.2) and bid_price >= 0.90:
                                          logger.info(f"[Sovereign Precinct] PRECISION LOCK: {local_symbol} at {bid_price:.2f} (0.2F from limit).")
                                          resolved = True
 
@@ -874,18 +903,18 @@ def run_position_monitor() -> None:
                                 if not resolved and local_hour >= 20 and bid_price >= 0.90:
                                     if hrrr_high is not None:
                                         # HIGH YES Spike: HRRR predicts spike above bracket or drop below
-                                        if is_high and (hrrr_high > limit_upper + 0.1 or hrrr_high < limit_lower - 0.2):
+                                        if is_high and (hrrr_high >= limit_upper or hrrr_high < limit_lower):
                                             logger.warning(f"[Sovereign Precinct] SPIKE GUARD: {local_symbol} dumping {bid_price:.2f} due to HRRR spoiler {hrrr_high}F.")
                                             resolved = True
                             # 3. TREND DIVERGENCE / SALVAGE (Capital Salvage)
                             # If HRRR (3km resolution) is predicting a result that makes winning impossible
                             if not resolved and hrrr_high is not None:
-                                # High YES Salvage: HRRR predicts max 5F below our bracket start
-                                if is_high and hrrr_high < (limit_lower - 5.0) and bid_price > 0.05:
+                                # High YES Salvage: HRRR predicts a clear miss below our bracket.
+                                if is_high and hrrr_high < (limit_lower - 1.5) and bid_price > 0.05:
                                     logger.warning(f"[Sovereign Precinct] SALVAGE EXIT: {local_symbol} HRRR predicts max {hrrr_high}F. Cutting for {bid_price:.2f}.")
                                     resolved = True
-                                # High YES Divergence: HRRR predicts result significantly below bracket
-                                elif is_high and hrrr_high < (limit_lower - 1.5):
+                                # High YES Divergence: HRRR projects a bracket miss.
+                                elif is_high and (hrrr_high < limit_lower or hrrr_high >= limit_upper):
                                     logger.warning(f"[Sovereign Precinct] TREND EXIT: {local_symbol} HRRR predicts {hrrr_high}F vs bracket start {limit_lower}F. Cutting loss.")
                                     resolved = True
 
@@ -1081,7 +1110,12 @@ def _cache_forecast_state():
                     entered_at = str(db_row[1])
                 
                 cursor.execute(
-                    "SELECT m.market_name, c.resolution_at FROM forecast_contracts c JOIN forecast_markets m ON c.market_id = m.id WHERE c.local_symbol = ? LIMIT 1",
+                    """SELECT COALESCE(c.contract_name, m.market_name), c.resolution_at
+                       FROM forecast_contracts c
+                       JOIN forecast_markets m ON c.market_id = m.id
+                       WHERE c.local_symbol = ?
+                       ORDER BY c.active DESC, c.last_seen_at DESC, c.id DESC
+                       LIMIT 1""",
                     (ticker,)
                 )
                 meta = cursor.fetchone()

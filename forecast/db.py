@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS forecast_contracts (
     market_id       INTEGER NOT NULL REFERENCES forecast_markets(id),
     conid           INTEGER,
     local_symbol    TEXT    NOT NULL,
+    contract_name   TEXT,
     right           TEXT    NOT NULL CHECK(right IN ('C', 'P')),
     strike          REAL    NOT NULL,
     currency        TEXT    NOT NULL DEFAULT 'USD',
@@ -145,6 +146,18 @@ QUOTE_RETENTION_DAYS: int = 7
 BAR_RETENTION_DAYS: int = 30
 
 
+def _ensure_column(
+    conn: sqlite3.Connection,
+    table_name: str,
+    column_name: str,
+    ddl_fragment: str,
+) -> None:
+    cols = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    existing = {str(row["name"]) for row in cols}
+    if column_name not in existing:
+        conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {ddl_fragment}")
+
+
 def init_forecast_db(db_path: str | None = None) -> None:
     """Create all 6 forecast tables (idempotent). Call once at startup."""
     with _conn(db_path) as c:
@@ -161,6 +174,7 @@ def init_forecast_db(db_path: str | None = None) -> None:
                 stmt = stmt.strip()
                 if stmt:
                     c.execute(stmt)
+        _ensure_column(c, "forecast_contracts", "contract_name", "contract_name TEXT")
         c.commit()
 
 
@@ -269,6 +283,7 @@ def upsert_contract(
     local_symbol: str,
     right: str,
     strike: float,
+    contract_name: str = "",
     currency: str = "USD",
     exchange: str = "KALSHI",
     last_trade_at: str = "",
@@ -290,20 +305,26 @@ def upsert_contract(
         ).fetchone()
         if row:
             c.execute(
-                "UPDATE forecast_contracts SET active=1, last_seen_at=?, conid=? WHERE id=?",
-                (now, conid, row["id"]),
+                """UPDATE forecast_contracts
+                   SET active=1,
+                       last_seen_at=?,
+                       conid=?,
+                       contract_name=COALESCE(NULLIF(?, ''), contract_name)
+                   WHERE id=?""",
+                (now, conid, contract_name, row["id"]),
             )
             return row["id"]
         cur = c.execute(
             """INSERT INTO forecast_contracts
-               (market_id, conid, local_symbol, right, strike, currency, exchange,
+               (market_id, conid, local_symbol, contract_name, right, strike, currency, exchange,
                 last_trade_at, resolution_at, payout_at, measured_period, active,
                 first_seen_at, last_seen_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,1,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1,?,?)""",
             (
                 market_id,
                 conid,
                 local_symbol,
+                contract_name,
                 right,
                 strike,
                 currency,
@@ -429,8 +450,8 @@ def get_active_contracts(db_path: str | None = None) -> list[dict]:
     """Return all active contracts with their market info joined."""
     with _conn(db_path) as c:
         rows = c.execute(
-            """SELECT fc.id, fc.market_id, fc.conid, fc.local_symbol, fc.right,
-                      fc.strike, fc.last_trade_at, fc.resolution_at,
+            """SELECT fc.id, fc.market_id, fc.conid, fc.local_symbol, fc.contract_name,
+                      fc.right, fc.strike, fc.last_trade_at, fc.resolution_at,
                       fm.market_symbol, fm.market_name, fm.category_path
                FROM forecast_contracts fc
                JOIN forecast_markets fm ON fm.id = fc.market_id
@@ -438,6 +459,23 @@ def get_active_contracts(db_path: str | None = None) -> list[dict]:
                ORDER BY fc.resolution_at ASC""",
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+def get_contract_metadata(local_symbol: str, db_path: str | None = None) -> dict | None:
+    """Return the most recent stored contract row for a ticker."""
+    with _conn(db_path) as c:
+        row = c.execute(
+            """SELECT fc.id, fc.market_id, fc.conid, fc.local_symbol, fc.contract_name,
+                      fc.right, fc.strike, fc.last_trade_at, fc.resolution_at,
+                      fm.market_symbol, fm.market_name, fm.category_path
+               FROM forecast_contracts fc
+               JOIN forecast_markets fm ON fm.id = fc.market_id
+               WHERE fc.local_symbol = ?
+               ORDER BY fc.active DESC, fc.last_seen_at DESC, fc.id DESC
+               LIMIT 1""",
+            (local_symbol,),
+        ).fetchone()
+        return dict(row) if row else None
 
 
 def get_recent_quotes(

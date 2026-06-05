@@ -96,7 +96,7 @@ def _rank_contracts(contracts: list[dict]) -> list[dict]:
         if hours > MAX_DAYS_TO_RESOLUTION * 24:
             continue  # too far out
 
-        name = c.get("long_name", "") or c.get("market_name", "")
+        name = c.get("contract_name", "") or c.get("long_name", "") or c.get("market_name", "")
         symbol = c.get("underlier", "") or c.get("market_symbol", "")
         t1 = _tier1_score(name, symbol)
 
@@ -156,7 +156,7 @@ def run_discovery(
         tradable_candidates.append(contract)
 
     for c in stub_only:
-        name = c.get("long_name", "") or c.get("market_name", "") or c.get("underlier", "")
+        event_name = c.get("event_title", "") or c.get("market_name", "") or c.get("underlier", "")
         symbol = c.get("underlier", "") or c.get("market_symbol", "") or c.get("local_symbol", "")
         exchange = c.get("exchange", "KALSHI")
         if not symbol:
@@ -165,7 +165,7 @@ def run_discovery(
         try:
             upsert_market(
                 market_symbol=symbol,
-                market_name=name or symbol,
+                market_name=event_name or symbol,
                 exchange=exchange,
                 category_path=c.get("category", ""),
                 underlier_symbol=symbol,
@@ -183,7 +183,8 @@ def run_discovery(
     result["skipped_expired"] = len(tradable_candidates) - len(ranked)
 
     for c in ranked:
-        name = c.get("long_name", "") or c.get("underlier", "")
+        event_name = c.get("event_title", "") or c.get("underlier", "")
+        contract_name = c.get("contract_name", "") or c.get("long_name", "") or c.get("underlier", "")
         symbol = c.get("underlier", "") or ""
         exchange = c.get("exchange", "KALSHI")
 
@@ -191,7 +192,7 @@ def run_discovery(
         try:
             market_id = upsert_market(
                 market_symbol=symbol,
-                market_name=name,
+                market_name=event_name or symbol,
                 exchange=exchange,
                 category_path=c.get("category", ""),
                 underlier_symbol=symbol,
@@ -209,6 +210,7 @@ def run_discovery(
             upsert_contract(
                 market_id=market_id,
                 local_symbol=c.get("local_symbol", symbol),
+                contract_name=contract_name,
                 right=c.get("right", "C"),
                 strike=float(c.get("strike") or 0.0),
                 currency="USD",

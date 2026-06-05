@@ -357,6 +357,7 @@ class KalshiBroker:
                         right = "C" if side == "YES" else "P"
                         results.append({
                             "underlier": ticker,
+                            "event_title": event.get("title") or ticker,
                             "local_symbol": m.get("ticker"),
                             "conid": None,
                             "right": right,
@@ -364,6 +365,7 @@ class KalshiBroker:
                             "last_trade_at": m.get("close_time", ""),
                             "exchange": "KALSHI",
                             "currency": "USD",
+                            "contract_name": m.get("title") or "",
                             "long_name": m.get("title"),
                             "category": cat,
                             "side": side,

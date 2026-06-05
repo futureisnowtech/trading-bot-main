@@ -9,6 +9,7 @@ def _make_weather_contract() -> dict:
         "id": 1,
         "market_id": 1,
         "local_symbol": "KXHIGHNY-30JUN26-T75",
+        "contract_name": "Will the high temp in NY be >75° on Jun 30, 2026?",
         "right": "C",
         "strike": 75.0,
         "last_trade_at": expiry,

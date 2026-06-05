@@ -17,6 +17,7 @@ Output for each candidate:
 """
 
 import logging
+import math
 import os
 import sys
 import time
@@ -744,11 +745,8 @@ def _extract_weather_model_probabilities(
     w_data: dict,
     semantics,
 ) -> tuple[float | None, float | None]:
-    members_gfs, members_ec = _extract_weather_model_members(w_data, semantics.mode)
-    prob_gfs = probability_from_members(members_gfs, semantics) if members_gfs else None
-    prob_ecmwf = None
-    if members_ec:
-        prob_ecmwf = probability_from_members(members_ec, semantics)
+    prob_gfs = _probability_from_weather_record(w_data, semantics)
+    prob_ecmwf = _probability_from_weather_record(w_data.get("ecmwf") or {}, semantics)
 
     return prob_gfs, prob_ecmwf
 
@@ -766,6 +764,70 @@ def _extract_weather_model_members(
     ecmwf_data = w_data.get("ecmwf") or {}
     members_ec = [float(v) for v in (ecmwf_data.get(key) or [])]
     return members_gfs, members_ec
+
+
+def _normal_cdf(z_value: float) -> float:
+    return 0.5 * (1.0 + math.erf(float(z_value) / math.sqrt(2.0)))
+
+
+def _probability_from_estimate(
+    mean_value: float,
+    sigma_value: float,
+    semantics,
+) -> float:
+    sigma = max(0.05, float(sigma_value))
+    mean = float(mean_value)
+
+    if semantics.comparator == "between":
+        if semantics.lower_bound is None or semantics.upper_bound is None:
+            return 0.0
+        upper = _normal_cdf((float(semantics.upper_bound) - mean) / sigma)
+        lower = _normal_cdf((float(semantics.lower_bound) - mean) / sigma)
+        return max(0.0, min(1.0, upper - lower))
+
+    if semantics.threshold is None:
+        return 0.0
+
+    if semantics.comparator == "gt":
+        return max(0.0, min(1.0, 1.0 - _normal_cdf((float(semantics.threshold) - mean) / sigma)))
+
+    return max(0.0, min(1.0, _normal_cdf((float(semantics.threshold) - mean) / sigma)))
+
+
+def _probability_from_weather_record(
+    weather_record: dict,
+    semantics,
+) -> float | None:
+    if not weather_record:
+        return None
+
+    provider_mode = str(weather_record.get("provider_mode") or "")
+    if provider_mode == "deterministic_multi_model":
+        if semantics.mode in {"RAIN", "SNOW"}:
+            mean_value = weather_record.get("mean_precip")
+            sigma_value = weather_record.get("sigma_precip")
+        elif semantics.mode == "LOW":
+            mean_value = weather_record.get("mean_low")
+            sigma_value = weather_record.get("sigma_low")
+        else:
+            mean_value = weather_record.get("mean_high")
+            sigma_value = weather_record.get("sigma_high")
+
+        if mean_value is None:
+            return None
+        return _probability_from_estimate(
+            mean_value=float(mean_value),
+            sigma_value=float(sigma_value or 0.5),
+            semantics=semantics,
+        )
+
+    if semantics.mode in ["RAIN", "SNOW", "WIND"]:
+        key = "members_precip" if semantics.mode != "WIND" else "members_wind"
+    else:
+        key = "members_high" if semantics.mode == "HIGH" else "members_low"
+
+    members = [float(v) for v in (weather_record.get(key) or [])]
+    return probability_from_members(members, semantics) if members else None
 
 
 def _get_adaptive_weather_model_blend(mode: str) -> dict:
@@ -992,6 +1054,8 @@ def _strategy_weather_details(
     prob_gfs, prob_ecmwf = _extract_weather_model_probabilities(w_data, semantics)
     if prob_gfs is None:
         return False, "", 0.0, ["missing_gfs_members"], False, 1.0, 3, 0.05
+    provider_mode = str(w_data.get("provider_mode") or "ensemble_members")
+    provider_size_multiplier = 0.85 if provider_mode == "deterministic_multi_model" else 1.0
 
     # ── Phase 3: AI/GraphCast Analysis (Sovereign Sigma Scaler) ────────────
     # v19.8: Move AI from Prob Blend to Sigma Scaler (Bayesian Confirmer)
@@ -1050,7 +1114,12 @@ def _strategy_weather_details(
     
     # v19.1.11: The Sigma Lever (Volatility Sizing)
     # v19.8: AI Multiplier now inflates/deflates Sigma directly
-    sigma_raw = w_data.get("sigma_high" if mode == "HIGH" else "sigma_low", 2.0)
+    if mode in {"RAIN", "SNOW"}:
+        sigma_raw = w_data.get("sigma_precip", w_data.get("sigma_low", 2.0))
+    elif mode == "HIGH":
+        sigma_raw = w_data.get("sigma_high", 2.0)
+    else:
+        sigma_raw = w_data.get("sigma_low", 2.0)
     sigma = sigma_raw * ai_multiplier
 
     # v19.1.11: Sovereign Instrumentation
@@ -1186,7 +1255,8 @@ def _strategy_weather_details(
             f"sigma_mult={sigma_mult:.2f}x",
             f"blend=GFS{gfs_weight:.0%}/EC{ecmwf_weight:.0%}",
             f"div_gap={divergence_gap:.1%}",
-            f"TCDC={peak_tcdc:.1f}%"
+            f"TCDC={peak_tcdc:.1f}%",
+            f"wx_provider={provider_mode}",
         ]
         if peak_ssrd is not None:
             factors.append(f"SSRD={float(peak_ssrd):.0f}W/m2")
@@ -1207,7 +1277,14 @@ def _strategy_weather_details(
         factors.append(f"tier={conv_tier}")
 
         # v19.1.12: Return raw ensemble_prob + sizing_multiplier separately
-        sizing_multiplier = convergence_multiplier * sigma_mult * divergence_size_multiplier
+        sizing_multiplier = (
+            convergence_multiplier
+            * sigma_mult
+            * divergence_size_multiplier
+            * provider_size_multiplier
+        )
+        if provider_size_multiplier < 1.0:
+            factors.append(f"provider_haircut={provider_size_multiplier:.2f}x")
         if ask_yes >= premium_yes_threshold:
             sizing_multiplier *= premium_yes_size_multiplier
             factors.append(
@@ -1224,6 +1301,7 @@ def _strategy_weather_details(
             f"sigma_mult={sigma_mult:.2f}x",
             f"blend=GFS{gfs_weight:.0%}/EC{ecmwf_weight:.0%}",
             f"div_gap={divergence_gap:.1%}",
+            f"wx_provider={provider_mode}",
         ]
         # v19.6: Sovereign Escalation — Tier Identification (NO Side)
         # v19.9: 50% Sizing Cut
@@ -1239,7 +1317,14 @@ def _strategy_weather_details(
 
         factors.append(f"tier={conv_tier}")
 
-        sizing_multiplier = convergence_multiplier * sigma_mult * divergence_size_multiplier
+        sizing_multiplier = (
+            convergence_multiplier
+            * sigma_mult
+            * divergence_size_multiplier
+            * provider_size_multiplier
+        )
+        if provider_size_multiplier < 1.0:
+            factors.append(f"provider_haircut={provider_size_multiplier:.2f}x")
         return True, "NO", no_prob, factors, is_taker, sizing_multiplier, conv_tier, sizing_cap
 
     return False, "", 0.0, ["insufficient_edge"], False, 1.0, 3, 0.05

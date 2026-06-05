@@ -460,6 +460,43 @@ def test_active_weather_city_scope_tracks_live_contract_universe(monkeypatch):
     assert city_keys == ["CHI", "LAX", "NY"]
 
 
+def test_fetch_open_meteo_ensemble_uses_deterministic_fallback_without_api_key(monkeypatch):
+    import asyncio
+    import data.kalshi_weather_monitor as wm
+
+    fallback_record = {
+        "provider_mode": "deterministic_multi_model",
+        "forecast_source": "open_meteo_forecast",
+        "members_high": [76.0],
+        "members_low": [61.0],
+        "members_precip": [0.02],
+        "mean_high": 76.0,
+        "sigma_high": 1.8,
+        "mean_low": 61.0,
+        "sigma_low": 1.8,
+        "mean_precip": 0.02,
+        "sigma_precip": 0.08,
+        "peak_tcdc": 10.0,
+        "timestamp": datetime.now(timezone.utc).timestamp(),
+        "ecmwf": {"provider_mode": "deterministic_multi_model", "members_high": [75.5], "mean_high": 75.5, "sigma_high": 1.7},
+        "aigefs": {"provider_mode": "deterministic_multi_model", "members_high": [76.2], "mean_high": 76.2, "sigma_high": 1.6},
+    }
+
+    wm._COORDINATE_CACHE.clear()
+    wm._ENSEMBLE_FETCH_STATE.clear()
+    monkeypatch.delenv("OPEN_METEO_API_KEY", raising=False)
+    monkeypatch.setattr(
+        wm,
+        "_fetch_open_meteo_deterministic_multimodel",
+        lambda city_key, lat, lon: asyncio.sleep(0, result=fallback_record),
+    )
+
+    result = asyncio.run(wm.fetch_open_meteo_ensemble("NY", 40.78, -73.97))
+
+    assert result["provider_mode"] == "deterministic_multi_model"
+    assert result["mean_high"] == 76.0
+
+
 def test_open_meteo_429_cools_city_and_skips_repeat_fetch(monkeypatch):
     import asyncio
     import data.kalshi_weather_monitor as wm
@@ -472,6 +509,24 @@ def test_open_meteo_429_cools_city_and_skips_repeat_fetch(monkeypatch):
             return {}
 
     calls = {"count": 0}
+    fallback_calls = {"count": 0}
+    fallback_record = {
+        "provider_mode": "deterministic_multi_model",
+        "forecast_source": "open_meteo_forecast",
+        "members_high": [76.0],
+        "members_low": [61.0],
+        "members_precip": [0.01],
+        "mean_high": 76.0,
+        "sigma_high": 1.8,
+        "mean_low": 61.0,
+        "sigma_low": 1.8,
+        "mean_precip": 0.01,
+        "sigma_precip": 0.08,
+        "peak_tcdc": 5.0,
+        "timestamp": datetime.now(timezone.utc).timestamp(),
+        "ecmwf": None,
+        "aigefs": None,
+    }
 
     wm._COORDINATE_CACHE.clear()
     wm._ENSEMBLE_FETCH_STATE.clear()
@@ -483,6 +538,11 @@ def test_open_meteo_429_cools_city_and_skips_repeat_fetch(monkeypatch):
         return _Resp()
 
     monkeypatch.setattr(wm.requests, "get", fake_get)
+    monkeypatch.setenv("OPEN_METEO_API_KEY", "present-for-test")
+    async def fake_det(city_key, lat, lon):
+        fallback_calls["count"] += 1
+        return dict(fallback_record)
+    monkeypatch.setattr(wm, "_fetch_open_meteo_deterministic_multimodel", fake_det)
     monkeypatch.setattr(
         "logging_db.trade_logger.log_event",
         lambda *args, **kwargs: None,
@@ -491,9 +551,10 @@ def test_open_meteo_429_cools_city_and_skips_repeat_fetch(monkeypatch):
     first = asyncio.run(wm.fetch_open_meteo_ensemble("NY", 40.78, -73.97))
     second = asyncio.run(wm.fetch_open_meteo_ensemble("LAX", 33.94, -118.41))
 
-    assert first == {}
-    assert second == {}
+    assert first["provider_mode"] == "deterministic_multi_model"
+    assert second["provider_mode"] == "deterministic_multi_model"
     assert calls["count"] == 1
+    assert fallback_calls["count"] == 2
     assert wm._global_ensemble_rate_limit_active() is True
 
 
@@ -546,3 +607,89 @@ def test_contract_weather_projection_is_day_specific(monkeypatch):
     assert projected["members_high"] == [84.0, 83.0]
     assert projected["members_low"] == [80.0, 79.0]
     assert round(projected["peak_ssrd"], 1) == 585.0
+
+
+def test_deterministic_fallback_weather_probability_is_continuous():
+    import forecast.strategy_engine as se
+
+    prob = se.blended_weather_yes_probability(
+        "KXHIGHNY-30JUN26-T75",
+        {
+            "provider_mode": "deterministic_multi_model",
+            "mean_high": 77.0,
+            "sigma_high": 1.8,
+            "members_high": [77.0],
+            "ecmwf": {
+                "provider_mode": "deterministic_multi_model",
+                "mean_high": 76.4,
+                "sigma_high": 1.6,
+                "members_high": [76.4],
+            },
+            "aigefs": {
+                "provider_mode": "deterministic_multi_model",
+                "mean_high": 76.8,
+                "sigma_high": 1.6,
+                "members_high": [76.8],
+            },
+        },
+        contract_name="Will the high temp in NY be >75° on Jun 30, 2026?",
+        strike=75.0,
+    )
+
+    assert prob is not None
+    assert 0.60 < prob < 0.90
+
+
+def test_deterministic_fallback_can_power_weather_strategy(monkeypatch):
+    import forecast.strategy_engine as se
+
+    deterministic_weather = {
+        "provider_mode": "deterministic_multi_model",
+        "members_high": [77.0],
+        "members_low": [61.0],
+        "members_precip": [0.0],
+        "mean_high": 77.0,
+        "sigma_high": 1.8,
+        "mean_low": 61.0,
+        "sigma_low": 1.8,
+        "mean_precip": 0.0,
+        "sigma_precip": 0.08,
+        "peak_tcdc": 8.0,
+        "timestamp": datetime.now(timezone.utc).timestamp(),
+        "ecmwf": {
+            "provider_mode": "deterministic_multi_model",
+            "members_high": [76.2],
+            "mean_high": 76.2,
+            "sigma_high": 1.6,
+        },
+        "aigefs": {
+            "provider_mode": "deterministic_multi_model",
+            "members_high": [76.8],
+            "mean_high": 76.8,
+            "sigma_high": 1.5,
+        },
+    }
+
+    monkeypatch.setattr(se, "get_weather_data", lambda ticker: deterministic_weather)
+    monkeypatch.setattr(
+        se,
+        "get_contract_weather_data",
+        lambda ticker, **kwargs: deterministic_weather,
+    )
+
+    now_ts = datetime.now(timezone.utc).isoformat()
+    result = se.evaluate_contract(
+        contract=_make_weather_contract(),
+        bars_5m=[],
+        bars_30m=[],
+        bars_1h=[],
+        bars_4h=[],
+        yes_quote=_quote(0.38, 0.02, now_ts),
+        no_quote=_quote(0.62, 0.02, now_ts),
+        bankroll=100.0,
+    )
+
+    assert result is not None
+    assert result.strategy_family == "weather_ensemble"
+    assert result.econ_approved is True
+    assert result.side == "YES"

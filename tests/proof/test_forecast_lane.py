@@ -234,13 +234,16 @@ def test_run_discovery_deactivates_missing_markets_and_contracts(tmp_db):
     from forecast.db import get_active_contracts, upsert_contract, upsert_market
     from forecast.discovery import run_discovery
 
+    future_dt = datetime.now(timezone.utc) + timedelta(days=2)
+    future_symbol_day = future_dt.strftime("%y%b%d").upper()
+
     old_market_id = upsert_market("KXHIGHOLD", "Old Legacy Weather", db_path=tmp_db)
     upsert_contract(
         market_id=old_market_id,
-        local_symbol="KXHIGHOLD-26JUN05-B75.5",
+        local_symbol=f"KXHIGHOLD-{future_symbol_day}-B75.5",
         right="C",
         strike=75.5,
-        last_trade_at=(datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y%m%d"),
+        last_trade_at=future_dt.strftime("%Y%m%d"),
         db_path=tmp_db,
     )
 
@@ -249,11 +252,11 @@ def test_run_discovery_deactivates_missing_markets_and_contracts(tmp_db):
         {
             "underlier": "KXHIGHNEW",
             "event_title": "New Weather Market",
-            "local_symbol": "KXHIGHNEW-26JUN05-B80.5",
+            "local_symbol": f"KXHIGHNEW-{future_symbol_day}-B80.5",
             "conid": None,
             "right": "C",
             "strike": 80.5,
-            "last_trade_at": (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y%m%d"),
+            "last_trade_at": future_dt.strftime("%Y%m%d"),
             "exchange": "KALSHI",
             "currency": "USD",
             "contract_name": "Will the high temp hit 81F?",
@@ -268,7 +271,7 @@ def test_run_discovery_deactivates_missing_markets_and_contracts(tmp_db):
 
     assert result["deactivated_contracts"] >= 1
     assert result["deactivated_markets"] >= 1
-    assert [row["local_symbol"] for row in rows] == ["KXHIGHNEW-26JUN05-B80.5"]
+    assert [row["local_symbol"] for row in rows] == [f"KXHIGHNEW-{future_symbol_day}-B80.5"]
 
 
 def test_deactivate_expired_contracts_retires_past_due_rows(tmp_db):

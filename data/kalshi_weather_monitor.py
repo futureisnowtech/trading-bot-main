@@ -32,10 +32,12 @@ _MONITOR_THREAD: Optional[threading.Thread] = None
 _ACTIVE_CITY_SCOPE_LOCK = threading.Lock()
 _ENSEMBLE_FETCH_STATE_LOCK = threading.Lock()
 _ENSEMBLE_GLOBAL_RATE_LIMIT_LOCK = threading.Lock()
+_PROVIDER_NOTICE_LOCK = threading.Lock()
 _WATERMARKS_FILE = ""
 _ACTIVE_CITY_SCOPE_CACHE: Dict[str, Any] = {"timestamp": 0.0, "city_keys": []}
 _ENSEMBLE_FETCH_STATE: Dict[str, Dict[str, Any]] = {}
 _ENSEMBLE_GLOBAL_RATE_LIMIT: Dict[str, Any] = {"until": 0.0, "reason": "", "logged_at": 0.0}
+_PROVIDER_NOTICES_EMITTED: set[str] = set()
 WEATHER_ACTIVE_CITY_REFRESH_SEC = 300
 WEATHER_ENSEMBLE_COOLDOWN_SEC = 1200
 WEATHER_ENSEMBLE_MODEL_PAUSE_SEC = 0.75
@@ -268,6 +270,215 @@ def _active_weather_city_keys() -> list[str]:
     return city_keys
 
 
+def _emit_provider_notice_once(notice_key: str, message: str) -> None:
+    with _PROVIDER_NOTICE_LOCK:
+        if notice_key in _PROVIDER_NOTICES_EMITTED:
+            return
+        _PROVIDER_NOTICES_EMITTED.add(notice_key)
+    logger.info(message)
+
+
+def _weather_model_key(model: str) -> str:
+    model_name = str(model or "").lower()
+    if "ecmwf" in model_name:
+        return "ecmwf"
+    if "graphcast" in model_name:
+        return "aigefs"
+    if "gfs" in model_name:
+        return "gfs"
+    return "other"
+
+
+def _deterministic_temp_sigma_floor(model_key: str, horizon_days: int = 0) -> float:
+    base = {
+        "gfs": 2.1,
+        "ecmwf": 1.8,
+        "aigefs": 1.6,
+    }.get(model_key, 2.0)
+    return min(5.0, base + (max(0, int(horizon_days)) * 0.45))
+
+
+def _deterministic_precip_sigma(mean_precip: float, horizon_days: int = 0) -> float:
+    return min(
+        2.0,
+        max(0.08, 0.06 + (abs(float(mean_precip)) * 0.55) + (max(0, int(horizon_days)) * 0.04)),
+    )
+
+
+def _build_weather_record_from_hourly(
+    hourly: dict[str, Any],
+    model: str,
+    *,
+    deterministic: bool,
+    forecast_source: str,
+) -> Dict[str, Any]:
+    if not hourly:
+        return {}
+
+    window_size = 26
+    hourly_time = list(hourly.get("time", []))
+    members_high, members_low, members_precip, cloud_members = [], [], [], []
+    ssrd_members = []
+    hourly_members_temp_f = {}
+    hourly_members_precip_in = {}
+    hourly_members_cloud = {}
+    hourly_members_ssrd = {}
+
+    model_key = _weather_model_key(model)
+    member_slots = [0] if deterministic else range(51 if model_key == "ecmwf" else (1 if model_key == "aigefs" else 31))
+
+    for i in member_slots:
+        member_label = f"member_{i:02d}"
+        if deterministic:
+            temp_key = "temperature_2m"
+            cloud_key = "cloud_cover"
+            precip_key = "precipitation"
+            ssrd_key = "shortwave_radiation"
+        else:
+            temp_key = "temperature_2m" if model_key == "aigefs" else f"temperature_2m_member{i:02d}"
+            cloud_key = "cloud_cover" if model_key == "aigefs" else f"cloud_cover_member{i:02d}"
+            precip_key = "precipitation" if model_key == "aigefs" else f"precipitation_member{i:02d}"
+            ssrd_key = "shortwave_radiation" if model_key == "aigefs" else f"shortwave_radiation_member{i:02d}"
+
+        if temp_key in hourly:
+            all_temps_c = hourly[temp_key]
+            temps_c = all_temps_c[:window_size]
+            if temps_c:
+                temps_f = [(float(tc) * 9 / 5) + 32 for tc in temps_c]
+                members_high.append(max(temps_f))
+                members_low.append(min(temps_f))
+            if all_temps_c:
+                hourly_members_temp_f[member_label] = [
+                    (float(tc) * 9 / 5) + 32 for tc in all_temps_c
+                ]
+
+        if precip_key in hourly:
+            all_precip_mm = hourly[precip_key]
+            p_mm = all_precip_mm[:window_size]
+            if p_mm:
+                members_precip.append(sum(float(mm) for mm in p_mm) * 0.03937)
+            if all_precip_mm:
+                hourly_members_precip_in[member_label] = [
+                    float(mm) * 0.03937 for mm in all_precip_mm
+                ]
+
+        if cloud_key in hourly:
+            all_cloud = hourly[cloud_key]
+            c_vals = all_cloud[11:17]
+            if c_vals:
+                cloud_members.append(float(np.mean(c_vals)))
+            if all_cloud:
+                hourly_members_cloud[member_label] = [float(val) for val in all_cloud]
+
+        if ssrd_key in hourly:
+            all_ssrd = hourly[ssrd_key]
+            s_vals = all_ssrd[11:17]
+            if s_vals:
+                ssrd_members.append(float(np.mean(s_vals)))
+            if all_ssrd:
+                hourly_members_ssrd[member_label] = [float(val) for val in all_ssrd]
+
+    if not members_high:
+        return {}
+
+    sigma_high = (
+        float(np.std(members_high))
+        if len(members_high) > 1
+        else _deterministic_temp_sigma_floor(model_key, horizon_days=0)
+    )
+    sigma_low = (
+        float(np.std(members_low))
+        if len(members_low) > 1
+        else _deterministic_temp_sigma_floor(model_key, horizon_days=0)
+    )
+    mean_precip = float(np.mean(members_precip)) if members_precip else 0.0
+    sigma_precip = (
+        float(np.std(members_precip))
+        if len(members_precip) > 1
+        else _deterministic_precip_sigma(mean_precip, horizon_days=0)
+    )
+
+    return {
+        "members_high": members_high,
+        "members_low": members_low,
+        "members_precip": members_precip,
+        "mean_high": float(np.mean(members_high)),
+        "sigma_high": sigma_high,
+        "mean_low": float(np.mean(members_low)),
+        "sigma_low": sigma_low,
+        "mean_precip": mean_precip,
+        "sigma_precip": sigma_precip,
+        "peak_tcdc": float(np.mean(cloud_members)) if cloud_members else 0.0,
+        "peak_ssrd": float(np.mean(ssrd_members)) if ssrd_members else None,
+        "timestamp": time.time(),
+        "hourly_time": hourly_time,
+        "hourly_members_temp_f": hourly_members_temp_f,
+        "hourly_members_precip_in": hourly_members_precip_in,
+        "hourly_members_cloud": hourly_members_cloud,
+        "hourly_members_ssrd": hourly_members_ssrd,
+        "provider_mode": "deterministic_multi_model" if deterministic else "ensemble_members",
+        "forecast_source": forecast_source,
+        "model_name": model,
+    }
+
+
+async def _fetch_open_meteo_deterministic_multimodel(
+    city_key: str,
+    lat: float,
+    lon: float,
+) -> Dict[str, Any]:
+    model_specs = [
+        ("gfs_seamless", "https://api.open-meteo.com/v1/gfs"),
+        ("ecmwf_ifs025", "https://api.open-meteo.com/v1/ecmwf"),
+        ("gfs_graphcast025", "https://api.open-meteo.com/v1/gfs"),
+    ]
+    results: dict[str, dict[str, Any]] = {}
+
+    for idx, (model, url) in enumerate(model_specs):
+        if idx and WEATHER_ENSEMBLE_MODEL_PAUSE_SEC > 0:
+            await asyncio.sleep(WEATHER_ENSEMBLE_MODEL_PAUSE_SEC)
+
+        params = {
+            "latitude": lat,
+            "longitude": lon,
+            "hourly": "temperature_2m,cloud_cover,precipitation,shortwave_radiation",
+            "models": model,
+            "timezone": "auto",
+            "forecast_days": 8,
+        }
+        try:
+            loop = asyncio.get_event_loop()
+            resp = await loop.run_in_executor(
+                None,
+                lambda: requests.get(url, params=params, timeout=15),
+            )
+            if resp.status_code != 200:
+                continue
+            data = resp.json()
+            record = _build_weather_record_from_hourly(
+                data.get("hourly", {}),
+                model,
+                deterministic=True,
+                forecast_source="open_meteo_forecast",
+            )
+            if record:
+                results[_weather_model_key(model)] = record
+        except Exception as exc:
+            logger.debug("Deterministic weather fetch failed for %s %s: %s", city_key, model, exc)
+
+    if not results:
+        return {}
+
+    final_record = results.get("gfs", list(results.values())[0]).copy()
+    final_record["ecmwf"] = results.get("ecmwf")
+    final_record["aigefs"] = results.get("aigefs")
+    final_record["provider_mode"] = "deterministic_multi_model"
+    final_record["forecast_source"] = "open_meteo_forecast"
+    final_record["city_key"] = city_key
+    final_record["timestamp"] = time.time()
+    return final_record
+
+
 def _resolve_weather_series(token: str) -> Optional[str]:
     value = str(token or "").upper()
     if not value:
@@ -378,6 +589,8 @@ def _project_contract_record(record: dict, target_date) -> dict:
         "sigma_high": float(np.std(members_high)) if len(members_high) > 1 else record.get("sigma_high", 0.5),
         "mean_low": float(np.mean(members_low)) if members_low else record.get("mean_low", 0.0),
         "sigma_low": float(np.std(members_low)) if len(members_low) > 1 else record.get("sigma_low", 0.5),
+        "mean_precip": float(np.mean(members_precip_total)) if members_precip_total else record.get("mean_precip", 0.0),
+        "sigma_precip": float(np.std(members_precip_total)) if len(members_precip_total) > 1 else record.get("sigma_precip", 0.08),
         "peak_tcdc": float(np.mean(cloud_means)) if cloud_means else float(record.get("peak_tcdc") or 0.0),
         "peak_ssrd": float(np.mean(ssrd_means)) if ssrd_means else record.get("peak_ssrd"),
         "timestamp": record.get("timestamp", time.time()),
@@ -387,7 +600,30 @@ def _project_contract_record(record: dict, target_date) -> dict:
         "hourly_members_precip_in": members_precip,
         "hourly_members_cloud": members_cloud,
         "hourly_members_ssrd": members_ssrd,
+        "provider_mode": record.get("provider_mode", "ensemble_members"),
+        "forecast_source": record.get("forecast_source", ""),
+        "model_name": record.get("model_name", ""),
     }
+
+    if projected["provider_mode"] == "deterministic_multi_model":
+        base_date = None
+        if hourly_time:
+            try:
+                base_date = datetime.fromisoformat(str(hourly_time[0]).replace("Z", "+00:00")).date()
+            except Exception:
+                try:
+                    base_date = datetime.strptime(str(hourly_time[0])[:10], "%Y-%m-%d").date()
+                except Exception:
+                    base_date = None
+        horizon_days = max(0, (target_date - base_date).days) if base_date else 0
+        model_key = _weather_model_key(projected.get("model_name", ""))
+        projected["sigma_high"] = _deterministic_temp_sigma_floor(model_key, horizon_days=horizon_days)
+        projected["sigma_low"] = _deterministic_temp_sigma_floor(model_key, horizon_days=horizon_days)
+        projected["sigma_precip"] = _deterministic_precip_sigma(
+            projected.get("mean_precip", 0.0),
+            horizon_days=horizon_days,
+        )
+        projected["target_horizon_days"] = horizon_days
 
     nested_ecmwf = record.get("ecmwf")
     if nested_ecmwf:
@@ -485,7 +721,14 @@ async def fetch_open_meteo_ensemble(city_key: str, lat: float, lon: float) -> Di
     if cached:
         return cached
     if _global_ensemble_rate_limit_active():
-        return {}
+        _emit_provider_notice_once(
+            "deterministic_due_to_quota",
+            "Weather provider running on deterministic fallback because Open-Meteo ensemble quota is exhausted.",
+        )
+        fallback = await _fetch_open_meteo_deterministic_multimodel(city_key, lat, lon)
+        if fallback:
+            _COORDINATE_CACHE[cache_key] = fallback
+        return fallback
 
     slot_status = _claim_ensemble_fetch_slot(cache_key)
     if slot_status == "cooldown":
@@ -495,7 +738,20 @@ async def fetch_open_meteo_ensemble(city_key: str, lat: float, lon: float) -> Di
 
     import os
     api_key = os.getenv("OPEN_METEO_API_KEY")
-    base_url = "https://customer-api.open-meteo.com/v1/ensemble" if api_key else "https://ensemble-api.open-meteo.com/v1/ensemble"
+    if not api_key:
+        _emit_provider_notice_once(
+            "deterministic_due_to_missing_key",
+            "OPEN_METEO_API_KEY absent; weather provider running on deterministic GFS/ECMWF/GraphCast fallback.",
+        )
+        try:
+            fallback = await _fetch_open_meteo_deterministic_multimodel(city_key, lat, lon)
+            if fallback:
+                _COORDINATE_CACHE[cache_key] = fallback
+            return fallback
+        finally:
+            _release_ensemble_fetch_slot(cache_key)
+
+    base_url = "https://customer-api.open-meteo.com/v1/ensemble"
     
     # v19.2: Sovereign Grand Ensemble (Institutional Blend)
     # GFS = 31, ECMWF = 51, GRAPHCAST (AI) = 1
@@ -543,7 +799,10 @@ async def fetch_open_meteo_ensemble(city_key: str, lat: float, lon: float) -> Di
                                 )
                             except Exception:
                                 pass
-                        break
+                        fallback = await _fetch_open_meteo_deterministic_multimodel(city_key, lat, lon)
+                        if fallback:
+                            _COORDINATE_CACHE[cache_key] = fallback
+                        return fallback
                     should_log = _enter_ensemble_cooldown(
                         cache_key,
                         city_key=city_key,
@@ -569,132 +828,38 @@ async def fetch_open_meteo_ensemble(city_key: str, lat: float, lon: float) -> Di
                             )
                         except Exception:
                             pass
-                    break
+                    fallback = await _fetch_open_meteo_deterministic_multimodel(city_key, lat, lon)
+                    if fallback:
+                        _COORDINATE_CACHE[cache_key] = fallback
+                    return fallback
 
                 if resp.status_code != 200:
                     continue
 
                 data = resp.json()
-                hourly = data.get("hourly", {})
-                if not hourly:
-                    continue
-
-                window_size = 26
-                hourly_time = list(hourly.get("time", []))
-                members_high, members_low, members_precip, cloud_members = [], [], [], []
-                ssrd_members = []
-                hourly_members_temp_f = {}
-                hourly_members_precip_in = {}
-                hourly_members_cloud = {}
-                hourly_members_ssrd = {}
-
-                # Model member counts
-                if "ecmwf" in model:
-                    max_members = 51
-                elif "graphcast" in model:
-                    max_members = 1  # Deterministic AI model
-                else:
-                    max_members = 31
-
-                for i in range(max_members):
-                    # For GraphCast, key is just temperature_2m
-                    if "graphcast" in model:
-                        temp_key = "temperature_2m"
-                    else:
-                        temp_key = f"temperature_2m_member{i:02d}"
-
-                    cloud_key = (
-                        f"cloud_cover_member{i:02d}" if "graphcast" not in model else "cloud_cover"
-                    )
-                    precip_key = (
-                        f"precipitation_member{i:02d}" if "graphcast" not in model else "precipitation"
-                    )
-                    ssrd_key = (
-                        f"shortwave_radiation_member{i:02d}"
-                        if "graphcast" not in model
-                        else "shortwave_radiation"
-                    )
-
-                    if temp_key in hourly:
-                        all_temps_c = hourly[temp_key]
-                        temps_c = all_temps_c[:window_size]
-                        if temps_c:
-                            temps_f = [(tc * 9 / 5) + 32 for tc in temps_c]
-                            members_high.append(max(temps_f))
-                            members_low.append(min(temps_f))
-                        if all_temps_c:
-                            hourly_members_temp_f[f"member_{i:02d}"] = [
-                                (float(tc) * 9 / 5) + 32 for tc in all_temps_c
-                            ]
-
-                    if precip_key in hourly:
-                        all_precip_mm = hourly[precip_key]
-                        p_mm = all_precip_mm[:window_size]
-                        if p_mm:
-                            val = sum(p_mm) * 0.03937
-                            members_precip.append(val)
-                        if all_precip_mm:
-                            hourly_members_precip_in[f"member_{i:02d}"] = [
-                                float(mm) * 0.03937 for mm in all_precip_mm
-                            ]
-
-                    if cloud_key in hourly:
-                        all_cloud = hourly[cloud_key]
-                        c_vals = all_cloud[11:17]  # Peak heating 11 AM - 4 PM
-                        if c_vals:
-                            cloud_members.append(np.mean(c_vals))
-                        if all_cloud:
-                            hourly_members_cloud[f"member_{i:02d}"] = [
-                                float(val) for val in all_cloud
-                            ]
-
-                    if ssrd_key in hourly:
-                        all_ssrd = hourly[ssrd_key]
-                        s_vals = all_ssrd[11:17]
-                        if s_vals:
-                            ssrd_members.append(float(np.mean(s_vals)))
-                        if all_ssrd:
-                            hourly_members_ssrd[f"member_{i:02d}"] = [
-                                float(val) for val in all_ssrd
-                            ]
-
-                if members_high:
-                    if "gfs_seamless" in model:
-                        m_type = "gfs"
-                    elif "ecmwf" in model:
-                        m_type = "ecmwf"
-                    elif "graphcast" in model:
-                        m_type = "aigefs"
-                    else:
-                        m_type = "other"
-
-                    results[m_type] = {
-                        "members_high": members_high,
-                        "members_low": members_low,
-                        "members_precip": members_precip,
-                        "mean_high": float(np.mean(members_high)),
-                        "sigma_high": float(np.std(members_high)) if len(members_high) > 1 else 0.5,
-                        "mean_low": float(np.mean(members_low)),
-                        "sigma_low": float(np.std(members_low)) if len(members_low) > 1 else 0.5,
-                        "peak_tcdc": float(np.mean(cloud_members)) if cloud_members else 0.0,
-                        "peak_ssrd": float(np.mean(ssrd_members)) if ssrd_members else None,
-                        "timestamp": time.time(),
-                        "hourly_time": hourly_time,
-                        "hourly_members_temp_f": hourly_members_temp_f,
-                        "hourly_members_precip_in": hourly_members_precip_in,
-                        "hourly_members_cloud": hourly_members_cloud,
-                        "hourly_members_ssrd": hourly_members_ssrd,
-                    }
+                record = _build_weather_record_from_hourly(
+                    data.get("hourly", {}),
+                    model,
+                    deterministic=False,
+                    forecast_source="open_meteo_ensemble",
+                )
+                if record:
+                    results[_weather_model_key(model)] = record
             except Exception as e:
                 logger.debug(f"Fetch failed for {city_key} {model}: {e}")
 
         if not results:
-            return {}
+            fallback = await _fetch_open_meteo_deterministic_multimodel(city_key, lat, lon)
+            if fallback:
+                _COORDINATE_CACHE[cache_key] = fallback
+            return fallback
 
         # Unified City Record
         final_record = results.get("gfs", list(results.values())[0]).copy()
         final_record["ecmwf"] = results.get("ecmwf")
         final_record["aigefs"] = results.get("aigefs")
+        final_record["provider_mode"] = "ensemble_members"
+        final_record["forecast_source"] = "open_meteo_ensemble"
 
         # Update cache
         _COORDINATE_CACHE[cache_key] = final_record

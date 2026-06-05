@@ -108,14 +108,76 @@ def _weather_contract_yes_probability(
     *,
     contract_name: str = "",
     strike: float | None = None,
+    resolution_at: str = "",
+    last_trade_at: str = "",
 ) -> float | None:
+    from data.kalshi_weather_monitor import get_contract_weather_data
     from forecast.weather_contracts import yes_probability_from_weather_data
+
+    if contract_name or strike is not None or resolution_at or last_trade_at:
+        projected = get_contract_weather_data(
+            ticker,
+            contract_name=contract_name,
+            strike=strike,
+            resolution_at=resolution_at,
+            last_trade_at=last_trade_at,
+        )
+        if projected:
+            w_data = projected
 
     return yes_probability_from_weather_data(
         ticker=ticker,
         w_data=w_data,
         contract_name=contract_name,
         strike=strike,
+    )
+
+
+def _held_model_probability(right: str, model_yes: float | None) -> float | None:
+    if model_yes is None:
+        return None
+    return model_yes if right == "C" else (1.0 - model_yes)
+
+
+def _remaining_edge_to_resolution(held_model_p: float | None, bid_price: float) -> float | None:
+    if held_model_p is None or held_model_p <= 0:
+        return None
+    from config import KALSHI_FEE_PER_CONTRACT
+
+    return float(held_model_p) - float(bid_price) - float(KALSHI_FEE_PER_CONTRACT)
+
+
+def _should_time_decay_exit(hours_to_resolution: float, bid_price: float, remaining_edge: float | None) -> bool:
+    if remaining_edge is None:
+        return False
+    from config import (
+        KALSHI_EXIT_REDEPLOY_EDGE,
+        KALSHI_EXIT_TIME_DECAY_BID_FLOOR,
+        KALSHI_EXIT_TIME_DECAY_HOURS,
+    )
+
+    return (
+        hours_to_resolution <= float(KALSHI_EXIT_TIME_DECAY_HOURS)
+        and bid_price >= float(KALSHI_EXIT_TIME_DECAY_BID_FLOOR)
+        and remaining_edge <= float(KALSHI_EXIT_REDEPLOY_EDGE)
+    )
+
+
+def _should_model_invalidation_exit(
+    entry_held_p: float | None,
+    held_model_p: float | None,
+    remaining_edge: float | None,
+) -> bool:
+    if entry_held_p is None or held_model_p is None or remaining_edge is None:
+        return False
+    from config import (
+        KALSHI_EXIT_MODEL_INVALIDATION_DELTA,
+        KALSHI_EXIT_REDEPLOY_EDGE,
+    )
+
+    return (
+        held_model_p <= (entry_held_p - float(KALSHI_EXIT_MODEL_INVALIDATION_DELTA))
+        and remaining_edge <= max(0.0, float(KALSHI_EXIT_REDEPLOY_EDGE) - 0.01)
     )
 
 
@@ -377,6 +439,7 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
             if open_positions:
                 from data.kalshi_weather_monitor import get_weather_data
                 from forecast.db import mark_forecast_position_closed
+                from forecast.db import get_contract_metadata
                 
                 for pos in open_positions:
                     ticker = pos.get("local_symbol", "")
@@ -388,7 +451,30 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                     current_price = float(quote.get(bid_key) or pos.get("entry_price") or 0.50)
                     
                     # 1. Sovereign Salvage (Dead-Trade Purge)
-                    model_yes = _weather_contract_yes_probability(ticker, w_data)
+                    contract_meta = get_contract_metadata(ticker)
+                    contract_name = (
+                        str(contract_meta.get("contract_name") or "")
+                        if contract_meta
+                        else ""
+                    )
+                    strike = (
+                        float(contract_meta.get("strike") or 0.0)
+                        if contract_meta and contract_meta.get("strike") is not None
+                        else None
+                    )
+                    resolution_at = (
+                        str(contract_meta.get("resolution_at") or "")
+                        if contract_meta
+                        else ""
+                    )
+                    model_yes = _weather_contract_yes_probability(
+                        ticker,
+                        w_data,
+                        contract_name=contract_name,
+                        strike=strike,
+                        resolution_at=resolution_at,
+                        last_trade_at=str(pos.get("last_trade_at") or ""),
+                    )
                     if model_yes is not None:
                         live_prob = model_yes if side == "YES" else (1.0 - model_yes)
                         if live_prob < 0.15:
@@ -663,41 +749,28 @@ def run_position_monitor() -> None:
 
         # 1. Pull Current Broker Reality
         broker_positions = broker.get_positions()
-        broker_tickers = {p["local_symbol"] for p in broker_positions if p.get("qty", 0) > 0}
         
-        # 2. Pull Local DB Expectation
+        # 2. Pull Local DB Expectation and reconcile it to broker reality
         from config import DB_PATH
 
         db_path = DB_PATH
-        from forecast.db import get_open_forecast_positions, mark_forecast_position_closed
+        from forecast.db import (
+            get_open_forecast_positions,
+            reconcile_forecast_positions,
+        )
+
+        recon = reconcile_forecast_positions(broker_positions, db_path=db_path)
+        if recon.get("adopted"):
+            logger.info(
+                "[Sovereign Recon] Auto-adopted %s broker position(s) into DB.",
+                recon["adopted"],
+            )
+        if recon.get("closed"):
+            logger.info(
+                "[Sovereign Recon] Closed %s stale DB position(s) missing at broker.",
+                recon["closed"],
+            )
         db_positions = get_open_forecast_positions(db_path=db_path)
-
-        # ── v19.1.10: Manual Exit Detection ──────────────────────────────────
-        for db_pos in db_positions:
-            ticker = db_pos["ticker"]
-            if ticker not in broker_tickers:
-                logger.info(f"[Sovereign Recon] Manual exit detected for {ticker}. Cleaning up DB.")
-                mark_forecast_position_closed(ticker, exit_type="manual_exit", db_path=db_path)
-
-        # ── v19.1.10: Manual Entry Adoption ──────────────────────────────────
-        from forecast.db import insert_forecast_position
-        for broker_pos in broker_positions:
-            ticker = broker_pos["local_symbol"]
-            qty = broker_pos.get("qty", 0)
-            if not qty: continue
-            
-            # If not in DB, adopt it
-            if not any(db_pos["ticker"] == ticker for db_pos in db_positions):
-                logger.info(f"[Sovereign Recon] Auto-adopting manual trade for {ticker} (qty={qty})")
-                insert_forecast_position(
-                    ticker=ticker,
-                    qty=qty,
-                    entry_price=broker_pos.get("entry_price") or broker_pos.get("mid") or 0.50,
-                    side=broker_pos.get("side", "YES"),
-                    db_path=db_path
-                )
-                # RC: Re-fetch or add to local list to prevent duplicate logic below
-                db_positions.append({"ticker": ticker})
 
         # ── v19.1.10: Standard Flattening / Exit Protocol ───────────────────
         now = datetime.now(timezone.utc)
@@ -713,6 +786,7 @@ def run_position_monitor() -> None:
 
             # Check resolution: has the contract expired?
             resolved = False
+            hours_to_resolution = 0.0
             if last_trade:
                 try:
                     # v19.1.6: Support ISO format and standard format
@@ -720,6 +794,9 @@ def run_position_monitor() -> None:
                     expiry = date_parse(last_trade)
                     if expiry.tzinfo is None:
                         expiry = expiry.replace(tzinfo=timezone.utc)
+                    hours_to_resolution = max(
+                        0.0, (expiry - now).total_seconds() / 3600.0
+                    )
                     if now >= expiry:
                         resolved = True
                         logger.info(
@@ -731,6 +808,9 @@ def run_position_monitor() -> None:
                         fmt = "%Y%m%d %H:%M:%S" if " " in last_trade else "%Y%m%d"
                         expiry = datetime.strptime(last_trade, fmt).replace(
                             tzinfo=timezone.utc
+                        )
+                        hours_to_resolution = max(
+                            0.0, (expiry - now).total_seconds() / 3600.0
                         )
                         if now >= expiry:
                             resolved = True
@@ -754,7 +834,7 @@ def run_position_monitor() -> None:
                     if is_weather:
                         from forecast.db import get_contract_metadata
                         from forecast.weather_contracts import resolve_weather_contract
-                        from data.kalshi_weather_monitor import get_weather_data
+                        from data.kalshi_weather_monitor import get_contract_weather_data
 
                         contract_meta = get_contract_metadata(local_symbol)
                         contract_name = (
@@ -774,10 +854,18 @@ def run_position_monitor() -> None:
                         )
 
                         # Get current model probability
-                        w_data = get_weather_data(local_symbol.split('-')[0])
+                        w_data = get_contract_weather_data(
+                            local_symbol,
+                            contract_name=contract_name,
+                            strike=strike,
+                            resolution_at=str(contract_meta.get("resolution_at") or "") if contract_meta else "",
+                            last_trade_at=str(last_trade or ""),
+                        )
                         if not w_data or semantics is None or semantics.ambiguous:
                             model_yes = 0.0
                             held_model_p = 0.0
+                            remaining_edge = None
+                            entry_held_p = None
                             intraday = {}
                             metar_temp = None
                             hrrr_high = None
@@ -790,10 +878,21 @@ def run_position_monitor() -> None:
                                     w_data,
                                     contract_name=contract_name,
                                     strike=strike,
+                                    resolution_at=str(contract_meta.get("resolution_at") or "") if contract_meta else "",
+                                    last_trade_at=str(last_trade or ""),
                                 )
                                 or 0.0
                             )
-                            held_model_p = model_yes if right == "C" else (1.0 - model_yes)
+                            held_model_p = _held_model_probability(right, model_yes) or 0.0
+                            entry_model_yes = pos.get("forecast_yes_prob")
+                            entry_held_p = None
+                            if entry_model_yes is not None:
+                                try:
+                                    entry_yes = float(entry_model_yes)
+                                    entry_held_p = _held_model_probability(right, entry_yes)
+                                except (TypeError, ValueError):
+                                    entry_held_p = None
+                            remaining_edge = _remaining_edge_to_resolution(held_model_p, bid_price)
                             intraday = w_data.get("intraday", {})
                             metar_temp = intraday.get("metar_temp")
                             hrrr_high = intraday.get("hrrr_high")
@@ -812,6 +911,37 @@ def run_position_monitor() -> None:
                             logger.warning(
                                 f"[Sovereign Exit] SL Triggered: {local_symbol} "
                                 f"held_p={held_model_p:.2f} < 0.50"
+                            )
+                            resolved = True
+
+                        # RULE 3: Model Invalidation Delta
+                        # If the live model has moved materially against the entry
+                        # and the remaining edge is mostly gone, redeploy capital.
+                        elif _should_model_invalidation_exit(
+                            entry_held_p,
+                            held_model_p,
+                            remaining_edge,
+                        ):
+                            logger.warning(
+                                f"[Sovereign Exit] INVALIDATION: {local_symbol} "
+                                f"entry_p={entry_held_p:.2f} live_p={held_model_p:.2f} "
+                                f"remaining_edge={remaining_edge:.3f}"
+                            )
+                            resolved = True
+
+                        # RULE 4: Time-Decay Redeploy
+                        # When the market has already priced most of the thesis and
+                        # little edge remains, redeploy instead of waiting for the
+                        # final settlement jump.
+                        elif _should_time_decay_exit(
+                            hours_to_resolution,
+                            bid_price,
+                            remaining_edge,
+                        ):
+                            logger.info(
+                                f"[Sovereign Exit] TIME-DECAY REDEPLOY: {local_symbol} "
+                                f"hours_to_res={hours_to_resolution:.1f} bid={bid_price:.2f} "
+                                f"remaining_edge={remaining_edge:.3f}"
                             )
                             resolved = True
                         
@@ -1074,7 +1204,12 @@ def _cache_forecast_state():
 
         broker = _get_broker()
         if not broker.is_connected(): return
-        
+
+        try:
+            broker.sync_positions()
+        except Exception as exc:
+            logger.debug("[ForecastRunner] Broker sync failed before cache refresh: %s", exc)
+
         positions = broker.get_positions()
         enriched = []
         total_pnl = 0.0

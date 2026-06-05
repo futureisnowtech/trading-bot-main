@@ -15,6 +15,8 @@ from config import (
 )
 from data.kalshi_weather_monitor import start_weather_monitor
 from forecast.runner import run_execution_cycle
+from runtime.position_reconciler import run_reconciliation
+from runtime.storage_maintenance import maintain_runtime_storage
 from runtime.storage_guard import runtime_storage_status
 
 
@@ -43,12 +45,21 @@ def main() -> int:
     bankroll = float(ACCOUNT_SIZE)
 
     start_weather_monitor()
+    try:
+        run_reconciliation()
+    except Exception:
+        logger.exception("Position reconciliation failed at startup")
     logger.info("Execution daemon online (sleep=%ss).", sleep_seconds)
 
     try:
         while True:
             cycle_started = time.time()
             try:
+                try:
+                    maintain_runtime_storage()
+                except Exception:
+                    logger.exception("Runtime storage maintenance failed")
+
                 storage = runtime_storage_status()
                 if not storage["ok"]:
                     logger.error(

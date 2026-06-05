@@ -211,6 +211,95 @@ def get_open_forecast_positions(db_path: str | None = None) -> list[dict]:
         return [dict(r) for r in rows]
 
 
+def sync_open_forecast_position(
+    ticker: str,
+    qty: float,
+    entry_price: float,
+    side: str,
+    db_path: str | None = None,
+) -> None:
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).isoformat()
+    with _conn(db_path) as c:
+        c.execute(
+            """
+            INSERT INTO forecast_positions
+                (ticker, qty, entry_price, side, active, opened_at, closed_at, exit_type)
+            VALUES (?, ?, ?, ?, 1, ?, NULL, NULL)
+            ON CONFLICT(ticker) DO UPDATE SET
+                qty=excluded.qty,
+                entry_price=excluded.entry_price,
+                side=excluded.side,
+                active=1,
+                opened_at=CASE
+                    WHEN forecast_positions.active=1 THEN forecast_positions.opened_at
+                    ELSE excluded.opened_at
+                END,
+                closed_at=NULL,
+                exit_type=NULL
+            """,
+            (ticker, qty, entry_price, side, now),
+        )
+        c.commit()
+
+
+def reconcile_forecast_positions(
+    broker_positions: list[dict],
+    *,
+    db_path: str | None = None,
+    close_missing_exit_type: str = "manual_exit",
+) -> dict:
+    """Mirror broker reality into the local forecast_positions cache."""
+    open_db_positions = get_open_forecast_positions(db_path=db_path)
+    broker_by_ticker = {
+        str(pos.get("local_symbol") or ""): pos
+        for pos in broker_positions
+        if str(pos.get("local_symbol") or "") and float(pos.get("qty") or 0.0) > 0
+    }
+    db_tickers = {str(pos.get("ticker") or "") for pos in open_db_positions if pos.get("ticker")}
+
+    closed = 0
+    adopted = 0
+    refreshed = 0
+
+    for db_pos in open_db_positions:
+        ticker = str(db_pos.get("ticker") or "")
+        if ticker and ticker not in broker_by_ticker:
+            mark_forecast_position_closed(
+                ticker,
+                exit_type=close_missing_exit_type,
+                db_path=db_path,
+            )
+            closed += 1
+
+    for ticker, broker_pos in broker_by_ticker.items():
+        sync_open_forecast_position(
+            ticker=ticker,
+            qty=float(broker_pos.get("qty") or 0.0),
+            entry_price=float(
+                broker_pos.get("entry_price")
+                or broker_pos.get("entry")
+                or broker_pos.get("mid")
+                or 0.0
+            ),
+            side=str(broker_pos.get("side") or "YES"),
+            db_path=db_path,
+        )
+        if ticker in db_tickers:
+            refreshed += 1
+        else:
+            adopted += 1
+
+    return {
+        "broker_positions": len(broker_by_ticker),
+        "db_positions_before": len(open_db_positions),
+        "adopted": adopted,
+        "refreshed": refreshed,
+        "closed": closed,
+    }
+
+
 def mark_forecast_position_closed(
     ticker: str, exit_type: str = "resolved", db_path: str | None = None
 ) -> None:

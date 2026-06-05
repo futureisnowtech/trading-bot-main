@@ -340,19 +340,23 @@ def get_paired_quotes(market_id: int, strike: float, last_trade_at: str, db_path
     """
     pair = {"yes_quote": None, "no_quote": None}
 
-    # Simple fallback: find latest for this strike
     with sqlite3.connect(db_path or DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
-        res = conn.execute("""
-            SELECT q.* FROM forecast_quotes q
-            JOIN forecast_contracts c ON q.contract_id = c.id
-            WHERE c.market_id = ? AND c.strike = ? AND c.last_trade_at = ?
-            ORDER BY q.ts DESC LIMIT 2
-        """, (market_id, strike, last_trade_at)).fetchall()
-
-        for r in res:
-            if r['side'] == 'YES': pair['yes_quote'] = dict(r)
-            else: pair['no_quote'] = dict(r)
+        for side_key, pair_key in (("YES", "yes_quote"), ("NO", "no_quote")):
+            row = conn.execute(
+                """
+                SELECT q.*
+                FROM forecast_quotes q
+                JOIN forecast_contracts c ON q.contract_id = c.id
+                WHERE c.market_id = ? AND c.strike = ? AND c.last_trade_at = ?
+                  AND q.side = ?
+                ORDER BY q.ts DESC
+                LIMIT 1
+                """,
+                (market_id, strike, last_trade_at, side_key),
+            ).fetchone()
+            if row:
+                pair[pair_key] = dict(row)
 
     if pair["yes_quote"] and pair["no_quote"]:
         yes_ask = float(pair["yes_quote"].get("ask") or 0.0)

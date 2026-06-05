@@ -28,7 +28,7 @@ class TestWeatherSovereign(unittest.TestCase):
         # -5C * 9/5 + 32 = 23F
         self.assertEqual(temp_f_neg, 23.0)
 
-    @patch('forecast.strategy_engine.get_weather_data')
+    @patch('forecast.strategy_engine.get_contract_weather_data')
     def test_ecmwf_convergence(self, mock_get_weather):
         """Verify GFS + ECMWF convergence (1.5x multiplier)."""
         ticker = "KXHIGHNY-26JUN01-B75.5"
@@ -58,7 +58,7 @@ class TestWeatherSovereign(unittest.TestCase):
         self.assertAlmostEqual(conf, 1.455)
         self.assertIn("conv_mult=1.5x", factors)
 
-    @patch('forecast.strategy_engine.get_weather_data')
+    @patch('forecast.strategy_engine.get_contract_weather_data')
     def test_ecmwf_divergence_veto(self, mock_get_weather):
         """Verify GFS + ECMWF divergence veto (gap > 40%)."""
         ticker = "KXHIGHNY-26JUN01-B75.5"

@@ -8,12 +8,16 @@ live execution loop via a low-latency shadow state dictionary.
 
 import asyncio
 import logging
+import os
+import re
 import threading
 import time
 from copy import deepcopy
+from datetime import date, datetime
 from typing import Any, Dict, Optional
 
 import numpy as np
+import pytz
 import requests
 
 logger = logging.getLogger("weather_monitor")
@@ -25,6 +29,14 @@ WEATHER_STATE_TTL_SEC = 21600
 _STATE_LOCK = threading.Lock()
 _MONITOR_LOCK = threading.Lock()
 _MONITOR_THREAD: Optional[threading.Thread] = None
+_WATERMARKS_FILE = ""
+
+try:
+    from config import DB_PATH as _DB_PATH
+
+    _WATERMARKS_FILE = os.path.join(os.path.dirname(_DB_PATH), "weather_watermarks.json")
+except Exception:
+    _WATERMARKS_FILE = ""
 
 # Kalshi Station Mappings (Lat/Lon)
 # Refined v19.1.10: Official ASOS Settlement Stations
@@ -134,13 +146,190 @@ def _resolve_weather_series(token: str) -> Optional[str]:
     return None
 
 
-def _intraday_payload(city_key: str, metar: Dict[str, Any], hrrr: Dict[str, Any]) -> Dict[str, Any]:
+def _station_for_series(series: str) -> Optional[dict]:
+    city_key = _SERIES_TO_CITY.get(series)
+    if city_key is None:
+        return None
+    return STATIONS.get(city_key)
+
+
+def _parse_contract_local_date(
+    ticker: str,
+    *,
+    station: Optional[dict] = None,
+    resolution_at: str = "",
+    last_trade_at: str = "",
+) -> Optional[date]:
+    symbol = str(ticker or "").upper()
+    match = re.search(r"-(\d{2}[A-Z]{3}\d{2})-", symbol)
+    if match:
+        try:
+            return datetime.strptime(match.group(1), "%y%B%d").date()
+        except ValueError:
+            try:
+                return datetime.strptime(match.group(1), "%y%b%d").date()
+            except ValueError:
+                pass
+
+    tz_name = (station or {}).get("tz", "UTC")
+    local_tz = pytz.timezone(tz_name)
+    for raw in (resolution_at, last_trade_at):
+        text = str(raw or "").strip()
+        if not text:
+            continue
+        try:
+            if "T" in text:
+                dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=pytz.UTC)
+                return dt.astimezone(local_tz).date()
+            if " " in text:
+                dt = datetime.strptime(text, "%Y%m%d %H:%M:%S").replace(tzinfo=pytz.UTC)
+                return dt.astimezone(local_tz).date()
+            return datetime.strptime(text, "%Y%m%d").date()
+        except Exception:
+            continue
+    return None
+
+
+def _target_day_indices(hourly_time: list[str], target_date) -> list[int]:
+    indices = []
+    target_label = target_date.isoformat()
+    for idx, raw_time in enumerate(hourly_time or []):
+        if str(raw_time).startswith(target_label):
+            indices.append(idx)
+    return indices
+
+
+def _reduce_member_projection(
+    member_series: dict[str, list[float]],
+    indices: list[int],
+    reducer,
+) -> list[float]:
+    values: list[float] = []
+    if not indices:
+        return values
+    for series in (member_series or {}).values():
+        bucket = [series[idx] for idx in indices if idx < len(series)]
+        if bucket:
+            values.append(float(reducer(bucket)))
+    return values
+
+
+def _project_contract_record(record: dict, target_date) -> dict:
+    if not record:
+        return {}
+
+    hourly_time = list(record.get("hourly_time") or [])
+    indices = _target_day_indices(hourly_time, target_date)
+    if not indices:
+        return {}
+
+    members_temp = record.get("hourly_members_temp_f") or {}
+    members_precip = record.get("hourly_members_precip_in") or {}
+    members_cloud = record.get("hourly_members_cloud") or {}
+
+    members_high = _reduce_member_projection(members_temp, indices, max)
+    members_low = _reduce_member_projection(members_temp, indices, min)
+    members_precip_total = _reduce_member_projection(members_precip, indices, sum)
+    cloud_means = _reduce_member_projection(members_cloud, indices, np.mean)
+
+    projected = {
+        "members_high": members_high,
+        "members_low": members_low,
+        "members_precip": members_precip_total,
+        "mean_high": float(np.mean(members_high)) if members_high else record.get("mean_high", 0.0),
+        "sigma_high": float(np.std(members_high)) if len(members_high) > 1 else record.get("sigma_high", 0.5),
+        "mean_low": float(np.mean(members_low)) if members_low else record.get("mean_low", 0.0),
+        "sigma_low": float(np.std(members_low)) if len(members_low) > 1 else record.get("sigma_low", 0.5),
+        "peak_tcdc": float(np.mean(cloud_means)) if cloud_means else float(record.get("peak_tcdc") or 0.0),
+        "timestamp": record.get("timestamp", time.time()),
+        "target_local_date": target_date.isoformat(),
+        "hourly_time": hourly_time,
+        "hourly_members_temp_f": members_temp,
+        "hourly_members_precip_in": members_precip,
+        "hourly_members_cloud": members_cloud,
+    }
+
+    nested_ecmwf = record.get("ecmwf")
+    if nested_ecmwf:
+        projected["ecmwf"] = _project_contract_record(nested_ecmwf, target_date)
+    else:
+        projected["ecmwf"] = None
+
+    nested_aigefs = record.get("aigefs")
+    if nested_aigefs:
+        projected["aigefs"] = _project_contract_record(nested_aigefs, target_date)
+    else:
+        projected["aigefs"] = None
+
+    return projected
+
+
+def _watermark_storage_path() -> str:
+    return _WATERMARKS_FILE
+
+
+def _load_watermarks() -> dict[str, float]:
+    path = _watermark_storage_path()
+    if not path or not os.path.exists(path):
+        return {}
+    try:
+        import json
+
+        with open(path, "r", encoding="utf-8") as handle:
+            raw = json.load(handle)
+        return {str(k): float(v) for k, v in dict(raw).items()}
+    except Exception:
+        return {}
+
+
+def _persist_watermarks(watermarks: dict[str, float]) -> None:
+    path = _watermark_storage_path()
+    if not path:
+        return
+    try:
+        import json
+
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(watermarks, handle, indent=2, sort_keys=True)
+    except Exception as exc:
+        logger.debug("Watermark persist failed: %s", exc)
+
+
+def _station_local_day(city_key: str) -> str:
+    station = STATIONS.get(city_key, {})
+    tz_name = station.get("tz", "UTC")
+    return datetime.now(pytz.timezone(tz_name)).strftime("%Y-%m-%d")
+
+
+def _intraday_payload(
+    city_key: str,
+    metar: Dict[str, Any],
+    hrrr: Dict[str, Any],
+    *,
+    watermarks: Optional[dict[str, float]] = None,
+) -> Dict[str, Any]:
     cur_temp = metar.get("temp_f")
+    daily_max = cur_temp
+    daily_min = cur_temp
+
+    if watermarks is not None:
+        today_str = _station_local_day(city_key)
+        max_key = f"{city_key}|{today_str}|max"
+        min_key = f"{city_key}|{today_str}|min"
+        if cur_temp is not None:
+            watermarks[max_key] = max(cur_temp, watermarks.get(max_key, cur_temp))
+            watermarks[min_key] = min(cur_temp, watermarks.get(min_key, cur_temp))
+        daily_max = watermarks.get(max_key, cur_temp)
+        daily_min = watermarks.get(min_key, cur_temp)
+
     return {
         "city_key": city_key,
         "metar_temp": cur_temp,
-        "daily_max": cur_temp,
-        "daily_min": cur_temp,
+        "daily_max": daily_max,
+        "daily_min": daily_min,
         "metar_raw": metar.get("raw"),
         "hrrr_high": hrrr.get("hrrr_high"),
         "hrrr_trend": hrrr.get("hrrr_trend"),
@@ -176,7 +365,8 @@ async def fetch_open_meteo_ensemble(city_key: str, lat: float, lon: float) -> Di
             "longitude": lon,
             "hourly": "temperature_2m,cloud_cover,precipitation",
             "models": model,
-            "timezone": "auto"
+            "timezone": "auto",
+            "forecast_days": 8,
         }
         if api_key: params["apikey"] = api_key
         
@@ -194,8 +384,12 @@ async def fetch_open_meteo_ensemble(city_key: str, lat: float, lon: float) -> Di
             hourly = data.get("hourly", {})
             if not hourly: continue
 
-            window_size = 26 
+            window_size = 26
+            hourly_time = list(hourly.get("time", []))
             members_high, members_low, members_precip, cloud_members = [], [], [], []
+            hourly_members_temp_f = {}
+            hourly_members_precip_in = {}
+            hourly_members_cloud = {}
             
             # Model member counts
             if "ecmwf" in model: max_members = 51
@@ -213,21 +407,34 @@ async def fetch_open_meteo_ensemble(city_key: str, lat: float, lon: float) -> Di
                 precip_key = f"precipitation_member{i:02d}" if "graphcast" not in model else "precipitation"
                 
                 if temp_key in hourly:
-                    temps_c = hourly[temp_key][:window_size]
+                    all_temps_c = hourly[temp_key]
+                    temps_c = all_temps_c[:window_size]
                     if temps_c:
                         temps_f = [(tc * 9/5) + 32 for tc in temps_c]
                         members_high.append(max(temps_f))
                         members_low.append(min(temps_f))
+                    if all_temps_c:
+                        hourly_members_temp_f[f"member_{i:02d}"] = [
+                            (float(tc) * 9 / 5) + 32 for tc in all_temps_c
+                        ]
                 
                 if precip_key in hourly:
-                    p_mm = hourly[precip_key][:window_size]
-                    if p_mm: 
+                    all_precip_mm = hourly[precip_key]
+                    p_mm = all_precip_mm[:window_size]
+                    if p_mm:
                         val = sum(p_mm) * 0.03937
                         members_precip.append(val)
+                    if all_precip_mm:
+                        hourly_members_precip_in[f"member_{i:02d}"] = [
+                            float(mm) * 0.03937 for mm in all_precip_mm
+                        ]
 
                 if cloud_key in hourly:
-                    c_vals = hourly[cloud_key][11:17] # Peak heating 11 AM - 4 PM
+                    all_cloud = hourly[cloud_key]
+                    c_vals = all_cloud[11:17] # Peak heating 11 AM - 4 PM
                     if c_vals: cloud_members.append(np.mean(c_vals))
+                    if all_cloud:
+                        hourly_members_cloud[f"member_{i:02d}"] = [float(val) for val in all_cloud]
 
             if members_high:
                 if "gfs_seamless" in model: m_type = "gfs"
@@ -244,7 +451,11 @@ async def fetch_open_meteo_ensemble(city_key: str, lat: float, lon: float) -> Di
                     "mean_low": float(np.mean(members_low)),
                     "sigma_low": float(np.std(members_low)) if len(members_low) > 1 else 0.5,
                     "peak_tcdc": float(np.mean(cloud_members)) if cloud_members else 0.0,
-                    "timestamp": time.time()
+                    "timestamp": time.time(),
+                    "hourly_time": hourly_time,
+                    "hourly_members_temp_f": hourly_members_temp_f,
+                    "hourly_members_precip_in": hourly_members_precip_in,
+                    "hourly_members_cloud": hourly_members_cloud,
                 }
         except Exception as e:
             logger.debug(f"Fetch failed for {city_key} {model}: {e}")
@@ -309,6 +520,8 @@ async def hydrate_weather_shadow_state(
     concurrency: int = 4,
 ) -> Dict[str, Any]:
     """Refresh the weather shadow state once for selected series or the whole universe."""
+    watermarks = _load_watermarks() if include_intraday else None
+
     if series_filter:
         city_keys = sorted({_SERIES_TO_CITY[s] for s in series_filter if s in _SERIES_TO_CITY})
     else:
@@ -332,7 +545,12 @@ async def hydrate_weather_shadow_state(
                     fetch_metar_observation(loc["icao"]),
                     fetch_hrrr_forecast(city_key, loc["lat"], loc["lon"]),
                 )
-                intraday_payload = _intraday_payload(city_key, metar, hrrr)
+                intraday_payload = _intraday_payload(
+                    city_key,
+                    metar,
+                    hrrr,
+                    watermarks=watermarks,
+                )
 
             updated = 0
             with _STATE_LOCK:
@@ -363,6 +581,8 @@ async def hydrate_weather_shadow_state(
         "updated_series": updated_series,
         "errors": errors,
     }
+    if include_intraday and watermarks is not None:
+        _persist_watermarks(watermarks)
     logger.info("Weather one-shot hydration summary: %s", summary)
     return summary
 
@@ -453,43 +673,26 @@ async def update_weather_shadow_state():
     async def run_intraday_sync():
         # v19.8: Day-High/Low Watermarks
         # Key: (city_key, YYYY-MM-DD) -> float
-        watermarks = {}
+        watermarks = _load_watermarks()
         
         while True:
             try:
                 # v19.1.10: Precision Ground Truth (METAR + HRRR)
-                from datetime import datetime
-                today_str = datetime.now().strftime("%Y-%m-%d")
-                
                 for city_key, loc in STATIONS.items():
                     metar = await fetch_metar_observation(loc["icao"])
                     hrrr = await fetch_hrrr_forecast(city_key, loc["lat"], loc["lon"])
-                    
-                    cur_temp = metar.get("temp_f")
-                    
-                    # Update Watermarks
-                    if cur_temp is not None:
-                        # Max
-                        max_key = (city_key, today_str, "max")
-                        watermarks[max_key] = max(cur_temp, watermarks.get(max_key, cur_temp))
-                        # Min
-                        min_key = (city_key, today_str, "min")
-                        watermarks[min_key] = min(cur_temp, watermarks.get(min_key, cur_temp))
-
-                    intraday_payload = {
-                        "metar_temp": cur_temp,
-                        "daily_max": watermarks.get((city_key, today_str, "max")),
-                        "daily_min": watermarks.get((city_key, today_str, "min")),
-                        "metar_raw": metar.get("raw"),
-                        "hrrr_high": hrrr.get("hrrr_high"),
-                        "hrrr_trend": hrrr.get("hrrr_trend"),
-                        "ts": time.time()
-                    }
+                    intraday_payload = _intraday_payload(
+                        city_key,
+                        metar,
+                        hrrr,
+                        watermarks=watermarks,
+                    )
                     
                     for s_ticker in loc.get("series", []):
                         if s_ticker in _WEATHER_SHADOW_STATE:
                             with _STATE_LOCK:
                                 _WEATHER_SHADOW_STATE[s_ticker]["intraday"] = intraday_payload
+                _persist_watermarks(watermarks)
                 
                 logger.info("Weather Intraday Precinct synced (METAR/HRRR/Watermarks).")
             except Exception as e:
@@ -519,6 +722,50 @@ def get_weather_data(ticker_prefix: str) -> Dict[str, Any]:
                 if data and time.time() - data["timestamp"] <= WEATHER_STATE_TTL_SEC:
                     return data
     return {}
+
+
+def get_contract_weather_data(
+    ticker: str,
+    *,
+    contract_name: str = "",
+    strike: float | None = None,
+    resolution_at: str = "",
+    last_trade_at: str = "",
+) -> Dict[str, Any]:
+    """Project cached weather state onto the contract's local settlement day."""
+    series = _resolve_weather_series(ticker) or ticker
+    base = get_weather_data(series)
+    if not base:
+        return {}
+
+    station = _station_for_series(series)
+    if station is None:
+        return base
+
+    target_date = _parse_contract_local_date(
+        ticker,
+        station=station,
+        resolution_at=resolution_at,
+        last_trade_at=last_trade_at,
+    )
+    if target_date is None:
+        return base
+
+    projected = _project_contract_record(base, target_date)
+    if not projected:
+        return {}
+
+    local_today = datetime.now(pytz.timezone(station.get("tz", "UTC"))).date()
+    if target_date == local_today:
+        projected["intraday"] = dict(base.get("intraday") or {})
+    else:
+        projected["intraday"] = {}
+
+    projected["series"] = series
+    projected["station_tz"] = station.get("tz", "UTC")
+    projected["contract_name"] = contract_name
+    projected["strike"] = strike
+    return projected
 
 def start_weather_monitor():
     """Start the weather daemon in a background thread."""

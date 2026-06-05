@@ -3,7 +3,6 @@ import logging
 import json
 import time
 from typing import Optional, List, Dict
-import system_state
 from notifications import agent_tools
 from config import GEMINI_MODEL
 
@@ -51,17 +50,28 @@ def get_repo_context() -> str:
     """
     context.append(db_schema)
 
-    # 3. Live Vitals
+    # 3. Broker-first live truth
     try:
-        state = system_state.state.get_state()
-        slim_state = {
-            "mode": state.get("mode"),
-            "kalshi_balance": state.get("kalshi", {}).get("balance"),
-            "active_markets": state.get("kalshi", {}).get("active_markets"),
-            "open_positions_count": len(state.get("strategy", {}).get("active_positions", [])),
+        live_status = json.loads(agent_tools.get_live_kalshi_status())
+        slim_truth = {
+            "broker_connected": live_status.get("broker_connected"),
+            "balance_usd": live_status.get("balance_usd"),
+            "active_markets": live_status.get("active_markets"),
+            "broker_positions_count": live_status.get("broker_positions_count"),
+            "db_positions_count": live_status.get("db_positions_count"),
+            "position_drift": live_status.get("position_drift", {}).get("has_drift"),
+            "forecast_lane": live_status.get("forecast_lane", {}),
         }
-        context.append("### LIVE SYSTEM VITALS\n" + json.dumps(slim_state, indent=2))
-    except Exception: pass
+        context.append("### LIVE OPERATOR TRUTH\n" + json.dumps(slim_truth, indent=2))
+    except Exception:
+        pass
+
+    # 4. Recent veto pattern
+    try:
+        veto_summary = json.loads(agent_tools.get_recent_veto_summary())
+        context.append("### RECENT VETO SUMMARY\n" + json.dumps(veto_summary, indent=2))
+    except Exception:
+        pass
 
     return "\n\n".join(context)
 
@@ -70,6 +80,10 @@ def read_file(file_path: str, start_line: Optional[int] = None, end_line: Option
 def list_files(dir_path: str = ".") -> str: return agent_tools.list_files(dir_path)
 def replace_text(file_path: str, old_string: str, new_string: str) -> str: return agent_tools.replace_text(file_path, old_string, new_string)
 def run_safe_command(command: str) -> str: return agent_tools.run_safe_command(command)
+def get_live_kalshi_status() -> str: return agent_tools.get_live_kalshi_status()
+def get_recent_veto_summary() -> str: return agent_tools.get_recent_veto_summary()
+def run_kalshi_diagnostic() -> str: return agent_tools.run_kalshi_diagnostic()
+def run_storage_audit() -> str: return agent_tools.run_storage_audit()
 
 def ask_ai(query: str) -> str:
     """
@@ -89,15 +103,26 @@ def ask_ai(query: str) -> str:
             "You are the Sovereign SRE Oracle for the Kalshi Weather Prediction Engine.\n"
             "Your primary goal is to provide deep, evidence-based analysis and technical execution.\n\n"
             "### OPERATIONAL MANDATE ###\n"
-            "1. **ACTION FIRST**: If asked a question about system state, trades, or code, you MUST call the appropriate tool (execute_sql, read_file, list_files) in your first turn. Never say 'I will check' without actually calling the tool.\n"
+            "1. **ACTION FIRST**: If asked a question about system state, cash, positions, vetoes, or code, you MUST call the appropriate tool in your first turn. Prefer broker-first live-truth tools before SQL when live status is requested.\n"
             "2. **EMPIRICAL PROOF**: Base your analysis on actual data from the DB or files. Do not speculate.\n"
             "3. **MULTI-STEP REASONING**: Use your tools in sequence if needed. For example, list files -> read file -> analyze.\n"
             "4. **TECHNICAL PRECISION**: You are a Lead Architect. Be concise, direct, and technically accurate.\n"
-            "5. **NO HALLUCINATIONS**: If a tool returns no data, state that clearly.\n\n"
+            "5. **NO HALLUCINATIONS**: If a tool returns no data, state that clearly.\n"
+            "6. **TRUTH BUCKETS**: Separate verified facts, inferred causes, and unverified items in your answer.\n\n"
             f"### CONTEXTUAL TRUTH ###\n{context}"
         )
 
-        tools = [execute_sql, read_file, list_files, replace_text, run_safe_command]
+        tools = [
+            get_live_kalshi_status,
+            get_recent_veto_summary,
+            run_kalshi_diagnostic,
+            run_storage_audit,
+            execute_sql,
+            read_file,
+            list_files,
+            replace_text,
+            run_safe_command,
+        ]
 
         config_dict = {
             'system_instruction': system_instruction,

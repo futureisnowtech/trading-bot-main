@@ -129,7 +129,6 @@ OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
 PM_LLM_TEMPERATURE: float = float(os.getenv("PM_LLM_TEMPERATURE", "0.3"))
 PM_LLM_MAX_TOKENS: int = int(os.getenv("PM_LLM_MAX_TOKENS", "600"))
 GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-GEMINI_MODEL_EXTENDED: str = "gemini-3.5-pro"  # Frontier Reasoning
 
 # ════════════════════════════════════════════════════════════════════
 # KALSHI (Weather Prediction Engine)
@@ -165,6 +164,18 @@ KALSHI_MAX_FEE_DRAG_PCT: float = 0.30
 KALSHI_FEE_BUFFER: float = 0.05
 KALSHI_KELLY_CAP: float = 0.10
 KALSHI_MAX_RISK_PER_EVENT_PCT: float = 0.015
+KALSHI_EXIT_MODEL_INVALIDATION_DELTA: float = float(
+    os.getenv("KALSHI_EXIT_MODEL_INVALIDATION_DELTA", "0.10")
+)
+KALSHI_EXIT_REDEPLOY_EDGE: float = float(
+    os.getenv("KALSHI_EXIT_REDEPLOY_EDGE", "0.03")
+)
+KALSHI_EXIT_TIME_DECAY_HOURS: float = float(
+    os.getenv("KALSHI_EXIT_TIME_DECAY_HOURS", "24")
+)
+KALSHI_EXIT_TIME_DECAY_BID_FLOOR: float = float(
+    os.getenv("KALSHI_EXIT_TIME_DECAY_BID_FLOOR", "0.70")
+)
 
 # ════════════════════════════════════════════════════════════════════
 # TELEGRAM (Mobile HUD)
@@ -196,7 +207,3 @@ MACRO_CACHE_FILE: str = _resolve_runtime_child(
 MIN_FREE_DISK_MB: int = int(os.getenv("MIN_FREE_DISK_MB", "2048"))
 LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
 MARKET_TIMEZONE: str = "America/New_York"
-
-# ── Kalshi Sovereign Limits ──
-KALSHI_MAX_USD_PER_POSITION: float = 10.0  # Non-negotiable
-KALSHI_FEE_PER_CONTRACT: float = 0.07      # Base transaction fee

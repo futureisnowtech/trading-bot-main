@@ -672,6 +672,25 @@ def get_weather_data(ticker: str):
 
     return _get_weather_data(ticker)
 
+
+def get_contract_weather_data(
+    ticker: str,
+    *,
+    contract_name: str = "",
+    strike: float | None = None,
+    resolution_at: str = "",
+    last_trade_at: str = "",
+):
+    from data.kalshi_weather_monitor import get_contract_weather_data as _get_contract_weather_data
+
+    return _get_contract_weather_data(
+        ticker,
+        contract_name=contract_name,
+        strike=strike,
+        resolution_at=resolution_at,
+        last_trade_at=last_trade_at,
+    )
+
 def calculate_continuous_sizing(market_price: float, ensemble_prob: float, capital_base: float, multiplier: float = 1.0, cap_pct: float = 0.10, conv_tier: int = 3) -> int:
     """Fee-adjusted binary-market sizing with hard bankroll and USD caps."""
     ensemble_prob = max(0.01, min(0.99, ensemble_prob))
@@ -746,6 +765,8 @@ def _strategy_weather_details(
     hours_to_res: float,
     contract_name: str = "",
     strike: float | None = None,
+    resolution_at: str = "",
+    last_trade_at: str = "",
 ) -> tuple[bool, str, float, list[str], bool, float, int, float]:
     """
     v19.1.10: Sovereign Alpha Blueprint.
@@ -756,7 +777,13 @@ def _strategy_weather_details(
     # Alpha Filter: 48-Hour Asymmetric Information Decay Window
     is_short_term = 1.5 <= hours_to_res <= 48.0
 
-    w_data = get_weather_data(ticker)
+    w_data = get_contract_weather_data(
+        ticker,
+        contract_name=contract_name,
+        strike=strike,
+        resolution_at=resolution_at,
+        last_trade_at=last_trade_at,
+    )
     if not w_data:
         if "HIGH" in ticker or "LOW" in ticker:
             logger.info(f"TRACE: No weather data for {ticker}")
@@ -1232,6 +1259,8 @@ def evaluate_contract(
         hours_to_res,
         contract_name=str(contract.get("contract_name") or ""),
         strike=float(contract.get("strike") or 0.0),
+        resolution_at=str(contract.get("resolution_at") or ""),
+        last_trade_at=str(contract.get("last_trade_at") or ""),
     )
     if w_res[0]: # w_passes
         # w_res = (passes, side, ensemble_prob, factors, is_taker, multiplier, tier, sizing_cap)
@@ -1526,18 +1555,7 @@ def evaluate_all_contracts(
             # v19.4 Sovereign Balance: Dynamic Hub Scaling (20% of Equity)
             current_hub_cap = max(20.0, bankroll * 0.20)
             
-            # v19.2: Logic consistency gate
-            is_consistent, conflict_reason = check_strike_consistency(ticker, "YES", open_positions)
-
-            if not is_consistent:
-                result = StrategyResult(
-                    strategy_family="vetoed", side="NONE", q_hat=0.0, ev=0.0, ev_yes=0.0, ev_no=0.0,
-                    confidence=0.0, uncertainty_penalty=0.0, econ_approved=False,
-                    veto_reason=conflict_reason, position_fraction=0.0,
-                    position_contracts=0, top_factors=[], 
-                    hours_to_resolution=hours_to_res
-                )
-            elif hub != "UNKNOWN" and current_hub_usd >= current_hub_cap:
+            if hub != "UNKNOWN" and current_hub_usd >= current_hub_cap:
                 result = StrategyResult(
                     strategy_family="vetoed", side="NONE", q_hat=0.0, ev=0.0, ev_yes=0.0, ev_no=0.0,
                     confidence=0.0, uncertainty_penalty=0.0, econ_approved=False,
@@ -1573,6 +1591,22 @@ def evaluate_all_contracts(
             if result is None:
                 continue
 
+            if result.side in {"YES", "NO"}:
+                is_consistent, conflict_reason = check_strike_consistency(
+                    ticker,
+                    result.side,
+                    open_positions,
+                )
+                if not is_consistent:
+                    result.econ_approved = False
+                    result.veto_reason = conflict_reason
+                    result.position_fraction = 0.0
+                    result.position_contracts = 0
+
+            chosen_contract = yc
+            if result.side == "NO" and nc is not None:
+                chosen_contract = nc
+
             # Update count for the rest of the tick if approved
             if result.econ_approved and result.position_contracts > 0:
                 current_tick_counts[family] = count + 1
@@ -1587,7 +1621,7 @@ def evaluate_all_contracts(
             rank_score = result.ev * result.confidence if result.econ_approved else 0.0
             approved_entries.append(
                 {
-                    "contract": yc,
+                    "contract": chosen_contract,
                     "result": result,
                     "rank_score": rank_score,
                 }

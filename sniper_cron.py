@@ -12,6 +12,8 @@ from config import (
     KALSHI_ENABLED,
 )
 from forecast.runner import run_execution_cycle
+from runtime.position_reconciler import run_reconciliation
+from runtime.storage_maintenance import maintain_runtime_storage
 from runtime.storage_guard import runtime_storage_status
 
 
@@ -33,6 +35,16 @@ def main() -> int:
     if not FORECAST_AUTONOMOUS_ENABLED:
         logging.warning("Autonomous forecast trading disabled. Exiting cleanly.")
         return 0
+
+    try:
+        run_reconciliation()
+    except Exception:
+        logging.exception("Position reconciliation failed")
+
+    try:
+        maintain_runtime_storage()
+    except Exception:
+        logging.exception("Runtime storage maintenance failed")
 
     storage = runtime_storage_status()
     if not storage["ok"]:

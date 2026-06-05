@@ -28,17 +28,43 @@ def run_reconciliation(db_path: str = DB_PATH) -> None:
     Safe to call at startup — never raises.
     """
     try:
-        holdings_count = 0
+        summary = {
+            "holdings_count": 0,
+            "adopted": 0,
+            "refreshed": 0,
+            "closed": 0,
+            "connected": False,
+        }
         try:
             from execution.kalshi_broker import get_kalshi_broker
+            from forecast.db import init_forecast_db, reconcile_forecast_positions
+
             broker = get_kalshi_broker()
-            if broker.connect():
+            if broker.is_connected() or broker.connect():
+                broker.sync_positions()
                 holdings = broker.get_positions()
-                holdings_count = len(holdings)
+                init_forecast_db(db_path=db_path)
+                recon = reconcile_forecast_positions(holdings, db_path=db_path)
+                summary.update(
+                    {
+                        "holdings_count": len(holdings),
+                        "connected": True,
+                        "adopted": int(recon.get("adopted") or 0),
+                        "refreshed": int(recon.get("refreshed") or 0),
+                        "closed": int(recon.get("closed") or 0),
+                    }
+                )
         except Exception: pass
 
         now_iso = datetime.now(timezone.utc).isoformat()
-        msg = f"Reconciliation complete: Kalshi holdings={holdings_count}"
+        msg = (
+            "Reconciliation complete: "
+            f"connected={summary['connected']} "
+            f"Kalshi holdings={summary['holdings_count']} "
+            f"adopted={summary['adopted']} "
+            f"refreshed={summary['refreshed']} "
+            f"closed={summary['closed']}"
+        )
 
         try:
             with _conn(db_path) as c:

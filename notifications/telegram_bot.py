@@ -152,8 +152,10 @@ def _load_forecast_snapshot() -> dict:
 def _build_local_audit_snapshot() -> tuple[str, str]:
     """Build a dashboard-free audit snapshot directly from DB and process state."""
     from runtime.incident_tracker import get_incident_summary
+    from runtime.operator_truth import get_live_kalshi_status
 
-    snapshot = _load_forecast_snapshot()
+    truth = get_live_kalshi_status()
+    snapshot = truth.get("forecast_snapshot") or _load_forecast_snapshot()
     raw_lines: list[str] = []
 
     with sqlite3.connect(DB_PATH, timeout=30.0) as conn:
@@ -187,11 +189,13 @@ def _build_local_audit_snapshot() -> tuple[str, str]:
         ).fetchone()
 
     incidents = get_incident_summary(DB_PATH)
-    balance = float(snapshot.get("equity", 0.0) or 0.0)
+    balance = float(truth.get("balance_usd") or snapshot.get("equity", 0.0) or 0.0)
     health = lane_row["health"] if lane_row else "UNKNOWN"
     readiness = lane_row["readiness_state"] if lane_row else "UNKNOWN"
     blocked_reason = lane_row["blocked_reason"] if lane_row else ""
-    active_markets = int(active_markets_row["n"] or 0) if active_markets_row else 0
+    active_markets = int(truth.get("active_markets") or (active_markets_row["n"] if active_markets_row else 0) or 0)
+    drift = truth.get("position_drift", {})
+    broker_positions_count = int(truth.get("broker_positions_count") or 0)
 
     msg_lines = [
         "<b>SOVEREIGN KALSHI AUDIT</b>",
@@ -202,7 +206,7 @@ def _build_local_audit_snapshot() -> tuple[str, str]:
         "",
         f"🌪 <b>WEATHER ENGINE</b> ({active_markets} active markets)",
         f"Equity: ${balance:,.2f}",
-        f"Open Positions: {len(open_positions)}",
+        f"Open Positions: {broker_positions_count}",
     ]
     raw_lines.extend(
         [
@@ -211,7 +215,7 @@ def _build_local_audit_snapshot() -> tuple[str, str]:
             f"Open Incidents: {incidents.get('total_open', 0)}",
             f"Active Markets: {active_markets}",
             f"Equity: ${balance:,.2f}",
-            f"Open Positions: {len(open_positions)}",
+            f"Open Positions: {broker_positions_count}",
         ]
     )
 
@@ -219,10 +223,17 @@ def _build_local_audit_snapshot() -> tuple[str, str]:
         msg_lines.append(f"Blocked Reason: {blocked_reason}")
         raw_lines.append(f"Blocked Reason: {blocked_reason}")
 
-    if open_positions:
-        for pos in open_positions[:8]:
+    if drift.get("has_drift"):
+        msg_lines.append("Truth Drift: YES")
+        raw_lines.append("Truth Drift: YES")
+    else:
+        raw_lines.append("Truth Drift: NO")
+
+    broker_positions = truth.get("broker_positions") or []
+    if broker_positions:
+        for pos in broker_positions[:8]:
             line = (
-                f"• {pos['ticker']}: {pos['side']} x{pos['qty']} "
+                f"• {pos['ticker']}: {pos['side']} x{float(pos['qty'] or 0):g} "
                 f"@ ${float(pos['entry_price'] or 0.0):.2f}"
             )
             msg_lines.append(line)
@@ -261,20 +272,13 @@ def restricted_access(func):
 
 @restricted_access
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    state = system_state.state.get_state()
-    
-    # Kalshi specifics
-    balance = 0.0
-    active_markets = 0
-    try:
-        from execution.kalshi_broker import get_kalshi_broker
-        broker = get_kalshi_broker()
-        balance = broker.get_account_balance()
-        
-        with sqlite3.connect(DB_PATH, timeout=30.0) as conn:
-            row = conn.execute("SELECT COUNT(*) FROM forecast_markets WHERE active=1").fetchone()
-            active_markets = row[0] if row else 0
-    except: pass
+    from runtime.operator_truth import get_live_kalshi_status
+
+    truth = get_live_kalshi_status()
+    balance = float(truth.get("balance_usd") or 0.0)
+    active_markets = int(truth.get("active_markets") or 0)
+    broker_positions_count = int(truth.get("broker_positions_count") or 0)
+    drift = truth.get("position_drift", {})
 
     # Lever 5: Cost Telemetry Integration
     usd_spent = 0.0
@@ -288,6 +292,8 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"<b>KALSHI WEATHER ENGINE: LIVE</b>\n"
         f"Balance: ${balance:,.2f}\n"
         f"Active Markets: {active_markets}\n"
+        f"Broker Positions: {broker_positions_count}\n"
+        f"Truth Drift: {'YES' if drift.get('has_drift') else 'NO'}\n"
         f"AI Spend (24h): ${usd_spent:.4f}"
     )
     await _reply_text(update, msg, parse_mode=ParseMode.HTML)
@@ -331,23 +337,21 @@ async def metrics_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def positions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show open forecast positions."""
     try:
-        with sqlite3.connect(DB_PATH, timeout=30.0) as conn:
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                """
-                SELECT ticker, qty, entry_price, side
-                FROM forecast_positions
-                WHERE active = 1 AND qty > 0
-                """
-            ).fetchall()
-            
+        from runtime.operator_truth import get_live_kalshi_status
+
+        truth = get_live_kalshi_status()
+        rows = truth.get("broker_positions") or []
+        drift = truth.get("position_drift", {})
+
         if not rows:
             await _reply_text(update, "No active forecast positions.")
             return
 
         msg = "<b>Active Forecast Positions</b>\n"
         for r in rows:
-            msg += f"🎫 {r['ticker']} | {r['side']} x{r['qty']} @ ${r['entry_price']:.2f}\n"
+            msg += f"🎫 {r['ticker']} | {r['side']} x{float(r['qty'] or 0):g} @ ${float(r['entry_price'] or 0):.2f}\n"
+        if drift.get("has_drift"):
+            msg += "\n⚠️ Truth drift detected between broker and DB."
         await _reply_text(update, msg, parse_mode=ParseMode.HTML)
     except Exception as e:
         await _reply_text(update, f"Error fetching positions: {e}")

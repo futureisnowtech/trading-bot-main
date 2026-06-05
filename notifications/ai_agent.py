@@ -47,6 +47,8 @@ def get_repo_context() -> str:
 - **system_events**: ts (TEXT), level (TEXT), source (TEXT), message (TEXT)
 - **api_costs**: ts (REAL), module (TEXT), prompt_tokens (INT), completion_tokens (INT), usd_cost (REAL)
 - **forecast_markets**: market_symbol (TEXT), market_name (TEXT), active (INT)
+- **weather_calibration**: ts (TEXT), brier_score (REAL), win_rate (REAL), ensemble_accuracy (REAL), sample_size (INT)
+- **weather_model_skill_state**: segment (TEXT), sample_size (INT), gfs_weight (REAL), ecmwf_weight (REAL), shrinkage (REAL)
     """
     context.append(db_schema)
 
@@ -80,6 +82,13 @@ def get_repo_context() -> str:
     except Exception:
         pass
 
+    # 6. Weather learning / adaptive blend state
+    try:
+        learning_status = json.loads(agent_tools.get_weather_learning_status())
+        context.append("### WEATHER LEARNING STATUS\n" + json.dumps(learning_status, indent=2))
+    except Exception:
+        pass
+
     return "\n\n".join(context)
 
 def execute_sql(query: str) -> str: return agent_tools.execute_sql(query)
@@ -90,6 +99,7 @@ def run_safe_command(command: str) -> str: return agent_tools.run_safe_command(c
 def get_live_kalshi_status() -> str: return agent_tools.get_live_kalshi_status()
 def get_recent_veto_summary() -> str: return agent_tools.get_recent_veto_summary()
 def get_recent_execution_summary() -> str: return agent_tools.get_recent_execution_summary()
+def get_weather_learning_status() -> str: return agent_tools.get_weather_learning_status()
 def run_kalshi_diagnostic() -> str: return agent_tools.run_kalshi_diagnostic()
 def run_storage_audit() -> str: return agent_tools.run_storage_audit()
 
@@ -125,6 +135,7 @@ def ask_ai(query: str) -> str:
             get_live_kalshi_status,
             get_recent_veto_summary,
             get_recent_execution_summary,
+            get_weather_learning_status,
             run_kalshi_diagnostic,
             run_storage_audit,
             execute_sql,

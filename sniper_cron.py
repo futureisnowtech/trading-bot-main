@@ -57,7 +57,7 @@ def main() -> int:
         )
         return 0
 
-    summary = run_execution_cycle(bankroll=float(ACCOUNT_SIZE))
+    summary = run_execution_cycle(bankroll=float(ACCOUNT_SIZE), run_rbi=True)
     logging.info("Sniper cycle complete: %s", summary)
     return 0
 

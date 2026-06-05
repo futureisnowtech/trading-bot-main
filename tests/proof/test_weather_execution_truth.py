@@ -119,6 +119,42 @@ def test_weather_override_can_clear_soft_low_conviction_gate(monkeypatch):
     assert result.veto_reason == ""
 
 
+def test_weather_override_uses_same_fee_buffered_ev_floor(monkeypatch):
+    import forecast.strategy_engine as se
+
+    fresh_weather = {
+        "members_high": [80.0] * 31,
+        "ecmwf": {"members_high": [80.0] * 31},
+        "sigma_high": 0.8,
+        "peak_tcdc": 5.0,
+        "timestamp": datetime.now(timezone.utc).timestamp(),
+    }
+
+    monkeypatch.setattr(se, "get_weather_data", lambda ticker: fresh_weather)
+    monkeypatch.setattr(
+        se,
+        "get_contract_weather_data",
+        lambda ticker, **kwargs: fresh_weather,
+    )
+
+    now_ts = datetime.now(timezone.utc).isoformat()
+    result = se.evaluate_contract(
+        contract=_make_weather_contract(),
+        bars_5m=[],
+        bars_30m=[],
+        bars_1h=[],
+        bars_4h=[],
+        yes_quote=_quote(0.83, 0.02, now_ts),
+        no_quote=_quote(0.17, 0.02, now_ts),
+        bankroll=100.0,
+    )
+
+    assert result is not None
+    assert result.strategy_family == "weather_ensemble"
+    assert result.econ_approved is False
+    assert result.veto_reason.startswith("fee_adjusted_ev_too_low")
+
+
 def test_weather_pair_freshness_uses_staler_quote_leg(monkeypatch):
     import forecast.strategy_engine as se
 
@@ -167,14 +203,14 @@ def test_weather_one_sided_no_book_can_still_trade(monkeypatch):
 
     now_ts = datetime.now(timezone.utc).isoformat()
     yes_quote = {
-        "bid": 0.18,
+        "bid": 0.25,
         "ask": None,
-        "mid": 0.18,
+        "mid": 0.25,
         "spread": None,
-        "implied_prob": 0.18,
+        "implied_prob": 0.25,
         "ts": now_ts,
     }
-    no_quote = _quote(0.82, 0.02, now_ts)
+    no_quote = _quote(0.74, 0.02, now_ts)
 
     result = se.evaluate_contract(
         contract=_make_weather_contract(),
@@ -191,6 +227,147 @@ def test_weather_one_sided_no_book_can_still_trade(monkeypatch):
     assert result.strategy_family == "weather_ensemble"
     assert result.side == "NO"
     assert result.econ_approved is True
+
+
+def test_weather_strategy_can_use_adaptive_model_weights(monkeypatch):
+    import forecast.strategy_engine as se
+
+    divergent_weather = {
+        "members_high": ([76.0] * 18) + ([75.0] * 13),
+        "ecmwf": {"members_high": ([76.0] * 6) + ([75.0] * 25)},
+        "sigma_high": 0.8,
+        "peak_tcdc": 5.0,
+        "timestamp": datetime.now(timezone.utc).timestamp(),
+    }
+
+    monkeypatch.setattr(se, "get_weather_data", lambda ticker: divergent_weather)
+    monkeypatch.setattr(
+        se,
+        "get_contract_weather_data",
+        lambda ticker, **kwargs: divergent_weather,
+    )
+    monkeypatch.setattr(
+        se,
+        "_get_adaptive_weather_model_blend",
+        lambda mode: {
+            "segment": "HIGH",
+            "sample_size": 8,
+            "gfs_weight": 0.2,
+            "ecmwf_weight": 0.8,
+            "effective_weight": 7.1,
+            "shrinkage": 1.0,
+        },
+    )
+
+    now_ts = datetime.now(timezone.utc).isoformat()
+    result = se.evaluate_contract(
+        contract=_make_weather_contract(),
+        bars_5m=[],
+        bars_30m=[],
+        bars_1h=[],
+        bars_4h=[],
+        yes_quote=_quote(0.65, 0.02, now_ts),
+        no_quote=_quote(0.35, 0.02, now_ts),
+        bankroll=100.0,
+    )
+
+    assert result is not None
+    assert result.strategy_family == "weather_ensemble"
+    assert result.side == "NO"
+    assert result.econ_approved is True
+
+
+def test_weather_divergence_is_softened_before_catastrophic_veto(monkeypatch):
+    import forecast.strategy_engine as se
+
+    weather = {
+        "members_high": ([76.0] * 24) + ([75.0] * 7),
+        "ecmwf": {"members_high": ([76.0] * 12) + ([75.0] * 19)},
+        "sigma_high": 0.8,
+        "peak_tcdc": 5.0,
+        "timestamp": datetime.now(timezone.utc).timestamp(),
+    }
+
+    monkeypatch.setattr(se, "get_weather_data", lambda ticker: weather)
+    monkeypatch.setattr(se, "get_contract_weather_data", lambda ticker, **kwargs: weather)
+
+    passes, side, confidence, factors, *_ = se._strategy_weather_details(
+        ticker="KXHIGHNY-30JUN26-T75",
+        ask_yes=0.35,
+        ask_no=0.65,
+        hours_to_res=24.0,
+        contract_name="Will the high temp in NY be >75° on Jun 30, 2026?",
+        strike=75.0,
+    )
+
+    assert passes is True
+    assert side == "YES"
+    assert confidence > 0.50
+    assert not any("model_divergence_veto" in factor for factor in factors)
+
+
+def test_weather_high_cloud_needs_low_solar_to_veto_high_temp(monkeypatch):
+    import forecast.strategy_engine as se
+
+    cloudy_but_hot_weather = {
+        "members_high": [82.0] * 31,
+        "ecmwf": {"members_high": [82.0] * 31},
+        "sigma_high": 0.8,
+        "peak_tcdc": 82.0,
+        "peak_ssrd": 520.0,
+        "timestamp": datetime.now(timezone.utc).timestamp(),
+    }
+
+    monkeypatch.setattr(se, "get_weather_data", lambda ticker: cloudy_but_hot_weather)
+    monkeypatch.setattr(
+        se,
+        "get_contract_weather_data",
+        lambda ticker, **kwargs: cloudy_but_hot_weather,
+    )
+
+    now_ts = datetime.now(timezone.utc).isoformat()
+    result = se.evaluate_contract(
+        contract=_make_weather_contract(),
+        bars_5m=[],
+        bars_30m=[],
+        bars_1h=[],
+        bars_4h=[],
+        yes_quote=_quote(0.62, 0.02, now_ts),
+        no_quote=_quote(0.38, 0.02, now_ts),
+        bankroll=100.0,
+    )
+
+    assert result is not None
+    assert result.strategy_family == "weather_ensemble"
+    assert result.side == "YES"
+    assert result.econ_approved is True
+
+
+def test_blended_weather_yes_probability_neutralizes_catastrophic_divergence(monkeypatch):
+    import forecast.strategy_engine as se
+
+    monkeypatch.setattr(
+        se,
+        "_get_adaptive_weather_model_blend",
+        lambda mode: {
+            "segment": "GLOBAL",
+            "sample_size": 20,
+            "gfs_weight": 0.6,
+            "ecmwf_weight": 0.4,
+        },
+    )
+
+    prob = se.blended_weather_yes_probability(
+        "KXHIGHNY-30JUN26-T75",
+        {
+            "members_high": [76.0] * 31,
+            "ecmwf": {"members_high": [70.0] * 31},
+        },
+        contract_name="Will the high temp in NY be >75° on Jun 30, 2026?",
+        strike=75.0,
+    )
+
+    assert prob == 0.5
 
 
 def test_ensure_weather_data_backfills_missing_series(monkeypatch):
@@ -261,6 +438,10 @@ def test_contract_weather_projection_is_day_specific(monkeypatch):
             "member_00": [10.0, 15.0, 20.0, 25.0],
             "member_01": [10.0, 12.0, 18.0, 22.0],
         },
+        "hourly_members_ssrd": {
+            "member_00": [100.0, 250.0, 500.0, 650.0],
+            "member_01": [120.0, 260.0, 520.0, 670.0],
+        },
         "intraday": {"metar_temp": 69.0, "daily_max": 70.0, "daily_min": 66.0},
         "ecmwf": None,
         "aigefs": None,
@@ -275,3 +456,4 @@ def test_contract_weather_projection_is_day_specific(monkeypatch):
     assert projected["target_local_date"] == "2026-06-06"
     assert projected["members_high"] == [84.0, 83.0]
     assert projected["members_low"] == [80.0, 79.0]
+    assert round(projected["peak_ssrd"], 1) == 585.0

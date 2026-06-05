@@ -39,9 +39,9 @@ TIER1_KEYWORDS: list[str] = [
     "temperature",
 ]
 
-# Resolution window: only trade events resolving within this window
+# Resolution window: discovery must stay aligned with the live strategy horizon.
 MIN_HOURS_TO_RESOLUTION: float = 2.0  # too close = insufficient time for entry
-MAX_DAYS_TO_RESOLUTION: float = 7.0  # v19.6: Extended to capture long-range Grand Slams
+MAX_DAYS_TO_RESOLUTION: float = 2.0  # 48h max to match live strategy gating
 
 # Min quote quality to be considered tradeable
 MAX_ACCEPTABLE_OVERROUND: float = 0.30  # Ω_t ≤ 0.30 (30%)
@@ -102,8 +102,8 @@ def _rank_contracts(contracts: list[dict]) -> list[dict]:
         symbol = c.get("underlier", "") or c.get("market_symbol", "")
         t1 = _tier1_score(name, symbol)
 
-        # Ideal resolution: 24h–7d from now
-        ideal_hours = 72.0
+        # Ideal resolution: roughly mid-window for the short-horizon weather lane.
+        ideal_hours = 24.0
         time_score = abs(hours - ideal_hours) / ideal_hours  # lower is better
 
         ranked.append({**c, "_tier1": t1, "_hours": hours, "_time_score": time_score})

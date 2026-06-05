@@ -104,6 +104,37 @@ def _file_size_mb(path: str) -> float:
         return 0.0
 
 
+def _format_learning_blend(
+    learning_status: dict[str, Any] | None,
+    *,
+    preferred_segment: str = "GLOBAL",
+) -> str:
+    status = learning_status or {}
+    global_blend = status.get("global_blend") or {}
+    mode_blends = status.get("mode_blends") or []
+    segment = str(preferred_segment or "GLOBAL").upper()
+
+    chosen = global_blend if segment == "GLOBAL" else next(
+        (row for row in mode_blends if str(row.get("segment") or "").upper() == segment),
+        None,
+    )
+    if not chosen:
+        chosen = global_blend
+
+    gfs_weight = _coerce_float((chosen or {}).get("gfs_weight"), 0.60)
+    ecmwf_weight = _coerce_float((chosen or {}).get("ecmwf_weight"), 0.40)
+    sample_size = int((chosen or {}).get("sample_size") or 0)
+    chosen_segment = str((chosen or {}).get("segment") or "STATIC").upper()
+
+    if sample_size <= 0:
+        return "Base 60% GFS + 40% ECMWF (adaptive learner still on baseline)"
+
+    return (
+        f"{chosen_segment}: GFS {gfs_weight:.0%} / ECMWF {ecmwf_weight:.0%} "
+        f"from {sample_size} resolved samples"
+    )
+
+
 def _load_contract_metadata(symbols: list[str]) -> dict[str, dict[str, Any]]:
     if not symbols:
         return {}
@@ -308,14 +339,21 @@ def build_realized_pnl_curve(trades: list[dict[str, Any]]) -> list[dict[str, Any
     return points
 
 
-def build_regime_manifest(balance_usd: float | None = None) -> dict[str, Any]:
+def build_regime_manifest(
+    balance_usd: float | None = None,
+    learning_status: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     balance = _coerce_float(balance_usd, ACCOUNT_SIZE)
     macro = _get_macro_context()
     build = get_build_info()
+    blend_summary = _format_learning_blend(learning_status)
     return {
         "version": build["app_version"],
         "reasoning_model": GEMINI_MODEL,
-        "ensemble_blend": "60% GFS + 40% ECMWF; AI/GraphCast only widens or compresses sigma",
+        "ensemble_blend": (
+            f"Base 60% GFS + 40% ECMWF; live adaptive blend is {blend_summary}. "
+            "AI/GraphCast only widens or compresses sigma"
+        ),
         "entry_math": [
             f"Net EV gate: post-fee EV must exceed {EV_THRESHOLD:.2f}",
             f"Fixed fee drag: ${KALSHI_FEE_PER_CONTRACT:.2f} per contract with {KALSHI_FEE_BUFFER:.2f} taker friction buffer",
@@ -351,6 +389,7 @@ def build_metric_explainers(balance_usd: float | None = None) -> dict[str, str]:
         "Drift": "Drift means the broker and the local SQLite ledger disagree. This matters because we operate broker-first, so drift is a warning that the local story may be stale or incomplete.",
         "Realized P&L": "This is closed-trade profit and loss already locked in. It excludes open-position swings so you can separate booked outcomes from temporary mark changes.",
         "Data Ingestion": "The engine starts by blending the two main weather ensembles. That keeps us from overreacting to one model run and gives the bot a more stable starting forecast.",
+        "Adaptive Blend": "The learner watches resolved weather contracts and can tilt the GFS/ECMWF mix away from the default 60/40 split when one model has been proving more accurate lately. This makes the engine adaptive without turning it into a black box.",
         "AI Volatility Adjustment": "GraphCast-style AI does not overrule the forecast direction. It only tells the bot whether confidence should be widened or tightened because the atmosphere looks more or less chaotic.",
         "Safety Gates": "These filters stop trades that look good on paper but fail live economics. Fees, spreads, stale data, and model-vs-market disagreement can all kill a trade here.",
         "Position Sizing": "Even when a trade passes, the bot still sizes it down through bankroll caps. This keeps one good-looking idea from becoming a dangerous oversized bet.",
@@ -365,16 +404,20 @@ def build_metric_explainers(balance_usd: float | None = None) -> dict[str, str]:
     }
 
 
-def build_decision_funnel(balance_usd: float | None = None) -> list[dict[str, Any]]:
+def build_decision_funnel(
+    balance_usd: float | None = None,
+    learning_status: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     explainers = build_metric_explainers(balance_usd)
     hub_cap = max(20.0, _coerce_float(balance_usd, ACCOUNT_SIZE) * 0.20)
+    learning_blend = _format_learning_blend(learning_status)
     return [
         {
             "stage": "01",
             "label": "Data Ingestion",
-            "headline": "60% GFS + 40% ECMWF",
-            "detail": "The engine fuses the two core ensemble families into one base weather probability before anything else happens.",
-            "pill": "Base forecast blend",
+            "headline": "Adaptive GFS / ECMWF Blend",
+            "detail": "The engine starts from the 60/40 baseline, then lets RBI nudge that mix when recent resolved weather contracts show one model is earning more trust.",
+            "pill": learning_blend,
             "tooltip": explainers["Data Ingestion"],
         },
         {
@@ -447,8 +490,11 @@ def build_ai_insights(
     recent_events: list[dict[str, Any]],
     recent_trades: list[dict[str, Any]],
     recent_vetoes: dict[str, Any],
+    learning_status: dict[str, Any] | None = None,
 ) -> list[dict[str, str]]:
     insights: list[dict[str, str]] = []
+    learning = learning_status or {}
+    global_blend = learning.get("global_blend") or {}
 
     if truth.get("broker_connected") and str(lane.get("readiness_state") or "") == "OPERATIONAL":
         insights.append(
@@ -457,6 +503,30 @@ def build_ai_insights(
                 "tone": "good",
                 "meta": "Broker-first truth",
                 "body": "Kalshi is connected, the forecast lane is operational, and the cockpit is reading broker cash and positions directly from the live stack.",
+            }
+        )
+
+    if int(global_blend.get("sample_size") or 0) > 0:
+        insights.append(
+            {
+                "title": "Learner Active",
+                "tone": "info",
+                "meta": "Adaptive model mix",
+                "body": (
+                    "RBI is now shaping live weather probabilities. "
+                    f"The current global blend is GFS {_coerce_float(global_blend.get('gfs_weight'), 0.60):.0%} "
+                    f"and ECMWF {_coerce_float(global_blend.get('ecmwf_weight'), 0.40):.0%} "
+                    f"from {int(global_blend.get('sample_size') or 0)} resolved samples."
+                ),
+            }
+        )
+    else:
+        insights.append(
+            {
+                "title": "Learner On Baseline",
+                "tone": "info",
+                "meta": "Adaptive guardrail",
+                "body": "The adaptive learner is running, but it is still holding the default 60/40 GFS/ECMWF blend until enough resolved weather labels accumulate.",
             }
         )
 
@@ -582,11 +652,32 @@ def build_ai_insights(
     return insights[:6]
 
 
-def build_regime_cards(balance_usd: float | None = None) -> list[dict[str, str]]:
+def build_regime_cards(
+    balance_usd: float | None = None,
+    learning_status: dict[str, Any] | None = None,
+) -> list[dict[str, str]]:
     balance = _coerce_float(balance_usd, ACCOUNT_SIZE)
     hub_cap = max(20.0, balance * 0.20)
     explainers = build_metric_explainers(balance_usd)
+    global_blend = (learning_status or {}).get("global_blend") or {}
+    blend_sample_size = int(global_blend.get("sample_size") or 0)
+    blend_value = (
+        f"G{_coerce_float(global_blend.get('gfs_weight'), 0.60):.0%}/E{_coerce_float(global_blend.get('ecmwf_weight'), 0.40):.0%}"
+        if blend_sample_size > 0
+        else "60/40"
+    )
+    blend_detail = (
+        f"{blend_sample_size} resolved samples"
+        if blend_sample_size > 0
+        else "baseline until enough labels"
+    )
     return [
+        {
+            "label": "Adaptive Blend",
+            "value": blend_value,
+            "detail": blend_detail,
+            "tooltip": explainers["Adaptive Blend"],
+        },
         {
             "label": "Net EV Gate",
             "value": f"{EV_THRESHOLD:.0%}",
@@ -629,6 +720,7 @@ def build_regime_cards(balance_usd: float | None = None) -> list[dict[str, str]]
 def get_cockpit_payload(*, live_sync: bool = True) -> dict[str, Any]:
     truth = get_live_kalshi_status(connect=live_sync, sync_broker=live_sync)
     lane = truth.get("forecast_lane") or {}
+    learning_status = truth.get("weather_learning") or {}
     symbols = sorted(
         {
             str(pos.get("ticker") or pos.get("local_symbol") or "")
@@ -678,7 +770,10 @@ def get_cockpit_payload(*, live_sync: bool = True) -> dict[str, Any]:
 
     recent_trades = _load_recent_trades(limit=25)
     recent_events = _load_recent_events(limit=25)
-    regime = build_regime_manifest(truth.get("balance_usd"))
+    regime = build_regime_manifest(
+        truth.get("balance_usd"),
+        learning_status=learning_status,
+    )
     build = get_build_info()
     trade_edge_rows = build_trade_edge_rows(recent_trades)
     market_counts = _load_market_counts()
@@ -697,9 +792,15 @@ def get_cockpit_payload(*, live_sync: bool = True) -> dict[str, Any]:
         "notifications": get_notifications(limit=12),
         "recent_vetoes": recent_vetoes,
         "regime": regime,
-        "regime_cards": build_regime_cards(truth.get("balance_usd")),
+        "regime_cards": build_regime_cards(
+            truth.get("balance_usd"),
+            learning_status=learning_status,
+        ),
         "metric_explainers": build_metric_explainers(truth.get("balance_usd")),
-        "decision_funnel": build_decision_funnel(truth.get("balance_usd")),
+        "decision_funnel": build_decision_funnel(
+            truth.get("balance_usd"),
+            learning_status=learning_status,
+        ),
         "market_counts": market_counts,
         "storage": {
             **storage,
@@ -708,6 +809,7 @@ def get_cockpit_payload(*, live_sync: bool = True) -> dict[str, Any]:
             "forecast_log_mb": _file_size_mb(FORECAST_LOG_PATH),
         },
         "deploy": build,
+        "weather_learning": learning_status,
         "ai_insights": build_ai_insights(
             truth=truth,
             lane=lane,
@@ -715,6 +817,7 @@ def get_cockpit_payload(*, live_sync: bool = True) -> dict[str, Any]:
             recent_events=recent_events,
             recent_trades=recent_trades,
             recent_vetoes=recent_vetoes,
+            learning_status=learning_status,
         ),
         "snapshot": _safe_json((truth.get("forecast_lane") or {}).get("snapshot_json"))
         or truth.get("forecast_snapshot")

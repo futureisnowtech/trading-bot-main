@@ -65,6 +65,24 @@ def test_build_regime_manifest_surfaces_live_constants():
     assert any("$40.00" in line for line in manifest["entry_gates"])
 
 
+def test_build_regime_manifest_surfaces_adaptive_blend_when_available():
+    from dashboard.cockpit_data import build_regime_manifest
+
+    manifest = build_regime_manifest(
+        balance_usd=200.0,
+        learning_status={
+            "global_blend": {
+                "segment": "GLOBAL",
+                "sample_size": 14,
+                "gfs_weight": 0.42,
+                "ecmwf_weight": 0.58,
+            }
+        },
+    )
+
+    assert "GLOBAL: GFS 42% / ECMWF 58% from 14 resolved samples" in manifest["ensemble_blend"]
+
+
 def test_build_regime_manifest_uses_runtime_build_version(monkeypatch):
     import dashboard.cockpit_data as cd
 
@@ -126,12 +144,20 @@ def test_build_ai_insights_translates_runtime_into_plain_english():
         ],
         recent_trades=[],
         recent_vetoes={"count": 2, "top_reasons": [{"reason": "missing_quotes", "count": 2}]},
+        learning_status={
+            "global_blend": {
+                "sample_size": 14,
+                "gfs_weight": 0.42,
+                "ecmwf_weight": 0.58,
+            }
+        },
     )
 
     titles = [row["title"] for row in insights]
     bodies = " ".join(row["body"] for row in insights)
 
     assert "Engine Live" in titles
+    assert "Learner Active" in titles
     assert "Ledger Reconciled" in titles
     assert "Universe Refreshed" in titles
     assert "holding" in bodies.lower() or "veto" in bodies.lower()

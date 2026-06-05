@@ -621,6 +621,10 @@ class KalshiBroker:
                 "entry": fill_price,
                 "entry_price": fill_price,
                 "forecast_yes_prob": kwargs.get("forecast_yes_prob"),
+                "model_prob_gfs": kwargs.get("model_prob_gfs"),
+                "model_prob_ecmwf": kwargs.get("model_prob_ecmwf"),
+                "weather_mode": kwargs.get("weather_mode"),
+                "forecast_hours_to_resolution": kwargs.get("forecast_hours_to_resolution"),
                 "last_trade_at": contract_dict.get("last_trade_at", ""),
                 "entered_at": datetime.now(timezone.utc).isoformat(),
             }
@@ -638,6 +642,10 @@ class KalshiBroker:
                     notes=kwargs.get("reason", ""),
                     contract_side=side.upper(),
                     forecast_yes_prob=kwargs.get("forecast_yes_prob"),
+                    model_prob_gfs=kwargs.get("model_prob_gfs"),
+                    model_prob_ecmwf=kwargs.get("model_prob_ecmwf"),
+                    weather_mode=kwargs.get("weather_mode"),
+                    forecast_hours_to_resolution=kwargs.get("forecast_hours_to_resolution"),
                 )
             except Exception as e:
                 logger.error(f"[KalshiBroker] log_trade error: {e}")

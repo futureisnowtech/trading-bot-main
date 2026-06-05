@@ -1,6 +1,11 @@
 # CHANGELOG
 
 ## 2026-06-04
+- Promoted the weather RBI loop from passive scorekeeping into a bounded adaptive learner that writes live GFS/ECMWF blend weights with recency decay, sample-size shrinkage, and runtime cooldown protection.
+- Made weather entries and exits probability-coherent by routing both through the same adaptive ensemble blend, including a catastrophic-divergence neutralization path for held-position exit logic.
+- Replaced the hard non-catastrophic GFS/ECMWF divergence veto with a bounded confidence-and-size penalty so disagreement reduces aggression before it fully kills a trade.
+- Added shortwave-radiation support to the weather ingest path and upgraded the HIGH-temperature cloud veto to require weak solar heating, not just raw cloud cover.
+- Surfaced live adaptive-learning state into broker truth, Telegram audit, cockpit cards/funnel/insights, and Oracle tool context so operator explanations now match the math the engine is actually using.
 - Made runtime state storage-safe on constrained machines by adding an env-driven runtime root (`ALGO_RUNTIME_DIR` / `DB_PATH` family), low-disk headroom checks for health/preflight and execution entrypoints, and path unification across runtime DB/log consumers.
 - Extended quote/bar retention pruning into the lean one-pass daemon path so `execution_daemon.py` no longer relies on the legacy scheduled loop to bound local SQLite growth.
 - Restored broker-truth cost basis handling for live Kalshi fills by hydrating executed orders for actual fill price and fees, and by deriving synced position entry prices from Kalshi `total_traded_dollars / position_fp`.

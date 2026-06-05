@@ -14,7 +14,11 @@ def _seed_trade_db(db_path: str) -> None:
             action TEXT,
             pnl_usd REAL DEFAULT 0,
             contract_side TEXT,
-            forecast_yes_prob REAL
+            forecast_yes_prob REAL,
+            model_prob_gfs REAL DEFAULT NULL,
+            model_prob_ecmwf REAL DEFAULT NULL,
+            weather_mode TEXT DEFAULT NULL,
+            forecast_hours_to_resolution REAL DEFAULT NULL
         );
         CREATE TABLE forecast_contracts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -131,3 +135,62 @@ def test_weather_rbi_skips_without_labeled_resolutions(tmp_path, monkeypatch):
     conn.close()
 
     assert count == 0
+
+
+def test_weather_rbi_publishes_adaptive_model_weights(tmp_path, monkeypatch):
+    import learning.weather_rbi as rbi
+
+    db = str(tmp_path / "weather_rbi_weights.db")
+    _seed_trade_db(db)
+
+    now = datetime.now(timezone.utc)
+    conn = sqlite3.connect(db)
+    for contract_id, symbol, resolved_side, forecast_yes_prob, gfs_prob, ec_prob in [
+        (1, "KXHIGHTEST-A", "YES", 0.78, 0.95, 0.78),
+        (2, "KXHIGHTEST-B", "NO", 0.35, 0.75, 0.22),
+        (3, "KXHIGHTEST-C", "NO", 0.28, 0.68, 0.18),
+        (4, "KXHIGHTEST-D", "YES", 0.72, 0.90, 0.74),
+    ]:
+        resolved_at = (now - timedelta(days=contract_id - 1)).isoformat()
+        conn.execute(
+            "INSERT INTO forecast_contracts (id, local_symbol) VALUES (?, ?)",
+            (contract_id, symbol),
+        )
+        conn.execute(
+            "INSERT INTO forecast_resolutions (contract_id, resolved_side, resolved_at) VALUES (?, ?, ?)",
+            (contract_id, resolved_side, resolved_at),
+        )
+        conn.execute(
+            """
+            INSERT INTO trades (
+                ts, broker, symbol, action, pnl_usd, contract_side, forecast_yes_prob,
+                model_prob_gfs, model_prob_ecmwf, weather_mode, forecast_hours_to_resolution
+            )
+            VALUES (?, 'kalshi', ?, 'SELL', 1.0, 'YES', ?, ?, ?, 'HIGH', 18.0)
+            """,
+            (resolved_at, symbol, forecast_yes_prob, gfs_prob, ec_prob),
+        )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(rbi, "DB_PATH", db)
+    monkeypatch.setattr(rbi, "init_forecast_db", lambda: None)
+
+    rbi.run_weather_rbi(force=True)
+
+    conn = sqlite3.connect(db)
+    row = conn.execute(
+        """
+        SELECT segment, sample_size, gfs_weight, ecmwf_weight, shrinkage
+        FROM weather_model_skill_state
+        WHERE segment = 'HIGH'
+        """
+    ).fetchone()
+    conn.close()
+
+    assert row is not None
+    assert row[0] == "HIGH"
+    assert row[1] == 4
+    assert round(row[2] + row[3], 6) == 1.0
+    assert row[3] > row[2]
+    assert 0.0 < row[4] < 1.0

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timedelta, timezone
 
 from config import DB_PATH as _CFG_DB_PATH
 import dashboard.db as dashboard_db
+from runtime.operator_truth import is_lane_heartbeat_fresh
 
 _DEFAULT_DB_PATH = _CFG_DB_PATH
 DB_PATH = _DEFAULT_DB_PATH
@@ -59,17 +59,7 @@ def get_forecast_health() -> dict:
                 lane_started = bool(row["active"])
                 lane_heartbeat_at = row["last_heartbeat_at"]
                 if lane_started and lane_heartbeat_at:
-                    try:
-                        heartbeat = datetime.fromisoformat(
-                            str(lane_heartbeat_at).replace("Z", "+00:00")
-                        )
-                        if heartbeat.tzinfo is None:
-                            heartbeat = heartbeat.replace(tzinfo=timezone.utc)
-                        lane_started = heartbeat >= (
-                            datetime.now(timezone.utc) - timedelta(hours=2)
-                        )
-                    except Exception:
-                        lane_started = False
+                    lane_started = is_lane_heartbeat_fresh(lane_heartbeat_at)
         else:
             row = conn.execute(
                 """

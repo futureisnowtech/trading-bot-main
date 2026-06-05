@@ -123,6 +123,63 @@ def test_execution_controller_does_not_chase_after_depth_loss():
     assert len(broker.orders) == 1
 
 
+def test_execution_controller_passes_weather_observation_fields_to_broker():
+    from execution.kalshi_execution_controller import KalshiExecutionController, TradeIntent
+
+    class BrokerStub:
+        def __init__(self):
+            self.kwargs = None
+
+        def get_quote(self, _ticker):
+            return {"yes_ask": 0.62, "yes_ask_size": 4}
+
+        def place_buy_order(self, contract_dict, qty, limit_price, **kwargs):
+            self.kwargs = kwargs
+            return {
+                "order_id": "ORD-1",
+                "status": "executed",
+                "price": limit_price,
+                "qty": qty,
+            }
+
+    result = SimpleNamespace(
+        position_contracts=4,
+        side="YES",
+        is_taker_override=True,
+        strategy_family="weather_ensemble",
+        ev=0.18,
+    )
+    intent = TradeIntent(
+        contract={
+            "local_symbol": "KXHIGHLAX-26JUN05-B69.5",
+            "right": "C",
+            "strike": 69.5,
+            "last_trade_at": "20260605",
+        },
+        result=result,
+        bankroll=200.0,
+        buying_power_usd=200.0,
+    )
+    broker = BrokerStub()
+    controller = KalshiExecutionController(broker)
+    plan = controller.plan_entry(intent)
+    controller.execute_plan(
+        plan,
+        forecast_yes_prob=0.74,
+        model_prob_gfs=0.71,
+        model_prob_ecmwf=0.79,
+        weather_mode="HIGH",
+        forecast_hours_to_resolution=21.5,
+    )
+
+    assert broker.kwargs is not None
+    assert broker.kwargs["forecast_yes_prob"] == 0.74
+    assert broker.kwargs["model_prob_gfs"] == 0.71
+    assert broker.kwargs["model_prob_ecmwf"] == 0.79
+    assert broker.kwargs["weather_mode"] == "HIGH"
+    assert broker.kwargs["forecast_hours_to_resolution"] == 21.5
+
+
 def test_held_mark_from_quote_uses_no_side_prices():
     from forecast.runner import _held_mark_from_quote
 

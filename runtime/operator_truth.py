@@ -10,6 +10,10 @@ from typing import Any
 
 from config import DB_PATH
 
+FORECAST_HEARTBEAT_STALE_SECONDS = 15 * 60
+BASE_GFS_WEIGHT = 0.60
+BASE_ECMWF_WEIGHT = 0.40
+
 
 def _connect_db(db_path: str = DB_PATH) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path, timeout=30.0)
@@ -25,6 +29,60 @@ def _json_or_empty(value: Any) -> dict:
         return parsed if isinstance(parsed, dict) else {}
     except Exception:
         return {}
+
+
+def _parse_utc(value: Any) -> datetime | None:
+    if value in (None, ""):
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except Exception:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def get_lane_heartbeat_age_seconds(value: Any) -> float | None:
+    heartbeat = _parse_utc(value)
+    if heartbeat is None:
+        return None
+    return max(0.0, (datetime.now(timezone.utc) - heartbeat).total_seconds())
+
+
+def is_lane_heartbeat_fresh(
+    value: Any,
+    *,
+    stale_after_seconds: int = FORECAST_HEARTBEAT_STALE_SECONDS,
+) -> bool:
+    age_seconds = get_lane_heartbeat_age_seconds(value)
+    if age_seconds is None:
+        return False
+    return age_seconds <= max(1, int(stale_after_seconds))
+
+
+def _normalize_lane_state(lane_state: dict[str, Any]) -> dict[str, Any]:
+    state = dict(lane_state or {})
+    heartbeat_at = state.get("last_heartbeat_at")
+    age_seconds = get_lane_heartbeat_age_seconds(heartbeat_at)
+    heartbeat_stale = age_seconds is None or age_seconds > FORECAST_HEARTBEAT_STALE_SECONDS
+
+    state["heartbeat_age_seconds"] = age_seconds
+    state["heartbeat_stale"] = heartbeat_stale
+
+    if bool(state.get("active")) and heartbeat_stale:
+        state["active"] = 0
+        state["connected"] = 0
+        state["tradable"] = 0
+        state["health"] = "WARN"
+        state["blocked_reason"] = "stale_runtime_heartbeat"
+        state["action_needed"] = "restart_execution_engine"
+        state["readiness_state"] = "STALE_HEARTBEAT"
+
+    return state
 
 
 def _normalize_broker_position(position: dict) -> dict:
@@ -234,6 +292,73 @@ def get_recent_execution_summary(
     }
 
 
+def get_weather_learning_status(*, db_path: str = DB_PATH) -> dict:
+    payload = {
+        "adaptive_active": False,
+        "base_blend": {
+            "gfs_weight": BASE_GFS_WEIGHT,
+            "ecmwf_weight": BASE_ECMWF_WEIGHT,
+        },
+        "global_blend": {
+            "segment": "STATIC",
+            "sample_size": 0,
+            "effective_weight": 0.0,
+            "gfs_weight": BASE_GFS_WEIGHT,
+            "ecmwf_weight": BASE_ECMWF_WEIGHT,
+            "shrinkage": 0.0,
+            "lookback_days": 30,
+            "ts": "",
+        },
+        "mode_blends": [],
+        "calibration": {},
+    }
+
+    try:
+        with _connect_db(db_path) as conn:
+            calibration_row = conn.execute(
+                """
+                SELECT ts, brier_score, win_rate, ensemble_accuracy, sample_size, edge_decay
+                FROM weather_calibration
+                ORDER BY ts DESC
+                LIMIT 1
+                """
+            ).fetchone()
+            if calibration_row:
+                payload["calibration"] = dict(calibration_row)
+
+            skill_rows = conn.execute(
+                """
+                SELECT segment, ts, sample_size, effective_weight, gfs_brier, ecmwf_brier,
+                       gfs_weight, ecmwf_weight, shrinkage, lookback_days
+                FROM weather_model_skill_state
+                ORDER BY CASE WHEN segment='GLOBAL' THEN 0 ELSE 1 END, sample_size DESC, segment ASC
+                """
+            ).fetchall()
+    except Exception as exc:
+        payload["error"] = str(exc)
+        return payload
+
+    if not skill_rows:
+        return payload
+
+    rows = [dict(row) for row in skill_rows]
+    global_row = next((row for row in rows if str(row.get("segment") or "").upper() == "GLOBAL"), None)
+    if global_row:
+        payload["global_blend"] = global_row
+        payload["adaptive_active"] = int(global_row.get("sample_size") or 0) > 0
+    else:
+        payload["global_blend"]["ts"] = str(rows[0].get("ts") or "")
+
+    payload["mode_blends"] = [
+        row
+        for row in rows
+        if str(row.get("segment") or "").upper() not in {"", "GLOBAL"}
+    ]
+    if not payload["adaptive_active"]:
+        payload["adaptive_active"] = any(int(row.get("sample_size") or 0) > 0 for row in payload["mode_blends"])
+    return payload
+
+
 def get_live_kalshi_status(
     *,
     db_path: str = DB_PATH,
@@ -309,7 +434,7 @@ def get_live_kalshi_status(
                 "SELECT * FROM lane_runtime_state WHERE lane_id='forecast'"
             ).fetchone()
             if lane_row:
-                lane_state = dict(lane_row)
+                lane_state = _normalize_lane_state(dict(lane_row))
                 snapshot = _json_or_empty(lane_row["snapshot_json"])
                 lane_state.pop("snapshot_json", None)
     except Exception as exc:
@@ -336,4 +461,5 @@ def get_live_kalshi_status(
         payload["recent_vetoes"] = get_recent_veto_summary(db_path=db_path)
     if include_recent_execution:
         payload["recent_execution"] = get_recent_execution_summary(db_path=db_path)
+    payload["weather_learning"] = get_weather_learning_status(db_path=db_path)
     return payload

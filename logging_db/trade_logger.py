@@ -73,7 +73,11 @@ def init_db() -> None:
         fee_usd REAL DEFAULT 0, pnl_usd REAL DEFAULT 0,
         paper INTEGER NOT NULL, order_id TEXT, notes TEXT,
         contract_side TEXT DEFAULT NULL,
-        forecast_yes_prob REAL DEFAULT NULL
+        forecast_yes_prob REAL DEFAULT NULL,
+        model_prob_gfs REAL DEFAULT NULL,
+        model_prob_ecmwf REAL DEFAULT NULL,
+        weather_mode TEXT DEFAULT NULL,
+        forecast_hours_to_resolution REAL DEFAULT NULL
     )""")
 
     for migration in [
@@ -94,6 +98,10 @@ def init_db() -> None:
         "ALTER TABLE trades ADD COLUMN pnl_pct REAL DEFAULT 0",
         "ALTER TABLE trades ADD COLUMN contract_side TEXT DEFAULT NULL",
         "ALTER TABLE trades ADD COLUMN forecast_yes_prob REAL DEFAULT NULL",
+        "ALTER TABLE trades ADD COLUMN model_prob_gfs REAL DEFAULT NULL",
+        "ALTER TABLE trades ADD COLUMN model_prob_ecmwf REAL DEFAULT NULL",
+        "ALTER TABLE trades ADD COLUMN weather_mode TEXT DEFAULT NULL",
+        "ALTER TABLE trades ADD COLUMN forecast_hours_to_resolution REAL DEFAULT NULL",
         # v13.7: 15-minute forward outcome fields for candidate_outcomes
         "ALTER TABLE candidate_outcomes ADD COLUMN price_15m REAL DEFAULT 0",
         "ALTER TABLE candidate_outcomes ADD COLUMN ret_15m_pct REAL DEFAULT 0",
@@ -628,6 +636,10 @@ def log_trade(
     pnl_pct=0.0,
     contract_side=None,
     forecast_yes_prob=None,
+    model_prob_gfs=None,
+    model_prob_ecmwf=None,
+    weather_mode=None,
+    forecast_hours_to_resolution=None,
     paper: int = 0,
 ) -> int:
     """
@@ -671,8 +683,9 @@ def log_trade(
         """INSERT INTO trades
         (ts,strategy,broker,symbol,action,order_type,qty,price,value_usd,
          fee_usd,pnl_usd,paper,order_id,notes,won,source,pnl_pct,
-         contract_side,forecast_yes_prob)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+         contract_side,forecast_yes_prob,model_prob_gfs,model_prob_ecmwf,
+         weather_mode,forecast_hours_to_resolution)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             ts,
             strategy,
@@ -693,6 +706,10 @@ def log_trade(
             pnl_pct,
             contract_side,
             forecast_yes_prob,
+            model_prob_gfs,
+            model_prob_ecmwf,
+            weather_mode,
+            forecast_hours_to_resolution,
         ),
     )
     trade_id = cur.lastrowid

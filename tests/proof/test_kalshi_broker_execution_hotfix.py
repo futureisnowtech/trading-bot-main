@@ -116,3 +116,49 @@ def test_sync_positions_preserves_cost_basis(monkeypatch):
     assert pos is not None
     assert pos["qty"] == 43.0
     assert pos["entry_price"] == 0.16
+
+
+def test_executed_buy_logs_weather_observation_fields(monkeypatch):
+    broker = _connected_broker()
+    captured = {}
+
+    monkeypatch.setattr(
+        broker,
+        "_request",
+        lambda *args, **kwargs: {"order": {"status": "executed", "order_id": "ORD-9"}},
+    )
+    monkeypatch.setattr(
+        broker,
+        "_hydrate_order_details",
+        lambda order: {
+            **order,
+            "fill_count_fp": "2.00",
+            "taker_fill_cost_dollars": "1.240000",
+        },
+    )
+    monkeypatch.setattr(broker, "_extract_total_fees", lambda *_args, **_kwargs: 0.14)
+
+    def fake_log_trade(**kwargs):
+        captured.update(kwargs)
+        return 1
+
+    monkeypatch.setattr("execution.kalshi_broker.log_trade", fake_log_trade)
+
+    result = broker.place_buy_order(
+        {"local_symbol": "KXLOWTPHX-26JUN05-T80", "right": "C"},
+        qty=2,
+        limit_price=0.62,
+        type="limit",
+        forecast_yes_prob=0.74,
+        model_prob_gfs=0.71,
+        model_prob_ecmwf=0.79,
+        weather_mode="LOW",
+        forecast_hours_to_resolution=21.5,
+    )
+
+    assert result["status"] == "executed"
+    assert captured["forecast_yes_prob"] == 0.74
+    assert captured["model_prob_gfs"] == 0.71
+    assert captured["model_prob_ecmwf"] == 0.79
+    assert captured["weather_mode"] == "LOW"
+    assert captured["forecast_hours_to_resolution"] == 21.5

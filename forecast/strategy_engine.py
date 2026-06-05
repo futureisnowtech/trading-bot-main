@@ -216,6 +216,9 @@ class StrategyResult:
     ask_no: float = 0.0
     hours_to_resolution: float = 0.0
     is_taker_override: bool = False
+    model_prob_gfs: float | None = None
+    model_prob_ecmwf: float | None = None
+    weather_mode: str = ""
 
 
 def _extract_log_odds_series(bars: list[dict]) -> list[float]:
@@ -733,6 +736,137 @@ def get_contract_weather_data(
         last_trade_at=last_trade_at,
     )
 
+
+def _extract_weather_model_probabilities(
+    w_data: dict,
+    semantics,
+) -> tuple[float | None, float | None]:
+    members_gfs, members_ec = _extract_weather_model_members(w_data, semantics.mode)
+    prob_gfs = probability_from_members(members_gfs, semantics) if members_gfs else None
+    prob_ecmwf = None
+    if members_ec:
+        prob_ecmwf = probability_from_members(members_ec, semantics)
+
+    return prob_gfs, prob_ecmwf
+
+
+def _extract_weather_model_members(
+    w_data: dict,
+    mode: str,
+) -> tuple[list[float], list[float]]:
+    if mode in ["RAIN", "SNOW", "WIND"]:
+        key = "members_precip" if mode != "WIND" else "members_wind"
+    else:
+        key = "members_high" if mode == "HIGH" else "members_low"
+
+    members_gfs = [float(v) for v in (w_data.get(key) or [])]
+    ecmwf_data = w_data.get("ecmwf") or {}
+    members_ec = [float(v) for v in (ecmwf_data.get(key) or [])]
+    return members_gfs, members_ec
+
+
+def _get_adaptive_weather_model_blend(mode: str) -> dict:
+    try:
+        from learning.weather_rbi import get_weather_model_blend
+
+        return get_weather_model_blend(mode)
+    except Exception:
+        return {
+            "segment": "STATIC",
+            "sample_size": 0,
+            "effective_weight": 0.0,
+            "gfs_brier": None,
+            "ecmwf_brier": None,
+            "gfs_weight": 0.60,
+            "ecmwf_weight": 0.40,
+            "shrinkage": 0.0,
+            "lookback_days": 30,
+        }
+
+
+def _blend_weather_probabilities(
+    *,
+    prob_gfs: float,
+    prob_ecmwf: float | None,
+    mode: str,
+) -> dict[str, float | bool]:
+    blend = _get_adaptive_weather_model_blend(mode)
+    gfs_weight = float(blend.get("gfs_weight") or 0.60)
+    ecmwf_weight = float(blend.get("ecmwf_weight") or 0.40)
+
+    if prob_ecmwf is None:
+        return {
+            "ensemble_prob": max(0.03, min(0.97, float(prob_gfs))),
+            "gfs_weight": gfs_weight,
+            "ecmwf_weight": ecmwf_weight,
+            "convergence_multiplier": 1.0,
+            "divergence_gap": 0.0,
+            "divergence_size_multiplier": 1.0,
+            "catastrophic_divergence": False,
+        }
+
+    ensemble_prob = (float(prob_gfs) * gfs_weight) + (float(prob_ecmwf) * ecmwf_weight)
+    yes_agree = prob_gfs > 0.75 and prob_ecmwf > 0.75
+    no_agree = prob_gfs < 0.25 and prob_ecmwf < 0.25
+    convergence_multiplier = 1.5 if (yes_agree or no_agree) else 1.0
+    divergence_gap = abs(float(prob_gfs) - float(prob_ecmwf))
+    divergence_size_multiplier = 1.0
+    catastrophic_divergence = divergence_gap > 0.70
+
+    if divergence_gap > 0.20:
+        confidence_scale = max(
+            0.55,
+            1.0 - min(0.45, (divergence_gap - 0.20) * 0.90),
+        )
+        divergence_size_multiplier = max(
+            0.60,
+            1.0 - min(0.40, (divergence_gap - 0.20) * 0.80),
+        )
+        ensemble_prob = 0.5 + ((ensemble_prob - 0.5) * confidence_scale)
+
+    return {
+        "ensemble_prob": max(0.03, min(0.97, ensemble_prob)),
+        "gfs_weight": gfs_weight,
+        "ecmwf_weight": ecmwf_weight,
+        "convergence_multiplier": convergence_multiplier,
+        "divergence_gap": divergence_gap,
+        "divergence_size_multiplier": divergence_size_multiplier,
+        "catastrophic_divergence": catastrophic_divergence,
+    }
+
+
+def blended_weather_yes_probability(
+    ticker: str,
+    w_data: dict | None,
+    *,
+    contract_name: str = "",
+    strike: float | None = None,
+    neutralize_catastrophic: bool = True,
+) -> float | None:
+    if not w_data:
+        return None
+
+    semantics = resolve_weather_contract(
+        ticker=ticker,
+        contract_name=contract_name,
+        strike=strike,
+    )
+    if semantics is None or semantics.ambiguous:
+        return None
+
+    prob_gfs, prob_ecmwf = _extract_weather_model_probabilities(w_data, semantics)
+    if prob_gfs is None:
+        return None
+
+    blended = _blend_weather_probabilities(
+        prob_gfs=prob_gfs,
+        prob_ecmwf=prob_ecmwf,
+        mode=semantics.mode,
+    )
+    if neutralize_catastrophic and blended["catastrophic_divergence"]:
+        return 0.5
+    return float(blended["ensemble_prob"])
+
 def calculate_continuous_sizing(market_price: float, ensemble_prob: float, capital_base: float, multiplier: float = 1.0, cap_pct: float = 0.10, conv_tier: int = 3) -> int:
     """Fee-adjusted binary-market sizing with hard bankroll and USD caps."""
     ensemble_prob = max(0.01, min(0.99, ensemble_prob))
@@ -851,30 +985,10 @@ def _strategy_weather_details(
         )
 
     mode = semantics.mode
-    
-    # ── Phase 1: GFS Analysis (Primary Trigger) ─────────────────────────────
-    # v19.9: Route to precip/wind data if ticker type matches
-    if mode in ["RAIN", "SNOW", "WIND"]:
-        members_gfs = w_data.get("members_precip" if mode != "WIND" else "members_wind", [])
-    else:
-        members_gfs = w_data.get("members_high" if mode == "HIGH" else "members_low", [])
-    if not members_gfs: return False, "", 0.0, ["missing_gfs_members"], False, 1.0, 3, 0.05
-    prob_gfs = probability_from_members(members_gfs, semantics)
+    members_gfs, members_ec = _extract_weather_model_members(w_data, mode)
+    prob_gfs, prob_ecmwf = _extract_weather_model_probabilities(w_data, semantics)
     if prob_gfs is None:
         return False, "", 0.0, ["missing_gfs_members"], False, 1.0, 3, 0.05
-    
-    # ── Phase 2: ECMWF Analysis (Convergence Anchor) ────────────────────────
-    ecmwf_data = w_data.get("ecmwf")
-    prob_ecmwf = None
-    
-    if ecmwf_data:
-        if mode in ["RAIN", "SNOW", "WIND"]:
-            members_ec = ecmwf_data.get("members_precip" if mode != "WIND" else "members_wind", [])
-        else:
-            members_ec = ecmwf_data.get("members_high" if mode == "HIGH" else "members_low", [])
-            
-        if members_ec:
-            prob_ecmwf = probability_from_members(members_ec, semantics)
 
     # ── Phase 3: AI/GraphCast Analysis (Sovereign Sigma Scaler) ────────────
     # v19.8: Move AI from Prob Blend to Sigma Scaler (Bayesian Confirmer)
@@ -890,9 +1004,8 @@ def _strategy_weather_details(
             ai_val = members_ai[0] # Deterministic
             # If AI value is on the wrong side of our bet, increase Sigma (uncertainty)
             # If AI is on our side, tighten Sigma (conviction)
-            ensemble_mean = float(
-                np.mean(members_gfs + (members_ec if prob_ecmwf is not None else []))
-            )
+            ensemble_member_values = members_gfs + members_ec
+            ensemble_mean = float(np.mean(ensemble_member_values)) if ensemble_member_values else ai_val
             ai_divergence = abs(ai_val - ensemble_mean)
             
             # Scale uncertainty based on AI disagreement
@@ -903,28 +1016,32 @@ def _strategy_weather_details(
             elif ai_divergence < (disagree_thresh / 3.0):
                 ai_multiplier = 0.8 # Compress Sigma/Conviction
 
-    # ── Final Probability & Edge (v19.8 Refined Blend) ────────────────────
-    # Blend: 60% GFS | 40% ECMWF (Pure Physics Blend)
-    if prob_ecmwf is not None:
-        ensemble_prob = (prob_gfs * 0.6) + (prob_ecmwf * 0.4)
-    else:
-        ensemble_prob = prob_gfs
-        
-    convergence_multiplier = 1.0
-    if prob_ecmwf is not None:
-        # High Conviction: GFS & EC agree (>75%)
-        if prob_gfs > 0.75 and prob_ecmwf > 0.75:
-            convergence_multiplier = 1.5
-            logger.info(
-                f"Sovereign Convergence: {ticker} GFS={prob_gfs:.1%} EC={prob_ecmwf:.1%} -> 1.5x"
-            )
-        # Veto if catastrophic divergence (>50% gap)
-        gap = abs(prob_gfs - prob_ecmwf)
-        if gap > 0.5:
-             logger.warning(f"Sovereign Divergence Veto: {ticker} GFS={prob_gfs:.1%} EC={prob_ecmwf:.1%} -> VETO")
-             return False, "", 0.0, ["model_divergence_veto"], False, 1.0, 3, 0.05
+    # ── Final Probability & Edge (adaptive blend + bounded divergence) ─────
+    blend_state = _blend_weather_probabilities(
+        prob_gfs=prob_gfs,
+        prob_ecmwf=prob_ecmwf,
+        mode=mode,
+    )
+    ensemble_prob = float(blend_state["ensemble_prob"])
+    gfs_weight = float(blend_state["gfs_weight"])
+    ecmwf_weight = float(blend_state["ecmwf_weight"])
+    convergence_multiplier = float(blend_state["convergence_multiplier"])
+    divergence_gap = float(blend_state["divergence_gap"])
+    divergence_size_multiplier = float(blend_state["divergence_size_multiplier"])
+    if prob_ecmwf is not None and convergence_multiplier > 1.0:
+        logger.info(
+            f"Sovereign Convergence: {ticker} GFS={prob_gfs:.1%} EC={prob_ecmwf:.1%} -> 1.5x"
+        )
+    if bool(blend_state["catastrophic_divergence"]):
+        logger.warning(
+            "Sovereign Divergence Veto: %s GFS=%.1f%% EC=%.1f%% gap=%.1f%% -> VETO",
+            ticker,
+            prob_gfs * 100.0,
+            (prob_ecmwf or 0.0) * 100.0,
+            divergence_gap * 100.0,
+        )
+        return False, "", 0.0, ["model_divergence_veto"], False, 1.0, 3, 0.05
 
-    ensemble_prob = max(0.03, min(0.97, ensemble_prob))
     edge_yes = (ensemble_prob - ask_yes) if ask_yes > 0 else None
     edge_no = ((1.0 - ensemble_prob) - ask_no) if ask_no > 0 else None
     
@@ -992,7 +1109,11 @@ def _strategy_weather_details(
 
     # Guardrail 1: The "Sun Spike" Veto
     peak_tcdc = w_data.get("peak_tcdc", 0.0)
-    cloud_veto = (mode == "HIGH") and (peak_tcdc > 65.0)
+    peak_ssrd = w_data.get("peak_ssrd")
+    if peak_ssrd is not None:
+        cloud_veto = (mode == "HIGH") and (peak_tcdc > 70.0) and (float(peak_ssrd) < 250.0)
+    else:
+        cloud_veto = (mode == "HIGH") and (peak_tcdc > 65.0)
 
     # v19.1.9: Narrow Bin Veto
     if semantics.comparator == "between":
@@ -1010,6 +1131,17 @@ def _strategy_weather_details(
 
     if edge_yes is not None and edge_yes > 0.08:
         if cloud_veto:
+            if peak_ssrd is not None:
+                return (
+                    False,
+                    "",
+                    0.0,
+                    [f"cloud_cover_veto (TCDC={peak_tcdc:.1f}% SSRD={float(peak_ssrd):.0f}W/m2)"],
+                    False,
+                    1.0,
+                    3,
+                    0.05,
+                )
             return False, "", 0.0, [f"cloud_cover_veto (TCDC={peak_tcdc:.1f}%)"], False, 1.0, 3, 0.05
 
         is_taker = edge_yes >= 0.22 and is_short_term
@@ -1018,8 +1150,12 @@ def _strategy_weather_details(
             f"edge={edge_yes:.1%}",
             f"conv_mult={convergence_multiplier:.1f}x",
             f"sigma_mult={sigma_mult:.2f}x",
+            f"blend=GFS{gfs_weight:.0%}/EC{ecmwf_weight:.0%}",
+            f"div_gap={divergence_gap:.1%}",
             f"TCDC={peak_tcdc:.1f}%"
         ]
+        if peak_ssrd is not None:
+            factors.append(f"SSRD={float(peak_ssrd):.0f}W/m2")
         # v19.6: Sovereign Escalation — Tier Identification
         # v19.9: 50% Sizing Cut (10% / 7.5% / 5%)
         conv_tier = 3
@@ -1035,9 +1171,9 @@ def _strategy_weather_details(
             sizing_cap = 0.075
             
         factors.append(f"tier={conv_tier}")
-        
+
         # v19.1.12: Return raw ensemble_prob + sizing_multiplier separately
-        sizing_multiplier = convergence_multiplier * sigma_mult
+        sizing_multiplier = convergence_multiplier * sigma_mult * divergence_size_multiplier
         return True, "YES", ensemble_prob, factors, is_taker, sizing_multiplier, conv_tier, sizing_cap
 
     if edge_no is not None and edge_no > 0.08:
@@ -1046,7 +1182,9 @@ def _strategy_weather_details(
             f"ensemble_p={ensemble_prob:.1%}",
             f"edge={edge_no:.1%}",
             f"conv_mult={convergence_multiplier:.1f}x",
-            f"sigma_mult={sigma_mult:.2f}x"
+            f"sigma_mult={sigma_mult:.2f}x",
+            f"blend=GFS{gfs_weight:.0%}/EC{ecmwf_weight:.0%}",
+            f"div_gap={divergence_gap:.1%}",
         ]
         # v19.6: Sovereign Escalation — Tier Identification (NO Side)
         # v19.9: 50% Sizing Cut
@@ -1059,10 +1197,10 @@ def _strategy_weather_details(
         elif no_prob > 0.85 and sigma < 1.5:
             conv_tier = 2
             sizing_cap = 0.075
-            
+
         factors.append(f"tier={conv_tier}")
-        
-        sizing_multiplier = convergence_multiplier * sigma_mult
+
+        sizing_multiplier = convergence_multiplier * sigma_mult * divergence_size_multiplier
         return True, "NO", no_prob, factors, is_taker, sizing_multiplier, conv_tier, sizing_cap
 
     return False, "", 0.0, ["insufficient_edge"], False, 1.0, 3, 0.05
@@ -1378,27 +1516,40 @@ def evaluate_contract(
             is_taker_override=False,
         )
 
-    # v19.6: Sovereign Conviction — Tiered Resolution Windows
-    # T3: 72h max | T2: 120h (5d) max | T1: 168h (7d) max
-    res_limit = 72.0
-    if best_tier == 1: res_limit = 168.0
-    elif best_tier == 2: res_limit = 120.0
-    
-    if hours_to_res > res_limit:
-        return StrategyResult(
-            strategy_family="vetoed", side="NONE", q_hat=q_hat, ev=0.0, ev_yes=0.0, ev_no=0.0,
-            confidence=0.0, uncertainty_penalty=0.0, econ_approved=False,
-            veto_reason=f"conviction_time_veto (Tier {best_tier} requires < {res_limit:.0f}h, got {hours_to_res:.1f}h)",
-            position_fraction=0.0, position_contracts=0, top_factors=best_factors,
-            hours_to_resolution=hours_to_res, is_taker_override=False
+    weather_model_prob_gfs = None
+    weather_model_prob_ecmwf = None
+    weather_mode = ""
+    if best_family == "weather_ensemble":
+        weather_semantics = resolve_weather_contract(
+            ticker=contract.get("local_symbol", ""),
+            contract_name=str(contract.get("contract_name") or ""),
+            strike=float(contract.get("strike") or 0.0),
         )
+        if weather_semantics is not None and not weather_semantics.ambiguous:
+            projected_weather = get_contract_weather_data(
+                contract.get("local_symbol", ""),
+                contract_name=str(contract.get("contract_name") or ""),
+                strike=float(contract.get("strike") or 0.0),
+                resolution_at=str(contract.get("resolution_at") or ""),
+                last_trade_at=str(contract.get("last_trade_at") or ""),
+            )
+            if projected_weather:
+                weather_model_prob_gfs, weather_model_prob_ecmwf = (
+                    _extract_weather_model_probabilities(projected_weather, weather_semantics)
+                )
+                weather_mode = weather_semantics.mode
 
     # v19.1.6: Sovereign Weather Override
     # Weather alpha is probabilistic arbitrage, NOT technical price action.
     # If weather passes, we override technical economics vetoes.
     if best_family == "weather_ensemble":
         p_cost = ask_yes if best_side == "YES" else ask_no
-        ev_chosen = best_confidence - p_cost - KALSHI_FEE_PER_CONTRACT
+        ev_chosen = (
+            best_confidence
+            - p_cost
+            - KALSHI_FEE_BUFFER
+            - KALSHI_FEE_PER_CONTRACT
+        )
         hard_econ_veto = any(
             veto_reason.startswith(prefix) for prefix in _HARD_ECON_VETO_PREFIXES
         )
@@ -1487,6 +1638,9 @@ def evaluate_contract(
         ask_no=ask_no,
         hours_to_resolution=hours_to_res,
         is_taker_override=best_is_taker,
+        model_prob_gfs=weather_model_prob_gfs,
+        model_prob_ecmwf=weather_model_prob_ecmwf,
+        weather_mode=weather_mode,
     )
 
 

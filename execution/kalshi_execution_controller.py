@@ -197,7 +197,16 @@ class KalshiExecutionController:
         if now < self._next_order_at:
             time.sleep(self._next_order_at - now)
 
-    def execute_plan(self, plan: ExecutionPlan, *, forecast_yes_prob: float) -> dict:
+    def execute_plan(
+        self,
+        plan: ExecutionPlan,
+        *,
+        forecast_yes_prob: float,
+        model_prob_gfs: float | None = None,
+        model_prob_ecmwf: float | None = None,
+        weather_mode: str | None = None,
+        forecast_hours_to_resolution: float | None = None,
+    ) -> dict:
         now = time.time()
         if now < self._rate_limited_until:
             return {
@@ -229,6 +238,10 @@ class KalshiExecutionController:
             reason=f"{getattr(plan.intent.result, 'strategy_family', 'forecast')}_ev={getattr(plan.intent.result, 'ev', 0.0):.4f}_depth={plan.visible_qty}",
             strategy=f"forecast_{getattr(plan.intent.result, 'strategy_family', 'weather_ensemble')}",
             forecast_yes_prob=forecast_yes_prob,
+            model_prob_gfs=model_prob_gfs,
+            model_prob_ecmwf=model_prob_ecmwf,
+            weather_mode=weather_mode,
+            forecast_hours_to_resolution=forecast_hours_to_resolution,
         )
         self._next_order_at = time.time() + self._min_order_interval_sec
 

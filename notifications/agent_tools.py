@@ -153,6 +153,19 @@ def get_recent_execution_summary() -> str:
         logger.error("AI execution summary error: %s", e)
         return f"Error: {str(e)}"
 
+
+def get_weather_learning_status() -> str:
+    """Return the latest weather RBI calibration and adaptive blend state."""
+    try:
+        from runtime.operator_truth import (
+            get_weather_learning_status as _get_weather_learning_status,
+        )
+
+        return json.dumps(_get_weather_learning_status(), indent=2)
+    except Exception as e:
+        logger.error("AI weather learning summary error: %s", e)
+        return f"Error: {str(e)}"
+
 def run_kalshi_diagnostic() -> str:
     """Run the repo's live Kalshi connectivity diagnostic script."""
     script_path = os.path.join(os.getcwd(), "scripts", "verify_kalshi_connection.py")

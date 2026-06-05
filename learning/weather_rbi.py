@@ -8,12 +8,27 @@ the underlying event still resolves the other way.
 
 import logging
 import sqlite3
+import time
 from datetime import datetime, timedelta, timezone
 
 from config import DB_PATH
 from forecast.db import init_forecast_db
 
 logger = logging.getLogger(__name__)
+
+BASE_GFS_WEIGHT = 0.60
+BASE_ECMWF_WEIGHT = 0.40
+RBI_CALIBRATION_LOOKBACK_DAYS = 7
+RBI_MODEL_LOOKBACK_DAYS = 30
+RBI_MODEL_HALF_LIFE_DAYS = 10.0
+RBI_RUN_COOLDOWN_HOURS = 18
+RBI_MIN_GLOBAL_SAMPLES = 12
+RBI_MIN_MODE_SAMPLES = 6
+RBI_MIN_MODEL_WEIGHT = 0.25
+RBI_MAX_MODEL_WEIGHT = 0.75
+RBI_CACHE_TTL_SECONDS = 300.0
+
+_MODEL_SKILL_CACHE = {"loaded_at": 0.0, "rows": {}}
 
 _DDL_CALIBRATION = """
 CREATE TABLE IF NOT EXISTS weather_calibration (
@@ -23,6 +38,21 @@ CREATE TABLE IF NOT EXISTS weather_calibration (
     ensemble_accuracy REAL,
     sample_size INTEGER,
     edge_decay REAL
+)
+"""
+
+_DDL_MODEL_SKILL_STATE = """
+CREATE TABLE IF NOT EXISTS weather_model_skill_state (
+    segment TEXT PRIMARY KEY,
+    ts TEXT NOT NULL,
+    sample_size INTEGER NOT NULL,
+    effective_weight REAL NOT NULL,
+    gfs_brier REAL,
+    ecmwf_brier REAL,
+    gfs_weight REAL NOT NULL,
+    ecmwf_weight REAL NOT NULL,
+    shrinkage REAL NOT NULL,
+    lookback_days INTEGER NOT NULL
 )
 """
 
@@ -45,33 +75,202 @@ def _parse_utc(value) -> datetime | None:
     return dt.astimezone(timezone.utc)
 
 
+def _clip_prob(value: float | None) -> float | None:
+    if value is None:
+        return None
+    return max(0.01, min(0.99, float(value)))
+
+
+def _clamp(value: float, low: float, high: float) -> float:
+    return max(low, min(high, float(value)))
+
+
+def _age_decay_weight(resolved_at: datetime, now_utc: datetime) -> float:
+    age_days = max(0.0, (now_utc - resolved_at).total_seconds() / 86400.0)
+    return 0.5 ** (age_days / RBI_MODEL_HALF_LIFE_DAYS)
+
+
+def _reset_model_skill_cache() -> None:
+    _MODEL_SKILL_CACHE["loaded_at"] = 0.0
+    _MODEL_SKILL_CACHE["rows"] = {}
+
+
+def _latest_calibration_ts(conn: sqlite3.Connection) -> datetime | None:
+    try:
+        row = conn.execute(
+            "SELECT ts FROM weather_calibration ORDER BY ts DESC LIMIT 1"
+        ).fetchone()
+    except sqlite3.OperationalError:
+        return None
+    if not row:
+        return None
+    return _parse_utc(row[0] if not isinstance(row, sqlite3.Row) else row["ts"])
+
+
+def _calculate_segment_weights(
+    samples: list[dict],
+    *,
+    min_samples: int,
+) -> dict:
+    if not samples:
+        return {
+            "sample_size": 0,
+            "effective_weight": 0.0,
+            "gfs_brier": None,
+            "ecmwf_brier": None,
+            "gfs_weight": BASE_GFS_WEIGHT,
+            "ecmwf_weight": BASE_ECMWF_WEIGHT,
+            "shrinkage": 0.0,
+        }
+
+    weighted_total = sum(float(sample["decay_weight"]) for sample in samples)
+    if weighted_total <= 0:
+        weighted_total = float(len(samples))
+
+    gfs_brier = sum(
+        float(sample["decay_weight"]) * (float(sample["gfs_prob"]) - float(sample["outcome_yes"])) ** 2
+        for sample in samples
+    ) / weighted_total
+    ecmwf_brier = sum(
+        float(sample["decay_weight"]) * (float(sample["ecmwf_prob"]) - float(sample["outcome_yes"])) ** 2
+        for sample in samples
+    ) / weighted_total
+
+    gfs_skill = 1.0 / max(0.02, gfs_brier)
+    ecmwf_skill = 1.0 / max(0.02, ecmwf_brier)
+    skill_total = gfs_skill + ecmwf_skill
+    raw_gfs_weight = gfs_skill / skill_total if skill_total > 0 else BASE_GFS_WEIGHT
+
+    shrinkage = min(1.0, len(samples) / float(max(1, min_samples)))
+    gfs_weight = (BASE_GFS_WEIGHT * (1.0 - shrinkage)) + (raw_gfs_weight * shrinkage)
+    gfs_weight = _clamp(gfs_weight, RBI_MIN_MODEL_WEIGHT, RBI_MAX_MODEL_WEIGHT)
+    ecmwf_weight = 1.0 - gfs_weight
+
+    return {
+        "sample_size": len(samples),
+        "effective_weight": round(weighted_total, 4),
+        "gfs_brier": round(gfs_brier, 6),
+        "ecmwf_brier": round(ecmwf_brier, 6),
+        "gfs_weight": round(gfs_weight, 6),
+        "ecmwf_weight": round(ecmwf_weight, 6),
+        "shrinkage": round(shrinkage, 6),
+    }
+
+
+def _load_model_skill_rows(db_path: str) -> dict[str, dict]:
+    rows: dict[str, dict] = {}
+    try:
+        with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            fetched = conn.execute(
+                """
+                SELECT segment, ts, sample_size, effective_weight, gfs_brier, ecmwf_brier,
+                       gfs_weight, ecmwf_weight, shrinkage, lookback_days
+                FROM weather_model_skill_state
+                """
+            ).fetchall()
+    except Exception:
+        return rows
+
+    for row in fetched:
+        segment = str(row["segment"] or "").upper()
+        if not segment:
+            continue
+        rows[segment] = dict(row)
+    return rows
+
+
+def get_weather_model_blend(
+    mode: str | None = None,
+    *,
+    db_path: str | None = None,
+    refresh: bool = False,
+) -> dict:
+    selected_db = db_path or DB_PATH
+    now_ts = time.time()
+    if refresh or (now_ts - float(_MODEL_SKILL_CACHE["loaded_at"] or 0.0)) > RBI_CACHE_TTL_SECONDS:
+        _MODEL_SKILL_CACHE["rows"] = _load_model_skill_rows(selected_db)
+        _MODEL_SKILL_CACHE["loaded_at"] = now_ts
+
+    rows = _MODEL_SKILL_CACHE["rows"]
+    segment = str(mode or "").upper()
+    row = rows.get(segment) if segment else None
+    if row is None:
+        row = rows.get("GLOBAL")
+
+    if row is None:
+        return {
+            "segment": "STATIC",
+            "sample_size": 0,
+            "effective_weight": 0.0,
+            "gfs_brier": None,
+            "ecmwf_brier": None,
+            "gfs_weight": BASE_GFS_WEIGHT,
+            "ecmwf_weight": BASE_ECMWF_WEIGHT,
+            "shrinkage": 0.0,
+            "lookback_days": RBI_MODEL_LOOKBACK_DAYS,
+        }
+
+    return {
+        "segment": str(row.get("segment") or "GLOBAL"),
+        "sample_size": int(row.get("sample_size") or 0),
+        "effective_weight": float(row.get("effective_weight") or 0.0),
+        "gfs_brier": row.get("gfs_brier"),
+        "ecmwf_brier": row.get("ecmwf_brier"),
+        "gfs_weight": float(row.get("gfs_weight") or BASE_GFS_WEIGHT),
+        "ecmwf_weight": float(row.get("ecmwf_weight") or BASE_ECMWF_WEIGHT),
+        "shrinkage": float(row.get("shrinkage") or 0.0),
+        "lookback_days": int(row.get("lookback_days") or RBI_MODEL_LOOKBACK_DAYS),
+    }
+
+
 def init_rbi_db() -> None:
     try:
         init_forecast_db()
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(_DDL_CALIBRATION)
+            conn.execute(_DDL_MODEL_SKILL_STATE)
             conn.commit()
     except Exception as e:
         logger.error(f"[weather_rbi] DB Init error: {e}")
 
 
-def run_weather_rbi() -> None:
+def run_weather_rbi(force: bool = False) -> None:
     """Execute the weather calibration loop using labeled contract outcomes only."""
     logger.info("[weather_rbi] Starting calibration cycle...")
     init_rbi_db()
 
-    cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+    now_utc = datetime.now(timezone.utc)
+    calibration_cutoff = now_utc - timedelta(days=RBI_CALIBRATION_LOOKBACK_DAYS)
+    model_cutoff = now_utc - timedelta(days=RBI_MODEL_LOOKBACK_DAYS)
 
     try:
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
+            latest_calibration = _latest_calibration_ts(conn)
+            if (
+                not force
+                and latest_calibration is not None
+                and latest_calibration >= now_utc - timedelta(hours=RBI_RUN_COOLDOWN_HOURS)
+            ):
+                logger.info(
+                    "[weather_rbi] Skipping calibration; latest run at %s is inside the %sh cooldown.",
+                    latest_calibration.isoformat(),
+                    RBI_RUN_COOLDOWN_HOURS,
+                )
+                return
 
             rows = conn.execute(
                 """
-                SELECT DISTINCT
+                SELECT
+                    t.id,
                     t.symbol,
                     t.contract_side,
                     t.forecast_yes_prob,
+                    t.model_prob_gfs,
+                    t.model_prob_ecmwf,
+                    t.weather_mode,
+                    t.forecast_hours_to_resolution,
                     t.pnl_usd,
                     r.resolved_side,
                     r.resolved_at
@@ -83,64 +282,134 @@ def run_weather_rbi() -> None:
                 WHERE t.broker = 'kalshi'
                   AND t.action = 'SELL'
                   AND t.contract_side IN ('YES', 'NO')
-                  AND t.forecast_yes_prob IS NOT NULL
                   AND r.resolved_side IN ('YES', 'NO')
-                ORDER BY r.resolved_at DESC
+                ORDER BY r.resolved_at DESC, t.id DESC
                 """
             ).fetchall()
 
             labeled = []
+            model_samples_global: list[dict] = []
+            model_samples_by_mode: dict[str, list[dict]] = {}
+            seen_symbols: set[str] = set()
+
             for row in rows:
+                symbol = str(row["symbol"] or "").strip()
+                if not symbol or symbol in seen_symbols:
+                    continue
+                seen_symbols.add(symbol)
+
                 resolved_at = _parse_utc(row["resolved_at"])
-                if resolved_at is None or resolved_at < cutoff:
+                if resolved_at is None or resolved_at < model_cutoff:
                     continue
 
                 contract_side = str(row["contract_side"]).upper()
-                yes_prob = max(0.0, min(1.0, float(row["forecast_yes_prob"])))
-                chosen_prob = yes_prob if contract_side == "YES" else (1.0 - yes_prob)
-                outcome = 1.0 if str(row["resolved_side"]).upper() == contract_side else 0.0
+                resolved_side = str(row["resolved_side"]).upper()
+                outcome_yes = 1.0 if resolved_side == "YES" else 0.0
 
-                labeled.append(
-                    {
-                        "chosen_prob": chosen_prob,
-                        "outcome": outcome,
-                        "pnl_usd": float(row["pnl_usd"] or 0.0),
-                    }
-                )
+                forecast_yes_prob = _clip_prob(row["forecast_yes_prob"])
+                if forecast_yes_prob is not None and resolved_at >= calibration_cutoff:
+                    chosen_prob = (
+                        forecast_yes_prob
+                        if contract_side == "YES"
+                        else (1.0 - forecast_yes_prob)
+                    )
+                    outcome = 1.0 if resolved_side == contract_side else 0.0
+                    labeled.append(
+                        {
+                            "chosen_prob": chosen_prob,
+                            "outcome": outcome,
+                            "pnl_usd": float(row["pnl_usd"] or 0.0),
+                        }
+                    )
 
-            if not labeled:
+                gfs_prob = _clip_prob(row["model_prob_gfs"])
+                ecmwf_prob = _clip_prob(row["model_prob_ecmwf"])
+                if gfs_prob is None or ecmwf_prob is None:
+                    continue
+
+                weather_mode = str(row["weather_mode"] or "").upper() or "UNKNOWN"
+                sample = {
+                    "symbol": symbol,
+                    "weather_mode": weather_mode,
+                    "outcome_yes": outcome_yes,
+                    "gfs_prob": gfs_prob,
+                    "ecmwf_prob": ecmwf_prob,
+                    "decay_weight": _age_decay_weight(resolved_at, now_utc),
+                }
+                model_samples_global.append(sample)
+                model_samples_by_mode.setdefault(weather_mode, []).append(sample)
+
+            if not labeled and not model_samples_global:
                 logger.info(
-                    "[weather_rbi] No labeled resolved weather samples found in the last 7 days. "
+                    "[weather_rbi] No labeled resolved weather samples found in the active windows. "
                     "Skipping calibration."
                 )
                 return
 
-            brier_sum = sum((sample["chosen_prob"] - sample["outcome"]) ** 2 for sample in labeled)
-            wins = sum(int(sample["outcome"]) for sample in labeled)
-            accuracy_sum = sum(1.0 - abs(sample["chosen_prob"] - sample["outcome"]) for sample in labeled)
-            pnl_sum = sum(sample["pnl_usd"] for sample in labeled)
-
-            count = len(labeled)
-            avg_brier = brier_sum / count
-            win_rate = wins / count
-            avg_accuracy = accuracy_sum / count
-            edge_decay = pnl_sum / count
             now_ts = datetime.now(timezone.utc).isoformat()
 
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO weather_calibration
-                    (ts, brier_score, win_rate, ensemble_accuracy, sample_size, edge_decay)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (now_ts, avg_brier, win_rate, avg_accuracy, count, edge_decay),
-            )
-            conn.commit()
+            if labeled:
+                brier_sum = sum((sample["chosen_prob"] - sample["outcome"]) ** 2 for sample in labeled)
+                wins = sum(int(sample["outcome"]) for sample in labeled)
+                accuracy_sum = sum(1.0 - abs(sample["chosen_prob"] - sample["outcome"]) for sample in labeled)
+                pnl_sum = sum(sample["pnl_usd"] for sample in labeled)
 
+                count = len(labeled)
+                avg_brier = brier_sum / count
+                win_rate = wins / count
+                avg_accuracy = accuracy_sum / count
+                edge_decay = pnl_sum / count
+
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO weather_calibration
+                        (ts, brier_score, win_rate, ensemble_accuracy, sample_size, edge_decay)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (now_ts, avg_brier, win_rate, avg_accuracy, count, edge_decay),
+                )
+
+                logger.info(
+                    "[weather_rbi] Calibration complete. "
+                    f"Brier={avg_brier:.4f} WR={win_rate:.2%} Accuracy={avg_accuracy:.2%} "
+                    f"Samples={count}"
+                )
+
+            segment_payloads = {"GLOBAL": model_samples_global}
+            segment_payloads.update(model_samples_by_mode)
+            for segment, samples in segment_payloads.items():
+                metrics = _calculate_segment_weights(
+                    samples,
+                    min_samples=(
+                        RBI_MIN_GLOBAL_SAMPLES if segment == "GLOBAL" else RBI_MIN_MODE_SAMPLES
+                    ),
+                )
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO weather_model_skill_state
+                        (segment, ts, sample_size, effective_weight, gfs_brier, ecmwf_brier,
+                         gfs_weight, ecmwf_weight, shrinkage, lookback_days)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        segment,
+                        now_ts,
+                        metrics["sample_size"],
+                        metrics["effective_weight"],
+                        metrics["gfs_brier"],
+                        metrics["ecmwf_brier"],
+                        metrics["gfs_weight"],
+                        metrics["ecmwf_weight"],
+                        metrics["shrinkage"],
+                        RBI_MODEL_LOOKBACK_DAYS,
+                    ),
+                )
+            conn.commit()
+            _reset_model_skill_cache()
             logger.info(
-                "[weather_rbi] Calibration complete. "
-                f"Brier={avg_brier:.4f} WR={win_rate:.2%} Accuracy={avg_accuracy:.2%} "
-                f"Samples={count}"
+                "[weather_rbi] Model skill update complete. global_samples=%s segments=%s",
+                len(model_samples_global),
+                sorted(segment_payloads),
             )
 
     except Exception as e:

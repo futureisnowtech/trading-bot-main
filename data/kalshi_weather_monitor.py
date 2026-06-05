@@ -228,11 +228,13 @@ def _project_contract_record(record: dict, target_date) -> dict:
     members_temp = record.get("hourly_members_temp_f") or {}
     members_precip = record.get("hourly_members_precip_in") or {}
     members_cloud = record.get("hourly_members_cloud") or {}
+    members_ssrd = record.get("hourly_members_ssrd") or {}
 
     members_high = _reduce_member_projection(members_temp, indices, max)
     members_low = _reduce_member_projection(members_temp, indices, min)
     members_precip_total = _reduce_member_projection(members_precip, indices, sum)
     cloud_means = _reduce_member_projection(members_cloud, indices, np.mean)
+    ssrd_means = _reduce_member_projection(members_ssrd, indices, np.mean)
 
     projected = {
         "members_high": members_high,
@@ -243,12 +245,14 @@ def _project_contract_record(record: dict, target_date) -> dict:
         "mean_low": float(np.mean(members_low)) if members_low else record.get("mean_low", 0.0),
         "sigma_low": float(np.std(members_low)) if len(members_low) > 1 else record.get("sigma_low", 0.5),
         "peak_tcdc": float(np.mean(cloud_means)) if cloud_means else float(record.get("peak_tcdc") or 0.0),
+        "peak_ssrd": float(np.mean(ssrd_means)) if ssrd_means else record.get("peak_ssrd"),
         "timestamp": record.get("timestamp", time.time()),
         "target_local_date": target_date.isoformat(),
         "hourly_time": hourly_time,
         "hourly_members_temp_f": members_temp,
         "hourly_members_precip_in": members_precip,
         "hourly_members_cloud": members_cloud,
+        "hourly_members_ssrd": members_ssrd,
     }
 
     nested_ecmwf = record.get("ecmwf")
@@ -363,7 +367,7 @@ async def fetch_open_meteo_ensemble(city_key: str, lat: float, lon: float) -> Di
         params = {
             "latitude": lat,
             "longitude": lon,
-            "hourly": "temperature_2m,cloud_cover,precipitation",
+            "hourly": "temperature_2m,cloud_cover,precipitation,shortwave_radiation",
             "models": model,
             "timezone": "auto",
             "forecast_days": 8,
@@ -387,9 +391,11 @@ async def fetch_open_meteo_ensemble(city_key: str, lat: float, lon: float) -> Di
             window_size = 26
             hourly_time = list(hourly.get("time", []))
             members_high, members_low, members_precip, cloud_members = [], [], [], []
+            ssrd_members = []
             hourly_members_temp_f = {}
             hourly_members_precip_in = {}
             hourly_members_cloud = {}
+            hourly_members_ssrd = {}
             
             # Model member counts
             if "ecmwf" in model: max_members = 51
@@ -405,6 +411,11 @@ async def fetch_open_meteo_ensemble(city_key: str, lat: float, lon: float) -> Di
                     
                 cloud_key = f"cloud_cover_member{i:02d}" if "graphcast" not in model else "cloud_cover"
                 precip_key = f"precipitation_member{i:02d}" if "graphcast" not in model else "precipitation"
+                ssrd_key = (
+                    f"shortwave_radiation_member{i:02d}"
+                    if "graphcast" not in model
+                    else "shortwave_radiation"
+                )
                 
                 if temp_key in hourly:
                     all_temps_c = hourly[temp_key]
@@ -436,6 +447,14 @@ async def fetch_open_meteo_ensemble(city_key: str, lat: float, lon: float) -> Di
                     if all_cloud:
                         hourly_members_cloud[f"member_{i:02d}"] = [float(val) for val in all_cloud]
 
+                if ssrd_key in hourly:
+                    all_ssrd = hourly[ssrd_key]
+                    s_vals = all_ssrd[11:17]
+                    if s_vals:
+                        ssrd_members.append(float(np.mean(s_vals)))
+                    if all_ssrd:
+                        hourly_members_ssrd[f"member_{i:02d}"] = [float(val) for val in all_ssrd]
+
             if members_high:
                 if "gfs_seamless" in model: m_type = "gfs"
                 elif "ecmwf" in model: m_type = "ecmwf"
@@ -451,11 +470,13 @@ async def fetch_open_meteo_ensemble(city_key: str, lat: float, lon: float) -> Di
                     "mean_low": float(np.mean(members_low)),
                     "sigma_low": float(np.std(members_low)) if len(members_low) > 1 else 0.5,
                     "peak_tcdc": float(np.mean(cloud_members)) if cloud_members else 0.0,
+                    "peak_ssrd": float(np.mean(ssrd_members)) if ssrd_members else None,
                     "timestamp": time.time(),
                     "hourly_time": hourly_time,
                     "hourly_members_temp_f": hourly_members_temp_f,
                     "hourly_members_precip_in": hourly_members_precip_in,
                     "hourly_members_cloud": hourly_members_cloud,
+                    "hourly_members_ssrd": hourly_members_ssrd,
                 }
         except Exception as e:
             logger.debug(f"Fetch failed for {city_key} {model}: {e}")

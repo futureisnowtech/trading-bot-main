@@ -190,12 +190,20 @@ def _build_local_audit_snapshot() -> tuple[str, str]:
 
     incidents = get_incident_summary(DB_PATH)
     balance = float(truth.get("balance_usd") or snapshot.get("equity", 0.0) or 0.0)
-    health = lane_row["health"] if lane_row else "UNKNOWN"
-    readiness = lane_row["readiness_state"] if lane_row else "UNKNOWN"
-    blocked_reason = lane_row["blocked_reason"] if lane_row else ""
+    lane_truth = truth.get("forecast_lane") or {}
+    health = str(lane_truth.get("health") or (lane_row["health"] if lane_row else "UNKNOWN"))
+    readiness = str(
+        lane_truth.get("readiness_state")
+        or (lane_row["readiness_state"] if lane_row else "UNKNOWN")
+    )
+    blocked_reason = str(
+        lane_truth.get("blocked_reason") or (lane_row["blocked_reason"] if lane_row else "")
+    )
     active_markets = int(truth.get("active_markets") or (active_markets_row["n"] if active_markets_row else 0) or 0)
     drift = truth.get("position_drift", {})
     broker_positions_count = int(truth.get("broker_positions_count") or 0)
+    learning = truth.get("weather_learning") or {}
+    learning_global = learning.get("global_blend") or {}
 
     msg_lines = [
         "<b>SOVEREIGN KALSHI AUDIT</b>",
@@ -218,6 +226,16 @@ def _build_local_audit_snapshot() -> tuple[str, str]:
             f"Open Positions: {broker_positions_count}",
         ]
     )
+
+    if int(learning_global.get("sample_size") or 0) > 0:
+        gfs_weight = float(learning_global.get("gfs_weight") or 0.60)
+        ec_weight = float(learning_global.get("ecmwf_weight") or 0.40)
+        sample_size = int(learning_global.get("sample_size") or 0)
+        line = f"Adaptive Blend: GFS={gfs_weight:.0%} ECMWF={ec_weight:.0%} n={sample_size}"
+    else:
+        line = "Adaptive Blend: baseline 60/40 (learner active but not yet tilted)"
+    msg_lines.append(line)
+    raw_lines.append(line)
 
     if blocked_reason:
         msg_lines.append(f"Blocked Reason: {blocked_reason}")

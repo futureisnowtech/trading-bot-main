@@ -70,7 +70,7 @@ def main() -> int:
                         storage["threshold_mb"],
                     )
                 else:
-                    summary = run_execution_cycle(bankroll=bankroll)
+                    summary = run_execution_cycle(bankroll=bankroll, run_rbi=True)
                     logger.info("Execution cycle complete: %s", summary)
             except Exception:
                 logger.exception("Execution cycle failed")

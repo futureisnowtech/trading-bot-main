@@ -217,7 +217,7 @@ def _weather_contract_yes_probability(
     last_trade_at: str = "",
 ) -> float | None:
     from data.kalshi_weather_monitor import get_contract_weather_data
-    from forecast.weather_contracts import yes_probability_from_weather_data
+    from forecast.strategy_engine import blended_weather_yes_probability
 
     if contract_name or strike is not None or resolution_at or last_trade_at:
         projected = get_contract_weather_data(
@@ -230,7 +230,7 @@ def _weather_contract_yes_probability(
         if projected:
             w_data = projected
 
-    return yes_probability_from_weather_data(
+    return blended_weather_yes_probability(
         ticker=ticker,
         w_data=w_data,
         contract_name=contract_name,
@@ -819,6 +819,10 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                     entry_result = execution_controller.execute_plan(
                         execution_plan,
                         forecast_yes_prob=forecast_yes_prob,
+                        model_prob_gfs=result.model_prob_gfs,
+                        model_prob_ecmwf=result.model_prob_ecmwf,
+                        weather_mode=result.weather_mode or None,
+                        forecast_hours_to_resolution=result.hours_to_resolution,
                     )
                     
                     if entry_result.get("status") == "executed":

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
@@ -366,3 +367,173 @@ def test_release_status_blocks_balance_truth_mismatch(proof_runtime, monkeypatch
         "balance_truth_mismatch" in blocker
         for blocker in payload["top_infrastructure_blockers"]
     )
+
+
+def test_weather_provider_status_warms_sampled_series_when_process_cache_is_cold(
+    proof_runtime,
+    monkeypatch,
+):
+    import forecast.db as fdb
+    import runtime.operator_truth as ot
+
+    db = str(proof_runtime.db_path)
+    monkeypatch.setattr(ot, "DB_PATH", db, raising=False)
+
+    warmed = {"ready": False}
+
+    monkeypatch.setattr(
+        fdb,
+        "get_active_contracts",
+        lambda db_path=db: [
+            {
+                "local_symbol": "KXHIGHNY-26JUN05-B89.5",
+                "contract_name": "NY High",
+                "strike": 89.5,
+                "resolution_at": "2026-06-05T23:59:59Z",
+                "last_trade_at": "2026-06-05T23:59:59Z",
+            }
+        ],
+        raising=False,
+    )
+
+    import data.kalshi_weather_monitor as wm
+
+    monkeypatch.setattr(
+        wm,
+        "_resolve_weather_series",
+        lambda ticker: "KXHIGHNY" if str(ticker).startswith("KXHIGHNY") else None,
+        raising=False,
+    )
+
+    def _ensure_weather_data(tickers, *, include_intraday=True, max_age_sec=0):
+        warmed["ready"] = True
+        return {
+            "requested_series": 1,
+            "refreshed_series": 1,
+            "requested_cities": 1,
+            "errors": 0,
+        }
+
+    def _get_contract_weather_data(
+        ticker,
+        *,
+        contract_name="",
+        strike=None,
+        resolution_at="",
+        last_trade_at="",
+    ):
+        if not warmed["ready"]:
+            return {}
+        return {
+            "provider_mode": "deterministic_multi_model",
+            "forecast_source": "open_meteo_forecast",
+            "timestamp": time.time(),
+        }
+
+    monkeypatch.setattr(wm, "ensure_weather_data", _ensure_weather_data, raising=False)
+    monkeypatch.setattr(wm, "get_contract_weather_data", _get_contract_weather_data, raising=False)
+
+    payload = ot.get_weather_provider_status(db_path=db, contract_limit=4)
+
+    assert payload["data_present"] is True
+    assert payload["provider_mode"] == "deterministic_multi_model"
+    assert payload["checked_contracts"] == 1
+    assert payload["hydration"]["refreshed_series"] == 1
+
+
+def test_release_status_prefers_passing_artifact_truth_when_one_shot_process_is_blind(
+    proof_runtime,
+    monkeypatch,
+):
+    import runtime.build_info as bi
+    import runtime.incident_tracker as it
+    import runtime.operator_truth as ot
+    import runtime.release_gate as rg
+
+    db = str(proof_runtime.db_path)
+    monkeypatch.setattr(ot, "DB_PATH", db, raising=False)
+    monkeypatch.setattr(
+        rg,
+        "load_release_audit_artifact",
+        lambda: {
+            "verdict": "READY_FOR_LIVE",
+            "audited_sha": "abc123",
+            "entries_allowed": True,
+            "as_of": "2026-06-05T20:00:00+00:00",
+            "last_successful_audit_at": "2026-06-05T20:00:00+00:00",
+            "details": {
+                "live_truth": {
+                    "broker_connected": True,
+                    "broker_error": "",
+                    "balance_usd": 164.0,
+                    "active_markets": 12,
+                    "lane": {
+                        "readiness_state": "OPERATIONAL",
+                        "heartbeat_stale": False,
+                        "heartbeat_age_seconds": 30.0,
+                    },
+                },
+                "provider_status": {
+                    "data_present": True,
+                    "provider_mode": "deterministic_multi_model",
+                    "forecast_source": "open_meteo_forecast",
+                    "weather_age_minutes": 9.0,
+                },
+                "balance_truth": {
+                    "broker_balance_usd": 164.0,
+                    "runtime_balance_usd": 164.0,
+                    "comparison_available": True,
+                    "delta_usd": 0.0,
+                    "tolerance_usd": 1.0,
+                    "balance_ok": True,
+                },
+            },
+        },
+    )
+    monkeypatch.setattr(
+        bi,
+        "get_build_info",
+        lambda: {"sha": "abc123", "app_version": "19.10.3", "metadata_stale": False},
+    )
+    monkeypatch.setattr(
+        it,
+        "get_incident_summary",
+        lambda db_path=db: {"total_open": 0, "by_severity": {}},
+    )
+    monkeypatch.setattr(it, "get_open_incidents", lambda db_path=db: [])
+    monkeypatch.setattr(
+        ot,
+        "get_live_kalshi_status",
+        lambda **kwargs: {
+            "broker_connected": False,
+            "broker_error": "",
+            "balance_usd": 0.0,
+            "active_markets": 0,
+            "forecast_lane": {
+                "readiness_state": "OPERATIONAL",
+                "heartbeat_stale": False,
+                "heartbeat_age_seconds": 30.0,
+                "buying_power_usd": 164.0,
+            },
+            "forecast_snapshot": {"equity": 164.0},
+            "recent_vetoes": {"top_reasons": []},
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(
+        ot,
+        "get_weather_provider_status",
+        lambda db_path=db, contract_limit=8: {
+            "data_present": False,
+            "provider_mode": "",
+            "weather_age_minutes": None,
+        },
+        raising=False,
+    )
+
+    payload = ot.get_release_status(db_path=db)
+
+    assert payload["current_release_verdict"] == "READY_FOR_LIVE"
+    assert payload["entries_allowed"] is True
+    assert payload["provider_mode"] == "deterministic_multi_model"
+    assert "broker_disconnected" not in payload["top_infrastructure_blockers"]

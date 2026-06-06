@@ -367,6 +367,33 @@ def get_weather_learning_status(*, db_path: str = DB_PATH) -> dict:
     return payload
 
 
+def _is_weather_ticker(ticker: str) -> bool:
+    token = str(ticker or "").upper()
+    return any(prefix in token for prefix in ("KXHIGH", "KXLOW", "KXRAIN"))
+
+
+def _sample_weather_contracts(active_contracts: list[dict], *, limit: int) -> list[dict]:
+    try:
+        from data.kalshi_weather_monitor import _resolve_weather_series
+    except Exception:
+        return []
+
+    sample: list[dict] = []
+    seen_series: set[str] = set()
+    for contract in active_contracts:
+        ticker = str(contract.get("local_symbol") or "")
+        if not _is_weather_ticker(ticker):
+            continue
+        series = _resolve_weather_series(ticker)
+        if not series or series in seen_series:
+            continue
+        seen_series.add(series)
+        sample.append(contract)
+        if len(sample) >= max(1, int(limit)):
+            break
+    return sample
+
+
 def get_weather_provider_status(
     *,
     db_path: str = DB_PATH,
@@ -383,21 +410,26 @@ def get_weather_provider_status(
     }
 
     try:
-        from data.kalshi_weather_monitor import get_contract_weather_data
+        from data.kalshi_weather_monitor import ensure_weather_data, get_contract_weather_data
         from forecast.db import get_active_contracts
 
         active = get_active_contracts(db_path=db_path)
         weather_contracts = [
-            contract
-            for contract in active
-            if any(
-                token in str(contract.get("local_symbol") or "")
-                for token in ("KXHIGH", "KXLOW", "KXRAIN")
-            )
+            contract for contract in active if _is_weather_ticker(str(contract.get("local_symbol") or ""))
         ]
         payload["active_weather_contracts"] = len(weather_contracts)
+        sample_contracts = _sample_weather_contracts(
+            weather_contracts,
+            limit=max(1, int(contract_limit)),
+        )
 
-        for contract in weather_contracts[: max(1, int(contract_limit))]:
+        if sample_contracts:
+            payload["hydration"] = ensure_weather_data(
+                [str(contract.get("local_symbol") or "") for contract in sample_contracts],
+                include_intraday=False,
+            )
+
+        for contract in sample_contracts:
             payload["checked_contracts"] += 1
             ticker = str(contract.get("local_symbol") or "")
             weather = get_contract_weather_data(
@@ -594,6 +626,24 @@ def get_release_status(
         load_release_audit_artifact,
     )
 
+    build = get_build_info()
+    artifact = load_release_audit_artifact()
+    artifact_details = artifact.get("details") if isinstance(artifact, dict) else {}
+    artifact_live_truth = (
+        artifact_details.get("live_truth") if isinstance(artifact_details, dict) else {}
+    ) or {}
+    artifact_provider = (
+        artifact_details.get("provider_status") if isinstance(artifact_details, dict) else {}
+    ) or {}
+    artifact_balance = (
+        artifact_details.get("balance_truth") if isinstance(artifact_details, dict) else {}
+    ) or {}
+
+    artifact_verdict = str(artifact.get("verdict") or "")
+    artifact_sha = str(artifact.get("audited_sha") or "").strip()
+    build_sha = str(build.get("sha") or "").strip()
+    artifact_matches_build = bool(artifact_sha and build_sha and artifact_sha == build_sha)
+
     if truth is None:
         truth = get_live_kalshi_status(
             db_path=db_path,
@@ -601,23 +651,31 @@ def get_release_status(
             sync_broker=False,
             include_recent_execution=False,
         )
+        if artifact_matches_build and artifact_live_truth and not bool(truth.get("broker_connected")):
+            truth["broker_connected"] = bool(artifact_live_truth.get("broker_connected"))
+            truth["broker_error"] = str(
+                truth.get("broker_error") or artifact_live_truth.get("broker_error") or ""
+            )
+            if truth.get("balance_usd") in (None, 0, 0.0):
+                truth["balance_usd"] = artifact_live_truth.get("balance_usd")
+            if not truth.get("active_markets"):
+                truth["active_markets"] = int(artifact_live_truth.get("active_markets") or 0)
+            if not truth.get("forecast_lane") and artifact_live_truth.get("lane"):
+                truth["forecast_lane"] = dict(artifact_live_truth.get("lane") or {})
 
-    build = get_build_info()
-    artifact = load_release_audit_artifact()
     lane = truth.get("forecast_lane") or {}
     veto_summary = truth.get("recent_vetoes") or get_recent_veto_summary(db_path=db_path)
     incident_summary = get_incident_summary(db_path=db_path)
     open_incidents = get_open_incidents(db_path=db_path)
     provider = get_weather_provider_status(db_path=db_path)
+    if artifact_matches_build and artifact_provider.get("data_present") and not provider.get("data_present"):
+        provider = dict(artifact_provider)
     balance_truth = get_balance_truth_status(truth=truth, db_path=db_path)
+    if artifact_matches_build and artifact_balance.get("balance_ok") and not balance_truth.get("balance_ok"):
+        balance_truth = dict(artifact_balance)
 
     blockers: list[str] = []
     warnings: list[str] = []
-
-    artifact_verdict = str(artifact.get("verdict") or "")
-    artifact_sha = str(artifact.get("audited_sha") or "").strip()
-    build_sha = str(build.get("sha") or "").strip()
-    artifact_matches_build = bool(artifact_sha and build_sha and artifact_sha == build_sha)
 
     if not artifact:
         blockers.append("release_audit_missing")

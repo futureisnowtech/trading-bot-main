@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 
 def test_market_scan_findings_blocks_infra_cluster():
     import scripts.release_audit as ra
@@ -128,3 +130,68 @@ def test_strategy_cycle_blocks_new_entries_when_release_gate_closed(monkeypatch)
 
     assert result == []
     assert any("entry_gate_blocked" in message for _level, _source, message in events)
+
+
+def test_scan_live_market_surface_warms_weather_series_before_evaluating(monkeypatch):
+    import scripts.release_audit as ra
+
+    warmed = {"called": False}
+
+    monkeypatch.setattr(
+        ra,
+        "get_active_contracts",
+        lambda db_path=None: [
+            {
+                "id": 1,
+                "market_id": 9,
+                "local_symbol": "KXHIGHNY-26JUN05-B89.5",
+                "contract_name": "NY High",
+                "right": "C",
+                "strike": 89.5,
+                "last_trade_at": "2026-06-05T23:59:59Z",
+                "resolution_at": "2026-06-05T23:59:59Z",
+            }
+        ],
+        raising=False,
+    )
+    monkeypatch.setattr(
+        ra,
+        "build_market_snapshots",
+        lambda *args, **kwargs: [
+            SimpleNamespace(
+                ticker="KXHIGHNY-26JUN05-B89.5",
+                yes_quote={},
+                no_quote={},
+            )
+        ],
+        raising=False,
+    )
+
+    import data.kalshi_weather_monitor as wm
+
+    monkeypatch.setattr(
+        wm,
+        "_resolve_weather_series",
+        lambda ticker: "KXHIGHNY" if str(ticker).startswith("KXHIGHNY") else None,
+        raising=False,
+    )
+
+    def _ensure_weather_data(tickers, *, include_intraday=True, max_age_sec=0):
+        warmed["called"] = True
+        return {"requested_series": 1, "refreshed_series": 1}
+
+    monkeypatch.setattr(wm, "ensure_weather_data", _ensure_weather_data, raising=False)
+
+    def _evaluate_market_snapshots(**kwargs):
+        assert warmed["called"] is True
+        return []
+
+    monkeypatch.setattr(ra, "evaluate_market_snapshots", _evaluate_market_snapshots, raising=False)
+
+    payload = ra._scan_live_market_surface(
+        bankroll=164.0,
+        open_positions=[],
+        scan_limit=4,
+    )
+
+    assert payload["weather_warmup"]["refreshed_series"] == 1

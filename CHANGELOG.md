@@ -1,6 +1,7 @@
 # CHANGELOG
 
 ## 2026-06-06
+- Added a host-written `host_service_status.json` artifact during deploy and taught the in-container hosted release audit to trust it only when the artifact is fresh and SHA-matched, eliminating the false container-mode blind spot around service-up verification.
 - Hardened the release gate itself so remote hosted audits now emit machine-clean JSON, the outer SSH-based remote audit tolerates mixed stdout safely, and deploys seed a same-SHA provisional `release_audit_pending_new_build` artifact before `execution-engine` starts to prevent stale release-truth drift during startup.
 - Fixed the deploy-time seeding path to write the provisional release artifact through a one-shot container against the mounted project volume, avoiding host-permission drift on root-owned `logs/` files.
 - Fixed the provisional-artifact seeding command to attach stdin into the one-shot container (`docker run -i`), ensuring the pending-release payload is actually written before the new engine boots.

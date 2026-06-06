@@ -58,6 +58,12 @@ def get_release_artifact_paths() -> dict[str, Path]:
     }
 
 
+def get_host_service_status_artifact_path() -> Path:
+    root = Path(RUNTIME_ROOT)
+    root.mkdir(parents=True, exist_ok=True)
+    return root / "host_service_status.json"
+
+
 def load_release_audit_artifact() -> dict[str, Any]:
     path = get_release_artifact_paths()["json"]
     if not path.exists():
@@ -89,6 +95,26 @@ def write_release_audit_artifact(
     return {key: str(value) for key, value in paths.items()}
 
 
+def load_host_service_status_artifact() -> dict[str, Any]:
+    path = get_host_service_status_artifact_path()
+    if not path.exists():
+        return {}
+    try:
+        parsed = json.loads(path.read_text(encoding="utf-8"))
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
+def write_host_service_status_artifact(payload: dict[str, Any]) -> str:
+    path = get_host_service_status_artifact_path()
+    path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True, default=str),
+        encoding="utf-8",
+    )
+    return str(path)
+
+
 def is_infrastructure_reason(reason: str) -> bool:
     token = str(reason or "").strip().lower()
     if not token:
@@ -101,4 +127,3 @@ def is_liquidity_warning(reason: str) -> bool:
     if not token:
         return False
     return token.startswith(_LIQUIDITY_WARNING_PREFIXES)
-

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 
@@ -239,3 +240,205 @@ def test_release_audit_json_mode_suppresses_noisy_stdout(monkeypatch, capsys):
     assert rc == 0
     assert out.lstrip().startswith("{")
     assert "[KalshiBroker] Connected" not in out
+
+
+def test_docker_service_status_uses_host_artifact_when_docker_unavailable(monkeypatch):
+    import scripts.release_audit as ra
+
+    def _raise_no_docker(*args, **kwargs):
+        raise RuntimeError("docker unavailable in container")
+
+    monkeypatch.setattr(ra.subprocess, "check_output", _raise_no_docker, raising=False)
+    monkeypatch.setattr(
+        ra,
+        "load_host_service_status_artifact",
+        lambda: {
+            "as_of": datetime.now(timezone.utc).isoformat(),
+            "audited_sha": "abc123",
+            "services": {
+                "execution-engine": {"up": True, "status": "Up 12 seconds"},
+                "telegram-oracle": {"up": True, "status": "Up 12 seconds"},
+                "kalshi-cockpit": {"up": True, "status": "Up 12 seconds"},
+            },
+        },
+        raising=False,
+    )
+
+    payload = ra._docker_service_status("abc123")
+
+    assert payload["source"] == "host_service_status_artifact"
+    assert payload["artifact_usable"] is True
+    assert payload["services"]["execution-engine"]["up"] is True
+    assert payload["docker_error"] == "docker unavailable in container"
+
+
+def test_run_remote_hosted_audit_uses_host_service_artifact_without_skip_warning(
+    monkeypatch,
+):
+    import scripts.release_audit as ra
+
+    monkeypatch.setattr(ra, "get_build_info", lambda: {"sha": "abc123"}, raising=False)
+    monkeypatch.setattr(ra, "init_incident_table", lambda *args, **kwargs: None, raising=False)
+    monkeypatch.setattr(ra, "ingest_system_events", lambda *args, **kwargs: None, raising=False)
+    monkeypatch.setattr(ra, "run_health_check", lambda force=True: {"healthy": True}, raising=False)
+    monkeypatch.setattr(
+        ra,
+        "get_live_kalshi_status",
+        lambda **kwargs: {
+            "broker_connected": True,
+            "broker_positions": [],
+            "db_positions": [],
+            "balance_usd": 164.0,
+            "active_markets": 4,
+            "forecast_lane": {"heartbeat_stale": False},
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(
+        ra,
+        "get_weather_provider_status",
+        lambda db_path=None: {
+            "data_present": True,
+            "provider_mode": "deterministic_multi_model",
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(
+        ra,
+        "get_balance_truth_status",
+        lambda **kwargs: {
+            "balance_ok": True,
+            "comparison_available": True,
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(
+        ra,
+        "_docker_service_status",
+        lambda expected_sha="": {
+            "source": "host_service_status_artifact",
+            "artifact_usable": True,
+            "services": {
+                "execution-engine": {"up": True, "status": "Up 12 seconds"},
+                "telegram-oracle": {"up": True, "status": "Up 12 seconds"},
+                "kalshi-cockpit": {"up": True, "status": "Up 12 seconds"},
+            },
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(ra, "_cockpit_health", lambda: {"ok": True}, raising=False)
+    monkeypatch.setattr(ra, "probe_reasoning_model", lambda: {"ok": True}, raising=False)
+    monkeypatch.setattr(ra, "_running_in_container", lambda: True, raising=False)
+    monkeypatch.setattr(
+        ra,
+        "_scan_live_market_surface",
+        lambda **kwargs: {
+            "sample_size": 4,
+            "markets_scanned": 4,
+            "approved_candidates": 0,
+            "execution_ready": 0,
+            "infrastructure_rejections": [],
+            "systematic_thin_liquidity": False,
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(ra, "_market_scan_findings", lambda *args, **kwargs: ([], []), raising=False)
+    monkeypatch.setattr(ra, "runtime_storage_status", lambda: {"ok": True}, raising=False)
+    monkeypatch.setattr(
+        ra,
+        "get_incident_summary",
+        lambda db_path=None: {"by_severity": {"CRITICAL": 0}},
+        raising=False,
+    )
+
+    payload = ra._run_remote_hosted_audit(scan_limit=4, soak_seconds=0)
+
+    assert payload["verdict"] == "READY_FOR_LIVE"
+    assert payload["blockers"] == []
+    assert "docker_service_check_skipped_in_container_mode" not in payload["warnings"]
+
+
+def test_run_remote_hosted_audit_blocks_when_host_service_artifact_missing(
+    monkeypatch,
+):
+    import scripts.release_audit as ra
+
+    monkeypatch.setattr(ra, "get_build_info", lambda: {"sha": "abc123"}, raising=False)
+    monkeypatch.setattr(ra, "init_incident_table", lambda *args, **kwargs: None, raising=False)
+    monkeypatch.setattr(ra, "ingest_system_events", lambda *args, **kwargs: None, raising=False)
+    monkeypatch.setattr(ra, "run_health_check", lambda force=True: {"healthy": True}, raising=False)
+    monkeypatch.setattr(
+        ra,
+        "get_live_kalshi_status",
+        lambda **kwargs: {
+            "broker_connected": True,
+            "broker_positions": [],
+            "db_positions": [],
+            "balance_usd": 164.0,
+            "active_markets": 4,
+            "forecast_lane": {"heartbeat_stale": False},
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(
+        ra,
+        "get_weather_provider_status",
+        lambda db_path=None: {
+            "data_present": True,
+            "provider_mode": "deterministic_multi_model",
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(
+        ra,
+        "get_balance_truth_status",
+        lambda **kwargs: {
+            "balance_ok": True,
+            "comparison_available": True,
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(
+        ra,
+        "_docker_service_status",
+        lambda expected_sha="": {
+            "source": "host_service_status_artifact",
+            "artifact_usable": False,
+            "artifact_reason": "missing",
+            "services": {
+                "execution-engine": {"up": False, "status": ""},
+                "telegram-oracle": {"up": False, "status": ""},
+                "kalshi-cockpit": {"up": False, "status": ""},
+            },
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(ra, "_cockpit_health", lambda: {"ok": True}, raising=False)
+    monkeypatch.setattr(ra, "probe_reasoning_model", lambda: {"ok": True}, raising=False)
+    monkeypatch.setattr(ra, "_running_in_container", lambda: True, raising=False)
+    monkeypatch.setattr(
+        ra,
+        "_scan_live_market_surface",
+        lambda **kwargs: {
+            "sample_size": 4,
+            "markets_scanned": 4,
+            "approved_candidates": 0,
+            "execution_ready": 0,
+            "infrastructure_rejections": [],
+            "systematic_thin_liquidity": False,
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(ra, "_market_scan_findings", lambda *args, **kwargs: ([], []), raising=False)
+    monkeypatch.setattr(ra, "runtime_storage_status", lambda: {"ok": True}, raising=False)
+    monkeypatch.setattr(
+        ra,
+        "get_incident_summary",
+        lambda db_path=None: {"by_severity": {"CRITICAL": 0}},
+        raising=False,
+    )
+
+    payload = ra._run_remote_hosted_audit(scan_limit=4, soak_seconds=0)
+
+    assert payload["verdict"] == "BLOCKED"
+    assert "host_service_status_artifact_missing" in payload["blockers"]

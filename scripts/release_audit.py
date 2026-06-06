@@ -51,6 +51,7 @@ from runtime.release_gate import (
     VERDICT_READY_FOR_LIVE,
     is_infrastructure_reason,
     is_liquidity_warning,
+    load_host_service_status_artifact,
     write_release_audit_artifact,
 )
 from runtime.storage_guard import runtime_storage_status
@@ -71,6 +72,12 @@ PROOF_GATE_TESTS = [
     "tests/proof/test_runtime_layer.py",
     "tests/proof/test_release_audit.py",
 ]
+SERVICE_NAMES = (
+    "execution-engine",
+    "telegram-oracle",
+    "kalshi-cockpit",
+)
+HOST_SERVICE_ARTIFACT_MAX_AGE_SECONDS = 30 * 60
 
 
 def _now_iso() -> str:
@@ -585,25 +592,81 @@ def _run_local_audit(*, scan_limit: int) -> dict[str, Any]:
     }
 
 
-def _docker_service_status() -> dict[str, Any]:
-    services = {
-        "execution-engine": {"up": False, "status": ""},
-        "telegram-oracle": {"up": False, "status": ""},
-        "kalshi-cockpit": {"up": False, "status": ""},
+def _blank_service_statuses() -> dict[str, dict[str, Any]]:
+    return {name: {"up": False, "status": ""} for name in SERVICE_NAMES}
+
+
+def _service_statuses_from_rows(raw_output: str) -> dict[str, dict[str, Any]]:
+    services = _blank_service_statuses()
+    for raw in str(raw_output or "").splitlines():
+        name, _sep, status = raw.partition("|")
+        if name in services:
+            services[name] = {"up": status.startswith("Up"), "status": status}
+    return services
+
+
+def _load_host_service_status(expected_sha: str = "") -> dict[str, Any]:
+    services = _blank_service_statuses()
+    artifact = load_host_service_status_artifact()
+    if not artifact:
+        return {
+            "services": services,
+            "source": "host_service_status_artifact",
+            "artifact_usable": False,
+            "artifact_reason": "missing",
+        }
+
+    artifact_services = artifact.get("services") or {}
+    for name in services:
+        status = artifact_services.get(name) or {}
+        services[name] = {
+            "up": bool(status.get("up")),
+            "status": str(status.get("status") or ""),
+        }
+
+    artifact_sha = str(artifact.get("audited_sha") or "").strip()
+    artifact_time = _parse_utc(artifact.get("as_of"))
+    age_seconds = None
+    if artifact_time is not None:
+        age_seconds = max(0.0, (datetime.now(timezone.utc) - artifact_time).total_seconds())
+
+    if not artifact_sha:
+        reason = "sha_missing"
+    elif expected_sha and artifact_sha != expected_sha:
+        reason = "sha_mismatch"
+    elif age_seconds is None:
+        reason = "timestamp_missing"
+    elif age_seconds > HOST_SERVICE_ARTIFACT_MAX_AGE_SECONDS:
+        reason = "stale"
+    else:
+        reason = ""
+
+    return {
+        "services": services,
+        "source": "host_service_status_artifact",
+        "artifact_usable": reason == "",
+        "artifact_reason": reason,
+        "artifact_age_seconds": age_seconds,
+        "artifact_sha": artifact_sha,
+        "artifact": artifact,
     }
+
+
+def _docker_service_status(expected_sha: str = "") -> dict[str, Any]:
     try:
         output = subprocess.check_output(
             ["docker", "ps", "--format", "{{.Names}}|{{.Status}}"],
             text=True,
         )
     except Exception as exc:
-        return {"services": services, "error": str(exc)}
+        artifact_status = _load_host_service_status(expected_sha)
+        artifact_status["docker_error"] = str(exc)
+        return artifact_status
 
-    for raw in output.splitlines():
-        name, _sep, status = raw.partition("|")
-        if name in services:
-            services[name] = {"up": status.startswith("Up"), "status": status}
-    return {"services": services}
+    return {
+        "services": _service_statuses_from_rows(output),
+        "source": "host_docker_ps",
+    }
 
 
 def _cockpit_health() -> dict[str, Any]:
@@ -624,13 +687,14 @@ def _cockpit_health() -> dict[str, Any]:
 
 def _run_remote_hosted_audit(*, scan_limit: int, soak_seconds: int) -> dict[str, Any]:
     build = get_build_info()
+    build_sha = str(build.get("sha") or "").strip()
     init_incident_table(DB_PATH)
     ingest_system_events(lookback_minutes=180, db_path=DB_PATH)
     health = run_health_check(force=True)
     truth = get_live_kalshi_status(db_path=DB_PATH, connect=True, sync_broker=True)
     provider_status = get_weather_provider_status(db_path=DB_PATH)
     balance_truth = get_balance_truth_status(truth=truth, db_path=DB_PATH)
-    containers = _docker_service_status()
+    containers = _docker_service_status(build_sha)
     cockpit = _cockpit_health()
     model_probe = probe_reasoning_model()
     container_mode = _running_in_container()
@@ -666,14 +730,36 @@ def _run_remote_hosted_audit(*, scan_limit: int, soak_seconds: int) -> dict[str,
         blockers.append("unresolved_critical_incidents")
 
     services = containers.get("services") or {}
-    if not container_mode:
+    service_truth_available = False
+    if containers.get("source") == "host_docker_ps":
+        service_truth_available = True
+    elif container_mode and bool(containers.get("artifact_usable")):
+        service_truth_available = True
+
+    if service_truth_available:
         for name, status in services.items():
             if not bool(status.get("up")):
                 blockers.append(f"{name}_down")
-        if containers.get("error"):
-            blockers.append(f"docker_ps_failed ({containers['error']})")
-    elif containers.get("error"):
-        warnings.append("docker_service_check_skipped_in_container_mode")
+    elif not container_mode and containers.get("docker_error"):
+        blockers.append(f"docker_ps_failed ({containers['docker_error']})")
+    elif container_mode:
+        artifact_reason = str(containers.get("artifact_reason") or "unavailable")
+        if artifact_reason == "sha_mismatch":
+            blockers.append(
+                f"host_service_status_artifact_sha_mismatch ({containers.get('artifact_sha') or 'missing'} != {build_sha or 'missing'})"
+            )
+        elif artifact_reason == "stale":
+            blockers.append(
+                f"host_service_status_artifact_stale ({int(containers.get('artifact_age_seconds') or 0)}s)"
+            )
+        elif artifact_reason == "missing":
+            blockers.append("host_service_status_artifact_missing")
+        elif artifact_reason == "timestamp_missing":
+            blockers.append("host_service_status_artifact_timestamp_missing")
+        elif artifact_reason == "sha_missing":
+            blockers.append("host_service_status_artifact_sha_missing")
+        else:
+            blockers.append("host_service_status_artifact_unavailable")
 
     if not bool(cockpit.get("ok")):
         blockers.append("cockpit_health_failed")

@@ -2,6 +2,7 @@
 
 ## 2026-06-06
 - Hardened the release gate itself so remote hosted audits now emit machine-clean JSON, the outer SSH-based remote audit tolerates mixed stdout safely, and deploys seed a same-SHA provisional `release_audit_pending_new_build` artifact before `execution-engine` starts to prevent stale release-truth drift during startup.
+- Fixed the deploy-time seeding path to write the provisional release artifact through a one-shot container against the mounted project volume, avoiding host-permission drift on root-owned `logs/` files.
 - Replaced the weather lane's flat `$0.07` pre-trade fee assumption with a shared exchange-derived Kalshi fee model, so strategy EV, sizing, affordability, exposure, exit-edge math, cockpit truth, and broker fee fallback now all use the same live economics.
 
 ## 2026-06-04

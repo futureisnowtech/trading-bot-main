@@ -124,7 +124,7 @@ echo "  Building cockpit image..."
 docker buildx build --pull --load --progress=plain -f Dockerfile.dashboard -t "${LOCAL_DASHBOARD_IMAGE_NAME}:latest" .
 
 echo "  Seeding provisional release artifact for new SHA..."
-docker run --rm -v ${PROJECT_DIR}:/app "${LOCAL_IMAGE_NAME}:latest" python3 - << PYEOF
+docker run --rm -i -v ${PROJECT_DIR}:/app "${LOCAL_IMAGE_NAME}:latest" python3 - << PYEOF
 from runtime.release_gate import VERDICT_BLOCKED, write_release_audit_artifact
 
 payload = {

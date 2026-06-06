@@ -1209,3 +1209,144 @@ def test_forecast_health_exposes_heartbeat_at(tmp_path):
     assert result["lane_heartbeat_at"] == "2026-04-16T03:00:00+00:00", (
         "lane_heartbeat_at must match the value from lane_runtime_state"
     )
+
+
+def test_kalshi_hub_exposure_cap_helper_uses_new_floor_and_pct():
+    from config import get_kalshi_hub_exposure_cap
+
+    assert get_kalshi_hub_exposure_cap(100.0) == 40.0
+    assert get_kalshi_hub_exposure_cap(144.31) == pytest.approx(43.293)
+    assert get_kalshi_hub_exposure_cap(200.0) == 60.0
+
+
+def test_strategy_engine_family_cap_allows_four_existing_positions(monkeypatch):
+    from forecast.market_snapshot import MarketSnapshot
+    import forecast.strategy_engine as se
+
+    snapshot = MarketSnapshot(
+        market_id=1,
+        ticker="KXLOWTLV-99JAN01-B71.5",
+        contract_name="Las Vegas Low",
+        strike=71.5,
+        last_trade_at="20990101",
+        resolution_at="2099-01-01T00:00:00Z",
+        yes_contract={"local_symbol": "KXLOWTLV-99JAN01-B71.5", "contract_name": "Las Vegas Low"},
+        no_contract={"local_symbol": "KXLOWTLV-99JAN01-T72", "contract_name": "Las Vegas Low"},
+        yes_quote={"ask": 0.42, "bid": 0.40, "mid": 0.41},
+        no_quote={"ask": 0.58, "bid": 0.56, "mid": 0.57},
+        bars_5m=[],
+        bars_30m=[],
+        bars_1h=[],
+        bars_4h=[],
+    )
+
+    called = {"evaluate": False}
+
+    def _stub_evaluate_contract(**kwargs):
+        called["evaluate"] = True
+        return se.StrategyResult(
+            strategy_family="stub",
+            side="NONE",
+            q_hat=0.0,
+            ev=0.0,
+            ev_yes=0.0,
+            ev_no=0.0,
+            confidence=0.0,
+            uncertainty_penalty=0.0,
+            econ_approved=False,
+            veto_reason="downstream_stub",
+            position_fraction=0.0,
+            position_contracts=0,
+            top_factors=[],
+            hours_to_resolution=24.0,
+        )
+
+    monkeypatch.setattr(se, "evaluate_contract", _stub_evaluate_contract)
+
+    results = se.evaluate_market_snapshots(
+        snapshots=[snapshot],
+        bankroll=200.0,
+        open_event_families={"KXLOWTLV": 4},
+        open_positions=[],
+    )
+
+    assert called["evaluate"] is True
+    assert results[0]["result"].veto_reason == "downstream_stub"
+
+
+def test_strategy_engine_family_cap_blocks_fifth_existing_position(monkeypatch):
+    from forecast.market_snapshot import MarketSnapshot
+    import forecast.strategy_engine as se
+
+    snapshot = MarketSnapshot(
+        market_id=1,
+        ticker="KXLOWTLV-99JAN01-B71.5",
+        contract_name="Las Vegas Low",
+        strike=71.5,
+        last_trade_at="20990101",
+        resolution_at="2099-01-01T00:00:00Z",
+        yes_contract={"local_symbol": "KXLOWTLV-99JAN01-B71.5", "contract_name": "Las Vegas Low"},
+        no_contract={"local_symbol": "KXLOWTLV-99JAN01-T72", "contract_name": "Las Vegas Low"},
+        yes_quote={"ask": 0.42, "bid": 0.40, "mid": 0.41},
+        no_quote={"ask": 0.58, "bid": 0.56, "mid": 0.57},
+        bars_5m=[],
+        bars_30m=[],
+        bars_1h=[],
+        bars_4h=[],
+    )
+
+    def _should_not_run(**kwargs):
+        raise AssertionError("family-cap veto should happen before evaluate_contract")
+
+    monkeypatch.setattr(se, "evaluate_contract", _should_not_run)
+
+    results = se.evaluate_market_snapshots(
+        snapshots=[snapshot],
+        bankroll=200.0,
+        open_event_families={"KXLOWTLV": 5},
+        open_positions=[],
+    )
+
+    assert results[0]["result"].veto_reason == "same_event_family_cap_reached"
+
+
+def test_strategy_engine_hub_cap_uses_thirty_percent_with_forty_dollar_floor(monkeypatch):
+    from forecast.market_snapshot import MarketSnapshot
+    import forecast.strategy_engine as se
+
+    snapshot = MarketSnapshot(
+        market_id=2,
+        ticker="KXHIGHSEA-99JAN01-B61.5",
+        contract_name="Seattle High",
+        strike=61.5,
+        last_trade_at="20990101",
+        resolution_at="2099-01-01T00:00:00Z",
+        yes_contract={"local_symbol": "KXHIGHSEA-99JAN01-B61.5", "contract_name": "Seattle High"},
+        no_contract={"local_symbol": "KXHIGHSEA-99JAN01-T62", "contract_name": "Seattle High"},
+        yes_quote={"ask": 0.42, "bid": 0.40, "mid": 0.41},
+        no_quote={"ask": 0.58, "bid": 0.56, "mid": 0.57},
+        bars_5m=[],
+        bars_30m=[],
+        bars_1h=[],
+        bars_4h=[],
+    )
+
+    def _should_not_run(**kwargs):
+        raise AssertionError("hub-cap veto should happen before evaluate_contract")
+
+    monkeypatch.setattr(se, "evaluate_contract", _should_not_run)
+
+    results = se.evaluate_market_snapshots(
+        snapshots=[snapshot],
+        bankroll=100.0,
+        open_event_families={},
+        open_positions=[
+            {
+                "local_symbol": "KXHIGHLAX-99JAN01-B69.5",
+                "qty": 100,
+                "entry_price": 0.50,
+            }
+        ],
+    )
+
+    assert results[0]["result"].veto_reason == "hub_exposure_cap_reached (57.0/40.0)"

@@ -35,8 +35,8 @@ def test_summarize_hub_exposure_groups_city_hubs():
         ]
     )
 
-    assert exposures[0] == {"hub": "WEST", "cost_basis_usd": 7.0}
-    assert exposures[1] == {"hub": "FLORIDA", "cost_basis_usd": 2.0}
+    assert exposures[0] == {"hub": "WEST", "exposure_usd": 9.1}
+    assert exposures[1] == {"hub": "FLORIDA", "exposure_usd": 2.35}
 
 
 def test_build_realized_pnl_curve_accumulates_in_time_order():
@@ -62,7 +62,8 @@ def test_build_regime_manifest_surfaces_live_constants():
     assert manifest["reasoning_model"]
     assert "60% GFS + 40% ECMWF" in manifest["ensemble_blend"]
     assert any("0.85" in line for line in manifest["exit_stack"])
-    assert any("$40.00" in line for line in manifest["entry_gates"])
+    assert any("Same event family cap 5" in line for line in manifest["entry_gates"])
+    assert any("$60.00" in line for line in manifest["entry_gates"])
 
 
 def test_build_regime_manifest_surfaces_adaptive_blend_when_available():
@@ -91,6 +92,16 @@ def test_build_regime_manifest_uses_runtime_build_version(monkeypatch):
     manifest = cd.build_regime_manifest(balance_usd=200.0)
 
     assert manifest["version"] == "19.10.1"
+
+
+def test_metric_explainers_surface_new_hub_cap_formula():
+    from dashboard.cockpit_data import build_metric_explainers
+
+    explainers = build_metric_explainers(balance_usd=144.31)
+
+    assert "43.29 dollars" in explainers["Regional Hub Cap"]
+    assert "max($40" in explainers["Regional Hub Cap"]
+    assert "30% of live cash" in explainers["Regional Hub Cap"]
 
 
 def test_build_trade_edge_rows_handles_yes_and_no_side_buys():

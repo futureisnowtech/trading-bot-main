@@ -23,6 +23,8 @@ from config import (
     KALSHI_EXIT_TIME_DECAY_HOURS,
     KALSHI_FEE_BUFFER,
     KALSHI_FEE_PER_CONTRACT,
+    KALSHI_HUB_EXPOSURE_MIN_USD,
+    KALSHI_HUB_EXPOSURE_PCT,
     KALSHI_KELLY_CAP,
     KALSHI_MAX_CONCURRENT_POSITIONS,
     KALSHI_MAX_DEPLOYED_PCT,
@@ -32,6 +34,8 @@ from config import (
     KALSHI_MAX_USD_PER_POSITION,
     KALSHI_MIN_PRICE,
     KALSHI_SAME_EVENT_FAMILY_CAP,
+    get_kalshi_hub_exposure_cap,
+    get_kalshi_position_exposure_usd,
 )
 from forecast.strategy_engine import EV_THRESHOLD, _get_city_hub, _get_macro_context
 from notifications.notification_engine import get_notifications
@@ -321,10 +325,13 @@ def summarize_hub_exposure(position_rows: list[dict[str, Any]]) -> list[dict[str
     by_hub: defaultdict[str, float] = defaultdict(float)
     for row in position_rows:
         hub = str(row.get("hub") or "UNKNOWN")
-        cost_basis = _coerce_float(row.get("entry_price")) * _coerce_float(row.get("qty"))
-        by_hub[hub] += cost_basis
+        exposure = get_kalshi_position_exposure_usd(
+            _coerce_float(row.get("qty")),
+            _coerce_float(row.get("entry_price")),
+        )
+        by_hub[hub] += exposure
     return [
-        {"hub": hub, "cost_basis_usd": round(cost, 4)}
+        {"hub": hub, "exposure_usd": round(cost, 4)}
         for hub, cost in sorted(by_hub.items(), key=lambda item: item[1], reverse=True)
     ]
 
@@ -348,6 +355,7 @@ def build_regime_manifest(
     learning_status: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     balance = _coerce_float(balance_usd, ACCOUNT_SIZE)
+    hub_cap = get_kalshi_hub_exposure_cap(balance)
     macro = _get_macro_context()
     build = get_build_info()
     blend_summary = _format_learning_blend(learning_status)
@@ -371,7 +379,11 @@ def build_regime_manifest(
             f"Max concurrent positions {KALSHI_MAX_CONCURRENT_POSITIONS}",
             f"Same event family cap {KALSHI_SAME_EVENT_FAMILY_CAP}",
             f"Max deployed capital {KALSHI_MAX_DEPLOYED_PCT:.0%}",
-            f"Regional hub cap now ${max(20.0, balance * 0.20):.2f}",
+            (
+                f"Regional hub cap now ${hub_cap:.2f} "
+                f"(max(${KALSHI_HUB_EXPOSURE_MIN_USD:.0f}, "
+                f"{KALSHI_HUB_EXPOSURE_PCT:.0%} of live cash))"
+            ),
         ],
         "exit_stack": [
             "Take profit when bid reaches 0.85 on weather positions",
@@ -385,7 +397,7 @@ def build_regime_manifest(
 
 def build_metric_explainers(balance_usd: float | None = None) -> dict[str, str]:
     balance = _coerce_float(balance_usd, ACCOUNT_SIZE)
-    hub_cap = max(20.0, balance * 0.20)
+    hub_cap = get_kalshi_hub_exposure_cap(balance)
     return {
         "Live Cash": "This is the cash Kalshi says is available right now. It is the real money the bot can still deploy without guessing from local records.",
         "Open Positions": "These are live Kalshi positions the broker is actually carrying. It keeps us honest by showing what the exchange sees, not what we hoped happened.",
@@ -400,7 +412,12 @@ def build_metric_explainers(balance_usd: float | None = None) -> dict[str, str]:
         "Position Sizing": "Even when a trade passes, the bot still sizes it down through bankroll caps. This keeps one good-looking idea from becoming a dangerous oversized bet.",
         "Net EV Gate": f"A trade must still clear at least {EV_THRESHOLD:.0%} edge after the ${KALSHI_FEE_PER_CONTRACT:.2f} fee and the taker friction buffer. This prevents the bot from buying tiny theoretical edges that disappear in real execution.",
         "Fractional Kelly": f"Kelly sizing starts from the math edge, then only uses a fraction of the account. Here it is capped at {KALSHI_KELLY_CAP:.0%}, which keeps conviction from turning into overbetting.",
-        "Regional Hub Cap": f"No single weather region is allowed to dominate the book. Right now the live hub cap is {_coerce_float(hub_cap):.2f} dollars, which limits correlated storm or temperature risk.",
+        "Regional Hub Cap": (
+            "No single weather region is allowed to dominate the book. "
+            f"Right now the live hub cap is {_coerce_float(hub_cap):.2f} dollars, "
+            f"computed as max(${KALSHI_HUB_EXPOSURE_MIN_USD:.0f}, "
+            f"{KALSHI_HUB_EXPOSURE_PCT:.0%} of live cash)."
+        ),
         "Max Deployed Capital": f"The engine can only deploy up to {KALSHI_MAX_DEPLOYED_PCT:.0%} of the account at once. That leaves dry powder and prevents the bot from becoming fully invested in mediocre conditions.",
         "Fee Buffer": f"The system assumes extra friction beyond the fixed ${KALSHI_FEE_PER_CONTRACT:.2f} contract fee. That buffer protects against thin books and keeps the entry math closer to what live fills actually cost.",
         "Forecast Freshness": f"Weather data older than {KALSHI_DATA_FRESHNESS_MINUTES} minutes is treated as stale. This stops the engine from making decisions off an old atmosphere.",
@@ -414,7 +431,7 @@ def build_decision_funnel(
     learning_status: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     explainers = build_metric_explainers(balance_usd)
-    hub_cap = max(20.0, _coerce_float(balance_usd, ACCOUNT_SIZE) * 0.20)
+    hub_cap = get_kalshi_hub_exposure_cap(_coerce_float(balance_usd, ACCOUNT_SIZE))
     learning_blend = _format_learning_blend(learning_status)
     return [
         {
@@ -688,7 +705,7 @@ def build_regime_cards(
     learning_status: dict[str, Any] | None = None,
 ) -> list[dict[str, str]]:
     balance = _coerce_float(balance_usd, ACCOUNT_SIZE)
-    hub_cap = max(20.0, balance * 0.20)
+    hub_cap = get_kalshi_hub_exposure_cap(balance)
     explainers = build_metric_explainers(balance_usd)
     global_blend = (learning_status or {}).get("global_blend") or {}
     blend_sample_size = int(global_blend.get("sample_size") or 0)

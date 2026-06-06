@@ -51,6 +51,8 @@ from config import (
     KALSHI_FEE_PER_CONTRACT,
     KALSHI_MAX_FEE_DRAG_PCT,
     KALSHI_MAX_USD_PER_POSITION,
+    get_kalshi_hub_exposure_cap,
+    get_kalshi_position_exposure_usd,
 )
 from forecast.market_snapshot import MarketSnapshot, build_market_snapshots
 from forecast.primitives import (
@@ -1850,9 +1852,10 @@ def evaluate_market_snapshots(
         p_ticker = pos.get("local_symbol", "")
         p_hub = _get_city_hub(p_ticker) # Ensure _get_city_hub uses airport codes (e.g. 'ORD', 'JFK', 'DEN')
         entry_price = float(pos.get("entry_price") or pos.get("entry") or 0.0)
-        # For both YES and NO contracts, max loss is the premium paid plus fees.
-        actual_capital_at_risk = entry_price + KALSHI_FEE_PER_CONTRACT
-        pos_usd = float(pos.get("qty", 0)) * actual_capital_at_risk
+        pos_usd = get_kalshi_position_exposure_usd(
+            float(pos.get("qty", 0)),
+            entry_price,
+        )
         hub_exposure[p_hub] = hub_exposure.get(p_hub, 0.0) + pos_usd
     
     # Initial load of open hub exposure (approximate based on ticker)
@@ -1889,7 +1892,7 @@ def evaluate_market_snapshots(
 
         count = current_tick_counts.get(family, 0)
         current_hub_usd = hub_exposure.get(hub, 0.0)
-        current_hub_cap = max(20.0, bankroll * 0.20)
+        current_hub_cap = get_kalshi_hub_exposure_cap(bankroll)
 
         if hub != "UNKNOWN" and current_hub_usd >= current_hub_cap:
             result = StrategyResult(
@@ -1964,9 +1967,9 @@ def evaluate_market_snapshots(
             risk_price = (
                 yes_quote.get("ask") if result.side == "YES" else no_quote.get("ask")
             ) or 0.50
-            hub_exposure[hub] = current_hub_usd + (
-                result.position_contracts
-                * (float(risk_price) + KALSHI_FEE_PER_CONTRACT)
+            hub_exposure[hub] = current_hub_usd + get_kalshi_position_exposure_usd(
+                result.position_contracts,
+                float(risk_price),
             )
 
         rank_score = result.ev * result.confidence if result.econ_approved else 0.0

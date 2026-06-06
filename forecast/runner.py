@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 try:
     from config import KALSHI_SAME_EVENT_FAMILY_CAP
 except ImportError:
-    KALSHI_SAME_EVENT_FAMILY_CAP = 2
+    KALSHI_SAME_EVENT_FAMILY_CAP = 5
 
 # ── Lazy imports (avoid heavy deps at module load time) ────────────────────────
 _broker = None

@@ -77,6 +77,9 @@ jobs:
           ACCOUNT_SIZE=5000
           FORECAST_LANE_ACTIVE=true
           FORECAST_AUTONOMOUS_ENABLED=true
+          KALSHI_SAME_EVENT_FAMILY_CAP=5
+          KALSHI_HUB_EXPOSURE_PCT=0.30
+          KALSHI_HUB_EXPOSURE_MIN_USD=40
           KALSHI_API_KEY_ID=test_key_ci
           KALSHI_PRIVATE_KEY_PATH=kalshi_private_key.pem
           TELEGRAM_BOT_TOKEN=test_token

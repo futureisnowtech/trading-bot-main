@@ -97,6 +97,21 @@ try:
     else:
         ok(f"KALSHI_MAX_USD_PER_POSITION={cfg.KALSHI_MAX_USD_PER_POSITION}")
 
+    if int(cfg.KALSHI_SAME_EVENT_FAMILY_CAP) < 1:
+        fail("KALSHI_SAME_EVENT_FAMILY_CAP must be at least 1")
+    else:
+        ok(f"KALSHI_SAME_EVENT_FAMILY_CAP={cfg.KALSHI_SAME_EVENT_FAMILY_CAP}")
+
+    if float(cfg.KALSHI_HUB_EXPOSURE_PCT) <= 0:
+        fail("KALSHI_HUB_EXPOSURE_PCT must be positive")
+    else:
+        ok(f"KALSHI_HUB_EXPOSURE_PCT={cfg.KALSHI_HUB_EXPOSURE_PCT:.2f}")
+
+    if float(cfg.KALSHI_HUB_EXPOSURE_MIN_USD) < 0:
+        fail("KALSHI_HUB_EXPOSURE_MIN_USD cannot be negative")
+    else:
+        ok(f"KALSHI_HUB_EXPOSURE_MIN_USD={cfg.KALSHI_HUB_EXPOSURE_MIN_USD:.2f}")
+
     if float(cfg.KALSHI_FEE_PER_CONTRACT) < 0:
         fail("KALSHI_FEE_PER_CONTRACT cannot be negative")
     else:

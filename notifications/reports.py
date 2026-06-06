@@ -144,11 +144,15 @@ def generate_sovereign_payload() -> dict:
 
         hub_exposure = {}
         try:
+            from config import get_kalshi_position_exposure_usd
             from forecast.strategy_engine import _get_city_hub
 
             for row in open_positions:
                 hub = _get_city_hub(row["ticker"])
-                exposure = float(row["qty"] or 0.0) * float(row["entry_price"] or 0.0)
+                exposure = get_kalshi_position_exposure_usd(
+                    float(row["qty"] or 0.0),
+                    float(row["entry_price"] or 0.0),
+                )
                 hub_exposure[hub] = round(hub_exposure.get(hub, 0.0) + exposure, 2)
         except Exception:
             hub_exposure = {}

@@ -152,7 +152,13 @@ FORECAST_MANUAL_ENABLED: bool = (
 # Kalshi Risk & Capital Partitioning
 KALSHI_MAX_DEPLOYED_PCT: float = 0.90
 KALSHI_MAX_CONCURRENT_POSITIONS: int = 15
-KALSHI_SAME_EVENT_FAMILY_CAP: int = int(os.getenv("KALSHI_SAME_EVENT_FAMILY_CAP", "2"))
+KALSHI_SAME_EVENT_FAMILY_CAP: int = int(os.getenv("KALSHI_SAME_EVENT_FAMILY_CAP", "5"))
+KALSHI_HUB_EXPOSURE_PCT: float = float(
+    os.getenv("KALSHI_HUB_EXPOSURE_PCT", "0.30")
+)
+KALSHI_HUB_EXPOSURE_MIN_USD: float = float(
+    os.getenv("KALSHI_HUB_EXPOSURE_MIN_USD", "40")
+)
 KALSHI_MAX_QTY_PER_POSITION: int = 200
 KALSHI_MAX_USD_PER_POSITION: float = 10.0  # Hard Ceiling
 KALSHI_MIN_PRICE: float = 0.15
@@ -225,3 +231,23 @@ MACRO_CACHE_FILE: str = _resolve_runtime_child(
 MIN_FREE_DISK_MB: int = int(os.getenv("MIN_FREE_DISK_MB", "2048"))
 LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
 MARKET_TIMEZONE: str = "America/New_York"
+
+
+def get_kalshi_hub_exposure_cap(balance_usd: float) -> float:
+    try:
+        balance = float(balance_usd)
+    except (TypeError, ValueError):
+        balance = 0.0
+    return max(KALSHI_HUB_EXPOSURE_MIN_USD, balance * KALSHI_HUB_EXPOSURE_PCT)
+
+
+def get_kalshi_position_exposure_usd(qty: float, entry_price: float) -> float:
+    try:
+        contracts = max(0.0, float(qty))
+    except (TypeError, ValueError):
+        contracts = 0.0
+    try:
+        price = max(0.0, float(entry_price))
+    except (TypeError, ValueError):
+        price = 0.0
+    return contracts * (price + KALSHI_FEE_PER_CONTRACT)

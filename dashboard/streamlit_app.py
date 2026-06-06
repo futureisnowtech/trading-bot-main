@@ -18,6 +18,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from dashboard.cockpit_data import get_cockpit_payload
+from config import get_kalshi_hub_exposure_cap
 
 st.set_page_config(
     page_title="Sovereign Kalshi Cockpit",
@@ -644,7 +645,7 @@ drift = truth.get("position_drift") or {}
 positions_count = len(positions_live)
 realized_curve = payload["realized_pnl_curve"]
 realized_pnl = realized_curve[-1]["cumulative_pnl"] if realized_curve else 0.0
-hub_cap_now = max(20.0, balance * 0.20)
+hub_cap_now = get_kalshi_hub_exposure_cap(balance)
 
 _render_html(
     f"""

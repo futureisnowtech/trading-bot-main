@@ -32,6 +32,7 @@ from forecast.db import (
     BAR_RETENTION_DAYS,
     DB_PATH,
 )
+from forecast.weather_contracts import weather_mode_for_ticker
 from logging_db.trade_logger import log_event
 
 logger = logging.getLogger("forecast.quote_harvester")
@@ -39,6 +40,10 @@ logger = logging.getLogger("forecast.quote_harvester")
 POLL_INTERVAL_SEC = 60
 PRUNE_INTERVAL_MIN = 60
 QUOTE_LOOKBACK = 1200 # approx 20m of 1s quotes? No, for forecast it is much slower.
+
+
+def _is_weather_contract_ticker(ticker: str) -> bool:
+    return weather_mode_for_ticker(str(ticker or "")) is not None
 
 
 # ── Internal Bar Building Logic ──────────────────────────────────────────────
@@ -168,6 +173,8 @@ class QuoteHarvester:
     def backfill_bars(self, contract_id: int, ticker: str) -> None:
         """v18.34: Backfill historical candles from broker to populate technical indicators."""
         if not self._broker or not self._broker.is_connected():
+            return
+        if _is_weather_contract_ticker(ticker):
             return
 
         db_path = self._db_path
@@ -309,7 +316,8 @@ class QuoteHarvester:
                             side=side,
                             db_path=self._db_path,
                         )
-                        _build_all_bars(contract_id, db_path=self._db_path)
+                        if not _is_weather_contract_ticker(local_symbol):
+                            _build_all_bars(contract_id, db_path=self._db_path)
                         total_quotes += 1
                     except Exception as e:
                         logger.debug(f"persist error {local_symbol}: {e}")

@@ -10,6 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Iterable
 
+from forecast.weather_contracts import weather_mode_for_ticker
+
 
 @dataclass(frozen=True)
 class MarketSnapshot:
@@ -51,6 +53,10 @@ def snapshot_pair_key(contract: dict) -> tuple[int, float, str, str]:
     )
 
 
+def _snapshot_requires_bars(ticker: str) -> bool:
+    return weather_mode_for_ticker(str(ticker or "")) is None
+
+
 def build_market_snapshots(
     active_contracts: Iterable[dict],
     *,
@@ -89,7 +95,7 @@ def build_market_snapshots(
         bars_1h: list[dict] = []
         bars_4h: list[dict] = []
         yes_id = yes_contract.get("id") or yes_contract.get("contract_id")
-        if yes_id:
+        if yes_id and _snapshot_requires_bars(ticker):
             try:
                 bars_5m = get_bars_fn(int(yes_id), "5m")
                 bars_30m = get_bars_fn(int(yes_id), "30m")

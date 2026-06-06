@@ -1,5 +1,8 @@
 # CHANGELOG
 
+## 2026-06-06
+- Replaced the weather lane's flat `$0.07` pre-trade fee assumption with a shared exchange-derived Kalshi fee model, so strategy EV, sizing, affordability, exposure, exit-edge math, cockpit truth, and broker fee fallback now all use the same live economics.
+
 ## 2026-06-04
 - Promoted the weather RBI loop from passive scorekeeping into a bounded adaptive learner that writes live GFS/ECMWF blend weights with recency decay, sample-size shrinkage, and runtime cooldown protection.
 - Made weather entries and exits probability-coherent by routing both through the same adaptive ensemble blend, including a catastrophic-divergence neutralization path for held-position exit logic.

@@ -7,6 +7,7 @@ live execution loop via a low-latency shadow state dictionary.
 """
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -34,6 +35,9 @@ _ENSEMBLE_FETCH_STATE_LOCK = threading.Lock()
 _ENSEMBLE_GLOBAL_RATE_LIMIT_LOCK = threading.Lock()
 _PROVIDER_NOTICE_LOCK = threading.Lock()
 _WATERMARKS_FILE = ""
+_WEATHER_SNAPSHOT_FILE = ""
+_SNAPSHOT_FILE_LOCK = threading.Lock()
+_LAST_SNAPSHOT_MTIME = 0.0
 _ACTIVE_CITY_SCOPE_CACHE: Dict[str, Any] = {"timestamp": 0.0, "city_keys": []}
 _ENSEMBLE_FETCH_STATE: Dict[str, Dict[str, Any]] = {}
 _ENSEMBLE_GLOBAL_RATE_LIMIT: Dict[str, Any] = {"until": 0.0, "reason": "", "logged_at": 0.0}
@@ -51,11 +55,13 @@ try:
     )
 
     _WATERMARKS_FILE = os.path.join(os.path.dirname(_DB_PATH), "weather_watermarks.json")
+    _WEATHER_SNAPSHOT_FILE = os.path.join(os.path.dirname(_DB_PATH), "weather_snapshot.json")
     WEATHER_ACTIVE_CITY_REFRESH_SEC = int(_CFG_ACTIVE_CITY_REFRESH_SEC)
     WEATHER_ENSEMBLE_COOLDOWN_SEC = int(_CFG_ENSEMBLE_COOLDOWN_SEC)
     WEATHER_ENSEMBLE_MODEL_PAUSE_SEC = float(_CFG_ENSEMBLE_MODEL_PAUSE_SEC)
 except Exception:
     _WATERMARKS_FILE = ""
+    _WEATHER_SNAPSHOT_FILE = ""
 
 # Kalshi Station Mappings (Lat/Lon)
 # Refined v19.1.10: Official ASOS Settlement Stations
@@ -151,6 +157,98 @@ async def fetch_metar_observation(icao: str) -> Dict[str, Any]:
 # ── Cache ───────────────────────────────────────────────────────────────────
 _COORDINATE_CACHE: Dict[str, Dict[str, Any]] = {}
 CACHE_EXPIRY_SEC = WEATHER_STATE_TTL_SEC  # 6 hours (weather ensembles are slow-moving)
+_OBSERVED_DAILY_CACHE: Dict[str, Dict[str, Any]] = {}
+OBSERVED_DAILY_CACHE_TTL_SEC = 6 * 3600
+
+
+def _series_record_is_fresh(record: Dict[str, Any] | None, *, max_age_sec: int = WEATHER_STATE_TTL_SEC) -> bool:
+    if not record:
+        return False
+    try:
+        ts = float(record.get("timestamp") or 0.0)
+    except Exception:
+        return False
+    return (time.time() - ts) <= max_age_sec
+
+
+def _persist_weather_snapshot() -> None:
+    """Persist the current weather shadow state for read-only sidecars."""
+    global _LAST_SNAPSHOT_MTIME
+
+    if not _WEATHER_SNAPSHOT_FILE:
+        return
+
+    with _STATE_LOCK:
+        snapshot_state = deepcopy(_WEATHER_SHADOW_STATE)
+
+    payload = {
+        "written_at": time.time(),
+        "series_count": len(snapshot_state),
+        "state": snapshot_state,
+    }
+    tmp_path = f"{_WEATHER_SNAPSHOT_FILE}.tmp"
+
+    try:
+        os.makedirs(os.path.dirname(_WEATHER_SNAPSHOT_FILE), exist_ok=True)
+        with _SNAPSHOT_FILE_LOCK:
+            with open(tmp_path, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle, indent=2, sort_keys=True)
+            os.replace(tmp_path, _WEATHER_SNAPSHOT_FILE)
+            _LAST_SNAPSHOT_MTIME = os.path.getmtime(_WEATHER_SNAPSHOT_FILE)
+    except Exception as exc:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
+        logger.debug("Weather snapshot persist failed: %s", exc)
+
+
+def _load_weather_snapshot(*, force: bool = False) -> Dict[str, Any]:
+    """Load persisted shared weather truth into the in-process shadow state."""
+    global _LAST_SNAPSHOT_MTIME
+
+    if not _WEATHER_SNAPSHOT_FILE or not os.path.exists(_WEATHER_SNAPSHOT_FILE):
+        return {"loaded_series": 0}
+
+    try:
+        file_mtime = os.path.getmtime(_WEATHER_SNAPSHOT_FILE)
+    except Exception:
+        return {"loaded_series": 0}
+
+    if not force and file_mtime <= _LAST_SNAPSHOT_MTIME:
+        return {"loaded_series": 0, "cached": True}
+
+    try:
+        with _SNAPSHOT_FILE_LOCK:
+            with open(_WEATHER_SNAPSHOT_FILE, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+    except Exception as exc:
+        logger.debug("Weather snapshot load failed: %s", exc)
+        return {"loaded_series": 0, "error": str(exc)}
+
+    state = payload.get("state") if isinstance(payload, dict) else {}
+    if not isinstance(state, dict):
+        return {"loaded_series": 0}
+
+    loaded_series = 0
+    with _STATE_LOCK:
+        for series, record in state.items():
+            if not isinstance(record, dict):
+                continue
+            current = _WEATHER_SHADOW_STATE.get(series)
+            current_ts = float((current or {}).get("timestamp") or 0.0)
+            incoming_ts = float(record.get("timestamp") or 0.0)
+            if current and current_ts > incoming_ts:
+                continue
+            _WEATHER_SHADOW_STATE[str(series)] = record
+            loaded_series += 1
+
+    _LAST_SNAPSHOT_MTIME = file_mtime
+    return {
+        "loaded_series": loaded_series,
+        "written_at": payload.get("written_at") if isinstance(payload, dict) else None,
+    }
 
 
 def _cached_ensemble_record(cache_key: str, *, max_age_sec: int = CACHE_EXPIRY_SEC) -> Dict[str, Any]:
@@ -303,6 +401,184 @@ def _deterministic_precip_sigma(mean_precip: float, horizon_days: int = 0) -> fl
         2.0,
         max(0.08, 0.06 + (abs(float(mean_precip)) * 0.55) + (max(0, int(horizon_days)) * 0.04)),
     )
+
+
+def _c_to_f(value: float | None) -> float | None:
+    if value is None:
+        return None
+    return (float(value) * 9.0 / 5.0) + 32.0
+
+
+def _mm_to_inches(value: float | None) -> float | None:
+    if value is None:
+        return None
+    return float(value) * 0.03937
+
+
+def _nws_cli_location(station: dict | None) -> str:
+    if not station:
+        return ""
+    explicit = str(station.get("cli_location") or "").strip().upper()
+    if explicit:
+        return explicit
+    icao = str(station.get("icao") or "").strip().upper()
+    if len(icao) == 4 and icao.startswith("K"):
+        return icao[1:]
+    return icao
+
+
+def _parse_cli_report_date(product_text: str) -> date | None:
+    match = re.search(
+        r"CLIMATE SUMMARY FOR ([A-Z]+ \d{1,2} \d{4})",
+        str(product_text or "").upper(),
+    )
+    if not match:
+        return None
+    try:
+        return datetime.strptime(match.group(1), "%B %d %Y").date()
+    except Exception:
+        return None
+
+
+def _parse_cli_numeric_token(token: str, *, trace_value: float | None = None) -> float | None:
+    value = str(token or "").strip().upper()
+    if not value or value in {"MM", "M"}:
+        return None
+    if value == "T":
+        return trace_value
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+
+def _parse_nws_cli_product_text(
+    product_text: str,
+    *,
+    target_date: date,
+) -> Dict[str, Any]:
+    report_date = _parse_cli_report_date(product_text)
+    if report_date != target_date:
+        return {}
+
+    text = str(product_text or "")
+    temperature_section = ""
+    precipitation_section = ""
+
+    temp_match = re.search(
+        r"TEMPERATURE \(F\)(.*?)(?:\n\s*PRECIPITATION \(IN\)|\Z)",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if temp_match:
+        temperature_section = temp_match.group(1)
+
+    precip_match = re.search(
+        r"PRECIPITATION \(IN\)(.*?)(?:\n\s*SNOWFALL \(IN\)|\n\s*DEGREE DAYS|\Z)",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if precip_match:
+        precipitation_section = precip_match.group(1)
+
+    observed_high = None
+    observed_low = None
+    observed_precip = None
+
+    if temperature_section:
+        max_match = re.search(
+            r"^\s*MAXIMUM\s+(-?\d+(?:\.\d+)?)\b",
+            temperature_section,
+            flags=re.IGNORECASE | re.MULTILINE,
+        )
+        min_match = re.search(
+            r"^\s*MINIMUM\s+(-?\d+(?:\.\d+)?)\b",
+            temperature_section,
+            flags=re.IGNORECASE | re.MULTILINE,
+        )
+        if max_match:
+            observed_high = float(max_match.group(1))
+        if min_match:
+            observed_low = float(min_match.group(1))
+
+    if precipitation_section:
+        yesterday_match = re.search(
+            r"^\s*YESTERDAY\s+([0-9.]+|T|MM)\b",
+            precipitation_section,
+            flags=re.IGNORECASE | re.MULTILINE,
+        )
+        if yesterday_match:
+            observed_precip = _parse_cli_numeric_token(
+                yesterday_match.group(1),
+                trace_value=0.001,
+            )
+
+    if observed_high is None and observed_low is None and observed_precip is None:
+        return {}
+
+    return {
+        "observed_high": observed_high,
+        "observed_low": observed_low,
+        "observed_precip": observed_precip,
+    }
+
+
+def _fetch_nws_cli_daily_summary(
+    city_key: str,
+    station: dict,
+    target_date: date,
+) -> Dict[str, Any]:
+    location = _nws_cli_location(station)
+    if not location:
+        return {}
+
+    headers = {"User-Agent": "kalshi-weather-engine/1.0"}
+    try:
+        index_resp = requests.get(
+            f"https://api.weather.gov/products/types/CLI/locations/{location}",
+            headers=headers,
+            timeout=15,
+        )
+        index_resp.raise_for_status()
+        products = list((index_resp.json() or {}).get("@graph") or [])
+    except Exception as exc:
+        logger.debug(
+            "NWS CLI index fetch failed for %s %s: %s",
+            city_key,
+            target_date.isoformat(),
+            exc,
+        )
+        return {}
+
+    for product in products[:10]:
+        product_url = str(product.get("@id") or "").strip()
+        if not product_url:
+            continue
+        try:
+            product_resp = requests.get(product_url, headers=headers, timeout=15)
+            product_resp.raise_for_status()
+            product_payload = product_resp.json() or {}
+            parsed = _parse_nws_cli_product_text(
+                str(product_payload.get("productText") or ""),
+                target_date=target_date,
+            )
+            if parsed:
+                return {
+                    "city_key": city_key,
+                    "target_local_date": target_date.isoformat(),
+                    **parsed,
+                    "source": "nws_cli_daily",
+                    "cached_at": time.time(),
+                }
+        except Exception as exc:
+            logger.debug(
+                "NWS CLI product fetch failed for %s %s via %s: %s",
+                city_key,
+                target_date.isoformat(),
+                product_url,
+                exc,
+            )
+    return {}
 
 
 def _build_weather_record_from_hourly(
@@ -678,6 +954,128 @@ def _station_local_day(city_key: str) -> str:
     return datetime.now(pytz.timezone(tz_name)).strftime("%Y-%m-%d")
 
 
+def _parse_metar_observation_key(metar_raw: str) -> float | None:
+    match = re.search(r"\b(\d{6})Z\b", str(metar_raw or ""))
+    if not match:
+        return None
+    try:
+        return float(match.group(1))
+    except Exception:
+        return None
+
+
+def _parse_metar_hourly_precip_inches(metar_raw: str) -> float | None:
+    match = re.search(r"\bP(\d{4})\b", str(metar_raw or ""))
+    if not match:
+        return None
+    try:
+        return int(match.group(1)) / 100.0
+    except Exception:
+        return None
+
+
+def _cached_observed_daily_record(cache_key: str) -> Dict[str, Any]:
+    cached = _OBSERVED_DAILY_CACHE.get(cache_key)
+    if not cached:
+        return {}
+    ts = float(cached.get("cached_at") or 0.0)
+    if time.time() - ts > OBSERVED_DAILY_CACHE_TTL_SEC:
+        return {}
+    return dict(cached)
+
+
+def _fetch_open_meteo_archive_daily_summary(
+    city_key: str,
+    lat: float,
+    lon: float,
+    target_date: date,
+    *,
+    timezone_name: str,
+) -> Dict[str, Any]:
+    cache_key = f"{city_key}|{target_date.isoformat()}"
+    params = {
+        "latitude": lat,
+        "longitude": lon,
+        "start_date": target_date.isoformat(),
+        "end_date": target_date.isoformat(),
+        "daily": "temperature_2m_max,temperature_2m_min,precipitation_sum",
+        "timezone": timezone_name,
+    }
+
+    try:
+        resp = requests.get(
+            "https://archive-api.open-meteo.com/v1/archive",
+            params=params,
+            timeout=15,
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+        daily = payload.get("daily") or {}
+        times = list(daily.get("time") or [])
+        if not times:
+            return {}
+
+        observed = {
+            "city_key": city_key,
+            "target_local_date": target_date.isoformat(),
+            "observed_high": (
+                _c_to_f(float(daily["temperature_2m_max"][0]))
+                if (daily.get("temperature_2m_max") or [None])[0] is not None
+                else None
+            ),
+            "observed_low": (
+                _c_to_f(float(daily["temperature_2m_min"][0]))
+                if (daily.get("temperature_2m_min") or [None])[0] is not None
+                else None
+            ),
+            "observed_precip": (
+                _mm_to_inches(float(daily["precipitation_sum"][0]))
+                if (daily.get("precipitation_sum") or [None])[0] is not None
+                else None
+            ),
+            "source": "open_meteo_archive_daily",
+            "cached_at": time.time(),
+        }
+        _OBSERVED_DAILY_CACHE[cache_key] = observed
+        return dict(observed)
+    except Exception as exc:
+        logger.debug(
+            "Observed daily fetch failed for %s %s: %s",
+            city_key,
+            target_date.isoformat(),
+            exc,
+        )
+        return {}
+
+
+def _fetch_observed_daily_summary(
+    city_key: str,
+    lat: float,
+    lon: float,
+    target_date: date,
+    *,
+    timezone_name: str,
+    station: dict | None = None,
+) -> Dict[str, Any]:
+    cache_key = f"{city_key}|{target_date.isoformat()}"
+    cached = _cached_observed_daily_record(cache_key)
+    if cached:
+        return cached
+
+    cli_observed = _fetch_nws_cli_daily_summary(city_key, station or {}, target_date)
+    if cli_observed:
+        _OBSERVED_DAILY_CACHE[cache_key] = cli_observed
+        return dict(cli_observed)
+
+    return _fetch_open_meteo_archive_daily_summary(
+        city_key,
+        lat,
+        lon,
+        target_date,
+        timezone_name=timezone_name,
+    )
+
+
 def _intraday_payload(
     city_key: str,
     metar: Dict[str, Any],
@@ -688,22 +1086,43 @@ def _intraday_payload(
     cur_temp = metar.get("temp_f")
     daily_max = cur_temp
     daily_min = cur_temp
+    daily_precip = None
 
     if watermarks is not None:
         today_str = _station_local_day(city_key)
         max_key = f"{city_key}|{today_str}|max"
         min_key = f"{city_key}|{today_str}|min"
+        precip_total_key = f"{city_key}|{today_str}|precip_total"
+        precip_obs_key = f"{city_key}|{today_str}|precip_obs_key"
         if cur_temp is not None:
             watermarks[max_key] = max(cur_temp, watermarks.get(max_key, cur_temp))
             watermarks[min_key] = min(cur_temp, watermarks.get(min_key, cur_temp))
         daily_max = watermarks.get(max_key, cur_temp)
         daily_min = watermarks.get(min_key, cur_temp)
 
+        metar_raw = str(metar.get("raw") or "")
+        obs_key = _parse_metar_observation_key(metar_raw)
+        hourly_precip = _parse_metar_hourly_precip_inches(metar_raw)
+        last_obs_key = watermarks.get(precip_obs_key, -1.0)
+        if (
+            obs_key is not None
+            and hourly_precip is not None
+            and float(obs_key) > float(last_obs_key)
+        ):
+            watermarks[precip_total_key] = round(
+                float(watermarks.get(precip_total_key, 0.0)) + float(hourly_precip),
+                4,
+            )
+            watermarks[precip_obs_key] = float(obs_key)
+        if metar_raw:
+            daily_precip = float(watermarks.get(precip_total_key, 0.0))
+
     return {
         "city_key": city_key,
         "metar_temp": cur_temp,
         "daily_max": daily_max,
         "daily_min": daily_min,
+        "daily_precip": daily_precip,
         "metar_raw": metar.get("raw"),
         "hrrr_high": hrrr.get("hrrr_high"),
         "hrrr_trend": hrrr.get("hrrr_trend"),
@@ -979,6 +1398,8 @@ async def hydrate_weather_shadow_state(
     }
     if include_intraday and watermarks is not None:
         _persist_watermarks(watermarks)
+    if updated_series > 0:
+        _persist_weather_snapshot()
     logger.info("Weather one-shot hydration summary: %s", summary)
     return summary
 
@@ -999,6 +1420,7 @@ def ensure_weather_data(
     if not needed_series:
         return {"requested_series": 0, "refreshed_series": 0, "requested_cities": 0, "errors": 0}
 
+    snapshot_restore = _load_weather_snapshot(force=not bool(_WEATHER_SHADOW_STATE))
     stale_series = set()
     now = time.time()
     for series in needed_series:
@@ -1012,6 +1434,7 @@ def ensure_weather_data(
             "refreshed_series": 0,
             "requested_cities": 0,
             "errors": 0,
+            "snapshot_loaded": int(snapshot_restore.get("loaded_series") or 0),
         }
 
     summary = asyncio.run(
@@ -1029,6 +1452,7 @@ def ensure_weather_data(
     return {
         "requested_series": len(needed_series),
         "refreshed_series": refreshed_series,
+        "snapshot_loaded": int(snapshot_restore.get("loaded_series") or 0),
         **summary,
     }
 
@@ -1064,6 +1488,7 @@ async def update_weather_shadow_state():
                 if new_state:
                     with _STATE_LOCK:
                         _WEATHER_SHADOW_STATE.update(new_state)
+                    _persist_weather_snapshot()
                     logger.info(
                         "Weather Ensemble synced: %s series across %s active cities",
                         len(new_state),
@@ -1104,6 +1529,7 @@ async def update_weather_shadow_state():
                             with _STATE_LOCK:
                                 _WEATHER_SHADOW_STATE[s_ticker]["intraday"] = intraday_payload
                 _persist_watermarks(watermarks)
+                _persist_weather_snapshot()
                 
                 logger.info(
                     "Weather Intraday Precinct synced (METAR/HRRR/Watermarks) for %s active cities.",
@@ -1121,10 +1547,10 @@ def get_weather_data(ticker_prefix: str) -> Dict[str, Any]:
     # v19.1.6: Direct lookup now that shadow state is keyed by series ticker
     series = _resolve_weather_series(ticker_prefix) or ticker_prefix
     data = _WEATHER_SHADOW_STATE.get(series)
-    if data:
-        # v19.1.6: Increase cache expiry to 6h to match polling cadence
-        if time.time() - data["timestamp"] > WEATHER_STATE_TTL_SEC:
-            return {}
+    if not _series_record_is_fresh(data):
+        _load_weather_snapshot(force=not bool(data))
+        data = _WEATHER_SHADOW_STATE.get(series)
+    if _series_record_is_fresh(data):
         return data
     
     # Fallback pattern matching
@@ -1132,8 +1558,10 @@ def get_weather_data(ticker_prefix: str) -> Dict[str, Any]:
         for s in series_list:
             if str(ticker_prefix).upper().startswith(s):
                 data = _WEATHER_SHADOW_STATE.get(s)
-                # v19.1.6: Increase cache expiry to 6h
-                if data and time.time() - data["timestamp"] <= WEATHER_STATE_TTL_SEC:
+                if not _series_record_is_fresh(data):
+                    _load_weather_snapshot(force=not bool(data))
+                    data = _WEATHER_SHADOW_STATE.get(s)
+                if _series_record_is_fresh(data):
                     return data
     return {}
 
@@ -1180,6 +1608,58 @@ def get_contract_weather_data(
     projected["contract_name"] = contract_name
     projected["strike"] = strike
     return projected
+
+
+def get_contract_observed_weather_data(
+    ticker: str,
+    *,
+    contract_name: str = "",
+    strike: float | None = None,
+    resolution_at: str = "",
+    last_trade_at: str = "",
+) -> Dict[str, Any]:
+    """Return contract-date observed truth for resolution ingestion."""
+    series = _resolve_weather_series(ticker) or ticker
+    base = get_weather_data(series)
+    station = _station_for_series(series)
+    if station is None:
+        return {}
+
+    target_date = _parse_contract_local_date(
+        ticker,
+        station=station,
+        resolution_at=resolution_at,
+        last_trade_at=last_trade_at,
+    )
+    if target_date is None:
+        return {}
+
+    timezone_name = station.get("tz", "UTC")
+    local_today = datetime.now(pytz.timezone(timezone_name)).date()
+    if target_date == local_today:
+        intraday = dict(base.get("intraday") or {})
+        if not intraday:
+            return {}
+        return {
+            "city_key": _SERIES_TO_CITY.get(series, ""),
+            "target_local_date": target_date.isoformat(),
+            "observed_high": intraday.get("daily_max"),
+            "observed_low": intraday.get("daily_min"),
+            "observed_precip": intraday.get("daily_precip"),
+            "source": "metar_watermark",
+        }
+
+    if target_date > local_today:
+        return {}
+
+    return _fetch_observed_daily_summary(
+        _SERIES_TO_CITY.get(series, ""),
+        float(station["lat"]),
+        float(station["lon"]),
+        target_date,
+        timezone_name=timezone_name,
+        station=station,
+    )
 
 def start_weather_monitor():
     """Start the weather daemon in a background thread."""

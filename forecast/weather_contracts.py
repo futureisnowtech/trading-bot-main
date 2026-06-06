@@ -46,8 +46,13 @@ def weather_mode_for_ticker(ticker: str) -> WeatherMode | None:
     return None
 
 
-def _display_range_to_bounds(low: float, high: float) -> tuple[float, float]:
-    return float(low) - 0.5, float(high) + 0.5
+def _contract_half_step(mode: WeatherMode) -> float:
+    return 0.5 if mode in {"HIGH", "LOW", "TEMP"} else 0.0
+
+
+def _display_range_to_bounds(low: float, high: float, mode: WeatherMode) -> tuple[float, float]:
+    half_step = _contract_half_step(mode)
+    return float(low) - half_step, float(high) + half_step
 
 
 def _title_semantics(
@@ -68,7 +73,7 @@ def _title_semantics(
         low = float(m.group(1))
         high = float(m.group(2))
         lo, hi = sorted((low, high))
-        lower_bound, upper_bound = _display_range_to_bounds(lo, hi)
+        lower_bound, upper_bound = _display_range_to_bounds(lo, hi, mode)
         return WeatherContractSemantics(
             ticker=ticker,
             mode=mode,
@@ -88,13 +93,14 @@ def _title_semantics(
     )
     if gt_match:
         display_threshold = float(gt_match.group(1))
+        half_step = _contract_half_step(mode)
         return WeatherContractSemantics(
             ticker=ticker,
             mode=mode,
             comparator="gt",
             source="contract_name",
             contract_name=title,
-            threshold=display_threshold + 0.5,
+            threshold=display_threshold + half_step,
             display_low=display_threshold,
         )
 
@@ -105,13 +111,14 @@ def _title_semantics(
     )
     if lt_match:
         display_threshold = float(lt_match.group(1))
+        half_step = _contract_half_step(mode)
         return WeatherContractSemantics(
             ticker=ticker,
             mode=mode,
             comparator="lt",
             source="contract_name",
             contract_name=title,
-            threshold=display_threshold - 0.5,
+            threshold=display_threshold - half_step,
             display_high=display_threshold,
         )
 
@@ -135,7 +142,7 @@ def resolve_weather_contract(
     if "-B" in symbol and strike is not None:
         low = math.floor(float(strike))
         high = math.ceil(float(strike))
-        lower_bound, upper_bound = _display_range_to_bounds(low, high)
+        lower_bound, upper_bound = _display_range_to_bounds(low, high, mode)
         return WeatherContractSemantics(
             ticker=ticker,
             mode=mode,
@@ -232,6 +239,7 @@ def resolve_weather_observation(
     ticker: str,
     observed_high: float | None,
     observed_low: float | None,
+    observed_precip: float | None = None,
     contract_name: str = "",
     strike: float | None = None,
 ) -> tuple[str, float, str] | None:
@@ -253,6 +261,11 @@ def resolve_weather_observation(
             return None
         observed_value = float(observed_low)
         label = "daily_min"
+    elif semantics.mode in {"RAIN", "SNOW"}:
+        if observed_precip is None:
+            return None
+        observed_value = float(observed_precip)
+        label = "daily_precip"
     else:
         return None
 

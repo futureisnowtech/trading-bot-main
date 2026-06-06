@@ -271,7 +271,7 @@ def run_weather_rbi(force: bool = False) -> None:
                     t.model_prob_ecmwf,
                     t.weather_mode,
                     t.forecast_hours_to_resolution,
-                    t.pnl_usd,
+                    COALESCE(pnl.realized_pnl_usd, 0.0) AS pnl_usd,
                     r.resolved_side,
                     r.resolved_at
                 FROM trades t
@@ -279,8 +279,20 @@ def run_weather_rbi(force: bool = False) -> None:
                   ON c.local_symbol = t.symbol
                 JOIN forecast_resolutions r
                   ON r.contract_id = c.id
+                LEFT JOIN (
+                    SELECT
+                        symbol,
+                        contract_side,
+                        SUM(pnl_usd) AS realized_pnl_usd
+                    FROM trades
+                    WHERE broker = 'kalshi'
+                      AND action = 'SELL'
+                    GROUP BY symbol, contract_side
+                ) pnl
+                  ON pnl.symbol = t.symbol
+                 AND pnl.contract_side = t.contract_side
                 WHERE t.broker = 'kalshi'
-                  AND t.action = 'SELL'
+                  AND t.action = 'BUY'
                   AND t.contract_side IN ('YES', 'NO')
                   AND r.resolved_side IN ('YES', 'NO')
                 ORDER BY r.resolved_at DESC, t.id DESC

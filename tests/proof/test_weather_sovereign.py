@@ -112,5 +112,24 @@ class TestWeatherSovereign(unittest.TestCase):
         self.assertIsNotNone(semantics)
         self.assertTrue(semantics.ambiguous)
 
+    def test_rain_thresholds_do_not_use_temperature_half_degree_offsets(self):
+        semantics = resolve_weather_contract(
+            "KXRAINNY-04JUN26-T1",
+            contract_name="Will rainfall in NY be >1 inch on Jun 4, 2026?",
+            strike=1.0,
+        )
+        self.assertIsNotNone(semantics)
+        self.assertEqual(semantics.threshold, 1.0)
+
+        prob = yes_probability_from_weather_data(
+            "KXRAINNY-04JUN26-T1",
+            {
+                "members_precip": [0.80, 1.01, 1.50],
+            },
+            contract_name="Will rainfall in NY be >1 inch on Jun 4, 2026?",
+            strike=1.0,
+        )
+        self.assertAlmostEqual(prob, 2 / 3)
+
 if __name__ == "__main__":
     unittest.main()

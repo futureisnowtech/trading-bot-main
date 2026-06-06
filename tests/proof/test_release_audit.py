@@ -132,10 +132,8 @@ def test_strategy_cycle_blocks_new_entries_when_release_gate_closed(monkeypatch)
     assert any("entry_gate_blocked" in message for _level, _source, message in events)
 
 
-def test_scan_live_market_surface_warms_weather_series_before_evaluating(monkeypatch):
+def test_scan_live_market_surface_stays_read_only_for_weather_truth(monkeypatch):
     import scripts.release_audit as ra
-
-    warmed = {"called": False}
 
     monkeypatch.setattr(
         ra,
@@ -167,23 +165,7 @@ def test_scan_live_market_surface_warms_weather_series_before_evaluating(monkeyp
         raising=False,
     )
 
-    import data.kalshi_weather_monitor as wm
-
-    monkeypatch.setattr(
-        wm,
-        "_resolve_weather_series",
-        lambda ticker: "KXHIGHNY" if str(ticker).startswith("KXHIGHNY") else None,
-        raising=False,
-    )
-
-    def _ensure_weather_data(tickers, *, include_intraday=True, max_age_sec=0):
-        warmed["called"] = True
-        return {"requested_series": 1, "refreshed_series": 1}
-
-    monkeypatch.setattr(wm, "ensure_weather_data", _ensure_weather_data, raising=False)
-
     def _evaluate_market_snapshots(**kwargs):
-        assert warmed["called"] is True
         return []
 
     monkeypatch.setattr(ra, "evaluate_market_snapshots", _evaluate_market_snapshots, raising=False)
@@ -194,4 +176,5 @@ def test_scan_live_market_surface_warms_weather_series_before_evaluating(monkeyp
         scan_limit=4,
     )
 
-    assert payload["weather_warmup"]["refreshed_series"] == 1
+    assert payload["weather_warmup"]["mode"] == "read_only_shared_truth"
+    assert payload["weather_warmup"]["attempted"] is False

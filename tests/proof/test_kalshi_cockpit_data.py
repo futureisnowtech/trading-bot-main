@@ -21,7 +21,7 @@ def test_build_position_row_uses_side_specific_no_quotes():
     assert row["ask"] == 0.57
     assert row["mark"] == 0.55
     assert row["gross_mark_pnl"] == 1.4
-    assert row["exit_pnl_est"] == -0.2
+    assert row["exit_pnl_est"] == 0.32
 
 
 def test_summarize_hub_exposure_groups_city_hubs():
@@ -35,8 +35,8 @@ def test_summarize_hub_exposure_groups_city_hubs():
         ]
     )
 
-    assert exposures[0] == {"hub": "WEST", "exposure_usd": 9.1}
-    assert exposures[1] == {"hub": "FLORIDA", "exposure_usd": 2.35}
+    assert exposures[0] == {"hub": "WEST", "exposure_usd": 7.38}
+    assert exposures[1] == {"hub": "FLORIDA", "exposure_usd": 2.09}
 
 
 def test_build_realized_pnl_curve_accumulates_in_time_order():
@@ -102,6 +102,7 @@ def test_metric_explainers_surface_new_hub_cap_formula():
     assert "43.29 dollars" in explainers["Regional Hub Cap"]
     assert "max($40" in explainers["Regional Hub Cap"]
     assert "30% of live cash" in explainers["Regional Hub Cap"]
+    assert "7.0% x price x (1-price)" in explainers["Fee Buffer"]
 
 
 def test_build_trade_edge_rows_handles_yes_and_no_side_buys():
@@ -131,9 +132,10 @@ def test_build_trade_edge_rows_handles_yes_and_no_side_buys():
     )
 
     assert rows[0]["model_confidence_pct"] == 97.0
-    assert rows[0]["edge_pct"] == 81.0
+    assert rows[0]["edge_pct"] == 80.1
+    assert rows[0]["edge_label"] == "Net Edge"
     assert rows[1]["model_confidence_pct"] == 82.0
-    assert rows[1]["edge_pct"] == 53.0
+    assert rows[1]["edge_pct"] == 51.6
 
 
 def test_build_ai_insights_translates_runtime_into_plain_english():

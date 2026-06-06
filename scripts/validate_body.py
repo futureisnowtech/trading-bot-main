@@ -112,10 +112,20 @@ try:
     else:
         ok(f"KALSHI_HUB_EXPOSURE_MIN_USD={cfg.KALSHI_HUB_EXPOSURE_MIN_USD:.2f}")
 
-    if float(cfg.KALSHI_FEE_PER_CONTRACT) < 0:
-        fail("KALSHI_FEE_PER_CONTRACT cannot be negative")
+    if float(cfg.KALSHI_TAKER_FEE_RATE) < 0:
+        fail("KALSHI_TAKER_FEE_RATE cannot be negative")
     else:
-        ok(f"KALSHI_FEE_PER_CONTRACT={cfg.KALSHI_FEE_PER_CONTRACT}")
+        ok(f"KALSHI_TAKER_FEE_RATE={cfg.KALSHI_TAKER_FEE_RATE:.4f}")
+
+    if float(cfg.KALSHI_MAKER_FEE_RATE) < 0:
+        fail("KALSHI_MAKER_FEE_RATE cannot be negative")
+    else:
+        ok(f"KALSHI_MAKER_FEE_RATE={cfg.KALSHI_MAKER_FEE_RATE:.4f}")
+
+    if float(cfg.KALSHI_FEE_PER_CONTRACT) < 0:
+        fail("KALSHI_FEE_PER_CONTRACT legacy fallback cannot be negative")
+    else:
+        ok(f"KALSHI_FEE_PER_CONTRACT_LEGACY={cfg.KALSHI_FEE_PER_CONTRACT}")
 
     if not cfg.FORECAST_LANE_ACTIVE:
         warn("FORECAST_LANE_ACTIVE=false — lane will remain disabled")

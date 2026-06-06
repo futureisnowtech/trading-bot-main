@@ -26,8 +26,13 @@ def test_resolution_sync_inserts_high_truth(tmp_path, monkeypatch):
     )
 
     monkeypatch.setattr(
-        "forecast.resolution_sync.get_weather_data",
-        lambda ticker: {"intraday": {"daily_max": 91.2, "daily_min": 70.0}},
+        "forecast.resolution_sync.get_contract_observed_weather_data",
+        lambda ticker, **kwargs: {
+            "observed_high": 91.2,
+            "observed_low": 70.0,
+            "observed_precip": None,
+            "source": "metar_watermark",
+        },
     )
 
     summary = sync_forecast_resolutions(
@@ -49,10 +54,10 @@ def test_resolution_sync_inserts_high_truth(tmp_path, monkeypatch):
     assert row == (contract_id, "YES", 91.2, "metar_watermark")
 
 
-def test_resolution_sync_skips_unsupported_rain_contracts(tmp_path, monkeypatch):
+def test_resolution_sync_inserts_rain_truth(tmp_path, monkeypatch):
     db = _make_db(tmp_path)
     market_id = upsert_market("KXRAINNY", "NY Rain", db_path=db)
-    upsert_contract(
+    contract_id = upsert_contract(
         market_id=market_id,
         local_symbol="KXRAINNY-04JUN26-T1",
         contract_name="Will rainfall in NY be >1 inch on Jun 4, 2026?",
@@ -64,8 +69,13 @@ def test_resolution_sync_skips_unsupported_rain_contracts(tmp_path, monkeypatch)
     )
 
     monkeypatch.setattr(
-        "forecast.resolution_sync.get_weather_data",
-        lambda ticker: {"intraday": {"daily_max": 80.0, "daily_min": 60.0}},
+        "forecast.resolution_sync.get_contract_observed_weather_data",
+        lambda ticker, **kwargs: {
+            "observed_high": None,
+            "observed_low": None,
+            "observed_precip": 1.24,
+            "source": "open_meteo_archive_daily",
+        },
     )
 
     summary = sync_forecast_resolutions(
@@ -73,8 +83,18 @@ def test_resolution_sync_skips_unsupported_rain_contracts(tmp_path, monkeypatch)
         now=datetime(2026, 6, 5, 8, 0, tzinfo=timezone.utc),
     )
 
-    assert summary["inserted"] == 0
-    assert summary["skipped_unsupported"] == 1
+    assert summary["inserted"] == 1
+
+    conn = sqlite3.connect(db)
+    row = conn.execute(
+        """
+        SELECT contract_id, resolved_side, resolved_value, source
+        FROM forecast_resolutions
+        """
+    ).fetchone()
+    conn.close()
+
+    assert row == (contract_id, "YES", 1.24, "open_meteo_archive_daily")
 
 
 def test_resolution_sync_resolves_bracket_contracts(tmp_path, monkeypatch):
@@ -92,8 +112,13 @@ def test_resolution_sync_resolves_bracket_contracts(tmp_path, monkeypatch):
     )
 
     monkeypatch.setattr(
-        "forecast.resolution_sync.get_weather_data",
-        lambda ticker: {"intraday": {"daily_max": 69.8, "daily_min": 55.0}},
+        "forecast.resolution_sync.get_contract_observed_weather_data",
+        lambda ticker, **kwargs: {
+            "observed_high": 69.8,
+            "observed_low": 55.0,
+            "observed_precip": None,
+            "source": "metar_watermark",
+        },
     )
 
     summary = sync_forecast_resolutions(
@@ -113,3 +138,70 @@ def test_resolution_sync_resolves_bracket_contracts(tmp_path, monkeypatch):
     conn.close()
 
     assert row == (contract_id, "YES", 69.8)
+
+
+def test_resolution_sync_skips_when_rain_truth_missing(tmp_path, monkeypatch):
+    db = _make_db(tmp_path)
+    market_id = upsert_market("KXRAINNY", "NY Rain", db_path=db)
+    upsert_contract(
+        market_id=market_id,
+        local_symbol="KXRAINNY-04JUN26-T1",
+        contract_name="Will rainfall in NY be >1 inch on Jun 4, 2026?",
+        right="C",
+        strike=1.0,
+        resolution_at="20260604",
+        last_trade_at="20260604",
+        db_path=db,
+    )
+
+    monkeypatch.setattr(
+        "forecast.resolution_sync.get_contract_observed_weather_data",
+        lambda ticker, **kwargs: {
+            "observed_high": None,
+            "observed_low": None,
+            "observed_precip": None,
+            "source": "open_meteo_archive_daily",
+        },
+    )
+
+    summary = sync_forecast_resolutions(
+        db_path=db,
+        now=datetime(2026, 6, 5, 8, 0, tzinfo=timezone.utc),
+    )
+
+    assert summary["inserted"] == 0
+    assert summary["skipped_no_ground_truth"] == 1
+
+
+def test_resolution_sync_current_day_rain_without_precip_is_not_mislabeled_unsupported(tmp_path, monkeypatch):
+    db = _make_db(tmp_path)
+    market_id = upsert_market("KXRAINNY", "NY Rain", db_path=db)
+    upsert_contract(
+        market_id=market_id,
+        local_symbol="KXRAINNY-04JUN26-T1",
+        contract_name="Will rainfall in NY be >1 inch on Jun 4, 2026?",
+        right="C",
+        strike=1.0,
+        resolution_at="20260604",
+        last_trade_at="20260604",
+        db_path=db,
+    )
+
+    monkeypatch.setattr(
+        "forecast.resolution_sync.get_contract_observed_weather_data",
+        lambda ticker, **kwargs: {
+            "observed_high": 80.0,
+            "observed_low": 60.0,
+            "observed_precip": None,
+            "source": "metar_watermark",
+        },
+    )
+
+    summary = sync_forecast_resolutions(
+        db_path=db,
+        now=datetime(2026, 6, 5, 8, 0, tzinfo=timezone.utc),
+    )
+
+    assert summary["inserted"] == 0
+    assert summary["skipped_no_ground_truth"] == 1
+    assert summary["skipped_unsupported"] == 0

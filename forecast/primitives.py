@@ -255,7 +255,7 @@ def kalshi_absolute_sizing(
         return 0, 0.0
 
     # qty_by_risk = max_loss_usd / cost_per_loss_unit
-    # In Kalshi, max loss to zero includes the premium paid plus fixed fees.
+    # In Kalshi, max loss to zero includes the premium paid plus exchange fees.
     qty_by_risk = int(max_loss_usd / total_cash_per_contract)
 
     # qty_by_capital = max_deploy_usd / total_cash_per_contract

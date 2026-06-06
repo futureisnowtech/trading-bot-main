@@ -64,7 +64,14 @@ def test_weather_rbi_uses_resolution_labels_and_no_inversion(tmp_path, monkeypat
         "INSERT INTO forecast_resolutions (contract_id, resolved_side, resolved_at) VALUES (2, 'NO', ?)",
         (resolved_at,),
     )
-    # Negative pnl on a correctly resolved YES should still count as outcome=1.
+    # Negative realized pnl on a correctly resolved YES should still count as outcome=1.
+    conn.execute(
+        """
+        INSERT INTO trades (ts, broker, symbol, action, pnl_usd, contract_side, forecast_yes_prob)
+        VALUES (?, 'kalshi', 'KXRAINTEST-YES', 'BUY', 0.0, 'YES', 0.80)
+        """,
+        (resolved_at,),
+    )
     conn.execute(
         """
         INSERT INTO trades (ts, broker, symbol, action, pnl_usd, contract_side, forecast_yes_prob)
@@ -73,6 +80,13 @@ def test_weather_rbi_uses_resolution_labels_and_no_inversion(tmp_path, monkeypat
         (resolved_at,),
     )
     # NO contract should use inverse chosen probability: 1 - forecast_yes_prob = 0.80.
+    conn.execute(
+        """
+        INSERT INTO trades (ts, broker, symbol, action, pnl_usd, contract_side, forecast_yes_prob)
+        VALUES (?, 'kalshi', 'KXRAINTEST-NO', 'BUY', 0.0, 'NO', 0.20)
+        """,
+        (resolved_at,),
+    )
     conn.execute(
         """
         INSERT INTO trades (ts, broker, symbol, action, pnl_usd, contract_side, forecast_yes_prob)
@@ -118,7 +132,7 @@ def test_weather_rbi_skips_without_labeled_resolutions(tmp_path, monkeypatch):
     conn.execute(
         """
         INSERT INTO trades (ts, broker, symbol, action, pnl_usd, contract_side, forecast_yes_prob)
-        VALUES (?, 'kalshi', 'KXRAINEMPTY', 'SELL', 5.0, 'YES', 0.90)
+        VALUES (?, 'kalshi', 'KXRAINEMPTY', 'BUY', 0.0, 'YES', 0.90)
         """,
         (now,),
     )
@@ -159,6 +173,16 @@ def test_weather_rbi_publishes_adaptive_model_weights(tmp_path, monkeypatch):
         conn.execute(
             "INSERT INTO forecast_resolutions (contract_id, resolved_side, resolved_at) VALUES (?, ?, ?)",
             (contract_id, resolved_side, resolved_at),
+        )
+        conn.execute(
+            """
+            INSERT INTO trades (
+                ts, broker, symbol, action, pnl_usd, contract_side, forecast_yes_prob,
+                model_prob_gfs, model_prob_ecmwf, weather_mode, forecast_hours_to_resolution
+            )
+            VALUES (?, 'kalshi', ?, 'BUY', 0.0, 'YES', ?, ?, ?, 'HIGH', 18.0)
+            """,
+            (resolved_at, symbol, forecast_yes_prob, gfs_prob, ec_prob),
         )
         conn.execute(
             """

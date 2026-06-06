@@ -118,6 +118,86 @@ def test_sync_positions_preserves_cost_basis(monkeypatch):
     assert pos["entry_price"] == 0.16
 
 
+def test_sync_positions_restores_weather_observation_fields(monkeypatch):
+    broker = _connected_broker()
+
+    monkeypatch.setattr(
+        broker,
+        "_request",
+        lambda method, path, params=None, body=None: {
+            "market_positions": [
+                {
+                    "ticker": "KXHIGHLAX-26JUN05-B69.5",
+                    "position_fp": "5.00",
+                    "total_traded_dollars": "3.250000",
+                }
+            ]
+        },
+    )
+    monkeypatch.setattr(
+        broker,
+        "_load_latest_entry_context",
+        lambda ticker, side: {
+            "entry_price": None,
+            "forecast_yes_prob": 0.81,
+            "model_prob_gfs": 0.77,
+            "model_prob_ecmwf": 0.84,
+            "weather_mode": "HIGH",
+            "forecast_hours_to_resolution": 19.5,
+            "entered_at": "2026-06-06T05:00:00+00:00",
+        },
+    )
+
+    broker.sync_positions()
+    pos = broker.get_position("KXHIGHLAX-26JUN05-B69.5", "C")
+
+    assert pos is not None
+    assert pos["forecast_yes_prob"] == 0.81
+    assert pos["model_prob_gfs"] == 0.77
+    assert pos["model_prob_ecmwf"] == 0.84
+    assert pos["weather_mode"] == "HIGH"
+    assert pos["forecast_hours_to_resolution"] == 19.5
+    assert pos["entered_at"] == "2026-06-06T05:00:00+00:00"
+
+
+def test_sync_positions_prefers_recorded_buy_entry_price(monkeypatch):
+    broker = _connected_broker()
+
+    monkeypatch.setattr(
+        broker,
+        "_request",
+        lambda method, path, params=None, body=None: {
+            "market_positions": [
+                {
+                    "ticker": "KXLOWTPHX-26JUN05-T80",
+                    "position_fp": "-8.00",
+                    "total_traded_dollars": "8.800000",
+                }
+            ]
+        },
+    )
+    monkeypatch.setattr(
+        broker,
+        "_load_latest_entry_context",
+        lambda ticker, side: {
+            "entry_price": 0.41,
+            "forecast_yes_prob": 0.26,
+            "model_prob_gfs": 0.22,
+            "model_prob_ecmwf": 0.28,
+            "weather_mode": "LOW",
+            "forecast_hours_to_resolution": 21.5,
+            "entered_at": "2026-06-06T05:00:00+00:00",
+        },
+    )
+
+    broker.sync_positions()
+    pos = broker.get_position("KXLOWTPHX-26JUN05-T80", "P")
+
+    assert pos is not None
+    assert pos["entry_price"] == 0.41
+    assert pos["qty"] == 8.0
+
+
 def test_executed_buy_logs_weather_observation_fields(monkeypatch):
     broker = _connected_broker()
     captured = {}
@@ -174,6 +254,10 @@ def test_partial_sell_preserves_remaining_position(monkeypatch):
         "entry": 0.40,
         "entry_price": 0.40,
         "forecast_yes_prob": 0.74,
+        "model_prob_gfs": 0.71,
+        "model_prob_ecmwf": 0.79,
+        "weather_mode": "LOW",
+        "forecast_hours_to_resolution": 21.5,
     }
     captured = {}
 
@@ -209,3 +293,8 @@ def test_partial_sell_preserves_remaining_position(monkeypatch):
     assert pos is not None
     assert pos["qty"] == 6.0
     assert captured["qty"] == 4.0
+    assert captured["forecast_yes_prob"] == 0.74
+    assert captured["model_prob_gfs"] == 0.71
+    assert captured["model_prob_ecmwf"] == 0.79
+    assert captured["weather_mode"] == "LOW"
+    assert captured["forecast_hours_to_resolution"] == 21.5

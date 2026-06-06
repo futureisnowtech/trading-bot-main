@@ -194,7 +194,10 @@ def _scan_live_market_surface(
         ),
     )
     snapshots = all_snapshots[: max(1, int(scan_limit))]
-    weather_warmup: dict[str, Any] = {}
+    weather_warmup: dict[str, Any] = {
+        "mode": "read_only_shared_truth",
+        "attempted": False,
+    }
     if not snapshots:
         return {
             "sample_size": 0,
@@ -208,29 +211,6 @@ def _scan_live_market_surface(
             "systematic_thin_liquidity": False,
             "weather_warmup": weather_warmup,
         }
-
-    try:
-        from data.kalshi_weather_monitor import _resolve_weather_series, ensure_weather_data
-
-        weather_tickers: list[str] = []
-        seen_series: set[str] = set()
-        for snapshot in snapshots:
-            ticker = str(getattr(snapshot, "ticker", "") or "")
-            if not any(prefix in ticker for prefix in ("KXHIGH", "KXLOW", "KXRAIN")):
-                continue
-            series = _resolve_weather_series(ticker)
-            if not series or series in seen_series:
-                continue
-            seen_series.add(series)
-            weather_tickers.append(ticker)
-
-        if weather_tickers:
-            weather_warmup = ensure_weather_data(
-                weather_tickers,
-                include_intraday=False,
-            )
-    except Exception as exc:
-        weather_warmup = {"error": str(exc)}
 
     open_positions_for_eval = [
         {

@@ -407,10 +407,14 @@ def get_weather_provider_status(
         "weather_age_minutes": None,
         "active_weather_contracts": 0,
         "checked_contracts": 0,
+        "hydration": {
+            "mode": "read_only_shared_truth",
+            "attempted": False,
+        },
     }
 
     try:
-        from data.kalshi_weather_monitor import ensure_weather_data, get_contract_weather_data
+        from data.kalshi_weather_monitor import get_contract_weather_data
         from forecast.db import get_active_contracts
 
         active = get_active_contracts(db_path=db_path)
@@ -422,12 +426,6 @@ def get_weather_provider_status(
             weather_contracts,
             limit=max(1, int(contract_limit)),
         )
-
-        if sample_contracts:
-            payload["hydration"] = ensure_weather_data(
-                [str(contract.get("local_symbol") or "") for contract in sample_contracts],
-                include_intraday=False,
-            )
 
         for contract in sample_contracts:
             payload["checked_contracts"] += 1

@@ -539,6 +539,50 @@ def test_strategy_continuation_deterministic():
         assert abs(r1.ev - r2.ev) < 1e-9
 
 
+def test_strategy_engine_rechecks_chosen_side_ev_after_signal_selection(monkeypatch):
+    import forecast.strategy_engine as se
+
+    contract = _make_contract(36.0)
+    bars = _make_bars([0.45 + (i * 0.01) for i in range(12)])
+    yes_q, no_q = _make_quotes(0.58, 0.42)
+
+    monkeypatch.setattr(
+        se,
+        "_economics_gate",
+        lambda **kwargs: (True, "", 0.07, 0.01),
+    )
+    monkeypatch.setattr(
+        se,
+        "_strategy_continuation",
+        lambda _features, _hours: (True, "NO", 0.91, ["forced_no_signal"]),
+    )
+    monkeypatch.setattr(
+        se,
+        "_strategy_mean_reversion",
+        lambda _features, _hours: (False, "", 0.0, []),
+    )
+    monkeypatch.setattr(
+        se,
+        "_strategy_late_repricing",
+        lambda _features, _hours: (False, "", 0.0, []),
+    )
+
+    result = se.evaluate_contract(
+        contract,
+        bars,
+        bars,
+        bars,
+        bars,
+        yes_q,
+        no_q,
+        bankroll=100.0,
+    )
+
+    assert result is not None
+    assert result.econ_approved is False
+    assert result.veto_reason.startswith("chosen_side_ev_too_low")
+
+
 def test_strategy_mean_reversion_detects_overextension():
     """mean_reversion must trigger on a series with |z_t| >= MIN_ABS_Z_MEAN_REVERSION."""
     from forecast.strategy_engine import _strategy_mean_reversion
@@ -1310,6 +1354,88 @@ def test_strategy_engine_family_cap_blocks_fifth_existing_position(monkeypatch):
     assert results[0]["result"].veto_reason == "same_event_family_cap_reached"
 
 
+def test_strategy_engine_does_not_preconsume_family_capacity_during_ranking(monkeypatch):
+    from forecast.market_snapshot import MarketSnapshot
+    import forecast.strategy_engine as se
+
+    original_cap = se.KALSHI_SAME_EVENT_FAMILY_CAP
+    monkeypatch.setattr(se, "KALSHI_SAME_EVENT_FAMILY_CAP", 1, raising=False)
+
+    snapshots = [
+        MarketSnapshot(
+            market_id=1,
+            ticker="KXLOWTLV-99JAN01-B71.5",
+            contract_name="Las Vegas Low A",
+            strike=71.5,
+            last_trade_at="20990101",
+            resolution_at="2099-01-01T00:00:00Z",
+            yes_contract={"local_symbol": "KXLOWTLV-99JAN01-B71.5", "contract_name": "Las Vegas Low A"},
+            no_contract={"local_symbol": "KXLOWTLV-99JAN01-T72", "contract_name": "Las Vegas Low A"},
+            yes_quote={"ask": 0.42, "bid": 0.40, "mid": 0.41},
+            no_quote={"ask": 0.58, "bid": 0.56, "mid": 0.57},
+            bars_5m=[],
+            bars_30m=[],
+            bars_1h=[],
+            bars_4h=[],
+        ),
+        MarketSnapshot(
+            market_id=2,
+            ticker="KXLOWTLV-99JAN01-B73.5",
+            contract_name="Las Vegas Low B",
+            strike=73.5,
+            last_trade_at="20990101",
+            resolution_at="2099-01-01T00:00:00Z",
+            yes_contract={"local_symbol": "KXLOWTLV-99JAN01-B73.5", "contract_name": "Las Vegas Low B"},
+            no_contract={"local_symbol": "KXLOWTLV-99JAN01-T74", "contract_name": "Las Vegas Low B"},
+            yes_quote={"ask": 0.42, "bid": 0.40, "mid": 0.41},
+            no_quote={"ask": 0.58, "bid": 0.56, "mid": 0.57},
+            bars_5m=[],
+            bars_30m=[],
+            bars_1h=[],
+            bars_4h=[],
+        ),
+    ]
+
+    call_count = {"value": 0}
+
+    def _stub_evaluate_contract(**kwargs):
+        call_count["value"] += 1
+        return se.StrategyResult(
+            strategy_family="stub",
+            side="YES",
+            q_hat=0.75,
+            ev=0.10 if call_count["value"] == 1 else 0.20,
+            ev_yes=0.10 if call_count["value"] == 1 else 0.20,
+            ev_no=-1.0,
+            confidence=0.90 if call_count["value"] == 1 else 0.95,
+            uncertainty_penalty=0.0,
+            econ_approved=True,
+            veto_reason="",
+            position_fraction=0.02,
+            position_contracts=1,
+            top_factors=[],
+            hours_to_resolution=24.0,
+            ask_yes=0.42,
+            ask_no=0.58,
+        )
+
+    monkeypatch.setattr(se, "evaluate_contract", _stub_evaluate_contract)
+
+    results = se.evaluate_market_snapshots(
+        snapshots=snapshots,
+        bankroll=200.0,
+        open_event_families={},
+        open_positions=[],
+    )
+
+    monkeypatch.setattr(se, "KALSHI_SAME_EVENT_FAMILY_CAP", original_cap, raising=False)
+
+    assert len(results) == 2
+    assert results[0]["result"].econ_approved is True
+    assert results[1]["result"].econ_approved is True
+    assert results[0]["rank_score"] > results[1]["rank_score"]
+
+
 def test_strategy_engine_hub_cap_uses_thirty_percent_with_forty_dollar_floor(monkeypatch):
     from forecast.market_snapshot import MarketSnapshot
     import forecast.strategy_engine as se
@@ -1349,4 +1475,4 @@ def test_strategy_engine_hub_cap_uses_thirty_percent_with_forty_dollar_floor(mon
         ],
     )
 
-    assert results[0]["result"].veto_reason == "hub_exposure_cap_reached (57.0/40.0)"
+    assert results[0]["result"].veto_reason == "hub_exposure_cap_reached (51.8/40.0)"

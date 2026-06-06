@@ -7,6 +7,7 @@ and dependency issues. It uses manual RSA-PSS signing for all V2 API requests.
 
 import logging
 import os
+import sqlite3
 import sys
 import uuid
 import base64
@@ -23,10 +24,11 @@ from cryptography.hazmat.primitives import serialization
 # Add root to path for logging_db
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import (
+    DB_PATH,
     KALSHI_API_KEY_ID,
-    KALSHI_FEE_PER_CONTRACT,
     REPO_ROOT,
     SHADOW_EXECUTION,
+    estimate_kalshi_order_fee_usd,
     resolve_runtime_path,
 )
 from logging_db.trade_logger import log_event, log_trade
@@ -122,6 +124,65 @@ class KalshiBroker:
         """Refresh local position cache from broker reality."""
         self._sync_positions()
 
+    def _load_latest_entry_context(self, ticker: str, side: str) -> dict:
+        """Recover weather entry metadata so exits remain learnable after restarts."""
+        payload = {
+            "entry_price": None,
+            "forecast_yes_prob": None,
+            "model_prob_gfs": None,
+            "model_prob_ecmwf": None,
+            "weather_mode": None,
+            "forecast_hours_to_resolution": None,
+            "entered_at": None,
+        }
+        try:
+            with sqlite3.connect(DB_PATH, timeout=5.0) as conn:
+                conn.row_factory = sqlite3.Row
+                row = conn.execute(
+                    """
+                    SELECT price,
+                           forecast_yes_prob,
+                           model_prob_gfs,
+                           model_prob_ecmwf,
+                           weather_mode,
+                           forecast_hours_to_resolution,
+                           ts
+                    FROM trades
+                    WHERE broker='kalshi'
+                      AND action='BUY'
+                      AND symbol=?
+                      AND contract_side=?
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (ticker, side.upper()),
+                ).fetchone()
+        except Exception:
+            return payload
+
+        if not row:
+            return payload
+
+        payload.update(
+            {
+                "entry_price": row["price"],
+                "forecast_yes_prob": row["forecast_yes_prob"],
+                "model_prob_gfs": row["model_prob_gfs"],
+                "model_prob_ecmwf": row["model_prob_ecmwf"],
+                "weather_mode": row["weather_mode"],
+                "forecast_hours_to_resolution": row["forecast_hours_to_resolution"],
+            }
+        )
+        ts_value = row["ts"]
+        if ts_value not in (None, ""):
+            try:
+                payload["entered_at"] = datetime.fromtimestamp(
+                    float(ts_value), tz=timezone.utc
+                ).isoformat()
+            except Exception:
+                payload["entered_at"] = str(ts_value)
+        return payload
+
     def _normalize_price_cents(self, price: float) -> int:
         cents = int(round(float(price) * 100))
         return max(_KALSHI_MIN_PRICE_CENTS, min(_KALSHI_MAX_PRICE_CENTS, cents))
@@ -192,7 +253,10 @@ class KalshiBroker:
                 return float(avg_fee) * fill_count
             except (TypeError, ValueError):
                 pass
-        return KALSHI_FEE_PER_CONTRACT * qty
+        fill_price = self._extract_average_fill_price(order_info)
+        if fill_price > 0 and qty > 0:
+            return estimate_kalshi_order_fee_usd(qty, fill_price)
+        return estimate_kalshi_order_fee_usd(qty, 0.50)
 
     def _hydrate_order_details(self, order_info: dict) -> dict:
         order_id = str(order_info.get("order_id") or "").strip()
@@ -257,6 +321,10 @@ class KalshiBroker:
                 won=(pnl_usd > 0),
                 contract_side=pos_info.get("side", default_side).upper(),
                 forecast_yes_prob=pos_info.get("forecast_yes_prob"),
+                model_prob_gfs=pos_info.get("model_prob_gfs"),
+                model_prob_ecmwf=pos_info.get("model_prob_ecmwf"),
+                weather_mode=pos_info.get("weather_mode"),
+                forecast_hours_to_resolution=pos_info.get("forecast_hours_to_resolution"),
             )
         except Exception as e:
             logger.error(f"[KalshiBroker] log_trade exit error: {e}")
@@ -382,7 +450,10 @@ class KalshiBroker:
                 right = "C" if side == "YES" else "P"
                 abs_qty = abs(qty)
                 total_traded = float(p.get("total_traded_dollars") or 0.0)
-                entry_price = (total_traded / abs_qty) if abs_qty > 0 and total_traded > 0 else 0.0
+                entry_context = self._load_latest_entry_context(ticker, side)
+                entry_price = float(entry_context.get("entry_price") or 0.0)
+                if entry_price <= 0.0:
+                    entry_price = (total_traded / abs_qty) if abs_qty > 0 and total_traded > 0 else 0.0
 
                 key = f"{ticker}_{right}"
                 self._open_positions[key] = {
@@ -392,9 +463,14 @@ class KalshiBroker:
                     "entry": entry_price,
                     "entry_price": entry_price,
                     "side": side,
-                    "forecast_yes_prob": None,
+                    "forecast_yes_prob": entry_context.get("forecast_yes_prob"),
+                    "model_prob_gfs": entry_context.get("model_prob_gfs"),
+                    "model_prob_ecmwf": entry_context.get("model_prob_ecmwf"),
+                    "weather_mode": entry_context.get("weather_mode"),
+                    "forecast_hours_to_resolution": entry_context.get("forecast_hours_to_resolution"),
                     "order_id": "EXISTING",
-                    "entered_at": datetime.now(timezone.utc).isoformat(),
+                    "entered_at": entry_context.get("entered_at")
+                    or datetime.now(timezone.utc).isoformat(),
                 }
         except Exception as e:
             log_event("WARN", "KalshiBroker", f"Position sync error: {e}")

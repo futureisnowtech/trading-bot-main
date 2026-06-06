@@ -4,6 +4,7 @@ Never hardcode anything that belongs here.
 """
 
 import os
+import math
 from datetime import time as dt_time
 from pathlib import Path
 
@@ -165,7 +166,11 @@ KALSHI_MIN_PRICE: float = 0.15
 KALSHI_MAX_SIGMA: float = 3.0
 KALSHI_MAX_SPREAD_RATIO: float = 0.20
 KALSHI_DATA_FRESHNESS_MINUTES: int = 180
-KALSHI_FEE_PER_CONTRACT: float = 0.07      # Base transaction fee
+KALSHI_TAKER_FEE_RATE: float = float(os.getenv("KALSHI_TAKER_FEE_RATE", "0.07"))
+KALSHI_MAKER_FEE_RATE: float = float(os.getenv("KALSHI_MAKER_FEE_RATE", "0.0175"))
+KALSHI_FEE_PER_CONTRACT: float = float(
+    os.getenv("KALSHI_FEE_PER_CONTRACT", str(KALSHI_TAKER_FEE_RATE))
+)  # Legacy fallback only
 KALSHI_MAX_FEE_DRAG_PCT: float = 0.30
 KALSHI_FEE_BUFFER: float = 0.05
 KALSHI_KELLY_CAP: float = 0.10
@@ -241,13 +246,162 @@ def get_kalshi_hub_exposure_cap(balance_usd: float) -> float:
     return max(KALSHI_HUB_EXPOSURE_MIN_USD, balance * KALSHI_HUB_EXPOSURE_PCT)
 
 
-def get_kalshi_position_exposure_usd(qty: float, entry_price: float) -> float:
+def get_kalshi_fee_rate(*, maker: bool = False, fee_rate: float | None = None) -> float:
+    if fee_rate is not None:
+        try:
+            return max(0.0, float(fee_rate))
+        except (TypeError, ValueError):
+            return max(0.0, float(KALSHI_TAKER_FEE_RATE))
+    return max(0.0, float(KALSHI_MAKER_FEE_RATE if maker else KALSHI_TAKER_FEE_RATE))
+
+
+def _normalize_kalshi_price(price: float) -> float:
+    try:
+        return max(0.0, min(1.0, float(price)))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def kalshi_raw_fee_per_contract(
+    price: float,
+    *,
+    maker: bool = False,
+    fee_rate: float | None = None,
+) -> float:
+    normalized_price = _normalize_kalshi_price(price)
+    if normalized_price <= 0.0:
+        return 0.0
+    rate = get_kalshi_fee_rate(maker=maker, fee_rate=fee_rate)
+    return rate * normalized_price * (1.0 - normalized_price)
+
+
+def estimate_kalshi_order_fee_usd(
+    qty: float,
+    price: float,
+    *,
+    maker: bool = False,
+    fee_rate: float | None = None,
+    round_up_cents: bool = True,
+) -> float:
     try:
         contracts = max(0.0, float(qty))
     except (TypeError, ValueError):
         contracts = 0.0
+    if contracts <= 0.0:
+        return 0.0
+
+    raw_total = contracts * kalshi_raw_fee_per_contract(
+        price,
+        maker=maker,
+        fee_rate=fee_rate,
+    )
+    if raw_total <= 0.0:
+        return 0.0
+    if not round_up_cents:
+        return raw_total
+    return math.ceil(raw_total * 100.0 - 1e-12) / 100.0
+
+
+def estimate_kalshi_fee_per_contract(
+    price: float,
+    *,
+    qty: float = 1.0,
+    maker: bool = False,
+    fee_rate: float | None = None,
+    round_up_cents: bool = True,
+    rounded: bool | None = None,
+) -> float:
+    if rounded is not None:
+        round_up_cents = bool(rounded)
     try:
-        price = max(0.0, float(entry_price))
+        contracts = max(0.0, float(qty))
     except (TypeError, ValueError):
-        price = 0.0
-    return contracts * (price + KALSHI_FEE_PER_CONTRACT)
+        contracts = 0.0
+    if contracts <= 0.0:
+        return 0.0
+    total_fee = estimate_kalshi_order_fee_usd(
+        contracts,
+        price,
+        maker=maker,
+        fee_rate=fee_rate,
+        round_up_cents=round_up_cents,
+    )
+    return total_fee / contracts if contracts > 0 else 0.0
+
+
+def estimate_kalshi_order_cost_usd(
+    qty: float,
+    price: float,
+    *,
+    maker: bool = False,
+    fee_rate: float | None = None,
+    round_up_cents: bool = True,
+) -> float:
+    try:
+        contracts = max(0.0, float(qty))
+    except (TypeError, ValueError):
+        contracts = 0.0
+    normalized_price = _normalize_kalshi_price(price)
+    if contracts <= 0.0 or normalized_price <= 0.0:
+        return 0.0
+    return (contracts * normalized_price) + estimate_kalshi_order_fee_usd(
+        contracts,
+        normalized_price,
+        maker=maker,
+        fee_rate=fee_rate,
+        round_up_cents=round_up_cents,
+    )
+
+
+def max_kalshi_contracts_for_budget(
+    price: float,
+    budget_usd: float,
+    *,
+    maker: bool = False,
+    fee_rate: float | None = None,
+) -> int:
+    normalized_price = _normalize_kalshi_price(price)
+    try:
+        budget = max(0.0, float(budget_usd))
+    except (TypeError, ValueError):
+        budget = 0.0
+    if normalized_price <= 0.0 or budget <= 0.0:
+        return 0
+
+    high = max(1, int(budget / max(normalized_price, 0.01)) + 2)
+    low = 0
+    best = 0
+    while low <= high:
+        mid = (low + high) // 2
+        total_cost = estimate_kalshi_order_cost_usd(
+            mid,
+            normalized_price,
+            maker=maker,
+            fee_rate=fee_rate,
+        )
+        if total_cost <= budget + 1e-9:
+            best = mid
+            low = mid + 1
+        else:
+            high = mid - 1
+    return best
+
+
+def get_kalshi_position_exposure_usd(
+    qty: float,
+    entry_price: float,
+    *,
+    maker: bool = False,
+    fee_rate: float | None = None,
+) -> float:
+    try:
+        contracts = max(0.0, float(qty))
+    except (TypeError, ValueError):
+        contracts = 0.0
+    price = _normalize_kalshi_price(entry_price)
+    return estimate_kalshi_order_cost_usd(
+        contracts,
+        price,
+        maker=maker,
+        fee_rate=fee_rate,
+    )

@@ -379,8 +379,6 @@ def test_weather_provider_status_warms_sampled_series_when_process_cache_is_cold
     db = str(proof_runtime.db_path)
     monkeypatch.setattr(ot, "DB_PATH", db, raising=False)
 
-    warmed = {"ready": False}
-
     monkeypatch.setattr(
         fdb,
         "get_active_contracts",
@@ -405,15 +403,6 @@ def test_weather_provider_status_warms_sampled_series_when_process_cache_is_cold
         raising=False,
     )
 
-    def _ensure_weather_data(tickers, *, include_intraday=True, max_age_sec=0):
-        warmed["ready"] = True
-        return {
-            "requested_series": 1,
-            "refreshed_series": 1,
-            "requested_cities": 1,
-            "errors": 0,
-        }
-
     def _get_contract_weather_data(
         ticker,
         *,
@@ -422,15 +411,12 @@ def test_weather_provider_status_warms_sampled_series_when_process_cache_is_cold
         resolution_at="",
         last_trade_at="",
     ):
-        if not warmed["ready"]:
-            return {}
         return {
             "provider_mode": "deterministic_multi_model",
             "forecast_source": "open_meteo_forecast",
             "timestamp": time.time(),
         }
 
-    monkeypatch.setattr(wm, "ensure_weather_data", _ensure_weather_data, raising=False)
     monkeypatch.setattr(wm, "get_contract_weather_data", _get_contract_weather_data, raising=False)
 
     payload = ot.get_weather_provider_status(db_path=db, contract_limit=4)
@@ -438,7 +424,8 @@ def test_weather_provider_status_warms_sampled_series_when_process_cache_is_cold
     assert payload["data_present"] is True
     assert payload["provider_mode"] == "deterministic_multi_model"
     assert payload["checked_contracts"] == 1
-    assert payload["hydration"]["refreshed_series"] == 1
+    assert payload["hydration"]["mode"] == "read_only_shared_truth"
+    assert payload["hydration"]["attempted"] is False
 
 
 def test_release_status_prefers_passing_artifact_truth_when_one_shot_process_is_blind(

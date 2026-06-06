@@ -15,7 +15,7 @@ import pytz
 
 from config import DB_PATH
 from forecast.db import init_forecast_db, insert_resolution
-from forecast.weather_contracts import resolve_weather_observation
+from forecast.weather_contracts import resolve_weather_contract, resolve_weather_observation
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +30,27 @@ def get_weather_data(ticker: str):
     from data.kalshi_weather_monitor import get_weather_data as _get_weather_data
 
     return _get_weather_data(ticker)
+
+
+def get_contract_observed_weather_data(
+    ticker: str,
+    *,
+    contract_name: str = "",
+    strike: float | None = None,
+    resolution_at: str = "",
+    last_trade_at: str = "",
+):
+    from data.kalshi_weather_monitor import (
+        get_contract_observed_weather_data as _get_contract_observed_weather_data,
+    )
+
+    return _get_contract_observed_weather_data(
+        ticker,
+        contract_name=contract_name,
+        strike=strike,
+        resolution_at=resolution_at,
+        last_trade_at=last_trade_at,
+    )
 
 
 def _station_for_ticker(ticker: str) -> dict | None:
@@ -78,6 +99,7 @@ def determine_weather_resolution(
     ticker: str,
     observed_high: float | None,
     observed_low: float | None,
+    observed_precip: float | None = None,
     contract_name: str = "",
     strike: float | None = None,
 ) -> tuple[str, float, str] | None:
@@ -86,6 +108,7 @@ def determine_weather_resolution(
         ticker=ticker,
         observed_high=observed_high,
         observed_low=observed_low,
+        observed_precip=observed_precip,
         contract_name=contract_name,
         strike=strike,
     )
@@ -96,10 +119,7 @@ def sync_forecast_resolutions(
     now: datetime | None = None,
 ) -> dict:
     """
-    Persist weather contract resolutions when observed ground truth is present.
-
-    Only HIGH/LOW contracts with explicit daily_max/daily_min values are
-    supported. Everything else is skipped to preserve truthfulness.
+    Persist weather contract resolutions when contract-date observed truth is present.
     """
     now_utc = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     summary = {
@@ -120,6 +140,8 @@ def sync_forecast_resolutions(
                    c.local_symbol,
                    c.contract_name,
                    c.strike,
+                   c.resolution_at,
+                   c.last_trade_at,
                    COALESCE(c.resolution_at, c.last_trade_at) AS resolution_key
             FROM forecast_contracts c
             LEFT JOIN forecast_resolutions r ON r.contract_id = c.id
@@ -136,16 +158,43 @@ def sync_forecast_resolutions(
             summary["skipped_not_due"] += 1
             continue
 
-        w_data = get_weather_data(ticker)
-        intraday = w_data.get("intraday", {}) if w_data else {}
-        if not intraday:
+        observed = get_contract_observed_weather_data(
+            ticker,
+            contract_name=str(row["contract_name"] or ""),
+            strike=float(row["strike"]) if row["strike"] is not None else None,
+            resolution_at=str(row["resolution_at"] or ""),
+            last_trade_at=str(row["last_trade_at"] or ""),
+        )
+        if not observed:
             summary["skipped_no_ground_truth"] += 1
             continue
+        if all(
+            observed.get(key) is None
+            for key in ("observed_high", "observed_low", "observed_precip")
+        ):
+            summary["skipped_no_ground_truth"] += 1
+            continue
+        semantics = resolve_weather_contract(
+            ticker=ticker,
+            contract_name=str(row["contract_name"] or ""),
+            strike=float(row["strike"]) if row["strike"] is not None else None,
+        )
+        if semantics is not None and not semantics.ambiguous:
+            if semantics.mode == "HIGH" and observed.get("observed_high") is None:
+                summary["skipped_no_ground_truth"] += 1
+                continue
+            if semantics.mode == "LOW" and observed.get("observed_low") is None:
+                summary["skipped_no_ground_truth"] += 1
+                continue
+            if semantics.mode in {"RAIN", "SNOW"} and observed.get("observed_precip") is None:
+                summary["skipped_no_ground_truth"] += 1
+                continue
 
         resolution = determine_weather_resolution(
             ticker=ticker,
-            observed_high=intraday.get("daily_max"),
-            observed_low=intraday.get("daily_min"),
+            observed_high=observed.get("observed_high"),
+            observed_low=observed.get("observed_low"),
+            observed_precip=observed.get("observed_precip"),
             contract_name=str(row["contract_name"] or ""),
             strike=float(row["strike"]) if row["strike"] is not None else None,
         )
@@ -160,7 +209,7 @@ def sync_forecast_resolutions(
             resolved_value=resolved_value,
             resolved_at=now_utc.isoformat(),
             notes=notes,
-            source="metar_watermark",
+            source=str(observed.get("source") or "kalshi"),
             db_path=db_path,
         )
         summary["inserted"] += 1

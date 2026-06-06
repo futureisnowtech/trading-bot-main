@@ -48,11 +48,13 @@ from config import (
     KALSHI_MAX_QTY_PER_POSITION,
     KALSHI_MAX_SPREAD_RATIO,
     KALSHI_DATA_FRESHNESS_MINUTES,
-    KALSHI_FEE_PER_CONTRACT,
     KALSHI_MAX_FEE_DRAG_PCT,
     KALSHI_MAX_USD_PER_POSITION,
+    estimate_kalshi_fee_per_contract,
+    estimate_kalshi_order_cost_usd,
     get_kalshi_hub_exposure_cap,
     get_kalshi_position_exposure_usd,
+    max_kalshi_contracts_for_budget,
 )
 from forecast.market_snapshot import MarketSnapshot, build_market_snapshots
 from forecast.primitives import (
@@ -152,6 +154,10 @@ _HARD_ECON_VETO_PREFIXES: tuple[str, ...] = (
     "longshot_bias_gate",
 )
 
+
+def _estimated_fee_per_contract(price: float, *, rounded: bool = False) -> float:
+    return estimate_kalshi_fee_per_contract(price, rounded=rounded)
+
 def _get_macro_context() -> dict:
     """Read v18.34 macro cache."""
     try:
@@ -190,6 +196,10 @@ def _get_city_hub(ticker: str) -> str:
         if any(city in t for city in cities):
             return hub
     return "UNKNOWN"
+
+
+def _is_weather_ticker(ticker: str) -> bool:
+    return weather_mode_for_ticker(str(ticker or "")) is not None
 
 
 @dataclass
@@ -482,18 +492,20 @@ def _economics_gate(
     ev_yes = -1.0
     ev_no = -1.0
     if yes_available:
+        fee_yes = _estimated_fee_per_contract(ask_yes, rounded=False)
         ev_yes = (
             q_hat
             - ask_yes
             - KALSHI_FEE_BUFFER
-            - KALSHI_FEE_PER_CONTRACT
+            - fee_yes
         )
     if no_available:
+        fee_no = _estimated_fee_per_contract(ask_no, rounded=False)
         ev_no = (
             (1.0 - q_hat)
             - ask_no
             - KALSHI_FEE_BUFFER
-            - KALSHI_FEE_PER_CONTRACT
+            - fee_no
         )
 
     # 8. Neither side has positive EV
@@ -512,7 +524,11 @@ def _economics_gate(
     best_side = "YES" if ev_yes >= ev_no else "NO"
     potential_gain = (1.0 - ask_yes) if best_side == "YES" else (1.0 - ask_no)
     if potential_gain > 0:
-        drag = KALSHI_FEE_PER_CONTRACT / potential_gain
+        fee_drag = _estimated_fee_per_contract(
+            ask_yes if best_side == "YES" else ask_no,
+            rounded=False,
+        )
+        drag = fee_drag / potential_gain
         if drag > KALSHI_MAX_FEE_DRAG_PCT:
             return False, f"fee_drag_veto (drag={drag:.1%} > {KALSHI_MAX_FEE_DRAG_PCT:.0%})", ev_yes, ev_no
 
@@ -533,6 +549,47 @@ def _economics_gate(
 
     # 10. Duplicate exposure penalty doesn't veto but is noted in sizing
     return True, "", ev_yes, ev_no
+
+
+def _weather_market_gate(
+    *,
+    ask_yes: float,
+    ask_no: float,
+    spread: float,
+    hours_to_resolution: float,
+    open_positions_count: int = 0,
+    deployed_pct: float = 0.0,
+) -> tuple[bool, str]:
+    """Execution-only gates for weather markets."""
+    yes_available = ask_yes > 0.0
+    no_available = ask_no > 0.0
+
+    if not yes_available and not no_available:
+        return False, "missing_quotes"
+
+    if deployed_pct >= KALSHI_MAX_DEPLOYED_PCT:
+        return False, "MAX_CAPITAL_EXCEEDED"
+
+    if hours_to_resolution < MIN_HOURS_TO_RES:
+        return False, "RESOLUTION_HORIZON_TOO_SHORT"
+
+    if hours_to_resolution > MAX_HOURS_TO_RES:
+        return False, f"too_far_from_resolution ({hours_to_resolution:.1f}h > {MAX_HOURS_TO_RES}h)"
+
+    if open_positions_count >= MAX_CONCURRENT_POSITIONS:
+        return False, f"concurrent_cap_reached ({open_positions_count}/{MAX_CONCURRENT_POSITIONS})"
+
+    if spread > MAX_SPREAD_DOLLARS:
+        return False, f"spread_too_wide ({spread:.3f} > {MAX_SPREAD_DOLLARS})"
+
+    available_prices = [price for price in (ask_yes, ask_no) if price > 0.0]
+    avg_price = sum(available_prices) / len(available_prices) if available_prices else 0.0
+    if avg_price > 0:
+        spread_ratio = spread / avg_price
+        if spread_ratio > KALSHI_MAX_SPREAD_RATIO:
+            return False, f"spread_ratio_veto ({spread_ratio:.1%} > {KALSHI_MAX_SPREAD_RATIO:.0%})"
+
+    return True, ""
 
 
 # ── Strategy families ──────────────────────────────────────────────────────────
@@ -938,7 +995,8 @@ def calculate_continuous_sizing(market_price: float, ensemble_prob: float, capit
     """Fee-adjusted binary-market sizing with hard bankroll and USD caps."""
     ensemble_prob = max(0.01, min(0.99, ensemble_prob))
     market_price = max(0.01, min(0.99, market_price))
-    effective_cost = min(0.99, market_price + KALSHI_FEE_PER_CONTRACT)
+    fee_per_contract = _estimated_fee_per_contract(market_price, rounded=False)
+    effective_cost = min(0.99, market_price + fee_per_contract)
 
     if ensemble_prob <= effective_cost or capital_base <= 0:
         return 0
@@ -956,11 +1014,12 @@ def calculate_continuous_sizing(market_price: float, ensemble_prob: float, capit
         per_event_cap_pct=cap_pct,
         deployed_pct=0.0,
         max_deployed_pct=1.0,
-        fee_per_contract=KALSHI_FEE_PER_CONTRACT,
+        fee_per_contract=fee_per_contract,
     )
-    total_cash_per_contract = market_price + KALSHI_FEE_PER_CONTRACT
-    if total_cash_per_contract > 0:
-        qty = min(qty, int(KALSHI_MAX_USD_PER_POSITION / total_cash_per_contract))
+    qty = min(
+        qty,
+        max_kalshi_contracts_for_budget(market_price, KALSHI_MAX_USD_PER_POSITION),
+    )
 
     return max(0, qty)
 
@@ -1152,7 +1211,10 @@ def _strategy_weather_details(
     premium_yes_net_edge_floor = float(KALSHI_EXPENSIVE_YES_MIN_NET_EDGE)
     premium_yes_size_multiplier = max(0.25, float(KALSHI_EXPENSIVE_YES_SIZE_MULTIPLIER))
     net_edge_yes = (
-        ensemble_prob - ask_yes - KALSHI_FEE_BUFFER - KALSHI_FEE_PER_CONTRACT
+        ensemble_prob
+        - ask_yes
+        - KALSHI_FEE_BUFFER
+        - _estimated_fee_per_contract(ask_yes, rounded=False)
         if ask_yes > 0
         else None
     )
@@ -1376,31 +1438,48 @@ def evaluate_contract(
     StrategyResult, or None if no strategy passes + economics gate.
     """
     ticker = contract.get("local_symbol", "")
-    
-    # v19.5: Sovereign Survival — Data Freshness Veto
-    # Ensure ensemble data isn't stale before evaluating.
-    w_data = get_weather_data(ticker)
-    if w_data:
-        data_ts = w_data.get("timestamp", 0)
-        age_m = (time.time() - data_ts) / 60.0
-        if age_m > KALSHI_DATA_FRESHNESS_MINUTES:
-             return StrategyResult(
-                strategy_family="vetoed", side="NONE", q_hat=0.0, ev=0.0, ev_yes=0.0, ev_no=0.0,
-                confidence=0.0, uncertainty_penalty=0.0, econ_approved=False,
-                veto_reason=f"stale_ensemble_data ({age_m:.0f}m old)", position_fraction=0.0,
-                position_contracts=0, top_factors=[], 
-                hours_to_resolution=_hours_to_resolution(contract.get("last_trade_at", ""))
-            )
-    else:
-        # Weather alpha requires data; veto if missing
-        is_weather = "KXHIGH" in ticker or "KXLOW" in ticker or "KXRAIN" in ticker
-        if is_weather:
+    is_weather = _is_weather_ticker(ticker)
+    hours_to_res = _hours_to_resolution(contract.get("last_trade_at", ""))
+
+    if is_weather:
+        # Weather alpha requires fresh shared truth before any market evaluation.
+        w_data = get_weather_data(ticker)
+        if w_data:
+            data_ts = w_data.get("timestamp", 0)
+            age_m = (time.time() - data_ts) / 60.0
+            if age_m > KALSHI_DATA_FRESHNESS_MINUTES:
+                return StrategyResult(
+                    strategy_family="vetoed",
+                    side="NONE",
+                    q_hat=0.0,
+                    ev=0.0,
+                    ev_yes=0.0,
+                    ev_no=0.0,
+                    confidence=0.0,
+                    uncertainty_penalty=0.0,
+                    econ_approved=False,
+                    veto_reason=f"stale_ensemble_data ({age_m:.0f}m old)",
+                    position_fraction=0.0,
+                    position_contracts=0,
+                    top_factors=[],
+                    hours_to_resolution=hours_to_res,
+                )
+        else:
             return StrategyResult(
-                strategy_family="vetoed", side="NONE", q_hat=0.0, ev=0.0, ev_yes=0.0, ev_no=0.0,
-                confidence=0.0, uncertainty_penalty=0.0, econ_approved=False,
-                veto_reason="missing_weather_data", position_fraction=0.0,
-                position_contracts=0, top_factors=[], 
-                hours_to_resolution=_hours_to_resolution(contract.get("last_trade_at", ""))
+                strategy_family="vetoed",
+                side="NONE",
+                q_hat=0.0,
+                ev=0.0,
+                ev_yes=0.0,
+                ev_no=0.0,
+                confidence=0.0,
+                uncertainty_penalty=0.0,
+                econ_approved=False,
+                veto_reason="missing_weather_data",
+                position_fraction=0.0,
+                position_contracts=0,
+                top_factors=[],
+                hours_to_resolution=hours_to_res,
             )
 
     ask_yes = float(yes_quote.get("ask") or 0.0)
@@ -1416,12 +1495,6 @@ def evaluate_contract(
     # YES and NO quotes are harvested independently, so the older leg controls.
     age_seconds = _max_quote_age_seconds(yes_quote, no_quote)
     if age_seconds is not None:
-        # Weather alpha is slow moving; allow a longer freshness window.
-        is_weather = (
-            "KXHIGH" in str(contract.get("local_symbol"))
-            or "KXLOW" in str(contract.get("local_symbol"))
-            or "KXRAIN" in str(contract.get("local_symbol"))
-        )
         limit = 600 if is_weather else 120
 
         if age_seconds > limit:
@@ -1439,14 +1512,14 @@ def evaluate_contract(
                 confidence=0.0,
                 uncertainty_penalty=0.0,
                 econ_approved=False,
-                veto_reason="stale_market_data",
+                veto_reason=f"stale_market_data ({age_seconds:.1f}s old)",
                 position_fraction=0.0,
                 position_contracts=0,
                 top_factors=[],
-                hours_to_resolution=_hours_to_resolution(contract.get("last_trade_at", ""))
+                hours_to_resolution=hours_to_res,
             )
 
-    if not ask_yes and not ask_no:
+    if ask_yes <= 0.0 and ask_no <= 0.0:
         logger.debug(
             f"evaluate_contract: missing quotes for {contract.get('local_symbol')}"
         )
@@ -1464,7 +1537,7 @@ def evaluate_contract(
             position_fraction=0.0,
             position_contracts=0,
             top_factors=[],
-            hours_to_resolution=_hours_to_resolution(contract.get("last_trade_at", ""))
+            hours_to_resolution=hours_to_res,
         )
 
     # v18.34: Macro Context Risk Gate
@@ -1488,13 +1561,166 @@ def evaluate_contract(
             position_fraction=0.0,
             position_contracts=0,
             top_factors=[],
-            hours_to_resolution=_hours_to_resolution(contract.get("last_trade_at", ""))
+            hours_to_resolution=hours_to_res,
         )
 
-    last_trade_at = contract.get("last_trade_at", "")
-    hours_to_res = _hours_to_resolution(last_trade_at)
+    if is_weather:
+        w_res = _strategy_weather_details(
+            ticker,
+            ask_yes,
+            ask_no,
+            hours_to_res,
+            contract_name=str(contract.get("contract_name") or ""),
+            strike=float(contract.get("strike") or 0.0),
+            resolution_at=str(contract.get("resolution_at") or ""),
+            last_trade_at=str(contract.get("last_trade_at") or ""),
+        )
+        weather_factors = list(w_res[3] or [])
+        if not w_res[0]:
+            return StrategyResult(
+                strategy_family="vetoed",
+                side="NONE",
+                q_hat=0.0,
+                ev=0.0,
+                ev_yes=0.0,
+                ev_no=0.0,
+                confidence=0.0,
+                uncertainty_penalty=0.0,
+                econ_approved=False,
+                veto_reason=str(weather_factors[0] if weather_factors else "no_strategy_signal"),
+                position_fraction=0.0,
+                position_contracts=0,
+                top_factors=weather_factors,
+                hours_to_resolution=hours_to_res,
+                is_taker_override=False,
+            )
 
-    # Compute all log-odds features
+        best_side = str(w_res[1] or "NONE")
+        chosen_prob = float(w_res[2] or 0.0)
+        best_factors = weather_factors
+        best_is_taker = bool(w_res[4])
+        best_multiplier = float(w_res[5] or 1.0)
+        best_tier = int(w_res[6] or 3)
+        best_sizing_cap = float(w_res[7] or 0.05)
+        q_hat = chosen_prob if best_side == "YES" else (1.0 - chosen_prob)
+        p_cost = ask_yes if best_side == "YES" else ask_no
+
+        if p_cost <= 0.0:
+            return StrategyResult(
+                strategy_family="vetoed",
+                side="NONE",
+                q_hat=q_hat,
+                ev=0.0,
+                ev_yes=0.0,
+                ev_no=0.0,
+                confidence=0.0,
+                uncertainty_penalty=0.0,
+                econ_approved=False,
+                veto_reason=f"missing_quotes_{best_side.lower()}",
+                position_fraction=0.0,
+                position_contracts=0,
+                top_factors=best_factors,
+                hours_to_resolution=hours_to_res,
+                is_taker_override=False,
+            )
+
+        approved, veto_reason = _weather_market_gate(
+            ask_yes=ask_yes,
+            ask_no=ask_no,
+            spread=spread,
+            hours_to_resolution=hours_to_res,
+            open_positions_count=open_positions_count,
+            deployed_pct=deployed_pct,
+        )
+        ev_yes = (
+            q_hat
+            - ask_yes
+            - KALSHI_FEE_BUFFER
+            - _estimated_fee_per_contract(ask_yes, rounded=False)
+            if ask_yes > 0.0
+            else -1.0
+        )
+        ev_no = (
+            (1.0 - q_hat)
+            - ask_no
+            - KALSHI_FEE_BUFFER
+            - _estimated_fee_per_contract(ask_no, rounded=False)
+            if ask_no > 0.0
+            else -1.0
+        )
+        ev_chosen = ev_yes if best_side == "YES" else ev_no
+        if approved and ev_chosen < EV_THRESHOLD:
+            approved = False
+            veto_reason = f"fee_adjusted_ev_too_low ({ev_chosen:.4f} < {EV_THRESHOLD})"
+
+        weather_model_prob_gfs = None
+        weather_model_prob_ecmwf = None
+        weather_mode = ""
+        weather_semantics = resolve_weather_contract(
+            ticker=contract.get("local_symbol", ""),
+            contract_name=str(contract.get("contract_name") or ""),
+            strike=float(contract.get("strike") or 0.0),
+        )
+        if weather_semantics is not None and not weather_semantics.ambiguous:
+            projected_weather = get_contract_weather_data(
+                contract.get("local_symbol", ""),
+                contract_name=str(contract.get("contract_name") or ""),
+                strike=float(contract.get("strike") or 0.0),
+                resolution_at=str(contract.get("resolution_at") or ""),
+                last_trade_at=str(contract.get("last_trade_at") or ""),
+            )
+            if projected_weather:
+                weather_model_prob_gfs, weather_model_prob_ecmwf = (
+                    _extract_weather_model_probabilities(projected_weather, weather_semantics)
+                )
+                weather_mode = weather_semantics.mode
+
+        if approved:
+            n_contracts = calculate_continuous_sizing(
+                market_price=p_cost,
+                ensemble_prob=chosen_prob,
+                capital_base=bankroll,
+                multiplier=best_multiplier,
+                cap_pct=best_sizing_cap,
+                conv_tier=best_tier,
+            )
+            if n_contracts > KALSHI_MAX_QTY_PER_POSITION:
+                logger.info(
+                    "Sovereign Survival: Capping %s qty %s -> %s",
+                    ticker,
+                    n_contracts,
+                    KALSHI_MAX_QTY_PER_POSITION,
+                )
+                n_contracts = KALSHI_MAX_QTY_PER_POSITION
+            total_cost = estimate_kalshi_order_cost_usd(n_contracts, p_cost)
+        else:
+            n_contracts, total_cost = 0, 0.0
+
+        actual_fraction = total_cost / bankroll if bankroll > 0 else 0.0
+        return StrategyResult(
+            strategy_family="weather_ensemble",
+            side=best_side,
+            q_hat=q_hat,
+            ev=ev_chosen,
+            ev_yes=ev_yes,
+            ev_no=ev_no,
+            confidence=chosen_prob,
+            uncertainty_penalty=max(0.0, min(0.5, 1.0 - best_multiplier)),
+            econ_approved=approved,
+            veto_reason=veto_reason,
+            position_fraction=actual_fraction,
+            position_contracts=n_contracts,
+            top_factors=best_factors,
+            ask_yes=ask_yes,
+            ask_no=ask_no,
+            hours_to_resolution=hours_to_res,
+            is_taker_override=best_is_taker,
+            model_prob_gfs=weather_model_prob_gfs,
+            model_prob_ecmwf=weather_model_prob_ecmwf,
+            weather_mode=weather_mode,
+        )
+
+    # Compute all log-odds features for non-weather markets.
     try:
         feats = _compute_features(
             bars_5m, bars_30m, bars_1h, bars_4h, ask_yes, ask_no, mid_yes, mid_no
@@ -1555,26 +1781,7 @@ def evaluate_contract(
         same_event_open=same_event_open,
     )
 
-    # Evaluate all strategy families
-    # v19.6: tuple = (passes, side, ensemble_prob, factors, is_taker, multiplier, tier, sizing_cap)
     strategy_candidates: list[tuple[str, str, float, list[str], bool, float, int, float]] = []
-
-    # v18.35: Weather Strategy (Ensemble-driven)
-    ticker = contract.get("local_symbol", "")
-    w_res = _strategy_weather_details(
-        ticker,
-        ask_yes,
-        ask_no,
-        hours_to_res,
-        contract_name=str(contract.get("contract_name") or ""),
-        strike=float(contract.get("strike") or 0.0),
-        resolution_at=str(contract.get("resolution_at") or ""),
-        last_trade_at=str(contract.get("last_trade_at") or ""),
-    )
-    if w_res[0]: # w_passes
-        # w_res = (passes, side, ensemble_prob, factors, is_taker, multiplier, tier, sizing_cap)
-        strategy_candidates.append(("weather_ensemble", w_res[1], w_res[2], w_res[3], w_res[4], w_res[5], w_res[6], w_res[7]))
-
     for name, fn in [
         ("continuation", _strategy_continuation),
         ("mean_reversion", _strategy_mean_reversion),
@@ -1642,100 +1849,37 @@ def evaluate_contract(
             is_taker_override=False,
         )
 
-    weather_model_prob_gfs = None
-    weather_model_prob_ecmwf = None
-    weather_mode = ""
-    if best_family == "weather_ensemble":
-        weather_semantics = resolve_weather_contract(
-            ticker=contract.get("local_symbol", ""),
-            contract_name=str(contract.get("contract_name") or ""),
-            strike=float(contract.get("strike") or 0.0),
-        )
-        if weather_semantics is not None and not weather_semantics.ambiguous:
-            projected_weather = get_contract_weather_data(
-                contract.get("local_symbol", ""),
-                contract_name=str(contract.get("contract_name") or ""),
-                strike=float(contract.get("strike") or 0.0),
-                resolution_at=str(contract.get("resolution_at") or ""),
-                last_trade_at=str(contract.get("last_trade_at") or ""),
-            )
-            if projected_weather:
-                weather_model_prob_gfs, weather_model_prob_ecmwf = (
-                    _extract_weather_model_probabilities(projected_weather, weather_semantics)
-                )
-                weather_mode = weather_semantics.mode
+    ev_chosen = ev_yes if best_side == "YES" else ev_no
+    p_cost = ask_yes if best_side == "YES" else ask_no
+    if approved and ev_chosen < EV_THRESHOLD:
+        approved = False
+        veto_reason = f"chosen_side_ev_too_low ({ev_chosen:.4f} < {EV_THRESHOLD})"
 
-    # v19.1.6: Sovereign Weather Override
-    # Weather alpha is probabilistic arbitrage, NOT technical price action.
-    # If weather passes, we override technical economics vetoes.
-    if best_family == "weather_ensemble":
-        p_cost = ask_yes if best_side == "YES" else ask_no
-        ev_chosen = (
-            best_confidence
-            - p_cost
-            - KALSHI_FEE_BUFFER
-            - KALSHI_FEE_PER_CONTRACT
-        )
-        hard_econ_veto = any(
-            veto_reason.startswith(prefix) for prefix in _HARD_ECON_VETO_PREFIXES
-        )
-        if ev_chosen < EV_THRESHOLD:
-            approved = False
-            veto_reason = f"fee_adjusted_ev_too_low ({ev_chosen:.4f} < {EV_THRESHOLD})"
-        elif hard_econ_veto:
-            approved = False
-        else:
-            approved = True
-            veto_reason = ""
-    else:
-        # Determine EV for chosen side (Technical)
-        ev_chosen = ev_yes if best_side == "YES" else ev_no
-        p_cost = ask_yes if best_side == "YES" else ask_no
-
-    # Uncertainty penalty from sigma and entropy
     uncertainty_penalty = min(0.40, sigma_t * 0.30 + max(0.0, h_t - 0.60) * 0.20)
-    adj_confidence = max(0.0, best_confidence - uncertainty_penalty)
 
-    # v18.34: Forensic Veto for Hedge Spaghetti (RETIRED v18.35 per user mandate)
-    # if same_event_open:
-    #     ...
-
-    # Capital Lockup Penalty (Velocity scaling)
-    # Scale fraction down exponentially the further away the resolution is.
-    # Penalty = exp(-0.5 * (hours / 48)) -> ~0.6 at 48h, ~0.17 at 168h
-    time_penalty = np.exp(-0.5 * (hours_to_res / 48.0)) if hours_to_res > 0 else 1.0
-
-    # Sizing (v18.35 Unrestricted Pivot)
     if approved:
-        if best_family == "weather_ensemble":
-            # Use continuous sizing for weather
-            n_contracts = calculate_continuous_sizing(
-                market_price=p_cost,
-                ensemble_prob=best_confidence,
-                capital_base=bankroll,
-                multiplier=best_multiplier,
-                cap_pct=best_sizing_cap,
-                conv_tier=best_tier
-            )
-            # v19.5: Institutional Quantity Cap (Prevent Penny Spree)
-            if n_contracts > KALSHI_MAX_QTY_PER_POSITION:
-                logger.info(f"Sovereign Survival: Capping {ticker} qty {n_contracts} -> {KALSHI_MAX_QTY_PER_POSITION}")
-                n_contracts = KALSHI_MAX_QTY_PER_POSITION
-
-            total_cost = n_contracts * p_cost
-        else:
-            n_contracts, total_cost = kalshi_absolute_sizing(
-                ask_price=p_cost,
-                bankroll=bankroll,
-                max_risk_pct=KALSHI_MAX_RISK_PER_EVENT_PCT,
-                max_deploy_pct=0.10, # Individual event capital limit (increased to 10%)
-                fee_per_contract=KALSHI_FEE_PER_CONTRACT,
-                max_usd_cap=KALSHI_MAX_USD_PER_POSITION,
-            )
+        per_contract_fee = _estimated_fee_per_contract(p_cost, rounded=False)
+        n_contracts, total_cost = kalshi_absolute_sizing(
+            ask_price=p_cost,
+            bankroll=bankroll,
+            max_risk_pct=KALSHI_MAX_RISK_PER_EVENT_PCT,
+            max_deploy_pct=0.10,
+            fee_per_contract=per_contract_fee,
+            max_usd_cap=KALSHI_MAX_USD_PER_POSITION,
+        )
+        exact_budget_cap = min(
+            bankroll * KALSHI_MAX_RISK_PER_EVENT_PCT,
+            bankroll * 0.10,
+            KALSHI_MAX_USD_PER_POSITION,
+        )
+        n_contracts = min(
+            n_contracts,
+            max_kalshi_contracts_for_budget(p_cost, exact_budget_cap),
+        )
+        total_cost = estimate_kalshi_order_cost_usd(n_contracts, p_cost)
     else:
         n_contracts, total_cost = 0, 0.0
 
-    # Actual deployed fraction for logging
     actual_fraction = total_cost / bankroll if bankroll > 0 else 0.0
 
     return StrategyResult(
@@ -1764,9 +1908,6 @@ def evaluate_contract(
         ask_no=ask_no,
         hours_to_resolution=hours_to_res,
         is_taker_override=best_is_taker,
-        model_prob_gfs=weather_model_prob_gfs,
-        model_prob_ecmwf=weather_model_prob_ecmwf,
-        weather_mode=weather_mode,
     )
 
 
@@ -1961,16 +2102,6 @@ def evaluate_market_snapshots(
         chosen_contract = yc
         if result.side == "NO":
             chosen_contract = nc
-
-        if result.econ_approved and result.position_contracts > 0:
-            current_tick_counts[family] = count + 1
-            risk_price = (
-                yes_quote.get("ask") if result.side == "YES" else no_quote.get("ask")
-            ) or 0.50
-            hub_exposure[hub] = current_hub_usd + get_kalshi_position_exposure_usd(
-                result.position_contracts,
-                float(risk_price),
-            )
 
         rank_score = result.ev * result.confidence if result.econ_approved else 0.0
         approved_entries.append(

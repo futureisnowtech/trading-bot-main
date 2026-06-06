@@ -11,7 +11,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from config import KALSHI_FEE_PER_CONTRACT
+from config import max_kalshi_contracts_for_budget
 
 
 @dataclass(frozen=True)
@@ -85,10 +85,7 @@ class KalshiExecutionController:
         return ask, self._floor_qty(ask_size)
 
     def _max_affordable_qty(self, price: float, buying_power_usd: float) -> int:
-        cash_per_contract = float(price) + float(KALSHI_FEE_PER_CONTRACT)
-        if cash_per_contract <= 0:
-            return 0
-        return self._floor_qty(float(buying_power_usd) / cash_per_contract)
+        return max_kalshi_contracts_for_budget(price, buying_power_usd)
 
     def plan_entry(self, intent: TradeIntent) -> ExecutionPlan:
         contract = intent.contract

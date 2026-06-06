@@ -247,9 +247,13 @@ def _held_model_probability(right: str, model_yes: float | None) -> float | None
 def _remaining_edge_to_resolution(held_model_p: float | None, bid_price: float) -> float | None:
     if held_model_p is None or held_model_p <= 0:
         return None
-    from config import KALSHI_FEE_PER_CONTRACT
+    from config import estimate_kalshi_fee_per_contract
 
-    return float(held_model_p) - float(bid_price) - float(KALSHI_FEE_PER_CONTRACT)
+    return (
+        float(held_model_p)
+        - float(bid_price)
+        - float(estimate_kalshi_fee_per_contract(bid_price, rounded=False))
+    )
 
 
 def _should_time_decay_exit(hours_to_resolution: float, bid_price: float, remaining_edge: float | None) -> bool:
@@ -699,6 +703,34 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
             for p in open_positions:
                 family = p.get("local_symbol", "").split("-")[0]
                 open_event_families_counts[family] += 1
+            cycle_event_families = defaultdict(int, dict(open_event_families_counts))
+            cycle_hub_exposure_usd: dict[str, float] = {}
+            try:
+                from config import (
+                    get_kalshi_hub_exposure_cap,
+                    get_kalshi_position_exposure_usd,
+                )
+                from forecast.strategy_engine import _get_city_hub
+
+                for pos in open_positions:
+                    symbol = str(pos.get("local_symbol") or pos.get("ticker") or "")
+                    hub = _get_city_hub(symbol)
+                    if hub == "UNKNOWN":
+                        continue
+                    entry_price = float(
+                        pos.get("entry_price") or pos.get("entry") or 0.0
+                    )
+                    exposure = get_kalshi_position_exposure_usd(
+                        float(pos.get("qty") or 0.0),
+                        entry_price,
+                    )
+                    cycle_hub_exposure_usd[hub] = (
+                        cycle_hub_exposure_usd.get(hub, 0.0) + exposure
+                    )
+            except Exception:
+                get_kalshi_hub_exposure_cap = None
+                get_kalshi_position_exposure_usd = None
+                _get_city_hub = None
 
             def _get_bars_fn(contract_id: int, interval: str) -> list[dict]:
                 return get_bars(contract_id, interval, limit=200)
@@ -790,6 +822,28 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                     if flatten_res.get("status") == "executed":
                         from forecast.db import mark_forecast_position_closed
                         mark_forecast_position_closed(worst_sym, exit_type="swap_exit")
+                        worst_family = worst_sym.split("-")[0]
+                        cycle_event_families[worst_family] = max(
+                            0,
+                            cycle_event_families.get(worst_family, 0) - 1,
+                        )
+                        if _get_city_hub and get_kalshi_position_exposure_usd:
+                            worst_hub = _get_city_hub(worst_sym)
+                            if worst_hub != "UNKNOWN":
+                                worst_entry = float(
+                                    worst_pos.get("entry_price")
+                                    or worst_pos.get("entry")
+                                    or 0.0
+                                )
+                                worst_exposure = get_kalshi_position_exposure_usd(
+                                    float(worst_pos.get("qty") or 0.0),
+                                    worst_entry,
+                                )
+                                cycle_hub_exposure_usd[worst_hub] = max(
+                                    0.0,
+                                    cycle_hub_exposure_usd.get(worst_hub, 0.0)
+                                    - worst_exposure,
+                                )
                     log_event("INFO", "ForecastRunner", f"Swap: Flattened {worst_sym} for {local_sym}")
 
                 # Hard duplicate guard: no same-contract double-down
@@ -808,6 +862,41 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                         f"[ForecastRunner] Duplicate guard: {key} already open"
                     )
                     continue
+
+                family = local_sym.split("-")[0]
+                if cycle_event_families.get(family, 0) >= KALSHI_SAME_EVENT_FAMILY_CAP:
+                    log_event(
+                        "WARNING",
+                        "ForecastRunner",
+                        f"[ForecastRunner] {local_sym} vetoed: same_event_family_cap_reached",
+                    )
+                    continue
+
+                candidate_hub = ""
+                projected_hub_exposure = 0.0
+                if _get_city_hub and get_kalshi_hub_exposure_cap and get_kalshi_position_exposure_usd:
+                    candidate_hub = _get_city_hub(local_sym)
+                    if candidate_hub != "UNKNOWN":
+                        hub_cap = get_kalshi_hub_exposure_cap(bankroll)
+                        current_hub_exposure = cycle_hub_exposure_usd.get(candidate_hub, 0.0)
+                        candidate_price = float(
+                            result.ask_yes if result.side == "YES" else result.ask_no
+                        )
+                        candidate_exposure = get_kalshi_position_exposure_usd(
+                            float(result.position_contracts),
+                            candidate_price,
+                        )
+                        projected_hub_exposure = current_hub_exposure + candidate_exposure
+                        if projected_hub_exposure > hub_cap:
+                            log_event(
+                                "WARNING",
+                                "ForecastRunner",
+                                (
+                                    f"[ForecastRunner] {local_sym} vetoed: "
+                                    f"hub_exposure_cap_reached ({projected_hub_exposure:.1f}/{hub_cap:.1f})"
+                                ),
+                            )
+                            continue
 
                 try:
                     forecast_yes_prob = result.q_hat
@@ -868,6 +957,13 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                         except Exception as _db_err:
                             logger.error(f"[ForecastRunner] DB insertion error: {_db_err}")
 
+                        cycle_event_families[family] += 1
+                        if candidate_hub and get_kalshi_position_exposure_usd:
+                            cycle_hub_exposure_usd[candidate_hub] = (
+                                cycle_hub_exposure_usd.get(candidate_hub, 0.0)
+                                + get_kalshi_position_exposure_usd(actual_qty, actual_price)
+                            )
+
                         try:
                             from notifications.notification_engine import notify_trade_open
                             notify_trade_open(
@@ -895,11 +991,11 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                             f"| strategy={result.strategy_family} ev={result.ev:.4f} "
                             f"q_hat={result.q_hat:.4f}"
                         )
-                        from config import KALSHI_FEE_PER_CONTRACT
+                        from config import estimate_kalshi_order_cost_usd
                         buying_power_usd = max(
                             0.0,
                             buying_power_usd
-                            - (actual_qty * (actual_price + float(KALSHI_FEE_PER_CONTRACT))),
+                            - estimate_kalshi_order_cost_usd(actual_qty, actual_price),
                         )
                     else:
                         outcome_msg = (

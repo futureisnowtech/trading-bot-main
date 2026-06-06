@@ -145,8 +145,8 @@ def test_weather_override_uses_same_fee_buffered_ev_floor(monkeypatch):
         bars_30m=[],
         bars_1h=[],
         bars_4h=[],
-        yes_quote=_quote(0.83, 0.02, now_ts),
-        no_quote=_quote(0.17, 0.02, now_ts),
+        yes_quote=_quote(0.86, 0.02, now_ts),
+        no_quote=_quote(0.14, 0.02, now_ts),
         bankroll=100.0,
     )
 
@@ -185,7 +185,7 @@ def test_weather_pair_freshness_uses_staler_quote_leg(monkeypatch):
 
     assert result is not None
     assert result.econ_approved is False
-    assert result.veto_reason == "stale_market_data"
+    assert result.veto_reason.startswith("stale_market_data")
 
 
 def test_weather_one_sided_no_book_can_still_trade(monkeypatch):
@@ -297,8 +297,8 @@ def test_expensive_yes_weather_requires_extra_headroom(monkeypatch):
 
     passes, side, _prob, factors, _is_taker, _mult, _tier, _cap = se._strategy_weather_details(
         "KXHIGHNY-30JUN26-T75",
-        ask_yes=0.81,
-        ask_no=0.19,
+        ask_yes=0.84,
+        ask_no=0.16,
         hours_to_res=24.0,
         contract_name="Will the high temp in NY be >75° on Jun 30, 2026?",
         strike=75.0,
@@ -406,6 +406,8 @@ def test_ensure_weather_data_backfills_missing_series(monkeypatch):
     import data.kalshi_weather_monitor as wm
 
     wm._WEATHER_SHADOW_STATE.clear()
+    wm._LAST_SNAPSHOT_MTIME = 0.0
+    monkeypatch.setattr(wm, "_WEATHER_SNAPSHOT_FILE", "", raising=False)
 
     async def fake_fetch_open_meteo_ensemble(city_key, lat, lon):
         return {
@@ -438,6 +440,113 @@ def test_ensure_weather_data_backfills_missing_series(monkeypatch):
     assert hydrated
     assert hydrated["members_high"]
     assert hydrated["intraday"]["metar_temp"] == 74.0
+
+
+def test_get_weather_data_restores_shared_snapshot_without_fetch(tmp_path, monkeypatch):
+    import json
+    import data.kalshi_weather_monitor as wm
+
+    snapshot_path = tmp_path / "weather_snapshot.json"
+    wm._WEATHER_SHADOW_STATE.clear()
+    wm._LAST_SNAPSHOT_MTIME = 0.0
+    monkeypatch.setattr(wm, "_WEATHER_SNAPSHOT_FILE", str(snapshot_path), raising=False)
+
+    snapshot_path.write_text(
+        json.dumps(
+            {
+                "written_at": datetime.now(timezone.utc).timestamp(),
+                "series_count": 1,
+                "state": {
+                    "KXHIGHNY": {
+                        "members_high": [76.0] * 31,
+                        "timestamp": datetime.now(timezone.utc).timestamp(),
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    hydrated = wm.get_weather_data("KXHIGHNY-30JUN26-T75")
+
+    assert hydrated["members_high"][0] == 76.0
+
+
+def test_ensure_weather_data_uses_shared_snapshot_before_fetch(tmp_path, monkeypatch):
+    import json
+    import data.kalshi_weather_monitor as wm
+
+    snapshot_path = tmp_path / "weather_snapshot.json"
+    wm._WEATHER_SHADOW_STATE.clear()
+    wm._LAST_SNAPSHOT_MTIME = 0.0
+    monkeypatch.setattr(wm, "_WEATHER_SNAPSHOT_FILE", str(snapshot_path), raising=False)
+
+    snapshot_path.write_text(
+        json.dumps(
+            {
+                "written_at": datetime.now(timezone.utc).timestamp(),
+                "series_count": 1,
+                "state": {
+                    "KXHIGHNY": {
+                        "members_high": [76.0] * 31,
+                        "timestamp": datetime.now(timezone.utc).timestamp(),
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    async def _should_not_fetch(*_args, **_kwargs):
+        raise AssertionError("fresh shared snapshot should avoid live fetch")
+
+    monkeypatch.setattr(wm, "fetch_open_meteo_ensemble", _should_not_fetch)
+
+    summary = wm.ensure_weather_data(["KXHIGHNY-30JUN26-T75"], include_intraday=False)
+
+    assert summary["refreshed_series"] == 0
+    assert summary["snapshot_loaded"] == 1
+
+
+def test_weather_market_snapshots_skip_bar_loading():
+    from forecast.market_snapshot import build_market_snapshots
+
+    active_contracts = [
+        {
+            "id": 1,
+            "market_id": 9,
+            "local_symbol": "KXHIGHNY-26JUN05-B89.5",
+            "contract_name": "NY High",
+            "right": "C",
+            "strike": 89.5,
+            "last_trade_at": "2026-06-05T23:59:59Z",
+            "resolution_at": "2026-06-05T23:59:59Z",
+        },
+        {
+            "id": 2,
+            "market_id": 9,
+            "local_symbol": "KXHIGHNY-26JUN05-B89.5",
+            "contract_name": "NY High",
+            "right": "P",
+            "strike": 89.5,
+            "last_trade_at": "2026-06-05T23:59:59Z",
+            "resolution_at": "2026-06-05T23:59:59Z",
+        },
+    ]
+
+    snapshots = build_market_snapshots(
+        active_contracts,
+        get_bars_fn=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("weather snapshots should not request bars")
+        ),
+        get_quotes_fn=lambda *_args, **_kwargs: {
+            "yes_quote": {"ask": 0.42, "bid": 0.40, "mid": 0.41},
+            "no_quote": {"ask": 0.58, "bid": 0.56, "mid": 0.57},
+        },
+    )
+
+    assert len(snapshots) == 1
+    assert snapshots[0].bars_5m == []
 
 
 def test_active_weather_city_scope_tracks_live_contract_universe(monkeypatch):
@@ -607,6 +716,187 @@ def test_contract_weather_projection_is_day_specific(monkeypatch):
     assert projected["members_high"] == [84.0, 83.0]
     assert projected["members_low"] == [80.0, 79.0]
     assert round(projected["peak_ssrd"], 1) == 585.0
+
+
+def test_contract_observed_weather_data_prefers_intraday_for_current_local_day(monkeypatch):
+    import data.kalshi_weather_monitor as wm
+
+    tz_name = wm.STATIONS["LAX"]["tz"]
+    local_today = datetime.now(timezone.utc).astimezone(
+        timezone.utc if tz_name == "UTC" else __import__("pytz").timezone(tz_name)
+    ).date()
+
+    monkeypatch.setattr(
+        wm,
+        "get_weather_data",
+        lambda series: {
+            "intraday": {
+                "daily_max": 75.0,
+                "daily_min": 61.0,
+                "daily_precip": 0.18,
+            }
+        },
+    )
+    monkeypatch.setattr(
+        wm,
+        "_parse_contract_local_date",
+        lambda *args, **kwargs: local_today,
+    )
+
+    observed = wm.get_contract_observed_weather_data(
+        "KXHIGHLAX-30JUN26-T75",
+        contract_name="Will the high temp in LA be >75° on Jun 30, 2026?",
+        strike=75.0,
+    )
+
+    assert observed["source"] == "metar_watermark"
+    assert observed["observed_high"] == 75.0
+    assert observed["observed_low"] == 61.0
+    assert observed["observed_precip"] == 0.18
+
+
+def test_contract_observed_weather_data_backfills_prior_day_from_archive(monkeypatch):
+    import data.kalshi_weather_monitor as wm
+    import pytz
+
+    tz_name = wm.STATIONS["LAX"]["tz"]
+    local_today = datetime.now(pytz.timezone(tz_name)).date()
+    prior_day = local_today - timedelta(days=1)
+
+    monkeypatch.setattr(wm, "get_weather_data", lambda series: {})
+    monkeypatch.setattr(
+        wm,
+        "_parse_contract_local_date",
+        lambda *args, **kwargs: prior_day,
+    )
+    monkeypatch.setattr(
+        wm,
+        "_fetch_observed_daily_summary",
+        lambda city_key, lat, lon, target_date, timezone_name, station=None: {
+            "city_key": city_key,
+            "target_local_date": target_date.isoformat(),
+            "observed_high": 83.0,
+            "observed_low": 67.0,
+            "observed_precip": 0.42,
+            "source": "open_meteo_archive_daily",
+        },
+    )
+
+    observed = wm.get_contract_observed_weather_data(
+        "KXRAINLAX-30JUN26-T1",
+        contract_name="Will rainfall in LA be >1 inch on Jun 30, 2026?",
+        strike=1.0,
+    )
+
+    assert observed["source"] == "open_meteo_archive_daily"
+    assert observed["observed_high"] == 83.0
+    assert observed["observed_low"] == 67.0
+    assert observed["observed_precip"] == 0.42
+
+
+def test_observed_daily_summary_converts_metric_archive_units(monkeypatch):
+    import data.kalshi_weather_monitor as wm
+
+    class _Resp:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "daily": {
+                    "time": ["2026-06-05"],
+                    "temperature_2m_max": [30.0],
+                    "temperature_2m_min": [20.0],
+                    "precipitation_sum": [25.4],
+                }
+            }
+
+    wm._OBSERVED_DAILY_CACHE.clear()
+    monkeypatch.setattr(wm, "_fetch_nws_cli_daily_summary", lambda *args, **kwargs: {})
+    monkeypatch.setattr(wm.requests, "get", lambda *args, **kwargs: _Resp())
+
+    observed = wm._fetch_observed_daily_summary(
+        "LAX",
+        33.94,
+        -118.41,
+        datetime(2026, 6, 5).date(),
+        timezone_name="America/Los_Angeles",
+    )
+
+    assert round(observed["observed_high"], 2) == 86.0
+    assert round(observed["observed_low"], 2) == 68.0
+    assert round(observed["observed_precip"], 4) == 1.0
+
+
+def test_nws_cli_product_text_parses_daily_truth():
+    import data.kalshi_weather_monitor as wm
+
+    parsed = wm._parse_nws_cli_product_text(
+        """
+...THE LOS ANGELES INTL AIRPORT CA CLIMATE SUMMARY FOR JUNE 5 2026...
+
+TEMPERATURE (F)
+ YESTERDAY
+  MAXIMUM         70   4:12 PM
+  MINIMUM         64  10:30 AM
+
+PRECIPITATION (IN)
+  YESTERDAY        T
+
+SNOWFALL (IN)
+  YESTERDAY       MM
+        """,
+        target_date=datetime(2026, 6, 5).date(),
+    )
+
+    assert parsed["observed_high"] == 70.0
+    assert parsed["observed_low"] == 64.0
+    assert parsed["observed_precip"] == 0.001
+
+
+def test_observed_daily_summary_prefers_nws_cli_daily(monkeypatch):
+    import data.kalshi_weather_monitor as wm
+
+    wm._OBSERVED_DAILY_CACHE.clear()
+    monkeypatch.setattr(
+        wm,
+        "_fetch_nws_cli_daily_summary",
+        lambda city_key, station, target_date: {
+            "city_key": city_key,
+            "target_local_date": target_date.isoformat(),
+            "observed_high": 74.0,
+            "observed_low": 59.0,
+            "observed_precip": 0.21,
+            "source": "nws_cli_daily",
+            "cached_at": 123.0,
+        },
+    )
+    monkeypatch.setattr(
+        wm,
+        "_fetch_open_meteo_archive_daily_summary",
+        lambda *args, **kwargs: {
+            "city_key": "LAX",
+            "target_local_date": "2026-06-05",
+            "observed_high": 999.0,
+            "observed_low": 999.0,
+            "observed_precip": 999.0,
+            "source": "open_meteo_archive_daily",
+            "cached_at": 123.0,
+        },
+    )
+
+    observed = wm._fetch_observed_daily_summary(
+        "LAX",
+        33.94,
+        -118.41,
+        datetime(2026, 6, 5).date(),
+        timezone_name="America/Los_Angeles",
+        station=wm.STATIONS["LAX"],
+    )
+
+    assert observed["source"] == "nws_cli_daily"
+    assert observed["observed_high"] == 74.0
+    assert observed["observed_precip"] == 0.21
 
 
 def test_deterministic_fallback_weather_probability_is_continuous():

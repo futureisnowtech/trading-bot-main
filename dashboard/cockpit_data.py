@@ -22,7 +22,7 @@ from config import (
     KALSHI_EXIT_TIME_DECAY_BID_FLOOR,
     KALSHI_EXIT_TIME_DECAY_HOURS,
     KALSHI_FEE_BUFFER,
-    KALSHI_FEE_PER_CONTRACT,
+    KALSHI_TAKER_FEE_RATE,
     KALSHI_HUB_EXPOSURE_MIN_USD,
     KALSHI_HUB_EXPOSURE_PCT,
     KALSHI_KELLY_CAP,
@@ -34,6 +34,8 @@ from config import (
     KALSHI_MAX_USD_PER_POSITION,
     KALSHI_MIN_PRICE,
     KALSHI_SAME_EVENT_FAMILY_CAP,
+    estimate_kalshi_fee_per_contract,
+    estimate_kalshi_order_fee_usd,
     get_kalshi_hub_exposure_cap,
     get_kalshi_position_exposure_usd,
 )
@@ -68,6 +70,10 @@ def _coerce_float(value: Any, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _fee_formula_text() -> str:
+    return f"{KALSHI_TAKER_FEE_RATE:.1%} x price x (1-price)"
 
 
 def _parse_ts(value: Any) -> datetime | None:
@@ -296,7 +302,7 @@ def build_position_row(
         gross_mark_pnl = round((mark - entry_price) * qty, 4)
     if bid is not None:
         entry_fee_usd = _coerce_float(entry_trade.get("fee_usd"))
-        exit_fee_usd = qty * KALSHI_FEE_PER_CONTRACT
+        exit_fee_usd = estimate_kalshi_order_fee_usd(qty, bid)
         exit_pnl_est = round((bid - entry_price) * qty - entry_fee_usd - exit_fee_usd, 4)
 
     return {
@@ -368,7 +374,7 @@ def build_regime_manifest(
         ),
         "entry_math": [
             f"Net EV gate: post-fee EV must exceed {EV_THRESHOLD:.2f}",
-            f"Fixed fee drag: ${KALSHI_FEE_PER_CONTRACT:.2f} per contract with {KALSHI_FEE_BUFFER:.2f} taker friction buffer",
+            f"Exchange fee drag: {_fee_formula_text()} with a ${KALSHI_FEE_BUFFER:.2f} execution buffer",
             f"Sizing: fractional Kelly capped at {KALSHI_KELLY_CAP:.0%}, max risk/event {KALSHI_MAX_RISK_PER_EVENT_PCT:.2%}, hard per-position cap ${KALSHI_MAX_USD_PER_POSITION:.0f}",
         ],
         "entry_gates": [
@@ -410,7 +416,11 @@ def build_metric_explainers(balance_usd: float | None = None) -> dict[str, str]:
         "AI Volatility Adjustment": "GraphCast-style AI does not overrule the forecast direction. It only tells the bot whether confidence should be widened or tightened because the atmosphere looks more or less chaotic.",
         "Safety Gates": "These filters stop trades that look good on paper but fail live economics. Fees, spreads, stale data, and model-vs-market disagreement can all kill a trade here.",
         "Position Sizing": "Even when a trade passes, the bot still sizes it down through bankroll caps. This keeps one good-looking idea from becoming a dangerous oversized bet.",
-        "Net EV Gate": f"A trade must still clear at least {EV_THRESHOLD:.0%} edge after the ${KALSHI_FEE_PER_CONTRACT:.2f} fee and the taker friction buffer. This prevents the bot from buying tiny theoretical edges that disappear in real execution.",
+        "Net EV Gate": (
+            f"A trade must still clear at least {EV_THRESHOLD:.0%} edge after Kalshi's "
+            f"exchange-derived fee curve ({_fee_formula_text()}) and the ${KALSHI_FEE_BUFFER:.2f} "
+            "execution buffer. This prevents the bot from buying tiny theoretical edges that disappear in real fills."
+        ),
         "Fractional Kelly": f"Kelly sizing starts from the math edge, then only uses a fraction of the account. Here it is capped at {KALSHI_KELLY_CAP:.0%}, which keeps conviction from turning into overbetting.",
         "Regional Hub Cap": (
             "No single weather region is allowed to dominate the book. "
@@ -419,7 +429,10 @@ def build_metric_explainers(balance_usd: float | None = None) -> dict[str, str]:
             f"{KALSHI_HUB_EXPOSURE_PCT:.0%} of live cash)."
         ),
         "Max Deployed Capital": f"The engine can only deploy up to {KALSHI_MAX_DEPLOYED_PCT:.0%} of the account at once. That leaves dry powder and prevents the bot from becoming fully invested in mediocre conditions.",
-        "Fee Buffer": f"The system assumes extra friction beyond the fixed ${KALSHI_FEE_PER_CONTRACT:.2f} contract fee. That buffer protects against thin books and keeps the entry math closer to what live fills actually cost.",
+        "Fee Buffer": (
+            f"The system first prices the exchange fee from Kalshi's live fee curve ({_fee_formula_text()}). "
+            f"Then it adds a separate ${KALSHI_FEE_BUFFER:.2f} execution buffer to protect against thin books and slippage."
+        ),
         "Forecast Freshness": f"Weather data older than {KALSHI_DATA_FRESHNESS_MINUTES} minutes is treated as stale. This stops the engine from making decisions off an old atmosphere.",
         "Recent Edge": "This compares the bot's side probability against the price it paid. A bigger gap means the model believed it was buying more outcome probability than the market was charging for.",
         "Confidence": "Confidence is the bot's probability for the side it actually bought, after converting YES/NO correctly. It is the core number behind whether a trade looked cheap or expensive.",
@@ -455,7 +468,7 @@ def build_decision_funnel(
             "label": "Safety Gates",
             "headline": f"Net EV > {EV_THRESHOLD:.0%} After Fees",
             "detail": "Trades get vetoed here if fee drag, spread, stale quotes, or model-vs-market divergence makes the edge unsafe.",
-            "pill": f"Fee ${KALSHI_FEE_PER_CONTRACT:.2f} + buffer ${KALSHI_FEE_BUFFER:.2f}",
+            "pill": f"Fee {_fee_formula_text()} + buffer ${KALSHI_FEE_BUFFER:.2f}",
             "tooltip": explainers["Safety Gates"],
         },
         {
@@ -486,7 +499,10 @@ def build_trade_edge_rows(trades: list[dict[str, Any]]) -> list[dict[str, Any]]:
         side = str(trade.get("contract_side") or "YES").upper()
         yes_prob = _coerce_float(forecast_yes_prob)
         held_confidence = yes_prob if side == "YES" else (1.0 - yes_prob)
-        edge = held_confidence - price
+        edge = held_confidence - price - estimate_kalshi_fee_per_contract(
+            price,
+            rounded=False,
+        )
 
         rows.append(
             {
@@ -497,7 +513,7 @@ def build_trade_edge_rows(trades: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "model_confidence_pct": round(held_confidence * 100.0, 1),
                 "market_price_pct": round(price * 100.0, 1),
                 "edge_pct": round(edge * 100.0, 1),
-                "edge_label": "Model Edge",
+                "edge_label": "Net Edge",
             }
         )
 

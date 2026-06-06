@@ -53,6 +53,84 @@ def test_build_realized_pnl_curve_accumulates_in_time_order():
     assert [point["cumulative_pnl"] for point in curve] == [2.0, 0.5, 3.5]
 
 
+def test_build_open_book_visual_rows_adds_book_heat_fields():
+    from dashboard.cockpit_data import build_open_book_visual_rows
+
+    rows = build_open_book_visual_rows(
+        [
+            {
+                "ticker": "KXHIGHMIA-26JUN06-B87.5",
+                "contract_name": "Miami High 87-88",
+                "side": "NO",
+                "qty": 10,
+                "entry_price": 0.15,
+                "gross_mark_pnl": -0.25,
+                "exit_pnl_est": -0.59,
+                "hub": "FLORIDA",
+                "resolution_at": "2099-06-07T04:59:00Z",
+            },
+            {
+                "ticker": "KXLOWTHOU-26JUN06-B76.5",
+                "contract_name": "Houston Low 76-77",
+                "side": "NO",
+                "qty": 20,
+                "entry_price": 0.16,
+                "gross_mark_pnl": -0.75,
+                "exit_pnl_est": -2.37,
+                "hub": "GULF",
+                "resolution_at": "2099-06-08T04:59:00Z",
+            },
+        ]
+    )
+
+    assert len(rows) == 2
+    assert rows[0]["display_label"] == "NO • KXHIGHMIA-26JUN06-B87.5"
+    assert rows[0]["exposure_usd"] > 0
+    assert rows[0]["hours_to_resolution"] is not None
+    assert rows[0]["resolve_bucket"] in {"0-12h", "12-24h", "24-48h", ">48h"}
+    assert rows[0]["book_weight_pct"] > 0
+    assert round(sum(row["book_weight_pct"] for row in rows), 2) == 100.0
+
+
+def test_summarize_open_book_rolls_up_exposure_and_resolution():
+    from dashboard.cockpit_data import summarize_open_book
+
+    summary = summarize_open_book(
+        [
+            {
+                "ticker": "KXHIGHMIA-26JUN06-B87.5",
+                "contract_name": "Miami High 87-88",
+                "side": "NO",
+                "qty": 10,
+                "entry_price": 0.15,
+                "gross_mark_pnl": -0.25,
+                "exit_pnl_est": -0.59,
+                "hub": "FLORIDA",
+                "resolution_at": "2099-06-07T04:59:00Z",
+            },
+            {
+                "ticker": "KXLOWTHOU-26JUN06-B76.5",
+                "contract_name": "Houston Low 76-77",
+                "side": "NO",
+                "qty": 20,
+                "entry_price": 0.16,
+                "gross_mark_pnl": -0.75,
+                "exit_pnl_est": -2.37,
+                "hub": "GULF",
+                "resolution_at": "2099-06-08T04:59:00Z",
+            },
+        ]
+    )
+
+    assert summary["position_count"] == 2
+    assert summary["contract_count"] == 30
+    assert summary["total_exposure_usd"] > 0
+    assert summary["total_mark_pnl_usd"] == -1.0
+    assert summary["total_exit_pnl_est_usd"] == -2.96
+    assert summary["largest_hub"] in {"FLORIDA", "GULF"}
+    assert summary["nearest_resolution_label"] != "N/A"
+
+
 def test_build_regime_manifest_surfaces_live_constants():
     from dashboard.cockpit_data import build_regime_manifest
 

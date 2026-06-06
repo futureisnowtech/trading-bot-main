@@ -413,6 +413,98 @@ p, li, div, span, label {
   background: rgba(8, 14, 31, 0.72);
 }
 
+.book-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.8rem;
+  margin-bottom: 0.85rem;
+}
+
+.book-card {
+  border-radius: 18px;
+  padding: 0.9rem 0.95rem;
+  background: linear-gradient(180deg, rgba(11, 19, 41, 0.88), rgba(5, 10, 22, 0.95));
+  border: 1px solid rgba(74, 242, 214, 0.12);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+}
+
+.book-card-good { border-left: 4px solid var(--mint); }
+.book-card-warn { border-left: 4px solid var(--amber); }
+.book-card-bad { border-left: 4px solid var(--red); }
+
+.book-card-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
+
+.book-card-title {
+  font-family: "Orbitron", sans-serif;
+  font-size: 0.88rem;
+  color: var(--text);
+}
+
+.book-card-meta {
+  color: var(--muted);
+  font-size: 0.72rem;
+  margin-top: 0.22rem;
+}
+
+.book-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 3.2rem;
+  padding: 0.3rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid rgba(111, 211, 255, 0.22);
+  background: rgba(111, 211, 255, 0.10);
+  color: var(--blue);
+  font-size: 0.72rem;
+}
+
+.book-stat-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+  margin-top: 0.75rem;
+}
+
+.book-stat {
+  border-radius: 14px;
+  padding: 0.55rem 0.65rem;
+  background: rgba(7, 14, 28, 0.78);
+  border: 1px solid rgba(111, 211, 255, 0.10);
+}
+
+.book-stat-label {
+  color: var(--muted);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+}
+
+.book-stat-value {
+  margin-top: 0.2rem;
+  color: var(--text);
+  font-size: 0.86rem;
+}
+
+.book-bar {
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(255,255,255,0.06);
+  margin-top: 0.7rem;
+}
+
+.book-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(74, 242, 214, 0.9), rgba(111, 211, 255, 0.9));
+}
+
 @media (max-width: 1100px) {
   .metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -527,6 +619,217 @@ def _insight_card(title: str, meta: str, body: str, tone: str = "info") -> str:
     """
 
 
+def _fmt_hours(value: float | None) -> str:
+    if value is None:
+        return "N/A"
+    return f"{float(value):.1f}h"
+
+
+def _render_open_book_cards(rows: list[dict]) -> None:
+    if not rows:
+        st.info("No live Kalshi positions are open right now.")
+        return
+
+    ordered_rows = sorted(
+        rows,
+        key=lambda row: (float(row.get("exposure_usd") or 0.0), float(row.get("qty") or 0.0)),
+        reverse=True,
+    )
+    cards: list[str] = []
+    for row in ordered_rows:
+        exit_pnl = float(row.get("exit_pnl_est") or 0.0)
+        tone = "book-card-good" if exit_pnl > 0 else "book-card-warn" if exit_pnl > -0.5 else "book-card-bad"
+        weight = max(8.0, min(100.0, float(row.get("book_weight_pct") or 0.0)))
+        cards.append(
+            f"""
+            <div class="book-card {tone}">
+              <div class="book-card-top">
+                <div>
+                  <div class="book-card-title">{html.escape(str(row.get("ticker") or ""))}</div>
+                  <div class="book-card-meta">{html.escape(str(row.get("contract_short") or ""))}</div>
+                </div>
+                <div class="book-chip">{html.escape(str(row.get("side") or ""))}</div>
+              </div>
+              <div class="book-stat-row">
+                <div class="book-stat">
+                  <div class="book-stat-label">Exposure</div>
+                  <div class="book-stat-value">{html.escape(_fmt_money(row.get("exposure_usd")))}</div>
+                </div>
+                <div class="book-stat">
+                  <div class="book-stat-label">Mark P&L</div>
+                  <div class="book-stat-value">{html.escape(_fmt_money(row.get("gross_mark_pnl")))}</div>
+                </div>
+                <div class="book-stat">
+                  <div class="book-stat-label">Exit P&L</div>
+                  <div class="book-stat-value">{html.escape(_fmt_money(row.get("exit_pnl_est")))}</div>
+                </div>
+                <div class="book-stat">
+                  <div class="book-stat-label">Resolves</div>
+                  <div class="book-stat-value">{html.escape(_fmt_hours(row.get("hours_to_resolution")))}</div>
+                </div>
+              </div>
+              <div class="book-card-meta" style="margin-top:0.7rem;">
+                {html.escape(str(row.get("hub") or "UNKNOWN"))} hub • {html.escape(str(int(float(row.get("qty") or 0.0))))} contracts • {html.escape(str(row.get("state_label") or ""))}
+              </div>
+              <div class="book-bar"><div class="book-fill" style="width:{weight:.2f}%"></div></div>
+              <div class="book-card-meta" style="margin-top:0.45rem;">{weight:.1f}% of live book exposure</div>
+            </div>
+            """
+        )
+
+    _render_html('<div class="book-grid">' + "".join(cards) + "</div>")
+
+
+def _render_open_book_heatmap(rows: list[dict]) -> None:
+    if not rows:
+        st.info("No live Kalshi positions are open right now.")
+        return
+
+    book_df = pd.DataFrame(rows)
+    long_rows: list[dict] = []
+    for row in rows:
+        for label, value in [
+            ("Book Weight %", row.get("book_weight_pct")),
+            ("Mark % on Risk", row.get("mark_pnl_pct_on_risk")),
+            ("Exit % on Risk", row.get("exit_pnl_pct_on_risk")),
+        ]:
+            if value is None:
+                continue
+            long_rows.append(
+                {
+                    "display_label": row.get("display_label"),
+                    "ticker": row.get("ticker"),
+                    "contract_short": row.get("contract_short"),
+                    "hub": row.get("hub"),
+                    "side": row.get("side"),
+                    "metric_label": label,
+                    "metric_value": float(value),
+                    "exposure_usd": float(row.get("exposure_usd") or 0.0),
+                    "gross_mark_pnl": float(row.get("gross_mark_pnl") or 0.0),
+                    "exit_pnl_est": float(row.get("exit_pnl_est") or 0.0),
+                    "hours_to_resolution": row.get("hours_to_resolution"),
+                }
+            )
+
+    if not long_rows:
+        st.info("Open positions do not yet have enough price data for a heat map.")
+        return
+
+    long_df = pd.DataFrame(long_rows)
+    display_order = (
+        book_df.sort_values(["exposure_usd", "exit_pnl_est"], ascending=[False, True])["display_label"]
+        .drop_duplicates()
+        .tolist()
+    )
+    metric_order = ["Book Weight %", "Mark % on Risk", "Exit % on Risk"]
+
+    heat = (
+        alt.Chart(long_df)
+        .mark_rect(cornerRadius=8)
+        .encode(
+            x=alt.X("metric_label:N", sort=metric_order, title=None),
+            y=alt.Y("display_label:N", sort=display_order, title=None),
+            color=alt.Color(
+                "metric_value:Q",
+                title="Percent",
+                scale=alt.Scale(domainMid=0, range=["#ff6b88", "#15243d", "#8cffb2"]),
+            ),
+            tooltip=[
+                alt.Tooltip("ticker:N", title="Ticker"),
+                alt.Tooltip("contract_short:N", title="Contract"),
+                alt.Tooltip("hub:N", title="Hub"),
+                alt.Tooltip("side:N", title="Side"),
+                alt.Tooltip("metric_label:N", title="Metric"),
+                alt.Tooltip("metric_value:Q", title="Percent", format=".2f"),
+                alt.Tooltip("exposure_usd:Q", title="Exposure", format=".2f"),
+                alt.Tooltip("gross_mark_pnl:Q", title="Mark P&L", format=".2f"),
+                alt.Tooltip("exit_pnl_est:Q", title="Exit P&L", format=".2f"),
+                alt.Tooltip("hours_to_resolution:Q", title="Hours Left", format=".1f"),
+            ],
+        )
+    )
+    text = heat.mark_text(color="#eaf6ff", fontSize=11).encode(
+        text=alt.Text("metric_value:Q", format=".1f")
+    )
+    chart = (
+        (heat + text)
+        .properties(height=max(240, len(display_order) * 40))
+        .configure_view(strokeOpacity=0)
+        .configure_axis(
+            labelColor="#eaf6ff",
+            titleColor="#91a3c2",
+            gridColor="rgba(145,163,194,0.18)",
+            domainColor="rgba(145,163,194,0.12)",
+            tickColor="rgba(145,163,194,0.12)",
+        )
+        .configure_legend(labelColor="#eaf6ff", titleColor="#91a3c2")
+    )
+    st.altair_chart(chart, width="stretch")
+
+
+def _render_open_book_expiry_chart(rows: list[dict]) -> None:
+    if not rows:
+        st.info("No live Kalshi positions are open right now.")
+        return
+
+    df = pd.DataFrame(rows)
+    df = df[df["hours_to_resolution"].notna()].copy()
+    if df.empty:
+        st.info("No open positions currently have a valid resolution timestamp.")
+        return
+
+    chart = (
+        alt.Chart(df)
+        .mark_circle(opacity=0.88, stroke="#eaf6ff", strokeWidth=0.7)
+        .encode(
+            x=alt.X(
+                "hours_to_resolution:Q",
+                title="Hours To Resolution",
+                axis=alt.Axis(grid=True, tickCount=6),
+            ),
+            y=alt.Y(
+                "exit_pnl_est:Q",
+                title="Estimated Exit P&L ($)",
+                axis=alt.Axis(grid=True),
+            ),
+            size=alt.Size(
+                "exposure_usd:Q",
+                title="Exposure",
+                scale=alt.Scale(range=[140, 2200]),
+            ),
+            color=alt.Color("hub:N", title="Hub"),
+            shape=alt.Shape("side:N", title="Side"),
+            tooltip=[
+                alt.Tooltip("ticker:N", title="Ticker"),
+                alt.Tooltip("contract_short:N", title="Contract"),
+                alt.Tooltip("hub:N", title="Hub"),
+                alt.Tooltip("side:N", title="Side"),
+                alt.Tooltip("exposure_usd:Q", title="Exposure", format=".2f"),
+                alt.Tooltip("gross_mark_pnl:Q", title="Mark P&L", format=".2f"),
+                alt.Tooltip("exit_pnl_est:Q", title="Exit P&L", format=".2f"),
+                alt.Tooltip("hours_to_resolution:Q", title="Hours Left", format=".1f"),
+                alt.Tooltip("book_weight_pct:Q", title="Book Weight %", format=".1f"),
+            ],
+        )
+        .properties(height=340)
+        .configure_view(strokeOpacity=0)
+        .configure_axis(
+            labelColor="#eaf6ff",
+            titleColor="#91a3c2",
+            gridColor="rgba(145,163,194,0.18)",
+            domainColor="rgba(145,163,194,0.12)",
+            tickColor="rgba(145,163,194,0.12)",
+        )
+        .configure_legend(labelColor="#eaf6ff", titleColor="#91a3c2")
+    )
+
+    zero_rule = alt.Chart(pd.DataFrame({"y": [0]})).mark_rule(
+        color="rgba(255,255,255,0.24)",
+        strokeDash=[6, 4],
+    ).encode(y="y:Q")
+    st.altair_chart((chart + zero_rule), width="stretch")
+
+
 def _funnel_stage_card(stage: dict) -> str:
     return f"""
     <div class="stage-card">
@@ -603,7 +906,7 @@ def _render_trade_edge_chart(rows: list[dict]) -> None:
         )
         .configure_legend(labelColor="#eaf6ff", titleColor="#91a3c2")
     )
-    st.altair_chart(chart, use_container_width=True)
+    st.altair_chart(chart, width="stretch")
 
 
 _render_html(_CSS)
@@ -627,6 +930,8 @@ regime = payload["regime"]
 deploy = payload["deploy"]
 positions_live = payload["positions_live"]
 positions_db_only = payload["positions_db_only"]
+open_book_visual = payload["open_book_visual"]
+open_book_summary = payload["open_book_summary"]
 recent_trades = payload["recent_trades"]
 trade_edge_rows = payload["trade_edge_rows"]
 recent_events = payload["recent_events"]
@@ -717,35 +1022,100 @@ with top_left:
     with st.container(border=False):
         rows = positions_live or positions_db_only
         if rows:
-            pos_df = pd.DataFrame(rows)
-            pos_df = pos_df[
-                [
-                    "ticker",
-                    "contract_name",
-                    "side",
-                    "qty",
-                    "entry_price",
-                    "bid",
-                    "ask",
-                    "mark",
-                    "gross_mark_pnl",
-                    "exit_pnl_est",
-                    "hub",
-                    "state_label",
-                    "resolution_at",
-                ]
-            ].rename(
-                columns={
-                    "contract_name": "contract",
-                    "entry_price": "entry",
-                    "gross_mark_pnl": "mark_pnl",
-                    "exit_pnl_est": "exit_pnl_est",
-                    "resolution_at": "resolves",
-                    "state_label": "state",
-                }
+            _render_html(
+                '<div class="mini-grid">'
+                + _mini_card(
+                    "Book Exposure",
+                    _fmt_money(open_book_summary.get("total_exposure_usd")),
+                    f"{open_book_summary.get('position_count')} live positions",
+                    metric_explainers.get("Book Exposure"),
+                )
+                + _mini_card(
+                    "Live Mark P&L",
+                    _fmt_money(open_book_summary.get("total_mark_pnl_usd")),
+                    "midpoint mark across the book",
+                    metric_explainers.get("Live Mark P&L"),
+                )
+                + _mini_card(
+                    "Emergency Exit P&L",
+                    _fmt_money(open_book_summary.get("total_exit_pnl_est_usd")),
+                    "flatten now at the live bid",
+                    metric_explainers.get("Emergency Exit P&L"),
+                )
+                + "</div>"
             )
-            st.dataframe(pos_df, width="stretch", hide_index=True)
-            st.caption("`mark_pnl` uses current side midpoint. `exit_pnl_est` is a bid-side liquidation estimate with exit fee and any recorded entry fee.")
+            _render_html(
+                '<div class="mini-grid">'
+                + _mini_card(
+                    "Nearest Resolution",
+                    str(open_book_summary.get("nearest_resolution_label") or "N/A"),
+                    "soonest contract to settle",
+                    metric_explainers.get("Nearest Resolution"),
+                )
+                + _mini_card(
+                    "Dominant Hub",
+                    str(open_book_summary.get("largest_hub") or "N/A"),
+                    _fmt_money(open_book_summary.get("largest_hub_exposure_usd")),
+                    metric_explainers.get("Regional Hub Cap"),
+                )
+                + _mini_card(
+                    "Largest Line",
+                    str(open_book_summary.get("largest_position_ticker") or "N/A"),
+                    _fmt_money(open_book_summary.get("largest_position_exposure_usd")),
+                    metric_explainers.get("Open Positions"),
+                )
+                + "</div>"
+            )
+
+            card_tab, heat_tab, expiry_tab, raw_tab = st.tabs(
+                ["Position Cards", "Heat Map", "Expiry Pressure", "Raw Table"]
+            )
+
+            with card_tab:
+                _render_open_book_cards(open_book_visual)
+
+            with heat_tab:
+                _render_open_book_heatmap(open_book_visual)
+                st.caption(
+                    "Heat cells show book weight plus mark-to-market and emergency-exit pressure as percentages of capital at risk."
+                )
+
+            with expiry_tab:
+                _render_open_book_expiry_chart(open_book_visual)
+                st.caption(
+                    "Bigger circles mean more capital committed. Points below zero are positions that would likely lose money if flattened right now."
+                )
+
+            with raw_tab:
+                pos_df = pd.DataFrame(rows)
+                pos_df = pos_df[
+                    [
+                        "ticker",
+                        "contract_name",
+                        "side",
+                        "qty",
+                        "entry_price",
+                        "bid",
+                        "ask",
+                        "mark",
+                        "gross_mark_pnl",
+                        "exit_pnl_est",
+                        "hub",
+                        "state_label",
+                        "resolution_at",
+                    ]
+                ].rename(
+                    columns={
+                        "contract_name": "contract",
+                        "entry_price": "entry",
+                        "gross_mark_pnl": "mark_pnl",
+                        "exit_pnl_est": "exit_pnl_est",
+                        "resolution_at": "resolves",
+                        "state_label": "state",
+                    }
+                )
+                st.dataframe(pos_df, width="stretch", hide_index=True)
+                st.caption("`mark_pnl` uses current side midpoint. `exit_pnl_est` is a bid-side liquidation estimate with exit fee and any recorded entry fee.")
         else:
             st.info("No live Kalshi positions are open right now.")
 

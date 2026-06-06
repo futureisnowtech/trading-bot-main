@@ -342,6 +342,129 @@ def summarize_hub_exposure(position_rows: list[dict[str, Any]]) -> list[dict[str
     ]
 
 
+def build_open_book_visual_rows(position_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    now = datetime.now(timezone.utc)
+    visual_rows: list[dict[str, Any]] = []
+    total_exposure = 0.0
+
+    for row in position_rows:
+        qty = _coerce_float(row.get("qty"))
+        entry_price = _coerce_float(row.get("entry_price"))
+        exposure_usd = get_kalshi_position_exposure_usd(qty, entry_price)
+        total_exposure += exposure_usd
+
+        resolution_dt = _parse_ts(row.get("resolution_at"))
+        hours_to_resolution = None
+        if resolution_dt is not None:
+            hours_to_resolution = round(
+                max(0.0, (resolution_dt - now).total_seconds()) / 3600.0,
+                2,
+            )
+
+        contract_name = str(row.get("contract_name") or row.get("ticker") or "")
+        visual_rows.append(
+            {
+                **row,
+                "contract_short": (
+                    contract_name
+                    if len(contract_name) <= 64
+                    else f"{contract_name[:61]}..."
+                ),
+                "display_label": f"{row.get('side') or 'UNK'} • {row.get('ticker') or ''}",
+                "exposure_usd": round(exposure_usd, 4),
+                "mark_pnl_pct_on_risk": round(
+                    (_coerce_float(row.get("gross_mark_pnl")) / exposure_usd) * 100.0,
+                    2,
+                )
+                if exposure_usd > 0 and row.get("gross_mark_pnl") is not None
+                else None,
+                "exit_pnl_pct_on_risk": round(
+                    (_coerce_float(row.get("exit_pnl_est")) / exposure_usd) * 100.0,
+                    2,
+                )
+                if exposure_usd > 0 and row.get("exit_pnl_est") is not None
+                else None,
+                "hours_to_resolution": hours_to_resolution,
+                "resolve_bucket": (
+                    "0-12h"
+                    if hours_to_resolution is not None and hours_to_resolution <= 12
+                    else "12-24h"
+                    if hours_to_resolution is not None and hours_to_resolution <= 24
+                    else "24-48h"
+                    if hours_to_resolution is not None and hours_to_resolution <= 48
+                    else ">48h"
+                    if hours_to_resolution is not None
+                    else "unknown"
+                ),
+                "resolution_label": _dt_text(row.get("resolution_at")),
+            }
+        )
+
+    for row in visual_rows:
+        exposure_usd = _coerce_float(row.get("exposure_usd"))
+        row["book_weight_pct"] = (
+            round((exposure_usd / total_exposure) * 100.0, 2)
+            if total_exposure > 0
+            else 0.0
+        )
+
+    return visual_rows
+
+
+def summarize_open_book(position_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    visual_rows = build_open_book_visual_rows(position_rows)
+    if not visual_rows:
+        return {
+            "position_count": 0,
+            "contract_count": 0,
+            "total_exposure_usd": 0.0,
+            "total_mark_pnl_usd": 0.0,
+            "total_exit_pnl_est_usd": 0.0,
+            "largest_hub": "",
+            "largest_hub_exposure_usd": 0.0,
+            "nearest_resolution_label": "N/A",
+            "largest_position_ticker": "",
+            "largest_position_exposure_usd": 0.0,
+        }
+
+    hub_rows = summarize_hub_exposure(visual_rows)
+    nearest = min(
+        visual_rows,
+        key=lambda row: (
+            10**9 if row.get("hours_to_resolution") is None else row["hours_to_resolution"]
+        ),
+    )
+    largest = max(visual_rows, key=lambda row: _coerce_float(row.get("exposure_usd")))
+
+    return {
+        "position_count": len(visual_rows),
+        "contract_count": int(sum(_coerce_float(row.get("qty")) for row in visual_rows)),
+        "total_exposure_usd": round(
+            sum(_coerce_float(row.get("exposure_usd")) for row in visual_rows),
+            4,
+        ),
+        "total_mark_pnl_usd": round(
+            sum(_coerce_float(row.get("gross_mark_pnl")) for row in visual_rows),
+            4,
+        ),
+        "total_exit_pnl_est_usd": round(
+            sum(_coerce_float(row.get("exit_pnl_est")) for row in visual_rows),
+            4,
+        ),
+        "largest_hub": str((hub_rows[0] if hub_rows else {}).get("hub") or ""),
+        "largest_hub_exposure_usd": round(
+            _coerce_float((hub_rows[0] if hub_rows else {}).get("exposure_usd")),
+            4,
+        ),
+        "nearest_resolution_label": str(nearest.get("resolution_label") or "N/A"),
+        "largest_position_ticker": str(largest.get("ticker") or ""),
+        "largest_position_exposure_usd": round(
+            _coerce_float(largest.get("exposure_usd")),
+            4,
+        ),
+    }
+
+
 def build_realized_pnl_curve(trades: list[dict[str, Any]]) -> list[dict[str, Any]]:
     running = 0.0
     points: list[dict[str, Any]] = []
@@ -411,6 +534,10 @@ def build_metric_explainers(balance_usd: float | None = None) -> dict[str, str]:
         "Release Gate": "This is the final production-readiness verdict. It stays blocked until the proof checks, runtime health, live provider checks, and droplet deployment truth all agree the engine is safe to place fresh entries.",
         "Drift": "Drift means the broker and the local SQLite ledger disagree. This matters because we operate broker-first, so drift is a warning that the local story may be stale or incomplete.",
         "Realized P&L": "This is closed-trade profit and loss already locked in. It excludes open-position swings so you can separate booked outcomes from temporary mark changes.",
+        "Book Exposure": "This is the fee-aware dollar amount currently committed across all live positions. It is the real capital at risk in the open book, not just the number of contracts.",
+        "Live Mark P&L": "This marks each live position to the current midpoint quote on the side we actually hold. It is a useful pulse check, but it is not a guaranteed exit result.",
+        "Emergency Exit P&L": "This estimates what the book would look like if we tried to flatten at the live bid right now after fees. It is the harsher, more realistic liquidation view.",
+        "Nearest Resolution": "This shows which open trade settles soonest. Near-expiry trades deserve extra attention because weather certainty and liquidity can change quickly into settlement.",
         "Data Ingestion": "The engine starts by blending the two main weather ensembles. That keeps us from overreacting to one model run and gives the bot a more stable starting forecast.",
         "Adaptive Blend": "The learner watches resolved weather contracts and can tilt the GFS/ECMWF mix away from the default 60/40 split when one model has been proving more accurate lately. This makes the engine adaptive without turning it into a black box.",
         "AI Volatility Adjustment": "GraphCast-style AI does not overrule the forecast direction. It only tells the bot whether confidence should be widened or tightened because the atmosphere looks more or less chaotic.",
@@ -850,6 +977,8 @@ def get_cockpit_payload(*, live_sync: bool = True) -> dict[str, Any]:
         "release_status": release_status,
         "positions_live": live_rows,
         "positions_db_only": drift_rows,
+        "open_book_visual": build_open_book_visual_rows(live_rows or drift_rows),
+        "open_book_summary": summarize_open_book(live_rows or drift_rows),
         "hub_exposure": summarize_hub_exposure(live_rows or drift_rows),
         "recent_trades": recent_trades,
         "trade_edge_rows": trade_edge_rows,

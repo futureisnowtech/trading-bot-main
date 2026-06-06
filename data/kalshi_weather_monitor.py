@@ -27,6 +27,7 @@ logger = logging.getLogger("weather_monitor")
 # O(1) read access for the strategy engine
 _WEATHER_SHADOW_STATE: Dict[str, Any] = {}
 WEATHER_STATE_TTL_SEC = 21600
+WEATHER_REFRESH_TARGET_SEC = 9900
 _STATE_LOCK = threading.Lock()
 _MONITOR_LOCK = threading.Lock()
 _MONITOR_THREAD: Optional[threading.Thread] = None
@@ -50,6 +51,7 @@ WEATHER_ENSEMBLE_MODEL_PAUSE_SEC = 0.75
 try:
     from config import (
         DB_PATH as _DB_PATH,
+        KALSHI_DATA_FRESHNESS_MINUTES as _CFG_KALSHI_DATA_FRESHNESS_MINUTES,
         WEATHER_ACTIVE_CITY_REFRESH_SEC as _CFG_ACTIVE_CITY_REFRESH_SEC,
         WEATHER_ENSEMBLE_COOLDOWN_SEC as _CFG_ENSEMBLE_COOLDOWN_SEC,
         WEATHER_ENSEMBLE_MODEL_PAUSE_SEC as _CFG_ENSEMBLE_MODEL_PAUSE_SEC,
@@ -57,6 +59,8 @@ try:
 
     _WATERMARKS_FILE = os.path.join(os.path.dirname(_DB_PATH), "weather_watermarks.json")
     _WEATHER_SNAPSHOT_FILE = os.path.join(os.path.dirname(_DB_PATH), "weather_snapshot.json")
+    WEATHER_STATE_TTL_SEC = max(300, int(float(_CFG_KALSHI_DATA_FRESHNESS_MINUTES) * 60))
+    WEATHER_REFRESH_TARGET_SEC = max(300, WEATHER_STATE_TTL_SEC - 900)
     WEATHER_ACTIVE_CITY_REFRESH_SEC = int(_CFG_ACTIVE_CITY_REFRESH_SEC)
     WEATHER_ENSEMBLE_COOLDOWN_SEC = int(_CFG_ENSEMBLE_COOLDOWN_SEC)
     WEATHER_ENSEMBLE_MODEL_PAUSE_SEC = float(_CFG_ENSEMBLE_MODEL_PAUSE_SEC)
@@ -170,7 +174,7 @@ async def fetch_metar_observation(icao: str) -> Dict[str, Any]:
 
 # ── Cache ───────────────────────────────────────────────────────────────────
 _COORDINATE_CACHE: Dict[str, Dict[str, Any]] = {}
-CACHE_EXPIRY_SEC = WEATHER_STATE_TTL_SEC  # 6 hours (weather ensembles are slow-moving)
+CACHE_EXPIRY_SEC = WEATHER_REFRESH_TARGET_SEC
 _OBSERVED_DAILY_CACHE: Dict[str, Dict[str, Any]] = {}
 OBSERVED_DAILY_CACHE_TTL_SEC = 6 * 3600
 
@@ -1590,7 +1594,7 @@ def ensure_weather_data(
     tickers_or_series: list[str],
     *,
     include_intraday: bool = True,
-    max_age_sec: int = WEATHER_STATE_TTL_SEC,
+    max_age_sec: int = WEATHER_REFRESH_TARGET_SEC,
 ) -> Dict[str, Any]:
     """Backfill only the missing or stale weather series needed by the current cycle."""
     needed_series = {
@@ -1678,7 +1682,7 @@ async def update_weather_shadow_state():
                     )
             except Exception as e:
                 logger.error(f"Ensemble sync failure: {e}")
-            await asyncio.sleep(10800)
+            await asyncio.sleep(WEATHER_REFRESH_TARGET_SEC)
 
     # ── Cycle 2: Fast Intraday Precinct (15 Minutes) ───────────────────────
     async def run_intraday_sync():

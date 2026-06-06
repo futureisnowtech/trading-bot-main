@@ -508,6 +508,83 @@ def test_ensure_weather_data_uses_shared_snapshot_before_fetch(tmp_path, monkeyp
     assert summary["snapshot_loaded"] == 1
 
 
+def test_ensure_weather_data_refreshes_snapshot_before_entry_gate_if_weather_is_aging(
+    tmp_path,
+    monkeypatch,
+):
+    import json
+    import data.kalshi_weather_monitor as wm
+
+    snapshot_path = tmp_path / "weather_snapshot.json"
+    wm._WEATHER_SHADOW_STATE.clear()
+    wm._LAST_SNAPSHOT_MTIME = 0.0
+    monkeypatch.setattr(wm, "_WEATHER_SNAPSHOT_FILE", str(snapshot_path), raising=False)
+
+    stale_ts = datetime.now(timezone.utc).timestamp() - float(wm.WEATHER_REFRESH_TARGET_SEC + 60)
+    snapshot_path.write_text(
+        json.dumps(
+            {
+                "written_at": stale_ts,
+                "series_count": 1,
+                "state": {
+                    "KXHIGHNY": {
+                        "members_high": [76.0] * 31,
+                        "timestamp": stale_ts,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    async def fake_fetch_open_meteo_ensemble(city_key, lat, lon):
+        return {
+            "members_high": [80.0] * 31,
+            "members_low": [65.0] * 31,
+            "members_precip": [0.01] * 31,
+            "mean_high": 80.0,
+            "sigma_high": 1.2,
+            "mean_low": 65.0,
+            "sigma_low": 1.1,
+            "mean_precip": 0.01,
+            "sigma_precip": 0.02,
+            "peak_tcdc": 10.0,
+            "timestamp": datetime.now(timezone.utc).timestamp(),
+            "provider_mode": "ensemble_members",
+            "forecast_source": "open_meteo_ensemble",
+            "ecmwf": None,
+            "aigefs": None,
+        }
+
+    async def fake_fetch_metar_observation(icao):
+        return {}
+
+    async def fake_fetch_hrrr_forecast(city_key, lat, lon):
+        return {}
+
+    monkeypatch.setattr(wm, "fetch_open_meteo_ensemble", fake_fetch_open_meteo_ensemble)
+    monkeypatch.setattr(wm, "fetch_metar_observation", fake_fetch_metar_observation)
+    monkeypatch.setattr(wm, "fetch_hrrr_forecast", fake_fetch_hrrr_forecast)
+
+    summary = wm.ensure_weather_data(["KXHIGHNY-30JUN26-T75"], include_intraday=False)
+
+    assert summary["refreshed_series"] == 1
+    assert wm.get_weather_data("KXHIGHNY-30JUN26-T75")["mean_high"] == 80.0
+
+
+def test_cached_ensemble_record_expires_on_refresh_target_window():
+    import data.kalshi_weather_monitor as wm
+
+    wm._COORDINATE_CACHE.clear()
+    wm._COORDINATE_CACHE["40.78_-73.97"] = {
+        "timestamp": datetime.now(timezone.utc).timestamp()
+        - float(wm.WEATHER_REFRESH_TARGET_SEC + 60),
+        "mean_high": 76.0,
+    }
+
+    assert wm._cached_ensemble_record("40.78_-73.97") == {}
+
+
 def test_weather_market_snapshots_skip_bar_loading():
     from forecast.market_snapshot import build_market_snapshots
 

@@ -22,6 +22,7 @@ def test_build_position_row_uses_side_specific_no_quotes():
     assert row["mark"] == 0.55
     assert row["gross_mark_pnl"] == 1.4
     assert row["exit_pnl_est"] == 0.32
+    assert row["weather_bucket"] == "Daily High"
 
 
 def test_summarize_hub_exposure_groups_city_hubs():
@@ -181,6 +182,53 @@ def test_metric_explainers_surface_new_hub_cap_formula():
     assert "max($40" in explainers["Regional Hub Cap"]
     assert "30% of live cash" in explainers["Regional Hub Cap"]
     assert "7.0% x price x (1-price)" in explainers["Fee Buffer"]
+
+
+def test_build_weather_type_boards_groups_open_book_by_lane():
+    from dashboard.cockpit_data import build_weather_type_boards
+
+    boards = build_weather_type_boards(
+        [
+            {
+                "ticker": "KXHIGHMIA-26JUN06-B87.5",
+                "contract_name": "Miami High 87-88",
+                "side": "NO",
+                "qty": 10,
+                "entry_price": 0.15,
+                "gross_mark_pnl": -0.25,
+                "exit_pnl_est": -0.59,
+                "hub": "FLORIDA",
+                "resolution_at": "2099-06-07T04:59:00Z",
+            },
+            {
+                "ticker": "KXRAINNYC-26JUN06-T0",
+                "contract_name": "Will it rain in New York City on Saturday?",
+                "side": "YES",
+                "qty": 8,
+                "entry_price": 0.42,
+                "gross_mark_pnl": 0.10,
+                "exit_pnl_est": -0.12,
+                "hub": "NORTHEAST",
+                "resolution_at": "2099-06-07T04:59:00Z",
+            },
+            {
+                "ticker": "KXTEMPNYCH-26JUN0522-T75.99",
+                "contract_name": "Will the temp in New York City be above 75.99° on Jun 5, 2026 at 10pm EDT?",
+                "side": "YES",
+                "qty": 5,
+                "entry_price": 0.21,
+                "gross_mark_pnl": 0.05,
+                "exit_pnl_est": -0.08,
+                "hub": "NORTHEAST",
+                "resolution_at": "2099-06-06T02:00:00Z",
+            },
+        ]
+    )
+
+    by_bucket = {board["bucket"]: board for board in boards}
+    assert by_bucket["Daily High"]["position_count"] == 1
+    assert by_bucket["Rain"]["position_count"] == 1
+    assert by_bucket["Hourly Temp"]["position_count"] == 1
 
 
 def test_build_trade_edge_rows_handles_yes_and_no_side_buys():

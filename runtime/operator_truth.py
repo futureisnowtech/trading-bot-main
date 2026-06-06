@@ -368,8 +368,13 @@ def get_weather_learning_status(*, db_path: str = DB_PATH) -> dict:
 
 
 def _is_weather_ticker(ticker: str) -> bool:
-    token = str(ticker or "").upper()
-    return any(prefix in token for prefix in ("KXHIGH", "KXLOW", "KXRAIN"))
+    try:
+        from forecast.weather_contracts import weather_mode_for_ticker
+
+        return weather_mode_for_ticker(str(ticker or "")) is not None
+    except Exception:
+        token = str(ticker or "").upper()
+        return any(prefix in token for prefix in ("KXHIGH", "KXLOW", "KXRAIN", "KXTEMP"))
 
 
 def _sample_weather_contracts(active_contracts: list[dict], *, limit: int) -> list[dict]:

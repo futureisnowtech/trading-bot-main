@@ -175,11 +175,11 @@ def _get_macro_context() -> dict:
 # Group cities into hubs to manage regional weather system covariance.
 # 31-City Sovereign Universe
 REGIONAL_HUBS = {
-    "MIDWEST": ["CHI", "MSP", "MKE", "OMA", "STL", "DET", "MCI", "OKC"],
-    "NORTHEAST": ["NYC", "NY", "BOS", "PHL", "DC"],
+    "MIDWEST": ["CHI", "MSP", "MIN", "MKE", "OMA", "STL", "DET", "MCI", "OKC"],
+    "NORTHEAST": ["NYC", "NY", "BOS", "PHL", "PHIL", "DC"],
     "SOUTH": ["ATL", "CLT", "RDU", "BNA", "CHS"],
     "FLORIDA": ["MIA", "MCO"],
-    "GULF": ["HOU", "AUS", "DAL", "SAT", "MSY"],
+    "GULF": ["HOU", "AUS", "DAL", "SAT", "SATX", "MSY", "NOLA"],
     "MOUNTAIN": ["DEN", "SLC", "ABQ"],
     "WEST": ["LAX", "SFO", "SF", "PHX", "SEA", "PDX", "LV"],
 }
@@ -816,6 +816,8 @@ def _extract_weather_model_members(
 ) -> tuple[list[float], list[float]]:
     if mode in ["RAIN", "SNOW", "WIND"]:
         key = "members_precip" if mode != "WIND" else "members_wind"
+    elif mode == "TEMP":
+        key = "members_temp"
     else:
         key = "members_high" if mode == "HIGH" else "members_low"
 
@@ -868,6 +870,9 @@ def _probability_from_weather_record(
         elif semantics.mode == "LOW":
             mean_value = weather_record.get("mean_low")
             sigma_value = weather_record.get("sigma_low")
+        elif semantics.mode == "TEMP":
+            mean_value = weather_record.get("mean_temp")
+            sigma_value = weather_record.get("sigma_temp")
         else:
             mean_value = weather_record.get("mean_high")
             sigma_value = weather_record.get("sigma_high")
@@ -882,6 +887,8 @@ def _probability_from_weather_record(
 
     if semantics.mode in ["RAIN", "SNOW", "WIND"]:
         key = "members_precip" if semantics.mode != "WIND" else "members_wind"
+    elif semantics.mode == "TEMP":
+        key = "members_temp"
     else:
         key = "members_high" if semantics.mode == "HIGH" else "members_low"
 
@@ -1125,6 +1132,8 @@ def _strategy_weather_details(
     if aigefs_data:
         if mode in ["RAIN", "SNOW", "WIND"]:
             members_ai = aigefs_data.get("members_precip" if mode != "WIND" else "members_wind", [])
+        elif mode == "TEMP":
+            members_ai = aigefs_data.get("members_temp", [])
         else:
             members_ai = aigefs_data.get("members_high" if mode == "HIGH" else "members_low", [])
             
@@ -1177,6 +1186,8 @@ def _strategy_weather_details(
     # v19.8: AI Multiplier now inflates/deflates Sigma directly
     if mode in {"RAIN", "SNOW"}:
         sigma_raw = w_data.get("sigma_precip", w_data.get("sigma_low", 2.0))
+    elif mode == "TEMP":
+        sigma_raw = w_data.get("sigma_temp", w_data.get("sigma_high", 2.0))
     elif mode == "HIGH":
         sigma_raw = w_data.get("sigma_high", 2.0)
     else:
@@ -2024,7 +2035,7 @@ def evaluate_market_snapshots(
         bars_1h = snapshot.bars_1h
         bars_4h = snapshot.bars_4h
 
-        is_weather = "KXHIGH" in ticker or "KXLOW" in ticker or "KXRAIN" in ticker
+        is_weather = _is_weather_ticker(ticker)
         if not is_weather and not bars_5m:
             continue
 

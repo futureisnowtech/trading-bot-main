@@ -42,6 +42,7 @@ _ACTIVE_CITY_SCOPE_CACHE: Dict[str, Any] = {"timestamp": 0.0, "city_keys": []}
 _ENSEMBLE_FETCH_STATE: Dict[str, Dict[str, Any]] = {}
 _ENSEMBLE_GLOBAL_RATE_LIMIT: Dict[str, Any] = {"until": 0.0, "reason": "", "logged_at": 0.0}
 _PROVIDER_NOTICES_EMITTED: set[str] = set()
+_OBSERVED_HOURLY_CACHE: Dict[str, Dict[str, Any]] = {}
 WEATHER_ACTIVE_CITY_REFRESH_SEC = 300
 WEATHER_ENSEMBLE_COOLDOWN_SEC = 1200
 WEATHER_ENSEMBLE_MODEL_PAUSE_SEC = 0.75
@@ -65,31 +66,43 @@ except Exception:
 
 # Kalshi Station Mappings (Lat/Lon)
 # Refined v19.1.10: Official ASOS Settlement Stations
+def _series(*tokens: str) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for token in tokens:
+        value = str(token or "").strip().upper()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        ordered.append(value)
+    return ordered
+
+
 STATIONS = {
-    "NY": {"lat": 40.78, "lon": -73.97, "icao": "KNYC", "name": "New York (Central Park)", "tz": "America/New_York", "series": ["KXHIGHNY", "KXLOWNY", "KXRAINNY"]},
-    "CHI": {"lat": 41.78, "lon": -87.75, "icao": "KMDW", "name": "Chicago (Midway)", "tz": "America/Chicago", "series": ["KXHIGHCHI", "KXLOWCHI", "KXRAINCHI"]},
-    "MIA": {"lat": 25.79, "lon": -80.29, "icao": "KMIA", "name": "Miami International", "tz": "America/New_York", "series": ["KXHIGHMIA", "KXLOWMIA", "KXRAINMIA"]},
-    "LAX": {"lat": 33.94, "lon": -118.41, "icao": "KLAX", "name": "Los Angeles Intl", "tz": "America/Los_Angeles", "series": ["KXHIGHLAX", "KXLOWLAX", "KXRAINLAX"]},
-    "DEN": {"lat": 39.86, "lon": -104.67, "icao": "KDEN", "name": "Denver International", "tz": "America/Denver", "series": ["KXHIGHDEN", "KXLOWDEN", "KXRAINDEN"]},
-    "AUS": {"lat": 30.20, "lon": -97.67, "icao": "KAUS", "name": "Austin-Bergstrom", "tz": "America/Chicago", "series": ["KXHIGHAUS", "KXLOWAUS", "KXRAINAUS"]},
-    "PHX": {"lat": 33.43, "lon": -112.01, "icao": "KPHX", "name": "Phoenix Sky Harbor", "tz": "America/Phoenix", "series": ["KXHIGHTPHX", "KXLOWTPHX"]},
-    "SEA": {"lat": 47.45, "lon": -122.31, "icao": "KSEA", "name": "Seattle-Tacoma", "tz": "America/Los_Angeles", "series": ["KXHIGHSEA", "KXLOWSEA", "KXRAINSEA"]},
-    "DAL": {"lat": 32.90, "lon": -97.04, "icao": "KDFW", "name": "Dallas/Fort Worth", "tz": "America/Chicago", "series": ["KXHIGHDAL", "KXLOWDAL"]},
-    "ATL": {"lat": 33.64, "lon": -84.43, "icao": "KATL", "name": "Hartsfield-Jackson", "tz": "America/New_York", "series": ["KXHIGHTATL", "KXLOWTATL"]},
-    "HOU": {"lat": 29.65, "lon": -95.28, "icao": "KHOU", "name": "Houston Hobby", "tz": "America/Chicago", "series": ["KXHIGHTHOU", "KXLOWTHOU"]},
-    "BOS": {"lat": 42.36, "lon": -71.01, "icao": "KBOS", "name": "Boston Logan", "tz": "America/New_York", "series": ["KXHIGHBOS", "KXLOWBOS"]},
-    "DC": {"lat": 38.85, "lon": -77.04, "icao": "KDCA", "name": "Reagan National", "tz": "America/New_York", "series": ["KXHIGHDC", "KXLOWDC", "KXRAINDC"]},
-    "SF": {"lat": 37.62, "lon": -122.37, "icao": "KSFO", "name": "San Francisco Intl", "tz": "America/Los_Angeles", "series": ["KXHIGHSF", "KXLOWSF", "KXRAINSF"]},
+    "NY": {"lat": 40.78, "lon": -73.97, "icao": "KNYC", "name": "New York (Central Park)", "tz": "America/New_York", "series": _series("KXHIGHNY", "HIGHNY", "KXLOWNY", "KXLOWNYC", "KXLOWTNYC", "KXRAINNY", "RAINNY", "RAINNYC", "KXRAINNYC", "KXTEMPNYCH", "KXHIGHNYD")},
+    "CHI": {"lat": 41.78, "lon": -87.75, "icao": "KMDW", "name": "Chicago (Midway)", "tz": "America/Chicago", "series": _series("KXHIGHCHI", "HIGHCHI", "KXLOWCHI", "KXLOWTCHI", "KXRAINCHIM", "KXTEMPCHIH")},
+    "MIA": {"lat": 25.79, "lon": -80.29, "icao": "KMIA", "name": "Miami International", "tz": "America/New_York", "series": _series("KXHIGHMIA", "HIGHMIA", "KXLOWMIA", "KXLOWTMIA", "RAINMIA", "KXRAINMIA", "KXRAINMIAM", "KXTEMPMIAH")},
+    "LAX": {"lat": 33.94, "lon": -118.41, "icao": "KLAX", "name": "Los Angeles Intl", "tz": "America/Los_Angeles", "series": _series("KXHIGHLAX", "KXLOWLAX", "KXLOWTLAX", "KXRAINLAX", "KXRAINLAXM", "KXTEMPLAXH")},
+    "DEN": {"lat": 39.86, "lon": -104.67, "icao": "KDEN", "name": "Denver International", "tz": "America/Denver", "series": _series("KXHIGHDEN", "KXLOWDEN", "KXLOWTDEN", "KXRAINDEN", "KXRAINDENM")},
+    "AUS": {"lat": 30.20, "lon": -97.67, "icao": "KAUS", "name": "Austin-Bergstrom", "tz": "America/Chicago", "series": _series("KXHIGHAUS", "HIGHAUS", "KXLOWAUS", "KXLOWTAUS", "KXRAINAUS", "KXRAINAUSM")},
+    "PHX": {"lat": 33.43, "lon": -112.01, "icao": "KPHX", "name": "Phoenix Sky Harbor", "tz": "America/Phoenix", "series": _series("KXHIGHTPHX", "KXLOWTPHX")},
+    "SEA": {"lat": 47.45, "lon": -122.31, "icao": "KSEA", "name": "Seattle-Tacoma", "tz": "America/Los_Angeles", "series": _series("KXHIGHSEA", "KXHIGHTSEA", "KXLOWSEA", "KXLOWTSEA", "RAINSEA", "KXRAINSEA", "KXRAINSEAM")},
+    "DAL": {"lat": 32.90, "lon": -97.04, "icao": "KDFW", "name": "Dallas/Fort Worth", "tz": "America/Chicago", "series": _series("KXHIGHDAL", "KXHIGHTDAL", "KXLOWDAL", "KXLOWTDAL", "KXRAINDALM")},
+    "ATL": {"lat": 33.64, "lon": -84.43, "icao": "KATL", "name": "Hartsfield-Jackson", "tz": "America/New_York", "series": _series("KXHIGHTATL", "KXLOWTATL")},
+    "HOU": {"lat": 29.65, "lon": -95.28, "icao": "KHOU", "name": "Houston Hobby", "tz": "America/Chicago", "series": _series("KXHIGHHOU", "KXHIGHOU", "KXHIGHTHOU", "KXLOWTHOU", "RAINHOU", "KXRAINHOU", "KXRAINHOUM")},
+    "BOS": {"lat": 42.36, "lon": -71.01, "icao": "KBOS", "name": "Boston Logan", "tz": "America/New_York", "series": _series("KXHIGHBOS", "KXHIGHTBOS", "KXLOWBOS", "KXLOWTBOS", "KXTEMPBOSH")},
+    "DC": {"lat": 38.85, "lon": -77.04, "icao": "KDCA", "name": "Reagan National", "tz": "America/New_York", "series": _series("KXHIGHDC", "KXHIGHTDC", "KXLOWDC", "KXLOWTDC", "KXRAINDC", "KXTEMPDCH")},
+    "SF": {"lat": 37.62, "lon": -122.37, "icao": "KSFO", "name": "San Francisco Intl", "tz": "America/Los_Angeles", "series": _series("KXHIGHSF", "KXHIGHTSFO", "KXLOWSF", "KXLOWTSFO", "KXRAINSF", "KXRAINSFOM")},
     "LV": {"lat": 36.08, "lon": -115.15, "icao": "KLAS", "name": "Las Vegas (Harry Reid)", "tz": "America/Los_Angeles", "series": ["KXHIGHTLV", "KXLOWTLV"]},
     # v19.3: Institutional Expansion Universe
-    "MSP": {"lat": 44.88, "lon": -93.22, "icao": "KMSP", "name": "Minneapolis-St. Paul", "tz": "America/Chicago", "series": ["KXHIGHMSP", "KXLOWMSP"]},
+    "MSP": {"lat": 44.88, "lon": -93.22, "icao": "KMSP", "name": "Minneapolis-St. Paul", "tz": "America/Chicago", "series": _series("KXHIGHMSP", "KXHIGHTMIN", "KXLOWMSP", "KXLOWTMIN")},
     "DET": {"lat": 42.21, "lon": -83.35, "icao": "KDTW", "name": "Detroit Metro", "tz": "America/New_York", "series": ["KXHIGHDET", "KXLOWDET"]},
     "SLC": {"lat": 40.79, "lon": -111.97, "icao": "KSLC", "name": "Salt Lake City Intl", "tz": "America/Denver", "series": ["KXHIGHSLC", "KXLOWSLC"]},
-    "OKC": {"lat": 35.39, "lon": -97.60, "icao": "KOKC", "name": "Oklahoma City", "tz": "America/Chicago", "series": ["KXHIGHOKC", "KXLOWOKC"]},
-    "PHL": {"lat": 39.87, "lon": -75.24, "icao": "KPHL", "name": "Philadelphia Intl", "tz": "America/New_York", "series": ["KXHIGHPHL", "KXLOWPHL", "KXRAINPHL"]},
+    "OKC": {"lat": 35.39, "lon": -97.60, "icao": "KOKC", "name": "Oklahoma City", "tz": "America/Chicago", "series": _series("KXHIGHOKC", "KXHIGHTOKC", "KXLOWOKC", "KXLOWTOKC")},
+    "PHL": {"lat": 39.87, "lon": -75.24, "icao": "KPHL", "name": "Philadelphia Intl", "tz": "America/New_York", "series": _series("KXHIGHPHL", "KXHIGHPHIL", "KXLOWPHL", "KXLOWPHIL", "KXLOWTPHIL", "KXRAINPHL")},
     "MCI": {"lat": 39.30, "lon": -94.71, "icao": "KMCI", "name": "Kansas City Intl", "tz": "America/Chicago", "series": ["KXHIGHMCI", "KXLOWMCI"]},
     "ABQ": {"lat": 35.04, "lon": -106.61, "icao": "KABQ", "name": "Albuquerque Intl", "tz": "America/Denver", "series": ["KXHIGHABQ", "KXLOWABQ"]},
-    "MSY": {"lat": 29.99, "lon": -90.26, "icao": "KMSY", "name": "New Orleans (Armstrong)", "tz": "America/Chicago", "series": ["KXHIGHMSY", "KXLOWMSY"]},
+    "MSY": {"lat": 29.99, "lon": -90.26, "icao": "KMSY", "name": "New Orleans (Armstrong)", "tz": "America/Chicago", "series": _series("KXHIGHMSY", "KXHIGHTNOLA", "KXLOWMSY", "KXLOWTNOLA", "KXRAINNO")},
     "PDX": {"lat": 45.59, "lon": -122.60, "icao": "KPDX", "name": "Portland Intl", "tz": "America/Los_Angeles", "series": ["KXHIGHPDX", "KXLOWPDX"]},
     "MKE": {"lat": 42.95, "lon": -87.90, "icao": "KMKE", "name": "Milwaukee (Mitchell)", "tz": "America/Chicago", "series": ["KXHIGHMKE", "KXLOWMKE"]},
     "MCO": {"lat": 28.43, "lon": -81.33, "icao": "KMCO", "name": "Orlando Intl", "tz": "America/New_York", "series": ["KXHIGHMCO", "KXLOWMCO", "KXRAINMCO"]},
@@ -98,6 +111,7 @@ STATIONS = {
     "CLT": {"lat": 35.21, "lon": -80.94, "icao": "KCLT", "name": "Charlotte-Douglas", "tz": "America/New_York", "series": ["KXHIGHCLT", "KXLOWCLT"]},
     "OMA": {"lat": 41.30, "lon": -95.89, "icao": "KOMA", "name": "Omaha (Eppley Airfield)", "tz": "America/Chicago", "series": ["KXHIGHOMA", "KXLOWOMA"]},
     "CHS": {"lat": 32.89, "lon": -80.04, "icao": "KCHS", "name": "Charleston (SC)", "tz": "America/New_York", "series": ["KXHIGHCHS", "KXLOWCHS"]},
+    "SAT": {"lat": 29.53, "lon": -98.47, "icao": "KSAT", "name": "San Antonio Intl", "tz": "America/Chicago", "series": _series("KXHIGHTSATX", "KXLOWTSATX")},
 }
 _SERIES_TO_CITY = {
     series: city_key
@@ -761,7 +775,7 @@ def _resolve_weather_series(token: str) -> Optional[str]:
         return None
     if value in _SERIES_TO_CITY:
         return value
-    for series in _SERIES_TO_CITY:
+    for series in sorted(_SERIES_TO_CITY, key=len, reverse=True):
         if value.startswith(series):
             return series
     return None
@@ -781,19 +795,49 @@ def _parse_contract_local_date(
     resolution_at: str = "",
     last_trade_at: str = "",
 ) -> Optional[date]:
-    symbol = str(ticker or "").upper()
-    match = re.search(r"-(\d{2}[A-Z]{3}\d{2})-", symbol)
-    if match:
-        try:
-            return datetime.strptime(match.group(1), "%y%B%d").date()
-        except ValueError:
-            try:
-                return datetime.strptime(match.group(1), "%y%b%d").date()
-            except ValueError:
-                pass
+    target_dt = _parse_contract_local_datetime(
+        ticker,
+        station=station,
+        resolution_at=resolution_at,
+        last_trade_at=last_trade_at,
+    )
+    return target_dt.date() if target_dt is not None else None
 
+
+def _parse_contract_local_datetime(
+    ticker: str,
+    *,
+    station: Optional[dict] = None,
+    resolution_at: str = "",
+    last_trade_at: str = "",
+) -> Optional[datetime]:
+    symbol = str(ticker or "").upper()
     tz_name = (station or {}).get("tz", "UTC")
     local_tz = pytz.timezone(tz_name)
+
+    match = re.search(r"-(\d{2}[A-Z]{3}\d{2})(\d{2})?(?:-|$)", symbol)
+    if match:
+        parsed_date = None
+        for fmt in ("%y%B%d", "%y%b%d"):
+            try:
+                parsed_date = datetime.strptime(match.group(1), fmt).date()
+                break
+            except ValueError:
+                continue
+        if parsed_date is not None:
+            hour_token = match.group(2)
+            hour_value = int(hour_token) if hour_token is not None else 0
+            hour_value = max(0, min(23, hour_value))
+            naive = datetime(
+                parsed_date.year,
+                parsed_date.month,
+                parsed_date.day,
+                hour_value,
+                0,
+                0,
+            )
+            return local_tz.localize(naive)
+
     for raw in (resolution_at, last_trade_at):
         text = str(raw or "").strip()
         if not text:
@@ -803,14 +847,19 @@ def _parse_contract_local_date(
                 dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
                 if dt.tzinfo is None:
                     dt = dt.replace(tzinfo=pytz.UTC)
-                return dt.astimezone(local_tz).date()
+                return dt.astimezone(local_tz)
             if " " in text:
                 dt = datetime.strptime(text, "%Y%m%d %H:%M:%S").replace(tzinfo=pytz.UTC)
-                return dt.astimezone(local_tz).date()
-            return datetime.strptime(text, "%Y%m%d").date()
+                return dt.astimezone(local_tz)
+            naive = datetime.strptime(text, "%Y%m%d")
+            return local_tz.localize(naive)
         except Exception:
             continue
     return None
+
+
+def _contract_has_explicit_local_hour(ticker: str) -> bool:
+    return bool(re.search(r"-(\d{2}[A-Z]{3}\d{2})(\d{2})(?:-|$)", str(ticker or "").upper()))
 
 
 def _target_day_indices(hourly_time: list[str], target_date) -> list[int]:
@@ -819,6 +868,31 @@ def _target_day_indices(hourly_time: list[str], target_date) -> list[int]:
     for idx, raw_time in enumerate(hourly_time or []):
         if str(raw_time).startswith(target_label):
             indices.append(idx)
+    return indices
+
+
+def _target_hour_indices(
+    hourly_time: list[str],
+    target_date,
+    target_hour: int,
+) -> list[int]:
+    indices = []
+    for idx, raw_time in enumerate(hourly_time or []):
+        text = str(raw_time or "").strip()
+        if not text:
+            continue
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            if parsed.date() == target_date and parsed.hour == target_hour:
+                indices.append(idx)
+            continue
+        except Exception:
+            pass
+
+        if text.startswith(target_date.isoformat()):
+            hour_match = re.search(r"T(\d{2})", text)
+            if hour_match and int(hour_match.group(1)) == target_hour:
+                indices.append(idx)
     return indices
 
 
@@ -837,7 +911,12 @@ def _reduce_member_projection(
     return values
 
 
-def _project_contract_record(record: dict, target_date) -> dict:
+def _project_contract_record(
+    record: dict,
+    target_date,
+    *,
+    target_hour: int | None = None,
+) -> dict:
     if not record:
         return {}
 
@@ -856,21 +935,35 @@ def _project_contract_record(record: dict, target_date) -> dict:
     members_precip_total = _reduce_member_projection(members_precip, indices, sum)
     cloud_means = _reduce_member_projection(members_cloud, indices, np.mean)
     ssrd_means = _reduce_member_projection(members_ssrd, indices, np.mean)
+    hour_indices = (
+        _target_hour_indices(hourly_time, target_date, int(target_hour))
+        if target_hour is not None
+        else []
+    )
+    members_temp_instant = _reduce_member_projection(
+        members_temp,
+        hour_indices,
+        lambda bucket: bucket[0],
+    )
 
     projected = {
         "members_high": members_high,
         "members_low": members_low,
+        "members_temp": members_temp_instant,
         "members_precip": members_precip_total,
         "mean_high": float(np.mean(members_high)) if members_high else record.get("mean_high", 0.0),
         "sigma_high": float(np.std(members_high)) if len(members_high) > 1 else record.get("sigma_high", 0.5),
         "mean_low": float(np.mean(members_low)) if members_low else record.get("mean_low", 0.0),
         "sigma_low": float(np.std(members_low)) if len(members_low) > 1 else record.get("sigma_low", 0.5),
+        "mean_temp": float(np.mean(members_temp_instant)) if members_temp_instant else None,
+        "sigma_temp": float(np.std(members_temp_instant)) if len(members_temp_instant) > 1 else None,
         "mean_precip": float(np.mean(members_precip_total)) if members_precip_total else record.get("mean_precip", 0.0),
         "sigma_precip": float(np.std(members_precip_total)) if len(members_precip_total) > 1 else record.get("sigma_precip", 0.08),
         "peak_tcdc": float(np.mean(cloud_means)) if cloud_means else float(record.get("peak_tcdc") or 0.0),
         "peak_ssrd": float(np.mean(ssrd_means)) if ssrd_means else record.get("peak_ssrd"),
         "timestamp": record.get("timestamp", time.time()),
         "target_local_date": target_date.isoformat(),
+        "target_local_hour": target_hour,
         "hourly_time": hourly_time,
         "hourly_members_temp_f": members_temp,
         "hourly_members_precip_in": members_precip,
@@ -895,6 +988,11 @@ def _project_contract_record(record: dict, target_date) -> dict:
         model_key = _weather_model_key(projected.get("model_name", ""))
         projected["sigma_high"] = _deterministic_temp_sigma_floor(model_key, horizon_days=horizon_days)
         projected["sigma_low"] = _deterministic_temp_sigma_floor(model_key, horizon_days=horizon_days)
+        if projected["mean_temp"] is not None:
+            projected["sigma_temp"] = _deterministic_temp_sigma_floor(
+                model_key,
+                horizon_days=horizon_days,
+            )
         projected["sigma_precip"] = _deterministic_precip_sigma(
             projected.get("mean_precip", 0.0),
             horizon_days=horizon_days,
@@ -903,13 +1001,21 @@ def _project_contract_record(record: dict, target_date) -> dict:
 
     nested_ecmwf = record.get("ecmwf")
     if nested_ecmwf:
-        projected["ecmwf"] = _project_contract_record(nested_ecmwf, target_date)
+        projected["ecmwf"] = _project_contract_record(
+            nested_ecmwf,
+            target_date,
+            target_hour=target_hour,
+        )
     else:
         projected["ecmwf"] = None
 
     nested_aigefs = record.get("aigefs")
     if nested_aigefs:
-        projected["aigefs"] = _project_contract_record(nested_aigefs, target_date)
+        projected["aigefs"] = _project_contract_record(
+            nested_aigefs,
+            target_date,
+            target_hour=target_hour,
+        )
     else:
         projected["aigefs"] = None
 
@@ -984,6 +1090,16 @@ def _cached_observed_daily_record(cache_key: str) -> Dict[str, Any]:
     return dict(cached)
 
 
+def _cached_observed_hourly_record(cache_key: str) -> Dict[str, Any]:
+    cached = _OBSERVED_HOURLY_CACHE.get(cache_key)
+    if not cached:
+        return {}
+    ts = float(cached.get("cached_at") or 0.0)
+    if time.time() - ts > OBSERVED_DAILY_CACHE_TTL_SEC:
+        return {}
+    return dict(cached)
+
+
 def _fetch_open_meteo_archive_daily_summary(
     city_key: str,
     lat: float,
@@ -1046,6 +1162,72 @@ def _fetch_open_meteo_archive_daily_summary(
             exc,
         )
         return {}
+
+
+def _fetch_open_meteo_archive_hourly_temp(
+    city_key: str,
+    lat: float,
+    lon: float,
+    target_date: date,
+    target_hour: int,
+    *,
+    timezone_name: str,
+) -> Dict[str, Any]:
+    cache_key = f"{city_key}|{target_date.isoformat()}|{int(target_hour):02d}"
+    cached = _cached_observed_hourly_record(cache_key)
+    if cached:
+        return cached
+
+    params = {
+        "latitude": lat,
+        "longitude": lon,
+        "start_date": target_date.isoformat(),
+        "end_date": target_date.isoformat(),
+        "hourly": "temperature_2m",
+        "timezone": timezone_name,
+    }
+
+    try:
+        resp = requests.get(
+            "https://archive-api.open-meteo.com/v1/archive",
+            params=params,
+            timeout=15,
+        )
+        resp.raise_for_status()
+        payload = resp.json() or {}
+        hourly = payload.get("hourly") or {}
+        times = list(hourly.get("time") or [])
+        temps = list(hourly.get("temperature_2m") or [])
+        for idx, raw_time in enumerate(times):
+            try:
+                parsed = datetime.fromisoformat(str(raw_time).replace("Z", "+00:00"))
+            except Exception:
+                continue
+            if parsed.date() != target_date or parsed.hour != int(target_hour):
+                continue
+            observed = {
+                "city_key": city_key,
+                "target_local_date": target_date.isoformat(),
+                "target_local_hour": int(target_hour),
+                "observed_temp": (
+                    _c_to_f(float(temps[idx]))
+                    if idx < len(temps) and temps[idx] is not None
+                    else None
+                ),
+                "source": "open_meteo_archive_hourly",
+                "cached_at": time.time(),
+            }
+            _OBSERVED_HOURLY_CACHE[cache_key] = observed
+            return dict(observed)
+    except Exception as exc:
+        logger.debug(
+            "Observed hourly fetch failed for %s %s@%02d: %s",
+            city_key,
+            target_date.isoformat(),
+            int(target_hour),
+            exc,
+        )
+    return {}
 
 
 def _fetch_observed_daily_summary(
@@ -1592,8 +1774,21 @@ def get_contract_weather_data(
     )
     if target_date is None:
         return base
+    target_hour = None
+    if _contract_has_explicit_local_hour(ticker):
+        target_dt = _parse_contract_local_datetime(
+            ticker,
+            station=station,
+            resolution_at=resolution_at,
+            last_trade_at=last_trade_at,
+        )
+        target_hour = target_dt.hour if target_dt is not None else None
 
-    projected = _project_contract_record(base, target_date)
+    projected = _project_contract_record(
+        base,
+        target_date,
+        target_hour=target_hour,
+    )
     if not projected:
         return {}
 
@@ -1633,15 +1828,53 @@ def get_contract_observed_weather_data(
     )
     if target_date is None:
         return {}
+    target_hour = None
+    if _contract_has_explicit_local_hour(ticker):
+        target_dt = _parse_contract_local_datetime(
+            ticker,
+            station=station,
+            resolution_at=resolution_at,
+            last_trade_at=last_trade_at,
+        )
+        target_hour = target_dt.hour if target_dt is not None else None
 
     timezone_name = station.get("tz", "UTC")
     local_today = datetime.now(pytz.timezone(timezone_name)).date()
+    city_key = _SERIES_TO_CITY.get(series, "")
+    if target_hour is not None:
+        if target_date > local_today:
+            return {}
+
+        if target_date == local_today:
+            intraday = dict(base.get("intraday") or {})
+            now_local = datetime.now(pytz.timezone(timezone_name))
+            if (
+                intraday.get("metar_temp") is not None
+                and now_local.hour == target_hour
+            ):
+                return {
+                    "city_key": city_key,
+                    "target_local_date": target_date.isoformat(),
+                    "target_local_hour": target_hour,
+                    "observed_temp": intraday.get("metar_temp"),
+                    "source": "metar_hourly",
+                }
+
+        return _fetch_open_meteo_archive_hourly_temp(
+            city_key,
+            float(station["lat"]),
+            float(station["lon"]),
+            target_date,
+            target_hour,
+            timezone_name=timezone_name,
+        )
+
     if target_date == local_today:
         intraday = dict(base.get("intraday") or {})
         if not intraday:
             return {}
         return {
-            "city_key": _SERIES_TO_CITY.get(series, ""),
+            "city_key": city_key,
             "target_local_date": target_date.isoformat(),
             "observed_high": intraday.get("daily_max"),
             "observed_low": intraday.get("daily_min"),
@@ -1653,7 +1886,7 @@ def get_contract_observed_weather_data(
         return {}
 
     return _fetch_observed_daily_summary(
-        _SERIES_TO_CITY.get(series, ""),
+        city_key,
         float(station["lat"]),
         float(station["lon"]),
         target_date,

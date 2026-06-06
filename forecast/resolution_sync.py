@@ -100,6 +100,7 @@ def determine_weather_resolution(
     observed_high: float | None,
     observed_low: float | None,
     observed_precip: float | None = None,
+    observed_temp: float | None = None,
     contract_name: str = "",
     strike: float | None = None,
 ) -> tuple[str, float, str] | None:
@@ -109,6 +110,7 @@ def determine_weather_resolution(
         observed_high=observed_high,
         observed_low=observed_low,
         observed_precip=observed_precip,
+        observed_temp=observed_temp,
         contract_name=contract_name,
         strike=strike,
     )
@@ -170,7 +172,7 @@ def sync_forecast_resolutions(
             continue
         if all(
             observed.get(key) is None
-            for key in ("observed_high", "observed_low", "observed_precip")
+            for key in ("observed_high", "observed_low", "observed_precip", "observed_temp")
         ):
             summary["skipped_no_ground_truth"] += 1
             continue
@@ -189,12 +191,16 @@ def sync_forecast_resolutions(
             if semantics.mode in {"RAIN", "SNOW"} and observed.get("observed_precip") is None:
                 summary["skipped_no_ground_truth"] += 1
                 continue
+            if semantics.mode == "TEMP" and observed.get("observed_temp") is None:
+                summary["skipped_no_ground_truth"] += 1
+                continue
 
         resolution = determine_weather_resolution(
             ticker=ticker,
             observed_high=observed.get("observed_high"),
             observed_low=observed.get("observed_low"),
             observed_precip=observed.get("observed_precip"),
+            observed_temp=observed.get("observed_temp"),
             contract_name=str(row["contract_name"] or ""),
             strike=float(row["strike"]) if row["strike"] is not None else None,
         )

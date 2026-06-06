@@ -446,14 +446,13 @@ def run_execution_cycle(
     try:
         from forecast.db import get_active_contracts
         from data.kalshi_weather_monitor import ensure_weather_data
+        from forecast.weather_contracts import weather_mode_for_ticker
 
         active_contracts = get_active_contracts(db_path=db_path)
         weather_symbols = [
             str(contract.get("local_symbol") or "")
             for contract in active_contracts
-            if "KXHIGH" in str(contract.get("local_symbol") or "")
-            or "KXLOW" in str(contract.get("local_symbol") or "")
-            or "KXRAIN" in str(contract.get("local_symbol") or "")
+            if weather_mode_for_ticker(str(contract.get("local_symbol") or "")) is not None
         ]
         weather_sync = ensure_weather_data(weather_symbols)
         if weather_sync.get("refreshed_series"):
@@ -1161,10 +1160,9 @@ def run_position_monitor() -> None:
                     # 1. Take Profit: Narrow Bin (Double-sided risk)
                     # We assume narrow if strike looks like a mid-range or 'between'
                     # For now, we'll use a conservative 85c trigger for all weather
-                    is_weather = any(
-                        token in local_symbol
-                        for token in ("KXHIGH", "KXLOW", "KXRAIN", "KXSNOW", "KXWIND")
-                    )
+                    from forecast.weather_contracts import weather_mode_for_ticker
+
+                    is_weather = weather_mode_for_ticker(local_symbol) is not None
 
                     if is_weather:
                         from forecast.db import get_contract_metadata

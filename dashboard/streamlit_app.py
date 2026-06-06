@@ -909,6 +909,58 @@ def _render_trade_edge_chart(rows: list[dict]) -> None:
     st.altair_chart(chart, width="stretch")
 
 
+def _render_weather_type_boards(
+    boards: list[dict],
+    market_type_counts: list[dict],
+) -> None:
+    counts_map = {
+        str(row.get("bucket") or ""): int(row.get("active_contracts") or 0)
+        for row in (market_type_counts or [])
+    }
+    if not boards:
+        st.info("No weather-type boards are available yet.")
+        return
+
+    tabs = st.tabs(
+        [
+            f"{board.get('bucket')} ({int(board.get('position_count') or 0)})"
+            for board in boards
+        ]
+    )
+    for tab, board in zip(tabs, boards):
+        with tab:
+            rows = list(board.get("rows") or [])
+            summary = board.get("summary") or {}
+            bucket = str(board.get("bucket") or "Weather")
+            active_contracts = counts_map.get(bucket, 0)
+            if rows:
+                _render_html(
+                    '<div class="mini-grid">'
+                    + _mini_card(
+                        "Open Positions",
+                        str(board.get("position_count") or 0),
+                        f"{int(board.get('contract_count') or 0)} contracts live",
+                    )
+                    + _mini_card(
+                        "Book Exposure",
+                        _fmt_money(summary.get("total_exposure_usd")),
+                        f"{active_contracts} active contracts in scan universe",
+                    )
+                    + _mini_card(
+                        "Emergency Exit P&L",
+                        _fmt_money(summary.get("total_exit_pnl_est_usd")),
+                        "same liquidation math as the main board",
+                    )
+                    + "</div>"
+                )
+                _render_open_book_cards(rows)
+            else:
+                st.info(
+                    f"No open {bucket.lower()} positions right now. "
+                    f"The live universe still has {active_contracts} active contract rows in this lane."
+                )
+
+
 _render_html(_CSS)
 
 with st.sidebar:
@@ -944,6 +996,8 @@ metric_explainers = payload["metric_explainers"]
 decision_funnel = payload["decision_funnel"]
 regime_cards = payload["regime_cards"]
 ai_insights = payload["ai_insights"]
+weather_type_boards = payload.get("weather_type_boards") or []
+weather_type_counts = payload.get("weather_type_counts") or []
 
 balance = float(truth.get("balance_usd") or 0.0)
 drift = truth.get("position_drift") or {}
@@ -1116,8 +1170,13 @@ with top_left:
                 )
                 st.dataframe(pos_df, width="stretch", hide_index=True)
                 st.caption("`mark_pnl` uses current side midpoint. `exit_pnl_est` is a bid-side liquidation estimate with exit fee and any recorded entry fee.")
+
+            st.markdown('<div class="section-title">Trade-Type Boards</div>', unsafe_allow_html=True)
+            _render_weather_type_boards(weather_type_boards, weather_type_counts)
         else:
             st.info("No live Kalshi positions are open right now.")
+            st.markdown('<div class="section-title">Trade-Type Boards</div>', unsafe_allow_html=True)
+            _render_weather_type_boards(weather_type_boards, weather_type_counts)
 
     st.markdown('<div class="section-title">Trade Curve</div>', unsafe_allow_html=True)
     if realized_curve:

@@ -40,6 +40,7 @@ from config import (
     get_kalshi_position_exposure_usd,
 )
 from forecast.strategy_engine import EV_THRESHOLD, _get_city_hub, _get_macro_context
+from forecast.weather_contracts import weather_trade_bucket
 from notifications.notification_engine import get_notifications
 from runtime.build_info import get_build_info
 from runtime.operator_truth import (
@@ -48,6 +49,16 @@ from runtime.operator_truth import (
     get_release_status,
 )
 from runtime.storage_guard import runtime_storage_status
+
+_WEATHER_BUCKET_ORDER = [
+    "Daily High",
+    "Daily Low",
+    "Rain",
+    "Hourly Temp",
+    "Snow",
+    "Wind",
+    "Other Weather",
+]
 
 def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH, timeout=30.0)
@@ -308,6 +319,10 @@ def build_position_row(
     return {
         "ticker": ticker,
         "contract_name": metadata.get("contract_name") or ticker,
+        "weather_bucket": weather_trade_bucket(
+            ticker,
+            contract_name=str(metadata.get("contract_name") or ticker),
+        ),
         "side": side,
         "qty": qty,
         "entry_price": round(entry_price, 4),
@@ -362,6 +377,13 @@ def build_open_book_visual_rows(position_rows: list[dict[str, Any]]) -> list[dic
             )
 
         contract_name = str(row.get("contract_name") or row.get("ticker") or "")
+        weather_bucket = str(
+            row.get("weather_bucket")
+            or weather_trade_bucket(
+                str(row.get("ticker") or ""),
+                contract_name=contract_name,
+            )
+        )
         visual_rows.append(
             {
                 **row,
@@ -371,6 +393,7 @@ def build_open_book_visual_rows(position_rows: list[dict[str, Any]]) -> list[dic
                     else f"{contract_name[:61]}..."
                 ),
                 "display_label": f"{row.get('side') or 'UNK'} • {row.get('ticker') or ''}",
+                "weather_bucket": weather_bucket,
                 "exposure_usd": round(exposure_usd, 4),
                 "mark_pnl_pct_on_risk": round(
                     (_coerce_float(row.get("gross_mark_pnl")) / exposure_usd) * 100.0,
@@ -463,6 +486,54 @@ def summarize_open_book(position_rows: list[dict[str, Any]]) -> dict[str, Any]:
             4,
         ),
     }
+
+
+def build_weather_type_boards(position_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    visual_rows = build_open_book_visual_rows(position_rows)
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in visual_rows:
+        grouped[str(row.get("weather_bucket") or "Other Weather")].append(row)
+
+    boards: list[dict[str, Any]] = []
+    for bucket in _WEATHER_BUCKET_ORDER:
+        bucket_rows = grouped.get(bucket, [])
+        boards.append(
+            {
+                "bucket": bucket,
+                "rows": bucket_rows,
+                "summary": summarize_open_book(bucket_rows),
+                "position_count": len(bucket_rows),
+                "contract_count": int(sum(_coerce_float(row.get("qty")) for row in bucket_rows)),
+            }
+        )
+    return boards
+
+
+def build_market_type_counts() -> list[dict[str, Any]]:
+    counts = defaultdict(int)
+    try:
+        with _connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT local_symbol, contract_name
+                FROM forecast_contracts
+                WHERE COALESCE(active, 1)=1
+                """
+            ).fetchall()
+    except Exception:
+        rows = []
+
+    for row in rows:
+        bucket = weather_trade_bucket(
+            str(row["local_symbol"] or ""),
+            contract_name=str(row["contract_name"] or ""),
+        )
+        counts[bucket] += 1
+
+    return [
+        {"bucket": bucket, "active_contracts": int(counts.get(bucket, 0))}
+        for bucket in _WEATHER_BUCKET_ORDER
+    ]
 
 
 def build_realized_pnl_curve(trades: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -979,6 +1050,8 @@ def get_cockpit_payload(*, live_sync: bool = True) -> dict[str, Any]:
         "positions_db_only": drift_rows,
         "open_book_visual": build_open_book_visual_rows(live_rows or drift_rows),
         "open_book_summary": summarize_open_book(live_rows or drift_rows),
+        "weather_type_boards": build_weather_type_boards(live_rows or drift_rows),
+        "weather_type_counts": build_market_type_counts(),
         "hub_exposure": summarize_hub_exposure(live_rows or drift_rows),
         "recent_trades": recent_trades,
         "trade_edge_rows": trade_edge_rows,

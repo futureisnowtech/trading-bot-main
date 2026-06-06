@@ -31,6 +31,10 @@ def _clean_title(title: str) -> str:
 
 def weather_mode_for_ticker(ticker: str) -> WeatherMode | None:
     symbol = (ticker or "").upper()
+    if re.search(r"-\d{2}[A-Z]{3}\d{4}(?:-|$)", symbol) and (
+        "TEMP" in symbol or "HIGH" in symbol or "LOW" in symbol
+    ):
+        return "TEMP"
     if "HIGH" in symbol:
         return "HIGH"
     if "LOW" in symbol:
@@ -41,13 +45,38 @@ def weather_mode_for_ticker(ticker: str) -> WeatherMode | None:
         return "SNOW"
     if "WIND" in symbol:
         return "WIND"
-    if symbol.startswith("KX"):
+    if "TEMP" in symbol:
         return "TEMP"
     return None
 
 
+def weather_trade_bucket(
+    ticker: str,
+    *,
+    contract_name: str = "",
+) -> str:
+    mode = weather_mode_for_ticker(ticker)
+    if mode == "HIGH":
+        return "Daily High"
+    if mode == "LOW":
+        return "Daily Low"
+    if mode == "RAIN":
+        return "Rain"
+    if mode == "TEMP":
+        return "Hourly Temp"
+    if mode == "SNOW":
+        return "Snow"
+    if mode == "WIND":
+        return "Wind"
+
+    title = _clean_title(contract_name).lower()
+    if "hourly" in title or " at " in title:
+        return "Hourly Temp"
+    return "Other Weather"
+
+
 def _contract_half_step(mode: WeatherMode) -> float:
-    return 0.5 if mode in {"HIGH", "LOW", "TEMP"} else 0.0
+    return 0.5 if mode in {"HIGH", "LOW"} else 0.0
 
 
 def _display_range_to_bounds(low: float, high: float, mode: WeatherMode) -> tuple[float, float]:
@@ -230,6 +259,8 @@ def yes_probability_from_weather_data(
         members = w_data.get("members_wind", [])
     elif semantics.mode == "LOW":
         members = w_data.get("members_low", [])
+    elif semantics.mode == "TEMP":
+        members = w_data.get("members_temp", [])
     else:
         members = w_data.get("members_high", [])
     return probability_from_members(members, semantics)
@@ -240,6 +271,7 @@ def resolve_weather_observation(
     observed_high: float | None,
     observed_low: float | None,
     observed_precip: float | None = None,
+    observed_temp: float | None = None,
     contract_name: str = "",
     strike: float | None = None,
 ) -> tuple[str, float, str] | None:
@@ -266,6 +298,11 @@ def resolve_weather_observation(
             return None
         observed_value = float(observed_precip)
         label = "daily_precip"
+    elif semantics.mode == "TEMP":
+        if observed_temp is None:
+            return None
+        observed_value = float(observed_temp)
+        label = "hourly_temp"
     else:
         return None
 

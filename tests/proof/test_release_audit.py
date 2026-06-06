@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from types import SimpleNamespace
 
 
@@ -178,3 +179,63 @@ def test_scan_live_market_surface_stays_read_only_for_weather_truth(monkeypatch)
 
     assert payload["weather_warmup"]["mode"] == "read_only_shared_truth"
     assert payload["weather_warmup"]["attempted"] is False
+
+
+def test_run_remote_audit_parses_json_after_stdout_noise(monkeypatch):
+    import scripts.release_audit as ra
+
+    monkeypatch.setattr(ra, "_git_head_sha", lambda: "abc123", raising=False)
+    monkeypatch.setattr(
+        ra.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(
+            returncode=0,
+            stdout=(
+                "[KalshiBroker] Connected (LIVE) ✅ | Balance: $240.34\n"
+                '{"audited_sha":"abc123","verdict":"PASS_WITH_WARNINGS","blockers":[],"warnings":["docker_service_check_skipped_in_container_mode"]}'
+            ),
+            stderr="",
+        ),
+        raising=False,
+    )
+
+    payload = ra._run_remote_audit(scan_limit=12, soak_seconds=10)
+
+    assert payload["verdict"] == "PASS_WITH_WARNINGS"
+    assert payload["blockers"] == []
+    assert payload["details"]["remote_payload"]["audited_sha"] == "abc123"
+
+
+def test_release_audit_json_mode_suppresses_noisy_stdout(monkeypatch, capsys):
+    import scripts.release_audit as ra
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["release_audit.py", "--local", "--format", "json"],
+        raising=False,
+    )
+
+    def _noisy_selected_mode(_args):
+        print("[KalshiBroker] Connected (LIVE) ✅ | Balance: $240.34")
+        return {
+            "mode": "local",
+            "as_of": "2026-06-06T00:00:00+00:00",
+            "audited_sha": "abc123",
+            "verdict": "PASS_WITH_WARNINGS",
+            "entries_allowed": True,
+            "blockers": [],
+            "warnings": [],
+            "details": {},
+        }
+
+    monkeypatch.setattr(ra, "_run_selected_mode", _noisy_selected_mode, raising=False)
+    monkeypatch.setattr(ra, "_render_markdown_report", lambda payload: "# ok\n", raising=False)
+    monkeypatch.setattr(ra, "write_release_audit_artifact", lambda payload, markdown="": {}, raising=False)
+
+    rc = ra.main()
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert out.lstrip().startswith("{")
+    assert "[KalshiBroker] Connected" not in out

@@ -123,6 +123,35 @@ docker buildx build --pull --load --progress=plain -t "${LOCAL_IMAGE_NAME}:lates
 echo "  Building cockpit image..."
 docker buildx build --pull --load --progress=plain -f Dockerfile.dashboard -t "${LOCAL_DASHBOARD_IMAGE_NAME}:latest" .
 
+echo "  Seeding provisional release artifact for new SHA..."
+python3 - << PYEOF
+from runtime.release_gate import VERDICT_BLOCKED, write_release_audit_artifact
+
+payload = {
+    "mode": "deploy_pending",
+    "as_of": "${DEPLOY_UTC}",
+    "audited_sha": "${LOCAL_SHA}",
+    "verdict": VERDICT_BLOCKED,
+    "entries_allowed": False,
+    "last_successful_audit_at": "",
+    "blockers": ["release_audit_pending_new_build"],
+    "warnings": [],
+    "details": {
+        "build": {
+            "app_version": "${APP_VERSION}",
+            "sha": "${LOCAL_SHA}",
+            "branch": "${BRANCH}",
+            "deployed_at_utc": "${DEPLOY_UTC}",
+        }
+    },
+}
+write_release_audit_artifact(
+    payload,
+    markdown="# Release Audit\\n\\nPending hosted audit for the newly deployed SHA.\\n",
+)
+print("  provisional release artifact written.")
+PYEOF
+
 echo "  Hot-reloading services..."
 docker compose up -d --remove-orphans --force-recreate --no-build
 

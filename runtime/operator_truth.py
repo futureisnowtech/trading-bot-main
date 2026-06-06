@@ -641,6 +641,11 @@ def get_release_status(
     artifact_sha = str(artifact.get("audited_sha") or "").strip()
     build_sha = str(build.get("sha") or "").strip()
     artifact_matches_build = bool(artifact_sha and build_sha and artifact_sha == build_sha)
+    artifact_blockers = [
+        str(item or "").strip()
+        for item in (artifact.get("blockers") or [])
+        if str(item or "").strip()
+    ]
 
     if truth is None:
         truth = get_live_kalshi_status(
@@ -678,7 +683,10 @@ def get_release_status(
     if not artifact:
         blockers.append("release_audit_missing")
     elif artifact_verdict not in PASSING_VERDICTS:
-        blockers.append(f"release_audit_not_passing ({artifact_verdict or 'UNKNOWN'})")
+        if artifact_blockers and artifact_matches_build:
+            blockers.extend(artifact_blockers)
+        else:
+            blockers.append(f"release_audit_not_passing ({artifact_verdict or 'UNKNOWN'})")
     elif build_sha and not artifact_sha:
         blockers.append("release_audit_sha_missing")
     elif build_sha and not artifact_matches_build:

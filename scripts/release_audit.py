@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import math
 import os
@@ -459,6 +461,30 @@ def _render_markdown_report(payload: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _extract_json_payload(raw_output: str) -> dict[str, Any]:
+    text = str(raw_output or "").strip()
+    if not text:
+        return {}
+
+    try:
+        parsed = json.loads(text)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        pass
+
+    decoder = json.JSONDecoder()
+    for index, char in enumerate(text):
+        if char != "{":
+            continue
+        try:
+            parsed, _end = decoder.raw_decode(text[index:])
+        except Exception:
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    return {}
+
+
 def _summarize_verdict(blockers: list[str], warnings: list[str]) -> str:
     if blockers:
         return VERDICT_BLOCKED
@@ -766,17 +792,18 @@ def _run_remote_audit(*, scan_limit: int, soak_seconds: int) -> dict[str, Any]:
     raw_output = (proc.stdout or "").strip()
     blockers: list[str] = []
     warnings: list[str] = []
-    remote_payload: dict[str, Any] = {}
+    remote_payload = _extract_json_payload(raw_output)
 
-    if proc.returncode != 0:
-        blockers.append("remote_release_audit_failed")
-        if proc.stderr:
-            warnings.append(proc.stderr.strip().splitlines()[-1])
-    else:
-        try:
-            remote_payload = json.loads(raw_output)
-        except Exception:
+    if not remote_payload:
+        if proc.returncode != 0:
+            blockers.append("remote_release_audit_failed")
+        else:
             blockers.append("remote_release_audit_parse_failed")
+        stderr_tail = (proc.stderr or "").strip()
+        if stderr_tail:
+            warnings.append(stderr_tail.splitlines()[-1])
+        elif raw_output:
+            warnings.append(raw_output.splitlines()[-1][:240])
 
     remote_sha = str(remote_payload.get("audited_sha") or "").strip()
     if local_sha and remote_sha and local_sha != remote_sha:
@@ -847,6 +874,25 @@ def _print_payload(payload: dict[str, Any], fmt: str) -> None:
             print(f"  - {warning}")
 
 
+def _run_selected_mode(args: argparse.Namespace) -> dict[str, Any]:
+    if args.local:
+        return _run_local_audit(scan_limit=args.scan_limit)
+    if args.remote:
+        return _run_remote_audit(
+            scan_limit=args.scan_limit,
+            soak_seconds=args.soak_seconds,
+        )
+    if args.promote:
+        return _run_promote(
+            scan_limit=args.scan_limit,
+            soak_seconds=args.soak_seconds,
+        )
+    return _run_remote_hosted_audit(
+        scan_limit=args.scan_limit,
+        soak_seconds=args.soak_seconds,
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
@@ -859,31 +905,14 @@ def main() -> int:
     parser.add_argument("--format", choices=("text", "json"), default="text", help="Stdout format.")
     args = parser.parse_args()
 
-    if args.local:
-        payload = _run_local_audit(scan_limit=args.scan_limit)
-        markdown = _render_markdown_report(payload)
-        write_release_audit_artifact(payload, markdown=markdown)
-    elif args.remote:
-        payload = _run_remote_audit(
-            scan_limit=args.scan_limit,
-            soak_seconds=args.soak_seconds,
-        )
-        markdown = _render_markdown_report(payload)
-        write_release_audit_artifact(payload, markdown=markdown)
-    elif args.promote:
-        payload = _run_promote(
-            scan_limit=args.scan_limit,
-            soak_seconds=args.soak_seconds,
-        )
-        markdown = _render_markdown_report(payload)
-        write_release_audit_artifact(payload, markdown=markdown)
+    if args.format == "json":
+        with contextlib.redirect_stdout(io.StringIO()):
+            payload = _run_selected_mode(args)
     else:
-        payload = _run_remote_hosted_audit(
-            scan_limit=args.scan_limit,
-            soak_seconds=args.soak_seconds,
-        )
-        markdown = _render_markdown_report(payload)
-        write_release_audit_artifact(payload, markdown=markdown)
+        payload = _run_selected_mode(args)
+
+    markdown = _render_markdown_report(payload)
+    write_release_audit_artifact(payload, markdown=markdown)
 
     _print_payload(payload, args.format)
     return 1 if str(payload.get("verdict") or "") == VERDICT_BLOCKED else 0

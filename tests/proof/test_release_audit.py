@@ -134,7 +134,7 @@ def test_strategy_cycle_blocks_new_entries_when_release_gate_closed(monkeypatch)
     assert any("entry_gate_blocked" in message for _level, _source, message in events)
 
 
-def test_scan_live_market_surface_stays_read_only_for_weather_truth(monkeypatch):
+def test_scan_live_market_surface_warms_weather_truth_for_weather_candidates(monkeypatch):
     import scripts.release_audit as ra
 
     monkeypatch.setattr(
@@ -171,6 +171,18 @@ def test_scan_live_market_surface_stays_read_only_for_weather_truth(monkeypatch)
         return []
 
     monkeypatch.setattr(ra, "evaluate_market_snapshots", _evaluate_market_snapshots, raising=False)
+    monkeypatch.setattr(
+        ra,
+        "_warm_weather_truth",
+        lambda tickers: {
+            "mode": "shared_truth_hydration",
+            "attempted": True,
+            "requested_tickers": len(list(tickers)),
+            "requested_series": 1,
+            "refreshed_series": 1,
+        },
+        raising=False,
+    )
 
     payload = ra._scan_live_market_surface(
         bankroll=164.0,
@@ -178,8 +190,9 @@ def test_scan_live_market_surface_stays_read_only_for_weather_truth(monkeypatch)
         scan_limit=4,
     )
 
-    assert payload["weather_warmup"]["mode"] == "read_only_shared_truth"
-    assert payload["weather_warmup"]["attempted"] is False
+    assert payload["weather_warmup"]["mode"] == "shared_truth_hydration"
+    assert payload["weather_warmup"]["attempted"] is True
+    assert payload["weather_warmup"]["refreshed_series"] == 1
 
 
 def test_run_remote_audit_parses_json_after_stdout_noise(monkeypatch):
@@ -342,6 +355,12 @@ def test_run_remote_hosted_audit_uses_host_service_artifact_without_skip_warning
         },
         raising=False,
     )
+    monkeypatch.setattr(
+        ra,
+        "_warm_weather_truth",
+        lambda *args, **kwargs: {"mode": "shared_truth_hydration", "attempted": True},
+        raising=False,
+    )
     monkeypatch.setattr(ra, "_market_scan_findings", lambda *args, **kwargs: ([], []), raising=False)
     monkeypatch.setattr(ra, "runtime_storage_status", lambda: {"ok": True}, raising=False)
     monkeypatch.setattr(
@@ -427,6 +446,12 @@ def test_run_remote_hosted_audit_blocks_when_host_service_artifact_missing(
             "infrastructure_rejections": [],
             "systematic_thin_liquidity": False,
         },
+        raising=False,
+    )
+    monkeypatch.setattr(
+        ra,
+        "_warm_weather_truth",
+        lambda *args, **kwargs: {"mode": "shared_truth_hydration", "attempted": True},
         raising=False,
     )
     monkeypatch.setattr(ra, "_market_scan_findings", lambda *args, **kwargs: ([], []), raising=False)

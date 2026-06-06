@@ -30,6 +30,7 @@ from forecast.db import get_active_contracts, get_bars, get_open_forecast_positi
 from forecast.market_snapshot import build_market_snapshots
 from forecast.quote_harvester import get_paired_quotes
 from forecast.strategy_engine import _get_macro_context, evaluate_market_snapshots
+from forecast.weather_contracts import weather_mode_for_ticker
 from monitoring.health_check import run_health_check
 from notifications.ai_agent import probe_reasoning_model
 from runtime.build_info import get_build_info
@@ -203,10 +204,7 @@ def _scan_live_market_surface(
         ),
     )
     snapshots = all_snapshots[: max(1, int(scan_limit))]
-    weather_warmup: dict[str, Any] = {
-        "mode": "read_only_shared_truth",
-        "attempted": False,
-    }
+    weather_warmup = _warm_weather_truth(snapshot.ticker for snapshot in snapshots)
     if not snapshots:
         return {
             "sample_size": 0,
@@ -384,6 +382,33 @@ def _scan_live_market_surface(
         "systematic_thin_liquidity": systematic_thin_liquidity,
         "weather_warmup": weather_warmup,
     }
+
+
+def _warm_weather_truth(tickers: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "mode": "shared_truth_hydration",
+        "attempted": False,
+        "requested_tickers": 0,
+    }
+    weather_tickers = [
+        str(ticker or "")
+        for ticker in tickers
+        if weather_mode_for_ticker(str(ticker or "")) is not None
+    ]
+    if not weather_tickers:
+        return payload
+
+    payload["attempted"] = True
+    payload["requested_tickers"] = len(weather_tickers)
+    try:
+        from data.kalshi_weather_monitor import ensure_weather_data
+
+        summary = ensure_weather_data(weather_tickers, include_intraday=False)
+        if isinstance(summary, dict):
+            payload.update(summary)
+    except Exception as exc:
+        payload["error"] = str(exc)
+    return payload
 
 
 def _market_scan_findings(
@@ -692,6 +717,10 @@ def _run_remote_hosted_audit(*, scan_limit: int, soak_seconds: int) -> dict[str,
     ingest_system_events(lookback_minutes=180, db_path=DB_PATH)
     health = run_health_check(force=True)
     truth = get_live_kalshi_status(db_path=DB_PATH, connect=True, sync_broker=True)
+    _warm_weather_truth(
+        str(contract.get("local_symbol") or "")
+        for contract in get_active_contracts(db_path=DB_PATH)
+    )
     provider_status = get_weather_provider_status(db_path=DB_PATH)
     balance_truth = get_balance_truth_status(truth=truth, db_path=DB_PATH)
     containers = _docker_service_status(build_sha)

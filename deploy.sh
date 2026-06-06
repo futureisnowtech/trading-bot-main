@@ -51,6 +51,7 @@ fi
 echo "  OK: local HEAD == origin/${BRANCH} == ${LOCAL_SHA}"
 
 DEPLOY_UTC=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+RELEASE_AUDIT_SOAK_SECONDS="${RELEASE_AUDIT_SOAK_SECONDS:-600}"
 APP_VERSION=$(python3 - <<'PYEOF'
 from VERSION import VERSION
 print(VERSION)
@@ -265,6 +266,9 @@ runtime_dir.mkdir(parents=True, exist_ok=True)
 )
 print("  cockpit provenance mirrored to /app/logs")
 PYEOF
+
+echo "  Running hosted release audit (soak=${RELEASE_AUDIT_SOAK_SECONDS}s)..."
+python3 scripts/release_audit.py --remote-hosted --scan-limit 12 --soak-seconds ${RELEASE_AUDIT_SOAK_SECONDS}
 
 echo "  version.txt contents:"
 cat ${PROJECT_DIR}/version.txt

@@ -36,7 +36,11 @@ from config import (
 from forecast.strategy_engine import EV_THRESHOLD, _get_city_hub, _get_macro_context
 from notifications.notification_engine import get_notifications
 from runtime.build_info import get_build_info
-from runtime.operator_truth import get_live_kalshi_status, get_recent_veto_summary
+from runtime.operator_truth import (
+    get_live_kalshi_status,
+    get_recent_veto_summary,
+    get_release_status,
+)
 from runtime.storage_guard import runtime_storage_status
 
 def _connect() -> sqlite3.Connection:
@@ -386,6 +390,7 @@ def build_metric_explainers(balance_usd: float | None = None) -> dict[str, str]:
         "Live Cash": "This is the cash Kalshi says is available right now. It is the real money the bot can still deploy without guessing from local records.",
         "Open Positions": "These are live Kalshi positions the broker is actually carrying. It keeps us honest by showing what the exchange sees, not what we hoped happened.",
         "Active Markets": "This is the weather market universe the engine can currently scan. A larger number means more opportunities, but the safety gates still decide whether any are worth trading.",
+        "Release Gate": "This is the final production-readiness verdict. It stays blocked until the proof checks, runtime health, live provider checks, and droplet deployment truth all agree the engine is safe to place fresh entries.",
         "Drift": "Drift means the broker and the local SQLite ledger disagree. This matters because we operate broker-first, so drift is a warning that the local story may be stale or incomplete.",
         "Realized P&L": "This is closed-trade profit and loss already locked in. It excludes open-position swings so you can separate booked outcomes from temporary mark changes.",
         "Data Ingestion": "The engine starts by blending the two main weather ensembles. That keeps us from overreacting to one model run and gives the bot a more stable starting forecast.",
@@ -485,6 +490,7 @@ def build_trade_edge_rows(trades: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def build_ai_insights(
     *,
     truth: dict[str, Any],
+    release_status: dict[str, Any],
     lane: dict[str, Any],
     market_counts: dict[str, Any],
     recent_events: list[dict[str, Any]],
@@ -495,6 +501,31 @@ def build_ai_insights(
     insights: list[dict[str, str]] = []
     learning = learning_status or {}
     global_blend = learning.get("global_blend") or {}
+    release_verdict = str(release_status.get("current_release_verdict") or "UNKNOWN")
+    entries_allowed = bool(release_status.get("entries_allowed"))
+
+    if entries_allowed:
+        insights.append(
+            {
+                "title": "Release Gate Open",
+                "tone": "good",
+                "meta": release_verdict,
+                "body": "Fresh entries are permitted because the latest release audit passed and the live runtime is not currently showing a hard production blocker.",
+            }
+        )
+    else:
+        blockers = release_status.get("top_infrastructure_blockers") or []
+        insights.append(
+            {
+                "title": "Release Gate Closed",
+                "tone": "warn",
+                "meta": release_verdict,
+                "body": (
+                    "Fresh entries are being held back until the release audit blockers clear. "
+                    f"Top blocker: {blockers[0] if blockers else 'release audit not yet promoted'}."
+                ),
+            }
+        )
 
     if truth.get("broker_connected") and str(lane.get("readiness_state") or "") == "OPERATIONAL":
         insights.append(
@@ -719,6 +750,7 @@ def build_regime_cards(
 
 def get_cockpit_payload(*, live_sync: bool = True) -> dict[str, Any]:
     truth = get_live_kalshi_status(connect=live_sync, sync_broker=live_sync)
+    release_status = get_release_status(truth=truth)
     lane = truth.get("forecast_lane") or {}
     learning_status = truth.get("weather_learning") or {}
     symbols = sorted(
@@ -782,6 +814,7 @@ def get_cockpit_payload(*, live_sync: bool = True) -> dict[str, Any]:
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "truth": truth,
+        "release_status": release_status,
         "positions_live": live_rows,
         "positions_db_only": drift_rows,
         "hub_exposure": summarize_hub_exposure(live_rows or drift_rows),
@@ -812,6 +845,7 @@ def get_cockpit_payload(*, live_sync: bool = True) -> dict[str, Any]:
         "weather_learning": learning_status,
         "ai_insights": build_ai_insights(
             truth=truth,
+            release_status=release_status,
             lane=lane,
             market_counts=market_counts,
             recent_events=recent_events,

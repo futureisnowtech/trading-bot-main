@@ -130,6 +130,7 @@ def test_build_ai_insights_translates_runtime_into_plain_english():
 
     insights = build_ai_insights(
         truth={"broker_connected": True, "position_drift": {"has_drift": False}},
+        release_status={"current_release_verdict": "READY_FOR_LIVE", "entries_allowed": True},
         lane={"readiness_state": "OPERATIONAL"},
         market_counts={"active_markets": 168},
         recent_events=[
@@ -157,6 +158,7 @@ def test_build_ai_insights_translates_runtime_into_plain_english():
     bodies = " ".join(row["body"] for row in insights)
 
     assert "Engine Live" in titles
+    assert "Release Gate Open" in titles
     assert "Learner Active" in titles
     assert "Ledger Reconciled" in titles
     assert "Universe Refreshed" in titles

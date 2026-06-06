@@ -2,6 +2,8 @@ import os
 import logging
 import json
 import time
+import io
+from contextlib import redirect_stderr, redirect_stdout
 from typing import Optional, List, Dict
 from notifications import agent_tools
 from config import GEMINI_MODEL
@@ -26,6 +28,46 @@ def get_reasoning_model_id() -> str:
     if model.startswith("models/"):
         return model
     return f"models/{model}"
+
+
+def probe_reasoning_model() -> dict:
+    """Cheap handshake probe used by release audits and operator truth."""
+    model_id = get_reasoning_model_id()
+    payload = {
+        "ok": False,
+        "model_id": model_id,
+        "response_preview": "",
+        "error": "",
+    }
+
+    api_key = os.environ.get("GOOGLE_API_KEY")
+    if not api_key:
+        payload["error"] = "GOOGLE_API_KEY is not set."
+        return payload
+    if not HAS_GENAI_SDK:
+        payload["error"] = "google-genai package not installed."
+        return payload
+
+    try:
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            client = genai.Client(api_key=api_key)
+            response = client.models.generate_content(
+                model=model_id,
+                contents="Reply with OK",
+                config=types.GenerateContentConfig(
+                    temperature=0.0,
+                    max_output_tokens=8,
+                ),
+            )
+        text = str(getattr(response, "text", "") or "").strip()
+        payload["response_preview"] = text[:24]
+        payload["ok"] = bool(text)
+        if not payload["ok"]:
+            payload["error"] = "empty model response"
+    except Exception as exc:
+        payload["error"] = str(exc)
+
+    return payload
 
 def get_repo_context() -> str:
     """
@@ -89,6 +131,13 @@ def get_repo_context() -> str:
     except Exception:
         pass
 
+    # 7. Release-gate truth
+    try:
+        release_status = json.loads(agent_tools.get_release_status())
+        context.append("### RELEASE GATE STATUS\n" + json.dumps(release_status, indent=2))
+    except Exception:
+        pass
+
     return "\n\n".join(context)
 
 def execute_sql(query: str) -> str: return agent_tools.execute_sql(query)
@@ -100,8 +149,10 @@ def get_live_kalshi_status() -> str: return agent_tools.get_live_kalshi_status()
 def get_recent_veto_summary() -> str: return agent_tools.get_recent_veto_summary()
 def get_recent_execution_summary() -> str: return agent_tools.get_recent_execution_summary()
 def get_weather_learning_status() -> str: return agent_tools.get_weather_learning_status()
+def get_release_status() -> str: return agent_tools.get_release_status()
 def run_kalshi_diagnostic() -> str: return agent_tools.run_kalshi_diagnostic()
 def run_storage_audit() -> str: return agent_tools.run_storage_audit()
+def run_release_audit(command: str) -> str: return agent_tools.run_release_audit(command)
 
 def ask_ai(query: str) -> str:
     """
@@ -136,8 +187,10 @@ def ask_ai(query: str) -> str:
             get_recent_veto_summary,
             get_recent_execution_summary,
             get_weather_learning_status,
+            get_release_status,
             run_kalshi_diagnostic,
             run_storage_audit,
+            run_release_audit,
             execute_sql,
             read_file,
             list_files,

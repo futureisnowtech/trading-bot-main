@@ -207,6 +207,12 @@ if verify_script.exists():
 else:
     fail("scripts/verify_kalshi_connection.py missing")
 
+release_audit_script = _REPO_ROOT / "scripts" / "release_audit.py"
+if release_audit_script.exists():
+    ok("Release audit script present")
+else:
+    fail("scripts/release_audit.py missing")
+
 
 print("\n--- Summary ---")
 if _warnings:

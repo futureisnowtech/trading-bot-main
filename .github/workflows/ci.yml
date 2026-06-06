@@ -62,6 +62,7 @@ jobs:
             tests/proof/test_trading_control.py \
             tests/proof/test_scheduler_cadence_config.py \
             tests/proof/test_runtime_layer.py \
+            tests/proof/test_release_audit.py \
             -k "forecast or weather or rbi or lane_economics_forecast or forecast_lane" \
             --tb=long \
             --no-header \

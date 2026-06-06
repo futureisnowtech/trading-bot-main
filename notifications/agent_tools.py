@@ -166,6 +166,16 @@ def get_weather_learning_status() -> str:
         logger.error("AI weather learning summary error: %s", e)
         return f"Error: {str(e)}"
 
+def get_release_status() -> str:
+    """Return the current release-gate verdict and live blocker summary."""
+    try:
+        from runtime.operator_truth import get_release_status as _get_release_status
+
+        return json.dumps(_get_release_status(), indent=2)
+    except Exception as e:
+        logger.error("AI release status error: %s", e)
+        return f"Error: {str(e)}"
+
 def run_kalshi_diagnostic() -> str:
     """Run the repo's live Kalshi connectivity diagnostic script."""
     script_path = os.path.join(os.getcwd(), "scripts", "verify_kalshi_connection.py")
@@ -202,6 +212,29 @@ def run_storage_audit() -> str:
     except Exception as e:
         return f"Error: {str(e)}"
 
+def run_release_audit(command: str) -> str:
+    """Run the canonical release audit in local, remote, or promote mode."""
+    allowed = {
+        "local": [sys.executable, "scripts/release_audit.py", "--local", "--format", "json"],
+        "remote": [sys.executable, "scripts/release_audit.py", "--remote", "--format", "json"],
+        "promote": [sys.executable, "scripts/release_audit.py", "--promote", "--format", "json"],
+    }
+    key = str(command or "").strip().lower()
+    if key not in allowed:
+        return "Error: command must be one of: local, remote, promote."
+    try:
+        result = subprocess.check_output(
+            allowed[key],
+            stderr=subprocess.STDOUT,
+            timeout=900,
+            text=True,
+        )
+        return result if result else "Success (no output)."
+    except subprocess.CalledProcessError as e:
+        return e.output or f"Error: command exited {e.returncode}"
+    except Exception as e:
+        return f"Error: {str(e)}"
+
 def run_safe_command(command: str) -> str:
     """Runs restricted shell commands (grep, py_compile, git status, git diff)."""
     allowed_exact = {
@@ -211,6 +244,8 @@ def run_safe_command(command: str) -> str:
         "python3 scripts/storage_audit.py",
         "python scripts/storage_audit.py",
         f"{sys.executable} scripts/storage_audit.py",
+        f"{sys.executable} scripts/release_audit.py --local",
+        f"{sys.executable} scripts/release_audit.py --remote",
     }
     allowed_bases = ["grep", "python3 -m py_compile", "git status", "git diff", "find"]
     is_allowed = any(command.startswith(base) for base in allowed_bases)

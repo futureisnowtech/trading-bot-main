@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -29,6 +30,13 @@ def _json_or_empty(value: Any) -> dict:
         return parsed if isinstance(parsed, dict) else {}
     except Exception:
         return {}
+
+
+def _coerce_float(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _parse_utc(value: Any) -> datetime | None:
@@ -359,6 +367,111 @@ def get_weather_learning_status(*, db_path: str = DB_PATH) -> dict:
     return payload
 
 
+def get_weather_provider_status(
+    *,
+    db_path: str = DB_PATH,
+    contract_limit: int = 8,
+) -> dict:
+    payload = {
+        "data_present": False,
+        "provider_mode": "",
+        "forecast_source": "",
+        "sample_ticker": "",
+        "weather_age_minutes": None,
+        "active_weather_contracts": 0,
+        "checked_contracts": 0,
+    }
+
+    try:
+        from data.kalshi_weather_monitor import get_contract_weather_data
+        from forecast.db import get_active_contracts
+
+        active = get_active_contracts(db_path=db_path)
+        weather_contracts = [
+            contract
+            for contract in active
+            if any(
+                token in str(contract.get("local_symbol") or "")
+                for token in ("KXHIGH", "KXLOW", "KXRAIN")
+            )
+        ]
+        payload["active_weather_contracts"] = len(weather_contracts)
+
+        for contract in weather_contracts[: max(1, int(contract_limit))]:
+            payload["checked_contracts"] += 1
+            ticker = str(contract.get("local_symbol") or "")
+            weather = get_contract_weather_data(
+                ticker,
+                contract_name=str(contract.get("contract_name") or ""),
+                strike=_coerce_float(contract.get("strike")),
+                resolution_at=str(contract.get("resolution_at") or ""),
+                last_trade_at=str(contract.get("last_trade_at") or ""),
+            )
+            if not weather:
+                continue
+
+            age_minutes = None
+            ts_value = _coerce_float(weather.get("timestamp"))
+            if ts_value is not None:
+                age_minutes = max(0.0, (time.time() - ts_value) / 60.0)
+
+            payload.update(
+                {
+                    "data_present": True,
+                    "provider_mode": str(weather.get("provider_mode") or ""),
+                    "forecast_source": str(weather.get("forecast_source") or ""),
+                    "sample_ticker": ticker,
+                    "weather_age_minutes": (
+                        round(age_minutes, 2) if age_minutes is not None else None
+                    ),
+                }
+            )
+            break
+    except Exception as exc:
+        payload["error"] = str(exc)
+
+    return payload
+
+
+def get_balance_truth_status(
+    *,
+    truth: dict | None = None,
+    db_path: str = DB_PATH,
+    tolerance_usd: float = 1.0,
+) -> dict:
+    if truth is None:
+        truth = get_live_kalshi_status(
+            db_path=db_path,
+            connect=False,
+            sync_broker=False,
+            include_recent_vetoes=False,
+            include_recent_execution=False,
+        )
+
+    lane = truth.get("forecast_lane") or {}
+    snapshot = truth.get("forecast_snapshot") or {}
+    broker_balance = _coerce_float(truth.get("balance_usd"))
+    runtime_balance = _coerce_float(lane.get("buying_power_usd"))
+    if runtime_balance is None:
+        runtime_balance = _coerce_float(snapshot.get("equity"))
+
+    comparison_available = broker_balance is not None and runtime_balance is not None
+    delta_usd = None
+    balance_ok = broker_balance is not None
+    if comparison_available:
+        delta_usd = round(float(broker_balance) - float(runtime_balance), 2)
+        balance_ok = abs(delta_usd) <= max(0.0, float(tolerance_usd))
+
+    return {
+        "broker_balance_usd": broker_balance,
+        "runtime_balance_usd": runtime_balance,
+        "comparison_available": comparison_available,
+        "delta_usd": delta_usd,
+        "tolerance_usd": float(tolerance_usd),
+        "balance_ok": balance_ok,
+    }
+
+
 def get_live_kalshi_status(
     *,
     db_path: str = DB_PATH,
@@ -463,3 +576,189 @@ def get_live_kalshi_status(
         payload["recent_execution"] = get_recent_execution_summary(db_path=db_path)
     payload["weather_learning"] = get_weather_learning_status(db_path=db_path)
     return payload
+
+
+def get_release_status(
+    *,
+    db_path: str = DB_PATH,
+    truth: dict | None = None,
+) -> dict:
+    from runtime.build_info import get_build_info
+    from runtime.incident_tracker import get_incident_summary, get_open_incidents
+    from runtime.release_gate import (
+        PASSING_VERDICTS,
+        VERDICT_BLOCKED,
+        VERDICT_PASS_WITH_WARNINGS,
+        VERDICT_READY_FOR_LIVE,
+        is_infrastructure_reason,
+        load_release_audit_artifact,
+    )
+
+    if truth is None:
+        truth = get_live_kalshi_status(
+            db_path=db_path,
+            connect=False,
+            sync_broker=False,
+            include_recent_execution=False,
+        )
+
+    build = get_build_info()
+    artifact = load_release_audit_artifact()
+    lane = truth.get("forecast_lane") or {}
+    veto_summary = truth.get("recent_vetoes") or get_recent_veto_summary(db_path=db_path)
+    incident_summary = get_incident_summary(db_path=db_path)
+    open_incidents = get_open_incidents(db_path=db_path)
+    provider = get_weather_provider_status(db_path=db_path)
+    balance_truth = get_balance_truth_status(truth=truth, db_path=db_path)
+
+    blockers: list[str] = []
+    warnings: list[str] = []
+
+    artifact_verdict = str(artifact.get("verdict") or "")
+    artifact_sha = str(artifact.get("audited_sha") or "").strip()
+    build_sha = str(build.get("sha") or "").strip()
+    artifact_matches_build = bool(artifact_sha and build_sha and artifact_sha == build_sha)
+
+    if not artifact:
+        blockers.append("release_audit_missing")
+    elif artifact_verdict not in PASSING_VERDICTS:
+        blockers.append(f"release_audit_not_passing ({artifact_verdict or 'UNKNOWN'})")
+    elif build_sha and not artifact_sha:
+        blockers.append("release_audit_sha_missing")
+    elif build_sha and not artifact_matches_build:
+        blockers.append(
+            f"release_audit_sha_mismatch ({artifact_sha or 'missing'} != {build_sha})"
+        )
+
+    if not bool(truth.get("broker_connected")):
+        blockers.append(
+            str(truth.get("broker_error") or "broker_disconnected")
+        )
+    broker_error = str(truth.get("broker_error") or "")
+    if broker_error and any(
+        token in broker_error
+        for token in (
+            "get_account_balance_failed",
+            "get_positions_failed",
+            "sync_positions_failed",
+        )
+    ):
+        blockers.append(broker_error)
+
+    if bool(lane.get("heartbeat_stale")):
+        blockers.append("stale_runtime_heartbeat")
+
+    if int(incident_summary.get("by_severity", {}).get("CRITICAL", 0) or 0) > 0:
+        blockers.append("unresolved_critical_incidents")
+
+    if build.get("metadata_stale"):
+        blockers.append("deploy_runtime_metadata_stale")
+
+    if int(truth.get("active_markets") or 0) > 0:
+        provider_mode = str(provider.get("provider_mode") or "").strip()
+        if not provider.get("data_present"):
+            blockers.append("weather_provider_unavailable")
+        elif not provider_mode:
+            blockers.append("provider_mode_unknown")
+        else:
+            from config import KALSHI_DATA_FRESHNESS_MINUTES
+
+            age_minutes = provider.get("weather_age_minutes")
+            if (
+                age_minutes is not None
+                and float(age_minutes) > float(KALSHI_DATA_FRESHNESS_MINUTES)
+            ):
+                blockers.append(
+                    f"stale_ensemble_data ({float(age_minutes):.0f}m old)"
+                )
+
+    if not balance_truth.get("balance_ok"):
+        if balance_truth.get("comparison_available"):
+            blockers.append(
+                f"balance_truth_mismatch ({balance_truth.get('delta_usd')} usd)"
+            )
+        else:
+            blockers.append("get_account_balance_failed")
+
+    top_warning_reasons = [
+        row
+        for row in (veto_summary.get("top_reasons") or [])
+        if not is_infrastructure_reason(str(row.get("reason") or ""))
+    ][:5]
+    if top_warning_reasons:
+        warnings.append(
+            ", ".join(
+                f"{row.get('reason')} x{row.get('count')}"
+                for row in top_warning_reasons[:3]
+            )
+        )
+
+    artifact_warnings = artifact.get("warnings") or []
+    for warning in artifact_warnings:
+        text = str(warning or "").strip()
+        if text:
+            warnings.append(text)
+
+    deduped_blockers: list[str] = []
+    seen_blockers: set[str] = set()
+    for item in blockers:
+        text = str(item or "").strip()
+        if text and text not in seen_blockers:
+            seen_blockers.add(text)
+            deduped_blockers.append(text)
+
+    deduped_warnings: list[str] = []
+    seen_warnings: set[str] = set()
+    for item in warnings:
+        text = str(item or "").strip()
+        if text and text not in seen_warnings:
+            seen_warnings.add(text)
+            deduped_warnings.append(text)
+
+    if deduped_blockers:
+        verdict = VERDICT_BLOCKED
+    elif artifact_verdict == VERDICT_PASS_WITH_WARNINGS:
+        verdict = VERDICT_PASS_WITH_WARNINGS
+    elif artifact_verdict == VERDICT_READY_FOR_LIVE:
+        verdict = VERDICT_READY_FOR_LIVE
+    else:
+        verdict = VERDICT_PASS_WITH_WARNINGS if deduped_warnings else VERDICT_BLOCKED
+
+    return {
+        "current_release_verdict": verdict,
+        "entries_allowed": verdict in PASSING_VERDICTS,
+        "last_audit_at": str(artifact.get("as_of") or ""),
+        "last_successful_audit_at": str(
+            artifact.get("last_successful_audit_at")
+            or artifact.get("as_of")
+            or ""
+        ),
+        "provider_mode": str(provider.get("provider_mode") or ""),
+        "provider_status": provider,
+        "balance_truth": balance_truth,
+        "heartbeat_fresh": not bool(lane.get("heartbeat_stale")),
+        "heartbeat_age_seconds": lane.get("heartbeat_age_seconds"),
+        "top_infrastructure_blockers": deduped_blockers[:6],
+        "top_non_blocking_veto_reasons": top_warning_reasons,
+        "deploy_parity": {
+            "build_sha": build_sha,
+            "artifact_sha": artifact_sha,
+            "artifact_matches_build": artifact_matches_build,
+            "metadata_stale": bool(build.get("metadata_stale")),
+            "version": str(build.get("app_version") or ""),
+            "deployed_at_utc": str(build.get("deployed_at_utc") or ""),
+        },
+        "open_incidents": incident_summary,
+        "critical_incidents": [
+            {
+                "source": row.get("source"),
+                "severity": row.get("severity"),
+                "sample_message": row.get("sample_message"),
+            }
+            for row in open_incidents
+            if str(row.get("severity") or "").upper() == "CRITICAL"
+        ][:5],
+        "artifact_verdict": artifact_verdict,
+        "artifact_entries_allowed": bool(artifact.get("entries_allowed")),
+        "warnings": deduped_warnings[:6],
+    }

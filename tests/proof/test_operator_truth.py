@@ -226,3 +226,143 @@ def test_live_kalshi_status_downgrades_stale_lane_heartbeat(proof_runtime, monke
     assert lane["connected"] == 0
     assert lane["readiness_state"] == "STALE_HEARTBEAT"
     assert lane["blocked_reason"] == "stale_runtime_heartbeat"
+
+
+def test_release_status_surfaces_passing_artifact_and_provider(proof_runtime, monkeypatch):
+    import runtime.build_info as bi
+    import runtime.incident_tracker as it
+    import runtime.operator_truth as ot
+    import runtime.release_gate as rg
+
+    db = str(proof_runtime.db_path)
+    monkeypatch.setattr(ot, "DB_PATH", db, raising=False)
+    monkeypatch.setattr(
+        rg,
+        "load_release_audit_artifact",
+        lambda: {
+            "verdict": "READY_FOR_LIVE",
+            "audited_sha": "abc123",
+            "entries_allowed": True,
+            "as_of": "2026-06-05T20:00:00+00:00",
+            "last_successful_audit_at": "2026-06-05T20:00:00+00:00",
+        },
+    )
+    monkeypatch.setattr(
+        bi,
+        "get_build_info",
+        lambda: {
+            "sha": "abc123",
+            "app_version": "19.10.3",
+            "metadata_stale": False,
+            "deployed_at_utc": "2026-06-05T20:00:00Z",
+        },
+    )
+    monkeypatch.setattr(
+        it,
+        "get_incident_summary",
+        lambda db_path=db: {"total_open": 0, "by_severity": {}},
+    )
+    monkeypatch.setattr(it, "get_open_incidents", lambda db_path=db: [])
+    monkeypatch.setattr(
+        ot,
+        "get_weather_provider_status",
+        lambda db_path=db, contract_limit=8: {
+            "data_present": True,
+            "provider_mode": "deterministic_multi_model",
+            "forecast_source": "open_meteo_deterministic",
+            "weather_age_minutes": 14.0,
+        },
+    )
+
+    payload = ot.get_release_status(
+        db_path=db,
+        truth={
+            "broker_connected": True,
+            "broker_error": "",
+            "balance_usd": 164.0,
+            "active_markets": 12,
+            "forecast_lane": {
+                "readiness_state": "OPERATIONAL",
+                "heartbeat_stale": False,
+                "heartbeat_age_seconds": 30.0,
+                "buying_power_usd": 164.0,
+            },
+            "forecast_snapshot": {"equity": 164.0},
+            "recent_vetoes": {
+                "top_reasons": [
+                    {"reason": "no_strategy_signal", "count": 4},
+                    {"reason": "missing_quotes", "count": 1},
+                ]
+            },
+        },
+    )
+
+    assert payload["current_release_verdict"] == "READY_FOR_LIVE"
+    assert payload["entries_allowed"] is True
+    assert payload["provider_mode"] == "deterministic_multi_model"
+    assert payload["deploy_parity"]["artifact_matches_build"] is True
+    assert payload["top_non_blocking_veto_reasons"][0]["reason"] == "no_strategy_signal"
+
+
+def test_release_status_blocks_balance_truth_mismatch(proof_runtime, monkeypatch):
+    import runtime.build_info as bi
+    import runtime.incident_tracker as it
+    import runtime.operator_truth as ot
+    import runtime.release_gate as rg
+
+    db = str(proof_runtime.db_path)
+    monkeypatch.setattr(ot, "DB_PATH", db, raising=False)
+    monkeypatch.setattr(
+        rg,
+        "load_release_audit_artifact",
+        lambda: {
+            "verdict": "READY_FOR_LIVE",
+            "audited_sha": "abc123",
+            "entries_allowed": True,
+            "as_of": "2026-06-05T20:00:00+00:00",
+        },
+    )
+    monkeypatch.setattr(
+        bi,
+        "get_build_info",
+        lambda: {"sha": "abc123", "app_version": "19.10.3", "metadata_stale": False},
+    )
+    monkeypatch.setattr(
+        it,
+        "get_incident_summary",
+        lambda db_path=db: {"total_open": 0, "by_severity": {}},
+    )
+    monkeypatch.setattr(it, "get_open_incidents", lambda db_path=db: [])
+    monkeypatch.setattr(
+        ot,
+        "get_weather_provider_status",
+        lambda db_path=db, contract_limit=8: {
+            "data_present": True,
+            "provider_mode": "deterministic_multi_model",
+            "weather_age_minutes": 10.0,
+        },
+    )
+
+    payload = ot.get_release_status(
+        db_path=db,
+        truth={
+            "broker_connected": True,
+            "broker_error": "",
+            "balance_usd": 164.0,
+            "active_markets": 6,
+            "forecast_lane": {
+                "readiness_state": "OPERATIONAL",
+                "heartbeat_stale": False,
+                "heartbeat_age_seconds": 15.0,
+                "buying_power_usd": 120.0,
+            },
+            "forecast_snapshot": {"equity": 120.0},
+            "recent_vetoes": {"top_reasons": []},
+        },
+    )
+
+    assert payload["current_release_verdict"] == "BLOCKED"
+    assert any(
+        "balance_truth_mismatch" in blocker
+        for blocker in payload["top_infrastructure_blockers"]
+    )

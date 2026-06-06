@@ -620,6 +620,7 @@ with st.sidebar:
 
 payload = _load_payload(live_sync)
 truth = payload["truth"]
+release_status = payload["release_status"]
 lane = truth.get("forecast_lane") or {}
 regime = payload["regime"]
 deploy = payload["deploy"]
@@ -659,13 +660,27 @@ _render_html(
         <div class="chip">Version {html.escape(str(regime['version']))}</div>
         <div class="chip">Lane {html.escape(str(lane.get('readiness_state') or 'UNKNOWN'))}</div>
         <div class="chip">Health {html.escape(str(lane.get('health') or 'UNKNOWN'))}</div>
+        <div class="chip">Release {html.escape(str(release_status.get('current_release_verdict') or 'UNKNOWN'))}</div>
         <div class="chip">Broker {'CONNECTED' if truth.get('broker_connected') else 'DISCONNECTED'}</div>
         <div class="chip">Model {html.escape(str(regime['reasoning_model']))}</div>
         <div class="chip">Deploy {html.escape(str(deploy.get('sha') or 'local'))[:7]}</div>
       </div>
     </div>
     """,
-)
+    )
+
+if not release_status.get("entries_allowed"):
+    blockers = release_status.get("top_infrastructure_blockers") or []
+    blocker_text = blockers[0] if blockers else "release audit not yet promoted"
+    _render_html(
+        f"""
+        <div class="banner">
+          <strong>Fresh entries are paused by the release gate.</strong>
+          The runtime is still live for monitoring and exits, but new trades stay blocked until the production blockers clear.
+          Current blocker: {html.escape(str(blocker_text))}.
+        </div>
+        """,
+    )
 
 if drift.get("has_drift"):
     _render_html(
@@ -684,6 +699,7 @@ metric_html = f"""
   {_metric_card("Live Cash", _fmt_money(balance), "Broker-reported balance", "tone-mint", metric_explainers.get("Live Cash"))}
   {_metric_card("Open Positions", str(positions_count), "Broker-truth live positions", "tone-cyan", metric_explainers.get("Open Positions"))}
   {_metric_card("Active Markets", str(market_counts['active_markets']), f"{market_counts['active_contracts']} active contracts", "tone-blue", metric_explainers.get("Active Markets"))}
+  {_metric_card("Release Gate", str(release_status.get('current_release_verdict') or 'UNKNOWN'), "fresh-entry permission state", "tone-mint" if release_status.get('entries_allowed') else "tone-amber", metric_explainers.get("Release Gate"))}
   {_metric_card("Drift", "YES" if drift.get('has_drift') else "NO", f"{len(positions_db_only)} db-only remnants", "tone-bad" if drift.get('has_drift') else "tone-mint", metric_explainers.get("Drift"))}
   {_metric_card("Realized P&L", _fmt_money(realized_pnl), "From Kalshi trade ledger", "tone-amber" if realized_pnl < 0 else "tone-mint", metric_explainers.get("Realized P&L"))}
 </div>

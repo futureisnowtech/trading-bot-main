@@ -83,17 +83,22 @@ def get_kalshi_state() -> Dict[str, Any]:
         "active_markets": 0,
         "drift": {},
         "broker_connected": False,
+        "release_verdict": "UNKNOWN",
+        "entries_allowed": False,
     }
     
     try:
-        from runtime.operator_truth import get_live_kalshi_status
+        from runtime.operator_truth import get_live_kalshi_status, get_release_status
 
         truth = get_live_kalshi_status()
+        release = get_release_status(truth=truth)
         state["balance"] = float(truth.get("balance_usd") or 0.0)
         state["positions"] = list(truth.get("broker_positions") or [])
         state["active_markets"] = int(truth.get("active_markets") or 0)
         state["drift"] = dict(truth.get("position_drift") or {})
         state["broker_connected"] = bool(truth.get("broker_connected"))
+        state["release_verdict"] = str(release.get("current_release_verdict") or "UNKNOWN")
+        state["entries_allowed"] = bool(release.get("entries_allowed"))
             
         # Hub exposure logic
         from forecast.strategy_engine import _get_city_hub
@@ -122,6 +127,8 @@ def build_main_menu_msg() -> str:
         f"Balance: {format_currency(k['balance'])}",
         f"Positions: {len(k['positions'])}/15",
         f"Active Hubs: {len(k['hubs'])}",
+        f"Release Gate: {k['release_verdict']}",
+        f"Entries: {'LIVE' if k['entries_allowed'] else 'PAUSED'}",
         f"Drift: {'YES' if k.get('drift', {}).get('has_drift') else 'NO'}",
         "",
         "<i>Tap a module below for deep-dive analysis.</i>"

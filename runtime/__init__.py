@@ -6,6 +6,7 @@ Modules:
   incident_tracker    — incidents table: groups repeated errors
   position_reconciler — reconciles open_positions against trades ledger
   economics           — unified lane-aware fee/edge interface
+  release_gate        — release audit artifacts + live entry permission
 """
 
 __all__ = [
@@ -14,5 +15,6 @@ __all__ = [
     "position_reconciler",
     "live_account",
     "economics",
+    "release_gate",
     "spot_kill_switch",
 ]

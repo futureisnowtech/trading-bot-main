@@ -152,9 +152,10 @@ def _load_forecast_snapshot() -> dict:
 def _build_local_audit_snapshot() -> tuple[str, str]:
     """Build a dashboard-free audit snapshot directly from DB and process state."""
     from runtime.incident_tracker import get_incident_summary
-    from runtime.operator_truth import get_live_kalshi_status
+    from runtime.operator_truth import get_live_kalshi_status, get_release_status
 
     truth = get_live_kalshi_status()
+    release = get_release_status(truth=truth)
     snapshot = truth.get("forecast_snapshot") or _load_forecast_snapshot()
     raw_lines: list[str] = []
 
@@ -204,26 +205,35 @@ def _build_local_audit_snapshot() -> tuple[str, str]:
     broker_positions_count = int(truth.get("broker_positions_count") or 0)
     learning = truth.get("weather_learning") or {}
     learning_global = learning.get("global_blend") or {}
+    release_verdict = str(release.get("current_release_verdict") or "UNKNOWN")
+    entries_allowed = bool(release.get("entries_allowed"))
+    provider_mode = str(release.get("provider_mode") or "unknown")
 
     msg_lines = [
         "<b>SOVEREIGN KALSHI AUDIT</b>",
         f"Status: {health}",
         f"Readiness: {readiness}",
+        f"Release Gate: {release_verdict}",
+        f"Entries Allowed: {'YES' if entries_allowed else 'NO'}",
         f"Open Incidents: {incidents.get('total_open', 0)}",
         f"CPU/RAM: {psutil.cpu_percent():.0f}% / {psutil.virtual_memory().percent:.0f}%",
         "",
         f"🌪 <b>WEATHER ENGINE</b> ({active_markets} active markets)",
         f"Equity: ${balance:,.2f}",
         f"Open Positions: {broker_positions_count}",
+        f"Provider Mode: {provider_mode}",
     ]
     raw_lines.extend(
         [
             f"Status: {health}",
             f"Readiness: {readiness}",
+            f"Release Gate: {release_verdict}",
+            f"Entries Allowed: {'YES' if entries_allowed else 'NO'}",
             f"Open Incidents: {incidents.get('total_open', 0)}",
             f"Active Markets: {active_markets}",
             f"Equity: ${balance:,.2f}",
             f"Open Positions: {broker_positions_count}",
+            f"Provider Mode: {provider_mode}",
         ]
     )
 
@@ -246,6 +256,11 @@ def _build_local_audit_snapshot() -> tuple[str, str]:
         raw_lines.append("Truth Drift: YES")
     else:
         raw_lines.append("Truth Drift: NO")
+
+    blockers = release.get("top_infrastructure_blockers") or []
+    if blockers:
+        msg_lines.append(f"Top Blocker: {blockers[0]}")
+        raw_lines.append(f"Top Blocker: {blockers[0]}")
 
     broker_positions = truth.get("broker_positions") or []
     if broker_positions:
@@ -290,9 +305,10 @@ def restricted_access(func):
 
 @restricted_access
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    from runtime.operator_truth import get_live_kalshi_status
+    from runtime.operator_truth import get_live_kalshi_status, get_release_status
 
     truth = get_live_kalshi_status()
+    release = get_release_status(truth=truth)
     balance = float(truth.get("balance_usd") or 0.0)
     active_markets = int(truth.get("active_markets") or 0)
     broker_positions_count = int(truth.get("broker_positions_count") or 0)
@@ -311,7 +327,11 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Balance: ${balance:,.2f}\n"
         f"Active Markets: {active_markets}\n"
         f"Broker Positions: {broker_positions_count}\n"
+        f"Release Gate: {release.get('current_release_verdict')}\n"
+        f"Entries Allowed: {'YES' if release.get('entries_allowed') else 'NO'}\n"
+        f"Provider Mode: {release.get('provider_mode') or 'unknown'}\n"
         f"Truth Drift: {'YES' if drift.get('has_drift') else 'NO'}\n"
+        f"Infra Blockers: {len(release.get('top_infrastructure_blockers') or [])}\n"
         f"AI Spend (24h): ${usd_spent:.4f}"
     )
     await _reply_text(update, msg, parse_mode=ParseMode.HTML)

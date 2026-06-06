@@ -670,6 +670,27 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                 )
                 return []
 
+            from runtime.operator_truth import get_release_status
+
+            release_status = get_release_status()
+            if not bool(release_status.get("entries_allowed")):
+                verdict = str(
+                    release_status.get("current_release_verdict") or "BLOCKED"
+                )
+                blockers = release_status.get("top_infrastructure_blockers") or []
+                blocker_text = ", ".join(str(item) for item in blockers[:3]) or "release_audit_not_promoted"
+                logger.warning(
+                    "[ForecastRunner] Entry gate closed by release audit (%s): %s",
+                    verdict,
+                    blocker_text,
+                )
+                log_event(
+                    "WARNING",
+                    "ForecastRunner",
+                    f"[ForecastRunner] entry_gate_blocked: {verdict} ({blocker_text})",
+                )
+                return []
+
             buying_power_usd = bankroll
 
             # Open event families (to detect same-event exposure)

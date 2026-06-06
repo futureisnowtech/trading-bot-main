@@ -76,6 +76,9 @@ python3 sniper_cron.py
 python3 execution_daemon.py
 python3 telegram_daemon.py
 python3 scripts/verify_kalshi_connection.py
+python3 scripts/release_audit.py --local
+python3 scripts/release_audit.py --remote
+python3 scripts/release_audit.py --promote
 python3 scripts/storage_audit.py
 python3 scripts/validate.py
 ```

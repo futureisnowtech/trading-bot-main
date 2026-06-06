@@ -268,7 +268,8 @@ print("  cockpit provenance mirrored to /app/logs")
 PYEOF
 
 echo "  Running hosted release audit (soak=${RELEASE_AUDIT_SOAK_SECONDS}s)..."
-python3 scripts/release_audit.py --remote-hosted --scan-limit 12 --soak-seconds ${RELEASE_AUDIT_SOAK_SECONDS}
+docker exec -i execution-engine sh -lc \
+  "cd /app && python3 scripts/release_audit.py --remote-hosted --scan-limit 12 --soak-seconds ${RELEASE_AUDIT_SOAK_SECONDS}"
 
 echo "  version.txt contents:"
 cat ${PROJECT_DIR}/version.txt

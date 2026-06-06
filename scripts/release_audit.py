@@ -144,6 +144,10 @@ def _git_head_sha() -> str:
         return ""
 
 
+def _running_in_container() -> bool:
+    return Path("/.dockerenv").exists()
+
+
 def _build_quote_map(snapshot) -> dict[str, Any]:
     yes_quote = snapshot.yes_quote or {}
     no_quote = snapshot.no_quote or {}
@@ -571,13 +575,19 @@ def _docker_service_status() -> dict[str, Any]:
 
 
 def _cockpit_health() -> dict[str, Any]:
-    url = "http://127.0.0.1:8501/_stcore/health"
-    try:
-        with urllib.request.urlopen(url, timeout=5) as resp:
-            body = resp.read().decode("utf-8").strip()
-        return {"ok": body == "ok", "url": url, "body": body}
-    except Exception as exc:
-        return {"ok": False, "url": url, "error": str(exc)}
+    urls = [
+        "http://127.0.0.1:8501/_stcore/health",
+        "http://kalshi-cockpit:8501/_stcore/health",
+    ]
+    last_error = ""
+    for url in urls:
+        try:
+            with urllib.request.urlopen(url, timeout=5) as resp:
+                body = resp.read().decode("utf-8").strip()
+            return {"ok": body == "ok", "url": url, "body": body}
+        except Exception as exc:
+            last_error = str(exc)
+    return {"ok": False, "url": urls[-1], "error": last_error}
 
 
 def _run_remote_hosted_audit(*, scan_limit: int, soak_seconds: int) -> dict[str, Any]:
@@ -591,6 +601,7 @@ def _run_remote_hosted_audit(*, scan_limit: int, soak_seconds: int) -> dict[str,
     containers = _docker_service_status()
     cockpit = _cockpit_health()
     model_probe = probe_reasoning_model()
+    container_mode = _running_in_container()
 
     open_positions = truth.get("broker_positions") or truth.get("db_positions") or []
     bankroll = _coerce_float(truth.get("balance_usd"), ACCOUNT_SIZE)
@@ -623,11 +634,14 @@ def _run_remote_hosted_audit(*, scan_limit: int, soak_seconds: int) -> dict[str,
         blockers.append("unresolved_critical_incidents")
 
     services = containers.get("services") or {}
-    for name, status in services.items():
-        if not bool(status.get("up")):
-            blockers.append(f"{name}_down")
-    if containers.get("error"):
-        blockers.append(f"docker_ps_failed ({containers['error']})")
+    if not container_mode:
+        for name, status in services.items():
+            if not bool(status.get("up")):
+                blockers.append(f"{name}_down")
+        if containers.get("error"):
+            blockers.append(f"docker_ps_failed ({containers['error']})")
+    elif containers.get("error"):
+        warnings.append("docker_service_check_skipped_in_container_mode")
 
     if not bool(cockpit.get("ok")):
         blockers.append("cockpit_health_failed")
@@ -704,6 +718,7 @@ def _run_remote_hosted_audit(*, scan_limit: int, soak_seconds: int) -> dict[str,
                 ][:5],
             },
             "market_scan": scan,
+            "container_mode": container_mode,
         },
     }
     markdown = _render_markdown_report(payload)
@@ -717,6 +732,10 @@ def _run_remote_hosted_audit(*, scan_limit: int, soak_seconds: int) -> dict[str,
 
 def _run_remote_audit(*, scan_limit: int, soak_seconds: int) -> dict[str, Any]:
     local_sha = _git_head_sha()
+    container_audit_cmd = (
+        f"cd /app && python3 scripts/release_audit.py --remote-hosted "
+        f"--scan-limit {int(scan_limit)} --soak-seconds {int(soak_seconds)} --format json"
+    )
     remote_cmd = [
         "ssh",
         "-p",
@@ -728,8 +747,8 @@ def _run_remote_audit(*, scan_limit: int, soak_seconds: int) -> dict[str, Any]:
         f"{REMOTE_USER}@{REMOTE_HOST}",
         (
             f"cd {shlex.quote(REMOTE_PROJECT_DIR)} && "
-            f"python3 scripts/release_audit.py --remote-hosted "
-            f"--scan-limit {int(scan_limit)} --soak-seconds {int(soak_seconds)} --format json"
+            f"docker exec -i execution-engine sh -lc "
+            f"{shlex.quote(container_audit_cmd)}"
         ),
     ]
     proc = subprocess.run(

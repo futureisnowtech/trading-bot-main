@@ -1029,7 +1029,9 @@ def _strategy_weather_details(
     if semantics.comparator == "between" and mode != "RAIN":
         narrow_bin_size_multiplier = 0.85
 
-    if net_edge_yes is not None and net_edge_yes >= EV_THRESHOLD:
+    effective_ev_threshold = 0.01 if mode == "TEMP" else EV_THRESHOLD
+
+    if net_edge_yes is not None and net_edge_yes >= effective_ev_threshold:
         if cloud_veto:
             if peak_ssrd is not None:
                 return (
@@ -1081,7 +1083,7 @@ def _strategy_weather_details(
             )
         return True, "YES", ensemble_prob, factors, is_taker, sizing_multiplier, conv_tier, sizing_cap
 
-    if net_edge_no is not None and net_edge_no >= EV_THRESHOLD:
+    if net_edge_no is not None and net_edge_no >= effective_ev_threshold:
         is_taker = edge_no >= 0.22 and is_short_term
         factors = [
             f"ensemble_p={ensemble_prob:.1%}",
@@ -1361,9 +1363,12 @@ def evaluate_contract(
             else -1.0
         )
         ev_chosen = ev_yes if best_side == "YES" else ev_no
-        if approved and ev_chosen < EV_THRESHOLD:
+        from forecast.weather_contracts import weather_mode_for_ticker
+        w_mode = weather_mode_for_ticker(ticker)
+        effective_ev_threshold = 0.01 if w_mode == "TEMP" else EV_THRESHOLD
+        if approved and ev_chosen < effective_ev_threshold:
             approved = False
-            veto_reason = f"fee_adjusted_ev_too_low ({ev_chosen:.4f} < {EV_THRESHOLD})"
+            veto_reason = f"fee_adjusted_ev_too_low ({ev_chosen:.4f} < {effective_ev_threshold})"
 
         weather_model_prob_gfs = None
         weather_model_prob_ecmwf = None

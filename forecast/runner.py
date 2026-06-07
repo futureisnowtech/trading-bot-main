@@ -831,11 +831,11 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                 contract = candidate["contract"]
                 local_sym = contract.get("local_symbol", "")
 
-                # ── Temporary Veto: Limit strictly to RAIN and Hourly TEMP (TEMP) for testing ──
+                # ── Temporary Veto: Limit strictly to Hourly TEMP (TEMP) for testing ──
                 from forecast.weather_contracts import weather_mode_for_ticker
                 cand_mode = weather_mode_for_ticker(local_sym)
-                if cand_mode not in ("RAIN", "TEMP"):
-                    logger.info(f"[Test Mode] Skipping non-Rain/Hourly contract: {local_sym} (mode={cand_mode})")
+                if cand_mode != "TEMP":
+                    logger.info(f"[Test Mode] Skipping non-Hourly contract: {local_sym} (mode={cand_mode})")
                     continue
 
                 # Only enter if econ approved AND contracts > 0

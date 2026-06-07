@@ -320,16 +320,16 @@ def run_weather_rbi(force: bool = False) -> None:
 
                 forecast_yes_prob = _clip_prob(row["forecast_yes_prob"])
                 if forecast_yes_prob is not None and resolved_at >= calibration_cutoff:
-                    chosen_prob = (
-                        forecast_yes_prob
-                        if contract_side == "YES"
-                        else (1.0 - forecast_yes_prob)
-                    )
-                    outcome = 1.0 if resolved_side == contract_side else 0.0
+                    if contract_side == "YES":
+                        chosen_prob = forecast_yes_prob
+                        chosen_outcome = 1.0 if resolved_side == "YES" else 0.0
+                    else:
+                        chosen_prob = 1.0 - forecast_yes_prob
+                        chosen_outcome = 1.0 if resolved_side == "NO" else 0.0
                     labeled.append(
                         {
                             "chosen_prob": chosen_prob,
-                            "outcome": outcome,
+                            "outcome": chosen_outcome,
                             "pnl_usd": float(row["pnl_usd"] or 0.0),
                         }
                     )

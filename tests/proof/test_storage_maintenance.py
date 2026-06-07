@@ -39,4 +39,6 @@ def test_maintain_runtime_storage_reports_all_sections(tmp_path):
     assert set(result.keys()) == {"bot_log", "forecast_log", "wal"}
     assert result["bot_log"]["rotated"] is False
     assert result["forecast_log"]["rotated"] is False
-    assert result["wal"]["checkpointed"] is False
+    assert result["wal"]["checkpointed"] is True
+    assert result["wal"]["forced_daily"] is True
+    assert result["wal"]["wal_bytes_before"] == 0

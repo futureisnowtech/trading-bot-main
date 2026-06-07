@@ -10,12 +10,16 @@ def _connected_broker() -> KalshiBroker:
 
 def test_marketable_yes_buy_uses_price_field_and_cost_cap(monkeypatch):
     broker = _connected_broker()
-    captured = {}
+    calls = []
 
     def fake_request(method, path, params=None, body=None):
-        captured["method"] = method
-        captured["path"] = path
-        captured["body"] = body
+        calls.append(
+            {
+                "method": method,
+                "path": path,
+                "body": body,
+            }
+        )
         return {"order": {"status": "resting", "order_id": "ORD-1"}}
 
     monkeypatch.setattr(broker, "_request", fake_request)
@@ -28,20 +32,27 @@ def test_marketable_yes_buy_uses_price_field_and_cost_cap(monkeypatch):
     )
 
     assert result["status"] == "resting"
-    assert captured["method"] == "POST"
-    assert captured["path"] == "/trade-api/v2/portfolio/orders"
-    assert captured["body"]["yes_price"] == 99
-    assert captured["body"]["buy_max_cost"] == 204
-    assert captured["body"]["time_in_force"] == "fill_or_kill"
-    assert "type" not in captured["body"]
+    assert calls[0]["method"] == "POST"
+    assert calls[0]["path"] == "/trade-api/v2/portfolio/orders"
+    assert calls[0]["body"]["yes_price"] == 99
+    assert calls[0]["body"]["buy_max_cost"] == 204
+    assert calls[0]["body"]["time_in_force"] == "fill_or_kill"
+    assert "type" not in calls[0]["body"]
+    assert any(call["method"] == "GET" for call in calls[1:])
 
 
 def test_marketable_no_buy_uses_no_leg_price_field(monkeypatch):
     broker = _connected_broker()
-    captured = {}
+    calls = []
 
     def fake_request(method, path, params=None, body=None):
-        captured["body"] = body
+        calls.append(
+            {
+                "method": method,
+                "path": path,
+                "body": body,
+            }
+        )
         return {"order": {"status": "resting", "order_id": "ORD-2"}}
 
     monkeypatch.setattr(broker, "_request", fake_request)
@@ -54,9 +65,10 @@ def test_marketable_no_buy_uses_no_leg_price_field(monkeypatch):
     )
 
     assert result["status"] == "resting"
-    assert captured["body"]["no_price"] == 99
-    assert captured["body"]["buy_max_cost"] == 110
-    assert "yes_price" not in captured["body"]
+    assert calls[0]["body"]["no_price"] == 99
+    assert calls[0]["body"]["buy_max_cost"] == 110
+    assert "yes_price" not in calls[0]["body"]
+    assert any(call["method"] == "GET" for call in calls[1:])
 
 
 def test_broker_surfaces_rate_limit_status(monkeypatch):
@@ -298,3 +310,47 @@ def test_partial_sell_preserves_remaining_position(monkeypatch):
     assert captured["model_prob_ecmwf"] == 0.79
     assert captured["weather_mode"] == "LOW"
     assert captured["forecast_hours_to_resolution"] == 21.5
+
+
+def test_resting_partial_buy_books_filled_contracts(monkeypatch):
+    broker = _connected_broker()
+    captured = {}
+
+    monkeypatch.setattr(
+        broker,
+        "_request",
+        lambda *args, **kwargs: {"order": {"status": "resting", "order_id": "ORD-REST"}},
+    )
+    monkeypatch.setattr(
+        broker,
+        "_hydrate_order_details",
+        lambda order: {
+            **order,
+            "fill_count_fp": "2.00",
+            "remaining_count": "3.00",
+            "taker_fill_cost_dollars": "1.240000",
+        },
+    )
+    monkeypatch.setattr(broker, "_extract_total_fees", lambda *_args, **_kwargs: 0.14)
+    monkeypatch.setattr("execution.kalshi_broker.log_trade", lambda **kwargs: captured.update(kwargs))
+
+    result = broker.place_buy_order(
+        {"local_symbol": "KXHIGHLAX-26JUN05-B69.5", "right": "C"},
+        qty=5,
+        limit_price=0.62,
+        type="limit",
+        forecast_yes_prob=0.74,
+        model_prob_gfs=0.71,
+        model_prob_ecmwf=0.79,
+        weather_mode="HIGH",
+        forecast_hours_to_resolution=21.5,
+    )
+
+    pos = broker.get_position("KXHIGHLAX-26JUN05-B69.5", "C")
+    assert result["status"] == "resting"
+    assert result["filled_qty"] == 2.0
+    assert result["remaining_order_qty"] == 3.0
+    assert pos is not None
+    assert pos["qty"] == 2.0
+    assert pos["resting_remaining_qty"] == 3.0
+    assert captured["qty"] == 2.0

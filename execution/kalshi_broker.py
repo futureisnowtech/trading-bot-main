@@ -31,6 +31,7 @@ from config import (
     estimate_kalshi_order_fee_usd,
     resolve_runtime_path,
 )
+from forecast.weather_contracts import weather_mode_for_ticker
 from logging_db.trade_logger import log_event, log_trade
 
 logger = logging.getLogger(__name__)
@@ -231,6 +232,18 @@ class KalshiBroker:
                 continue
         return 0.0
 
+    def _extract_remaining_count(self, order_info: dict, requested_qty: int) -> float:
+        for key in ("remaining_count", "remaining_count_fp", "remaining_orders_count", "count_left"):
+            raw = order_info.get(key)
+            if raw in (None, ""):
+                continue
+            try:
+                return max(0.0, float(raw))
+            except (TypeError, ValueError):
+                continue
+        fill_qty = self._extract_fill_count(order_info)
+        return max(0.0, float(requested_qty) - float(fill_qty))
+
     def _extract_total_fees(self, order_info: dict, qty: int) -> float:
         total = 0.0
         found = False
@@ -291,8 +304,18 @@ class KalshiBroker:
 
         pos_info = self._open_positions.get(key, {})
         held_qty = float(pos_info.get("qty") or 0.0)
-        fill_qty = self._extract_fill_count(order_info) or float(requested_qty)
+        fill_qty = self._extract_fill_count(order_info)
         fill_qty = max(0.0, min(fill_qty, held_qty or float(requested_qty)))
+        if fill_qty <= 0:
+            return {
+                "order_id": order_info.get("order_id", "ERR"),
+                "status": str(order_info.get("status") or "pending"),
+                "entry_price": float(pos_info.get("entry_price") or pos_info.get("entry") or 0.50),
+                "exit_price": 0.0,
+                "pnl_usd": 0.0,
+                "filled_qty": 0.0,
+                "remaining_position_qty": held_qty or float(requested_qty),
+            }
         exit_price = self._extract_average_fill_price(order_info)
         fee_usd = self._extract_total_fees(order_info, int(round(fill_qty or requested_qty)))
         order_id = order_info.get("order_id", "ERR")
@@ -337,6 +360,93 @@ class KalshiBroker:
             "pnl_usd": pnl_usd,
             "filled_qty": fill_qty,
             "remaining_position_qty": remaining_qty,
+        }
+
+    def _apply_entry_fill(
+        self,
+        *,
+        ticker: str,
+        right: str,
+        requested_qty: int,
+        order_info: dict,
+        order_type: str,
+        status: str,
+        context: dict,
+    ) -> dict:
+        fill_qty = self._extract_fill_count(order_info)
+        if fill_qty <= 0:
+            return {
+                "order_id": order_info.get("order_id", "ERR"),
+                "status": status,
+                "price": 0.0,
+                "qty": 0,
+                "filled_qty": 0,
+                "remaining_order_qty": self._extract_remaining_count(order_info, requested_qty),
+            }
+
+        fill_qty = max(0.0, min(float(requested_qty), float(fill_qty)))
+        fill_price = self._extract_average_fill_price(order_info)
+        fee_usd = self._extract_total_fees(order_info, int(round(fill_qty)))
+        order_id = order_info.get("order_id", "ERR")
+        key = f"{ticker}_{right}"
+        side = "YES" if right == "C" else "NO"
+        existing = self._open_positions.get(key, {})
+        prior_qty = float(existing.get("qty") or 0.0)
+        prior_entry = float(existing.get("entry_price") or existing.get("entry") or 0.0)
+        blended_entry = fill_price
+        if prior_qty > 0 and fill_price > 0:
+            blended_entry = ((prior_qty * prior_entry) + (fill_qty * fill_price)) / (prior_qty + fill_qty)
+        total_qty = prior_qty + fill_qty
+        remaining_order_qty = self._extract_remaining_count(order_info, requested_qty)
+
+        self._open_positions[key] = {
+            "qty": total_qty,
+            "side": side,
+            "local_symbol": ticker,
+            "right": right,
+            "entry": blended_entry,
+            "entry_price": blended_entry,
+            "forecast_yes_prob": context.get("forecast_yes_prob"),
+            "model_prob_gfs": context.get("model_prob_gfs"),
+            "model_prob_ecmwf": context.get("model_prob_ecmwf"),
+            "weather_mode": context.get("weather_mode"),
+            "forecast_hours_to_resolution": context.get("forecast_hours_to_resolution"),
+            "last_trade_at": context.get("last_trade_at", ""),
+            "entered_at": existing.get("entered_at") or datetime.now(timezone.utc).isoformat(),
+            "resting_order_id": order_id if remaining_order_qty > 0 else None,
+            "resting_remaining_qty": remaining_order_qty,
+        }
+
+        try:
+            log_trade(
+                strategy=context.get("strategy", "forecast_weather"),
+                broker="kalshi",
+                symbol=ticker,
+                action="BUY",
+                order_type=order_type,
+                qty=fill_qty,
+                price=fill_price,
+                fee_usd=fee_usd,
+                order_id=order_id,
+                notes=context.get("reason", ""),
+                contract_side=side,
+                forecast_yes_prob=context.get("forecast_yes_prob"),
+                model_prob_gfs=context.get("model_prob_gfs"),
+                model_prob_ecmwf=context.get("model_prob_ecmwf"),
+                weather_mode=context.get("weather_mode"),
+                forecast_hours_to_resolution=context.get("forecast_hours_to_resolution"),
+            )
+        except Exception as e:
+            logger.error(f"[KalshiBroker] log_trade entry error: {e}")
+
+        return {
+            "order_id": order_id,
+            "status": status,
+            "price": fill_price,
+            "qty": int(round(fill_qty)),
+            "filled_qty": fill_qty,
+            "remaining_order_qty": remaining_order_qty,
+            "position_qty_after_fill": total_qty,
         }
 
     def _request(self, method: str, path: str, params: dict = None, body: dict = None) -> dict:
@@ -509,13 +619,13 @@ class KalshiBroker:
                     seen_tickers.add(ticker)
 
             for event in all_events:
-                # SRE FIX: HARD WEATHER GATE (Sovereign Mandate Enforcement)
                 cat = event.get("category", "")
                 ticker = event.get("event_ticker", "")
-                
-                if "Weather" not in cat and not ticker.startswith("KX"):
-                    continue
 
+                if not ticker:
+                    continue
+                if "weather" not in str(cat).lower() and weather_mode_for_ticker(ticker) is None:
+                    continue
                 if not _is_weather_market(ticker, event.get("title"), cat):
                     continue
                 
@@ -525,11 +635,15 @@ class KalshiBroker:
                 markets = m_data.get("markets", [])
                 
                 for m in markets:
-                    if m.get("status") != "active": continue
+                    if m.get("status") != "active":
+                        continue
+                    market_ticker = str(m.get("ticker") or "")
+                    if weather_mode_for_ticker(market_ticker) is None:
+                        continue
                     
                     strike = 0.0
                     import re
-                    match = re.search(r'-[TBL](-?\d+\.?\d*)$', m.get("ticker", ""))
+                    match = re.search(r'-[TBL](-?\d+\.?\d*)$', market_ticker)
                     if match:
                         try:
                             strike = float(match.group(1))
@@ -541,7 +655,7 @@ class KalshiBroker:
                         results.append({
                             "underlier": ticker,
                             "event_title": event.get("title") or ticker,
-                            "local_symbol": m.get("ticker"),
+                            "local_symbol": market_ticker,
                             "conid": None,
                             "right": right,
                             "strike": strike,
@@ -756,65 +870,43 @@ class KalshiBroker:
 
         order_info = resp.get("order", {})
         status = order_info.get("status")
-        
-        # SRE FIX: Await legitimate fills. No more $0.00 ghost trades.
-        if status == "executed":
+        context = {
+            "forecast_yes_prob": kwargs.get("forecast_yes_prob"),
+            "model_prob_gfs": kwargs.get("model_prob_gfs"),
+            "model_prob_ecmwf": kwargs.get("model_prob_ecmwf"),
+            "weather_mode": kwargs.get("weather_mode"),
+            "forecast_hours_to_resolution": kwargs.get("forecast_hours_to_resolution"),
+            "last_trade_at": contract_dict.get("last_trade_at", ""),
+            "reason": kwargs.get("reason", ""),
+            "strategy": kwargs.get("strategy", "forecast_weather"),
+        }
+
+        if status in ["executed", "resting", "pending"]:
             order_info = self._hydrate_order_details(order_info)
-            fill_price = self._extract_average_fill_price(order_info)
-            order_id = order_info.get("order_id", "ERR")
-            fee_usd = self._extract_total_fees(order_info, qty)
-            
-            print(f"[KalshiBroker] BUY {qty} {ticker} ({side.upper()}) @ {fill_price:.4f} | ID={order_id}")
-            key = f"{ticker}_{contract_dict['right']}"
-            self._open_positions[key] = {
-                "qty": qty,
-                "side": side.upper(),
-                "local_symbol": ticker,
-                "right": contract_dict["right"],
-                "entry": fill_price,
-                "entry_price": fill_price,
-                "forecast_yes_prob": kwargs.get("forecast_yes_prob"),
-                "model_prob_gfs": kwargs.get("model_prob_gfs"),
-                "model_prob_ecmwf": kwargs.get("model_prob_ecmwf"),
-                "weather_mode": kwargs.get("weather_mode"),
-                "forecast_hours_to_resolution": kwargs.get("forecast_hours_to_resolution"),
-                "last_trade_at": contract_dict.get("last_trade_at", ""),
-                "entered_at": datetime.now(timezone.utc).isoformat(),
-            }
-            try:
-                log_trade(
-                    strategy=kwargs.get("strategy", "forecast_weather"),
-                    broker="kalshi",
-                    symbol=ticker,
-                    action="BUY",
-                    order_type=order_type.capitalize(),
-                    qty=qty,
-                    price=fill_price,
-                    fee_usd=fee_usd,
-                    order_id=order_id,
-                    notes=kwargs.get("reason", ""),
-                    contract_side=side.upper(),
-                    forecast_yes_prob=kwargs.get("forecast_yes_prob"),
-                    model_prob_gfs=kwargs.get("model_prob_gfs"),
-                    model_prob_ecmwf=kwargs.get("model_prob_ecmwf"),
-                    weather_mode=kwargs.get("weather_mode"),
-                    forecast_hours_to_resolution=kwargs.get("forecast_hours_to_resolution"),
+            result = self._apply_entry_fill(
+                ticker=ticker,
+                right=contract_dict["right"],
+                requested_qty=qty,
+                order_info=order_info,
+                order_type=order_type.capitalize(),
+                status=status,
+                context=context,
+            )
+            if float(result.get("filled_qty") or 0.0) > 0:
+                print(
+                    f"[KalshiBroker] BUY {result['filled_qty']:g} {ticker} ({side.upper()}) "
+                    f"@ {float(result.get('price') or 0.0):.4f} | ID={result['order_id']}"
                 )
-            except Exception as e:
-                logger.error(f"[KalshiBroker] log_trade error: {e}")
-            return {
-                "order_id": order_id,
-                "status": status,
-                "price": fill_price,
-                "qty": qty,
-            }
-            
-        elif status in ["resting", "pending"]:
-            logger.info(f"Order resting, not updating positions table yet. ID: {order_info.get('order_id')}")
-            return {"order_id": order_info.get("order_id"), "status": status}
-        else:
-            logger.error(f"Order failed or rejected: {resp}")
-            return {"order_id": "ERR", "status": status}
+            elif status in ["resting", "pending"]:
+                logger.info(
+                    "Order %s with no immediate fill yet. ID=%s",
+                    status,
+                    order_info.get("order_id"),
+                )
+            return result
+
+        logger.error(f"Order failed or rejected: {resp}")
+        return {"order_id": "ERR", "status": status}
 
     def place_sell_order(self, contract_dict: dict, qty: int, limit_price: float, **kwargs) -> dict:
         """SRE FIX: Dedicated Sell Order Handler for Limit Exits."""
@@ -843,7 +935,7 @@ class KalshiBroker:
                 body["yes_price"] = _KALSHI_MARKETABLE_EXIT_CENTS
             else:
                 body["no_price"] = _KALSHI_MARKETABLE_EXIT_CENTS
-            body["time_in_force"] = "fill_or_kill"
+            body["time_in_force"] = "ioc"
         else:
             if side == "yes":
                 body["yes_price"] = limit_cents
@@ -859,7 +951,7 @@ class KalshiBroker:
         order_info = resp.get("order", {})
         status = order_info.get("status")
 
-        if status == "executed":
+        if status in ["executed", "resting", "pending"]:
             order_info = self._hydrate_order_details(order_info)
             result = self._apply_exit_fill(
                 ticker=ticker,
@@ -871,10 +963,12 @@ class KalshiBroker:
                 reason=kwargs.get("reason", ""),
                 strategy=kwargs.get("strategy", "forecast_exit"),
             )
-            print(
-                f"[KalshiBroker] SELL {result['filled_qty']:g} {ticker} "
-                f"@ {result['exit_price']:.4f} | ID={result['order_id']}"
-            )
+            result["status"] = status
+            if float(result.get("filled_qty") or 0.0) > 0:
+                print(
+                    f"[KalshiBroker] SELL {result['filled_qty']:g} {ticker} "
+                    f"@ {result['exit_price']:.4f} | ID={result['order_id']}"
+                )
             return result
         
         return {"order_id": order_info.get("order_id", "ERR"), "status": status}
@@ -909,7 +1003,7 @@ class KalshiBroker:
             "side": side,
             "count": int(qty),
             "client_order_id": str(uuid.uuid4()),
-            "time_in_force": "fill_or_kill",
+            "time_in_force": "ioc",
         }
         if side == "yes":
             body["yes_price"] = _KALSHI_MARKETABLE_EXIT_CENTS
@@ -937,7 +1031,7 @@ class KalshiBroker:
             order_id = order_info.get("order_id") or resp.get("order_id", "ERR")
             status = order_info.get("status")
 
-            if status == "executed":
+            if status in ["executed", "resting", "pending"]:
                 order_info = self._hydrate_order_details(order_info)
                 result = self._apply_exit_fill(
                     ticker=local_symbol,
@@ -949,6 +1043,7 @@ class KalshiBroker:
                     reason=kwargs.get("reason", "salvage_exit"),
                     strategy=kwargs.get("strategy", "forecast_exit"),
                 )
+                result["status"] = status
                 exit_price = result["exit_price"]
                 pnl_usd = result["pnl_usd"]
                 filled_qty = result["filled_qty"]

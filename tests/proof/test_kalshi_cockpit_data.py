@@ -181,7 +181,7 @@ def test_metric_explainers_surface_new_hub_cap_formula():
     assert "43.29 dollars" in explainers["Regional Hub Cap"]
     assert "max($40" in explainers["Regional Hub Cap"]
     assert "30% of live cash" in explainers["Regional Hub Cap"]
-    assert "7.0% x price x (1-price)" in explainers["Fee Buffer"]
+    assert "7.0% x price x (1-price)" in explainers["Fee Model"]
 
 
 def test_build_weather_type_boards_groups_open_book_by_lane():

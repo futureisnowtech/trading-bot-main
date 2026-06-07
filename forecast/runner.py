@@ -935,9 +935,10 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                         forecast_hours_to_resolution=result.hours_to_resolution,
                     )
                     
-                    if entry_result.get("status") == "executed":
+                    filled_qty = float(entry_result.get("filled_qty") or entry_result.get("qty") or 0.0)
+                    if entry_result.get("status") == "executed" or filled_qty > 0:
                         actual_price = entry_result.get("price") or execution_plan.limit_price
-                        actual_qty = int(entry_result.get("qty") or execution_plan.executable_qty)
+                        actual_qty = int(round(filled_qty or execution_plan.executable_qty))
                         entry_msg = (
                             f"[ForecastRunner] Entry: {contract.get('local_symbol')} "
                             f"{result.side.upper()} x{actual_qty} @ {actual_price} "
@@ -946,12 +947,23 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                         log_event("INFO", "ForecastRunner", entry_msg)
                         
                         try:
-                            from forecast.db import insert_forecast_position
-                            insert_forecast_position(
+                            from forecast.db import sync_open_forecast_position
+
+                            live_pos = None
+                            if broker.is_connected():
+                                live_pos = broker.get_position(
+                                    contract.get("local_symbol", ""),
+                                    contract.get("right", "C"),
+                                )
+                            sync_open_forecast_position(
                                 ticker=contract.get("local_symbol", ""),
-                                qty=actual_qty,
-                                entry_price=actual_price,
-                                side=result.side.upper()
+                                qty=float((live_pos or {}).get("qty") or actual_qty),
+                                entry_price=float(
+                                    (live_pos or {}).get("entry_price")
+                                    or (live_pos or {}).get("entry")
+                                    or actual_price
+                                ),
+                                side=result.side.upper(),
                             )
                         except Exception as _db_err:
                             logger.error(f"[ForecastRunner] DB insertion error: {_db_err}")
@@ -990,6 +1002,15 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                             f"| strategy={result.strategy_family} ev={result.ev:.4f} "
                             f"q_hat={result.q_hat:.4f}"
                         )
+                        if entry_result.get("status") in {"resting", "pending"}:
+                            logger.info(
+                                "[ForecastRunner] Entry for %s is partially filled and still %s "
+                                "(filled=%s remaining_order=%s).",
+                                contract.get("local_symbol"),
+                                entry_result.get("status"),
+                                actual_qty,
+                                entry_result.get("remaining_order_qty"),
+                            )
                         from config import estimate_kalshi_order_cost_usd
                         buying_power_usd = max(
                             0.0,
@@ -1461,15 +1482,22 @@ def run_position_monitor() -> None:
                         )
                         continue
 
-                    if flatten_res.get("status") != "executed":
+                    status = str(flatten_res.get("status") or "")
+                    filled_qty = float(flatten_res.get("filled_qty") or 0.0)
+                    remaining_qty = float(flatten_res.get("remaining_position_qty") or qty or 0.0)
+
+                    if status not in {"executed", "resting", "pending"} and filled_qty <= 0:
                         logger.warning(
                             f"Exit still pending for {local_symbol}; leaving position open "
-                            f"(status={flatten_res.get('status')})."
+                            f"(status={status})."
                         )
                         continue
 
-                    filled_qty = float(flatten_res.get("filled_qty") or qty or 0)
-                    remaining_qty = float(flatten_res.get("remaining_position_qty") or 0.0)
+                    if filled_qty <= 0:
+                        logger.warning(
+                            f"Exit for {local_symbol} returned {status} with no filled quantity; leaving position open."
+                        )
+                        continue
 
                     if remaining_qty > 0:
                         sync_open_forecast_position(

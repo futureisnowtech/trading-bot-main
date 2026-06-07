@@ -14,7 +14,7 @@ import re
 import threading
 import time
 from copy import deepcopy
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 import numpy as np
@@ -866,6 +866,45 @@ def _contract_has_explicit_local_hour(ticker: str) -> bool:
     return bool(re.search(r"-(\d{2}[A-Z]{3}\d{2})(\d{2})(?:-|$)", str(ticker or "").upper()))
 
 
+def _parse_hourly_local_datetime(raw_time: str, timezone_name: str) -> datetime | None:
+    text = str(raw_time or "").strip()
+    if not text:
+        return None
+
+    local_tz = pytz.timezone(timezone_name)
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            return local_tz.localize(parsed)
+        return parsed.astimezone(local_tz)
+    except Exception:
+        pass
+
+    for fmt in ("%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return local_tz.localize(datetime.strptime(text, fmt))
+        except Exception:
+            continue
+    return None
+
+
+def _daily_settlement_start_hour(target_date: date, timezone_name: str) -> int:
+    local_tz = pytz.timezone(timezone_name)
+    noon_local = local_tz.localize(
+        datetime(target_date.year, target_date.month, target_date.day, 12, 0, 0)
+    )
+    return 1 if bool(noon_local.dst()) else 0
+
+
+def _station_settlement_date(timezone_name: str) -> date:
+    local_tz = pytz.timezone(timezone_name)
+    now_local = datetime.now(local_tz)
+    start_hour = _daily_settlement_start_hour(now_local.date(), timezone_name)
+    if start_hour > 0 and now_local.hour < start_hour:
+        return (now_local - timedelta(days=1)).date()
+    return now_local.date()
+
+
 def _target_day_indices(hourly_time: list[str], target_date) -> list[int]:
     indices = []
     target_label = target_date.isoformat()
@@ -920,12 +959,28 @@ def _project_contract_record(
     target_date,
     *,
     target_hour: int | None = None,
+    timezone_name: str = "UTC",
 ) -> dict:
     if not record:
         return {}
 
     hourly_time = list(record.get("hourly_time") or [])
-    indices = _target_day_indices(hourly_time, target_date)
+    if target_hour is None:
+        local_tz = pytz.timezone(timezone_name)
+        settlement_start_hour = _daily_settlement_start_hour(target_date, timezone_name)
+        settlement_start = local_tz.localize(
+            datetime(target_date.year, target_date.month, target_date.day, settlement_start_hour, 0, 0)
+        )
+        settlement_end = settlement_start + timedelta(days=1)
+        indices = []
+        for idx, raw_time in enumerate(hourly_time or []):
+            parsed = _parse_hourly_local_datetime(raw_time, timezone_name)
+            if parsed is None:
+                continue
+            if settlement_start <= parsed < settlement_end:
+                indices.append(idx)
+    else:
+        indices = _target_day_indices(hourly_time, target_date)
     if not indices:
         return {}
 
@@ -937,8 +992,17 @@ def _project_contract_record(
     members_high = _reduce_member_projection(members_temp, indices, max)
     members_low = _reduce_member_projection(members_temp, indices, min)
     members_precip_total = _reduce_member_projection(members_precip, indices, sum)
-    cloud_means = _reduce_member_projection(members_cloud, indices, np.mean)
-    ssrd_means = _reduce_member_projection(members_ssrd, indices, np.mean)
+    midday_indices = [
+        idx
+        for idx, raw_time in enumerate(hourly_time or [])
+        if (
+            (parsed := _parse_hourly_local_datetime(raw_time, timezone_name)) is not None
+            and parsed.date() == target_date
+            and 11 <= parsed.hour <= 16
+        )
+    ]
+    cloud_peaks = _reduce_member_projection(members_cloud, midday_indices or indices, max)
+    ssrd_means = _reduce_member_projection(members_ssrd, midday_indices or indices, np.mean)
     hour_indices = (
         _target_hour_indices(hourly_time, target_date, int(target_hour))
         if target_hour is not None
@@ -963,11 +1027,12 @@ def _project_contract_record(
         "sigma_temp": float(np.std(members_temp_instant)) if len(members_temp_instant) > 1 else None,
         "mean_precip": float(np.mean(members_precip_total)) if members_precip_total else record.get("mean_precip", 0.0),
         "sigma_precip": float(np.std(members_precip_total)) if len(members_precip_total) > 1 else record.get("sigma_precip", 0.08),
-        "peak_tcdc": float(np.mean(cloud_means)) if cloud_means else float(record.get("peak_tcdc") or 0.0),
+        "peak_tcdc": float(np.mean(cloud_peaks)) if cloud_peaks else float(record.get("peak_tcdc") or 0.0),
         "peak_ssrd": float(np.mean(ssrd_means)) if ssrd_means else record.get("peak_ssrd"),
         "timestamp": record.get("timestamp", time.time()),
         "target_local_date": target_date.isoformat(),
         "target_local_hour": target_hour,
+        "settlement_start_hour": _daily_settlement_start_hour(target_date, timezone_name),
         "hourly_time": hourly_time,
         "hourly_members_temp_f": members_temp,
         "hourly_members_precip_in": members_precip,
@@ -1009,6 +1074,7 @@ def _project_contract_record(
             nested_ecmwf,
             target_date,
             target_hour=target_hour,
+            timezone_name=timezone_name,
         )
     else:
         projected["ecmwf"] = None
@@ -1019,6 +1085,7 @@ def _project_contract_record(
             nested_aigefs,
             target_date,
             target_hour=target_hour,
+            timezone_name=timezone_name,
         )
     else:
         projected["aigefs"] = None
@@ -1061,7 +1128,7 @@ def _persist_watermarks(watermarks: dict[str, float]) -> None:
 def _station_local_day(city_key: str) -> str:
     station = STATIONS.get(city_key, {})
     tz_name = station.get("tz", "UTC")
-    return datetime.now(pytz.timezone(tz_name)).strftime("%Y-%m-%d")
+    return _station_settlement_date(tz_name).isoformat()
 
 
 def _parse_metar_observation_key(metar_raw: str) -> float | None:
@@ -1792,11 +1859,12 @@ def get_contract_weather_data(
         base,
         target_date,
         target_hour=target_hour,
+        timezone_name=station.get("tz", "UTC"),
     )
     if not projected:
         return {}
 
-    local_today = datetime.now(pytz.timezone(station.get("tz", "UTC"))).date()
+    local_today = _station_settlement_date(station.get("tz", "UTC"))
     if target_date == local_today:
         projected["intraday"] = dict(base.get("intraday") or {})
     else:
@@ -1843,7 +1911,7 @@ def get_contract_observed_weather_data(
         target_hour = target_dt.hour if target_dt is not None else None
 
     timezone_name = station.get("tz", "UTC")
-    local_today = datetime.now(pytz.timezone(timezone_name)).date()
+    local_today = _station_settlement_date(timezone_name)
     city_key = _SERIES_TO_CITY.get(series, "")
     if target_hour is not None:
         if target_date > local_today:

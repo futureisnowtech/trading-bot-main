@@ -117,6 +117,10 @@ def test_execution_daemon_starts_weather_monitor_after_first_cycle(monkeypatch):
     monkeypatch.setattr(ed, "sync_incidents_and_notify", lambda: None, raising=False)
     monkeypatch.setattr(ed, "maintain_runtime_storage", lambda: None, raising=False)
     monkeypatch.setattr(
+        "notifications.telegram_bot.start_bot_thread",
+        lambda: order.append("telegram"),
+    )
+    monkeypatch.setattr(
         ed,
         "runtime_storage_status",
         lambda: {
@@ -142,4 +146,4 @@ def test_execution_daemon_starts_weather_monitor_after_first_cycle(monkeypatch):
     monkeypatch.setattr(ed.time, "sleep", lambda seconds: (_ for _ in ()).throw(KeyboardInterrupt()))
 
     assert ed.main() == 0
-    assert order == ["cycle", "monitor"]
+    assert order == ["telegram", "cycle", "monitor"]

@@ -37,7 +37,6 @@ from config import (
     KALSHI_EXPENSIVE_YES_MIN_NET_EDGE,
     KALSHI_EXPENSIVE_YES_SIZE_MULTIPLIER,
     KALSHI_EXPENSIVE_YES_THRESHOLD,
-    KALSHI_FEE_BUFFER,
     KALSHI_KELLY_CAP,
     KALSHI_MAX_CONCURRENT_POSITIONS,
     KALSHI_MAX_DEPLOYED_PCT,
@@ -106,7 +105,6 @@ MAX_HOURS_TO_RES: float = 48.0
 # v19.7: Sovereign Precision Calibration
 # Raising the bar for Alpha to ensure Win-Rate Restoration.
 EV_THRESHOLD: float = 0.05  # v19.9: Hardened 5% post-fee edge floor
-MAX_MODEL_MARKET_DIVERGENCE: float = 0.20  # v19.9: Market Truth Veto (20% cap)
 
 # Longshot Bias Gate
 MIN_IMPLIED_PROB_FOR_YES: float = 0.10  # refuse to buy YES below 10% probability
@@ -145,7 +143,6 @@ _HARD_ECON_VETO_PREFIXES: tuple[str, ...] = (
     "overround_too_high",
     "spread_too_wide",
     "spread_ratio_veto",
-    "market_truth_veto",
     "market_near_certainty",
     "entropy_too_high",
     "sigma_too_high",
@@ -157,6 +154,17 @@ _HARD_ECON_VETO_PREFIXES: tuple[str, ...] = (
 
 def _estimated_fee_per_contract(price: float, *, rounded: bool = False) -> float:
     return estimate_kalshi_fee_per_contract(price, rounded=rounded)
+
+
+def _weather_net_edge(contract_prob: float, ask_price: float) -> float | None:
+    if ask_price <= 0.0:
+        return None
+    return (
+        float(contract_prob)
+        - float(ask_price)
+        - _estimated_fee_per_contract(ask_price, rounded=False)
+    )
+
 
 def _get_macro_context() -> dict:
     """Read v18.34 macro cache."""
@@ -183,7 +191,53 @@ REGIONAL_HUBS = {
     "MOUNTAIN": ["DEN", "SLC", "ABQ"],
     "WEST": ["LAX", "SFO", "SF", "PHX", "SEA", "PDX", "LV"],
 }
-# v19.4: HUB_CAP is now a percentage of balance (20%) calculated in-loop.
+_CITY_TO_HUB = {
+    city: hub
+    for hub, cities in REGIONAL_HUBS.items()
+    for city in cities
+}
+_AIRPORT_TO_CITY = {
+    "JFK": "NY",
+    "LGA": "NY",
+    "EWR": "NY",
+    "DCA": "DC",
+    "IAD": "DC",
+    "BWI": "DC",
+    "ORD": "CHI",
+    "MDW": "CHI",
+    "DTW": "DET",
+    "MSP": "MSP",
+    "MKE": "MKE",
+    "OMA": "OMA",
+    "STL": "STL",
+    "MCI": "MCI",
+    "OKC": "OKC",
+    "BOS": "BOS",
+    "PHL": "PHL",
+    "ATL": "ATL",
+    "CLT": "CLT",
+    "RDU": "RDU",
+    "BNA": "BNA",
+    "CHS": "CHS",
+    "MIA": "MIA",
+    "MCO": "MCO",
+    "HOU": "HOU",
+    "IAH": "HOU",
+    "AUS": "AUS",
+    "DFW": "DAL",
+    "DAL": "DAL",
+    "SAT": "SAT",
+    "MSY": "MSY",
+    "DEN": "DEN",
+    "SLC": "SLC",
+    "ABQ": "ABQ",
+    "LAX": "LAX",
+    "SFO": "SF",
+    "SEA": "SEA",
+    "PDX": "PDX",
+    "PHX": "PHX",
+    "LAS": "LV",
+}
 
 
 def _get_city_hub(ticker: str) -> str:
@@ -192,6 +246,25 @@ def _get_city_hub(ticker: str) -> str:
     Maps 31 cities to meteorologically correlated macro-regions.
     """
     t = ticker.upper()
+    try:
+        from data.kalshi_weather_monitor import STATIONS
+
+        for city_key, station in STATIONS.items():
+            city_hub = _CITY_TO_HUB.get(city_key)
+            if not city_hub:
+                continue
+            icao = str(station.get("icao") or "").upper().replace("K", "")
+            if city_key in t or (icao and icao in t):
+                return city_hub
+            for series in station.get("series", []):
+                if t.startswith(str(series).upper()):
+                    return city_hub
+    except Exception:
+        pass
+
+    for airport_code, city_key in _AIRPORT_TO_CITY.items():
+        if airport_code in t:
+            return _CITY_TO_HUB.get(city_key, "UNKNOWN")
     for hub, cities in REGIONAL_HUBS.items():
         if any(city in t for city in cities):
             return hub
@@ -447,18 +520,6 @@ def _economics_gate(
         if spread_ratio > KALSHI_MAX_SPREAD_RATIO:
             return False, f"spread_ratio_veto ({spread_ratio:.1%} > {KALSHI_MAX_SPREAD_RATIO:.0%})", 0.0, 0.0
 
-    # v19.7: Market Truth Veto (Model-Market Divergence)
-    # If the gap between our model and market is too wide (>30%), our model is likely wrong.
-    market_yes_ref = ask_yes if yes_available else (1.0 - ask_no if no_available else None)
-    divergence = abs(q_hat - market_yes_ref) if market_yes_ref is not None else 0.0
-    if market_yes_ref is not None and divergence > MAX_MODEL_MARKET_DIVERGENCE:
-        return (
-            False,
-            f"market_truth_veto (Divergence={divergence:.1%} > {MAX_MODEL_MARKET_DIVERGENCE:.0%})",
-            0.0,
-            0.0,
-        )
-
     # 4. Entropy gates: don't trade near certainty
     if h_t < MIN_ENTROPY_FOR_ENTRY:
         return (
@@ -496,7 +557,6 @@ def _economics_gate(
         ev_yes = (
             q_hat
             - ask_yes
-            - KALSHI_FEE_BUFFER
             - fee_yes
         )
     if no_available:
@@ -504,7 +564,6 @@ def _economics_gate(
         ev_no = (
             (1.0 - q_hat)
             - ask_no
-            - KALSHI_FEE_BUFFER
             - fee_no
         )
 
@@ -999,33 +1058,29 @@ def blended_weather_yes_probability(
     return float(blended["ensemble_prob"])
 
 def calculate_continuous_sizing(market_price: float, ensemble_prob: float, capital_base: float, multiplier: float = 1.0, cap_pct: float = 0.10, conv_tier: int = 3) -> int:
-    """Fee-adjusted binary-market sizing with hard bankroll and USD caps."""
+    """Continuous sigmoid sizing with post-fee edge and hard USD caps."""
     ensemble_prob = max(0.01, min(0.99, ensemble_prob))
     market_price = max(0.01, min(0.99, market_price))
     fee_per_contract = _estimated_fee_per_contract(market_price, rounded=False)
-    effective_cost = min(0.99, market_price + fee_per_contract)
+    effective_cost = max(0.01, min(0.99, market_price + fee_per_contract))
+    post_fee_edge = ensemble_prob - effective_cost
 
-    if ensemble_prob <= effective_cost or capital_base <= 0:
+    if post_fee_edge <= 0.0 or capital_base <= 0:
         return 0
 
-    fraction = fractional_kelly_fraction(
-        q_side=ensemble_prob,
-        p_cost=effective_cost,
-        confidence_multiplier=max(0.25, float(multiplier)),
-        kelly_cap=cap_pct,
+    sigmoid_scaler = 1.0 / (1.0 + math.exp(-15.0 * (post_fee_edge - 0.12)))
+    capital_allowance = min(
+        max(0.0, float(capital_base) * max(0.0, float(cap_pct))),
+        float(KALSHI_MAX_USD_PER_POSITION),
     )
-    qty = contracts_from_fraction(
-        fraction=fraction,
-        bankroll=capital_base,
-        p_cost=market_price,
-        per_event_cap_pct=cap_pct,
-        deployed_pct=0.0,
-        max_deployed_pct=1.0,
-        fee_per_contract=fee_per_contract,
+    scaled_budget = min(
+        float(KALSHI_MAX_USD_PER_POSITION),
+        capital_allowance * sigmoid_scaler * max(0.10, float(multiplier)),
     )
+    qty = max_kalshi_contracts_for_budget(market_price, scaled_budget)
     qty = min(
         qty,
-        max_kalshi_contracts_for_budget(market_price, KALSHI_MAX_USD_PER_POSITION),
+        KALSHI_MAX_QTY_PER_POSITION,
     )
 
     return max(0, qty)
@@ -1181,6 +1236,8 @@ def _strategy_weather_details(
 
     edge_yes = (ensemble_prob - ask_yes) if ask_yes > 0 else None
     edge_no = ((1.0 - ensemble_prob) - ask_no) if ask_no > 0 else None
+    net_edge_yes = _weather_net_edge(ensemble_prob, ask_yes)
+    net_edge_no = _weather_net_edge(1.0 - ensemble_prob, ask_no)
     
     # v19.1.11: The Sigma Lever (Volatility Sizing)
     # v19.8: AI Multiplier now inflates/deflates Sigma directly
@@ -1221,15 +1278,6 @@ def _strategy_weather_details(
     premium_yes_threshold = float(KALSHI_EXPENSIVE_YES_THRESHOLD)
     premium_yes_net_edge_floor = float(KALSHI_EXPENSIVE_YES_MIN_NET_EDGE)
     premium_yes_size_multiplier = max(0.25, float(KALSHI_EXPENSIVE_YES_SIZE_MULTIPLIER))
-    net_edge_yes = (
-        ensemble_prob
-        - ask_yes
-        - KALSHI_FEE_BUFFER
-        - _estimated_fee_per_contract(ask_yes, rounded=False)
-        if ask_yes > 0
-        else None
-    )
-
     if (
         ask_yes > 0
         and edge_yes is not None
@@ -1288,26 +1336,12 @@ def _strategy_weather_details(
     # Guardrail 1: The "Sun Spike" Veto
     peak_tcdc = w_data.get("peak_tcdc", 0.0)
     peak_ssrd = w_data.get("peak_ssrd")
-    if peak_ssrd is not None:
-        cloud_veto = (mode == "HIGH") and (peak_tcdc > 70.0) and (float(peak_ssrd) < 250.0)
-    else:
-        cloud_veto = (mode == "HIGH") and (peak_tcdc > 65.0)
+    cloud_veto = (mode == "HIGH") and (peak_tcdc > 65.0)
+    narrow_bin_size_multiplier = 1.0
+    if semantics.comparator == "between" and mode != "RAIN":
+        narrow_bin_size_multiplier = 0.85
 
-    # v19.1.9: Narrow Bin Veto
-    if semantics.comparator == "between":
-        if mode != "RAIN" and max(edge_yes, edge_no) < 0.25:
-             return (
-                 False,
-                 "",
-                 0.0,
-                 [f"narrow_bin_trap_edge_too_low ({max(edge_yes, edge_no):.2f})"],
-                 False,
-                 1.0,
-                 3,
-                 0.05,
-             )
-
-    if edge_yes is not None and edge_yes > 0.08:
+    if net_edge_yes is not None and net_edge_yes >= EV_THRESHOLD:
         if cloud_veto:
             if peak_ssrd is not None:
                 return (
@@ -1326,6 +1360,7 @@ def _strategy_weather_details(
         factors = [
             f"ensemble_p={ensemble_prob:.1%}",
             f"edge={edge_yes:.1%}",
+            f"net_ev={net_edge_yes:.1%}",
             f"conv_mult={convergence_multiplier:.1f}x",
             f"sigma_mult={sigma_mult:.2f}x",
             f"blend=GFS{gfs_weight:.0%}/EC{ecmwf_weight:.0%}",
@@ -1335,21 +1370,9 @@ def _strategy_weather_details(
         ]
         if peak_ssrd is not None:
             factors.append(f"SSRD={float(peak_ssrd):.0f}W/m2")
-        # v19.6: Sovereign Escalation — Tier Identification
-        # v19.9: 50% Sizing Cut (10% / 7.5% / 5%)
-        conv_tier = 3
-        sizing_cap = 0.05
-        
-        # TIER 1: AMAZING (Grand Slam)
-        if ensemble_prob > 0.92 and sigma < 1.0:
-            conv_tier = 1
-            sizing_cap = 0.10
-        # TIER 2: HIGH
-        elif ensemble_prob > 0.85 and sigma < 1.5:
-            conv_tier = 2
-            sizing_cap = 0.075
-            
-        factors.append(f"tier={conv_tier}")
+        conv_tier = 0
+        sizing_cap = KALSHI_KELLY_CAP
+        factors.append("tier=continuous")
 
         # v19.1.12: Return raw ensemble_prob + sizing_multiplier separately
         sizing_multiplier = (
@@ -1357,9 +1380,12 @@ def _strategy_weather_details(
             * sigma_mult
             * divergence_size_multiplier
             * provider_size_multiplier
+            * narrow_bin_size_multiplier
         )
         if provider_size_multiplier < 1.0:
             factors.append(f"provider_haircut={provider_size_multiplier:.2f}x")
+        if narrow_bin_size_multiplier < 1.0:
+            factors.append(f"narrow_bin_haircut={narrow_bin_size_multiplier:.2f}x")
         if ask_yes >= premium_yes_threshold:
             sizing_multiplier *= premium_yes_size_multiplier
             factors.append(
@@ -1367,39 +1393,34 @@ def _strategy_weather_details(
             )
         return True, "YES", ensemble_prob, factors, is_taker, sizing_multiplier, conv_tier, sizing_cap
 
-    if edge_no is not None and edge_no > 0.08:
+    if net_edge_no is not None and net_edge_no >= EV_THRESHOLD:
         is_taker = edge_no >= 0.22 and is_short_term
         factors = [
             f"ensemble_p={ensemble_prob:.1%}",
             f"edge={edge_no:.1%}",
+            f"net_ev={net_edge_no:.1%}",
             f"conv_mult={convergence_multiplier:.1f}x",
             f"sigma_mult={sigma_mult:.2f}x",
             f"blend=GFS{gfs_weight:.0%}/EC{ecmwf_weight:.0%}",
             f"div_gap={divergence_gap:.1%}",
             f"wx_provider={provider_mode}",
         ]
-        # v19.6: Sovereign Escalation — Tier Identification (NO Side)
-        # v19.9: 50% Sizing Cut
-        conv_tier = 3
-        sizing_cap = 0.05
+        conv_tier = 0
+        sizing_cap = KALSHI_KELLY_CAP
         no_prob = 1.0 - ensemble_prob
-        if no_prob > 0.92 and sigma < 1.0:
-            conv_tier = 1
-            sizing_cap = 0.10
-        elif no_prob > 0.85 and sigma < 1.5:
-            conv_tier = 2
-            sizing_cap = 0.075
-
-        factors.append(f"tier={conv_tier}")
+        factors.append("tier=continuous")
 
         sizing_multiplier = (
             convergence_multiplier
             * sigma_mult
             * divergence_size_multiplier
             * provider_size_multiplier
+            * narrow_bin_size_multiplier
         )
         if provider_size_multiplier < 1.0:
             factors.append(f"provider_haircut={provider_size_multiplier:.2f}x")
+        if narrow_bin_size_multiplier < 1.0:
+            factors.append(f"narrow_bin_haircut={narrow_bin_size_multiplier:.2f}x")
         return True, "NO", no_prob, factors, is_taker, sizing_multiplier, conv_tier, sizing_cap
 
     return False, "", 0.0, ["insufficient_edge"], False, 1.0, 3, 0.05
@@ -1552,28 +1573,29 @@ def evaluate_contract(
         )
 
     # v18.34: Macro Context Risk Gate
-    macro = _get_macro_context()
-    risk_score = float(macro.get("risk_score", 0))
-    if risk_score >= 8:
-        logger.info(
-            f"Sovereign Veto: MACRO_RISK_OVERLOAD (score={risk_score}) for {contract.get('local_symbol')}"
-        )
-        return StrategyResult(
-            strategy_family="vetoed",
-            side="NONE",
-            q_hat=0.0,
-            ev=0.0,
-            ev_yes=0.0,
-            ev_no=0.0,
-            confidence=0.0,
-            uncertainty_penalty=0.0,
-            econ_approved=False,
-            veto_reason="macro_risk_overload",
-            position_fraction=0.0,
-            position_contracts=0,
-            top_factors=[],
-            hours_to_resolution=hours_to_res,
-        )
+    if not is_weather:
+        macro = _get_macro_context()
+        risk_score = float(macro.get("risk_score", 0))
+        if risk_score >= 8:
+            logger.info(
+                f"Sovereign Veto: MACRO_RISK_OVERLOAD (score={risk_score}) for {contract.get('local_symbol')}"
+            )
+            return StrategyResult(
+                strategy_family="vetoed",
+                side="NONE",
+                q_hat=0.0,
+                ev=0.0,
+                ev_yes=0.0,
+                ev_no=0.0,
+                confidence=0.0,
+                uncertainty_penalty=0.0,
+                econ_approved=False,
+                veto_reason="macro_risk_overload",
+                position_fraction=0.0,
+                position_contracts=0,
+                top_factors=[],
+                hours_to_resolution=hours_to_res,
+            )
 
     if is_weather:
         w_res = _strategy_weather_details(
@@ -1646,7 +1668,6 @@ def evaluate_contract(
         ev_yes = (
             q_hat
             - ask_yes
-            - KALSHI_FEE_BUFFER
             - _estimated_fee_per_contract(ask_yes, rounded=False)
             if ask_yes > 0.0
             else -1.0
@@ -1654,7 +1675,6 @@ def evaluate_contract(
         ev_no = (
             (1.0 - q_hat)
             - ask_no
-            - KALSHI_FEE_BUFFER
             - _estimated_fee_per_contract(ask_no, rounded=False)
             if ask_no > 0.0
             else -1.0
@@ -1767,12 +1787,12 @@ def evaluate_contract(
     # Compute q_hat (fair probability for YES)
     q_hat = compute_q_hat(
         p_mid=feats["latest_prob"],
-        v_1h=v_1h,
-        a_30m=a_30m,
+        v_1h=0.0,
+        a_30m=0.0,
         sigma_t=sigma_t,
         h_t=h_t,
         omega_t=omega_t,
-        z_t=z_t,
+        z_t=0.0,
         context_bias=0.0,
     )
 

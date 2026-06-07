@@ -270,7 +270,6 @@ def test_docker_service_status_uses_host_artifact_when_docker_unavailable(monkey
             "audited_sha": "abc123",
             "services": {
                 "execution-engine": {"up": True, "status": "Up 12 seconds"},
-                "telegram-oracle": {"up": True, "status": "Up 12 seconds"},
                 "kalshi-cockpit": {"up": True, "status": "Up 12 seconds"},
             },
         },
@@ -333,7 +332,6 @@ def test_run_remote_hosted_audit_uses_host_service_artifact_without_skip_warning
             "artifact_usable": True,
             "services": {
                 "execution-engine": {"up": True, "status": "Up 12 seconds"},
-                "telegram-oracle": {"up": True, "status": "Up 12 seconds"},
                 "kalshi-cockpit": {"up": True, "status": "Up 12 seconds"},
             },
         },
@@ -426,7 +424,6 @@ def test_run_remote_hosted_audit_blocks_when_host_service_artifact_missing(
             "artifact_reason": "missing",
             "services": {
                 "execution-engine": {"up": False, "status": ""},
-                "telegram-oracle": {"up": False, "status": ""},
                 "kalshi-cockpit": {"up": False, "status": ""},
             },
         },

@@ -75,7 +75,6 @@ PROOF_GATE_TESTS = [
 ]
 SERVICE_NAMES = (
     "execution-engine",
-    "telegram-oracle",
     "kalshi-cockpit",
 )
 HOST_SERVICE_ARTIFACT_MAX_AGE_SECONDS = 30 * 60

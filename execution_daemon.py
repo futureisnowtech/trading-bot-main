@@ -16,15 +16,12 @@ from config import (
 from data.kalshi_weather_monitor import start_weather_monitor
 from forecast.runner import run_execution_cycle
 from runtime.incident_tracker import sync_incidents_and_notify
+from runtime.logging_setup import configure_runtime_logging
 from runtime.position_reconciler import run_reconciliation
 from runtime.storage_maintenance import maintain_runtime_storage
 from runtime.storage_guard import runtime_storage_status
 
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(name)s %(levelname)s %(message)s",
-)
+configure_runtime_logging()
 
 logger = logging.getLogger("execution_daemon")
 
@@ -44,6 +41,7 @@ def main() -> int:
 
     sleep_seconds = max(1, int(float(os.getenv("SNIPER_SLEEP_SECONDS", "300"))))
     bankroll = float(ACCOUNT_SIZE)
+    telegram_thread_started = False
 
     try:
         run_reconciliation()
@@ -55,6 +53,15 @@ def main() -> int:
         logger.exception("Incident sync failed after startup reconciliation")
     logger.info("Execution daemon online (sleep=%ss).", sleep_seconds)
     weather_monitor_started = False
+
+    try:
+        from notifications.telegram_bot import start_bot_thread
+
+        start_bot_thread()
+        telegram_thread_started = True
+        logger.info("Embedded Telegram daemon started inside execution-engine.")
+    except Exception:
+        logger.exception("Embedded Telegram daemon startup failed")
 
     try:
         while True:

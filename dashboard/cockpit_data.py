@@ -21,7 +21,6 @@ from config import (
     KALSHI_EXIT_REDEPLOY_EDGE,
     KALSHI_EXIT_TIME_DECAY_BID_FLOOR,
     KALSHI_EXIT_TIME_DECAY_HOURS,
-    KALSHI_FEE_BUFFER,
     KALSHI_TAKER_FEE_RATE,
     KALSHI_HUB_EXPOSURE_MIN_USD,
     KALSHI_HUB_EXPOSURE_PCT,
@@ -568,8 +567,9 @@ def build_regime_manifest(
         ),
         "entry_math": [
             f"Net EV gate: post-fee EV must exceed {EV_THRESHOLD:.2f}",
-            f"Exchange fee drag: {_fee_formula_text()} with a ${KALSHI_FEE_BUFFER:.2f} execution buffer",
-            f"Sizing: fractional Kelly capped at {KALSHI_KELLY_CAP:.0%}, max risk/event {KALSHI_MAX_RISK_PER_EVENT_PCT:.2%}, hard per-position cap ${KALSHI_MAX_USD_PER_POSITION:.0f}",
+            f"Exchange fee drag: {_fee_formula_text()} with no extra flat fee buffer",
+            "Weather entries key off post-fee EV directly, and narrow bins are sized down instead of auto-vetoed",
+            f"Sizing: continuous sigmoid scaler with a hard per-position cap of ${KALSHI_MAX_USD_PER_POSITION:.0f}",
         ],
         "entry_gates": [
             f"Minimum contract price {KALSHI_MIN_PRICE:.2f}",
@@ -613,13 +613,13 @@ def build_metric_explainers(balance_usd: float | None = None) -> dict[str, str]:
         "Adaptive Blend": "The learner watches resolved weather contracts and can tilt the GFS/ECMWF mix away from the default 60/40 split when one model has been proving more accurate lately. This makes the engine adaptive without turning it into a black box.",
         "AI Volatility Adjustment": "GraphCast-style AI does not overrule the forecast direction. It only tells the bot whether confidence should be widened or tightened because the atmosphere looks more or less chaotic.",
         "Safety Gates": "These filters stop trades that look good on paper but fail live economics. Fees, spreads, stale data, and model-vs-market disagreement can all kill a trade here.",
-        "Position Sizing": "Even when a trade passes, the bot still sizes it down through bankroll caps. This keeps one good-looking idea from becoming a dangerous oversized bet.",
+        "Position Sizing": "Even when a trade passes, the bot still sizes it down through a continuous edge scaler, bankroll caps, and hub caps. This keeps one good-looking idea from becoming a dangerous oversized bet.",
         "Net EV Gate": (
             f"A trade must still clear at least {EV_THRESHOLD:.0%} edge after Kalshi's "
-            f"exchange-derived fee curve ({_fee_formula_text()}) and the ${KALSHI_FEE_BUFFER:.2f} "
-            "execution buffer. This prevents the bot from buying tiny theoretical edges that disappear in real fills."
+            f"exchange-derived fee curve ({_fee_formula_text()}). This prevents the bot from buying "
+            "tiny theoretical edges that disappear in real fills."
         ),
-        "Fractional Kelly": f"Kelly sizing starts from the math edge, then only uses a fraction of the account. Here it is capped at {KALSHI_KELLY_CAP:.0%}, which keeps conviction from turning into overbetting.",
+        "Fractional Kelly": f"Legacy Kelly math still informs the hard bankroll rails, but live weather sizing now scales continuously from edge while staying under the ${KALSHI_MAX_USD_PER_POSITION:.0f} hard cap.",
         "Regional Hub Cap": (
             "No single weather region is allowed to dominate the book. "
             f"Right now the live hub cap is {_coerce_float(hub_cap):.2f} dollars, "
@@ -627,10 +627,7 @@ def build_metric_explainers(balance_usd: float | None = None) -> dict[str, str]:
             f"{KALSHI_HUB_EXPOSURE_PCT:.0%} of live cash)."
         ),
         "Max Deployed Capital": f"The engine can only deploy up to {KALSHI_MAX_DEPLOYED_PCT:.0%} of the account at once. That leaves dry powder and prevents the bot from becoming fully invested in mediocre conditions.",
-        "Fee Buffer": (
-            f"The system first prices the exchange fee from Kalshi's live fee curve ({_fee_formula_text()}). "
-            f"Then it adds a separate ${KALSHI_FEE_BUFFER:.2f} execution buffer to protect against thin books and slippage."
-        ),
+        "Fee Model": f"The system prices Kalshi friction directly from the exchange fee curve ({_fee_formula_text()}) instead of adding a second flat fee tax on top.",
         "Forecast Freshness": f"Weather data older than {KALSHI_DATA_FRESHNESS_MINUTES} minutes is treated as stale. This stops the engine from making decisions off an old atmosphere.",
         "Recent Edge": "This compares the bot's side probability against the price it paid. A bigger gap means the model believed it was buying more outcome probability than the market was charging for.",
         "Confidence": "Confidence is the bot's probability for the side it actually bought, after converting YES/NO correctly. It is the core number behind whether a trade looked cheap or expensive.",
@@ -665,15 +662,15 @@ def build_decision_funnel(
             "stage": "03",
             "label": "Safety Gates",
             "headline": f"Net EV > {EV_THRESHOLD:.0%} After Fees",
-            "detail": "Trades get vetoed here if fee drag, spread, stale quotes, or model-vs-market divergence makes the edge unsafe.",
-            "pill": f"Fee {_fee_formula_text()} + buffer ${KALSHI_FEE_BUFFER:.2f}",
+            "detail": "Trades get vetoed here if fee drag, spread, stale quotes, or stale weather truth makes the edge unsafe.",
+            "pill": f"Fee {_fee_formula_text()}",
             "tooltip": explainers["Safety Gates"],
         },
         {
             "stage": "04",
             "label": "Position Sizing",
-            "headline": f"Kelly Cap {KALSHI_KELLY_CAP:.0%}",
-            "detail": "Approved trades are clipped again by Kelly, event risk, deployment limits, and regional hub exposure.",
+            "headline": f"Sigmoid Size Under ${KALSHI_MAX_USD_PER_POSITION:.0f}",
+            "detail": "Approved trades are clipped again by the continuous edge scaler, hard bankroll caps, and regional hub exposure.",
             "pill": f"Hub cap ${hub_cap:.2f}",
             "tooltip": explainers["Position Sizing"],
         },
@@ -949,7 +946,7 @@ def build_regime_cards(
         {
             "label": "Fractional Kelly",
             "value": f"{KALSHI_KELLY_CAP:.0%}",
-            "detail": "maximum Kelly slice",
+            "detail": "hard bankroll rail",
             "tooltip": explainers["Fractional Kelly"],
         },
         {
@@ -965,10 +962,10 @@ def build_regime_cards(
             "tooltip": explainers["Max Deployed Capital"],
         },
         {
-            "label": "Fee Buffer",
-            "value": f"${KALSHI_FEE_BUFFER:.2f}",
-            "detail": "extra friction allowance",
-            "tooltip": explainers["Fee Buffer"],
+            "label": "Fee Model",
+            "value": _fee_formula_text(),
+            "detail": "exchange-derived friction curve",
+            "tooltip": explainers["Fee Model"],
         },
         {
             "label": "Forecast Freshness",

@@ -7,12 +7,9 @@ import logging
 import sys
 
 from notifications.telegram_bot import run_bot
+from runtime.logging_setup import configure_runtime_logging
 
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(name)s %(levelname)s %(message)s",
-)
+configure_runtime_logging()
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 logging.getLogger("telegram").setLevel(logging.WARNING)

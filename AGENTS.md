@@ -19,7 +19,7 @@ This repository is now the active Kalshi-only execution tree.
 - `telegram_daemon.py` runs the Telegram operator/oracle process.
 - `forecast/runner.py` exposes `run_execution_cycle()` as the canonical single-pass entrypoint.
 - `execution/kalshi_broker.py` is the only active broker adapter in the repo.
-- `docker-compose.yml` starts only `execution-engine` and `telegram-oracle`.
+- `docker-compose.yml` starts `execution-engine` with the embedded Telegram daemon plus `kalshi-cockpit`.
 - `deploy.sh` deploys the lean Kalshi stack to the droplet.
 
 ## Scope Boundary

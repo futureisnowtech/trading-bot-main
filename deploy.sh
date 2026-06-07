@@ -158,7 +158,6 @@ docker compose up -d --remove-orphans --force-recreate --no-build
 echo "  Waiting for containers..."
 sleep 10
 docker ps | grep execution-engine
-docker ps | grep telegram-oracle
 docker ps | grep kalshi-cockpit
 
 echo "  Verifying forecast lane readiness..."
@@ -259,7 +258,6 @@ from runtime.release_gate import write_host_service_status_artifact
 
 services = {
     "execution-engine": {"up": False, "status": ""},
-    "telegram-oracle": {"up": False, "status": ""},
     "kalshi-cockpit": {"up": False, "status": ""},
 }
 
@@ -300,7 +298,7 @@ manifest = {
     "sha": "${LOCAL_SHA}",
     "branch": "${BRANCH}",
     "deployed_at_utc": "${DEPLOY_UTC}",
-    "services": ["execution-engine", "telegram-oracle", "kalshi-cockpit"],
+    "services": ["execution-engine", "kalshi-cockpit"],
     "cockpit_url": "http://64.225.20.38:8501",
 }
 with open("${PROJECT_DIR}/deploy_manifest.json", "w") as f:
@@ -326,7 +324,7 @@ runtime_dir.mkdir(parents=True, exist_ok=True)
             "sha": "${LOCAL_SHA}",
             "branch": "${BRANCH}",
             "deployed_at_utc": "${DEPLOY_UTC}",
-            "services": ["execution-engine", "telegram-oracle", "kalshi-cockpit"],
+            "services": ["execution-engine", "kalshi-cockpit"],
             "cockpit_url": "http://64.225.20.38:8501",
         },
         indent=2,

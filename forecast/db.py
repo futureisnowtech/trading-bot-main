@@ -151,7 +151,7 @@ _DDL_FORECAST_POSITIONS = """
 CREATE TABLE IF NOT EXISTS forecast_positions (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     ticker       TEXT    NOT NULL UNIQUE,
-    qty          REAL    NOT NULL,
+    qty          INTEGER NOT NULL,
     entry_price  REAL    NOT NULL,
     side         TEXT    NOT NULL CHECK(side IN ('YES', 'NO')),
     active       INTEGER NOT NULL DEFAULT 1,
@@ -213,12 +213,13 @@ def insert_forecast_position(
     from datetime import datetime, timezone
 
     now = datetime.now(timezone.utc).isoformat()
+    normalized_qty = max(0, int(round(float(qty))))
     with _conn(db_path) as c:
         c.execute(
             """INSERT OR REPLACE INTO forecast_positions
                (ticker, qty, entry_price, side, active, opened_at)
                VALUES (?, ?, ?, ?, 1, ?)""",
-            (ticker, qty, entry_price, side, now),
+            (ticker, normalized_qty, entry_price, side, now),
         )
         c.commit()
 
@@ -241,6 +242,7 @@ def sync_open_forecast_position(
     from datetime import datetime, timezone
 
     now = datetime.now(timezone.utc).isoformat()
+    normalized_qty = max(0, int(round(float(qty))))
     with _conn(db_path) as c:
         c.execute(
             """
@@ -259,7 +261,7 @@ def sync_open_forecast_position(
                 closed_at=NULL,
                 exit_type=NULL
             """,
-            (ticker, qty, entry_price, side, now),
+            (ticker, normalized_qty, entry_price, side, now),
         )
         c.commit()
 

@@ -54,9 +54,11 @@ class TestWeatherSovereign(unittest.TestCase):
         self.assertTrue(passes)
         self.assertEqual(side, "YES")
         # ensemble_prob is capped at 0.97
-        # confidence = 0.97 * 1.5 = 1.455
-        self.assertAlmostEqual(conf, 1.455)
+        # between-range weather contracts now carry a narrow-bin sizing haircut.
+        # confidence = 0.97 * 1.5 * 0.85 = 1.23675
+        self.assertAlmostEqual(conf, 1.23675)
         self.assertIn("conv_mult=1.5x", factors)
+        self.assertIn("narrow_bin_haircut=0.85x", factors)
 
     @patch('forecast.strategy_engine.get_contract_weather_data')
     def test_ecmwf_divergence_veto(self, mock_get_weather):

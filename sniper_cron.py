@@ -13,15 +13,12 @@ from config import (
 )
 from forecast.runner import run_execution_cycle
 from runtime.incident_tracker import sync_incidents_and_notify
+from runtime.logging_setup import configure_runtime_logging
 from runtime.position_reconciler import run_reconciliation
 from runtime.storage_maintenance import maintain_runtime_storage
 from runtime.storage_guard import runtime_storage_status
 
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(name)s %(levelname)s %(message)s",
-)
+configure_runtime_logging()
 
 
 def main() -> int:

@@ -56,29 +56,6 @@ from config import (
     max_kalshi_contracts_for_budget,
 )
 from forecast.market_snapshot import MarketSnapshot, build_market_snapshots
-from forecast.primitives import (
-    DEFAULT_ALPHA,
-    DEFAULT_BETA,
-    DEFAULT_DELTA,
-    DEFAULT_EPSILON,
-    DEFAULT_ETA,
-    DEFAULT_GAMMA,
-    DEFAULT_ZETA,
-    acceleration,
-    clip_prob,
-    compute_ev,
-    compute_q_hat,
-    contracts_from_fraction,
-    entropy,
-    fractional_kelly_fraction,
-    kalshi_absolute_sizing,
-    log_odds,
-    log_odds_vol,
-    overround,
-    parity_gap,
-    velocity,
-    z_score,
-)
 from forecast.weather_contracts import (
     probability_from_members,
     resolve_weather_contract,
@@ -115,10 +92,6 @@ MIN_ENTROPY_FOR_ENTRY: float = 0.05  # don't trade if market already 95%+ certai
 
 # Volatility cap — don't trade if log-odds are too noisy
 MAX_SIGMA_T: float = 0.80
-
-# z-score cap for mean_reversion entries — must be overextended enough
-MIN_ABS_Z_CONTINUATION: float = 0.0  # continuation doesn't require z
-MIN_ABS_Z_MEAN_REVERSION: float = 1.5  # must be ≥1.5 std devs from EMA
 
 # Parity gap gate — G_t too large means pricing is internally inconsistent
 MAX_PARITY_GAP_ABS: float = 0.05  # |G_t| ≤ 0.05
@@ -164,6 +137,10 @@ def _weather_net_edge(contract_prob: float, ask_price: float) -> float | None:
         - float(ask_price)
         - _estimated_fee_per_contract(ask_price, rounded=False)
     )
+
+
+def min_contract_price_for_mode(mode: str) -> float:
+    return 0.04 if str(mode or "").upper() == "RAIN" else float(KALSHI_MIN_PRICE)
 
 
 def _get_macro_context() -> dict:
@@ -294,13 +271,10 @@ class StrategyResult:
     top_factors: list[str]  # human-readable top signal factors
     # --- Computed features for logging/dashboard ---
     x_t: float = 0.0
-    v_1h: float = 0.0
-    a_30m: float = 0.0
     sigma_t: float = 0.0
     h_t: float = 0.0
     omega_t: float = 0.0
     g_t: float = 0.0
-    z_t: float = 0.0
     ask_yes: float = 0.0
     ask_no: float = 0.0
     hours_to_resolution: float = 0.0
@@ -308,24 +282,6 @@ class StrategyResult:
     model_prob_gfs: float | None = None
     model_prob_ecmwf: float | None = None
     weather_mode: str = ""
-
-
-def _extract_log_odds_series(bars: list[dict]) -> list[float]:
-    """
-    Extract a time-ordered list of log-odds values from bar dicts.
-    Uses bar['c'] (close mid) as implied probability.
-    Clips to [0.01, 0.99] before log.
-    """
-    xs = []
-    for b in bars:
-        mid = b.get("c") or b.get("mid_mean")
-        if mid is None:
-            continue
-        try:
-            xs.append(log_odds(float(mid)))
-        except Exception:
-            pass
-    return xs
 
 
 def _hours_to_resolution(last_trade_at: str) -> float:
@@ -342,77 +298,6 @@ def _hours_to_resolution(last_trade_at: str) -> float:
         return max(0.0, delta)
     except Exception:
         return 0.0
-
-
-def _compute_features(
-    bars_5m: list[dict],
-    bars_30m: list[dict],
-    bars_1h: list[dict],
-    bars_4h: list[dict],
-    ask_yes: float,
-    ask_no: float,
-    mid_yes: float,
-    mid_no: float,
-) -> dict:
-    """
-    Compute all log-odds features from multi-timeframe bars.
-
-    Returns dict with: x_t, v_1h, a_30m, sigma_t, h_t, omega_t, g_t, z_t,
-    v_4h, velocity_30m, latest_prob
-    """
-    # Primary price series — use 1h bars for most features
-    xs_1h = _extract_log_odds_series(bars_1h)
-    xs_30m = _extract_log_odds_series(bars_30m)
-    xs_5m = _extract_log_odds_series(bars_5m)
-    xs_4h = _extract_log_odds_series(bars_4h)
-
-    # Current log-odds from most recent bar (prefer 5m for freshness)
-    latest_prob = None
-    for bar_list in [bars_5m, bars_30m, bars_1h]:
-        if bar_list:
-            latest_prob = bar_list[-1].get("c") or bar_list[-1].get("mid_mean")
-            if latest_prob:
-                break
-    if latest_prob is None:
-        latest_prob = mid_yes if mid_yes else 0.50
-    latest_prob = clip_prob(float(latest_prob))
-
-    x_t = log_odds(latest_prob)
-
-    # Velocities: Δt = 1 bar for each timeframe
-    v_1h = velocity(xs_1h, k=1, dt=1.0) if len(xs_1h) >= 2 else 0.0
-    v_4h = velocity(xs_4h, k=1, dt=1.0) if len(xs_4h) >= 2 else 0.0
-    v_30m_series = velocity(xs_30m, k=1, dt=1.0) if len(xs_30m) >= 2 else 0.0
-
-    # Acceleration: 30m bars, 1 step
-    a_30m = acceleration(xs_30m, k=1, dt=1.0) if len(xs_30m) >= 3 else 0.0
-
-    # Volatility: std of diffs over last 20 5m bars
-    sigma_t = log_odds_vol(xs_5m, window=20) if xs_5m else 0.0
-
-    # Entropy
-    h_t = entropy(latest_prob)
-
-    # Overround and parity gap (require both sides)
-    omega_t = overround(ask_yes, ask_no) if ask_yes and ask_no else 0.0
-    g_t = parity_gap(mid_yes, mid_no) if mid_yes and mid_no else 0.0
-
-    # Z-score: deviation from EMA using 1h bars (more stable than 5m)
-    z_t = z_score(xs_1h, window=20) if len(xs_1h) >= 5 else 0.0
-
-    return {
-        "x_t": x_t,
-        "v_1h": v_1h,
-        "v_4h": v_4h,
-        "a_30m": a_30m,
-        "sigma_t": sigma_t,
-        "h_t": h_t,
-        "omega_t": omega_t,
-        "g_t": g_t,
-        "z_t": z_t,
-        "latest_prob": latest_prob,
-        "velocity_30m": v_30m_series,
-    }
 
 
 def _max_quote_age_seconds(*quotes: dict) -> float | None:
@@ -651,185 +536,6 @@ def _weather_market_gate(
     return True, ""
 
 
-# ── Strategy families ──────────────────────────────────────────────────────────
-
-
-def _strategy_continuation(
-    features: dict, hours_to_res: float
-) -> tuple[bool, str, float, list[str]]:
-    """
-    continuation strategy:
-      - positive 1h AND 4h log-odds slope (trend in one direction)
-      - non-negative 30m acceleration (trend not decelerating)
-      - low/moderate overround
-      - no extreme overextension (|z_t| < 2.5)
-      - sufficient time to resolution
-
-    Returns: (passes, side, confidence, top_factors)
-    """
-    v_1h = features["v_1h"]
-    v_4h = features["v_4h"]
-    a_30m = features["a_30m"]
-    z_t = features["z_t"]
-    omega_t = features["omega_t"]
-
-    factors = []
-
-    # Slope agreement: both 1h and 4h must agree on direction
-    if v_1h > 0 and v_4h > 0:
-        side = "YES"
-        factors.append(f"1h_vel=+{v_1h:.3f} 4h_vel=+{v_4h:.3f}")
-    elif v_1h < 0 and v_4h < 0:
-        side = "NO"
-        factors.append(f"1h_vel={v_1h:.3f} 4h_vel={v_4h:.3f}")
-    else:
-        return False, "", 0.0, ["slope_disagreement"]
-
-    # Acceleration: 30m must be non-negative in direction of trade
-    if side == "YES" and a_30m < -0.05:
-        return False, "", 0.0, ["30m_deceleration_against_YES"]
-    if side == "NO" and a_30m > 0.05:
-        return False, "", 0.0, ["30m_acceleration_against_NO"]
-    factors.append(f"a_30m={a_30m:.3f}")
-
-    # Not overextended (mean reversion risk)
-    if abs(z_t) > 2.5:
-        return False, "", 0.0, [f"overextended z={z_t:.2f}"]
-    factors.append(f"z_t={z_t:.2f}")
-
-    # Enough time for continuation play
-    if hours_to_res < 4.0:
-        return False, "", 0.0, ["insufficient_time_for_continuation"]
-
-    # Confidence: higher when slope is large, acceleration is aligned, z is moderate
-    slope_mag = min(abs(v_1h) + abs(v_4h), 2.0) / 2.0
-    accel_boost = (
-        0.10 if (side == "YES" and a_30m > 0) or (side == "NO" and a_30m < 0) else 0.0
-    )
-    confidence = min(0.90, 0.50 + slope_mag * 0.30 + accel_boost)
-
-    return True, side, confidence, factors
-
-
-def _strategy_mean_reversion(
-    features: dict, hours_to_res: float
-) -> tuple[bool, str, float, list[str]]:
-    """
-    mean_reversion strategy:
-      - large absolute z_t (contract is overextended vs EMA)
-      - acceleration rolling over against the current move
-      - entropy not extreme
-      - enough time left for reversion
-
-    Returns: (passes, side, confidence, top_factors)
-    """
-    z_t = features["z_t"]
-    a_30m = features["a_30m"]
-    h_t = features["h_t"]
-    v_1h = features["v_1h"]
-
-    factors = []
-
-    # Must be overextended enough
-    if abs(z_t) < MIN_ABS_Z_MEAN_REVERSION:
-        return (
-            False,
-            "",
-            0.0,
-            [f"z_not_extreme enough ({abs(z_t):.2f} < {MIN_ABS_Z_MEAN_REVERSION})"],
-        )
-
-    # Determine reversion side (fade the overextension)
-    if z_t > 0:
-        # Overextended toward YES → trade NO (expect mean reversion downward)
-        side = "NO"
-        # Acceleration should be rolling over (turning negative)
-        if a_30m > 0.05:
-            return False, "", 0.0, ["still_accelerating_against_NO_reversion"]
-        factors.append(f"z_t=+{z_t:.2f} (extended toward YES, fade to NO)")
-    else:
-        # Overextended toward NO → trade YES
-        side = "YES"
-        if a_30m < -0.05:
-            return False, "", 0.0, ["still_accelerating_against_YES_reversion"]
-        factors.append(f"z_t={z_t:.2f} (extended toward NO, fade to YES)")
-
-    factors.append(f"a_30m={a_30m:.3f}")
-
-    # Entropy: market must still have uncertainty (not already resolved)
-    if h_t < MIN_ENTROPY_FOR_ENTRY:
-        return False, "", 0.0, [f"entropy_too_low (H={h_t:.3f})"]
-
-    # Time: need enough hours for the reversion to happen
-    if hours_to_res < 6.0:
-        return False, "", 0.0, ["insufficient_time_for_mean_reversion"]
-
-    # Confidence: driven by z magnitude and acceleration confirmation
-    z_magnitude = min(abs(z_t) / 3.0, 1.0)
-    accel_confirm = (
-        0.10
-        if ((side == "NO" and a_30m <= 0) or (side == "YES" and a_30m >= 0))
-        else 0.0
-    )
-    confidence = min(0.85, 0.45 + z_magnitude * 0.30 + accel_confirm)
-
-    return True, side, confidence, factors
-
-
-def _strategy_late_repricing(
-    features: dict, hours_to_res: float
-) -> tuple[bool, str, float, list[str]]:
-    """
-    late_repricing strategy:
-      - meaningful movement in the 4h–24h window before resolution
-      - low parity distortion (G_t near zero)
-      - contract not close to 0/1 saturation
-      - event-quality and liquidity thresholds met
-      - time window: 2h–72h before resolution
-
-    Returns: (passes, side, confidence, top_factors)
-    """
-    v_4h = features["v_4h"]
-    g_t = features["g_t"]
-    h_t = features["h_t"]
-    z_t = features["z_t"]
-    sigma_t = features["sigma_t"]
-    latest_prob = features["latest_prob"]
-
-    factors = []
-
-    # Must have significant recent movement
-    if abs(v_4h) < 0.10:
-        return False, "", 0.0, [f"insufficient_4h_movement (v4h={v_4h:.3f})"]
-
-    # Time window: specifically for late repricing (2h–72h window)
-    if hours_to_res > 72.0 or hours_to_res < 2.0:
-        return False, "", 0.0, [f"outside_late_repricing_window ({hours_to_res:.1f}h)"]
-
-    # Parity distortion must be low
-    if abs(g_t) > 0.03:
-        return False, "", 0.0, [f"parity_distorted (|G|={abs(g_t):.3f})"]
-
-    # Not already saturated (not near 0 or 1)
-    if latest_prob > 0.92 or latest_prob < 0.08:
-        return False, "", 0.0, [f"near_saturation (p={latest_prob:.3f})"]
-
-    # Side: follow the recent 4h movement
-    side = "YES" if v_4h > 0 else "NO"
-    factors.append(
-        f"v_4h={'+' if v_4h > 0 else ''}{v_4h:.3f} (late move toward {side})"
-    )
-    factors.append(f"g_t={g_t:.4f} (parity OK)")
-    factors.append(f"H_t={h_t:.3f} (entropy OK)")
-
-    # Confidence: recent movement magnitude, low sigma (stable repricing not chaotic)
-    move_conf = min(abs(v_4h) / 0.5, 1.0) * 0.40
-    sigma_penalty = max(0.0, sigma_t - 0.20) * 0.50
-    confidence = min(0.80, 0.50 + move_conf - sigma_penalty)
-
-    return True, side, confidence, factors
-
-
 # ── Main entry point ───────────────────────────────────────────────────────────
 
 
@@ -1031,7 +737,7 @@ def blended_weather_yes_probability(
     *,
     contract_name: str = "",
     strike: float | None = None,
-    neutralize_catastrophic: bool = True,
+    neutralize_catastrophic: bool = False,
 ) -> float | None:
     if not w_data:
         return None
@@ -1053,35 +759,27 @@ def blended_weather_yes_probability(
         prob_ecmwf=prob_ecmwf,
         mode=semantics.mode,
     )
-    if neutralize_catastrophic and blended["catastrophic_divergence"]:
-        return 0.5
     return float(blended["ensemble_prob"])
 
 def calculate_continuous_sizing(market_price: float, ensemble_prob: float, capital_base: float, multiplier: float = 1.0, cap_pct: float = 0.10, conv_tier: int = 3) -> int:
-    """Continuous sigmoid sizing with post-fee edge and hard USD caps."""
+    """Continuous sigmoid sizing driven by post-fee edge."""
     ensemble_prob = max(0.01, min(0.99, ensemble_prob))
     market_price = max(0.01, min(0.99, market_price))
     fee_per_contract = _estimated_fee_per_contract(market_price, rounded=False)
-    effective_cost = max(0.01, min(0.99, market_price + fee_per_contract))
-    post_fee_edge = ensemble_prob - effective_cost
+    calculated_ev = ensemble_prob - market_price - fee_per_contract
 
-    if post_fee_edge <= 0.0 or capital_base <= 0:
+    if calculated_ev <= 0.0 or capital_base <= 0:
         return 0
 
-    sigmoid_scaler = 1.0 / (1.0 + math.exp(-15.0 * (post_fee_edge - 0.12)))
+    scaling_factor = 1.0 / (1.0 + math.exp(-15.0 * (calculated_ev - 0.12)))
     capital_allowance = min(
         max(0.0, float(capital_base) * max(0.0, float(cap_pct))),
         float(KALSHI_MAX_USD_PER_POSITION),
     )
-    scaled_budget = min(
-        float(KALSHI_MAX_USD_PER_POSITION),
-        capital_allowance * sigmoid_scaler * max(0.10, float(multiplier)),
-    )
-    qty = max_kalshi_contracts_for_budget(market_price, scaled_budget)
-    qty = min(
-        qty,
-        KALSHI_MAX_QTY_PER_POSITION,
-    )
+    deployed_budget = capital_allowance * scaling_factor * max(0.10, float(multiplier))
+    per_contract_outlay = max(0.01, market_price + fee_per_contract)
+    qty = int(deployed_budget / per_contract_outlay)
+    qty = min(max(0, qty), KALSHI_MAX_QTY_PER_POSITION)
 
     return max(0, qty)
 
@@ -1224,15 +922,6 @@ def _strategy_weather_details(
         logger.info(
             f"Sovereign Convergence: {ticker} GFS={prob_gfs:.1%} EC={prob_ecmwf:.1%} -> 1.5x"
         )
-    if bool(blend_state["catastrophic_divergence"]):
-        logger.warning(
-            "Sovereign Divergence Veto: %s GFS=%.1f%% EC=%.1f%% gap=%.1f%% -> VETO",
-            ticker,
-            prob_gfs * 100.0,
-            (prob_ecmwf or 0.0) * 100.0,
-            divergence_gap * 100.0,
-        )
-        return False, "", 0.0, ["model_divergence_veto"], False, 1.0, 3, 0.05
 
     edge_yes = (ensemble_prob - ask_yes) if ask_yes > 0 else None
     edge_no = ((1.0 - ensemble_prob) - ask_no) if ask_no > 0 else None
@@ -1300,25 +989,24 @@ def _strategy_weather_details(
             0.05,
         )
     
-    # v19.5: Sovereign Survival — Institutional Price Floor ($0.15)
-    # Never trade penny longshots.
-    if ask_yes > 0 and edge_yes is not None and edge_yes > 0 and ask_yes < KALSHI_MIN_PRICE:
+    min_allowed_price = min_contract_price_for_mode(mode)
+    if ask_yes > 0 and edge_yes is not None and edge_yes > 0 and ask_yes < min_allowed_price:
         return (
             False,
             "",
             0.0,
-            [f"penny_veto (ask={ask_yes:.2f} < {KALSHI_MIN_PRICE})"],
+            [f"penny_veto (ask={ask_yes:.2f} < {min_allowed_price:.2f})"],
             False,
             1.0,
             3,
             0.05,
         )
-    if ask_no > 0 and edge_no is not None and edge_no > 0 and ask_no < KALSHI_MIN_PRICE:
+    if ask_no > 0 and edge_no is not None and edge_no > 0 and ask_no < min_allowed_price:
         return (
             False,
             "",
             0.0,
-            [f"penny_veto (ask={ask_no:.2f} < {KALSHI_MIN_PRICE})"],
+            [f"penny_veto (ask={ask_no:.2f} < {min_allowed_price:.2f})"],
             False,
             1.0,
             3,
@@ -1572,30 +1260,23 @@ def evaluate_contract(
             hours_to_resolution=hours_to_res,
         )
 
-    # v18.34: Macro Context Risk Gate
     if not is_weather:
-        macro = _get_macro_context()
-        risk_score = float(macro.get("risk_score", 0))
-        if risk_score >= 8:
-            logger.info(
-                f"Sovereign Veto: MACRO_RISK_OVERLOAD (score={risk_score}) for {contract.get('local_symbol')}"
-            )
-            return StrategyResult(
-                strategy_family="vetoed",
-                side="NONE",
-                q_hat=0.0,
-                ev=0.0,
-                ev_yes=0.0,
-                ev_no=0.0,
-                confidence=0.0,
-                uncertainty_penalty=0.0,
-                econ_approved=False,
-                veto_reason="macro_risk_overload",
-                position_fraction=0.0,
-                position_contracts=0,
-                top_factors=[],
-                hours_to_resolution=hours_to_res,
-            )
+        return StrategyResult(
+            strategy_family="vetoed",
+            side="NONE",
+            q_hat=0.0,
+            ev=0.0,
+            ev_yes=0.0,
+            ev_no=0.0,
+            confidence=0.0,
+            uncertainty_penalty=0.0,
+            econ_approved=False,
+            veto_reason="non_weather_contract_unsupported",
+            position_fraction=0.0,
+            position_contracts=0,
+            top_factors=[],
+            hours_to_resolution=hours_to_res,
+        )
 
     if is_weather:
         w_res = _strategy_weather_details(
@@ -1751,194 +1432,21 @@ def evaluate_contract(
             weather_mode=weather_mode,
         )
 
-    # Compute all log-odds features for non-weather markets.
-    try:
-        feats = _compute_features(
-            bars_5m, bars_30m, bars_1h, bars_4h, ask_yes, ask_no, mid_yes, mid_no
-        )
-    except Exception:
-        logger.exception(f"Feature computation failed for {contract.get('local_symbol')}")
-        return StrategyResult(
-            strategy_family="vetoed",
-            side="NONE",
-            q_hat=0.0,
-            ev=0.0,
-            ev_yes=0.0,
-            ev_no=0.0,
-            confidence=0.0,
-            uncertainty_penalty=0.0,
-            econ_approved=False,
-            veto_reason="feature_computation_failed",
-            position_fraction=0.0,
-            position_contracts=0,
-            top_factors=[],
-            hours_to_resolution=hours_to_res
-        )
-
-    x_t = feats["x_t"]
-    v_1h = feats["v_1h"]
-    a_30m = feats["a_30m"]
-    sigma_t = feats["sigma_t"]
-    h_t = feats["h_t"]
-    omega_t = feats["omega_t"]
-    g_t = feats["g_t"]
-    z_t = feats["z_t"]
-
-    # Compute q_hat (fair probability for YES)
-    q_hat = compute_q_hat(
-        p_mid=feats["latest_prob"],
-        v_1h=0.0,
-        a_30m=0.0,
-        sigma_t=sigma_t,
-        h_t=h_t,
-        omega_t=omega_t,
-        z_t=0.0,
-        context_bias=0.0,
-    )
-
-    # Run economics gate
-    approved, veto_reason, ev_yes, ev_no = _economics_gate(
-        ask_yes=ask_yes,
-        ask_no=ask_no,
-        q_hat=q_hat,
-        omega_t=omega_t,
-        g_t=g_t,
-        h_t=h_t,
-        sigma_t=sigma_t,
-        spread=spread,
-        hours_to_resolution=hours_to_res,
-        open_positions_count=open_positions_count,
-        deployed_pct=deployed_pct,
-        same_event_open=same_event_open,
-    )
-
-    strategy_candidates: list[tuple[str, str, float, list[str], bool, float, int, float]] = []
-    for name, fn in [
-        ("continuation", _strategy_continuation),
-        ("mean_reversion", _strategy_mean_reversion),
-        ("late_repricing", _strategy_late_repricing),
-    ]:
-        try:
-            passes, side, confidence, factors = fn(feats, hours_to_res)
-            if passes:
-                strategy_candidates.append((name, side, confidence, factors, False, 1.0, 3, 0.05))
-        except Exception as e:
-            logger.debug(f"Strategy {name} error: {e}")
-
-    tradable_sides = {
-        side
-        for side, ask in (("YES", ask_yes), ("NO", ask_no))
-        if ask > 0.0
-    }
-    original_candidate_count = len(strategy_candidates)
-    if tradable_sides:
-        strategy_candidates = [
-            candidate for candidate in strategy_candidates if candidate[1] in tradable_sides
-        ]
-
-    if not strategy_candidates:
-        # No strategy signal
-        return StrategyResult(
-            strategy_family="vetoed",
-            side="NONE",
-            q_hat=q_hat,
-            ev=0.0,
-            ev_yes=ev_yes,
-            ev_no=ev_no,
-            confidence=0.0,
-            uncertainty_penalty=0.0,
-            econ_approved=False,
-            veto_reason=(
-                "signal_side_unquotable" if original_candidate_count > 0 else "no_strategy_signal"
-            ),
-            position_fraction=0.0,
-            position_contracts=0,
-            top_factors=[],
-            hours_to_resolution=hours_to_res,
-            is_taker_override=False
-        )
-
-    # Pick highest-confidence strategy
-    strategy_candidates.sort(key=lambda x: x[2], reverse=True)
-    best_family, best_side, best_confidence, best_factors, best_is_taker, best_multiplier, best_tier, best_sizing_cap = strategy_candidates[0]
-    if (best_side == "YES" and ask_yes <= 0.0) or (best_side == "NO" and ask_no <= 0.0):
-        return StrategyResult(
-            strategy_family="vetoed",
-            side="NONE",
-            q_hat=q_hat,
-            ev=0.0,
-            ev_yes=ev_yes,
-            ev_no=ev_no,
-            confidence=0.0,
-            uncertainty_penalty=0.0,
-            econ_approved=False,
-            veto_reason=f"missing_quotes_{best_side.lower()}",
-            position_fraction=0.0,
-            position_contracts=0,
-            top_factors=best_factors,
-            hours_to_resolution=hours_to_res,
-            is_taker_override=False,
-        )
-
-    ev_chosen = ev_yes if best_side == "YES" else ev_no
-    p_cost = ask_yes if best_side == "YES" else ask_no
-    if approved and ev_chosen < EV_THRESHOLD:
-        approved = False
-        veto_reason = f"chosen_side_ev_too_low ({ev_chosen:.4f} < {EV_THRESHOLD})"
-
-    uncertainty_penalty = min(0.40, sigma_t * 0.30 + max(0.0, h_t - 0.60) * 0.20)
-
-    if approved:
-        per_contract_fee = _estimated_fee_per_contract(p_cost, rounded=False)
-        n_contracts, total_cost = kalshi_absolute_sizing(
-            ask_price=p_cost,
-            bankroll=bankroll,
-            max_risk_pct=KALSHI_MAX_RISK_PER_EVENT_PCT,
-            max_deploy_pct=0.10,
-            fee_per_contract=per_contract_fee,
-            max_usd_cap=KALSHI_MAX_USD_PER_POSITION,
-        )
-        exact_budget_cap = min(
-            bankroll * KALSHI_MAX_RISK_PER_EVENT_PCT,
-            bankroll * 0.10,
-            KALSHI_MAX_USD_PER_POSITION,
-        )
-        n_contracts = min(
-            n_contracts,
-            max_kalshi_contracts_for_budget(p_cost, exact_budget_cap),
-        )
-        total_cost = estimate_kalshi_order_cost_usd(n_contracts, p_cost)
-    else:
-        n_contracts, total_cost = 0, 0.0
-
-    actual_fraction = total_cost / bankroll if bankroll > 0 else 0.0
-
     return StrategyResult(
-        strategy_family=best_family,
-        side=best_side,
-        q_hat=q_hat,
-        ev=ev_chosen,
-        ev_yes=ev_yes,
-        ev_no=ev_no,
-        confidence=best_confidence,
-        uncertainty_penalty=uncertainty_penalty,
-        econ_approved=approved,
-        veto_reason=veto_reason,
-        position_fraction=actual_fraction,
-        position_contracts=n_contracts,
-        top_factors=best_factors,
-        x_t=x_t,
-        v_1h=v_1h,
-        a_30m=a_30m,
-        sigma_t=sigma_t,
-        h_t=h_t,
-        omega_t=omega_t,
-        g_t=g_t,
-        z_t=z_t,
-        ask_yes=ask_yes,
-        ask_no=ask_no,
+        strategy_family="vetoed",
+        side="NONE",
+        q_hat=0.0,
+        ev=0.0,
+        ev_yes=0.0,
+        ev_no=0.0,
+        confidence=0.0,
+        uncertainty_penalty=0.0,
+        econ_approved=False,
+        veto_reason="non_weather_contract_unsupported",
+        position_fraction=0.0,
+        position_contracts=0,
+        top_factors=[],
         hours_to_resolution=hours_to_res,
-        is_taker_override=best_is_taker,
     )
 
 

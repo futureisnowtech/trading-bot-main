@@ -55,6 +55,11 @@ SEV_CRITICAL = 'CRITICAL'
 _MAX_NOTIFICATIONS = 500
 _PRUNE_TO          = 450  # keep this many after pruning
 _TABLE_INITIALIZED: bool = False
+_TELEGRAM_ALLOWED_EVENT_CODES = {
+    "ORDER_FILLED",
+    "POSITION_FLATTENED",
+    "CRITICAL_KILL_SWITCH",
+}
 
 
 # ── Data model ────────────────────────────────────────────────────────────────
@@ -153,14 +158,44 @@ def _prune(conn):
 
 
 def _should_dispatch_telegram(event: NotificationEvent) -> bool:
-    if event.severity == SEV_CRITICAL:
-        return True
-    if event.category in (CAT_TRADE_OPEN, CAT_TRADE_CLOSE):
-        return True
     try:
-        return bool((event.data or {}).get("telegram"))
+        code = str((event.data or {}).get("telegram_event") or "").strip().upper()
     except Exception:
         return False
+    return code in _TELEGRAM_ALLOWED_EVENT_CODES
+
+
+def _render_telegram_message(event: NotificationEvent) -> str:
+    payload = event.data or {}
+    code = str(payload.get("telegram_event") or "").strip().upper()
+
+    if code == "ORDER_FILLED":
+        capital = float(payload.get("capital_deployed") or payload.get("size_usd") or 0.0)
+        return (
+            "<b>ORDER_FILLED</b>\n"
+            f"Ticker: {payload.get('symbol')}\n"
+            f"Side: {payload.get('direction')}\n"
+            f"Contracts Filled: {int(payload.get('contracts_filled') or 0)}\n"
+            f"Executed Price: ${float(payload.get('entry') or 0.0):.2f}\n"
+            f"Total Capital Deployed: ${capital:.2f}"
+        )
+
+    if code == "POSITION_FLATTENED":
+        return (
+            "<b>POSITION_FLATTENED</b>\n"
+            f"Ticker: {payload.get('symbol')}\n"
+            f"Realized PnL: ${float(payload.get('pnl_usd') or 0.0):+.2f}\n"
+            f"Yield: {float(payload.get('pnl_pct') or 0.0):+.1%}"
+        )
+
+    if code == "CRITICAL_KILL_SWITCH":
+        return (
+            "<b>CRITICAL_KILL_SWITCH</b>\n"
+            f"Trigger: {payload.get('trigger')}\n"
+            f"Detail: {event.message}"
+        )
+
+    return f"<b>{event.title}</b>\n{event.message}"
 
 
 # ── Core write API ────────────────────────────────────────────────────────────
@@ -200,8 +235,7 @@ def push(event: NotificationEvent) -> Optional[str]:
         if _should_dispatch_telegram(event):
             try:
                 from notifications.telegram_bot import send_message as tg_send
-                tg_text = f"<b>{event.title}</b>\n{event.message}"
-                tg_send(tg_text)
+                tg_send(_render_telegram_message(event))
             except Exception as e:
                 logger.error(f"Telegram dispatch error: {e}")
 
@@ -216,17 +250,23 @@ def push(event: NotificationEvent) -> Optional[str]:
 def notify_trade_open(symbol: str, direction: str, size_usd: float,
                       entry_price: float, score: float,
                       top_3: List[str], features: Dict,
-                      regime: str = 'UNKNOWN') -> None:
+                      regime: str = 'UNKNOWN',
+                      contracts_filled: int = 0,
+                      capital_deployed: float | None = None) -> None:
     """Notify when a new position is opened."""
+    deployed = float(capital_deployed if capital_deployed is not None else size_usd)
     push(NotificationEvent(
         category=CAT_TRADE_OPEN,
         severity=SEV_INFO,
         title=f'{direction} {symbol} @ ${entry_price:,.2f}',
-        message=(f'Size: ${size_usd:.0f}  Score: {score:.1f}  '
+        message=(f'Size: ${deployed:.0f}  Score: {score:.1f}  '
                  f'Regime: {regime}'),
         why=make_why(top_3, features, regime, score),
         data={'symbol': symbol, 'direction': direction,
-              'entry': entry_price, 'size_usd': size_usd},
+              'entry': entry_price, 'size_usd': deployed,
+              'contracts_filled': int(contracts_filled or 0),
+              'capital_deployed': deployed,
+              'telegram_event': 'ORDER_FILLED'},
     ))
 
 
@@ -243,7 +283,7 @@ def notify_trade_close(symbol: str, direction: str, pnl_usd: float,
         message=f'Exit: {exit_type}  Regime: {regime}',
         why=make_why(top_3, features, regime, score),
         data={'symbol': symbol, 'pnl_usd': pnl_usd, 'pnl_pct': pnl_pct,
-              'exit_type': exit_type},
+              'exit_type': exit_type, 'telegram_event': 'POSITION_FLATTENED'},
     ))
 
 
@@ -315,7 +355,11 @@ def notify_kill_switch(trigger_type: str, detail: str,
         severity=sev,
         title=f'KILL SWITCH {action} — {trigger_type}',
         message=detail,
-        data={'trigger': trigger_type, 'resume': is_resume},
+        data={
+            'trigger': trigger_type,
+            'resume': is_resume,
+            'telegram_event': '' if is_resume else 'CRITICAL_KILL_SWITCH',
+        },
     ))
 
 

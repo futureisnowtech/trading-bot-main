@@ -5,6 +5,7 @@ All tables live in the existing logs/trades.db (WAL mode).
 Call init_forecast_db() once at startup (idempotent — uses CREATE TABLE IF NOT EXISTS).
 """
 
+import json
 import os
 import sqlite3
 import sys
@@ -161,6 +162,33 @@ CREATE TABLE IF NOT EXISTS forecast_positions (
 );
 """
 
+_DDL_RECENT_VETOES = """
+CREATE TABLE IF NOT EXISTS recent_vetoes (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts                 TEXT    NOT NULL,
+    ticker             TEXT    NOT NULL,
+    strategy_family    TEXT,
+    side               TEXT,
+    veto_reason        TEXT    NOT NULL,
+    rank_score         REAL,
+    ev                 REAL,
+    position_contracts INTEGER,
+    size_usd           REAL,
+    details_json       TEXT    DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_recent_vetoes_ts
+    ON recent_vetoes (ts DESC);
+CREATE INDEX IF NOT EXISTS idx_recent_vetoes_reason
+    ON recent_vetoes (veto_reason);
+"""
+
+_DDL_SYSTEM_COOLDOWNS = """
+CREATE TABLE IF NOT EXISTS system_cooldowns (
+    process_name     TEXT PRIMARY KEY,
+    last_executed_ts INTEGER NOT NULL
+);
+"""
+
 # v19.4 Sovereign Balance: Tighten retention for 31-city scale
 QUOTE_RETENTION_DAYS: int = 7
 BAR_RETENTION_DAYS: int = 30
@@ -189,6 +217,8 @@ def init_forecast_db(db_path: str | None = None) -> None:
             _DDL_FORECAST_BARS,
             _DDL_FORECAST_RESOLUTIONS,
             _DDL_FORECAST_POSITIONS,
+            _DDL_RECENT_VETOES,
+            _DDL_SYSTEM_COOLDOWNS,
         ]:
             for stmt in ddl_block.strip().split(";"):
                 stmt = stmt.strip()
@@ -334,6 +364,99 @@ def mark_forecast_position_closed(
                SET active=0, closed_at=?, exit_type=?
                WHERE ticker=? AND active=1""",
             (now, exit_type, ticker),
+        )
+        c.commit()
+
+
+def record_recent_veto(
+    *,
+    ticker: str,
+    veto_reason: str,
+    strategy_family: str = "",
+    side: str = "",
+    rank_score: float | None = None,
+    ev: float | None = None,
+    position_contracts: int | None = None,
+    size_usd: float | None = None,
+    details: dict | None = None,
+    db_path: str | None = None,
+    max_rows: int = 1000,
+) -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    payload = json.dumps(details or {}, separators=(",", ":"))
+    with _conn(db_path) as c:
+        c.execute(
+            """
+            INSERT INTO recent_vetoes
+                (ts, ticker, strategy_family, side, veto_reason, rank_score, ev,
+                 position_contracts, size_usd, details_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                now,
+                ticker,
+                strategy_family,
+                side,
+                veto_reason,
+                rank_score,
+                ev,
+                position_contracts,
+                size_usd,
+                payload,
+            ),
+        )
+        c.execute(
+            """
+            DELETE FROM recent_vetoes
+             WHERE id NOT IN (
+                 SELECT id
+                 FROM recent_vetoes
+                 ORDER BY ts DESC, id DESC
+                 LIMIT ?
+             )
+            """,
+            (max(1, int(max_rows)),),
+        )
+        c.commit()
+
+
+def get_system_cooldown_ts(
+    process_name: str,
+    *,
+    db_path: str | None = None,
+) -> int | None:
+    with _conn(db_path) as c:
+        row = c.execute(
+            """
+            SELECT last_executed_ts
+            FROM system_cooldowns
+            WHERE process_name=?
+            """,
+            (process_name,),
+        ).fetchone()
+    if not row:
+        return None
+    try:
+        return int(row["last_executed_ts"])
+    except Exception:
+        return None
+
+
+def set_system_cooldown_ts(
+    process_name: str,
+    last_executed_ts: int,
+    *,
+    db_path: str | None = None,
+) -> None:
+    with _conn(db_path) as c:
+        c.execute(
+            """
+            INSERT INTO system_cooldowns (process_name, last_executed_ts)
+            VALUES (?, ?)
+            ON CONFLICT(process_name) DO UPDATE SET
+                last_executed_ts=excluded.last_executed_ts
+            """,
+            (process_name, int(last_executed_ts)),
         )
         c.commit()
 

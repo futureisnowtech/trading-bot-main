@@ -572,7 +572,7 @@ def build_regime_manifest(
             f"Sizing: continuous sigmoid scaler with a hard per-position cap of ${KALSHI_MAX_USD_PER_POSITION:.0f}",
         ],
         "entry_gates": [
-            f"Minimum contract price {KALSHI_MIN_PRICE:.2f}",
+            f"Minimum contract price {KALSHI_MIN_PRICE:.2f} for temp lanes, 0.04 for rain lanes",
             f"Maximum sigma {KALSHI_MAX_SIGMA:.1f}F",
             f"Maximum spread ratio {KALSHI_MAX_SPREAD_RATIO:.0%}",
             f"Weather data freshness window {KALSHI_DATA_FRESHNESS_MINUTES} minutes",

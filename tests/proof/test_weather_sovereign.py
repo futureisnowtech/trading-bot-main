@@ -44,8 +44,8 @@ class TestWeatherSovereign(unittest.TestCase):
         
         passes, side, conf, factors, is_taker = _strategy_weather(
             ticker,
-            0.50,
-            0.50,
+            0.35,
+            0.65,
             24.0,
             contract_name="Will the high temp in NY be 75-76° on Jun 1, 2026?",
             strike=75.5,
@@ -61,8 +61,8 @@ class TestWeatherSovereign(unittest.TestCase):
         self.assertIn("narrow_bin_haircut=0.85x", factors)
 
     @patch('forecast.strategy_engine.get_contract_weather_data')
-    def test_ecmwf_divergence_veto(self, mock_get_weather):
-        """Verify GFS + ECMWF divergence veto (gap > 40%)."""
+    def test_ecmwf_divergence_is_softened_not_vetoed(self, mock_get_weather):
+        """Verify model divergence now sizes down instead of hard-vetoing."""
         ticker = "KXHIGHNY-26JUN01-B75.5"
         mock_get_weather.return_value = {
             "members_high": [76] * 31, # 100% GFS prob inside band
@@ -74,15 +74,16 @@ class TestWeatherSovereign(unittest.TestCase):
         
         passes, side, conf, factors, is_taker = _strategy_weather(
             ticker,
-            0.50,
-            0.50,
+            0.35,
+            0.65,
             24.0,
             contract_name="Will the high temp in NY be 75-76° on Jun 1, 2026?",
             strike=75.5,
         )
         
-        self.assertFalse(passes)
-        self.assertIn("model_divergence_veto", factors)
+        self.assertTrue(passes)
+        self.assertEqual(side, "YES")
+        self.assertTrue(any(str(f).startswith("div_gap=") for f in factors))
 
     def test_bracket_contract_semantics_count_only_inside_bin(self):
         semantics = resolve_weather_contract(

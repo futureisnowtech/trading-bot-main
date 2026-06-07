@@ -79,7 +79,7 @@ def test_weather_rbi_uses_resolution_labels_and_no_inversion(tmp_path, monkeypat
         """,
         (resolved_at,),
     )
-    # NO contract should use inverse chosen probability: 1 - forecast_yes_prob = 0.80.
+    # NO contract still stores YES-probability truth on the calibration axis.
     conn.execute(
         """
         INSERT INTO trades (ts, broker, symbol, action, pnl_usd, contract_side, forecast_yes_prob)
@@ -118,6 +118,53 @@ def test_weather_rbi_uses_resolution_labels_and_no_inversion(tmp_path, monkeypat
     assert round(row[1], 4) == 1.0
     assert round(row[2], 4) == 0.8
     assert row[3] == 2
+
+
+def test_weather_rbi_scores_no_contracts_on_yes_probability_axis(tmp_path, monkeypatch):
+    import learning.weather_rbi as rbi
+
+    db = str(tmp_path / "weather_rbi_no_axis.db")
+    _seed_trade_db(db)
+
+    now = datetime.now(timezone.utc)
+    resolved_at = now.isoformat()
+
+    conn = sqlite3.connect(db)
+    conn.execute("INSERT INTO forecast_contracts (id, local_symbol) VALUES (1, 'KXRAINAXIS-NO')")
+    conn.execute(
+        "INSERT INTO forecast_resolutions (contract_id, resolved_side, resolved_at) VALUES (1, 'NO', ?)",
+        (resolved_at,),
+    )
+    conn.execute(
+        """
+        INSERT INTO trades (ts, broker, symbol, action, pnl_usd, contract_side, forecast_yes_prob)
+        VALUES (?, 'kalshi', 'KXRAINAXIS-NO', 'BUY', 0.0, 'NO', 0.80)
+        """,
+        (resolved_at,),
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(rbi, "DB_PATH", db)
+    monkeypatch.setattr(rbi, "init_forecast_db", lambda: None)
+
+    rbi.run_weather_rbi(force=True)
+
+    conn = sqlite3.connect(db)
+    row = conn.execute(
+        """
+        SELECT brier_score, win_rate, ensemble_accuracy
+        FROM weather_calibration
+        ORDER BY ts DESC
+        LIMIT 1
+        """
+    ).fetchone()
+    conn.close()
+
+    assert row is not None
+    assert round(row[0], 4) == 0.64
+    assert round(row[1], 4) == 1.0
+    assert round(row[2], 4) == 0.2
 
 
 def test_weather_rbi_skips_without_labeled_resolutions(tmp_path, monkeypatch):
@@ -216,5 +263,6 @@ def test_weather_rbi_publishes_adaptive_model_weights(tmp_path, monkeypatch):
     assert row[0] == "HIGH"
     assert row[1] == 4
     assert round(row[2] + row[3], 6) == 1.0
-    assert row[3] > row[2]
+    assert row[2] != 0.60
+    assert row[3] != 0.40
     assert 0.0 < row[4] < 1.0

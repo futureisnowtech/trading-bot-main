@@ -1,231 +1,117 @@
 """
-forecast/primitives.py — Log-odds mathematical primitives for event-contract signals.
+forecast/primitives.py — lean probability and sizing helpers for Kalshi weather.
 
-All formulas operate in log-odds space where p_t is an implied probability
-clipped to [CLIP_LO, CLIP_HI] before any log is taken.
+The weather lane now avoids legacy HFT momentum physics. Fair value is shaped by:
+  - midpoint probability in log-odds space
+  - weather uncertainty via sigma
+  - market entropy
+  - overround / house edge
+  - ensemble agreement and RBI-driven blend bias
 
-Reference formulas (from system spec):
-  x_t = log(p_t / (1 - p_t))                   — log-odds
-  v_t = (x_t - x_{t-k}) / Δt                   — velocity (log-odds per unit time)
-  a_t = (v_t - v_{t-k}) / Δt                   — acceleration
-  σ_t = rolling_std(diff(x_t))                  — log-odds volatility
-  H_t = -p_t·ln(p_t) - (1-p_t)·ln(1-p_t)      — binary entropy
-  Ω_t = ask_yes_t + ask_no_t - 1                — overround
-  G_t = mid_yes_t + mid_no_t - 1                — parity gap
-  z_t = (x_t - EMA_n(x_t)) / std_n(x_t)        — z-score vs EMA
-
-  q_hat = logistic(x_t + α·v_1h + β·a_30m
-                   - γ·z_t - δ·σ_t - ε·H_t
-                   - ζ·Ω_t + η·context_bias)    — fair-probability estimate
-
-All functions are pure (no I/O, no DB).  They accept scalars or numpy arrays.
+All functions are pure and side-effect free.
 """
 
-import math
-import numpy as np
-from typing import Sequence
+from __future__ import annotations
 
-# Clipping bounds — prevents log(0) and log(inf)
+import math
+
+# Clipping bounds keep the logit math finite.
 CLIP_LO: float = 0.01
 CLIP_HI: float = 0.99
 
-# Default q_hat coefficients (interpretable starting point; tune via calibration)
-DEFAULT_ALPHA: float = 0.40  # 1h velocity weight
-DEFAULT_BETA: float = 0.20  # 30m acceleration weight
-DEFAULT_GAMMA: float = 0.30  # z-score (overextension) penalty
-DEFAULT_DELTA: float = 0.25  # volatility penalty
-DEFAULT_EPSILON: float = 0.15  # entropy penalty
-DEFAULT_ZETA: float = 0.50  # overround penalty
-DEFAULT_ETA: float = 0.10  # context bias weight
-
-# EMA / std window for z_t computation
-Z_EMA_WINDOW: int = 20
-
-
-# ---------------------------------------------------------------------------
-# Core primitives
-# ---------------------------------------------------------------------------
+# Default q_hat coefficients.
+DEFAULT_SIGMA_PENALTY: float = 0.25
+DEFAULT_ENTROPY_PENALTY: float = 0.15
+DEFAULT_OVERROUND_PENALTY: float = 0.50
+DEFAULT_AGREEMENT_BONUS: float = 0.25
+DEFAULT_ML_BIAS_WEIGHT: float = 0.20
+DEFAULT_CONTEXT_WEIGHT: float = 0.10
 
 
 def clip_prob(p: float) -> float:
-    """Clip probability to [CLIP_LO, CLIP_HI]."""
+    """Clip probability to the safe logit range."""
     return max(CLIP_LO, min(CLIP_HI, float(p)))
 
 
 def log_odds(p: float) -> float:
-    """x_t = log(p_t / (1 - p_t)).  Clips p first."""
+    """Return the log-odds for a clipped probability."""
     p = clip_prob(p)
     return math.log(p / (1.0 - p))
 
 
 def logistic(x: float) -> float:
-    """Inverse of log_odds: σ(x) = 1 / (1 + e^-x). Output in (0, 1)."""
+    """Inverse-logit transform."""
     return 1.0 / (1.0 + math.exp(-x))
 
 
 def entropy(p: float) -> float:
-    """H_t = -p·ln(p) - (1-p)·ln(1-p).  Binary entropy in nats. Clips p first."""
+    """Binary entropy in nats."""
     p = clip_prob(p)
     return -(p * math.log(p) + (1.0 - p) * math.log(1.0 - p))
 
 
 def overround(ask_yes: float, ask_no: float) -> float:
-    """Ω_t = ask_yes + ask_no - 1.  Positive means house edge; 0 = fair."""
-    return ask_yes + ask_no - 1.0
+    """House edge implied by the paired ask prices."""
+    return float(ask_yes) + float(ask_no) - 1.0
 
 
 def parity_gap(mid_yes: float, mid_no: float) -> float:
-    """G_t = mid_yes + mid_no - 1.  Positive = YES premium; negative = NO premium."""
-    return mid_yes + mid_no - 1.0
-
-
-# ---------------------------------------------------------------------------
-# Series-based primitives (require list/array of log-odds values)
-# ---------------------------------------------------------------------------
-
-
-def velocity(x_series: Sequence[float], k: int = 1, dt: float = 1.0) -> float:
-    """v_t = (x_t - x_{t-k}) / Δt.  Returns last velocity.
-
-    Args:
-        x_series: sequence of log-odds values, most-recent last.
-        k: look-back steps.
-        dt: time step size (e.g. 1.0 for 1 bar, 4.0 for 4 bars → 1h in 15m bars).
-    """
-    if len(x_series) < k + 1:
-        return 0.0
-    return (x_series[-1] - x_series[-(k + 1)]) / max(dt, 1e-9)
-
-
-def acceleration(
-    x_series: Sequence[float],
-    k: int = 1,
-    dt: float = 1.0,
-) -> float:
-    """a_t = (v_t - v_{t-k}) / Δt.  Requires at least 2k+1 elements."""
-    if len(x_series) < 2 * k + 1:
-        return 0.0
-    v_now = velocity(x_series[-(k + 1) :], k=k, dt=dt)
-    v_prev = velocity(x_series[-(2 * k + 1) : -(k)], k=k, dt=dt)
-    return (v_now - v_prev) / max(dt, 1e-9)
-
-
-def log_odds_vol(x_series: Sequence[float], window: int = 20) -> float:
-    """σ_t = rolling_std(diff(x_t)) over last `window` diffs."""
-    xs = list(x_series)
-    if len(xs) < 2:
-        return 0.0
-    diffs = np.diff(xs[-window:]) if len(xs) >= window else np.diff(xs)
-    return float(np.std(diffs)) if len(diffs) > 0 else 0.0
-
-
-def z_score(
-    x_series: Sequence[float],
-    window: int = Z_EMA_WINDOW,
-) -> float:
-    """z_t = (x_t - EMA_n(x_t)) / std_n(x_t).
-
-    Uses exponentially-weighted mean and std for the EMA component.
-    Returns 0 if series is too short or std is near zero.
-    """
-    xs = np.array(list(x_series), dtype=float)
-    if len(xs) < 4:
-        return 0.0
-    span = min(window, len(xs))
-    # EMA via pandas-style ewm (α = 2/(span+1))
-    alpha = 2.0 / (span + 1)
-    ema = xs[0]
-    for val in xs[1:]:
-        ema = alpha * val + (1.0 - alpha) * ema
-    std = float(np.std(xs[-span:]))
-    if std < 1e-9:
-        return 0.0
-    return (xs[-1] - ema) / std
-
-
-# ---------------------------------------------------------------------------
-# Fair probability estimate
-# ---------------------------------------------------------------------------
+    """Internal YES/NO midpoint skew."""
+    return float(mid_yes) + float(mid_no) - 1.0
 
 
 def compute_q_hat(
     p_mid: float,
-    v_1h: float,
-    a_30m: float,
     sigma_t: float,
     h_t: float | None = None,
     omega_t: float | None = None,
+    ensemble_agreement: float = 0.0,
+    ml_bias: float = 0.0,
     context_bias: float = 0.0,
-    z_t: float | None = None,
-    alpha: float = DEFAULT_ALPHA,
-    beta: float = DEFAULT_BETA,
-    gamma: float = DEFAULT_GAMMA,
-    delta: float = DEFAULT_DELTA,
-    epsilon: float = DEFAULT_EPSILON,
-    zeta: float = DEFAULT_ZETA,
-    eta: float = DEFAULT_ETA,
+    sigma_penalty: float = DEFAULT_SIGMA_PENALTY,
+    entropy_penalty: float = DEFAULT_ENTROPY_PENALTY,
+    overround_penalty: float = DEFAULT_OVERROUND_PENALTY,
+    agreement_bonus: float = DEFAULT_AGREEMENT_BONUS,
+    ml_bias_weight: float = DEFAULT_ML_BIAS_WEIGHT,
+    context_weight: float = DEFAULT_CONTEXT_WEIGHT,
 ) -> float:
-    """q_hat = logistic(x_t + α·v_1h + β·a_30m - γ·z_t - δ·σ_t - ε·H_t - ζ·Ω_t + η·bias)
-
-    Args:
-        p_mid: current midpoint probability (will be clipped).
-        v_1h: 1h log-odds velocity.
-        a_30m: 30m log-odds acceleration.
-        sigma_t: log-odds volatility (σ_t).
-        h_t: binary entropy (computed from p_mid if None).
-        omega_t: overround Ω_t (set to 0 if None — conservative).
-        context_bias: external bias term (e.g. from macro data).
-        z_t: z-score deviation (computed to 0 if None — no mean-reversion signal).
-        alpha..eta: coefficient overrides.
-    Returns:
-        q_hat in (CLIP_LO, CLIP_HI) — fair probability estimate for YES.
     """
-    x_t = log_odds(p_mid)
-    _h = h_t if h_t is not None else entropy(p_mid)
-    _om = omega_t if omega_t is not None else 0.0
-    _z = z_t if z_t is not None else 0.0
+    Fair YES probability with only weather-relevant penalties and blend bias.
+
+    ``ensemble_agreement`` and ``ml_bias`` are bounded directional nudges.
+    Positive values raise conviction; sigma, entropy, and overround reduce it.
+    """
+    midpoint = clip_prob(p_mid)
+    entropy_term = h_t if h_t is not None else entropy(midpoint)
+    overround_term = omega_t if omega_t is not None else 0.0
+
+    agreement_term = max(-1.0, min(1.0, float(ensemble_agreement)))
+    ml_term = max(-1.0, min(1.0, float(ml_bias)))
+    context_term = max(-1.0, min(1.0, float(context_bias)))
 
     logit = (
-        x_t
-        + alpha * v_1h
-        + beta * a_30m
-        - gamma * _z
-        - delta * sigma_t
-        - epsilon * _h
-        - zeta * _om
-        + eta * context_bias
+        log_odds(midpoint)
+        - sigma_penalty * max(0.0, float(sigma_t))
+        - entropy_penalty * max(0.0, float(entropy_term))
+        - overround_penalty * max(0.0, float(overround_term))
+        + agreement_bonus * agreement_term
+        + ml_bias_weight * ml_term
+        + context_weight * context_term
     )
     return clip_prob(logistic(logit))
 
 
-# ---------------------------------------------------------------------------
-# EV calculation
-# ---------------------------------------------------------------------------
-
-
-def compute_ev(
-    q_hat: float,
-    ask_yes: float,
-    ask_no: float,
-    fee_buffer: float = 0.0,
-) -> tuple[float, float]:
+def compute_ev(q_hat: float, ask_yes: float, ask_no: float, fee_per_contract: float = 0.0) -> tuple[float, float]:
     """
-    Sovereign Net EV (v18.32): Evaluates against the Ask (worst-case fill)
-    and injects a conservative friction buffer.
+    Net EV for YES and NO using only real exchange fee friction.
 
-    EV_yes = q_hat - ask_yes - fee_buffer
-    EV_no  = (1 - q_hat) - ask_no - fee_buffer
-
-    Returns (ev_yes, ev_no).
+    EV_yes = q_hat - ask_yes - fee
+    EV_no  = (1 - q_hat) - ask_no - fee
     """
-    ev_yes = q_hat - ask_yes - fee_buffer
-    ev_no = (1.0 - q_hat) - ask_no - fee_buffer
+    fee = max(0.0, float(fee_per_contract))
+    ev_yes = float(q_hat) - float(ask_yes) - fee
+    ev_no = (1.0 - float(q_hat)) - float(ask_no) - fee
     return ev_yes, ev_no
-
-
-# ---------------------------------------------------------------------------
-# Sizing
-# ---------------------------------------------------------------------------
 
 
 def kalshi_absolute_sizing(
@@ -237,13 +123,9 @@ def kalshi_absolute_sizing(
     max_usd_cap: float | None = None,
 ) -> tuple[int, float]:
     """
-    Binary Risk Sizing (v18.32): Sizes by Absolute Loss to Zero.
-    
-    Ensures:
-    1. Total loss if contract -> $0.00 is capped at max_risk_pct of bankroll.
-    2. Total capital locked in one event is capped at max_deploy_pct of bankroll.
-    
-    Returns: (n_contracts, total_cost_usd)
+    Size by absolute premium-at-risk plus fees.
+
+    In Kalshi, the premium paid is the capital at risk for both YES and NO.
     """
     if ask_price <= 0 or bankroll <= 0:
         return 0, 0.0
@@ -254,14 +136,9 @@ def kalshi_absolute_sizing(
     if total_cash_per_contract <= 0:
         return 0, 0.0
 
-    # qty_by_risk = max_loss_usd / cost_per_loss_unit
-    # In Kalshi, max loss to zero includes the premium paid plus exchange fees.
     qty_by_risk = int(max_loss_usd / total_cash_per_contract)
-
-    # qty_by_capital = max_deploy_usd / total_cash_per_contract
     qty_by_capital = int(max_deploy_usd / total_cash_per_contract)
 
-    # v19.9.1: Hard USD Ceiling
     if max_usd_cap is None:
         try:
             from config import KALSHI_MAX_USD_PER_POSITION
@@ -289,18 +166,7 @@ def fractional_kelly_fraction(
     kelly_cap: float = 0.10,
 ) -> float:
     """
-    f_raw = max(0, (q_side - p_cost) / max(1 - p_cost, 0.01))
-    f     = min(kelly_cap, λ · f_raw · confidence · correlation_penalty)
-
-    Args:
-        q_side: our belief probability for the chosen side.
-        p_cost: ask price of the chosen side contract.
-        lambda_: fractional Kelly multiplier (default 1.0 = full edge; use <1 for caution).
-        confidence_multiplier: scales down when signal confidence is low.
-        correlation_penalty: scales down when correlated positions exist.
-        kelly_cap: hard cap on fraction (default 0.10 per spec).
-    Returns:
-        Final fraction of bankroll to risk (0.0 to kelly_cap).
+    Convert a contract edge into a capped bankroll fraction.
     """
     denom = max(1.0 - p_cost, 0.01)
     f_raw = max(0.0, (q_side - p_cost) / denom)
@@ -317,30 +183,17 @@ def contracts_from_fraction(
     max_deployed_pct: float = 0.35,
     fee_per_contract: float = 0.0,
 ) -> int:
-    """Convert a Kelly fraction to whole-number contracts.
-
-    Applies per-event and total-deployment caps:
-        max_dollar_risk = min(fraction, per_event_cap_pct) × bankroll
-        also bounded by remaining deployment headroom
-
-    Returns 0 if no room or cost is zero/negative.
-    """
+    """Convert a fraction-of-bankroll budget to whole contracts."""
     if p_cost <= 0 or bankroll <= 0:
         return 0
 
-    # Per-event cap
     per_event_dollars = min(fraction, per_event_cap_pct) * bankroll
-
-    # Deployment headroom
     remaining_pct = max(0.0, max_deployed_pct - deployed_pct)
     headroom_dollars = remaining_pct * bankroll
-
     dollar_risk = min(per_event_dollars, headroom_dollars)
     if dollar_risk <= 0:
         return 0
 
-    # Kalshi order counts are direct share counts. Each share costs the premium
-    # paid plus any fixed per-contract fee that is part of the real cash outlay.
     cost_per_contract = p_cost + max(0.0, fee_per_contract)
     if cost_per_contract <= 0:
         return 0

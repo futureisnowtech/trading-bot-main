@@ -172,7 +172,6 @@ KALSHI_FEE_PER_CONTRACT: float = float(
     os.getenv("KALSHI_FEE_PER_CONTRACT", str(KALSHI_TAKER_FEE_RATE))
 )  # Legacy fallback only
 KALSHI_MAX_FEE_DRAG_PCT: float = 0.30
-KALSHI_FEE_BUFFER: float = 0.05  # Legacy observability knob; not applied to live EV math.
 KALSHI_KELLY_CAP: float = 0.10
 KALSHI_MAX_RISK_PER_EVENT_PCT: float = 0.015
 KALSHI_EXIT_MODEL_INVALIDATION_DELTA: float = float(

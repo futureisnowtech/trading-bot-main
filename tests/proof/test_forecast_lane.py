@@ -8,10 +8,8 @@ Coverage:
   4.  Bar generation: all 5 required intervals (5m, 30m, 1h, 4h, 1d)
   5.  YES/NO pair join: omega_t and g_t computed correctly
   6.  Primitives: log_odds, entropy, overround, parity_gap, compute_q_hat
-  7.  Primitives: velocity, acceleration, log_odds_vol, z_score
-  8.  Strategy determinism: continuation (stable output on same input)
-  9.  Strategy determinism: mean_reversion (stable output on same input)
-  10. Strategy determinism: late_repricing (stable output on same input)
+  7.  Weather-only lane: non-weather strategy path fails closed
+  8.  Strategy determinism: weather override remains stable on same input
   11. Economics gate: correct veto for overround > MAX_OVERROUND
   12. Economics gate: correct veto for insufficient EV
   13. Economics gate: correct veto for concurrent cap
@@ -425,51 +423,11 @@ def test_primitives_q_hat_range():
     from forecast.primitives import CLIP_HI, CLIP_LO, compute_q_hat
 
     for p in [0.1, 0.3, 0.5, 0.7, 0.9]:
-        q = compute_q_hat(p, v_1h=0.1, a_30m=0.05, sigma_t=0.1)
+        q = compute_q_hat(p, sigma_t=0.1, ensemble_agreement=0.4, ml_bias=0.1)
         assert CLIP_LO <= q <= CLIP_HI, f"q_hat={q} out of range for p={p}"
 
 
-# ── 7. Primitives: series math ────────────────────────────────────────────────
-
-
-def test_primitives_velocity_direction():
-    """velocity must be positive when series is rising."""
-    from forecast.primitives import log_odds, velocity
-
-    rising = [log_odds(p) for p in [0.40, 0.45, 0.50, 0.55, 0.60]]
-    assert velocity(rising) > 0, "velocity should be positive for rising series"
-
-    falling = [log_odds(p) for p in [0.60, 0.55, 0.50, 0.45, 0.40]]
-    assert velocity(falling) < 0, "velocity should be negative for falling series"
-
-
-def test_primitives_acceleration_sign():
-    """acceleration is positive when velocity is increasing."""
-    from forecast.primitives import log_odds, acceleration
-
-    # Accelerating upward: each step bigger
-    accel = [log_odds(p) for p in [0.40, 0.42, 0.46, 0.52, 0.60]]
-    assert acceleration(accel) > 0
-
-
-def test_primitives_vol_nonnegative():
-    """log_odds_vol must always be non-negative."""
-    from forecast.primitives import log_odds, log_odds_vol
-
-    xs = [log_odds(p) for p in [0.3, 0.5, 0.4, 0.6, 0.35, 0.55]]
-    assert log_odds_vol(xs) >= 0
-
-
-def test_primitives_z_score_zero_for_flat_series():
-    """z_score should be near 0 for a constant series."""
-    from forecast.primitives import log_odds, z_score
-
-    flat = [log_odds(0.5)] * 25
-    z = z_score(flat)
-    assert abs(z) < 1e-6, f"z_score for flat series should be 0, got {z}"
-
-
-# ── 8–10. Strategy determinism ────────────────────────────────────────────────
+# ── 7–8. Weather-only lane behavior ───────────────────────────────────────────
 
 
 def _make_bars(probs: list[float]) -> list[dict]:
@@ -500,74 +458,64 @@ def _make_quotes(
     return yes_q, no_q
 
 
-def _make_contract(hours_out: float = 24.0) -> dict:
+def _make_contract(hours_out: float = 24.0, *, symbol: str = "CPI-C30") -> dict:
     expiry = (datetime.now(timezone.utc) + timedelta(hours=hours_out)).strftime(
         "%Y%m%d"
     )
     return {
         "id": 1,
         "market_id": 1,
-        "local_symbol": "CPI-C30",
+        "local_symbol": symbol,
         "right": "C",
         "strike": 3.0,
         "last_trade_at": expiry,
     }
 
 
-def test_strategy_continuation_deterministic():
-    """continuation must return the same result on identical inputs."""
+def test_non_weather_contracts_fail_closed():
     from forecast.strategy_engine import evaluate_contract
 
-    # Rising trend: probs increasing over last 12 bars on both 1h and 4h
-    probs_up = [0.40 + i * 0.02 for i in range(12)]
-    bars = _make_bars(probs_up)
+    bars = _make_bars([0.40 + i * 0.02 for i in range(12)])
     yes_q, no_q = _make_quotes(0.60, 0.42)
     contract = _make_contract(36.0)
 
-    r1 = evaluate_contract(
-        contract, bars, bars, bars, bars, yes_q, no_q, bankroll=100.0
-    )
-    r2 = evaluate_contract(
+    result = evaluate_contract(
         contract, bars, bars, bars, bars, yes_q, no_q, bankroll=100.0
     )
 
-    # Results must be identical (deterministic)
-    if r1 is not None and r2 is not None:
-        assert r1.strategy_family == r2.strategy_family
-        assert r1.side == r2.side
-        assert abs(r1.q_hat - r2.q_hat) < 1e-9
-        assert abs(r1.ev - r2.ev) < 1e-9
+    assert result is not None
+    assert result.econ_approved is False
+    assert result.veto_reason == "non_weather_contract_unsupported"
 
 
-def test_strategy_engine_rechecks_chosen_side_ev_after_signal_selection(monkeypatch):
+def test_weather_evaluation_is_stable_on_identical_inputs(monkeypatch):
     import forecast.strategy_engine as se
 
-    contract = _make_contract(36.0)
-    bars = _make_bars([0.45 + (i * 0.01) for i in range(12)])
+    weather = {
+        "members_high": [80.0] * 31,
+        "ecmwf": {"members_high": [80.0] * 31},
+        "sigma_high": 0.8,
+        "peak_tcdc": 5.0,
+        "timestamp": datetime.now(timezone.utc).timestamp(),
+    }
+    monkeypatch.setattr(se, "get_weather_data", lambda ticker: weather)
+    monkeypatch.setattr(se, "get_contract_weather_data", lambda ticker, **kwargs: weather)
+
+    contract = _make_contract(36.0, symbol="KXHIGHNY-30JUN26-T75")
+    bars = _make_bars([])
     yes_q, no_q = _make_quotes(0.58, 0.42)
 
-    monkeypatch.setattr(
-        se,
-        "_economics_gate",
-        lambda **kwargs: (True, "", 0.07, 0.01),
+    r1 = se.evaluate_contract(
+        contract,
+        bars,
+        bars,
+        bars,
+        bars,
+        yes_q,
+        no_q,
+        bankroll=100.0,
     )
-    monkeypatch.setattr(
-        se,
-        "_strategy_continuation",
-        lambda _features, _hours: (True, "NO", 0.91, ["forced_no_signal"]),
-    )
-    monkeypatch.setattr(
-        se,
-        "_strategy_mean_reversion",
-        lambda _features, _hours: (False, "", 0.0, []),
-    )
-    monkeypatch.setattr(
-        se,
-        "_strategy_late_repricing",
-        lambda _features, _hours: (False, "", 0.0, []),
-    )
-
-    result = se.evaluate_contract(
+    r2 = se.evaluate_contract(
         contract,
         bars,
         bars,
@@ -578,73 +526,11 @@ def test_strategy_engine_rechecks_chosen_side_ev_after_signal_selection(monkeypa
         bankroll=100.0,
     )
 
-    assert result is not None
-    assert result.econ_approved is False
-    assert result.veto_reason.startswith("chosen_side_ev_too_low")
-
-
-def test_strategy_mean_reversion_detects_overextension():
-    """mean_reversion must trigger on a series with |z_t| >= MIN_ABS_Z_MEAN_REVERSION."""
-    from forecast.strategy_engine import _strategy_mean_reversion
-    from forecast.primitives import log_odds
-
-    # Spike series: flat then sudden jump (creates high z_t)
-    xs_flat = [log_odds(0.50)] * 18
-    xs_spike = [log_odds(0.50 + i * 0.04) for i in range(4)]
-    full_series_probs = [0.50] * 18 + [0.52, 0.56, 0.64, 0.76]
-
-    bars = _make_bars(full_series_probs)
-    features_mock = {
-        "x_t": log_odds(0.76),
-        "v_1h": 0.30,
-        "v_4h": 0.15,
-        "a_30m": -0.05,  # deceleration (rolling over)
-        "sigma_t": 0.10,
-        "h_t": 0.60,
-        "omega_t": 0.05,
-        "g_t": 0.01,
-        "z_t": 2.1,  # overextended
-        "latest_prob": 0.76,
-        "velocity_30m": 0.1,
-    }
-    passes, side, conf, factors = _strategy_mean_reversion(
-        features_mock, hours_to_res=24.0
-    )
-    assert passes, (
-        f"mean_reversion should fire on overextended series, got factors={factors}"
-    )
-    assert side == "NO", f"Overextended toward YES → should fade to NO, got {side}"
-
-
-def test_strategy_late_repricing_window():
-    """late_repricing only fires within 2h–72h of resolution."""
-    from forecast.strategy_engine import _strategy_late_repricing
-
-    features = {
-        "x_t": 0.2,
-        "v_1h": 0.1,
-        "v_4h": 0.25,
-        "a_30m": 0.0,
-        "sigma_t": 0.05,
-        "h_t": 0.65,
-        "omega_t": 0.04,
-        "g_t": 0.01,
-        "z_t": 0.3,
-        "latest_prob": 0.58,
-        "velocity_30m": 0.1,
-    }
-
-    # Inside window → should pass
-    passes_in, _, _, _ = _strategy_late_repricing(features, hours_to_res=24.0)
-    assert passes_in, "late_repricing should fire at 24h to resolution"
-
-    # Outside window (>72h) → must not pass
-    passes_out, _, _, _ = _strategy_late_repricing(features, hours_to_res=100.0)
-    assert not passes_out, "late_repricing must NOT fire beyond 72h window"
-
-    # Too close (<2h) → must not pass
-    passes_close, _, _, _ = _strategy_late_repricing(features, hours_to_res=1.0)
-    assert not passes_close, "late_repricing must NOT fire within 2h of resolution"
+    assert r1 is not None and r2 is not None
+    assert r1.strategy_family == r2.strategy_family
+    assert r1.side == r2.side
+    assert abs(r1.q_hat - r2.q_hat) < 1e-9
+    assert abs(r1.ev - r2.ev) < 1e-9
 
 
 # ── 11–13. Economics gate ─────────────────────────────────────────────────────

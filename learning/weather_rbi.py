@@ -12,7 +12,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 from config import DB_PATH
-from forecast.db import init_forecast_db
+from forecast.db import get_system_cooldown_ts, init_forecast_db, set_system_cooldown_ts
 
 logger = logging.getLogger(__name__)
 
@@ -22,11 +22,12 @@ RBI_CALIBRATION_LOOKBACK_DAYS = 7
 RBI_MODEL_LOOKBACK_DAYS = 30
 RBI_MODEL_HALF_LIFE_DAYS = 10.0
 RBI_RUN_COOLDOWN_HOURS = 18
-RBI_MIN_GLOBAL_SAMPLES = 12
-RBI_MIN_MODE_SAMPLES = 6
+RBI_MIN_GLOBAL_SAMPLES = 50
+RBI_MIN_MODE_SAMPLES = 25
 RBI_MIN_MODEL_WEIGHT = 0.25
 RBI_MAX_MODEL_WEIGHT = 0.75
 RBI_CACHE_TTL_SECONDS = 300.0
+RBI_PROCESS_NAME = "weather_rbi"
 
 _MODEL_SKILL_CACHE = {"loaded_at": 0.0, "rows": {}}
 
@@ -53,6 +54,13 @@ CREATE TABLE IF NOT EXISTS weather_model_skill_state (
     ecmwf_weight REAL NOT NULL,
     shrinkage REAL NOT NULL,
     lookback_days INTEGER NOT NULL
+)
+"""
+
+_DDL_SYSTEM_COOLDOWNS = """
+CREATE TABLE IF NOT EXISTS system_cooldowns (
+    process_name TEXT PRIMARY KEY,
+    last_executed_ts INTEGER NOT NULL
 )
 """
 
@@ -230,6 +238,7 @@ def init_rbi_db() -> None:
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(_DDL_CALIBRATION)
             conn.execute(_DDL_MODEL_SKILL_STATE)
+            conn.execute(_DDL_SYSTEM_COOLDOWNS)
             conn.commit()
     except Exception as e:
         logger.error(f"[weather_rbi] DB Init error: {e}")
@@ -241,24 +250,27 @@ def run_weather_rbi(force: bool = False) -> None:
     init_rbi_db()
 
     now_utc = datetime.now(timezone.utc)
+    now_ts_int = int(now_utc.timestamp())
     calibration_cutoff = now_utc - timedelta(days=RBI_CALIBRATION_LOOKBACK_DAYS)
     model_cutoff = now_utc - timedelta(days=RBI_MODEL_LOOKBACK_DAYS)
 
     try:
+        latest_run_ts = get_system_cooldown_ts(RBI_PROCESS_NAME, db_path=DB_PATH)
+        if (
+            not force
+            and latest_run_ts is not None
+            and (now_ts_int - latest_run_ts) < int(RBI_RUN_COOLDOWN_HOURS * 3600)
+        ):
+            latest_run = datetime.fromtimestamp(latest_run_ts, tz=timezone.utc)
+            logger.info(
+                "[weather_rbi] Skipping calibration; latest run at %s is inside the %sh cooldown.",
+                latest_run.isoformat(),
+                RBI_RUN_COOLDOWN_HOURS,
+            )
+            return
+
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
-            latest_calibration = _latest_calibration_ts(conn)
-            if (
-                not force
-                and latest_calibration is not None
-                and latest_calibration >= now_utc - timedelta(hours=RBI_RUN_COOLDOWN_HOURS)
-            ):
-                logger.info(
-                    "[weather_rbi] Skipping calibration; latest run at %s is inside the %sh cooldown.",
-                    latest_calibration.isoformat(),
-                    RBI_RUN_COOLDOWN_HOURS,
-                )
-                return
 
             rows = conn.execute(
                 """
@@ -320,16 +332,12 @@ def run_weather_rbi(force: bool = False) -> None:
 
                 forecast_yes_prob = _clip_prob(row["forecast_yes_prob"])
                 if forecast_yes_prob is not None and resolved_at >= calibration_cutoff:
-                    if contract_side == "YES":
-                        chosen_prob = forecast_yes_prob
-                        chosen_outcome = 1.0 if resolved_side == "YES" else 0.0
-                    else:
-                        chosen_prob = 1.0 - forecast_yes_prob
-                        chosen_outcome = 1.0 if resolved_side == "NO" else 0.0
+                    chosen_outcome = 1.0 if contract_side == resolved_side else 0.0
                     labeled.append(
                         {
-                            "chosen_prob": chosen_prob,
-                            "outcome": chosen_outcome,
+                            "forecast_yes_prob": forecast_yes_prob,
+                            "outcome_yes": outcome_yes,
+                            "chosen_outcome": chosen_outcome,
                             "pnl_usd": float(row["pnl_usd"] or 0.0),
                         }
                     )
@@ -356,14 +364,21 @@ def run_weather_rbi(force: bool = False) -> None:
                     "[weather_rbi] No labeled resolved weather samples found in the active windows. "
                     "Skipping calibration."
                 )
+                set_system_cooldown_ts(RBI_PROCESS_NAME, now_ts_int, db_path=DB_PATH)
                 return
 
             now_ts = datetime.now(timezone.utc).isoformat()
 
             if labeled:
-                brier_sum = sum((sample["chosen_prob"] - sample["outcome"]) ** 2 for sample in labeled)
-                wins = sum(int(sample["outcome"]) for sample in labeled)
-                accuracy_sum = sum(1.0 - abs(sample["chosen_prob"] - sample["outcome"]) for sample in labeled)
+                brier_sum = sum(
+                    (sample["forecast_yes_prob"] - sample["outcome_yes"]) ** 2
+                    for sample in labeled
+                )
+                wins = sum(int(sample["chosen_outcome"]) for sample in labeled)
+                accuracy_sum = sum(
+                    1.0 - abs(sample["forecast_yes_prob"] - sample["outcome_yes"])
+                    for sample in labeled
+                )
                 pnl_sum = sum(sample["pnl_usd"] for sample in labeled)
 
                 count = len(labeled)
@@ -418,6 +433,7 @@ def run_weather_rbi(force: bool = False) -> None:
                 )
             conn.commit()
             _reset_model_skill_cache()
+            set_system_cooldown_ts(RBI_PROCESS_NAME, now_ts_int, db_path=DB_PATH)
             logger.info(
                 "[weather_rbi] Model skill update complete. global_samples=%s segments=%s",
                 len(model_samples_global),

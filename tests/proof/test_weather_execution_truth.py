@@ -27,6 +27,21 @@ def _quote(mid: float, spread: float, ts: str) -> dict:
     }
 
 
+def _make_rain_contract() -> dict:
+    expiry = (datetime.now(timezone.utc) + timedelta(hours=24)).strftime(
+        "%Y%m%d %H:%M:%S"
+    )
+    return {
+        "id": 2,
+        "market_id": 1,
+        "local_symbol": "KXRAINNY-30JUN26-T1",
+        "contract_name": "Will rainfall in NY be >1 inch on Jun 30, 2026?",
+        "right": "C",
+        "strike": 1.0,
+        "last_trade_at": expiry,
+    }
+
+
 def test_weather_continuous_sizing_stays_live_positive():
     from forecast.strategy_engine import calculate_continuous_sizing
 
@@ -206,6 +221,42 @@ def test_weather_override_uses_exchange_fee_only_ev_floor_without_buffer_tax(mon
     assert result.econ_approved is True
     assert result.veto_reason == ""
     assert result.position_contracts > 0
+
+
+def test_rain_lane_allows_sub_fifteen_cent_entries_when_above_rain_floor(monkeypatch):
+    import forecast.strategy_engine as se
+
+    rain_weather = {
+        "members_precip": [1.3] * 31,
+        "ecmwf": {"members_precip": [1.4] * 31},
+        "sigma_precip": 0.05,
+        "peak_tcdc": 20.0,
+        "timestamp": datetime.now(timezone.utc).timestamp(),
+    }
+
+    monkeypatch.setattr(se, "get_weather_data", lambda ticker: rain_weather)
+    monkeypatch.setattr(
+        se,
+        "get_contract_weather_data",
+        lambda ticker, **kwargs: rain_weather,
+    )
+
+    now_ts = datetime.now(timezone.utc).isoformat()
+    result = se.evaluate_contract(
+        contract=_make_rain_contract(),
+        bars_5m=[],
+        bars_30m=[],
+        bars_1h=[],
+        bars_4h=[],
+        yes_quote=_quote(0.08, 0.02, now_ts),
+        no_quote=_quote(0.92, 0.02, now_ts),
+        bankroll=100.0,
+    )
+
+    assert result is not None
+    assert result.strategy_family == "weather_ensemble"
+    assert result.side == "YES"
+    assert result.econ_approved is True
 
 
 def test_weather_pair_freshness_uses_staler_quote_leg(monkeypatch):
@@ -432,7 +483,7 @@ def test_weather_divergence_is_softened_before_catastrophic_veto(monkeypatch):
     assert passes is True
     assert side == "YES"
     assert confidence > 0.50
-    assert not any("model_divergence_veto" in factor for factor in factors)
+    assert not any("divergence_veto" in factor for factor in factors)
 
 
 def test_weather_high_cloud_hard_veto_blocks_high_temp_yes(monkeypatch):
@@ -509,7 +560,7 @@ def test_weather_ignores_legacy_macro_risk_gate(monkeypatch):
     assert result.econ_approved is True
 
 
-def test_blended_weather_yes_probability_neutralizes_catastrophic_divergence(monkeypatch):
+def test_blended_weather_yes_probability_preserves_softened_divergence_signal(monkeypatch):
     import forecast.strategy_engine as se
 
     monkeypatch.setattr(
@@ -533,7 +584,8 @@ def test_blended_weather_yes_probability_neutralizes_catastrophic_divergence(mon
         strike=75.0,
     )
 
-    assert prob == 0.5
+    assert prob is not None
+    assert 0.5 < prob < 0.97
 
 
 def test_ensure_weather_data_backfills_missing_series(monkeypatch):

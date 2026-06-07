@@ -135,6 +135,51 @@ def _live_position_summary(positions: list[dict]) -> tuple[int, float]:
     return count, round(deployed, 4)
 
 
+def _persist_recent_veto(
+    contract: dict,
+    result=None,
+    *,
+    reason: str,
+    details: dict | None = None,
+) -> None:
+    try:
+        from config import estimate_kalshi_order_cost_usd
+        from forecast.db import record_recent_veto
+
+        ticker = str(contract.get("local_symbol") or "")
+        side = str(getattr(result, "side", "") or "").upper()
+        ask_yes = float(getattr(result, "ask_yes", 0.0) or 0.0)
+        ask_no = float(getattr(result, "ask_no", 0.0) or 0.0)
+        price = ask_yes if side == "YES" else ask_no if side == "NO" else 0.0
+        contracts = int(getattr(result, "position_contracts", 0) or 0)
+        size_usd = (
+            estimate_kalshi_order_cost_usd(contracts, price)
+            if contracts > 0 and price > 0.0
+            else 0.0
+        )
+        record_recent_veto(
+            ticker=ticker,
+            strategy_family=str(getattr(result, "strategy_family", "") or ""),
+            side=side,
+            veto_reason=reason,
+            rank_score=float(getattr(result, "confidence", 0.0) or 0.0),
+            ev=float(getattr(result, "ev", 0.0) or 0.0),
+            position_contracts=contracts,
+            size_usd=size_usd,
+            details={
+                "top_factors": list(getattr(result, "top_factors", []) or []),
+                "hours_to_resolution": float(
+                    getattr(result, "hours_to_resolution", 0.0) or 0.0
+                ),
+                "ask_yes": ask_yes,
+                "ask_no": ask_no,
+                **(details or {}),
+            },
+        )
+    except Exception:
+        logger.exception("Failed to persist recent veto for %s", contract.get("local_symbol"))
+
+
 def _publish_forecast_lane_state(
     *,
     broker=None,
@@ -790,9 +835,12 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                 if not result.econ_approved or result.position_contracts <= 0:
                     veto_msg = f"[ForecastRunner] {local_sym} vetoed: {result.veto_reason or 'sizing_zero'}"
                     logger.debug(veto_msg)
-                    # SRE FIX: Upgrade to WARNING if it's an economic veto so incident tracker picks it up
-                    lvl = "WARNING" if not result.econ_approved else "INFO"
-                    log_event(lvl, "ForecastRunner", veto_msg)
+                    _persist_recent_veto(
+                        contract,
+                        result,
+                        reason=result.veto_reason or "sizing_zero",
+                        details={"stage": "strategy_eval"},
+                    )
                     continue
 
                 # v19.1.12: Concurrency & Swap Logic
@@ -864,10 +912,11 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
 
                 family = local_sym.split("-")[0]
                 if cycle_event_families.get(family, 0) >= KALSHI_SAME_EVENT_FAMILY_CAP:
-                    log_event(
-                        "WARNING",
-                        "ForecastRunner",
-                        f"[ForecastRunner] {local_sym} vetoed: same_event_family_cap_reached",
+                    _persist_recent_veto(
+                        contract,
+                        result,
+                        reason="same_event_family_cap_reached",
+                        details={"stage": "family_cap"},
                     )
                     continue
 
@@ -887,13 +936,19 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                         )
                         projected_hub_exposure = current_hub_exposure + candidate_exposure
                         if projected_hub_exposure > hub_cap:
-                            log_event(
-                                "WARNING",
-                                "ForecastRunner",
-                                (
-                                    f"[ForecastRunner] {local_sym} vetoed: "
-                                    f"hub_exposure_cap_reached ({projected_hub_exposure:.1f}/{hub_cap:.1f})"
+                            _persist_recent_veto(
+                                contract,
+                                result,
+                                reason=(
+                                    "hub_exposure_cap_reached "
+                                    f"({projected_hub_exposure:.1f}/{hub_cap:.1f})"
                                 ),
+                                details={
+                                    "stage": "hub_cap",
+                                    "projected_hub_exposure": projected_hub_exposure,
+                                    "hub_cap": hub_cap,
+                                    "hub": candidate_hub,
+                                },
                             )
                             continue
 
@@ -919,10 +974,14 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                             contract.get("local_symbol"),
                             execution_plan.reason,
                         )
-                        log_event(
-                            "WARNING",
-                            "ForecastRunner",
-                            f"[ForecastRunner] {contract.get('local_symbol')} execution_blocked: {execution_plan.reason}",
+                        _persist_recent_veto(
+                            contract,
+                            result,
+                            reason=str(execution_plan.reason or execution_plan.status or "execution_blocked"),
+                            details={
+                                "stage": "execution_plan",
+                                "execution_status": execution_plan.status,
+                            },
                         )
                         continue
 
@@ -939,6 +998,9 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                     if entry_result.get("status") == "executed" or filled_qty > 0:
                         actual_price = entry_result.get("price") or execution_plan.limit_price
                         actual_qty = int(round(filled_qty or execution_plan.executable_qty))
+                        from config import estimate_kalshi_order_cost_usd
+
+                        capital_deployed = estimate_kalshi_order_cost_usd(actual_qty, actual_price)
                         entry_msg = (
                             f"[ForecastRunner] Entry: {contract.get('local_symbol')} "
                             f"{result.side.upper()} x{actual_qty} @ {actual_price} "
@@ -980,12 +1042,14 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                             notify_trade_open(
                                 symbol=contract.get("local_symbol", ""),
                                 direction=result.side.upper(),
-                                size_usd=actual_qty * actual_price,
+                                size_usd=capital_deployed,
                                 entry_price=actual_price,
                                 score=result.ev,
                                 top_3=result.top_factors or [],
                                 features={},
                                 regime="KALSHI",
+                                contracts_filled=actual_qty,
+                                capital_deployed=capital_deployed,
                             )
                         except Exception as _ne_err:
                             logger.error(f"[ForecastRunner] Notification error: {_ne_err}")
@@ -1011,11 +1075,10 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                                 actual_qty,
                                 entry_result.get("remaining_order_qty"),
                             )
-                        from config import estimate_kalshi_order_cost_usd
                         buying_power_usd = max(
                             0.0,
                             buying_power_usd
-                            - estimate_kalshi_order_cost_usd(actual_qty, actual_price),
+                            - capital_deployed,
                         )
                     else:
                         outcome_msg = (

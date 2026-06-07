@@ -189,6 +189,48 @@ def get_recent_veto_summary(
 ) -> dict:
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=max(1, int(lookback_hours)))).isoformat()
     records: list[dict] = []
+    reasons = Counter()
+
+    try:
+        with _connect_db(db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT ts, ticker, veto_reason, rank_score, ev, position_contracts, size_usd, details_json
+                FROM recent_vetoes
+                WHERE ts >= ?
+                ORDER BY ts DESC, id DESC
+                LIMIT ?
+                """,
+                (cutoff, max(1, int(limit))),
+            ).fetchall()
+    except Exception:
+        rows = []
+
+    if rows:
+        for row in rows:
+            reason = str(row["veto_reason"] or "unknown").strip() or "unknown"
+            reasons[reason] += 1
+            records.append(
+                {
+                    "ts": row["ts"],
+                    "ticker": row["ticker"],
+                    "reason": reason,
+                    "rank_score": _coerce_float(row["rank_score"]),
+                    "ev": _coerce_float(row["ev"]),
+                    "position_contracts": int(row["position_contracts"] or 0),
+                    "size_usd": _coerce_float(row["size_usd"]),
+                    "details": _json_or_empty(row["details_json"]),
+                }
+            )
+        return {
+            "lookback_hours": lookback_hours,
+            "count": len(records),
+            "top_reasons": [
+                {"reason": reason, "count": count}
+                for reason, count in reasons.most_common(8)
+            ],
+            "recent_records": records[:12],
+        }
 
     try:
         with _connect_db(db_path) as conn:
@@ -214,7 +256,6 @@ def get_recent_veto_summary(
             "error": str(exc),
         }
 
-    reasons = Counter()
     for row in rows:
         message = str(row["message"] or "")
         _prefix, _sep, reason = message.partition(" vetoed: ")

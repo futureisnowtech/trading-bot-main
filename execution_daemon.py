@@ -94,6 +94,15 @@ def main() -> int:
                     logger.exception("Incident sync failed after execution cycle")
             except Exception:
                 logger.exception("Execution cycle failed")
+                try:
+                    from notifications.notification_engine import notify_kill_switch
+
+                    notify_kill_switch(
+                        "runtime_loop_exception",
+                        "Execution cycle crashed before clean completion. Inspect runtime logs immediately.",
+                    )
+                except Exception:
+                    logger.exception("Kill-switch notification dispatch failed")
 
             elapsed = time.time() - cycle_started
             logger.info("Sleeping %ss before next cycle (elapsed=%.1fs).", sleep_seconds, elapsed)

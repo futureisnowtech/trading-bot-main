@@ -127,23 +127,37 @@ def test_weather_learning_status_surfaces_latest_adaptive_blend(proof_runtime, m
 
 
 def test_recent_veto_summary_aggregates_reason_counts(proof_runtime, monkeypatch):
+    import forecast.db as fdb
     import runtime.operator_truth as ot
 
     db = str(proof_runtime.db_path)
     monkeypatch.setattr(ot, "DB_PATH", db, raising=False)
+    fdb.init_forecast_db(db_path=db)
 
     with sqlite3.connect(proof_runtime.db_path) as conn:
         conn.execute(
-            "INSERT INTO system_events (ts, level, source, message) VALUES (?, 'WARNING', 'ForecastRunner', ?)",
-            ("2026-06-04T18:57:46+00:00", "[ForecastRunner] KXHIGHNY vetoed: missing_quotes"),
+            """
+            INSERT INTO recent_vetoes
+                (ts, ticker, strategy_family, side, veto_reason, rank_score, ev, position_contracts, size_usd, details_json)
+            VALUES (?, 'KXHIGHNY', 'weather_ensemble', 'YES', 'missing_quotes', 0.0, 0.0, 0, 0.0, '{}')
+            """,
+            ("2026-06-04T18:57:46+00:00",),
         )
         conn.execute(
-            "INSERT INTO system_events (ts, level, source, message) VALUES (?, 'WARNING', 'ForecastRunner', ?)",
-            ("2026-06-04T18:58:46+00:00", "[ForecastRunner] KXLOWNY vetoed: missing_quotes"),
+            """
+            INSERT INTO recent_vetoes
+                (ts, ticker, strategy_family, side, veto_reason, rank_score, ev, position_contracts, size_usd, details_json)
+            VALUES (?, 'KXLOWNY', 'weather_ensemble', 'NO', 'missing_quotes', 0.0, 0.0, 0, 0.0, '{}')
+            """,
+            ("2026-06-04T18:58:46+00:00",),
         )
         conn.execute(
-            "INSERT INTO system_events (ts, level, source, message) VALUES (?, 'WARNING', 'ForecastRunner', ?)",
-            ("2026-06-04T18:59:46+00:00", "[ForecastRunner] KXRAINNY vetoed: no_strategy_signal"),
+            """
+            INSERT INTO recent_vetoes
+                (ts, ticker, strategy_family, side, veto_reason, rank_score, ev, position_contracts, size_usd, details_json)
+            VALUES (?, 'KXRAINNY', 'weather_ensemble', 'YES', 'no_strategy_signal', 0.0, 0.0, 0, 0.0, '{}')
+            """,
+            ("2026-06-04T18:59:46+00:00",),
         )
 
     summary = ot.get_recent_veto_summary(db_path=db, lookback_hours=50000)

@@ -1031,7 +1031,7 @@ def _strategy_weather_details(
     if semantics.comparator == "between" and mode != "RAIN":
         narrow_bin_size_multiplier = 0.85
 
-    effective_ev_threshold = 0.01 if mode == "TEMP" else EV_THRESHOLD
+    effective_ev_threshold = 0.03 if mode == "TEMP" else EV_THRESHOLD
 
     if net_edge_yes is not None and net_edge_yes >= effective_ev_threshold:
         if cloud_veto:
@@ -1369,7 +1369,7 @@ def evaluate_contract(
             else -1.0
         )
         ev_chosen = ev_yes if best_side == "YES" else ev_no
-        effective_ev_threshold = 0.01 if w_mode == "TEMP" else EV_THRESHOLD
+        effective_ev_threshold = 0.03 if w_mode == "TEMP" else EV_THRESHOLD
         if approved and ev_chosen < effective_ev_threshold:
             approved = False
             veto_reason = f"fee_adjusted_ev_too_low ({ev_chosen:.4f} < {effective_ev_threshold})"

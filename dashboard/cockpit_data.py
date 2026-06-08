@@ -577,8 +577,8 @@ def build_regime_manifest(
         "entry_gates": [
             (
                 f"Fresh-entry scope {live_entry_scope()} "
-                f"with {hourly_support.get('resolver_ready_city_count', 0)}/"
-                f"{hourly_support.get('universe_city_count', 0)} cities resolver-ready"
+                f"with {hourly_support.get('exchange_verified_city_count', 0)}/"
+                f"{hourly_support.get('universe_city_count', 0)} cities exchange-verified for hourly"
             ),
             "Only true hour-stamped weather contracts are allowed for fresh entries",
             f"Minimum contract price {KALSHI_MIN_PRICE:.2f} for non-hourly weather lanes, 0.03 for hourly/rain lanes",

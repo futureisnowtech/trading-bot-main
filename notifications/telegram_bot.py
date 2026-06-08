@@ -211,8 +211,8 @@ def _build_local_audit_snapshot() -> tuple[str, str]:
     entry_scope = str(release.get("entry_scope") or "UNKNOWN")
     hourly_support = release.get("hourly_city_support") or {}
     hourly_support_line = (
-        f"Hourly Support: {int(hourly_support.get('resolver_ready_city_count') or 0)}/"
-        f"{int(hourly_support.get('universe_city_count') or 0)} cities resolver-ready"
+        f"Hourly Support: {int(hourly_support.get('exchange_verified_city_count') or 0)}/"
+        f"{int(hourly_support.get('universe_city_count') or 0)} cities exchange-verified"
     )
 
     msg_lines = [

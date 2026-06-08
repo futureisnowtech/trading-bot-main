@@ -229,14 +229,20 @@ _AIRPORT_TO_CITY = {
 }
 
 
-def _get_city_hub(ticker: str) -> str:
+def _get_city_hub(ticker: str, *, contract_name: str = "") -> str:
     """
     v19.3: Sovereign Regional Hub Routing.
     Maps the active station universe to meteorologically correlated macro-regions.
     """
     t = ticker.upper()
     try:
-        from data.kalshi_weather_monitor import STATIONS
+        from data.kalshi_weather_monitor import STATIONS, resolve_weather_city_key
+
+        city_key = resolve_weather_city_key(t, contract_name=contract_name)
+        if city_key:
+            city_hub = _CITY_TO_HUB.get(city_key)
+            if city_hub:
+                return city_hub
 
         for city_key, station in STATIONS.items():
             city_hub = _CITY_TO_HUB.get(city_key)
@@ -1573,7 +1579,10 @@ def evaluate_market_snapshots(
     hub_exposure = {} 
     for pos in open_positions:
         p_ticker = pos.get("local_symbol", "")
-        p_hub = _get_city_hub(p_ticker) # Ensure _get_city_hub uses airport codes (e.g. 'ORD', 'JFK', 'DEN')
+        p_hub = _get_city_hub(
+            p_ticker,
+            contract_name=str(pos.get("contract_name") or ""),
+        )  # Ensure _get_city_hub uses airport codes (e.g. 'ORD', 'JFK', 'DEN')
         entry_price = float(pos.get("entry_price") or pos.get("entry") or 0.0)
         pos_usd = get_kalshi_position_exposure_usd(
             float(pos.get("qty", 0)),
@@ -1611,7 +1620,7 @@ def evaluate_market_snapshots(
             continue
 
         family = snapshot.family
-        hub = _get_city_hub(ticker)
+        hub = _get_city_hub(ticker, contract_name=snapshot.contract_name)
 
         count = current_tick_counts.get(family, 0)
         current_hub_usd = hub_exposure.get(hub, 0.0)

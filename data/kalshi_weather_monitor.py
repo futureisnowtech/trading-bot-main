@@ -84,10 +84,10 @@ def _series(*tokens: str) -> list[str]:
 
 
 STATIONS = {
-    "NY": {"lat": 40.78, "lon": -73.97, "icao": "KNYC", "name": "New York (Central Park)", "tz": "America/New_York", "series": _series("KXHIGHNY", "HIGHNY", "KXLOWNY", "KXLOWNYC", "KXLOWTNYC", "KXRAINNY", "RAINNY", "RAINNYC", "KXRAINNYC", "KXTEMPNY", "KXTEMPNYCH", "KXHIGHNYD")},
-    "CHI": {"lat": 41.78, "lon": -87.75, "icao": "KMDW", "name": "Chicago (Midway)", "tz": "America/Chicago", "series": _series("KXHIGHCHI", "HIGHCHI", "KXLOWCHI", "KXLOWTCHI", "KXRAINCHIM", "KXTEMPCHI")},
-    "MIA": {"lat": 25.79, "lon": -80.29, "icao": "KMIA", "name": "Miami International", "tz": "America/New_York", "series": _series("KXHIGHMIA", "HIGHMIA", "KXLOWMIA", "KXLOWTMIA", "RAINMIA", "KXRAINMIA", "KXRAINMIAM", "KXTEMPMIA")},
-    "LAX": {"lat": 33.94, "lon": -118.41, "icao": "KLAX", "name": "Los Angeles Intl", "tz": "America/Los_Angeles", "series": _series("KXHIGHLAX", "KXLOWLAX", "KXLOWTLAX", "KXRAINLAX", "KXRAINLAXM", "KXTEMPLAX")},
+    "NY": {"lat": 40.78, "lon": -73.97, "icao": "KNYC", "name": "New York (Central Park)", "tz": "America/New_York", "series": _series("KXHIGHNY", "HIGHNY", "KXLOWNY", "KXLOWNYC", "KXLOWTNYC", "KXRAINNY", "RAINNY", "RAINNYC", "KXRAINNYC", "KXTEMPNYCH", "KXHIGHNYD")},
+    "CHI": {"lat": 41.78, "lon": -87.75, "icao": "KMDW", "name": "Chicago (Midway)", "tz": "America/Chicago", "series": _series("KXHIGHCHI", "HIGHCHI", "KXLOWCHI", "KXLOWTCHI", "KXRAINCHIM", "KXTEMPCHIH")},
+    "MIA": {"lat": 25.79, "lon": -80.29, "icao": "KMIA", "name": "Miami International", "tz": "America/New_York", "series": _series("KXHIGHMIA", "HIGHMIA", "KXLOWMIA", "KXLOWTMIA", "RAINMIA", "KXRAINMIA", "KXRAINMIAM", "KXTEMPMIAH")},
+    "LAX": {"lat": 33.94, "lon": -118.41, "icao": "KLAX", "name": "Los Angeles Intl", "tz": "America/Los_Angeles", "series": _series("KXHIGHLAX", "KXLOWLAX", "KXLOWTLAX", "KXRAINLAX", "KXRAINLAXM", "KXTEMPLAXH")},
     "DEN": {"lat": 39.86, "lon": -104.67, "icao": "KDEN", "name": "Denver International", "tz": "America/Denver", "series": _series("KXHIGHDEN", "KXLOWDEN", "KXLOWTDEN", "KXRAINDEN", "KXRAINDENM")},
     "AUS": {"lat": 30.20, "lon": -97.67, "icao": "KAUS", "name": "Austin-Bergstrom", "tz": "America/Chicago", "series": _series("KXHIGHAUS", "HIGHAUS", "KXLOWAUS", "KXLOWTAUS", "KXRAINAUS", "KXRAINAUSM")},
     "PHX": {"lat": 33.43, "lon": -112.01, "icao": "KPHX", "name": "Phoenix Sky Harbor", "tz": "America/Phoenix", "series": _series("KXHIGHTPHX", "KXLOWTPHX")},
@@ -95,8 +95,8 @@ STATIONS = {
     "DAL": {"lat": 32.90, "lon": -97.04, "icao": "KDFW", "name": "Dallas/Fort Worth", "tz": "America/Chicago", "series": _series("KXHIGHDAL", "KXHIGHTDAL", "KXLOWDAL", "KXLOWTDAL", "KXRAINDALM")},
     "ATL": {"lat": 33.64, "lon": -84.43, "icao": "KATL", "name": "Hartsfield-Jackson", "tz": "America/New_York", "series": _series("KXHIGHTATL", "KXLOWTATL")},
     "HOU": {"lat": 29.65, "lon": -95.28, "icao": "KHOU", "name": "Houston Hobby", "tz": "America/Chicago", "series": _series("KXHIGHHOU", "KXHIGHOU", "KXHIGHTHOU", "KXLOWTHOU", "RAINHOU", "KXRAINHOU", "KXRAINHOUM")},
-    "BOS": {"lat": 42.36, "lon": -71.01, "icao": "KBOS", "name": "Boston Logan", "tz": "America/New_York", "series": _series("KXHIGHBOS", "KXHIGHTBOS", "KXLOWBOS", "KXLOWTBOS", "KXTEMPBOS")},
-    "DC": {"lat": 38.85, "lon": -77.04, "icao": "KDCA", "name": "Reagan National", "tz": "America/New_York", "series": _series("KXHIGHDC", "KXHIGHTDC", "KXLOWDC", "KXLOWTDC", "KXRAINDC", "KXTEMPDC")},
+    "BOS": {"lat": 42.36, "lon": -71.01, "icao": "KBOS", "name": "Boston Logan", "tz": "America/New_York", "series": _series("KXHIGHBOS", "KXHIGHTBOS", "KXLOWBOS", "KXLOWTBOS", "KXTEMPBOSH")},
+    "DC": {"lat": 38.85, "lon": -77.04, "icao": "KDCA", "name": "Reagan National", "tz": "America/New_York", "series": _series("KXHIGHDC", "KXHIGHTDC", "KXLOWDC", "KXLOWTDC", "KXRAINDC", "KXTEMPDCH")},
     "SF": {"lat": 37.62, "lon": -122.37, "icao": "KSFO", "name": "San Francisco Intl", "tz": "America/Los_Angeles", "series": _series("KXHIGHSF", "KXHIGHTSFO", "KXLOWSF", "KXLOWTSFO", "KXRAINSF", "KXRAINSFOM")},
     "LV": {"lat": 36.08, "lon": -115.15, "icao": "KLAS", "name": "Las Vegas (Harry Reid)", "tz": "America/Los_Angeles", "series": ["KXHIGHTLV", "KXLOWTLV"]},
     # v19.3: Institutional Expansion Universe
@@ -134,6 +134,17 @@ _WEATHER_PREFIXES = (
     "HIGH",
     "LOW",
 )
+_CITY_TITLE_ALIASES = (
+    ("NEW YORK CITY", "NY"),
+    ("NEW YORK", "NY"),
+    ("NYC", "NY"),
+    ("LOS ANGELES", "LAX"),
+    ("CHICAGO", "CHI"),
+    ("WASHINGTON, DC", "DC"),
+    ("WASHINGTON DC", "DC"),
+    ("MIAMI", "MIA"),
+    ("BOSTON", "BOS"),
+)
 
 
 def _canonical_series_for_city(city_key: str) -> Optional[str]:
@@ -146,6 +157,16 @@ def _canonical_series_for_city(city_key: str) -> Optional[str]:
             if series.startswith(prefix):
                 return series
     return series_list[0]
+
+
+def _city_key_from_contract_name(contract_name: str) -> Optional[str]:
+    title = re.sub(r"\s+", " ", str(contract_name or "").replace("*", " ")).strip().upper()
+    if not title:
+        return None
+    for alias, city_key in _CITY_TITLE_ALIASES:
+        if alias in title:
+            return city_key
+    return None
 
 
 def _series_suffix_aliases(series: str) -> set[str]:
@@ -166,6 +187,8 @@ def _build_hourly_temp_alias_map() -> dict[str, str]:
     for city_key, station in STATIONS.items():
         aliases: set[str] = set()
         for series in station.get("series", []):
+            if not str(series).upper().startswith("KXTEMP"):
+                continue
             aliases.update(_series_suffix_aliases(str(series)))
         for alias in sorted(aliases, key=len, reverse=True):
             alias_map.setdefault(alias, str(city_key).upper())
@@ -192,6 +215,16 @@ def _resolve_hourly_temp_city_key(token: str) -> Optional[str]:
     return None
 
 
+def resolve_weather_city_key(token: str, *, contract_name: str = "") -> Optional[str]:
+    city_key = _city_key_from_contract_name(contract_name)
+    if city_key is not None:
+        return city_key
+    series = _resolve_weather_series(token)
+    if series is not None:
+        return _SERIES_TO_CITY.get(series)
+    return None
+
+
 def get_hourly_city_support_summary() -> dict[str, Any]:
     explicit_hourly = sorted(
         city_key
@@ -205,6 +238,20 @@ def get_hourly_city_support_summary() -> dict[str, Any]:
         "explicit_hourly_series_city_count": len(explicit_hourly),
         "resolver_ready_cities": resolver_ready,
         "explicit_hourly_series_cities": explicit_hourly,
+        "exchange_verified_city_count": len(explicit_hourly),
+        "exchange_verified_cities": explicit_hourly,
+        "verified_hourly_series_count": sum(
+            1
+            for station in STATIONS.values()
+            for series in station.get("series", [])
+            if str(series).upper().startswith("KXTEMP")
+        ),
+        "verified_hourly_series": sorted(
+            str(series).upper()
+            for station in STATIONS.values()
+            for series in station.get("series", [])
+            if str(series).upper().startswith("KXTEMP")
+        ),
     }
 
 # ── Intraday Ground Truth ───────────────────────────────────────────────────
@@ -439,15 +486,17 @@ def _active_weather_city_keys() -> list[str]:
     try:
         from forecast.db import get_active_contracts
 
-        needed_series = {
-            _resolve_weather_series(contract.get("local_symbol") or "")
-            for contract in get_active_contracts()
-        }
         city_keys = sorted(
             {
-                _SERIES_TO_CITY[series]
-                for series in needed_series
-                if series is not None and series in _SERIES_TO_CITY
+                city_key
+                for contract in get_active_contracts()
+                for city_key in [
+                    resolve_weather_city_key(
+                        contract.get("local_symbol") or "",
+                        contract_name=str(contract.get("contract_name") or ""),
+                    )
+                ]
+                if city_key is not None
             }
         )
     except Exception as exc:
@@ -875,8 +924,10 @@ def _resolve_weather_series(token: str) -> Optional[str]:
     return None
 
 
-def _station_for_series(series: str) -> Optional[dict]:
-    city_key = _SERIES_TO_CITY.get(series)
+def _station_for_series(series: str, *, contract_name: str = "") -> Optional[dict]:
+    city_key = resolve_weather_city_key(series, contract_name=contract_name)
+    if city_key is None:
+        city_key = _SERIES_TO_CITY.get(series)
     if city_key is None:
         return None
     return STATIONS.get(city_key)
@@ -1916,12 +1967,13 @@ def get_contract_weather_data(
     last_trade_at: str = "",
 ) -> Dict[str, Any]:
     """Project cached weather state onto the contract's local settlement day."""
-    series = _resolve_weather_series(ticker) or ticker
+    city_key = resolve_weather_city_key(ticker, contract_name=contract_name)
+    series = _canonical_series_for_city(city_key) if city_key else (_resolve_weather_series(ticker) or ticker)
     base = get_weather_data(series)
     if not base:
         return {}
 
-    station = _station_for_series(series)
+    station = STATIONS.get(city_key) if city_key else _station_for_series(series, contract_name=contract_name)
     if station is None:
         return base
 
@@ -1974,9 +2026,10 @@ def get_contract_observed_weather_data(
     last_trade_at: str = "",
 ) -> Dict[str, Any]:
     """Return contract-date observed truth for resolution ingestion."""
-    series = _resolve_weather_series(ticker) or ticker
+    city_key = resolve_weather_city_key(ticker, contract_name=contract_name)
+    series = _canonical_series_for_city(city_key) if city_key else (_resolve_weather_series(ticker) or ticker)
     base = get_weather_data(series)
-    station = _station_for_series(series)
+    station = STATIONS.get(city_key) if city_key else _station_for_series(series, contract_name=contract_name)
     if station is None:
         return {}
 
@@ -2000,7 +2053,7 @@ def get_contract_observed_weather_data(
 
     timezone_name = station.get("tz", "UTC")
     local_today = _station_settlement_date(timezone_name)
-    city_key = _SERIES_TO_CITY.get(series, "")
+    city_key = city_key or _SERIES_TO_CITY.get(series, "")
     if target_hour is not None:
         if target_date > local_today:
             return {}

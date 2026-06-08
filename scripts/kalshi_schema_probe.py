@@ -35,6 +35,11 @@ def main():
                 elif not isinstance(res.get("events"), list):
                     logger.error(f"FAIL: Kalshi response did not contain 'events' array for {series}. Got: {res}")
                     failures.append((series, "Malformed response structure (no events list)"))
+                elif not res.get("events"):
+                    logger.warning(
+                        "NEUTRAL: %s query accepted but returned zero events. This is not proof that the family is live.",
+                        series,
+                    )
                 else:
                     logger.info(f"PASS: {series} is structurally valid on Kalshi.")
             except Exception as e:

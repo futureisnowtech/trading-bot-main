@@ -32,8 +32,8 @@ def test_only_true_hourly_contracts_use_intraday_lane_gates():
         spread=0.18,
         hours_to_resolution=0.5,
         mode="TEMP",
-        ticker="KXTEMPATL-24JAN0122-T75.99",
-        contract_name="Will the temperature in Atlanta be above 75.99° at 10pm local time?",
+        ticker="KXTEMPCHIH-24JAN0122-T75.99",
+        contract_name="Will the temperature in Chicago be above 75.99° at 10pm local time?",
     )
     assert ok is True
     assert reason == ""
@@ -72,35 +72,50 @@ def test_hourly_series_aliases_resolve_for_rain_and_temp():
     assert wm._resolve_weather_series("KXTEMPNYCH-24JAN0122-T75.99") == "KXTEMPNYCH"
 
 
-def test_verified_hourly_resolver_covers_full_station_universe():
+def test_verified_hourly_resolver_covers_exchange_verified_cities():
     import data.kalshi_weather_monitor as wm
 
-    unresolved = []
-    for city_key, station in wm.STATIONS.items():
-        aliases = sorted(
-            {
-                alias
-                for series in station.get("series", [])
-                for alias in wm._series_suffix_aliases(series)
-            },
-            key=len,
-            reverse=True,
-        )
-        assert aliases, f"expected at least one verified weather suffix for {city_key}"
-        ticker = f"KXTEMP{aliases[0]}-24JAN0122-T75.99"
-        resolved = wm._resolve_weather_series(ticker)
-        if not resolved:
-            unresolved.append(city_key)
+    summary = wm.get_hourly_city_support_summary()
+    assert summary["exchange_verified_city_count"] == 6
+    assert summary["exchange_verified_cities"] == ["BOS", "CHI", "DC", "LAX", "MIA", "NY"]
 
-    assert unresolved == []
+    expected = {
+        "KXTEMPBOSH-24JAN0122-T75.99": "KXTEMPBOSH",
+        "KXTEMPCHIH-24JAN0122-T75.99": "KXTEMPCHIH",
+        "KXTEMPDCH-24JAN0122-T75.99": "KXTEMPDCH",
+        "KXTEMPLAXH-24JAN0122-T75.99": "KXTEMPLAXH",
+        "KXTEMPMIAH-24JAN0122-T75.99": "KXTEMPMIAH",
+        "KXTEMPNYCH-24JAN0122-T75.99": "KXTEMPNYCH",
+    }
+    for ticker, series in expected.items():
+        assert wm._resolve_weather_series(ticker) == series
 
 
 def test_verified_hourly_resolver_uses_known_weather_suffixes_only():
     import data.kalshi_weather_monitor as wm
 
-    assert wm._resolve_weather_series("KXTEMPATL-24JAN0122-T75.99") == "KXHIGHTATL"
-    assert wm._resolve_weather_series("KXTEMPSFO-24JAN0122-T75.99") == "KXHIGHSF"
+    assert wm._resolve_weather_series("KXTEMPATL-24JAN0122-T75.99") is None
+    assert wm._resolve_weather_series("KXTEMPSFO-24JAN0122-T75.99") is None
     assert wm._resolve_weather_series("KXTEMPDCA-24JAN0122-T75.99") is None
+
+
+def test_hourly_city_resolution_prefers_contract_title_when_series_label_is_messy():
+    import data.kalshi_weather_monitor as wm
+
+    assert (
+        wm.resolve_weather_city_key(
+            "KXTEMPLAXH-26APR1619-T76.99",
+            contract_name="Will the temp in NYC be above 76.99° on Apr 16, 2026 at 7pm EDT?",
+        )
+        == "NY"
+    )
+    assert (
+        wm.resolve_weather_city_key(
+            "KXTEMPLAXH-26APR1620-T66.99",
+            contract_name="Will the temp in Los Angeles be above 66.99° on Apr 16, 2026 at 8pm EDT?",
+        )
+        == "LAX"
+    )
 
 
 def test_hourly_contract_projection_uses_exact_hour_members(monkeypatch):

@@ -597,8 +597,13 @@ class KalshiBroker:
             weather_events = []
             for loc in STATIONS.values():
                 for series_id in loc.get("series", []):
-                    data = self._request("GET", "/trade-api/v2/events", params={"series_ticker": series_id, "status": "open"})
-                    weather_events.extend(data.get("events", []))
+                    for event_status in ("open", "unopened"):
+                        data = self._request(
+                            "GET",
+                            "/trade-api/v2/events",
+                            params={"series_ticker": series_id, "status": event_status},
+                        )
+                        weather_events.extend(data.get("events", []))
             
             generic_events = []
             cursor = ""

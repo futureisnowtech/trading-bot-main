@@ -834,6 +834,13 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                 contract = candidate["contract"]
                 local_sym = contract.get("local_symbol", "")
 
+                # ── Temporary Veto: Limit strictly to Hourly TEMP (TEMP) for testing ──
+                from forecast.weather_contracts import weather_mode_for_ticker
+                cand_mode = weather_mode_for_ticker(local_sym)
+                if cand_mode != "TEMP":
+                    logger.info(f"[Test Mode] Skipping non-Hourly contract: {local_sym} (mode={cand_mode})")
+                    continue
+
                 # Only enter if econ approved AND contracts > 0
                 if not result.econ_approved or result.position_contracts <= 0:
                     veto_msg = f"[ForecastRunner] {local_sym} vetoed: {result.veto_reason or 'sizing_zero'}"

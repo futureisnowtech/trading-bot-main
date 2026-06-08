@@ -31,6 +31,7 @@ def _clean_title(title: str) -> str:
 
 _HOURLY_WEATHER_TICKER_RE = re.compile(r"-\d{2}[A-Z]{3}\d{4}(?:-|$)")
 _HOURLY_TITLE_RE = re.compile(r"\bat\s+\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)\b")
+_SHORT_CADENCE_TEMP_PREFIXES = ("KXLOWT", "KXHIGHT")
 
 
 def has_hourly_weather_timestamp(ticker: str) -> bool:
@@ -45,6 +46,22 @@ def is_hourly_weather_contract(
     if weather_mode_for_ticker(ticker) is None:
         return False
     if has_hourly_weather_timestamp(ticker):
+        return True
+    title = _clean_title(contract_name).lower()
+    return "hourly" in title or bool(_HOURLY_TITLE_RE.search(title))
+
+
+def is_short_cadence_weather_contract(
+    ticker: str,
+    *,
+    contract_name: str = "",
+) -> bool:
+    symbol = (ticker or "").upper()
+    if not symbol or weather_mode_for_ticker(symbol) is None:
+        return False
+    if has_hourly_weather_timestamp(symbol):
+        return True
+    if symbol.startswith(_SHORT_CADENCE_TEMP_PREFIXES):
         return True
     title = _clean_title(contract_name).lower()
     return "hourly" in title or bool(_HOURLY_TITLE_RE.search(title))

@@ -89,7 +89,10 @@ def _rank_contracts(contracts: list[dict]) -> list[dict]:
     """
     ranked = []
     
-    from forecast.weather_contracts import weather_mode_for_ticker
+    from forecast.weather_contracts import (
+        is_short_cadence_weather_contract,
+        weather_mode_for_ticker,
+    )
 
     for c in contracts:
         hours = _hours_to_resolution(c.get("last_trade_at", ""))
@@ -100,7 +103,14 @@ def _rank_contracts(contracts: list[dict]) -> list[dict]:
         # Hourly Temp contracts must be discovered up to 20 mins (0.33h) before resolution.
         symbol = c.get("underlier", "") or c.get("market_symbol", "") or c.get("local_symbol", "")
         mode = weather_mode_for_ticker(symbol)
-        min_hours = 0.33 if mode == "TEMP" else MIN_HOURS_TO_RESOLUTION
+        min_hours = (
+            0.33
+            if is_short_cadence_weather_contract(
+                symbol,
+                contract_name=c.get("contract_name", "") or c.get("market_name", ""),
+            )
+            else MIN_HOURS_TO_RESOLUTION
+        )
         
         if hours < min_hours:
             continue  # too close to resolution

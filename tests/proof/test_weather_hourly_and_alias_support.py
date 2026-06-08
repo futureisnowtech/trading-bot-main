@@ -4,12 +4,49 @@ import time
 
 
 def test_hourly_weather_mode_detection_recognizes_hour_stamped_tickers():
-    from forecast.weather_contracts import is_hourly_weather_contract, weather_mode_for_ticker
+    from forecast.weather_contracts import (
+        is_hourly_weather_contract,
+        is_short_cadence_weather_contract,
+        weather_mode_for_ticker,
+    )
 
     assert weather_mode_for_ticker("KXTEMPNYCH-24JAN0122-T75.99") == "TEMP"
     assert weather_mode_for_ticker("KXHIGHNYD-24JAN0122-T75.99") == "TEMP"
     assert is_hourly_weather_contract("KXTEMPNYCH-24JAN0122-T75.99")
     assert not is_hourly_weather_contract("KXLOWTNYC-26JUN09-T52")
+    assert is_short_cadence_weather_contract("KXTEMPNYCH-24JAN0122-T75.99")
+    assert is_short_cadence_weather_contract(
+        "KXLOWTNYC-26JUN09-T52",
+        contract_name="Will the minimum temperature be <52° on Jun 9, 2026?",
+    )
+
+
+def test_short_cadence_temp_contracts_use_intraday_lane_gates():
+    import forecast.strategy_engine as se
+
+    ok, reason = se._weather_market_gate(
+        ask_yes=0.20,
+        ask_no=0.80,
+        spread=0.18,
+        hours_to_resolution=0.5,
+        mode="LOW",
+        ticker="KXLOWTNYC-26JUN09-T52",
+        contract_name="Will the minimum temperature be <52° on Jun 9, 2026?",
+    )
+    assert ok is True
+    assert reason == ""
+
+    ok, reason = se._weather_market_gate(
+        ask_yes=0.20,
+        ask_no=0.80,
+        spread=0.18,
+        hours_to_resolution=0.5,
+        mode="LOW",
+        ticker="KXLOWNY-26JUN09-T52",
+        contract_name="Will the low temperature in NYC be <52° on Jun 9, 2026?",
+    )
+    assert ok is False
+    assert reason == "RESOLUTION_HORIZON_TOO_SHORT"
 
 
 def test_hourly_weather_contract_preserves_decimal_threshold():

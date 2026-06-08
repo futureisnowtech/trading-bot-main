@@ -834,14 +834,14 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                 contract = candidate["contract"]
                 local_sym = contract.get("local_symbol", "")
 
-                # Keep fresh entries pinned to true hour-stamped weather contracts only.
-                from forecast.weather_contracts import is_hourly_weather_contract
-                if not is_hourly_weather_contract(
+                # Keep fresh entries pinned to the short-cadence weather lane.
+                from forecast.weather_contracts import is_short_cadence_weather_contract
+                if not is_short_cadence_weather_contract(
                     local_sym,
                     contract_name=str(contract.get("contract_name") or ""),
                 ):
                     logger.info(
-                        "[Hourly-Only Mode] Skipping non-hourly contract: %s",
+                        "[Short-Cadence Mode] Skipping non-short-cadence contract: %s",
                         local_sym,
                     )
                     continue

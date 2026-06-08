@@ -57,6 +57,7 @@ from config import (
 )
 from forecast.market_snapshot import MarketSnapshot, build_market_snapshots
 from forecast.weather_contracts import (
+    is_short_cadence_weather_contract,
     probability_from_members,
     resolve_weather_contract,
     weather_mode_for_ticker,
@@ -139,9 +140,17 @@ def _weather_net_edge(contract_prob: float, ask_price: float) -> float | None:
     )
 
 
-def min_contract_price_for_mode(mode: str) -> float:
+def min_contract_price_for_mode(
+    mode: str,
+    *,
+    ticker: str = "",
+    contract_name: str = "",
+) -> float:
     mode_str = str(mode or "").upper()
-    if mode_str in ("RAIN", "TEMP"):
+    if mode_str in ("RAIN", "TEMP") or is_short_cadence_weather_contract(
+        ticker,
+        contract_name=contract_name,
+    ):
         return 0.03
     return float(KALSHI_MIN_PRICE)
 
@@ -507,10 +516,16 @@ def _weather_market_gate(
     open_positions_count: int = 0,
     deployed_pct: float = 0.0,
     mode: str = "",
+    ticker: str = "",
+    contract_name: str = "",
 ) -> tuple[bool, str]:
     """Execution-only gates for weather markets."""
     yes_available = ask_yes > 0.0
     no_available = ask_no > 0.0
+    short_cadence = is_short_cadence_weather_contract(
+        ticker,
+        contract_name=contract_name,
+    )
 
     if not yes_available and not no_available:
         return False, "missing_quotes"
@@ -518,7 +533,7 @@ def _weather_market_gate(
     if deployed_pct >= KALSHI_MAX_DEPLOYED_PCT:
         return False, "MAX_CAPITAL_EXCEEDED"
 
-    min_hours = 0.33 if mode == "TEMP" else MIN_HOURS_TO_RES
+    min_hours = 0.33 if (mode == "TEMP" or short_cadence) else MIN_HOURS_TO_RES
     if hours_to_resolution < min_hours:
         return False, "RESOLUTION_HORIZON_TOO_SHORT"
 
@@ -528,7 +543,7 @@ def _weather_market_gate(
     if open_positions_count >= MAX_CONCURRENT_POSITIONS:
         return False, f"concurrent_cap_reached ({open_positions_count}/{MAX_CONCURRENT_POSITIONS})"
 
-    max_spread_dollars = 0.22 if mode == "TEMP" else MAX_SPREAD_DOLLARS
+    max_spread_dollars = 0.22 if (mode == "TEMP" or short_cadence) else MAX_SPREAD_DOLLARS
     if spread > max_spread_dollars:
         return False, f"spread_too_wide ({spread:.3f} > {max_spread_dollars})"
 
@@ -536,7 +551,7 @@ def _weather_market_gate(
     avg_price = sum(available_prices) / len(available_prices) if available_prices else 0.0
     if avg_price > 0:
         spread_ratio = spread / avg_price
-        max_spread_ratio = 0.36 if mode == "TEMP" else KALSHI_MAX_SPREAD_RATIO
+        max_spread_ratio = 0.36 if (mode == "TEMP" or short_cadence) else KALSHI_MAX_SPREAD_RATIO
         if spread_ratio > max_spread_ratio:
             return False, f"spread_ratio_veto ({spread_ratio:.1%} > {max_spread_ratio:.0%})"
 
@@ -996,7 +1011,15 @@ def _strategy_weather_details(
             0.05,
         )
     
-    min_allowed_price = min_contract_price_for_mode(mode)
+    short_cadence = is_short_cadence_weather_contract(
+        ticker,
+        contract_name=contract_name,
+    )
+    min_allowed_price = min_contract_price_for_mode(
+        mode,
+        ticker=ticker,
+        contract_name=contract_name,
+    )
     if ask_yes > 0 and edge_yes is not None and edge_yes > 0 and ask_yes < min_allowed_price:
         return (
             False,
@@ -1036,7 +1059,7 @@ def _strategy_weather_details(
     if semantics.comparator == "between" and mode != "RAIN":
         narrow_bin_size_multiplier = 0.85
 
-    effective_ev_threshold = 0.006 if mode == "TEMP" else EV_THRESHOLD
+    effective_ev_threshold = 0.006 if (mode == "TEMP" or short_cadence) else EV_THRESHOLD
 
     if net_edge_yes is not None and net_edge_yes >= effective_ev_threshold:
         if cloud_veto:
@@ -1350,6 +1373,10 @@ def evaluate_contract(
         from forecast.weather_contracts import weather_mode_for_ticker
         w_mode = weather_mode_for_ticker(ticker)
 
+        short_cadence = is_short_cadence_weather_contract(
+            ticker,
+            contract_name=str(contract.get("contract_name") or ""),
+        )
         approved, veto_reason = _weather_market_gate(
             ask_yes=ask_yes,
             ask_no=ask_no,
@@ -1358,6 +1385,8 @@ def evaluate_contract(
             open_positions_count=open_positions_count,
             deployed_pct=deployed_pct,
             mode=w_mode,
+            ticker=ticker,
+            contract_name=str(contract.get("contract_name") or ""),
         )
         ev_yes = (
             q_hat
@@ -1374,7 +1403,7 @@ def evaluate_contract(
             else -1.0
         )
         ev_chosen = ev_yes if best_side == "YES" else ev_no
-        effective_ev_threshold = 0.006 if w_mode == "TEMP" else EV_THRESHOLD
+        effective_ev_threshold = 0.006 if (w_mode == "TEMP" or short_cadence) else EV_THRESHOLD
         if approved and ev_chosen < effective_ev_threshold:
             approved = False
             veto_reason = f"fee_adjusted_ev_too_low ({ev_chosen:.4f} < {effective_ev_threshold})"

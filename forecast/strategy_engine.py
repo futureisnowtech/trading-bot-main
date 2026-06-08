@@ -503,6 +503,7 @@ def _weather_market_gate(
     hours_to_resolution: float,
     open_positions_count: int = 0,
     deployed_pct: float = 0.0,
+    mode: str = "",
 ) -> tuple[bool, str]:
     """Execution-only gates for weather markets."""
     yes_available = ask_yes > 0.0
@@ -514,7 +515,8 @@ def _weather_market_gate(
     if deployed_pct >= KALSHI_MAX_DEPLOYED_PCT:
         return False, "MAX_CAPITAL_EXCEEDED"
 
-    if hours_to_resolution < MIN_HOURS_TO_RES:
+    min_hours = 0.33 if mode == "TEMP" else MIN_HOURS_TO_RES
+    if hours_to_resolution < min_hours:
         return False, "RESOLUTION_HORIZON_TOO_SHORT"
 
     if hours_to_resolution > MAX_HOURS_TO_RES:
@@ -1340,6 +1342,9 @@ def evaluate_contract(
                 is_taker_override=False,
             )
 
+        from forecast.weather_contracts import weather_mode_for_ticker
+        w_mode = weather_mode_for_ticker(ticker)
+
         approved, veto_reason = _weather_market_gate(
             ask_yes=ask_yes,
             ask_no=ask_no,
@@ -1347,6 +1352,7 @@ def evaluate_contract(
             hours_to_resolution=hours_to_res,
             open_positions_count=open_positions_count,
             deployed_pct=deployed_pct,
+            mode=w_mode,
         )
         ev_yes = (
             q_hat
@@ -1363,8 +1369,6 @@ def evaluate_contract(
             else -1.0
         )
         ev_chosen = ev_yes if best_side == "YES" else ev_no
-        from forecast.weather_contracts import weather_mode_for_ticker
-        w_mode = weather_mode_for_ticker(ticker)
         effective_ev_threshold = 0.01 if w_mode == "TEMP" else EV_THRESHOLD
         if approved and ev_chosen < effective_ev_threshold:
             approved = False

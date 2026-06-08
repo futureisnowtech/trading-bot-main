@@ -89,11 +89,20 @@ def _rank_contracts(contracts: list[dict]) -> list[dict]:
     """
     ranked = []
     
+    from forecast.weather_contracts import weather_mode_for_ticker
+
     for c in contracts:
         hours = _hours_to_resolution(c.get("last_trade_at", ""))
         if hours is None:
             continue
-        if hours < MIN_HOURS_TO_RESOLUTION:
+        
+        # v19.10.1: Lane-aware time-to-expiry gate.
+        # Hourly Temp contracts must be discovered up to 20 mins (0.33h) before resolution.
+        symbol = c.get("underlier", "") or c.get("market_symbol", "") or c.get("local_symbol", "")
+        mode = weather_mode_for_ticker(symbol)
+        min_hours = 0.33 if mode == "TEMP" else MIN_HOURS_TO_RESOLUTION
+        
+        if hours < min_hours:
             continue  # too close to resolution
         if hours > MAX_DAYS_TO_RESOLUTION * 24:
             continue  # too far out

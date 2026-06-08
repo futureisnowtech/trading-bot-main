@@ -633,7 +633,10 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                 (p.get("entry_price") or 0) * (p.get("qty") or 0)
                 for p in open_positions
             )
-            deployed_pct = min(1.0, deployed_value / max(bankroll, 1.0))
+            # v19.10.1: Capital math bugfix. Dividing by bankroll (cash) instead of
+            # total net assets artificially spikes deployed_pct and blocks trading.
+            total_net_assets = bankroll + deployed_value
+            deployed_pct = min(1.0, deployed_value / max(total_net_assets, 1.0))
 
             # v19.5.2: Sovereign Salvage & Take-Profit (Unblocked)
             # We run these BEFORE the capital guard so we can free up capital.

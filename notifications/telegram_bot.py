@@ -208,6 +208,12 @@ def _build_local_audit_snapshot() -> tuple[str, str]:
     release_verdict = str(release.get("current_release_verdict") or "UNKNOWN")
     entries_allowed = bool(release.get("entries_allowed"))
     provider_mode = str(release.get("provider_mode") or "unknown")
+    entry_scope = str(release.get("entry_scope") or "UNKNOWN")
+    hourly_support = release.get("hourly_city_support") or {}
+    hourly_support_line = (
+        f"Hourly Support: {int(hourly_support.get('resolver_ready_city_count') or 0)}/"
+        f"{int(hourly_support.get('universe_city_count') or 0)} cities resolver-ready"
+    )
 
     msg_lines = [
         "<b>SOVEREIGN KALSHI AUDIT</b>",
@@ -215,6 +221,7 @@ def _build_local_audit_snapshot() -> tuple[str, str]:
         f"Readiness: {readiness}",
         f"Release Gate: {release_verdict}",
         f"Entries Allowed: {'YES' if entries_allowed else 'NO'}",
+        f"Entry Scope: {entry_scope}",
         f"Open Incidents: {incidents.get('total_open', 0)}",
         f"CPU/RAM: {psutil.cpu_percent():.0f}% / {psutil.virtual_memory().percent:.0f}%",
         "",
@@ -222,6 +229,7 @@ def _build_local_audit_snapshot() -> tuple[str, str]:
         f"Equity: ${balance:,.2f}",
         f"Open Positions: {broker_positions_count}",
         f"Provider Mode: {provider_mode}",
+        hourly_support_line,
     ]
     raw_lines.extend(
         [
@@ -229,11 +237,13 @@ def _build_local_audit_snapshot() -> tuple[str, str]:
             f"Readiness: {readiness}",
             f"Release Gate: {release_verdict}",
             f"Entries Allowed: {'YES' if entries_allowed else 'NO'}",
+            f"Entry Scope: {entry_scope}",
             f"Open Incidents: {incidents.get('total_open', 0)}",
             f"Active Markets: {active_markets}",
             f"Equity: ${balance:,.2f}",
             f"Open Positions: {broker_positions_count}",
             f"Provider Mode: {provider_mode}",
+            hourly_support_line,
         ]
     )
 

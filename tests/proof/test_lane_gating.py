@@ -74,6 +74,17 @@ def test_health_check_healthy_with_credentials_and_low_error_rate(
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "telegram-token")
     monkeypatch.setenv("TELEGRAM_CHAT_ID", "12345")
     monkeypatch.setattr(hc, "DB_PATH", str(proof_runtime.db_path), raising=False)
+    monkeypatch.setattr(
+        hc,
+        "runtime_storage_status",
+        lambda path=None: {
+            "ok": True,
+            "free_mb": 4096.0,
+            "threshold_mb": 2048.0,
+            "path": str(proof_runtime.db_path.parent),
+        },
+        raising=False,
+    )
 
     result = hc.run_health_check(force=True)
     checks = {check["name"]: check for check in result["checks"]}

@@ -722,6 +722,21 @@ def get_release_status(
     balance_truth = get_balance_truth_status(truth=truth, db_path=db_path)
     if artifact_matches_build and artifact_balance.get("balance_ok") and not balance_truth.get("balance_ok"):
         balance_truth = dict(artifact_balance)
+    try:
+        from data.kalshi_weather_monitor import get_hourly_city_support_summary
+        from forecast.weather_contracts import live_entry_scope
+
+        hourly_support = get_hourly_city_support_summary()
+        entry_scope = live_entry_scope()
+    except Exception:
+        hourly_support = {
+            "universe_city_count": 0,
+            "resolver_ready_city_count": 0,
+            "explicit_hourly_series_city_count": 0,
+            "resolver_ready_cities": [],
+            "explicit_hourly_series_cities": [],
+        }
+        entry_scope = "UNKNOWN"
 
     blockers: list[str] = []
     warnings: list[str] = []
@@ -837,6 +852,8 @@ def get_release_status(
     return {
         "current_release_verdict": verdict,
         "entries_allowed": verdict in PASSING_VERDICTS,
+        "entry_scope": entry_scope,
+        "hourly_city_support": hourly_support,
         "last_audit_at": str(artifact.get("as_of") or ""),
         "last_successful_audit_at": str(
             artifact.get("last_successful_audit_at")

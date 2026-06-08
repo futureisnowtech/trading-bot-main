@@ -96,6 +96,7 @@ jobs:
             tests/proof/test_resolution_sync.py \
             tests/proof/test_weather_rbi_truth.py \
             tests/proof/test_weather_sovereign.py \
+            tests/proof/test_weather_hourly_and_alias_support.py \
             tests/proof/test_lane_gating.py \
             tests/proof/test_trading_control.py \
             tests/proof/test_scheduler_cadence_config.py \

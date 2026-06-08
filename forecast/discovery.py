@@ -90,7 +90,7 @@ def _rank_contracts(contracts: list[dict]) -> list[dict]:
     ranked = []
     
     from forecast.weather_contracts import (
-        is_short_cadence_weather_contract,
+        is_live_entry_weather_contract,
         weather_mode_for_ticker,
     )
 
@@ -105,7 +105,7 @@ def _rank_contracts(contracts: list[dict]) -> list[dict]:
         mode = weather_mode_for_ticker(symbol)
         min_hours = (
             0.33
-            if is_short_cadence_weather_contract(
+            if is_live_entry_weather_contract(
                 symbol,
                 contract_name=c.get("contract_name", "") or c.get("market_name", ""),
             )

@@ -57,7 +57,7 @@ from config import (
 )
 from forecast.market_snapshot import MarketSnapshot, build_market_snapshots
 from forecast.weather_contracts import (
-    is_short_cadence_weather_contract,
+    is_hourly_weather_contract,
     probability_from_members,
     resolve_weather_contract,
     weather_mode_for_ticker,
@@ -147,7 +147,7 @@ def min_contract_price_for_mode(
     contract_name: str = "",
 ) -> float:
     mode_str = str(mode or "").upper()
-    if mode_str in ("RAIN", "TEMP") or is_short_cadence_weather_contract(
+    if mode_str in ("RAIN", "TEMP") or is_hourly_weather_contract(
         ticker,
         contract_name=contract_name,
     ):
@@ -170,7 +170,7 @@ def _get_macro_context() -> dict:
 
 # v19.3: Sovereign Regional Risk Engine
 # Group cities into hubs to manage regional weather system covariance.
-# 31-City Sovereign Universe
+# 32-City Sovereign Universe
 REGIONAL_HUBS = {
     "MIDWEST": ["CHI", "MSP", "MIN", "MKE", "OMA", "STL", "DET", "MCI", "OKC"],
     "NORTHEAST": ["NYC", "NY", "BOS", "PHL", "PHIL", "DC"],
@@ -232,7 +232,7 @@ _AIRPORT_TO_CITY = {
 def _get_city_hub(ticker: str) -> str:
     """
     v19.3: Sovereign Regional Hub Routing.
-    Maps 31 cities to meteorologically correlated macro-regions.
+    Maps the active station universe to meteorologically correlated macro-regions.
     """
     t = ticker.upper()
     try:
@@ -522,7 +522,7 @@ def _weather_market_gate(
     """Execution-only gates for weather markets."""
     yes_available = ask_yes > 0.0
     no_available = ask_no > 0.0
-    short_cadence = is_short_cadence_weather_contract(
+    hourly_contract = is_hourly_weather_contract(
         ticker,
         contract_name=contract_name,
     )
@@ -533,7 +533,7 @@ def _weather_market_gate(
     if deployed_pct >= KALSHI_MAX_DEPLOYED_PCT:
         return False, "MAX_CAPITAL_EXCEEDED"
 
-    min_hours = 0.33 if (mode == "TEMP" or short_cadence) else MIN_HOURS_TO_RES
+    min_hours = 0.33 if (mode == "TEMP" or hourly_contract) else MIN_HOURS_TO_RES
     if hours_to_resolution < min_hours:
         return False, "RESOLUTION_HORIZON_TOO_SHORT"
 
@@ -543,7 +543,7 @@ def _weather_market_gate(
     if open_positions_count >= MAX_CONCURRENT_POSITIONS:
         return False, f"concurrent_cap_reached ({open_positions_count}/{MAX_CONCURRENT_POSITIONS})"
 
-    max_spread_dollars = 0.22 if (mode == "TEMP" or short_cadence) else MAX_SPREAD_DOLLARS
+    max_spread_dollars = 0.22 if (mode == "TEMP" or hourly_contract) else MAX_SPREAD_DOLLARS
     if spread > max_spread_dollars:
         return False, f"spread_too_wide ({spread:.3f} > {max_spread_dollars})"
 
@@ -551,7 +551,7 @@ def _weather_market_gate(
     avg_price = sum(available_prices) / len(available_prices) if available_prices else 0.0
     if avg_price > 0:
         spread_ratio = spread / avg_price
-        max_spread_ratio = 0.36 if (mode == "TEMP" or short_cadence) else KALSHI_MAX_SPREAD_RATIO
+        max_spread_ratio = 0.36 if (mode == "TEMP" or hourly_contract) else KALSHI_MAX_SPREAD_RATIO
         if spread_ratio > max_spread_ratio:
             return False, f"spread_ratio_veto ({spread_ratio:.1%} > {max_spread_ratio:.0%})"
 
@@ -1011,7 +1011,7 @@ def _strategy_weather_details(
             0.05,
         )
     
-    short_cadence = is_short_cadence_weather_contract(
+    hourly_contract = is_hourly_weather_contract(
         ticker,
         contract_name=contract_name,
     )
@@ -1059,7 +1059,7 @@ def _strategy_weather_details(
     if semantics.comparator == "between" and mode != "RAIN":
         narrow_bin_size_multiplier = 0.85
 
-    effective_ev_threshold = 0.006 if (mode == "TEMP" or short_cadence) else EV_THRESHOLD
+    effective_ev_threshold = 0.006 if (mode == "TEMP" or hourly_contract) else EV_THRESHOLD
 
     if net_edge_yes is not None and net_edge_yes >= effective_ev_threshold:
         if cloud_veto:
@@ -1373,7 +1373,7 @@ def evaluate_contract(
         from forecast.weather_contracts import weather_mode_for_ticker
         w_mode = weather_mode_for_ticker(ticker)
 
-        short_cadence = is_short_cadence_weather_contract(
+        hourly_contract = is_hourly_weather_contract(
             ticker,
             contract_name=str(contract.get("contract_name") or ""),
         )
@@ -1403,7 +1403,7 @@ def evaluate_contract(
             else -1.0
         )
         ev_chosen = ev_yes if best_side == "YES" else ev_no
-        effective_ev_threshold = 0.006 if (w_mode == "TEMP" or short_cadence) else EV_THRESHOLD
+        effective_ev_threshold = 0.006 if (w_mode == "TEMP" or hourly_contract) else EV_THRESHOLD
         if approved and ev_chosen < effective_ev_threshold:
             approved = False
             veto_reason = f"fee_adjusted_ev_too_low ({ev_chosen:.4f} < {effective_ev_threshold})"

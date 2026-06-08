@@ -39,6 +39,25 @@ def test_market_scan_findings_warns_on_systematic_thin_liquidity():
     assert warnings == ["systematic_thin_liquidity"]
 
 
+def test_market_scan_findings_warns_when_no_true_hourly_inventory_is_present():
+    import scripts.release_audit as ra
+
+    blockers, warnings = ra._market_scan_findings(
+        {
+            "sample_size": 0,
+            "scope_active_contracts": 0,
+            "entry_scope": "TRUE_HOURLY_ONLY",
+            "infrastructure_rejections": [],
+            "systematic_thin_liquidity": False,
+        },
+        active_markets=10,
+        strict_runtime=True,
+    )
+
+    assert blockers == []
+    assert warnings == ["no_entry_scope_inventory (TRUE_HOURLY_ONLY)"]
+
+
 def test_render_markdown_report_contains_verdict_and_counts():
     import scripts.release_audit as ra
 
@@ -144,10 +163,10 @@ def test_scan_live_market_surface_warms_weather_truth_for_weather_candidates(mon
             {
                 "id": 1,
                 "market_id": 9,
-                "local_symbol": "KXHIGHNY-26JUN05-B89.5",
-                "contract_name": "NY High",
+                "local_symbol": "KXTEMPNYCH-26JUN0522-T75.99",
+                "contract_name": "Will the temp in New York City be above 75.99° on Jun 5, 2026 at 10pm EST?",
                 "right": "C",
-                "strike": 89.5,
+                "strike": 75.99,
                 "last_trade_at": "2026-06-05T23:59:59Z",
                 "resolution_at": "2026-06-05T23:59:59Z",
             }
@@ -159,7 +178,7 @@ def test_scan_live_market_surface_warms_weather_truth_for_weather_candidates(mon
         "build_market_snapshots",
         lambda *args, **kwargs: [
             SimpleNamespace(
-                ticker="KXHIGHNY-26JUN05-B89.5",
+                ticker="KXTEMPNYCH-26JUN0522-T75.99",
                 yes_quote={},
                 no_quote={},
             )
@@ -193,6 +212,8 @@ def test_scan_live_market_surface_warms_weather_truth_for_weather_candidates(mon
     assert payload["weather_warmup"]["mode"] == "shared_truth_hydration"
     assert payload["weather_warmup"]["attempted"] is True
     assert payload["weather_warmup"]["refreshed_series"] == 1
+    assert payload["entry_scope"] == "TRUE_HOURLY_ONLY"
+    assert payload["scope_active_contracts"] == 1
 
 
 def test_run_remote_audit_parses_json_after_stdout_noise(monkeypatch):

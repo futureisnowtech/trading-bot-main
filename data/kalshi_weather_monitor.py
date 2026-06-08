@@ -69,7 +69,8 @@ except Exception:
     _WEATHER_SNAPSHOT_FILE = ""
 
 # Kalshi Station Mappings (Lat/Lon)
-# Refined v19.1.10: Official ASOS Settlement Stations
+# Refined v19.1.10: Official ASOS Settlement Stations.
+# Repo truth: the active station universe currently contains 32 cities.
 def _series(*tokens: str) -> list[str]:
     seen: set[str] = set()
     ordered: list[str] = []
@@ -122,6 +123,89 @@ _SERIES_TO_CITY = {
     for city_key, loc in STATIONS.items()
     for series in loc.get("series", [])
 }
+_WEATHER_PREFIXES = (
+    "KXTEMP",
+    "KXHIGHT",
+    "KXLOWT",
+    "KXHIGH",
+    "KXLOW",
+    "KXRAIN",
+    "RAIN",
+    "HIGH",
+    "LOW",
+)
+
+
+def _canonical_series_for_city(city_key: str) -> Optional[str]:
+    station = STATIONS.get(city_key) or {}
+    series_list = [str(series).upper() for series in station.get("series", []) if str(series).strip()]
+    if not series_list:
+        return None
+    for prefix in ("KXTEMP", "KXHIGH", "KXLOW", "KXRAIN", "KXHIGHT", "KXLOWT"):
+        for series in series_list:
+            if series.startswith(prefix):
+                return series
+    return series_list[0]
+
+
+def _series_suffix_aliases(series: str) -> set[str]:
+    token = str(series or "").upper()
+    aliases: set[str] = set()
+    for prefix in _WEATHER_PREFIXES:
+        if not token.startswith(prefix):
+            continue
+        suffix = token[len(prefix):].strip()
+        if len(suffix) >= 2:
+            aliases.add(suffix)
+        break
+    return aliases
+
+
+def _build_hourly_temp_alias_map() -> dict[str, str]:
+    alias_map: dict[str, str] = {}
+    for city_key, station in STATIONS.items():
+        aliases: set[str] = set()
+        for series in station.get("series", []):
+            aliases.update(_series_suffix_aliases(str(series)))
+        for alias in sorted(aliases, key=len, reverse=True):
+            alias_map.setdefault(alias, str(city_key).upper())
+    return alias_map
+
+
+_HOURLY_TEMP_ALIAS_TO_CITY = _build_hourly_temp_alias_map()
+_HOURLY_TEMP_ALIAS_ORDER = tuple(
+    sorted(_HOURLY_TEMP_ALIAS_TO_CITY.keys(), key=len, reverse=True)
+)
+
+
+def _resolve_hourly_temp_city_key(token: str) -> Optional[str]:
+    value = str(token or "").upper()
+    if not value.startswith("KXTEMP"):
+        return None
+    head = value.split("-", 1)[0]
+    suffix = head[len("KXTEMP") :].strip()
+    if not suffix:
+        return None
+    for alias in _HOURLY_TEMP_ALIAS_ORDER:
+        if suffix == alias:
+            return _HOURLY_TEMP_ALIAS_TO_CITY.get(alias)
+    return None
+
+
+def get_hourly_city_support_summary() -> dict[str, Any]:
+    explicit_hourly = sorted(
+        city_key
+        for city_key, station in STATIONS.items()
+        if any(str(series).upper().startswith("KXTEMP") for series in station.get("series", []))
+    )
+    resolver_ready = sorted(set(_HOURLY_TEMP_ALIAS_TO_CITY.values()))
+    return {
+        "universe_city_count": len(STATIONS),
+        "resolver_ready_city_count": len(resolver_ready),
+        "explicit_hourly_series_city_count": len(explicit_hourly),
+        "resolver_ready_cities": resolver_ready,
+        "explicit_hourly_series_cities": explicit_hourly,
+    }
 
 # ── Intraday Ground Truth ───────────────────────────────────────────────────
 
@@ -777,11 +861,17 @@ def _resolve_weather_series(token: str) -> Optional[str]:
     value = str(token or "").upper()
     if not value:
         return None
+    value_head = value.split("-", 1)[0]
     if value in _SERIES_TO_CITY:
         return value
     for series in sorted(_SERIES_TO_CITY, key=len, reverse=True):
+        if value.startswith("KXTEMP") and str(series).startswith("KXTEMP") and value_head != str(series):
+            continue
         if value.startswith(series):
             return series
+    city_key = _resolve_hourly_temp_city_key(value)
+    if city_key is not None:
+        return _canonical_series_for_city(city_key)
     return None
 
 

@@ -6,22 +6,24 @@ import time
 def test_hourly_weather_mode_detection_recognizes_hour_stamped_tickers():
     from forecast.weather_contracts import (
         is_hourly_weather_contract,
-        is_short_cadence_weather_contract,
+        is_live_entry_weather_contract,
+        live_entry_scope,
         weather_mode_for_ticker,
     )
 
     assert weather_mode_for_ticker("KXTEMPNYCH-24JAN0122-T75.99") == "TEMP"
     assert weather_mode_for_ticker("KXHIGHNYD-24JAN0122-T75.99") == "TEMP"
+    assert live_entry_scope() == "TRUE_HOURLY_ONLY"
     assert is_hourly_weather_contract("KXTEMPNYCH-24JAN0122-T75.99")
     assert not is_hourly_weather_contract("KXLOWTNYC-26JUN09-T52")
-    assert is_short_cadence_weather_contract("KXTEMPNYCH-24JAN0122-T75.99")
-    assert is_short_cadence_weather_contract(
+    assert is_live_entry_weather_contract("KXTEMPNYCH-24JAN0122-T75.99")
+    assert not is_live_entry_weather_contract(
         "KXLOWTNYC-26JUN09-T52",
         contract_name="Will the minimum temperature be <52° on Jun 9, 2026?",
     )
 
 
-def test_short_cadence_temp_contracts_use_intraday_lane_gates():
+def test_only_true_hourly_contracts_use_intraday_lane_gates():
     import forecast.strategy_engine as se
 
     ok, reason = se._weather_market_gate(
@@ -29,9 +31,9 @@ def test_short_cadence_temp_contracts_use_intraday_lane_gates():
         ask_no=0.80,
         spread=0.18,
         hours_to_resolution=0.5,
-        mode="LOW",
-        ticker="KXLOWTNYC-26JUN09-T52",
-        contract_name="Will the minimum temperature be <52° on Jun 9, 2026?",
+        mode="TEMP",
+        ticker="KXTEMPATL-24JAN0122-T75.99",
+        contract_name="Will the temperature in Atlanta be above 75.99° at 10pm local time?",
     )
     assert ok is True
     assert reason == ""
@@ -42,8 +44,8 @@ def test_short_cadence_temp_contracts_use_intraday_lane_gates():
         spread=0.18,
         hours_to_resolution=0.5,
         mode="LOW",
-        ticker="KXLOWNY-26JUN09-T52",
-        contract_name="Will the low temperature in NYC be <52° on Jun 9, 2026?",
+        ticker="KXLOWTNYC-26JUN09-T52",
+        contract_name="Will the minimum temperature be <52° on Jun 9, 2026?",
     )
     assert ok is False
     assert reason == "RESOLUTION_HORIZON_TOO_SHORT"
@@ -68,6 +70,37 @@ def test_hourly_series_aliases_resolve_for_rain_and_temp():
 
     assert wm._resolve_weather_series("KXRAINNYC-26JUN07-T0") == "KXRAINNYC"
     assert wm._resolve_weather_series("KXTEMPNYCH-24JAN0122-T75.99") == "KXTEMPNYCH"
+
+
+def test_verified_hourly_resolver_covers_full_station_universe():
+    import data.kalshi_weather_monitor as wm
+
+    unresolved = []
+    for city_key, station in wm.STATIONS.items():
+        aliases = sorted(
+            {
+                alias
+                for series in station.get("series", [])
+                for alias in wm._series_suffix_aliases(series)
+            },
+            key=len,
+            reverse=True,
+        )
+        assert aliases, f"expected at least one verified weather suffix for {city_key}"
+        ticker = f"KXTEMP{aliases[0]}-24JAN0122-T75.99"
+        resolved = wm._resolve_weather_series(ticker)
+        if not resolved:
+            unresolved.append(city_key)
+
+    assert unresolved == []
+
+
+def test_verified_hourly_resolver_uses_known_weather_suffixes_only():
+    import data.kalshi_weather_monitor as wm
+
+    assert wm._resolve_weather_series("KXTEMPATL-24JAN0122-T75.99") == "KXHIGHTATL"
+    assert wm._resolve_weather_series("KXTEMPSFO-24JAN0122-T75.99") == "KXHIGHSF"
+    assert wm._resolve_weather_series("KXTEMPDCA-24JAN0122-T75.99") is None
 
 
 def test_hourly_contract_projection_uses_exact_hour_members(monkeypatch):

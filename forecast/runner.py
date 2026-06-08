@@ -787,6 +787,11 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
             ) -> dict:
                 return get_paired_quotes(market_id, strike, last_trade_at)
 
+            from forecast.weather_contracts import (
+                is_live_entry_weather_contract,
+                live_entry_scope,
+            )
+
             # v18.34: Dual-Path Macro Context Injection
             macro_ctx = {}
             try:
@@ -795,8 +800,23 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
             except Exception:
                 pass
 
+            active_in_scope = [
+                contract
+                for contract in active
+                if is_live_entry_weather_contract(
+                    str(contract.get("local_symbol") or ""),
+                    contract_name=str(contract.get("contract_name") or ""),
+                )
+            ]
+            if len(active_in_scope) != len(active):
+                logger.info(
+                    "[%s] Filtered %s non-hourly contracts from fresh-entry scan.",
+                    live_entry_scope(),
+                    max(0, len(active) - len(active_in_scope)),
+                )
+
             snapshots = build_market_snapshots(
-                active,
+                active_in_scope,
                 get_bars_fn=_get_bars_fn,
                 get_quotes_fn=_get_quotes_fn,
             )
@@ -834,14 +854,14 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                 contract = candidate["contract"]
                 local_sym = contract.get("local_symbol", "")
 
-                # Keep fresh entries pinned to the short-cadence weather lane.
-                from forecast.weather_contracts import is_short_cadence_weather_contract
-                if not is_short_cadence_weather_contract(
+                # Keep fresh entries pinned to true hour-stamped weather contracts only.
+                if not is_live_entry_weather_contract(
                     local_sym,
                     contract_name=str(contract.get("contract_name") or ""),
                 ):
                     logger.info(
-                        "[Short-Cadence Mode] Skipping non-short-cadence contract: %s",
+                        "[%s] Skipping non-hourly contract: %s",
+                        live_entry_scope(),
                         local_sym,
                     )
                     continue

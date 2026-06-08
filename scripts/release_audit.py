@@ -30,7 +30,11 @@ from forecast.db import get_active_contracts, get_bars, get_open_forecast_positi
 from forecast.market_snapshot import build_market_snapshots
 from forecast.quote_harvester import get_paired_quotes
 from forecast.strategy_engine import _get_macro_context, evaluate_market_snapshots
-from forecast.weather_contracts import weather_mode_for_ticker
+from forecast.weather_contracts import (
+    is_live_entry_weather_contract,
+    live_entry_scope,
+    weather_mode_for_ticker,
+)
 from monitoring.health_check import run_health_check
 from notifications.ai_agent import probe_reasoning_model
 from runtime.build_info import get_build_info
@@ -67,6 +71,7 @@ PROOF_GATE_TESTS = [
     "tests/proof/test_resolution_sync.py",
     "tests/proof/test_weather_rbi_truth.py",
     "tests/proof/test_weather_sovereign.py",
+    "tests/proof/test_weather_hourly_and_alias_support.py",
     "tests/proof/test_lane_gating.py",
     "tests/proof/test_trading_control.py",
     "tests/proof/test_scheduler_cadence_config.py",
@@ -187,8 +192,16 @@ def _scan_live_market_surface(
     scan_limit: int,
 ) -> dict[str, Any]:
     active_contracts = get_active_contracts(db_path=DB_PATH)
+    scoped_contracts = [
+        contract
+        for contract in active_contracts
+        if is_live_entry_weather_contract(
+            str(contract.get("local_symbol") or ""),
+            contract_name=str(contract.get("contract_name") or ""),
+        )
+    ]
     all_snapshots = build_market_snapshots(
-        active_contracts,
+        scoped_contracts,
         get_bars_fn=lambda contract_id, interval: get_bars(
             contract_id,
             interval,
@@ -209,6 +222,9 @@ def _scan_live_market_surface(
             "sample_size": 0,
             "rows": [],
             "markets_scanned": 0,
+            "entry_scope": live_entry_scope(),
+            "total_active_contracts": len(active_contracts),
+            "scope_active_contracts": len(scoped_contracts),
             "approved_candidates": 0,
             "execution_ready": 0,
             "thin_liquidity_count": 0,
@@ -367,6 +383,9 @@ def _scan_live_market_surface(
         "sample_size": sample_size,
         "rows": rows,
         "markets_scanned": len(snapshots),
+        "entry_scope": live_entry_scope(),
+        "total_active_contracts": len(active_contracts),
+        "scope_active_contracts": len(scoped_contracts),
         "approved_candidates": approved_candidates,
         "execution_ready": execution_ready,
         "thin_liquidity_count": thin_liquidity_count,
@@ -419,11 +438,15 @@ def _market_scan_findings(
     blockers: list[str] = []
     warnings: list[str] = []
     sample_size = int(scan.get("sample_size") or 0)
+    scope_active_contracts = int(scan.get("scope_active_contracts") or 0)
+    entry_scope = str(scan.get("entry_scope") or live_entry_scope())
     infra_rows = scan.get("infrastructure_rejections") or []
     infra_count = sum(int(row.get("count") or 0) for row in infra_rows)
 
     if sample_size == 0:
-        if strict_runtime and active_markets > 0:
+        if scope_active_contracts <= 0:
+            warnings.append(f"no_entry_scope_inventory ({entry_scope})")
+        elif strict_runtime and active_markets > 0:
             blockers.append("scan_no_markets_scored")
         else:
             warnings.append("market_scan_unavailable")
@@ -483,6 +506,8 @@ def _render_markdown_report(payload: dict[str, Any]) -> str:
             f"- Active Markets: `{details.get('live_truth', {}).get('active_markets')}`",
             "",
             "## Market Scan",
+            f"- Entry Scope: `{scan.get('entry_scope', live_entry_scope())}`",
+            f"- In-Scope Contracts: `{scan.get('scope_active_contracts', 0)}` / `{scan.get('total_active_contracts', 0)}` active contracts",
             f"- Markets Scanned: `{scan.get('markets_scanned', 0)}`",
             f"- Approved Candidates: `{scan.get('approved_candidates', 0)}`",
             f"- Execution Ready: `{scan.get('execution_ready', 0)}`",
@@ -546,6 +571,23 @@ def _run_local_audit(*, scan_limit: int) -> dict[str, Any]:
     build = get_build_info()
     warnings: list[str] = []
     commands = [
+        _run_command(
+            "compileall",
+            [
+                sys.executable,
+                "-m",
+                "compileall",
+                "-q",
+                "forecast",
+                "data",
+                "execution",
+                "dashboard",
+                "notifications",
+                "runtime",
+                "scripts",
+                "tests/proof",
+            ],
+        ),
         _run_command(
             "proof_gate",
             [sys.executable, "-m", "pytest", *PROOF_GATE_TESTS, "-q", "--tb=short", "--no-header"],

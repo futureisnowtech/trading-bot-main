@@ -8,6 +8,7 @@ This repository is now the active Kalshi-only execution tree.
 - Canonical lane: `forecast`
 - Runtime model: lean dual process
 - Trading mode: live-only Kalshi weather execution
+- Fresh-entry scope: strict true hourly weather contracts only
 - Exposure truth: broker-first, ledgerless, fee-aware
 - Settlement truth: `forecast_resolutions`
 - Learning truth: Weather RBI calibrates only on resolved labels, never inferred PnL
@@ -62,6 +63,7 @@ python3 -m pytest \
   tests/proof/test_resolution_sync.py \
   tests/proof/test_weather_rbi_truth.py \
   tests/proof/test_weather_sovereign.py \
+  tests/proof/test_weather_hourly_and_alias_support.py \
   tests/proof/test_lane_gating.py \
   tests/proof/test_trading_control.py \
   tests/proof/test_scheduler_cadence_config.py \
@@ -76,6 +78,7 @@ python3 sniper_cron.py
 python3 execution_daemon.py
 python3 telegram_daemon.py
 python3 scripts/verify_kalshi_connection.py
+bash scripts/install_hooks.sh
 python3 scripts/release_audit.py --local
 python3 scripts/release_audit.py --remote
 python3 scripts/release_audit.py --promote

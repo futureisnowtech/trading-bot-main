@@ -39,7 +39,7 @@ from config import (
     get_kalshi_position_exposure_usd,
 )
 from forecast.strategy_engine import EV_THRESHOLD, _get_city_hub, _get_macro_context
-from forecast.weather_contracts import weather_trade_bucket
+from forecast.weather_contracts import live_entry_scope, weather_trade_bucket
 from notifications.notification_engine import get_notifications
 from runtime.build_info import get_build_info
 from runtime.operator_truth import (
@@ -48,6 +48,7 @@ from runtime.operator_truth import (
     get_release_status,
 )
 from runtime.storage_guard import runtime_storage_status
+from data.kalshi_weather_monitor import get_hourly_city_support_summary
 
 _WEATHER_BUCKET_ORDER = [
     "Daily High",
@@ -558,9 +559,11 @@ def build_regime_manifest(
     macro = _get_macro_context()
     build = get_build_info()
     blend_summary = _format_learning_blend(learning_status)
+    hourly_support = get_hourly_city_support_summary()
     return {
         "version": build["app_version"],
         "reasoning_model": GEMINI_MODEL,
+        "entry_scope": live_entry_scope(),
         "ensemble_blend": (
             f"Base 60% GFS + 40% ECMWF; live adaptive blend is {blend_summary}. "
             "AI/GraphCast only widens or compresses sigma"
@@ -572,7 +575,13 @@ def build_regime_manifest(
             f"Sizing: continuous sigmoid scaler with a hard per-position cap of ${KALSHI_MAX_USD_PER_POSITION:.0f}",
         ],
         "entry_gates": [
-            f"Minimum contract price {KALSHI_MIN_PRICE:.2f} for temp lanes, 0.04 for rain lanes",
+            (
+                f"Fresh-entry scope {live_entry_scope()} "
+                f"with {hourly_support.get('resolver_ready_city_count', 0)}/"
+                f"{hourly_support.get('universe_city_count', 0)} cities resolver-ready"
+            ),
+            "Only true hour-stamped weather contracts are allowed for fresh entries",
+            f"Minimum contract price {KALSHI_MIN_PRICE:.2f} for non-hourly weather lanes, 0.03 for hourly/rain lanes",
             f"Maximum sigma {KALSHI_MAX_SIGMA:.1f}F",
             f"Maximum spread ratio {KALSHI_MAX_SPREAD_RATIO:.0%}",
             f"Weather data freshness window {KALSHI_DATA_FRESHNESS_MINUTES} minutes",

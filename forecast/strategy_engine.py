@@ -140,7 +140,10 @@ def _weather_net_edge(contract_prob: float, ask_price: float) -> float | None:
 
 
 def min_contract_price_for_mode(mode: str) -> float:
-    return 0.04 if str(mode or "").upper() == "RAIN" else float(KALSHI_MIN_PRICE)
+    mode_str = str(mode or "").upper()
+    if mode_str in ("RAIN", "TEMP"):
+        return 0.03
+    return float(KALSHI_MIN_PRICE)
 
 
 def _get_macro_context() -> dict:
@@ -525,15 +528,17 @@ def _weather_market_gate(
     if open_positions_count >= MAX_CONCURRENT_POSITIONS:
         return False, f"concurrent_cap_reached ({open_positions_count}/{MAX_CONCURRENT_POSITIONS})"
 
-    if spread > MAX_SPREAD_DOLLARS:
-        return False, f"spread_too_wide ({spread:.3f} > {MAX_SPREAD_DOLLARS})"
+    max_spread_dollars = 0.22 if mode == "TEMP" else MAX_SPREAD_DOLLARS
+    if spread > max_spread_dollars:
+        return False, f"spread_too_wide ({spread:.3f} > {max_spread_dollars})"
 
     available_prices = [price for price in (ask_yes, ask_no) if price > 0.0]
     avg_price = sum(available_prices) / len(available_prices) if available_prices else 0.0
     if avg_price > 0:
         spread_ratio = spread / avg_price
-        if spread_ratio > KALSHI_MAX_SPREAD_RATIO:
-            return False, f"spread_ratio_veto ({spread_ratio:.1%} > {KALSHI_MAX_SPREAD_RATIO:.0%})"
+        max_spread_ratio = 0.36 if mode == "TEMP" else KALSHI_MAX_SPREAD_RATIO
+        if spread_ratio > max_spread_ratio:
+            return False, f"spread_ratio_veto ({spread_ratio:.1%} > {max_spread_ratio:.0%})"
 
     return True, ""
 
@@ -1031,7 +1036,7 @@ def _strategy_weather_details(
     if semantics.comparator == "between" and mode != "RAIN":
         narrow_bin_size_multiplier = 0.85
 
-    effective_ev_threshold = 0.03 if mode == "TEMP" else EV_THRESHOLD
+    effective_ev_threshold = 0.006 if mode == "TEMP" else EV_THRESHOLD
 
     if net_edge_yes is not None and net_edge_yes >= effective_ev_threshold:
         if cloud_veto:
@@ -1369,7 +1374,7 @@ def evaluate_contract(
             else -1.0
         )
         ev_chosen = ev_yes if best_side == "YES" else ev_no
-        effective_ev_threshold = 0.03 if w_mode == "TEMP" else EV_THRESHOLD
+        effective_ev_threshold = 0.006 if w_mode == "TEMP" else EV_THRESHOLD
         if approved and ev_chosen < effective_ev_threshold:
             approved = False
             veto_reason = f"fee_adjusted_ev_too_low ({ev_chosen:.4f} < {effective_ev_threshold})"
@@ -1399,7 +1404,7 @@ def evaluate_contract(
         if approved:
             n_contracts = calculate_continuous_sizing(
                 market_price=p_cost,
-                ensemble_prob=chosen_prob,
+                ensemble_prob=q_hat,
                 capital_base=bankroll,
                 multiplier=best_multiplier,
                 cap_pct=best_sizing_cap,

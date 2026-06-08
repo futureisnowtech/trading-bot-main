@@ -4,10 +4,12 @@ import time
 
 
 def test_hourly_weather_mode_detection_recognizes_hour_stamped_tickers():
-    from forecast.weather_contracts import weather_mode_for_ticker
+    from forecast.weather_contracts import is_hourly_weather_contract, weather_mode_for_ticker
 
     assert weather_mode_for_ticker("KXTEMPNYCH-24JAN0122-T75.99") == "TEMP"
     assert weather_mode_for_ticker("KXHIGHNYD-24JAN0122-T75.99") == "TEMP"
+    assert is_hourly_weather_contract("KXTEMPNYCH-24JAN0122-T75.99")
+    assert not is_hourly_weather_contract("KXLOWTNYC-26JUN09-T52")
 
 
 def test_hourly_weather_contract_preserves_decimal_threshold():

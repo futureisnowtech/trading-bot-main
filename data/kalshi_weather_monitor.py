@@ -83,10 +83,10 @@ def _series(*tokens: str) -> list[str]:
 
 
 STATIONS = {
-    "NY": {"lat": 40.78, "lon": -73.97, "icao": "KNYC", "name": "New York (Central Park)", "tz": "America/New_York", "series": _series("KXHIGHNY", "HIGHNY", "KXLOWNY", "KXLOWNYC", "KXLOWTNYC", "KXRAINNY", "RAINNY", "RAINNYC", "KXRAINNYC", "KXTEMPNYCH", "KXHIGHNYD")},
-    "CHI": {"lat": 41.78, "lon": -87.75, "icao": "KMDW", "name": "Chicago (Midway)", "tz": "America/Chicago", "series": _series("KXHIGHCHI", "HIGHCHI", "KXLOWCHI", "KXLOWTCHI", "KXRAINCHIM", "KXTEMPCHIH")},
-    "MIA": {"lat": 25.79, "lon": -80.29, "icao": "KMIA", "name": "Miami International", "tz": "America/New_York", "series": _series("KXHIGHMIA", "HIGHMIA", "KXLOWMIA", "KXLOWTMIA", "RAINMIA", "KXRAINMIA", "KXRAINMIAM", "KXTEMPMIAH")},
-    "LAX": {"lat": 33.94, "lon": -118.41, "icao": "KLAX", "name": "Los Angeles Intl", "tz": "America/Los_Angeles", "series": _series("KXHIGHLAX", "KXLOWLAX", "KXLOWTLAX", "KXRAINLAX", "KXRAINLAXM", "KXTEMPLAXH")},
+    "NY": {"lat": 40.78, "lon": -73.97, "icao": "KNYC", "name": "New York (Central Park)", "tz": "America/New_York", "series": _series("KXHIGHNY", "HIGHNY", "KXLOWNY", "KXLOWNYC", "KXLOWTNYC", "KXRAINNY", "RAINNY", "RAINNYC", "KXRAINNYC", "KXTEMPNY", "KXTEMPNYCH", "KXHIGHNYD")},
+    "CHI": {"lat": 41.78, "lon": -87.75, "icao": "KMDW", "name": "Chicago (Midway)", "tz": "America/Chicago", "series": _series("KXHIGHCHI", "HIGHCHI", "KXLOWCHI", "KXLOWTCHI", "KXRAINCHIM", "KXTEMPCHI")},
+    "MIA": {"lat": 25.79, "lon": -80.29, "icao": "KMIA", "name": "Miami International", "tz": "America/New_York", "series": _series("KXHIGHMIA", "HIGHMIA", "KXLOWMIA", "KXLOWTMIA", "RAINMIA", "KXRAINMIA", "KXRAINMIAM", "KXTEMPMIA")},
+    "LAX": {"lat": 33.94, "lon": -118.41, "icao": "KLAX", "name": "Los Angeles Intl", "tz": "America/Los_Angeles", "series": _series("KXHIGHLAX", "KXLOWLAX", "KXLOWTLAX", "KXRAINLAX", "KXRAINLAXM", "KXTEMPLAX")},
     "DEN": {"lat": 39.86, "lon": -104.67, "icao": "KDEN", "name": "Denver International", "tz": "America/Denver", "series": _series("KXHIGHDEN", "KXLOWDEN", "KXLOWTDEN", "KXRAINDEN", "KXRAINDENM")},
     "AUS": {"lat": 30.20, "lon": -97.67, "icao": "KAUS", "name": "Austin-Bergstrom", "tz": "America/Chicago", "series": _series("KXHIGHAUS", "HIGHAUS", "KXLOWAUS", "KXLOWTAUS", "KXRAINAUS", "KXRAINAUSM")},
     "PHX": {"lat": 33.43, "lon": -112.01, "icao": "KPHX", "name": "Phoenix Sky Harbor", "tz": "America/Phoenix", "series": _series("KXHIGHTPHX", "KXLOWTPHX")},
@@ -94,8 +94,8 @@ STATIONS = {
     "DAL": {"lat": 32.90, "lon": -97.04, "icao": "KDFW", "name": "Dallas/Fort Worth", "tz": "America/Chicago", "series": _series("KXHIGHDAL", "KXHIGHTDAL", "KXLOWDAL", "KXLOWTDAL", "KXRAINDALM")},
     "ATL": {"lat": 33.64, "lon": -84.43, "icao": "KATL", "name": "Hartsfield-Jackson", "tz": "America/New_York", "series": _series("KXHIGHTATL", "KXLOWTATL")},
     "HOU": {"lat": 29.65, "lon": -95.28, "icao": "KHOU", "name": "Houston Hobby", "tz": "America/Chicago", "series": _series("KXHIGHHOU", "KXHIGHOU", "KXHIGHTHOU", "KXLOWTHOU", "RAINHOU", "KXRAINHOU", "KXRAINHOUM")},
-    "BOS": {"lat": 42.36, "lon": -71.01, "icao": "KBOS", "name": "Boston Logan", "tz": "America/New_York", "series": _series("KXHIGHBOS", "KXHIGHTBOS", "KXLOWBOS", "KXLOWTBOS", "KXTEMPBOSH")},
-    "DC": {"lat": 38.85, "lon": -77.04, "icao": "KDCA", "name": "Reagan National", "tz": "America/New_York", "series": _series("KXHIGHDC", "KXHIGHTDC", "KXLOWDC", "KXLOWTDC", "KXRAINDC", "KXTEMPDCH")},
+    "BOS": {"lat": 42.36, "lon": -71.01, "icao": "KBOS", "name": "Boston Logan", "tz": "America/New_York", "series": _series("KXHIGHBOS", "KXHIGHTBOS", "KXLOWBOS", "KXLOWTBOS", "KXTEMPBOS")},
+    "DC": {"lat": 38.85, "lon": -77.04, "icao": "KDCA", "name": "Reagan National", "tz": "America/New_York", "series": _series("KXHIGHDC", "KXHIGHTDC", "KXLOWDC", "KXLOWTDC", "KXRAINDC", "KXTEMPDC")},
     "SF": {"lat": 37.62, "lon": -122.37, "icao": "KSFO", "name": "San Francisco Intl", "tz": "America/Los_Angeles", "series": _series("KXHIGHSF", "KXHIGHTSFO", "KXLOWSF", "KXLOWTSFO", "KXRAINSF", "KXRAINSFOM")},
     "LV": {"lat": 36.08, "lon": -115.15, "icao": "KLAS", "name": "Las Vegas (Harry Reid)", "tz": "America/Los_Angeles", "series": ["KXHIGHTLV", "KXLOWTLV"]},
     # v19.3: Institutional Expansion Universe
@@ -965,6 +965,7 @@ def _project_contract_record(
         return {}
 
     hourly_time = list(record.get("hourly_time") or [])
+    hour_indices: list[int] = []
     if target_hour is None:
         local_tz = pytz.timezone(timezone_name)
         settlement_start_hour = _daily_settlement_start_hour(target_date, timezone_name)
@@ -980,7 +981,8 @@ def _project_contract_record(
             if settlement_start <= parsed < settlement_end:
                 indices.append(idx)
     else:
-        indices = _target_day_indices(hourly_time, target_date)
+        hour_indices = _target_hour_indices(hourly_time, target_date, int(target_hour))
+        indices = hour_indices
     if not indices:
         return {}
 
@@ -1001,16 +1003,12 @@ def _project_contract_record(
             and 11 <= parsed.hour <= 16
         )
     ]
-    cloud_peaks = _reduce_member_projection(members_cloud, midday_indices or indices, max)
-    ssrd_means = _reduce_member_projection(members_ssrd, midday_indices or indices, np.mean)
-    hour_indices = (
-        _target_hour_indices(hourly_time, target_date, int(target_hour))
-        if target_hour is not None
-        else []
-    )
+    weather_window_indices = hour_indices or midday_indices or indices
+    cloud_peaks = _reduce_member_projection(members_cloud, weather_window_indices, max)
+    ssrd_means = _reduce_member_projection(members_ssrd, weather_window_indices, np.mean)
     members_temp_instant = _reduce_member_projection(
         members_temp,
-        hour_indices,
+        hour_indices or indices,
         lambda bucket: bucket[0],
     )
 

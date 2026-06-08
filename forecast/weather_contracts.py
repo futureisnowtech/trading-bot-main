@@ -29,9 +29,30 @@ def _clean_title(title: str) -> str:
     return re.sub(r"\s+", " ", (title or "").replace("*", " ")).strip()
 
 
+_HOURLY_WEATHER_TICKER_RE = re.compile(r"-\d{2}[A-Z]{3}\d{4}(?:-|$)")
+_HOURLY_TITLE_RE = re.compile(r"\bat\s+\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)\b")
+
+
+def has_hourly_weather_timestamp(ticker: str) -> bool:
+    return bool(_HOURLY_WEATHER_TICKER_RE.search((ticker or "").upper()))
+
+
+def is_hourly_weather_contract(
+    ticker: str,
+    *,
+    contract_name: str = "",
+) -> bool:
+    if weather_mode_for_ticker(ticker) is None:
+        return False
+    if has_hourly_weather_timestamp(ticker):
+        return True
+    title = _clean_title(contract_name).lower()
+    return "hourly" in title or bool(_HOURLY_TITLE_RE.search(title))
+
+
 def weather_mode_for_ticker(ticker: str) -> WeatherMode | None:
     symbol = (ticker or "").upper()
-    if re.search(r"-\d{2}[A-Z]{3}\d{4}(?:-|$)", symbol) and (
+    if has_hourly_weather_timestamp(symbol) and (
         "TEMP" in symbol or "HIGH" in symbol or "LOW" in symbol
     ):
         return "TEMP"
@@ -70,7 +91,7 @@ def weather_trade_bucket(
         return "Wind"
 
     title = _clean_title(contract_name).lower()
-    if "hourly" in title or " at " in title:
+    if "hourly" in title or _HOURLY_TITLE_RE.search(title):
         return "Hourly Temp"
     return "Other Weather"
 
@@ -94,7 +115,7 @@ def _title_semantics(
         return None
 
     m = re.search(
-        r"\bbe\s+(-?\d+(?:\.\d+)?)\s*[-–]\s*(-?\d+(?:\.\d+)?)\s*(?:°|degrees|deg|inches|inch|in|mph)?",
+        r"(?:be\s+)?(-?\d+(?:\.\d+)?)\s*(?:°|degrees|deg)?\s*(?:to|and|[-–])\s*(-?\d+(?:\.\d+)?)\s*(?:°|degrees|deg|inches|inch|in|mph)?",
         title,
         flags=re.IGNORECASE,
     )
@@ -116,12 +137,12 @@ def _title_semantics(
         )
 
     gt_match = re.search(
-        r"\bbe\s*(?:>|>=|at least|above|over)\s*(-?\d+(?:\.\d+)?)",
+        r"(?:\bbe\s*(?:>|>=|at least|above|over)\s*(-?\d+(?:\.\d+)?))|(?:(-?\d+(?:\.\d+)?)\s*(?:°|degrees|deg)?\s*(?:or higher|or more|and above))",
         title,
         flags=re.IGNORECASE,
     )
     if gt_match:
-        display_threshold = float(gt_match.group(1))
+        display_threshold = float(gt_match.group(1) or gt_match.group(2))
         half_step = _contract_half_step(mode)
         return WeatherContractSemantics(
             ticker=ticker,
@@ -134,12 +155,12 @@ def _title_semantics(
         )
 
     lt_match = re.search(
-        r"\bbe\s*(?:<|<=|at most|below|under)\s*(-?\d+(?:\.\d+)?)",
+        r"(?:\bbe\s*(?:<|<=|at most|below|under)\s*(-?\d+(?:\.\d+)?))|(?:(-?\d+(?:\.\d+)?)\s*(?:°|degrees|deg)?\s*(?:or lower|or less|and below))",
         title,
         flags=re.IGNORECASE,
     )
     if lt_match:
-        display_threshold = float(lt_match.group(1))
+        display_threshold = float(lt_match.group(1) or lt_match.group(2))
         half_step = _contract_half_step(mode)
         return WeatherContractSemantics(
             ticker=ticker,
@@ -196,7 +217,7 @@ def resolve_weather_contract(
 
     if "-T" in symbol and strike is not None:
         # Temperature-chain edge buckets are not directionally safe from the ticker alone.
-        ambiguous = mode in {"HIGH", "LOW", "TEMP"}
+        ambiguous = mode in {"HIGH", "LOW"}
         return WeatherContractSemantics(
             ticker=ticker,
             mode=mode,
@@ -217,12 +238,14 @@ def member_satisfies_contract(value: float, semantics: WeatherContractSemantics)
             return False
         return semantics.lower_bound <= val < semantics.upper_bound
     if semantics.comparator == "gt":
-        if semantics.threshold is None:
+        limit = semantics.threshold if semantics.threshold is not None else semantics.display_low
+        if limit is None:
             return False
-        return val > semantics.threshold
-    if semantics.threshold is None:
+        return val >= limit
+    limit = semantics.threshold if semantics.threshold is not None else semantics.display_high
+    if limit is None:
         return False
-    return val < semantics.threshold
+    return val <= limit
 
 
 def probability_from_members(

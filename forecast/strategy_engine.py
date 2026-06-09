@@ -1483,14 +1483,14 @@ def evaluate_contract(
                 )
                 n_contracts = KALSHI_MAX_QTY_PER_POSITION
                 
-            # Enforce strict SRE Risk Ceilings
-            cost_limit = min(bankroll * 0.25, 10.00)
+            # Enforce strict SRE Risk Ceilings (Surge Mode scales to KALSHI_MAX_USD_PER_POSITION)
+            cost_limit = min(bankroll * 0.25, float(KALSHI_MAX_USD_PER_POSITION) if is_surge else 10.00)
             current_est_cost = estimate_kalshi_order_cost_usd(n_contracts, p_cost)
             if current_est_cost > cost_limit:
                 n_contracts = int(cost_limit / (p_cost + _estimated_fee_per_contract(p_cost, rounded=False)))
                 n_contracts = min(max(0, n_contracts), KALSHI_MAX_QTY_PER_POSITION)
                 logger.info(
-                    f"Sovereign SRE Clamp: Clamping {ticker} cost to {cost_limit} USD (qty {n_contracts})"
+                    f"Sovereign SRE Clamp: Clamping {ticker} cost to {cost_limit:.2f} USD (qty {n_contracts})"
                 )
                 
             total_cost = estimate_kalshi_order_cost_usd(n_contracts, p_cost)

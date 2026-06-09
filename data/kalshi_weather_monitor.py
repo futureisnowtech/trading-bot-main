@@ -133,6 +133,8 @@ _WEATHER_PREFIXES = (
     "RAIN",
     "HIGH",
     "LOW",
+    "KXWIND",
+    "KXSNOW",
 )
 _CITY_TITLE_ALIASES = (
     ("NEW YORK CITY", "NY"),
@@ -212,6 +214,17 @@ def _resolve_hourly_temp_city_key(token: str) -> Optional[str]:
     for alias in _HOURLY_TEMP_ALIAS_ORDER:
         if suffix == alias:
             return _HOURLY_TEMP_ALIAS_TO_CITY.get(alias)
+    return None
+
+
+def _resolve_generic_prefix_city_key(token: str) -> Optional[str]:
+    value = str(token or "").upper()
+    for prefix in ("KXWIND", "KXSNOW", "KXRAIN", "KXHIGH", "KXLOW", "RAIN"):
+        if value.startswith(prefix):
+            head = value.split("-", 1)[0]
+            suffix = head[len(prefix):].strip()
+            if suffix in _HOURLY_TEMP_ALIAS_TO_CITY:
+                return _HOURLY_TEMP_ALIAS_TO_CITY.get(suffix)
     return None
 
 
@@ -745,11 +758,12 @@ def _build_weather_record_from_hourly(
     window_size = 26
     hourly_time = list(hourly.get("time", []))
     members_high, members_low, members_precip, cloud_members = [], [], [], []
-    ssrd_members = []
+    ssrd_members, members_wind = [], []
     hourly_members_temp_f = {}
     hourly_members_precip_in = {}
     hourly_members_cloud = {}
     hourly_members_ssrd = {}
+    hourly_members_wind = {}
 
     model_key = _weather_model_key(model)
     member_slots = [0] if deterministic else range(51 if model_key == "ecmwf" else (1 if model_key == "aigefs" else 31))
@@ -761,11 +775,13 @@ def _build_weather_record_from_hourly(
             cloud_key = "cloud_cover"
             precip_key = "precipitation"
             ssrd_key = "shortwave_radiation"
+            wind_key = "wind_speed_10m"
         else:
             temp_key = "temperature_2m" if model_key == "aigefs" else f"temperature_2m_member{i:02d}"
             cloud_key = "cloud_cover" if model_key == "aigefs" else f"cloud_cover_member{i:02d}"
             precip_key = "precipitation" if model_key == "aigefs" else f"precipitation_member{i:02d}"
             ssrd_key = "shortwave_radiation" if model_key == "aigefs" else f"shortwave_radiation_member{i:02d}"
+            wind_key = "wind_speed_10m" if model_key == "aigefs" else f"wind_speed_10m_member{i:02d}"
 
         if temp_key in hourly:
             all_temps_c = hourly[temp_key]
@@ -787,6 +803,16 @@ def _build_weather_record_from_hourly(
             if all_precip_mm:
                 hourly_members_precip_in[member_label] = [
                     float(mm) * 0.03937 for mm in all_precip_mm
+                ]
+
+        if wind_key in hourly:
+            all_wind_kmh = hourly[wind_key]
+            w_kmh = all_wind_kmh[:window_size]
+            if w_kmh:
+                members_wind.append(max(float(kmh) for kmh in w_kmh) * 0.621371)
+            if all_wind_kmh:
+                hourly_members_wind[member_label] = [
+                    float(kmh) * 0.621371 for kmh in all_wind_kmh
                 ]
 
         if cloud_key in hourly:
@@ -824,17 +850,20 @@ def _build_weather_record_from_hourly(
         if len(members_precip) > 1
         else _deterministic_precip_sigma(mean_precip, horizon_days=0)
     )
+    mean_wind = float(np.mean(members_wind)) if members_wind else 0.0
 
     return {
         "members_high": members_high,
         "members_low": members_low,
         "members_precip": members_precip,
+        "members_wind": members_wind,
         "mean_high": float(np.mean(members_high)),
         "sigma_high": sigma_high,
         "mean_low": float(np.mean(members_low)),
         "sigma_low": sigma_low,
         "mean_precip": mean_precip,
         "sigma_precip": sigma_precip,
+        "mean_wind": mean_wind,
         "peak_tcdc": float(np.mean(cloud_members)) if cloud_members else 0.0,
         "peak_ssrd": float(np.mean(ssrd_members)) if ssrd_members else None,
         "timestamp": time.time(),
@@ -843,6 +872,7 @@ def _build_weather_record_from_hourly(
         "hourly_members_precip_in": hourly_members_precip_in,
         "hourly_members_cloud": hourly_members_cloud,
         "hourly_members_ssrd": hourly_members_ssrd,
+        "hourly_members_wind": hourly_members_wind,
         "provider_mode": "deterministic_multi_model" if deterministic else "ensemble_members",
         "forecast_source": forecast_source,
         "model_name": model,
@@ -919,6 +949,8 @@ def _resolve_weather_series(token: str) -> Optional[str]:
         if value.startswith(series):
             return series
     city_key = _resolve_hourly_temp_city_key(value)
+    if city_key is None:
+        city_key = _resolve_generic_prefix_city_key(value)
     if city_key is not None:
         return _canonical_series_for_city(city_key)
     return None
@@ -1131,10 +1163,12 @@ def _project_contract_record(
     members_precip = record.get("hourly_members_precip_in") or {}
     members_cloud = record.get("hourly_members_cloud") or {}
     members_ssrd = record.get("hourly_members_ssrd") or {}
+    members_wind = record.get("hourly_members_wind") or {}
 
     members_high = _reduce_member_projection(members_temp, indices, max)
     members_low = _reduce_member_projection(members_temp, indices, min)
     members_precip_total = _reduce_member_projection(members_precip, indices, sum)
+    members_wind_max = _reduce_member_projection(members_wind, indices, max)
     midday_indices = [
         idx
         for idx, raw_time in enumerate(hourly_time or [])
@@ -1158,6 +1192,7 @@ def _project_contract_record(
         "members_low": members_low,
         "members_temp": members_temp_instant,
         "members_precip": members_precip_total,
+        "members_wind": members_wind_max,
         "mean_high": float(np.mean(members_high)) if members_high else record.get("mean_high", 0.0),
         "sigma_high": float(np.std(members_high)) if len(members_high) > 1 else record.get("sigma_high", 0.5),
         "mean_low": float(np.mean(members_low)) if members_low else record.get("mean_low", 0.0),
@@ -1177,6 +1212,7 @@ def _project_contract_record(
         "hourly_members_precip_in": members_precip,
         "hourly_members_cloud": members_cloud,
         "hourly_members_ssrd": members_ssrd,
+        "hourly_members_wind": members_wind,
         "provider_mode": record.get("provider_mode", "ensemble_members"),
         "forecast_source": record.get("forecast_source", ""),
         "model_name": record.get("model_name", ""),

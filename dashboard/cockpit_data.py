@@ -683,6 +683,22 @@ def build_decision_funnel(
         },
         {
             "stage": "03",
+            "label": "Snow",
+            "headline": "Winter Precipitation / Standard EV",
+            "detail": f"EV ≥ 4.0% | Spread ≤ 35% | Price ≥ 0.08 | Min Time 4.0h",
+            "pill": "Snowfall",
+            "tooltip": "Snow Lane: Tracks snowfall-specific contracts. Standard EV threshold applies, mapping precipitation model arrays from GFS/ECMWF to detect frozen precipitation accumulation.",
+        },
+        {
+            "stage": "04",
+            "label": "Wind",
+            "headline": "Velocity Spikes / Standard EV",
+            "detail": f"EV ≥ 4.0% | Spread ≤ 35% | Price ≥ 0.08 | Min Time 4.0h",
+            "pill": "Wind Speed",
+            "tooltip": "Wind Lane: Captures wind velocity and gust markets. Ingests 10-meter wind speed datasets to trade velocity spikes.",
+        },
+        {
+            "stage": "05",
             "label": "Daily Temps",
             "headline": "Strict EV / Cloud Veto",
             "detail": f"EV ≥ 4.0% | Spread ≤ 35% | Price ≥ 0.08 | Veto if TCDC > 65%",

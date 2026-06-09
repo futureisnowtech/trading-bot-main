@@ -814,8 +814,17 @@ def blended_weather_yes_probability(
     )
     return float(blended["ensemble_prob"])
 
-def calculate_continuous_sizing(market_price: float, ensemble_prob: float, capital_base: float, multiplier: float = 1.0, cap_pct: float = 0.10, conv_tier: int = 3) -> int:
-    """Continuous sigmoid sizing driven by post-fee edge."""
+def calculate_continuous_sizing(
+    market_price: float,
+    ensemble_prob: float,
+    capital_base: float,
+    multiplier: float = 1.0,
+    cap_pct: float = 0.10,
+    conv_tier: int = 3,
+    hours_to_res: float = 24.0,
+    lane_ev_threshold: float = 0.050,
+) -> int:
+    """Continuous sigmoid sizing driven by post-fee edge with theta-decaying steepness."""
     ensemble_prob = max(0.01, min(0.99, ensemble_prob))
     market_price = max(0.01, min(0.99, market_price))
     fee_per_contract = _estimated_fee_per_contract(market_price, rounded=False)
@@ -824,7 +833,14 @@ def calculate_continuous_sizing(market_price: float, ensemble_prob: float, capit
     if calculated_ev <= 0.0 or capital_base <= 0:
         return 0
 
-    scaling_factor = 1.0 / (1.0 + math.exp(-15.0 * (calculated_ev - 0.06)))
+    # 1. Base the offset strictly on the lane's specific required edge
+    dynamic_offset = lane_ev_threshold 
+    
+    # 2. Theta-Decaying Steepness: As time runs out, certainty increases.
+    # At 120 hours out, steepness is a gentle 10.0. At 2 hours out, it's an aggressive 25.0.
+    theta_steepness = 25.0 - (15.0 * (min(hours_to_res, 120.0) / 120.0))
+
+    scaling_factor = 1.0 / (1.0 + math.exp(-theta_steepness * (calculated_ev - dynamic_offset)))
     capital_allowance = min(
         max(0.0, float(capital_base) * max(0.0, float(cap_pct))),
         float(KALSHI_MAX_USD_PER_POSITION),
@@ -1488,6 +1504,8 @@ def evaluate_contract(
                 multiplier=best_multiplier * (3.5 if is_surge else 1.0),
                 cap_pct=max(best_sizing_cap, 0.10) if is_surge else best_sizing_cap,
                 conv_tier=best_tier,
+                hours_to_res=hours_to_res,
+                lane_ev_threshold=effective_ev_threshold,
             )
             if n_contracts > KALSHI_MAX_QTY_PER_POSITION:
                 logger.info(

@@ -993,7 +993,9 @@ def load_session_win_rate() -> dict[str, Any]:
             """
             SELECT COUNT(*) as total,
                    SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END) as wins,
-                   SUM(CASE WHEN pnl_usd < 0 THEN 1 ELSE 0 END) as losses
+                   SUM(CASE WHEN pnl_usd < 0 THEN 1 ELSE 0 END) as losses,
+                   SUM(CASE WHEN pnl_usd > 0 THEN pnl_usd ELSE 0.0 END) as total_won_usd,
+                   SUM(CASE WHEN pnl_usd < 0 THEN pnl_usd ELSE 0.0 END) as total_lost_usd
             FROM trades
             WHERE paper = 0 AND pnl_usd != 0
               AND ts >= ?
@@ -1007,6 +1009,8 @@ def load_session_win_rate() -> dict[str, Any]:
             "wins": 0,
             "losses": 0,
             "win_rate": 0.0,
+            "total_won_usd": 0.0,
+            "total_lost_usd": 0.0,
         }
 
     total = row["total"]
@@ -1018,6 +1022,8 @@ def load_session_win_rate() -> dict[str, Any]:
         "wins": wins,
         "losses": losses,
         "win_rate": win_rate,
+        "total_won_usd": float(row["total_won_usd"] or 0.0),
+        "total_lost_usd": float(row["total_lost_usd"] or 0.0),
     }
 
 

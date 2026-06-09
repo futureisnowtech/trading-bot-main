@@ -1008,8 +1008,10 @@ drift = truth.get("position_drift") or {}
 positions_count = len(positions_live)
 realized_curve = payload["realized_pnl_curve"]
 realized_pnl = realized_curve[-1]["cumulative_pnl"] if realized_curve else 0.0
-win_rate_stats = payload.get("session_win_rate", {"total": 0, "wins": 0, "losses": 0, "win_rate": 0.0})
+win_rate_stats = payload.get("session_win_rate", {"total": 0, "wins": 0, "losses": 0, "win_rate": 0.0, "total_won_usd": 0.0, "total_lost_usd": 0.0})
 win_rate_val = win_rate_stats["win_rate"]
+total_won = win_rate_stats.get("total_won_usd", 0.0)
+total_lost = win_rate_stats.get("total_lost_usd", 0.0)
 hub_cap_now = get_kalshi_hub_exposure_cap(balance)
 
 _render_html(
@@ -1069,7 +1071,7 @@ metric_html = f"""
   {_metric_card("Release Gate", str(release_status.get('current_release_verdict') or 'UNKNOWN'), "fresh-entry permission state", "tone-mint" if release_status.get('entries_allowed') else "tone-amber", metric_explainers.get("Release Gate"))}
   {_metric_card("Drift", "YES" if drift.get('has_drift') else "NO", f"{len(positions_db_only)} db-only remnants", "tone-bad" if drift.get('has_drift') else "tone-mint", metric_explainers.get("Drift"))}
   {_metric_card("Realized P&L", _fmt_money(realized_pnl), "From Kalshi trade ledger", "tone-amber" if realized_pnl < 0 else "tone-mint", metric_explainers.get("Realized P&L"))}
-  {_metric_card("Win Rate", f"{win_rate_val:.1%}", f"{win_rate_stats['wins']}W - {win_rate_stats['losses']}L ({win_rate_stats['total']} total)", "tone-blue", metric_explainers.get("Session Win Rate"))}
+  {_metric_card("Win Rate", f"{win_rate_val:.1%}", f"+{_fmt_money(total_won)} / -{_fmt_money(abs(total_lost))}", "tone-blue", metric_explainers.get("Session Win Rate"))}
 </div>
 """
 _render_html(metric_html)

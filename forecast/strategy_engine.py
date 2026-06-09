@@ -580,7 +580,7 @@ def _weather_market_gate(
 
     available_prices = [price for price in (ask_yes, ask_no) if price > 0.0]
     avg_price = sum(available_prices) / len(available_prices) if available_prices else 0.0
-    if avg_price > 0:
+    if avg_price >= 0.05:  # Skip spread ratio check for penny underdog contracts
         spread_ratio = spread / avg_price
         max_spread_ratio = 0.36 if (mode == "TEMP" or hourly_contract) else KALSHI_MAX_SPREAD_RATIO
         if spread_ratio > max_spread_ratio:

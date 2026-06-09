@@ -778,7 +778,7 @@ def _render_open_book_expiry_chart(rows: list[dict]) -> None:
         st.info("No open positions currently have a valid resolution timestamp.")
         return
 
-    chart = (
+    base_chart = (
         alt.Chart(df)
         .mark_circle(opacity=0.88, stroke="#eaf6ff", strokeWidth=0.7)
         .encode(
@@ -812,6 +812,15 @@ def _render_open_book_expiry_chart(rows: list[dict]) -> None:
             ],
         )
         .properties(height=340)
+    )
+
+    zero_rule = alt.Chart(pd.DataFrame({"y": [0]})).mark_rule(
+        color="rgba(255,255,255,0.24)",
+        strokeDash=[6, 4],
+    ).encode(y="y:Q")
+
+    final_chart = (
+        (base_chart + zero_rule)
         .configure_view(strokeOpacity=0)
         .configure_axis(
             labelColor="#eaf6ff",
@@ -822,12 +831,7 @@ def _render_open_book_expiry_chart(rows: list[dict]) -> None:
         )
         .configure_legend(labelColor="#eaf6ff", titleColor="#91a3c2")
     )
-
-    zero_rule = alt.Chart(pd.DataFrame({"y": [0]})).mark_rule(
-        color="rgba(255,255,255,0.24)",
-        strokeDash=[6, 4],
-    ).encode(y="y:Q")
-    st.altair_chart((chart + zero_rule), width="stretch")
+    st.altair_chart(final_chart, width="stretch")
 
 
 def _funnel_stage_card(stage: dict) -> str:

@@ -82,7 +82,7 @@ MAX_HOURS_TO_RES: float = 120.0
 
 # v19.7: Sovereign Precision Calibration
 # Raising the bar for Alpha to ensure Win-Rate Restoration.
-EV_THRESHOLD: float = 0.025  # v19.9: Hardened 2.5% post-fee edge floor
+EV_THRESHOLD: float = 0.050  # v19.9: Hardened 5.0% post-fee edge floor
 
 # Longshot Bias Gate
 MIN_IMPLIED_PROB_FOR_YES: float = 0.10  # refuse to buy YES below 10% probability
@@ -1484,7 +1484,7 @@ def evaluate_contract(
                 n_contracts = KALSHI_MAX_QTY_PER_POSITION
                 
             # Enforce strict SRE Risk Ceilings (Surge Mode scales to KALSHI_MAX_USD_PER_POSITION)
-            cost_limit = min(bankroll * 0.25, float(KALSHI_MAX_USD_PER_POSITION) if is_surge else 20.00)
+            cost_limit = min(bankroll * 0.25, float(KALSHI_MAX_USD_PER_POSITION) if is_surge else 40.00)
             current_est_cost = estimate_kalshi_order_cost_usd(n_contracts, p_cost)
             if current_est_cost > cost_limit:
                 n_contracts = int(cost_limit / (p_cost + _estimated_fee_per_contract(p_cost, rounded=False)))

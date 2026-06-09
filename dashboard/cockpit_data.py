@@ -536,14 +536,27 @@ def build_market_type_counts() -> list[dict[str, Any]]:
     ]
 
 
-def build_realized_pnl_curve(trades: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def load_session_pnl_curve() -> list[dict[str, Any]]:
+    from config import TRADE_SESSION_START
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT ts, pnl_usd
+            FROM trades
+            WHERE paper = 0 AND pnl_usd != 0
+              AND ts >= ?
+            ORDER BY ts ASC
+            """,
+            (TRADE_SESSION_START,),
+        ).fetchall()
+
     running = 0.0
     points: list[dict[str, Any]] = []
-    for row in reversed(trades):
-        running += _coerce_float(row.get("pnl_usd"))
+    for row in rows:
+        running += float(row["pnl_usd"] or 0.0)
         points.append(
             {
-                "ts": _dt_text(row.get("ts")),
+                "ts": _dt_text(row["ts"]),
                 "cumulative_pnl": round(running, 4),
             }
         )
@@ -1095,7 +1108,7 @@ def get_cockpit_payload(*, live_sync: bool = True) -> dict[str, Any]:
         "hub_exposure": summarize_hub_exposure(live_rows or drift_rows),
         "recent_trades": recent_trades,
         "trade_edge_rows": trade_edge_rows,
-        "realized_pnl_curve": build_realized_pnl_curve(recent_trades),
+        "realized_pnl_curve": load_session_pnl_curve(),
         "session_win_rate": load_session_win_rate(),
         "recent_events": recent_events,
         "notifications": get_notifications(limit=12),

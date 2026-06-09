@@ -46,7 +46,7 @@ def test_market_scan_findings_warns_when_no_true_hourly_inventory_is_present():
         {
             "sample_size": 0,
             "scope_active_contracts": 0,
-            "entry_scope": "TRUE_HOURLY_ONLY",
+            "entry_scope": "ALL_WEATHER_LANES",
             "infrastructure_rejections": [],
             "systematic_thin_liquidity": False,
         },
@@ -55,7 +55,7 @@ def test_market_scan_findings_warns_when_no_true_hourly_inventory_is_present():
     )
 
     assert blockers == []
-    assert warnings == ["no_entry_scope_inventory (TRUE_HOURLY_ONLY)"]
+    assert warnings == ["no_entry_scope_inventory (ALL_WEATHER_LANES)"]
 
 
 def test_render_markdown_report_contains_verdict_and_counts():
@@ -212,7 +212,7 @@ def test_scan_live_market_surface_warms_weather_truth_for_weather_candidates(mon
     assert payload["weather_warmup"]["mode"] == "shared_truth_hydration"
     assert payload["weather_warmup"]["attempted"] is True
     assert payload["weather_warmup"]["refreshed_series"] == 1
-    assert payload["entry_scope"] == "TRUE_HOURLY_ONLY"
+    assert payload["entry_scope"] == "ALL_WEATHER_LANES"
     assert payload["scope_active_contracts"] == 1
 
 

@@ -13,11 +13,11 @@ def test_hourly_weather_mode_detection_recognizes_hour_stamped_tickers():
 
     assert weather_mode_for_ticker("KXTEMPNYCH-24JAN0122-T75.99") == "TEMP"
     assert weather_mode_for_ticker("KXHIGHNYD-24JAN0122-T75.99") == "TEMP"
-    assert live_entry_scope() == "TRUE_HOURLY_ONLY"
+    assert live_entry_scope() == "ALL_WEATHER_LANES"
     assert is_hourly_weather_contract("KXTEMPNYCH-24JAN0122-T75.99")
     assert not is_hourly_weather_contract("KXLOWTNYC-26JUN09-T52")
     assert is_live_entry_weather_contract("KXTEMPNYCH-24JAN0122-T75.99")
-    assert not is_live_entry_weather_contract(
+    assert is_live_entry_weather_contract(
         "KXLOWTNYC-26JUN09-T52",
         contract_name="Will the minimum temperature be <52° on Jun 9, 2026?",
     )

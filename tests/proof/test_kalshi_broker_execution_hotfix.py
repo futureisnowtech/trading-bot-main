@@ -354,3 +354,108 @@ def test_resting_partial_buy_books_filled_contracts(monkeypatch):
     assert pos["qty"] == 2.0
     assert pos["resting_remaining_qty"] == 3.0
     assert captured["qty"] == 2.0
+
+
+def test_discover_markets_uses_series_catalog_and_keeps_partial_truth(monkeypatch):
+    broker = _connected_broker()
+    calls = []
+    monkeypatch.setattr(
+        "execution.kalshi_broker._WEATHER_SERIES_CACHE",
+        {"expires_at": 0.0, "series_meta": {}},
+    )
+
+    def fake_request(method, path, params=None, body=None):
+        calls.append((method, path, params))
+        params = params or {}
+        if path == "/trade-api/v2/series":
+            return {
+                "series": [
+                    {
+                        "ticker": "KXHIGHNY",
+                        "title": "Highest temperature in NYC",
+                        "category": "Climate and Weather",
+                    },
+                    {
+                        "ticker": "KXTEMPNYCH",
+                        "title": "Hourly Directional NYC Temperature",
+                        "category": "Climate and Weather",
+                    },
+                    {
+                        "ticker": "KXTEMPDCH",
+                        "title": "Hourly Directional DC Temperature",
+                        "category": "Climate and Weather",
+                    },
+                ]
+            }
+        if path == "/trade-api/v2/events" and params.get("series_ticker") == "KXHIGHNY":
+            if params.get("status") == "open":
+                return {
+                    "events": [
+                        {
+                            "event_ticker": "KXHIGHNY-26JUN09",
+                            "title": "Highest temperature in NYC on Jun 9, 2026?",
+                            "category": "Climate and Weather",
+                            "markets": [
+                                {
+                                    "ticker": "KXHIGHNY-26JUN09-T85",
+                                    "status": "active",
+                                    "title": "Will the **high temp in NYC** be >85° on Jun 9, 2026?",
+                                    "close_time": "2026-06-10T04:59:00Z",
+                                }
+                            ],
+                        }
+                    ]
+                }
+            return {
+                "events": [
+                    {
+                        "event_ticker": "KXHIGHNY-26JUN10",
+                        "title": "Highest temperature in NYC on Jun 10, 2026?",
+                        "category": "Climate and Weather",
+                        "markets": [
+                            {
+                                "ticker": "KXHIGHNY-26JUN10-T85",
+                                "status": "initialized",
+                                "title": "Will the **high temp in NYC** be >85° on Jun 10, 2026?",
+                                "close_time": "2026-06-11T04:59:00Z",
+                            }
+                        ],
+                    }
+                ]
+            }
+        if path == "/trade-api/v2/events" and params.get("series_ticker") == "KXTEMPDCH":
+            if params.get("status") == "open":
+                return {"events": []}
+            return {
+                "events": [
+                    {
+                        "event_ticker": "KXTEMPDCH-26JUN1019",
+                        "title": "Hourly temperature in DC at 7pm on Jun 10, 2026?",
+                        "category": "Climate and Weather",
+                        "markets": [
+                            {
+                                "ticker": "KXTEMPDCH-26JUN1019-T77.99",
+                                "status": "initialized",
+                                "title": "Will the temp in Washington DC be above 77.99° on Jun 10, 2026 at 7pm EDT?",
+                                "close_time": "2026-06-10T23:00:00Z",
+                            }
+                        ],
+                    }
+                ]
+            }
+        if path == "/trade-api/v2/events" and params.get("series_ticker") == "KXTEMPNYCH":
+            return {"error": {"code": "too_many_requests", "message": "slow down"}}
+        return {"events": []}
+
+    monkeypatch.setattr(broker, "_request", fake_request)
+
+    results = broker.discover_markets()
+
+    active_rows = [row for row in results if row.get("local_symbol") == "KXHIGHNY-26JUN09-T85"]
+    assert len(active_rows) == 2
+    assert {row["side"] for row in active_rows} == {"YES", "NO"}
+    assert any(
+        row.get("stub_only") and row.get("underlier") == "KXTEMPDCH-26JUN1019"
+        for row in results
+    )
+    assert any(path == "/trade-api/v2/series" for _method, path, _params in calls)

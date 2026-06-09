@@ -40,6 +40,11 @@ _KALSHI_MIN_PRICE_CENTS = 1
 _KALSHI_MAX_PRICE_CENTS = 99
 _KALSHI_MARKETABLE_ENTRY_CENTS = 99
 _KALSHI_MARKETABLE_EXIT_CENTS = 1
+_WEATHER_SERIES_CACHE_TTL_SECONDS = 3600.0
+_WEATHER_SERIES_CACHE: dict[str, object] = {
+    "expires_at": 0.0,
+    "series_meta": {},
+}
 
 # ── Credentials ───────────────────────────────────────────────────────────────
 KALSHI_PRIVATE_KEY_PATH = os.getenv("KALSHI_PRIVATE_KEY_PATH", "").strip()
@@ -65,6 +70,18 @@ def _is_weather_market(ticker: str, title: str, category: str = "") -> bool:
         return True
 
     return False
+
+
+def _parse_market_strike(ticker: str) -> float:
+    import re
+
+    match = re.search(r"-[TBL](-?\d+\.?\d*)$", str(ticker or ""))
+    if not match:
+        return 0.0
+    try:
+        return float(match.group(1))
+    except ValueError:
+        return 0.0
 
 class KalshiBroker:
     def __init__(self) -> None:
@@ -592,86 +609,209 @@ class KalshiBroker:
 
         results = []
         try:
-            from data.kalshi_weather_monitor import STATIONS
-            
-            weather_events = []
-            for loc in STATIONS.values():
-                for series_id in loc.get("series", []):
-                    for event_status in ("open", "unopened"):
-                        data = self._request(
-                            "GET",
-                            "/trade-api/v2/events",
-                            params={"series_ticker": series_id, "status": event_status},
-                        )
-                        weather_events.extend(data.get("events", []))
-            
-            generic_events = []
-            cursor = ""
-            for _ in range(5):  # Fewer pages for purified focus
-                data = self._request("GET", "/trade-api/v2/events", params={"limit": 200, "status": "open", "cursor": cursor})
-                page_events = data.get("events", [])
-                if not page_events: break
-                generic_events.extend(page_events)
-                cursor = data.get("cursor", "")
-                if not cursor: break
-            
-            seen_tickers = set()
-            all_events = []
-            for e in (weather_events + generic_events):
-                ticker = e.get("event_ticker")
-                if ticker not in seen_tickers:
-                    all_events.append(e)
-                    seen_tickers.add(ticker)
+            from data.kalshi_weather_monitor import STATIONS, resolve_weather_city_key
 
-            for event in all_events:
-                cat = event.get("category", "")
-                ticker = event.get("event_ticker", "")
+            def _is_error_payload(payload: dict) -> bool:
+                return bool(isinstance(payload, dict) and payload.get("error"))
 
+            def _series_is_tradeable_weather_lane(series_info: dict) -> bool:
+                ticker = str(series_info.get("ticker") or "")
+                title = str(series_info.get("title") or "")
                 if not ticker:
-                    continue
-                if "weather" not in str(cat).lower() and weather_mode_for_ticker(ticker) is None:
-                    continue
-                if not _is_weather_market(ticker, event.get("title"), cat):
-                    continue
-                
-                m_data = self._request(
-                    "GET", "/trade-api/v2/markets", params={"event_ticker": ticker}
-                )
-                markets = m_data.get("markets", [])
-                
-                for m in markets:
-                    if m.get("status") != "active":
-                        continue
-                    market_ticker = str(m.get("ticker") or "")
-                    if weather_mode_for_ticker(market_ticker) is None:
-                        continue
-                    
-                    strike = 0.0
-                    import re
-                    match = re.search(r'-[TBL](-?\d+\.?\d*)$', market_ticker)
-                    if match:
-                        try:
-                            strike = float(match.group(1))
-                        except ValueError:
-                            pass
+                    return False
 
-                    for side in ["YES", "NO"]:
-                        right = "C" if side == "YES" else "P"
-                        results.append({
-                            "underlier": ticker,
-                            "event_title": event.get("title") or ticker,
-                            "local_symbol": market_ticker,
-                            "conid": None,
-                            "right": right,
-                            "strike": strike,
-                            "last_trade_at": m.get("close_time", ""),
-                            "exchange": "KALSHI",
-                            "currency": "USD",
-                            "contract_name": m.get("title") or "",
-                            "long_name": m.get("title"),
-                            "category": cat,
-                            "side": side,
-                        })
+                title_lower = title.lower()
+                if not ticker.startswith(
+                    ("KXTEMP", "KXHIGH", "KXLOW", "KXRAIN", "KXHIGHT", "KXLOWT", "HIGH", "LOW", "RAIN")
+                ) and not (
+                    "hourly directional" in title_lower and "temperature" in title_lower
+                ):
+                    return False
+
+                blob = f"{ticker} {title}".lower()
+                city_key = resolve_weather_city_key(ticker, contract_name=title)
+                mode = weather_mode_for_ticker(ticker)
+                if mode is None and "hourly directional" in title_lower and "temperature" in title_lower:
+                    mode = "TEMP"
+
+                if city_key is None or mode not in {"HIGH", "LOW", "RAIN", "TEMP"}:
+                    return False
+
+                return any(keyword in blob for keyword in ("temperature", "temp", "rain"))
+
+            weather_series_meta: dict[str, dict] = {}
+            cache_expires_at = float(_WEATHER_SERIES_CACHE.get("expires_at") or 0.0)
+            if cache_expires_at > time.time():
+                cached_meta = _WEATHER_SERIES_CACHE.get("series_meta") or {}
+                if isinstance(cached_meta, dict):
+                    weather_series_meta = dict(cached_meta)
+
+            if not weather_series_meta:
+                series_catalog = self._request(
+                    "GET",
+                    "/trade-api/v2/series",
+                    params={"limit": 200},
+                )
+                if not _is_error_payload(series_catalog):
+                    for series_info in series_catalog.get("series", []):
+                        if _series_is_tradeable_weather_lane(series_info):
+                            series_id = str(series_info.get("ticker") or "")
+                            if series_id:
+                                weather_series_meta[series_id] = {
+                                    "title": str(series_info.get("title") or ""),
+                                    "category": str(series_info.get("category") or ""),
+                                }
+                _WEATHER_SERIES_CACHE["expires_at"] = time.time() + _WEATHER_SERIES_CACHE_TTL_SECONDS
+                _WEATHER_SERIES_CACHE["series_meta"] = dict(weather_series_meta)
+
+            discovery_series: list[str] = []
+            seen_series: set[str] = set()
+            if weather_series_meta:
+                ranked_families: dict[tuple[str, str], tuple[int, str]] = {}
+                for series_id, meta in weather_series_meta.items():
+                    title_lower = str(meta.get("title") or "").lower()
+                    city_key = resolve_weather_city_key(series_id, contract_name=str(meta.get("title") or ""))
+                    lane = weather_mode_for_ticker(series_id)
+                    if lane is None and "hourly directional" in title_lower and "temperature" in title_lower:
+                        lane = "TEMP"
+                    if city_key is None or lane not in {"HIGH", "LOW", "RAIN", "TEMP"}:
+                        continue
+
+                    score = 0
+                    if series_id.startswith("KX"):
+                        score += 100
+                    if lane == "TEMP" and series_id.startswith("KXTEMP"):
+                        score += 25
+                    if lane == "HIGH" and series_id.startswith("KXHIGH"):
+                        score += 20
+                    if lane == "LOW" and series_id.startswith("KXLOWT"):
+                        score += 20
+                    if lane == "RAIN" and series_id.startswith("KXRAIN"):
+                        score += 20
+                    if "hourly directional" in title_lower:
+                        score += 10
+
+                    family_key = (city_key, lane)
+                    current = ranked_families.get(family_key)
+                    if current is None or score > current[0]:
+                        ranked_families[family_key] = (score, series_id)
+
+                discovery_series = sorted(
+                    {series_id for _score, series_id in ranked_families.values()}
+                )
+                seen_series.update(discovery_series)
+
+            if not discovery_series:
+                for loc in STATIONS.values():
+                    for series_id in loc.get("series", []):
+                        if series_id not in seen_series:
+                            seen_series.add(series_id)
+                            discovery_series.append(series_id)
+
+            seen_contracts: set[tuple[str, str]] = set()
+            seen_stubs: set[str] = set()
+
+            for series_id in discovery_series:
+                meta = weather_series_meta.get(series_id, {})
+                title_lower = str(meta.get("title") or "").lower()
+                scan_statuses = ("open", "unopened") if "hourly directional" in title_lower else ("open",)
+                for event_status in scan_statuses:
+                    data = self._request(
+                        "GET",
+                        "/trade-api/v2/events",
+                        params={
+                            "series_ticker": series_id,
+                            "status": event_status,
+                            "with_nested_markets": "true",
+                        },
+                    )
+                    if _is_error_payload(data):
+                        err = data.get("error")
+                        log_event(
+                            "WARNING",
+                            "KalshiBroker",
+                            f"Weather discovery skipped {series_id} {event_status}: {err}",
+                        )
+                        continue
+
+                    for event in data.get("events", []):
+                        ticker = str(event.get("event_ticker") or "")
+                        event_title = str(event.get("title") or meta.get("title") or ticker)
+                        cat = str(event.get("category") or meta.get("category") or "")
+                        if not ticker:
+                            continue
+                        if not _is_weather_market(ticker, event_title, cat):
+                            city_key = resolve_weather_city_key(ticker, contract_name=event_title)
+                            if city_key is None or weather_mode_for_ticker(ticker) is None:
+                                continue
+
+                        markets = event.get("markets") or []
+                        initialized_seen = False
+                        initialized_close_time = ""
+
+                        for market in markets:
+                            market_status = str(market.get("status") or "").lower()
+                            market_ticker = str(market.get("ticker") or "")
+                            if not market_ticker:
+                                continue
+
+                            if market_status == "initialized":
+                                initialized_seen = True
+                                initialized_close_time = (
+                                    str(market.get("close_time") or "")
+                                    or str(market.get("expiration_time") or "")
+                                )
+                                continue
+
+                            if market_status != "active":
+                                continue
+                            if weather_mode_for_ticker(market_ticker) is None:
+                                continue
+
+                            strike = _parse_market_strike(market_ticker)
+                            contract_name = str(market.get("title") or "")
+                            last_trade_at = str(
+                                market.get("close_time")
+                                or market.get("expiration_time")
+                                or ""
+                            )
+                            for side in ("YES", "NO"):
+                                key = (market_ticker, side)
+                                if key in seen_contracts:
+                                    continue
+                                seen_contracts.add(key)
+                                right = "C" if side == "YES" else "P"
+                                results.append(
+                                    {
+                                        "underlier": ticker,
+                                        "event_title": event_title or ticker,
+                                        "local_symbol": market_ticker,
+                                        "conid": None,
+                                        "right": right,
+                                        "strike": strike,
+                                        "last_trade_at": last_trade_at,
+                                        "exchange": "KALSHI",
+                                        "currency": "USD",
+                                        "contract_name": contract_name,
+                                        "long_name": contract_name,
+                                        "category": cat,
+                                        "side": side,
+                                    }
+                                )
+
+                        if initialized_seen and ticker not in seen_stubs:
+                            seen_stubs.add(ticker)
+                            results.append(
+                                {
+                                    "underlier": ticker,
+                                    "event_title": event_title or ticker,
+                                    "market_name": event_title or ticker,
+                                    "exchange": "KALSHI",
+                                    "category": cat,
+                                    "last_trade_at": initialized_close_time,
+                                    "stub_only": True,
+                                }
+                            )
         except Exception as e:
             log_event("ERROR", "KalshiBroker", f"Market discovery error: {e}")
 

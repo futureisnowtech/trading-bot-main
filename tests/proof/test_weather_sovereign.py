@@ -115,6 +115,26 @@ class TestWeatherSovereign(unittest.TestCase):
         self.assertIsNotNone(semantics)
         self.assertTrue(semantics.ambiguous)
 
+    def test_title_semantics_override_t_suffix_for_lower_tail_weather_contracts(self):
+        semantics = resolve_weather_contract(
+            "KXHIGHMIA-26JUN06-T83",
+            contract_name="Will the **high temp in Miami** be <83° on Jun 6, 2026?",
+            strike=83.0,
+        )
+        self.assertIsNotNone(semantics)
+        self.assertEqual(semantics.comparator, "lt")
+        self.assertAlmostEqual(semantics.threshold, 82.5)
+
+        prob = yes_probability_from_weather_data(
+            "KXHIGHMIA-26JUN06-T83",
+            {
+                "members_high": [82.4, 82.5, 82.6, 83.0],
+            },
+            contract_name="Will the **high temp in Miami** be <83° on Jun 6, 2026?",
+            strike=83.0,
+        )
+        self.assertAlmostEqual(prob, 0.5)
+
     def test_rain_thresholds_do_not_use_temperature_half_degree_offsets(self):
         semantics = resolve_weather_contract(
             "KXRAINNY-04JUN26-T1",

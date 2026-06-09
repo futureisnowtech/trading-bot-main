@@ -1007,11 +1007,11 @@ balance = float(truth.get("balance_usd") or 0.0)
 drift = truth.get("position_drift") or {}
 positions_count = len(positions_live)
 realized_curve = payload["realized_pnl_curve"]
-realized_pnl = realized_curve[-1]["cumulative_pnl"] if realized_curve else 0.0
 win_rate_stats = payload.get("session_win_rate", {"total": 0, "wins": 0, "losses": 0, "win_rate": 0.0, "total_won_usd": 0.0, "total_lost_usd": 0.0})
 win_rate_val = win_rate_stats["win_rate"]
 total_won = win_rate_stats.get("total_won_usd", 0.0)
 total_lost = win_rate_stats.get("total_lost_usd", 0.0)
+realized_pnl = total_won + total_lost
 hub_cap_now = get_kalshi_hub_exposure_cap(balance)
 
 _render_html(

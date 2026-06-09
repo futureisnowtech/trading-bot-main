@@ -286,19 +286,22 @@ def sync_open_forecast_position(
     db_path: str | None = None,
 ) -> None:
     from datetime import datetime, timezone
+    from forecast.weather_contracts import weather_mode_for_ticker
 
+    category = weather_mode_for_ticker(ticker) or 'TEMP'
     now = datetime.now(timezone.utc).isoformat()
     normalized_qty = max(0, int(round(float(qty))))
     with _conn(db_path) as c:
         c.execute(
             """
             INSERT INTO forecast_positions
-                (ticker, qty, entry_price, side, active, opened_at, closed_at, exit_type)
-            VALUES (?, ?, ?, ?, 1, ?, NULL, NULL)
+                (ticker, qty, entry_price, side, category, active, opened_at, closed_at, exit_type)
+            VALUES (?, ?, ?, ?, ?, 1, ?, NULL, NULL)
             ON CONFLICT(ticker) DO UPDATE SET
                 qty=excluded.qty,
                 entry_price=excluded.entry_price,
                 side=excluded.side,
+                category=excluded.category,
                 active=1,
                 opened_at=CASE
                     WHEN forecast_positions.active=1 THEN forecast_positions.opened_at
@@ -307,7 +310,7 @@ def sync_open_forecast_position(
                 closed_at=NULL,
                 exit_type=NULL
             """,
-            (ticker, normalized_qty, entry_price, side, now),
+            (ticker, normalized_qty, entry_price, side, category, now),
         )
         c.commit()
 

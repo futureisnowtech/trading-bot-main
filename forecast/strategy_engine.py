@@ -817,7 +817,10 @@ def blended_weather_yes_probability(
 def calculate_hrrr_aware_steepness(hours_to_res: float) -> float:
     base_steepness = 10.0
     hrrr_cliff_multiplier = 20.0
-    hrrr_factor = 1.0 / (1.0 + math.exp(0.5 * (hours_to_res - 18.0)))
+    exponent = 0.5 * (hours_to_res - 18.0)
+    # Clip exponent to prevent float overflow on long-horizon contracts (max exp is ~709)
+    safe_exponent = max(-50.0, min(50.0, exponent))
+    hrrr_factor = 1.0 / (1.0 + math.exp(safe_exponent))
     return base_steepness + (hrrr_cliff_multiplier * hrrr_factor)
 
 def calculate_optimal_vwap_size(book_asks: list[dict], model_prob: float, max_budget_usd: float, lane_ev_threshold: float) -> int:
@@ -884,7 +887,11 @@ def calculate_continuous_sizing(
     # 2. HRRR Log-Sigmoid Time Decay:
     theta_steepness = calculate_hrrr_aware_steepness(hours_to_res)
 
-    scaling_factor = 1.0 / (1.0 + math.exp(-theta_steepness * (calculated_ev - dynamic_offset)))
+    sizing_exponent = -theta_steepness * (calculated_ev - dynamic_offset)
+    # Clip exponent to prevent float overflow on extreme edge discrepancies
+    safe_sizing_exponent = max(-50.0, min(50.0, sizing_exponent))
+
+    scaling_factor = 1.0 / (1.0 + math.exp(safe_sizing_exponent))
     capital_allowance = min(
         max(0.0, float(capital_base) * max(0.0, float(cap_pct))),
         float(KALSHI_MAX_USD_PER_POSITION),

@@ -673,11 +673,11 @@ def test_discovery_accepts_weather_markets():
     assert _is_weather_market("LANDFALL", "Will the storm make landfall?", "climate")
 
 
-def test_discovery_rejects_contracts_beyond_live_48h_horizon():
+def test_discovery_rejects_contracts_beyond_live_120h_horizon():
     from forecast.discovery import _rank_contracts
 
     too_far = {
-        "last_trade_at": (datetime.now(timezone.utc) + timedelta(hours=72)).strftime(
+        "last_trade_at": (datetime.now(timezone.utc) + timedelta(hours=125)).strftime(
             "%Y%m%d %H:%M:%S"
         ),
         "contract_name": "Will NYC high exceed 80?",
@@ -687,7 +687,7 @@ def test_discovery_rejects_contracts_beyond_live_48h_horizon():
     }
 
     ranked = _rank_contracts([too_far])
-    assert ranked == [], "Discovery must not admit weather contracts beyond the live 48h horizon."
+    assert ranked == [], "Discovery must not admit weather contracts beyond the live 120h horizon."
 
 
 # ── 16–17. Dashboard alignment ────────────────────────────────────────────────

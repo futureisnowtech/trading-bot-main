@@ -76,9 +76,9 @@ MAX_OVERROUND: float = 0.15  # Tightened from 0.25 to 0.15 for Kalshi
 # Spread hard cap
 MAX_SPREAD_DOLLARS: float = 0.12  # $0.12 per contract
 
-# Time-to-resolution gates (v19.7: Horizon Pullback to 48h)
+# Time-to-resolution gates (v19.7: Horizon Pullback to 5 days)
 MIN_HOURS_TO_RES: float = 1.0
-MAX_HOURS_TO_RES: float = 48.0
+MAX_HOURS_TO_RES: float = 120.0
 
 # v19.7: Sovereign Precision Calibration
 # Raising the bar for Alpha to ensure Win-Rate Restoration.

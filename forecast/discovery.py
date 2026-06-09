@@ -41,7 +41,7 @@ TIER1_KEYWORDS: list[str] = [
 
 # Resolution window: discovery must stay aligned with the live strategy horizon.
 MIN_HOURS_TO_RESOLUTION: float = 2.0  # too close = insufficient time for entry
-MAX_DAYS_TO_RESOLUTION: float = 2.0  # 48h max to match live strategy gating
+MAX_DAYS_TO_RESOLUTION: float = 5.0  # 5 days max to match live strategy gating
 
 # Min quote quality to be considered tradeable
 MAX_ACCEPTABLE_OVERROUND: float = 0.30  # Ω_t ≤ 0.30 (30%)

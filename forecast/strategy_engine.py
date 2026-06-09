@@ -82,7 +82,7 @@ MAX_HOURS_TO_RES: float = 48.0
 
 # v19.7: Sovereign Precision Calibration
 # Raising the bar for Alpha to ensure Win-Rate Restoration.
-EV_THRESHOLD: float = 0.05  # v19.9: Hardened 5% post-fee edge floor
+EV_THRESHOLD: float = 0.025  # v19.9: Hardened 2.5% post-fee edge floor
 
 # Longshot Bias Gate
 MIN_IMPLIED_PROB_FOR_YES: float = 0.10  # refuse to buy YES below 10% probability
@@ -1079,7 +1079,7 @@ def _strategy_weather_details(
     if semantics.comparator == "between" and mode != "RAIN":
         narrow_bin_size_multiplier = 0.85
 
-    effective_ev_threshold = 0.006 if (mode == "TEMP" or hourly_contract) else EV_THRESHOLD
+    effective_ev_threshold = 0.003 if (mode == "TEMP" or hourly_contract) else EV_THRESHOLD
 
     if net_edge_yes is not None and net_edge_yes >= effective_ev_threshold:
         if cloud_veto:
@@ -1423,7 +1423,7 @@ def evaluate_contract(
             else -1.0
         )
         ev_chosen = ev_yes if best_side == "YES" else ev_no
-        effective_ev_threshold = 0.006 if (w_mode == "TEMP" or hourly_contract) else EV_THRESHOLD
+        effective_ev_threshold = 0.003 if (w_mode == "TEMP" or hourly_contract) else EV_THRESHOLD
         if approved and ev_chosen < effective_ev_threshold:
             approved = False
             veto_reason = f"fee_adjusted_ev_too_low ({ev_chosen:.4f} < {effective_ev_threshold})"
@@ -1455,7 +1455,7 @@ def evaluate_contract(
             model_entropy = -(q_hat * math.log(q_hat) + (1.0 - q_hat) * math.log(1.0 - q_hat)) if 0.0 < q_hat < 1.0 else 0.0
 
             # Asymmetric Fast-Lane (Surge Mode)
-            is_surge = (0.03 <= p_cost <= 0.15) and (model_entropy < 0.05) and (ev_chosen >= 0.20)
+            is_surge = (0.03 <= p_cost <= 0.15) and (model_entropy < 0.05) and (ev_chosen >= 0.10)
             
             n_contracts = calculate_continuous_sizing(
                 market_price=p_cost,

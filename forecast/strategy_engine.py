@@ -814,6 +814,50 @@ def blended_weather_yes_probability(
     )
     return float(blended["ensemble_prob"])
 
+def calculate_hrrr_aware_steepness(hours_to_res: float) -> float:
+    base_steepness = 10.0
+    hrrr_cliff_multiplier = 20.0
+    hrrr_factor = 1.0 / (1.0 + math.exp(0.5 * (hours_to_res - 18.0)))
+    return base_steepness + (hrrr_cliff_multiplier * hrrr_factor)
+
+def calculate_optimal_vwap_size(book_asks: list[dict], model_prob: float, max_budget_usd: float, lane_ev_threshold: float) -> int:
+    total_qty = 0
+    total_spend = 0.0
+    
+    for level in book_asks:
+        price = level.get('price', 0.0) or level.get('ask', 0.0)
+        available_qty = level.get('qty', 0) or level.get('size', 1)
+        
+        if price <= 0.0:
+            continue
+            
+        if price <= 0.10:
+            fee = 0.01
+        elif price <= 0.20:
+            fee = 0.02
+        else:
+            fee = 0.07
+            
+        cost_per_contract = price + fee
+        marginal_ev = model_prob - cost_per_contract
+        
+        if marginal_ev < lane_ev_threshold: 
+            break
+            
+        affordable_qty = int((max_budget_usd - total_spend) // cost_per_contract)
+        take_qty = min(available_qty, affordable_qty)
+        
+        if take_qty <= 0:
+            break
+            
+        total_qty += take_qty
+        total_spend += (take_qty * cost_per_contract)
+        
+        if total_spend >= max_budget_usd:
+            break
+            
+    return min(total_qty, 2500)
+
 def calculate_continuous_sizing(
     market_price: float,
     ensemble_prob: float,
@@ -823,8 +867,9 @@ def calculate_continuous_sizing(
     conv_tier: int = 3,
     hours_to_res: float = 24.0,
     lane_ev_threshold: float = 0.050,
+    book_asks: list[dict] | None = None,
 ) -> int:
-    """Continuous sigmoid sizing driven by post-fee edge with theta-decaying steepness."""
+    """Discrete CLOB-aligned and HRRR time-decay sizing driven by Level-2 VWAP queue depth."""
     ensemble_prob = max(0.01, min(0.99, ensemble_prob))
     market_price = max(0.01, min(0.99, market_price))
     fee_per_contract = _estimated_fee_per_contract(market_price, rounded=False)
@@ -836,9 +881,8 @@ def calculate_continuous_sizing(
     # 1. Base the offset strictly on the lane's specific required edge
     dynamic_offset = lane_ev_threshold 
     
-    # 2. Theta-Decaying Steepness: As time runs out, certainty increases.
-    # At 120 hours out, steepness is a gentle 10.0. At 2 hours out, it's an aggressive 25.0.
-    theta_steepness = 25.0 - (15.0 * (min(hours_to_res, 120.0) / 120.0))
+    # 2. HRRR Log-Sigmoid Time Decay:
+    theta_steepness = calculate_hrrr_aware_steepness(hours_to_res)
 
     scaling_factor = 1.0 / (1.0 + math.exp(-theta_steepness * (calculated_ev - dynamic_offset)))
     capital_allowance = min(
@@ -846,11 +890,16 @@ def calculate_continuous_sizing(
         float(KALSHI_MAX_USD_PER_POSITION),
     )
     deployed_budget = capital_allowance * scaling_factor * max(0.10, float(multiplier))
-    per_contract_outlay = max(0.01, market_price + fee_per_contract)
-    qty = int(deployed_budget / per_contract_outlay)
-    qty = min(max(0, qty), KALSHI_MAX_QTY_PER_POSITION)
 
-    return max(0, qty)
+    # If book asks are provided, walk the real book. Else fallback to vwap mock layer
+    if book_asks:
+        qty = calculate_optimal_vwap_size(book_asks, ensemble_prob, deployed_budget, lane_ev_threshold)
+    else:
+        # Fallback to single level
+        mock_asks = [{"price": market_price, "qty": KALSHI_MAX_QTY_PER_POSITION}]
+        qty = calculate_optimal_vwap_size(mock_asks, ensemble_prob, deployed_budget, lane_ev_threshold)
+
+    return min(max(0, qty), KALSHI_MAX_QTY_PER_POSITION)
 
 import re
 
@@ -1715,27 +1764,9 @@ def evaluate_market_snapshots(
         hub = _get_city_hub(ticker, contract_name=snapshot.contract_name)
 
         count = current_tick_counts.get(family, 0)
-        current_hub_usd = hub_exposure.get(hub, 0.0)
         current_hub_cap = get_kalshi_hub_exposure_cap(bankroll)
 
-        if hub != "UNKNOWN" and current_hub_usd >= current_hub_cap:
-            result = StrategyResult(
-                strategy_family="vetoed",
-                side="NONE",
-                q_hat=0.0,
-                ev=0.0,
-                ev_yes=0.0,
-                ev_no=0.0,
-                confidence=0.0,
-                uncertainty_penalty=0.0,
-                econ_approved=False,
-                veto_reason=f"hub_exposure_cap_reached ({current_hub_usd:.1f}/{current_hub_cap:.1f})",
-                position_fraction=0.0,
-                position_contracts=0,
-                top_factors=[],
-                hours_to_resolution=hours_to_res,
-            )
-        elif count >= KALSHI_SAME_EVENT_FAMILY_CAP:
+        if count >= KALSHI_SAME_EVENT_FAMILY_CAP:
             result = StrategyResult(
                 strategy_family="vetoed",
                 side="NONE",
@@ -1766,6 +1797,35 @@ def evaluate_market_snapshots(
                 open_positions_count=open_positions_count,
                 same_event_open=(count > 0),
             )
+
+            # Evaluate Net Directional Delta Hub Hedging cap strictly post-sizing
+            if result is not None and result.econ_approved and result.side in {"YES", "NO"} and hub != "UNKNOWN":
+                current_signed_sum = sum(hub_signed_exposures.get(hub, []))
+                candidate_price = float(result.ev_yes if result.side == "YES" else result.ev_no) # Pessimistic ev reference or fallback price
+                candidate_price = float(yc.get("ask") or yes_quote.get("ask_yes") or 0.50) if result.side == "YES" else float(nc.get("ask") or no_quote.get("ask_no") or 0.50)
+                
+                candidate_exposure = get_kalshi_position_exposure_usd(
+                    float(result.position_contracts),
+                    candidate_price,
+                )
+                
+                p_side = str(result.side).upper()
+                p_prefix = ticker.split("-")[0].upper()
+                is_cool_wet_prefix = any(x in p_prefix for x in ("KXLOW", "RAIN", "KXRAIN", "KXSNOW", "KXWIND"))
+                is_warm_dry_prefix = any(x in p_prefix for x in ("KXHIGH", "KXTEMP"))
+                if is_cool_wet_prefix:
+                    c_sign = -1.0 if p_side == "YES" else 1.0
+                elif is_warm_dry_prefix:
+                    c_sign = 1.0 if p_side == "YES" else -1.0
+                else:
+                    c_sign = 1.0
+                    
+                projected_hub_exposure = abs(current_signed_sum + (candidate_exposure * c_sign))
+                if projected_hub_exposure > current_hub_cap:
+                    result.econ_approved = False
+                    result.veto_reason = f"hub_exposure_cap_reached ({projected_hub_exposure:.1f}/{current_hub_cap:.1f})"
+                    result.position_fraction = 0.0
+                    result.position_contracts = 0
 
         if result is None:
             continue

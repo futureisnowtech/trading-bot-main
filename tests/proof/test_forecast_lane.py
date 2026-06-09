@@ -1343,10 +1343,26 @@ def test_strategy_engine_hub_cap_uses_thirty_percent_with_forty_dollar_floor(mon
         bars_4h=[],
     )
 
-    def _should_not_run(**kwargs):
-        raise AssertionError("hub-cap veto should happen before evaluate_contract")
+    def _mock_eval(*args, **kwargs):
+        from forecast.strategy_engine import StrategyResult
+        return StrategyResult(
+            strategy_family="weather_ensemble",
+            side="YES",
+            q_hat=0.80,
+            ev=0.20,
+            ev_yes=0.20,
+            ev_no=-0.10,
+            confidence=0.80,
+            uncertainty_penalty=0.0,
+            econ_approved=True,
+            veto_reason="",
+            position_fraction=0.10,
+            position_contracts=100,
+            top_factors=[],
+            hours_to_resolution=12.0,
+        )
 
-    monkeypatch.setattr(se, "evaluate_contract", _should_not_run)
+    monkeypatch.setattr(se, "evaluate_contract", _mock_eval)
 
     results = se.evaluate_market_snapshots(
         snapshots=[snapshot],
@@ -1357,8 +1373,9 @@ def test_strategy_engine_hub_cap_uses_thirty_percent_with_forty_dollar_floor(mon
                 "local_symbol": "KXHIGHLAX-99JAN01-B69.5",
                 "qty": 100,
                 "entry_price": 0.50,
+                "side": "YES",
             }
         ],
     )
 
-    assert results[0]["result"].veto_reason == "hub_exposure_cap_reached (57.0/40.0)"
+    assert results[0]["result"].veto_reason == "hub_exposure_cap_reached (114.0/40.0)"

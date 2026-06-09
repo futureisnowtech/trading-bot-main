@@ -975,7 +975,7 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                     candidate_hub = _get_city_hub(local_sym)
                     if candidate_hub != "UNKNOWN":
                         hub_cap = get_kalshi_hub_exposure_cap(bankroll)
-                        current_hub_exposure = cycle_hub_exposure_usd.get(candidate_hub, 0.0)
+                        current_signed_sum = sum(cycle_hub_signed_exposures.get(candidate_hub, []))
                         candidate_price = float(
                             result.ask_yes if result.side == "YES" else result.ask_no
                         )
@@ -983,7 +983,20 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                             float(result.position_contracts),
                             candidate_price,
                         )
-                        projected_hub_exposure = current_hub_exposure + candidate_exposure
+                        
+                        p_side = str(result.side).upper()
+                        p_prefix = local_sym.split("-")[0].upper()
+                        is_cool_wet_prefix = any(x in p_prefix for x in ("KXLOW", "RAIN", "KXRAIN", "KXSNOW", "KXWIND"))
+                        is_warm_dry_prefix = any(x in p_prefix for x in ("KXHIGH", "KXTEMP"))
+                        if is_cool_wet_prefix:
+                            c_sign = -1.0 if p_side == "YES" else 1.0
+                        elif is_warm_dry_prefix:
+                            c_sign = 1.0 if p_side == "YES" else -1.0
+                        else:
+                            c_sign = 1.0
+                            
+                        projected_hub_exposure = abs(current_signed_sum + (candidate_exposure * c_sign))
+                        
                         if projected_hub_exposure > hub_cap:
                             _persist_recent_veto(
                                 contract,

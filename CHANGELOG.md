@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## 2026-06-08
+- Enabled and fully parameterized Snow and Wind weather trading functionality across the core engine and visual cockpit.
+- Upgraded the Open-Meteo data ingestion module (`data/kalshi_weather_monitor.py`) to fetch `wind_speed_10m` data from deterministic and ensemble weather models, constructing and propagating the live `members_wind` and `hourly_members_wind` arrays.
+- Implemented `_resolve_generic_prefix_city_key` to dynamically resolve city prefixes for wind (`KXWIND`) and snow (`KXSNOW`) contracts using existing ASOS station suffix aliases, bypassing static list limitations.
+- Redesigned the generic 4-step decision funnel into a 5-lane visual "Execution Pipelines" matrix on the cockpit dashboard to map specific mathematical thresholds, spreads, and AI veto rules side-by-side across Hourly Temps, Rain, Snow, Wind, and Daily Temps.
+- Fixed a cockpit data discrepancy where the Realized P&L box was calculating rolling totals from the last 25 recent trades only. Replaced it with a database-backed total (`total_won + total_lost`) to display the true, complete session P&L.
+- Extended the Trade Curve visualization and CSV data export to use a direct, database-backed query (`load_session_pnl_curve`) reflecting all closed non-zero trades since session start, resolving missing negative/historical trades.
+
 ## 2026-06-06
 - Replaced the cockpit's raw open-book dump with a live visual trade board that adds fee-aware exposure rollups, position cards, a normalized heat map, and an expiry-pressure chart while keeping the broker-truth table as a fallback tab.
 - Added a host-written `host_service_status.json` artifact during deploy and taught the in-container hosted release audit to trust it only when the artifact is fresh and SHA-matched, eliminating the false container-mode blind spot around service-up verification.

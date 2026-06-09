@@ -1178,6 +1178,11 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
         except Exception as e:
             logger.error(f"[ForecastRunner] Strategy cycle error: {e}")
 
+        # v19.2 Settle microstructure rest state
+        logger.info("[ForecastRunner] Sleeping 30s for microstructure settlement...")
+        import time
+        time.sleep(30)
+
         return entries
 
 
@@ -1524,6 +1529,11 @@ def run_position_monitor() -> None:
                     bid_key, bid_vol_key = _held_bid_fields(right)
                     current_bid = float(quote.get(bid_key, 0) or 0)
                     current_bid_vol = int(quote.get(bid_vol_key, 0) or 0)
+
+                    # v19.2 SRE Exit Guard: Avoid fee waste on worthless contracts
+                    if current_bid <= 0.01:
+                        logger.info(f"[Sovereign Exit Guard] Bid is {current_bid:.2f} <= 0.01 for {local_symbol}. Skipping exit to avoid fee waste.")
+                        continue
 
                     executable_exit_qty = min(int(qty or 0), max(0, int(current_bid_vol or 0)))
 

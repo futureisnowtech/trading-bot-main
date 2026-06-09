@@ -155,10 +155,23 @@ CREATE TABLE IF NOT EXISTS forecast_positions (
     qty          INTEGER NOT NULL,
     entry_price  REAL    NOT NULL,
     side         TEXT    NOT NULL CHECK(side IN ('YES', 'NO')),
+    category     TEXT    NOT NULL DEFAULT 'TEMP',
     active       INTEGER NOT NULL DEFAULT 1,
     opened_at    TEXT    NOT NULL,
     closed_at    TEXT,
     exit_type    TEXT
+);
+"""
+
+_DDL_WEATHER_MODEL_WEIGHTS = """
+CREATE TABLE IF NOT EXISTS weather_model_weights (
+    date             TEXT NOT NULL,
+    category         TEXT NOT NULL,
+    gfs_weight       REAL NOT NULL,
+    ecmwf_weight     REAL NOT NULL,
+    penny_threshold  REAL NOT NULL,
+    running_brier    REAL,
+    PRIMARY KEY (date, category)
 );
 """
 
@@ -219,6 +232,7 @@ def init_forecast_db(db_path: str | None = None) -> None:
             _DDL_FORECAST_POSITIONS,
             _DDL_RECENT_VETOES,
             _DDL_SYSTEM_COOLDOWNS,
+            _DDL_WEATHER_MODEL_WEIGHTS,
         ]:
             for stmt in ddl_block.strip().split(";"):
                 stmt = stmt.strip()
@@ -241,15 +255,17 @@ def insert_forecast_position(
     db_path: str | None = None,
 ) -> None:
     from datetime import datetime, timezone
+    from forecast.weather_contracts import weather_mode_for_ticker
 
+    category = weather_mode_for_ticker(ticker) or 'TEMP'
     now = datetime.now(timezone.utc).isoformat()
     normalized_qty = max(0, int(round(float(qty))))
     with _conn(db_path) as c:
         c.execute(
             """INSERT OR REPLACE INTO forecast_positions
-               (ticker, qty, entry_price, side, active, opened_at)
-               VALUES (?, ?, ?, ?, 1, ?)""",
-            (ticker, normalized_qty, entry_price, side, now),
+               (ticker, qty, entry_price, side, category, active, opened_at)
+               VALUES (?, ?, ?, ?, ?, 1, ?)""",
+            (ticker, normalized_qty, entry_price, side, category, now),
         )
         c.commit()
 

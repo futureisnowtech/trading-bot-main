@@ -526,6 +526,20 @@ def _weather_market_gate(
     contract_name: str = "",
 ) -> tuple[bool, str]:
     """Execution-only gates for weather markets."""
+    # ── v19.2 Anti-Double-Down Guard ───────────────────────────────────────
+    try:
+        import sqlite3
+        from config import DB_PATH
+        with sqlite3.connect(DB_PATH, timeout=5.0) as conn:
+            row = conn.execute(
+                "SELECT 1 FROM forecast_positions WHERE ticker=? AND active=1",
+                (ticker,),
+            ).fetchone()
+            if row:
+                return False, "duplicate_strike_guard_active"
+    except Exception as e:
+        logger.warning(f"Anti-Double-Down Guard query failed for {ticker}: {e}")
+
     yes_available = ask_yes > 0.0
     no_available = ask_no > 0.0
     hourly_contract = is_hourly_weather_contract(
@@ -1437,12 +1451,18 @@ def evaluate_contract(
                 weather_mode = weather_semantics.mode
 
         if approved:
+            # Model Entropy of predicted q_hat
+            model_entropy = -(q_hat * math.log(q_hat) + (1.0 - q_hat) * math.log(1.0 - q_hat)) if 0.0 < q_hat < 1.0 else 0.0
+
+            # Asymmetric Fast-Lane (Surge Mode)
+            is_surge = (0.03 <= p_cost <= 0.15) and (model_entropy < 0.05) and (ev_chosen >= 0.20)
+            
             n_contracts = calculate_continuous_sizing(
                 market_price=p_cost,
                 ensemble_prob=q_hat,
                 capital_base=bankroll,
-                multiplier=best_multiplier,
-                cap_pct=best_sizing_cap,
+                multiplier=best_multiplier * (3.5 if is_surge else 1.0),
+                cap_pct=max(best_sizing_cap, 0.10) if is_surge else best_sizing_cap,
                 conv_tier=best_tier,
             )
             if n_contracts > KALSHI_MAX_QTY_PER_POSITION:
@@ -1453,6 +1473,17 @@ def evaluate_contract(
                     KALSHI_MAX_QTY_PER_POSITION,
                 )
                 n_contracts = KALSHI_MAX_QTY_PER_POSITION
+                
+            # Enforce strict SRE Risk Ceilings
+            cost_limit = min(bankroll * 0.25, 10.00)
+            current_est_cost = estimate_kalshi_order_cost_usd(n_contracts, p_cost)
+            if current_est_cost > cost_limit:
+                n_contracts = int(cost_limit / (p_cost + _estimated_fee_per_contract(p_cost, rounded=False)))
+                n_contracts = min(max(0, n_contracts), KALSHI_MAX_QTY_PER_POSITION)
+                logger.info(
+                    f"Sovereign SRE Clamp: Clamping {ticker} cost to {cost_limit} USD (qty {n_contracts})"
+                )
+                
             total_cost = estimate_kalshi_order_cost_usd(n_contracts, p_cost)
         else:
             n_contracts, total_cost = 0, 0.0

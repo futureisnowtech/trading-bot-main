@@ -146,6 +146,15 @@ def min_contract_price_for_mode(
     ticker: str = "",
     contract_name: str = "",
 ) -> float:
+    try:
+        from learning.weather_rbi import get_weather_model_blend
+        blend = get_weather_model_blend(mode)
+        penny_floor = blend.get("penny_threshold")
+        if penny_floor is not None:
+            return max(0.01, float(penny_floor))
+    except Exception as e:
+        logger.warning(f"Failed to fetch dynamic penny floor for mode {mode}: {e}")
+
     mode_str = str(mode or "").upper()
     if mode_str in ("RAIN", "TEMP") or is_hourly_weather_contract(
         ticker,

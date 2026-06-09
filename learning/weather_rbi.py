@@ -172,9 +172,8 @@ def _load_model_skill_rows(db_path: str) -> dict[str, dict]:
             conn.row_factory = sqlite3.Row
             fetched = conn.execute(
                 """
-                SELECT segment, ts, sample_size, effective_weight, gfs_brier, ecmwf_brier,
-                       gfs_weight, ecmwf_weight, shrinkage, lookback_days
-                FROM weather_model_skill_state
+                SELECT category as segment, gfs_weight, ecmwf_weight, penny_threshold, running_brier
+                FROM weather_model_weights
                 """
             ).fetchall()
     except Exception:
@@ -217,6 +216,7 @@ def get_weather_model_blend(
             "ecmwf_weight": BASE_ECMWF_WEIGHT,
             "shrinkage": 0.0,
             "lookback_days": RBI_MODEL_LOOKBACK_DAYS,
+            "penny_threshold": None,
         }
 
     return {
@@ -229,6 +229,7 @@ def get_weather_model_blend(
         "ecmwf_weight": float(row.get("ecmwf_weight") or BASE_ECMWF_WEIGHT),
         "shrinkage": float(row.get("shrinkage") or 0.0),
         "lookback_days": int(row.get("lookback_days") or RBI_MODEL_LOOKBACK_DAYS),
+        "penny_threshold": float(row.get("penny_threshold")) if row.get("penny_threshold") is not None else None,
     }
 
 

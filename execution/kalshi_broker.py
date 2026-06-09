@@ -667,7 +667,6 @@ class KalshiBroker:
             discovery_series: list[str] = []
             seen_series: set[str] = set()
             if weather_series_meta:
-                ranked_families: dict[tuple[str, str], tuple[int, str]] = {}
                 for series_id, meta in weather_series_meta.items():
                     title_lower = str(meta.get("title") or "").lower()
                     city_key = resolve_weather_city_key(series_id, contract_name=str(meta.get("title") or ""))
@@ -676,29 +675,9 @@ class KalshiBroker:
                         lane = "TEMP"
                     if city_key is None or lane not in {"HIGH", "LOW", "RAIN", "TEMP"}:
                         continue
+                    discovery_series.append(series_id)
 
-                    score = 0
-                    if series_id.startswith("KX"):
-                        score += 100
-                    if lane == "TEMP" and series_id.startswith("KXTEMP"):
-                        score += 25
-                    if lane == "HIGH" and series_id.startswith("KXHIGH"):
-                        score += 20
-                    if lane == "LOW" and series_id.startswith("KXLOWT"):
-                        score += 20
-                    if lane == "RAIN" and series_id.startswith("KXRAIN"):
-                        score += 20
-                    if "hourly directional" in title_lower:
-                        score += 10
-
-                    family_key = (city_key, lane)
-                    current = ranked_families.get(family_key)
-                    if current is None or score > current[0]:
-                        ranked_families[family_key] = (score, series_id)
-
-                discovery_series = sorted(
-                    {series_id for _score, series_id in ranked_families.values()}
-                )
+                discovery_series = sorted(list(set(discovery_series)))
                 seen_series.update(discovery_series)
 
             if not discovery_series:

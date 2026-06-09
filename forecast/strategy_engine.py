@@ -156,7 +156,9 @@ def min_contract_price_for_mode(
         logger.warning(f"Failed to fetch dynamic penny floor for mode {mode}: {e}")
 
     mode_str = str(mode or "").upper()
-    if mode_str in ("RAIN", "TEMP") or is_hourly_weather_contract(
+    if mode_str in {"RAIN", "SNOW", "WIND"}:
+        return 0.02
+    if mode_str == "TEMP" or is_hourly_weather_contract(
         ticker,
         contract_name=contract_name,
     ):
@@ -1088,7 +1090,12 @@ def _strategy_weather_details(
     if semantics.comparator == "between" and mode != "RAIN":
         narrow_bin_size_multiplier = 0.85
 
-    effective_ev_threshold = 0.003 if (mode == "TEMP" or hourly_contract) else EV_THRESHOLD
+    if mode in {"RAIN", "SNOW", "WIND"}:
+        effective_ev_threshold = 0.060
+    elif mode == "TEMP" or hourly_contract:
+        effective_ev_threshold = 0.003
+    else:
+        effective_ev_threshold = EV_THRESHOLD
 
     if net_edge_yes is not None and net_edge_yes >= effective_ev_threshold:
         if cloud_veto:
@@ -1432,7 +1439,12 @@ def evaluate_contract(
             else -1.0
         )
         ev_chosen = ev_yes if best_side == "YES" else ev_no
-        effective_ev_threshold = 0.003 if (w_mode == "TEMP" or hourly_contract) else EV_THRESHOLD
+        if w_mode in {"RAIN", "SNOW", "WIND"}:
+            effective_ev_threshold = 0.060
+        elif w_mode == "TEMP" or hourly_contract:
+            effective_ev_threshold = 0.003
+        else:
+            effective_ev_threshold = EV_THRESHOLD
         if approved and ev_chosen < effective_ev_threshold:
             approved = False
             veto_reason = f"fee_adjusted_ev_too_low ({ev_chosen:.4f} < {effective_ev_threshold})"

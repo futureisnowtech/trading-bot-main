@@ -281,7 +281,7 @@ p, li, div, span, label {
 
 .stage-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.8rem;
 }
 
@@ -1076,7 +1076,7 @@ metric_html = f"""
 """
 _render_html(metric_html)
 
-st.markdown("### Decision Funnel")
+st.markdown("### Execution Pipelines")
 _render_html('<div class="stage-grid">' + "".join(_funnel_stage_card(stage) for stage in decision_funnel) + "</div>")
 
 top_left, top_right = st.columns([1.3, 1.0], gap="large")

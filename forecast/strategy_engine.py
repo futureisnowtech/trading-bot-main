@@ -824,7 +824,7 @@ def calculate_continuous_sizing(market_price: float, ensemble_prob: float, capit
     if calculated_ev <= 0.0 or capital_base <= 0:
         return 0
 
-    scaling_factor = 1.0 / (1.0 + math.exp(-15.0 * (calculated_ev - 0.12)))
+    scaling_factor = 1.0 / (1.0 + math.exp(-15.0 * (calculated_ev - 0.06)))
     capital_allowance = min(
         max(0.0, float(capital_base) * max(0.0, float(cap_pct))),
         float(KALSHI_MAX_USD_PER_POSITION),
@@ -1000,19 +1000,22 @@ def _strategy_weather_details(
     except Exception:
         pass
 
-    # v19.5: Sovereign Survival — Hard Sigma Veto
-    if sigma > KALSHI_MAX_SIGMA:
-        logger.warning(f"Sovereign Chaos Veto: {ticker} Sigma={sigma:.1f}F > {KALSHI_MAX_SIGMA}")
+    # v19.5: Sovereign Survival — Hard Sigma Veto (Evaluates raw physical data only)
+    if sigma_raw > KALSHI_MAX_SIGMA:
+        logger.warning(f"Sovereign Chaos Veto: {ticker} Sigma={sigma_raw:.1f}F > {KALSHI_MAX_SIGMA}")
         return (
             False,
             "",
             0.0,
-            [f"chaos_veto (sigma={sigma:.1f} > {KALSHI_MAX_SIGMA})"],
+            [f"chaos_veto (sigma={sigma_raw:.1f} > {KALSHI_MAX_SIGMA})"],
             False,
             1.0,
             3,
             0.05,
         )
+
+    # Apply AI Multiplier to post-gate sizing sigma
+    sigma = sigma_raw * ai_multiplier
 
     # sigma_mult: 1.0 at 2.0F sigma, 1.25 at 1.0F sigma, 0.5 at 4.0F sigma
     sigma_mult = max(0.3, min(1.3, 1.5 - (sigma / 4.0)))
@@ -1627,20 +1630,39 @@ def evaluate_market_snapshots(
     # Local frequency map to track evaluations in the SAME tick
     current_tick_counts = open_event_families.copy()
     
-    # v19.1.10: Regional Hub Exposure Tracking
-    hub_exposure = {} 
+    # v19.1.10: Regional Hub Exposure Tracking (Net Directional Delta Hedging)
+    hub_signed_exposures = {} 
     for pos in open_positions:
         p_ticker = pos.get("local_symbol", "")
         p_hub = _get_city_hub(
             p_ticker,
             contract_name=str(pos.get("contract_name") or ""),
-        )  # Ensure _get_city_hub uses airport codes (e.g. 'ORD', 'JFK', 'DEN')
+        )
         entry_price = float(pos.get("entry_price") or pos.get("entry") or 0.0)
         pos_usd = get_kalshi_position_exposure_usd(
             float(pos.get("qty", 0)),
             entry_price,
         )
-        hub_exposure[p_hub] = hub_exposure.get(p_hub, 0.0) + pos_usd
+        
+        # Calculate Delta Sign
+        # cool/wet outcomes (YES on Rain, NO on Daily High, YES on Hourly Low, YES on Snow, YES on Wind) = -1.0
+        # warm/dry outcomes (NO on Rain, YES on Daily High, NO on Hourly Low, NO on Snow, NO on Wind) = +1.0
+        p_side = str(pos.get("side") or "").upper()
+        p_prefix = p_ticker.split("-")[0].upper()
+        
+        is_cool_wet_prefix = any(x in p_prefix for x in ("KXLOW", "RAIN", "KXRAIN", "KXSNOW", "KXWIND"))
+        is_warm_dry_prefix = any(x in p_prefix for x in ("KXHIGH", "KXTEMP"))
+        
+        if is_cool_wet_prefix:
+            sign = -1.0 if p_side == "YES" else 1.0
+        elif is_warm_dry_prefix:
+            sign = 1.0 if p_side == "YES" else -1.0
+        else:
+            sign = 1.0
+            
+        hub_signed_exposures[p_hub] = hub_signed_exposures.get(p_hub, []) + [pos_usd * sign]
+        
+    hub_exposure = {hub: abs(sum(exps)) for hub, exposures in hub_signed_exposures.items() for exps in [exposures]}
     
     # Initial load of open hub exposure (approximate based on ticker)
     # Note: In a true state-full system, we'd query existing positions.

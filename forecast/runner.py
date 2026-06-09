@@ -759,6 +759,7 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                 )
                 from forecast.strategy_engine import _get_city_hub
 
+                cycle_hub_signed_exposures = {}
                 for pos in open_positions:
                     symbol = str(pos.get("local_symbol") or pos.get("ticker") or "")
                     hub = _get_city_hub(symbol)
@@ -771,9 +772,22 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                         float(pos.get("qty") or 0.0),
                         entry_price,
                     )
-                    cycle_hub_exposure_usd[hub] = (
-                        cycle_hub_exposure_usd.get(hub, 0.0) + exposure
-                    )
+                    p_side = str(pos.get("side") or "").upper()
+                    p_prefix = symbol.split("-")[0].upper()
+                    
+                    is_cool_wet_prefix = any(x in p_prefix for x in ("KXLOW", "RAIN", "KXRAIN", "KXSNOW", "KXWIND"))
+                    is_warm_dry_prefix = any(x in p_prefix for x in ("KXHIGH", "KXTEMP"))
+                    
+                    if is_cool_wet_prefix:
+                        sign = -1.0 if p_side == "YES" else 1.0
+                    elif is_warm_dry_prefix:
+                        sign = 1.0 if p_side == "YES" else -1.0
+                    else:
+                        sign = 1.0
+                        
+                    cycle_hub_signed_exposures[hub] = cycle_hub_signed_exposures.get(hub, []) + [exposure * sign]
+                    
+                cycle_hub_exposure_usd = {h: abs(sum(exps)) for h, exps in cycle_hub_signed_exposures.items()}
             except Exception:
                 get_kalshi_hub_exposure_cap = None
                 get_kalshi_position_exposure_usd = None
@@ -1178,10 +1192,11 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
         except Exception as e:
             logger.error(f"[ForecastRunner] Strategy cycle error: {e}")
 
-        # v19.2 Settle microstructure rest state
-        logger.info("[ForecastRunner] Sleeping 30s for microstructure settlement...")
+        # v19.2 Settle microstructure rest state (Leaky Token Bucket / Burst delays)
+        # Avoid blind 30s rate-limiting delays while safely pacing submissions.
+        logger.info("[ForecastRunner] Pacing burst submissions. Executing micro-delay...")
         import time
-        time.sleep(30)
+        time.sleep(1.5)
 
         return entries
 

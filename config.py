@@ -155,12 +155,12 @@ KALSHI_MAX_DEPLOYED_PCT: float = 0.90
 KALSHI_MAX_CONCURRENT_POSITIONS: int = 50
 KALSHI_SAME_EVENT_FAMILY_CAP: int = int(os.getenv("KALSHI_SAME_EVENT_FAMILY_CAP", "5"))
 KALSHI_HUB_EXPOSURE_PCT: float = float(
-    os.getenv("KALSHI_HUB_EXPOSURE_PCT", "0.30")
+    os.getenv("KALSHI_HUB_EXPOSURE_PCT", "0.60")
 )
 KALSHI_HUB_EXPOSURE_MIN_USD: float = float(
     os.getenv("KALSHI_HUB_EXPOSURE_MIN_USD", "40")
 )
-KALSHI_MAX_QTY_PER_POSITION: int = 200
+KALSHI_MAX_QTY_PER_POSITION: int = 2500
 KALSHI_MAX_USD_PER_POSITION: float = 50.0  # Hard Ceiling
 KALSHI_MIN_PRICE: float = 0.08
 KALSHI_MAX_SIGMA: float = 2.8
@@ -268,10 +268,20 @@ def kalshi_raw_fee_per_contract(
     fee_rate: float | None = None,
 ) -> float:
     normalized_price = _normalize_kalshi_price(price)
-    if normalized_price <= 0.0:
+    if normalized_price <= 0.0 or normalized_price >= 1.0:
         return 0.0
-    rate = get_kalshi_fee_rate(maker=maker, fee_rate=fee_rate)
-    return rate * normalized_price * (1.0 - normalized_price)
+    
+    if maker:
+        rate = get_kalshi_fee_rate(maker=True, fee_rate=fee_rate)
+        return rate * normalized_price * (1.0 - normalized_price)
+        
+    # Explicit Discrete V2 Taker Fee Tier logic
+    if normalized_price <= 0.10:
+        return 0.01
+    elif normalized_price <= 0.20:
+        return 0.02
+    else:
+        return 0.07
 
 
 def estimate_kalshi_order_fee_usd(

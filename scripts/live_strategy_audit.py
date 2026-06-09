@@ -81,11 +81,11 @@ def run_audit():
         avg_price = 0.30
         spread_ratio = spread / avg_price
         max_ratio = 0.35
-        # If spread ratio (50%) > max_ratio (35%), must veto!
+        # If spread ratio (40%) > max_ratio (35%), must veto!
         approved, veto_reason = _weather_market_gate(
-            ask_yes=0.22,
-            ask_no=0.38,
-            spread=0.15,
+            ask_yes=0.16,
+            ask_no=0.24,
+            spread=0.08,
             hours_to_resolution=12.0,
             open_positions_count=0,
             deployed_pct=0.0,

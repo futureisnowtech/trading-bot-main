@@ -106,7 +106,7 @@ def run_audit():
     logger.info("\n--- Phase 3: Surge Mode Sizing Simulation ---")
     try:
         p_cost = 0.05
-        q_hat = 0.99
+        q_hat = 0.995
         # model entropy is very low (certainty)
         model_entropy = -(q_hat * math.log(q_hat) + (1.0 - q_hat) * math.log(1.0 - q_hat))
         # ev chosen is 94% edge (highly convex!)

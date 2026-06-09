@@ -614,6 +614,7 @@ def build_metric_explainers(balance_usd: float | None = None) -> dict[str, str]:
         "Release Gate": "This is the final production-readiness verdict. It stays blocked until the proof checks, runtime health, live provider checks, and droplet deployment truth all agree the engine is safe to place fresh entries.",
         "Drift": "Drift means the broker and the local SQLite ledger disagree. This matters because we operate broker-first, so drift is a warning that the local story may be stale or incomplete.",
         "Realized P&L": "This is closed-trade profit and loss already locked in. It excludes open-position swings so you can separate booked outcomes from temporary mark changes.",
+        "Session Win Rate": "The win rate of completed Kalshi trades since the active trade session start. Calculated as wins divided by total non-zero P&L closed positions.",
         "Book Exposure": "This is the fee-aware dollar amount currently committed across all live positions. It is the real capital at risk in the open book, not just the number of contracts.",
         "Live Mark P&L": "This marks each live position to the current midpoint quote on the side we actually hold. It is a useful pulse check, but it is not a guaranteed exit result.",
         "Emergency Exit P&L": "This estimates what the book would look like if we tried to flatten at the live bid right now after fees. It is the harsher, more realistic liquidation view.",
@@ -985,6 +986,41 @@ def build_regime_cards(
     ]
 
 
+def load_session_win_rate() -> dict[str, Any]:
+    from config import TRADE_SESSION_START
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT COUNT(*) as total,
+                   SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END) as wins,
+                   SUM(CASE WHEN pnl_usd < 0 THEN 1 ELSE 0 END) as losses
+            FROM trades
+            WHERE paper = 0 AND pnl_usd != 0
+              AND ts >= ?
+            """,
+            (TRADE_SESSION_START,),
+        ).fetchone()
+
+    if not row or not row["total"]:
+        return {
+            "total": 0,
+            "wins": 0,
+            "losses": 0,
+            "win_rate": 0.0,
+        }
+
+    total = row["total"]
+    wins = row["wins"] or 0
+    losses = row["losses"] or 0
+    win_rate = wins / total if total > 0 else 0.0
+    return {
+        "total": total,
+        "wins": wins,
+        "losses": losses,
+        "win_rate": win_rate,
+    }
+
+
 def get_cockpit_payload(*, live_sync: bool = True) -> dict[str, Any]:
     truth = get_live_kalshi_status(connect=live_sync, sync_broker=live_sync)
     release_status = get_release_status(truth=truth)
@@ -1062,6 +1098,7 @@ def get_cockpit_payload(*, live_sync: bool = True) -> dict[str, Any]:
         "recent_trades": recent_trades,
         "trade_edge_rows": trade_edge_rows,
         "realized_pnl_curve": build_realized_pnl_curve(recent_trades),
+        "session_win_rate": load_session_win_rate(),
         "recent_events": recent_events,
         "notifications": get_notifications(limit=12),
         "recent_vetoes": recent_vetoes,

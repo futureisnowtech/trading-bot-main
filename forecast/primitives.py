@@ -40,8 +40,10 @@ def log_odds(p: float) -> float:
 
 
 def logistic(x: float) -> float:
-    """Inverse-logit transform."""
-    return 1.0 / (1.0 + math.exp(-x))
+    """Inverse-logit transform with SRE overflow protection."""
+    # Force max() and min() clipping limits to prevent math.exp() OverflowError
+    safe_x = max(-50.0, min(50.0, float(x)))
+    return 1.0 / (1.0 + math.exp(-safe_x))
 
 
 def entropy(p: float) -> float:

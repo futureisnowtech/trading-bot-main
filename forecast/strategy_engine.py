@@ -33,6 +33,7 @@ import numpy as np
 
 from config import (
     DB_PATH,
+    HUB_PARAMS,
     MACRO_CACHE_FILE,
     KALSHI_EXPENSIVE_YES_MIN_NET_EDGE,
     KALSHI_EXPENSIVE_YES_SIZE_MULTIPLIER,
@@ -96,6 +97,53 @@ MAX_SIGMA_T: float = 0.80
 
 # Parity gap gate — G_t too large means pricing is internally inconsistent
 MAX_PARITY_GAP_ABS: float = 0.05  # |G_t| ≤ 0.05
+
+
+# v19.10 Gate 11: Hard RBI Conviction Floor — LANE-AWARE conviction floor on q_side.
+# Thresholds derived from each lane's resolution mechanics, not optimization:
+#   - Hourly contracts (TEMP family / KX*T*): fast resolution + cheap re-entry
+#     can tolerate moderate conviction.
+#   - Daily HIGH/LOW (temp): 24h capital lockup needs stronger conviction.
+#   - Binary RAIN/SNOW/WIND: cheap longshots with weak signal need strictest floor.
+# Per-hub override via config/hub_params.json[hub]["hard_rbi_threshold"] is honored
+# when present; SRE clamp [0.50, 0.95] is enforced unconditionally.
+HARD_RBI_THRESHOLD_HOURLY: float = 0.53
+HARD_RBI_THRESHOLD_DAILY: float = 0.57
+HARD_RBI_THRESHOLD_BINARY: float = 0.62
+HARD_RBI_THRESHOLD_LO: float = 0.50
+HARD_RBI_THRESHOLD_HI: float = 0.95
+
+
+def _resolve_hard_rbi_threshold(
+    lane: str | None,
+    hourly: bool,
+    hub: str,
+) -> float:
+    """Pick the Hard RBI conviction floor for one contract.
+
+    Resolution order:
+      1. Hourly contracts (any lane) or TEMP get the loose floor.
+      2. Binary-precip lanes (RAIN/SNOW/WIND) get the strictest floor.
+      3. Daily HIGH/LOW get the middle floor.
+      4. Unknown lanes fall back to the daily floor.
+      5. Optional per-hub override from HUB_PARAMS replaces the lane default.
+      6. SRE clamp [0.50, 0.95] is applied unconditionally.
+    """
+    if hourly or lane == "TEMP":
+        base = HARD_RBI_THRESHOLD_HOURLY
+    elif lane in {"RAIN", "SNOW", "WIND"}:
+        base = HARD_RBI_THRESHOLD_BINARY
+    elif lane in {"HIGH", "LOW"}:
+        base = HARD_RBI_THRESHOLD_DAILY
+    else:
+        base = HARD_RBI_THRESHOLD_DAILY
+    try:
+        bucket = HUB_PARAMS.get(hub, {}) if isinstance(HUB_PARAMS, dict) else {}
+        if isinstance(bucket, dict) and "hard_rbi_threshold" in bucket:
+            base = float(bucket["hard_rbi_threshold"])
+    except (TypeError, ValueError):
+        pass
+    return max(HARD_RBI_THRESHOLD_LO, min(HARD_RBI_THRESHOLD_HI, float(base)))
 
 # Duplicate/correlated exposure penalty
 SAME_EVENT_PENALTY: float = 0.50  # halve Kelly fraction if same event family open
@@ -691,6 +739,9 @@ def _probability_from_weather_record(
         elif semantics.mode == "TEMP":
             mean_value = weather_record.get("mean_temp")
             sigma_value = weather_record.get("sigma_temp")
+        elif semantics.mode == "WIND":
+            mean_value = weather_record.get("mean_wind")
+            sigma_value = weather_record.get("sigma_wind")
         else:
             mean_value = weather_record.get("mean_high")
             sigma_value = weather_record.get("sigma_high")
@@ -1523,6 +1574,29 @@ def evaluate_contract(
         if approved and ev_chosen < effective_ev_threshold:
             approved = False
             veto_reason = f"fee_adjusted_ev_too_low ({ev_chosen:.4f} < {effective_ev_threshold})"
+
+        # ── Gate 11: Hard RBI Conviction Floor (v19.10 lane-aware) ─────────────
+        # Kills marginal-conviction trades BEFORE sizing so fee drag cannot
+        # dominate post-fee PnL. Threshold is derived from the lane's resolution
+        # mechanics; see _resolve_hard_rbi_threshold() for the layered logic.
+        if approved:
+            _hub_for_gate11 = _get_city_hub(
+                contract.get("local_symbol", ""),
+                contract_name=str(contract.get("contract_name") or ""),
+            )
+            _hard_rbi_threshold = _resolve_hard_rbi_threshold(
+                lane=w_mode,
+                hourly=hourly_contract,
+                hub=_hub_for_gate11,
+            )
+            _q_side_for_gate11 = max(0.01, min(0.99, float(q_hat)))
+            if _q_side_for_gate11 < _hard_rbi_threshold:
+                approved = False
+                veto_reason = (
+                    f"HARD_RBI_CONVICTION_FLOOR "
+                    f"(q={_q_side_for_gate11:.3f}<T={_hard_rbi_threshold:.3f} "
+                    f"lane={w_mode or 'UNKNOWN'} hub={_hub_for_gate11})"
+                )
 
         weather_model_prob_gfs = None
         weather_model_prob_ecmwf = None

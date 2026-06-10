@@ -414,3 +414,22 @@ def get_kalshi_position_exposure_usd(
         maker=maker,
         fee_rate=fee_rate,
     )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# v19.10: Optional per-hub Gate 11 overrides
+# ──────────────────────────────────────────────────────────────────────────────
+# Loaded from config/hub_params.json. Hubs may optionally override the lane-aware
+# Hard RBI Conviction Floor by setting {"hard_rbi_threshold": <0.50–0.95>}.
+# If the file is absent, empty, or malformed, HUB_PARAMS is {} and the lane-aware
+# defaults in forecast/strategy_engine.py apply unconditionally.
+import json as _hub_json
+
+_HUB_PARAMS_PATH = os.path.join(REPO_ROOT, "config", "hub_params.json")
+try:
+    with open(_HUB_PARAMS_PATH, "r", encoding="utf-8") as _hub_fh:
+        HUB_PARAMS: dict = _hub_json.load(_hub_fh)
+        if not isinstance(HUB_PARAMS, dict):
+            HUB_PARAMS = {}
+except (FileNotFoundError, _hub_json.JSONDecodeError, OSError):
+    HUB_PARAMS = {}

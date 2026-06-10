@@ -851,6 +851,11 @@ def _build_weather_record_from_hourly(
         else _deterministic_precip_sigma(mean_precip, horizon_days=0)
     )
     mean_wind = float(np.mean(members_wind)) if members_wind else 0.0
+    sigma_wind = (
+        float(np.std(members_wind))
+        if len(members_wind) > 1
+        else 0.5
+    )
 
     return {
         "members_high": members_high,
@@ -864,6 +869,7 @@ def _build_weather_record_from_hourly(
         "mean_precip": mean_precip,
         "sigma_precip": sigma_precip,
         "mean_wind": mean_wind,
+        "sigma_wind": sigma_wind,
         "peak_tcdc": float(np.mean(cloud_members)) if cloud_members else 0.0,
         "peak_ssrd": float(np.mean(ssrd_members)) if ssrd_members else None,
         "timestamp": time.time(),

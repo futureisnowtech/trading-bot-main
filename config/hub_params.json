@@ -1,1 +1,9 @@
-{}
+{
+  "MIDWEST":   {"hard_rbi_threshold": 0.50},
+  "NORTHEAST": {"hard_rbi_threshold": 0.52},
+  "SOUTH":     {"hard_rbi_threshold": 0.70},
+  "FLORIDA":   {"hard_rbi_threshold": 0.70},
+  "GULF":      {"hard_rbi_threshold": 0.70},
+  "MOUNTAIN":  {"hard_rbi_threshold": 0.70},
+  "WEST":      {"hard_rbi_threshold": 0.54}
+}

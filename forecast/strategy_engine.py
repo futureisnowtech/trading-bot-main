@@ -1217,13 +1217,21 @@ def _strategy_weather_details(
         narrow_bin_size_multiplier = 0.85
 
     if mode in {"RAIN", "SNOW", "WIND"}:
-        effective_ev_threshold = 0.060
+        base_threshold = 0.060
     elif mode == "TEMP" or hourly_contract:
-        effective_ev_threshold = 0.003
+        base_threshold = 0.003
     else:
-        effective_ev_threshold = EV_THRESHOLD
+        base_threshold = EV_THRESHOLD
 
-    if net_edge_yes is not None and net_edge_yes >= effective_ev_threshold:
+    def _get_fee_aware_threshold(price: float) -> float:
+        if 0.20 < price < 0.35:
+            return max(base_threshold, 0.080)
+        return base_threshold
+
+    effective_ev_threshold_yes = _get_fee_aware_threshold(ask_yes)
+    effective_ev_threshold_no = _get_fee_aware_threshold(ask_no)
+
+    if net_edge_yes is not None and net_edge_yes >= effective_ev_threshold_yes:
         if cloud_veto:
             if peak_ssrd is not None:
                 return (
@@ -1275,7 +1283,7 @@ def _strategy_weather_details(
             )
         return True, "YES", ensemble_prob, factors, is_taker, sizing_multiplier, conv_tier, sizing_cap
 
-    if net_edge_no is not None and net_edge_no >= effective_ev_threshold:
+    if net_edge_no is not None and net_edge_no >= effective_ev_threshold_no:
         is_taker = edge_no >= 0.22 and is_short_term
         factors = [
             f"ensemble_p={ensemble_prob:.1%}",
@@ -1566,11 +1574,18 @@ def evaluate_contract(
         )
         ev_chosen = ev_yes if best_side == "YES" else ev_no
         if w_mode in {"RAIN", "SNOW", "WIND"}:
-            effective_ev_threshold = 0.060
+            base_threshold = 0.060
         elif w_mode == "TEMP" or hourly_contract:
-            effective_ev_threshold = 0.003
+            base_threshold = 0.003
         else:
-            effective_ev_threshold = EV_THRESHOLD
+            base_threshold = EV_THRESHOLD
+            
+        p_cost_eval = ask_yes if best_side == "YES" else ask_no
+        if 0.20 < p_cost_eval < 0.35:
+            effective_ev_threshold = max(base_threshold, 0.080)
+        else:
+            effective_ev_threshold = base_threshold
+            
         if approved and ev_chosen < effective_ev_threshold:
             approved = False
             veto_reason = f"fee_adjusted_ev_too_low ({ev_chosen:.4f} < {effective_ev_threshold})"

@@ -1390,45 +1390,46 @@ def run_position_monitor() -> None:
                             logger.info(f"[Sovereign Exit] TP Triggered: {local_symbol} at {bid_price:.2f} (85c Floor)")
                             resolved = True
 
+                        # Fix 3: Disable Panic Selling. 
+                        # We no longer exit on model invalidation or time decay unless profitable.
+                        # We ride the variance to resolution to avoid double-taxed Kalshi fees.
+                        
                         # RULE 2: Model Invalidation (Stop-Loss)
-                        # If our own model prob drops below 50%, the thesis is dead.
-                        elif held_model_p < 0.50 and held_model_p > 0:
-                            logger.warning(
-                                f"[Sovereign Exit] SL Triggered: {local_symbol} "
-                                f"held_p={held_model_p:.2f} < 0.50"
-                            )
-                            resolved = True
+                        # (Disabled by Sovereign SRE Fix 3)
+                        # elif held_model_p < 0.50 and held_model_p > 0:
+                        #     logger.warning(
+                        #         f"[Sovereign Exit] SL Triggered: {local_symbol} "
+                        #         f"held_p={held_model_p:.2f} < 0.50"
+                        #     )
+                        #     resolved = True
 
                         # RULE 3: Model Invalidation Delta
-                        # If the live model has moved materially against the entry
-                        # and the remaining edge is mostly gone, redeploy capital.
-                        elif _should_model_invalidation_exit(
-                            entry_held_p,
-                            held_model_p,
-                            remaining_edge,
-                        ):
-                            logger.warning(
-                                f"[Sovereign Exit] INVALIDATION: {local_symbol} "
-                                f"entry_p={entry_held_p:.2f} live_p={held_model_p:.2f} "
-                                f"remaining_edge={remaining_edge:.3f}"
-                            )
-                            resolved = True
+                        # (Disabled by Sovereign SRE Fix 3)
+                        # elif _should_model_invalidation_exit(
+                        #     entry_held_p,
+                        #     held_model_p,
+                        #     remaining_edge,
+                        # ):
+                        #     logger.warning(
+                        #         f"[Sovereign Exit] INVALIDATION: {local_symbol} "
+                        #         f"entry_p={entry_held_p:.2f} live_p={held_model_p:.2f} "
+                        #         f"remaining_edge={remaining_edge:.3f}"
+                        #     )
+                        #     resolved = True
 
                         # RULE 4: Time-Decay Redeploy
-                        # When the market has already priced most of the thesis and
-                        # little edge remains, redeploy instead of waiting for the
-                        # final settlement jump.
-                        elif _should_time_decay_exit(
-                            hours_to_resolution,
-                            bid_price,
-                            remaining_edge,
-                        ):
-                            logger.info(
-                                f"[Sovereign Exit] TIME-DECAY REDEPLOY: {local_symbol} "
-                                f"hours_to_res={hours_to_resolution:.1f} bid={bid_price:.2f} "
-                                f"remaining_edge={remaining_edge:.3f}"
-                            )
-                            resolved = True
+                        # (Disabled by Sovereign SRE Fix 3)
+                        # elif _should_time_decay_exit(
+                        #     hours_to_resolution,
+                        #     bid_price,
+                        #     remaining_edge,
+                        # ):
+                        #     logger.info(
+                        #         f"[Sovereign Exit] TIME-DECAY REDEPLOY: {local_symbol} "
+                        #         f"hours_to_res={hours_to_resolution:.1f} bid={bid_price:.2f} "
+                        #         f"remaining_edge={remaining_edge:.3f}"
+                        #     )
+                        #     resolved = True
                         
                         # ── v19.1.10: Intraday Precinct (METAR/HRRR) ─────────
                         # v19.1.10: Sovereign Instrumentation (Intraday Layer)

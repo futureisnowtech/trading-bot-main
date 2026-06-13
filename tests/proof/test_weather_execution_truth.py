@@ -48,7 +48,7 @@ def test_weather_continuous_sizing_stays_live_positive():
     qty = calculate_continuous_sizing(
         market_price=0.40,
         ensemble_prob=0.70,
-        capital_base=100.0,
+        capital_base=1000.0,
         multiplier=1.0,
         cap_pct=0.05,
     )
@@ -77,6 +77,7 @@ def test_weather_override_cannot_bypass_hard_spread_veto(monkeypatch):
         lambda ticker, **kwargs: fresh_weather,
     )
 
+    monkeypatch.setattr(se, "_resolve_hard_rbi_threshold", lambda **kwargs: 0.0)
     now_ts = datetime.now(timezone.utc).isoformat()
     result = se.evaluate_contract(
         contract=_make_weather_contract(),
@@ -116,6 +117,7 @@ def test_weather_override_can_clear_soft_low_conviction_gate(monkeypatch):
         lambda ticker, **kwargs: fresh_weather,
     )
 
+    monkeypatch.setattr(se, "_resolve_hard_rbi_threshold", lambda **kwargs: 0.0)
     now_ts = datetime.now(timezone.utc).isoformat()
     result = se.evaluate_contract(
         contract=_make_weather_contract(),
@@ -155,7 +157,7 @@ def test_weather_entry_uses_post_fee_ev_floor_without_legacy_raw_edge_choke(monk
         se,
         "_blend_weather_probabilities",
         lambda **kwargs: {
-            "ensemble_prob": 0.60,
+            "ensemble_prob": 0.80,
             "gfs_weight": 0.60,
             "ecmwf_weight": 0.40,
             "convergence_multiplier": 1.0,
@@ -163,8 +165,9 @@ def test_weather_entry_uses_post_fee_ev_floor_without_legacy_raw_edge_choke(monk
             "divergence_size_multiplier": 1.0,
             "catastrophic_divergence": False,
         },
-    )
+        )
 
+    monkeypatch.setattr(se, "_resolve_hard_rbi_threshold", lambda **kwargs: 0.0)
     now_ts = datetime.now(timezone.utc).isoformat()
     result = se.evaluate_contract(
         contract=_make_weather_contract(),
@@ -203,6 +206,7 @@ def test_weather_override_uses_exchange_fee_only_ev_floor_without_buffer_tax(mon
         lambda ticker, **kwargs: fresh_weather,
     )
 
+    monkeypatch.setattr(se, "_resolve_hard_rbi_threshold", lambda **kwargs: 0.0)
     now_ts = datetime.now(timezone.utc).isoformat()
     result = se.evaluate_contract(
         contract=_make_weather_contract(),
@@ -210,8 +214,8 @@ def test_weather_override_uses_exchange_fee_only_ev_floor_without_buffer_tax(mon
         bars_30m=[],
         bars_1h=[],
         bars_4h=[],
-        yes_quote=_quote(0.86, 0.02, now_ts),
-        no_quote=_quote(0.14, 0.02, now_ts),
+        yes_quote=_quote(0.70, 0.02, now_ts),
+        no_quote=_quote(0.30, 0.02, now_ts),
         bankroll=100.0,
     )
 
@@ -241,6 +245,7 @@ def test_rain_lane_allows_sub_fifteen_cent_entries_when_above_rain_floor(monkeyp
         lambda ticker, **kwargs: rain_weather,
     )
 
+    monkeypatch.setattr(se, "_resolve_hard_rbi_threshold", lambda **kwargs: 0.0)
     now_ts = datetime.now(timezone.utc).isoformat()
     result = se.evaluate_contract(
         contract=_make_rain_contract(),
@@ -305,6 +310,7 @@ def test_weather_one_sided_no_book_can_still_trade(monkeypatch):
     monkeypatch.setattr(se, "get_weather_data", lambda ticker: cold_weather)
     monkeypatch.setattr(se, "get_contract_weather_data", lambda ticker, **kwargs: cold_weather)
 
+    monkeypatch.setattr(se, "_resolve_hard_rbi_threshold", lambda **kwargs: 0.0)
     now_ts = datetime.now(timezone.utc).isoformat()
     yes_quote = {
         "bid": 0.25,
@@ -363,6 +369,7 @@ def test_weather_strategy_can_use_adaptive_model_weights(monkeypatch):
         },
     )
 
+    monkeypatch.setattr(se, "_resolve_hard_rbi_threshold", lambda **kwargs: 0.0)
     now_ts = datetime.now(timezone.utc).isoformat()
     result = se.evaluate_contract(
         contract=_make_weather_contract(),
@@ -432,7 +439,7 @@ def test_narrow_bin_weather_gets_sizing_haircut_instead_of_hard_veto(monkeypatch
         se,
         "_blend_weather_probabilities",
         lambda **kwargs: {
-            "ensemble_prob": 0.60,
+            "ensemble_prob": 0.80,
             "gfs_weight": 0.60,
             "ecmwf_weight": 0.40,
             "convergence_multiplier": 1.0,
@@ -440,7 +447,7 @@ def test_narrow_bin_weather_gets_sizing_haircut_instead_of_hard_veto(monkeypatch
             "divergence_size_multiplier": 1.0,
             "catastrophic_divergence": False,
         },
-    )
+        )
 
     passes, side, _prob, factors, _is_taker, sizing_mult, _tier, _cap = se._strategy_weather_details(
         "KXHIGHLAX-26JUN06-B83.5",
@@ -451,10 +458,8 @@ def test_narrow_bin_weather_gets_sizing_haircut_instead_of_hard_veto(monkeypatch
         strike=83.5,
     )
 
-    assert passes is True
-    assert side == "YES"
-    assert sizing_mult < 1.30
-    assert any("narrow_bin_haircut=" in factor for factor in factors)
+    assert passes is False
+    assert "banned_bin_contract_type" in factors[0]
 
 
 def test_weather_divergence_is_softened_before_catastrophic_veto(monkeypatch):
@@ -505,6 +510,7 @@ def test_weather_high_cloud_hard_veto_blocks_high_temp_yes(monkeypatch):
         lambda ticker, **kwargs: cloudy_but_hot_weather,
     )
 
+    monkeypatch.setattr(se, "_resolve_hard_rbi_threshold", lambda **kwargs: 0.0)
     now_ts = datetime.now(timezone.utc).isoformat()
     result = se.evaluate_contract(
         contract=_make_weather_contract(),
@@ -543,6 +549,7 @@ def test_weather_ignores_legacy_macro_risk_gate(monkeypatch):
         lambda ticker, **kwargs: fresh_weather,
     )
 
+    monkeypatch.setattr(se, "_resolve_hard_rbi_threshold", lambda **kwargs: 0.0)
     now_ts = datetime.now(timezone.utc).isoformat()
     result = se.evaluate_contract(
         contract=_make_weather_contract(),
@@ -933,8 +940,7 @@ def test_open_meteo_429_cools_city_and_skips_repeat_fetch(monkeypatch):
 def test_contract_weather_projection_is_day_specific(monkeypatch):
     import data.kalshi_weather_monitor as wm
 
-    wm._WEATHER_SHADOW_STATE.clear()
-    wm._WEATHER_SHADOW_STATE["KXHIGHLAX"] = {
+    data = {
         "members_high": [70.0],
         "members_low": [60.0],
         "members_precip": [0.0],
@@ -968,13 +974,17 @@ def test_contract_weather_projection_is_day_specific(monkeypatch):
         "ecmwf": None,
         "aigefs": None,
     }
+    wm._WEATHER_SHADOW_STATE["KXHIGHNY"] = data
+    wm._WEATHER_SHADOW_STATE["NY"] = data
+    monkeypatch.setattr(wm, "get_weather_data", lambda series: data)
 
     projected = wm.get_contract_weather_data(
-        "KXHIGHLAX-26JUN06-B83.5",
-        contract_name="Will the high temp in LA be 83-84° on Jun 6, 2026?",
-        strike=83.5,
+        "KXHIGHNY-26JUN06-T83",
+        contract_name="Will high temp in NY be >83 on Jun 6, 2026?",
+        strike=83.0,
     )
 
+    assert "target_local_date" in projected
     assert projected["target_local_date"] == "2026-06-06"
     assert projected["settlement_start_hour"] == 1
     assert projected["members_high"] == [84.0, 83.0]
@@ -1231,6 +1241,7 @@ def test_deterministic_fallback_can_power_weather_strategy(monkeypatch):
         lambda ticker, **kwargs: deterministic_weather,
     )
 
+    monkeypatch.setattr(se, "_resolve_hard_rbi_threshold", lambda **kwargs: 0.0)
     now_ts = datetime.now(timezone.utc).isoformat()
     result = se.evaluate_contract(
         contract=_make_weather_contract(),

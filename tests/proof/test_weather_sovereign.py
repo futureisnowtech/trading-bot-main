@@ -31,54 +31,51 @@ class TestWeatherSovereign(unittest.TestCase):
     @patch('forecast.strategy_engine.get_contract_weather_data')
     def test_ecmwf_convergence(self, mock_get_weather):
         """Verify GFS + ECMWF convergence (1.5x multiplier)."""
-        ticker = "KXHIGHNY-26JUN01-B75.5"
+        ticker = "KXHIGHNY-26JUN01-T75"
         # 31 GFS members, 31 EC members for simplicity in mock
-        # Success if >= 75.5
+        # Success if >= 75
         mock_get_weather.return_value = {
-            "members_high": [76] * 31, # 100% GFS prob inside 75-76 band
+            "members_high": [76] * 31, # 100% GFS prob inside >75
             "ecmwf": {
-                "members_high": [76] * 31 # 100% EC prob inside 75-76 band
+                "members_high": [76] * 31 # 100% EC prob inside >75
             },
             "peak_tcdc": 10.0
         }
-        
+
         passes, side, conf, factors, is_taker = _strategy_weather(
             ticker,
             0.35,
             0.65,
             24.0,
-            contract_name="Will the high temp in NY be 75-76° on Jun 1, 2026?",
-            strike=75.5,
+            contract_name="Will the high temp in NY be 75° or higher on Jun 1, 2026?",
+            strike=75.0,
         )
         
         self.assertTrue(passes)
         self.assertEqual(side, "YES")
-        # ensemble_prob is capped at 0.97
-        # between-range weather contracts now carry a narrow-bin sizing haircut.
-        # confidence = 0.97 * 1.5 * 0.85 = 1.23675
-        self.assertAlmostEqual(conf, 1.23675)
+        # confidence = 0.97 * 1.5 = 1.455
+        self.assertAlmostEqual(conf, 1.455)
         self.assertIn("conv_mult=1.5x", factors)
-        self.assertIn("narrow_bin_haircut=0.85x", factors)
 
     @patch('forecast.strategy_engine.get_contract_weather_data')
     def test_ecmwf_divergence_is_softened_not_vetoed(self, mock_get_weather):
         """Verify model divergence now sizes down instead of hard-vetoing."""
-        ticker = "KXHIGHNY-26JUN01-B75.5"
+        ticker = "KXHIGHNY-26JUN01-T75"
         mock_get_weather.return_value = {
-            "members_high": [76] * 31, # 100% GFS prob inside band
+            "members_high": [76] * 31, # 100% GFS prob inside >75
             "ecmwf": {
                 "members_high": [70] * 31 # 0% EC prob
             },
             "peak_tcdc": 10.0
         }
-        
+
         passes, side, conf, factors, is_taker = _strategy_weather(
             ticker,
             0.35,
             0.65,
             24.0,
-            contract_name="Will the high temp in NY be 75-76° on Jun 1, 2026?",
-            strike=75.5,
+            contract_name="Will the high temp in NY be 75° or higher on Jun 1, 2026?",
+            strike=75.0,
         )
         
         self.assertTrue(passes)

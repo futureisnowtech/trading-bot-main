@@ -83,7 +83,7 @@ MAX_HOURS_TO_RES: float = 120.0
 
 # v19.7: Sovereign Precision Calibration
 # Raising the bar for Alpha to ensure Win-Rate Restoration.
-EV_THRESHOLD: float = 0.050  # v19.9: Hardened 5.0% post-fee edge floor
+EV_THRESHOLD: float = 0.120  # v19.9: Hardened 12.0% post-fee edge floor
 
 # Longshot Bias Gate
 MIN_IMPLIED_PROB_FOR_YES: float = 0.10  # refuse to buy YES below 10% probability
@@ -957,7 +957,10 @@ def calculate_continuous_sizing(
         mock_asks = [{"price": market_price, "qty": KALSHI_MAX_QTY_PER_POSITION}]
         qty = calculate_optimal_vwap_size(mock_asks, ensemble_prob, deployed_budget, lane_ev_threshold)
 
-    return min(max(0, qty), KALSHI_MAX_QTY_PER_POSITION)
+    final_qty = min(max(0, qty), KALSHI_MAX_QTY_PER_POSITION)
+    if final_qty < 10:
+        return 0
+    return final_qty
 
 import re
 
@@ -1212,16 +1215,22 @@ def _strategy_weather_details(
     peak_tcdc = w_data.get("peak_tcdc", 0.0)
     peak_ssrd = w_data.get("peak_ssrd")
     cloud_veto = (mode == "HIGH") and (peak_tcdc > 65.0)
+    
+    # Fix 1: Ban the Bins (Narrow Bin Meat Grinder)
+    if semantics.comparator == "between":
+        return (
+            False,
+            "",
+            0.0,
+            ["banned_bin_contract_type"],
+            False,
+            1.0,
+            3,
+            0.05,
+        )
     narrow_bin_size_multiplier = 1.0
-    if semantics.comparator == "between" and mode != "RAIN":
-        narrow_bin_size_multiplier = 0.85
 
-    if mode in {"RAIN", "SNOW", "WIND"}:
-        base_threshold = 0.060
-    elif mode == "TEMP" or hourly_contract:
-        base_threshold = 0.003
-    else:
-        base_threshold = EV_THRESHOLD
+    base_threshold = EV_THRESHOLD
 
     def _get_fee_aware_threshold(price: float) -> float:
         if 0.20 < price < 0.35:
@@ -1573,12 +1582,7 @@ def evaluate_contract(
             else -1.0
         )
         ev_chosen = ev_yes if best_side == "YES" else ev_no
-        if w_mode in {"RAIN", "SNOW", "WIND"}:
-            base_threshold = 0.060
-        elif w_mode == "TEMP" or hourly_contract:
-            base_threshold = 0.003
-        else:
-            base_threshold = EV_THRESHOLD
+        base_threshold = EV_THRESHOLD
             
         p_cost_eval = ask_yes if best_side == "YES" else ask_no
         if 0.20 < p_cost_eval < 0.35:

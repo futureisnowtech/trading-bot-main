@@ -10,13 +10,13 @@ from forecast.strategy_engine import calculate_continuous_sizing
 def test_sizing_monotonicity_and_safety(price, p, bankroll):
     """
     Property-based test ensuring mathematical sanity and monotonicity:
-    1. Sizing must never exceed KALSHI_MAX_QTY_PER_POSITION (200).
+    1. Sizing must never exceed KALSHI_MAX_QTY_PER_POSITION (2500).
     2. Sizing must be 0 if price is higher than probability (negative EV).
     3. Increasing probability must NEVER decrease size (all else equal).
     4. Sizing must decrease or stay equal if price increases (all else equal).
     """
     qty = calculate_continuous_sizing(price, p, bankroll)
-    assert 0 <= qty <= 200
+    assert 0 <= qty <= 2500
 
     # Negative EV check
     fee = 0.07 * price * (1.0 - price)

@@ -1091,6 +1091,19 @@ def _strategy_weather_details(
         prob_ecmwf=prob_ecmwf,
         mode=mode,
     )
+    # SRE Pillar 4: Directional Consensus Gate
+    if blend_state.get("catastrophic_divergence"):
+        return (
+            False,
+            "",
+            0.0,
+            [f"catastrophic_divergence_veto (gap={blend_state['divergence_gap']:.2%})"],
+            False,
+            1.0,
+            3,
+            0.05,
+        )
+    
     ensemble_prob = float(blend_state["ensemble_prob"])
     gfs_weight = float(blend_state["gfs_weight"])
     ecmwf_weight = float(blend_state["ecmwf_weight"])
@@ -1234,7 +1247,8 @@ def _strategy_weather_details(
 
     def _get_fee_aware_threshold(price: float) -> float:
         if 0.20 < price < 0.35:
-            return max(base_threshold, 0.080)
+            # SRE Pillar 5: Corrected Sweet Spot scaling
+            return min(base_threshold, 0.080)
         return base_threshold
 
     effective_ev_threshold_yes = _get_fee_aware_threshold(ask_yes)
@@ -1415,6 +1429,10 @@ def evaluate_contract(
 
     ask_yes = float(yes_quote.get("ask") or 0.0)
     ask_no = float(no_quote.get("ask") or 0.0)
+    # SRE Pillar 2: Liquidity Awareness (Top-of-Book depth)
+    ask_size_yes = int(yes_quote.get("ask_size") or 0)
+    ask_size_no = int(no_quote.get("ask_size") or 0)
+    
     mid_yes = float(yes_quote.get("mid") or 0.0)
     mid_no = float(no_quote.get("mid") or 0.0)
     spread = max(
@@ -1528,6 +1546,9 @@ def evaluate_contract(
         best_tier = int(w_res[6] or 3)
         best_sizing_cap = float(w_res[7] or 0.05)
         q_hat = chosen_prob if best_side == "YES" else (1.0 - chosen_prob)
+        # SRE Pillar 6: Rule 1 Probability Input Clamps
+        q_hat = max(0.01, min(0.99, float(q_hat)))
+
         p_cost = ask_yes if best_side == "YES" else ask_no
 
         if p_cost <= 0.0:
@@ -1586,7 +1607,8 @@ def evaluate_contract(
             
         p_cost_eval = ask_yes if best_side == "YES" else ask_no
         if 0.20 < p_cost_eval < 0.35:
-            effective_ev_threshold = max(base_threshold, 0.080)
+            # SRE Pillar 5: Corrected Sweet Spot scaling
+            effective_ev_threshold = min(base_threshold, 0.080)
         else:
             effective_ev_threshold = base_threshold
             
@@ -1646,6 +1668,10 @@ def evaluate_contract(
             # Asymmetric Fast-Lane (Surge Mode)
             is_surge = (0.03 <= p_cost <= 0.15) and (model_entropy < 0.05) and (ev_chosen >= 0.10)
             
+            # SRE Pillar 2: Liquidity Awareness & Ask-Size Capping
+            p_cost_size = ask_size_yes if best_side == "YES" else ask_size_no
+            book_asks = [{"price": p_cost, "qty": p_cost_size}] if p_cost_size > 0 else None
+            
             n_contracts = calculate_continuous_sizing(
                 market_price=p_cost,
                 ensemble_prob=q_hat,
@@ -1655,7 +1681,13 @@ def evaluate_contract(
                 conv_tier=best_tier,
                 hours_to_res=hours_to_res,
                 lane_ev_threshold=effective_ev_threshold,
+                book_asks=book_asks,
             )
+            
+            # STRICT SRE Pillar 2: Top-of-book hard clamp
+            if p_cost_size > 0:
+                n_contracts = min(n_contracts, p_cost_size)
+
             if n_contracts > KALSHI_MAX_QTY_PER_POSITION:
                 logger.info(
                     "Sovereign Survival: Capping %s qty %s -> %s",
@@ -1669,8 +1701,10 @@ def evaluate_contract(
             cost_limit = min(bankroll * 0.25, float(KALSHI_MAX_USD_PER_POSITION) if is_surge else 40.00)
             current_est_cost = estimate_kalshi_order_cost_usd(n_contracts, p_cost)
             if current_est_cost > cost_limit:
-                n_contracts = int(cost_limit / (p_cost + _estimated_fee_per_contract(p_cost, rounded=False)))
-                n_contracts = min(max(0, n_contracts), KALSHI_MAX_QTY_PER_POSITION)
+                # SRE Pillar 2 FIX: Recalculate clamped qty against cost limit correctly
+                clamped_qty = int(cost_limit / (p_cost + _estimated_fee_per_contract(p_cost, rounded=False)))
+                n_contracts = min(max(0, n_contracts), clamped_qty)
+                n_contracts = min(n_contracts, KALSHI_MAX_QTY_PER_POSITION)
                 logger.info(
                     f"Sovereign SRE Clamp: Clamping {ticker} cost to {cost_limit:.2f} USD (qty {n_contracts})"
                 )

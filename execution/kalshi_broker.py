@@ -985,6 +985,7 @@ class KalshiBroker:
                 body["yes_price"] = limit_cents
             else:
                 body["no_price"] = limit_cents
+            body["time_in_force"] = "ioc"
         
         resp = self._request("POST", "/trade-api/v2/portfolio/orders", body=body)
         error_code = self._extract_error_code(resp)
@@ -1065,6 +1066,7 @@ class KalshiBroker:
                 body["yes_price"] = limit_cents
             else:
                 body["no_price"] = limit_cents
+            body["time_in_force"] = "ioc"
 
         resp = self._request("POST", "/trade-api/v2/portfolio/orders", body=body)
         error_code = self._extract_error_code(resp)

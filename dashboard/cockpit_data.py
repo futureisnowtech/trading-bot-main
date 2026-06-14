@@ -536,6 +536,19 @@ def build_market_type_counts() -> list[dict[str, Any]]:
     ]
 
 
+def build_realized_pnl_curve(trades: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Accumulate PNL in time order for charting."""
+    sorted_trades = sorted(trades, key=lambda x: str(x.get("ts") or ""))
+    curve: list[dict[str, Any]] = []
+    running = 0.0
+    for trade in sorted_trades:
+        running += _coerce_float(trade.get("pnl_usd"))
+        point = trade.copy()
+        point["cumulative_pnl"] = round(running, 4)
+        curve.append(point)
+    return curve
+
+
 def load_session_pnl_curve() -> list[dict[str, Any]]:
     from config import TRADE_SESSION_START
     with _connect() as conn:

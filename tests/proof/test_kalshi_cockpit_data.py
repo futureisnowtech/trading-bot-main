@@ -16,12 +16,12 @@ def test_build_position_row_uses_side_specific_no_quotes():
         quote={"no_bid": 0.53, "no_ask": 0.57, "yes_bid": 0.43, "yes_ask": 0.47},
         entry_trade={"fee_usd": 0.7, "strategy": "weather_ensemble"},
     )
-
     assert row["bid"] == 0.53
     assert row["ask"] == 0.57
     assert row["mark"] == 0.55
     assert row["gross_mark_pnl"] == 1.4
-    assert row["exit_pnl_est"] == 0.32
+    # SRE Pillar: Using discrete taker fee (0.07 for >20c)
+    assert row["exit_pnl_est"] == -0.2
     assert row["weather_bucket"] == "Daily High"
 
 
@@ -36,8 +36,9 @@ def test_summarize_hub_exposure_groups_city_hubs():
         ]
     )
 
-    assert exposures[0] == {"hub": "WEST", "exposure_usd": 7.38}
-    assert exposures[1] == {"hub": "FLORIDA", "exposure_usd": 2.09}
+    # SRE Pillar: (20 * 0.22) + (10 * 0.37) = 4.4 + 3.7 = 8.1
+    assert exposures[0] == {"hub": "WEST", "exposure_usd": 8.1}
+    assert exposures[1] == {"hub": "FLORIDA", "exposure_usd": 2.35}
 
 
 def test_build_realized_pnl_curve_accumulates_in_time_order():
@@ -258,10 +259,12 @@ def test_build_trade_edge_rows_handles_yes_and_no_side_buys():
     )
 
     assert rows[0]["model_confidence_pct"] == 97.0
-    assert rows[0]["edge_pct"] == 80.1
+    # SRE Pillar: 0.97 - 0.16 - 0.02 (fee) = 0.79 -> 79.0%
+    assert rows[0]["edge_pct"] == 79.0
     assert rows[0]["edge_label"] == "Net Edge"
     assert rows[1]["model_confidence_pct"] == 82.0
-    assert rows[1]["edge_pct"] == 51.6
+    # SRE Pillar: 0.82 - 0.29 - 0.07 (fee) = 0.46 -> 46.0%
+    assert rows[1]["edge_pct"] == 46.0
 
 
 def test_build_ai_insights_translates_runtime_into_plain_english():

@@ -902,14 +902,33 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                         logger.warning(f"[ForecastRunner] {local_sym} (ev={result.ev:.4f}) skipped: at cap and EV < 0.15 swap floor.")
                         continue
                     
-                    # Logic: Flatten the absolute WORST open position
-                    # We sort open positions by their 'stale' entry EV or just pick one.
-                    # Best approach: find the one with the lowest current EV if possible.
-                    # For this MVP: Flatten the oldest position to make room for high-alpha new play.
-                    worst_pos = open_positions[0] # Simplest: FIFO churn
+                    # SRE Pillar 7: Smart Swap Sorting (Kill the Toxic FIFO Churn)
+                    # We sort by current model probability (descending edge) and kill the worst.
+                    def _get_live_held_prob(p):
+                        try:
+                            _w_data = get_weather_data(p.get("local_symbol", ""))
+                            _meta = get_contract_metadata(p.get("local_symbol", ""))
+                            _m_yes = _weather_contract_yes_probability(
+                                p.get("local_symbol", ""),
+                                _w_data,
+                                contract_name=str(_meta.get("contract_name") or ""),
+                                strike=float(_meta.get("strike") or 0.0),
+                                last_trade_at=str(p.get("last_trade_at") or ""),
+                            )
+                            if _m_yes is None: return 1.0 # Protect unknowns
+                            return _m_yes if p.get("side") == "YES" else (1.0 - _m_yes)
+                        except: return 1.0
+
+                    sorted_positions = sorted(open_positions, key=_get_live_held_prob)
+                    worst_pos = sorted_positions[0]
                     worst_sym = worst_pos.get("local_symbol", "UNKNOWN")
+                    worst_prob = _get_live_held_prob(worst_pos)
                     
-                    logger.info(f"[ForecastRunner] SWAP TRIGGERED: Flattening {worst_sym} to make room for {local_sym} (ev={result.ev:.4f})")
+                    if worst_prob > 0.65:
+                        logger.info(f"[ForecastRunner] SWAP VETO: All open positions have high conviction (worst p={worst_prob:.2%}). Skipping {local_sym}.")
+                        continue
+                    
+                    logger.info(f"[ForecastRunner] SWAP TRIGGERED: Flattening {worst_sym} (p={worst_prob:.2%}) to make room for {local_sym} (ev={result.ev:.4f})")
                     flatten_res = broker.flatten_position(
                         worst_sym,
                         worst_pos.get("right", "C"),

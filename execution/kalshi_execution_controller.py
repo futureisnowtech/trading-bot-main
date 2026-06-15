@@ -243,7 +243,11 @@ class KalshiExecutionController:
         self._next_order_at = time.time() + self._min_order_interval_sec
 
         status = str(result.get("status") or "")
-        result["qty"] = result.get("qty") or plan.executable_qty
+        if status in ("executed", "resting", "pending"):
+            result["qty"] = result.get("qty") or plan.executable_qty
+        else:
+            result["qty"] = result.get("qty") or 0.0
+        
         result["requested_qty"] = plan.requested_qty
         result["visible_qty"] = plan.visible_qty
         result["affordable_qty"] = plan.affordable_qty

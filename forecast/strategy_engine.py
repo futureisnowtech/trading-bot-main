@@ -1217,6 +1217,19 @@ def _strategy_weather_details(
     peak_ssrd = w_data.get("peak_ssrd")
     cloud_veto = (mode == "HIGH") and (peak_tcdc > 65.0)
     
+    # Fix 1: Ban the Bins (Narrow Bin Meat Grinder)
+    if semantics.comparator == "between":
+        return (
+            False,
+            "",
+            0.0,
+            ["banned_bin_contract_type"],
+            False,
+            1.0,
+            3,
+            0.05,
+        )
+
     narrow_bin_size_multiplier = 1.0
 
     base_threshold = EV_THRESHOLD

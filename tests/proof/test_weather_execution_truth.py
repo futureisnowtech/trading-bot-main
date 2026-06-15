@@ -458,8 +458,8 @@ def test_narrow_bin_weather_gets_sizing_haircut_instead_of_hard_veto(monkeypatch
         strike=83.5,
     )
 
-    assert passes is True
-    # The bin contract ban was removed, so this now passes if EV is high enough.
+    assert passes is False
+    assert "banned_bin_contract_type" in factors[0]
 
 
 def test_weather_divergence_is_softened_before_catastrophic_veto(monkeypatch):

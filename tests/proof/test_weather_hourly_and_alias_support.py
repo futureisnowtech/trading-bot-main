@@ -17,8 +17,8 @@ def test_hourly_weather_mode_detection_recognizes_hour_stamped_tickers():
     assert is_hourly_weather_contract("KXTEMPNYCH-24JAN0122-T75.99")
     assert not is_hourly_weather_contract("KXLOWTNYC-26JUN09-T52")
     assert is_live_entry_weather_contract("KXTEMPNYCH-24JAN0122-T75.99")
-    # SRE Pillar 3: KXLOWT (Daily Low) is no longer a valid fresh entry contract.
-    assert not is_live_entry_weather_contract(
+    # SRE Pillar 3 removed: KXLOWT (Daily Low) is a valid fresh entry contract again.
+    assert is_live_entry_weather_contract(
         "KXLOWTNYC-26JUN09-T52",
         contract_name="Will the minimum temperature be <52° on Jun 9, 2026?",
     )

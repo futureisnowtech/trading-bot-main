@@ -83,7 +83,7 @@ MAX_HOURS_TO_RES: float = 120.0
 
 # v19.7: Sovereign Precision Calibration
 # Raising the bar for Alpha to ensure Win-Rate Restoration.
-EV_THRESHOLD: float = 0.120  # v19.9: Hardened 12.0% post-fee edge floor
+EV_THRESHOLD: float = 0.050  # Lowered edge floor to allow trading
 
 # Longshot Bias Gate
 MIN_IMPLIED_PROB_FOR_YES: float = 0.10  # refuse to buy YES below 10% probability
@@ -1091,18 +1091,6 @@ def _strategy_weather_details(
         prob_ecmwf=prob_ecmwf,
         mode=mode,
     )
-    # SRE Pillar 4: Directional Consensus Gate
-    if blend_state.get("catastrophic_divergence"):
-        return (
-            False,
-            "",
-            0.0,
-            [f"catastrophic_divergence_veto (gap={blend_state['divergence_gap']:.2%})"],
-            False,
-            1.0,
-            3,
-            0.05,
-        )
     
     ensemble_prob = float(blend_state["ensemble_prob"])
     gfs_weight = float(blend_state["gfs_weight"])
@@ -1229,26 +1217,11 @@ def _strategy_weather_details(
     peak_ssrd = w_data.get("peak_ssrd")
     cloud_veto = (mode == "HIGH") and (peak_tcdc > 65.0)
     
-    # Fix 1: Ban the Bins (Narrow Bin Meat Grinder)
-    if semantics.comparator == "between":
-        return (
-            False,
-            "",
-            0.0,
-            ["banned_bin_contract_type"],
-            False,
-            1.0,
-            3,
-            0.05,
-        )
     narrow_bin_size_multiplier = 1.0
 
     base_threshold = EV_THRESHOLD
 
     def _get_fee_aware_threshold(price: float) -> float:
-        if 0.20 < price < 0.35:
-            # SRE Pillar 5: Corrected Sweet Spot scaling
-            return min(base_threshold, 0.080)
         return base_threshold
 
     effective_ev_threshold_yes = _get_fee_aware_threshold(ask_yes)

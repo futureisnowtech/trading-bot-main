@@ -77,8 +77,9 @@ def is_live_entry_weather_contract(
     *,
     contract_name: str = "",
 ) -> bool:
-    # Fresh entries are allowed across all active weather lanes.
-    return weather_mode_for_ticker(ticker) is not None
+    # SRE Pillar 3: Canonical Scope Restoration (Strict Hourly Only)
+    # v19.10: Ban daily high/low from fresh entries as per GEMINI.md mandate.
+    return is_hourly_weather_contract(ticker, contract_name=contract_name)
 
 
 def weather_mode_for_ticker(ticker: str) -> WeatherMode | None:

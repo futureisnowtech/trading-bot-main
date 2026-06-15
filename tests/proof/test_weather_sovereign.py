@@ -58,8 +58,8 @@ class TestWeatherSovereign(unittest.TestCase):
         self.assertIn("conv_mult=1.5x", factors)
 
     @patch('forecast.strategy_engine.get_contract_weather_data')
-    def test_ecmwf_divergence_is_allowed(self, mock_get_weather):
-        """Verify model divergence does not trigger a hard veto."""
+    def test_ecmwf_divergence_is_vetoed(self, mock_get_weather):
+        """Verify model divergence now triggers a hard veto as per Sovereign Pillar 4."""
         ticker = "KXHIGHNY-26JUN01-T75"
         mock_get_weather.return_value = {
             "members_high": [76] * 31, # 100% GFS prob inside >75
@@ -78,7 +78,10 @@ class TestWeatherSovereign(unittest.TestCase):
             strike=75.0,
         )
 
-        self.assertTrue(passes)
+        self.assertFalse(passes)
+        self.assertIn("catastrophic_divergence_veto", factors[0])
+        self.assertEqual(side, "")
+        self.assertTrue(any("gap=" in str(f) for f in factors))
 
     def test_bracket_contract_semantics_count_only_inside_bin(self):
         semantics = resolve_weather_contract(

@@ -1091,6 +1091,18 @@ def _strategy_weather_details(
         prob_ecmwf=prob_ecmwf,
         mode=mode,
     )
+    # SRE Pillar 4: Directional Consensus Gate
+    if blend_state.get("catastrophic_divergence"):
+        return (
+            False,
+            "",
+            0.0,
+            [f"catastrophic_divergence_veto (gap={blend_state['divergence_gap']:.2%})"],
+            False,
+            1.0,
+            3,
+            0.05,
+        )
     
     ensemble_prob = float(blend_state["ensemble_prob"])
     gfs_weight = float(blend_state["gfs_weight"])

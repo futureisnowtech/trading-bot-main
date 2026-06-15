@@ -100,18 +100,17 @@ def _rank_contracts(contracts: list[dict]) -> list[dict]:
         if hours is None:
             continue
         
-        # v19.10.1: Lane-aware time-to-expiry gate.
-        # Hourly Temp contracts must be discovered up to 20 mins (0.33h) before resolution.
         symbol = c.get("underlier", "") or c.get("market_symbol", "") or c.get("local_symbol", "")
         mode = weather_mode_for_ticker(symbol)
-        min_hours = (
-            0.33
-            if is_hourly_weather_contract(
-                symbol,
-                contract_name=c.get("contract_name", "") or c.get("market_name", ""),
-            )
-            else MIN_HOURS_TO_RESOLUTION
+        
+        is_hourly = is_hourly_weather_contract(
+            symbol,
+            contract_name=c.get("contract_name", "") or c.get("market_name", ""),
         )
+        
+        # v19.10.1: Lane-aware time-to-expiry gate.
+        # Hourly Temp contracts must be discovered up to 3 mins (0.05h) before resolution.
+        min_hours = 0.05 if is_hourly else MIN_HOURS_TO_RESOLUTION
         
         if hours < min_hours:
             continue  # too close to resolution
@@ -123,7 +122,8 @@ def _rank_contracts(contracts: list[dict]) -> list[dict]:
         t1 = _tier1_score(name, symbol)
 
         # Ideal resolution: roughly mid-window for the short-horizon weather lane.
-        ideal_hours = 24.0
+        # SRE Pillar: prioritize hourly sniper entries (1.0h ideal) over daily 24h lag.
+        ideal_hours = 1.0 if is_hourly else 24.0
         time_score = abs(hours - ideal_hours) / ideal_hours  # lower is better
 
         ranked.append({**c, "_tier1": t1, "_hours": hours, "_time_score": time_score})

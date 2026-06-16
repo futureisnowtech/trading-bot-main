@@ -407,8 +407,8 @@ def test_expensive_yes_weather_requires_extra_headroom(monkeypatch):
 
     passes, side, _prob, factors, _is_taker, _mult, _tier, _cap = se._strategy_weather_details(
         "KXHIGHNY-30JUN26-T75",
-        ask_yes=0.91,
-        ask_no=0.09,
+        ask_yes=0.96,
+        ask_no=0.04,
         hours_to_res=24.0,
         contract_name="Will the high temp in NY be >75° on Jun 30, 2026?",
         strike=75.0,

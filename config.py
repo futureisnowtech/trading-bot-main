@@ -5,6 +5,7 @@ Never hardcode anything that belongs here.
 
 import os
 import math
+from decimal import Decimal, ROUND_CEILING
 from datetime import time as dt_time
 from pathlib import Path
 
@@ -270,18 +271,9 @@ def kalshi_raw_fee_per_contract(
     normalized_price = _normalize_kalshi_price(price)
     if normalized_price <= 0.0 or normalized_price >= 1.0:
         return 0.0
-    
-    if maker:
-        rate = get_kalshi_fee_rate(maker=True, fee_rate=fee_rate)
-        return rate * normalized_price * (1.0 - normalized_price)
-        
-    # Explicit Discrete V2 Taker Fee Tier logic
-    if normalized_price <= 0.10:
-        return 0.01
-    elif normalized_price <= 0.20:
-        return 0.02
-    else:
-        return 0.07
+
+    rate = get_kalshi_fee_rate(maker=maker, fee_rate=fee_rate)
+    return rate * normalized_price * (1.0 - normalized_price)
 
 
 def estimate_kalshi_order_fee_usd(
@@ -308,7 +300,11 @@ def estimate_kalshi_order_fee_usd(
         return 0.0
     if not round_up_cents:
         return raw_total
-    return math.ceil(raw_total * 100.0 - 1e-12) / 100.0
+    rounded = (
+        Decimal(str(raw_total))
+        .quantize(Decimal("0.01"), rounding=ROUND_CEILING)
+    )
+    return float(rounded)
 
 
 def estimate_kalshi_fee_per_contract(

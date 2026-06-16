@@ -242,14 +242,15 @@ def test_position_reconciliation_logs_completion_event(proof_runtime, monkeypatc
     assert "Kalshi holdings=1" in row[1]
 
 
-def test_lane_economics_forecast_is_zero_cost():
+def test_lane_economics_forecast_uses_live_fee_model():
     from runtime.economics import get_lane_economics, is_trade_viable
 
     econ = get_lane_economics("forecast")
     assert econ.lane_id == "forecast"
-    assert econ.taker_fee_pct == 0.0
-    assert econ.min_viable_edge_pct == 0.0
-    assert is_trade_viable("forecast", 0.0) is True
+    assert econ.taker_fee_pct == 0.07
+    assert econ.maker_fee_pct == 0.0175
+    assert round(econ.min_viable_edge_pct, 4) == 0.035
+    assert is_trade_viable("forecast", 0.0) is False
 
 
 def test_execution_engine_uses_long_lived_daemon():

@@ -1378,4 +1378,4 @@ def test_strategy_engine_hub_cap_uses_thirty_percent_with_forty_dollar_floor(mon
         ],
     )
 
-    assert results[0]["result"].veto_reason == "hub_exposure_cap_reached (114.0/40.0)"
+    assert results[0]["result"].veto_reason == "hub_exposure_cap_reached (103.5/40.0)"

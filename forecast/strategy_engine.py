@@ -68,9 +68,6 @@ logger = logging.getLogger(__name__)
 
 # ── Gate thresholds ────────────────────────────────────────────────────────────
 
-# EV must exceed this to pass the economics gate (positive edge requirement)
-EV_THRESHOLD: float = 0.02  # 2 cents per $1 contract = 2% edge
-
 # Overround hard cap — above this the house edge is too large
 MAX_OVERROUND: float = 0.15  # Tightened from 0.25 to 0.15 for Kalshi
 
@@ -81,9 +78,9 @@ MAX_SPREAD_DOLLARS: float = 0.12  # $0.12 per contract
 MIN_HOURS_TO_RES: float = 1.0
 MAX_HOURS_TO_RES: float = 120.0
 
-# v19.7: Sovereign Precision Calibration
-# Raising the bar for Alpha to ensure Win-Rate Restoration.
-EV_THRESHOLD: float = 0.050  # Lowered edge floor to allow trading
+# Baseline post-fee edge floor. This is intentionally a single canonical
+# constant; lane-specific behavior should layer on top of it explicitly.
+EV_THRESHOLD: float = 0.050
 
 # Longshot Bias Gate
 MIN_IMPLIED_PROB_FOR_YES: float = 0.10  # refuse to buy YES below 10% probability
@@ -885,13 +882,7 @@ def calculate_optimal_vwap_size(book_asks: list[dict], model_prob: float, max_bu
         if price <= 0.0:
             continue
             
-        if price <= 0.10:
-            fee = 0.01
-        elif price <= 0.20:
-            fee = 0.02
-        else:
-            fee = 0.07
-            
+        fee = _estimated_fee_per_contract(price, rounded=False)
         cost_per_contract = price + fee
         marginal_ev = model_prob - cost_per_contract
         
@@ -957,10 +948,7 @@ def calculate_continuous_sizing(
         mock_asks = [{"price": market_price, "qty": KALSHI_MAX_QTY_PER_POSITION}]
         qty = calculate_optimal_vwap_size(mock_asks, ensemble_prob, deployed_budget, lane_ev_threshold)
 
-    final_qty = min(max(0, qty), KALSHI_MAX_QTY_PER_POSITION)
-    if final_qty < 10:
-        return 0
-    return final_qty
+    return min(max(0, qty), KALSHI_MAX_QTY_PER_POSITION)
 
 import re
 
@@ -1244,13 +1232,8 @@ def _strategy_weather_details(
 
     narrow_bin_size_multiplier = 1.0
 
-    base_threshold = EV_THRESHOLD
-
-    def _get_fee_aware_threshold(price: float) -> float:
-        return base_threshold
-
-    effective_ev_threshold_yes = _get_fee_aware_threshold(ask_yes)
-    effective_ev_threshold_no = _get_fee_aware_threshold(ask_no)
+    effective_ev_threshold_yes = EV_THRESHOLD
+    effective_ev_threshold_no = EV_THRESHOLD
 
     if net_edge_yes is not None and net_edge_yes >= effective_ev_threshold_yes:
         if cloud_veto:
@@ -1601,14 +1584,7 @@ def evaluate_contract(
             else -1.0
         )
         ev_chosen = ev_yes if best_side == "YES" else ev_no
-        base_threshold = EV_THRESHOLD
-            
-        p_cost_eval = ask_yes if best_side == "YES" else ask_no
-        if 0.20 < p_cost_eval < 0.35:
-            # SRE Pillar 5: Corrected Sweet Spot scaling
-            effective_ev_threshold = min(base_threshold, 0.080)
-        else:
-            effective_ev_threshold = base_threshold
+        effective_ev_threshold = EV_THRESHOLD
             
         if approved and ev_chosen < effective_ev_threshold:
             approved = False
@@ -1696,13 +1672,11 @@ def evaluate_contract(
                 n_contracts = KALSHI_MAX_QTY_PER_POSITION
                 
             # Enforce strict SRE Risk Ceilings (Surge Mode scales to KALSHI_MAX_USD_PER_POSITION)
-            cost_limit = min(bankroll * 0.25, float(KALSHI_MAX_USD_PER_POSITION) if is_surge else 40.00)
+            cost_limit = min(bankroll * 0.25, float(KALSHI_MAX_USD_PER_POSITION))
             current_est_cost = estimate_kalshi_order_cost_usd(n_contracts, p_cost)
             if current_est_cost > cost_limit:
-                # SRE Pillar 2 FIX: Recalculate clamped qty against cost limit correctly
-                clamped_qty = int(cost_limit / (p_cost + _estimated_fee_per_contract(p_cost, rounded=False)))
-                n_contracts = min(max(0, n_contracts), clamped_qty)
-                n_contracts = min(n_contracts, KALSHI_MAX_QTY_PER_POSITION)
+                clamped_qty = max_kalshi_contracts_for_budget(p_cost, cost_limit)
+                n_contracts = min(max(0, n_contracts), clamped_qty, KALSHI_MAX_QTY_PER_POSITION)
                 logger.info(
                     f"Sovereign SRE Clamp: Clamping {ticker} cost to {cost_limit:.2f} USD (qty {n_contracts})"
                 )
@@ -1933,7 +1907,6 @@ def evaluate_market_snapshots(
             # Evaluate Net Directional Delta Hub Hedging cap strictly post-sizing
             if result is not None and result.econ_approved and result.side in {"YES", "NO"} and hub != "UNKNOWN":
                 current_signed_sum = sum(hub_signed_exposures.get(hub, []))
-                candidate_price = float(result.ev_yes if result.side == "YES" else result.ev_no) # Pessimistic ev reference or fallback price
                 candidate_price = float(yc.get("ask") or yes_quote.get("ask_yes") or 0.50) if result.side == "YES" else float(nc.get("ask") or no_quote.get("ask_no") or 0.50)
                 
                 candidate_exposure = get_kalshi_position_exposure_usd(

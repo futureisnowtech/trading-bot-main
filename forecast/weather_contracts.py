@@ -32,7 +32,7 @@ def _clean_title(title: str) -> str:
 _HOURLY_WEATHER_TICKER_RE = re.compile(r"-\d{2}[A-Z]{3}\d{4}(?:-|$)")
 _HOURLY_TITLE_RE = re.compile(r"\bat\s+\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)\b")
 _SHORT_CADENCE_TEMP_PREFIXES = ("KXLOWT", "KXHIGHT")
-LIVE_ENTRY_SCOPE = "ALL_WEATHER_LANES"
+LIVE_ENTRY_SCOPE = "HOURLY_ONLY"
 
 
 def has_hourly_weather_timestamp(ticker: str) -> bool:

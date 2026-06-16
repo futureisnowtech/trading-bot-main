@@ -84,7 +84,7 @@ def _coerce_float(value: Any, default: float = 0.0) -> float:
 
 
 def _fee_formula_text() -> str:
-    return f"{KALSHI_TAKER_FEE_RATE:.1%} x price x (1-price)"
+    return f"{KALSHI_TAKER_FEE_RATE:.1%} x price x (1-price), rounded at order level"
 
 
 def _parse_ts(value: Any) -> datetime | None:
@@ -597,14 +597,14 @@ def build_regime_manifest(
         "entry_math": [
             f"Net EV gate: post-fee EV must exceed {EV_THRESHOLD:.2f}",
             f"Exchange fee drag: {_fee_formula_text()} with no extra flat fee buffer",
-            "Weather entries key off post-fee EV directly, and narrow bins are sized down instead of auto-vetoed",
+            "Weather entries key off post-fee EV directly, and narrow bins are auto-vetoed before sizing",
             f"Sizing: continuous sigmoid scaler with a hard per-position cap of ${KALSHI_MAX_USD_PER_POSITION:.0f}",
         ],
         "entry_gates": [
             (
                 f"Fresh-entry scope {live_entry_scope()} "
-                f"with {hourly_support.get('exchange_verified_city_count', 0)}/"
-                f"{hourly_support.get('universe_city_count', 0)} cities exchange-verified for hourly"
+                f"with {hourly_support.get('resolver_ready_city_count', 0)}/"
+                f"{hourly_support.get('universe_city_count', 0)} cities registry-mapped for hourly"
             ),
             "Only true hour-stamped weather contracts are allowed for fresh entries",
             f"Minimum contract price {KALSHI_MIN_PRICE:.2f} for non-hourly weather lanes, 0.03 for hourly/rain lanes",

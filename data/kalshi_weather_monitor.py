@@ -136,6 +136,11 @@ _WEATHER_PREFIXES = (
     "KXWIND",
     "KXSNOW",
 )
+_REGISTRY_HOURLY_PREFIXES = (
+    "KXTEMP",
+    "KXHIGHT",
+    "KXLOWT",
+)
 _CITY_TITLE_ALIASES = (
     ("NEW YORK CITY", "NY"),
     ("NEW YORK", "NY"),
@@ -154,11 +159,16 @@ def _canonical_series_for_city(city_key: str) -> Optional[str]:
     series_list = [str(series).upper() for series in station.get("series", []) if str(series).strip()]
     if not series_list:
         return None
-    for prefix in ("KXTEMP", "KXHIGH", "KXLOW", "KXRAIN", "KXHIGHT", "KXLOWT"):
+    for prefix in ("KXTEMP", "KXHIGHT", "KXLOWT", "KXHIGH", "KXLOW", "KXRAIN"):
         for series in series_list:
             if series.startswith(prefix):
                 return series
     return series_list[0]
+
+
+def _is_registry_hourly_series(series: str) -> bool:
+    token = str(series or "").upper()
+    return any(token.startswith(prefix) for prefix in _REGISTRY_HOURLY_PREFIXES)
 
 
 def _city_key_from_contract_name(contract_name: str) -> Optional[str]:
@@ -203,6 +213,22 @@ _HOURLY_TEMP_ALIAS_ORDER = tuple(
 )
 
 
+def _build_short_cadence_alias_map() -> dict[str, str]:
+    alias_map: dict[str, str] = {}
+    for city_key, station in STATIONS.items():
+        aliases: set[str] = set()
+        for series in station.get("series", []):
+            if not _is_registry_hourly_series(str(series)):
+                continue
+            aliases.update(_series_suffix_aliases(str(series)))
+        for alias in sorted(aliases, key=len, reverse=True):
+            alias_map.setdefault(alias, str(city_key).upper())
+    return alias_map
+
+
+_SHORT_CADENCE_ALIAS_TO_CITY = _build_short_cadence_alias_map()
+
+
 def _resolve_hourly_temp_city_key(token: str) -> Optional[str]:
     value = str(token or "").upper()
     if not value.startswith("KXTEMP"):
@@ -223,8 +249,8 @@ def _resolve_generic_prefix_city_key(token: str) -> Optional[str]:
         if value.startswith(prefix):
             head = value.split("-", 1)[0]
             suffix = head[len(prefix):].strip()
-            if suffix in _HOURLY_TEMP_ALIAS_TO_CITY:
-                return _HOURLY_TEMP_ALIAS_TO_CITY.get(suffix)
+            if suffix in _SHORT_CADENCE_ALIAS_TO_CITY:
+                return _SHORT_CADENCE_ALIAS_TO_CITY.get(suffix)
     return None
 
 
@@ -239,32 +265,29 @@ def resolve_weather_city_key(token: str, *, contract_name: str = "") -> Optional
 
 
 def get_hourly_city_support_summary() -> dict[str, Any]:
-    explicit_hourly = sorted(
+    registry_hourly = sorted(
         city_key
         for city_key, station in STATIONS.items()
-        if any(str(series).upper().startswith("KXTEMP") for series in station.get("series", []))
+        if any(_is_registry_hourly_series(str(series)) for series in station.get("series", []))
     )
-    resolver_ready = sorted(set(_HOURLY_TEMP_ALIAS_TO_CITY.values()))
+    resolver_ready = sorted(set(_SHORT_CADENCE_ALIAS_TO_CITY.values()))
+    verified_hourly_series = sorted(
+        str(series).upper()
+        for station in STATIONS.values()
+        for series in station.get("series", [])
+        if _is_registry_hourly_series(str(series))
+    )
     return {
+        "support_basis": "local_series_registry",
         "universe_city_count": len(STATIONS),
         "resolver_ready_city_count": len(resolver_ready),
-        "explicit_hourly_series_city_count": len(explicit_hourly),
+        "explicit_hourly_series_city_count": len(registry_hourly),
         "resolver_ready_cities": resolver_ready,
-        "explicit_hourly_series_cities": explicit_hourly,
-        "exchange_verified_city_count": len(explicit_hourly),
-        "exchange_verified_cities": explicit_hourly,
-        "verified_hourly_series_count": sum(
-            1
-            for station in STATIONS.values()
-            for series in station.get("series", [])
-            if str(series).upper().startswith("KXTEMP")
-        ),
-        "verified_hourly_series": sorted(
-            str(series).upper()
-            for station in STATIONS.values()
-            for series in station.get("series", [])
-            if str(series).upper().startswith("KXTEMP")
-        ),
+        "explicit_hourly_series_cities": registry_hourly,
+        "exchange_verified_city_count": len(registry_hourly),
+        "exchange_verified_cities": registry_hourly,
+        "verified_hourly_series_count": len(verified_hourly_series),
+        "verified_hourly_series": verified_hourly_series,
     }
 
 # ── Intraday Ground Truth ───────────────────────────────────────────────────

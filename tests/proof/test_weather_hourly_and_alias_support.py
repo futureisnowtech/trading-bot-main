@@ -13,7 +13,7 @@ def test_hourly_weather_mode_detection_recognizes_hour_stamped_tickers():
 
     assert weather_mode_for_ticker("KXTEMPNYCH-24JAN0122-T75.99") == "TEMP"
     assert weather_mode_for_ticker("KXHIGHNYD-24JAN0122-T75.99") == "TEMP"
-    assert live_entry_scope() == "ALL_WEATHER_LANES"
+    assert live_entry_scope() == "HOURLY_ONLY"
     assert is_hourly_weather_contract("KXTEMPNYCH-24JAN0122-T75.99")
     assert not is_hourly_weather_contract("KXLOWTNYC-26JUN09-T52")
     assert is_live_entry_weather_contract("KXTEMPNYCH-24JAN0122-T75.99")
@@ -77,8 +77,11 @@ def test_verified_hourly_resolver_covers_exchange_verified_cities():
     import data.kalshi_weather_monitor as wm
 
     summary = wm.get_hourly_city_support_summary()
-    assert summary["exchange_verified_city_count"] == 6
-    assert summary["exchange_verified_cities"] == ["BOS", "CHI", "DC", "LAX", "MIA", "NY"]
+    assert summary["support_basis"] == "local_series_registry"
+    assert summary["resolver_ready_city_count"] >= 6
+    assert summary["exchange_verified_city_count"] >= 6
+    for city_key in ["BOS", "CHI", "DC", "LAX", "MIA", "NY"]:
+        assert city_key in summary["resolver_ready_cities"]
 
     expected = {
         "KXTEMPBOSH-24JAN0122-T75.99": "KXTEMPBOSH",
@@ -90,6 +93,8 @@ def test_verified_hourly_resolver_covers_exchange_verified_cities():
     }
     for ticker, series in expected.items():
         assert wm._resolve_weather_series(ticker) == series
+    assert "KXHIGHTATL" in summary["verified_hourly_series"]
+    assert "KXLOWTNYC" in summary["verified_hourly_series"]
 
 
 def test_verified_hourly_resolver_uses_known_weather_suffixes_only():

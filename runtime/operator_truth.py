@@ -415,7 +415,19 @@ def _is_weather_ticker(ticker: str) -> bool:
         return weather_mode_for_ticker(str(ticker or "")) is not None
     except Exception:
         token = str(ticker or "").upper()
-        return any(prefix in token for prefix in ("KXHIGH", "KXLOW", "KXRAIN", "KXTEMP"))
+        return any(
+            prefix in token
+            for prefix in (
+                "KXHIGH",
+                "KXHIGHT",
+                "KXLOW",
+                "KXLOWT",
+                "KXRAIN",
+                "KXSNOW",
+                "KXWIND",
+                "KXTEMP",
+            )
+        )
 
 
 def _sample_weather_contracts(active_contracts: list[dict], *, limit: int) -> list[dict]:

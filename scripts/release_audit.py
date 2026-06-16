@@ -69,7 +69,6 @@ REMOTE_PROJECT_DIR = "/home/algo-runner/bot"
 PROOF_GATE_TESTS = [
     "tests/proof/test_forecast_lane.py",
     "tests/proof/test_resolution_sync.py",
-    "tests/proof/test_weather_rbi_truth.py",
     "tests/proof/test_weather_sovereign.py",
     "tests/proof/test_weather_hourly_and_alias_support.py",
     "tests/proof/test_lane_gating.py",

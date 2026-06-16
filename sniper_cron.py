@@ -59,7 +59,7 @@ def main() -> int:
         )
         return 0
 
-    summary = run_execution_cycle(bankroll=float(ACCOUNT_SIZE), run_rbi=True)
+    summary = run_execution_cycle(bankroll=float(ACCOUNT_SIZE), run_rbi=False)
     try:
         sync_incidents_and_notify()
     except Exception:

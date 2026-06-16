@@ -342,14 +342,16 @@ def get_recent_execution_summary(
 
 
 def get_weather_learning_status(*, db_path: str = DB_PATH) -> dict:
-    payload = {
+    return {
         "adaptive_active": False,
+        "status": "disabled",
+        "disabled_reason": "live_weather_learning_retired",
         "base_blend": {
             "gfs_weight": BASE_GFS_WEIGHT,
             "ecmwf_weight": BASE_ECMWF_WEIGHT,
         },
         "global_blend": {
-            "segment": "STATIC",
+            "segment": "STATIC_DISABLED",
             "sample_size": 0,
             "effective_weight": 0.0,
             "gfs_weight": BASE_GFS_WEIGHT,
@@ -361,51 +363,6 @@ def get_weather_learning_status(*, db_path: str = DB_PATH) -> dict:
         "mode_blends": [],
         "calibration": {},
     }
-
-    try:
-        with _connect_db(db_path) as conn:
-            calibration_row = conn.execute(
-                """
-                SELECT ts, brier_score, win_rate, ensemble_accuracy, sample_size, edge_decay
-                FROM weather_calibration
-                ORDER BY ts DESC
-                LIMIT 1
-                """
-            ).fetchone()
-            if calibration_row:
-                payload["calibration"] = dict(calibration_row)
-
-            skill_rows = conn.execute(
-                """
-                SELECT segment, ts, sample_size, effective_weight, gfs_brier, ecmwf_brier,
-                       gfs_weight, ecmwf_weight, shrinkage, lookback_days
-                FROM weather_model_skill_state
-                ORDER BY CASE WHEN segment='GLOBAL' THEN 0 ELSE 1 END, sample_size DESC, segment ASC
-                """
-            ).fetchall()
-    except Exception as exc:
-        payload["error"] = str(exc)
-        return payload
-
-    if not skill_rows:
-        return payload
-
-    rows = [dict(row) for row in skill_rows]
-    global_row = next((row for row in rows if str(row.get("segment") or "").upper() == "GLOBAL"), None)
-    if global_row:
-        payload["global_blend"] = global_row
-        payload["adaptive_active"] = int(global_row.get("sample_size") or 0) > 0
-    else:
-        payload["global_blend"]["ts"] = str(rows[0].get("ts") or "")
-
-    payload["mode_blends"] = [
-        row
-        for row in rows
-        if str(row.get("segment") or "").upper() not in {"", "GLOBAL"}
-    ]
-    if not payload["adaptive_active"]:
-        payload["adaptive_active"] = any(int(row.get("sample_size") or 0) > 0 for row in payload["mode_blends"])
-    return payload
 
 
 def _is_weather_ticker(ticker: str) -> bool:

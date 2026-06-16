@@ -82,7 +82,7 @@ def main() -> int:
                         storage["threshold_mb"],
                     )
                 else:
-                    summary = run_execution_cycle(bankroll=bankroll, run_rbi=True)
+                    summary = run_execution_cycle(bankroll=bankroll, run_rbi=False)
                     logger.info("Execution cycle complete: %s", summary)
                     if not weather_monitor_started:
                         start_weather_monitor()

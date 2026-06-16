@@ -253,7 +253,7 @@ def _build_local_audit_snapshot() -> tuple[str, str]:
         sample_size = int(learning_global.get("sample_size") or 0)
         line = f"Adaptive Blend: GFS={gfs_weight:.0%} ECMWF={ec_weight:.0%} n={sample_size}"
     else:
-        line = "Adaptive Blend: baseline 60/40 (learner active but not yet tilted)"
+        line = "Adaptive Blend: static 60/40 (learning disabled)"
     msg_lines.append(line)
     raw_lines.append(line)
 

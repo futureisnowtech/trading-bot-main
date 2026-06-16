@@ -542,12 +542,7 @@ def run_execution_cycle(
             pass
 
     if run_rbi:
-        try:
-            from learning.weather_rbi import run_weather_rbi
-
-            run_weather_rbi()
-        except Exception as exc:
-            logger.warning("[ForecastRunner] RBI cycle failed: %s", exc)
+        logger.info("[ForecastRunner] RBI learning disabled for live weather trading.")
 
     summary = {
         "broker_connected": connected,

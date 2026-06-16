@@ -73,14 +73,15 @@ def test_marketable_no_buy_uses_no_leg_price_field(monkeypatch):
 
 def test_broker_surfaces_rate_limit_status(monkeypatch):
     broker = _connected_broker()
+    calls = []
 
-    monkeypatch.setattr(
-        broker,
-        "_request",
-        lambda *args, **kwargs: {
+    def fake_request(*args, **kwargs):
+        calls.append(kwargs.get("body") or {})
+        return {
             "error": {"code": "too_many_requests", "message": "too many requests"}
-        },
-    )
+        }
+
+    monkeypatch.setattr(broker, "_request", fake_request)
 
     result = broker.place_buy_order(
         {"local_symbol": "KXHIGHAUS-26JUN05-B83.5", "right": "C"},
@@ -90,6 +91,7 @@ def test_broker_surfaces_rate_limit_status(monkeypatch):
     )
 
     assert result["status"] == "too_many_requests"
+    assert calls[0]["time_in_force"] == "immediate_or_cancel"
 
 
 def test_fill_price_falls_back_to_total_cost_per_share():

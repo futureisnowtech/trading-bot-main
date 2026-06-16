@@ -985,7 +985,7 @@ class KalshiBroker:
                 body["yes_price"] = limit_cents
             else:
                 body["no_price"] = limit_cents
-            body["time_in_force"] = "ioc"
+            body["time_in_force"] = "immediate_or_cancel"
         
         resp = self._request("POST", "/trade-api/v2/portfolio/orders", body=body)
         error_code = self._extract_error_code(resp)
@@ -1060,13 +1060,13 @@ class KalshiBroker:
                 body["yes_price"] = _KALSHI_MARKETABLE_EXIT_CENTS
             else:
                 body["no_price"] = _KALSHI_MARKETABLE_EXIT_CENTS
-            body["time_in_force"] = "ioc"
+            body["time_in_force"] = "immediate_or_cancel"
         else:
             if side == "yes":
                 body["yes_price"] = limit_cents
             else:
                 body["no_price"] = limit_cents
-            body["time_in_force"] = "ioc"
+            body["time_in_force"] = "immediate_or_cancel"
 
         resp = self._request("POST", "/trade-api/v2/portfolio/orders", body=body)
         error_code = self._extract_error_code(resp)
@@ -1129,7 +1129,7 @@ class KalshiBroker:
             "side": side,
             "count": int(qty),
             "client_order_id": str(uuid.uuid4()),
-            "time_in_force": "ioc",
+            "time_in_force": "immediate_or_cancel",
         }
         if side == "yes":
             body["yes_price"] = _KALSHI_MARKETABLE_EXIT_CENTS

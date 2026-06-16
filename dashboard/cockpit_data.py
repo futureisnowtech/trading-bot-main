@@ -152,7 +152,7 @@ def _format_learning_blend(
     chosen_segment = str((chosen or {}).get("segment") or "STATIC").upper()
 
     if sample_size <= 0:
-        return "Base 60% GFS + 40% ECMWF (adaptive learner still on baseline)"
+        return "Base 60% GFS + 40% ECMWF (learning disabled)"
 
     return (
         f"{chosen_segment}: GFS {gfs_weight:.0%} / ECMWF {ecmwf_weight:.0%} "
@@ -646,7 +646,7 @@ def build_metric_explainers(balance_usd: float | None = None) -> dict[str, str]:
         "Emergency Exit P&L": "This estimates what the book would look like if we tried to flatten at the live bid right now after fees. It is the harsher, more realistic liquidation view.",
         "Nearest Resolution": "This shows which open trade settles soonest. Near-expiry trades deserve extra attention because weather certainty and liquidity can change quickly into settlement.",
         "Data Ingestion": "The engine starts by blending the two main weather ensembles. That keeps us from overreacting to one model run and gives the bot a more stable starting forecast.",
-        "Adaptive Blend": "The learner watches resolved weather contracts and can tilt the GFS/ECMWF mix away from the default 60/40 split when one model has been proving more accurate lately. This makes the engine adaptive without turning it into a black box.",
+        "Adaptive Blend": "The engine is currently using a fixed 60/40 GFS/ECMWF blend. Learning is disabled so the weather brain stays simple, inspectable, and consistent while we focus on getting clean live execution.",
         "AI Volatility Adjustment": "GraphCast-style AI does not overrule the forecast direction. It only tells the bot whether confidence should be widened or tightened because the atmosphere looks more or less chaotic.",
         "Safety Gates": "These filters stop trades that look good on paper but fail live economics. Fees, spreads, stale data, and model-vs-market disagreement can all kill a trade here.",
         "Position Sizing": "Even when a trade passes, the bot still sizes it down through a continuous edge scaler, bankroll caps, and hub caps. This keeps one good-looking idea from becoming a dangerous oversized bet.",
@@ -972,7 +972,7 @@ def build_regime_cards(
     blend_detail = (
         f"{blend_sample_size} resolved samples"
         if blend_sample_size > 0
-        else "baseline until enough labels"
+        else "static baseline"
     )
     return [
         {

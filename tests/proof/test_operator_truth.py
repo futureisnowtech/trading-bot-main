@@ -64,66 +64,21 @@ def test_live_kalshi_status_is_broker_first_and_surfaces_drift(proof_runtime, mo
     broker.sync_positions.assert_called_once()
 
 
-def test_weather_learning_status_surfaces_latest_adaptive_blend(proof_runtime, monkeypatch):
+def test_weather_learning_status_is_static_when_live_learning_is_disabled(proof_runtime, monkeypatch):
     import runtime.operator_truth as ot
 
     db = str(proof_runtime.db_path)
     monkeypatch.setattr(ot, "DB_PATH", db, raising=False)
 
-    with sqlite3.connect(proof_runtime.db_path) as conn:
-        conn.execute(
-            """
-            CREATE TABLE weather_calibration (
-                ts TEXT PRIMARY KEY,
-                brier_score REAL,
-                win_rate REAL,
-                ensemble_accuracy REAL,
-                sample_size INTEGER,
-                edge_decay REAL
-            )
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE weather_model_skill_state (
-                segment TEXT PRIMARY KEY,
-                ts TEXT NOT NULL,
-                sample_size INTEGER NOT NULL,
-                effective_weight REAL NOT NULL,
-                gfs_brier REAL,
-                ecmwf_brier REAL,
-                gfs_weight REAL NOT NULL,
-                ecmwf_weight REAL NOT NULL,
-                shrinkage REAL NOT NULL,
-                lookback_days INTEGER NOT NULL
-            )
-            """
-        )
-        conn.execute(
-            """
-            INSERT INTO weather_calibration
-                (ts, brier_score, win_rate, ensemble_accuracy, sample_size, edge_decay)
-            VALUES ('2026-06-05T00:00:00+00:00', 0.11, 0.62, 0.71, 14, 0.02)
-            """
-        )
-        conn.execute(
-            """
-            INSERT INTO weather_model_skill_state
-                (segment, ts, sample_size, effective_weight, gfs_brier, ecmwf_brier,
-                 gfs_weight, ecmwf_weight, shrinkage, lookback_days)
-            VALUES
-                ('GLOBAL', '2026-06-05T00:00:00+00:00', 14, 11.5, 0.18, 0.12, 0.42, 0.58, 1.0, 30),
-                ('HIGH',   '2026-06-05T00:00:00+00:00', 8, 6.2, 0.19, 0.11, 0.38, 0.62, 1.0, 30)
-            """
-        )
-
     payload = ot.get_weather_learning_status(db_path=db)
 
-    assert payload["adaptive_active"] is True
-    assert payload["global_blend"]["segment"] == "GLOBAL"
-    assert payload["global_blend"]["gfs_weight"] == 0.42
-    assert payload["global_blend"]["ecmwf_weight"] == 0.58
-    assert payload["mode_blends"][0]["segment"] == "HIGH"
+    assert payload["adaptive_active"] is False
+    assert payload["status"] == "disabled"
+    assert payload["disabled_reason"] == "live_weather_learning_retired"
+    assert payload["global_blend"]["segment"] == "STATIC_DISABLED"
+    assert payload["global_blend"]["gfs_weight"] == 0.60
+    assert payload["global_blend"]["ecmwf_weight"] == 0.40
+    assert payload["mode_blends"] == []
 
 
 def test_recent_veto_summary_aggregates_reason_counts(proof_runtime, monkeypatch):

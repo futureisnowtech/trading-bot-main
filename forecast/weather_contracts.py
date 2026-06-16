@@ -32,7 +32,7 @@ def _clean_title(title: str) -> str:
 _HOURLY_WEATHER_TICKER_RE = re.compile(r"-\d{2}[A-Z]{3}\d{4}(?:-|$)")
 _HOURLY_TITLE_RE = re.compile(r"\bat\s+\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)\b")
 _SHORT_CADENCE_TEMP_PREFIXES = ("KXLOWT", "KXHIGHT")
-LIVE_ENTRY_SCOPE = "HOURLY_ONLY"
+LIVE_ENTRY_SCOPE = "ALL_WEATHER_LANES"
 
 
 def has_hourly_weather_timestamp(ticker: str) -> bool:
@@ -77,9 +77,7 @@ def is_live_entry_weather_contract(
     *,
     contract_name: str = "",
 ) -> bool:
-    # SRE Pillar 3: Canonical Scope Restoration (Strict Hourly Only)
-    # v19.10: Ban daily high/low from fresh entries as per GEMINI.md mandate.
-    return is_hourly_weather_contract(ticker, contract_name=contract_name)
+    return weather_mode_for_ticker(ticker) is not None
 
 
 def weather_mode_for_ticker(ticker: str) -> WeatherMode | None:

@@ -191,15 +191,6 @@ def min_contract_price_for_mode(
     ticker: str = "",
     contract_name: str = "",
 ) -> float:
-    try:
-        from learning.weather_rbi import get_weather_model_blend
-        blend = get_weather_model_blend(mode)
-        penny_floor = blend.get("penny_threshold")
-        if penny_floor is not None:
-            return max(0.01, float(penny_floor))
-    except Exception as e:
-        logger.warning(f"Failed to fetch dynamic penny floor for mode {mode}: {e}")
-
     mode_str = str(mode or "").upper()
     if mode_str in {"RAIN", "SNOW", "WIND"}:
         return 0.02
@@ -763,22 +754,17 @@ def _probability_from_weather_record(
 
 
 def _get_adaptive_weather_model_blend(mode: str) -> dict:
-    try:
-        from learning.weather_rbi import get_weather_model_blend
-
-        return get_weather_model_blend(mode)
-    except Exception:
-        return {
-            "segment": "STATIC",
-            "sample_size": 0,
-            "effective_weight": 0.0,
-            "gfs_brier": None,
-            "ecmwf_brier": None,
-            "gfs_weight": 0.60,
-            "ecmwf_weight": 0.40,
-            "shrinkage": 0.0,
-            "lookback_days": 30,
-        }
+    return {
+        "segment": "STATIC_DISABLED",
+        "sample_size": 0,
+        "effective_weight": 0.0,
+        "gfs_brier": None,
+        "ecmwf_brier": None,
+        "gfs_weight": 0.60,
+        "ecmwf_weight": 0.40,
+        "shrinkage": 0.0,
+        "lookback_days": 30,
+    }
 
 
 def _blend_weather_probabilities(
@@ -1589,29 +1575,6 @@ def evaluate_contract(
         if approved and ev_chosen < effective_ev_threshold:
             approved = False
             veto_reason = f"fee_adjusted_ev_too_low ({ev_chosen:.4f} < {effective_ev_threshold})"
-
-        # ── Gate 11: Hard RBI Conviction Floor (v19.10 lane-aware) ─────────────
-        # Kills marginal-conviction trades BEFORE sizing so fee drag cannot
-        # dominate post-fee PnL. Threshold is derived from the lane's resolution
-        # mechanics; see _resolve_hard_rbi_threshold() for the layered logic.
-        if approved:
-            _hub_for_gate11 = _get_city_hub(
-                contract.get("local_symbol", ""),
-                contract_name=str(contract.get("contract_name") or ""),
-            )
-            _hard_rbi_threshold = _resolve_hard_rbi_threshold(
-                lane=w_mode,
-                hourly=hourly_contract,
-                hub=_hub_for_gate11,
-            )
-            _q_side_for_gate11 = max(0.01, min(0.99, float(q_hat)))
-            if _q_side_for_gate11 < _hard_rbi_threshold:
-                approved = False
-                veto_reason = (
-                    f"HARD_RBI_CONVICTION_FLOOR "
-                    f"(q={_q_side_for_gate11:.3f}<T={_hard_rbi_threshold:.3f} "
-                    f"lane={w_mode or 'UNKNOWN'} hub={_hub_for_gate11})"
-                )
 
         weather_model_prob_gfs = None
         weather_model_prob_ecmwf = None

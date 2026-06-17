@@ -139,13 +139,13 @@ KALSHI_API_KEY_ID: str = os.getenv("KALSHI_API_KEY_ID", "").strip()
 KALSHI_PRIVATE_KEY_PATH: str = get_kalshi_private_key_path()
 KALSHI_ENABLED: bool = os.getenv("KALSHI_ENABLED", "true").lower() == "true"
 FORECAST_LANE_ACTIVE: bool = (
-    os.getenv("FORECAST_LANE_ACTIVE", "true").lower() == "true"
+    os.getenv("FORECAST_LANE_ACTIVE", "false").lower() == "true"
 )
 FORECAST_DASHBOARD_VISIBLE: bool = (
     os.getenv("FORECAST_DASHBOARD_VISIBLE", "true").lower() == "true"
 )
 FORECAST_AUTONOMOUS_ENABLED: bool = (
-    os.getenv("FORECAST_AUTONOMOUS_ENABLED", "true").lower() == "true"
+    os.getenv("FORECAST_AUTONOMOUS_ENABLED", "false").lower() == "true"
 )
 FORECAST_MANUAL_ENABLED: bool = (
     os.getenv("FORECAST_MANUAL_ENABLED", "true").lower() == "true"

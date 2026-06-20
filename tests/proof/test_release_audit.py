@@ -153,6 +153,71 @@ def test_strategy_cycle_blocks_new_entries_when_release_gate_closed(monkeypatch)
     assert any("entry_gate_blocked" in message for _level, _source, message in events)
 
 
+def test_strategy_cycle_with_open_release_gate_handles_empty_candidates(monkeypatch):
+    import config
+    import forecast.db as fdb
+    import forecast.market_snapshot as fms
+    import forecast.runner as fr
+    import forecast.strategy_engine as fse
+    import runtime.operator_truth as ot
+
+    class BrokerStub:
+        def is_connected(self):
+            return True
+
+        def sync_positions(self):
+            return None
+
+        def get_account_balance(self):
+            return 164.0
+
+        def get_positions(self):
+            return []
+
+    monkeypatch.setattr(config, "KALSHI_ENABLED", True, raising=False)
+    monkeypatch.setattr(config, "FORECAST_LANE_ACTIVE", True, raising=False)
+    monkeypatch.setattr(fr, "_get_broker", lambda: BrokerStub(), raising=False)
+    monkeypatch.setattr(
+        fdb,
+        "get_active_contracts",
+        lambda db_path=None: [
+            {
+                "id": 1,
+                "market_id": 7,
+                "local_symbol": "KXLOWNY-26JUN06-T70",
+                "contract_name": "NY Low",
+                "right": "C",
+                "strike": 70.0,
+                "last_trade_at": "20260606",
+                "resolution_at": "2026-06-06T04:59:00Z",
+            }
+        ],
+        raising=False,
+    )
+    monkeypatch.setattr(fdb, "get_bars", lambda *args, **kwargs: [], raising=False)
+    monkeypatch.setattr(fms, "build_market_snapshots", lambda *args, **kwargs: [], raising=False)
+    monkeypatch.setattr(
+        fse,
+        "evaluate_market_snapshots",
+        lambda **kwargs: [],
+        raising=False,
+    )
+    monkeypatch.setattr(
+        ot,
+        "get_release_status",
+        lambda: {
+            "entries_allowed": True,
+            "current_release_verdict": "READY_FOR_LIVE",
+            "top_infrastructure_blockers": [],
+        },
+        raising=False,
+    )
+
+    result = fr.run_strategy_cycle(bankroll=164.0)
+
+    assert result == []
+
+
 def test_scan_live_market_surface_warms_weather_truth_for_weather_candidates(monkeypatch):
     import scripts.release_audit as ra
 

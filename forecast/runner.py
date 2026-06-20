@@ -1564,7 +1564,6 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
         # v19.2 Settle microstructure rest state (Leaky Token Bucket / Burst delays)
         # Avoid blind 30s rate-limiting delays while safely pacing submissions.
         logger.info("[ForecastRunner] Pacing burst submissions. Executing micro-delay...")
-        import time
         time.sleep(1.5)
 
         return entries

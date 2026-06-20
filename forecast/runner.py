@@ -335,6 +335,40 @@ def _should_model_invalidation_exit(
     )
 
 
+def _should_hourly_edge_loss_exit(
+    *,
+    hours_to_resolution: float,
+    bid_price: float,
+    entry_held_p: float | None,
+    held_model_p: float | None,
+    remaining_edge: float | None,
+) -> bool:
+    if held_model_p is None or remaining_edge is None:
+        return False
+
+    from config import (
+        KALSHI_HOURLY_EXIT_BID_FLOOR,
+        KALSHI_HOURLY_EXIT_INVALIDATION_HOURS,
+        KALSHI_HOURLY_EXIT_REDEPLOY_EDGE,
+        KALSHI_HOURLY_EXIT_REDEPLOY_HOURS,
+    )
+
+    bid_floor = float(KALSHI_HOURLY_EXIT_BID_FLOOR)
+    if bid_price < bid_floor:
+        return False
+
+    if (
+        hours_to_resolution <= float(KALSHI_HOURLY_EXIT_INVALIDATION_HOURS)
+        and _should_model_invalidation_exit(entry_held_p, held_model_p, remaining_edge)
+    ):
+        return True
+
+    return (
+        hours_to_resolution <= float(KALSHI_HOURLY_EXIT_REDEPLOY_HOURS)
+        and remaining_edge <= float(KALSHI_HOURLY_EXIT_REDEPLOY_EDGE)
+    )
+
+
 # ── Discovery loop ─────────────────────────────────────────────────────────────
 
 
@@ -819,7 +853,7 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
             ]
             if len(active_in_scope) != len(active):
                 logger.info(
-                    "[%s] Filtered %s non-hourly contracts from fresh-entry scan.",
+                    "[%s] Filtered %s non-weather contracts from fresh-entry scan.",
                     live_entry_scope(),
                     max(0, len(active) - len(active_in_scope)),
                 )
@@ -863,13 +897,13 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                 contract = candidate["contract"]
                 local_sym = contract.get("local_symbol", "")
 
-                # Keep fresh entries pinned to true hour-stamped weather contracts only.
+                # Keep fresh entries pinned to the live all-weather scope.
                 if not is_live_entry_weather_contract(
                     local_sym,
                     contract_name=str(contract.get("contract_name") or ""),
                 ):
                     logger.info(
-                        "[%s] Skipping non-hourly contract: %s",
+                        "[%s] Skipping out-of-scope contract: %s",
                         live_entry_scope(),
                         local_sym,
                     )
@@ -949,11 +983,34 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                                     float(worst_pos.get("qty") or 0.0),
                                     worst_entry,
                                 )
+                                worst_side = str(worst_pos.get("side") or "").upper()
+                                worst_prefix = worst_sym.split("-")[0].upper()
+                                is_cool_wet_prefix = any(
+                                    x in worst_prefix
+                                    for x in ("KXLOW", "RAIN", "KXRAIN", "KXSNOW", "KXWIND")
+                                )
+                                is_warm_dry_prefix = any(
+                                    x in worst_prefix for x in ("KXHIGH", "KXTEMP")
+                                )
+                                if is_cool_wet_prefix:
+                                    worst_sign = -1.0 if worst_side == "YES" else 1.0
+                                elif is_warm_dry_prefix:
+                                    worst_sign = 1.0 if worst_side == "YES" else -1.0
+                                else:
+                                    worst_sign = 1.0
+                                cycle_hub_signed_exposures.setdefault(worst_hub, []).append(
+                                    -(worst_exposure * worst_sign)
+                                )
                                 cycle_hub_exposure_usd[worst_hub] = max(
                                     0.0,
                                     cycle_hub_exposure_usd.get(worst_hub, 0.0)
                                     - worst_exposure,
                                 )
+                        open_positions = [
+                            p
+                            for p in open_positions
+                            if p.get("local_symbol") != worst_sym
+                        ]
                     log_event("INFO", "ForecastRunner", f"Swap: Flattened {worst_sym} for {local_sym}")
 
                 # Hard duplicate guard: no same-contract double-down
@@ -1109,10 +1166,45 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
 
                         cycle_event_families[family] += 1
                         if candidate_hub and get_kalshi_position_exposure_usd:
-                            cycle_hub_exposure_usd[candidate_hub] = (
-                                cycle_hub_exposure_usd.get(candidate_hub, 0.0)
-                                + get_kalshi_position_exposure_usd(actual_qty, actual_price)
+                            actual_exposure = get_kalshi_position_exposure_usd(
+                                actual_qty,
+                                actual_price,
                             )
+                            p_prefix = local_sym.split("-")[0].upper()
+                            is_cool_wet_prefix = any(
+                                x in p_prefix for x in ("KXLOW", "RAIN", "KXRAIN", "KXSNOW", "KXWIND")
+                            )
+                            is_warm_dry_prefix = any(
+                                x in p_prefix for x in ("KXHIGH", "KXTEMP")
+                            )
+                            if is_cool_wet_prefix:
+                                entry_sign = -1.0 if result.side.upper() == "YES" else 1.0
+                            elif is_warm_dry_prefix:
+                                entry_sign = 1.0 if result.side.upper() == "YES" else -1.0
+                            else:
+                                entry_sign = 1.0
+                            cycle_hub_signed_exposures.setdefault(candidate_hub, []).append(
+                                actual_exposure * entry_sign
+                            )
+                            cycle_hub_exposure_usd[candidate_hub] = abs(
+                                sum(cycle_hub_signed_exposures.get(candidate_hub, []))
+                            )
+                        open_positions.append(
+                            {
+                                "local_symbol": contract.get("local_symbol", ""),
+                                "qty": float((live_pos or {}).get("qty") or actual_qty),
+                                "entry_price": float(
+                                    (live_pos or {}).get("entry_price")
+                                    or (live_pos or {}).get("entry")
+                                    or actual_price
+                                ),
+                                "side": result.side.upper(),
+                                "right": contract.get("right", "C"),
+                                "last_trade_at": contract.get("last_trade_at", ""),
+                                "contract_name": contract.get("contract_name", ""),
+                                "forecast_yes_prob": forecast_yes_prob,
+                            }
+                        )
 
                         try:
                             from notifications.notification_engine import notify_trade_open
@@ -1548,6 +1640,30 @@ def run_position_monitor() -> None:
                                 elif is_high and (hrrr_high < limit_lower or hrrr_high >= limit_upper):
                                     logger.warning(f"[Sovereign Precinct] TREND EXIT: {local_symbol} HRRR predicts {hrrr_high}F vs bracket start {limit_lower}F. Cutting loss.")
                                     resolved = True
+
+                        if (
+                            not resolved
+                            and semantics is not None
+                            and not semantics.ambiguous
+                            and semantics.mode == "TEMP"
+                            and _should_hourly_edge_loss_exit(
+                                hours_to_resolution=hours_to_resolution,
+                                bid_price=bid_price,
+                                entry_held_p=entry_held_p,
+                                held_model_p=held_model_p,
+                                remaining_edge=remaining_edge,
+                            )
+                        ):
+                            logger.warning(
+                                "[Hourly Exit] %s invalidated: held_p=%.2f entry_p=%s edge=%s bid=%.2f htr=%.2f",
+                                local_symbol,
+                                held_model_p,
+                                f"{entry_held_p:.2f}" if entry_held_p is not None else "n/a",
+                                f"{remaining_edge:.3f}" if remaining_edge is not None else "n/a",
+                                bid_price,
+                                hours_to_resolution,
+                            )
+                            resolved = True
 
             except Exception as e:
                 logger.debug(f"Exit Protocol check failed for {local_symbol}: {e}")

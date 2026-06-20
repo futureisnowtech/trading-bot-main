@@ -55,6 +55,49 @@ def test_weather_continuous_sizing_stays_live_positive():
     assert qty > 0
 
 
+def test_weather_no_side_sizing_uses_no_probability(monkeypatch):
+    import forecast.strategy_engine as se
+
+    fresh_weather = {"timestamp": datetime.now(timezone.utc).timestamp()}
+    captured: dict[str, float] = {}
+
+    monkeypatch.setattr(se, "get_weather_data", lambda ticker: fresh_weather)
+    monkeypatch.setattr(
+        se,
+        "_strategy_weather_details",
+        lambda *args, **kwargs: (True, "NO", 0.90, ["mock"], False, 1.0, 0, 0.05),
+    )
+    monkeypatch.setattr(se, "get_contract_weather_data", lambda *args, **kwargs: None)
+
+    def _capture_sizing(**kwargs):
+        captured["ensemble_prob"] = kwargs["ensemble_prob"]
+        return 7
+
+    monkeypatch.setattr(se, "calculate_continuous_sizing", _capture_sizing)
+
+    contract = _make_weather_contract()
+    contract["local_symbol"] = "KXLOWTPHIL-26JUN17-T64"
+    contract["contract_name"] = "Will the low temp in Philadelphia be >64 on Jun 17, 2026?"
+    contract["strike"] = 64.0
+
+    now_ts = datetime.now(timezone.utc).isoformat()
+    result = se.evaluate_contract(
+        contract=contract,
+        bars_5m=[],
+        bars_30m=[],
+        bars_1h=[],
+        bars_4h=[],
+        yes_quote=_quote(0.95, 0.02, now_ts),
+        no_quote=_quote(0.10, 0.02, now_ts),
+        bankroll=100.0,
+    )
+
+    assert result is not None
+    assert result.side == "NO"
+    assert captured["ensemble_prob"] == 0.90
+    assert result.position_contracts == 7
+
+
 def test_weather_override_cannot_bypass_hard_spread_veto(monkeypatch):
     import forecast.strategy_engine as se
 
@@ -93,6 +136,48 @@ def test_weather_override_cannot_bypass_hard_spread_veto(monkeypatch):
     assert result is not None
     assert result.econ_approved is False
     assert "spread" in result.veto_reason.lower()
+
+
+def test_hourly_between_contracts_are_not_blanket_banned(monkeypatch):
+    import forecast.strategy_engine as se
+
+    fresh_weather = {
+        "members_temp": [84.0] * 31,
+        "ecmwf": {"members_temp": [84.0] * 31},
+        "sigma_temp": 0.7,
+        "peak_tcdc": 5.0,
+        "timestamp": datetime.now(timezone.utc).timestamp(),
+    }
+
+    monkeypatch.setattr(se, "get_weather_data", lambda ticker: fresh_weather)
+    monkeypatch.setattr(se, "get_contract_weather_data", lambda ticker, **kwargs: fresh_weather)
+    monkeypatch.setattr(
+        se,
+        "_blend_weather_probabilities",
+        lambda **kwargs: {
+            "ensemble_prob": 0.78,
+            "gfs_weight": 0.60,
+            "ecmwf_weight": 0.40,
+            "convergence_multiplier": 1.0,
+            "divergence_gap": 0.0,
+            "divergence_size_multiplier": 1.0,
+            "catastrophic_divergence": False,
+        },
+    )
+
+    passes, side, prob, factors, *_ = se._strategy_weather_details(
+        "KXHIGHTATL-26JUN1711-B83.5",
+        ask_yes=0.24,
+        ask_no=0.76,
+        hours_to_res=0.8,
+        contract_name="Will the hourly temp in Atlanta be 83-84° at 11 AM on Jun 17, 2026?",
+        strike=83.5,
+    )
+
+    assert passes is True
+    assert side == "YES"
+    assert prob > 0.50
+    assert not any("banned_bin_contract_type" in factor for factor in factors)
 
 
 def test_weather_override_can_clear_soft_low_conviction_gate(monkeypatch):

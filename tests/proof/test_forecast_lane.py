@@ -1240,7 +1240,7 @@ def test_strategy_engine_family_cap_blocks_fifth_existing_position(monkeypatch):
     assert results[0]["result"].veto_reason == "same_event_family_cap_reached"
 
 
-def test_strategy_engine_does_not_preconsume_family_capacity_during_ranking(monkeypatch):
+def test_strategy_engine_keeps_only_one_best_strike_per_event_slot(monkeypatch):
     from forecast.market_snapshot import MarketSnapshot
     import forecast.strategy_engine as se
 
@@ -1318,8 +1318,117 @@ def test_strategy_engine_does_not_preconsume_family_capacity_during_ranking(monk
 
     assert len(results) == 2
     assert results[0]["result"].econ_approved is True
-    assert results[1]["result"].econ_approved is True
+    assert results[1]["result"].econ_approved is False
+    assert "same_event_best_strike_selected" in results[1]["result"].veto_reason
     assert results[0]["rank_score"] > results[1]["rank_score"]
+
+
+def test_check_strike_consistency_allows_same_family_different_event_slots():
+    import forecast.strategy_engine as se
+
+    allowed, reason = se.check_strike_consistency(
+        "KXTEMPNYCH-26JUN1711-T75.99",
+        "YES",
+        [
+            {
+                "local_symbol": "KXTEMPNYCH-26JUN1709-T71.99",
+                "side": "YES",
+            }
+        ],
+    )
+
+    assert allowed is True
+    assert reason == ""
+
+
+def test_check_strike_consistency_blocks_same_event_slot_same_side():
+    import forecast.strategy_engine as se
+
+    allowed, reason = se.check_strike_consistency(
+        "KXTEMPNYCH-26JUN1711-T76.99",
+        "YES",
+        [
+            {
+                "local_symbol": "KXTEMPNYCH-26JUN1711-T75.99",
+                "side": "YES",
+            }
+        ],
+    )
+
+    assert allowed is False
+    assert "bracket_overlap_veto" in reason
+
+
+def test_strategy_engine_allows_same_family_across_different_event_slots(monkeypatch):
+    from forecast.market_snapshot import MarketSnapshot
+    import forecast.strategy_engine as se
+
+    snapshots = [
+        MarketSnapshot(
+            market_id=1,
+            ticker="KXTEMPNYCH-26JUN1709-T71.99",
+            contract_name="NY Hourly 9AM",
+            strike=71.99,
+            last_trade_at="20990101 09:00:00",
+            resolution_at="2099-01-01T09:00:00Z",
+            yes_contract={"local_symbol": "KXTEMPNYCH-26JUN1709-T71.99", "contract_name": "NY Hourly 9AM"},
+            no_contract={"local_symbol": "KXTEMPNYCH-26JUN1709-T71.99", "contract_name": "NY Hourly 9AM"},
+            yes_quote={"ask": 0.20, "bid": 0.18, "mid": 0.19},
+            no_quote={"ask": 0.80, "bid": 0.78, "mid": 0.79},
+            bars_5m=[],
+            bars_30m=[],
+            bars_1h=[],
+            bars_4h=[],
+        ),
+        MarketSnapshot(
+            market_id=2,
+            ticker="KXTEMPNYCH-26JUN1711-T75.99",
+            contract_name="NY Hourly 11AM",
+            strike=75.99,
+            last_trade_at="20990101 11:00:00",
+            resolution_at="2099-01-01T11:00:00Z",
+            yes_contract={"local_symbol": "KXTEMPNYCH-26JUN1711-T75.99", "contract_name": "NY Hourly 11AM"},
+            no_contract={"local_symbol": "KXTEMPNYCH-26JUN1711-T75.99", "contract_name": "NY Hourly 11AM"},
+            yes_quote={"ask": 0.20, "bid": 0.18, "mid": 0.19},
+            no_quote={"ask": 0.80, "bid": 0.78, "mid": 0.79},
+            bars_5m=[],
+            bars_30m=[],
+            bars_1h=[],
+            bars_4h=[],
+        ),
+    ]
+
+    def _stub_evaluate_contract(**kwargs):
+        return se.StrategyResult(
+            strategy_family="stub",
+            side="YES",
+            q_hat=0.75,
+            ev=0.20,
+            ev_yes=0.20,
+            ev_no=-1.0,
+            confidence=0.90,
+            uncertainty_penalty=0.0,
+            econ_approved=True,
+            veto_reason="",
+            position_fraction=0.02,
+            position_contracts=1,
+            top_factors=[],
+            hours_to_resolution=1.0,
+            ask_yes=0.20,
+            ask_no=0.80,
+        )
+
+    monkeypatch.setattr(se, "evaluate_contract", _stub_evaluate_contract)
+
+    results = se.evaluate_market_snapshots(
+        snapshots=snapshots,
+        bankroll=200.0,
+        open_event_families={},
+        open_positions=[],
+    )
+
+    assert len(results) == 2
+    assert all(item["result"].econ_approved for item in results)
 
 
 def test_strategy_engine_hub_cap_uses_thirty_percent_with_forty_dollar_floor(monkeypatch):

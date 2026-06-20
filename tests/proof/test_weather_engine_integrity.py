@@ -156,3 +156,29 @@ def test_model_invalidation_exit_requires_adverse_delta_and_thin_edge():
     assert _should_model_invalidation_exit(0.72, 0.58, 0.01) is True
     assert _should_model_invalidation_exit(0.72, 0.66, 0.01) is False
     assert _should_model_invalidation_exit(0.72, 0.58, 0.05) is False
+
+
+def test_hourly_edge_loss_exit_requires_redeployable_bid_and_bad_edge():
+    from forecast.runner import _should_hourly_edge_loss_exit
+
+    assert _should_hourly_edge_loss_exit(
+        hours_to_resolution=0.80,
+        bid_price=0.12,
+        entry_held_p=0.72,
+        held_model_p=0.58,
+        remaining_edge=0.01,
+    ) is True
+    assert _should_hourly_edge_loss_exit(
+        hours_to_resolution=0.80,
+        bid_price=0.03,
+        entry_held_p=0.72,
+        held_model_p=0.58,
+        remaining_edge=0.01,
+    ) is False
+    assert _should_hourly_edge_loss_exit(
+        hours_to_resolution=2.0,
+        bid_price=0.12,
+        entry_held_p=0.72,
+        held_model_p=0.58,
+        remaining_edge=0.01,
+    ) is False

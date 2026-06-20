@@ -1203,8 +1203,9 @@ def _strategy_weather_details(
     peak_ssrd = w_data.get("peak_ssrd")
     cloud_veto = (mode == "HIGH") and (peak_tcdc > 65.0)
     
-    # Fix 1: Ban the Bins (Narrow Bin Meat Grinder)
-    if semantics.comparator == "between":
+    # Hourly "between" bins are now first-class; broader daily bin support stays off
+    # until we have stronger live evidence across those markets.
+    if semantics.comparator == "between" and mode != "TEMP":
         return (
             False,
             "",
@@ -1512,7 +1513,8 @@ def evaluate_contract(
         best_multiplier = float(w_res[5] or 1.0)
         best_tier = int(w_res[6] or 3)
         best_sizing_cap = float(w_res[7] or 0.05)
-        q_hat = chosen_prob if best_side == "YES" else (1.0 - chosen_prob)
+        chosen_side_prob = max(0.01, min(0.99, float(chosen_prob)))
+        q_hat = chosen_side_prob if best_side == "YES" else (1.0 - chosen_side_prob)
         # SRE Pillar 6: Rule 1 Probability Input Clamps
         q_hat = max(0.01, min(0.99, float(q_hat)))
 
@@ -1611,7 +1613,7 @@ def evaluate_contract(
             
             n_contracts = calculate_continuous_sizing(
                 market_price=p_cost,
-                ensemble_prob=q_hat,
+                ensemble_prob=chosen_side_prob,
                 capital_base=bankroll,
                 multiplier=best_multiplier * (3.5 if is_surge else 1.0),
                 cap_pct=max(best_sizing_cap, 0.10) if is_surge else best_sizing_cap,
@@ -1692,29 +1694,88 @@ def evaluate_contract(
 
 def check_strike_consistency(ticker: str, side: str, open_positions: list[dict]) -> tuple[bool, str]:
     """
-    v19.4 Sovereign Balance: Institutional Logical Exclusivity.
-    Ensures only ONE active strike per city per side (YES/NO).
+    Institutional strike consistency keyed to one settlement slot, not the whole city family.
+
+    Different days / hours for the same city are allowed to coexist.
+    Multiple same-side strikes for the exact same event slot are not.
     """
-    family = ticker.split("-")[0]
+    event_key = _ticker_event_key(ticker)
     
     for p in open_positions:
         p_ticker = p.get("local_symbol", "")
-        if family not in p_ticker: continue
+        if _ticker_event_key(p_ticker) != event_key:
+            continue
         
         p_side = p.get("side", "").upper()
         
-        # 1. Mutual Exclusivity: Veto if we already have a position on this SIDE for this city
+        # 1. Mutual Exclusivity inside one event slot
         if side == "YES" and p_side == "YES":
             return False, f"bracket_overlap_veto: already have YES on {p_ticker}"
         
         if side == "NO" and p_side == "NO":
             return False, f"bracket_overlap_veto: already have NO on {p_ticker}"
 
-        # 2. Opposite Side Conflict (Hedge Guard)
+        # 2. Opposite-side hedge guard only on the exact same contract
         if side == "NO" and p_side == "YES" and ticker == p_ticker:
             return False, "hedge_guard: cannot bet NO on existing YES strike"
 
     return True, ""
+
+
+def _ticker_event_key(ticker: str) -> str:
+    parts = str(ticker or "").split("-")
+    if len(parts) >= 2:
+        return f"{parts[0]}-{parts[1]}"
+    return str(ticker or "")
+
+
+def _apply_best_event_slot_selection(entries: list[dict]) -> list[dict]:
+    """
+    Keep one best candidate per settlement slot and mark the rest as explicit vetoes.
+
+    This preserves operator visibility while stopping the engine from spraying
+    adjacent strikes in the same city/hour or city/day.
+    """
+    best_by_event: dict[str, dict] = {}
+
+    for candidate in entries:
+        result = candidate.get("result")
+        contract = candidate.get("contract") or {}
+        if (
+            result is None
+            or not getattr(result, "econ_approved", False)
+            or str(getattr(result, "side", "")) not in {"YES", "NO"}
+        ):
+            continue
+
+        event_key = _ticker_event_key(str(contract.get("local_symbol") or ""))
+        incumbent = best_by_event.get(event_key)
+        if incumbent is None or float(candidate.get("rank_score") or 0.0) > float(
+            incumbent.get("rank_score") or 0.0
+        ):
+            if incumbent is not None:
+                incumbent_result = incumbent["result"]
+                incumbent_result.econ_approved = False
+                incumbent_result.veto_reason = (
+                    "same_event_best_strike_selected "
+                    f"({contract.get('local_symbol')})"
+                )
+                incumbent_result.position_fraction = 0.0
+                incumbent_result.position_contracts = 0
+                incumbent["rank_score"] = 0.0
+            best_by_event[event_key] = candidate
+        else:
+            winner_symbol = str(
+                (incumbent.get("contract") or {}).get("local_symbol") or ""
+            )
+            result.econ_approved = False
+            result.veto_reason = f"same_event_best_strike_selected ({winner_symbol})"
+            result.position_fraction = 0.0
+            result.position_contracts = 0
+            candidate["rank_score"] = 0.0
+
+    entries.sort(key=lambda x: x["rank_score"], reverse=True)
+    return entries
 
 def evaluate_all_contracts(
     active_contracts: list[dict],
@@ -1925,4 +1986,4 @@ def evaluate_market_snapshots(
         )
 
     approved_entries.sort(key=lambda x: x["rank_score"], reverse=True)
-    return approved_entries
+    return _apply_best_event_slot_selection(approved_entries)

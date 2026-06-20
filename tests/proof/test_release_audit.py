@@ -396,6 +396,136 @@ def test_run_remote_hosted_audit_uses_host_service_artifact_without_skip_warning
     assert "docker_service_check_skipped_in_container_mode" not in payload["warnings"]
 
 
+def test_run_remote_hosted_audit_rechecks_runtime_after_soak(monkeypatch):
+    import scripts.release_audit as ra
+
+    monkeypatch.setattr(ra, "get_build_info", lambda: {"sha": "abc123"}, raising=False)
+    monkeypatch.setattr(ra, "init_incident_table", lambda *args, **kwargs: None, raising=False)
+    monkeypatch.setattr(ra, "ingest_system_events", lambda *args, **kwargs: None, raising=False)
+    monkeypatch.setattr(ra, "run_health_check", lambda force=True: {"healthy": True}, raising=False)
+    monkeypatch.setattr(
+        ra,
+        "_docker_service_status",
+        lambda expected_sha="": {
+            "source": "host_service_status_artifact",
+            "artifact_usable": True,
+            "services": {
+                "execution-engine": {"up": True, "status": "Up 12 seconds"},
+                "kalshi-cockpit": {"up": True, "status": "Up 12 seconds"},
+            },
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(ra, "_cockpit_health", lambda: {"ok": True}, raising=False)
+    monkeypatch.setattr(ra, "probe_reasoning_model", lambda: {"ok": True}, raising=False)
+    monkeypatch.setattr(ra, "_running_in_container", lambda: True, raising=False)
+    monkeypatch.setattr(ra, "runtime_storage_status", lambda: {"ok": True}, raising=False)
+    monkeypatch.setattr(
+        ra,
+        "get_incident_summary",
+        lambda db_path=None: {"by_severity": {"CRITICAL": 0}},
+        raising=False,
+    )
+    monkeypatch.setattr(ra, "get_open_incidents", lambda db_path=None: [], raising=False)
+    monkeypatch.setattr(
+        ra,
+        "get_release_status",
+        lambda **kwargs: {"current_release_verdict": "READY_FOR_LIVE", "entries_allowed": True},
+        raising=False,
+    )
+    monkeypatch.setattr(ra.time, "sleep", lambda *_args, **_kwargs: None, raising=False)
+
+    runtime_states = iter(
+        [
+            {
+                "truth": {
+                    "broker_connected": True,
+                    "broker_error": "",
+                    "broker_positions": [],
+                    "db_positions": [],
+                    "balance_usd": 164.0,
+                    "active_markets": 4,
+                    "forecast_lane": {
+                        "heartbeat_stale": True,
+                        "health": "WARN",
+                        "readiness_state": "STALE_HEARTBEAT",
+                        "blocked_reason": "stale_runtime_heartbeat",
+                    },
+                },
+                "provider_status": {
+                    "data_present": True,
+                    "provider_mode": "deterministic_multi_model",
+                },
+                "balance_truth": {
+                    "balance_ok": False,
+                    "comparison_available": True,
+                    "delta_usd": 12.0,
+                },
+                "market_scan": {
+                    "sample_size": 0,
+                    "scope_active_contracts": 12,
+                    "markets_scanned": 0,
+                    "approved_candidates": 0,
+                    "execution_ready": 0,
+                    "infrastructure_rejections": [],
+                    "systematic_thin_liquidity": False,
+                    "entry_scope": "ALL_WEATHER_LANES",
+                },
+            },
+            {
+                "truth": {
+                    "broker_connected": True,
+                    "broker_error": "",
+                    "broker_positions": [],
+                    "db_positions": [],
+                    "balance_usd": 164.0,
+                    "active_markets": 4,
+                    "forecast_lane": {
+                        "heartbeat_stale": False,
+                        "health": "OK",
+                        "readiness_state": "OPERATIONAL",
+                        "blocked_reason": "",
+                    },
+                },
+                "provider_status": {
+                    "data_present": True,
+                    "provider_mode": "deterministic_multi_model",
+                },
+                "balance_truth": {
+                    "balance_ok": True,
+                    "comparison_available": True,
+                    "delta_usd": 0.0,
+                },
+                "market_scan": {
+                    "sample_size": 4,
+                    "scope_active_contracts": 12,
+                    "markets_scanned": 4,
+                    "approved_candidates": 1,
+                    "execution_ready": 1,
+                    "infrastructure_rejections": [],
+                    "systematic_thin_liquidity": False,
+                    "entry_scope": "ALL_WEATHER_LANES",
+                },
+            },
+        ]
+    )
+    monkeypatch.setattr(
+        ra,
+        "_collect_runtime_audit_state",
+        lambda **kwargs: next(runtime_states),
+        raising=False,
+    )
+
+    payload = ra._run_remote_hosted_audit(scan_limit=4, soak_seconds=600)
+
+    assert payload["verdict"] == "READY_FOR_LIVE"
+    assert payload["blockers"] == []
+    assert payload["details"]["live_truth"]["lane"]["heartbeat_stale"] is False
+    assert payload["details"]["balance_truth"]["balance_ok"] is True
+    assert payload["details"]["market_scan"]["sample_size"] == 4
+    assert payload["details"]["startup_runtime"]["market_scan"]["sample_size"] == 0
+
+
 def test_run_remote_hosted_audit_blocks_when_host_service_artifact_missing(
     monkeypatch,
 ):

@@ -750,12 +750,7 @@ def _cockpit_health() -> dict[str, Any]:
     return {"ok": False, "url": urls[-1], "error": last_error}
 
 
-def _run_remote_hosted_audit(*, scan_limit: int, soak_seconds: int) -> dict[str, Any]:
-    build = get_build_info()
-    build_sha = str(build.get("sha") or "").strip()
-    init_incident_table(DB_PATH)
-    ingest_system_events(lookback_minutes=180, db_path=DB_PATH)
-    health = run_health_check(force=True)
+def _collect_runtime_audit_state(*, scan_limit: int) -> dict[str, Any]:
     truth = get_live_kalshi_status(db_path=DB_PATH, connect=True, sync_broker=True)
     _warm_weather_truth(
         str(contract.get("local_symbol") or "")
@@ -763,11 +758,6 @@ def _run_remote_hosted_audit(*, scan_limit: int, soak_seconds: int) -> dict[str,
     )
     provider_status = get_weather_provider_status(db_path=DB_PATH)
     balance_truth = get_balance_truth_status(truth=truth, db_path=DB_PATH)
-    containers = _docker_service_status(build_sha)
-    cockpit = _cockpit_health()
-    model_probe = probe_reasoning_model()
-    container_mode = _running_in_container()
-
     open_positions = truth.get("broker_positions") or truth.get("db_positions") or []
     bankroll = _coerce_float(truth.get("balance_usd"), ACCOUNT_SIZE)
     scan = _scan_live_market_surface(
@@ -775,6 +765,34 @@ def _run_remote_hosted_audit(*, scan_limit: int, soak_seconds: int) -> dict[str,
         open_positions=open_positions,
         scan_limit=scan_limit,
     )
+    return {
+        "truth": truth,
+        "provider_status": provider_status,
+        "balance_truth": balance_truth,
+        "market_scan": scan,
+    }
+
+
+def _run_remote_hosted_audit(*, scan_limit: int, soak_seconds: int) -> dict[str, Any]:
+    build = get_build_info()
+    build_sha = str(build.get("sha") or "").strip()
+    init_incident_table(DB_PATH)
+    ingest_system_events(lookback_minutes=180, db_path=DB_PATH)
+    health = run_health_check(force=True)
+    containers = _docker_service_status(build_sha)
+    cockpit = _cockpit_health()
+    model_probe = probe_reasoning_model()
+    container_mode = _running_in_container()
+    startup_runtime = _collect_runtime_audit_state(scan_limit=scan_limit)
+    runtime_state = startup_runtime
+    if soak_seconds > 0:
+        time.sleep(max(0, int(soak_seconds)))
+        runtime_state = _collect_runtime_audit_state(scan_limit=scan_limit)
+
+    truth = runtime_state["truth"]
+    provider_status = runtime_state["provider_status"]
+    balance_truth = runtime_state["balance_truth"]
+    scan = runtime_state["market_scan"]
 
     blockers: list[str] = []
     warnings: list[str] = []
@@ -860,19 +878,6 @@ def _run_remote_hosted_audit(*, scan_limit: int, soak_seconds: int) -> dict[str,
     if not bool(health.get("healthy")):
         warnings.append("health_check_degraded")
 
-    if soak_seconds > 0:
-        time.sleep(max(0, int(soak_seconds)))
-        truth_after_soak = get_live_kalshi_status(
-            db_path=DB_PATH,
-            connect=False,
-            sync_broker=False,
-        )
-        lane_after_soak = truth_after_soak.get("forecast_lane") or {}
-        if bool(lane_after_soak.get("heartbeat_stale")):
-            blockers.append("stale_runtime_heartbeat_after_soak")
-        if not bool(truth_after_soak.get("broker_connected")):
-            blockers.append("broker_disconnected_after_soak")
-
     verdict = _summarize_verdict(blockers, warnings)
     payload = {
         "mode": "remote_hosted",
@@ -906,6 +911,7 @@ def _run_remote_hosted_audit(*, scan_limit: int, soak_seconds: int) -> dict[str,
             },
             "market_scan": scan,
             "container_mode": container_mode,
+            "startup_runtime": startup_runtime if soak_seconds > 0 else {},
         },
     }
     markdown = _render_markdown_report(payload)

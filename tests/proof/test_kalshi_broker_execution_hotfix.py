@@ -8,7 +8,7 @@ def _connected_broker() -> KalshiBroker:
     return broker
 
 
-def test_marketable_yes_buy_uses_price_field_and_cost_cap(monkeypatch):
+def test_marketable_yes_buy_uses_event_order_v2_shape(monkeypatch):
     broker = _connected_broker()
     calls = []
 
@@ -33,15 +33,16 @@ def test_marketable_yes_buy_uses_price_field_and_cost_cap(monkeypatch):
 
     assert result["status"] == "resting"
     assert calls[0]["method"] == "POST"
-    assert calls[0]["path"] == "/trade-api/v2/portfolio/orders"
-    assert calls[0]["body"]["yes_price"] == 99
-    assert calls[0]["body"]["buy_max_cost"] == 204
-    assert calls[0]["body"]["time_in_force"] == "fill_or_kill"
-    assert "type" not in calls[0]["body"]
+    assert calls[0]["path"] == "/trade-api/v2/portfolio/events/orders"
+    assert calls[0]["body"]["side"] == "bid"
+    assert calls[0]["body"]["count"] == "3.00"
+    assert calls[0]["body"]["price"] == "0.6700"
+    assert calls[0]["body"]["time_in_force"] == "immediate_or_cancel"
+    assert calls[0]["body"]["reduce_only"] is False
     assert any(call["method"] == "GET" for call in calls[1:])
 
 
-def test_marketable_no_buy_uses_no_leg_price_field(monkeypatch):
+def test_marketable_no_buy_maps_to_yes_leg_ask(monkeypatch):
     broker = _connected_broker()
     calls = []
 
@@ -65,9 +66,10 @@ def test_marketable_no_buy_uses_no_leg_price_field(monkeypatch):
     )
 
     assert result["status"] == "resting"
-    assert calls[0]["body"]["no_price"] == 99
-    assert calls[0]["body"]["buy_max_cost"] == 110
-    assert "yes_price" not in calls[0]["body"]
+    assert calls[0]["path"] == "/trade-api/v2/portfolio/events/orders"
+    assert calls[0]["body"]["side"] == "ask"
+    assert calls[0]["body"]["price"] == "0.4600"
+    assert calls[0]["body"]["reduce_only"] is False
     assert any(call["method"] == "GET" for call in calls[1:])
 
 
@@ -312,6 +314,49 @@ def test_partial_sell_preserves_remaining_position(monkeypatch):
     assert captured["model_prob_ecmwf"] == 0.79
     assert captured["weather_mode"] == "LOW"
     assert captured["forecast_hours_to_resolution"] == 21.5
+
+
+def test_no_side_exit_pnl_uses_complement_math(monkeypatch):
+    broker = _connected_broker()
+    broker._open_positions["KXLOWTPHX-26JUN05-T80_P"] = {
+        "qty": 5,
+        "side": "NO",
+        "local_symbol": "KXLOWTPHX-26JUN05-T80",
+        "right": "P",
+        "entry": 0.41,
+        "entry_price": 0.41,
+    }
+    captured = {}
+
+    monkeypatch.setattr(
+        broker,
+        "_request",
+        lambda *args, **kwargs: {"order": {"status": "executed", "order_id": "ORD-NO-EXIT"}},
+    )
+    monkeypatch.setattr(
+        broker,
+        "_hydrate_order_details",
+        lambda order: {
+            **order,
+            "fill_count_fp": "5.00",
+            "taker_fill_cost_dollars": "3.000000",
+        },
+    )
+    monkeypatch.setattr(broker, "_extract_total_fees", lambda *_args, **_kwargs: 0.15)
+    monkeypatch.setattr("execution.kalshi_broker.log_trade", lambda **kwargs: captured.update(kwargs))
+
+    result = broker.place_sell_order(
+        {"local_symbol": "KXLOWTPHX-26JUN05-T80"},
+        qty=5,
+        limit_price=0.60,
+        side="no",
+        type="limit",
+    )
+
+    assert result["status"] == "executed"
+    assert result["exit_price"] == 0.6
+    assert round(result["pnl_usd"], 4) == -1.1
+    assert round(captured["pnl_usd"], 4) == -1.1
 
 
 def test_resting_partial_buy_books_filled_contracts(monkeypatch):

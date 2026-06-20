@@ -12,6 +12,7 @@ the underlying runner functions remain reusable for diagnostics and local loops.
 """
 
 import logging
+import json
 import os
 import sys
 import threading
@@ -178,6 +179,47 @@ def _persist_recent_veto(
         )
     except Exception:
         logger.exception("Failed to persist recent veto for %s", contract.get("local_symbol"))
+
+
+def _weather_candidate_gate_class(reason: str) -> str:
+    token = str(reason or "").strip().lower()
+    if not token:
+        return ""
+    if token.startswith(("missing_", "stale_", "provider_", "weather_provider_")):
+        return "data_unavailable"
+    if token.startswith(
+        (
+            "same_event_family_cap_reached",
+            "hub_exposure_cap_reached",
+            "bracket_overlap_veto",
+            "hedge_guard",
+            "concurrent_cap_reached",
+            "deployed_cap",
+            "swap_veto",
+            "duplicate_guard",
+        )
+    ):
+        return "risk_block"
+    if token.startswith(
+        (
+            "fee_adjusted_ev_too_low",
+            "insufficient_edge",
+            "low_conviction",
+            "no_strategy_signal",
+            "penny_veto",
+            "expensive_yes_headroom_veto",
+            "cloud_cover_veto",
+            "chaos_veto",
+            "catastrophic_divergence_veto",
+            "banned_bin_contract_type",
+        )
+    ):
+        return "below_threshold"
+    if token.startswith(("execution_", "too_many_requests", "deprecated_", "missing_live_ask")):
+        return "execution_failed"
+    if token.startswith("sizing_zero"):
+        return "sizing_zero"
+    return "econ_veto"
 
 
 def _publish_forecast_lane_state(
@@ -622,6 +664,7 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
             from forecast.market_snapshot import build_market_snapshots
             from forecast.quote_harvester import get_paired_quotes
             from forecast.strategy_engine import (
+                EV_THRESHOLD,
                 MAX_CONCURRENT_POSITIONS,
                 MAX_DEPLOYED_PCT,
                 evaluate_market_snapshots,
@@ -892,6 +935,127 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
             if not candidates:
                 logger.info("[ForecastRunner] No trade candidates qualified in this cycle.")
 
+            scan_id = f"forecast_weather_{int(time.time() * 1000)}"
+            funnel_counts = {
+                "scanner_candidates_total": len(candidates),
+                "dual_exposure_block": 0,
+                "cooldown_block": 0,
+                "risk_block": 0,
+                "data_unavailable": 0,
+                "below_threshold": 0,
+                "econ_veto": 0,
+                "research_only_block": 0,
+                "sizing_zero": 0,
+                "execution_failed": 0,
+                "entered": 0,
+            }
+
+            def _record_weather_candidate(
+                *,
+                candidate: dict,
+                decision: str,
+                reason: str = "",
+                tradeability_status: str = "",
+            ) -> None:
+                try:
+                    from forecast.weather_contracts import weather_trade_bucket
+                    from logging_db.trade_logger import log_scan_candidate
+
+                    result = candidate.get("result")
+                    contract = candidate.get("contract") or {}
+                    snapshot = candidate.get("snapshot")
+                    if result is None:
+                        return
+
+                    local_symbol = str(contract.get("local_symbol") or "")
+                    side = str(getattr(result, "side", "") or "").upper()
+                    raw_ask_price = (
+                        getattr(result, "ask_yes", 0.0)
+                        if side == "YES"
+                        else getattr(result, "ask_no", 0.0)
+                    )
+                    ask_price = float(raw_ask_price or 0.0)
+                    yes_quote = getattr(snapshot, "yes_quote", {}) or {}
+                    no_quote = getattr(snapshot, "no_quote", {}) or {}
+                    yes_bid = float(yes_quote.get("bid") or 0.0)
+                    yes_ask = float(yes_quote.get("ask") or 0.0)
+                    spread_abs = max(0.0, yes_ask - yes_bid) if yes_bid > 0 and yes_ask > 0 else 0.0
+                    spread_pct = (spread_abs / yes_ask) if yes_ask > 0 else 0.0
+                    ask_depth = float(
+                        (yes_quote.get("ask_size") if side == "YES" else no_quote.get("ask_size"))
+                        or 0.0
+                    )
+                    bid_depth = float(
+                        (yes_quote.get("bid_size") if side == "YES" else no_quote.get("bid_size"))
+                        or 0.0
+                    )
+                    qty = int(getattr(result, "position_contracts", 0) or 0)
+                    size_usd = ask_price * max(0, qty)
+                    rank_score = float(candidate.get("rank_score") or 0.0)
+                    veto_reason = str(reason or getattr(result, "veto_reason", "") or "")
+                    gate_class = _weather_candidate_gate_class(veto_reason)
+
+                    log_scan_candidate(
+                        scan_id=scan_id,
+                        symbol=local_symbol,
+                        exchange="KALSHI",
+                        base_asset="WEATHER",
+                        direction=side or "NONE",
+                        primary_setup=str(getattr(result, "strategy_family", "") or "weather_ensemble"),
+                        scan_setups_json=json.dumps(list(getattr(result, "top_factors", []) or [])),
+                        price=ask_price,
+                        volume_24h_usd=0.0,
+                        spread_pct=spread_pct,
+                        bid_depth_usd=bid_depth,
+                        ask_depth_usd=ask_depth,
+                        atr_15m=0.0,
+                        stop_pct=0.0,
+                        target_pct=0.0,
+                        scanner_expected_profit=float(getattr(result, "ev", 0.0) or 0.0) * max(0, qty),
+                        regime="KALSHI_WEATHER",
+                        technical_score=float(getattr(result, "confidence", 0.0) or 0.0) * 100.0,
+                        ml_score=0.0,
+                        composite_score=rank_score * 100.0,
+                        entry_threshold=float(EV_THRESHOLD),
+                        should_enter_signal=1 if side in {"YES", "NO"} else 0,
+                        econ_approved=1 if bool(getattr(result, "econ_approved", False)) else 0,
+                        econ_tier=str(getattr(result, "weather_mode", "") or ""),
+                        econ_reject_reason=veto_reason,
+                        edge_score=float(getattr(result, "ev", 0.0) or 0.0),
+                        size_usd=size_usd,
+                        leverage=1,
+                        entry_block_reason=veto_reason,
+                        decision=decision,
+                        source="forecast_runner",
+                        recommended_lane=weather_trade_bucket(
+                            local_symbol,
+                            contract_name=str(contract.get("contract_name") or ""),
+                        ),
+                        tradeability_status=tradeability_status or decision,
+                        trade_blocked_reason=veto_reason,
+                        trade_size_block_reason="sizing_zero" if decision == "sizing_zero" else "",
+                        trade_source_reason=veto_reason,
+                        manual_executable=0,
+                        auto_executable=1,
+                        spot_regime="kalshi_weather",
+                        setup_family=str(getattr(result, "strategy_family", "") or "weather_ensemble"),
+                        setup_score=float(getattr(result, "confidence", 0.0) or 0.0),
+                        setup_preference="forecast_weather",
+                        execution_route=f"ioc_{str(contract.get('right') or 'C')}",
+                        microstructure_veto=veto_reason if gate_class in {"execution_failed", "below_threshold"} else "",
+                        final_spot_score=rank_score,
+                        regime_floor=float(EV_THRESHOLD),
+                        net_win_usd=float(getattr(result, "ev", 0.0) or 0.0) * size_usd,
+                        econ_gate_class=gate_class,
+                    )
+                except Exception as exc:
+                    logger.debug("[ForecastRunner] Candidate journaling skipped for %s: %s", local_symbol if 'local_symbol' in locals() else 'unknown', exc)
+
+            def _bump_funnel(reason: str) -> None:
+                gate_class = _weather_candidate_gate_class(reason)
+                if gate_class and gate_class in funnel_counts:
+                    funnel_counts[gate_class] += 1
+
             for candidate in candidates:
                 result = candidate["result"]
                 contract = candidate["contract"]
@@ -913,6 +1077,13 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                 if not result.econ_approved or result.position_contracts <= 0:
                     veto_msg = f"[ForecastRunner] {local_sym} vetoed: {result.veto_reason or 'sizing_zero'}"
                     logger.debug(veto_msg)
+                    _record_weather_candidate(
+                        candidate=candidate,
+                        decision="sizing_zero" if result.econ_approved and result.position_contracts <= 0 else "econ_veto",
+                        reason=result.veto_reason or "sizing_zero",
+                        tradeability_status="blocked",
+                    )
+                    _bump_funnel(result.veto_reason or "sizing_zero")
                     _persist_recent_veto(
                         contract,
                         result,
@@ -929,6 +1100,13 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                     # SWAP RULE: Candidate EV must be > 0.15 to justify a swap churn.
                     if result.ev < 0.15:
                         logger.warning(f"[ForecastRunner] {local_sym} (ev={result.ev:.4f}) skipped: at cap and EV < 0.15 swap floor.")
+                        _record_weather_candidate(
+                            candidate=candidate,
+                            decision="risk_block",
+                            reason="swap_veto_candidate_ev_below_floor",
+                            tradeability_status="blocked",
+                        )
+                        _bump_funnel("swap_veto_candidate_ev_below_floor")
                         continue
                     
                     # SRE Pillar 7: Smart Swap Sorting (Kill the Toxic FIFO Churn)
@@ -955,6 +1133,13 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                     
                     if worst_prob > 0.65:
                         logger.info(f"[ForecastRunner] SWAP VETO: All open positions have high conviction (worst p={worst_prob:.2%}). Skipping {local_sym}.")
+                        _record_weather_candidate(
+                            candidate=candidate,
+                            decision="risk_block",
+                            reason="swap_veto_all_open_positions_high_conviction",
+                            tradeability_status="blocked",
+                        )
+                        _bump_funnel("swap_veto_all_open_positions_high_conviction")
                         continue
                     
                     logger.info(f"[ForecastRunner] SWAP TRIGGERED: Flattening {worst_sym} (p={worst_prob:.2%}) to make room for {local_sym} (ev={result.ev:.4f})")
@@ -1028,10 +1213,24 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                     logger.debug(
                         f"[ForecastRunner] Duplicate guard: {key} already open"
                     )
+                    _record_weather_candidate(
+                        candidate=candidate,
+                        decision="risk_block",
+                        reason="duplicate_guard",
+                        tradeability_status="blocked",
+                    )
+                    _bump_funnel("duplicate_guard")
                     continue
 
                 family = local_sym.split("-")[0]
                 if cycle_event_families.get(family, 0) >= KALSHI_SAME_EVENT_FAMILY_CAP:
+                    _record_weather_candidate(
+                        candidate=candidate,
+                        decision="risk_block",
+                        reason="same_event_family_cap_reached",
+                        tradeability_status="blocked",
+                    )
+                    _bump_funnel("same_event_family_cap_reached")
                     _persist_recent_veto(
                         contract,
                         result,
@@ -1069,13 +1268,21 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                         projected_hub_exposure = abs(current_signed_sum + (candidate_exposure * c_sign))
                         
                         if projected_hub_exposure > hub_cap:
+                            hub_reason = (
+                                "hub_exposure_cap_reached "
+                                f"({projected_hub_exposure:.1f}/{hub_cap:.1f})"
+                            )
+                            _record_weather_candidate(
+                                candidate=candidate,
+                                decision="risk_block",
+                                reason=hub_reason,
+                                tradeability_status="blocked",
+                            )
+                            _bump_funnel(hub_reason)
                             _persist_recent_veto(
                                 contract,
                                 result,
-                                reason=(
-                                    "hub_exposure_cap_reached "
-                                    f"({projected_hub_exposure:.1f}/{hub_cap:.1f})"
-                                ),
+                                reason=hub_reason,
                                 details={
                                     "stage": "hub_cap",
                                     "projected_hub_exposure": projected_hub_exposure,
@@ -1107,10 +1314,18 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                             contract.get("local_symbol"),
                             execution_plan.reason,
                         )
+                        blocked_reason = str(execution_plan.reason or execution_plan.status or "execution_blocked")
+                        _record_weather_candidate(
+                            candidate=candidate,
+                            decision="execution_failed",
+                            reason=blocked_reason,
+                            tradeability_status="blocked",
+                        )
+                        _bump_funnel(blocked_reason)
                         _persist_recent_veto(
                             contract,
                             result,
-                            reason=str(execution_plan.reason or execution_plan.status or "execution_blocked"),
+                            reason=blocked_reason,
                             details={
                                 "stage": "execution_plan",
                                 "execution_status": execution_plan.status,
@@ -1229,6 +1444,13 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                                 "entry": entry_result,
                             }
                         )
+                        funnel_counts["entered"] += 1
+                        _record_weather_candidate(
+                            candidate=candidate,
+                            decision="entered",
+                            reason=str(entry_result.get("execution_reason") or ""),
+                            tradeability_status="entered",
+                        )
                         logger.info(
                             f"[ForecastRunner] ENTERED {contract.get('local_symbol')} "
                             f"{result.side} x{actual_qty} @ {actual_price:.4f} "
@@ -1250,6 +1472,18 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                             - capital_deployed,
                         )
                     else:
+                        failed_reason = str(
+                            entry_result.get("status")
+                            or entry_result.get("execution_reason")
+                            or "order_rejected"
+                        )
+                        _record_weather_candidate(
+                            candidate=candidate,
+                            decision="execution_failed",
+                            reason=failed_reason,
+                            tradeability_status="blocked",
+                        )
+                        _bump_funnel(failed_reason)
                         outcome_msg = (
                             f"[ForecastRunner] {contract.get('local_symbol')} execution_result: "
                             f"{entry_result.get('status') or 'unknown'}"
@@ -1305,9 +1539,24 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                             )
                             break
                 except Exception as e:
+                    exception_reason = f"execution_exception:{e}"
+                    _record_weather_candidate(
+                        candidate=candidate,
+                        decision="execution_failed",
+                        reason=exception_reason,
+                        tradeability_status="blocked",
+                    )
+                    _bump_funnel(exception_reason)
                     logger.error(
                         f"[ForecastRunner] Entry failed for {contract.get('local_symbol')}: {e}"
                     )
+
+            try:
+                from logging_db.trade_logger import log_scan_funnel
+
+                log_scan_funnel(scan_id=scan_id, **funnel_counts)
+            except Exception as exc:
+                logger.debug("[ForecastRunner] Funnel journaling skipped for %s: %s", scan_id, exc)
 
         except Exception as e:
             logger.error(f"[ForecastRunner] Strategy cycle error: {e}")

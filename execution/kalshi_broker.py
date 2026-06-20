@@ -89,7 +89,7 @@ class KalshiBroker:
         self._open_positions: dict[str, dict] = {}  # key = f"{ticker}_{right}"
         self._private_key = None
         
-    def connect(self) -> bool:
+    def connect(self, *, sync_positions: bool = True, quiet: bool = False) -> bool:
         """Verify credentials and load private key for signing."""
         private_key_path = resolve_runtime_path(
             KALSHI_PRIVATE_KEY_PATH,
@@ -124,13 +124,16 @@ class KalshiBroker:
                 raise RuntimeError(f"Auth verification failed: {resp['error']}")
                 
             self._connected = True
-            print(f"[KalshiBroker] Connected (LIVE) ✅ | Balance: ${float(resp.get('balance_dollars', 0)):.2f}")
+            if not quiet:
+                print(f"[KalshiBroker] Connected (LIVE) ✅ | Balance: ${float(resp.get('balance_dollars', 0)):.2f}")
             log_event("INFO", "KalshiBroker", "Connected (LIVE)")
             
-            self._sync_positions()
+            if sync_positions:
+                self._sync_positions()
             return True
         except Exception as e:
-            print(f"[KalshiBroker] Connection error: {e}")
+            if not quiet:
+                print(f"[KalshiBroker] Connection error: {e}")
             log_event("ERROR", "KalshiBroker", f"Connection failed: {e}")
             self._connected = False
             return False
@@ -288,6 +291,68 @@ class KalshiBroker:
             return estimate_kalshi_order_fee_usd(qty, fill_price)
         return estimate_kalshi_order_fee_usd(qty, 0.50)
 
+    @staticmethod
+    def _event_order_side(*, right: str, action: str) -> str:
+        normalized_right = str(right or "C").upper()
+        normalized_action = str(action or "buy").lower()
+        if normalized_action == "buy":
+            return "bid" if normalized_right == "C" else "ask"
+        return "ask" if normalized_right == "C" else "bid"
+
+    @staticmethod
+    def _yes_leg_price(right: str, contract_price: float) -> float:
+        normalized_right = str(right or "C").upper()
+        price = float(contract_price or 0.0)
+        if normalized_right == "P":
+            price = 1.0 - price
+        return max(0.01, min(0.99, round(price, 4)))
+
+    def _build_event_order_body(
+        self,
+        *,
+        ticker: str,
+        right: str,
+        qty: int,
+        limit_price: float,
+        action: str,
+        reduce_only: bool = False,
+    ) -> dict:
+        yes_leg_price = self._yes_leg_price(right, limit_price)
+        return {
+            "ticker": ticker,
+            "client_order_id": str(uuid.uuid4()),
+            "side": self._event_order_side(right=right, action=action),
+            "count": f"{max(0, int(qty)):.2f}",
+            "price": f"{yes_leg_price:.4f}",
+            "time_in_force": "immediate_or_cancel",
+            "self_trade_prevention_type": "taker_at_cross",
+            "post_only": False,
+            "cancel_order_on_pause": False,
+            "reduce_only": bool(reduce_only),
+            "subaccount": 0,
+            "exchange_index": 0,
+        }
+
+    def _normalize_order_response(
+        self,
+        resp: dict,
+        *,
+        requested_qty: int,
+    ) -> tuple[dict, str]:
+        order_info = resp.get("order") if isinstance(resp.get("order"), dict) else dict(resp)
+        fill_qty = self._extract_fill_count(order_info)
+        remaining_qty = self._extract_remaining_count(order_info, requested_qty)
+        status = str(order_info.get("status") or "").strip().lower()
+        if status:
+            return order_info, status
+        if fill_qty > 0 and remaining_qty <= 0:
+            return order_info, "executed"
+        if fill_qty > 0 and remaining_qty > 0:
+            return order_info, "resting"
+        if remaining_qty > 0:
+            return order_info, "pending"
+        return order_info, "pending"
+
     def _hydrate_order_details(self, order_info: dict) -> dict:
         order_id = str(order_info.get("order_id") or "").strip()
         if not order_id:
@@ -337,7 +402,15 @@ class KalshiBroker:
         fee_usd = self._extract_total_fees(order_info, int(round(fill_qty or requested_qty)))
         order_id = order_info.get("order_id", "ERR")
         entry_price = float(pos_info.get("entry_price") or pos_info.get("entry") or 0.50)
-        pnl_usd = (exit_price - entry_price) * fill_qty if exit_price > 0 else 0.0
+        held_side = str(pos_info.get("side", default_side) or default_side).upper()
+        if exit_price > 0:
+            if held_side == "NO":
+                pnl_usd = (entry_price - exit_price) * fill_qty
+            else:
+                pnl_usd = (exit_price - entry_price) * fill_qty
+            pnl_usd -= fee_usd
+        else:
+            pnl_usd = 0.0
         remaining_qty = max(0.0, held_qty - fill_qty)
 
         if remaining_qty > 0 and key in self._open_positions:
@@ -957,44 +1030,25 @@ class KalshiBroker:
             raise RuntimeError("[KalshiBroker] Not connected to Kalshi")
 
         ticker = contract_dict["local_symbol"]
-        side = "yes" if contract_dict["right"] == "C" else "no"
+        right = str(contract_dict.get("right") or "C").upper()
+        side = "yes" if right == "C" else "no"
         order_type = kwargs.get("type", "limit").lower()
-        limit_cents = self._normalize_price_cents(limit_price)
-        
-        body = {
-            "ticker": ticker,
-            "action": "buy",
-            "side": side,
-            "count": int(qty),
-            "client_order_id": str(uuid.uuid4()),
-        }
+        body = self._build_event_order_body(
+            ticker=ticker,
+            right=right,
+            qty=qty,
+            limit_price=limit_price,
+            action="buy",
+            reduce_only=False,
+        )
 
-        if order_type == "market":
-            # Kalshi now only supports limit-style writes. Emulate market intent
-            # with a marketable limit plus a hard max-cost cap.
-            aggressive_cents = _KALSHI_MARKETABLE_ENTRY_CENTS
-            buy_cap_cents = min(_KALSHI_MAX_PRICE_CENTS, limit_cents + 1)
-            body["buy_max_cost"] = int(qty) * buy_cap_cents
-            body["time_in_force"] = "fill_or_kill"
-            if side == "yes":
-                body["yes_price"] = aggressive_cents
-            else:
-                body["no_price"] = aggressive_cents
-        else:
-            if side == "yes":
-                body["yes_price"] = limit_cents
-            else:
-                body["no_price"] = limit_cents
-            body["time_in_force"] = "immediate_or_cancel"
-        
-        resp = self._request("POST", "/trade-api/v2/portfolio/orders", body=body)
+        resp = self._request("POST", "/trade-api/v2/portfolio/events/orders", body=body)
         error_code = self._extract_error_code(resp)
         if error_code:
             logger.error(f"Order failed or rejected: {resp}")
             return {"order_id": "ERR", "status": error_code, "error": resp.get("error")}
 
-        order_info = resp.get("order", {})
-        status = order_info.get("status")
+        order_info, status = self._normalize_order_response(resp, requested_qty=qty)
         context = {
             "forecast_yes_prob": kwargs.get("forecast_yes_prob"),
             "model_prob_gfs": kwargs.get("model_prob_gfs"),
@@ -1043,39 +1097,25 @@ class KalshiBroker:
         # OR buying a NO. The runner seems to use flatten_position for exits.
         # But if the runner calls place_sell_order, we need to know the 'side' held.
         # Assume we held YES for now as it's the primary weather bet.
-        side = kwargs.get("side", "yes").lower() 
+        side = kwargs.get("side", "yes").lower()
         order_type = kwargs.get("type", "limit").lower()
+        right = "C" if side == "yes" else "P"
+        body = self._build_event_order_body(
+            ticker=ticker,
+            right=right,
+            qty=qty,
+            limit_price=limit_price,
+            action="sell",
+            reduce_only=True,
+        )
 
-        body = {
-            "ticker": ticker,
-            "action": "sell",
-            "side": side,
-            "count": int(qty),
-            "client_order_id": str(uuid.uuid4()),
-        }
-
-        limit_cents = self._normalize_price_cents(limit_price)
-        if order_type == "market":
-            if side == "yes":
-                body["yes_price"] = _KALSHI_MARKETABLE_EXIT_CENTS
-            else:
-                body["no_price"] = _KALSHI_MARKETABLE_EXIT_CENTS
-            body["time_in_force"] = "immediate_or_cancel"
-        else:
-            if side == "yes":
-                body["yes_price"] = limit_cents
-            else:
-                body["no_price"] = limit_cents
-            body["time_in_force"] = "immediate_or_cancel"
-
-        resp = self._request("POST", "/trade-api/v2/portfolio/orders", body=body)
+        resp = self._request("POST", "/trade-api/v2/portfolio/events/orders", body=body)
         error_code = self._extract_error_code(resp)
         if error_code:
             logger.error(f"Order failed or rejected: {resp}")
             return {"order_id": "ERR", "status": error_code, "error": resp.get("error")}
 
-        order_info = resp.get("order", {})
-        status = order_info.get("status")
+        order_info, status = self._normalize_order_response(resp, requested_qty=qty)
 
         if status in ["executed", "resting", "pending"]:
             order_info = self._hydrate_order_details(order_info)
@@ -1124,23 +1164,21 @@ class KalshiBroker:
             }
 
         body = {
-            "ticker": local_symbol,
-            "action": "sell",
-            "side": side,
-            "count": int(qty),
-            "client_order_id": str(uuid.uuid4()),
-            "time_in_force": "immediate_or_cancel",
+            **self._build_event_order_body(
+                ticker=local_symbol,
+                right=right,
+                qty=qty,
+                limit_price=bid_price,
+                action="sell",
+                reduce_only=True,
+            )
         }
-        if side == "yes":
-            body["yes_price"] = _KALSHI_MARKETABLE_EXIT_CENTS
-        else:
-            body["no_price"] = _KALSHI_MARKETABLE_EXIT_CENTS
         
         pos_info = self._open_positions.get(key, {})
         entry_price = float(pos_info.get("entry_price") or pos_info.get("entry") or 0.50)
 
         try:
-            resp = self._request("POST", "/trade-api/v2/portfolio/orders", body=body)
+            resp = self._request("POST", "/trade-api/v2/portfolio/events/orders", body=body)
             error_code = self._extract_error_code(resp)
             if error_code:
                 logger.error(f"Order failed or rejected: {resp}")
@@ -1153,9 +1191,8 @@ class KalshiBroker:
                     "pnl_usd": 0.0,
                 }
 
-            order_info = resp.get("order", {})
+            order_info, status = self._normalize_order_response(resp, requested_qty=qty)
             order_id = order_info.get("order_id") or resp.get("order_id", "ERR")
-            status = order_info.get("status")
 
             if status in ["executed", "resting", "pending"]:
                 order_info = self._hydrate_order_details(order_info)
@@ -1207,6 +1244,40 @@ class KalshiBroker:
     def get_account_balance(self) -> float:
         resp = self._request("GET", "/trade-api/v2/portfolio/balance")
         return float(resp.get("balance_dollars", 0))
+
+    def get_settlements(
+        self,
+        *,
+        min_ts: int | None = None,
+        limit: int = 500,
+        max_pages: int = 20,
+    ) -> list[dict]:
+        if not self.is_connected():
+            raise RuntimeError("[KalshiBroker] Not connected to Kalshi")
+
+        results: list[dict] = []
+        cursor = ""
+        pages = 0
+        while pages < max(1, int(max_pages)):
+            params: dict[str, object] = {"limit": max(1, min(int(limit), 1000))}
+            if cursor:
+                params["cursor"] = cursor
+            if min_ts is not None:
+                params["min_ts"] = int(min_ts)
+            payload = self._request("GET", "/trade-api/v2/portfolio/settlements", params=params)
+            error_code = self._extract_error_code(payload)
+            if error_code:
+                raise RuntimeError(f"get_settlements_failed: {error_code}")
+
+            settlements = payload.get("settlements") or []
+            if not isinstance(settlements, list):
+                settlements = []
+            results.extend([row for row in settlements if isinstance(row, dict)])
+            cursor = str(payload.get("cursor") or "").strip()
+            pages += 1
+            if not cursor:
+                break
+        return results
 
     def disconnect(self) -> None:
         self._connected = False

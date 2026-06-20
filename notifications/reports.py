@@ -5,6 +5,8 @@ from datetime import datetime, timezone, timedelta
 import os
 from typing import Dict, Optional
 
+from runtime.kalshi_settlement_truth import load_weather_settlement_truth
+
 logger = logging.getLogger(__name__)
 
 def _get_db_path():
@@ -29,15 +31,14 @@ def generate_war_room_report(paper: bool = False) -> str:
     
     # 1. PnL and Fees
     try:
+        settlement_truth = load_weather_settlement_truth()
+        pnl = float(settlement_truth.get("total_pnl_usd") or 0.0)
         res = conn.execute("""
             SELECT 
-                SUM(pnl_usd) as total_pnl,
                 SUM(fee_usd) as total_fees
             FROM trades
             WHERE ts >= ? AND paper = ?
         """, (start_time, is_paper)).fetchone()
-        
-        pnl = res['total_pnl'] or 0.0
         fees = res['total_fees'] or 0.0
     except Exception as e:
         logger.error(f"Error fetching PnL/Fees: {e}")

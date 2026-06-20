@@ -42,6 +42,7 @@ from forecast.strategy_engine import EV_THRESHOLD, _get_city_hub, _get_macro_con
 from forecast.weather_contracts import live_entry_scope, weather_trade_bucket
 from notifications.notification_engine import get_notifications
 from runtime.build_info import get_build_info
+from runtime.kalshi_settlement_truth import load_weather_settlement_truth
 from runtime.operator_truth import (
     get_live_kalshi_status,
     get_recent_veto_summary,
@@ -550,26 +551,15 @@ def build_realized_pnl_curve(trades: list[dict[str, Any]]) -> list[dict[str, Any
 
 
 def load_session_pnl_curve() -> list[dict[str, Any]]:
-    from config import TRADE_SESSION_START
-    with _connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT ts, pnl_usd
-            FROM trades
-            WHERE paper = 0 AND pnl_usd != 0
-              AND ts >= ?
-            ORDER BY ts ASC
-            """,
-            (TRADE_SESSION_START,),
-        ).fetchall()
-
+    truth = load_weather_settlement_truth()
+    rows = list(truth.get("curve_points") or [])
     running = 0.0
     points: list[dict[str, Any]] = []
     for row in rows:
-        running += float(row["pnl_usd"] or 0.0)
+        running += float(row.get("pnl_usd") or 0.0)
         points.append(
             {
-                "ts": _dt_text(row["ts"]),
+                "ts": _dt_text(row.get("ts")),
                 "cumulative_pnl": round(running, 4),
             }
         )
@@ -1021,43 +1011,17 @@ def build_regime_cards(
 
 
 def load_session_win_rate() -> dict[str, Any]:
-    from config import TRADE_SESSION_START
-    with _connect() as conn:
-        row = conn.execute(
-            """
-            SELECT COUNT(*) as total,
-                   SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END) as wins,
-                   SUM(CASE WHEN pnl_usd < 0 THEN 1 ELSE 0 END) as losses,
-                   SUM(CASE WHEN pnl_usd > 0 THEN pnl_usd ELSE 0.0 END) as total_won_usd,
-                   SUM(CASE WHEN pnl_usd < 0 THEN pnl_usd ELSE 0.0 END) as total_lost_usd
-            FROM trades
-            WHERE paper = 0 AND pnl_usd != 0
-              AND ts >= ?
-            """,
-            (TRADE_SESSION_START,),
-        ).fetchone()
-
-    if not row or not row["total"]:
-        return {
-            "total": 0,
-            "wins": 0,
-            "losses": 0,
-            "win_rate": 0.0,
-            "total_won_usd": 0.0,
-            "total_lost_usd": 0.0,
-        }
-
-    total = row["total"]
-    wins = row["wins"] or 0
-    losses = row["losses"] or 0
-    win_rate = wins / total if total > 0 else 0.0
+    truth = load_weather_settlement_truth()
     return {
-        "total": total,
-        "wins": wins,
-        "losses": losses,
-        "win_rate": win_rate,
-        "total_won_usd": float(row["total_won_usd"] or 0.0),
-        "total_lost_usd": float(row["total_lost_usd"] or 0.0),
+        "total": int(truth.get("total") or 0),
+        "wins": int(truth.get("wins") or 0),
+        "losses": int(truth.get("losses") or 0),
+        "win_rate": float(truth.get("win_rate") or 0.0),
+        "total_won_usd": float(truth.get("total_won_usd") or 0.0),
+        "total_lost_usd": float(truth.get("total_lost_usd") or 0.0),
+        "total_pnl_usd": float(truth.get("total_pnl_usd") or 0.0),
+        "source": str(truth.get("source") or "unavailable"),
+        "stale": bool(truth.get("stale")),
     }
 
 

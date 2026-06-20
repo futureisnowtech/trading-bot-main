@@ -95,12 +95,29 @@ def parse_shadow_block_line(line: str) -> ShadowAttempt | None:
     except Exception:
         return None
 
+    raw_side = str(body.get("side") or "unknown").upper()
+    reduce_only = bool(body.get("reduce_only"))
+    action = str(body.get("action") or "").upper()
+    if not action:
+        action = "SELL" if reduce_only else "BUY"
+
+    normalized_side = raw_side
+    if raw_side in {"BID", "ASK"}:
+        if reduce_only:
+            normalized_side = "NO" if raw_side == "BID" else "YES"
+        else:
+            normalized_side = "YES" if raw_side == "BID" else "NO"
+
+    order_type = str(body.get("type") or "").upper()
+    if not order_type:
+        order_type = "LIMIT" if body.get("price") not in (None, "") else "UNKNOWN"
+
     return ShadowAttempt(
         ticker=str(body.get("ticker") or "UNKNOWN"),
-        action=str(body.get("action") or "unknown").upper(),
-        side=str(body.get("side") or "unknown").upper(),
-        count=int(body.get("count") or 0),
-        order_type=str(body.get("type") or "unknown").upper(),
+        action=action or "UNKNOWN",
+        side=normalized_side or "UNKNOWN",
+        count=int(float(body.get("count") or 0)),
+        order_type=order_type,
         raw_line=line.rstrip(),
     )
 

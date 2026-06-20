@@ -263,6 +263,35 @@ def test_build_trade_edge_rows_handles_yes_and_no_side_buys():
     assert rows[1]["edge_pct"] == 51.6
 
 
+def test_load_session_win_rate_uses_broker_settlement_truth(monkeypatch):
+    import dashboard.cockpit_data as cd
+
+    monkeypatch.setattr(
+        cd,
+        "load_weather_settlement_truth",
+        lambda: {
+            "total": 12,
+            "wins": 8,
+            "losses": 4,
+            "win_rate": 8 / 12,
+            "total_won_usd": 21.5,
+            "total_lost_usd": -9.25,
+            "total_pnl_usd": 12.25,
+            "source": "broker_settlements",
+            "stale": False,
+        },
+    )
+
+    payload = cd.load_session_win_rate()
+
+    assert payload["total"] == 12
+    assert payload["wins"] == 8
+    assert payload["losses"] == 4
+    assert payload["total_pnl_usd"] == 12.25
+    assert payload["source"] == "broker_settlements"
+    assert payload["stale"] is False
+
+
 def test_build_ai_insights_translates_runtime_into_plain_english():
     from dashboard.cockpit_data import build_ai_insights
 

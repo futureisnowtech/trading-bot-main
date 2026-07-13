@@ -1,0 +1,2656 @@
+{
+  "agent_stats": {
+    "count": 0,
+    "columns": [
+      {
+        "name": "id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "agent_name",
+        "type": "TEXT"
+      },
+      {
+        "name": "regime",
+        "type": "TEXT"
+      },
+      {
+        "name": "votes_buy",
+        "type": "INTEGER"
+      },
+      {
+        "name": "votes_hold",
+        "type": "INTEGER"
+      },
+      {
+        "name": "votes_sell",
+        "type": "INTEGER"
+      },
+      {
+        "name": "correct_buy",
+        "type": "INTEGER"
+      },
+      {
+        "name": "incorrect_buy",
+        "type": "INTEGER"
+      },
+      {
+        "name": "total_assessed",
+        "type": "INTEGER"
+      },
+      {
+        "name": "accuracy",
+        "type": "REAL"
+      },
+      {
+        "name": "last_updated",
+        "type": "TEXT"
+      }
+    ]
+  },
+  "api_costs": {
+    "count": 0,
+    "columns": [
+      {
+        "name": "id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "ts",
+        "type": "REAL"
+      },
+      {
+        "name": "call_type",
+        "type": "TEXT"
+      },
+      {
+        "name": "input_tokens",
+        "type": "INTEGER"
+      },
+      {
+        "name": "output_tokens",
+        "type": "INTEGER"
+      },
+      {
+        "name": "cost_usd",
+        "type": "REAL"
+      },
+      {
+        "name": "symbol",
+        "type": "TEXT"
+      }
+    ]
+  },
+  "api_telemetry": {
+    "count": 0,
+    "columns": [
+      {
+        "name": "id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "ts",
+        "type": "REAL"
+      },
+      {
+        "name": "module",
+        "type": "TEXT"
+      },
+      {
+        "name": "prompt_tokens",
+        "type": "INTEGER"
+      },
+      {
+        "name": "completion_tokens",
+        "type": "INTEGER"
+      }
+    ]
+  },
+  "backtest_results": {
+    "count": 0,
+    "columns": [
+      {
+        "name": "id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "strategy_name",
+        "type": "TEXT"
+      },
+      {
+        "name": "variant",
+        "type": "TEXT"
+      },
+      {
+        "name": "symbol",
+        "type": "TEXT"
+      },
+      {
+        "name": "timeframe",
+        "type": "TEXT"
+      },
+      {
+        "name": "period_start",
+        "type": "TEXT"
+      },
+      {
+        "name": "period_end",
+        "type": "TEXT"
+      },
+      {
+        "name": "param_hash",
+        "type": "TEXT"
+      },
+      {
+        "name": "params_json",
+        "type": "TEXT"
+      },
+      {
+        "name": "total_trades",
+        "type": "INTEGER"
+      },
+      {
+        "name": "win_rate",
+        "type": "REAL"
+      },
+      {
+        "name": "total_pnl",
+        "type": "REAL"
+      },
+      {
+        "name": "sharpe",
+        "type": "REAL"
+      },
+      {
+        "name": "max_drawdown",
+        "type": "REAL"
+      },
+      {
+        "name": "avg_pnl",
+        "type": "REAL"
+      },
+      {
+        "name": "profit_factor",
+        "type": "REAL"
+      },
+      {
+        "name": "passed",
+        "type": "INTEGER"
+      },
+      {
+        "name": "archived_at",
+        "type": "TEXT"
+      },
+      {
+        "name": "notes",
+        "type": "TEXT"
+      }
+    ]
+  },
+  "candidate_outcomes": {
+    "count": 5315,
+    "columns": [
+      {
+        "name": "id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "candidate_id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "label_status",
+        "type": "TEXT"
+      },
+      {
+        "name": "entry_ref_price",
+        "type": "REAL"
+      },
+      {
+        "name": "price_1h",
+        "type": "REAL"
+      },
+      {
+        "name": "price_4h",
+        "type": "REAL"
+      },
+      {
+        "name": "ret_1h_pct",
+        "type": "REAL"
+      },
+      {
+        "name": "ret_4h_pct",
+        "type": "REAL"
+      },
+      {
+        "name": "mfe_4h_pct",
+        "type": "REAL"
+      },
+      {
+        "name": "mae_4h_pct",
+        "type": "REAL"
+      },
+      {
+        "name": "hit_1r",
+        "type": "INTEGER"
+      },
+      {
+        "name": "hit_2r",
+        "type": "INTEGER"
+      },
+      {
+        "name": "hit_stop",
+        "type": "INTEGER"
+      },
+      {
+        "name": "best_exit_pct",
+        "type": "REAL"
+      },
+      {
+        "name": "worst_drawdown_pct",
+        "type": "REAL"
+      },
+      {
+        "name": "labeled_at",
+        "type": "TEXT"
+      },
+      {
+        "name": "price_15m",
+        "type": "REAL"
+      },
+      {
+        "name": "ret_15m_pct",
+        "type": "REAL"
+      },
+      {
+        "name": "path_timing_evaluated",
+        "type": "INTEGER"
+      },
+      {
+        "name": "time_to_05r_min",
+        "type": "REAL"
+      },
+      {
+        "name": "time_to_1r_min",
+        "type": "REAL"
+      },
+      {
+        "name": "time_to_2r_min",
+        "type": "REAL"
+      },
+      {
+        "name": "peak_r_4h",
+        "type": "REAL"
+      }
+    ]
+  },
+  "challenger_state": {
+    "count": 0,
+    "columns": [
+      {
+        "name": "id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "strategy",
+        "type": "TEXT"
+      },
+      {
+        "name": "run_id",
+        "type": "TEXT"
+      },
+      {
+        "name": "promotion_tier",
+        "type": "TEXT"
+      },
+      {
+        "name": "criteria_met_json",
+        "type": "TEXT"
+      },
+      {
+        "name": "promoted_at",
+        "type": "TEXT"
+      },
+      {
+        "name": "demoted_at",
+        "type": "TEXT"
+      },
+      {
+        "name": "notes",
+        "type": "TEXT"
+      },
+      {
+        "name": "created_at",
+        "type": "TEXT"
+      }
+    ]
+  },
+  "debate_results": {
+    "count": 0,
+    "columns": [
+      {
+        "name": "id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "ts",
+        "type": "REAL"
+      },
+      {
+        "name": "symbol",
+        "type": "TEXT"
+      },
+      {
+        "name": "buy_votes",
+        "type": "INTEGER"
+      },
+      {
+        "name": "hold_votes",
+        "type": "INTEGER"
+      },
+      {
+        "name": "sell_votes",
+        "type": "INTEGER"
+      },
+      {
+        "name": "final_signal",
+        "type": "TEXT"
+      },
+      {
+        "name": "confidence",
+        "type": "REAL"
+      },
+      {
+        "name": "reasoning",
+        "type": "TEXT"
+      },
+      {
+        "name": "bull_case",
+        "type": "TEXT"
+      },
+      {
+        "name": "bear_case",
+        "type": "TEXT"
+      },
+      {
+        "name": "key_risk",
+        "type": "TEXT"
+      },
+      {
+        "name": "agent_details",
+        "type": "TEXT"
+      },
+      {
+        "name": "regime",
+        "type": "TEXT"
+      }
+    ]
+  },
+  "edge_snapshots": {
+    "count": 0,
+    "columns": [
+      {
+        "name": "id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "ts",
+        "type": "REAL"
+      },
+      {
+        "name": "market",
+        "type": "TEXT"
+      },
+      {
+        "name": "symbol",
+        "type": "TEXT"
+      },
+      {
+        "name": "v_score",
+        "type": "REAL"
+      },
+      {
+        "name": "e_score",
+        "type": "REAL"
+      },
+      {
+        "name": "d_factor",
+        "type": "REAL"
+      },
+      {
+        "name": "t_multiplier",
+        "type": "REAL"
+      },
+      {
+        "name": "k_factor",
+        "type": "REAL"
+      },
+      {
+        "name": "m_score",
+        "type": "REAL"
+      },
+      {
+        "name": "final_size_usd",
+        "type": "REAL"
+      },
+      {
+        "name": "debate_type",
+        "type": "TEXT"
+      },
+      {
+        "name": "notes",
+        "type": "TEXT"
+      }
+    ]
+  },
+  "exit_evaluations": {
+    "count": 0,
+    "columns": [
+      {
+        "name": "id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "trade_id",
+        "type": "TEXT"
+      },
+      {
+        "name": "close_order_id",
+        "type": "TEXT"
+      },
+      {
+        "name": "exit_type",
+        "type": "TEXT"
+      },
+      {
+        "name": "actual_exit_price",
+        "type": "REAL"
+      },
+      {
+        "name": "actual_exit_pct",
+        "type": "REAL"
+      },
+      {
+        "name": "optimal_exit_price",
+        "type": "REAL"
+      },
+      {
+        "name": "opportunity_loss_pct",
+        "type": "REAL"
+      },
+      {
+        "name": "stop_overshoot_pct",
+        "type": "REAL"
+      },
+      {
+        "name": "regime",
+        "type": "TEXT"
+      },
+      {
+        "name": "composite_score_at_exit",
+        "type": "REAL"
+      },
+      {
+        "name": "mfe_at_exit",
+        "type": "REAL"
+      },
+      {
+        "name": "mae_at_exit",
+        "type": "REAL"
+      },
+      {
+        "name": "path_label",
+        "type": "TEXT"
+      },
+      {
+        "name": "created_at",
+        "type": "TEXT"
+      }
+    ]
+  },
+  "forecast_bars": {
+    "count": 3850,
+    "columns": [
+      {
+        "name": "id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "contract_id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "interval",
+        "type": "TEXT"
+      },
+      {
+        "name": "ts_open",
+        "type": "TEXT"
+      },
+      {
+        "name": "ts_close",
+        "type": "TEXT"
+      },
+      {
+        "name": "o",
+        "type": "REAL"
+      },
+      {
+        "name": "h",
+        "type": "REAL"
+      },
+      {
+        "name": "l",
+        "type": "REAL"
+      },
+      {
+        "name": "c",
+        "type": "REAL"
+      },
+      {
+        "name": "mid_mean",
+        "type": "REAL"
+      },
+      {
+        "name": "spread_mean",
+        "type": "REAL"
+      },
+      {
+        "name": "vol_proxy",
+        "type": "REAL"
+      },
+      {
+        "name": "derived_from_quotes",
+        "type": "INTEGER"
+      }
+    ]
+  },
+  "forecast_contracts": {
+    "count": 1535,
+    "columns": [
+      {
+        "name": "id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "market_id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "conid",
+        "type": "INTEGER"
+      },
+      {
+        "name": "local_symbol",
+        "type": "TEXT"
+      },
+      {
+        "name": "right",
+        "type": "TEXT"
+      },
+      {
+        "name": "strike",
+        "type": "REAL"
+      },
+      {
+        "name": "currency",
+        "type": "TEXT"
+      },
+      {
+        "name": "exchange",
+        "type": "TEXT"
+      },
+      {
+        "name": "last_trade_at",
+        "type": "TEXT"
+      },
+      {
+        "name": "resolution_at",
+        "type": "TEXT"
+      },
+      {
+        "name": "payout_at",
+        "type": "TEXT"
+      },
+      {
+        "name": "measured_period",
+        "type": "TEXT"
+      },
+      {
+        "name": "active",
+        "type": "INTEGER"
+      },
+      {
+        "name": "first_seen_at",
+        "type": "TEXT"
+      },
+      {
+        "name": "last_seen_at",
+        "type": "TEXT"
+      },
+      {
+        "name": "contract_name",
+        "type": "TEXT"
+      }
+    ]
+  },
+  "forecast_markets": {
+    "count": 133,
+    "columns": [
+      {
+        "name": "id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "market_symbol",
+        "type": "TEXT"
+      },
+      {
+        "name": "market_name",
+        "type": "TEXT"
+      },
+      {
+        "name": "exchange",
+        "type": "TEXT"
+      },
+      {
+        "name": "category_path",
+        "type": "TEXT"
+      },
+      {
+        "name": "underlier_symbol",
+        "type": "TEXT"
+      },
+      {
+        "name": "underlier_conid",
+        "type": "INTEGER"
+      },
+      {
+        "name": "dataset_ref",
+        "type": "TEXT"
+      },
+      {
+        "name": "active",
+        "type": "INTEGER"
+      },
+      {
+        "name": "first_seen_at",
+        "type": "TEXT"
+      },
+      {
+        "name": "last_seen_at",
+        "type": "TEXT"
+      }
+    ]
+  },
+  "forecast_positions": {
+    "count": 3,
+    "columns": [
+      {
+        "name": "id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "ticker",
+        "type": "TEXT"
+      },
+      {
+        "name": "qty",
+        "type": "INTEGER"
+      },
+      {
+        "name": "entry_price",
+        "type": "REAL"
+      },
+      {
+        "name": "side",
+        "type": "TEXT"
+      },
+      {
+        "name": "category",
+        "type": "TEXT"
+      },
+      {
+        "name": "active",
+        "type": "INTEGER"
+      },
+      {
+        "name": "opened_at",
+        "type": "TEXT"
+      },
+      {
+        "name": "closed_at",
+        "type": "TEXT"
+      },
+      {
+        "name": "exit_type",
+        "type": "TEXT"
+      }
+    ]
+  },
+  "forecast_quotes": {
+    "count": 8195,
+    "columns": [
+      {
+        "name": "id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "contract_id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "ts",
+        "type": "TEXT"
+      },
+      {
+        "name": "bid",
+        "type": "REAL"
+      },
+      {
+        "name": "ask",
+        "type": "REAL"
+      },
+      {
+        "name": "bid_size",
+        "type": "REAL"
+      },
+      {
+        "name": "ask_size",
+        "type": "REAL"
+      },
+      {
+        "name": "mid",
+        "type": "REAL"
+      },
+      {
+        "name": "spread",
+        "type": "REAL"
+      },
+      {
+        "name": "implied_prob",
+        "type": "REAL"
+      },
+      {
+        "name": "side",
+        "type": "TEXT"
+      }
+    ]
+  },
+  "forecast_resolutions": {
+    "count": 0,
+    "columns": [
+      {
+        "name": "id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "contract_id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "resolved_side",
+        "type": "TEXT"
+      },
+      {
+        "name": "resolved_value",
+        "type": "REAL"
+      },
+      {
+        "name": "resolved_at",
+        "type": "TEXT"
+      },
+      {
+        "name": "payout_at",
+        "type": "TEXT"
+      },
+      {
+        "name": "notes",
+        "type": "TEXT"
+      },
+      {
+        "name": "source",
+        "type": "TEXT"
+      }
+    ]
+  },
+  "incidents": {
+    "count": 0,
+    "columns": [
+      {
+        "name": "id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "lane_id",
+        "type": "TEXT"
+      },
+      {
+        "name": "source",
+        "type": "TEXT"
+      },
+      {
+        "name": "fingerprint",
+        "type": "TEXT"
+      },
+      {
+        "name": "first_seen_at",
+        "type": "TEXT"
+      },
+      {
+        "name": "last_seen_at",
+        "type": "TEXT"
+      },
+      {
+        "name": "count",
+        "type": "INTEGER"
+      },
+      {
+        "name": "severity",
+        "type": "TEXT"
+      },
+      {
+        "name": "state",
+        "type": "TEXT"
+      },
+      {
+        "name": "updated_at",
+        "type": "TEXT"
+      },
+      {
+        "name": "sample_message",
+        "type": "TEXT"
+      },
+      {
+        "name": "alerted_at",
+        "type": "TEXT"
+      },
+      {
+        "name": "last_alerted_count",
+        "type": "INTEGER"
+      },
+      {
+        "name": "last_alerted_severity",
+        "type": "TEXT"
+      }
+    ]
+  },
+  "kill_switch_log": {
+    "count": 0,
+    "columns": [
+      {
+        "name": "id",
+        "type": "TEXT"
+      },
+      {
+        "name": "ts",
+        "type": "TEXT"
+      },
+      {
+        "name": "reason",
+        "type": "TEXT"
+      },
+      {
+        "name": "balance",
+        "type": "REAL"
+      },
+      {
+        "name": "peak_balance",
+        "type": "REAL"
+      },
+      {
+        "name": "positions_closed",
+        "type": "INTEGER"
+      },
+      {
+        "name": "resumed_at",
+        "type": "TEXT"
+      },
+      {
+        "name": "trigger_type",
+        "type": "TEXT"
+      },
+      {
+        "name": "lane",
+        "type": "TEXT"
+      }
+    ]
+  },
+  "lane_runtime_state": {
+    "count": 4,
+    "columns": [
+      {
+        "name": "id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "lane_id",
+        "type": "TEXT"
+      },
+      {
+        "name": "lane_role",
+        "type": "TEXT"
+      },
+      {
+        "name": "enabled",
+        "type": "INTEGER"
+      },
+      {
+        "name": "active",
+        "type": "INTEGER"
+      },
+      {
+        "name": "configured",
+        "type": "INTEGER"
+      },
+      {
+        "name": "dashboard_visible",
+        "type": "INTEGER"
+      },
+      {
+        "name": "autonomous_enabled",
+        "type": "INTEGER"
+      },
+      {
+        "name": "manual_allowed",
+        "type": "INTEGER"
+      },
+      {
+        "name": "mode",
+        "type": "TEXT"
+      },
+      {
+        "name": "connected",
+        "type": "INTEGER"
+      },
+      {
+        "name": "discovering",
+        "type": "INTEGER"
+      },
+      {
+        "name": "quoting",
+        "type": "INTEGER"
+      },
+      {
+        "name": "tradable",
+        "type": "INTEGER"
+      },
+      {
+        "name": "health",
+        "type": "TEXT"
+      },
+      {
+        "name": "blocked_reason",
+        "type": "TEXT"
+      },
+      {
+        "name": "action_needed",
+        "type": "TEXT"
+      },
+      {
+        "name": "last_success_at",
+        "type": "TEXT"
+      },
+      {
+        "name": "last_error_at",
+        "type": "TEXT"
+      },
+      {
+        "name": "last_heartbeat_at",
+        "type": "TEXT"
+      },
+      {
+        "name": "positions_open",
+        "type": "INTEGER"
+      },
+      {
+        "name": "capital_deployed_usd",
+        "type": "REAL"
+      },
+      {
+        "name": "buying_power_usd",
+        "type": "REAL"
+      },
+      {
+        "name": "issue_count",
+        "type": "INTEGER"
+      },
+      {
+        "name": "readiness_state",
+        "type": "TEXT"
+      },
+      {
+        "name": "promotion_condition",
+        "type": "TEXT"
+      },
+      {
+        "name": "updated_at",
+        "type": "TEXT"
+      },
+      {
+        "name": "snapshot_json",
+        "type": "TEXT"
+      }
+    ]
+  },
+  "learner_state": {
+    "count": 0,
+    "columns": [
+      {
+        "name": "symbol",
+        "type": "TEXT"
+      },
+      {
+        "name": "vaccinated",
+        "type": "INTEGER"
+      },
+      {
+        "name": "score",
+        "type": "REAL"
+      }
+    ]
+  },
+  "ml_feature_snapshots": {
+    "count": 0,
+    "columns": [
+      {
+        "name": "id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "trade_id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "symbol",
+        "type": "TEXT"
+      },
+      {
+        "name": "direction",
+        "type": "TEXT"
+      },
+      {
+        "name": "won",
+        "type": "INTEGER"
+      },
+      {
+        "name": "pnl_usd",
+        "type": "REAL"
+      },
+      {
+        "name": "entry_price",
+        "type": "REAL"
+      },
+      {
+        "name": "exit_price",
+        "type": "REAL"
+      },
+      {
+        "name": "entry_score",
+        "type": "REAL"
+      },
+      {
+        "name": "exit_score",
+        "type": "REAL"
+      },
+      {
+        "name": "regime",
+        "type": "TEXT"
+      },
+      {
+        "name": "incubation_id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "features_json",
+        "type": "TEXT"
+      },
+      {
+        "name": "candidate_id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "scan_id",
+        "type": "TEXT"
+      },
+      {
+        "name": "raw_scanner_symbol",
+        "type": "TEXT"
+      },
+      {
+        "name": "base_asset",
+        "type": "TEXT"
+      },
+      {
+        "name": "executed_symbol",
+        "type": "TEXT"
+      },
+      {
+        "name": "trade_ref",
+        "type": "TEXT"
+      },
+      {
+        "name": "route_type",
+        "type": "TEXT"
+      },
+      {
+        "name": "setup_family",
+        "type": "TEXT"
+      },
+      {
+        "name": "setup_score",
+        "type": "REAL"
+      },
+      {
+        "name": "spot_regime",
+        "type": "TEXT"
+      },
+      {
+        "name": "tv_profile_name",
+        "type": "TEXT"
+      },
+      {
+        "name": "tv_htf_bias",
+        "type": "TEXT"
+      },
+      {
+        "name": "tv_signal_age_sec",
+        "type": "REAL"
+      },
+      {
+        "name": "tv_veto_state",
+        "type": "TEXT"
+      },
+      {
+        "name": "fast_follow_through",
+        "type": "INTEGER"
+      },
+      {
+        "name": "thesis_decay_risk",
+        "type": "INTEGER"
+      },
+      {
+        "name": "expected_net_pnl_after_fees",
+        "type": "REAL"
+      },
+      {
+        "name": "route_conditional_value",
+        "type": "REAL"
+      },
+      {
+        "name": "reconstructed",
+        "type": "INTEGER"
+      },
+      {
+        "name": "ts",
+        "type": "REAL"
+      }
+    ]
+  },
+  "ml_retrain_queue": {
+    "count": 0,
+    "columns": [
+      {
+        "name": "pair_key",
+        "type": "TEXT"
+      },
+      {
+        "name": "direction",
+        "type": "TEXT"
+      },
+      {
+        "name": "pending",
+        "type": "INTEGER"
+      },
+      {
+        "name": "last_queued",
+        "type": "REAL"
+      }
+    ]
+  },
+  "notifications": {
+    "count": 14,
+    "columns": [
+      {
+        "name": "id",
+        "type": "TEXT"
+      },
+      {
+        "name": "ts",
+        "type": "TEXT"
+      },
+      {
+        "name": "category",
+        "type": "TEXT"
+      },
+      {
+        "name": "severity",
+        "type": "TEXT"
+      },
+      {
+        "name": "title",
+        "type": "TEXT"
+      },
+      {
+        "name": "message",
+        "type": "TEXT"
+      },
+      {
+        "name": "data",
+        "type": "TEXT"
+      },
+      {
+        "name": "read",
+        "type": "INTEGER"
+      },
+      {
+        "name": "why_json",
+        "type": "TEXT"
+      }
+    ]
+  },
+  "open_positions": {
+    "count": 0,
+    "columns": [
+      {
+        "name": "symbol",
+        "type": "TEXT"
+      },
+      {
+        "name": "strategy",
+        "type": "TEXT"
+      },
+      {
+        "name": "qty",
+        "type": "REAL"
+      },
+      {
+        "name": "entry",
+        "type": "REAL"
+      },
+      {
+        "name": "stop",
+        "type": "REAL"
+      },
+      {
+        "name": "target",
+        "type": "REAL"
+      },
+      {
+        "name": "high_since_entry",
+        "type": "REAL"
+      },
+      {
+        "name": "ts_entry",
+        "type": "TEXT"
+      },
+      {
+        "name": "paper",
+        "type": "INTEGER"
+      },
+      {
+        "name": "direction",
+        "type": "TEXT"
+      },
+      {
+        "name": "entry_reason",
+        "type": "TEXT"
+      },
+      {
+        "name": "spot_regime",
+        "type": "TEXT"
+      },
+      {
+        "name": "setup_family",
+        "type": "TEXT"
+      },
+      {
+        "name": "setup_score",
+        "type": "REAL"
+      },
+      {
+        "name": "setup_preference",
+        "type": "TEXT"
+      },
+      {
+        "name": "tf_5m_state",
+        "type": "TEXT"
+      },
+      {
+        "name": "tf_30m_state",
+        "type": "TEXT"
+      },
+      {
+        "name": "tf_4h_state",
+        "type": "TEXT"
+      },
+      {
+        "name": "tf_1d_state",
+        "type": "TEXT"
+      },
+      {
+        "name": "structural_confirms",
+        "type": "TEXT"
+      },
+      {
+        "name": "execution_route",
+        "type": "TEXT"
+      },
+      {
+        "name": "cooldown_until",
+        "type": "TEXT"
+      },
+      {
+        "name": "microstructure_veto",
+        "type": "TEXT"
+      },
+      {
+        "name": "stop_model_version",
+        "type": "TEXT"
+      },
+      {
+        "name": "target_model_version",
+        "type": "TEXT"
+      },
+      {
+        "name": "target_r",
+        "type": "REAL"
+      },
+      {
+        "name": "trail_arm_r",
+        "type": "REAL"
+      },
+      {
+        "name": "risk_dollars",
+        "type": "REAL"
+      },
+      {
+        "name": "entry_fee_usd",
+        "type": "REAL"
+      },
+      {
+        "name": "exit_reason",
+        "type": "TEXT"
+      },
+      {
+        "name": "lane",
+        "type": "TEXT"
+      },
+      {
+        "name": "low_since_entry",
+        "type": "REAL"
+      },
+      {
+        "name": "atr_at_entry",
+        "type": "REAL"
+      },
+      {
+        "name": "composite_score",
+        "type": "REAL"
+      },
+      {
+        "name": "trailing_active",
+        "type": "INTEGER"
+      },
+      {
+        "name": "trailing_stop_price",
+        "type": "REAL"
+      },
+      {
+        "name": "scale_33_done",
+        "type": "INTEGER"
+      },
+      {
+        "name": "scale_66_done",
+        "type": "INTEGER"
+      },
+      {
+        "name": "leverage",
+        "type": "INTEGER"
+      },
+      {
+        "name": "entry_trade_id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "entry_order_id",
+        "type": "TEXT"
+      },
+      {
+        "name": "entry_feature_snapshot_id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "tv_profile_name",
+        "type": "TEXT"
+      },
+      {
+        "name": "tv_signal_bias",
+        "type": "TEXT"
+      },
+      {
+        "name": "tv_signal_ts",
+        "type": "TEXT"
+      },
+      {
+        "name": "tv_signal_age_sec",
+        "type": "REAL"
+      },
+      {
+        "name": "tv_indicator_name",
+        "type": "TEXT"
+      },
+      {
+        "name": "tv_signal_strength",
+        "type": "TEXT"
+      },
+      {
+        "name": "candidate_id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "candidate_scan_id",
+        "type": "TEXT"
+      },
+      {
+        "name": "raw_scanner_symbol",
+        "type": "TEXT"
+      },
+      {
+        "name": "base_asset",
+        "type": "TEXT"
+      },
+      {
+        "name": "tv_veto_state",
+        "type": "TEXT"
+      },
+      {
+        "name": "sell_failure_count",
+        "type": "INTEGER"
+      },
+      {
+        "name": "sell_blocked",
+        "type": "INTEGER"
+      },
+      {
+        "name": "sell_blocked_reason",
+        "type": "TEXT"
+      }
+    ]
+  },
+  "recent_vetoes": {
+    "count": 0,
+    "columns": [
+      {
+        "name": "id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "ts",
+        "type": "TEXT"
+      },
+      {
+        "name": "ticker",
+        "type": "TEXT"
+      },
+      {
+        "name": "strategy_family",
+        "type": "TEXT"
+      },
+      {
+        "name": "side",
+        "type": "TEXT"
+      },
+      {
+        "name": "veto_reason",
+        "type": "TEXT"
+      },
+      {
+        "name": "rank_score",
+        "type": "REAL"
+      },
+      {
+        "name": "ev",
+        "type": "REAL"
+      },
+      {
+        "name": "position_contracts",
+        "type": "INTEGER"
+      },
+      {
+        "name": "size_usd",
+        "type": "REAL"
+      },
+      {
+        "name": "details_json",
+        "type": "TEXT"
+      }
+    ]
+  },
+  "scan_candidates": {
+    "count": 30935,
+    "columns": [
+      {
+        "name": "id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "scan_id",
+        "type": "TEXT"
+      },
+      {
+        "name": "ts",
+        "type": "REAL"
+      },
+      {
+        "name": "symbol",
+        "type": "TEXT"
+      },
+      {
+        "name": "exchange",
+        "type": "TEXT"
+      },
+      {
+        "name": "base_asset",
+        "type": "TEXT"
+      },
+      {
+        "name": "direction",
+        "type": "TEXT"
+      },
+      {
+        "name": "primary_setup",
+        "type": "TEXT"
+      },
+      {
+        "name": "scan_setups_json",
+        "type": "TEXT"
+      },
+      {
+        "name": "price",
+        "type": "REAL"
+      },
+      {
+        "name": "volume_24h_usd",
+        "type": "REAL"
+      },
+      {
+        "name": "spread_pct",
+        "type": "REAL"
+      },
+      {
+        "name": "bid_depth_usd",
+        "type": "REAL"
+      },
+      {
+        "name": "ask_depth_usd",
+        "type": "REAL"
+      },
+      {
+        "name": "atr_15m",
+        "type": "REAL"
+      },
+      {
+        "name": "stop_pct",
+        "type": "REAL"
+      },
+      {
+        "name": "target_pct",
+        "type": "REAL"
+      },
+      {
+        "name": "scanner_expected_profit",
+        "type": "REAL"
+      },
+      {
+        "name": "regime",
+        "type": "TEXT"
+      },
+      {
+        "name": "technical_score",
+        "type": "REAL"
+      },
+      {
+        "name": "ml_score",
+        "type": "REAL"
+      },
+      {
+        "name": "composite_score",
+        "type": "REAL"
+      },
+      {
+        "name": "entry_threshold",
+        "type": "REAL"
+      },
+      {
+        "name": "should_enter_signal",
+        "type": "INTEGER"
+      },
+      {
+        "name": "econ_approved",
+        "type": "INTEGER"
+      },
+      {
+        "name": "econ_tier",
+        "type": "TEXT"
+      },
+      {
+        "name": "econ_reject_reason",
+        "type": "TEXT"
+      },
+      {
+        "name": "edge_score",
+        "type": "REAL"
+      },
+      {
+        "name": "size_usd",
+        "type": "REAL"
+      },
+      {
+        "name": "leverage",
+        "type": "INTEGER"
+      },
+      {
+        "name": "entry_block_reason",
+        "type": "TEXT"
+      },
+      {
+        "name": "decision",
+        "type": "TEXT"
+      },
+      {
+        "name": "paper",
+        "type": "INTEGER"
+      },
+      {
+        "name": "source",
+        "type": "TEXT"
+      },
+      {
+        "name": "labeled",
+        "type": "INTEGER"
+      },
+      {
+        "name": "scanner_theoretical_position_usd",
+        "type": "REAL"
+      },
+      {
+        "name": "scanner_effective_position_usd",
+        "type": "REAL"
+      },
+      {
+        "name": "recommended_lane",
+        "type": "TEXT"
+      },
+      {
+        "name": "tradeability_status",
+        "type": "TEXT"
+      },
+      {
+        "name": "trade_blocked_reason",
+        "type": "TEXT"
+      },
+      {
+        "name": "trade_size_block_reason",
+        "type": "TEXT"
+      },
+      {
+        "name": "trade_source_reason",
+        "type": "TEXT"
+      },
+      {
+        "name": "manual_executable",
+        "type": "INTEGER"
+      },
+      {
+        "name": "auto_executable",
+        "type": "INTEGER"
+      },
+      {
+        "name": "spot_regime",
+        "type": "TEXT"
+      },
+      {
+        "name": "setup_family",
+        "type": "TEXT"
+      },
+      {
+        "name": "setup_score",
+        "type": "REAL"
+      },
+      {
+        "name": "setup_preference",
+        "type": "TEXT"
+      },
+      {
+        "name": "tf_5m_state",
+        "type": "TEXT"
+      },
+      {
+        "name": "tf_30m_state",
+        "type": "TEXT"
+      },
+      {
+        "name": "tf_4h_state",
+        "type": "TEXT"
+      },
+      {
+        "name": "tf_1d_state",
+        "type": "TEXT"
+      },
+      {
+        "name": "structural_confirms",
+        "type": "TEXT"
+      },
+      {
+        "name": "execution_route",
+        "type": "TEXT"
+      },
+      {
+        "name": "cooldown_until",
+        "type": "TEXT"
+      },
+      {
+        "name": "microstructure_veto",
+        "type": "TEXT"
+      },
+      {
+        "name": "final_spot_score",
+        "type": "REAL"
+      },
+      {
+        "name": "regime_floor",
+        "type": "REAL"
+      },
+      {
+        "name": "actual_stop_pct",
+        "type": "REAL"
+      },
+      {
+        "name": "actual_target_pct",
+        "type": "REAL"
+      },
+      {
+        "name": "net_rr",
+        "type": "REAL"
+      },
+      {
+        "name": "net_win_usd",
+        "type": "REAL"
+      },
+      {
+        "name": "econ_gate_class",
+        "type": "TEXT"
+      },
+      {
+        "name": "funding_rate",
+        "type": "REAL"
+      }
+    ]
+  },
+  "scan_funnels": {
+    "count": 5576,
+    "columns": [
+      {
+        "name": "id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "scan_id",
+        "type": "TEXT"
+      },
+      {
+        "name": "ts",
+        "type": "REAL"
+      },
+      {
+        "name": "scanner_candidates_total",
+        "type": "INTEGER"
+      },
+      {
+        "name": "dual_exposure_block",
+        "type": "INTEGER"
+      },
+      {
+        "name": "cooldown_block",
+        "type": "INTEGER"
+      },
+      {
+        "name": "risk_block",
+        "type": "INTEGER"
+      },
+      {
+        "name": "data_unavailable",
+        "type": "INTEGER"
+      },
+      {
+        "name": "below_threshold",
+        "type": "INTEGER"
+      },
+      {
+        "name": "econ_veto",
+        "type": "INTEGER"
+      },
+      {
+        "name": "research_only_block",
+        "type": "INTEGER"
+      },
+      {
+        "name": "sizing_zero",
+        "type": "INTEGER"
+      },
+      {
+        "name": "execution_failed",
+        "type": "INTEGER"
+      },
+      {
+        "name": "entered",
+        "type": "INTEGER"
+      },
+      {
+        "name": "scored_total",
+        "type": "INTEGER"
+      },
+      {
+        "name": "econ_passed_total",
+        "type": "INTEGER"
+      },
+      {
+        "name": "final_entryable_total",
+        "type": "INTEGER"
+      }
+    ]
+  },
+  "signal_stats": {
+    "count": 0,
+    "columns": [
+      {
+        "name": "id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "signal_name",
+        "type": "TEXT"
+      },
+      {
+        "name": "regime",
+        "type": "TEXT"
+      },
+      {
+        "name": "strategy",
+        "type": "TEXT"
+      },
+      {
+        "name": "source",
+        "type": "TEXT"
+      },
+      {
+        "name": "fires",
+        "type": "INTEGER"
+      },
+      {
+        "name": "wins",
+        "type": "INTEGER"
+      },
+      {
+        "name": "losses",
+        "type": "INTEGER"
+      },
+      {
+        "name": "total_pnl",
+        "type": "REAL"
+      },
+      {
+        "name": "avg_pnl",
+        "type": "REAL"
+      },
+      {
+        "name": "win_rate",
+        "type": "REAL"
+      },
+      {
+        "name": "bayesian_pts",
+        "type": "REAL"
+      },
+      {
+        "name": "prior_pts",
+        "type": "REAL"
+      },
+      {
+        "name": "last_updated",
+        "type": "TEXT"
+      }
+    ]
+  },
+  "signals": {
+    "count": 0,
+    "columns": [
+      {
+        "name": "id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "ts",
+        "type": "REAL"
+      },
+      {
+        "name": "strategy",
+        "type": "TEXT"
+      },
+      {
+        "name": "symbol",
+        "type": "TEXT"
+      },
+      {
+        "name": "signal",
+        "type": "TEXT"
+      },
+      {
+        "name": "confidence",
+        "type": "REAL"
+      },
+      {
+        "name": "reason",
+        "type": "TEXT"
+      },
+      {
+        "name": "acted_on",
+        "type": "INTEGER"
+      },
+      {
+        "name": "price",
+        "type": "REAL"
+      }
+    ]
+  },
+  "spot_cooldown_state": {
+    "count": 0,
+    "columns": [
+      {
+        "name": "symbol",
+        "type": "TEXT"
+      },
+      {
+        "name": "last_exit_ts",
+        "type": "INTEGER"
+      }
+    ]
+  },
+  "spot_edge_conditions": {
+    "count": 0,
+    "columns": [
+      {
+        "name": "id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "symbol",
+        "type": "TEXT"
+      },
+      {
+        "name": "field",
+        "type": "TEXT"
+      },
+      {
+        "name": "operator",
+        "type": "TEXT"
+      },
+      {
+        "name": "value",
+        "type": "TEXT"
+      },
+      {
+        "name": "reason",
+        "type": "TEXT"
+      },
+      {
+        "name": "n_total",
+        "type": "INTEGER"
+      },
+      {
+        "name": "n_bucket",
+        "type": "INTEGER"
+      },
+      {
+        "name": "wr",
+        "type": "REAL"
+      },
+      {
+        "name": "pf",
+        "type": "REAL"
+      },
+      {
+        "name": "baseline_pf",
+        "type": "REAL"
+      },
+      {
+        "name": "confidence",
+        "type": "REAL"
+      },
+      {
+        "name": "active",
+        "type": "INTEGER"
+      },
+      {
+        "name": "derived_at",
+        "type": "TEXT"
+      }
+    ]
+  },
+  "spot_holding_classifications": {
+    "count": 11,
+    "columns": [
+      {
+        "name": "symbol",
+        "type": "TEXT"
+      },
+      {
+        "name": "classification",
+        "type": "TEXT"
+      },
+      {
+        "name": "note",
+        "type": "TEXT"
+      },
+      {
+        "name": "updated_at",
+        "type": "TEXT"
+      }
+    ]
+  },
+  "spot_regime_state": {
+    "count": 8,
+    "columns": [
+      {
+        "name": "symbol",
+        "type": "TEXT"
+      },
+      {
+        "name": "last_regime",
+        "type": "TEXT"
+      },
+      {
+        "name": "ts",
+        "type": "INTEGER"
+      }
+    ]
+  },
+  "sqlite_sequence": {
+    "count": 11,
+    "columns": [
+      {
+        "name": "name",
+        "type": ""
+      },
+      {
+        "name": "seq",
+        "type": ""
+      }
+    ]
+  },
+  "system_cooldowns": {
+    "count": 0,
+    "columns": [
+      {
+        "name": "process_name",
+        "type": "TEXT"
+      },
+      {
+        "name": "last_executed_ts",
+        "type": "INTEGER"
+      }
+    ]
+  },
+  "system_events": {
+    "count": 9433,
+    "columns": [
+      {
+        "name": "id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "ts",
+        "type": "REAL"
+      },
+      {
+        "name": "level",
+        "type": "TEXT"
+      },
+      {
+        "name": "source",
+        "type": "TEXT"
+      },
+      {
+        "name": "message",
+        "type": "TEXT"
+      }
+    ]
+  },
+  "system_runtime_state": {
+    "count": 1,
+    "columns": [
+      {
+        "name": "id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "process_mode",
+        "type": "TEXT"
+      },
+      {
+        "name": "startup_ts",
+        "type": "TEXT"
+      },
+      {
+        "name": "account_size_live",
+        "type": "REAL"
+      },
+      {
+        "name": "process_alive",
+        "type": "INTEGER"
+      },
+      {
+        "name": "active_lanes",
+        "type": "TEXT"
+      },
+      {
+        "name": "global_status",
+        "type": "TEXT"
+      },
+      {
+        "name": "last_global_heartbeat_at",
+        "type": "TEXT"
+      },
+      {
+        "name": "launch_readiness_state",
+        "type": "TEXT"
+      },
+      {
+        "name": "updated_at",
+        "type": "TEXT"
+      }
+    ]
+  },
+  "trade_attribution": {
+    "count": 0,
+    "columns": [
+      {
+        "name": "id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "trade_ref",
+        "type": "TEXT"
+      },
+      {
+        "name": "symbol",
+        "type": "TEXT"
+      },
+      {
+        "name": "strategy",
+        "type": "TEXT"
+      },
+      {
+        "name": "regime",
+        "type": "TEXT"
+      },
+      {
+        "name": "source",
+        "type": "TEXT"
+      },
+      {
+        "name": "entry_ts",
+        "type": "REAL"
+      },
+      {
+        "name": "exit_ts",
+        "type": "REAL"
+      },
+      {
+        "name": "entry_price",
+        "type": "REAL"
+      },
+      {
+        "name": "exit_price",
+        "type": "REAL"
+      },
+      {
+        "name": "pnl_usd",
+        "type": "REAL"
+      },
+      {
+        "name": "pnl_pct",
+        "type": "REAL"
+      },
+      {
+        "name": "fee_usd",
+        "type": "REAL"
+      },
+      {
+        "name": "won",
+        "type": "INTEGER"
+      },
+      {
+        "name": "signals_json",
+        "type": "TEXT"
+      },
+      {
+        "name": "conviction",
+        "type": "REAL"
+      },
+      {
+        "name": "exit_reason",
+        "type": "TEXT"
+      },
+      {
+        "name": "hold_minutes",
+        "type": "REAL"
+      },
+      {
+        "name": "paper",
+        "type": "INTEGER"
+      },
+      {
+        "name": "lesson",
+        "type": "TEXT"
+      },
+      {
+        "name": "created_at",
+        "type": "REAL"
+      },
+      {
+        "name": "mae_pct",
+        "type": "REAL"
+      },
+      {
+        "name": "mfe_pct",
+        "type": "REAL"
+      },
+      {
+        "name": "exit_type",
+        "type": "TEXT"
+      },
+      {
+        "name": "is_fee_trap",
+        "type": "INTEGER"
+      },
+      {
+        "name": "ml_p_win",
+        "type": "REAL"
+      },
+      {
+        "name": "super_score",
+        "type": "REAL"
+      },
+      {
+        "name": "composite_score",
+        "type": "REAL"
+      },
+      {
+        "name": "entry_order_id",
+        "type": "TEXT"
+      },
+      {
+        "name": "feature_snapshot_id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "lineage_complete",
+        "type": "INTEGER"
+      },
+      {
+        "name": "lineage_notes",
+        "type": "TEXT"
+      },
+      {
+        "name": "integrity_tier",
+        "type": "TEXT"
+      },
+      {
+        "name": "technical_score",
+        "type": "REAL"
+      },
+      {
+        "name": "ml_score",
+        "type": "REAL"
+      },
+      {
+        "name": "entry_thesis_score",
+        "type": "REAL"
+      },
+      {
+        "name": "exit_thesis_score",
+        "type": "REAL"
+      },
+      {
+        "name": "trailing_stop_activated",
+        "type": "INTEGER"
+      },
+      {
+        "name": "scale_out_triggered",
+        "type": "INTEGER"
+      },
+      {
+        "name": "funding_collected",
+        "type": "REAL"
+      },
+      {
+        "name": "maker_rebate",
+        "type": "REAL"
+      },
+      {
+        "name": "candidate_id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "scan_id",
+        "type": "TEXT"
+      },
+      {
+        "name": "raw_scanner_symbol",
+        "type": "TEXT"
+      },
+      {
+        "name": "base_asset",
+        "type": "TEXT"
+      },
+      {
+        "name": "executed_symbol",
+        "type": "TEXT"
+      },
+      {
+        "name": "route_type",
+        "type": "TEXT"
+      },
+      {
+        "name": "setup_family",
+        "type": "TEXT"
+      },
+      {
+        "name": "setup_score",
+        "type": "REAL"
+      },
+      {
+        "name": "tv_profile_name",
+        "type": "TEXT"
+      },
+      {
+        "name": "tv_signal_age_sec",
+        "type": "REAL"
+      },
+      {
+        "name": "tv_htf_bias",
+        "type": "TEXT"
+      },
+      {
+        "name": "tv_veto_state",
+        "type": "TEXT"
+      },
+      {
+        "name": "reconstructed",
+        "type": "INTEGER"
+      }
+    ]
+  },
+  "trade_features": {
+    "count": 0,
+    "columns": [
+      {
+        "name": "id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "trade_id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "ts",
+        "type": "REAL"
+      },
+      {
+        "name": "symbol",
+        "type": "TEXT"
+      },
+      {
+        "name": "direction",
+        "type": "TEXT"
+      },
+      {
+        "name": "features_json",
+        "type": "TEXT"
+      }
+    ]
+  },
+  "trade_integrity": {
+    "count": 0,
+    "columns": [
+      {
+        "name": "id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "trade_id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "close_order_id",
+        "type": "TEXT"
+      },
+      {
+        "name": "tier",
+        "type": "TEXT"
+      },
+      {
+        "name": "reason",
+        "type": "TEXT"
+      },
+      {
+        "name": "source_check",
+        "type": "TEXT"
+      },
+      {
+        "name": "created_at",
+        "type": "TEXT"
+      },
+      {
+        "name": "notes",
+        "type": "TEXT"
+      }
+    ]
+  },
+  "trades": {
+    "count": 4,
+    "columns": [
+      {
+        "name": "id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "ts",
+        "type": "REAL"
+      },
+      {
+        "name": "strategy",
+        "type": "TEXT"
+      },
+      {
+        "name": "broker",
+        "type": "TEXT"
+      },
+      {
+        "name": "symbol",
+        "type": "TEXT"
+      },
+      {
+        "name": "action",
+        "type": "TEXT"
+      },
+      {
+        "name": "order_type",
+        "type": "TEXT"
+      },
+      {
+        "name": "qty",
+        "type": "REAL"
+      },
+      {
+        "name": "price",
+        "type": "REAL"
+      },
+      {
+        "name": "value_usd",
+        "type": "REAL"
+      },
+      {
+        "name": "fee_usd",
+        "type": "REAL"
+      },
+      {
+        "name": "pnl_usd",
+        "type": "REAL"
+      },
+      {
+        "name": "paper",
+        "type": "INTEGER"
+      },
+      {
+        "name": "order_id",
+        "type": "TEXT"
+      },
+      {
+        "name": "notes",
+        "type": "TEXT"
+      },
+      {
+        "name": "lane",
+        "type": "TEXT"
+      },
+      {
+        "name": "won",
+        "type": "INTEGER"
+      },
+      {
+        "name": "source",
+        "type": "TEXT"
+      },
+      {
+        "name": "pnl_pct",
+        "type": "REAL"
+      },
+      {
+        "name": "contract_side",
+        "type": "TEXT"
+      },
+      {
+        "name": "forecast_yes_prob",
+        "type": "REAL"
+      },
+      {
+        "name": "model_prob_gfs",
+        "type": "REAL"
+      },
+      {
+        "name": "model_prob_ecmwf",
+        "type": "REAL"
+      },
+      {
+        "name": "weather_mode",
+        "type": "TEXT"
+      },
+      {
+        "name": "forecast_hours_to_resolution",
+        "type": "REAL"
+      }
+    ]
+  },
+  "tv_signals": {
+    "count": 0,
+    "columns": [
+      {
+        "name": "id",
+        "type": "INTEGER"
+      },
+      {
+        "name": "ts",
+        "type": "REAL"
+      },
+      {
+        "name": "symbol",
+        "type": "TEXT"
+      },
+      {
+        "name": "action_raw",
+        "type": "TEXT"
+      },
+      {
+        "name": "direction",
+        "type": "TEXT"
+      },
+      {
+        "name": "htf_bias",
+        "type": "TEXT"
+      },
+      {
+        "name": "price",
+        "type": "REAL"
+      },
+      {
+        "name": "tf_min",
+        "type": "TEXT"
+      },
+      {
+        "name": "indicator_name",
+        "type": "TEXT"
+      },
+      {
+        "name": "profile_name",
+        "type": "TEXT"
+      },
+      {
+        "name": "strength",
+        "type": "TEXT"
+      },
+      {
+        "name": "signal_desc",
+        "type": "TEXT"
+      },
+      {
+        "name": "secret_validated",
+        "type": "INTEGER"
+      },
+      {
+        "name": "raw_payload_json",
+        "type": "TEXT"
+      }
+    ]
+  },
+  "weather_model_weights": {
+    "count": 0,
+    "columns": [
+      {
+        "name": "date",
+        "type": "TEXT"
+      },
+      {
+        "name": "category",
+        "type": "TEXT"
+      },
+      {
+        "name": "gfs_weight",
+        "type": "REAL"
+      },
+      {
+        "name": "ecmwf_weight",
+        "type": "REAL"
+      },
+      {
+        "name": "penny_threshold",
+        "type": "REAL"
+      },
+      {
+        "name": "running_brier",
+        "type": "REAL"
+      }
+    ]
+  }
+}

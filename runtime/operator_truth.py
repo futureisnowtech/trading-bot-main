@@ -367,9 +367,18 @@ def get_weather_learning_status(*, db_path: str = DB_PATH) -> dict:
 
 def _is_weather_ticker(ticker: str) -> bool:
     try:
+        from data.kalshi_weather_monitor import STATIONS, resolve_weather_city_key
         from forecast.weather_contracts import weather_mode_for_ticker
-
-        return weather_mode_for_ticker(str(ticker or "")) is not None
+        
+        mode = weather_mode_for_ticker(ticker)
+        if mode is None:
+            return False
+            
+        city_key = resolve_weather_city_key(ticker)
+        if city_key is None or city_key not in STATIONS:
+            return False
+            
+        return True
     except Exception:
         token = str(ticker or "").upper()
         return any(

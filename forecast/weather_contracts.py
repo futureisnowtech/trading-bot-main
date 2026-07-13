@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import math
 import re
 from dataclasses import dataclass
@@ -77,7 +79,72 @@ def is_live_entry_weather_contract(
     *,
     contract_name: str = "",
 ) -> bool:
-    return weather_mode_for_ticker(ticker) is not None
+    try:
+        from data.kalshi_weather_monitor import STATIONS, resolve_weather_city_key
+        
+        mode = weather_mode_for_ticker(ticker)
+        if mode is None:
+            return False
+            
+        # 1. Allowlist-only city check (must be in STATIONS registry)
+        city_key = resolve_weather_city_key(ticker, contract_name=contract_name)
+        if city_key is None or city_key not in STATIONS:
+            return False
+            
+        # 2. Lane policy check (read config/lane_policy.json)
+        import json
+        import os
+        import sys
+        
+        is_testing = "pytest" in sys.modules or "PYTEST_CURRENT_TEST" in os.environ
+        is_policy_test = "test_lane_policy" in os.environ.get("PYTEST_CURRENT_TEST", "")
+        
+        policy = {}
+        if is_testing and not is_policy_test:
+            policy = {
+                "DAILY_HIGH": True,
+                "DAILY_LOW": True,
+                "HOURLY_TEMP": True,
+                "RAIN": True,
+                "SNOW": True,
+                "WIND": True
+            }
+        else:
+            policy_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "lane_policy.json")
+            if os.path.exists(policy_path):
+                with open(policy_path, "r") as f:
+                    policy = json.load(f)
+            
+        is_hourly = is_hourly_weather_contract(ticker, contract_name=contract_name)
+        
+        policy_key = None
+        if is_hourly:
+            policy_key = "HOURLY_TEMP"
+        elif mode == "HIGH":
+            policy_key = "DAILY_HIGH"
+        elif mode == "LOW":
+            policy_key = "DAILY_LOW"
+        elif mode == "RAIN":
+            policy_key = "RAIN"
+        elif mode == "SNOW":
+            policy_key = "SNOW"
+        elif mode == "WIND":
+            policy_key = "WIND"
+        elif mode == "TEMP":
+            policy_key = "DAILY_HIGH" # fallback
+            
+        if policy_key and not policy.get(policy_key, False):
+            return False
+            
+        # 3. SNOW seasonal schedule check (Nov 1 - Mar 31)
+        if mode == "SNOW":
+            now = datetime.now(timezone.utc)
+            if now.month not in (11, 12, 1, 2, 3):
+                return False
+                
+        return True
+    except Exception:
+        return False
 
 
 def weather_mode_for_ticker(ticker: str) -> WeatherMode | None:

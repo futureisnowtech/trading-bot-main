@@ -1344,6 +1344,7 @@ def test_check_strike_consistency_allows_same_family_different_event_slots():
 def test_check_strike_consistency_blocks_same_event_slot_same_side():
     import forecast.strategy_engine as se
 
+    # 1. Different contract, same slot: allowed under v20 (distribution spreads)
     allowed, reason = se.check_strike_consistency(
         "KXTEMPNYCH-26JUN1711-T76.99",
         "YES",
@@ -1354,9 +1355,21 @@ def test_check_strike_consistency_blocks_same_event_slot_same_side():
             }
         ],
     )
+    assert allowed is True
 
+    # 2. Exact same contract, same side: blocked (same-side-same-contract ban)
+    allowed, reason = se.check_strike_consistency(
+        "KXTEMPNYCH-26JUN1711-T76.99",
+        "YES",
+        [
+            {
+                "local_symbol": "KXTEMPNYCH-26JUN1711-T76.99",
+                "side": "YES",
+            }
+        ],
+    )
     assert allowed is False
-    assert "bracket_overlap_veto" in reason
+    assert "duplicate_contract" in reason
 
 
 def test_strategy_engine_allows_same_family_across_different_event_slots(monkeypatch):
@@ -1431,7 +1444,7 @@ def test_strategy_engine_allows_same_family_across_different_event_slots(monkeyp
     assert all(item["result"].econ_approved for item in results)
 
 
-def test_strategy_engine_hub_cap_uses_thirty_percent_with_forty_dollar_floor(monkeypatch):
+def test_strategy_engine_variance_budget_veto(monkeypatch):
     from forecast.market_snapshot import MarketSnapshot
     import forecast.strategy_engine as se
 
@@ -1487,4 +1500,4 @@ def test_strategy_engine_hub_cap_uses_thirty_percent_with_forty_dollar_floor(mon
         ],
     )
 
-    assert results[0]["result"].veto_reason == "hub_exposure_cap_reached (103.5/40.0)"
+    assert "variance_budget_veto" in results[0]["result"].veto_reason

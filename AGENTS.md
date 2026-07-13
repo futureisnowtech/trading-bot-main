@@ -35,6 +35,8 @@ This repository is now the active Kalshi-only execution tree.
 - No automatic resume after a halt.
 - No inference-based learning labels.
 - No broad rewrites of weather execution logic without proof coverage.
+- Covariance Netting: Enforced PSD-shrinkage correlation covariance engine with disjoint bracket covariance limit set at (0.08 * B)^2.
+- Continuous Kelly Sizing: Log-utility objective routing maker/taker dynamically with ceiled continuous fee model and favorite scaler.
 
 ## Key Files
 

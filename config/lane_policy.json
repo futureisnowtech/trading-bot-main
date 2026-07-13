@@ -1,0 +1,8 @@
+{
+  "DAILY_HIGH": true,
+  "DAILY_LOW": true,
+  "HOURLY_TEMP": false,
+  "RAIN": false,
+  "SNOW": false,
+  "WIND": false
+}

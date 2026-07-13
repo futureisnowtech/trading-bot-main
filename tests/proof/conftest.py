@@ -83,7 +83,12 @@ def proof_runtime(tmp_path, monkeypatch) -> ProofRuntime:
     monkeypatch.setattr(config, "DB_PATH", str(db_path), raising=False)
     monkeypatch.setattr(config, "CSV_LOG_DIR", str(csv_dir), raising=False)
     monkeypatch.setattr(config, "ACCOUNT_SIZE", 5_000.0, raising=False)
+    monkeypatch.setattr(config, "WEATHER_CACHE_ROOT", str(logs_dir), raising=False)
     monkeypatch.setattr(config, "False", True, raising=False)
+    
+    import data.kalshi_weather_monitor as wm
+    monkeypatch.setattr(wm, "_WATERMARKS_FILE", str(logs_dir / "weather_watermarks.json"), raising=False)
+    monkeypatch.setattr(wm, "_WEATHER_SNAPSHOT_FILE", str(logs_dir / "weather_snapshot.json"), raising=False)
 
     existing_conn = getattr(trade_logger, "_DB_CONN", None)
     if existing_conn is not None:

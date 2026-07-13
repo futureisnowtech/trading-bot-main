@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 
-def test_intraday_payload_tracks_daily_watermarks_by_city_day():
+def test_intraday_payload_tracks_daily_watermarks_by_city_day(proof_runtime):
     import data.kalshi_weather_monitor as wm
 
     watermarks: dict[str, float] = {}
@@ -31,7 +31,7 @@ def test_intraday_payload_tracks_daily_watermarks_by_city_day():
     assert watermarks[f"LAX|{city_day}|precip_total"] == 0.12
 
 
-def test_intraday_payload_deduplicates_metar_hourly_precip_by_observation_time():
+def test_intraday_payload_deduplicates_metar_hourly_precip_by_observation_time(proof_runtime):
     import data.kalshi_weather_monitor as wm
 
     watermarks: dict[str, float] = {}

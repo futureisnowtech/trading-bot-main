@@ -61,7 +61,7 @@ from runtime.release_gate import (
 )
 from runtime.storage_guard import runtime_storage_status
 
-REMOTE_HOST = "64.225.20.38"
+REMOTE_HOST = "157.245.15.40"
 REMOTE_PORT = "2222"
 REMOTE_USER = "algo-runner"
 REMOTE_PROJECT_DIR = "/home/algo-runner/bot"

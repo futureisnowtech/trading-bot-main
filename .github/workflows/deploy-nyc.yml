@@ -148,11 +148,11 @@ jobs:
       - name: Seed known_hosts
         run: |
           mkdir -p ~/.ssh
-          ssh-keyscan -p 2222 64.225.20.38 >> ~/.ssh/known_hosts
+          ssh-keyscan -p 2222 157.245.15.40 >> ~/.ssh/known_hosts
 
       - name: Preflight remote reachability
         run: |
-          ssh -o BatchMode=yes -p 2222 algo-runner@64.225.20.38 'echo NYC preflight OK'
+          ssh -o BatchMode=yes -p 2222 algo-runner@157.245.15.40 'echo NYC preflight OK'
 
       - name: Deploy exact authored SHA
         run: |
@@ -162,12 +162,12 @@ jobs:
       - name: Verify deployed SHA and services
         run: |
           EXPECTED_SHA="$(git rev-parse HEAD)"
-          REMOTE_SHA="$(ssh -o BatchMode=yes -p 2222 algo-runner@64.225.20.38 "awk -F= '/^sha=/{print \$2}' /home/algo-runner/bot/version.txt")"
+          REMOTE_SHA="$(ssh -o BatchMode=yes -p 2222 algo-runner@157.245.15.40 "awk -F= '/^sha=/{print \$2}' /home/algo-runner/bot/version.txt")"
           if [ "$REMOTE_SHA" != "$EXPECTED_SHA" ]; then
             echo "Remote SHA mismatch: expected $EXPECTED_SHA got $REMOTE_SHA"
             exit 1
           fi
-          ssh -o BatchMode=yes -p 2222 algo-runner@64.225.20.38 '
+          ssh -o BatchMode=yes -p 2222 algo-runner@157.245.15.40 '
             docker ps --format "{{.Names}} {{.Status}}" | grep "execution-engine" | grep "Up"
             docker ps --format "{{.Names}} {{.Status}}" | grep "telegram-oracle" | grep "Up"
           '

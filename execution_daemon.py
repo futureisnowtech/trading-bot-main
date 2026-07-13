@@ -63,9 +63,20 @@ def main() -> int:
     except Exception:
         logger.exception("Embedded Telegram daemon startup failed")
 
+    from datetime import datetime, timezone
+    from forecast.firewall import reset_daily_flag
+    last_utc_day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
     try:
         while True:
             cycle_started = time.time()
+            current_utc_day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            if current_utc_day != last_utc_day:
+                try:
+                    reset_daily_flag()
+                    last_utc_day = current_utc_day
+                except Exception:
+                    logger.exception("Failed to reset daily firewall flag at UTC day boundary")
             try:
                 try:
                     maintain_runtime_storage()

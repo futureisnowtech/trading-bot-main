@@ -79,7 +79,7 @@ For every formula, function, or parameter modification you review or write, you 
 
 2. **DISCRETE CLOB REALITY (No Academic Approximations)**
    - **The Check:** Are you using continuous curves for discrete reality?
-   - **The Rule:** Kalshi is a discrete CLOB. You cannot buy 1.5 contracts. You cannot pay a parabolic fee curve. You MUST use explicit discrete tier logic for fees (<=10c: 1c, 11c-20c: 2c, >20c: 7c). You MUST cast final execution quantities with `int()`. You MUST evaluate Expected Value (EV) strictly against the pessimistic `ask_price`, never the `mid_price`.
+   - **The Rule:** Kalshi is a discrete CLOB. You cannot buy 1.5 contracts. You MUST use the official ceiled continuous fee model: `fee(p, n, r) = ceil(r * n * p * (1-p) * 100) / 100 / n`. You MUST cast final execution quantities with `int()`. You MUST evaluate Expected Value (EV) strictly against the pessimistic `ask_price` (or routed maker `bid_price`), never the `mid_price`.
 
 3. **THERMODYNAMIC COVARIANCE & NETTING**
    - **The Check:** Are you prematurely converting exposures to absolute values before netting hedges?

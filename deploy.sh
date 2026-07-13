@@ -4,7 +4,7 @@
 # -----------------------------------------------------------------------------
 set -euo pipefail
 
-NYC_IP="64.225.20.38"
+NYC_IP="157.245.15.40"
 NYC_PORT="2222"
 NYC_USER="algo-runner"
 PROJECT_DIR="/home/${NYC_USER}/bot"
@@ -229,7 +229,7 @@ except Exception:
 raise SystemExit(1)
 PYEOF
     then
-        echo "  Cockpit ready on http://64.225.20.38:8501"
+        echo "  Cockpit ready on http://157.245.15.40:8501"
         COCKPIT_OK=1
         break
     fi
@@ -299,7 +299,7 @@ manifest = {
     "branch": "${BRANCH}",
     "deployed_at_utc": "${DEPLOY_UTC}",
     "services": ["execution-engine", "kalshi-cockpit"],
-    "cockpit_url": "http://64.225.20.38:8501",
+    "cockpit_url": "http://157.245.15.40:8501",
 }
 with open("${PROJECT_DIR}/deploy_manifest.json", "w") as f:
     json.dump(manifest, f, indent=2)
@@ -325,7 +325,7 @@ runtime_dir.mkdir(parents=True, exist_ok=True)
             "branch": "${BRANCH}",
             "deployed_at_utc": "${DEPLOY_UTC}",
             "services": ["execution-engine", "kalshi-cockpit"],
-            "cockpit_url": "http://64.225.20.38:8501",
+            "cockpit_url": "http://157.245.15.40:8501",
         },
         indent=2,
     ),
@@ -348,4 +348,4 @@ echo "  SHA deployed : ${LOCAL_SHA}"
 echo "  Branch       : ${BRANCH}"
 echo "  Deploy UTC   : ${DEPLOY_UTC}"
 echo "  Server       : ${NYC_USER}@${NYC_IP}:${PROJECT_DIR}"
-echo "  Cockpit URL  : http://64.225.20.38:8501"
+echo "  Cockpit URL  : http://157.245.15.40:8501"

@@ -166,13 +166,17 @@ KALSHI_MAX_USD_PER_POSITION: float = 40.0  # Hard Ceiling
 KALSHI_MIN_PRICE: float = 0.08
 KALSHI_MAX_SIGMA: float = 2.8
 KALSHI_MAX_SPREAD_RATIO: float = 0.35
-KALSHI_DATA_FRESHNESS_MINUTES: int = 180
+KALSHI_DATA_FRESHNESS_MINUTES_HOURLY: int = 25   # SPEC §4.5
+KALSHI_DATA_FRESHNESS_MINUTES_DAILY:  int = 90   # SPEC §4.5
+KALSHI_DATA_FRESHNESS_MINUTES: int = 90  # Legacy fallback
 KALSHI_TAKER_FEE_RATE: float = float(os.getenv("KALSHI_TAKER_FEE_RATE", "0.07"))
 KALSHI_MAKER_FEE_RATE: float = float(os.getenv("KALSHI_MAKER_FEE_RATE", "0.0175"))
 KALSHI_FEE_PER_CONTRACT: float = float(
     os.getenv("KALSHI_FEE_PER_CONTRACT", str(KALSHI_TAKER_FEE_RATE))
 )  # Legacy fallback only
 KALSHI_MAX_FEE_DRAG_PCT: float = 0.30
+KALSHI_MAX_SPREAD_DOLLARS: float = 0.12  # SPEC §5.4c — quote coherence gate (dollars, not ratio)
+KALSHI_MIN_ENTRY_PRICE: float = 0.30     # SPEC §2.6 — hard entry price floor; deletes 0.02/0.03 carve-outs
 KALSHI_KELLY_CAP: float = 0.10
 KALSHI_MAX_RISK_PER_EVENT_PCT: float = 0.015
 KALSHI_EXIT_MODEL_INVALIDATION_DELTA: float = float(
@@ -242,6 +246,7 @@ DB_PATH: str = _resolve_runtime_child("DB_PATH", "trades.db")
 CSV_LOG_DIR: str = _resolve_runtime_child("CSV_LOG_DIR", "csv")
 BOT_LOG_PATH: str = _resolve_runtime_child("BOT_LOG_PATH", "bot.log")
 FORECAST_LOG_PATH: str = _resolve_runtime_child("FORECAST_LOG_PATH", "forecast.log")
+WEATHER_CACHE_ROOT: str = os.getenv("WEATHER_CACHE_ROOT", RUNTIME_ROOT)
 MACRO_CACHE_FILE: str = _resolve_runtime_child(
     "MACRO_CACHE_FILE", "cached_macro_regime.json"
 )

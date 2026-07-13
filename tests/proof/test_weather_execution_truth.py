@@ -167,8 +167,8 @@ def test_hourly_between_contracts_are_not_blanket_banned(monkeypatch):
 
     passes, side, prob, factors, *_ = se._strategy_weather_details(
         "KXHIGHTATL-26JUN1711-B83.5",
-        ask_yes=0.24,
-        ask_no=0.76,
+        ask_yes=0.32,
+        ask_no=0.68,
         hours_to_res=0.8,
         contract_name="Will the hourly temp in Atlanta be 83-84° at 11 AM on Jun 17, 2026?",
         strike=83.5,
@@ -338,8 +338,8 @@ def test_rain_lane_allows_sub_fifteen_cent_entries_when_above_rain_floor(monkeyp
         bars_30m=[],
         bars_1h=[],
         bars_4h=[],
-        yes_quote=_quote(0.08, 0.02, now_ts),
-        no_quote=_quote(0.92, 0.02, now_ts),
+        yes_quote=_quote(0.32, 0.02, now_ts),
+        no_quote=_quote(0.68, 0.02, now_ts),
         bankroll=100.0,
     )
 
@@ -1101,6 +1101,11 @@ def test_contract_observed_weather_data_prefers_intraday_for_current_local_day(m
         "_parse_contract_local_date",
         lambda *args, **kwargs: local_today,
     )
+    monkeypatch.setattr(
+        wm,
+        "_station_settlement_date",
+        lambda timezone_name: local_today,
+    )
 
     observed = wm.get_contract_observed_weather_data(
         "KXHIGHLAX-30JUN26-T75",
@@ -1127,6 +1132,11 @@ def test_contract_observed_weather_data_backfills_prior_day_from_archive(monkeyp
         wm,
         "_parse_contract_local_date",
         lambda *args, **kwargs: prior_day,
+    )
+    monkeypatch.setattr(
+        wm,
+        "_station_settlement_date",
+        lambda timezone_name: local_today,
     )
     monkeypatch.setattr(
         wm,

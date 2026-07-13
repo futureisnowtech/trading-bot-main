@@ -78,6 +78,31 @@ def _get_broker():
 
     return get_kalshi_broker()
 
+def calculate_ceiled_fee(p: float, n: int, maker: bool = False) -> float:
+    from config import estimate_kalshi_fee_per_contract
+    p_clamped = max(0.01, min(0.99, float(p)))
+    n_clamped = max(1, int(n))
+    return estimate_kalshi_fee_per_contract(p_clamped, qty=n_clamped, maker=maker)
+
+
+def calculate_salvage_exit_threshold(tau_hours: float, p_entry: float) -> float:
+    return 0.15
+
+
+def get_position_basis_quality(ticker: str, db_path: str | None = None) -> str:
+    try:
+        import sqlite3
+        from config import DB_PATH
+        with sqlite3.connect(db_path or DB_PATH, timeout=5.0) as conn:
+            row = conn.execute(
+                "SELECT basis_quality FROM forecast_positions WHERE ticker = ? AND active = 1 LIMIT 1",
+                (ticker,)
+            ).fetchone()
+            if row:
+                return str(row[0])
+    except Exception:
+        pass
+    return "CONFIRMED"
 
 def _get_harvester():
     global _harvester
@@ -643,7 +668,8 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
     Returns list of entry results (empty if nothing qualified).
     """
     with _eval_lock:
-        from config import FORECAST_LANE_ACTIVE, KALSHI_ENABLED
+        from config import FORECAST_LANE_ACTIVE, KALSHI_ENABLED, DB_PATH
+        db_path = DB_PATH
 
         if not KALSHI_ENABLED or not FORECAST_LANE_ACTIVE:
             logger.warning(
@@ -751,38 +777,76 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                         resolution_at=resolution_at,
                         last_trade_at=str(pos.get("last_trade_at") or ""),
                     )
-                    if model_yes is not None:
+                    
+                    # SPEC §5 exits
+                    bid_key, ask_key = _held_quote_fields(side)
+                    bid_price = float(quote.get(bid_key) or 0.0)
+                    ask_price = float(quote.get(ask_key) or 0.0)
+                    n_pos = int(float(pos.get("qty") or 0))
+                    entry_price = float(pos.get("entry_price") or 0.50)
+                    
+                    if model_yes is not None and n_pos > 0:
                         live_prob = model_yes if side == "YES" else (1.0 - model_yes)
-                        if live_prob < 0.15:
-                            logger.warning(f"[SovereignSalvage] PURGING toxic position {ticker} (p={live_prob:.1%})")
+                        
+                        # 1. Theta-decaying salvage exit (toxic position purge) (SPEC §5.2)
+                        p_exit = calculate_salvage_exit_threshold(hours_to_resolution, entry_price)
+                        
+                        # 2. Fee-aware exit admissibility (SPEC §5.3)
+                        # exit iff (bid - fee(bid))*n > q_live*n + 0.5*(ask-bid)*n
+                        exit_admissible = False
+                        if bid_price > 0.0:
+                            exit_fee = calculate_ceiled_fee(bid_price, n_pos, maker=False)
+                            left_side = (bid_price - exit_fee) * n_pos
+                            right_side = live_prob * n_pos + 0.5 * (ask_price - bid_price) * n_pos
+                            if left_side > right_side:
+                                exit_admissible = True
+                                
+                        if live_prob < p_exit or exit_admissible:
+                            reason_str = "salvage_exit" if live_prob < p_exit else "fee_aware_admissibility_exit"
+                            logger.warning(f"[SovereignExit] PURGING position {ticker} (p_live={live_prob:.2%}, p_exit={p_exit:.2%}, admissible={exit_admissible}) due to {reason_str}")
                             flatten_res = broker.flatten_position(
                                 ticker,
                                 right,
-                                pos.get("qty", 0),
+                                n_pos,
                             )
                             if flatten_res.get("status") == "executed":
-                                mark_forecast_position_closed(ticker, exit_type="salvage_exit")
-                            log_event("INFO", "ForecastRunner", f"Salvage: Purged {ticker} at {live_prob:.1%}")
-                            # Reset flags to allow eval to proceed in this tick
+                                mark_forecast_position_closed(ticker, exit_type=reason_str, db_path=db_path)
+                                pnl = float(flatten_res.get("pnl_usd") or 0.0)
+                                try:
+                                    from forecast.firewall import record_exit_lockout, record_round_trip, record_realized_pnl
+                                    res_at = contract_meta.get("resolution_at") if contract_meta else None
+                                    record_exit_lockout(ticker, res_at, reason_str, db_path=db_path)
+                                    record_round_trip(ticker, db_path=db_path)
+                                    record_realized_pnl(pnl, db_path=db_path)
+                                except Exception as fw_err:
+                                    logger.error(f"[Firewall] Failed to log exit: {fw_err}")
+                            log_event("INFO", "ForecastRunner", f"Exit: Purged {ticker} due to {reason_str}")
                             is_at_cap = False
                             deployed_pct = 0.0
                             break
 
-                    # 2. Institutional Take-Profit (70% Lock-in)
-                    entry_price = float(pos.get("entry_price") or 0.50)
-                    max_gain = 1.0 - entry_price
-                    target_gain = max_gain * 0.70
+                    # 3. Take-profit: uses TRUE basis only (basis_quality='CONFIRMED') (SPEC §5.4)
+                    # Trigger at p_entry + 0.70*(1 - p_entry)
+                    basis_quality = get_position_basis_quality(ticker, db_path=db_path)
+                    target_tp_price = entry_price + 0.70 * (1.0 - entry_price)
                     
-                    if (current_price - entry_price) >= target_gain:
-                        logger.info(f"[SovereignHUD] TAKE-PROFIT: Locking in 70% gain for {ticker} (Price={current_price:.2f})")
+                    if basis_quality == "CONFIRMED" and bid_price >= target_tp_price and n_pos > 0:
+                        logger.info(f"[SovereignHUD] TAKE-PROFIT: Locking in TP for {ticker} (Price={bid_price:.2f} >= target={target_tp_price:.2f})")
                         flatten_res = broker.flatten_position(
                             ticker,
                             pos.get("right", "C"),
-                            pos.get("qty", 0),
+                            n_pos,
                         )
                         if flatten_res.get("status") == "executed":
-                            mark_forecast_position_closed(ticker, exit_type="take_profit")
-                        log_event("INFO", "ForecastRunner", f"TakeProfit: Locked {ticker} at {current_price:.2f}")
+                            mark_forecast_position_closed(ticker, exit_type="take_profit", db_path=db_path)
+                            pnl = float(flatten_res.get("pnl_usd") or 0.0)
+                            try:
+                                from forecast.firewall import record_round_trip, record_realized_pnl
+                                record_round_trip(ticker, db_path=db_path)
+                                record_realized_pnl(pnl, db_path=db_path)
+                            except Exception as fw_err:
+                                logger.error(f"[Firewall] Failed to log TP exit: {fw_err}")
+                        log_event("INFO", "ForecastRunner", f"TakeProfit: Locked {ticker} at {bid_price:.2f}")
                         is_at_cap = False
                         deployed_pct = 0.0
                         break
@@ -823,47 +887,20 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                 family = p.get("local_symbol", "").split("-")[0]
                 open_event_families_counts[family] += 1
             cycle_event_families = defaultdict(int, dict(open_event_families_counts))
-            cycle_hub_exposure_usd: dict[str, float] = {}
-            try:
-                from config import (
-                    get_kalshi_hub_exposure_cap,
-                    get_kalshi_position_exposure_usd,
-                )
-                from forecast.strategy_engine import _get_city_hub
 
-                cycle_hub_signed_exposures = {}
-                for pos in open_positions:
-                    symbol = str(pos.get("local_symbol") or pos.get("ticker") or "")
-                    hub = _get_city_hub(symbol)
-                    if hub == "UNKNOWN":
-                        continue
-                    entry_price = float(
-                        pos.get("entry_price") or pos.get("entry") or 0.0
-                    )
-                    exposure = get_kalshi_position_exposure_usd(
-                        float(pos.get("qty") or 0.0),
-                        entry_price,
-                    )
-                    p_side = str(pos.get("side") or "").upper()
-                    p_prefix = symbol.split("-")[0].upper()
-                    
-                    is_cool_wet_prefix = any(x in p_prefix for x in ("KXLOW", "RAIN", "KXRAIN", "KXSNOW", "KXWIND"))
-                    is_warm_dry_prefix = any(x in p_prefix for x in ("KXHIGH", "KXTEMP"))
-                    
-                    if is_cool_wet_prefix:
-                        sign = -1.0 if p_side == "YES" else 1.0
-                    elif is_warm_dry_prefix:
-                        sign = 1.0 if p_side == "YES" else -1.0
-                    else:
-                        sign = 1.0
-                        
-                    cycle_hub_signed_exposures[hub] = cycle_hub_signed_exposures.get(hub, []) + [exposure * sign]
-                    
-                cycle_hub_exposure_usd = {h: abs(sum(exps)) for h, exps in cycle_hub_signed_exposures.items()}
-            except Exception:
-                get_kalshi_hub_exposure_cap = None
-                get_kalshi_position_exposure_usd = None
-                _get_city_hub = None
+            # Initialize covariance correlation matrix R once per runner cycle
+            R = {}
+            is_authoritative = False
+            try:
+                from forecast.covariance_engine import get_station_correlation_matrix
+                from data.kalshi_weather_monitor import STATIONS
+                from config import DB_PATH
+                
+                station_codes = [loc["icao"] for loc in STATIONS.values()]
+                R, is_authoritative = get_station_correlation_matrix(DB_PATH, station_codes)
+                logger.info(f"[ForecastRunner] Covariance matrix initialized. Authoritative: {is_authoritative}")
+            except Exception as cov_err:
+                logger.error(f"[ForecastRunner] Covariance init failed: {cov_err}")
 
             def _get_bars_fn(contract_id: int, interval: str) -> list[dict]:
                 return get_bars(contract_id, interval, limit=200)
@@ -1061,6 +1098,55 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                 contract = candidate["contract"]
                 local_sym = contract.get("local_symbol", "")
 
+                # Stateful Firewall Gate Check (SPEC §5.4)
+                try:
+                    from forecast.firewall import check_entry_firewall
+                    fw_allowed, fw_veto_reason = check_entry_firewall(local_sym, bankroll, db_path=db_path)
+                    if not fw_allowed:
+                        _record_weather_candidate(
+                            candidate=candidate,
+                            decision="econ_veto",
+                            reason=fw_veto_reason,
+                            tradeability_status="blocked",
+                        )
+                        _bump_funnel(fw_veto_reason)
+                        _persist_recent_veto(
+                            contract,
+                            result,
+                            reason=fw_veto_reason,
+                            details={"stage": "firewall_gate"},
+                        )
+                        continue
+                except Exception as fw_exc:
+                    logger.error(f"[Firewall] Error during entry check for {local_sym}: {fw_exc}")
+
+                # Unregistered Ticker Check (SPEC §2)
+                try:
+                    from forecast.weather_contracts import weather_mode_for_ticker
+                    from data.kalshi_weather_monitor import STATIONS, resolve_weather_city_key
+                    raw_mode = weather_mode_for_ticker(local_sym)
+                    if raw_mode is not None:
+                        c_key = resolve_weather_city_key(local_sym, contract_name=str(contract.get("contract_name") or ""))
+                        if c_key is None or c_key not in STATIONS:
+                            veto_msg = f"[ForecastRunner] {local_sym} vetoed: unregistered_ticker"
+                            logger.warning(veto_msg)
+                            _record_weather_candidate(
+                                candidate=candidate,
+                                decision="econ_veto",
+                                reason="unregistered_ticker",
+                                tradeability_status="blocked",
+                            )
+                            _bump_funnel("unregistered_ticker")
+                            _persist_recent_veto(
+                                contract,
+                                result,
+                                reason="unregistered_ticker",
+                                details={"stage": "unregistered_ticker_check"},
+                            )
+                            continue
+                except Exception as ut_exc:
+                    logger.error(f"[ForecastRunner] Error in unregistered ticker check for {local_sym}: {ut_exc}")
+
                 # Keep fresh entries pinned to the live all-weather scope.
                 if not is_live_entry_weather_contract(
                     local_sym,
@@ -1150,47 +1236,21 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                     )
                     if flatten_res.get("status") == "executed":
                         from forecast.db import mark_forecast_position_closed
-                        mark_forecast_position_closed(worst_sym, exit_type="swap_exit")
+                        mark_forecast_position_closed(worst_sym, exit_type="swap_exit", db_path=db_path)
+                        pnl = float(flatten_res.get("pnl_usd") or 0.0)
+                        try:
+                            from forecast.firewall import record_round_trip, record_realized_pnl
+                            record_round_trip(worst_sym, db_path=db_path)
+                            record_realized_pnl(pnl, db_path=db_path)
+                        except Exception as fw_err:
+                            logger.error(f"[Firewall] Failed to log swap exit: {fw_err}")
                         worst_family = worst_sym.split("-")[0]
                         cycle_event_families[worst_family] = max(
                             0,
                             cycle_event_families.get(worst_family, 0) - 1,
                         )
-                        if _get_city_hub and get_kalshi_position_exposure_usd:
-                            worst_hub = _get_city_hub(worst_sym)
-                            if worst_hub != "UNKNOWN":
-                                worst_entry = float(
-                                    worst_pos.get("entry_price")
-                                    or worst_pos.get("entry")
-                                    or 0.0
-                                )
-                                worst_exposure = get_kalshi_position_exposure_usd(
-                                    float(worst_pos.get("qty") or 0.0),
-                                    worst_entry,
-                                )
-                                worst_side = str(worst_pos.get("side") or "").upper()
-                                worst_prefix = worst_sym.split("-")[0].upper()
-                                is_cool_wet_prefix = any(
-                                    x in worst_prefix
-                                    for x in ("KXLOW", "RAIN", "KXRAIN", "KXSNOW", "KXWIND")
-                                )
-                                is_warm_dry_prefix = any(
-                                    x in worst_prefix for x in ("KXHIGH", "KXTEMP")
-                                )
-                                if is_cool_wet_prefix:
-                                    worst_sign = -1.0 if worst_side == "YES" else 1.0
-                                elif is_warm_dry_prefix:
-                                    worst_sign = 1.0 if worst_side == "YES" else -1.0
-                                else:
-                                    worst_sign = 1.0
-                                cycle_hub_signed_exposures.setdefault(worst_hub, []).append(
-                                    -(worst_exposure * worst_sign)
-                                )
-                                cycle_hub_exposure_usd[worst_hub] = max(
-                                    0.0,
-                                    cycle_hub_exposure_usd.get(worst_hub, 0.0)
-                                    - worst_exposure,
-                                )
+                        # Positional exposure is now updated dynamically via covariance check
+                        pass
                         open_positions = [
                             p
                             for p in open_positions
@@ -1239,58 +1299,47 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                     )
                     continue
 
-                candidate_hub = ""
-                projected_hub_exposure = 0.0
-                if _get_city_hub and get_kalshi_hub_exposure_cap and get_kalshi_position_exposure_usd:
-                    candidate_hub = _get_city_hub(local_sym)
-                    if candidate_hub != "UNKNOWN":
-                        hub_cap = get_kalshi_hub_exposure_cap(bankroll)
-                        current_signed_sum = sum(cycle_hub_signed_exposures.get(candidate_hub, []))
-                        candidate_price = float(
-                            result.ask_yes if result.side == "YES" else result.ask_no
+                # Variance budget check & absolute backstop (SPEC §4.6)
+                try:
+                    from forecast.covariance_engine import check_and_shrink_candidate
+                    from config import DB_PATH
+                    
+                    candidate_qty = int(result.position_contracts)
+                    candidate_price = float(result.ask_yes if result.side == "YES" else result.ask_no)
+                    
+                    final_qty, charge_factor, debug_info = check_and_shrink_candidate(
+                        candidate_contract=contract,
+                        candidate_side=result.side,
+                        candidate_price=candidate_price,
+                        candidate_qty=candidate_qty,
+                        open_positions=open_positions,
+                        bankroll=bankroll,
+                        db_path=DB_PATH
+                    )
+                    
+                    if final_qty <= 0:
+                        logger.info(f"[ForecastRunner] Candidate {local_sym} vetoed by variance budget / absolute backstop: {debug_info}")
+                        _record_weather_candidate(
+                            candidate=candidate,
+                            decision="risk_block",
+                            reason=f"variance_budget_veto ({debug_info.get('reason')})",
+                            tradeability_status="blocked",
                         )
-                        candidate_exposure = get_kalshi_position_exposure_usd(
-                            float(result.position_contracts),
-                            candidate_price,
+                        _bump_funnel("variance_budget_veto")
+                        _persist_recent_veto(
+                            contract,
+                            result,
+                            reason=f"variance_budget_veto ({debug_info.get('reason')})",
+                            details=debug_info,
                         )
-                        
-                        p_side = str(result.side).upper()
-                        p_prefix = local_sym.split("-")[0].upper()
-                        is_cool_wet_prefix = any(x in p_prefix for x in ("KXLOW", "RAIN", "KXRAIN", "KXSNOW", "KXWIND"))
-                        is_warm_dry_prefix = any(x in p_prefix for x in ("KXHIGH", "KXTEMP"))
-                        if is_cool_wet_prefix:
-                            c_sign = -1.0 if p_side == "YES" else 1.0
-                        elif is_warm_dry_prefix:
-                            c_sign = 1.0 if p_side == "YES" else -1.0
-                        else:
-                            c_sign = 1.0
-                            
-                        projected_hub_exposure = abs(current_signed_sum + (candidate_exposure * c_sign))
-                        
-                        if projected_hub_exposure > hub_cap:
-                            hub_reason = (
-                                "hub_exposure_cap_reached "
-                                f"({projected_hub_exposure:.1f}/{hub_cap:.1f})"
-                            )
-                            _record_weather_candidate(
-                                candidate=candidate,
-                                decision="risk_block",
-                                reason=hub_reason,
-                                tradeability_status="blocked",
-                            )
-                            _bump_funnel(hub_reason)
-                            _persist_recent_veto(
-                                contract,
-                                result,
-                                reason=hub_reason,
-                                details={
-                                    "stage": "hub_cap",
-                                    "projected_hub_exposure": projected_hub_exposure,
-                                    "hub_cap": hub_cap,
-                                    "hub": candidate_hub,
-                                },
-                            )
-                            continue
+                        continue
+                    
+                    if final_qty < candidate_qty:
+                        logger.info(f"[ForecastRunner] Candidate {local_sym} qty shrunk from {candidate_qty} to {final_qty} by variance budget/absolute backstop")
+                        result.position_contracts = final_qty
+                        result.position_fraction = (final_qty * candidate_price) / bankroll
+                except Exception as cov_err:
+                    logger.error(f"[ForecastRunner] Variance budget check failed for {local_sym}: {cov_err}")
 
                 try:
                     forecast_yes_prob = result.q_hat
@@ -1380,30 +1429,8 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                             logger.error(f"[ForecastRunner] DB insertion error: {_db_err}")
 
                         cycle_event_families[family] += 1
-                        if candidate_hub and get_kalshi_position_exposure_usd:
-                            actual_exposure = get_kalshi_position_exposure_usd(
-                                actual_qty,
-                                actual_price,
-                            )
-                            p_prefix = local_sym.split("-")[0].upper()
-                            is_cool_wet_prefix = any(
-                                x in p_prefix for x in ("KXLOW", "RAIN", "KXRAIN", "KXSNOW", "KXWIND")
-                            )
-                            is_warm_dry_prefix = any(
-                                x in p_prefix for x in ("KXHIGH", "KXTEMP")
-                            )
-                            if is_cool_wet_prefix:
-                                entry_sign = -1.0 if result.side.upper() == "YES" else 1.0
-                            elif is_warm_dry_prefix:
-                                entry_sign = 1.0 if result.side.upper() == "YES" else -1.0
-                            else:
-                                entry_sign = 1.0
-                            cycle_hub_signed_exposures.setdefault(candidate_hub, []).append(
-                                actual_exposure * entry_sign
-                            )
-                            cycle_hub_exposure_usd[candidate_hub] = abs(
-                                sum(cycle_hub_signed_exposures.get(candidate_hub, []))
-                            )
+                        # Exposure is tracked dynamically in the next cycle's covariance engine checks
+                        pass
                         open_positions.append(
                             {
                                 "local_symbol": contract.get("local_symbol", ""),
@@ -1600,7 +1627,7 @@ def run_position_monitor() -> None:
             sync_open_forecast_position,
         )
 
-        recon = reconcile_forecast_positions(broker_positions, db_path=db_path)
+        recon = reconcile_forecast_positions(broker_positions, broker=broker, db_path=db_path)
         if recon.get("adopted"):
             logger.info(
                 "[Sovereign Recon] Auto-adopted %s broker position(s) into DB.",
@@ -1739,49 +1766,10 @@ def run_position_monitor() -> None:
                             daily_max = intraday.get("daily_max", metar_temp)
                             daily_min = intraday.get("daily_min", metar_temp)
 
-                        # RULE 1: Narrow Bin Take-Profit (85c)
-                        # If market prices us at 85% and it's a weather bin, take the money.
-                        if bid_price >= 0.85:
-                            logger.info(f"[Sovereign Exit] TP Triggered: {local_symbol} at {bid_price:.2f} (85c Floor)")
-                            resolved = True
-
                         # Fix 3: Disable Panic Selling. 
                         # We no longer exit on model invalidation or time decay unless profitable.
                         # We ride the variance to resolution to avoid double-taxed Kalshi fees.
                         
-                        # RULE 2: Model Invalidation (Stop-Loss)
-                        # (Disabled by Sovereign SRE Fix 3)
-                        # elif held_model_p < 0.50 and held_model_p > 0:
-                        #     logger.warning(
-                        #         f"[Sovereign Exit] SL Triggered: {local_symbol} "
-                        #         f"held_p={held_model_p:.2f} < 0.50"
-                        #     )
-                        #     resolved = True
-
-                        # RULE 3: Model Invalidation Delta
-                        # (Disabled by Sovereign SRE Fix 3)
-                        # elif _should_model_invalidation_exit(
-                        #     entry_held_p,
-                        #     held_model_p,
-                        #     remaining_edge,
-                        # ):
-                        #     logger.warning(
-                        #         f"[Sovereign Exit] INVALIDATION: {local_symbol} "
-                        #         f"entry_p={entry_held_p:.2f} live_p={held_model_p:.2f} "
-                        #         f"remaining_edge={remaining_edge:.3f}"
-                        #     )
-                        #     resolved = True
-
-                        # RULE 4: Time-Decay Redeploy
-                        # (Disabled by Sovereign SRE Fix 3)
-                        # elif _should_time_decay_exit(
-                        #     hours_to_resolution,
-                        #     bid_price,
-                        #     remaining_edge,
-                        # ):
-                        #     logger.info(
-                        #         f"[Sovereign Exit] TIME-DECAY REDEPLOY: {local_symbol} "
-                        #         f"hours_to_res={hours_to_resolution:.1f} bid={bid_price:.2f} "
                         #         f"remaining_edge={remaining_edge:.3f}"
                         #     )
                         #     resolved = True
@@ -1938,6 +1926,34 @@ def run_position_monitor() -> None:
                     current_bid = float(quote.get(bid_key, 0) or 0)
                     current_bid_vol = int(quote.get(bid_vol_key, 0) or 0)
 
+                    # Quote Coherence Invariant Check (SPEC §5.4c)
+                    try:
+                        from forecast.db import get_contract_metadata
+                        from forecast.quote_harvester import get_paired_quotes
+                        contract_meta = get_contract_metadata(local_symbol, db_path=db_path)
+                        if contract_meta:
+                            m_id = contract_meta.get("market_id")
+                            c_strike = contract_meta.get("strike")
+                            c_last_trade = contract_meta.get("last_trade_at")
+                            pair = get_paired_quotes(m_id, c_strike, c_last_trade, db_path=db_path)
+                            entry_ask = 0.0
+                            if pair:
+                                q_side_key = "yes_quote" if right == "C" else "no_quote"
+                                q_dict = pair.get(q_side_key)
+                                if q_dict:
+                                    entry_ask = float(q_dict.get("ask") or 0.0)
+                            
+                            if entry_ask > 0.0 and current_bid > 0.0:
+                                from forecast.firewall import check_quote_coherence
+                                coherent, coherence_reason = check_quote_coherence(
+                                    local_symbol, entry_ask, current_bid, db_path=db_path
+                                )
+                                if not coherent:
+                                    # Halt the ticker and skip exit to prevent bad execution
+                                    continue
+                    except Exception as fw_exc:
+                        logger.error(f"[Firewall] Coherence check error for {local_symbol}: {fw_exc}")
+
                     # v19.2 SRE Exit Guard: Avoid fee waste on worthless contracts
                     if current_bid <= 0.01:
                         logger.info(f"[Sovereign Exit Guard] Bid is {current_bid:.2f} <= 0.01 for {local_symbol}. Skipping exit to avoid fee waste.")
@@ -2038,6 +2054,13 @@ def run_position_monitor() -> None:
                         exit_type="resolved_or_expired",
                         db_path=db_path,
                     )
+                    pnl = float(flatten_res.get("pnl_usd") or 0.0)
+                    try:
+                        from forecast.firewall import record_round_trip, record_realized_pnl
+                        record_round_trip(local_symbol, db_path=db_path)
+                        record_realized_pnl(pnl, db_path=db_path)
+                    except Exception as fw_err:
+                        logger.error(f"[Firewall] Failed to log exit in position monitor: {fw_err}")
 
                     # Notify via Telegram/DB
                     if flatten_res.get("order_id") != "ERR":

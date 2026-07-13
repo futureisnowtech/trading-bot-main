@@ -144,6 +144,14 @@ CREATE TABLE IF NOT EXISTS forecast_resolutions (
     payout_at     TEXT,
     notes         TEXT,
     source        TEXT,
+    q_gfs         REAL,
+    q_ecmwf       REAL,
+    q_hrrr        REAL,
+    q_hat         REAL,
+    sigma_post    REAL,
+    lambda_scaler REAL,
+    fee_rate_applied REAL,
+    basis_quality TEXT DEFAULT 'CONFIRMED',
     UNIQUE(contract_id)
 );
 """
@@ -159,7 +167,8 @@ CREATE TABLE IF NOT EXISTS forecast_positions (
     active       INTEGER NOT NULL DEFAULT 1,
     opened_at    TEXT    NOT NULL,
     closed_at    TEXT,
-    exit_type    TEXT
+    exit_type    TEXT,
+    basis_quality TEXT DEFAULT 'CONFIRMED'
 );
 """
 
@@ -202,6 +211,18 @@ CREATE TABLE IF NOT EXISTS system_cooldowns (
 );
 """
 
+_DDL_NOAA_DAILY_SUMMARIES = """
+CREATE TABLE IF NOT EXISTS noaa_daily_summaries (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    station        TEXT NOT NULL,
+    date           TEXT NOT NULL,
+    temp_max       REAL,
+    temp_min       REAL,
+    precipitation  REAL,
+    UNIQUE(station, date)
+);
+"""
+
 # v19.4 Sovereign Balance: Tighten retention for 31-city scale
 QUOTE_RETENTION_DAYS: int = 7
 BAR_RETENTION_DAYS: int = 30
@@ -220,7 +241,7 @@ def _ensure_column(
 
 
 def init_forecast_db(db_path: str | None = None) -> None:
-    """Create all 6 forecast tables (idempotent). Call once at startup."""
+    """Create all forecast tables + v20 firewall tables (idempotent). Call once at startup."""
     with _conn(db_path) as c:
         # Execute each DDL block; the INDEX statements are separate from CREATE TABLE
         for ddl_block in [
@@ -233,13 +254,33 @@ def init_forecast_db(db_path: str | None = None) -> None:
             _DDL_RECENT_VETOES,
             _DDL_SYSTEM_COOLDOWNS,
             _DDL_WEATHER_MODEL_WEIGHTS,
+            _DDL_NOAA_DAILY_SUMMARIES,
         ]:
             for stmt in ddl_block.strip().split(";"):
                 stmt = stmt.strip()
                 if stmt:
                     c.execute(stmt)
         _ensure_column(c, "forecast_contracts", "contract_name", "contract_name TEXT")
+        _ensure_column(c, "forecast_positions", "basis_quality", "basis_quality TEXT DEFAULT 'CONFIRMED'")
+        _ensure_column(c, "forecast_resolutions", "q_gfs", "q_gfs REAL")
+        _ensure_column(c, "forecast_resolutions", "q_ecmwf", "q_ecmwf REAL")
+        _ensure_column(c, "forecast_resolutions", "q_hrrr", "q_hrrr REAL")
+        _ensure_column(c, "forecast_resolutions", "q_hat", "q_hat REAL")
+        _ensure_column(c, "forecast_resolutions", "sigma_post", "sigma_post REAL")
+        _ensure_column(c, "forecast_resolutions", "lambda_scaler", "lambda_scaler REAL")
+        _ensure_column(c, "forecast_resolutions", "fee_rate_applied", "fee_rate_applied REAL")
+        _ensure_column(c, "forecast_resolutions", "basis_quality", "basis_quality TEXT DEFAULT 'CONFIRMED'")
         c.commit()
+
+    # v20 SPEC §5.4 — create stateful firewall tables in same DB
+    try:
+        from forecast.firewall import ensure_firewall_tables
+        ensure_firewall_tables(db_path=db_path)
+    except Exception as _fw_err:  # pragma: no cover
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            "[init_forecast_db] Firewall table init failed: %s", _fw_err
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -283,6 +324,7 @@ def sync_open_forecast_position(
     qty: float,
     entry_price: float,
     side: str,
+    basis_quality: str = "CONFIRMED",
     db_path: str | None = None,
 ) -> None:
     from datetime import datetime, timezone
@@ -295,8 +337,8 @@ def sync_open_forecast_position(
         c.execute(
             """
             INSERT INTO forecast_positions
-                (ticker, qty, entry_price, side, category, active, opened_at, closed_at, exit_type)
-            VALUES (?, ?, ?, ?, ?, 1, ?, NULL, NULL)
+                (ticker, qty, entry_price, side, category, active, opened_at, closed_at, exit_type, basis_quality)
+            VALUES (?, ?, ?, ?, ?, 1, ?, NULL, NULL, ?)
             ON CONFLICT(ticker) DO UPDATE SET
                 qty=excluded.qty,
                 entry_price=excluded.entry_price,
@@ -308,16 +350,55 @@ def sync_open_forecast_position(
                     ELSE excluded.opened_at
                 END,
                 closed_at=NULL,
-                exit_type=NULL
+                exit_type=NULL,
+                basis_quality=excluded.basis_quality
             """,
-            (ticker, normalized_qty, entry_price, side, category, now),
+            (ticker, normalized_qty, entry_price, side, category, now, basis_quality),
         )
         c.commit()
+
+
+def _fetch_confirmed_entry_price_from_fills(broker, ticker: str, side: str) -> float | None:
+    """Fetch fills for the ticker from broker with retry/backoff to find a confirmed entry price."""
+    import time
+    if broker is None or not hasattr(broker, "_request"):
+        return None
+        
+    backoffs = [0.5, 1.0, 2.0]
+    for attempt, delay in enumerate(backoffs):
+        try:
+            resp = broker._request("GET", "/trade-api/v2/portfolio/fills", params={"ticker": ticker, "limit": 100})
+            fills = resp.get("fills") or []
+            if fills:
+                target_side = side.lower()
+                matching_fills = [
+                    f for f in fills 
+                    if str(f.get("side")).lower() == target_side
+                ]
+                if matching_fills:
+                    total_cost = 0.0
+                    total_qty = 0.0
+                    for f in matching_fills:
+                        try:
+                            # price in cents
+                            p = float(f.get("price") or 0.0) / 100.0
+                            count = float(f.get("count") or 0.0)
+                            total_cost += p * count
+                            total_qty += count
+                        except Exception:
+                            continue
+                    if total_qty > 0:
+                        return total_cost / total_qty
+            time.sleep(delay)
+        except Exception:
+            time.sleep(delay)
+    return None
 
 
 def reconcile_forecast_positions(
     broker_positions: list[dict],
     *,
+    broker = None,
     db_path: str | None = None,
     close_missing_exit_type: str = "manual_exit",
 ) -> dict:
@@ -345,16 +426,36 @@ def reconcile_forecast_positions(
             closed += 1
 
     for ticker, broker_pos in broker_by_ticker.items():
+        raw_price = float(
+            broker_pos.get("entry_price")
+            or broker_pos.get("entry")
+            or 0.0
+        )
+        side = str(broker_pos.get("side") or "YES")
+        
+        basis_quality = "CONFIRMED"
+        entry_price = raw_price
+        
+        if entry_price <= 0.0:
+            resolved_price = _fetch_confirmed_entry_price_from_fills(broker, ticker, side)
+            if resolved_price is not None and resolved_price > 0.0:
+                entry_price = resolved_price
+                basis_quality = "CONFIRMED"
+            else:
+                fallback_mid = float(broker_pos.get("mid") or 0.0)
+                if fallback_mid > 0.0:
+                    entry_price = fallback_mid
+                    basis_quality = "ESTIMATED"
+                else:
+                    entry_price = 0.50
+                    basis_quality = "ESTIMATED"
+
         sync_open_forecast_position(
             ticker=ticker,
             qty=float(broker_pos.get("qty") or 0.0),
-            entry_price=float(
-                broker_pos.get("entry_price")
-                or broker_pos.get("entry")
-                or broker_pos.get("mid")
-                or 0.0
-            ),
-            side=str(broker_pos.get("side") or "YES"),
+            entry_price=entry_price,
+            side=side,
+            basis_quality=basis_quality,
             db_path=db_path,
         )
         if ticker in db_tickers:
@@ -788,14 +889,23 @@ def insert_resolution(
     payout_at: str = "",
     notes: str = "",
     source: str = "kalshi",
+    q_gfs: float | None = None,
+    q_ecmwf: float | None = None,
+    q_hrrr: float | None = None,
+    q_hat: float | None = None,
+    sigma_post: float | None = None,
+    lambda_scaler: float | None = None,
+    fee_rate_applied: float | None = None,
+    basis_quality: str = "CONFIRMED",
     db_path: str | None = None,
 ) -> None:
     with _conn(db_path) as c:
         c.execute(
             """INSERT OR IGNORE INTO forecast_resolutions
                (contract_id, resolved_side, resolved_value, resolved_at,
-                payout_at, notes, source)
-               VALUES (?,?,?,?,?,?,?)""",
+                payout_at, notes, source, q_gfs, q_ecmwf, q_hrrr, q_hat,
+                sigma_post, lambda_scaler, fee_rate_applied, basis_quality)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 contract_id,
                 resolved_side,
@@ -804,6 +914,14 @@ def insert_resolution(
                 payout_at,
                 notes,
                 source,
+                q_gfs,
+                q_ecmwf,
+                q_hrrr,
+                q_hat,
+                sigma_post,
+                lambda_scaler,
+                fee_rate_applied,
+                basis_quality,
             ),
         )
         c.commit()

@@ -616,7 +616,8 @@ def get_logger() -> _TradeLoggerHandle:
 
 
 def _ts() -> str:
-    return datetime.now(pytz.timezone(MARKET_TIMEZONE)).isoformat()
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat()
 
 
 def log_trade(

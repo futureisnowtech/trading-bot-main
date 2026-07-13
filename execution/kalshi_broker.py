@@ -178,6 +178,21 @@ class KalshiBroker:
                     """,
                     (ticker, side.upper()),
                 ).fetchone()
+                
+                if not row:
+                    pos_row = conn.execute(
+                        """
+                        SELECT entry_price, category
+                        FROM forecast_positions
+                        WHERE ticker=?
+                          AND active=1
+                        """,
+                        (ticker,),
+                    ).fetchone()
+                    if pos_row:
+                        payload["entry_price"] = pos_row["entry_price"]
+                        payload["weather_mode"] = pos_row["category"]
+                        return payload
         except Exception:
             return payload
 

@@ -52,6 +52,7 @@ SKIP_DIRS: set[str] = {
     "brain",
     "docs",
     "memory",
+    "research_package",
 }
 
 # Files to skip (reference-only; repo_truth_gate may reference patterns for testing)

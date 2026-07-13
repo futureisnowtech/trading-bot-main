@@ -130,13 +130,67 @@ class KalshiBroker:
             
             if sync_positions:
                 self._sync_positions()
-            return True
         except Exception as e:
-            if not quiet:
-                print(f"[KalshiBroker] Connection error: {e}")
-            log_event("ERROR", "KalshiBroker", f"Connection failed: {e}")
-            self._connected = False
-            return False
+            if SHADOW_EXECUTION:
+                self._connected = True
+                self._private_key = None
+                if not quiet:
+                    print(f"[KalshiBroker] Connected (SHADOW-ONLY FALLBACK) ✅")
+                log_event("INFO", "KalshiBroker", "Connected (SHADOW-ONLY FALLBACK)")
+            else:
+                if not quiet:
+                    print(f"[KalshiBroker] Connection error: {e}")
+                log_event("ERROR", "KalshiBroker", f"Connection failed: {e}")
+                self._connected = False
+                return False
+
+        if SHADOW_EXECUTION:
+            # Initialize virtual balance file
+            balance_dir = os.path.join(REPO_ROOT, "logs")
+            os.makedirs(balance_dir, exist_ok=True)
+            balance_path = os.path.join(balance_dir, "paper_balance.json")
+            from config import ACCOUNT_SIZE
+            if not os.path.exists(balance_path):
+                try:
+                    with open(balance_path, "w", encoding="utf-8") as f:
+                        json.dump({
+                            "balance": float(ACCOUNT_SIZE),
+                            "last_updated": datetime.now(timezone.utc).isoformat()
+                        }, f, indent=2)
+                except Exception as exc:
+                    logger.error(f"[KalshiBroker] Failed to initialize paper balance: {exc}")
+            
+            # Load virtual balance
+            try:
+                with open(balance_path, "r", encoding="utf-8") as f:
+                    balance_data = json.load(f)
+                    self._paper_balance = float(balance_data.get("balance", ACCOUNT_SIZE))
+            except Exception:
+                self._paper_balance = float(ACCOUNT_SIZE)
+                
+            # Load paper positions from SQLite table forecast_positions_paper
+            try:
+                from forecast.db import get_open_forecast_positions_paper
+                db_positions = get_open_forecast_positions_paper(db_path=DB_PATH)
+                self._open_positions.clear()
+                for p in db_positions:
+                    ticker = p["ticker"]
+                    right = "C" if p["side"] == "YES" else "P"
+                    key = f"{ticker}_{right}"
+                    self._open_positions[key] = {
+                        "local_symbol": ticker,
+                        "right": right,
+                        "qty": float(p["qty"]),
+                        "entry": float(p["entry_price"]),
+                        "entry_price": float(p["entry_price"]),
+                        "side": p["side"],
+                        "order_id": "SHADOW_EXISTING",
+                        "entered_at": p["opened_at"]
+                    }
+            except Exception as exc:
+                logger.warning(f"[KalshiBroker] Failed to restore paper positions: {exc}")
+
+        return True
 
     def is_connected(self) -> bool:
         return self._connected and self._private_key is not None
@@ -558,8 +612,7 @@ class KalshiBroker:
         """Execute signed Kalshi V2 request."""
         
         if SHADOW_EXECUTION and method.upper() == "POST" and "orders" in path:
-            print(f"[Kalshi] SHADOW MODE: Blocked {method} {path} body={body}")
-            return {"order_id": f"shadow_{uuid.uuid4().hex[:8]}"}
+            raise RuntimeError("Mutating request blocked by shadow mode firewall")
 
         try:
             ts = str(int(time.time() * 1000))
@@ -1041,6 +1094,9 @@ class KalshiBroker:
         return [self.get_quote(c["local_symbol"]) for c in contracts]
 
     def place_buy_order(self, contract_dict: dict, qty: int, limit_price: float, **kwargs) -> dict:
+        if SHADOW_EXECUTION:
+            return self._execute_shadow_buy(contract_dict, qty, limit_price, **kwargs)
+
         if not self.is_connected():
             raise RuntimeError("[KalshiBroker] Not connected to Kalshi")
 
@@ -1104,6 +1160,17 @@ class KalshiBroker:
 
     def place_sell_order(self, contract_dict: dict, qty: int, limit_price: float, **kwargs) -> dict:
         """SRE FIX: Dedicated Sell Order Handler for Limit Exits."""
+        if SHADOW_EXECUTION:
+            side = kwargs.get("side", "yes").lower()
+            return self._execute_shadow_sell(
+                contract_dict,
+                qty=qty,
+                limit_price=limit_price,
+                side=side,
+                strategy=kwargs.get("strategy", "forecast_exit"),
+                reason=kwargs.get("reason", ""),
+            )
+
         if not self.is_connected():
             raise RuntimeError("[KalshiBroker] Not connected to Kalshi")
 
@@ -1155,6 +1222,35 @@ class KalshiBroker:
         return {"order_id": order_info.get("order_id", "ERR"), "status": status}
 
     def flatten_position(self, local_symbol: str, right: str, qty: int, **kwargs) -> dict:
+        key = f"{local_symbol}_{right}"
+        pos_info = self._open_positions.get(key, {})
+        entry_price = float(pos_info.get("entry_price") or pos_info.get("entry") or 0.50)
+
+        if SHADOW_EXECUTION:
+            quote = self.get_quote(local_symbol)
+            bid_key = "yes_bid" if right == "C" else "no_bid"
+            bid_price = float(quote.get(bid_key) or 0.0)
+            
+            res = self._execute_shadow_sell(
+                {"local_symbol": local_symbol, "right": right},
+                qty=qty,
+                limit_price=bid_price,
+                strategy=kwargs.get("strategy", "forecast_exit"),
+                reason=kwargs.get("reason", "salvage_exit"),
+            )
+            # Calculate PnL for the response
+            pnl_usd = (res.get("price", 0.0) - entry_price) * res.get("qty", 0)
+            current_qty = int(self._open_positions.get(key, {}).get("qty", 0))
+            return {
+                "order_id": res.get("order_id"),
+                "status": res.get("status"),
+                "exit_price": res.get("price", 0.0),
+                "entry_price": entry_price,
+                "pnl_usd": pnl_usd,
+                "filled_qty": res.get("qty", 0),
+                "remaining_position_qty": max(0, current_qty),
+            }
+
         if not self.is_connected():
             raise RuntimeError("[KalshiBroker] Not connected to Kalshi")
         
@@ -1257,6 +1353,16 @@ class KalshiBroker:
         return list(self._open_positions.values())
 
     def get_account_balance(self) -> float:
+        if SHADOW_EXECUTION:
+            balance_path = os.path.join(REPO_ROOT, "logs", "paper_balance.json")
+            try:
+                with open(balance_path, "r", encoding="utf-8") as f:
+                    balance_data = json.load(f)
+                    self._paper_balance = float(balance_data.get("balance", 0.0))
+            except Exception:
+                pass
+            return self._paper_balance
+
         resp = self._request("GET", "/trade-api/v2/portfolio/balance")
         return float(resp.get("balance_dollars", 0))
 
@@ -1293,6 +1399,274 @@ class KalshiBroker:
             if not cursor:
                 break
         return results
+
+    def _execute_shadow_buy(self, contract_dict: dict, qty: int, limit_price: float, **kwargs) -> dict:
+        import math
+        ticker = contract_dict["local_symbol"]
+        right = str(contract_dict.get("right") or "C").upper()
+        side = "YES" if right == "C" else "NO"
+        order_type = kwargs.get("type", "limit").lower()
+        
+        # 1. Fetch live quote
+        try:
+            quote = self.get_quote(ticker)
+        except Exception as exc:
+            logger.error(f"[ShadowBroker] Failed to fetch quote for {ticker}: {exc}")
+            return {"order_id": "ERR", "status": "no_quote"}
+            
+        if not quote:
+            return {"order_id": "ERR", "status": "no_quote"}
+            
+        # 2. Pessimistic fill price & depth
+        if side == "YES":
+            ask = float(quote.get("yes_ask") or 0.0)
+            ask_size = int(float(quote.get("yes_ask_vol") or 0.0))
+            fill_price = ask
+            available_size = ask_size
+        else:
+            ask = float(quote.get("no_ask") or 0.0)
+            ask_size = int(float(quote.get("no_ask_vol") or 0.0))
+            fill_price = ask
+            available_size = ask_size
+            
+        if fill_price <= 0.0:
+            logger.warning(f"[ShadowBroker] No sell depth on quote for {ticker}")
+            return {"order_id": "ERR", "status": "no_depth"}
+            
+        # 3. Clamp quantity to resting size
+        fill_qty = min(int(qty), available_size)
+        if fill_qty <= 0:
+            logger.warning(f"[ShadowBroker] Zero liquidity at ask price for {ticker}")
+            return {"order_id": "ERR", "status": "no_depth"}
+            
+        # 4. Fee calculation
+        fee_usd = estimate_kalshi_order_fee_usd(fill_qty, fill_price)
+        cost_usd = (fill_qty * fill_price) + fee_usd
+        
+        # Lock check
+        balance_path = os.path.join(REPO_ROOT, "logs", "paper_balance.json")
+        try:
+            with open(balance_path, "r", encoding="utf-8") as f:
+                balance_data = json.load(f)
+                self._paper_balance = float(balance_data.get("balance", 0.0))
+        except Exception:
+            pass
+            
+        if cost_usd > self._paper_balance:
+            logger.warning(f"[ShadowBroker] Insufficient virtual funds: cost=${cost_usd:.2f} balance=${self._paper_balance:.2f}")
+            return {"order_id": "ERR", "status": "insufficient_funds"}
+            
+        # 5. Deduct balance
+        self._paper_balance -= cost_usd
+        try:
+            with open(balance_path, "w", encoding="utf-8") as f:
+                json.dump({
+                    "balance": self._paper_balance,
+                    "last_updated": datetime.now(timezone.utc).isoformat()
+                }, f, indent=2)
+        except Exception as exc:
+            logger.error(f"[ShadowBroker] Failed to save paper balance: {exc}")
+            
+        # 6. Add paper position in DB (forecast_positions_paper)
+        order_id = f"shadow_{uuid.uuid4().hex[:8]}"
+        try:
+            from forecast.db import sync_open_forecast_position_paper
+            sync_open_forecast_position_paper(
+                ticker=ticker,
+                qty=fill_qty,
+                entry_price=fill_price,
+                side=side,
+                basis_quality="CONFIRMED",
+                db_path=DB_PATH,
+            )
+        except Exception as exc:
+            logger.error(f"[ShadowBroker] Failed to save position to DB: {exc}")
+            
+        # 7. Update memory cache
+        key = f"{ticker}_{right}"
+        existing = self._open_positions.get(key, {})
+        prior_qty = float(existing.get("qty") or 0.0)
+        prior_entry = float(existing.get("entry_price") or existing.get("entry") or 0.0)
+        blended_entry = fill_price
+        if prior_qty > 0:
+            blended_entry = ((prior_qty * prior_entry) + (fill_qty * fill_price)) / (prior_qty + fill_qty)
+            
+        self._open_positions[key] = {
+            "local_symbol": ticker,
+            "right": right,
+            "qty": prior_qty + fill_qty,
+            "entry": blended_entry,
+            "entry_price": blended_entry,
+            "side": side,
+            "order_id": order_id,
+            "entered_at": existing.get("entered_at") or datetime.now(timezone.utc).isoformat(),
+        }
+        
+        # 8. Log trade in trades table
+        try:
+            log_trade(
+                strategy=kwargs.get("strategy", "forecast_weather"),
+                broker="kalshi",
+                symbol=ticker,
+                action="BUY",
+                order_type=order_type.capitalize(),
+                qty=fill_qty,
+                price=fill_price,
+                fee_usd=fee_usd,
+                order_id=order_id,
+                notes=kwargs.get("reason", "Shadow order entry"),
+                contract_side=side,
+                forecast_yes_prob=kwargs.get("forecast_yes_prob"),
+                model_prob_gfs=kwargs.get("model_prob_gfs"),
+                model_prob_ecmwf=kwargs.get("model_prob_ecmwf"),
+                weather_mode=kwargs.get("weather_mode"),
+                forecast_hours_to_resolution=kwargs.get("forecast_hours_to_resolution"),
+            )
+        except Exception as exc:
+            logger.error(f"[ShadowBroker] Failed to log shadow trade: {exc}")
+            
+        print(f"[ShadowBroker] BUY {fill_qty:g} {ticker} ({side}) @ {fill_price:.4f} | ID={order_id}")
+        
+        return {
+            "order_id": order_id,
+            "status": "executed",
+            "price": fill_price,
+            "qty": fill_qty,
+            "filled_qty": fill_qty,
+            "remaining_order_qty": 0,
+        }
+
+    def _execute_shadow_sell(self, contract_dict: dict, qty: int, limit_price: float, **kwargs) -> dict:
+        ticker = contract_dict["local_symbol"]
+        right = str(contract_dict.get("right") or "C").upper()
+        side = "YES" if right == "C" else "NO"
+        order_type = kwargs.get("type", "limit").lower()
+        key = f"{ticker}_{right}"
+        
+        existing = self._open_positions.get(key)
+        if not existing:
+            logger.warning(f"[ShadowBroker] No open shadow position for {ticker}")
+            return {"order_id": "ERR", "status": "no_position"}
+            
+        current_qty = int(existing["qty"])
+        sell_qty = min(int(qty), current_qty)
+        if sell_qty <= 0:
+            return {"order_id": "ERR", "status": "no_position"}
+            
+        # 1. Fetch live quote
+        try:
+            quote = self.get_quote(ticker)
+        except Exception as exc:
+            logger.error(f"[ShadowBroker] Failed to fetch quote for {ticker}: {exc}")
+            return {"order_id": "ERR", "status": "no_quote"}
+            
+        if not quote:
+            return {"order_id": "ERR", "status": "no_quote"}
+            
+        # 2. Pessimistic fill price & depth
+        if side == "YES":
+            bid = float(quote.get("yes_bid") or 0.0)
+            bid_size = int(float(quote.get("yes_bid_vol") or 0.0))
+            fill_price = bid
+            available_size = bid_size
+        else:
+            bid = float(quote.get("no_bid") or 0.0)
+            bid_size = int(float(quote.get("no_bid_vol") or 0.0))
+            fill_price = bid
+            available_size = bid_size
+            
+        if fill_price <= 0.0:
+            logger.warning(f"[ShadowBroker] No buy depth on quote for {ticker}")
+            return {"order_id": "ERR", "status": "no_depth"}
+            
+        # 3. Clamp quantity to resting size
+        fill_qty = min(sell_qty, available_size)
+        if fill_qty <= 0:
+            logger.warning(f"[ShadowBroker] Zero liquidity at bid price for {ticker}")
+            return {"order_id": "ERR", "status": "no_depth"}
+            
+        # 4. Fee calculation
+        fee_usd = estimate_kalshi_order_fee_usd(fill_qty, fill_price)
+        proceeds_usd = (fill_qty * fill_price) - fee_usd
+        
+        # 5. Add to virtual balance
+        balance_path = os.path.join(REPO_ROOT, "logs", "paper_balance.json")
+        try:
+            with open(balance_path, "r", encoding="utf-8") as f:
+                balance_data = json.load(f)
+                self._paper_balance = float(balance_data.get("balance", 0.0))
+        except Exception:
+            pass
+            
+        self._paper_balance += proceeds_usd
+        try:
+            with open(balance_path, "w", encoding="utf-8") as f:
+                json.dump({
+                    "balance": self._paper_balance,
+                    "last_updated": datetime.now(timezone.utc).isoformat()
+                }, f, indent=2)
+        except Exception as exc:
+            logger.error(f"[ShadowBroker] Failed to save paper balance: {exc}")
+            
+        # 6. Update paper position in DB (forecast_positions_paper)
+        order_id = f"shadow_{uuid.uuid4().hex[:8]}"
+        remaining_qty = current_qty - fill_qty
+        try:
+            if remaining_qty > 0:
+                from forecast.db import sync_open_forecast_position_paper
+                sync_open_forecast_position_paper(
+                    ticker=ticker,
+                    qty=remaining_qty,
+                    entry_price=float(existing["entry"]),
+                    side=side,
+                    basis_quality="CONFIRMED",
+                    db_path=DB_PATH,
+                )
+            else:
+                from forecast.db import mark_forecast_position_closed_paper
+                mark_forecast_position_closed_paper(ticker, exit_type="exit", db_path=DB_PATH)
+        except Exception as exc:
+            logger.error(f"[ShadowBroker] Failed to update position in DB: {exc}")
+            
+        # 7. Update memory cache
+        if remaining_qty > 0:
+            self._open_positions[key]["qty"] = remaining_qty
+        else:
+            self._open_positions.pop(key, None)
+            
+        # 8. Log trade in trades table
+        try:
+            log_trade(
+                strategy=kwargs.get("strategy", "forecast_weather"),
+                broker="kalshi",
+                symbol=ticker,
+                action="SELL",
+                order_type=order_type.capitalize(),
+                qty=fill_qty,
+                price=fill_price,
+                fee_usd=fee_usd,
+                order_id=order_id,
+                notes=kwargs.get("reason", "Shadow order exit"),
+                contract_side=side,
+                forecast_yes_prob=kwargs.get("forecast_yes_prob"),
+                model_prob_gfs=kwargs.get("model_prob_gfs"),
+                model_prob_ecmwf=kwargs.get("model_prob_ecmwf"),
+                weather_mode=kwargs.get("weather_mode"),
+                forecast_hours_to_resolution=kwargs.get("forecast_hours_to_resolution"),
+            )
+        except Exception as exc:
+            logger.error(f"[ShadowBroker] Failed to log shadow trade: {exc}")
+            
+        print(f"[ShadowBroker] SELL {fill_qty:g} {ticker} ({side}) @ {fill_price:.4f} | ID={order_id}")
+        
+        return {
+            "order_id": order_id,
+            "status": "executed",
+            "price": fill_price,
+            "qty": fill_qty,
+            "filled_qty": fill_qty,
+            "remaining_order_qty": 0,
+        }
 
     def disconnect(self) -> None:
         self._connected = False

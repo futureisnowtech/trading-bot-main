@@ -1618,14 +1618,19 @@ def run_position_monitor() -> None:
         broker_positions = broker.get_positions()
         
         # 2. Pull Local DB Expectation and reconcile it to broker reality
-        from config import DB_PATH
+        from config import DB_PATH, SHADOW_EXECUTION
 
         db_path = DB_PATH
-        from forecast.db import (
-            get_open_forecast_positions,
-            reconcile_forecast_positions,
-            sync_open_forecast_position,
-        )
+        if SHADOW_EXECUTION:
+            from forecast.db import (
+                get_open_forecast_positions_paper as get_open_forecast_positions,
+                reconcile_forecast_positions_paper as reconcile_forecast_positions,
+            )
+        else:
+            from forecast.db import (
+                get_open_forecast_positions,
+                reconcile_forecast_positions,
+            )
 
         recon = reconcile_forecast_positions(broker_positions, broker=broker, db_path=db_path)
         if recon.get("adopted"):

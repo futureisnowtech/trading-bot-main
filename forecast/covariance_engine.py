@@ -325,7 +325,7 @@ def calculate_shrinkage_limit(
     limit_var = (0.08 * bankroll) ** 2
     
     # Current portfolio variance
-    var_current = calculate_portfolio_variance(w, Sigma)
+    var_current = calculate_portfolio_variance(w, Sigma[:N, :N])
     if var_current > limit_var:
         return 0.0 # Already over budget
         

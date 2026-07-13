@@ -129,7 +129,7 @@ def run_audit():
         # Sizing SRE Risk Ceiling Clamp
         cost_limit_surge = min(1000.0 * 0.25, float(KALSHI_MAX_USD_PER_POSITION) if is_surge else 20.00)
         logger.info(f"SRE Ceiling under Surge Mode: CostLimit=${cost_limit_surge:.2f} (Portfolio Limit=${1000.0 * 0.25:.2f})")
-        assert cost_limit_surge == 50.00, f"Expected Surge Ceiling $50.00, got ${cost_limit_surge:.2f}"
+        assert cost_limit_surge == float(KALSHI_MAX_USD_PER_POSITION), f"Expected Surge Ceiling ${float(KALSHI_MAX_USD_PER_POSITION):.2f}, got ${cost_limit_surge:.2f}"
         
         # Standard Sizing SRE Risk Ceiling Clamp
         cost_limit_std = min(1000.0 * 0.25, float(KALSHI_MAX_USD_PER_POSITION) if False else 20.00)

@@ -777,7 +777,22 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                         resolution_at=resolution_at,
                         last_trade_at=str(pos.get("last_trade_at") or ""),
                     )
-                    
+                    # Calculate hours_to_resolution
+                    now_utc = datetime.now(timezone.utc)
+                    hours_to_resolution = 0.0
+                    last_trade = str(pos.get("last_trade_at") or (contract_meta.get("last_trade_at") if contract_meta else "") or "")
+                    if last_trade:
+                        try:
+                            from dateutil.parser import parse as date_parse
+                            expiry = date_parse(last_trade)
+                            if expiry.tzinfo is None:
+                                expiry = expiry.replace(tzinfo=timezone.utc)
+                            hours_to_resolution = max(
+                                0.0, (expiry - now_utc).total_seconds() / 3600.0
+                            )
+                        except Exception:
+                            pass
+
                     # SPEC §5 exits
                     bid_key, ask_key = _held_quote_fields(side)
                     bid_price = float(quote.get(bid_key) or 0.0)

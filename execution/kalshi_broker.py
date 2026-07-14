@@ -701,6 +701,29 @@ class KalshiBroker:
 
     def _sync_positions(self) -> None:
         """Sync open positions from Kalshi into local state."""
+        if SHADOW_EXECUTION:
+            try:
+                from forecast.db import get_open_forecast_positions_paper
+                db_positions = get_open_forecast_positions_paper(db_path=DB_PATH)
+                self._open_positions.clear()
+                for p in db_positions:
+                    ticker = p["ticker"]
+                    right = "C" if p["side"] == "YES" else "P"
+                    key = f"{ticker}_{right}"
+                    self._open_positions[key] = {
+                        "local_symbol": ticker,
+                        "right": right,
+                        "qty": float(p["qty"]),
+                        "entry": float(p["entry_price"]),
+                        "entry_price": float(p["entry_price"]),
+                        "side": p["side"],
+                        "order_id": "SHADOW_EXISTING",
+                        "entered_at": p["opened_at"]
+                    }
+            except Exception as exc:
+                logger.warning(f"[KalshiBroker] Failed to restore paper positions: {exc}")
+            return
+
         if not self.is_connected():
             return
         try:

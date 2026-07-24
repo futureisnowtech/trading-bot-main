@@ -83,7 +83,7 @@ def ensure_firewall_tables(db_path: str | None = None) -> None:
     Called from forecast/db.py::init_forecast_db(). SPEC §5.4
     """
     path = str(db_path or DB_PATH)
-    with sqlite3.connect(path) as conn:
+    with sqlite3.connect(path, timeout=30.0) as conn:
         conn.execute(_DDL_FIREWALL_STATE)
         conn.execute(_DDL_FIREWALL_ROUND_TRIPS)
         conn.execute(_DDL_FIREWALL_ROUND_TRIPS_IDX)
@@ -129,7 +129,7 @@ def record_exit_lockout(
     now_utc = datetime.now(timezone.utc).isoformat()
     lockout = str(settlement_time or "")
 
-    with sqlite3.connect(path) as conn:
+    with sqlite3.connect(path, timeout=30.0) as conn:
         conn.execute(
             """
             INSERT INTO firewall_state (ticker, lockout_until, updated_at)
@@ -163,7 +163,7 @@ def check_reentry_lockout(
     now_utc = datetime.now(timezone.utc).isoformat()
 
     try:
-        with sqlite3.connect(path) as conn:
+        with sqlite3.connect(path, timeout=30.0) as conn:
             row = conn.execute(
                 "SELECT lockout_until FROM firewall_state WHERE ticker = ?",
                 (ticker,),
@@ -197,7 +197,7 @@ def record_round_trip(ticker: str, *, db_path: str | None = None) -> None:
     """
     path = str(db_path or DB_PATH)
     now_utc = datetime.now(timezone.utc).isoformat()
-    with sqlite3.connect(path) as conn:
+    with sqlite3.connect(path, timeout=30.0) as conn:
         conn.execute(
             "INSERT INTO firewall_round_trips (ticker, closed_at) VALUES (?, ?)",
             (ticker, now_utc),
@@ -223,7 +223,7 @@ def check_oscillation_breaker(
     ).isoformat()
 
     try:
-        with sqlite3.connect(path) as conn:
+        with sqlite3.connect(path, timeout=30.0) as conn:
             count: int = conn.execute(
                 """
                 SELECT COUNT(*) FROM firewall_round_trips
@@ -251,7 +251,7 @@ def _write_halt_state(ticker: str, reason: str, *, db_path: str | None = None) -
     """Persist halt reason and entries_allowed=0 for a ticker. Internal helper."""
     path = str(db_path or DB_PATH)
     now_utc = datetime.now(timezone.utc).isoformat()
-    with sqlite3.connect(path) as conn:
+    with sqlite3.connect(path, timeout=30.0) as conn:
         conn.execute(
             """
             INSERT INTO firewall_state
@@ -277,7 +277,7 @@ def is_ticker_halted(ticker: str, *, db_path: str | None = None) -> tuple[bool, 
     """
     path = str(db_path or DB_PATH)
     try:
-        with sqlite3.connect(path) as conn:
+        with sqlite3.connect(path, timeout=30.0) as conn:
             row = conn.execute(
                 """
                 SELECT entries_allowed, halted_reason
@@ -357,7 +357,7 @@ def record_realized_pnl(pnl_usd: float, *, db_path: str | None = None) -> None:
     path = str(db_path or DB_PATH)
     day_utc: str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     now_utc: str = datetime.now(timezone.utc).isoformat()
-    with sqlite3.connect(path) as conn:
+    with sqlite3.connect(path, timeout=30.0) as conn:
         conn.execute(
             """
             INSERT INTO firewall_day_pnl (day_utc, realized, updated_at)
@@ -376,7 +376,7 @@ def _get_today_day_loss(db_path: str | None = None) -> float:
     path = str(db_path or DB_PATH)
     day_utc: str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     try:
-        with sqlite3.connect(path) as conn:
+        with sqlite3.connect(path, timeout=30.0) as conn:
             row = conn.execute(
                 "SELECT realized FROM firewall_day_pnl WHERE day_utc = ?",
                 (day_utc,),
@@ -397,7 +397,7 @@ def _get_trailing_30d_mean_daily_edge(db_path: str | None = None) -> float:
         datetime.now(timezone.utc) - timedelta(days=30)
     ).timestamp()
     try:
-        with sqlite3.connect(path) as conn:
+        with sqlite3.connect(path, timeout=30.0) as conn:
             row = conn.execute(
                 """
                 SELECT AVG(daily_pnl) FROM (
@@ -463,7 +463,7 @@ def is_entries_allowed_today(*, db_path: str | None = None) -> tuple[bool, str]:
     """
     path = str(db_path or DB_PATH)
     try:
-        with sqlite3.connect(path) as conn:
+        with sqlite3.connect(path, timeout=30.0) as conn:
             row = conn.execute(
                 """
                 SELECT entries_allowed, halted_reason, updated_at
@@ -495,7 +495,7 @@ def set_entries_blocked(reason: str, *, db_path: str | None = None) -> None:
     """Persist global entries_allowed=False until next UTC day. SPEC §5.4d"""
     path = str(db_path or DB_PATH)
     now_utc: str = datetime.now(timezone.utc).isoformat()
-    with sqlite3.connect(path) as conn:
+    with sqlite3.connect(path, timeout=30.0) as conn:
         conn.execute(
             """
             INSERT INTO firewall_state
@@ -520,7 +520,7 @@ def reset_daily_flag(*, db_path: str | None = None) -> None:
     """
     path = str(db_path or DB_PATH)
     now_utc: str = datetime.now(timezone.utc).isoformat()
-    with sqlite3.connect(path) as conn:
+    with sqlite3.connect(path, timeout=30.0) as conn:
         conn.execute(
             """
             INSERT INTO firewall_state

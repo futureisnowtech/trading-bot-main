@@ -23,12 +23,12 @@ logger = logging.getLogger(__name__)
 def execute_sql(query: str) -> str:
     """
     Safe, read-only SQL execution for the AI agent.
-    Targets the active runtime DB. Available tables: forecast_positions, trades,
-    system_events, api_costs, forecast_markets.
+    Supports SELECT, WITH, and PRAGMA queries.
     """
     q_upper = query.strip().upper()
-    if not q_upper.startswith("SELECT"):
-        return "Error: Only SELECT queries are allowed."
+    valid_start = any(q_upper.startswith(prefix) for prefix in ["SELECT", "WITH", "PRAGMA"])
+    if not valid_start:
+        return "Error: Only read-only SELECT, WITH, or PRAGMA queries are allowed."
 
     forbidden = ["DROP", "DELETE", "UPDATE", "INSERT", "ALTER", "CREATE", "REPLACE"]
     if any(cmd in q_upper for cmd in forbidden):
@@ -55,7 +55,8 @@ def read_file(file_path: str, start_line: Optional[int] = None, end_line: Option
     """Reads a file from the repository. Use start_line and end_line for large files (e.g., logs)."""
     try:
         abs_path = os.path.abspath(file_path)
-        if not abs_path.startswith(os.getcwd()):
+        repo_root = os.path.abspath(REPO_ROOT)
+        if not abs_path.startswith(repo_root) and not abs_path.startswith("/app"):
             return "Error: Access denied. Cannot read files outside of the repository root."
         
         if not os.path.exists(abs_path):
@@ -70,7 +71,7 @@ def read_file(file_path: str, start_line: Optional[int] = None, end_line: Option
             content = "".join(lines[s:e])
         else:
             is_doc = file_path.endswith('.md') or file_path.endswith('.txt')
-            limit = 10000 if is_doc else 2000
+            limit = 10000 if is_doc else 5000
             
             content = "".join(lines[:limit])
             if len(lines) > limit:
@@ -79,6 +80,7 @@ def read_file(file_path: str, start_line: Optional[int] = None, end_line: Option
         return content
     except Exception as e:
         return f"Error reading file: {str(e)}"
+
 
 def list_files(dir_path: str = ".") -> str:
     """Lists files in a directory to help explore the codebase."""
@@ -236,7 +238,7 @@ def run_release_audit(command: str) -> str:
         return f"Error: {str(e)}"
 
 def run_safe_command(command: str) -> str:
-    """Runs restricted shell commands (grep, py_compile, git status, git diff)."""
+    """Runs restricted shell commands (grep, py_compile, git status, git diff, git log, sqlite3, etc)."""
     allowed_exact = {
         "python3 scripts/verify_kalshi_connection.py",
         "python scripts/verify_kalshi_connection.py",
@@ -247,8 +249,8 @@ def run_safe_command(command: str) -> str:
         f"{sys.executable} scripts/release_audit.py --local",
         f"{sys.executable} scripts/release_audit.py --remote",
     }
-    allowed_bases = ["grep", "python3 -m py_compile", "git status", "git diff", "find"]
-    is_allowed = any(command.startswith(base) for base in allowed_bases)
+    allowed_bases = ["grep", "python3 -m py_compile", "git status", "git diff", "git log", "find", "sqlite3", "cat", "head", "tail", "wc", "ls"]
+    is_allowed = any(command.strip().startswith(base) for base in allowed_bases)
 
     try:
         parts = shlex.split(command)
@@ -267,7 +269,8 @@ def run_safe_command(command: str) -> str:
         return "Error: Git metadata is not deployed in this runtime; git commands are unavailable here."
 
     try:
-        result = subprocess.check_output(command, shell=True, stderr=subprocess.STDOUT, timeout=15).decode()
+        result = subprocess.check_output(command, shell=True, stderr=subprocess.STDOUT, timeout=30).decode()
         return result if result else "Success (no output)."
     except Exception as e:
         return f"Error: {str(e)}"
+

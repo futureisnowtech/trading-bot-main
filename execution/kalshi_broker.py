@@ -181,18 +181,9 @@ class KalshiBroker:
                 return False
 
         if config.SHADOW_EXECUTION:
-            # Load virtual balance
-            try:
-                with open(balance_path, "r", encoding="utf-8") as f:
-                    balance_data = json.load(f)
-                    self._paper_balance = float(balance_data.get("balance", ACCOUNT_SIZE))
-            except Exception:
-                self._paper_balance = float(ACCOUNT_SIZE)
-                
-            # Load paper positions from SQLite table forecast_positions_paper
-            self._restore_shadow_positions()
-
+            return self._init_shadow_balance(sync_positions=sync_positions, quiet=quiet)
         return True
+
 
     def is_connected(self) -> bool:
         return self._connected and (self._private_key is not None or config.SHADOW_EXECUTION)

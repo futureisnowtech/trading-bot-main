@@ -71,30 +71,61 @@ def probe_reasoning_model() -> dict:
 
 def get_repo_context() -> str:
     """
-    Builds a rich context for the AI, including the filesystem layout and SQL schema.
+    Builds a rich context for the AI, including dynamic SQL schema, live config parameters, and runtime status.
     """
     context = []
 
     # 1. Canonical Truth (AGENTS.md)
     try:
-        with open("AGENTS.md", "r") as f:
-            context.append("### AGENTS.md (System Architecture)\n" + f.read())
+        if os.path.exists("AGENTS.md"):
+            with open("AGENTS.md", "r") as f:
+                context.append("### AGENTS.md (System Architecture)\n" + f.read())
     except Exception: pass
 
-    # 2. Database Schema
-    db_schema = """
-### DATABASE SCHEMA (logs/trades.db)
-- **forecast_positions**: ticker (TEXT), qty (REAL), entry_price (REAL), side (TEXT), active (INT), opened_at (TEXT)
-- **trades**: ts (TEXT), strategy (TEXT), symbol (TEXT), action (TEXT), qty (REAL), price (REAL), pnl_usd (REAL), broker (TEXT)
-- **system_events**: ts (TEXT), level (TEXT), source (TEXT), message (TEXT)
-- **api_costs**: ts (REAL), module (TEXT), prompt_tokens (INT), completion_tokens (INT), usd_cost (REAL)
-- **forecast_markets**: market_symbol (TEXT), market_name (TEXT), active (INT)
-- **weather_calibration**: ts (TEXT), brier_score (REAL), win_rate (REAL), ensemble_accuracy (REAL), sample_size (INT)
-- **weather_model_skill_state**: segment (TEXT), sample_size (INT), gfs_weight (REAL), ecmwf_weight (REAL), shrinkage (REAL)
-    """
-    context.append(db_schema)
+    # 2. Live Risk & System Configuration Parameters
+    try:
+        import config
+        from forecast.strategy_engine import EV_THRESHOLD, CITY_BLACKLIST
+        live_config = {
+            "ACCOUNT_SIZE": config.ACCOUNT_SIZE,
+            "SHADOW_EXECUTION": config.SHADOW_EXECUTION,
+            "KALSHI_MIN_ENTRY_PRICE": config.KALSHI_MIN_ENTRY_PRICE,
+            "EV_THRESHOLD": EV_THRESHOLD,
+            "KALSHI_MAX_USD_PER_POSITION": config.KALSHI_MAX_USD_PER_POSITION,
+            "KALSHI_MAX_QTY_PER_POSITION": config.KALSHI_MAX_QTY_PER_POSITION,
+            "KALSHI_MAX_CONCURRENT_POSITIONS": config.KALSHI_MAX_CONCURRENT_POSITIONS,
+            "KALSHI_HUB_EXPOSURE_MIN_USD": config.KALSHI_HUB_EXPOSURE_MIN_USD,
+            "KALSHI_HUB_EXPOSURE_PCT": config.KALSHI_HUB_EXPOSURE_PCT,
+            "KALSHI_KELLY_CAP": config.KALSHI_KELLY_CAP,
+            "KALSHI_MAX_RISK_PER_EVENT_PCT": config.KALSHI_MAX_RISK_PER_EVENT_PCT,
+            "KALSHI_MAX_DEPLOYED_PCT": config.KALSHI_MAX_DEPLOYED_PCT,
+            "CITY_BLACKLIST": list(CITY_BLACKLIST) if isinstance(CITY_BLACKLIST, (set, list)) else list(CITY_BLACKLIST),
+        }
+        context.append("### LIVE ENGINE CONFIGURATION & RISK LIMITS\n" + json.dumps(live_config, indent=2))
+    except Exception as exc:
+        logger.warning("Failed to hydrate live config context: %s", exc)
 
-    # 3. Broker-first live truth
+    # 3. Dynamic Database Schema
+    try:
+        import sqlite3
+        from config import DB_PATH
+        if os.path.exists(DB_PATH):
+            schema_info = {}
+            with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT name FROM sqlite_master WHERE type='table';")
+                tables = [t[0] for t in cur.fetchall()]
+                for t in tables:
+                    cur.execute(f"PRAGMA table_info({t});")
+                    cols = [c[1] for c in cur.fetchall()]
+                    cur.execute(f"SELECT COUNT(*) FROM {t}")
+                    cnt = cur.fetchone()[0]
+                    schema_info[t] = {"row_count": cnt, "columns": cols}
+            context.append("### DYNAMIC DATABASE SCHEMA (trades.db)\n" + json.dumps(schema_info, indent=2))
+    except Exception as exc:
+        logger.warning("Dynamic database schema hydration failed: %s", exc)
+
+    # 4. Broker-first live truth
     try:
         live_status = json.loads(agent_tools.get_live_kalshi_status())
         slim_truth = {
@@ -110,28 +141,28 @@ def get_repo_context() -> str:
     except Exception:
         pass
 
-    # 4. Recent veto pattern
+    # 5. Recent veto pattern
     try:
         veto_summary = json.loads(agent_tools.get_recent_veto_summary())
         context.append("### RECENT VETO SUMMARY\n" + json.dumps(veto_summary, indent=2))
     except Exception:
         pass
 
-    # 5. Recent execution failures after approval
+    # 6. Recent execution failures after approval
     try:
         execution_summary = json.loads(agent_tools.get_recent_execution_summary())
         context.append("### RECENT EXECUTION SUMMARY\n" + json.dumps(execution_summary, indent=2))
     except Exception:
         pass
 
-    # 6. Weather learning / adaptive blend state
+    # 7. Weather learning / adaptive blend state
     try:
         learning_status = json.loads(agent_tools.get_weather_learning_status())
         context.append("### WEATHER LEARNING STATUS\n" + json.dumps(learning_status, indent=2))
     except Exception:
         pass
 
-    # 7. Release-gate truth
+    # 8. Release-gate truth
     try:
         release_status = json.loads(agent_tools.get_release_status())
         context.append("### RELEASE GATE STATUS\n" + json.dumps(release_status, indent=2))

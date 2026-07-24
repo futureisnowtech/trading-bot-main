@@ -439,9 +439,9 @@ def check_kill_switch(
         return True, ""
 
     trailing_edge: float = _get_trailing_30d_mean_daily_edge(db_path=db_path)
-    bp_threshold: float = 0.03 * bankroll_safe
+    bp_threshold: float = max(5.0, 0.03 * bankroll_safe)
     edge_threshold: float = 5.0 * trailing_edge if trailing_edge > 0.0 else float("inf")
-    threshold: float = min(bp_threshold, edge_threshold)
+    threshold: float = max(5.0, min(bp_threshold, edge_threshold))
 
     if day_loss > threshold:
         reason = (

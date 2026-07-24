@@ -23,11 +23,11 @@ from cryptography.hazmat.primitives import serialization
 
 # Add root to path for logging_db
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import config
 from config import (
     DB_PATH,
     KALSHI_API_KEY_ID,
     REPO_ROOT,
-    SHADOW_EXECUTION,
     estimate_kalshi_order_fee_usd,
     resolve_runtime_path,
 )
@@ -88,6 +88,42 @@ class KalshiBroker:
         self._connected = False
         self._open_positions: dict[str, dict] = {}  # key = f"{ticker}_{right}"
         self._private_key = None
+
+    def _init_shadow_balance(self, sync_positions: bool = True, quiet: bool = False) -> bool:
+        self._connected = True
+        self._private_key = None
+        if not quiet:
+            print("[KalshiBroker] Connected (SHADOW-ONLY FALLBACK) ✅")
+        log_event("INFO", "KalshiBroker", "Connected (SHADOW-ONLY FALLBACK)")
+        
+        balance_dir = os.path.join(REPO_ROOT, "logs")
+        os.makedirs(balance_dir, exist_ok=True)
+        balance_path = os.path.join(balance_dir, "paper_balance.json")
+        from config import ACCOUNT_SIZE
+        if not os.path.exists(balance_path):
+            try:
+                with open(balance_path, "w", encoding="utf-8") as f:
+                    json.dump({
+                        "balance": float(ACCOUNT_SIZE),
+                        "last_updated": datetime.now(timezone.utc).isoformat()
+                    }, f, indent=2)
+            except Exception as exc:
+                logger.warning(f"[KalshiBroker] Shadow balance init failed: {exc}")
+        self._paper_balance = float(ACCOUNT_SIZE)
+        if os.path.exists(balance_path):
+            try:
+                with open(balance_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    self._paper_balance = float(data.get("balance", ACCOUNT_SIZE))
+            except Exception:
+                pass
+        
+        # Load paper positions from SQLite table forecast_positions_paper
+        self._restore_shadow_positions()
+        
+        if sync_positions:
+            self._sync_positions()
+        return True
         
     def connect(self, *, sync_positions: bool = True, quiet: bool = False) -> bool:
         """Verify credentials and load private key for signing."""
@@ -99,6 +135,8 @@ class KalshiBroker:
 
         if not KALSHI_API_KEY_ID or not private_key_path:
             log_event("ERROR", "KalshiBroker", "Missing KALSHI_API_KEY_ID or KALSHI_PRIVATE_KEY_PATH in .env")
+            if config.SHADOW_EXECUTION:
+                return self._init_shadow_balance(sync_positions=sync_positions, quiet=quiet)
             return False
 
         if not os.path.exists(private_key_path):
@@ -107,6 +145,8 @@ class KalshiBroker:
                 "KalshiBroker",
                 f"Kalshi private key not found at resolved path: {private_key_path}",
             )
+            if config.SHADOW_EXECUTION:
+                return self._init_shadow_balance(sync_positions=sync_positions, quiet=quiet)
             return False
 
         try:
@@ -131,12 +171,8 @@ class KalshiBroker:
             if sync_positions:
                 self._sync_positions()
         except Exception as e:
-            if SHADOW_EXECUTION:
-                self._connected = True
-                self._private_key = None
-                if not quiet:
-                    print(f"[KalshiBroker] Connected (SHADOW-ONLY FALLBACK) ✅")
-                log_event("INFO", "KalshiBroker", "Connected (SHADOW-ONLY FALLBACK)")
+            if config.SHADOW_EXECUTION:
+                return self._init_shadow_balance(sync_positions=sync_positions, quiet=quiet)
             else:
                 if not quiet:
                     print(f"[KalshiBroker] Connection error: {e}")
@@ -144,22 +180,7 @@ class KalshiBroker:
                 self._connected = False
                 return False
 
-        if SHADOW_EXECUTION:
-            # Initialize virtual balance file
-            balance_dir = os.path.join(REPO_ROOT, "logs")
-            os.makedirs(balance_dir, exist_ok=True)
-            balance_path = os.path.join(balance_dir, "paper_balance.json")
-            from config import ACCOUNT_SIZE
-            if not os.path.exists(balance_path):
-                try:
-                    with open(balance_path, "w", encoding="utf-8") as f:
-                        json.dump({
-                            "balance": float(ACCOUNT_SIZE),
-                            "last_updated": datetime.now(timezone.utc).isoformat()
-                        }, f, indent=2)
-                except Exception as exc:
-                    logger.error(f"[KalshiBroker] Failed to initialize paper balance: {exc}")
-            
+        if config.SHADOW_EXECUTION:
             # Load virtual balance
             try:
                 with open(balance_path, "r", encoding="utf-8") as f:
@@ -174,7 +195,8 @@ class KalshiBroker:
         return True
 
     def is_connected(self) -> bool:
-        return self._connected and self._private_key is not None
+        return self._connected and (self._private_key is not None or config.SHADOW_EXECUTION)
+
 
     def sync_positions(self) -> None:
         """Refresh local position cache from broker reality."""
@@ -192,7 +214,7 @@ class KalshiBroker:
             "entered_at": None,
         }
         try:
-            with sqlite3.connect(DB_PATH, timeout=5.0) as conn:
+            with sqlite3.connect(config.DB_PATH, timeout=5.0) as conn:
                 conn.row_factory = sqlite3.Row
                 row = conn.execute(
                     """
@@ -592,7 +614,7 @@ class KalshiBroker:
     def _request(self, method: str, path: str, params: dict = None, body: dict = None) -> dict:
         """Execute signed Kalshi V2 request."""
         
-        if SHADOW_EXECUTION and method.upper() == "POST" and "orders" in path:
+        if config.SHADOW_EXECUTION and method.upper() == "POST" and "orders" in path:
             raise RuntimeError("Mutating request blocked by shadow mode firewall")
 
         try:
@@ -684,7 +706,7 @@ class KalshiBroker:
         """Helper to restore shadow positions from forecast_positions_paper SQLite table."""
         try:
             from forecast.db import get_open_forecast_positions_paper
-            db_positions = get_open_forecast_positions_paper(db_path=DB_PATH)
+            db_positions = get_open_forecast_positions_paper(db_path=config.DB_PATH)
             self._open_positions.clear()
             for p in db_positions:
                 ticker = p["ticker"]
@@ -705,7 +727,7 @@ class KalshiBroker:
 
     def _sync_positions(self) -> None:
         """Sync open positions from Kalshi into local state."""
-        if SHADOW_EXECUTION:
+        if config.SHADOW_EXECUTION:
             self._restore_shadow_positions()
             return
 
@@ -1102,7 +1124,7 @@ class KalshiBroker:
         return [self.get_quote(c["local_symbol"]) for c in contracts]
 
     def place_buy_order(self, contract_dict: dict, qty: int, limit_price: float, **kwargs) -> dict:
-        if SHADOW_EXECUTION:
+        if config.SHADOW_EXECUTION:
             return self._execute_shadow_buy(contract_dict, qty, limit_price, **kwargs)
 
         if not self.is_connected():
@@ -1168,7 +1190,7 @@ class KalshiBroker:
 
     def place_sell_order(self, contract_dict: dict, qty: int, limit_price: float, **kwargs) -> dict:
         """SRE FIX: Dedicated Sell Order Handler for Limit Exits."""
-        if SHADOW_EXECUTION:
+        if config.SHADOW_EXECUTION:
             side = kwargs.get("side", "yes").lower()
             return self._execute_shadow_sell(
                 contract_dict,
@@ -1234,7 +1256,7 @@ class KalshiBroker:
         pos_info = self._open_positions.get(key, {})
         entry_price = float(pos_info.get("entry_price") or pos_info.get("entry") or 0.50)
 
-        if SHADOW_EXECUTION:
+        if config.SHADOW_EXECUTION:
             quote = self.get_quote(local_symbol)
             bid_key = "yes_bid" if right == "C" else "no_bid"
             bid_price = float(quote.get(bid_key) or 0.0)
@@ -1361,7 +1383,7 @@ class KalshiBroker:
         return list(self._open_positions.values())
 
     def get_account_balance(self) -> float:
-        if SHADOW_EXECUTION:
+        if config.SHADOW_EXECUTION:
             balance_path = os.path.join(REPO_ROOT, "logs", "paper_balance.json")
             try:
                 with open(balance_path, "r", encoding="utf-8") as f:
@@ -1485,7 +1507,7 @@ class KalshiBroker:
                 entry_price=fill_price,
                 side=side,
                 basis_quality="CONFIRMED",
-                db_path=DB_PATH,
+                db_path=config.DB_PATH,
             )
         except Exception as exc:
             logger.error(f"[ShadowBroker] Failed to save position to DB: {exc}")
@@ -1628,11 +1650,11 @@ class KalshiBroker:
                     entry_price=float(existing["entry"]),
                     side=side,
                     basis_quality="CONFIRMED",
-                    db_path=DB_PATH,
+                    db_path=config.DB_PATH,
                 )
             else:
                 from forecast.db import mark_forecast_position_closed_paper
-                mark_forecast_position_closed_paper(ticker, exit_type="exit", db_path=DB_PATH)
+                mark_forecast_position_closed_paper(ticker, exit_type="exit", db_path=config.DB_PATH)
         except Exception as exc:
             logger.error(f"[ShadowBroker] Failed to update position in DB: {exc}")
             

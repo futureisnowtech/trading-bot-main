@@ -82,7 +82,7 @@ MAX_HOURS_TO_RES: float = 120.0
 
 # Baseline post-fee edge floor. This is intentionally a single canonical
 # constant; lane-specific behavior should layer on top of it explicitly.
-EV_THRESHOLD: float = 0.050
+EV_THRESHOLD: float = float(os.getenv("EV_THRESHOLD", "0.050"))
 
 # Longshot Bias Gate
 MIN_IMPLIED_PROB_FOR_YES: float = 0.10  # refuse to buy YES below 10% probability
@@ -106,11 +106,13 @@ MAX_PARITY_GAP_ABS: float = 0.05  # |G_t| ≤ 0.05
 #   - Binary RAIN/SNOW/WIND: cheap longshots with weak signal need strictest floor.
 # Per-hub override via config/hub_params.json[hub]["hard_rbi_threshold"] is honored
 # when present; SRE clamp [0.50, 0.95] is enforced unconditionally.
-HARD_RBI_THRESHOLD_HOURLY: float = 0.53
-HARD_RBI_THRESHOLD_DAILY: float = 0.57
-HARD_RBI_THRESHOLD_BINARY: float = 0.62
+HARD_RBI_THRESHOLD_HOURLY: float = float(os.getenv("HARD_RBI_THRESHOLD_HOURLY", "0.53"))
+HARD_RBI_THRESHOLD_DAILY: float = float(os.getenv("HARD_RBI_THRESHOLD_DAILY", "0.57"))
+HARD_RBI_THRESHOLD_BINARY: float = float(os.getenv("HARD_RBI_THRESHOLD_BINARY", "0.62"))
 HARD_RBI_THRESHOLD_LO: float = 0.50
 HARD_RBI_THRESHOLD_HI: float = 0.95
+
+
 
 
 def _resolve_hard_rbi_threshold(
@@ -957,11 +959,15 @@ def solve_optimal_size(
             n_vwap = calculate_optimal_vwap_size(level2_asks, q_clamped, f_final * bankroll, 0.0)
             n_final = min(n_final, n_vwap)
             
-        n_new = min(n_final, 2500) # KALSHI_MAX_QTY_PER_POSITION = 2500
-        n_new = max(1, n_new)
+        if f_star <= 0.0 or n_final == 0:
+            n_new = 0
+        else:
+            n_new = min(n_final, int(KALSHI_MAX_QTY_PER_POSITION))
+            n_new = max(1, n_new)
         if n_new == n:
             break
         n = n_new
+
         
     return f_star, phi, int(n)
 

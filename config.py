@@ -116,7 +116,7 @@ TRADE_SESSION_START: str = os.getenv("TRADE_SESSION_START", "2026-03-28")
 # ════════════════════════════════════════════════════════════════════
 # ACCOUNT
 # ════════════════════════════════════════════════════════════════════
-ACCOUNT_SIZE: float = float(os.getenv("ACCOUNT_SIZE", "5000"))
+ACCOUNT_SIZE: float = float(os.getenv("ACCOUNT_SIZE", "100"))
 MAX_DEPLOYED_PCT: float = 1.0
 CASH_RESERVE_PCT: float = 0.0
 
@@ -152,8 +152,8 @@ FORECAST_MANUAL_ENABLED: bool = (
 )
 
 # Kalshi Risk & Capital Partitioning
-KALSHI_MAX_DEPLOYED_PCT: float = 0.90
-KALSHI_MAX_CONCURRENT_POSITIONS: int = 50
+KALSHI_MAX_DEPLOYED_PCT: float = float(os.getenv("KALSHI_MAX_DEPLOYED_PCT", "0.90"))
+KALSHI_MAX_CONCURRENT_POSITIONS: int = int(os.getenv("KALSHI_MAX_CONCURRENT_POSITIONS", "50"))
 KALSHI_SAME_EVENT_FAMILY_CAP: int = int(os.getenv("KALSHI_SAME_EVENT_FAMILY_CAP", "5"))
 KALSHI_HUB_EXPOSURE_PCT: float = float(
     os.getenv("KALSHI_HUB_EXPOSURE_PCT", "0.60")
@@ -161,8 +161,8 @@ KALSHI_HUB_EXPOSURE_PCT: float = float(
 KALSHI_HUB_EXPOSURE_MIN_USD: float = float(
     os.getenv("KALSHI_HUB_EXPOSURE_MIN_USD", "40")
 )
-KALSHI_MAX_QTY_PER_POSITION: int = 2500
-KALSHI_MAX_USD_PER_POSITION: float = 40.0  # Hard Ceiling
+KALSHI_MAX_QTY_PER_POSITION: int = int(os.getenv("KALSHI_MAX_QTY_PER_POSITION", "2500"))
+KALSHI_MAX_USD_PER_POSITION: float = float(os.getenv("KALSHI_MAX_USD_PER_POSITION", "40.0"))  # Hard Ceiling
 KALSHI_MIN_PRICE: float = 0.08
 KALSHI_MAX_SIGMA: float = 2.8
 KALSHI_MAX_SPREAD_RATIO: float = 0.35
@@ -176,9 +176,11 @@ KALSHI_FEE_PER_CONTRACT: float = float(
 )  # Legacy fallback only
 KALSHI_MAX_FEE_DRAG_PCT: float = 0.30
 KALSHI_MAX_SPREAD_DOLLARS: float = 0.12  # SPEC §5.4c — quote coherence gate (dollars, not ratio)
-KALSHI_MIN_ENTRY_PRICE: float = 0.30     # SPEC §2.6 — hard entry price floor; deletes 0.02/0.03 carve-outs
-KALSHI_KELLY_CAP: float = 0.10
-KALSHI_MAX_RISK_PER_EVENT_PCT: float = 0.015
+KALSHI_MIN_ENTRY_PRICE: float = float(os.getenv("KALSHI_MIN_ENTRY_PRICE", "0.30"))     # SPEC §2.6 — hard entry price floor; deletes 0.02/0.03 carve-outs
+KALSHI_KELLY_CAP: float = float(os.getenv("KALSHI_KELLY_CAP", "0.10"))
+KALSHI_MAX_RISK_PER_EVENT_PCT: float = float(os.getenv("KALSHI_MAX_RISK_PER_EVENT_PCT", "0.015"))
+
+
 KALSHI_EXIT_MODEL_INVALIDATION_DELTA: float = float(
     os.getenv("KALSHI_EXIT_MODEL_INVALIDATION_DELTA", "0.10")
 )

@@ -112,6 +112,12 @@ HARD_RBI_THRESHOLD_BINARY: float = float(os.getenv("HARD_RBI_THRESHOLD_BINARY", 
 HARD_RBI_THRESHOLD_LO: float = 0.50
 HARD_RBI_THRESHOLD_HI: float = 0.95
 
+# Audit-derived City Blacklist configured via environment variables
+_env_blacklist = os.getenv("CITY_BLACKLIST", "").strip()
+CITY_BLACKLIST: set[str] = set([c.strip().upper() for c in _env_blacklist.split(",") if c.strip()]) if _env_blacklist else set()
+
+
+
 
 
 
@@ -1083,6 +1089,11 @@ def _strategy_weather_details(
     """
     # Alpha Filter: 48-Hour Asymmetric Information Decay Window
     is_short_term = 1.5 <= hours_to_res <= 48.0
+
+    hub = _get_city_hub(ticker, contract_name=contract_name)
+    if hub.upper() in CITY_BLACKLIST or any(f"KXHIGH{b}-" in ticker.upper() or f"KXLOW{b}-" in ticker.upper() for b in CITY_BLACKLIST):
+        return False, "", 0.0, [f"city_blacklisted_{hub}"], False, 1.0, 3, 0.05
+
 
     w_data = get_contract_weather_data(
         ticker,

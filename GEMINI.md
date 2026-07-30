@@ -10,6 +10,12 @@ This repository is the active Kalshi-only execution tree.
 - Exposure truth: broker-first, ledgerless
 - Learning truth: RBI calibrates only on resolved labels
 - Fresh-entry scope: strict true hourly weather contracts only
+- Post-Paper Data Boundary: POST_PAPER_START_DATE = "2026-07-24" (rejects pre-July 24 legacy paper data)
+- Tri-Model Ensemble Ingest: 50% GFS + 35% ECMWF + 15% DWD ICON (122 simulation paths)
+- Value Price Bracket Gate: $0.30 - $0.70 entry price floor/ceiling
+- Kalshi Cheat Code Mispricing Scanner: q_tri >= 78% and model-market delta >= 22%
+- Asymmetric High-Conviction Kelly Sizing: $15.00 - $35.00 risk allocation per trade
+- Tiered Goldmine City Priority Scanner: DC, PHL, ATL, DAL, DFW, LV, LAS, OKC, CHI scanned first
 - Non-hourly daily weather contracts may still exist in the data universe, but they are not allowed for fresh entries
 
 ## Hard Rules

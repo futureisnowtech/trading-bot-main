@@ -75,17 +75,20 @@ def get_repo_context() -> str:
     """
     context = []
 
-    # 1. Canonical Truth (AGENTS.md)
+    # 1. Canonical Truth (AGENTS.md & GEMINI.md)
     try:
         if os.path.exists("AGENTS.md"):
             with open("AGENTS.md", "r") as f:
                 context.append("### AGENTS.md (System Architecture)\n" + f.read())
+        if os.path.exists("GEMINI.md"):
+            with open("GEMINI.md", "r") as f:
+                context.append("### GEMINI.md (Operating Truth)\n" + f.read())
     except Exception: pass
 
     # 2. Live Risk & System Configuration Parameters
     try:
         import config
-        from forecast.strategy_engine import EV_THRESHOLD, CITY_BLACKLIST
+        from forecast.strategy_engine import EV_THRESHOLD, CITY_BLACKLIST, CITY_PRIORITY_TIERS
         live_config = {
             "ACCOUNT_SIZE": config.ACCOUNT_SIZE,
             "SHADOW_EXECUTION": config.SHADOW_EXECUTION,
@@ -99,18 +102,20 @@ def get_repo_context() -> str:
             "KALSHI_KELLY_CAP": config.KALSHI_KELLY_CAP,
             "KALSHI_MAX_RISK_PER_EVENT_PCT": config.KALSHI_MAX_RISK_PER_EVENT_PCT,
             "KALSHI_MAX_DEPLOYED_PCT": config.KALSHI_MAX_DEPLOYED_PCT,
+            "CITY_PRIORITY_TIERS": CITY_PRIORITY_TIERS,
             "CITY_BLACKLIST": list(CITY_BLACKLIST) if isinstance(CITY_BLACKLIST, (set, list)) else list(CITY_BLACKLIST),
         }
         context.append("### LIVE ENGINE CONFIGURATION & RISK LIMITS\n" + json.dumps(live_config, indent=2))
     except Exception as exc:
         logger.warning("Failed to hydrate live config context: %s", exc)
 
-    # 3. Dynamic Database Schema
+    # 3. Dynamic Database Schema & Active Positions
     try:
         import sqlite3
         from config import DB_PATH
         if os.path.exists(DB_PATH):
             schema_info = {}
+            active_positions = []
             with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
                 cur = conn.cursor()
                 cur.execute("SELECT name FROM sqlite_master WHERE type='table';")
@@ -121,7 +126,13 @@ def get_repo_context() -> str:
                     cur.execute(f"SELECT COUNT(*) FROM {t}")
                     cnt = cur.fetchone()[0]
                     schema_info[t] = {"row_count": cnt, "columns": cols}
+                
+                # Hydrate active trades
+                cur.execute("SELECT ticker, side, price, qty, timestamp FROM forecast_positions WHERE active=1 LIMIT 50")
+                active_positions = [dict(zip(["ticker", "side", "price", "qty", "timestamp"], r)) for r in cur.fetchall()]
+                
             context.append("### DYNAMIC DATABASE SCHEMA (trades.db)\n" + json.dumps(schema_info, indent=2))
+            context.append("### LIVE ACTIVE FORECAST POSITIONS\n" + json.dumps(active_positions, indent=2))
     except Exception as exc:
         logger.warning("Dynamic database schema hydration failed: %s", exc)
 

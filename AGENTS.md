@@ -13,6 +13,17 @@ This repository is now the active Kalshi-only execution tree.
 - Settlement truth: `forecast_resolutions`
 - Learning truth: Weather RBI calibrates only on resolved labels, never inferred PnL
 
+## Active Architecture & Strategy (v19.16.0 Release)
+
+- **Tri-Model Ensemble Ingest**: Blends 122 physical simulation paths (50% US GFS / 35% European ECMWF / 15% German DWD ICON).
+- **5-Minute Station Calculus**: Evaluates 1st-order numerical thermal derivatives (dT/dt <= -0.20F/hr) to lock out YES bets post afternoon peak heating.
+- **Value Price Bracket Gate ($0.30 - $0.70)**: Restricts entries strictly to high-EV price zone, deleting penny longshots and low-upside bets.
+- **$2.0°F Safety Buffer**: Enforces minimum model projection headroom to prevent boundary miss wipeouts.
+- **Kalshi Cheat Code Mispricing Arbitrage Scanner**: Scans for contracts where model win probability q_tri >= 78% and model-market delta edge >= 22%.
+- **Asymmetric Kelly Conviction Sizing**: Dynamically scales position allocations from $5.00 up to $35.00 per high-conviction trade.
+- **Tiered Goldmine City Priority Scanner**: Prioritizes Tier 1 goldmine cities (DC, PHL, ATL, DAL, DFW, LV, LAS, OKC, CHI) first before secondary or noisy micro-climate hubs.
+- **Autonomous Leak Forensics**: Auto-applies 48h city firewall lockouts and elevates station conviction floors on any trade loss.
+
 ## Active Runtime
 
 - `execution_daemon.py` is the production long-lived execution process.

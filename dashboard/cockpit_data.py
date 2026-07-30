@@ -581,14 +581,16 @@ def build_regime_manifest(
         "reasoning_model": GEMINI_MODEL,
         "entry_scope": live_entry_scope(),
         "ensemble_blend": (
-            f"Base 60% GFS + 40% ECMWF; live adaptive blend is {blend_summary}. "
-            "AI/GraphCast only widens or compresses sigma"
+            f"Tri-Model 50% GFS + 35% ECMWF + 15% DWD ICON (122 simulation paths). "
+            f"Live adaptive blend is {blend_summary}."
         ),
         "entry_math": [
             f"Net EV gate: post-fee EV must exceed {EV_THRESHOLD:.2f}",
-            f"Exchange fee drag: {_fee_formula_text()} with no extra flat fee buffer",
-            "Weather entries key off post-fee EV directly, and narrow bins are auto-vetoed before sizing",
-            f"Sizing: continuous sigmoid scaler with a hard per-position cap of ${KALSHI_MAX_USD_PER_POSITION:.0f}",
+            f"Value Price Bracket: $0.30–$0.70 entry floor/ceiling with $2.0°F safety buffer",
+            f"Cheat Code Scanner: q_tri >= 78% and model-market delta edge >= 22%",
+            f"Asymmetric Conviction Sizing: $15.00–$35.00 position risk allocation per trade",
+            f"Tiered Goldmine City Priority: Tier 1 (DC, PHL, ATL, DAL, DFW, LV, OKC, CHI) scanned first",
+            f"5-Minute Station Calculus: dT/dt <= -0.20°F/hr thermal derivative lock",
         ],
         "entry_gates": [
             (

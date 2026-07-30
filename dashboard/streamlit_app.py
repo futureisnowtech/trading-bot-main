@@ -1026,12 +1026,14 @@ _render_html(
       </div>
       <div class="chip-row">
         <div class="chip">Version {html.escape(str(regime['version']))}</div>
+        <div class="chip">Tri-Model 122 Paths</div>
+        <div class="chip">Cheatcode Arbitrage Engine</div>
+        <div class="chip">Goldmine Priority Queue</div>
+        <div class="chip">Asymmetric Kelly $15-$35</div>
         <div class="chip">Lane {html.escape(str(lane.get('readiness_state') or 'UNKNOWN'))}</div>
         <div class="chip">Health {html.escape(str(lane.get('health') or 'UNKNOWN'))}</div>
         <div class="chip">Release {html.escape(str(release_status.get('current_release_verdict') or 'UNKNOWN'))}</div>
-        <div class="chip">Scope {html.escape(str(regime.get('entry_scope') or 'UNKNOWN'))}</div>
         <div class="chip">Broker {'CONNECTED' if truth.get('broker_connected') else 'DISCONNECTED'}</div>
-        <div class="chip">Model {html.escape(str(regime['reasoning_model']))}</div>
         <div class="chip">Deploy {html.escape(str(deploy.get('sha') or 'local'))[:7]}</div>
       </div>
     </div>

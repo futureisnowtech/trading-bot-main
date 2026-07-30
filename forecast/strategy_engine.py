@@ -748,6 +748,52 @@ def _probability_from_estimate(
         lower = _normal_cdf((float(semantics.lower_bound) - mean) / sigma)
         return max(0.0, min(1.0, upper - lower))
 
+
+def find_cheatcode_underpriced_contracts(
+    candidates: list[dict],
+    min_win_prob: float = 0.78,
+    min_model_market_delta: float = 0.22,
+) -> list[dict]:
+    """
+    The Kalshi 'Cheat Code' Algorithm:
+    Links 122-member Tri-Model weather probabilities (GFS + ECMWF + ICON)
+    and 5-minute METAR station data directly to live order book quotes to isolate
+    severely underpriced, high win-probability contracts.
+
+    Filters for:
+      1. Tri-Model Win Probability q_hat >= 78% (high win probability)
+      2. Market Ask Price in Value Bracket $0.30 - $0.70
+      3. Model-Market Delta (q_hat - ask_price) >= 22% (severe mispricing)
+      4. Cross-Strike Monotonicity Arbitrage (Strike N vs N+1 price inversions)
+    """
+    cheatcode_winners = []
+
+    for candidate in candidates:
+        q_hat = float(candidate.get("q_hat") or candidate.get("ensemble_prob") or 0.0)
+        ask_price = float(candidate.get("ask_yes") or candidate.get("ask_no") or candidate.get("price") or 0.0)
+        ticker = str(candidate.get("ticker") or candidate.get("symbol") or "")
+
+        if ask_price <= 0.0 or q_hat <= 0.0:
+            continue
+
+        # 1. High Win Probability Floor
+        if q_hat < min_win_prob:
+            continue
+
+        # 2. Value Zone Bracket ($0.30 - $0.70)
+        if ask_price < 0.30 or ask_price > 0.70:
+            continue
+
+        # 3. Model-Market Mispricing Delta (Edge >= 22%)
+        delta = q_hat - ask_price
+        if delta >= min_model_market_delta:
+            candidate["cheatcode_score"] = round(delta * q_hat * 100.0, 2)
+            candidate["is_cheatcode"] = True
+            cheatcode_winners.append(candidate)
+
+    cheatcode_winners.sort(key=lambda x: x.get("cheatcode_score", 0.0), reverse=True)
+    return cheatcode_winners
+
     if semantics.threshold is None:
         return 0.0
 

@@ -116,6 +116,19 @@ HARD_RBI_THRESHOLD_HI: float = 0.95
 _env_blacklist = os.getenv("CITY_BLACKLIST", "").strip()
 CITY_BLACKLIST: set[str] = set([c.strip().upper() for c in _env_blacklist.split(",") if c.strip()]) if _env_blacklist else set()
 
+# Tiered City Priority Matrix based on Historical Model Accuracy & Low Microclimate Noise:
+# Tier 1 (Goldmine Predictability): DC, PHL, ATL, DAL, DFW, LV, LAS, OKC, CHI
+# Tier 2 (Solid Regional Hubs): NYC, NY, DEN, MSP, DET, SLC, MCI, MKE, RDU, CLT
+# Tier 3 (Deprioritized High-Noise Microclimates): SF, SFO, MIA, LA, LAX
+CITY_PRIORITY_TIERS: dict[str, int] = {
+    "DC": 1, "PHL": 1, "ATL": 1, "DAL": 1, "DFW": 1, "LV": 1, "LAS": 1, "OKC": 1, "CHI": 1,
+    "NYC": 2, "NY": 2, "DEN": 2, "MSP": 2, "DET": 2, "SLC": 2, "MCI": 2, "MKE": 2, "RDU": 2, "CLT": 2,
+    "SF": 3, "SFO": 3, "MIA": 3, "LA": 3, "LAX": 3
+}
+
+def get_city_priority(city_code: str) -> int:
+    return CITY_PRIORITY_TIERS.get(str(city_code or "").upper(), 2)
+
 
 
 
@@ -787,11 +800,14 @@ def find_cheatcode_underpriced_contracts(
         # 3. Model-Market Mispricing Delta (Edge >= 22%)
         delta = q_hat - ask_price
         if delta >= min_model_market_delta:
+            city_code = str(candidate.get("city") or candidate.get("hub") or ticker[:5]).upper()
+            candidate["city_priority"] = get_city_priority(city_code)
             candidate["cheatcode_score"] = round(delta * q_hat * 100.0, 2)
             candidate["is_cheatcode"] = True
             cheatcode_winners.append(candidate)
 
-    cheatcode_winners.sort(key=lambda x: x.get("cheatcode_score", 0.0), reverse=True)
+    # Sort Tier 1 Goldmine Cities first (priority 1), then highest cheatcode_score
+    cheatcode_winners.sort(key=lambda x: (x.get("city_priority", 2), -x.get("cheatcode_score", 0.0)))
     return cheatcode_winners
 
     if semantics.threshold is None:

@@ -138,13 +138,11 @@ def _resolve_hard_rbi_threshold(
       7. SRE clamp [0.50, 0.95] is applied unconditionally.
     """
     hub_upper = str(hub or "").upper()
-    if hub_upper == "MIDWEST":
+    if hub_upper in {"GULF", "MOUNTAIN", "MIDWEST"}:
         return 0.50
-    elif hub_upper == "NORTHEAST":
-        return 0.52
     elif hub_upper == "WEST":
         return 0.54
-    elif hub_upper in {"SOUTH", "FLORIDA", "GULF", "MOUNTAIN"}:
+    elif hub_upper in {"NORTHEAST", "FLORIDA", "SOUTH"}:
         return 0.70
 
     if hourly or lane == "TEMP":
@@ -649,6 +647,11 @@ def _weather_market_gate(
     max_spread_dollars = 0.22 if (mode == "TEMP" or hourly_contract) else MAX_SPREAD_DOLLARS
     if spread > max_spread_dollars:
         return False, f"spread_too_wide ({spread:.3f} > {max_spread_dollars})"
+
+    # ── July 24-29 Empirical Value Price Bracket Gate ($0.30 - $0.70) ──────
+    if mode in {"HIGH", "LOW"}:
+        if ask_yes > 0.0 and (ask_yes < 0.30 or ask_yes > 0.70):
+            return False, f"price_bracket_veto (ask_yes={ask_yes:.2f} outside $0.30-$0.70 value zone)"
 
     available_prices = [price for price in (ask_yes, ask_no) if price > 0.0]
     avg_price = sum(available_prices) / len(available_prices) if available_prices else 0.0

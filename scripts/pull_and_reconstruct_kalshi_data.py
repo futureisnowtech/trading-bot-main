@@ -11,7 +11,7 @@ from execution.kalshi_broker import get_kalshi_broker
 from forecast.db import reconcile_forecast_positions
 from research_package.scratch.generate_csvs import generate_trades, generate_quotes, generate_actuals
 
-DB_PATH = "/Users/joshmacbookair2020/projects/algo_trading_final/logs/trades.db"
+from config import DB_PATH, POST_PAPER_START_DATE
 
 def parse_iso_to_local_offset(iso_str):
     if not iso_str:

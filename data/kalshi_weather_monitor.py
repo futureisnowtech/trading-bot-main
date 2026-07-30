@@ -1630,9 +1630,8 @@ async def fetch_open_meteo_ensemble(city_key: str, lat: float, lon: float) -> Di
     base_url = "https://customer-api.open-meteo.com/v1/ensemble"
     
     # v19.2: Sovereign Grand Ensemble (Institutional Blend)
-    # GFS = 31, ECMWF = 51, GRAPHCAST (AI) = 1
-    # Note: GraphCast is deterministic but highly accurate in the 24-48h window.
-    models = ["gfs_seamless", "ecmwf_ifs025", "gfs_graphcast025"]
+    # GFS = 31, ECMWF = 51, ICON = 40, GRAPHCAST (AI) = 1
+    models = ["gfs_seamless", "ecmwf_ifs025", "icon_seamless", "gfs_graphcast025"]
     results = {}
 
     try:
@@ -1733,6 +1732,7 @@ async def fetch_open_meteo_ensemble(city_key: str, lat: float, lon: float) -> Di
         # Unified City Record
         final_record = results.get("gfs", list(results.values())[0]).copy()
         final_record["ecmwf"] = results.get("ecmwf")
+        final_record["icon"] = results.get("icon")
         final_record["aigefs"] = results.get("aigefs")
         final_record["provider_mode"] = "ensemble_members"
         final_record["forecast_source"] = "open_meteo_ensemble"

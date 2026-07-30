@@ -1018,6 +1018,13 @@ def calculate_continuous_sizing(
         cov_charge=1.0,
         level2_asks=book_asks
     )
+    # Asymmetric High-Conviction Scaling (Lever 1):
+    # Scale contract count for high edge & tri-model consensus trades ($15-$35 allocation)
+    if n > 0 and ensemble_prob >= 0.75 and multiplier >= 1.25 and market_price > 0.0:
+        target_allocation_usd = min(KALSHI_MAX_USD_PER_POSITION, max(15.0, capital_base * 0.15 * multiplier))
+        conviction_contracts = int(target_allocation_usd / market_price)
+        n = max(n, conviction_contracts)
+
     return n
 
 import re

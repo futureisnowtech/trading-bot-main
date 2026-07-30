@@ -929,6 +929,21 @@ def estimate_zeta(contract_id: Optional[int], tau_hours: float, spread: float, d
     return max(0.01, min(0.99, zeta))
 
 
+def calculate_diurnal_heating_derivative(hourly_temps: list[float], current_local_hour: float = 14.0) -> tuple[float, bool]:
+    """
+    Evaluates 1st order numerical derivative dT/dt = (T_n - T_{n-1}) / dt over METAR observations.
+    Peak heating physically concludes after 2:00 PM local time when dT/dt <= -0.20F/hr.
+    Returns:
+        (dT_dt_degrees_per_hr: float, peak_heating_concluded: bool)
+    """
+    if not hourly_temps or len(hourly_temps) < 2:
+        return 0.0, False
+
+    dT_dt = float(hourly_temps[-1] - hourly_temps[-2])
+    peak_concluded = (current_local_hour >= 14.0) and (dT_dt <= -0.20)
+    return dT_dt, peak_concluded
+
+
 def log_utility_g(f: float, q: float, p: float, phi: float) -> float:
     if f <= 0.0 or f >= 1.0:
         return -999999.0

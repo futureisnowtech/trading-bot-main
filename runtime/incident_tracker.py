@@ -277,3 +277,39 @@ def sync_incidents_and_notify(
         pass
 
     return {"upserted": upserted, "alerted": alerted}
+
+
+def record_incident(
+    *,
+    lane_id: str = "forecast",
+    source: str = "runtime",
+    fingerprint: str,
+    message: str,
+    level: str | int = "CRITICAL",
+    db_path: str = DB_PATH,
+) -> bool:
+    """Explicitly record an incident into the incidents table."""
+    try:
+        init_incident_table(db_path)
+        sev = _severity_from_level(str(level))
+        now = _now_iso()
+        with _conn(db_path) as c:
+            c.execute(
+                """
+                INSERT INTO incidents (
+                    lane_id, source, fingerprint, sample_message,
+                    first_seen_at, last_seen_at, count, severity, state, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, 'open', ?)
+                ON CONFLICT(lane_id, fingerprint) DO UPDATE SET
+                    sample_message = excluded.sample_message,
+                    last_seen_at = excluded.last_seen_at,
+                    count = count + 1,
+                    severity = excluded.severity,
+                    state = 'open',
+                    updated_at = excluded.updated_at
+                """,
+                (lane_id, source, fingerprint, message[:240], now, now, sev, now),
+            )
+        return True
+    except Exception as exc:
+        return False

@@ -274,3 +274,50 @@ def run_safe_command(command: str) -> str:
     except Exception as e:
         return f"Error: {str(e)}"
 
+
+def apply_autonomous_hub_parameter_optimization(
+    hub_name: str,
+    parameter_key: str,
+    new_value: float,
+    reasoning: str,
+) -> str:
+    """Executes closed-loop parameter mutation with walk-forward validation, atomic lock, and preflight checks."""
+    try:
+        from learning.agent_optimizer import propose_and_apply_hub_parameter
+
+        res = propose_and_apply_hub_parameter(
+            hub_name=hub_name,
+            parameter_key=parameter_key,
+            new_value=new_value,
+            reasoning=reasoning,
+        )
+        return json.dumps(res, indent=2)
+    except Exception as e:
+        logger.error("AI autonomous optimization error: %s", e)
+        return f"Error: {str(e)}"
+
+
+def get_autonomous_mutation_history(limit: int = 10) -> str:
+    """Retrieves immutable mutation audit trail log."""
+    try:
+        from runtime.agent_mutation_ledger import get_mutation_history
+
+        history = get_mutation_history(limit=limit)
+        return json.dumps(history, indent=2)
+    except Exception as e:
+        logger.error("AI mutation history error: %s", e)
+        return f"Error: {str(e)}"
+
+
+def run_soak_monitor_check() -> str:
+    """Evaluates all 72h soaking mutations and triggers automated rollbacks if performance degrades."""
+    try:
+        from runtime.post_deploy_soak import run_post_deploy_soak_monitor
+
+        res = run_post_deploy_soak_monitor()
+        return json.dumps(res, indent=2)
+    except Exception as e:
+        logger.error("AI soak monitor check error: %s", e)
+        return f"Error: {str(e)}"
+
+

@@ -581,13 +581,15 @@ def _metric_card(
 
 
 def _mini_card(label: str, value: str, detail: str, tooltip: str | None = None) -> str:
+    explain_html = f'<div style="font-size: 0.73em; color: #bbb; margin-top: 5px; line-height: 1.25; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 4px;">{html.escape(tooltip)}</div>' if tooltip else ""
     return f"""
-    <div class="mini-card">
+    <div class="mini-card" style="height: auto; min-height: 110px; padding: 12px; margin-bottom: 8px;">
       <div class="mini-label">
-        <span class="label-wrap">{html.escape(label)}{_tooltip_dot(tooltip)}</span>
+        <span class="label-wrap" style="font-weight: bold; color: #888; text-transform: uppercase; font-size: 0.8em; letter-spacing: 0.5px;">{html.escape(label)}</span>
       </div>
-      <div class="mini-value">{html.escape(value)}</div>
-      <div class="mini-detail">{html.escape(detail)}</div>
+      <div class="mini-value" style="font-size: 1.4em; font-weight: bold; color: #fff; margin-top: 2px;">{html.escape(value)}</div>
+      <div class="mini-detail" style="font-size: 0.8em; color: #00e5ff; margin-top: 1px;">{html.escape(detail)}</div>
+      {explain_html}
     </div>
     """
 
@@ -1015,7 +1017,7 @@ realized_pnl = total_won + total_lost
 hub_cap_now = get_kalshi_hub_exposure_cap(balance)
 
 # ════════════════════════════════════════════════════════════════════
-# J.A.R.V.I.S. INTERACTIVE COMMAND CORE & PHYSICS PAPER TRIAL TIMER
+# WEATHERMAN BOT & PHYSICS PAPER TRIAL TIMER
 # ════════════════════════════════════════════════════════════════════
 import json
 from pathlib import Path
@@ -1045,12 +1047,6 @@ now_utc = datetime.now(timezone.utc)
 remaining = trial_end - now_utc
 remaining_seconds = max(0, int(remaining.total_seconds()))
 
-# Format countdown string
-hours_left = remaining_seconds // 3600
-minutes_left = (remaining_seconds % 3600) // 60
-seconds_left = remaining_seconds % 60
-countdown_str = f"{hours_left:02d}:{minutes_left:02d}:{seconds_left:02d}"
-
 # Query paper positions count
 try:
     conn = sqlite3.connect(DB_PATH)
@@ -1060,8 +1056,8 @@ try:
 except Exception:
     paper_active = 0
 
-# Render Upgraded Giant Animated J.A.R.V.I.S. Arc Reactor
-st.markdown("<div style='text-align: center; margin-top: 10px; font-weight: bold; letter-spacing: 3px; color: #00e5ff; font-size: 0.9em; text-shadow: 0 0 10px rgba(0, 229, 255, 0.4);'>J.A.R.V.I.S. COMMAND PLATFORM</div>", unsafe_allow_html=True)
+# Render Upgraded Giant Animated Weatherman Bot Arc Reactor
+st.markdown("<div style='text-align: center; margin-top: 15px; font-weight: bold; letter-spacing: 3px; color: #00e5ff; font-size: 1.0em; text-shadow: 0 0 10px rgba(0, 229, 255, 0.4);'>WEATHERMAN BOT COMMAND PORTAL</div>", unsafe_allow_html=True)
 col_l, col_m, col_r = st.columns([1.5, 2, 1.5])
 
 with col_m:
@@ -1125,51 +1121,72 @@ with col_m:
         """,
         unsafe_allow_html=True
     )
-    if st.button("Query J.A.R.V.I.S. Core", use_container_width=True):
+    if st.button("Query Weatherman Bot Core", use_container_width=True):
         st.session_state.show_jarvis = not st.session_state.get("show_jarvis", False)
 
-# Render countdown timer right beneath
-col_timer_l, col_timer_r = st.columns([1, 1])
-with col_timer_l:
-    if remaining_seconds > 0:
-        st.markdown(
-            f"""
-            <div style="text-align: center; border: 1px solid rgba(0, 229, 255, 0.2); background-color: rgba(0, 229, 255, 0.03); border-radius: 6px; padding: 8px;">
-                <div style="font-size: 0.75em; letter-spacing: 1px; color: #a5d6a7;">PHYSICS PAPER TRIAL</div>
-                <div style="font-size: 1.8em; font-family: monospace; font-weight: bold; color: #00e5ff; text-shadow: 0 0 8px rgba(0, 229, 255, 0.8); line-height: 1.2;">{countdown_str}</div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-    else:
-        st.markdown(
-            """
-            <div style="text-align: center; border: 1px solid #ffd54f; background-color: rgba(255, 213, 79, 0.05); border-radius: 6px; padding: 8px;">
-                <div style="font-size: 0.75em; letter-spacing: 1px; color: #ffd54f;">PAPER TRIAL COMPLETE</div>
-                <div style="font-size: 1.1em; font-weight: bold; color: #ffd54f; text-shadow: 0 0 8px rgba(255, 213, 79, 0.8); line-height: 1.2; margin-top: 4px;">READY FOR PRODUCTION</div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+# Render Javascript live ticking countdown timer
+st.markdown(
+    f"""
+    <div style="text-align: center; border: 2px solid rgba(0, 229, 255, 0.4); background-color: rgba(0, 229, 255, 0.05); border-radius: 8px; padding: 12px; margin-bottom: 25px; box-shadow: 0 0 15px rgba(0, 229, 255, 0.2);">
+        <div style="font-size: 0.8em; letter-spacing: 2px; color: #a5d6a7; font-weight: bold; margin-bottom: 5px;">PHYSICS PAPER TRIAL COUNTDOWN</div>
+        <div id="trial-timer" style="font-size: 2.8em; font-family: monospace; font-weight: bold; color: #00e5ff; text-shadow: 0 0 10px rgba(0, 229, 255, 0.8); line-height: 1;">--:--:--</div>
+        <div style="font-size: 0.9em; color: #81c784; margin-top: 8px; font-weight: bold;">Active Paper Positions: {paper_active}</div>
+    </div>
+    <script>
+        var endTime = new Date("{trial_end.isoformat()}").getTime();
+        var x = setInterval(function() {{
+            var now = new Date().getTime();
+            var distance = endTime - now;
+            if (distance < 0) {{
+                clearInterval(x);
+                document.getElementById("trial-timer").innerHTML = "READY FOR PRODUCTION";
+                document.getElementById("trial-timer").style.color = "#ffd54f";
+                document.getElementById("trial-timer").style.textShadow = "0 0 10px rgba(255, 213, 79, 0.8)";
+            }} else {{
+                var hours = Math.floor(distance / (1000 * 60 * 60));
+                var minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+                var seconds = Math.floor((distance % (1000 * 60)) / 1000);
+                
+                hours = hours < 10 ? "0" + hours : hours;
+                minutes = minutes < 10 ? "0" + minutes : minutes;
+                seconds = seconds < 10 ? "0" + seconds : seconds;
+                
+                document.getElementById("trial-timer").innerHTML = hours + ":" + minutes + ":" + seconds;
+            }}
+        }}, 1000);
+    </script>
+    """,
+    unsafe_allow_html=True
+)
 
-with col_timer_r:
-    st.markdown(
-        f"""
-        <div style="text-align: center; border: 1px solid rgba(165, 214, 167, 0.2); background-color: rgba(165, 214, 167, 0.03); border-radius: 6px; padding: 8px;">
-            <div style="font-size: 0.75em; letter-spacing: 1px; color: #a5d6a7;">ACTIVE PAPER POSITIONS</div>
-            <div style="font-size: 1.8em; font-family: monospace; font-weight: bold; color: #81c784; text-shadow: 0 0 8px rgba(129, 199, 132, 0.8); line-height: 1.2;">{paper_active}</div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-st.markdown("<br>", unsafe_allow_html=True)
+# Suggested Prompts Row
+st.markdown("<div style='font-size: 0.8em; color: #888; text-transform: uppercase; font-weight: bold; text-align: center; margin-bottom: 5px;'>Suggested Direct Commands</div>", unsafe_allow_html=True)
+sug_cols = st.columns(5)
+labels = [
+    "📊 System Health",
+    "🌡️ Miami Low Edge",
+    "📑 Recent Trades",
+    "🔄 Reconcile Drift",
+    "📈 Paper vs Live"
+]
+prompts_map = {
+    "📊 System Health": "Run a complete audit on our runtime container logs, check the disk free space, and print the last 20 warning or error log lines.",
+    "🌡️ Miami Low Edge": "Retrieve the model forecast probabilities (GFS vs ECMWF) for our Miami low contract KXLOWTMIA-26AUG01-T80, check what the current recorded low is, and verify if we have any edge.",
+    "📑 Recent Trades": "Query the SQLite database for the last 5 trades, calculate our net edge vs paid market prices, and give me a summary of how we performed.",
+    "🔄 Reconcile Drift": "Fetch our live holdings from the Kalshi API, cross-reference them with our local database positions table, and run reconciliation to ensure there is zero truth drift.",
+    "📈 Paper vs Live": "Provide a comparative analysis of our live realized PnL versus our new dynamic physics paper-trading curve to see if the boundary models are outperforming."
+}
+for col, label in zip(sug_cols, labels):
+    if col.button(label, use_container_width=True, key=f"sug_{label}"):
+        st.session_state.jarvis_prompt_input = prompts_map[label]
+        st.session_state.show_jarvis = True
+        st.rerun()
 
 if st.session_state.get("show_jarvis", False):
     st.markdown(
         """
         <div style="background-color: rgba(0, 229, 255, 0.05); border: 1px solid rgba(0, 229, 255, 0.2); padding: 15px; border-radius: 6px; margin-top: 10px; margin-bottom: 20px;">
-            <strong style="color: #00e5ff;">🤖 J.A.R.V.I.S. Command Terminal</strong>
+            <strong style="color: #00e5ff;">🤖 Weatherman Bot Command Terminal</strong>
             <div style="font-size: 0.85em; color: #a5d6a7; margin-top: 2px;">Superintelligent diagnostic agent connected to droplet sqlite and log trails.</div>
         </div>
         """,
@@ -1178,40 +1195,191 @@ if st.session_state.get("show_jarvis", False):
     
     if "jarvis_history" not in st.session_state:
         st.session_state.jarvis_history = [
-            {"role": "assistant", "content": "J.A.R.V.I.S. is online. Direct server hooks initialized. Ask me to audit trades, explain current positions, pull bot logs, or manually flatten any contract."}
+            {"role": "assistant", "content": "Weatherman Bot is online. Direct server hooks initialized. Ask me to audit trades, explain current positions, pull bot logs, or manually flatten any contract."}
         ]
         
     for msg in st.session_state.jarvis_history:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
             
-    if prompt := st.chat_input("Input system query..."):
+    # Check for auto-prompt queue from button click
+    prompt = None
+    if st.session_state.get("jarvis_prompt_input"):
+        prompt = st.session_state.pop("jarvis_prompt_input")
         with st.chat_message("user"):
             st.markdown(prompt)
         st.session_state.jarvis_history.append({"role": "user", "content": prompt})
         
         with st.chat_message("assistant"):
-            with st.spinner("Executing diagnostic query..."):
+            with st.spinner("Executing direct command..."):
                 try:
                     from dashboard.jarvis_brain import run_jarvis_chat
                     reply = run_jarvis_chat(st.session_state.jarvis_history)
                     st.markdown(reply)
                     st.session_state.jarvis_history.append({"role": "assistant", "content": reply})
                 except Exception as e:
-                    st.error(f"Failed to compile response: {e}")
+                    st.error(f"Failed to execute command: {e}")
         st.rerun()
+    else:
+        if prompt := st.chat_input("Input system query..."):
+            with st.chat_message("user"):
+                st.markdown(prompt)
+            st.session_state.jarvis_history.append({"role": "user", "content": prompt})
+            
+            with st.chat_message("assistant"):
+                with st.spinner("Executing diagnostic query..."):
+                    try:
+                        from dashboard.jarvis_brain import run_jarvis_chat
+                        reply = run_jarvis_chat(st.session_state.jarvis_history)
+                        st.markdown(reply)
+                        st.session_state.jarvis_history.append({"role": "assistant", "content": reply})
+                    except Exception as e:
+                        st.error(f"Failed to compile response: {e}")
+            st.rerun()
+
+# ── upgraded live core section (highest fold position) ──────────────────
+total_equity = balance + float(open_book_summary.get("total_exposure_usd") or 0.0)
+exposure_pct = (float(open_book_summary.get("total_exposure_usd") or 0.0) / total_equity * 100) if total_equity > 0 else 0
+cash_pct = 100 - exposure_pct
+
+st.markdown("<div style='font-size: 1.1em; font-weight: bold; color: #fff; text-transform: uppercase; letter-spacing: 1px; margin-top: 15px; margin-bottom: 10px;'>📊 Live Core Portfolio Status</div>", unsafe_allow_html=True)
+live_core_html = f"""
+<style>
+.live-core-container {{
+    background-color: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 25px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}}
+.live-core-grid {{
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 20px;
+    margin-bottom: 20px;
+}}
+.live-core-card {{
+    background-color: rgba(255, 255, 255, 0.01);
+    border-left: 3px solid #00e5ff;
+    padding: 10px 15px;
+}}
+.live-core-card.pnl-loss {{
+    border-left-color: #ff5252;
+}}
+.live-core-card.pnl-win {{
+    border-left-color: #69f0ae;
+}}
+.live-core-label {{
+    font-size: 0.8em;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #888;
+}}
+.live-core-val {{
+    font-size: 1.8em;
+    font-weight: bold;
+    color: #fff;
+    margin: 5px 0;
+}}
+.live-core-desc {{
+    font-size: 0.75em;
+    color: #bbb;
+    line-height: 1.3;
+}}
+.live-core-visual-section {{
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    padding-top: 15px;
+}}
+.allocation-bar-label {{
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.8em;
+    color: #aaa;
+    margin-bottom: 5px;
+}}
+.allocation-bar-outer {{
+    width: 100%;
+    height: 12px;
+    background-color: rgba(255, 255, 255, 0.05);
+    border-radius: 6px;
+    overflow: hidden;
+    display: flex;
+}}
+.allocation-bar-exposure {{
+    width: {exposure_pct}%;
+    height: 100%;
+    background-color: #00e5ff;
+    box-shadow: 0 0 10px rgba(0, 229, 255, 0.5);
+}}
+.allocation-bar-cash {{
+    width: {cash_pct}%;
+    height: 100%;
+    background-color: #69f0ae;
+    box-shadow: 0 0 10px rgba(105, 240, 174, 0.5);
+}}
+.winrate-bar-outer {{
+    width: 100%;
+    height: 8px;
+    background-color: rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-top: 8px;
+}}
+.winrate-bar-inner {{
+    width: {win_rate_val * 100}%;
+    height: 100%;
+    background-color: #4af2d6;
+    box-shadow: 0 0 8px rgba(74, 242, 214, 0.5);
+}}
+</style>
+
+<div class="live-core-container">
+    <div class="live-core-grid">
+        <div class="live-core-card">
+            <div class="live-core-label">Total Account Equity</div>
+            <div class="live-core-val" style="color: #4af2d6; text-shadow: 0 0 10px rgba(74, 242, 214, 0.3);">${total_equity:.2f}</div>
+            <div class="live-core-desc">Total net asset value of the portfolio (Available Cash + Open Exposure Value).</div>
+        </div>
+        <div class="live-core-card">
+            <div class="live-core-label">Available Cash</div>
+            <div class="live-core-val" style="color: #69f0ae;">${balance:.2f}</div>
+            <div class="live-core-desc">Unlocked liquidity ready for executing new orders.</div>
+        </div>
+        <div class="live-core-card {'pnl-loss' if realized_pnl < 0 else 'pnl-win'}">
+            <div class="live-core-label">Realized P&L</div>
+            <div class="live-core-val" style="color: {'#ff5252' if realized_pnl < 0 else '#69f0ae'};">${realized_pnl:+.2f}</div>
+            <div class="live-core-desc">Realized weather trading returns since session start.</div>
+        </div>
+        <div class="live-core-card">
+            <div class="live-core-label">Win Rate</div>
+            <div class="live-core-val" style="color: #ffd166;">{win_rate_val:.1%}</div>
+            <div class="live-core-desc">Winning settled contracts vs total trades ({win_rate_stats.get('wins', 0)} Wins / {win_rate_stats.get('losses', 0)} Losses).</div>
+            <div class="winrate-bar-outer">
+                <div class="winrate-bar-inner"></div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="live-core-visual-section">
+        <div class="allocation-bar-label">
+            <span>📊 Deployed Risk Exposure: {exposure_pct:.1f}% (${open_book_summary.get('total_exposure_usd', 0.0):.2f})</span>
+            <span>🟢 Unlocked Cash: {cash_pct:.1f}% (${balance:.2f})</span>
+        </div>
+        <div class="allocation-bar-outer">
+            <div class="allocation-bar-exposure"></div>
+            <div class="allocation-bar-cash"></div>
+        </div>
+    </div>
+</div>
+"""
+_render_html(live_core_html)
 
 _render_html(
     f"""
-    <div class="hero">
-      <div class="eyebrow">Sovereign Weather Engine</div>
-      <div class="hero-title">Kalshi Cockpit</div>
-      <div class="hero-sub">
-        Broker-first command HUD for live weather trading. This board fuses Kalshi balance and positions,
-        local ledger drift, recent veto reasons, notifications, regime math, and deployment provenance into
-        one read-only cockpit.
-      </div>
-      <div class="chip-row">
+    <div class="hero" style="padding: 10px 20px; min-height: auto;">
+      <div class="hero-title" style="font-size: 2.2em;">Kalshi Cockpit</div>
+      <div class="chip-row" style="margin-top: 8px;">
         <div class="chip">Version {html.escape(str(regime['version']))}</div>
         <div class="chip">Tri-Model 122 Paths</div>
         <div class="chip">Cheatcode Arbitrage Engine</div>
@@ -1292,19 +1460,7 @@ if drift.get("has_drift"):
                 except Exception as e:
                     st.error(f"Failed to flatten: {e}")
 
-st.markdown("### Live Core")
-metric_html = f"""
-<div class="metric-grid">
-  {_metric_card("Live Cash", _fmt_money(balance), "Broker-reported balance", "tone-mint", metric_explainers.get("Live Cash"))}
-  {_metric_card("Open Positions", str(positions_count), "Broker-truth live positions", "tone-cyan", metric_explainers.get("Open Positions"))}
-  {_metric_card("Active Markets", str(market_counts['active_markets']), f"{market_counts['active_contracts']} active contracts", "tone-blue", metric_explainers.get("Active Markets"))}
-  {_metric_card("Release Gate", str(release_status.get('current_release_verdict') or 'UNKNOWN'), "fresh-entry permission state", "tone-mint" if release_status.get('entries_allowed') else "tone-amber", metric_explainers.get("Release Gate"))}
-  {_metric_card("Drift", "YES" if drift.get('has_drift') else "NO", f"{len(positions_db_only)} db-only remnants", "tone-bad" if drift.get('has_drift') else "tone-mint", metric_explainers.get("Drift"))}
-  {_metric_card("Realized P&L", _fmt_money(realized_pnl), "From Kalshi trade ledger", "tone-amber" if realized_pnl < 0 else "tone-mint", metric_explainers.get("Realized P&L"))}
-  {_metric_card("Win Rate", f"{win_rate_val:.1%}", f"+{_fmt_money(total_won)} / -{_fmt_money(abs(total_lost))}", "tone-blue", metric_explainers.get("Session Win Rate"))}
-</div>
-"""
-_render_html(metric_html)
+
 
 st.markdown("### Execution Pipelines")
 _render_html('<div class="stage-grid">' + "".join(_funnel_stage_card(stage) for stage in decision_funnel) + "</div>")

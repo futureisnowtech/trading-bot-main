@@ -54,11 +54,6 @@ from data.kalshi_weather_monitor import get_hourly_city_support_summary
 _WEATHER_BUCKET_ORDER = [
     "Daily High",
     "Daily Low",
-    "Rain",
-    "Hourly Temp",
-    "Snow",
-    "Wind",
-    "Other Weather",
 ]
 
 def _connect() -> sqlite3.Connection:

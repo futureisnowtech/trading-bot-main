@@ -172,8 +172,8 @@ def _load_model_skill_rows(db_path: str) -> dict[str, dict]:
             conn.row_factory = sqlite3.Row
             fetched = conn.execute(
                 """
-                SELECT category as segment, gfs_weight, ecmwf_weight, penny_threshold, running_brier
-                FROM weather_model_weights
+                SELECT segment, gfs_weight, ecmwf_weight, sample_size, effective_weight, gfs_brier, ecmwf_brier, shrinkage, lookback_days
+                FROM weather_model_skill_state
                 """
             ).fetchall()
     except Exception:

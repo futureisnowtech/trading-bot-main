@@ -467,10 +467,7 @@ class KalshiBroker:
         entry_price = float(pos_info.get("entry_price") or pos_info.get("entry") or 0.50)
         held_side = str(pos_info.get("side", default_side) or default_side).upper()
         if exit_price > 0:
-            if held_side == "NO":
-                pnl_usd = (entry_price - exit_price) * fill_qty
-            else:
-                pnl_usd = (exit_price - entry_price) * fill_qty
+            pnl_usd = (exit_price - entry_price) * fill_qty
             pnl_usd -= fee_usd
         else:
             pnl_usd = 0.0

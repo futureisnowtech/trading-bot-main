@@ -39,6 +39,7 @@ from config import (
     KALSHI_EXPENSIVE_YES_SIZE_MULTIPLIER,
     KALSHI_EXPENSIVE_YES_THRESHOLD,
     KALSHI_KELLY_CAP,
+    KALSHI_KELLY_FRACTION,
     KALSHI_MAX_CONCURRENT_POSITIONS,
     KALSHI_MAX_DEPLOYED_PCT,
     KALSHI_MAX_RISK_PER_EVENT_PCT,
@@ -1040,7 +1041,7 @@ def solve_optimal_size(
         f_star = max(0.0, f_star)
         
         fav_scaler = calculate_favorite_scaler(q_clamped, bankroll)
-        f_final = 0.25 * f_star * (1.0 / max(1e-9, lambda_scaler)) * cov_charge * fav_scaler
+        f_final = KALSHI_KELLY_FRACTION * f_star * (1.0 / max(1e-9, lambda_scaler)) * cov_charge * fav_scaler
         
         n_final = int(math.floor(f_final * bankroll / max(1e-9, p_clamped + phi)))
         if level2_asks:

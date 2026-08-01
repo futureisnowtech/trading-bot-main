@@ -86,7 +86,11 @@ def calculate_ceiled_fee(p: float, n: int, maker: bool = False) -> float:
 
 
 def calculate_salvage_exit_threshold(tau_hours: float, p_entry: float) -> float:
-    return 0.15
+    # Time-decaying salvage exit threshold (SPEC §5.2):
+    # Scale from 15% down to 2% as we approach resolution (24-hour horizon).
+    if tau_hours <= 0:
+        return 0.02
+    return max(0.02, min(0.15, (tau_hours / 24.0) * 0.15))
 
 
 def get_position_basis_quality(ticker: str, db_path: str | None = None) -> str:
@@ -643,7 +647,17 @@ def run_execution_cycle(
             pass
 
     if run_rbi:
-        logger.info("[ForecastRunner] RBI learning disabled for live weather trading.")
+        try:
+            import threading
+            from learning.weather_rbi import run_weather_rbi
+            threading.Thread(
+                target=run_weather_rbi,
+                kwargs={"force": False},
+                daemon=True,
+                name="WeatherRbiBackgroundThread",
+            ).start()
+        except Exception as rbi_err:
+            logger.warning("[ForecastRunner] Failed to start background RBI thread: %s", rbi_err)
 
     summary = {
         "broker_connected": connected,

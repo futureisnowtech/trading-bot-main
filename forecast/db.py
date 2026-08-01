@@ -350,7 +350,7 @@ def sync_open_forecast_position(
 
     category = weather_mode_for_ticker(ticker) or 'TEMP'
     now = datetime.now(timezone.utc).isoformat()
-    normalized_qty = max(0, int(round(float(qty))))
+    normalized_qty = max(0.0, float(qty))
     with _conn(db_path) as c:
         c.execute(
             """
@@ -527,7 +527,7 @@ def sync_open_forecast_position_paper(
 
     category = weather_mode_for_ticker(ticker) or 'TEMP'
     now = datetime.now(timezone.utc).isoformat()
-    normalized_qty = max(0, int(round(float(qty))))
+    normalized_qty = max(0.0, float(qty))
     with _conn(db_path) as c:
         c.execute(
             """

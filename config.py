@@ -114,7 +114,7 @@ SHADOW_EXECUTION: bool = os.getenv("SHADOW_EXECUTION", "false").lower() == "true
 
 # Session start: all performance stats (win rate, P&L, trade counts) are
 # measured from this date forward.
-TRADE_SESSION_START: str = os.getenv("TRADE_SESSION_START", "2026-03-28")
+TRADE_SESSION_START: str = os.getenv("TRADE_SESSION_START", "2026-07-23")
 
 # ════════════════════════════════════════════════════════════════════
 # ACCOUNT

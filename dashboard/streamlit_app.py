@@ -1014,6 +1014,93 @@ total_lost = win_rate_stats.get("total_lost_usd", 0.0)
 realized_pnl = total_won + total_lost
 hub_cap_now = get_kalshi_hub_exposure_cap(balance)
 
+# ════════════════════════════════════════════════════════════════════
+# J.A.R.V.I.S. INTERACTIVE COMMAND CORE
+# ════════════════════════════════════════════════════════════════════
+st.markdown("<div style='text-align: center; margin-bottom: -10px; font-weight: bold; letter-spacing: 2px; color: #00e5ff; font-size: 0.85em;'>SYSTEM COMMAND DIRECT</div>", unsafe_allow_html=True)
+col_l, col_m, col_r = st.columns([2, 1, 2])
+
+with col_m:
+    st.markdown(
+        """
+        <style>
+        .jarvis-reactor-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-top: 10px;
+        }
+        .jarvis-reactor {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(0, 229, 255, 0.95) 0%, rgba(0, 110, 255, 0.5) 50%, rgba(0, 0, 0, 0.9) 100%);
+            box-shadow: 0 0 25px rgba(0, 229, 255, 0.75), inset 0 0 15px rgba(0, 229, 255, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 3px solid rgba(255, 255, 255, 0.15);
+            animation: jarvisPulse 2.5s infinite alternate ease-in-out;
+            cursor: pointer;
+        }
+        @keyframes jarvisPulse {
+            0% { transform: scale(0.96); box-shadow: 0 0 20px rgba(0, 229, 255, 0.6); }
+            100% { transform: scale(1.04); box-shadow: 0 0 35px rgba(0, 229, 255, 0.95); }
+        }
+        .jarvis-icon {
+            font-size: 32px;
+            color: #ffffff;
+            text-shadow: 0 0 8px rgba(255, 255, 255, 0.8);
+            user-select: none;
+        }
+        </style>
+        <div class="jarvis-reactor-container">
+            <div class="jarvis-reactor">
+                <div class="jarvis-icon">⚡☁️</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+    if st.button("Query J.A.R.V.I.S.", use_container_width=True):
+        st.session_state.show_jarvis = not st.session_state.get("show_jarvis", False)
+
+if st.session_state.get("show_jarvis", False):
+    st.markdown(
+        """
+        <div style="background-color: rgba(0, 229, 255, 0.05); border: 1px solid rgba(0, 229, 255, 0.2); padding: 15px; border-radius: 6px; margin-top: 10px; margin-bottom: 20px;">
+            <strong style="color: #00e5ff;">🤖 J.A.R.V.I.S. Command Terminal</strong>
+            <div style="font-size: 0.85em; color: #a5d6a7; margin-top: 2px;">Superintelligent diagnostic agent connected to droplet sqlite and log trails.</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+    
+    if "jarvis_history" not in st.session_state:
+        st.session_state.jarvis_history = [
+            {"role": "assistant", "content": "J.A.R.V.I.S. is online. Direct server hooks initialized. Ask me to audit trades, explain current positions, pull bot logs, or manually flatten any contract."}
+        ]
+        
+    for msg in st.session_state.jarvis_history:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+            
+    if prompt := st.chat_input("Input system query..."):
+        with st.chat_message("user"):
+            st.markdown(prompt)
+        st.session_state.jarvis_history.append({"role": "user", "content": prompt})
+        
+        with st.chat_message("assistant"):
+            with st.spinner("Executing diagnostic query..."):
+                try:
+                    from dashboard.jarvis_brain import run_jarvis_chat
+                    reply = run_jarvis_chat(st.session_state.jarvis_history)
+                    st.markdown(reply)
+                    st.session_state.jarvis_history.append({"role": "assistant", "content": reply})
+                except Exception as e:
+                    st.error(f"Failed to compile response: {e}")
+        st.rerun()
+
 _render_html(
     f"""
     <div class="hero">
@@ -1082,6 +1169,28 @@ if drift.get("has_drift"):
         </div>
         """,
     )
+    
+    st.write("🔧 **Drift Intervention Controls**")
+    for mismatch in (drift.get("qty_mismatches") or []):
+        ticker = mismatch["ticker"]
+        side = mismatch["side"]
+        broker_qty = float(mismatch["broker_qty"] or 0.0)
+        col1, col2 = st.columns([3, 1])
+        col1.write(f"Flatten mismatched **{ticker}** ({side}) &mdash; Broker has {broker_qty} open contracts.")
+        if col2.button(f"Flatten {ticker[:15]}...", key=f"flat_{ticker}", use_container_width=True):
+            with st.spinner(f"Flattening {ticker}..."):
+                try:
+                    from execution.kalshi_broker import get_kalshi_broker
+                    from forecast.db import mark_forecast_position_closed
+                    broker = get_kalshi_broker()
+                    broker.connect()
+                    right = "C" if side == "YES" else "P"
+                    broker.flatten_position(ticker, right, int(round(broker_qty)))
+                    mark_forecast_position_closed(ticker, exit_type="manual_reconcile")
+                    st.success(f"Position {ticker} successfully flattened!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Failed to flatten: {e}")
 
 st.markdown("### Live Core")
 metric_html = f"""

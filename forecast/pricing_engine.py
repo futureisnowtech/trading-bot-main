@@ -416,14 +416,52 @@ def calculate_pricing(
     # 6. Weekly-refit Isotonic Calibration
     q_hat = calibrate_probability(q_hat_raw, mode, db_path)
     
+    # ── J.A.R.V.I.S. Continuous Physics Delta Overlay (PAPER RUN ONLY) ──
+    if os.getenv("RUN_PAPER_CYCLE", "false").lower() == "true":
+        gfs_precip = float(w_data.get("mean_precip") or 0.0)
+        ec_precip = float(ecmwf_data.get("mean_precip") or 0.0)
+        gfs_wind = float(w_data.get("mean_wind") or 0.0)
+        ec_wind = float(ecmwf_data.get("mean_wind") or 0.0)
+        
+        dT_precip_gfs = 0.0
+        if gfs_precip > 0.0:
+            dT_precip_gfs = -6.0 / (1.0 + math.exp(-12.0 * (gfs_precip - 0.15)))
+        dT_wind_gfs = 0.0
+        if gfs_wind > 0.0:
+            dT_wind_gfs = 4.5 / (1.0 + math.exp(-0.35 * (gfs_wind - 14.5)))
+            
+        dT_precip_ec = 0.0
+        if ec_precip > 0.0:
+            dT_precip_ec = -6.0 / (1.0 + math.exp(-12.0 * (ec_precip - 0.15)))
+        dT_wind_ec = 0.0
+        if ec_wind > 0.0:
+            dT_wind_ec = 4.5 / (1.0 + math.exp(-0.35 * (ec_wind - 14.5)))
+            
+        shift_gfs = (dT_precip_gfs + dT_wind_gfs) * 0.08
+        shift_ec = (dT_precip_ec + dT_wind_ec) * 0.08
+        
+        if mode == "HIGH":
+            q_gfs = max(0.01, min(0.99, q_gfs + shift_gfs))
+            q_ecmwf = max(0.01, min(0.99, q_ecmwf + shift_ec))
+        elif mode == "LOW":
+            q_gfs = max(0.01, min(0.99, q_gfs + shift_gfs))
+            q_ecmwf = max(0.01, min(0.99, q_ecmwf + shift_ec))
+            
+        q_hat_raw = log_odds_blend(q_gfs, q_ecmwf, q_hrrr, weights, hours_to_res)
+        q_hat = calibrate_probability(q_hat_raw, mode, db_path)
+
+    gfs_w = weights.get("gfs", 0.60) * (1.0 - (0.0 if q_hrrr is None else 0.85 / (1.0 + math.exp(max(-50.0, min(50.0, 0.30*(hours_to_res-18.0)))))))
+    ec_w = weights.get("ecmwf", 0.40) * (1.0 - (0.0 if q_hrrr is None else 0.85 / (1.0 + math.exp(max(-50.0, min(50.0, 0.30*(hours_to_res-18.0)))))))
+    hrrr_w = 0.0 if q_hrrr is None else 0.85 / (1.0 + math.exp(max(-50.0, min(50.0, 0.30*(hours_to_res-18.0)))))
+
     return {
         "q_gfs": q_gfs,
         "q_ecmwf": q_ecmwf,
         "q_hrrr": q_hrrr,
         "q_hat": q_hat,
         "lambda_scaler": lambda_scaler,
-        "gfs_weight": weights.get("gfs", 0.60) * (1.0 - (0.0 if q_hrrr is None else 0.85 / (1.0 + math.exp(max(-50.0, min(50.0, 0.30*(hours_to_res-18.0))))))), # rough actual weight representation
-        "ecmwf_weight": weights.get("ecmwf", 0.40) * (1.0 - (0.0 if q_hrrr is None else 0.85 / (1.0 + math.exp(max(-50.0, min(50.0, 0.30*(hours_to_res-18.0))))))),
-        "hrrr_weight": 0.0 if q_hrrr is None else 0.85 / (1.0 + math.exp(max(-50.0, min(50.0, 0.30*(hours_to_res-18.0))))),
+        "gfs_weight": gfs_w,
+        "ecmwf_weight": ec_w,
+        "hrrr_weight": hrrr_w,
         "basis_quality": "CONFIRMED",
     }

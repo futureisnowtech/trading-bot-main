@@ -94,7 +94,18 @@ def main() -> int:
                     )
                 else:
                     summary = run_execution_cycle(bankroll=bankroll, run_rbi=True)
-                    logger.info("Execution cycle complete: %s", summary)
+                    logger.info("Live Execution cycle complete: %s", summary)
+                    
+                    try:
+                        logger.info("Starting parallel paper cycle with continuous physics overrides...")
+                        os.environ["RUN_PAPER_CYCLE"] = "true"
+                        paper_summary = run_execution_cycle(bankroll=bankroll, run_rbi=False)
+                        logger.info("Paper Execution cycle complete: %s", paper_summary)
+                    except Exception as paper_err:
+                        logger.exception("Paper execution cycle failed: %s", paper_err)
+                    finally:
+                        os.environ["RUN_PAPER_CYCLE"] = "false"
+                        
                     if not weather_monitor_started:
                         start_weather_monitor()
                         weather_monitor_started = True

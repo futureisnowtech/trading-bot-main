@@ -1015,10 +1015,54 @@ realized_pnl = total_won + total_lost
 hub_cap_now = get_kalshi_hub_exposure_cap(balance)
 
 # ════════════════════════════════════════════════════════════════════
-# J.A.R.V.I.S. INTERACTIVE COMMAND CORE
+# J.A.R.V.I.S. INTERACTIVE COMMAND CORE & PHYSICS PAPER TRIAL TIMER
 # ════════════════════════════════════════════════════════════════════
-st.markdown("<div style='text-align: center; margin-bottom: -10px; font-weight: bold; letter-spacing: 2px; color: #00e5ff; font-size: 0.85em;'>SYSTEM COMMAND DIRECT</div>", unsafe_allow_html=True)
-col_l, col_m, col_r = st.columns([2, 1, 2])
+import json
+from pathlib import Path
+from datetime import datetime, timezone, timedelta
+
+# Load or init Paper Trial Start Time
+TRIAL_FILE = Path("/app/logs/paper_trial_start.json")
+if not TRIAL_FILE.parent.exists():
+    TRIAL_FILE = Path(DB_PATH).parent / "paper_trial_start.json"
+
+if not TRIAL_FILE.exists():
+    try:
+        with open(TRIAL_FILE, "w") as f:
+            json.dump({"start_time": datetime.now(timezone.utc).isoformat()}, f)
+    except Exception:
+        pass
+
+try:
+    with open(TRIAL_FILE) as f:
+        trial_data = json.load(f)
+    trial_start = datetime.fromisoformat(trial_data["start_time"])
+except Exception:
+    trial_start = datetime.now(timezone.utc)
+
+trial_end = trial_start + timedelta(hours=48)
+now_utc = datetime.now(timezone.utc)
+remaining = trial_end - now_utc
+remaining_seconds = max(0, int(remaining.total_seconds()))
+
+# Format countdown string
+hours_left = remaining_seconds // 3600
+minutes_left = (remaining_seconds % 3600) // 60
+seconds_left = remaining_seconds % 60
+countdown_str = f"{hours_left:02d}:{minutes_left:02d}:{seconds_left:02d}"
+
+# Query paper positions count
+try:
+    conn = sqlite3.connect(DB_PATH)
+    paper_rows = conn.execute("SELECT count(*) FROM forecast_positions_paper WHERE active = 1").fetchone()
+    paper_active = paper_rows[0] if paper_rows else 0
+    conn.close()
+except Exception:
+    paper_active = 0
+
+# Render Upgraded Giant Animated J.A.R.V.I.S. Arc Reactor
+st.markdown("<div style='text-align: center; margin-top: 10px; font-weight: bold; letter-spacing: 3px; color: #00e5ff; font-size: 0.9em; text-shadow: 0 0 10px rgba(0, 229, 255, 0.4);'>J.A.R.V.I.S. COMMAND PLATFORM</div>", unsafe_allow_html=True)
+col_l, col_m, col_r = st.columns([1.5, 2, 1.5])
 
 with col_m:
     st.markdown(
@@ -1028,42 +1072,98 @@ with col_m:
             display: flex;
             justify-content: center;
             align-items: center;
-            margin-top: 10px;
+            margin-top: 15px;
+            margin-bottom: 10px;
         }
-        .jarvis-reactor {
-            width: 100px;
-            height: 100px;
+        .jarvis-reactor-outer {
+            width: 250px;
+            height: 250px;
             border-radius: 50%;
-            background: radial-gradient(circle, rgba(0, 229, 255, 0.95) 0%, rgba(0, 110, 255, 0.5) 50%, rgba(0, 0, 0, 0.9) 100%);
-            box-shadow: 0 0 25px rgba(0, 229, 255, 0.75), inset 0 0 15px rgba(0, 229, 255, 0.5);
+            background: transparent;
+            border: 4px dashed rgba(0, 229, 255, 0.8);
             display: flex;
-            align-items: center;
             justify-content: center;
-            border: 3px solid rgba(255, 255, 255, 0.15);
-            animation: jarvisPulse 2.5s infinite alternate ease-in-out;
-            cursor: pointer;
+            align-items: center;
+            animation: rotateOuter 16s linear infinite;
+            box-shadow: 0 0 35px rgba(0, 229, 255, 0.3);
         }
-        @keyframes jarvisPulse {
-            0% { transform: scale(0.96); box-shadow: 0 0 20px rgba(0, 229, 255, 0.6); }
-            100% { transform: scale(1.04); box-shadow: 0 0 35px rgba(0, 229, 255, 0.95); }
+        .jarvis-reactor-inner {
+            width: 200px;
+            height: 200px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(0, 229, 255, 0.95) 0%, rgba(0, 110, 255, 0.5) 45%, rgba(0, 0, 0, 0.95) 100%);
+            border: 5px solid rgba(255, 255, 255, 0.15);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            box-shadow: 0 0 60px rgba(0, 229, 255, 0.9), inset 0 0 25px rgba(0, 229, 255, 0.5);
+            animation: pulseCore 3s infinite alternate ease-in-out;
+            transform-origin: center;
+        }
+        @keyframes rotateOuter {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        @keyframes pulseCore {
+            0% { transform: scale(0.96); filter: brightness(0.9); }
+            100% { transform: scale(1.04); filter: brightness(1.25); }
         }
         .jarvis-icon {
-            font-size: 32px;
+            font-size: 72px;
             color: #ffffff;
-            text-shadow: 0 0 8px rgba(255, 255, 255, 0.8);
+            text-shadow: 0 0 15px rgba(255, 255, 255, 0.9), 0 0 30px rgba(0, 229, 255, 0.7);
             user-select: none;
         }
         </style>
         <div class="jarvis-reactor-container">
-            <div class="jarvis-reactor">
-                <div class="jarvis-icon">⚡☁️</div>
+            <div class="jarvis-reactor-outer">
+                <div class="jarvis-reactor-inner">
+                    <div class="jarvis-icon">⚡☁️</div>
+                </div>
             </div>
         </div>
         """,
         unsafe_allow_html=True
     )
-    if st.button("Query J.A.R.V.I.S.", use_container_width=True):
+    if st.button("Query J.A.R.V.I.S. Core", use_container_width=True):
         st.session_state.show_jarvis = not st.session_state.get("show_jarvis", False)
+
+# Render countdown timer right beneath
+col_timer_l, col_timer_r = st.columns([1, 1])
+with col_timer_l:
+    if remaining_seconds > 0:
+        st.markdown(
+            f"""
+            <div style="text-align: center; border: 1px solid rgba(0, 229, 255, 0.2); background-color: rgba(0, 229, 255, 0.03); border-radius: 6px; padding: 8px;">
+                <div style="font-size: 0.75em; letter-spacing: 1px; color: #a5d6a7;">PHYSICS PAPER TRIAL</div>
+                <div style="font-size: 1.8em; font-family: monospace; font-weight: bold; color: #00e5ff; text-shadow: 0 0 8px rgba(0, 229, 255, 0.8); line-height: 1.2;">{countdown_str}</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    else:
+        st.markdown(
+            """
+            <div style="text-align: center; border: 1px solid #ffd54f; background-color: rgba(255, 213, 79, 0.05); border-radius: 6px; padding: 8px;">
+                <div style="font-size: 0.75em; letter-spacing: 1px; color: #ffd54f;">PAPER TRIAL COMPLETE</div>
+                <div style="font-size: 1.1em; font-weight: bold; color: #ffd54f; text-shadow: 0 0 8px rgba(255, 213, 79, 0.8); line-height: 1.2; margin-top: 4px;">READY FOR PRODUCTION</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+with col_timer_r:
+    st.markdown(
+        f"""
+        <div style="text-align: center; border: 1px solid rgba(165, 214, 167, 0.2); background-color: rgba(165, 214, 167, 0.03); border-radius: 6px; padding: 8px;">
+            <div style="font-size: 0.75em; letter-spacing: 1px; color: #a5d6a7;">ACTIVE PAPER POSITIONS</div>
+            <div style="font-size: 1.8em; font-family: monospace; font-weight: bold; color: #81c784; text-shadow: 0 0 8px rgba(129, 199, 132, 0.8); line-height: 1.2;">{paper_active}</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+st.markdown("<br>", unsafe_allow_html=True)
 
 if st.session_state.get("show_jarvis", False):
     st.markdown(

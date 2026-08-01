@@ -1054,12 +1054,31 @@ if not release_status.get("entries_allowed"):
     )
 
 if drift.get("has_drift"):
+    drift_details = []
+    if drift.get("broker_only"):
+        for p in drift["broker_only"]:
+            drift_details.append(f"<li>Broker-Only Position: <code>{html.escape(str(p.get('ticker')))}</code> ({html.escape(str(p.get('side')))}) &mdash; Qty: {p.get('qty')}, Entry: ${p.get('entry_price', 0.0):.2f}</li>")
+    if drift.get("db_only"):
+        for p in drift["db_only"]:
+            drift_details.append(f"<li>DB-Only Remnant: <code>{html.escape(str(p.get('ticker')))}</code> ({html.escape(str(p.get('side')))}) &mdash; Qty: {p.get('qty')}, Entry: ${p.get('entry_price', 0.0):.2f}</li>")
+    if drift.get("qty_mismatches"):
+        for p in drift["qty_mismatches"]:
+            drift_details.append(f"<li>Quantity Mismatch: <code>{html.escape(str(p.get('ticker')))}</code> ({html.escape(str(p.get('side')))}) &mdash; Broker has <b>{p.get('broker_qty')}</b>, DB has <b>{p.get('db_qty')}</b></li>")
+    if drift.get("entry_mismatches"):
+        for p in drift["entry_mismatches"]:
+            drift_details.append(f"<li>Entry Price Mismatch: <code>{html.escape(str(p.get('ticker')))}</code> ({html.escape(str(p.get('side')))}) &mdash; Broker: ${p.get('broker_entry_price', 0.0):.2f}, DB: ${p.get('db_entry_price', 0.0):.2f}</li>")
+            
+    details_html = f"<ul style='margin-top: 5px; margin-bottom: 0px;'>{''.join(drift_details)}</ul>" if drift_details else ""
     _render_html(
-        """
+        f"""
         <div class="banner">
           <strong>Truth drift detected.</strong> Broker reality and SQLite do not fully agree right now.
           The cockpit is showing both layers explicitly so you can see whether the issue is a stale local
           ledger, a manual broker action, or a runtime reconciliation lag.
+          <div style="margin-top: 10px; font-size: 0.9em; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 8px;">
+            <strong>Mismatched Positions:</strong>
+            {details_html}
+          </div>
         </div>
         """,
     )

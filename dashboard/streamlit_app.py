@@ -1470,117 +1470,104 @@ if drift.get("has_drift"):
 
 
 
-st.markdown("### Execution Pipelines")
-_render_html('<div class="stage-grid">' + "".join(_funnel_stage_card(stage) for stage in decision_funnel) + "</div>")
-
 top_left, top_right = st.columns([1.3, 1.0], gap="large")
 
 with top_left:
     st.markdown('<div class="section-title">Open Book</div>', unsafe_allow_html=True)
     with st.container(border=False):
-        rows = positions_live or positions_db_only
+        rows = open_book_visual
         if rows:
-            _render_html(
-                '<div class="mini-grid">'
-                + _mini_card(
-                    "Book Exposure",
-                    _fmt_money(open_book_summary.get("total_exposure_usd")),
-                    f"{open_book_summary.get('position_count')} live positions",
-                    metric_explainers.get("Book Exposure"),
-                )
-                + _mini_card(
-                    "Live Mark P&L",
-                    _fmt_money(open_book_summary.get("total_mark_pnl_usd")),
-                    "midpoint mark across the book",
-                    metric_explainers.get("Live Mark P&L"),
-                )
-                + _mini_card(
-                    "Emergency Exit P&L",
-                    _fmt_money(open_book_summary.get("total_exit_pnl_est_usd")),
-                    "flatten now at the live bid",
-                    metric_explainers.get("Emergency Exit P&L"),
-                )
-                + "</div>"
+            pos_df = pd.DataFrame(rows)
+            # Add weather_mode column for color scale and grouping
+            pos_df["weather_mode"] = pos_df.apply(
+                lambda r: "HIGH" if "HIGH" in str(r.get("weather_bucket")).upper() or "HIGH" in str(r.get("ticker")).upper() else "LOW",
+                axis=1
             )
-            _render_html(
-                '<div class="mini-grid">'
-                + _mini_card(
-                    "Nearest Resolution",
-                    str(open_book_summary.get("nearest_resolution_label") or "N/A"),
-                    "soonest contract to settle",
-                    metric_explainers.get("Nearest Resolution"),
+            # Fill missing/NaN values to avoid Altair render errors
+            pos_df["gross_mark_pnl"] = pos_df["gross_mark_pnl"].fillna(0.0)
+            pos_df["exit_pnl_est"] = pos_df["exit_pnl_est"].fillna(0.0)
+            pos_df["hours_to_resolution"] = pos_df["hours_to_resolution"].fillna(0.0)
+            pos_df["exposure_usd"] = pos_df["exposure_usd"].fillna(0.0)
+            
+            # ── CHART 1: Book Exposure by Ticker & Hub ──
+            st.markdown("#### 1. Open Book Risk Exposure")
+            exp_chart = (
+                alt.Chart(pos_df)
+                .mark_bar(cornerRadiusEnd=4, size=16)
+                .encode(
+                    y=alt.Y("ticker:N", sort="-x", title="Market Ticker"),
+                    x=alt.X("exposure_usd:Q", title="Committed Capital (USD)"),
+                    color=alt.Color("hub:N", legend=alt.Legend(title="Regional Hub"), scale=alt.Scale(scheme="tableau10")),
+                    tooltip=["ticker", "hub", "qty", "exposure_usd"]
                 )
-                + _mini_card(
-                    "Dominant Hub",
-                    str(open_book_summary.get("largest_hub") or "N/A"),
-                    _fmt_money(open_book_summary.get("largest_hub_exposure_usd")),
-                    metric_explainers.get("Regional Hub Cap"),
-                )
-                + _mini_card(
-                    "Largest Line",
-                    str(open_book_summary.get("largest_position_ticker") or "N/A"),
-                    _fmt_money(open_book_summary.get("largest_position_exposure_usd")),
-                    metric_explainers.get("Open Positions"),
-                )
-                + "</div>"
+                .properties(height=300, width="container")
             )
+            st.altair_chart(exp_chart, use_container_width=True)
+            st.caption("**Purpose/Insight:** Audits live risk exposure sizing per contract, grouped by geographical region.")
 
-            card_tab, heat_tab, expiry_tab, raw_tab = st.tabs(
-                ["Position Cards", "Heat Map", "Expiry Pressure", "Raw Table"]
+            # ── CHART 2: Mark P&L vs Exit Liquidation P&L ──
+            st.markdown("#### 2. Live Mark vs Liquidation P&L Comparison")
+            melted_df = pos_df.melt(
+                id_vars=["ticker"],
+                value_vars=["gross_mark_pnl", "exit_pnl_est"],
+                var_name="PnL Type",
+                value_name="USD"
             )
-
-            with card_tab:
-                _render_open_book_cards(open_book_visual)
-
-            with heat_tab:
-                _render_open_book_heatmap(open_book_visual)
-                st.caption(
-                    "Heat cells show book weight plus mark-to-market and emergency-exit pressure as percentages of capital at risk."
+            melted_df["PnL Type"] = melted_df["PnL Type"].map({
+                "gross_mark_pnl": "Live Mark P&L",
+                "exit_pnl_est": "Emergency Exit P&L"
+            })
+            pnl_chart = (
+                alt.Chart(melted_df)
+                .mark_bar(cornerRadiusEnd=3)
+                .encode(
+                    y=alt.Y("ticker:N", title="Market Ticker"),
+                    yOffset="PnL Type:N",
+                    x=alt.X("USD:Q", title="Profit / Loss (USD)"),
+                    color=alt.Color("PnL Type:N", scale=alt.Scale(domain=["Live Mark P&L", "Emergency Exit P&L"], range=["#69f0ae", "#ff5252"])),
+                    tooltip=["ticker", "PnL Type", "USD"]
                 )
+                .properties(height=350, width="container")
+            )
+            st.altair_chart(pnl_chart, use_container_width=True)
+            st.caption("**Purpose/Insight:** Compares paper mark returns to actual exit values if closed immediately at live bid quotes.")
 
-            with expiry_tab:
-                _render_open_book_expiry_chart(open_book_visual)
-                st.caption(
-                    "Bigger circles mean more capital committed. Points below zero are positions that would likely lose money if flattened right now."
+            # ── CHART 3: Regional Hub Diversification ──
+            st.markdown("#### 3. Regional Hub Risk Allocation")
+            hub_chart = (
+                alt.Chart(pos_df)
+                .mark_bar(cornerRadiusEnd=4, size=24)
+                .encode(
+                    y=alt.Y("hub:N", sort="-x", title="Regional Hub"),
+                    x=alt.X("exposure_usd:Q", aggregate="sum", title="Total Exposure (USD)"),
+                    color=alt.Color("hub:N", legend=None, scale=alt.Scale(scheme="tableau10")),
+                    tooltip=["hub", "sum(exposure_usd)"]
                 )
+                .properties(height=200, width="container")
+            )
+            st.altair_chart(hub_chart, use_container_width=True)
+            st.caption("**Purpose/Insight:** Monitors compliance with the 30% regional hub concentration exposure cap.")
 
-            with raw_tab:
-                pos_df = pd.DataFrame(rows)
-                pos_df = pos_df[
-                    [
-                        "ticker",
-                        "contract_name",
-                        "side",
-                        "qty",
-                        "entry_price",
-                        "bid",
-                        "ask",
-                        "mark",
-                        "gross_mark_pnl",
-                        "exit_pnl_est",
-                        "hub",
-                        "state_label",
-                        "resolution_at",
-                    ]
-                ].rename(
-                    columns={
-                        "contract_name": "contract",
-                        "entry_price": "entry",
-                        "gross_mark_pnl": "mark_pnl",
-                        "exit_pnl_est": "exit_pnl_est",
-                        "resolution_at": "resolves",
-                        "state_label": "state",
-                    }
+            # ── CHART 4: High vs Low Weather Markets Risk ──
+            st.markdown("#### 4. Daily High vs Daily Low Risk Distribution")
+            type_chart = (
+                alt.Chart(pos_df)
+                .mark_bar(size=30)
+                .encode(
+                    x=alt.X("weather_mode:N", title="Market Category"),
+                    y=alt.Y("exposure_usd:Q", aggregate="sum", title="Committed Capital (USD)"),
+                    color=alt.Color("weather_mode:N", scale=alt.Scale(domain=["HIGH", "LOW"], range=["#ffd166", "#4af2d6"]), legend=None),
+                    tooltip=["weather_mode", "sum(exposure_usd)"]
                 )
-                st.dataframe(pos_df, width="stretch", hide_index=True)
-                st.caption("`mark_pnl` uses current side midpoint. `exit_pnl_est` is a bid-side liquidation estimate with exit fee and any recorded entry fee.")
+                .properties(height=200, width="container")
+            )
+            st.altair_chart(type_chart, use_container_width=True)
+            st.caption("**Purpose/Insight:** Audits balance between Daily High (daytime exceedance) and Daily Low (overnight low) risk exposure.")
 
-            st.markdown('<div class="section-title">Trade-Type Boards</div>', unsafe_allow_html=True)
-            _render_weather_type_boards(weather_type_boards, weather_type_counts)
+            with st.expander("🔍 View Raw Position Ledger Table"):
+                st.dataframe(pos_df[["ticker", "side", "qty", "entry_price", "mark", "gross_mark_pnl", "exit_pnl_est", "hub"]], use_container_width=True, hide_index=True)
         else:
             st.info("No live Kalshi positions are open right now.")
-            st.markdown('<div class="section-title">Trade-Type Boards</div>', unsafe_allow_html=True)
-            _render_weather_type_boards(weather_type_boards, weather_type_counts)
 
     st.markdown('<div class="section-title">Trade Curve</div>', unsafe_allow_html=True)
     if realized_curve:

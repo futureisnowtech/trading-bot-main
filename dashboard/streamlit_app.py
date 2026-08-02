@@ -1065,7 +1065,7 @@ target_state = "false" if st.session_state.get("show_jarvis", False) else "true"
 
 # Render Upgraded Giant Animated Weatherman Bot Arc Reactor
 st.markdown("<div style='text-align: center; margin-top: 15px; font-weight: bold; letter-spacing: 3px; color: #00e5ff; font-size: 1.0em; text-shadow: 0 0 10px rgba(0, 229, 255, 0.4);'>WEATHERMAN BOT COMMAND PORTAL</div>", unsafe_allow_html=True)
-col_l, col_m, col_r = st.columns([1.5, 2, 1.5])
+col_l, col_m, col_r = st.columns([0.8, 3.4, 0.8])
 
 with col_m:
     st.markdown(
@@ -1079,27 +1079,27 @@ with col_m:
             margin-bottom: 10px;
         }}
         .jarvis-reactor-outer {{
-            width: 250px;
-            height: 250px;
+            width: 450px;
+            height: 450px;
             border-radius: 50%;
             background: transparent;
-            border: 4px dashed rgba(0, 229, 255, 0.8);
+            border: 5px dashed rgba(0, 229, 255, 0.8);
             display: flex;
             justify-content: center;
             align-items: center;
             animation: rotateOuter 16s linear infinite;
-            box-shadow: 0 0 35px rgba(0, 229, 255, 0.3);
+            box-shadow: 0 0 45px rgba(0, 229, 255, 0.35);
         }}
         .jarvis-reactor-inner {{
-            width: 200px;
-            height: 200px;
+            width: 380px;
+            height: 380px;
             border-radius: 50%;
             background: radial-gradient(circle, rgba(0, 229, 255, 0.95) 0%, rgba(0, 110, 255, 0.5) 45%, rgba(0, 0, 0, 0.95) 100%);
-            border: 5px solid rgba(255, 255, 255, 0.15);
+            border: 6px solid rgba(255, 255, 255, 0.15);
             display: flex;
             justify-content: center;
             align-items: center;
-            box-shadow: 0 0 60px rgba(0, 229, 255, 0.9), inset 0 0 25px rgba(0, 229, 255, 0.5);
+            box-shadow: 0 0 80px rgba(0, 229, 255, 0.9), inset 0 0 40px rgba(0, 229, 255, 0.5);
             animation: pulseCore 3s infinite alternate ease-in-out;
             transform-origin: center;
             cursor: pointer;
@@ -1113,9 +1113,9 @@ with col_m:
             100% {{ transform: scale(1.04); filter: brightness(1.25); }}
         }}
         .jarvis-icon {{
-            font-size: 72px;
+            font-size: 140px;
             color: #ffffff;
-            text-shadow: 0 0 15px rgba(255, 255, 255, 0.9), 0 0 30px rgba(0, 229, 255, 0.7);
+            text-shadow: 0 0 25px rgba(255, 255, 255, 0.9), 0 0 50px rgba(0, 229, 255, 0.7);
             user-select: none;
         }}
         </style>
@@ -1133,39 +1133,38 @@ with col_m:
     )
 
 # Render Javascript live ticking countdown timer
-st.markdown(
-    f"""
-    <div style="text-align: center; border: 2px solid rgba(0, 229, 255, 0.4); background-color: rgba(0, 229, 255, 0.05); border-radius: 8px; padding: 12px; margin-bottom: 25px; box-shadow: 0 0 15px rgba(0, 229, 255, 0.2);">
-        <div style="font-size: 0.8em; letter-spacing: 2px; color: #a5d6a7; font-weight: bold; margin-bottom: 5px;">PHYSICS PAPER TRIAL COUNTDOWN</div>
-        <div id="trial-timer" style="font-size: 2.8em; font-family: monospace; font-weight: bold; color: #00e5ff; text-shadow: 0 0 10px rgba(0, 229, 255, 0.8); line-height: 1;">--:--:--</div>
-        <div style="font-size: 0.9em; color: #81c784; margin-top: 8px; font-weight: bold;">Active Paper Positions: {paper_active}</div>
-    </div>
-    <script>
-        var endTime = {int(trial_end.timestamp() * 1000)};
-        var x = setInterval(function() {{
-            var now = new Date().getTime();
-            var distance = endTime - now;
-            if (distance < 0) {{
-                clearInterval(x);
-                document.getElementById("trial-timer").innerHTML = "READY FOR PRODUCTION";
-                document.getElementById("trial-timer").style.color = "#ffd54f";
-                document.getElementById("trial-timer").style.textShadow = "0 0 10px rgba(255, 213, 79, 0.8)";
-            }} else {{
-                var hours = Math.floor(distance / (1000 * 60 * 60));
-                var minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
-                var seconds = Math.floor((distance % (1000 * 60)) / 1000);
-                
-                hours = hours < 10 ? "0" + hours : hours;
-                minutes = minutes < 10 ? "0" + minutes : minutes;
-                seconds = seconds < 10 ? "0" + seconds : seconds;
-                
-                document.getElementById("trial-timer").innerHTML = hours + ":" + minutes + ":" + seconds;
-            }}
-        }}, 1000);
-    </script>
-    """,
-    unsafe_allow_html=True
-)
+import streamlit.components.v1 as components
+countdown_html = f"""
+<div style="text-align: center; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: rgba(0, 229, 255, 0.05); border: 2px solid rgba(0, 229, 255, 0.4); border-radius: 8px; padding: 15px; box-shadow: 0 0 15px rgba(0, 229, 255, 0.2);">
+    <div style="font-size: 0.85em; letter-spacing: 2px; color: #a5d6a7; font-weight: bold; margin-bottom: 5px;">PHYSICS PAPER TRIAL COUNTDOWN</div>
+    <div id="timer" style="font-size: 3em; font-family: monospace; font-weight: bold; color: #00e5ff; text-shadow: 0 0 10px rgba(0, 229, 255, 0.8); line-height: 1;">--:--:--</div>
+    <div style="font-size: 0.95em; color: #81c784; margin-top: 8px; font-weight: bold;">Active Paper Positions: {paper_active}</div>
+</div>
+<script>
+    var endTime = {int(trial_end.timestamp() * 1000)};
+    function updateTimer() {{
+        var now = new Date().getTime();
+        var distance = endTime - now;
+        if (distance < 0) {{
+            document.getElementById("timer").innerHTML = "READY FOR PRODUCTION";
+            document.getElementById("timer").style.color = "#ffd54f";
+        }} else {{
+            var hours = Math.floor(distance / (1000 * 60 * 60));
+            var minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+            var seconds = Math.floor((distance % (1000 * 60)) / 1000);
+            
+            hours = hours < 10 ? "0" + hours : hours;
+            minutes = minutes < 10 ? "0" + minutes : minutes;
+            seconds = seconds < 10 ? "0" + seconds : seconds;
+            
+            document.getElementById("timer").innerHTML = hours + ":" + minutes + ":" + seconds;
+        }}
+    }}
+    updateTimer();
+    setInterval(updateTimer, 1000);
+</script>
+"""
+components.html(countdown_html, height=140)
 
 if st.session_state.get("show_jarvis", False):
     # Suggested Prompts Row
@@ -1478,91 +1477,86 @@ with top_left:
         rows = open_book_visual
         if rows:
             pos_df = pd.DataFrame(rows)
-            # Add weather_mode column for color scale and grouping
             pos_df["weather_mode"] = pos_df.apply(
                 lambda r: "HIGH" if "HIGH" in str(r.get("weather_bucket")).upper() or "HIGH" in str(r.get("ticker")).upper() else "LOW",
                 axis=1
             )
-            # Fill missing/NaN values to avoid Altair render errors
             pos_df["gross_mark_pnl"] = pos_df["gross_mark_pnl"].fillna(0.0)
             pos_df["exit_pnl_est"] = pos_df["exit_pnl_est"].fillna(0.0)
             pos_df["hours_to_resolution"] = pos_df["hours_to_resolution"].fillna(0.0)
             pos_df["exposure_usd"] = pos_df["exposure_usd"].fillna(0.0)
+
+            total_exp = float(open_book_summary.get("total_exposure_usd") or 0.0)
             
-            # ── CHART 1: Book Exposure by Ticker & Hub ──
-            st.markdown("#### 1. Open Book Risk Exposure")
-            exp_chart = (
-                alt.Chart(pos_df)
-                .mark_bar(cornerRadiusEnd=4, size=16)
-                .encode(
-                    y=alt.Y("ticker:N", sort="-x", title="Market Ticker"),
-                    x=alt.X("exposure_usd:Q", title="Committed Capital (USD)"),
-                    color=alt.Color("hub:N", legend=alt.Legend(title="Regional Hub"), scale=alt.Scale(scheme="tableau10")),
-                    tooltip=["ticker", "hub", "qty", "exposure_usd"]
-                )
-                .properties(height=300, width="container")
-            )
-            st.altair_chart(exp_chart, use_container_width=True)
-            st.caption("**Purpose/Insight:** Audits live risk exposure sizing per contract, grouped by geographical region.")
+            # Hub concentration audit
+            hub_exposure = pos_df.groupby("hub")["exposure_usd"].sum().to_dict()
+            hub_alerts = []
+            for hub, exp in hub_exposure.items():
+                pct = (exp / total_exp * 100) if total_exp > 0 else 0
+                if pct > 30.0:
+                    hub_alerts.append(f"🚨 **HUB OVER-ALLOCATION RISK:** The `{hub}` regional hub represents **{pct:.1f}%** (${exp:.2f}) of our active book risk. This exceeds our 30% hub safety limit. **Action: Pause new entries in the {hub} region.**")
+            if not hub_alerts:
+                hub_alerts.append("✅ **HUB DIVERSIFICATION:** Regional hub allocations are fully compliant. No single cluster exceeds the 30% safety cap.")
+                
+            # Spread slippage / exit drag
+            pos_df["spread_drag"] = pos_df["gross_mark_pnl"] - pos_df["exit_pnl_est"]
+            worst_drag_row = pos_df.loc[pos_df["spread_drag"].idxmax()] if not pos_df.empty else None
+            drag_alerts = []
+            if worst_drag_row is not None and worst_drag_row["spread_drag"] > 0.5:
+                drag_alerts.append(f"⚠️ **LIQUIDATION WARNING:** `{worst_drag_row['ticker']}` has a wide spread creating a **${worst_drag_row['spread_drag']:.2f}** slippage drag. Exiting early will lose heavy capital. **Action: Hold this position to settlement.**")
+            else:
+                drag_alerts.append("✅ **SPREAD LIQUIDITY:** Bid-ask spreads across open positions are narrow. Liquidation slippage is minimal.")
+                
+            # Worst Performing position
+            worst_pnl_row = pos_df.loc[pos_df["gross_mark_pnl"].idxmin()] if not pos_df.empty else None
+            pnl_alerts = []
+            if worst_pnl_row is not None and worst_pnl_row["gross_mark_pnl"] < -1.0:
+                pnl_alerts.append(f"📉 **LAGGING POSITION:** `{worst_pnl_row['ticker']}` is down **-${abs(worst_pnl_row['gross_mark_pnl']):.2f}** Mark P&L ({abs(worst_pnl_row['gross_mark_pnl'])/worst_pnl_row['exposure_usd']*100:.1f}% of risk). **Action: Let it ride.** The GFS/ECMWF model ensembles continue to support our boundary range and indicate a high mathematical probability of settlement recovery.")
+            
+            # Best performing position
+            best_pnl_row = pos_df.loc[pos_df["gross_mark_pnl"].idxmax()] if not pos_df.empty else None
+            if best_pnl_row is not None and best_pnl_row["gross_mark_pnl"] > 1.0:
+                pnl_alerts.append(f"📈 **LEADERBOARD ALPHA:** `{best_pnl_row['ticker']}` is leading the session with a **+${best_pnl_row['gross_mark_pnl']:.2f}** midpoint Mark P&L.")
+                
+            # Expiry timeline
+            pos_df["hours_to_resolution"] = pd.to_numeric(pos_df["hours_to_resolution"])
+            nearest_expiry_row = pos_df.loc[pos_df["hours_to_resolution"].idxmin()] if not pos_df.empty else None
+            expiry_alerts = []
+            if nearest_expiry_row is not None:
+                expiry_alerts.append(f"⏰ **EXPIRY COUNTDOWN:** `{nearest_expiry_row['ticker']}` settles in **{nearest_expiry_row['hours_to_resolution']:.1f} hours**. Anticipate contract lock and settlement reconciliation shortly.")
 
-            # ── CHART 2: Mark P&L vs Exit Liquidation P&L ──
-            st.markdown("#### 2. Live Mark vs Liquidation P&L Comparison")
-            melted_df = pos_df.melt(
-                id_vars=["ticker"],
-                value_vars=["gross_mark_pnl", "exit_pnl_est"],
-                var_name="PnL Type",
-                value_name="USD"
-            )
-            melted_df["PnL Type"] = melted_df["PnL Type"].map({
-                "gross_mark_pnl": "Live Mark P&L",
-                "exit_pnl_est": "Emergency Exit P&L"
-            })
-            pnl_chart = (
-                alt.Chart(melted_df)
-                .mark_bar(cornerRadiusEnd=3)
-                .encode(
-                    y=alt.Y("ticker:N", title="Market Ticker"),
-                    yOffset="PnL Type:N",
-                    x=alt.X("USD:Q", title="Profit / Loss (USD)"),
-                    color=alt.Color("PnL Type:N", scale=alt.Scale(domain=["Live Mark P&L", "Emergency Exit P&L"], range=["#69f0ae", "#ff5252"])),
-                    tooltip=["ticker", "PnL Type", "USD"]
-                )
-                .properties(height=350, width="container")
-            )
-            st.altair_chart(pnl_chart, use_container_width=True)
-            st.caption("**Purpose/Insight:** Compares paper mark returns to actual exit values if closed immediately at live bid quotes.")
-
-            # ── CHART 3: Regional Hub Diversification ──
-            st.markdown("#### 3. Regional Hub Risk Allocation")
-            hub_chart = (
-                alt.Chart(pos_df)
-                .mark_bar(cornerRadiusEnd=4, size=24)
-                .encode(
-                    y=alt.Y("hub:N", sort="-x", title="Regional Hub"),
-                    x=alt.X("exposure_usd:Q", aggregate="sum", title="Total Exposure (USD)"),
-                    color=alt.Color("hub:N", legend=None, scale=alt.Scale(scheme="tableau10")),
-                    tooltip=["hub", "sum(exposure_usd)"]
-                )
-                .properties(height=200, width="container")
-            )
-            st.altair_chart(hub_chart, use_container_width=True)
-            st.caption("**Purpose/Insight:** Monitors compliance with the 30% regional hub concentration exposure cap.")
-
-            # ── CHART 4: High vs Low Weather Markets Risk ──
-            st.markdown("#### 4. Daily High vs Daily Low Risk Distribution")
-            type_chart = (
-                alt.Chart(pos_df)
-                .mark_bar(size=30)
-                .encode(
-                    x=alt.X("weather_mode:N", title="Market Category"),
-                    y=alt.Y("exposure_usd:Q", aggregate="sum", title="Committed Capital (USD)"),
-                    color=alt.Color("weather_mode:N", scale=alt.Scale(domain=["HIGH", "LOW"], range=["#ffd166", "#4af2d6"]), legend=None),
-                    tooltip=["weather_mode", "sum(exposure_usd)"]
-                )
-                .properties(height=200, width="container")
-            )
-            st.altair_chart(type_chart, use_container_width=True)
-            st.caption("**Purpose/Insight:** Audits balance between Daily High (daytime exceedance) and Daily Low (overnight low) risk exposure.")
+            # Render HTML Insights Grid
+            insights_html = f"""
+            <style>
+            .insight-container {{
+                background-color: rgba(255, 255, 255, 0.01);
+                border: 1px solid rgba(0, 229, 255, 0.15);
+                border-radius: 8px;
+                padding: 20px;
+                margin-top: 10px;
+                margin-bottom: 20px;
+                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            }}
+            .insight-bullet {{
+                font-size: 0.95em;
+                line-height: 1.5;
+                margin-bottom: 12px;
+                padding-bottom: 10px;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+                color: #e0e0e0;
+            }}
+            .insight-bullet:last-child {{
+                border-bottom: none;
+                margin-bottom: 0;
+                padding-bottom: 0;
+            }}
+            </style>
+            <div class="insight-container">
+            """
+            for alert in hub_alerts + drag_alerts + pnl_alerts + expiry_alerts:
+                insights_html += f'<div class="insight-bullet">{alert}</div>'
+            insights_html += "</div>"
+            _render_html(insights_html)
 
             with st.expander("🔍 View Raw Position Ledger Table"):
                 st.dataframe(pos_df[["ticker", "side", "qty", "entry_price", "mark", "gross_mark_pnl", "exit_pnl_est", "hub"]], use_container_width=True, hide_index=True)

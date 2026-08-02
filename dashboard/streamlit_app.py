@@ -1056,31 +1056,29 @@ try:
 except Exception:
     paper_active = 0
 
-# Check query parameters for show_jarvis toggle
-q_params = st.query_params
-if "show_jarvis" in q_params:
-    st.session_state.show_jarvis = (q_params["show_jarvis"] == "true")
-
-target_state = "false" if st.session_state.get("show_jarvis", False) else "true"
-
 # Render Upgraded Giant Animated Weatherman Bot Arc Reactor
 st.markdown("<div style='text-align: center; margin-top: 15px; font-weight: bold; letter-spacing: 3px; color: #00e5ff; font-size: 1.0em; text-shadow: 0 0 10px rgba(0, 229, 255, 0.4);'>WEATHERMAN BOT COMMAND PORTAL</div>", unsafe_allow_html=True)
 col_l, col_m, col_r = st.columns([0.8, 3.4, 0.8])
 
 with col_m:
+    # Outer rotating border container and styled classes
     st.markdown(
-        f"""
+        """
         <style>
-        .jarvis-reactor-container {{
+        .jarvis-reactor-container {
             display: flex;
             justify-content: center;
             align-items: center;
             margin-top: 15px;
             margin-bottom: 10px;
-        }}
-        .jarvis-reactor-outer {{
-            width: 450px;
-            height: 450px;
+            position: relative;
+            width: 480px;
+            height: 480px;
+            margin: 15px auto;
+        }
+        .jarvis-reactor-outer {
+            width: 460px;
+            height: 460px;
             border-radius: 50%;
             background: transparent;
             border: 5px dashed rgba(0, 229, 255, 0.8);
@@ -1089,48 +1087,67 @@ with col_m:
             align-items: center;
             animation: rotateOuter 16s linear infinite;
             box-shadow: 0 0 45px rgba(0, 229, 255, 0.35);
-        }}
-        .jarvis-reactor-inner {{
-            width: 380px;
-            height: 380px;
-            border-radius: 50%;
-            background: radial-gradient(circle, rgba(0, 229, 255, 0.95) 0%, rgba(0, 110, 255, 0.5) 45%, rgba(0, 0, 0, 0.95) 100%);
-            border: 6px solid rgba(255, 255, 255, 0.15);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            box-shadow: 0 0 80px rgba(0, 229, 255, 0.9), inset 0 0 40px rgba(0, 229, 255, 0.5);
-            animation: pulseCore 3s infinite alternate ease-in-out;
-            transform-origin: center;
-            cursor: pointer;
-        }}
-        @keyframes rotateOuter {{
-            0% {{ transform: rotate(0deg); }}
-            100% {{ transform: rotate(360deg); }}
-        }}
-        @keyframes pulseCore {{
-            0% {{ transform: scale(0.96); filter: brightness(0.9); }}
-            100% {{ transform: scale(1.04); filter: brightness(1.25); }}
-        }}
-        .jarvis-icon {{
-            font-size: 140px;
-            color: #ffffff;
-            text-shadow: 0 0 25px rgba(255, 255, 255, 0.9), 0 0 50px rgba(0, 229, 255, 0.7);
-            user-select: none;
-        }}
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 1;
+        }
+        @keyframes rotateOuter {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        @keyframes pulseCore {
+            0% { transform: scale(0.96); filter: brightness(0.9); }
+            100% { transform: scale(1.04); filter: brightness(1.25); }
+        }
+        
+        /* Turn the native Streamlit button inside the reactor-btn-wrapper into the reactor core! */
+        .reactor-btn-wrapper {
+            position: absolute;
+            top: 45px;
+            left: 45px;
+            z-index: 10;
+        }
+        .reactor-btn-wrapper div.stButton > button {
+            width: 390px !important;
+            height: 390px !important;
+            border-radius: 50% !important;
+            background: radial-gradient(circle, rgba(0, 229, 255, 0.95) 0%, rgba(0, 110, 255, 0.5) 45%, rgba(0, 0, 0, 0.95) 100%) !important;
+            border: 6px solid rgba(255, 255, 255, 0.15) !important;
+            box-shadow: 0 0 80px rgba(0, 229, 255, 0.9), inset 0 0 40px rgba(0, 229, 255, 0.5) !important;
+            font-size: 130px !important;
+            color: #ffffff !important;
+            text-shadow: 0 0 25px rgba(255, 255, 255, 0.9), 0 0 50px rgba(0, 229, 255, 0.7) !important;
+            cursor: pointer !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            animation: pulseCore 3s infinite alternate ease-in-out !important;
+            transition: all 0.3s ease !important;
+            line-height: 390px !important;
+            padding: 0 !important;
+        }
+        .reactor-btn-wrapper div.stButton > button:hover {
+            border-color: rgba(0, 229, 255, 0.85) !important;
+            box-shadow: 0 0 100px rgba(0, 229, 255, 1.0), inset 0 0 55px rgba(0, 229, 255, 0.6) !important;
+            transform: scale(1.02) !important;
+        }
+        .reactor-btn-wrapper div.stButton > button:active {
+            transform: scale(0.98) !important;
+        }
         </style>
-        <a href="?show_jarvis={target_state}" target="_self" style="text-decoration: none;">
-            <div class="jarvis-reactor-container">
-                <div class="jarvis-reactor-outer">
-                    <div class="jarvis-reactor-inner">
-                        <div class="jarvis-icon">⚡☁️</div>
-                    </div>
-                </div>
-            </div>
-        </a>
+        <div class="jarvis-reactor-container">
+            <div class="jarvis-reactor-outer"></div>
+        </div>
         """,
         unsafe_allow_html=True
     )
+    # Render the actual native Streamlit button nested in the wrapper class
+    st.markdown('<div class="reactor-btn-wrapper">', unsafe_allow_html=True)
+    if st.button("⚡", key="reactor_toggle_btn"):
+        st.session_state.show_jarvis = not st.session_state.get("show_jarvis", False)
+        st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
 
 # Render Javascript live ticking countdown timer
 import streamlit.components.v1 as components

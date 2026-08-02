@@ -1135,6 +1135,33 @@ with col_m:
         .reactor-btn-wrapper div.stButton > button:active {
             transform: scale(0.98) !important;
         }
+        
+        /* Mobile/iOS Safari Responsive Constraints */
+        @media (max-width: 600px) {
+            .jarvis-reactor-container {
+                width: 320px !important;
+                height: 320px !important;
+                margin: 10px auto !important;
+            }
+            .jarvis-reactor-outer {
+                width: 300px !important;
+                height: 300px !important;
+                border-width: 3px !important;
+                top: 10px !important;
+                left: 10px !important;
+            }
+            .reactor-btn-wrapper {
+                top: 30px !important;
+                left: 30px !important;
+            }
+            .reactor-btn-wrapper div.stButton > button {
+                width: 260px !important;
+                height: 260px !important;
+                font-size: 80px !important;
+                line-height: 260px !important;
+                border-width: 4px !important;
+            }
+        }
         </style>
         <div class="jarvis-reactor-container">
             <div class="jarvis-reactor-outer"></div>

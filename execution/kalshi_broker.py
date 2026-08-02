@@ -89,6 +89,11 @@ class KalshiBroker:
         self._open_positions: dict[str, dict] = {}  # key = f"{ticker}_{right}"
         self._private_key = None
 
+    @property
+    def _paper_balance_path(self) -> str:
+        filename = "paper_balance_lane_b.json" if os.getenv("RUN_LANE_B_CYCLE", "false").lower() == "true" else "paper_balance.json"
+        return os.path.join(REPO_ROOT, "logs", filename)
+
     def _init_shadow_balance(self, sync_positions: bool = True, quiet: bool = False) -> bool:
         self._connected = True
         self._private_key = None
@@ -98,7 +103,7 @@ class KalshiBroker:
         
         balance_dir = os.path.join(REPO_ROOT, "logs")
         os.makedirs(balance_dir, exist_ok=True)
-        balance_path = os.path.join(balance_dir, "paper_balance.json")
+        balance_path = self._paper_balance_path
         from config import ACCOUNT_SIZE
         if not os.path.exists(balance_path):
             try:
@@ -1372,7 +1377,7 @@ class KalshiBroker:
 
     def get_account_balance(self) -> float:
         if config.SHADOW_EXECUTION:
-            balance_path = os.path.join(REPO_ROOT, "logs", "paper_balance.json")
+            balance_path = self._paper_balance_path
             try:
                 with open(balance_path, "r", encoding="utf-8") as f:
                     balance_data = json.load(f)
@@ -1436,16 +1441,29 @@ class KalshiBroker:
             return {"order_id": "ERR", "status": "no_quote"}
             
         # 2. Pessimistic fill price & depth
+        is_maker_lane = os.getenv("RUN_LANE_B_CYCLE", "false").lower() == "true"
         if side == "YES":
-            ask = float(quote.get("yes_ask") or 0.0)
-            ask_size = int(float(quote.get("yes_ask_vol") or 0.0))
-            fill_price = ask
-            available_size = ask_size
+            if is_maker_lane:
+                bid = float(quote.get("yes_bid") or 0.0)
+                bid_size = int(float(quote.get("yes_bid_vol") or 0.0))
+                fill_price = bid if bid > 0.0 else float(quote.get("yes_ask") or 0.0) - 0.03
+                available_size = bid_size if bid_size > 0 else 500
+            else:
+                ask = float(quote.get("yes_ask") or 0.0)
+                ask_size = int(float(quote.get("yes_ask_vol") or 0.0))
+                fill_price = ask
+                available_size = ask_size
         else:
-            ask = float(quote.get("no_ask") or 0.0)
-            ask_size = int(float(quote.get("no_ask_vol") or 0.0))
-            fill_price = ask
-            available_size = ask_size
+            if is_maker_lane:
+                bid = float(quote.get("no_bid") or 0.0)
+                bid_size = int(float(quote.get("no_bid_vol") or 0.0))
+                fill_price = bid if bid > 0.0 else float(quote.get("no_ask") or 0.0) - 0.03
+                available_size = bid_size if bid_size > 0 else 500
+            else:
+                ask = float(quote.get("no_ask") or 0.0)
+                ask_size = int(float(quote.get("no_ask_vol") or 0.0))
+                fill_price = ask
+                available_size = ask_size
             
         if fill_price <= 0.0:
             logger.warning(f"[ShadowBroker] No sell depth on quote for {ticker}")
@@ -1454,15 +1472,15 @@ class KalshiBroker:
         # 3. Clamp quantity to resting size
         fill_qty = min(int(qty), available_size)
         if fill_qty <= 0:
-            logger.warning(f"[ShadowBroker] Zero liquidity at ask price for {ticker}")
+            logger.warning(f"[ShadowBroker] Zero liquidity at price for {ticker}")
             return {"order_id": "ERR", "status": "no_depth"}
             
         # 4. Fee calculation
-        fee_usd = estimate_kalshi_order_fee_usd(fill_qty, fill_price)
+        fee_usd = estimate_kalshi_order_fee_usd(fill_qty, fill_price, maker=is_maker_lane)
         cost_usd = (fill_qty * fill_price) + fee_usd
         
         # Lock check
-        balance_path = os.path.join(REPO_ROOT, "logs", "paper_balance.json")
+        balance_path = self._paper_balance_path
         try:
             with open(balance_path, "r", encoding="utf-8") as f:
                 balance_data = json.load(f)
@@ -1608,7 +1626,7 @@ class KalshiBroker:
         proceeds_usd = (fill_qty * fill_price) - fee_usd
         
         # 5. Add to virtual balance
-        balance_path = os.path.join(REPO_ROOT, "logs", "paper_balance.json")
+        balance_path = self._paper_balance_path
         try:
             with open(balance_path, "r", encoding="utf-8") as f:
                 balance_data = json.load(f)

@@ -188,6 +188,22 @@ CREATE TABLE IF NOT EXISTS forecast_positions_paper (
 );
 """
 
+_DDL_FORECAST_POSITIONS_PAPER_LANE_B = """
+CREATE TABLE IF NOT EXISTS forecast_positions_paper_lane_b (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticker       TEXT    NOT NULL UNIQUE,
+    qty          INTEGER NOT NULL,
+    entry_price  REAL    NOT NULL,
+    side         TEXT    NOT NULL CHECK(side IN ('YES', 'NO')),
+    category     TEXT    NOT NULL DEFAULT 'TEMP',
+    active       INTEGER NOT NULL DEFAULT 1,
+    opened_at    TEXT    NOT NULL,
+    closed_at    TEXT,
+    exit_type    TEXT,
+    basis_quality TEXT DEFAULT 'CONFIRMED'
+);
+"""
+
 _DDL_WEATHER_MODEL_WEIGHTS = """
 CREATE TABLE IF NOT EXISTS weather_model_weights (
     date             TEXT NOT NULL,
@@ -268,6 +284,7 @@ def init_forecast_db(db_path: str | None = None) -> None:
             _DDL_FORECAST_RESOLUTIONS,
             _DDL_FORECAST_POSITIONS,
             _DDL_FORECAST_POSITIONS_PAPER,
+            _DDL_FORECAST_POSITIONS_PAPER_LANE_B,
             _DDL_RECENT_VETOES,
             _DDL_SYSTEM_COOLDOWNS,
             _DDL_WEATHER_MODEL_WEIGHTS,
@@ -280,6 +297,7 @@ def init_forecast_db(db_path: str | None = None) -> None:
         _ensure_column(c, "forecast_contracts", "contract_name", "contract_name TEXT")
         _ensure_column(c, "forecast_positions", "basis_quality", "basis_quality TEXT DEFAULT 'CONFIRMED'")
         _ensure_column(c, "forecast_positions_paper", "basis_quality", "basis_quality TEXT DEFAULT 'CONFIRMED'")
+        _ensure_column(c, "forecast_positions_paper_lane_b", "basis_quality", "basis_quality TEXT DEFAULT 'CONFIRMED'")
         _ensure_column(c, "forecast_resolutions", "q_gfs", "q_gfs REAL")
         _ensure_column(c, "forecast_resolutions", "q_ecmwf", "q_ecmwf REAL")
         _ensure_column(c, "forecast_resolutions", "q_hrrr", "q_hrrr REAL")
@@ -506,10 +524,18 @@ def mark_forecast_position_closed(
         c.commit()
 
 
+def _paper_table() -> str:
+    import os
+    if os.getenv("RUN_LANE_B_CYCLE", "false").lower() == "true":
+        return "forecast_positions_paper_lane_b"
+    return "forecast_positions_paper"
+
+
 def get_open_forecast_positions_paper(db_path: str | None = None) -> list[dict]:
+    table = _paper_table()
     with _conn(db_path) as c:
         rows = c.execute(
-            "SELECT * FROM forecast_positions_paper WHERE active=1"
+            f"SELECT * FROM {table} WHERE active=1"
         ).fetchall()
         return [dict(r) for r in rows]
 
@@ -525,13 +551,14 @@ def sync_open_forecast_position_paper(
     from datetime import datetime, timezone
     from forecast.weather_contracts import weather_mode_for_ticker
 
+    table = _paper_table()
     category = weather_mode_for_ticker(ticker) or 'TEMP'
     now = datetime.now(timezone.utc).isoformat()
     normalized_qty = max(0.0, float(qty))
     with _conn(db_path) as c:
         c.execute(
-            """
-            INSERT INTO forecast_positions_paper
+            f"""
+            INSERT INTO {table}
                 (ticker, qty, entry_price, side, category, active, opened_at, closed_at, exit_type, basis_quality)
             VALUES (?, ?, ?, ?, ?, 1, ?, NULL, NULL, ?)
             ON CONFLICT(ticker) DO UPDATE SET
@@ -541,7 +568,7 @@ def sync_open_forecast_position_paper(
                 category=excluded.category,
                 active=1,
                 opened_at=CASE
-                    WHEN forecast_positions_paper.active=1 THEN forecast_positions_paper.opened_at
+                    WHEN {table}.active=1 THEN {table}.opened_at
                     ELSE excluded.opened_at
                 END,
                 closed_at=NULL,
@@ -558,10 +585,11 @@ def mark_forecast_position_closed_paper(
 ) -> None:
     from datetime import datetime, timezone
 
+    table = _paper_table()
     now = datetime.now(timezone.utc).isoformat()
     with _conn(db_path) as c:
         c.execute(
-            """UPDATE forecast_positions_paper
+            f"""UPDATE {table}
                SET active=0, closed_at=?, exit_type=?
                WHERE ticker=? AND active=1""",
             (now, exit_type, ticker),

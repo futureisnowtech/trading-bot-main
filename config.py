@@ -110,7 +110,11 @@ def _resolve_runtime_child(env_key: str, default_name: str) -> str:
 # ════════════════════════════════════════════════════════════════════
 # v18.32: Ripped out paper trading and scalper mode switches.
 # All systems are strictly LIVE.
-SHADOW_EXECUTION: bool = os.getenv("SHADOW_EXECUTION", "false").lower() == "true"
+# SHADOW_EXECUTION is resolved dynamically to support concurrent paper trading lanes
+def __getattr__(name: str):
+    if name == "SHADOW_EXECUTION":
+        return os.getenv("RUN_PAPER_CYCLE", "false").lower() == "true" or os.getenv("RUN_LANE_B_CYCLE", "false").lower() == "true" or os.getenv("SHADOW_EXECUTION", "false").lower() == "true"
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 # Session start: all performance stats (win rate, P&L, trade counts) are
 # measured from this date forward.

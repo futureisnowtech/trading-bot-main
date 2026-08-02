@@ -1133,7 +1133,7 @@ st.markdown(
         <div style="font-size: 0.9em; color: #81c784; margin-top: 8px; font-weight: bold;">Active Paper Positions: {paper_active}</div>
     </div>
     <script>
-        var endTime = new Date("{trial_end.isoformat()}").getTime();
+        var endTime = {int(trial_end.timestamp() * 1000)};
         var x = setInterval(function() {{
             var now = new Date().getTime();
             var distance = endTime - now;

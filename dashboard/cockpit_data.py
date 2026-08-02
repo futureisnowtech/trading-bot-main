@@ -647,7 +647,7 @@ def build_metric_explainers(balance_usd: float | None = None) -> dict[str, str]:
             "No single weather region is allowed to dominate the book. "
             f"Right now the live hub cap is {_coerce_float(hub_cap):.2f} dollars, "
             f"computed as max(${KALSHI_HUB_EXPOSURE_MIN_USD:.0f}, "
-            f"{KALSHI_HUB_EXPOSURE_PCT:.0%} of live cash)."
+            f"{KALSHI_HUB_EXPOSURE_PCT:.0%} of total bankroll)."
         ),
         "Max Deployed Capital": f"The engine can only deploy up to {KALSHI_MAX_DEPLOYED_PCT:.0%} of the account at once. That leaves dry powder and prevents the bot from becoming fully invested in mediocre conditions.",
         "Fee Model": f"The system prices Kalshi friction directly from the exchange fee curve ({_fee_formula_text()}) instead of adding a second flat fee tax on top.",
@@ -982,7 +982,7 @@ def build_regime_cards(
         },
         {
             "label": "Regional Hub Cap",
-            "value": f"${hub_cap:,.0f}",
+            "value": f"${hub_cap:,.2f}",
             "detail": "max correlated regional risk",
             "tooltip": explainers["Regional Hub Cap"],
         },

@@ -1056,22 +1056,29 @@ try:
 except Exception:
     paper_active = 0
 
+# Check query parameters for show_jarvis toggle
+q_params = st.query_params
+if "show_jarvis" in q_params:
+    st.session_state.show_jarvis = (q_params["show_jarvis"] == "true")
+
+target_state = "false" if st.session_state.get("show_jarvis", False) else "true"
+
 # Render Upgraded Giant Animated Weatherman Bot Arc Reactor
 st.markdown("<div style='text-align: center; margin-top: 15px; font-weight: bold; letter-spacing: 3px; color: #00e5ff; font-size: 1.0em; text-shadow: 0 0 10px rgba(0, 229, 255, 0.4);'>WEATHERMAN BOT COMMAND PORTAL</div>", unsafe_allow_html=True)
 col_l, col_m, col_r = st.columns([1.5, 2, 1.5])
 
 with col_m:
     st.markdown(
-        """
+        f"""
         <style>
-        .jarvis-reactor-container {
+        .jarvis-reactor-container {{
             display: flex;
             justify-content: center;
             align-items: center;
             margin-top: 15px;
             margin-bottom: 10px;
-        }
-        .jarvis-reactor-outer {
+        }}
+        .jarvis-reactor-outer {{
             width: 250px;
             height: 250px;
             border-radius: 50%;
@@ -1082,8 +1089,8 @@ with col_m:
             align-items: center;
             animation: rotateOuter 16s linear infinite;
             box-shadow: 0 0 35px rgba(0, 229, 255, 0.3);
-        }
-        .jarvis-reactor-inner {
+        }}
+        .jarvis-reactor-inner {{
             width: 200px;
             height: 200px;
             border-radius: 50%;
@@ -1095,34 +1102,35 @@ with col_m:
             box-shadow: 0 0 60px rgba(0, 229, 255, 0.9), inset 0 0 25px rgba(0, 229, 255, 0.5);
             animation: pulseCore 3s infinite alternate ease-in-out;
             transform-origin: center;
-        }
-        @keyframes rotateOuter {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        @keyframes pulseCore {
-            0% { transform: scale(0.96); filter: brightness(0.9); }
-            100% { transform: scale(1.04); filter: brightness(1.25); }
-        }
-        .jarvis-icon {
+            cursor: pointer;
+        }}
+        @keyframes rotateOuter {{
+            0% {{ transform: rotate(0deg); }}
+            100% {{ transform: rotate(360deg); }}
+        }}
+        @keyframes pulseCore {{
+            0% {{ transform: scale(0.96); filter: brightness(0.9); }}
+            100% {{ transform: scale(1.04); filter: brightness(1.25); }}
+        }}
+        .jarvis-icon {{
             font-size: 72px;
             color: #ffffff;
             text-shadow: 0 0 15px rgba(255, 255, 255, 0.9), 0 0 30px rgba(0, 229, 255, 0.7);
             user-select: none;
-        }
+        }}
         </style>
-        <div class="jarvis-reactor-container">
-            <div class="jarvis-reactor-outer">
-                <div class="jarvis-reactor-inner">
-                    <div class="jarvis-icon">⚡☁️</div>
+        <a href="?show_jarvis={target_state}" target="_self" style="text-decoration: none;">
+            <div class="jarvis-reactor-container">
+                <div class="jarvis-reactor-outer">
+                    <div class="jarvis-reactor-inner">
+                        <div class="jarvis-icon">⚡☁️</div>
+                    </div>
                 </div>
             </div>
-        </div>
+        </a>
         """,
         unsafe_allow_html=True
     )
-    if st.button("Query Weatherman Bot Core", use_container_width=True):
-        st.session_state.show_jarvis = not st.session_state.get("show_jarvis", False)
 
 # Render Javascript live ticking countdown timer
 st.markdown(
@@ -1159,30 +1167,30 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# Suggested Prompts Row
-st.markdown("<div style='font-size: 0.8em; color: #888; text-transform: uppercase; font-weight: bold; text-align: center; margin-bottom: 5px;'>Suggested Direct Commands</div>", unsafe_allow_html=True)
-sug_cols = st.columns(5)
-labels = [
-    "📊 System Health",
-    "🌡️ Miami Low Edge",
-    "📑 Recent Trades",
-    "🔄 Reconcile Drift",
-    "📈 Paper vs Live"
-]
-prompts_map = {
-    "📊 System Health": "Run a complete audit on our runtime container logs, check the disk free space, and print the last 20 warning or error log lines.",
-    "🌡️ Miami Low Edge": "Retrieve the model forecast probabilities (GFS vs ECMWF) for our Miami low contract KXLOWTMIA-26AUG01-T80, check what the current recorded low is, and verify if we have any edge.",
-    "📑 Recent Trades": "Query the SQLite database for the last 5 trades, calculate our net edge vs paid market prices, and give me a summary of how we performed.",
-    "🔄 Reconcile Drift": "Fetch our live holdings from the Kalshi API, cross-reference them with our local database positions table, and run reconciliation to ensure there is zero truth drift.",
-    "📈 Paper vs Live": "Provide a comparative analysis of our live realized PnL versus our new dynamic physics paper-trading curve to see if the boundary models are outperforming."
-}
-for col, label in zip(sug_cols, labels):
-    if col.button(label, use_container_width=True, key=f"sug_{label}"):
-        st.session_state.jarvis_prompt_input = prompts_map[label]
-        st.session_state.show_jarvis = True
-        st.rerun()
-
 if st.session_state.get("show_jarvis", False):
+    # Suggested Prompts Row
+    st.markdown("<div style='font-size: 0.8em; color: #888; text-transform: uppercase; font-weight: bold; text-align: center; margin-top: 15px; margin-bottom: 5px;'>Suggested Direct Commands</div>", unsafe_allow_html=True)
+    sug_cols = st.columns(5)
+    labels = [
+        "📊 System Health",
+        "🌡️ Miami Low Edge",
+        "📑 Recent Trades",
+        "🔄 Reconcile Drift",
+        "📈 Paper vs Live"
+    ]
+    prompts_map = {
+        "📊 System Health": "Run a complete audit on our runtime container logs, check the disk free space, and print the last 20 warning or error log lines.",
+        "🌡️ Miami Low Edge": "Retrieve the model forecast probabilities (GFS vs ECMWF) for our Miami low contract KXLOWTMIA-26AUG01-T80, check what the current recorded low is, and verify if we have any edge.",
+        "📑 Recent Trades": "Query the SQLite database for the last 5 trades, calculate our net edge vs paid market prices, and give me a summary of how we performed.",
+        "🔄 Reconcile Drift": "Fetch our live holdings from the Kalshi API, cross-reference them with our local database positions table, and run reconciliation to ensure there is zero truth drift.",
+        "📈 Paper vs Live": "Provide a comparative analysis of our live realized PnL versus our new dynamic physics paper-trading curve to see if the boundary models are outperforming."
+    }
+    for col, label in zip(sug_cols, labels):
+        if col.button(label, use_container_width=True, key=f"sug_{label}"):
+            st.session_state.jarvis_prompt_input = prompts_map[label]
+            st.session_state.show_jarvis = True
+            st.rerun()
+
     st.markdown(
         """
         <div style="background-color: rgba(0, 229, 255, 0.05); border: 1px solid rgba(0, 229, 255, 0.2); padding: 15px; border-radius: 6px; margin-top: 10px; margin-bottom: 20px;">

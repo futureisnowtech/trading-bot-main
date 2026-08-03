@@ -1080,6 +1080,25 @@ import streamlit.components.v1 as components
 st.markdown(
     f"""
     <style>
+    /* Fix Streamlit chat input text visibility */
+    div[data-testid="stChatInput"] textarea,
+    div[data-testid="stChatInput"] input {{
+        color: #ffffff !important;
+        background-color: rgba(6, 15, 35, 0.95) !important;
+        font-family: 'IBM Plex Mono', monospace !important;
+        font-size: 15px !important;
+        caret-color: #00e5ff !important;
+    }}
+    div[data-testid="stChatInput"] textarea::placeholder,
+    div[data-testid="stChatInput"] input::placeholder {{
+        color: rgba(0, 229, 255, 0.6) !important;
+    }}
+    div[data-testid="stChatInput"] {{
+        border: 1px solid rgba(0, 229, 255, 0.4) !important;
+        border-radius: 12px !important;
+        box-shadow: 0 0 15px rgba(0, 229, 255, 0.2) !important;
+    }}
+
     .jarvis-orb-wrap {{
         display: flex;
         flex-direction: column;
@@ -1088,17 +1107,29 @@ st.markdown(
         width: 100%;
     }}
     .jarvis-orb-anchor {{
-        display: none;
+        display: block;
+        height: 0px;
+        margin: 0;
+        padding: 0;
     }}
     
-    /* Target the st.button container that immediately follows our anchor container */
+    /* Target the st.button container wrapper */
+    div.element-container:has(div.jarvis-orb-anchor) + div.element-container {{
+        display: flex !important;
+        justify-content: center !important;
+        align-items: center !important;
+        width: 100% !important;
+        margin: 10px auto !important;
+        padding: 0 !important;
+    }}
+
     div.element-container:has(div.jarvis-orb-anchor) + div.element-container div.stButton {{
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        width: 100%;
-        margin: 10px auto;
-        position: relative;
+        display: flex !important;
+        justify-content: center !important;
+        align-items: center !important;
+        width: 100% !important;
+        margin: 0 auto !important;
+        position: relative !important;
     }}
     
     /* Target the button itself to style it as the pulsing reactor core */
@@ -1115,6 +1146,7 @@ st.markdown(
         color: transparent !important;
         font-size: 0px !important;
         padding: 0 !important;
+        margin: 0 auto !important;
         transition: all 0.4s ease-in-out !important;
         animation: pulseJ 3s infinite alternate ease-in-out;
     }}
@@ -1125,10 +1157,13 @@ st.markdown(
         border-color: rgba(0, 229, 255, 0.8) !important;
     }}
     
-    /* Outer rotating data ring positioned around the button */
+    /* Outer rotating data ring mathematically centered using 50% transform */
     div.element-container:has(div.jarvis-orb-anchor) + div.element-container div.stButton::after {{
         content: '';
         position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
         width: {_size + 30}px;
         height: {_size + 30}px;
         border-radius: 50%;
@@ -1377,7 +1412,16 @@ else:
                         st.session_state.jarvis_history.append({"role": "assistant", "content": reply})
                     except Exception as e:
                         st.error(f"Command failed: {e}")
-            st.rerun()
+    # Pin viewport scroll to top of Jarvis console to prevent auto-scrolling away
+    scroll_align_html = """
+    <script>
+        var targetEl = window.parent.document.querySelector('.jarvis-orb-anchor') || window.parent.document.querySelector('.jarvis-chat-bubble');
+        if (targetEl) {
+            targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+    </script>
+    """
+    components.html(scroll_align_html, height=0)
 
     st.markdown('</div>', unsafe_allow_html=True)
 

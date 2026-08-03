@@ -18,6 +18,8 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from dashboard.cockpit_data import get_cockpit_payload
+from config import DB_PATH, get_kalshi_hub_exposure_cap
+
 # Intercept query params to toggle Jarvis chat open/close state
 if st.query_params.get("toggle_jarvis") == "1":
     st.session_state.show_jarvis = not st.session_state.get("show_jarvis", False)

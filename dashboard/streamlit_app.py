@@ -1062,10 +1062,12 @@ except Exception:
 # ── Jarvis Expanding Orb Widget ─────────────────────────────────────
 jarvis_open = st.session_state.get("show_jarvis", False)
 
+try:
+    from dashboard.jarvis_assets import JARVIS_REACTOR_BASE64
+except ImportError:
+    JARVIS_REACTOR_BASE64 = ""
+
 # Dimensions: dormant = 280px sphere, active = 420px rounded chat bubble
-_orb_size = 420 if jarvis_open else 280
-_btn_size = _orb_size - 60
-_btn_offset = 30
 _border_style = "solid" if jarvis_open else "dashed"
 _border_opacity = "0.5" if jarvis_open else "0.85"
 
@@ -1082,18 +1084,20 @@ st.markdown(
     }}
     .jarvis-orb {{
         position: relative;
-        width: {_orb_size}px;
-        height: {_orb_size}px;
+        width: 280px;
+        height: 280px;
         margin: 0 auto;
         transition: all 0.4s ease;
+        border-radius: 50%;
+        animation: pulseJ 3s infinite alternate ease-in-out;
     }}
     .jarvis-orb-ring {{
         position: absolute;
-        inset: 0;
+        inset: -10px;
         border-radius: 50%;
         border: 4px {_border_style} rgba(0, 229, 255, {_border_opacity});
         animation: rotJ 16s linear infinite;
-        box-shadow: 0 0 35px rgba(0, 229, 255, 0.3);
+        box-shadow: 0 0 35px rgba(0, 229, 255, 0.35);
         pointer-events: none;
         z-index: 1;
     }}
@@ -1101,41 +1105,35 @@ st.markdown(
         to {{ transform: rotate(360deg); }}
     }}
     @keyframes pulseJ {{
-        0% {{ transform: scale(0.97); filter: brightness(0.92); }}
-        100% {{ transform: scale(1.03); filter: brightness(1.2); }}
+        0% {{ transform: scale(0.97); filter: brightness(0.9); }}
+        100% {{ transform: scale(1.03); filter: brightness(1.15); }}
     }}
     .jarvis-btn-pos {{
-        position: absolute;
-        top: {_btn_offset}px;
-        left: {_btn_offset}px;
+        position: relative;
+        margin-top: -280px;
+        margin-bottom: 20px;
+        width: 280px;
+        height: 280px;
         z-index: 10;
     }}
     .jarvis-btn-pos div.stButton > button {{
-        width: {_btn_size}px !important;
-        height: {_btn_size}px !important;
+        width: 280px !important;
+        height: 280px !important;
         border-radius: 50% !important;
-        background: radial-gradient(circle, rgba(0, 229, 255, 0.95) 0%, rgba(0, 110, 255, 0.5) 42%, rgba(0, 0, 0, 0.95) 100%) !important;
-        border: 5px solid rgba(255, 255, 255, 0.15) !important;
-        box-shadow: 0 0 60px rgba(0, 229, 255, 0.8), inset 0 0 30px rgba(0, 229, 255, 0.4) !important;
-        font-size: {_btn_size // 3}px !important;
-        color: #fff !important;
-        text-shadow: 0 0 20px rgba(255,255,255,0.9), 0 0 40px rgba(0,229,255,0.7) !important;
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+        color: transparent !important;
         cursor: pointer !important;
-        display: flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        animation: pulseJ 3s infinite alternate ease-in-out !important;
-        line-height: {_btn_size}px !important;
         padding: 0 !important;
         transition: all 0.3s ease !important;
     }}
     .jarvis-btn-pos div.stButton > button:hover {{
-        box-shadow: 0 0 90px rgba(0,229,255,1.0), inset 0 0 45px rgba(0,229,255,0.5) !important;
-        transform: scale(1.03) !important;
+        background: rgba(0, 229, 255, 0.05) !important;
     }}
     .jarvis-label {{
         text-align: center;
-        margin-top: 6px;
+        margin-top: 15px;
         font-weight: bold;
         letter-spacing: 3px;
         color: #00e5ff;
@@ -1151,7 +1149,12 @@ st.markdown(
 if not jarvis_open:
     st.markdown('<div class="jarvis-orb-wrap">', unsafe_allow_html=True)
     st.markdown(
-        '<div class="jarvis-orb"><div class="jarvis-orb-ring"></div></div>',
+        f'''
+        <div class="jarvis-orb">
+            <div class="jarvis-orb-ring"></div>
+            <img src="data:image/jpeg;base64,{JARVIS_REACTOR_BASE64}" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover; box-shadow: 0 0 45px rgba(0, 229, 255, 0.6);" />
+        </div>
+        ''',
         unsafe_allow_html=True,
     )
     st.markdown('<div class="jarvis-btn-pos">', unsafe_allow_html=True)
@@ -1179,7 +1182,7 @@ if not jarvis_open:
     </script>
     """
     components.html(countdown_html, height=80)
-    st.markdown('<div class="jarvis-label">TAP TO OPEN COMMAND CONSOLE</div>', unsafe_allow_html=True)
+    st.markdown('<div class="jarvis-label">TAP ORB TO INITIATE INTEL</div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
 # ── Active state: expanded orb becomes chat interface ───────────────
@@ -1259,8 +1262,17 @@ else:
     hdr_l, hdr_r = st.columns([5, 1])
     with hdr_l:
         st.markdown(
-            '<div class="jarvis-header-title">⚡ WEATHERMAN BOT</div>'
-            '<div class="jarvis-header-sub">Diagnostic agent · droplet sqlite · live log trails</div>',
+            f'''
+            <div style="display: flex; align-items: center; gap: 15px;">
+                <div style="width: 50px; height: 50px; border-radius: 50%; border: 2px solid #00e5ff; box-shadow: 0 0 10px rgba(0,229,255,0.5); overflow: hidden; flex-shrink: 0;">
+                    <img src="data:image/jpeg;base64,{JARVIS_REACTOR_BASE64}" style="width: 100%; height: 100%; object-fit: cover;" />
+                </div>
+                <div>
+                    <div class="jarvis-header-title">⚡ WEATHERMAN BOT</div>
+                    <div class="jarvis-header-sub">Diagnostic agent · droplet sqlite · live log trails</div>
+                </div>
+            </div>
+            ''',
             unsafe_allow_html=True,
         )
     with hdr_r:

@@ -1069,6 +1069,8 @@ except ImportError:
 
 # Dimensions: dormant = 500px, active = 400px (80% size)
 _size = 400 if jarvis_open else 500
+_mobile_size = 200 if jarvis_open else 260
+_mobile_ring = _mobile_size + 20
 _ring_inset = -12 if jarvis_open else -15
 _border_style = "solid" if jarvis_open else "dashed"
 _border_opacity = "0.5" if jarvis_open else "0.85"
@@ -1158,18 +1160,24 @@ st.markdown(
     /* Mobile/iOS Safari Responsive Constraints */
     @media (max-width: 600px) {{
         div.element-container:has(div.jarvis-orb-anchor) + div.element-container div.stButton > button {{
-            width: 260px !important;
-            height: 260px !important;
+            width: {_mobile_size}px !important;
+            height: {_mobile_size}px !important;
         }}
         div.element-container:has(div.jarvis-orb-anchor) + div.element-container div.stButton::after {{
-            width: 285px !important;
-            height: 285px !important;
+            width: {_mobile_ring}px !important;
+            height: {_mobile_ring}px !important;
             border-width: 3px !important;
             box-shadow: 0 0 25px rgba(0, 229, 255, 0.4) !important;
         }}
         .jarvis-label {{
-            margin-top: 15px !important;
+            margin-top: 12px !important;
             font-size: 0.8em !important;
+            letter-spacing: 1.5px !important;
+        }}
+        .jarvis-chat-bubble {{
+            padding: 12px 8px 8px 8px !important;
+            border-radius: 18px !important;
+            margin: 10px auto !important;
         }}
     }}
     </style>

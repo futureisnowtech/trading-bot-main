@@ -20,12 +20,6 @@ if str(_ROOT) not in sys.path:
 from dashboard.cockpit_data import get_cockpit_payload
 from config import DB_PATH, get_kalshi_hub_exposure_cap
 
-# Intercept query params to toggle Jarvis chat open/close state
-if st.query_params.get("toggle_jarvis") == "1":
-    st.session_state.show_jarvis = not st.session_state.get("show_jarvis", False)
-    st.query_params.clear()
-    st.rerun()
-
 st.set_page_config(
     page_title="Sovereign Kalshi Cockpit",
     page_icon="🌪",
@@ -1073,6 +1067,9 @@ try:
 except ImportError:
     JARVIS_REACTOR_BASE64 = ""
 
+# Dimensions: dormant = 500px, active = 400px (80% size)
+_size = 400 if jarvis_open else 500
+_ring_inset = -12 if jarvis_open else -15
 _border_style = "solid" if jarvis_open else "dashed"
 _border_opacity = "0.5" if jarvis_open else "0.85"
 
@@ -1085,42 +1082,62 @@ st.markdown(
         display: flex;
         flex-direction: column;
         align-items: center;
-        margin: 20px auto;
+        margin: 10px auto;
         width: 100%;
     }}
-    .jarvis-orb-container {{
+    .jarvis-orb-anchor {{
+        display: none;
+    }}
+    
+    /* Target the st.button container that immediately follows our anchor container */
+    div.element-container:has(div.jarvis-orb-anchor) + div.element-container div.stButton {{
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        width: 100%;
+        margin: 10px auto;
         position: relative;
-        width: 560px;
-        height: 560px;
-        margin: 0 auto;
-        transition: all 0.4s ease;
-        border-radius: 50%;
+    }}
+    
+    /* Target the button itself to style it as the pulsing reactor core */
+    div.element-container:has(div.jarvis-orb-anchor) + div.element-container div.stButton > button {{
+        width: {_size}px !important;
+        height: {_size}px !important;
+        border-radius: 50% !important;
+        background-image: url("data:image/jpeg;base64,{JARVIS_REACTOR_BASE64}") !important;
+        background-size: cover !important;
+        background-position: center !important;
+        border: 3px solid rgba(0, 229, 255, 0.4) !important;
+        box-shadow: 0 0 50px rgba(0, 229, 255, 0.6), inset 0 0 30px rgba(0, 229, 255, 0.3) !important;
+        cursor: pointer !important;
+        color: transparent !important;
+        font-size: 0px !important;
+        padding: 0 !important;
+        transition: all 0.4s ease-in-out !important;
         animation: pulseJ 3s infinite alternate ease-in-out;
     }}
-    .jarvis-orb-ring {{
+    
+    div.element-container:has(div.jarvis-orb-anchor) + div.element-container div.stButton > button:hover {{
+        box-shadow: 0 0 80px rgba(0, 229, 255, 0.95), inset 0 0 45px rgba(0, 229, 255, 0.4) !important;
+        transform: scale(1.02) !important;
+        border-color: rgba(0, 229, 255, 0.8) !important;
+    }}
+    
+    /* Outer rotating data ring positioned around the button */
+    div.element-container:has(div.jarvis-orb-anchor) + div.element-container div.stButton::after {{
+        content: '';
         position: absolute;
-        inset: -15px;
+        width: {_size + 30}px;
+        height: {_size + 30}px;
         border-radius: 50%;
-        border: 5px {_border_style} rgba(0, 229, 255, {_border_opacity});
+        border: 4px {_border_style} rgba(0, 229, 255, {_border_opacity});
         animation: rotJ 20s linear infinite;
-        box-shadow: 0 0 50px rgba(0, 229, 255, 0.45);
+        box-shadow: 0 0 35px rgba(0, 229, 255, 0.35);
         pointer-events: none;
         z-index: 2;
+        transition: all 0.4s ease-in-out;
     }}
-    .jarvis-orb-img {{
-        width: 560px;
-        height: 560px;
-        border-radius: 50%;
-        object-fit: cover;
-        box-shadow: 0 0 45px rgba(0, 229, 255, 0.6);
-        transition: all 0.3s ease;
-        z-index: 1;
-        cursor: pointer;
-    }}
-    .jarvis-orb-img:hover {{
-        box-shadow: 0 0 80px rgba(0, 229, 255, 0.95);
-        transform: scale(1.02);
-    }}
+    
     @keyframes rotJ {{
         to {{ transform: rotate(360deg); }}
     }}
@@ -1130,32 +1147,29 @@ st.markdown(
     }}
     .jarvis-label {{
         text-align: center;
-        margin-top: 25px;
+        margin-top: 15px;
         font-weight: bold;
         letter-spacing: 3px;
         color: #00e5ff;
-        font-size: 1.0em;
+        font-size: 0.95em;
         text-shadow: 0 0 8px rgba(0, 229, 255, 0.4);
     }}
 
     /* Mobile/iOS Safari Responsive Constraints */
     @media (max-width: 600px) {{
-        .jarvis-orb-container {{
-            width: 300px !important;
-            height: 300px !important;
+        div.element-container:has(div.jarvis-orb-anchor) + div.element-container div.stButton > button {{
+            width: 260px !important;
+            height: 260px !important;
         }}
-        .jarvis-orb-ring {{
-            inset: -8px !important;
+        div.element-container:has(div.jarvis-orb-anchor) + div.element-container div.stButton::after {{
+            width: 285px !important;
+            height: 285px !important;
             border-width: 3px !important;
             box-shadow: 0 0 25px rgba(0, 229, 255, 0.4) !important;
         }}
-        .jarvis-orb-img {{
-            width: 300px !important;
-            height: 300px !important;
-        }}
         .jarvis-label {{
             margin-top: 15px !important;
-            font-size: 0.85em !important;
+            font-size: 0.8em !important;
         }}
     }}
     </style>
@@ -1163,21 +1177,15 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ── Dormant state: orb + countdown ──────────────────────────────────
+# Render the anchor and the button (which acts as the orb)
+st.markdown('<div class="jarvis-orb-anchor"></div>', unsafe_allow_html=True)
+if st.button("⚡", key="reactor_toggle_btn"):
+    st.session_state.show_jarvis = not st.session_state.get("show_jarvis", False)
+    st.rerun()
+
+# ── Dormant state countdown ──
 if not jarvis_open:
     st.markdown('<div class="jarvis-orb-wrap">', unsafe_allow_html=True)
-    st.markdown(
-        f'''
-        <a href="?toggle_jarvis=1" target="_self" style="text-decoration: none;">
-            <div class="jarvis-orb-container">
-                <div class="jarvis-orb-ring"></div>
-                <img src="data:image/jpeg;base64,{JARVIS_REACTOR_BASE64}" class="jarvis-orb-img" />
-            </div>
-        </a>
-        ''',
-        unsafe_allow_html=True,
-    )
-
     # Countdown sits right under the dormant orb
     countdown_html = f"""
     <div style="text-align:center; font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; padding:8px 0;">
@@ -1207,7 +1215,7 @@ else:
         <style>
         .jarvis-chat-bubble {
             max-width: 700px;
-            margin: 10px auto;
+            margin: 20px auto;
             background: radial-gradient(ellipse at top, rgba(0,30,60,0.95) 0%, rgba(5,8,22,0.98) 100%);
             border: 2px solid rgba(0, 229, 255, 0.4);
             border-radius: 28px;

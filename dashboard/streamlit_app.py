@@ -1059,205 +1059,284 @@ except Exception:
     paper_active_a = 0
     paper_active_b = 0
 
-# Render Upgraded Giant Animated Weatherman Bot Arc Reactor
-# Render Unified Weatherman Bot Command Console Card
-st.markdown("<div style='text-align: center; margin-top: 15px; font-weight: bold; letter-spacing: 3px; color: #00e5ff; font-size: 1.0em; text-shadow: 0 0 10px rgba(0, 229, 255, 0.4);'>WEATHERMAN BOT COMMAND CONSOLE</div>", unsafe_allow_html=True)
+# ── Jarvis Expanding Orb Widget ─────────────────────────────────────
+jarvis_open = st.session_state.get("show_jarvis", False)
 
-with st.container(border=True):
-    # A. Reactor Core Centerpiece
+# Dimensions: dormant = 280px sphere, active = 420px rounded chat bubble
+_orb_size = 420 if jarvis_open else 280
+_btn_size = _orb_size - 60
+_btn_offset = 30
+_border_style = "solid" if jarvis_open else "dashed"
+_border_opacity = "0.5" if jarvis_open else "0.85"
+
+import streamlit.components.v1 as components
+
+st.markdown(
+    f"""
+    <style>
+    .jarvis-orb-wrap {{
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        margin: 10px auto;
+    }}
+    .jarvis-orb {{
+        position: relative;
+        width: {_orb_size}px;
+        height: {_orb_size}px;
+        margin: 0 auto;
+        transition: all 0.4s ease;
+    }}
+    .jarvis-orb-ring {{
+        position: absolute;
+        inset: 0;
+        border-radius: 50%;
+        border: 4px {_border_style} rgba(0, 229, 255, {_border_opacity});
+        animation: rotJ 16s linear infinite;
+        box-shadow: 0 0 35px rgba(0, 229, 255, 0.3);
+        pointer-events: none;
+        z-index: 1;
+    }}
+    @keyframes rotJ {{
+        to {{ transform: rotate(360deg); }}
+    }}
+    @keyframes pulseJ {{
+        0% {{ transform: scale(0.97); filter: brightness(0.92); }}
+        100% {{ transform: scale(1.03); filter: brightness(1.2); }}
+    }}
+    .jarvis-btn-pos {{
+        position: absolute;
+        top: {_btn_offset}px;
+        left: {_btn_offset}px;
+        z-index: 10;
+    }}
+    .jarvis-btn-pos div.stButton > button {{
+        width: {_btn_size}px !important;
+        height: {_btn_size}px !important;
+        border-radius: 50% !important;
+        background: radial-gradient(circle, rgba(0, 229, 255, 0.95) 0%, rgba(0, 110, 255, 0.5) 42%, rgba(0, 0, 0, 0.95) 100%) !important;
+        border: 5px solid rgba(255, 255, 255, 0.15) !important;
+        box-shadow: 0 0 60px rgba(0, 229, 255, 0.8), inset 0 0 30px rgba(0, 229, 255, 0.4) !important;
+        font-size: {_btn_size // 3}px !important;
+        color: #fff !important;
+        text-shadow: 0 0 20px rgba(255,255,255,0.9), 0 0 40px rgba(0,229,255,0.7) !important;
+        cursor: pointer !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        animation: pulseJ 3s infinite alternate ease-in-out !important;
+        line-height: {_btn_size}px !important;
+        padding: 0 !important;
+        transition: all 0.3s ease !important;
+    }}
+    .jarvis-btn-pos div.stButton > button:hover {{
+        box-shadow: 0 0 90px rgba(0,229,255,1.0), inset 0 0 45px rgba(0,229,255,0.5) !important;
+        transform: scale(1.03) !important;
+    }}
+    .jarvis-label {{
+        text-align: center;
+        margin-top: 6px;
+        font-weight: bold;
+        letter-spacing: 3px;
+        color: #00e5ff;
+        font-size: 0.85em;
+        text-shadow: 0 0 8px rgba(0, 229, 255, 0.4);
+    }}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# ── Dormant state: orb + countdown ──────────────────────────────────
+if not jarvis_open:
+    st.markdown('<div class="jarvis-orb-wrap">', unsafe_allow_html=True)
     st.markdown(
-        """
-        <style>
-        .jarvis-reactor-container {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            position: relative;
-            width: 320px;
-            height: 320px;
-            margin: 10px auto;
-        }
-        .jarvis-reactor-outer {
-            width: 300px;
-            height: 300px;
-            border-radius: 50%;
-            background: transparent;
-            border: 4px dashed rgba(0, 229, 255, 0.85);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            animation: rotateOuter 16s linear infinite;
-            box-shadow: 0 0 35px rgba(0, 229, 255, 0.3);
-            position: absolute;
-            top: 10px;
-            left: 10px;
-            z-index: 1;
-        }
-        @keyframes rotateOuter {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        @keyframes pulseCore {
-            0% { transform: scale(0.96); filter: brightness(0.9); }
-            100% { transform: scale(1.04); filter: brightness(1.25); }
-        }
-        
-        .reactor-btn-wrapper {
-            position: absolute;
-            top: 35px;
-            left: 35px;
-            z-index: 10;
-        }
-        .reactor-btn-wrapper div.stButton > button {
-            width: 250px !important;
-            height: 250px !important;
-            border-radius: 50% !important;
-            background: radial-gradient(circle, rgba(0, 229, 255, 0.95) 0%, rgba(0, 110, 255, 0.5) 45%, rgba(0, 0, 0, 0.95) 100%) !important;
-            border: 5px solid rgba(255, 255, 255, 0.15) !important;
-            box-shadow: 0 0 60px rgba(0, 229, 255, 0.8), inset 0 0 30px rgba(0, 229, 255, 0.4) !important;
-            font-size: 85px !important;
-            color: #ffffff !important;
-            text-shadow: 0 0 20px rgba(255, 255, 255, 0.9), 0 0 40px rgba(0, 229, 255, 0.7) !important;
-            cursor: pointer !important;
-            display: flex !important;
-            align-items: center !important;
-            justify-content: center !important;
-            animation: pulseCore 3s infinite alternate ease-in-out !important;
-            transition: all 0.3s ease !important;
-            line-height: 250px !important;
-            padding: 0 !important;
-        }
-        .reactor-btn-wrapper div.stButton > button:hover {
-            border-color: rgba(0, 229, 255, 0.9) !important;
-            box-shadow: 0 0 80px rgba(0, 229, 255, 1.0), inset 0 0 45px rgba(0, 229, 255, 0.5) !important;
-            transform: scale(1.02) !important;
-        }
-        </style>
-        <div class="jarvis-reactor-container">
-            <div class="jarvis-reactor-outer"></div>
-        </div>
-        """,
-        unsafe_allow_html=True
+        '<div class="jarvis-orb"><div class="jarvis-orb-ring"></div></div>',
+        unsafe_allow_html=True,
     )
-    
-    st.markdown('<div class="reactor-btn-wrapper">', unsafe_allow_html=True)
+    st.markdown('<div class="jarvis-btn-pos">', unsafe_allow_html=True)
     if st.button("⚡", key="reactor_toggle_btn"):
-        st.session_state.show_jarvis = not st.session_state.get("show_jarvis", False)
+        st.session_state.show_jarvis = True
         st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # B. Trial Countdown Timer (embedded directly within console)
-    import streamlit.components.v1 as components
+    # Countdown sits right under the dormant orb
     countdown_html = f"""
-    <div style="text-align: center; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: rgba(0, 229, 255, 0.02); border: 1px solid rgba(0, 229, 255, 0.15); border-radius: 8px; padding: 10px; margin-top: 10px; margin-bottom: 10px;">
-        <div style="font-size: 0.75em; letter-spacing: 2px; color: #a5d6a7; font-weight: bold; margin-bottom: 2px;">PHYSICS PAPER TRIAL COUNTDOWN</div>
-        <div id="timer" style="font-size: 2.2em; font-family: monospace; font-weight: bold; color: #00e5ff; text-shadow: 0 0 8px rgba(0, 229, 255, 0.8); line-height: 1;">--:--:--</div>
-        <div style="font-size: 0.85em; color: #81c784; margin-top: 4px; font-weight: bold;">Lane A: {paper_active_a} active &nbsp;|&nbsp; Lane B: {paper_active_b} active</div>
+    <div style="text-align:center; font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; padding:8px 0;">
+        <div style="font-size:0.7em; letter-spacing:2px; color:#a5d6a7; font-weight:bold;">PAPER TRIAL</div>
+        <div id="timer" style="font-size:2em; font-family:monospace; font-weight:bold; color:#00e5ff; text-shadow:0 0 8px rgba(0,229,255,0.8);">--:--:--</div>
+        <div style="font-size:0.8em; color:#81c784; font-weight:bold; margin-top:2px;">Lane A: {paper_active_a} &nbsp;|&nbsp; Lane B: {paper_active_b}</div>
     </div>
     <script>
         var endTime = {int(trial_end.timestamp() * 1000)};
         function updateTimer() {{
-            var now = new Date().getTime();
-            var distance = endTime - now;
-            if (distance < 0) {{
-                document.getElementById("timer").innerHTML = "READY FOR PRODUCTION";
-                document.getElementById("timer").style.color = "#ffd54f";
-            }} else {{
-                var hours = Math.floor(distance / (1000 * 60 * 60));
-                var minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
-                var seconds = Math.floor((distance % (1000 * 60)) / 1000);
-                
-                hours = hours < 10 ? "0" + hours : hours;
-                minutes = minutes < 10 ? "0" + minutes : minutes;
-                seconds = seconds < 10 ? "0" + seconds : seconds;
-                
-                document.getElementById("timer").innerHTML = hours + ":" + minutes + ":" + seconds;
-            }}
+            var now = new Date().getTime(), d = endTime - now;
+            if (d < 0) {{ document.getElementById("timer").innerHTML = "PRODUCTION READY"; document.getElementById("timer").style.color = "#ffd54f"; return; }}
+            var h = Math.floor(d/3600000), m = Math.floor((d%3600000)/60000), s = Math.floor((d%60000)/1000);
+            document.getElementById("timer").innerHTML = (h<10?"0":"")+h+":"+(m<10?"0":"")+m+":"+(s<10?"0":"")+s;
         }}
-        updateTimer();
-        setInterval(updateTimer, 1000);
+        updateTimer(); setInterval(updateTimer, 1000);
     </script>
     """
-    components.html(countdown_html, height=100)
+    components.html(countdown_html, height=80)
+    st.markdown('<div class="jarvis-label">TAP TO OPEN COMMAND CONSOLE</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
-    # C. Interactive Terminal Sub-Widget
-    if st.session_state.get("show_jarvis", False):
-        st.markdown("<div style='font-size: 0.8em; color: #888; text-transform: uppercase; font-weight: bold; text-align: center; margin-top: 10px; margin-bottom: 5px;'>Suggested Direct Commands</div>", unsafe_allow_html=True)
-        sug_cols = st.columns(5)
-        labels = [
-            "📊 System Health",
-            "🌡️ Miami Low Edge",
-            "📑 Recent Trades",
-            "🔄 Reconcile Drift",
-            "📈 Paper vs Live"
-        ]
-        prompts_map = {
-            "📊 System Health": "Run a complete audit on our runtime container logs, check the disk free space, and print the last 20 warning or error log lines.",
-            "🌡️ Miami Low Edge": "Retrieve the model forecast probabilities (GFS vs ECMWF) for our Miami low contract KXLOWTMIA-26AUG01-T80, check what the current recorded low is, and verify if we have any edge.",
-            "📑 Recent Trades": "Query the SQLite database for the last 5 trades, calculate our net edge vs paid market prices, and give me a summary of how we performed.",
-            "🔄 Reconcile Drift": "Fetch our live holdings from the Kalshi API, cross-reference them with our local database positions table, and run reconciliation to ensure there is zero truth drift.",
-            "📈 Paper vs Live": "Provide a comparative analysis of our live realized PnL versus our new dynamic physics paper-trading curve to see if the boundary models are outperforming."
+# ── Active state: expanded orb becomes chat interface ───────────────
+else:
+    st.markdown(
+        """
+        <style>
+        .jarvis-chat-bubble {
+            max-width: 700px;
+            margin: 10px auto;
+            background: radial-gradient(ellipse at top, rgba(0,30,60,0.95) 0%, rgba(5,8,22,0.98) 100%);
+            border: 2px solid rgba(0, 229, 255, 0.4);
+            border-radius: 28px;
+            padding: 20px 18px 12px 18px;
+            box-shadow: 0 0 50px rgba(0, 229, 255, 0.25), inset 0 0 30px rgba(0, 229, 255, 0.05);
+            position: relative;
+            overflow: hidden;
         }
-        for col, label in zip(sug_cols, labels):
-            if col.button(label, use_container_width=True, key=f"sug_{label}"):
-                st.session_state.jarvis_prompt_input = prompts_map[label]
-                st.session_state.show_jarvis = True
-                st.rerun()
+        .jarvis-chat-bubble::before {
+            content: '';
+            position: absolute;
+            inset: -2px;
+            border-radius: 28px;
+            border: 2px solid transparent;
+            background: conic-gradient(from 0deg, transparent 0%, rgba(0,229,255,0.6) 25%, transparent 50%, rgba(0,229,255,0.3) 75%, transparent 100%) border-box;
+            -webkit-mask: linear-gradient(#fff 0 0) padding-box, linear-gradient(#fff 0 0);
+            -webkit-mask-composite: xor;
+            mask-composite: exclude;
+            animation: rotJ 8s linear infinite;
+            pointer-events: none;
+            z-index: 0;
+        }
+        .jarvis-header-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 10px;
+        }
+        .jarvis-header-title {
+            font-size: 1.1em;
+            font-weight: bold;
+            color: #00e5ff;
+            letter-spacing: 1px;
+            text-shadow: 0 0 10px rgba(0,229,255,0.5);
+        }
+        .jarvis-header-sub {
+            font-size: 0.75em;
+            color: #81c784;
+        }
+        .jarvis-close-hint {
+            position: relative;
+            z-index: 10;
+        }
+        .jarvis-close-hint div.stButton > button {
+            background: rgba(255,82,82,0.15) !important;
+            border: 1px solid rgba(255,82,82,0.4) !important;
+            border-radius: 50% !important;
+            width: 36px !important;
+            height: 36px !important;
+            min-width: 36px !important;
+            font-size: 16px !important;
+            color: #ff5252 !important;
+            padding: 0 !important;
+            line-height: 36px !important;
+        }
+        .jarvis-close-hint div.stButton > button:hover {
+            background: rgba(255,82,82,0.35) !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
+    st.markdown('<div class="jarvis-chat-bubble">', unsafe_allow_html=True)
+
+    # Header row with title + close button
+    hdr_l, hdr_r = st.columns([5, 1])
+    with hdr_l:
         st.markdown(
-            """
-            <div style="background-color: rgba(0, 229, 255, 0.03); border: 1px solid rgba(0, 229, 255, 0.15); padding: 12px; border-radius: 6px; margin-top: 10px; margin-bottom: 15px;">
-                <strong style="color: #00e5ff;">🤖 Weatherman Bot Command Terminal</strong>
-                <div style="font-size: 0.85em; color: #a5d6a7; margin-top: 2px;">Diagnostic agent connected to droplet sqlite and log trails.</div>
-            </div>
-            """,
-            unsafe_allow_html=True
+            '<div class="jarvis-header-title">⚡ WEATHERMAN BOT</div>'
+            '<div class="jarvis-header-sub">Diagnostic agent · droplet sqlite · live log trails</div>',
+            unsafe_allow_html=True,
         )
-        
-        if "jarvis_history" not in st.session_state:
-            st.session_state.jarvis_history = [
-                {"role": "assistant", "content": "Weatherman Bot is online. Direct server hooks initialized. Ask me to audit trades, explain current positions, pull bot logs, or manually flatten any contract."}
-            ]
-            
-        for msg in st.session_state.jarvis_history:
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
-                
-        # Check for auto-prompt queue from button click
-        prompt = None
-        if st.session_state.get("jarvis_prompt_input"):
-            prompt = st.session_state.pop("jarvis_prompt_input")
+    with hdr_r:
+        st.markdown('<div class="jarvis-close-hint">', unsafe_allow_html=True)
+        if st.button("✕", key="jarvis_close_btn"):
+            st.session_state.show_jarvis = False
+            st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    # Suggestion chips
+    sug_cols = st.columns(5)
+    labels = [
+        "📊 Health",
+        "🌡️ Edge",
+        "📑 Trades",
+        "🔄 Drift",
+        "📈 Paper v Live",
+    ]
+    prompts_map = {
+        "📊 Health": "Run a complete audit on our runtime container logs, check the disk free space, and print the last 20 warning or error log lines.",
+        "🌡️ Edge": "Retrieve the model forecast probabilities (GFS vs ECMWF) for our Miami low contract KXLOWTMIA-26AUG01-T80, check what the current recorded low is, and verify if we have any edge.",
+        "📑 Trades": "Query the SQLite database for the last 5 trades, calculate our net edge vs paid market prices, and give me a summary of how we performed.",
+        "🔄 Drift": "Fetch our live holdings from the Kalshi API, cross-reference them with our local database positions table, and run reconciliation to ensure there is zero truth drift.",
+        "📈 Paper v Live": "Provide a comparative analysis of our live realized PnL versus our new dynamic physics paper-trading curve to see if the boundary models are outperforming.",
+    }
+    for col, label in zip(sug_cols, labels):
+        if col.button(label, use_container_width=True, key=f"sug_{label}"):
+            st.session_state.jarvis_prompt_input = prompts_map[label]
+            st.session_state.show_jarvis = True
+            st.rerun()
+
+    # Chat history
+    if "jarvis_history" not in st.session_state:
+        st.session_state.jarvis_history = [
+            {"role": "assistant", "content": "Weatherman Bot online. Ask me to audit trades, explain positions, pull logs, or flatten a contract."}
+        ]
+
+    for msg in st.session_state.jarvis_history:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    # Process queued prompt from suggestion chip
+    if st.session_state.get("jarvis_prompt_input"):
+        prompt = st.session_state.pop("jarvis_prompt_input")
+        with st.chat_message("user"):
+            st.markdown(prompt)
+        st.session_state.jarvis_history.append({"role": "user", "content": prompt})
+
+        with st.chat_message("assistant"):
+            with st.spinner("Executing..."):
+                try:
+                    from dashboard.jarvis_brain import run_jarvis_chat
+                    reply = run_jarvis_chat(st.session_state.jarvis_history)
+                    st.markdown(reply)
+                    st.session_state.jarvis_history.append({"role": "assistant", "content": reply})
+                except Exception as e:
+                    st.error(f"Command failed: {e}")
+        st.rerun()
+    else:
+        if prompt := st.chat_input("Ask Weatherman Bot anything..."):
             with st.chat_message("user"):
                 st.markdown(prompt)
             st.session_state.jarvis_history.append({"role": "user", "content": prompt})
-            
+
             with st.chat_message("assistant"):
-                with st.spinner("Executing direct command..."):
+                with st.spinner("Executing..."):
                     try:
                         from dashboard.jarvis_brain import run_jarvis_chat
                         reply = run_jarvis_chat(st.session_state.jarvis_history)
                         st.markdown(reply)
                         st.session_state.jarvis_history.append({"role": "assistant", "content": reply})
                     except Exception as e:
-                        st.error(f"Failed to execute command: {e}")
+                        st.error(f"Command failed: {e}")
             st.rerun()
-        else:
-            # Render chat_input inline inside the container
-            if prompt := st.chat_input("Input system query..."):
-                with st.chat_message("user"):
-                    st.markdown(prompt)
-                st.session_state.jarvis_history.append({"role": "user", "content": prompt})
-                
-                with st.chat_message("assistant"):
-                    with st.spinner("Executing diagnostic query..."):
-                        try:
-                            from dashboard.jarvis_brain import run_jarvis_chat
-                            reply = run_jarvis_chat(st.session_state.jarvis_history)
-                            st.markdown(reply)
-                            st.session_state.jarvis_history.append({"role": "assistant", "content": reply})
-                        except Exception as e:
-                            st.error(f"Failed to compile response: {e}")
-                st.rerun()
+
+    st.markdown('</div>', unsafe_allow_html=True)
 
 # ── upgraded live core section (highest fold position) ──────────────────
 total_equity = balance + float(open_book_summary.get("total_exposure_usd") or 0.0)

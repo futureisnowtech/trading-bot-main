@@ -18,7 +18,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from dashboard.cockpit_data import get_cockpit_payload
-from config import get_kalshi_hub_exposure_cap
+from config import DB_PATH, get_kalshi_hub_exposure_cap
 
 st.set_page_config(
     page_title="Sovereign Kalshi Cockpit",
@@ -1047,14 +1047,17 @@ now_utc = datetime.now(timezone.utc)
 remaining = trial_end - now_utc
 remaining_seconds = max(0, int(remaining.total_seconds()))
 
-# Query paper positions count
+# Query paper positions count (Lane A + Lane B)
 try:
     conn = sqlite3.connect(DB_PATH)
-    paper_rows = conn.execute("SELECT count(*) FROM forecast_positions_paper WHERE active = 1").fetchone()
-    paper_active = paper_rows[0] if paper_rows else 0
+    paper_rows_a = conn.execute("SELECT count(*) FROM forecast_positions_paper WHERE active = 1").fetchone()
+    paper_active_a = paper_rows_a[0] if paper_rows_a else 0
+    paper_rows_b = conn.execute("SELECT count(*) FROM forecast_positions_paper_lane_b WHERE active = 1").fetchone()
+    paper_active_b = paper_rows_b[0] if paper_rows_b else 0
     conn.close()
 except Exception:
-    paper_active = 0
+    paper_active_a = 0
+    paper_active_b = 0
 
 # Render Upgraded Giant Animated Weatherman Bot Arc Reactor
 # Render Unified Weatherman Bot Command Console Card
@@ -1149,7 +1152,7 @@ with st.container(border=True):
     <div style="text-align: center; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: rgba(0, 229, 255, 0.02); border: 1px solid rgba(0, 229, 255, 0.15); border-radius: 8px; padding: 10px; margin-top: 10px; margin-bottom: 10px;">
         <div style="font-size: 0.75em; letter-spacing: 2px; color: #a5d6a7; font-weight: bold; margin-bottom: 2px;">PHYSICS PAPER TRIAL COUNTDOWN</div>
         <div id="timer" style="font-size: 2.2em; font-family: monospace; font-weight: bold; color: #00e5ff; text-shadow: 0 0 8px rgba(0, 229, 255, 0.8); line-height: 1;">--:--:--</div>
-        <div style="font-size: 0.85em; color: #81c784; margin-top: 4px; font-weight: bold;">Active Paper Positions: {paper_active}</div>
+        <div style="font-size: 0.85em; color: #81c784; margin-top: 4px; font-weight: bold;">Lane A: {paper_active_a} active &nbsp;|&nbsp; Lane B: {paper_active_b} active</div>
     </div>
     <script>
         var endTime = {int(trial_end.timestamp() * 1000)};

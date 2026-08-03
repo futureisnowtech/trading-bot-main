@@ -18,7 +18,11 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from dashboard.cockpit_data import get_cockpit_payload
-from config import DB_PATH, get_kalshi_hub_exposure_cap
+# Intercept query params to toggle Jarvis chat open/close state
+if st.query_params.get("toggle_jarvis") == "1":
+    st.session_state.show_jarvis = not st.session_state.get("show_jarvis", False)
+    st.query_params.clear()
+    st.rerun()
 
 st.set_page_config(
     page_title="Sovereign Kalshi Cockpit",
@@ -1067,7 +1071,6 @@ try:
 except ImportError:
     JARVIS_REACTOR_BASE64 = ""
 
-# Dimensions: dormant = 560px sphere, active = 420px rounded chat bubble
 _border_style = "solid" if jarvis_open else "dashed"
 _border_opacity = "0.5" if jarvis_open else "0.85"
 
@@ -1100,7 +1103,21 @@ st.markdown(
         animation: rotJ 20s linear infinite;
         box-shadow: 0 0 50px rgba(0, 229, 255, 0.45);
         pointer-events: none;
+        z-index: 2;
+    }}
+    .jarvis-orb-img {{
+        width: 560px;
+        height: 560px;
+        border-radius: 50%;
+        object-fit: cover;
+        box-shadow: 0 0 45px rgba(0, 229, 255, 0.6);
+        transition: all 0.3s ease;
         z-index: 1;
+        cursor: pointer;
+    }}
+    .jarvis-orb-img:hover {{
+        box-shadow: 0 0 80px rgba(0, 229, 255, 0.95);
+        transform: scale(1.02);
     }}
     @keyframes rotJ {{
         to {{ transform: rotate(360deg); }}
@@ -1108,25 +1125,6 @@ st.markdown(
     @keyframes pulseJ {{
         0% {{ transform: scale(0.98); filter: brightness(0.9); }}
         100% {{ transform: scale(1.02); filter: brightness(1.15); }}
-    }}
-    .jarvis-orb-container div.stButton > button {{
-        width: 560px !important;
-        height: 560px !important;
-        border-radius: 50% !important;
-        background-image: url("data:image/jpeg;base64,{JARVIS_REACTOR_BASE64}") !important;
-        background-size: cover !important;
-        background-position: center !important;
-        border: 2px solid rgba(255, 255, 255, 0.15) !important;
-        box-shadow: 0 0 40px rgba(0, 229, 255, 0.5), inset 0 0 30px rgba(0, 229, 255, 0.3) !important;
-        cursor: pointer !important;
-        color: transparent !important;
-        font-size: 0px !important;
-        padding: 0 !important;
-        transition: all 0.3s ease !important;
-    }}
-    .jarvis-orb-container div.stButton > button:hover {{
-        box-shadow: 0 0 80px rgba(0, 229, 255, 0.9), inset 0 0 45px rgba(0, 229, 255, 0.4) !important;
-        transform: scale(1.01) !important;
     }}
     .jarvis-label {{
         text-align: center;
@@ -1149,7 +1147,7 @@ st.markdown(
             border-width: 3px !important;
             box-shadow: 0 0 25px rgba(0, 229, 255, 0.4) !important;
         }}
-        .jarvis-orb-container div.stButton > button {{
+        .jarvis-orb-img {{
             width: 300px !important;
             height: 300px !important;
         }}
@@ -1166,12 +1164,17 @@ st.markdown(
 # ── Dormant state: orb + countdown ──────────────────────────────────
 if not jarvis_open:
     st.markdown('<div class="jarvis-orb-wrap">', unsafe_allow_html=True)
-    st.markdown('<div class="jarvis-orb-container">', unsafe_allow_html=True)
-    st.markdown('<div class="jarvis-orb-ring"></div>', unsafe_allow_html=True)
-    if st.button("⚡", key="reactor_toggle_btn"):
-        st.session_state.show_jarvis = True
-        st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown(
+        f'''
+        <a href="?toggle_jarvis=1" target="_self" style="text-decoration: none;">
+            <div class="jarvis-orb-container">
+                <div class="jarvis-orb-ring"></div>
+                <img src="data:image/jpeg;base64,{JARVIS_REACTOR_BASE64}" class="jarvis-orb-img" />
+            </div>
+        </a>
+        ''',
+        unsafe_allow_html=True,
+    )
 
     # Countdown sits right under the dormant orb
     countdown_html = f"""

@@ -1067,7 +1067,7 @@ try:
 except ImportError:
     JARVIS_REACTOR_BASE64 = ""
 
-# Dimensions: dormant = 280px sphere, active = 420px rounded chat bubble
+# Dimensions: dormant = 560px sphere, active = 420px rounded chat bubble
 _border_style = "solid" if jarvis_open else "dashed"
 _border_opacity = "0.5" if jarvis_open else "0.85"
 
@@ -1080,12 +1080,13 @@ st.markdown(
         display: flex;
         flex-direction: column;
         align-items: center;
-        margin: 10px auto;
+        margin: 20px auto;
+        width: 100%;
     }}
-    .jarvis-orb {{
+    .jarvis-orb-container {{
         position: relative;
-        width: 280px;
-        height: 280px;
+        width: 560px;
+        height: 560px;
         margin: 0 auto;
         transition: all 0.4s ease;
         border-radius: 50%;
@@ -1093,11 +1094,11 @@ st.markdown(
     }}
     .jarvis-orb-ring {{
         position: absolute;
-        inset: -10px;
+        inset: -15px;
         border-radius: 50%;
-        border: 4px {_border_style} rgba(0, 229, 255, {_border_opacity});
-        animation: rotJ 16s linear infinite;
-        box-shadow: 0 0 35px rgba(0, 229, 255, 0.35);
+        border: 5px {_border_style} rgba(0, 229, 255, {_border_opacity});
+        animation: rotJ 20s linear infinite;
+        box-shadow: 0 0 50px rgba(0, 229, 255, 0.45);
         pointer-events: none;
         z-index: 1;
     }}
@@ -1105,40 +1106,57 @@ st.markdown(
         to {{ transform: rotate(360deg); }}
     }}
     @keyframes pulseJ {{
-        0% {{ transform: scale(0.97); filter: brightness(0.9); }}
-        100% {{ transform: scale(1.03); filter: brightness(1.15); }}
+        0% {{ transform: scale(0.98); filter: brightness(0.9); }}
+        100% {{ transform: scale(1.02); filter: brightness(1.15); }}
     }}
-    .jarvis-btn-pos {{
-        position: relative;
-        margin-top: -280px;
-        margin-bottom: 20px;
-        width: 280px;
-        height: 280px;
-        z-index: 10;
-    }}
-    .jarvis-btn-pos div.stButton > button {{
-        width: 280px !important;
-        height: 280px !important;
+    .jarvis-orb-container div.stButton > button {{
+        width: 560px !important;
+        height: 560px !important;
         border-radius: 50% !important;
-        background: transparent !important;
-        border: none !important;
-        box-shadow: none !important;
-        color: transparent !important;
+        background-image: url("data:image/jpeg;base64,{JARVIS_REACTOR_BASE64}") !important;
+        background-size: cover !important;
+        background-position: center !important;
+        border: 2px solid rgba(255, 255, 255, 0.15) !important;
+        box-shadow: 0 0 40px rgba(0, 229, 255, 0.5), inset 0 0 30px rgba(0, 229, 255, 0.3) !important;
         cursor: pointer !important;
+        color: transparent !important;
+        font-size: 0px !important;
         padding: 0 !important;
         transition: all 0.3s ease !important;
     }}
-    .jarvis-btn-pos div.stButton > button:hover {{
-        background: rgba(0, 229, 255, 0.05) !important;
+    .jarvis-orb-container div.stButton > button:hover {{
+        box-shadow: 0 0 80px rgba(0, 229, 255, 0.9), inset 0 0 45px rgba(0, 229, 255, 0.4) !important;
+        transform: scale(1.01) !important;
     }}
     .jarvis-label {{
         text-align: center;
-        margin-top: 15px;
+        margin-top: 25px;
         font-weight: bold;
         letter-spacing: 3px;
         color: #00e5ff;
-        font-size: 0.85em;
+        font-size: 1.0em;
         text-shadow: 0 0 8px rgba(0, 229, 255, 0.4);
+    }}
+
+    /* Mobile/iOS Safari Responsive Constraints */
+    @media (max-width: 600px) {{
+        .jarvis-orb-container {{
+            width: 300px !important;
+            height: 300px !important;
+        }}
+        .jarvis-orb-ring {{
+            inset: -8px !important;
+            border-width: 3px !important;
+            box-shadow: 0 0 25px rgba(0, 229, 255, 0.4) !important;
+        }}
+        .jarvis-orb-container div.stButton > button {{
+            width: 300px !important;
+            height: 300px !important;
+        }}
+        .jarvis-label {{
+            margin-top: 15px !important;
+            font-size: 0.85em !important;
+        }}
     }}
     </style>
     """,
@@ -1148,16 +1166,8 @@ st.markdown(
 # ── Dormant state: orb + countdown ──────────────────────────────────
 if not jarvis_open:
     st.markdown('<div class="jarvis-orb-wrap">', unsafe_allow_html=True)
-    st.markdown(
-        f'''
-        <div class="jarvis-orb">
-            <div class="jarvis-orb-ring"></div>
-            <img src="data:image/jpeg;base64,{JARVIS_REACTOR_BASE64}" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover; box-shadow: 0 0 45px rgba(0, 229, 255, 0.6);" />
-        </div>
-        ''',
-        unsafe_allow_html=True,
-    )
-    st.markdown('<div class="jarvis-btn-pos">', unsafe_allow_html=True)
+    st.markdown('<div class="jarvis-orb-container">', unsafe_allow_html=True)
+    st.markdown('<div class="jarvis-orb-ring"></div>', unsafe_allow_html=True)
     if st.button("⚡", key="reactor_toggle_btn"):
         st.session_state.show_jarvis = True
         st.rerun()
@@ -1166,9 +1176,9 @@ if not jarvis_open:
     # Countdown sits right under the dormant orb
     countdown_html = f"""
     <div style="text-align:center; font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; padding:8px 0;">
-        <div style="font-size:0.7em; letter-spacing:2px; color:#a5d6a7; font-weight:bold;">PAPER TRIAL</div>
-        <div id="timer" style="font-size:2em; font-family:monospace; font-weight:bold; color:#00e5ff; text-shadow:0 0 8px rgba(0,229,255,0.8);">--:--:--</div>
-        <div style="font-size:0.8em; color:#81c784; font-weight:bold; margin-top:2px;">Lane A: {paper_active_a} &nbsp;|&nbsp; Lane B: {paper_active_b}</div>
+        <div style="font-size:0.75em; letter-spacing:2px; color:#a5d6a7; font-weight:bold;">PAPER TRIAL</div>
+        <div id="timer" style="font-size:2.2em; font-family:monospace; font-weight:bold; color:#00e5ff; text-shadow:0 0 8px rgba(0,229,255,0.8); line-height:1.2;">--:--:--</div>
+        <div style="font-size:0.85em; color:#81c784; font-weight:bold; margin-top:4px;">Lane A: {paper_active_a} &nbsp;|&nbsp; Lane B: {paper_active_b}</div>
     </div>
     <script>
         var endTime = {int(trial_end.timestamp() * 1000)};

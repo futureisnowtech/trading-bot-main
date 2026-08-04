@@ -1484,143 +1484,6 @@ else:
 
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ── upgraded live core section (highest fold position) ──────────────────
-total_equity = balance + float(open_book_summary.get("total_exposure_usd") or 0.0)
-exposure_pct = (float(open_book_summary.get("total_exposure_usd") or 0.0) / total_equity * 100) if total_equity > 0 else 0
-cash_pct = 100 - exposure_pct
-
-st.markdown("<div style='font-size: 1.1em; font-weight: bold; color: #fff; text-transform: uppercase; letter-spacing: 1px; margin-top: 15px; margin-bottom: 10px;'>📊 Live Core Portfolio Status</div>", unsafe_allow_html=True)
-live_core_html = f"""
-<style>
-.live-core-container {{
-    background-color: rgba(255, 255, 255, 0.02);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 8px;
-    padding: 20px;
-    margin-bottom: 25px;
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-}}
-.live-core-grid {{
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 20px;
-    margin-bottom: 20px;
-}}
-.live-core-card {{
-    background-color: rgba(255, 255, 255, 0.01);
-    border-left: 3px solid #00e5ff;
-    padding: 10px 15px;
-}}
-.live-core-card.pnl-loss {{
-    border-left-color: #ff5252;
-}}
-.live-core-card.pnl-win {{
-    border-left-color: #69f0ae;
-}}
-.live-core-label {{
-    font-size: 0.8em;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    color: #888;
-}}
-.live-core-val {{
-    font-size: 1.8em;
-    font-weight: bold;
-    color: #fff;
-    margin: 5px 0;
-}}
-.live-core-desc {{
-    font-size: 0.75em;
-    color: #bbb;
-    line-height: 1.3;
-}}
-.live-core-visual-section {{
-    border-top: 1px solid rgba(255, 255, 255, 0.05);
-    padding-top: 15px;
-}}
-.allocation-bar-label {{
-    display: flex;
-    justify-content: space-between;
-    font-size: 0.8em;
-    color: #aaa;
-    margin-bottom: 5px;
-}}
-.allocation-bar-outer {{
-    width: 100%;
-    height: 12px;
-    background-color: rgba(255, 255, 255, 0.05);
-    border-radius: 6px;
-    overflow: hidden;
-    display: flex;
-}}
-.allocation-bar-exposure {{
-    width: {exposure_pct}%;
-    height: 100%;
-    background-color: #00e5ff;
-    box-shadow: 0 0 10px rgba(0, 229, 255, 0.5);
-}}
-.allocation-bar-cash {{
-    width: {cash_pct}%;
-    height: 100%;
-    background-color: #69f0ae;
-    box-shadow: 0 0 10px rgba(105, 240, 174, 0.5);
-}}
-.winrate-bar-outer {{
-    width: 100%;
-    height: 8px;
-    background-color: rgba(255, 255, 255, 0.05);
-    border-radius: 4px;
-    overflow: hidden;
-    margin-top: 8px;
-}}
-.winrate-bar-inner {{
-    width: {win_rate_val * 100}%;
-    height: 100%;
-    background-color: #4af2d6;
-    box-shadow: 0 0 8px rgba(74, 242, 214, 0.5);
-}}
-</style>
-
-<div class="live-core-container">
-    <div class="live-core-grid">
-        <div class="live-core-card">
-            <div class="live-core-label">Total Account Equity</div>
-            <div class="live-core-val" style="color: #4af2d6; text-shadow: 0 0 10px rgba(74, 242, 214, 0.3);">${total_equity:.2f}</div>
-            <div class="live-core-desc">Total net asset value of the portfolio (Available Cash + Open Exposure Value).</div>
-        </div>
-        <div class="live-core-card">
-            <div class="live-core-label">Available Cash</div>
-            <div class="live-core-val" style="color: #69f0ae;">${balance:.2f}</div>
-            <div class="live-core-desc">Unlocked liquidity ready for executing new orders.</div>
-        </div>
-        <div class="live-core-card {'pnl-loss' if realized_pnl < 0 else 'pnl-win'}">
-            <div class="live-core-label">Realized P&L</div>
-            <div class="live-core-val" style="color: {'#ff5252' if realized_pnl < 0 else '#69f0ae'};">${realized_pnl:+.2f}</div>
-            <div class="live-core-desc">Realized weather trading returns since session start.</div>
-        </div>
-        <div class="live-core-card">
-            <div class="live-core-label">Win Rate</div>
-            <div class="live-core-val" style="color: #ffd166;">{win_rate_val:.1%}</div>
-            <div class="live-core-desc">Winning settled contracts vs total trades ({win_rate_stats.get('wins', 0)} Wins / {win_rate_stats.get('losses', 0)} Losses).</div>
-            <div class="winrate-bar-outer">
-                <div class="winrate-bar-inner"></div>
-            </div>
-        </div>
-    </div>
-    
-    <div class="live-core-visual-section">
-        <div class="allocation-bar-label">
-            <span>📊 Deployed Risk Exposure: {exposure_pct:.1f}% (${open_book_summary.get('total_exposure_usd', 0.0):.2f})</span>
-            <span>🟢 Unlocked Cash: {cash_pct:.1f}% (${balance:.2f})</span>
-        </div>
-        <div class="allocation-bar-outer">
-            <div class="allocation-bar-exposure"></div>
-            <div class="allocation-bar-cash"></div>
-        </div>
-    </div>
-</div>
-"""
-_render_html(live_core_html)
 
 _render_html(
     f"""
@@ -1709,52 +1572,17 @@ if drift.get("has_drift"):
 
 
 
-with top_left:
-    st.markdown('<div class="section-title">Live Open Book Summary</div>', unsafe_allow_html=True)
-    live_summary_html = f"""
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:12px;">
-        <div style="background:rgba(255,255,255,0.02);border-left:3px solid #00e5ff;padding:10px 14px;border-radius:4px;">
-            <div style="font-size:0.75em;text-transform:uppercase;letter-spacing:1px;color:#888;">Total Equity</div>
-            <div style="font-size:1.6em;font-weight:bold;color:#4af2d6;">${total_equity:.2f}</div>
-        </div>
-        <div style="background:rgba(255,255,255,0.02);border-left:3px solid #69f0ae;padding:10px 14px;border-radius:4px;">
-            <div style="font-size:0.75em;text-transform:uppercase;letter-spacing:1px;color:#888;">Cash Available</div>
-            <div style="font-size:1.6em;font-weight:bold;color:#69f0ae;">${balance:.2f}</div>
-        </div>
-        <div style="background:rgba(255,255,255,0.02);border-left:3px solid {'#ff5252' if realized_pnl < 0 else '#69f0ae'};padding:10px 14px;border-radius:4px;">
-            <div style="font-size:0.75em;text-transform:uppercase;letter-spacing:1px;color:#888;">Realized PnL</div>
-            <div style="font-size:1.6em;font-weight:bold;color:{'#ff5252' if realized_pnl < 0 else '#69f0ae'};">${realized_pnl:+.2f}</div>
-        </div>
-        <div style="background:rgba(255,255,255,0.02);border-left:3px solid #fff3;padding:10px 14px;border-radius:4px;">
-            <div style="font-size:0.75em;text-transform:uppercase;letter-spacing:1px;color:#888;">Win Rate</div>
-            <div style="font-size:1.6em;font-weight:bold;color:#fff;">{win_rate_val*100:.1f}%</div>
-        </div>
-    </div>
-    """
-    _render_html(live_summary_html)
+# ── Portfolio Summary ─────────────────────────────────────────────────────────
+_pm1, _pm2, _pm3, _pm4 = st.columns(4)
+_pm1.metric("Total Equity", f"${total_equity:,.2f}")
+_pm2.metric("Cash Available", f"${balance:,.2f}")
+_pm3.metric("Realized PnL", f"${realized_pnl:+.2f}")
+_pm4.metric("Win Rate", f"{win_rate_val:.1%}")
 
-    if realized_curve:
-        curve_df = pd.DataFrame(realized_curve)
-        curve_df = curve_df.rename(columns={"ts": "time", "cumulative_pnl": "realized_pnl"})
-        st.line_chart(curve_df.set_index("time"), height=160)
+if realized_curve:
+    _curve_df = pd.DataFrame(realized_curve).rename(columns={"ts": "time", "cumulative_pnl": "realized_pnl"})
+    st.line_chart(_curve_df.set_index("time"), height=130)
 
-with top_right:
-    st.markdown('<div class="section-title">Risk Matrix & Controls</div>', unsafe_allow_html=True)
-    _render_html(
-        '<div class="mini-grid">' + "".join(
-            _mini_card(card["label"], card["value"], card["detail"], card.get("tooltip"))
-            for card in regime_cards
-        ) + "</div>",
-    )
-
-    st.markdown('<div class="section-title">Runtime System Integrity</div>', unsafe_allow_html=True)
-    _render_html(
-        '<div class="mini-grid">'
-        + _mini_card("Disk Free", f"{round(float(storage['free_mb']), 0):,.0f} MB", "server headroom")
-        + _mini_card("DB Footprint", f"{storage['db_mb']} MB", "local SQLite ledger")
-        + _mini_card("Quote Cache", f"{market_counts['quote_rows']:,}", "forecast quote rows")
-        + "</div>",
-    )
 
 # ── Full-width Trading Lane Matrix ───────────────────────────────────────────
 st.markdown('<div class="section-title" style="margin-top:24px;">⚡ Trading Lane Matrix</div>', unsafe_allow_html=True)

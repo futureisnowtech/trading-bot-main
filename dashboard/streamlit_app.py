@@ -1852,7 +1852,7 @@ with top_left:
         st.info("No realized Kalshi P&L history is available yet.")
 
 with top_right:
-    st.markdown('<div class="section-title">Risk Controls</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Risk Matrix & Controls</div>', unsafe_allow_html=True)
     _render_html(
         '<div class="mini-grid">' + "".join(
             _mini_card(card["label"], card["value"], card["detail"], card.get("tooltip"))
@@ -1860,82 +1860,32 @@ with top_right:
         ) + "</div>",
     )
 
-    st.markdown('<div class="section-title">Risk Radar</div>', unsafe_allow_html=True)
-    hub_df = pd.DataFrame(payload["hub_exposure"])
-    if not hub_df.empty:
-        st.dataframe(hub_df, width="stretch", hide_index=True)
-        st.caption(f"Live hub cap right now: {_fmt_money(hub_cap_now)}")
-    else:
-        st.info("No active hub exposure.")
-
-    st.markdown('<div class="section-title">Veto Tape</div>', unsafe_allow_html=True)
-    if recent_vetoes.get("top_reasons"):
-        veto_df = pd.DataFrame(recent_vetoes["top_reasons"])
-        st.dataframe(veto_df, width="stretch", hide_index=True)
-    else:
-        st.success("No recent hard veto cluster in the current lookback window.")
-
-    st.markdown('<div class="section-title">Runtime Integrity</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Runtime System Integrity</div>', unsafe_allow_html=True)
     _render_html(
         '<div class="mini-grid">'
-        + _mini_card("Disk Free", f"{round(float(storage['free_mb']), 0):,.0f} MB", "headroom before writes get risky")
-        + _mini_card("DB Size", f"{storage['db_mb']} MB", "local SQLite footprint")
-        + _mini_card("Quote Cache", f"{market_counts['quote_rows']:,}", "stored forecast quote rows")
+        + _mini_card("Disk Free", f"{round(float(storage['free_mb']), 0):,.0f} MB", "server headroom")
+        + _mini_card("DB Footprint", f"{storage['db_mb']} MB", "local SQLite ledger")
+        + _mini_card("Quote Cache", f"{market_counts['quote_rows']:,}", "forecast quote rows")
         + "</div>",
     )
 
-st.markdown("### Trade Edge Tracker")
-st.caption(
-    "Each bar compares what the model believed for the side it bought versus the market price it paid. "
-    "Hover any bar to inspect the trade in plain percentages."
-)
-_render_trade_edge_chart(trade_edge_rows)
-if trade_edge_rows:
-    edge_table = pd.DataFrame(trade_edge_rows)[
-        ["ts", "symbol", "side", "model_confidence_pct", "market_price_pct", "edge_pct", "strategy"]
-    ].rename(
-        columns={
-            "model_confidence_pct": "model_conf_%",
-            "market_price_pct": "paid_price_%",
-            "edge_pct": "edge_%",
-        }
-    )
-    st.dataframe(edge_table, width="stretch", hide_index=True)
-
-insight_left, insight_right = st.columns([1.25, 0.95], gap="large")
-
-with insight_left:
-    st.markdown("### AI Insights")
-    for insight in ai_insights:
-        _render_html(
-            _insight_card(
-                insight.get("title", "Insight"),
-                insight.get("meta", ""),
-                insight.get("body", ""),
-                tone=insight.get("tone", "info"),
-            )
-        )
-
-with insight_right:
-    st.markdown("### Operator Alerts")
-    if notifications:
-        for event in notifications[:12]:
-            tone = "tone-bad" if event.get("severity") == "CRITICAL" else "tone-amber" if event.get("severity") == "WARNING" else "tone-blue"
-            why = event.get("why") or {}
-            why_bits = why.get("top_3_reasons") or []
-            why_text = " | ".join(str(x) for x in why_bits[:3]) if why_bits else str(event.get("message") or "")
-            ts_value = datetime.fromtimestamp(float(event.get("ts") or 0), tz=timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
-            st.markdown(
-                _feed_card(
-                    f"{event.get('category')} :: {event.get('title')}",
-                    ts_value,
-                    why_text,
-                    tone=tone,
-                ),
-                unsafe_allow_html=True,
-            )
-    else:
-        st.info("No notification feed rows available.")
+# Collapsible Advanced System Telemetry Matrix (cutting clutter)
+with st.expander("🔍 View Advanced Telemetry, Veto Tape & System Feed"):
+    t_col1, t_col2 = st.columns(2)
+    with t_col1:
+        st.markdown("##### 🛡️ Regional Hub Allocations")
+        hub_df = pd.DataFrame(payload["hub_exposure"])
+        if not hub_df.empty:
+            st.dataframe(hub_df, width="stretch", hide_index=True)
+        else:
+            st.info("No active hub exposure.")
+    with t_col2:
+        st.markdown("##### 🚫 Veto Cluster Tape")
+        if recent_vetoes.get("top_reasons"):
+            veto_df = pd.DataFrame(recent_vetoes["top_reasons"])
+            st.dataframe(veto_df, width="stretch", hide_index=True)
+        else:
+            st.success("No recent hard veto clusters.")
 
 st.markdown("### Event Tape")
 show_raw_events = st.toggle(

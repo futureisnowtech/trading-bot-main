@@ -69,6 +69,25 @@ from forecast.weather_contracts import (
 
 logger = logging.getLogger(__name__)
 
+
+def get_dynamic_param(key: str, default: Any) -> Any:
+    """Read live dynamic override from SQLite dynamic_system_config table if set by JARVIS."""
+    try:
+        if os.path.exists(DB_PATH):
+            conn = sqlite3.connect(DB_PATH, timeout=5.0)
+            row = conn.execute("SELECT param_value FROM dynamic_system_config WHERE param_key = ?", (key.upper(),)).fetchone()
+            conn.close()
+            if row and row[0] is not None:
+                val = row[0]
+                if isinstance(default, float):
+                    return float(val)
+                if isinstance(default, int):
+                    return int(val)
+                return val
+    except Exception:
+        pass
+    return default
+
 # ── Gate thresholds ────────────────────────────────────────────────────────────
 
 # Overround hard cap — above this the house edge is too large
@@ -1040,8 +1059,8 @@ def solve_optimal_size(
         f_star = (q_clamped - p_clamped - phi) / (1.0 - p_clamped - phi)
         f_star = max(0.0, f_star)
         
-        fav_scaler = calculate_favorite_scaler(q_clamped, bankroll)
-        f_final = KALSHI_KELLY_FRACTION * f_star * (1.0 / max(1e-9, lambda_scaler)) * cov_charge * fav_scaler
+        kelly_frac = get_dynamic_param("KELLY_FRACTION", KALSHI_KELLY_FRACTION)
+        f_final = kelly_frac * f_star * (1.0 / max(1e-9, lambda_scaler)) * cov_charge * fav_scaler
         
         n_final = int(math.floor(f_final * bankroll / max(1e-9, p_clamped + phi)))
         if level2_asks:

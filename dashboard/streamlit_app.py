@@ -988,6 +988,8 @@ regime = payload["regime"]
 deploy = payload["deploy"]
 positions_live = payload["positions_live"]
 positions_db_only = payload["positions_db_only"]
+positions_paper_a = payload.get("positions_paper_a") or []
+positions_paper_b = payload.get("positions_paper_b") or []
 open_book_visual = payload["open_book_visual"]
 open_book_summary = payload["open_book_summary"]
 recent_trades = payload["recent_trades"]
@@ -1664,96 +1666,126 @@ if drift.get("has_drift"):
 top_left, top_right = st.columns([1.3, 1.0], gap="large")
 
 with top_left:
-    st.markdown('<div class="section-title">Open Book</div>', unsafe_allow_html=True)
-    with st.container(border=False):
-        rows = open_book_visual
-        if rows:
-            pos_df = pd.DataFrame(rows)
-            pos_df["weather_mode"] = pos_df.apply(
-                lambda r: "HIGH" if "HIGH" in str(r.get("weather_bucket")).upper() or "HIGH" in str(r.get("ticker")).upper() else "LOW",
-                axis=1
-            )
-            pos_df["gross_mark_pnl"] = pos_df["gross_mark_pnl"].fillna(0.0)
-            pos_df["exit_pnl_est"] = pos_df["exit_pnl_est"].fillna(0.0)
-            pos_df["hours_to_resolution"] = pos_df["hours_to_resolution"].fillna(0.0)
-            pos_df["exposure_usd"] = pos_df["exposure_usd"].fillna(0.0)
+    st.markdown('<div class="section-title">Trading Lanes & Open Book</div>', unsafe_allow_html=True)
+    
+    lane_tab1, lane_tab2, lane_tab3 = st.tabs([
+        f"🟢 Live Trading ({len(open_book_visual)})",
+        f"🧪 Paper Lane A ({len(positions_paper_a)})",
+        f"🚀 Paper Lane B ({len(positions_paper_b)})",
+    ])
+    
+    with lane_tab1:
+        with st.container(border=False):
+            rows = open_book_visual
+            if rows:
+                pos_df = pd.DataFrame(rows)
+                pos_df["weather_mode"] = pos_df.apply(
+                    lambda r: "HIGH" if "HIGH" in str(r.get("weather_bucket")).upper() or "HIGH" in str(r.get("ticker")).upper() else "LOW",
+                    axis=1
+                )
+                pos_df["gross_mark_pnl"] = pos_df["gross_mark_pnl"].fillna(0.0)
+                pos_df["exit_pnl_est"] = pos_df["exit_pnl_est"].fillna(0.0)
+                pos_df["hours_to_resolution"] = pos_df["hours_to_resolution"].fillna(0.0)
+                pos_df["exposure_usd"] = pos_df["exposure_usd"].fillna(0.0)
 
-            total_exp = float(open_book_summary.get("total_exposure_usd") or 0.0)
-            
-            # Hub concentration audit
-            hub_exposure = pos_df.groupby("hub")["exposure_usd"].sum().to_dict()
-            hub_alerts = []
-            for hub, exp in hub_exposure.items():
-                pct = (exp / total_exp * 100) if total_exp > 0 else 0
-                if pct > 30.0:
-                    hub_alerts.append(f"🚨 **HUB OVER-ALLOCATION RISK:** The `{hub}` regional hub represents **{pct:.1f}%** (${exp:.2f}) of our active book risk. This exceeds our 30% hub safety limit. **Action: Pause new entries in the {hub} region.**")
-            if not hub_alerts:
-                hub_alerts.append("✅ **HUB DIVERSIFICATION:** Regional hub allocations are fully compliant. No single cluster exceeds the 30% safety cap.")
+                total_exp = float(open_book_summary.get("total_exposure_usd") or 0.0)
                 
-            # Spread slippage / exit drag
-            pos_df["spread_drag"] = pos_df["gross_mark_pnl"] - pos_df["exit_pnl_est"]
-            worst_drag_row = pos_df.loc[pos_df["spread_drag"].idxmax()] if not pos_df.empty else None
-            drag_alerts = []
-            if worst_drag_row is not None and worst_drag_row["spread_drag"] > 0.5:
-                drag_alerts.append(f"⚠️ **LIQUIDATION WARNING:** `{worst_drag_row['ticker']}` has a wide spread creating a **${worst_drag_row['spread_drag']:.2f}** slippage drag. Exiting early will lose heavy capital. **Action: Hold this position to settlement.**")
+                # Hub concentration audit
+                hub_exposure = pos_df.groupby("hub")["exposure_usd"].sum().to_dict()
+                hub_alerts = []
+                for hub, exp in hub_exposure.items():
+                    pct = (exp / total_exp * 100) if total_exp > 0 else 0
+                    if pct > 30.0:
+                        hub_alerts.append(f"🚨 **HUB OVER-ALLOCATION RISK:** The `{hub}` regional hub represents **{pct:.1f}%** (${exp:.2f}) of our active book risk. This exceeds our 30% hub safety limit. **Action: Pause new entries in the {hub} region.**")
+                if not hub_alerts:
+                    hub_alerts.append("✅ **HUB DIVERSIFICATION:** Regional hub allocations are fully compliant. No single cluster exceeds the 30% safety cap.")
+                    
+                # Spread slippage / exit drag
+                pos_df["spread_drag"] = pos_df["gross_mark_pnl"] - pos_df["exit_pnl_est"]
+                worst_drag_row = pos_df.loc[pos_df["spread_drag"].idxmax()] if not pos_df.empty else None
+                drag_alerts = []
+                if worst_drag_row is not None and worst_drag_row["spread_drag"] > 0.5:
+                    drag_alerts.append(f"⚠️ **LIQUIDATION WARNING:** `{worst_drag_row['ticker']}` has a wide spread creating a **${worst_drag_row['spread_drag']:.2f}** slippage drag. Exiting early will lose heavy capital. **Action: Hold this position to settlement.**")
+                else:
+                    drag_alerts.append("✅ **SPREAD LIQUIDITY:** Bid-ask spreads across open positions are narrow. Liquidation slippage is minimal.")
+                    
+                # Worst Performing position
+                worst_pnl_row = pos_df.loc[pos_df["gross_mark_pnl"].idxmin()] if not pos_df.empty else None
+                pnl_alerts = []
+                if worst_pnl_row is not None and worst_pnl_row["gross_mark_pnl"] < -1.0:
+                    pnl_alerts.append(f"📉 **LAGGING POSITION:** `{worst_pnl_row['ticker']}` is down **-${abs(worst_pnl_row['gross_mark_pnl']):.2f}** Mark P&L ({abs(worst_pnl_row['gross_mark_pnl'])/worst_pnl_row['exposure_usd']*100:.1f}% of risk). **Action: Let it ride.** The GFS/ECMWF model ensembles continue to support our boundary range and indicate a high mathematical probability of settlement recovery.")
+                
+                # Best performing position
+                best_pnl_row = pos_df.loc[pos_df["gross_mark_pnl"].idxmax()] if not pos_df.empty else None
+                if best_pnl_row is not None and best_pnl_row["gross_mark_pnl"] > 1.0:
+                    pnl_alerts.append(f"📈 **LEADERBOARD ALPHA:** `{best_pnl_row['ticker']}` is leading the session with a **+${best_pnl_row['gross_mark_pnl']:.2f}** midpoint Mark P&L.")
+                    
+                # Expiry timeline
+                pos_df["hours_to_resolution"] = pd.to_numeric(pos_df["hours_to_resolution"])
+                nearest_expiry_row = pos_df.loc[pos_df["hours_to_resolution"].idxmin()] if not pos_df.empty else None
+                expiry_alerts = []
+                if nearest_expiry_row is not None:
+                    expiry_alerts.append(f"⏰ **EXPIRY COUNTDOWN:** `{nearest_expiry_row['ticker']}` settles in **{nearest_expiry_row['hours_to_resolution']:.1f} hours**. Anticipate contract lock and settlement reconciliation shortly.")
+
+                # Render HTML Insights Grid
+                insights_html = f"""
+                <style>
+                .insight-container {{
+                    background-color: rgba(255, 255, 255, 0.01);
+                    border: 1px solid rgba(0, 229, 255, 0.15);
+                    border-radius: 8px;
+                    padding: 20px;
+                    margin-top: 10px;
+                    margin-bottom: 20px;
+                    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+                }}
+                .insight-bullet {{
+                    font-size: 0.95em;
+                    line-height: 1.5;
+                    margin-bottom: 12px;
+                    padding-bottom: 10px;
+                    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+                    color: #e0e0e0;
+                }}
+                .insight-bullet:last-child {{
+                    border-bottom: none;
+                    margin-bottom: 0;
+                    padding-bottom: 0;
+                }}
+                </style>
+                <div class="insight-container">
+                """
+                for alert in hub_alerts + drag_alerts + pnl_alerts + expiry_alerts:
+                    insights_html += f'<div class="insight-bullet">{alert}</div>'
+                insights_html += "</div>"
+                _render_html(insights_html)
+
+                with st.expander("🔍 View Raw Position Ledger Table"):
+                    st.dataframe(pos_df[["ticker", "side", "qty", "entry_price", "mark", "gross_mark_pnl", "exit_pnl_est", "hub"]], use_container_width=True, hide_index=True)
             else:
-                drag_alerts.append("✅ **SPREAD LIQUIDITY:** Bid-ask spreads across open positions are narrow. Liquidation slippage is minimal.")
-                
-            # Worst Performing position
-            worst_pnl_row = pos_df.loc[pos_df["gross_mark_pnl"].idxmin()] if not pos_df.empty else None
-            pnl_alerts = []
-            if worst_pnl_row is not None and worst_pnl_row["gross_mark_pnl"] < -1.0:
-                pnl_alerts.append(f"📉 **LAGGING POSITION:** `{worst_pnl_row['ticker']}` is down **-${abs(worst_pnl_row['gross_mark_pnl']):.2f}** Mark P&L ({abs(worst_pnl_row['gross_mark_pnl'])/worst_pnl_row['exposure_usd']*100:.1f}% of risk). **Action: Let it ride.** The GFS/ECMWF model ensembles continue to support our boundary range and indicate a high mathematical probability of settlement recovery.")
-            
-            # Best performing position
-            best_pnl_row = pos_df.loc[pos_df["gross_mark_pnl"].idxmax()] if not pos_df.empty else None
-            if best_pnl_row is not None and best_pnl_row["gross_mark_pnl"] > 1.0:
-                pnl_alerts.append(f"📈 **LEADERBOARD ALPHA:** `{best_pnl_row['ticker']}` is leading the session with a **+${best_pnl_row['gross_mark_pnl']:.2f}** midpoint Mark P&L.")
-                
-            # Expiry timeline
-            pos_df["hours_to_resolution"] = pd.to_numeric(pos_df["hours_to_resolution"])
-            nearest_expiry_row = pos_df.loc[pos_df["hours_to_resolution"].idxmin()] if not pos_df.empty else None
-            expiry_alerts = []
-            if nearest_expiry_row is not None:
-                expiry_alerts.append(f"⏰ **EXPIRY COUNTDOWN:** `{nearest_expiry_row['ticker']}` settles in **{nearest_expiry_row['hours_to_resolution']:.1f} hours**. Anticipate contract lock and settlement reconciliation shortly.")
+                st.info("No live Kalshi positions are open right now.")
 
-            # Render HTML Insights Grid
-            insights_html = f"""
-            <style>
-            .insight-container {{
-                background-color: rgba(255, 255, 255, 0.01);
-                border: 1px solid rgba(0, 229, 255, 0.15);
-                border-radius: 8px;
-                padding: 20px;
-                margin-top: 10px;
-                margin-bottom: 20px;
-                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            }}
-            .insight-bullet {{
-                font-size: 0.95em;
-                line-height: 1.5;
-                margin-bottom: 12px;
-                padding-bottom: 10px;
-                border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-                color: #e0e0e0;
-            }}
-            .insight-bullet:last-child {{
-                border-bottom: none;
-                margin-bottom: 0;
-                padding-bottom: 0;
-            }}
-            </style>
-            <div class="insight-container">
-            """
-            for alert in hub_alerts + drag_alerts + pnl_alerts + expiry_alerts:
-                insights_html += f'<div class="insight-bullet">{alert}</div>'
-            insights_html += "</div>"
-            _render_html(insights_html)
-
-            with st.expander("🔍 View Raw Position Ledger Table"):
-                st.dataframe(pos_df[["ticker", "side", "qty", "entry_price", "mark", "gross_mark_pnl", "exit_pnl_est", "hub"]], use_container_width=True, hide_index=True)
+    with lane_tab2:
+        st.markdown("##### 🧪 Paper Lane A (Physics Boundary Taker)")
+        st.caption("Real-time paper trading lane simulating taker execution based on evaporative cooling, nocturnal wind shear, and soil moisture memory physics rules.")
+        if positions_paper_a:
+            df_pa = pd.DataFrame(positions_paper_a)
+            st.dataframe(df_pa[["ticker", "side", "qty", "entry_price", "market_exposure_dollars", "created_at"]], use_container_width=True, hide_index=True)
+            tot_exp_a = sum(float(p.get("market_exposure_dollars") or 0.0) for p in positions_paper_a)
+            st.metric("Lane A Paper Capital Committed", f"${tot_exp_a:,.2f}", delta=f"{len(positions_paper_a)} active positions")
         else:
-            st.info("No live Kalshi positions are open right now.")
+            st.info("No active positions in Paper Lane A currently.")
+
+    with lane_tab3:
+        st.markdown("##### 🚀 Paper Lane B (10X Physics Override & Maker Order Book Bids)")
+        st.caption("10X target paper trading lane simulating maker limit orders (buying at the bid) with priority queue modeling.")
+        if positions_paper_b:
+            df_pb = pd.DataFrame(positions_paper_b)
+            st.dataframe(df_pb[["ticker", "side", "qty", "entry_price", "market_exposure_dollars", "created_at"]], use_container_width=True, hide_index=True)
+            tot_exp_b = sum(float(p.get("market_exposure_dollars") or 0.0) for p in positions_paper_b)
+            st.metric("Lane B Paper Capital Committed", f"${tot_exp_b:,.2f}", delta=f"{len(positions_paper_b)} active positions")
+        else:
+            st.info("No active positions in Paper Lane B currently.")
 
     st.markdown('<div class="section-title">Trade Curve</div>', unsafe_allow_html=True)
     if realized_curve:

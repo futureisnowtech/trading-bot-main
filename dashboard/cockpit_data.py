@@ -1007,6 +1007,32 @@ def build_regime_cards(
     ]
 
 
+def _load_paper_positions(table_name: str) -> list[dict[str, Any]]:
+    """Query paper trading position rows from SQLite database."""
+    if not os.path.exists(DB_PATH):
+        return []
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            f"SELECT * FROM {table_name} WHERE active = 1 ORDER BY created_at DESC"
+        ).fetchall()
+        conn.close()
+        res = []
+        for r in rows:
+            d = dict(r)
+            d["ticker"] = str(d.get("ticker") or d.get("local_symbol") or "")
+            d["qty"] = float(d.get("qty") or 0.0)
+            d["entry_price"] = float(d.get("entry_price") or 0.0)
+            d["side"] = str(d.get("side") or "YES")
+            d["market_exposure_dollars"] = d["qty"] * d["entry_price"]
+            res.append(d)
+        return res
+    except Exception as e:
+        logger.warning(f"Failed loading paper positions from {table_name}: {e}")
+        return []
+
+
 def load_session_win_rate() -> dict[str, Any]:
     truth = load_weather_settlement_truth()
     return {
@@ -1074,6 +1100,9 @@ def get_cockpit_payload(*, live_sync: bool = True) -> dict[str, Any]:
         for position in drift.get("db_only", [])
     ]
 
+    paper_rows_a = _load_paper_positions("forecast_positions_paper")
+    paper_rows_b = _load_paper_positions("forecast_positions_paper_lane_b")
+
     recent_trades = _load_recent_trades(limit=25)
     recent_events = _load_recent_events(limit=25)
     regime = build_regime_manifest(
@@ -1091,6 +1120,8 @@ def get_cockpit_payload(*, live_sync: bool = True) -> dict[str, Any]:
         "release_status": release_status,
         "positions_live": live_rows,
         "positions_db_only": drift_rows,
+        "positions_paper_a": paper_rows_a,
+        "positions_paper_b": paper_rows_b,
         "open_book_visual": build_open_book_visual_rows(live_rows or drift_rows),
         "open_book_summary": summarize_open_book(live_rows or drift_rows),
         "weather_type_boards": build_weather_type_boards(live_rows or drift_rows),

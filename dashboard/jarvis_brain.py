@@ -37,30 +37,61 @@ def get_account_status() -> str:
 
 
 def get_open_positions() -> str:
-    """List all currently active open positions with entry prices, market values, and side."""
+    """List all currently active open positions across Live Broker, Paper Lane A (Physics), and Paper Lane B (10X Maker)."""
+    res = []
+    
+    # 1. Live Broker Positions
     try:
         from execution.kalshi_broker import get_kalshi_broker
         broker = get_kalshi_broker()
-        broker.connect()
-        positions = broker.get_positions()
-        active_pos = []
-        for p in positions:
-            qty = abs(float(p.get("position_fp") or p.get("qty") or 0.0))
-            if qty <= 0:
-                continue
-            ticker = p.get("ticker") or p.get("local_symbol")
-            side = "YES" if float(p.get("position_fp") or p.get("qty") or 0.0) > 0 else "NO"
-            mkt_val = float(p.get("market_exposure_dollars") or 0.0)
-            entry = float(p.get("entry_price") or p.get("entry") or 0.0)
-            pnl = float(p.get("realized_pnl_dollars") or 0.0)
-            active_pos.append(
-                f"- {ticker} ({side}) | Qty: {qty:.2f} | Entry: ${entry:.2f} | Current Value: ${mkt_val:.2f} | Realized PnL: ${pnl:.2f}"
-            )
-        if not active_pos:
-            return "No active positions currently held at the broker."
-        return "\n".join(active_pos)
+        if broker.is_connected() or broker.connect():
+            positions = broker.get_positions()
+            active_pos = []
+            for p in positions:
+                qty = abs(float(p.get("position_fp") or p.get("qty") or 0.0))
+                if qty <= 0:
+                    continue
+                ticker = p.get("ticker") or p.get("local_symbol")
+                side = "YES" if float(p.get("position_fp") or p.get("qty") or 0.0) > 0 else "NO"
+                mkt_val = float(p.get("market_exposure_dollars") or 0.0)
+                entry = float(p.get("entry_price") or p.get("entry") or 0.0)
+                pnl = float(p.get("realized_pnl_dollars") or 0.0)
+                active_pos.append(
+                    f"  - {ticker} ({side}) | Qty: {qty:.0f} | Entry: ${entry:.2f} | Current Val: ${mkt_val:.2f} | Realized PnL: ${pnl:.2f}"
+                )
+            if active_pos:
+                res.append("🟢 **LIVE BROKER POSITIONS:**\n" + "\n".join(active_pos))
+            else:
+                res.append("🟢 **LIVE BROKER POSITIONS:** No active live broker positions.")
     except Exception as e:
-        return f"Error retrieving open positions: {e}"
+        res.append(f"🟢 **LIVE BROKER POSITIONS:** Query error: {e}")
+
+    # 2. SQLite Paper Lane A & Lane B Positions
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        
+        # Lane A
+        rows_a = conn.execute("SELECT ticker, side, qty, entry_price, created_at FROM forecast_positions_paper WHERE active = 1").fetchall()
+        if rows_a:
+            lines_a = [f"  - {r['ticker']} ({r['side']}) | Qty: {r['qty']} | Entry: ${r['entry_price']:.2f} | Date: {r['created_at']}" for r in rows_a]
+            res.append("🧪 **PAPER LANE A (Physics Boundary Taker):**\n" + "\n".join(lines_a))
+        else:
+            res.append("🧪 **PAPER LANE A (Physics Boundary Taker):** No active paper positions.")
+            
+        # Lane B
+        rows_b = conn.execute("SELECT ticker, side, qty, entry_price, created_at FROM forecast_positions_paper_lane_b WHERE active = 1").fetchall()
+        if rows_b:
+            lines_b = [f"  - {r['ticker']} ({r['side']}) | Qty: {r['qty']} | Entry: ${r['entry_price']:.2f} | Date: {r['created_at']}" for r in rows_b]
+            res.append("🚀 **PAPER LANE B (10X Physics Maker Override):**\n" + "\n".join(lines_b))
+        else:
+            res.append("🚀 **PAPER LANE B (10X Physics Maker Override):** No active paper positions.")
+            
+        conn.close()
+    except Exception as e:
+        res.append(f"Paper DB Query Error: {e}")
+
+    return "\n\n".join(res)
 
 
 def get_recent_trades(limit: int = 15) -> str:

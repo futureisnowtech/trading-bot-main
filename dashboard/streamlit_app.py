@@ -990,6 +990,8 @@ positions_live = payload["positions_live"]
 positions_db_only = payload["positions_db_only"]
 positions_paper_a = payload.get("positions_paper_a") or []
 positions_paper_b = payload.get("positions_paper_b") or []
+history_paper_a = payload.get("history_paper_a") or []
+history_paper_b = payload.get("history_paper_b") or []
 open_book_visual = payload["open_book_visual"]
 open_book_summary = payload["open_book_summary"]
 recent_trades = payload["recent_trades"]
@@ -1814,22 +1816,32 @@ with top_left:
         st.caption("Real-time paper trading lane simulating taker execution based on evaporative cooling, nocturnal wind shear, and soil moisture memory physics rules.")
         if positions_paper_a:
             df_pa = pd.DataFrame(positions_paper_a)
-            st.dataframe(df_pa[["ticker", "side", "qty", "entry_price", "market_exposure_dollars", "created_at"]], use_container_width=True, hide_index=True)
+            st.dataframe(df_pa[["ticker", "side", "qty", "entry_price", "market_exposure_dollars", "opened_at"]], use_container_width=True, hide_index=True)
             tot_exp_a = sum(float(p.get("market_exposure_dollars") or 0.0) for p in positions_paper_a)
-            st.metric("Lane A Paper Capital Committed", f"${tot_exp_a:,.2f}", delta=f"{len(positions_paper_a)} active positions")
+            st.metric("Lane A Active Exposure", f"${tot_exp_a:,.2f}", delta=f"{len(positions_paper_a)} active positions")
         else:
-            st.info("No active positions in Paper Lane A currently.")
+            st.info("No active open positions in Paper Lane A currently.")
+
+        if history_paper_a:
+            with st.expander("📜 View Recent Paper Lane A Trades Ledger", expanded=True):
+                df_ha = pd.DataFrame(history_paper_a)
+                st.dataframe(df_ha[["ticker", "side", "qty", "entry_price", "opened_at", "closed_at", "exit_type"]], use_container_width=True, hide_index=True)
 
     with lane_tab3:
         st.markdown("##### 🚀 Paper Lane B (10X Physics Override & Maker Order Book Bids)")
         st.caption("10X target paper trading lane simulating maker limit orders (buying at the bid) with priority queue modeling.")
         if positions_paper_b:
             df_pb = pd.DataFrame(positions_paper_b)
-            st.dataframe(df_pb[["ticker", "side", "qty", "entry_price", "market_exposure_dollars", "created_at"]], use_container_width=True, hide_index=True)
+            st.dataframe(df_pb[["ticker", "side", "qty", "entry_price", "market_exposure_dollars", "opened_at"]], use_container_width=True, hide_index=True)
             tot_exp_b = sum(float(p.get("market_exposure_dollars") or 0.0) for p in positions_paper_b)
-            st.metric("Lane B Paper Capital Committed", f"${tot_exp_b:,.2f}", delta=f"{len(positions_paper_b)} active positions")
+            st.metric("Lane B Active Exposure", f"${tot_exp_b:,.2f}", delta=f"{len(positions_paper_b)} active positions")
         else:
-            st.info("No active positions in Paper Lane B currently.")
+            st.info("No active open positions in Paper Lane B currently.")
+
+        if history_paper_b:
+            with st.expander("📜 View Recent Paper Lane B Trades Ledger", expanded=True):
+                df_hb = pd.DataFrame(history_paper_b)
+                st.dataframe(df_hb[["ticker", "side", "qty", "entry_price", "opened_at", "closed_at", "exit_type"]], use_container_width=True, hide_index=True)
 
     st.markdown('<div class="section-title">Trade Curve</div>', unsafe_allow_html=True)
     if realized_curve:

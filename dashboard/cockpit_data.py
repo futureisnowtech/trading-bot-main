@@ -1010,16 +1010,16 @@ def build_regime_cards(
     ]
 
 
-def _load_paper_positions(table_name: str) -> list[dict[str, Any]]:
+def _load_paper_positions(table_name: str, active_only: bool = True, limit: int = 50) -> list[dict[str, Any]]:
     """Query paper trading position rows from SQLite database."""
     if not os.path.exists(DB_PATH):
         return []
     try:
         conn = sqlite3.connect(DB_PATH, timeout=10.0)
         conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            f"SELECT * FROM {table_name} WHERE active = 1 ORDER BY created_at DESC"
-        ).fetchall()
+        where_clause = "WHERE active = 1" if active_only else ""
+        query = f"SELECT * FROM {table_name} {where_clause} ORDER BY opened_at DESC LIMIT {limit}"
+        rows = conn.execute(query).fetchall()
         conn.close()
         res = []
         for r in rows:
@@ -1029,6 +1029,9 @@ def _load_paper_positions(table_name: str) -> list[dict[str, Any]]:
             d["entry_price"] = float(d.get("entry_price") or 0.0)
             d["side"] = str(d.get("side") or "YES")
             d["market_exposure_dollars"] = d["qty"] * d["entry_price"]
+            d["opened_at"] = str(d.get("opened_at") or "")
+            d["closed_at"] = str(d.get("closed_at") or "")
+            d["exit_type"] = str(d.get("exit_type") or "ACTIVE")
             res.append(d)
         return res
     except Exception as e:
@@ -1103,8 +1106,10 @@ def get_cockpit_payload(*, live_sync: bool = True) -> dict[str, Any]:
         for position in drift.get("db_only", [])
     ]
 
-    paper_rows_a = _load_paper_positions("forecast_positions_paper")
-    paper_rows_b = _load_paper_positions("forecast_positions_paper_lane_b")
+    paper_rows_a = _load_paper_positions("forecast_positions_paper", active_only=True)
+    paper_rows_b = _load_paper_positions("forecast_positions_paper_lane_b", active_only=True)
+    paper_history_a = _load_paper_positions("forecast_positions_paper", active_only=False, limit=35)
+    paper_history_b = _load_paper_positions("forecast_positions_paper_lane_b", active_only=False, limit=35)
 
     recent_trades = _load_recent_trades(limit=25)
     recent_events = _load_recent_events(limit=25)
@@ -1125,6 +1130,8 @@ def get_cockpit_payload(*, live_sync: bool = True) -> dict[str, Any]:
         "positions_db_only": drift_rows,
         "positions_paper_a": paper_rows_a,
         "positions_paper_b": paper_rows_b,
+        "history_paper_a": paper_history_a,
+        "history_paper_b": paper_history_b,
         "open_book_visual": build_open_book_visual_rows(live_rows or drift_rows),
         "open_book_summary": summarize_open_book(live_rows or drift_rows),
         "weather_type_boards": build_weather_type_boards(live_rows or drift_rows),

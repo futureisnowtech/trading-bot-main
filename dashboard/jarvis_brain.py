@@ -191,14 +191,79 @@ def get_paper_lane_comparison() -> str:
         return f"Error comparing paper lanes: {e}"
 
 
+def update_system_parameter(key: str, value: str, rationale: str = "") -> str:
+    """Update a live system strategy parameter (e.g. KELLY_FRACTION, TAKE_PROFIT_TRIGGER, GFS_WEIGHT, HUB_RISK_CAP_PCT) in the SQLite dynamic config table."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS dynamic_system_config (
+                param_key TEXT PRIMARY KEY,
+                param_value TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                rationale TEXT
+            )"""
+        )
+        now_iso = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            "INSERT INTO dynamic_system_config (param_key, param_value, updated_at, rationale) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(param_key) DO UPDATE SET param_value=excluded.param_value, updated_at=excluded.updated_at, rationale=excluded.rationale",
+            (key.upper(), str(value), now_iso, rationale)
+        )
+        conn.commit()
+        conn.close()
+        return f"✅ SYSTEM BRIDGE OVERRIDE SUCCESS: Parameter '{key.upper()}' updated to '{value}' at {now_iso}. Rationale: {rationale}"
+    except Exception as e:
+        return f"❌ System Bridge Override Error: {e}"
+
+
+def get_system_parameters() -> str:
+    """Retrieve all current dynamic system parameter overrides from the SQLite database."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS dynamic_system_config (
+                param_key TEXT PRIMARY KEY,
+                param_value TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                rationale TEXT
+            )"""
+        )
+        rows = conn.execute("SELECT * FROM dynamic_system_config ORDER BY param_key").fetchall()
+        conn.close()
+        if not rows:
+            return "No dynamic parameter overrides currently set. System running on default config.py constants."
+        lines = [f"- **{r['param_key']}**: `{r['param_value']}` (Updated: {r['updated_at']}) | Rationale: {r['rationale']}" for r in rows]
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Error retrieving system parameters: {e}"
+
+
+def apply_hot_patch_code(patch_name: str, code_snippet: str) -> str:
+    """Safely apply or update a Python code patch in the forecast system patch directory."""
+    patch_dir = os.path.join(os.path.dirname(DB_PATH), "jarvis_patches")
+    os.makedirs(patch_dir, exist_ok=True)
+    file_path = os.path.join(patch_dir, f"{patch_name}.py")
+    try:
+        compile(code_snippet, file_path, "exec")
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(f"# JARVIS Autonomous Hot Patch: {patch_name}\n")
+            f.write(f"# Timestamp: {datetime.now(timezone.utc).isoformat()}\n\n")
+            f.write(code_snippet)
+        return f"⚡ HOT PATCH APPLIED: Saved and verified syntax for patch '{patch_name}' at {file_path}."
+    except Exception as e:
+        return f"❌ Hot Patch Syntax Error: {e}"
+
+
 # ── Chat execution ──────────────────────────────────────────────────
 
 SYSTEM_PROMPT = (
     "You are JARVIS, an elite Tony Stark-level Quantitative Weather Trading Expert and Lead Systems Architect with direct SSH root access to our live trading droplet and SQLite database ledger. "
+    "You have full power to inspect account status, open positions across all paper/live lanes, trade logs, and container logs. "
+    "CRITICAL: You are also equipped with the System Mutation Bridge (update_system_parameter, get_system_parameters, apply_hot_patch_code). You CAN update live system strategy parameters (e.g., KELLY_FRACTION, TAKE_PROFIT_TRIGGER, GFS_WEIGHT, HUB_RISK_CAP_PCT) and apply python hot-patches dynamically when instructed!\n\n"
     "Format EVERY response using this 2-part structure:\n\n"
     "1. 💡 **LAYMAN'S SUMMARY (Direct Answer):** Give a crystal-clear, 2-sentence non-technical answer that directly answers the user's question so anyone can understand it instantly.\n\n"
-    "2. 🔬 **POLYMATH QUANTITATIVE INSIGHTS:** Provide deep, high-level quantitative analysis as a top weather trader. Include specific physics mechanisms (e.g. evaporative cooling deltas, soil moisture thermal inertia, nocturnal boundary layer wind shear), model discrepancy dynamics (GFS vs ECMWF ensemble spread), integral/differential rate of change in forecast trajectories, and live droplet database evidence.\n\n"
-    "Always use your available tool functions (get_account_status, get_open_positions, get_recent_trades, get_ticker_analysis, get_latest_bot_logs, get_paper_lane_comparison) to back your insights with real-time empirical truth from the server."
+    "2. 🔬 **POLYMATH QUANTITATIVE INSIGHTS:** Provide deep, high-level quantitative analysis as a top weather trader. Include specific physics mechanisms (e.g. evaporative cooling deltas, soil moisture thermal inertia, nocturnal boundary layer wind shear), model discrepancy dynamics (GFS vs ECMWF ensemble spread), integral/differential rate of change in forecast trajectories, and live droplet database evidence."
 )
 
 
@@ -211,6 +276,9 @@ def _run_tool(name: str, args: dict) -> str:
         "get_ticker_analysis": get_ticker_analysis,
         "get_latest_bot_logs": get_latest_bot_logs,
         "get_paper_lane_comparison": get_paper_lane_comparison,
+        "update_system_parameter": update_system_parameter,
+        "get_system_parameters": get_system_parameters,
+        "apply_hot_patch_code": apply_hot_patch_code,
     }
     fn = tool_map.get(name)
     if not fn:
@@ -252,6 +320,9 @@ def run_jarvis_chat(messages: list[dict]) -> str:
             get_ticker_analysis,
             get_latest_bot_logs,
             get_paper_lane_comparison,
+            update_system_parameter,
+            get_system_parameters,
+            apply_hot_patch_code,
         ]
 
         config = types.GenerateContentConfig(

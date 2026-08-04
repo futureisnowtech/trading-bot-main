@@ -1093,10 +1093,21 @@ st.markdown(
     div[data-testid="stChatInput"] input::placeholder {{
         color: rgba(0, 229, 255, 0.6) !important;
     }}
+    /* Force st.chat_input to render inline directly inside Jarvis HUD instead of screen bottom */
     div[data-testid="stChatInput"] {{
+        position: relative !important;
+        bottom: auto !important;
+        margin: 15px auto !important;
+        width: 100% !important;
+        max-width: 700px !important;
         border: 1px solid rgba(0, 229, 255, 0.4) !important;
         border-radius: 12px !important;
         box-shadow: 0 0 15px rgba(0, 229, 255, 0.2) !important;
+    }}
+
+    /* Completely hide un-needed floating outer dotted circle */
+    div.element-container:has(div.jarvis-orb-anchor) + div.element-container div.stButton::after {{
+        display: none !important;
     }}
 
     .jarvis-orb-wrap {{

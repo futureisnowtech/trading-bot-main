@@ -1239,7 +1239,7 @@ if st.button("⚡", key="reactor_toggle_btn"):
     st.session_state.show_jarvis = not st.session_state.get("show_jarvis", False)
     st.rerun()
 
-# ── Dormant state countdown ──
+# ── Dormant state countdown & Autonomous 4-Hour Holographic Crystal Tips ──
 if not jarvis_open:
     st.markdown('<div class="jarvis-orb-wrap">', unsafe_allow_html=True)
     # Countdown sits right under the dormant orb
@@ -1262,6 +1262,36 @@ if not jarvis_open:
     """
     components.html(countdown_html, height=80)
     st.markdown('<div class="jarvis-label">TAP ORB TO INITIATE INTEL</div>', unsafe_allow_html=True)
+    
+    # ── Autonomous 4-Hour Holographic Crystal Shards Pool ──
+    ALL_CRYSTAL_TIPS = [
+        {"label": "💧 Evaporative Cooling", "prompt": "Audit the evaporative cooling precip deltas on our active contracts and check if high temps are suppressed.", "icon": "💧"},
+        {"label": "💨 Nocturnal Wind Shear", "prompt": "Check overnight wind shear metrics and explain how low temp floors are being adjusted.", "icon": "💨"},
+        {"label": "☀️ Dry Soil Memory", "prompt": "Inspect rolling 7-day soil moisture totals and explain dry soil warm bias modeling.", "icon": "☀️"},
+        {"label": "🛡️ Hub Risk Cap", "prompt": "Check our hub concentration exposure across Miami, Austin, Phoenix, Chicago, and NYC.", "icon": "🛡️"},
+        {"label": "📊 GFS vs ECMWF Spread", "prompt": "Compare GFS vs ECMWF ensemble path divergence across open contracts.", "icon": "📊"},
+        {"label": "🚀 Paper Lane B Alpha", "prompt": "Query Paper Lane B 10X Maker positions and analyze order book queue fill rates.", "icon": "🚀"},
+        {"label": "⚖️ Dynamic Kelly Sizing", "prompt": "Explain how fractional Kelly sizing ($15-$35 brackets) is capping capital drawdown.", "icon": "⚖️"},
+        {"label": "🎯 Take Profit Trigger", "prompt": "Audit open positions near the 85¢ take-profit exit threshold.", "icon": "🎯"},
+        {"label": "🔄 Truth Drift Audit", "prompt": "Run full reconciliation between local SQLite position ledger and live Kalshi exchange.", "icon": "🔄"},
+        {"label": "⏱️ Forecast Freshness", "prompt": "Check forecast model freshness and list any recent model age vetoes.", "icon": "⏱️"},
+        {"label": "📈 PnL Performance", "prompt": "Provide a complete breakdown of our PnL since July 29th across all trading lanes.", "icon": "📈"},
+        {"label": "🤖 Droplet Integrity", "prompt": "Inspect container disk space, bot logs, and background process uptime on the droplet.", "icon": "🤖"},
+    ]
+
+    # Rotate 4 active crystal tips every 4 hours based on epoch
+    epoch_4h = int(datetime.now(timezone.utc).timestamp()) // (4 * 3600)
+    active_crystals = [ALL_CRYSTAL_TIPS[(epoch_4h + i) % len(ALL_CRYSTAL_TIPS)] for i in range(4)]
+
+    st.markdown("<div style='text-align: center; margin-top: 15px; font-size: 0.75em; letter-spacing: 2px; color: #81c784; font-weight: bold;'>💎 AUTONOMOUS HUD CRYSTAL INSIGHTS (AUTO-ROTATES EVERY 4H)</div>", unsafe_allow_html=True)
+    c1, c2 = st.columns(2)
+    for idx, tip in enumerate(active_crystals):
+        col = c1 if idx % 2 == 0 else c2
+        if col.button(f"{tip['icon']} {tip['label']}", use_container_width=True, key=f"crystal_btn_{idx}_{epoch_4h}"):
+            st.session_state.jarvis_prompt_input = tip["prompt"]
+            st.session_state.show_jarvis = True
+            st.rerun()
+
     st.markdown('</div>', unsafe_allow_html=True)
 
 # ── Active state: expanded orb becomes chat interface ───────────────
@@ -1411,13 +1441,26 @@ else:
                     st.error(f"Command failed: {e}")
         st.rerun()
     else:
-        if prompt := st.chat_input("Ask Weatherman Bot anything..."):
+        with st.form(key="jarvis_inline_cmd_form", clear_on_submit=True):
+            cmd_l, cmd_r = st.columns([4.8, 1.2])
+            with cmd_l:
+                user_typed_prompt = st.text_input(
+                    "Command Input",
+                    placeholder="Ask JARVIS anything (e.g., PnL since July 29, open positions, bot logs)...",
+                    label_visibility="collapsed",
+                    key="jarvis_form_input_val",
+                )
+            with cmd_r:
+                submitted = st.form_submit_button("⚡ EXECUTE", use_container_width=True)
+
+        if submitted and user_typed_prompt and user_typed_prompt.strip():
+            prompt = user_typed_prompt.strip()
             with st.chat_message("user"):
                 st.markdown(prompt)
             st.session_state.jarvis_history.append({"role": "user", "content": prompt})
 
             with st.chat_message("assistant"):
-                with st.spinner("Executing..."):
+                with st.spinner("Analyzing droplet database & live logs..."):
                     try:
                         from dashboard.jarvis_brain import run_jarvis_chat
                         reply = run_jarvis_chat(st.session_state.jarvis_history)
@@ -1425,6 +1468,7 @@ else:
                         st.session_state.jarvis_history.append({"role": "assistant", "content": reply})
                     except Exception as e:
                         st.error(f"Command failed: {e}")
+            st.rerun()
     # Pin viewport scroll to top of Jarvis console to prevent auto-scrolling away
     scroll_align_html = """
     <script>

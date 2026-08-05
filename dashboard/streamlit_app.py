@@ -1281,6 +1281,31 @@ if not jarvis_open:
         {"label": "🤖 Droplet Integrity", "prompt": "Inspect container disk space, bot logs, and background process uptime on the droplet.", "icon": "🤖"},
     ]
 
+    st.markdown("""
+    <style>
+    /* Crystal tip buttons — force visible white text on dark background */
+    div[data-testid="stButton"] > button {
+        background: rgba(0, 229, 255, 0.08) !important;
+        border: 1px solid rgba(0, 229, 255, 0.35) !important;
+        color: #e0f7fa !important;
+        font-weight: 600 !important;
+        font-size: 0.82em !important;
+        letter-spacing: 0.5px !important;
+        border-radius: 8px !important;
+        transition: all 0.2s ease !important;
+    }
+    div[data-testid="stButton"] > button:hover {
+        background: rgba(0, 229, 255, 0.22) !important;
+        border-color: rgba(0, 229, 255, 0.7) !important;
+        color: #ffffff !important;
+        box-shadow: 0 0 12px rgba(0, 229, 255, 0.4) !important;
+    }
+    div[data-testid="stButton"] > button p {
+        color: #e0f7fa !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
     # Rotate 4 active crystal tips every 4 hours based on epoch
     epoch_4h = int(datetime.now(timezone.utc).timestamp()) // (4 * 3600)
     active_crystals = [ALL_CRYSTAL_TIPS[(epoch_4h + i) % len(ALL_CRYSTAL_TIPS)] for i in range(4)]

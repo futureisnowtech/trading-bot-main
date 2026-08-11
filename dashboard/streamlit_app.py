@@ -1393,21 +1393,25 @@ else:
             st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # Suggestion chips
+    # Suggestion chips. Each points at one specific, verified tool by name rather than
+    # a freeform multi-step prompt -- the prior versions invited the model to
+    # improvise SQL or reasoned over a hardcoded, long-expired contract
+    # (KXLOWTMIA-26AUG01-T80), which is exactly the kind of arbitrary preload that
+    # tells you nothing about current system health.
     sug_cols = st.columns(5)
     labels = [
-        "📊 Health",
-        "🌡️ Edge",
-        "📑 Trades",
-        "🔄 Drift",
-        "📈 Fee vs Edge",
+        "🚦 Why No Trades?",
+        "💸 Fee vs Edge",
+        "🎯 Maker Fills",
+        "📂 Open Book",
+        "🔍 Truth Drift",
     ]
     prompts_map = {
-        "📊 Health": "Run a complete audit on our runtime container logs, check the disk free space, and print the last 20 warning or error log lines.",
-        "🌡️ Edge": "Retrieve the model forecast probabilities (GFS vs ECMWF) for our Miami low contract KXLOWTMIA-26AUG01-T80, check what the current recorded low is, and verify if we have any edge.",
-        "📑 Trades": "Query the SQLite database for the last 5 trades, calculate our net edge vs paid market prices, and give me a summary of how we performed.",
-        "🔄 Drift": "Fetch our live holdings from the Kalshi API, cross-reference them with our local database positions table, and run reconciliation to ensure there is zero truth drift.",
-        "📈 Fee vs Edge": "Compare gross edge captured against exchange fees paid on settled weather contracts, and quantify how much of the edge fees are consuming.",
+        "🚦 Why No Trades?": "Call get_entry_funnel. Tell me plainly whether entries are currently allowed, and if not, exactly what is blocking them.",
+        "💸 Fee vs Edge": "Call get_fee_drag. Report the gross edge, fees paid, and net realized PnL for the live era, and state what fraction of the edge fees are consuming.",
+        "🎯 Maker Fills": "Call get_maker_fill_stats. Report the maker fill rate, how many entries timed out and crossed as taker, and the average spread saved per contract.",
+        "📂 Open Book": "Call get_open_positions. List every open position with side, quantity, entry price, and current realized PnL.",
+        "🔍 Truth Drift": "Call get_live_kalshi_status. Report position_drift specifically -- state clearly whether the broker and local database agree, and detail any mismatch.",
     }
     for col, label in zip(sug_cols, labels):
         if col.button(label, use_container_width=True, key=f"sug_{label}"):

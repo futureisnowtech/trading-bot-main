@@ -349,18 +349,10 @@ def get_fee_drag() -> str:
         wins = int(truth.get("wins") or 0)
         losses = int(truth.get("losses") or 0)
 
-        # Scope fees to the same live-trading era the settlement truth covers.
-        # Summing all-time fees against era-scoped PnL overstates the drag badly:
-        # the trades table predates the live era by thousands of rows.
-        from config import POST_PAPER_START_DATE
-
-        conn = sqlite3.connect(_get_db_path())
-        row = conn.execute(
-            "SELECT COALESCE(SUM(fee_usd), 0) FROM trades WHERE broker = 'kalshi' AND ts >= ?",
-            (POST_PAPER_START_DATE,),
-        ).fetchone()
-        conn.close()
-        fees = float(row[0] or 0.0)
+        # Fees come from settlement truth, not the trades table. The trades table is
+        # incomplete for the live era (its most recent row predates current activity),
+        # so summing it understated fees by ~4x.
+        fees = float(truth.get("total_fees_usd") or 0.0)
 
         gross = net + fees
         pct = (100.0 * fees / gross) if gross > 0 else 0.0
@@ -476,6 +468,86 @@ SYSTEM_PROMPT = (
     "1. 💡 **LAYMAN'S SUMMARY (Direct Answer):** Give a crystal-clear, 2-sentence non-technical answer that directly answers the user's question so anyone can understand it instantly.\n\n"
     "2. 🔬 **POLYMATH QUANTITATIVE INSIGHTS:** Provide deep, high-level quantitative analysis as a top weather trader. Include specific physics mechanisms (e.g. evaporative cooling deltas, soil moisture thermal inertia, nocturnal boundary layer wind shear), model discrepancy dynamics (GFS vs ECMWF ensemble spread), integral/differential rate of change in forecast trajectories, NOAA ground-truth observations, and live droplet database evidence."
 )
+
+
+def get_entry_funnel(lookback_hours: int = 24) -> str:
+    """Why the bot did or did not enter trades recently: candidates, vetoes, outcomes.
+
+    Use this when asked why there are no new trades, whether the bot is still working,
+    or what is blocking entries.
+    """
+    from notifications import agent_tools as at
+
+    parts = []
+    try:
+        from runtime.operator_truth import get_release_status as _rs
+
+        rs = _rs() or {}
+        parts.append(
+            f"Release gate: {rs.get('current_release_verdict')} | "
+            f"entries_allowed={rs.get('entries_allowed')} | "
+            f"blockers={rs.get('top_infrastructure_blockers') or []}"
+        )
+    except Exception as e:
+        parts.append(f"Release gate: unavailable ({e})")
+
+    parts.append("--- Vetoes ---\n" + str(at.get_recent_veto_summary()))
+    parts.append("--- Execution outcomes ---\n" + str(at.get_recent_execution_summary()))
+    return "\n\n".join(parts)
+
+
+def get_maker_fill_stats(lookback_hours: int = 48) -> str:
+    """How the maker-first entry experiment is performing: fills vs crosses.
+
+    Maker entry rests at the bid to pay ~4x less in fees. This reports how often
+    those resting orders actually fill versus timing out and crossing as taker,
+    which is the number that decides whether the experiment is working.
+    """
+    import re
+    import subprocess
+
+    from config import MAKER_ENTRY_ENABLED, MAKER_ENTRY_TIMEOUT_S
+
+    header = f"MAKER_ENTRY_ENABLED={MAKER_ENTRY_ENABLED} | timeout={MAKER_ENTRY_TIMEOUT_S}s"
+    try:
+        out = subprocess.run(
+            ["docker", "logs", "--since", f"{int(lookback_hours)}h", "execution-engine"],
+            capture_output=True, text=True, timeout=60,
+        )
+        log = (out.stdout or "") + (out.stderr or "")
+    except Exception:
+        try:
+            from config import BOT_LOG_PATH
+
+            with open(BOT_LOG_PATH, "r", encoding="utf-8", errors="ignore") as fh:
+                log = fh.read()[-400000:]
+        except Exception as e:
+            return f"{header}\nNo log source available: {e}"
+
+    lines = [l for l in log.splitlines() if "[Maker]" in l or "MAKER BUY" in l]
+    if not lines:
+        return (
+            f"{header}\nNo maker activity in the last {lookback_hours}h. Either no entry "
+            f"was attempted, or the flag was enabled after the last entry."
+        )
+
+    filled = sum(1 for l in lines if "MAKER BUY" in l)
+    no_fill = sum(1 for l in lines if "No fill" in l)
+    crossed_other = sum(1 for l in lines if "crossing" in l and "No fill" not in l)
+    attempts = filled + no_fill + crossed_other
+    rate = (100.0 * filled / attempts) if attempts else 0.0
+
+    saved = [float(m) for m in re.findall(r"saved vs ask ([0-9.]+)/contract", log)]
+    saved_txt = f"avg ${sum(saved)/len(saved):.4f}/contract on {len(saved)} fills" if saved else "n/a"
+
+    return (
+        f"{header}\n"
+        f"Attempts: {attempts} | maker fills: {filled} | timed out: {no_fill} | "
+        f"skipped to taker: {crossed_other}\n"
+        f"Maker fill rate: {rate:.0f}%\n"
+        f"Spread saved: {saved_txt}\n\n"
+        + "\n".join(lines[-12:])
+    )
 
 
 def show_panel(name: str) -> str:

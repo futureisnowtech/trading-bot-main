@@ -103,6 +103,8 @@ def _build_registry() -> dict[str, Tool]:
     add(jb.get_latest_bot_logs, READ)
     add(jb.get_fee_drag, READ)
     add(jb.get_system_parameters, READ)
+    add(jb.get_entry_funnel, READ)
+    add(jb.get_maker_fill_stats, READ)
     add(jb.show_panel, READ)
     add(jb.update_system_parameter, WRITE)
     add(jb.apply_hot_patch_code, WRITE)

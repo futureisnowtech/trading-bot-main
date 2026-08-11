@@ -87,6 +87,7 @@ def _empty_truth(*, source: str, since_iso: str) -> dict[str, Any]:
         "losses": 0,
         "win_rate": 0.0,
         "total_pnl_usd": 0.0,
+        "total_fees_usd": 0.0,
         "total_won_usd": 0.0,
         "total_lost_usd": 0.0,
         "by_bucket": {},
@@ -154,6 +155,7 @@ def build_weather_settlement_truth(
             continue
 
         pnl_usd = settlement_pnl_usd(row)
+        truth["total_fees_usd"] = round(truth["total_fees_usd"] + _safe_float(row.get("fee_cost")), 4)
 
         _append_bucket_stats(truth, pnl_usd=pnl_usd)
         bucket_stats = buckets.setdefault(

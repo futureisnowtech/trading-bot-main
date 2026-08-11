@@ -112,6 +112,13 @@ try:
     else:
         ok(f"KALSHI_HUB_EXPOSURE_MIN_USD={cfg.KALSHI_HUB_EXPOSURE_MIN_USD:.2f}")
 
+    # Salvage delta drives automated closes, so it must stay deterministic and
+    # match the published parameter catalog (research_package, CONFIRMED 0.15).
+    if not 0.0 < float(cfg.SALVAGE_EXIT_DELTA) < 1.0:
+        fail("SALVAGE_EXIT_DELTA must be a probability strictly between 0 and 1")
+    else:
+        ok(f"SALVAGE_EXIT_DELTA={cfg.SALVAGE_EXIT_DELTA:.2f}")
+
     if float(cfg.KALSHI_TAKER_FEE_RATE) < 0:
         fail("KALSHI_TAKER_FEE_RATE cannot be negative")
     else:

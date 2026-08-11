@@ -363,6 +363,33 @@ def test_no_side_exit_pnl_uses_complement_math(monkeypatch):
     assert round(captured["pnl_usd"], 4) == -1.1
 
 
+def test_realized_pnl_is_sign_mirrored_across_sides():
+    """YES and NO are complements, so the same fills must mirror in sign."""
+    from execution.kalshi_broker import KalshiBroker
+
+    args = dict(entry_price=0.41, exit_price=0.60, qty=5, fee_usd=0.15)
+
+    yes_pnl = KalshiBroker._realized_pnl(held_side="YES", **args)
+    no_pnl = KalshiBroker._realized_pnl(held_side="NO", **args)
+
+    assert round(yes_pnl, 4) == 0.8
+    assert round(no_pnl, 4) == -1.1
+    # Fees are side-independent, so the gross legs must be exact opposites.
+    assert round((yes_pnl + args["fee_usd"]) + (no_pnl + args["fee_usd"]), 10) == 0.0
+
+
+def test_realized_pnl_rejects_unknown_side():
+    """Silently defaulting an unknown side to long-YES math is the 174d23d bug."""
+    import pytest
+
+    from execution.kalshi_broker import KalshiBroker
+
+    with pytest.raises(ValueError):
+        KalshiBroker._realized_pnl(
+            held_side="LONG", entry_price=0.41, exit_price=0.60, qty=5, fee_usd=0.15
+        )
+
+
 def test_resting_partial_buy_books_filled_contracts(monkeypatch):
     broker = _connected_broker()
     captured = {}

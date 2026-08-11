@@ -94,16 +94,41 @@ class TestV20Specification(unittest.TestCase):
         self.assertTrue(n_scaled < n_base)
 
     def test_exit_curves(self):
-        """Verify strict 15% (0.15) salvage exit threshold (SPEC Phase 6)."""
-        # At any tau and entry price, salvage exit should be strictly 0.15
-        val_120 = calculate_salvage_exit_threshold(120.0, 0.40)
-        self.assertAlmostEqual(val_120, 0.15)
+        """Salvage exit is a constant, invariant to tau and entry price.
 
-        val_0 = calculate_salvage_exit_threshold(0.0, 0.40)
-        self.assertAlmostEqual(val_0, 0.15)
+        Bound to config.SALVAGE_EXIT_DELTA so runtime, validation and this
+        proof cannot drift apart the way 174d23d's tau-decay did.
+        """
+        from config import SALVAGE_EXIT_DELTA
 
-        val_high = calculate_salvage_exit_threshold(0.0, 0.80)
-        self.assertAlmostEqual(val_high, 0.15)
+        self.assertAlmostEqual(SALVAGE_EXIT_DELTA, 0.15)
+
+        for tau_hours in (120.0, 24.0, 3.2, 1.0, 0.0, -5.0):
+            for p_entry in (0.10, 0.40, 0.80):
+                self.assertAlmostEqual(
+                    calculate_salvage_exit_threshold(tau_hours, p_entry),
+                    SALVAGE_EXIT_DELTA,
+                    msg=f"salvage threshold varied at tau={tau_hours}, p={p_entry}",
+                )
+
+    def test_salvage_delta_matches_published_parameter_catalog(self):
+        """The parameter catalog is an audit surface; it must state the live value."""
+        from config import SALVAGE_EXIT_DELTA
+
+        catalog = os.path.join(
+            _ROOT, "research_package", "03_parameter_catalog.md"
+        )
+        with open(catalog, "r", encoding="utf-8") as handle:
+            salvage_lines = [
+                line for line in handle if "Sovereign Salvage Delta" in line
+            ]
+        self.assertTrue(salvage_lines, "Salvage delta missing from parameter catalog.")
+        for line in salvage_lines:
+            self.assertIn(
+                f"{SALVAGE_EXIT_DELTA:.2f}",
+                line,
+                msg=f"Catalog row disagrees with config ({SALVAGE_EXIT_DELTA}): {line.strip()}",
+            )
 
     def test_disjoint_bracket_covariance(self):
         """Verify disjoint bracket same-event contracts have negative covariance (SPEC Phase 5)."""

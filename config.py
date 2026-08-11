@@ -125,7 +125,7 @@ PHYSICS_DELTA_ENABLED: bool = os.getenv("PHYSICS_DELTA_ENABLED", "true").lower()
 # enable only after the physics-delta deploy is verified. If an order does not
 # fill within the timeout it is cancelled and re-crossed, so a thin book degrades
 # to today's taker behavior rather than silently halting entries.
-MAKER_ENTRY_ENABLED: bool = os.getenv("MAKER_ENTRY_ENABLED", "false").lower() == "true"
+MAKER_ENTRY_ENABLED: bool = os.getenv("MAKER_ENTRY_ENABLED", "true").lower() == "true"
 MAKER_ENTRY_TIMEOUT_S: int = int(os.getenv("MAKER_ENTRY_TIMEOUT_S", "90"))
 
 # Session start: all performance stats (win rate, P&L, trade counts) are

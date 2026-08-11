@@ -93,7 +93,11 @@ def test_broker_surfaces_rate_limit_status(monkeypatch):
     )
 
     assert result["status"] == "too_many_requests"
-    assert calls[0]["time_in_force"] == "immediate_or_cancel"
+    # Maker-first entry probes the quote before ordering, so the order body is not
+    # necessarily the first call. The taker order must still be IOC.
+    order_bodies = [c for c in calls if "time_in_force" in c]
+    assert order_bodies, "no order body was submitted"
+    assert order_bodies[-1]["time_in_force"] == "immediate_or_cancel"
 
 
 def test_fill_price_falls_back_to_total_cost_per_share():

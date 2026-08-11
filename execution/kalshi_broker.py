@@ -384,6 +384,7 @@ class KalshiBroker:
         limit_price: float,
         action: str,
         reduce_only: bool = False,
+        post_only: bool = False,
     ) -> dict:
         yes_leg_price = self._yes_leg_price(right, limit_price)
         return {
@@ -392,9 +393,11 @@ class KalshiBroker:
             "side": self._event_order_side(right=right, action=action),
             "count": f"{max(0, int(qty)):.2f}",
             "price": f"{yes_leg_price:.4f}",
-            "time_in_force": "immediate_or_cancel",
+            # A post-only order must rest to earn the maker rate; IOC would cancel it
+            # instantly, so the time-in-force has to flip with post_only.
+            "time_in_force": "good_till_cancelled" if post_only else "immediate_or_cancel",
             "self_trade_prevention_type": "taker_at_cross",
-            "post_only": False,
+            "post_only": bool(post_only),
             "cancel_order_on_pause": False,
             "reduce_only": bool(reduce_only),
             "subaccount": 0,
@@ -420,6 +423,27 @@ class KalshiBroker:
         if remaining_qty > 0:
             return order_info, "pending"
         return order_info, "pending"
+
+    def cancel_order(self, order_id: str) -> bool:
+        """Cancel a resting order. Returns True if the exchange accepted the cancel."""
+        oid = str(order_id or "").strip()
+        if not oid:
+            return False
+        try:
+            resp = self._request("DELETE", f"/trade-api/v2/portfolio/orders/{oid}")
+            return not self._extract_error_code(resp)
+        except Exception as exc:
+            logger.warning("Cancel failed for order %s: %s", oid, exc)
+            return False
+
+    def _order_filled_qty(self, order_id: str) -> float:
+        """Contracts filled so far on a resting order."""
+        try:
+            details = self._request("GET", f"/trade-api/v2/portfolio/orders/{order_id}")
+            order = details.get("order") or {}
+            return self._extract_fill_count(order)
+        except Exception:
+            return 0.0
 
     def _hydrate_order_details(self, order_info: dict) -> dict:
         order_id = str(order_info.get("order_id") or "").strip()
@@ -1102,6 +1126,121 @@ class KalshiBroker:
     def get_quotes_batch(self, contracts: list[dict]) -> list[dict]:
         return [self.get_quote(c["local_symbol"]) for c in contracts]
 
+    def _try_maker_entry(
+        self,
+        *,
+        contract_dict: dict,
+        ticker: str,
+        right: str,
+        side: str,
+        qty: int,
+        taker_limit_price: float,
+        kwargs: dict,
+    ) -> dict | None:
+        """Rest a post-only buy at the bid; return a fill result, or None to cross.
+
+        Returning None means "fall through to the normal taker path" — that is the
+        safe default for every failure mode here (no quote, no bid, bid above our
+        limit, rejected post-only, timeout with zero fill). A partial fill is
+        returned as-is rather than topping up as taker: the remainder gets another
+        chance on the next cycle, and chasing it would spend the fee saving we came
+        for.
+        """
+        timeout_s = max(0, int(getattr(config, "MAKER_ENTRY_TIMEOUT_S", 90)))
+
+        try:
+            quote = self.get_quote(ticker) or {}
+        except Exception as exc:
+            logger.warning("[Maker] Quote failed for %s: %s", ticker, exc)
+            return None
+
+        raw_bid = quote.get("yes_bid") if side == "yes" else quote.get("no_bid")
+        try:
+            bid = float(raw_bid or 0.0)
+        except (TypeError, ValueError):
+            bid = 0.0
+        if bid <= 0.0:
+            logger.info("[Maker] No bid on %s; crossing instead.", ticker)
+            return None
+
+        # Never pay more than the taker path would have. If the bid is already at or
+        # above our limit there is no saving available, so just cross.
+        if bid >= float(taker_limit_price):
+            logger.info(
+                "[Maker] Bid %.4f >= limit %.4f on %s; crossing instead.",
+                bid, float(taker_limit_price), ticker,
+            )
+            return None
+
+        body = self._build_event_order_body(
+            ticker=ticker,
+            right=right,
+            qty=qty,
+            limit_price=bid,
+            action="buy",
+            reduce_only=False,
+            post_only=True,
+        )
+        resp = self._request("POST", "/trade-api/v2/portfolio/events/orders", body=body)
+        error_code = self._extract_error_code(resp)
+        if error_code:
+            # Most often the book moved and post_only would have crossed.
+            logger.info("[Maker] Post-only rejected on %s (%s); crossing.", ticker, error_code)
+            return None
+
+        order_info, _status = self._normalize_order_response(resp, requested_qty=qty)
+        order_id = str(order_info.get("order_id") or "").strip()
+        if not order_id:
+            return None
+
+        logger.info(
+            "[Maker] Resting %s x%d @ %.4f (taker would be %.4f), waiting %ds",
+            ticker, qty, bid, float(taker_limit_price), timeout_s,
+        )
+
+        filled = 0.0
+        deadline = time.time() + timeout_s
+        while time.time() < deadline:
+            time.sleep(min(5.0, max(1.0, timeout_s / 10.0)))
+            filled = self._order_filled_qty(order_id)
+            if filled >= qty:
+                break
+
+        if filled <= 0.0:
+            self.cancel_order(order_id)
+            logger.info("[Maker] No fill on %s within %ds; crossing.", ticker, timeout_s)
+            return None
+
+        # Partial or full: stop here and keep the maker rate on what we got.
+        if filled < qty:
+            self.cancel_order(order_id)
+            logger.info("[Maker] Partial fill %.0f/%d on %s; keeping maker fill.", filled, qty, ticker)
+
+        context = {
+            "forecast_yes_prob": kwargs.get("forecast_yes_prob"),
+            "model_prob_gfs": kwargs.get("model_prob_gfs"),
+            "model_prob_ecmwf": kwargs.get("model_prob_ecmwf"),
+            "weather_mode": kwargs.get("weather_mode"),
+            "forecast_hours_to_resolution": kwargs.get("forecast_hours_to_resolution"),
+            "last_trade_at": contract_dict.get("last_trade_at", ""),
+            "reason": kwargs.get("reason", ""),
+            "strategy": kwargs.get("strategy", "forecast_weather"),
+        }
+        result = self._apply_entry_fill(
+            ticker=ticker,
+            right=right,
+            requested_qty=qty,
+            order_info=self._hydrate_order_details(order_info),
+            order_type="Maker",
+            status="executed",
+            context=context,
+        )
+        print(
+            f"[KalshiBroker] MAKER BUY {result.get('filled_qty')} {ticker} ({side.upper()}) "
+            f"@ {float(result.get('price') or 0.0):.4f} | saved vs ask {float(taker_limit_price) - bid:.4f}/contract"
+        )
+        return result
+
     def place_buy_order(self, contract_dict: dict, qty: int, limit_price: float, **kwargs) -> dict:
         if config.SHADOW_EXECUTION:
             return self._execute_shadow_buy(contract_dict, qty, limit_price, **kwargs)
@@ -1113,6 +1252,25 @@ class KalshiBroker:
         right = str(contract_dict.get("right") or "C").upper()
         side = "yes" if right == "C" else "no"
         order_type = kwargs.get("type", "limit").lower()
+
+        # Maker-first entry: rest at the bid to earn the maker fee rate (~4x cheaper
+        # than taker) and save the spread. If it does not fill inside the timeout we
+        # cancel and cross, so a thin book degrades to today's taker behavior rather
+        # than silently halting entries. Fees are the live lane's binding constraint:
+        # they consume more than the gross edge the strategy captures.
+        if config.MAKER_ENTRY_ENABLED and order_type == "limit":
+            maker_result = self._try_maker_entry(
+                contract_dict=contract_dict,
+                ticker=ticker,
+                right=right,
+                side=side,
+                qty=qty,
+                taker_limit_price=limit_price,
+                kwargs=kwargs,
+            )
+            if maker_result is not None:
+                return maker_result
+
         body = self._build_event_order_body(
             ticker=ticker,
             right=right,

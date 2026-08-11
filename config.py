@@ -200,11 +200,18 @@ KALSHI_MAX_DEPLOYED_PCT: float = float(os.getenv("KALSHI_MAX_DEPLOYED_PCT", "0.9
 KALSHI_MAX_CONCURRENT_POSITIONS: int = int(os.getenv("KALSHI_MAX_CONCURRENT_POSITIONS", "50"))
 KALSHI_SAME_EVENT_FAMILY_CAP: int = int(os.getenv("KALSHI_SAME_EVENT_FAMILY_CAP", "5"))
 KALSHI_HUB_EXPOSURE_PCT: float = float(
-    os.getenv("KALSHI_HUB_EXPOSURE_PCT", "0.60")
+    # Default tracks the live .env (0.30). It read 0.60 while production ran
+    # 0.30, so any environment missing the var silently doubled the regional
+    # exposure ceiling -- which is how CI diverged from the box it was proving.
+    os.getenv("KALSHI_HUB_EXPOSURE_PCT", "0.30")
 )
 KALSHI_HUB_EXPOSURE_MIN_USD: float = float(
     os.getenv("KALSHI_HUB_EXPOSURE_MIN_USD", "40")
 )
+# Sovereign Salvage Delta: purge a position when its model probability falls
+# below this. Constant by contract -- see research_package/03_parameter_catalog.md
+# (marked CONFIRMED) and 02_strategy_catalog.md section 4.
+SALVAGE_EXIT_DELTA: float = float(os.getenv("SALVAGE_EXIT_DELTA", "0.15"))
 KALSHI_MAX_QTY_PER_POSITION: int = int(os.getenv("KALSHI_MAX_QTY_PER_POSITION", "2500"))
 KALSHI_MAX_USD_PER_POSITION: float = float(os.getenv("KALSHI_MAX_USD_PER_POSITION", "40.0"))  # Hard Ceiling
 KALSHI_MIN_PRICE: float = 0.08

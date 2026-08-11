@@ -368,6 +368,34 @@ class KalshiBroker:
         return "ask" if normalized_right == "C" else "bid"
 
     @staticmethod
+    def _realized_pnl(
+        *,
+        held_side: str,
+        entry_price: float,
+        exit_price: float,
+        qty: float,
+        fee_usd: float,
+    ) -> float:
+        """Realized P&L for a single exit, in raw Kalshi contract-price units.
+
+        YES and NO are complements: a NO holder gains as the contract price
+        falls. Fill prices stay contract-native (the API-facing conversion in
+        _yes_leg_price applies only to the outbound order body) -- the sole
+        thing that varies by side is the sign of the basis.
+
+        Sole owner of this formula. 174d23d inlined it, dropped the NO branch,
+        and every NO exit was then booked with long-YES sign.
+        """
+        side = str(held_side or "").strip().upper()
+        if side not in ("YES", "NO"):
+            raise ValueError(
+                f"Cannot compute realized P&L for unknown held side {held_side!r}; "
+                "expected 'YES' or 'NO'."
+            )
+        basis = (entry_price - exit_price) if side == "NO" else (exit_price - entry_price)
+        return basis * float(qty) - float(fee_usd)
+
+    @staticmethod
     def _yes_leg_price(right: str, contract_price: float) -> float:
         normalized_right = str(right or "C").upper()
         price = float(contract_price or 0.0)
@@ -496,8 +524,13 @@ class KalshiBroker:
         entry_price = float(pos_info.get("entry_price") or pos_info.get("entry") or 0.50)
         held_side = str(pos_info.get("side", default_side) or default_side).upper()
         if exit_price > 0:
-            pnl_usd = (exit_price - entry_price) * fill_qty
-            pnl_usd -= fee_usd
+            pnl_usd = self._realized_pnl(
+                held_side=held_side,
+                entry_price=entry_price,
+                exit_price=exit_price,
+                qty=fill_qty,
+                fee_usd=fee_usd,
+            )
         else:
             pnl_usd = 0.0
         remaining_qty = max(0.0, held_qty - fill_qty)

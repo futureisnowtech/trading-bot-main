@@ -61,6 +61,24 @@ def _reset_kill_switch() -> None:
         ks.last_latency_ms = 0.0
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _ensure_forecast_schema() -> None:
+    """Guarantee the forecast schema exists before any proof runs.
+
+    Several proofs read config.DB_PATH directly instead of going through the
+    proof_runtime fixture. On a developer box that database already exists, so
+    the gap only surfaced on a clean CI checkout as
+    `sqlite3.OperationalError: no such table: forecast_contracts`.
+    init_forecast_db is CREATE TABLE IF NOT EXISTS throughout, so this is
+    idempotent and never touches existing rows.
+    """
+    import config
+    from forecast.db import init_forecast_db
+
+    Path(config.DB_PATH).parent.mkdir(parents=True, exist_ok=True)
+    init_forecast_db(config.DB_PATH)
+
+
 @pytest.fixture
 def proof_runtime(tmp_path, monkeypatch) -> ProofRuntime:
     logs_dir = tmp_path / "logs"

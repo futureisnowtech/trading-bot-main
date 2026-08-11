@@ -1060,6 +1060,7 @@ def solve_optimal_size(
         f_star = max(0.0, f_star)
         
         kelly_frac = get_dynamic_param("KELLY_FRACTION", KALSHI_KELLY_FRACTION)
+        fav_scaler = calculate_favorite_scaler(q_clamped, bankroll)
         f_final = kelly_frac * f_star * (1.0 / max(1e-9, lambda_scaler)) * cov_charge * fav_scaler
         
         n_final = int(math.floor(f_final * bankroll / max(1e-9, p_clamped + phi)))

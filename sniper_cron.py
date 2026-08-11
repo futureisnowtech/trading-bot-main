@@ -6,7 +6,6 @@ import logging
 import sys
 
 from config import (
-    ACCOUNT_SIZE,
     FORECAST_AUTONOMOUS_ENABLED,
     FORECAST_LANE_ACTIVE,
     KALSHI_ENABLED,
@@ -59,7 +58,9 @@ def main() -> int:
         )
         return 0
 
-    summary = run_execution_cycle(bankroll=float(ACCOUNT_SIZE), run_rbi=True)
+    from runtime.live_account import resolve_live_bankroll
+
+    summary = run_execution_cycle(bankroll=resolve_live_bankroll(), run_rbi=True)
     try:
         sync_incidents_and_notify()
     except Exception:

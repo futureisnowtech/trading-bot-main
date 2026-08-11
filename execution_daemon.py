@@ -8,7 +8,6 @@ import sys
 import time
 
 from config import (
-    ACCOUNT_SIZE,
     FORECAST_AUTONOMOUS_ENABLED,
     FORECAST_LANE_ACTIVE,
     KALSHI_ENABLED,
@@ -40,7 +39,14 @@ def main() -> int:
         return 0
 
     sleep_seconds = max(1, int(float(os.getenv("SNIPER_SLEEP_SECONDS", "300"))))
-    bankroll = float(ACCOUNT_SIZE)
+    # Bankroll comes from Kalshi, not a hand-set constant. ACCOUNT_SIZE stays
+    # only as the last-resort floor inside resolve_live_bankroll.
+    from runtime.live_account import resolve_live_bankroll
+
+    logger.info(
+        "[ExecutionDaemon] Startup bankroll from broker: $%.2f (re-read every cycle)",
+        resolve_live_bankroll(),
+    )
     telegram_thread_started = False
 
     try:
@@ -93,7 +99,11 @@ def main() -> int:
                         storage["threshold_mb"],
                     )
                 else:
-                    summary = run_execution_cycle(bankroll=bankroll, run_rbi=True)
+                    # Re-read per cycle: the account moves as positions settle,
+                    # so a value captured at startup goes stale within hours.
+                    summary = run_execution_cycle(
+                        bankroll=resolve_live_bankroll(), run_rbi=True
+                    )
                     logger.info("Live Execution cycle complete: %s", summary)
 
                     try:

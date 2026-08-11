@@ -18,17 +18,19 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
+from config import POST_PAPER_START_DATE as LIVE_ERA_START
 from execution.kalshi_broker import KalshiBroker
 from runtime.kalshi_settlement_truth import settlement_pnl_usd
 
-def audit(start_date: str = "2026-07-24", emit_webapp_ts: str | None = None):
+def audit(start_date: str = "2026-07-24", end_date: str | None = None, emit_webapp_ts: str | None = None):
     broker = KalshiBroker()
     if not broker.connect():
         print("❌ Auth Error: Failed to connect to live Kalshi REST API.")
         sys.exit(1)
 
+    window_desc = f"{start_date} to {end_date}" if end_date else f"{start_date} to Present"
     print(f"\n==================================================================")
-    print(f"🔒 CANONICAL REAL KALSHI REST API AUDIT (Start Date >= {start_date})")
+    print(f"🔒 CANONICAL REAL KALSHI REST API AUDIT ({window_desc})")
     print(f"==================================================================\n")
 
     # 1. Real Balance & Open Portfolio Value
@@ -70,7 +72,14 @@ def audit(start_date: str = "2026-07-24", emit_webapp_ts: str | None = None):
         if not cursor:
             break
 
-    period_settlements = [s for s in all_settlements if s.get("settled_time", "") >= start_date]
+    # Comparing the full ISO timestamp against a bare end_date (e.g. "2026-08-10") with
+    # <= would wrongly exclude every row settled ON that date, since
+    # "2026-08-10T14:06:35Z" > "2026-08-10" lexicographically. Slice to the date prefix.
+    period_settlements = [
+        s for s in all_settlements
+        if s.get("settled_time", "") >= start_date
+        and (not end_date or str(s.get("settled_time", ""))[:10] <= end_date)
+    ]
 
     total_net_pnl = 0.0
     total_fees = 0.0
@@ -95,7 +104,7 @@ def audit(start_date: str = "2026-07-24", emit_webapp_ts: str | None = None):
     win_rate = (100.0 * wins / len(period_settlements)) if period_settlements else 0.0
 
     print(f"\n==================================================================")
-    print(f"🧾 OFFICIAL KALSHI ACCOUNT PnL AUDIT ({start_date} to Present):")
+    print(f"🧾 OFFICIAL KALSHI ACCOUNT PnL AUDIT ({window_desc}):")
     print(f"==================================================================")
     print(f"• Total Settled Contracts:   {len(period_settlements)}")
     print(f"• Winning Settlements:       {wins}")
@@ -108,7 +117,7 @@ def audit(start_date: str = "2026-07-24", emit_webapp_ts: str | None = None):
     # Independent cross-check: rebuild the same PnL from raw fill cashflow. Method A
     # (above) reads settlement aggregates; this reads every individual fill. They use
     # different endpoints, so agreement means the number is real and not a formula artifact.
-    verify_pnl, detail = _verify_via_fills(broker, period_settlements, start_date)
+    verify_pnl, detail = _verify_via_fills(broker, period_settlements, LIVE_ERA_START)
     if verify_pnl is not None:
         drift = abs(verify_pnl - total_net_pnl)
         status = "✅ agree" if drift < 1.0 else f"❌ DISAGREE by ${drift:,.2f}"
@@ -125,15 +134,24 @@ def audit(start_date: str = "2026-07-24", emit_webapp_ts: str | None = None):
             settlements=period_settlements,
             positions=active_mkt,
             start_date=start_date,
+            end_date=end_date,
         )
 
 
-def _verify_via_fills(broker, settlements: list, start_date: str):
+def _verify_via_fills(broker, settlements: list, fills_lookback_start: str):
     """Rebuild realized PnL from individual fills as a check on the settlement math.
 
     Sign convention that matters: a fill with side="no" and action="sell" ACQUIRES no
     contracts (it is a sale of the yes side), so it is cash out, not cash in. Reading
     those as inflows inflates the result by hundreds of dollars.
+
+    fills_lookback_start must be the live era's start, NOT a windowed report's own
+    --start: a position can be entered days before it settles, so bounding the fills
+    pull to the report window clips entry fills for anything opened earlier, understating
+    `paid` and inflating the apparent PnL. The ticker set from `settlements` still scopes
+    the result to exactly the window being reported -- only the fills lookback needs the
+    wider net. A windowed --start/--end run once disagreed with settlement PnL by $52 for
+    exactly this reason before the lookback was decoupled from the window.
     """
     from runtime.kalshi_settlement_truth import _parse_session_start
 
@@ -141,7 +159,7 @@ def _verify_via_fills(broker, settlements: list, start_date: str):
         return float(v or 0)
 
     try:
-        min_ts = int(_parse_session_start(start_date).timestamp())
+        min_ts = int(_parse_session_start(fills_lookback_start).timestamp())
         fills, cursor = [], ""
         while True:
             params = {"limit": 200, "min_ts": min_ts}
@@ -187,7 +205,9 @@ def _fmt_usd(amount: float) -> str:
     return f"{'+$' if amount >= 0 else '-$'}{abs(amount):.2f}"
 
 
-def emit_results_data_ts(path: str, *, settlements: list, positions: list, start_date: str) -> None:
+def emit_results_data_ts(
+    path: str, *, settlements: list, positions: list, start_date: str, end_date: str | None = None
+) -> None:
     """Write the WebApp trade ledger (src/lib/resultsData.ts) from settlement truth.
 
     The headline in botStats and the rows underneath it are derived from the same
@@ -253,9 +273,10 @@ def emit_results_data_ts(path: str, *, settlements: list, positions: list, start
     def ts_rows(items: list) -> str:
         return "\n".join(f"  {json.dumps(r, ensure_ascii=False)}," for r in items)
 
+    window_label = f"{start_date} to {end_date}" if end_date else f"{start_date}+"
     content = f"""// AUTO-GENERATED by scripts/audit_real_kalshi_records.py --emit-webapp-ts
 // Source: Kalshi REST /trade-api/v2/portfolio/settlements (canonical settlement formula)
-// Era: {start_date}+ (live trading only) | {len(rows)} settlements | generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}
+// Window: {window_label} (live trading only) | {len(rows)} settlements | generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}
 // Do not hand-edit: regenerate instead, so the headline always equals the sum of the rows.
 
 export interface Trade {{
@@ -324,6 +345,7 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--start", default="2026-07-24", help="Start date ISO format (YYYY-MM-DD)")
+    parser.add_argument("--end", default=None, help="Inclusive end date ISO format (YYYY-MM-DD). Omit for open-ended.")
     parser.add_argument("--emit-webapp-ts", default=None, help="Path to write the WebApp resultsData.ts")
     args = parser.parse_args()
-    audit(start_date=args.start, emit_webapp_ts=args.emit_webapp_ts)
+    audit(start_date=args.start, end_date=args.end, emit_webapp_ts=args.emit_webapp_ts)

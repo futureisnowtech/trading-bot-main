@@ -55,9 +55,17 @@ from runtime.operator_truth import (
 from runtime.storage_guard import runtime_storage_status
 from data.kalshi_weather_monitor import get_hourly_city_support_summary
 
+# Every bucket the engine can hold must appear here. build_weather_type_boards
+# drops any position whose bucket is missing, so trimming this list hides live
+# risk from the operator instead of merely tidying the board (64fb12f).
 _WEATHER_BUCKET_ORDER = [
     "Daily High",
     "Daily Low",
+    "Rain",
+    "Hourly Temp",
+    "Snow",
+    "Wind",
+    "Other Weather",
 ]
 
 def _connect() -> sqlite3.Connection:
@@ -651,7 +659,7 @@ def build_metric_explainers(balance_usd: float | None = None) -> dict[str, str]:
             "No single weather region is allowed to dominate the book. "
             f"Right now the live hub cap is {_coerce_float(hub_cap):.2f} dollars, "
             f"computed as max(${KALSHI_HUB_EXPOSURE_MIN_USD:.0f}, "
-            f"{KALSHI_HUB_EXPOSURE_PCT:.0%} of total bankroll)."
+            f"{KALSHI_HUB_EXPOSURE_PCT:.0%} of live cash)."
         ),
         "Max Deployed Capital": f"The engine can only deploy up to {KALSHI_MAX_DEPLOYED_PCT:.0%} of the account at once. That leaves dry powder and prevents the bot from becoming fully invested in mediocre conditions.",
         "Fee Model": f"The system prices Kalshi friction directly from the exchange fee curve ({_fee_formula_text()}) instead of adding a second flat fee tax on top.",

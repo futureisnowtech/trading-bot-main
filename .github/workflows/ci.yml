@@ -53,23 +53,10 @@ jobs:
 
       - name: Run Kalshi proof gate
         run: |
-          python -m pytest \
-            tests/proof/test_forecast_lane.py \
-            tests/proof/test_resolution_sync.py \
-            tests/proof/test_weather_rbi_truth.py \
-            tests/proof/test_weather_sovereign.py \
-            tests/proof/test_weather_hourly_and_alias_support.py \
-            tests/proof/test_lane_gating.py \
-            tests/proof/test_trading_control.py \
-            tests/proof/test_scheduler_cadence_config.py \
-            tests/proof/test_runtime_layer.py \
-            tests/proof/test_release_audit.py \
-            tests/proof/test_mathematical_symmetry.py \
-            tests/proof/test_boundary_fuzzing.py \
-            -k "forecast or weather or rbi or lane_economics_forecast or forecast_lane or sizing or boundary" \
+          python -m pytest tests/proof \
             --tb=long \
             --no-header \
-            -v
+            -q
 
       - name: Live Kalshi schema probe
         run: |

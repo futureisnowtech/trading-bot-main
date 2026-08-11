@@ -205,6 +205,10 @@ KALSHI_HUB_EXPOSURE_PCT: float = float(
 KALSHI_HUB_EXPOSURE_MIN_USD: float = float(
     os.getenv("KALSHI_HUB_EXPOSURE_MIN_USD", "40")
 )
+# Sovereign Salvage Delta: purge a position when its model probability falls
+# below this. Constant by contract -- see research_package/03_parameter_catalog.md
+# (marked CONFIRMED) and 02_strategy_catalog.md section 4.
+SALVAGE_EXIT_DELTA: float = float(os.getenv("SALVAGE_EXIT_DELTA", "0.15"))
 KALSHI_MAX_QTY_PER_POSITION: int = int(os.getenv("KALSHI_MAX_QTY_PER_POSITION", "2500"))
 KALSHI_MAX_USD_PER_POSITION: float = float(os.getenv("KALSHI_MAX_USD_PER_POSITION", "40.0"))  # Hard Ceiling
 KALSHI_MIN_PRICE: float = 0.08

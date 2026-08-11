@@ -142,7 +142,14 @@ def test_automated_rollback_trigger():
             )
             """
         )
-        now_str = "2026-08-01T00:00:00Z"
+        # Must be stamped AFTER the mutation row, which is written at real "now".
+        # A hardcoded literal here silently stops counting as post-mutation the
+        # moment the wall clock passes it, which is how this proof went dark.
+        from datetime import datetime, timedelta, timezone
+
+        now_str = (datetime.now(timezone.utc) + timedelta(minutes=1)).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
         for i in range(6):
             conn.execute(
                 "INSERT INTO trades (ts, paper, pnl_usd, won) VALUES (?, 0, -1.0, 0)",

@@ -86,11 +86,12 @@ def calculate_ceiled_fee(p: float, n: int, maker: bool = False) -> float:
 
 
 def calculate_salvage_exit_threshold(tau_hours: float, p_entry: float) -> float:
-    # Time-decaying salvage exit threshold (SPEC §5.2):
-    # Scale from 15% down to 2% as we approach resolution (24-hour horizon).
-    if tau_hours <= 0:
-        return 0.02
-    return max(0.02, min(0.15, (tau_hours / 24.0) * 0.15))
+    # Constant Sovereign Salvage Delta, independent of tau and entry price.
+    # 174d23d replaced this with a tau-decay citing "SPEC §5.2"; no such spec
+    # exists in the repo, and every parameter/strategy doc states a flat 0.15.
+    from config import SALVAGE_EXIT_DELTA
+
+    return SALVAGE_EXIT_DELTA
 
 
 def get_position_basis_quality(ticker: str, db_path: str | None = None) -> str:

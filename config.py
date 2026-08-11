@@ -200,7 +200,10 @@ KALSHI_MAX_DEPLOYED_PCT: float = float(os.getenv("KALSHI_MAX_DEPLOYED_PCT", "0.9
 KALSHI_MAX_CONCURRENT_POSITIONS: int = int(os.getenv("KALSHI_MAX_CONCURRENT_POSITIONS", "50"))
 KALSHI_SAME_EVENT_FAMILY_CAP: int = int(os.getenv("KALSHI_SAME_EVENT_FAMILY_CAP", "5"))
 KALSHI_HUB_EXPOSURE_PCT: float = float(
-    os.getenv("KALSHI_HUB_EXPOSURE_PCT", "0.60")
+    # Default tracks the live .env (0.30). It read 0.60 while production ran
+    # 0.30, so any environment missing the var silently doubled the regional
+    # exposure ceiling -- which is how CI diverged from the box it was proving.
+    os.getenv("KALSHI_HUB_EXPOSURE_PCT", "0.30")
 )
 KALSHI_HUB_EXPOSURE_MIN_USD: float = float(
     os.getenv("KALSHI_HUB_EXPOSURE_MIN_USD", "40")

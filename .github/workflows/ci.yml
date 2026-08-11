@@ -32,6 +32,11 @@ jobs:
         run: |
           cat > .env << 'EOF'
           ACCOUNT_SIZE=5000
+          # Risk constants are pinned explicitly so the gate never proves a
+          # different risk posture than production by falling back to defaults.
+          KALSHI_HUB_EXPOSURE_PCT=0.30
+          KALSHI_HUB_EXPOSURE_MIN_USD=40
+          SALVAGE_EXIT_DELTA=0.15
           FORECAST_LANE_ACTIVE=true
           FORECAST_AUTONOMOUS_ENABLED=true
           KALSHI_API_KEY_ID=test_key_ci

@@ -199,19 +199,19 @@ FORECAST_MANUAL_ENABLED: bool = (
 KALSHI_MAX_DEPLOYED_PCT: float = float(os.getenv("KALSHI_MAX_DEPLOYED_PCT", "0.90"))
 KALSHI_MAX_CONCURRENT_POSITIONS: int = int(os.getenv("KALSHI_MAX_CONCURRENT_POSITIONS", "50"))
 KALSHI_SAME_EVENT_FAMILY_CAP: int = int(os.getenv("KALSHI_SAME_EVENT_FAMILY_CAP", "5"))
+# Regional hub exposure ceiling: cap = max(MIN_USD, balance * PCT).
+#
+# These defaults deliberately mirror the values running in NYC production, not
+# an aspirational number. Production has been on 0.30 / $12 for the whole live
+# era, and that is the posture that produced the settled track record. The repo
+# previously claimed 0.60 / $40 while production ran 0.30 / $12, which made the
+# cockpit overstate regional headroom and made CI prove a risk posture nothing
+# actually traded. Change these only alongside the droplet .env.
 KALSHI_HUB_EXPOSURE_PCT: float = float(
-    # Default tracks the live .env so no environment can silently prove a
-    # different risk posture than the one that trades.
-    #
-    # Operator-set to 1.20 on 2026-08-11 (raised from 0.30). Above ~0.90 this
-    # ceiling sits over KALSHI_MAX_DEPLOYED_PCT, so the regional concentration
-    # limit no longer binds: a single weather hub may hold everything the
-    # engine is allowed to deploy. Per-position and total-deployment rails
-    # (KALSHI_MAX_USD_PER_POSITION, KALSHI_MAX_DEPLOYED_PCT) still apply.
-    os.getenv("KALSHI_HUB_EXPOSURE_PCT", "1.20")
+    os.getenv("KALSHI_HUB_EXPOSURE_PCT", "0.30")
 )
 KALSHI_HUB_EXPOSURE_MIN_USD: float = float(
-    os.getenv("KALSHI_HUB_EXPOSURE_MIN_USD", "40")
+    os.getenv("KALSHI_HUB_EXPOSURE_MIN_USD", "12")
 )
 # Sovereign Salvage Delta: purge a position when its model probability falls
 # below this. Constant by contract -- see research_package/03_parameter_catalog.md

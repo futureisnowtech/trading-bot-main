@@ -40,6 +40,16 @@ def _safe_float(value: Any) -> float:
         return 0.0
 
 
+def settlement_revenue_usd(row: dict[str, Any]) -> float:
+    """Settlement ``revenue`` in dollars.
+
+    Kalshi reports ``revenue`` in cents. Earlier callers only divided by 100 when the
+    field arrived as an int or digit-string, so a float payload was read as dollars —
+    a silent 100x overstatement. Always treat the field as cents.
+    """
+    return _safe_float(row.get("revenue")) / 100.0
+
+
 def _is_cache_fresh(path: Path, *, max_age_seconds: int) -> bool:
     if not path.exists():
         return False
@@ -97,6 +107,34 @@ def _append_bucket_stats(target: dict[str, Any], *, pnl_usd: float) -> None:
     target["win_rate"] = round((target["wins"] / total), 4) if total else 0.0
 
 
+def settlement_pnl_usd(row: dict[str, Any]) -> float:
+    """Realized PnL in dollars for one settled market.
+
+    Winning contracts pay $1.00 each at settlement; both sides' premium and the
+    settlement fee are sunk cost:
+
+        pnl = winning_contracts - yes_total_cost - no_total_cost - fee
+
+    Do not infer proceeds from ``max(yes_cost, no_cost) - min(yes_cost, no_cost)``.
+    Both fields are costs, not proceeds, so that expression is non-negative by
+    construction and reports a win on every two-sided row — it produced a fabricated
+    +$346.11 / 88.3% against a $93.77 account. ``revenue`` is unusable here too: the
+    API returns 0 for it on 152 of 163 live rows.
+    """
+    market_result = str(row.get("market_result") or "").lower()
+    yes_count = _safe_float(row.get("yes_count_fp") or row.get("yes_count"))
+    no_count = _safe_float(row.get("no_count_fp") or row.get("no_count"))
+    payout = yes_count if market_result == "yes" else no_count if market_result == "no" else 0.0
+
+    yes_cost = _safe_float(row.get("yes_total_cost_dollars"))
+    no_cost = _safe_float(row.get("no_total_cost_dollars"))
+    fee_cost = _safe_float(row.get("fee_cost"))
+    # Round to cents here so every surface — cockpit, audit, published ledger —
+    # classifies wins and sums PnL off the identical value. Rounding downstream
+    # instead lets the same trade count as a win on one surface and a scratch on another.
+    return round(payout - yes_cost - no_cost - fee_cost, 2)
+
+
 def build_weather_settlement_truth(
     settlements: list[dict[str, Any]],
     *,
@@ -115,17 +153,7 @@ def build_weather_settlement_truth(
         if bucket == "Other Weather":
             continue
 
-        yes_count = _safe_float(row.get("yes_count_fp") or row.get("yes_count"))
-        no_count = _safe_float(row.get("no_count_fp") or row.get("no_count"))
-        yes_cost = _safe_float(row.get("yes_total_cost_dollars"))
-        no_cost = _safe_float(row.get("no_total_cost_dollars"))
-        fee_cost = _safe_float(row.get("fee_cost"))
-        market_result = str(row.get("market_result") or "").lower()
-
-        payout = yes_count if market_result == "yes" else no_count if market_result == "no" else 0.0
-        pnl_usd = round(payout - yes_cost - no_cost - fee_cost, 4)
-        if abs(pnl_usd) < 1e-9:
-            continue
+        pnl_usd = settlement_pnl_usd(row)
 
         _append_bucket_stats(truth, pnl_usd=pnl_usd)
         bucket_stats = buckets.setdefault(
@@ -173,6 +201,7 @@ def refresh_weather_settlement_truth(
     payload["as_of"] = datetime.now(timezone.utc).isoformat()
     payload["source"] = "broker_settlements"
     return _write_cache(_CACHE_FILE, payload)
+
 
 
 def load_weather_settlement_truth(

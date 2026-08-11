@@ -36,6 +36,7 @@ from config import (
     KALSHI_MAX_USD_PER_POSITION,
     KALSHI_MIN_PRICE,
     KALSHI_SAME_EVENT_FAMILY_CAP,
+    POST_PAPER_START_DATE,
     estimate_kalshi_fee_per_contract,
     estimate_kalshi_order_fee_usd,
     get_kalshi_hub_exposure_cap,
@@ -1039,6 +1040,69 @@ def _load_paper_positions(table_name: str, active_only: bool = True, limit: int 
         return []
 
 
+def load_stark_matrix_metrics() -> dict[str, Any]:
+    """Live equity plus rolling 7d/48h performance for the Jarvis matrix.
+
+    Windowed stats route through ``build_weather_settlement_truth`` so the cockpit
+    reports the same win definition (sign of realized PnL) and the same cashflow
+    formula as the ledger and the audit script. Deriving wins from ``market_result``
+    alone would ignore cost basis and disagree with every other surface.
+    """
+    from datetime import timedelta
+
+    from execution.kalshi_broker import KalshiBroker
+    from runtime.kalshi_settlement_truth import (
+        _parse_session_start,
+        build_weather_settlement_truth,
+    )
+
+    try:
+        broker = KalshiBroker()
+        if not broker.connect():
+            return {}
+
+        bal_res = broker._request("GET", "/trade-api/v2/portfolio/balance")
+        cash_bal = float(bal_res.get("balance_dollars", 0.0))
+        port_val = float(bal_res.get("portfolio_value", 0.0)) / 100.0 if "portfolio_value" in bal_res else 0.0
+        total_equity = cash_bal + port_val
+
+        # Scope to the live-trading era instead of paging the full account history
+        # on every cache miss. get_settlements already handles cursor + page bounds.
+        min_ts = int(_parse_session_start(POST_PAPER_START_DATE).timestamp())
+        all_settlements = broker.get_settlements(min_ts=min_ts)
+
+        now_dt = datetime.now(timezone.utc)
+        ts_7d = (now_dt - timedelta(days=7)).isoformat()
+        ts_48h = (now_dt - timedelta(hours=48)).isoformat()
+
+        s_7d = [s for s in all_settlements if str(s.get("settled_time") or "") >= ts_7d]
+        s_48h = [s for s in all_settlements if str(s.get("settled_time") or "") >= ts_48h]
+
+        truth_7d = build_weather_settlement_truth(s_7d, since_iso=POST_PAPER_START_DATE)
+        truth_48h = build_weather_settlement_truth(s_48h, since_iso=POST_PAPER_START_DATE)
+
+        total_7d = int(truth_7d.get("total") or 0)
+        wins_7d = int(truth_7d.get("wins") or 0)
+        losses_7d = int(truth_7d.get("losses") or 0)
+        # build_weather_settlement_truth stores win_rate as a 0-1 fraction.
+        win_rate_7d = 100.0 * float(truth_7d.get("win_rate") or 0.0)
+
+        return {
+            "total_equity": total_equity,
+            "cash_balance": cash_bal,
+            "portfolio_value": port_val,
+            "win_rate_7d": win_rate_7d,
+            "wins_7d": wins_7d,
+            "losses_7d": losses_7d,
+            "total_7d": total_7d,
+            "pnl_48h": float(truth_48h.get("total_pnl_usd") or 0.0),
+            "total_48h": int(truth_48h.get("total") or 0),
+        }
+    except Exception as e:
+        logger.warning(f"Failed to load stark matrix metrics: {e}")
+        return {}
+
+
 def load_session_win_rate() -> dict[str, Any]:
     truth = load_weather_settlement_truth()
     return {
@@ -1051,6 +1115,36 @@ def load_session_win_rate() -> dict[str, Any]:
         "total_pnl_usd": float(truth.get("total_pnl_usd") or 0.0),
         "source": str(truth.get("source") or "unavailable"),
         "stale": bool(truth.get("stale")),
+    }
+
+
+def get_paper_trial_countdown() -> dict[str, Any]:
+    """Countdown to the end of the current 7-day paper-lane trial.
+
+    Window is pinned to the trial that started 2026-08-09. Update both timestamps
+    when a new trial begins, otherwise the cockpit shows a permanently expired timer.
+    """
+    from datetime import datetime, timezone
+    target_dt = datetime.fromisoformat("2026-08-16T19:23:27+00:00")
+    now_dt = datetime.now(timezone.utc)
+    diff = target_dt - now_dt
+    seconds_remaining = max(0, int(diff.total_seconds()))
+
+    days = seconds_remaining // 86400
+    hours = (seconds_remaining % 86400) // 3600
+    minutes = (seconds_remaining % 3600) // 60
+    seconds = seconds_remaining % 60
+
+    return {
+        "start_time": "2026-08-09T19:23:27Z",
+        "target_time": "2026-08-16T19:23:27Z",
+        "seconds_remaining": seconds_remaining,
+        "days_remaining": days,
+        "hours_remaining": hours,
+        "minutes_remaining": minutes,
+        "seconds_remaining_in_minute": seconds,
+        "formatted": f"{days}d {hours:02d}h {minutes:02d}m {seconds:02d}s",
+        "active": seconds_remaining > 0,
     }
 
 
@@ -1132,6 +1226,8 @@ def get_cockpit_payload(*, live_sync: bool = True) -> dict[str, Any]:
         "positions_paper_b": paper_rows_b,
         "history_paper_a": paper_history_a,
         "history_paper_b": paper_history_b,
+        "paper_trial_countdown": get_paper_trial_countdown(),
+        "stark_matrix": load_stark_matrix_metrics(),
         "open_book_visual": build_open_book_visual_rows(live_rows or drift_rows),
         "open_book_summary": summarize_open_book(live_rows or drift_rows),
         "weather_type_boards": build_weather_type_boards(live_rows or drift_rows),

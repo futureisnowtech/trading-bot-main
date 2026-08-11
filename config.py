@@ -41,7 +41,7 @@ _ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = _ROOT_DIR
 
 # Post-Paper Live Trading Era Invariant Boundary
-POST_PAPER_START_DATE = "2026-07-24"
+POST_PAPER_START_DATE = "2026-07-23"
 
 
 def _resolve_runtime_root() -> str:

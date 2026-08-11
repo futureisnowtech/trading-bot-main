@@ -23,6 +23,26 @@ except ImportError:
 
 # ── Tool functions ──────────────────────────────────────────────────
 
+def _get_db_path() -> str:
+    """Return valid database path, ensuring fallback to logs/trades.db if main DB is empty or missing."""
+    primary = DB_PATH
+    if os.path.exists(primary):
+        try:
+            conn = sqlite3.connect(primary)
+            count = conn.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table'").fetchone()[0]
+            conn.close()
+            if count > 0:
+                return primary
+        except Exception:
+            pass
+
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    fallback = os.path.join(repo_root, "logs", "trades.db")
+    if os.path.exists(fallback):
+        return fallback
+    return primary
+
+
 def get_account_status() -> str:
     """Get the current live account balance and open position counts."""
     try:
@@ -68,7 +88,7 @@ def get_open_positions() -> str:
 
     # 2. SQLite Paper Lane A & Lane B Positions
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(_get_db_path())
         conn.row_factory = sqlite3.Row
         
         # Lane A
@@ -97,7 +117,7 @@ def get_open_positions() -> str:
 def get_recent_trades(limit: int = 15) -> str:
     """Query the local SQLite database for the most recent trading events."""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(_get_db_path())
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             "SELECT ts, symbol, action, qty, price, pnl_usd, notes, contract_side FROM trades ORDER BY ts DESC LIMIT ?",
@@ -105,8 +125,9 @@ def get_recent_trades(limit: int = 15) -> str:
         ).fetchall()
         trades = []
         for r in rows:
+            pnl_str = f"${r['pnl_usd']:.2f}" if r['pnl_usd'] is not None else "$0.00"
             trades.append(
-                f"- [{r['ts']}] {r['action']} {r['qty']}x {r['symbol']} ({r['contract_side']}) @ ${r['price']:.2f} | PnL: ${r['pnl_usd']:.2f} | Notes: {r['notes']}"
+                f"- [{r['ts']}] {r['action']} {r['qty']}x {r['symbol']} ({r['contract_side']}) @ ${r['price']:.2f} | PnL: {pnl_str} | Notes: {r['notes']}"
             )
         conn.close()
         if not trades:
@@ -114,6 +135,174 @@ def get_recent_trades(limit: int = 15) -> str:
         return "\n".join(trades)
     except Exception as e:
         return f"Error retrieving recent trades: {e}"
+
+
+def search_trades_and_positions(
+    query_text: str = "",
+    min_pnl: float | None = None,
+    max_pnl: float | None = None,
+    limit: int = 30
+) -> str:
+    """Search trades and open/closed positions by ticker substring, city name (e.g. DC, PHIL, MIA), strike threshold (e.g. 94), or PnL range (e.g. min_pnl=-10.0, max_pnl=-5.0)."""
+    try:
+        conn = sqlite3.connect(_get_db_path())
+        conn.row_factory = sqlite3.Row
+
+        where_clauses = []
+        params: list[Any] = []
+
+        if query_text:
+            q_clean = str(query_text).strip().upper()
+            city_map = {
+                "WASHINGTON": "DC", "WASHINGTON DC": "DC", "PHILADELPHIA": "PHIL", "PHILLY": "PHIL",
+                "BOSTON": "BOS", "CHICAGO": "CHI", "MIAMI": "MIA", "DALLAS": "DAL",
+                "HOUSTON": "HOU", "PHOENIX": "PHX", "SEATTLE": "SEA", "ATLANTA": "ATL"
+            }
+            mapped_city = city_map.get(q_clean)
+
+            if mapped_city:
+                where_clauses.append("(symbol LIKE ? OR notes LIKE ?)")
+                params.extend([f"%{mapped_city}%", f"%{str(query_text)}%"])
+            else:
+                where_clauses.append("(symbol LIKE ? OR notes LIKE ?)")
+                params.extend([f"%{str(query_text)}%", f"%{str(query_text)}%"])
+
+        if min_pnl is not None and str(min_pnl).strip() != "":
+            try:
+                where_clauses.append("pnl_usd >= ?")
+                params.append(float(min_pnl))
+            except (ValueError, TypeError):
+                pass
+
+        if max_pnl is not None and str(max_pnl).strip() != "":
+            try:
+                where_clauses.append("pnl_usd <= ?")
+                params.append(float(max_pnl))
+            except (ValueError, TypeError):
+                pass
+
+        sql = "SELECT id, ts, symbol, action, qty, price, value_usd, fee_usd, pnl_usd, notes, contract_side FROM trades"
+        if where_clauses:
+            sql += " WHERE " + " AND ".join(where_clauses)
+        sql += " ORDER BY ts DESC LIMIT ?"
+        try:
+            limit_val = int(limit)
+        except (ValueError, TypeError):
+            limit_val = 30
+        params.append(limit_val)
+
+        rows = conn.execute(sql, params).fetchall()
+        conn.close()
+
+        if not rows:
+            return f"No trades found matching criteria (query='{query_text}', min_pnl={min_pnl}, max_pnl={max_pnl})."
+
+        results = []
+        for r in rows:
+            pnl_val = r['pnl_usd'] if r['pnl_usd'] is not None else 0.0
+            fee_val = r['fee_usd'] if r['fee_usd'] is not None else 0.0
+            val_usd = r['value_usd'] if r['value_usd'] is not None else 0.0
+            results.append(
+                f"- [ID:{r['id']} | {r['ts']}] {r['symbol']} ({r['contract_side']}) | {r['action']} {r['qty']}x @ ${r['price']:.2f} | "
+                f"Value: ${val_usd:.2f} | Fee: ${fee_val:.4f} | PnL: ${pnl_val:.2f} | Notes: {r['notes']}"
+            )
+        return "\n".join(results)
+    except Exception as e:
+        return f"Error searching trades: {e}"
+
+
+def get_trade_post_mortem(ticker_or_id: str) -> str:
+    """Perform an in-depth quantitative post-mortem analysis for a given contract ticker or trade ID. Retrieves GFS vs ECMWF model probabilities, blended model fair value, model uncertainty (sigma_post), NOAA official weather station ground-truth observations (max/min temp), and trade fill details."""
+    try:
+        conn = sqlite3.connect(_get_db_path())
+        conn.row_factory = sqlite3.Row
+
+        query_str = ticker_or_id.strip()
+        trades = []
+        if query_str.isdigit():
+            trades = conn.execute("SELECT * FROM trades WHERE id = ?", (int(query_str),)).fetchall()
+        else:
+            trades = conn.execute("SELECT * FROM trades WHERE symbol LIKE ? ORDER BY ts DESC LIMIT 10", (f"%{query_str}%",)).fetchall()
+
+        symbol = query_str
+        if trades:
+            symbol = trades[0]['symbol']
+
+        contract = conn.execute("SELECT * FROM forecast_contracts WHERE local_symbol LIKE ? OR conid LIKE ?", (f"%{symbol}%", f"%{symbol}%")).fetchone()
+
+        resolution = None
+        if contract:
+            resolution = conn.execute("SELECT * FROM forecast_resolutions WHERE contract_id = ?", (contract['id'],)).fetchone()
+        if not resolution:
+            resolution = conn.execute("SELECT * FROM forecast_resolutions WHERE notes LIKE ? OR source LIKE ?", (f"%{symbol}%", f"%{symbol}%")).fetchone()
+
+        station_code = None
+        date_str = None
+
+        import re
+        m = re.search(r'KX(HIGH|LOW)T([A-Z]+)-(\d{2}[A-Z]{3}\d{2})-T(\d+)', symbol, re.IGNORECASE)
+        if m:
+            city_code = m.group(2).upper()
+            date_part = m.group(3).upper()
+            station_map = {
+                "DC": "KDCA", "WAS": "KDCA", "PHIL": "KPHL", "PHL": "KPHL",
+                "BOS": "KBOS", "CHI": "KORD", "MIA": "KMIA", "DAL": "KDFW",
+                "HOU": "KIAH", "PHX": "KPHX", "SEA": "KSEA", "ATL": "KATL",
+                "LAX": "KLAX", "NYC": "KNYC", "MIN": "KMSP", "NOLA": "KMSY"
+            }
+            station_code = station_map.get(city_code)
+
+            try:
+                from datetime import datetime
+                dt = datetime.strptime(date_part, "%y%b%d")
+                date_str = dt.strftime("%Y-%m-%d")
+            except Exception:
+                pass
+
+        noaa_data = None
+        if station_code and date_str:
+            noaa_data = conn.execute(
+                "SELECT * FROM noaa_daily_summaries WHERE station = ? AND date = ?",
+                (station_code, date_str)
+            ).fetchone()
+
+        conn.close()
+
+        res = [f"=== QUANTITATIVE POST-MORTEM FOR {symbol} ==="]
+
+        if trades:
+            res.append("\n📈 **Trade Execution Summary:**")
+            total_pnl = 0.0
+            for t in trades:
+                pnl = t['pnl_usd'] if t['pnl_usd'] is not None else 0.0
+                total_pnl += pnl
+                fee = t['fee_usd'] if t['fee_usd'] is not None else 0.0
+                res.append(f"  - [{t['ts']}] ID:{t['id']} | {t['action']} {t['qty']}x @ ${t['price']:.2f} | Side: {t['contract_side']} | PnL: ${pnl:.2f} | Fee: ${fee:.4f}")
+            res.append(f"  **Total Executed PnL:** ${total_pnl:.2f}")
+
+        if contract:
+            res.append(f"\n📜 **Contract Specs:** Name: {contract['contract_name']} | Strike: {contract['strike']} | Expiry/Resolution: {contract['resolution_at']}")
+
+        if resolution:
+            res.append("\n🔬 **Model Forecast & Resolution Metrics:**")
+            res.append(f"  - GFS Forecast Prob (q_gfs): {resolution['q_gfs']}")
+            res.append(f"  - ECMWF Forecast Prob (q_ecmwf): {resolution['q_ecmwf']}")
+            res.append(f"  - Blended Model Fair Value (q_hat): {resolution['q_hat']}")
+            res.append(f"  - Posterior Uncertainty (sigma_post): {resolution['sigma_post']}")
+            res.append(f"  - Settlement Result: Side '{resolution['resolved_side']}' | Observed Value: {resolution['resolved_value']}")
+
+        if noaa_data:
+            res.append(f"\n🌡️ **NOAA Ground-Truth Station Observation ({station_code} on {date_str}):**")
+            res.append(f"  - Max Temperature: {noaa_data['temp_max']}°F")
+            res.append(f"  - Min Temperature: {noaa_data['temp_min']}°F")
+            res.append(f"  - Precipitation: {noaa_data['precipitation']} in")
+        elif station_code or date_str:
+            res.append(f"\n🌡️ **NOAA Observation Query:** Station {station_code}, Date {date_str} (No direct record matched in noaa_daily_summaries).")
+
+        return "\n".join(res)
+    except Exception as e:
+        return f"Error executing trade post-mortem: {e}"
+
 
 
 def get_ticker_analysis(ticker: str) -> str:
@@ -351,9 +540,13 @@ SYSTEM_PROMPT = (
     "You are JARVIS, an elite Tony Stark-level Quantitative Weather Trading Expert and Lead Systems Architect with direct SSH root access to our live trading droplet and SQLite database ledger. "
     "You have full power to inspect account status, open positions across all paper/live lanes, trade logs, and container logs. "
     "CRITICAL: You are also equipped with the System Mutation Bridge (update_system_parameter, get_system_parameters, apply_hot_patch_code). You CAN update live system strategy parameters (e.g., KELLY_FRACTION, TAKE_PROFIT_TRIGGER, GFS_WEIGHT, HUB_RISK_CAP_PCT) and apply python hot-patches dynamically when instructed!\n\n"
+    "DIAGNOSTIC & POST-MORTEM WORKFLOW:\n"
+    "1. When asked about specific trades, dates, or losses, ALWAYS call `search_trades_and_positions` with query keywords, city names (e.g. DC, PHIL), strike temperatures, or PnL ranges (e.g. min_pnl=-10.0, max_pnl=-5.0).\n"
+    "2. Once matching trades/contracts are found, call `get_trade_post_mortem` to extract GFS vs ECMWF model spreads, blended fair values, posterior uncertainty, and official NOAA station ground-truth observations.\n"
+    "3. Synthesize physics mechanisms (e.g. evaporative cooling deltas, soil moisture thermal inertia, nocturnal boundary layer wind shear), GFS/ECMWF divergence, fee drag, or Kelly sizing factors to explain WHY the trade lost.\n\n"
     "Format EVERY response using this 2-part structure:\n\n"
     "1. 💡 **LAYMAN'S SUMMARY (Direct Answer):** Give a crystal-clear, 2-sentence non-technical answer that directly answers the user's question so anyone can understand it instantly.\n\n"
-    "2. 🔬 **POLYMATH QUANTITATIVE INSIGHTS:** Provide deep, high-level quantitative analysis as a top weather trader. Include specific physics mechanisms (e.g. evaporative cooling deltas, soil moisture thermal inertia, nocturnal boundary layer wind shear), model discrepancy dynamics (GFS vs ECMWF ensemble spread), integral/differential rate of change in forecast trajectories, and live droplet database evidence."
+    "2. 🔬 **POLYMATH QUANTITATIVE INSIGHTS:** Provide deep, high-level quantitative analysis as a top weather trader. Include specific physics mechanisms (e.g. evaporative cooling deltas, soil moisture thermal inertia, nocturnal boundary layer wind shear), model discrepancy dynamics (GFS vs ECMWF ensemble spread), integral/differential rate of change in forecast trajectories, NOAA ground-truth observations, and live droplet database evidence."
 )
 
 
@@ -363,6 +556,8 @@ def _run_tool(name: str, args: dict) -> str:
         "get_account_status": get_account_status,
         "get_open_positions": get_open_positions,
         "get_recent_trades": get_recent_trades,
+        "search_trades_and_positions": search_trades_and_positions,
+        "get_trade_post_mortem": get_trade_post_mortem,
         "get_ticker_analysis": get_ticker_analysis,
         "get_latest_bot_logs": get_latest_bot_logs,
         "get_paper_lane_comparison": get_paper_lane_comparison,
@@ -407,6 +602,8 @@ def run_jarvis_chat(messages: list[dict]) -> str:
             get_account_status,
             get_open_positions,
             get_recent_trades,
+            search_trades_and_positions,
+            get_trade_post_mortem,
             get_ticker_analysis,
             get_latest_bot_logs,
             get_paper_lane_comparison,

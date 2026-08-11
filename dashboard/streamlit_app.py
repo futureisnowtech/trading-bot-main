@@ -1010,6 +1010,16 @@ weather_type_boards = payload.get("weather_type_boards") or []
 weather_type_counts = payload.get("weather_type_counts") or []
 
 balance = float(truth.get("balance_usd") or 0.0)
+port_val = float(truth.get("portfolio_value", 0.0) or 0.0) / 100.0 if "portfolio_value" in truth else 0.0
+total_equity = balance + port_val
+
+stark_matrix = payload.get("stark_matrix") or {}
+win_rate_7d = float(stark_matrix.get("win_rate_7d") or 0.0)
+pnl_48h = float(stark_matrix.get("pnl_48h") or 0.0)
+wins_7d = int(stark_matrix.get("wins_7d") or 0)
+losses_7d = int(stark_matrix.get("losses_7d") or 0)
+total_7d = int(stark_matrix.get("total_7d") or 0)
+
 drift = truth.get("position_drift") or {}
 positions_count = len(positions_live)
 realized_curve = payload["realized_pnl_curve"]
@@ -1046,22 +1056,50 @@ try:
 except Exception:
     trial_start = datetime.now(timezone.utc)
 
-trial_end = trial_start + timedelta(hours=48)
+trial_end = trial_start + timedelta(days=7)
 now_utc = datetime.now(timezone.utc)
 remaining = trial_end - now_utc
 remaining_seconds = max(0, int(remaining.total_seconds()))
 
-# Query paper positions count (Lane A + Lane B)
+# Load paper lane balances & PnL
+paper_bal_a = 1000.0
+paper_bal_b = 1000.0
+bal_a_file = Path(DB_PATH).parent / "paper_balance.json"
+bal_b_file = Path(DB_PATH).parent / "paper_balance_lane_b.json"
+
+if bal_a_file.exists():
+    try:
+        with open(bal_a_file) as f:
+            paper_bal_a = float(json.load(f).get("balance", 1000.0))
+    except Exception:
+        pass
+
+if bal_b_file.exists():
+    try:
+        with open(bal_b_file) as f:
+            paper_bal_b = float(json.load(f).get("balance", 1000.0))
+    except Exception:
+        pass
+
+pnl_a = paper_bal_a - 1000.0
+pnl_b = paper_bal_b - 1000.0
+
 try:
     conn = sqlite3.connect(DB_PATH)
-    paper_rows_a = conn.execute("SELECT count(*) FROM forecast_positions_paper WHERE active = 1").fetchone()
-    paper_active_a = paper_rows_a[0] if paper_rows_a else 0
-    paper_rows_b = conn.execute("SELECT count(*) FROM forecast_positions_paper_lane_b WHERE active = 1").fetchone()
-    paper_active_b = paper_rows_b[0] if paper_rows_b else 0
+    rows_a_act = conn.execute("SELECT count(*) FROM forecast_positions_paper WHERE active = 1").fetchone()
+    paper_active_a = rows_a_act[0] if rows_a_act else 0
+    rows_b_act = conn.execute("SELECT count(*) FROM forecast_positions_paper_lane_b WHERE active = 1").fetchone()
+    paper_active_b = rows_b_act[0] if rows_b_act else 0
+    rows_a_tot = conn.execute("SELECT count(*) FROM forecast_positions_paper").fetchone()
+    paper_total_a = rows_a_tot[0] if rows_a_tot else 0
+    rows_b_tot = conn.execute("SELECT count(*) FROM forecast_positions_paper_lane_b").fetchone()
+    paper_total_b = rows_b_tot[0] if rows_b_tot else 0
     conn.close()
 except Exception:
     paper_active_a = 0
     paper_active_b = 0
+    paper_total_a = 0
+    paper_total_b = 0
 
 # ── Jarvis Expanding Orb Widget ─────────────────────────────────────
 jarvis_open = st.session_state.get("show_jarvis", False)
@@ -1245,25 +1283,58 @@ if st.button("⚡", key="reactor_toggle_btn"):
 if not jarvis_open:
     st.markdown('<div class="jarvis-orb-wrap">', unsafe_allow_html=True)
     # Countdown sits right under the dormant orb
+    str_pnl_a = f"${pnl_a:+.2f}"
+    str_pnl_b = f"${pnl_b:+.2f}"
+    str_pnl_48h = f"${pnl_48h:+.2f}"
+    str_eq = f"${total_equity:,.2f}"
+    str_cash = f"${balance:,.2f}"
+
     countdown_html = f"""
-    <div style="text-align:center; font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; padding:8px 0;">
-        <div style="font-size:0.75em; letter-spacing:2px; color:#a5d6a7; font-weight:bold;">PAPER TRIAL</div>
-        <div id="timer" style="font-size:2.2em; font-family:monospace; font-weight:bold; color:#00e5ff; text-shadow:0 0 8px rgba(0,229,255,0.8); line-height:1.2;">--:--:--</div>
-        <div style="font-size:0.85em; color:#81c784; font-weight:bold; margin-top:4px;">Lane A: {paper_active_a} &nbsp;|&nbsp; Lane B: {paper_active_b}</div>
+    <div style="font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; padding:6px 2px; max-width:750px; margin:0 auto;">
+        <!-- Stark Holographic Matrix Cards Grid -->
+        <div style="display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:10px; margin-bottom:10px;">
+            <div style="background:radial-gradient(ellipse at top left, rgba(0,229,255,0.15), rgba(5,10,22,0.95)); border:1px solid rgba(0,229,255,0.35); border-radius:18px; padding:12px; box-shadow:0 0 20px rgba(0,229,255,0.15);">
+                <div style="font-size:0.7em; font-weight:bold; letter-spacing:1.5px; color:#4af2d6; text-transform:uppercase;">🏆 WIN RATE (7-DAY)</div>
+                <div style="font-size:1.6em; font-weight:bold; color:#ffffff; font-family:monospace; margin-top:2px;">{win_rate_7d:.1f}%</div>
+                <div style="font-size:0.75em; color:#a5d6a7; margin-top:1px;">{wins_7d} Wins / {losses_7d} Losses ({total_7d} Total)</div>
+            </div>
+            
+            <div style="background:radial-gradient(ellipse at top right, rgba(0,255,136,0.15), rgba(5,10,22,0.95)); border:1px solid rgba(0,255,136,0.35); border-radius:18px; padding:12px; box-shadow:0 0 20px rgba(0,255,136,0.15);">
+                <div style="font-size:0.7em; font-weight:bold; letter-spacing:1.5px; color:#69ffb4; text-transform:uppercase;">📈 REALIZED P&L (48-HOUR)</div>
+                <div style="font-size:1.6em; font-weight:bold; color:#00ff88; font-family:monospace; margin-top:2px;">{str_pnl_48h}</div>
+                <div style="font-size:0.75em; color:#a5d6a7; margin-top:1px;">Net Bank Cashflow Last 48H</div>
+            </div>
+
+            <div style="background:radial-gradient(ellipse at bottom left, rgba(0,229,255,0.15), rgba(5,10,22,0.95)); border:1px solid rgba(0,229,255,0.35); border-radius:18px; padding:12px; box-shadow:0 0 20px rgba(0,229,255,0.15);">
+                <div style="font-size:0.7em; font-weight:bold; letter-spacing:1.5px; color:#4af2d6; text-transform:uppercase;">🛡️ ACCOUNT EQUITY</div>
+                <div style="font-size:1.6em; font-weight:bold; color:#00e5ff; font-family:monospace; margin-top:2px;">{str_eq}</div>
+                <div style="font-size:0.75em; color:#8899a6; margin-top:1px;">Cash: {str_cash} | Active: {positions_count}</div>
+            </div>
+
+            <div style="background:radial-gradient(ellipse at bottom right, rgba(255,213,79,0.15), rgba(5,10,22,0.95)); border:1px solid rgba(255,213,79,0.35); border-radius:18px; padding:12px; box-shadow:0 0 20px rgba(255,213,79,0.15);">
+                <div style="font-size:0.7em; font-weight:bold; letter-spacing:1.5px; color:#ffd54f; text-transform:uppercase;">⏳ 7-DAY AUDIT TRIAL</div>
+                <div id="timer" style="font-size:1.6em; font-weight:bold; color:#ffd54f; font-family:monospace; margin-top:2px;">--:--:--</div>
+                <div style="font-size:0.75em; color:#8899a6; margin-top:1px;">A: {str_pnl_a} | B: {str_pnl_b}</div>
+            </div>
+        </div>
+
+        <script>
+            var endTime = {int(trial_end.timestamp() * 1000)};
+            function updateTimer() {{
+                var now = new Date().getTime(), d = endTime - now;
+                if (d < 0) {{ document.getElementById("timer").innerHTML = "AUDIT COMPLETE"; document.getElementById("timer").style.color = "#ffd54f"; return; }}
+                var days = Math.floor(d / 86400000);
+                var h = Math.floor((d % 86400000) / 3600000);
+                var m = Math.floor((d % 3600000) / 60000);
+                var s = Math.floor((d % 60000) / 1000);
+                document.getElementById("timer").innerHTML = days + "d " + (h<10?"0":"")+h + ":" + (m<10?"0":"")+m + ":" + (s<10?"0":"")+s;
+            }}
+            updateTimer(); setInterval(updateTimer, 1000);
+        </script>
     </div>
-    <script>
-        var endTime = {int(trial_end.timestamp() * 1000)};
-        function updateTimer() {{
-            var now = new Date().getTime(), d = endTime - now;
-            if (d < 0) {{ document.getElementById("timer").innerHTML = "PRODUCTION READY"; document.getElementById("timer").style.color = "#ffd54f"; return; }}
-            var h = Math.floor(d/3600000), m = Math.floor((d%3600000)/60000), s = Math.floor((d%60000)/1000);
-            document.getElementById("timer").innerHTML = (h<10?"0":"")+h+":"+(m<10?"0":"")+m+":"+(s<10?"0":"")+s;
-        }}
-        updateTimer(); setInterval(updateTimer, 1000);
-    </script>
     """
-    components.html(countdown_html, height=80)
-    st.markdown('<div class="jarvis-label">TAP ORB TO INITIATE INTEL</div>', unsafe_allow_html=True)
+    components.html(countdown_html, height=195)
+    st.markdown('<div class="jarvis-label">TAP REACTOR ORB TO INITIATE J.A.R.V.I.S. INTEL</div>', unsafe_allow_html=True)
     
     # ── Autonomous 4-Hour Holographic Crystal Shards Pool ──
     ALL_CRYSTAL_TIPS = [
@@ -1508,214 +1579,202 @@ else:
     components.html(scroll_align_html, height=0)
 
     st.markdown('</div>', unsafe_allow_html=True)
+# ═══════════════════════════════════════════════════════════════════
+# DORMANT PANEL — only render when Jarvis console is closed
+# ═══════════════════════════════════════════════════════════════════
+if not jarvis_open:
 
+    if not release_status.get("entries_allowed"):
+        blockers = release_status.get("top_infrastructure_blockers") or []
+        blocker_text = blockers[0] if blockers else "release audit not yet promoted"
+        _render_html(
+            f"""
+            <div class="banner">
+              <strong>Fresh entries are paused by the release gate.</strong>
+              The runtime is still live for monitoring and exits, but new trades stay blocked until the production blockers clear.
+              Current blocker: {html.escape(str(blocker_text))}.
+            </div>
+            """,
+        )
 
-_render_html(
-    f"""
-    <div class="hero" style="padding: 10px 20px; min-height: auto;">
-      <div class="hero-title" style="font-size: 2.2em;">Kalshi Cockpit</div>
-      <div class="chip-row" style="margin-top: 8px;">
-        <div class="chip">Version {html.escape(str(regime['version']))}</div>
-        <div class="chip">Tri-Model 122 Paths</div>
-        <div class="chip">Cheatcode Arbitrage Engine</div>
-        <div class="chip">Goldmine Priority Queue</div>
-        <div class="chip">Asymmetric Kelly $15-$35</div>
-        <div class="chip">Lane {html.escape(str(lane.get('readiness_state') or 'UNKNOWN'))}</div>
-        <div class="chip">Health {html.escape(str(lane.get('health') or 'UNKNOWN'))}</div>
-        <div class="chip">Release {html.escape(str(release_status.get('current_release_verdict') or 'UNKNOWN'))}</div>
-        <div class="chip">Broker {'CONNECTED' if truth.get('broker_connected') else 'DISCONNECTED'}</div>
-        <div class="chip">Deploy {html.escape(str(deploy.get('sha') or 'local'))[:7]}</div>
-      </div>
-    </div>
-    """,
-    )
+    if drift.get("has_drift"):
+        drift_details = []
+        if drift.get("broker_only"):
+            for p in drift["broker_only"]:
+                drift_details.append(f"<li>Broker-Only Position: <code>{html.escape(str(p.get('ticker')))}</code> ({html.escape(str(p.get('side')))}) &mdash; Qty: {p.get('qty')}, Entry: ${p.get('entry_price', 0.0):.2f}</li>")
+        if drift.get("db_only"):
+            for p in drift["db_only"]:
+                drift_details.append(f"<li>DB-Only Remnant: <code>{html.escape(str(p.get('ticker')))}</code> ({html.escape(str(p.get('side')))}) &mdash; Qty: {p.get('qty')}, Entry: ${p.get('entry_price', 0.0):.2f}</li>")
+        if drift.get("qty_mismatches"):
+            for p in drift["qty_mismatches"]:
+                drift_details.append(f"<li>Quantity Mismatch: <code>{html.escape(str(p.get('ticker')))}</code> ({html.escape(str(p.get('side')))}) &mdash; Broker has <b>{p.get('broker_qty')}</b>, DB has <b>{p.get('db_qty')}</b></li>")
+        if drift.get("entry_mismatches"):
+            for p in drift["entry_mismatches"]:
+                drift_details.append(f"<li>Entry Price Mismatch: <code>{html.escape(str(p.get('ticker')))}</code> ({html.escape(str(p.get('side')))}) &mdash; Broker: ${p.get('broker_entry_price', 0.0):.2f}, DB: ${p.get('db_entry_price', 0.0):.2f}</li>")
 
-if not release_status.get("entries_allowed"):
-    blockers = release_status.get("top_infrastructure_blockers") or []
-    blocker_text = blockers[0] if blockers else "release audit not yet promoted"
+        details_html = f"<ul style='margin-top: 5px; margin-bottom: 0px;'>{''.join(drift_details)}</ul>" if drift_details else ""
+        _render_html(
+            f"""
+            <div class="banner">
+              <strong>Truth drift detected.</strong> Broker reality and SQLite do not fully agree right now.
+              The cockpit is showing both layers explicitly so you can see whether the issue is a stale local
+              ledger, a manual broker action, or a runtime reconciliation lag.
+              <div style="margin-top: 10px; font-size: 0.9em; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 8px;">
+                <strong>Mismatched Positions:</strong>
+                {details_html}
+              </div>
+            </div>
+            """,
+        )
+
+        st.write("🔧 **Drift Intervention Controls**")
+        for mismatch in (drift.get("qty_mismatches") or []):
+            ticker = mismatch["ticker"]
+            side = mismatch["side"]
+            broker_qty = float(mismatch["broker_qty"] or 0.0)
+            col1, col2 = st.columns([3, 1])
+            col1.write(f"Flatten mismatched **{ticker}** ({side}) &mdash; Broker has {broker_qty} open contracts.")
+            if col2.button(f"Flatten {ticker[:15]}...", key=f"flat_{ticker}", use_container_width=True):
+                with st.spinner(f"Flattening {ticker}..."):
+                    try:
+                        from execution.kalshi_broker import get_kalshi_broker
+                        from forecast.db import mark_forecast_position_closed
+                        broker = get_kalshi_broker()
+                        broker.connect()
+                        right = "C" if side == "YES" else "P"
+                        broker.flatten_position(ticker, right, int(round(broker_qty)))
+                        mark_forecast_position_closed(ticker, exit_type="manual_reconcile")
+                        st.success(f"Position {ticker} successfully flattened!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed to flatten: {e}")
+
+    # ── 7-Day Paper Lane Audit Countdown Timer ───────────────────────────
+    countdown_data = payload.get("paper_trial_countdown") or {}
+    cd_fmt = countdown_data.get("formatted", "7d 00h 00m 00s")
+
     _render_html(
         f"""
-        <div class="banner">
-          <strong>Fresh entries are paused by the release gate.</strong>
-          The runtime is still live for monitoring and exits, but new trades stay blocked until the production blockers clear.
-          Current blocker: {html.escape(str(blocker_text))}.
+        <div style="background: linear-gradient(135deg, rgba(74, 242, 214, 0.12), rgba(0, 229, 255, 0.05)); border: 1px solid rgba(74, 242, 214, 0.3); border-radius: 16px; padding: 16px 20px; margin: 16px 0; display: flex; align-items: center; justify-content: space-between;">
+            <div>
+                <div style="font-size: 0.8em; color: #4af2d6; text-transform: uppercase; letter-spacing: 1px; font-weight: bold;">⏳ 7-DAY PAPER LANE AUDIT COUNTDOWN</div>
+                <div style="font-size: 1.3em; font-weight: bold; color: #ffffff; margin-top: 4px;">Target Completion: August 16, 2026</div>
+                <div style="font-size: 0.85em; color: #8899a6; margin-top: 2px;">Paper Lane A (Physics Delta) vs Paper Lane B (10X Maker) vs Live Lane</div>
+            </div>
+            <div style="text-align: right;">
+                <div style="font-family: 'Orbitron', monospace; font-size: 1.8em; font-weight: bold; color: #00e5ff; text-shadow: 0 0 10px rgba(0,229,255,0.4);">{html.escape(cd_fmt)}</div>
+                <div style="font-size: 0.75em; color: #4af2d6; margin-top: 2px;">TIME REMAINING</div>
+            </div>
         </div>
-        """,
+        """
     )
 
-if drift.get("has_drift"):
-    drift_details = []
-    if drift.get("broker_only"):
-        for p in drift["broker_only"]:
-            drift_details.append(f"<li>Broker-Only Position: <code>{html.escape(str(p.get('ticker')))}</code> ({html.escape(str(p.get('side')))}) &mdash; Qty: {p.get('qty')}, Entry: ${p.get('entry_price', 0.0):.2f}</li>")
-    if drift.get("db_only"):
-        for p in drift["db_only"]:
-            drift_details.append(f"<li>DB-Only Remnant: <code>{html.escape(str(p.get('ticker')))}</code> ({html.escape(str(p.get('side')))}) &mdash; Qty: {p.get('qty')}, Entry: ${p.get('entry_price', 0.0):.2f}</li>")
-    if drift.get("qty_mismatches"):
-        for p in drift["qty_mismatches"]:
-            drift_details.append(f"<li>Quantity Mismatch: <code>{html.escape(str(p.get('ticker')))}</code> ({html.escape(str(p.get('side')))}) &mdash; Broker has <b>{p.get('broker_qty')}</b>, DB has <b>{p.get('db_qty')}</b></li>")
-    if drift.get("entry_mismatches"):
-        for p in drift["entry_mismatches"]:
-            drift_details.append(f"<li>Entry Price Mismatch: <code>{html.escape(str(p.get('ticker')))}</code> ({html.escape(str(p.get('side')))}) &mdash; Broker: ${p.get('broker_entry_price', 0.0):.2f}, DB: ${p.get('db_entry_price', 0.0):.2f}</li>")
-            
-    details_html = f"<ul style='margin-top: 5px; margin-bottom: 0px;'>{''.join(drift_details)}</ul>" if drift_details else ""
-    _render_html(
-        f"""
-        <div class="banner">
-          <strong>Truth drift detected.</strong> Broker reality and SQLite do not fully agree right now.
-          The cockpit is showing both layers explicitly so you can see whether the issue is a stale local
-          ledger, a manual broker action, or a runtime reconciliation lag.
-          <div style="margin-top: 10px; font-size: 0.9em; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 8px;">
-            <strong>Mismatched Positions:</strong>
-            {details_html}
-          </div>
-        </div>
-        """,
-    )
-    
-    st.write("🔧 **Drift Intervention Controls**")
-    for mismatch in (drift.get("qty_mismatches") or []):
-        ticker = mismatch["ticker"]
-        side = mismatch["side"]
-        broker_qty = float(mismatch["broker_qty"] or 0.0)
-        col1, col2 = st.columns([3, 1])
-        col1.write(f"Flatten mismatched **{ticker}** ({side}) &mdash; Broker has {broker_qty} open contracts.")
-        if col2.button(f"Flatten {ticker[:15]}...", key=f"flat_{ticker}", use_container_width=True):
-            with st.spinner(f"Flattening {ticker}..."):
-                try:
-                    from execution.kalshi_broker import get_kalshi_broker
-                    from forecast.db import mark_forecast_position_closed
-                    broker = get_kalshi_broker()
-                    broker.connect()
-                    right = "C" if side == "YES" else "P"
-                    broker.flatten_position(ticker, right, int(round(broker_qty)))
-                    mark_forecast_position_closed(ticker, exit_type="manual_reconcile")
-                    st.success(f"Position {ticker} successfully flattened!")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Failed to flatten: {e}")
+    # ── Full-width Trading Lane Matrix ───────────────────────────────────────
+    st.markdown('<div class="section-title" style="margin-top:16px;">⚡ Trading Lane Matrix</div>', unsafe_allow_html=True)
 
+    lane_tab1, lane_tab2, lane_tab3 = st.tabs([
+        f"🟢 Live Trading ({len(open_book_visual)} open)",
+        f"🧪 Paper Lane A — Physics ({len(positions_paper_a)} active | {len(history_paper_a)} total)",
+        f"🚀 Paper Lane B — 10X Maker ({len(positions_paper_b)} active | {len(history_paper_b)} total)",
+    ])
 
+    with lane_tab1:
+        rows = open_book_visual
+        if rows:
+            pos_df = pd.DataFrame(rows)
+            pos_df["gross_mark_pnl"] = pd.to_numeric(pos_df["gross_mark_pnl"], errors="coerce").fillna(0.0)
+            pos_df["exposure_usd"] = pd.to_numeric(pos_df["exposure_usd"], errors="coerce").fillna(0.0)
+            pos_df["hours_to_resolution"] = pd.to_numeric(pos_df["hours_to_resolution"], errors="coerce").fillna(0.0)
 
-# ── Portfolio Summary ─────────────────────────────────────────────────────────
-_pm1, _pm2, _pm3, _pm4 = st.columns(4)
-_pm1.metric("Total Equity", f"${total_equity:,.2f}")
-_pm2.metric("Cash Available", f"${balance:,.2f}")
-_pm3.metric("Realized PnL", f"${realized_pnl:+.2f}")
-_pm4.metric("Win Rate", f"{win_rate_val:.1%}")
+            m1, m2, m3, m4 = st.columns(4)
+            total_exp = float(open_book_summary.get("total_exposure_usd") or 0.0)
+            total_pnl = pos_df["gross_mark_pnl"].sum()
+            m1.metric("Open Positions", len(rows))
+            m2.metric("Total Exposure", f"${total_exp:,.2f}")
+            m3.metric("Mark PnL", f"${total_pnl:+.2f}", delta=f"{'↑' if total_pnl >= 0 else '↓'} unrealized")
+            m4.metric("Soonest Expiry", f"{pos_df['hours_to_resolution'].min():.1f}h" if len(pos_df) > 0 else "—")
 
-if realized_curve:
-    _curve_df = pd.DataFrame(realized_curve).rename(columns={"ts": "time", "cumulative_pnl": "realized_pnl"})
-    st.line_chart(_curve_df.set_index("time"), height=130)
-
-
-# ── Full-width Trading Lane Matrix ───────────────────────────────────────────
-st.markdown('<div class="section-title" style="margin-top:24px;">⚡ Trading Lane Matrix</div>', unsafe_allow_html=True)
-
-lane_tab1, lane_tab2, lane_tab3 = st.tabs([
-    f"🟢 Live Trading ({len(open_book_visual)} open)",
-    f"🧪 Paper Lane A — Physics ({len(positions_paper_a)} active | {len(history_paper_a)} total)",
-    f"🚀 Paper Lane B — 10X Maker ({len(positions_paper_b)} active | {len(history_paper_b)} total)",
-])
-
-with lane_tab1:
-    rows = open_book_visual
-    if rows:
-        pos_df = pd.DataFrame(rows)
-        pos_df["gross_mark_pnl"] = pd.to_numeric(pos_df["gross_mark_pnl"], errors="coerce").fillna(0.0)
-        pos_df["exposure_usd"] = pd.to_numeric(pos_df["exposure_usd"], errors="coerce").fillna(0.0)
-        pos_df["hours_to_resolution"] = pd.to_numeric(pos_df["hours_to_resolution"], errors="coerce").fillna(0.0)
-
-        m1, m2, m3, m4 = st.columns(4)
-        total_exp = float(open_book_summary.get("total_exposure_usd") or 0.0)
-        total_pnl = pos_df["gross_mark_pnl"].sum()
-        m1.metric("Open Positions", len(rows))
-        m2.metric("Total Exposure", f"${total_exp:,.2f}")
-        m3.metric("Mark PnL", f"${total_pnl:+.2f}", delta=f"{'↑' if total_pnl >= 0 else '↓'} unrealized")
-        m4.metric("Soonest Expiry", f"{pos_df['hours_to_resolution'].min():.1f}h" if len(pos_df) > 0 else "—")
-
-        st.dataframe(
-            pos_df[["ticker", "side", "qty", "entry_price", "mark", "gross_mark_pnl", "hours_to_resolution", "hub"]].rename(columns={
-                "gross_mark_pnl": "mark_pnl",
-                "hours_to_resolution": "hrs_left",
-            }),
-            use_container_width=True, hide_index=True
-        )
-    else:
-        st.info("No live Kalshi positions are open right now.")
-
-with lane_tab2:
-    if positions_paper_a:
-        pa_m1, pa_m2, pa_m3, pa_m4 = st.columns(4)
-        tot_exp_a = sum(float(p.get("market_exposure_dollars") or 0.0) for p in positions_paper_a)
-        closed_a = [p for p in history_paper_a if p.get("exit_type") not in (None, "ACTIVE", "")]
-        wins_a = sum(1 for p in closed_a if p.get("exit_type") == "resolved")
-        pa_m1.metric("Active Positions", len(positions_paper_a))
-        pa_m2.metric("Capital Deployed", f"${tot_exp_a:,.2f}")
-        pa_m3.metric("Total Trades", len(history_paper_a))
-        pa_m4.metric("Resolved Wins", wins_a)
-
-        df_pa = pd.DataFrame(positions_paper_a)
-        st.dataframe(
-            df_pa[["ticker", "side", "qty", "entry_price", "market_exposure_dollars", "opened_at"]].rename(columns={
-                "market_exposure_dollars": "exposure_$",
-                "opened_at": "opened",
-            }),
-            use_container_width=True, hide_index=True
-        )
-    else:
-        st.info("🧪 Paper Lane A has no active positions. The runner fires nightly — check back after the next forecast cycle.")
-
-    if history_paper_a:
-        with st.expander(f"📜 Full Trade Ledger — Lane A ({len(history_paper_a)} trades)", expanded=False):
-            df_ha = pd.DataFrame(history_paper_a)
             st.dataframe(
-                df_ha[["ticker", "side", "qty", "entry_price", "opened_at", "closed_at", "exit_type"]].rename(columns={
-                    "entry_price": "entry_¢",
-                    "opened_at": "opened",
-                    "closed_at": "closed",
-                    "exit_type": "outcome",
+                pos_df[["ticker", "side", "qty", "entry_price", "mark", "gross_mark_pnl", "hours_to_resolution", "hub"]].rename(columns={
+                    "gross_mark_pnl": "mark_pnl",
+                    "hours_to_resolution": "hrs_left",
                 }),
                 use_container_width=True, hide_index=True
             )
+        else:
+            st.info("No live Kalshi positions are open right now.")
 
-with lane_tab3:
-    if positions_paper_b:
-        pb_m1, pb_m2, pb_m3, pb_m4 = st.columns(4)
-        tot_exp_b = sum(float(p.get("market_exposure_dollars") or 0.0) for p in positions_paper_b)
-        closed_b = [p for p in history_paper_b if p.get("exit_type") not in (None, "ACTIVE", "")]
-        wins_b = sum(1 for p in closed_b if p.get("exit_type") == "resolved")
-        pb_m1.metric("Active Positions", len(positions_paper_b))
-        pb_m2.metric("Capital Deployed", f"${tot_exp_b:,.2f}")
-        pb_m3.metric("Total Trades", len(history_paper_b))
-        pb_m4.metric("Resolved Wins", wins_b)
+    with lane_tab2:
+        if positions_paper_a:
+            pa_m1, pa_m2, pa_m3, pa_m4 = st.columns(4)
+            tot_exp_a = sum(float(p.get("market_exposure_dollars") or 0.0) for p in positions_paper_a)
+            closed_a = [p for p in history_paper_a if p.get("exit_type") not in (None, "ACTIVE", "")]
+            wins_a = sum(1 for p in closed_a if p.get("exit_type") == "resolved")
+            pa_m1.metric("Active Positions", len(positions_paper_a))
+            pa_m2.metric("Capital Deployed", f"${tot_exp_a:,.2f}")
+            pa_m3.metric("Total Trades", len(history_paper_a))
+            pa_m4.metric("Resolved Wins", wins_a)
 
-        df_pb = pd.DataFrame(positions_paper_b)
-        st.dataframe(
-            df_pb[["ticker", "side", "qty", "entry_price", "market_exposure_dollars", "opened_at"]].rename(columns={
-                "market_exposure_dollars": "exposure_$",
-                "opened_at": "opened",
-            }),
-            use_container_width=True, hide_index=True
-        )
-    else:
-        st.info("🚀 Paper Lane B has no active positions. The maker bid runner fires nightly — check back after the next forecast cycle.")
-
-    if history_paper_b:
-        with st.expander(f"📜 Full Trade Ledger — Lane B ({len(history_paper_b)} trades)", expanded=False):
-            df_hb = pd.DataFrame(history_paper_b)
+            df_pa = pd.DataFrame(positions_paper_a)
             st.dataframe(
-                df_hb[["ticker", "side", "qty", "entry_price", "opened_at", "closed_at", "exit_type"]].rename(columns={
-                    "entry_price": "entry_¢",
+                df_pa[["ticker", "side", "qty", "entry_price", "market_exposure_dollars", "opened_at"]].rename(columns={
+                    "market_exposure_dollars": "exposure_$",
                     "opened_at": "opened",
-                    "closed_at": "closed",
-                    "exit_type": "outcome",
                 }),
                 use_container_width=True, hide_index=True
             )
+        else:
+            st.info("🧪 Paper Lane A has no active positions. The runner fires nightly — check back after the next forecast cycle.")
 
-# Collapsible Advanced System Telemetry Matrix
-with top_right:
+        if history_paper_a:
+            with st.expander(f"📜 Full Trade Ledger — Lane A ({len(history_paper_a)} trades)", expanded=False):
+                df_ha = pd.DataFrame(history_paper_a)
+                st.dataframe(
+                    df_ha[["ticker", "side", "qty", "entry_price", "opened_at", "closed_at", "exit_type"]].rename(columns={
+                        "entry_price": "entry_¢",
+                        "opened_at": "opened",
+                        "closed_at": "closed",
+                        "exit_type": "outcome",
+                    }),
+                    use_container_width=True, hide_index=True
+                )
+
+    with lane_tab3:
+        if positions_paper_b:
+            pb_m1, pb_m2, pb_m3, pb_m4 = st.columns(4)
+            tot_exp_b = sum(float(p.get("market_exposure_dollars") or 0.0) for p in positions_paper_b)
+            closed_b = [p for p in history_paper_b if p.get("exit_type") not in (None, "ACTIVE", "")]
+            wins_b = sum(1 for p in closed_b if p.get("exit_type") == "resolved")
+            pb_m1.metric("Active Positions", len(positions_paper_b))
+            pb_m2.metric("Capital Deployed", f"${tot_exp_b:,.2f}")
+            pb_m3.metric("Total Trades", len(history_paper_b))
+            pb_m4.metric("Resolved Wins", wins_b)
+
+            df_pb = pd.DataFrame(positions_paper_b)
+            st.dataframe(
+                df_pb[["ticker", "side", "qty", "entry_price", "market_exposure_dollars", "opened_at"]].rename(columns={
+                    "market_exposure_dollars": "exposure_$",
+                    "opened_at": "opened",
+                }),
+                use_container_width=True, hide_index=True
+            )
+        else:
+            st.info("🚀 Paper Lane B has no active positions. The maker bid runner fires nightly — check back after the next forecast cycle.")
+
+        if history_paper_b:
+            with st.expander(f"📜 Full Trade Ledger — Lane B ({len(history_paper_b)} trades)", expanded=False):
+                df_hb = pd.DataFrame(history_paper_b)
+                st.dataframe(
+                    df_hb[["ticker", "side", "qty", "entry_price", "opened_at", "closed_at", "exit_type"]].rename(columns={
+                        "entry_price": "entry_¢",
+                        "opened_at": "opened",
+                        "closed_at": "closed",
+                        "exit_type": "outcome",
+                    }),
+                    use_container_width=True, hide_index=True
+                )
+
+    # Collapsible Advanced System Telemetry Matrix
     st.markdown('<div class="section-title">Risk Matrix & Controls</div>', unsafe_allow_html=True)
     _render_html(
         '<div class="mini-grid">' + "".join(
@@ -1733,82 +1792,82 @@ with top_right:
         + "</div>",
     )
 
-# Collapsible Advanced System Telemetry Matrix (cutting clutter)
-with st.expander("🔍 View Advanced Telemetry, Veto Tape & System Feed"):
-    t_col1, t_col2 = st.columns(2)
-    with t_col1:
-        st.markdown("##### 🛡️ Regional Hub Allocations")
-        hub_df = pd.DataFrame(payload["hub_exposure"])
-        if not hub_df.empty:
-            st.dataframe(hub_df, width="stretch", hide_index=True)
-        else:
-            st.info("No active hub exposure.")
-    with t_col2:
-        st.markdown("##### 🚫 Veto Cluster Tape")
-        if recent_vetoes.get("top_reasons"):
-            veto_df = pd.DataFrame(recent_vetoes["top_reasons"])
-            st.dataframe(veto_df, width="stretch", hide_index=True)
-        else:
-            st.success("No recent hard veto clusters.")
+    # Collapsible Advanced System Telemetry Matrix (cutting clutter)
+    with st.expander("🔍 View Advanced Telemetry, Veto Tape &amp; System Feed"):
+        t_col1, t_col2 = st.columns(2)
+        with t_col1:
+            st.markdown("##### 🛡️ Regional Hub Allocations")
+            hub_df = pd.DataFrame(payload["hub_exposure"])
+            if not hub_df.empty:
+                st.dataframe(hub_df, width="stretch", hide_index=True)
+            else:
+                st.info("No active hub exposure.")
+        with t_col2:
+            st.markdown("##### 🚫 Veto Cluster Tape")
+            if recent_vetoes.get("top_reasons"):
+                veto_df = pd.DataFrame(recent_vetoes["top_reasons"])
+                st.dataframe(veto_df, width="stretch", hide_index=True)
+            else:
+                st.success("No recent hard veto clusters.")
 
-st.markdown("### Event Tape")
-show_raw_events = st.toggle(
-    "Show Raw Event Tape",
-    value=False,
-    help="By default the cockpit translates telemetry into plain-English insights. Turn this on to inspect the underlying raw system events.",
-)
-if show_raw_events:
-    evt_left, evt_right = st.columns(2, gap="large")
-    with evt_left:
-        st.markdown('<div class="section-title">System Events</div>', unsafe_allow_html=True)
-        if recent_events:
-            for event in recent_events[:12]:
-                tone = "tone-bad" if event.get("level") in {"ERROR", "CRITICAL"} else "tone-amber" if event.get("level") == "WARNING" else "tone-cyan"
-                st.markdown(
-                    _feed_card(
-                        f"{event.get('source')} [{event.get('level')}]",
-                        _fmt_dt(event.get("ts")),
-                        str(event.get("message") or ""),
-                        tone=tone,
-                    ),
-                    unsafe_allow_html=True,
-                )
-        else:
-            st.info("No recent system events.")
-
-    with evt_right:
-        st.markdown('<div class="section-title">Recent Trade Rows</div>', unsafe_allow_html=True)
-        if recent_trades:
-            trades_df = pd.DataFrame(recent_trades)
-            trades_df["ts"] = trades_df["ts"].map(_fmt_dt)
-            st.dataframe(
-                trades_df[
-                    [
-                        "ts",
-                        "symbol",
-                        "action",
-                        "qty",
-                        "price",
-                        "fee_usd",
-                        "pnl_usd",
-                        "strategy",
-                        "contract_side",
-                        "forecast_yes_prob",
-                    ]
-                ],
-                width="stretch",
-                hide_index=True,
-            )
-        else:
-            st.info("No recent Kalshi trades found.")
-else:
-    _render_html(
-        """
-        <div class="toggle-shell">
-          Raw telemetry is hidden right now. The cockpit is showing translated insights by default so you can read what the system means, not just what it logged.
-        </div>
-        """
+    st.markdown("### Event Tape")
+    show_raw_events = st.toggle(
+        "Show Raw Event Tape",
+        value=False,
+        help="By default the cockpit translates telemetry into plain-English insights. Turn this on to inspect the underlying raw system events.",
     )
+    if show_raw_events:
+        evt_left, evt_right = st.columns(2, gap="large")
+        with evt_left:
+            st.markdown('<div class="section-title">System Events</div>', unsafe_allow_html=True)
+            if recent_events:
+                for event in recent_events[:12]:
+                    tone = "tone-bad" if event.get("level") in {"ERROR", "CRITICAL"} else "tone-amber" if event.get("level") == "WARNING" else "tone-cyan"
+                    st.markdown(
+                        _feed_card(
+                            f"{event.get('source')} [{event.get('level')}]",
+                            _fmt_dt(event.get("ts")),
+                            str(event.get("message") or ""),
+                            tone=tone,
+                        ),
+                        unsafe_allow_html=True,
+                    )
+            else:
+                st.info("No recent system events.")
+
+        with evt_right:
+            st.markdown('<div class="section-title">Recent Trade Rows</div>', unsafe_allow_html=True)
+            if recent_trades:
+                trades_df = pd.DataFrame(recent_trades)
+                trades_df["ts"] = trades_df["ts"].map(_fmt_dt)
+                st.dataframe(
+                    trades_df[
+                        [
+                            "ts",
+                            "symbol",
+                            "action",
+                            "qty",
+                            "price",
+                            "fee_usd",
+                            "pnl_usd",
+                            "strategy",
+                            "contract_side",
+                            "forecast_yes_prob",
+                        ]
+                    ],
+                    width="stretch",
+                    hide_index=True,
+                )
+            else:
+                st.info("No recent Kalshi trades found.")
+    else:
+        _render_html(
+            """
+            <div class="toggle-shell">
+              Raw telemetry is hidden right now. The cockpit is showing translated insights by default so you can read what the system means, not just what it logged.
+            </div>
+            """
+        )
 
 st.divider()
 st.caption(

@@ -13,6 +13,24 @@ This repository is now the active Kalshi-only execution tree.
 - Settlement truth: `forecast_resolutions`
 - Learning truth: Weather RBI calibrates only on resolved labels, never inferred PnL
 
+## MANDATE: REAL KALSHI RECORDS INVARIANT
+1. **LIVE KALSHI REST API IS CANONICAL**: When auditing real Kalshi performance, always query the live REST API (`/trade-api/v2/portfolio/settlements` and `/trade-api/v2/portfolio/positions`) directly via `KalshiBroker`. Never rely on partial local DB snapshots or static arrays. Settlements — not fills — carry realized PnL; `KalshiBroker` has no fills accessor.
+2. **DATE BOUNDARY**: Scope live execution metrics to `POST_PAPER_START_DATE = "2026-07-23"`.
+3. **PAPER LANES AUDIT**: Paper lanes (`forecast_positions_paper`, `forecast_positions_paper_lane_b`) run on the droplet. Do not report local empty fallback tables as non-performance without verifying droplet runtime state.
+4. **ONE PnL FORMULA**: Realized PnL comes only from `runtime/kalshi_settlement_truth.settlement_pnl_usd`
+   (`winning_contracts − yes_total_cost − no_total_cost − fee`, rounded to cents). Never re-derive it
+   inline. Never treat `max(yes_cost, no_cost) − min(yes_cost, no_cost)` as exit proceeds: both fields
+   are costs, so that form is non-negative by construction and scores a win on every two-sided row —
+   it once reported +$346.11 / 88.3% on an account whose true result was −$6.60 / 61.3%. Never trust
+   `revenue` either; the API returns 0 for it on the large majority of live rows.
+
+## MANDATE: SYSTEM UPDATE & COCKPIT SYNC PROTOCOL (J.A.R.V.I.S. OPTIMIZATION)
+1. **MANDATORY TELEMETRY SYNC**: Whenever system updates, strategy refactors, risk gate changes, or accounting formula fixes occur, the AI assistant/agent MUST immediately update and verify all Cockpit data layers (`dashboard/cockpit_data.py`, `dashboard/streamlit_app.py`, `runtime/kalshi_settlement_truth.py`), audit tools (`scripts/audit_real_kalshi_records.py`), and WebApp presentation models (`src/lib/resultsData.ts`, `ResultsDashboard.tsx`).
+2. **ZERO STALE SURFACES**: No operator cockpit surface or AI audit path may rely on deprecated formulas, legacy mock data, or single-endpoint partial cashflow calculations.
+3. **AUTOMATED AUDIT RUNTIME**: After any system modification, run `python3 scripts/audit_real_kalshi_records.py` and verify clean compilation and API sync before declaring completion. To refresh the public ledger, add `--emit-webapp-ts <webapp>/src/lib/resultsData.ts`; it refuses to write unless the headline equals the sum of the emitted rows.
+
+
+
 ## Active Architecture & Strategy (v19.16.0 Release)
 
 - **Tri-Model Ensemble Ingest**: Blends 122 physical simulation paths (50% US GFS / 35% European ECMWF / 15% German DWD ICON).

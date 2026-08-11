@@ -34,7 +34,7 @@ jobs:
           ACCOUNT_SIZE=5000
           # Risk constants are pinned explicitly so the gate never proves a
           # different risk posture than production by falling back to defaults.
-          KALSHI_HUB_EXPOSURE_PCT=0.30
+          KALSHI_HUB_EXPOSURE_PCT=1.20
           KALSHI_HUB_EXPOSURE_MIN_USD=40
           SALVAGE_EXIT_DELTA=0.15
           FORECAST_LANE_ACTIVE=true

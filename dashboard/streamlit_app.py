@@ -17,6 +17,7 @@ os.chdir(_ROOT)
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+from dashboard import panels
 from dashboard.cockpit_data import get_cockpit_payload
 from config import DB_PATH, get_kalshi_hub_exposure_cap
 
@@ -527,16 +528,7 @@ def _fmt_pct(value: float | None) -> str:
     return f"{value:.1%}"
 
 
-def _fmt_dt(value: str | None) -> str:
-    if not value:
-        return "N/A"
-    try:
-        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
-    except Exception:
-        return str(value)
+_fmt_dt = panels.fmt_dt
 
 
 @st.cache_data(ttl=45, show_spinner=False)
@@ -544,11 +536,7 @@ def _load_payload(live_sync: bool) -> dict:
     return get_cockpit_payload(live_sync=live_sync)
 
 
-def _render_html(block: str) -> None:
-    if hasattr(st, "html"):
-        st.html(block)
-    else:
-        st.markdown(block, unsafe_allow_html=True)
+_render_html = panels.render_html
 
 
 def _tooltip_dot(text: str | None) -> str:
@@ -580,30 +568,10 @@ def _metric_card(
     """
 
 
-def _mini_card(label: str, value: str, detail: str, tooltip: str | None = None) -> str:
-    explain_html = f'<div style="font-size: 0.73em; color: #bbb; margin-top: 5px; line-height: 1.25; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 4px;">{html.escape(tooltip)}</div>' if tooltip else ""
-    return f"""
-    <div class="mini-card" style="height: auto; min-height: 110px; padding: 12px; margin-bottom: 8px;">
-      <div class="mini-label">
-        <span class="label-wrap" style="font-weight: bold; color: #888; text-transform: uppercase; font-size: 0.8em; letter-spacing: 0.5px;">{html.escape(label)}</span>
-      </div>
-      <div class="mini-value" style="font-size: 1.4em; font-weight: bold; color: #fff; margin-top: 2px;">{html.escape(value)}</div>
-      <div class="mini-detail" style="font-size: 0.8em; color: #00e5ff; margin-top: 1px;">{html.escape(detail)}</div>
-      {explain_html}
-    </div>
-    """
+_mini_card = panels.mini_card
 
 
-def _feed_card(title: str, meta: str, body: str, tone: str = "tone-cyan") -> str:
-    return f"""
-    <div class="feed-card">
-      <div class="feed-top">
-        <div class="feed-title {tone}">{html.escape(title)}</div>
-        <div class="feed-meta">{html.escape(meta)}</div>
-      </div>
-      <div class="feed-meta" style="margin-top:0.55rem; white-space:pre-wrap;">{html.escape(body)}</div>
-    </div>
-    """
+_feed_card = panels.feed_card
 
 
 def _insight_card(title: str, meta: str, body: str, tone: str = "info") -> str:
@@ -1214,43 +1182,54 @@ if st.button("⚡", key="reactor_toggle_btn"):
 # ── Dormant state countdown & Autonomous 4-Hour Holographic Crystal Tips ──
 if not jarvis_open:
     st.markdown('<div class="jarvis-orb-wrap">', unsafe_allow_html=True)
-    # Countdown sits right under the dormant orb
-    str_pnl_48h = f"${pnl_48h:+.2f}"
-    str_eq = f"${total_equity:,.2f}"
-    str_cash = f"${balance:,.2f}"
+    # ── Vitals rendered into the orb itself ──────────────────────────
+    # No cards, no tables. The orb encodes system state: ring arc = 7-day win
+    # rate, core hue = 48h PnL sign, halo pulse = open position count, center
+    # readout = equity. Health is legible without tapping, which is what keeps an
+    # orb-only screen honest rather than merely dramatic.
+    _wr = max(0.0, min(100.0, float(win_rate_7d)))
+    _ring_deg = _wr * 3.6
+    _healthy = pnl_48h >= 0
+    _core = "#00ff88" if _healthy else "#ff5470"
+    _core_soft = "rgba(0,255,136,0.35)" if _healthy else "rgba(255,84,112,0.35)"
+    _alert = (not release_status.get("entries_allowed")) or bool(drift.get("has_drift"))
+    _ring_track = "rgba(255,213,79,0.55)" if _alert else "rgba(0,229,255,0.18)"
+    # More open positions -> faster pulse, floored so an idle book still breathes.
+    _pulse_s = max(1.6, 4.0 - 0.25 * float(positions_count))
 
-    countdown_html = f"""
-    <div style="font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; padding:6px 2px; max-width:750px; margin:0 auto;">
-        <!-- Stark Holographic Matrix Cards Grid -->
-        <div style="display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:10px; margin-bottom:10px;">
-            <div style="background:radial-gradient(ellipse at top left, rgba(0,229,255,0.15), rgba(5,10,22,0.95)); border:1px solid rgba(0,229,255,0.35); border-radius:18px; padding:12px; box-shadow:0 0 20px rgba(0,229,255,0.15);">
-                <div style="font-size:0.7em; font-weight:bold; letter-spacing:1.5px; color:#4af2d6; text-transform:uppercase;">🏆 WIN RATE (7-DAY)</div>
-                <div style="font-size:1.6em; font-weight:bold; color:#ffffff; font-family:monospace; margin-top:2px;">{win_rate_7d:.1f}%</div>
-                <div style="font-size:0.75em; color:#a5d6a7; margin-top:1px;">{wins_7d} Wins / {losses_7d} Losses ({total_7d} Total)</div>
-            </div>
-            
-            <div style="background:radial-gradient(ellipse at top right, rgba(0,255,136,0.15), rgba(5,10,22,0.95)); border:1px solid rgba(0,255,136,0.35); border-radius:18px; padding:12px; box-shadow:0 0 20px rgba(0,255,136,0.15);">
-                <div style="font-size:0.7em; font-weight:bold; letter-spacing:1.5px; color:#69ffb4; text-transform:uppercase;">📈 REALIZED P&L (48-HOUR)</div>
-                <div style="font-size:1.6em; font-weight:bold; color:#00ff88; font-family:monospace; margin-top:2px;">{str_pnl_48h}</div>
-                <div style="font-size:0.75em; color:#a5d6a7; margin-top:1px;">Net Bank Cashflow Last 48H</div>
-            </div>
-
-            <div style="background:radial-gradient(ellipse at bottom left, rgba(0,229,255,0.15), rgba(5,10,22,0.95)); border:1px solid rgba(0,229,255,0.35); border-radius:18px; padding:12px; box-shadow:0 0 20px rgba(0,229,255,0.15);">
-                <div style="font-size:0.7em; font-weight:bold; letter-spacing:1.5px; color:#4af2d6; text-transform:uppercase;">🛡️ ACCOUNT EQUITY</div>
-                <div style="font-size:1.6em; font-weight:bold; color:#00e5ff; font-family:monospace; margin-top:2px;">{str_eq}</div>
-                <div style="font-size:0.75em; color:#8899a6; margin-top:1px;">Cash: {str_cash} | Active: {positions_count}</div>
-            </div>
-
-            <div style="background:radial-gradient(ellipse at bottom right, rgba(255,213,79,0.15), rgba(5,10,22,0.95)); border:1px solid rgba(255,213,79,0.35); border-radius:18px; padding:12px; box-shadow:0 0 20px rgba(255,213,79,0.15);">
-                <div style="font-size:0.7em; font-weight:bold; letter-spacing:1.5px; color:#ffd54f; text-transform:uppercase;">🧾 REALIZED (LIVE ERA)</div>
-                <div style="font-size:1.6em; font-weight:bold; color:#ffd54f; font-family:monospace; margin-top:2px;">${realized_pnl:+,.2f}</div>
-                <div style="font-size:0.75em; color:#8899a6; margin-top:1px;">{win_rate_stats.get('wins',0)}W / {win_rate_stats.get('losses',0)}L over {win_rate_stats.get('total',0)} settled</div>
-            </div>
+    orb_html = f"""
+    <div style="display:flex; justify-content:center; align-items:center; padding:10px 0 4px 0;">
+      <div style="position:relative; width:300px; height:300px;">
+        <div style="position:absolute; inset:0; border-radius:50%;
+             background:conic-gradient({_core} 0deg, {_core} {_ring_deg}deg, {_ring_track} {_ring_deg}deg, {_ring_track} 360deg);
+             filter:drop-shadow(0 0 22px {_core_soft});
+             animation:orbspin 18s linear infinite;"></div>
+        <div style="position:absolute; inset:14px; border-radius:50%; background:radial-gradient(circle at 50% 40%, rgba(8,16,32,0.92), rgba(2,5,12,0.99));
+             border:1px solid rgba(0,229,255,0.22);"></div>
+        <div style="position:absolute; inset:38px; border-radius:50%;
+             background:radial-gradient(circle at 50% 45%, {_core_soft}, rgba(0,0,0,0) 68%);
+             animation:orbpulse {_pulse_s}s ease-in-out infinite;"></div>
+        <div style="position:absolute; inset:0; display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center;">
+          <div style="font-size:0.62em; letter-spacing:2.4px; color:#4af2d6; text-transform:uppercase;">Equity</div>
+          <div style="font-family:'Orbitron',monospace; font-size:2.05em; font-weight:bold; color:#ffffff; text-shadow:0 0 18px {_core_soft};">${total_equity:,.2f}</div>
+          <div style="font-size:0.74em; color:{_core}; font-family:monospace; margin-top:2px;">{pnl_48h:+.2f} <span style="color:#6b7d8f;">48h</span></div>
+          <div style="width:120px; height:1px; background:rgba(0,229,255,0.22); margin:9px 0;"></div>
+          <div style="font-size:0.72em; color:#8899a6; font-family:monospace;">
+            <span style="color:#00e5ff;">{_wr:.0f}%</span> win &nbsp;·&nbsp;
+            <span style="color:#00e5ff;">{positions_count}</span> open
+          </div>
+          <div style="font-size:0.63em; color:{'#ffd54f' if _alert else '#48606f'}; margin-top:6px; letter-spacing:0.6px;">
+            {'⚠ ATTENTION REQUIRED' if _alert else 'ALL SYSTEMS NOMINAL'}
+          </div>
         </div>
-
+      </div>
     </div>
+    <style>
+      @keyframes orbspin {{ to {{ transform:rotate(360deg); }} }}
+      @keyframes orbpulse {{ 0%,100% {{ opacity:0.45; transform:scale(0.97); }} 50% {{ opacity:0.95; transform:scale(1.03); }} }}
+    </style>
     """
-    components.html(countdown_html, height=195)
+    components.html(orb_html, height=316)
     st.markdown('<div class="jarvis-label">TAP REACTOR ORB TO INITIATE J.A.R.V.I.S. INTEL</div>', unsafe_allow_html=True)
     
     # ── Autonomous 4-Hour Holographic Crystal Shards Pool ──
@@ -1499,195 +1478,32 @@ else:
 # ═══════════════════════════════════════════════════════════════════
 # DORMANT PANEL — only render when Jarvis console is closed
 # ═══════════════════════════════════════════════════════════════════
-if not jarvis_open:
+# ── Summoned panels ─────────────────────────────────────────────────
+# The permanent dashboard is gone. JARVIS calls show_panel(name) and the panel
+# renders here until dismissed, so nothing is on screen that was not asked for.
+_panel_ctx = {
+    "payload": payload,
+    "release_status": release_status,
+    "drift": drift,
+    "open_book_visual": open_book_visual,
+    "open_book_summary": open_book_summary,
+    "regime_cards": regime_cards,
+    "storage": storage,
+    "market_counts": market_counts,
+    "recent_vetoes": recent_vetoes,
+    "recent_events": recent_events,
+    "recent_trades": recent_trades,
+}
 
-    if not release_status.get("entries_allowed"):
-        blockers = release_status.get("top_infrastructure_blockers") or []
-        blocker_text = blockers[0] if blockers else "release audit not yet promoted"
-        _render_html(
-            f"""
-            <div class="banner">
-              <strong>Fresh entries are paused by the release gate.</strong>
-              The runtime is still live for monitoring and exits, but new trades stay blocked until the production blockers clear.
-              Current blocker: {html.escape(str(blocker_text))}.
-            </div>
-            """,
-        )
-
-    if drift.get("has_drift"):
-        drift_details = []
-        if drift.get("broker_only"):
-            for p in drift["broker_only"]:
-                drift_details.append(f"<li>Broker-Only Position: <code>{html.escape(str(p.get('ticker')))}</code> ({html.escape(str(p.get('side')))}) &mdash; Qty: {p.get('qty')}, Entry: ${p.get('entry_price', 0.0):.2f}</li>")
-        if drift.get("db_only"):
-            for p in drift["db_only"]:
-                drift_details.append(f"<li>DB-Only Remnant: <code>{html.escape(str(p.get('ticker')))}</code> ({html.escape(str(p.get('side')))}) &mdash; Qty: {p.get('qty')}, Entry: ${p.get('entry_price', 0.0):.2f}</li>")
-        if drift.get("qty_mismatches"):
-            for p in drift["qty_mismatches"]:
-                drift_details.append(f"<li>Quantity Mismatch: <code>{html.escape(str(p.get('ticker')))}</code> ({html.escape(str(p.get('side')))}) &mdash; Broker has <b>{p.get('broker_qty')}</b>, DB has <b>{p.get('db_qty')}</b></li>")
-        if drift.get("entry_mismatches"):
-            for p in drift["entry_mismatches"]:
-                drift_details.append(f"<li>Entry Price Mismatch: <code>{html.escape(str(p.get('ticker')))}</code> ({html.escape(str(p.get('side')))}) &mdash; Broker: ${p.get('broker_entry_price', 0.0):.2f}, DB: ${p.get('db_entry_price', 0.0):.2f}</li>")
-
-        details_html = f"<ul style='margin-top: 5px; margin-bottom: 0px;'>{''.join(drift_details)}</ul>" if drift_details else ""
-        _render_html(
-            f"""
-            <div class="banner">
-              <strong>Truth drift detected.</strong> Broker reality and SQLite do not fully agree right now.
-              The cockpit is showing both layers explicitly so you can see whether the issue is a stale local
-              ledger, a manual broker action, or a runtime reconciliation lag.
-              <div style="margin-top: 10px; font-size: 0.9em; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 8px;">
-                <strong>Mismatched Positions:</strong>
-                {details_html}
-              </div>
-            </div>
-            """,
-        )
-
-        st.write("🔧 **Drift Intervention Controls**")
-        for mismatch in (drift.get("qty_mismatches") or []):
-            ticker = mismatch["ticker"]
-            side = mismatch["side"]
-            broker_qty = float(mismatch["broker_qty"] or 0.0)
-            col1, col2 = st.columns([3, 1])
-            col1.write(f"Flatten mismatched **{ticker}** ({side}) &mdash; Broker has {broker_qty} open contracts.")
-            if col2.button(f"Flatten {ticker[:15]}...", key=f"flat_{ticker}", use_container_width=True):
-                with st.spinner(f"Flattening {ticker}..."):
-                    try:
-                        from execution.kalshi_broker import get_kalshi_broker
-                        from forecast.db import mark_forecast_position_closed
-                        broker = get_kalshi_broker()
-                        broker.connect()
-                        right = "C" if side == "YES" else "P"
-                        broker.flatten_position(ticker, right, int(round(broker_qty)))
-                        mark_forecast_position_closed(ticker, exit_type="manual_reconcile")
-                        st.success(f"Position {ticker} successfully flattened!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Failed to flatten: {e}")
-
-    st.markdown('<div class="section-title" style="margin-top:16px;">⚡ Live Trading Lane</div>', unsafe_allow_html=True)
-
-    rows = open_book_visual
-    if rows:
-        pos_df = pd.DataFrame(rows)
-        pos_df["gross_mark_pnl"] = pd.to_numeric(pos_df["gross_mark_pnl"], errors="coerce").fillna(0.0)
-        pos_df["exposure_usd"] = pd.to_numeric(pos_df["exposure_usd"], errors="coerce").fillna(0.0)
-        pos_df["hours_to_resolution"] = pd.to_numeric(pos_df["hours_to_resolution"], errors="coerce").fillna(0.0)
-
-        m1, m2, m3, m4 = st.columns(4)
-        total_exp = float(open_book_summary.get("total_exposure_usd") or 0.0)
-        total_pnl = pos_df["gross_mark_pnl"].sum()
-        m1.metric("Open Positions", len(rows))
-        m2.metric("Total Exposure", f"${total_exp:,.2f}")
-        m3.metric("Mark PnL", f"${total_pnl:+.2f}", delta=f"{'↑' if total_pnl >= 0 else '↓'} unrealized")
-        m4.metric("Soonest Expiry", f"{pos_df['hours_to_resolution'].min():.1f}h" if len(pos_df) > 0 else "—")
-
-        st.dataframe(
-            pos_df[["ticker", "side", "qty", "entry_price", "mark", "gross_mark_pnl", "hours_to_resolution", "hub"]].rename(columns={
-                "gross_mark_pnl": "mark_pnl",
-                "hours_to_resolution": "hrs_left",
-            }),
-            use_container_width=True, hide_index=True
-        )
-    else:
-        st.info("No live Kalshi positions are open right now.")
-
-
-    # Collapsible Advanced System Telemetry Matrix
-    st.markdown('<div class="section-title">Risk Matrix & Controls</div>', unsafe_allow_html=True)
-    _render_html(
-        '<div class="mini-grid">' + "".join(
-            _mini_card(card["label"], card["value"], card["detail"], card.get("tooltip"))
-            for card in regime_cards
-        ) + "</div>",
-    )
-
-    st.markdown('<div class="section-title">Runtime System Integrity</div>', unsafe_allow_html=True)
-    _render_html(
-        '<div class="mini-grid">'
-        + _mini_card("Disk Free", f"{round(float(storage['free_mb']), 0):,.0f} MB", "server headroom")
-        + _mini_card("DB Footprint", f"{storage['db_mb']} MB", "local SQLite ledger")
-        + _mini_card("Quote Cache", f"{market_counts['quote_rows']:,}", "forecast quote rows")
-        + "</div>",
-    )
-
-    # Collapsible Advanced System Telemetry Matrix (cutting clutter)
-    with st.expander("🔍 View Advanced Telemetry, Veto Tape &amp; System Feed"):
-        t_col1, t_col2 = st.columns(2)
-        with t_col1:
-            st.markdown("##### 🛡️ Regional Hub Allocations")
-            hub_df = pd.DataFrame(payload["hub_exposure"])
-            if not hub_df.empty:
-                st.dataframe(hub_df, width="stretch", hide_index=True)
-            else:
-                st.info("No active hub exposure.")
-        with t_col2:
-            st.markdown("##### 🚫 Veto Cluster Tape")
-            if recent_vetoes.get("top_reasons"):
-                veto_df = pd.DataFrame(recent_vetoes["top_reasons"])
-                st.dataframe(veto_df, width="stretch", hide_index=True)
-            else:
-                st.success("No recent hard veto clusters.")
-
-    st.markdown("### Event Tape")
-    show_raw_events = st.toggle(
-        "Show Raw Event Tape",
-        value=False,
-        help="By default the cockpit translates telemetry into plain-English insights. Turn this on to inspect the underlying raw system events.",
-    )
-    if show_raw_events:
-        evt_left, evt_right = st.columns(2, gap="large")
-        with evt_left:
-            st.markdown('<div class="section-title">System Events</div>', unsafe_allow_html=True)
-            if recent_events:
-                for event in recent_events[:12]:
-                    tone = "tone-bad" if event.get("level") in {"ERROR", "CRITICAL"} else "tone-amber" if event.get("level") == "WARNING" else "tone-cyan"
-                    st.markdown(
-                        _feed_card(
-                            f"{event.get('source')} [{event.get('level')}]",
-                            _fmt_dt(event.get("ts")),
-                            str(event.get("message") or ""),
-                            tone=tone,
-                        ),
-                        unsafe_allow_html=True,
-                    )
-            else:
-                st.info("No recent system events.")
-
-        with evt_right:
-            st.markdown('<div class="section-title">Recent Trade Rows</div>', unsafe_allow_html=True)
-            if recent_trades:
-                trades_df = pd.DataFrame(recent_trades)
-                trades_df["ts"] = trades_df["ts"].map(_fmt_dt)
-                st.dataframe(
-                    trades_df[
-                        [
-                            "ts",
-                            "symbol",
-                            "action",
-                            "qty",
-                            "price",
-                            "fee_usd",
-                            "pnl_usd",
-                            "strategy",
-                            "contract_side",
-                            "forecast_yes_prob",
-                        ]
-                    ],
-                    width="stretch",
-                    hide_index=True,
-                )
-            else:
-                st.info("No recent Kalshi trades found.")
-    else:
-        _render_html(
-            """
-            <div class="toggle-shell">
-              Raw telemetry is hidden right now. The cockpit is showing translated insights by default so you can read what the system means, not just what it logged.
-            </div>
-            """
-        )
+_active = st.session_state.get("active_panels") or []
+if _active:
+    st.markdown('<div class="panel-deck">', unsafe_allow_html=True)
+    for _name in list(_active):
+        panels.render_panel(_name, _panel_ctx)
+    if st.button("✕ Dismiss panels", key="dismiss_panels", use_container_width=True):
+        st.session_state.active_panels = []
+        st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
 
 st.divider()
 st.caption(

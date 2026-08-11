@@ -478,6 +478,32 @@ SYSTEM_PROMPT = (
 )
 
 
+def show_panel(name: str) -> str:
+    """Display a data panel in the cockpit console.
+
+    Valid names: alerts (release blockers and broker-vs-ledger drift), open_book
+    (live positions, exposure, mark PnL), risk (risk ceilings in force), runtime
+    (disk/db/quote-cache health, hub exposure, veto tape), events (raw system event
+    tape), trades (recent trade rows). Use this when the operator asks to see or be
+    shown something, rather than describing the data in prose.
+    """
+    from dashboard.panels import PANEL_NAMES
+
+    key = str(name or "").strip().lower()
+    if key not in PANEL_NAMES:
+        return f"Unknown panel '{name}'. Valid panels: {', '.join(PANEL_NAMES)}."
+    try:
+        import streamlit as st
+
+        active = st.session_state.setdefault("active_panels", [])
+        if key not in active:
+            active.append(key)
+        return f"Panel '{key}' is now displayed in the console."
+    except Exception:
+        # Reached from a non-Streamlit surface (e.g. Telegram); nothing to render.
+        return f"Panel '{key}' can only be displayed in the cockpit console."
+
+
 def run_jarvis_chat(messages: list[dict]) -> str:
     """Cockpit entrypoint. Delegates to the shared brain with full write access.
 

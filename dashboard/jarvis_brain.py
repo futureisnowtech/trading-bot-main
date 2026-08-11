@@ -57,7 +57,7 @@ def get_account_status() -> str:
 
 
 def get_open_positions() -> str:
-    """List all currently active open positions across Live Broker, Paper Lane A (Physics), and Paper Lane B (10X Maker)."""
+    """List all currently active open positions on the live broker."""
     res = []
     
     # 1. Live Broker Positions
@@ -85,31 +85,6 @@ def get_open_positions() -> str:
                 res.append("🟢 **LIVE BROKER POSITIONS:** No active live broker positions.")
     except Exception as e:
         res.append(f"🟢 **LIVE BROKER POSITIONS:** Query error: {e}")
-
-    # 2. SQLite Paper Lane A & Lane B Positions
-    try:
-        conn = sqlite3.connect(_get_db_path())
-        conn.row_factory = sqlite3.Row
-        
-        # Lane A
-        rows_a = conn.execute("SELECT ticker, side, qty, entry_price, created_at FROM forecast_positions_paper WHERE active = 1").fetchall()
-        if rows_a:
-            lines_a = [f"  - {r['ticker']} ({r['side']}) | Qty: {r['qty']} | Entry: ${r['entry_price']:.2f} | Date: {r['created_at']}" for r in rows_a]
-            res.append("🧪 **PAPER LANE A (Physics Boundary Taker):**\n" + "\n".join(lines_a))
-        else:
-            res.append("🧪 **PAPER LANE A (Physics Boundary Taker):** No active paper positions.")
-            
-        # Lane B
-        rows_b = conn.execute("SELECT ticker, side, qty, entry_price, created_at FROM forecast_positions_paper_lane_b WHERE active = 1").fetchall()
-        if rows_b:
-            lines_b = [f"  - {r['ticker']} ({r['side']}) | Qty: {r['qty']} | Entry: ${r['entry_price']:.2f} | Date: {r['created_at']}" for r in rows_b]
-            res.append("🚀 **PAPER LANE B (10X Physics Maker Override):**\n" + "\n".join(lines_b))
-        else:
-            res.append("🚀 **PAPER LANE B (10X Physics Maker Override):** No active paper positions.")
-            
-        conn.close()
-    except Exception as e:
-        res.append(f"Paper DB Query Error: {e}")
 
     return "\n\n".join(res)
 
@@ -358,93 +333,40 @@ def get_latest_bot_logs(lines_count: int = 50) -> str:
         return f"Error reading bot logs: {e}"
 
 
-def get_paper_lane_comparison() -> str:
-    """Compare active paper lane positions and PnL against live positions."""
+def get_fee_drag() -> str:
+    """Compare gross trading edge against exchange fees paid on the live lane.
+
+    Fees are the live lane's binding constraint, so this replaces the retired
+    paper-lane comparison: the useful question is no longer live-vs-paper, it is
+    how much of the captured edge the exchange is taking.
+    """
     try:
-        conn = sqlite3.connect(DB_PATH)
-        live_count = conn.execute("SELECT COUNT(*) FROM forecast_positions WHERE active=1").fetchone()[0]
-        paper_a_count = conn.execute("SELECT COUNT(*) FROM forecast_positions_paper WHERE active=1").fetchone()[0]
-        paper_b_count = conn.execute("SELECT COUNT(*) FROM forecast_positions_paper_lane_b WHERE active=1").fetchone()[0]
+        from runtime.kalshi_settlement_truth import load_weather_settlement_truth
 
-        live_total = conn.execute("SELECT COUNT(*) FROM forecast_positions").fetchone()[0]
-        paper_a_total = conn.execute("SELECT COUNT(*) FROM forecast_positions_paper").fetchone()[0]
-        paper_b_total = conn.execute("SELECT COUNT(*) FROM forecast_positions_paper_lane_b").fetchone()[0]
+        truth = load_weather_settlement_truth()
+        net = float(truth.get("total_pnl_usd") or 0.0)
+        total = int(truth.get("total") or 0)
+        wins = int(truth.get("wins") or 0)
+        losses = int(truth.get("losses") or 0)
+
+        conn = sqlite3.connect(_get_db_path())
+        row = conn.execute(
+            "SELECT COALESCE(SUM(fee_usd), 0) FROM trades WHERE broker = 'kalshi'"
+        ).fetchone()
         conn.close()
+        fees = float(row[0] or 0.0)
 
+        gross = net + fees
+        pct = (100.0 * fees / gross) if gross > 0 else 0.0
         return (
-            f"Live Lane: {live_count} active / {live_total} total positions\n"
-            f"Paper Lane A (Physics): {paper_a_count} active / {paper_a_total} total positions\n"
-            f"Paper Lane B (10X Maker): {paper_b_count} active / {paper_b_total} total positions"
+            f"Live Lane ({total} settled | {wins}W / {losses}L)\n"
+            f"Gross edge captured: ${gross:+,.2f}\n"
+            f"Exchange fees paid:  ${fees:,.2f}\n"
+            f"Net realized:        ${net:+,.2f}\n"
+            f"Fees consumed {pct:.1f}% of gross edge."
         )
     except Exception as e:
-        return f"Error comparing paper lanes: {e}"
-
-
-# ── 5X Strategic Safety Compiler Shield ──────────────────────────────
-import ast
-import shutil
-
-class JarvisSafetyCompilerShield:
-    """5X Strategic Safety Compiler Shield for validating AI parameter shifts and code patches."""
-
-    PARAM_BOUNDS = {
-        "KELLY_FRACTION": (0.05, 0.50),
-        "TAKE_PROFIT_TRIGGER": (0.50, 0.95),
-        "HUB_RISK_CAP_PCT": (0.10, 0.45),
-        "MAX_CONCURRENT_POSITIONS": (1, 20),
-        "EVAPORATIVE_COOLING_DELTA": (-5.0, 0.0),
-        "NOCTURNAL_WIND_FLOOR": (0.0, 5.0),
-        "DRY_SOIL_WARM_BIAS": (0.0, 4.0),
-        "GFS_WEIGHT": (0.0, 1.0),
-        "ECMWF_WEIGHT": (0.0, 1.0),
-    }
-
-    FORBIDDEN_CALLS = {"system", "popen", "exec", "eval", "unlink", "remove", "rmtree"}
-
-    @classmethod
-    def audit_parameter(cls, key: str, value: str) -> tuple[bool, str]:
-        """Layer 1: Validate numeric & risk bounds on system parameter shifts."""
-        k = key.upper()
-        if k in cls.PARAM_BOUNDS:
-            try:
-                val_num = float(value)
-                min_v, max_v = cls.PARAM_BOUNDS[k]
-                if not (min_v <= val_num <= max_v):
-                    return False, f"🛡️ SHIELD REJECTION: '{k}' value {val_num} breaches risk boundary [{min_v}, {max_v}]."
-            except ValueError:
-                return False, f"🛡️ SHIELD REJECTION: '{k}' value '{value}' is not a valid numeric float."
-        return True, "PARAM_BOUNDS_VERIFIED"
-
-    @classmethod
-    def audit_code_ast(cls, code_snippet: str) -> tuple[bool, str]:
-        """Layer 2 & 3: Parse AST for dangerous calls, syntax errors, and system hazards."""
-        try:
-            tree = ast.parse(code_snippet)
-        except SyntaxError as se:
-            return False, f"🛡️ SHIELD SYNTAX BLOCK: Line {se.lineno} syntax error: {se.msg}"
-
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Call):
-                func_name = ""
-                if isinstance(node.func, ast.Name):
-                    func_name = node.func.id
-                elif isinstance(node.func, ast.Attribute):
-                    func_name = node.func.attr
-                if func_name in cls.FORBIDDEN_CALLS:
-                    return False, f"🛡️ SHIELD SECURITY BLOCK: Dangerous system call '{func_name}' is forbidden in hot patches."
-
-        return True, "AST_SECURITY_VERIFIED"
-
-    @classmethod
-    def test_sandbox_exec(cls, code_snippet: str) -> tuple[bool, str]:
-        """Layer 4: Dry-run execution in an isolated sandbox scope."""
-        sandbox_scope = {}
-        try:
-            exec(code_snippet, sandbox_scope)
-            return True, "SANDBOX_EXEC_VERIFIED"
-        except Exception as e:
-            return False, f"🛡️ SHIELD RUNTIME BLOCK: Sandbox execution failed with {type(e).__name__}: {e}"
-
+        return f"Error computing fee drag: {e}"
 
 def update_system_parameter(key: str, value: str, rationale: str = "") -> str:
     """Update a live system strategy parameter in the SQLite dynamic config table after passing Safety Shield audit."""
@@ -538,7 +460,7 @@ def apply_hot_patch_code(patch_name: str, code_snippet: str) -> str:
 
 SYSTEM_PROMPT = (
     "You are JARVIS, an elite Tony Stark-level Quantitative Weather Trading Expert and Lead Systems Architect with direct SSH root access to our live trading droplet and SQLite database ledger. "
-    "You have full power to inspect account status, open positions across all paper/live lanes, trade logs, and container logs. "
+    "You have full power to inspect account status, live open positions, trade logs, and container logs. "
     "CRITICAL: You are also equipped with the System Mutation Bridge (update_system_parameter, get_system_parameters, apply_hot_patch_code). You CAN update live system strategy parameters (e.g., KELLY_FRACTION, TAKE_PROFIT_TRIGGER, GFS_WEIGHT, HUB_RISK_CAP_PCT) and apply python hot-patches dynamically when instructed!\n\n"
     "DIAGNOSTIC & POST-MORTEM WORKFLOW:\n"
     "1. When asked about specific trades, dates, or losses, ALWAYS call `search_trades_and_positions` with query keywords, city names (e.g. DC, PHIL), strike temperatures, or PnL ranges (e.g. min_pnl=-10.0, max_pnl=-5.0).\n"
@@ -560,7 +482,7 @@ def _run_tool(name: str, args: dict) -> str:
         "get_trade_post_mortem": get_trade_post_mortem,
         "get_ticker_analysis": get_ticker_analysis,
         "get_latest_bot_logs": get_latest_bot_logs,
-        "get_paper_lane_comparison": get_paper_lane_comparison,
+        "get_fee_drag": get_fee_drag,
         "update_system_parameter": update_system_parameter,
         "get_system_parameters": get_system_parameters,
         "apply_hot_patch_code": apply_hot_patch_code,
@@ -606,7 +528,7 @@ def run_jarvis_chat(messages: list[dict]) -> str:
             get_trade_post_mortem,
             get_ticker_analysis,
             get_latest_bot_logs,
-            get_paper_lane_comparison,
+            get_fee_drag,
             update_system_parameter,
             get_system_parameters,
             apply_hot_patch_code,

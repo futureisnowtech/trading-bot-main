@@ -108,13 +108,25 @@ def _resolve_runtime_child(env_key: str, default_name: str) -> str:
 # ════════════════════════════════════════════════════════════════════
 # SYSTEM MODE
 # ════════════════════════════════════════════════════════════════════
-# v18.32: Ripped out paper trading and scalper mode switches.
-# All systems are strictly LIVE.
-# SHADOW_EXECUTION is resolved dynamically to support concurrent paper trading lanes
-def __getattr__(name: str):
-    if name == "SHADOW_EXECUTION":
-        return os.getenv("RUN_PAPER_CYCLE", "false").lower() == "true" or os.getenv("RUN_LANE_B_CYCLE", "false").lower() == "true" or os.getenv("SHADOW_EXECUTION", "false").lower() == "true"
-    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+# v19.18: Paper lanes A and B retired. There is one live lane; the two ideas the
+# paper lanes existed to test are now flags on that single path (see LANE FEATURES).
+SHADOW_EXECUTION: bool = os.getenv("SHADOW_EXECUTION", "false").lower() == "true"
+
+# ════════════════════════════════════════════════════════════════════
+# LANE FEATURES
+# ════════════════════════════════════════════════════════════════════
+# Continuous physics delta overlay (formerly paper Lane A): correct model
+# temperature for precip and wind before pricing. Rain caps the daytime high;
+# wind mixes the boundary layer and lifts the overnight low.
+PHYSICS_DELTA_ENABLED: bool = os.getenv("PHYSICS_DELTA_ENABLED", "true").lower() == "true"
+
+# Maker entry (formerly paper Lane B): rest at the bid instead of crossing the
+# ask. Maker fees are ~4x cheaper than taker and the spread is saved. Ships off;
+# enable only after the physics-delta deploy is verified. If an order does not
+# fill within the timeout it is cancelled and re-crossed, so a thin book degrades
+# to today's taker behavior rather than silently halting entries.
+MAKER_ENTRY_ENABLED: bool = os.getenv("MAKER_ENTRY_ENABLED", "false").lower() == "true"
+MAKER_ENTRY_TIMEOUT_S: int = int(os.getenv("MAKER_ENTRY_TIMEOUT_S", "90"))
 
 # Session start: all performance stats (win rate, P&L, trade counts) are
 # measured from this date forward.

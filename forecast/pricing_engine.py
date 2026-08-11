@@ -9,9 +9,40 @@ from typing import Any, Dict, List, Tuple
 import numpy as np
 from sklearn.isotonic import IsotonicRegression
 
+from config import PHYSICS_DELTA_ENABLED
 from forecast.weather_contracts import resolve_weather_contract, WeatherContractSemantics
 
 logger = logging.getLogger("pricing_engine")
+
+# Physics delta overlay tuning. Both effects are sigmoids in the raw met variable,
+# scaled into probability space by _PHYSICS_PROB_SCALE.
+_PRECIP_MAX_DT = -6.0    # deg F: heavy precip caps the daytime high
+_PRECIP_MIDPOINT = 0.15  # inches
+_PRECIP_STEEPNESS = 12.0
+_WIND_MAX_DT = 4.5       # deg F: wind mixes the boundary layer, lifting the overnight low
+_WIND_MIDPOINT = 14.5    # mph
+_WIND_STEEPNESS = 0.35
+_PHYSICS_PROB_SCALE = 0.08
+
+
+def _physics_shift(model_data: dict) -> float:
+    """Probability shift implied by a model's precip and wind fields.
+
+    Returns 0.0 when neither field is present, so a model that does not report
+    precip or wind is left untouched rather than being nudged by a default.
+    """
+    precip = float(model_data.get("mean_precip") or 0.0)
+    wind = float(model_data.get("mean_wind") or 0.0)
+
+    dt_precip = 0.0
+    if precip > 0.0:
+        dt_precip = _PRECIP_MAX_DT / (1.0 + math.exp(-_PRECIP_STEEPNESS * (precip - _PRECIP_MIDPOINT)))
+
+    dt_wind = 0.0
+    if wind > 0.0:
+        dt_wind = _WIND_MAX_DT / (1.0 + math.exp(-_WIND_STEEPNESS * (wind - _WIND_MIDPOINT)))
+
+    return (dt_precip + dt_wind) * _PHYSICS_PROB_SCALE
 
 def get_lead_bucket(hours_to_res: float) -> int:
     """Classify lead time into one of the 4 lead-buckets (SPEC §3.2)."""
@@ -416,37 +447,18 @@ def calculate_pricing(
     # 6. Weekly-refit Isotonic Calibration
     q_hat = calibrate_probability(q_hat_raw, mode, db_path)
     
-    # ── J.A.R.V.I.S. Continuous Physics Delta Overlay (PAPER RUN ONLY) ──
-    if os.getenv("RUN_PAPER_CYCLE", "false").lower() == "true":
-        gfs_precip = float(w_data.get("mean_precip") or 0.0)
-        ec_precip = float(ecmwf_data.get("mean_precip") or 0.0)
-        gfs_wind = float(w_data.get("mean_wind") or 0.0)
-        ec_wind = float(ecmwf_data.get("mean_wind") or 0.0)
-        
-        dT_precip_gfs = 0.0
-        if gfs_precip > 0.0:
-            dT_precip_gfs = -6.0 / (1.0 + math.exp(-12.0 * (gfs_precip - 0.15)))
-        dT_wind_gfs = 0.0
-        if gfs_wind > 0.0:
-            dT_wind_gfs = 4.5 / (1.0 + math.exp(-0.35 * (gfs_wind - 14.5)))
-            
-        dT_precip_ec = 0.0
-        if ec_precip > 0.0:
-            dT_precip_ec = -6.0 / (1.0 + math.exp(-12.0 * (ec_precip - 0.15)))
-        dT_wind_ec = 0.0
-        if ec_wind > 0.0:
-            dT_wind_ec = 4.5 / (1.0 + math.exp(-0.35 * (ec_wind - 14.5)))
-            
-        shift_gfs = (dT_precip_gfs + dT_wind_gfs) * 0.08
-        shift_ec = (dT_precip_ec + dT_wind_ec) * 0.08
-        
-        if mode == "HIGH":
-            q_gfs = max(0.01, min(0.99, q_gfs + shift_gfs))
-            q_ecmwf = max(0.01, min(0.99, q_ecmwf + shift_ec))
-        elif mode == "LOW":
-            q_gfs = max(0.01, min(0.99, q_gfs + shift_gfs))
-            q_ecmwf = max(0.01, min(0.99, q_ecmwf + shift_ec))
-            
+    # ── Continuous Physics Delta Overlay ──
+    # Correct each model's probability for precip and wind before blending.
+    # Promoted from paper Lane A, which is retired; PHYSICS_DELTA_ENABLED is the
+    # kill switch. Applies to HIGH and LOW alike -- both prior mode branches were
+    # identical, so the distinction was never real.
+    if PHYSICS_DELTA_ENABLED:
+        shift_gfs = _physics_shift(w_data)
+        shift_ec = _physics_shift(ecmwf_data)
+
+        q_gfs = max(0.01, min(0.99, q_gfs + shift_gfs))
+        q_ecmwf = max(0.01, min(0.99, q_ecmwf + shift_ec))
+
         q_hat_raw = log_odds_blend(q_gfs, q_ecmwf, q_hrrr, weights, hours_to_res)
         q_hat = calibrate_probability(q_hat_raw, mode, db_path)
 

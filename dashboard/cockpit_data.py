@@ -1011,35 +1011,6 @@ def build_regime_cards(
     ]
 
 
-def _load_paper_positions(table_name: str, active_only: bool = True, limit: int = 50) -> list[dict[str, Any]]:
-    """Query paper trading position rows from SQLite database."""
-    if not os.path.exists(DB_PATH):
-        return []
-    try:
-        conn = sqlite3.connect(DB_PATH, timeout=10.0)
-        conn.row_factory = sqlite3.Row
-        where_clause = "WHERE active = 1" if active_only else ""
-        query = f"SELECT * FROM {table_name} {where_clause} ORDER BY opened_at DESC LIMIT {limit}"
-        rows = conn.execute(query).fetchall()
-        conn.close()
-        res = []
-        for r in rows:
-            d = dict(r)
-            d["ticker"] = str(d.get("ticker") or d.get("local_symbol") or "")
-            d["qty"] = float(d.get("qty") or 0.0)
-            d["entry_price"] = float(d.get("entry_price") or 0.0)
-            d["side"] = str(d.get("side") or "YES")
-            d["market_exposure_dollars"] = d["qty"] * d["entry_price"]
-            d["opened_at"] = str(d.get("opened_at") or "")
-            d["closed_at"] = str(d.get("closed_at") or "")
-            d["exit_type"] = str(d.get("exit_type") or "ACTIVE")
-            res.append(d)
-        return res
-    except Exception as e:
-        logger.warning(f"Failed loading paper positions from {table_name}: {e}")
-        return []
-
-
 def load_stark_matrix_metrics() -> dict[str, Any]:
     """Live equity plus rolling 7d/48h performance for the Jarvis matrix.
 
@@ -1118,36 +1089,6 @@ def load_session_win_rate() -> dict[str, Any]:
     }
 
 
-def get_paper_trial_countdown() -> dict[str, Any]:
-    """Countdown to the end of the current 7-day paper-lane trial.
-
-    Window is pinned to the trial that started 2026-08-09. Update both timestamps
-    when a new trial begins, otherwise the cockpit shows a permanently expired timer.
-    """
-    from datetime import datetime, timezone
-    target_dt = datetime.fromisoformat("2026-08-16T19:23:27+00:00")
-    now_dt = datetime.now(timezone.utc)
-    diff = target_dt - now_dt
-    seconds_remaining = max(0, int(diff.total_seconds()))
-
-    days = seconds_remaining // 86400
-    hours = (seconds_remaining % 86400) // 3600
-    minutes = (seconds_remaining % 3600) // 60
-    seconds = seconds_remaining % 60
-
-    return {
-        "start_time": "2026-08-09T19:23:27Z",
-        "target_time": "2026-08-16T19:23:27Z",
-        "seconds_remaining": seconds_remaining,
-        "days_remaining": days,
-        "hours_remaining": hours,
-        "minutes_remaining": minutes,
-        "seconds_remaining_in_minute": seconds,
-        "formatted": f"{days}d {hours:02d}h {minutes:02d}m {seconds:02d}s",
-        "active": seconds_remaining > 0,
-    }
-
-
 def get_cockpit_payload(*, live_sync: bool = True) -> dict[str, Any]:
     truth = get_live_kalshi_status(connect=live_sync, sync_broker=live_sync)
     release_status = get_release_status(truth=truth)
@@ -1200,10 +1141,6 @@ def get_cockpit_payload(*, live_sync: bool = True) -> dict[str, Any]:
         for position in drift.get("db_only", [])
     ]
 
-    paper_rows_a = _load_paper_positions("forecast_positions_paper", active_only=True)
-    paper_rows_b = _load_paper_positions("forecast_positions_paper_lane_b", active_only=True)
-    paper_history_a = _load_paper_positions("forecast_positions_paper", active_only=False, limit=35)
-    paper_history_b = _load_paper_positions("forecast_positions_paper_lane_b", active_only=False, limit=35)
 
     recent_trades = _load_recent_trades(limit=25)
     recent_events = _load_recent_events(limit=25)
@@ -1222,11 +1159,6 @@ def get_cockpit_payload(*, live_sync: bool = True) -> dict[str, Any]:
         "release_status": release_status,
         "positions_live": live_rows,
         "positions_db_only": drift_rows,
-        "positions_paper_a": paper_rows_a,
-        "positions_paper_b": paper_rows_b,
-        "history_paper_a": paper_history_a,
-        "history_paper_b": paper_history_b,
-        "paper_trial_countdown": get_paper_trial_countdown(),
         "stark_matrix": load_stark_matrix_metrics(),
         "open_book_visual": build_open_book_visual_rows(live_rows or drift_rows),
         "open_book_summary": summarize_open_book(live_rows or drift_rows),

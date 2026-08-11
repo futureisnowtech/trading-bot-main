@@ -95,27 +95,7 @@ def main() -> int:
                 else:
                     summary = run_execution_cycle(bankroll=bankroll, run_rbi=True)
                     logger.info("Live Execution cycle complete: %s", summary)
-                    
-                    try:
-                        logger.info("Starting parallel paper cycle with continuous physics overrides...")
-                        os.environ["RUN_PAPER_CYCLE"] = "true"
-                        paper_summary = run_execution_cycle(bankroll=bankroll, run_rbi=False)
-                        logger.info("Paper Execution cycle complete: %s", paper_summary)
-                    except Exception as paper_err:
-                        logger.exception("Paper execution cycle failed: %s", paper_err)
-                    finally:
-                        os.environ["RUN_PAPER_CYCLE"] = "false"
-                        
-                    try:
-                        logger.info("Starting parallel Lane B (10X Physics + Maker Limit) paper cycle...")
-                        os.environ["RUN_LANE_B_CYCLE"] = "true"
-                        lane_b_summary = run_execution_cycle(bankroll=bankroll, run_rbi=False)
-                        logger.info("Lane B Execution cycle complete: %s", lane_b_summary)
-                    except Exception as lane_b_err:
-                        logger.exception("Lane B execution cycle failed: %s", lane_b_err)
-                    finally:
-                        os.environ["RUN_LANE_B_CYCLE"] = "false"
-                        
+
                     if not weather_monitor_started:
                         start_weather_monitor()
                         weather_monitor_started = True

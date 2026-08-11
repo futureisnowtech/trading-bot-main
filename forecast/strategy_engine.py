@@ -1103,9 +1103,7 @@ def calculate_continuous_sizing(
     )
     # Scale contract count for high edge & tri-model consensus trades ($15-$35 allocation)
     if n > 0 and ensemble_prob >= 0.75 and multiplier >= 1.25 and market_price > 0.0:
-        import os
-        max_usd = 250.0 if os.getenv("RUN_LANE_B_CYCLE", "false").lower() == "true" else KALSHI_MAX_USD_PER_POSITION
-        target_allocation_usd = min(max_usd, max(15.0, capital_base * 0.15 * multiplier))
+        target_allocation_usd = min(KALSHI_MAX_USD_PER_POSITION, max(15.0, capital_base * 0.15 * multiplier))
         conviction_contracts = int(target_allocation_usd / market_price)
         n = max(n, conviction_contracts)
 
@@ -2079,9 +2077,8 @@ def evaluate_contract(
                 
             total_cost = n_contracts * (p_cost + calculate_ceiled_fee(p_cost, n_contracts, maker=not best_is_taker))
             
-            # Enforce strict SRE Risk Ceilings (if KALSHI_MAX_USD_PER_POSITION is overridden)
-            import os
-            max_usd = 250.0 if os.getenv("RUN_LANE_B_CYCLE", "false").lower() == "true" else KALSHI_MAX_USD_PER_POSITION
+            # Enforce strict SRE Risk Ceilings
+            max_usd = KALSHI_MAX_USD_PER_POSITION
             if max_usd is not None:
                 cost_limit = float(max_usd)
                 if total_cost > cost_limit:

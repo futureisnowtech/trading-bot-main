@@ -988,10 +988,6 @@ regime = payload["regime"]
 deploy = payload["deploy"]
 positions_live = payload["positions_live"]
 positions_db_only = payload["positions_db_only"]
-positions_paper_a = payload.get("positions_paper_a") or []
-positions_paper_b = payload.get("positions_paper_b") or []
-history_paper_a = payload.get("history_paper_a") or []
-history_paper_b = payload.get("history_paper_b") or []
 open_book_visual = payload["open_book_visual"]
 open_book_summary = payload["open_book_summary"]
 recent_trades = payload["recent_trades"]
@@ -1036,70 +1032,6 @@ hub_cap_now = get_kalshi_hub_exposure_cap(balance)
 import json
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
-
-# Load or init Paper Trial Start Time
-TRIAL_FILE = Path("/app/logs/paper_trial_start.json")
-if not TRIAL_FILE.parent.exists():
-    TRIAL_FILE = Path(DB_PATH).parent / "paper_trial_start.json"
-
-if not TRIAL_FILE.exists():
-    try:
-        with open(TRIAL_FILE, "w") as f:
-            json.dump({"start_time": datetime.now(timezone.utc).isoformat()}, f)
-    except Exception:
-        pass
-
-try:
-    with open(TRIAL_FILE) as f:
-        trial_data = json.load(f)
-    trial_start = datetime.fromisoformat(trial_data["start_time"])
-except Exception:
-    trial_start = datetime.now(timezone.utc)
-
-trial_end = trial_start + timedelta(days=7)
-now_utc = datetime.now(timezone.utc)
-remaining = trial_end - now_utc
-remaining_seconds = max(0, int(remaining.total_seconds()))
-
-# Load paper lane balances & PnL
-paper_bal_a = 1000.0
-paper_bal_b = 1000.0
-bal_a_file = Path(DB_PATH).parent / "paper_balance.json"
-bal_b_file = Path(DB_PATH).parent / "paper_balance_lane_b.json"
-
-if bal_a_file.exists():
-    try:
-        with open(bal_a_file) as f:
-            paper_bal_a = float(json.load(f).get("balance", 1000.0))
-    except Exception:
-        pass
-
-if bal_b_file.exists():
-    try:
-        with open(bal_b_file) as f:
-            paper_bal_b = float(json.load(f).get("balance", 1000.0))
-    except Exception:
-        pass
-
-pnl_a = paper_bal_a - 1000.0
-pnl_b = paper_bal_b - 1000.0
-
-try:
-    conn = sqlite3.connect(DB_PATH)
-    rows_a_act = conn.execute("SELECT count(*) FROM forecast_positions_paper WHERE active = 1").fetchone()
-    paper_active_a = rows_a_act[0] if rows_a_act else 0
-    rows_b_act = conn.execute("SELECT count(*) FROM forecast_positions_paper_lane_b WHERE active = 1").fetchone()
-    paper_active_b = rows_b_act[0] if rows_b_act else 0
-    rows_a_tot = conn.execute("SELECT count(*) FROM forecast_positions_paper").fetchone()
-    paper_total_a = rows_a_tot[0] if rows_a_tot else 0
-    rows_b_tot = conn.execute("SELECT count(*) FROM forecast_positions_paper_lane_b").fetchone()
-    paper_total_b = rows_b_tot[0] if rows_b_tot else 0
-    conn.close()
-except Exception:
-    paper_active_a = 0
-    paper_active_b = 0
-    paper_total_a = 0
-    paper_total_b = 0
 
 # ── Jarvis Expanding Orb Widget ─────────────────────────────────────
 jarvis_open = st.session_state.get("show_jarvis", False)
@@ -1283,8 +1215,6 @@ if st.button("⚡", key="reactor_toggle_btn"):
 if not jarvis_open:
     st.markdown('<div class="jarvis-orb-wrap">', unsafe_allow_html=True)
     # Countdown sits right under the dormant orb
-    str_pnl_a = f"${pnl_a:+.2f}"
-    str_pnl_b = f"${pnl_b:+.2f}"
     str_pnl_48h = f"${pnl_48h:+.2f}"
     str_eq = f"${total_equity:,.2f}"
     str_cash = f"${balance:,.2f}"
@@ -1312,25 +1242,12 @@ if not jarvis_open:
             </div>
 
             <div style="background:radial-gradient(ellipse at bottom right, rgba(255,213,79,0.15), rgba(5,10,22,0.95)); border:1px solid rgba(255,213,79,0.35); border-radius:18px; padding:12px; box-shadow:0 0 20px rgba(255,213,79,0.15);">
-                <div style="font-size:0.7em; font-weight:bold; letter-spacing:1.5px; color:#ffd54f; text-transform:uppercase;">⏳ 7-DAY AUDIT TRIAL</div>
-                <div id="timer" style="font-size:1.6em; font-weight:bold; color:#ffd54f; font-family:monospace; margin-top:2px;">--:--:--</div>
-                <div style="font-size:0.75em; color:#8899a6; margin-top:1px;">A: {str_pnl_a} | B: {str_pnl_b}</div>
+                <div style="font-size:0.7em; font-weight:bold; letter-spacing:1.5px; color:#ffd54f; text-transform:uppercase;">🧾 REALIZED (LIVE ERA)</div>
+                <div style="font-size:1.6em; font-weight:bold; color:#ffd54f; font-family:monospace; margin-top:2px;">${realized_pnl:+,.2f}</div>
+                <div style="font-size:0.75em; color:#8899a6; margin-top:1px;">{win_rate_stats.get('wins',0)}W / {win_rate_stats.get('losses',0)}L over {win_rate_stats.get('total',0)} settled</div>
             </div>
         </div>
 
-        <script>
-            var endTime = {int(trial_end.timestamp() * 1000)};
-            function updateTimer() {{
-                var now = new Date().getTime(), d = endTime - now;
-                if (d < 0) {{ document.getElementById("timer").innerHTML = "AUDIT COMPLETE"; document.getElementById("timer").style.color = "#ffd54f"; return; }}
-                var days = Math.floor(d / 86400000);
-                var h = Math.floor((d % 86400000) / 3600000);
-                var m = Math.floor((d % 3600000) / 60000);
-                var s = Math.floor((d % 60000) / 1000);
-                document.getElementById("timer").innerHTML = days + "d " + (h<10?"0":"")+h + ":" + (m<10?"0":"")+m + ":" + (s<10?"0":"")+s;
-            }}
-            updateTimer(); setInterval(updateTimer, 1000);
-        </script>
     </div>
     """
     components.html(countdown_html, height=195)
@@ -1343,7 +1260,7 @@ if not jarvis_open:
         {"label": "☀️ Dry Soil Memory", "prompt": "Inspect rolling 7-day soil moisture totals and explain dry soil warm bias modeling.", "icon": "☀️"},
         {"label": "🛡️ Hub Risk Cap", "prompt": "Check our hub concentration exposure across Miami, Austin, Phoenix, Chicago, and NYC.", "icon": "🛡️"},
         {"label": "📊 GFS vs ECMWF Spread", "prompt": "Compare GFS vs ECMWF ensemble path divergence across open contracts.", "icon": "📊"},
-        {"label": "🚀 Paper Lane B Alpha", "prompt": "Query Paper Lane B 10X Maker positions and analyze order book queue fill rates.", "icon": "🚀"},
+        {"label": "💸 Fee Drag", "prompt": "Break down exchange fees paid versus gross edge captured on settled weather trades, and show what maker pricing would have saved.", "icon": "💸"},
         {"label": "⚖️ Dynamic Kelly Sizing", "prompt": "Explain how fractional Kelly sizing ($15-$35 brackets) is capping capital drawdown.", "icon": "⚖️"},
         {"label": "🎯 Take Profit Trigger", "prompt": "Audit open positions near the 85¢ take-profit exit threshold.", "icon": "🎯"},
         {"label": "🔄 Truth Drift Audit", "prompt": "Run full reconciliation between local SQLite position ledger and live Kalshi exchange.", "icon": "🔄"},
@@ -1496,14 +1413,14 @@ else:
         "🌡️ Edge",
         "📑 Trades",
         "🔄 Drift",
-        "📈 Paper v Live",
+        "📈 Fee vs Edge",
     ]
     prompts_map = {
         "📊 Health": "Run a complete audit on our runtime container logs, check the disk free space, and print the last 20 warning or error log lines.",
         "🌡️ Edge": "Retrieve the model forecast probabilities (GFS vs ECMWF) for our Miami low contract KXLOWTMIA-26AUG01-T80, check what the current recorded low is, and verify if we have any edge.",
         "📑 Trades": "Query the SQLite database for the last 5 trades, calculate our net edge vs paid market prices, and give me a summary of how we performed.",
         "🔄 Drift": "Fetch our live holdings from the Kalshi API, cross-reference them with our local database positions table, and run reconciliation to ensure there is zero truth drift.",
-        "📈 Paper v Live": "Provide a comparative analysis of our live realized PnL versus our new dynamic physics paper-trading curve to see if the boundary models are outperforming.",
+        "📈 Fee vs Edge": "Compare gross edge captured against exchange fees paid on settled weather contracts, and quantify how much of the edge fees are consuming.",
     }
     for col, label in zip(sug_cols, labels):
         if col.button(label, use_container_width=True, key=f"sug_{label}"):
@@ -1649,130 +1566,33 @@ if not jarvis_open:
                     except Exception as e:
                         st.error(f"Failed to flatten: {e}")
 
-    # ── 7-Day Paper Lane Audit Countdown Timer ───────────────────────────
-    countdown_data = payload.get("paper_trial_countdown") or {}
-    cd_fmt = countdown_data.get("formatted", "7d 00h 00m 00s")
+    st.markdown('<div class="section-title" style="margin-top:16px;">⚡ Live Trading Lane</div>', unsafe_allow_html=True)
 
-    _render_html(
-        f"""
-        <div style="background: linear-gradient(135deg, rgba(74, 242, 214, 0.12), rgba(0, 229, 255, 0.05)); border: 1px solid rgba(74, 242, 214, 0.3); border-radius: 16px; padding: 16px 20px; margin: 16px 0; display: flex; align-items: center; justify-content: space-between;">
-            <div>
-                <div style="font-size: 0.8em; color: #4af2d6; text-transform: uppercase; letter-spacing: 1px; font-weight: bold;">⏳ 7-DAY PAPER LANE AUDIT COUNTDOWN</div>
-                <div style="font-size: 1.3em; font-weight: bold; color: #ffffff; margin-top: 4px;">Target Completion: August 16, 2026</div>
-                <div style="font-size: 0.85em; color: #8899a6; margin-top: 2px;">Paper Lane A (Physics Delta) vs Paper Lane B (10X Maker) vs Live Lane</div>
-            </div>
-            <div style="text-align: right;">
-                <div style="font-family: 'Orbitron', monospace; font-size: 1.8em; font-weight: bold; color: #00e5ff; text-shadow: 0 0 10px rgba(0,229,255,0.4);">{html.escape(cd_fmt)}</div>
-                <div style="font-size: 0.75em; color: #4af2d6; margin-top: 2px;">TIME REMAINING</div>
-            </div>
-        </div>
-        """
-    )
+    rows = open_book_visual
+    if rows:
+        pos_df = pd.DataFrame(rows)
+        pos_df["gross_mark_pnl"] = pd.to_numeric(pos_df["gross_mark_pnl"], errors="coerce").fillna(0.0)
+        pos_df["exposure_usd"] = pd.to_numeric(pos_df["exposure_usd"], errors="coerce").fillna(0.0)
+        pos_df["hours_to_resolution"] = pd.to_numeric(pos_df["hours_to_resolution"], errors="coerce").fillna(0.0)
 
-    # ── Full-width Trading Lane Matrix ───────────────────────────────────────
-    st.markdown('<div class="section-title" style="margin-top:16px;">⚡ Trading Lane Matrix</div>', unsafe_allow_html=True)
+        m1, m2, m3, m4 = st.columns(4)
+        total_exp = float(open_book_summary.get("total_exposure_usd") or 0.0)
+        total_pnl = pos_df["gross_mark_pnl"].sum()
+        m1.metric("Open Positions", len(rows))
+        m2.metric("Total Exposure", f"${total_exp:,.2f}")
+        m3.metric("Mark PnL", f"${total_pnl:+.2f}", delta=f"{'↑' if total_pnl >= 0 else '↓'} unrealized")
+        m4.metric("Soonest Expiry", f"{pos_df['hours_to_resolution'].min():.1f}h" if len(pos_df) > 0 else "—")
 
-    lane_tab1, lane_tab2, lane_tab3 = st.tabs([
-        f"🟢 Live Trading ({len(open_book_visual)} open)",
-        f"🧪 Paper Lane A — Physics ({len(positions_paper_a)} active | {len(history_paper_a)} total)",
-        f"🚀 Paper Lane B — 10X Maker ({len(positions_paper_b)} active | {len(history_paper_b)} total)",
-    ])
+        st.dataframe(
+            pos_df[["ticker", "side", "qty", "entry_price", "mark", "gross_mark_pnl", "hours_to_resolution", "hub"]].rename(columns={
+                "gross_mark_pnl": "mark_pnl",
+                "hours_to_resolution": "hrs_left",
+            }),
+            use_container_width=True, hide_index=True
+        )
+    else:
+        st.info("No live Kalshi positions are open right now.")
 
-    with lane_tab1:
-        rows = open_book_visual
-        if rows:
-            pos_df = pd.DataFrame(rows)
-            pos_df["gross_mark_pnl"] = pd.to_numeric(pos_df["gross_mark_pnl"], errors="coerce").fillna(0.0)
-            pos_df["exposure_usd"] = pd.to_numeric(pos_df["exposure_usd"], errors="coerce").fillna(0.0)
-            pos_df["hours_to_resolution"] = pd.to_numeric(pos_df["hours_to_resolution"], errors="coerce").fillna(0.0)
-
-            m1, m2, m3, m4 = st.columns(4)
-            total_exp = float(open_book_summary.get("total_exposure_usd") or 0.0)
-            total_pnl = pos_df["gross_mark_pnl"].sum()
-            m1.metric("Open Positions", len(rows))
-            m2.metric("Total Exposure", f"${total_exp:,.2f}")
-            m3.metric("Mark PnL", f"${total_pnl:+.2f}", delta=f"{'↑' if total_pnl >= 0 else '↓'} unrealized")
-            m4.metric("Soonest Expiry", f"{pos_df['hours_to_resolution'].min():.1f}h" if len(pos_df) > 0 else "—")
-
-            st.dataframe(
-                pos_df[["ticker", "side", "qty", "entry_price", "mark", "gross_mark_pnl", "hours_to_resolution", "hub"]].rename(columns={
-                    "gross_mark_pnl": "mark_pnl",
-                    "hours_to_resolution": "hrs_left",
-                }),
-                use_container_width=True, hide_index=True
-            )
-        else:
-            st.info("No live Kalshi positions are open right now.")
-
-    with lane_tab2:
-        if positions_paper_a:
-            pa_m1, pa_m2, pa_m3, pa_m4 = st.columns(4)
-            tot_exp_a = sum(float(p.get("market_exposure_dollars") or 0.0) for p in positions_paper_a)
-            closed_a = [p for p in history_paper_a if p.get("exit_type") not in (None, "ACTIVE", "")]
-            wins_a = sum(1 for p in closed_a if p.get("exit_type") == "resolved")
-            pa_m1.metric("Active Positions", len(positions_paper_a))
-            pa_m2.metric("Capital Deployed", f"${tot_exp_a:,.2f}")
-            pa_m3.metric("Total Trades", len(history_paper_a))
-            pa_m4.metric("Resolved Wins", wins_a)
-
-            df_pa = pd.DataFrame(positions_paper_a)
-            st.dataframe(
-                df_pa[["ticker", "side", "qty", "entry_price", "market_exposure_dollars", "opened_at"]].rename(columns={
-                    "market_exposure_dollars": "exposure_$",
-                    "opened_at": "opened",
-                }),
-                use_container_width=True, hide_index=True
-            )
-        else:
-            st.info("🧪 Paper Lane A has no active positions. The runner fires nightly — check back after the next forecast cycle.")
-
-        if history_paper_a:
-            with st.expander(f"📜 Full Trade Ledger — Lane A ({len(history_paper_a)} trades)", expanded=False):
-                df_ha = pd.DataFrame(history_paper_a)
-                st.dataframe(
-                    df_ha[["ticker", "side", "qty", "entry_price", "opened_at", "closed_at", "exit_type"]].rename(columns={
-                        "entry_price": "entry_¢",
-                        "opened_at": "opened",
-                        "closed_at": "closed",
-                        "exit_type": "outcome",
-                    }),
-                    use_container_width=True, hide_index=True
-                )
-
-    with lane_tab3:
-        if positions_paper_b:
-            pb_m1, pb_m2, pb_m3, pb_m4 = st.columns(4)
-            tot_exp_b = sum(float(p.get("market_exposure_dollars") or 0.0) for p in positions_paper_b)
-            closed_b = [p for p in history_paper_b if p.get("exit_type") not in (None, "ACTIVE", "")]
-            wins_b = sum(1 for p in closed_b if p.get("exit_type") == "resolved")
-            pb_m1.metric("Active Positions", len(positions_paper_b))
-            pb_m2.metric("Capital Deployed", f"${tot_exp_b:,.2f}")
-            pb_m3.metric("Total Trades", len(history_paper_b))
-            pb_m4.metric("Resolved Wins", wins_b)
-
-            df_pb = pd.DataFrame(positions_paper_b)
-            st.dataframe(
-                df_pb[["ticker", "side", "qty", "entry_price", "market_exposure_dollars", "opened_at"]].rename(columns={
-                    "market_exposure_dollars": "exposure_$",
-                    "opened_at": "opened",
-                }),
-                use_container_width=True, hide_index=True
-            )
-        else:
-            st.info("🚀 Paper Lane B has no active positions. The maker bid runner fires nightly — check back after the next forecast cycle.")
-
-        if history_paper_b:
-            with st.expander(f"📜 Full Trade Ledger — Lane B ({len(history_paper_b)} trades)", expanded=False):
-                df_hb = pd.DataFrame(history_paper_b)
-                st.dataframe(
-                    df_hb[["ticker", "side", "qty", "entry_price", "opened_at", "closed_at", "exit_type"]].rename(columns={
-                        "entry_price": "entry_¢",
-                        "opened_at": "opened",
-                        "closed_at": "closed",
-                        "exit_type": "outcome",
-                    }),
-                    use_container_width=True, hide_index=True
-                )
 
     # Collapsible Advanced System Telemetry Matrix
     st.markdown('<div class="section-title">Risk Matrix & Controls</div>', unsafe_allow_html=True)

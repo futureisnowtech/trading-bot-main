@@ -14,7 +14,7 @@ def test_shadow_broker_initialization_and_order_flow(proof_runtime, monkeypatch)
     monkeypatch.setattr(config, "ACCOUNT_SIZE", 1000.0, raising=False)
 
     # Clean any pre-existing balance file in test env
-    balance_path = Path(config.REPO_ROOT) / "logs" / "paper_balance.json"
+    balance_path = Path(config.REPO_ROOT) / "logs" / "shadow_balance.json"
     if balance_path.exists():
         try:
             balance_path.unlink()
@@ -22,7 +22,7 @@ def test_shadow_broker_initialization_and_order_flow(proof_runtime, monkeypatch)
             pass
 
     # Now import forecast.db and initialize
-    from forecast.db import init_forecast_db, get_open_forecast_positions_paper
+    from forecast.db import init_forecast_db
     init_forecast_db(db_path=str(db_file))
 
     # 2. Get Broker and Connect
@@ -67,13 +67,14 @@ def test_shadow_broker_initialization_and_order_flow(proof_runtime, monkeypatch)
     expected_balance = 1000.0 - 33.30
     assert abs(broker.get_account_balance() - expected_balance) < 1e-4
 
-    # Verify position is recorded in the paper positions table
-    paper_positions = get_open_forecast_positions_paper(db_path=str(db_file))
-    assert len(paper_positions) == 1
-    assert paper_positions[0]["ticker"] == ticker
-    assert paper_positions[0]["qty"] == 50
-    assert paper_positions[0]["entry_price"] == 0.65
-    assert paper_positions[0]["side"] == "YES"
+    # Shadow positions are held in memory only. They used to be mirrored into
+    # forecast_positions_paper; that table retired with the paper lanes, and a dry
+    # run must not write to the store the live lane reads.
+    held = broker._open_positions[f"{ticker}_C"]
+    assert held["local_symbol"] == ticker
+    assert held["qty"] == 50
+    assert held["entry_price"] == 0.65
+    assert held["side"] == "YES"
 
     # 5. Place simulated BUY order exceeding resting size (Liquidity constraint)
     # Attempting to buy 200, but depth is only 100. It should clamp to 100.
@@ -101,89 +102,7 @@ def test_shadow_broker_initialization_and_order_flow(proof_runtime, monkeypatch)
         broker._request("POST", "/trade-api/v2/portfolio/events/orders", body={})
 
 
-def test_shadow_resolution_settlement(proof_runtime, monkeypatch):
-    import config
-    db_file = proof_runtime.db_path
-    monkeypatch.setattr(config, "DB_PATH", str(db_file), raising=False)
-    monkeypatch.setattr(config, "SHADOW_EXECUTION", True, raising=False)
-    monkeypatch.setattr(config, "ACCOUNT_SIZE", 1000.0, raising=False)
-
-    # Now import forecast.db
-    from forecast.db import init_forecast_db, sync_open_forecast_position_paper, get_open_forecast_positions_paper
-    init_forecast_db(db_path=str(db_file))
-
-    balance_path = Path(config.REPO_ROOT) / "logs" / "paper_balance.json"
-    if balance_path.exists():
-        try:
-            balance_path.unlink()
-        except OSError:
-            pass
-
-    # Connect shadow broker to initialize balance file
-    from execution.kalshi_broker import KalshiBroker
-    broker = KalshiBroker()
-    assert broker.connect(sync_positions=False, quiet=True) is True
-    assert broker.get_account_balance() == 1000.0
-
-    # 1. Manually insert contracts and positions to simulate state
-    ticker_win = "TEST_WIN_T80"
-    ticker_loss = "TEST_LOSS_T80"
-
-    with sqlite3.connect(str(db_file)) as conn:
-        # Insert markets
-        conn.execute(
-            """INSERT INTO forecast_markets 
-               (id, market_symbol, market_name, first_seen_at, last_seen_at) 
-               VALUES (1, 'TEST_M', 'Test Market', '2026-07-13T00:00:00Z', '2026-07-13T00:00:00Z')"""
-        )
-        
-        # Insert contracts with required NOT NULL columns
-        conn.execute(
-            """INSERT INTO forecast_contracts 
-               (local_symbol, market_id, active, first_seen_at, last_seen_at, right, strike) 
-               VALUES (?, 1, 1, '2026-07-13T00:00:00Z', '2026-07-13T00:00:00Z', 'C', 80.0)""",
-            (ticker_win,)
-        )
-        conn.execute(
-            """INSERT INTO forecast_contracts 
-               (local_symbol, market_id, active, first_seen_at, last_seen_at, right, strike) 
-               VALUES (?, 1, 1, '2026-07-13T00:00:00Z', '2026-07-13T00:00:00Z', 'C', 80.0)""",
-            (ticker_loss,)
-        )
-        
-        # Get contract IDs
-        win_id = conn.execute("SELECT id FROM forecast_contracts WHERE local_symbol=?", (ticker_win,)).fetchone()[0]
-        loss_id = conn.execute("SELECT id FROM forecast_contracts WHERE local_symbol=?", (ticker_loss,)).fetchone()[0]
-
-        # Insert mock resolutions
-        conn.execute(
-            "INSERT INTO forecast_resolutions (contract_id, resolved_side, resolved_value, resolved_at, source) VALUES (?, 'YES', 1.0, '2026-07-13T01:00:00Z', 'kalshi')",
-            (win_id,)
-        )
-        conn.execute(
-            "INSERT INTO forecast_resolutions (contract_id, resolved_side, resolved_value, resolved_at, source) VALUES (?, 'NO', 0.0, '2026-07-13T01:00:00Z', 'kalshi')",
-            (loss_id,)
-        )
-        conn.commit()
-
-    # Create paper positions
-    # Position 1: 10 contracts of YES on ticker_win (Win: payout = 10 * $1.00 = $10.00)
-    sync_open_forecast_position_paper(ticker_win, qty=10, entry_price=0.60, side="YES", db_path=str(db_file))
-    # Position 2: 20 contracts of YES on ticker_loss (Loss: payout = $0.00)
-    sync_open_forecast_position_paper(ticker_loss, qty=20, entry_price=0.55, side="YES", db_path=str(db_file))
-
-    # Verify positions are open
-    open_paper = get_open_forecast_positions_paper(db_path=str(db_file))
-    assert len(open_paper) == 2
-
-    # 2. Run Paper Position Settlement
-    from forecast.resolution_sync import settle_paper_positions
-    res = settle_paper_positions(db_path=str(db_file))
-    assert res["settled_count"] == 2
-
-    # Check updated balance: starting 1000.0 + $10.00 = 1010.0
-    assert broker.get_account_balance() == 1010.0
-
-    # Verify positions are closed in the DB
-    open_paper_after = get_open_forecast_positions_paper(db_path=str(db_file))
-    assert len(open_paper_after) == 0
+# NOTE: test_shadow_resolution_settlement was removed with the paper lanes.
+# It exercised forecast.resolution_sync.settle_paper_positions, which settled
+# forecast_positions_paper against forecast_resolutions. Paper lanes A and B are
+# retired, so there is no successor behavior to assert.

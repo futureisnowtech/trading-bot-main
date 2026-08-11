@@ -1437,7 +1437,6 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                         
                         try:
                             from forecast.db import sync_open_forecast_position
-
                             live_pos = None
                             if broker.is_connected():
                                 live_pos = broker.get_position(
@@ -1453,6 +1452,7 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                                     or actual_price
                                 ),
                                 side=result.side.upper(),
+                                db_path=db_path,
                             )
                         except Exception as _db_err:
                             logger.error(f"[ForecastRunner] DB insertion error: {_db_err}")
@@ -1647,19 +1647,13 @@ def run_position_monitor() -> None:
         broker_positions = broker.get_positions()
         
         # 2. Pull Local DB Expectation and reconcile it to broker reality
-        from config import DB_PATH, SHADOW_EXECUTION
+        from config import DB_PATH
 
         db_path = DB_PATH
-        if SHADOW_EXECUTION:
-            from forecast.db import (
-                get_open_forecast_positions_paper as get_open_forecast_positions,
-                reconcile_forecast_positions_paper as reconcile_forecast_positions,
-            )
-        else:
-            from forecast.db import (
-                get_open_forecast_positions,
-                reconcile_forecast_positions,
-            )
+        from forecast.db import (
+            get_open_forecast_positions,
+            reconcile_forecast_positions,
+        )
 
         recon = reconcile_forecast_positions(broker_positions, broker=broker, db_path=db_path)
         if recon.get("adopted"):
@@ -2066,6 +2060,7 @@ def run_position_monitor() -> None:
                         continue
 
                     if remaining_qty > 0:
+                        from forecast.db import sync_open_forecast_position
                         sync_open_forecast_position(
                             ticker=local_symbol,
                             qty=remaining_qty,
@@ -2083,6 +2078,7 @@ def run_position_monitor() -> None:
                         )
                         continue
 
+                    from forecast.db import mark_forecast_position_closed
                     mark_forecast_position_closed(
                         local_symbol,
                         exit_type="resolved_or_expired",

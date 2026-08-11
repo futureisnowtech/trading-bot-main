@@ -13,7 +13,7 @@ def _get_db_path():
     from config import DB_PATH
     return DB_PATH
 
-def generate_war_room_report(paper: bool = False) -> str:
+def generate_war_room_report() -> str:
     """
     Generate the 9:00 PM ET 'War Room' Report.
     PnL: +$X | Fees: $Y | Shadow-to-Live Variance: Z% | System Health: NOMINAL
@@ -27,8 +27,6 @@ def generate_war_room_report(paper: bool = False) -> str:
     now = datetime.now(timezone.utc)
     start_time = (now - timedelta(hours=24)).isoformat()
     
-    is_paper = 1 if paper else 0
-    
     # 1. PnL and Fees
     try:
         settlement_truth = load_weather_settlement_truth()
@@ -37,8 +35,8 @@ def generate_war_room_report(paper: bool = False) -> str:
             SELECT 
                 SUM(fee_usd) as total_fees
             FROM trades
-            WHERE ts >= ? AND paper = ?
-        """, (start_time, is_paper)).fetchone()
+            WHERE ts >= ? AND paper = 0
+        """, (start_time,)).fetchone()
         fees = res['total_fees'] or 0.0
     except Exception as e:
         logger.error(f"Error fetching PnL/Fees: {e}")
@@ -52,21 +50,20 @@ def generate_war_room_report(paper: bool = False) -> str:
             FROM scan_candidates sc
             JOIN candidate_outcomes co ON sc.id = co.candidate_id
             WHERE sc.ts >= ? 
-              AND sc.paper = ?
               AND sc.decision != 'entered'
               AND sc.composite_score >= 50
               AND sc.econ_approved = 1
               AND co.ret_4h_pct > 0
-        """, (start_time, is_paper)).fetchone()
+        """, (start_time,)).fetchone()
         leak = leak_res['potential_profit'] or 0.0
     except Exception as e:
         logger.debug(f"Error fetching Leak: {e}")
         leak = 0.0
 
     # 3. Shadow-to-Live Variance
-    # (Placeholder logic: compare paper PnL vs Live PnL if both exist, 
-    # or just use 0.0% if we are only in one mode)
-    variance = 0.0 # Placeholder
+    # Always 0.0 now: the paper lanes it compared against are retired and there is
+    # only one live book to report on.
+    variance = 0.0
     
     # 4. System Health
     health = "NOMINAL"

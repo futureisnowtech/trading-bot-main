@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 
 import pytz
 
-from config import DB_PATH, SHADOW_EXECUTION, REPO_ROOT, ACCOUNT_SIZE
+from config import DB_PATH, REPO_ROOT, ACCOUNT_SIZE
 from forecast.db import init_forecast_db, insert_resolution
 from forecast.weather_contracts import resolve_weather_contract, resolve_weather_observation
 
@@ -226,106 +226,6 @@ def sync_forecast_resolutions(
             notes,
         )
 
-    if SHADOW_EXECUTION:
-        try:
-            settle_res = settle_paper_positions(db_path=db_path)
-            summary["paper_settled"] = settle_res.get("settled_count", 0)
-        except Exception as exc:
-            logger.warning("[ResolutionSync] Shadow/Paper position settlement failed: %s", exc)
-
     return summary
 
 
-def settle_paper_positions(db_path: str = DB_PATH) -> dict:
-    """
-    Settle open paper positions using resolved ground truth from forecast_resolutions.
-    """
-    import os
-    import json
-    
-    # 1. Fetch active paper positions from forecast_positions_paper
-    with sqlite3.connect(db_path) as conn:
-        conn.row_factory = sqlite3.Row
-        active_positions = conn.execute(
-            """
-            SELECT p.id, p.ticker, p.qty, p.side, p.entry_price, r.resolved_side, r.resolved_value
-            FROM forecast_positions_paper p
-            JOIN forecast_contracts c ON c.local_symbol = p.ticker
-            JOIN forecast_resolutions r ON r.contract_id = c.id
-            WHERE p.active = 1
-            """
-        ).fetchall()
-        
-    if not active_positions:
-        return {"settled_count": 0}
-        
-    settled = 0
-    # Load paper balance
-    balance_path = os.path.join(REPO_ROOT, "logs", "paper_balance.json")
-    try:
-        with open(balance_path, "r", encoding="utf-8") as f:
-            balance_data = json.load(f)
-            balance = float(balance_data.get("balance", ACCOUNT_SIZE))
-    except Exception:
-        balance = float(ACCOUNT_SIZE)
-        
-    for pos in active_positions:
-        ticker = pos["ticker"]
-        qty = int(pos["qty"])
-        side = pos["side"]
-        entry_price = float(pos["entry_price"])
-        resolved_side = pos["resolved_side"]
-        
-        # Calculate payout
-        is_win = (side == resolved_side)
-        payout = qty * 1.00 if is_win else 0.0
-        
-        balance += payout
-        
-        # Update database: mark active=0, closed_at=now, exit_type='resolved'
-        now_str = datetime.now(timezone.utc).isoformat()
-        with sqlite3.connect(db_path) as conn:
-            conn.execute(
-                """
-                UPDATE forecast_positions_paper
-                SET active = 0, closed_at = ?, exit_type = 'resolved'
-                WHERE id = ?
-                """,
-                (now_str, pos["id"])
-            )
-            conn.commit()
-            
-        # Log resolution trade in the trade log database (trades table)
-        try:
-            from logging_db.trade_logger import log_trade
-            log_trade(
-                strategy="forecast_weather",
-                broker="kalshi",
-                symbol=ticker,
-                action="SELL" if side == "YES" else "BUY", # close trade
-                order_type="Resolution",
-                qty=qty,
-                price=1.00 if is_win else 0.00,
-                fee_usd=0.0,
-                order_id=f"settle_{ticker}",
-                notes=f"Paper resolution win={is_win} (observed side={resolved_side})",
-                contract_side=side,
-            )
-        except Exception as e:
-            logger.error(f"[PaperResolution] log_trade error: {e}")
-            
-        settled += 1
-        logger.info("[PaperResolution] Settled paper position for %s: qty=%s side=%s resolved=%s win=%s payout=$%s",
-                    ticker, qty, side, resolved_side, is_win, payout)
-                    
-    # Save updated balance
-    try:
-        with open(balance_path, "w", encoding="utf-8") as f:
-            json.dump({
-                "balance": balance,
-                "last_updated": datetime.now(timezone.utc).isoformat()
-            }, f, indent=2)
-    except Exception as exc:
-        logger.error("[PaperResolution] Failed to save paper balance: %s", exc)
-        
-    return {"settled_count": settled}

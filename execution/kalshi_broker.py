@@ -91,8 +91,8 @@ class KalshiBroker:
 
     @property
     def _paper_balance_path(self) -> str:
-        filename = "paper_balance_lane_b.json" if os.getenv("RUN_LANE_B_CYCLE", "false").lower() == "true" else "paper_balance.json"
-        return os.path.join(REPO_ROOT, "logs", filename)
+        """Dry-run balance file. Single lane now that Lane A/B are retired."""
+        return os.path.join(REPO_ROOT, "logs", "shadow_balance.json")
 
     def _init_shadow_balance(self, sync_positions: bool = True, quiet: bool = False) -> bool:
         self._connected = True
@@ -696,27 +696,13 @@ class KalshiBroker:
             return {"error": str(e)}
 
     def _restore_shadow_positions(self) -> None:
-        """Helper to restore shadow positions from forecast_positions_paper SQLite table."""
-        try:
-            from forecast.db import get_open_forecast_positions_paper
-            db_positions = get_open_forecast_positions_paper(db_path=config.DB_PATH)
-            self._open_positions.clear()
-            for p in db_positions:
-                ticker = p["ticker"]
-                right = "C" if p["side"] == "YES" else "P"
-                key = f"{ticker}_{right}"
-                self._open_positions[key] = {
-                    "local_symbol": ticker,
-                    "right": right,
-                    "qty": float(p["qty"]),
-                    "entry": float(p["entry_price"]),
-                    "entry_price": float(p["entry_price"]),
-                    "side": p["side"],
-                    "order_id": "SHADOW_EXISTING",
-                    "entered_at": p["opened_at"]
-                }
-        except Exception as exc:
-            logger.warning(f"[KalshiBroker] Failed to restore paper positions: {exc}")
+        """Start shadow mode with a flat book.
+
+        Shadow state used to be rehydrated from forecast_positions_paper. The paper
+        lanes are retired and that table is gone, so a dry run now begins with no
+        positions rather than inheriting a simulated book.
+        """
+        self._open_positions.clear()
 
     def _sync_positions(self) -> None:
         """Sync open positions from Kalshi into local state."""
@@ -1440,30 +1426,19 @@ class KalshiBroker:
         if not quote:
             return {"order_id": "ERR", "status": "no_quote"}
             
-        # 2. Pessimistic fill price & depth
-        is_maker_lane = os.getenv("RUN_LANE_B_CYCLE", "false").lower() == "true"
+        # 2. Pessimistic fill price & depth.
+        # Always models a taker fill by crossing the ask. Lane B's maker variant
+        # rested at the bid and assumed it always filled, which is the one thing a
+        # simulator cannot honestly claim; real maker entry is implemented against
+        # the exchange under MAKER_ENTRY_ENABLED instead of guessed at here.
         if side == "YES":
-            if is_maker_lane:
-                bid = float(quote.get("yes_bid") or 0.0)
-                bid_size = int(float(quote.get("yes_bid_vol") or 0.0))
-                fill_price = bid if bid > 0.0 else float(quote.get("yes_ask") or 0.0) - 0.03
-                available_size = bid_size if bid_size > 0 else 500
-            else:
-                ask = float(quote.get("yes_ask") or 0.0)
-                ask_size = int(float(quote.get("yes_ask_vol") or 0.0))
-                fill_price = ask
-                available_size = ask_size
+            ask = float(quote.get("yes_ask") or 0.0)
+            ask_size = int(float(quote.get("yes_ask_vol") or 0.0))
         else:
-            if is_maker_lane:
-                bid = float(quote.get("no_bid") or 0.0)
-                bid_size = int(float(quote.get("no_bid_vol") or 0.0))
-                fill_price = bid if bid > 0.0 else float(quote.get("no_ask") or 0.0) - 0.03
-                available_size = bid_size if bid_size > 0 else 500
-            else:
-                ask = float(quote.get("no_ask") or 0.0)
-                ask_size = int(float(quote.get("no_ask_vol") or 0.0))
-                fill_price = ask
-                available_size = ask_size
+            ask = float(quote.get("no_ask") or 0.0)
+            ask_size = int(float(quote.get("no_ask_vol") or 0.0))
+        fill_price = ask
+        available_size = ask_size
             
         if fill_price <= 0.0:
             logger.warning(f"[ShadowBroker] No sell depth on quote for {ticker}")
@@ -1476,7 +1451,7 @@ class KalshiBroker:
             return {"order_id": "ERR", "status": "no_depth"}
             
         # 4. Fee calculation
-        fee_usd = estimate_kalshi_order_fee_usd(fill_qty, fill_price, maker=is_maker_lane)
+        fee_usd = estimate_kalshi_order_fee_usd(fill_qty, fill_price, maker=False)
         cost_usd = (fill_qty * fill_price) + fee_usd
         
         # Lock check
@@ -1503,20 +1478,10 @@ class KalshiBroker:
         except Exception as exc:
             logger.error(f"[ShadowBroker] Failed to save paper balance: {exc}")
             
-        # 6. Add paper position in DB (forecast_positions_paper)
+        # 6. Shadow positions live in memory only. They used to be mirrored into
+        # forecast_positions_paper; that table is retired with the paper lanes, and a
+        # dry run has no business writing to the same store the live lane reads.
         order_id = f"shadow_{uuid.uuid4().hex[:8]}"
-        try:
-            from forecast.db import sync_open_forecast_position_paper
-            sync_open_forecast_position_paper(
-                ticker=ticker,
-                qty=fill_qty,
-                entry_price=fill_price,
-                side=side,
-                basis_quality="CONFIRMED",
-                db_path=config.DB_PATH,
-            )
-        except Exception as exc:
-            logger.error(f"[ShadowBroker] Failed to save position to DB: {exc}")
             
         # 7. Update memory cache
         key = f"{ticker}_{right}"
@@ -1644,25 +1609,9 @@ class KalshiBroker:
         except Exception as exc:
             logger.error(f"[ShadowBroker] Failed to save paper balance: {exc}")
             
-        # 6. Update paper position in DB (forecast_positions_paper)
+        # 6. Shadow positions live in memory only (see the buy path).
         order_id = f"shadow_{uuid.uuid4().hex[:8]}"
         remaining_qty = current_qty - fill_qty
-        try:
-            if remaining_qty > 0:
-                from forecast.db import sync_open_forecast_position_paper
-                sync_open_forecast_position_paper(
-                    ticker=ticker,
-                    qty=remaining_qty,
-                    entry_price=float(existing["entry"]),
-                    side=side,
-                    basis_quality="CONFIRMED",
-                    db_path=config.DB_PATH,
-                )
-            else:
-                from forecast.db import mark_forecast_position_closed_paper
-                mark_forecast_position_closed_paper(ticker, exit_type="exit", db_path=config.DB_PATH)
-        except Exception as exc:
-            logger.error(f"[ShadowBroker] Failed to update position in DB: {exc}")
             
         # 7. Update memory cache
         if remaining_qty > 0:

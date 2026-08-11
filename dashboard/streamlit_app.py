@@ -25,7 +25,7 @@ st.set_page_config(
     page_title="Sovereign Kalshi Cockpit",
     page_icon="🌪",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 _CSS = """
@@ -937,16 +937,20 @@ def _render_weather_type_boards(
 
 _render_html(_CSS)
 
-with st.sidebar:
-    st.markdown("## Cockpit Controls")
-    st.caption("Broker truth is cached for 45 seconds to keep the cockpit sharp without burning Kalshi calls.")
-    live_sync = st.toggle("Broker Sync", value=True, help="When on, the cockpit pulls live balance, positions, and mark data from Kalshi.")
-    if st.button("Refresh Now", width="stretch"):
-        st.cache_data.clear()
-        st.rerun()
-    st.divider()
-    st.markdown("### Display")
-    st.caption("Read-only cockpit. No order writes, no state mutations.")
+# Orb-only surface: hide every piece of Streamlit chrome so nothing frames the orb.
+_render_html("""
+<style>
+  #MainMenu, header, footer, [data-testid="stToolbar"],
+  [data-testid="stDecoration"], [data-testid="stStatusWidget"],
+  [data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"] { display: none !important; }
+  .stApp { background: radial-gradient(ellipse at 50% 30%, #0a1424 0%, #03060d 60%, #010307 100%); }
+  .block-container { padding: 1.2rem 1rem 2rem 1rem !important; max-width: 1100px; }
+</style>
+""")
+
+# Broker sync is always on. The sidebar that used to toggle it is gone: this is an
+# orb-only surface, and a 45s-cached read is cheap enough not to need a switch.
+live_sync = True
 
 payload = _load_payload(live_sync)
 truth = payload["truth"]
@@ -1198,95 +1202,99 @@ if not jarvis_open:
     _pulse_s = max(1.6, 4.0 - 0.25 * float(positions_count))
 
     orb_html = f"""
-    <div style="display:flex; justify-content:center; align-items:center; padding:10px 0 4px 0;">
-      <div style="position:relative; width:300px; height:300px;">
-        <div style="position:absolute; inset:0; border-radius:50%;
-             background:conic-gradient({_core} 0deg, {_core} {_ring_deg}deg, {_ring_track} {_ring_deg}deg, {_ring_track} 360deg);
-             filter:drop-shadow(0 0 22px {_core_soft});
-             animation:orbspin 18s linear infinite;"></div>
-        <div style="position:absolute; inset:14px; border-radius:50%; background:radial-gradient(circle at 50% 40%, rgba(8,16,32,0.92), rgba(2,5,12,0.99));
-             border:1px solid rgba(0,229,255,0.22);"></div>
-        <div style="position:absolute; inset:38px; border-radius:50%;
-             background:radial-gradient(circle at 50% 45%, {_core_soft}, rgba(0,0,0,0) 68%);
-             animation:orbpulse {_pulse_s}s ease-in-out infinite;"></div>
-        <div style="position:absolute; inset:0; display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center;">
-          <div style="font-size:0.62em; letter-spacing:2.4px; color:#4af2d6; text-transform:uppercase;">Equity</div>
-          <div style="font-family:'Orbitron',monospace; font-size:2.05em; font-weight:bold; color:#ffffff; text-shadow:0 0 18px {_core_soft};">${total_equity:,.2f}</div>
-          <div style="font-size:0.74em; color:{_core}; font-family:monospace; margin-top:2px;">{pnl_48h:+.2f} <span style="color:#6b7d8f;">48h</span></div>
-          <div style="width:120px; height:1px; background:rgba(0,229,255,0.22); margin:9px 0;"></div>
-          <div style="font-size:0.72em; color:#8899a6; font-family:monospace;">
-            <span style="color:#00e5ff;">{_wr:.0f}%</span> win &nbsp;·&nbsp;
-            <span style="color:#00e5ff;">{positions_count}</span> open
+    <div class="orb-stage">
+      <div class="orb">
+        <!-- rotating outer lattice -->
+        <div class="ring lattice"></div>
+        <!-- win-rate arc: filled portion of the ring is the 7d win rate -->
+        <div class="ring arc"></div>
+        <!-- counter-rotating tick bezel -->
+        <div class="ring bezel"></div>
+        <!-- radar sweep -->
+        <div class="sweep"></div>
+        <!-- glass shell + reactor core -->
+        <div class="shell"></div>
+        <div class="core"></div>
+        <div class="readout">
+          <div class="cap">Equity</div>
+          <div class="eq">${total_equity:,.2f}</div>
+          <div class="delta">{pnl_48h:+.2f}<span class="dim"> 48h</span></div>
+          <div class="rule"></div>
+          <div class="stats">
+            <span class="hot">{_wr:.0f}%</span><span class="dim"> win</span>
+            <span class="sep">·</span>
+            <span class="hot">{positions_count}</span><span class="dim"> open</span>
           </div>
-          <div style="font-size:0.63em; color:{'#ffd54f' if _alert else '#48606f'}; margin-top:6px; letter-spacing:0.6px;">
-            {'⚠ ATTENTION REQUIRED' if _alert else 'ALL SYSTEMS NOMINAL'}
-          </div>
+          <div class="status">{'&#9888; ATTENTION' if _alert else 'NOMINAL'}</div>
         </div>
       </div>
+      <div class="prov">{html.escape(str(deploy.get('sha') or 'unknown')[:7])} &middot; {html.escape(_fmt_dt(payload['generated_at']))}</div>
     </div>
+
     <style>
-      @keyframes orbspin {{ to {{ transform:rotate(360deg); }} }}
-      @keyframes orbpulse {{ 0%,100% {{ opacity:0.45; transform:scale(0.97); }} 50% {{ opacity:0.95; transform:scale(1.03); }} }}
+      .orb-stage {{ display:flex; flex-direction:column; align-items:center; justify-content:center;
+                    font-family:'IBM Plex Mono',ui-monospace,monospace; }}
+      .orb {{ position:relative; width:340px; height:340px; }}
+      .ring {{ position:absolute; border-radius:50%; }}
+
+      .lattice {{ inset:0;
+        background:
+          repeating-conic-gradient(from 0deg, rgba(0,229,255,0.22) 0deg 1.2deg, rgba(0,0,0,0) 1.2deg 9deg);
+        -webkit-mask:radial-gradient(circle, transparent 61%, #000 62%, #000 70%, transparent 71%);
+                mask:radial-gradient(circle, transparent 61%, #000 62%, #000 70%, transparent 71%);
+        animation:spin 26s linear infinite; }}
+
+      .arc {{ inset:26px;
+        background:conic-gradient(from -90deg, {_core} 0deg, {_core} {_ring_deg}deg, {_ring_track} {_ring_deg}deg 360deg);
+        -webkit-mask:radial-gradient(circle, transparent 70%, #000 71%);
+                mask:radial-gradient(circle, transparent 70%, #000 71%);
+        filter:drop-shadow(0 0 16px {_core_soft}); }}
+
+      .bezel {{ inset:44px;
+        background:repeating-conic-gradient(from 0deg, rgba(74,242,214,0.5) 0deg 0.5deg, rgba(0,0,0,0) 0.5deg 6deg);
+        -webkit-mask:radial-gradient(circle, transparent 84%, #000 85%);
+                mask:radial-gradient(circle, transparent 84%, #000 85%);
+        animation:spin 14s linear infinite reverse; }}
+
+      .sweep {{ position:absolute; inset:52px; border-radius:50%;
+        background:conic-gradient(from 0deg, rgba(0,229,255,0.30), rgba(0,229,255,0) 55deg);
+        animation:spin 3.6s linear infinite; }}
+
+      .shell {{ position:absolute; inset:56px; border-radius:50%;
+        background:radial-gradient(circle at 50% 34%, rgba(14,28,50,0.96), rgba(2,5,12,0.99) 72%);
+        border:1px solid rgba(0,229,255,0.28);
+        box-shadow:inset 0 0 46px rgba(0,229,255,0.10), 0 0 60px rgba(0,229,255,0.10); }}
+
+      .core {{ position:absolute; inset:96px; border-radius:50%;
+        background:radial-gradient(circle at 50% 45%, {_core_soft}, rgba(0,0,0,0) 70%);
+        animation:pulse {_pulse_s}s ease-in-out infinite; }}
+
+      .readout {{ position:absolute; inset:0; display:flex; flex-direction:column;
+                  align-items:center; justify-content:center; text-align:center; }}
+      .cap    {{ font-size:9px; letter-spacing:3.4px; color:#4af2d6; text-transform:uppercase; }}
+      .eq     {{ font-family:'Orbitron',monospace; font-size:31px; font-weight:800; color:#fff;
+                 line-height:1.15; text-shadow:0 0 22px {_core_soft}; }}
+      .delta  {{ font-size:12px; color:{_core}; margin-top:1px; }}
+      .rule   {{ width:104px; height:1px; margin:9px 0;
+                 background:linear-gradient(90deg, transparent, rgba(0,229,255,0.5), transparent); }}
+      .stats  {{ font-size:11.5px; letter-spacing:0.4px; }}
+      .hot    {{ color:#00e5ff; font-weight:600; }}
+      .dim    {{ color:#61788c; }}
+      .sep    {{ color:#2f4657; margin:0 6px; }}
+      .status {{ margin-top:8px; font-size:9px; letter-spacing:2.2px;
+                 color:{'#ffd54f' if _alert else '#3d5768'}; }}
+      .prov   {{ margin-top:6px; font-size:8.5px; letter-spacing:1.4px; color:#24384a; }}
+
+      @keyframes spin  {{ to {{ transform:rotate(360deg); }} }}
+      @keyframes pulse {{ 0%,100% {{ opacity:.40; transform:scale(.95); }}
+                          50%     {{ opacity:.95; transform:scale(1.05); }} }}
     </style>
     """
-    components.html(orb_html, height=316)
-    st.markdown('<div class="jarvis-label">TAP REACTOR ORB TO INITIATE J.A.R.V.I.S. INTEL</div>', unsafe_allow_html=True)
-    
-    # ── Autonomous 4-Hour Holographic Crystal Shards Pool ──
-    ALL_CRYSTAL_TIPS = [
-        {"label": "💧 Evaporative Cooling", "prompt": "Audit the evaporative cooling precip deltas on our active contracts and check if high temps are suppressed.", "icon": "💧"},
-        {"label": "💨 Nocturnal Wind Shear", "prompt": "Check overnight wind shear metrics and explain how low temp floors are being adjusted.", "icon": "💨"},
-        {"label": "☀️ Dry Soil Memory", "prompt": "Inspect rolling 7-day soil moisture totals and explain dry soil warm bias modeling.", "icon": "☀️"},
-        {"label": "🛡️ Hub Risk Cap", "prompt": "Check our hub concentration exposure across Miami, Austin, Phoenix, Chicago, and NYC.", "icon": "🛡️"},
-        {"label": "📊 GFS vs ECMWF Spread", "prompt": "Compare GFS vs ECMWF ensemble path divergence across open contracts.", "icon": "📊"},
-        {"label": "💸 Fee Drag", "prompt": "Break down exchange fees paid versus gross edge captured on settled weather trades, and show what maker pricing would have saved.", "icon": "💸"},
-        {"label": "⚖️ Dynamic Kelly Sizing", "prompt": "Explain how fractional Kelly sizing ($15-$35 brackets) is capping capital drawdown.", "icon": "⚖️"},
-        {"label": "🎯 Take Profit Trigger", "prompt": "Audit open positions near the 85¢ take-profit exit threshold.", "icon": "🎯"},
-        {"label": "🔄 Truth Drift Audit", "prompt": "Run full reconciliation between local SQLite position ledger and live Kalshi exchange.", "icon": "🔄"},
-        {"label": "⏱️ Forecast Freshness", "prompt": "Check forecast model freshness and list any recent model age vetoes.", "icon": "⏱️"},
-        {"label": "📈 PnL Performance", "prompt": "Provide a complete breakdown of our PnL since July 29th across all trading lanes.", "icon": "📈"},
-        {"label": "🤖 Droplet Integrity", "prompt": "Inspect container disk space, bot logs, and background process uptime on the droplet.", "icon": "🤖"},
-    ]
+    components.html(orb_html, height=384)
 
-    st.markdown("""
-    <style>
-    /* Crystal tip buttons — force visible white text on dark background */
-    div[data-testid="stButton"] > button {
-        background: rgba(0, 229, 255, 0.08) !important;
-        border: 1px solid rgba(0, 229, 255, 0.35) !important;
-        color: #e0f7fa !important;
-        font-weight: 600 !important;
-        font-size: 0.82em !important;
-        letter-spacing: 0.5px !important;
-        border-radius: 8px !important;
-        transition: all 0.2s ease !important;
-    }
-    div[data-testid="stButton"] > button:hover {
-        background: rgba(0, 229, 255, 0.22) !important;
-        border-color: rgba(0, 229, 255, 0.7) !important;
-        color: #ffffff !important;
-        box-shadow: 0 0 12px rgba(0, 229, 255, 0.4) !important;
-    }
-    div[data-testid="stButton"] > button p {
-        color: #e0f7fa !important;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
-    # Rotate 4 active crystal tips every 4 hours based on epoch
-    epoch_4h = int(datetime.now(timezone.utc).timestamp()) // (4 * 3600)
-    active_crystals = [ALL_CRYSTAL_TIPS[(epoch_4h + i) % len(ALL_CRYSTAL_TIPS)] for i in range(4)]
-
-    st.markdown("<div style='text-align: center; margin-top: 15px; font-size: 0.75em; letter-spacing: 2px; color: #81c784; font-weight: bold;'>💎 AUTONOMOUS HUD CRYSTAL INSIGHTS (AUTO-ROTATES EVERY 4H)</div>", unsafe_allow_html=True)
-    c1, c2 = st.columns(2)
-    for idx, tip in enumerate(active_crystals):
-        col = c1 if idx % 2 == 0 else c2
-        if col.button(f"{tip['icon']} {tip['label']}", use_container_width=True, key=f"crystal_btn_{idx}_{epoch_4h}"):
-            st.session_state.jarvis_prompt_input = tip["prompt"]
-            st.session_state.show_jarvis = True
-            st.rerun()
-
-    st.markdown('</div>', unsafe_allow_html=True)
+    # Nothing else renders in the dormant state. The orb is the whole surface; the
+    # prompt shortcuts that used to sit under it live inside the console, one tap away
+    # instead of permanently on screen.
 
 # ── Active state: expanded orb becomes chat interface ───────────────
 else:
@@ -1505,10 +1513,3 @@ if _active:
         st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
 
-st.divider()
-st.caption(
-    f"Generated {_fmt_dt(payload['generated_at'])} | "
-    f"Lane updated {_fmt_dt(lane.get('updated_at'))} | "
-    f"Deployed SHA {str(deploy.get('sha') or 'unknown')[:12]} | "
-    f"Broker sync {'ON' if live_sync else 'OFF'}"
-)

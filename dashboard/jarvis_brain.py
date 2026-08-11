@@ -478,114 +478,13 @@ SYSTEM_PROMPT = (
 )
 
 
-def _run_tool(name: str, args: dict) -> str:
-    """Execute a tool function by name and return the result."""
-    tool_map = {
-        "get_account_status": get_account_status,
-        "get_open_positions": get_open_positions,
-        "get_recent_trades": get_recent_trades,
-        "search_trades_and_positions": search_trades_and_positions,
-        "get_trade_post_mortem": get_trade_post_mortem,
-        "get_ticker_analysis": get_ticker_analysis,
-        "get_latest_bot_logs": get_latest_bot_logs,
-        "get_fee_drag": get_fee_drag,
-        "update_system_parameter": update_system_parameter,
-        "get_system_parameters": get_system_parameters,
-        "apply_hot_patch_code": apply_hot_patch_code,
-    }
-    fn = tool_map.get(name)
-    if not fn:
-        return f"Unknown tool: {name}"
-    try:
-        return fn(**args)
-    except Exception as e:
-        return f"Tool execution error ({name}): {e}"
-
-
 def run_jarvis_chat(messages: list[dict]) -> str:
-    """Run chat interface using google.genai Client with tool calling."""
-    api_key = os.environ.get("GOOGLE_API_KEY")
-    if not api_key:
-        return "⚠️ Jarvis is inactive: GOOGLE_API_KEY is not set."
-    if not HAS_GENAI_SDK:
-        return "⚠️ Jarvis is inactive: google-genai SDK not installed."
+    """Cockpit entrypoint. Delegates to the shared brain with full write access.
 
-    try:
-        client = genai.Client(api_key=api_key)
+    The tool-calling loop, model resolution and system prompt now live in
+    runtime.brain, shared with the Telegram operator. This wrapper keeps the old
+    signature so streamlit_app.py did not have to change.
+    """
+    from runtime import brain
 
-        model_id = (GEMINI_MODEL or "gemini-2.5-flash").strip()
-        if not model_id.startswith("models/"):
-            model_id = f"models/{model_id}"
-
-        # Build contents list from chat history
-        contents = []
-        for msg in messages:
-            role = "user" if msg["role"] == "user" else "model"
-            contents.append(types.Content(
-                role=role,
-                parts=[types.Part.from_text(text=msg["content"])]
-            ))
-
-        tool_functions = [
-            get_account_status,
-            get_open_positions,
-            get_recent_trades,
-            search_trades_and_positions,
-            get_trade_post_mortem,
-            get_ticker_analysis,
-            get_latest_bot_logs,
-            get_fee_drag,
-            update_system_parameter,
-            get_system_parameters,
-            apply_hot_patch_code,
-        ]
-
-        config = types.GenerateContentConfig(
-            system_instruction=SYSTEM_PROMPT,
-            temperature=0.3,
-            max_output_tokens=2048,
-            tools=tool_functions,
-        )
-
-        response = client.models.generate_content(
-            model=model_id,
-            contents=contents,
-            config=config,
-        )
-
-        # Handle tool calls if present
-        if response.candidates and response.candidates[0].content.parts:
-            parts = response.candidates[0].content.parts
-            function_calls = [p for p in parts if p.function_call]
-
-            if function_calls:
-                # Execute each tool call and collect results
-                tool_results_parts = []
-                for fc_part in function_calls:
-                    fc = fc_part.function_call
-                    result_str = _run_tool(fc.name, dict(fc.args) if fc.args else {})
-                    tool_results_parts.append(
-                        types.Part.from_function_response(
-                            name=fc.name,
-                            response={"result": result_str}
-                        )
-                    )
-
-                # Send tool results back to model
-                contents.append(response.candidates[0].content)
-                contents.append(types.Content(
-                    role="user",
-                    parts=tool_results_parts,
-                ))
-
-                follow_up = client.models.generate_content(
-                    model=model_id,
-                    contents=contents,
-                    config=config,
-                )
-                return follow_up.text or "No response generated after tool execution."
-
-        return response.text or "No response generated."
-    except Exception as e:
-        logger.exception("Jarvis execution error")
-        return f"⚠️ Error executing JARVIS query: {e}"
+    return brain.ask(messages, surface=brain.COCKPIT)

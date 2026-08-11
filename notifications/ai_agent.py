@@ -197,64 +197,12 @@ def run_storage_audit() -> str: return agent_tools.run_storage_audit()
 def run_release_audit(command: str) -> str: return agent_tools.run_release_audit(command)
 
 def ask_ai(query: str) -> str:
+    """Telegram entrypoint. Delegates to the shared brain with read-only access.
+
+    The tool-calling loop and system prompt now live in runtime.brain, shared with the
+    cockpit orb. Telegram is restricted to read-tier tools, so a mistyped message
+    cannot patch live trading code; write tools must be run from the cockpit.
     """
-    Advanced reasoning agent for the Kalshi Weather Engine.
-    Mandate: Use tools immediately to answer questions. Never just describe intent.
-    """
-    api_key = os.environ.get("GOOGLE_API_KEY")
-    if not api_key: return "Error: GOOGLE_API_KEY is not set."
-    if not HAS_GENAI_SDK: return "Error: google-genai package not installed."
+    from runtime import brain
 
-    try:
-        client = genai.Client(api_key=api_key)
-        model_id = get_reasoning_model_id()
-        
-        context = get_repo_context()
-        system_instruction = (
-            "You are the Sovereign SRE Oracle for the Kalshi Weather Prediction Engine.\n"
-            "Your primary goal is to provide deep, evidence-based analysis and technical execution.\n\n"
-            "### OPERATIONAL MANDATE ###\n"
-            "1. **ACTION FIRST**: If asked a question about system state, cash, positions, vetoes, or code, you MUST call the appropriate tool in your first turn. Prefer broker-first live-truth tools before SQL when live status is requested.\n"
-            "2. **EMPIRICAL PROOF**: Base your analysis on actual data from the DB or files. Do not speculate.\n"
-            "3. **MULTI-STEP REASONING**: Use your tools in sequence if needed. For example, list files -> read file -> analyze.\n"
-            "4. **TECHNICAL PRECISION**: You are a Lead Architect. Be concise, direct, and technically accurate.\n"
-            "5. **NO HALLUCINATIONS**: If a tool returns no data, state that clearly.\n"
-            "6. **TRUTH BUCKETS**: Separate verified facts, inferred causes, and unverified items in your answer.\n"
-            "7. **DO NOT COLLAPSE DISTINCT FAILURE MODES**: Treat vetoes, execution blocks, and post-submit depth failures as separate categories.\n\n"
-            f"### CONTEXTUAL TRUTH ###\n{context}"
-        )
-
-        tools = [
-            get_live_kalshi_status,
-            get_recent_veto_summary,
-            get_recent_execution_summary,
-            get_weather_learning_status,
-            get_release_status,
-            run_kalshi_diagnostic,
-            run_storage_audit,
-            run_release_audit,
-            execute_sql,
-            read_file,
-            list_files,
-            replace_text,
-            run_safe_command,
-        ]
-
-        config_dict = {
-            'system_instruction': system_instruction,
-            'tools': tools,
-            'automatic_function_calling': {'disable': False},
-            'safety_settings': [{'category': c, 'threshold': 'BLOCK_NONE'} for c in ['HARM_CATEGORY_HARASSMENT', 'HARM_CATEGORY_HATE_SPEECH', 'HARM_CATEGORY_SEXUALLY_EXPLICIT', 'HARM_CATEGORY_DANGEROUS_CONTENT', 'HARM_CATEGORY_CIVIC_INTEGRITY']]
-        }
-
-        # Use a high-capacity model for complex reasoning
-        chat = client.chats.create(model=model_id, config=config_dict)
-        response = chat.send_message(query)
-        
-        if not response or not response.text:
-            return "SRE Oracle Error: Model failed to provide a textual response. Check logs for tool execution status."
-
-        return response.text
-    except Exception as e:
-        logger.error(f"SRE Oracle exception: {e}")
-        return f"🚨 Oracle Handshake Error: {str(e)}"
+    return brain.ask([{"role": "user", "content": query}], surface=brain.TELEGRAM)

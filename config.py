@@ -200,10 +200,15 @@ KALSHI_MAX_DEPLOYED_PCT: float = float(os.getenv("KALSHI_MAX_DEPLOYED_PCT", "0.9
 KALSHI_MAX_CONCURRENT_POSITIONS: int = int(os.getenv("KALSHI_MAX_CONCURRENT_POSITIONS", "50"))
 KALSHI_SAME_EVENT_FAMILY_CAP: int = int(os.getenv("KALSHI_SAME_EVENT_FAMILY_CAP", "5"))
 KALSHI_HUB_EXPOSURE_PCT: float = float(
-    # Default tracks the live .env (0.30). It read 0.60 while production ran
-    # 0.30, so any environment missing the var silently doubled the regional
-    # exposure ceiling -- which is how CI diverged from the box it was proving.
-    os.getenv("KALSHI_HUB_EXPOSURE_PCT", "0.30")
+    # Default tracks the live .env so no environment can silently prove a
+    # different risk posture than the one that trades.
+    #
+    # Operator-set to 1.20 on 2026-08-11 (raised from 0.30). Above ~0.90 this
+    # ceiling sits over KALSHI_MAX_DEPLOYED_PCT, so the regional concentration
+    # limit no longer binds: a single weather hub may hold everything the
+    # engine is allowed to deploy. Per-position and total-deployment rails
+    # (KALSHI_MAX_USD_PER_POSITION, KALSHI_MAX_DEPLOYED_PCT) still apply.
+    os.getenv("KALSHI_HUB_EXPOSURE_PCT", "1.20")
 )
 KALSHI_HUB_EXPOSURE_MIN_USD: float = float(
     os.getenv("KALSHI_HUB_EXPOSURE_MIN_USD", "40")

@@ -1144,9 +1144,28 @@ def test_forecast_health_exposes_heartbeat_at(tmp_path):
 def test_kalshi_hub_exposure_cap_helper_uses_new_floor_and_pct():
     from config import get_kalshi_hub_exposure_cap
 
-    assert get_kalshi_hub_exposure_cap(100.0) == 40.0
-    assert get_kalshi_hub_exposure_cap(144.31) == pytest.approx(43.293)
-    assert get_kalshi_hub_exposure_cap(200.0) == 60.0
+    from config import KALSHI_HUB_EXPOSURE_MIN_USD as FLOOR
+    from config import KALSHI_HUB_EXPOSURE_PCT as PCT
+
+    # Asserted as properties of the floor/pct contract rather than hardcoded
+    # dollar figures, so deliberately retuning the exposure knob cannot turn
+    # this proof red. Hardcoded values here were what made CI disagree with
+    # the box the proofs were written on.
+    assert get_kalshi_hub_exposure_cap(0.0) == FLOOR
+    assert get_kalshi_hub_exposure_cap(FLOOR / PCT / 2) == FLOOR
+
+    # Once the percentage term clears the floor it takes over, and scales.
+    clear = (FLOOR / PCT) * 10
+    assert get_kalshi_hub_exposure_cap(clear) == pytest.approx(clear * PCT)
+    assert get_kalshi_hub_exposure_cap(2 * clear) == pytest.approx(2 * clear * PCT)
+
+    # Never below the floor, and never decreasing as balance grows.
+    previous = 0.0
+    for balance in (0.0, 50.0, 100.0, 144.31, 200.0, 1_000.0, 5_000.0):
+        cap = get_kalshi_hub_exposure_cap(balance)
+        assert cap >= FLOOR
+        assert cap >= previous
+        previous = cap
 
 
 def test_strategy_engine_family_cap_allows_four_existing_positions(monkeypatch):

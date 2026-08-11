@@ -134,14 +134,18 @@ def test_summarize_open_book_rolls_up_exposure_and_resolution():
 def test_build_regime_manifest_surfaces_live_constants():
     from dashboard.cockpit_data import build_regime_manifest
 
-    manifest = build_regime_manifest(balance_usd=200.0)
+    from config import get_kalshi_hub_exposure_cap
+
+    balance = 200.0
+    manifest = build_regime_manifest(balance_usd=balance)
 
     assert manifest["version"]
     assert manifest["reasoning_model"]
     assert "60% GFS + 40% ECMWF" in manifest["ensemble_blend"]
     assert any("0.85" in line for line in manifest["exit_stack"])
     assert any("Same event family cap 5" in line for line in manifest["entry_gates"])
-    assert any("$60.00" in line for line in manifest["entry_gates"])
+    expected_cap = f"${get_kalshi_hub_exposure_cap(balance):.2f}"
+    assert any(expected_cap in line for line in manifest["entry_gates"])
 
 
 def test_build_regime_manifest_surfaces_adaptive_blend_when_available():
@@ -175,11 +179,20 @@ def test_build_regime_manifest_uses_runtime_build_version(monkeypatch):
 def test_metric_explainers_surface_new_hub_cap_formula():
     from dashboard.cockpit_data import build_metric_explainers
 
-    explainers = build_metric_explainers(balance_usd=144.31)
+    from config import (
+        KALSHI_HUB_EXPOSURE_MIN_USD,
+        KALSHI_HUB_EXPOSURE_PCT,
+        get_kalshi_hub_exposure_cap,
+    )
 
-    assert "43.29 dollars" in explainers["Regional Hub Cap"]
-    assert "max($40" in explainers["Regional Hub Cap"]
-    assert "30% of live cash" in explainers["Regional Hub Cap"]
+    balance = 144.31
+    explainers = build_metric_explainers(balance_usd=balance)
+
+    # Derived from config so the explainer is proven to quote the live
+    # constants, not a figure that happened to be true when this was written.
+    assert f"{get_kalshi_hub_exposure_cap(balance):.2f} dollars" in explainers["Regional Hub Cap"]
+    assert f"max(${KALSHI_HUB_EXPOSURE_MIN_USD:.0f}" in explainers["Regional Hub Cap"]
+    assert f"{KALSHI_HUB_EXPOSURE_PCT:.0%} of live cash" in explainers["Regional Hub Cap"]
     assert "7.0% x price x (1-price)" in explainers["Fee Model"]
 
 

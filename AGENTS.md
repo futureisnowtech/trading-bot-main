@@ -15,8 +15,8 @@ This repository is now the active Kalshi-only execution tree.
 
 ## MANDATE: REAL KALSHI RECORDS INVARIANT
 1. **LIVE KALSHI REST API IS CANONICAL**: When auditing real Kalshi performance, always query the live REST API (`/trade-api/v2/portfolio/settlements` and `/trade-api/v2/portfolio/positions`) directly via `KalshiBroker`. Never rely on partial local DB snapshots or static arrays. Settlements — not fills — carry realized PnL; `KalshiBroker` has no fills accessor.
-2. **DATE BOUNDARY**: Scope live execution metrics to `POST_PAPER_START_DATE = "2026-07-23"`.
-3. **PAPER LANES AUDIT**: Paper lanes (`forecast_positions_paper`, `forecast_positions_paper_lane_b`) run on the droplet. Do not report local empty fallback tables as non-performance without verifying droplet runtime state.
+2. **DATE BOUNDARY**: Scope live execution metrics to `POST_PAPER_START_DATE = "2026-07-24"`.
+3. **NO PAPER LANES**: Paper lanes A and B are retired; `forecast_positions_paper*` are dropped. There is one live lane. The ideas the lanes tested are config flags on it: `PHYSICS_DELTA_ENABLED` (precip/wind temperature correction) and `MAKER_ENTRY_ENABLED` (rest at bid). Do not reintroduce a parallel simulated book.
 4. **ONE PnL FORMULA**: Realized PnL comes only from `runtime/kalshi_settlement_truth.settlement_pnl_usd`
    (`winning_contracts − yes_total_cost − no_total_cost − fee`, rounded to cents). Never re-derive it
    inline. Never treat `max(yes_cost, no_cost) − min(yes_cost, no_cost)` as exit proceeds: both fields

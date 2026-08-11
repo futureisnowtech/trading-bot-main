@@ -99,7 +99,15 @@ def resolve_live_bankroll(*, db_path: Optional[str] = None, broker=None) -> floa
             from execution.kalshi_broker import get_kalshi_broker
 
             broker = get_kalshi_broker()
-        balance = float(broker.get_account_balance() or 0.0)
+        # get_kalshi_broker() hands back an *unconnected* instance. Without
+        # this the balance request returns 0 and we silently fall through to
+        # the config floor -- the exact failure this function exists to end.
+        connected = True
+        is_connected = getattr(broker, "is_connected", None)
+        if is_connected is not None and not is_connected():
+            connected = bool(broker.connect(sync_positions=False, quiet=True))
+        if connected:
+            balance = float(broker.get_account_balance() or 0.0)
     except Exception:
         balance = 0.0
 

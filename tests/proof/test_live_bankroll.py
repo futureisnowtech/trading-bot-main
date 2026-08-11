@@ -75,6 +75,48 @@ def test_falls_back_to_config_floor_when_nothing_else_is_available(tmp_path):
     assert resolved == pytest.approx(float(ACCOUNT_SIZE))
 
 
+class _UnconnectedBroker:
+    """Mirrors get_kalshi_broker(), which returns an instance that has not
+    authenticated yet. Reading balance without connecting returns 0."""
+
+    def __init__(self, balance):
+        self._balance = balance
+        self._connected = False
+        self.connect_calls = 0
+
+    def is_connected(self):
+        return self._connected
+
+    def connect(self, *, sync_positions=True, quiet=False):
+        self.connect_calls += 1
+        self._connected = True
+        return True
+
+    def get_account_balance(self):
+        return self._balance if self._connected else 0.0
+
+
+def test_unconnected_broker_is_connected_before_reading_balance(tmp_path):
+    """Regression: the balance read silently returned 0 and fell to the floor."""
+    db = str(tmp_path / "t.db")
+    broker = _UnconnectedBroker(76.14)
+
+    resolved = resolve_live_bankroll(db_path=db, broker=broker)
+
+    assert broker.connect_calls == 1
+    assert resolved == pytest.approx(76.14)
+
+
+def test_already_connected_broker_is_not_reconnected(tmp_path):
+    db = str(tmp_path / "t.db")
+    broker = _UnconnectedBroker(76.14)
+    broker.connect()
+    broker.connect_calls = 0
+
+    assert resolve_live_bankroll(db_path=db, broker=broker) == pytest.approx(76.14)
+    assert broker.connect_calls == 0
+
+
 def test_resolved_bankroll_is_always_positive(tmp_path):
     """Whatever happens, sizing gets a usable denominator."""
     db = str(tmp_path / "empty.db")

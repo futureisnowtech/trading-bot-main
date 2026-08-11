@@ -102,8 +102,12 @@ def _build_registry() -> dict[str, Tool]:
     add(jb.get_ticker_analysis, READ)
     add(jb.get_latest_bot_logs, READ)
     add(jb.get_fee_drag, READ)
+    add(jb.get_performance_attribution, READ)
     add(jb.get_system_parameters, READ)
     add(jb.get_entry_funnel, READ)
+    add(jb.recall_brain_history, READ)
+    add(jb.request_change, READ)
+    add(jb.list_pending_approvals, READ)
     add(jb.get_maker_fill_stats, READ)
     add(jb.show_panel, READ)
     add(jb.update_system_parameter, WRITE)
@@ -171,8 +175,9 @@ def _system_instruction(surface: str) -> str:
     scope = (
         "You have full read and write access, including code patching and parameter changes."
         if surface in _WRITE_SURFACES
-        else "You have READ-ONLY access. Tools that modify the system are unavailable here; "
-        "if asked to change something, say it must be done from the cockpit."
+        else "You have READ-ONLY access. Tools that modify the system are unavailable here. "
+        "If asked to change something, use request_change to queue it for one-tap cockpit "
+        "approval instead of just refusing -- that is the intended path from this surface."
     )
 
     return (
@@ -192,6 +197,23 @@ def _system_instruction(surface: str) -> str:
         f"### ACCESS SCOPE ###\n{scope}\n\n"
         f"### CONTEXTUAL TRUTH ###\n{context}"
     )
+
+
+def _remember(surface: str, question: str, answer: str) -> None:
+    """Persist a Q&A turn so a future session can recall it.
+
+    Chat history today is only session_state (cockpit) or nothing (Telegram builds
+    a fresh single-message context every call) -- so "what did we decide about the
+    Kelly fraction last week" has never had an answer. Reuses system_events, the
+    table every other runtime log already writes to, rather than adding a new one;
+    recall_brain_history filters on the source prefix this uses.
+    """
+    try:
+        from logging_db.trade_logger import log_event
+
+        log_event("INFO", f"brain:{surface}", f"Q: {question}\nA: {answer}"[:4000])
+    except Exception as exc:
+        logger.warning("Could not persist brain history: %s", exc)
 
 
 def ask(messages: list[dict], *, surface: str = COCKPIT) -> str:
@@ -230,6 +252,7 @@ def ask(messages: list[dict], *, surface: str = COCKPIT) -> str:
         text = getattr(response, "text", None)
         if not text:
             return "No textual response was produced. Check logs for tool execution status."
+        _remember(surface, str(messages[-1].get("content") or ""), text)
         return text
     except Exception as exc:
         logger.exception("Brain execution error on surface %s", surface)

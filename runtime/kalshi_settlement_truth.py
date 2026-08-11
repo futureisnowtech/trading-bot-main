@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import re
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -106,6 +107,20 @@ def _append_bucket_stats(target: dict[str, Any], *, pnl_usd: float) -> None:
         target["total_lost_usd"] = round(target["total_lost_usd"] + pnl_usd, 4)
     total = max(0, int(target["total"]))
     target["win_rate"] = round((target["wins"] / total), 4) if total else 0.0
+
+
+_CITY_RE = re.compile(r"^KX(?:HIGH|LOW)T?([A-Z]{2,6})-")
+
+
+def city_from_ticker(ticker: str) -> str:
+    """City code embedded in a weather ticker, e.g. KXLOWTSATX-... -> SATX.
+
+    Kalshi's own naming is inconsistent about the T before the city code (compare
+    KXHIGHCHI to KXLOWTCHI for the same city), so the regex treats it as optional
+    rather than assuming either form.
+    """
+    m = _CITY_RE.match(str(ticker or "").upper())
+    return m.group(1) if m else "UNKNOWN"
 
 
 def settlement_pnl_usd(row: dict[str, Any]) -> float:

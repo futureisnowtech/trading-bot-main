@@ -96,6 +96,13 @@ def main() -> int:
                     summary = run_execution_cycle(bankroll=bankroll, run_rbi=True)
                     logger.info("Live Execution cycle complete: %s", summary)
 
+                    try:
+                        from runtime.sentinel import check_and_alert
+
+                        check_and_alert()
+                    except Exception:
+                        logger.exception("Sentinel check failed")
+
                     if not weather_monitor_started:
                         start_weather_monitor()
                         weather_monitor_started = True

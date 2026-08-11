@@ -1196,7 +1196,13 @@ if not jarvis_open:
     _healthy = pnl_48h >= 0
     _core = "#00ff88" if _healthy else "#ff5470"
     _core_soft = "rgba(0,255,136,0.35)" if _healthy else "rgba(255,84,112,0.35)"
-    _alert = (not release_status.get("entries_allowed")) or bool(drift.get("has_drift"))
+    try:
+        from runtime import approvals as _approvals
+
+        _pending_approvals = len(_approvals.list_pending())
+    except Exception:
+        _pending_approvals = 0
+    _alert = (not release_status.get("entries_allowed")) or bool(drift.get("has_drift")) or _pending_approvals > 0
     _ring_track = "rgba(255,213,79,0.55)" if _alert else "rgba(0,229,255,0.18)"
     # More open positions -> faster pulse, floored so an idle book still breathes.
     _pulse_s = max(1.6, 4.0 - 0.25 * float(positions_count))

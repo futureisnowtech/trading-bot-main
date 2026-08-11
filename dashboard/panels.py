@@ -265,6 +265,36 @@ def render_trades(ctx: dict[str, Any]) -> None:
 
 
 # name -> (title, renderer). The name is what JARVIS passes to show_panel.
+def render_approvals(ctx: dict[str, Any]) -> None:
+    """Changes proposed from Telegram, waiting for a one-tap decision here.
+
+    Telegram can only propose (runtime.approvals.request_change); it cannot execute
+    write-tier tools directly. This is where a proposal actually takes effect.
+    """
+    from runtime import approvals
+
+    pending = approvals.list_pending()
+    if not pending:
+        st.info("No pending approvals.")
+        return
+
+    for item in pending:
+        with st.container(border=True):
+            st.markdown(f"**#{item['id']} · {item['action']}**")
+            st.caption(f"Proposed from {item['surface']} at {fmt_dt(item['created_at'])}")
+            st.write(f"Params: `{item['params_json']}`")
+            if item.get("rationale"):
+                st.write(f"Rationale: {item['rationale']}")
+            c1, c2 = st.columns(2)
+            if c1.button("✅ Approve", key=f"approve_{item['id']}", width="stretch"):
+                result = approvals.resolve(int(item["id"]), approve=True)
+                st.success(result)
+                st.rerun()
+            if c2.button("✕ Reject", key=f"reject_{item['id']}", width="stretch"):
+                approvals.resolve(int(item["id"]), approve=False)
+                st.rerun()
+
+
 PANELS: dict[str, tuple[str, Callable[[dict[str, Any]], None]]] = {
     "alerts": ("🚨 Alerts & Truth Drift", render_alerts),
     "open_book": ("⚡ Live Trading Lane", render_open_book),
@@ -272,6 +302,7 @@ PANELS: dict[str, tuple[str, Callable[[dict[str, Any]], None]]] = {
     "runtime": ("🩺 Runtime System Integrity", render_runtime),
     "events": ("📡 System Event Tape", render_events),
     "trades": ("🧾 Recent Trade Rows", render_trades),
+    "approvals": ("✅ Pending Approvals", render_approvals),
 }
 
 PANEL_NAMES = tuple(PANELS)

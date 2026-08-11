@@ -128,6 +128,31 @@ PHYSICS_DELTA_ENABLED: bool = os.getenv("PHYSICS_DELTA_ENABLED", "true").lower()
 MAKER_ENTRY_ENABLED: bool = os.getenv("MAKER_ENTRY_ENABLED", "true").lower() == "true"
 MAKER_ENTRY_TIMEOUT_S: int = int(os.getenv("MAKER_ENTRY_TIMEOUT_S", "90"))
 
+
+def get_dynamic_bool(key: str, default: bool) -> bool:
+    """Boolean override from dynamic_system_config, set via update_system_parameter.
+
+    forecast.strategy_engine.get_dynamic_param coerces non-string defaults with
+    int(val)/float(val); since bool is a subclass of int, a bool default routes into
+    int("True") and raises, so the override is silently swallowed by that function's
+    try/except and never applies. Booleans get their own reader instead.
+    """
+    try:
+        if os.path.exists(DB_PATH):
+            import sqlite3
+
+            conn = sqlite3.connect(DB_PATH, timeout=5.0)
+            row = conn.execute(
+                "SELECT param_value FROM dynamic_system_config WHERE param_key = ?",
+                (key.upper(),),
+            ).fetchone()
+            conn.close()
+            if row and row[0] is not None:
+                return str(row[0]).strip().lower() in ("1", "true", "yes", "on")
+    except Exception:
+        pass
+    return default
+
 # Session start: all performance stats (win rate, P&L, trade counts) are
 # measured from this date forward.
 TRADE_SESSION_START: str = os.getenv("TRADE_SESSION_START", "2026-07-24")

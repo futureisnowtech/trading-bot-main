@@ -7,6 +7,7 @@ import os
 import sqlite3
 import json
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 from config import DB_PATH, GEMINI_MODEL
@@ -19,6 +20,67 @@ try:
     HAS_GENAI_SDK = True
 except ImportError:
     HAS_GENAI_SDK = False
+
+
+class JarvisSafetyCompilerShield:
+    """Guards on JARVIS-initiated system mutations.
+
+    update_system_parameter and apply_hot_patch_code referenced this class
+    without it ever being defined anywhere in the repo, so both tools raised
+    NameError on every single call -- neither has ever actually worked. This is
+    the smallest real implementation that unblocks both; it is a basic guard
+    against obviously wrong input, not a substitute for reviewing anything
+    non-trivial that comes through apply_hot_patch_code.
+    """
+
+    # A key with no config.py counterpart is very likely a hallucinated parameter
+    # name, not a real knob -- restrict overrides to known constant families.
+    _ALLOWED_PREFIXES = ("KALSHI_", "MAKER_", "PHYSICS_")
+    _BANNED_IMPORTS = {"os", "sys", "subprocess", "shutil", "socket"}
+    _BANNED_CALLS = {"eval", "exec", "__import__"}
+
+    @staticmethod
+    def audit_parameter(key: str, value: str) -> tuple[bool, str]:
+        key_u = str(key or "").strip().upper()
+        if not key_u:
+            return False, "❌ Safety Shield: empty parameter key."
+        if not key_u.startswith(JarvisSafetyCompilerShield._ALLOWED_PREFIXES):
+            return False, (
+                f"❌ Safety Shield: '{key_u}' is not a recognized override-able parameter "
+                f"(expected one of {JarvisSafetyCompilerShield._ALLOWED_PREFIXES})."
+            )
+        if len(str(value)) > 256:
+            return False, "❌ Safety Shield: value too long."
+        return True, "✅ Safety Shield: parameter audit passed."
+
+    @staticmethod
+    def audit_code_ast(code: str) -> tuple[bool, str]:
+        import ast
+
+        try:
+            tree = ast.parse(code or "")
+        except SyntaxError as exc:
+            return False, f"❌ Safety Shield: code does not parse ({exc})."
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                names = [a.name for a in node.names] if isinstance(node, ast.Import) else [node.module or ""]
+                if any(n.split(".")[0] in JarvisSafetyCompilerShield._BANNED_IMPORTS for n in names):
+                    return False, f"❌ Safety Shield: import of {names} is not allowed in a hot patch."
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in JarvisSafetyCompilerShield._BANNED_CALLS
+            ):
+                return False, f"❌ Safety Shield: call to '{node.func.id}' is not allowed in a hot patch."
+        return True, "✅ Safety Shield: AST audit passed."
+
+    @staticmethod
+    def test_sandbox_exec(code: str) -> tuple[bool, str]:
+        try:
+            compile(code or "", "<jarvis_hot_patch>", "exec")
+        except SyntaxError as exc:
+            return False, f"❌ Safety Shield: sandbox compile failed ({exc})."
+        return True, "✅ Safety Shield: sandbox compile passed."
 
 
 # ── Tool functions ──────────────────────────────────────────────────
@@ -333,6 +395,91 @@ def get_latest_bot_logs(lines_count: int = 50) -> str:
         return f"Error reading bot logs: {e}"
 
 
+def get_performance_attribution() -> str:
+    """Break down live-era realized PnL by city, contract type, and maker/taker fill.
+
+    A single aggregate win rate hides where the edge actually lives. Uses only
+    settlements from POST_PAPER_START_DATE onward (live trading, not paper-lane or
+    pre-cutover data) -- this is real trading performance, not a backtest over
+    historical model data. Maker/taker classification is inferred by matching each
+    settlement's actual fee against the maker-rate and taker-rate fee the exchange
+    would have charged at that price and size; it is a reasonable estimate, not an
+    exact per-fill record, since settlement rows do not carry a maker/taker flag.
+    """
+    try:
+        from collections import defaultdict
+
+        from config import POST_PAPER_START_DATE, estimate_kalshi_fee_per_contract
+        from execution.kalshi_broker import KalshiBroker
+        from forecast.weather_contracts import weather_trade_bucket
+        from runtime.kalshi_settlement_truth import (
+            _parse_session_start,
+            city_from_ticker,
+            settlement_pnl_usd,
+        )
+
+        broker = KalshiBroker()
+        if not broker.connect():
+            return "Error: could not connect to the broker."
+
+        min_ts = int(_parse_session_start(POST_PAPER_START_DATE).timestamp())
+        settlements = broker.get_settlements(min_ts=min_ts)
+
+        def _f(v):
+            try:
+                return float(v or 0)
+            except (TypeError, ValueError):
+                return 0.0
+
+        by_city: dict[str, dict[str, float]] = defaultdict(lambda: {"n": 0, "wins": 0, "pnl": 0.0})
+        by_bucket: dict[str, dict[str, float]] = defaultdict(lambda: {"n": 0, "wins": 0, "pnl": 0.0})
+        by_fill: dict[str, dict[str, float]] = defaultdict(lambda: {"n": 0, "wins": 0, "pnl": 0.0, "fees": 0.0})
+
+        for row in settlements:
+            ticker = str(row.get("ticker") or "")
+            bucket = weather_trade_bucket(ticker, contract_name=str(row.get("event_ticker") or ticker))
+            if bucket == "Other Weather":
+                continue
+
+            pnl = settlement_pnl_usd(row)
+            is_win = pnl > 0.001
+
+            for d, k in ((by_city, city_from_ticker(ticker)), (by_bucket, bucket)):
+                d[k]["n"] += 1
+                d[k]["pnl"] += pnl
+                if is_win:
+                    d[k]["wins"] += 1
+
+            yes_c, no_c = _f(row.get("yes_count_fp")), _f(row.get("no_count_fp"))
+            yes_cost, no_cost = _f(row.get("yes_total_cost_dollars")), _f(row.get("no_total_cost_dollars"))
+            fee = _f(row.get("fee_cost"))
+            count, cost = (yes_c, yes_cost) if yes_c > 0 else (no_c, no_cost)
+            if count > 0:
+                price = cost / count
+                taker_fee = estimate_kalshi_fee_per_contract(price, qty=count, maker=False) * count
+                maker_fee = estimate_kalshi_fee_per_contract(price, qty=count, maker=True) * count
+                label = "maker" if abs(fee - maker_fee) < abs(fee - taker_fee) else "taker"
+            else:
+                label = "unknown"
+            by_fill[label]["n"] += 1
+            by_fill[label]["pnl"] += pnl
+            by_fill[label]["fees"] += fee
+            if is_win:
+                by_fill[label]["wins"] += 1
+
+        def render(d: dict, title: str) -> str:
+            lines = [f"By {title}:"]
+            for k, v in sorted(d.items(), key=lambda kv: -kv[1]["pnl"]):
+                wr = 100.0 * v["wins"] / v["n"] if v["n"] else 0.0
+                extra = f" fees=${v['fees']:.2f}" if "fees" in v else ""
+                lines.append(f"  {k:10s} n={int(v['n']):3d} win={wr:5.1f}% pnl=${v['pnl']:+7.2f}{extra}")
+            return "\n".join(lines)
+
+        return "\n\n".join([render(by_city, "city"), render(by_bucket, "contract type"), render(by_fill, "fill type (inferred)")])
+    except Exception as e:
+        return f"Error computing performance attribution: {e}"
+
+
 def get_fee_drag() -> str:
     """Compare gross trading edge against exchange fees paid on the live lane.
 
@@ -384,6 +531,10 @@ def update_system_parameter(key: str, value: str, rationale: str = "") -> str:
             )"""
         )
         now_iso = datetime.now(timezone.utc).isoformat()
+        prior_row = conn.execute(
+            "SELECT param_value FROM dynamic_system_config WHERE param_key = ?", (key.upper(),)
+        ).fetchone()
+        prior_value = prior_row[0] if prior_row else "(default from config.py)"
         conn.execute(
             "INSERT INTO dynamic_system_config (param_key, param_value, updated_at, rationale) VALUES (?, ?, ?, ?) "
             "ON CONFLICT(param_key) DO UPDATE SET param_value=excluded.param_value, updated_at=excluded.updated_at, rationale=excluded.rationale",
@@ -391,6 +542,19 @@ def update_system_parameter(key: str, value: str, rationale: str = "") -> str:
         )
         conn.commit()
         conn.close()
+        # dynamic_system_config is keyed by param and UPSERTs, so the prior value and
+        # its rationale would otherwise be gone the moment this runs. Preserve the
+        # change itself in system_events so recall_brain_history can answer "what was
+        # this before and why did we change it."
+        try:
+            from logging_db.trade_logger import log_event
+
+            log_event(
+                "INFO", "param_change",
+                f"{key.upper()}: {prior_value} -> {value} | rationale: {rationale or '(none given)'}",
+            )
+        except Exception:
+            pass
         return f"🛡️ 5X SAFETY SHIELD PASSED | OVERRIDE SUCCESS: Parameter '{key.upper()}' updated to '{value}' at {now_iso}. Rationale: {rationale}"
     except Exception as e:
         return f"❌ System Bridge Override Error: {e}"
@@ -468,6 +632,67 @@ SYSTEM_PROMPT = (
     "1. 💡 **LAYMAN'S SUMMARY (Direct Answer):** Give a crystal-clear, 2-sentence non-technical answer that directly answers the user's question so anyone can understand it instantly.\n\n"
     "2. 🔬 **POLYMATH QUANTITATIVE INSIGHTS:** Provide deep, high-level quantitative analysis as a top weather trader. Include specific physics mechanisms (e.g. evaporative cooling deltas, soil moisture thermal inertia, nocturnal boundary layer wind shear), model discrepancy dynamics (GFS vs ECMWF ensemble spread), integral/differential rate of change in forecast trajectories, NOAA ground-truth observations, and live droplet database evidence."
 )
+
+
+def recall_brain_history(query: str = "", limit: int = 10) -> str:
+    """Search past JARVIS/Telegram conversations and parameter changes.
+
+    Use this for questions like "what did we decide about X last week" or "has this
+    come up before" -- both surfaces log every turn to the same history, so this
+    covers conversations that happened on the other surface too.
+    """
+    try:
+        conn = sqlite3.connect(_get_db_path())
+        conn.row_factory = sqlite3.Row
+        sql = "SELECT ts, source, message FROM system_events WHERE source LIKE 'brain:%' OR source = 'param_change'"
+        params: list[Any] = []
+        if query:
+            sql += " AND message LIKE ?"
+            params.append(f"%{query}%")
+        sql += " ORDER BY id DESC LIMIT ?"
+        params.append(max(1, int(limit)))
+        rows = conn.execute(sql, params).fetchall()
+        conn.close()
+        if not rows:
+            return f"No history found matching '{query}'." if query else "No brain history recorded yet."
+        return "\n\n".join(f"[{r['ts']}] ({r['source']})\n{r['message']}" for r in rows)
+    except Exception as e:
+        return f"Error recalling history: {e}"
+
+
+def request_change(action: str, enabled: bool | None = None, key: str = "", value: str = "", rationale: str = "") -> str:
+    """Propose a system change for cockpit approval. Does not change anything itself.
+
+    Use this on a read-only surface (Telegram) when the operator wants to act on a
+    finding but write access is not available here. Valid actions: set_maker_entry_enabled
+    (pass enabled=true/false), update_system_parameter (pass key, value), promote_release
+    (no extra params). The change only takes effect if approved from the cockpit.
+    """
+    from runtime import approvals
+
+    params = {}
+    if enabled is not None:
+        params["enabled"] = enabled
+    if key:
+        params["key"] = key
+    if value:
+        params["value"] = value
+    return approvals.request_change(action, params, rationale)
+
+
+def list_pending_approvals() -> str:
+    """List proposed changes waiting for cockpit approval."""
+    from runtime import approvals
+
+    pending = approvals.list_pending()
+    if not pending:
+        return "No pending approvals."
+    lines = [
+        f"#{p['id']} [{p['surface']}] {p['action']}({p['params_json']}) -- {p['rationale'] or 'no rationale given'} "
+        f"(queued {p['created_at']})"
+        for p in pending
+    ]
+    return "\n".join(lines)
 
 
 def get_entry_funnel(lookback_hours: int = 24) -> str:

@@ -1258,7 +1258,8 @@ class KalshiBroker:
         # cancel and cross, so a thin book degrades to today's taker behavior rather
         # than silently halting entries. Fees are the live lane's binding constraint:
         # they consume more than the gross edge the strategy captures.
-        if config.MAKER_ENTRY_ENABLED and order_type == "limit":
+        maker_enabled = config.get_dynamic_bool("MAKER_ENTRY_ENABLED", config.MAKER_ENTRY_ENABLED)
+        if maker_enabled and order_type == "limit":
             maker_result = self._try_maker_entry(
                 contract_dict=contract_dict,
                 ticker=ticker,

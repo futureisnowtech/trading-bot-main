@@ -349,9 +349,15 @@ def get_fee_drag() -> str:
         wins = int(truth.get("wins") or 0)
         losses = int(truth.get("losses") or 0)
 
+        # Scope fees to the same live-trading era the settlement truth covers.
+        # Summing all-time fees against era-scoped PnL overstates the drag badly:
+        # the trades table predates the live era by thousands of rows.
+        from config import POST_PAPER_START_DATE
+
         conn = sqlite3.connect(_get_db_path())
         row = conn.execute(
-            "SELECT COALESCE(SUM(fee_usd), 0) FROM trades WHERE broker = 'kalshi'"
+            "SELECT COALESCE(SUM(fee_usd), 0) FROM trades WHERE broker = 'kalshi' AND ts >= ?",
+            (POST_PAPER_START_DATE,),
         ).fetchone()
         conn.close()
         fees = float(row[0] or 0.0)

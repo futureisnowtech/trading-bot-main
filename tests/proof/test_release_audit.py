@@ -768,6 +768,34 @@ def test_deploy_script_never_lets_docker_exec_eat_the_remote_script():
         )
 
 
+def test_host_service_status_artifact_is_refreshed_on_a_timer():
+    """Writing it only at deploy time closes the release gate 30 minutes later.
+
+    The in-container audit cannot see Docker, so it trusts this host-written
+    artifact and rejects it past HOST_SERVICE_ARTIFACT_MAX_AGE_SECONDS. Without
+    a refresh timer the engine's own periodic audit reports
+    `host_service_status_artifact_stale` and entries stop until the next deploy.
+    """
+    import os
+    from pathlib import Path
+
+    import scripts.release_audit as ra
+
+    refresher = Path("scripts/refresh_host_service_status.sh")
+    assert refresher.exists(), "host service-status refresher script is missing"
+    assert os.access(refresher, os.X_OK), "refresher must be executable for cron"
+    assert "write_host_service_status_artifact" in refresher.read_text(encoding="utf-8")
+
+    deploy = Path("deploy.sh").read_text(encoding="utf-8")
+    assert "refresh_host_service_status.sh" in deploy
+    assert "crontab -" in deploy, "deploy must install the refresh timer"
+
+    # The timer has to run comfortably inside the window the audit enforces.
+    cron_period_seconds = 5 * 60
+    assert cron_period_seconds < ra.HOST_SERVICE_ARTIFACT_MAX_AGE_SECONDS
+    assert "*/5 * * * *" in deploy
+
+
 def test_deploy_script_verifies_the_remote_block_ran_to_completion():
     from pathlib import Path
 

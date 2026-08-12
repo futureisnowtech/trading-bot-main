@@ -123,3 +123,27 @@ Two guards now exist and are pinned by `tests/proof/test_release_audit.py`:
 
 The `docker run --rm -i ... << PYEOF` calls are safe because their heredoc
 already supplies stdin. Keep it that way when adding steps.
+
+## Host service-status artifact must stay fresh
+
+`logs/host_service_status.json` is how the in-container release audit learns
+whether both containers are up — the audit runs inside `execution-engine` and
+cannot reach the Docker daemon. `scripts/release_audit.py` rejects the artifact
+once it is older than `HOST_SERVICE_ARTIFACT_MAX_AGE_SECONDS` (30 minutes).
+
+It used to be written **only** by `deploy.sh`, so 30 minutes after every deploy
+the engine's own periodic audit flipped the gate to
+`host_service_status_artifact_stale` and the bot stopped taking entries until
+someone deployed again. Observed live on 2026-08-12 at `041cdd2`:
+`BLOCKED / entries_allowed=NO` with a 4565s-stale artifact.
+
+`scripts/refresh_host_service_status.sh` now owns that write, and `deploy.sh`
+installs a `*/5 * * * *` cron entry for it (idempotently, on every deploy). The
+script runs natively as `algo-runner` — no helper container — so the artifact
+keeps deploy-user ownership. Cron log: `logs/host_service_status_cron.log`.
+
+Check it with:
+
+```bash
+ssh -p 2222 algo-runner@157.245.15.40 'crontab -l; cat /home/algo-runner/bot/logs/release_verdict.txt'
+```

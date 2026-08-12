@@ -300,47 +300,6 @@ if [ "\${COCKPIT_OK}" -ne 1 ]; then
     exit 1
 fi
 
-echo "  Writing host service-status artifact..."
-SERVICE_STATUS_B64=\$(docker ps --format '{{.Names}}|{{.Status}}' | base64 | tr -d '\n')
-docker run --rm -i \
-  --user "\${ALGO_UID}:\${ALGO_GID}" \
-  -e PYTHONDONTWRITEBYTECODE=1 \
-  -e SERVICE_STATUS_B64="\${SERVICE_STATUS_B64}" \
-  -e SERVICE_STATUS_SHA="${LOCAL_SHA}" \
-  -e SERVICE_STATUS_AS_OF="${DEPLOY_UTC}" \
-  -v ${PROJECT_DIR}:/app "${LOCAL_IMAGE_NAME}:latest" python3 - << 'PYEOF'
-import base64
-import os
-
-from runtime.release_gate import write_host_service_status_artifact
-
-services = {
-    "execution-engine": {"up": False, "status": ""},
-    "kalshi-cockpit": {"up": False, "status": ""},
-}
-
-raw = os.environ.get("SERVICE_STATUS_B64", "").strip()
-decoded = ""
-if raw:
-    decoded = base64.b64decode(raw.encode("utf-8")).decode("utf-8")
-
-for line in decoded.splitlines():
-    name, _sep, status = line.partition("|")
-    if name in services:
-        services[name] = {"up": status.startswith("Up"), "status": status}
-
-payload = {
-    "as_of": os.environ.get("SERVICE_STATUS_AS_OF", ""),
-    "audited_sha": os.environ.get("SERVICE_STATUS_SHA", ""),
-    "source": "host_docker_ps",
-    "services": services,
-    "all_up": all(bool(item.get("up")) for item in services.values()),
-}
-
-path = write_host_service_status_artifact(payload)
-print(f"  host service status artifact written: {path}")
-PYEOF
-
 echo "  Writing provenance markers..."
 mkdir -p ${PROJECT_DIR}/logs
 
@@ -380,6 +339,18 @@ for target in (
     target.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 print("  deploy_manifest.json written to project root and logs/")
 PYEOF
+
+echo "  Writing host service-status artifact..."
+chmod +x ${PROJECT_DIR}/scripts/refresh_host_service_status.sh
+PROJECT_DIR=${PROJECT_DIR} ${PROJECT_DIR}/scripts/refresh_host_service_status.sh
+
+# The in-container audit rejects this artifact once it is older than 30 minutes,
+# so writing it only here closed the release gate 30 minutes after every deploy.
+# Keep a host-side timer refreshing it. Installed idempotently on every deploy.
+echo "  Ensuring host service-status refresh cron is installed..."
+CRON_LINE="*/5 * * * * PROJECT_DIR=${PROJECT_DIR} ${PROJECT_DIR}/scripts/refresh_host_service_status.sh >> ${PROJECT_DIR}/logs/host_service_status_cron.log 2>&1"
+( crontab -l 2>/dev/null | grep -v 'refresh_host_service_status.sh' || true; echo "\${CRON_LINE}" ) | crontab -
+crontab -l | grep -F 'refresh_host_service_status.sh'
 
 # NOTE: every docker exec below MUST redirect stdin from /dev/null. This whole
 # block is piped into a remote `bash -s`, so an interactive-attached container

@@ -287,7 +287,13 @@ def test_deploy_script_audits_remote_ownership_and_runs_helper_containers_as_hos
     assert 'docker run --rm -u "\\${REMOTE_UID}:\\${REMOTE_GID}" -v ${PROJECT_DIR}:/workspace alpine:3.20 sh -lc \\' in deploy
     assert 'export ALGO_UID="\\$(id -u)"' in deploy
     assert 'export ALGO_GID="\\$(id -g)"' in deploy
-    assert deploy.count('--user "\\${ALGO_UID}:\\${ALGO_GID}"') >= 2
+    # Every helper *container* that touches the bind mount runs as the deploy
+    # user so bind-mounted files never drift to root ownership.
+    assert deploy.count('--user "\\${ALGO_UID}:\\${ALGO_GID}"') >= 1
+    # The host service-status artifact is no longer written by a helper
+    # container at all -- it is written natively by the deploy user, on a timer,
+    # so it stays fresh between deploys instead of going stale after 30 minutes.
+    assert "refresh_host_service_status.sh" in deploy
     assert 'Deploy introduced non-${NYC_USER} ownership drift.' in deploy
 
 

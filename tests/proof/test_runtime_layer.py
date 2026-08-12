@@ -142,6 +142,35 @@ def test_incident_ingest_groups_forecast_errors(proof_runtime, monkeypatch):
     assert incidents[0]["count"] >= 5
 
 
+def test_incident_ingest_does_not_recount_same_events(proof_runtime, monkeypatch):
+    import runtime.incident_tracker as it
+
+    db = str(proof_runtime.db_path)
+    monkeypatch.setattr(it, "DB_PATH", db, raising=False)
+    it.init_incident_table(db_path=db)
+
+    for _ in range(2):
+        _insert_event_raw(
+            proof_runtime.db_path,
+            source="KalshiBroker",
+            message="Weather discovery skipped: too_many_requests",
+            level="WARNING",
+        )
+
+    assert it.ingest_system_events(lookback_minutes=120, db_path=db) == 1
+    assert it.ingest_system_events(lookback_minutes=120, db_path=db) == 0
+    assert it.get_open_incidents(db_path=db)[0]["count"] == 2
+
+    _insert_event_raw(
+        proof_runtime.db_path,
+        source="KalshiBroker",
+        message="Weather discovery skipped: too_many_requests",
+        level="WARNING",
+    )
+    assert it.ingest_system_events(lookback_minutes=120, db_path=db) == 1
+    assert it.get_open_incidents(db_path=db)[0]["count"] == 3
+
+
 def test_incident_ingest_non_forecast_sources_fall_back_to_system(proof_runtime, monkeypatch):
     import runtime.incident_tracker as it
 

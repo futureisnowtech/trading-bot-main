@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS incidents (
     alerted_at     TEXT,
     last_alerted_count INTEGER NOT NULL DEFAULT 0,
     last_alerted_severity TEXT NOT NULL DEFAULT '',
+    last_event_id  INTEGER NOT NULL DEFAULT 0,
     updated_at     TEXT NOT NULL,
     UNIQUE(lane_id, fingerprint)
 )
@@ -70,9 +71,17 @@ def _ensure_incident_columns(c: sqlite3.Connection) -> None:
         ("alerted_at", "alerted_at TEXT"),
         ("last_alerted_count", "last_alerted_count INTEGER NOT NULL DEFAULT 0"),
         ("last_alerted_severity", "last_alerted_severity TEXT NOT NULL DEFAULT ''"),
+        ("last_event_id", "last_event_id INTEGER NOT NULL DEFAULT 0"),
     ):
         if name not in cols:
             c.execute(f"ALTER TABLE incidents ADD COLUMN {ddl}")
+            if name == "last_event_id" and c.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='system_events'"
+            ).fetchone():
+                c.execute(
+                    "UPDATE incidents SET last_event_id="
+                    "COALESCE((SELECT MAX(id) FROM system_events), 0)"
+                )
 
 def init_incident_table(db_path: str = DB_PATH) -> None:
     with _conn(db_path) as c:
@@ -83,7 +92,16 @@ def ingest_system_events(lookback_minutes: int = 60, db_path: str = DB_PATH) -> 
     cutoff_iso = (datetime.now(timezone.utc) - timedelta(minutes=lookback_minutes)).isoformat()
     try:
         with _conn(db_path) as c:
-            rows = c.execute("SELECT source, level, message, ts FROM system_events WHERE ts >= ? ORDER BY ts", (cutoff_iso,)).fetchall()
+            rows = c.execute(
+                "SELECT id, source, level, message, ts FROM system_events WHERE ts >= ? ORDER BY id",
+                (cutoff_iso,),
+            ).fetchall()
+            seen = {
+                (row["lane_id"], row["fingerprint"]): int(row["last_event_id"] or 0)
+                for row in c.execute(
+                    "SELECT lane_id, fingerprint, last_event_id FROM incidents"
+                ).fetchall()
+            }
     except Exception: return 0
 
     groups: dict[tuple, dict] = {}
@@ -98,6 +116,9 @@ def ingest_system_events(lookback_minutes: int = 60, db_path: str = DB_PATH) -> 
 
         fp = f"{source}::{message[:80].lower().strip()}"
         key = (lane_id, fp)
+        event_id = int(row["id"])
+        if event_id <= seen.get(key, 0):
+            continue
         if key not in groups:
             groups[key] = {
                 "lane_id": lane_id,
@@ -108,6 +129,7 @@ def ingest_system_events(lookback_minutes: int = 60, db_path: str = DB_PATH) -> 
                 "last_seen_at": ts,
                 "count": 1,
                 "severity": _severity_from_level(level),
+                "last_event_id": event_id,
             }
         else:
             groups[key]["count"] += 1
@@ -116,6 +138,7 @@ def ingest_system_events(lookback_minutes: int = 60, db_path: str = DB_PATH) -> 
             if _severity_rank(new_sev) > _severity_rank(groups[key]["severity"]):
                 groups[key]["severity"] = new_sev
             groups[key]["sample_message"] = message[:240]
+            groups[key]["last_event_id"] = max(groups[key]["last_event_id"], event_id)
 
     if not groups: return 0
 
@@ -128,9 +151,10 @@ def ingest_system_events(lookback_minutes: int = 60, db_path: str = DB_PATH) -> 
                 c.execute("""
                     INSERT INTO incidents (
                         lane_id, source, fingerprint, sample_message,
-                        first_seen_at, last_seen_at, count, severity, state, updated_at
+                        first_seen_at, last_seen_at, count, severity, state,
+                        last_event_id, updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)
                     ON CONFLICT(lane_id, fingerprint) DO UPDATE SET
                         sample_message = excluded.sample_message,
                         last_seen_at = MAX(last_seen_at, excluded.last_seen_at),
@@ -141,6 +165,7 @@ def ingest_system_events(lookback_minutes: int = 60, db_path: str = DB_PATH) -> 
                             WHEN excluded.severity='WARNING' OR severity='WARNING' THEN 'WARNING'
                             ELSE 'INFO' END,
                         state        = CASE WHEN state='resolved' THEN 'open' ELSE state END,
+                        last_event_id = excluded.last_event_id,
                         updated_at   = excluded.updated_at
                 """, (
                     g["lane_id"],
@@ -151,6 +176,7 @@ def ingest_system_events(lookback_minutes: int = 60, db_path: str = DB_PATH) -> 
                     g["last_seen_at"],
                     g["count"],
                     g["severity"],
+                    g["last_event_id"],
                     now,
                 ))
                 upserted += 1

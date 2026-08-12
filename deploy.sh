@@ -156,7 +156,7 @@ docker buildx build --pull --load --progress=plain \
 
 echo "  Seeding provisional release artifact for new SHA..."
 docker run --rm -i \
-  --user "${ALGO_UID}:${ALGO_GID}" \
+  --user "\${ALGO_UID}:\${ALGO_GID}" \
   -e PYTHONDONTWRITEBYTECODE=1 \
   -v ${PROJECT_DIR}:/app "${LOCAL_IMAGE_NAME}:latest" python3 - << PYEOF
 from runtime.release_gate import VERDICT_BLOCKED, write_release_audit_artifact

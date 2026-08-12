@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -680,3 +681,66 @@ def test_run_remote_hosted_audit_blocks_when_host_service_artifact_missing(
 
     assert payload["verdict"] == "BLOCKED"
     assert "host_service_status_artifact_missing" in payload["blockers"]
+
+
+def test_build_deploy_pending_artifact_preserves_last_passing_gate():
+    from runtime.release_gate import build_deploy_pending_artifact
+
+    payload = build_deploy_pending_artifact(
+        prior_release={
+            "audited_sha": "oldsha",
+            "verdict": "READY_FOR_LIVE",
+            "entries_allowed": True,
+            "as_of": "2026-08-12T03:30:00Z",
+            "last_successful_audit_at": "2026-08-12T03:30:00Z",
+            "details": {
+                "live_truth": {"broker_connected": True, "balance_usd": 164.0},
+                "provider_status": {"data_present": True, "provider_mode": "deterministic_multi_model"},
+                "balance_truth": {"balance_ok": True, "delta_usd": 0.0},
+            },
+        },
+        audited_sha="newsha",
+        app_version="19.17.0",
+        branch="master",
+        deployed_at_utc="2026-08-12T03:36:12Z",
+    )
+
+    assert payload["mode"] == "deploy_pending"
+    assert payload["verdict"] == "PASS_WITH_WARNINGS"
+    assert payload["entries_allowed"] is True
+    assert payload["blockers"] == []
+    assert payload["warnings"] == ["release_audit_pending_new_build"]
+    assert payload["details"]["live_truth"]["broker_connected"] is True
+
+
+def test_build_deploy_pending_artifact_keeps_existing_blocked_state():
+    from runtime.release_gate import build_deploy_pending_artifact
+
+    payload = build_deploy_pending_artifact(
+        prior_release={
+            "audited_sha": "oldsha",
+            "verdict": "BLOCKED",
+            "entries_allowed": False,
+            "as_of": "2026-08-12T03:30:00Z",
+            "blockers": ["broker_disconnected"],
+        },
+        audited_sha="newsha",
+        app_version="19.17.0",
+        branch="master",
+        deployed_at_utc="2026-08-12T03:36:12Z",
+    )
+
+    assert payload["verdict"] == "BLOCKED"
+    assert payload["entries_allowed"] is False
+    assert payload["blockers"] == ["release_audit_pending_new_build"]
+
+
+def test_deploy_script_preserves_prior_release_and_runs_immediate_audit():
+    from pathlib import Path
+
+    deploy = Path("deploy.sh").read_text(encoding="utf-8")
+
+    assert 'PRE_DEPLOY_RELEASE_JSON' in deploy
+    assert 'PRE_DEPLOY_RELEASE_B64' in deploy
+    assert 'build_deploy_pending_artifact' in deploy
+    assert '--remote-hosted --scan-limit 12 --soak-seconds 0' in deploy

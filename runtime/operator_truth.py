@@ -662,6 +662,7 @@ def get_release_status(
     ) or {}
 
     artifact_verdict = str(artifact.get("verdict") or "")
+    artifact_mode = str(artifact.get("mode") or "").strip()
     artifact_sha = str(artifact.get("audited_sha") or "").strip()
     build_sha = str(build.get("sha") or "").strip()
     artifact_matches_build = bool(artifact_sha and build_sha and artifact_sha == build_sha)
@@ -671,11 +672,13 @@ def get_release_status(
         if str(item or "").strip()
     ]
 
+    deploy_pending = artifact_mode == "deploy_pending" and artifact_matches_build
+
     if truth is None:
         truth = get_live_kalshi_status(
             db_path=db_path,
-            connect=False,
-            sync_broker=False,
+            connect=deploy_pending,
+            sync_broker=deploy_pending,
             include_recent_execution=False,
         )
         if artifact_matches_build and artifact_live_truth and not bool(truth.get("broker_connected")):

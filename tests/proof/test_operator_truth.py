@@ -407,6 +407,86 @@ def test_release_status_surfaces_pending_new_build_blocker_without_sha_drift(
     )
 
 
+def test_release_status_reconnects_when_same_sha_deploy_is_pending(
+    proof_runtime,
+    monkeypatch,
+):
+    import runtime.build_info as bi
+    import runtime.incident_tracker as it
+    import runtime.operator_truth as ot
+    import runtime.release_gate as rg
+
+    db = str(proof_runtime.db_path)
+    monkeypatch.setattr(ot, "DB_PATH", db, raising=False)
+    monkeypatch.setattr(
+        rg,
+        "load_release_audit_artifact",
+        lambda: {
+            "mode": "deploy_pending",
+            "verdict": "PASS_WITH_WARNINGS",
+            "entries_allowed": True,
+            "audited_sha": "abc123",
+            "as_of": "2026-08-12T03:36:12Z",
+            "last_successful_audit_at": "2026-08-12T03:30:00Z",
+            "warnings": ["release_audit_pending_new_build"],
+            "details": {
+                "build": {
+                    "app_version": "19.17.0",
+                    "sha": "abc123",
+                    "branch": "master",
+                    "deployed_at_utc": "2026-08-12T03:36:12Z",
+                }
+            },
+        },
+    )
+    monkeypatch.setattr(
+        bi,
+        "get_build_info",
+        lambda: {"sha": "abc123", "app_version": "19.17.0", "metadata_stale": False},
+    )
+    monkeypatch.setattr(
+        it,
+        "get_incident_summary",
+        lambda db_path=db: {"total_open": 0, "by_severity": {}},
+    )
+    monkeypatch.setattr(it, "get_open_incidents", lambda db_path=db: [])
+    monkeypatch.setattr(
+        ot,
+        "get_live_kalshi_status",
+        lambda **kwargs: {
+            "broker_connected": kwargs["connect"],
+            "broker_error": "",
+            "balance_usd": 164.0 if kwargs["connect"] else 0.0,
+            "active_markets": 6,
+            "forecast_lane": {
+                "readiness_state": "OPERATIONAL",
+                "heartbeat_stale": False,
+                "heartbeat_age_seconds": 15.0,
+                "buying_power_usd": 164.0,
+            },
+            "forecast_snapshot": {"equity": 164.0},
+            "recent_vetoes": {"top_reasons": []},
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(
+        ot,
+        "get_weather_provider_status",
+        lambda db_path=db, contract_limit=8: {
+            "data_present": True,
+            "provider_mode": "deterministic_multi_model",
+            "weather_age_minutes": 10.0,
+        },
+    )
+
+    payload = ot.get_release_status(db_path=db)
+
+    assert payload["current_release_verdict"] == "PASS_WITH_WARNINGS"
+    assert payload["entries_allowed"] is True
+    assert "broker_disconnected" not in payload["top_infrastructure_blockers"]
+    assert "balance_truth_mismatch" not in " ".join(payload["top_infrastructure_blockers"])
+
+
 def test_weather_provider_status_warms_sampled_series_when_process_cache_is_cold(
     proof_runtime,
     monkeypatch,

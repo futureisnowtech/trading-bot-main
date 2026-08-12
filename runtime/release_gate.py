@@ -115,6 +115,70 @@ def write_host_service_status_artifact(payload: dict[str, Any]) -> str:
     return str(path)
 
 
+def build_deploy_pending_artifact(
+    *,
+    prior_release: dict[str, Any] | None,
+    audited_sha: str,
+    app_version: str,
+    branch: str,
+    deployed_at_utc: str,
+) -> dict[str, Any]:
+    """Build the temporary artifact written between container restart and hosted audit.
+
+    If the currently running release is already passing, preserve that tradable state
+    during the short deploy window and surface the new-build condition as a warning.
+    If the currently running release is already blocked, keep it blocked.
+    """
+    prior = prior_release if isinstance(prior_release, dict) else {}
+    prior_verdict = str(
+        prior.get("verdict") or prior.get("current_release_verdict") or ""
+    ).strip()
+    prior_entries_allowed = bool(prior.get("entries_allowed"))
+    prior_details = prior.get("details") if isinstance(prior.get("details"), dict) else {}
+    prior_last_success = str(
+        prior.get("last_successful_audit_at") or prior.get("as_of") or ""
+    ).strip()
+
+    passing = prior_entries_allowed and prior_verdict in PASSING_VERDICTS
+
+    payload: dict[str, Any] = {
+        "mode": "deploy_pending",
+        "as_of": deployed_at_utc,
+        "audited_sha": str(audited_sha or "").strip(),
+        "verdict": VERDICT_BLOCKED,
+        "entries_allowed": False,
+        "last_successful_audit_at": "",
+        "blockers": ["release_audit_pending_new_build"],
+        "warnings": [],
+        "details": {
+            "build": {
+                "app_version": str(app_version or ""),
+                "sha": str(audited_sha or "").strip(),
+                "branch": str(branch or ""),
+                "deployed_at_utc": str(deployed_at_utc or ""),
+            },
+            "prior_release": {
+                "audited_sha": str(prior.get("audited_sha") or "").strip(),
+                "verdict": prior_verdict,
+                "as_of": str(prior.get("as_of") or ""),
+            },
+        },
+    }
+
+    if passing:
+        payload["verdict"] = VERDICT_PASS_WITH_WARNINGS
+        payload["entries_allowed"] = True
+        payload["last_successful_audit_at"] = prior_last_success
+        payload["blockers"] = []
+        payload["warnings"] = ["release_audit_pending_new_build"]
+        for key in ("live_truth", "provider_status", "balance_truth"):
+            value = prior_details.get(key)
+            if isinstance(value, dict) and value:
+                payload["details"][key] = value
+
+    return payload
+
+
 def is_infrastructure_reason(reason: str) -> bool:
     token = str(reason or "").strip().lower()
     if not token:

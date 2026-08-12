@@ -154,31 +154,49 @@ docker buildx build --pull --load --progress=plain \
   -f Dockerfile.dashboard \
   -t "${LOCAL_DASHBOARD_IMAGE_NAME}:latest" .
 
+echo "  Capturing current live release state before restart..."
+PRE_DEPLOY_RELEASE_JSON=""
+if docker ps --format '{{.Names}}' | grep -qx 'execution-engine'; then
+  PRE_DEPLOY_RELEASE_JSON="$(docker exec -i execution-engine sh -lc \
+    'cd /app && python3 scripts/release_audit.py --remote-hosted --scan-limit 12 --soak-seconds 0 --format json' \
+    2>/dev/null || true)"
+fi
+PRE_DEPLOY_RELEASE_B64="$(printf '%s' "${PRE_DEPLOY_RELEASE_JSON}" | base64 | tr -d '\n')"
+
 echo "  Seeding provisional release artifact for new SHA..."
 docker run --rm -i \
   --user "\${ALGO_UID}:\${ALGO_GID}" \
   -e PYTHONDONTWRITEBYTECODE=1 \
+  -e PRE_DEPLOY_RELEASE_B64="${PRE_DEPLOY_RELEASE_B64}" \
   -v ${PROJECT_DIR}:/app "${LOCAL_IMAGE_NAME}:latest" python3 - << PYEOF
-from runtime.release_gate import VERDICT_BLOCKED, write_release_audit_artifact
+import base64
+import json
+import os
 
-payload = {
-    "mode": "deploy_pending",
-    "as_of": "${DEPLOY_UTC}",
-    "audited_sha": "${LOCAL_SHA}",
-    "verdict": VERDICT_BLOCKED,
-    "entries_allowed": False,
-    "last_successful_audit_at": "",
-    "blockers": ["release_audit_pending_new_build"],
-    "warnings": [],
-    "details": {
-        "build": {
-            "app_version": "${APP_VERSION}",
-            "sha": "${LOCAL_SHA}",
-            "branch": "${BRANCH}",
-            "deployed_at_utc": "${DEPLOY_UTC}",
-        }
-    },
-}
+from runtime.release_gate import (
+    build_deploy_pending_artifact,
+    load_release_audit_artifact,
+    write_release_audit_artifact,
+)
+
+prior_release = load_release_audit_artifact()
+raw = os.environ.get("PRE_DEPLOY_RELEASE_B64", "").strip()
+if raw:
+    try:
+        decoded = base64.b64decode(raw.encode("utf-8")).decode("utf-8").strip()
+        parsed = json.loads(decoded)
+        if isinstance(parsed, dict):
+            prior_release = parsed
+    except Exception:
+        pass
+
+payload = build_deploy_pending_artifact(
+    prior_release=prior_release,
+    audited_sha="${LOCAL_SHA}",
+    app_version="${APP_VERSION}",
+    branch="${BRANCH}",
+    deployed_at_utc="${DEPLOY_UTC}",
+)
 write_release_audit_artifact(
     payload,
     markdown="# Release Audit\\n\\nPending hosted audit for the newly deployed SHA.\\n",
@@ -358,6 +376,10 @@ for target in (
     target.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 print("  deploy_manifest.json written to project root and logs/")
 PYEOF
+
+echo "  Running immediate hosted release audit..."
+docker exec -i execution-engine sh -lc \
+  "cd /app && python3 scripts/release_audit.py --remote-hosted --scan-limit 12 --soak-seconds 0"
 
 echo "  Running hosted release audit (soak=${RELEASE_AUDIT_SOAK_SECONDS}s)..."
 docker exec -i execution-engine sh -lc \

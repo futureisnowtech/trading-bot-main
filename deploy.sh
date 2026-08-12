@@ -89,8 +89,8 @@ echo "Pruning remote cache artifacts that can block sync..."
 ${SSH_CMD} ${NYC_USER}@${NYC_IP} bash -s << REMOTE_PRUNE
 set -euo pipefail
 mkdir -p ${PROJECT_DIR}
-REMOTE_UID="$(id -u)"
-REMOTE_GID="$(id -g)"
+REMOTE_UID="\$(id -u)"
+REMOTE_GID="\$(id -g)"
 docker run --rm -u "${REMOTE_UID}:${REMOTE_GID}" -v ${PROJECT_DIR}:/workspace alpine:3.20 sh -lc \
   'find /workspace \( -name __pycache__ -o -name .pytest_cache \) -prune -exec rm -rf {} +; find /workspace -name "*.pyc" -delete'
 REMOTE_PRUNE
@@ -122,8 +122,8 @@ cd ${PROJECT_DIR}
 
 export IMAGE_NAME="${LOCAL_IMAGE_NAME}"
 export DASHBOARD_IMAGE_NAME="${LOCAL_DASHBOARD_IMAGE_NAME}"
-export ALGO_UID="$(id -u)"
-export ALGO_GID="$(id -g)"
+export ALGO_UID="\$(id -u)"
+export ALGO_GID="\$(id -g)"
 
 if [ ! -f .env ]; then
     echo "ERROR: ${PROJECT_DIR}/.env is missing on the droplet."

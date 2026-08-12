@@ -12,6 +12,8 @@ from unittest.mock import MagicMock, patch
 
 ROOT = Path(__file__).resolve().parents[2]
 DASHBOARD_ROOT = ROOT / "dashboard"
+ENGINE_DOCKERFILE = ROOT / "Dockerfile"
+DASHBOARD_DOCKERFILE = ROOT / "Dockerfile.dashboard"
 
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -257,3 +259,31 @@ def test_execution_engine_uses_long_lived_daemon():
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     assert "execution_daemon.py" in compose
     assert "while true; do python3 sniper_cron.py" not in compose
+
+
+def test_runtime_compose_uses_canonical_images_and_non_root_user():
+    compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    assert "${IMAGE_NAME:-ghcr.io/futureisnowtech/trading-bot-main}:latest" in compose
+    assert "${DASHBOARD_IMAGE_NAME:-ghcr.io/futureisnowtech/trading-bot-main-dashboard}:latest" in compose
+    assert compose.count('user: "${ALGO_UID:-1000}:${ALGO_GID:-1000}"') == 2
+
+
+def test_runtime_images_disable_bytecode_and_drop_root():
+    engine = ENGINE_DOCKERFILE.read_text(encoding="utf-8")
+    dashboard = DASHBOARD_DOCKERFILE.read_text(encoding="utf-8")
+
+    for text in (engine, dashboard):
+        assert "PYTHONDONTWRITEBYTECODE=1" in text
+        assert "USER appuser" in text
+        assert "useradd --uid 1000 --gid 1000" in text
+
+
+def test_deploy_script_audits_remote_ownership_and_runs_helper_containers_as_host_user():
+    deploy = (ROOT / "deploy.sh").read_text(encoding="utf-8")
+    assert "Auditing remote ownership..." in deploy
+    assert "remote_ownership_report()" in deploy
+    assert 'REMOTE_UID="$(id -u)"' in deploy
+    assert 'REMOTE_GID="$(id -g)"' in deploy
+    assert 'docker run --rm -u "${REMOTE_UID}:${REMOTE_GID}" -v ${PROJECT_DIR}:/workspace alpine:3.20 sh -lc \\' in deploy
+    assert '--user "${ALGO_UID}:${ALGO_GID}"' in deploy
+    assert 'Deploy introduced non-${NYC_USER} ownership drift.' in deploy

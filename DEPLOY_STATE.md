@@ -1,6 +1,6 @@
 # Deploy state — read before shipping anything to NYC
 
-Last verified: 2026-08-11 23:30 UTC
+Last verified: 2026-08-12 01:46 UTC
 
 ## What is actually running
 
@@ -18,10 +18,10 @@ of truth. Deploy provenance is stamped by `deploy.sh` into:
 | | |
 |---|---|
 | Containers | `execution-engine`, `kalshi-cockpit` |
-| Images | `algo-trading-bot:latest`, `algo-trading-bot-dashboard:latest` |
-| Deployed commit | **`77cfa77`** (= `master` at deploy time) |
-| Version | `VERSION = 19.17.0` |
-| Deployed | 2026-08-11, manual build on droplet |
+| Images | `ghcr.io/futureisnowtech/trading-bot-main:latest`, `ghcr.io/futureisnowtech/trading-bot-main-dashboard:latest` |
+| Live SHA / branch / deploy time | Read `/home/algo-runner/bot/version.txt` and `/home/algo-runner/bot/deploy_manifest.json` |
+| Version | Read `app_version=` from the stamped provenance files above |
+| Deploy method | Guarded deploy via `./deploy.sh` |
 | Config/env | `/home/algo-runner/bot/.env` + `docker-compose.yml` |
 
 Before this, production sat on `603a42a` (v19.10.12, 2026-07-12) for a month —
@@ -58,8 +58,10 @@ recorded run is `skipped`. CI itself also failed continuously until
 - refuses dirty or unpushed work
 - ships the exact committed tree
 - builds both images on the droplet itself
+- runs the runtime and helper containers as the non-root deploy user
 - verifies forecast-lane and cockpit readiness
 - stamps deployed SHA provenance into the host and runtime logs
+- fails if ownership drift appears anywhere under `/home/algo-runner/bot`
 - runs the hosted release audit on the newly built runtime
 
 Confirm a good deploy with `Live Execution cycle complete` in the logs, a
@@ -68,9 +70,9 @@ Confirm a good deploy with `Live Execution cycle complete` in the logs, a
 ## Rollback
 
 ```bash
-ssh root@157.245.15.40 'cd /home/algo-runner/bot && \
-  docker tag algo-rollback-engine:20260811 algo-trading-bot:latest && \
-  docker tag algo-rollback-dash:20260811 algo-trading-bot-dashboard:latest && \
+ssh -p 2222 algo-runner@157.245.15.40 'cd /home/algo-runner/bot && \
+  docker tag algo-rollback-engine:20260811 ghcr.io/futureisnowtech/trading-bot-main:latest && \
+  docker tag algo-rollback-dash:20260811 ghcr.io/futureisnowtech/trading-bot-main-dashboard:latest && \
   docker compose up -d'
 ```
 
@@ -97,3 +99,6 @@ ssh root@157.245.15.40 'cd /home/algo-runner/bot && \
   broker each cycle via `runtime.live_account.resolve_live_bankroll()`;
   `ACCOUNT_SIZE` survives only as the last-resort floor.
 - `.env` backups are written to `/home/algo-runner/bot/.env.bak.<timestamp>`.
+- Runtime containers and deploy helper containers now run as UID/GID `1000`
+  (`algo-runner`) and with `PYTHONDONTWRITEBYTECODE=1` so bind-mounted files
+  stay owned by the deploy user instead of drifting to root.

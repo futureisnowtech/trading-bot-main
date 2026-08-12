@@ -5,14 +5,23 @@ LABEL org.opencontainers.image.revision=$BUILD_SHA
 
 WORKDIR /app
 
-ENV BUILD_SHA=$BUILD_SHA
+ENV BUILD_SHA=$BUILD_SHA \
+    PYTHONDONTWRITEBYTECODE=1 \
+    HOME=/home/appuser \
+    XDG_CACHE_HOME=/home/appuser/.cache \
+    STREAMLIT_HOME=/home/appuser/.streamlit
 
 COPY requirements-dashboard.txt requirements-runtime.txt ./
 RUN pip install --no-cache-dir -r requirements-dashboard.txt
 
 COPY . .
-RUN mkdir -p logs
+RUN groupadd --gid 1000 appuser \
+    && useradd --uid 1000 --gid 1000 --create-home --home-dir /home/appuser --shell /bin/sh appuser \
+    && mkdir -p /home/appuser/.cache /home/appuser/.streamlit /app/logs \
+    && chown -R appuser:appuser /home/appuser /app
 
 EXPOSE 8501
+
+USER appuser
 
 CMD ["streamlit", "run", "dashboard/streamlit_app.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true", "--browser.gatherUsageStats=false"]

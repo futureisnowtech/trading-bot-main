@@ -1,7 +1,8 @@
 services:
   execution-engine:
-    image: ${IMAGE_NAME:-algo-trading-bot}:latest
+    image: ${IMAGE_NAME:-ghcr.io/futureisnowtech/trading-bot-main}:latest
     build: .
+    user: "${ALGO_UID:-1000}:${ALGO_GID:-1000}"
     container_name: execution-engine
     restart: unless-stopped
     env_file:
@@ -19,10 +20,11 @@ services:
         max-file: "3"
 
   kalshi-cockpit:
-    image: ${DASHBOARD_IMAGE_NAME:-algo-trading-bot-dashboard}:latest
+    image: ${DASHBOARD_IMAGE_NAME:-ghcr.io/futureisnowtech/trading-bot-main-dashboard}:latest
     build:
       context: .
       dockerfile: Dockerfile.dashboard
+    user: "${ALGO_UID:-1000}:${ALGO_GID:-1000}"
     container_name: kalshi-cockpit
     restart: unless-stopped
     env_file:

@@ -18,6 +18,18 @@ cleanup() {
 }
 trap cleanup EXIT
 
+remote_ownership_report() {
+    ${SSH_CMD} ${NYC_USER}@${NYC_IP} bash -s << REMOTE_OWNERSHIP
+set -euo pipefail
+if [ ! -d ${PROJECT_DIR} ]; then
+    exit 0
+fi
+find ${PROJECT_DIR} \
+  -path ${PROJECT_DIR}/.git -prune -o \
+  -not -user ${NYC_USER} -printf '%u:%g %m %p\n'
+REMOTE_OWNERSHIP
+}
+
 BRANCH=$(git branch --show-current || true)
 if [ -z "${BRANCH}" ]; then
     BRANCH=$(git for-each-ref --format='%(refname:short)' refs/remotes/origin --contains HEAD | sed 's#^origin/##' | grep -v '^HEAD$' | head -n 1 || true)
@@ -63,11 +75,23 @@ LOCAL_DASHBOARD_IMAGE_NAME="${IMAGE_REPO}-dashboard"
 
 TMP_EXPORT_DIR=$(mktemp -d "${TMPDIR:-/tmp}/kalshi-deploy.XXXXXX")
 
+echo "Auditing remote ownership..."
+REMOTE_OWNERSHIP_DRIFT="$(remote_ownership_report)"
+if [ -n "${REMOTE_OWNERSHIP_DRIFT}" ]; then
+    echo "ERROR: Remote tree contains files not owned by ${NYC_USER}."
+    echo "       Repair ownership before deploying so the blessed path stays exact."
+    printf '%s\n' "${REMOTE_OWNERSHIP_DRIFT}" | head -n 40
+    exit 1
+fi
+echo "  OK: remote tree ownership is clean."
+
 echo "Pruning remote cache artifacts that can block sync..."
 ${SSH_CMD} ${NYC_USER}@${NYC_IP} bash -s << REMOTE_PRUNE
 set -euo pipefail
 mkdir -p ${PROJECT_DIR}
-docker run --rm -v ${PROJECT_DIR}:/workspace alpine:3.20 sh -lc \
+REMOTE_UID="$(id -u)"
+REMOTE_GID="$(id -g)"
+docker run --rm -u "${REMOTE_UID}:${REMOTE_GID}" -v ${PROJECT_DIR}:/workspace alpine:3.20 sh -lc \
   'find /workspace \( -name __pycache__ -o -name .pytest_cache \) -prune -exec rm -rf {} +; find /workspace -name "*.pyc" -delete'
 REMOTE_PRUNE
 
@@ -98,6 +122,8 @@ cd ${PROJECT_DIR}
 
 export IMAGE_NAME="${LOCAL_IMAGE_NAME}"
 export DASHBOARD_IMAGE_NAME="${LOCAL_DASHBOARD_IMAGE_NAME}"
+export ALGO_UID="$(id -u)"
+export ALGO_GID="$(id -g)"
 
 if [ ! -f .env ]; then
     echo "ERROR: ${PROJECT_DIR}/.env is missing on the droplet."
@@ -129,7 +155,10 @@ docker buildx build --pull --load --progress=plain \
   -t "${LOCAL_DASHBOARD_IMAGE_NAME}:latest" .
 
 echo "  Seeding provisional release artifact for new SHA..."
-docker run --rm -i -v ${PROJECT_DIR}:/app "${LOCAL_IMAGE_NAME}:latest" python3 - << PYEOF
+docker run --rm -i \
+  --user "${ALGO_UID}:${ALGO_GID}" \
+  -e PYTHONDONTWRITEBYTECODE=1 \
+  -v ${PROJECT_DIR}:/app "${LOCAL_IMAGE_NAME}:latest" python3 - << PYEOF
 from runtime.release_gate import VERDICT_BLOCKED, write_release_audit_artifact
 
 payload = {
@@ -252,6 +281,8 @@ fi
 echo "  Writing host service-status artifact..."
 SERVICE_STATUS_B64=\$(docker ps --format '{{.Names}}|{{.Status}}' | base64 | tr -d '\n')
 docker run --rm -i \
+  --user "\${ALGO_UID}:\${ALGO_GID}" \
+  -e PYTHONDONTWRITEBYTECODE=1 \
   -e SERVICE_STATUS_B64="\${SERVICE_STATUS_B64}" \
   -e SERVICE_STATUS_SHA="${LOCAL_SHA}" \
   -e SERVICE_STATUS_AS_OF="${DEPLOY_UTC}" \
@@ -331,6 +362,16 @@ PYEOF
 echo "  Running hosted release audit (soak=${RELEASE_AUDIT_SOAK_SECONDS}s)..."
 docker exec -i execution-engine sh -lc \
   "cd /app && python3 scripts/release_audit.py --remote-hosted --scan-limit 12 --soak-seconds ${RELEASE_AUDIT_SOAK_SECONDS}"
+
+echo "  Auditing remote ownership after deploy..."
+REMOTE_OWNERSHIP_DRIFT="\$(find ${PROJECT_DIR} \
+  -path ${PROJECT_DIR}/.git -prune -o \
+  -not -user ${NYC_USER} -printf '%u:%g %m %p\n')"
+if [ -n "\${REMOTE_OWNERSHIP_DRIFT}" ]; then
+    echo "ERROR: Deploy introduced non-${NYC_USER} ownership drift."
+    printf '%s\n' "\${REMOTE_OWNERSHIP_DRIFT}" | head -n 40
+    exit 1
+fi
 
 echo "  version.txt contents:"
 cat ${PROJECT_DIR}/version.txt

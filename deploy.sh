@@ -161,13 +161,13 @@ if docker ps --format '{{.Names}}' | grep -qx 'execution-engine'; then
     'cd /app && python3 scripts/release_audit.py --remote-hosted --scan-limit 12 --soak-seconds 0 --format json' \
     2>/dev/null || true)"
 fi
-PRE_DEPLOY_RELEASE_B64="$(printf '%s' "${PRE_DEPLOY_RELEASE_JSON}" | base64 | tr -d '\n')"
+PRE_DEPLOY_RELEASE_B64="$(printf '%s' "\${PRE_DEPLOY_RELEASE_JSON}" | base64 | tr -d '\n')"
 
 echo "  Seeding provisional release artifact for new SHA..."
 docker run --rm -i \
   --user "\${ALGO_UID}:\${ALGO_GID}" \
   -e PYTHONDONTWRITEBYTECODE=1 \
-  -e PRE_DEPLOY_RELEASE_B64="${PRE_DEPLOY_RELEASE_B64}" \
+  -e PRE_DEPLOY_RELEASE_B64="\${PRE_DEPLOY_RELEASE_B64}" \
   -v ${PROJECT_DIR}:/app "${LOCAL_IMAGE_NAME}:latest" python3 - << PYEOF
 import base64
 import json

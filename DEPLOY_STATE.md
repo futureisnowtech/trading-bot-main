@@ -6,8 +6,14 @@ Last verified: 2026-08-11 23:30 UTC
 
 NYC production (droplet `157.245.15.40`) runs **Docker images built on the box
 itself**, not a git checkout and not a registry pull. The source tree lives at
-`/home/algo-runner/bot` with no `.git`, so the deployed commit is not
-recoverable from the box alone — record it here on every deploy.
+`/home/algo-runner/bot` with no `.git`, so git itself is not the runtime source
+of truth. Deploy provenance is stamped by `deploy.sh` into:
+
+- `/home/algo-runner/bot/version.txt`
+- `/home/algo-runner/bot/deploy_manifest.json`
+- `/home/algo-runner/bot/logs/version.txt`
+- `/home/algo-runner/bot/logs/deploy_manifest.json`
+- `BUILD_SHA` embedded into both Docker images at build time
 
 | | |
 |---|---|
@@ -19,16 +25,18 @@ recoverable from the box alone — record it here on every deploy.
 | Config/env | `/home/algo-runner/bot/.env` + `docker-compose.yml` |
 
 Before this, production sat on `603a42a` (v19.10.12, 2026-07-12) for a month —
-82 commits behind — because `deploy-nyc.yml` never fires (below). The entire
-settled track record through 2026-08-11 belongs to `603a42a`, not to `master`.
+82 commits behind — because `deploy-nyc.yml` never fired. The entire settled
+track record through 2026-08-11 belongs to `603a42a`, not to `master`.
 
-If the deployed commit is ever unknown, fingerprint it:
+It is valid for `master` to be ahead of production by docs-only commits. Do not
+block startup just because the deployed SHA is behind `master`; the real bug is
+silent drift, not controlled lag.
+
+If the deployed commit is ever unclear, trust the stamped provenance first:
 
 ```bash
-ssh root@157.245.15.40 'docker exec execution-engine md5sum /app/config.py'
-for c in $(git rev-list --all -- config.py); do
-  [ "$(git show $c:config.py | md5 -q)" = "<hash>" ] && echo "$c" && break
-done
+ssh -p 2222 algo-runner@157.245.15.40 'sed -n "1,20p" /home/algo-runner/bot/version.txt'
+ssh -p 2222 algo-runner@157.245.15.40 'sed -n "1,80p" /home/algo-runner/bot/deploy_manifest.json'
 ```
 
 ## The deploy pipeline does not deploy
@@ -41,32 +49,18 @@ recorded run is `skipped`. CI itself also failed continuously until
 ## How to deploy
 
 ```bash
-# 1. ship master (respects .gitignore, so .env / logs / *.pem are untouched)
-git archive --format=tar master | ssh root@157.245.15.40 'tar -x -C /home/algo-runner/bot'
-
-# 2. tag a rollback BEFORE building
-ssh root@157.245.15.40 'docker tag algo-trading-bot:latest algo-rollback-engine:$(date +%Y%m%d)
-                        docker tag algo-trading-bot-dashboard:latest algo-rollback-dash:$(date +%Y%m%d)'
-
-# 3. build
-ssh root@157.245.15.40 'cd /home/algo-runner/bot && docker compose build'
-
-# 4. smoke test the built image against the live account BEFORE swapping
-ssh root@157.245.15.40 'cd /home/algo-runner/bot && docker run --rm --env-file .env \
-  -v /home/algo-runner/bot/logs:/app/logs \
-  -v /home/algo-runner/bot/kalshi_private_key.pem:/run/secrets/kalshi_private_key.pem:ro \
-  algo-trading-bot:latest python3 -c "
-from runtime.live_account import resolve_live_bankroll; print(resolve_live_bankroll())"'
-
-# 5. swap, then watch a full cycle
-ssh root@157.245.15.40 'cd /home/algo-runner/bot && docker compose up -d'
+# From the repo root on a clean, pushed master:
+./deploy.sh
 ```
 
-**Step 4 is not optional.** It caught a bug that would otherwise have shipped
-looking healthy: `resolve_live_bankroll()` returned the config floor instead of
-the live balance, because `get_kalshi_broker()` hands back an unconnected
-broker. A green test suite did not catch it; running the built image against
-the real account did.
+`deploy.sh` is the blessed path because it:
+
+- refuses dirty or unpushed work
+- ships the exact committed tree
+- builds both images on the droplet itself
+- verifies forecast-lane and cockpit readiness
+- stamps deployed SHA provenance into the host and runtime logs
+- runs the hosted release audit on the newly built runtime
 
 Confirm a good deploy with `Live Execution cycle complete` in the logs, a
 `bankroll=$…` that matches the real balance, and zero `Traceback` lines.
@@ -82,15 +76,14 @@ ssh root@157.245.15.40 'cd /home/algo-runner/bot && \
 
 ## Config rules
 
-- Risk constants must move in **three places together**: the droplet `.env`
-  (what executes), `config.py` defaults (what a fresh environment gets), and
-  the `.env` block in `ci.yml` (what CI proves). The repo once claimed
-  `0.60 / $40` while production ran `0.30 / $12`, so the cockpit overstated
-  regional headroom and CI proved a posture nothing traded.
+- Risk constants must move in **four places together**: the droplet `.env`
+  (what executes), `config.py` defaults (what a fresh environment gets), the
+  `.env` block in `ci.yml`, and the `.env` block in `deploy-nyc.yml`. Protected
+  deploy must prove the same posture that CI proves.
 - To read the live values, ask the running container rather than trusting any
   document — including this one:
   ```bash
-  ssh root@157.245.15.40 'docker exec execution-engine python3 -c "
+  ssh -p 2222 algo-runner@157.245.15.40 'docker exec execution-engine python3 -c "
   import config
   for k in dir(config):
       if k.startswith((\"KALSHI_\", \"SALVAGE_\", \"ACCOUNT_\")):

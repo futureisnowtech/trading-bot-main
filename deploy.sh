@@ -118,10 +118,15 @@ if ! docker buildx version >/dev/null 2>&1; then
 fi
 
 echo "  Building lean runtime image from the exact committed tree..."
-docker buildx build --pull --load --progress=plain -t "${LOCAL_IMAGE_NAME}:latest" .
+docker buildx build --pull --load --progress=plain \
+  --build-arg BUILD_SHA="${LOCAL_SHA}" \
+  -t "${LOCAL_IMAGE_NAME}:latest" .
 
 echo "  Building cockpit image..."
-docker buildx build --pull --load --progress=plain -f Dockerfile.dashboard -t "${LOCAL_DASHBOARD_IMAGE_NAME}:latest" .
+docker buildx build --pull --load --progress=plain \
+  --build-arg BUILD_SHA="${LOCAL_SHA}" \
+  -f Dockerfile.dashboard \
+  -t "${LOCAL_DASHBOARD_IMAGE_NAME}:latest" .
 
 echo "  Seeding provisional release artifact for new SHA..."
 docker run --rm -i -v ${PROJECT_DIR}:/app "${LOCAL_IMAGE_NAME}:latest" python3 - << PYEOF
@@ -284,54 +289,43 @@ print(f"  host service status artifact written: {path}")
 PYEOF
 
 echo "  Writing provenance markers..."
+mkdir -p ${PROJECT_DIR}/logs
+
 cat > ${PROJECT_DIR}/version.txt << VTXT
 app_version=${APP_VERSION}
 sha=${LOCAL_SHA}
+build_sha=${LOCAL_SHA}
+branch=${BRANCH}
+deployed_at_utc=${DEPLOY_UTC}
+VTXT
+
+cat > ${PROJECT_DIR}/logs/version.txt << VTXT
+app_version=${APP_VERSION}
+sha=${LOCAL_SHA}
+build_sha=${LOCAL_SHA}
 branch=${BRANCH}
 deployed_at_utc=${DEPLOY_UTC}
 VTXT
 
 python3 - << PYEOF
 import json
+from pathlib import Path
+
 manifest = {
     "app_version": "${APP_VERSION}",
     "sha": "${LOCAL_SHA}",
+    "build_sha": "${LOCAL_SHA}",
     "branch": "${BRANCH}",
     "deployed_at_utc": "${DEPLOY_UTC}",
     "services": ["execution-engine", "kalshi-cockpit"],
     "cockpit_url": "http://157.245.15.40:8501",
 }
-with open("${PROJECT_DIR}/deploy_manifest.json", "w") as f:
-    json.dump(manifest, f, indent=2)
-print("  deploy_manifest.json written.")
-PYEOF
-
-docker exec -i kalshi-cockpit python3 - << PYEOF
-import json
-from pathlib import Path
-
-runtime_dir = Path("/app/logs")
-runtime_dir.mkdir(parents=True, exist_ok=True)
-
-(runtime_dir / "version.txt").write_text(
-    "app_version=${APP_VERSION}\\nsha=${LOCAL_SHA}\\nbranch=${BRANCH}\\ndeployed_at_utc=${DEPLOY_UTC}\\n",
-    encoding="utf-8",
-)
-(runtime_dir / "deploy_manifest.json").write_text(
-    json.dumps(
-        {
-            "app_version": "${APP_VERSION}",
-            "sha": "${LOCAL_SHA}",
-            "branch": "${BRANCH}",
-            "deployed_at_utc": "${DEPLOY_UTC}",
-            "services": ["execution-engine", "kalshi-cockpit"],
-            "cockpit_url": "http://157.245.15.40:8501",
-        },
-        indent=2,
-    ),
-    encoding="utf-8",
-)
-print("  cockpit provenance mirrored to /app/logs")
+for target in (
+    Path("${PROJECT_DIR}/deploy_manifest.json"),
+    Path("${PROJECT_DIR}/logs/deploy_manifest.json"),
+):
+    target.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+print("  deploy_manifest.json written to project root and logs/")
 PYEOF
 
 echo "  Running hosted release audit (soak=${RELEASE_AUDIT_SOAK_SECONDS}s)..."

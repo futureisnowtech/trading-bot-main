@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -69,15 +70,21 @@ def load_deploy_metadata() -> dict[str, Any]:
 def get_build_info() -> dict[str, Any]:
     metadata = load_deploy_metadata()
     metadata_sha = str(metadata.get("sha") or "").strip()
+    build_sha = str(
+        os.getenv("BUILD_SHA")
+        or metadata.get("build_sha")
+        or ""
+    ).strip()
     git_sha = _read_git_value("rev-parse", "HEAD")
     git_branch = _read_git_value("branch", "--show-current")
     metadata_stale = bool(git_sha and metadata_sha and metadata_sha != git_sha)
+    build_sha_mismatch = bool(build_sha and metadata_sha and metadata_sha != build_sha)
     app_version = SOURCE_VERSION if metadata_stale else str(
         metadata.get("app_version")
         or metadata.get("version")
         or SOURCE_VERSION
     ).strip()
-    sha = git_sha or metadata_sha
+    sha = git_sha or build_sha or metadata_sha
     branch = git_branch or str(metadata.get("branch") or "").strip()
     deployed_at_utc = "" if metadata_stale else str(metadata.get("deployed_at_utc") or "").strip()
     cockpit_url = "" if metadata_stale else str(metadata.get("cockpit_url") or "").strip()
@@ -88,8 +95,15 @@ def get_build_info() -> dict[str, Any]:
         "version": app_version or SOURCE_VERSION,
         "sha": sha,
         "short_sha": sha[:7] if sha else "",
+        "metadata_sha": metadata_sha,
+        "metadata_short_sha": metadata_sha[:7] if metadata_sha else "",
+        "git_sha": git_sha,
+        "git_short_sha": git_sha[:7] if git_sha else "",
+        "build_sha": build_sha,
+        "build_short_sha": build_sha[:7] if build_sha else "",
         "branch": branch,
         "deployed_at_utc": deployed_at_utc,
         "cockpit_url": cockpit_url,
         "metadata_stale": metadata_stale,
+        "build_sha_mismatch": build_sha_mismatch,
     }

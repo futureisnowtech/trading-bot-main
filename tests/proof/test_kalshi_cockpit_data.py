@@ -418,3 +418,30 @@ def test_get_build_info_ignores_stale_local_metadata_when_git_sha_differs(monkey
     assert build["deployed_at_utc"] == ""
     assert build["cockpit_url"] == ""
     assert build["metadata_stale"] is True
+
+
+def test_get_build_info_uses_embedded_build_sha_and_flags_metadata_mismatch(monkeypatch):
+    import runtime.build_info as bi
+
+    monkeypatch.setattr(
+        bi,
+        "load_deploy_metadata",
+        lambda: {
+            "app_version": "19.17.0",
+            "sha": "olddeploysha",
+            "build_sha": "olddeploysha",
+            "branch": "master",
+            "deployed_at_utc": "2026-08-11T22:19:00Z",
+        },
+    )
+    monkeypatch.setattr(bi, "_read_git_value", lambda *args: "")
+    monkeypatch.setenv("BUILD_SHA", "newbuildsha1234567")
+
+    build = bi.get_build_info()
+
+    assert build["sha"] == "newbuildsha1234567"
+    assert build["short_sha"] == "newbuil"
+    assert build["build_sha"] == "newbuildsha1234567"
+    assert build["metadata_sha"] == "olddeploysha"
+    assert build["build_sha_mismatch"] is True
+    assert build["metadata_stale"] is False

@@ -1,9 +1,13 @@
 FROM python:3.12-slim
 
+ARG BUILD_SHA=""
+LABEL org.opencontainers.image.revision=$BUILD_SHA
+
 WORKDIR /app
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PIP_ROOT_USER_ACTION=ignore
+    PIP_ROOT_USER_ACTION=ignore \
+    BUILD_SHA=$BUILD_SHA
 
 # Copy dependency files
 COPY requirements-runtime.txt .

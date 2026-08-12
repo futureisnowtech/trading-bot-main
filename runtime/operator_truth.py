@@ -847,9 +847,12 @@ def get_release_status(
         "top_non_blocking_veto_reasons": top_warning_reasons,
         "deploy_parity": {
             "build_sha": build_sha,
+            "embedded_build_sha": str(build.get("build_sha") or ""),
+            "metadata_sha": str(build.get("metadata_sha") or ""),
             "artifact_sha": artifact_sha,
             "artifact_matches_build": artifact_matches_build,
             "metadata_stale": bool(build.get("metadata_stale")),
+            "build_sha_mismatch": bool(build.get("build_sha_mismatch")),
             "version": str(build.get("app_version") or ""),
             "deployed_at_utc": str(build.get("deployed_at_utc") or ""),
         },

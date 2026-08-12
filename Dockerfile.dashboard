@@ -1,6 +1,11 @@
 FROM python:3.12-slim
 
+ARG BUILD_SHA=""
+LABEL org.opencontainers.image.revision=$BUILD_SHA
+
 WORKDIR /app
+
+ENV BUILD_SHA=$BUILD_SHA
 
 COPY requirements-dashboard.txt requirements-runtime.txt ./
 RUN pip install --no-cache-dir -r requirements-dashboard.txt

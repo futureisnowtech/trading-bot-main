@@ -744,3 +744,36 @@ def test_deploy_script_preserves_prior_release_and_runs_immediate_audit():
     assert 'PRE_DEPLOY_RELEASE_B64' in deploy
     assert 'build_deploy_pending_artifact' in deploy
     assert '--remote-hosted --scan-limit 12 --soak-seconds 0' in deploy
+
+
+def test_deploy_script_never_lets_docker_exec_eat_the_remote_script():
+    """`docker exec -i` inside the remote heredoc silently truncates the deploy.
+
+    The remote block is piped into `bash -s`, so a container attached to stdin
+    consumes the rest of the script as its own input. Bash then reaches EOF and
+    exits 0, skipping the soak audit and ownership re-audit while still
+    reporting success. Every docker exec must therefore read from /dev/null.
+    """
+    import re
+    from pathlib import Path
+
+    deploy = Path("deploy.sh").read_text(encoding="utf-8")
+
+    assert "docker exec -i" not in deploy, (
+        "docker exec -i inside the remote heredoc will consume the deploy script"
+    )
+    for match in re.finditer(r"docker exec\b.*?(?=\n\s*\n)", deploy, re.DOTALL):
+        assert "/dev/null" in match.group(0), (
+            f"docker exec without a /dev/null stdin redirect:\n{match.group(0)}"
+        )
+
+
+def test_deploy_script_verifies_the_remote_block_ran_to_completion():
+    from pathlib import Path
+
+    deploy = Path("deploy.sh").read_text(encoding="utf-8")
+
+    assert "REMOTE_COMPLETION_SENTINEL" in deploy
+    # Emitted as the final remote statement, then verified on the local side.
+    assert 'echo "${REMOTE_COMPLETION_SENTINEL}"' in deploy
+    assert 'grep -q "^${REMOTE_COMPLETION_SENTINEL}\\$" "${REMOTE_LOG}"' in deploy

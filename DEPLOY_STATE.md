@@ -1,6 +1,6 @@
 # Deploy state — read before shipping anything to NYC
 
-Last verified: 2026-08-12 01:46 UTC
+Last verified: 2026-08-12 19:45 UTC
 
 ## What is actually running
 
@@ -102,3 +102,24 @@ ssh -p 2222 algo-runner@157.245.15.40 'cd /home/algo-runner/bot && \
 - Runtime containers and deploy helper containers now run as UID/GID `1000`
   (`algo-runner`) and with `PYTHONDONTWRITEBYTECODE=1` so bind-mounted files
   stay owned by the deploy user instead of drifting to root.
+
+## Deploy-script hazard: stdin-eating containers
+
+The remote block in `deploy.sh` is piped into `bash -s`, so **the remote script
+itself is that shell's stdin**. Any container started with stdin attached
+(`docker exec -i`, `docker run -i` without its own redirect) consumes the rest
+of the script as its own input. Bash then reaches EOF and exits **0**, so the
+deploy reports success while every remaining step is silently skipped.
+
+This bit a real deploy on 2026-08-12 (`55d198f`): the 600-second soak audit, the
+post-deploy ownership re-audit, and the provenance echo never ran, and the
+script still printed `Deployment complete.` and exited 0.
+
+Two guards now exist and are pinned by `tests/proof/test_release_audit.py`:
+
+- every `docker exec` in the remote block redirects `</dev/null`
+- the remote block's last statement echoes `__REMOTE_DEPLOY_COMPLETE__`, which
+  the local side greps for and fails the deploy if absent
+
+The `docker run --rm -i ... << PYEOF` calls are safe because their heredoc
+already supplies stdin. Keep it that way when adding steps.

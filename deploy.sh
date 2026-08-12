@@ -64,6 +64,9 @@ echo "  OK: local HEAD == origin/${BRANCH} == ${LOCAL_SHA}"
 
 DEPLOY_UTC=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 RELEASE_AUDIT_SOAK_SECONDS="${RELEASE_AUDIT_SOAK_SECONDS:-600}"
+# Printed as the very last remote statement and checked locally, so a remote
+# block that dies early can never be reported as a successful deploy.
+REMOTE_COMPLETION_SENTINEL="__REMOTE_DEPLOY_COMPLETE__"
 APP_VERSION=$(python3 - <<'PYEOF'
 from VERSION import VERSION
 print(VERSION)
@@ -116,7 +119,8 @@ rsync -avz \
     "${TMP_EXPORT_DIR}/" "${NYC_USER}@${NYC_IP}:${PROJECT_DIR}/"
 
 echo "Restarting lean Docker stack on droplet..."
-${SSH_CMD} ${NYC_USER}@${NYC_IP} bash -s << REMOTE_EOF
+REMOTE_LOG="${TMP_EXPORT_DIR}/remote_deploy.log"
+${SSH_CMD} ${NYC_USER}@${NYC_IP} bash -s << REMOTE_EOF | tee "${REMOTE_LOG}"
 set -euo pipefail
 cd ${PROJECT_DIR}
 
@@ -157,9 +161,9 @@ docker buildx build --pull --load --progress=plain \
 echo "  Capturing current live release state before restart..."
 PRE_DEPLOY_RELEASE_JSON=""
 if docker ps --format '{{.Names}}' | grep -qx 'execution-engine'; then
-  PRE_DEPLOY_RELEASE_JSON="$(docker exec -i execution-engine sh -lc \
+  PRE_DEPLOY_RELEASE_JSON="$(docker exec execution-engine sh -lc \
     'cd /app && python3 scripts/release_audit.py --remote-hosted --scan-limit 12 --soak-seconds 0 --format json' \
-    2>/dev/null || true)"
+    </dev/null 2>/dev/null || true)"
 fi
 PRE_DEPLOY_RELEASE_B64="$(printf '%s' "\${PRE_DEPLOY_RELEASE_JSON}" | base64 | tr -d '\n')"
 
@@ -377,13 +381,21 @@ for target in (
 print("  deploy_manifest.json written to project root and logs/")
 PYEOF
 
+# NOTE: every docker exec below MUST redirect stdin from /dev/null. This whole
+# block is piped into a remote `bash -s`, so an interactive-attached container
+# consumes the rest of this script as its own stdin -- bash then hits EOF and
+# exits 0, silently skipping every remaining step. That is how the soak audit,
+# the ownership re-audit, and the provenance echo were once bypassed on a deploy
+# that still reported success.
 echo "  Running immediate hosted release audit..."
-docker exec -i execution-engine sh -lc \
-  "cd /app && python3 scripts/release_audit.py --remote-hosted --scan-limit 12 --soak-seconds 0"
+docker exec execution-engine sh -lc \
+  "cd /app && python3 scripts/release_audit.py --remote-hosted --scan-limit 12 --soak-seconds 0" \
+  </dev/null
 
 echo "  Running hosted release audit (soak=${RELEASE_AUDIT_SOAK_SECONDS}s)..."
-docker exec -i execution-engine sh -lc \
-  "cd /app && python3 scripts/release_audit.py --remote-hosted --scan-limit 12 --soak-seconds ${RELEASE_AUDIT_SOAK_SECONDS}"
+docker exec execution-engine sh -lc \
+  "cd /app && python3 scripts/release_audit.py --remote-hosted --scan-limit 12 --soak-seconds ${RELEASE_AUDIT_SOAK_SECONDS}" \
+  </dev/null
 
 echo "  Auditing remote ownership after deploy..."
 REMOTE_OWNERSHIP_DRIFT="\$(find ${PROJECT_DIR} \
@@ -397,7 +409,16 @@ fi
 
 echo "  version.txt contents:"
 cat ${PROJECT_DIR}/version.txt
+echo "${REMOTE_COMPLETION_SENTINEL}"
 REMOTE_EOF
+
+if ! grep -q "^${REMOTE_COMPLETION_SENTINEL}\$" "${REMOTE_LOG}"; then
+    echo "ERROR: The remote deploy block exited before reaching its final step."
+    echo "       Every step after the last line above was skipped, so the release"
+    echo "       audits and ownership checks did NOT run. Treat this deploy as"
+    echo "       unverified and re-run it."
+    exit 1
+fi
 
 echo ""
 echo "Deployment complete."

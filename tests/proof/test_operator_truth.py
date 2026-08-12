@@ -546,6 +546,308 @@ def test_weather_provider_status_warms_sampled_series_when_process_cache_is_cold
     assert payload["hydration"]["attempted"] is False
 
 
+def test_weather_freshness_limit_is_tight_for_hourly_and_wide_for_daily():
+    from config import (
+        KALSHI_DATA_FRESHNESS_MINUTES_DAILY,
+        KALSHI_DATA_FRESHNESS_MINUTES_HOURLY,
+    )
+    from forecast.weather_contracts import weather_freshness_limit_minutes
+
+    hourly = weather_freshness_limit_minutes("KXTEMPNYCH-26JUN0522-T75.99")
+    daily = weather_freshness_limit_minutes(
+        "KXHIGHNY-26JUN05-B89.5", contract_name="NY High"
+    )
+
+    assert hourly == KALSHI_DATA_FRESHNESS_MINUTES_HOURLY
+    assert daily == KALSHI_DATA_FRESHNESS_MINUTES_DAILY
+    assert hourly < daily
+
+
+def _stale_gate_truth() -> dict:
+    return {
+        "broker_connected": True,
+        "broker_error": "",
+        "balance_usd": 164.0,
+        "active_markets": 6,
+        "forecast_lane": {
+            "readiness_state": "OPERATIONAL",
+            "heartbeat_stale": False,
+            "heartbeat_age_seconds": 15.0,
+            "buying_power_usd": 164.0,
+        },
+        "forecast_snapshot": {"equity": 164.0},
+        "recent_vetoes": {"top_reasons": []},
+    }
+
+
+def _patch_passing_release_context(monkeypatch, db, provider_status):
+    import runtime.build_info as bi
+    import runtime.incident_tracker as it
+    import runtime.operator_truth as ot
+    import runtime.release_gate as rg
+
+    monkeypatch.setattr(ot, "DB_PATH", db, raising=False)
+    monkeypatch.setattr(
+        rg,
+        "load_release_audit_artifact",
+        lambda: {
+            "verdict": "READY_FOR_LIVE",
+            "audited_sha": "abc123",
+            "entries_allowed": True,
+            "as_of": "2026-06-05T20:00:00+00:00",
+        },
+    )
+    monkeypatch.setattr(
+        bi,
+        "get_build_info",
+        lambda: {"sha": "abc123", "app_version": "19.10.3", "metadata_stale": False},
+    )
+    monkeypatch.setattr(
+        it,
+        "get_incident_summary",
+        lambda db_path=db: {"total_open": 0, "by_severity": {}},
+    )
+    monkeypatch.setattr(it, "get_open_incidents", lambda db_path=db: [])
+    monkeypatch.setattr(
+        ot,
+        "get_weather_provider_status",
+        lambda db_path=db, contract_limit=8: provider_status,
+        raising=False,
+    )
+
+
+def test_release_status_blocks_when_every_sampled_series_is_stale(
+    proof_runtime,
+    monkeypatch,
+):
+    """40-minute-old data is fine for a daily high and stale for an hourly temp.
+
+    The legacy gate compared every contract against the 90-minute fallback, so
+    this case passed the release gate while the strategy engine was vetoing it.
+    Here the hourly series is the whole sample, so the provider is systemically
+    stale and the gate closes.
+    """
+    import runtime.operator_truth as ot
+
+    db = str(proof_runtime.db_path)
+    _patch_passing_release_context(
+        monkeypatch,
+        db,
+        {
+            "data_present": True,
+            "provider_mode": "deterministic_multi_model",
+            "sample_ticker": "KXTEMPNYCH-26JUN0522-T75.99",
+            "weather_age_minutes": 40.0,
+            "freshness_limit_minutes": 25,
+            "series_freshness": [
+                {
+                    "ticker": "KXTEMPNYCH-26JUN0522-T75.99",
+                    "hourly": True,
+                    "age_minutes": 40.0,
+                    "limit_minutes": 25,
+                }
+            ],
+            "stale_series": [
+                {
+                    "ticker": "KXTEMPNYCH-26JUN0522-T75.99",
+                    "hourly": True,
+                    "age_minutes": 40.0,
+                    "limit_minutes": 25,
+                }
+            ],
+        },
+    )
+
+    payload = ot.get_release_status(db_path=db, truth=_stale_gate_truth())
+
+    assert payload["current_release_verdict"] == "BLOCKED"
+    assert payload["entries_allowed"] is False
+    blocker = next(
+        item
+        for item in payload["top_infrastructure_blockers"]
+        if item.startswith("stale_ensemble_data")
+    )
+    assert "25m limit" in blocker
+    assert "KXTEMPNYCH-26JUN0522-T75.99" in blocker
+
+
+def test_release_status_allows_daily_series_at_the_same_age(proof_runtime, monkeypatch):
+    import runtime.operator_truth as ot
+
+    db = str(proof_runtime.db_path)
+    _patch_passing_release_context(
+        monkeypatch,
+        db,
+        {
+            "data_present": True,
+            "provider_mode": "deterministic_multi_model",
+            "sample_ticker": "KXHIGHNY-26JUN05-B89.5",
+            "weather_age_minutes": 40.0,
+            "freshness_limit_minutes": 90,
+            "series_freshness": [
+                {
+                    "ticker": "KXHIGHNY-26JUN05-B89.5",
+                    "hourly": False,
+                    "age_minutes": 40.0,
+                    "limit_minutes": 90,
+                }
+            ],
+            "stale_series": [],
+        },
+    )
+
+    payload = ot.get_release_status(db_path=db, truth=_stale_gate_truth())
+
+    assert payload["current_release_verdict"] == "READY_FOR_LIVE"
+    assert payload["entries_allowed"] is True
+    assert not any(
+        item.startswith("stale_ensemble_data")
+        for item in payload["top_infrastructure_blockers"]
+    )
+
+
+def test_release_status_warns_instead_of_blocking_on_partial_staleness(
+    proof_runtime,
+    monkeypatch,
+):
+    """One stale hourly lane must not halt the fresh daily lanes.
+
+    The release gate is a global kill switch, so partial provider staleness is a
+    warning -- the per-contract entry veto is what keeps the stale contract
+    itself untradable.
+    """
+    import runtime.operator_truth as ot
+
+    db = str(proof_runtime.db_path)
+    stale_hourly = {
+        "ticker": "KXTEMPNYCH-26JUN0522-T75.99",
+        "hourly": True,
+        "age_minutes": 40.0,
+        "limit_minutes": 25,
+    }
+    fresh_daily = {
+        "ticker": "KXHIGHNY-26JUN05-B89.5",
+        "hourly": False,
+        "age_minutes": 40.0,
+        "limit_minutes": 90,
+    }
+    _patch_passing_release_context(
+        monkeypatch,
+        db,
+        {
+            "data_present": True,
+            "provider_mode": "deterministic_multi_model",
+            "sample_ticker": "KXHIGHNY-26JUN05-B89.5",
+            "weather_age_minutes": 40.0,
+            "freshness_limit_minutes": 90,
+            "series_freshness": [fresh_daily, stale_hourly],
+            "stale_series": [stale_hourly],
+        },
+    )
+
+    payload = ot.get_release_status(db_path=db, truth=_stale_gate_truth())
+
+    assert payload["entries_allowed"] is True
+    assert not any(
+        item.startswith("stale_ensemble_data")
+        for item in payload["top_infrastructure_blockers"]
+    )
+    warning = next(
+        item for item in payload["warnings"] if item.startswith("partial_stale_ensemble_data")
+    )
+    assert "1/2 series" in warning
+    assert "KXTEMPNYCH-26JUN0522-T75.99" in warning
+
+
+def test_provider_staleness_findings_handle_legacy_flat_artifact_shape():
+    """Artifacts written before per-series freshness carry only a headline sample."""
+    import runtime.operator_truth as ot
+
+    stale_blocker, stale_warning = ot.get_provider_staleness_findings(
+        {
+            "data_present": True,
+            "sample_ticker": "KXTEMPNYCH-26JUN0522-T75.99",
+            "weather_age_minutes": 40.0,
+        }
+    )
+    fresh_blocker, fresh_warning = ot.get_provider_staleness_findings(
+        {
+            "data_present": True,
+            "sample_ticker": "KXHIGHNY-26JUN05-B89.5",
+            "weather_age_minutes": 40.0,
+        }
+    )
+
+    # A one-series sample that breaches is systemic by definition.
+    assert stale_blocker.startswith("stale_ensemble_data")
+    assert "25m limit" in stale_blocker
+    assert stale_warning == ""
+    assert (fresh_blocker, fresh_warning) == ("", "")
+
+
+def test_weather_provider_status_flags_stale_hourly_series_worst_first(
+    proof_runtime,
+    monkeypatch,
+):
+    import forecast.db as fdb
+    import runtime.operator_truth as ot
+
+    db = str(proof_runtime.db_path)
+    monkeypatch.setattr(ot, "DB_PATH", db, raising=False)
+
+    contracts = [
+        {
+            "local_symbol": "KXHIGHNY-26JUN05-B89.5",
+            "contract_name": "NY High",
+            "strike": 89.5,
+            "resolution_at": "2026-06-05T23:59:59Z",
+            "last_trade_at": "2026-06-05T23:59:59Z",
+        },
+        {
+            "local_symbol": "KXTEMPNYCH-26JUN0522-T75.99",
+            "contract_name": "NYC temp at 10pm",
+            "strike": 75.99,
+            "resolution_at": "2026-06-05T23:59:59Z",
+            "last_trade_at": "2026-06-05T23:59:59Z",
+        },
+    ]
+    monkeypatch.setattr(fdb, "get_active_contracts", lambda db_path=db: contracts, raising=False)
+
+    import data.kalshi_weather_monitor as wm
+
+    monkeypatch.setattr(
+        wm,
+        "_resolve_weather_series",
+        lambda ticker: str(ticker).split("-")[0],
+        raising=False,
+    )
+
+    ages_by_ticker = {
+        "KXHIGHNY-26JUN05-B89.5": 40.0,
+        "KXTEMPNYCH-26JUN0522-T75.99": 61.0,
+    }
+
+    def _get_contract_weather_data(ticker, **kwargs):
+        return {
+            "provider_mode": "deterministic_multi_model",
+            "forecast_source": "open_meteo_forecast",
+            "timestamp": time.time() - ages_by_ticker[ticker] * 60.0,
+        }
+
+    monkeypatch.setattr(wm, "get_contract_weather_data", _get_contract_weather_data, raising=False)
+
+    payload = ot.get_weather_provider_status(db_path=db, contract_limit=4)
+
+    assert payload["data_present"] is True
+    assert payload["checked_contracts"] == 2
+    # The daily high sits inside its 90m window; only the hourly temp breaches.
+    assert [item["ticker"] for item in payload["stale_series"]] == [
+        "KXTEMPNYCH-26JUN0522-T75.99"
+    ]
+    assert payload["stale_series"][0]["limit_minutes"] == 25
+    assert payload["hydration"]["attempted"] is False
+
+
 def test_release_status_prefers_passing_artifact_truth_when_one_shot_process_is_blind(
     proof_runtime,
     monkeypatch,

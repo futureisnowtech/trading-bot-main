@@ -39,7 +39,9 @@ These parameters gate entry signals based on order book and forecast characteris
 | `MAX_SIGMA_T` | `strategy_engine.py` | `0.80` | Volatility cap during rapid repricings. | **CONFIRMED** |
 | `MAX_PARITY_GAP_ABS` | `strategy_engine.py` | `0.05` | Parity mismatch gap (|YES + NO - 1.0|). | **CONFIRMED** |
 | `KALSHI_MAX_FEE_DRAG_PCT` | `config.py` | `0.30` | Vetoes trade if fees represent > 30% of gross gain. | **CONFIRMED** |
-| `KALSHI_DATA_FRESHNESS_MINUTES` | `config.py` | `180` (3 hours) | Maximum allowed age of GFS/ECMWF weather snapshot files. | **CONFIRMED** |
+| `KALSHI_DATA_FRESHNESS_MINUTES_HOURLY` | `config.py` | `25` (SPEC §4.5) | Maximum allowed age of GFS/ECMWF weather snapshot data for hourly contracts. | **CONFIRMED** |
+| `KALSHI_DATA_FRESHNESS_MINUTES_DAILY` | `config.py` | `90` (SPEC §4.5) | Maximum allowed age for daily high/low contracts. Selected per contract by `weather_freshness_limit_minutes()`. | **CONFIRMED** |
+| `WEATHER_REFRESH_TARGET_SEC` | `kalshi_weather_monitor.py` | `1200` (20 min) | Ensemble refresh cadence. Derived from the *hourly* window minus a 5-minute fetch margin so hourly data stays inside its gate. | **CONFIRMED** |
 
 ---
 

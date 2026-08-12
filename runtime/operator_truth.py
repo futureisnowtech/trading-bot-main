@@ -429,8 +429,11 @@ def get_weather_provider_status(
         "forecast_source": "",
         "sample_ticker": "",
         "weather_age_minutes": None,
+        "freshness_limit_minutes": None,
         "active_weather_contracts": 0,
         "checked_contracts": 0,
+        "series_freshness": [],
+        "stale_series": [],
         "hydration": {
             "mode": "read_only_shared_truth",
             "attempted": False,
@@ -440,6 +443,10 @@ def get_weather_provider_status(
     try:
         from data.kalshi_weather_monitor import get_contract_weather_data
         from forecast.db import get_active_contracts
+        from forecast.weather_contracts import (
+            is_hourly_weather_contract,
+            weather_freshness_limit_minutes,
+        )
 
         active = get_active_contracts(db_path=db_path)
         weather_contracts = [
@@ -454,9 +461,10 @@ def get_weather_provider_status(
         for contract in sample_contracts:
             payload["checked_contracts"] += 1
             ticker = str(contract.get("local_symbol") or "")
+            contract_name = str(contract.get("contract_name") or "")
             weather = get_contract_weather_data(
                 ticker,
-                contract_name=str(contract.get("contract_name") or ""),
+                contract_name=contract_name,
                 strike=_coerce_float(contract.get("strike")),
                 resolution_at=str(contract.get("resolution_at") or ""),
                 last_trade_at=str(contract.get("last_trade_at") or ""),
@@ -467,24 +475,110 @@ def get_weather_provider_status(
             age_minutes = None
             ts_value = _coerce_float(weather.get("timestamp"))
             if ts_value is not None:
-                age_minutes = max(0.0, (time.time() - ts_value) / 60.0)
+                age_minutes = round(max(0.0, (time.time() - ts_value) / 60.0), 2)
 
-            payload.update(
-                {
-                    "data_present": True,
-                    "provider_mode": str(weather.get("provider_mode") or ""),
-                    "forecast_source": str(weather.get("forecast_source") or ""),
-                    "sample_ticker": ticker,
-                    "weather_age_minutes": (
-                        round(age_minutes, 2) if age_minutes is not None else None
-                    ),
-                }
-            )
-            break
+            # Each series is judged against its own SPEC §4.5 window: an hourly
+            # contract on 40-minute-old data is stale even though a daily high
+            # on the same snapshot is fine.
+            entry = {
+                "ticker": ticker,
+                "hourly": is_hourly_weather_contract(ticker, contract_name=contract_name),
+                "age_minutes": age_minutes,
+                "limit_minutes": weather_freshness_limit_minutes(
+                    ticker, contract_name=contract_name
+                ),
+            }
+            payload["series_freshness"].append(entry)
+            if age_minutes is not None and age_minutes > entry["limit_minutes"]:
+                payload["stale_series"].append(entry)
+
+            if not payload["data_present"]:
+                payload.update(
+                    {
+                        "data_present": True,
+                        "provider_mode": str(weather.get("provider_mode") or ""),
+                        "forecast_source": str(weather.get("forecast_source") or ""),
+                        "sample_ticker": ticker,
+                        "weather_age_minutes": age_minutes,
+                        "freshness_limit_minutes": entry["limit_minutes"],
+                    }
+                )
+
+        # Worst breach first, so the gate reports the most-overdue series.
+        payload["stale_series"].sort(
+            key=lambda item: float(item["age_minutes"]) - float(item["limit_minutes"]),
+            reverse=True,
+        )
     except Exception as exc:
         payload["error"] = str(exc)
 
     return payload
+
+
+def _describe_stale_series(entry: dict[str, Any]) -> str:
+    return (
+        f"{float(entry.get('age_minutes') or 0.0):.0f}m old "
+        f"> {int(entry.get('limit_minutes') or 0)}m limit for "
+        f"{entry.get('ticker') or 'unknown'}"
+    )
+
+
+def get_provider_staleness_findings(
+    provider: dict[str, Any] | None,
+) -> tuple[str, str]:
+    """Return ``(blocker, warning)`` for weather-snapshot staleness.
+
+    The release gate is a global kill switch, so only a *systemically* stale
+    provider -- every sampled series past its own SPEC §4.5 window -- closes it.
+    Partial staleness is a warning instead: ``forecast.strategy_engine`` still
+    vetoes each stale contract at entry, so no stale trade slips through while
+    the lanes that do have fresh data keep trading.
+
+    Handles both the per-series shape written by ``get_weather_provider_status``
+    and the flat single-sample shape carried by release artifacts from older
+    builds, where only the headline sample age was recorded.
+    """
+    status = provider if isinstance(provider, dict) else {}
+
+    stale_series = status.get("stale_series")
+    dated_series = [
+        item
+        for item in (status.get("series_freshness") or [])
+        if isinstance(item, dict) and item.get("age_minutes") is not None
+    ]
+    if isinstance(stale_series, list) and dated_series:
+        if not stale_series:
+            return "", ""
+        worst = _describe_stale_series(stale_series[0])
+        if len(stale_series) >= len(dated_series):
+            return f"stale_ensemble_data ({worst})", ""
+        return "", (
+            f"partial_stale_ensemble_data "
+            f"({len(stale_series)}/{len(dated_series)} series, worst {worst})"
+        )
+
+    age_minutes = _coerce_float(status.get("weather_age_minutes"))
+    if age_minutes is None:
+        return "", ""
+    limit_minutes = _coerce_float(status.get("freshness_limit_minutes"))
+    if limit_minutes is None:
+        sample_ticker = str(status.get("sample_ticker") or "")
+        try:
+            from forecast.weather_contracts import weather_freshness_limit_minutes
+
+            limit_minutes = float(weather_freshness_limit_minutes(sample_ticker))
+        except Exception:
+            from config import KALSHI_DATA_FRESHNESS_MINUTES
+
+            limit_minutes = float(KALSHI_DATA_FRESHNESS_MINUTES)
+    if age_minutes > limit_minutes:
+        # Single-sample payload: that one series is the whole sample, so a
+        # breach is systemic by definition.
+        return (
+            f"stale_ensemble_data ({age_minutes:.0f}m old "
+            f"> {int(limit_minutes)}m limit)"
+        ), ""
+    return "", ""
 
 
 def get_balance_truth_status(
@@ -767,16 +861,13 @@ def get_release_status(
         elif not provider_mode:
             blockers.append("provider_mode_unknown")
         else:
-            from config import KALSHI_DATA_FRESHNESS_MINUTES
-
-            age_minutes = provider.get("weather_age_minutes")
-            if (
-                age_minutes is not None
-                and float(age_minutes) > float(KALSHI_DATA_FRESHNESS_MINUTES)
-            ):
-                blockers.append(
-                    f"stale_ensemble_data ({float(age_minutes):.0f}m old)"
-                )
+            staleness_blocker, staleness_warning = get_provider_staleness_findings(
+                provider
+            )
+            if staleness_blocker:
+                blockers.append(staleness_blocker)
+            if staleness_warning:
+                warnings.append(staleness_warning)
 
     if not balance_truth.get("balance_ok"):
         if balance_truth.get("comparison_available"):

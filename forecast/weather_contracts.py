@@ -7,6 +7,11 @@ import re
 from dataclasses import dataclass
 from typing import Iterable, Literal
 
+from config import (
+    KALSHI_DATA_FRESHNESS_MINUTES_DAILY,
+    KALSHI_DATA_FRESHNESS_MINUTES_HOURLY,
+)
+
 
 Comparator = Literal["gt", "lt", "between"]
 WeatherMode = Literal["HIGH", "LOW", "RAIN", "SNOW", "WIND", "TEMP"]
@@ -52,6 +57,23 @@ def is_hourly_weather_contract(
         return True
     title = _clean_title(contract_name).lower()
     return "hourly" in title or bool(_HOURLY_TITLE_RE.search(title))
+
+
+def weather_freshness_limit_minutes(
+    ticker: str,
+    *,
+    contract_name: str = "",
+) -> int:
+    """Max weather-snapshot age this contract tolerates, in minutes (SPEC §4.5).
+
+    Hourly contracts resolve inside the hour, so they get the tight window;
+    daily highs/lows get the wide one. Every consumer of the freshness rule
+    routes through here -- the strategy-engine entry veto and the release gate
+    must never drift apart on what counts as stale.
+    """
+    if is_hourly_weather_contract(ticker, contract_name=contract_name):
+        return int(KALSHI_DATA_FRESHNESS_MINUTES_HOURLY)
+    return int(KALSHI_DATA_FRESHNESS_MINUTES_DAILY)
 
 
 def is_short_cadence_weather_contract(

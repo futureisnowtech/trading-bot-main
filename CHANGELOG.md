@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## 2026-08-12 (v19.18.0)
+- Fixed the release gate checking every weather contract against the legacy 90-minute freshness fallback, so hourly contracts were held to the daily bar: `runtime.operator_truth.get_release_status` now resolves the SPEC §4.5 window per contract type via the new `forecast.weather_contracts.weather_freshness_limit_minutes`, which the strategy-engine entry veto also routes through so the two surfaces cannot drift apart.
+- Taught `get_weather_provider_status` to check every sampled weather series against its own freshness window instead of stopping at the first series with data, reporting `series_freshness` and a worst-breach-first `stale_series`.
+- Scoped the gate's staleness verdict to systemic failure: only an entirely stale sample closes the global gate (`stale_ensemble_data`), while partial staleness reports `partial_stale_ensemble_data` as a warning and leaves fresh lanes tradable — the per-contract entry veto is what keeps a stale contract itself untradable.
+- Fixed the ensemble refresh cadence being derived from the wide daily window (75 minutes), which left hourly weather data stale for roughly two-thirds of every cycle and made hourly contracts effectively untradable. `WEATHER_REFRESH_TARGET_SEC` is now derived from the tightest (hourly) window minus a fetch margin, giving a 20-minute cycle; cached state still spans the 90-minute daily window.
+- Pinned both invariants in the proof gate: refresh cadence must fit inside the hourly freshness window, the per-coordinate fetch cache must not outlive the loop that drives it, and the module-level fallback constants must match the config-derived values.
+- Corrected the parameter catalogs, which documented `KALSHI_DATA_FRESHNESS_MINUTES` as a confirmed `180` (3 hours) long after the value became per-contract-type.
+
 ## 2026-06-08
 - Enabled and fully parameterized Snow and Wind weather trading functionality across the core engine and visual cockpit.
 - Upgraded the Open-Meteo data ingestion module (`data/kalshi_weather_monitor.py`) to fetch `wind_speed_10m` data from deterministic and ensemble weather models, constructing and propagating the live `members_wind` and `hourly_members_wind` arrays.

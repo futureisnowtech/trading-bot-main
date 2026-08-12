@@ -49,8 +49,6 @@ from config import (
     KALSHI_MAX_SIGMA,
     KALSHI_MAX_QTY_PER_POSITION,
     KALSHI_MAX_SPREAD_RATIO,
-    KALSHI_DATA_FRESHNESS_MINUTES_HOURLY,
-    KALSHI_DATA_FRESHNESS_MINUTES_DAILY,
     KALSHI_MAX_FEE_DRAG_PCT,
     KALSHI_MAX_USD_PER_POSITION,
     estimate_kalshi_fee_per_contract,
@@ -64,6 +62,7 @@ from forecast.weather_contracts import (
     is_hourly_weather_contract,
     probability_from_members,
     resolve_weather_contract,
+    weather_freshness_limit_minutes,
     weather_mode_for_ticker,
 )
 
@@ -1732,13 +1731,11 @@ def evaluate_contract(
             data_ts = w_data.get("timestamp", 0)
             age_m = (time.time() - data_ts) / 60.0
             
-            from forecast.weather_contracts import is_hourly_weather_contract
-            is_hourly = is_hourly_weather_contract(ticker, contract_name=contract.get("contract_name", ""))
-            freshness_limit = (
-                KALSHI_DATA_FRESHNESS_MINUTES_HOURLY if is_hourly
-                else KALSHI_DATA_FRESHNESS_MINUTES_DAILY
+            freshness_limit = weather_freshness_limit_minutes(
+                ticker,
+                contract_name=contract.get("contract_name", ""),
             )
-            
+
             if age_m > freshness_limit:
                 return StrategyResult(
                     strategy_family="vetoed",
@@ -1750,7 +1747,10 @@ def evaluate_contract(
                     confidence=0.0,
                     uncertainty_penalty=0.0,
                     econ_approved=False,
-                    veto_reason=f"stale_ensemble_data ({age_m:.0f}m old)",
+                    veto_reason=(
+                        f"stale_ensemble_data ({age_m:.0f}m old "
+                        f"> {freshness_limit}m limit)"
+                    ),
                     position_fraction=0.0,
                     position_contracts=0,
                     top_factors=[],

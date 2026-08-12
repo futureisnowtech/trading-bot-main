@@ -36,7 +36,7 @@ These values filter incoming contracts to reject low-edge or high-risk setups:
 
 *   **Sovereign Salvage Delta (0.15)**: Exits position if contract probability drops below $15\%$.
 *   **Take-Profit Target (0.70)**: Closes contract to secure $70\%$ of the maximum possible gain.
-*   **`KALSHI_DATA_FRESHNESS_MINUTES` (180)**: GFS/ECMWF weather snapshot files must be less than 3 hours old to prevent stale forecast executions.
+*   **`KALSHI_DATA_FRESHNESS_MINUTES_HOURLY` (25) / `_DAILY` (90)**: GFS/ECMWF weather snapshot data must be younger than the window for that contract type — 25 minutes for hourly contracts, 90 for daily highs and lows — to prevent stale forecast executions. The ensemble loop refreshes every 20 minutes so hourly data stays inside its window.
 
 ---
 

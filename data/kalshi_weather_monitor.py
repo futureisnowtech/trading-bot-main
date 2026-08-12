@@ -26,8 +26,12 @@ logger = logging.getLogger("weather_monitor")
 # ── Shadow State ──────────────────────────────────────────────────────────────
 # O(1) read access for the strategy engine
 _WEATHER_SHADOW_STATE: Dict[str, Any] = {}
-WEATHER_STATE_TTL_SEC = 21600
-WEATHER_REFRESH_TARGET_SEC = 9900
+# Fallbacks only -- the real values are derived from the SPEC §4.5 freshness
+# windows in the config import below. Kept in step with those defaults (90m
+# daily TTL, 20m refresh) so a config import failure cannot silently widen the
+# cadence past the gate that vetoes stale contracts.
+WEATHER_STATE_TTL_SEC = 5400
+WEATHER_REFRESH_TARGET_SEC = 1200
 _STATE_LOCK = threading.Lock()
 _MONITOR_LOCK = threading.Lock()
 _MONITOR_THREAD: Optional[threading.Thread] = None
@@ -50,7 +54,8 @@ WEATHER_ENSEMBLE_MODEL_PAUSE_SEC = 0.75
 try:
     from config import (
         DB_PATH as _DB_PATH,
-        KALSHI_DATA_FRESHNESS_MINUTES as _CFG_KALSHI_DATA_FRESHNESS_MINUTES,
+        KALSHI_DATA_FRESHNESS_MINUTES_DAILY as _CFG_FRESHNESS_MINUTES_DAILY,
+        KALSHI_DATA_FRESHNESS_MINUTES_HOURLY as _CFG_FRESHNESS_MINUTES_HOURLY,
         WEATHER_ACTIVE_CITY_REFRESH_SEC as _CFG_ACTIVE_CITY_REFRESH_SEC,
         WEATHER_ENSEMBLE_COOLDOWN_SEC as _CFG_ENSEMBLE_COOLDOWN_SEC,
         WEATHER_ENSEMBLE_MODEL_PAUSE_SEC as _CFG_ENSEMBLE_MODEL_PAUSE_SEC,
@@ -59,8 +64,18 @@ try:
 
     _WATERMARKS_FILE = os.path.join(_WEATHER_CACHE_ROOT, "weather_watermarks.json")
     _WEATHER_SNAPSHOT_FILE = os.path.join(_WEATHER_CACHE_ROOT, "weather_snapshot.json")
-    WEATHER_STATE_TTL_SEC = max(300, int(float(_CFG_KALSHI_DATA_FRESHNESS_MINUTES) * 60))
-    WEATHER_REFRESH_TARGET_SEC = max(300, WEATHER_STATE_TTL_SEC - 900)
+    # Cached state stays usable out to the widest gate (daily), because a daily
+    # high legitimately trades on a 90-minute-old ensemble record.
+    WEATHER_STATE_TTL_SEC = max(300, int(float(_CFG_FRESHNESS_MINUTES_DAILY) * 60))
+    # But the refresh cadence is set by the *tightest* gate (hourly), minus a
+    # 5-minute margin for fetch time. Deriving it from the daily window instead
+    # left hourly contracts stale for roughly two-thirds of every cycle, so the
+    # strategy engine vetoed them and the release gate reported the provider as
+    # stale. This constant also drives CACHE_EXPIRY_SEC, so the loop cadence and
+    # the per-coordinate fetch cache always agree.
+    WEATHER_REFRESH_TARGET_SEC = max(
+        300, int(float(_CFG_FRESHNESS_MINUTES_HOURLY) * 60) - 300
+    )
     WEATHER_ACTIVE_CITY_REFRESH_SEC = int(_CFG_ACTIVE_CITY_REFRESH_SEC)
     WEATHER_ENSEMBLE_COOLDOWN_SEC = int(_CFG_ENSEMBLE_COOLDOWN_SEC)
     WEATHER_ENSEMBLE_MODEL_PAUSE_SEC = float(_CFG_ENSEMBLE_MODEL_PAUSE_SEC)
@@ -1918,7 +1933,7 @@ async def update_weather_shadow_state():
     global _WEATHER_SHADOW_STATE
     logger.info("Weather shadow state pipeline active.")
     
-    # ── Cycle 1: Heavy Ensemble Loop (3 Hours) ─────────────────────────────
+    # ── Cycle 1: Ensemble Loop (WEATHER_REFRESH_TARGET_SEC) ────────────────
     async def run_ensemble_sync():
         while True:
             try:

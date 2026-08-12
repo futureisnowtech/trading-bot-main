@@ -19,7 +19,8 @@ from config import (
     DB_PATH,
     FORECAST_LOG_PATH,
     GEMINI_MODEL,
-    KALSHI_DATA_FRESHNESS_MINUTES,
+    KALSHI_DATA_FRESHNESS_MINUTES_DAILY,
+    KALSHI_DATA_FRESHNESS_MINUTES_HOURLY,
     KALSHI_EXIT_MODEL_INVALIDATION_DELTA,
     KALSHI_EXIT_REDEPLOY_EDGE,
     KALSHI_EXIT_TIME_DECAY_BID_FLOOR,
@@ -609,7 +610,10 @@ def build_regime_manifest(
             f"Minimum contract price {KALSHI_MIN_PRICE:.2f} for non-hourly weather lanes, 0.03 for hourly/rain lanes",
             f"Maximum sigma {KALSHI_MAX_SIGMA:.1f}F",
             f"Maximum spread ratio {KALSHI_MAX_SPREAD_RATIO:.0%}",
-            f"Weather data freshness window {KALSHI_DATA_FRESHNESS_MINUTES} minutes",
+            (
+                f"Weather data freshness window {KALSHI_DATA_FRESHNESS_MINUTES_HOURLY} minutes "
+                f"hourly / {KALSHI_DATA_FRESHNESS_MINUTES_DAILY} minutes daily"
+            ),
             f"Max concurrent positions {KALSHI_MAX_CONCURRENT_POSITIONS}",
             f"Same event family cap {KALSHI_SAME_EVENT_FAMILY_CAP}",
             f"Max deployed capital {KALSHI_MAX_DEPLOYED_PCT:.0%}",
@@ -663,7 +667,11 @@ def build_metric_explainers(balance_usd: float | None = None) -> dict[str, str]:
         ),
         "Max Deployed Capital": f"The engine can only deploy up to {KALSHI_MAX_DEPLOYED_PCT:.0%} of the account at once. That leaves dry powder and prevents the bot from becoming fully invested in mediocre conditions.",
         "Fee Model": f"The system prices Kalshi friction directly from the exchange fee curve ({_fee_formula_text()}) instead of adding a second flat fee tax on top.",
-        "Forecast Freshness": f"Weather data older than {KALSHI_DATA_FRESHNESS_MINUTES} minutes is treated as stale. This stops the engine from making decisions off an old atmosphere.",
+        "Forecast Freshness": (
+            f"Hourly contracts treat weather data older than {KALSHI_DATA_FRESHNESS_MINUTES_HOURLY} minutes as stale; "
+            f"daily highs and lows get {KALSHI_DATA_FRESHNESS_MINUTES_DAILY} minutes because they move more slowly. "
+            "This stops the engine from making decisions off an old atmosphere."
+        ),
         "Recent Edge": "This compares the bot's side probability against the price it paid. A bigger gap means the model believed it was buying more outcome probability than the market was charging for.",
         "Confidence": "Confidence is the bot's probability for the side it actually bought, after converting YES/NO correctly. It is the core number behind whether a trade looked cheap or expensive.",
     }
@@ -1012,8 +1020,8 @@ def build_regime_cards(
         },
         {
             "label": "Forecast Freshness",
-            "value": f"{KALSHI_DATA_FRESHNESS_MINUTES}m",
-            "detail": "max age before veto",
+            "value": f"{KALSHI_DATA_FRESHNESS_MINUTES_HOURLY}m / {KALSHI_DATA_FRESHNESS_MINUTES_DAILY}m",
+            "detail": "hourly / daily max age before veto",
             "tooltip": explainers["Forecast Freshness"],
         },
     ]

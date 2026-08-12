@@ -9,6 +9,56 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 
+def test_weather_refresh_cadence_stays_inside_the_tightest_freshness_gate():
+    """The ensemble loop must refresh faster than the strictest staleness veto.
+
+    Deriving the cadence from the wide daily window left hourly contracts stale
+    for most of every cycle: the strategy engine vetoed them on entry and the
+    release gate reported the weather provider as stale. Refresh cadence is set
+    by the tightest gate, never the widest.
+    """
+    from config import (
+        KALSHI_DATA_FRESHNESS_MINUTES_DAILY,
+        KALSHI_DATA_FRESHNESS_MINUTES_HOURLY,
+    )
+    from data.kalshi_weather_monitor import (
+        CACHE_EXPIRY_SEC,
+        WEATHER_REFRESH_TARGET_SEC,
+        WEATHER_STATE_TTL_SEC,
+    )
+
+    hourly_window_sec = KALSHI_DATA_FRESHNESS_MINUTES_HOURLY * 60
+    assert WEATHER_REFRESH_TARGET_SEC < hourly_window_sec, (
+        f"refresh cadence {WEATHER_REFRESH_TARGET_SEC}s does not fit inside the "
+        f"{hourly_window_sec}s hourly freshness window"
+    )
+    # The per-coordinate fetch cache must not outlive the loop that drives it,
+    # or the loop wakes up and gets a cached record back instead of a refresh.
+    assert CACHE_EXPIRY_SEC <= WEATHER_REFRESH_TARGET_SEC
+    # Cached state still has to remain usable across the widest (daily) window.
+    assert WEATHER_STATE_TTL_SEC >= KALSHI_DATA_FRESHNESS_MINUTES_DAILY * 60
+
+
+def test_weather_monitor_fallback_constants_match_the_derived_cadence():
+    """A config import failure must not silently widen the cadence.
+
+    The module-level fallbacks are what survive that failure, so they are pinned
+    to the same values the config-derived path produces.
+    """
+    import config
+    from data.kalshi_weather_monitor import (
+        WEATHER_REFRESH_TARGET_SEC,
+        WEATHER_STATE_TTL_SEC,
+    )
+
+    assert WEATHER_STATE_TTL_SEC == max(
+        300, config.KALSHI_DATA_FRESHNESS_MINUTES_DAILY * 60
+    )
+    assert WEATHER_REFRESH_TARGET_SEC == max(
+        300, config.KALSHI_DATA_FRESHNESS_MINUTES_HOURLY * 60 - 300
+    )
+
+
 def test_scc01_ml_retrain_check_waits_for_time_and_trade_threshold(monkeypatch):
     import config
     import scheduler.v10_runner as runner

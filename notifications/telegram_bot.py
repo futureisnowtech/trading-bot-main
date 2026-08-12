@@ -334,6 +334,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     msg = (
         f"<b>KALSHI WEATHER ENGINE: LIVE</b>\n"
+        f"Bot State: {'Can place new trades now' if release.get('entries_allowed') else 'New entries are paused'}\n"
         f"Balance: ${balance:,.2f}\n"
         f"Active Markets: {active_markets}\n"
         f"Broker Positions: {broker_positions_count}\n"
@@ -343,6 +344,53 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Truth Drift: {'YES' if drift.get('has_drift') else 'NO'}\n"
         f"Infra Blockers: {len(release.get('top_infrastructure_blockers') or [])}\n"
         f"AI Spend (24h): ${usd_spent:.4f}"
+    )
+    blockers = release.get("top_infrastructure_blockers") or []
+    if blockers:
+        msg += f"\nMain Blocker: {escape(str(blockers[0]), quote=False)}"
+    await _reply_text(update, msg, parse_mode=ParseMode.HTML)
+
+
+@restricted_access
+async def brief_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    from dashboard.jarvis_brain import get_operator_brief
+
+    await _reply_text(update, f"<pre>{escape(get_operator_brief(), quote=False)}</pre>", parse_mode=ParseMode.HTML)
+
+
+@restricted_access
+async def why_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    from dashboard.jarvis_brain import get_trading_readiness_summary
+
+    await _reply_text(
+        update,
+        f"<pre>{escape(get_trading_readiness_summary(), quote=False)}</pre>",
+        parse_mode=ParseMode.HTML,
+    )
+
+
+@restricted_access
+async def changes_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    from dashboard.jarvis_brain import list_pending_approvals
+
+    await _reply_text(
+        update,
+        f"<pre>{escape(list_pending_approvals(), quote=False)}</pre>",
+        parse_mode=ParseMode.HTML,
+    )
+
+
+@restricted_access
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = (
+        "<b>Operator Shortcuts</b>\n"
+        "/brief - plain-English health summary and what needs attention\n"
+        "/why - why the bot is or is not placing new trades\n"
+        "/status - compact live balance, gate, drift, and blocker snapshot\n"
+        "/positions - live open weather bets\n"
+        "/changes - pending cockpit approval requests\n"
+        "/audit - full local audit plus AI analysis\n"
+        "/ask &lt;question&gt; - ask Jarvis anything in plain English"
     )
     await _reply_text(update, msg, parse_mode=ParseMode.HTML)
 
@@ -545,6 +593,10 @@ async def run_bot():
     try:
         app = ApplicationBuilder().token(TOKEN).build()
 
+        app.add_handler(CommandHandler("help", help_command))
+        app.add_handler(CommandHandler("brief", brief_command))
+        app.add_handler(CommandHandler("why", why_command))
+        app.add_handler(CommandHandler("changes", changes_command))
         app.add_handler(CommandHandler("status", status_command))
         app.add_handler(CommandHandler("hud", hud_command))
         app.add_handler(CommandHandler("logs", logs_command))

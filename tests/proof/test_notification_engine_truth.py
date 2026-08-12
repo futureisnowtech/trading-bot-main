@@ -8,6 +8,7 @@ from notifications.notification_engine import (
     SEV_WARNING,
     _render_telegram_message,
     _should_dispatch_telegram,
+    notify_system,
 )
 
 
@@ -74,3 +75,27 @@ def test_kill_switch_trigger_dispatches_critical_alert():
 
     assert _should_dispatch_telegram(event) is True
     assert "CRITICAL_KILL_SWITCH" in _render_telegram_message(event)
+
+
+def test_notify_system_explicit_telegram_path_marks_operator_alert(monkeypatch):
+    captured = {}
+
+    def fake_push(event):
+        captured["event"] = event
+        return "row-id"
+
+    monkeypatch.setattr("notifications.notification_engine.push", fake_push)
+
+    notify_system(
+        title="Kalshi API rate limit hit",
+        detail="Execution controller paused entries.",
+        severity=SEV_WARNING,
+        telegram=True,
+    )
+
+    event = captured["event"]
+    assert event.category == CAT_SYSTEM
+    assert event.data["telegram"] is True
+    assert event.data["telegram_event"] == "OPERATOR_ALERT"
+    assert _should_dispatch_telegram(event) is True
+    assert "OPERATOR ALERT" in _render_telegram_message(event)

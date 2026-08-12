@@ -107,7 +107,7 @@ def _execute(action: str, params: dict[str, Any]) -> str:
     if action == "promote_release":
         from notifications.agent_tools import run_release_audit
 
-        return run_release_audit("--promote")
+        return run_release_audit("promote")
     return f"No executor registered for action '{action}'."
 
 

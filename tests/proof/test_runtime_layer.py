@@ -289,3 +289,129 @@ def test_deploy_script_audits_remote_ownership_and_runs_helper_containers_as_hos
     assert 'export ALGO_GID="\\$(id -g)"' in deploy
     assert deploy.count('--user "\\${ALGO_UID}:\\${ALGO_GID}"') >= 2
     assert 'Deploy introduced non-${NYC_USER} ownership drift.' in deploy
+
+
+def test_approval_queue_promote_release_uses_canonical_command(tmp_path, monkeypatch):
+    import config
+    import runtime.approvals as approvals
+
+    db = str(tmp_path / "approvals.db")
+    monkeypatch.setattr(config, "DB_PATH", db, raising=False)
+    monkeypatch.setattr(
+        "notifications.agent_tools.run_release_audit",
+        lambda command: f"ran {command}",
+    )
+
+    approvals.request_change("promote_release")
+    pending = approvals.list_pending()
+
+    assert pending
+    assert approvals.resolve(int(pending[0]["id"]), approve=True) == "ran promote"
+
+
+def test_agent_read_file_can_read_repo_files_without_name_error():
+    import notifications.agent_tools as tools
+
+    content = tools.read_file(str(ROOT / "VERSION.py"), start_line=1, end_line=8)
+
+    assert "VERSION" in content
+
+
+def test_jarvis_open_positions_uses_canonical_broker_side(monkeypatch):
+    import dashboard.jarvis_brain as jb
+
+    monkeypatch.setattr(
+        "runtime.operator_truth.get_live_kalshi_status",
+        lambda: {
+            "broker_positions": [
+                {"ticker": "KXLOWNY-12AUG26-T70", "side": "NO", "qty": 4, "entry_price": 0.37}
+            ],
+            "position_drift": {"has_drift": False},
+        },
+    )
+
+    output = jb.get_open_positions()
+
+    assert "KXLOWNY-12AUG26-T70 (NO)" in output
+
+
+def test_operator_brief_summarizes_live_truth_in_plain_english(monkeypatch):
+    import dashboard.jarvis_brain as jb
+
+    monkeypatch.setattr(
+        "runtime.operator_truth.get_live_kalshi_status",
+        lambda: {
+            "broker_connected": True,
+            "broker_positions_count": 2,
+            "active_markets": 11,
+            "position_drift": {"has_drift": True},
+        },
+    )
+    monkeypatch.setattr(
+        "runtime.operator_truth.get_release_status",
+        lambda truth=None: {
+            "entries_allowed": False,
+            "current_release_verdict": "BLOCKED",
+            "top_infrastructure_blockers": ["release_audit_pending_new_build"],
+            "critical_incidents": [],
+            "open_incidents": {"total_open": 1},
+            "provider_mode": "deterministic_multi_model",
+        },
+    )
+    monkeypatch.setattr("runtime.approvals.list_pending", lambda: [{"id": 17}])
+
+    output = jb.get_operator_brief()
+
+    assert "Trading status: PAUSED (BLOCKED)" in output
+    assert "Book sync: broker and database do NOT agree." in output
+    assert "Pending change requests: 1" in output
+    assert "Main blocker: release_audit_pending_new_build" in output
+
+
+def test_trading_readiness_summary_explains_blockers_in_plain_english(monkeypatch):
+    import dashboard.jarvis_brain as jb
+
+    monkeypatch.setattr(
+        "runtime.operator_truth.get_live_kalshi_status",
+        lambda: {
+            "forecast_lane": {"blocked_reason": "stale_runtime_heartbeat"},
+            "recent_vetoes": {"top_reasons": [{"reason": "missing_quotes", "count": 3}]},
+            "recent_execution": {"top_outcomes": [{"outcome": "too_many_requests", "count": 2}]},
+        },
+    )
+    monkeypatch.setattr(
+        "runtime.operator_truth.get_release_status",
+        lambda truth=None: {
+            "entries_allowed": False,
+            "top_infrastructure_blockers": ["broker_disconnected"],
+        },
+    )
+    monkeypatch.setattr("runtime.approvals.list_pending", lambda: [])
+
+    output = jb.get_trading_readiness_summary()
+
+    assert "blocked from placing new trades" in output
+    assert "Main hard blocker: broker_disconnected" in output
+    assert "Lane-level block reason: stale_runtime_heartbeat" in output
+    assert "Most common recent pass/fail filter: missing_quotes (3 times)." in output
+    assert "Most common recent execution issue: too_many_requests (2 times)." in output
+
+
+def test_jarvis_preloaded_prompts_are_plain_english_and_operator_focused():
+    text = (ROOT / "dashboard" / "streamlit_app.py").read_text(encoding="utf-8")
+
+    assert "🧭 What Needs Attention?" in text
+    assert "🛑 Why Isn't It Trading?" in text
+    assert "💸 Are Fees Hurting Us?" in text
+    assert "Why No Trades?" not in text
+    assert "Call get_operator_brief" in text
+    assert "Call get_trading_readiness_summary" in text
+
+
+def test_telegram_surface_exposes_plain_english_operator_shortcuts():
+    text = (ROOT / "notifications" / "telegram_bot.py").read_text(encoding="utf-8")
+
+    assert 'CommandHandler("brief", brief_command)' in text
+    assert 'CommandHandler("why", why_command)' in text
+    assert 'CommandHandler("changes", changes_command)' in text
+    assert "/brief - plain-English health summary and what needs attention" in text

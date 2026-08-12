@@ -59,6 +59,7 @@ _TELEGRAM_ALLOWED_EVENT_CODES = {
     "ORDER_FILLED",
     "POSITION_FLATTENED",
     "CRITICAL_KILL_SWITCH",
+    "OPERATOR_ALERT",
 }
 
 
@@ -195,6 +196,13 @@ def _render_telegram_message(event: NotificationEvent) -> str:
             f"Detail: {event.message}"
         )
 
+    if code == "OPERATOR_ALERT":
+        return (
+            f"<b>OPERATOR ALERT ({event.severity})</b>\n"
+            f"{event.title}\n"
+            f"{event.message}"
+        )
+
     return f"<b>{event.title}</b>\n{event.message}"
 
 
@@ -307,6 +315,7 @@ def notify_risk(title: str, detail: str, severity: str = SEV_WARNING,
     payload = dict(data or {})
     if telegram:
         payload["telegram"] = True
+        payload.setdefault("telegram_event", "OPERATOR_ALERT")
     push(NotificationEvent(
         category=CAT_RISK,
         severity=severity,
@@ -371,6 +380,7 @@ def notify_system(title: str, detail: str,
     payload = dict(data or {})
     if telegram:
         payload["telegram"] = True
+        payload.setdefault("telegram_event", "OPERATOR_ALERT")
     push(NotificationEvent(
         category=CAT_SYSTEM,
         severity=severity,

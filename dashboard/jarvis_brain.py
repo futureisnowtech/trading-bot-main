@@ -7,6 +7,7 @@ import os
 import sqlite3
 import json
 import logging
+import shutil
 from datetime import datetime, timezone
 from typing import Any
 
@@ -119,36 +120,32 @@ def get_account_status() -> str:
 
 
 def get_open_positions() -> str:
-    """List all currently active open positions on the live broker."""
-    res = []
-    
-    # 1. Live Broker Positions
+    """List all currently active open positions from canonical broker-first truth."""
     try:
-        from execution.kalshi_broker import get_kalshi_broker
-        broker = get_kalshi_broker()
-        if broker.is_connected() or broker.connect():
-            positions = broker.get_positions()
-            active_pos = []
-            for p in positions:
-                qty = abs(float(p.get("position_fp") or p.get("qty") or 0.0))
-                if qty <= 0:
-                    continue
-                ticker = p.get("ticker") or p.get("local_symbol")
-                side = "YES" if float(p.get("position_fp") or p.get("qty") or 0.0) > 0 else "NO"
-                mkt_val = float(p.get("market_exposure_dollars") or 0.0)
-                entry = float(p.get("entry_price") or p.get("entry") or 0.0)
-                pnl = float(p.get("realized_pnl_dollars") or 0.0)
-                active_pos.append(
-                    f"  - {ticker} ({side}) | Qty: {qty:.0f} | Entry: ${entry:.2f} | Current Val: ${mkt_val:.2f} | Realized PnL: ${pnl:.2f}"
-                )
-            if active_pos:
-                res.append("🟢 **LIVE BROKER POSITIONS:**\n" + "\n".join(active_pos))
-            else:
-                res.append("🟢 **LIVE BROKER POSITIONS:** No active live broker positions.")
-    except Exception as e:
-        res.append(f"🟢 **LIVE BROKER POSITIONS:** Query error: {e}")
+        from runtime.operator_truth import get_live_kalshi_status
 
-    return "\n\n".join(res)
+        truth = get_live_kalshi_status()
+        positions = truth.get("broker_positions") or []
+        drift = truth.get("position_drift") or {}
+        if not positions:
+            msg = "No active live broker positions."
+            if drift.get("has_drift"):
+                msg += "\nWarning: broker/database drift is currently present."
+            return msg
+
+        lines = ["LIVE BROKER POSITIONS:"]
+        for pos in positions:
+            lines.append(
+                f"  - {pos.get('ticker')} ({pos.get('side')}) | "
+                f"Qty: {float(pos.get('qty') or 0):g} | "
+                f"Entry: ${float(pos.get('entry_price') or 0.0):.2f}"
+            )
+        if drift.get("has_drift"):
+            lines.append("")
+            lines.append("Warning: broker/database drift is currently present.")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Error retrieving open positions: {e}"
 
 
 def get_recent_trades(limit: int = 15) -> str:
@@ -581,6 +578,127 @@ def get_system_parameters() -> str:
         return "\n".join(lines)
     except Exception as e:
         return f"Error retrieving system parameters: {e}"
+
+
+def get_operator_brief() -> str:
+    """Return a plain-English owner summary of live health, trading state, and next action."""
+    try:
+        from runtime import approvals
+        from runtime.operator_truth import get_live_kalshi_status, get_release_status
+
+        truth = get_live_kalshi_status()
+        release = get_release_status(truth=truth)
+        pending = approvals.list_pending()
+
+        drift = truth.get("position_drift") or {}
+        blockers = release.get("top_infrastructure_blockers") or []
+        critical_incidents = release.get("critical_incidents") or []
+        pending_count = len(pending)
+        entries_allowed = bool(release.get("entries_allowed"))
+        broker_connected = bool(truth.get("broker_connected"))
+        verdict = str(release.get("current_release_verdict") or "UNKNOWN")
+
+        if blockers:
+            next_action = f"Investigate blocker: {blockers[0]}"
+        elif drift.get("has_drift"):
+            next_action = "Reconcile broker vs database positions before trusting local bookkeeping."
+        elif critical_incidents:
+            next_action = f"Review critical incident: {critical_incidents[0].get('sample_message') or critical_incidents[0].get('source')}"
+        elif pending_count:
+            next_action = f"Review {pending_count} pending cockpit approval request(s)."
+        else:
+            next_action = "No immediate operator action is required."
+
+        lines = [
+            "OWNER BRIEF",
+            f"Trading status: {'ACTIVE' if entries_allowed else 'PAUSED'} ({verdict})",
+            (
+                "Meaning: the bot is allowed to place new trades right now."
+                if entries_allowed
+                else "Meaning: the bot is blocked from opening new trades right now."
+            ),
+            f"Broker connection: {'CONNECTED' if broker_connected else 'DISCONNECTED'}",
+            f"Open weather positions: {int(truth.get('broker_positions_count') or 0)}",
+            f"Active markets scanning: {int(truth.get('active_markets') or 0)}",
+            (
+                "Book sync: broker and database agree."
+                if not drift.get("has_drift")
+                else "Book sync: broker and database do NOT agree."
+            ),
+            f"Open incidents: {int((release.get('open_incidents') or {}).get('total_open') or 0)}",
+            f"Pending change requests: {pending_count}",
+            f"Weather data mode: {release.get('provider_mode') or 'unknown'}",
+        ]
+        if blockers:
+            lines.append(f"Main blocker: {blockers[0]}")
+        lines.append(f"Next thing to look at: {next_action}")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Error building operator brief: {e}"
+
+
+def get_trading_readiness_summary(lookback_hours: int = 24) -> str:
+    """Explain, in plain English, whether the bot can trade and what is blocking entries."""
+    try:
+        from runtime import approvals
+        from runtime.operator_truth import (
+            get_live_kalshi_status,
+            get_recent_execution_summary,
+            get_recent_veto_summary,
+            get_release_status,
+        )
+
+        truth = get_live_kalshi_status()
+        release = get_release_status(truth=truth)
+        vetoes = truth.get("recent_vetoes") or get_recent_veto_summary(lookback_hours=lookback_hours)
+        execution = truth.get("recent_execution") or get_recent_execution_summary(lookback_hours=lookback_hours)
+        lane = truth.get("forecast_lane") or {}
+        blockers = release.get("top_infrastructure_blockers") or []
+        pending = approvals.list_pending()
+
+        top_veto = ((vetoes.get("top_reasons") or [{}])[:1] or [{}])[0]
+        top_exec = ((execution.get("top_outcomes") or [{}])[:1] or [{}])[0]
+
+        lines = []
+        if release.get("entries_allowed"):
+            lines.append("The bot is currently allowed to place new trades.")
+            lines.append("There is no hard release-gate blocker stopping entries right now.")
+        else:
+            lines.append("The bot is currently blocked from placing new trades.")
+            if blockers:
+                lines.append(f"Main hard blocker: {blockers[0]}")
+
+        blocked_reason = str(lane.get("blocked_reason") or "").strip()
+        if blocked_reason:
+            lines.append(f"Lane-level block reason: {blocked_reason}")
+
+        if top_veto.get("reason"):
+            lines.append(
+                f"Most common recent pass/fail filter: {top_veto['reason']} "
+                f"({int(top_veto.get('count') or 0)} times)."
+            )
+        else:
+            lines.append("Recent veto summary: no repeated strategy filter dominated the lookback window.")
+
+        if top_exec.get("outcome"):
+            lines.append(
+                f"Most common recent execution issue: {top_exec['outcome']} "
+                f"({int(top_exec.get('count') or 0)} times)."
+            )
+        else:
+            lines.append("Recent execution summary: no repeated order-execution failure dominated the lookback window.")
+
+        if pending:
+            lines.append(f"Pending cockpit approvals waiting on you: {len(pending)}.")
+        else:
+            lines.append("There are no pending cockpit approvals waiting on you.")
+
+        if release.get("entries_allowed") and not top_veto.get("reason") and not top_exec.get("outcome"):
+            lines.append("Bottom line: the bot appears free to trade and is likely just waiting for a strong enough weather setup.")
+
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Error building trading readiness summary: {e}"
 
 
 def apply_hot_patch_code(patch_name: str, code_snippet: str) -> str:

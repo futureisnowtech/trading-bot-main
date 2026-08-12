@@ -16,7 +16,7 @@ import sys
 import shlex
 from typing import Optional, List
 
-from config import DB_PATH
+from config import DB_PATH, REPO_ROOT
 
 logger = logging.getLogger(__name__)
 
@@ -319,5 +319,4 @@ def run_soak_monitor_check() -> str:
     except Exception as e:
         logger.error("AI soak monitor check error: %s", e)
         return f"Error: {str(e)}"
-
 

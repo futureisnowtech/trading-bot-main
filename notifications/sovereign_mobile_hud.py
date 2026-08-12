@@ -131,7 +131,7 @@ def build_main_menu_msg() -> str:
         f"Entries: {'LIVE' if k['entries_allowed'] else 'PAUSED'}",
         f"Drift: {'YES' if k.get('drift', {}).get('has_drift') else 'NO'}",
         "",
-        "<i>Tap a module below for deep-dive analysis.</i>"
+        "<i>Tap below to see whether the bot can trade, what it is holding, and what needs attention.</i>"
     ]
     return "\n".join(msg)
 

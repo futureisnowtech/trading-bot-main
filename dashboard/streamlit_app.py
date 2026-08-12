@@ -1406,18 +1406,18 @@ else:
     # tells you nothing about current system health.
     sug_cols = st.columns(5)
     labels = [
-        "🚦 Why No Trades?",
-        "💸 Fee vs Edge",
-        "🎯 Maker Fills",
-        "📂 Open Book",
-        "🔍 Truth Drift",
+        "🧭 What Needs Attention?",
+        "🛑 Why Isn't It Trading?",
+        "💸 Are Fees Hurting Us?",
+        "🎯 Are Entries Working?",
+        "📂 What Bets Are Live?",
     ]
     prompts_map = {
-        "🚦 Why No Trades?": "Call get_entry_funnel. Tell me plainly whether entries are currently allowed, and if not, exactly what is blocking them.",
-        "💸 Fee vs Edge": "Call get_fee_drag. Report the gross edge, fees paid, and net realized PnL for the live era, and state what fraction of the edge fees are consuming.",
-        "🎯 Maker Fills": "Call get_maker_fill_stats. Report the maker fill rate, how many entries timed out and crossed as taker, and the average spread saved per contract.",
-        "📂 Open Book": "Call get_open_positions. List every open position with side, quantity, entry price, and current realized PnL.",
-        "🔍 Truth Drift": "Call get_live_kalshi_status. Report position_drift specifically -- state clearly whether the broker and local database agree, and detail any mismatch.",
+        "🧭 What Needs Attention?": "Call get_operator_brief. In plain English, tell me whether the bot is healthy, whether it can trade, and the one thing I should pay attention to right now.",
+        "🛑 Why Isn't It Trading?": "Call get_trading_readiness_summary. Explain in plain English whether the bot is allowed to place new trades, and if not, exactly what is stopping it.",
+        "💸 Are Fees Hurting Us?": "Call get_fee_drag. Explain in plain English how much of our trading edge fees are eating and whether that is materially hurting us.",
+        "🎯 Are Entries Working?": "Call get_maker_fill_stats. Explain in plain English whether our entry approach is getting good fills or forcing us to overpay.",
+        "📂 What Bets Are Live?": "Call get_open_positions. List our live weather bets in plain English, including side, size, and entry price.",
     }
     for col, label in zip(sug_cols, labels):
         if col.button(label, use_container_width=True, key=f"sug_{label}"):
@@ -1428,7 +1428,7 @@ else:
     # Chat history
     if "jarvis_history" not in st.session_state:
         st.session_state.jarvis_history = [
-            {"role": "assistant", "content": "Weatherman Bot online. Ask me to audit trades, explain positions, pull logs, or flatten a contract."}
+            {"role": "assistant", "content": "Jarvis is live. Ask what the bot is doing, why it is or is not trading, what bets are open, or whether anything needs your attention."}
         ]
 
     for msg in st.session_state.jarvis_history:
@@ -1458,7 +1458,7 @@ else:
             with cmd_l:
                 user_typed_prompt = st.text_input(
                     "Command Input",
-                    placeholder="Ask JARVIS anything (e.g., PnL since July 29, open positions, bot logs)...",
+                    placeholder="Ask in plain English (e.g., Why isn't it trading? What bets are live? Does anything need me?)",
                     label_visibility="collapsed",
                     key="jarvis_form_input_val",
                 )
@@ -1522,4 +1522,3 @@ if _active:
         st.session_state.active_panels = []
         st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
-

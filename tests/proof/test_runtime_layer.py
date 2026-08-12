@@ -284,7 +284,7 @@ def test_deploy_script_audits_remote_ownership_and_runs_helper_containers_as_hos
     assert "remote_ownership_report()" in deploy
     assert 'REMOTE_UID="\\$(id -u)"' in deploy
     assert 'REMOTE_GID="\\$(id -g)"' in deploy
-    assert 'docker run --rm -u "${REMOTE_UID}:${REMOTE_GID}" -v ${PROJECT_DIR}:/workspace alpine:3.20 sh -lc \\' in deploy
+    assert 'docker run --rm -u "\\${REMOTE_UID}:\\${REMOTE_GID}" -v ${PROJECT_DIR}:/workspace alpine:3.20 sh -lc \\' in deploy
     assert 'export ALGO_UID="\\$(id -u)"' in deploy
     assert 'export ALGO_GID="\\$(id -g)"' in deploy
     assert '--user "${ALGO_UID}:${ALGO_GID}"' in deploy

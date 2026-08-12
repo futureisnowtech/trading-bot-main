@@ -91,7 +91,7 @@ set -euo pipefail
 mkdir -p ${PROJECT_DIR}
 REMOTE_UID="\$(id -u)"
 REMOTE_GID="\$(id -g)"
-docker run --rm -u "${REMOTE_UID}:${REMOTE_GID}" -v ${PROJECT_DIR}:/workspace alpine:3.20 sh -lc \
+docker run --rm -u "\${REMOTE_UID}:\${REMOTE_GID}" -v ${PROJECT_DIR}:/workspace alpine:3.20 sh -lc \
   'find /workspace \( -name __pycache__ -o -name .pytest_cache \) -prune -exec rm -rf {} +; find /workspace -name "*.pyc" -delete'
 REMOTE_PRUNE
 

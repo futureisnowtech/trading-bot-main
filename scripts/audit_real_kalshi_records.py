@@ -22,7 +22,7 @@ from config import POST_PAPER_START_DATE as LIVE_ERA_START
 from execution.kalshi_broker import KalshiBroker
 from runtime.kalshi_settlement_truth import settlement_pnl_usd
 
-def audit(start_date: str = "2026-07-24", end_date: str | None = None, emit_webapp_ts: str | None = None):
+def audit(start_date: str = LIVE_ERA_START, end_date: str | None = None, emit_webapp_ts: str | None = None):
     broker = KalshiBroker()
     if not broker.connect():
         print("❌ Auth Error: Failed to connect to live Kalshi REST API.")
@@ -344,7 +344,7 @@ export const releaseLogs: {{ date: string; tag: string; details: string }}[] = [
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--start", default="2026-07-24", help="Start date ISO format (YYYY-MM-DD)")
+    parser.add_argument("--start", default=LIVE_ERA_START, help="Start date ISO format (YYYY-MM-DD)")
     parser.add_argument("--end", default=None, help="Inclusive end date ISO format (YYYY-MM-DD). Omit for open-ended.")
     parser.add_argument("--emit-webapp-ts", default=None, help="Path to write the WebApp resultsData.ts")
     args = parser.parse_args()

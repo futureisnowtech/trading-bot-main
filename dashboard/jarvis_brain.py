@@ -11,7 +11,7 @@ import shutil
 from datetime import datetime, timezone
 from typing import Any
 
-from config import DB_PATH, GEMINI_MODEL
+from config import DB_PATH, GEMINI_MODEL, TRADE_DATA_START_DATE
 
 logger = logging.getLogger(__name__)
 
@@ -154,8 +154,9 @@ def get_recent_trades(limit: int = 15) -> str:
         conn = sqlite3.connect(_get_db_path())
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
-            "SELECT ts, symbol, action, qty, price, pnl_usd, notes, contract_side FROM trades ORDER BY ts DESC LIMIT ?",
-            (limit,)
+            "SELECT ts, symbol, action, qty, price, pnl_usd, notes, contract_side "
+            "FROM trades WHERE ts >= ? ORDER BY ts DESC LIMIT ?",
+            (TRADE_DATA_START_DATE, limit),
         ).fetchall()
         trades = []
         for r in rows:
@@ -182,8 +183,8 @@ def search_trades_and_positions(
         conn = sqlite3.connect(_get_db_path())
         conn.row_factory = sqlite3.Row
 
-        where_clauses = []
-        params: list[Any] = []
+        where_clauses = ["ts >= ?"]
+        params: list[Any] = [TRADE_DATA_START_DATE]
 
         if query_text:
             q_clean = str(query_text).strip().upper()
@@ -254,9 +255,15 @@ def get_trade_post_mortem(ticker_or_id: str) -> str:
         query_str = ticker_or_id.strip()
         trades = []
         if query_str.isdigit():
-            trades = conn.execute("SELECT * FROM trades WHERE id = ?", (int(query_str),)).fetchall()
+            trades = conn.execute(
+                "SELECT * FROM trades WHERE id = ? AND ts >= ?",
+                (int(query_str), TRADE_DATA_START_DATE),
+            ).fetchall()
         else:
-            trades = conn.execute("SELECT * FROM trades WHERE symbol LIKE ? ORDER BY ts DESC LIMIT 10", (f"%{query_str}%",)).fetchall()
+            trades = conn.execute(
+                "SELECT * FROM trades WHERE symbol LIKE ? AND ts >= ? ORDER BY ts DESC LIMIT 10",
+                (f"%{query_str}%", TRADE_DATA_START_DATE),
+            ).fetchall()
 
         symbol = query_str
         if trades:
@@ -354,7 +361,8 @@ def get_ticker_analysis(ticker: str) -> str:
         ).fetchone()
 
         trades = conn.execute(
-            "SELECT * FROM trades WHERE symbol = ? ORDER BY ts DESC LIMIT 5", (ticker,)
+            "SELECT * FROM trades WHERE symbol = ? AND ts >= ? ORDER BY ts DESC LIMIT 5",
+            (ticker, TRADE_DATA_START_DATE),
         ).fetchall()
 
         conn.close()

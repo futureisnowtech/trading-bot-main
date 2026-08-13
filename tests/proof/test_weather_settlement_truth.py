@@ -1,3 +1,6 @@
+import json
+
+import runtime.kalshi_settlement_truth as settlement_truth
 from runtime.kalshi_settlement_truth import build_weather_settlement_truth
 
 
@@ -33,3 +36,21 @@ def test_build_weather_settlement_truth_uses_broker_settlement_payout_math():
     assert truth["total_pnl_usd"] == 5.25
     assert truth["by_bucket"]["Daily High"]["total_pnl_usd"] == 3.5
     assert truth["by_bucket"]["Hourly Temp"]["total_pnl_usd"] == 1.75
+
+
+def test_settlement_cache_rejects_a_different_trade_boundary(tmp_path, monkeypatch):
+    cache_file = tmp_path / "weather_settlement_truth.json"
+    cache_file.write_text(
+        json.dumps({"since": "2026-07-24", "total": 99, "source": "stale-boundary"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(settlement_truth, "_CACHE_FILE", cache_file)
+
+    truth = settlement_truth.load_weather_settlement_truth(
+        since_iso="2026-07-23",
+        refresh=False,
+    )
+
+    assert truth["since"] == "2026-07-23"
+    assert truth["total"] == 0
+    assert truth["source"] == "unavailable"

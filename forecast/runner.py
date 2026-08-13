@@ -2226,9 +2226,11 @@ def _cache_forecast_state():
             resolution_at = "Unknown"
             
             try:
+                from config import TRADE_DATA_START_DATE
                 cursor.execute(
-                    "SELECT price, ts FROM trades WHERE symbol=? AND action='BUY' AND broker='kalshi' ORDER BY ts DESC LIMIT 1",
-                    (ticker,)
+                    "SELECT price, ts FROM trades WHERE symbol=? AND action='BUY' "
+                    "AND broker='kalshi' AND ts >= ? ORDER BY ts DESC LIMIT 1",
+                    (ticker, TRADE_DATA_START_DATE),
                 )
                 db_row = cursor.fetchone()
                 if db_row:

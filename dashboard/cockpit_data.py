@@ -209,6 +209,8 @@ def _load_latest_buy_trades(symbols: list[str]) -> dict[str, dict[str, Any]]:
         return {}
 
     results: dict[str, dict[str, Any]] = {}
+    from config import TRADE_DATA_START_DATE
+
     with _connect() as conn:
         for symbol in symbols:
             row = conn.execute(
@@ -218,10 +220,11 @@ def _load_latest_buy_trades(symbols: list[str]) -> dict[str, dict[str, Any]]:
                 WHERE symbol = ?
                   AND action = 'BUY'
                   AND broker = 'kalshi'
+                  AND ts >= ?
                 ORDER BY ts DESC
                 LIMIT 1
                 """,
-                (symbol,),
+                (symbol, TRADE_DATA_START_DATE),
             ).fetchone()
             if row:
                 results[symbol] = dict(row)
@@ -229,6 +232,8 @@ def _load_latest_buy_trades(symbols: list[str]) -> dict[str, dict[str, Any]]:
 
 
 def _load_recent_trades(limit: int = 20) -> list[dict[str, Any]]:
+    from config import TRADE_DATA_START_DATE
+
     with _connect() as conn:
         rows = conn.execute(
             """
@@ -236,10 +241,11 @@ def _load_recent_trades(limit: int = 20) -> list[dict[str, Any]]:
                    contract_side, forecast_yes_prob, notes
             FROM trades
             WHERE broker = 'kalshi'
+              AND ts >= ?
             ORDER BY ts DESC
             LIMIT ?
             """,
-            (limit,),
+            (TRADE_DATA_START_DATE, limit),
         ).fetchall()
     return [dict(row) for row in rows]
 

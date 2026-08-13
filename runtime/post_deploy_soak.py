@@ -15,7 +15,7 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
 
-from config import DB_PATH, REPO_ROOT
+from config import DB_PATH, REPO_ROOT, TRADE_DATA_START_DATE
 from runtime.agent_mutation_ledger import (
     STATUS_PASSED,
     STATUS_REVERTED,
@@ -51,14 +51,15 @@ def compute_post_mutation_performance(
 ) -> Dict[str, float]:
     """Calculate trade win-rate and average PnL for trades placed after mutation_ts."""
     try:
-        dt_mutation = _parse_iso(mutation_ts)
+        dt_mutation = max(_parse_iso(mutation_ts), _parse_iso(TRADE_DATA_START_DATE))
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
         all_rows = conn.execute(
             """
             SELECT ts, pnl_usd, won FROM trades
-            WHERE paper = 0
-            """
+            WHERE paper = 0 AND ts >= ?
+            """,
+            (TRADE_DATA_START_DATE,),
         ).fetchall()
         conn.close()
 

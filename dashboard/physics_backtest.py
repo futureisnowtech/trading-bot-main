@@ -7,7 +7,7 @@ and dry-soil bias corrections would have saved losses or enhanced edge.
 import sqlite3
 import os
 from datetime import datetime, timezone, timedelta
-from config import DB_PATH
+from config import DB_PATH, TRADE_DATA_START_DATE
 
 def run_backtest_simulation() -> str:
     if not os.path.exists(DB_PATH):
@@ -25,9 +25,10 @@ def run_backtest_simulation() -> str:
         FROM trades t
         LEFT JOIN forecast_contracts c ON c.local_symbol = t.symbol
         LEFT JOIN forecast_resolutions r ON r.contract_id = c.id
-        WHERE t.broker = 'kalshi' AND t.action = 'BUY'
+        WHERE t.broker = 'kalshi' AND t.action = 'BUY' AND t.ts >= ?
         ORDER BY t.ts DESC LIMIT 150
-        """
+        """,
+        (TRADE_DATA_START_DATE,),
     ).fetchall()
 
     conn.close()

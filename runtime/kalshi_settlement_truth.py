@@ -71,6 +71,10 @@ def _load_cache(path: Path) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
+def _cache_matches_boundary(payload: dict[str, Any], since_iso: str) -> bool:
+    return str(payload.get("since") or "") == str(since_iso or "")
+
+
 def _write_cache(path: Path, payload: dict[str, Any]) -> dict[str, Any]:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
@@ -229,7 +233,7 @@ def load_weather_settlement_truth(
 ) -> dict[str, Any]:
     if _is_cache_fresh(_CACHE_FILE, max_age_seconds=max_age_seconds):
         cached = _load_cache(_CACHE_FILE)
-        if cached:
+        if cached and _cache_matches_boundary(cached, since_iso):
             return cached
 
     if refresh:
@@ -237,13 +241,13 @@ def load_weather_settlement_truth(
             return refresh_weather_settlement_truth(since_iso=since_iso)
         except Exception:
             cached = _load_cache(_CACHE_FILE)
-            if cached:
+            if cached and _cache_matches_boundary(cached, since_iso):
                 cached["source"] = str(cached.get("source") or "broker_settlements_stale")
                 cached["stale"] = True
                 return cached
 
     cached = _load_cache(_CACHE_FILE)
-    if cached:
+    if cached and _cache_matches_boundary(cached, since_iso):
         cached["stale"] = True
         return cached
     return _empty_truth(source="unavailable", since_iso=since_iso)

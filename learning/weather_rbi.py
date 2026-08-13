@@ -11,7 +11,7 @@ import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
 
-from config import DB_PATH
+from config import DB_PATH, TRADE_DATA_START_DATE
 from forecast.db import get_system_cooldown_ts, init_forecast_db, set_system_cooldown_ts
 
 logger = logging.getLogger(__name__)
@@ -300,16 +300,19 @@ def run_weather_rbi(force: bool = False) -> None:
                     FROM trades
                     WHERE broker = 'kalshi'
                       AND action = 'SELL'
+                      AND ts >= ?
                     GROUP BY symbol, contract_side
                 ) pnl
                   ON pnl.symbol = t.symbol
                  AND pnl.contract_side = t.contract_side
                 WHERE t.broker = 'kalshi'
                   AND t.action = 'BUY'
+                  AND t.ts >= ?
                   AND t.contract_side IN ('YES', 'NO')
                   AND r.resolved_side IN ('YES', 'NO')
                 ORDER BY r.resolved_at DESC, t.id DESC
-                """
+                """,
+                (TRADE_DATA_START_DATE, TRADE_DATA_START_DATE),
             ).fetchall()
 
             labeled = []

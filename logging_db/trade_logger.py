@@ -17,7 +17,7 @@ import pytz
 import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import DB_PATH, CSV_LOG_DIR, MARKET_TIMEZONE
+from config import DB_PATH, CSV_LOG_DIR, MARKET_TIMEZONE, TRADE_DATA_START_DATE
 
 logger = logging.getLogger(__name__)
 
@@ -1458,9 +1458,20 @@ def get_integrity_summary() -> dict:
         conn = _conn()
         cur = conn.cursor()
         # Count close-side trades (pnl_usd != 0)
-        cur.execute("SELECT COUNT(*) FROM trades WHERE pnl_usd != 0")
+        cur.execute(
+            "SELECT COUNT(*) FROM trades WHERE pnl_usd != 0 AND ts >= ?",
+            (TRADE_DATA_START_DATE,),
+        )
         total_closes = (cur.fetchone() or [0])[0]
-        cur.execute("SELECT tier, COUNT(*) FROM trade_integrity GROUP BY tier")
+        cur.execute(
+            """SELECT ti.tier, COUNT(*)
+               FROM trade_integrity ti
+               JOIN trades t
+                 ON ti.close_order_id = COALESCE(t.order_id, CAST(t.id AS TEXT))
+               WHERE t.ts >= ?
+               GROUP BY ti.tier""",
+            (TRADE_DATA_START_DATE,),
+        )
         tier_counts = {r[0]: r[1] for r in cur.fetchall()}
         covered = sum(tier_counts.values())
         return {
@@ -1508,8 +1519,8 @@ def bulk_backfill_integrity() -> dict:
             SELECT t.id, t.order_id, t.pnl_usd, t.price, t.qty, t.source, t.notes
             FROM trades t
             LEFT JOIN trade_integrity ti ON ti.close_order_id = COALESCE(t.order_id, CAST(t.id AS TEXT))
-            WHERE t.pnl_usd != 0 AND ti.id IS NULL
-        """)
+            WHERE t.pnl_usd != 0 AND ti.id IS NULL AND t.ts >= ?
+        """, (TRADE_DATA_START_DATE,))
         rows = cur.fetchall()
         half_account = ACCOUNT_SIZE * 0.5
 
@@ -1977,13 +1988,15 @@ def get_win_rate(strategy=None, lookback_days=14) -> float:
     cur = conn.cursor()
     if strategy:
         cur.execute(
-            "SELECT pnl_usd FROM trades WHERE strategy=? AND paper=0 AND pnl_usd != 0 ORDER BY ts DESC LIMIT ?",
-            (strategy, lookback_days * 5),
+            "SELECT pnl_usd FROM trades WHERE strategy=? AND paper=0 AND pnl_usd != 0 "
+            "AND ts >= ? ORDER BY ts DESC LIMIT ?",
+            (strategy, TRADE_DATA_START_DATE, lookback_days * 5),
         )
     else:
         cur.execute(
-            "SELECT pnl_usd FROM trades WHERE paper=0 AND pnl_usd != 0 ORDER BY ts DESC LIMIT ?",
-            (lookback_days * 5),
+            "SELECT pnl_usd FROM trades WHERE paper=0 AND pnl_usd != 0 "
+            "AND ts >= ? ORDER BY ts DESC LIMIT ?",
+            (TRADE_DATA_START_DATE, lookback_days * 5),
         )
     rows = cur.fetchall()
     conn.close()
@@ -2075,14 +2088,14 @@ def get_kelly_stats(strategy: str = None, window: int = 50) -> dict:
     if strategy:
         cur.execute(
             "SELECT pnl_usd FROM trades WHERE paper=0 AND strategy=? AND pnl_usd != 0 "
-            "ORDER BY ts DESC LIMIT ?",
-            (strategy, window),
+            "AND ts >= ? ORDER BY ts DESC LIMIT ?",
+            (strategy, TRADE_DATA_START_DATE, window),
         )
     else:
         cur.execute(
             "SELECT pnl_usd FROM trades WHERE paper=0 AND pnl_usd != 0 "
-            "ORDER BY ts DESC LIMIT ?",
-            (window,),
+            "AND ts >= ? ORDER BY ts DESC LIMIT ?",
+            (TRADE_DATA_START_DATE, window),
         )
     rows = [r[0] for r in cur.fetchall()]
     conn.close()
@@ -2128,8 +2141,8 @@ def get_recent_trades(limit=20) -> list:
     conn = _conn()
     cur = conn.cursor()
     cur.execute(
-        "SELECT * FROM trades WHERE paper=0 ORDER BY ts DESC LIMIT ?",
-        (limit,),
+        "SELECT * FROM trades WHERE paper=0 AND ts >= ? ORDER BY ts DESC LIMIT ?",
+        (TRADE_DATA_START_DATE, limit),
     )
     rows = [dict(r) for r in cur.fetchall()]
     conn.close()
@@ -2201,9 +2214,10 @@ def get_tax_summary() -> dict:
         """
         SELECT ts, strategy, symbol, pnl_usd, fee_usd, value_usd
         FROM trades
-        WHERE paper=0 AND pnl_usd != 0
+        WHERE paper=0 AND pnl_usd != 0 AND ts >= ?
         ORDER BY ts ASC
-    """
+    """,
+        (TRADE_DATA_START_DATE,),
     )
     rows = [dict(r) for r in cur.fetchall()]
 
@@ -2496,9 +2510,9 @@ def get_performance_attribution(lookback_days=30) -> dict:
     """
     from datetime import timedelta
 
-    cutoff = (
+    cutoff = max(TRADE_DATA_START_DATE, (
         datetime.now(pytz.timezone(MARKET_TIMEZONE)) - timedelta(days=lookback_days)
-    ).strftime("%Y-%m-%d")
+    ).strftime("%Y-%m-%d"))
     conn = _conn()
     cur = conn.cursor()
     cur.execute(
@@ -2538,9 +2552,9 @@ def get_strategy_consecutive_losses(strategy: str) -> int:
     cur = conn.cursor()
     cur.execute(
         """SELECT pnl_usd FROM trades
-        WHERE strategy=? AND paper=0 AND pnl_usd != 0
+        WHERE strategy=? AND paper=0 AND pnl_usd != 0 AND ts >= ?
         ORDER BY ts DESC LIMIT 20""",
-        (strategy,),
+        (strategy, TRADE_DATA_START_DATE),
     )
     rows = cur.fetchall()
     conn.close()

@@ -10,7 +10,7 @@ This repository is the active Kalshi-only execution tree.
 - Exposure truth: broker-first, ledgerless
 - Learning truth: RBI calibrates only on resolved labels
 - Fresh-entry scope: strict true hourly weather contracts only
-- Post-Paper Data Boundary: POST_PAPER_START_DATE = "2026-07-24" (rejects pre-July 24 legacy paper data)
+- Quality Trade Data Boundary: TRADE_DATA_START_DATE = "2026-07-23" (rejects earlier trades from analytics and learning, but not broker exposure reconciliation)
 - Tri-Model Ensemble Ingest: 50% GFS + 35% ECMWF + 15% DWD ICON (122 simulation paths)
 - Value Price Bracket Gate: $0.30 - $0.70 entry price floor/ceiling
 - Kalshi Cheat Code Mispricing Scanner: q_tri >= 78% and model-market delta >= 22%

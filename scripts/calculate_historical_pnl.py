@@ -1,7 +1,8 @@
 import sqlite3
 import collections
 
-DB_PATH = "/Users/joshmacbookair2020/projects/algo_trading_final/logs/trades.db"
+from config import DB_PATH, TRADE_DATA_START_DATE
+
 
 def main():
     conn = sqlite3.connect(DB_PATH)
@@ -23,7 +24,10 @@ def main():
     print(f"Loaded {len(resolutions)} settlements from DB.")
 
     # 2. Get all trades
-    cursor.execute("SELECT * FROM trades ORDER BY symbol, ts ASC")
+    cursor.execute(
+        "SELECT * FROM trades WHERE ts >= ? ORDER BY symbol, ts ASC",
+        (TRADE_DATA_START_DATE,),
+    )
     trades = [dict(r) for r in cursor.fetchall()]
     print(f"Loaded {len(trades)} trades from DB.")
 

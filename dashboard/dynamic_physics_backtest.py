@@ -8,7 +8,7 @@ import sqlite3
 import os
 import math
 from datetime import datetime, timezone
-from config import DB_PATH
+from config import DB_PATH, TRADE_DATA_START_DATE
 
 def calculate_evaporative_cooling_delta(precip_forecast: float) -> float:
     """
@@ -58,8 +58,10 @@ def run_dynamic_backtest() -> str:
         LEFT JOIN forecast_contracts c ON c.local_symbol = t.symbol
         LEFT JOIN forecast_resolutions r ON r.contract_id = c.id
         WHERE t.broker = 'kalshi' AND t.action = 'BUY' AND r.resolved_side IS NOT NULL
+          AND t.ts >= ?
         ORDER BY t.ts DESC LIMIT 150
-        """
+        """,
+        (TRADE_DATA_START_DATE,),
     ).fetchall()
 
     conn.close()

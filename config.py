@@ -40,8 +40,10 @@ load_dotenv()
 _ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = _ROOT_DIR
 
-# Post-Paper Live Trading Era Invariant Boundary
-POST_PAPER_START_DATE = "2026-07-24"
+# Canonical quality boundary for every historical trade read. Operational broker
+# state remains unbounded so an older open position can never disappear from risk.
+TRADE_DATA_START_DATE: str = os.getenv("TRADE_DATA_START_DATE", "2026-07-23")
+POST_PAPER_START_DATE: str = TRADE_DATA_START_DATE
 
 
 def _resolve_runtime_root() -> str:
@@ -155,7 +157,7 @@ def get_dynamic_bool(key: str, default: bool) -> bool:
 
 # Session start: all performance stats (win rate, P&L, trade counts) are
 # measured from this date forward.
-TRADE_SESSION_START: str = os.getenv("TRADE_SESSION_START", "2026-07-24")
+TRADE_SESSION_START: str = TRADE_DATA_START_DATE
 
 # ════════════════════════════════════════════════════════════════════
 # ACCOUNT

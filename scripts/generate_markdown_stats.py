@@ -57,7 +57,8 @@ def main():
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
-    cursor.execute("SELECT * FROM trades")
+    from config import TRADE_DATA_START_DATE
+    cursor.execute("SELECT * FROM trades WHERE ts >= ?", (TRADE_DATA_START_DATE,))
     rows = cursor.fetchall()
     
     # Aggregations

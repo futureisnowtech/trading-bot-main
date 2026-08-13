@@ -89,7 +89,7 @@ def _check_entries_allowed() -> tuple[str, bool, str]:
 def _check_entry_stall(stall_hours: float = 3.0) -> tuple[str, bool, str]:
     """No successful BUY in stall_hours. Only meaningful while entries are allowed --
     a blocked gate already has its own alert, and a stall while blocked is expected."""
-    from config import DB_PATH
+    from config import DB_PATH, TRADE_DATA_START_DATE
     from runtime.operator_truth import get_release_status
 
     status = get_release_status() or {}
@@ -97,7 +97,10 @@ def _check_entry_stall(stall_hours: float = 3.0) -> tuple[str, bool, str]:
         return "entry_stall", False, ""
 
     conn = sqlite3.connect(DB_PATH)
-    row = conn.execute("SELECT MAX(ts) FROM trades WHERE action='BUY' AND broker='kalshi'").fetchone()
+    row = conn.execute(
+        "SELECT MAX(ts) FROM trades WHERE action='BUY' AND broker='kalshi' AND ts >= ?",
+        (TRADE_DATA_START_DATE,),
+    ).fetchone()
     conn.close()
     last_ts = row[0] if row else None
     if not last_ts:

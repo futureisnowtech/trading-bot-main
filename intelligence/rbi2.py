@@ -221,6 +221,7 @@ def train_challenger(db_path: str = DB_PATH) -> dict[str, Any]:
     return {
         "status": "challenger_ready" if passed else "challenger_rejected_by_validation",
         "artifact_id": artifact_id,
+        "data_cutoff": cutoff,
         "sample_size": len(samples),
         "holdout_size": len(holdout),
         "expected_improvement": improvement,

@@ -800,13 +800,21 @@ def recall_brain_history(query: str = "", limit: int = 10) -> str:
         return f"Error recalling history: {e}"
 
 
-def request_change(action: str, enabled: bool | None = None, key: str = "", value: str = "", rationale: str = "") -> str:
+def request_change(
+    action: str,
+    enabled: bool | None = None,
+    key: str = "",
+    value: str = "",
+    artifact_id: str = "",
+    rationale: str = "",
+) -> str:
     """Propose a system change for cockpit approval. Does not change anything itself.
 
     Use this on a read-only surface (Telegram) when the operator wants to act on a
     finding but write access is not available here. Valid actions: set_maker_entry_enabled
     (pass enabled=true/false), update_system_parameter (pass key, value), promote_release
-    (no extra params). The change only takes effect if approved from the cockpit.
+    (no extra params), or promote_rbi_artifact (pass artifact_id). The change only
+    takes effect if approved from the cockpit.
     """
     from runtime import approvals
 
@@ -817,6 +825,10 @@ def request_change(action: str, enabled: bool | None = None, key: str = "", valu
         params["key"] = key
     if value:
         params["value"] = value
+    if artifact_id:
+        params["artifact_id"] = artifact_id
+    if rationale:
+        params["rationale"] = rationale
     return approvals.request_change(action, params, rationale)
 
 

@@ -30,6 +30,10 @@ WHITELIST: dict[str, dict[str, Any]] = {
         "description": "Promote the current release audit so fresh entries are allowed.",
         "params": [],
     },
+    "promote_rbi_artifact": {
+        "description": "Promote a validated RBI 2.0 challenger to production champion.",
+        "params": ["artifact_id", "rationale"],
+    },
 }
 
 
@@ -108,6 +112,14 @@ def _execute(action: str, params: dict[str, Any]) -> str:
         from notifications.agent_tools import run_release_audit
 
         return run_release_audit("promote")
+    if action == "promote_rbi_artifact":
+        from intelligence.rbi2 import promote_challenger
+        result = promote_challenger(
+            str(params.get("artifact_id", "")),
+            promoted_by="cockpit_approval",
+            reason=str(params.get("rationale", "approved Cerebro proposal")),
+        )
+        return json.dumps(result, sort_keys=True)
     return f"No executor registered for action '{action}'."
 
 

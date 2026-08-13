@@ -273,6 +273,8 @@ def init_forecast_db(db_path: str | None = None) -> None:
         _ensure_column(c, "forecast_resolutions", "fee_rate_applied", "fee_rate_applied REAL")
         _ensure_column(c, "forecast_resolutions", "basis_quality", "basis_quality TEXT DEFAULT 'CONFIRMED'")
         c.commit()
+    from intelligence.schema import init_intelligence_db
+    init_intelligence_db(db_path or DB_PATH)
 
     # v20 SPEC §5.4 — create stateful firewall tables in same DB
     try:

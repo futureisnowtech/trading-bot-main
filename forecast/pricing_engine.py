@@ -163,105 +163,14 @@ def kernel_smoothed_probability(
     return max(0.01, min(0.99, sum(probs) / K))
 
 def calculate_brier_weights(mode: str, lead_bucket: int, db_path: str | None) -> Dict[str, float]:
-    """
-    SPEC §3.2: Recency-decayed Brier weights per (model, mode, lead-bucket).
-    w_j = 0.94**age_days.
-    """
+    """Return only the explicitly promoted RBI 2.0 champion weights."""
     defaults = {"gfs": 0.60, "ecmwf": 0.40}
-    if not db_path or not os.path.exists(db_path):
-        return defaults
-        
     try:
-        from datetime import datetime, timezone
-        with sqlite3.connect(db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                """
-                SELECT r.resolved_side, r.q_gfs, r.q_ecmwf, r.resolved_at, c.local_symbol
-                FROM forecast_resolutions r
-                JOIN forecast_contracts c ON r.contract_id = c.id
-                WHERE r.q_gfs IS NOT NULL
-                  AND r.q_ecmwf IS NOT NULL
-                """
-            ).fetchall()
-            
-            # Filter rows by mode in python
-            def _get_mode_from_ticker(ticker: str) -> str:
-                ticker_upper = ticker.upper()
-                if "HIGH" in ticker_upper: return "HIGH"
-                if "LOW" in ticker_upper: return "LOW"
-                if "RAIN" in ticker_upper: return "RAIN"
-                if "SNOW" in ticker_upper: return "SNOW"
-                if "WIND" in ticker_upper: return "WIND"
-                if "TEMP" in ticker_upper: return "TEMP"
-                return "TEMP"
-                
-            filtered_rows = []
-            for r in rows:
-                if _get_mode_from_ticker(r["local_symbol"] or "") == mode:
-                    filtered_rows.append(r)
-            rows = filtered_rows
-            
-            if len(rows) < 5:
-                return defaults
-                
-            now_utc = datetime.now(timezone.utc)
-            sum_w_gfs = 0.0
-            sum_w_ec = 0.0
-            sum_weighted_bs_gfs = 0.0
-            sum_weighted_bs_ec = 0.0
-            y_vals = []
-            
-            for row in rows:
-                resolved_side = row["resolved_side"]
-                y = 1.0 if resolved_side == "YES" else 0.0
-                y_vals.append(y)
-                
-                try:
-                    res_dt = datetime.fromisoformat(row["resolved_at"].replace("Z", "+00:00"))
-                    age_days = (now_utc - res_dt).days
-                except Exception:
-                    age_days = 0
-                age_days = max(0, age_days)
-                
-                wj = 0.94 ** age_days
-                q_gfs = float(row["q_gfs"])
-                q_ec = float(row["q_ecmwf"])
-                
-                sum_weighted_bs_gfs += wj * ((q_gfs - y) ** 2)
-                sum_w_gfs += wj
-                
-                sum_weighted_bs_ec += wj * ((q_ec - y) ** 2)
-                sum_w_ec += wj
-                
-            if sum_w_gfs <= 0 or sum_w_ec <= 0 or not y_vals:
-                return defaults
-                
-            BS_gfs = sum_weighted_bs_gfs / sum_w_gfs
-            BS_ec = sum_weighted_bs_ec / sum_w_ec
-            
-            ybar = sum(y_vals) / len(y_vals)
-            BS_ref = max(1e-4, ybar * (1.0 - ybar))
-            
-            S_gfs = max(1e-4, BS_ref - BS_gfs)
-            S_ec = max(1e-4, BS_ref - BS_ec)
-            
-            val_gfs = 4.0 * S_gfs / BS_ref
-            val_ec = 4.0 * S_ec / BS_ref
-            
-            val_gfs = max(-50.0, min(50.0, val_gfs))
-            val_ec = max(-50.0, min(50.0, val_ec))
-            
-            exp_gfs = math.exp(val_gfs)
-            exp_ec = math.exp(val_ec)
-            denom = exp_gfs + exp_ec
-            
-            w_gfs = exp_gfs / denom if denom > 0 else 0.60
-            w_ec = exp_ec / denom if denom > 0 else 0.40
-            
-            return {"gfs": w_gfs, "ecmwf": w_ec}
+        from intelligence.rbi2 import get_active_model_weights
+        weights = get_active_model_weights(mode, db_path=db_path or DB_PATH)
+        return {"gfs": weights["gfs"], "ecmwf": weights["ecmwf"]}
     except Exception as e:
-        logger.warning(f"Error fitting Brier weights: {e}")
+        logger.warning(f"Error loading RBI 2.0 champion: {e}")
         return defaults
 
 def log_odds_blend(

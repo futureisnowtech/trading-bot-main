@@ -112,8 +112,8 @@ def _build_registry() -> dict[str, Tool]:
     add(jb.list_pending_approvals, READ)
     add(jb.get_maker_fill_stats, READ)
     add(jb.show_panel, READ)
-    add(jb.update_system_parameter, WRITE)
-    add(jb.apply_hot_patch_code, WRITE)
+    add(jb.get_rbi2_status_summary, READ)
+    add(jb.get_cerebro_brief, READ)
 
     # SRE/runtime tools (formerly Telegram-only).
     add(at.get_live_kalshi_status, READ)

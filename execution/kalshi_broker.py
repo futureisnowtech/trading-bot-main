@@ -14,6 +14,8 @@ import base64
 import time
 import requests
 import json
+import random
+import threading
 from datetime import datetime, timezone
 from typing import Optional, List, Dict
 
@@ -45,6 +47,9 @@ _WEATHER_SERIES_CACHE: dict[str, object] = {
     "expires_at": 0.0,
     "series_meta": {},
 }
+_REQUEST_LOCK = threading.Lock()
+_LAST_REQUEST_AT = 0.0
+_MIN_REQUEST_INTERVAL_SECONDS = 0.08
 
 # ── Credentials ───────────────────────────────────────────────────────────────
 KALSHI_PRIVATE_KEY_PATH = os.getenv("KALSHI_PRIVATE_KEY_PATH", "").strip()
@@ -662,6 +667,24 @@ class KalshiBroker:
         }
 
     def _request(self, method: str, path: str, params: dict = None, body: dict = None) -> dict:
+        """Pace all calls and retry idempotent reads after Kalshi throttling."""
+        attempts = 4 if method.upper() == "GET" else 1
+        for attempt in range(attempts):
+            global _LAST_REQUEST_AT
+            with _REQUEST_LOCK:
+                delay = _MIN_REQUEST_INTERVAL_SECONDS - (time.monotonic() - _LAST_REQUEST_AT)
+                if delay > 0:
+                    time.sleep(delay)
+                result = self._request_once(method, path, params=params, body=body)
+                _LAST_REQUEST_AT = time.monotonic()
+            error = result.get("error") if isinstance(result, dict) else None
+            code = str(error.get("code") if isinstance(error, dict) else error or "")
+            if "too_many_requests" not in code or attempt == attempts - 1:
+                return result
+            time.sleep(min(4.0, 0.35 * (2 ** attempt)) + random.uniform(0.0, 0.2))
+        return {"error": {"code": "too_many_requests", "message": "retry budget exhausted"}}
+
+    def _request_once(self, method: str, path: str, params: dict = None, body: dict = None) -> dict:
         """Execute signed Kalshi V2 request."""
         
         if config.SHADOW_EXECUTION and method.upper() == "POST" and "orders" in path:

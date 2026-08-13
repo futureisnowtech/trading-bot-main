@@ -974,6 +974,8 @@ metric_explainers = payload["metric_explainers"]
 decision_funnel = payload["decision_funnel"]
 regime_cards = payload["regime_cards"]
 ai_insights = payload["ai_insights"]
+cerebro = payload.get("cerebro") or {}
+rbi2 = payload.get("rbi2") or {}
 weather_type_boards = payload.get("weather_type_boards") or []
 weather_type_counts = payload.get("weather_type_counts") or []
 
@@ -1206,10 +1208,30 @@ if not jarvis_open:
     _ring_track = "rgba(255,213,79,0.55)" if _alert else "rgba(0,229,255,0.18)"
     # More open positions -> faster pulse, floored so an idle book still breathes.
     _pulse_s = max(1.6, 4.0 - 0.25 * float(positions_count))
+    import math as _math
+    _signal_nodes = []
+    _node_colors = {"ACTIVE": "#ffd54f", "CONFIRMED": "#00ff88", "FALSIFIED": "#ff5470", "INCONCLUSIVE": "#8aa4b8"}
+    for _idx, _insight in enumerate((cerebro.get("latest_insights") or [])[:6]):
+        _angle = (_idx * 60 - 90) * _math.pi / 180.0
+        _radius = 146 if _idx % 2 == 0 else 126
+        _x = 170 + _math.cos(_angle) * _radius
+        _y = 170 + _math.sin(_angle) * _radius
+        _state = str(_insight.get("status") or "ACTIVE").upper()
+        _color = _node_colors.get(_state, "#00e5ff")
+        _title = html.escape(str(_insight.get("title") or "Cerebro signal"))
+        _confidence = float(_insight.get("confidence") or 0.0)
+        _signal_nodes.append(
+            f'<div class="signal-node" title="{_title}" style="left:{_x:.0f}px;top:{_y:.0f}px;'
+            f'--signal:{_color};--tempo:{max(1.2, 3.4 - 2.0 * _confidence):.2f}s"></div>'
+        )
+    _nodes_html = "".join(_signal_nodes)
+    _active_count = int((cerebro.get("insight_counts") or {}).get("ACTIVE", 0) or 0)
+    _artifact = str(((rbi2.get("champion") or {}).get("artifact_id") or "baseline"))
 
     orb_html = f"""
     <div class="orb-stage">
       <div class="orb">
+        {_nodes_html}
         <!-- rotating outer lattice -->
         <div class="ring lattice"></div>
         <!-- win-rate arc: filled portion of the ring is the 7d win rate -->
@@ -1232,6 +1254,7 @@ if not jarvis_open:
             <span class="hot">{positions_count}</span><span class="dim"> open</span>
           </div>
           <div class="status">{'&#9888; ATTENTION' if _alert else 'NOMINAL'}</div>
+          <div class="cerebro-state">CEREBRO {_active_count} · {html.escape(_artifact[:18])}</div>
         </div>
       </div>
       <div class="prov">{html.escape(str(deploy.get('sha') or 'unknown')[:7])} &middot; {html.escape(_fmt_dt(payload['generated_at']))}</div>
@@ -1242,6 +1265,11 @@ if not jarvis_open:
                     font-family:'IBM Plex Mono',ui-monospace,monospace; }}
       .orb {{ position:relative; width:340px; height:340px; }}
       .ring {{ position:absolute; border-radius:50%; }}
+      .signal-node {{ position:absolute; width:10px; height:10px; border-radius:50%; z-index:8;
+        transform:translate(-50%,-50%); background:var(--signal); border:1px solid #dff;
+        box-shadow:0 0 7px var(--signal),0 0 18px var(--signal); animation:signal var(--tempo) ease-in-out infinite; }}
+      .signal-node::after {{ content:''; position:absolute; inset:-6px; border:1px solid var(--signal);
+        border-radius:50%; opacity:.45; }}
 
       .lattice {{ inset:0;
         background:
@@ -1289,11 +1317,15 @@ if not jarvis_open:
       .sep    {{ color:#2f4657; margin:0 6px; }}
       .status {{ margin-top:8px; font-size:9px; letter-spacing:2.2px;
                  color:{'#ffd54f' if _alert else '#3d5768'}; }}
+      .cerebro-state {{ margin-top:5px; max-width:170px; white-space:nowrap; overflow:hidden;
+        text-overflow:ellipsis; color:#466b7d; font-size:7px; letter-spacing:1px; }}
       .prov   {{ margin-top:6px; font-size:8.5px; letter-spacing:1.4px; color:#24384a; }}
 
       @keyframes spin  {{ to {{ transform:rotate(360deg); }} }}
       @keyframes pulse {{ 0%,100% {{ opacity:.40; transform:scale(.95); }}
                           50%     {{ opacity:.95; transform:scale(1.05); }} }}
+      @keyframes signal {{ 0%,100% {{ opacity:.45; transform:translate(-50%,-50%) scale(.75); }}
+                           50% {{ opacity:1; transform:translate(-50%,-50%) scale(1.35); }} }}
     </style>
     """
     components.html(orb_html, height=384)
@@ -1424,6 +1456,16 @@ else:
             st.session_state.jarvis_prompt_input = prompts_map[label]
             st.session_state.show_jarvis = True
             st.rerun()
+
+    with st.expander(f"CEREBRO SIGNAL ARCHIVE · {sum((cerebro.get('insight_counts') or {}).values())}"):
+        _archive = cerebro.get("latest_insights") or []
+        if not _archive:
+            st.caption("Cerebro is collecting point-in-time evidence. Insights appear only when a falsifiable pattern clears the evidence floor.")
+        for _insight in _archive:
+            _state = str(_insight.get("status") or "ACTIVE")
+            st.markdown(f"**{_state} · {float(_insight.get('confidence') or 0):.0%}**  {_insight.get('title', '')}")
+            st.caption(str(_insight.get("summary") or ""))
+            st.caption(f"Test: {_insight.get('falsification_rule', '')}")
 
     # Chat history
     if "jarvis_history" not in st.session_state:

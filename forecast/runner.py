@@ -623,9 +623,13 @@ def run_execution_cycle(
     resolution_summary = {}
     if sync_resolutions:
         try:
+            from intelligence.outcomes import sync_official_market_outcomes
             from forecast.resolution_sync import sync_forecast_resolutions
 
-            resolution_summary = sync_forecast_resolutions(db_path=db_path)
+            resolution_summary = {
+                "official": sync_official_market_outcomes(broker, db_path=db_path),
+                "provisional": sync_forecast_resolutions(db_path=db_path),
+            }
         except Exception as exc:
             logger.warning("[ForecastRunner] Resolution sync failed: %s", exc)
             resolution_summary = {"error": str(exc)}
@@ -650,12 +654,12 @@ def run_execution_cycle(
     if run_rbi:
         try:
             import threading
-            from learning.weather_rbi import run_weather_rbi
+            from intelligence.runner import run_intelligence_cycle
             threading.Thread(
-                target=run_weather_rbi,
+                target=run_intelligence_cycle,
                 kwargs={"force": False},
                 daemon=True,
-                name="WeatherRbiBackgroundThread",
+                name="RBI2CerebroBackgroundThread",
             ).start()
         except Exception as rbi_err:
             logger.warning("[ForecastRunner] Failed to start background RBI thread: %s", rbi_err)
@@ -1033,6 +1037,18 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                     snapshot = candidate.get("snapshot")
                     if result is None:
                         return
+
+                    try:
+                        from intelligence.evidence import record_prediction
+                        record_prediction(
+                            scan_id=scan_id,
+                            candidate=candidate,
+                            decision=decision,
+                            reason=str(reason or getattr(result, "veto_reason", "") or ""),
+                            db_path=db_path,
+                        )
+                    except Exception as evidence_exc:
+                        logger.debug("[ForecastRunner] RBI 2.0 evidence capture skipped: %s", evidence_exc)
 
                     local_symbol = str(contract.get("local_symbol") or "")
                     side = str(getattr(result, "side", "") or "").upper()

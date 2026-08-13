@@ -64,7 +64,7 @@ def test_live_kalshi_status_is_broker_first_and_surfaces_drift(proof_runtime, mo
     broker.sync_positions.assert_called_once()
 
 
-def test_weather_learning_status_is_static_when_live_learning_is_disabled(proof_runtime, monkeypatch):
+def test_weather_learning_status_uses_governed_rbi2_champion(proof_runtime, monkeypatch):
     import runtime.operator_truth as ot
 
     db = str(proof_runtime.db_path)
@@ -72,13 +72,14 @@ def test_weather_learning_status_is_static_when_live_learning_is_disabled(proof_
 
     payload = ot.get_weather_learning_status(db_path=db)
 
-    assert payload["adaptive_active"] is False
-    assert payload["status"] == "disabled"
-    assert payload["disabled_reason"] == "live_weather_learning_retired"
-    assert payload["global_blend"]["segment"] == "STATIC_DISABLED"
+    assert payload["adaptive_active"] is True
+    assert payload["status"] == "rbi2_governed"
+    assert payload["disabled_reason"] == ""
+    assert payload["champion_artifact_id"] == "rbi2-baseline-60-40"
+    assert payload["global_blend"]["segment"] == "GLOBAL"
     assert payload["global_blend"]["gfs_weight"] == 0.60
     assert payload["global_blend"]["ecmwf_weight"] == 0.40
-    assert payload["mode_blends"] == []
+    assert payload["calibration"]["official_outcomes_only"] is True
 
 
 def test_recent_veto_summary_aggregates_reason_counts(proof_runtime, monkeypatch):

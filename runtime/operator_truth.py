@@ -342,26 +342,30 @@ def get_recent_execution_summary(
 
 
 def get_weather_learning_status(*, db_path: str = DB_PATH) -> dict:
+    from intelligence.rbi2 import get_rbi2_status
+    status = get_rbi2_status(db_path=db_path)
+    champion = status.get("champion") or {}
+    weights = champion.get("weights") or {"GLOBAL": {"gfs": BASE_GFS_WEIGHT, "ecmwf": BASE_ECMWF_WEIGHT}}
+    global_weights = weights.get("GLOBAL") or {}
     return {
-        "adaptive_active": False,
-        "status": "disabled",
-        "disabled_reason": "live_weather_learning_retired",
-        "base_blend": {
-            "gfs_weight": BASE_GFS_WEIGHT,
-            "ecmwf_weight": BASE_ECMWF_WEIGHT,
-        },
+        "adaptive_active": True,
+        "status": "rbi2_governed",
+        "disabled_reason": "",
+        "champion_artifact_id": champion.get("artifact_id"),
+        "official_sample_count": status.get("official_sample_count", 0),
+        "base_blend": {"gfs_weight": BASE_GFS_WEIGHT, "ecmwf_weight": BASE_ECMWF_WEIGHT},
         "global_blend": {
-            "segment": "STATIC_DISABLED",
-            "sample_size": 0,
-            "effective_weight": 0.0,
-            "gfs_weight": BASE_GFS_WEIGHT,
-            "ecmwf_weight": BASE_ECMWF_WEIGHT,
+            "segment": "GLOBAL",
+            "sample_size": champion.get("sample_size", 0),
+            "effective_weight": 1.0,
+            "gfs_weight": global_weights.get("gfs", BASE_GFS_WEIGHT),
+            "ecmwf_weight": global_weights.get("ecmwf", BASE_ECMWF_WEIGHT),
             "shrinkage": 0.0,
-            "lookback_days": 30,
-            "ts": "",
+            "lookback_days": 0,
+            "ts": champion.get("promoted_at", ""),
         },
-        "mode_blends": [],
-        "calibration": {},
+        "mode_blends": weights,
+        "calibration": {"promotion_mode": "human_approved", "official_outcomes_only": True},
     }
 
 

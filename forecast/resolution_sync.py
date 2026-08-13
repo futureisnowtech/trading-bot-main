@@ -216,6 +216,7 @@ def sync_forecast_resolutions(
             resolved_at=now_utc.isoformat(),
             notes=notes,
             source=str(observed.get("source") or "kalshi"),
+            basis_quality="PROVISIONAL",
             db_path=db_path,
         )
         summary["inserted"] += 1
@@ -227,5 +228,4 @@ def sync_forecast_resolutions(
         )
 
     return summary
-
 

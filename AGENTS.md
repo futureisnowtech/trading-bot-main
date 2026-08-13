@@ -10,8 +10,8 @@ This repository is now the active Kalshi-only execution tree.
 - Trading mode: live-only Kalshi weather execution
 - Fresh-entry scope: strict true hourly weather contracts only
 - Exposure truth: broker-first, ledgerless, fee-aware
-- Settlement truth: `forecast_resolutions`
-- Learning truth: Weather RBI calibrates only on resolved labels, never inferred PnL
+- Settlement truth: finalized Kalshi market outcomes, mirrored into `forecast_resolutions`
+- Learning truth: RBI 2.0 trains only on revisioned official outcomes and requires explicit champion promotion
 
 ## MANDATE: REAL KALSHI RECORDS INVARIANT
 1. **LIVE KALSHI REST API IS CANONICAL**: When auditing real Kalshi performance, always query the live REST API (`/trade-api/v2/portfolio/settlements` and `/trade-api/v2/portfolio/positions`) directly via `KalshiBroker`. Never rely on partial local DB snapshots or static arrays. Settlements — not fills — carry realized PnL; `KalshiBroker` has no fills accessor.
@@ -77,7 +77,7 @@ This repository is now the active Kalshi-only execution tree.
 | `forecast/strategy_engine.py` | Weather alpha, economics gate, sizing |
 | `forecast/resolution_sync.py` | Conservative weather settlement ingestion |
 | `data/kalshi_weather_monitor.py` | Ensemble + METAR shadow state |
-| `learning/weather_rbi.py` | Post-resolution Brier-based calibration |
+| `intelligence/` | Point-in-time evidence, official outcomes, RBI 2.0 artifacts, and Cerebro insights |
 | `notifications/telegram_bot.py` | Operator interface |
 | `execution_daemon.py` | Long-lived lean execution daemon |
 | `sniper_cron.py` | Single-pass execution worker |

@@ -1175,6 +1175,14 @@ def get_cockpit_payload(*, live_sync: bool = True) -> dict[str, Any]:
     market_counts = _load_market_counts()
     recent_vetoes = get_recent_veto_summary()
     storage = runtime_storage_status()
+    try:
+        from intelligence.cerebro import get_cerebro_status
+        from intelligence.rbi2 import get_rbi2_status
+        cerebro = get_cerebro_status(db_path=DB_PATH)
+        rbi2 = get_rbi2_status(db_path=DB_PATH)
+    except Exception as exc:
+        logger.warning("Intelligence payload unavailable: %s", exc)
+        cerebro, rbi2 = {"latest_insights": [], "insight_counts": {}}, {}
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "truth": truth,
@@ -1213,6 +1221,8 @@ def get_cockpit_payload(*, live_sync: bool = True) -> dict[str, Any]:
         },
         "deploy": build,
         "weather_learning": learning_status,
+        "rbi2": rbi2,
+        "cerebro": cerebro,
         "ai_insights": build_ai_insights(
             truth=truth,
             release_status=release_status,

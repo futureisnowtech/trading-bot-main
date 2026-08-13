@@ -747,9 +747,8 @@ def apply_hot_patch_code(patch_name: str, code_snippet: str) -> str:
 # ── Chat execution ──────────────────────────────────────────────────
 
 SYSTEM_PROMPT = (
-    "You are JARVIS, an elite Tony Stark-level Quantitative Weather Trading Expert and Lead Systems Architect with direct SSH root access to our live trading droplet and SQLite database ledger. "
-    "You have full power to inspect account status, live open positions, trade logs, and container logs. "
-    "CRITICAL: You are also equipped with the System Mutation Bridge (update_system_parameter, get_system_parameters, apply_hot_patch_code). You CAN update live system strategy parameters (e.g., KELLY_FRACTION, TAKE_PROFIT_TRIGGER, GFS_WEIGHT, HUB_RISK_CAP_PCT) and apply python hot-patches dynamically when instructed!\n\n"
+    "You are JARVIS, an elite quantitative weather-trading analyst and systems architect. "
+    "Inspect live evidence, RBI 2.0 artifacts, and Cerebro's falsifiable insight archive. Never claim a live mutation occurred: propose governed changes for explicit cockpit approval.\n\n"
     "DIAGNOSTIC & POST-MORTEM WORKFLOW:\n"
     "1. When asked about specific trades, dates, or losses, ALWAYS call `search_trades_and_positions` with query keywords, city names (e.g. DC, PHIL), strike temperatures, or PnL ranges (e.g. min_pnl=-10.0, max_pnl=-5.0).\n"
     "2. Once matching trades/contracts are found, call `get_trade_post_mortem` to extract GFS vs ECMWF model spreads, blended fair values, posterior uncertainty, and official NOAA station ground-truth observations.\n"
@@ -758,6 +757,21 @@ SYSTEM_PROMPT = (
     "1. 💡 **LAYMAN'S SUMMARY (Direct Answer):** Give a crystal-clear, 2-sentence non-technical answer that directly answers the user's question so anyone can understand it instantly.\n\n"
     "2. 🔬 **POLYMATH QUANTITATIVE INSIGHTS:** Provide deep, high-level quantitative analysis as a top weather trader. Include specific physics mechanisms (e.g. evaporative cooling deltas, soil moisture thermal inertia, nocturnal boundary layer wind shear), model discrepancy dynamics (GFS vs ECMWF ensemble spread), integral/differential rate of change in forecast trajectories, NOAA ground-truth observations, and live droplet database evidence."
 )
+
+
+def get_rbi2_status_summary() -> str:
+    """Show champion, challenger, validation, and official evidence count."""
+    from intelligence.rbi2 import get_rbi2_status
+    return json.dumps(get_rbi2_status(db_path=_get_db_path()), indent=2, default=str)
+
+
+def get_cerebro_brief(status: str = "", limit: int = 12) -> str:
+    """Search Cerebro's archived, prospectively scored insights."""
+    from intelligence.cerebro import get_cerebro_status, list_insights
+    return json.dumps({
+        "status": get_cerebro_status(db_path=_get_db_path()),
+        "insights": list_insights(status=status, limit=limit, db_path=_get_db_path()),
+    }, indent=2, default=str)
 
 
 def recall_brain_history(query: str = "", limit: int = 10) -> str:

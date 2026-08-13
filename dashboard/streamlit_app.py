@@ -1458,14 +1458,40 @@ else:
             st.rerun()
 
     with st.expander(f"CEREBRO SIGNAL ARCHIVE · {sum((cerebro.get('insight_counts') or {}).values())}"):
+        _experiment_by_insight = {
+            str(_experiment.get("insight_id") or ""): _experiment
+            for _experiment in (cerebro.get("latest_experiments") or [])
+        }
+        _pending_cerebro_msgs = st.session_state.pop("cerebro_queue_message", "")
+        if _pending_cerebro_msgs:
+            st.info(_pending_cerebro_msgs)
         _archive = cerebro.get("latest_insights") or []
         if not _archive:
             st.caption("Cerebro is collecting point-in-time evidence. Insights appear only when a falsifiable pattern clears the evidence floor.")
         for _insight in _archive:
+            _insight_id = str(_insight.get("insight_id") or "")
             _state = str(_insight.get("status") or "ACTIVE")
             st.markdown(f"**{_state} · {float(_insight.get('confidence') or 0):.0%}**  {_insight.get('title', '')}")
             st.caption(str(_insight.get("summary") or ""))
             st.caption(f"Test: {_insight.get('falsification_rule', '')}")
+            _existing = _experiment_by_insight.get(_insight_id)
+            if _existing:
+                st.caption(
+                    f"Experiment: {_existing.get('status', 'UNKNOWN')} · "
+                    f"{(_existing.get('change_spec') or {}).get('proposal_type', 'manual_review')}"
+                )
+            elif _state in {"ACTIVE", "CONFIRMED"} and _insight_id:
+                if st.button("Queue Shadow Experiment", key=f"cerebro_queue_{_insight_id}", use_container_width=False):
+                    from runtime import approvals as _approvals
+
+                    st.session_state.cerebro_queue_message = _approvals.request_change(
+                        "create_cerebro_experiment",
+                        {"insight_id": _insight_id},
+                        f"Queued from cockpit archive for insight {_insight_id}.",
+                        surface="cockpit",
+                        dedupe_pending=True,
+                    )
+                    st.rerun()
         _experiments = cerebro.get("latest_experiments") or []
         if _experiments:
             st.markdown("**Shadow Experiments**")

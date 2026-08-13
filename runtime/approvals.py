@@ -70,15 +70,35 @@ def whitelist_help() -> str:
     )
 
 
-def request_change(action: str, params: dict[str, Any] | None = None, rationale: str = "", *, surface: str = "telegram") -> str:
+def request_change(
+    action: str,
+    params: dict[str, Any] | None = None,
+    rationale: str = "",
+    *,
+    surface: str = "telegram",
+    dedupe_pending: bool = False,
+) -> str:
     """Queue a proposed change for cockpit approval. Never executes anything itself."""
     if action not in WHITELIST:
         return f"Unknown action '{action}'. Allowed actions:\n{whitelist_help()}"
+    encoded_params = json.dumps(params or {}, sort_keys=True)
     conn = _conn()
+    if dedupe_pending:
+        existing = conn.execute(
+            "SELECT id FROM pending_approvals WHERE status='pending' AND action=? AND params_json=? ORDER BY id DESC LIMIT 1",
+            (action, encoded_params),
+        ).fetchone()
+        if existing:
+            row_id = int(existing["id"])
+            conn.close()
+            return (
+                f"Proposal #{row_id} is already pending for cockpit approval: {action}({params or {}}). "
+                f"No duplicate was queued."
+            )
     conn.execute(
         "INSERT INTO pending_approvals (created_at, surface, action, params_json, rationale, status) "
         "VALUES (?, ?, ?, ?, ?, 'pending')",
-        (datetime.now(timezone.utc).isoformat(), surface, action, json.dumps(params or {}), rationale),
+        (datetime.now(timezone.utc).isoformat(), surface, action, encoded_params, rationale),
     )
     conn.commit()
     row_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]

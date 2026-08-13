@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from config import DB_PATH
-from intelligence.cerebro import generate_insights
+from intelligence.cerebro import generate_insights, process_experiments
 from intelligence.rbi2 import train_challenger
 from intelligence.schema import connect, init_intelligence_db
 
@@ -38,6 +38,7 @@ def run_intelligence_cycle(*, force: bool = False, db_path: str = DB_PATH) -> di
             "run_id": run_id,
             "rbi2": train_challenger(db_path=db_path),
             "cerebro": generate_insights(db_path=db_path),
+            "experiments": process_experiments(db_path=db_path),
         }
         cutoff = str((result["rbi2"] or {}).get("data_cutoff") or "")
         status = "COMPLETE"

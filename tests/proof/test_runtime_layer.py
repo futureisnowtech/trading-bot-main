@@ -368,6 +368,32 @@ def test_approval_queue_can_create_cerebro_experiments(tmp_path, monkeypatch):
     assert "ce-test" in resolved
 
 
+def test_approval_queue_dedupes_pending_identical_requests(tmp_path, monkeypatch):
+    import config
+    import runtime.approvals as approvals
+
+    db = str(tmp_path / "approvals_dedupe.db")
+    monkeypatch.setattr(config, "DB_PATH", db, raising=False)
+
+    first = approvals.request_change(
+        "create_cerebro_experiment",
+        {"insight_id": "ci-test"},
+        "selected from archive",
+        dedupe_pending=True,
+    )
+    second = approvals.request_change(
+        "create_cerebro_experiment",
+        {"insight_id": "ci-test"},
+        "selected from archive",
+        dedupe_pending=True,
+    )
+    pending = approvals.list_pending()
+
+    assert "Proposal #1 queued" in first
+    assert "already pending" in second
+    assert len(pending) == 1
+
+
 def test_agent_read_file_can_read_repo_files_without_name_error():
     import notifications.agent_tools as tools
 

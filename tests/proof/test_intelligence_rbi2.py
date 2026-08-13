@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, timedelta, timezone
 
-from intelligence.cerebro import create_experiment_from_insight, generate_insights, get_cerebro_status
+from intelligence.cerebro import create_experiment_from_insight, generate_insights, get_cerebro_status, process_experiments
 from intelligence.outcomes import record_outcome
 from intelligence.rbi2 import get_active_model_weights, promote_challenger, train_challenger
 from intelligence.schema import connect, init_intelligence_db
@@ -68,19 +68,43 @@ def test_outcomes_are_revision_aware_and_cerebro_starts_empty(tmp_path):
 
 
 def test_cerebro_experiment_flow_is_operator_reachable(tmp_path):
+    import config
+    import runtime.approvals as approvals
+
     db_path = str(tmp_path / "cerebro.db")
-    _seed(db_path)
-    train_challenger(db_path=db_path)
-    created = generate_insights(db_path=db_path)
-    assert created["created_count"] >= 1
+    old_db = config.DB_PATH
+    config.DB_PATH = db_path
+    try:
+        _seed(db_path)
+        train_challenger(db_path=db_path)
+        created = generate_insights(db_path=db_path)
+        assert created["created_count"] >= 1
 
-    insight_id = str(created["created"][0])
-    experiment = create_experiment_from_insight(insight_id, approved_by="test", db_path=db_path)
+        insight_id = str(created["created"][0])
+        experiment = create_experiment_from_insight(insight_id, approved_by="test", db_path=db_path)
 
-    assert experiment["status"] == "APPROVED_FOR_SHADOW"
-    assert experiment["change_spec"]["proposal_type"] == "promote_rbi_artifact"
+        assert experiment["status"] == "APPROVED_FOR_SHADOW"
+        assert experiment["change_spec"]["proposal_type"] == "promote_rbi_artifact"
 
-    status = get_cerebro_status(db_path)
-    assert status["experiment_count"] == 1
-    assert status["approved_experiment_count"] == 1
-    assert status["latest_experiments"][0]["experiment_id"] == experiment["experiment_id"]
+        status = get_cerebro_status(db_path)
+        assert status["experiment_count"] == 1
+        assert status["approved_experiment_count"] == 1
+        assert status["latest_experiments"][0]["experiment_id"] == experiment["experiment_id"]
+
+        with connect(db_path) as conn:
+            conn.execute(
+                "UPDATE cerebro_insights SET status='CONFIRMED', scored_count=20, resolution_note='confirmed prospectively' WHERE insight_id=?",
+                (insight_id,),
+            )
+            conn.commit()
+
+        processed = process_experiments(db_path=db_path)
+        pending = approvals.list_pending()
+        refreshed = get_cerebro_status(db_path)
+
+        assert processed["action_pending"] == 1
+        assert pending
+        assert pending[0]["action"] == "promote_rbi_artifact"
+        assert refreshed["latest_experiments"][0]["status"] == "ACTION_PENDING"
+    finally:
+        config.DB_PATH = old_db

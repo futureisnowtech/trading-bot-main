@@ -12,6 +12,18 @@ from config import DB_PATH, estimate_kalshi_fee_per_contract
 from intelligence.rbi2 import get_rbi2_status
 from intelligence.schema import connect, init_intelligence_db
 
+INSIGHT_STATUSES = {"ACTIVE", "CONFIRMED", "FALSIFIED", "INCONCLUSIVE"}
+EXPERIMENT_STATUSES = {
+    "PROPOSED",
+    "APPROVED_FOR_SHADOW",
+    "SHADOW_ACTIVE",
+    "ACTION_PENDING",
+    "COMPLETED_CONFIRMED",
+    "COMPLETED_FALSIFIED",
+    "COMPLETED_INCONCLUSIVE",
+}
+RUN_STATUSES = {"RUNNING", "COMPLETE", "FAILED"}
+
 
 def _fingerprint(kind: str, key: str) -> str:
     return hashlib.sha256(f"{kind}:{key}".encode("utf-8")).hexdigest()
@@ -32,6 +44,11 @@ def _json_dict(value: Any) -> dict[str, Any]:
     except Exception:
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+def _normalized_status(value: str, *, allowed: set[str]) -> str:
+    token = str(value or "").upper().strip()
+    return token if token in allowed else ""
 
 
 def _insert_insight(
@@ -335,11 +352,12 @@ def list_insights(
     db_path: str = DB_PATH,
 ) -> list[dict[str, Any]]:
     init_intelligence_db(db_path)
+    status_token = _normalized_status(status, allowed=INSIGHT_STATUSES)
     with connect(db_path) as conn:
-        if status:
+        if status_token:
             rows = conn.execute(
                 "SELECT * FROM cerebro_insights WHERE status=? ORDER BY created_at DESC LIMIT ?",
-                (status.upper(), max(1, int(limit))),
+                (status_token, max(1, int(limit))),
             ).fetchall()
         else:
             rows = conn.execute(
@@ -527,6 +545,171 @@ def approve_experiment(
     return {"experiment_id": experiment_id, "status": "APPROVED_FOR_SHADOW"}
 
 
+def _update_experiment(
+    conn,
+    experiment_id: str,
+    *,
+    status: str,
+    result: dict[str, Any],
+) -> None:
+    conn.execute(
+        """UPDATE cerebro_experiments
+           SET status=?, result_json=?
+           WHERE experiment_id=?""",
+        (
+            status,
+            json.dumps(result, sort_keys=True),
+            experiment_id,
+        ),
+    )
+
+
+def process_experiments(db_path: str = DB_PATH) -> dict[str, Any]:
+    init_intelligence_db(db_path)
+    summary = {
+        "processed": 0,
+        "shadow_active": 0,
+        "action_pending": 0,
+        "completed_confirmed": 0,
+        "completed_falsified": 0,
+        "completed_inconclusive": 0,
+    }
+    with connect(db_path) as conn:
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS pending_approvals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                surface TEXT NOT NULL,
+                action TEXT NOT NULL,
+                params_json TEXT NOT NULL,
+                rationale TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                resolved_at TEXT,
+                result TEXT
+            )"""
+        )
+        rows = conn.execute(
+            """SELECT e.*, i.status AS insight_status, i.title, i.summary, i.scored_count,
+                      i.horizon_count, i.resolution_note, i.evidence_json
+               FROM cerebro_experiments e
+               JOIN cerebro_insights i ON i.insight_id=e.insight_id
+               WHERE e.status IN ('APPROVED_FOR_SHADOW', 'SHADOW_ACTIVE', 'ACTION_PENDING')
+               ORDER BY e.created_at ASC"""
+        ).fetchall()
+        for raw in rows:
+            row = dict(raw)
+            change_spec = _json_dict(row.get("change_spec_json"))
+            result = _json_dict(row.get("result_json"))
+            insight_status = str(row.get("insight_status") or "ACTIVE").upper()
+            artifact_id = str(change_spec.get("artifact_id") or "")
+            next_status = "SHADOW_ACTIVE"
+            result.update(
+                {
+                    "last_evaluated_at": datetime.now(timezone.utc).isoformat(),
+                    "insight_status": insight_status,
+                    "scored_count": int(row.get("scored_count") or 0),
+                    "horizon_count": int(row.get("horizon_count") or 0),
+                    "resolution_note": str(row.get("resolution_note") or ""),
+                    "proposal_type": str(change_spec.get("proposal_type") or "manual_review"),
+                }
+            )
+            if insight_status == "ACTIVE":
+                result["state"] = "waiting_for_more_resolved_outcomes"
+                summary["shadow_active"] += 1
+            elif insight_status == "CONFIRMED":
+                result["state"] = "confirmed"
+                if str(change_spec.get("proposal_type") or "") == "promote_rbi_artifact" and artifact_id:
+                    from intelligence.rbi2 import get_champion_artifact
+
+                    if str((get_champion_artifact(db_path=db_path) or {}).get("artifact_id") or "") == artifact_id:
+                        next_status = "COMPLETED_CONFIRMED"
+                        result["queued_action"] = "promote_rbi_artifact"
+                        result["action_state"] = "already_promoted"
+                        summary["completed_confirmed"] += 1
+                    else:
+                        latest_approval = conn.execute(
+                            """SELECT id, status, result, params_json
+                               FROM pending_approvals
+                               WHERE action='promote_rbi_artifact'
+                               ORDER BY id DESC"""
+                        ).fetchall()
+                        matched = None
+                        for approval in latest_approval:
+                            params = _json_dict(approval["params_json"])
+                            if str(params.get("artifact_id") or "") == artifact_id:
+                                matched = dict(approval)
+                                matched["params"] = params
+                                break
+                        if matched and str(matched.get("status") or "") == "pending":
+                            next_status = "ACTION_PENDING"
+                            result["queued_action"] = "promote_rbi_artifact"
+                            result["action_state"] = "pending_operator_approval"
+                            result["approval_id"] = int(matched["id"])
+                            summary["action_pending"] += 1
+                        elif matched and str(matched.get("status") or "") == "rejected":
+                            next_status = "COMPLETED_CONFIRMED"
+                            result["queued_action"] = "promote_rbi_artifact"
+                            result["action_state"] = "operator_rejected"
+                            result["approval_id"] = int(matched["id"])
+                            result["approval_result"] = str(matched.get("result") or "")
+                            summary["completed_confirmed"] += 1
+                        else:
+                            from runtime import approvals
+
+                            queue_message = approvals.request_change(
+                                "promote_rbi_artifact",
+                                {
+                                    "artifact_id": artifact_id,
+                                    "rationale": f"Cerebro experiment {row['experiment_id']} confirmed prospective challenger advantage.",
+                                },
+                                f"Cerebro confirmed RBI artifact {artifact_id}; queueing governed promotion review.",
+                                surface="cerebro",
+                                dedupe_pending=True,
+                            )
+                            pending_row = conn.execute(
+                                """SELECT id FROM pending_approvals
+                                   WHERE status='pending' AND action='promote_rbi_artifact' AND params_json=?
+                                   ORDER BY id DESC LIMIT 1""",
+                                (
+                                    json.dumps(
+                                        {
+                                            "artifact_id": artifact_id,
+                                            "rationale": f"Cerebro experiment {row['experiment_id']} confirmed prospective challenger advantage.",
+                                        },
+                                        sort_keys=True,
+                                    ),
+                                ),
+                            ).fetchone()
+                            next_status = "ACTION_PENDING"
+                            result["queued_action"] = "promote_rbi_artifact"
+                            result["action_state"] = "pending_operator_approval"
+                            result["queue_message"] = queue_message
+                            if pending_row:
+                                result["approval_id"] = int(pending_row["id"])
+                            summary["action_pending"] += 1
+                else:
+                    next_status = "COMPLETED_CONFIRMED"
+                    result["recommended_next_step"] = "manual_review"
+                    summary["completed_confirmed"] += 1
+            elif insight_status == "FALSIFIED":
+                next_status = "COMPLETED_FALSIFIED"
+                result["state"] = "falsified"
+                summary["completed_falsified"] += 1
+            else:
+                next_status = "COMPLETED_INCONCLUSIVE"
+                result["state"] = "inconclusive"
+                summary["completed_inconclusive"] += 1
+            _update_experiment(
+                conn,
+                str(row["experiment_id"]),
+                status=next_status,
+                result=result,
+            )
+            summary["processed"] += 1
+        conn.commit()
+    return summary
+
+
 def list_experiments(
     *,
     status: str = "",
@@ -534,11 +717,12 @@ def list_experiments(
     db_path: str = DB_PATH,
 ) -> list[dict[str, Any]]:
     init_intelligence_db(db_path)
+    status_token = _normalized_status(status, allowed=EXPERIMENT_STATUSES)
     query = "SELECT * FROM cerebro_experiments"
     params: list[Any] = []
-    if status:
+    if status_token:
         query += " WHERE status=?"
-        params.append(status.upper())
+        params.append(status_token)
     query += " ORDER BY created_at DESC LIMIT ?"
     params.append(max(1, int(limit)))
     with connect(db_path) as conn:
@@ -560,11 +744,12 @@ def list_runs(
     db_path: str = DB_PATH,
 ) -> list[dict[str, Any]]:
     init_intelligence_db(db_path)
+    status_token = _normalized_status(status, allowed=RUN_STATUSES)
     query = "SELECT * FROM intelligence_runs"
     params: list[Any] = []
-    if status:
+    if status_token:
         query += " WHERE status=?"
-        params.append(status.upper())
+        params.append(status_token)
     query += " ORDER BY started_at DESC LIMIT ?"
     params.append(max(1, int(limit)))
     with connect(db_path) as conn:

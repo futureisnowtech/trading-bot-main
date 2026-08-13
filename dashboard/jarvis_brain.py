@@ -768,11 +768,23 @@ def get_rbi2_status_summary() -> str:
 def get_cerebro_brief(status: str = "", limit: int = 12) -> str:
     """Search Cerebro's archived, prospectively scored insights."""
     from intelligence.cerebro import get_cerebro_status, list_experiments, list_insights, list_runs
+    status_token = str(status or "").upper().strip()
+    insight_statuses = {"ACTIVE", "CONFIRMED", "FALSIFIED", "INCONCLUSIVE"}
+    experiment_statuses = {
+        "PROPOSED",
+        "APPROVED_FOR_SHADOW",
+        "SHADOW_ACTIVE",
+        "ACTION_PENDING",
+        "COMPLETED_CONFIRMED",
+        "COMPLETED_FALSIFIED",
+        "COMPLETED_INCONCLUSIVE",
+    }
+    run_statuses = {"RUNNING", "COMPLETE", "FAILED"}
     return json.dumps({
         "status": get_cerebro_status(db_path=_get_db_path()),
-        "insights": list_insights(status=status, limit=limit, db_path=_get_db_path()),
-        "experiments": list_experiments(status=status, limit=limit, db_path=_get_db_path()),
-        "runs": list_runs(limit=min(limit, 10), db_path=_get_db_path()),
+        "insights": list_insights(status=status_token if status_token in insight_statuses else "", limit=limit, db_path=_get_db_path()),
+        "experiments": list_experiments(status=status_token if status_token in experiment_statuses else "", limit=limit, db_path=_get_db_path()),
+        "runs": list_runs(limit=min(limit, 10), status=status_token if status_token in run_statuses else "", db_path=_get_db_path()),
     }, indent=2, default=str)
 
 

@@ -114,6 +114,8 @@ def _build_registry() -> dict[str, Tool]:
     add(jb.show_panel, READ)
     add(jb.get_rbi2_status_summary, READ)
     add(jb.get_cerebro_brief, READ)
+    add(jb.propose_cerebro_experiment, READ)
+    add(jb.list_cerebro_experiments, READ)
 
     # SRE/runtime tools (formerly Telegram-only).
     add(at.get_live_kalshi_status, READ)

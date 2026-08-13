@@ -1466,6 +1466,22 @@ else:
             st.markdown(f"**{_state} · {float(_insight.get('confidence') or 0):.0%}**  {_insight.get('title', '')}")
             st.caption(str(_insight.get("summary") or ""))
             st.caption(f"Test: {_insight.get('falsification_rule', '')}")
+        _experiments = cerebro.get("latest_experiments") or []
+        if _experiments:
+            st.markdown("**Shadow Experiments**")
+            for _experiment in _experiments[:6]:
+                _kind = str((_experiment.get("change_spec") or {}).get("proposal_type") or "manual_review")
+                st.caption(
+                    f"{_experiment.get('status', 'UNKNOWN')} · {_experiment.get('experiment_id', '')} · "
+                    f"{_kind} · insight {_experiment.get('insight_id', '')}"
+                )
+        _runs = cerebro.get("latest_runs") or []
+        if _runs:
+            _latest_run = _runs[0]
+            st.caption(
+                f"Latest intelligence cycle: {_latest_run.get('status', 'UNKNOWN')} · "
+                f"{_latest_run.get('started_at', '')}"
+            )
 
     # Chat history
     if "jarvis_history" not in st.session_state:

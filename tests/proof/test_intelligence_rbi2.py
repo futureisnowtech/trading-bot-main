@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, timedelta, timezone
 
-from intelligence.cerebro import get_cerebro_status
+from intelligence.cerebro import create_experiment_from_insight, generate_insights, get_cerebro_status
 from intelligence.outcomes import record_outcome
 from intelligence.rbi2 import get_active_model_weights, promote_challenger, train_challenger
 from intelligence.schema import connect, init_intelligence_db
@@ -65,3 +65,22 @@ def test_outcomes_are_revision_aware_and_cerebro_starts_empty(tmp_path):
         rows = conn.execute("SELECT market_result, current FROM intelligence_outcomes ORDER BY revision").fetchall()
     assert [(row["market_result"], row["current"]) for row in rows] == [("YES", 0), ("NO", 1)]
     assert get_cerebro_status(db_path)["latest_insights"] == []
+
+
+def test_cerebro_experiment_flow_is_operator_reachable(tmp_path):
+    db_path = str(tmp_path / "cerebro.db")
+    _seed(db_path)
+    train_challenger(db_path=db_path)
+    created = generate_insights(db_path=db_path)
+    assert created["created_count"] >= 1
+
+    insight_id = str(created["created"][0])
+    experiment = create_experiment_from_insight(insight_id, approved_by="test", db_path=db_path)
+
+    assert experiment["status"] == "APPROVED_FOR_SHADOW"
+    assert experiment["change_spec"]["proposal_type"] == "promote_rbi_artifact"
+
+    status = get_cerebro_status(db_path)
+    assert status["experiment_count"] == 1
+    assert status["approved_experiment_count"] == 1
+    assert status["latest_experiments"][0]["experiment_id"] == experiment["experiment_id"]

@@ -22,6 +22,18 @@ def _latest_prediction_id(conn) -> int:
     return int(row[0] or 0)
 
 
+def _json_dict(value: Any) -> dict[str, Any]:
+    if not value:
+        return {}
+    if isinstance(value, dict):
+        return value
+    try:
+        parsed = json.loads(value)
+    except Exception:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
 def _insert_insight(
     *,
     kind: str,
@@ -343,6 +355,64 @@ def list_insights(
     return result
 
 
+def _default_experiment_spec(insight: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    insight_type = str(insight.get("insight_type") or "")
+    evidence = _json_dict(insight.get("evidence_json"))
+    base_guardrails = {
+        "shadow_only": True,
+        "official_outcomes_only": True,
+        "requires_human_promotion": True,
+        "source_insight_id": str(insight.get("insight_id") or ""),
+        "minimum_horizon_count": int(insight.get("horizon_count") or 20),
+    }
+    if insight_type == "challenger_improvement":
+        return (
+            {
+                "proposal_type": "promote_rbi_artifact",
+                "artifact_id": str(evidence.get("artifact_id") or ""),
+            },
+            {
+                **base_guardrails,
+                "approval_path": "cockpit_pending_approval",
+                "prospective_confirmation_required": True,
+            },
+        )
+    if insight_type == "model_dominance":
+        preferred = "gfs" if float(evidence.get("gfs_brier") or 0.0) <= float(evidence.get("ecmwf_brier") or 0.0) else "ecmwf"
+        return (
+            {
+                "proposal_type": "segment_weight_review",
+                "mode": str(evidence.get("mode") or ""),
+                "preferred_model": preferred,
+            },
+            {
+                **base_guardrails,
+                "minimum_segment_advantage": 0.01,
+                "change_requires_code_review": True,
+            },
+        )
+    if insight_type == "veto_selectivity":
+        return (
+            {
+                "proposal_type": "veto_policy_review",
+                "reason": str(evidence.get("reason") or ""),
+                "quoted_counterfactual_mean": float(evidence.get("mean_quoted_counterfactual") or 0.0),
+            },
+            {
+                **base_guardrails,
+                "quoted_counterfactual_only": True,
+                "fill_claims_forbidden": True,
+            },
+        )
+    return (
+        {
+            "proposal_type": "manual_review",
+            "insight_type": insight_type,
+        },
+        base_guardrails,
+    )
+
+
 def create_experiment(
     insight_id: str,
     *,
@@ -378,6 +448,61 @@ def create_experiment(
     return {"experiment_id": experiment_id, "status": "PROPOSED", "insight_id": insight_id}
 
 
+def create_experiment_from_insight(
+    insight_id: str,
+    *,
+    approved_by: str = "",
+    db_path: str = DB_PATH,
+) -> dict[str, Any]:
+    init_intelligence_db(db_path)
+    with connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT * FROM cerebro_insights WHERE insight_id=?",
+            (insight_id,),
+        ).fetchone()
+    if not row:
+        raise ValueError("Unknown Cerebro insight")
+    insight = dict(row)
+    change_spec, guardrails = _default_experiment_spec(insight)
+    with connect(db_path) as conn:
+        existing = conn.execute(
+            """SELECT * FROM cerebro_experiments
+               WHERE insight_id=? AND change_spec_json=?
+               ORDER BY created_at DESC LIMIT 1""",
+            (insight_id, json.dumps(change_spec, sort_keys=True)),
+        ).fetchone()
+    if existing:
+        payload = dict(existing)
+        if approved_by and str(payload.get("status") or "") == "PROPOSED":
+            payload.update(
+                approve_experiment(
+                    str(payload["experiment_id"]),
+                    approved_by=approved_by,
+                    db_path=db_path,
+                )
+            )
+        payload["change_spec"] = _json_dict(payload.pop("change_spec_json", "{}"))
+        payload["guardrails"] = _json_dict(payload.pop("guardrails_json", "{}"))
+        payload["result"] = _json_dict(payload.pop("result_json", "{}"))
+        return payload
+    result = create_experiment(
+        insight_id,
+        change_spec=change_spec,
+        guardrails=guardrails,
+        db_path=db_path,
+    )
+    if approved_by:
+        approved = approve_experiment(
+            str(result["experiment_id"]),
+            approved_by=approved_by,
+            db_path=db_path,
+        )
+        result.update(approved)
+    result["change_spec"] = change_spec
+    result["guardrails"] = guardrails
+    return result
+
+
 def approve_experiment(
     experiment_id: str,
     *,
@@ -402,6 +527,56 @@ def approve_experiment(
     return {"experiment_id": experiment_id, "status": "APPROVED_FOR_SHADOW"}
 
 
+def list_experiments(
+    *,
+    status: str = "",
+    limit: int = 25,
+    db_path: str = DB_PATH,
+) -> list[dict[str, Any]]:
+    init_intelligence_db(db_path)
+    query = "SELECT * FROM cerebro_experiments"
+    params: list[Any] = []
+    if status:
+        query += " WHERE status=?"
+        params.append(status.upper())
+    query += " ORDER BY created_at DESC LIMIT ?"
+    params.append(max(1, int(limit)))
+    with connect(db_path) as conn:
+        rows = conn.execute(query, params).fetchall()
+    experiments: list[dict[str, Any]] = []
+    for row in rows:
+        payload = dict(row)
+        payload["change_spec"] = _json_dict(payload.pop("change_spec_json", "{}"))
+        payload["guardrails"] = _json_dict(payload.pop("guardrails_json", "{}"))
+        payload["result"] = _json_dict(payload.pop("result_json", "{}"))
+        experiments.append(payload)
+    return experiments
+
+
+def list_runs(
+    *,
+    limit: int = 12,
+    status: str = "",
+    db_path: str = DB_PATH,
+) -> list[dict[str, Any]]:
+    init_intelligence_db(db_path)
+    query = "SELECT * FROM intelligence_runs"
+    params: list[Any] = []
+    if status:
+        query += " WHERE status=?"
+        params.append(status.upper())
+    query += " ORDER BY started_at DESC LIMIT ?"
+    params.append(max(1, int(limit)))
+    with connect(db_path) as conn:
+        rows = conn.execute(query, params).fetchall()
+    runs: list[dict[str, Any]] = []
+    for row in rows:
+        payload = dict(row)
+        payload["summary"] = _json_dict(payload.pop("summary_json", "{}"))
+        runs.append(payload)
+    return runs
+
+
 def get_cerebro_status(db_path: str = DB_PATH) -> dict[str, Any]:
     init_intelligence_db(db_path)
     with connect(db_path) as conn:
@@ -412,10 +587,16 @@ def get_cerebro_status(db_path: str = DB_PATH) -> dict[str, Any]:
         prediction_count = int(conn.execute("SELECT COUNT(*) FROM intelligence_predictions").fetchone()[0] or 0)
         official_count = int(conn.execute("SELECT COUNT(*) FROM intelligence_outcomes WHERE current=1 AND official=1").fetchone()[0] or 0)
         experiment_count = int(conn.execute("SELECT COUNT(*) FROM cerebro_experiments").fetchone()[0] or 0)
+        approved_experiment_count = int(
+            conn.execute("SELECT COUNT(*) FROM cerebro_experiments WHERE status='APPROVED_FOR_SHADOW'").fetchone()[0] or 0
+        )
     return {
         "prediction_count": prediction_count,
         "official_outcome_count": official_count,
         "insight_counts": counts,
         "experiment_count": experiment_count,
+        "approved_experiment_count": approved_experiment_count,
         "latest_insights": list_insights(limit=8, db_path=db_path),
+        "latest_experiments": list_experiments(limit=8, db_path=db_path),
+        "latest_runs": list_runs(limit=6, db_path=db_path),
     }

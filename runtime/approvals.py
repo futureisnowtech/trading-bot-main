@@ -34,6 +34,10 @@ WHITELIST: dict[str, dict[str, Any]] = {
         "description": "Promote a validated RBI 2.0 challenger to production champion.",
         "params": ["artifact_id", "rationale"],
     },
+    "create_cerebro_experiment": {
+        "description": "Create and approve a shadow-only Cerebro experiment from an archived insight.",
+        "params": ["insight_id", "rationale"],
+    },
 }
 
 
@@ -118,6 +122,14 @@ def _execute(action: str, params: dict[str, Any]) -> str:
             str(params.get("artifact_id", "")),
             promoted_by="cockpit_approval",
             reason=str(params.get("rationale", "approved Cerebro proposal")),
+        )
+        return json.dumps(result, sort_keys=True)
+    if action == "create_cerebro_experiment":
+        from intelligence.cerebro import create_experiment_from_insight
+
+        result = create_experiment_from_insight(
+            str(params.get("insight_id", "")),
+            approved_by="cockpit_approval",
         )
         return json.dumps(result, sort_keys=True)
     return f"No executor registered for action '{action}'."

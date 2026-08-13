@@ -344,6 +344,30 @@ def test_approval_queue_promote_release_uses_canonical_command(tmp_path, monkeyp
     assert approvals.resolve(int(pending[0]["id"]), approve=True) == "ran promote"
 
 
+def test_approval_queue_can_create_cerebro_experiments(tmp_path, monkeypatch):
+    import config
+    import runtime.approvals as approvals
+
+    db = str(tmp_path / "approvals_cerebro.db")
+    monkeypatch.setattr(config, "DB_PATH", db, raising=False)
+    monkeypatch.setattr(
+        "intelligence.cerebro.create_experiment_from_insight",
+        lambda insight_id, approved_by="": {
+            "experiment_id": "ce-test",
+            "insight_id": insight_id,
+            "status": "APPROVED_FOR_SHADOW",
+            "approved_by": approved_by,
+        },
+    )
+
+    approvals.request_change("create_cerebro_experiment", {"insight_id": "ci-test"}, "selected from archive")
+    pending = approvals.list_pending()
+
+    assert pending
+    resolved = approvals.resolve(int(pending[0]["id"]), approve=True)
+    assert "ce-test" in resolved
+
+
 def test_agent_read_file_can_read_repo_files_without_name_error():
     import notifications.agent_tools as tools
 

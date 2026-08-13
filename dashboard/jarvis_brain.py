@@ -767,10 +767,12 @@ def get_rbi2_status_summary() -> str:
 
 def get_cerebro_brief(status: str = "", limit: int = 12) -> str:
     """Search Cerebro's archived, prospectively scored insights."""
-    from intelligence.cerebro import get_cerebro_status, list_insights
+    from intelligence.cerebro import get_cerebro_status, list_experiments, list_insights, list_runs
     return json.dumps({
         "status": get_cerebro_status(db_path=_get_db_path()),
         "insights": list_insights(status=status, limit=limit, db_path=_get_db_path()),
+        "experiments": list_experiments(status=status, limit=limit, db_path=_get_db_path()),
+        "runs": list_runs(limit=min(limit, 10), db_path=_get_db_path()),
     }, indent=2, default=str)
 
 
@@ -806,6 +808,7 @@ def request_change(
     key: str = "",
     value: str = "",
     artifact_id: str = "",
+    insight_id: str = "",
     rationale: str = "",
 ) -> str:
     """Propose a system change for cockpit approval. Does not change anything itself.
@@ -813,8 +816,9 @@ def request_change(
     Use this on a read-only surface (Telegram) when the operator wants to act on a
     finding but write access is not available here. Valid actions: set_maker_entry_enabled
     (pass enabled=true/false), update_system_parameter (pass key, value), promote_release
-    (no extra params), or promote_rbi_artifact (pass artifact_id). The change only
-    takes effect if approved from the cockpit.
+    (no extra params), promote_rbi_artifact (pass artifact_id), or
+    create_cerebro_experiment (pass insight_id). The change only takes effect if
+    approved from the cockpit.
     """
     from runtime import approvals
 
@@ -827,9 +831,34 @@ def request_change(
         params["value"] = value
     if artifact_id:
         params["artifact_id"] = artifact_id
+    if insight_id:
+        params["insight_id"] = insight_id
     if rationale:
         params["rationale"] = rationale
     return approvals.request_change(action, params, rationale)
+
+
+def propose_cerebro_experiment(insight_id: str, rationale: str = "") -> str:
+    """Queue a cockpit approval to create a shadow-only experiment from an insight."""
+    return request_change(
+        "create_cerebro_experiment",
+        insight_id=insight_id,
+        rationale=rationale or "Operator selected a Cerebro insight for governed shadow follow-up.",
+    )
+
+
+def list_cerebro_experiments(status: str = "", limit: int = 12) -> str:
+    """List archived Cerebro experiments and recent intelligence-cycle runs."""
+    from intelligence.cerebro import list_experiments, list_runs
+
+    return json.dumps(
+        {
+            "experiments": list_experiments(status=status, limit=limit, db_path=_get_db_path()),
+            "runs": list_runs(limit=min(limit, 10), db_path=_get_db_path()),
+        },
+        indent=2,
+        default=str,
+    )
 
 
 def list_pending_approvals() -> str:

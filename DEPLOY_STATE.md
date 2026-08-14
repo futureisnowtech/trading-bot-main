@@ -15,6 +15,15 @@ of truth. Deploy provenance is stamped by `deploy.sh` into:
 - `/home/algo-runner/bot/logs/deploy_manifest.json`
 - `BUILD_SHA` embedded into both Docker images at build time
 
+For live-trading audits and recent-history questions, treat the droplet runtime
+database as canonical:
+
+- `/home/algo-runner/bot/logs/trades.db`
+
+Do not answer from the local Mac copy first unless the question is explicitly
+about local files or local/prod parity has already been verified for that exact
+dataset.
+
 | | |
 |---|---|
 | Containers | `execution-engine`, `kalshi-cockpit` |

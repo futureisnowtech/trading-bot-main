@@ -597,6 +597,26 @@ def test_economics_gate_veto_concurrent_cap():
     assert "concurrent" in reason.lower() or "cap" in reason.lower()
 
 
+def test_weather_market_gate_allows_ultra_no_concurrency_bonus():
+    from forecast.strategy_engine import MAX_CONCURRENT_POSITIONS, _weather_market_gate
+
+    approved, reason = _weather_market_gate(
+        ask_yes=0.40,
+        ask_no=0.45,
+        spread=0.02,
+        hours_to_resolution=24.0,
+        open_positions_count=MAX_CONCURRENT_POSITIONS,
+        deployed_pct=0.0,
+        mode="",
+        ticker="TEST-ULTRA-NO",
+        contract_name="Test Ultra No",
+        side="NO",
+        held_probability=0.95,
+    )
+    assert approved
+    assert reason == ""
+
+
 # ── 14. Tiny-bankroll sizing ──────────────────────────────────────────────────
 
 
@@ -1223,9 +1243,10 @@ def test_strategy_engine_family_cap_allows_four_existing_positions(monkeypatch):
     assert results[0]["result"].veto_reason == "downstream_stub"
 
 
-def test_strategy_engine_family_cap_blocks_fifth_existing_position(monkeypatch):
+def test_strategy_engine_family_cap_blocks_after_ultra_bonus_is_exhausted(monkeypatch):
     from forecast.market_snapshot import MarketSnapshot
     import forecast.strategy_engine as se
+    from config import KALSHI_ULTRA_HIGH_PROB_NO_FAMILY_CAP_BONUS
 
     snapshot = MarketSnapshot(
         market_id=1,
@@ -1252,11 +1273,65 @@ def test_strategy_engine_family_cap_blocks_fifth_existing_position(monkeypatch):
     results = se.evaluate_market_snapshots(
         snapshots=[snapshot],
         bankroll=200.0,
-        open_event_families={"KXLOWTLV": 5},
+        open_event_families={"KXLOWTLV": 5 + KALSHI_ULTRA_HIGH_PROB_NO_FAMILY_CAP_BONUS},
         open_positions=[],
     )
 
     assert results[0]["result"].veto_reason == "same_event_family_cap_reached"
+
+
+def test_strategy_engine_allows_ultra_no_family_bonus(monkeypatch):
+    from forecast.market_snapshot import MarketSnapshot
+    import forecast.strategy_engine as se
+
+    snapshot = MarketSnapshot(
+        market_id=1,
+        ticker="KXLOWTLV-99JAN01-B71.5",
+        contract_name="Las Vegas Low",
+        strike=71.5,
+        last_trade_at="20990101",
+        resolution_at="2099-01-01T00:00:00Z",
+        yes_contract={"local_symbol": "KXLOWTLV-99JAN01-B71.5", "contract_name": "Las Vegas Low"},
+        no_contract={"local_symbol": "KXLOWTLV-99JAN01-T72", "contract_name": "Las Vegas Low"},
+        yes_quote={"ask": 0.42, "bid": 0.40, "mid": 0.41},
+        no_quote={"ask": 0.58, "bid": 0.56, "mid": 0.57},
+        bars_5m=[],
+        bars_30m=[],
+        bars_1h=[],
+        bars_4h=[],
+    )
+
+    def _stub_evaluate_contract(**kwargs):
+        return se.StrategyResult(
+            strategy_family="stub",
+            side="NO",
+            q_hat=0.05,
+            ev=0.20,
+            ev_yes=-1.0,
+            ev_no=0.20,
+            confidence=0.95,
+            uncertainty_penalty=0.0,
+            econ_approved=True,
+            veto_reason="",
+            position_fraction=0.02,
+            position_contracts=1,
+            top_factors=[],
+            hours_to_resolution=24.0,
+            ask_yes=0.42,
+            ask_no=0.58,
+        )
+
+    monkeypatch.setattr(se, "evaluate_contract", _stub_evaluate_contract)
+
+    results = se.evaluate_market_snapshots(
+        snapshots=[snapshot],
+        bankroll=200.0,
+        open_event_families={"KXLOWTLV": 5},
+        open_positions=[],
+    )
+
+    assert results[0]["result"].econ_approved is True
+    assert results[0]["result"].veto_reason == ""
 
 
 def test_strategy_engine_keeps_only_one_best_strike_per_event_slot(monkeypatch):

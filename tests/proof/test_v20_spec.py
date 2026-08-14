@@ -94,26 +94,52 @@ class TestV20Specification(unittest.TestCase):
         self.assertTrue(n_scaled < n_base)
 
     def test_exit_curves(self):
-        """Salvage exit is a constant, invariant to tau and entry price.
-
-        Bound to config.SALVAGE_EXIT_DELTA so runtime, validation and this
-        proof cannot drift apart the way 174d23d's tau-decay did.
-        """
-        from config import SALVAGE_EXIT_DELTA
+        """Salvage exit is tiered by entry conviction, not tau or entry price."""
+        from config import (
+            SALVAGE_EXIT_DELTA,
+            SALVAGE_EXIT_DELTA_HIGH_PROB,
+            SALVAGE_EXIT_DELTA_ULTRA_HIGH_PROB,
+        )
 
         self.assertAlmostEqual(SALVAGE_EXIT_DELTA, 0.15)
+        self.assertAlmostEqual(SALVAGE_EXIT_DELTA_HIGH_PROB, 0.12)
+        self.assertAlmostEqual(SALVAGE_EXIT_DELTA_ULTRA_HIGH_PROB, 0.10)
 
         for tau_hours in (120.0, 24.0, 3.2, 1.0, 0.0, -5.0):
             for p_entry in (0.10, 0.40, 0.80):
                 self.assertAlmostEqual(
-                    calculate_salvage_exit_threshold(tau_hours, p_entry),
+                    calculate_salvage_exit_threshold(
+                        tau_hours,
+                        p_entry,
+                        entry_held_probability=0.79,
+                    ),
                     SALVAGE_EXIT_DELTA,
                     msg=f"salvage threshold varied at tau={tau_hours}, p={p_entry}",
+                )
+                self.assertAlmostEqual(
+                    calculate_salvage_exit_threshold(
+                        tau_hours,
+                        p_entry,
+                        entry_held_probability=0.80,
+                    ),
+                    SALVAGE_EXIT_DELTA_HIGH_PROB,
+                )
+                self.assertAlmostEqual(
+                    calculate_salvage_exit_threshold(
+                        tau_hours,
+                        p_entry,
+                        entry_held_probability=0.90,
+                    ),
+                    SALVAGE_EXIT_DELTA_ULTRA_HIGH_PROB,
                 )
 
     def test_salvage_delta_matches_published_parameter_catalog(self):
         """The parameter catalog is an audit surface; it must state the live value."""
-        from config import SALVAGE_EXIT_DELTA
+        from config import (
+            SALVAGE_EXIT_DELTA,
+            SALVAGE_EXIT_DELTA_HIGH_PROB,
+            SALVAGE_EXIT_DELTA_ULTRA_HIGH_PROB,
+        )
 
         catalog = os.path.join(
             _ROOT, "research_package", "03_parameter_catalog.md"
@@ -124,11 +150,16 @@ class TestV20Specification(unittest.TestCase):
             ]
         self.assertTrue(salvage_lines, "Salvage delta missing from parameter catalog.")
         for line in salvage_lines:
-            self.assertIn(
-                f"{SALVAGE_EXIT_DELTA:.2f}",
-                line,
-                msg=f"Catalog row disagrees with config ({SALVAGE_EXIT_DELTA}): {line.strip()}",
-            )
+            for value in (
+                SALVAGE_EXIT_DELTA,
+                SALVAGE_EXIT_DELTA_HIGH_PROB,
+                SALVAGE_EXIT_DELTA_ULTRA_HIGH_PROB,
+            ):
+                self.assertIn(
+                    f"{value:.2f}",
+                    line,
+                    msg=f"Catalog row disagrees with config ({value}): {line.strip()}",
+                )
 
     def test_disjoint_bracket_covariance(self):
         """Verify disjoint bracket same-event contracts have negative covariance (SPEC Phase 5)."""

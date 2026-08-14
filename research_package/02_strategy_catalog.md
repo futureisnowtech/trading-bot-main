@@ -61,7 +61,7 @@ Every candidate must pass 11 mandatory gate checks in `_economics_gate()` and `_
 
 The bot executes four explicit exit systems inside `run_strategy_cycle()`:
 
-*   **Sovereign Salvage (Dead-Trade Purge)**: If the updated weather model probability of our bet falls below $15\%$ ($<0.15$), the position is closed immediately at market prices to salvage remaining capital.
+*   **Sovereign Salvage (Dead-Trade Purge)**: If the updated held-side model probability falls below the conviction-tier salvage floor, the position is closed immediately at market prices to salvage remaining capital. The live floor is `15%` by default, `12%` for `80%+` entries, and `10%` for `90%+` entries.
 *   **Take-Profit (70% Gain Lock-in)**: Exits the position if the market price appreciates by $70\%$ of the maximum possible gain:
     $$\text{Target Price} \ge \text{Entry Price} + (1.0 - \text{Entry Price}) \cdot 0.70$$
 *   **Anti-Double-Down & Bracket Guards**: Rejects buying more contracts on the same strike, or hedging opposite contract sides within the same city event.

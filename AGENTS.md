@@ -12,6 +12,7 @@ This repository is now the active Kalshi-only execution tree.
 - Exposure truth: broker-first, ledgerless, fee-aware
 - Settlement truth: finalized Kalshi market outcomes, mirrored into `forecast_resolutions`
 - Learning truth: RBI 2.0 trains only on revisioned official outcomes and requires explicit champion promotion
+- Live archive truth: for live-trading audits, prediction-history questions, calibration analysis, or "what happened recently" requests, query the droplet database first (`algo-runner@157.245.15.40:/home/algo-runner/bot/logs/trades.db`). The local Mac database is non-canonical and may be partial, reconstructed, stale, or space-trimmed.
 
 ## MANDATE: REAL KALSHI RECORDS INVARIANT
 1. **LIVE KALSHI REST API IS CANONICAL**: When auditing real Kalshi performance, always query the live REST API (`/trade-api/v2/portfolio/settlements` and `/trade-api/v2/portfolio/positions`) directly via `KalshiBroker`. Never rely on partial local DB snapshots or static arrays. Settlements — not fills — carry realized PnL; `KalshiBroker` has no fills accessor.
@@ -23,6 +24,7 @@ This repository is now the active Kalshi-only execution tree.
    are costs, so that form is non-negative by construction and scores a win on every two-sided row —
    it once reported +$346.11 / 88.3% on an account whose true result was −$6.60 / 61.3%. Never trust
    `revenue` either; the API returns 0 for it on the large majority of live rows.
+5. **DROPLET-FIRST ANALYSIS RULE**: When the user asks about live performance, recent trades, archived probabilities, Jarvis/Cerebro/RBI evidence, win-rate by tier, or anything phrased like "our system" rather than "this local file", inspect the droplet first. Only use the local DB after explicitly establishing that it matches production closely enough for the question.
 
 ## MANDATE: SYSTEM UPDATE & COCKPIT SYNC PROTOCOL (J.A.R.V.I.S. OPTIMIZATION)
 1. **MANDATORY TELEMETRY SYNC**: Whenever system updates, strategy refactors, risk gate changes, or accounting formula fixes occur, the AI assistant/agent MUST immediately update and verify all Cockpit data layers (`dashboard/cockpit_data.py`, `dashboard/streamlit_app.py`, `runtime/kalshi_settlement_truth.py`), audit tools (`scripts/audit_real_kalshi_records.py`), and WebApp presentation models (`src/lib/resultsData.ts`, `ResultsDashboard.tsx`).

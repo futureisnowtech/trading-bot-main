@@ -85,13 +85,16 @@ def calculate_ceiled_fee(p: float, n: int, maker: bool = False) -> float:
     return estimate_kalshi_fee_per_contract(p_clamped, qty=n_clamped, maker=maker)
 
 
-def calculate_salvage_exit_threshold(tau_hours: float, p_entry: float) -> float:
-    # Constant Sovereign Salvage Delta, independent of tau and entry price.
-    # 174d23d replaced this with a tau-decay citing "SPEC §5.2"; no such spec
-    # exists in the repo, and every parameter/strategy doc states a flat 0.15.
-    from config import SALVAGE_EXIT_DELTA
+def calculate_salvage_exit_threshold(
+    tau_hours: float,
+    p_entry: float,
+    entry_held_probability: float | None = None,
+) -> float:
+    # Conviction-tier salvage stays independent of tau and price while giving
+    # top-conviction entries slightly more room to mean-revert.
+    from config import get_salvage_exit_delta_for_entry
 
-    return SALVAGE_EXIT_DELTA
+    return get_salvage_exit_delta_for_entry(entry_held_probability)
 
 
 def get_position_basis_quality(ticker: str, db_path: str | None = None) -> str:
@@ -821,9 +824,20 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                     
                     if model_yes is not None and n_pos > 0:
                         live_prob = model_yes if side == "YES" else (1.0 - model_yes)
-                        
-                        # 1. Theta-decaying salvage exit (toxic position purge) (SPEC §5.2)
-                        p_exit = calculate_salvage_exit_threshold(hours_to_resolution, entry_price)
+                        entry_held_p = None
+                        entry_model_yes = pos.get("forecast_yes_prob")
+                        if entry_model_yes is not None:
+                            try:
+                                entry_held_p = _held_model_probability(right, float(entry_model_yes))
+                            except (TypeError, ValueError):
+                                entry_held_p = None
+
+                        # 1. Conviction-tier salvage exit (toxic position purge)
+                        p_exit = calculate_salvage_exit_threshold(
+                            hours_to_resolution,
+                            entry_price,
+                            entry_held_probability=entry_held_p,
+                        )
                         
                         # 2. Fee-aware exit admissibility (SPEC §5.3)
                         # exit iff (bid - fee(bid))*n > q_live*n + 0.5*(ask-bid)*n
@@ -1329,7 +1343,13 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                     continue
 
                 family = local_sym.split("-")[0]
-                if cycle_event_families.get(family, 0) >= KALSHI_SAME_EVENT_FAMILY_CAP:
+                from config import get_kalshi_effective_same_event_family_cap
+
+                effective_family_cap = get_kalshi_effective_same_event_family_cap(
+                    result.side,
+                    result.confidence,
+                )
+                if cycle_event_families.get(family, 0) >= effective_family_cap:
                     _record_weather_candidate(
                         candidate=candidate,
                         decision="risk_block",

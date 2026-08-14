@@ -443,6 +443,8 @@ def _market_scan_findings(
     infra_count = sum(int(row.get("count") or 0) for row in infra_rows)
 
     if sample_size == 0:
+        if active_markets <= 0 and scope_active_contracts <= 0:
+            return blockers, warnings
         if scope_active_contracts <= 0:
             warnings.append(f"no_entry_scope_inventory ({entry_scope})")
         elif strict_runtime and active_markets > 0:

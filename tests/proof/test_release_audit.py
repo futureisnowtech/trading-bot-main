@@ -59,6 +59,25 @@ def test_market_scan_findings_warns_when_no_true_hourly_inventory_is_present():
     assert warnings == ["no_entry_scope_inventory (ALL_WEATHER_LANES)"]
 
 
+def test_market_scan_findings_ignores_empty_inventory_when_no_active_markets():
+    import scripts.release_audit as ra
+
+    blockers, warnings = ra._market_scan_findings(
+        {
+            "sample_size": 0,
+            "scope_active_contracts": 0,
+            "entry_scope": "ALL_WEATHER_LANES",
+            "infrastructure_rejections": [],
+            "systematic_thin_liquidity": False,
+        },
+        active_markets=0,
+        strict_runtime=True,
+    )
+
+    assert blockers == []
+    assert warnings == []
+
+
 def test_render_markdown_report_contains_verdict_and_counts():
     import scripts.release_audit as ra
 

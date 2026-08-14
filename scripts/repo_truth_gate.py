@@ -115,8 +115,14 @@ RISK_CONSTANT_PATTERNS: list[tuple[str, str]] = [
     (r"KELLY_CAP\s*[:=]\s*0\.\d+", "Hardcoded KELLY_CAP"),
 ]
 
-# Files allowed to define risk constants (only config.py)
-RISK_ALLOW_FILES: set[str] = {"config.py"}
+# Files allowed to define or pin risk constants. config.py remains the source of
+# truth; the two workflow fixtures are allowed to mirror production by writing
+# sanctioned test .env files for CI and deploy validation.
+RISK_ALLOW_FILES: set[str] = {
+    "config.py",
+    ".github/workflows/ci.yml",
+    ".github/workflows/deploy-nyc.yml",
+}
 
 
 # ── File collection ───────────────────────────────────────────────────────────
@@ -242,12 +248,13 @@ def check_live_start_policy(files: list[Path]) -> list[str]:
 
 
 def check_risk_constants(files: list[Path]) -> list[str]:
-    """Fail if any file other than config.py defines risk-limit constants."""
+    """Fail if any unsanctioned file defines risk-limit constants."""
     failures: list[str] = []
     for path in files:
         if not _should_scan(path):
             continue
-        if path.name in RISK_ALLOW_FILES:
+        rel = path.relative_to(_ROOT)
+        if str(rel) in RISK_ALLOW_FILES or path.name in RISK_ALLOW_FILES:
             continue
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
@@ -256,7 +263,6 @@ def check_risk_constants(files: list[Path]) -> list[str]:
         for pattern, label in RISK_CONSTANT_PATTERNS:
             matches = re.findall(pattern, text)
             if matches:
-                rel = path.relative_to(_ROOT)
                 failures.append(f"  {rel}: {label} — must be moved to config.py")
     return failures
 

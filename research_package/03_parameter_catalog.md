@@ -12,9 +12,13 @@ These parameters control capital deployment size and prevent over-exposure:
 | :--- | :--- | :--- | :--- | :--- |
 | `KALSHI_MAX_DEPLOYED_PCT` | `config.py` | `0.90` (90%) | Max percentage of total capital base that can be deployed concurrently. | **CONFIRMED** |
 | `KALSHI_MAX_CONCURRENT_POSITIONS` | `config.py` | `50` | Maximum number of open contracts allowed in the portfolio. | **CONFIRMED** |
+| `KALSHI_ULTRA_HIGH_PROB_NO_CONCURRENT_BONUS` | `config.py` | `+2` | Additional concurrent slots reserved for ultra-high-conviction `NO` trades only. | **CONFIRMED** |
 | `KALSHI_MAX_USD_PER_POSITION` | `config.py` | `$40.00` | SRE Hard dollar ceiling for any single position. | **CONFIRMED** |
+| `KALSHI_HIGH_PROB_POSITION_CAP_MULTIPLIER` | `config.py` | `1.50x` | Size-up multiplier for held-side probabilities at or above `80%`. | **CONFIRMED** |
+| `KALSHI_ULTRA_HIGH_PROB_POSITION_CAP_MULTIPLIER` | `config.py` | `2.00x` | Full size-up multiplier for held-side probabilities at or above `90%`. | **CONFIRMED** |
 | `KALSHI_MAX_QTY_PER_POSITION` | `config.py` | `2500` | Hard ceiling on the number of contracts in any single position. | **CONFIRMED** |
 | `KALSHI_SAME_EVENT_FAMILY_CAP` | `config.py` | `5` | Maximum number of active contracts allowed per city/event series. | **CONFIRMED** |
+| `KALSHI_ULTRA_HIGH_PROB_NO_FAMILY_CAP_BONUS` | `config.py` | `+1` | Additional same-city slot reserved for ultra-high-conviction `NO` trades only. | **CONFIRMED** |
 | `KALSHI_KELLY_CAP` | `config.py` | `0.10` (10%) | Max fractional Kelly sizing allocation (hard constraint). | **CONFIRMED** |
 | `SAME_EVENT_PENALTY` | `strategy_engine.py` | `0.50` (50%) | Sizing multiplier applied to halve sizes if event family shares positions. | **CONFIRMED** |
 | `MIN_FREE_DISK_MB` | `config.py` | `2048` | Minimum free disk space required on host system to execute. | **CONFIRMED** |
@@ -49,7 +53,7 @@ These parameters gate entry signals based on order book and forecast characteris
 
 | Parameter Name | File Source | Value | Control Target | Status |
 | :--- | :--- | :--- | :--- | :--- |
-| `Sovereign Salvage Delta` | `forecast/runner.py` | `0.15` (15%) | Purge position if bet probability drops below this. | **CONFIRMED** |
+| `Sovereign Salvage Delta` | `forecast/runner.py` | `0.15 / 0.12 / 0.10` | Purge position if held-side probability falls below `15%` by default, `12%` for `80%+` entries, or `10%` for `90%+` entries. | **CONFIRMED** |
 | `Take-Profit Target` | `forecast/runner.py` | `0.70` (70%) | Exit lock-in target gain (70% of max potential profit). | **CONFIRMED** |
 | `KALSHI_EXPENSIVE_YES_THRESHOLD` | `config.py` | `0.70` | Threshold above which contracts are marked as expensive. | **CONFIRMED** |
 | `KALSHI_EXPENSIVE_YES_MIN_NET_EDGE`| `config.py` | `0.01` | Minimum required edge for expensive YES contracts. | **CONFIRMED** |

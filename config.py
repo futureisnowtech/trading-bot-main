@@ -201,6 +201,20 @@ FORECAST_MANUAL_ENABLED: bool = (
 KALSHI_MAX_DEPLOYED_PCT: float = float(os.getenv("KALSHI_MAX_DEPLOYED_PCT", "0.90"))
 KALSHI_MAX_CONCURRENT_POSITIONS: int = int(os.getenv("KALSHI_MAX_CONCURRENT_POSITIONS", "50"))
 KALSHI_SAME_EVENT_FAMILY_CAP: int = int(os.getenv("KALSHI_SAME_EVENT_FAMILY_CAP", "5"))
+KALSHI_HIGH_PROB_THRESHOLD: float = float(os.getenv("KALSHI_HIGH_PROB_THRESHOLD", "0.80"))
+KALSHI_ULTRA_HIGH_PROB_THRESHOLD: float = float(os.getenv("KALSHI_ULTRA_HIGH_PROB_THRESHOLD", "0.90"))
+KALSHI_HIGH_PROB_POSITION_CAP_MULTIPLIER: float = float(
+    os.getenv("KALSHI_HIGH_PROB_POSITION_CAP_MULTIPLIER", "1.50")
+)
+KALSHI_ULTRA_HIGH_PROB_POSITION_CAP_MULTIPLIER: float = float(
+    os.getenv("KALSHI_ULTRA_HIGH_PROB_POSITION_CAP_MULTIPLIER", "2.00")
+)
+KALSHI_ULTRA_HIGH_PROB_NO_CONCURRENT_BONUS: int = int(
+    os.getenv("KALSHI_ULTRA_HIGH_PROB_NO_CONCURRENT_BONUS", "2")
+)
+KALSHI_ULTRA_HIGH_PROB_NO_FAMILY_CAP_BONUS: int = int(
+    os.getenv("KALSHI_ULTRA_HIGH_PROB_NO_FAMILY_CAP_BONUS", "1")
+)
 # Regional hub exposure ceiling: cap = max(MIN_USD, balance * PCT).
 #
 # These defaults deliberately mirror the values running in NYC production, not
@@ -216,9 +230,15 @@ KALSHI_HUB_EXPOSURE_MIN_USD: float = float(
     os.getenv("KALSHI_HUB_EXPOSURE_MIN_USD", "12")
 )
 # Sovereign Salvage Delta: purge a position when its model probability falls
-# below this. Constant by contract -- see research_package/03_parameter_catalog.md
-# (marked CONFIRMED) and 02_strategy_catalog.md section 4.
+# below this. High-conviction entries get slightly more room before the bot
+# abandons them, while sub-80% entries still use the full default delta.
 SALVAGE_EXIT_DELTA: float = float(os.getenv("SALVAGE_EXIT_DELTA", "0.15"))
+SALVAGE_EXIT_DELTA_HIGH_PROB: float = float(
+    os.getenv("SALVAGE_EXIT_DELTA_HIGH_PROB", "0.12")
+)
+SALVAGE_EXIT_DELTA_ULTRA_HIGH_PROB: float = float(
+    os.getenv("SALVAGE_EXIT_DELTA_ULTRA_HIGH_PROB", "0.10")
+)
 KALSHI_MAX_QTY_PER_POSITION: int = int(os.getenv("KALSHI_MAX_QTY_PER_POSITION", "2500"))
 KALSHI_MAX_USD_PER_POSITION: float = float(os.getenv("KALSHI_MAX_USD_PER_POSITION", "40.0"))  # Hard Ceiling
 KALSHI_MIN_PRICE: float = 0.08
@@ -238,6 +258,74 @@ KALSHI_MIN_ENTRY_PRICE: float = float(os.getenv("KALSHI_MIN_ENTRY_PRICE", "0.30"
 KALSHI_KELLY_CAP: float = float(os.getenv("KALSHI_KELLY_CAP", "0.10"))
 KALSHI_KELLY_FRACTION: float = float(os.getenv("KALSHI_KELLY_FRACTION", "0.25"))
 KALSHI_MAX_RISK_PER_EVENT_PCT: float = float(os.getenv("KALSHI_MAX_RISK_PER_EVENT_PCT", "0.015"))
+
+
+def _bounded_probability(value: float | None) -> float | None:
+    try:
+        return max(0.0, min(1.0, float(value)))
+    except (TypeError, ValueError):
+        return None
+
+
+def get_kalshi_conviction_bucket(held_probability: float | None) -> str:
+    prob = _bounded_probability(held_probability)
+    if prob is None:
+        return "base"
+    if prob >= KALSHI_ULTRA_HIGH_PROB_THRESHOLD:
+        return "ultra"
+    if prob >= KALSHI_HIGH_PROB_THRESHOLD:
+        return "high"
+    return "base"
+
+
+def get_kalshi_position_cap_multiplier(held_probability: float | None) -> float:
+    bucket = get_kalshi_conviction_bucket(held_probability)
+    if bucket == "ultra":
+        return KALSHI_ULTRA_HIGH_PROB_POSITION_CAP_MULTIPLIER
+    if bucket == "high":
+        return KALSHI_HIGH_PROB_POSITION_CAP_MULTIPLIER
+    return 1.0
+
+
+def get_kalshi_position_cap_usd(held_probability: float | None) -> float:
+    return float(KALSHI_MAX_USD_PER_POSITION) * float(
+        get_kalshi_position_cap_multiplier(held_probability)
+    )
+
+
+def get_kalshi_effective_concurrent_cap(
+    side: str | None,
+    held_probability: float | None,
+) -> int:
+    cap = int(KALSHI_MAX_CONCURRENT_POSITIONS)
+    if (
+        str(side or "").upper() == "NO"
+        and get_kalshi_conviction_bucket(held_probability) == "ultra"
+    ):
+        cap += int(KALSHI_ULTRA_HIGH_PROB_NO_CONCURRENT_BONUS)
+    return cap
+
+
+def get_kalshi_effective_same_event_family_cap(
+    side: str | None,
+    held_probability: float | None,
+) -> int:
+    cap = int(KALSHI_SAME_EVENT_FAMILY_CAP)
+    if (
+        str(side or "").upper() == "NO"
+        and get_kalshi_conviction_bucket(held_probability) == "ultra"
+    ):
+        cap += int(KALSHI_ULTRA_HIGH_PROB_NO_FAMILY_CAP_BONUS)
+    return cap
+
+
+def get_salvage_exit_delta_for_entry(held_probability: float | None) -> float:
+    bucket = get_kalshi_conviction_bucket(held_probability)
+    if bucket == "ultra":
+        return float(SALVAGE_EXIT_DELTA_ULTRA_HIGH_PROB)
+    if bucket == "high":
+        return float(SALVAGE_EXIT_DELTA_HIGH_PROB)
+    return float(SALVAGE_EXIT_DELTA)
 
 
 KALSHI_EXIT_MODEL_INVALIDATION_DELTA: float = float(

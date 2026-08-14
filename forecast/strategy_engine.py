@@ -35,6 +35,7 @@ from config import (
     DB_PATH,
     HUB_PARAMS,
     MACRO_CACHE_FILE,
+    KALSHI_HIGH_PROB_THRESHOLD,
     KALSHI_EXPENSIVE_YES_MIN_NET_EDGE,
     KALSHI_EXPENSIVE_YES_SIZE_MULTIPLIER,
     KALSHI_EXPENSIVE_YES_THRESHOLD,
@@ -51,9 +52,13 @@ from config import (
     KALSHI_MAX_SPREAD_RATIO,
     KALSHI_MAX_FEE_DRAG_PCT,
     KALSHI_MAX_USD_PER_POSITION,
+    KALSHI_ULTRA_HIGH_PROB_THRESHOLD,
     estimate_kalshi_fee_per_contract,
     estimate_kalshi_order_cost_usd,
+    get_kalshi_effective_concurrent_cap,
+    get_kalshi_effective_same_event_family_cap,
     get_kalshi_hub_exposure_cap,
+    get_kalshi_position_cap_usd,
     get_kalshi_position_exposure_usd,
     max_kalshi_contracts_for_budget,
 )
@@ -460,6 +465,8 @@ def _economics_gate(
     open_positions_count: int = 0,
     deployed_pct: float = 0.0,
     same_event_open: bool = False,
+    side: str = "",
+    held_probability: float | None = None,
 ) -> tuple[bool, str, float, float]:
     """
     Multi-factor economics gate. No decorative checks — every factor can veto.
@@ -498,10 +505,14 @@ def _economics_gate(
             0.0,
         )
 
-    if open_positions_count >= MAX_CONCURRENT_POSITIONS:
+    effective_concurrent_cap = get_kalshi_effective_concurrent_cap(
+        side,
+        held_probability,
+    )
+    if open_positions_count >= effective_concurrent_cap:
         return (
             False,
-            f"concurrent_cap_reached ({open_positions_count}/{MAX_CONCURRENT_POSITIONS})",
+            f"concurrent_cap_reached ({open_positions_count}/{effective_concurrent_cap})",
             0.0,
             0.0,
         )
@@ -638,6 +649,8 @@ def _weather_market_gate(
     ticker: str = "",
     contract_name: str = "",
     is_taker_override: bool = False,
+    side: str = "",
+    held_probability: float | None = None,
 ) -> tuple[bool, str]:
     """Execution-only gates for weather markets."""
     # ── v19.2 Anti-Double-Down Guard ───────────────────────────────────────
@@ -674,8 +687,12 @@ def _weather_market_gate(
     if hours_to_resolution > MAX_HOURS_TO_RES:
         return False, f"too_far_from_resolution ({hours_to_resolution:.1f}h > {MAX_HOURS_TO_RES}h)"
 
-    if open_positions_count >= MAX_CONCURRENT_POSITIONS:
-        return False, f"concurrent_cap_reached ({open_positions_count}/{MAX_CONCURRENT_POSITIONS})"
+    effective_concurrent_cap = get_kalshi_effective_concurrent_cap(
+        side,
+        held_probability,
+    )
+    if open_positions_count >= effective_concurrent_cap:
+        return False, f"concurrent_cap_reached ({open_positions_count}/{effective_concurrent_cap})"
 
     max_spread_dollars = 0.22 if (mode == "TEMP" or hourly_contract) else MAX_SPREAD_DOLLARS
     if spread > max_spread_dollars:
@@ -1090,6 +1107,7 @@ def calculate_continuous_sizing(
     hours_to_res: float = 24.0,
     lane_ev_threshold: float = 0.050,
     book_asks: list[dict] | None = None,
+    position_cap_usd: float | None = None,
 ) -> int:
     f_star, phi, n = solve_optimal_size(
         q=ensemble_prob,
@@ -1100,9 +1118,27 @@ def calculate_continuous_sizing(
         cov_charge=1.0,
         level2_asks=book_asks
     )
-    # Scale contract count for high edge & tri-model consensus trades ($15-$35 allocation)
-    if n > 0 and ensemble_prob >= 0.75 and multiplier >= 1.25 and market_price > 0.0:
-        target_allocation_usd = min(KALSHI_MAX_USD_PER_POSITION, max(15.0, capital_base * 0.15 * multiplier))
+    effective_position_cap = (
+        float(position_cap_usd)
+        if position_cap_usd is not None
+        else float(KALSHI_MAX_USD_PER_POSITION)
+    )
+    if (
+        n > 0
+        and market_price > 0.0
+        and effective_position_cap > 0.0
+        and ensemble_prob >= KALSHI_HIGH_PROB_THRESHOLD
+    ):
+        if ensemble_prob >= KALSHI_ULTRA_HIGH_PROB_THRESHOLD:
+            target_allocation_usd = min(
+                effective_position_cap,
+                max(20.0, capital_base * 0.18 * max(1.0, multiplier)),
+            )
+        else:
+            target_allocation_usd = min(
+                effective_position_cap,
+                max(12.0, capital_base * 0.10 * min(max(1.0, multiplier), 1.25)),
+            )
         conviction_contracts = int(target_allocation_usd / market_price)
         n = max(n, conviction_contracts)
 
@@ -1898,6 +1934,7 @@ def evaluate_contract(
         q_hat = chosen_side_prob if best_side == "YES" else (1.0 - chosen_side_prob)
         # SRE Pillar 6: Rule 1 Probability Input Clamps
         q_hat = max(0.01, min(0.99, float(q_hat)))
+        position_cap_usd = get_kalshi_position_cap_usd(chosen_prob)
 
         p_cost = ask_yes if best_side == "YES" else ask_no
 
@@ -1937,6 +1974,8 @@ def evaluate_contract(
             mode=w_mode,
             ticker=ticker,
             contract_name=str(contract.get("contract_name") or ""),
+            side=best_side,
+            held_probability=chosen_prob,
         )
         # SRE Pillar 1: Clamped pricing/utility inputs
         q = chosen_side_prob
@@ -1968,6 +2007,7 @@ def evaluate_contract(
                 hours_to_res=hours_to_res,
                 lane_ev_threshold=0.05,
                 book_asks=level2_asks_T,
+                position_cap_usd=position_cap_usd,
             )
             f_star_T, phi_T, _ = solve_optimal_size(q, p_T, maker=False, bankroll=bankroll, lambda_scaler=lambda_val, cov_charge=1.0, level2_asks=level2_asks_T)
             u_T = log_utility_g(f_star_T, q, p_T, phi_T)
@@ -1996,6 +2036,7 @@ def evaluate_contract(
                 hours_to_res=hours_to_res,
                 lane_ev_threshold=0.05,
                 book_asks=level2_asks_T,
+                position_cap_usd=position_cap_usd,
             )
             f_star_T, phi_T, _ = solve_optimal_size(q, p_T, maker=False, bankroll=bankroll, lambda_scaler=lambda_val, cov_charge=1.0, level2_asks=level2_asks_T)
             u_T = log_utility_g(f_star_T, q, p_T, phi_T)
@@ -2078,7 +2119,7 @@ def evaluate_contract(
             total_cost = n_contracts * (p_cost + calculate_ceiled_fee(p_cost, n_contracts, maker=not best_is_taker))
             
             # Enforce strict SRE Risk Ceilings
-            max_usd = KALSHI_MAX_USD_PER_POSITION
+            max_usd = position_cap_usd
             if max_usd is not None:
                 cost_limit = float(max_usd)
                 if total_cost > cost_limit:
@@ -2331,7 +2372,8 @@ def evaluate_market_snapshots(
         count = current_tick_counts.get(family, 0)
         current_hub_cap = get_kalshi_hub_exposure_cap(bankroll)
 
-        if count >= KALSHI_SAME_EVENT_FAMILY_CAP:
+        max_family_cap = get_kalshi_effective_same_event_family_cap("NO", 1.0)
+        if count >= max_family_cap:
             result = StrategyResult(
                 strategy_family="vetoed",
                 side="NONE",
@@ -2362,6 +2404,19 @@ def evaluate_market_snapshots(
                 open_positions_count=open_positions_count,
                 same_event_open=(count > 0),
             )
+            if (
+                result is not None
+                and result.econ_approved
+                and result.side in {"YES", "NO"}
+                and count >= get_kalshi_effective_same_event_family_cap(
+                    result.side,
+                    result.confidence,
+                )
+            ):
+                result.econ_approved = False
+                result.veto_reason = "same_event_family_cap_reached"
+                result.position_fraction = 0.0
+                result.position_contracts = 0
 
             # SPEC §4.6: Variance budget check & absolute backstop post-sizing
             if result is not None and result.econ_approved and result.side in {"YES", "NO"}:

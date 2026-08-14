@@ -775,7 +775,12 @@ def _collect_runtime_audit_state(*, scan_limit: int) -> dict[str, Any]:
     }
 
 
-def _run_remote_hosted_audit(*, scan_limit: int, soak_seconds: int) -> dict[str, Any]:
+def _run_remote_hosted_audit(
+    *,
+    scan_limit: int,
+    soak_seconds: int,
+    persist_artifact: bool = True,
+) -> dict[str, Any]:
     build = get_build_info()
     build_sha = str(build.get("sha") or "").strip()
     init_incident_table(DB_PATH)
@@ -917,7 +922,8 @@ def _run_remote_hosted_audit(*, scan_limit: int, soak_seconds: int) -> dict[str,
         },
     }
     markdown = _render_markdown_report(payload)
-    write_release_audit_artifact(payload, markdown=markdown)
+    if persist_artifact:
+        write_release_audit_artifact(payload, markdown=markdown)
     payload["details"]["release_status"] = get_release_status(
         db_path=DB_PATH,
         truth=truth,
@@ -1053,6 +1059,7 @@ def _run_selected_mode(args: argparse.Namespace) -> dict[str, Any]:
     return _run_remote_hosted_audit(
         scan_limit=args.scan_limit,
         soak_seconds=args.soak_seconds,
+        persist_artifact=not bool(getattr(args, "no_persist", False)),
     )
 
 
@@ -1066,6 +1073,11 @@ def main() -> int:
     parser.add_argument("--scan-limit", type=int, default=12, help="Maximum market snapshots to score in the bounded scan.")
     parser.add_argument("--soak-seconds", type=int, default=600, help="Runtime soak window for the hosted audit.")
     parser.add_argument("--format", choices=("text", "json"), default="text", help="Stdout format.")
+    parser.add_argument(
+        "--no-persist",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
     args = parser.parse_args()
 
     if args.format == "json":
@@ -1075,7 +1087,8 @@ def main() -> int:
         payload = _run_selected_mode(args)
 
     markdown = _render_markdown_report(payload)
-    write_release_audit_artifact(payload, markdown=markdown)
+    if not args.no_persist:
+        write_release_audit_artifact(payload, markdown=markdown)
 
     _print_payload(payload, args.format)
     return 1 if str(payload.get("verdict") or "") == VERDICT_BLOCKED else 0

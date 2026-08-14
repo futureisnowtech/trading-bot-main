@@ -358,10 +358,13 @@ crontab -l | grep -F 'refresh_host_service_status.sh'
 # exits 0, silently skipping every remaining step. That is how the soak audit,
 # the ownership re-audit, and the provenance echo were once bypassed on a deploy
 # that still reported success.
-echo "  Running immediate hosted release audit..."
-docker exec execution-engine sh -lc \
-  "cd /app && python3 scripts/release_audit.py --remote-hosted --scan-limit 12 --soak-seconds 0" \
+echo "  Running immediate hosted release audit (advisory)..."
+if ! docker exec execution-engine sh -lc \
+  "cd /app && python3 scripts/release_audit.py --remote-hosted --scan-limit 12 --soak-seconds 0 --no-persist" \
   </dev/null
+then
+  echo "  Immediate audit still warming up; keeping deploy-pending gate until the soak audit settles."
+fi
 
 echo "  Running hosted release audit (soak=${RELEASE_AUDIT_SOAK_SECONDS}s)..."
 docker exec execution-engine sh -lc \

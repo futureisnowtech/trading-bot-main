@@ -762,7 +762,55 @@ def test_deploy_script_preserves_prior_release_and_runs_immediate_audit():
     assert 'PRE_DEPLOY_RELEASE_JSON' in deploy
     assert 'PRE_DEPLOY_RELEASE_B64' in deploy
     assert 'build_deploy_pending_artifact' in deploy
-    assert '--remote-hosted --scan-limit 12 --soak-seconds 0' in deploy
+    assert '--remote-hosted --scan-limit 12 --soak-seconds 0 --no-persist' in deploy
+    assert 'Immediate audit still warming up' in deploy
+
+
+def test_release_audit_main_no_persist_skips_artifact_write(monkeypatch):
+    import scripts.release_audit as ra
+
+    writes: list[tuple[dict, str]] = []
+
+    monkeypatch.setattr(
+        ra,
+        "_run_selected_mode",
+        lambda args: {
+            "mode": "remote_hosted",
+            "verdict": "BLOCKED",
+            "entries_allowed": False,
+            "audited_sha": "abc123",
+            "as_of": "2026-08-14T21:30:00+00:00",
+            "blockers": ["quote_ingestion_failure (9/12 infrastructure vetoes)"],
+            "warnings": [],
+            "details": {},
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(
+        ra,
+        "write_release_audit_artifact",
+        lambda payload, markdown="": writes.append((payload, markdown)),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "release_audit.py",
+            "--remote-hosted",
+            "--scan-limit",
+            "12",
+            "--soak-seconds",
+            "0",
+            "--no-persist",
+        ],
+        raising=False,
+    )
+
+    exit_code = ra.main()
+
+    assert exit_code == 1
+    assert writes == []
 
 
 def test_deploy_script_never_lets_docker_exec_eat_the_remote_script():

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import os
+import time
 from collections import namedtuple
 
 
@@ -116,6 +117,16 @@ def test_execution_daemon_starts_weather_monitor_after_first_cycle(monkeypatch):
     monkeypatch.setattr(ed, "run_reconciliation", lambda: None, raising=False)
     monkeypatch.setattr(ed, "sync_incidents_and_notify", lambda: None, raising=False)
     monkeypatch.setattr(ed, "maintain_runtime_storage", lambda: None, raising=False)
+    # main() imports this from runtime.live_account at call time, so patching it on
+    # `ed` does nothing. Left unpatched it opens a live Kalshi broker connection
+    # whenever a real .env is present, and the resulting exception is swallowed by
+    # the cycle's except-block -- the cycle silently never runs and this test fails
+    # on developer machines while passing in a bare checkout.
+    monkeypatch.setattr(
+        "runtime.live_account.resolve_live_bankroll",
+        lambda *args, **kwargs: 250.0,
+        raising=False,
+    )
     monkeypatch.setattr(
         "notifications.telegram_bot.start_bot_thread",
         lambda: order.append("telegram"),
@@ -143,7 +154,20 @@ def test_execution_daemon_starts_weather_monitor_after_first_cycle(monkeypatch):
         lambda: order.append("monitor"),
         raising=False,
     )
-    monkeypatch.setattr(ed.time, "sleep", lambda seconds: (_ for _ in ()).throw(KeyboardInterrupt()))
+    # Stop the daemon after one cycle by making *its* sleep raise. Patching
+    # ed.time.sleep instead would mutate the shared time module, so any library
+    # that sleeps during the cycle (the sentinel's backoff, an HTTP retry) would
+    # raise KeyboardInterrupt straight past the cycle's `except Exception` and
+    # end the loop early. Swapping the module reference keeps the blast radius
+    # inside execution_daemon.
+    class _StopOnSleep:
+        def __getattr__(self, name):
+            return getattr(time, name)
+
+        def sleep(self, seconds):
+            raise KeyboardInterrupt()
+
+    monkeypatch.setattr(ed, "time", _StopOnSleep(), raising=False)
 
     assert ed.main() == 0
     assert order == ["telegram", "cycle", "monitor"]

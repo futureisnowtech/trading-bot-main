@@ -766,6 +766,26 @@ def test_deploy_script_preserves_prior_release_and_runs_immediate_audit():
     assert 'Immediate audit still warming up' in deploy
 
 
+def test_deploy_soak_window_covers_a_full_discovery_cycle():
+    """The soak must outlast _bg_discovery (5 min) or it stops proving anything.
+
+    Below 300s the audit re-collects runtime state without ever witnessing a
+    discovery pass, which turns the release gate into a slow restart check.
+    """
+    import re
+    from pathlib import Path
+
+    deploy = Path("deploy.sh").read_text(encoding="utf-8")
+
+    match = re.search(r'RELEASE_AUDIT_SOAK_SECONDS="\$\{RELEASE_AUDIT_SOAK_SECONDS:-(\d+)\}"', deploy)
+    assert match, "deploy.sh must define a default RELEASE_AUDIT_SOAK_SECONDS"
+    assert int(match.group(1)) >= 300
+
+    parser_default = re.search(r'"--soak-seconds", type=int, default=(\d+)', Path("scripts/release_audit.py").read_text(encoding="utf-8"))
+    assert parser_default, "release_audit.py must define a --soak-seconds default"
+    assert int(parser_default.group(1)) >= 300
+
+
 def test_release_audit_main_no_persist_skips_artifact_write(monkeypatch):
     import scripts.release_audit as ra
 

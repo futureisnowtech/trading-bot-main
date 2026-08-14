@@ -1071,7 +1071,7 @@ def main() -> int:
     mode.add_argument("--promote", action="store_true", help="Run local + remote release checks and summarize a promotion verdict.")
     mode.add_argument("--remote-hosted", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--scan-limit", type=int, default=12, help="Maximum market snapshots to score in the bounded scan.")
-    parser.add_argument("--soak-seconds", type=int, default=600, help="Runtime soak window for the hosted audit.")
+    parser.add_argument("--soak-seconds", type=int, default=360, help="Runtime soak window for the hosted audit.")
     parser.add_argument("--format", choices=("text", "json"), default="text", help="Stdout format.")
     parser.add_argument(
         "--no-persist",

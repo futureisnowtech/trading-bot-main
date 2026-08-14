@@ -51,6 +51,46 @@ def test_only_true_hourly_contracts_use_intraday_lane_gates():
     assert reason == "RESOLUTION_HORIZON_TOO_SHORT"
 
 
+def test_daily_weather_bracket_uses_0_20_to_0_70_window():
+    import forecast.strategy_engine as se
+
+    ok, reason = se._weather_market_gate(
+        ask_yes=0.25,
+        ask_no=0.75,
+        spread=0.10,
+        hours_to_resolution=2.0,
+        mode="HIGH",
+        ticker="KXHIGHTNYC-26AUG14-T85",
+        contract_name="Will the maximum temperature in NYC be above 85 on Aug 14, 2026?",
+    )
+    assert ok is True
+    assert reason == ""
+
+    ok, reason = se._weather_market_gate(
+        ask_yes=0.19,
+        ask_no=0.81,
+        spread=0.10,
+        hours_to_resolution=2.0,
+        mode="HIGH",
+        ticker="KXHIGHTNYC-26AUG14-T85",
+        contract_name="Will the maximum temperature in NYC be above 85 on Aug 14, 2026?",
+    )
+    assert ok is False
+    assert reason == "price_bracket_veto (ask_yes=0.19 outside $0.20-$0.70 value zone)"
+
+    ok, reason = se._weather_market_gate(
+        ask_yes=0.71,
+        ask_no=0.29,
+        spread=0.10,
+        hours_to_resolution=2.0,
+        mode="LOW",
+        ticker="KXLOWTNYC-26AUG14-T65",
+        contract_name="Will the minimum temperature in NYC be below 65 on Aug 14, 2026?",
+    )
+    assert ok is False
+    assert reason == "price_bracket_veto (ask_yes=0.71 outside $0.20-$0.70 value zone)"
+
+
 def test_hourly_weather_contract_preserves_decimal_threshold():
     from forecast.weather_contracts import resolve_weather_contract
 

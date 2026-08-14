@@ -9,7 +9,7 @@ from collections import Counter
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from config import DB_PATH
+from config import DB_PATH, TRADE_DATA_START_DATE
 
 FORECAST_HEARTBEAT_STALE_SECONDS = 15 * 60
 BASE_GFS_WEIGHT = 0.60
@@ -37,6 +37,17 @@ def _coerce_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _reason_code(reason: Any) -> str:
+    token = str(reason or "").strip()
+    if not token:
+        return ""
+    for splitter in (" (", ":"):
+        if splitter in token:
+            token = token.split(splitter, 1)[0]
+            break
+    return token.strip()
 
 
 def _parse_utc(value: Any) -> datetime | None:
@@ -277,6 +288,184 @@ def get_recent_veto_summary(
             for reason, count in reasons.most_common(8)
         ],
         "recent_records": records[:12],
+    }
+
+
+def get_yes_path_audit_summary(
+    *,
+    db_path: str = DB_PATH,
+    start_date: str = TRADE_DATA_START_DATE,
+    limit: int = 20000,
+) -> dict:
+    try:
+        from intelligence.schema import init_intelligence_db
+
+        init_intelligence_db(db_path)
+    except Exception:
+        pass
+
+    try:
+        with _connect_db(db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT evaluated_at, ticker, chosen_side, decision, decision_reason,
+                       q_champion, yes_ask, no_ask, weather_mode, features_json
+                FROM intelligence_predictions
+                WHERE evaluated_at >= ?
+                  AND chosen_side='YES'
+                ORDER BY evaluated_at DESC, id DESC
+                LIMIT ?
+                """,
+                (start_date, max(1, int(limit))),
+            ).fetchall()
+    except Exception as exc:
+        return {
+            "start_date": start_date,
+            "chosen_yes_count": 0,
+            "entered_yes_count": 0,
+            "blocked_yes_count": 0,
+            "high_conf_blocked_yes_count": 0,
+            "high_conf_entered_yes_count": 0,
+            "top_blockers": [],
+            "gate_flag_counts": {},
+            "recent_samples": [],
+            "error": str(exc),
+        }
+
+    if not rows:
+        return {
+            "start_date": start_date,
+            "chosen_yes_count": 0,
+            "entered_yes_count": 0,
+            "blocked_yes_count": 0,
+            "high_conf_blocked_yes_count": 0,
+            "high_conf_entered_yes_count": 0,
+            "top_blockers": [],
+            "gate_flag_counts": {},
+            "recent_samples": [],
+        }
+
+    chosen_yes_count = len(rows)
+    entered_yes_count = 0
+    blocked_yes_count = 0
+    high_conf_blocked_yes_count = 0
+    high_conf_entered_yes_count = 0
+    blocker_stats: dict[str, dict[str, Any]] = {}
+    gate_flag_counts: Counter[str] = Counter()
+    recent_samples: list[dict[str, Any]] = []
+
+    def _bucket_for(reason: str) -> dict[str, Any]:
+        bucket = blocker_stats.get(reason)
+        if bucket is None:
+            bucket = {
+                "count": 0,
+                "held_prob_sum": 0.0,
+                "held_prob_n": 0,
+                "yes_ask_sum": 0.0,
+                "yes_ask_n": 0,
+                "spread_abs_sum": 0.0,
+                "spread_abs_n": 0,
+                "spread_ratio_sum": 0.0,
+                "spread_ratio_n": 0,
+                "yes_net_edge_sum": 0.0,
+                "yes_net_edge_n": 0,
+            }
+            blocker_stats[reason] = bucket
+        return bucket
+
+    for row in rows:
+        features = _json_or_empty(row["features_json"])
+        audit = features.get("audit") if isinstance(features.get("audit"), dict) else {}
+        gate_flags = audit.get("gate_flags") if isinstance(audit.get("gate_flags"), dict) else {}
+        held_prob = (
+            _coerce_float(audit.get("chosen_side_probability"))
+            or _coerce_float(features.get("confidence"))
+            or _coerce_float(row["q_champion"])
+        )
+        yes_ask = _coerce_float(audit.get("ask_yes")) or _coerce_float(row["yes_ask"])
+        spread_abs = _coerce_float(audit.get("spread_abs"))
+        spread_ratio = _coerce_float(audit.get("spread_ratio"))
+        yes_net_edge = _coerce_float(audit.get("yes_net_edge"))
+        decision = str(row["decision"] or "").strip()
+        reason = _reason_code(audit.get("reason_code") or row["decision_reason"]) or "unknown"
+
+        if len(recent_samples) < 8:
+            recent_samples.append(
+                {
+                    "evaluated_at": row["evaluated_at"],
+                    "ticker": row["ticker"],
+                    "decision": decision,
+                    "reason": reason,
+                    "held_probability": held_prob,
+                    "yes_ask": yes_ask,
+                    "spread_abs": spread_abs,
+                    "yes_net_edge": yes_net_edge,
+                }
+            )
+
+        if decision == "entered":
+            entered_yes_count += 1
+            if held_prob is not None and held_prob >= 0.90:
+                high_conf_entered_yes_count += 1
+            continue
+
+        blocked_yes_count += 1
+        if held_prob is not None and held_prob >= 0.90:
+            high_conf_blocked_yes_count += 1
+        bucket = _bucket_for(reason)
+        bucket["count"] += 1
+        if held_prob is not None:
+            bucket["held_prob_sum"] += held_prob
+            bucket["held_prob_n"] += 1
+        if yes_ask is not None:
+            bucket["yes_ask_sum"] += yes_ask
+            bucket["yes_ask_n"] += 1
+        if spread_abs is not None:
+            bucket["spread_abs_sum"] += spread_abs
+            bucket["spread_abs_n"] += 1
+        if spread_ratio is not None:
+            bucket["spread_ratio_sum"] += spread_ratio
+            bucket["spread_ratio_n"] += 1
+        if yes_net_edge is not None:
+            bucket["yes_net_edge_sum"] += yes_net_edge
+            bucket["yes_net_edge_n"] += 1
+        for flag, enabled in gate_flags.items():
+            if enabled:
+                gate_flag_counts[str(flag)] += 1
+
+    def _avg(total: float, count: int) -> float | None:
+        if count <= 0:
+            return None
+        return round(total / count, 4)
+
+    top_blockers = [
+        {
+            "reason": reason,
+            "count": int(stats["count"]),
+            "avg_held_probability": _avg(stats["held_prob_sum"], stats["held_prob_n"]),
+            "avg_yes_ask": _avg(stats["yes_ask_sum"], stats["yes_ask_n"]),
+            "avg_spread_abs": _avg(stats["spread_abs_sum"], stats["spread_abs_n"]),
+            "avg_spread_ratio": _avg(stats["spread_ratio_sum"], stats["spread_ratio_n"]),
+            "avg_yes_net_edge": _avg(stats["yes_net_edge_sum"], stats["yes_net_edge_n"]),
+        }
+        for reason, stats in sorted(
+            blocker_stats.items(),
+            key=lambda item: (-int(item[1]["count"]), item[0]),
+        )[:8]
+    ]
+
+    return {
+        "start_date": start_date,
+        "chosen_yes_count": chosen_yes_count,
+        "entered_yes_count": entered_yes_count,
+        "blocked_yes_count": blocked_yes_count,
+        "high_conf_blocked_yes_count": high_conf_blocked_yes_count,
+        "high_conf_entered_yes_count": high_conf_entered_yes_count,
+        "top_blockers": top_blockers,
+        "gate_flag_counts": dict(
+            sorted(gate_flag_counts.items(), key=lambda item: (-item[1], item[0]))
+        ),
+        "recent_samples": recent_samples,
     }
 
 
@@ -726,6 +915,7 @@ def get_live_kalshi_status(
         payload["recent_vetoes"] = get_recent_veto_summary(db_path=db_path)
     if include_recent_execution:
         payload["recent_execution"] = get_recent_execution_summary(db_path=db_path)
+    payload["yes_path_audit"] = get_yes_path_audit_summary(db_path=db_path)
     payload["weather_learning"] = get_weather_learning_status(db_path=db_path)
     return payload
 

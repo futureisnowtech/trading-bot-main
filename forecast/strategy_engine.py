@@ -35,6 +35,8 @@ from config import (
     DB_PATH,
     HUB_PARAMS,
     MACRO_CACHE_FILE,
+    KALSHI_DAILY_ASK_YES_BRACKET_MAX,
+    KALSHI_DAILY_ASK_YES_BRACKET_MIN,
     KALSHI_HIGH_PROB_THRESHOLD,
     KALSHI_EXPENSIVE_YES_MIN_NET_EDGE,
     KALSHI_EXPENSIVE_YES_SIZE_MULTIPLIER,
@@ -698,11 +700,16 @@ def _weather_market_gate(
     if spread > max_spread_dollars:
         return False, f"spread_too_wide ({spread:.3f} > {max_spread_dollars})"
 
-    # ── July 24-29 Empirical Value Price Bracket Gate ($0.30 - $0.70) ──────
+    # ── Empirical Value Price Bracket Gate (daily ask_yes $0.20 - $0.70) ────
     is_test_contract = not ticker or is_taker_override or "TEST" in ticker.upper() or "MOCK" in ticker.upper() or "26JUN" in ticker.upper() or "30JUN" in ticker.upper()
     if mode in {"HIGH", "LOW"} and not is_test_contract:
-        if ask_yes > 0.0 and (ask_yes < 0.30 or ask_yes > 0.70):
-            return False, f"price_bracket_veto (ask_yes={ask_yes:.2f} outside $0.30-$0.70 value zone)"
+        min_bracket = float(KALSHI_DAILY_ASK_YES_BRACKET_MIN)
+        max_bracket = float(KALSHI_DAILY_ASK_YES_BRACKET_MAX)
+        if ask_yes > 0.0 and (ask_yes < min_bracket or ask_yes > max_bracket):
+            return False, (
+                f"price_bracket_veto (ask_yes={ask_yes:.2f} "
+                f"outside ${min_bracket:.2f}-${max_bracket:.2f} value zone)"
+            )
 
     available_prices = [price for price in (ask_yes, ask_no) if price > 0.0]
     avg_price = sum(available_prices) / len(available_prices) if available_prices else 0.0

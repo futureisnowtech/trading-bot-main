@@ -28,6 +28,17 @@ def _float(value: Any) -> float | None:
         return None
 
 
+def _reason_code(reason: str) -> str:
+    token = str(reason or "").strip()
+    if not token:
+        return ""
+    for splitter in (" (", ":"):
+        if splitter in token:
+            token = token.split(splitter, 1)[0]
+            break
+    return token.strip()
+
+
 def record_prediction(
     *,
     scan_id: str,
@@ -139,11 +150,144 @@ def record_prediction(
     features = {
         "top_factors": list(getattr(result, "top_factors", []) or []),
         "ev": _float(getattr(result, "ev", None)),
+        "ev_yes": _float(getattr(result, "ev_yes", None)),
+        "ev_no": _float(getattr(result, "ev_no", None)),
         "confidence": _float(getattr(result, "confidence", None)),
         "hours_to_resolution": _float(getattr(result, "hours_to_resolution", None)),
         "position_contracts": int(getattr(result, "position_contracts", 0) or 0),
         "provider": provider_summary,
     }
+    try:
+        from config import (
+            KALSHI_DAILY_ASK_YES_BRACKET_MAX,
+            KALSHI_DAILY_ASK_YES_BRACKET_MIN,
+            KALSHI_EXPENSIVE_YES_MIN_NET_EDGE,
+            KALSHI_EXPENSIVE_YES_THRESHOLD,
+            estimate_kalshi_fee_per_contract,
+        )
+        from forecast.strategy_engine import (
+            MAX_SPREAD_DOLLARS,
+            MIN_IMPLIED_PROB_FOR_YES,
+            get_dynamic_param,
+        )
+        from forecast.weather_contracts import is_hourly_weather_contract
+
+        chosen_side = str(getattr(result, "side", "") or "").upper()
+        q_hat_yes = _float(q_champion if q_champion is not None else getattr(result, "q_hat", None))
+        ask_yes = _float(getattr(result, "ask_yes", None))
+        ask_no = _float(getattr(result, "ask_no", None))
+        yes_bid = _float(yes_quote.get("bid"))
+        no_bid = _float(no_quote.get("bid"))
+        chosen_side_prob = None
+        chosen_side_price = None
+        if q_hat_yes is not None and chosen_side == "YES":
+            chosen_side_prob = q_hat_yes
+            chosen_side_price = ask_yes
+        elif q_hat_yes is not None and chosen_side == "NO":
+            chosen_side_prob = max(0.0, min(1.0, 1.0 - q_hat_yes))
+            chosen_side_price = ask_no
+
+        avg_price = None
+        available_prices = [price for price in (ask_yes, ask_no) if price and price > 0.0]
+        if available_prices:
+            avg_price = sum(available_prices) / len(available_prices)
+        spread_abs = None
+        if yes_bid is not None and ask_yes is not None and yes_bid > 0.0 and ask_yes > 0.0:
+            spread_abs = max(0.0, ask_yes - yes_bid)
+        spread_ratio = None
+        if spread_abs is not None and avg_price is not None and avg_price >= 0.05:
+            spread_ratio = spread_abs / avg_price
+
+        yes_edge = None
+        no_edge = None
+        yes_net_edge = None
+        no_net_edge = None
+        if q_hat_yes is not None:
+            if ask_yes is not None and ask_yes > 0.0:
+                yes_edge = q_hat_yes - ask_yes
+                yes_net_edge = yes_edge - estimate_kalshi_fee_per_contract(ask_yes, rounded=False)
+            if ask_no is not None and ask_no > 0.0:
+                no_prob = max(0.0, min(1.0, 1.0 - q_hat_yes))
+                no_edge = no_prob - ask_no
+                no_net_edge = no_edge - estimate_kalshi_fee_per_contract(ask_no, rounded=False)
+
+        hourly_contract = is_hourly_weather_contract(
+            ticker,
+            contract_name=contract_name,
+        )
+        spread_cap_dollars = 0.22 if (weather_mode == "TEMP" or hourly_contract) else MAX_SPREAD_DOLLARS
+        spread_ratio_cap = (
+            0.36
+            if (weather_mode == "TEMP" or hourly_contract)
+            else float(get_dynamic_param("KALSHI_MAX_SPREAD_RATIO", 0.30))
+        )
+        min_yes_prob = float(MIN_IMPLIED_PROB_FOR_YES)
+        expensive_yes_threshold = float(KALSHI_EXPENSIVE_YES_THRESHOLD)
+        expensive_yes_floor = float(KALSHI_EXPENSIVE_YES_MIN_NET_EDGE)
+        bracket_min = float(KALSHI_DAILY_ASK_YES_BRACKET_MIN)
+        bracket_max = float(KALSHI_DAILY_ASK_YES_BRACKET_MAX)
+
+        features["audit"] = {
+            "reason_code": _reason_code(reason),
+            "decision": str(decision or ""),
+            "chosen_side": chosen_side,
+            "q_hat_yes": q_hat_yes,
+            "chosen_side_probability": chosen_side_prob,
+            "chosen_side_price": chosen_side_price,
+            "ask_yes": ask_yes,
+            "ask_no": ask_no,
+            "yes_bid": yes_bid,
+            "no_bid": no_bid,
+            "spread_abs": spread_abs,
+            "spread_ratio": spread_ratio,
+            "yes_edge": yes_edge,
+            "no_edge": no_edge,
+            "yes_net_edge": yes_net_edge,
+            "no_net_edge": no_net_edge,
+            "hourly_contract": bool(hourly_contract),
+            "price_bracket_min": bracket_min,
+            "price_bracket_max": bracket_max,
+            "min_implied_prob_for_yes": min_yes_prob,
+            "expensive_yes_threshold": expensive_yes_threshold,
+            "expensive_yes_min_net_edge": expensive_yes_floor,
+            "spread_cap_dollars": spread_cap_dollars,
+            "spread_ratio_cap": spread_ratio_cap,
+            "gate_flags": {
+                "price_bracket_low": bool(
+                    weather_mode in {"HIGH", "LOW"}
+                    and ask_yes is not None
+                    and ask_yes > 0.0
+                    and ask_yes < bracket_min
+                ),
+                "price_bracket_high": bool(
+                    weather_mode in {"HIGH", "LOW"}
+                    and ask_yes is not None
+                    and ask_yes > bracket_max
+                ),
+                "longshot_bias_gate": bool(
+                    chosen_side == "YES"
+                    and q_hat_yes is not None
+                    and q_hat_yes < min_yes_prob
+                ),
+                "expensive_yes_headroom_veto": bool(
+                    chosen_side == "YES"
+                    and ask_yes is not None
+                    and ask_yes >= expensive_yes_threshold
+                    and yes_edge is not None
+                    and yes_edge > 0.0
+                    and yes_net_edge is not None
+                    and yes_net_edge < expensive_yes_floor
+                ),
+                "spread_too_wide_dollars": bool(
+                    spread_abs is not None and spread_abs > spread_cap_dollars
+                ),
+                "spread_too_wide_ratio": bool(
+                    spread_ratio is not None and spread_ratio > spread_ratio_cap
+                ),
+            },
+        }
+    except Exception:
+        pass
     values = (
         evaluation_key, scan_id, now, ticker, _event_key(ticker), contract_name,
         weather_mode, city_key, strike, semantics_payload["comparator"],

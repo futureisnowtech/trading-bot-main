@@ -18,7 +18,6 @@ from config import (
     BOT_LOG_PATH,
     DB_PATH,
     FORECAST_LOG_PATH,
-    GEMINI_MODEL,
     KALSHI_DATA_FRESHNESS_MINUTES_DAILY,
     KALSHI_DATA_FRESHNESS_MINUTES_HOURLY,
     KALSHI_EXIT_MODEL_INVALIDATION_DELTA,
@@ -584,6 +583,8 @@ def build_regime_manifest(
     balance_usd: float | None = None,
     learning_status: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    from runtime.reasoning_provider import get_reasoning_display_name
+
     balance = _coerce_float(balance_usd, ACCOUNT_SIZE)
     hub_cap = get_kalshi_hub_exposure_cap(balance)
     macro = _get_macro_context()
@@ -592,7 +593,7 @@ def build_regime_manifest(
     hourly_support = get_hourly_city_support_summary()
     return {
         "version": build["app_version"],
-        "reasoning_model": GEMINI_MODEL,
+        "reasoning_model": get_reasoning_display_name(),
         "entry_scope": live_entry_scope(),
         "ensemble_blend": (
             f"Tri-Model 50% GFS + 35% ECMWF + 15% DWD ICON (122 simulation paths). "

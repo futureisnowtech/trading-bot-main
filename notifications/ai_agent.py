@@ -1,73 +1,21 @@
 import os
 import logging
 import json
-import time
-import io
-from contextlib import redirect_stderr, redirect_stdout
-from typing import Optional, List, Dict
+from typing import Optional
 from notifications import agent_tools
-from config import GEMINI_MODEL
-
-try:
-    from google import genai
-    from google.genai import types
-    HAS_GENAI_SDK = True
-except ImportError:
-    HAS_GENAI_SDK = False
-
-# Oracle model follows the repo-wide Gemini config by default.
-GEMINI_REASONING_MODEL = os.getenv("GEMINI_REASONING_MODEL", GEMINI_MODEL).strip() or GEMINI_MODEL
+from runtime.reasoning_provider import get_reasoning_model_id as _get_reasoning_model_id
+from runtime.reasoning_provider import probe_reasoning_model as _probe_reasoning_model
 
 logger = logging.getLogger(__name__)
 
 
 def get_reasoning_model_id() -> str:
-    model = (GEMINI_REASONING_MODEL or GEMINI_MODEL or "").strip()
-    if not model:
-        model = "gemini-2.5-flash"
-    if model.startswith("models/"):
-        return model
-    return f"models/{model}"
+    return _get_reasoning_model_id()
 
 
 def probe_reasoning_model() -> dict:
     """Cheap handshake probe used by release audits and operator truth."""
-    model_id = get_reasoning_model_id()
-    payload = {
-        "ok": False,
-        "model_id": model_id,
-        "response_preview": "",
-        "error": "",
-    }
-
-    api_key = os.environ.get("GOOGLE_API_KEY")
-    if not api_key:
-        payload["error"] = "GOOGLE_API_KEY is not set."
-        return payload
-    if not HAS_GENAI_SDK:
-        payload["error"] = "google-genai package not installed."
-        return payload
-
-    try:
-        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-            client = genai.Client(api_key=api_key)
-            response = client.models.generate_content(
-                model=model_id,
-                contents="Reply with OK",
-                config=types.GenerateContentConfig(
-                    temperature=0.0,
-                    max_output_tokens=8,
-                ),
-            )
-        text = str(getattr(response, "text", "") or "").strip()
-        payload["response_preview"] = text[:24]
-        payload["ok"] = bool(text)
-        if not payload["ok"]:
-            payload["error"] = "empty model response"
-    except Exception as exc:
-        payload["error"] = str(exc)
-
-    return payload
+    return _probe_reasoning_model()
 
 def get_repo_context() -> str:
     """

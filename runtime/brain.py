@@ -35,6 +35,10 @@ try:
 except ImportError:
     HAS_GENAI_SDK = False
 
+from runtime.reasoning_provider import ask_with_deepseek
+from runtime.reasoning_provider import get_reasoning_model_id as _get_reasoning_model_id
+from runtime.reasoning_provider import get_reasoning_provider
+
 READ = "read"
 WRITE = "write"
 
@@ -161,9 +165,7 @@ def tools_for(surface: str) -> list[Callable[..., str]]:
 
 
 def _model_id() -> str:
-    from config import GEMINI_MODEL
-
-    model = (os.getenv("GEMINI_REASONING_MODEL", "").strip() or GEMINI_MODEL or "gemini-2.5-flash").strip()
+    model = _get_reasoning_model_id()
     return model[len("models/"):] if model.startswith("models/") else model
 
 
@@ -225,20 +227,31 @@ def ask(messages: list[dict], *, surface: str = COCKPIT) -> str:
 
     ``messages`` is a list of ``{"role": "user"|"assistant", "content": str}``.
     """
-    api_key = os.environ.get("GOOGLE_API_KEY")
-    if not api_key:
-        return "⚠️ Brain is inactive: GOOGLE_API_KEY is not set."
-    if not HAS_GENAI_SDK:
-        return "⚠️ Brain is inactive: google-genai SDK not installed."
     if not messages:
         return "No question provided."
 
     token = _CURRENT_SURFACE.set(surface)
     try:
+        provider = get_reasoning_provider()
+        tools = tools_for(surface)
+        if provider == "deepseek":
+            return ask_with_deepseek(
+                messages,
+                system_instruction=_system_instruction(surface),
+                tools=tools,
+                temperature=0.3,
+            )
+
+        api_key = os.environ.get("GOOGLE_API_KEY")
+        if not api_key:
+            return "⚠️ Brain is inactive: GOOGLE_API_KEY is not set."
+        if not HAS_GENAI_SDK:
+            return "⚠️ Brain is inactive: google-genai SDK not installed."
+
         client = genai.Client(api_key=api_key)
         config = {
             "system_instruction": _system_instruction(surface),
-            "tools": tools_for(surface),
+            "tools": tools,
             # Let the SDK drive the tool loop so multi-step chains work. The previous
             # cockpit loop ran exactly one round of tool calls and then stopped.
             "automatic_function_calling": {"disable": False},

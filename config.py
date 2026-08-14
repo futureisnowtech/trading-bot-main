@@ -172,11 +172,24 @@ CASH_RESERVE_PCT: float = 0.0
 GOOGLE_API_KEY: str = os.getenv("GOOGLE_API_KEY", "")
 ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
 OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+DEEPSEEK_API_KEY: str = os.getenv("DEEPSEEK_API_KEY", "")
+REASONING_PROVIDER: str = os.getenv("REASONING_PROVIDER", "gemini").strip().lower()
 
 # AI Exit Settings
 PM_LLM_TEMPERATURE: float = float(os.getenv("PM_LLM_TEMPERATURE", "0.3"))
 PM_LLM_MAX_TOKENS: int = int(os.getenv("PM_LLM_MAX_TOKENS", "600"))
 GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+DEEPSEEK_MODEL: str = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash").strip() or "deepseek-v4-flash"
+DEEPSEEK_BASE_URL: str = (
+    os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").strip()
+    or "https://api.deepseek.com"
+)
+DEEPSEEK_REASONING_EFFORT: str = (
+    os.getenv("DEEPSEEK_REASONING_EFFORT", "high").strip() or "high"
+)
+DEEPSEEK_THINKING_MODE: str = (
+    os.getenv("DEEPSEEK_THINKING_MODE", "enabled").strip().lower() or "enabled"
+)
 
 # ════════════════════════════════════════════════════════════════════
 # KALSHI (Weather Prediction Engine)

@@ -79,10 +79,17 @@ if private_key_path:
     else:
         fail(f"KALSHI_PRIVATE_KEY_PATH does not exist: {private_key_path}")
 
-if os.getenv("GOOGLE_API_KEY", "").strip():
-    ok("GOOGLE_API_KEY set")
+reasoning_provider = os.getenv("REASONING_PROVIDER", "gemini").strip().lower() or "gemini"
+if reasoning_provider == "deepseek":
+    if os.getenv("DEEPSEEK_API_KEY", "").strip():
+        ok("DEEPSEEK_API_KEY set for REASONING_PROVIDER=deepseek")
+    else:
+        warn("DEEPSEEK_API_KEY not set — DeepSeek oracle replies will be unavailable")
 else:
-    warn("GOOGLE_API_KEY not set — AI audit/oracle replies will be unavailable")
+    if os.getenv("GOOGLE_API_KEY", "").strip():
+        ok("GOOGLE_API_KEY set")
+    else:
+        warn("GOOGLE_API_KEY not set — AI audit/oracle replies will be unavailable")
 
 
 print("\n--- Kalshi Lane ---")

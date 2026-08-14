@@ -1146,8 +1146,12 @@ def calculate_continuous_sizing(
                 effective_position_cap,
                 max(12.0, capital_base * 0.10 * min(max(1.0, multiplier), 1.25)),
             )
+        # solve_optimal_size already clamps to KALSHI_MAX_QTY_PER_POSITION, but the
+        # conviction override raises n past its own result, so the qty cap has to be
+        # re-applied here. Without it a cheap contract turns a $40 position cap into
+        # an unbounded contract count (at $0.016 the $40 cap buys 2500+ contracts).
         conviction_contracts = int(target_allocation_usd / market_price)
-        n = max(n, conviction_contracts)
+        n = min(max(n, conviction_contracts), int(KALSHI_MAX_QTY_PER_POSITION))
 
     return n
 

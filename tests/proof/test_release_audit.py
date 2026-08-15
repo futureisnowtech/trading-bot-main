@@ -766,11 +766,17 @@ def test_deploy_script_preserves_prior_release_and_runs_immediate_audit():
     assert 'Immediate audit still warming up' in deploy
 
 
-def test_deploy_soak_window_covers_a_full_discovery_cycle():
-    """The soak must outlast _bg_discovery (5 min) or it stops proving anything.
+def test_deploy_soak_window_covers_a_full_execution_cycle():
+    """The soak must outlast one execution cycle or it stops proving anything.
 
-    Below 300s the audit re-collects runtime state without ever witnessing a
-    discovery pass, which turns the release gate into a slow restart check.
+    Production's cadence is execution_daemon's loop, which sleeps
+    SNIPER_SLEEP_SECONDS (default 300s) and writes the lane heartbeat at the end
+    of each cycle via run_position_monitor. Below 300s the audit can re-collect
+    runtime state before any cycle has completed, which turns the release gate
+    into a slow restart check.
+
+    Not to be confused with forecast.runner's schedule.every(...) jobs: those
+    only fire when forecast/runner.py is run directly, never in production.
     """
     import re
     from pathlib import Path

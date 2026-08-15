@@ -1,7 +1,7 @@
 """Proof: the cockpit's standing briefings cache, expire, and stay read-only.
 
-These answers are generated unattended on a 4-hour timer, so the surface they
-run on must not be able to reach a write-tier tool.
+These answers are regenerated unattended whenever they age past a 4-hour TTL, so
+the surface they run on must not be able to reach a write-tier tool.
 """
 
 import sys

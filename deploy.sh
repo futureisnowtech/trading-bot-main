@@ -64,13 +64,21 @@ echo "  OK: local HEAD == origin/${BRANCH} == ${LOCAL_SHA}"
 
 DEPLOY_UTC=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 # The soak sleeps, then re-collects runtime state so the release gate judges a
-# container that has been running, not one that merely booted. The floor is set
-# by the slowest job it must witness: _bg_discovery runs every 5 min
-# (forecast/runner.py), the strategy cycle every 2 min, the lane heartbeat every
-# 30 s, and the quote-harvester sweep takes ~104 s after restart. 360 s covers a
-# full discovery cycle plus a minute of slack for one that starts just after t0.
-# Do not drop below 300 s: the soak then never observes a discovery pass and
-# degrades into a slow restart check.
+# container that has been running, not one that merely booted.
+#
+# The floor is one full execution cycle. Production runs execution_daemon.py,
+# whose loop sleeps SNIPER_SLEEP_SECONDS (default 300 s, unset on the droplet).
+# That loop is the real cadence: it runs the cycle, and run_position_monitor at
+# the end of it writes the lane heartbeat the audit checks. The quote-harvester
+# sweep takes ~104 s after a restart and fits inside the same window.
+#
+# Do NOT reason from the schedule.every(...) jobs in forecast.runner
+# (_bg_discovery 5 m, strategy 2 m, position monitor 30 s). They live in
+# start_forecast_lane, which only runs when forecast/runner.py is executed
+# directly -- production never calls it.
+#
+# 360 s covers one 300 s cycle plus a minute of slack. Below 300 s the soak can
+# return before any cycle has completed, and degrades into a slow restart check.
 RELEASE_AUDIT_SOAK_SECONDS="${RELEASE_AUDIT_SOAK_SECONDS:-360}"
 # Printed as the very last remote statement and checked locally, so a remote
 # block that dies early can never be reported as a successful deploy.

@@ -7,8 +7,8 @@ text instantly and only pays the model cost on a refresh.
 
 Storage is the shared runtime SQLite database (`/app/logs/trades.db` in
 production), which is bind-mounted into both the cockpit and the execution
-engine. That is deliberate: the engine's scheduler refreshes the cache on a
-timer, and the cockpit reads what it wrote.
+engine. That is deliberate: execution_daemon's cycle regenerates whatever has
+aged past the TTL, and the cockpit reads what it wrote.
 
 Answers are generated on a read-only surface, so neither the timer nor the
 refresh button can reach a write-tier tool.
@@ -25,8 +25,9 @@ from config import DB_PATH
 
 logger = logging.getLogger(__name__)
 
-# Answers older than this are stale. The engine's scheduler regenerates them on
-# the same cadence, so in a healthy system the cockpit rarely shows a stale one.
+# Answers older than this are stale. execution_daemon checks every cycle and
+# regenerates only what has aged out, so this TTL alone sets the cadence and in a
+# healthy system the cockpit rarely shows a stale one.
 BRIEFING_TTL_SECONDS = 4 * 60 * 60
 
 # Generated on this surface, which is deliberately not in brain._WRITE_SURFACES:

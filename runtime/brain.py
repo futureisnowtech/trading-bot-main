@@ -35,9 +35,8 @@ try:
 except ImportError:
     HAS_GENAI_SDK = False
 
-from runtime.reasoning_provider import ask_with_deepseek
-from runtime.reasoning_provider import get_reasoning_model_id as _get_reasoning_model_id
-from runtime.reasoning_provider import get_reasoning_provider
+from runtime.reasoning_provider import ReasoningProviderError, ask_with_deepseek
+from runtime.reasoning_provider import get_reasoning_provider, model_id_for
 
 READ = "read"
 WRITE = "write"
@@ -164,8 +163,9 @@ def tools_for(surface: str) -> list[Callable[..., str]]:
     ]
 
 
-def _model_id() -> str:
-    model = _get_reasoning_model_id()
+def _gemini_model_id() -> str:
+    """Bare Gemini model name, independent of which provider is configured."""
+    model = model_id_for("gemini")
     return model[len("models/"):] if model.startswith("models/") else model
 
 
@@ -234,19 +234,28 @@ def ask(messages: list[dict], *, surface: str = COCKPIT) -> str:
     try:
         provider = get_reasoning_provider()
         tools = tools_for(surface)
+        degraded_notice = ""
         if provider == "deepseek":
-            return ask_with_deepseek(
-                messages,
-                system_instruction=_system_instruction(surface),
-                tools=tools,
-                temperature=0.3,
-            )
+            try:
+                return ask_with_deepseek(
+                    messages,
+                    system_instruction=_system_instruction(surface),
+                    tools=tools,
+                    temperature=0.3,
+                )
+            except ReasoningProviderError as exc:
+                # An exhausted balance, a rate limit or an outage should degrade the
+                # operator surfaces, not silence them. ask_with_deepseek only raises
+                # this before any tool has run, so re-asking Gemini cannot repeat a
+                # tool call that already took effect.
+                logger.warning("DeepSeek unavailable (%s); falling back to Gemini.", exc)
+                degraded_notice = f"⚠️ DeepSeek unavailable ({exc}) — answered by the Gemini fallback.\n\n"
 
         api_key = os.environ.get("GOOGLE_API_KEY")
         if not api_key:
-            return "⚠️ Brain is inactive: GOOGLE_API_KEY is not set."
+            return f"{degraded_notice}⚠️ Brain is inactive: GOOGLE_API_KEY is not set."
         if not HAS_GENAI_SDK:
-            return "⚠️ Brain is inactive: google-genai SDK not installed."
+            return f"{degraded_notice}⚠️ Brain is inactive: google-genai SDK not installed."
 
         client = genai.Client(api_key=api_key)
         config = {
@@ -263,14 +272,17 @@ def ask(messages: list[dict], *, surface: str = COCKPIT) -> str:
             role = "user" if msg.get("role") == "user" else "model"
             history.append({"role": role, "parts": [{"text": str(msg.get("content") or "")}]})
 
-        chat = client.chats.create(model=_model_id(), config=config, history=history)
+        # Always the Gemini id here: on the fallback path the configured provider
+        # is still deepseek, so resolving the *configured* model would hand the
+        # Gemini client a DeepSeek model name.
+        chat = client.chats.create(model=_gemini_model_id(), config=config, history=history)
         response = chat.send_message(str(messages[-1].get("content") or ""))
 
         text = getattr(response, "text", None)
         if not text:
-            return "No textual response was produced. Check logs for tool execution status."
+            return f"{degraded_notice}No textual response was produced. Check logs for tool execution status."
         _remember(surface, str(messages[-1].get("content") or ""), text)
-        return text
+        return f"{degraded_notice}{text}"
     except Exception as exc:
         logger.exception("Brain execution error on surface %s", surface)
         return f"⚠️ Error executing query: {exc}"

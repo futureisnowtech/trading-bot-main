@@ -1,5 +1,10 @@
 # ── Credentials (NEVER commit) ───────────────────────────────────────────────
 .env
+# Timestamped backups written before any .env edit (DEPLOY_STATE.md convention).
+# `.env` alone does not match these, so they were previously untracked but not
+# ignored -- one `git add -A` away from committing live keys.
+.env.bak.*
+.env.*.bak
 did.bin
 kalshi_private_key*.pem
 key.der

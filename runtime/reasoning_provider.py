@@ -36,19 +36,23 @@ except ImportError:
 _SUPPORTED_PROVIDERS = {"gemini", "deepseek"}
 
 
+class ReasoningProviderError(RuntimeError):
+    """The selected provider could not answer -- caller should try the fallback.
+
+    Raised for anything that makes the provider unusable rather than merely
+    unhelpful: a missing key, a missing SDK, an exhausted balance, a rate limit,
+    a network failure. Callers cascade to the other provider on this; they do
+    not cascade on a normal answer they simply dislike.
+    """
+
+
 def get_reasoning_provider() -> str:
     provider = os.getenv("REASONING_PROVIDER", "gemini").strip().lower()
     return provider if provider in _SUPPORTED_PROVIDERS else "gemini"
 
 
 def get_reasoning_model_id() -> str:
-    if get_reasoning_provider() == "deepseek":
-        return (os.getenv("DEEPSEEK_MODEL", "").strip() or DEEPSEEK_MODEL or "deepseek-v4-flash").strip()
-
-    model = (os.getenv("GEMINI_REASONING_MODEL", "").strip() or GEMINI_MODEL or "gemini-2.5-flash").strip()
-    if not model:
-        model = "gemini-2.5-flash"
-    return model if model.startswith("models/") else f"models/{model}"
+    return model_id_for(get_reasoning_provider())
 
 
 def get_reasoning_display_name() -> str:
@@ -72,16 +76,63 @@ def get_deepseek_thinking_mode() -> str:
 
 
 def probe_reasoning_model() -> dict[str, Any]:
+    """Handshake the configured provider, falling back to the other one.
+
+    The release audit turns a failed probe into a hard blocker, so without the
+    cascade an outage at one vendor -- an exhausted balance, a rate limit --
+    would stop a deploy even though the other provider is configured, funded and
+    reachable. A fallback success reports ok=True with fallback_used set, so the
+    audit passes while the report still shows the degradation.
+    """
+    provider = get_reasoning_provider()
     payload = {
         "ok": False,
-        "provider": get_reasoning_provider(),
+        "provider": provider,
         "model_id": get_reasoning_model_id(),
         "response_preview": "",
         "error": "",
+        "fallback_used": False,
+        "fallback_provider": "",
     }
-    if payload["provider"] == "deepseek":
-        return _probe_deepseek(payload)
-    return _probe_gemini(payload)
+    primary = _probe_deepseek(payload) if provider == "deepseek" else _probe_gemini(payload)
+    if primary.get("ok"):
+        return primary
+
+    fallback = "gemini" if provider == "deepseek" else "deepseek"
+    primary_error = str(primary.get("error") or "unknown error")
+    secondary: dict[str, Any] = {
+        "ok": False,
+        "provider": provider,
+        "model_id": model_id_for(fallback),
+        "response_preview": "",
+        "error": "",
+        "fallback_used": True,
+        "fallback_provider": fallback,
+    }
+    secondary = _probe_gemini(secondary) if fallback == "gemini" else _probe_deepseek(secondary)
+    if secondary.get("ok"):
+        logger.warning(
+            "Reasoning probe: %s failed (%s); %s fallback answered.",
+            provider,
+            primary_error,
+            fallback,
+        )
+        secondary["error"] = f"{provider} unavailable ({primary_error}); answered by {fallback}"
+        return secondary
+
+    primary["error"] = (
+        f"{provider} unavailable ({primary_error}); "
+        f"{fallback} fallback also failed ({secondary.get('error') or 'unknown error'})"
+    )
+    return primary
+
+
+def model_id_for(provider: str) -> str:
+    """Resolve a provider's model id without regard to what is configured."""
+    if provider == "deepseek":
+        return (os.getenv("DEEPSEEK_MODEL", "").strip() or DEEPSEEK_MODEL or "deepseek-v4-flash").strip()
+    model = (os.getenv("GEMINI_REASONING_MODEL", "").strip() or GEMINI_MODEL or "gemini-2.5-flash").strip()
+    return model if model.startswith("models/") else f"models/{model}"
 
 
 def ask_with_deepseek(
@@ -94,9 +145,9 @@ def ask_with_deepseek(
 ) -> str:
     api_key = os.getenv("DEEPSEEK_API_KEY", "").strip()
     if not api_key:
-        return "⚠️ Brain is inactive: DEEPSEEK_API_KEY is not set."
+        raise ReasoningProviderError("DEEPSEEK_API_KEY is not set")
     if not HAS_OPENAI_SDK:
-        return "⚠️ Brain is inactive: openai SDK not installed."
+        raise ReasoningProviderError("openai SDK not installed")
 
     client = OpenAI(
         api_key=api_key,
@@ -118,6 +169,7 @@ def ask_with_deepseek(
     model_id = get_reasoning_model_id()
     reasoning_effort = get_deepseek_reasoning_effort()
     thinking_mode = get_deepseek_thinking_mode()
+    executed_tools = False
 
     for _ in range(max_rounds):
         request: dict[str, Any] = {
@@ -132,7 +184,21 @@ def ask_with_deepseek(
         if thinking_mode:
             request["extra_body"] = {"thinking": {"type": thinking_mode}}
 
-        response = client.chat.completions.create(**request)
+        try:
+            response = client.chat.completions.create(**request)
+        except Exception as exc:
+            # Only offer the caller a fallback while no tool has run yet. Once a
+            # tool has executed, retrying the whole conversation on the other
+            # provider would re-execute it -- harmless for a read, a duplicated
+            # mutation for a write. Fail closed instead.
+            if executed_tools:
+                logger.exception("DeepSeek failed after executing tools; not cascading")
+                return (
+                    f"⚠️ DeepSeek failed partway through the request, after tools had already run: {exc}. "
+                    "Not retrying on the fallback provider, because that would repeat those tool calls."
+                )
+            raise ReasoningProviderError(str(exc)) from exc
+
         message = response.choices[0].message
         tool_calls = list(message.tool_calls or [])
 
@@ -146,6 +212,7 @@ def ask_with_deepseek(
             chat_messages.append(assistant_message)
 
             for tool_call in tool_calls:
+                executed_tools = True
                 result = _run_tool_call(
                     tool_map,
                     tool_call.function.name,
@@ -180,7 +247,7 @@ def _probe_gemini(payload: dict[str, Any]) -> dict[str, Any]:
     try:
         client = genai.Client(api_key=api_key)
         response = client.models.generate_content(
-            model=get_reasoning_model_id(),
+            model=model_id_for("gemini"),
             contents="Reply with OK",
             config=genai_types.GenerateContentConfig(
                 temperature=0.0,
@@ -212,7 +279,7 @@ def _probe_deepseek(payload: dict[str, Any]) -> dict[str, Any]:
             base_url=get_deepseek_base_url(),
         )
         response = client.chat.completions.create(
-            model=get_reasoning_model_id(),
+            model=model_id_for("deepseek"),
             messages=[{"role": "user", "content": "Reply with OK"}],
             stream=False,
         )

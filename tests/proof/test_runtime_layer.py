@@ -483,14 +483,24 @@ def test_trading_readiness_summary_explains_blockers_in_plain_english(monkeypatc
 
 
 def test_jarvis_preloaded_prompts_are_plain_english_and_operator_focused():
-    text = (ROOT / "dashboard" / "streamlit_app.py").read_text(encoding="utf-8")
+    # The labels and prompts now live in dashboard/briefing_cache.py, which is the
+    # single source shared by the orb chips and the cached briefing tabs. Asserting
+    # against a second copy in streamlit_app.py is what let them drift before.
+    from dashboard.briefing_cache import BRIEFING_LABELS, PROMPTS_BY_LABEL
 
-    assert "🧭 What Needs Attention?" in text
-    assert "🛑 Why Isn't It Trading?" in text
-    assert "💸 Are Fees Hurting Us?" in text
-    assert "Why No Trades?" not in text
-    assert "Call get_operator_brief" in text
-    assert "Call get_trading_readiness_summary" in text
+    assert "🧭 What Needs Attention?" in BRIEFING_LABELS
+    assert "🛑 Why Isn't It Trading?" in BRIEFING_LABELS
+    assert "💸 Are Fees Hurting Us?" in BRIEFING_LABELS
+    assert "Why No Trades?" not in BRIEFING_LABELS
+
+    prompts = " ".join(PROMPTS_BY_LABEL.values())
+    assert "Call get_operator_brief" in prompts
+    assert "Call get_trading_readiness_summary" in prompts
+
+    # And the cockpit must actually consume that source rather than redefining it.
+    text = (ROOT / "dashboard" / "streamlit_app.py").read_text(encoding="utf-8")
+    assert "from dashboard.briefing_cache import" in text
+    assert "PROMPTS_BY_LABEL" in text
 
 
 def test_telegram_surface_exposes_plain_english_operator_shortcuts():

@@ -1436,26 +1436,73 @@ else:
     # improvise SQL or reasoned over a hardcoded, long-expired contract
     # (KXLOWTMIA-26AUG01-T80), which is exactly the kind of arbitrary preload that
     # tells you nothing about current system health.
+    from dashboard.briefing_cache import (
+        BRIEFING_LABELS,
+        BRIEFING_TTL_SECONDS,
+        PROMPTS_BY_LABEL,
+        get_briefings,
+        refresh_all_briefings,
+    )
+
     sug_cols = st.columns(5)
-    labels = [
-        "🧭 What Needs Attention?",
-        "🛑 Why Isn't It Trading?",
-        "💸 Are Fees Hurting Us?",
-        "🎯 Are Entries Working?",
-        "📂 What Bets Are Live?",
-    ]
-    prompts_map = {
-        "🧭 What Needs Attention?": "Call get_operator_brief. In plain English, tell me whether the bot is healthy, whether it can trade, and the one thing I should pay attention to right now.",
-        "🛑 Why Isn't It Trading?": "Call get_trading_readiness_summary. Explain in plain English whether the bot is allowed to place new trades, and if not, exactly what is stopping it.",
-        "💸 Are Fees Hurting Us?": "Call get_fee_drag. Explain in plain English how much of our trading edge fees are eating and whether that is materially hurting us.",
-        "🎯 Are Entries Working?": "Call get_maker_fill_stats. Explain in plain English whether our entry approach is getting good fills or forcing us to overpay.",
-        "📂 What Bets Are Live?": "Call get_open_positions. List our live weather bets in plain English, including side, size, and entry price.",
-    }
+    labels = BRIEFING_LABELS
+    prompts_map = PROMPTS_BY_LABEL
     for col, label in zip(sug_cols, labels):
         if col.button(label, use_container_width=True, key=f"sug_{label}"):
             st.session_state.jarvis_prompt_input = prompts_map[label]
             st.session_state.show_jarvis = True
             st.rerun()
+
+    # Standing answers, one tab per chip. The chips above re-ask the question live
+    # in the chat; these tabs show the last cached answer with no wait, which is
+    # what you want when you just opened the orb to check on things.
+    _briefings = get_briefings()
+    _oldest_age = max(
+        (b["age_seconds"] for b in _briefings.values() if b["age_seconds"] is not None),
+        default=None,
+    )
+    _any_stale = any(b["stale"] for b in _briefings.values())
+
+    _refresh_col, _status_col = st.columns([1, 3])
+    with _refresh_col:
+        if st.button("⟳ Autorefresh All", use_container_width=True, key="briefing_refresh_all"):
+            with st.spinner("Re-asking all five questions…"):
+                _results = refresh_all_briefings()
+            _failed = [r["label"] for r in _results if not r.get("ok")]
+            st.session_state.briefing_refresh_note = (
+                f"Refreshed {len(_results) - len(_failed)}/{len(_results)}."
+                + (f" Failed: {', '.join(_failed)}" if _failed else "")
+            )
+            st.rerun()
+    with _status_col:
+        _note = st.session_state.pop("briefing_refresh_note", "")
+        if _note:
+            st.caption(_note)
+        elif _oldest_age is None:
+            st.caption("No answers generated yet — press Autorefresh All.")
+        else:
+            _hrs = _oldest_age / 3600.0
+            st.caption(
+                f"Answers auto-refresh every {BRIEFING_TTL_SECONDS // 3600}h · "
+                f"oldest is {_hrs:.1f}h old"
+                + (" · some are stale" if _any_stale else "")
+            )
+
+    for _tab, _label in zip(st.tabs(labels), labels):
+        with _tab:
+            _b = _briefings[_label]
+            if _b["never_generated"]:
+                st.caption("Not generated yet. Press Autorefresh All, or tap the chip above to ask now.")
+            else:
+                _age_h = (_b["age_seconds"] or 0) / 3600.0
+                if _b["stale"]:
+                    st.caption(f"⚠️ Stale — generated {_age_h:.1f}h ago, past the {BRIEFING_TTL_SECONDS // 3600}h window.")
+                else:
+                    st.caption(f"Generated {_age_h:.1f}h ago.")
+                if _b["answer"]:
+                    st.markdown(_b["answer"])
+                else:
+                    st.caption(f"Last refresh failed: {_b['error'] or 'unknown error'}")
 
     with st.expander(f"CEREBRO SIGNAL ARCHIVE · {sum((cerebro.get('insight_counts') or {}).values())}"):
         _experiment_by_insight = {

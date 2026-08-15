@@ -5,6 +5,7 @@ execution_daemon.py — Lean long-lived Kalshi execution daemon.
 import logging
 import os
 import sys
+import threading
 import time
 
 from config import (
@@ -23,6 +24,41 @@ from runtime.storage_guard import runtime_storage_status
 configure_runtime_logging()
 
 logger = logging.getLogger("execution_daemon")
+
+# Guards against stacking refreshes: a full set is five tool-calling round trips
+# (~2 minutes), which is longer than nothing but shorter than the 4h TTL, so at
+# most one can ever be in flight.
+_briefing_refresh_running = threading.Event()
+
+
+def _refresh_cockpit_briefings() -> None:
+    """Regenerate any cockpit briefing that has aged past its TTL.
+
+    Lives here rather than in forecast.runner's scheduler because this daemon is
+    what production actually runs; the runner's schedule.* jobs only fire when
+    forecast/runner.py is executed directly.
+
+    Runs off-thread so five model round trips never delay a trading cycle, and
+    refreshes only what is stale, so the 4h TTL alone sets the cadence.
+    """
+    try:
+        from dashboard.briefing_cache import refresh_stale_briefings
+
+        refreshed = refresh_stale_briefings()
+        if refreshed:
+            ok = sum(1 for r in refreshed if r.get("ok"))
+            logger.info("Cockpit briefings refreshed: %d/%d succeeded.", ok, len(refreshed))
+    except Exception:
+        logger.exception("Cockpit briefing refresh failed")
+    finally:
+        _briefing_refresh_running.clear()
+
+
+def _start_briefing_refresh_if_due() -> None:
+    if _briefing_refresh_running.is_set():
+        return
+    _briefing_refresh_running.set()
+    threading.Thread(target=_refresh_cockpit_briefings, daemon=True).start()
 
 
 def main() -> int:
@@ -117,6 +153,8 @@ def main() -> int:
                         start_weather_monitor()
                         weather_monitor_started = True
                         logger.info("Weather monitor started after initial on-demand hydration.")
+
+                    _start_briefing_refresh_if_due()
                 try:
                     sync_incidents_and_notify()
                 except Exception:

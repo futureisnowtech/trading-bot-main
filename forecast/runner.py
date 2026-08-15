@@ -2444,25 +2444,14 @@ def start_forecast_lane(bankroll: float = 100.0) -> None:
     from notifications.reports import send_sovereign_briefing
     schedule.every(6).hours.do(send_sovereign_briefing)
 
-    # Keep the cockpit's standing answers warm. Generated here rather than in the
-    # cockpit so opening the orb never waits on five tool-calling round trips;
-    # both containers share logs/trades.db, so the cockpit reads what this writes.
-    def _refresh_cockpit_briefings():
-        try:
-            from dashboard.briefing_cache import refresh_all_briefings
-
-            refresh_all_briefings()
-        except Exception as e:
-            logger.error(f"[ForecastRunner] Cockpit briefing refresh failed: {e}")
-
-    schedule.every(4).hours.do(_refresh_cockpit_briefings)
+    # NOTE: the cockpit briefing refresh is wired into execution_daemon.py, not
+    # here. Production runs execution_daemon.py, which imports run_execution_cycle
+    # directly and never calls this function -- anything scheduled in here is dead
+    # code on the droplet.
 
     # Manual trigger on startup
     logger.info("[ForecastRunner] Triggering initial strategy cycle...")
     threading.Thread(target=run_strategy_cycle, args=(bankroll,), daemon=True).start()
-    # Warm the briefing cache off-thread so a cold start shows answers without
-    # blocking the lane's startup.
-    threading.Thread(target=_refresh_cockpit_briefings, daemon=True).start()
 
     logger.info(
         f"[ForecastRunner] Lane fully operational | bankroll=${bankroll:.0f} "

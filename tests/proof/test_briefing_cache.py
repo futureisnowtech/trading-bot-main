@@ -130,3 +130,42 @@ def test_refresh_stale_skips_fresh_answers(tmp_path, monkeypatch):
     )
     assert bc.refresh_stale_briefings(db_path=db) == []
     assert calls == []
+
+
+def test_refresh_is_wired_into_the_daemon_that_production_runs():
+    """The wiring lived in forecast.runner's scheduler first, where it was dead code.
+
+    execution_daemon.py is the container's command; it imports run_execution_cycle
+    directly and never calls start_forecast_lane, so anything registered on that
+    scheduler never fires on the droplet.
+    """
+    daemon_src = (_ROOT / "execution_daemon.py").read_text(encoding="utf-8")
+    assert "_start_briefing_refresh_if_due()" in daemon_src
+    assert "refresh_stale_briefings" in daemon_src
+
+    runner_src = (_ROOT / "forecast" / "runner.py").read_text(encoding="utf-8")
+    assert "schedule.every(4).hours" not in runner_src, (
+        "briefing refresh must not be scheduled in start_forecast_lane; "
+        "production never calls it"
+    )
+
+
+def test_daemon_refresh_thread_does_not_stack(monkeypatch):
+    import execution_daemon as ed
+
+    ed._briefing_refresh_running.clear()
+    started = []
+    monkeypatch.setattr(
+        ed.threading, "Thread",
+        lambda *a, **k: type("T", (), {"start": lambda self: started.append(1)})(),
+        raising=False,
+    )
+
+    ed._start_briefing_refresh_if_due()
+    ed._start_briefing_refresh_if_due()
+    assert started == [1], "a second refresh must not start while one is in flight"
+
+    ed._briefing_refresh_running.clear()
+    ed._start_briefing_refresh_if_due()
+    assert started == [1, 1]
+    ed._briefing_refresh_running.clear()

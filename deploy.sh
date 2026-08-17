@@ -88,7 +88,15 @@ from VERSION import VERSION
 print(VERSION)
 PYEOF
 )
-IMAGE_REPO="ghcr.io/$(git remote get-url origin | sed 's/.*github.com[:\/]\(.*\)\.git/\1/' | tr '[:upper:]' '[:lower:]')"
+# Resolve owner/repo for the ghcr tag. The old expression required a trailing
+# ".git", which only the SSH remote carries -- so a laptop deploy worked while
+# the Actions runner (which checks out "https://github.com/owner/repo", no
+# suffix) passed the whole URL through and produced the invalid tag
+# "ghcr.io/https://github.com/owner/repo". Prefer GITHUB_REPOSITORY when the
+# runner sets it, and make the fallback tolerate both remote forms.
+REPO_SLUG="${GITHUB_REPOSITORY:-$(git remote get-url origin \
+    | sed -E 's#^(https?://|git@)github\.com[:/]##; s#\.git$##')}"
+IMAGE_REPO="ghcr.io/$(printf '%s' "${REPO_SLUG}" | tr '[:upper:]' '[:lower:]')"
 LOCAL_IMAGE_NAME="${IMAGE_REPO}"
 LOCAL_DASHBOARD_IMAGE_NAME="${IMAGE_REPO}-dashboard"
 

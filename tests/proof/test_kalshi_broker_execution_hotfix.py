@@ -537,3 +537,72 @@ def test_discover_markets_uses_series_catalog_and_keeps_partial_truth(monkeypatc
         for row in results
     )
     assert any(path == "/trade-api/v2/series" for _method, path, _params in calls)
+
+
+def test_post_only_maker_entry_uses_exchange_spelling_of_gtc(monkeypatch):
+    """Kalshi's enum is good_till_canceled (one L).
+
+    The misspelling "good_till_cancelled" is rejected as invalid_parameters, and
+    because _try_maker_entry treats every failure as "fall through and cross",
+    the rejection was silent: 212 of 212 live fills paid taker fees while
+    MAKER_ENTRY_ENABLED was True. Pin the spelling so it cannot regress.
+    """
+    broker = _connected_broker()
+
+    body = broker._build_event_order_body(
+        ticker="KXHIGHLAX-26JUN05-B69.5",
+        right="C",
+        qty=3,
+        limit_price=0.61,
+        action="buy",
+        post_only=True,
+    )
+
+    assert body["time_in_force"] == "good_till_canceled"
+    assert body["time_in_force"] != "good_till_cancelled"
+    assert body["post_only"] is True
+
+    # The taker leg must keep its own (already correct) time-in-force.
+    taker_body = broker._build_event_order_body(
+        ticker="KXHIGHLAX-26JUN05-B69.5",
+        right="C",
+        qty=3,
+        limit_price=0.61,
+        action="buy",
+        post_only=False,
+    )
+    assert taker_body["time_in_force"] == "immediate_or_cancel"
+    assert taker_body["post_only"] is False
+
+
+def test_maker_entry_rests_at_bid_then_falls_through_to_taker_on_no_fill(monkeypatch):
+    """A maker attempt that never fills must cancel and cross, not drop the entry."""
+    broker = _connected_broker()
+    monkeypatch.setattr(broker, "get_quote", lambda ticker: {"yes_bid": 0.58})
+    monkeypatch.setattr(broker, "_order_filled_qty", lambda order_id: 0.0)
+    monkeypatch.setattr(broker, "cancel_order", lambda order_id: True)
+    monkeypatch.setattr("config.MAKER_ENTRY_TIMEOUT_S", 0)
+
+    bodies = []
+
+    def fake_request(method, path, params=None, body=None):
+        if method == "POST":
+            bodies.append(body)
+        return {"order": {"status": "resting", "order_id": "ORD-M"}}
+
+    monkeypatch.setattr(broker, "_request", fake_request)
+
+    broker.place_buy_order(
+        {"local_symbol": "KXHIGHLAX-26JUN05-B69.5", "right": "C"},
+        qty=2,
+        limit_price=0.62,
+        type="limit",
+    )
+
+    assert len(bodies) == 2, "expected a post-only attempt followed by a taker cross"
+    assert bodies[0]["post_only"] is True
+    assert bodies[0]["time_in_force"] == "good_till_canceled"
+    assert bodies[0]["price"] == "0.5800", "maker leg must rest at the bid"
+    assert bodies[1]["post_only"] is False
+    assert bodies[1]["time_in_force"] == "immediate_or_cancel"
+    assert bodies[1]["price"] == "0.6200", "taker leg must cross at our limit"

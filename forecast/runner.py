@@ -1489,6 +1489,8 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                                     or actual_price
                                 ),
                                 side=result.side.upper(),
+                                q_hat=float(getattr(result, "q_hat", 0.0) or 0.0),
+                                ev_at_entry=float(getattr(result, "ev", 0.0) or 0.0),
                                 db_path=db_path,
                             )
                         except Exception as _db_err:

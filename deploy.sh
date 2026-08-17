@@ -8,7 +8,12 @@ NYC_IP="157.245.15.40"
 NYC_PORT="2222"
 NYC_USER="algo-runner"
 PROJECT_DIR="/home/${NYC_USER}/bot"
-SSH_CMD="ssh -p ${NYC_PORT} -o StrictHostKeyChecking=no"
+# ServerAliveInterval keeps the session alive through the long silent steps. The
+# hosted release audit soaks for 360s without writing anything, which is long
+# enough for an idle NAT/firewall hop to drop the connection: the deploy then
+# reports "client_loop: send disconnect: Broken pipe" and fails *after* the bot
+# is already up and healthy, skipping its own verification step.
+SSH_CMD="ssh -p ${NYC_PORT} -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=20"
 TMP_EXPORT_DIR=""
 
 cleanup() {

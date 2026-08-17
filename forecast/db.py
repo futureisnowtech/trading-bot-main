@@ -264,6 +264,13 @@ def init_forecast_db(db_path: str | None = None) -> None:
                     c.execute(stmt)
         _ensure_column(c, "forecast_contracts", "contract_name", "contract_name TEXT")
         _ensure_column(c, "forecast_positions", "basis_quality", "basis_quality TEXT DEFAULT 'CONFIRMED'")
+        # The forecast that justified the entry, kept next to the entry itself.
+        # forecast_resolutions has carried q_hat columns for a long time and they
+        # are NULL on all 76k rows, because resolution_sync runs off weather
+        # observations and never sees the model output. Recording it here is what
+        # makes "were our entries actually calibrated?" answerable at all.
+        _ensure_column(c, "forecast_positions", "q_hat", "q_hat REAL")
+        _ensure_column(c, "forecast_positions", "ev_at_entry", "ev_at_entry REAL")
         _ensure_column(c, "forecast_resolutions", "q_gfs", "q_gfs REAL")
         _ensure_column(c, "forecast_resolutions", "q_ecmwf", "q_ecmwf REAL")
         _ensure_column(c, "forecast_resolutions", "q_hrrr", "q_hrrr REAL")
@@ -329,6 +336,8 @@ def sync_open_forecast_position(
     entry_price: float,
     side: str,
     basis_quality: str = "CONFIRMED",
+    q_hat: float | None = None,
+    ev_at_entry: float | None = None,
     db_path: str | None = None,
 ) -> None:
     from datetime import datetime, timezone
@@ -337,12 +346,15 @@ def sync_open_forecast_position(
     category = weather_mode_for_ticker(ticker) or 'TEMP'
     now = datetime.now(timezone.utc).isoformat()
     normalized_qty = max(0.0, float(qty))
+    q_hat_val = float(q_hat) if q_hat is not None else None
+    ev_val = float(ev_at_entry) if ev_at_entry is not None else None
     with _conn(db_path) as c:
         c.execute(
             """
             INSERT INTO forecast_positions
-                (ticker, qty, entry_price, side, category, active, opened_at, closed_at, exit_type, basis_quality)
-            VALUES (?, ?, ?, ?, ?, 1, ?, NULL, NULL, ?)
+                (ticker, qty, entry_price, side, category, active, opened_at, closed_at, exit_type,
+                 basis_quality, q_hat, ev_at_entry)
+            VALUES (?, ?, ?, ?, ?, 1, ?, NULL, NULL, ?, ?, ?)
             ON CONFLICT(ticker) DO UPDATE SET
                 qty=excluded.qty,
                 entry_price=excluded.entry_price,
@@ -355,9 +367,14 @@ def sync_open_forecast_position(
                 END,
                 closed_at=NULL,
                 exit_type=NULL,
-                basis_quality=excluded.basis_quality
+                basis_quality=excluded.basis_quality,
+                -- Reconciliation adopts broker positions with no forecast attached;
+                -- never let that blank out a q_hat the strategy already recorded.
+                q_hat=COALESCE(excluded.q_hat, forecast_positions.q_hat),
+                ev_at_entry=COALESCE(excluded.ev_at_entry, forecast_positions.ev_at_entry)
             """,
-            (ticker, normalized_qty, entry_price, side, category, now, basis_quality),
+            (ticker, normalized_qty, entry_price, side, category, now, basis_quality,
+             q_hat_val, ev_val),
         )
         c.commit()
 

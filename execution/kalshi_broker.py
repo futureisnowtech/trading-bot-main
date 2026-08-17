@@ -428,7 +428,10 @@ class KalshiBroker:
             "price": f"{yes_leg_price:.4f}",
             # A post-only order must rest to earn the maker rate; IOC would cancel it
             # instantly, so the time-in-force has to flip with post_only.
-            "time_in_force": "good_till_cancelled" if post_only else "immediate_or_cancel",
+            # Kalshi spells this the American way with one L. "good_till_cancelled"
+            # is rejected as invalid_parameters, which silently forced every maker
+            # entry to fall through and cross as a taker.
+            "time_in_force": "good_till_canceled" if post_only else "immediate_or_cancel",
             "self_trade_prevention_type": "taker_at_cross",
             "post_only": bool(post_only),
             "cancel_order_on_pause": False,

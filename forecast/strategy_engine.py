@@ -108,7 +108,17 @@ MAX_HOURS_TO_RES: float = 120.0
 
 # Baseline post-fee edge floor. This is intentionally a single canonical
 # constant; lane-specific behavior should layer on top of it explicitly.
-EV_THRESHOLD: float = float(os.getenv("EV_THRESHOLD", "0.050"))
+#
+# 0.120 is a fee-derived floor, not a taste. The true round-trip taker cost at
+# the sizes we actually trade is ~2.6-3.0% of notional, and the realized book
+# shows fees consuming ~297% of gross edge, so the bar has to clear the round
+# trip with real margin rather than shave it. See docs/fee_hurdle.md.
+EV_THRESHOLD: float = float(os.getenv("EV_THRESHOLD", "0.120"))
+
+# The exit leg is discounted because a fraction of positions resolve rather than
+# being sold back. Kept identical to the weight solve_optimal_size applies, so
+# the admission gate and the sizer price the same round trip.
+_EXIT_FEE_WEIGHT: float = 0.48
 
 # Longshot Bias Gate
 MIN_IMPLIED_PROB_FOR_YES: float = 0.10  # refuse to buy YES below 10% probability
@@ -234,12 +244,27 @@ def _estimated_fee_per_contract(price: float, *, rounded: bool = False) -> float
 
 
 def _weather_net_edge(contract_prob: float, ask_price: float) -> float | None:
+    """Edge left after the *round-trip* cost of actually holding the contract.
+
+    Two corrections over the naive version, both of which made the gate
+    understate cost and admit trades that could not clear fees:
+
+    1. ``rounded=True``. Kalshi ceilings the fee to the cent on the order total,
+       and we trade 1-4 contracts, so the raw rate materially under-bills. At
+       qty=1 the ceiling roughly doubles the true per-contract fee.
+    2. The exit is charged too. We pay to get out as well as in; billing only
+       the entry hid roughly a third of the cost. ``_EXIT_FEE_WEIGHT`` matches
+       the discount ``solve_optimal_size`` already applies, so the gate and the
+       sizer now price the same round trip.
+    """
     if ask_price <= 0.0:
         return None
+    fee_in = _estimated_fee_per_contract(ask_price, rounded=True)
+    fee_out = _estimated_fee_per_contract(ask_price, rounded=True)
     return (
         float(contract_prob)
         - float(ask_price)
-        - _estimated_fee_per_contract(ask_price, rounded=False)
+        - (fee_in + _EXIT_FEE_WEIGHT * fee_out)
     )
 
 

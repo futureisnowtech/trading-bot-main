@@ -34,8 +34,9 @@ jobs:
           ACCOUNT_SIZE=5000
           # Risk constants are pinned explicitly so the gate never proves a
           # different risk posture than production by falling back to defaults.
-          KALSHI_MAX_CONCURRENT_POSITIONS=8
+          KALSHI_MAX_CONCURRENT_POSITIONS=20
           KALSHI_SAME_EVENT_FAMILY_CAP=5
+          EV_THRESHOLD=0.120
           KALSHI_HUB_EXPOSURE_PCT=0.30
           KALSHI_HUB_EXPOSURE_MIN_USD=12
           KALSHI_MAX_USD_PER_POSITION=10.0

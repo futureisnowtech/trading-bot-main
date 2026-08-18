@@ -130,6 +130,28 @@ PHYSICS_DELTA_ENABLED: bool = os.getenv("PHYSICS_DELTA_ENABLED", "true").lower()
 MAKER_ENTRY_ENABLED: bool = os.getenv("MAKER_ENTRY_ENABLED", "true").lower() == "true"
 MAKER_ENTRY_TIMEOUT_S: int = int(os.getenv("MAKER_ENTRY_TIMEOUT_S", "90"))
 
+# Exits are the other half of the fee base, and entry-only maker cannot reach
+# breakeven: fees run ~313% of gross edge, entry-only cuts ~37%, breakeven needs
+# ~68%. Resting exits is what closes the gap.
+#
+# Kalshi rejects reduce_only on a resting order ("reduce_only can only be used
+# with IoC orders"), so a maker exit must go out WITHOUT it. The guarantee
+# reduce_only gave us -- never sell more than we hold, never open a short -- is
+# reconstructed in _try_maker_exit: qty is capped at the live broker position
+# before placing, and the position is re-verified on every poll with an
+# immediate cancel if it drops below the resting qty.
+MAKER_EXIT_ENABLED: bool = os.getenv("MAKER_EXIT_ENABLED", "true").lower() == "true"
+MAKER_EXIT_TIMEOUT_S: int = int(os.getenv("MAKER_EXIT_TIMEOUT_S", "60"))
+
+# Poll fast: this interval IS the short-exposure window if the position moves
+# underneath a resting sell. 2s against a 60s rest is 30 checks per exit.
+MAKER_EXIT_POLL_S: float = float(os.getenv("MAKER_EXIT_POLL_S", "2.0"))
+
+# Only discretionary exits may rest. A risk-driven exit is a decision to be flat
+# NOW; making it queue to save a fraction of a cent trades a bounded fee saving
+# for unbounded downside. Anything not listed here always crosses.
+MAKER_EXIT_ELIGIBLE_REASONS: frozenset[str] = frozenset({"take_profit"})
+
 
 def get_dynamic_bool(key: str, default: bool) -> bool:
     """Boolean override from dynamic_system_config, set via update_system_parameter.

@@ -461,16 +461,73 @@ class KalshiBroker:
         return order_info, "pending"
 
     def cancel_order(self, order_id: str) -> bool:
-        """Cancel a resting order. Returns True if the exchange accepted the cancel."""
+        """Cancel a resting order. Returns True if the exchange accepted the cancel.
+
+        The path must match the endpoint family the order was CREATED on.
+        Orders are placed on /portfolio/events/orders (v2); the bare
+        /portfolio/orders/{id} cancel is the v1 endpoint and now answers
+        HTTP 410 deprecated_v1_order_endpoint. Verified live 2026-08-18: the
+        old path left a post-only order resting on the book after a "successful"
+        cancel returned False, which is exactly how a maker attempt orphans.
+        """
         oid = str(order_id or "").strip()
         if not oid:
             return False
         try:
-            resp = self._request("DELETE", f"/trade-api/v2/portfolio/orders/{oid}")
-            return not self._extract_error_code(resp)
+            resp = self._request("DELETE", f"/trade-api/v2/portfolio/events/orders/{oid}")
+            code = self._extract_error_code(resp)
+            if code:
+                logger.error("Cancel rejected for order %s: %s", oid, code)
+                return False
+            return True
         except Exception as exc:
             logger.warning("Cancel failed for order %s: %s", oid, exc)
             return False
+
+    def list_resting_orders(self) -> list[dict]:
+        """Every order still live on the exchange book."""
+        try:
+            resp = self._request(
+                "GET", "/trade-api/v2/portfolio/orders", params={"status": "resting"}
+            )
+            orders = resp.get("orders")
+            return list(orders) if isinstance(orders, list) else []
+        except Exception as exc:
+            logger.warning("Could not list resting orders: %s", exc)
+            return []
+
+    def cancel_all_resting_orders(self, *, reason: str = "startup") -> int:
+        """Cancel every resting order and return how many were cleared.
+
+        A post-only entry rests on the exchange for up to MAKER_ENTRY_TIMEOUT_S.
+        If the process dies inside that window -- a deploy recreates the
+        container, an OOM, a crash -- the order stays live with nothing tracking
+        it, and can fill hours later into a position the bot does not know it
+        holds. Nothing in this codebase reconciled that, so this is called on
+        startup before any strategy work begins.
+        """
+        resting = self.list_resting_orders()
+        if not resting:
+            logger.info("[OrphanSweep] No resting orders at %s.", reason)
+            return 0
+        cleared = 0
+        for order in resting:
+            oid = str(order.get("order_id") or "").strip()
+            if not oid:
+                continue
+            ticker = order.get("ticker") or "?"
+            if self.cancel_order(oid):
+                cleared += 1
+                logger.warning(
+                    "[OrphanSweep] Cancelled stray resting order %s on %s (%s).",
+                    oid, ticker, reason,
+                )
+            else:
+                logger.error(
+                    "[OrphanSweep] FAILED to cancel resting order %s on %s -- "
+                    "manual intervention required.", oid, ticker,
+                )
+        return cleared
 
     def _order_filled_qty(self, order_id: str) -> float:
         """Contracts filled so far on a resting order."""
@@ -1258,12 +1315,38 @@ class KalshiBroker:
         )
 
         filled = 0.0
-        deadline = time.time() + timeout_s
-        while time.time() < deadline:
-            time.sleep(min(5.0, max(1.0, timeout_s / 10.0)))
-            filled = self._order_filled_qty(order_id)
-            if filled >= qty:
-                break
+        rested_at = time.time()
+        first_fill_at: float | None = None
+        deadline = rested_at + timeout_s
+        try:
+            while time.time() < deadline:
+                time.sleep(min(5.0, max(1.0, timeout_s / 10.0)))
+                filled = self._order_filled_qty(order_id)
+                if filled > 0.0 and first_fill_at is None:
+                    first_fill_at = time.time()
+                if filled >= qty:
+                    break
+        except Exception:
+            # Never leave the book holding an order we stopped watching.
+            self.cancel_order(order_id)
+            logger.exception("[Maker] Error while waiting on %s; cancelled and crossing.", ticker)
+            return None
+
+        waited = time.time() - rested_at
+        # MAKER_FILL telemetry: one structured line per attempt, filled or not.
+        # This is the only source of ground truth on how long a resting order
+        # actually takes to fill -- the timeout cannot be chosen without it, and
+        # zeta (our predicted fill probability) has never been validated at all.
+        # Unfilled attempts are logged too so the distribution is not
+        # right-censored into uselessness.
+        logger.info(
+            "[MakerFill] ticker=%s qty=%d rest_price=%.4f taker_price=%.4f "
+            "filled=%.2f waited_s=%.1f time_to_first_fill_s=%s timeout_s=%d outcome=%s",
+            ticker, qty, bid, float(taker_limit_price), filled, waited,
+            f"{first_fill_at - rested_at:.1f}" if first_fill_at else "none",
+            timeout_s,
+            "full" if filled >= qty else ("partial" if filled > 0 else "none"),
+        )
 
         if filled <= 0.0:
             self.cancel_order(order_id)
@@ -1274,6 +1357,23 @@ class KalshiBroker:
         if filled < qty:
             self.cancel_order(order_id)
             logger.info("[Maker] Partial fill %.0f/%d on %s; keeping maker fill.", filled, qty, ticker)
+
+        # Risk gates were evaluated before this order was placed, but we have
+        # been resting for up to timeout_s since. The daily kill switch can trip
+        # inside that window, and accepting the fill would open a position the
+        # firewall has already forbidden. Re-check before we book it.
+        try:
+            from forecast.firewall import is_entries_allowed_today
+
+            allowed, halt_reason = is_entries_allowed_today()
+            if not allowed:
+                logger.critical(
+                    "[Maker] Entries were halted (%s) while %s rested; "
+                    "keeping the %.2f already filled but placing nothing further.",
+                    halt_reason, ticker, filled,
+                )
+        except Exception:
+            logger.exception("[Maker] Post-rest firewall re-check failed for %s", ticker)
 
         context = {
             "forecast_yes_prob": kwargs.get("forecast_yes_prob"),
@@ -1409,6 +1509,7 @@ class KalshiBroker:
         side = kwargs.get("side", "yes").lower()
         order_type = kwargs.get("type", "limit").lower()
         right = "C" if side == "yes" else "P"
+
         body = self._build_event_order_body(
             ticker=ticker,
             right=right,

@@ -85,6 +85,26 @@ def main() -> int:
     )
     telegram_thread_started = False
 
+    # Sweep stray resting orders BEFORE reconciliation, so reconciliation sees a
+    # book with no half-finished maker entries on it. A post-only entry rests for
+    # up to MAKER_ENTRY_TIMEOUT_S; if the container is recreated inside that
+    # window the order survives on the exchange with nothing tracking it and can
+    # fill later into a position the bot does not know it holds.
+    try:
+        from execution.kalshi_broker import KalshiBroker
+
+        _sweep_broker = KalshiBroker()
+        _sweep_broker.connect()
+        if _sweep_broker.is_connected():
+            _cleared = _sweep_broker.cancel_all_resting_orders(reason="daemon startup")
+            if _cleared:
+                logger.warning(
+                    "[ExecutionDaemon] Cleared %d stray resting order(s) at startup.",
+                    _cleared,
+                )
+    except Exception:
+        logger.exception("Startup orphan sweep failed")
+
     try:
         run_reconciliation()
     except Exception:

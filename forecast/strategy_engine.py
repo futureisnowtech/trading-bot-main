@@ -1029,6 +1029,36 @@ def calculate_favorite_scaler(q: float, bankroll: float) -> float:
     return 0.60 + (s_max - 0.60) / denom_s
 
 
+# A maker attempt that misses is not a lost trade. _try_maker_entry cancels at the
+# timeout and crosses as taker, so the cost of trying is a bounded delay, not
+# forgone utility. Priced as a haircut on the fallback leg for the adverse
+# selection of crossing ~90s later than we otherwise would have.
+_MAKER_FALLBACK_DISCOUNT: float = 0.98
+
+# Inside this window the rest is a large fraction of the contract's remaining
+# life and the book thins into resolution, so don't spend the delay.
+_MAKER_MIN_HOURS_TO_RES: float = 1.0
+
+
+def _maker_first_utility(u_M: float, u_T: float, zeta: float, tau_hours: float) -> float:
+    """Expected utility of *trying* maker first, then crossing if it misses.
+
+    The original expression was ``zeta * u_M``, which scores a missed maker fill
+    as zero utility. That is not what the execution path does -- it falls through
+    to the taker route -- so the comparison systematically understated maker and
+    sent essentially everything to taker: 3 maker attempts across 645 positions
+    while fees ate 313% of gross edge.
+
+    Modelling the fallback makes maker-first win whenever the maker leg is
+    genuinely better, rather than only when the fill probability is high enough
+    to carry the whole trade alone.
+    """
+    if tau_hours < _MAKER_MIN_HOURS_TO_RES:
+        return zeta * u_M
+    z = max(0.0, min(1.0, float(zeta)))
+    return z * u_M + (1.0 - z) * u_T * _MAKER_FALLBACK_DISCOUNT
+
+
 def estimate_zeta(contract_id: Optional[int], tau_hours: float, spread: float, db_path: str | None = None) -> float:
     if not contract_id or tau_hours <= 0.0:
         return 0.0
@@ -2058,7 +2088,7 @@ def evaluate_contract(
                 u_M = log_utility_g(f_star_M, q, p_M, phi_M)
                 spread = max(0.0, p_T - p_M)
                 zeta = estimate_zeta(contract.get("id"), hours_to_res, spread, DB_PATH)
-                expected_u_M = zeta * u_M
+                expected_u_M = _maker_first_utility(u_M, u_T, zeta, hours_to_res)
         else: # NO Routing
             p_T = ask_no_clamped
             level2_asks_T = [{"price": p_T, "qty": ask_size_no}] if ask_size_no > 0 else None
@@ -2087,7 +2117,7 @@ def evaluate_contract(
                 u_M = log_utility_g(f_star_M, q, p_M, phi_M)
                 spread = max(0.0, p_T - p_M)
                 zeta = estimate_zeta(contract.get("id"), hours_to_res, spread, DB_PATH)
-                expected_u_M = zeta * u_M
+                expected_u_M = _maker_first_utility(u_M, u_T, zeta, hours_to_res)
                 
         # Choose the route with higher utility
         if expected_u_M > u_T and expected_u_M > 0.0:

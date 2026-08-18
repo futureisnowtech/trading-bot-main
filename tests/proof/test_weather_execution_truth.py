@@ -75,6 +75,13 @@ def test_weather_no_side_sizing_uses_no_probability(monkeypatch):
 
     monkeypatch.setattr(se, "calculate_continuous_sizing", _capture_sizing)
 
+    # This test pins TAKER-route sizing: it stubs calculate_continuous_sizing,
+    # which only the taker leg calls, and asserts the size comes back from it.
+    # Since maker-first routing landed the route is a real decision, so force it
+    # rather than depending on which side happens to win. Maker-route sizing has
+    # its own coverage in test_maker_routing_and_exits.py.
+    monkeypatch.setattr(se, "_maker_first_utility", lambda u_M, u_T, zeta, tau: -1e9)
+
     contract = _make_weather_contract()
     contract["local_symbol"] = "KXLOWTPHIL-26JUN17-T64"
     contract["contract_name"] = "Will the low temp in Philadelphia be >64 on Jun 17, 2026?"

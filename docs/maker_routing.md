@@ -103,3 +103,77 @@ Expected payoff once done: round-trip cost falls from ~2.6-3.0% to ~1.3-1.5% on
 routed trades. Fees are the binding constraint on this lane, so this is the
 single largest P&L lever available — which is exactly why it deserves its own
 change with its own proof, not a rushed bundle.
+
+---
+
+# Live API findings, 2026-08-18
+
+Verified by placing real orders against the production API and cancelling them.
+Both were silent-inert failures: the code would have "worked" while doing nothing.
+
+## 1. post-only GTC is accepted (the TIF fix is real)
+
+```
+REQUEST  time_in_force=good_till_canceled post_only=True stp=taker_at_cross
+RESPONSE error_code=(none)  status=resting
+```
+
+The `good_till_canceled` spelling fix is confirmed end to end. `post_only` and
+`self_trade_prevention_type=taker_at_cross` coexist fine.
+
+## 2. cancel_order was pointed at a DEPRECATED endpoint
+
+```
+DELETE /trade-api/v2/portfolio/orders/{id}
+  -> 410 {"code": "deprecated_v1_order_endpoint"}
+DELETE /trade-api/v2/portfolio/events/orders/{id}
+  -> 200 {"order_id": ..., "reduced_by": "1.00"}   <-- correct
+```
+
+Orders are CREATED on `/portfolio/events/orders`; the bare `/portfolio/orders`
+cancel is the v1 path. `cancel_order` returned False and **the order stayed
+resting on the book**. Every code path that rests an order relies on this to
+clean up, so before this fix each maker attempt would have orphaned an order
+permanently. This is why the orphan sweep exists as well as the endpoint fix:
+belt and braces.
+
+Note the GET paths (`/portfolio/orders/{id}`, `?status=resting`) are NOT
+deprecated and still work. Only the DELETE was on the v1 route.
+
+## 3. reduce_only CANNOT be combined with post-only -- maker exits are blocked
+
+```
+REQUEST  action=sell reduce_only=True post_only=True tif=good_till_canceled
+RESPONSE 400 invalid_order: "reduce_only can only be used with IoC orders"
+```
+
+post-only requires GTC; `reduce_only` requires IoC. They are mutually exclusive,
+so **an exit cannot rest without giving up `reduce_only`** -- the flag that stops
+a sell from opening a short if the position moves underneath it.
+
+This matters because entry-only maker cannot reach breakeven:
+
+| scenario | fees | net |
+|---|---|---|
+| today (all taker) | $25.44 | -$17.32 |
+| entry maker only | ~$15.90 | -$7.78 |
+| entry + exit maker | ~$6.36 | +$1.76 |
+
+Breakeven needs a ~68% fee cut; entry-only delivers ~37%. So the exit leg is not
+optional for profitability, and the only route to it is dropping `reduce_only`
+and replacing that guarantee in-process:
+
+1. cap sell qty at the live position size before placing,
+2. re-check the position on every poll of the rest loop and cancel the instant it
+   drops below the resting qty,
+3. accept a worst case of a few contracts of short exposure for one poll interval.
+
+That is a designed change with a real (if small) new risk, so it is not bundled
+here. Until it is done, maker work cannot make this lane profitable on its own.
+
+## 4. v2 position rows use fixed-point string fields
+
+`market_positions[].position_fp` (e.g. `"-1.00"`), not `position`. Reading
+`position` returns None and silently looks like a flat book. Production
+(`kalshi_broker.py:861`) already reads `position_fp` correctly; ad-hoc scripts
+are where this bites.

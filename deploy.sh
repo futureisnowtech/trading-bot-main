@@ -194,7 +194,7 @@ if docker ps --format '{{.Names}}' | grep -qx 'execution-engine'; then
     'cd /app && python3 scripts/release_audit.py --remote-hosted --scan-limit 12 --soak-seconds 0 --format json' \
     </dev/null 2>/dev/null || true)"
 fi
-PRE_DEPLOY_RELEASE_B64="$(printf '%s' "\${PRE_DEPLOY_RELEASE_JSON}" | base64 | tr -d '\n')"
+PRE_DEPLOY_RELEASE_B64="\$(printf '%s' "\${PRE_DEPLOY_RELEASE_JSON}" | base64 | tr -d '\n')"
 
 echo "  Seeding provisional release artifact for new SHA..."
 docker run --rm -i \

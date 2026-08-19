@@ -247,10 +247,10 @@ KALSHI_ULTRA_HIGH_PROB_NO_FAMILY_CAP_BONUS: int = int(
 # cockpit overstate regional headroom and made CI prove a risk posture nothing
 # actually traded. Change these only alongside the droplet .env.
 KALSHI_HUB_EXPOSURE_PCT: float = float(
-    os.getenv("KALSHI_HUB_EXPOSURE_PCT", "0.30")
+    os.getenv("KALSHI_HUB_EXPOSURE_PCT", "0.40")
 )
 KALSHI_HUB_EXPOSURE_MIN_USD: float = float(
-    os.getenv("KALSHI_HUB_EXPOSURE_MIN_USD", "12")
+    os.getenv("KALSHI_HUB_EXPOSURE_MIN_USD", "20")
 )
 # Sovereign Salvage Delta: purge a position when its model probability falls
 # below this. High-conviction entries get slightly more room before the bot

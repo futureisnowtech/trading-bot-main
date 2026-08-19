@@ -28,6 +28,33 @@ def test_last_hour_keeps_the_conservative_scoring():
     assert not _routes_maker(0.0031, 0.0020, 0.46, tau)
 
 
+def test_maker_first_utility_formula_explicit():
+    """Explicit mathematical verification of expected maker utility formula:
+    zeta * u_M + (1.0 - zeta) * u_T * 0.98.
+    """
+    from forecast.strategy_engine import _MAKER_FALLBACK_DISCOUNT
+
+    assert _MAKER_FALLBACK_DISCOUNT == 0.98
+
+    # Case 1: Standard values with tau >= _MAKER_MIN_HOURS_TO_RES
+    u_M, u_T, zeta, tau = 0.0031, 0.0020, 0.30, 10.0
+    expected = 0.30 * 0.0031 + (1.0 - 0.30) * 0.0020 * 0.98
+    actual = _maker_first_utility(u_M, u_T, zeta, tau)
+    assert abs(actual - expected) < 1e-12
+
+    # Case 2: zeta = 0.0 -> expected fallback = u_T * 0.98
+    actual_zero = _maker_first_utility(u_M, u_T, 0.0, tau)
+    assert abs(actual_zero - (u_T * 0.98)) < 1e-12
+
+    # Case 3: zeta = 1.0 -> expected = u_M
+    actual_one = _maker_first_utility(u_M, u_T, 1.0, tau)
+    assert abs(actual_one - u_M) < 1e-12
+
+    # Case 4: Clamping out-of-bounds zeta values
+    assert abs(_maker_first_utility(u_M, u_T, -0.5, tau) - (u_T * 0.98)) < 1e-12
+    assert abs(_maker_first_utility(u_M, u_T, 1.5, tau) - u_M) < 1e-12
+
+
 # ------------------------------------------------- reduce_only replacement
 
 

@@ -25,10 +25,13 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from config import DB_PATH
-
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from config import DB_PATH
+
 DEFAULT_DB_PATH = Path(DB_PATH)
 
 VETO_RE = re.compile(r"\[ForecastRunner\]\s+(?P<ticker>\S+)\s+vetoed:\s+(?P<reason>.+)")

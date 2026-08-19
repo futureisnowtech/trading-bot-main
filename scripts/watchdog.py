@@ -24,6 +24,11 @@ import sqlite3
 import subprocess
 import sys
 
+_SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
+_REPO_ROOT = _SCRIPT_DIR.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 DB = os.getenv("WATCHDOG_DB", "/app/logs/trades.db")
 STATE = pathlib.Path(os.getenv("WATCHDOG_STATE", "/app/logs/watchdog_state.json"))
 LOG = os.getenv("WATCHDOG_LOG", "/app/logs/bot.log")

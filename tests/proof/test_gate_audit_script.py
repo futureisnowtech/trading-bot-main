@@ -46,3 +46,74 @@ def test_coerce_event_ts_accepts_isoformat_strings():
 
     assert ts is not None
     assert ts > 0
+
+
+def test_gate_audit_script_execution_with_skip_run(tmp_path):
+    """gate_audit.py must run cleanly with --skip-run from any CWD without ModuleNotFoundError."""
+    import pathlib
+    import subprocess
+    import sys
+
+    root = pathlib.Path(__file__).resolve().parents[2]
+    script = root / "scripts" / "gate_audit.py"
+
+    res = subprocess.run(
+        [sys.executable, str(script), "--skip-run"],
+        cwd=str(tmp_path),
+        capture_output=True,
+        text=True,
+    )
+
+    assert res.returncode == 0, f"gate_audit.py failed:\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
+    assert "KALSHI GATE AUDIT" in res.stdout
+    assert "ModuleNotFoundError" not in res.stderr
+
+
+def test_scripts_sys_path_safety_and_execution_all_audits(tmp_path):
+    """Scripts gate_audit.py, watchdog.py, release_audit.py must be sys.path safe when called from any directory."""
+    import os
+    import pathlib
+    import sqlite3
+    import subprocess
+    import sys
+
+    root = pathlib.Path(__file__).resolve().parents[2]
+    scripts_dir = root / "scripts"
+
+    # 1. gate_audit.py --skip-run
+    gate_script = scripts_dir / "gate_audit.py"
+    res_gate = subprocess.run(
+        [sys.executable, str(gate_script), "--skip-run"],
+        cwd=str(tmp_path),
+        capture_output=True,
+        text=True,
+    )
+    assert res_gate.returncode == 0, f"gate_audit.py failed:\n{res_gate.stderr}"
+    assert "ModuleNotFoundError" not in res_gate.stderr
+
+    # 2. watchdog.py --dry-run
+    watchdog_script = scripts_dir / "watchdog.py"
+    db_file = tmp_path / "trades.db"
+    sqlite3.connect(str(db_file)).close()
+    env = dict(os.environ, WATCHDOG_DB=str(db_file))
+    res_wd = subprocess.run(
+        [sys.executable, str(watchdog_script), "--dry-run"],
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert res_wd.returncode == 0, f"watchdog.py failed:\n{res_wd.stderr}"
+    assert "ModuleNotFoundError" not in res_wd.stderr
+
+    # 3. release_audit.py --help
+    release_script = scripts_dir / "release_audit.py"
+    res_rel = subprocess.run(
+        [sys.executable, str(release_script), "--help"],
+        cwd=str(tmp_path),
+        capture_output=True,
+        text=True,
+    )
+    assert res_rel.returncode == 0, f"release_audit.py failed:\n{res_rel.stderr}"
+    assert "ModuleNotFoundError" not in res_rel.stderr
+

@@ -190,7 +190,7 @@ docker buildx build --pull --load --progress=plain \
 echo "  Capturing current live release state before restart..."
 PRE_DEPLOY_RELEASE_JSON=""
 if docker ps --format '{{.Names}}' | grep -qx 'execution-engine'; then
-  PRE_DEPLOY_RELEASE_JSON="$(docker exec execution-engine sh -lc \
+  PRE_DEPLOY_RELEASE_JSON="\$(docker exec execution-engine sh -lc \
     'cd /app && python3 scripts/release_audit.py --remote-hosted --scan-limit 12 --soak-seconds 0 --format json' \
     </dev/null 2>/dev/null || true)"
 fi

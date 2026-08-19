@@ -104,8 +104,8 @@ def test_snow_seasonal_schedule(proof_runtime, monkeypatch):
                 f.write(original_policy)
 
 def test_hard_price_floor(proof_runtime):
-    """Verify that strategy minimum contract price floor is $0.30."""
-    # Min price floor should return KALSHI_MIN_ENTRY_PRICE (0.30) regardless of mode
-    assert min_contract_price_for_mode("RAIN") == 0.30
-    assert min_contract_price_for_mode("TEMP") == 0.30
-    assert min_contract_price_for_mode("HIGH") == 0.30
+    """Verify that strategy minimum contract price floor is $0.34."""
+    # Min price floor should return KALSHI_MIN_ENTRY_PRICE (0.34) regardless of mode
+    assert min_contract_price_for_mode("RAIN") == 0.34
+    assert min_contract_price_for_mode("TEMP") == 0.34
+    assert min_contract_price_for_mode("HIGH") == 0.34

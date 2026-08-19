@@ -277,7 +277,7 @@ KALSHI_FEE_PER_CONTRACT: float = float(
 )  # Legacy fallback only
 KALSHI_MAX_FEE_DRAG_PCT: float = 0.30
 KALSHI_MAX_SPREAD_DOLLARS: float = 0.12  # SPEC §5.4c — quote coherence gate (dollars, not ratio)
-KALSHI_MIN_ENTRY_PRICE: float = float(os.getenv("KALSHI_MIN_ENTRY_PRICE", "0.30"))     # SPEC §2.6 — hard entry price floor; deletes 0.02/0.03 carve-outs
+KALSHI_MIN_ENTRY_PRICE: float = float(os.getenv("KALSHI_MIN_ENTRY_PRICE", "0.34"))     # SPEC §2.6 — hard entry price floor; deletes 0.02/0.03 carve-outs
 KALSHI_KELLY_CAP: float = float(os.getenv("KALSHI_KELLY_CAP", "0.10"))
 KALSHI_KELLY_FRACTION: float = float(os.getenv("KALSHI_KELLY_FRACTION", "0.25"))
 KALSHI_MAX_RISK_PER_EVENT_PCT: float = float(os.getenv("KALSHI_MAX_RISK_PER_EVENT_PCT", "0.015"))

@@ -138,3 +138,25 @@ def test_watchdog_detects_a_closed_release_gate(tmp_path, monkeypatch):
         "the footgun that caused it must stay documented: release_audit.py "
         "--local persists its verdict and can halt live trading"
     )
+
+
+def test_watchdog_is_invoked_from_the_host_not_inside_the_container():
+    """A dead container is the one failure the in-container watchdog cannot report.
+
+    `docker exec execution-engine ... watchdog.py` fails when the container is
+    down, the error goes to a log file, and no alert is sent -- a hole in the
+    safety net exactly where the bot falling over would land. The cron must call
+    the host wrapper, which checks liveness itself first.
+    """
+    deploy = (ROOT / "deploy.sh").read_text()
+    assert "scripts/watchdog_host.sh" in deploy
+    assert "docker exec execution-engine python3 /app/scripts/watchdog.py >>" not in deploy, (
+        "cron must not invoke the watchdog directly inside the container"
+    )
+
+    wrapper = ROOT / "scripts" / "watchdog_host.sh"
+    assert wrapper.exists()
+    src = wrapper.read_text()
+    assert "docker ps" in src, "must check container liveness from the host"
+    assert "sendMessage" in src, "must be able to alert without the container"
+    assert "_down" in src, "must be edge-triggered so a long outage pages once"

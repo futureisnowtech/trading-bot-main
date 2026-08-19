@@ -77,6 +77,27 @@ def collect() -> dict[str, str]:
     except Exception as exc:
         bad["firewall_check"] = f"Could not read firewall state: {exc}"
 
+    # 2b. The release gate is closed. This is the fastest-moving silent halt we
+    #     have seen: the runner keeps scanning and logging normally while
+    #     entering nothing, so "no entries" only becomes visible hours later.
+    #     It has fired for real on a transient missing_weather_data burst right
+    #     after a container restart, and on a stale artifact left behind by an
+    #     operator running release_audit.py --local by hand (that mode PERSISTS
+    #     its verdict; use --no-persist for diagnostics).
+    try:
+        from runtime.release_gate import load_release_audit_artifact
+
+        art = load_release_audit_artifact() or {}
+        verdict = str(art.get("verdict") or "")
+        if verdict and verdict != "READY_FOR_LIVE":
+            blockers = art.get("blockers") or []
+            bad["gate_blocked"] = (
+                f"Release gate {verdict}: {', '.join(map(str, blockers))[:140] or 'no reason given'}. "
+                f"The bot scans but enters nothing."
+            )
+    except Exception as exc:
+        bad["gate_check"] = f"Could not read the release artifact: {exc}"
+
     # 3. Enabled-but-inert: maker routing on, but never attempted.
     #    This is the failure that cost 313% of gross edge for months.
     try:

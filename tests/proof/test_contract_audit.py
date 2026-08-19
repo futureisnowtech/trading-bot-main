@@ -111,3 +111,26 @@ def test_watchdog_checks_the_failure_that_cost_the_most():
     src = (ROOT / "scripts" / "watchdog.py").read_text()
     assert "maker_inert" in src
     assert "MAKER_ENTRY_ENABLED" in src
+
+
+def test_watchdog_detects_a_closed_release_gate(tmp_path, monkeypatch):
+    """The silent halt that actually happened, and that "no entries" missed.
+
+    A BLOCKED release artifact makes the runner scan normally while entering
+    nothing. The stall check only notices after STALL_HOURS, so the gate itself
+    has to be read directly.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "wd_gate", str(ROOT / "scripts" / "watchdog.py"))
+    wd = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(wd)
+
+    src = (ROOT / "scripts" / "watchdog.py").read_text()
+    assert "gate_blocked" in src
+    assert "READY_FOR_LIVE" in src, "must compare against the healthy verdict"
+    assert "--no-persist" in src, (
+        "the footgun that caused it must stay documented: release_audit.py "
+        "--local persists its verdict and can halt live trading"
+    )

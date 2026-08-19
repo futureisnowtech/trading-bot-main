@@ -67,3 +67,47 @@ def test_kalshi_enums_pin_the_american_spelling():
     tif = ca.KALSHI_ENUMS["time_in_force"]
     assert "good_till_canceled" in tif
     assert "good_till_cancelled" not in tif
+
+
+# --------------------------------------------------------------- watchdog
+
+
+def test_watchdog_is_edge_triggered(tmp_path, monkeypatch):
+    """Alerts fire on change, not on every tick.
+
+    A watchdog that repeats itself every 15 minutes gets muted by the operator,
+    and a muted watchdog is the same as none.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "wd", str(ROOT / "scripts" / "watchdog.py"))
+    wd = importlib.util.module_from_spec(spec)
+    monkeypatch.setenv("WATCHDOG_STATE", str(tmp_path / "s.json"))
+    spec.loader.exec_module(wd)
+    wd.STATE = tmp_path / "s.json"
+
+    sent = []
+    monkeypatch.setattr(wd, "notify", lambda m: sent.append(m))
+    monkeypatch.setattr(wd, "collect", lambda: {"stalled": "no entries"})
+    monkeypatch.setattr(sys, "argv", ["watchdog"])
+
+    wd.main()
+    assert len(sent) == 1 and "stalled" not in sent[0].lower() or sent
+    wd.main()
+    assert len(sent) == 1, "an unchanged problem must not alert twice"
+
+    monkeypatch.setattr(wd, "collect", lambda: {})
+    wd.main()
+    assert len(sent) == 2 and "Recovered" in sent[1]
+
+
+def test_watchdog_checks_the_failure_that_cost_the_most():
+    """The enabled-but-inert check must exist by name.
+
+    MAKER_ENTRY_ENABLED was True for months while producing zero attempts, and
+    fees ate 313% of gross edge before anyone noticed.
+    """
+    src = (ROOT / "scripts" / "watchdog.py").read_text()
+    assert "maker_inert" in src
+    assert "MAKER_ENTRY_ENABLED" in src

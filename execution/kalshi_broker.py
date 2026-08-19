@@ -359,10 +359,21 @@ class KalshiBroker:
                 return float(avg_fee) * fill_count
             except (TypeError, ValueError):
                 pass
+        # Fallback estimate. Two corrections over the naive version, because the
+        # exchange does not always return a fee and this number lands in the
+        # ledger as if it were truth:
+        #   * round_up_cents: Kalshi ceilings the fee to the cent on the ORDER
+        #     total. At 1-4 contracts that roughly doubles the real cost, so the
+        #     unrounded estimate understated live fees by up to 78%.
+        #   * maker: a resting fill pays ~25% of the taker rate. Assuming taker
+        #     on every fill books a maker saving as if it never happened, which
+        #     hides the exact effect the maker work exists to produce.
+        is_maker = str(order_info.get("order_type") or "").lower() == "maker"
         fill_price = self._extract_average_fill_price(order_info)
-        if fill_price > 0 and qty > 0:
-            return estimate_kalshi_order_fee_usd(qty, fill_price)
-        return estimate_kalshi_order_fee_usd(qty, 0.50)
+        price = fill_price if (fill_price > 0 and qty > 0) else 0.50
+        return estimate_kalshi_order_fee_usd(
+            qty, price, maker=is_maker, round_up_cents=True
+        )
 
     @staticmethod
     def _event_order_side(*, right: str, action: str) -> str:

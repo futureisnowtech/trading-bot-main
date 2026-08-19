@@ -76,8 +76,18 @@ def get_repo_context() -> str:
                     schema_info[t] = {"row_count": cnt, "columns": cols}
                 
                 # Hydrate active trades
-                cur.execute("SELECT ticker, side, price, qty, timestamp FROM forecast_positions WHERE active=1 LIMIT 50")
-                active_positions = [dict(zip(["ticker", "side", "price", "qty", "timestamp"], r)) for r in cur.fetchall()]
+                # forecast_positions has entry_price/opened_at, not price/timestamp.
+                # The wrong names raised OperationalError, which the bare except
+                # below swallowed together with the schema block -- so the agent
+                # silently ran with no database context at all.
+                cur.execute(
+                    "SELECT ticker, side, entry_price, qty, opened_at "
+                    "FROM forecast_positions WHERE active=1 LIMIT 50"
+                )
+                active_positions = [
+                    dict(zip(["ticker", "side", "entry_price", "qty", "opened_at"], r))
+                    for r in cur.fetchall()
+                ]
                 
             context.append("### DYNAMIC DATABASE SCHEMA (trades.db)\n" + json.dumps(schema_info, indent=2))
             context.append("### LIVE ACTIVE FORECAST POSITIONS\n" + json.dumps(active_positions, indent=2))

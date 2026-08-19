@@ -24,6 +24,12 @@ def configure_runtime_logging(*, log_path: str = BOT_LOG_PATH) -> None:
     root.handlers.clear()
     root.setLevel(level)
 
+    # httpx logs the full request URL at INFO. Telegram embeds the bot token in
+    # its path, so long-poll getUpdates was writing the live credential into
+    # bot.log every ~10s -- tens of thousands of plaintext copies on disk.
+    for noisy in ("httpx", "httpcore"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+
     stream_handler = logging.StreamHandler()
     stream_handler.setFormatter(formatter)
     root.addHandler(stream_handler)

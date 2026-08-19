@@ -139,6 +139,8 @@ rsync -avz \
     -e "ssh -p ${NYC_PORT} -o StrictHostKeyChecking=no" \
     --exclude '.git/' \
     --exclude '.env' \
+    --exclude '.env.*' \
+    --exclude '*.der' \
     --exclude 'kalshi_private_key*.pem' \
     --exclude 'logs' \
     --exclude 'version.txt' \
@@ -394,7 +396,7 @@ echo "  Ensuring watchdog cron is installed..."
 # `docker exec` just fails into a log file. The wrapper checks liveness from the
 # host first and alerts by itself when the container is gone.
 WATCHDOG_CRON="*/15 * * * * PROJECT_DIR=${PROJECT_DIR} ${PROJECT_DIR}/scripts/watchdog_host.sh >> ${PROJECT_DIR}/logs/watchdog_cron.log 2>&1"
-( crontab -l 2>/dev/null | grep -v 'scripts/watchdog.py' || true; echo "\${WATCHDOG_CRON}" ) | crontab -
+( crontab -l 2>/dev/null | grep -v 'watchdog_host.sh' | grep -v 'scripts/watchdog.py' || true; echo "\${WATCHDOG_CRON}" ) | crontab -
 crontab -l | grep -F 'scripts/watchdog_host.sh'
 
 # NOTE: every docker exec below MUST redirect stdin from /dev/null. This whole

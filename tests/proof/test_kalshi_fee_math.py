@@ -72,3 +72,46 @@ def test_weather_net_edge_fee_hurdle_and_exit_weight():
     entry_only_net_edge = contract_prob - ask_price - fee_rounded
     assert actual_net_edge < entry_only_net_edge, "_weather_net_edge must penalize exit fee"
 
+
+
+def test_exit_fill_price_is_normalised_to_the_yes_leg():
+    """Closing a NO position is submitted as side=yes, so the echo is a YES price.
+
+    _realized_pnl treats the sides as complements, which only holds if both legs
+    are YES-denominated. A no_price entry booked against a yes_price exit
+    overstated the round trip by 2*entry-1 per contract.
+    """
+    from execution.kalshi_broker import KalshiBroker
+
+    broker = object.__new__(KalshiBroker)  # no __init__: pure parsing under test
+
+    # Authoritative field wins outright.
+    assert broker._extract_average_fill_price( {"yes_price_dollars": "0.2000", "no_price_dollars": "0.8000"}
+    ) == 0.20
+
+    # A NO-side echo with no explicit yes field must be flipped to the YES leg.
+    assert round(
+        broker._extract_average_fill_price( {"outcome_side": "no", "price": "0.8000"}
+        ),
+        4,
+    ) == 0.20
+
+    # Cost-derived fallback is flipped the same way, and sums both fill buckets.
+    assert round(
+        broker._extract_average_fill_price(
+            {
+                "outcome_side": "no",
+                "fill_count_fp": "5.00",
+                "taker_fill_cost_dollars": "3.000000",
+                "maker_fill_cost_dollars": "1.000000",
+            },
+        ),
+        4,
+    ) == 0.20
+
+    # A YES-side order is left alone.
+    assert round(
+        broker._extract_average_fill_price( {"outcome_side": "yes", "price": "0.2000"}
+        ),
+        4,
+    ) == 0.20

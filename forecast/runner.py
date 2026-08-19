@@ -857,8 +857,19 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                                 right,
                                 n_pos,
                             )
-                            if flatten_res.get("status") == "executed":
-                                mark_forecast_position_closed(ticker, exit_type=reason_str, db_path=db_path)
+                            exit_filled = float(flatten_res.get("filled_qty") or 0.0)
+                            exit_remaining = float(flatten_res.get("remaining_position_qty") or 0.0)
+                            if flatten_res.get("status") == "executed" and exit_filled > 0:
+                                # Only mark closed on a FULL flatten. A partial fill
+                                # used to close the DB row while the broker still held
+                                # the residual, losing its basis and TP target.
+                                if exit_remaining <= 0:
+                                    mark_forecast_position_closed(ticker, exit_type=reason_str, db_path=db_path)
+                                else:
+                                    logger.warning(
+                                        f"[SovereignExit] PARTIAL flatten {ticker}: "
+                                        f"filled={exit_filled:g} remaining={exit_remaining:g} — row kept open"
+                                    )
                                 pnl = float(flatten_res.get("pnl_usd") or 0.0)
                                 try:
                                     from forecast.firewall import record_exit_lockout, record_round_trip, record_realized_pnl
@@ -868,10 +879,21 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                                     record_realized_pnl(pnl, db_path=db_path)
                                 except Exception as fw_err:
                                     logger.error(f"[Firewall] Failed to log exit: {fw_err}")
-                            log_event("INFO", "ForecastRunner", f"Exit: Purged {ticker} due to {reason_str}")
-                            is_at_cap = False
-                            deployed_pct = 0.0
-                            break
+                                log_event("INFO", "ForecastRunner", f"Exit: Purged {ticker} due to {reason_str}")
+                                # Capital was genuinely released, so the caps may
+                                # reopen. These used to sit outside this guard, which
+                                # let a FAILED exit zero out deployed_pct and defeat
+                                # the MAX_DEPLOYED_PCT check below.
+                                is_at_cap = False
+                                deployed_pct = 0.0
+                            else:
+                                logger.error(
+                                    f"[SovereignExit] Flatten did NOT execute for {ticker} "
+                                    f"(status={flatten_res.get('status')}) — caps left intact"
+                                )
+                            # continue, not break: one broker hiccup used to defer every
+                            # remaining position's exit evaluation by a whole cycle.
+                            continue
 
                     # 3. Take-profit: uses TRUE basis only (basis_quality='CONFIRMED') (SPEC §5.4)
                     # Trigger at p_entry + 0.70*(1 - p_entry)
@@ -885,8 +907,16 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                             pos.get("right", "C"),
                             n_pos,
                         )
-                        if flatten_res.get("status") == "executed":
-                            mark_forecast_position_closed(ticker, exit_type="take_profit", db_path=db_path)
+                        tp_filled = float(flatten_res.get("filled_qty") or 0.0)
+                        tp_remaining = float(flatten_res.get("remaining_position_qty") or 0.0)
+                        if flatten_res.get("status") == "executed" and tp_filled > 0:
+                            if tp_remaining <= 0:
+                                mark_forecast_position_closed(ticker, exit_type="take_profit", db_path=db_path)
+                            else:
+                                logger.warning(
+                                    f"[SovereignHUD] PARTIAL take-profit {ticker}: "
+                                    f"filled={tp_filled:g} remaining={tp_remaining:g} — row kept open"
+                                )
                             pnl = float(flatten_res.get("pnl_usd") or 0.0)
                             try:
                                 from forecast.firewall import record_round_trip, record_realized_pnl
@@ -894,10 +924,15 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                                 record_realized_pnl(pnl, db_path=db_path)
                             except Exception as fw_err:
                                 logger.error(f"[Firewall] Failed to log TP exit: {fw_err}")
-                        log_event("INFO", "ForecastRunner", f"TakeProfit: Locked {ticker} at {bid_price:.2f}")
-                        is_at_cap = False
-                        deployed_pct = 0.0
-                        break
+                            log_event("INFO", "ForecastRunner", f"TakeProfit: Locked {ticker} at {bid_price:.2f}")
+                            is_at_cap = False
+                            deployed_pct = 0.0
+                        else:
+                            logger.error(
+                                f"[SovereignHUD] Take-profit did NOT execute for {ticker} "
+                                f"(status={flatten_res.get('status')}) — caps left intact"
+                            )
+                        continue
 
             if deployed_pct >= MAX_DEPLOYED_PCT:
                 logger.warning(
@@ -1157,6 +1192,17 @@ def run_strategy_cycle(bankroll: float = 100.0) -> list[dict]:
                 result = candidate["result"]
                 contract = candidate["contract"]
                 local_sym = contract.get("local_symbol", "")
+
+                # Re-derive occupancy every iteration. open_count/is_at_cap were
+                # computed once per cycle and never refreshed, while this loop
+                # appends each new fill to open_positions -- so a burst could open
+                # past the cap and only log "concurrent_cap_reached (10/8)" after
+                # the fact. cycle_event_families is already re-checked this way.
+                # Deliberately no break here: the swap gate below consumes
+                # is_at_cap to rotate out the worst position, so short-circuiting
+                # would silently disable swapping.
+                open_count = len(open_positions)
+                is_at_cap = open_count >= MAX_CONCURRENT_POSITIONS
 
                 # Stateful Firewall Gate Check (SPEC §5.4)
                 try:

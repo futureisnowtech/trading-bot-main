@@ -289,29 +289,61 @@ class KalshiBroker:
             return str(error)
         return ""
 
+    @staticmethod
+    def _coerce_price(raw) -> float | None:
+        """Kalshi prices arrive either as decimal dollar strings or integer cents."""
+        if raw in (None, ""):
+            return None
+        try:
+            if isinstance(raw, str) and "." in raw:
+                return float(raw)
+            return float(raw) / 100.0
+        except (TypeError, ValueError):
+            return None
+
     def _extract_average_fill_price(self, order_info: dict) -> float:
+        """Average fill price, always denominated on the YES leg.
+
+        _realized_pnl treats YES and NO as complements, which is only valid if
+        both legs speak one denomination. They did not: a NO entry is submitted
+        as side="no" and echoes no_price, while closing that NO position is
+        submitted as side="yes"/action="buy" and echoes yes_price. Booking a
+        no_price entry against a yes_price exit overstated the round trip by
+        2*entry - 1 per contract and flipped sign whenever 1-entry < exit < entry
+        -- which is most of the band for NO entries at 0.6-0.85.
+
+        yes_price_dollars is authoritative when present; anything derived from
+        our own echo or from fill cost is flipped to the YES leg using
+        outcome_side.
+        """
+        direct = self._coerce_price(order_info.get("yes_price_dollars"))
+        if direct is not None and direct > 0:
+            return direct
+
+        outcome = str(order_info.get("outcome_side") or "").strip().lower()
+        needs_flip = outcome == "no"
+
+        def _as_yes(price: float) -> float:
+            return (1.0 - price) if needs_flip else price
+
         for key in ("average_price", "average_fill_price", "price"):
-            raw = order_info.get(key)
-            if raw in (None, ""):
-                continue
-            try:
-                if isinstance(raw, str) and "." in raw:
-                    return float(raw)
-                return float(raw) / 100.0
-            except (TypeError, ValueError):
-                continue
+            price = self._coerce_price(order_info.get(key))
+            if price is not None:
+                return _as_yes(price)
+
         fill_count = self._extract_fill_count(order_info)
         if fill_count > 0:
+            total_cost = 0.0
             for key in ("taker_fill_cost_dollars", "maker_fill_cost_dollars"):
                 raw = order_info.get(key)
                 if raw in (None, ""):
                     continue
                 try:
-                    total_cost = float(raw)
-                    if total_cost > 0:
-                        return total_cost / fill_count
+                    total_cost += float(raw)
                 except (TypeError, ValueError):
                     continue
+            if total_cost > 0:
+                return _as_yes(total_cost / fill_count)
         return 0.0
 
     def _extract_fill_count(self, order_info: dict) -> float:
@@ -368,7 +400,17 @@ class KalshiBroker:
         #   * maker: a resting fill pays ~25% of the taker rate. Assuming taker
         #     on every fill books a maker saving as if it never happened, which
         #     hides the exact effect the maker work exists to produce.
-        is_maker = str(order_info.get("order_type") or "").lower() == "maker"
+        # Maker-ness is not a field on Kalshi's order object -- its `type` is
+        # "limit"/"market" with no "maker" value, so keying on order_type left
+        # this permanently False and booked taker rates on maker fills. The
+        # exchange reports it as which cost bucket actually filled.
+        def _cost(key: str) -> float:
+            try:
+                return float(order_info.get(key) or 0.0)
+            except (TypeError, ValueError):
+                return 0.0
+
+        is_maker = _cost("maker_fill_cost_dollars") > _cost("taker_fill_cost_dollars")
         fill_price = self._extract_average_fill_price(order_info)
         price = fill_price if (fill_price > 0 and qty > 0) else 0.50
         return estimate_kalshi_order_fee_usd(
@@ -865,9 +907,25 @@ class KalshiBroker:
             return
         try:
             data = self._request("GET", "/trade-api/v2/portfolio/positions")
-            self._open_positions.clear()
+            # Parse before clearing. Clearing first meant one 429 or read timeout
+            # emptied the position map that the concurrency cap, deployed-capital
+            # gate and duplicate guard all read, so a transient API failure looked
+            # exactly like a flat book.
+            if self._extract_error_code(data):
+                logger.error(
+                    "[KalshiBroker] Position sync failed, keeping previous snapshot: %s",
+                    (data or {}).get("error"),
+                )
+                return
+            positions = (data or {}).get("market_positions")
+            if positions is None:
+                logger.error(
+                    "[KalshiBroker] Position sync returned no market_positions; "
+                    "keeping previous snapshot."
+                )
+                return
 
-            positions = data.get("market_positions", [])
+            self._open_positions.clear()
             for p in positions:
                 qty_str = p.get("position_fp", "0")
                 qty = float(qty_str)

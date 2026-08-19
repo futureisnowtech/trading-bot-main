@@ -129,7 +129,11 @@ def test_watchdog_detects_a_closed_release_gate(tmp_path, monkeypatch):
 
     src = (ROOT / "scripts" / "watchdog.py").read_text()
     assert "gate_blocked" in src
-    assert "READY_FOR_LIVE" in src, "must compare against the healthy verdict"
+    assert "entries_allowed" in src, (
+        "must gate on entries_allowed like the runner does; PASS_WITH_WARNINGS "
+        "is healthy and allows entries, so keying on the verdict string pages "
+        "every 15 minutes forever"
+    )
     assert "--no-persist" in src, (
         "the footgun that caused it must stay documented: release_audit.py "
         "--local persists its verdict and can halt live trading"

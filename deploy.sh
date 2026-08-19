@@ -120,6 +120,7 @@ echo "  OK: remote tree ownership is clean."
 echo "Pruning remote cache artifacts that can block sync..."
 ${SSH_CMD} ${NYC_USER}@${NYC_IP} bash -s << REMOTE_PRUNE
 set -euo pipefail
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:\${PATH:-}
 mkdir -p ${PROJECT_DIR}
 REMOTE_UID="\$(id -u)"
 REMOTE_GID="\$(id -g)"
@@ -151,6 +152,7 @@ echo "Restarting lean Docker stack on droplet..."
 REMOTE_LOG="${TMP_EXPORT_DIR}/remote_deploy.log"
 ${SSH_CMD} ${NYC_USER}@${NYC_IP} bash -s << REMOTE_EOF | tee "${REMOTE_LOG}"
 set -euo pipefail
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:\${PATH:-}
 cd ${PROJECT_DIR}
 
 export IMAGE_NAME="${LOCAL_IMAGE_NAME}"

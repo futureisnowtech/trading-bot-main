@@ -136,8 +136,8 @@ ML_RETRAIN_MIN_NEW_CLEAN_TRADES: int = int(os.getenv("ML_RETRAIN_MIN_NEW_CLEAN_T
 RBI_MIN_DAYS: float = float(os.getenv("RBI_MIN_DAYS", "7"))
 RBI_MIN_NEW_CLEAN_TRADES: int = int(os.getenv("RBI_MIN_NEW_CLEAN_TRADES", "20"))
 
-MAKER_ENTRY_ENABLED: bool = os.getenv("MAKER_ENTRY_ENABLED", "false").lower() == "true"
-MAKER_ENTRY_TIMEOUT_S: int = int(os.getenv("MAKER_ENTRY_TIMEOUT_S", "90"))
+MAKER_ENTRY_ENABLED: bool = os.getenv("MAKER_ENTRY_ENABLED", "true").lower() == "true"
+MAKER_ENTRY_TIMEOUT_S: int = int(os.getenv("MAKER_ENTRY_TIMEOUT_S", "20"))
 
 
 

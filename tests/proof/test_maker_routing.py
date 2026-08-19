@@ -7,13 +7,6 @@ def _routes_maker(u_M, u_T, zeta, tau):
     return e > u_T and e > 0.0
 
 
-def _broker():
-    b = KalshiBroker()
-    b._connected = True
-    b._private_key = object()
-    return b
-
-
 # ---------------------------------------------------------------- routing
 
 

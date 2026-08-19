@@ -385,10 +385,15 @@ crontab -l | grep -F 'refresh_host_service_status.sh'
 # is watching -- entries stopping, a flag on but inert, an order orphaned on the
 # book. Installed the same idempotent way, so a rebuilt droplet gets it back and
 # a redeploy never ends up with two copies.
+chmod +x "${PROJECT_DIR}/scripts/watchdog_host.sh" 2>/dev/null || true
 echo "  Ensuring watchdog cron is installed..."
-WATCHDOG_CRON="*/15 * * * * /usr/bin/docker exec execution-engine python3 /app/scripts/watchdog.py >> ${PROJECT_DIR}/logs/watchdog_cron.log 2>&1"
+# Invoke the HOST wrapper, not `docker exec` directly. The watchdog lives inside
+# execution-engine, so a dead container is the one failure it cannot report --
+# `docker exec` just fails into a log file. The wrapper checks liveness from the
+# host first and alerts by itself when the container is gone.
+WATCHDOG_CRON="*/15 * * * * PROJECT_DIR=${PROJECT_DIR} ${PROJECT_DIR}/scripts/watchdog_host.sh >> ${PROJECT_DIR}/logs/watchdog_cron.log 2>&1"
 ( crontab -l 2>/dev/null | grep -v 'scripts/watchdog.py' || true; echo "\${WATCHDOG_CRON}" ) | crontab -
-crontab -l | grep -F 'scripts/watchdog.py'
+crontab -l | grep -F 'scripts/watchdog_host.sh'
 
 # NOTE: every docker exec below MUST redirect stdin from /dev/null. This whole
 # block is piped into a remote `bash -s`, so an interactive-attached container

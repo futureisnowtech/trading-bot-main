@@ -190,6 +190,22 @@ def _scan_live_market_surface(
     open_positions: list[dict[str, Any]],
     scan_limit: int,
 ) -> dict[str, Any]:
+    # Refresh quotes before sampling, exactly as the runner does at the top of
+    # its own cycle. Without this the audit reads whatever the last strategy
+    # cycle left behind: the effective refresh cadence is ~20 minutes (300s
+    # daemon sleep plus a ~78s harvest plus the scan itself) while the weather
+    # freshness SLA is 600s, so for more than half of every cycle every quote
+    # looks stale. The audit then classifies stale_market_data as an
+    # infrastructure failure and closes the entry gate on a bot whose own
+    # scanning is perfectly healthy -- stale_market_data is 0% of the runner's
+    # live vetoes. That false signal halted live trading 3 times in 16 hours.
+    try:
+        from forecast.runner import _refresh_quotes_once
+
+        _refresh_quotes_once()
+    except Exception as exc:  # never let the refresh itself fail the audit
+        print(f"  (pre-scan quote refresh failed: {exc})", file=sys.stderr)
+
     active_contracts = get_active_contracts(db_path=DB_PATH)
     scoped_contracts = [
         contract

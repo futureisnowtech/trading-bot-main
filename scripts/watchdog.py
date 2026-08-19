@@ -89,10 +89,16 @@ def collect() -> dict[str, str]:
 
         art = load_release_audit_artifact() or {}
         verdict = str(art.get("verdict") or "")
-        if verdict and verdict != "READY_FOR_LIVE":
+        # Gate on entries_allowed, not on the verdict string. The runner itself
+        # checks entries_allowed (forecast/runner.py), and PASS_WITH_WARNINGS is
+        # a healthy steady state that allows entries -- alerting on any verdict
+        # that is not READY_FOR_LIVE would page every 15 minutes forever, which
+        # is how a watchdog gets muted and stops being a watchdog.
+        if art and art.get("entries_allowed") is False:
             blockers = art.get("blockers") or []
             bad["gate_blocked"] = (
-                f"Release gate {verdict}: {', '.join(map(str, blockers))[:140] or 'no reason given'}. "
+                f"Release gate {verdict or 'BLOCKED'}: "
+                f"{', '.join(map(str, blockers))[:140] or 'no reason given'}. "
                 f"The bot scans but enters nothing."
             )
     except Exception as exc:

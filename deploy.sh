@@ -381,6 +381,15 @@ CRON_LINE="*/5 * * * * PROJECT_DIR=${PROJECT_DIR} ${PROJECT_DIR}/scripts/refresh
 ( crontab -l 2>/dev/null | grep -v 'refresh_host_service_status.sh' || true; echo "\${CRON_LINE}" ) | crontab -
 crontab -l | grep -F 'refresh_host_service_status.sh'
 
+# The watchdog is the only thing that will notice a silent failure while nobody
+# is watching -- entries stopping, a flag on but inert, an order orphaned on the
+# book. Installed the same idempotent way, so a rebuilt droplet gets it back and
+# a redeploy never ends up with two copies.
+echo "  Ensuring watchdog cron is installed..."
+WATCHDOG_CRON="*/15 * * * * /usr/bin/docker exec execution-engine python3 /app/scripts/watchdog.py >> ${PROJECT_DIR}/logs/watchdog_cron.log 2>&1"
+( crontab -l 2>/dev/null | grep -v 'scripts/watchdog.py' || true; echo "\${WATCHDOG_CRON}" ) | crontab -
+crontab -l | grep -F 'scripts/watchdog.py'
+
 # NOTE: every docker exec below MUST redirect stdin from /dev/null. This whole
 # block is piped into a remote `bash -s`, so an interactive-attached container
 # consumes the rest of this script as its own stdin -- bash then hits EOF and

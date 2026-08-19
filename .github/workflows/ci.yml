@@ -68,6 +68,10 @@ jobs:
             --select=E,F,W \
             || true
 
+      - name: Boundary contract audit
+        run: |
+          python scripts/contract_audit.py --strict
+
       - name: Run Kalshi proof gate
         run: |
           python -m pytest tests/proof \

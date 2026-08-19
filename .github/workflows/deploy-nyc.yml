@@ -103,6 +103,10 @@ jobs:
           : > kalshi_private_key.pem
           chmod 600 kalshi_private_key.pem
 
+      - name: Boundary contract audit
+        run: |
+          python scripts/contract_audit.py --strict
+
       - name: Kalshi proof gate
         run: |
           python -m pytest tests/proof \

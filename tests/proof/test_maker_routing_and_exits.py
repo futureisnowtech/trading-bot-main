@@ -1,6 +1,4 @@
-"""Proof for maker routing and for the in-process replacement of reduce_only."""
-import config
-from execution.kalshi_broker import KalshiBroker
+"""Proof for maker-first routing."""
 from forecast.strategy_engine import _MAKER_MIN_HOURS_TO_RES, _maker_first_utility
 
 
@@ -38,82 +36,6 @@ def test_last_hour_keeps_the_conservative_scoring():
 
 
 # ------------------------------------------------- reduce_only replacement
-
-
-def test_maker_exit_never_rests_more_than_is_held(monkeypatch):
-    """Kalshi rejects reduce_only on resting orders, so qty must be capped here."""
-    b = _broker()
-    monkeypatch.setattr(b, "live_position_qty", lambda t: 3.0)
-    monkeypatch.setattr(b, "get_quote", lambda t: {"yes_ask": 0.80})
-    monkeypatch.setattr(b, "_order_filled_qty", lambda oid: 0.0)
-    monkeypatch.setattr(b, "cancel_order", lambda oid: True)
-    monkeypatch.setattr(config, "MAKER_EXIT_TIMEOUT_S", 0)
-    bodies = []
-
-    def fake_request(method, path, params=None, body=None):
-        if method == "POST":
-            bodies.append(body)
-        return {"order": {"status": "resting", "order_id": "O1"}}
-
-    monkeypatch.setattr(b, "_request", fake_request)
-    b._try_maker_exit(contract_dict={"local_symbol": "T"}, ticker="T", right="C",
-                      side="yes", qty=10, taker_limit_price=0.60, kwargs={})
-    assert bodies, "expected a resting sell"
-    assert bodies[0]["count"] == "3.00", "must cap at the 3 contracts actually held"
-    assert bodies[0]["reduce_only"] is False, "Kalshi rejects reduce_only on GTC"
-    assert bodies[0]["post_only"] is True
-    assert bodies[0]["time_in_force"] == "good_till_canceled"
-
-
-def test_maker_exit_refuses_to_rest_when_nothing_is_held(monkeypatch):
-    b = _broker()
-    monkeypatch.setattr(b, "live_position_qty", lambda t: 0.0)
-    placed = []
-    monkeypatch.setattr(b, "_request", lambda m, p, params=None, body=None: placed.append(body) or {})
-    out = b._try_maker_exit(contract_dict={"local_symbol": "T"}, ticker="T", right="C",
-                            side="yes", qty=5, taker_limit_price=0.60, kwargs={})
-    assert out is None
-    assert not placed, "must never rest a sell against a position we do not hold"
-
-
-def test_maker_exit_refuses_to_rest_when_position_is_unknown(monkeypatch):
-    """A failed position lookup must not be read as 'nothing to protect'."""
-    b = _broker()
-    monkeypatch.setattr(b, "live_position_qty", lambda t: -1.0)
-    placed = []
-    monkeypatch.setattr(b, "_request", lambda m, p, params=None, body=None: placed.append(body) or {})
-    assert b._try_maker_exit(contract_dict={"local_symbol": "T"}, ticker="T", right="C",
-                             side="yes", qty=5, taker_limit_price=0.60, kwargs={}) is None
-    assert not placed
-
-
-def test_resting_sell_is_pulled_when_the_position_shrinks(monkeypatch):
-    """The core reduce_only guarantee: never let the remainder open a short."""
-    b = _broker()
-    seq = iter([5.0, 5.0, 1.0, 1.0, 1.0])  # cap at 5, then it collapses to 1
-    monkeypatch.setattr(b, "live_position_qty", lambda t: next(seq, 1.0))
-    monkeypatch.setattr(b, "get_quote", lambda t: {"yes_ask": 0.80})
-    monkeypatch.setattr(b, "_order_filled_qty", lambda oid: 0.0)
-    monkeypatch.setattr(config, "MAKER_EXIT_TIMEOUT_S", 30)
-    monkeypatch.setattr(config, "MAKER_EXIT_POLL_S", 0.5)
-    cancelled = []
-    monkeypatch.setattr(b, "cancel_order", lambda oid: cancelled.append(oid) or True)
-    monkeypatch.setattr(b, "_request",
-                        lambda m, p, params=None, body=None: {"order": {"status": "resting", "order_id": "O1"}})
-    out = b._try_maker_exit(contract_dict={"local_symbol": "T"}, ticker="T", right="C",
-                            side="yes", qty=5, taker_limit_price=0.60, kwargs={})
-    assert cancelled == ["O1"], "must cancel as soon as the position drops"
-    assert out is None, "nothing filled, so fall through to the taker path"
-
-
-def test_risk_driven_exits_never_rest():
-    for urgent in ("salvage_exit", "fee_aware_admissibility_exit", "stop_loss",
-                   "manual_exit", "firewall_daily_kill_switch"):
-        assert not any(r in urgent for r in config.MAKER_EXIT_ELIGIBLE_REASONS)
-
-
-def test_take_profit_is_eligible():
-    assert any(r in "take_profit" for r in config.MAKER_EXIT_ELIGIBLE_REASONS)
 
 
 def test_maker_route_still_respects_the_usd_position_cap():

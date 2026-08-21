@@ -114,7 +114,10 @@ def collect() -> dict[str, str]:
     try:
         import config
 
-        if getattr(config, "MAKER_ENTRY_ENABLED", False):
+        # Cockpit approvals land in dynamic_system_config, not in the process env,
+        # so the static attribute reports the *stale* value and this check would
+        # silently skip after an operator turned maker entry on.
+        if config.get_dynamic_bool("MAKER_ENTRY_ENABLED", config.MAKER_ENTRY_ENABLED):
             cutoff = (now - dt.timedelta(days=3)).isoformat()
             entries = _q(
                 con, "SELECT COUNT(*) FROM trades WHERE action='BUY' AND ts > ?", (cutoff,)

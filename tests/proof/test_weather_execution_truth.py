@@ -172,10 +172,14 @@ def test_hourly_between_contracts_are_not_blanket_banned(monkeypatch):
         },
     )
 
+    # Priced clear of the entry-price floor on purpose: this test is about the
+    # contract-type ban, and test_lane_policy.py owns KALSHI_MIN_ENTRY_PRICE.
+    # Hardcoding an ask under the floor made this fail on penny_veto instead.
+    ask_yes = round(se.KALSHI_MIN_ENTRY_PRICE + 0.06, 2)
     passes, side, prob, factors, *_ = se._strategy_weather_details(
         "KXHIGHTATL-26JUN1711-B83.5",
-        ask_yes=0.32,
-        ask_no=0.68,
+        ask_yes=ask_yes,
+        ask_no=round(1.0 - ask_yes, 2),
         hours_to_res=0.8,
         contract_name="Will the hourly temp in Atlanta be 83-84° at 11 AM on Jun 17, 2026?",
         strike=83.5,
@@ -339,14 +343,16 @@ def test_rain_lane_allows_sub_fifteen_cent_entries_when_above_rain_floor(monkeyp
 
     monkeypatch.setattr(se, "_resolve_hard_rbi_threshold", lambda **kwargs: 0.0)
     now_ts = datetime.now(timezone.utc).isoformat()
+    # Derived from the floor for the same reason as the hourly-bin test above.
+    ask_yes = round(se.KALSHI_MIN_ENTRY_PRICE + 0.06, 2)
     result = se.evaluate_contract(
         contract=_make_rain_contract(),
         bars_5m=[],
         bars_30m=[],
         bars_1h=[],
         bars_4h=[],
-        yes_quote=_quote(0.32, 0.02, now_ts),
-        no_quote=_quote(0.68, 0.02, now_ts),
+        yes_quote=_quote(ask_yes, 0.02, now_ts),
+        no_quote=_quote(round(1.0 - ask_yes, 2), 0.02, now_ts),
         bankroll=100.0,
     )
 

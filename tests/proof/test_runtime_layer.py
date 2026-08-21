@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import sqlite3
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -510,3 +510,71 @@ def test_telegram_surface_exposes_plain_english_operator_shortcuts():
     assert 'CommandHandler("why", why_command)' in text
     assert 'CommandHandler("changes", changes_command)' in text
     assert "/brief - plain-English health summary and what needs attention" in text
+
+
+def test_execution_cycle_stamps_lane_heartbeat_before_the_entry_gate(
+    proof_runtime, monkeypatch
+):
+    """A slow cycle must not age out its own liveness stamp.
+
+    The release gate reads last_heartbeat_at from inside run_strategy_cycle. While the
+    only writer was run_position_monitor -- which run_execution_cycle calls *after* the
+    strategy pass, and whose 30s schedule never fires under execution_daemon.py -- any
+    cycle slower than FORECAST_HEARTBEAT_STALE_SECONDS refused its own entries with
+    stale_runtime_heartbeat while the broker was connected and healthy.
+    """
+    import config
+    import forecast.runner as fr
+    import runtime.runtime_state as rs
+    from runtime.operator_truth import is_lane_heartbeat_fresh
+
+    db = str(proof_runtime.db_path)
+    monkeypatch.setattr(rs, "DB_PATH", db, raising=False)
+    monkeypatch.setattr(config, "KALSHI_ENABLED", True, raising=False)
+    monkeypatch.setattr(config, "FORECAST_LANE_ACTIVE", True, raising=False)
+
+    # Two hours stale: only a write made earlier in this same cycle can let the
+    # gate's read pass.
+    rs.upsert_lane_state(
+        "forecast",
+        db_path=db,
+        enabled=1,
+        active=1,
+        last_heartbeat_at=(datetime.now(timezone.utc) - timedelta(hours=2)).isoformat(),
+    )
+
+    class _StubBroker:
+        def is_connected(self):
+            return True
+
+        def connect(self):
+            return True
+
+        def get_positions(self):
+            return []
+
+        def get_account_balance(self):
+            return 250.0
+
+    seen: dict[str, object] = {}
+
+    def _strategy(bankroll: float = 100.0):
+        lane = rs.get_lane_state("forecast", db_path=db)
+        seen["fresh_at_gate"] = is_lane_heartbeat_fresh(lane["last_heartbeat_at"])
+        return []
+
+    monkeypatch.setattr(fr, "_get_broker", lambda: _StubBroker(), raising=False)
+    monkeypatch.setattr(fr, "run_discovery_cycle", lambda: {}, raising=False)
+    monkeypatch.setattr(fr, "run_strategy_cycle", _strategy, raising=False)
+    monkeypatch.setattr(fr, "run_position_monitor", lambda: None, raising=False)
+    monkeypatch.setattr(fr, "_cache_forecast_state", lambda: {}, raising=False)
+
+    summary = fr.run_execution_cycle(
+        bankroll=100.0, refresh_quotes=False, sync_resolutions=False
+    )
+
+    assert summary["broker_connected"] is True
+    assert seen.get("fresh_at_gate") is True, (
+        "entry gate read a stale heartbeat inside the cycle that was supposed to "
+        "have refreshed it"
+    )

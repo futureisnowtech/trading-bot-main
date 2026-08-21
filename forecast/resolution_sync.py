@@ -144,9 +144,11 @@ def sync_forecast_resolutions(
                    c.strike,
                    c.resolution_at,
                    c.last_trade_at,
-                   COALESCE(c.resolution_at, c.last_trade_at) AS resolution_key
+                   COALESCE(c.resolution_at, c.last_trade_at) AS resolution_key,
+                   p.q_hat AS position_q_hat
             FROM forecast_contracts c
             LEFT JOIN forecast_resolutions r ON r.contract_id = c.id
+            LEFT JOIN forecast_positions p ON p.ticker = c.local_symbol
             WHERE r.id IS NULL
               AND COALESCE(c.resolution_at, c.last_trade_at, '') != ''
             """
@@ -209,6 +211,7 @@ def sync_forecast_resolutions(
             continue
 
         resolved_side, resolved_value, notes = resolution
+        position_q_hat = row["position_q_hat"]
         insert_resolution(
             contract_id=int(row["id"]),
             resolved_side=resolved_side,
@@ -217,6 +220,7 @@ def sync_forecast_resolutions(
             notes=notes,
             source=str(observed.get("source") or "kalshi"),
             basis_quality="PROVISIONAL",
+            q_hat=float(position_q_hat) if position_q_hat is not None else None,
             db_path=db_path,
         )
         summary["inserted"] += 1

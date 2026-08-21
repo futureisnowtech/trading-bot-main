@@ -1245,28 +1245,66 @@ def calculate_continuous_sizing(
         if position_cap_usd is not None
         else float(KALSHI_MAX_USD_PER_POSITION)
     )
-    if (
-        n > 0
-        and market_price > 0.0
-        and effective_position_cap > 0.0
-        and ensemble_prob >= KALSHI_HIGH_PROB_THRESHOLD
-    ):
-        if ensemble_prob >= KALSHI_ULTRA_HIGH_PROB_THRESHOLD:
-            target_allocation_usd = min(
-                effective_position_cap,
-                max(20.0, capital_base * 0.18 * max(1.0, multiplier)),
-            )
+    if n > 0 and market_price > 0.0 and effective_position_cap > 0.0:
+        # Conviction ramp is keyed off f_star (the real Kelly edge -- already
+        # nets out price and fees) instead of raw ensemble_prob. Gating on
+        # ensemble_prob alone meant a cheap, wide-edge contract (e.g. q_hat=0.75
+        # at a $0.40 ask) never qualified for extra size just because 0.75 < the
+        # 0.80 probability cutoff, even though its edge exceeded that of an
+        # expensive near-threshold contract (q_hat=0.81 at $0.79). f_star folds
+        # price back in, so it ranks trades by actual edge, not raw confidence.
+        #
+        # The two reference f_star breakpoints translate the existing
+        # KALSHI_HIGH/ULTRA_HIGH_PROB_THRESHOLD knobs into edge-space at a
+        # neutral $0.50 reference price, so the ramp starts/ends exactly where
+        # the old cliff used to fire for a mid-priced contract, and reuses the
+        # same operator-tuned thresholds rather than inventing new constants.
+        fee_ref = calculate_ceiled_fee(0.50, 1, maker=False)
+        phi_ref = 1.48 * fee_ref
+        f_star_high_ref = max(0.0, (KALSHI_HIGH_PROB_THRESHOLD - 0.50 - phi_ref) / max(1e-9, 0.50 - phi_ref))
+        f_star_ultra_ref = max(0.0, (KALSHI_ULTRA_HIGH_PROB_THRESHOLD - 0.50 - phi_ref) / max(1e-9, 0.50 - phi_ref))
+
+        if f_star_ultra_ref > f_star_high_ref:
+            ramp = (f_star - f_star_high_ref) / (f_star_ultra_ref - f_star_high_ref)
         else:
-            target_allocation_usd = min(
+            ramp = 1.0 if f_star >= f_star_high_ref else 0.0
+        ramp = max(0.0, min(1.0, ramp))
+
+        if ramp > 0.0:
+            # Dampen (never amplify) the ramp once the live-tracked calibration
+            # score (forecast.db.get_live_brier_score) has enough resolved
+            # trades to be meaningful. 0.25 is the Brier score of a coin-flip
+            # model -- at or past that, the model hasn't earned extra size, so
+            # scaler goes to 0 and the ramp collapses back to the Kelly-only n.
+            # No-ops (scaler=1.0) until resolution_sync.py has backfilled
+            # enough q_hat-tagged settlements, and any DB error is swallowed
+            # so a calibration-read failure never blocks a live trade.
+            calib_scaler = 1.0
+            try:
+                from forecast.db import get_live_brier_score
+                calib = get_live_brier_score()
+                if calib["score"] is not None:
+                    calib_scaler = max(0.0, min(1.0, 1.0 - calib["score"] / 0.25))
+            except Exception:
+                pass
+            ramp *= calib_scaler
+
+        if ramp > 0.0:
+            high_alloc = min(
                 effective_position_cap,
                 max(12.0, capital_base * 0.10 * min(max(1.0, multiplier), 1.25)),
             )
-        # solve_optimal_size already clamps to KALSHI_MAX_QTY_PER_POSITION, but the
-        # conviction override raises n past its own result, so the qty cap has to be
-        # re-applied here. Without it a cheap contract turns a $40 position cap into
-        # an unbounded contract count (at $0.016 the $40 cap buys 2500+ contracts).
-        conviction_contracts = int(target_allocation_usd / market_price)
-        n = min(max(n, conviction_contracts), int(KALSHI_MAX_QTY_PER_POSITION))
+            ultra_alloc = min(
+                effective_position_cap,
+                max(20.0, capital_base * 0.18 * max(1.0, multiplier)),
+            )
+            target_allocation_usd = high_alloc + ramp * (ultra_alloc - high_alloc)
+            # solve_optimal_size already clamps to KALSHI_MAX_QTY_PER_POSITION, but the
+            # conviction override raises n past its own result, so the qty cap has to be
+            # re-applied here. Without it a cheap contract turns a $40 position cap into
+            # an unbounded contract count (at $0.016 the $40 cap buys 2500+ contracts).
+            conviction_contracts = int(target_allocation_usd / market_price)
+            n = min(max(n, conviction_contracts), int(KALSHI_MAX_QTY_PER_POSITION))
 
     return n
 

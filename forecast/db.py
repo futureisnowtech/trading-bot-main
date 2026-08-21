@@ -953,6 +953,26 @@ def insert_resolution(
 # ---------------------------------------------------------------------------
 
 
+def get_live_brier_score(min_n: int = 20, db_path: str | None = None) -> dict:
+    """Real Brier score of entry q_hat against realized settlement outcomes.
+
+    Joins forecast_resolutions.q_hat (the strategy's fair-probability estimate
+    at entry, forwarded by resolution_sync.py) against resolved_side. Returns
+    n=0/score=None below min_n -- there is no synthetic fallback here, unlike
+    the placeholder writes in live_strategy_audit.py and leak_forensics.py.
+    """
+    with _conn(db_path) as c:
+        rows = c.execute(
+            """SELECT q_hat, resolved_side FROM forecast_resolutions
+               WHERE q_hat IS NOT NULL AND resolved_side IN ('YES', 'NO')"""
+        ).fetchall()
+    n = len(rows)
+    if n < min_n:
+        return {"score": None, "n": n, "min_n": min_n}
+    sq_err = sum((r["q_hat"] - (1.0 if r["resolved_side"] == "YES" else 0.0)) ** 2 for r in rows)
+    return {"score": sq_err / n, "n": n, "min_n": min_n}
+
+
 def get_active_contracts(db_path: str | None = None) -> list[dict]:
     """Return all active contracts with their market info joined."""
     with _conn(db_path) as c:

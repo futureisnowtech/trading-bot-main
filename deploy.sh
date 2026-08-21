@@ -174,22 +174,38 @@ if [ ! -f kalshi_private_key.pem ]; then
     exit 1
 fi
 
-if ! docker buildx version >/dev/null 2>&1; then
-    echo "ERROR: docker buildx is required on the droplet for clean image builds."
-    echo "       Install the buildx CLI plugin for user ${NYC_USER} before deploying."
-    exit 1
+GHCR_TOKEN="${GHCR_TOKEN:-}"
+GHCR_ACTOR="${GHCR_ACTOR:-}"
+
+if [ -n "${GHCR_TOKEN}" ]; then
+  # CI already built and pushed both images for this exact SHA (see
+  # deploy-nyc.yml) -- pull the prebuilt images instead of rebuilding from
+  # scratch on the 2-core droplet, which took ~40 minutes.
+  echo "  Pulling prebuilt images for SHA ${LOCAL_SHA} from GHCR..."
+  echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_ACTOR}" --password-stdin
+  docker pull "${LOCAL_IMAGE_NAME}:${LOCAL_SHA}"
+  docker tag "${LOCAL_IMAGE_NAME}:${LOCAL_SHA}" "${LOCAL_IMAGE_NAME}:latest"
+  docker pull "${LOCAL_DASHBOARD_IMAGE_NAME}:${LOCAL_SHA}"
+  docker tag "${LOCAL_DASHBOARD_IMAGE_NAME}:${LOCAL_SHA}" "${LOCAL_DASHBOARD_IMAGE_NAME}:latest"
+else
+  echo "  GHCR_TOKEN not set -- building images locally from the exact committed tree..."
+  if ! docker buildx version >/dev/null 2>&1; then
+      echo "ERROR: docker buildx is required on the droplet for clean image builds."
+      echo "       Install the buildx CLI plugin for user ${NYC_USER} before deploying."
+      exit 1
+  fi
+
+  echo "  Building lean runtime image..."
+  docker buildx build --pull --load --progress=plain \
+    --build-arg BUILD_SHA="${LOCAL_SHA}" \
+    -t "${LOCAL_IMAGE_NAME}:latest" .
+
+  echo "  Building cockpit image..."
+  docker buildx build --pull --load --progress=plain \
+    --build-arg BUILD_SHA="${LOCAL_SHA}" \
+    -f Dockerfile.dashboard \
+    -t "${LOCAL_DASHBOARD_IMAGE_NAME}:latest" .
 fi
-
-echo "  Building lean runtime image from the exact committed tree..."
-docker buildx build --pull --load --progress=plain \
-  --build-arg BUILD_SHA="${LOCAL_SHA}" \
-  -t "${LOCAL_IMAGE_NAME}:latest" .
-
-echo "  Building cockpit image..."
-docker buildx build --pull --load --progress=plain \
-  --build-arg BUILD_SHA="${LOCAL_SHA}" \
-  -f Dockerfile.dashboard \
-  -t "${LOCAL_DASHBOARD_IMAGE_NAME}:latest" .
 
 echo "  Capturing current live release state before restart..."
 PRE_DEPLOY_RELEASE_JSON=""

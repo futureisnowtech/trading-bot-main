@@ -924,9 +924,12 @@ def get_maker_fill_stats(lookback_hours: int = 48) -> str:
     import re
     import subprocess
 
-    from config import MAKER_ENTRY_ENABLED, MAKER_ENTRY_TIMEOUT_S
+    from config import MAKER_ENTRY_ENABLED, MAKER_ENTRY_TIMEOUT_S, get_dynamic_bool
 
-    header = f"MAKER_ENTRY_ENABLED={MAKER_ENTRY_ENABLED} | timeout={MAKER_ENTRY_TIMEOUT_S}s"
+    # Report what the broker will actually do at order time (kalshi_broker reads
+    # the dynamic override), not the value baked into this process's env.
+    maker_enabled = get_dynamic_bool("MAKER_ENTRY_ENABLED", MAKER_ENTRY_ENABLED)
+    header = f"MAKER_ENTRY_ENABLED={maker_enabled} | timeout={MAKER_ENTRY_TIMEOUT_S}s"
     try:
         out = subprocess.run(
             ["docker", "logs", "--since", f"{int(lookback_hours)}h", "execution-engine"],

@@ -569,6 +569,25 @@ def run_execution_cycle(
     db_path = DB_PATH
     init_forecast_db(db_path=db_path)
 
+    # Liveness stamp goes out FIRST, not just at the tail of run_position_monitor
+    # below. The release gate reads this stamp inside run_strategy_cycle and
+    # blocks entries once it is older than FORECAST_HEARTBEAT_STALE_SECONDS
+    # (15 min). Production runs execution_daemon.py, so the runner's
+    # schedule.every(30).seconds.do(run_position_monitor) never fires and the
+    # only writer was the *tail* of this cycle -- i.e. after the gate already
+    # read it. With a 13-21 min cycle period the gate routinely aged out its own
+    # stamp and refused entries with stale_runtime_heartbeat while the broker was
+    # connected and healthy. Stamping at cycle start keeps the signal honest (a
+    # dead or wedged daemon still stops producing cycles and still ages out)
+    # without the gate blocking itself. Broker health has its own blocker
+    # (broker_disconnected); the heartbeat does not need to double as one.
+    try:
+        from runtime.runtime_state import mark_lane_heartbeat
+
+        mark_lane_heartbeat("forecast", db_path=db_path)
+    except Exception as exc:
+        logger.warning("[ForecastRunner] Cycle-start heartbeat write failed: %s", exc)
+
     broker = _get_broker()
     connected = broker.is_connected()
     if not connected:

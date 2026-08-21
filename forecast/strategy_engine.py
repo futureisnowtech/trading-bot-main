@@ -148,7 +148,10 @@ HARD_RBI_THRESHOLD_BINARY: float = float(os.getenv("HARD_RBI_THRESHOLD_BINARY", 
 HARD_RBI_THRESHOLD_LO: float = 0.50
 HARD_RBI_THRESHOLD_HI: float = 0.95
 
-# Audit-derived City Blacklist configured via environment variables
+# Audit-derived City Blacklist configured via environment variables.
+# Entries may be either a station key (PHX, MSP) or a regional hub (WEST, MIDWEST);
+# _blacklisted_city_code() resolves both. Validated at import so a typo cannot
+# silently disarm the gate.
 _env_blacklist = os.getenv("CITY_BLACKLIST", "").strip()
 CITY_BLACKLIST: set[str] = set([c.strip().upper() for c in _env_blacklist.split(",") if c.strip()]) if _env_blacklist else set()
 
@@ -386,6 +389,63 @@ def _get_city_hub(ticker: str, *, contract_name: str = "") -> str:
         if any(city in t for city in cities):
             return hub
     return "UNKNOWN"
+
+
+def _blacklisted_city_code(ticker: str, *, contract_name: str = "") -> str:
+    """
+    Return the CITY_BLACKLIST entry this contract matches, or "" if it is tradeable.
+
+    Matching on the hub alone is not enough: _get_city_hub returns a macro-region
+    (WEST, MIDWEST), so a city-code entry like PHX never equals it and every
+    contract passes. The ticker's city token also varies per series — KXLOWTMIN
+    and KXLOWMSP are both Minneapolis — so resolve the canonical station key
+    first and only fall back to the raw ticker token.
+    """
+    if not CITY_BLACKLIST:
+        return ""
+
+    t = str(ticker or "").upper()
+    try:
+        from data.kalshi_weather_monitor import resolve_weather_city_key
+
+        city = str(resolve_weather_city_key(t, contract_name=contract_name) or "").upper()
+    except Exception:
+        city = ""
+    if city and city in CITY_BLACKLIST:
+        return city
+
+    hub = _get_city_hub(t, contract_name=contract_name).upper()
+    if hub in CITY_BLACKLIST:
+        return hub
+
+    # Last resort: the series segment ends with the city token (KXHIGHTPHX-...).
+    series_segment = t.split("-")[0]
+    for code in sorted(CITY_BLACKLIST):
+        if code and series_segment.endswith(code):
+            return code
+    return ""
+
+
+def unknown_city_blacklist_entries() -> list[str]:
+    """CITY_BLACKLIST entries that match no known station key or regional hub."""
+    known = set(REGIONAL_HUBS) | {c.upper() for cities in REGIONAL_HUBS.values() for c in cities}
+    try:
+        from data.kalshi_weather_monitor import STATIONS
+
+        known |= {str(k).upper() for k in STATIONS}
+    except Exception:
+        pass
+    return sorted(c for c in CITY_BLACKLIST if c not in known)
+
+
+if CITY_BLACKLIST:
+    _unknown = unknown_city_blacklist_entries()
+    logger.info("[CityBlacklist] Active entries: %s", ",".join(sorted(CITY_BLACKLIST)))
+    if _unknown:
+        logger.warning(
+            "[CityBlacklist] Ignoring unrecognized entries (no station key or hub matches): %s",
+            ",".join(_unknown),
+        )
 
 
 def _is_weather_ticker(ticker: str, contract_name: str = "") -> bool:
@@ -1300,9 +1360,9 @@ def _strategy_weather_details(
     # Alpha Filter: 48-Hour Asymmetric Information Decay Window
     is_short_term = 1.5 <= hours_to_res <= 48.0
 
-    hub = _get_city_hub(ticker, contract_name=contract_name)
-    if hub.upper() in CITY_BLACKLIST or any(f"KXHIGH{b}-" in ticker.upper() or f"KXLOW{b}-" in ticker.upper() for b in CITY_BLACKLIST):
-        return False, "", 0.0, [f"city_blacklisted_{hub}"], False, 1.0, 3, 0.05
+    blacklisted = _blacklisted_city_code(ticker, contract_name=contract_name)
+    if blacklisted:
+        return False, "", 0.0, [f"city_blacklisted_{blacklisted}"], False, 1.0, 3, 0.05
 
 
     w_data = get_contract_weather_data(

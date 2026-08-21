@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 2026-08-21
+- Fixed `CITY_BLACKLIST` being silently inert: the entry gate compared blacklist entries against `_get_city_hub()`, which returns a macro-region (`WEST`, `MIDWEST`), so a station-key entry like `PHX` matched nothing, and the ticker fallback looked for `KXHIGHPHX-` / `KXLOWPHX-` while live daily tickers are `KXHIGHTPHX-` / `KXLOWTMIN-`. `_blacklisted_city_code()` now resolves the canonical station key first (so every series alias for a city is covered), still honors hub-level entries, and falls back to a series-segment suffix match.
+- Added an import-time report of the active blacklist plus a warning for entries that match no known station key or hub, so a typo can no longer disarm the gate unnoticed.
+- Reinstated the audit-derived blacklist on NYC production: `CITY_BLACKLIST=PHX,MSP`. Live Kalshi settlements since the live-era start (275 settled contracts, net -$27.85) put -$46.47 of realized loss in those two cities alone — PHX -$26.55 over 24 settlements (LOW alone -$26.91) and MSP -$19.92 over 26 — while the other 18 cities netted +$18.62 combined.
+- Pinned the gate in the proof suite (`tests/proof/test_city_blacklist.py`): every ticker form of a blacklisted city is blocked, non-blacklisted cities stay tradeable, hub-level entries still work, and the veto reason names the matched city.
+
 ## 2026-08-12 (v19.18.0)
 - Fixed the release gate checking every weather contract against the legacy 90-minute freshness fallback, so hourly contracts were held to the daily bar: `runtime.operator_truth.get_release_status` now resolves the SPEC §4.5 window per contract type via the new `forecast.weather_contracts.weather_freshness_limit_minutes`, which the strategy-engine entry veto also routes through so the two surfaces cannot drift apart.
 - Taught `get_weather_provider_status` to check every sampled weather series against its own freshness window instead of stopping at the first series with data, reporting `series_freshness` and a worst-breach-first `stale_series`.

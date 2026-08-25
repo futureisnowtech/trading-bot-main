@@ -105,17 +105,23 @@ def _normalize_lane_state(lane_state: dict[str, Any]) -> dict[str, Any]:
 
 
 def _normalize_broker_position(position: dict) -> dict:
+    yes_leg_entry_price = float(
+        position.get("yes_leg_entry_price")
+        or position.get("entry_price")
+        or position.get("entry")
+        or position.get("avg_entry")
+        or 0.0
+    )
     return {
         "ticker": str(position.get("local_symbol") or ""),
         "side": str(position.get("side") or "").upper(),
         "right": str(position.get("right") or ""),
         "qty": float(position.get("qty") or 0.0),
-        "entry_price": float(
-            position.get("entry_price")
-            or position.get("entry")
-            or position.get("avg_entry")
-            or 0.0
-        ),
+        "entry_price": yes_leg_entry_price,
+        "yes_leg_entry_price": yes_leg_entry_price,
+        "held_side_entry_price": position.get("held_side_entry_price"),
+        "market_exposure_usd": position.get("market_exposure_usd")
+        or position.get("market_exposure_dollars"),
         "forecast_yes_prob": position.get("forecast_yes_prob"),
         "entered_at": position.get("entered_at"),
         "source": "broker",
@@ -129,6 +135,7 @@ def _normalize_db_position(position: sqlite3.Row | dict) -> dict:
         "side": str(row.get("side") or "").upper(),
         "qty": float(row.get("qty") or 0.0),
         "entry_price": float(row.get("entry_price") or 0.0),
+        "yes_leg_entry_price": float(row.get("entry_price") or 0.0),
         "opened_at": row.get("opened_at"),
         "source": "db",
     }
@@ -534,14 +541,25 @@ def get_weather_learning_status(*, db_path: str = DB_PATH) -> dict:
     from intelligence.rbi2 import get_rbi2_status
     status = get_rbi2_status(db_path=db_path)
     champion = status.get("champion") or {}
+    learning_gate = status.get("learning_gate") or {}
     weights = champion.get("weights") or {"GLOBAL": {"gfs": BASE_GFS_WEIGHT, "ecmwf": BASE_ECMWF_WEIGHT}}
     global_weights = weights.get("GLOBAL") or {}
+    champion_artifact_id = str(champion.get("artifact_id") or "rbi2-baseline-60-40")
+    learned_active = champion_artifact_id != "rbi2-baseline-60-40"
+    learning_complete = bool(learning_gate.get("passed"))
     return {
-        "adaptive_active": True,
-        "status": "rbi2_governed",
+        "adaptive_active": learned_active,
+        "status": (
+            "rbi2_learned_active"
+            if learned_active
+            else "rbi2_awaiting_promotion"
+            if learning_complete
+            else "rbi2_learning_period"
+        ),
         "disabled_reason": "",
-        "champion_artifact_id": champion.get("artifact_id"),
+        "champion_artifact_id": champion_artifact_id,
         "official_sample_count": status.get("official_sample_count", 0),
+        "learning_gate": learning_gate,
         "base_blend": {"gfs_weight": BASE_GFS_WEIGHT, "ecmwf_weight": BASE_ECMWF_WEIGHT},
         "global_blend": {
             "segment": "GLOBAL",
@@ -554,7 +572,12 @@ def get_weather_learning_status(*, db_path: str = DB_PATH) -> dict:
             "ts": champion.get("promoted_at", ""),
         },
         "mode_blends": weights,
-        "calibration": {"promotion_mode": "human_approved", "official_outcomes_only": True},
+        "calibration": {
+            "promotion_mode": "human_approved",
+            "official_outcomes_only": True,
+            "minimum_learning_days": learning_gate.get("minimum_days", 7),
+            "learning_epoch": learning_gate.get("learning_epoch", ""),
+        },
     }
 
 
@@ -562,15 +585,15 @@ def _is_weather_ticker(ticker: str) -> bool:
     try:
         from data.kalshi_weather_monitor import STATIONS, resolve_weather_city_key
         from forecast.weather_contracts import weather_mode_for_ticker
-        
+
         mode = weather_mode_for_ticker(ticker)
         if mode is None:
             return False
-            
+
         city_key = resolve_weather_city_key(ticker)
         if city_key is None or city_key not in STATIONS:
             return False
-            
+
         return True
     except Exception:
         token = str(ticker or "").upper()
@@ -744,9 +767,9 @@ def get_provider_staleness_findings(
             return "", ""
         worst = _describe_stale_series(stale_series[0])
         if len(stale_series) >= len(dated_series):
-            return f"stale_ensemble_data ({worst})", ""
+            return f"stale_weather_model_data ({worst})", ""
         return "", (
-            f"partial_stale_ensemble_data "
+            f"partial_stale_weather_model_data "
             f"({len(stale_series)}/{len(dated_series)} series, worst {worst})"
         )
 
@@ -768,7 +791,7 @@ def get_provider_staleness_findings(
         # Single-sample payload: that one series is the whole sample, so a
         # breach is systemic by definition.
         return (
-            f"stale_ensemble_data ({age_minutes:.0f}m old "
+            f"stale_weather_model_data ({age_minutes:.0f}m old "
             f"> {int(limit_minutes)}m limit)"
         ), ""
     return "", ""

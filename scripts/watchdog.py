@@ -109,36 +109,7 @@ def collect() -> dict[str, str]:
     except Exception as exc:
         bad["gate_check"] = f"Could not read the release artifact: {exc}"
 
-    # 3. Enabled-but-inert: maker routing on, but never attempted.
-    #    This is the failure that cost 313% of gross edge for months.
-    try:
-        import config
-
-        # Cockpit approvals land in dynamic_system_config, not in the process env,
-        # so the static attribute reports the *stale* value and this check would
-        # silently skip after an operator turned maker entry on.
-        if config.get_dynamic_bool("MAKER_ENTRY_ENABLED", config.MAKER_ENTRY_ENABLED):
-            cutoff = (now - dt.timedelta(days=3)).isoformat()
-            entries = _q(
-                con, "SELECT COUNT(*) FROM trades WHERE action='BUY' AND ts > ?", (cutoff,)
-            )
-            n = entries[0][0] if entries else 0
-            if n >= 10:
-                attempts = 0
-                try:
-                    with open(LOG, errors="ignore") as fh:
-                        attempts = sum(1 for ln in fh if "[Maker]" in ln)
-                except OSError:
-                    attempts = -1
-                if attempts == 0:
-                    bad["maker_inert"] = (
-                        f"MAKER_ENTRY_ENABLED is on and {n} entries ran in 3d, "
-                        f"but zero maker attempts were logged."
-                    )
-    except Exception:
-        pass
-
-    # 4. Orphaned resting orders.
+    # 3. Orphaned resting orders. Taker-only production should have none.
     try:
         from execution.kalshi_broker import KalshiBroker
 
@@ -146,10 +117,10 @@ def collect() -> dict[str, str]:
         b.connect()
         if b.is_connected():
             resting = b.list_resting_orders()
-            if len(resting) > 2:
+            if resting:
                 bad["orphans"] = (
                     f"{len(resting)} resting orders on the book "
-                    f"(a rest window holds at most ~1-2)."
+                    f"(taker-only production expects zero)."
                 )
     except Exception as exc:
         bad["broker"] = f"Broker unreachable: {exc}"

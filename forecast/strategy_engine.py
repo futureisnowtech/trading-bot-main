@@ -1,13 +1,9 @@
 """
-forecast/strategy_engine.py — Kalshi weather strategy families + economics gate + sizing.
+forecast/strategy_engine.py — canonical Kalshi weather-physics strategy, gates, and sizing.
 
-Three strategy families (v1):
-  continuation    — trend is likely to continue toward resolution
-  mean_reversion  — overextended move expected to revert
-  late_repricing  — mispricing before resolution; contract hasn't updated
-
-Economics gate: real veto logic using all required inputs from spec.
-Sizing: fractional Kelly, capped at 0.10 of bankroll.
+One fresh-entry family is active in this candidate: ``weather_physics``.
+It consumes the canonical pricing engine, applies market/risk vetoes, routes
+IOC taker entries, and enforces fee-inclusive position/event caps.
 
 Output for each candidate:
   StrategyResult(
@@ -19,6 +15,7 @@ Output for each candidate:
 import logging
 import math
 import os
+import sqlite3
 import sys
 import time
 from dataclasses import dataclass, field
@@ -32,6 +29,7 @@ if _ROOT not in sys.path:
 import numpy as np
 
 from config import (
+    CITY_BLACKLIST,
     DB_PATH,
     HUB_PARAMS,
     MACRO_CACHE_FILE,
@@ -45,14 +43,13 @@ from config import (
     KALSHI_KELLY_FRACTION,
     KALSHI_MAX_CONCURRENT_POSITIONS,
     KALSHI_MAX_DEPLOYED_PCT,
+    KALSHI_MIN_MODEL_HEADROOM_F,
     KALSHI_MAX_RISK_PER_EVENT_PCT,
     KALSHI_SAME_EVENT_FAMILY_CAP,
-    KALSHI_MIN_PRICE,
     KALSHI_MIN_ENTRY_PRICE,
     KALSHI_MAX_SIGMA,
     KALSHI_MAX_QTY_PER_POSITION,
     KALSHI_MAX_SPREAD_RATIO,
-    KALSHI_MAX_FEE_DRAG_PCT,
     KALSHI_MAX_USD_PER_POSITION,
     KALSHI_ULTRA_HIGH_PROB_THRESHOLD,
     estimate_kalshi_fee_per_contract,
@@ -61,6 +58,7 @@ from config import (
     get_kalshi_effective_same_event_family_cap,
     get_kalshi_hub_exposure_cap,
     get_kalshi_position_cap_usd,
+    get_kalshi_position_snapshot_exposure_usd,
     get_kalshi_position_exposure_usd,
     max_kalshi_contracts_for_budget,
 )
@@ -96,9 +94,6 @@ def get_dynamic_param(key: str, default: Any) -> Any:
 
 # ── Gate thresholds ────────────────────────────────────────────────────────────
 
-# Overround hard cap — above this the house edge is too large
-MAX_OVERROUND: float = 0.15  # Tightened from 0.25 to 0.15 for Kalshi
-
 # Spread hard cap
 MAX_SPREAD_DOLLARS: float = 0.12  # $0.12 per contract
 
@@ -120,126 +115,15 @@ EV_THRESHOLD: float = float(os.getenv("EV_THRESHOLD", "0.120"))
 # the admission gate and the sizer price the same round trip.
 _EXIT_FEE_WEIGHT: float = 0.48
 
-# Longshot Bias Gate
-MIN_IMPLIED_PROB_FOR_YES: float = 0.10  # refuse to buy YES below 10% probability
-
-# Entropy saturation — don't trade near 0 or 1 (already resolved)
-MAX_ENTROPY_FOR_ENTRY: float = 0.67  # H(p) = 0.67 nat ≈ p in [0.09, 0.91]
-MIN_ENTROPY_FOR_ENTRY: float = 0.05  # don't trade if market already 95%+ certain
-
-# Volatility cap — don't trade if log-odds are too noisy
-MAX_SIGMA_T: float = 0.80
-
-# Parity gap gate — G_t too large means pricing is internally inconsistent
-MAX_PARITY_GAP_ABS: float = 0.05  # |G_t| ≤ 0.05
-
-
-# v19.10 Gate 11: Hard RBI Conviction Floor — LANE-AWARE conviction floor on q_side.
-# Thresholds derived from each lane's resolution mechanics, not optimization:
-#   - Hourly contracts (TEMP family / KX*T*): fast resolution + cheap re-entry
-#     can tolerate moderate conviction.
-#   - Daily HIGH/LOW (temp): 24h capital lockup needs stronger conviction.
-#   - Binary RAIN/SNOW/WIND: cheap longshots with weak signal need strictest floor.
-# Per-hub override via config/hub_params.json[hub]["hard_rbi_threshold"] is honored
-# when present; SRE clamp [0.50, 0.95] is enforced unconditionally.
-HARD_RBI_THRESHOLD_HOURLY: float = float(os.getenv("HARD_RBI_THRESHOLD_HOURLY", "0.53"))
-HARD_RBI_THRESHOLD_DAILY: float = float(os.getenv("HARD_RBI_THRESHOLD_DAILY", "0.57"))
-HARD_RBI_THRESHOLD_BINARY: float = float(os.getenv("HARD_RBI_THRESHOLD_BINARY", "0.62"))
-HARD_RBI_THRESHOLD_LO: float = 0.50
-HARD_RBI_THRESHOLD_HI: float = 0.95
-
-# Audit-derived City Blacklist configured via environment variables.
-# Entries may be either a station key (PHX, MSP) or a regional hub (WEST, MIDWEST);
-# _blacklisted_city_code() resolves both. Validated at import so a typo cannot
-# silently disarm the gate.
-_env_blacklist = os.getenv("CITY_BLACKLIST", "").strip()
-CITY_BLACKLIST: set[str] = set([c.strip().upper() for c in _env_blacklist.split(",") if c.strip()]) if _env_blacklist else set()
-
-# Tiered City Priority Matrix based on Historical Model Accuracy & Low Microclimate Noise:
-# Tier 1 (Goldmine Predictability): DC, PHL, ATL, DAL, DFW, LV, LAS, OKC, CHI
-# Tier 2 (Solid Regional Hubs): NYC, NY, DEN, MSP, DET, SLC, MCI, MKE, RDU, CLT
-# Tier 3 (Deprioritized High-Noise Microclimates): SF, SFO, MIA, LA, LAX
-CITY_PRIORITY_TIERS: dict[str, int] = {
-    "DC": 1, "PHL": 1, "ATL": 1, "DAL": 1, "DFW": 1, "LV": 1, "LAS": 1, "OKC": 1, "CHI": 1,
-    "NYC": 2, "NY": 2, "DEN": 2, "MSP": 2, "DET": 2, "SLC": 2, "MCI": 2, "MKE": 2, "RDU": 2, "CLT": 2,
-    "SF": 3, "SFO": 3, "MIA": 3, "LA": 3, "LAX": 3
-}
-
-def get_city_priority(city_code: str) -> int:
-    return CITY_PRIORITY_TIERS.get(str(city_code or "").upper(), 2)
-
-
-
-
-
-
-def _resolve_hard_rbi_threshold(
-    lane: str | None,
-    hourly: bool,
-    hub: str,
-) -> float:
-    """Pick the Hard RBI conviction floor for one contract.
-
-    Resolution order:
-      1. Regional overrides (Midwest (0.50), Northeast (0.52), West (0.54), South/Florida/Gulf/Mountain (0.70))
-      2. Hourly contracts (any lane) or TEMP get the loose floor.
-      3. Binary-precip lanes (RAIN/SNOW/WIND) get the strictest floor.
-      4. Daily HIGH/LOW get the middle floor.
-      5. Unknown lanes fall back to the daily floor.
-      6. Optional per-hub override from HUB_PARAMS replaces the lane default.
-      7. SRE clamp [0.50, 0.95] is applied unconditionally.
-    """
-    hub_upper = str(hub or "").upper()
-    if hub_upper in {"GULF", "MOUNTAIN", "MIDWEST"}:
-        return 0.50
-    elif hub_upper == "WEST":
-        return 0.54
-    elif hub_upper in {"NORTHEAST", "FLORIDA", "SOUTH"}:
-        return 0.70
-
-    if hourly or lane == "TEMP":
-        base = HARD_RBI_THRESHOLD_HOURLY
-    elif lane in {"RAIN", "SNOW", "WIND"}:
-        base = HARD_RBI_THRESHOLD_BINARY
-    elif lane in {"HIGH", "LOW"}:
-        base = HARD_RBI_THRESHOLD_DAILY
-    else:
-        base = HARD_RBI_THRESHOLD_DAILY
-    try:
-        bucket = HUB_PARAMS.get(hub, {}) if isinstance(HUB_PARAMS, dict) else {}
-        if isinstance(bucket, dict) and "hard_rbi_threshold" in bucket:
-            base = float(bucket["hard_rbi_threshold"])
-    except (TypeError, ValueError):
-        pass
-    return max(HARD_RBI_THRESHOLD_LO, min(HARD_RBI_THRESHOLD_HI, float(base)))
+# The versioned fallback lives in config.py; CITY_BLACKLIST may still override it
+# for an intentional emergency posture.  Entries may be station keys or regional
+# hubs, and _blacklisted_city_code() resolves and validates both forms below.
 
 # Duplicate/correlated exposure penalty
 SAME_EVENT_PENALTY: float = 0.50  # halve Kelly fraction if same event family open
 
-# Late-repricing: look back this many hours for movement
-LATE_REPRICING_LOOKBACK_HOURS: float = 24.0
-
-# Sizing parameters (mapped to Sovereign config v18.33)
-KELLY_CAP: float = KALSHI_KELLY_CAP
-MAX_DEPLOYED_PCT: float = KALSHI_MAX_DEPLOYED_PCT
+# Sizing alias used by the aggregate event-risk enforcement path.
 MAX_RISK_PER_EVENT_PCT: float = KALSHI_MAX_RISK_PER_EVENT_PCT
-MAX_CONCURRENT_POSITIONS: int = KALSHI_MAX_CONCURRENT_POSITIONS
-
-_HARD_ECON_VETO_PREFIXES: tuple[str, ...] = (
-    "MAX_CAPITAL_EXCEEDED",
-    "RESOLUTION_HORIZON_TOO_SHORT",
-    "too_far_from_resolution",
-    "concurrent_cap_reached",
-    "overround_too_high",
-    "spread_too_wide",
-    "spread_ratio_veto",
-    "market_near_certainty",
-    "entropy_too_high",
-    "sigma_too_high",
-    "parity_gap_too_large",
-    "fee_drag_veto",
-    "longshot_bias_gate",
-)
 
 
 def _estimated_fee_per_contract(price: float, *, rounded: bool = False) -> float:
@@ -452,15 +336,15 @@ def _is_weather_ticker(ticker: str, contract_name: str = "") -> bool:
     try:
         from data.kalshi_weather_monitor import STATIONS, resolve_weather_city_key
         from forecast.weather_contracts import weather_mode_for_ticker
-        
+
         mode = weather_mode_for_ticker(ticker)
         if mode is None:
             return False
-            
+
         city_key = resolve_weather_city_key(ticker, contract_name=contract_name)
         if city_key is None or city_key not in STATIONS:
             return False
-            
+
         return True
     except Exception:
         return False
@@ -496,6 +380,7 @@ class StrategyResult:
     model_prob_gfs: float | None = None
     model_prob_ecmwf: float | None = None
     weather_mode: str = ""
+    pricing_trace: dict[str, Any] = field(default_factory=dict)
 
 
 def _hours_to_resolution(last_trade_at: str) -> float:
@@ -536,192 +421,7 @@ def _max_quote_age_seconds(*quotes: dict) -> float | None:
     return max(ages)
 
 
-# ── Economics gate ─────────────────────────────────────────────────────────────
-
-
-def _economics_gate(
-    ask_yes: float,
-    ask_no: float,
-    q_hat: float,
-    omega_t: float,
-    g_t: float,
-    h_t: float,
-    sigma_t: float,
-    spread: float,
-    hours_to_resolution: float,
-    open_positions_count: int = 0,
-    deployed_pct: float = 0.0,
-    same_event_open: bool = False,
-    side: str = "",
-    held_probability: float | None = None,
-) -> tuple[bool, str, float, float]:
-    """
-    Multi-factor economics gate. No decorative checks — every factor can veto.
-
-    Returns: (approved, veto_reason, ev_yes, ev_no)
-    """
-    yes_available = ask_yes > 0.0
-    no_available = ask_no > 0.0
-
-    if not yes_available and not no_available:
-        return False, "missing_quotes", 0.0, 0.0
-
-    # 0. Capital Partition (Sovereign Mandate v18.32)
-    if deployed_pct >= KALSHI_MAX_DEPLOYED_PCT:
-        return (
-            False,
-            "MAX_CAPITAL_EXCEEDED",
-            0.0,
-            0.0,
-        )
-
-    # 1. Minimum hours to resolution
-    if hours_to_resolution < MIN_HOURS_TO_RES:
-        return (
-            False,
-            "RESOLUTION_HORIZON_TOO_SHORT",
-            0.0,
-            0.0,
-        )
-
-    if hours_to_resolution > MAX_HOURS_TO_RES:
-        return (
-            False,
-            f"too_far_from_resolution ({hours_to_resolution:.1f}h > {MAX_HOURS_TO_RES}h)",
-            0.0,
-            0.0,
-        )
-
-    effective_concurrent_cap = get_kalshi_effective_concurrent_cap(
-        side,
-        held_probability,
-    )
-    if open_positions_count >= effective_concurrent_cap:
-        return (
-            False,
-            f"concurrent_cap_reached ({open_positions_count}/{effective_concurrent_cap})",
-            0.0,
-            0.0,
-        )
-
-    # 2. Overround too high (house edge eats the edge)
-    if omega_t > MAX_OVERROUND:
-        return (
-            False,
-            f"overround_too_high (Ω={omega_t:.3f} > {MAX_OVERROUND})",
-            0.0,
-            0.0,
-        )
-
-    # 3. Spread too wide
-    if spread > MAX_SPREAD_DOLLARS:
-        return False, f"spread_too_wide ({spread:.3f} > {MAX_SPREAD_DOLLARS})", 0.0, 0.0
-
-    # v19.5: Spread-to-Price Ratio Gate (Liquidity Veto)
-    available_prices = [price for price in (ask_yes, ask_no) if price > 0.0]
-    avg_price = sum(available_prices) / len(available_prices) if available_prices else 0.0
-    if avg_price > 0:
-        spread_ratio = spread / avg_price
-        if spread_ratio > KALSHI_MAX_SPREAD_RATIO:
-            return False, f"spread_ratio_veto ({spread_ratio:.1%} > {KALSHI_MAX_SPREAD_RATIO:.0%})", 0.0, 0.0
-
-    # 4. Entropy gates: don't trade near certainty
-    if h_t < MIN_ENTROPY_FOR_ENTRY:
-        return (
-            False,
-            f"market_near_certainty (H={h_t:.3f} < {MIN_ENTROPY_FOR_ENTRY})",
-            0.0,
-            0.0,
-        )
-    if h_t > MAX_ENTROPY_FOR_ENTRY:
-        return (
-            False,
-            f"entropy_too_high (H={h_t:.3f} > {MAX_ENTROPY_FOR_ENTRY})",
-            0.0,
-            0.0,
-        )
-
-    # 4b. Probability-based Entropy limits (p in [0.05, 0.67])
-    if q_hat < 0.05 or q_hat > 0.67:
-        return (
-            False,
-            f"entropy_limits (p={q_hat:.3f} outside [0.05, 0.67])",
-            0.0,
-            0.0,
-        )
-
-    # 5. Volatility cap — don't trade during noisy repricing
-    if sigma_t > MAX_SIGMA_T:
-        return False, f"sigma_too_high (σ={sigma_t:.3f} > {MAX_SIGMA_T})", 0.0, 0.0
-
-    # 6. Parity gap — internally inconsistent pricing
-    if abs(g_t) > MAX_PARITY_GAP_ABS:
-        return (
-            False,
-            f"parity_gap_too_large (|G|={abs(g_t):.3f} > {MAX_PARITY_GAP_ABS})",
-            0.0,
-            0.0,
-        )
-
-    # 7. Compute EV only for executable sides (using taker friction buffer)
-    ev_yes = -1.0
-    ev_no = -1.0
-    if yes_available:
-        fee_yes = _estimated_fee_per_contract(ask_yes, rounded=False)
-        ev_yes = (
-            q_hat
-            - ask_yes
-            - fee_yes
-        )
-    if no_available:
-        fee_no = _estimated_fee_per_contract(ask_no, rounded=False)
-        ev_no = (
-            (1.0 - q_hat)
-            - ask_no
-            - fee_no
-        )
-
-    # 8. Neither side has positive EV
-    available_evs = [ev for ev, available in ((ev_yes, yes_available), (ev_no, no_available)) if available]
-    best_ev = max(available_evs) if available_evs else -1.0
-    if best_ev < EV_THRESHOLD:
-        return (
-            False,
-            f"LOW_CONVICTION_ALPHA (Net_EV={best_ev:.4f} < {EV_THRESHOLD})",
-            ev_yes,
-            ev_no,
-        )
-
-    # v19.5: Fee Drag Veto
-    # If fees consume > 30% of gross gain, veto.
-    best_side = "YES" if ev_yes >= ev_no else "NO"
-    potential_gain = (1.0 - ask_yes) if best_side == "YES" else (1.0 - ask_no)
-    if potential_gain > 0:
-        fee_drag = _estimated_fee_per_contract(
-            ask_yes if best_side == "YES" else ask_no,
-            rounded=False,
-        )
-        drag = fee_drag / potential_gain
-        if drag > KALSHI_MAX_FEE_DRAG_PCT:
-            return False, f"fee_drag_veto (drag={drag:.1%} > {KALSHI_MAX_FEE_DRAG_PCT:.0%})", ev_yes, ev_no
-
-    # 9. Longshot Bias Gate: refuse to buy YES below the probability threshold
-    # Note: latest_prob is YES implied probability.
-    # If the strategy wants to buy YES but p < 0.10, we veto.
-    # (Checking here for EV passing YES but p too low)
-    if yes_available and ev_yes >= EV_THRESHOLD and q_hat < MIN_IMPLIED_PROB_FOR_YES:
-        # If EV is only positive for YES, we veto. 
-        # If EV is positive for both, we might still allow NO if it's the better EV.
-        if ev_yes >= ev_no:
-            return (
-                False,
-                f"longshot_bias_gate (YES_p={q_hat:.3f} < {MIN_IMPLIED_PROB_FOR_YES})",
-                ev_yes,
-                ev_no,
-            )
-
-    # 10. Duplicate exposure penalty doesn't veto but is noted in sizing
-    return True, "", ev_yes, ev_no
+# ── Canonical weather market gate ──────────────────────────────────────────────
 
 
 def _weather_market_gate(
@@ -889,55 +589,6 @@ def _probability_from_estimate(
         lower = _normal_cdf((float(semantics.lower_bound) - mean) / sigma)
         return max(0.0, min(1.0, upper - lower))
 
-
-def find_cheatcode_underpriced_contracts(
-    candidates: list[dict],
-    min_win_prob: float = 0.78,
-    min_model_market_delta: float = 0.22,
-) -> list[dict]:
-    """
-    The Kalshi 'Cheat Code' Algorithm:
-    Links 122-member Tri-Model weather probabilities (GFS + ECMWF + ICON)
-    and 5-minute METAR station data directly to live order book quotes to isolate
-    severely underpriced, high win-probability contracts.
-
-    Filters for:
-      1. Tri-Model Win Probability q_hat >= 78% (high win probability)
-      2. Market Ask Price in Value Bracket $0.30 - $0.70
-      3. Model-Market Delta (q_hat - ask_price) >= 22% (severe mispricing)
-      4. Cross-Strike Monotonicity Arbitrage (Strike N vs N+1 price inversions)
-    """
-    cheatcode_winners = []
-
-    for candidate in candidates:
-        q_hat = float(candidate.get("q_hat") or candidate.get("ensemble_prob") or 0.0)
-        ask_price = float(candidate.get("ask_yes") or candidate.get("ask_no") or candidate.get("price") or 0.0)
-        ticker = str(candidate.get("ticker") or candidate.get("symbol") or "")
-
-        if ask_price <= 0.0 or q_hat <= 0.0:
-            continue
-
-        # 1. High Win Probability Floor
-        if q_hat < min_win_prob:
-            continue
-
-        # 2. Value Zone Bracket ($0.30 - $0.70)
-        if ask_price < 0.30 or ask_price > 0.70:
-            continue
-
-        # 3. Model-Market Mispricing Delta (Edge >= 22%)
-        delta = q_hat - ask_price
-        if delta >= min_model_market_delta:
-            city_code = str(candidate.get("city") or candidate.get("hub") or ticker[:5]).upper()
-            candidate["city_priority"] = get_city_priority(city_code)
-            candidate["cheatcode_score"] = round(delta * q_hat * 100.0, 2)
-            candidate["is_cheatcode"] = True
-            cheatcode_winners.append(candidate)
-
-    # Sort Tier 1 Goldmine Cities first (priority 1), then highest cheatcode_score
-    cheatcode_winners.sort(key=lambda x: (x.get("city_priority", 2), -x.get("cheatcode_score", 0.0)))
-    return cheatcode_winners
-
     if semantics.threshold is None:
         return 0.0
 
@@ -991,18 +642,6 @@ def _probability_from_weather_record(
     return probability_from_members(members, semantics) if members else None
 
 
-# Sentinels for backward compatibility/monkeypatching in tests
-def _default_blend_sentinel(*args, **kwargs):
-    pass
-
-_blend_weather_probabilities = _default_blend_sentinel
-_get_adaptive_weather_model_blend = _default_blend_sentinel
-
-
-
-
-
-
 def blended_weather_yes_probability(
     ticker: str,
     w_data: dict | None,
@@ -1040,33 +679,33 @@ def calculate_hrrr_aware_steepness(hours_to_res: float) -> float:
 def calculate_optimal_vwap_size(book_asks: list[dict], model_prob: float, max_budget_usd: float, lane_ev_threshold: float) -> int:
     total_qty = 0
     total_spend = 0.0
-    
+
     for level in book_asks:
         price = level.get('price', 0.0) or level.get('ask', 0.0)
         available_qty = level.get('qty', 0) or level.get('size', 1)
-        
+
         if price <= 0.0:
             continue
-            
+
         fee = _estimated_fee_per_contract(price, rounded=False)
         cost_per_contract = price + fee
         marginal_ev = model_prob - cost_per_contract
-        
-        if marginal_ev < lane_ev_threshold: 
+
+        if marginal_ev < lane_ev_threshold:
             break
-            
+
         affordable_qty = int((max_budget_usd - total_spend) // cost_per_contract)
         take_qty = min(available_qty, affordable_qty)
-        
+
         if take_qty <= 0:
             break
-            
+
         total_qty += take_qty
         total_spend += (take_qty * cost_per_contract)
-        
+
         if total_spend >= max_budget_usd:
             break
-            
+
     return min(total_qty, 2500)
 
 def calculate_ceiled_fee(p: float, n: int, maker: bool = False) -> float:
@@ -1081,72 +720,12 @@ def calculate_favorite_scaler(q: float, bankroll: float) -> float:
     denom_smax = 1.0 + math.exp(- (float(bankroll) - 2000.0) / 800.0)
     denom_smax = max(1e-9, denom_smax)
     s_max = 1.0 + 0.5 / denom_smax
-    
+
     exponent = -12.0 * (q_clamped - 0.70)
     exponent_clamped = max(-50.0, min(50.0, exponent))
     denom_s = 1.0 + math.exp(exponent_clamped)
     denom_s = max(1e-9, denom_s)
     return 0.60 + (s_max - 0.60) / denom_s
-
-
-# A maker attempt that misses is not a lost trade. _try_maker_entry cancels at the
-# timeout and crosses as taker, so the cost of trying is a bounded delay, not
-# forgone utility. Priced as a haircut on the fallback leg for the adverse
-# selection of crossing ~90s later than we otherwise would have.
-_MAKER_FALLBACK_DISCOUNT: float = 0.98
-
-# Inside this window the rest is a large fraction of the contract's remaining
-# life and the book thins into resolution, so don't spend the delay.
-_MAKER_MIN_HOURS_TO_RES: float = 1.0
-
-
-def _maker_first_utility(u_M: float, u_T: float, zeta: float, tau_hours: float) -> float:
-    """Expected utility of *trying* maker first, then crossing if it misses.
-
-    The original expression was ``zeta * u_M``, which scores a missed maker fill
-    as zero utility. That is not what the execution path does -- it falls through
-    to the taker route -- so the comparison systematically understated maker and
-    sent essentially everything to taker: 3 maker attempts across 645 positions
-    while fees ate 313% of gross edge.
-
-    Modelling the fallback makes maker-first win whenever the maker leg is
-    genuinely better, rather than only when the fill probability is high enough
-    to carry the whole trade alone.
-    """
-    if tau_hours < _MAKER_MIN_HOURS_TO_RES:
-        return zeta * u_M
-    z = max(0.0, min(1.0, float(zeta)))
-    return z * u_M + (1.0 - z) * u_T * _MAKER_FALLBACK_DISCOUNT
-
-
-def estimate_zeta(contract_id: Optional[int], tau_hours: float, spread: float, db_path: str | None = None) -> float:
-    if not contract_id or tau_hours <= 0.0:
-        return 0.0
-    try:
-        import sqlite3
-        import numpy as np
-        from config import DB_PATH
-        with sqlite3.connect(db_path or DB_PATH, timeout=5.0) as conn:
-            rows = conn.execute(
-                """
-                SELECT bid_yes, ask_yes FROM forecast_quotes
-                WHERE contract_id = ?
-                ORDER BY ts DESC LIMIT 100
-                """,
-                (contract_id,)
-            ).fetchall()
-        if len(rows) < 5:
-            vol = 0.05
-        else:
-            mids = [0.5 * (float(r[0] or 0.5) + float(r[1] or 0.5)) for r in rows]
-            vol = float(np.std(mids))
-    except Exception:
-        vol = 0.05
-        
-    vol = max(1e-9, vol)
-    spread = max(0.0, spread)
-    zeta = math.exp(-spread / vol) * (1.0 - math.exp(-max(0.0, tau_hours) / 12.0))
-    return max(0.01, min(0.99, zeta))
 
 
 def calculate_diurnal_heating_derivative(hourly_temps: list[float], current_local_hour: float = 14.0) -> tuple[float, bool]:
@@ -1162,6 +741,27 @@ def calculate_diurnal_heating_derivative(hourly_temps: list[float], current_loca
     dT_dt = float(hourly_temps[-1] - hourly_temps[-2])
     peak_concluded = (current_local_hour >= 14.0) and (dT_dt <= -0.20)
     return dT_dt, peak_concluded
+
+
+def _projection_headroom_f(semantics, projection: float, side: str) -> float:
+    """Signed physical distance supporting the selected outcome."""
+    value = float(projection)
+    chosen = str(side or "").upper()
+    if semantics.comparator == "gt" and semantics.threshold is not None:
+        yes_headroom = value - float(semantics.threshold)
+    elif semantics.comparator == "lt" and semantics.threshold is not None:
+        yes_headroom = float(semantics.threshold) - value
+    elif (
+        semantics.comparator == "between"
+        and semantics.lower_bound is not None
+        and semantics.upper_bound is not None
+    ):
+        lower = float(semantics.lower_bound)
+        upper = float(semantics.upper_bound)
+        yes_headroom = min(value - lower, upper - value)
+    else:
+        return float("inf")
+    return yes_headroom if chosen == "YES" else -yes_headroom
 
 
 def log_utility_g(f: float, q: float, p: float, phi: float) -> float:
@@ -1185,27 +785,27 @@ def solve_optimal_size(
     n = 100
     f_star = 0.0
     phi = 0.0
-    
+
     q_clamped = max(0.01, min(0.99, float(q)))
     p_clamped = max(0.01, min(0.99, float(p)))
-    
+
     for _ in range(5):
         fee_in = calculate_ceiled_fee(p_clamped, n, maker=maker)
         fee_out = calculate_ceiled_fee(p_clamped, n, maker=maker)
         phi = fee_in + 0.48 * fee_out
-        
+
         f_star = (q_clamped - p_clamped - phi) / (1.0 - p_clamped - phi)
         f_star = max(0.0, f_star)
-        
+
         kelly_frac = get_dynamic_param("KELLY_FRACTION", KALSHI_KELLY_FRACTION)
         fav_scaler = calculate_favorite_scaler(q_clamped, bankroll)
         f_final = kelly_frac * f_star * (1.0 / max(1e-9, lambda_scaler)) * cov_charge * fav_scaler
-        
+
         n_final = int(math.floor(f_final * bankroll / max(1e-9, p_clamped + phi)))
         if level2_asks:
             n_vwap = calculate_optimal_vwap_size(level2_asks, q_clamped, f_final * bankroll, 0.0)
             n_final = min(n_final, n_vwap)
-            
+
         if f_star <= 0.0 or n_final == 0:
             n_new = 0
         else:
@@ -1215,13 +815,13 @@ def solve_optimal_size(
             break
         n = n_new
 
-        
+
     return f_star, phi, int(n)
 
 
 def calculate_continuous_sizing(
     market_price: float,
-    ensemble_prob: float,
+    model_prob: float,
     capital_base: float,
     multiplier: float = 1.0,
     cap_pct: float = 0.10,
@@ -1232,7 +832,7 @@ def calculate_continuous_sizing(
     position_cap_usd: float | None = None,
 ) -> int:
     f_star, phi, n = solve_optimal_size(
-        q=ensemble_prob,
+        q=model_prob,
         p=market_price,
         maker=False,
         bankroll=capital_base,
@@ -1240,15 +840,17 @@ def calculate_continuous_sizing(
         cov_charge=1.0,
         level2_asks=book_asks
     )
-    effective_position_cap = (
+    configured_position_cap = (
         float(position_cap_usd)
         if position_cap_usd is not None
         else float(KALSHI_MAX_USD_PER_POSITION)
     )
+    kelly_cap_usd = max(0.0, float(cap_pct)) * max(0.0, float(capital_base))
+    effective_position_cap = min(configured_position_cap, kelly_cap_usd)
     if n > 0 and market_price > 0.0 and effective_position_cap > 0.0:
         # Conviction ramp is keyed off f_star (the real Kelly edge -- already
-        # nets out price and fees) instead of raw ensemble_prob. Gating on
-        # ensemble_prob alone meant a cheap, wide-edge contract (e.g. q_hat=0.75
+        # nets out price and fees) instead of raw model_prob. Gating on
+        # model_prob alone meant a cheap, wide-edge contract (e.g. q_hat=0.75
         # at a $0.40 ask) never qualified for extra size just because 0.75 < the
         # 0.80 probability cutoff, even though its edge exceeded that of an
         # expensive near-threshold contract (q_hat=0.81 at $0.79). f_star folds
@@ -1276,17 +878,17 @@ def calculate_continuous_sizing(
             # trades to be meaningful. 0.25 is the Brier score of a coin-flip
             # model -- at or past that, the model hasn't earned extra size, so
             # scaler goes to 0 and the ramp collapses back to the Kelly-only n.
-            # No-ops (scaler=1.0) until resolution_sync.py has backfilled
-            # enough q_hat-tagged settlements, and any DB error is swallowed
-            # so a calibration-read failure never blocks a live trade.
-            calib_scaler = 1.0
+            # Extra conviction size must be earned by resolved calibration.
+            # Missing/failed calibration leaves baseline Kelly intact but
+            # disables the bonus ramp instead of failing open into larger size.
+            calib_scaler = 0.0
             try:
                 from forecast.db import get_live_brier_score
                 calib = get_live_brier_score()
                 if calib["score"] is not None:
                     calib_scaler = max(0.0, min(1.0, 1.0 - calib["score"] / 0.25))
             except Exception:
-                pass
+                calib_scaler = 0.0
             ramp *= calib_scaler
 
         if ramp > 0.0:
@@ -1306,7 +908,17 @@ def calculate_continuous_sizing(
             conviction_contracts = int(target_allocation_usd / market_price)
             n = min(max(n, conviction_contracts), int(KALSHI_MAX_QTY_PER_POSITION))
 
-    return n
+    if n > 0:
+        n = min(
+            n,
+            max_kalshi_contracts_for_budget(
+                market_price,
+                effective_position_cap,
+                maker=False,
+            ),
+            int(KALSHI_MAX_QTY_PER_POSITION),
+        )
+    return max(0, int(n))
 
 import re
 
@@ -1342,41 +954,52 @@ def _parse_weather_threshold(ticker: str) -> Optional[float]:
             return float(match.group(1))
         except ValueError:
             pass
-            
+
     return None
 
-def get_adaptive_model_weights(mode: str, db_path: str | None = None) -> tuple[float, float]:
-    from config import DB_PATH
-    import sqlite3
-    import os
-    path = db_path or DB_PATH
-    if not path or not os.path.exists(path):
-        return 0.60, 0.40
-    try:
-        with sqlite3.connect(path, timeout=5.0) as conn:
-            conn.row_factory = sqlite3.Row
-            # Try specific mode first
-            row = conn.execute(
-                """
-                SELECT gfs_weight, ecmwf_weight FROM weather_model_skill_state
-                WHERE segment = ? ORDER BY ts DESC LIMIT 1
-                """,
-                (mode.upper(),)
-            ).fetchone()
-            if row:
-                return float(row["gfs_weight"]), float(row["ecmwf_weight"])
-            # Fall back to GLOBAL
-            row = conn.execute(
-                """
-                SELECT gfs_weight, ecmwf_weight FROM weather_model_skill_state
-                WHERE segment = 'GLOBAL' ORDER BY ts DESC LIMIT 1
-                """,
-            ).fetchone()
-            if row:
-                return float(row["gfs_weight"]), float(row["ecmwf_weight"])
-    except Exception as e:
-        logger.warning(f"Failed to fetch adaptive weights from DB: {e}")
-    return 0.60, 0.40
+def _convergence_guardrail(
+    q_gfs: float | None,
+    q_ecmwf: float | None,
+) -> dict[str, float | bool]:
+    """The GFS/ECMWF agreement policy selected for production.
+
+    The 1.5x multiplier is earned only when every available physical model
+    agrees in the same probability tail. Fewer than two real models is neutral;
+    gaps over 20 points shrink q_hat toward 0.50 and size, and the maximum
+    pairwise gap over 70 points is a hard veto.
+    """
+    available = [float(q) for q in (q_gfs, q_ecmwf) if q is not None]
+    if len(available) < 2:
+        return {
+            "convergence_multiplier": 1.0,
+            "divergence_gap": 0.0,
+            "divergence_size_multiplier": 1.0,
+            "confidence_scale": 1.0,
+            "catastrophic_divergence": False,
+        }
+
+    yes_agree = all(q > 0.75 for q in available)
+    no_agree = all(q < 0.25 for q in available)
+    divergence_gap = max(available) - min(available)
+    confidence_scale = 1.0
+    divergence_size_multiplier = 1.0
+    if divergence_gap > 0.20:
+        confidence_scale = max(
+            0.55,
+            1.0 - min(0.45, (divergence_gap - 0.20) * 0.90),
+        )
+        divergence_size_multiplier = max(
+            0.60,
+            1.0 - min(0.40, (divergence_gap - 0.20) * 0.80),
+        )
+
+    return {
+        "convergence_multiplier": 1.5 if (yes_agree or no_agree) else 1.0,
+        "divergence_gap": divergence_gap,
+        "divergence_size_multiplier": divergence_size_multiplier,
+        "confidence_scale": confidence_scale,
+        "catastrophic_divergence": divergence_gap > 0.70,
+    }
 
 
 def _strategy_weather_details(
@@ -1388,19 +1011,18 @@ def _strategy_weather_details(
     strike: float | None = None,
     resolution_at: str = "",
     last_trade_at: str = "",
-) -> tuple[bool, str, float, list[str], bool, float, int, float]:
+) -> tuple[bool, str, float, list[str], bool, float, int, float, dict[str, Any]]:
     """
     v19.1.10: Sovereign Alpha Blueprint.
     1. Multi-Model Convergence (GFS + ECMWF)
     2. Precision Bracket Pinning
     3. Regional Hub Gating
     """
-    # Alpha Filter: 48-Hour Asymmetric Information Decay Window
-    is_short_term = 1.5 <= hours_to_res <= 48.0
+    pricing_trace: dict[str, Any] = {}
 
     blacklisted = _blacklisted_city_code(ticker, contract_name=contract_name)
     if blacklisted:
-        return False, "", 0.0, [f"city_blacklisted_{blacklisted}"], False, 1.0, 3, 0.05
+        return False, "", 0.0, [f"city_blacklisted_{blacklisted}"], False, 1.0, 3, 0.05, pricing_trace
 
 
     w_data = get_contract_weather_data(
@@ -1413,7 +1035,7 @@ def _strategy_weather_details(
     if not w_data:
         if "HIGH" in ticker or "LOW" in ticker:
             logger.info(f"TRACE: No weather data for {ticker}")
-        return False, "", 0.0, ["no_weather_ensemble_data"], False, 1.0, 3, 0.05
+        return False, "", 0.0, ["no_weather_model_data"], False, 1.0, 3, 0.05, pricing_trace
 
     semantics = resolve_weather_contract(
         ticker=ticker,
@@ -1421,7 +1043,7 @@ def _strategy_weather_details(
         strike=strike,
     )
     if semantics is None:
-        return False, "", 0.0, [f"unsupported_weather_contract: {ticker}"], False, 1.0, 3, 0.05
+        return False, "", 0.0, [f"unsupported_weather_contract: {ticker}"], False, 1.0, 3, 0.05, pricing_trace
     if semantics.ambiguous:
         return (
             False,
@@ -1432,201 +1054,120 @@ def _strategy_weather_details(
             1.0,
             3,
             0.05,
+            pricing_trace,
         )
 
     mode = semantics.mode
 
-    import inspect
-    use_legacy_math = False
+    # One canonical probability path serves production, replay, and tests.
+    # Tests that need controlled inputs patch calculate_pricing explicitly;
+    # runtime behavior must never depend on stack-frame names.
+    from forecast.pricing_engine import calculate_pricing
+    from config import DB_PATH
+
     try:
-        for frame in inspect.stack():
-            func_name = frame.function
-            if any(term in func_name for term in [
-                "test_ecmwf", "test_expensive_yes", "test_narrow_bin",
-                "test_hourly_between", "test_weather_entry", "test_weather_strategy",
-                "test_blended_weather"
-            ]):
-                use_legacy_math = True
-                break
-    except Exception:
-        pass
+        pricing = calculate_pricing(
+            ticker,
+            w_data,
+            hours_to_res=hours_to_res,
+            contract_name=contract_name,
+            strike=strike,
+            db_path=DB_PATH,
+        )
+    except Exception as pr_err:
+        return False, "", 0.0, [f"pricing_engine_error: {pr_err}"], False, 1.0, 3, 0.05, pricing_trace
 
-    if _blend_weather_probabilities is not _default_blend_sentinel or _get_adaptive_weather_model_blend is not _default_blend_sentinel:
-        use_legacy_math = True
-
-    if use_legacy_math:
-        # Legacy Math Fallback for verification/proof compatibility
-        # 1. Extract members
-        if mode in ["RAIN", "SNOW", "WIND"]:
-            key = "members_precip" if mode != "WIND" else "members_wind"
-        elif mode == "TEMP":
-            key = "members_temp"
-        else:
-            key = "members_high" if mode == "HIGH" else "members_low"
-        members_gfs = [float(v) for v in (w_data.get(key) or [])]
-        ecmwf_data = w_data.get("ecmwf") or {}
-        members_ec = [float(v) for v in (ecmwf_data.get(key) or [])]
-        
-        # 2. Probability extraction
-        def get_prob(members):
-            if not members:
-                return None
-            limit = semantics.threshold if semantics.threshold is not None else semantics.display_high
-            if limit is None:
-                limit = semantics.display_low
-            if limit is None:
-                return None
-            limit = float(limit)
-            
-            hits = 0
-            for val in members:
-                satisfied = False
-                if semantics.comparator == "between":
-                    if semantics.lower_bound is not None and semantics.upper_bound is not None:
-                        satisfied = float(semantics.lower_bound) <= val <= float(semantics.upper_bound)
-                elif semantics.comparator == "lt":
-                    satisfied = val <= limit
-                else:
-                    satisfied = val >= limit
-                if satisfied:
-                    hits += 1
-            return hits / len(members)
-            
-        prob_gfs = get_prob(members_gfs)
-        prob_ecmwf = get_prob(members_ec)
-        
-        # 3. Weights and Blending
-        if _get_adaptive_weather_model_blend is not _default_blend_sentinel:
-            blend_state = _get_adaptive_weather_model_blend(mode)
-            gfs_weight = float(blend_state.get("gfs_weight", 0.60))
-            ecmwf_weight = float(blend_state.get("ecmwf_weight", 0.40))
-        else:
-            gfs_weight, ecmwf_weight = get_adaptive_model_weights(mode)
-            
-        if _blend_weather_probabilities is not _default_blend_sentinel:
-            res = _blend_weather_probabilities(
-                prob_gfs=prob_gfs or 0.5,
-                prob_ecmwf=prob_ecmwf,
-                mode=mode
-            )
-            ensemble_prob = float(res["ensemble_prob"])
-            gfs_weight = float(res.get("gfs_weight", gfs_weight))
-            ecmwf_weight = float(res.get("ecmwf_weight", ecmwf_weight))
-            convergence_multiplier = float(res.get("convergence_multiplier", 1.0))
-            divergence_gap = float(res.get("divergence_gap", 0.0))
-            divergence_size_multiplier = float(res.get("divergence_size_multiplier", 1.0))
-            catastrophic_divergence = bool(res.get("catastrophic_divergence", False))
-        else:
-            if prob_ecmwf is None:
-                ensemble_prob = max(0.03, min(0.97, float(prob_gfs or 0.5)))
-                convergence_multiplier = 1.0
-                divergence_gap = 0.0
-                divergence_size_multiplier = 1.0
-                catastrophic_divergence = False
-            else:
-                ensemble_prob = (float(prob_gfs or 0.5) * gfs_weight) + (float(prob_ecmwf) * ecmwf_weight)
-                yes_agree = (prob_gfs or 0.5) > 0.75 and prob_ecmwf > 0.75
-                no_agree = (prob_gfs or 0.5) < 0.25 and prob_ecmwf < 0.25
-                convergence_multiplier = 1.5 if (yes_agree or no_agree) else 1.0
-                divergence_gap = abs(float(prob_gfs or 0.5) - float(prob_ecmwf))
-                divergence_size_multiplier = 1.0
-                catastrophic_divergence = divergence_gap > 0.70
-
-                if divergence_gap > 0.20:
-                    confidence_scale = max(
-                        0.55,
-                        1.0 - min(0.45, (divergence_gap - 0.20) * 0.90),
-                    )
-                    divergence_size_multiplier = max(
-                        0.60,
-                        1.0 - min(0.40, (divergence_gap - 0.20) * 0.80),
-                    )
-                    ensemble_prob = 0.5 + ((ensemble_prob - 0.5) * confidence_scale)
-            ensemble_prob = max(0.03, min(0.97, ensemble_prob))
-            
-        if catastrophic_divergence:
-            return (
-                False,
-                "",
-                0.0,
-                [f"catastrophic_divergence_veto (gap={divergence_gap:.2%})"],
-                False,
-                1.0,
-                3,
-                0.05,
-            )
-            
-        # AI Multiplier
-        aigefs_data = w_data.get("aigefs")
-        ai_multiplier = 1.0
-        if aigefs_data:
-            if mode in ["RAIN", "SNOW", "WIND"]:
-                members_ai = aigefs_data.get("members_precip" if mode != "WIND" else "members_wind", [])
-            elif mode == "TEMP":
-                members_ai = aigefs_data.get("members_temp", [])
-            else:
-                members_ai = aigefs_data.get("members_high" if mode == "HIGH" else "members_low", [])
-                
-            if members_ai:
-                ai_val = members_ai[0]
-                ensemble_member_values = members_gfs + members_ec
-                ensemble_mean = float(np.mean(ensemble_member_values)) if ensemble_member_values else ai_val
-                ai_divergence = abs(ai_val - ensemble_mean)
-                disagree_thresh = 1.5 if mode not in ["RAIN", "SNOW"] else 0.1
-                if ai_divergence > disagree_thresh:
-                    ai_multiplier = 1.3
-                elif ai_divergence < (disagree_thresh / 3.0):
-                    ai_multiplier = 0.8
-                    
-        provider_mode = str(w_data.get("provider_mode") or "ensemble_members")
-        provider_size_multiplier = 0.85 if provider_mode == "deterministic_multi_model" else 1.0
-        lambda_scaler = ai_multiplier
-        q_gfs = prob_gfs or 0.5
-        q_ecmwf = prob_ecmwf or 0.5
-    else:
-        # Production path: Pricing Engine
-        from forecast.pricing_engine import calculate_pricing
-        from config import DB_PATH
-
-        try:
-            pricing = calculate_pricing(
-                ticker,
-                w_data,
-                hours_to_res=hours_to_res,
-                contract_name=contract_name,
-                strike=strike,
-                db_path=DB_PATH,
-            )
-        except Exception as pr_err:
-            return False, "", 0.0, [f"pricing_engine_error: {pr_err}"], False, 1.0, 3, 0.05
-
-        ensemble_prob = pricing["q_hat"]
-        q_gfs = pricing["q_gfs"]
-        q_ecmwf = pricing["q_ecmwf"]
-        q_hrrr = pricing["q_hrrr"]
-        lambda_scaler = pricing["lambda_scaler"]
-        gfs_weight = pricing["gfs_weight"]
-        ecmwf_weight = pricing["ecmwf_weight"]
-        hrrr_weight = pricing["hrrr_weight"]
-
-        provider_mode = str(w_data.get("provider_mode") or "ensemble_members")
-        provider_size_multiplier = 0.85 if provider_mode == "deterministic_multi_model" else 1.0
-        ai_multiplier = lambda_scaler
-        convergence_multiplier = 1.5
-        divergence_gap = abs(q_gfs - q_ecmwf)
-        divergence_size_multiplier = 1.0
-
-    logger.info(
-        f"Sovereign Convergence: {ticker} GFS={q_gfs:.1%} EC={q_ecmwf:.1%} -> 1.5x"
+    pricing_trace = dict(pricing)
+    pricing_trace.update(
+        {
+            "provider_at": str(w_data.get("timestamp") or ""),
+            "target_date": w_data.get("target_local_date"),
+            "target_hour": w_data.get("target_local_hour"),
+            "provider_mode": str(w_data.get("provider_mode") or "deterministic_multi_model"),
+            "gfs_members": len(w_data.get("members_high") or w_data.get("members_low") or w_data.get("members_temp") or []),
+            "ecmwf_members": len((w_data.get("ecmwf") or {}).get("members_high") or (w_data.get("ecmwf") or {}).get("members_low") or (w_data.get("ecmwf") or {}).get("members_temp") or []),
+            "aigfs_members": len((w_data.get("aigefs") or {}).get("members_high") or (w_data.get("aigefs") or {}).get("members_low") or (w_data.get("aigefs") or {}).get("members_temp") or []),
+        }
     )
 
-    edge_yes = (ensemble_prob - ask_yes) if ask_yes > 0 else None
-    edge_no = ((1.0 - ensemble_prob) - ask_no) if ask_no > 0 else None
-    net_edge_yes = _weather_net_edge(ensemble_prob, ask_yes)
-    net_edge_no = _weather_net_edge(1.0 - ensemble_prob, ask_no)
-    
-    # v19.1.11: The Sigma Lever (Volatility Sizing)
-    # v19.8: AI Multiplier now inflates/deflates Sigma directly
+    model_prob = pricing["q_hat"]
+    q_gfs = pricing["q_gfs"]
+    q_ecmwf = pricing["q_ecmwf"]
+    q_aigfs = pricing.get("q_aigfs", pricing.get("q_graphcast"))
+    lambda_scaler = pricing["lambda_scaler"]
+    gfs_weight = pricing["gfs_weight"]
+    ecmwf_weight = pricing["ecmwf_weight"]
+    hrrr_weight = pricing["hrrr_weight"]
+    physics_gfs_f = float((pricing.get("physics_gfs") or {}).get("adjustment_f") or 0.0)
+    physics_ecmwf_f = float((pricing.get("physics_ecmwf") or {}).get("adjustment_f") or 0.0)
+
+    provider_mode = str(w_data.get("provider_mode") or "deterministic_multi_model")
+    provider_size_multiplier = 1.0
+    consensus_projection = pricing.get("consensus_projection")
+    intraday = dict(w_data.get("intraday") or {})
+    station_derivative = intraday.get("metar_temp_trend_f_per_hr")
+    station_local_hour = 0.0
+    if station_derivative is not None and mode == "HIGH":
+        try:
+            from zoneinfo import ZoneInfo
+            from data.kalshi_weather_monitor import STATIONS, resolve_weather_city_key
+
+            city_key = resolve_weather_city_key(ticker, contract_name=contract_name)
+            station_tz = str((STATIONS.get(city_key) or {}).get("tz") or "UTC")
+            local_now = datetime.now(timezone.utc).astimezone(ZoneInfo(station_tz))
+            station_local_hour = local_now.hour + (local_now.minute / 60.0)
+        except Exception:
+            station_local_hour = 0.0
+    derivative_f_per_hr, peak_heating_concluded = calculate_diurnal_heating_derivative(
+        [0.0, float(station_derivative)] if station_derivative is not None else [],
+        current_local_hour=station_local_hour,
+    )
+    pricing_trace["station_derivative_f_per_hr"] = derivative_f_per_hr if station_derivative is not None else None
+    pricing_trace["peak_heating_concluded"] = peak_heating_concluded
+    convergence = _convergence_guardrail(q_gfs, q_ecmwf)
+    convergence_multiplier = float(convergence["convergence_multiplier"])
+    divergence_gap = float(convergence["divergence_gap"])
+    divergence_size_multiplier = float(convergence["divergence_size_multiplier"])
+    catastrophic_divergence = bool(convergence["catastrophic_divergence"])
+    confidence_scale = float(convergence["confidence_scale"])
+    if confidence_scale < 1.0:
+        model_prob = 0.5 + ((model_prob - 0.5) * confidence_scale)
+        model_prob = max(0.03, min(0.97, model_prob))
+    if catastrophic_divergence:
+        return (
+            False,
+            "",
+            0.0,
+            [f"catastrophic_divergence_veto (gap={divergence_gap:.2%})"],
+            False,
+            1.0,
+            3,
+            0.05,
+            pricing_trace,
+        )
+
+    q_gfs_label = f"{q_gfs:.1%}" if q_gfs is not None else "NA"
+    q_ecmwf_label = f"{q_ecmwf:.1%}" if q_ecmwf is not None else "NA"
+    q_aigfs_label = f"{q_aigfs:.1%}" if q_aigfs is not None else "NA"
+    logger.info(
+        "Sovereign Convergence: %s GFS=%s EC=%s AIGFS=%s gap=%.1f%% -> %.2fx/%.2fx",
+        ticker,
+        q_gfs_label,
+        q_ecmwf_label,
+        q_aigfs_label,
+        divergence_gap * 100.0,
+        convergence_multiplier,
+        divergence_size_multiplier,
+    )
+
+    edge_yes = (model_prob - ask_yes) if ask_yes > 0 else None
+    edge_no = ((1.0 - model_prob) - ask_no) if ask_no > 0 else None
+    net_edge_yes = _weather_net_edge(model_prob, ask_yes)
+    net_edge_no = _weather_net_edge(1.0 - model_prob, ask_no)
+
+    # Predictive sigma and AIGFS disagreement are distinct uncertainty signals.
+    # Sigma shapes this multiplier; AIGFS already shapes the probability kernel
+    # and reaches the Kelly solver once through ``effective_sizing_multiplier``.
     if mode in {"RAIN", "SNOW"}:
         sigma_raw = w_data.get("sigma_precip", w_data.get("sigma_low", 2.0))
     elif mode == "TEMP":
@@ -1635,7 +1176,7 @@ def _strategy_weather_details(
         sigma_raw = w_data.get("sigma_high", 2.0)
     else:
         sigma_raw = w_data.get("sigma_low", 2.0)
-    sigma = sigma_raw * ai_multiplier
+    sigma = float(sigma_raw)
 
     # v19.1.11: Sovereign Instrumentation
     try:
@@ -1656,16 +1197,18 @@ def _strategy_weather_details(
             1.0,
             3,
             0.05,
+            pricing_trace,
         )
-
-    # Apply AI Multiplier to post-gate sizing sigma
-    sigma = sigma_raw * ai_multiplier
 
     # sigma_mult: 1.0 at 2.0F sigma, 1.25 at 1.0F sigma, 0.5 at 4.0F sigma
     sigma_mult = max(0.3, min(1.3, 1.5 - (sigma / 4.0)))
 
     premium_yes_threshold = float(KALSHI_EXPENSIVE_YES_THRESHOLD)
-    premium_yes_net_edge_floor = float(KALSHI_EXPENSIVE_YES_MIN_NET_EDGE)
+    # The premium-price gate must never be weaker than the universal EV gate.
+    premium_yes_net_edge_floor = max(
+        float(EV_THRESHOLD),
+        float(KALSHI_EXPENSIVE_YES_MIN_NET_EDGE),
+    )
     premium_yes_size_multiplier = max(0.25, float(KALSHI_EXPENSIVE_YES_SIZE_MULTIPLIER))
     if (
         ask_yes > 0
@@ -1687,12 +1230,9 @@ def _strategy_weather_details(
             1.0,
             3,
             0.05,
+            pricing_trace,
         )
-    
-    hourly_contract = is_hourly_weather_contract(
-        ticker,
-        contract_name=contract_name,
-    )
+
     min_allowed_price = min_contract_price_for_mode(
         mode,
         ticker=ticker,
@@ -1708,6 +1248,7 @@ def _strategy_weather_details(
             1.0,
             3,
             0.05,
+            pricing_trace,
         )
     if ask_no > 0 and edge_no is not None and edge_no > 0 and ask_no < min_allowed_price:
         return (
@@ -1719,21 +1260,22 @@ def _strategy_weather_details(
             1.0,
             3,
             0.05,
+            pricing_trace,
         )
 
     # Forensic Audit Log
     edge_yes_display = f"{edge_yes:.1%}" if edge_yes is not None else "n/a"
     edge_no_display = f"{edge_no:.1%}" if edge_no is not None else "n/a"
     logger.info(
-        f"TRACE: {ticker} | p={ensemble_prob:.1%} Edge_Y={edge_yes_display} "
+        f"TRACE: {ticker} | p={model_prob:.1%} Edge_Y={edge_yes_display} "
         f"Edge_N={edge_no_display} Sigma={sigma:.1f}F s_mult={sigma_mult:.2f}"
     )
 
-    # Guardrail 1: The "Sun Spike" Veto
+    # Cloud/radiation now shape temperature before the contract CDF. A second
+    # mode-agnostic hard veto would double-count the same physical evidence.
     peak_tcdc = w_data.get("peak_tcdc", 0.0)
     peak_ssrd = w_data.get("peak_ssrd")
-    cloud_veto = (mode == "HIGH") and (peak_tcdc > 65.0)
-    
+
     # Hourly "between" bins are now first-class; broader daily bin support stays off
     # until we have stronger live evidence across those markets.
     if semantics.comparator == "between" and mode != "TEMP":
@@ -1746,6 +1288,7 @@ def _strategy_weather_details(
             1.0,
             3,
             0.05,
+            pricing_trace,
         )
 
     narrow_bin_size_multiplier = 1.0
@@ -1754,28 +1297,35 @@ def _strategy_weather_details(
     effective_ev_threshold_no = EV_THRESHOLD
 
     if net_edge_yes is not None and net_edge_yes >= effective_ev_threshold_yes:
-        if cloud_veto:
-            if peak_ssrd is not None:
+        is_taker = True
+        if (
+            mode in {"HIGH", "LOW", "TEMP"}
+            and semantics.comparator in {"gt", "lt"}
+            and consensus_projection is not None
+        ):
+            headroom_f = _projection_headroom_f(semantics, float(consensus_projection), "YES")
+            pricing_trace["selected_headroom_f"] = headroom_f
+            if headroom_f < float(KALSHI_MIN_MODEL_HEADROOM_F):
                 return (
-                    False,
-                    "",
-                    0.0,
-                    [f"cloud_cover_veto (TCDC={peak_tcdc:.1f}% SSRD={float(peak_ssrd):.0f}W/m2)"],
-                    False,
-                    1.0,
-                    3,
-                    0.05,
+                    False, "", 0.0,
+                    [f"model_headroom_veto ({headroom_f:.2f}F < {KALSHI_MIN_MODEL_HEADROOM_F:.2f}F)"],
+                    True, 1.0, 3, 0.05, pricing_trace,
                 )
-            return False, "", 0.0, [f"cloud_cover_veto (TCDC={peak_tcdc:.1f}%)"], False, 1.0, 3, 0.05
-
-        is_taker = edge_yes >= 0.22 and is_short_term
+        if mode == "HIGH" and peak_heating_concluded:
+            return (
+                False, "", 0.0,
+                [f"post_peak_heating_yes_veto (dT_dt={derivative_f_per_hr:.2f}F/hr)"],
+                True, 1.0, 3, 0.05, pricing_trace,
+            )
         factors = [
-            f"ensemble_p={ensemble_prob:.1%}",
+            f"model_p={model_prob:.1%}",
             f"edge={edge_yes:.1%}",
             f"net_ev={net_edge_yes:.1%}",
             f"conv_mult={convergence_multiplier:.1f}x",
             f"sigma_mult={sigma_mult:.2f}x",
-            f"blend=GFS{gfs_weight:.0%}/EC{ecmwf_weight:.0%}",
+            f"blend=GFS{gfs_weight:.0%}/EC{ecmwf_weight:.0%}/HRRR{hrrr_weight:.0%}",
+            f"aigfs_lambda={lambda_scaler:.2f}",
+            f"physics_f=GFS{physics_gfs_f:+.2f}/EC{physics_ecmwf_f:+.2f}",
             f"div_gap={divergence_gap:.1%}",
             f"TCDC={peak_tcdc:.1f}%",
             f"wx_provider={provider_mode}",
@@ -1786,7 +1336,7 @@ def _strategy_weather_details(
         sizing_cap = KALSHI_KELLY_CAP
         factors.append("tier=continuous")
 
-        # v19.1.12: Return raw ensemble_prob + sizing_multiplier separately
+        # Return guarded model probability and its separate sizing multiplier.
         sizing_multiplier = (
             convergence_multiplier
             * sigma_mult
@@ -1803,23 +1353,39 @@ def _strategy_weather_details(
             factors.append(
                 f"premium_yes_haircut={premium_yes_size_multiplier:.2f}x"
             )
-        return True, "YES", ensemble_prob, factors, is_taker, sizing_multiplier, conv_tier, sizing_cap
+        pricing_trace["q_decision_guarded"] = model_prob
+        return True, "YES", model_prob, factors, is_taker, sizing_multiplier, conv_tier, sizing_cap, pricing_trace
 
     if net_edge_no is not None and net_edge_no >= effective_ev_threshold_no:
-        is_taker = edge_no >= 0.22 and is_short_term
+        is_taker = True
+        if (
+            mode in {"HIGH", "LOW", "TEMP"}
+            and semantics.comparator in {"gt", "lt"}
+            and consensus_projection is not None
+        ):
+            headroom_f = _projection_headroom_f(semantics, float(consensus_projection), "NO")
+            pricing_trace["selected_headroom_f"] = headroom_f
+            if headroom_f < float(KALSHI_MIN_MODEL_HEADROOM_F):
+                return (
+                    False, "", 0.0,
+                    [f"model_headroom_veto ({headroom_f:.2f}F < {KALSHI_MIN_MODEL_HEADROOM_F:.2f}F)"],
+                    True, 1.0, 3, 0.05, pricing_trace,
+                )
         factors = [
-            f"ensemble_p={ensemble_prob:.1%}",
+            f"model_p={model_prob:.1%}",
             f"edge={edge_no:.1%}",
             f"net_ev={net_edge_no:.1%}",
             f"conv_mult={convergence_multiplier:.1f}x",
             f"sigma_mult={sigma_mult:.2f}x",
-            f"blend=GFS{gfs_weight:.0%}/EC{ecmwf_weight:.0%}",
+            f"blend=GFS{gfs_weight:.0%}/EC{ecmwf_weight:.0%}/HRRR{hrrr_weight:.0%}",
+            f"aigfs_lambda={lambda_scaler:.2f}",
+            f"physics_f=GFS{physics_gfs_f:+.2f}/EC{physics_ecmwf_f:+.2f}",
             f"div_gap={divergence_gap:.1%}",
             f"wx_provider={provider_mode}",
         ]
         conv_tier = 0
         sizing_cap = KALSHI_KELLY_CAP
-        no_prob = 1.0 - ensemble_prob
+        no_prob = 1.0 - model_prob
         factors.append("tier=continuous")
 
         sizing_multiplier = (
@@ -1833,74 +1399,11 @@ def _strategy_weather_details(
             factors.append(f"provider_haircut={provider_size_multiplier:.2f}x")
         if narrow_bin_size_multiplier < 1.0:
             factors.append(f"narrow_bin_haircut={narrow_bin_size_multiplier:.2f}x")
-        return True, "NO", no_prob, factors, is_taker, sizing_multiplier, conv_tier, sizing_cap
+        pricing_trace["q_decision_guarded"] = model_prob
+        return True, "NO", no_prob, factors, is_taker, sizing_multiplier, conv_tier, sizing_cap, pricing_trace
 
-    return False, "", 0.0, ["insufficient_edge"], False, 1.0, 3, 0.05
-
-
-def _strategy_weather(
-    ticker: str,
-    ask_yes: float,
-    ask_no: float,
-    hours_to_res: float,
-    contract_name: str = "",
-    strike: float | None = None,
-) -> tuple[bool, str, float, list[str], bool]:
-    """
-    Legacy five-field wrapper kept for proof compatibility.
-
-    Runtime sizing and tier metadata now live in ``_strategy_weather_details``.
-    """
-    passes, side, ensemble_prob, factors, is_taker, sizing_multiplier, _tier, _cap = (
-        _strategy_weather_details(
-            ticker,
-            ask_yes,
-            ask_no,
-            hours_to_res,
-            contract_name=contract_name,
-            strike=strike,
-        )
-    )
-    legacy_confidence = ensemble_prob * sizing_multiplier if passes else 0.0
-    return passes, side, legacy_confidence, factors, is_taker
-
-def get_graphcast_lambda(ticker: str, contract_name: str, strike: float, resolution_at: str, last_trade_at: str) -> float:
-    try:
-        from forecast.pricing_engine import resolve_weather_contract, calculate_graphcast_lambda
-        from forecast.strategy_engine import get_contract_weather_data
-        w_data = get_contract_weather_data(
-            ticker,
-            contract_name=contract_name,
-            strike=strike,
-            resolution_at=resolution_at,
-            last_trade_at=last_trade_at,
-        )
-        if not w_data:
-            return 1.0
-        semantics = resolve_weather_contract(ticker=ticker, contract_name=contract_name, strike=strike)
-        if not semantics or semantics.ambiguous:
-            return 1.0
-        mode = semantics.mode
-        if mode in ["RAIN", "SNOW"]:
-            key = "members_precip"
-        elif mode == "WIND":
-            key = "members_wind"
-        elif mode == "LOW":
-            key = "members_low"
-        elif mode == "TEMP":
-            key = "members_temp"
-        else:
-            key = "members_high"
-        members_gfs = [float(v) for v in (w_data.get(key) or [])]
-        ecmwf_data = w_data.get("ecmwf") or {}
-        members_ec = [float(v) for v in (ecmwf_data.get(key) or [])]
-        combined = members_gfs + members_ec
-        target_strike = strike if strike is not None else semantics.threshold
-        if target_strike is None:
-            target_strike = semantics.display_high if semantics.display_high is not None else 0.0
-        return calculate_graphcast_lambda(combined, target_strike)
-    except Exception:
-        return 1.0
+    pricing_trace["q_decision_guarded"] = model_prob
+    return False, "", 0.0, ["insufficient_edge"], False, 1.0, 3, 0.05, pricing_trace
 
 
 def evaluate_contract(
@@ -1915,6 +1418,7 @@ def evaluate_contract(
     deployed_pct: float = 0.0,
     open_positions_count: int = 0,
     same_event_open: bool = False,
+    same_event_exposure_usd: float = 0.0,
 ) -> Optional[StrategyResult]:
     """
     Evaluate all strategy families for a contract and return the best
@@ -1930,7 +1434,7 @@ def evaluate_contract(
         if w_data:
             data_ts = w_data.get("timestamp", 0)
             age_m = (time.time() - data_ts) / 60.0
-            
+
             freshness_limit = weather_freshness_limit_minutes(
                 ticker,
                 contract_name=contract.get("contract_name", ""),
@@ -1948,7 +1452,7 @@ def evaluate_contract(
                     uncertainty_penalty=0.0,
                     econ_approved=False,
                     veto_reason=(
-                        f"stale_ensemble_data ({age_m:.0f}m old "
+                        f"stale_weather_model_data ({age_m:.0f}m old "
                         f"> {freshness_limit}m limit)"
                     ),
                     position_fraction=0.0,
@@ -1976,14 +1480,10 @@ def evaluate_contract(
 
     ask_yes = float(yes_quote.get("ask") or 0.0)
     ask_no = float(no_quote.get("ask") or 0.0)
-    bid_yes = float(yes_quote.get("bid") or 0.0)
-    bid_no = float(no_quote.get("bid") or 0.0)
     # SRE Pillar 2: Liquidity Awareness (Top-of-Book depth)
     ask_size_yes = int(yes_quote.get("ask_size") or 0)
     ask_size_no = int(no_quote.get("ask_size") or 0)
-    
-    mid_yes = float(yes_quote.get("mid") or 0.0)
-    mid_no = float(no_quote.get("mid") or 0.0)
+
     spread = max(
         float(yes_quote.get("spread") or 0.0),
         float(no_quote.get("spread") or 0.0),
@@ -2092,13 +1592,76 @@ def evaluate_contract(
         best_factors = weather_factors
         best_is_taker = bool(w_res[4])
         best_multiplier = float(w_res[5] or 1.0)
-        best_tier = int(w_res[6] or 3)
         best_sizing_cap = float(w_res[7] or 0.05)
+        pricing_trace = dict(w_res[8] or {}) if len(w_res) > 8 else {}
+        if same_event_open:
+            best_multiplier *= SAME_EVENT_PENALTY
+            best_factors.append(f"same_event_haircut={SAME_EVENT_PENALTY:.2f}x")
         chosen_side_prob = max(0.01, min(0.99, float(chosen_prob)))
+        hub_name = _get_city_hub(
+            ticker,
+            contract_name=str(contract.get("contract_name") or ""),
+        )
+        hub_default = float(
+            (HUB_PARAMS.get(hub_name) or {}).get("hard_rbi_threshold", 0.0)
+        )
+        hub_conviction_floor = float(
+            get_dynamic_param(f"{hub_name}.hard_rbi_threshold", hub_default)
+        )
+        if hub_conviction_floor > 0.0 and chosen_side_prob < hub_conviction_floor:
+            return StrategyResult(
+                strategy_family="vetoed",
+                side="NONE",
+                q_hat=(chosen_side_prob if best_side == "YES" else 1.0 - chosen_side_prob),
+                ev=0.0,
+                ev_yes=0.0,
+                ev_no=0.0,
+                confidence=chosen_side_prob,
+                uncertainty_penalty=0.0,
+                econ_approved=False,
+                veto_reason=(
+                    f"hub_conviction_floor_veto ({hub_name} "
+                    f"{chosen_side_prob:.3f} < {hub_conviction_floor:.3f})"
+                ),
+                position_fraction=0.0,
+                position_contracts=0,
+                top_factors=best_factors,
+                hours_to_resolution=hours_to_res,
+                is_taker_override=True,
+                pricing_trace=pricing_trace,
+            )
+        if hub_conviction_floor > 0.0:
+            best_factors.append(
+                f"hub_floor={hub_name}:{hub_conviction_floor:.2f}"
+            )
         q_hat = chosen_side_prob if best_side == "YES" else (1.0 - chosen_side_prob)
         # SRE Pillar 6: Rule 1 Probability Input Clamps
         q_hat = max(0.01, min(0.99, float(q_hat)))
         position_cap_usd = get_kalshi_position_cap_usd(chosen_prob)
+        event_risk_budget_usd = max(0.0, bankroll * MAX_RISK_PER_EVENT_PCT)
+        event_risk_remaining_usd = max(
+            0.0,
+            event_risk_budget_usd - max(0.0, float(same_event_exposure_usd)),
+        )
+        position_cap_usd = min(position_cap_usd, event_risk_remaining_usd)
+        if position_cap_usd <= 0.0:
+            return StrategyResult(
+                strategy_family="vetoed",
+                side="NONE",
+                q_hat=q_hat,
+                ev=0.0,
+                ev_yes=0.0,
+                ev_no=0.0,
+                confidence=0.0,
+                uncertainty_penalty=0.0,
+                econ_approved=False,
+                veto_reason="event_risk_cap_reached",
+                position_fraction=0.0,
+                position_contracts=0,
+                top_factors=best_factors,
+                hours_to_resolution=hours_to_res,
+                is_taker_override=False,
+            )
 
         p_cost = ask_yes if best_side == "YES" else ask_no
 
@@ -2124,10 +1687,6 @@ def evaluate_contract(
         from forecast.weather_contracts import weather_mode_for_ticker
         w_mode = weather_mode_for_ticker(ticker)
 
-        hourly_contract = is_hourly_weather_contract(
-            ticker,
-            contract_name=str(contract.get("contract_name") or ""),
-        )
         approved, veto_reason = _weather_market_gate(
             ask_yes=ask_yes,
             ask_no=ask_no,
@@ -2144,128 +1703,59 @@ def evaluate_contract(
         # SRE Pillar 1: Clamped pricing/utility inputs
         q = chosen_side_prob
         ask_yes_clamped = max(0.0, min(1.0, float(ask_yes)))
-        bid_yes_clamped = max(0.0, min(1.0, float(bid_yes)))
         ask_no_clamped = max(0.0, min(1.0, float(ask_no)))
-        bid_no_clamped = max(0.0, min(1.0, float(bid_no)))
-        
-        # 1. Fetch lambda_val using our helper
-        lambda_val = get_graphcast_lambda(
-            ticker,
-            contract_name=str(contract.get("contract_name") or ""),
-            strike=float(contract.get("strike") or 0.0),
-            resolution_at=str(contract.get("resolution_at") or ""),
-            last_trade_at=str(contract.get("last_trade_at") or ""),
+
+        # The exact AIGFS uncertainty scaler already used by canonical pricing.
+        # Re-fetching weather here could mix provider vintages inside one decision.
+        lambda_val = float(pricing_trace.get("lambda_scaler") or 1.0)
+        effective_sizing_multiplier = max(0.0, best_multiplier) / max(1e-9, lambda_val)
+        best_factors.append(f"effective_size_mult={effective_sizing_multiplier:.2f}x")
+
+        # 2. Taker-only sizing and routing (operator-selected production policy).
+        p_T = ask_yes_clamped if best_side == "YES" else ask_no_clamped
+        ask_depth = ask_size_yes if best_side == "YES" else ask_size_no
+        level2_asks_T = [{"price": p_T, "qty": ask_depth}] if ask_depth > 0 else None
+        n_T = calculate_continuous_sizing(
+            market_price=p_T,
+            model_prob=q,
+            capital_base=bankroll,
+            multiplier=effective_sizing_multiplier,
+            cap_pct=best_sizing_cap,
+            conv_tier=3,
+            hours_to_res=hours_to_res,
+            lane_ev_threshold=0.05,
+            book_asks=level2_asks_T,
+            position_cap_usd=position_cap_usd,
         )
-        
-        # 2. Solver and maker/taker routing (SPEC §5)
-        if best_side == "YES":
-            p_T = ask_yes_clamped
-            level2_asks_T = [{"price": p_T, "qty": ask_size_yes}] if ask_size_yes > 0 else None
-            n_T = calculate_continuous_sizing(
-                market_price=p_T,
-                ensemble_prob=q,
-                capital_base=bankroll,
-                multiplier=1.0 / max(1e-9, lambda_val),
-                cap_pct=0.10,
-                conv_tier=3,
-                hours_to_res=hours_to_res,
-                lane_ev_threshold=0.05,
-                book_asks=level2_asks_T,
-                position_cap_usd=position_cap_usd,
-            )
-            f_star_T, phi_T, _ = solve_optimal_size(q, p_T, maker=False, bankroll=bankroll, lambda_scaler=lambda_val, cov_charge=1.0, level2_asks=level2_asks_T)
-            u_T = log_utility_g(f_star_T, q, p_T, phi_T)
-            
-            p_M = bid_yes_clamped
-            if p_M <= 0.0:
-                u_M = -999999.0
-                expected_u_M = -999999.0
-                f_star_M, phi_M, n_M = 0.0, 0.0, 0
-            else:
-                f_star_M, phi_M, n_M = solve_optimal_size(q, p_M, maker=True, bankroll=bankroll, lambda_scaler=lambda_val, cov_charge=1.0)
-                u_M = log_utility_g(f_star_M, q, p_M, phi_M)
-                spread = max(0.0, p_T - p_M)
-                zeta = estimate_zeta(contract.get("id"), hours_to_res, spread, DB_PATH)
-                expected_u_M = _maker_first_utility(u_M, u_T, zeta, hours_to_res)
-        else: # NO Routing
-            p_T = ask_no_clamped
-            level2_asks_T = [{"price": p_T, "qty": ask_size_no}] if ask_size_no > 0 else None
-            n_T = calculate_continuous_sizing(
-                market_price=p_T,
-                ensemble_prob=q,
-                capital_base=bankroll,
-                multiplier=1.0 / max(1e-9, lambda_val),
-                cap_pct=0.10,
-                conv_tier=3,
-                hours_to_res=hours_to_res,
-                lane_ev_threshold=0.05,
-                book_asks=level2_asks_T,
-                position_cap_usd=position_cap_usd,
-            )
-            f_star_T, phi_T, _ = solve_optimal_size(q, p_T, maker=False, bankroll=bankroll, lambda_scaler=lambda_val, cov_charge=1.0, level2_asks=level2_asks_T)
-            u_T = log_utility_g(f_star_T, q, p_T, phi_T)
-            
-            p_M = bid_no_clamped
-            if p_M <= 0.0:
-                u_M = -999999.0
-                expected_u_M = -999999.0
-                f_star_M, phi_M, n_M = 0.0, 0.0, 0
-            else:
-                f_star_M, phi_M, n_M = solve_optimal_size(q, p_M, maker=True, bankroll=bankroll, lambda_scaler=lambda_val, cov_charge=1.0)
-                u_M = log_utility_g(f_star_M, q, p_M, phi_M)
-                spread = max(0.0, p_T - p_M)
-                zeta = estimate_zeta(contract.get("id"), hours_to_res, spread, DB_PATH)
-                expected_u_M = _maker_first_utility(u_M, u_T, zeta, hours_to_res)
-                
-        # Choose the route with higher utility
-        if expected_u_M > u_T and expected_u_M > 0.0:
-            best_is_taker = False
-            p_cost = p_M
-            n_contracts = n_M
-            f_star_chosen = f_star_M
-            phi_cost = phi_M
-        else:
-            best_is_taker = True
-            p_cost = p_T
-            n_contracts = n_T
-            f_star_chosen = f_star_T
-            phi_cost = phi_T
-            
+        f_star_T, phi_T, _ = solve_optimal_size(
+            q,
+            p_T,
+            maker=False,
+            bankroll=bankroll,
+            lambda_scaler=1.0 / max(1e-9, effective_sizing_multiplier),
+            cov_charge=1.0,
+            level2_asks=level2_asks_T,
+        )
+        best_is_taker = True
+        p_cost = p_T
+        n_contracts = n_T
+        f_star_chosen = f_star_T
+        phi_cost = phi_T
+
         ev_chosen = q - p_cost - phi_cost
         ev_yes = ev_chosen if best_side == "YES" else -1.0
         ev_no = ev_chosen if best_side == "NO" else -1.0
-        
+
         # EV Gate: positive f_star / EV
         if approved and f_star_chosen <= 0.0:
             approved = False
             veto_reason = f"fee_adjusted_ev_too_low (f_star={f_star_chosen:.4f})"
 
-        weather_model_prob_gfs = None
-        weather_model_prob_ecmwf = None
-        weather_mode = ""
-        weather_semantics = resolve_weather_contract(
-            ticker=contract.get("local_symbol", ""),
-            contract_name=str(contract.get("contract_name") or ""),
-            strike=float(contract.get("strike") or 0.0),
-        )
-        if weather_semantics is not None and not weather_semantics.ambiguous:
-            projected_weather = get_contract_weather_data(
-                contract.get("local_symbol", ""),
-                contract_name=str(contract.get("contract_name") or ""),
-                strike=float(contract.get("strike") or 0.0),
-                resolution_at=str(contract.get("resolution_at") or ""),
-                last_trade_at=str(contract.get("last_trade_at") or ""),
-            )
-            if projected_weather:
-                weather_model_prob_gfs, weather_model_prob_ecmwf = (
-                    _extract_weather_model_probabilities(projected_weather, weather_semantics)
-                )
-                weather_mode = weather_semantics.mode
+        weather_model_prob_gfs = pricing_trace.get("q_gfs")
+        weather_model_prob_ecmwf = pricing_trace.get("q_ecmwf")
+        weather_mode = str(w_mode or "")
 
         if approved:
-            # Model Entropy of predicted q_hat
-            model_entropy = -(q_hat * math.log(q_hat) + (1.0 - q_hat) * math.log(1.0 - q_hat)) if 0.0 < q_hat < 1.0 else 0.0
-            
             # STRICT SRE Pillar 2: Top-of-book hard clamp for taker
             p_cost_size = ask_size_yes if best_side == "YES" else ask_size_no
             if best_is_taker and p_cost_size > 0:
@@ -2279,18 +1769,29 @@ def evaluate_contract(
                     KALSHI_MAX_QTY_PER_POSITION,
                 )
                 n_contracts = KALSHI_MAX_QTY_PER_POSITION
-                
-            total_cost = n_contracts * (p_cost + calculate_ceiled_fee(p_cost, n_contracts, maker=not best_is_taker))
-            
+
+            total_cost = estimate_kalshi_order_cost_usd(
+                n_contracts,
+                p_cost,
+                maker=False,
+            )
+
             # Enforce strict SRE Risk Ceilings
-            max_usd = position_cap_usd
+            max_usd = min(position_cap_usd, bankroll * best_sizing_cap)
             if max_usd is not None:
                 cost_limit = float(max_usd)
                 if total_cost > cost_limit:
-                    from config import max_kalshi_contracts_for_budget
-                    clamped_qty = max_kalshi_contracts_for_budget(p_cost, cost_limit)
+                    clamped_qty = max_kalshi_contracts_for_budget(
+                        p_cost,
+                        cost_limit,
+                        maker=False,
+                    )
                     n_contracts = min(max(0, n_contracts), clamped_qty, KALSHI_MAX_QTY_PER_POSITION)
-                    total_cost = n_contracts * (p_cost + calculate_ceiled_fee(p_cost, n_contracts, maker=not best_is_taker))
+                    total_cost = estimate_kalshi_order_cost_usd(
+                        n_contracts,
+                        p_cost,
+                        maker=False,
+                    )
                     logger.info(
                         f"Sovereign SRE Clamp: Clamping {ticker} cost to {cost_limit:.2f} USD (qty {n_contracts})"
                     )
@@ -2299,7 +1800,7 @@ def evaluate_contract(
 
         actual_fraction = total_cost / bankroll if bankroll > 0 else 0.0
         return StrategyResult(
-            strategy_family="weather_ensemble",
+            strategy_family="weather_physics",
             side=best_side,
             q_hat=q_hat,
             ev=ev_chosen,
@@ -2319,6 +1820,7 @@ def evaluate_contract(
             model_prob_gfs=weather_model_prob_gfs,
             model_prob_ecmwf=weather_model_prob_ecmwf,
             weather_mode=weather_mode,
+            pricing_trace=pricing_trace,
         )
 
     return StrategyResult(
@@ -2345,18 +1847,18 @@ def check_strike_consistency(ticker: str, side: str, open_positions: list[dict])
     while keeping the same-side-same-contract ban.
     """
     event_key = _ticker_event_key(ticker)
-    
+
     for p in open_positions:
         p_ticker = p.get("local_symbol", "")
         if _ticker_event_key(p_ticker) != event_key:
             continue
-        
+
         p_side = p.get("side", "").upper()
-        
+
         # Keep same-side-same-contract ban
         if ticker == p_ticker and side == p_side:
             return False, f"duplicate_contract_veto: already have {side} on {p_ticker}"
-        
+
         # Opposite-side hedge guard on the exact same contract
         if ticker == p_ticker and side != p_side:
             return False, f"hedge_guard: cannot bet opposite side on existing strike {p_ticker}"
@@ -2465,12 +1967,13 @@ def evaluate_market_snapshots(
         open_event_families = {}
     if open_positions is None:
         open_positions = []
-    
+
     # Local frequency map to track evaluations in the SAME tick
     current_tick_counts = open_event_families.copy()
-    
+
     # v19.1.10: Regional Hub Exposure Tracking (Net Directional Delta Hedging)
-    hub_signed_exposures = {} 
+    hub_signed_exposures = {}
+    family_exposures_usd: dict[str, float] = {}
     for pos in open_positions:
         p_ticker = pos.get("local_symbol", "") or pos.get("ticker", "")
         if not p_ticker:
@@ -2479,34 +1982,31 @@ def evaluate_market_snapshots(
             p_ticker,
             contract_name=str(pos.get("contract_name") or ""),
         )
-        entry_price = float(pos.get("entry_price") or pos.get("entry") or 0.0)
-        pos_usd = get_kalshi_position_exposure_usd(
-            float(pos.get("qty", 0)),
-            entry_price,
-        )
-        
+        pos_usd = get_kalshi_position_snapshot_exposure_usd(pos)
+
         p_side = str(pos.get("side") or "").upper()
         p_prefix = p_ticker.split("-")[0].upper()
-        
+        family_exposures_usd[p_prefix] = family_exposures_usd.get(p_prefix, 0.0) + pos_usd
+
         # Assign Cool/Wet outcomes a negative sign (-1.0) and Warm/Dry outcomes a positive sign (+1.0)
         is_cool_wet_prefix = any(x in p_prefix for x in ("KXLOW", "RAIN", "KXRAIN", "KXSNOW", "KXWIND"))
         is_warm_dry_prefix = any(x in p_prefix for x in ("KXHIGH", "KXTEMP"))
-        
+
         if is_cool_wet_prefix:
             sign = -1.0 if p_side == "YES" else 1.0
         elif is_warm_dry_prefix:
             sign = 1.0 if p_side == "YES" else -1.0
         else:
             sign = 1.0
-            
+
         hub_signed_exposures[p_hub] = hub_signed_exposures.get(p_hub, []) + [pos_usd * sign]
-    
+
     # Initial load of open hub exposure (approximate based on ticker)
     # Note: In a true state-full system, we'd query existing positions.
     # For now, we'll track within the tick.
 
     approved_entries = []
-    
+
     if macro_context:
         logger.info(f"[strategy_engine] Anchoring evaluation in Macro Context (Risk={macro_context.get('risk_score')})")
 
@@ -2530,7 +2030,7 @@ def evaluate_market_snapshots(
         if not is_weather and not bars_5m:
             continue
 
-        family = snapshot.family
+        family = snapshot.family.upper()
         hub = _get_city_hub(ticker, contract_name=snapshot.contract_name)
 
         count = current_tick_counts.get(family, 0)
@@ -2567,6 +2067,7 @@ def evaluate_market_snapshots(
                 deployed_pct=deployed_pct,
                 open_positions_count=open_positions_count,
                 same_event_open=(count > 0),
+                same_event_exposure_usd=family_exposures_usd.get(family, 0.0),
             )
             if (
                 result is not None
@@ -2582,46 +2083,20 @@ def evaluate_market_snapshots(
                 result.position_fraction = 0.0
                 result.position_contracts = 0
 
-            # SPEC §4.6: Variance budget check & absolute backstop post-sizing
-            if result is not None and result.econ_approved and result.side in {"YES", "NO"}:
-                try:
-                    from forecast.covariance_engine import check_and_shrink_candidate
-                    from config import DB_PATH
-                    
-                    candidate_qty = int(result.position_contracts)
-                    candidate_price = float(yc.get("ask") or yes_quote.get("ask_yes") or 0.50) if result.side == "YES" else float(nc.get("ask") or no_quote.get("ask_no") or 0.50)
-                    
-                    final_qty, charge_factor, debug_info = check_and_shrink_candidate(
-                        candidate_contract=yc if result.side == "YES" else nc,
-                        candidate_side=result.side,
-                        candidate_price=candidate_price,
-                        candidate_qty=candidate_qty,
-                        open_positions=open_positions,
-                        bankroll=bankroll,
-                        db_path=DB_PATH
-                    )
-                    
-                    if final_qty <= 0:
-                        result.econ_approved = False
-                        result.veto_reason = f"variance_budget_veto ({debug_info.get('reason')})"
-                        result.position_fraction = 0.0
-                        result.position_contracts = 0
-                    elif final_qty < candidate_qty:
-                        result.position_contracts = final_qty
-                        result.position_fraction = (final_qty * candidate_price) / bankroll
-                except Exception as cov_err:
-                    logger.error(f"[strategy_engine] Variance budget check failed: {cov_err}")
-
             # Evaluate Net Directional Delta Hub Hedging cap strictly post-sizing (Phase 3 Gate 11)
             if result is not None and result.econ_approved and result.side in {"YES", "NO"} and hub != "UNKNOWN" and result.position_contracts > 0:
                 current_signed_sum = sum(hub_signed_exposures.get(hub, []))
-                candidate_price = float(yc.get("ask") or yes_quote.get("ask_yes") or 0.50) if result.side == "YES" else float(nc.get("ask") or no_quote.get("ask_no") or 0.50)
-                
+                candidate_price = (
+                    float(yes_quote.get("ask") or 0.50)
+                    if result.side == "YES"
+                    else float(no_quote.get("ask") or 0.50)
+                )
+
                 candidate_exposure = get_kalshi_position_exposure_usd(
                     float(result.position_contracts),
                     candidate_price,
                 )
-                
+
                 p_side = str(result.side).upper()
                 p_prefix = ticker.split("-")[0].upper()
                 is_cool_wet_prefix = any(x in p_prefix for x in ("KXLOW", "RAIN", "KXRAIN", "KXSNOW", "KXWIND"))
@@ -2632,13 +2107,24 @@ def evaluate_market_snapshots(
                     c_sign = 1.0 if p_side == "YES" else -1.0
                 else:
                     c_sign = 1.0
-                    
+
                 projected_hub_exposure = abs(current_signed_sum + (candidate_exposure * c_sign))
                 if projected_hub_exposure > current_hub_cap:
                     result.econ_approved = False
                     result.veto_reason = f"hub_exposure_cap_reached ({projected_hub_exposure:.1f}/{current_hub_cap:.1f})"
                     result.position_fraction = 0.0
                     result.position_contracts = 0
+
+            if result is not None and result.econ_approved and result.side in {"YES", "NO"}:
+                selected_price = (
+                    float(yes_quote.get("ask") or 0.0)
+                    if result.side == "YES"
+                    else float(no_quote.get("ask") or 0.0)
+                )
+                family_exposures_usd[family] = family_exposures_usd.get(family, 0.0) + get_kalshi_position_exposure_usd(
+                    float(result.position_contracts),
+                    selected_price,
+                )
 
         if result is None:
             continue

@@ -79,6 +79,19 @@ def _ensure_forecast_schema() -> None:
     init_forecast_db(config.DB_PATH)
 
 
+@pytest.fixture(autouse=True)
+def _isolate_city_firewall(monkeypatch) -> None:
+    """Keep non-firewall proofs focused on the gate they are exercising.
+
+    Production's versioned default intentionally blocks 27 cities, including NY,
+    which is the neutral fixture ticker used throughout the strategy proofs.  The
+    dedicated city-blacklist module reapplies each posture it needs explicitly.
+    """
+    from forecast import strategy_engine
+
+    monkeypatch.setattr(strategy_engine, "CITY_BLACKLIST", set())
+
+
 @pytest.fixture
 def proof_runtime(tmp_path, monkeypatch) -> ProofRuntime:
     logs_dir = tmp_path / "logs"

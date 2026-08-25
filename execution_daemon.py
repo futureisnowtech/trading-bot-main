@@ -83,32 +83,34 @@ def main() -> int:
         "[ExecutionDaemon] Startup bankroll from broker: $%.2f (re-read every cycle)",
         resolve_live_bankroll(),
     )
-    telegram_thread_started = False
-
-    # Sweep stray resting orders BEFORE reconciliation, so reconciliation sees a
-    # book with no half-finished maker entries on it. A post-only entry rests for
-    # up to MAKER_ENTRY_TIMEOUT_S; if the container is recreated inside that
-    # window the order survives on the exchange with nothing tracking it and can
-    # fill later into a position the bot does not know it holds.
+    # Sweep stray resting orders BEFORE reconciliation. Production never rests
+    # an entry; anything found is historical, external, or anomalous and must be
+    # cleared before the bot can trust its position snapshot.
     try:
         from execution.kalshi_broker import KalshiBroker
 
         _sweep_broker = KalshiBroker()
-        _sweep_broker.connect()
-        if _sweep_broker.is_connected():
-            _cleared = _sweep_broker.cancel_all_resting_orders(reason="daemon startup")
-            if _cleared:
-                logger.warning(
-                    "[ExecutionDaemon] Cleared %d stray resting order(s) at startup.",
-                    _cleared,
-                )
+        if not _sweep_broker.connect() or not _sweep_broker.is_connected():
+            logger.critical("Startup broker snapshot is not authoritative; refusing to trade.")
+            return 2
+        _sweep = _sweep_broker.cancel_all_resting_orders(reason="daemon startup")
+        if not bool(_sweep.get("ok")):
+            logger.critical("Startup orphan sweep is uncertain: %s", _sweep)
+            return 3
+        if int(_sweep.get("cleared") or 0) > 0:
+            logger.warning(
+                "[ExecutionDaemon] Cleared %d stray resting order(s) at startup.",
+                int(_sweep["cleared"]),
+            )
     except Exception:
-        logger.exception("Startup orphan sweep failed")
+        logger.exception("Startup orphan sweep failed; refusing to trade")
+        return 3
 
     try:
         run_reconciliation()
     except Exception:
-        logger.exception("Position reconciliation failed at startup")
+        logger.exception("Position reconciliation failed at startup; refusing to trade")
+        return 4
     try:
         sync_incidents_and_notify()
     except Exception:
@@ -120,7 +122,6 @@ def main() -> int:
         from notifications.telegram_bot import start_bot_thread
 
         start_bot_thread()
-        telegram_thread_started = True
         logger.info("Embedded Telegram daemon started inside execution-engine.")
     except Exception:
         logger.exception("Embedded Telegram daemon startup failed")

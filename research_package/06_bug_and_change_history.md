@@ -54,7 +54,6 @@ These issues are present in the current live environment:
 *   *Description*: Active positions are logged with an entry price of `0.35` USD, while the `trades` table logs actual fills at `0.01` and `0.07` USD.
 *   *Impact*: The position reconciler was executed immediately after order placement. Because the database trade record was not committed yet or could not be matched at that exact millisecond, the reconciler fell back to the order book's `mid` price ($0.35) and permanently cached it.
 
-### 3.3 The Observational-Only Adaptive weights Stagger
-*   *Files affected*: [`learning/weather_rbi.py`](file:///Users/joshmacbookair2020/projects/algo_trading_final/learning/weather_rbi.py) vs [`forecast/strategy_engine.py`](file:///Users/joshmacbookair2020/projects/algo_trading_final/forecast/strategy_engine.py).
-*   *Description*: The weather adaptive weights learner writes models skill weights to the DB, but `_blend_weather_probabilities()` calls a stub (`_get_adaptive_weather_model_blend()`) that is hardcoded to a static `{"gfs_weight": 0.60, "ecmwf_weight": 0.40}` under `STATIC_DISABLED`.
-*   *Impact*: Model weight adaptation is completely offline. The GFS/ECMWF blend is frozen.
+### 3.3 Resolved: Adaptive-weight production disconnect
+*   *Historical description*: An older, uncalled weather learner coexisted with the production pricing path, while a later pricing loader referenced `DB_PATH` without importing it, causing a swallowed exception and 60/40 fallback.
+*   *Resolution (2026-08-25 v19.20 candidate)*: The disconnected learner and its dead schema were removed. `forecast.pricing_engine.calculate_brier_weights()` now reads only explicitly promoted RBI 2.0 champion weights for the deterministic GFS/ECMWF blend. ICON and the commercial ensemble path are excluded.

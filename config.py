@@ -122,48 +122,23 @@ SHADOW_EXECUTION: bool = os.getenv("SHADOW_EXECUTION", "false").lower() == "true
 # wind mixes the boundary layer and lifts the overnight low.
 PHYSICS_DELTA_ENABLED: bool = os.getenv("PHYSICS_DELTA_ENABLED", "true").lower() == "true"
 
-# Maker entry (formerly paper Lane B): rest at the bid instead of crossing the
-# ask. Maker fees are ~4x cheaper than taker and the spread is saved. Ships off;
-# enable only after the physics-delta deploy is verified. If an order does not
-# fill within the timeout it is cancelled and re-crossed, so a thin book degrades
-# to today's taker behavior rather than silently halting entries.
+# The production entry lane is taker-only. Resting entry orders were retired by
+# operator decision; generic cancellation remains solely as startup protection
+# against externally or historically resting orders.
 # Learning-loop cadence. These were read via getattr(config, ...) with inline
 # defaults and never defined here, so setting them in .env did nothing and
-# raised nothing -- the same silent-no-op class as MAKER_ENTRY_TIMEOUT_SECONDS.
+# raised nothing -- a silent configuration no-op.
 # Values match the inline defaults they replace, so behaviour is unchanged.
 ML_RETRAIN_MIN_HOURS: float = float(os.getenv("ML_RETRAIN_MIN_HOURS", "24"))
 ML_RETRAIN_MIN_NEW_CLEAN_TRADES: int = int(os.getenv("ML_RETRAIN_MIN_NEW_CLEAN_TRADES", "20"))
 RBI_MIN_DAYS: float = float(os.getenv("RBI_MIN_DAYS", "7"))
-RBI_MIN_NEW_CLEAN_TRADES: int = int(os.getenv("RBI_MIN_NEW_CLEAN_TRADES", "20"))
-
-MAKER_ENTRY_ENABLED: bool = os.getenv("MAKER_ENTRY_ENABLED", "true").lower() == "true"
-MAKER_ENTRY_TIMEOUT_S: int = int(os.getenv("MAKER_ENTRY_TIMEOUT_S", "20"))
-
-
-
-def get_dynamic_bool(key: str, default: bool) -> bool:
-    """Boolean override from dynamic_system_config, set via update_system_parameter.
-
-    forecast.strategy_engine.get_dynamic_param coerces non-string defaults with
-    int(val)/float(val); since bool is a subclass of int, a bool default routes into
-    int("True") and raises, so the override is silently swallowed by that function's
-    try/except and never applies. Booleans get their own reader instead.
-    """
-    try:
-        if os.path.exists(DB_PATH):
-            import sqlite3
-
-            conn = sqlite3.connect(DB_PATH, timeout=5.0)
-            row = conn.execute(
-                "SELECT param_value FROM dynamic_system_config WHERE param_key = ?",
-                (key.upper(),),
-            ).fetchone()
-            conn.close()
-            if row and row[0] is not None:
-                return str(row[0]).strip().lower() in ("1", "true", "yes", "on")
-    except Exception:
-        pass
-    return default
+RBI_MIN_NEW_CLEAN_TRADES: int = int(os.getenv("RBI_MIN_NEW_CLEAN_TRADES", "24"))
+# Version the probability/evidence contract so a materially changed engine must
+# collect a fresh learning window instead of training on incompatible history.
+RBI_LEARNING_EPOCH: str = os.getenv(
+    "RBI_LEARNING_EPOCH",
+    "v19.20.0-deterministic-physics-path",
+).strip()
 
 # Session start: all performance stats (win rate, P&L, trade counts) are
 # measured from this date forward.
@@ -221,6 +196,11 @@ FORECAST_MANUAL_ENABLED: bool = (
 )
 
 # Kalshi Risk & Capital Partitioning
+# Source defaults are the versioned fallback for a fresh runtime.  This revision
+# was reconciled against the effective (config + env + SQLite overrides) NYC
+# production posture on 2026-08-24.  Environment values may override it, but a
+# missing variable must not silently create a different risk system.
+NYC_LIVE_POLICY_REVISION: str = "2026-08-24"
 KALSHI_MAX_DEPLOYED_PCT: float = float(os.getenv("KALSHI_MAX_DEPLOYED_PCT", "0.90"))
 KALSHI_MAX_CONCURRENT_POSITIONS: int = int(os.getenv("KALSHI_MAX_CONCURRENT_POSITIONS", "20"))
 KALSHI_SAME_EVENT_FAMILY_CAP: int = int(os.getenv("KALSHI_SAME_EVENT_FAMILY_CAP", "5"))
@@ -240,12 +220,10 @@ KALSHI_ULTRA_HIGH_PROB_NO_FAMILY_CAP_BONUS: int = int(
 )
 # Regional hub exposure ceiling: cap = max(MIN_USD, balance * PCT).
 #
-# These defaults deliberately mirror the values running in NYC production, not
-# an aspirational number. Production has been on 0.30 / $12 for the whole live
-# era, and that is the posture that produced the settled track record. The repo
-# previously claimed 0.60 / $40 while production ran 0.30 / $12, which made the
-# cockpit overstate regional headroom and made CI prove a risk posture nothing
-# actually traded. Change these only alongside the droplet .env.
+# These defaults deliberately mirror the effective values running in NYC
+# production, not an aspirational or historical number.  The live config resolves
+# to 0.40 / $20; CI and examples previously pinned 0.30 / $12 and therefore proved
+# a different posture. Change these only with an explicit policy revision.
 KALSHI_HUB_EXPOSURE_PCT: float = float(
     os.getenv("KALSHI_HUB_EXPOSURE_PCT", "0.40")
 )
@@ -262,25 +240,58 @@ SALVAGE_EXIT_DELTA_HIGH_PROB: float = float(
 SALVAGE_EXIT_DELTA_ULTRA_HIGH_PROB: float = float(
     os.getenv("SALVAGE_EXIT_DELTA_ULTRA_HIGH_PROB", "0.10")
 )
-KALSHI_MAX_QTY_PER_POSITION: int = int(os.getenv("KALSHI_MAX_QTY_PER_POSITION", "2500"))
-KALSHI_MAX_USD_PER_POSITION: float = float(os.getenv("KALSHI_MAX_USD_PER_POSITION", "40.0"))  # Hard Ceiling
-KALSHI_MIN_PRICE: float = 0.08
+KALSHI_MAX_QTY_PER_POSITION: int = int(os.getenv("KALSHI_MAX_QTY_PER_POSITION", "15"))
+KALSHI_MAX_USD_PER_POSITION: float = float(os.getenv("KALSHI_MAX_USD_PER_POSITION", "10.0"))  # Hard Ceiling
 KALSHI_MAX_SIGMA: float = 2.8
+KALSHI_MIN_MODEL_HEADROOM_F: float = float(
+    os.getenv("KALSHI_MIN_MODEL_HEADROOM_F", "2.0")
+)
 KALSHI_MAX_SPREAD_RATIO: float = 0.35
 KALSHI_DATA_FRESHNESS_MINUTES_HOURLY: int = 25   # SPEC §4.5
 KALSHI_DATA_FRESHNESS_MINUTES_DAILY:  int = 90   # SPEC §4.5
 KALSHI_DATA_FRESHNESS_MINUTES: int = 90  # Legacy fallback
 KALSHI_TAKER_FEE_RATE: float = float(os.getenv("KALSHI_TAKER_FEE_RATE", "0.07"))
-KALSHI_MAKER_FEE_RATE: float = float(os.getenv("KALSHI_MAKER_FEE_RATE", "0.0175"))
+# Retrospective fill normalization only. Production has no maker route or knob.
+_HISTORICAL_KALSHI_MAKER_FEE_RATE: float = 0.0175
 KALSHI_FEE_PER_CONTRACT: float = float(
     os.getenv("KALSHI_FEE_PER_CONTRACT", str(KALSHI_TAKER_FEE_RATE))
 )  # Legacy fallback only
-KALSHI_MAX_FEE_DRAG_PCT: float = 0.30
 KALSHI_MAX_SPREAD_DOLLARS: float = 0.12  # SPEC §5.4c — quote coherence gate (dollars, not ratio)
+KALSHI_MAX_ENTRY_SLIPPAGE: float = float(
+    os.getenv("KALSHI_MAX_ENTRY_SLIPPAGE", "0.02")
+)
+KALSHI_POSITION_SNAPSHOT_MAX_AGE_SEC: float = float(
+    os.getenv("KALSHI_POSITION_SNAPSHOT_MAX_AGE_SEC", "60")
+)
 KALSHI_MIN_ENTRY_PRICE: float = float(os.getenv("KALSHI_MIN_ENTRY_PRICE", "0.34"))     # SPEC §2.6 — hard entry price floor; deletes 0.02/0.03 carve-outs
-KALSHI_KELLY_CAP: float = float(os.getenv("KALSHI_KELLY_CAP", "0.10"))
+# Enforced sizing ceilings. KELLY_CAP limits each order's fee-inclusive capital
+# fraction after conviction overrides. MAX_RISK_PER_EVENT_PCT limits aggregate
+# contract-family exposure before broker submission.
+KALSHI_KELLY_CAP: float = float(os.getenv("KALSHI_KELLY_CAP", "0.12"))
 KALSHI_KELLY_FRACTION: float = float(os.getenv("KALSHI_KELLY_FRACTION", "0.25"))
-KALSHI_MAX_RISK_PER_EVENT_PCT: float = float(os.getenv("KALSHI_MAX_RISK_PER_EVENT_PCT", "0.015"))
+KALSHI_MAX_RISK_PER_EVENT_PCT: float = float(os.getenv("KALSHI_MAX_RISK_PER_EVENT_PCT", "0.08"))
+
+# Version-controlled fallback for the city firewall.  NYC previously carried
+# this only in its untracked .env, so a rebuild or new operator checkout could
+# silently trade 27 cities that production intentionally blocks.  The effective
+# default leaves CHI, DEN, LAX, OKC, and SAT enabled.  CITY_BLACKLIST remains an
+# intentional emergency override surface, including support for regional hubs.
+CITY_BLACKLIST_POLICY_REVISION: str = "2026-08-24.nyc-live"
+DEFAULT_CITY_BLACKLIST: frozenset[str] = frozenset(
+    {
+        "ABQ", "ATL", "AUS", "BOS", "CHS", "CLT", "DAL", "DC", "DET",
+        "HOU", "LV", "MCI", "MCO", "MIA", "MKE", "MSP", "MSY", "NY",
+        "OMA", "PDX", "PHL", "PHX", "RDU", "SEA", "SF", "SLC", "STL",
+    }
+)
+_city_blacklist_env = os.getenv(
+    "CITY_BLACKLIST", ",".join(sorted(DEFAULT_CITY_BLACKLIST))
+).strip()
+CITY_BLACKLIST: frozenset[str] = frozenset(
+    code.strip().upper()
+    for code in _city_blacklist_env.split(",")
+    if code.strip()
+)
 
 
 def _bounded_probability(value: float | None) -> float | None:
@@ -393,11 +404,11 @@ KALSHI_EXPENSIVE_YES_SIZE_MULTIPLIER: float = float(
 WEATHER_ACTIVE_CITY_REFRESH_SEC: int = int(
     os.getenv("WEATHER_ACTIVE_CITY_REFRESH_SEC", "300")
 )
-WEATHER_ENSEMBLE_COOLDOWN_SEC: int = int(
-    os.getenv("WEATHER_ENSEMBLE_COOLDOWN_SEC", "1200")
+WEATHER_PROVIDER_COOLDOWN_SEC: int = int(
+    os.getenv("WEATHER_PROVIDER_COOLDOWN_SEC", "1200")
 )
-WEATHER_ENSEMBLE_MODEL_PAUSE_SEC: float = float(
-    os.getenv("WEATHER_ENSEMBLE_MODEL_PAUSE_SEC", "0.75")
+WEATHER_MODEL_PAUSE_SEC: float = float(
+    os.getenv("WEATHER_MODEL_PAUSE_SEC", "0.75")
 )
 
 # ════════════════════════════════════════════════════════════════════
@@ -447,7 +458,10 @@ def get_kalshi_fee_rate(*, maker: bool = False, fee_rate: float | None = None) -
             return max(0.0, float(fee_rate))
         except (TypeError, ValueError):
             return max(0.0, float(KALSHI_TAKER_FEE_RATE))
-    return max(0.0, float(KALSHI_MAKER_FEE_RATE if maker else KALSHI_TAKER_FEE_RATE))
+    return max(
+        0.0,
+        float(_HISTORICAL_KALSHI_MAKER_FEE_RATE if maker else KALSHI_TAKER_FEE_RATE),
+    )
 
 
 def _normalize_kalshi_price(price: float) -> float:
@@ -605,6 +619,61 @@ def get_kalshi_position_exposure_usd(
         maker=maker,
         fee_rate=fee_rate,
     )
+
+
+def kalshi_held_price_from_yes_leg(yes_price: float, side: str) -> float:
+    """Translate Kalshi's canonical YES-book price into the held outcome price."""
+    price = _normalize_kalshi_price(yes_price)
+    if str(side or "YES").upper() == "NO":
+        price = 1.0 - price
+    return max(0.0, min(1.0, price))
+
+
+def get_kalshi_position_held_price(position: dict) -> float:
+    """Return the actual cost per held contract from a broker position snapshot.
+
+    Live V2 order/fill accounting is YES-denominated even for a NO holding.  The
+    official market exposure is therefore preferred, followed by an explicit
+    held-side field, and only then the legacy YES-leg ``entry_price``.
+    """
+    qty = max(0.0, float(position.get("qty") or 0.0))
+    for key in ("market_exposure_usd", "market_exposure_dollars"):
+        raw = position.get(key)
+        if raw not in (None, "") and qty > 0.0:
+            try:
+                exposure = abs(float(raw))
+                if exposure > 0.0:
+                    return max(0.0, min(1.0, exposure / qty))
+            except (TypeError, ValueError):
+                pass
+
+    explicit = position.get("held_side_entry_price")
+    if explicit not in (None, ""):
+        try:
+            return max(0.0, min(1.0, float(explicit)))
+        except (TypeError, ValueError):
+            pass
+
+    yes_leg = position.get("yes_leg_entry_price")
+    if yes_leg in (None, ""):
+        yes_leg = position.get("entry_price", position.get("entry", 0.0))
+    return kalshi_held_price_from_yes_leg(
+        float(yes_leg or 0.0),
+        str(position.get("side") or ("NO" if position.get("right") == "P" else "YES")),
+    )
+
+
+def get_kalshi_position_snapshot_exposure_usd(
+    position: dict,
+    *,
+    include_estimated_fee: bool = False,
+) -> float:
+    """Economic dollars at risk for one cached position, side-correct for NO."""
+    qty = max(0.0, float(position.get("qty") or 0.0))
+    price = get_kalshi_position_held_price(position)
+    if not include_estimated_fee:
+        return qty * price
+    return get_kalshi_position_exposure_usd(qty, price)
 
 
 # ──────────────────────────────────────────────────────────────────────────────

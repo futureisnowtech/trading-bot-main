@@ -418,7 +418,7 @@ def run_backtest_simulation(df_actuals):
                     sizing_multiplier = 1.0 # Base
                     qty = calculate_continuous_sizing(
                         market_price=p_cost,
-                        ensemble_prob=fair_prob if best_side == "YES" else (1.0 - fair_prob),
+                        model_prob=fair_prob if best_side == "YES" else (1.0 - fair_prob),
                         capital_base=100.0,
                         multiplier=sizing_multiplier,
                         cap_pct=0.10,

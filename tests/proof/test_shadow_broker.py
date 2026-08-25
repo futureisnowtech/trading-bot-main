@@ -28,6 +28,13 @@ def test_shadow_broker_initialization_and_order_flow(proof_runtime, monkeypatch)
     # 2. Get Broker and Connect
     from execution.kalshi_broker import KalshiBroker
     broker = KalshiBroker()
+    monkeypatch.setattr(
+        broker,
+        "_request",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("shadow connect touched the live Kalshi API")
+        ),
+    )
     
     # Verify that connect() works in shadow mode without valid API key / key path
     assert broker.connect(sync_positions=True, quiet=True) is True
@@ -98,6 +105,8 @@ def test_shadow_broker_initialization_and_order_flow(proof_runtime, monkeypatch)
     assert abs(post_balance - (pre_balance + 30.17)) < 1e-4
 
     # 7. Check DDL firewall: direct mutating REST calls must be blocked
+    monkeypatch.undo()
+    monkeypatch.setattr(config, "SHADOW_EXECUTION", True, raising=False)
     with pytest.raises(RuntimeError, match="Mutating request blocked by shadow mode firewall"):
         broker._request("POST", "/trade-api/v2/portfolio/events/orders", body={})
 

@@ -3,6 +3,63 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 
+def test_fill_recovery_uses_current_v2_fields_and_keeps_yes_leg_basis(monkeypatch):
+    import forecast.db as fdb
+
+    broker = MagicMock()
+    broker._request.return_value = {
+        "fills": [
+            {
+                "ticker": "KXLOWTOKC-26AUG24-T78",
+                "action": "buy",
+                "outcome_side": "no",
+                "yes_price_dollars": "0.6200",
+                "no_price_dollars": "0.3800",
+                "count_fp": "1.00",
+            },
+            # An opposite-outcome close/hedge must not contaminate the NO basis.
+            {
+                "ticker": "KXLOWTOKC-26AUG24-T78",
+                "action": "buy",
+                "outcome_side": "yes",
+                "yes_price_dollars": "0.7000",
+                "no_price_dollars": "0.3000",
+                "count_fp": "4.00",
+            },
+        ]
+    }
+    monkeypatch.setattr("time.sleep", lambda *_args, **_kwargs: None)
+
+    price = fdb._fetch_confirmed_entry_price_from_fills(
+        broker, "KXLOWTOKC-26AUG24-T78", "NO"
+    )
+
+    assert price == 0.62
+
+
+def test_fill_recovery_derives_yes_leg_from_no_price_when_needed(monkeypatch):
+    import forecast.db as fdb
+
+    broker = MagicMock()
+    broker._request.return_value = {
+        "fills": [
+            {
+                "action": "buy",
+                "outcome_side": "no",
+                "no_price_dollars": "0.3800",
+                "count_fp": "2.00",
+            }
+        ]
+    }
+    monkeypatch.setattr("time.sleep", lambda *_args, **_kwargs: None)
+
+    price = fdb._fetch_confirmed_entry_price_from_fills(
+        broker, "KXLOWTOKC-26AUG24-T78", "NO"
+    )
+
+    assert price == 0.62
+
+
 def test_reconcile_forecast_positions_adopts_and_closes(proof_runtime):
     import forecast.db as fdb
 

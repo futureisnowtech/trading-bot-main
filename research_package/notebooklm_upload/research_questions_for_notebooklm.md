@@ -16,9 +16,9 @@ This document lists high-value analytical questions designed to help you probe t
 ---
 
 ## 2. Strategy & Sizing Logic
-5.  **How are GFS and ECMWF weather model predictions blended in the active `weather_ensemble` strategy, and what are their respective weights?**
-    *   *Context*: Trace why weights are locked to a static 60/40 blend (`STATIC_DISABLED`) despite the active RBI calibration loop.
-6.  **How does the bot adjust position sizing using the GraphCast AI (AIGEFS) model?**
+5.  **How are deterministic GFS and ECMWF predictions blended in the v19.20 `weather_physics` strategy, and how does NCEP AIGFS change uncertainty?**
+    *   *Context*: Trace the promoted RBI GFS/ECMWF split, explicit predictive sigma, bounded pre-CDF physics, and AIGFS lambda into order size.
+6.  **How does the bot adjust position sizing using the NCEP AIGFS model?**
     *   *Context*: Detail the "Sigma Volatility Scaler" mechanism.
 7.  **What is "Thermodynamic Netting" and how does the bot net weather covariance across regional hubs?**
     *   *Context*: Review the signed sums mapping for cool/wet vs warm/dry outcomes in `forecast/runner.py`.

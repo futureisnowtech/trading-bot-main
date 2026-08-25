@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import json
 import math
+import os
 import re
 from dataclasses import dataclass
 from typing import Iterable, Literal
@@ -39,7 +41,28 @@ def _clean_title(title: str) -> str:
 _HOURLY_WEATHER_TICKER_RE = re.compile(r"-\d{2}[A-Z]{3}\d{4}(?:-|$)")
 _HOURLY_TITLE_RE = re.compile(r"\bat\s+\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)\b")
 _SHORT_CADENCE_TEMP_PREFIXES = ("KXLOWT", "KXHIGHT")
-LIVE_ENTRY_SCOPE = "ALL_WEATHER_LANES"
+_LANE_POLICY_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "config",
+    "lane_policy.json",
+)
+
+
+def get_live_lane_policy() -> dict[str, bool]:
+    defaults = {
+        "DAILY_HIGH": False,
+        "DAILY_LOW": False,
+        "HOURLY_TEMP": False,
+        "RAIN": False,
+        "SNOW": False,
+        "WIND": False,
+    }
+    try:
+        with open(_LANE_POLICY_PATH, "r", encoding="utf-8") as handle:
+            raw = json.load(handle)
+        return {key: bool(raw.get(key, default)) for key, default in defaults.items()}
+    except Exception:
+        return defaults
 
 
 def has_hourly_weather_timestamp(ticker: str) -> bool:
@@ -93,7 +116,8 @@ def is_short_cadence_weather_contract(
 
 
 def live_entry_scope() -> str:
-    return LIVE_ENTRY_SCOPE
+    enabled = [key for key, value in get_live_lane_policy().items() if value]
+    return "+".join(enabled) if enabled else "NO_FRESH_ENTRY_LANES"
 
 
 def is_live_entry_weather_contract(
@@ -113,29 +137,9 @@ def is_live_entry_weather_contract(
         if city_key is None or city_key not in STATIONS:
             return False
             
-        # 2. Lane policy check (read config/lane_policy.json)
-        import json
-        import os
-        import sys
-        
-        is_testing = "pytest" in sys.modules or "PYTEST_CURRENT_TEST" in os.environ
-        is_policy_test = "test_lane_policy" in os.environ.get("PYTEST_CURRENT_TEST", "")
-        
-        policy = {}
-        if is_testing and not is_policy_test:
-            policy = {
-                "DAILY_HIGH": True,
-                "DAILY_LOW": True,
-                "HOURLY_TEMP": True,
-                "RAIN": True,
-                "SNOW": True,
-                "WIND": True
-            }
-        else:
-            policy_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "lane_policy.json")
-            if os.path.exists(policy_path):
-                with open(policy_path, "r") as f:
-                    policy = json.load(f)
+        # 2. Lane policy check. Tests use this same versioned file; there is no
+        # hidden pytest-only all-lanes override.
+        policy = get_live_lane_policy()
             
         is_hourly = is_hourly_weather_contract(ticker, contract_name=contract_name)
         
@@ -233,9 +237,14 @@ def _title_semantics(
     if not title:
         return None
 
+    # Strip ISO dates from the text searched for numeric contract bounds.
+    # Otherwise a title containing ``2026-08-25`` can be misread as a
+    # temperature range. The original title is retained in evidence.
+    semantics_title = re.sub(r"\b\d{4}-\d{2}-\d{2}\b", " ", title)
+
     m = re.search(
         r"(?:be\s+)?(-?\d+(?:\.\d+)?)\s*(?:°|degrees|deg)?\s*(?:to|and|[-–])\s*(-?\d+(?:\.\d+)?)\s*(?:°|degrees|deg|inches|inch|in|mph)?",
-        title,
+        semantics_title,
         flags=re.IGNORECASE,
     )
     if m:
@@ -257,7 +266,7 @@ def _title_semantics(
 
     gt_match = re.search(
         r"(?:\bbe\s*(?:>|>=|at least|above|over)\s*(-?\d+(?:\.\d+)?))|(?:(-?\d+(?:\.\d+)?)\s*(?:°|degrees|deg)?\s*(?:or higher|or more|and above))",
-        title,
+        semantics_title,
         flags=re.IGNORECASE,
     )
     if gt_match:
@@ -275,7 +284,7 @@ def _title_semantics(
 
     lt_match = re.search(
         r"(?:\bbe\s*(?:<|<=|at most|below|under)\s*(-?\d+(?:\.\d+)?))|(?:(-?\d+(?:\.\d+)?)\s*(?:°|degrees|deg)?\s*(?:or lower|or less|and below))",
-        title,
+        semantics_title,
         flags=re.IGNORECASE,
     )
     if lt_match:

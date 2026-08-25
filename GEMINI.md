@@ -9,14 +9,13 @@ This repository is the active Kalshi-only execution tree.
 - Trading mode: live-only Kalshi weather
 - Exposure truth: broker-first, ledgerless
 - Learning truth: RBI calibrates only on resolved labels
-- Fresh-entry scope: strict true hourly weather contracts only
+- Fresh-entry scope: versioned `config/lane_policy.json` allowlist (currently DAILY_HIGH and DAILY_LOW)
 - Quality Trade Data Boundary: TRADE_DATA_START_DATE = "2026-07-23" (rejects earlier trades from analytics and learning, but not broker exposure reconciliation)
-- Tri-Model Ensemble Ingest: 50% GFS + 35% ECMWF + 15% DWD ICON (122 simulation paths)
-- Value Price Bracket Gate: $0.30 - $0.70 entry price floor/ceiling
-- Kalshi Cheat Code Mispricing Scanner: q_tri >= 78% and model-market delta >= 22%
-- Asymmetric High-Conviction Kelly Sizing: $15.00 - $35.00 risk allocation per trade
-- Tiered Goldmine City Priority Scanner: DC, PHL, ATL, DAL, DFW, LV, LAS, OKC, CHI scanned first
-- Non-hourly daily weather contracts may still exist in the data universe, but they are not allowed for fresh entries
+- Candidate full weather path: deterministic GFS/ECMWF with explicit predictive sigma and bounded high/low physics before the CDF, actual NCEP AIGFS disagreement as the uncertainty scaler, and optional near-term HRRR for daily HIGH contracts; `bounded_heuristic_v1` is operationally proven but its skill remains pending the current RBI evidence epoch
+- Provider boundary: keyless deterministic Open-Meteo GFS/ECMWF/AIGFS plus HRRR/METAR; commercial ensembles and ICON are excluded, and missing GFS fails closed
+- Missing-model policy: renormalize only real model probabilities; never substitute a fake 50% probability for a missing provider
+- Convergence policy: 1.5x only when GFS and ECMWF agree above 75% or below 25%; gaps above 20 points soften q_hat and size, and gaps above 70 points veto the entry
+- Entry floor and position rails: $0.34 minimum entry, 15-contract ceiling, $10 base dollar cap, 12% fee-inclusive Kelly cap, and 8% aggregate event-family cap
 
 ## Hard Rules
 
@@ -24,7 +23,7 @@ This repository is the active Kalshi-only execution tree.
 - Do not assume a city has a valid `KXTEMP...` family unless it can be resolved from already-known official weather series or live Kalshi inventory.
 - Keep exchange-series truth separate from city weather-data mapping.
 - If a live hourly contract family cannot be resolved safely, fail closed and surface it in release status.
-- Do not widen the lane to short-cadence or daily low/high just to force trades.
+- Do not widen the fresh-entry lanes beyond the versioned lane policy just to force trades.
 
 ## Required Local Gate
 
@@ -85,7 +84,7 @@ For every formula, function, or parameter modification you review or write, you 
 
 2. **DISCRETE CLOB REALITY (No Academic Approximations)**
    - **The Check:** Are you using continuous curves for discrete reality?
-   - **The Rule:** Kalshi is a discrete CLOB. You cannot buy 1.5 contracts. You MUST use the official ceiled continuous fee model: `fee(p, n, r) = ceil(r * n * p * (1-p) * 100) / 100 / n`. You MUST cast final execution quantities with `int()`. You MUST evaluate Expected Value (EV) strictly against the pessimistic `ask_price` (or routed maker `bid_price`), never the `mid_price`.
+   - **The Rule:** Kalshi is a discrete CLOB. You cannot buy 1.5 contracts. You MUST use the official ceiled continuous fee model: `fee(p, n, r) = ceil(r * n * p * (1-p) * 100) / 100 / n`. You MUST cast final execution quantities with `int()`. You MUST evaluate Expected Value (EV) strictly against the executable taker `ask_price`, never the `mid_price`.
 
 3. **THERMODYNAMIC COVARIANCE & NETTING**
    - **The Check:** Are you prematurely converting exposures to absolute values before netting hedges?

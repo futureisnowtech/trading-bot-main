@@ -82,7 +82,7 @@ def _build_bars_for_interval(contract_id: int, interval: str, seconds: int, db_p
             ts_close=ts_close,
             o=prices[0],
             h=max(prices),
-            l=min(prices),
+            low=min(prices),
             c_=prices[-1],
             mid_mean=sum(prices) / len(prices),
             spread_mean=sum(float(q["spread"]) for q in quotes) / len(quotes),
@@ -113,7 +113,7 @@ def _resample_candles_to_bars(contract_id: int, candles: list[dict], interval: s
                 ts_close=ts_open, # approximate for backfill
                 o=float(c["open"]),
                 h=float(c["high"]),
-                l=float(c["low"]),
+                low=float(c["low"]),
                 c_=float(c["close"]),
                 mid_mean=mid_mean,
                 spread_mean=0.0, # Not available in candles

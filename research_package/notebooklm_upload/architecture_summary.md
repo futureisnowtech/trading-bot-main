@@ -11,7 +11,7 @@ The system runs two long-lived python processes on a remote server:
 1.  **Trading Execution Daemon (`execution_daemon.py`)**:
     *   Runs the trading loop every 5 minutes.
     *   Checks system disk space (stops if free space is below 2048 MB).
-    *   Orchestrates contract discovery, GFS/ECMWF model updates, order book quote scanning, strategy evaluations, and trade submission.
+    *   Orchestrates contract discovery, deterministic GFS/ECMWF/AIGFS updates, METAR/HRRR hydration, order-book scanning, strategy evaluation, and trade submission.
     *   Hosts an embedded thread for the Telegram interface.
 2.  **Telegram Operator Daemon (`telegram_daemon.py` / `notifications/telegram_bot.py`)**:
     *   Polls for incoming operator messages.
@@ -23,7 +23,7 @@ The system runs two long-lived python processes on a remote server:
 
 The bot requires three datasets to evaluate trades:
 
-*   **Ensemble Weather Forecasts**: The bot pulls predictions from Open-Meteo GFS and ECMWF models. These arrays are cached locally in `logs/weather_snapshot.json`.
+*   **Weather Forecasts**: The v19.20 candidate pulls keyless deterministic GFS, ECMWF, and NCEP AIGFS from Open-Meteo and caches contract-projectable values plus predictive sigma in `logs/weather_snapshot.json`; commercial ensembles and ICON are absent.
 *   **Order Book Quotes**: The quote harvester fetches paired bid/ask levels from Kalshi and caches them to `forecast_quotes` in `logs/trades.db`.
 *   **Intraday Observations (METAR)**: Scraping NOAA METAR reports updates real-time temperature boundaries in `logs/weather_watermarks.json` to manage exits.
 
@@ -46,4 +46,4 @@ To manage geographic risk correlation (e.g., if it rains in New York, it is like
 *   The sum of these signed exposures is checked against a dynamically calculated regional cap to prevent over-exposure.
 
 ### 3.2 Order Submissions
-Orders are submitted as marketable limit orders with hard budget constraints (`KALSHI_MAX_USD_PER_POSITION = 40.0`). Transactions are logged in `logs/trades.db` and daily CSV files.
+Orders use taker-only immediate-or-cancel routing with a $10 base position rail, 15-contract limit, fee-inclusive 12% Kelly cap, aggregate 8% event-family cap, and additional hub/covariance constraints. Transactions are logged in `logs/trades.db` and daily CSV files.

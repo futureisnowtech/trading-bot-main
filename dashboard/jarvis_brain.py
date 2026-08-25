@@ -7,11 +7,10 @@ import os
 import sqlite3
 import json
 import logging
-import shutil
 from datetime import datetime, timezone
 from typing import Any
 
-from config import DB_PATH, GEMINI_MODEL, TRADE_DATA_START_DATE
+from config import DB_PATH, GEMINI_MODEL, HUB_PARAMS, TRADE_DATA_START_DATE
 
 logger = logging.getLogger(__name__)
 
@@ -24,64 +23,32 @@ except ImportError:
 
 
 class JarvisSafetyCompilerShield:
-    """Guards on JARVIS-initiated system mutations.
+    """Allow only dynamic parameters consumed by the production decision path."""
 
-    update_system_parameter and apply_hot_patch_code referenced this class
-    without it ever being defined anywhere in the repo, so both tools raised
-    NameError on every single call -- neither has ever actually worked. This is
-    the smallest real implementation that unblocks both; it is a basic guard
-    against obviously wrong input, not a substitute for reviewing anything
-    non-trivial that comes through apply_hot_patch_code.
-    """
-
-    # A key with no config.py counterpart is very likely a hallucinated parameter
-    # name, not a real knob -- restrict overrides to known constant families.
-    _ALLOWED_PREFIXES = ("KALSHI_", "MAKER_", "PHYSICS_")
-    _BANNED_IMPORTS = {"os", "sys", "subprocess", "shutil", "socket"}
-    _BANNED_CALLS = {"eval", "exec", "__import__"}
+    _ALLOWED_KEYS = {"KELLY_FRACTION"}
 
     @staticmethod
     def audit_parameter(key: str, value: str) -> tuple[bool, str]:
         key_u = str(key or "").strip().upper()
         if not key_u:
             return False, "❌ Safety Shield: empty parameter key."
-        if not key_u.startswith(JarvisSafetyCompilerShield._ALLOWED_PREFIXES):
+        is_hub_floor = key_u.endswith(".HARD_RBI_THRESHOLD") and (
+            key_u.removesuffix(".HARD_RBI_THRESHOLD") in HUB_PARAMS
+        )
+        if key_u not in JarvisSafetyCompilerShield._ALLOWED_KEYS and not is_hub_floor:
             return False, (
                 f"❌ Safety Shield: '{key_u}' is not a recognized override-able parameter "
-                f"(expected one of {JarvisSafetyCompilerShield._ALLOWED_PREFIXES})."
+                "consumed by the production decision path."
             )
-        if len(str(value)) > 256:
-            return False, "❌ Safety Shield: value too long."
+        try:
+            numeric_value = float(value)
+        except (TypeError, ValueError):
+            return False, "❌ Safety Shield: parameter value must be numeric."
+        if key_u == "KELLY_FRACTION" and not 0.0 < numeric_value <= 0.50:
+            return False, "❌ Safety Shield: KELLY_FRACTION must be in (0, 0.50]."
+        if is_hub_floor and not 0.50 <= numeric_value <= 0.95:
+            return False, "❌ Safety Shield: hub RBI threshold must be in [0.50, 0.95]."
         return True, "✅ Safety Shield: parameter audit passed."
-
-    @staticmethod
-    def audit_code_ast(code: str) -> tuple[bool, str]:
-        import ast
-
-        try:
-            tree = ast.parse(code or "")
-        except SyntaxError as exc:
-            return False, f"❌ Safety Shield: code does not parse ({exc})."
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.Import, ast.ImportFrom)):
-                names = [a.name for a in node.names] if isinstance(node, ast.Import) else [node.module or ""]
-                if any(n.split(".")[0] in JarvisSafetyCompilerShield._BANNED_IMPORTS for n in names):
-                    return False, f"❌ Safety Shield: import of {names} is not allowed in a hot patch."
-            if (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Name)
-                and node.func.id in JarvisSafetyCompilerShield._BANNED_CALLS
-            ):
-                return False, f"❌ Safety Shield: call to '{node.func.id}' is not allowed in a hot patch."
-        return True, "✅ Safety Shield: AST audit passed."
-
-    @staticmethod
-    def test_sandbox_exec(code: str) -> tuple[bool, str]:
-        try:
-            compile(code or "", "<jarvis_hot_patch>", "exec")
-        except SyntaxError as exc:
-            return False, f"❌ Safety Shield: sandbox compile failed ({exc})."
-        return True, "✅ Safety Shield: sandbox compile passed."
 
 
 # ── Tool functions ──────────────────────────────────────────────────
@@ -709,41 +676,6 @@ def get_trading_readiness_summary(lookback_hours: int = 24) -> str:
         return f"Error building trading readiness summary: {e}"
 
 
-def apply_hot_patch_code(patch_name: str, code_snippet: str) -> str:
-    """Safely apply a Python code patch after passing 5-Layer Safety Compiler Shield AST & Sandbox audits."""
-    # Layer 2 AST Audit
-    passed_ast, msg_ast = JarvisSafetyCompilerShield.audit_code_ast(code_snippet)
-    if not passed_ast:
-        return msg_ast
-
-    # Layer 3 Sandbox Execution Test
-    passed_sandbox, msg_sandbox = JarvisSafetyCompilerShield.test_sandbox_exec(code_snippet)
-    if not passed_sandbox:
-        return msg_sandbox
-
-    patch_dir = os.path.join(os.path.dirname(DB_PATH), "jarvis_patches")
-    backup_dir = os.path.join(os.path.dirname(DB_PATH), "jarvis_patches_backup")
-    os.makedirs(patch_dir, exist_ok=True)
-    os.makedirs(backup_dir, exist_ok=True)
-
-    file_path = os.path.join(patch_dir, f"{patch_name}.py")
-
-    # Layer 4 Immutable Backup Engine
-    if os.path.exists(file_path):
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        backup_path = os.path.join(backup_dir, f"{patch_name}_{timestamp}.py")
-        shutil.copy2(file_path, backup_path)
-
-    try:
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write(f"# JARVIS Autonomous Hot Patch: {patch_name}\n")
-            f.write(f"# Verified by 5X Safety Compiler Shield at {datetime.now(timezone.utc).isoformat()}\n\n")
-            f.write(code_snippet)
-        return f"🛡️ 5X SAFETY SHIELD VERIFIED | HOT PATCH APPLIED: Saved patch '{patch_name}' at {file_path}. (AST Security: PASS | Sandbox Exec: PASS)"
-    except Exception as e:
-        return f"❌ Hot Patch File Write Error: {e}"
-
-
 # ── Chat execution ──────────────────────────────────────────────────
 
 SYSTEM_PROMPT = (
@@ -755,7 +687,7 @@ SYSTEM_PROMPT = (
     "3. Synthesize physics mechanisms (e.g. evaporative cooling deltas, soil moisture thermal inertia, nocturnal boundary layer wind shear), GFS/ECMWF divergence, fee drag, or Kelly sizing factors to explain WHY the trade lost.\n\n"
     "Format EVERY response using this 2-part structure:\n\n"
     "1. 💡 **LAYMAN'S SUMMARY (Direct Answer):** Give a crystal-clear, 2-sentence non-technical answer that directly answers the user's question so anyone can understand it instantly.\n\n"
-    "2. 🔬 **POLYMATH QUANTITATIVE INSIGHTS:** Provide deep, high-level quantitative analysis as a top weather trader. Include specific physics mechanisms (e.g. evaporative cooling deltas, soil moisture thermal inertia, nocturnal boundary layer wind shear), model discrepancy dynamics (GFS vs ECMWF ensemble spread), integral/differential rate of change in forecast trajectories, NOAA ground-truth observations, and live droplet database evidence."
+    "2. 🔬 **POLYMATH QUANTITATIVE INSIGHTS:** Provide deep, high-level quantitative analysis as a top weather trader. Include specific physics mechanisms (e.g. evaporative cooling deltas, soil moisture thermal inertia, nocturnal boundary layer wind shear), deterministic model discrepancy and predictive-error sigma (GFS vs ECMWF), integral/differential rate of change in forecast trajectories, NOAA ground-truth observations, and live droplet database evidence."
 )
 
 
@@ -826,8 +758,8 @@ def request_change(
     """Propose a system change for cockpit approval. Does not change anything itself.
 
     Use this on a read-only surface (Telegram) when the operator wants to act on a
-    finding but write access is not available here. Valid actions: set_maker_entry_enabled
-    (pass enabled=true/false), update_system_parameter (pass key, value), promote_release
+    finding but write access is not available here. Valid actions:
+    update_system_parameter (pass key, value), promote_release
     (no extra params), promote_rbi_artifact (pass artifact_id), or
     create_cerebro_experiment (pass insight_id). The change only takes effect if
     approved from the cockpit.
@@ -912,63 +844,6 @@ def get_entry_funnel(lookback_hours: int = 24) -> str:
     parts.append("--- Vetoes ---\n" + str(at.get_recent_veto_summary()))
     parts.append("--- Execution outcomes ---\n" + str(at.get_recent_execution_summary()))
     return "\n\n".join(parts)
-
-
-def get_maker_fill_stats(lookback_hours: int = 48) -> str:
-    """How the maker-first entry experiment is performing: fills vs crosses.
-
-    Maker entry rests at the bid to pay ~4x less in fees. This reports how often
-    those resting orders actually fill versus timing out and crossing as taker,
-    which is the number that decides whether the experiment is working.
-    """
-    import re
-    import subprocess
-
-    from config import MAKER_ENTRY_ENABLED, MAKER_ENTRY_TIMEOUT_S, get_dynamic_bool
-
-    # Report what the broker will actually do at order time (kalshi_broker reads
-    # the dynamic override), not the value baked into this process's env.
-    maker_enabled = get_dynamic_bool("MAKER_ENTRY_ENABLED", MAKER_ENTRY_ENABLED)
-    header = f"MAKER_ENTRY_ENABLED={maker_enabled} | timeout={MAKER_ENTRY_TIMEOUT_S}s"
-    try:
-        out = subprocess.run(
-            ["docker", "logs", "--since", f"{int(lookback_hours)}h", "execution-engine"],
-            capture_output=True, text=True, timeout=60,
-        )
-        log = (out.stdout or "") + (out.stderr or "")
-    except Exception:
-        try:
-            from config import BOT_LOG_PATH
-
-            with open(BOT_LOG_PATH, "r", encoding="utf-8", errors="ignore") as fh:
-                log = fh.read()[-400000:]
-        except Exception as e:
-            return f"{header}\nNo log source available: {e}"
-
-    lines = [l for l in log.splitlines() if "[Maker]" in l or "MAKER BUY" in l]
-    if not lines:
-        return (
-            f"{header}\nNo maker activity in the last {lookback_hours}h. Either no entry "
-            f"was attempted, or the flag was enabled after the last entry."
-        )
-
-    filled = sum(1 for l in lines if "MAKER BUY" in l)
-    no_fill = sum(1 for l in lines if "No fill" in l)
-    crossed_other = sum(1 for l in lines if "crossing" in l and "No fill" not in l)
-    attempts = filled + no_fill + crossed_other
-    rate = (100.0 * filled / attempts) if attempts else 0.0
-
-    saved = [float(m) for m in re.findall(r"saved vs ask ([0-9.]+)/contract", log)]
-    saved_txt = f"avg ${sum(saved)/len(saved):.4f}/contract on {len(saved)} fills" if saved else "n/a"
-
-    return (
-        f"{header}\n"
-        f"Attempts: {attempts} | maker fills: {filled} | timed out: {no_fill} | "
-        f"skipped to taker: {crossed_other}\n"
-        f"Maker fill rate: {rate:.0f}%\n"
-        f"Spread saved: {saved_txt}\n\n"
-        + "\n".join(lines[-12:])
-    )
 
 
 def show_panel(name: str) -> str:

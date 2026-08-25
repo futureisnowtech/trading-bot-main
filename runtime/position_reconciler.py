@@ -22,58 +22,57 @@ def _conn(db_path: str = DB_PATH) -> sqlite3.Connection:
     return c
 
 
-def run_reconciliation(db_path: str = DB_PATH) -> None:
+def run_reconciliation(db_path: str = DB_PATH) -> dict:
     """
     Run reconciliation against Kalshi broker.
-    Safe to call at startup — never raises.
+    Raises when broker truth is unavailable so startup cannot treat unknown as flat.
     """
-    try:
-        summary = {
-            "holdings_count": 0,
-            "adopted": 0,
-            "refreshed": 0,
-            "closed": 0,
-            "connected": False,
-        }
-        try:
-            from execution.kalshi_broker import get_kalshi_broker
-            from forecast.db import init_forecast_db, reconcile_forecast_positions
+    summary = {
+        "holdings_count": 0,
+        "adopted": 0,
+        "refreshed": 0,
+        "closed": 0,
+        "connected": False,
+    }
+    from execution.kalshi_broker import get_kalshi_broker
+    from forecast.db import init_forecast_db, reconcile_forecast_positions
 
-            broker = get_kalshi_broker()
-            if broker.is_connected() or broker.connect():
-                broker.sync_positions()
-                holdings = broker.get_positions()
-                init_forecast_db(db_path=db_path)
-                recon = reconcile_forecast_positions(holdings, db_path=db_path)
-                summary.update(
-                    {
-                        "holdings_count": len(holdings),
-                        "connected": True,
-                        "adopted": int(recon.get("adopted") or 0),
-                        "refreshed": int(recon.get("refreshed") or 0),
-                        "closed": int(recon.get("closed") or 0),
-                    }
-                )
-        except Exception: pass
-
-        now_iso = datetime.now(timezone.utc).isoformat()
-        msg = (
-            "Reconciliation complete: "
-            f"connected={summary['connected']} "
-            f"Kalshi holdings={summary['holdings_count']} "
-            f"adopted={summary['adopted']} "
-            f"refreshed={summary['refreshed']} "
-            f"closed={summary['closed']}"
+    broker = get_kalshi_broker()
+    if not broker.is_connected() and not broker.connect():
+        raise RuntimeError("reconciliation_broker_unavailable")
+    if not broker.sync_positions() or not broker.has_fresh_position_snapshot():
+        raise RuntimeError(
+            f"reconciliation_position_snapshot_unavailable:{broker.position_snapshot_status()}"
         )
+    holdings = broker.get_positions()
+    init_forecast_db(db_path=db_path)
+    recon = reconcile_forecast_positions(holdings, broker=broker, db_path=db_path)
+    summary.update(
+        {
+            "holdings_count": len(holdings),
+            "connected": True,
+            "adopted": int(recon.get("adopted") or 0),
+            "refreshed": int(recon.get("refreshed") or 0),
+            "closed": int(recon.get("closed") or 0),
+        }
+    )
 
-        try:
-            with _conn(db_path) as c:
-                c.execute(
-                    "INSERT INTO system_events (ts, level, source, message) VALUES (?, 'INFO', 'PositionReconciler', ?)",
-                    (now_iso, msg),
-                )
-        except Exception:
-            pass
-    except Exception as e:
-        import logging
-        logging.getLogger(__name__).warning("run_reconciliation failed: %s", e)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    msg = (
+        "Reconciliation complete: "
+        f"connected={summary['connected']} "
+        f"Kalshi holdings={summary['holdings_count']} "
+        f"adopted={summary['adopted']} "
+        f"refreshed={summary['refreshed']} "
+        f"closed={summary['closed']}"
+    )
+
+    try:
+        with _conn(db_path) as c:
+            c.execute(
+                "INSERT INTO system_events (ts, level, source, message) VALUES (?, 'INFO', 'PositionReconciler', ?)",
+                (now_iso, msg),
+            )
+    except Exception:
+        pass
+    return summary

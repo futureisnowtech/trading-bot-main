@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import sys
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -59,7 +58,7 @@ def test_market_scan_findings_warns_when_no_true_hourly_inventory_is_present():
     assert warnings == ["no_entry_scope_inventory (ALL_WEATHER_LANES)"]
 
 
-def test_market_scan_findings_ignores_empty_inventory_when_no_active_markets():
+def test_market_scan_findings_never_calls_zero_inventory_ready():
     import scripts.release_audit as ra
 
     blockers, warnings = ra._market_scan_findings(
@@ -75,7 +74,79 @@ def test_market_scan_findings_ignores_empty_inventory_when_no_active_markets():
     )
 
     assert blockers == []
+    assert warnings == ["no_active_market_inventory"]
+
+
+def test_build_identity_findings_warn_locally_and_block_hosted():
+    import scripts.release_audit as ra
+
+    stale = {
+        "sha": "newsha",
+        "metadata_stale": True,
+        "build_sha_mismatch": True,
+    }
+
+    blockers, warnings = ra._build_identity_findings(stale, strict=False)
+    assert blockers == []
+    assert warnings == [
+        "deploy_runtime_metadata_stale",
+        "deploy_runtime_build_sha_mismatch",
+    ]
+
+    blockers, warnings = ra._build_identity_findings(stale, strict=True)
+    assert blockers == [
+        "deploy_runtime_metadata_stale",
+        "deploy_runtime_build_sha_mismatch",
+    ]
     assert warnings == []
+
+
+def test_local_audit_blocks_a_dirty_worktree(monkeypatch, tmp_path):
+    import scripts.release_audit as ra
+
+    monkeypatch.setattr(ra, "get_build_info", lambda: {"sha": "abc123"}, raising=False)
+    monkeypatch.setattr(
+        ra,
+        "_git_worktree_state",
+        lambda: {
+            "available": True,
+            "dirty": True,
+            "paths": [" M forecast/runner.py"],
+            "changed_path_count": 1,
+            "error": "",
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(
+        ra,
+        "_run_command",
+        lambda label, command: {"label": label, "ok": True, "returncode": 0},
+        raising=False,
+    )
+    monkeypatch.setattr(ra, "run_health_check", lambda force=True: {"healthy": True}, raising=False)
+    monkeypatch.setattr(ra, "runtime_storage_status", lambda: {"ok": True}, raising=False)
+    monkeypatch.setattr(ra, "DB_PATH", str(tmp_path / "audit.db"), raising=False)
+    monkeypatch.setattr(ra, "get_open_forecast_positions", lambda db_path=None: [], raising=False)
+    monkeypatch.setattr(
+        ra,
+        "_scan_live_market_surface",
+        lambda **kwargs: {
+            "sample_size": 1,
+            "markets_scanned": 1,
+            "scope_active_contracts": 1,
+            "rows": [{"ticker": "KXHIGHCHI-TEST"}],
+            "infrastructure_rejections": [],
+            "systematic_thin_liquidity": False,
+        },
+        raising=False,
+    )
+
+    payload = ra._run_local_audit(scan_limit=1)
+
+    assert payload["verdict"] == "BLOCKED"
+    assert payload["entries_allowed"] is False
+    assert "working_tree_dirty" in payload["blockers"]
+    assert payload["details"]["worktree"]["changed_path_count"] == 1
 
 
 def test_render_markdown_report_contains_verdict_and_counts():
@@ -122,7 +193,13 @@ def test_strategy_cycle_blocks_new_entries_when_release_gate_closed(monkeypatch)
             return True
 
         def sync_positions(self):
-            return None
+            return True
+
+        def has_fresh_position_snapshot(self):
+            return True
+
+        def position_snapshot_status(self):
+            return {"authoritative": True, "fresh": True}
 
         def get_account_balance(self):
             return 164.0
@@ -186,7 +263,13 @@ def test_strategy_cycle_with_open_release_gate_handles_empty_candidates(monkeypa
             return True
 
         def sync_positions(self):
-            return None
+            return True
+
+        def has_fresh_position_snapshot(self):
+            return True
+
+        def position_snapshot_status(self):
+            return {"authoritative": True, "fresh": True}
 
         def get_account_balance(self):
             return 164.0
@@ -248,10 +331,10 @@ def test_scan_live_market_surface_warms_weather_truth_for_weather_candidates(mon
             {
                 "id": 1,
                 "market_id": 9,
-                "local_symbol": "KXTEMPNYCH-26JUN0522-T75.99",
-                "contract_name": "Will the temp in New York City be above 75.99° on Jun 5, 2026 at 10pm EST?",
+                "local_symbol": "KXHIGHCHI-26JUN05-T75",
+                "contract_name": "Will the high temperature in Chicago be above 75° on Jun 5, 2026?",
                 "right": "C",
-                "strike": 75.99,
+                "strike": 75.0,
                 "last_trade_at": "2026-06-05T23:59:59Z",
                 "resolution_at": "2026-06-05T23:59:59Z",
             }
@@ -263,7 +346,7 @@ def test_scan_live_market_surface_warms_weather_truth_for_weather_candidates(mon
         "build_market_snapshots",
         lambda *args, **kwargs: [
             SimpleNamespace(
-                ticker="KXTEMPNYCH-26JUN0522-T75.99",
+                ticker="KXHIGHCHI-26JUN05-T75",
                 yes_quote={},
                 no_quote={},
             )
@@ -297,7 +380,7 @@ def test_scan_live_market_surface_warms_weather_truth_for_weather_candidates(mon
     assert payload["weather_warmup"]["mode"] == "shared_truth_hydration"
     assert payload["weather_warmup"]["attempted"] is True
     assert payload["weather_warmup"]["refreshed_series"] == 1
-    assert payload["entry_scope"] == "ALL_WEATHER_LANES"
+    assert payload["entry_scope"] == "DAILY_HIGH+DAILY_LOW"
     assert payload["scope_active_contracts"] == 1
 
 
@@ -324,6 +407,32 @@ def test_run_remote_audit_parses_json_after_stdout_noise(monkeypatch):
     assert payload["verdict"] == "PASS_WITH_WARNINGS"
     assert payload["blockers"] == []
     assert payload["details"]["remote_payload"]["audited_sha"] == "abc123"
+
+
+def test_run_remote_audit_times_out_fail_closed(monkeypatch):
+    import subprocess
+
+    import scripts.release_audit as ra
+
+    monkeypatch.setattr(ra, "_git_head_sha", lambda: "abc123", raising=False)
+
+    def _timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(
+            cmd=args[0],
+            timeout=kwargs["timeout"],
+            output="partial remote audit output",
+            stderr="ssh still waiting",
+        )
+
+    monkeypatch.setattr(ra.subprocess, "run", _timeout, raising=False)
+
+    payload = ra._run_remote_audit(scan_limit=12, soak_seconds=10)
+
+    assert payload["verdict"] == "BLOCKED"
+    assert payload["entries_allowed"] is False
+    assert payload["blockers"] == ["remote_release_audit_timeout (130s)"]
+    assert payload["details"]["timeout_seconds"] == 130
+    assert payload["details"]["stderr_tail"] == ["ssh still waiting"]
 
 
 def test_release_audit_json_mode_suppresses_noisy_stdout(monkeypatch, capsys):

@@ -2,7 +2,7 @@
 
 Every notification today is reactive: the only thing that pings Telegram is a
 trade actually opening or closing (notifications/notification_engine.py). If the
-bot silently stops entering -- a veto storm, a release-gate block, a dead maker
+bot silently stops entering -- a veto storm or a release-gate block --
 book -- nothing tells you until you happen to open the cockpit. This runs the same
 checks an operator would ask JARVIS for, on the daemon's own cycle, and messages
 Telegram only when a check transitions from OK to bad (edge-triggered) or the
@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -123,31 +122,6 @@ def _check_entry_stall(stall_hours: float = 3.0) -> tuple[str, bool, str]:
     )
 
 
-def _check_maker_fill_rate(min_attempts: int = 5, min_rate_pct: float = 25.0) -> tuple[str, bool, str]:
-    from config import MAKER_ENTRY_ENABLED, get_dynamic_bool
-
-    if not get_dynamic_bool("MAKER_ENTRY_ENABLED", MAKER_ENTRY_ENABLED):
-        return "maker_fill_rate", False, ""
-
-    from dashboard.jarvis_brain import get_maker_fill_stats
-
-    report = get_maker_fill_stats(lookback_hours=24)
-    m_attempts = re.search(r"Attempts:\s*(\d+)", report)
-    m_rate = re.search(r"fill rate:\s*([\d.]+)%", report)
-    if not m_attempts or not m_rate:
-        return "maker_fill_rate", False, ""
-
-    attempts = int(m_attempts.group(1))
-    rate = float(m_rate.group(1))
-    is_bad = attempts >= min_attempts and rate < min_rate_pct
-    return (
-        "maker_fill_rate",
-        is_bad,
-        f"Maker fill rate is {rate:.0f}% over {attempts} attempts in 24h (below the {min_rate_pct:.0f}% floor). "
-        f"Most entries are timing out and crossing as taker -- the fee saving is not materializing.",
-    )
-
-
 def _check_pending_approvals() -> tuple[str, bool, str]:
     from runtime import approvals
 
@@ -162,7 +136,6 @@ def _check_pending_approvals() -> tuple[str, bool, str]:
 _CHECKS: list[Callable[[], tuple[str, bool, str]]] = [
     _check_entries_allowed,
     _check_entry_stall,
-    _check_maker_fill_rate,
     _check_pending_approvals,
 ]
 

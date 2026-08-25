@@ -14,18 +14,33 @@ from forecast.strategy_engine import (
     calculate_favorite_scaler,
     solve_optimal_size,
     log_utility_g,
-    estimate_zeta
 )
 from forecast.runner import (
     calculate_salvage_exit_threshold,
     get_position_basis_quality
 )
 from forecast.covariance_engine import (
-    assemble_covariance_matrix
+    assemble_covariance_matrix,
+    calculate_shrinkage_limit,
 )
 
 
 class TestV20Specification(unittest.TestCase):
+
+    def test_first_position_is_subject_to_variance_budget(self):
+        import numpy as np
+
+        # q=0.5 gives Bernoulli variance 0.25. At a $100 bankroll the
+        # 8%-of-bankroll variance budget allows at most 16 contracts.
+        limit = calculate_shrinkage_limit(
+            np.array([]),
+            np.array([[0.25]]),
+            candidate_idx=0,
+            candidate_side_sign=1.0,
+            bankroll=100.0,
+        )
+
+        self.assertAlmostEqual(limit, 16.0)
 
     def test_ceiled_fee_model(self):
         """Verify ceiled continuous fee model (SPEC Phase 6)."""
@@ -70,28 +85,34 @@ class TestV20Specification(unittest.TestCase):
         self.assertTrue(s_5000 > s_1000)
 
     def test_solve_optimal_size_lambda_sensitivity(self):
-        """Verify sizing response to GraphCast Lambda scaling."""
-        # Baseline Kelly size
-        f_star_base, phi_base, n_base = solve_optimal_size(
-            q=0.60,
-            p=0.45,
-            maker=False,
-            bankroll=1000.0,
-            lambda_scaler=1.0,
-            cov_charge=1.0
-        )
-        self.assertTrue(n_base > 0)
+        """Verify sizing response to AIGFS lambda scaling."""
+        # Isolate lambda sensitivity from production's 15-contract hard clamp;
+        # with that clamp active both otherwise-distinct raw sizes correctly cap
+        # at 15, which says nothing about the lambda math under test.
+        from unittest.mock import patch
 
-        # Doubled Lambda should decrease sizing proportionally
-        f_star_scaled, phi_scaled, n_scaled = solve_optimal_size(
-            q=0.60,
-            p=0.45,
-            maker=False,
-            bankroll=1000.0,
-            lambda_scaler=2.0,
-            cov_charge=1.0
-        )
-        self.assertTrue(n_scaled < n_base)
+        with patch("forecast.strategy_engine.KALSHI_MAX_QTY_PER_POSITION", 2500):
+            # Baseline Kelly size
+            f_star_base, phi_base, n_base = solve_optimal_size(
+                q=0.60,
+                p=0.45,
+                maker=False,
+                bankroll=1000.0,
+                lambda_scaler=1.0,
+                cov_charge=1.0
+            )
+            self.assertTrue(n_base > 0)
+
+            # Doubled Lambda should decrease sizing proportionally
+            f_star_scaled, phi_scaled, n_scaled = solve_optimal_size(
+                q=0.60,
+                p=0.45,
+                maker=False,
+                bankroll=1000.0,
+                lambda_scaler=2.0,
+                cov_charge=1.0
+            )
+            self.assertTrue(n_scaled < n_base)
 
     def test_exit_curves(self):
         """Salvage exit is tiered by entry conviction, not tau or entry price."""

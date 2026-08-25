@@ -26,6 +26,7 @@ import logging
 import os
 import sqlite3
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -76,6 +77,18 @@ CREATE TABLE IF NOT EXISTS firewall_day_pnl (
 );
 """
 
+_DDL_FIREWALL_REALIZED_EVENTS: str = """
+CREATE TABLE IF NOT EXISTS firewall_realized_events (
+    event_id    TEXT PRIMARY KEY,
+    ticker      TEXT NOT NULL DEFAULT '',
+    occurred_at TEXT NOT NULL,
+    pnl_usd     REAL NOT NULL,
+    source      TEXT NOT NULL,
+    official    INTEGER NOT NULL DEFAULT 0,
+    recorded_at TEXT NOT NULL
+);
+"""
+
 
 def ensure_firewall_tables(db_path: str | None = None) -> None:
     """
@@ -88,6 +101,7 @@ def ensure_firewall_tables(db_path: str | None = None) -> None:
         conn.execute(_DDL_FIREWALL_ROUND_TRIPS)
         conn.execute(_DDL_FIREWALL_ROUND_TRIPS_IDX)
         conn.execute(_DDL_FIREWALL_DAY_PNL)
+        conn.execute(_DDL_FIREWALL_REALIZED_EVENTS)
         conn.commit()
 
 
@@ -170,7 +184,7 @@ def check_reentry_lockout(
             ).fetchone()
     except Exception as exc:
         logger.warning("[Firewall §5.4a] DB read error for %s: %s", ticker, exc)
-        return True, ""
+        return False, f"firewall_state_unavailable ({exc})"
 
     if not row:
         return True, ""
@@ -233,7 +247,7 @@ def check_oscillation_breaker(
             ).fetchone()[0]
     except Exception as exc:
         logger.warning("[Firewall §5.4b] DB read error for %s: %s", ticker, exc)
-        return True, ""
+        return False, f"firewall_state_unavailable ({exc})"
 
     if count >= _OSCILLATION_TRIP_LIMIT:
         reason = (
@@ -289,6 +303,7 @@ def is_ticker_halted(ticker: str, *, db_path: str | None = None) -> tuple[bool, 
             return True, str(row[1])
     except Exception as exc:
         logger.warning("[Firewall] halt check error for %s: %s", ticker, exc)
+        return True, f"firewall_state_unavailable ({exc})"
     return False, ""
 
 
@@ -345,7 +360,16 @@ def check_quote_coherence(
 # ---------------------------------------------------------------------------
 
 
-def record_realized_pnl(pnl_usd: float, *, db_path: str | None = None) -> None:
+def record_realized_pnl(
+    pnl_usd: float,
+    *,
+    ticker: str = "",
+    event_id: str = "",
+    occurred_at: str = "",
+    source: str = "exit_fill",
+    official: bool = False,
+    db_path: str | None = None,
+) -> None:
     """
     Accumulate intraday realized PnL in the UTC-day bucket.
     Called from runner.py after every position close. SPEC §5.4d
@@ -355,20 +379,88 @@ def record_realized_pnl(pnl_usd: float, *, db_path: str | None = None) -> None:
         db_path: Override DB path for tests.
     """
     path = str(db_path or DB_PATH)
-    day_utc: str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     now_utc: str = datetime.now(timezone.utc).isoformat()
+    occurred = str(occurred_at or now_utc)
+    day_utc = occurred[:10]
+    identity = str(event_id or f"{source}:{ticker}:{time.time_ns()}")
     with sqlite3.connect(path, timeout=30.0) as conn:
+        conn.execute(_DDL_FIREWALL_REALIZED_EVENTS)
+        conn.execute(
+            """INSERT INTO firewall_realized_events
+               (event_id, ticker, occurred_at, pnl_usd, source, official, recorded_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(event_id) DO UPDATE SET
+                 occurred_at=excluded.occurred_at,
+                 pnl_usd=excluded.pnl_usd,
+                 source=excluded.source,
+                 official=excluded.official,
+                 recorded_at=excluded.recorded_at""",
+            (identity, ticker, occurred, float(pnl_usd), source, int(bool(official)), now_utc),
+        )
         conn.execute(
             """
             INSERT INTO firewall_day_pnl (day_utc, realized, updated_at)
-            VALUES (?, ?, ?)
+            VALUES (?, (SELECT COALESCE(SUM(pnl_usd), 0.0)
+                        FROM firewall_realized_events
+                        WHERE substr(occurred_at, 1, 10) = ?), ?)
             ON CONFLICT(day_utc) DO UPDATE SET
-                realized   = realized + excluded.realized,
+                realized   = excluded.realized,
                 updated_at = excluded.updated_at
             """,
-            (day_utc, float(pnl_usd), now_utc),
+            (day_utc, day_utc, now_utc),
         )
         conn.commit()
+
+
+def sync_official_settlement_pnl(
+    settlements: list[dict],
+    *,
+    db_path: str | None = None,
+) -> dict:
+    """Replace provisional exit events with idempotent official settlement truth."""
+    from runtime.kalshi_settlement_truth import settlement_pnl_usd
+
+    path = str(db_path or DB_PATH)
+    ensure_firewall_tables(path)
+    inserted = 0
+    tickers: set[str] = set()
+    with sqlite3.connect(path, timeout=30.0) as conn:
+        for row in settlements:
+            ticker = str(row.get("ticker") or "").strip()
+            if not ticker:
+                continue
+            occurred = str(row.get("settled_time") or row.get("created_time") or "")
+            if not occurred:
+                continue
+            event_id = f"kalshi_settlement:{ticker}:{occurred}"
+            pnl = settlement_pnl_usd(row)
+            conn.execute(
+                "DELETE FROM firewall_realized_events "
+                "WHERE ticker=? AND official=0 AND source='exit_fill'",
+                (ticker,),
+            )
+            conn.execute(
+                """INSERT INTO firewall_realized_events
+                   (event_id, ticker, occurred_at, pnl_usd, source, official, recorded_at)
+                   VALUES (?, ?, ?, ?, 'kalshi_settlement', 1, ?)
+                   ON CONFLICT(event_id) DO UPDATE SET
+                     pnl_usd=excluded.pnl_usd,
+                     occurred_at=excluded.occurred_at,
+                     recorded_at=excluded.recorded_at""",
+                (event_id, ticker, occurred, pnl, datetime.now(timezone.utc).isoformat()),
+            )
+            inserted += 1
+            tickers.add(ticker)
+        conn.execute("DELETE FROM firewall_day_pnl")
+        conn.execute(
+            """INSERT INTO firewall_day_pnl (day_utc, realized, updated_at)
+               SELECT substr(occurred_at, 1, 10), SUM(pnl_usd), ?
+               FROM firewall_realized_events
+               GROUP BY substr(occurred_at, 1, 10)""",
+            (datetime.now(timezone.utc).isoformat(),),
+        )
+        conn.commit()
+    return {"official_rows": inserted, "tickers": len(tickers)}
 
 
 def _get_today_day_loss(db_path: str | None = None) -> float:
@@ -377,14 +469,16 @@ def _get_today_day_loss(db_path: str | None = None) -> float:
     day_utc: str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     try:
         with sqlite3.connect(path, timeout=30.0) as conn:
+            conn.execute(_DDL_FIREWALL_REALIZED_EVENTS)
             row = conn.execute(
-                "SELECT realized FROM firewall_day_pnl WHERE day_utc = ?",
+                "SELECT SUM(pnl_usd) FROM firewall_realized_events "
+                "WHERE substr(occurred_at, 1, 10) = ?",
                 (day_utc,),
             ).fetchone()
         pnl = float(row[0]) if row and row[0] is not None else 0.0
         return max(0.0, -pnl)
-    except Exception:
-        return 0.0
+    except Exception as exc:
+        raise RuntimeError(f"firewall_day_pnl_unavailable:{exc}") from exc
 
 
 def _get_trailing_30d_mean_daily_edge(db_path: str | None = None) -> float:
@@ -401,21 +495,21 @@ def _get_trailing_30d_mean_daily_edge(db_path: str | None = None) -> float:
             row = conn.execute(
                 """
                 SELECT AVG(daily_pnl) FROM (
-                    SELECT DATE(ts, 'unixepoch') AS d,
-                           SUM(pnl_usd)         AS daily_pnl
-                    FROM   trades
-                    WHERE  ts >= ?
+                    SELECT substr(occurred_at, 1, 10) AS d,
+                           SUM(pnl_usd) AS daily_pnl
+                    FROM firewall_realized_events
+                    WHERE occurred_at >= ?
                     GROUP  BY d
                     HAVING SUM(pnl_usd) > 0
                 )
                 """,
-                (cutoff_ts,),
+                (datetime.fromtimestamp(cutoff_ts, tz=timezone.utc).isoformat(),),
             ).fetchone()
         val = float(row[0]) if row and row[0] is not None else 0.0
         return max(0.0, val)
     except Exception as exc:
         logger.warning("[Firewall §5.4d] trailing-edge query failed: %s", exc)
-        return 0.0
+        raise RuntimeError(f"firewall_trailing_edge_unavailable:{exc}") from exc
 
 
 def check_kill_switch(
@@ -439,9 +533,9 @@ def check_kill_switch(
         return True, ""
 
     trailing_edge: float = _get_trailing_30d_mean_daily_edge(db_path=db_path)
-    bp_threshold: float = max(5.0, 0.03 * bankroll_safe)
+    bp_threshold: float = 0.03 * bankroll_safe
     edge_threshold: float = 5.0 * trailing_edge if trailing_edge > 0.0 else float("inf")
-    threshold: float = max(5.0, min(bp_threshold, edge_threshold))
+    threshold: float = min(bp_threshold, edge_threshold)
 
     if day_loss > threshold:
         reason = (
@@ -488,6 +582,7 @@ def is_entries_allowed_today(*, db_path: str | None = None) -> tuple[bool, str]:
                 return False, str(halted_reason or "firewall_daily_kill_switch")
     except Exception as exc:
         logger.warning("[Firewall §5.4d] global flag read failed: %s", exc)
+        return False, f"firewall_state_unavailable ({exc})"
     return True, ""
 
 

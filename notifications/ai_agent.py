@@ -36,7 +36,7 @@ def get_repo_context() -> str:
     # 2. Live Risk & System Configuration Parameters
     try:
         import config
-        from forecast.strategy_engine import EV_THRESHOLD, CITY_BLACKLIST, CITY_PRIORITY_TIERS
+        from forecast.strategy_engine import EV_THRESHOLD
         live_config = {
             "ACCOUNT_SIZE": config.ACCOUNT_SIZE,
             "SHADOW_EXECUTION": config.SHADOW_EXECUTION,
@@ -50,8 +50,7 @@ def get_repo_context() -> str:
             "KALSHI_KELLY_CAP": config.KALSHI_KELLY_CAP,
             "KALSHI_MAX_RISK_PER_EVENT_PCT": config.KALSHI_MAX_RISK_PER_EVENT_PCT,
             "KALSHI_MAX_DEPLOYED_PCT": config.KALSHI_MAX_DEPLOYED_PCT,
-            "CITY_PRIORITY_TIERS": CITY_PRIORITY_TIERS,
-            "CITY_BLACKLIST": list(CITY_BLACKLIST) if isinstance(CITY_BLACKLIST, (set, list)) else list(CITY_BLACKLIST),
+            "CITY_BLACKLIST": sorted(config.CITY_BLACKLIST),
         }
         context.append("### LIVE ENGINE CONFIGURATION & RISK LIMITS\n" + json.dumps(live_config, indent=2))
     except Exception as exc:

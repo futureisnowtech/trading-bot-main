@@ -10,9 +10,6 @@ Coverage:
   6.  Primitives: log_odds, entropy, overround, parity_gap, compute_q_hat
   7.  Weather-only lane: non-weather strategy path fails closed
   8.  Strategy determinism: weather override remains stable on same input
-  11. Economics gate: correct veto for overround > MAX_OVERROUND
-  12. Economics gate: correct veto for insufficient EV
-  13. Economics gate: correct veto for concurrent cap
   14. Tiny-bankroll sizing: contracts_from_fraction respects all caps
   15. Novelty / non-economic markets fail-closed at discovery filter
   16. Dashboard forecast tab: render function importable + has correct name
@@ -533,79 +530,15 @@ def test_weather_evaluation_is_stable_on_identical_inputs(monkeypatch):
     assert abs(r1.ev - r2.ev) < 1e-9
 
 
-# ── 11–13. Economics gate ─────────────────────────────────────────────────────
-
-
-def test_economics_gate_veto_overround():
-    """Gate must veto when overround exceeds MAX_OVERROUND."""
-    from forecast.strategy_engine import MAX_OVERROUND, _economics_gate
-
-    approved, reason, _, _ = _economics_gate(
-        ask_yes=0.60,
-        ask_no=0.60,  # Ω = 0.20 + 0.60 - 1 = 0.20 → but sum = 1.20 → Ω = 0.20
-        q_hat=0.60,
-        omega_t=MAX_OVERROUND + 0.01,  # just above threshold
-        g_t=0.0,
-        h_t=0.65,
-        sigma_t=0.05,
-        spread=0.02,
-        hours_to_resolution=24.0,
-    )
-    assert not approved
-    assert "overround" in reason.lower()
-
-
-def test_economics_gate_veto_insufficient_ev():
-    """Gate must veto when both sides have EV below threshold."""
-    from forecast.strategy_engine import EV_THRESHOLD, _economics_gate
-
-    # q_hat = 0.52, ask_yes = 0.55 → EV_yes = 0.52 - 0.55 = -0.03 (negative)
-    # q_hat = 0.52, ask_no  = 0.50 → EV_no = 0.48 - 0.50 = -0.02 (negative)
-    approved, reason, ev_yes, ev_no = _economics_gate(
-        ask_yes=0.55,
-        ask_no=0.50,
-        q_hat=0.52,
-        omega_t=0.05,
-        g_t=0.00,
-        h_t=0.65,
-        sigma_t=0.05,
-        spread=0.02,
-        hours_to_resolution=24.0,
-    )
-    assert not approved
-    assert "ev" in reason.lower() or "insufficient" in reason.lower()
-
-
-def test_economics_gate_veto_concurrent_cap():
-    """Gate must veto when concurrent position cap is reached."""
-    from forecast.strategy_engine import MAX_CONCURRENT_POSITIONS, _economics_gate
-
-    # Provide enough EV to pass that check
-    approved, reason, _, _ = _economics_gate(
-        ask_yes=0.40,
-        ask_no=0.45,
-        q_hat=0.65,
-        omega_t=0.05,
-        g_t=0.00,
-        h_t=0.65,
-        sigma_t=0.05,
-        spread=0.02,
-        hours_to_resolution=24.0,
-        open_positions_count=MAX_CONCURRENT_POSITIONS,  # at cap
-    )
-    assert not approved
-    assert "concurrent" in reason.lower() or "cap" in reason.lower()
-
-
 def test_weather_market_gate_allows_ultra_no_concurrency_bonus():
-    from forecast.strategy_engine import MAX_CONCURRENT_POSITIONS, _weather_market_gate
+    from forecast.strategy_engine import KALSHI_MAX_CONCURRENT_POSITIONS, _weather_market_gate
 
     approved, reason = _weather_market_gate(
         ask_yes=0.40,
         ask_no=0.45,
         spread=0.02,
         hours_to_resolution=24.0,
-        open_positions_count=MAX_CONCURRENT_POSITIONS,
+        open_positions_count=KALSHI_MAX_CONCURRENT_POSITIONS,
         deployed_pct=0.0,
         mode="",
         ticker="TEST-ULTRA-NO",
@@ -1243,6 +1176,72 @@ def test_strategy_engine_family_cap_allows_four_existing_positions(monkeypatch):
     assert results[0]["result"].veto_reason == "downstream_stub"
 
 
+def test_batch_ranking_does_not_double_apply_sequential_covariance(monkeypatch):
+    from forecast.market_snapshot import MarketSnapshot
+    import forecast.covariance_engine as covariance_engine
+    import forecast.strategy_engine as se
+
+    snapshot = MarketSnapshot(
+        market_id=1,
+        ticker="KXHIGHCHI-99JAN01-T75",
+        contract_name="Chicago High",
+        strike=75.0,
+        last_trade_at="20990101",
+        resolution_at="2099-01-01T00:00:00Z",
+        yes_contract={"local_symbol": "KXHIGHCHI-99JAN01-T75", "contract_name": "Chicago High"},
+        no_contract={"local_symbol": "KXHIGHCHI-99JAN01-L75", "contract_name": "Chicago High"},
+        yes_quote={"ask": 0.40, "bid": 0.38, "mid": 0.39},
+        no_quote={"ask": 0.60, "bid": 0.58, "mid": 0.59},
+        bars_5m=[],
+        bars_30m=[],
+        bars_1h=[],
+        bars_4h=[],
+    )
+
+    monkeypatch.setattr(
+        se,
+        "evaluate_contract",
+        lambda **kwargs: se.StrategyResult(
+            strategy_family="weather_physics",
+            side="YES",
+            q_hat=0.75,
+            ev=0.20,
+            ev_yes=0.20,
+            ev_no=-0.20,
+            confidence=0.75,
+            uncertainty_penalty=0.0,
+            econ_approved=True,
+            veto_reason="",
+            position_fraction=0.02,
+            position_contracts=2,
+            top_factors=[],
+            hours_to_resolution=24.0,
+        ),
+    )
+    calls = {"count": 0}
+
+    def _unexpected_covariance(**_kwargs):
+        calls["count"] += 1
+        raise RuntimeError("batch ranking must not own sequential covariance")
+
+    monkeypatch.setattr(
+        covariance_engine,
+        "check_and_shrink_candidate",
+        _unexpected_covariance,
+    )
+
+    results = se.evaluate_market_snapshots(
+        snapshots=[snapshot],
+        bankroll=100.0,
+        open_event_families={},
+        open_positions=[],
+    )
+
+    assert calls["count"] == 0
+    assert results[0]["result"].econ_approved is True
+    assert results[0]["result"].position_contracts == 2
+
+
 def test_strategy_engine_family_cap_blocks_after_ultra_bonus_is_exhausted(monkeypatch):
     from forecast.market_snapshot import MarketSnapshot
     import forecast.strategy_engine as se
@@ -1322,6 +1321,10 @@ def test_strategy_engine_allows_ultra_no_family_bonus(monkeypatch):
         )
 
     monkeypatch.setattr(se, "evaluate_contract", _stub_evaluate_contract)
+    monkeypatch.setattr(
+        "forecast.covariance_engine.check_and_shrink_candidate",
+        lambda **kwargs: (int(kwargs["candidate_qty"]), 1.0, {"reason": "test_passthrough"}),
+    )
 
     results = se.evaluate_market_snapshots(
         snapshots=[snapshot],
@@ -1400,6 +1403,10 @@ def test_strategy_engine_keeps_only_one_best_strike_per_event_slot(monkeypatch):
         )
 
     monkeypatch.setattr(se, "evaluate_contract", _stub_evaluate_contract)
+    monkeypatch.setattr(
+        "forecast.covariance_engine.check_and_shrink_candidate",
+        lambda **kwargs: (int(kwargs["candidate_qty"]), 1.0, {"reason": "test_passthrough"}),
+    )
 
     results = se.evaluate_market_snapshots(
         snapshots=snapshots,
@@ -1526,6 +1533,10 @@ def test_strategy_engine_allows_same_family_across_different_event_slots(monkeyp
         )
 
     monkeypatch.setattr(se, "evaluate_contract", _stub_evaluate_contract)
+    monkeypatch.setattr(
+        "forecast.covariance_engine.check_and_shrink_candidate",
+        lambda **kwargs: (int(kwargs["candidate_qty"]), 1.0, {"reason": "test_passthrough"}),
+    )
 
     results = se.evaluate_market_snapshots(
         snapshots=snapshots,
@@ -1538,7 +1549,7 @@ def test_strategy_engine_allows_same_family_across_different_event_slots(monkeyp
     assert all(item["result"].econ_approved for item in results)
 
 
-def test_strategy_engine_variance_budget_veto(monkeypatch):
+def test_strategy_engine_hub_exposure_prefilter_veto(monkeypatch):
     from forecast.market_snapshot import MarketSnapshot
     import forecast.strategy_engine as se
 
@@ -1594,4 +1605,46 @@ def test_strategy_engine_variance_budget_veto(monkeypatch):
         ],
     )
 
-    assert "variance_budget_veto" in results[0]["result"].veto_reason
+    assert "hub_exposure_cap_reached" in results[0]["result"].veto_reason
+
+
+def test_runner_recomputes_hub_cap_from_sequential_live_book(monkeypatch):
+    import config
+    from forecast.runner import _final_hub_exposure_check
+
+    monkeypatch.setattr(config, "KALSHI_HUB_EXPOSURE_MIN_USD", 20.0)
+    monkeypatch.setattr(config, "KALSHI_HUB_EXPOSURE_PCT", 0.20)
+    open_positions = [
+        {
+            "local_symbol": "KXHIGHLAX-26AUG25-T80",
+            "contract_name": "Los Angeles high",
+            "side": "YES",
+            "qty": 36,
+            "market_exposure_usd": 18.0,
+        }
+    ]
+
+    allowed, debug = _final_hub_exposure_check(
+        ticker="KXHIGHTPHX-26AUG25-T110",
+        contract_name="Phoenix high",
+        side="YES",
+        price=0.50,
+        qty=10,
+        open_positions=open_positions,
+        bankroll=100.0,
+    )
+    hedged_allowed, hedged_debug = _final_hub_exposure_check(
+        ticker="KXHIGHTPHX-26AUG25-T110",
+        contract_name="Phoenix high",
+        side="NO",
+        price=0.50,
+        qty=10,
+        open_positions=open_positions,
+        bankroll=100.0,
+    )
+
+    assert allowed is False
+    assert debug["reason"] == "hub_exposure_cap_reached"
+    assert round(debug["projected_exposure_usd"], 2) == 23.18
+    assert hedged_allowed is True
+    assert round(hedged_debug["projected_exposure_usd"], 2) == 12.82

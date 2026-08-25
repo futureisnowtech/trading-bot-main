@@ -42,6 +42,6 @@ This document catalogues software versions, historical bug fixes, and active SRE
 *   *Risk*: Incorrect position cost basis.
 *   *Description*: The position reconciler runs immediately after trade placement. Due to database commit delays, the matching execution record is not found, and the reconciler falls back to the order book's `mid` price ($0.35) instead of the actual fill price ($0.01/$0.07).
 
-### 3.3 Offline Learning weights
-*   *Risk*: Adaptive weights are inactive.
-*   *Description*: The RBI learner writes model skill weights to the database, but the blender is hardcoded to use static weights (60% GFS / 40% ECMWF).
+### 3.3 Resolved Adaptive-Weight Disconnect
+*   *Historical risk*: Adaptive weights were inactive.
+*   *Resolution*: The 2026-08-24 v19.20 candidate consumes explicitly promoted RBI 2.0 weights in the deterministic GFS/ECMWF blend; ICON and the commercial ensemble path are excluded.

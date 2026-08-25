@@ -7,7 +7,7 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
-from config import DB_PATH
+from config import DB_PATH, RBI_LEARNING_EPOCH
 from intelligence.schema import connect, init_intelligence_db
 
 
@@ -62,62 +62,96 @@ def record_prediction(
     contract_name = str(contract.get("contract_name") or getattr(snapshot, "contract_name", "") or ticker)
     strike = _float(contract.get("strike"))
     weather_mode = str(getattr(result, "weather_mode", "") or "")
-    q_gfs = _float(getattr(result, "model_prob_gfs", None))
-    q_ecmwf = _float(getattr(result, "model_prob_ecmwf", None))
-    q_hrrr = None
+    pricing_trace = getattr(result, "pricing_trace", {}) or {}
+    if not isinstance(pricing_trace, dict):
+        pricing_trace = {}
+    q_gfs = _float(pricing_trace.get("q_gfs", getattr(result, "model_prob_gfs", None)))
+    q_ecmwf = _float(pricing_trace.get("q_ecmwf", getattr(result, "model_prob_ecmwf", None)))
+    q_aigfs = _float(pricing_trace.get("q_aigfs", pricing_trace.get("q_graphcast")))
+    q_hrrr = _float(pricing_trace.get("q_hrrr"))
     q_champion = _float(getattr(result, "q_hat", None))
-    provider_at = ""
+    provider_at = str(
+        pricing_trace.get("provider_at")
+        or pricing_trace.get("provider_timestamp")
+        or ""
+    )
     provider_payload_hash = ""
-    provider_summary: dict[str, Any] = {}
+    traced_summary = pricing_trace.get("provider_summary") or {}
+    provider_summary: dict[str, Any] = (
+        dict(traced_summary) if isinstance(traced_summary, dict) else {}
+    )
+    if pricing_trace:
+        provider_summary.update({
+            "provider_mode": pricing_trace.get(
+                "provider_mode", provider_summary.get("provider_mode")
+            ),
+            "target_date": pricing_trace.get(
+                "target_date", provider_summary.get("target_date")
+            ),
+            "target_hour": pricing_trace.get(
+                "target_hour", provider_summary.get("target_hour")
+            ),
+            "model_path": pricing_trace.get(
+                "model_path", provider_summary.get("model_path")
+            ),
+            "physics_method": pricing_trace.get(
+                "physics_method", provider_summary.get("physics_method")
+            ),
+            "physics_validation_status": pricing_trace.get(
+                "physics_validation_status",
+                provider_summary.get("physics_validation_status"),
+            ),
+            "model_probabilities": {
+                "gfs": q_gfs,
+                "ecmwf": q_ecmwf,
+                "aigfs": q_aigfs,
+                "hrrr": q_hrrr,
+            },
+            "blend_weights": {
+                "gfs": _float(pricing_trace.get("gfs_weight")),
+                "ecmwf": _float(pricing_trace.get("ecmwf_weight")),
+                "hrrr": _float(pricing_trace.get("hrrr_weight")),
+            },
+            "aigfs_lambda": _float(pricing_trace.get("lambda_scaler")),
+        })
+    provider_summary = {
+        key: value for key, value in provider_summary.items() if value is not None
+    }
+    if provider_summary:
+        provider_payload_hash = str(pricing_trace.get("provider_payload_hash") or "")
+        if not provider_payload_hash:
+            provider_payload_hash = _stable_hash(provider_summary)
 
     semantics = None
     city_key = ""
     artifact_id = ""
     try:
-        from data.kalshi_weather_monitor import get_contract_weather_data, resolve_weather_city_key
-        from forecast.pricing_engine import calculate_pricing
+        from data.kalshi_weather_monitor import resolve_weather_city_key
         from forecast.weather_contracts import resolve_weather_contract
-        from intelligence.rbi2 import get_champion_artifact
+        from intelligence.rbi2 import get_active_model_weights
 
         semantics = resolve_weather_contract(ticker, contract_name=contract_name, strike=strike)
         city_key = str(resolve_weather_city_key(ticker, contract_name=contract_name) or "")
-        weather = get_contract_weather_data(
-            ticker,
-            contract_name=contract_name,
-            strike=strike,
-            resolution_at=str(contract.get("resolution_at") or ""),
-            last_trade_at=str(contract.get("last_trade_at") or ""),
+        artifact_id = str(
+            get_active_model_weights(weather_mode, db_path=db_path).get("artifact_id") or ""
         )
-        if weather and semantics is not None and not semantics.ambiguous:
-            pricing = calculate_pricing(
-                ticker,
-                weather,
-                float(getattr(result, "hours_to_resolution", 0.0) or 0.0),
-                contract_name=contract_name,
-                strike=strike,
-                db_path=db_path,
-            )
-            q_gfs = _float(pricing.get("q_gfs"))
-            q_ecmwf = _float(pricing.get("q_ecmwf"))
-            q_hrrr = _float(pricing.get("q_hrrr"))
-            q_champion = _float(pricing.get("q_hat"))
-            provider_at = str(weather.get("timestamp") or "")
-            provider_summary = {
-                "provider_mode": weather.get("provider_mode"),
-                "series": weather.get("series"),
-                "target_date": weather.get("target_local_date"),
-                "target_hour": weather.get("target_local_hour"),
-                "gfs_members": len(weather.get("members_high") or weather.get("members_low") or weather.get("members_temp") or []),
-                "ecmwf_members": len((weather.get("ecmwf") or {}).get("members_high") or (weather.get("ecmwf") or {}).get("members_low") or (weather.get("ecmwf") or {}).get("members_temp") or []),
-            }
-            provider_payload_hash = _stable_hash(provider_summary)
-        artifact_id = str((get_champion_artifact(db_path=db_path) or {}).get("artifact_id") or "")
     except Exception:
         pass
 
     q_baseline = None
     if q_gfs is not None and q_ecmwf is not None:
-        q_baseline = 0.60 * q_gfs + 0.40 * q_ecmwf
+        try:
+            from forecast.pricing_engine import log_odds_blend
+
+            q_baseline = log_odds_blend(
+                q_gfs,
+                q_ecmwf,
+                q_hrrr,
+                {"gfs": 0.60, "ecmwf": 0.40},
+                float(getattr(result, "hours_to_resolution", 0.0) or 0.0),
+            )
+        except Exception:
+            q_baseline = None
 
     semantics_payload = {
         "comparator": getattr(semantics, "comparator", None),
@@ -163,13 +197,10 @@ def record_prediction(
             KALSHI_DAILY_ASK_YES_BRACKET_MIN,
             KALSHI_EXPENSIVE_YES_MIN_NET_EDGE,
             KALSHI_EXPENSIVE_YES_THRESHOLD,
+            KALSHI_MAX_SPREAD_RATIO,
             estimate_kalshi_fee_per_contract,
         )
-        from forecast.strategy_engine import (
-            MAX_SPREAD_DOLLARS,
-            MIN_IMPLIED_PROB_FOR_YES,
-            get_dynamic_param,
-        )
+        from forecast.strategy_engine import MAX_SPREAD_DOLLARS
         from forecast.weather_contracts import is_hourly_weather_contract
 
         chosen_side = str(getattr(result, "side", "") or "").upper()
@@ -219,9 +250,8 @@ def record_prediction(
         spread_ratio_cap = (
             0.36
             if (weather_mode == "TEMP" or hourly_contract)
-            else float(get_dynamic_param("KALSHI_MAX_SPREAD_RATIO", 0.30))
+            else float(KALSHI_MAX_SPREAD_RATIO)
         )
-        min_yes_prob = float(MIN_IMPLIED_PROB_FOR_YES)
         expensive_yes_threshold = float(KALSHI_EXPENSIVE_YES_THRESHOLD)
         expensive_yes_floor = float(KALSHI_EXPENSIVE_YES_MIN_NET_EDGE)
         bracket_min = float(KALSHI_DAILY_ASK_YES_BRACKET_MIN)
@@ -247,7 +277,6 @@ def record_prediction(
             "hourly_contract": bool(hourly_contract),
             "price_bracket_min": bracket_min,
             "price_bracket_max": bracket_max,
-            "min_implied_prob_for_yes": min_yes_prob,
             "expensive_yes_threshold": expensive_yes_threshold,
             "expensive_yes_min_net_edge": expensive_yes_floor,
             "spread_cap_dollars": spread_cap_dollars,
@@ -263,11 +292,6 @@ def record_prediction(
                     weather_mode in {"HIGH", "LOW"}
                     and ask_yes is not None
                     and ask_yes > bracket_max
-                ),
-                "longshot_bias_gate": bool(
-                    chosen_side == "YES"
-                    and q_hat_yes is not None
-                    and q_hat_yes < min_yes_prob
                 ),
                 "expensive_yes_headroom_veto": bool(
                     chosen_side == "YES"
@@ -299,7 +323,8 @@ def record_prediction(
         _float(no_quote.get("bid")), _float(no_quote.get("ask")),
         str(yes_quote.get("ts") or no_quote.get("ts") or ""), provider_at,
         provider_payload_hash, _stable_hash(semantics_payload), code_sha,
-        config_hash, artifact_id, json.dumps(features, sort_keys=True), now,
+        config_hash, artifact_id, RBI_LEARNING_EPOCH,
+        json.dumps(features, sort_keys=True), now,
     )
     with connect(db_path) as conn:
         conn.execute(
@@ -310,8 +335,8 @@ def record_prediction(
                 chosen_side, decision, decision_reason, q_gfs, q_ecmwf, q_hrrr,
                 q_baseline, q_champion, yes_bid, yes_ask, no_bid, no_ask,
                 quote_at, provider_at, provider_payload_hash, rule_hash, code_sha,
-                config_hash, artifact_id, features_json, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                config_hash, artifact_id, learning_epoch, features_json, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(evaluation_key) DO UPDATE SET
                  decision=excluded.decision,
                  decision_reason=excluded.decision_reason,
@@ -321,6 +346,7 @@ def record_prediction(
                  q_hrrr=COALESCE(excluded.q_hrrr, intelligence_predictions.q_hrrr),
                  q_baseline=COALESCE(excluded.q_baseline, intelligence_predictions.q_baseline),
                  q_champion=COALESCE(excluded.q_champion, intelligence_predictions.q_champion),
+                 learning_epoch=excluded.learning_epoch,
                  features_json=excluded.features_json""",
             values,
         )

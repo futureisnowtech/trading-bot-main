@@ -253,7 +253,7 @@ def _build_local_audit_snapshot() -> tuple[str, str]:
         sample_size = int(learning_global.get("sample_size") or 0)
         line = f"Adaptive Blend: GFS={gfs_weight:.0%} ECMWF={ec_weight:.0%} n={sample_size}"
     else:
-        line = "Adaptive Blend: static 60/40 (learning disabled)"
+        line = "Adaptive Blend: governed deterministic GFS=60% ECMWF=40% baseline during the mandatory 7-day current-epoch learning gate; AIGFS scales uncertainty and ICON is absent"
     msg_lines.append(line)
     raw_lines.append(line)
 

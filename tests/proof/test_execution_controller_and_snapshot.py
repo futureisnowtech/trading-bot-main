@@ -49,8 +49,9 @@ def test_execution_controller_caps_qty_to_visible_depth():
 
     class BrokerStub:
         def get_quote(self, _ticker):
-            return {
-                "yes_ask": 0.61,
+                return {
+                    "yes_bid": 0.58,
+                    "yes_ask": 0.61,
                 "yes_ask_size": 4.9,
             }
 
@@ -60,6 +61,8 @@ def test_execution_controller_caps_qty_to_visible_depth():
         is_taker_override=False,
         strategy_family="weather_ensemble",
         ev=0.12,
+        confidence=0.90,
+        ask_yes=0.61,
     )
     intent = TradeIntent(
         contract={"local_symbol": "KXLOWTPHX-26JUN05-T80", "right": "C"},
@@ -85,7 +88,7 @@ def test_execution_controller_does_not_chase_after_depth_loss():
             self.orders: list[tuple[int, float, str]] = []
 
         def get_quote(self, _ticker):
-            return {"yes_ask": 0.62, "yes_ask_size": 4}
+            return {"yes_bid": 0.59, "yes_ask": 0.62, "yes_ask_size": 4}
 
         def place_buy_order(self, contract_dict, qty, limit_price, **kwargs):
             self.orders.append((qty, limit_price, kwargs.get("reason", "")))
@@ -100,6 +103,8 @@ def test_execution_controller_does_not_chase_after_depth_loss():
         is_taker_override=True,
         strategy_family="weather_ensemble",
         ev=0.18,
+        confidence=0.90,
+        ask_yes=0.62,
     )
     intent = TradeIntent(
         contract={
@@ -131,7 +136,7 @@ def test_execution_controller_passes_weather_observation_fields_to_broker():
             self.kwargs = None
 
         def get_quote(self, _ticker):
-            return {"yes_ask": 0.62, "yes_ask_size": 4}
+            return {"yes_bid": 0.59, "yes_ask": 0.62, "yes_ask_size": 4}
 
         def place_buy_order(self, contract_dict, qty, limit_price, **kwargs):
             self.kwargs = kwargs
@@ -148,6 +153,8 @@ def test_execution_controller_passes_weather_observation_fields_to_broker():
         is_taker_override=True,
         strategy_family="weather_ensemble",
         ev=0.18,
+        confidence=0.90,
+        ask_yes=0.62,
     )
     intent = TradeIntent(
         contract={
@@ -192,3 +199,84 @@ def test_held_mark_from_quote_uses_no_side_prices():
     }
 
     assert _held_mark_from_quote(position, quote) == 0.8
+
+
+def test_execution_controller_reprices_at_final_post_boundary():
+    from execution.kalshi_execution_controller import KalshiExecutionController, TradeIntent
+
+    class BrokerStub:
+        def __init__(self):
+            self.quote_calls = 0
+            self.orders = []
+
+        def get_quote(self, _ticker):
+            self.quote_calls += 1
+            ask = 0.60 if self.quote_calls == 1 else 0.64
+            return {"yes_bid": ask - 0.02, "yes_ask": ask, "yes_ask_size": 10}
+
+        def place_buy_order(self, *args, **kwargs):
+            self.orders.append((args, kwargs))
+            return {"status": "executed", "filled_qty": 1}
+
+    result = SimpleNamespace(
+        position_contracts=3,
+        side="YES",
+        is_taker_override=True,
+        strategy_family="weather_physics",
+        ev=0.20,
+        confidence=0.90,
+        ask_yes=0.60,
+        weather_mode="TEMP",
+    )
+    intent = TradeIntent(
+        contract={"local_symbol": "KXTEMPNYCH-1-T70", "right": "C"},
+        result=result,
+        bankroll=200.0,
+        buying_power_usd=200.0,
+    )
+    broker = BrokerStub()
+    controller = KalshiExecutionController(broker)
+
+    execution = controller.execute_plan(
+        controller.plan_entry(intent), forecast_yes_prob=0.90
+    )
+
+    assert execution["status"] == "blocked"
+    assert "live_slippage_veto" in execution["execution_reason"]
+    assert broker.orders == []
+
+
+def test_execution_controller_cannot_override_position_or_kelly_cap(monkeypatch):
+    import config
+    from execution.kalshi_execution_controller import KalshiExecutionController, TradeIntent
+
+    monkeypatch.setattr(config, "KALSHI_MAX_USD_PER_POSITION", 40.0)
+    monkeypatch.setattr(config, "KALSHI_KELLY_CAP", 0.10)
+
+    class BrokerStub:
+        def get_quote(self, _ticker):
+            return {"yes_bid": 0.48, "yes_ask": 0.50, "yes_ask_size": 100}
+
+    result = SimpleNamespace(
+        position_contracts=100,
+        side="YES",
+        is_taker_override=True,
+        strategy_family="weather_physics",
+        ev=0.30,
+        confidence=0.90,
+        ask_yes=0.50,
+        weather_mode="TEMP",
+    )
+    intent = TradeIntent(
+        contract={"local_symbol": "KXTEMPNYCH-1-T70", "right": "C"},
+        result=result,
+        bankroll=100.0,
+        buying_power_usd=100.0,
+        max_capital_usd=100.0,
+    )
+
+    plan = KalshiExecutionController(BrokerStub()).plan_entry(intent)
+
+    assert plan.status == "ready"
+    assert plan.affordable_qty == config.max_kalshi_contracts_for_budget(0.50, 10.0)
+    assert plan.executable_qty == plan.affordable_qty

@@ -48,12 +48,12 @@ graph TD
 *   **`forecast/runner.py` (Active)**: Coordinates the sequential execution steps in each 5-minute cycle:
     1.  *Discovery*: Syncs the active contract list from Kalshi.
     2.  *Cleanup*: Deactivates expired contracts.
-    3.  *Weather Hydration*: Pulls fresh GFS/ECMWF forecasts if stale.
+    3.  *Weather Hydration*: Pulls fresh keyless deterministic GFS/ECMWF/AIGFS forecasts if stale and attaches METAR/HRRR observations.
     4.  *Quote Harvest*: Collects L2 book spreads.
     5.  *Strategy Cycle*: Evaluates the strategy, applies gates, sizes, and submits trades.
     6.  *Position Monitor*: Executes exit policies (Salvage/TP/Bracket busts).
     7.  *Resolution Sync*: Downloads settlement records.
-*   **`forecast/strategy_engine.py` (Active)**: Loads cached weather parameters, blends GFS and ECMWF models, runs multi-factor SRE gates, and calculates position sizing.
+*   **`forecast/strategy_engine.py` (Active)**: Loads cached weather parameters, consumes the full-model probability output, runs convergence and multi-factor SRE gates, and calculates position sizing.
 
 ### 2.3 Broker & Order Management
 *   **`execution/kalshi_broker.py` (Active)**: Handles REST communication with Kalshi's API using RSA private key signing. Fetches positions, balances, and submits REST calls.
@@ -64,17 +64,18 @@ graph TD
 ## 3. Core Data & Execution Flows
 
 ### 3.1 Weather Data Flow
-1.  **Ensemble Forecast Retrieval**: GFS (Global Forecast System) and ECMWF (European Centre for Medium-Range Weather Forecasts) model data are fetched from **Open-Meteo API** (via `data/kalshi_weather_monitor.py`).
-2.  **JSON Caching**: Raw forecast member arrays are written to `logs/weather_snapshot.json`.
+1.  **Forecast Retrieval**: Deterministic GFS, ECMWF, and NCEP AIGFS are fetched from **Open-Meteo API** (via `data/kalshi_weather_monitor.py`) without a commercial ensemble key. Missing GFS fails the bundle closed; ICON is not part of the path.
+2.  **JSON Caching**: Contract-projectable forecast arrays and explicit predictive-error sigma are written to `logs/weather_snapshot.json`.
 3.  **Real-Time METAR Observations**: Intraday station observations are scraped from NOAA/AviationWeather METAR reports and cached to `logs/weather_watermarks.json` to keep track of temperature high/low boundaries.
     *   > [!WARNING]
         > **CONFIRMED ARCHITECTURAL BUG**: Unit tests (`tests/proof/test_weather_intraday_watermarks.py`) lack filesystem isolation. When executed, they overwrite the production `logs/weather_watermarks.json` with a mock temperature of `74.0` across multiple dates, corrupting live exit evaluations.
 
 ### 3.2 Strategy & Sizing Flow
 1.  **Paired Quotes**: Quote harvester fetches bid/ask prices and sizes for YES and NO sides.
-2.  **Probability Blending**: GFS and ECMWF probabilities are blended using static weights (60% GFS, 40% ECMWF).
-3.  **Uncertainty Adjustment**: AI/GraphCast deterministic predictions are evaluated. If the AI deviates from the ensemble mean, volatility ($\sigma$) is scaled upwards, reducing position size.
-4.  **Continuous Kelly Sizing**: Sizing is determined via fractional Kelly, capped at 10% bankroll (`KALSHI_KELLY_CAP = 0.10`).
+2.  **Probability Blending**: Promoted RBI skill weights set the deterministic GFS/ECMWF log-odds split. Bounded high/low physics is applied in temperature space before each model CDF.
+3.  **Uncertainty Adjustment**: The actual NCEP AIGFS forecast is compared with GFS/ECMWF. Disagreement widens probability kernels and reduces Kelly size; agreement narrows them.
+4.  **Convergence Safety**: Unanimous GFS/ECMWF same-tail agreement earns 1.5x; gaps above 20 points soften probability/size and gaps above 70 points veto.
+5.  **Continuous Kelly Sizing**: Quarter-Kelly sizing consumes convergence/divergence/AIGFS/sigma multipliers and is bounded by quantity, fee-inclusive Kelly, aggregate event, dollar, hub, exposure, and fail-closed covariance rails.
 
 ### 3.3 Thermodynamic Netting Flow (SRE Compliance)
 *   **CONFIRMED (Strict Mathematical Netting)**:
@@ -97,7 +98,7 @@ graph TD
 
 ### 4.1 External APIs & Services
 *   **Kalshi API v2**: Exchange REST endpoint for execution, order book quotes, and account status.
-*   **Open-Meteo API**: Meteorological data feed for GFS/ECMWF model runs.
+*   **Open-Meteo API**: Keyless meteorological feed for deterministic GFS, ECMWF, NCEP AIGFS, HRRR, and archive observations; commercial ensembles and ICON are not used.
 *   **AviationWeather (METAR)**: Scraped NOAA METAR text reports for real-time station temp observations.
 *   **Telegram Bot API**: Used by the notification engine and operator bot.
 *   **Grafana / Prometheus (Optional)**: If enabled, exports SRE metrics (volatility, balance, Brier scores).

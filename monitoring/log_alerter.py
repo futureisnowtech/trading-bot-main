@@ -82,9 +82,7 @@ class LogAlertWatchdog:
     def _add_insight(self, line: str) -> str:
         """Translates terse system errors into human-readable strategic insights."""
         if "limit_order_rejected" in line:
-            return "\n💡 <b>Insight:</b> Order canceled to protect capital. We use Maker-Only orders to avoid the 0.60% Taker fee. The price moved too fast, so the exchange safely rejected it rather than overcharging us."
-        if "taker_fallback_disabled" in line:
-            return "\n💡 <b>Insight:</b> Trade skipped. The Maker order didn't fill, and our strict Maker-Only policy blocked the Taker fallback to prevent unnecessary fee drag."
+            return "\n💡 <b>Insight:</b> The IOC taker order was rejected or did not fill, so no new exposure was assumed. Check the execution reason and current quote before retrying."
         if "Non-critical background state telemetry error" in line:
             return "\n💡 <b>Insight:</b> A background telemetry or API call timed out. The system safely caught it. No action needed."
         if "mixed_mode_paper_like_live_order" in line:

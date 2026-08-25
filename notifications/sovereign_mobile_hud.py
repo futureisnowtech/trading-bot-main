@@ -198,7 +198,7 @@ def build_philosophy_msg() -> str:
         "<b>📜 SOVEREIGN TRADING PHILOSOPHY</b>",
         "",
         "<b>1. The Sigma Lever (Volatility)</b>",
-        "We treat model disagreement (Sigma) as a risk vector. Chaotic ensembles trigger automatic position size reduction.",
+        "We treat deterministic model disagreement and predictive sigma as risk vectors; chaotic forecasts reduce size automatically.",
         "",
         "<b>2. Opportunistic Swaps</b>",
         "Capital is finite. We ruthlessly flatten sub-par positions if a new candidate offers >10% improvement in EV.",

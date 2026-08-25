@@ -54,8 +54,8 @@ BRIEFINGS: list[tuple[str, str]] = [
     ),
     (
         "🎯 Are Entries Working?",
-        "Call get_maker_fill_stats. Explain in plain English whether our entry approach is "
-        "getting good fills or forcing us to overpay.",
+        "Call get_entry_funnel. Explain in plain English whether candidates are reaching "
+        "the IOC taker route and which final controls are blocking or shrinking them.",
     ),
     (
         "📂 What Bets Are Live?",

@@ -6,9 +6,9 @@ This document details the meteorological data inputs and recovered settlements.
 
 ## 1. Weather Data Feeds
 
-1.  **Open-Meteo GFS and ECMWF Ensembles**: Cached in `logs/weather_snapshot.json`.
+1.  **Open-Meteo deterministic GFS, ECMWF, and NCEP AIGFS**: Keyless contract-projectable forecasts plus predictive sigma are cached in `logs/weather_snapshot.json`; commercial ensembles and ICON are excluded.
 2.  **NOAA ASOS / METAR Observations**: Real-time hourly reports cached in `logs/weather_watermarks.json` (partially corrupted locally by unit tests).
-3.  **GraphCast AI (AIGEFS)**: Volatility adjustment model.
+3.  **NCEP AIGFS (`aigefs` internal key)**: Actual forecast input for GFS/ECMWF disagreement-based uncertainty adjustment.
 
 ---
 

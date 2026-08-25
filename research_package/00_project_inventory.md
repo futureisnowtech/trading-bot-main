@@ -25,7 +25,7 @@ Below is a detailed inventory of the repository, categorizing each file by type,
 | File Path | Type | Apparent Purpose | Status | Data/Entities | Include? | Rationale |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | [`forecast/runner.py`](file:///Users/joshmacbookair2020/projects/algo_trading_final/forecast/runner.py) | Python Script | Orchestrates the discovery, quote refreshes, and strategy eval loops. Runs take-profit and toxic salvage exits. | **ACTIVE** | Connects broker to DB, executes trades. | Yes | Primary coordinate system of the forecast lane. |
-| [`forecast/strategy_engine.py`](file:///Users/joshmacbookair2020/projects/algo_trading_final/forecast/strategy_engine.py) | Python Script | Evaluates GFS/ECMWF weather data, blends probabilities, checks SRE gates, and calculates continuous sizing. | **ACTIVE** | Blends ensemble forecasts; runs economics gate checks. | Yes | Strategy heart; contains SRE sizing checks. |
+| [`forecast/strategy_engine.py`](file:///Users/joshmacbookair2020/projects/algo_trading_final/forecast/strategy_engine.py) | Python Script | Consumes deterministic-model weather probabilities, applies convergence and active market/risk gates, and calculates continuous sizing. | **ACTIVE** | Rejects retired commercial-ensemble payloads and enforces the canonical fee-aware decision path. | Yes | Strategy heart; contains SRE sizing checks. |
 | [`forecast/db.py`](file:///Users/joshmacbookair2020/projects/algo_trading_final/forecast/db.py) | Python Script | Forecast-specific SQL queries for active contracts, quotes, resolutions, and position caching. | **ACTIVE** | Caches tables in `logs/trades.db`. | Yes | SQL interface for forecast metadata. |
 | [`forecast/weather_contracts.py`](file:///Users/joshmacbookair2020/projects/algo_trading_final/forecast/weather_contracts.py) | Python Script | Parses Kalshi ticker series and contract names into weather metrics (Temp, Precip, Wind) and thresholds. | **ACTIVE** | Maps symbols to contract bounds (High/Low/Precip). | Yes | Contract semantics parser. |
 | [`forecast/discovery.py`](file:///Users/joshmacbookair2020/projects/algo_trading_final/forecast/discovery.py) | Python Script | Syncs active/tradable Kalshi weather markets and strikes into the database. | **ACTIVE** | Inserts into `forecast_markets` and `forecast_contracts`. | Yes | Market scanner interface. |
@@ -44,7 +44,6 @@ Below is a detailed inventory of the repository, categorizing each file by type,
 
 | File Path | Type | Apparent Purpose | Status | Data/Entities | Include? | Rationale |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| [`learning/weather_rbi.py`](file:///Users/joshmacbookair2020/projects/algo_trading_final/learning/weather_rbi.py) | Python Script | Calibrates weather GFS vs ECMWF models based on resolved outcomes (Brier Score). | **OBSERVATIONAL** | Not connected to active trading (stubs exist). | Yes | Invaluable for showing ML limits. |
 | [`learning/signal_performance.py`](file:///Users/joshmacbookair2020/projects/algo_trading_final/learning/signal_performance.py) | Python Script | Evaluates historic GFS/ECMWF member accuracy. | **OBSERVATIONAL** | Not connected to active entry path. | Yes | Context on signal modeling. |
 
 ### 5. Notifications & Operator Bot (in `/notifications/`)
@@ -73,7 +72,7 @@ Below is a detailed inventory of the repository, categorizing each file by type,
 | File Path | Type | Apparent Purpose | Status | Data/Entities | Include? | Rationale |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | [`logs/trades.db`](file:///Users/joshmacbookair2020/projects/algo_trading_final/logs/trades.db) | SQLite DB | The primary repository database. Holds trades, scan candidates, system logs, quotes, and configurations. | **ACTIVE** | 14.0MB size; 30+ tables. | Yes | Primary source of telemetry. |
-| [`logs/weather_snapshot.json`](file:///Users/joshmacbookair2020/projects/algo_trading_final/logs/weather_snapshot.json) | JSON | Cached multi-model ensemble (GFS + ECMWF) forecast members for active cities. | **ACTIVE** | 1.4MB size; 35 series. | Yes | Raw weather inputs. |
+| [`logs/weather_snapshot.json`](file:///Users/joshmacbookair2020/projects/algo_trading_final/logs/weather_snapshot.json) | JSON | Cached deterministic GFS/ECMWF/AIGFS forecasts, predictive sigma, and METAR/HRRR state for active cities. | **ACTIVE** | Runtime-generated; size and series count vary. | Yes | Raw weather inputs. |
 | [`logs/weather_watermarks.json`](file:///Users/joshmacbookair2020/projects/algo_trading_final/logs/weather_watermarks.json) | JSON | Intraday observed high/low temperatures. | **POLLUTED** | All values overwritten with `74.0` mock temp. | Yes | Highlights test isolation bug. |
 | [`logs/csv/`](file:///Users/joshmacbookair2020/projects/algo_trading_final/logs/csv) | Directory | Flat file duplicates of logged trades. | **ACTIVE** | Daily trade CSVs. | Yes | Redundant trade audit trail. |
 | [`logs/backtest/`](file:///Users/joshmacbookair2020/projects/algo_trading_final/logs/backtest) | Directory | Legacy symbols model fit files (e.g. BTC_30d). | **LEGACY** | Crypto/Spot backtest metadata. | No | Outside of Kalshi weather scope. |

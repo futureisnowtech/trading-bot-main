@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS intelligence_predictions (
     code_sha TEXT,
     config_hash TEXT,
     artifact_id TEXT,
+    learning_epoch TEXT NOT NULL DEFAULT '',
     features_json TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL
 );
@@ -156,6 +157,15 @@ def connect(db_path: str = DB_PATH) -> sqlite3.Connection:
 def init_intelligence_db(db_path: str = DB_PATH) -> None:
     with connect(db_path) as conn:
         conn.executescript(DDL)
+        prediction_columns = {
+            str(row["name"])
+            for row in conn.execute("PRAGMA table_info(intelligence_predictions)").fetchall()
+        }
+        if "learning_epoch" not in prediction_columns:
+            conn.execute(
+                "ALTER TABLE intelligence_predictions "
+                "ADD COLUMN learning_epoch TEXT NOT NULL DEFAULT ''"
+            )
         baseline = conn.execute(
             "SELECT 1 FROM intelligence_model_artifacts WHERE status='champion'"
         ).fetchone()

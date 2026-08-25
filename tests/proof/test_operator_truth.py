@@ -64,6 +64,28 @@ def test_live_kalshi_status_is_broker_first_and_surfaces_drift(proof_runtime, mo
     broker.sync_positions.assert_called_once()
 
 
+def test_broker_truth_preserves_official_no_exposure_for_cockpit():
+    import runtime.operator_truth as ot
+
+    position = ot._normalize_broker_position(
+        {
+            "local_symbol": "KXLOWTOKC-26AUG24-T78",
+            "side": "NO",
+            "right": "P",
+            "qty": 1.0,
+            "entry_price": 0.62,
+            "yes_leg_entry_price": 0.62,
+            "held_side_entry_price": 0.38,
+            "market_exposure_usd": 0.38,
+        }
+    )
+
+    assert position["entry_price"] == 0.62
+    assert position["yes_leg_entry_price"] == 0.62
+    assert position["held_side_entry_price"] == 0.38
+    assert position["market_exposure_usd"] == 0.38
+
+
 def test_weather_learning_status_uses_governed_rbi2_champion(proof_runtime, monkeypatch):
     import runtime.operator_truth as ot
 
@@ -72,13 +94,15 @@ def test_weather_learning_status_uses_governed_rbi2_champion(proof_runtime, monk
 
     payload = ot.get_weather_learning_status(db_path=db)
 
-    assert payload["adaptive_active"] is True
-    assert payload["status"] == "rbi2_governed"
+    assert payload["adaptive_active"] is False
+    assert payload["status"] == "rbi2_learning_period"
     assert payload["disabled_reason"] == ""
     assert payload["champion_artifact_id"] == "rbi2-baseline-60-40"
     assert payload["global_blend"]["segment"] == "GLOBAL"
     assert payload["global_blend"]["gfs_weight"] == 0.60
     assert payload["global_blend"]["ecmwf_weight"] == 0.40
+    assert payload["learning_gate"]["minimum_days"] == 7.0
+    assert payload["learning_gate"]["passed"] is False
     assert payload["calibration"]["official_outcomes_only"] is True
 
 
@@ -666,7 +690,7 @@ def test_release_status_blocks_when_every_sampled_series_is_stale(
     blocker = next(
         item
         for item in payload["top_infrastructure_blockers"]
-        if item.startswith("stale_ensemble_data")
+        if item.startswith("stale_weather_model_data")
     )
     assert "25m limit" in blocker
     assert "KXTEMPNYCH-26JUN0522-T75.99" in blocker
@@ -702,7 +726,7 @@ def test_release_status_allows_daily_series_at_the_same_age(proof_runtime, monke
     assert payload["current_release_verdict"] == "READY_FOR_LIVE"
     assert payload["entries_allowed"] is True
     assert not any(
-        item.startswith("stale_ensemble_data")
+        item.startswith("stale_weather_model_data")
         for item in payload["top_infrastructure_blockers"]
     )
 
@@ -750,11 +774,11 @@ def test_release_status_warns_instead_of_blocking_on_partial_staleness(
 
     assert payload["entries_allowed"] is True
     assert not any(
-        item.startswith("stale_ensemble_data")
+        item.startswith("stale_weather_model_data")
         for item in payload["top_infrastructure_blockers"]
     )
     warning = next(
-        item for item in payload["warnings"] if item.startswith("partial_stale_ensemble_data")
+        item for item in payload["warnings"] if item.startswith("partial_stale_weather_model_data")
     )
     assert "1/2 series" in warning
     assert "KXTEMPNYCH-26JUN0522-T75.99" in warning
@@ -780,7 +804,7 @@ def test_provider_staleness_findings_handle_legacy_flat_artifact_shape():
     )
 
     # A one-series sample that breaches is systemic by definition.
-    assert stale_blocker.startswith("stale_ensemble_data")
+    assert stale_blocker.startswith("stale_weather_model_data")
     assert "25m limit" in stale_blocker
     assert stale_warning == ""
     assert (fresh_blocker, fresh_warning) == ("", "")

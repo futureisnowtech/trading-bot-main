@@ -9,7 +9,10 @@ def test_build_position_row_uses_side_specific_no_quotes():
             "ticker": "KXHIGHDEN-26JUN06-T79",
             "side": "NO",
             "qty": 10,
-            "entry_price": 0.41,
+            # V2 stores a YES-leg basis for this NO position; Kalshi's
+            # authoritative held-side exposure is $3.80.
+            "entry_price": 0.62,
+            "market_exposure_dollars": "3.80",
             "opened_at": "2026-06-05T00:00:00+00:00",
         },
         metadata={"contract_name": "Denver High", "resolution_at": "2026-06-06T04:59:00Z"},
@@ -19,8 +22,10 @@ def test_build_position_row_uses_side_specific_no_quotes():
     assert row["bid"] == 0.53
     assert row["ask"] == 0.57
     assert row["mark"] == 0.55
-    assert row["gross_mark_pnl"] == 1.4
-    assert row["exit_pnl_est"] == 0.32
+    assert row["yes_leg_entry_price"] == 0.62
+    assert row["held_side_entry_price"] == 0.38
+    assert row["gross_mark_pnl"] == 1.7
+    assert row["exit_pnl_est"] == 0.62
     assert row["weather_bucket"] == "Daily High"
 
 
@@ -35,8 +40,27 @@ def test_summarize_hub_exposure_groups_city_hubs():
         ]
     )
 
-    assert exposures[0] == {"hub": "WEST", "exposure_usd": 7.38}
-    assert exposures[1] == {"hub": "FLORIDA", "exposure_usd": 2.09}
+    assert exposures[0] == {"hub": "WEST", "exposure_usd": 7.0}
+    assert exposures[1] == {"hub": "FLORIDA", "exposure_usd": 2.0}
+
+
+def test_hub_exposure_uses_official_no_side_market_exposure():
+    from dashboard.cockpit_data import summarize_hub_exposure
+
+    exposures = summarize_hub_exposure(
+        [
+            {
+                "ticker": "KXLOWTOKC-26AUG24-T78",
+                "side": "NO",
+                "qty": 1,
+                "entry_price": 0.62,
+                "market_exposure_dollars": "0.38",
+                "hub": "PLAINS",
+            }
+        ]
+    )
+
+    assert exposures == [{"hub": "PLAINS", "exposure_usd": 0.38}]
 
 
 def test_build_realized_pnl_curve_accumulates_in_time_order():
@@ -64,6 +88,7 @@ def test_build_open_book_visual_rows_adds_book_heat_fields():
                 "side": "NO",
                 "qty": 10,
                 "entry_price": 0.15,
+                "held_side_entry_price": 0.15,
                 "gross_mark_pnl": -0.25,
                 "exit_pnl_est": -0.59,
                 "hub": "FLORIDA",
@@ -75,6 +100,7 @@ def test_build_open_book_visual_rows_adds_book_heat_fields():
                 "side": "NO",
                 "qty": 20,
                 "entry_price": 0.16,
+                "held_side_entry_price": 0.16,
                 "gross_mark_pnl": -0.75,
                 "exit_pnl_est": -2.37,
                 "hub": "GULF",
@@ -103,6 +129,7 @@ def test_summarize_open_book_rolls_up_exposure_and_resolution():
                 "side": "NO",
                 "qty": 10,
                 "entry_price": 0.15,
+                "held_side_entry_price": 0.15,
                 "gross_mark_pnl": -0.25,
                 "exit_pnl_est": -0.59,
                 "hub": "FLORIDA",
@@ -114,6 +141,7 @@ def test_summarize_open_book_rolls_up_exposure_and_resolution():
                 "side": "NO",
                 "qty": 20,
                 "entry_price": 0.16,
+                "held_side_entry_price": 0.16,
                 "gross_mark_pnl": -0.75,
                 "exit_pnl_est": -2.37,
                 "hub": "GULF",
@@ -141,7 +169,9 @@ def test_build_regime_manifest_surfaces_live_constants():
 
     assert manifest["version"]
     assert manifest["reasoning_model"]
-    assert "60% GFS + 40% ECMWF" in manifest["ensemble_blend"]
+    assert "60% GFS / 40% ECMWF" in manifest["ensemble_blend"]
+    assert "commercial ensembles and ICON are absent" in manifest["ensemble_blend"]
+    assert "AIGFS adjusts uncertainty" in manifest["ensemble_blend"]
     assert any("0.85" in line for line in manifest["exit_stack"])
     assert any("Same event family cap 5" in line for line in manifest["entry_gates"])
     expected_cap = f"${get_kalshi_hub_exposure_cap(balance):.2f}"

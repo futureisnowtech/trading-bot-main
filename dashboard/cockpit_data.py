@@ -34,13 +34,14 @@ from config import (
     KALSHI_MAX_SIGMA,
     KALSHI_MAX_SPREAD_RATIO,
     KALSHI_MAX_USD_PER_POSITION,
-    KALSHI_MIN_PRICE,
+    KALSHI_MIN_ENTRY_PRICE,
     KALSHI_SAME_EVENT_FAMILY_CAP,
     POST_PAPER_START_DATE,
     estimate_kalshi_fee_per_contract,
     estimate_kalshi_order_fee_usd,
     get_kalshi_hub_exposure_cap,
-    get_kalshi_position_exposure_usd,
+    get_kalshi_position_held_price,
+    get_kalshi_position_snapshot_exposure_usd,
 )
 from forecast.strategy_engine import EV_THRESHOLD, _get_city_hub, _get_macro_context
 from forecast.weather_contracts import live_entry_scope, weather_trade_bucket
@@ -160,7 +161,7 @@ def _format_learning_blend(
     chosen_segment = str((chosen or {}).get("segment") or "STATIC").upper()
 
     if sample_size <= 0:
-        return "Base 60% GFS + 40% ECMWF (learning disabled)"
+        return "promoted RBI baseline: 60% GFS / 40% ECMWF"
 
     return (
         f"{chosen_segment}: GFS {gfs_weight:.0%} / ECMWF {ecmwf_weight:.0%} "
@@ -307,7 +308,15 @@ def build_position_row(
     side = str(position.get("side") or "YES").upper()
     ticker = str(position.get("ticker") or position.get("local_symbol") or "")
     qty = _coerce_float(position.get("qty"))
-    entry_price = _coerce_float(position.get("entry_price") or position.get("entry"))
+    yes_leg_entry_price = _coerce_float(
+        position.get("yes_leg_entry_price")
+        or position.get("entry_price")
+        or position.get("entry")
+    )
+    # Kalshi V2 persists a canonical YES-leg basis even for NO holdings.  Marks,
+    # liquidation estimates, and dollars-at-risk all speak the held outcome, so
+    # translate once here and carry the explicit held field downstream.
+    entry_price = get_kalshi_position_held_price(position)
 
     bid_key = "yes_bid" if side == "YES" else "no_bid"
     ask_key = "yes_ask" if side == "YES" else "no_ask"
@@ -340,6 +349,10 @@ def build_position_row(
         "side": side,
         "qty": qty,
         "entry_price": round(entry_price, 4),
+        "held_side_entry_price": round(entry_price, 4),
+        "yes_leg_entry_price": round(yes_leg_entry_price, 4),
+        "market_exposure_usd": position.get("market_exposure_usd")
+        or position.get("market_exposure_dollars"),
         "bid": bid,
         "ask": ask,
         "mark": mark,
@@ -360,10 +373,7 @@ def summarize_hub_exposure(position_rows: list[dict[str, Any]]) -> list[dict[str
     by_hub: defaultdict[str, float] = defaultdict(float)
     for row in position_rows:
         hub = str(row.get("hub") or "UNKNOWN")
-        exposure = get_kalshi_position_exposure_usd(
-            _coerce_float(row.get("qty")),
-            _coerce_float(row.get("entry_price")),
-        )
+        exposure = get_kalshi_position_snapshot_exposure_usd(row)
         by_hub[hub] += exposure
     return [
         {"hub": hub, "exposure_usd": round(cost, 4)}
@@ -377,9 +387,7 @@ def build_open_book_visual_rows(position_rows: list[dict[str, Any]]) -> list[dic
     total_exposure = 0.0
 
     for row in position_rows:
-        qty = _coerce_float(row.get("qty"))
-        entry_price = _coerce_float(row.get("entry_price"))
-        exposure_usd = get_kalshi_position_exposure_usd(qty, entry_price)
+        exposure_usd = get_kalshi_position_snapshot_exposure_usd(row)
         total_exposure += exposure_usd
 
         resolution_dt = _parse_ts(row.get("resolution_at"))
@@ -596,16 +604,19 @@ def build_regime_manifest(
         "reasoning_model": get_reasoning_display_name(),
         "entry_scope": live_entry_scope(),
         "ensemble_blend": (
-            f"Tri-Model 50% GFS + 35% ECMWF + 15% DWD ICON (122 simulation paths). "
-            f"Live adaptive blend is {blend_summary}."
+            f"Deterministic GFS/ECMWF log-odds blend with explicit forecast-error "
+            f"sigma and bounded high/low physics before the CDF. NCEP AIGFS adjusts uncertainty "
+            f"and near-term HRRR can splice into daily-HIGH pricing; commercial ensembles and ICON are absent. "
+            f"Current GFS/ECMWF champion is {blend_summary}."
         ),
         "entry_math": [
             f"Net EV gate: post-fee EV must exceed {EV_THRESHOLD:.2f}",
-            f"Value Price Bracket: $0.30–$0.70 entry floor/ceiling with $2.0°F safety buffer",
-            f"Cheat Code Scanner: q_tri >= 78% and model-market delta edge >= 22%",
-            f"Asymmetric Conviction Sizing: $15.00–$35.00 position risk allocation per trade",
-            f"Tiered Goldmine City Priority: Tier 1 (DC, PHL, ATL, DAL, DFW, LV, OKC, CHI) scanned first",
-            f"5-Minute Station Calculus: dT/dt <= -0.20°F/hr thermal derivative lock",
+            f"Hard entry-price floor: ${KALSHI_MIN_ENTRY_PRICE:.2f}",
+            f"Position rails: ${KALSHI_MAX_USD_PER_POSITION:.2f} base cap and configured conviction multipliers",
+            "Convergence guardrail: bonus only for same-tail physical-model agreement; >20-point gaps are softened and >70-point gaps vetoed",
+            f"Fee-inclusive Kelly cap: {KALSHI_KELLY_CAP:.0%} of live bankroll per order",
+            f"Aggregate event-family risk cap: {KALSHI_MAX_RISK_PER_EVENT_PCT:.0%} of live bankroll",
+            "5-Minute Station Calculus: dT/dt <= -0.20°F/hr thermal derivative lock",
         ],
         "entry_gates": [
             (
@@ -613,8 +624,8 @@ def build_regime_manifest(
                 f"with {hourly_support.get('resolver_ready_city_count', 0)}/"
                 f"{hourly_support.get('universe_city_count', 0)} cities registry-mapped for hourly"
             ),
-            "Only true hour-stamped weather contracts are allowed for fresh entries",
-            f"Minimum contract price {KALSHI_MIN_PRICE:.2f} for non-hourly weather lanes, 0.03 for hourly/rain lanes",
+            f"Fresh entries are restricted to versioned lanes: {live_entry_scope()}",
+            f"Hard minimum entry price ${KALSHI_MIN_ENTRY_PRICE:.2f}",
             f"Maximum sigma {KALSHI_MAX_SIGMA:.1f}F",
             f"Maximum spread ratio {KALSHI_MAX_SPREAD_RATIO:.0%}",
             (
@@ -655,17 +666,17 @@ def build_metric_explainers(balance_usd: float | None = None) -> dict[str, str]:
         "Live Mark P&L": "This marks each live position to the current midpoint quote on the side we actually hold. It is a useful pulse check, but it is not a guaranteed exit result.",
         "Emergency Exit P&L": "This estimates what the book would look like if we tried to flatten at the live bid right now after fees. It is the harsher, more realistic liquidation view.",
         "Nearest Resolution": "This shows which open trade settles soonest. Near-expiry trades deserve extra attention because weather certainty and liquidity can change quickly into settlement.",
-        "Data Ingestion": "The engine starts by blending the two main weather ensembles. That keeps us from overreacting to one model run and gives the bot a more stable starting forecast.",
-        "Adaptive Blend": "The engine is currently using a fixed 60/40 GFS/ECMWF blend. Learning is disabled so the weather brain stays simple, inspectable, and consistent while we focus on getting clean live execution.",
-        "AI Volatility Adjustment": "GraphCast-style AI does not overrule the forecast direction. It only tells the bot whether confidence should be widened or tightened because the atmosphere looks more or less chaotic.",
+        "Data Ingestion": "The engine fetches keyless deterministic GFS, ECMWF, and NCEP AIGFS, then attaches METAR and optional near-term HRRR. It fails closed without GFS and has no commercial ensemble or ICON path.",
+        "Adaptive Blend": "Governed RBI chooses the GFS/ECMWF split. It stays on its 60/40 baseline until this probability epoch has at least seven days and 24 official outcomes, a challenger wins chronological validation, and a human promotes it.",
+        "AI Volatility Adjustment": "NCEP AIGFS has no voting weight. Its standardized disagreement with GFS/ECMWF widens or narrows probability kernels and reaches Kelly size.",
         "Safety Gates": "These filters stop trades that look good on paper but fail live economics. Fees, spreads, stale data, and model-vs-market disagreement can all kill a trade here.",
-        "Position Sizing": "Even when a trade passes, the bot still sizes it down through a continuous edge scaler, bankroll caps, and hub caps. This keeps one good-looking idea from becoming a dangerous oversized bet.",
+        "Position Sizing": f"The taker solver consumes convergence, divergence, sigma, AIGFS uncertainty, and same-event penalties, then enforces the ${KALSHI_MAX_USD_PER_POSITION:.0f} base rail, {KALSHI_KELLY_CAP:.0%} fee-inclusive Kelly cap, {KALSHI_MAX_RISK_PER_EVENT_PCT:.0%} event cap, and hub/covariance limits.",
         "Net EV Gate": (
             f"A trade must still clear at least {EV_THRESHOLD:.0%} edge after Kalshi's "
             f"exchange-derived fee curve ({_fee_formula_text()}). This prevents the bot from buying "
             "tiny theoretical edges that disappear in real fills."
         ),
-        "Fractional Kelly": f"Legacy Kelly math still informs the hard bankroll rails, but live weather sizing now scales continuously from edge while staying under the ${KALSHI_MAX_USD_PER_POSITION:.0f} hard cap.",
+        "Fractional Kelly": f"Quarter-Kelly solves fee-aware taker size continuously, with each fee-inclusive order bounded by {KALSHI_KELLY_CAP:.0%} of bankroll and the configured position rails.",
         "Regional Hub Cap": (
             "No single weather region is allowed to dominate the book. "
             f"Right now the live hub cap is {_coerce_float(hub_cap):.2f} dollars, "
@@ -688,49 +699,47 @@ def build_decision_funnel(
     balance_usd: float | None = None,
     learning_status: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    explainers = build_metric_explainers(balance_usd)
-    hub_cap = get_kalshi_hub_exposure_cap(_coerce_float(balance_usd, ACCOUNT_SIZE))
     learning_blend = _format_learning_blend(learning_status)
     return [
         {
             "stage": "01",
-            "label": "Hourly Temps",
-            "headline": "Fast Resolution / Tight Spread",
-            "detail": f"EV ≥ 0.3% | Spread ≤ 36% | Price ≥ 0.08 | Max Spread $0.22 | Min Time 0.33h",
-            "pill": "High Frequency",
-            "tooltip": "Hourly Temp Lane: Uses loosened spread ratios and lower EV thresholds because contracts settle extremely fast with high certainty.",
+            "label": "Entry Scope",
+            "headline": live_entry_scope(),
+            "detail": "Versioned lane policy + station allowlist + city firewall",
+            "pill": "Policy",
+            "tooltip": "Only daily HIGH and daily LOW are enabled for fresh entries; hourly temperature, rain, snow, and wind remain observation-only.",
         },
         {
             "stage": "02",
-            "label": "Rain",
-            "headline": "High Volatility / Standard EV",
-            "detail": f"EV ≥ 2.5% | Spread ≤ 35% | Price ≥ 0.08 | Min Time 4.0h",
-            "pill": "Precipitation",
-            "tooltip": "Rain Lane: Standard EV threshold applies, but spread ratio allows for wider markets typically seen in low-liquidity precip contracts.",
+            "label": "Forecast Truth",
+            "headline": "Deterministic GFS + ECMWF",
+            "detail": "AIGFS uncertainty | Optional HRRR | No ICON/ensemble key",
+            "pill": "Fail Closed",
+            "tooltip": "GFS must be present. Each real provider keeps its identity, with explicit predictive sigma and no commercial ensemble fallback.",
         },
         {
             "stage": "03",
-            "label": "Snow",
-            "headline": "Winter Precipitation / Standard EV",
-            "detail": f"EV ≥ 2.5% | Spread ≤ 35% | Price ≥ 0.08 | Min Time 4.0h",
-            "pill": "Snowfall",
-            "tooltip": "Snow Lane: Tracks snowfall-specific contracts. Standard EV threshold applies, mapping precipitation model arrays from GFS/ECMWF to detect frozen precipitation accumulation.",
+            "label": "Probability",
+            "headline": "CDF + bounded physics",
+            "detail": f"{learning_blend} | bounded_heuristic_v1",
+            "pill": "RBI Governed",
+            "tooltip": "High/low physics moves degrees Fahrenheit before the CDF. RBI remains on the governed baseline until the seven-day current-epoch gate and explicit promotion pass.",
         },
         {
             "stage": "04",
-            "label": "Wind",
-            "headline": "Velocity Spikes / Standard EV",
-            "detail": f"EV ≥ 2.5% | Spread ≤ 35% | Price ≥ 0.08 | Min Time 4.0h",
-            "pill": "Wind Speed",
-            "tooltip": "Wind Lane: Captures wind velocity and gust markets. Ingests 10-meter wind speed datasets to trade velocity spikes.",
+            "label": "Market Gate",
+            "headline": f"Net EV ≥ {EV_THRESHOLD:.0%}",
+            "detail": f"Spread ≤ $0.12 and {KALSHI_MAX_SPREAD_RATIO:.0%} | Entry price ≥ ${KALSHI_MIN_ENTRY_PRICE:.2f}",
+            "pill": "After Fees",
+            "tooltip": "The selected side must retain the canonical edge after modeled round-trip fees and pass quote, freshness, horizon, and liquidity checks.",
         },
         {
             "stage": "05",
-            "label": "Daily Temps",
-            "headline": "Strict EV / Cloud Veto",
-            "detail": f"EV ≥ 2.5% | Spread ≤ 35% | Price ≥ 0.08 | Veto if TCDC > 65%",
-            "pill": "Macro Trend",
-            "tooltip": "Daily Temp Lane: Strict mathematical thresholds. Also includes an explicit AI cloud-cover veto (TCDC > 65%) to block trades when solar radiation uncertainty is too high.",
+            "label": "Sizing + Risk",
+            "headline": f"Kelly cap {KALSHI_KELLY_CAP:.0%}",
+            "detail": f"${KALSHI_MAX_USD_PER_POSITION:.0f} position | {KALSHI_MAX_RISK_PER_EVENT_PCT:.0%} event | covariance fail-closed",
+            "pill": "Fee Inclusive",
+            "tooltip": "Convergence, divergence, predictive uncertainty, same-event exposure, position quantity, broker depth, and portfolio covariance all reach the final order cap.",
         },
     ]
 
@@ -787,6 +796,7 @@ def build_ai_insights(
     insights: list[dict[str, str]] = []
     learning = learning_status or {}
     global_blend = learning.get("global_blend") or {}
+    learning_gate = learning.get("learning_gate") or {}
     release_verdict = str(release_status.get("current_release_verdict") or "UNKNOWN")
     entries_allowed = bool(release_status.get("entries_allowed"))
 
@@ -838,12 +848,16 @@ def build_ai_insights(
             }
         )
     else:
+        observed_days = _coerce_float(learning_gate.get("observed_days"), 0.0)
+        minimum_days = _coerce_float(learning_gate.get("minimum_days"), 7.0)
+        sample_count = int(learning_gate.get("sample_count") or 0)
+        required_samples = int(learning_gate.get("required_samples") or 24)
         insights.append(
             {
                 "title": "Learner On Baseline",
                 "tone": "info",
-                "meta": "Adaptive guardrail",
-                "body": "The adaptive learner is running, but it is still holding the default 60/40 GFS/ECMWF blend until enough resolved weather labels accumulate.",
+                "meta": f"Learning {observed_days:.1f}/{minimum_days:.1f} days · {sample_count}/{required_samples} settled samples",
+                "body": "RBI 2.0 is using its governed 60/40 deterministic GFS/ECMWF baseline while the current probability-path epoch completes its mandatory learning period; only a holdout-validated, explicitly approved challenger may replace it.",
             }
         )
 

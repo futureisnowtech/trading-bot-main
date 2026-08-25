@@ -1,158 +1,147 @@
-# Deploy state — read before shipping anything to NYC
+# Deploy state — read before changing NYC
 
-Last verified: 2026-08-12 19:45 UTC
+Last verified directly against NYC: 2026-08-25
 
-## What is actually running
+## Deployed production truth
 
-NYC production (droplet `157.245.15.40`) runs **Docker images built on the box
-itself**, not a git checkout and not a registry pull. The source tree lives at
-`/home/algo-runner/bot` with no `.git`, so git itself is not the runtime source
-of truth. Deploy provenance is stamped by `deploy.sh` into:
+| Item | Verified state |
+|---|---|
+| Droplet | `algo-runner@157.245.15.40:2222` |
+| Runtime root | `/home/algo-runner/bot` |
+| Containers | `execution-engine`, `kalshi-cockpit` — both up when checked |
+| Images | `ghcr.io/futureisnowtech/trading-bot-main:latest` and dashboard companion |
+| Version | `19.18.0` |
+| SHA / branch | `0ab0300a67edc19ca5a4f73e852f690376685ff4` / `master` |
+| Deploy stamp | `2026-08-21T19:34:54Z` |
+| Open-Meteo commercial key | absent |
+| Weather provider actually available | deterministic GFS + ECMWF only; old AI identifier yields null data, and no ICON ensemble |
+| City firewall | 27 cities blocked; only CHI, DEN, LAX, OKC, SAT enabled |
+
+The stamped files are authoritative for deployed code identity:
 
 - `/home/algo-runner/bot/version.txt`
 - `/home/algo-runner/bot/deploy_manifest.json`
-- `/home/algo-runner/bot/logs/version.txt`
-- `/home/algo-runner/bot/logs/deploy_manifest.json`
-- `BUILD_SHA` embedded into both Docker images at build time
+- their copies under `/home/algo-runner/bot/logs/`
+- `BUILD_SHA` inside the images
 
-For live-trading audits and recent-history questions, treat the droplet runtime
-database as canonical:
+The live database remains canonical for trades and recent runtime evidence:
+`/home/algo-runner/bot/logs/trades.db`.
 
-- `/home/algo-runner/bot/logs/trades.db`
+## Important live-versus-candidate discrepancy
 
-Do not answer from the local Mac copy first unless the question is explicitly
-about local files or local/prod parity has already been verified for that exact
-dataset.
+NYC has **not** received the v19.20.0 deterministic-physics repair. Its deployed source
+still requests retired Open-Meteo model identifier `gfs_graphcast025`, which
+currently returns HTTP 200 with null forecast arrays, and the production
+strategy branch still assigns the convergence sizing multiplier as an
+unconditional `1.5`.
 
-| | |
-|---|---|
-| Containers | `execution-engine`, `kalshi-cockpit` |
-| Images | `ghcr.io/futureisnowtech/trading-bot-main:latest`, `ghcr.io/futureisnowtech/trading-bot-main-dashboard:latest` |
-| Live SHA / branch / deploy time | Read `/home/algo-runner/bot/version.txt` and `/home/algo-runner/bot/deploy_manifest.json` |
-| Version | Read `app_version=` from the stamped provenance files above |
-| Deploy method | Guarded deploy via `./deploy.sh` |
-| Config/env | `/home/algo-runner/bot/.env` + `docker-compose.yml` |
+The local source candidate is `VERSION.py` 19.20.0 on branch
+`codex/live-policy-truth-alignment`, based on `0ab0300`. The production stamp
+above does not contain this candidate. The candidate:
 
-Before this, production sat on `603a42a` (v19.10.12, 2026-07-12) for a month —
-82 commits behind — because `deploy-nyc.yml` never fired. The entire settled
-track record through 2026-08-11 belongs to `603a42a`, not to `master`.
+- removes the commercial Open-Meteo ensemble/key path and ICON dependency;
+- fetches deterministic GFS, ECMWF, and supported `ncep_aigfs025`, failing
+  closed rather than relabeling a surviving non-GFS model;
+- represents deterministic forecast uncertainty with model/horizon sigma and
+  makes that sigma reach the probability kernel;
+- applies bounded daily-HIGH radiative/precipitation cooling and daily-LOW
+  moisture/cloud/wind-mixing lift in degrees Fahrenheit before the contract CDF;
+- labels that physics method `bounded_heuristic_v1`: its end-to-end plumbing is
+  proven, while its incremental forecast skill remains pending current-epoch
+  outcomes rather than being claimed in advance;
+- leaves hourly temperature, rain, snow, and wind probabilities free of unsafe
+  cross-variable temperature shifts;
+- restores the selected legacy convergence rule: 1.5x only for unanimous
+  same-tail physical-model agreement, soft probability/size penalties above a
+  20-point gap, and a hard veto above 70 points;
+- routes supported `ncep_aigfs025` through the GFS endpoint and uses the actual
+  AIGFS value as the uncertainty input;
+- hardens partial/null hourly data without losing time alignment;
+- loads promoted RBI GFS/ECMWF weights on the real pricing call path;
+- makes convergence/divergence/AIGFS/sigma multipliers reach order quantity,
+  enforces the fee-inclusive 12% Kelly cap and aggregate 8% event cap, and
+  makes covariance failures veto;
+- starts a new `v19.20.0-deterministic-physics-path` RBI evidence epoch and keeps the
+  governed 60/40 baseline binding until at least seven days and 24 officially
+  settled current-epoch samples exist, after which holdout validation and
+  explicit human promotion are still required.
 
-It is valid for `master` to be ahead of production by docs-only commits. Do not
-block startup just because the deployed SHA is behind `master`; the real bug is
-silent drift, not controlled lag.
+## Candidate proof status
 
-If the deployed commit is ever unclear, trust the stamped provenance first:
+The earlier isolated v19.19.0/ICON candidate proof is superseded and is not
+evidence for this refactor. On 2026-08-25, this dirty v19.20.0 candidate passed:
 
-```bash
-ssh -p 2222 algo-runner@157.245.15.40 'sed -n "1,20p" /home/algo-runner/bot/version.txt'
-ssh -p 2222 algo-runner@157.245.15.40 'sed -n "1,80p" /home/algo-runner/bot/deploy_manifest.json'
-```
+- complete repository suite: 421 passed;
+- clean touched-core Ruff, `compileall`, `scripts/validate.py`, strict boundary
+  contract audit, and strict repo-truth gate;
+- live Kalshi schema probe: structurally valid API with $58.73 balance;
+- keyless provider probe: one contract-projected value each for GFS, ECMWF, and
+  AIGFS; explicit GFS/ECMWF sigma; bounded pre-CDF physics; weights sum to one;
+  model path `deterministic_gfs_ecmwf_aigfs_hrrr_physics`;
+- non-trading provider → projection → pricing → strategy → sizing →
+  execution-plan proof: `weather_physics`, fee-inclusive position fraction
+  7.49%, 12 contracts, IOC plan `ready`, and a broker tripwire proving no order
+  submission occurred;
+- shadow single-pass runtime completion without authenticating to or reading the
+  live account.
 
-## The deploy pipeline does not deploy
+No container was restarted and no live order was submitted during these source
+proofs. They prove source/runtime-path compatibility, not deployment; current
+deployment truth must always be read from the stamped files listed above.
 
-`deploy-nyc.yml` requires a green `Kalshi CI` run on `master` **and**
-`vars.NYC_AUTO_DEPLOY_ENABLED == 'true'`. That variable is unset, so every
-recorded run is `skipped`. CI itself also failed continuously until
-2026-08-11. Deploys are therefore **manual**, by the procedure below.
+## Effective live risk posture
 
-## How to deploy
+Verified values include:
 
-```bash
-# From the repo root on a clean, pushed master:
-./deploy.sh
-```
+- max deployed fraction: 0.90
+- concurrent positions: 20
+- same-event-family cap: 5
+- max quantity per position: 15
+- base position dollars: 10
+- minimum entry price: 0.34
+- Kelly fraction: 0.25
+- declared Kelly cap: 0.12
+- declared per-event risk: 0.08
+- regional exposure: `max($20, 40% of live cash)`
 
-`deploy.sh` is the blessed path because it:
+Those values remain unenforced in deployed v19.18.0. The v19.20.0 source
+candidate enforces both, but they must not be credited as live protection until
+the exact committed candidate is deployed and re-verified.
 
-- refuses dirty or unpushed work
-- ships the exact committed tree
-- builds both images on the droplet itself
-- runs the runtime and helper containers as the non-root deploy user
-- verifies forecast-lane and cockpit readiness
-- stamps deployed SHA provenance into the host and runtime logs
-- fails if ownership drift appears anywhere under `/home/algo-runner/bot`
-- runs the hosted release audit on the newly built runtime
+## Deployment boundary
 
-Confirm a good deploy with `Live Execution cycle complete` in the logs, a
-`bankroll=$…` that matches the real balance, and zero `Traceback` lines.
+Do not deploy this candidate until all of the following are true:
 
-## Rollback
+1. the changes are reviewed, committed, and pushed;
+2. the keyless deterministic provider probe proves GFS/ECMWF/AIGFS identity,
+   completeness, freshness, and contract projection in the isolated runtime;
+3. the user explicitly authorizes a production deployment;
+4. `./deploy.sh` passes its clean-tree, origin-parity, hosted-soak, ownership,
+   provenance, and release-audit guards.
 
-```bash
-ssh -p 2222 algo-runner@157.245.15.40 'cd /home/algo-runner/bot && \
-  docker tag algo-rollback-engine:20260811 ghcr.io/futureisnowtech/trading-bot-main:latest && \
-  docker tag algo-rollback-dash:20260811 ghcr.io/futureisnowtech/trading-bot-main-dashboard:latest && \
-  docker compose up -d'
-```
+`deploy.sh` exports the exact committed tree and syncs it to the droplet. When
+GHCR credentials are supplied it pulls SHA-tagged images built by CI; otherwise
+it builds from the exact tree on the droplet. It then tags/starts the lean stack
+and stamps provenance. The protected GitHub workflow remains conditional on
+its environment/variable gates; a green CI run alone is not proof of deploy.
 
-## Config rules
-
-- Risk constants must move in **four places together**: the droplet `.env`
-  (what executes), `config.py` defaults (what a fresh environment gets), the
-  `.env` block in `ci.yml`, and the `.env` block in `deploy-nyc.yml`. Protected
-  deploy must prove the same posture that CI proves.
-- To read the live values, ask the running container rather than trusting any
-  document — including this one:
-  ```bash
-  ssh -p 2222 algo-runner@157.245.15.40 'docker exec execution-engine python3 -c "
-  import config
-  for k in dir(config):
-      if k.startswith((\"KALSHI_\", \"SALVAGE_\", \"ACCOUNT_\")):
-          print(k, getattr(config, k))"'
-  ```
-- The max-deployed-capital ceiling is now honoured from the environment. The
-  old image hardcoded it and ignored the env var entirely; the droplet `.env`
-  was aligned to the hardcoded figure before deploy specifically so that
-  activation changed nothing.
-- `ACCOUNT_SIZE` no longer drives live sizing. The bankroll is read from the
-  broker each cycle via `runtime.live_account.resolve_live_bankroll()`;
-  `ACCOUNT_SIZE` survives only as the last-resort floor.
-- `.env` backups are written to `/home/algo-runner/bot/.env.bak.<timestamp>`.
-- Runtime containers and deploy helper containers now run as UID/GID `1000`
-  (`algo-runner`) and with `PYTHONDONTWRITEBYTECODE=1` so bind-mounted files
-  stay owned by the deploy user instead of drifting to root.
-
-## Deploy-script hazard: stdin-eating containers
-
-The remote block in `deploy.sh` is piped into `bash -s`, so **the remote script
-itself is that shell's stdin**. Any container started with stdin attached
-(`docker exec -i`, `docker run -i` without its own redirect) consumes the rest
-of the script as its own input. Bash then reaches EOF and exits **0**, so the
-deploy reports success while every remaining step is silently skipped.
-
-This bit a real deploy on 2026-08-12 (`55d198f`): the 600-second soak audit, the
-post-deploy ownership re-audit, and the provenance echo never ran, and the
-script still printed `Deployment complete.` and exited 0.
-
-Two guards now exist and are pinned by `tests/proof/test_release_audit.py`:
-
-- every `docker exec` in the remote block redirects `</dev/null`
-- the remote block's last statement echoes `__REMOTE_DEPLOY_COMPLETE__`, which
-  the local side greps for and fails the deploy if absent
-
-The `docker run --rm -i ... << PYEOF` calls are safe because their heredoc
-already supplies stdin. Keep it that way when adding steps.
-
-## Host service-status artifact must stay fresh
-
-`logs/host_service_status.json` is how the in-container release audit learns
-whether both containers are up — the audit runs inside `execution-engine` and
-cannot reach the Docker daemon. `scripts/release_audit.py` rejects the artifact
-once it is older than `HOST_SERVICE_ARTIFACT_MAX_AGE_SECONDS` (30 minutes).
-
-It used to be written **only** by `deploy.sh`, so 30 minutes after every deploy
-the engine's own periodic audit flipped the gate to
-`host_service_status_artifact_stale` and the bot stopped taking entries until
-someone deployed again. Observed live on 2026-08-12 at `041cdd2`:
-`BLOCKED / entries_allowed=NO` with a 4565s-stale artifact.
-
-`scripts/refresh_host_service_status.sh` now owns that write, and `deploy.sh`
-installs a `*/5 * * * *` cron entry for it (idempotently, on every deploy). The
-script runs natively as `algo-runner` — no helper container — so the artifact
-keeps deploy-user ownership. Cron log: `logs/host_service_status_cron.log`.
-
-Check it with:
+## Read-only verification commands
 
 ```bash
-ssh -p 2222 algo-runner@157.245.15.40 'crontab -l; cat /home/algo-runner/bot/logs/release_verdict.txt'
+ssh -p 2222 algo-runner@157.245.15.40 'sed -n "1,40p" /home/algo-runner/bot/version.txt'
+ssh -p 2222 algo-runner@157.245.15.40 'sed -n "1,120p" /home/algo-runner/bot/deploy_manifest.json'
+ssh -p 2222 algo-runner@157.245.15.40 'docker ps --format "{{.Names}} {{.Image}} {{.Status}}"'
 ```
+
+## Deployment hazards that remain active
+
+- The remote block in `deploy.sh` is piped into `bash -s`; a container command
+  with unowned stdin can consume the rest of the deploy script. Preserve the
+  `</dev/null>` / heredoc protections and final
+  `__REMOTE_DEPLOY_COMPLETE__` sentinel.
+- `logs/host_service_status.json` expires after 30 minutes. The installed
+  five-minute `refresh_host_service_status.sh` cron must remain healthy or the
+  release gate will eventually stop new entries.
+- Risk values must stay aligned across `config.py`, `.env.example`, CI,
+  protected deploy validation, and the droplet `.env`. Read the running
+  container before trusting documentation.

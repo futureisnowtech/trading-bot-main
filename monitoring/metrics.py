@@ -13,7 +13,7 @@ BUYING_POWER_GAUGE = Gauge('algo_bot_buying_power_usd', 'Available buying power 
 
 # SRE FIX: Pure Weather Metrics Exporter
 KALSHI_WEATHER_EDGE_RATIO_GAUGE = Gauge('kalshi_weather_edge_ratio', 'Edge ratio for active weather markets', ['ticker'])
-WEATHER_ENSEMBLE_PROB_GAUGE = Gauge('algo_bot_weather_ensemble_prob', 'Ensemble probability per ticker', ['ticker'])
+WEATHER_MODEL_PROB_GAUGE = Gauge('algo_bot_weather_model_prob', 'Deterministic weather-model probability per ticker', ['ticker'])
 WEATHER_METAR_DIFF_GAUGE = Gauge('algo_bot_weather_metar_diff', 'METAR ground truth diff from threshold', ['ticker'])
 WEATHER_HRRR_DIFF_GAUGE = Gauge('algo_bot_weather_hrrr_diff', 'HRRR intraday diff from threshold', ['ticker'])
 WEATHER_SIGMA_GAUGE = Gauge('algo_bot_weather_sigma', 'Ensemble standard deviation (Sigma)', ['ticker'])

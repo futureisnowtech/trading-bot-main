@@ -1,9 +1,9 @@
-"""
-data/kalshi_weather_monitor.py — Asynchronous Weather Ensemble Pipeline.
+"""Asynchronous multi-model weather pipeline for Kalshi contracts.
 
-Ingests 31-member GFS ensembles from Open-Meteo to calculate probabilistic edges
-for Kalshi weather prediction markets. Decouples heavy network ops from the 
-live execution loop via a low-latency shadow state dictionary.
+Production ingests deterministic GFS, ECMWF, and NCEP AIGFS plus HRRR and
+METAR observations. Commercial Open-Meteo ensembles are intentionally absent
+from the trading dependency graph. Network work remains decoupled from the
+execution loop through a shadow-state cache.
 """
 
 import asyncio
@@ -36,36 +36,32 @@ _STATE_LOCK = threading.Lock()
 _MONITOR_LOCK = threading.Lock()
 _MONITOR_THREAD: Optional[threading.Thread] = None
 _ACTIVE_CITY_SCOPE_LOCK = threading.Lock()
-_ENSEMBLE_FETCH_STATE_LOCK = threading.Lock()
-_ENSEMBLE_GLOBAL_RATE_LIMIT_LOCK = threading.Lock()
-_PROVIDER_NOTICE_LOCK = threading.Lock()
+_PROVIDER_FETCH_STATE_LOCK = threading.Lock()
 _WATERMARKS_FILE = ""
 _WEATHER_SNAPSHOT_FILE = ""
 _SNAPSHOT_FILE_LOCK = threading.Lock()
 _LAST_SNAPSHOT_MTIME = 0.0
 _ACTIVE_CITY_SCOPE_CACHE: Dict[str, Any] = {"timestamp": 0.0, "city_keys": []}
-_ENSEMBLE_FETCH_STATE: Dict[str, Dict[str, Any]] = {}
-_ENSEMBLE_GLOBAL_RATE_LIMIT: Dict[str, Any] = {"until": 0.0, "reason": "", "logged_at": 0.0}
-_PROVIDER_NOTICES_EMITTED: set[str] = set()
+_PROVIDER_FETCH_STATE: Dict[str, Dict[str, Any]] = {}
 _OBSERVED_HOURLY_CACHE: Dict[str, Dict[str, Any]] = {}
 WEATHER_ACTIVE_CITY_REFRESH_SEC = 300
-WEATHER_ENSEMBLE_COOLDOWN_SEC = 1200
-WEATHER_ENSEMBLE_MODEL_PAUSE_SEC = 0.75
+WEATHER_PROVIDER_COOLDOWN_SEC = 1200
+WEATHER_MODEL_PAUSE_SEC = 0.75
 try:
     from config import (
         DB_PATH as _DB_PATH,
         KALSHI_DATA_FRESHNESS_MINUTES_DAILY as _CFG_FRESHNESS_MINUTES_DAILY,
         KALSHI_DATA_FRESHNESS_MINUTES_HOURLY as _CFG_FRESHNESS_MINUTES_HOURLY,
         WEATHER_ACTIVE_CITY_REFRESH_SEC as _CFG_ACTIVE_CITY_REFRESH_SEC,
-        WEATHER_ENSEMBLE_COOLDOWN_SEC as _CFG_ENSEMBLE_COOLDOWN_SEC,
-        WEATHER_ENSEMBLE_MODEL_PAUSE_SEC as _CFG_ENSEMBLE_MODEL_PAUSE_SEC,
+        WEATHER_PROVIDER_COOLDOWN_SEC as _CFG_PROVIDER_COOLDOWN_SEC,
+        WEATHER_MODEL_PAUSE_SEC as _CFG_MODEL_PAUSE_SEC,
         WEATHER_CACHE_ROOT as _WEATHER_CACHE_ROOT,
     )
 
     _WATERMARKS_FILE = os.path.join(_WEATHER_CACHE_ROOT, "weather_watermarks.json")
     _WEATHER_SNAPSHOT_FILE = os.path.join(_WEATHER_CACHE_ROOT, "weather_snapshot.json")
     # Cached state stays usable out to the widest gate (daily), because a daily
-    # high legitimately trades on a 90-minute-old ensemble record.
+    # high legitimately trades on a 90-minute-old model record.
     WEATHER_STATE_TTL_SEC = max(300, int(float(_CFG_FRESHNESS_MINUTES_DAILY) * 60))
     # But the refresh cadence is set by the *tightest* gate (hourly), minus a
     # 5-minute margin for fetch time. Deriving it from the daily window instead
@@ -77,8 +73,8 @@ try:
         300, int(float(_CFG_FRESHNESS_MINUTES_HOURLY) * 60) - 300
     )
     WEATHER_ACTIVE_CITY_REFRESH_SEC = int(_CFG_ACTIVE_CITY_REFRESH_SEC)
-    WEATHER_ENSEMBLE_COOLDOWN_SEC = int(_CFG_ENSEMBLE_COOLDOWN_SEC)
-    WEATHER_ENSEMBLE_MODEL_PAUSE_SEC = float(_CFG_ENSEMBLE_MODEL_PAUSE_SEC)
+    WEATHER_PROVIDER_COOLDOWN_SEC = int(_CFG_PROVIDER_COOLDOWN_SEC)
+    WEATHER_MODEL_PAUSE_SEC = float(_CFG_MODEL_PAUSE_SEC)
 except Exception:
     _WATERMARKS_FILE = ""
     _WEATHER_SNAPSHOT_FILE = ""
@@ -338,7 +334,7 @@ async def fetch_metar_observation(icao: str) -> Dict[str, Any]:
                 tc_raw = temp_match.group(1).replace('M', '-')
                 temp_c = float(tc_raw)
                 temp_f = round((temp_c * 9/5) + 32, 1)
-            
+
             # High-precision T-group override
             t_group_f = _parse_t_group(raw)
             if t_group_f is not None:
@@ -451,7 +447,7 @@ def _load_weather_snapshot(*, force: bool = False) -> Dict[str, Any]:
     }
 
 
-def _cached_ensemble_record(cache_key: str, *, max_age_sec: int = CACHE_EXPIRY_SEC) -> Dict[str, Any]:
+def _cached_provider_record(cache_key: str, *, max_age_sec: int = CACHE_EXPIRY_SEC) -> Dict[str, Any]:
     cached = _COORDINATE_CACHE.get(cache_key)
     if not cached:
         return {}
@@ -461,29 +457,10 @@ def _cached_ensemble_record(cache_key: str, *, max_age_sec: int = CACHE_EXPIRY_S
     return cached
 
 
-def _global_ensemble_rate_limit_active() -> bool:
-    with _ENSEMBLE_GLOBAL_RATE_LIMIT_LOCK:
-        return float(_ENSEMBLE_GLOBAL_RATE_LIMIT.get("until") or 0.0) > time.time()
-
-
-def _activate_global_ensemble_rate_limit(*, reason: str) -> bool:
-    tomorrow_utc = (
-        datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
-        + 86400
-    )
-    with _ENSEMBLE_GLOBAL_RATE_LIMIT_LOCK:
-        already_active = float(_ENSEMBLE_GLOBAL_RATE_LIMIT.get("until") or 0.0) > time.time()
-        _ENSEMBLE_GLOBAL_RATE_LIMIT["until"] = tomorrow_utc
-        _ENSEMBLE_GLOBAL_RATE_LIMIT["reason"] = reason
-        if not already_active:
-            _ENSEMBLE_GLOBAL_RATE_LIMIT["logged_at"] = time.time()
-        return not already_active
-
-
-def _claim_ensemble_fetch_slot(cache_key: str) -> str:
+def _claim_provider_fetch_slot(cache_key: str) -> str:
     now = time.time()
-    with _ENSEMBLE_FETCH_STATE_LOCK:
-        state = _ENSEMBLE_FETCH_STATE.setdefault(cache_key, {})
+    with _PROVIDER_FETCH_STATE_LOCK:
+        state = _PROVIDER_FETCH_STATE.setdefault(cache_key, {})
         cooldown_until = float(state.get("cooldown_until") or 0.0)
         if cooldown_until > now:
             return "cooldown"
@@ -493,35 +470,31 @@ def _claim_ensemble_fetch_slot(cache_key: str) -> str:
         return "leader"
 
 
-def _release_ensemble_fetch_slot(cache_key: str) -> None:
-    with _ENSEMBLE_FETCH_STATE_LOCK:
-        state = _ENSEMBLE_FETCH_STATE.setdefault(cache_key, {})
+def _release_provider_fetch_slot(cache_key: str) -> None:
+    with _PROVIDER_FETCH_STATE_LOCK:
+        state = _PROVIDER_FETCH_STATE.setdefault(cache_key, {})
         state["inflight"] = False
 
 
-def _enter_ensemble_cooldown(cache_key: str, *, city_key: str, model: str) -> bool:
-    now = time.time()
-    with _ENSEMBLE_FETCH_STATE_LOCK:
-        state = _ENSEMBLE_FETCH_STATE.setdefault(cache_key, {})
-        prior = float(state.get("cooldown_until") or 0.0)
-        state["cooldown_until"] = now + max(60, WEATHER_ENSEMBLE_COOLDOWN_SEC)
-        state["last_429_city"] = city_key
-        state["last_429_model"] = model
-        return prior <= now
+def _set_provider_cooldown(cache_key: str) -> None:
+    """Back off one coordinate after a failed deterministic provider cycle."""
+    with _PROVIDER_FETCH_STATE_LOCK:
+        state = _PROVIDER_FETCH_STATE.setdefault(cache_key, {})
+        state["cooldown_until"] = time.time() + max(1, WEATHER_PROVIDER_COOLDOWN_SEC)
 
 
-async def _await_inflight_ensemble(cache_key: str) -> Dict[str, Any]:
+async def _await_inflight_provider(cache_key: str) -> Dict[str, Any]:
     deadline = time.time() + 20.0
     while time.time() < deadline:
-        cached = _cached_ensemble_record(cache_key)
+        cached = _cached_provider_record(cache_key)
         if cached:
             return cached
-        with _ENSEMBLE_FETCH_STATE_LOCK:
-            inflight = bool(_ENSEMBLE_FETCH_STATE.get(cache_key, {}).get("inflight"))
+        with _PROVIDER_FETCH_STATE_LOCK:
+            inflight = bool(_PROVIDER_FETCH_STATE.get(cache_key, {}).get("inflight"))
         if not inflight:
             break
         await asyncio.sleep(0.25)
-    return _cached_ensemble_record(cache_key)
+    return _cached_provider_record(cache_key)
 
 
 def _active_weather_city_keys() -> list[str]:
@@ -570,20 +543,14 @@ def _active_weather_city_keys() -> list[str]:
     return city_keys
 
 
-def _emit_provider_notice_once(notice_key: str, message: str) -> None:
-    with _PROVIDER_NOTICE_LOCK:
-        if notice_key in _PROVIDER_NOTICES_EMITTED:
-            return
-        _PROVIDER_NOTICES_EMITTED.add(notice_key)
-    logger.info(message)
-
-
 def _weather_model_key(model: str) -> str:
     model_name = str(model or "").lower()
     if "ecmwf" in model_name:
         return "ecmwf"
-    if "graphcast" in model_name:
+    if "aigfs" in model_name or "graphcast" in model_name:
         return "aigefs"
+    if "icon" in model_name:
+        return "icon"
     if "gfs" in model_name:
         return "gfs"
     return "other"
@@ -804,7 +771,11 @@ def _build_weather_record_from_hourly(
     hourly_members_wind = {}
 
     model_key = _weather_model_key(model)
-    member_slots = [0] if deterministic else range(51 if model_key == "ecmwf" else (1 if model_key == "aigefs" else 31))
+    if deterministic:
+        member_slots = [0]
+    else:
+        member_count = {"ecmwf": 51, "icon": 40, "aigefs": 1}.get(model_key, 31)
+        member_slots = range(member_count)
 
     for i in member_slots:
         member_label = f"member_{i:02d}"
@@ -815,59 +786,70 @@ def _build_weather_record_from_hourly(
             ssrd_key = "shortwave_radiation"
             wind_key = "wind_speed_10m"
         else:
-            temp_key = "temperature_2m" if model_key == "aigefs" else f"temperature_2m_member{i:02d}"
-            cloud_key = "cloud_cover" if model_key == "aigefs" else f"cloud_cover_member{i:02d}"
-            precip_key = "precipitation" if model_key == "aigefs" else f"precipitation_member{i:02d}"
-            ssrd_key = "shortwave_radiation" if model_key == "aigefs" else f"shortwave_radiation_member{i:02d}"
-            wind_key = "wind_speed_10m" if model_key == "aigefs" else f"wind_speed_10m_member{i:02d}"
+            # Open-Meteo exposes the control member without a suffix and then
+            # perturbations as member01..memberNN; there is no member00 field.
+            # AIGFS is deterministic and likewise uses the unsuffixed key.
+            suffix = "" if i == 0 or model_key == "aigefs" else f"_member{i:02d}"
+            temp_key = f"temperature_2m{suffix}"
+            cloud_key = f"cloud_cover{suffix}"
+            precip_key = f"precipitation{suffix}"
+            ssrd_key = f"shortwave_radiation{suffix}"
+            wind_key = f"wind_speed_10m{suffix}"
 
         if temp_key in hourly:
             all_temps_c = hourly[temp_key]
-            temps_c = all_temps_c[:window_size]
+            temps_c = [value for value in all_temps_c[:window_size] if value is not None]
             if temps_c:
                 temps_f = [(float(tc) * 9 / 5) + 32 for tc in temps_c]
                 members_high.append(max(temps_f))
                 members_low.append(min(temps_f))
             if all_temps_c:
                 hourly_members_temp_f[member_label] = [
-                    (float(tc) * 9 / 5) + 32 for tc in all_temps_c
+                    None if tc is None else (float(tc) * 9 / 5) + 32
+                    for tc in all_temps_c
                 ]
 
         if precip_key in hourly:
             all_precip_mm = hourly[precip_key]
-            p_mm = all_precip_mm[:window_size]
+            p_mm = [value for value in all_precip_mm[:window_size] if value is not None]
             if p_mm:
                 members_precip.append(sum(float(mm) for mm in p_mm) * 0.03937)
             if all_precip_mm:
                 hourly_members_precip_in[member_label] = [
-                    float(mm) * 0.03937 for mm in all_precip_mm
+                    None if mm is None else float(mm) * 0.03937
+                    for mm in all_precip_mm
                 ]
 
         if wind_key in hourly:
             all_wind_kmh = hourly[wind_key]
-            w_kmh = all_wind_kmh[:window_size]
+            w_kmh = [value for value in all_wind_kmh[:window_size] if value is not None]
             if w_kmh:
                 members_wind.append(max(float(kmh) for kmh in w_kmh) * 0.621371)
             if all_wind_kmh:
                 hourly_members_wind[member_label] = [
-                    float(kmh) * 0.621371 for kmh in all_wind_kmh
+                    None if kmh is None else float(kmh) * 0.621371
+                    for kmh in all_wind_kmh
                 ]
 
         if cloud_key in hourly:
             all_cloud = hourly[cloud_key]
-            c_vals = all_cloud[11:17]
+            c_vals = [value for value in all_cloud[11:17] if value is not None]
             if c_vals:
                 cloud_members.append(float(np.mean(c_vals)))
             if all_cloud:
-                hourly_members_cloud[member_label] = [float(val) for val in all_cloud]
+                hourly_members_cloud[member_label] = [
+                    None if val is None else float(val) for val in all_cloud
+                ]
 
         if ssrd_key in hourly:
             all_ssrd = hourly[ssrd_key]
-            s_vals = all_ssrd[11:17]
+            s_vals = [value for value in all_ssrd[11:17] if value is not None]
             if s_vals:
                 ssrd_members.append(float(np.mean(s_vals)))
             if all_ssrd:
-                hourly_members_ssrd[member_label] = [float(val) for val in all_ssrd]
+                hourly_members_ssrd[member_label] = [
+                    None if val is None else float(val) for val in all_ssrd
+                ]
 
     if not members_high:
         return {}
@@ -931,18 +913,18 @@ async def _fetch_open_meteo_deterministic_multimodel(
     model_specs = [
         ("gfs_seamless", "https://api.open-meteo.com/v1/gfs"),
         ("ecmwf_ifs025", "https://api.open-meteo.com/v1/ecmwf"),
-        ("gfs_graphcast025", "https://api.open-meteo.com/v1/gfs"),
+        ("ncep_aigfs025", "https://api.open-meteo.com/v1/gfs"),
     ]
     results: dict[str, dict[str, Any]] = {}
 
     for idx, (model, url) in enumerate(model_specs):
-        if idx and WEATHER_ENSEMBLE_MODEL_PAUSE_SEC > 0:
-            await asyncio.sleep(WEATHER_ENSEMBLE_MODEL_PAUSE_SEC)
+        if idx and WEATHER_MODEL_PAUSE_SEC > 0:
+            await asyncio.sleep(WEATHER_MODEL_PAUSE_SEC)
 
         params = {
             "latitude": lat,
             "longitude": lon,
-            "hourly": "temperature_2m,cloud_cover,precipitation,shortwave_radiation",
+            "hourly": "temperature_2m,cloud_cover,precipitation,shortwave_radiation,wind_speed_10m",
             "models": model,
             "timezone": "auto",
             "forecast_days": 8,
@@ -960,7 +942,7 @@ async def _fetch_open_meteo_deterministic_multimodel(
                 data.get("hourly", {}),
                 model,
                 deterministic=True,
-                forecast_source="open_meteo_forecast",
+                forecast_source="open_meteo_deterministic",
             )
             if record:
                 results[_weather_model_key(model)] = record
@@ -970,11 +952,21 @@ async def _fetch_open_meteo_deterministic_multimodel(
     if not results:
         return {}
 
-    final_record = results.get("gfs", list(results.values())[0]).copy()
+    # The top-level record is always GFS. Never copy another surviving model
+    # into this slot: that can label ECMWF as GFS and count it twice.
+    if "gfs" not in results:
+        logger.warning(
+            "Deterministic weather fetch for %s produced no GFS record; failing closed.",
+            city_key,
+        )
+        return {}
+
+    final_record = results["gfs"].copy()
     final_record["ecmwf"] = results.get("ecmwf")
     final_record["aigefs"] = results.get("aigefs")
+    final_record["icon"] = None
     final_record["provider_mode"] = "deterministic_multi_model"
-    final_record["forecast_source"] = "open_meteo_forecast"
+    final_record["forecast_source"] = "open_meteo_deterministic"
     final_record["city_key"] = city_key
     final_record["timestamp"] = time.time()
     return final_record
@@ -1157,7 +1149,7 @@ def _target_hour_indices(
 
 
 def _reduce_member_projection(
-    member_series: dict[str, list[float]],
+    member_series: dict[str, list[float | None]],
     indices: list[int],
     reducer,
 ) -> list[float]:
@@ -1165,7 +1157,11 @@ def _reduce_member_projection(
     if not indices:
         return values
     for series in (member_series or {}).values():
-        bucket = [series[idx] for idx in indices if idx < len(series)]
+        bucket = [
+            series[idx]
+            for idx in indices
+            if idx < len(series) and series[idx] is not None
+        ]
         if bucket:
             values.append(float(reducer(bucket)))
     return values
@@ -1245,6 +1241,8 @@ def _project_contract_record(
         "sigma_temp": float(np.std(members_temp_instant)) if len(members_temp_instant) > 1 else None,
         "mean_precip": float(np.mean(members_precip_total)) if members_precip_total else record.get("mean_precip", 0.0),
         "sigma_precip": float(np.std(members_precip_total)) if len(members_precip_total) > 1 else record.get("sigma_precip", 0.08),
+        "mean_wind": float(np.mean(members_wind_max)) if members_wind_max else record.get("mean_wind", 0.0),
+        "sigma_wind": float(np.std(members_wind_max)) if len(members_wind_max) > 1 else record.get("sigma_wind", 0.5),
         "peak_tcdc": float(np.mean(cloud_peaks)) if cloud_peaks else float(record.get("peak_tcdc") or 0.0),
         "peak_ssrd": float(np.mean(ssrd_means)) if ssrd_means else record.get("peak_ssrd"),
         "timestamp": record.get("timestamp", time.time()),
@@ -1257,7 +1255,7 @@ def _project_contract_record(
         "hourly_members_cloud": members_cloud,
         "hourly_members_ssrd": members_ssrd,
         "hourly_members_wind": members_wind,
-        "provider_mode": record.get("provider_mode", "ensemble_members"),
+        "provider_mode": record.get("provider_mode", "deterministic_multi_model"),
         "forecast_source": record.get("forecast_source", ""),
         "model_name": record.get("model_name", ""),
     }
@@ -1297,6 +1295,10 @@ def _project_contract_record(
         )
     else:
         projected["ecmwf"] = None
+
+    # Commercial ICON ensembles are excluded. Clearing this field prevents an
+    # older persisted snapshot from silently restoring the retired provider.
+    projected["icon"] = None
 
     nested_aigefs = record.get("aigefs")
     if nested_aigefs:
@@ -1559,6 +1561,7 @@ def _intraday_payload(
     daily_max = cur_temp
     daily_min = cur_temp
     daily_precip = None
+    metar_temp_trend_f_per_hr = None
 
     if watermarks is not None:
         today_str = _station_local_day(city_key)
@@ -1566,6 +1569,9 @@ def _intraday_payload(
         min_key = f"{city_key}|{today_str}|min"
         precip_total_key = f"{city_key}|{today_str}|precip_total"
         precip_obs_key = f"{city_key}|{today_str}|precip_obs_key"
+        temp_obs_key = f"{city_key}|{today_str}|temp_obs_key"
+        temp_value_key = f"{city_key}|{today_str}|temp_value"
+        temp_trend_key = f"{city_key}|{today_str}|temp_trend_f_per_hr"
         if cur_temp is not None:
             watermarks[max_key] = max(cur_temp, watermarks.get(max_key, cur_temp))
             watermarks[min_key] = min(cur_temp, watermarks.get(min_key, cur_temp))
@@ -1574,6 +1580,23 @@ def _intraday_payload(
 
         metar_raw = str(metar.get("raw") or "")
         obs_key = _parse_metar_observation_key(metar_raw)
+        if obs_key is not None and cur_temp is not None:
+            previous_obs = watermarks.get(temp_obs_key)
+            previous_temp = watermarks.get(temp_value_key)
+            if previous_obs is not None and previous_temp is not None and float(obs_key) > float(previous_obs):
+                current_day_hour = int(float(obs_key) // 10000) * 24.0 + (float(obs_key) % 10000) // 100 + (float(obs_key) % 100) / 60.0
+                previous_day_hour = int(float(previous_obs) // 10000) * 24.0 + (float(previous_obs) % 10000) // 100 + (float(previous_obs) % 100) / 60.0
+                elapsed_hours = current_day_hour - previous_day_hour
+                if elapsed_hours > 0.0:
+                    metar_temp_trend_f_per_hr = round(
+                        (float(cur_temp) - float(previous_temp)) / elapsed_hours,
+                        4,
+                    )
+                    watermarks[temp_trend_key] = metar_temp_trend_f_per_hr
+            watermarks[temp_obs_key] = float(obs_key)
+            watermarks[temp_value_key] = float(cur_temp)
+        if metar_temp_trend_f_per_hr is None and watermarks.get(temp_trend_key) is not None:
+            metar_temp_trend_f_per_hr = float(watermarks[temp_trend_key])
         hourly_precip = _parse_metar_hourly_precip_inches(metar_raw)
         last_obs_key = watermarks.get(precip_obs_key, -1.0)
         if (
@@ -1596,170 +1619,41 @@ def _intraday_payload(
         "daily_min": daily_min,
         "daily_precip": daily_precip,
         "metar_raw": metar.get("raw"),
+        "metar_temp_trend_f_per_hr": metar_temp_trend_f_per_hr,
         "hrrr_high": hrrr.get("hrrr_high"),
         "hrrr_trend": hrrr.get("hrrr_trend"),
         "ts": time.time(),
     }
 
-async def fetch_open_meteo_ensemble(city_key: str, lat: float, lon: float) -> Dict[str, Any]:
+async def fetch_deterministic_weather_models(city_key: str, lat: float, lon: float) -> Dict[str, Any]:
+    """Fetch the keyless deterministic GFS/ECMWF/AIGFS production bundle.
+
+    There is deliberately no commercial-key or ensemble-endpoint branch.
+    Predictive uncertainty is represented by model-specific forecast-error
+    sigma downstream, not by pretending a one-member forecast is an ensemble.
     """
-    v19.1.10: Sovereign Multi-Model Ingestion (GFS + ECMWF).
-    Includes cloud_cover for TCDC overrides, max/min temps, and precip.
-    """
-    # v19.1.6: Coordinate-based caching
     cache_key = f"{lat:.2f}_{lon:.2f}"
-    cached = _cached_ensemble_record(cache_key)
+    cached = _cached_provider_record(cache_key)
     if cached:
         return cached
-    if _global_ensemble_rate_limit_active():
-        _emit_provider_notice_once(
-            "deterministic_due_to_quota",
-            "Weather provider running on deterministic fallback because Open-Meteo ensemble quota is exhausted.",
-        )
-        fallback = await _fetch_open_meteo_deterministic_multimodel(city_key, lat, lon)
-        if fallback:
-            _COORDINATE_CACHE[cache_key] = fallback
-        return fallback
 
-    slot_status = _claim_ensemble_fetch_slot(cache_key)
+    slot_status = _claim_provider_fetch_slot(cache_key)
     if slot_status == "cooldown":
         return {}
     if slot_status == "wait":
-        return await _await_inflight_ensemble(cache_key)
-
-    import os
-    api_key = os.getenv("OPEN_METEO_API_KEY")
-    if not api_key:
-        _emit_provider_notice_once(
-            "deterministic_due_to_missing_key",
-            "OPEN_METEO_API_KEY absent; weather provider running on deterministic GFS/ECMWF/GraphCast fallback.",
-        )
-        try:
-            fallback = await _fetch_open_meteo_deterministic_multimodel(city_key, lat, lon)
-            if fallback:
-                _COORDINATE_CACHE[cache_key] = fallback
-            return fallback
-        finally:
-            _release_ensemble_fetch_slot(cache_key)
-
-    base_url = "https://customer-api.open-meteo.com/v1/ensemble"
-    
-    # v19.2: Sovereign Grand Ensemble (Institutional Blend)
-    # GFS = 31, ECMWF = 51, ICON = 40, GRAPHCAST (AI) = 1
-    models = ["gfs_seamless", "ecmwf_ifs025", "icon_seamless", "gfs_graphcast025"]
-    results = {}
+        return await _await_inflight_provider(cache_key)
 
     try:
-        for idx, model in enumerate(models):
-            if idx and WEATHER_ENSEMBLE_MODEL_PAUSE_SEC > 0:
-                await asyncio.sleep(WEATHER_ENSEMBLE_MODEL_PAUSE_SEC)
-
-            params = {
-                "latitude": lat,
-                "longitude": lon,
-                "hourly": "temperature_2m,cloud_cover,precipitation,shortwave_radiation",
-                "models": model,
-                "timezone": "auto",
-                "forecast_days": 8,
-            }
-            if api_key:
-                params["apikey"] = api_key
-
-            try:
-                loop = asyncio.get_event_loop()
-                resp = await loop.run_in_executor(
-                    None,
-                    lambda: requests.get(base_url, params=params, timeout=15),
-                )
-
-                if resp.status_code == 429:
-                    response_text = (resp.text or "").strip()
-                    if "Daily API request limit exceeded" in response_text:
-                        if _activate_global_ensemble_rate_limit(reason=response_text):
-                            logger.warning(
-                                "Open-Meteo daily ensemble limit exhausted; pausing all ensemble fetches until tomorrow UTC."
-                            )
-                            try:
-                                from logging_db.trade_logger import log_event
-
-                                log_event(
-                                    "WARNING",
-                                    "WeatherMonitor",
-                                    "Open-Meteo daily ensemble limit exhausted; pausing all ensemble fetches until tomorrow UTC.",
-                                )
-                            except Exception:
-                                pass
-                        fallback = await _fetch_open_meteo_deterministic_multimodel(city_key, lat, lon)
-                        if fallback:
-                            _COORDINATE_CACHE[cache_key] = fallback
-                        return fallback
-                    should_log = _enter_ensemble_cooldown(
-                        cache_key,
-                        city_key=city_key,
-                        model=model,
-                    )
-                    if should_log:
-                        logger.warning(
-                            "Open-Meteo 429 for %s [%s]; cooling city for %ss.",
-                            city_key,
-                            model,
-                            WEATHER_ENSEMBLE_COOLDOWN_SEC,
-                        )
-                        try:
-                            from logging_db.trade_logger import log_event
-
-                            log_event(
-                                "WARNING",
-                                "WeatherMonitor",
-                                (
-                                    f"Open-Meteo 429 (Rate Limit) for {city_key} [{model}] "
-                                    f"cooldown={WEATHER_ENSEMBLE_COOLDOWN_SEC}s"
-                                ),
-                            )
-                        except Exception:
-                            pass
-                    fallback = await _fetch_open_meteo_deterministic_multimodel(city_key, lat, lon)
-                    if fallback:
-                        _COORDINATE_CACHE[cache_key] = fallback
-                    return fallback
-
-                if resp.status_code != 200:
-                    continue
-
-                data = resp.json()
-                record = _build_weather_record_from_hourly(
-                    data.get("hourly", {}),
-                    model,
-                    deterministic=False,
-                    forecast_source="open_meteo_ensemble",
-                )
-                if record:
-                    results[_weather_model_key(model)] = record
-            except Exception as e:
-                logger.debug(f"Fetch failed for {city_key} {model}: {e}")
-
-        if not results:
-            fallback = await _fetch_open_meteo_deterministic_multimodel(city_key, lat, lon)
-            if fallback:
-                _COORDINATE_CACHE[cache_key] = fallback
-            return fallback
-
-        # Unified City Record
-        final_record = results.get("gfs", list(results.values())[0]).copy()
-        final_record["ecmwf"] = results.get("ecmwf")
-        final_record["icon"] = results.get("icon")
-        final_record["aigefs"] = results.get("aigefs")
-        final_record["provider_mode"] = "ensemble_members"
-        final_record["forecast_source"] = "open_meteo_ensemble"
-
-        # Update cache
-        _COORDINATE_CACHE[cache_key] = final_record
-        return final_record
+        record = await _fetch_open_meteo_deterministic_multimodel(city_key, lat, lon)
+        if record:
+            _COORDINATE_CACHE[cache_key] = record
+        else:
+            _set_provider_cooldown(cache_key)
+        return record
     finally:
-        _release_ensemble_fetch_slot(cache_key)
-
-def inject_weather_ensemble(ticker_prefix: str, members: list[float], tcdc: float = 0.0):
-    """v19.1.5: Force-inject an ensemble for live verification/testing."""
+        _release_provider_fetch_slot(cache_key)
+def inject_weather_model(ticker_prefix: str, members: list[float], tcdc: float = 0.0):
+    """Force-inject a model fixture for local verification/testing."""
     global _WEATHER_SHADOW_STATE
     _WEATHER_SHADOW_STATE[ticker_prefix] = {
         "members": members,
@@ -1768,7 +1662,11 @@ def inject_weather_ensemble(ticker_prefix: str, members: list[float], tcdc: floa
         "peak_tcdc": tcdc,
         "timestamp": time.time()
     }
-    logger.info(f"VERIFICATION: Injected weather ensemble for {ticker_prefix}")
+    logger.info(f"VERIFICATION: Injected weather model for {ticker_prefix}")
+
+
+# Backward-compatible test/replay hook; production ingestion does not call it.
+inject_weather_ensemble = inject_weather_model
 
 
 async def fetch_hrrr_forecast(city_key: str, lat: float, lon: float) -> Dict[str, Any]:
@@ -1822,8 +1720,8 @@ async def hydrate_weather_shadow_state(
     async def _hydrate_city(city_key: str) -> int:
         loc = STATIONS[city_key]
         async with semaphore:
-            ensemble = await fetch_open_meteo_ensemble(city_key, loc["lat"], loc["lon"])
-            if not ensemble:
+            forecast = await fetch_deterministic_weather_models(city_key, loc["lat"], loc["lon"])
+            if not forecast:
                 return 0
 
             intraday_payload = None
@@ -1842,7 +1740,7 @@ async def hydrate_weather_shadow_state(
             updated = 0
             with _STATE_LOCK:
                 for s_ticker in loc.get("series", []):
-                    payload = deepcopy(ensemble)
+                    payload = deepcopy(forecast)
                     existing = _WEATHER_SHADOW_STATE.get(s_ticker, {})
                     if intraday_payload:
                         payload["intraday"] = intraday_payload
@@ -1929,26 +1827,26 @@ def ensure_weather_data(
     }
 
 async def update_weather_shadow_state():
-    """Background loop polling weather data (Ensembles + Intraday METAR/HRRR)."""
+    """Background loop polling deterministic models plus METAR/HRRR."""
     global _WEATHER_SHADOW_STATE
     logger.info("Weather shadow state pipeline active.")
-    
-    # ── Cycle 1: Ensemble Loop (WEATHER_REFRESH_TARGET_SEC) ────────────────
-    async def run_ensemble_sync():
+
+    # ── Cycle 1: Deterministic model loop (WEATHER_REFRESH_TARGET_SEC) ─────
+    async def run_forecast_sync():
         while True:
             try:
                 new_state = {}
                 import random
                 city_keys = _active_weather_city_keys()
                 if not city_keys:
-                    logger.info("Weather Ensemble sync skipped: no active weather cities.")
+                    logger.info("Weather forecast sync skipped: no active weather cities.")
                     await asyncio.sleep(900)
                     continue
                 random.shuffle(city_keys)
-                
+
                 for city_key in city_keys:
                     loc = STATIONS[city_key]
-                    result = await fetch_open_meteo_ensemble(city_key, loc["lat"], loc["lon"])
+                    result = await fetch_deterministic_weather_models(city_key, loc["lat"], loc["lon"])
                     if result:
                         for s_ticker in loc.get("series", []):
                             existing = _WEATHER_SHADOW_STATE.get(s_ticker, {})
@@ -1956,18 +1854,18 @@ async def update_weather_shadow_state():
                             payload["intraday"] = existing.get("intraday", {})
                             new_state[s_ticker] = payload
                     await asyncio.sleep(random.uniform(2, 5))
-                
+
                 if new_state:
                     with _STATE_LOCK:
                         _WEATHER_SHADOW_STATE.update(new_state)
                     _persist_weather_snapshot()
                     logger.info(
-                        "Weather Ensemble synced: %s series across %s active cities",
+                        "Deterministic weather models synced: %s series across %s active cities",
                         len(new_state),
                         len(city_keys),
                     )
             except Exception as e:
-                logger.error(f"Ensemble sync failure: {e}")
+                logger.error(f"Deterministic forecast sync failure: {e}")
             await asyncio.sleep(WEATHER_REFRESH_TARGET_SEC)
 
     # ── Cycle 2: Fast Intraday Precinct (15 Minutes) ───────────────────────
@@ -1975,7 +1873,7 @@ async def update_weather_shadow_state():
         # v19.8: Day-High/Low Watermarks
         # Key: (city_key, YYYY-MM-DD) -> float
         watermarks = _load_watermarks()
-        
+
         while True:
             try:
                 # v19.1.10: Precision Ground Truth (METAR + HRRR)
@@ -1995,14 +1893,14 @@ async def update_weather_shadow_state():
                         hrrr,
                         watermarks=watermarks,
                     )
-                    
+
                     for s_ticker in loc.get("series", []):
                         if s_ticker in _WEATHER_SHADOW_STATE:
                             with _STATE_LOCK:
                                 _WEATHER_SHADOW_STATE[s_ticker]["intraday"] = intraday_payload
                 _persist_watermarks(watermarks)
                 _persist_weather_snapshot()
-                
+
                 logger.info(
                     "Weather Intraday Precinct synced (METAR/HRRR/Watermarks) for %s active cities.",
                     len(city_keys),
@@ -2012,7 +1910,7 @@ async def update_weather_shadow_state():
             await asyncio.sleep(900)
 
     # Launch concurrent loops
-    await asyncio.gather(run_ensemble_sync(), run_intraday_sync())
+    await asyncio.gather(run_forecast_sync(), run_intraday_sync())
 
 def get_weather_data(ticker_prefix: str) -> Dict[str, Any]:
     """Retrieve cached weather data for a ticker prefix (e.g. 'KXHIGHNY')."""
@@ -2024,7 +1922,7 @@ def get_weather_data(ticker_prefix: str) -> Dict[str, Any]:
         data = _WEATHER_SHADOW_STATE.get(series)
     if _series_record_is_fresh(data):
         return data
-    
+
     # Fallback pattern matching
     for series_list in [loc.get("series", []) for loc in STATIONS.values()]:
         for s in series_list:
@@ -2089,6 +1987,8 @@ def get_contract_weather_data(
         projected["intraday"] = dict(base.get("intraday") or {})
     else:
         projected["intraday"] = {}
+    projected["hrrr_high"] = projected["intraday"].get("hrrr_high")
+    projected["hrrr_trend"] = projected["intraday"].get("hrrr_trend")
 
     projected["series"] = series
     projected["station_tz"] = station.get("tz", "UTC")

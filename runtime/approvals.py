@@ -18,10 +18,6 @@ from typing import Any
 # Every allowed action maps to an existing, already-safe write tool. This module
 # adds no new mutation paths -- it only adds a queue in front of ones that exist.
 WHITELIST: dict[str, dict[str, Any]] = {
-    "set_maker_entry_enabled": {
-        "description": "Enable or disable maker-first entry.",
-        "params": ["enabled"],
-    },
     "update_system_parameter": {
         "description": "Update a dynamic strategy parameter (passes the Safety Shield audit).",
         "params": ["key", "value", "rationale"],
@@ -120,12 +116,6 @@ def list_pending(limit: int = 20) -> list[dict[str, Any]]:
 
 
 def _execute(action: str, params: dict[str, Any]) -> str:
-    if action == "set_maker_entry_enabled":
-        from dashboard.jarvis_brain import update_system_parameter
-
-        return update_system_parameter(
-            "MAKER_ENTRY_ENABLED", str(bool(params.get("enabled"))), "approved via cockpit queue"
-        )
     if action == "update_system_parameter":
         from dashboard.jarvis_brain import update_system_parameter
 

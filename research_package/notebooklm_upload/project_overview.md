@@ -23,12 +23,12 @@ This research directory contains the following catalogs and data exports to help
 ### 2.1 Technical and Strategy Catalogs
 *   **[`00_project_inventory.md`](file:///Users/joshmacbookair2020/projects/algo_trading_final/research_package/00_project_inventory.md)**: Inventories every script, database, deployment file, and configuration file in the project.
 *   **[`01_system_architecture.md`](file:///Users/joshmacbookair2020/projects/algo_trading_final/research_package/01_system_architecture.md)**: Blueprints the daemon processes, data pipelines, order routing, and thermodynamic netting rules.
-*   **[`02_strategy_catalog.md`](file:///Users/joshmacbookair2020/projects/algo_trading_final/research_package/02_strategy_catalog.md)**: Explains the multi-model weather probability blending (GFS + ECMWF) and AI consensus scaling.
+*   **[`02_strategy_catalog.md`](file:///Users/joshmacbookair2020/projects/algo_trading_final/research_package/02_strategy_catalog.md)**: Explains the deterministic GFS/ECMWF probability blend, bounded physics, and NCEP AIGFS uncertainty scaling.
 *   **[`03_parameter_catalog.md`](file:///Users/joshmacbookair2020/projects/algo_trading_final/research_package/03_parameter_catalog.md)**: Indexes the risk limits, SRE gate thresholds, and weather station mappings.
 
 ### 2.2 Data Quality & History Reports
 *   **[`04_trade_data_summary.md`](file:///Users/joshmacbookair2020/projects/algo_trading_final/research_package/04_trade_data_summary.md)**: Describes logged fills and trade database structures.
-*   **[`05_weather_data_summary.md`](file:///Users/joshmacbookair2020/projects/algo_trading_final/research_package/05_weather_data_summary.md)**: Identifies GFS/ECMWF forecasts and METAR observations cache.
+*   **[`05_weather_data_summary.md`](file:///Users/joshmacbookair2020/projects/algo_trading_final/research_package/05_weather_data_summary.md)**: Identifies deterministic forecast providers, NCEP AIGFS, HRRR, and the METAR observations cache.
 *   **[`06_bug_and_change_history.md`](file:///Users/joshmacbookair2020/projects/algo_trading_final/research_package/06_bug_and_change_history.md)**: Details resolved bugs and critical system anomalies.
 *   **[`07_data_quality_audit.md`](file:///Users/joshmacbookair2020/projects/algo_trading_final/research_package/07_data_quality_audit.md)**: Audits files for missing values, duplicates, and gives a research-readiness verdict.
 

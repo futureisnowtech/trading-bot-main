@@ -102,15 +102,10 @@ def test_watchdog_is_edge_triggered(tmp_path, monkeypatch):
     assert len(sent) == 2 and "Recovered" in sent[1]
 
 
-def test_watchdog_checks_the_failure_that_cost_the_most():
-    """The enabled-but-inert check must exist by name.
-
-    MAKER_ENTRY_ENABLED was True for months while producing zero attempts, and
-    fees ate 313% of gross edge before anyone noticed.
-    """
+def test_watchdog_enforces_taker_only_resting_order_invariant():
     src = (ROOT / "scripts" / "watchdog.py").read_text()
-    assert "maker_inert" in src
-    assert "MAKER_ENTRY_ENABLED" in src
+    assert "taker-only production expects zero" in src
+    assert "MAKER_ENTRY_ENABLED" not in src
 
 
 def test_watchdog_detects_a_closed_release_gate(tmp_path, monkeypatch):

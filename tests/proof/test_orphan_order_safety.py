@@ -1,9 +1,9 @@
-"""Proof for the maker-path safety work.
+"""Proof for resting-order cleanup in the taker-only production lane.
 
 Every case here maps to a defect found by live inspection on 2026-08-18, not to
 a hypothetical. The headline one: cancel_order pointed at the deprecated v1
-endpoint, so a post-only order that was placed could never be cancelled and
-stayed resting on the exchange forever.
+endpoint, so an old resting order could not be cancelled and remained live on
+the exchange.
 """
 from execution.kalshi_broker import KalshiBroker
 
@@ -53,8 +53,9 @@ def test_orphan_sweep_cancels_every_resting_order(monkeypatch):
         {"order_id": "B", "ticker": "KXLOWLA-2"},
     ])
     cancelled = []
-    monkeypatch.setattr(b, "cancel_order", lambda oid: cancelled.append(oid) or True)
-    assert b.cancel_all_resting_orders(reason="test") == 2
+    monkeypatch.setattr(b, "cancel_and_confirm", lambda oid: cancelled.append(oid) or True)
+    result = b.cancel_all_resting_orders(reason="test")
+    assert result == {"ok": True, "found": 2, "cleared": 2, "failed": []}
     assert cancelled == ["A", "B"]
 
 
@@ -65,5 +66,6 @@ def test_orphan_sweep_counts_only_successful_cancels(monkeypatch):
         {"order_id": "A", "ticker": "T1"},
         {"order_id": "B", "ticker": "T2"},
     ])
-    monkeypatch.setattr(b, "cancel_order", lambda oid: oid == "A")
-    assert b.cancel_all_resting_orders(reason="test") == 1
+    monkeypatch.setattr(b, "cancel_and_confirm", lambda oid: oid == "A")
+    result = b.cancel_all_resting_orders(reason="test")
+    assert result == {"ok": False, "found": 2, "cleared": 1, "failed": ["B"]}

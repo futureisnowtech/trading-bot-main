@@ -11,7 +11,12 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from config import max_kalshi_contracts_for_budget
+import config
+from config import (
+    estimate_kalshi_fee_per_contract,
+    get_kalshi_position_cap_usd,
+    max_kalshi_contracts_for_budget,
+)
 
 
 @dataclass(frozen=True)
@@ -21,6 +26,7 @@ class TradeIntent:
     bankroll: float
     buying_power_usd: float
     market_snapshot: Any | None = None
+    max_capital_usd: float | None = None
 
 
 @dataclass(frozen=True)
@@ -114,7 +120,90 @@ class KalshiExecutionController:
 
         quote = self._broker.get_quote(ticker) or {}
         ask_price, visible_qty = self._visible_ask_depth(right, quote)
-        affordable_qty = self._max_affordable_qty(ask_price, intent.buying_power_usd)
+        side = str(getattr(result, "side", "YES") or "YES").upper()
+        evaluated_ask = float(
+            getattr(result, "ask_no" if side == "NO" else "ask_yes", 0.0) or 0.0
+        )
+        max_slippage = max(0.0, float(config.KALSHI_MAX_ENTRY_SLIPPAGE))
+        if evaluated_ask > 0.0 and ask_price > evaluated_ask + max_slippage + 1e-9:
+            return ExecutionPlan(
+                intent=intent, ticker=ticker, right=right, side=side,
+                order_type=order_type, limit_price=ask_price,
+                requested_qty=requested_qty, visible_qty=visible_qty,
+                affordable_qty=0, executable_qty=0, quote=quote,
+                status="blocked",
+                reason=(
+                    f"live_slippage_veto ({evaluated_ask:.4f}->{ask_price:.4f} "
+                    f"> {max_slippage:.4f})"
+                ),
+            )
+
+        bid_key, _bid_size_key = self._bid_fields_for_right(right)
+        bid_price = float(quote.get(bid_key) or 0.0)
+        if bid_price <= 0.0 or ask_price - bid_price > float(config.KALSHI_MAX_SPREAD_DOLLARS):
+            return ExecutionPlan(
+                intent=intent, ticker=ticker, right=right, side=side,
+                order_type=order_type, limit_price=ask_price,
+                requested_qty=requested_qty, visible_qty=visible_qty,
+                affordable_qty=0, executable_qty=0, quote=quote,
+                status="blocked", reason="live_quote_coherence_veto",
+            )
+
+        held_probability = max(0.0, min(1.0, float(getattr(result, "confidence", 0.0) or 0.0)))
+        entry_fee = estimate_kalshi_fee_per_contract(ask_price, rounded=True)
+        exit_fee = estimate_kalshi_fee_per_contract(ask_price, rounded=True)
+        live_net_ev = held_probability - ask_price - entry_fee - (0.48 * exit_fee)
+        try:
+            from forecast.strategy_engine import EV_THRESHOLD
+            ev_floor = float(EV_THRESHOLD)
+        except Exception:
+            ev_floor = 0.12
+        if live_net_ev < ev_floor:
+            return ExecutionPlan(
+                intent=intent, ticker=ticker, right=right, side=side,
+                order_type=order_type, limit_price=ask_price,
+                requested_qty=requested_qty, visible_qty=visible_qty,
+                affordable_qty=0, executable_qty=0, quote=quote,
+                status="blocked",
+                reason=f"live_fee_adjusted_ev_veto ({live_net_ev:.4f} < {ev_floor:.4f})",
+            )
+
+        weather_mode = str(getattr(result, "weather_mode", "") or "").upper()
+        yes_ask = float(quote.get("yes_ask") or 0.0)
+        if weather_mode in {"HIGH", "LOW"} and yes_ask > 0.0:
+            if not (
+                float(config.KALSHI_DAILY_ASK_YES_BRACKET_MIN)
+                <= yes_ask
+                <= float(config.KALSHI_DAILY_ASK_YES_BRACKET_MAX)
+            ):
+                return ExecutionPlan(
+                    intent=intent, ticker=ticker, right=right, side=side,
+                    order_type=order_type, limit_price=ask_price,
+                    requested_qty=requested_qty, visible_qty=visible_qty,
+                    affordable_qty=0, executable_qty=0, quote=quote,
+                    status="blocked", reason="live_price_bracket_veto",
+                )
+        if ask_price < float(config.KALSHI_MIN_ENTRY_PRICE):
+            return ExecutionPlan(
+                intent=intent, ticker=ticker, right=right, side=side,
+                order_type=order_type, limit_price=ask_price,
+                requested_qty=requested_qty, visible_qty=visible_qty,
+                affordable_qty=0, executable_qty=0, quote=quote,
+                status="blocked", reason="live_min_entry_price_veto",
+            )
+
+        default_capital_cap = min(
+            get_kalshi_position_cap_usd(held_probability),
+            max(0.0, float(intent.bankroll)) * float(config.KALSHI_KELLY_CAP),
+        )
+        capital_cap = min(
+            max(0.0, float(intent.buying_power_usd)),
+            default_capital_cap,
+            max(0.0, float(intent.max_capital_usd))
+            if intent.max_capital_usd is not None
+            else default_capital_cap,
+        )
+        affordable_qty = self._max_affordable_qty(ask_price, capital_cap)
         executable_qty = min(requested_qty, visible_qty, affordable_qty)
 
         if ask_price <= 0:
@@ -122,7 +211,7 @@ class KalshiExecutionController:
                 intent=intent,
                 ticker=ticker,
                 right=right,
-                side=str(getattr(result, "side", "YES") or "YES"),
+                side=side,
                 order_type=order_type,
                 limit_price=0.0,
                 requested_qty=requested_qty,
@@ -139,7 +228,7 @@ class KalshiExecutionController:
                 intent=intent,
                 ticker=ticker,
                 right=right,
-                side=str(getattr(result, "side", "YES") or "YES"),
+                side=side,
                 order_type=order_type,
                 limit_price=ask_price,
                 requested_qty=requested_qty,
@@ -156,7 +245,7 @@ class KalshiExecutionController:
                 intent=intent,
                 ticker=ticker,
                 right=right,
-                side=str(getattr(result, "side", "YES") or "YES"),
+                side=side,
                 order_type=order_type,
                 limit_price=ask_price,
                 requested_qty=requested_qty,
@@ -172,7 +261,7 @@ class KalshiExecutionController:
             intent=intent,
             ticker=ticker,
             right=right,
-            side=str(getattr(result, "side", "YES") or "YES"),
+            side=side,
             order_type=order_type,
             limit_price=ask_price,
             requested_qty=requested_qty,
@@ -222,6 +311,65 @@ class KalshiExecutionController:
             }
 
         self._respect_local_pacing()
+
+        # Real broker submissions get a second safety check at the last mutable
+        # boundary. Lightweight unit-test brokers intentionally omit the snapshot
+        # interface and exercise only controller math.
+        if hasattr(self._broker, "position_snapshot_status"):
+            if not self._broker.has_fresh_position_snapshot():
+                return {
+                    "order_id": "ERR", "status": "position_snapshot_unavailable",
+                    "qty": 0, "filled_qty": 0,
+                    "execution_reason": str(self._broker.position_snapshot_status()),
+                }
+            try:
+                from forecast.firewall import check_entry_firewall
+
+                allowed, reason = check_entry_firewall(plan.ticker, plan.intent.bankroll)
+                if not allowed:
+                    return {
+                        "order_id": "ERR", "status": "firewall_blocked",
+                        "qty": 0, "filled_qty": 0, "execution_reason": reason,
+                    }
+            except Exception as exc:
+                return {
+                    "order_id": "ERR", "status": "firewall_state_unavailable",
+                    "qty": 0, "filled_qty": 0, "execution_reason": str(exc),
+                }
+
+            try:
+                from runtime.operator_truth import get_release_status
+
+                release = get_release_status()
+                if not bool(release.get("entries_allowed")):
+                    return {
+                        "order_id": "ERR", "status": "release_gate_blocked",
+                        "qty": 0, "filled_qty": 0,
+                        "execution_reason": str(
+                            release.get("current_release_verdict")
+                            or "release_not_promoted"
+                        ),
+                    }
+            except Exception as exc:
+                return {
+                    "order_id": "ERR", "status": "release_gate_unavailable",
+                    "qty": 0, "filled_qty": 0, "execution_reason": str(exc),
+                }
+
+        # The candidate may have waited for evidence persistence, release checks,
+        # or local pacing. Re-fetch depth and economics at the final boundary so
+        # the POST cannot use a stale evaluated ask or stale visible quantity.
+        refreshed_plan = self.plan_entry(plan.intent)
+        if refreshed_plan.status != "ready" or refreshed_plan.executable_qty <= 0:
+            return {
+                "order_id": "ERR",
+                "status": refreshed_plan.status,
+                "qty": 0,
+                "filled_qty": 0,
+                "execution_reason": refreshed_plan.reason or "final_replan_blocked",
+            }
+        plan = refreshed_plan
+
         result = self._broker.place_buy_order(
             contract_dict={
                 "local_symbol": plan.ticker,
@@ -233,7 +381,7 @@ class KalshiExecutionController:
             limit_price=plan.limit_price,
             type=plan.order_type,
             reason=f"{getattr(plan.intent.result, 'strategy_family', 'forecast')}_ev={getattr(plan.intent.result, 'ev', 0.0):.4f}_depth={plan.visible_qty}",
-            strategy=f"forecast_{getattr(plan.intent.result, 'strategy_family', 'weather_ensemble')}",
+            strategy=f"forecast_{getattr(plan.intent.result, 'strategy_family', 'weather_physics')}",
             forecast_yes_prob=forecast_yes_prob,
             model_prob_gfs=model_prob_gfs,
             model_prob_ecmwf=model_prob_ecmwf,
@@ -243,11 +391,8 @@ class KalshiExecutionController:
         self._next_order_at = time.time() + self._min_order_interval_sec
 
         status = str(result.get("status") or "")
-        if status in ("executed", "resting", "pending"):
-            result["qty"] = result.get("qty") or plan.executable_qty
-        else:
-            result["qty"] = result.get("qty") or 0.0
-        
+        result["qty"] = float(result.get("filled_qty") or result.get("qty") or 0.0)
+
         result["requested_qty"] = plan.requested_qty
         result["visible_qty"] = plan.visible_qty
         result["affordable_qty"] = plan.affordable_qty

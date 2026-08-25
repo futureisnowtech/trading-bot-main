@@ -8,9 +8,7 @@ import contextlib
 import io
 import json
 import math
-import os
 import shlex
-import sqlite3
 import subprocess
 import sys
 import time
@@ -24,7 +22,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from config import ACCOUNT_SIZE, DB_PATH, REPO_ROOT
+from config import ACCOUNT_SIZE, DB_PATH
 from execution.kalshi_execution_controller import KalshiExecutionController, TradeIntent
 from forecast.db import get_active_contracts, get_bars, get_open_forecast_positions
 from forecast.market_snapshot import build_market_snapshots
@@ -82,6 +80,7 @@ SERVICE_NAMES = (
     "kalshi-cockpit",
 )
 HOST_SERVICE_ARTIFACT_MAX_AGE_SECONDS = 30 * 60
+REMOTE_AUDIT_TIMEOUT_GRACE_SECONDS = 120
 
 
 def _now_iso() -> str:
@@ -155,6 +154,61 @@ def _git_head_sha() -> str:
         ).strip()
     except Exception:
         return ""
+
+
+def _git_worktree_state() -> dict[str, Any]:
+    """Return auditable source state; an uncommitted tree has no exact SHA."""
+    if not (_ROOT / ".git").exists():
+        return {"available": False, "dirty": False, "paths": [], "error": ""}
+    try:
+        output = subprocess.check_output(
+            [
+                "git",
+                "-C",
+                str(_ROOT),
+                "status",
+                "--porcelain=v1",
+                "--untracked-files=normal",
+            ],
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+    except Exception as exc:
+        return {
+            "available": True,
+            "dirty": True,
+            "paths": [],
+            "error": str(exc),
+        }
+    rows = [line for line in output.splitlines() if line.strip()]
+    return {
+        "available": True,
+        "dirty": bool(rows),
+        "paths": rows[:100],
+        "changed_path_count": len(rows),
+        "error": "",
+    }
+
+
+def _build_identity_findings(
+    build: dict[str, Any],
+    *,
+    strict: bool,
+) -> tuple[list[str], list[str]]:
+    """Classify explicit build-identity contradictions.
+
+    Local source audits may legitimately retain the manifest from the last
+    deployment, but that state must never be called READY_FOR_LIVE. A hosted or
+    promotion audit treats the same contradiction as a hard blocker.
+    """
+    blockers: list[str] = []
+    warnings: list[str] = []
+    destination = blockers if strict else warnings
+    if bool(build.get("metadata_stale")):
+        destination.append("deploy_runtime_metadata_stale")
+    if bool(build.get("build_sha_mismatch")):
+        destination.append("deploy_runtime_build_sha_mismatch")
+    return blockers, warnings
 
 
 def _running_in_container() -> bool:
@@ -460,6 +514,7 @@ def _market_scan_findings(
 
     if sample_size == 0:
         if active_markets <= 0 and scope_active_contracts <= 0:
+            warnings.append("no_active_market_inventory")
             return blockers, warnings
         if scope_active_contracts <= 0:
             warnings.append(f"no_entry_scope_inventory ({entry_scope})")
@@ -587,6 +642,7 @@ def _slim_live_truth(truth: dict[str, Any]) -> dict[str, Any]:
 def _run_local_audit(*, scan_limit: int) -> dict[str, Any]:
     build = get_build_info()
     warnings: list[str] = []
+    worktree = _git_worktree_state()
     commands = [
         _run_command(
             "compileall",
@@ -620,6 +676,16 @@ def _run_local_audit(*, scan_limit: int) -> dict[str, Any]:
         for cmd in commands
         if not bool(cmd.get("ok"))
     ]
+    if worktree.get("available") and worktree.get("dirty"):
+        blockers.append("working_tree_dirty")
+    if worktree.get("error"):
+        blockers.append("working_tree_state_unavailable")
+    identity_blockers, identity_warnings = _build_identity_findings(
+        build,
+        strict=False,
+    )
+    blockers.extend(identity_blockers)
+    warnings.extend(identity_warnings)
 
     health = run_health_check(force=True)
     storage = runtime_storage_status()
@@ -662,6 +728,7 @@ def _run_local_audit(*, scan_limit: int) -> dict[str, Any]:
         "warnings": warnings,
         "details": {
             "build": build,
+            "worktree": worktree,
             "commands": commands,
             "health_check": health,
             "storage": {
@@ -821,6 +888,12 @@ def _run_remote_hosted_audit(
     warnings: list[str] = []
     if not str(build.get("sha") or "").strip():
         blockers.append("deploy_runtime_sha_missing")
+    identity_blockers, identity_warnings = _build_identity_findings(
+        build,
+        strict=True,
+    )
+    blockers.extend(identity_blockers)
+    warnings.extend(identity_warnings)
 
     if not bool(truth.get("broker_connected")):
         blockers.append(str(truth.get("broker_error") or "broker_disconnected"))
@@ -968,12 +1041,40 @@ def _run_remote_audit(*, scan_limit: int, soak_seconds: int) -> dict[str, Any]:
             f"{shlex.quote(container_audit_cmd)}"
         ),
     ]
-    proc = subprocess.run(
-        remote_cmd,
-        cwd=str(_ROOT),
-        capture_output=True,
-        text=True,
+    remote_timeout_seconds = max(
+        60,
+        int(soak_seconds) + REMOTE_AUDIT_TIMEOUT_GRACE_SECONDS,
     )
+    try:
+        proc = subprocess.run(
+            remote_cmd,
+            cwd=str(_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=remote_timeout_seconds,
+        )
+    except subprocess.TimeoutExpired as exc:
+        stdout = exc.stdout.decode("utf-8", errors="replace") if isinstance(exc.stdout, bytes) else str(exc.stdout or "")
+        stderr = exc.stderr.decode("utf-8", errors="replace") if isinstance(exc.stderr, bytes) else str(exc.stderr or "")
+        return {
+            "mode": "remote",
+            "as_of": _now_iso(),
+            "audited_sha": local_sha,
+            "verdict": VERDICT_BLOCKED,
+            "entries_allowed": False,
+            "last_successful_audit_at": "",
+            "blockers": [
+                f"remote_release_audit_timeout ({remote_timeout_seconds}s)"
+            ],
+            "warnings": [],
+            "details": {
+                "ssh_command": " ".join(shlex.quote(token) for token in remote_cmd),
+                "timeout_seconds": remote_timeout_seconds,
+                "stdout_tail": stdout.splitlines()[-20:],
+                "stderr_tail": stderr.splitlines()[-20:],
+                "remote_payload": {},
+            },
+        }
     raw_output = (proc.stdout or "").strip()
     blockers: list[str] = []
     warnings: list[str] = []
@@ -989,6 +1090,8 @@ def _run_remote_audit(*, scan_limit: int, soak_seconds: int) -> dict[str, Any]:
             warnings.append(stderr_tail.splitlines()[-1])
         elif raw_output:
             warnings.append(raw_output.splitlines()[-1][:240])
+    elif proc.returncode != 0:
+        blockers.append(f"remote_release_audit_nonzero ({proc.returncode})")
 
     remote_sha = str(remote_payload.get("audited_sha") or "").strip()
     if local_sha and remote_sha and local_sha != remote_sha:
@@ -998,6 +1101,8 @@ def _run_remote_audit(*, scan_limit: int, soak_seconds: int) -> dict[str, Any]:
         blockers.extend(str(item) for item in (remote_payload.get("blockers") or []))
     elif remote_payload:
         warnings.extend(str(item) for item in (remote_payload.get("warnings") or []))
+    if "entries_allowed" in remote_payload and not bool(remote_payload.get("entries_allowed")):
+        blockers.append("remote_release_entries_disallowed")
 
     verdict = _summarize_verdict(blockers, warnings)
     payload = {

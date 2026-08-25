@@ -279,9 +279,24 @@ def test_lane_economics_forecast_uses_live_fee_model():
     econ = get_lane_economics("forecast")
     assert econ.lane_id == "forecast"
     assert econ.taker_fee_pct == 0.07
-    assert econ.maker_fee_pct == 0.0175
+    assert not hasattr(econ, "maker_fee_pct")
     assert round(econ.min_viable_edge_pct, 4) == 0.035
     assert is_trade_viable("forecast", 0.0) is False
+
+
+def test_dynamic_parameter_shield_only_accepts_live_consumers():
+    from dashboard.jarvis_brain import JarvisSafetyCompilerShield
+
+    assert JarvisSafetyCompilerShield.audit_parameter("KELLY_FRACTION", "0.20")[0]
+    assert JarvisSafetyCompilerShield.audit_parameter(
+        "MIDWEST.hard_rbi_threshold", "0.60"
+    )[0]
+    assert not JarvisSafetyCompilerShield.audit_parameter(
+        "KALSHI_MAKER_ENTRY_TIMEOUT", "5"
+    )[0]
+    assert not JarvisSafetyCompilerShield.audit_parameter(
+        "MIDWEST.hard_rbi_threshold", "0.99"
+    )[0]
 
 
 def test_execution_engine_uses_long_lived_daemon():
@@ -555,6 +570,9 @@ def test_execution_cycle_stamps_lane_heartbeat_before_the_entry_gate(
 
         def get_account_balance(self):
             return 250.0
+
+        def get_settlements(self, **_kwargs):
+            return []
 
     seen: dict[str, object] = {}
 

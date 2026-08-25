@@ -64,13 +64,13 @@ def _is_weather_market(ticker: str, title: str, category: str = "") -> bool:
     """
     if not title or not ticker:
         return False
-    
+
     t_lower = f"{ticker} {title}".lower()
     c_lower = category.lower() if category else ""
 
     # v19.1.KALSHI: Pure weather focus.
     weather_keywords = ["temp", "temperature", "rain", "precip", "precipitation", "weather", "degree", "hurricane", "storm", "snow", "landfall", "cat 5", "category 5"]
-    
+
     if "weather" in c_lower or any(kw in t_lower for kw in weather_keywords):
         return True
 
@@ -93,6 +93,9 @@ class KalshiBroker:
         self._connected = False
         self._open_positions: dict[str, dict] = {}  # key = f"{ticker}_{right}"
         self._private_key = None
+        self._positions_synced_at_monotonic: float | None = None
+        self._positions_authoritative = False
+        self._position_sync_error = "not_synced"
 
     @property
     def _paper_balance_path(self) -> str:
@@ -105,7 +108,7 @@ class KalshiBroker:
         if not quiet:
             print("[KalshiBroker] Connected (SHADOW-ONLY FALLBACK) ✅")
         log_event("INFO", "KalshiBroker", "Connected (SHADOW-ONLY FALLBACK)")
-        
+
         balance_dir = os.path.join(REPO_ROOT, "logs")
         os.makedirs(balance_dir, exist_ok=True)
         balance_path = self._paper_balance_path
@@ -127,16 +130,24 @@ class KalshiBroker:
                     self._paper_balance = float(data.get("balance", ACCOUNT_SIZE))
             except Exception:
                 pass
-        
+
         # Load paper positions from SQLite table forecast_positions_paper
         self._restore_shadow_positions()
-        
-        if sync_positions:
-            self._sync_positions()
+        self._positions_synced_at_monotonic = time.monotonic()
+        self._positions_authoritative = True
+        self._position_sync_error = ""
         return True
-        
+
     def connect(self, *, sync_positions: bool = True, quiet: bool = False) -> bool:
         """Verify credentials and load private key for signing."""
+        if config.SHADOW_EXECUTION:
+            # A dry run must never authenticate against or read from the live
+            # account before falling back to its isolated shadow book.
+            return self._init_shadow_balance(
+                sync_positions=sync_positions,
+                quiet=quiet,
+            )
+
         private_key_path = resolve_runtime_path(
             KALSHI_PRIVATE_KEY_PATH,
             "/run/secrets/kalshi_private_key.pem",
@@ -162,24 +173,28 @@ class KalshiBroker:
         try:
             with open(private_key_path, 'r') as f:
                 key_pem = f.read()
-            
+
             self._private_key = serialization.load_pem_private_key(
                 key_pem.encode(),
                 password=None
             )
-            
+
             # Verify connection by getting balance
             resp = self._request("GET", "/trade-api/v2/portfolio/balance")
             if "error" in resp:
                 raise RuntimeError(f"Auth verification failed: {resp['error']}")
-                
+
             self._connected = True
             if not quiet:
                 print(f"[KalshiBroker] Connected (LIVE) ✅ | Balance: ${float(resp.get('balance_dollars', 0)):.2f}")
             log_event("INFO", "KalshiBroker", "Connected (LIVE)")
-            
+
             if sync_positions:
-                self._sync_positions()
+                if not self._sync_positions():
+                    raise RuntimeError(
+                        "Initial position snapshot was not authoritative: "
+                        f"{self._position_sync_error or 'unknown_error'}"
+                    )
         except Exception as e:
             if config.SHADOW_EXECUTION:
                 return self._init_shadow_balance(sync_positions=sync_positions, quiet=quiet)
@@ -190,8 +205,6 @@ class KalshiBroker:
                 self._connected = False
                 return False
 
-        if config.SHADOW_EXECUTION:
-            return self._init_shadow_balance(sync_positions=sync_positions, quiet=quiet)
         return True
 
 
@@ -199,9 +212,36 @@ class KalshiBroker:
         return self._connected and (self._private_key is not None or config.SHADOW_EXECUTION)
 
 
-    def sync_positions(self) -> None:
-        """Refresh local position cache from broker reality."""
-        self._sync_positions()
+    def sync_positions(self) -> bool:
+        """Refresh local position cache; True means the snapshot is authoritative."""
+        return self._sync_positions()
+
+    def position_snapshot_status(self, *, max_age_sec: float | None = None) -> dict:
+        """Expose whether risk controls may safely rely on the cached positions."""
+        age = None
+        if self._positions_synced_at_monotonic is not None:
+            age = max(0.0, time.monotonic() - self._positions_synced_at_monotonic)
+        limit = float(
+            max_age_sec
+            if max_age_sec is not None
+            else getattr(config, "KALSHI_POSITION_SNAPSHOT_MAX_AGE_SEC", 60.0)
+        )
+        fresh = bool(
+            self._positions_authoritative
+            and age is not None
+            and age <= max(1.0, limit)
+        )
+        return {
+            "authoritative": bool(self._positions_authoritative),
+            "fresh": fresh,
+            "age_sec": age,
+            "max_age_sec": limit,
+            "error": self._position_sync_error,
+            "position_count": len(self._open_positions),
+        }
+
+    def has_fresh_position_snapshot(self, *, max_age_sec: float | None = None) -> bool:
+        return bool(self.position_snapshot_status(max_age_sec=max_age_sec)["fresh"])
 
     def _load_latest_entry_context(self, ticker: str, side: str) -> dict:
         """Recover weather entry metadata so exits remain learnable after restarts."""
@@ -236,7 +276,7 @@ class KalshiBroker:
                     """,
                     (ticker, side.upper()),
                 ).fetchone()
-                
+
                 if not row:
                     pos_row = conn.execute(
                         """
@@ -391,19 +431,9 @@ class KalshiBroker:
                 return float(avg_fee) * fill_count
             except (TypeError, ValueError):
                 pass
-        # Fallback estimate. Two corrections over the naive version, because the
-        # exchange does not always return a fee and this number lands in the
-        # ledger as if it were truth:
-        #   * round_up_cents: Kalshi ceilings the fee to the cent on the ORDER
-        #     total. At 1-4 contracts that roughly doubles the real cost, so the
-        #     unrounded estimate understated live fees by up to 78%.
-        #   * maker: a resting fill pays ~25% of the taker rate. Assuming taker
-        #     on every fill books a maker saving as if it never happened, which
-        #     hides the exact effect the maker work exists to produce.
-        # Maker-ness is not a field on Kalshi's order object -- its `type` is
-        # "limit"/"market" with no "maker" value, so keying on order_type left
-        # this permanently False and booked taker rates on maker fills. The
-        # exchange reports it as which cost bucket actually filled.
+        # Fallback estimate for historical/external fills. Production entries
+        # are taker-only, but the exchange can still report either fee bucket
+        # for older orders, so infer the bucket from its authoritative costs.
         def _cost(key: str) -> float:
             try:
                 return float(order_info.get(key) or 0.0)
@@ -470,7 +500,6 @@ class KalshiBroker:
         limit_price: float,
         action: str,
         reduce_only: bool = False,
-        post_only: bool = False,
     ) -> dict:
         yes_leg_price = self._yes_leg_price(right, limit_price)
         return {
@@ -479,14 +508,9 @@ class KalshiBroker:
             "side": self._event_order_side(right=right, action=action),
             "count": f"{max(0, int(qty)):.2f}",
             "price": f"{yes_leg_price:.4f}",
-            # A post-only order must rest to earn the maker rate; IOC would cancel it
-            # instantly, so the time-in-force has to flip with post_only.
-            # Kalshi spells this the American way with one L. "good_till_cancelled"
-            # is rejected as invalid_parameters, which silently forced every maker
-            # entry to fall through and cross as a taker.
-            "time_in_force": "good_till_canceled" if post_only else "immediate_or_cancel",
+            "time_in_force": "immediate_or_cancel",
             "self_trade_prevention_type": "taker_at_cross",
-            "post_only": bool(post_only),
+            "post_only": False,
             "cancel_order_on_pause": False,
             "reduce_only": bool(reduce_only),
             "subaccount": 0,
@@ -503,15 +527,23 @@ class KalshiBroker:
         fill_qty = self._extract_fill_count(order_info)
         remaining_qty = self._extract_remaining_count(order_info, requested_qty)
         status = str(order_info.get("status") or "").strip().lower()
-        if status:
-            return order_info, status
-        if fill_qty > 0 and remaining_qty <= 0:
+        # Every production order is IOC. Kalshi's V2 create response is a flat
+        # object with fill_count/remaining_count and may have no status; an IOC
+        # can also be reported as canceled after a partial fill. Any positive
+        # fill is therefore an executed fill, never a resting order.
+        if fill_qty > 0:
             return order_info, "executed"
-        if fill_qty > 0 and remaining_qty > 0:
-            return order_info, "resting"
+        if status in {"executed", "filled"}:
+            # The compact create response can omit fill details; hydrate before
+            # deciding whether the apparent execution actually filled.
+            return order_info, "executed"
+        if status in {"resting", "pending", "open"}:
+            return order_info, "unexpected_resting"
+        if status in {"canceled", "cancelled", "expired", "rejected"}:
+            return order_info, "no_fill"
         if remaining_qty > 0:
-            return order_info, "pending"
-        return order_info, "pending"
+            return order_info, "no_fill"
+        return order_info, "no_fill"
 
     def cancel_order(self, order_id: str) -> bool:
         """Cancel a resting order. Returns True if the exchange accepted the cancel.
@@ -520,8 +552,8 @@ class KalshiBroker:
         Orders are placed on /portfolio/events/orders (v2); the bare
         /portfolio/orders/{id} cancel is the v1 endpoint and now answers
         HTTP 410 deprecated_v1_order_endpoint. Verified live 2026-08-18: the
-        old path left a post-only order resting on the book after a "successful"
-        cancel returned False, which is exactly how a maker attempt orphans.
+        old path left a historical resting order on the book after a
+        "successful" cancel returned False.
         """
         oid = str(order_id or "").strip()
         if not oid:
@@ -538,58 +570,88 @@ class KalshiBroker:
             return False
 
     def list_resting_orders(self) -> list[dict]:
-        """Every order still live on the exchange book."""
-        try:
-            resp = self._request(
-                "GET", "/trade-api/v2/portfolio/orders", params={"status": "resting"}
-            )
-            orders = resp.get("orders")
-            return list(orders) if isinstance(orders, list) else []
-        except Exception as exc:
-            logger.warning("Could not list resting orders: %s", exc)
-            return []
+        """Every order still live on the exchange book; uncertainty is an error."""
+        resp = self._request(
+            "GET", "/trade-api/v2/portfolio/orders", params={"status": "resting"}
+        )
+        code = self._extract_error_code(resp)
+        if code:
+            raise RuntimeError(f"resting_order_snapshot_failed:{code}")
+        orders = resp.get("orders")
+        if not isinstance(orders, list):
+            raise RuntimeError("resting_order_snapshot_missing_orders")
+        return list(orders)
 
-    def cancel_all_resting_orders(self, *, reason: str = "startup") -> int:
-        """Cancel every resting order and return how many were cleared.
+    def cancel_and_confirm(self, order_id: str) -> bool:
+        """Cancel an order and prove it is no longer resting before continuing."""
+        oid = str(order_id or "").strip()
+        if not oid or not self.cancel_order(oid):
+            return False
+        for _attempt in range(3):
+            try:
+                resting_ids = {
+                    str(row.get("order_id") or "").strip()
+                    for row in self.list_resting_orders()
+                }
+                if oid not in resting_ids:
+                    return True
+            except Exception as exc:
+                logger.warning("Cancellation confirmation failed for %s: %s", oid, exc)
+            time.sleep(0.25)
+        logger.error("Order %s could not be proven cancelled.", oid)
+        return False
 
-        A post-only entry rests on the exchange for up to MAKER_ENTRY_TIMEOUT_S.
-        If the process dies inside that window -- a deploy recreates the
-        container, an OOM, a crash -- the order stays live with nothing tracking
-        it, and can fill hours later into a position the bot does not know it
-        holds. Nothing in this codebase reconciled that, so this is called on
-        startup before any strategy work begins.
+    def cancel_all_resting_orders(self, *, reason: str = "startup") -> dict:
+        """Cancel every resting order and return an authoritative sweep result.
+
+        Production never intentionally rests an entry. This sweep protects
+        against historical, external, or exchange-anomalous orders before any
+        strategy work begins.
         """
-        resting = self.list_resting_orders()
+        try:
+            resting = self.list_resting_orders()
+        except Exception as exc:
+            logger.error("[OrphanSweep] Could not inspect resting orders: %s", exc)
+            return {"ok": False, "found": 0, "cleared": 0, "failed": [], "error": str(exc)}
         if not resting:
             logger.info("[OrphanSweep] No resting orders at %s.", reason)
-            return 0
+            return {"ok": True, "found": 0, "cleared": 0, "failed": []}
         cleared = 0
+        failed: list[str] = []
         for order in resting:
             oid = str(order.get("order_id") or "").strip()
             if not oid:
                 continue
             ticker = order.get("ticker") or "?"
-            if self.cancel_order(oid):
+            if self.cancel_and_confirm(oid):
                 cleared += 1
                 logger.warning(
                     "[OrphanSweep] Cancelled stray resting order %s on %s (%s).",
                     oid, ticker, reason,
                 )
             else:
+                failed.append(oid)
                 logger.error(
                     "[OrphanSweep] FAILED to cancel resting order %s on %s -- "
                     "manual intervention required.", oid, ticker,
                 )
-        return cleared
+        return {
+            "ok": not failed,
+            "found": len(resting),
+            "cleared": cleared,
+            "failed": failed,
+        }
 
     def _order_filled_qty(self, order_id: str) -> float:
         """Contracts filled so far on a resting order."""
-        try:
-            details = self._request("GET", f"/trade-api/v2/portfolio/orders/{order_id}")
-            order = details.get("order") or {}
-            return self._extract_fill_count(order)
-        except Exception:
-            return 0.0
+        details = self._request("GET", f"/trade-api/v2/portfolio/orders/{order_id}")
+        code = self._extract_error_code(details)
+        if code:
+            raise RuntimeError(f"order_status_failed:{code}")
+        order = details.get("order")
+        if not isinstance(order, dict):
+            raise RuntimeError("order_status_missing_order")
+        return self._extract_fill_count(order)
 
     def _hydrate_order_details(self, order_info: dict) -> dict:
         order_id = str(order_info.get("order_id") or "").strip()
@@ -720,14 +782,26 @@ class KalshiBroker:
         order_id = order_info.get("order_id", "ERR")
         key = f"{ticker}_{right}"
         side = "YES" if right == "C" else "NO"
+        held_fill_price = fill_price if side == "YES" else (1.0 - fill_price)
         existing = self._open_positions.get(key, {})
         prior_qty = float(existing.get("qty") or 0.0)
         prior_entry = float(existing.get("entry_price") or existing.get("entry") or 0.0)
+        prior_held_entry = float(
+            existing.get("held_side_entry_price")
+            or (prior_entry if side == "YES" else 1.0 - prior_entry)
+        )
         blended_entry = fill_price
         if prior_qty > 0 and fill_price > 0:
             blended_entry = ((prior_qty * prior_entry) + (fill_qty * fill_price)) / (prior_qty + fill_qty)
         total_qty = prior_qty + fill_qty
-        remaining_order_qty = self._extract_remaining_count(order_info, requested_qty)
+        blended_held_entry = held_fill_price
+        if prior_qty > 0 and held_fill_price > 0:
+            blended_held_entry = (
+                (prior_qty * prior_held_entry) + (fill_qty * held_fill_price)
+            ) / total_qty
+        # Production entries are IOC, so the venue cancels every unfilled
+        # remainder; it must never be represented as a locally resting order.
+        remaining_order_qty = 0.0
 
         self._open_positions[key] = {
             "qty": total_qty,
@@ -736,6 +810,9 @@ class KalshiBroker:
             "right": right,
             "entry": blended_entry,
             "entry_price": blended_entry,
+            "yes_leg_entry_price": blended_entry,
+            "held_side_entry_price": blended_held_entry,
+            "market_exposure_usd": total_qty * blended_held_entry,
             "forecast_yes_prob": context.get("forecast_yes_prob"),
             "model_prob_gfs": context.get("model_prob_gfs"),
             "model_prob_ecmwf": context.get("model_prob_ecmwf"),
@@ -773,6 +850,8 @@ class KalshiBroker:
             "order_id": order_id,
             "status": status,
             "price": fill_price,
+            "yes_leg_price": fill_price,
+            "held_side_price": held_fill_price,
             "qty": int(round(fill_qty)),
             "filled_qty": fill_qty,
             "remaining_order_qty": remaining_order_qty,
@@ -799,7 +878,7 @@ class KalshiBroker:
 
     def _request_once(self, method: str, path: str, params: dict = None, body: dict = None) -> dict:
         """Execute signed Kalshi V2 request."""
-        
+
         if config.SHADOW_EXECUTION and method.upper() == "POST" and "orders" in path:
             raise RuntimeError("Mutating request blocked by shadow mode firewall")
 
@@ -807,7 +886,7 @@ class KalshiBroker:
             ts = str(int(time.time() * 1000))
             method_upper = method.upper()
             msg = f"{ts}{method_upper}{path}"
-            
+
             signature = self._private_key.sign(
                 msg.encode(),
                 padding.PSS(
@@ -817,16 +896,16 @@ class KalshiBroker:
                 hashes.SHA256()
             )
             sig_b64 = base64.b64encode(signature).decode()
-            
+
             headers = {
                 "KALSHI-ACCESS-KEY": KALSHI_API_KEY_ID,
                 "KALSHI-ACCESS-SIGNATURE": sig_b64,
                 "KALSHI-ACCESS-TIMESTAMP": ts,
                 "Content-Type": "application/json"
             }
-            
+
             body_str = json.dumps(body, separators=(',', ':')) if body else ""
-            
+
             url = f"{KALSHI_API_BASE}{path}"
             if method == "GET":
                 resp = requests.get(url, headers=headers, params=params, timeout=10)
@@ -836,7 +915,7 @@ class KalshiBroker:
                 resp = requests.delete(url, headers=headers, timeout=10)
             else:
                 return {"error": "unsupported_method"}
-            
+
             payload = None
             try:
                 payload = resp.json()
@@ -897,14 +976,19 @@ class KalshiBroker:
         """
         self._open_positions.clear()
 
-    def _sync_positions(self) -> None:
-        """Sync open positions from Kalshi into local state."""
+    def _sync_positions(self) -> bool:
+        """Sync positions atomically; never turn an API failure into a flat book."""
         if config.SHADOW_EXECUTION:
             self._restore_shadow_positions()
-            return
+            self._positions_synced_at_monotonic = time.monotonic()
+            self._positions_authoritative = True
+            self._position_sync_error = ""
+            return True
 
         if not self.is_connected():
-            return
+            self._positions_authoritative = False
+            self._position_sync_error = "broker_not_connected"
+            return False
         try:
             data = self._request("GET", "/trade-api/v2/portfolio/positions")
             # Parse before clearing. Clearing first meant one 429 or read timeout
@@ -912,42 +996,66 @@ class KalshiBroker:
             # gate and duplicate guard all read, so a transient API failure looked
             # exactly like a flat book.
             if self._extract_error_code(data):
+                self._positions_authoritative = False
+                self._position_sync_error = self._extract_error_code(data)
                 logger.error(
                     "[KalshiBroker] Position sync failed, keeping previous snapshot: %s",
                     (data or {}).get("error"),
                 )
-                return
+                return False
             positions = (data or {}).get("market_positions")
             if positions is None:
+                self._positions_authoritative = False
+                self._position_sync_error = "missing_market_positions"
                 logger.error(
                     "[KalshiBroker] Position sync returned no market_positions; "
                     "keeping previous snapshot."
                 )
-                return
+                return False
 
-            self._open_positions.clear()
+            next_positions: dict[str, dict] = {}
             for p in positions:
                 qty_str = p.get("position_fp", "0")
                 qty = float(qty_str)
-                if qty == 0: continue
-                
+                if qty == 0:
+                    continue
+
                 ticker = p.get("ticker")
                 side = "YES" if qty > 0 else "NO"
                 right = "C" if side == "YES" else "P"
                 abs_qty = abs(qty)
-                total_traded = float(p.get("total_traded_dollars") or 0.0)
+                market_exposure_usd = abs(float(p.get("market_exposure_dollars") or 0.0))
                 entry_context = self._load_latest_entry_context(ticker, side)
-                entry_price = float(entry_context.get("entry_price") or 0.0)
-                if entry_price <= 0.0:
-                    entry_price = (total_traded / abs_qty) if abs_qty > 0 and total_traded > 0 else 0.0
+                held_side_entry_price = (
+                    market_exposure_usd / abs_qty
+                    if abs_qty > 0 and market_exposure_usd > 0
+                    else 0.0
+                )
+                if held_side_entry_price > 0.0:
+                    # Broker exposure is the authoritative held-side basis for
+                    # the current remaining position. Local fills are retained
+                    # only for forecast context, never allowed to override it.
+                    entry_price = (
+                        held_side_entry_price
+                        if side == "YES"
+                        else 1.0 - held_side_entry_price
+                    )
+                else:
+                    entry_price = float(entry_context.get("entry_price") or 0.0)
+                    held_side_entry_price = (
+                        entry_price if side == "YES" else 1.0 - entry_price
+                    )
 
                 key = f"{ticker}_{right}"
-                self._open_positions[key] = {
+                next_positions[key] = {
                     "local_symbol": ticker,
                     "right": right,
                     "qty": abs_qty,
                     "entry": entry_price,
                     "entry_price": entry_price,
+                    "yes_leg_entry_price": entry_price,
+                    "held_side_entry_price": held_side_entry_price,
+                    "market_exposure_usd": market_exposure_usd,
                     "side": side,
                     "forecast_yes_prob": entry_context.get("forecast_yes_prob"),
                     "model_prob_gfs": entry_context.get("model_prob_gfs"),
@@ -958,8 +1066,16 @@ class KalshiBroker:
                     "entered_at": entry_context.get("entered_at")
                     or datetime.now(timezone.utc).isoformat(),
                 }
+            self._open_positions = next_positions
+            self._positions_synced_at_monotonic = time.monotonic()
+            self._positions_authoritative = True
+            self._position_sync_error = ""
+            return True
         except Exception as e:
+            self._positions_authoritative = False
+            self._position_sync_error = str(e)
             log_event("WARN", "KalshiBroker", f"Position sync error: {e}")
+            return False
 
     def discover_markets(self) -> list[dict]:
         """Discover active Kalshi weather contracts."""
@@ -1182,11 +1298,11 @@ class KalshiBroker:
                 "spread": None,
                 "ts": datetime.now(timezone.utc).isoformat(),
             }
-        
+
         try:
             data = self._request("GET", f"/trade-api/v2/markets/{ticker}/orderbook")
             book = data.get("orderbook_fp", {})
-            
+
             yes_levels = book.get("yes_dollars", [])
             no_levels = book.get("no_dollars", [])
 
@@ -1203,7 +1319,7 @@ class KalshiBroker:
 
             no_bid = _level_num(no_levels, 0)
             no_bid_vol = _level_num(no_levels, 1, 0.0) or 0.0
-            
+
             yes_ask = round(1.0 - no_bid, 4) if no_bid is not None else None
             yes_ask_vol = no_bid_vol
             no_ask = round(1.0 - yes_bid, 4) if yes_bid is not None else None
@@ -1254,7 +1370,7 @@ class KalshiBroker:
     def get_historical_candles(self, ticker: str, interval_min: int = 1, limit: int = 100) -> list[dict]:
         if not self.is_connected():
             return []
-        
+
         if interval_min not in [1, 60, 1440]:
             interval_min = 1
 
@@ -1268,29 +1384,29 @@ class KalshiBroker:
             "start_ts": start_ts,
             "end_ts": now_ts
         }
-        
+
         data = self._request("GET", "/trade-api/v2/markets/candlesticks", params=params)
-        
+
         if "error" in data:
             return []
 
         markets = data.get("markets", [])
         if not markets:
             return []
-        
+
         candles = markets[0].get("candlesticks", [])
         results = []
         for c in candles:
             try:
                 bid_o = float(c.get("yes_bid", {}).get("open_dollars") or 0)
                 ask_o = float(c.get("yes_ask", {}).get("open_dollars") or 1.0)
-                
+
                 bid_h = float(c.get("yes_bid", {}).get("high_dollars") or 0)
                 ask_h = float(c.get("yes_ask", {}).get("high_dollars") or 1.0)
-                
+
                 bid_l = float(c.get("yes_bid", {}).get("low_dollars") or 0)
                 ask_l = float(c.get("yes_ask", {}).get("low_dollars") or 1.0)
-                
+
                 bid_c = float(c.get("yes_bid", {}).get("close_dollars") or 0)
                 ask_c = float(c.get("yes_ask", {}).get("close_dollars") or 1.0)
 
@@ -1304,170 +1420,12 @@ class KalshiBroker:
                 })
             except (ValueError, TypeError):
                 continue
-        
+
         results.sort(key=lambda x: x["ts_open"])
         return results
 
     def get_quotes_batch(self, contracts: list[dict]) -> list[dict]:
         return [self.get_quote(c["local_symbol"]) for c in contracts]
-
-    def _try_maker_entry(
-        self,
-        *,
-        contract_dict: dict,
-        ticker: str,
-        right: str,
-        side: str,
-        qty: int,
-        taker_limit_price: float,
-        kwargs: dict,
-    ) -> dict | None:
-        """Rest a post-only buy at the bid; return a fill result, or None to cross.
-
-        Returning None means "fall through to the normal taker path" — that is the
-        safe default for every failure mode here (no quote, no bid, bid above our
-        limit, rejected post-only, timeout with zero fill). A partial fill is
-        returned as-is rather than topping up as taker: the remainder gets another
-        chance on the next cycle, and chasing it would spend the fee saving we came
-        for.
-        """
-        timeout_s = max(0, int(getattr(config, "MAKER_ENTRY_TIMEOUT_S", 90)))
-
-        try:
-            quote = self.get_quote(ticker) or {}
-        except Exception as exc:
-            logger.warning("[Maker] Quote failed for %s: %s", ticker, exc)
-            return None
-
-        raw_bid = quote.get("yes_bid") if side == "yes" else quote.get("no_bid")
-        try:
-            bid = float(raw_bid or 0.0)
-        except (TypeError, ValueError):
-            bid = 0.0
-        if bid <= 0.0:
-            logger.info("[Maker] No bid on %s; crossing instead.", ticker)
-            return None
-
-        # Never pay more than the taker path would have. If the bid is already at or
-        # above our limit there is no saving available, so just cross.
-        if bid >= float(taker_limit_price):
-            logger.info(
-                "[Maker] Bid %.4f >= limit %.4f on %s; crossing instead.",
-                bid, float(taker_limit_price), ticker,
-            )
-            return None
-
-        body = self._build_event_order_body(
-            ticker=ticker,
-            right=right,
-            qty=qty,
-            limit_price=bid,
-            action="buy",
-            reduce_only=False,
-            post_only=True,
-        )
-        resp = self._request("POST", "/trade-api/v2/portfolio/events/orders", body=body)
-        error_code = self._extract_error_code(resp)
-        if error_code:
-            # Most often the book moved and post_only would have crossed.
-            logger.info("[Maker] Post-only rejected on %s (%s); crossing.", ticker, error_code)
-            return None
-
-        order_info, _status = self._normalize_order_response(resp, requested_qty=qty)
-        order_id = str(order_info.get("order_id") or "").strip()
-        if not order_id:
-            return None
-
-        logger.info(
-            "[Maker] Resting %s x%d @ %.4f (taker would be %.4f), waiting %ds",
-            ticker, qty, bid, float(taker_limit_price), timeout_s,
-        )
-
-        filled = 0.0
-        rested_at = time.time()
-        first_fill_at: float | None = None
-        deadline = rested_at + timeout_s
-        try:
-            while time.time() < deadline:
-                time.sleep(min(5.0, max(1.0, timeout_s / 10.0)))
-                filled = self._order_filled_qty(order_id)
-                if filled > 0.0 and first_fill_at is None:
-                    first_fill_at = time.time()
-                if filled >= qty:
-                    break
-        except Exception:
-            # Never leave the book holding an order we stopped watching.
-            self.cancel_order(order_id)
-            logger.exception("[Maker] Error while waiting on %s; cancelled and crossing.", ticker)
-            return None
-
-        waited = time.time() - rested_at
-        # MAKER_FILL telemetry: one structured line per attempt, filled or not.
-        # This is the only source of ground truth on how long a resting order
-        # actually takes to fill -- the timeout cannot be chosen without it, and
-        # zeta (our predicted fill probability) has never been validated at all.
-        # Unfilled attempts are logged too so the distribution is not
-        # right-censored into uselessness.
-        logger.info(
-            "[MakerFill] ticker=%s qty=%d rest_price=%.4f taker_price=%.4f "
-            "filled=%.2f waited_s=%.1f time_to_first_fill_s=%s timeout_s=%d outcome=%s",
-            ticker, qty, bid, float(taker_limit_price), filled, waited,
-            f"{first_fill_at - rested_at:.1f}" if first_fill_at else "none",
-            timeout_s,
-            "full" if filled >= qty else ("partial" if filled > 0 else "none"),
-        )
-
-        if filled <= 0.0:
-            self.cancel_order(order_id)
-            logger.info("[Maker] No fill on %s within %ds; crossing.", ticker, timeout_s)
-            return None
-
-        # Partial or full: stop here and keep the maker rate on what we got.
-        if filled < qty:
-            self.cancel_order(order_id)
-            logger.info("[Maker] Partial fill %.0f/%d on %s; keeping maker fill.", filled, qty, ticker)
-
-        # Risk gates were evaluated before this order was placed, but we have
-        # been resting for up to timeout_s since. The daily kill switch can trip
-        # inside that window, and accepting the fill would open a position the
-        # firewall has already forbidden. Re-check before we book it.
-        try:
-            from forecast.firewall import is_entries_allowed_today
-
-            allowed, halt_reason = is_entries_allowed_today()
-            if not allowed:
-                logger.critical(
-                    "[Maker] Entries were halted (%s) while %s rested; "
-                    "keeping the %.2f already filled but placing nothing further.",
-                    halt_reason, ticker, filled,
-                )
-        except Exception:
-            logger.exception("[Maker] Post-rest firewall re-check failed for %s", ticker)
-
-        context = {
-            "forecast_yes_prob": kwargs.get("forecast_yes_prob"),
-            "model_prob_gfs": kwargs.get("model_prob_gfs"),
-            "model_prob_ecmwf": kwargs.get("model_prob_ecmwf"),
-            "weather_mode": kwargs.get("weather_mode"),
-            "forecast_hours_to_resolution": kwargs.get("forecast_hours_to_resolution"),
-            "last_trade_at": contract_dict.get("last_trade_at", ""),
-            "reason": kwargs.get("reason", ""),
-            "strategy": kwargs.get("strategy", "forecast_weather"),
-        }
-        result = self._apply_entry_fill(
-            ticker=ticker,
-            right=right,
-            requested_qty=qty,
-            order_info=self._hydrate_order_details(order_info),
-            order_type="Maker",
-            status="executed",
-            context=context,
-        )
-        print(
-            f"[KalshiBroker] MAKER BUY {result.get('filled_qty')} {ticker} ({side.upper()}) "
-            f"@ {float(result.get('price') or 0.0):.4f} | saved vs ask {float(taker_limit_price) - bid:.4f}/contract"
-        )
-        return result
 
     def place_buy_order(self, contract_dict: dict, qty: int, limit_price: float, **kwargs) -> dict:
         if config.SHADOW_EXECUTION:
@@ -1480,25 +1438,6 @@ class KalshiBroker:
         right = str(contract_dict.get("right") or "C").upper()
         side = "yes" if right == "C" else "no"
         order_type = kwargs.get("type", "limit").lower()
-
-        # Maker-first entry: rest at the bid to earn the maker fee rate (~4x cheaper
-        # than taker) and save the spread. If it does not fill inside the timeout we
-        # cancel and cross, so a thin book degrades to today's taker behavior rather
-        # than silently halting entries. Fees are the live lane's binding constraint:
-        # they consume more than the gross edge the strategy captures.
-        maker_enabled = config.get_dynamic_bool("MAKER_ENTRY_ENABLED", config.MAKER_ENTRY_ENABLED)
-        if maker_enabled and order_type == "limit":
-            maker_result = self._try_maker_entry(
-                contract_dict=contract_dict,
-                ticker=ticker,
-                right=right,
-                side=side,
-                qty=qty,
-                taker_limit_price=limit_price,
-                kwargs=kwargs,
-            )
-            if maker_result is not None:
-                return maker_result
 
         body = self._build_event_order_body(
             ticker=ticker,
@@ -1527,7 +1466,17 @@ class KalshiBroker:
             "strategy": kwargs.get("strategy", "forecast_weather"),
         }
 
-        if status in ["executed", "resting", "pending"]:
+        if status == "unexpected_resting":
+            order_id = str(order_info.get("order_id") or "").strip()
+            cancelled = bool(order_id) and self.cancel_and_confirm(order_id)
+            return {
+                "order_id": order_id or "ERR",
+                "status": "unexpected_resting_cancelled" if cancelled else "unexpected_resting_uncertain",
+                "qty": 0,
+                "filled_qty": 0,
+            }
+
+        if status == "executed":
             order_info = self._hydrate_order_details(order_info)
             result = self._apply_entry_fill(
                 ticker=ticker,
@@ -1542,12 +1491,6 @@ class KalshiBroker:
                 print(
                     f"[KalshiBroker] BUY {result['filled_qty']:g} {ticker} ({side.upper()}) "
                     f"@ {float(result.get('price') or 0.0):.4f} | ID={result['order_id']}"
-                )
-            elif status in ["resting", "pending"]:
-                logger.info(
-                    "Order %s with no immediate fill yet. ID=%s",
-                    status,
-                    order_info.get("order_id"),
                 )
             return result
 
@@ -1566,7 +1509,7 @@ class KalshiBroker:
                 if str(row.get("ticker") or "") == str(ticker):
                     return abs(float(row.get("position_fp") or 0.0))
         except Exception as exc:
-            logger.warning("[MakerExit] Position lookup failed for %s: %s", ticker, exc)
+            logger.warning("[PositionExit] Position lookup failed for %s: %s", ticker, exc)
             return -1.0
         return 0.0
 
@@ -1612,7 +1555,17 @@ class KalshiBroker:
 
         order_info, status = self._normalize_order_response(resp, requested_qty=qty)
 
-        if status in ["executed", "resting", "pending"]:
+        if status == "unexpected_resting":
+            order_id = str(order_info.get("order_id") or "").strip()
+            cancelled = bool(order_id) and self.cancel_and_confirm(order_id)
+            return {
+                "order_id": order_id or "ERR",
+                "status": "unexpected_resting_cancelled" if cancelled else "unexpected_resting_uncertain",
+                "filled_qty": 0,
+                "remaining_position_qty": float(qty),
+            }
+
+        if status == "executed":
             order_info = self._hydrate_order_details(order_info)
             result = self._apply_exit_fill(
                 ticker=ticker,
@@ -1631,7 +1584,7 @@ class KalshiBroker:
                     f"@ {result['exit_price']:.4f} | ID={result['order_id']}"
                 )
             return result
-        
+
         return {"order_id": order_info.get("order_id", "ERR"), "status": status}
 
     def flatten_position(self, local_symbol: str, right: str, qty: int, **kwargs) -> dict:
@@ -1643,7 +1596,7 @@ class KalshiBroker:
             quote = self.get_quote(local_symbol)
             bid_key = "yes_bid" if right == "C" else "no_bid"
             bid_price = float(quote.get(bid_key) or 0.0)
-            
+
             res = self._execute_shadow_sell(
                 {"local_symbol": local_symbol, "right": right},
                 qty=qty,
@@ -1666,14 +1619,14 @@ class KalshiBroker:
 
         if not self.is_connected():
             raise RuntimeError("[KalshiBroker] Not connected to Kalshi")
-        
+
         side = "yes" if right == "C" else "no"
         key = f"{local_symbol}_{right}"
-        
+
         quote = self.get_quote(local_symbol)
         bid_key = "yes_bid" if right == "C" else "no_bid"
         bid_price = float(quote.get(bid_key) or 0.0)
-        
+
         if bid_price < 0.01:
             return {
                 "order_id": "ERR",
@@ -1697,7 +1650,7 @@ class KalshiBroker:
                 reduce_only=True,
             )
         }
-        
+
         pos_info = self._open_positions.get(key, {})
         entry_price = float(pos_info.get("entry_price") or pos_info.get("entry") or 0.50)
 
@@ -1718,7 +1671,19 @@ class KalshiBroker:
             order_info, status = self._normalize_order_response(resp, requested_qty=qty)
             order_id = order_info.get("order_id") or resp.get("order_id", "ERR")
 
-            if status in ["executed", "resting", "pending"]:
+            if status == "unexpected_resting":
+                cancelled = bool(order_id) and self.cancel_and_confirm(order_id)
+                return {
+                    "order_id": order_id,
+                    "status": "unexpected_resting_cancelled" if cancelled else "unexpected_resting_uncertain",
+                    "flattened_qty": 0,
+                    "filled_qty": 0,
+                    "exit_price": 0.0,
+                    "entry_price": entry_price,
+                    "pnl_usd": 0.0,
+                }
+
+            if status == "executed":
                 order_info = self._hydrate_order_details(order_info)
                 result = self._apply_exit_fill(
                     ticker=local_symbol,
@@ -1819,22 +1784,19 @@ class KalshiBroker:
         right = str(contract_dict.get("right") or "C").upper()
         side = "YES" if right == "C" else "NO"
         order_type = kwargs.get("type", "limit").lower()
-        
+
         # 1. Fetch live quote
         try:
             quote = self.get_quote(ticker)
         except Exception as exc:
             logger.error(f"[ShadowBroker] Failed to fetch quote for {ticker}: {exc}")
             return {"order_id": "ERR", "status": "no_quote"}
-            
+
         if not quote:
             return {"order_id": "ERR", "status": "no_quote"}
-            
+
         # 2. Pessimistic fill price & depth.
-        # Always models a taker fill by crossing the ask. Lane B's maker variant
-        # rested at the bid and assumed it always filled, which is the one thing a
-        # simulator cannot honestly claim; real maker entry is implemented against
-        # the exchange under MAKER_ENTRY_ENABLED instead of guessed at here.
+        # Shadow execution models the production taker route by crossing the ask.
         if side == "YES":
             ask = float(quote.get("yes_ask") or 0.0)
             ask_size = int(float(quote.get("yes_ask_vol") or 0.0))
@@ -1843,21 +1805,21 @@ class KalshiBroker:
             ask_size = int(float(quote.get("no_ask_vol") or 0.0))
         fill_price = ask
         available_size = ask_size
-            
+
         if fill_price <= 0.0:
             logger.warning(f"[ShadowBroker] No sell depth on quote for {ticker}")
             return {"order_id": "ERR", "status": "no_depth"}
-            
+
         # 3. Clamp quantity to resting size
         fill_qty = min(int(qty), available_size)
         if fill_qty <= 0:
             logger.warning(f"[ShadowBroker] Zero liquidity at price for {ticker}")
             return {"order_id": "ERR", "status": "no_depth"}
-            
+
         # 4. Fee calculation
         fee_usd = estimate_kalshi_order_fee_usd(fill_qty, fill_price, maker=False)
         cost_usd = (fill_qty * fill_price) + fee_usd
-        
+
         # Lock check
         balance_path = self._paper_balance_path
         try:
@@ -1866,11 +1828,11 @@ class KalshiBroker:
                 self._paper_balance = float(balance_data.get("balance", 0.0))
         except Exception:
             pass
-            
+
         if cost_usd > self._paper_balance:
             logger.warning(f"[ShadowBroker] Insufficient virtual funds: cost=${cost_usd:.2f} balance=${self._paper_balance:.2f}")
             return {"order_id": "ERR", "status": "insufficient_funds"}
-            
+
         # 5. Deduct balance
         self._paper_balance -= cost_usd
         try:
@@ -1881,32 +1843,36 @@ class KalshiBroker:
                 }, f, indent=2)
         except Exception as exc:
             logger.error(f"[ShadowBroker] Failed to save paper balance: {exc}")
-            
+
         # 6. Shadow positions live in memory only. They used to be mirrored into
         # forecast_positions_paper; that table is retired with the paper lanes, and a
         # dry run has no business writing to the same store the live lane reads.
         order_id = f"shadow_{uuid.uuid4().hex[:8]}"
-            
+
         # 7. Update memory cache
         key = f"{ticker}_{right}"
         existing = self._open_positions.get(key, {})
         prior_qty = float(existing.get("qty") or 0.0)
-        prior_entry = float(existing.get("entry_price") or existing.get("entry") or 0.0)
+        prior_entry = float(existing.get("held_side_entry_price") or fill_price)
         blended_entry = fill_price
         if prior_qty > 0:
             blended_entry = ((prior_qty * prior_entry) + (fill_qty * fill_price)) / (prior_qty + fill_qty)
-            
+        yes_leg_entry = blended_entry if side == "YES" else (1.0 - blended_entry)
+
         self._open_positions[key] = {
             "local_symbol": ticker,
             "right": right,
             "qty": prior_qty + fill_qty,
-            "entry": blended_entry,
-            "entry_price": blended_entry,
+            "entry": yes_leg_entry,
+            "entry_price": yes_leg_entry,
+            "yes_leg_entry_price": yes_leg_entry,
+            "held_side_entry_price": blended_entry,
+            "market_exposure_usd": (prior_qty + fill_qty) * blended_entry,
             "side": side,
             "order_id": order_id,
             "entered_at": existing.get("entered_at") or datetime.now(timezone.utc).isoformat(),
         }
-        
+
         # 8. Log trade in trades table
         try:
             log_trade(
@@ -1929,13 +1895,15 @@ class KalshiBroker:
             )
         except Exception as exc:
             logger.error(f"[ShadowBroker] Failed to log shadow trade: {exc}")
-            
+
         print(f"[ShadowBroker] BUY {fill_qty:g} {ticker} ({side}) @ {fill_price:.4f} | ID={order_id}")
-        
+
         return {
             "order_id": order_id,
             "status": "executed",
             "price": fill_price,
+            "yes_leg_price": fill_price if side == "YES" else (1.0 - fill_price),
+            "held_side_price": fill_price,
             "qty": fill_qty,
             "filled_qty": fill_qty,
             "remaining_order_qty": 0,
@@ -1947,27 +1915,27 @@ class KalshiBroker:
         side = "YES" if right == "C" else "NO"
         order_type = kwargs.get("type", "limit").lower()
         key = f"{ticker}_{right}"
-        
+
         existing = self._open_positions.get(key)
         if not existing:
             logger.warning(f"[ShadowBroker] No open shadow position for {ticker}")
             return {"order_id": "ERR", "status": "no_position"}
-            
+
         current_qty = int(existing["qty"])
         sell_qty = min(int(qty), current_qty)
         if sell_qty <= 0:
             return {"order_id": "ERR", "status": "no_position"}
-            
+
         # 1. Fetch live quote
         try:
             quote = self.get_quote(ticker)
         except Exception as exc:
             logger.error(f"[ShadowBroker] Failed to fetch quote for {ticker}: {exc}")
             return {"order_id": "ERR", "status": "no_quote"}
-            
+
         if not quote:
             return {"order_id": "ERR", "status": "no_quote"}
-            
+
         # 2. Pessimistic fill price & depth
         if side == "YES":
             bid = float(quote.get("yes_bid") or 0.0)
@@ -1979,21 +1947,21 @@ class KalshiBroker:
             bid_size = int(float(quote.get("no_bid_vol") or 0.0))
             fill_price = bid
             available_size = bid_size
-            
+
         if fill_price <= 0.0:
             logger.warning(f"[ShadowBroker] No buy depth on quote for {ticker}")
             return {"order_id": "ERR", "status": "no_depth"}
-            
+
         # 3. Clamp quantity to resting size
         fill_qty = min(sell_qty, available_size)
         if fill_qty <= 0:
             logger.warning(f"[ShadowBroker] Zero liquidity at bid price for {ticker}")
             return {"order_id": "ERR", "status": "no_depth"}
-            
+
         # 4. Fee calculation
         fee_usd = estimate_kalshi_order_fee_usd(fill_qty, fill_price)
         proceeds_usd = (fill_qty * fill_price) - fee_usd
-        
+
         # 5. Add to virtual balance
         balance_path = self._paper_balance_path
         try:
@@ -2002,7 +1970,7 @@ class KalshiBroker:
                 self._paper_balance = float(balance_data.get("balance", 0.0))
         except Exception:
             pass
-            
+
         self._paper_balance += proceeds_usd
         try:
             with open(balance_path, "w", encoding="utf-8") as f:
@@ -2012,17 +1980,17 @@ class KalshiBroker:
                 }, f, indent=2)
         except Exception as exc:
             logger.error(f"[ShadowBroker] Failed to save paper balance: {exc}")
-            
+
         # 6. Shadow positions live in memory only (see the buy path).
         order_id = f"shadow_{uuid.uuid4().hex[:8]}"
         remaining_qty = current_qty - fill_qty
-            
+
         # 7. Update memory cache
         if remaining_qty > 0:
             self._open_positions[key]["qty"] = remaining_qty
         else:
             self._open_positions.pop(key, None)
-            
+
         # 8. Log trade in trades table
         try:
             log_trade(
@@ -2045,9 +2013,9 @@ class KalshiBroker:
             )
         except Exception as exc:
             logger.error(f"[ShadowBroker] Failed to log shadow trade: {exc}")
-            
+
         print(f"[ShadowBroker] SELL {fill_qty:g} {ticker} ({side}) @ {fill_price:.4f} | ID={order_id}")
-        
+
         return {
             "order_id": order_id,
             "status": "executed",

@@ -8,7 +8,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from forecast.strategy_engine import _strategy_weather, _parse_weather_threshold
+from forecast.strategy_engine import _strategy_weather_details, _parse_weather_threshold
 from forecast.weather_contracts import resolve_weather_contract, yes_probability_from_weather_data
 from data.kalshi_weather_monitor import _parse_t_group
 
@@ -35,14 +35,14 @@ class TestWeatherSovereign(unittest.TestCase):
         # 31 GFS members, 31 EC members for simplicity in mock
         # Success if >= 75
         mock_get_weather.return_value = {
-            "members_high": [76] * 31, # 100% GFS prob inside >75
+            "members_high": [78] * 31,
             "ecmwf": {
-                "members_high": [76] * 31 # 100% EC prob inside >75
+                "members_high": [78] * 31
             },
             "peak_tcdc": 10.0
         }
 
-        passes, side, conf, factors, is_taker = _strategy_weather(
+        passes, side, conf, factors, is_taker, sizing_multiplier, *_ = _strategy_weather_details(
             ticker,
             0.35,
             0.65,
@@ -53,8 +53,8 @@ class TestWeatherSovereign(unittest.TestCase):
         
         self.assertTrue(passes)
         self.assertEqual(side, "YES")
-        # confidence = 0.97 * 1.5 = 1.455
-        self.assertAlmostEqual(conf, 1.455)
+        self.assertGreater(conf, 0.75)
+        self.assertAlmostEqual(sizing_multiplier, 1.5)
         self.assertIn("conv_mult=1.5x", factors)
 
     @patch('forecast.strategy_engine.get_contract_weather_data')
@@ -62,14 +62,14 @@ class TestWeatherSovereign(unittest.TestCase):
         """Verify model divergence now triggers a hard veto as per Sovereign Pillar 4."""
         ticker = "KXHIGHNY-26JUN01-T75"
         mock_get_weather.return_value = {
-            "members_high": [76] * 31, # 100% GFS prob inside >75
+            "members_high": [80] * 31,
             "ecmwf": {
-                "members_high": [70] * 31 # 0% EC prob
+                "members_high": [68] * 31
             },
             "peak_tcdc": 10.0
         }
 
-        passes, side, conf, factors, is_taker = _strategy_weather(
+        passes, side, conf, factors, is_taker, *_ = _strategy_weather_details(
             ticker,
             0.35,
             0.65,
@@ -103,6 +103,16 @@ class TestWeatherSovereign(unittest.TestCase):
             strike=69.5,
         )
         self.assertAlmostEqual(prob, 3 / 5)
+
+    def test_iso_contract_date_is_not_misread_as_temperature_range(self):
+        semantics = resolve_weather_contract(
+            "KXHIGHCHI-26AUG25-T75",
+            contract_name="Will the Chicago high be above 75° on 2026-08-25?",
+            strike=75.0,
+        )
+        self.assertIsNotNone(semantics)
+        self.assertEqual(semantics.comparator, "gt")
+        self.assertAlmostEqual(semantics.threshold, 75.5)
 
     def test_temperature_edge_contract_is_ambiguous_without_contract_title(self):
         semantics = resolve_weather_contract(

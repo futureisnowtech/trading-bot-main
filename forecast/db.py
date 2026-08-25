@@ -174,18 +174,6 @@ CREATE TABLE IF NOT EXISTS forecast_positions (
 
 
 
-_DDL_WEATHER_MODEL_WEIGHTS = """
-CREATE TABLE IF NOT EXISTS weather_model_weights (
-    date             TEXT NOT NULL,
-    category         TEXT NOT NULL,
-    gfs_weight       REAL NOT NULL,
-    ecmwf_weight     REAL NOT NULL,
-    penny_threshold  REAL NOT NULL,
-    running_brier    REAL,
-    PRIMARY KEY (date, category)
-);
-"""
-
 _DDL_RECENT_VETOES = """
 CREATE TABLE IF NOT EXISTS recent_vetoes (
     id                 INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -255,7 +243,6 @@ def init_forecast_db(db_path: str | None = None) -> None:
             _DDL_FORECAST_POSITIONS,
             _DDL_RECENT_VETOES,
             _DDL_SYSTEM_COOLDOWNS,
-            _DDL_WEATHER_MODEL_WEIGHTS,
             _DDL_NOAA_DAILY_SUMMARIES,
         ]:
             for stmt in ddl_block.strip().split(";"):
@@ -380,33 +367,54 @@ def sync_open_forecast_position(
 
 
 def _fetch_confirmed_entry_price_from_fills(broker, ticker: str, side: str) -> float | None:
-    """Fetch fills for the ticker from broker with retry/backoff to find a confirmed entry price."""
+    """Recover a YES-denominated buy basis from current Kalshi V2 fill fields.
+
+    ``forecast_positions.entry_price`` intentionally uses the same canonical
+    YES-leg denomination as the broker's realized-P&L math.  V2 identifies the
+    purchased outcome via ``outcome_side`` and reports decimal prices in
+    ``yes_price_dollars`` / ``no_price_dollars`` with quantity in ``count_fp``.
+    The legacy ``side`` / cent ``price`` / ``count`` shape remains a final
+    compatibility fallback for old fixtures and archived responses.
+    """
     import time
     if broker is None or not hasattr(broker, "_request"):
         return None
-        
+
     backoffs = [0.5, 1.0, 2.0]
-    for attempt, delay in enumerate(backoffs):
+    for delay in backoffs:
         try:
             resp = broker._request("GET", "/trade-api/v2/portfolio/fills", params={"ticker": ticker, "limit": 100})
             fills = resp.get("fills") or []
             if fills:
                 target_side = side.lower()
                 matching_fills = [
-                    f for f in fills 
-                    if str(f.get("side")).lower() == target_side
+                    f for f in fills
+                    if str(f.get("outcome_side") or f.get("side") or "").lower()
+                    == target_side
+                    and str(f.get("action") or "buy").lower() == "buy"
                 ]
                 if matching_fills:
                     total_cost = 0.0
                     total_qty = 0.0
                     for f in matching_fills:
                         try:
-                            # price in cents
-                            p = float(f.get("price") or 0.0) / 100.0
-                            count = float(f.get("count") or 0.0)
-                            total_cost += p * count
+                            yes_raw = f.get("yes_price_dollars")
+                            no_raw = f.get("no_price_dollars")
+                            if yes_raw not in (None, ""):
+                                yes_price = float(yes_raw)
+                            elif no_raw not in (None, ""):
+                                yes_price = 1.0 - float(no_raw)
+                            else:
+                                legacy_price = float(f.get("price") or 0.0) / 100.0
+                                yes_price = (
+                                    1.0 - legacy_price
+                                    if target_side == "no"
+                                    else legacy_price
+                                )
+                            count = float(f.get("count_fp") or f.get("count") or 0.0)
+                            total_cost += yes_price * count
                             total_qty += count
-                        except Exception:
+                        except (TypeError, ValueError):
                             continue
                     if total_qty > 0:
                         return total_cost / total_qty
@@ -453,10 +461,10 @@ def reconcile_forecast_positions(
             or 0.0
         )
         side = str(broker_pos.get("side") or "YES")
-        
+
         basis_quality = "CONFIRMED"
         entry_price = raw_price
-        
+
         if entry_price <= 0.0:
             resolved_price = _fetch_confirmed_entry_price_from_fills(broker, ticker, side)
             if resolved_price is not None and resolved_price > 0.0:
@@ -872,7 +880,7 @@ def upsert_bar(
     ts_close: str,
     o: float,
     h: float,
-    l: float,
+    low: float,
     c_: float,
     mid_mean: float,
     spread_mean: float,
@@ -892,7 +900,7 @@ def upsert_bar(
                 ts_close,
                 o,
                 h,
-                l,
+                low,
                 c_,
                 mid_mean,
                 spread_mean,
@@ -959,7 +967,7 @@ def get_live_brier_score(min_n: int = 20, db_path: str | None = None) -> dict:
     Joins forecast_resolutions.q_hat (the strategy's fair-probability estimate
     at entry, forwarded by resolution_sync.py) against resolved_side. Returns
     n=0/score=None below min_n -- there is no synthetic fallback here, unlike
-    the placeholder writes in live_strategy_audit.py and leak_forensics.py.
+    historical placeholder writers that bypassed official settlement truth.
     """
     with _conn(db_path) as c:
         rows = c.execute(

@@ -113,7 +113,6 @@ def _build_registry() -> dict[str, Tool]:
     add(jb.recall_brain_history, READ)
     add(jb.request_change, READ)
     add(jb.list_pending_approvals, READ)
-    add(jb.get_maker_fill_stats, READ)
     add(jb.show_panel, READ)
     add(jb.get_rbi2_status_summary, READ)
     add(jb.get_cerebro_brief, READ)

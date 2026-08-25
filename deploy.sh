@@ -174,6 +174,72 @@ if [ ! -f kalshi_private_key.pem ]; then
     exit 1
 fi
 
+echo "  Aligning non-secret runtime policy with v19.20..."
+python3 - << 'PYEOF'
+import os
+import shutil
+from pathlib import Path
+
+env_path = Path(".env")
+backup_path = Path(".env.pre-v19.20")
+if not backup_path.exists():
+    shutil.copy2(env_path, backup_path)
+
+updates = {
+    "KALSHI_MAX_DEPLOYED_PCT": "0.90",
+    "KALSHI_MAX_ENTRY_SLIPPAGE": "0.02",
+    "KALSHI_POSITION_SNAPSHOT_MAX_AGE_SEC": "60",
+    "KALSHI_MIN_MODEL_HEADROOM_F": "2.0",
+    "KALSHI_MAX_CONCURRENT_POSITIONS": "20",
+    "KALSHI_SAME_EVENT_FAMILY_CAP": "5",
+    "KALSHI_HUB_EXPOSURE_PCT": "0.40",
+    "KALSHI_HUB_EXPOSURE_MIN_USD": "20",
+    "KALSHI_MAX_QTY_PER_POSITION": "15",
+    "KALSHI_MAX_USD_PER_POSITION": "10.0",
+    "KALSHI_MIN_ENTRY_PRICE": "0.34",
+    "KALSHI_KELLY_CAP": "0.12",
+    "KALSHI_KELLY_FRACTION": "0.25",
+    "KALSHI_MAX_RISK_PER_EVENT_PCT": "0.08",
+    "RBI_MIN_DAYS": "7",
+    "RBI_MIN_NEW_CLEAN_TRADES": "24",
+    "RBI_LEARNING_EPOCH": "v19.20.0-deterministic-physics-path",
+    "WEATHER_PROVIDER_COOLDOWN_SEC": "1200",
+    "WEATHER_MODEL_PAUSE_SEC": "0.75",
+    "CITY_BLACKLIST": "ABQ,ATL,AUS,BOS,CHS,CLT,DAL,DC,DET,HOU,LV,MCI,MCO,MIA,MKE,MSP,MSY,NY,OMA,PDX,PHL,PHX,RDU,SEA,SF,SLC,STL",
+}
+retired = {
+    "KALSHI_MAKER_FEE_RATE",
+    "OPEN_METEO_API_KEY",
+    "WEATHER_ENSEMBLE_COOLDOWN_SEC",
+    "WEATHER_ENSEMBLE_MODEL_PAUSE_SEC",
+}
+
+output = []
+seen = set()
+for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+    stripped = raw_line.strip()
+    if stripped and not stripped.startswith("#") and "=" in stripped:
+        key = stripped.split("=", 1)[0].strip()
+        if key in retired:
+            continue
+        if key in updates:
+            output.append(f"{key}={updates[key]}")
+            seen.add(key)
+            continue
+    output.append(raw_line)
+
+missing = [key for key in updates if key not in seen]
+if missing:
+    output.extend(["", "# Versioned v19.20 production policy"])
+    output.extend(f"{key}={updates[key]}" for key in missing)
+
+tmp_path = Path(".env.v19.20.tmp")
+tmp_path.write_text("\n".join(output).rstrip() + "\n", encoding="utf-8")
+os.chmod(tmp_path, env_path.stat().st_mode)
+tmp_path.replace(env_path)
+print("  Runtime policy aligned; original retained at .env.pre-v19.20")
+PYEOF
+
 GHCR_TOKEN="${GHCR_TOKEN:-}"
 GHCR_ACTOR="${GHCR_ACTOR:-}"
 

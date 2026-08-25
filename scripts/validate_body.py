@@ -131,11 +131,6 @@ try:
     else:
         ok(f"KALSHI_TAKER_FEE_RATE={cfg.KALSHI_TAKER_FEE_RATE:.4f}")
 
-    if float(cfg.KALSHI_MAKER_FEE_RATE) < 0:
-        fail("KALSHI_MAKER_FEE_RATE cannot be negative")
-    else:
-        ok(f"KALSHI_MAKER_FEE_RATE={cfg.KALSHI_MAKER_FEE_RATE:.4f}")
-
     if float(cfg.KALSHI_FEE_PER_CONTRACT) < 0:
         fail("KALSHI_FEE_PER_CONTRACT legacy fallback cannot be negative")
     else:

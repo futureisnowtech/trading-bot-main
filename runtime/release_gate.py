@@ -32,6 +32,7 @@ _INFRASTRUCTURE_PREFIXES: tuple[str, ...] = (
     "remote_sha_mismatch",
     "scan_no_markets_scored",
     "stale_ensemble_data",
+    "stale_weather_model_data",
     "stale_market_data",
     "stale_runtime_heartbeat",
     "storage_headroom",

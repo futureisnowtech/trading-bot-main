@@ -2,6 +2,11 @@
 
 This directory contains a clean, cataloged archive of the Kalshi Weather prediction bot's codebase, data logs, version history, and configurations. It is designed to be easily analyzed by research tools like NotebookLM.
 
+> Historical evidence bundle: numeric inventories describe the 2026-07-07
+> capture. Current runtime truth lives in `AGENTS.md` and
+> `docs/production_probability_path.md` unless a section below is explicitly
+> marked as refreshed.
+
 ---
 
 ## 1. Directory Structure
@@ -11,7 +16,7 @@ This research package contains the following files:
 ### 1.1 Inventories & Catalogs
 *   **[`00_project_inventory.md`](file:///Users/joshmacbookair2020/projects/algo_trading_final/research_package/00_project_inventory.md)**: A complete inventory of every script, database, deployment file, and configuration file in the project.
 *   **[`01_system_architecture.md`](file:///Users/joshmacbookair2020/projects/algo_trading_final/research_package/01_system_architecture.md)**: A blueprint of daemons, database schemas, order routing, and thermodynamic netting rules.
-*   **[`02_strategy_catalog.md`](file:///Users/joshmacbookair2020/projects/algo_trading_final/research_package/02_strategy_catalog.md)**: Breakdown of the weather prediction model (GFS + ECMWF blending), GraphCast AI consensus, SRE safety gates, and exit logic.
+*   **[`02_strategy_catalog.md`](file:///Users/joshmacbookair2020/projects/algo_trading_final/research_package/02_strategy_catalog.md)**: Breakdown of the full physical-model blend, NCEP AIGFS uncertainty input, convergence guardrail, SRE safety gates, and exit logic.
 *   **[`03_parameter_catalog.md`](file:///Users/joshmacbookair2020/projects/algo_trading_final/research_package/03_parameter_catalog.md)**: Summary of configurations, risk limits, overrides, and station coordinates.
 
 ### 1.2 Flat-File Normalized Data Exports (1,470 Trades, 551 Settlements)

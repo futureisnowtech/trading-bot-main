@@ -4,20 +4,16 @@ This catalog details the rules, probability models, safety gates, and exit logic
 
 ---
 
-## 1. Unified Strategy: `weather_ensemble`
+## 1. Unified Strategy: `weather_physics`
 
-The system uses a single active trading strategy named **`weather_ensemble`**. It merges numerical forecasts, evaluates odds, and manages exits.
+The v19.20 candidate uses a single strategy named **`weather_physics`**. It merges deterministic numerical forecasts with explicit uncertainty and bounded temperature physics, evaluates odds, and manages exits. Deployed v19.18 still records the legacy `weather_ensemble` label.
 
-### 1.1 GFS and ECMWF Blending
-The baseline probability estimate ($q_{\text{hat}}$) is built by combining:
-*   **GFS Ensemble members** (weighted at 60%).
-*   **ECMWF Ensemble members** (weighted at 40%).
-*   *Agreement Boost*: If both models predict high certainty (both $>75\%$ or both $<25\%$), size is increased by $1.5\text{x}$.
-*   *Divergence Haircut*: If models disagree ($>20\%$ gap), size is reduced and the probability is shrunk towards 50-50. If disagreement exceeds $70\%$, the trade is vetoed immediately.
+### 1.1 Deterministic Physical-Model Blend
+The baseline probability estimate ($q_{\text{hat}}$) uses promoted relative GFS/ECMWF skill weights, model/horizon predictive-error sigma, and mode-aware temperature physics before the CDF. Commercial ensembles and ICON are absent. Unanimous same-tail GFS/ECMWF agreement earns $1.5\text{x}$; a probability gap above 20 points reduces probability and size, and above 70 points vetoes the trade.
 
-### 1.2 GraphCast AI consensus (Sigma Scaler)
-*   Instead of changing the fair probability directly, the machine learning GraphCast AI model serves as a volatility ($\sigma$) scaler.
-*   If the AI model disagrees with GFS/ECMWF mean values, uncertainty ($\sigma$) is increased, causing the Kelly sizing model to allocate fewer contracts.
+### 1.2 NCEP AIGFS consensus (Sigma Scaler)
+*   Instead of changing the fair probability directly, the machine-learning NCEP AIGFS forecast serves as a volatility ($\sigma$) scaler.
+*   If the actual AIGFS value disagrees with the combined GFS/ECMWF mean, uncertainty ($\sigma$) is increased, causing the Kelly sizing model to allocate fewer contracts.
 *   If the AI model agrees closely, uncertainty is decreased, permitting larger allocations.
 
 ---
@@ -26,17 +22,15 @@ The baseline probability estimate ($q_{\text{hat}}$) is built by combining:
 
 Before placing orders, the bot checks 11 safety rules. If any check fails, the trade is vetoed:
 
-1.  **Overround Cap**: Rejects if exchange bid-ask spreads create a house edge $> 15\%$.
-2.  **Spread Cap**: Rejects if bid-ask spread is $>\$0.12$.
-3.  **Spread-to-Price Ratio**: Rejects if spread divided by average price is $> 35\%$.
-4.  **Horizon Bounds**: Rejects if contract is $<1$ hour or $>120$ hours (5 days) from settlement.
-5.  **Volatility Cap**: Rejects if log-odds price noise $\sigma > 0.80$.
-6.  **Parity Gap**: Rejects if implied YES + implied NO prices deviate from $\$1.00$ by $>\$0.05$.
-7.  **Positive EV Floor**: Rejects if expected value after fees is $< \$0.05$ per contract.
-8.  **Longshot Gate**: Rejects buying YES if blended probability is $< 10\%$.
-9.  **Entropy Limits**: Rejects trades if probability is too close to certainty ($<5\%$) or in chaotic zones ($>67\%$).
-10. **Duplicate Strike Guard**: Rejects buying if another position is open on the exact same contract.
-11. **Regional Exposure Cap**: Rejects if trade exceeds regional risk allocations.
+1.  **Lane and city policy**: fresh entries must be enabled in the versioned lane policy and survive the station/city firewall.
+2.  **Provider identity and freshness**: GFS is mandatory; stale or commercial-ensemble payloads fail closed.
+3.  **Spread checks**: daily contracts are capped at a $0.12 spread and 35% spread-to-price ratio.
+4.  **Horizon bounds**: daily entries must be 1 to 120 hours from settlement.
+5.  **Forecast uncertainty**: excessive projected sigma or a GFS/ECMWF probability gap above 70 points vetoes.
+6.  **Post-fee EV**: chosen-side expected value must meet the canonical 0.12 floor after ceiled modeled fees.
+7.  **Position and portfolio risk**: duplicate strikes, quote depth, concurrency, same-family exposure, regional exposure, and covariance budget are all enforced.
+
+The former overround/parity/entropy “economics gate” was dead code and has been removed; it must not be described as an active safety layer.
 
 ---
 
@@ -46,4 +40,4 @@ Open positions are continuously monitored for exit signals:
 
 *   **Take-Profit**: Closures are triggered to lock in $70\%$ of maximum potential profit (e.g., if entry is $\$0.30$, max gain is $\$0.70$, target gain is $\$0.49$, triggering exit at $\$0.79$).
 *   **Sovereign Salvage**: If updated weather forecasts indicate the bet's probability has dropped below $15\%$, the bot exits immediately at market price to salvage remaining capital.
-*   **Portfolio Swaps**: If the 50-position limit is reached and a new, high-EV ($>0.15$) trade is found, the bot flattens its lowest-probability position ($<0.65$) to release capital.
+*   **Portfolio Swaps**: At the 20-position base limit, the runner may evaluate a stronger candidate for risk-controlled redeployment rather than blindly adding exposure.

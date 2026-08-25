@@ -7,6 +7,7 @@ from forecast.firewall import (
     record_exit_lockout,
     record_round_trip,
     record_realized_pnl,
+    sync_official_settlement_pnl,
     check_reentry_lockout,
     check_oscillation_breaker,
     check_quote_coherence,
@@ -139,9 +140,55 @@ def test_daily_kill_switch_and_self_healing(proof_runtime):
             "UPDATE firewall_day_pnl SET day_utc = ? WHERE day_utc = ?",
             (yesterday_date, datetime.now(timezone.utc).strftime("%Y-%m-%d"))
         )
+        conn.execute(
+            "UPDATE firewall_realized_events SET occurred_at = ?",
+            (yesterday,)
+        )
         conn.commit()
         
     # check_entry_firewall should self-heal and allow entry
     allowed, reason = check_entry_firewall("ANY_TICKER", bankroll, db_path=db)
     assert allowed is True
     assert reason == ""
+
+
+def test_official_settlement_sync_replaces_provisional_and_is_idempotent(proof_runtime):
+    db = str(proof_runtime.db_path)
+    ensure_firewall_tables(db)
+    settled = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    ticker = "KXHIGHCHI-26AUG25-T80"
+
+    record_realized_pnl(
+        -1.25,
+        ticker=ticker,
+        event_id=f"exit_fill:{ticker}:local",
+        occurred_at=settled,
+        source="exit_fill",
+        db_path=db,
+    )
+    row = {
+        "ticker": ticker,
+        "settled_time": settled,
+        "market_result": "yes",
+        "yes_count_fp": "2.00",
+        "no_count_fp": "0.00",
+        "yes_total_cost_dollars": "1.20",
+        "no_total_cost_dollars": "0.00",
+        "fee_cost": "0.10",
+    }
+
+    sync_official_settlement_pnl([row], db_path=db)
+    sync_official_settlement_pnl([row], db_path=db)
+
+    with sqlite3.connect(db) as conn:
+        events = conn.execute(
+            "SELECT source, official, pnl_usd FROM firewall_realized_events WHERE ticker=?",
+            (ticker,),
+        ).fetchall()
+        day_total = conn.execute(
+            "SELECT realized FROM firewall_day_pnl WHERE day_utc=?",
+            (settled[:10],),
+        ).fetchone()[0]
+
+    assert events == [("kalshi_settlement", 1, 0.7)]
+    assert day_total == 0.7

@@ -20,7 +20,13 @@ def test_marketable_yes_buy_uses_event_order_v2_shape(monkeypatch):
                 "body": body,
             }
         )
-        return {"order": {"status": "resting", "order_id": "ORD-1"}}
+        return {
+            "order_id": "ORD-1",
+            "fill_count": "3.00",
+            "remaining_count": "0.00",
+            "average_fill_price": "0.6700",
+            "average_fee_paid": "0.0100",
+        }
 
     monkeypatch.setattr(broker, "_request", fake_request)
 
@@ -31,7 +37,7 @@ def test_marketable_yes_buy_uses_event_order_v2_shape(monkeypatch):
         type="market",
     )
 
-    assert result["status"] == "resting"
+    assert result["status"] == "executed"
     assert calls[0]["method"] == "POST"
     assert calls[0]["path"] == "/trade-api/v2/portfolio/events/orders"
     assert calls[0]["body"]["side"] == "bid"
@@ -54,7 +60,14 @@ def test_marketable_no_buy_maps_to_yes_leg_ask(monkeypatch):
                 "body": body,
             }
         )
-        return {"order": {"status": "resting", "order_id": "ORD-2"}}
+        return {
+            "order_id": "ORD-2",
+            "fill_count": "2.00",
+            "remaining_count": "0.00",
+            "average_fill_price": "0.5400",
+            "average_fee_paid": "0.0100",
+            "outcome_side": "no",
+        }
 
     monkeypatch.setattr(broker, "_request", fake_request)
 
@@ -65,7 +78,7 @@ def test_marketable_no_buy_maps_to_yes_leg_ask(monkeypatch):
         type="market",
     )
 
-    assert result["status"] == "resting"
+    assert result["status"] == "executed"
     assert calls[0]["path"] == "/trade-api/v2/portfolio/events/orders"
     assert calls[0]["body"]["side"] == "ask"
     assert calls[0]["body"]["price"] == "0.4600"
@@ -93,8 +106,7 @@ def test_broker_surfaces_rate_limit_status(monkeypatch):
     )
 
     assert result["status"] == "too_many_requests"
-    # Maker-first entry probes the quote before ordering, so the order body is not
-    # necessarily the first call. The taker order must still be IOC.
+    # The taker order must always be IOC.
     order_bodies = [c for c in calls if "time_in_force" in c]
     assert order_bodies, "no order body was submitted"
     assert order_bodies[-1]["time_in_force"] == "immediate_or_cancel"
@@ -124,7 +136,7 @@ def test_sync_positions_preserves_cost_basis(monkeypatch):
                 {
                     "ticker": "KXHIGHLAX-26JUN05-B69.5",
                     "position_fp": "43.00",
-                    "total_traded_dollars": "6.880000",
+                    "market_exposure_dollars": "6.880000",
                 }
             ]
         },
@@ -149,7 +161,7 @@ def test_sync_positions_restores_weather_observation_fields(monkeypatch):
                 {
                     "ticker": "KXHIGHLAX-26JUN05-B69.5",
                     "position_fp": "5.00",
-                    "total_traded_dollars": "3.250000",
+                    "market_exposure_dollars": "3.250000",
                 }
             ]
         },
@@ -180,7 +192,7 @@ def test_sync_positions_restores_weather_observation_fields(monkeypatch):
     assert pos["entered_at"] == "2026-06-06T05:00:00+00:00"
 
 
-def test_sync_positions_prefers_recorded_buy_entry_price(monkeypatch):
+def test_sync_positions_prefers_official_no_side_exposure_basis(monkeypatch):
     broker = _connected_broker()
 
     monkeypatch.setattr(
@@ -191,7 +203,7 @@ def test_sync_positions_prefers_recorded_buy_entry_price(monkeypatch):
                 {
                     "ticker": "KXLOWTPHX-26JUN05-T80",
                     "position_fp": "-8.00",
-                    "total_traded_dollars": "8.800000",
+                    "market_exposure_dollars": "4.720000",
                 }
             ]
         },
@@ -214,7 +226,9 @@ def test_sync_positions_prefers_recorded_buy_entry_price(monkeypatch):
     pos = broker.get_position("KXLOWTPHX-26JUN05-T80", "P")
 
     assert pos is not None
-    assert pos["entry_price"] == 0.41
+    assert round(pos["entry_price"], 8) == 0.41
+    assert pos["held_side_entry_price"] == 0.59
+    assert pos["market_exposure_usd"] == 4.72
     assert pos["qty"] == 8.0
 
 
@@ -390,14 +404,22 @@ def test_realized_pnl_rejects_unknown_side():
         )
 
 
-def test_resting_partial_buy_books_filled_contracts(monkeypatch):
+def test_ioc_partial_buy_books_only_filled_contracts(monkeypatch):
     broker = _connected_broker()
     captured = {}
 
     monkeypatch.setattr(
         broker,
         "_request",
-        lambda *args, **kwargs: {"order": {"status": "resting", "order_id": "ORD-REST"}},
+        lambda *args, **kwargs: {
+            "order": {
+                "status": "canceled",
+                "order_id": "ORD-IOC-PARTIAL",
+                "fill_count_fp": "2.00",
+                "remaining_count_fp": "3.00",
+                "yes_price_dollars": "0.6200",
+            }
+        },
     )
     monkeypatch.setattr(
         broker,
@@ -405,7 +427,7 @@ def test_resting_partial_buy_books_filled_contracts(monkeypatch):
         lambda order: {
             **order,
             "fill_count_fp": "2.00",
-            "remaining_count": "3.00",
+            "remaining_count_fp": "3.00",
             "taker_fill_cost_dollars": "1.240000",
         },
     )
@@ -425,13 +447,35 @@ def test_resting_partial_buy_books_filled_contracts(monkeypatch):
     )
 
     pos = broker.get_position("KXHIGHLAX-26JUN05-B69.5", "C")
-    assert result["status"] == "resting"
+    assert result["status"] == "executed"
     assert result["filled_qty"] == 2.0
-    assert result["remaining_order_qty"] == 3.0
+    assert result["remaining_order_qty"] == 0.0
     assert pos is not None
     assert pos["qty"] == 2.0
-    assert pos["resting_remaining_qty"] == 3.0
+    assert pos["resting_remaining_qty"] == 0.0
     assert captured["qty"] == 2.0
+
+
+def test_failed_position_sync_preserves_cache_and_marks_snapshot_unsafe(monkeypatch):
+    broker = _connected_broker()
+    broker._open_positions["KXHIGHNY-1_C"] = {
+        "local_symbol": "KXHIGHNY-1",
+        "right": "C",
+        "side": "YES",
+        "qty": 3.0,
+        "entry_price": 0.55,
+    }
+    broker._positions_authoritative = True
+    monkeypatch.setattr(
+        broker,
+        "_request",
+        lambda *_args, **_kwargs: {"error": {"code": "too_many_requests"}},
+    )
+
+    assert broker.sync_positions() is False
+    assert broker.get_position("KXHIGHNY-1", "C")["qty"] == 3.0
+    assert broker.has_fresh_position_snapshot() is False
+    assert broker.position_snapshot_status()["error"] == "too_many_requests"
 
 
 def test_discover_markets_uses_series_catalog_and_keeps_partial_truth(monkeypatch):
@@ -537,72 +581,3 @@ def test_discover_markets_uses_series_catalog_and_keeps_partial_truth(monkeypatc
         for row in results
     )
     assert any(path == "/trade-api/v2/series" for _method, path, _params in calls)
-
-
-def test_post_only_maker_entry_uses_exchange_spelling_of_gtc(monkeypatch):
-    """Kalshi's enum is good_till_canceled (one L).
-
-    The misspelling "good_till_cancelled" is rejected as invalid_parameters, and
-    because _try_maker_entry treats every failure as "fall through and cross",
-    the rejection was silent: 212 of 212 live fills paid taker fees while
-    MAKER_ENTRY_ENABLED was True. Pin the spelling so it cannot regress.
-    """
-    broker = _connected_broker()
-
-    body = broker._build_event_order_body(
-        ticker="KXHIGHLAX-26JUN05-B69.5",
-        right="C",
-        qty=3,
-        limit_price=0.61,
-        action="buy",
-        post_only=True,
-    )
-
-    assert body["time_in_force"] == "good_till_canceled"
-    assert body["time_in_force"] != "good_till_cancelled"
-    assert body["post_only"] is True
-
-    # The taker leg must keep its own (already correct) time-in-force.
-    taker_body = broker._build_event_order_body(
-        ticker="KXHIGHLAX-26JUN05-B69.5",
-        right="C",
-        qty=3,
-        limit_price=0.61,
-        action="buy",
-        post_only=False,
-    )
-    assert taker_body["time_in_force"] == "immediate_or_cancel"
-    assert taker_body["post_only"] is False
-
-
-def test_maker_entry_rests_at_bid_then_falls_through_to_taker_on_no_fill(monkeypatch):
-    """A maker attempt that never fills must cancel and cross, not drop the entry."""
-    broker = _connected_broker()
-    monkeypatch.setattr(broker, "get_quote", lambda ticker: {"yes_bid": 0.58})
-    monkeypatch.setattr(broker, "_order_filled_qty", lambda order_id: 0.0)
-    monkeypatch.setattr(broker, "cancel_order", lambda order_id: True)
-    monkeypatch.setattr("config.MAKER_ENTRY_TIMEOUT_S", 0)
-
-    bodies = []
-
-    def fake_request(method, path, params=None, body=None):
-        if method == "POST":
-            bodies.append(body)
-        return {"order": {"status": "resting", "order_id": "ORD-M"}}
-
-    monkeypatch.setattr(broker, "_request", fake_request)
-
-    broker.place_buy_order(
-        {"local_symbol": "KXHIGHLAX-26JUN05-B69.5", "right": "C"},
-        qty=2,
-        limit_price=0.62,
-        type="limit",
-    )
-
-    assert len(bodies) == 2, "expected a post-only attempt followed by a taker cross"
-    assert bodies[0]["post_only"] is True
-    assert bodies[0]["time_in_force"] == "good_till_canceled"
-    assert bodies[0]["price"] == "0.5800", "maker leg must rest at the bid"
-    assert bodies[1]["post_only"] is False
-    assert bodies[1]["time_in_force"] == "immediate_or_cancel"
-    assert bodies[1]["price"] == "0.6200", "taker leg must cross at our limit"
